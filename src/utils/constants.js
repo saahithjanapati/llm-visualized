@@ -1,0 +1,11 @@
+export const VECTOR_LENGTH = 100;
+export const SPHERE_RADIUS = 0.15;
+export const SPHERE_DIAMETER = SPHERE_RADIUS * 2;
+export const VECTOR_VISUAL_WIDTH = VECTOR_LENGTH * SPHERE_DIAMETER;
+export const SPAWN_Y = -50;
+export const DESPAWN_Y = 90;
+export const SPAWN_X_RANGE = 70;
+export const SPAWN_Z_RANGE = 10;
+export const VECTOR_SPEED = 0.1;
+export const EPSILON = 1e-5; // Small value for Layer Norm stability
+export const SPAWN_INTERVAL = 120; // Faster spawning
