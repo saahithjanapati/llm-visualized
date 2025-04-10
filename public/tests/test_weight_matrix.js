@@ -1,8 +1,8 @@
-import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { GUI } from 'lil-gui'; // Import GUI
-// Adjust path to import the component from the src directory
-import { WeightMatrixVisualization } from '../src/components/WeightMatrixVisualization.js';
+import * as THREE from '/node_modules/three/build/three.module.js';
+import { OrbitControls } from '/node_modules/three/examples/jsm/controls/OrbitControls.js';
+import { GUI } from '/node_modules/lil-gui/dist/lil-gui.esm.js'; // Import GUI from node_modules
+// Adjust path to import the component relative to the project root
+import { WeightMatrixVisualization } from '../../src/components/WeightMatrixVisualization.js';
 
 // --- Minimal Scene Setup --- 
 const scene = new THREE.Scene();

@@ -1,7 +1,8 @@
-import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-// Adjust path to import the component from the src directory
-import { VectorVisualization } from '../src/components/VectorVisualization.js';
+import * as THREE from '/node_modules/three/build/three.module.js';
+import { OrbitControls } from '/node_modules/three/examples/jsm/controls/OrbitControls.js';
+// Adjust path to import the component relative to the project root
+// Since this file is in public/tests, we go up two levels then into src
+import { VectorVisualization } from '../../src/components/VectorVisualization.js';
 
 // --- Minimal Scene Setup ---
 const scene = new THREE.Scene();

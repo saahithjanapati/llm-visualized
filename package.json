@@ -7,8 +7,10 @@
     "test": "tests"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "node generate_index.js"
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
@@ -21,6 +23,8 @@
     "three-mesh-bvh": "^0.9.0"
   },
   "devDependencies": {
-    "parcel": "^2.14.4"
+    "@vitejs/plugin-basic-ssl": "^2.0.0",
+    "parcel": "^2.14.4",
+    "vite": "^6.2.6"
   }
 }

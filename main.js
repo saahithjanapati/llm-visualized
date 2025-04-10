@@ -1,11 +1,11 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 
 // Import components and utils
-import { VectorVisualization } from './src/components/VectorVisualization.js';
+import { VectorVisualization } from '/src/components/VectorVisualization.js';
 import {
     SPAWN_Y,
     DESPAWN_Y,
@@ -13,7 +13,7 @@ import {
     SPAWN_Z_RANGE,
     VECTOR_SPEED,
     SPAWN_INTERVAL
-} from './src/utils/constants.js';
+} from '/src/utils/constants.js';
 
 // Scene setup
 const scene = new THREE.Scene();

@@ -3,21 +3,53 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LLM Visualization Project</title>
+    <title>LLM Visualized - Entry Point</title>
     <style>
-        body { font-family: sans-serif; padding: 2em; background-color: #000000; color: #ffffff; }
-        h1 { color: #ffffff; }
-        ul { list-style: none; padding: 0; }
-        li { margin-bottom: 1em; }
-        a { text-decoration: none; color: #66bfff; font-size: 1.2em; }
-        a:hover { text-decoration: underline; color: #8ccfff; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 20px;
+            background-color: #f9f9f9;
+            color: #333;
+            line-height: 1.6;
+        }
+        h1 {
+            color: #1a1a1a;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+        }
+        ul {
+            list-style-type: none;
+            padding: 0;
+        }
+        li {
+            margin: 15px 0;
+        }
+        a {
+            display: block;
+            padding: 12px 18px;
+            background-color: #fff;
+            color: #007aff; /* iOS blue */
+            text-decoration: none;
+            border-radius: 8px;
+            border: 1px solid #eee;
+            transition: background-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        a:hover, a:focus {
+            background-color: #f0f8ff; /* Light blue tint */
+            box-shadow: 0 4px 8px rgba(0,0,0,0.08);
+            outline: none;
+        }
     </style>
 </head>
 <body>
-    <h1>LLM Visualization Project</h1>
-    <p>Select a visualization to view:</p>
+    <h1>LLM Visualized</h1>
+    <p>Select an entry point:</p>
     <ul>
-        <li><a href="app.html">Main Application (GPT-2 Forward Pass)</a></li>
+        <li><a href="app.html">Main Application (GPT-2 Forward Pass Visualization)</a></li>
         <!-- TEST_LINKS_PLACEHOLDER -->
     </ul>
 </body>

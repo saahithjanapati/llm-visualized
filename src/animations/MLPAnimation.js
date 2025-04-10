@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { VectorVisualization } from '../components/VectorVisualization.js';
 import { EmbeddingMatrixVisualization } from '../components/EmbeddingMatrixVisualization.js';
-import * as TWEEN from 'three/addons/libs/tween.module.js'; // Use namespace import
+import * as TWEEN from 'three/examples/jsm/libs/tween.module.js'; // Updated path
 import { mapValueToColor } from '../utils/colors.js'; // Assuming you have this
 import { VECTOR_SPEED, SPAWN_Y } from '../utils/constants.js';
 
