@@ -12,5 +12,15 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "dependencies": {
+    "lil-gui": "^0.20.0",
+    "three": "^0.175.0",
+    "three-bvh-csg": "^0.0.17",
+    "three-csg-ts": "^3.2.0",
+    "three-mesh-bvh": "^0.9.0"
+  },
+  "devDependencies": {
+    "parcel": "^2.14.4"
+  }
 }
