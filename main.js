@@ -60,6 +60,7 @@ const SPAWN_Z_RANGE = 10; // Increased Z range for more depth variation (was 5)
 const VECTOR_SPEED = 0.1;
 const EPSILON = 1e-5; // Small value for Layer Norm stability
 
+
 const vectors = [];
 let spawnTimer = 0;
 const SPAWN_INTERVAL = 120; // Faster spawning (was 360)
