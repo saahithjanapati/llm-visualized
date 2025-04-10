@@ -49,6 +49,7 @@ controls.maxDistance = 180; // Slightly increased max distance
 
 // --- GPT-2 Vector Visualization ---
 
+
 const VECTOR_LENGTH = 100; // Reverted length
 const SPHERE_RADIUS = 0.15; // Reverted radius
 const SPHERE_DIAMETER = SPHERE_RADIUS * 2;
@@ -59,6 +60,7 @@ const SPAWN_X_RANGE = 70; // Increased horizontal spawn range significantly
 const SPAWN_Z_RANGE = 10; // Increased Z range for more depth variation (was 5)
 const VECTOR_SPEED = 0.1;
 const EPSILON = 1e-5; // Small value for Layer Norm stability
+
 
 
 const vectors = [];
