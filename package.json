@@ -1,0 +1,15 @@
+{
+  "name": "llm-visualized",
+  "version": "1.0.0",
+  "description": "3d visualization of gpt2",
+  "main": "main.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
