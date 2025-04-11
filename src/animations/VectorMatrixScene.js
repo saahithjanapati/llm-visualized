@@ -5,6 +5,9 @@ import { VectorVisualization } from '../components/VectorVisualization';
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization';
 import { VECTOR_LENGTH } from '../utils/constants.js'; // Import VECTOR_LENGTH
 
+// Maximum points per trail line (adjust for performance/length)
+const MAX_TRAIL_POINTS = 1000; // Further increased buffer size
+
 export function initVectorMatrixScene(canvas) {
     // --- Basic Three.js setup ---
     const scene = new THREE.Scene();
@@ -31,7 +34,9 @@ export function initVectorMatrixScene(canvas) {
 
     // --- Visualizations ---
     const allVectorVisualizations = []; // Array to hold all vector instances
-    const vectorHeightOffset = 20; // Further increased offset for larger animation range
+    const allTrailLines = []; // Array to hold { line, geometry, material } for trails
+    const allTrailPoints = []; // Array of arrays to hold points for each trail line [[x,y,z], ...]
+    const vectorHeightOffset = 40; // Significantly increased offset
 
     // Configure matrix with user specified defaults
     const matrixParams = {
@@ -79,6 +84,18 @@ export function initVectorMatrixScene(canvas) {
 
         scene.add(vectorVis.group);
         allVectorVisualizations.push(vectorVis); // Add to array for cleanup
+
+        // --- Create Trail Line for this Vector ---
+        allTrailPoints.push([]); // Initialize points array for this trail
+        const trailGeometry = new THREE.BufferGeometry();
+        // Pre-allocate buffer large enough for max points
+        const positions = new Float32Array(MAX_TRAIL_POINTS * 3);
+        trailGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+        const trailMaterial = new THREE.LineBasicMaterial({ color: 0x888888 }); // Gray color
+        const trailLine = new THREE.Line(trailGeometry, trailMaterial);
+        scene.add(trailLine);
+        allTrailLines.push({ line: trailLine, geometry: trailGeometry, material: trailMaterial });
     }
 
     // --- GUI (Optional - for parameter tuning) ---
@@ -104,6 +121,7 @@ export function initVectorMatrixScene(canvas) {
     }
 
     const clock = new THREE.Clock(); // Clock for animation timing
+    let previousY = startY; // Initialize previous Y position tracking
 
     // --- Animation Loop ---
     function animate() {
@@ -116,6 +134,32 @@ export function initVectorMatrixScene(canvas) {
 
         // Calculate current Y position using linear interpolation within the loop
         const currentY = startY + loopTime * animationDistance;
+
+        // --- Check for Animation Reset ---
+        const animationReset = currentY < previousY;
+        if (animationReset) {
+            // Clear points for all trails
+            allTrailPoints.forEach(points => points.length = 0);
+        }
+
+        // --- Update Trail Lines ---
+        allTrailLines.forEach((trail, index) => {
+            const currentPoints = allTrailPoints[index];
+            const vectorZPos = allVectorVisualizations[index].group.position.z; // Get Z for this vector
+            const newPoint = [0, currentY, vectorZPos];
+
+            // Add new point
+            currentPoints.push(newPoint);
+
+            // Update geometry attribute
+            const positionAttribute = trail.geometry.getAttribute('position');
+            for (let j = 0; j < currentPoints.length; j++) {
+                positionAttribute.setXYZ(j, currentPoints[j][0], currentPoints[j][1], currentPoints[j][2]);
+            }
+
+            trail.geometry.setDrawRange(0, currentPoints.length);
+            positionAttribute.needsUpdate = true; 
+        });
 
         // --- Matrix Color Animation ---
         const matrixBottomY = -matrixParams.height / 2;
@@ -143,6 +187,9 @@ export function initVectorMatrixScene(canvas) {
             vectorVis.group.position.y = currentY;
         });
 
+        // Update previous Y for next frame
+        previousY = currentY;
+
         renderer.render(scene, camera);
     }
 
@@ -155,6 +202,10 @@ export function initVectorMatrixScene(canvas) {
         gui.destroy();
         // Dispose geometries and materials
         allVectorVisualizations.forEach(vec => vec.dispose()); // Dispose all vectors
+        allTrailLines.forEach(trail => { // Dispose trails
+            trail.geometry.dispose();
+            trail.material.dispose();
+        });
         matrixVis._clearMesh(); // Use existing clear method
         // Add disposal for other objects if needed
         renderer.dispose();
