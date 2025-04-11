@@ -78,11 +78,9 @@ const initialParams = {
     depth: 30,
     topWidthFactor: 0.7,
     cornerRadius: 0.8,
-    numberOfSlits: 0,
+    numberOfSlits: 10, // Start with some slits visible
     slitWidth: 0.2,
-    slitHeight: 0,  // Use 0 instead of null for auto height
-    slitColor: 0x000000,
-    slitOpacity: 0.9,
+    slitDepthFactor: 1.0, // Add new depth factor (1.0 = full depth)
     slitWidthFactor: 0.9
 };
 
@@ -94,9 +92,7 @@ const testMatrix = new WeightMatrixVisualization(null, new THREE.Vector3(0, 0, 0
     initialParams.cornerRadius,
     initialParams.numberOfSlits,
     initialParams.slitWidth,
-    initialParams.slitHeight,
-    initialParams.slitColor,
-    initialParams.slitOpacity,
+    initialParams.slitDepthFactor,
     initialParams.slitWidthFactor
 );
 scene.add(testMatrix.group);
@@ -104,6 +100,9 @@ scene.add(testMatrix.group);
 // --- Setup GUI ---
 const gui = new GUI();
 const guiParams = { ...initialParams }; // Clone initial params for GUI
+delete guiParams.slitColor; // Remove from guiParams
+delete guiParams.slitOpacity; // Remove from guiParams
+delete guiParams.slitHeight; // Remove old height param
 guiParams.metalness = 0.1; // Add initial material params to guiParams
 guiParams.roughness = 0.7;
 
@@ -130,23 +129,10 @@ slitsFolder.add(guiParams, 'numberOfSlits', 0, 15, 1).name('Number').onChange(up
 slitsFolder.add(guiParams, 'slitWidth', 0.05, 1.0, 0.05).name('Thickness').onChange(updateMatrixGeometry);
 slitsFolder.add(guiParams, 'slitWidthFactor', 0.1, 1.5, 0.05).name('Width Factor').onChange(updateMatrixGeometry);
 
-// Add control for slit height (0 = auto)
-// Create the control with min value of 0
-slitsFolder.add(guiParams, 'slitHeight', 0, 10, 0.1)
-    .name('Height (0=auto)')
+// Add control for slit depth factor
+slitsFolder.add(guiParams, 'slitDepthFactor', 0, 1, 0.01)
+    .name('Depth Factor')
     .onChange(updateMatrixGeometry);
-
-// Add color control for slits
-slitsFolder.addColor(guiParams, 'slitColor').name('Color').onChange(value => {
-    guiParams.slitColor = value;
-    updateMatrixGeometry();
-});
-
-// Add opacity control for slits
-slitsFolder.add(guiParams, 'slitOpacity', 0, 1, 0.05).name('Opacity').onChange(value => {
-    // For opacity we can use the updateSlitProperties to avoid full recreation
-    testMatrix.updateSlitProperties({ slitOpacity: value });
-});
 
 slitsFolder.open(); // Start open
 

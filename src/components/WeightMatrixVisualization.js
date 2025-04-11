@@ -1,7 +1,8 @@
 import * as THREE from 'three';
+import { CSG } from 'three-csg-ts'; // Import CSG
 
 export class WeightMatrixVisualization {
-    constructor(data = null, position = new THREE.Vector3(0, 0, 0), width = 8, height = 4, depth = 30, topWidthFactor = 0.7, cornerRadius = 0.8, numberOfSlits = 0, slitWidth = 0.2, slitHeight = 0, slitColor = 0x000000, slitOpacity = 0.9, slitWidthFactor = 0.9) {
+    constructor(data = null, position = new THREE.Vector3(0, 0, 0), width = 8, height = 4, depth = 30, topWidthFactor = 0.7, cornerRadius = 0.8, numberOfSlits = 0, slitWidth = 0.2, slitDepthFactor = 1.0, slitWidthFactor = 0.9) {
         this.group = new THREE.Group();
         this.group.position.copy(position);
 
@@ -12,13 +13,12 @@ export class WeightMatrixVisualization {
         this.cornerRadius = cornerRadius;
         this.numberOfSlits = numberOfSlits;
         this.slitWidth = slitWidth;
-        this.slitHeight = slitHeight; // 0 means auto height calculation
-        this.slitColor = slitColor;
-        this.slitOpacity = slitOpacity;
+        this.slitDepthFactor = Math.max(0, Math.min(1, slitDepthFactor)); // Clamp between 0 and 1
         this.slitWidthFactor = slitWidthFactor; // Percentage of trapezoid width that slits occupy
 
-        this.mesh = null; // Main trapezoid mesh
-        this.slitMeshes = []; // Array to store slit meshes
+        this.mesh = null; // Main trapezoid mesh (sides)
+        this.frontCapMesh = null; // Front face mesh
+        this.backCapMesh = null; // Back face mesh
 
         this._createMesh();
 
@@ -43,19 +43,26 @@ export class WeightMatrixVisualization {
             }
             this.mesh = null;
         }
-
-        // Remove and dispose of all slit meshes
-        this.slitMeshes.forEach(slitMesh => {
-            this.group.remove(slitMesh);
-            if (slitMesh.geometry) slitMesh.geometry.dispose();
-            if (slitMesh.material) slitMesh.material.dispose();
-        });
-        this.slitMeshes = [];
+        
+        // Clear caps
+        if (this.frontCapMesh) {
+            this.group.remove(this.frontCapMesh);
+            if (this.frontCapMesh.geometry) this.frontCapMesh.geometry.dispose();
+            // Material is shared, dispose only once with main mesh
+            this.frontCapMesh = null;
+        }
+        if (this.backCapMesh) {
+            this.group.remove(this.backCapMesh);
+            if (this.backCapMesh.geometry) this.backCapMesh.geometry.dispose();
+            // Material is shared
+            this.backCapMesh = null;
+        }
     }
 
     _createMesh() {
         this._clearMesh(); // Clear previous mesh and resources
 
+        // --- Create Main Trapezoid Shape (used for extrusion AND caps) ---
         const shape = new THREE.Shape();
         const hw = this.width / 2;
         const hTopW = (this.width * this.topWidthFactor) / 2;
@@ -73,68 +80,84 @@ export class WeightMatrixVisualization {
         const extrudeSettings = {
             steps: 1,
             depth: this.depth,
-            bevelEnabled: true,
-            bevelThickness: cr,
-            bevelSize: cr,
-            bevelOffset: -cr,
-            bevelSegments: 24 // Increase for smoother bevels
+            bevelEnabled: false, // Disable bevel
+            // bevelThickness: cr,
+            // bevelSize: cr,
+            // bevelOffset: -cr,
+            // bevelSegments: 24 
         };
 
-        // Create geometry by extruding the shape (with potential holes)
-        const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
-        geometry.center(); // Center the resulting geometry
+        // Create initial geometry by extruding the shape
+        const baseGeometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+        baseGeometry.center(); // Center the resulting geometry
 
-        // Create material (render both sides as holes make inside visible)
+        // Create a Mesh for the base geometry to use with CSG
+        const baseMesh = new THREE.Mesh(baseGeometry); // Material is not needed for CSG operation itself
+
+        // --- Create and Subtract Slits using CSG (for the side walls) ---
+        let finalMesh = baseMesh; // Start with the base mesh
+
+        if (this.numberOfSlits > 0 && this.slitWidth > 0) {
+            const slitSpacing = this.depth / (this.numberOfSlits + 1);
+
+            // Calculate the actual depth of the cut based on the factor
+            const cutDepth = this.height * this.slitDepthFactor;
+            // Make the subtraction box height match the cut depth (+ epsilon)
+            const slitBoxHeight = cutDepth + 0.001; // Use exact depth + epsilon
+            // Calculate the Y position for the center of the cut region
+            const cutCenterY = (this.height / 2) - (cutDepth / 2);
+            
+            // Use constant average width for slits (based on diagnostic findings)
+            const avgWidth = (this.width + (this.width * this.topWidthFactor)) / 2;
+            const constantSlitBoxWidth = avgWidth * this.slitWidthFactor;
+
+            for (let i = 0; i < this.numberOfSlits; i++) {
+                const zPos = -this.depth / 2 + slitSpacing * (i + 1);
+
+                // Create a box geometry for the slit with the CONSTANT width and EXACT cut depth (+epsilon)
+                const slitGeometry = new THREE.BoxGeometry(constantSlitBoxWidth, slitBoxHeight, this.slitWidth);
+                
+                // Material not needed for CSG
+                const slitMesh = new THREE.Mesh(slitGeometry); 
+
+                // Position the slit box so its center aligns with the desired cut midpoint
+                slitMesh.position.set(0, cutCenterY, zPos);
+                slitMesh.updateMatrix(); // IMPORTANT: Update matrix before CSG operation
+
+                // Subtract the slit mesh from the current result
+                finalMesh = CSG.subtract(finalMesh, slitMesh);
+            }
+        }
+
+        // --- Finalize the Side Walls Mesh ---
         const material = new THREE.MeshStandardMaterial({
             color: 0x0077ff, // Initial color
             metalness: 0.1,
             roughness: 0.7,
             flatShading: false,
-            side: THREE.DoubleSide
+            side: THREE.DoubleSide // Keep DoubleSide for the extruded part in case caps aren't perfectly flush
         });
 
-        // Create the mesh and add it to the group
-        this.mesh = new THREE.Mesh(geometry, material);
+        // Assign the final CSG result geometry and the material to the main mesh (sides)
+        this.mesh = finalMesh; 
+        this.mesh.material = material;
+        this.mesh.geometry.computeVertexNormals(); 
+
+        // Add the side walls mesh (with holes) to the group
         this.group.add(this.mesh);
 
-        // --- Create horizontal slits if requested ---
-        if (this.numberOfSlits > 0 && this.slitWidth > 0) {
-            // Calculate spacing between slits
-            const slitSpacing = this.depth / (this.numberOfSlits + 1);
-            
-            // Create a slightly transparent material for visualizing the slits
-            const slitMaterial = new THREE.MeshBasicMaterial({
-                color: this.slitColor,
-                transparent: true,
-                opacity: this.slitOpacity,
-                side: THREE.DoubleSide
-            });
-            
-            // Calculate standardized slit dimensions
-            // If slitHeight is 0, make it slightly larger than the trapezoid height
-            const actualSlitHeight = this.slitHeight <= 0 ? this.height + 0.2 : this.slitHeight;
-            
-            // Calculate standard width for all slits - use average of bottom and top width
-            const avgWidth = (this.width + (this.width * this.topWidthFactor)) / 2;
-            const standardSlitWidth = avgWidth * this.slitWidthFactor;
-            
-            for (let i = 0; i < this.numberOfSlits; i++) {
-                // Calculate position along the depth
-                const zPos = -this.depth/2 + slitSpacing * (i + 1);
-                
-                // Create a thin box for the slit with standardized width
-                const slitGeometry = new THREE.BoxGeometry(standardSlitWidth, actualSlitHeight, this.slitWidth);
-                
-                const slitMesh = new THREE.Mesh(slitGeometry, slitMaterial);
-                
-                // Position the slit at the correct location along the depth
-                slitMesh.position.set(0, 0, zPos);
-                
-                // Add the slit mesh to the group and store it
-                this.group.add(slitMesh);
-                this.slitMeshes.push(slitMesh);
-            }
-        }
+        // --- Create and Add Front/Back Caps ---
+        const capGeometry = new THREE.ShapeGeometry(shape); // Use the original 2D shape
+        capGeometry.center(); // Center it like the extruded geometry
+
+        this.frontCapMesh = new THREE.Mesh(capGeometry, material);
+        this.frontCapMesh.position.z = this.depth / 2; // Position at the front
+        this.group.add(this.frontCapMesh);
+
+        this.backCapMesh = new THREE.Mesh(capGeometry, material);
+        this.backCapMesh.position.z = -this.depth / 2; // Position at the back
+        this.backCapMesh.rotation.y = Math.PI; // Rotate to face outwards
+        this.group.add(this.backCapMesh);
     }
 
     updateData(data) {
@@ -157,10 +180,11 @@ export class WeightMatrixVisualization {
         this.numberOfSlits = params.numberOfSlits ?? this.numberOfSlits;
         this.slitWidth = params.slitWidth ?? this.slitWidth;
         
-        // New parameters
-        this.slitHeight = params.slitHeight ?? this.slitHeight;
-        this.slitColor = params.slitColor ?? this.slitColor;
-        this.slitOpacity = params.slitOpacity ?? this.slitOpacity;
+        // Update new parameters (excluding slit color/opacity)
+        // this.slitHeight = params.slitHeight ?? this.slitHeight; // Removed
+        this.slitDepthFactor = params.slitDepthFactor !== undefined 
+            ? Math.max(0, Math.min(1, params.slitDepthFactor)) // Clamp between 0 and 1
+            : this.slitDepthFactor;
         this.slitWidthFactor = params.slitWidthFactor ?? this.slitWidthFactor;
 
         this._createMesh(); // Recreate the mesh with new parameters
@@ -178,46 +202,37 @@ export class WeightMatrixVisualization {
     }
 
     setColor(color) {
-        if (this.mesh && this.mesh.material) {
-            const mat = this.mesh.material;
-            // Handle potential array of materials (though ExtrudeGeometry usually creates one)
-            if (Array.isArray(mat)) {
-                mat.forEach(m => m.color.set(color));
-            } else {
-                mat.color.set(color);
+        const applyColor = (mat) => {
+            if (mat) {
+                if (Array.isArray(mat)) {
+                    mat.forEach(m => m.color.set(color));
+                } else {
+                    mat.color.set(color);
+                }
             }
-        }
+        };
+        applyColor(this.mesh?.material);
+        applyColor(this.frontCapMesh?.material); // Apply to caps too
+        applyColor(this.backCapMesh?.material);  // Apply to caps too
     }
 
     setMaterialProperties(props) {
-        if (this.mesh && this.mesh.material) {
-            const applyProps = (mat) => {
-                if (props.metalness !== undefined) mat.metalness = props.metalness;
-                if (props.roughness !== undefined) mat.roughness = props.roughness;
-            };
-            const mat = this.mesh.material;
-            // Handle potential array of materials
-            if (Array.isArray(mat)) {
-                mat.forEach(applyProps);
-            } else {
-                applyProps(mat);
+        const applyProps = (mat) => {
+            if (mat) {
+                 if (Array.isArray(mat)) {
+                    mat.forEach(m => {
+                        if (props.metalness !== undefined) m.metalness = props.metalness;
+                        if (props.roughness !== undefined) m.roughness = props.roughness;
+                    });
+                } else {
+                    if (props.metalness !== undefined) mat.metalness = props.metalness;
+                    if (props.roughness !== undefined) mat.roughness = props.roughness;
+                }
             }
-        }
-    }
-
-    // Update slit properties without recreating the whole mesh
-    updateSlitProperties(props) {
-        if (props.slitColor !== undefined || props.slitOpacity !== undefined) {
-            this.slitMeshes.forEach(slitMesh => {
-                if (props.slitColor !== undefined) {
-                    this.slitColor = props.slitColor;
-                    slitMesh.material.color.set(props.slitColor);
-                }
-                if (props.slitOpacity !== undefined) {
-                    this.slitOpacity = props.slitOpacity;
-                    slitMesh.material.opacity = props.slitOpacity;
-                }
-            });
-        }
+           
+        };
+        applyProps(this.mesh?.material);
+        applyProps(this.frontCapMesh?.material); // Apply to caps too
+        applyProps(this.backCapMesh?.material);  // Apply to caps too
     }
 }
