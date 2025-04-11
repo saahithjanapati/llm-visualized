@@ -16,6 +16,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@tweenjs/tween.js": "^25.0.0",
     "lil-gui": "^0.20.0",
     "three": "^0.175.0",
     "three-bvh-csg": "^0.0.17",

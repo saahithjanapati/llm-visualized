@@ -131,11 +131,13 @@ export class WeightMatrixVisualization {
 
         // --- Finalize the Side Walls Mesh ---
         const material = new THREE.MeshStandardMaterial({
-            color: 0x0077ff, // Initial color
+            color: 0x0077ff, // Initial color (will be overridden by animation)
             metalness: 0.1,
             roughness: 0.7,
             flatShading: false,
-            side: THREE.DoubleSide // Keep DoubleSide for the extruded part in case caps aren't perfectly flush
+            side: THREE.DoubleSide, // Keep DoubleSide for the extruded part in case caps aren't perfectly flush
+            transparent: true, // Enable transparency
+            opacity: 0.8       // Set opacity level (0 = fully transparent, 1 = fully opaque)
         });
 
         // Assign the final CSG result geometry and the material to the main mesh (sides)
