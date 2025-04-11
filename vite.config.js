@@ -26,6 +26,7 @@ export default defineConfig({
             app: resolve(__dirname, 'app.html'),
             testVector: resolve(__dirname, 'tests/test_vector.html'),
             testWeightMatrix: resolve(__dirname, 'tests/test_weight_matrix.html'),
+            testVectorMatrix: resolve(__dirname, 'tests/vector-matrix-test.html'),
             // Add other HTML files here if needed
         }
     } 
