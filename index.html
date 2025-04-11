@@ -3,63 +3,45 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LLM Visualized - Entry Point</title>
+    <title>LLM Visualized - Select Page</title>
     <style>
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
-            max-width: 800px;
-            margin: 40px auto;
-            padding: 20px;
-            background-color: #121212; /* Dark background */
-            color: #e0e0e0; /* Light text */
+            font-family: sans-serif;
+            padding: 2em;
+            background-color: #1a1a1a;
+            color: #e0e0e0;
             line-height: 1.6;
         }
         h1 {
-            color: #ffffff; /* White heading */
-            border-bottom: 1px solid #333; /* Darker border */
-            padding-bottom: 10px;
-            margin-bottom: 20px;
-        }
-        h2 {
-            color: #cccccc; /* Lighter grey for sub-heading */
-            margin-top: 40px; /* Add space above the test links */
-            margin-bottom: 10px;
-            border-top: 1px solid #333; /* Separator line */
-            padding-top: 20px; /* Space below the line */
+            color: #ffffff;
+            border-bottom: 1px solid #444;
+            padding-bottom: 0.5em;
         }
         ul {
-            list-style-type: none;
+            list-style: none;
             padding: 0;
         }
         li {
-            margin: 15px 0;
+            margin: 0.75em 0;
         }
         a {
-            display: block;
-            padding: 12px 18px;
-            background-color: #1e1e1e; /* Darker element background */
-            color: #58a6ff; /* Lighter blue for links */
             text-decoration: none;
-            border-radius: 8px;
-            border: 1px solid #333; /* Darker border */
-            transition: background-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.2); /* Adjusted shadow for dark */
+            color: #58a6ff;
+            font-size: 1.1em;
         }
-        a:hover, a:focus {
-            background-color: #2c2c2c; /* Slightly lighter on hover */
-            box-shadow: 0 4px 8px rgba(0,0,0,0.3); /* Adjusted shadow */
-            outline: none;
+        a:hover {
+            text-decoration: underline;
+            color: #80bfff;
         }
     </style>
 </head>
 <body>
-    <h1>LLM Visualized</h1>
-    <p>Select an entry point:</p>
+    <h1>Select a Page</h1>
     <ul>
-        <li><a href="app.html">Main Application (GPT-2 Forward Pass Visualization)</a></li>
-        <h2>Tests</h2>
-                <li><a href="./tests/test_vector.html">Test: Test Vector</a></li>
-        <li><a href="./tests/test_weight_matrix.html">Test: Test Weight Matrix</a></li>
+        <li><a href="/app.html">Main Application</a></li>
+        <li><a href="/tests/test_vector.html">Test: Vector Visualization</a></li>
+        <li><a href="/tests/test_weight_matrix.html">Test: Weight Matrix Visualization</a></li>
+        <!-- Add links to other tests here -->
     </ul>
 </body>
 </html> 

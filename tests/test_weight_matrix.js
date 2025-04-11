@@ -1,8 +1,8 @@
-import * as THREE from '/node_modules/three/build/three.module.js';
-import { OrbitControls } from '/node_modules/three/examples/jsm/controls/OrbitControls.js';
-import { GUI } from '/node_modules/lil-gui/dist/lil-gui.esm.js'; // Import GUI from node_modules
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { GUI } from 'lil-gui';
 // Adjust path to import the component relative to the project root
-import { WeightMatrixVisualization } from '../../src/components/WeightMatrixVisualization.js';
+import { WeightMatrixVisualization } from '/src/components/WeightMatrixVisualization.js';
 
 // --- Minimal Scene Setup --- 
 const scene = new THREE.Scene();
@@ -70,6 +70,18 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(0, 0, 0); // Target the origin
 controls.enableDamping = true;
 controls.dampingFactor = 0.05;
+
+// --- Keyboard Controls Setup ---
+const keyboardState = {};
+const panSpeed = 0.5; // Adjust panning speed as needed
+
+document.addEventListener('keydown', (event) => {
+    keyboardState[event.code] = true;
+});
+
+document.addEventListener('keyup', (event) => {
+    keyboardState[event.code] = false;
+});
 
 // --- Instantiate and Add the Component ---
 const initialParams = {
@@ -149,6 +161,40 @@ const pulseColor = new THREE.Color(); // Color to lerp into
 
 function animate() {
     requestAnimationFrame(animate);
+
+    // --- Handle Keyboard Panning ---
+    const forward = new THREE.Vector3();
+    camera.getWorldDirection(forward);
+    const right = new THREE.Vector3().crossVectors(camera.up, forward).normalize();
+    const up = new THREE.Vector3().crossVectors(forward, right).normalize(); // Ensure 'up' is orthogonal
+
+    let didPan = false;
+    const panVector = new THREE.Vector3();
+
+    if (keyboardState['KeyW'] || keyboardState['ArrowUp']) {
+        panVector.add(up); // Pan up
+        didPan = true;
+    }
+    if (keyboardState['KeyS'] || keyboardState['ArrowDown']) {
+        panVector.sub(up); // Pan down
+        didPan = true;
+    }
+    if (keyboardState['KeyA'] || keyboardState['ArrowLeft']) {
+        panVector.sub(right); // Pan left
+        didPan = true;
+    }
+    if (keyboardState['KeyD'] || keyboardState['ArrowRight']) {
+        panVector.add(right); // Pan right
+        didPan = true;
+    }
+
+    if (didPan) {
+        panVector.normalize().multiplyScalar(panSpeed);
+        camera.position.add(panVector);
+        controls.target.add(panVector); // Move the target along with the camera
+    }
+    // --- End Keyboard Panning ---
+
     controls.update();
 
     // Color Pulsation

@@ -58,6 +58,18 @@ controls.screenSpacePanning = false;
 controls.minDistance = 10;
 controls.maxDistance = 180; // Slightly increased max distance
 
+// --- Keyboard Controls Setup ---
+const keyboardState = {};
+const panSpeed = 0.5; // Adjust panning speed as needed
+
+document.addEventListener('keydown', (event) => {
+    keyboardState[event.code] = true;
+});
+
+document.addEventListener('keyup', (event) => {
+    keyboardState[event.code] = false;
+});
+
 // --- GPT-2 Vector Visualization --- - Now managed via class
 
 // Removed constants - now in src/utils/constants.js
@@ -89,6 +101,39 @@ window.addEventListener('resize', () => {
 // Animation Loop
 function animate() {
     requestAnimationFrame(animate);
+
+    // --- Handle Keyboard Panning ---
+    const forward = new THREE.Vector3();
+    camera.getWorldDirection(forward);
+    const right = new THREE.Vector3().crossVectors(camera.up, forward).normalize();
+    const up = new THREE.Vector3().crossVectors(forward, right).normalize(); // Ensure 'up' is orthogonal
+
+    let didPan = false;
+    const panVector = new THREE.Vector3();
+
+    if (keyboardState['KeyW'] || keyboardState['ArrowUp']) {
+        panVector.add(up); // Pan up
+        didPan = true;
+    }
+    if (keyboardState['KeyS'] || keyboardState['ArrowDown']) {
+        panVector.sub(up); // Pan down
+        didPan = true;
+    }
+    if (keyboardState['KeyA'] || keyboardState['ArrowLeft']) {
+        panVector.sub(right); // Pan left
+        didPan = true;
+    }
+    if (keyboardState['KeyD'] || keyboardState['ArrowRight']) {
+        panVector.add(right); // Pan right
+        didPan = true;
+    }
+
+    if (didPan) {
+        panVector.normalize().multiplyScalar(panSpeed);
+        camera.position.add(panVector);
+        controls.target.add(panVector); // Move the target along with the camera
+    }
+    // --- End Keyboard Panning ---
 
     // Spawn new vectors periodically
     spawnTimer++;
