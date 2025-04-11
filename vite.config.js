@@ -20,7 +20,15 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     // Remove rollupOptions.input, Vite handles HTML entry points automatically
-    rollupOptions: {} 
+    rollupOptions: {
+        input: {
+            main: resolve(__dirname, 'index.html'),
+            app: resolve(__dirname, 'app.html'),
+            testVector: resolve(__dirname, 'tests/test_vector.html'),
+            testWeightMatrix: resolve(__dirname, 'tests/test_weight_matrix.html'),
+            // Add other HTML files here if needed
+        }
+    } 
   },
   server: {
     https: true,
