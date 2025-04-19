@@ -32,6 +32,11 @@ export function initVectorMatrixScene(canvas) {
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
 
+    // --- Keyboard Controls State ---
+    const keysPressed = {};
+    const moveSpeed = 0.5; // Adjust speed as needed
+    const rotateSpeed = 0.02; // Adjust rotation speed as needed
+
     // --- Visualizations ---
     const allVectorVisualizations = []; // Array to hold all vector instances
     const allTrailLines = []; // Array to hold { line, geometry, material } for trails
@@ -120,12 +125,72 @@ export function initVectorMatrixScene(canvas) {
         renderer.setSize(window.innerWidth, window.innerHeight);
     }
 
+    // --- Keyboard Event Listeners ---
+    function onKeyDown(event) {
+        keysPressed[event.key.toLowerCase()] = true;
+        keysPressed[event.code] = true; // Also store by code for arrow keys
+    }
+
+    function onKeyUp(event) {
+        keysPressed[event.key.toLowerCase()] = false;
+        keysPressed[event.code] = false;
+    }
+
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+
     const clock = new THREE.Clock(); // Clock for animation timing
     let previousY = startY; // Initialize previous Y position tracking
 
     // --- Animation Loop ---
     function animate() {
         requestAnimationFrame(animate);
+
+        // --- Handle Keyboard Movement ---
+        // WASD for Translation
+        if (keysPressed['w']) {
+            camera.translateZ(-moveSpeed);
+        }
+        if (keysPressed['s']) {
+            camera.translateZ(moveSpeed);
+        }
+        if (keysPressed['a']) {
+            camera.translateX(-moveSpeed);
+        }
+        if (keysPressed['d']) {
+            camera.translateX(moveSpeed);
+        }
+
+        // Arrow Keys for Rotation (adjusting OrbitControls target)
+        const lookDirection = new THREE.Vector3();
+        camera.getWorldDirection(lookDirection);
+        const rightDirection = new THREE.Vector3().crossVectors(lookDirection, camera.up).normalize();
+
+        if (keysPressed['ArrowUp']) {
+            // Adjust target upwards relative to camera view
+            const upAdjustment = new THREE.Vector3().copy(camera.up).multiplyScalar(rotateSpeed * 10); // Scale factor for noticeable change
+            controls.target.add(upAdjustment);
+            // camera.position.add(upAdjustment); // Remove camera position change for rotation
+        }
+        if (keysPressed['ArrowDown']) {
+            // Adjust target downwards relative to camera view
+            const downAdjustment = new THREE.Vector3().copy(camera.up).multiplyScalar(-rotateSpeed * 10);
+            controls.target.add(downAdjustment);
+            // camera.position.add(downAdjustment); // Remove camera position change for rotation
+        }
+        if (keysPressed['ArrowLeft']) {
+            // Adjust target leftwards relative to camera view
+            const leftAdjustment = new THREE.Vector3().copy(rightDirection).multiplyScalar(-rotateSpeed * 10);
+            controls.target.add(leftAdjustment);
+             // camera.position.add(leftAdjustment); // Remove camera position change for rotation
+        }
+        if (keysPressed['ArrowRight']) {
+            // Adjust target rightwards relative to camera view
+            const rightAdjustment = new THREE.Vector3().copy(rightDirection).multiplyScalar(rotateSpeed * 10);
+            controls.target.add(rightAdjustment);
+            // camera.position.add(rightAdjustment); // Remove camera position change for rotation
+        }
+
         controls.update(); // Required if enableDamping is true
 
         const elapsedTime = clock.getElapsedTime();
@@ -198,6 +263,8 @@ export function initVectorMatrixScene(canvas) {
     // Return cleanup function
     return () => {
         window.removeEventListener('resize', onWindowResize);
+        window.removeEventListener('keydown', onKeyDown); // Remove key listeners
+        window.removeEventListener('keyup', onKeyUp);     // Remove key listeners
         controls.dispose();
         gui.destroy();
         // Dispose geometries and materials

@@ -7,7 +7,9 @@
     "test": "tests"
   },
   "scripts": {
+    "predev": "node generate_index.js",
     "dev": "vite",
+    "prebuild": "node generate_index.js",
     "build": "vite build",
     "preview": "vite preview",
     "test": "echo \"Error: no test specified\" && exit 1"
