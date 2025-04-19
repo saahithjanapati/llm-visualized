@@ -18,7 +18,6 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@tweenjs/tween.js": "^25.0.0",
     "lil-gui": "^0.20.0",
     "three": "^0.175.0",
     "three-bvh-csg": "^0.0.17",
@@ -26,6 +25,7 @@
     "three-mesh-bvh": "^0.9.0"
   },
   "devDependencies": {
+    "@tweenjs/tween.js": "^25.0.0",
     "@vitejs/plugin-basic-ssl": "^2.0.0",
     "parcel": "^2.14.4",
     "vite": "^6.2.6"

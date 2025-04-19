@@ -28,6 +28,7 @@ export default defineConfig({
             testWeightMatrix: resolve(__dirname, 'tests/test_weight_matrix.html'),
             risingVectors: resolve(__dirname, 'tests/rising-vectors-test.html'),
             vectorMatrix: resolve(__dirname, 'tests/vector-matrix-test.html'),
+            vectorAddition: resolve(__dirname, 'tests/vector_addition_test.html'),
             // Add other HTML files here if needed
         }
     } 
