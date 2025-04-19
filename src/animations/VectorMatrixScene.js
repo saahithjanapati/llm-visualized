@@ -34,7 +34,9 @@ export function initVectorMatrixScene(canvas) {
 
     // --- Keyboard Controls State ---
     const keysPressed = {};
-    const moveSpeed = 0.5; // Adjust speed as needed
+    const moveSpeed = 0.5; // Original speed, can be reused or adjusted
+    const panSpeed = 0.2; // Speed for panning
+    const zoomSpeed = 0.5; // Speed for zooming
     const rotateSpeed = 0.02; // Adjust rotation speed as needed
 
     // --- Visualizations ---
@@ -147,48 +149,51 @@ export function initVectorMatrixScene(canvas) {
         requestAnimationFrame(animate);
 
         // --- Handle Keyboard Movement ---
-        // WASD for Translation
+        const cameraRight = new THREE.Vector3();
+        camera.getWorldDirection(cameraRight); // Get forward direction first
+        cameraRight.cross(camera.up).normalize(); // Calculate right vector
+        const cameraUp = new THREE.Vector3().copy(camera.up); // Use world up for panning usually
+
+        // WASD for Panning (Move camera and target together)
         if (keysPressed['w']) {
-            camera.translateZ(-moveSpeed);
+            const panOffset = cameraUp.clone().multiplyScalar(panSpeed);
+            camera.position.add(panOffset);
+            controls.target.add(panOffset);
         }
         if (keysPressed['s']) {
-            camera.translateZ(moveSpeed);
+            const panOffset = cameraUp.clone().multiplyScalar(-panSpeed);
+            camera.position.add(panOffset);
+            controls.target.add(panOffset);
         }
         if (keysPressed['a']) {
-            camera.translateX(-moveSpeed);
+            const panOffset = cameraRight.clone().multiplyScalar(-panSpeed);
+            camera.position.add(panOffset);
+            controls.target.add(panOffset);
         }
         if (keysPressed['d']) {
-            camera.translateX(moveSpeed);
+            const panOffset = cameraRight.clone().multiplyScalar(panSpeed);
+            camera.position.add(panOffset);
+            controls.target.add(panOffset);
         }
 
-        // Arrow Keys for Rotation (adjusting OrbitControls target)
-        const lookDirection = new THREE.Vector3();
-        camera.getWorldDirection(lookDirection);
-        const rightDirection = new THREE.Vector3().crossVectors(lookDirection, camera.up).normalize();
-
+        // Arrow Up/Down for Tilting (Pitch - Adjusting OrbitControls target vertically)
         if (keysPressed['ArrowUp']) {
-            // Adjust target upwards relative to camera view
-            const upAdjustment = new THREE.Vector3().copy(camera.up).multiplyScalar(rotateSpeed * 10); // Scale factor for noticeable change
-            controls.target.add(upAdjustment);
-            // camera.position.add(upAdjustment); // Remove camera position change for rotation
+            const targetOffset = cameraUp.clone().multiplyScalar(rotateSpeed * 10); // Adjust target up
+            controls.target.add(targetOffset);
         }
         if (keysPressed['ArrowDown']) {
-            // Adjust target downwards relative to camera view
-            const downAdjustment = new THREE.Vector3().copy(camera.up).multiplyScalar(-rotateSpeed * 10);
-            controls.target.add(downAdjustment);
-            // camera.position.add(downAdjustment); // Remove camera position change for rotation
+            const targetOffset = cameraUp.clone().multiplyScalar(-rotateSpeed * 10); // Adjust target down
+            controls.target.add(targetOffset);
         }
+
+        // Arrow Left/Right for Rotating View Angle (Adjusting OrbitControls target horizontally)
         if (keysPressed['ArrowLeft']) {
-            // Adjust target leftwards relative to camera view
-            const leftAdjustment = new THREE.Vector3().copy(rightDirection).multiplyScalar(-rotateSpeed * 10);
-            controls.target.add(leftAdjustment);
-             // camera.position.add(leftAdjustment); // Remove camera position change for rotation
+            const targetOffset = cameraRight.clone().multiplyScalar(-rotateSpeed * 10); // Adjust target left
+            controls.target.add(targetOffset);
         }
         if (keysPressed['ArrowRight']) {
-            // Adjust target rightwards relative to camera view
-            const rightAdjustment = new THREE.Vector3().copy(rightDirection).multiplyScalar(rotateSpeed * 10);
-            controls.target.add(rightAdjustment);
-            // camera.position.add(rightAdjustment); // Remove camera position change for rotation
+            const targetOffset = cameraRight.clone().multiplyScalar(rotateSpeed * 10); // Adjust target right
+            controls.target.add(targetOffset);
         }
 
         controls.update(); // Required if enableDamping is true

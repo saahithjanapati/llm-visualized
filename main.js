@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { initVectorMatrixScene } from '/src/animations/VectorMatrixScene.js';
+import { initVectorMatrixScene } from './src/animations/VectorMatrixScene.js';
 
 // Initialize the Vector Matrix Scene
 const canvas = document.createElement('canvas');
