@@ -29,6 +29,7 @@ export default defineConfig({
             risingVectors: resolve(__dirname, 'tests/rising-vectors-test.html'),
             vectorMatrix: resolve(__dirname, 'tests/vector-matrix-test.html'),
             vectorAddition: resolve(__dirname, 'tests/vector_addition_test.html'),
+            vectorMultiplication: resolve(__dirname, 'tests/vector_multiplication_test.html'),
             // Add other HTML files here if needed
         }
     } 
