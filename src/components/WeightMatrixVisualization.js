@@ -64,27 +64,93 @@ export class WeightMatrixVisualization {
 
         // --- Create Main Trapezoid Shape (used for extrusion AND caps) ---
         const shape = new THREE.Shape();
-        const hw = this.width / 2;
-        const hTopW = (this.width * this.topWidthFactor) / 2;
-        const hh = this.height / 2;
-        const cr = this.cornerRadius;
 
-        // Define the outer trapezoid profile
-        shape.moveTo(-hw, -hh);          // Bottom Left
-        shape.lineTo(hw, -hh);           // Bottom Right
-        shape.lineTo(hTopW, hh);         // Top Right
-        shape.lineTo(-hTopW, hh);        // Top Left
-        shape.closePath();               // Close the shape
+        const hw     = this.width  / 2;                         // half bottom width
+        const hTopW  = (this.width * this.topWidthFactor) / 2;  // half top width
+        const hh     = this.height / 2;                         // half height
 
-        // Extrusion settings
+        // Desired corner radius, clamped so that arcs never overlap.
+        let cr = this.cornerRadius;
+        // How far we can go horizontally on bottom edge
+        const maxBottomRadius = Math.max(0, hw - hTopW);
+        // Length of the slanted sides
+        const sideLen = Math.hypot(hw - hTopW, this.height);
+        const maxSideRadius  = sideLen / 2; // can't exceed half the edge length
+        cr = Math.min(cr, maxBottomRadius, maxSideRadius);
+
+        // If radius is effectively zero, keep original sharp trapezoid
+        if (cr < 1e-4) {
+            shape.moveTo(-hw, -hh);
+            shape.lineTo(hw, -hh);
+            shape.lineTo(hTopW, hh);
+            shape.lineTo(-hTopW, hh);
+            shape.closePath();
+        } else {
+            // Pre‑compute some helper points for each corner where the arc starts/ends
+            // Bottom edge offsets
+            const blStart = new THREE.Vector2(-hw + cr, -hh); // bottom‑left start
+            const brStart = new THREE.Vector2(hw - cr,  -hh); // bottom‑right start
+            // Top edge offsets
+            const trEnd   = new THREE.Vector2(hTopW - cr,  hh); // top‑right end
+            const tlEnd   = new THREE.Vector2(-hTopW + cr, hh); // top‑left end
+
+            // Unit vectors along the two slanted sides
+            const rightSideDir = new THREE.Vector2(hTopW - hw, 2*hh).normalize();
+            // Vector that goes from the bottom‑left to the top‑left along the slanted edge
+            // (positive X, positive Y).  We do NOT negate; we'll use ± later as needed.
+            const leftSideDir  = new THREE.Vector2(-hTopW + hw, 2*hh).normalize();
+
+            const brSidePt = new THREE.Vector2(hw, -hh).addScaledVector(rightSideDir, cr);  // point after rounding bottom‑right
+            const trSidePt = new THREE.Vector2(hTopW, hh).addScaledVector(rightSideDir.clone().negate(), cr); // point before rounding top‑right
+
+            // For the top‑left we move *backwards* along the edge, so we use the negative direction.
+            const tlSidePt = new THREE.Vector2(-hTopW, hh).addScaledVector(leftSideDir.clone().negate(), cr); // point after rounding top‑left
+            // For the bottom‑left we move inward/upward along the edge (positive direction).
+            const blSidePt = new THREE.Vector2(-hw, -hh).addScaledVector(leftSideDir, cr);  // point before rounding bottom‑left
+
+            // Start drawing
+            shape.moveTo(blStart.x, blStart.y);
+            // Bottom edge
+            shape.lineTo(brStart.x, brStart.y);
+            // Bottom‑right corner arc (quadratic approximation)
+            shape.quadraticCurveTo(hw, -hh, brSidePt.x, brSidePt.y);
+            // Right side
+            shape.lineTo(trSidePt.x, trSidePt.y);
+            // Top‑right corner arc
+            shape.quadraticCurveTo(hTopW, hh, trEnd.x, trEnd.y);
+            // Top edge
+            shape.lineTo(tlEnd.x, tlEnd.y);
+            // Top‑left corner arc
+            shape.quadraticCurveTo(-hTopW, hh, tlSidePt.x, tlSidePt.y);
+            // Left side
+            shape.lineTo(blSidePt.x, blSidePt.y);
+            // Bottom‑left corner arc
+            shape.quadraticCurveTo(-hw, -hh, blStart.x, blStart.y);
+            shape.closePath();
+        }
+
+        // Extrusion settings with rounded/filleted corners controlled by `cornerRadius`
+        // Enabling bevel creates additional geometry around every edge of the
+        // extruded shape giving the appearance of smooth, rounded corners on
+        // the final 3‑D trapezoid.  The user‑provided `cornerRadius` controls
+        // both how far the bevel extends out from each edge (`bevelSize`) and
+        // how thick the bevel is (`bevelThickness`).  A few segments are added
+        // to approximate a smooth curve.  Increase `bevelSegments` for an even
+        // smoother fillet at the cost of additional geometry.
         const extrudeSettings = {
             steps: 1,
             depth: this.depth,
-            bevelEnabled: false, // Disable bevel
-            // bevelThickness: cr,
-            // bevelSize: cr,
-            // bevelOffset: -cr,
-            // bevelSegments: 24 
+            bevelEnabled: false,
+            // Beveling is turned off because the 2‑D shape already contains
+            // true circular arcs for its corners. Disabling bevel avoids CSG
+            // artefacts that prevented the slit boxes from cutting all the
+            // way through the top and bottom faces.
+            bevelThickness: this.cornerRadius * 1.2,
+            bevelSize: this.cornerRadius * 1.2,
+            bevelOffset: 0,
+            // Make the smoothness scale with the radius: at least 6 segments
+            // with 3 extra per unit radius.
+            bevelSegments: Math.max(6, Math.round(this.cornerRadius * 3))
         };
 
         // Create initial geometry by extruding the shape
@@ -102,14 +168,19 @@ export class WeightMatrixVisualization {
 
             // Calculate the actual depth of the cut based on the factor
             const cutDepth = this.height * this.slitDepthFactor;
-            // Make the subtraction box height match the cut depth (+ epsilon)
-            const slitBoxHeight = cutDepth + 0.001; // Use exact depth + epsilon
-            // Calculate the Y position for the center of the cut region
-            const cutCenterY = (this.height / 2) - (cutDepth / 2);
+            // Extend the box height by the corner radius so it fully intersects
+            // the bevelled top (and any rounded bottom if depth factor == 1).
+            const slitBoxHeight = cutDepth + this.cornerRadius * 2 + 0.001;
+            // Re‑compute its vertical centre so the box still starts flush with
+            // the very top of the matrix.
+            const cutCenterY = (this.height / 2) - (slitBoxHeight / 2);
             
-            // Use constant average width for slits (based on diagnostic findings)
-            const avgWidth = (this.width + (this.width * this.topWidthFactor)) / 2;
-            const constantSlitBoxWidth = avgWidth * this.slitWidthFactor;
+            // Make the slit subtraction box wide enough to exceed the widest point
+            // of the trapezoid, including any curvature.  We simply take the
+            // larger of the bottom width and top width, then add twice the
+            // corner radius so the box always extends beyond the outer surface.
+            const widest = Math.max(this.width, this.width * this.topWidthFactor);
+            const constantSlitBoxWidth = (widest + this.cornerRadius * 2) * this.slitWidthFactor;
 
             for (let i = 0; i < this.numberOfSlits; i++) {
                 const zPos = -this.depth / 2 + slitSpacing * (i + 1);
@@ -148,17 +219,21 @@ export class WeightMatrixVisualization {
         // Add the side walls mesh (with holes) to the group
         this.group.add(this.mesh);
 
-        // --- Create and Add Front/Back Caps ---
-        const capGeometry = new THREE.ShapeGeometry(shape); // Use the original 2D shape
-        capGeometry.center(); // Center it like the extruded geometry
+        // --- Add Front / Back Caps to ensure end faces are solid ---
+        // After the CSG operations (slits) the original end faces may have
+        // been lost, so we recreate them using the original 2‑D profile and
+        // place them just outside the body (epsilon offset) to avoid z‑fighting.
+        const capGeometry = new THREE.ShapeGeometry(shape);
+        capGeometry.center();
 
+        const epsilon = 0.001; // small offset to prevent z‑fighting
         this.frontCapMesh = new THREE.Mesh(capGeometry, material);
-        this.frontCapMesh.position.z = this.depth / 2; // Position at the front
+        this.frontCapMesh.position.z = this.depth / 2 + epsilon;
         this.group.add(this.frontCapMesh);
 
         this.backCapMesh = new THREE.Mesh(capGeometry, material);
-        this.backCapMesh.position.z = -this.depth / 2; // Position at the back
-        this.backCapMesh.rotation.y = Math.PI; // Rotate to face outwards
+        this.backCapMesh.position.z = -this.depth / 2 - epsilon;
+        this.backCapMesh.rotation.y = Math.PI; // flip so normals face outwards
         this.group.add(this.backCapMesh);
     }
 
