@@ -1,10 +1,10 @@
 import * as THREE from 'three';
-import { initVectorMatrixScene } from './src/animations/VectorMatrixScene.js';
+import { initMainScene } from './src/animations/MainScene.js';
 
-// Initialize the Vector Matrix Scene
+// Initialize the Main Scene
 const canvas = document.createElement('canvas');
 document.body.appendChild(canvas);
-const cleanup = initVectorMatrixScene(canvas);
+const cleanup = initMainScene(canvas);
 
 // Handle cleanup if the page is unloaded
 window.addEventListener('beforeunload', () => {
