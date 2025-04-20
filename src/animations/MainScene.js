@@ -7,9 +7,11 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { VectorVisualization } from '../components/VectorVisualization';
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization';
 import { VECTOR_LENGTH } from '../utils/constants.js'; // Import VECTOR_LENGTH
+import { mapValueToColor } from '../utils/colors.js'; // For vector addition color updates
+import TWEEN from '@tweenjs/tween.js'; // Tweening library for addition animation
 
 // Maximum points per trail line (adjust for performance/length)
-const MAX_TRAIL_POINTS = 1000; // Further increased buffer size
+const MAX_TRAIL_POINTS = 2000; // Further increased buffer size
 
 export function initMainScene(canvas) { // Renamed function here
     // --- Basic Three.js setup ---
@@ -64,7 +66,24 @@ export function initMainScene(canvas) { // Renamed function here
     const allVectorVisualizations = []; // Array to hold all vector instances
     const allTrailLines = []; // Array to hold { line, geometry, material } for trails
     const allTrailPoints = []; // Array of arrays to hold points for each trail line [[x,y,z], ...]
-    const vectorHeightOffset = 40; // Significantly increased offset
+    const vectorHeightOffset = 60; // Start even lower so vectors appear further beneath the matrix
+
+    // --- Branching / Duplicate Vector Setup ---
+    // Arrays to hold duplicate vectors and their trails
+    const branchedVectorVisualizations = [];
+    const branchedTrailLines = [];
+    const branchedTrailPoints = [];
+    const additionPlayedFlags = [];
+
+    // Configuration for the duplicate vector path (all durations are expressed as fraction of the full loop 0..1)
+    const branchConfig = {
+        branchStartT: 0.15,   // When (0..1) the branch occurs (still below the matrix)
+        horzDurationT: 0.20,  // Fraction of the loop spent moving right
+        vertDurationT: 0.30,  // Fraction spent moving up
+        leftDurationT: 0.25,  // Fraction spent moving left to meet originals
+        branchX: 45,          // How far to move to the right (in world units) – move further to avoid the matrix
+        meetYOffset: 5        // Final Y offset above the original vector path when they meet
+    };
 
     // Material Definitions (Shared by Matrix & Vectors)
     const availableMaterials = {
@@ -204,6 +223,125 @@ export function initMainScene(canvas) { // Renamed function here
         });
     }
 
+    // --- Vector Addition Animation (adapted from VectorAdditionAnimation.js) ---
+    function startAdditionAnimation(vec1, vec2) {
+        const duration = 400; // faster animation
+        const flashDuration = 80;
+        const delayBetweenCubes = 15;
+        const vectorLength = vec1.ellipses.length;
+
+        if (vectorLength !== vec2.ellipses.length) return;
+
+        // Mark addition animation playing so main loop doesn't reset prematurely
+        additionPlaying.active = true;
+        additionPlaying.endTime = performance.now() + duration + flashDuration + vectorLength * delayBetweenCubes;
+
+        console.log('[startAdditionAnimation] active tweens before creation:', TWEEN.getAll().length);
+
+        for (let i = 0; i < vectorLength; i++) {
+            const ellipse1 = vec1.ellipses[i];
+            const ellipse2 = vec2.ellipses[i];
+            if (!ellipse1 || !ellipse2) continue;
+
+            // Force matrix updates before calculations
+            vec1.group.updateMatrixWorld(true);
+            vec2.group.updateMatrixWorld(true);
+
+            const targetPosition = new THREE.Vector3();
+            ellipse2.getWorldPosition(targetPosition);
+            const localTarget = ellipse1.parent.worldToLocal(targetPosition.clone());
+
+            // Debug for first cube of first addition run
+            if (i === 0 && !additionPlaying.logged) {
+                const sourceWorldPosition = new THREE.Vector3();
+                ellipse1.getWorldPosition(sourceWorldPosition);
+                console.log(`Debug (i=0):`);
+                console.log(`  ellipse2 (target) world Y: ${targetPosition.y}`);
+                console.log(`  ellipse1 (source) world Y: ${sourceWorldPosition.y}`);
+                console.log(`  ellipse1.parent (branched group) world Y: ${ellipse1.parent.position.y}`);
+                console.log(`  Calculated localTarget.y: ${localTarget.y}`);
+                console.log(`  Initial ellipse1.position.y: ${ellipse1.position.y}`);
+                additionPlaying.logged = true;
+            }
+
+            const moveTween = new TWEEN.Tween(ellipse1.position, true)
+                .to({ y: localTarget.y }, duration)
+                .easing(TWEEN.Easing.Quadratic.InOut)
+                .delay(i * delayBetweenCubes)
+                .onUpdate(() => {
+                    if (i === 0) {
+                        console.log('[MoveTween onUpdate] ellipse1.position.y =', ellipse1.position.y);
+                    }
+                })
+                .onStart(() => {
+                    if (i === 0 && !additionPlaying.tweenLogged) {
+                        console.log('[MoveTween onStart] First tween started. From y=', ellipse1.position.y, 'to', localTarget.y);
+                        additionPlaying.tweenLogged = true;
+                    }
+                })
+                .onComplete(() => {
+                    if (i === 0) console.log('[MoveTween onComplete] First tween completed');
+
+                    // Flash effect on target cube
+                    const originalColor = ellipse2.material.color.clone();
+                    const originalEmissive = ellipse2.material.emissive ? ellipse2.material.emissive.clone() : new THREE.Color();
+                    const originalIntensity = ellipse2.material.emissiveIntensity !== undefined ? ellipse2.material.emissiveIntensity : 0.0;
+
+                    // Set to white for a bright flash (works well with bloom)
+                    ellipse2.material.color.set(0xffffff);
+                    if (ellipse2.material.emissive) {
+                        ellipse2.material.emissive.set(0xffffff);
+                    }
+                    ellipse2.material.emissiveIntensity = 1.0;
+
+                    // Tween on the material itself (dummy target) just for timing
+                    new TWEEN.Tween(ellipse2.material, true)
+                        .to({}, flashDuration)
+                        .onComplete(() => {
+                            // Calculate new summed value & color
+                            const sum = vec1.data[i] + vec2.data[i];
+                            vec2.data[i] = sum;
+                            const newColor = mapValueToColor(sum);
+
+                            // Restore cube material to new color
+                            ellipse2.material.color.copy(newColor);
+                            if (ellipse2.material.emissive) {
+                                ellipse2.material.emissive.copy(newColor);
+                            }
+                            ellipse2.material.emissiveIntensity = originalIntensity;
+
+                            // Hide the source cube after merging
+                            ellipse1.visible = false;
+                        })
+                        .start();
+                });
+
+            moveTween.start();
+            if (i === 0) {
+                console.log("moveTween.start() called for i=0");
+            }
+        }
+
+        console.log('[startAdditionAnimation] active tweens after creation:', TWEEN.getAll().length);
+    }
+
+    function resetVectorAddition(vec1, vec2) {
+        const len = vec1.ellipses.length;
+        for (let i = 0; i < len; i++) {
+            const e1 = vec1.ellipses[i];
+            const e2 = vec2.ellipses[i];
+            if (e1) {
+                e1.visible = true;
+                e1.position.y = 0;
+            }
+            if (e2) {
+                const color = mapValueToColor(vec2.data[i]);
+                e2.material.color.copy(color);
+                e2.material.emissive.copy(color);
+                e2.material.emissiveIntensity = 0.3;
+            }
+        }
+    }
 
     // --- Create and Position Vectors over Slits ---
     const slitSpacing = matrixParams.depth / (matrixParams.numberOfSlits + 1);
@@ -218,6 +356,8 @@ export function initMainScene(canvas) { // Renamed function here
 
         // Use default constructor from VectorVisualization
         const vectorVis = new VectorVisualization(vectorData);
+        // Store normalized data (to keep values near [-1,1]) for addition calculations
+        vectorVis.data = vectorVis.layerNormalize(vectorData);
 
         // Apply initial vector control parameters (including material type now)
         const InitialVectorMaterial = availableMaterials[vectorControlParams.material];
@@ -251,6 +391,34 @@ export function initMainScene(canvas) { // Renamed function here
 
         scene.add(vectorVis.group);
         allVectorVisualizations.push(vectorVis); // Add to array for cleanup
+
+        // --- Create Duplicate Branched Vector ---
+        const branchedVectorVis = new VectorVisualization(vectorData.slice()); // duplicate data
+        branchedVectorVis.data = branchedVectorVis.layerNormalize(vectorData.slice());
+        // Apply same initial material overrides as originals
+        branchedVectorVis.ellipses.forEach((ellipse, idx) => {
+            const origEllipse = vectorVis.ellipses[idx];
+            if (origEllipse && origEllipse.material) {
+                const clonedMat = origEllipse.material.clone();
+                ellipse.material.dispose();
+                ellipse.material = clonedMat;
+            }
+        });
+        // Initial position identical to original
+        branchedVectorVis.group.position.set(0, startY, vectorZPos);
+        scene.add(branchedVectorVis.group);
+        branchedVectorVisualizations.push(branchedVectorVis);
+        additionPlayedFlags.push(false);
+
+        // Trail for duplicate
+        branchedTrailPoints.push([]);
+        const branchedTrailGeometry = new THREE.BufferGeometry();
+        const branchedPositions = new Float32Array(MAX_TRAIL_POINTS * 3);
+        branchedTrailGeometry.setAttribute('position', new THREE.BufferAttribute(branchedPositions, 3));
+        const branchedTrailMaterial = new THREE.LineBasicMaterial({ color: 0x888888 }); // Same color as originals
+        const branchedTrailLine = new THREE.Line(branchedTrailGeometry, branchedTrailMaterial);
+        scene.add(branchedTrailLine);
+        branchedTrailLines.push({ line: branchedTrailLine, geometry: branchedTrailGeometry, material: branchedTrailMaterial });
 
         // --- Create Trail Line for this Vector ---
         allTrailPoints.push([]); // Initialize points array for this trail
@@ -336,6 +504,13 @@ export function initMainScene(canvas) { // Renamed function here
     const clock = new THREE.Clock(); // Clock for animation timing
     let previousY = startY; // Initialize previous Y position tracking
 
+    const additionPlaying = { active: false, endTime: 0, logged: false, tweenLogged: false }; // Global flag to pause reset while addition runs
+
+    // --- Post-Addition Rise Parameters ---
+    const extraRiseDistance = 15; // How far to continue rising after combination
+    const extraRiseDuration = 3;  // Seconds it takes to reach the extra height
+    let extraRiseStartTime = null;
+
     // --- Animation Loop ---
     function animate() {
         requestAnimationFrame(animate);
@@ -391,28 +566,53 @@ export function initMainScene(canvas) { // Renamed function here
 
         controls.update(); // Required if enableDamping is true
 
+        // Update tweens (addition animations) with current time
+        const updated = TWEEN.update();
+        if (additionPlaying.active) {
+            console.log('[animate] TWEEN.update returned', updated, 'active tweens:', TWEEN.getAll().length);
+        }
+
+        // Log position *after* tween update
+        if (additionPlaying.active) {
+            // Log position of the first ellipse of the first vector during the animation
+            if (branchedVectorVisualizations[0] && branchedVectorVisualizations[0].ellipses[0]) {
+                console.log("Animate loop: ellipse[0].position.y = ", branchedVectorVisualizations[0].ellipses[0].position.y);
+            }
+        }
+
         const elapsedTime = clock.getElapsedTime();
-        const animationDuration = 5; // seconds for one full loop (up and down implied by modulo)
-        const loopTime = (elapsedTime % animationDuration) / animationDuration; // Normalized loop time (0 to 1)
+        const animationDuration = 5; // seconds to reach the meeting point once
+        const loopTime = Math.min(elapsedTime / animationDuration, 1); // clamp 0..1, no cycling
 
         // Calculate current Y position using linear interpolation within the loop
         const currentY = startY + loopTime * animationDistance;
 
-        // --- Check for Animation Reset ---
-        const animationReset = currentY < previousY;
-        if (animationReset) {
-            // Clear points for all trails
-            allTrailPoints.forEach(points => points.length = 0);
+        // Mark addition finished when its expected time passes
+        if (additionPlaying.active && performance.now() > additionPlaying.endTime) {
+            additionPlaying.active = false;
         }
 
-        // --- Update Trail Lines ---
+        // If all addition animations have played and finished, start the extra rise (once)
+        if (!additionPlaying.active && extraRiseStartTime === null && additionPlayedFlags.every(f => f)) {
+            extraRiseStartTime = clock.getElapsedTime();
+        }
+
+        // Calculate any extra rise offset based on time since extraRiseStartTime
+        let extraRiseOffset = 0;
+        if (extraRiseStartTime !== null) {
+            const riseElapsed = clock.getElapsedTime() - extraRiseStartTime;
+            const tRise = Math.min(riseElapsed / extraRiseDuration, 1); // 0..1
+            extraRiseOffset = THREE.MathUtils.lerp(0, extraRiseDistance, tRise);
+        }
+
+        // --- Update Trail Lines for Original Vectors ---
         allTrailLines.forEach((trail, index) => {
             const currentPoints = allTrailPoints[index];
-            const vectorZPos = allVectorVisualizations[index].group.position.z; // Get Z for this vector
-            const newPoint = [0, currentY, vectorZPos];
+            const vectorZPos = allVectorVisualizations[index].group.position.z; // Z is constant per vector
+            const currentYPos = allVectorVisualizations[index].group.position.y;
+            const newPoint = [0, currentYPos, vectorZPos];
 
-            // Add new point
-            currentPoints.push(newPoint);
+            if (currentPoints.length < MAX_TRAIL_POINTS) currentPoints.push(newPoint);
 
             // Update geometry attribute
             const positionAttribute = trail.geometry.getAttribute('position');
@@ -422,6 +622,72 @@ export function initMainScene(canvas) { // Renamed function here
 
             trail.geometry.setDrawRange(0, currentPoints.length);
             positionAttribute.needsUpdate = true;
+        });
+
+        // --- Update Branched Vector Positions & Trails ---
+        const t1 = branchConfig.branchStartT;
+        const t2 = t1 + branchConfig.horzDurationT;
+        const t3 = t2 + branchConfig.vertDurationT;
+        const t4 = t3 + branchConfig.leftDurationT;
+
+        // Pre-compute key Y values along original path
+        const yBranch = startY + t1 * animationDistance;
+        const yAboveOriginal = startY + t4 * animationDistance + branchConfig.meetYOffset;
+
+        branchedVectorVisualizations.forEach((bVecVis, index) => {
+            const zPos = bVecVis.group.position.z; // constant Z same as original
+            let xPos = 0;
+            let yPos = currentY; // default follow original
+
+            // First, check if this vector should trigger its addition animation
+            if (!additionPlayedFlags[index] && loopTime >= t4) {
+                startAdditionAnimation(branchedVectorVisualizations[index], allVectorVisualizations[index]);
+                additionPlayedFlags[index] = true;
+            }
+
+            if (additionPlaying.active) {
+                // Keep the branched vector locked in place while addition wave runs
+                xPos = 0;
+                yPos = yAboveOriginal;
+            } else if (loopTime < t1) {
+                // Before branching, follow original
+                xPos = 0;
+                yPos = startY + loopTime * animationDistance;
+            } else if (loopTime >= t1 && loopTime < t2) {
+                // Horizontal move right
+                const localT = (loopTime - t1) / branchConfig.horzDurationT;
+                xPos = THREE.MathUtils.lerp(0, branchConfig.branchX, localT);
+                yPos = yBranch;
+            } else if (loopTime >= t2 && loopTime < t3) {
+                // Vertical move up
+                const localT = (loopTime - t2) / branchConfig.vertDurationT;
+                xPos = branchConfig.branchX;
+                yPos = THREE.MathUtils.lerp(yBranch, yAboveOriginal, localT);
+            } else if (loopTime >= t3 && loopTime < t4) {
+                // Horizontal move left at constant Y
+                const localT = (loopTime - t3) / branchConfig.leftDurationT;
+                xPos = THREE.MathUtils.lerp(branchConfig.branchX, 0, localT);
+                yPos = yAboveOriginal; // Keep Y constant during horizontal return for axis‑aligned motion
+            } else {
+                // After meeting originals (x==0), stay put at the join position
+                xPos = 0;
+                yPos = yAboveOriginal; // Remain stationary until loop reset
+            }
+
+            // Update branched vector position
+            bVecVis.group.position.set(xPos, yPos + extraRiseOffset, zPos);
+
+            // --- Trail for branched ---
+            const bTrail = branchedTrailLines[index];
+            const bPoints = branchedTrailPoints[index];
+            if (bPoints.length < MAX_TRAIL_POINTS) bPoints.push([xPos, yPos, zPos]);
+
+            const bPosAttr = bTrail.geometry.getAttribute('position');
+            for (let j = 0; j < bPoints.length; j++) {
+                bPosAttr.setXYZ(j, bPoints[j][0], bPoints[j][1], bPoints[j][2]);
+            }
+            bTrail.geometry.setDrawRange(0, bPoints.length);
+            bPosAttr.needsUpdate = true;
         });
 
         // --- Matrix Color Animation ---
@@ -463,9 +729,18 @@ export function initMainScene(canvas) { // Renamed function here
             });
         }
 
-        // Update vector positions
+        // Update original vector positions – stop once they reach below branched height
+        const yOriginalStop = yAboveOriginal - branchConfig.meetYOffset;
         allVectorVisualizations.forEach(vectorVis => {
-            vectorVis.group.position.y = currentY;
+            // Allow vertical movement until reaching stop height
+            let baseY;
+            if (currentY < yOriginalStop) {
+                baseY = currentY;
+            } else {
+                baseY = yOriginalStop;
+            }
+
+            vectorVis.group.position.y = baseY + extraRiseOffset;
         });
 
         // Update previous Y for next frame
@@ -493,7 +768,13 @@ export function initMainScene(canvas) { // Renamed function here
 
         // Dispose geometries and materials
         allVectorVisualizations.forEach(vec => vec.dispose()); // Dispose all vectors (handles ellipse materials/geometries)
-        allTrailLines.forEach(trail => { // Dispose trails
+        allTrailLines.forEach(trail => { // Dispose original trails
+            trail.geometry.dispose();
+            trail.material.dispose();
+        });
+
+        branchedVectorVisualizations.forEach(vec => vec.dispose());
+        branchedTrailLines.forEach(trail => {
             trail.geometry.dispose();
             trail.material.dispose();
         });
