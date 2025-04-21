@@ -82,8 +82,15 @@ export function initMainScene(canvas) { // Renamed function here
         horzDurationT: 0.20,  // Fraction of the loop spent moving right
         vertDurationT: 0.30,  // Fraction spent moving up
         leftDurationT: 0.25,  // Fraction spent moving left to meet originals
-        branchX: 45,          // How far to move to the right (in world units) – move further to avoid the matrix
+        branchX: 90,          // How far to move to the right (in world units) – move further to avoid the matrix
         meetYOffset: 5        // Final Y offset above the original vector path when they meet
+    };
+
+    // --- New simple two‑matrix merge configuration (branching temporarily disabled) ---
+    const mergeConfig = {
+        rightX: branchConfig.branchX, // X position of right‑hand matrix and its vectors
+        vertDurationT: 0.7,           // Portion of the timeline the vectors move vertically
+        moveLeftDurationT: 0.3        // Portion of timeline they slide left to merge
     };
 
     // Material Definitions (Shared by Matrix & Vectors)
@@ -114,57 +121,95 @@ export function initMainScene(canvas) { // Renamed function here
         material: defaultMatrixMaterialName,
         color: 0xaaaaaa, // Default color
     };
-    const matrixVis = new WeightMatrixVisualization(null, new THREE.Vector3(0, 0, 0), matrixParams.width, matrixParams.height, matrixParams.depth, matrixParams.topWidthFactor, matrixParams.cornerRadius, matrixParams.numberOfSlits, matrixParams.slitWidth, matrixParams.slitDepthFactor, matrixParams.slitWidthFactor);
+    // --- Weight Matrices ---
+    // Original matrix in the centre (for the original vectors)
+    const matrixVis = new WeightMatrixVisualization(
+        null,
+        new THREE.Vector3(0, 0, 0),
+        matrixParams.width,
+        matrixParams.height,
+        matrixParams.depth,
+        matrixParams.topWidthFactor,
+        matrixParams.cornerRadius,
+        matrixParams.numberOfSlits,
+        matrixParams.slitWidth,
+        matrixParams.slitDepthFactor,
+        matrixParams.slitWidthFactor
+    );
+
+    // Additional matrix that sits along the branched path so the duplicate vectors
+    // also pass through a weight matrix.  It shares the *same* parameters so that
+    // GUI controls affect both identically.  We simply offset it in X so that the
+    // two matrices do not intersect.
+    const branchedMatrixVis = new WeightMatrixVisualization(
+        null,
+        new THREE.Vector3(branchConfig.branchX, 0, 0), // position it directly on the branched path
+        matrixParams.width,
+        matrixParams.height,
+        matrixParams.depth,
+        matrixParams.topWidthFactor,
+        matrixParams.cornerRadius,
+        matrixParams.numberOfSlits,
+        matrixParams.slitWidth,
+        matrixParams.slitDepthFactor,
+        matrixParams.slitWidthFactor
+    );
+
+    // Keep both matrices in a single collection for easy iteration later
+    const allMatrixVisualizations = [matrixVis, branchedMatrixVis];
 
     // Function to update matrix material
     function updateMatrixMaterial() {
-        if (!matrixVis.group) return;
+        // Iterate over BOTH matrices so GUI changes affect them equally
+        allMatrixVisualizations.forEach(matVis => {
+            if (!matVis.group) return;
 
-        // Find the first mesh to get its old material (for disposal)
-        let oldMaterial = null;
-        matrixVis.group.children.forEach(child => {
-            if (child instanceof THREE.Mesh && child.material && !oldMaterial) {
-                oldMaterial = child.material;
+            // Find the first mesh to get its old material (for disposal)
+            let oldMaterial = null;
+            matVis.group.children.forEach(child => {
+                if (child instanceof THREE.Mesh && child.material && !oldMaterial) {
+                    oldMaterial = child.material;
+                }
+            });
+
+            const MaterialConstructor = availableMaterials[matrixParams.material];
+            if (!MaterialConstructor) {
+                console.error('Invalid material selected:', matrixParams.material);
+                return;
+            }
+
+            const newMaterial = new MaterialConstructor({
+                color: matrixParams.color,
+                transparent: true, // Keep transparent for opacity control
+                opacity: matrixParams.opacity,
+            });
+
+            // Apply the new material to every mesh child of the current matrix
+            matVis.group.children.forEach(child => {
+                if (child instanceof THREE.Mesh) {
+                    child.material = newMaterial;
+                    child.material.needsUpdate = true;
+                }
+            });
+
+            if (oldMaterial && oldMaterial !== newMaterial && typeof oldMaterial.dispose === 'function') {
+                oldMaterial.dispose();
             }
         });
-
-        const MaterialConstructor = availableMaterials[matrixParams.material];
-        if (!MaterialConstructor) {
-            console.error('Invalid material selected:', matrixParams.material);
-            return;
-        }
-
-        const newMaterial = new MaterialConstructor({
-            color: matrixParams.color,
-            transparent: true, // Keep transparent for opacity control
-            opacity: matrixParams.opacity,
-            // Add specific properties for certain materials if needed
-            // e.g., side: THREE.DoubleSide for MeshBasicMaterial if required
-        });
-
-        // Apply the new material to all mesh children
-        matrixVis.group.children.forEach(child => {
-            if (child instanceof THREE.Mesh) {
-                child.material = newMaterial;
-                child.material.needsUpdate = true; // Ensure material update is flagged
-            }
-        });
-
-        // Dispose the old material (only once)
-        if (oldMaterial && oldMaterial !== newMaterial && typeof oldMaterial.dispose === 'function') {
-            oldMaterial.dispose();
-        }
     }
 
-    // Initial material setup
+    // Initial material setup (applies to both matrices)
     updateMatrixMaterial();
-    scene.add(matrixVis.group);
 
+    // Add both matrices to the scene
+    scene.add(matrixVis.group);
+    scene.add(branchedMatrixVis.group);
 
     // Define colors for animation (kept for potential future use)
     const brightYellow = new THREE.Color(0xFFFF00);
     const darkYellow = new THREE.Color(0xCCA000);
-    const matrixCurrentColor = new THREE.Color(); // Color object to reuse for lerping
+    const matrixCurrentColor = new THREE.Color(); // Color object for the central matrix
+    const matrixCurrentColor2 = new THREE.Color(); // Color object for the branched‑path matrix
     const baseMatrixColor = new THREE.Color(); // To store the GUI base color
 
     // --- Vector Control Parameters ---
@@ -405,8 +450,8 @@ export function initMainScene(canvas) { // Renamed function here
                 ellipse.material = clonedMat;
             }
         });
-        // Initial position identical to original
-        branchedVectorVis.group.position.set(0, startY, vectorZPos);
+        // Start the right‑side vectors directly under their own matrix at x = branchX
+        branchedVectorVis.group.position.set(branchConfig.branchX, startY, vectorZPos);
         scene.add(branchedVectorVis.group);
         branchedVectorVisualizations.push(branchedVectorVis);
         additionPlayedFlags.push(false);
@@ -419,8 +464,8 @@ export function initMainScene(canvas) { // Renamed function here
         const branchedTrailMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.05 }); // Softer white
         const branchedTrailLine = new THREE.Line(branchedTrailGeometry, branchedTrailMaterial);
         scene.add(branchedTrailLine);
-        // Seed branched trail with first point so it is always visible
-        const initialBPos = [0, startY, vectorZPos];
+        // Seed branched trail starting directly beneath the right‑hand matrix
+        const initialBPos = [branchConfig.branchX, startY, vectorZPos];
         branchedTrailPoints[i].push(initialBPos);
         branchedTrailGeometry.getAttribute('position').setXYZ(0, ...initialBPos);
         branchedTrailGeometry.setDrawRange(0, 1);
@@ -470,12 +515,17 @@ export function initMainScene(canvas) { // Renamed function here
     matrixFolder.add(matrixParams, 'material', Object.keys(availableMaterials)).name('Material').onChange(updateMatrixMaterial);
     matrixFolder.addColor(matrixParams, 'color').name('Color').onChange(updateMatrixMaterial);
     matrixFolder.add(matrixParams, 'numberOfSlits', 0, 20, 1).name('Number of Slits').onChange(() => { /* Complex update needed */ });
-    matrixFolder.add(matrixParams, 'slitWidth', 0.1, 5.0, 0.05).name('Slit Width').onChange(() => matrixVis.updateGeometry(matrixParams));
-    matrixFolder.add(matrixParams, 'slitDepthFactor', 0, 1, 0.01).name('Slit Depth Factor').onChange(() => matrixVis.updateGeometry(matrixParams));
-    matrixFolder.add(matrixParams, 'slitWidthFactor', 0.1, 1, 0.01).name('Slit Width Factor').onChange(() => matrixVis.updateGeometry(matrixParams));
-    matrixFolder.add(matrixParams, 'width', 1, 100, 0.5).name('Base Width').onChange(() => matrixVis.updateGeometry(matrixParams));
-    matrixFolder.add(matrixParams, 'topWidthFactor', 0.1, 2, 0.01).name('Top Width Factor').onChange(() => matrixVis.updateGeometry(matrixParams));
-    matrixFolder.add(matrixParams, 'cornerRadius', 0, 5, 0.05).name('Corner Radius').onChange(() => matrixVis.updateGeometry(matrixParams));
+    const updateBothMatrixGeometry = () => {
+        matrixVis.updateGeometry(matrixParams);
+        branchedMatrixVis.updateGeometry(matrixParams);
+    };
+
+    matrixFolder.add(matrixParams, 'slitWidth', 0.1, 5.0, 0.05).name('Slit Width').onChange(updateBothMatrixGeometry);
+    matrixFolder.add(matrixParams, 'slitDepthFactor', 0, 1, 0.01).name('Slit Depth Factor').onChange(updateBothMatrixGeometry);
+    matrixFolder.add(matrixParams, 'slitWidthFactor', 0.1, 1, 0.01).name('Slit Width Factor').onChange(updateBothMatrixGeometry);
+    matrixFolder.add(matrixParams, 'width', 1, 100, 0.5).name('Base Width').onChange(updateBothMatrixGeometry);
+    matrixFolder.add(matrixParams, 'topWidthFactor', 0.1, 2, 0.01).name('Top Width Factor').onChange(updateBothMatrixGeometry);
+    matrixFolder.add(matrixParams, 'cornerRadius', 0, 5, 0.05).name('Corner Radius').onChange(updateBothMatrixGeometry);
     matrixFolder.add(matrixParams, 'depth', 5, 100, 1).name('Depth').onChange(() => { /* Complex update needed */ });
     matrixFolder.add(matrixParams, 'opacity', 0, 1, 0.01).name('Opacity').onChange((value) => {
         matrixParams.opacity = value; // Store value
@@ -597,7 +647,7 @@ export function initMainScene(canvas) { // Renamed function here
 
         const elapsedTime = clock.getElapsedTime();
         const animationDuration = 5; // seconds to reach the meeting point once
-        const loopTime = Math.min(elapsedTime / animationDuration, 1); // clamp 0..1, no cycling
+        const loopTime = elapsedTime / animationDuration; // allow to grow beyond 1 so vectors keep moving
 
         // Calculate current Y position using linear interpolation within the loop
         const currentY = startY + loopTime * animationDistance;
@@ -635,7 +685,13 @@ export function initMainScene(canvas) { // Renamed function here
 
             const newPoint = [0, trailY, vectorZPos];
 
-            if (currentPoints.length < MAX_TRAIL_POINTS) currentPoints.push(newPoint);
+            // Only record if position changed to avoid duplicate overlapping segments
+            if (currentPoints.length === 0 ||
+                newPoint[0] !== currentPoints[currentPoints.length - 1][0] ||
+                newPoint[1] !== currentPoints[currentPoints.length - 1][1] ||
+                newPoint[2] !== currentPoints[currentPoints.length - 1][2]) {
+                if (currentPoints.length < MAX_TRAIL_POINTS) currentPoints.push(newPoint);
+            }
 
             // Update geometry attribute
             const positionAttribute = trail.geometry.getAttribute('position');
@@ -649,72 +705,66 @@ export function initMainScene(canvas) { // Renamed function here
             trail.geometry.computeBoundingSphere();
         });
 
-        // --- Update Branched Vector Positions & Trails ---
-        const t1 = branchConfig.branchStartT;
-        const t2 = t1 + branchConfig.horzDurationT;
-        const t3 = t2 + branchConfig.vertDurationT;
-        const t4 = t3 + branchConfig.leftDurationT;
+        /* ==============================================================
+         *  BRANCHING PATH DISABLED – Using simple two‑matrix merge flow
+         *  ------------------------------------------------------------
+         *  1. Both vector sets (left & right) ascend vertically through
+         *     their respective matrices until `mergeConfig.vertDurationT`.
+         *  2. Right‑hand vectors then slide horizontally to X = 0 over
+         *     `mergeConfig.moveLeftDurationT` of the timeline, lining up
+         *     with the left vectors.
+         *  3. When the slide finishes we trigger the addition animation
+         *     (right → left).
+         * ============================================================*/
 
-        // Pre-compute key Y values along original path
-        const yBranch = startY + t1 * animationDistance;
-        const yAboveOriginal = startY + t4 * animationDistance + branchConfig.meetYOffset;
+        const vertPhaseT   = mergeConfig.vertDurationT;
+        const slidePhaseT  = mergeConfig.moveLeftDurationT;
+        const yEnd         = startY + animationDistance; // final vertical height (just above matrices)
 
         branchedVectorVisualizations.forEach((bVecVis, index) => {
-            const zPos = bVecVis.group.position.z; // constant Z same as original
-            let xPos = 0;
-            let yPos = currentY; // default follow original
+            const zPos = bVecVis.group.position.z;
 
-            // First, check if this vector should trigger its addition animation
-            if (!additionPlayedFlags[index] && loopTime >= t4) {
-                // Reverse the order so units move **from** the bottom/original vectors **to** the branched/top vectors
-                startAdditionAnimation(allVectorVisualizations[index], bVecVis);
-                additionPlayedFlags[index] = true;
-            }
+            let xPos   = mergeConfig.rightX;
+            let yPos   = yEnd; // default final height
 
-            if (additionPlaying.active) {
-                // Keep the branched vector locked in place while addition wave runs
-                xPos = 0;
-                yPos = yAboveOriginal;
-            } else if (loopTime < t1) {
-                // Before branching, follow original
-                xPos = 0;
-                yPos = startY + loopTime * animationDistance;
-            } else if (loopTime >= t1 && loopTime < t2) {
-                // Horizontal move right
-                const localT = (loopTime - t1) / branchConfig.horzDurationT;
-                xPos = THREE.MathUtils.lerp(0, branchConfig.branchX, localT);
-                yPos = yBranch;
-            } else if (loopTime >= t2 && loopTime < t3) {
-                // Vertical move up
-                const localT = (loopTime - t2) / branchConfig.vertDurationT;
-                xPos = branchConfig.branchX;
-                yPos = THREE.MathUtils.lerp(yBranch, yAboveOriginal, localT);
-            } else if (loopTime >= t3 && loopTime < t4) {
-                // Horizontal move left at constant Y
-                const localT = (loopTime - t3) / branchConfig.leftDurationT;
-                xPos = THREE.MathUtils.lerp(branchConfig.branchX, 0, localT);
-                yPos = yAboveOriginal; // Keep Y constant during horizontal return for axis-aligned motion
+            if (loopTime < vertPhaseT) {
+                // Ascend vertically only
+                const tVert = loopTime / vertPhaseT;
+                yPos = THREE.MathUtils.lerp(startY, yEnd, tVert);
+                xPos = mergeConfig.rightX;
             } else {
-                // After meeting originals (x==0), stay put at the join position
-                xPos = 0;
-                yPos = yAboveOriginal; // Remain stationary until loop reset
+                // Slide horizontally towards centre
+                const tSlide = Math.min((loopTime - vertPhaseT) / slidePhaseT, 1);
+                yPos = yEnd;
+                xPos = THREE.MathUtils.lerp(mergeConfig.rightX, 0, tSlide);
+
+                // Trigger addition once (when slide finishes)
+                if (!additionPlayedFlags[index] && tSlide >= 1) {
+                    // Move units FROM the lower/left vector set TO the upper/right one
+                    startAdditionAnimation(allVectorVisualizations[index], bVecVis); // bottom -> top
+                    additionPlayedFlags[index] = true;
+                }
             }
 
-            // Update branched vector position
+            // Apply extra rise offset so merged vectors continue moving up
             bVecVis.group.position.set(xPos, yPos + extraRiseOffset, zPos);
 
-            // --- Trail for branched ---
+            // --- Simple trail update for branched vectors ---
             const bTrail = branchedTrailLines[index];
             const bPoints = branchedTrailPoints[index];
-            if (bPoints.length < MAX_TRAIL_POINTS) bPoints.push([xPos, yPos, zPos]);
-
+            const bNew = [xPos, yPos + extraRiseOffset, zPos];
+            if (bPoints.length === 0 ||
+                bNew[0] !== bPoints[bPoints.length - 1][0] ||
+                bNew[1] !== bPoints[bPoints.length - 1][1] ||
+                bNew[2] !== bPoints[bPoints.length - 1][2]) {
+                if (bPoints.length < MAX_TRAIL_POINTS) bPoints.push(bNew);
+            }
             const bPosAttr = bTrail.geometry.getAttribute('position');
             for (let j = 0; j < bPoints.length; j++) {
                 bPosAttr.setXYZ(j, bPoints[j][0], bPoints[j][1], bPoints[j][2]);
             }
             bTrail.geometry.setDrawRange(0, bPoints.length);
             bPosAttr.needsUpdate = true;
-            // Update bounding sphere for branched trail as well
             bTrail.geometry.computeBoundingSphere();
         });
 
@@ -746,19 +796,36 @@ export function initMainScene(canvas) { // Renamed function here
                 matrixCurrentColor.copy(darkYellow);
             }
 
-            // Apply the calculated color to all matrix mesh materials
+            // Apply the calculated color to all mesh materials of BOTH matrices
             matrixVis.group.children.forEach(child => {
-                if (child instanceof THREE.Mesh && child.material) {
-                     // Check if material has a color property before setting
-                    if (child.material.color) {
-                        child.material.color.copy(matrixCurrentColor);
-                    }
+                if (child instanceof THREE.Mesh && child.material && child.material.color) {
+                    child.material.color.copy(matrixCurrentColor);
+                }
+            });
+
+            // --- Colour animation for the BRANCHED matrix based on the first branched vector's Y ---
+            let branchedVectorY = branchedVectorVisualizations.length > 0 ? branchedVectorVisualizations[0].group.position.y : startY;
+            if (branchedVectorY < matrixBottomY) {
+                matrixCurrentColor2.copy(outsideColor);
+            } else if (branchedVectorY >= matrixBottomY && branchedVectorY < matrixMidY) {
+                const t2 = (branchedVectorY - matrixBottomY) / (matrixMidY - matrixBottomY);
+                matrixCurrentColor2.lerpColors(outsideColor, brightYellow, t2);
+            } else if (branchedVectorY >= matrixMidY && branchedVectorY < matrixTopY) {
+                const t2 = (branchedVectorY - matrixMidY) / (matrixTopY - matrixMidY);
+                matrixCurrentColor2.lerpColors(brightYellow, darkYellow, t2);
+            } else {
+                matrixCurrentColor2.copy(darkYellow);
+            }
+
+            branchedMatrixVis.group.children.forEach(child => {
+                if (child instanceof THREE.Mesh && child.material && child.material.color) {
+                    child.material.color.copy(matrixCurrentColor2);
                 }
             });
         }
 
         // Update original vector positions – stop once they reach below branched height
-        const yOriginalStop = yAboveOriginal - branchConfig.meetYOffset;
+        const yOriginalStop = yEnd - branchConfig.meetYOffset;
         allVectorVisualizations.forEach(vectorVis => {
             // Allow vertical movement until reaching stop height
             let baseY;
@@ -807,21 +874,22 @@ export function initMainScene(canvas) { // Renamed function here
             trail.material.dispose();
         });
 
-        // Dispose the final matrix material (find it on one of the meshes)
-        let finalMatrixMaterial = null;
-        if (matrixVis.group) {
-            matrixVis.group.children.forEach(child => {
-                if (child instanceof THREE.Mesh && child.material && !finalMatrixMaterial) {
-                    finalMatrixMaterial = child.material;
-                }
-            });
-        }
-        if (finalMatrixMaterial && typeof finalMatrixMaterial.dispose === 'function') {
-            finalMatrixMaterial.dispose();
-        }
+        // Dispose materials and geometries for both matrices
+        allMatrixVisualizations.forEach(matVis => {
+            let matMaterial = null;
+            if (matVis.group) {
+                matVis.group.children.forEach(child => {
+                    if (child instanceof THREE.Mesh && child.material && !matMaterial) {
+                        matMaterial = child.material;
+                    }
+                });
+            }
+            if (matMaterial && typeof matMaterial.dispose === 'function') {
+                matMaterial.dispose();
+            }
+            matVis._clearMesh();
+        });
 
-        matrixVis._clearMesh(); // Use existing clear method which handles matrix geometries
-        // Add disposal for other objects if needed
         renderer.dispose();
     };
-} 
+}
