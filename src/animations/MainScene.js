@@ -104,7 +104,7 @@ export function initMainScene(canvas) { // Renamed function here
         height: 8, // Increased thickness
         depth: 72,
         topWidthFactor: 0.76,
-        cornerRadius: 0.1, // Keeping previous default, adjust if needed
+        cornerRadius: 2, // Default corner radius
         numberOfSlits: 5,
         slitWidth: 2.0, // Increased slit width
         slitDepthFactor: 1.0,
@@ -415,7 +415,7 @@ export function initMainScene(canvas) { // Renamed function here
         const branchedTrailGeometry = new THREE.BufferGeometry();
         const branchedPositions = new Float32Array(MAX_TRAIL_POINTS * 3);
         branchedTrailGeometry.setAttribute('position', new THREE.BufferAttribute(branchedPositions, 3));
-        const branchedTrailMaterial = new THREE.LineBasicMaterial({ color: 0x888888 }); // Same color as originals
+        const branchedTrailMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.05 }); // Softer white
         const branchedTrailLine = new THREE.Line(branchedTrailGeometry, branchedTrailMaterial);
         scene.add(branchedTrailLine);
         branchedTrailLines.push({ line: branchedTrailLine, geometry: branchedTrailGeometry, material: branchedTrailMaterial });
@@ -427,14 +427,15 @@ export function initMainScene(canvas) { // Renamed function here
         const positions = new Float32Array(MAX_TRAIL_POINTS * 3);
         trailGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 
-        const trailMaterial = new THREE.LineBasicMaterial({ color: 0x888888 }); // Gray color
+        const trailMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.05 }); // Softer white
         const trailLine = new THREE.Line(trailGeometry, trailMaterial);
         scene.add(trailLine);
         allTrailLines.push({ line: trailLine, geometry: trailGeometry, material: trailMaterial });
     }
 
     // --- GUI ---
-    const gui = new GUI();
+    const gui = new GUI({ closeFolders: true });
+    gui.close();
 
     // Lighting Folder
     const lightFolder = gui.addFolder('Lighting');
@@ -467,7 +468,7 @@ export function initMainScene(canvas) { // Renamed function here
         matrixParams.opacity = value; // Store value
         updateMatrixMaterial(); // Recreate material with new opacity
     });
-    matrixFolder.open();
+    // matrixFolder.open(); // Keep closed by default
 
     // Vectors Folder
     const vectorFolder = gui.addFolder('Vectors');
@@ -520,6 +521,8 @@ export function initMainScene(canvas) { // Renamed function here
         camera.getWorldDirection(cameraRight); // Get forward direction first
         cameraRight.cross(camera.up).normalize(); // Calculate right vector
         const cameraUp = new THREE.Vector3().copy(camera.up); // Use world up for panning usually
+        const cameraForward = new THREE.Vector3(); // Vector to store forward direction
+        camera.getWorldDirection(cameraForward); // Get the camera's forward direction
 
         // WASD for Panning (Move camera and target together)
         if (keysPressed['w']) {
@@ -543,13 +546,13 @@ export function initMainScene(canvas) { // Renamed function here
             controls.target.add(panOffset);
         }
 
-        // Arrow Up/Down for Tilting (Pitch - Adjusting OrbitControls target vertically)
+        // Arrow Up/Down for Rotating View Angle (Adjusting OrbitControls target vertically)
         if (keysPressed['ArrowUp']) {
-            const targetOffset = cameraUp.clone().multiplyScalar(rotateSpeed * 10); // Adjust target up
+            const targetOffset = cameraUp.clone().multiplyScalar(rotateSpeed * 10); // Tilt view upward
             controls.target.add(targetOffset);
         }
         if (keysPressed['ArrowDown']) {
-            const targetOffset = cameraUp.clone().multiplyScalar(-rotateSpeed * 10); // Adjust target down
+            const targetOffset = cameraUp.clone().multiplyScalar(-rotateSpeed * 10); // Tilt view downward
             controls.target.add(targetOffset);
         }
 
@@ -562,7 +565,6 @@ export function initMainScene(canvas) { // Renamed function here
             const targetOffset = cameraRight.clone().multiplyScalar(rotateSpeed * 10); // Adjust target right
             controls.target.add(targetOffset);
         }
-
 
         controls.update(); // Required if enableDamping is true
 
@@ -609,8 +611,16 @@ export function initMainScene(canvas) { // Renamed function here
         allTrailLines.forEach((trail, index) => {
             const currentPoints = allTrailPoints[index];
             const vectorZPos = allVectorVisualizations[index].group.position.z; // Z is constant per vector
-            const currentYPos = allVectorVisualizations[index].group.position.y;
-            const newPoint = [0, currentYPos, vectorZPos];
+            let trailY = allVectorVisualizations[index].group.position.y;
+
+            // After the addition has played for this vector, extend its trail so it meets
+            // the branched vector's trail at the rendez‑vous height (computed locally)
+            if (additionPlayedFlags[index]) {
+                const yMeet = startY + (branchConfig.branchStartT + branchConfig.horzDurationT + branchConfig.vertDurationT + branchConfig.leftDurationT) * animationDistance + branchConfig.meetYOffset;
+                trailY = yMeet + extraRiseOffset;
+            }
+
+            const newPoint = [0, trailY, vectorZPos];
 
             if (currentPoints.length < MAX_TRAIL_POINTS) currentPoints.push(newPoint);
 
@@ -622,6 +632,8 @@ export function initMainScene(canvas) { // Renamed function here
 
             trail.geometry.setDrawRange(0, currentPoints.length);
             positionAttribute.needsUpdate = true;
+            // Recompute bounding sphere so correct frustum‑culling as the trail grows
+            trail.geometry.computeBoundingSphere();
         });
 
         // --- Update Branched Vector Positions & Trails ---
@@ -641,7 +653,8 @@ export function initMainScene(canvas) { // Renamed function here
 
             // First, check if this vector should trigger its addition animation
             if (!additionPlayedFlags[index] && loopTime >= t4) {
-                startAdditionAnimation(branchedVectorVisualizations[index], allVectorVisualizations[index]);
+                // Reverse the order so units move **from** the bottom/original vectors **to** the branched/top vectors
+                startAdditionAnimation(allVectorVisualizations[index], bVecVis);
                 additionPlayedFlags[index] = true;
             }
 
@@ -667,7 +680,7 @@ export function initMainScene(canvas) { // Renamed function here
                 // Horizontal move left at constant Y
                 const localT = (loopTime - t3) / branchConfig.leftDurationT;
                 xPos = THREE.MathUtils.lerp(branchConfig.branchX, 0, localT);
-                yPos = yAboveOriginal; // Keep Y constant during horizontal return for axis‑aligned motion
+                yPos = yAboveOriginal; // Keep Y constant during horizontal return for axis-aligned motion
             } else {
                 // After meeting originals (x==0), stay put at the join position
                 xPos = 0;
@@ -688,6 +701,8 @@ export function initMainScene(canvas) { // Renamed function here
             }
             bTrail.geometry.setDrawRange(0, bPoints.length);
             bPosAttr.needsUpdate = true;
+            // Update bounding sphere for branched trail as well
+            bTrail.geometry.computeBoundingSphere();
         });
 
         // --- Matrix Color Animation ---
