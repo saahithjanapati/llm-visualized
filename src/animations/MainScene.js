@@ -18,7 +18,7 @@ export function initMainScene(canvas) { // Renamed function here
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x111111); // Dark background
 
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 3000);
     camera.position.set(0, 10, 25); // Position camera to view both objects
 
     const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
@@ -54,6 +54,7 @@ export function initMainScene(canvas) { // Renamed function here
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
+    controls.maxDistance = 2500; // prevent zooming beyond far plane
 
     // --- Keyboard Controls State ---
     const keysPressed = {};
@@ -418,6 +419,12 @@ export function initMainScene(canvas) { // Renamed function here
         const branchedTrailMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.05 }); // Softer white
         const branchedTrailLine = new THREE.Line(branchedTrailGeometry, branchedTrailMaterial);
         scene.add(branchedTrailLine);
+        // Seed branched trail with first point so it is always visible
+        const initialBPos = [0, startY, vectorZPos];
+        branchedTrailPoints[i].push(initialBPos);
+        branchedTrailGeometry.getAttribute('position').setXYZ(0, ...initialBPos);
+        branchedTrailGeometry.setDrawRange(0, 1);
+        branchedTrailGeometry.computeBoundingSphere();
         branchedTrailLines.push({ line: branchedTrailLine, geometry: branchedTrailGeometry, material: branchedTrailMaterial });
 
         // --- Create Trail Line for this Vector ---
@@ -430,6 +437,12 @@ export function initMainScene(canvas) { // Renamed function here
         const trailMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.05 }); // Softer white
         const trailLine = new THREE.Line(trailGeometry, trailMaterial);
         scene.add(trailLine);
+        // Seed original trail with first point as well
+        const initialPos = [0, startY, vectorZPos];
+        allTrailPoints[i].push(initialPos);
+        trailGeometry.getAttribute('position').setXYZ(0, ...initialPos);
+        trailGeometry.setDrawRange(0, 1);
+        trailGeometry.computeBoundingSphere();
         allTrailLines.push({ line: trailLine, geometry: trailGeometry, material: trailMaterial });
     }
 
