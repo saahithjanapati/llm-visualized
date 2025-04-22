@@ -76,6 +76,18 @@ export function initMainScene(canvas) { // Renamed function here
     const branchedTrailPoints = [];
     const additionPlayedFlags = [];
     const originalTrailFrozenFlags = []; // Flags to stop updating original trails once merged
+    // Smooth trail extension state tracking
+    const trailExtendActive = [];
+    const trailExtendStartTimes = [];
+    const trailExtendStartYs = [];
+    const trailExtendTargetYs = [];
+    // Calculate total duration of addition animation for trail sync
+    const additionDuration = 400; // ms from startAdditionAnimation
+    const additionFlashDuration = 80; // ms from startAdditionAnimation
+    const additionDelayBetweenCubes = 15; // ms from startAdditionAnimation
+    const additionVectorLength = VECTOR_LENGTH; // Ensure this matches data length
+    const totalAdditionDuration = additionDuration + additionFlashDuration + (additionVectorLength - 1) * additionDelayBetweenCubes;
+    const trailExtendDuration = totalAdditionDuration; // sync trail extension with addition animation
 
     // Configuration for the duplicate vector path (all durations are expressed as fraction of the full loop 0..1)
     const branchConfig = {
@@ -475,6 +487,10 @@ export function initMainScene(canvas) { // Renamed function here
 
         // Initialize frozen flag for original trail
         originalTrailFrozenFlags.push(false);
+        trailExtendActive.push(false);
+        trailExtendStartTimes.push(0);
+        trailExtendStartYs.push(startY);
+        trailExtendTargetYs.push(startY);
 
         // --- Create Trail Line for this Vector ---
         allTrailPoints.push([]); // Initialize points array for this trail
@@ -678,19 +694,37 @@ export function initMainScene(canvas) { // Renamed function here
         allTrailLines.forEach((trail, index) => {
             const currentPoints = allTrailPoints[index];
             const vectorZPos = allVectorVisualizations[index].group.position.z; // Z is constant per vector
-            // Determine Y position based on whether trail is frozen (post-merge)
+            // Determine Y position based on state (normal, extending, frozen)
             let trailY;
             if (originalTrailFrozenFlags[index]) {
-                // Once frozen, align exactly with branched vector's Y (ensures no offset)
+                // After freeze, always follow branched vector
                 trailY = branchedVectorVisualizations[index].group.position.y;
+            } else if (trailExtendActive[index]) {
+                const now = performance.now();
+                const tExt = Math.min((now - trailExtendStartTimes[index]) / trailExtendDuration, 1);
+                // Lerp from the start Y to the target Y
+                trailY = THREE.MathUtils.lerp(trailExtendStartYs[index], trailExtendTargetYs[index], tExt);
+
+                // If finished, mark as frozen to stop further growth and align tips
+                if (tExt >= 1) {
+                    trailY = trailExtendTargetYs[index];
+                    trailExtendActive[index] = false;
+                    originalTrailFrozenFlags[index] = true;
+                }
             } else {
+                // Normal phase – follow original vector position
                 trailY = allVectorVisualizations[index].group.position.y;
             }
 
             const newPoint = [0, trailY, vectorZPos];
 
-            // Only record new point if trail still accepting updates
-            if (!originalTrailFrozenFlags[index]) {
+            if (originalTrailFrozenFlags[index]) {
+                // Just update the very last point so the tip keeps following the merged path
+                if (currentPoints.length > 0) {
+                    currentPoints[currentPoints.length - 1][1] = trailY;
+                }
+            } else {
+                // Record new point while trail is still growing
                 if (currentPoints.length === 0 ||
                     newPoint[0] !== currentPoints[currentPoints.length - 1][0] ||
                     newPoint[1] !== currentPoints[currentPoints.length - 1][1] ||
@@ -749,22 +783,12 @@ export function initMainScene(canvas) { // Renamed function here
                     // Move units FROM the lower/left vector set TO the upper/right one
                     startAdditionAnimation(allVectorVisualizations[index], bVecVis); // bottom -> top
                     additionPlayedFlags[index] = true;
-                    originalTrailFrozenFlags[index] = true; // freeze original trail update beyond this point
 
-                    /* Ensure original trail extends exactly to the meeting point so there is no visible gap */
-                    const meetY = yPos + extraRiseOffset;
-                    const oPoints = allTrailPoints[index];
-                    if (oPoints.length === 0 ||
-                        meetY !== oPoints[oPoints.length - 1][1]) {
-                        if (oPoints.length < MAX_TRAIL_POINTS) oPoints.push([0, meetY, zPos]);
-                        const oTrail = allTrailLines[index];
-                        const oAttr = oTrail.geometry.getAttribute('position');
-                        const len = oPoints.length;
-                        oAttr.setXYZ(len - 1, 0, meetY, zPos);
-                        oTrail.geometry.setDrawRange(0, len);
-                        oAttr.needsUpdate = true;
-                        oTrail.geometry.computeBoundingSphere();
-                    }
+                    // Initialize smooth trail extension parameters (grow original trail during addition)
+                    trailExtendActive[index] = true;
+                    trailExtendStartTimes[index] = performance.now();
+                    trailExtendStartYs[index] = allVectorVisualizations[index].group.position.y + extraRiseOffset; // Current original position
+                    trailExtendTargetYs[index] = yPos + extraRiseOffset; // Meeting point
                 }
             }
 
