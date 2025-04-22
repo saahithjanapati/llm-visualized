@@ -75,6 +75,7 @@ export function initMainScene(canvas) { // Renamed function here
     const branchedTrailLines = [];
     const branchedTrailPoints = [];
     const additionPlayedFlags = [];
+    const originalTrailFrozenFlags = []; // Flags to stop updating original trails once merged
 
     // Configuration for the duplicate vector path (all durations are expressed as fraction of the full loop 0..1)
     const branchConfig = {
@@ -472,6 +473,9 @@ export function initMainScene(canvas) { // Renamed function here
         branchedTrailGeometry.computeBoundingSphere();
         branchedTrailLines.push({ line: branchedTrailLine, geometry: branchedTrailGeometry, material: branchedTrailMaterial });
 
+        // Initialize frozen flag for original trail
+        originalTrailFrozenFlags.push(false);
+
         // --- Create Trail Line for this Vector ---
         allTrailPoints.push([]); // Initialize points array for this trail
         const trailGeometry = new THREE.BufferGeometry();
@@ -674,23 +678,25 @@ export function initMainScene(canvas) { // Renamed function here
         allTrailLines.forEach((trail, index) => {
             const currentPoints = allTrailPoints[index];
             const vectorZPos = allVectorVisualizations[index].group.position.z; // Z is constant per vector
-            let trailY = allVectorVisualizations[index].group.position.y;
-
-            // After the addition has played for this vector, extend its trail so it meets
-            // the branched vector's trail at the rendez‑vous height (computed locally)
-            if (additionPlayedFlags[index]) {
-                const yMeet = startY + (branchConfig.branchStartT + branchConfig.horzDurationT + branchConfig.vertDurationT + branchConfig.leftDurationT) * animationDistance + branchConfig.meetYOffset;
-                trailY = yMeet + extraRiseOffset;
+            // Determine Y position based on whether trail is frozen (post-merge)
+            let trailY;
+            if (originalTrailFrozenFlags[index]) {
+                // Once frozen, align exactly with branched vector's Y (ensures no offset)
+                trailY = branchedVectorVisualizations[index].group.position.y;
+            } else {
+                trailY = allVectorVisualizations[index].group.position.y;
             }
 
             const newPoint = [0, trailY, vectorZPos];
 
-            // Only record if position changed to avoid duplicate overlapping segments
-            if (currentPoints.length === 0 ||
-                newPoint[0] !== currentPoints[currentPoints.length - 1][0] ||
-                newPoint[1] !== currentPoints[currentPoints.length - 1][1] ||
-                newPoint[2] !== currentPoints[currentPoints.length - 1][2]) {
-                if (currentPoints.length < MAX_TRAIL_POINTS) currentPoints.push(newPoint);
+            // Only record new point if trail still accepting updates
+            if (!originalTrailFrozenFlags[index]) {
+                if (currentPoints.length === 0 ||
+                    newPoint[0] !== currentPoints[currentPoints.length - 1][0] ||
+                    newPoint[1] !== currentPoints[currentPoints.length - 1][1] ||
+                    newPoint[2] !== currentPoints[currentPoints.length - 1][2]) {
+                    if (currentPoints.length < MAX_TRAIL_POINTS) currentPoints.push(newPoint);
+                }
             }
 
             // Update geometry attribute
@@ -743,6 +749,22 @@ export function initMainScene(canvas) { // Renamed function here
                     // Move units FROM the lower/left vector set TO the upper/right one
                     startAdditionAnimation(allVectorVisualizations[index], bVecVis); // bottom -> top
                     additionPlayedFlags[index] = true;
+                    originalTrailFrozenFlags[index] = true; // freeze original trail update beyond this point
+
+                    /* Ensure original trail extends exactly to the meeting point so there is no visible gap */
+                    const meetY = yPos + extraRiseOffset;
+                    const oPoints = allTrailPoints[index];
+                    if (oPoints.length === 0 ||
+                        meetY !== oPoints[oPoints.length - 1][1]) {
+                        if (oPoints.length < MAX_TRAIL_POINTS) oPoints.push([0, meetY, zPos]);
+                        const oTrail = allTrailLines[index];
+                        const oAttr = oTrail.geometry.getAttribute('position');
+                        const len = oPoints.length;
+                        oAttr.setXYZ(len - 1, 0, meetY, zPos);
+                        oTrail.geometry.setDrawRange(0, len);
+                        oAttr.needsUpdate = true;
+                        oTrail.geometry.computeBoundingSphere();
+                    }
                 }
             }
 
