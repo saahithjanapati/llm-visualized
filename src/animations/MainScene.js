@@ -10,6 +10,9 @@ import { VECTOR_LENGTH } from '../utils/constants.js'; // Import VECTOR_LENGTH
 import { mapValueToColor } from '../utils/colors.js'; // For vector addition color updates
 import TWEEN from '@tweenjs/tween.js'; // Tweening library for addition animation
 
+// Toggle to true to see verbose logs; false for production performance
+const DEBUG = false;
+
 // Maximum points per trail line (adjust for performance/length)
 const MAX_TRAIL_POINTS = 2000; // Further increased buffer size
 
@@ -303,7 +306,7 @@ export function initMainScene(canvas) { // Renamed function here
         additionPlaying.active = true;
         additionPlaying.endTime = getVirtualNow() + duration + flashDuration + vectorLength * delayBetweenCubes;
 
-        console.log('[startAdditionAnimation] active tweens before creation:', TWEEN.getAll().length);
+        if (DEBUG) console.log('[startAdditionAnimation] active tweens before creation:', TWEEN.getAll().length);
 
         for (let i = 0; i < vectorLength; i++) {
             const ellipse1 = vec1.ellipses[i];
@@ -319,16 +322,13 @@ export function initMainScene(canvas) { // Renamed function here
             const localTarget = ellipse1.parent.worldToLocal(targetPosition.clone());
 
             // Debug for first cube of first addition run
-            if (i === 0 && !additionPlaying.logged) {
-                const sourceWorldPosition = new THREE.Vector3();
-                ellipse1.getWorldPosition(sourceWorldPosition);
+            if (DEBUG) {
                 console.log(`Debug (i=0):`);
                 console.log(`  ellipse2 (target) world Y: ${targetPosition.y}`);
                 console.log(`  ellipse1 (source) world Y: ${sourceWorldPosition.y}`);
                 console.log(`  ellipse1.parent (branched group) world Y: ${ellipse1.parent.position.y}`);
                 console.log(`  Calculated localTarget.y: ${localTarget.y}`);
                 console.log(`  Initial ellipse1.position.y: ${ellipse1.position.y}`);
-                additionPlaying.logged = true;
             }
 
             const moveTween = new TWEEN.Tween(ellipse1.position, true)
@@ -336,18 +336,18 @@ export function initMainScene(canvas) { // Renamed function here
                 .easing(TWEEN.Easing.Quadratic.InOut)
                 .delay(i * delayBetweenCubes)
                 .onUpdate(() => {
-                    if (i === 0) {
+                    if (DEBUG && i === 0) {
                         console.log('[MoveTween onUpdate] ellipse1.position.y =', ellipse1.position.y);
                     }
                 })
                 .onStart(() => {
-                    if (i === 0 && !additionPlaying.tweenLogged) {
+                    if (DEBUG && i === 0 && !additionPlaying.tweenLogged) {
                         console.log('[MoveTween onStart] First tween started. From y=', ellipse1.position.y, 'to', localTarget.y);
                         additionPlaying.tweenLogged = true;
                     }
                 })
                 .onComplete(() => {
-                    if (i === 0) console.log('[MoveTween onComplete] First tween completed');
+                    if (DEBUG && i === 0) console.log('[MoveTween onComplete] First tween completed');
 
                     // Flash effect on target cube
                     const originalColor = ellipse2.material.color.clone();
@@ -384,12 +384,12 @@ export function initMainScene(canvas) { // Renamed function here
                 });
 
             moveTween.start(getVirtualNow());
-            if (i === 0) {
+            if (DEBUG && i === 0) {
                 console.log("moveTween.start() called for i=0");
             }
         }
 
-        console.log('[startAdditionAnimation] active tweens after creation:', TWEEN.getAll().length);
+        if (DEBUG) console.log('[startAdditionAnimation] active tweens after creation:', TWEEN.getAll().length);
     }
 
     function resetVectorAddition(vec1, vec2) {
@@ -722,7 +722,7 @@ export function initMainScene(canvas) { // Renamed function here
         const elapsedTime = accumulatedElapsedBeforePause + clock.getElapsedTime();
 
         // Log position *after* tween update
-        if (additionPlaying.active) {
+        if (DEBUG && additionPlaying.active) {
             // Log position of the first ellipse of the first vector during the animation
             if (branchedVectorVisualizations[0] && branchedVectorVisualizations[0].ellipses[0]) {
                 console.log("Animate loop: ellipse[0].position.y = ", branchedVectorVisualizations[0].ellipses[0].position.y);
@@ -799,14 +799,22 @@ export function initMainScene(canvas) { // Renamed function here
 
             // Update geometry attribute
             const positionAttribute = trail.geometry.getAttribute('position');
-            for (let j = 0; j < currentPoints.length; j++) {
-                positionAttribute.setXYZ(j, currentPoints[j][0], currentPoints[j][1], currentPoints[j][2]);
-            }
+            const posAttr = positionAttribute;
+            const prevDrawCount = trail.geometry.drawRange.count || 0;
 
-            trail.geometry.setDrawRange(0, currentPoints.length);
-            positionAttribute.needsUpdate = true;
-            // Recompute bounding sphere so correct frustum‑culling as the trail grows
-            trail.geometry.computeBoundingSphere();
+            const drawCount = currentPoints.length;
+
+            // Update only the newest point (last index)
+            const lastIdx = drawCount - 1;
+            posAttr.setXYZ(lastIdx, newPoint[0], newPoint[1], newPoint[2]);
+
+            trail.geometry.setDrawRange(0, drawCount);
+            posAttr.needsUpdate = true;
+
+            // Recompute bounding sphere only when we actually added a vertex this frame
+            if (!originalTrailFrozenFlags[index] && drawCount !== prevDrawCount) {
+                trail.geometry.computeBoundingSphere();
+            }
         });
 
         /* ==============================================================
@@ -863,19 +871,23 @@ export function initMainScene(canvas) { // Renamed function here
             const bTrail = branchedTrailLines[index];
             const bPoints = branchedTrailPoints[index];
             const bNew = [xPos, yPos + extraRiseOffset, zPos];
-            if (bPoints.length === 0 ||
-                bNew[0] !== bPoints[bPoints.length - 1][0] ||
-                bNew[1] !== bPoints[bPoints.length - 1][1] ||
-                bNew[2] !== bPoints[bPoints.length - 1][2]) {
+            const prevLen = bPoints.length;
+            if (prevLen === 0 || bNew[0] !== bPoints[prevLen - 1][0] || bNew[1] !== bPoints[prevLen - 1][1] || bNew[2] !== bPoints[prevLen - 1][2]) {
                 if (bPoints.length < MAX_TRAIL_POINTS) bPoints.push(bNew);
             }
+
+            const newLen = bPoints.length;
             const bPosAttr = bTrail.geometry.getAttribute('position');
-            for (let j = 0; j < bPoints.length; j++) {
-                bPosAttr.setXYZ(j, bPoints[j][0], bPoints[j][1], bPoints[j][2]);
-            }
-            bTrail.geometry.setDrawRange(0, bPoints.length);
+            const newIdx = newLen - 1;
+            bPosAttr.setXYZ(newIdx, bNew[0], bNew[1], bNew[2]);
+
+            bTrail.geometry.setDrawRange(0, newLen);
             bPosAttr.needsUpdate = true;
-            bTrail.geometry.computeBoundingSphere();
+
+            // Update bounding sphere only when we actually grew the trail
+            if (newLen !== prevLen) {
+                bTrail.geometry.computeBoundingSphere();
+            }
         });
 
         // --- Matrix Color Animation ---

@@ -32,8 +32,10 @@ export class VectorVisualization {
                 emissiveIntensity: 0.3
              });
 
-            const ellipseGeometry = baseSphereGeometry.clone();
-            const ellipse = new THREE.Mesh(ellipseGeometry, material);
+            // Re-use the single shared geometry instance instead of cloning it for
+            // every mesh.  This saves GPU memory and upload time because the
+            // vertex data now exists only once.
+            const ellipse = new THREE.Mesh(baseSphereGeometry, material);
             ellipse.position.x = (i - VECTOR_LENGTH / 2) * SPHERE_DIAMETER;
             ellipse.position.y = 0; // Relative to the group
             this.group.add(ellipse);
@@ -72,12 +74,13 @@ export class VectorVisualization {
     }
 
     dispose() {
-         this.ellipses.forEach(ellipse => {
-            if (ellipse.geometry) ellipse.geometry.dispose();
+        // All ellipses share the same Geometry instance, so we must NOT dispose
+        // it individually here (it will be released once when the whole app
+        // tears down).  Only dispose the per-sphere materials.
+        this.ellipses.forEach(ellipse => {
             if (ellipse.material) ellipse.material.dispose();
         });
         this.ellipses = []; // Clear the array
-        // Note: We don't dispose the shared baseSphereGeometry here
     }
 }
 
