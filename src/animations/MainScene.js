@@ -48,6 +48,14 @@ export function initMainScene(canvas) { // Renamed function here
     scene.add(ambientLight);
     const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
     directionalLight.position.set(5, 10, 7.5);
+
+    // === Light Source Visualization ===
+    const lightSphereGeometry = new THREE.SphereGeometry(0.8, 16, 16);
+    const lightSphereMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+    const lightSphere = new THREE.Mesh(lightSphereGeometry, lightSphereMaterial);
+    // Make the sphere a child of the light so it stays in sync with position tweaks
+    directionalLight.add(lightSphere);
+
     scene.add(directionalLight);
 
     // --- Controls ---
@@ -523,6 +531,12 @@ export function initMainScene(canvas) { // Renamed function here
     lightFolder.add(directionalLight.position, 'y', -20, 20, 0.5).name('Dir Light Y');
     lightFolder.add(directionalLight.position, 'z', -20, 20, 0.5).name('Dir Light Z');
 
+    // Parameter & GUI toggle for light visualization
+    const lightVisParams = { showLight: true };
+    lightFolder.add(lightVisParams, 'showLight').name('Show Light Source').onChange(value => {
+        lightSphere.visible = value;
+    });
+
     // Bloom Effect Folder
     const bloomFolder = gui.addFolder('Bloom Effect');
     bloomFolder.add(bloomParams, 'strength', 0, 3, 0.05).name('Strength').onChange((value) => { bloomPass.strength = value; });
@@ -919,6 +933,10 @@ export function initMainScene(canvas) { // Renamed function here
             trail.geometry.dispose();
             trail.material.dispose();
         });
+
+        // Dispose light visualization
+        lightSphereGeometry.dispose();
+        lightSphereMaterial.dispose();
 
         // Dispose materials and geometries for both matrices
         allMatrixVisualizations.forEach(matVis => {
