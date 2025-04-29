@@ -301,7 +301,7 @@ export function initMainScene(canvas) { // Renamed function here
 
         // Mark addition animation playing so main loop doesn't reset prematurely
         additionPlaying.active = true;
-        additionPlaying.endTime = performance.now() + duration + flashDuration + vectorLength * delayBetweenCubes;
+        additionPlaying.endTime = getVirtualNow() + duration + flashDuration + vectorLength * delayBetweenCubes;
 
         console.log('[startAdditionAnimation] active tweens before creation:', TWEEN.getAll().length);
 
@@ -380,10 +380,10 @@ export function initMainScene(canvas) { // Renamed function here
                             // Hide the source cube after merging
                             ellipse1.visible = false;
                         })
-                        .start();
+                        .start(getVirtualNow());
                 });
 
-            moveTween.start();
+            moveTween.start(getVirtualNow());
             if (i === 0) {
                 console.log("moveTween.start() called for i=0");
             }
@@ -604,6 +604,50 @@ export function initMainScene(canvas) { // Renamed function here
 
     const additionPlaying = { active: false, endTime: 0, logged: false, tweenLogged: false }; // Global flag to pause reset while addition runs
 
+    // --- Page Visibility Pause/Resume Support ---
+    let isPaused = false; // Tracks if the animation is currently paused because the tab is hidden
+    let accumulatedElapsedBeforePause = 0; // Total elapsedTime before the current pause
+    let tweenTimeOffset = 0; // Total time removed from TWEEN due to pauses
+    let pauseStartTime = 0;  // Absolute time when pause began
+
+    // Helper to get the "virtual" timeline that excludes paused durations
+    const getVirtualNow = () => performance.now() - tweenTimeOffset;
+
+    function pauseAnimation() {
+        if (isPaused) return;
+        isPaused = true;
+        // Add the time up to this moment into our accumulator
+        accumulatedElapsedBeforePause += clock.getElapsedTime(); // Preserve elapsed up to the pause moment
+        // Stop the clock so it does not advance further
+        clock.stop();
+
+        // Mark when this pause started so we can offset TWEEN timing
+        pauseStartTime = performance.now();
+    }
+
+    function resumeAnimation() {
+        if (!isPaused) return;
+        isPaused = false;
+        // Restart clock from zero; we'll add the accumulated offset each frame
+        clock.start();
+
+        // Increase the TWEEN time offset by the actual pause duration so tweens resume seamlessly
+        if (pauseStartTime !== 0) {
+            tweenTimeOffset += performance.now() - pauseStartTime;
+            pauseStartTime = 0;
+        }
+    }
+
+    // Listen for tab visibility changes to trigger pause / resume
+    const visibilityHandler = () => {
+        if (document.hidden) {
+            pauseAnimation();
+        } else {
+            resumeAnimation();
+        }
+    };
+    document.addEventListener('visibilitychange', visibilityHandler);
+
     // --- Post-Addition Rise Parameters ---
     const extraRiseDistance = 15; // How far to continue rising after combination
     const extraRiseDuration = 3;  // Seconds it takes to reach the extra height
@@ -612,6 +656,12 @@ export function initMainScene(canvas) { // Renamed function here
     // --- Animation Loop ---
     function animate() {
         requestAnimationFrame(animate);
+
+        // If the tab is hidden and the animation is paused, skip all updates to
+        // avoid large jumps in simulation state when the user returns.
+        if (isPaused) {
+            return; // Nothing else to do this frame
+        }
 
         // --- Handle Keyboard Movement ---
         const cameraRight = new THREE.Vector3();
@@ -665,11 +715,11 @@ export function initMainScene(canvas) { // Renamed function here
 
         controls.update(); // Required if enableDamping is true
 
-        // Update tweens (addition animations) with current time
-        const updated = TWEEN.update();
-        if (additionPlaying.active) {
-            console.log('[animate] TWEEN.update returned', updated, 'active tweens:', TWEEN.getAll().length);
-        }
+        // Update tweens (addition animations) using virtual time that excludes pauses
+        const updated = TWEEN.update(getVirtualNow());
+
+        // Calculate scene elapsed time (for vector motion) which also stops during pauses
+        const elapsedTime = accumulatedElapsedBeforePause + clock.getElapsedTime();
 
         // Log position *after* tween update
         if (additionPlaying.active) {
@@ -679,7 +729,6 @@ export function initMainScene(canvas) { // Renamed function here
             }
         }
 
-        const elapsedTime = clock.getElapsedTime();
         const animationDuration = 5; // seconds to reach the meeting point once
         const loopTime = elapsedTime / animationDuration; // allow to grow beyond 1 so vectors keep moving
 
@@ -687,19 +736,20 @@ export function initMainScene(canvas) { // Renamed function here
         const currentY = startY + loopTime * animationDistance;
 
         // Mark addition finished when its expected time passes
-        if (additionPlaying.active && performance.now() > additionPlaying.endTime) {
+        if (additionPlaying.active && getVirtualNow() > additionPlaying.endTime) {
             additionPlaying.active = false;
         }
 
         // If all addition animations have played and finished, start the extra rise (once)
         if (!additionPlaying.active && extraRiseStartTime === null && additionPlayedFlags.every(f => f)) {
-            extraRiseStartTime = clock.getElapsedTime();
+            // Store based on the unified elapsedTime value that includes pre-pause accumulator
+            extraRiseStartTime = elapsedTime;
         }
 
         // Calculate any extra rise offset based on time since extraRiseStartTime
         let extraRiseOffset = 0;
         if (extraRiseStartTime !== null) {
-            const riseElapsed = clock.getElapsedTime() - extraRiseStartTime;
+            const riseElapsed = elapsedTime - extraRiseStartTime;
             const tRise = Math.min(riseElapsed / extraRiseDuration, 1); // 0..1
             extraRiseOffset = THREE.MathUtils.lerp(0, extraRiseDistance, tRise);
         }
@@ -913,6 +963,7 @@ export function initMainScene(canvas) { // Renamed function here
         window.removeEventListener('resize', onWindowResize);
         window.removeEventListener('keydown', onKeyDown); // Remove key listeners
         window.removeEventListener('keyup', onKeyUp);     // Remove key listeners
+        document.removeEventListener('visibilitychange', visibilityHandler);
         controls.dispose();
         gui.destroy();
 
