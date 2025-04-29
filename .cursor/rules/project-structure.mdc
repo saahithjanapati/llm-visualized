@@ -1,0 +1,18 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Project Structure Guide
+
+The application boots from [main.js](mdc:main.js), which creates a canvas and hands it to the 3-D scene initializer in [MainScene.js](mdc:src/animations/MainScene.js).
+
+Inside this scene file you will find the orchestration of
+
+* vector rendering logic in [VectorVisualization.js](mdc:src/components/VectorVisualization.js)
+* weight-matrix geometry in [WeightMatrixVisualization.js](mdc:src/components/WeightMatrixVisualization.js)
+* supporting utility functions such as color mapping in [colors.js](mdc:src/utils/colors.js) and constants in [constants.js](mdc:src/utils/constants.js)
+
+High-level animation helpers live in the `src/animations` directory, for example vector arithmetic animations are implemented in [VectorAdditionAnimation.js](mdc:src/animations/VectorAdditionAnimation.js) and [VectorMultiplicationAnimation.js](mdc:src/animations/VectorMultiplicationAnimation.js).
+
+Use this map to quickly jump between the entry point, scene setup, and reusable visualization components.
