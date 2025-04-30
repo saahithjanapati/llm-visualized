@@ -222,6 +222,17 @@ export function initMainScene(canvas) { // Renamed function here
         });
     }
 
+    // Utility to rebuild BOTH matrices when a geometry-changing GUI control
+    // changes.  After we recreate their geometries we call updateMatrixMaterial
+    // to restore the currently selected material type, colour and opacity.
+    const updateBothMatrixGeometry = () => {
+        matrixVis.updateGeometry(matrixParams);
+        branchedMatrixVis.updateGeometry(matrixParams);
+
+        // Ensure appearance stays in sync
+        updateMatrixMaterial();
+    };
+
     // Initial material setup (applies to both matrices)
     updateMatrixMaterial();
 
@@ -247,7 +258,7 @@ export function initMainScene(canvas) { // Renamed function here
 
     // Function to update all vector materials
     function updateAllVectorMaterials(property, value) {
-        allVectorVisualizations.forEach(vectorVis => {
+        [...allVectorVisualizations, ...branchedVectorVisualizations].forEach(vectorVis => {
             vectorVis.ellipses.forEach(ellipse => {
                 if (ellipse.material) {
                     if (property === 'material') {
@@ -548,19 +559,18 @@ export function initMainScene(canvas) { // Renamed function here
     const matrixFolder = gui.addFolder('Matrix');
     matrixFolder.add(matrixParams, 'material', Object.keys(availableMaterials)).name('Material').onChange(updateMatrixMaterial);
     matrixFolder.addColor(matrixParams, 'color').name('Color').onChange(updateMatrixMaterial);
-    matrixFolder.add(matrixParams, 'numberOfSlits', 0, 20, 1).name('Number of Slits').onChange(() => { /* Complex update needed */ });
-    const updateBothMatrixGeometry = () => {
-        matrixVis.updateGeometry(matrixParams);
-        branchedMatrixVis.updateGeometry(matrixParams);
-    };
-
+    matrixFolder.add(matrixParams, 'numberOfSlits', 0, 20, 1)
+        .name('Number of Slits')
+        .onChange(updateBothMatrixGeometry);
     matrixFolder.add(matrixParams, 'slitWidth', 0.1, 5.0, 0.05).name('Slit Width').onChange(updateBothMatrixGeometry);
     matrixFolder.add(matrixParams, 'slitDepthFactor', 0, 1, 0.01).name('Slit Depth Factor').onChange(updateBothMatrixGeometry);
     matrixFolder.add(matrixParams, 'slitWidthFactor', 0.1, 1, 0.01).name('Slit Width Factor').onChange(updateBothMatrixGeometry);
     matrixFolder.add(matrixParams, 'width', 1, 100, 0.5).name('Base Width').onChange(updateBothMatrixGeometry);
     matrixFolder.add(matrixParams, 'topWidthFactor', 0.1, 2, 0.01).name('Top Width Factor').onChange(updateBothMatrixGeometry);
     matrixFolder.add(matrixParams, 'cornerRadius', 0, 5, 0.05).name('Corner Radius').onChange(updateBothMatrixGeometry);
-    matrixFolder.add(matrixParams, 'depth', 5, 100, 1).name('Depth').onChange(() => { /* Complex update needed */ });
+    matrixFolder.add(matrixParams, 'depth', 5, 100, 1)
+        .name('Depth')
+        .onChange(updateBothMatrixGeometry);
     matrixFolder.add(matrixParams, 'opacity', 0, 1, 0.01).name('Opacity').onChange((value) => {
         matrixParams.opacity = value; // Store value
         updateMatrixMaterial(); // Recreate material with new opacity
