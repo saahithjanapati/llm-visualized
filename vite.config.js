@@ -30,6 +30,7 @@ export default defineConfig({
             vectorMatrix: resolve(__dirname, 'tests/vector-matrix-test.html'),
             vectorAddition: resolve(__dirname, 'tests/vector_addition_test.html'),
             vectorMultiplication: resolve(__dirname, 'tests/vector_multiplication_test.html'),
+            vectorNormalization: resolve(__dirname, 'tests/vector_normalization_test.html'),
             // Add other HTML files here if needed
         }
     } 
