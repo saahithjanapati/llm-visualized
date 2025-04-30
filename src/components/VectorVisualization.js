@@ -3,8 +3,13 @@ import { mapValueToColor } from '../utils/colors.js';
 import { uniformRandom } from '../utils/mathUtils.js';
 import { VECTOR_LENGTH, SPHERE_RADIUS, EPSILON, SPHERE_DIAMETER } from '../utils/constants.js';
 
-// Prepare base geometry
-const baseSphereGeometry = new THREE.SphereGeometry(SPHERE_RADIUS, 8, 8);
+// Generate a smoother, fully spherical geometry for each bead.  We increase
+// the width/height segments for better roundness and remove the previous
+// Y/Z stretching so the beads appear nearly perfect circles instead of tall
+// ellipsoids.
+const baseSphereGeometry = new THREE.SphereGeometry(SPHERE_RADIUS, 16, 16);
+// Preserve the original elongated stone/ellipse look by stretching along the
+// Y and Z axes **after** generating a smoother base sphere.
 const yScale = 4;
 const zScale = yScale;
 const scaleMatrix = new THREE.Matrix4().makeScale(1, yScale, zScale);
