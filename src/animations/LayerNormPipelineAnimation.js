@@ -50,13 +50,13 @@ export function initLayerNormPipelineAnimation(container) {
 
     // --- LayerNorm solid -----------------------------------------------------------
     const lnParams = {
-        width: 60,
-        height: 22,
+        width: 40,
+        height: 23,
         depth: 72,
         wallThickness: 1.0,
         numberOfHoles: 5,
         holeWidth: 2.5,
-        holeWidthFactor: 10
+        holeWidthFactor: 3.75
     };
 
     const layerNormVis = new LayerNormalizationVisualization(
@@ -85,8 +85,8 @@ export function initLayerNormPipelineAnimation(container) {
     const offsetY = 10; // vertical padding for moving vector outside solid
     const startY  = -lnParams.height / 2 - offsetY;
     const endY    =  lnParams.height / 2 + offsetY; // used for opacity ramp only
-    // Start position for the addition vector – spawn lower inside the solid (quarter height above center)
-    const addStartInsideY = lnParams.height / 4; // 1/4 of full height above center
+    // Start position for the addition vector – spawn *above* the centre (quarter height above centre)
+    const addStartInsideY = lnParams.height / 4; // 1/4 of full height above centre
 
     // Z-positions per slit
     const slitSpacing = lnParams.depth / (lnParams.numberOfHoles + 1);
@@ -142,7 +142,16 @@ export function initLayerNormPipelineAnimation(container) {
             new TWEEN.Tween(e1.position)
                 .to({ y: localTarget.y }, duration)
                 .easing(TWEEN.Easing.Quadratic.InOut)
+                .onStart(() => {
+                    // Disable depth writing to avoid Z-fighting "fuzz" as the two ellipses overlap
+                    if (e1.material) e1.material.depthWrite = false;
+                })
                 .onComplete(() => {
+                    // Hide the source ellipse immediately upon reaching the target to avoid
+                    // a brief period of z-fighting / "fuzziness" as two geometries overlap.
+                    e1.visible = false;
+                    if (e1.material) e1.material.depthWrite = true;
+
                     moveTweensCompleted++;
                     if (moveTweensCompleted === vectorLength) {
                         triggerFlash();
@@ -163,7 +172,7 @@ export function initLayerNormPipelineAnimation(container) {
                 };
                 e2.material.color.set(0xffffff);
                 e2.material.emissive.set(0xffffff);
-                e2.material.emissiveIntensity = 1.0;
+                e2.material.emissiveIntensity = 1.5;
             }
             new TWEEN.Tween({})
                 .to({}, flashDuration)
@@ -216,10 +225,10 @@ export function initLayerNormPipelineAnimation(container) {
                     const originalEmissive = ellipse2.material.emissive.clone();
                     const originalIntensity = ellipse2.material.emissiveIntensity;
 
-                    // Set to white for flash effect
+                    // Set to white for flash effect (boost intensity for visibility inside shell)
                     ellipse2.material.color.set(0xffffff);
                     ellipse2.material.emissive.set(0xffffff);
-                    ellipse2.material.emissiveIntensity = 1.0; // EXACT value from VectorAdditionAnimation
+                    ellipse2.material.emissiveIntensity = 1.5;
 
                     // Flash tween with dummy target - uses onComplete only
                     const flashTween = new TWEEN.Tween(ellipse2.material)
@@ -382,7 +391,8 @@ export function initLayerNormPipelineAnimation(container) {
             // After multiplication done, trigger addition
             if (l.multDone && !l.addStarted) {
                 l.addStarted = true;
-                startAdditionAnimation(l.addVec, l.multTarget, () => {
+                // Swap the order so the *main* vector (multTarget) moves upward to the static addition vector.
+                startAdditionAnimation(l.multTarget, l.addVec, () => {
                     l.addDone = true;
                     l.addVec.group.visible = false;
                 });

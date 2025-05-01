@@ -26,7 +26,7 @@ export class LayerNormalizationVisualization {
         numberOfHoles = 6,
         /* Z-thickness of each hole (affects how wide the slit appears) */
         holeWidth = 0.4,
-        /* Percentage of the ellipse width that holes will occupy (0-1) */
+        /* Controls the length of slits along the ellipse surface (0-1) */
         holeWidthFactor = 0.8,
         /* How many segments to approximate the ellipse – higher = smoother */
         segments = 64
@@ -106,11 +106,16 @@ export class LayerNormalizationVisualization {
         // ==== STEP 3 — cut pass-through holes on the TOP and BOTTOM edges ====
         if (this.numberOfHoles > 0 && this.holeWidth > 0) {
             const spacing = this.depth / (this.numberOfHoles + 1);
-            // Width of the subtraction box – slightly larger than the ellipse's
-            // major axis so it always cuts completely through.
-            const boxWidth = this.width * this.holeWidthFactor + this.wallThickness * 2;
+            // Width of the subtraction box – calculating a width that ensures
+            // complete penetration through the elliptical surface at any height
+            // We need to ensure the box is wide enough to cut through the ellipse 
+            // at the point where the slit occurs
+            const widthScaleFactor = 1 + (this.height / this.width);
+            // Ensure we can create really wide slits when requested
+            const boxWidth = this.width * this.holeWidthFactor * widthScaleFactor * 1.2;
             // Height of the subtraction box (vertical size of each slit)
-            const boxHeight = this.wallThickness * 1.5; // a tad larger than the wall so the hole is clearly visible
+            const maxSlitHeight = outerRadiusY; // centre-line limit so top & bottom never overlap
+            const boxHeight = Math.min(this.wallThickness * 1.5 * this.holeWidthFactor, maxSlitHeight);
 
             for (let i = 0; i < this.numberOfHoles; i++) {
                 const zPos = -this.depth / 2 + spacing * (i + 1);
