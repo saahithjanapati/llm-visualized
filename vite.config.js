@@ -32,10 +32,7 @@ export default defineConfig({
             vectorMultiplication: resolve(__dirname, 'tests/vector_multiplication_test.html'),
             vectorNormalization: resolve(__dirname, 'tests/vector_normalization_test.html'),
             layerNorm: resolve(__dirname, 'tests/test_layer_norm.html'),
-            layerNormAnimation: resolve(__dirname, 'tests/test_layer-norm-animation-test.html'),
-            layerNormPipeline: resolve(__dirname, 'tests/test_layer_norm_pipeline.html'),
-
-            // Add other HTML files here if needed
+            layerNormPipeline: resolve(__dirname, 'tests/layer-norm-pipeline-test.html'),
         }
     } 
   },
