@@ -49,17 +49,37 @@ export function initMainScene(canvas) { // Renamed function here
     // --- Lighting ---
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
     scene.add(ambientLight);
+
+
+    // --- First Directional Light ---
     const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
     directionalLight.position.set(5, 10, 7.5);
 
     // === Light Source Visualization ===
-    const lightSphereGeometry = new THREE.SphereGeometry(0.8, 16, 16);
-    const lightSphereMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00 });
-    const lightSphere = new THREE.Mesh(lightSphereGeometry, lightSphereMaterial);
-    // Make the sphere a child of the light so it stays in sync with position tweaks
-    directionalLight.add(lightSphere);
+    // Arrow helper for Light 1
+    const dir1 = new THREE.Vector3(); // Direction vector
+    const origin1 = directionalLight.position;
+    const length1 = 5; // Length of the arrow
+    const color1 = 0xffff00; // Yellow
+    const arrowHelper1 = new THREE.ArrowHelper(dir1, origin1, length1, color1);
+    scene.add(arrowHelper1);
 
     scene.add(directionalLight);
+
+    // --- Second Directional Light ---
+    const directionalLight2 = new THREE.DirectionalLight(0xffa500, 0.6); // Orange color, slightly less intense
+    directionalLight2.position.set(-15, 5, -10);
+
+    // === Second Light Source Visualization ===
+    // Arrow helper for Light 2
+    const dir2 = new THREE.Vector3(); // Direction vector
+    const origin2 = directionalLight2.position;
+    const length2 = 5;
+    const color2 = 0xffa500; // Orange
+    const arrowHelper2 = new THREE.ArrowHelper(dir2, origin2, length2, color2);
+    scene.add(arrowHelper2);
+
+    scene.add(directionalLight2);
 
     // --- Controls ---
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -537,16 +557,19 @@ export function initMainScene(canvas) { // Renamed function here
     // Lighting Folder
     const lightFolder = gui.addFolder('Lighting');
     lightFolder.add(ambientLight, 'intensity', 0, 2, 0.1).name('Ambient Intensity');
-    lightFolder.add(directionalLight, 'intensity', 0, 2, 0.1).name('Directional Intensity');
-    lightFolder.add(directionalLight.position, 'x', -20, 20, 0.5).name('Dir Light X');
-    lightFolder.add(directionalLight.position, 'y', -20, 20, 0.5).name('Dir Light Y');
-    lightFolder.add(directionalLight.position, 'z', -20, 20, 0.5).name('Dir Light Z');
+    // --- Light 1 Controls ---
+    const light1Folder = lightFolder.addFolder('Directional Light 1 (White)');
+    light1Folder.add(directionalLight, 'intensity', 0, 2, 0.1).name('Intensity');
+    light1Folder.add(directionalLight.position, 'x', -100, 100, 0.5).name('X Position'); // Increased range
+    light1Folder.add(directionalLight.position, 'y', -100, 100, 0.5).name('Y Position'); // Increased range
+    light1Folder.add(directionalLight.position, 'z', -100, 100, 0.5).name('Z Position'); // Increased range
 
-    // Parameter & GUI toggle for light visualization
-    const lightVisParams = { showLight: true };
-    lightFolder.add(lightVisParams, 'showLight').name('Show Light Source').onChange(value => {
-        lightSphere.visible = value;
-    });
+    // --- Light 2 Controls ---
+    const light2Folder = lightFolder.addFolder('Directional Light 2 (Orange)');
+    light2Folder.add(directionalLight2, 'intensity', 0, 2, 0.1).name('Intensity');
+    light2Folder.add(directionalLight2.position, 'x', -100, 100, 0.5).name('X Position'); // Increased range
+    light2Folder.add(directionalLight2.position, 'y', -100, 100, 0.5).name('Y Position'); // Increased range
+    light2Folder.add(directionalLight2.position, 'z', -100, 100, 0.5).name('Z Position'); // Increased range
 
     // Bloom Effect Folder
     const bloomFolder = gui.addFolder('Bloom Effect');
@@ -970,6 +993,17 @@ export function initMainScene(canvas) { // Renamed function here
             vectorVis.group.position.y = baseY + extraRiseOffset;
         });
 
+        // --- Update Light Arrow Helpers ---
+        // Update Arrow 1
+        arrowHelper1.position.copy(directionalLight.position);
+        dir1.subVectors(directionalLight.target.position, directionalLight.position).normalize();
+        arrowHelper1.setDirection(dir1);
+
+        // Update Arrow 2
+        arrowHelper2.position.copy(directionalLight2.position);
+        dir2.subVectors(directionalLight2.target.position, directionalLight2.position).normalize();
+        arrowHelper2.setDirection(dir2);
+
         // Update previous Y for next frame
         previousY = currentY;
 
@@ -1007,9 +1041,9 @@ export function initMainScene(canvas) { // Renamed function here
             trail.material.dispose();
         });
 
-        // Dispose light visualization
-        lightSphereGeometry.dispose();
-        lightSphereMaterial.dispose();
+        // Remove ArrowHelpers from scene (they manage their own geometry/materials)
+        scene.remove(arrowHelper1);
+        scene.remove(arrowHelper2);
 
         // Dispose materials and geometries for both matrices
         allMatrixVisualizations.forEach(matVis => {
