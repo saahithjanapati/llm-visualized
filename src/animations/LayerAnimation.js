@@ -463,12 +463,22 @@ export function initLayerAnimation(container) {
                     break;
             }
 
-            // Determine which branched object is visible for trail
-            let branchFollower = null;
-            if (lane.resultVec && lane.resultVec.group.visible) branchFollower = lane.resultVec.group;
-            else if (lane.movingVec.group.visible) branchFollower = lane.movingVec.group;
-            if (branchFollower) {
-                updateTrail(lane.branchTrail, branchFollower.position);
+            // Determine which branched object position to follow for trail
+            let branchPos = null;
+            const centerIndex = Math.floor(VECTOR_LENGTH / 2);
+            // During addition inside LayerNorm, follow the center ellipse movement
+            if (lane.addStarted && !lane.addDone) {
+                const centerEllipse = lane.multTarget.ellipses[centerIndex];
+                const worldPos = new THREE.Vector3();
+                centerEllipse.getWorldPosition(worldPos);
+                branchPos = worldPos;
+            } else if (lane.resultVec && lane.resultVec.group.visible) {
+                branchPos = lane.resultVec.group.position;
+            } else if (lane.movingVec.group.visible) {
+                branchPos = lane.movingVec.group.position;
+            }
+            if (branchPos) {
+                updateTrail(lane.branchTrail, branchPos);
             }
         });
 
