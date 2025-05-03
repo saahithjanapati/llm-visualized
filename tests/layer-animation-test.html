@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Layer Animation Test</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #111; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="renderCanvas"></canvas>
+
+    <!-- Import map for ESM modules used by the animation -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://esm.sh/three@0.160.0",
+            "three/examples/jsm/controls/OrbitControls.js": "https://esm.sh/three@0.160.0/examples/jsm/controls/OrbitControls.js",
+            "three/examples/jsm/postprocessing/EffectComposer.js": "https://esm.sh/three@0.160.0/examples/jsm/postprocessing/EffectComposer.js",
+            "three/examples/jsm/postprocessing/RenderPass.js": "https://esm.sh/three@0.160.0/examples/jsm/postprocessing/RenderPass.js",
+            "three/examples/jsm/postprocessing/UnrealBloomPass.js": "https://esm.sh/three@0.160.0/examples/jsm/postprocessing/UnrealBloomPass.js",
+            "three-csg-ts": "https://esm.sh/three-csg-ts@3.2.0",
+            "../src/components/VectorVisualization.js": "../src/components/VectorVisualization.js",
+            "../src/components/VectorNormalizationVisualization.js": "../src/components/VectorNormalizationVisualization.js",
+            "../src/components/LayerNormalizationVisualization.js": "../src/components/LayerNormalizationVisualization.js",
+            "../src/components/WeightMatrixVisualization.js": "../src/components/WeightMatrixVisualization.js",
+            "../src/utils/constants.js": "../src/utils/constants.js",
+            "../src/utils/colors.js": "../src/utils/colors.js",
+            "../src/animations/LayerAnimation.js": "../src/animations/LayerAnimation.js"
+        }
+    }
+    </script>
+
+    <!-- Global TWEEN.js UMD build for animation tweens -->
+    <script src="https://unpkg.com/@tweenjs/tween.js@23.1.1/dist/tween.umd.js"></script>
+
+    <script type="module">
+        import { initLayerAnimation } from '../src/animations/LayerAnimation.js';
+        const canvas = document.getElementById('renderCanvas');
+        const cleanup = initLayerAnimation(canvas);
+
+        window.addEventListener('beforeunload', () => {
+            if (typeof cleanup === 'function') cleanup();
+        });
+    </script>
+</body>
+</html> 
