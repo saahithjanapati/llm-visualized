@@ -752,26 +752,35 @@ export function initMainScene(canvas) { // Renamed function here
         allTrailLines.forEach((trail, index) => {
             const currentPoints = allTrailPoints[index];
             const vectorZPos = allVectorVisualizations[index].group.position.z; // Z is constant per vector
+            // Before computing trailY, insert retrieval of center ellipses
+            const centerIndex = Math.floor(VECTOR_LENGTH / 2);
+            const origCenterWorld = new THREE.Vector3();
+            const branchedCenterWorld = new THREE.Vector3();
+            // Get world positions for the center ellipses
+            if (allVectorVisualizations[index].ellipses[centerIndex]) {
+                allVectorVisualizations[index].ellipses[centerIndex].getWorldPosition(origCenterWorld);
+            }
+            if (branchedVectorVisualizations[index].ellipses[centerIndex]) {
+                branchedVectorVisualizations[index].ellipses[centerIndex].getWorldPosition(branchedCenterWorld);
+            }
+
             // Determine Y position based on state (normal, extending, frozen)
             let trailY;
             if (originalTrailFrozenFlags[index]) {
-                // After freeze, always follow branched vector
-                trailY = branchedVectorVisualizations[index].group.position.y;
+                // After freeze, follow branched center ellipse
+                trailY = branchedCenterWorld.y;
             } else if (trailExtendActive[index]) {
                 const now = performance.now();
                 const tExt = Math.min((now - trailExtendStartTimes[index]) / trailExtendDuration, 1);
-                // Lerp from the start Y to the target Y
                 trailY = THREE.MathUtils.lerp(trailExtendStartYs[index], trailExtendTargetYs[index], tExt);
-
-                // If finished, mark as frozen to stop further growth and align tips
                 if (tExt >= 1) {
                     trailY = trailExtendTargetYs[index];
                     trailExtendActive[index] = false;
                     originalTrailFrozenFlags[index] = true;
                 }
             } else {
-                // Normal phase – follow original vector position
-                trailY = allVectorVisualizations[index].group.position.y;
+                // Use original center ellipse position
+                trailY = origCenterWorld.y;
             }
 
             const newPoint = [0, trailY, vectorZPos];
