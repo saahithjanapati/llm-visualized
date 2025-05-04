@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vector Addition Animation (Instanced) Test</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #111; }
+    </style>
+</head>
+<body>
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://esm.sh/three@0.160.0",
+            "three/examples/jsm/controls/OrbitControls.js": "https://esm.sh/three@0.160.0/examples/jsm/controls/OrbitControls.js",
+            "three/examples/jsm/postprocessing/EffectComposer.js": "https://esm.sh/three@0.160.0/examples/jsm/postprocessing/EffectComposer.js",
+            "three/examples/jsm/postprocessing/RenderPass.js": "https://esm.sh/three@0.160.0/examples/jsm/postprocessing/RenderPass.js",
+            "three/examples/jsm/postprocessing/UnrealBloomPass.js": "https://esm.sh/three@0.160.0/examples/jsm/postprocessing/UnrealBloomPass.js",
+            "../src/components/VectorVisualizationInstanced.js": "../src/components/VectorVisualizationInstanced.js",
+            "../src/animations/VectorAdditionAnimationInstanced.js": "../src/animations/VectorAdditionAnimationInstanced.js",
+            "../src/utils/constants.js": "../src/utils/constants.js",
+            "../src/utils/colors.js": "../src/utils/colors.js"
+        }
+    }
+    </script>
+
+    <script src="https://unpkg.com/@tweenjs/tween.js@23.1.1/dist/tween.umd.js"></script>
+
+    <script type="module">
+        import { initVectorAdditionAnimationInstanced } from '../src/animations/VectorAdditionAnimationInstanced.js';
+        const cleanup = initVectorAdditionAnimationInstanced(document.body);
+        window.addEventListener('beforeunload', () => cleanup && cleanup());
+    </script>
+</body>
+</html> 

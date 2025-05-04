@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js';
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization.js';
-import { VectorVisualization } from '../components/VectorVisualization.js';
+import { VectorVisualizationInstanced } from '../components/VectorVisualizationInstanced.js';
 import { VECTOR_LENGTH } from '../utils/constants.js';
 
 // Maximum points per trail line
@@ -74,6 +74,15 @@ export function initMultiHeadAttentionAnimation(containerElement) {
     // Stores all matrix visualization objects, structured as:
     // allMatrices[headSetIndex][0=Query, 1=Key, 2=Value]
     const allMatrices = []; // Will hold NUM_HEAD_SETS * 3 matrices
+
+    // --- START ADDED DATA PROPERTY HELPER ---
+    // Helper function to add the raw data property needed by createDuplicate
+    function createVectorInstancedWithData(data, initialPosition) {
+        const vecVis = new VectorVisualizationInstanced(data, initialPosition);
+        vecVis.data = data; // Add the raw data property for duplication logic
+        return vecVis;
+    }
+    // --- END ADDED DATA PROPERTY HELPER ---
 
     // Function to create or update all Q, K, V matrices for all head sets
     function createOrUpdateAllMatrices() {
@@ -239,8 +248,9 @@ export function initMultiHeadAttentionAnimation(containerElement) {
 
         for (let i = 0; i < matrixParams.numberOfSlits; i++) {
             const data = Array.from({ length: VECTOR_LENGTH }, () => Math.random() * 2 - 1);
-            const vecVis = new VectorVisualization(data);
-            vecVis.data = data; // Preserve raw values for later duplication
+            // Use the new instanced version and the helper function
+            const vecVis = createVectorInstancedWithData(data);
+            // vecVis.data is now set by the helper
             const zPos = -keyMatrixDepth / 2 + slitSpacing * (i + 1);
             vecVis.group.position.set(keyMatrixPos.x, startY, zPos);
             addAnimatedVectorWithTrail(vecVis, h);
@@ -275,13 +285,14 @@ export function initMultiHeadAttentionAnimation(containerElement) {
         console.log('[MultiHeadAttention] Executing startProcessingPhase...');
         const matrixCenterY = matrixParams.height / 2; // Calculate center Y here
         animatedVectorsByHead.flat().forEach(vecVis => {
-            // flash to white
-            vecVis.ellipses.forEach(e => {
-                e.material.originalColor = e.material.color.clone();
-                e.material.color.set(0xffffff);
-                e.material.emissive.set(0xffffff);
-                e.material.emissiveIntensity = 1.0;
-            });
+            // flash to white - REMOVED as InstancedMesh doesn't support easy per-instance material changes this way
+            // vecVis.ellipses.forEach(e => {
+            //     e.material.originalColor = e.material.color.clone();
+            //     e.material.color.set(0xffffff);
+            //     e.material.emissive.set(0xffffff);
+            //     e.material.emissiveIntensity = 1.0;
+            // });
+
 
             // Animate upward through its matrix
             const targetY = matrixCenterY + matrixParams.height + 5; // Move above the matrix
@@ -303,13 +314,13 @@ export function initMultiHeadAttentionAnimation(containerElement) {
                     vecVis.group.scale.set(s, 1, 1);
                 })
                 .onComplete(() => {
-                    // restore colours (smaller vector new mapping could apply)
-                    vecVis.ellipses.forEach(e => {
-                        const col = e.material.originalColor || e.material.color;
-                        e.material.color.copy(col);
-                        e.material.emissive.copy(col);
-                        e.material.emissiveIntensity = 0.3;
-                    });
+                    // restore colours - REMOVED (no flash effect to restore from)
+                    // vecVis.ellipses.forEach(e => {
+                    //     const col = e.material.originalColor || e.material.color;
+                    //     e.material.color.copy(col);
+                    //     e.material.emissive.copy(col);
+                    //     e.material.emissiveIntensity = 0.3;
+                    // });
                 })
                 .start();
         });
@@ -318,9 +329,12 @@ export function initMultiHeadAttentionAnimation(containerElement) {
     // Create a duplicate vector at a specific X position for a specific head
     const createDuplicate = (sourceVec, headIndex, targetXPos) => {
         console.log(`[MultiHeadAttention] Creating duplicate for head ${headIndex} at x=${targetXPos.toFixed(2)}`);
+        // Access data using the stored .data property
         const srcData = sourceVec.data ?? Array.from({ length: VECTOR_LENGTH }, () => Math.random() * 2 - 1);
-        const dup = new VectorVisualization(srcData.slice());
-        dup.data = srcData.slice();
+        // Use the new instanced version via the helper
+        const dup = createVectorInstancedWithData(srcData.slice());
+        // dup.data is now set by the helper
+
         // Position duplicate at the source's Z, target X, and current Y
         dup.group.position.set(targetXPos, sourceVec.group.position.y, sourceVec.group.position.z);
         addAnimatedVectorWithTrail(dup, headIndex);

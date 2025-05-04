@@ -8,7 +8,7 @@ export function mapValueToColor(value) {
 
     const hue = (clampedValue + 1) / 2; // Full hue range based on clamped value
     const saturation = 1.0;
-    // Use constant lightness for now after normalization
-    const lightness = 0.55;
+    // Increase lightness for brighter instances
+    const lightness = 0.75;
     return new THREE.Color().setHSL(hue, saturation, lightness);
 }
