@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js';
-import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization.js';
+import { WeightMatrixVisualizationInstance as WeightMatrixVisualization } from '../components/WeightMatrixVisualizationInstance.js';
 import { VectorVisualizationInstanced } from '../components/VectorVisualizationInstanced.js';
 import { VECTOR_LENGTH } from '../utils/constants.js';
 
@@ -157,33 +157,23 @@ export function initMultiHeadAttentionAnimation(containerElement) {
 
     // Geometry update helper (called from GUI)
     function updateMatricesGeometry() {
-        // Recreate geometry for ALL matrices across ALL sets
+        // When using the shared-geometry implementation disposing the geometry
+        // would invalidate **all** matrices, so we simply forward the new
+        // parameters to each instance.  If the params differ from the cached
+        // set the first call will trigger a re-generation which every *new* instance
+        // afterwards will then re-use automatically.
         allMatrices.flat().forEach(matVis => {
             if (matVis) {
-                // Dispose old geometry/material before creating new
-                if (matVis.mesh) {
-                    if (matVis.mesh.geometry) matVis.mesh.geometry.dispose();
-                    if (matVis.mesh.material) {
-                        if (Array.isArray(matVis.mesh.material)) {
-                            matVis.mesh.material.forEach(m => m.dispose());
-                        } else {
-                            matVis.mesh.material.dispose();
-                        }
-                    }
-                }
                 matVis.updateGeometry(matrixParams);
             }
         });
 
-        // Recalculate positions and update scene graph objects
+        // Recalculate positions and update scene graph objects (size may change)
         createOrUpdateAllMatrices();
 
         // Update controls target if matrix height changes
         controls.target.set(0, matrixParams.height / 2, 0);
-
-        // NOTE: We are NOT updating vector positions/tween targets here
-        // for simplicity. Parameter changes during animation might lead
-        // to visual inconsistencies.
+        // Vector positions & tweens left untouched for simplicity.
     }
 
     createOrUpdateAllMatrices(); // Create matrices using the function defined above
