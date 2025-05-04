@@ -54,8 +54,8 @@ export function initLayerAnimation(container) {
     //  Visualisation blocks (only right-hand LayerNorm)
     // -------------------------------------------------------------------------
     const lnParams = {
-        width: 40,
-        height: 25,
+        width: 37,
+        height: 22,
         depth: 72,
         wallThickness: 1.0,
         numberOfHoles: 5,
@@ -133,14 +133,9 @@ export function initLayerAnimation(container) {
         movingVec.group.visible = false;
 
         // ---------- Static vectors inside LayerNorm ----------
-        const multTarget = new VectorVisualization(data.slice(), new THREE.Vector3(branchX, 0, zPos));
+        const multTarget = new VectorVisualization(data.slice(), new THREE.Vector3(branchX, 3, zPos));
         multTarget.data = [...data];
         scene.add(multTarget.group);
-
-        const addStartInsideY = lnParams.height / 4; // quarter height above centre
-        const addVec = new VectorVisualization(data.slice(), new THREE.Vector3(branchX, addStartInsideY, zPos));
-        addVec.data = [...data];
-        scene.add(addVec.group);
 
         // Create trails
         const origTrail = createTrailLine(0xffffff);
@@ -151,13 +146,10 @@ export function initLayerAnimation(container) {
             originalVec: origVec,
             movingVec,
             multTarget,
-            addVec,
             // Pipeline flags
             normStarted: false,
             multStarted: false,
             multDone: false,
-            addStarted: false,
-            addDone: false,
             // Horizontal / merge states
             horizPhase: 'waiting', // waiting | right | insideLN | moveLeft | merged
             resultVec: null,
@@ -186,10 +178,8 @@ export function initLayerAnimation(container) {
             new TWEEN.Tween(e1.position)
                 .to({ y: localTarget.y }, duration)
                 .easing(TWEEN.Easing.Quadratic.InOut)
-                .onStart(() => { if (e1.material) e1.material.depthWrite = false; })
                 .onComplete(() => {
                     e1.visible = false;
-                    if (e1.material) e1.material.depthWrite = true;
                     moveTweensCompleted++;
                     if (moveTweensCompleted === vectorLength) triggerFlash();
                 })
@@ -315,8 +305,84 @@ export function initLayerAnimation(container) {
         const deltaTime = clock.getDelta();
         const timeNow = performance.now();
 
+        // --- LayerNorm Appearance Control ---
+        const darkGray = new THREE.Color(0x333333);
+        const lightYellow = new THREE.Color(0xFFFF99); // For semi-transparent state
+        const brightYellow = new THREE.Color(0xFFFF00); // For final opaque state
+        const opaqueOpacity = 1.0;
+        const semiTransparentOpacity = 0.6;
+        const exitTransitionRange = 10; // Y-distance over which the exit transition occurs
+
+        const firstMovingVecY = lanes.length > 0 ? lanes[0].movingVec.group.position.y : startY;
+        const bottomY = -lnParams.height / 2;
+        const midY = 0; // Assuming center is 0
+        const topY = lnParams.height / 2;
+
+        let targetColor = darkGray;
+        let targetOpacity = opaqueOpacity;
+        let lerpFactor = 0;
+
+        if (firstMovingVecY >= bottomY && firstMovingVecY < midY) {
+            // Entering (Bottom Half): Lerp from Dark Gray to Light Yellow / Semi-Transparent
+            lerpFactor = (firstMovingVecY - bottomY) / (midY - bottomY);
+            targetColor = darkGray.clone().lerp(lightYellow, lerpFactor);
+            targetOpacity = opaqueOpacity + (semiTransparentOpacity - opaqueOpacity) * lerpFactor;
+        } else if (firstMovingVecY >= midY && firstMovingVecY < topY) {
+            // Inside (Top Half): Stay at Light Yellow / Semi-Transparent
+            targetColor = lightYellow;
+            targetOpacity = semiTransparentOpacity;
+        } else if (firstMovingVecY >= topY) {
+            // Exiting: Lerp from Light Yellow / Semi-Transparent to Bright Yellow / Opaque
+            lerpFactor = Math.min(1, (firstMovingVecY - topY) / exitTransitionRange);
+            targetColor = lightYellow.clone().lerp(brightYellow, lerpFactor);
+            targetOpacity = semiTransparentOpacity + (opaqueOpacity - semiTransparentOpacity) * lerpFactor;
+            // Ensure opacity reaches exactly 1.0 when lerpFactor is 1
+            if (lerpFactor >= 1.0) {
+                targetOpacity = opaqueOpacity; // Force full opaqueness
+            }
+        } // Else (below) remains darkGray and opaque
+
+        layerNorm.group.children.forEach(child => {
+            if (child instanceof THREE.Mesh && child.material) {
+                // Set transparent flag based on final opacity value
+                child.material.transparent = targetOpacity < 1.0;
+                child.material.color.copy(targetColor);
+                child.material.opacity = targetOpacity;
+                child.material.needsUpdate = true;
+            }
+        });
+
         lanes.forEach((lane, idx) => {
-            const { originalVec, movingVec, multTarget, addVec } = lane;
+            const { originalVec, movingVec, multTarget } = lane;
+
+            // --- MultTarget Appearance Control ---
+            const movingVecY = movingVec.group.position.y;
+            // Lerp factor based on movingVec's progress in the bottom half of LN
+            const multLerpFactor = THREE.MathUtils.clamp((movingVecY - bottomY) / (midY - bottomY), 0, 1);
+            const initialMultEmissiveIntensity = 0.01;
+            const finalMultEmissiveIntensity = 0.4; // Slightly brighter than default
+
+            for (let i = 0; i < VECTOR_LENGTH; i++) {
+                const ellipse = multTarget.ellipses[i];
+                if (ellipse && ellipse.material) {
+                    const dataColor = mapValueToColor(multTarget.data[i]);
+                    const darkDataColor = dataColor.clone().multiplyScalar(0.2); // Darker version
+
+                    // Lerp color from dark to full, lerp emissive intensity
+                    ellipse.material.color.copy(darkDataColor).lerp(dataColor, multLerpFactor);
+                    ellipse.material.emissive.copy(darkDataColor).lerp(dataColor, multLerpFactor);
+
+                    // Lerp emissive intensity
+                    const currentIntensity = initialMultEmissiveIntensity + (finalMultEmissiveIntensity - initialMultEmissiveIntensity) * multLerpFactor;
+                    ellipse.material.emissiveIntensity = currentIntensity;
+
+                    // Keep fully opaque
+                    ellipse.material.opacity = 1.0;
+                    ellipse.material.transparent = false;
+
+                    ellipse.material.needsUpdate = true;
+                }
+            }
 
             // -------------------- ORIGINAL VEC RISE --------------------
             const branchFinalY = meetY; // branched vectors end at the merge height
@@ -385,74 +451,61 @@ export function initLayerAnimation(container) {
                         startMultiplicationAnimation(movingVec, multTarget, () => {
                             lane.multDone = true;
                             movingVec.group.visible = false;
-                        });
-                    }
+                            // Create result vector immediately after multiplication
+                            if (!lane.resultVec) {
+                                // Hide the multiplication target vector
+                                multTarget.group.visible = false;
+                                const resultData = [...multTarget.data];
+                                const resultVec = new VectorVisualization(resultData, multTarget.group.position.clone());
+                                resultVec.data = [...resultData];
+                                scene.add(resultVec.group);
+                                // Copy material appearance from multTarget
+                                for (let i = 0; i < VECTOR_LENGTH; i++) {
+                                    if (multTarget.ellipses[i] && resultVec.ellipses[i]) {
+                                        resultVec.ellipses[i].material.color.copy(multTarget.ellipses[i].material.color);
+                                        resultVec.ellipses[i].material.emissive.copy(multTarget.ellipses[i].material.emissive);
+                                        resultVec.ellipses[i].material.emissiveIntensity = multTarget.ellipses[i].material.emissiveIntensity;
+                                    }
+                                }
+                                lane.resultVec = resultVec;
 
-                    // After multiplication, trigger addition
-                    if (lane.multDone && !lane.addStarted) {
-                        lane.addStarted = true;
-                        startAdditionAnimation(multTarget, addVec, () => {
-                            lane.addDone = true;
-                            addVec.group.visible = false; // we will create result copy
-                        });
-                    }
+                                // Rise just above LN top
+                                const finalY = branchFinalY; // fully clear LayerNorm
+                                const distance = finalY - resultVec.group.position.y;
+                                const riseDuration = (distance / riseSpeedInsideLN) * 1000;
 
-                    // After addition completes create rising result once per lane
-                    if (lane.addDone && !lane.resultVec) {
-                        // Create rising copy like pipeline
-                        const resultData = [...addVec.data];
-                        const resultVec = new VectorVisualization(resultData, addVec.group.position.clone());
-                        resultVec.data = [...resultData];
-                        scene.add(resultVec.group);
-                        // Copy material appearance from addVec
-                        for (let i = 0; i < VECTOR_LENGTH; i++) {
-                            if (addVec.ellipses[i] && resultVec.ellipses[i]) {
-                                resultVec.ellipses[i].material.color.copy(addVec.ellipses[i].material.color);
-                                resultVec.ellipses[i].material.emissive.copy(addVec.ellipses[i].material.emissive);
-                                resultVec.ellipses[i].material.emissiveIntensity = addVec.ellipses[i].material.emissiveIntensity;
-                            }
-                        }
-
-                        lane.resultVec = resultVec;
-
-                        // Rise just above LN top
-                        const finalY = branchFinalY; // fully clear LayerNorm
-                        const distance = finalY - resultVec.group.position.y;
-                        const riseDuration = (distance / riseSpeedInsideLN) * 1000;
-
-                        new TWEEN.Tween(resultVec.group.position)
-                            .to({ y: finalY }, riseDuration)
-                            .easing(TWEEN.Easing.Linear.None)
-                            .onComplete(() => {
-                                // Start horizontal slide left to centre
-                                const slideDuration = (branchX / horizSpeed) * 1000;
                                 new TWEEN.Tween(resultVec.group.position)
-                                    .to({ x: 0 }, slideDuration)
-                                    .easing(TWEEN.Easing.Quadratic.InOut)
+                                    .to({ y: finalY }, riseDuration)
+                                    .easing(TWEEN.Easing.Linear.None)
                                     .onComplete(() => {
-                                        // Trigger merge addition once at centre
-                                        if (!lane.mergeStarted) {
-                                            lane.mergeStarted = true;
-                                            startAdditionAnimation(originalVec, resultVec, () => {
-                                                resultVec.group.visible = false;
-                                                lane.horizPhase = 'merged';
-                                            });
-                                        }
+                                        // Start horizontal slide left to centre
+                                        const slideDuration = (branchX / horizSpeed) * 1000;
+                                        new TWEEN.Tween(resultVec.group.position)
+                                            .to({ x: 0 }, slideDuration)
+                                            .easing(TWEEN.Easing.Quadratic.InOut)
+                                            .onComplete(() => {
+                                                // Trigger merge addition once at centre
+                                                if (!lane.mergeStarted) {
+                                                    lane.mergeStarted = true;
+                                                    startAdditionAnimation(originalVec, lane.resultVec, () => {
+                                                        lane.resultVec.group.visible = false;
+                                                        lane.horizPhase = 'merged';
+                                                    });
+                                                }
+                                            })
+                                            .start();
                                     })
                                     .start();
-                            })
-                            .start();
+                            }
+                        });
                     }
                     break;
                 }
                 case 'moveLeft': {
                     if (!lane.mergeStarted && lane.resultVec && lane.resultVec.group.position.x <= 0.01) {
                         lane.mergeStarted = true;
-                        startAdditionAnimation(lane.resultVec, originalVec, () => {
-                            // After merge hide resultVec
-                            if (lane.resultVec) {
-                                lane.resultVec.group.visible = false;
-                            }
+                        startAdditionAnimation(originalVec, lane.resultVec, () => {
+                            lane.resultVec.group.visible = false;
                             lane.horizPhase = 'merged';
                         });
                     }
@@ -467,7 +520,7 @@ export function initLayerAnimation(container) {
             let branchPos = null;
             const centerIndex = Math.floor(VECTOR_LENGTH / 2);
             // During addition inside LayerNorm, follow the center ellipse movement
-            if (lane.addStarted && !lane.addDone) {
+            if (lane.multStarted && lane.multDone && !lane.resultVec) {
                 const centerEllipse = lane.multTarget.ellipses[centerIndex];
                 const worldPos = new THREE.Vector3();
                 centerEllipse.getWorldPosition(worldPos);
@@ -499,7 +552,6 @@ export function initLayerAnimation(container) {
             l.originalVec.dispose();
             l.movingVec.dispose();
             l.multTarget.dispose();
-            l.addVec.dispose();
             if (l.resultVec) l.resultVec.dispose();
         });
         layerNorm.dispose && layerNorm.dispose();
