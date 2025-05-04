@@ -133,7 +133,7 @@ export function initLayerAnimation(container) {
         movingVec.group.visible = false;
 
         // ---------- Static vectors inside LayerNorm ----------
-        const multTarget = new VectorVisualization(data.slice(), new THREE.Vector3(branchX, 3, zPos));
+        const multTarget = new VectorVisualization(data.slice(), new THREE.Vector3(branchX, 3.3, zPos));
         multTarget.data = [...data];
         scene.add(multTarget.group);
 
