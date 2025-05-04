@@ -34,7 +34,8 @@ export default defineConfig({
             layerNorm: resolve(__dirname, 'tests/test_layer_norm.html'),
             layerNormPipeline: resolve(__dirname, 'tests/layer-norm-pipeline-test.html'),
             layer: resolve(__dirname, 'tests/layer-animation-test.html'),
-            attention: resolve(__dirname, 'tests/attention-head-test.html')
+            attention: resolve(__dirname, 'tests/attention-head-test.html'),
+            mha: resolve(__dirname, 'tests/multi-head-attention-test.html')
         }
     } 
   },

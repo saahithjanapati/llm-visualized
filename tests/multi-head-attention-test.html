@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Attention Head Animation Test</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #111; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <!-- Optional canvas element; we could also pass document.body directly -->
+    <canvas id="renderCanvas"></canvas>
+
+    <!-- Import map to resolve bare module specifiers in the browser -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://esm.sh/three@0.160.0",
+            "three/examples/jsm/controls/OrbitControls.js": "https://esm.sh/three@0.160.0/examples/jsm/controls/OrbitControls.js",
+            "../src/components/WeightMatrixVisualization.js": "../src/components/WeightMatrixVisualization.js",
+            "../src/components/VectorVisualization.js": "../src/components/VectorVisualization.js",
+            "../src/utils/constants.js": "../src/utils/constants.js",
+            "../src/utils/colors.js": "../src/utils/colors.js"
+        }
+    }
+    </script>
+
+    <!-- Global TWEEN.js for animation tweens -->
+    <script src="https://unpkg.com/@tweenjs/tween.js@23.1.1/dist/tween.umd.js"></script>
+
+    <script type="module">
+        import { initMultiHeadAttentionAnimation } from '../src/animations/MultiHeadAttentionAnimation.js';
+
+        const canvas = document.getElementById('renderCanvas');
+        const cleanup = initMultiHeadAttentionAnimation(canvas);
+
+        // Clean up when the user navigates away or refreshes the page
+        window.addEventListener('beforeunload', () => {
+            if (typeof cleanup === 'function') cleanup();
+        });
+    </script>
+</body>
+</html> 

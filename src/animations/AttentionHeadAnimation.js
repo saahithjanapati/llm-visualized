@@ -140,7 +140,6 @@ export function initAttentionHeadAnimation(containerElement) {
     // ---------------------------------------------------------------------
     const allVectors = [];      // originals + duplicates
     const allTrailLines = [];
-    const allTrailPoints = [];
 
     const originalVectors = []; // keep track of originals separately
 
@@ -154,9 +153,6 @@ export function initAttentionHeadAnimation(containerElement) {
         allVectors.forEach((vecVis, i) => {
             const zPos = -matrixParams.depth / 2 + slitSpacing * (i + 1);
             vecVis.group.position.set(0, vecVis.group.position.y, zPos);
-            // Also move trail points Z if any
-            const tPoints = allTrailPoints[i];
-            tPoints.forEach(pt => pt[2] = zPos);
         });
     };
 
@@ -171,7 +167,7 @@ export function initAttentionHeadAnimation(containerElement) {
         // seed first point
         geometry.getAttribute('position').setXYZ(0, ...initPos);
         geometry.setDrawRange(0, 1);
-        return { line, geometry, positions, points: [initPos] };
+        return { line, geometry, positions, points: [initPos], isFull: false };
     };
 
     // Utility to create a VectorVisualization plus trail and register arrays
@@ -181,7 +177,6 @@ export function initAttentionHeadAnimation(containerElement) {
 
         const trail = createTrailForVector([vecVis.group.position.x, vecVis.group.position.y, vecVis.group.position.z]);
         allTrailLines.push(trail);
-        allTrailPoints.push(trail.points);
     };
 
     // Generate 5 original vectors & trails
@@ -359,12 +354,22 @@ export function initAttentionHeadAnimation(containerElement) {
 
         // Update trails for all vectors (including duplicates)
         allVectors.forEach((vecVis, idx) => {
-            const tList = allTrailPoints[idx];
-            const geom = allTrailLines[idx].geometry;
+            // Get the trail object directly
+            const trail = allTrailLines[idx];
+            // Access points list via trail object
+            const tList = trail.points;
+            const geom = trail.geometry;
             const attr = geom.getAttribute('position');
 
             const newPoint = [vecVis.group.position.x, vecVis.group.position.y, vecVis.group.position.z];
-            if (tList.length < MAX_TRAIL_POINTS) tList.push(newPoint);
+            // Check if the trail is full before pushing
+            if (!trail.isFull) {
+                tList.push(newPoint);
+                // Check if it just became full
+                if (tList.length === MAX_TRAIL_POINTS) {
+                    trail.isFull = true;
+                }
+            }
 
             const lastIdx = tList.length - 1;
             attr.setXYZ(lastIdx, ...newPoint);
