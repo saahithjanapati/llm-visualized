@@ -2,7 +2,20 @@ import * as THREE from 'three';
 import { CSG } from 'three-csg-ts'; // Import CSG
 
 export class WeightMatrixVisualization {
-    constructor(data = null, position = new THREE.Vector3(0, 0, 0), width = 8, height = 4, depth = 30, topWidthFactor = 0.7, cornerRadius = 0.8, numberOfSlits = 0, slitWidth = 0.2, slitDepthFactor = 1.0, slitWidthFactor = 0.9) {
+    constructor(
+        data = null,
+        position = new THREE.Vector3(0, 0, 0),
+        width = 8,
+        height = 4,
+        depth = 30,
+        topWidthFactor = 0.7,
+        cornerRadius = 0.8,
+        numberOfSlits = 0,
+        slitWidth = 0.2,
+        slitDepthFactor = 1.0,
+        slitBottomWidthFactor = 0.9, // previously `slitWidthFactor`
+        slitTopWidthFactor = null    // allow different top factor; defaults to bottom
+    ) {
         this.group = new THREE.Group();
         this.group.position.copy(position);
 
@@ -14,7 +27,8 @@ export class WeightMatrixVisualization {
         this.numberOfSlits = numberOfSlits;
         this.slitWidth = slitWidth;
         this.slitDepthFactor = Math.max(0, Math.min(1, slitDepthFactor)); // Clamp between 0 and 1
-        this.slitWidthFactor = slitWidthFactor; // Percentage of trapezoid width that slits occupy
+        this.slitBottomWidthFactor = slitBottomWidthFactor; // bottom width factor
+        this.slitTopWidthFactor = slitTopWidthFactor !== null ? slitTopWidthFactor : slitBottomWidthFactor; // default to bottom factor
 
         this.mesh = null; // Main trapezoid mesh (sides)
         this.frontCapMesh = null; // Front face mesh
@@ -180,13 +194,32 @@ export class WeightMatrixVisualization {
             // larger of the bottom width and top width, then add twice the
             // corner radius so the box always extends beyond the outer surface.
             const widest = Math.max(this.width, this.width * this.topWidthFactor);
-            const constantSlitBoxWidth = (widest + this.cornerRadius * 2) * this.slitWidthFactor;
+            const constantBottomWidth = (widest + this.cornerRadius * 2) * this.slitBottomWidthFactor;
+            const constantTopWidth    = (widest + this.cornerRadius * 2) * this.slitTopWidthFactor;
 
             for (let i = 0; i < this.numberOfSlits; i++) {
                 const zPos = -this.depth / 2 + slitSpacing * (i + 1);
 
-                // Create a box geometry for the slit with the CONSTANT width and EXACT cut depth (+epsilon)
-                const slitGeometry = new THREE.BoxGeometry(constantSlitBoxWidth, slitBoxHeight, this.slitWidth);
+                let slitGeometry;
+
+                if (Math.abs(constantBottomWidth - constantTopWidth) < 1e-4) {
+                    // Simple rectangular slit (top == bottom)
+                    slitGeometry = new THREE.BoxGeometry(constantBottomWidth, slitBoxHeight, this.slitWidth);
+                } else {
+                    // Create tapered geometry (trapezoidal prism) by modifying a box geometry
+                    slitGeometry = new THREE.BoxGeometry(constantBottomWidth, slitBoxHeight, this.slitWidth, 1, 1, 1);
+                    const posAttr = slitGeometry.attributes.position;
+                    const halfH = slitBoxHeight / 2;
+                    for (let v = 0; v < posAttr.count; v++) {
+                        const y = posAttr.getY(v);
+                        const t = (y + halfH) / slitBoxHeight; // 0 at bottom, 1 at top
+                        const targetWidth = THREE.MathUtils.lerp(constantBottomWidth, constantTopWidth, t);
+                        const scale = targetWidth / constantBottomWidth;
+                        posAttr.setX(v, posAttr.getX(v) * scale);
+                    }
+                    posAttr.needsUpdate = true;
+                    slitGeometry.computeVertexNormals();
+                }
                 
                 // Material not needed for CSG
                 const slitMesh = new THREE.Mesh(slitGeometry); 
@@ -262,7 +295,8 @@ export class WeightMatrixVisualization {
         this.slitDepthFactor = params.slitDepthFactor !== undefined 
             ? Math.max(0, Math.min(1, params.slitDepthFactor)) // Clamp between 0 and 1
             : this.slitDepthFactor;
-        this.slitWidthFactor = params.slitWidthFactor ?? this.slitWidthFactor;
+        this.slitBottomWidthFactor = params.slitBottomWidthFactor ?? this.slitBottomWidthFactor;
+        this.slitTopWidthFactor = params.slitTopWidthFactor ?? this.slitTopWidthFactor;
 
         this._createMesh(); // Recreate the mesh with new parameters
     }
