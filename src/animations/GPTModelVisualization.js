@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js';
 import { LayerNormalizationVisualization } from '../components/LayerNormalizationVisualization.js';
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization.js';
 
@@ -87,12 +88,26 @@ export function initGPTModelVisualization(container) {
     const vMat = new THREE.MeshStandardMaterial({ color: 0xff3355, metalness: 0.2, roughness: 0.6, transparent: true, opacity: 0.85 });
 
     // Instanced meshes — one for each of Q, K, V
-    const NUM_HEADS = 12; // per layer
-    const totalInstances = NUM_LAYERS * NUM_HEADS;
+    const MAX_HEADS   = 12; // GPT size (fewer for bigger models)
+    const MAX_LAYERS  = NUM_LAYERS; // constant for this viz
+
+    // GUI-controlled state
+    const state = {
+        layers: MAX_LAYERS,
+        heads:  MAX_HEADS
+    };
+
+    const totalInstances = MAX_LAYERS * MAX_HEADS;
 
     const qMesh = new THREE.InstancedMesh(baseGeometry, qMat, totalInstances);
     const kMesh = new THREE.InstancedMesh(baseGeometry, kMat, totalInstances);
     const vMesh = new THREE.InstancedMesh(baseGeometry, vMat, totalInstances);
+
+    // Store original transforms so we can restore quickly when toggling visibility
+    const originalQ = new Array(totalInstances);
+    const originalK = new Array(totalInstances);
+    const originalV = new Array(totalInstances);
+    const hiddenMatrix     = new THREE.Matrix4().makeScale(0, 0, 0);
 
     // Helper to compute per-instance transform matrices
     const tmpMat   = new THREE.Matrix4();
@@ -102,8 +117,8 @@ export function initGPTModelVisualization(container) {
 
     // Horizontal layout identical to MultiHeadAttentionAnimation
     const singleSetWidth = 3 * matrixParams.width;
-    const HEAD_SET_GAP   = 15;
-    const totalWidth     = NUM_HEADS * singleSetWidth + (NUM_HEADS - 1) * HEAD_SET_GAP;
+    const HEAD_SET_GAP   = 60;
+    const totalWidth     = MAX_HEADS * singleSetWidth + (MAX_HEADS - 1) * HEAD_SET_GAP;
     const firstSet_Q_Center_X = -totalWidth / 2 + matrixParams.width / 2;
 
     // Dimensions for non-instanced blocks (defined BEFORE use)
@@ -127,26 +142,29 @@ export function initGPTModelVisualization(container) {
     for (let layer = 0; layer < NUM_LAYERS; layer++) {
         const layerBaseY = layer * LAYER_HEIGHT;
 
-        for (let head = 0; head < NUM_HEADS; head++) {
+        for (let head = 0; head < MAX_HEADS; head++) {
             const setOffset = head * (singleSetWidth + HEAD_SET_GAP);
             const x_q = firstSet_Q_Center_X + setOffset;
             const x_k = x_q + matrixParams.width;
             const x_v = x_k + matrixParams.width;
 
-            // Q matrix
+            // Q
             tmpPos.set(x_q, layerBaseY + attentionYOffset, 0);
             tmpMat.compose(tmpPos, tmpQuat, tmpScale);
-            qMesh.setMatrixAt(instanceIdx, tmpMat);
+            qMesh.setMatrixAt(instanceIdx, tmpMat.clone());
+            originalQ[instanceIdx] = tmpMat.clone();
 
-            // K matrix
+            // K
             tmpPos.set(x_k, layerBaseY + attentionYOffset, 0);
             tmpMat.compose(tmpPos, tmpQuat, tmpScale);
-            kMesh.setMatrixAt(instanceIdx, tmpMat);
+            kMesh.setMatrixAt(instanceIdx, tmpMat.clone());
+            originalK[instanceIdx] = tmpMat.clone();
 
-            // V matrix
+            // V
             tmpPos.set(x_v, layerBaseY + attentionYOffset, 0);
             tmpMat.compose(tmpPos, tmpQuat, tmpScale);
-            vMesh.setMatrixAt(instanceIdx, tmpMat);
+            vMesh.setMatrixAt(instanceIdx, tmpMat.clone());
+            originalV[instanceIdx] = tmpMat.clone();
 
             instanceIdx++;
         }
@@ -209,6 +227,33 @@ export function initGPTModelVisualization(container) {
     }
 
     // ───────────────────────────────────────────────────────────────────────────
+    // GUI: dynamic head-count control
+    // ────────────────────────────────────────────────────────────────────
+    const gui = new GUI();
+    gui.add(state, 'layers', 1, MAX_LAYERS, 1).name('Visible Layers').onChange(updateVisibility);
+    gui.add(state, 'heads',  1, MAX_HEADS,  1).name('Heads / Layer').onChange(updateVisibility);
+
+    function updateVisibility() {
+        let idx = 0;
+        for (let l = 0; l < MAX_LAYERS; l++) {
+            const layerVisible = l < state.layers;
+            for (let h = 0; h < MAX_HEADS; h++) {
+                const show = layerVisible && h < state.heads;
+                qMesh.setMatrixAt(idx, show ? originalQ[idx] : hiddenMatrix);
+                kMesh.setMatrixAt(idx, show ? originalK[idx] : hiddenMatrix);
+                vMesh.setMatrixAt(idx, show ? originalV[idx] : hiddenMatrix);
+                idx++;
+            }
+        }
+        qMesh.instanceMatrix.needsUpdate = true;
+        kMesh.instanceMatrix.needsUpdate = true;
+        vMesh.instanceMatrix.needsUpdate = true;
+    }
+
+    // Apply initial visibility (in case defaults < max)
+    updateVisibility();
+
+    // ───────────────────────────────────────────────────────────────────────────
     // Resize handler & render loop
     // ───────────────────────────────────────────────────────────────────────────
     function onWindowResize() {
@@ -229,6 +274,7 @@ export function initGPTModelVisualization(container) {
     return () => {
         window.removeEventListener('resize', onWindowResize);
         controls.dispose();
+        gui.destroy();
         renderer.dispose();
         scene.traverse(obj => {
             if (obj.geometry) obj.geometry.dispose();
