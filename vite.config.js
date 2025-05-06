@@ -36,7 +36,8 @@ export default defineConfig({
             layer: resolve(__dirname, 'tests/layer-animation-test.html'),
             attention: resolve(__dirname, 'tests/attention-head-test.html'),
             mha: resolve(__dirname, 'tests/multi-head-attention-test.html'),
-            vectorAdditionInstanced: resolve(__dirname, 'tests/vector_addition_instanced_test.html')
+            vectorAdditionInstanced: resolve(__dirname, 'tests/vector_addition_instanced_test.html'),
+            gptModel: resolve(__dirname, 'tests/gpt_model_test.html')
         }
     } 
   },
