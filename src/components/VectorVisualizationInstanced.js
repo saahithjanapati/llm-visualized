@@ -22,10 +22,12 @@ export class VectorVisualizationInstanced {
 
         // Material – shared for all instances. Emissive/color will be overridden per instance via vertex colors.
         const material = new THREE.MeshStandardMaterial({
+            color: new THREE.Color(0xffffff), // Base color white, to be tinted by instance color
+            vertexColors: true, // Enable instance colors
             metalness: 0.3,
             roughness: 0.5,
-            emissive: new THREE.Color(0xffffff),
-            emissiveIntensity: 0.2
+            emissive: new THREE.Color(0xffffff), // Emissive base white, will be tinted by instance color
+            emissiveIntensity: 0.5 // Adjusted to match non-instanced version for better pop
         });
 
         // Create InstancedMesh
