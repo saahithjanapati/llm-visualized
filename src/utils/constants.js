@@ -1,4 +1,4 @@
-export const VECTOR_LENGTH = 100;
+export const VECTOR_LENGTH = 768;
 export const SPHERE_RADIUS = 0.15;
 export const SPHERE_DIAMETER = SPHERE_RADIUS * 2;
 export const VECTOR_VISUAL_WIDTH = VECTOR_LENGTH * SPHERE_DIAMETER;
