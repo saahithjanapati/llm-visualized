@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { mapValueToColor } from '../utils/colors.js';
+import { mapValueToColor_LOG, mapValueToColor } from '../utils/colors.js';
 import { uniformRandom } from '../utils/mathUtils.js';
 import { VECTOR_LENGTH, SPHERE_RADIUS, EPSILON, SPHERE_DIAMETER } from '../utils/constants.js';
 
@@ -24,16 +24,20 @@ export class VectorVisualization {
         this.speed = 0; // Initialize speed, will be set externally in main.js
 
         const vectorData = initialData || this.generateTestData();
-        const normalizedVectorData = this.layerNormalize(vectorData);
+        // const normalizedVectorData = this.layerNormalize(vectorData); // REMOVED: Do not normalize for initial coloring
 
         for (let i = 0; i < VECTOR_LENGTH; i++) {
-            const value = normalizedVectorData[i];
-            const color = mapValueToColor(value);
+            const value = vectorData[i]; // NEW: Use raw initialData for initial coloring
+            const color = mapValueToColor_LOG(value, i); // Call logging version
+            // const fixedColor = new THREE.Color(0x00ff00); // TEST: Use fixed bright green
+
             const material = new THREE.MeshStandardMaterial({
-                color: color,
+                color: color, // Original
+                // color: fixedColor, // TEST
                 metalness: 0.3,
                 roughness: 0.5,
-                emissive: color,
+                emissive: color, // Original
+                // emissive: fixedColor, // TEST
                 emissiveIntensity: 0.3
              });
 
@@ -69,7 +73,7 @@ export class VectorVisualization {
         const normalizedVectorData = this.layerNormalize(newData);
         for (let i = 0; i < VECTOR_LENGTH; i++) {
             const value = normalizedVectorData[i];
-            const color = mapValueToColor(value);
+            const color = mapValueToColor_LOG(value, i); // Also use logging version here for consistency during updates if any
             const ellipse = this.ellipses[i];
             if (ellipse && ellipse.material) { // Check if ellipse and material exist
                 ellipse.material.color.copy(color);

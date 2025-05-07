@@ -1,0 +1,134 @@
+// export const VECTOR_LENGTH = 5; // REMOVED: This was causing the length mismatch.
+// The main VECTOR_LENGTH (100) should be imported from utils/constants.js directly where needed,
+// or LayerAnimationConstants.js should correctly re-export it if preferred as a central point for this animation.
+// For now, removing it here means LayerAnimation.js will need to adjust its import.
+
+// -----------------------------------------------------------------------------
+// General Layout Constants
+// -----------------------------------------------------------------------------
+
+/** Vertical gap between the top of one component and the bottom of the next. */
+export const VERTICAL_GAP_COMPONENTS = 20;
+
+/** Horizontal X-offset from the main residual stream (x=0) for branched components like LayerNorms, MHSA, MLP. */
+export const BRANCH_X = 80;
+
+// -----------------------------------------------------------------------------
+// LayerNorm1 (LN1) Parameters
+// -----------------------------------------------------------------------------
+
+/** Y-position for the center of the first LayerNormalization block. */
+export const LAYER_NORM_1_Y_POS = -10;
+
+/**
+ * Parameters defining the geometry and appearance of the first LayerNormalization block.
+ * @property {number} width - Width of the LayerNorm block.
+ * @property {number} height - Height of the LayerNorm block.
+ * @property {number} depth - Depth of the LayerNorm block.
+ * @property {number} wallThickness - Thickness of the walls of the LayerNorm block.
+ * @property {number} numberOfHoles - Number of holes/slits along the depth of the block.
+ * @property {number} holeWidth - Width of each hole/slit.
+ * @property {number} holeWidthFactor - Factor to adjust the visual width of the holes.
+ */
+export const LN_PARAMS = {
+    width: 70,
+    height: 35,
+    depth: 120,
+    wallThickness: 1.0,
+    numberOfHoles: 5, // This is also used as numVectors for lanes
+    holeWidth: 2.5,
+    holeWidthFactor: 3.75
+};
+
+// -----------------------------------------------------------------------------
+// Multi-Head Self-Attention (MHSA) Parameters
+// -----------------------------------------------------------------------------
+
+/** Number of attention head sets (each set has Q, K, V matrices). */
+export const NUM_HEAD_SETS_LAYER = 12;
+
+/** Horizontal gap between adjacent attention head sets. */
+export const HEAD_SET_GAP_LAYER = 10;
+
+/** Horizontal center-to-center spacing for Q, K, V matrices within a single attention head. */
+export const MHA_INTERNAL_MATRIX_SPACING = 37.5;
+
+/**
+ * Parameters defining the geometry of individual Q, K, V matrices in the MHSA block.
+ * Properties are consistent with WeightMatrixVisualization constructor.
+ */
+export const MHA_MATRIX_PARAMS = {
+    width: 37.5,
+    height: 12,
+    depth: 100,
+    topWidthFactor: 0.47,
+    cornerRadius: 1.2,
+    numberOfSlits: 5, // Visually, might want to link to VECTOR_LENGTH or a fraction
+    slitWidth: 1.85,
+    slitDepthFactor: 1.0,
+    slitBottomWidthFactor: 0.95,
+    slitTopWidthFactor: 0.37
+};
+
+// -----------------------------------------------------------------------------
+// LayerNorm2 (LN2) Parameters
+// -----------------------------------------------------------------------------
+// LN2 uses LN_PARAMS for its geometry by default in LayerAnimation.js.
+// If specific params are needed for LN2, they can be defined here.
+// e.g., export const LN2_PARAMS = { ... };
+
+// -----------------------------------------------------------------------------
+// MLP (Multi-Layer Perceptron) Layer Parameters
+// -----------------------------------------------------------------------------
+
+/** Factor by which the vector dimension is multiplied in the MLP's up-projection. */
+export const MLP_VECTOR_MULTIPLIER = 4;
+
+/**
+ * Base styling parameters for the WeightMatrixVisualizations in the MLP layer.
+ * Width and depth are scaled based on MLP_VECTOR_MULTIPLIER.
+ * numberOfSlits is also scaled.
+ */
+export const MLP_MATRIX_STYLE_PARAMS = {
+    height: 15,
+    topWidthFactor: 0.6,
+    cornerRadius: 1.0,
+    // numberOfSlits will be VECTOR_LENGTH for the d_model side, and VECTOR_LENGTH * MLP_VECTOR_MULTIPLIER for the 4*d_model side
+    slitWidth: 1.5,
+    slitDepthFactor: 1.0,
+    slitBottomWidthFactor: 0.9,
+    slitTopWidthFactor: 0.5
+};
+
+/** Visual representation of depth for d_model in MLP matrices. Used for scaling. */
+export const MLP_D_MODEL_VISUAL_DEPTH = 20;
+
+
+// -----------------------------------------------------------------------------
+// Animation Path & Behavior Constants
+// -----------------------------------------------------------------------------
+
+/** Vertical offset below LayerNorm1 for spawning original vectors. */
+export const ANIM_OFFSET_Y_ORIGINAL_SPAWN = 10;
+
+/** Vertical offset above LayerNorm1 top where original and processed vectors meet (or would have met). */
+export const ANIM_MEET_Y_OFFSET_ABOVE_LN1 = 5;
+
+/** Speed at which original vectors rise along the main path (x=0). */
+export const ANIM_RISE_SPEED_ORIGINAL = 3;
+
+/** Horizontal speed for vectors moving towards/away from branched components. */
+export const ANIM_HORIZ_SPEED = 15;
+
+/** Vertical speed for vectors moving upwards inside the LayerNorm block. */
+export const ANIM_RISE_SPEED_INSIDE_LN = 6;
+
+// mergeGap was used for the original merge logic, may not be needed if merge is redesigned
+// export const ANIM_MERGE_GAP = 7;
+
+// -----------------------------------------------------------------------------
+// Trail Line Constants
+// -----------------------------------------------------------------------------
+
+/** Maximum number of points to store for each trail line, affecting trail length. */
+export const MAX_TRAIL_POINTS = 1500; 

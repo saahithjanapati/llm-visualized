@@ -6,8 +6,28 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { LayerNormalizationVisualization } from '../components/LayerNormalizationVisualization.js';
 import { VectorVisualization } from '../components/VectorVisualization.js';
 import { VectorNormalizationVisualization } from '../components/VectorNormalizationVisualization.js';
+import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization.js';
 import { VECTOR_LENGTH } from '../utils/constants.js';
 import { mapValueToColor } from '../utils/colors.js';
+import {
+    VERTICAL_GAP_COMPONENTS,
+    BRANCH_X,
+    LAYER_NORM_1_Y_POS,
+    LN_PARAMS,
+    NUM_HEAD_SETS_LAYER,
+    HEAD_SET_GAP_LAYER,
+    MHA_INTERNAL_MATRIX_SPACING,
+    MHA_MATRIX_PARAMS,
+    MLP_VECTOR_MULTIPLIER,
+    MLP_MATRIX_STYLE_PARAMS,
+    MLP_D_MODEL_VISUAL_DEPTH,
+    ANIM_OFFSET_Y_ORIGINAL_SPAWN,
+    ANIM_MEET_Y_OFFSET_ABOVE_LN1,
+    ANIM_RISE_SPEED_ORIGINAL,
+    ANIM_HORIZ_SPEED,
+    ANIM_RISE_SPEED_INSIDE_LN,
+    MAX_TRAIL_POINTS
+} from './LayerAnimationConstants.js';
 
 // NOTE: Requires global TWEEN.js (loaded separately via <script>)
 
@@ -51,56 +71,107 @@ export function initLayerAnimation(container) {
     scene.add(dirLight);
 
     // -------------------------------------------------------------------------
-    //  Visualisation blocks (only right-hand LayerNorm)
+    //  Component Parameters (Values from LayerAnimationConstants.js)
     // -------------------------------------------------------------------------
-    const lnParams = {
-        width: 37,
-        height: 22,
-        depth: 72,
-        wallThickness: 1.0,
-        numberOfHoles: 5,
-        holeWidth: 2.5,
-        holeWidthFactor: 3.75
-    };
-    const branchX = 80; // Horizontal offset for right-hand LayerNorm
-    const layerNorm = new LayerNormalizationVisualization(
-        new THREE.Vector3(branchX, 0, 0),
-        lnParams.width,
-        lnParams.height,
-        lnParams.depth,
-        lnParams.wallThickness,
-        lnParams.numberOfHoles,
-        lnParams.holeWidth,
-        lnParams.holeWidthFactor
+    // const VERTICAL_GAP_COMPONENTS = 20; // Now from constants
+
+    // LayerNorm1 (existing)
+    // const lnParams = { ... }; // Now LN_PARAMS from constants
+    // const branchX = 80; // Now BRANCH_X from constants
+    // const layerNorm1_Y_pos = -10; // Now LAYER_NORM_1_Y_POS from constants
+
+    const layerNorm1 = new LayerNormalizationVisualization(
+        new THREE.Vector3(BRANCH_X, LAYER_NORM_1_Y_POS, 0),
+        LN_PARAMS.width,
+        LN_PARAMS.height,
+        LN_PARAMS.depth,
+        LN_PARAMS.wallThickness,
+        LN_PARAMS.numberOfHoles,
+        LN_PARAMS.holeWidth,
+        LN_PARAMS.holeWidthFactor
     );
-    scene.add(layerNorm.group);
+    scene.add(layerNorm1.group);
 
     // -------------------------------------------------------------------------
-    //  Main path parameters (no central matrix)
+    //  Multi-Head Self-Attention (MHSA)
     // -------------------------------------------------------------------------
-    const offsetY = 10;
-    const startY = -lnParams.height / 2 - offsetY;   // Spawn below LayerNorm height
-    const meetYOffset = 5;                           // Meeting point above LayerNorm top
-    const meetY = lnParams.height / 2 + meetYOffset; // Y where originals wait for merge
+    // const NUM_HEAD_SETS_LAYER = 12; // Now from constants
+    // const HEAD_SET_GAP_LAYER = 10;   // Now from constants
+    // const MHA_INTERNAL_MATRIX_SPACING = 37.5; // Now from constants
+    // const mhaMatrixParams = { ... }; // Now MHA_MATRIX_PARAMS from constants
 
-    const branchStartY = startY + 5; // trigger branch when originals have risen just 5 units
+    const ln1_top_y = layerNorm1.group.position.y + LN_PARAMS.height / 2;
+    const MHSA_BASE_Y = ln1_top_y + VERTICAL_GAP_COMPONENTS;
+    const mhsa_matrix_center_y = MHSA_BASE_Y + MHA_MATRIX_PARAMS.height / 2;
 
-    // Z-lane spacing same as number of holes
-    const numVectors = lnParams.numberOfHoles;
-    const slitSpacing = lnParams.depth / (numVectors + 1);
+    const mhaVisualizations = [];
 
-    // Motion speeds
-    const riseSpeedOriginal = 3;   // slower up speed for originals
-    const horizSpeed = 15;         // horizontal move speed for duplicates/result
-    const riseSpeedInsideLN = 6;   // duplicate vertical speed inside LN
-    const mergeGap = 7; // branched result stops this much below originals before merge
+    for (let i = 0; i < NUM_HEAD_SETS_LAYER; i++) {
+        const headSetWidth = MHA_INTERNAL_MATRIX_SPACING * 2 + MHA_MATRIX_PARAMS.width;
+        const currentHeadSetBaseX = BRANCH_X - MHA_INTERNAL_MATRIX_SPACING + i * (headSetWidth + HEAD_SET_GAP_LAYER);
 
-    // Per-lane collections
+        const x_q = currentHeadSetBaseX;
+        const x_k = currentHeadSetBaseX + MHA_INTERNAL_MATRIX_SPACING;
+        const x_v = currentHeadSetBaseX + MHA_INTERNAL_MATRIX_SPACING * 2;
+
+        const queryMatrix = new WeightMatrixVisualization(
+            null, new THREE.Vector3(x_q, mhsa_matrix_center_y, 0),
+            MHA_MATRIX_PARAMS.width, MHA_MATRIX_PARAMS.height, MHA_MATRIX_PARAMS.depth,
+            MHA_MATRIX_PARAMS.topWidthFactor, MHA_MATRIX_PARAMS.cornerRadius, MHA_MATRIX_PARAMS.numberOfSlits,
+            MHA_MATRIX_PARAMS.slitWidth, MHA_MATRIX_PARAMS.slitDepthFactor,
+            MHA_MATRIX_PARAMS.slitBottomWidthFactor, MHA_MATRIX_PARAMS.slitTopWidthFactor
+        );
+        queryMatrix.setColor(new THREE.Color(0x3333ff));
+        scene.add(queryMatrix.group);
+        mhaVisualizations.push(queryMatrix);
+
+        const keyMatrix = new WeightMatrixVisualization(
+            null, new THREE.Vector3(x_k, mhsa_matrix_center_y, 0),
+            MHA_MATRIX_PARAMS.width, MHA_MATRIX_PARAMS.height, MHA_MATRIX_PARAMS.depth,
+            MHA_MATRIX_PARAMS.topWidthFactor, MHA_MATRIX_PARAMS.cornerRadius, MHA_MATRIX_PARAMS.numberOfSlits,
+            MHA_MATRIX_PARAMS.slitWidth, MHA_MATRIX_PARAMS.slitDepthFactor,
+            MHA_MATRIX_PARAMS.slitBottomWidthFactor, MHA_MATRIX_PARAMS.slitTopWidthFactor
+        );
+        keyMatrix.setColor(new THREE.Color(0x33ff33));
+        scene.add(keyMatrix.group);
+        mhaVisualizations.push(keyMatrix);
+
+        const valueMatrix = new WeightMatrixVisualization(
+            null, new THREE.Vector3(x_v, mhsa_matrix_center_y, 0),
+            MHA_MATRIX_PARAMS.width, MHA_MATRIX_PARAMS.height, MHA_MATRIX_PARAMS.depth,
+            MHA_MATRIX_PARAMS.topWidthFactor, MHA_MATRIX_PARAMS.cornerRadius, MHA_MATRIX_PARAMS.numberOfSlits,
+            MHA_MATRIX_PARAMS.slitWidth, MHA_MATRIX_PARAMS.slitDepthFactor,
+            MHA_MATRIX_PARAMS.slitBottomWidthFactor, MHA_MATRIX_PARAMS.slitTopWidthFactor
+        );
+        valueMatrix.setColor(new THREE.Color(0xff3333));
+        scene.add(valueMatrix.group);
+        mhaVisualizations.push(valueMatrix);
+    }
+
+    // -------------------------------------------------------------------------
+    //  Main path parameters (Values from LayerAnimationConstants.js)
+    // -------------------------------------------------------------------------
+    // const offsetY = 10; // Now ANIM_OFFSET_Y_ORIGINAL_SPAWN
+    const startY = LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2 - ANIM_OFFSET_Y_ORIGINAL_SPAWN;
+    // const meetYOffset = 5; // Now ANIM_MEET_Y_OFFSET_ABOVE_LN1
+    const meetY = LAYER_NORM_1_Y_POS + LN_PARAMS.height / 2 + ANIM_MEET_Y_OFFSET_ABOVE_LN1;
+
+    const branchStartY = startY + 5;
+
+    const numVectors = LN_PARAMS.numberOfHoles;
+    const slitSpacing = LN_PARAMS.depth / (numVectors + 1);
+
+    // Motion speeds (Now from constants)
+    // const riseSpeedOriginal = 3;
+    // const horizSpeed = 15;
+    // const riseSpeedInsideLN = 6;
+    // const mergeGap = 7; // Not currently used due to animation change
+
     const originals = [];
-    const lanes = []; // each lane object will mirror LayerNormPipeline logic and extra states
+    const lanes = [];
 
     // --- Trail line support --------------------------------------------------------
-    const MAX_TRAIL_POINTS = 1500;
+    // const MAX_TRAIL_POINTS = 1500; // Now from constants
     function createTrailLine(color) {
         const geometry = new THREE.BufferGeometry();
         const positions = new Float32Array(MAX_TRAIL_POINTS * 3);
@@ -113,10 +184,10 @@ export function initLayerAnimation(container) {
     }
 
     for (let i = 0; i < numVectors; i++) {
-        const zPos = -lnParams.depth / 2 + slitSpacing * (i + 1);
+        const zPos = -LN_PARAMS.depth / 2 + slitSpacing * (i + 1);
 
         // ---------- Original vector on main (centre) path ----------
-        const data = Array.from({ length: VECTOR_LENGTH }, () => Math.random() * 2 - 1);
+        const data = Array.from({ length: VECTOR_LENGTH }, () => Math.random() * 2 - 1); // Reverted to random data
         const origVec = new VectorVisualization(data, new THREE.Vector3(0, startY, zPos));
         origVec.data = [...data];
         scene.add(origVec.group);
@@ -124,16 +195,16 @@ export function initLayerAnimation(container) {
 
         // ---------- Duplicate moving vector (will branch) ----------
         const movingVec = new VectorNormalizationVisualization(new THREE.Vector3(0, startY, zPos));
-        movingVec.originalData = [...data];
+        movingVec.originalData = [...data]; // Reverted to random data
         movingVec.normalizedData = movingVec.layerNormalize(data);
-        movingVec.data = movingVec.normalizedData;
+        movingVec.data = movingVec.normalizedData; // This is used by movingVec.update()
         scene.add(movingVec.group);
 
         // Start hidden – will appear once branch begins
         movingVec.group.visible = false;
 
         // ---------- Static vectors inside LayerNorm ----------
-        const multTarget = new VectorVisualization(data.slice(), new THREE.Vector3(branchX, 3.3, zPos));
+        const multTarget = new VectorVisualization(data.slice(), new THREE.Vector3(BRANCH_X, 3.3, zPos)); // Reverted to random data
         multTarget.data = [...data];
         scene.add(multTarget.group);
 
@@ -273,15 +344,48 @@ export function initLayerAnimation(container) {
 
     // helper to push position into trail
     function updateTrail(trailObj, pos) {
+        // Ensure pos is valid and is a Vector3-like object
+        if (!pos || typeof pos.x !== 'number' || typeof pos.y !== 'number' || typeof pos.z !== 'number') {
+            // console.warn('updateTrail received invalid pos:', pos);
+            return; // Invalid position, do nothing
+        }
+
         const pts = trailObj.points;
-        // Only add if changed
-        if (pts.length === 0 || pos.x !== pts[pts.length - 1][0] || pos.y !== pts[pts.length - 1][1] || pos.z !== pts[pts.length - 1][2]) {
-            if (pts.length < MAX_TRAIL_POINTS) pts.push([pos.x, pos.y, pos.z]);
-            const idx = pts.length - 1;
-            trailObj.geometry.attributes.position.setXYZ(idx, pos.x, pos.y, pos.z);
-            trailObj.geometry.setDrawRange(0, pts.length);
-            trailObj.geometry.attributes.position.needsUpdate = true;
-            if (idx % 20 === 0) trailObj.geometry.computeBoundingSphere();
+        let needsToPushNewPoint = false;
+
+        if (pts.length === 0) {
+            needsToPushNewPoint = true;
+        } else {
+            const lastPt = pts[pts.length - 1];
+            // Check if last point is a valid array [x,y,z]
+            if (Array.isArray(lastPt) && lastPt.length === 3 &&
+                typeof lastPt[0] === 'number' && typeof lastPt[1] === 'number' && typeof lastPt[2] === 'number') {
+                if (pos.x !== lastPt[0] || pos.y !== lastPt[1] || pos.z !== lastPt[2]) {
+                    needsToPushNewPoint = true;
+                }
+            } else {
+                // Last point is corrupted, treat as if point changed to re-sync / clear and push.
+                // For now, just mark that we need to push the current valid 'pos'.
+                // console.warn("Corrupted last point in trail. Forcing update with current pos.", lastPt);
+                needsToPushNewPoint = true;
+                // Optional: clear corrupted trail: pts.length = 0;
+            }
+        }
+
+        if (needsToPushNewPoint) {
+            if (pts.length < MAX_TRAIL_POINTS) {
+                pts.push([pos.x, pos.y, pos.z]);
+                const idx = pts.length - 1;
+                trailObj.geometry.attributes.position.setXYZ(idx, pos.x, pos.y, pos.z);
+                trailObj.geometry.setDrawRange(0, pts.length);
+                trailObj.geometry.attributes.position.needsUpdate = true;
+                // Compute bounding sphere: if it's the first point, or every 20 points thereafter.
+                if (idx === 0 || (idx > 0 && idx % 20 === 0)) {
+                    trailObj.geometry.computeBoundingSphere();
+                }
+            }
+            // If MAX_TRAIL_POINTS is reached, the trail currently stops visually extending.
+            // No shifting logic is implemented in this version of LayerAnimation's trail.
         }
     }
 
@@ -314,26 +418,26 @@ export function initLayerAnimation(container) {
         const exitTransitionRange = 10; // Y-distance over which the exit transition occurs
 
         const firstMovingVecY = lanes.length > 0 ? lanes[0].movingVec.group.position.y : startY;
-        const bottomY = -lnParams.height / 2;
-        const midY = 0; // Assuming center is 0
-        const topY = lnParams.height / 2;
+        const bottomY_ln1_abs = LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2;
+        const midY_ln1_abs = LAYER_NORM_1_Y_POS;
+        const topY_ln1_abs = LAYER_NORM_1_Y_POS + LN_PARAMS.height / 2;
 
         let targetColor = darkGray;
         let targetOpacity = opaqueOpacity;
         let lerpFactor = 0;
 
-        if (firstMovingVecY >= bottomY && firstMovingVecY < midY) {
+        if (firstMovingVecY >= bottomY_ln1_abs && firstMovingVecY < midY_ln1_abs) {
             // Entering (Bottom Half): Lerp from Dark Gray to Light Yellow / Semi-Transparent
-            lerpFactor = (firstMovingVecY - bottomY) / (midY - bottomY);
+            lerpFactor = (firstMovingVecY - bottomY_ln1_abs) / (midY_ln1_abs - bottomY_ln1_abs);
             targetColor = darkGray.clone().lerp(lightYellow, lerpFactor);
             targetOpacity = opaqueOpacity + (semiTransparentOpacity - opaqueOpacity) * lerpFactor;
-        } else if (firstMovingVecY >= midY && firstMovingVecY < topY) {
+        } else if (firstMovingVecY >= midY_ln1_abs && firstMovingVecY < topY_ln1_abs) {
             // Inside (Top Half): Stay at Light Yellow / Semi-Transparent
             targetColor = lightYellow;
             targetOpacity = semiTransparentOpacity;
-        } else if (firstMovingVecY >= topY) {
+        } else if (firstMovingVecY >= topY_ln1_abs) {
             // Exiting: Lerp from Light Yellow / Semi-Transparent to Bright Yellow / Opaque
-            lerpFactor = Math.min(1, (firstMovingVecY - topY) / exitTransitionRange);
+            lerpFactor = Math.min(1, (firstMovingVecY - topY_ln1_abs) / exitTransitionRange);
             targetColor = lightYellow.clone().lerp(brightYellow, lerpFactor);
             targetOpacity = semiTransparentOpacity + (opaqueOpacity - semiTransparentOpacity) * lerpFactor;
             // Ensure opacity reaches exactly 1.0 when lerpFactor is 1
@@ -342,7 +446,7 @@ export function initLayerAnimation(container) {
             }
         } // Else (below) remains darkGray and opaque
 
-        layerNorm.group.children.forEach(child => {
+        layerNorm1.group.children.forEach(child => {
             if (child instanceof THREE.Mesh && child.material) {
                 // Set transparent flag based on final opacity value
                 child.material.transparent = targetOpacity < 1.0;
@@ -358,7 +462,11 @@ export function initLayerAnimation(container) {
             // --- MultTarget Appearance Control ---
             const movingVecY = movingVec.group.position.y;
             // Lerp factor based on movingVec's progress in the bottom half of LN
-            const multLerpFactor = THREE.MathUtils.clamp((movingVecY - bottomY) / (midY - bottomY), 0, 1);
+            // This needs to be relative to layerNorm1's position
+            const movingVecY_relativeTo_LN1_bottom = movingVecY - (LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2);
+            const ln1_height = LN_PARAMS.height;
+            const multLerpFactor = THREE.MathUtils.clamp(movingVecY_relativeTo_LN1_bottom / (ln1_height / 2), 0, 1);
+
             const initialMultEmissiveIntensity = 0.01;
             const finalMultEmissiveIntensity = 0.4; // Slightly brighter than default
 
@@ -386,14 +494,15 @@ export function initLayerAnimation(container) {
 
             // -------------------- ORIGINAL VEC RISE --------------------
             const branchFinalY = meetY; // branched vectors end at the merge height
-            const originalStopY = meetY - mergeGap; // originals stop below branched vectors
-            if (originalVec.group.position.y < originalStopY) {
-                originalVec.group.position.y += riseSpeedOriginal * deltaTime;
-                if (originalVec.group.position.y > originalStopY) originalVec.group.position.y = originalStopY;
+            const originalTargetY = meetY;
+
+            if (originalVec.group.position.y < originalTargetY) {
+                originalVec.group.position.y += ANIM_RISE_SPEED_ORIGINAL * deltaTime;
+                if (originalVec.group.position.y > originalTargetY) originalVec.group.position.y = originalTargetY;
             }
 
             // Update original trail: track center ellipse during merge, else use group position
-            if (lane.mergeStarted) {
+            if (lane.mergeStarted) { // This mergeStarted will now only be for future merge operations, not LN1
                 const centerIndex = Math.floor(VECTOR_LENGTH / 2);
                 const centerEllipse = originalVec.ellipses[centerIndex];
                 const worldPos = new THREE.Vector3();
@@ -415,23 +524,24 @@ export function initLayerAnimation(container) {
                 }
                 case 'right': {
                     // Horizontal move to LayerNorm X
-                    const dx = horizSpeed * deltaTime;
-                    movingVec.group.position.x = Math.min(branchX, movingVec.group.position.x + dx);
-                    if (movingVec.group.position.x >= branchX) {
-                        movingVec.group.position.x = branchX;
+                    const dx = ANIM_HORIZ_SPEED * deltaTime;
+                    movingVec.group.position.x = Math.min(BRANCH_X, movingVec.group.position.x + dx);
+                    if (movingVec.group.position.x >= BRANCH_X) {
+                        movingVec.group.position.x = BRANCH_X;
                         lane.horizPhase = 'insideLN';
                     }
                     break;
                 }
                 case 'insideLN': {
                     // ---------------- LayerNorm pipeline behaviour ----------------
-                    const bottomY = -lnParams.height / 2;
-                    const midY = 0;
-                    const topY = lnParams.height / 2;
+                    // Y positions relative to the current LayerNorm (layerNorm1 for now)
+                    const currentLN_bottomY_abs = LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2;
+                    const currentLN_midY_abs = LAYER_NORM_1_Y_POS;
+                    // const currentLN_topY_abs = LAYER_NORM_1_Y_POS + LN_PARAMS.height / 2;
 
-                    // Start normalization when reaching 35% height above bottom
-                    const normStartY = bottomY + (midY - bottomY) * 0.35;
-                    if (!lane.normStarted && movingVec.group.position.y >= normStartY) {
+                    // Start normalization when reaching 35% height above bottom of current LN
+                    const normStartY_abs = currentLN_bottomY_abs + (LN_PARAMS.height * 0.35);
+                    if (!lane.normStarted && movingVec.group.position.y >= normStartY_abs) {
                         movingVec.startAnimation();
                         lane.normStarted = true;
                     }
@@ -442,11 +552,11 @@ export function initLayerAnimation(container) {
                     // Move up (only when not actively normalizing)
                     const normAnimating = lane.normStarted && movingVec.animationState.isAnimating;
                     if (!lane.multStarted && !normAnimating) {
-                        movingVec.group.position.y += riseSpeedInsideLN * deltaTime;
+                        movingVec.group.position.y += ANIM_RISE_SPEED_INSIDE_LN * deltaTime;
                     }
 
-                    // Trigger multiplication at centre
-                    if (!lane.multStarted && movingVec.group.position.y >= midY) {
+                    // Trigger multiplication at centre of current LN
+                    if (!lane.multStarted && movingVec.group.position.y >= currentLN_midY_abs) {
                         lane.multStarted = true;
                         startMultiplicationAnimation(movingVec, multTarget, () => {
                             lane.multDone = true;
@@ -470,30 +580,16 @@ export function initLayerAnimation(container) {
                                 lane.resultVec = resultVec;
 
                                 // Rise just above LN top
-                                const finalY = branchFinalY; // fully clear LayerNorm
+                                const finalY = branchFinalY;
                                 const distance = finalY - resultVec.group.position.y;
-                                const riseDuration = (distance / riseSpeedInsideLN) * 1000;
+                                const riseDuration = (distance / ANIM_RISE_SPEED_INSIDE_LN) * 1000;
 
                                 new TWEEN.Tween(resultVec.group.position)
                                     .to({ y: finalY }, riseDuration)
                                     .easing(TWEEN.Easing.Linear.None)
                                     .onComplete(() => {
-                                        // Start horizontal slide left to centre
-                                        const slideDuration = (branchX / horizSpeed) * 1000;
-                                        new TWEEN.Tween(resultVec.group.position)
-                                            .to({ x: 0 }, slideDuration)
-                                            .easing(TWEEN.Easing.Quadratic.InOut)
-                                            .onComplete(() => {
-                                                // Trigger merge addition once at centre
-                                                if (!lane.mergeStarted) {
-                                                    lane.mergeStarted = true;
-                                                    startAdditionAnimation(originalVec, lane.resultVec, () => {
-                                                        lane.resultVec.group.visible = false;
-                                                        lane.horizPhase = 'merged';
-                                                    });
-                                                }
-                                            })
-                                            .start();
+                                        // Vector has passed LN1 and is at branchX, finalY
+                                        lane.horizPhase = 'completedLN1'; // New phase indicating LN1 is done, vector is at branchX
                                     })
                                     .start();
                             }
@@ -501,17 +597,18 @@ export function initLayerAnimation(container) {
                     }
                     break;
                 }
-                case 'moveLeft': {
-                    if (!lane.mergeStarted && lane.resultVec && lane.resultVec.group.position.x <= 0.01) {
-                        lane.mergeStarted = true;
-                        startAdditionAnimation(originalVec, lane.resultVec, () => {
-                            lane.resultVec.group.visible = false;
-                            lane.horizPhase = 'merged';
-                        });
-                    }
+                case 'moveLeft': { // This case will no longer be triggered by the LN1 output
+                    // if (!lane.mergeStarted && lane.resultVec && lane.resultVec.group.position.x <= 0.01) {
+                    //     lane.mergeStarted = true;
+                    //     startAdditionAnimation(originalVec, lane.resultVec, () => {
+                    //         lane.resultVec.group.visible = false;
+                    //         lane.horizPhase = 'merged';
+                    //     });
+                    // }
                     break;
                 }
-                case 'merged':
+                case 'merged': // This case will no longer be triggered by the LN1 output
+                case 'completedLN1': // New state, vector is waiting for next step
                 default:
                     break;
             }
@@ -554,7 +651,15 @@ export function initLayerAnimation(container) {
             l.multTarget.dispose();
             if (l.resultVec) l.resultVec.dispose();
         });
-        layerNorm.dispose && layerNorm.dispose();
+        layerNorm1.dispose && layerNorm1.dispose();
+
+        // mhaVisualizations and mlpMatrix1/mlpMatrix2 contain WeightMatrixVisualization instances.
+        // Their groups and meshes will be handled by the scene.traverse below.
+        // If WeightMatrixVisualization had its own dispose, we'd call it here.
+        // e.g., mhaVisualizations.forEach(vis => vis.dispose && vis.dispose());
+        // e.g., if (mlpMatrix1.dispose) mlpMatrix1.dispose();
+        // e.g., if (mlpMatrix2.dispose) mlpMatrix2.dispose();
+
         scene.traverse(obj => {
             if (obj.geometry) obj.geometry.dispose();
             if (obj.material) {
