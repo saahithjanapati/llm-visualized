@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Instanced Prism Addition Animation Test</title>
+    <style>
+        body { margin: 0; font-family: Arial, sans-serif; background-color: #111; color: #fff; }
+        canvas { display: block; }
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background-color: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 5px;
+            z-index: 10;
+        }
+        button {
+            background-color: #444;
+            color: #fff;
+            border: 1px solid #666;
+            padding: 8px 12px;
+            margin-top: 5px;
+            cursor: pointer;
+            border-radius: 3px;
+        }
+        button:hover {
+            background-color: #555;
+        }
+    </style>
+    <!-- Load TWEEN.js globally using UMD version -->
+    <script src="https://unpkg.com/@tweenjs/tween.js@23.1.1/dist/tween.umd.js"></script>
+</head>
+<body>
+    <div id="controls">
+        <button id="randomizeData">Randomize Source/Target</button>
+        <button id="animateAddition">Animate Addition</button> 
+    </div>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.162.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.162.0/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { VectorVisualizationInstancedPrism } from '../src/components/VectorVisualizationInstancedPrism.js';
+        import { PrismAdditionAnimation } from '../src/animations/PrismAdditionAnimation.js';
+
+        // TWEEN is now globally available via the script tag, no import needed.
+        // window.TWEEN is also not needed as TWEEN is directly global.
+
+        // --- Direct TWEEN Test in HTML (using global TWEEN) ---
+        console.log('[HTML Direct Test] Initial TWEEN count:', TWEEN.getAll ? TWEEN.getAll().length : 'N/A');
+        const htmlTestTweenData = { v: 0 };
+        const htmlTestTween = new TWEEN.Tween(htmlTestTweenData)
+            .to({ v: 1 }, 500)
+            .onUpdate(() => console.log('[HTML Direct Test] htmlTestTween updated:', htmlTestTweenData.v))
+            .onComplete(() => console.log('[HTML Direct Test] htmlTestTween completed.'))
+            .start();
+        const htmlTestTweenCountAfter = TWEEN.getAll ? TWEEN.getAll().length : -1;
+        console.log('[HTML Direct Test] TWEEN count after starting one tween:', htmlTestTweenCountAfter);
+        if (htmlTestTweenCountAfter === 0) {
+            console.error('[HTML Direct Test] CRITICAL: TWEEN.start() did not register the tween directly in HTML with UMD version.');
+        } else {
+            console.log('[HTML Direct Test] SUCCESS: TWEEN.start() registered a tween using UMD version.');
+        }
+        // --- End of Direct TWEEN Test ---
+
+        let scene, camera, renderer, controls, clock;
+        let prismVecSource, prismVecTarget, additionAnimation;
+
+        // Initial position for vectors
+        const targetPos = new THREE.Vector3(0, 0, 0);
+        const sourceOffset = new THREE.Vector3(0, -5, 0); // Position source below target
+        const sourcePos = targetPos.clone().add(sourceOffset);
+
+        init();
+        animate();
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1a1a1a);
+            clock = new THREE.Clock();
+
+            const aspect = window.innerWidth / window.innerHeight;
+            camera = new THREE.PerspectiveCamera(60, aspect, 0.1, 2000);
+            camera.position.set(0, 10, 90); // Adjusted position slightly
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.9);
+            directionalLight.position.set(15, 30, 25);
+            scene.add(directionalLight);
+
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.target.set(0, 0, 0); // Center target
+
+            // Create two prism vectors
+            prismVecTarget = new VectorVisualizationInstancedPrism(null, targetPos);
+            prismVecSource = new VectorVisualizationInstancedPrism(null, sourcePos);
+            scene.add(prismVecTarget.group);
+            scene.add(prismVecSource.group);
+
+            // Create animation controller
+            additionAnimation = new PrismAdditionAnimation(prismVecSource, prismVecTarget);
+            
+            // --- Button Listeners ---
+            document.getElementById('randomizeData').addEventListener('click', () => {
+                // Generate new data for both source and target
+                const newSourceData = prismVecSource.generateTestData();
+                const newTargetData = prismVecTarget.generateTestData();
+                // Snap both visuals to their new data states
+                prismVecSource.updateDataAndSnapVisuals(newSourceData);
+                prismVecTarget.updateDataAndSnapVisuals(newTargetData);
+            });
+
+            document.getElementById('animateAddition').addEventListener('click', () => {
+                if (additionAnimation) {
+                    additionAnimation.start();
+                }
+            });
+
+            window.addEventListener('resize', onWindowResize, false);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const deltaTime = clock.getDelta();
+            // Use TWEEN.update() without passing custom time so it uses performance.now()
+            const tweenUpdated = TWEEN.update(); // Update TWEEN with internal clock
+            // Debug: log first few frames after starting animation
+            if (tweenUpdated && additionAnimation && additionAnimation.isAnimating) {
+                console.log("Frame updated tweens");
+            }
+
+            if (additionAnimation) { // Call the animation controller's update method
+                additionAnimation.update(deltaTime);
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html> 

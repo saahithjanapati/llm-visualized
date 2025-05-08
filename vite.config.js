@@ -23,25 +23,14 @@ export default defineConfig({
     rollupOptions: {
         input: {
             main: resolve(__dirname, 'index.html'),
-            app: resolve(__dirname, 'app.html'),
-            testVector: resolve(__dirname, 'tests/test_vector.html'),
-            testWeightMatrix: resolve(__dirname, 'tests/test_weight_matrix.html'),
-            risingVectors: resolve(__dirname, 'tests/rising-vectors-test.html'),
-            vectorMatrix: resolve(__dirname, 'tests/vector-matrix-test.html'),
-            vectorAddition: resolve(__dirname, 'tests/vector_addition_test.html'),
-            vectorMultiplication: resolve(__dirname, 'tests/vector_multiplication_test.html'),
-            vectorNormalization: resolve(__dirname, 'tests/vector_normalization_test.html'),
-            layerNorm: resolve(__dirname, 'tests/test_layer_norm.html'),
-            layerNormPipeline: resolve(__dirname, 'tests/layer-norm-pipeline-test.html'),
+
             layer: resolve(__dirname, 'tests/layer-animation-test.html'),
-            attention: resolve(__dirname, 'tests/attention-head-test.html'),
             mha: resolve(__dirname, 'tests/multi-head-attention-test.html'),
-            vectorAdditionInstanced: resolve(__dirname, 'tests/vector_addition_instanced_test.html'),
             gptModel: resolve(__dirname, 'tests/gpt-model-test.html'),
-            vectorInstanced: resolve(__dirname, 'tests/test_vector_instanced.html'),
             vectorInstancedPrism: resolve(__dirname, 'tests/test_vector_instanced_prism.html'),
-            minimalInstancedColor: resolve(__dirname, 'tests/minimal_instanced_color_test.html'),
-            prismRowVisualization: resolve(__dirname, 'tests/test_prism_row_visualization.html')
+            prismRowVisualization: resolve(__dirname, 'tests/test_prism_row_visualization.html'),
+            prismLayerNormAnimation: resolve(__dirname, 'tests/test_vector_instanced_prism_norm_anim.html'),
+            prismAdditionAnimation: resolve(__dirname, 'tests/test_vector_instanced_prism_add_anim.html')
         }
     } 
   },

@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { uniformRandom } from '../utils/mathUtils.js';
 import { 
     VECTOR_LENGTH_PRISM, 
     PRISM_BASE_WIDTH,
@@ -8,52 +7,54 @@ import {
     PRISM_HEIGHT_SCALE_FACTOR,
 } from '../utils/constants.js';
 
-// Generate the base geometry once
-// The prism's origin will be at its center. We'll adjust its y-position when setting instance matrices.
-const basePrismGeometry = new THREE.BoxGeometry(PRISM_BASE_WIDTH, 1, PRISM_BASE_DEPTH); // Height is 1, will be scaled
+// Base geometry has height 1, will be scaled by data
+const basePrismGeometry = new THREE.BoxGeometry(PRISM_BASE_WIDTH, 1, PRISM_BASE_DEPTH);
+
+// Pre-calculate fixed uniform height and scales for the prisms
+let _uniformCalculatedHeight = PRISM_MAX_HEIGHT * PRISM_HEIGHT_SCALE_FACTOR * 2.0; // Double height
+_uniformCalculatedHeight = Math.max(0.01, _uniformCalculatedHeight); // Ensure minimum
+const _prismWidthScale = 1.5;
+const _prismDepthScale = 1.5;
 
 export class VectorVisualizationInstancedPrism {
-    constructor(initialData = null, initialPosition = new THREE.Vector3(0, 0, 0)) {
+    constructor(initialData = null, initialPosition = new THREE.Vector3(0, 0, 0), numSubsections = 30) {
         this.group = new THREE.Group();
         this.group.position.copy(initialPosition);
 
         this.rawData = initialData || this.generateTestData();
-        this.normalizedData = this.layerNormalize(this.rawData);
+        this.normalizedData = []; // Will be populated by updateDataInternal
+        this.numSubsections = numSubsections;
+        this.currentKeyColors = []; // To store the current random key colors for subsections
 
-        // Using MeshBasicMaterial to rule out lighting issues
+        // For storing individual instance animation states if needed by an external controller
+        this.instanceUserData = Array(VECTOR_LENGTH_PRISM).fill(null).map(() => ({})); 
+
         const material = new THREE.MeshBasicMaterial({ 
-            color: new THREE.Color(0xffffff) // Base color white, will be tinted by instance color
+            color: new THREE.Color(0xffffff) // Base color for material, instance colors will override
         });
 
         const instancedGeometry = basePrismGeometry.clone();
         this.mesh = new THREE.InstancedMesh(instancedGeometry, material, VECTOR_LENGTH_PRISM);
         this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-
-        this.updateInstanceGeometryAndColors();
         this.group.add(this.mesh);
+        
+        this.updateDataInternal(this.rawData.slice()); // Process initial data
+        this._generateKeyColors(); // Generate initial key colors
+        this.updateInstanceGeometryAndColors();      // Set initial visual state (fixed dimensions, subsection colors)
     }
 
     generateTestData() {
         const data = [];
         for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
-            // Generate values between 0 and 1 for simplicity
-            data.push(Math.random()); 
+            data.push(Math.random() * 2 - 1); // Values between -1 and 1 for more dynamic range
         }
         return data;
     }
 
-    // Rewritten layerNormalize for simplicity and robustness
-    layerNormalize(vectorData) {
-        if (!vectorData || vectorData.length === 0) {
-            console.warn("LayerNormalize: Input data is empty or null.");
-            return [];
-        }
-
-        const finiteData = vectorData.filter(val => typeof val === 'number' && isFinite(val));
-        if (finiteData.length === 0) {
-            console.warn("LayerNormalize: No finite numbers in input data. Defaulting to all 0.5.");
-            return vectorData.map(() => 0.5); // Return array of 0.5 of original length
-        }
+    minMaxNormalize(dataArray) {
+        if (!dataArray || dataArray.length === 0) return [];
+        const finiteData = dataArray.filter(val => typeof val === 'number' && isFinite(val));
+        if (finiteData.length === 0) return dataArray.map(() => 0.5); // Default if no finite numbers
 
         let minVal = finiteData[0];
         let maxVal = finiteData[0];
@@ -61,74 +62,185 @@ export class VectorVisualizationInstancedPrism {
             if (finiteData[i] < minVal) minVal = finiteData[i];
             if (finiteData[i] > maxVal) maxVal = finiteData[i];
         }
-
         const range = maxVal - minVal;
-
-        // If all values are the same (or very close), normalize all to 0.5
-        if (range < 1e-7) { // Using a small epsilon for float comparison
-            return vectorData.map(val => (typeof val === 'number' && isFinite(val) ? 0.5 : 0.5));
-        }
-
-        // Normalize to 0-1 range
-        return vectorData.map(val => {
+        if (range < 1e-7) return dataArray.map(val => (typeof val === 'number' && isFinite(val) ? 0.5 : 0.5));
+        return dataArray.map(val => {
             if (typeof val === 'number' && isFinite(val)) {
                 return (val - minVal) / range;
             } else {
-                // Handle non-finite numbers in original array by mapping them to 0.5 (mid-point)
-                return 0.5; 
+                return 0.5; // Default for non-finite original values
+            }
+        });
+    }
+
+    layerNormalize(vectorData) {
+        // Existing layerNormalize logic - assumed to return values in a typical range (e.g., roughly -1 to 1, or 0 to 1 after some scaling)
+        // For visualization, the output of layerNormalize should ideally be consistently in 0-1 range or be minMaxNormalized before height scaling.
+        // Let's assume it gives values that can be scaled. If it already produces 0-1, that's fine.
+        if (!vectorData || vectorData.length === 0) return [];
+        const finiteData = vectorData.filter(val => typeof val === 'number' && isFinite(val));
+        if (finiteData.length === 0) return vectorData.map(() => 0.5);
+        let minVal = finiteData[0];
+        let maxVal = finiteData[0];
+        for (let i = 1; i < finiteData.length; i++) {
+            if (finiteData[i] < minVal) minVal = finiteData[i];
+            if (finiteData[i] > maxVal) maxVal = finiteData[i];
+        }
+        const range = maxVal - minVal;
+        if (range < 1e-7) return vectorData.map(val => (typeof val === 'number' && isFinite(val) ? 0.5 : 0.5));
+        return vectorData.map(val => {
+            if (typeof val === 'number' && isFinite(val)) {
+                return (val - minVal) / range; // Ensures 0-1 output for layerNorm too
+            } else {
+                return 0.5;
             }
         });
     }
     
+    // This method now ALWAYS applies fixed dimensions. Colors are based on subsections.
+    // It's called for initial setup and when numSubsections changes.
+    // Temporary visual changes (like animation offsets/colors) will be done by setInstanceAppearance.
     updateInstanceGeometryAndColors() {
         const dummy = new THREE.Object3D();
-        let uniformHeight = PRISM_MAX_HEIGHT * PRISM_HEIGHT_SCALE_FACTOR;
-        uniformHeight *= 2.0; // Make prisms twice as tall
-        
-        const prismWidthScale = 1.5; // Make prisms 50% wider
-        const prismDepthScale = 1.5; // Make prisms 50% thicker (depth)
 
-        const color = new THREE.Color();
+        // Use the stored key colors
+        if (this.currentKeyColors.length === 0) this._generateKeyColors();
 
         for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
-            // Position and Scale
-            const x = (i - VECTOR_LENGTH_PRISM / 2) * (PRISM_BASE_WIDTH * prismWidthScale);
-            dummy.scale.set(prismWidthScale, uniformHeight, prismDepthScale); // Apply new width, height, and depth scale
-            dummy.position.set(x, uniformHeight / 2, 0); 
+            // Apply fixed, uniform dimensions
+            const x = (i - VECTOR_LENGTH_PRISM / 2) * (PRISM_BASE_WIDTH * _prismWidthScale);
+            dummy.scale.set(_prismWidthScale, _uniformCalculatedHeight, _prismDepthScale);
+            dummy.position.set(x, _uniformCalculatedHeight / 2, 0); 
             dummy.updateMatrix();
             this.mesh.setMatrixAt(i, dummy.matrix);
 
-            // Set color to form a smooth gradient across instances
-            const hue = i / VECTOR_LENGTH_PRISM; // Hue from 0.0 to 1.0 across all prisms
-            const saturation = 1.0; // Full saturation for vibrancy
-            const lightness = 0.5;  // Standard lightness for vibrant hues
-            color.setHSL(hue, saturation, lightness);
-            this.mesh.setColorAt(i, color);
+            // Set color using the stored key colors and getDefaultColorForIndex logic
+            this.mesh.setColorAt(i, this.getDefaultColorForIndex(i));
         }
 
         this.mesh.instanceMatrix.needsUpdate = true;
         if (this.mesh.instanceColor) {
             this.mesh.instanceColor.needsUpdate = true;
-            // console.log("instanceColor buffer exists and needsUpdate set to true.");
         } else {
-            // console.warn("instanceColor buffer does NOT exist on the mesh after setColorAt!");
+            // This warning should ideally not appear with correct material setup
+            console.warn("instanceColor buffer does NOT exist on the mesh after setColorAt!");
         }
-        // console.log("Finished attempting to set all instances to RED.");
     }
 
-    updateData(newData) {
-        if (!newData || newData.length !== VECTOR_LENGTH_PRISM) {
-            console.warn(`updateData: New data length (${newData ? newData.length : 'null'}) does not match VECTOR_LENGTH_PRISM (${VECTOR_LENGTH_PRISM}). Using old data or re-generating.`);
-            this.rawData = this.generateTestData(); // Fallback to new test data if bad input
+    // Updates the visual appearance of a single instance for animation purposes
+    setInstanceAppearance(index, yOffset, tempColor) {
+        if (index < 0 || index >= VECTOR_LENGTH_PRISM) return;
+        const currentMatrix = new THREE.Matrix4();
+        this.mesh.getMatrixAt(index, currentMatrix);
+        const position = new THREE.Vector3();
+        const quaternion = new THREE.Quaternion();
+        const scale = new THREE.Vector3();
+        currentMatrix.decompose(position, quaternion, scale);
+        const baseX = (index - VECTOR_LENGTH_PRISM / 2) * (PRISM_BASE_WIDTH * _prismWidthScale);
+        const basePrismYPos = _uniformCalculatedHeight / 2;
+        position.set(baseX, basePrismYPos + yOffset, 0);
+        
+        // Explicitly set the correct scale during compose
+        scale.set(_prismWidthScale, _uniformCalculatedHeight, _prismDepthScale);
+
+        currentMatrix.compose(position, quaternion, scale);
+        this.mesh.setMatrixAt(index, currentMatrix);
+        this.mesh.instanceMatrix.needsUpdate = true;
+
+        if (tempColor instanceof THREE.Color) {
+            this.mesh.setColorAt(index, tempColor);
+            if (this.mesh.instanceColor) {
+                this.mesh.instanceColor.needsUpdate = true;
+            }
+        }
+    }
+
+    // Resets a single instance to its default appearance (fixed dimensions, subsection color)
+    resetInstanceAppearance(index) {
+        if (index < 0 || index >= VECTOR_LENGTH_PRISM) return;
+        
+        const dummy = new THREE.Object3D();
+        const x = (index - VECTOR_LENGTH_PRISM / 2) * (PRISM_BASE_WIDTH * _prismWidthScale);
+        dummy.scale.set(_prismWidthScale, _uniformCalculatedHeight, _prismDepthScale);
+        dummy.position.set(x, _uniformCalculatedHeight / 2, 0); 
+        dummy.updateMatrix();
+        this.mesh.setMatrixAt(index, dummy.matrix);
+    }
+
+    // Renamed from updateData. This is for internal data state update only.
+    updateDataInternal(newData) {
+        if (!newData || !Array.isArray(newData) || newData.length !== VECTOR_LENGTH_PRISM) {
+            this.rawData = this.generateTestData();
         } else {
-            this.rawData = newData;
+            this.rawData = newData.slice();
         }
         this.normalizedData = this.layerNormalize(this.rawData);
+    }
+
+    // Public method for users to update data, which will cause a visual snap.
+    // For animation, the PrismLayerNormAnimation class will call updateDataInternal
+    // and then manage visual updates via updateInstanceGeometryAndColors(interpolatedHeights).
+    updateDataAndSnapVisuals(newData) {
+        this.updateDataInternal(newData);
+        this._generateKeyColors(); // Regenerate key colors for the snap
         this.updateInstanceGeometryAndColors();
+    }
+    
+    updateColorSubsections(newNumSubsections) {
+        this.numSubsections = Math.max(1, Math.floor(newNumSubsections));
+        // This will re-calculate colors and also re-apply current heights (animated or static)
+        this.updateInstanceGeometryAndColors(); 
     }
 
     dispose() {
         if (this.mesh.geometry) this.mesh.geometry.dispose();
         if (this.mesh.material) this.mesh.material.dispose();
+        this.rawData = [];
+        this.normalizedData = [];
+        this.instanceUserData = [];
+    }
+
+    _generateKeyColors() {
+        this.currentKeyColors = [];
+        const currentNumSubsections = Math.max(1, this.numSubsections);
+        const numKeyColors = currentNumSubsections + 1;
+        for (let k = 0; k < numKeyColors; k++) {
+            const randomHue = Math.random();
+            this.currentKeyColors.push(new THREE.Color().setHSL(randomHue, 1.0, 0.5));
+        }
+    }
+
+    getDefaultColorForIndex(index) {
+        const tempColor = new THREE.Color();
+        if (index < 0 || index >= VECTOR_LENGTH_PRISM || this.currentKeyColors.length === 0) {
+             return tempColor.setRGB(0.5, 0.5, 0.5); 
+        }
+        const currentNumSubsections = Math.max(1, this.numSubsections);
+        if (VECTOR_LENGTH_PRISM <= 1) {
+            tempColor.copy(this.currentKeyColors[0]);
+        } else {
+            const globalProgress = index / (VECTOR_LENGTH_PRISM - 1);
+            const segmentProgress = globalProgress * currentNumSubsections;
+            const idx1 = Math.floor(segmentProgress);
+            const safeIdx1 = Math.min(idx1, this.currentKeyColors.length - 1);
+            const safeIdx2 = Math.min(idx1 + 1, this.currentKeyColors.length - 1);
+            const color1 = this.currentKeyColors[safeIdx1];
+            const color2 = this.currentKeyColors[safeIdx2];
+            const local_t = segmentProgress - idx1;
+            tempColor.copy(color1).lerp(color2, local_t);
+        }
+        return tempColor;
+    }
+
+    getUniformHeight() {
+        return _uniformCalculatedHeight;
+    }
+
+    getWidthScale() { 
+        return _prismWidthScale; 
+    }
+
+    getDepthScale() { 
+        return _prismDepthScale; 
     }
 }
