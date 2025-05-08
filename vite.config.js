@@ -37,7 +37,11 @@ export default defineConfig({
             attention: resolve(__dirname, 'tests/attention-head-test.html'),
             mha: resolve(__dirname, 'tests/multi-head-attention-test.html'),
             vectorAdditionInstanced: resolve(__dirname, 'tests/vector_addition_instanced_test.html'),
-            gptModel: resolve(__dirname, 'tests/gpt-model-test.html')
+            gptModel: resolve(__dirname, 'tests/gpt-model-test.html'),
+            vectorInstanced: resolve(__dirname, 'tests/test_vector_instanced.html'),
+            vectorInstancedPrism: resolve(__dirname, 'tests/test_vector_instanced_prism.html'),
+            minimalInstancedColor: resolve(__dirname, 'tests/minimal_instanced_color_test.html'),
+            prismRowVisualization: resolve(__dirname, 'tests/test_prism_row_visualization.html')
         }
     } 
   },
