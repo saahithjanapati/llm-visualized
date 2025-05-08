@@ -54,13 +54,13 @@ scene.add(layerNormVis.group);
 // ---- GUI ----
 const gui = new GUI();
 const geomFolder = gui.addFolder('Geometry');
-geomFolder.add(params, 'width', 2, 20, 0.1).onChange(() => {
+geomFolder.add(params, 'width', 2, 1000, 0.1).onChange(() => {
     layerNormVis.updateGeometry(params);
 });
-geomFolder.add(params, 'height', 1, 10, 0.1).onChange(() => {
+geomFolder.add(params, 'height', 1, 1000, 0.1).onChange(() => {
     layerNormVis.updateGeometry(params);
 });
-geomFolder.add(params, 'depth', 1, 30, 0.1).onChange(() => {
+geomFolder.add(params, 'depth', 1, 1000, 0.1).onChange(() => {
     layerNormVis.updateGeometry(params);
 });
 geomFolder.add(params, 'wallThickness', 0.1, 3, 0.05).onChange(() => {

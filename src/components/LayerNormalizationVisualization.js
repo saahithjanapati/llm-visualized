@@ -175,11 +175,27 @@ export class LayerNormalizationVisualization {
                     (outerRadiusY * cosT) * (outerRadiusY * cosT) +
                     (outerRadiusX * sinT) * (outerRadiusX * sinT)
                 );
-                // Cull only faces that lie *well* inside the wall ( >≈40 % of
-                // wall thickness).  This avoids deleting legitimate outer-wall
-                // triangles whose centroids happen to fall a little inside due
-                // to geometry tessellation.
-                const margin = this.wallThickness * 0.01;
+                // Adjust the culling margin so it scales with the overall
+                // size of the geometry.  A fixed absolute value worked fine
+                // for very small meshes but once the ellipse grows, the
+                // geometric error between the ideal curve and the faceted
+                // approximation increases proportionally to the radius.
+                // If we keep using the tiny constant margin we end up
+                // mistakenly deleting legitimate outer-wall faces.  We now
+                // base the margin on the *sagitta* (chord error) of the
+                // segmentation which is `R * (1 - cos(π / segments))` for a
+                // circle of radius R.  The ellipse has two radii, so we use
+                // the larger one as a safe upper-bound, and add a small
+                // wall-thickness factor to keep behaviour reasonable when the
+                // geometry is very small.
+
+                const maxOuterRadius = Math.max(outerRadiusX, outerRadiusY);
+                const chordError = maxOuterRadius * (1 - Math.cos(Math.PI / this.segments));
+
+                // Safety factor so we never accidentally cull *true* outer
+                // wall faces – tweakable but 1.1 works well in practise.
+                const margin = Math.max(this.wallThickness * 0.05, chordError * 1.1);
+
                 if (rLen < expectedR - margin) continue;
 
                 // Keep the triangle

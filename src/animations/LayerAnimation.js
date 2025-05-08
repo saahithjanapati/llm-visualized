@@ -4,13 +4,11 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { LayerNormalizationVisualization } from '../components/LayerNormalizationVisualization.js';
-import { VectorVisualization } from '../components/VectorVisualization.js';
-import { VectorNormalizationVisualization } from '../components/VectorNormalizationVisualization.js';
+import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization.js';
-import { VECTOR_LENGTH } from '../utils/constants.js';
-import { mapValueToColor } from '../utils/colors.js';
-import {
-    VERTICAL_GAP_COMPONENTS,
+import { 
+    VECTOR_LENGTH,
+    LN_TO_MHA_GAP,
     BRANCH_X,
     LAYER_NORM_1_Y_POS,
     LN_PARAMS,
@@ -26,10 +24,17 @@ import {
     ANIM_RISE_SPEED_ORIGINAL,
     ANIM_HORIZ_SPEED,
     ANIM_RISE_SPEED_INSIDE_LN,
-    MAX_TRAIL_POINTS
-} from './LayerAnimationConstants.js';
+    MAX_TRAIL_POINTS,
+    ANIM_RISE_SPEED_HEAD,
+    HEAD_VECTOR_STOP_BELOW,
+    GLOBAL_ANIM_SPEED_MULT
+} from '../utils/constants.js';
+import { mapValueToColor } from '../utils/colors.js';
 
 // NOTE: Requires global TWEEN.js (loaded separately via <script>)
+
+// Define speed multiplier
+const SPEED_MULT = GLOBAL_ANIM_SPEED_MULT;
 
 export function initLayerAnimation(container) {
     // -------------------------------------------------------------------------
@@ -38,8 +43,8 @@ export function initLayerAnimation(container) {
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x111111);
 
-    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 20, 70);
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 10000);
+    camera.position.set(2140, 150, 3500);
 
     let renderer;
     if (container instanceof HTMLCanvasElement) {
@@ -64,6 +69,7 @@ export function initLayerAnimation(container) {
     // -------------------------------------------------------------------------
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
+    controls.target.set(2140, 66, 0);
 
     scene.add(new THREE.AmbientLight(0xffffff, 0.6));
     const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
@@ -101,10 +107,11 @@ export function initLayerAnimation(container) {
     // const mhaMatrixParams = { ... }; // Now MHA_MATRIX_PARAMS from constants
 
     const ln1_top_y = layerNorm1.group.position.y + LN_PARAMS.height / 2;
-    const MHSA_BASE_Y = ln1_top_y + VERTICAL_GAP_COMPONENTS;
+    const MHSA_BASE_Y = ln1_top_y + LN_TO_MHA_GAP;
     const mhsa_matrix_center_y = MHSA_BASE_Y + MHA_MATRIX_PARAMS.height / 2;
 
     const mhaVisualizations = [];
+    const headsCentersX = [];
 
     for (let i = 0; i < NUM_HEAD_SETS_LAYER; i++) {
         const headSetWidth = MHA_INTERNAL_MATRIX_SPACING * 2 + MHA_MATRIX_PARAMS.width;
@@ -146,6 +153,8 @@ export function initLayerAnimation(container) {
         valueMatrix.setColor(new THREE.Color(0xff3333));
         scene.add(valueMatrix.group);
         mhaVisualizations.push(valueMatrix);
+
+        headsCentersX.push(x_k); // Use K matrix centre as canonical head centre
     }
 
     // -------------------------------------------------------------------------
@@ -188,24 +197,20 @@ export function initLayerAnimation(container) {
 
         // ---------- Original vector on main (centre) path ----------
         const data = Array.from({ length: VECTOR_LENGTH }, () => Math.random() * 2 - 1); // Reverted to random data
-        const origVec = new VectorVisualization(data, new THREE.Vector3(0, startY, zPos));
-        origVec.data = [...data];
+        const origVec = new VectorVisualizationInstancedPrism(data, new THREE.Vector3(0, startY, zPos));
         scene.add(origVec.group);
         originals.push(origVec);
 
         // ---------- Duplicate moving vector (will branch) ----------
-        const movingVec = new VectorNormalizationVisualization(new THREE.Vector3(0, startY, zPos));
-        movingVec.originalData = [...data]; // Reverted to random data
-        movingVec.normalizedData = movingVec.layerNormalize(data);
-        movingVec.data = movingVec.normalizedData; // This is used by movingVec.update()
+        const movingVec = new VectorVisualizationInstancedPrism(data, new THREE.Vector3(0, startY, zPos));
+        movingVec.updateDataInternal(data);
         scene.add(movingVec.group);
 
         // Start hidden – will appear once branch begins
         movingVec.group.visible = false;
 
         // ---------- Static vectors inside LayerNorm ----------
-        const multTarget = new VectorVisualization(data.slice(), new THREE.Vector3(BRANCH_X, 3.3, zPos)); // Reverted to random data
-        multTarget.data = [...data];
+        const multTarget = new VectorVisualizationInstancedPrism(data.slice(), new THREE.Vector3(BRANCH_X, 3.3, zPos));
         scene.add(multTarget.group);
 
         // Create trails
@@ -226,7 +231,12 @@ export function initLayerAnimation(container) {
             resultVec: null,
             mergeStarted: false,
             origTrail,
-            branchTrail
+            branchTrail,
+            // New MHSA traversal properties
+            travellingVec: null,
+            upwardCopies: [],
+            headIndex: 0,
+            finalAscend: false
         });
     }
 
@@ -234,6 +244,10 @@ export function initLayerAnimation(container) {
     //  Helper: multiplication animation (copied from pipeline)
     // -------------------------------------------------------------------------
     function startMultiplicationAnimation(vec1, vec2, onComplete) {
+        console.warn("startMultiplicationAnimation needs refactoring for InstancedPrism.");
+        if (onComplete) onComplete();
+
+        /*
         const duration = 750;
         const vectorLength = vec1.ellipses.length;
         let moveTweensCompleted = 0;
@@ -286,12 +300,16 @@ export function initLayerAnimation(container) {
                 if (onComplete) onComplete();
             }).start();
         }
+        */
     }
 
     // -------------------------------------------------------------------------
     //  Helper: addition animation (same as pipeline)
     // -------------------------------------------------------------------------
     function startAdditionAnimation(vec1, vec2, onComplete) {
+        console.warn("startAdditionAnimation needs refactoring for InstancedPrism.");
+        if (onComplete) onComplete();
+        /*
         const ADD_DURATION = 500;
         const ADD_FLASH = 120;
         const ADD_DELAY_BETWEEN = 50;
@@ -340,6 +358,7 @@ export function initLayerAnimation(container) {
                 })
                 .start();
         }
+        */
     }
 
     // helper to push position into trail
@@ -467,13 +486,17 @@ export function initLayerAnimation(container) {
             const ln1_height = LN_PARAMS.height;
             const multLerpFactor = THREE.MathUtils.clamp(movingVecY_relativeTo_LN1_bottom / (ln1_height / 2), 0, 1);
 
+            // TODO: Refactor for InstancedPrism - multTarget appearance
+            // The old code iterated ellipses. VectorVisualizationInstancedPrism handles its own appearance.
+            // If dynamic appearance is needed beyond default, use setInstanceAppearance or update data.
+            /*
             const initialMultEmissiveIntensity = 0.01;
             const finalMultEmissiveIntensity = 0.4; // Slightly brighter than default
 
             for (let i = 0; i < VECTOR_LENGTH; i++) {
                 const ellipse = multTarget.ellipses[i];
                 if (ellipse && ellipse.material) {
-                    const dataColor = mapValueToColor(multTarget.data[i]);
+                    const dataColor = mapValueToColor(multTarget.rawData[i]); // Use rawData
                     const darkDataColor = dataColor.clone().multiplyScalar(0.2); // Darker version
 
                     // Lerp color from dark to full, lerp emissive intensity
@@ -491,23 +514,27 @@ export function initLayerAnimation(container) {
                     ellipse.material.needsUpdate = true;
                 }
             }
+            */
 
             // -------------------- ORIGINAL VEC RISE --------------------
             const branchFinalY = meetY; // branched vectors end at the merge height
             const originalTargetY = meetY;
 
             if (originalVec.group.position.y < originalTargetY) {
-                originalVec.group.position.y += ANIM_RISE_SPEED_ORIGINAL * deltaTime;
+                originalVec.group.position.y += ANIM_RISE_SPEED_ORIGINAL * SPEED_MULT * deltaTime;
                 if (originalVec.group.position.y > originalTargetY) originalVec.group.position.y = originalTargetY;
             }
 
             // Update original trail: track center ellipse during merge, else use group position
             if (lane.mergeStarted) { // This mergeStarted will now only be for future merge operations, not LN1
                 const centerIndex = Math.floor(VECTOR_LENGTH / 2);
-                const centerEllipse = originalVec.ellipses[centerIndex];
-                const worldPos = new THREE.Vector3();
-                centerEllipse.getWorldPosition(worldPos);
-                updateTrail(lane.origTrail, worldPos);
+                // const centerEllipse = originalVec.ellipses[centerIndex]; // No ellipses
+                // const worldPos = new THREE.Vector3();
+                // centerEllipse.getWorldPosition(worldPos);
+                // updateTrail(lane.origTrail, worldPos);
+                // TODO: Refactor for InstancedPrism - If a specific point on the prism is needed, calculate it.
+                // For now, using group position.
+                updateTrail(lane.origTrail, originalVec.group.position);
             } else {
                 updateTrail(lane.origTrail, originalVec.group.position);
             }
@@ -524,7 +551,7 @@ export function initLayerAnimation(container) {
                 }
                 case 'right': {
                     // Horizontal move to LayerNorm X
-                    const dx = ANIM_HORIZ_SPEED * deltaTime;
+                    const dx = ANIM_HORIZ_SPEED * SPEED_MULT * deltaTime;
                     movingVec.group.position.x = Math.min(BRANCH_X, movingVec.group.position.x + dx);
                     if (movingVec.group.position.x >= BRANCH_X) {
                         movingVec.group.position.x = BRANCH_X;
@@ -542,17 +569,24 @@ export function initLayerAnimation(container) {
                     // Start normalization when reaching 35% height above bottom of current LN
                     const normStartY_abs = currentLN_bottomY_abs + (LN_PARAMS.height * 0.35);
                     if (!lane.normStarted && movingVec.group.position.y >= normStartY_abs) {
-                        movingVec.startAnimation();
+                        // movingVec.startAnimation(); // VectorVisualizationInstancedPrism does not have startAnimation
+                        // TODO: Refactor for InstancedPrism - Trigger normalization effect if needed.
+                        // This might involve a custom animation loop that calls setInstanceAppearance on movingVec
+                        // or a method within VectorVisualizationInstancedPrism to animate its normalization.
+                        // For now, we assume normalization is reflected by updating its data.
+                        movingVec.updateDataInternal(movingVec.rawData.slice()); // This re-calculates normalizedData
                         lane.normStarted = true;
                     }
 
                     // Update normalization visuals
-                    movingVec.update(timeNow);
+                    // movingVec.update(timeNow); // VectorVisualizationInstancedPrism does not have update()
+                    // TODO: Refactor for InstancedPrism - If there's an ongoing animation for normalization, update it here.
 
                     // Move up (only when not actively normalizing)
-                    const normAnimating = lane.normStarted && movingVec.animationState.isAnimating;
+                    // const normAnimating = lane.normStarted && movingVec.animationState.isAnimating; // animationState doesn't exist
+                    const normAnimating = false; // Placeholder, as direct animation state isn't available
                     if (!lane.multStarted && !normAnimating) {
-                        movingVec.group.position.y += ANIM_RISE_SPEED_INSIDE_LN * deltaTime;
+                        movingVec.group.position.y += ANIM_RISE_SPEED_INSIDE_LN * SPEED_MULT * deltaTime;
                     }
 
                     // Trigger multiplication at centre of current LN
@@ -565,11 +599,16 @@ export function initLayerAnimation(container) {
                             if (!lane.resultVec) {
                                 // Hide the multiplication target vector
                                 multTarget.group.visible = false;
-                                const resultData = [...multTarget.data];
-                                const resultVec = new VectorVisualization(resultData, multTarget.group.position.clone());
-                                resultVec.data = [...resultData];
+                                const resultData = [...multTarget.rawData]; // Use rawData from multTarget after multiplication
+                                // const resultVec = new VectorVisualization(resultData, multTarget.group.position.clone());
+                                const resultVec = new VectorVisualizationInstancedPrism(resultData, multTarget.group.position.clone());
+                                // resultVec.data = [...resultData];
                                 scene.add(resultVec.group);
                                 // Copy material appearance from multTarget
+                                // TODO: Refactor for InstancedPrism - Appearance transfer for instanced prisms.
+                                // This might involve setting similar subsection counts/colors or copying instance user data if applicable.
+                                // For now, resultVec will have its default appearance.
+                                /*
                                 for (let i = 0; i < VECTOR_LENGTH; i++) {
                                     if (multTarget.ellipses[i] && resultVec.ellipses[i]) {
                                         resultVec.ellipses[i].material.color.copy(multTarget.ellipses[i].material.color);
@@ -577,19 +616,23 @@ export function initLayerAnimation(container) {
                                         resultVec.ellipses[i].material.emissiveIntensity = multTarget.ellipses[i].material.emissiveIntensity;
                                     }
                                 }
+                                */
                                 lane.resultVec = resultVec;
 
                                 // Rise just above LN top
                                 const finalY = branchFinalY;
                                 const distance = finalY - resultVec.group.position.y;
-                                const riseDuration = (distance / ANIM_RISE_SPEED_INSIDE_LN) * 1000;
+                                const riseDuration = (distance / (ANIM_RISE_SPEED_INSIDE_LN * SPEED_MULT)) * 1000;
 
                                 new TWEEN.Tween(resultVec.group.position)
                                     .to({ y: finalY }, riseDuration)
                                     .easing(TWEEN.Easing.Linear.None)
                                     .onComplete(() => {
                                         // Vector has passed LN1 and is at branchX, finalY
-                                        lane.horizPhase = 'completedLN1'; // New phase indicating LN1 is done, vector is at branchX
+                                        lane.horizPhase = 'travelMHSA'; // Start moving through MHSA heads
+                                        lane.travellingVec = resultVec;
+                                        lane.headIndex = 0;
+                                        lane.upwardCopies = [];
                                     })
                                     .start();
                             }
@@ -597,7 +640,7 @@ export function initLayerAnimation(container) {
                     }
                     break;
                 }
-                case 'moveLeft': { // This case will no longer be triggered by the LN1 output
+                case 'moveLeft': {
                     // if (!lane.mergeStarted && lane.resultVec && lane.resultVec.group.position.x <= 0.01) {
                     //     lane.mergeStarted = true;
                     //     startAdditionAnimation(originalVec, lane.resultVec, () => {
@@ -607,10 +650,57 @@ export function initLayerAnimation(container) {
                     // }
                     break;
                 }
+                case 'travelMHSA': {
+                    const tVec = lane.travellingVec;
+                    if (!tVec) break;
+                    const targetHeadIdx = lane.headIndex || 0;
+                    const targetX = headsCentersX[Math.min(targetHeadIdx, headsCentersX.length - 1)];
+                    const dx = ANIM_HORIZ_SPEED * SPEED_MULT * deltaTime;
+                    if (tVec.group.position.x < targetX - 0.01) {
+                        tVec.group.position.x = Math.min(targetX, tVec.group.position.x + dx);
+                    } else {
+                        // Arrived at (or passed) the head centre
+                        if (targetHeadIdx < NUM_HEAD_SETS_LAYER - 1) {
+                            // Duplicate: create upward copy that rises, original continues
+                            const dupeData = [...tVec.rawData];
+                            const upVec = new VectorVisualizationInstancedPrism(dupeData, tVec.group.position.clone());
+                            scene.add(upVec.group);
+                            lane.upwardCopies.push(upVec);
+                        } else {
+                            // Last head – current vector will rise instead of duplicating
+                            lane.finalAscend = true;
+                        }
+                        lane.headIndex = targetHeadIdx + 1;
+                        // If finished traversing all heads, stop horizontal motion
+                        if (lane.headIndex >= NUM_HEAD_SETS_LAYER) {
+                            lane.horizPhase = 'finishedHeads';
+                        }
+                    }
+                    break;
+                }
+                case 'finishedHeads': {
+                    // No-op for now; vectors already positioned under heads
+                    break;
+                }
                 case 'merged': // This case will no longer be triggered by the LN1 output
-                case 'completedLN1': // New state, vector is waiting for next step
                 default:
                     break;
+            }
+
+            // --- Upward movement for copies under heads ---
+            const headStopY = mhsa_matrix_center_y - HEAD_VECTOR_STOP_BELOW;
+            if (lane.upwardCopies && lane.upwardCopies.length) {
+                lane.upwardCopies.forEach(upVec => {
+                    if (upVec.group.position.y < headStopY) {
+                        upVec.group.position.y = Math.min(headStopY, upVec.group.position.y + ANIM_RISE_SPEED_HEAD * SPEED_MULT * deltaTime);
+                    }
+                });
+            }
+            if (lane.finalAscend && lane.travellingVec) {
+                const tVec = lane.travellingVec;
+                if (tVec.group.position.y < headStopY) {
+                    tVec.group.position.y = Math.min(headStopY, tVec.group.position.y + ANIM_RISE_SPEED_HEAD * SPEED_MULT * deltaTime);
+                }
             }
 
             // Determine which branched object position to follow for trail
@@ -618,10 +708,13 @@ export function initLayerAnimation(container) {
             const centerIndex = Math.floor(VECTOR_LENGTH / 2);
             // During addition inside LayerNorm, follow the center ellipse movement
             if (lane.multStarted && lane.multDone && !lane.resultVec) {
-                const centerEllipse = lane.multTarget.ellipses[centerIndex];
-                const worldPos = new THREE.Vector3();
-                centerEllipse.getWorldPosition(worldPos);
-                branchPos = worldPos;
+                // const centerEllipse = lane.multTarget.ellipses[centerIndex]; // No ellipses
+                // const worldPos = new THREE.Vector3();
+                // centerEllipse.getWorldPosition(worldPos);
+                // branchPos = worldPos;
+                // TODO: Refactor for InstancedPrism - If a specific point on the prism is needed, calculate it.
+                // For now, using group position of multTarget (which is now the result's source).
+                branchPos = lane.multTarget.group.position;
             } else if (lane.resultVec && lane.resultVec.group.visible) {
                 branchPos = lane.resultVec.group.position;
             } else if (lane.movingVec.group.visible) {

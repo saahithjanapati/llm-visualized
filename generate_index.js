@@ -1,6 +1,39 @@
 const fs = require('fs');
 const path = require('path');
 
+// Function to extract vite config inputs, ensuring it's robust
+function getViteInputs() {
+    try {
+        const viteConfigPath = path.join(__dirname, 'vite.config.js');
+        const viteConfigContent = fs.readFileSync(viteConfigPath, 'utf8');
+        
+        // Use a more robust regex to find the input object
+        const inputRegex = /input:\s*{[^}]*}/s;
+        const match = viteConfigContent.match(inputRegex);
+
+        if (!match) {
+            console.warn("Could not find 'input:' block in vite.config.js. Proceeding with all files in tests directory.");
+            return null; // Return null if input block not found
+        }
+
+        const inputBlock = match[0];
+        
+        // Extract file paths from the input block
+        // This regex looks for resolve(__dirname, 'tests/filename.html')
+        const fileRegex = /resolve\(__dirname, 'tests\/([^']+\.html)'\)/g;
+        let fileMatch;
+        const viteFiles = [];
+        while ((fileMatch = fileRegex.exec(inputBlock)) !== null) {
+            viteFiles.push(fileMatch[1]);
+        }
+        console.log('Successfully extracted files from vite.config.js:', viteFiles);
+        return viteFiles;
+    } catch (err) {
+        console.warn('Warning: Could not read or parse vite.config.js. Proceeding with all files in tests directory.', err);
+        return null; // Return null in case of other errors
+    }
+}
+
 const testsDir = path.join(__dirname, 'tests');
 const templatePath = path.join(__dirname, 'index.template.html');
 const outputPath = path.join(__dirname, 'index.html');
@@ -24,12 +57,21 @@ try {
     let templateContent = fs.readFileSync(templatePath, 'utf8');
     console.log('Template file read successfully.');
 
+    // Get the list of allowed test files from vite.config.js
+    const allowedTestFiles = getViteInputs();
+
     // Read the tests directory
     const files = fs.readdirSync(testsDir);
-    console.log(`Found files: ${files.join(', ')}`);
+    console.log(`Found files in ${testsDir}: ${files.join(', ')}`);
 
     const testLinks = files
-        .filter(file => file.endsWith('.html')) // Only include HTML files
+        .filter(file => {
+            if (!file.endsWith('.html')) return false; // Only include HTML files
+            if (allowedTestFiles) { // If vite config was parsed successfully
+                return allowedTestFiles.includes(file);
+            }
+            return true; // If vite config parsing failed, include all html files (fallback)
+        })
         .map(file => {
             const displayName = generateDisplayName(file);
             const filePath = path.join('tests', file);

@@ -30,7 +30,8 @@ export default defineConfig({
             vectorInstancedPrism: resolve(__dirname, 'tests/test_vector_instanced_prism.html'),
             prismRowVisualization: resolve(__dirname, 'tests/test_prism_row_visualization.html'),
             prismLayerNormAnimation: resolve(__dirname, 'tests/test_vector_instanced_prism_norm_anim.html'),
-            prismAdditionAnimation: resolve(__dirname, 'tests/test_vector_instanced_prism_add_anim.html')
+            prismAdditionAnimation: resolve(__dirname, 'tests/test_vector_instanced_prism_add_anim.html'),
+            layerNorm: resolve(__dirname, 'tests/test_layer_norm.html'),
         }
     } 
   },
