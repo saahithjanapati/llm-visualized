@@ -49,11 +49,11 @@ export function mapValueToColor_LOG(value, index) {
     const clampedValue = Math.max(-1, Math.min(1, value / 2));
     const hue = (clampedValue + 1) / 2;
     const saturation = 1.0;
-    const lightness = 0.4;
+    const lightness = 0.6;
     const finalColor = new THREE.Color().setHSL(hue, saturation, lightness);
 
     if (shouldLog) {
-        console.log(` -> clamped=${clampedValue.toFixed(3)}, hue=${hue.toFixed(3)}, L=0.4, RGB=(${finalColor.r.toFixed(3)}, ${finalColor.g.toFixed(3)}, ${finalColor.b.toFixed(3)})`);
+        console.log(` -> clamped=${clampedValue.toFixed(3)}, hue=${hue.toFixed(3)}, L=0.6, RGB=(${finalColor.r.toFixed(3)}, ${finalColor.g.toFixed(3)}, ${finalColor.b.toFixed(3)})`);
     }
     return finalColor;
 }
@@ -87,3 +87,26 @@ export function mapValueToColor_LOG(value, index) {
 //     console.log(`mapValueToColor output: value=${value}, clamped=${clampedValue}, hue=${hue}, color R=${finalColor.r} G=${finalColor.g} B=${finalColor.b}`);
 //     return finalColor;
 // }
+
+export function mapNormalizedValueToBrightColor(value, targetColorInstance) {
+    let h = 0.33; // Default hue (green)
+    let s = 0.9;  // Default saturation
+    let l = 0.6;  // Default lightness
+
+    if (typeof value === 'number' && isFinite(value)) {
+        const clampedValue = Math.max(0, Math.min(1, value));
+        h = clampedValue * 0.8; // Map the 0-1 value to a hue range (e.g., 0 to 0.8 for red to blue)
+        s = 0.9; // High saturation
+        l = 0.7;  // High lightness
+    } else {
+        // console.warn(`mapNormalizedValueToBrightColor received non-finite value: ${value}. Defaulting color.`);
+        // Using a less intrusive log, or remove if too noisy during normal operation with fixed layerNormalize
+        if (typeof value !== 'number') console.log(`Bad color value: ${value}`); 
+    }
+
+    if (targetColorInstance) {
+        targetColorInstance.setHSL(h, s, l);
+        return targetColorInstance;
+    }
+    return new THREE.Color().setHSL(h, s, l);
+}

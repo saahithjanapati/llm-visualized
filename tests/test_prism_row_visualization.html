@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Prism Row Visualization Test</title>
+    <style>body { margin: 0; } canvas { display: block; }</style>
+</head>
+<body>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.158.0/build/three.module.js"
+            }
+        }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { PrismRowVisualization } from '../src/components/PrismRowVisualization.js';
+
+        let camera, scene, renderer;
+
+        init();
+        animate();
+
+        function init() {
+            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 200);
+            camera.position.z = 15; // Adjusted camera position to view all prisms
+            camera.position.y = 5; // Slightly elevated view
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x111111);
+
+            // Instantiate our visualization
+            const prismVis = new PrismRowVisualization(768);
+            scene.add(prismVis.getMesh());
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            // Optional: Add animation/interaction here later
+            // For example, rotating the camera or the prism row
+            // prismVis.getMesh().rotation.y += 0.005;
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html> 

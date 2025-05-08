@@ -1,4 +1,4 @@
-export const VECTOR_LENGTH = 768;
+export const VECTOR_LENGTH = 100;
 export const SPHERE_RADIUS = 0.15;
 export const SPHERE_DIAMETER = SPHERE_RADIUS * 2;
 export const VECTOR_VISUAL_WIDTH = VECTOR_LENGTH * SPHERE_DIAMETER;
@@ -10,3 +10,9 @@ export const VECTOR_SPEED = 0.1;
 export const EPSILON = 1e-5; // Small value for Layer Norm stability
 export const SPAWN_INTERVAL = 120; // Faster spawning
 export const HIDE_INSTANCE_Y_OFFSET = 10000; // Used to "hide" instanced mesh instances by moving them far away
+
+export const VECTOR_LENGTH_PRISM = 768;
+export const PRISM_BASE_WIDTH = 0.1; // Width of the prism along the main vector axis
+export const PRISM_BASE_DEPTH = 5; // Depth of the prism
+export const PRISM_MAX_HEIGHT = 1.5; // Max height for a prism when data is at its peak
+export const PRISM_HEIGHT_SCALE_FACTOR = 0.75; // Scales normalized data to prism height

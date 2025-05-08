@@ -438,11 +438,18 @@ export function initMainScene(canvas) { // Renamed function here
             const mat = vectorVis.mesh.material;
             mat.opacity = vectorControlParams.opacity;
             mat.transparent = vectorControlParams.opacity < 1.0;
-            mat.metalness = vectorControlParams.metalness;
-            mat.roughness = vectorControlParams.roughness;
-            mat.emissiveIntensity = vectorControlParams.emissiveIntensity;
-            mat.color.set(vectorControlParams.baseColor); // Set base color
-            mat.emissive.set(vectorControlParams.baseColor); // Set base emissive color
+
+            // Safely set properties, checking if they exist on the material
+            if ('metalness' in mat) mat.metalness = vectorControlParams.metalness;
+            if ('roughness' in mat) mat.roughness = vectorControlParams.roughness;
+            if ('emissiveIntensity' in mat) mat.emissiveIntensity = vectorControlParams.emissiveIntensity;
+            
+            if (mat.color) { // mat.color should exist on MeshBasicMaterial
+                mat.color.set(vectorControlParams.baseColor); // Set base color
+            }
+            if (mat.emissive) { // mat.emissive does not exist on MeshBasicMaterial by default
+                mat.emissive.set(vectorControlParams.baseColor); // Set base emissive color
+            }
             // Material type is set by default in VectorVisualizationInstanced,
             // can be changed via updateAllVectorMaterials if a different default is needed initially.
             // For now, we assume the default MeshStandardMaterial is fine and apply properties.
@@ -463,11 +470,18 @@ export function initMainScene(canvas) { // Renamed function here
             const oMat = vectorVis.mesh.material;
             bMat.opacity = oMat.opacity;
             bMat.transparent = oMat.transparent;
-            bMat.metalness = oMat.metalness;
-            bMat.roughness = oMat.roughness;
-            bMat.emissiveIntensity = oMat.emissiveIntensity;
-            bMat.color.copy(oMat.color);
-            bMat.emissive.copy(oMat.emissive);
+
+            // Safely copy properties, checking if they exist on both materials
+            if ('metalness' in oMat && 'metalness' in bMat) bMat.metalness = oMat.metalness;
+            if ('roughness' in oMat && 'roughness' in bMat) bMat.roughness = oMat.roughness;
+            if ('emissiveIntensity' in oMat && 'emissiveIntensity' in bMat) bMat.emissiveIntensity = oMat.emissiveIntensity;
+            
+            if (oMat.color && bMat.color) {
+                bMat.color.copy(oMat.color);
+            }
+            if (oMat.emissive && bMat.emissive) {
+                bMat.emissive.copy(oMat.emissive);
+            }
         }
 
         scene.add(branchedVectorVis.group);

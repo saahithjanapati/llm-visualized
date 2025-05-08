@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { mapValueToColor } from '../utils/colors.js';
+import { mapValueToColor_LOG } from '../utils/colors.js';
 import { uniformRandom } from '../utils/mathUtils.js';
 import { VECTOR_LENGTH, SPHERE_RADIUS, EPSILON, SPHERE_DIAMETER } from '../utils/constants.js';
 
@@ -20,32 +20,33 @@ export class VectorVisualizationInstanced {
         this.rawData = initialData || this.generateTestData();
         this.normalizedData = this.layerNormalize(this.rawData);
 
-        // Material – shared for all instances. Emissive/color will be overridden per instance via vertex colors.
-        const material = new THREE.MeshStandardMaterial({
-            color: new THREE.Color(0xffffff), // Base color white, to be tinted by instance color
-            vertexColors: true, // Enable instance colors
-            metalness: 0.3,
-            roughness: 0.5,
-            emissive: new THREE.Color(0xffffff), // Emissive base white, will be tinted by instance color
-            emissiveIntensity: 0.5 // Adjusted to match non-instanced version for better pop
+        // Material – shared for all instances.
+        const material = new THREE.MeshBasicMaterial({ // MeshBasicMaterial for diagnostics
+            color: new THREE.Color(0xffffff),      // Base color white, to be tinted by instance color
+            opacity: 1.0,
+            transparent: false
         });
 
+        // TEST: Clone the geometry for the InstancedMesh
+        const instancedGeometry = baseSphereGeometry.clone();
+
         // Create InstancedMesh
-        this.mesh = new THREE.InstancedMesh(baseSphereGeometry, material, VECTOR_LENGTH);
+        this.mesh = new THREE.InstancedMesh(instancedGeometry, material, VECTOR_LENGTH); // Use cloned geometry
         this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); // we will animate
 
         // Populate initial transforms/colors
         const dummy = new THREE.Object3D();
+        const redColor = new THREE.Color(0xff0000); // TEST: Force all to red
+
         for (let i = 0; i < VECTOR_LENGTH; i++) {
             const x = (i - VECTOR_LENGTH / 2) * SPHERE_DIAMETER;
             dummy.position.set(x, 0, 0);
             dummy.updateMatrix();
             this.mesh.setMatrixAt(i, dummy.matrix);
 
-            const col = mapValueToColor(this.normalizedData[i]);
-            this.mesh.setColorAt(i, col);
+            this.mesh.setColorAt(i, redColor); // TEST: Set to red
         }
-        this.mesh.instanceColor.needsUpdate = true;
+        this.mesh.instanceColor.needsUpdate = true; // Crucial for instance colors
 
         this.group.add(this.mesh);
     }
@@ -67,27 +68,24 @@ export class VectorVisualizationInstanced {
         return vectorData.map(val => (val - mean) / stdDev);
     }
 
-    // Update colors with new data, keeping transforms unchanged
     updateData(newData) {
         this.rawData = newData;
         this.normalizedData = this.layerNormalize(newData);
+        const redColor = new THREE.Color(0xff0000); // TEST: Force all to red for updates too
+
         for (let i = 0; i < VECTOR_LENGTH; i++) {
-            const col = mapValueToColor(this.normalizedData[i]);
-            this.mesh.setColorAt(i, col);
+            this.mesh.setColorAt(i, redColor); // TEST: Set to red
         }
-        this.mesh.instanceColor.needsUpdate = true;
+        this.mesh.instanceColor.needsUpdate = true; // Crucial for instance colors
     }
 
-    // Utility to update one instance's color quickly
     setInstanceColor(index, color) {
         this.mesh.setColorAt(index, color);
-        this.mesh.instanceColor.needsUpdate = true;
+        this.mesh.instanceColor.needsUpdate = true; // Crucial for instance colors
     }
 
-    // Utility to update one instance's position (y coordinate) quickly
     setInstanceYOffset(index, y) {
         const dummy = new THREE.Object3D();
-        // Compute X based on index
         const x = (index - VECTOR_LENGTH / 2) * SPHERE_DIAMETER;
         dummy.position.set(x, y, 0);
         dummy.updateMatrix();
@@ -96,7 +94,7 @@ export class VectorVisualizationInstanced {
     }
 
     dispose() {
-        this.mesh.geometry.dispose();
+        this.mesh.geometry.dispose(); // Dispose the cloned geometry
         this.mesh.material.dispose();
     }
 } 
