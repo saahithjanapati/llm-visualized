@@ -9,3 +9,4 @@ export const SPAWN_Z_RANGE = 10;
 export const VECTOR_SPEED = 0.1;
 export const EPSILON = 1e-5; // Small value for Layer Norm stability
 export const SPAWN_INTERVAL = 120; // Faster spawning
+export const HIDE_INSTANCE_Y_OFFSET = 10000; // Used to "hide" instanced mesh instances by moving them far away

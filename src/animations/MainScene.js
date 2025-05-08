@@ -4,9 +4,9 @@ import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'; // Import EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';     // Import RenderPass
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'; // Import UnrealBloomPass
-import { VectorVisualization } from '../components/VectorVisualization';
+import { VectorVisualizationInstanced } from '../components/VectorVisualizationInstanced'; // Updated import
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization';
-import { VECTOR_LENGTH } from '../utils/constants.js'; // Import VECTOR_LENGTH
+import { VECTOR_LENGTH, HIDE_INSTANCE_Y_OFFSET } from '../utils/constants.js'; // Import VECTOR_LENGTH and HIDE_INSTANCE_Y_OFFSET
 import { mapValueToColor } from '../utils/colors.js'; // For vector addition color updates
 import TWEEN from '@tweenjs/tween.js'; // Tweening library for addition animation
 
@@ -244,172 +244,173 @@ export function initMainScene(canvas) { // Renamed function here
         metalness: 0.3, // Default from VectorVisualization
         roughness: 0.5, // Default from VectorVisualization
         emissiveIntensity: 0.3, // Default from VectorVisualization
-        material: defaultVectorMaterialName // Add material selection for vectors
+        material: defaultVectorMaterialName, // Add material selection for vectors
+        // Add a base color for instanced materials, as vertex colors will tint this
+        baseColor: 0xffffff
     };
 
     // Function to update all vector materials
     function updateAllVectorMaterials(property, value) {
         [...allVectorVisualizations, ...branchedVectorVisualizations].forEach(vectorVis => {
-            vectorVis.ellipses.forEach(ellipse => {
-                if (ellipse.material) {
-                    if (property === 'material') {
-                        // Change material type
-                        const MaterialConstructor = availableMaterials[value];
-                        if (!MaterialConstructor) {
-                            console.error('Invalid vector material selected:', value);
-                            return; // Skip this ellipse if material type is invalid
-                        }
+            if (!vectorVis.mesh || !vectorVis.mesh.material) return;
 
-                        const oldMaterial = ellipse.material;
-                        const newMaterial = new MaterialConstructor({
-                            // Preserve existing data-driven color & emissive
-                            color: oldMaterial.color,
-                            emissive: oldMaterial.emissive,
-                            // Apply global controls
-                            transparent: vectorControlParams.opacity < 1.0,
-                            opacity: vectorControlParams.opacity,
-                            metalness: vectorControlParams.metalness,
-                            roughness: vectorControlParams.roughness,
-                            emissiveIntensity: vectorControlParams.emissiveIntensity,
-                        });
-                        ellipse.material = newMaterial;
-                        if (oldMaterial && typeof oldMaterial.dispose === 'function') {
-                            oldMaterial.dispose(); // Dispose the old specific instance
-                        }
-                    } else {
-                         // Update specific property on existing material
-                        if (property === 'opacity') {
-                            ellipse.material.opacity = value;
-                            ellipse.material.transparent = value < 1.0; // Enable transparency only if needed
-                        } else if (property === 'metalness') {
-                            ellipse.material.metalness = value;
-                        } else if (property === 'roughness') {
-                            ellipse.material.roughness = value;
-                        } else if (property === 'emissiveIntensity') {
-                            ellipse.material.emissiveIntensity = value;
-                        }
-                    }
-                    ellipse.material.needsUpdate = true;
+            const material = vectorVis.mesh.material; // Get the shared material
+
+            if (property === 'material') {
+                // Change material type
+                const MaterialConstructor = availableMaterials[value];
+                if (!MaterialConstructor) {
+                    console.error('Invalid vector material selected:', value);
+                    return;
                 }
-            });
+
+                const oldMaterial = material;
+                const newMaterial = new MaterialConstructor({
+                    vertexColors: true, // Crucial for instanced rendering
+                    color: new THREE.Color(vectorControlParams.baseColor), // Use base color
+                    transparent: vectorControlParams.opacity < 1.0,
+                    opacity: vectorControlParams.opacity,
+                    metalness: vectorControlParams.metalness,
+                    roughness: vectorControlParams.roughness,
+                    emissive: new THREE.Color(vectorControlParams.baseColor), // Base emissive color
+                    emissiveIntensity: vectorControlParams.emissiveIntensity,
+                });
+                vectorVis.mesh.material = newMaterial; // Assign new material to the instanced mesh
+                if (oldMaterial && typeof oldMaterial.dispose === 'function') {
+                    oldMaterial.dispose();
+                }
+            } else {
+                // Update specific property on existing material
+                if (property === 'opacity') {
+                    material.opacity = value;
+                    material.transparent = value < 1.0;
+                } else if (property === 'metalness') {
+                    material.metalness = value;
+                } else if (property === 'roughness') {
+                    material.roughness = value;
+                } else if (property === 'emissiveIntensity') {
+                    material.emissiveIntensity = value;
+                } else if (property === 'baseColor') { // For instanced mesh base color
+                    material.color.set(value);
+                    material.emissive.set(value); // Keep emissive tint aligned with base color
+                }
+            }
+            material.needsUpdate = true;
         });
     }
 
-    // --- Vector Addition Animation (adapted from VectorAdditionAnimation.js) ---
-    function startAdditionAnimation(vec1, vec2) {
-        const duration = 400; // faster animation
+    // --- Vector Addition Animation (adapted for VectorVisualizationInstanced) ---
+    function startAdditionAnimation(vec1, vec2) { // vec1 is source (branched), vec2 is target (original)
+        const duration = 400;
         const flashDuration = 80;
         const delayBetweenCubes = 15;
-        const vectorLength = vec1.ellipses.length;
+        const vectorLength = VECTOR_LENGTH; // vec1.normalizedData.length;
 
-        if (vectorLength !== vec2.ellipses.length) return;
-
-        // Mark addition animation playing so main loop doesn't reset prematurely
+        // Mark addition animation playing
         additionPlaying.active = true;
         additionPlaying.endTime = getVirtualNow() + duration + flashDuration + vectorLength * delayBetweenCubes;
 
         if (DEBUG) console.log('[startAdditionAnimation] active tweens before creation:', TWEEN.getAll().length);
 
         for (let i = 0; i < vectorLength; i++) {
-            const ellipse1 = vec1.ellipses[i];
-            const ellipse2 = vec2.ellipses[i];
-            if (!ellipse1 || !ellipse2) continue;
+            // For InstancedMesh, we don't have individual ellipse objects.
+            // We animate the instance's matrix directly (or a property controlling it).
+            // The "targetPosition" logic needs to be rethought.
+            // vec1 is the branched (source) vector, vec2 is the original (target) vector.
+            // The branched vector's instances will move towards the original vector's instances.
 
-            // Force matrix updates before calculations
-            vec1.group.updateMatrixWorld(true);
-            vec2.group.updateMatrixWorld(true);
+            // Get world position of the target instance (vec2, instance i)
+            const targetWorldPos = new THREE.Vector3();
+            const tempMatrixTarget = new THREE.Matrix4();
+            vec2.mesh.getMatrixAt(i, tempMatrixTarget);
+            targetWorldPos.setFromMatrixPosition(tempMatrixTarget);
+            targetWorldPos.applyMatrix4(vec2.group.matrixWorld); // Apply group's world transform
 
-            const targetPosition = new THREE.Vector3();
-            ellipse2.getWorldPosition(targetPosition);
-            const localTarget = ellipse1.parent.worldToLocal(targetPosition.clone());
+            // Convert target world position to local space of vec1's group
+            const localTargetPosInVec1Group = vec1.group.worldToLocal(targetWorldPos.clone());
 
-            // Debug for first cube of first addition run
-            if (DEBUG) {
-                console.log(`Debug (i=0):`);
-                console.log(`  ellipse2 (target) world Y: ${targetPosition.y}`);
-                console.log(`  ellipse1 (source) world Y: ${sourceWorldPosition.y}`);
-                console.log(`  ellipse1.parent (branched group) world Y: ${ellipse1.parent.position.y}`);
-                console.log(`  Calculated localTarget.y: ${localTarget.y}`);
-                console.log(`  Initial ellipse1.position.y: ${ellipse1.position.y}`);
-            }
+            // We need the current local Y of instance 'i' in vec1
+            const currentInstanceMatrix = new THREE.Matrix4();
+            vec1.mesh.getMatrixAt(i, currentInstanceMatrix);
+            const currentInstanceLocalPos = new THREE.Vector3().setFromMatrixPosition(currentInstanceMatrix);
 
-            const moveTween = new TWEEN.Tween(ellipse1.position, true)
-                .to({ y: localTarget.y }, duration)
+
+            const moveTween = new TWEEN.Tween({ y: currentInstanceLocalPos.y }, true) // Tween a dummy object
+                .to({ y: localTargetPosInVec1Group.y }, duration)
                 .easing(TWEEN.Easing.Quadratic.InOut)
                 .delay(i * delayBetweenCubes)
-                .onUpdate(() => {
+                .onUpdate((obj) => {
+                    vec1.setInstanceYOffset(i, obj.y); // Update instance's Y position
                     if (DEBUG && i === 0) {
-                        console.log('[MoveTween onUpdate] ellipse1.position.y =', ellipse1.position.y);
+                        // console.log('[MoveTween onUpdate] vec1 instance 0 local y =', obj.y);
                     }
                 })
                 .onStart(() => {
                     if (DEBUG && i === 0 && !additionPlaying.tweenLogged) {
-                        console.log('[MoveTween onStart] First tween started. From y=', ellipse1.position.y, 'to', localTarget.y);
+                        // console.log('[MoveTween onStart] First tween started. From y=', currentInstanceLocalPos.y, 'to', localTargetPosInVec1Group.y);
                         additionPlaying.tweenLogged = true;
                     }
                 })
                 .onComplete(() => {
-                    if (DEBUG && i === 0) console.log('[MoveTween onComplete] First tween completed');
+                    if (DEBUG && i === 0) console.log('[MoveTween onComplete] First tween completed for instance 0');
 
-                    // Flash effect on target cube
-                    const originalColor = ellipse2.material.color.clone();
-                    const originalEmissive = ellipse2.material.emissive ? ellipse2.material.emissive.clone() : new THREE.Color();
-                    const originalIntensity = ellipse2.material.emissiveIntensity !== undefined ? ellipse2.material.emissiveIntensity : 0.0;
+                    // Flash effect on target instance (vec2, instance i)
+                    const originalColor = new THREE.Color();
+                    vec2.mesh.getColorAt(i, originalColor); // Get current color
 
-                    // Set to white for a bright flash (works well with bloom)
-                    ellipse2.material.color.set(0xffffff);
-                    if (ellipse2.material.emissive) {
-                        ellipse2.material.emissive.set(0xffffff);
-                    }
-                    ellipse2.material.emissiveIntensity = 1.0;
+                    // Set to white for flash
+                    vec2.setInstanceColor(i, new THREE.Color(0xffffff));
 
-                    // Tween on the material itself (dummy target) just for timing
-                    new TWEEN.Tween(ellipse2.material, true)
+                    new TWEEN.Tween({}, true) // Dummy tween for timing
                         .to({}, flashDuration)
                         .onComplete(() => {
                             // Calculate new summed value & color
-                            const sum = vec1.data[i] + vec2.data[i];
-                            vec2.data[i] = sum;
-                            const newColor = mapValueToColor(sum);
+                            // Note: vec1.rawData[i] should be the value from the *branched* vector
+                            //       vec2.rawData[i] is from the *original* vector
+                            const sum = vec1.rawData[i] + vec2.rawData[i];
+                            vec2.rawData[i] = sum; // Update raw data on target
+                            // Normalized data is not directly updated here, relies on updateData if needed later
+                            // For immediate visual, calculate new color from sum
+                            const newColor = mapValueToColor( (sum - vec2.normalizedData.reduce((a,b)=>a+b,0)/VECTOR_LENGTH) / Math.sqrt(vec2.normalizedData.reduce((acc, val, idx, arr) => acc + Math.pow(val - vec2.rawData.reduce((a,b)=>a+b,0)/VECTOR_LENGTH, 2), 0)/VECTOR_LENGTH + 1e-5)); // A quick map based on sum
+                            // More correctly, we should re-normalize vec2.rawData and then map colors.
+                            // For now, use the simple approach:
+                            const remappedSumColor = mapValueToColor(sum); // Or use a re-normalized value
 
-                            // Restore cube material to new color
-                            ellipse2.material.color.copy(newColor);
-                            if (ellipse2.material.emissive) {
-                                ellipse2.material.emissive.copy(newColor);
-                            }
-                            ellipse2.material.emissiveIntensity = originalIntensity;
 
-                            // Hide the source cube after merging
-                            ellipse1.visible = false;
+                            // Restore instance material to new color (on vec2)
+                            vec2.setInstanceColor(i, remappedSumColor); // Use the color from sum
+
+                            // "Hide" the source instance (vec1, instance i) by moving it far away
+                            vec1.setInstanceYOffset(i, HIDE_INSTANCE_Y_OFFSET);
                         })
                         .start(getVirtualNow());
                 });
 
             moveTween.start(getVirtualNow());
             if (DEBUG && i === 0) {
-                console.log("moveTween.start() called for i=0");
+                // console.log("moveTween.start() called for i=0");
             }
         }
 
         if (DEBUG) console.log('[startAdditionAnimation] active tweens after creation:', TWEEN.getAll().length);
     }
 
-    function resetVectorAddition(vec1, vec2) {
-        const len = vec1.ellipses.length;
+
+    function resetVectorAddition(vec1, vec2) { // vec1 is source (branched), vec2 is target (original)
+        const len = VECTOR_LENGTH; // vec1.normalizedData.length;
         for (let i = 0; i < len; i++) {
-            const e1 = vec1.ellipses[i];
-            const e2 = vec2.ellipses[i];
-            if (e1) {
-                e1.visible = true;
-                e1.position.y = 0;
-            }
-            if (e2) {
-                const color = mapValueToColor(vec2.data[i]);
-                e2.material.color.copy(color);
-                e2.material.emissive.copy(color);
-                e2.material.emissiveIntensity = 0.3;
-            }
+            // Reset source instance (vec1)
+            vec1.setInstanceYOffset(i, 0); // Reset Y offset
+            // Color is already set from its normalizedData, no need to change unless data changes
+
+            // Reset target instance (vec2)
+            // Recalculate color based on its current (potentially summed) normalizedData
+            const color = mapValueToColor(vec2.normalizedData[i]);
+            vec2.setInstanceColor(i, color);
         }
+        // Ensure raw data of vec2 is updated if its normalizedData was what we conceptually summed into
+        // This part might need more thought if rawData is the source of truth.
+        // For now, assume normalizedData drives colors, and rawData was updated in startAdditionAnimation.
     }
 
     // --- Create and Position Vectors over Slits ---
@@ -423,58 +424,52 @@ export function initMainScene(canvas) { // Renamed function here
         // Generate unique data for each vector, matching VECTOR_LENGTH
         const vectorData = Array.from({ length: VECTOR_LENGTH }, () => (Math.random() - 0.5) * 10);
 
-        // Use default constructor from VectorVisualization
-        const vectorVis = new VectorVisualization(vectorData);
-        // Store normalized data (to keep values near [-1,1]) for addition calculations
-        vectorVis.data = vectorVis.layerNormalize(vectorData);
-
-        // Apply initial vector control parameters (including material type now)
-        const InitialVectorMaterial = availableMaterials[vectorControlParams.material];
-        vectorVis.ellipses.forEach(ellipse => {
-            if (ellipse.material) {
-                 const oldMaterial = ellipse.material;
-                 const newMaterial = new InitialVectorMaterial({
-                     // Preserve initial data-driven color & emissive
-                     color: oldMaterial.color,
-                     emissive: oldMaterial.emissive,
-                     // Apply initial global controls
-                     transparent: vectorControlParams.opacity < 1.0,
-                     opacity: vectorControlParams.opacity,
-                     metalness: vectorControlParams.metalness,
-                     roughness: vectorControlParams.roughness,
-                     emissiveIntensity: vectorControlParams.emissiveIntensity,
-                 });
-                 ellipse.material = newMaterial;
-                 if (oldMaterial && typeof oldMaterial.dispose === 'function') {
-                     oldMaterial.dispose();
-                 }
-                 ellipse.material.needsUpdate = true;
-             }
-        });
-
-
         // Calculate Z position based on slit index
         const vectorZPos = -matrixParams.depth / 2 + slitSpacing * (i + 1);
         // Set initial position (start of animation)
-        vectorVis.group.position.set(0, startY, vectorZPos);
+        const initialPosition = new THREE.Vector3(0, startY, vectorZPos);
+
+        // Use VectorVisualizationInstanced constructor
+        const vectorVis = new VectorVisualizationInstanced(vectorData, initialPosition);
+        // vectorVis.data is now vectorVis.rawData or vectorVis.normalizedData
+
+        // Apply initial vector control parameters
+        if (vectorVis.mesh && vectorVis.mesh.material) {
+            const mat = vectorVis.mesh.material;
+            mat.opacity = vectorControlParams.opacity;
+            mat.transparent = vectorControlParams.opacity < 1.0;
+            mat.metalness = vectorControlParams.metalness;
+            mat.roughness = vectorControlParams.roughness;
+            mat.emissiveIntensity = vectorControlParams.emissiveIntensity;
+            mat.color.set(vectorControlParams.baseColor); // Set base color
+            mat.emissive.set(vectorControlParams.baseColor); // Set base emissive color
+            // Material type is set by default in VectorVisualizationInstanced,
+            // can be changed via updateAllVectorMaterials if a different default is needed initially.
+            // For now, we assume the default MeshStandardMaterial is fine and apply properties.
+        }
+
 
         scene.add(vectorVis.group);
-        allVectorVisualizations.push(vectorVis); // Add to array for cleanup
+        allVectorVisualizations.push(vectorVis);
 
         // --- Create Duplicate Branched Vector ---
-        const branchedVectorVis = new VectorVisualization(vectorData.slice()); // duplicate data
-        branchedVectorVis.data = branchedVectorVis.layerNormalize(vectorData.slice());
+        const branchedInitialPosition = new THREE.Vector3(branchConfig.branchX, startY, vectorZPos);
+        const branchedVectorVis = new VectorVisualizationInstanced(vectorData.slice(), branchedInitialPosition); // duplicate data
+
         // Apply same initial material overrides as originals
-        branchedVectorVis.ellipses.forEach((ellipse, idx) => {
-            const origEllipse = vectorVis.ellipses[idx];
-            if (origEllipse && origEllipse.material) {
-                const clonedMat = origEllipse.material.clone();
-                ellipse.material.dispose();
-                ellipse.material = clonedMat;
-            }
-        });
-        // Start the right‑side vectors directly under their own matrix at x = branchX
-        branchedVectorVis.group.position.set(branchConfig.branchX, startY, vectorZPos);
+        if (branchedVectorVis.mesh && branchedVectorVis.mesh.material && vectorVis.mesh && vectorVis.mesh.material) {
+            // Clone properties, not the material instance itself, as it's shared within InstancedMesh
+            const bMat = branchedVectorVis.mesh.material;
+            const oMat = vectorVis.mesh.material;
+            bMat.opacity = oMat.opacity;
+            bMat.transparent = oMat.transparent;
+            bMat.metalness = oMat.metalness;
+            bMat.roughness = oMat.roughness;
+            bMat.emissiveIntensity = oMat.emissiveIntensity;
+            bMat.color.copy(oMat.color);
+            bMat.emissive.copy(oMat.emissive);
+        }
+
         scene.add(branchedVectorVis.group);
         branchedVectorVisualizations.push(branchedVectorVis);
         additionPlayedFlags.push(false);
@@ -568,6 +563,7 @@ export function initMainScene(canvas) { // Renamed function here
     vectorFolder.add(vectorControlParams, 'metalness', 0, 1, 0.01).name('Metalness').onChange(value => updateAllVectorMaterials('metalness', value));
     vectorFolder.add(vectorControlParams, 'roughness', 0, 1, 0.01).name('Roughness').onChange(value => updateAllVectorMaterials('roughness', value));
     vectorFolder.add(vectorControlParams, 'emissiveIntensity', 0, 1, 0.01).name('Emissive Intensity').onChange(value => updateAllVectorMaterials('emissiveIntensity', value));
+    vectorFolder.add(vectorControlParams, 'baseColor', 0x000000, 0xffffff).name('Base Color (Instanced)').onChange(value => updateAllVectorMaterials('baseColor', value));
     // vectorFolder.open(); // Keep closed by default
 
     // --- Resize Handling ---
@@ -718,8 +714,15 @@ export function initMainScene(canvas) { // Renamed function here
         // Log position *after* tween update
         if (DEBUG && additionPlaying.active) {
             // Log position of the first ellipse of the first vector during the animation
-            if (branchedVectorVisualizations[0] && branchedVectorVisualizations[0].ellipses[0]) {
-                console.log("Animate loop: ellipse[0].position.y = ", branchedVectorVisualizations[0].ellipses[0].position.y);
+            // This needs to be adapted for InstancedMesh if specific instance data is needed.
+            // For now, we can log the group position or skip detailed instance logging here.
+            if (branchedVectorVisualizations[0] && branchedVectorVisualizations[0].group) {
+                 // console.log("Animate loop: branchedVectorVisualizations[0].group.position.y = ", branchedVectorVisualizations[0].group.position.y);
+                 // To get specific instance data, it's more involved:
+                 const tempMatrix = new THREE.Matrix4();
+                 branchedVectorVisualizations[0].mesh.getMatrixAt(0, tempMatrix);
+                 const instancePos = new THREE.Vector3().setFromMatrixPosition(tempMatrix);
+                 // console.log("Animate loop: branched instance[0] local y =", instancePos.y);
             }
         }
 
@@ -756,12 +759,21 @@ export function initMainScene(canvas) { // Renamed function here
             const centerIndex = Math.floor(VECTOR_LENGTH / 2);
             const origCenterWorld = new THREE.Vector3();
             const branchedCenterWorld = new THREE.Vector3();
-            // Get world positions for the center ellipses
-            if (allVectorVisualizations[index].ellipses[centerIndex]) {
-                allVectorVisualizations[index].ellipses[centerIndex].getWorldPosition(origCenterWorld);
+
+            // Get world positions for the center instances
+            if (allVectorVisualizations[index] && allVectorVisualizations[index].mesh) {
+                const originalVec = allVectorVisualizations[index];
+                const tempMatrixOrig = new THREE.Matrix4();
+                originalVec.mesh.getMatrixAt(centerIndex, tempMatrixOrig);
+                origCenterWorld.setFromMatrixPosition(tempMatrixOrig);
+                origCenterWorld.applyMatrix4(originalVec.group.matrixWorld);
             }
-            if (branchedVectorVisualizations[index].ellipses[centerIndex]) {
-                branchedVectorVisualizations[index].ellipses[centerIndex].getWorldPosition(branchedCenterWorld);
+            if (branchedVectorVisualizations[index] && branchedVectorVisualizations[index].mesh) {
+                const branchedVec = branchedVectorVisualizations[index];
+                const tempMatrixBranched = new THREE.Matrix4();
+                branchedVec.mesh.getMatrixAt(centerIndex, tempMatrixBranched);
+                branchedCenterWorld.setFromMatrixPosition(tempMatrixBranched);
+                branchedCenterWorld.applyMatrix4(branchedVec.group.matrixWorld);
             }
 
             // Determine Y position based on state (normal, extending, frozen)
@@ -855,8 +867,15 @@ export function initMainScene(canvas) { // Renamed function here
 
                 // Trigger addition once (when slide finishes)
                 if (!additionPlayedFlags[index] && tSlide >= 1) {
-                    // Move units FROM the lower/left vector set TO the upper/right one
-                    startAdditionAnimation(allVectorVisualizations[index], bVecVis); // bottom -> top
+                    // Move units FROM the lower/left vector set (allVectorVisualizations[index])
+                    // TO the upper/right one (bVecVis)
+                    // So, source is allVectorVisualizations[index], target is bVecVis
+                    // BUT, the current animation has branched moving to original.
+                    // startAdditionAnimation expects (sourceInstanceContainer, targetInstanceContainer)
+                    // vec1 is source (moves), vec2 is target (receives value, flashes)
+                    // In the current setup: branchedVectorVisualizations[index] (bVecVis) is the source,
+                    // and allVectorVisualizations[index] is the target.
+                    startAdditionAnimation(allVectorVisualizations[index], bVecVis);
                     additionPlayedFlags[index] = true;
 
                     // Initialize smooth trail extension parameters (grow original trail during addition)
@@ -988,13 +1007,13 @@ export function initMainScene(canvas) { // Renamed function here
         // We don't explicitly dispose the composer itself, but ensure passes are handled.
 
         // Dispose geometries and materials
-        allVectorVisualizations.forEach(vec => vec.dispose()); // Dispose all vectors (handles ellipse materials/geometries)
+        allVectorVisualizations.forEach(vec => vec.dispose()); // Dispose all vectors (handles instanced mesh geometry/material)
         allTrailLines.forEach(trail => { // Dispose original trails
             trail.geometry.dispose();
             trail.material.dispose();
         });
 
-        branchedVectorVisualizations.forEach(vec => vec.dispose());
+        branchedVectorVisualizations.forEach(vec => vec.dispose()); // Same for branched
         branchedTrailLines.forEach(trail => {
             trail.geometry.dispose();
             trail.material.dispose();
