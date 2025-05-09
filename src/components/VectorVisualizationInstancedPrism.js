@@ -409,7 +409,7 @@ export class VectorVisualizationInstancedPrism {
     }
 
     // Applies final visual state after processing (e.g., shrinking and coloring output vectors)
-    applyProcessedVisuals(processedData, numVisibleOutputUnits, colorOptionsForKeyColors) {
+    applyProcessedVisuals(processedData, numVisibleOutputUnits, colorOptionsForKeyColors, visualOptions = { setHiddenToBlack: true }) {
         // 1. Update internal rawData with the new (potentially shorter) processedData
         // This rawData will be used by updateKeyColorsFromData for the visible units.
         this.rawData = processedData.slice(); 
@@ -481,7 +481,12 @@ export class VectorVisualizationInstancedPrism {
                 // This is an OUTER prism, should be hidden
                 dummy.scale.set(0.001, 0.001, 0.001); // Effectively invisible scale
                 dummy.position.set(baseX, HIDE_INSTANCE_Y_OFFSET, 0); // Also move far away
-                this.mesh.setColorAt(i, new THREE.Color(0,0,0)); // Black for hidden
+                // Only set to black if the option is true (or default)
+                if (visualOptions.setHiddenToBlack !== false) {
+                    this.mesh.setColorAt(i, new THREE.Color(0,0,0)); // Black for hidden
+                }
+                // If setHiddenToBlack is explicitly false, their color is not changed by this call,
+                // allowing them to retain their current instance color while shrinking/moving.
             }
             dummy.updateMatrix();
             this.mesh.setMatrixAt(i, dummy.matrix);

@@ -25,7 +25,6 @@ export default defineConfig({
             main: resolve(__dirname, 'index.html'),
 
             layer: resolve(__dirname, 'tests/layer-animation-test.html'),
-            mha: resolve(__dirname, 'tests/multi-head-attention-test.html'),
             gptModel: resolve(__dirname, 'tests/gpt-model-test.html'),
             vectorInstancedPrism: resolve(__dirname, 'tests/test_vector_instanced_prism.html'),
             prismRowVisualization: resolve(__dirname, 'tests/test_prism_row_visualization.html'),
@@ -33,6 +32,8 @@ export default defineConfig({
             prismAdditionAnimation: resolve(__dirname, 'tests/test_vector_instanced_prism_add_anim.html'),
             prismMultiplicationAnimation: resolve(__dirname, 'tests/test_prism_multiplication_animation.html'),
             layerNorm: resolve(__dirname, 'tests/test_layer_norm.html'),
+            mhaAnimation: resolve(__dirname, 'tests/mha_visualization_test.html'),
+            mhaPassThrough: resolve(__dirname, 'tests/test_mhsa_pass_through.html'),
         }
     } 
   },

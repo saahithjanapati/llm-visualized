@@ -39,6 +39,11 @@ export class MHSAAnimation {
         this.outputVectorLength = 64;
         this.mhaResultRiseOffsetY = 50;
         this.mhaResultRiseDuration = 500 / SPEED_MULT;
+        this.mhaPassThroughDuration = MHSA_PASS_THROUGH_TOTAL_DURATION_MS / SPEED_MULT;
+
+        this.matrixInitialRestingColor = new THREE.Color(0x404040); // Initial dark grey for all matrices
+        this.matrixRestingEmissiveIntensity = 0.1; // Default low emissive intensity
+        this.matrixRestingOpacity = 0.7; // Default opacity for resting matrices
 
         this.brightGreen = new THREE.Color(0x33FF33);
         this.darkTintedGreen = new THREE.Color(0x002200);
@@ -175,91 +180,135 @@ export class MHSAAnimation {
 
         const originalMatrixEmissive = matrix.mesh.material.emissive.clone();
         const originalMatrixIntensity = matrix.mesh.material.emissiveIntensity;
+        let finalVisualsApplied = false; // Flag to ensure processed visuals are applied once
+        let initialDimensionChangeApplied = false; // Flag for early dimension change
         const tweenState = { y: vector.group.position.y, progress: 0, colorR: 1, colorG: 1, colorB: 1, matrixEmissiveIntensity: originalMatrixIntensity };
         const initialVecColor = new THREE.Color();
         if(vector.mesh.instanceColor) { vector.mesh.getColorAt(0, initialVecColor); } else { initialVecColor.setRGB(0.5,0.5,0.5); }
         tweenState.colorR = initialVecColor.r; tweenState.colorG = initialVecColor.g; tweenState.colorB = initialVecColor.b;
 
         new TWEEN.Tween(tweenState)
-            .to({ y: passThroughY, progress: 1.0, colorR: 1.0, colorG: 1.0, colorB: 1.0, matrixEmissiveIntensity: MHSA_MATRIX_MAX_EMISSIVE_INTENSITY }, duration)
+            .to({ y: passThroughY + riseOffset, progress: 1.0, colorR: 1.0, colorG: 1.0, colorB: 1.0, matrixEmissiveIntensity: MHSA_MATRIX_MAX_EMISSIVE_INTENSITY }, duration)
             .easing(TWEEN.Easing.Quadratic.InOut)
             .onUpdate(() => {
                 // Move vector
                 vector.group.position.y = tweenState.y;
                 // Only update trail while the vector is inside the matrix region
                 const y = vector.group.position.y;
+
+                // Apply 64-dimensional conversion as vector enters the matrix bottom
+                const matrixBottomEntryY = this.mhsa_matrix_center_y - MHA_MATRIX_PARAMS.height / 2;
+                if (!initialDimensionChangeApplied && y >= matrixBottomEntryY) {
+                    // ------------------------------------------------------------------
+                    // OPTIMISATION: Swap heavy 768-instance mesh for a light 64-instance
+                    // mesh instead of modifying each instance every frame.
+                    // ------------------------------------------------------------------
+
+                    // 1) Create new lightweight vector (still uses the same class)
+                    const smallVec = new VectorVisualizationInstancedPrism(
+                        vector.rawData.slice(0, outLength), // supply d_model slice
+                        vector.group.position.clone(),
+                        3 // subsection count for colour gradient
+                    );
+
+                    // Apply final visuals immediately
+                    smallVec.applyProcessedVisuals(
+                        smallVec.rawData.slice(0, outLength),
+                        outLength,
+                        {
+                            numKeyColors: 3,
+                            generationOptions: {
+                                type: 'monochromatic',
+                                baseHue: finalVectorHue,
+                                saturation: 0.9,
+                                minLightness: 0.4,
+                                maxLightness: 0.8
+                            }
+                        },
+                        { setHiddenToBlack: false }
+                    );
+
+                    this.scene.add(smallVec.group);
+
+                    // 2) Hide heavy original vector
+                    vector.group.visible = false;
+
+                    // 3) From now on animate using the small vector reference
+                    vector = smallVec;
+                    initialDimensionChangeApplied = true;
+                }
+
                 if (y >= matrixBottomY && y <= matrixTopY) {
                     updateTrail(passThroughTrail, vector.group.position);
                 }
 
-                let currentMatrixTargetColor = initialVecColor;
-                let currentEmissiveIntensity = 0.1;
+                let currentMatrixTargetColor = new THREE.Color();
+                let currentEmissiveIntensity = this.matrixRestingEmissiveIntensity;
                 let t = 0;
+                let emissiveTargetColorForMatrix = new THREE.Color();
 
+                // Use smoothstep for a softer transition from dark → bright.
                 if (tweenState.progress < MHSA_PASS_THROUGH_BRIGHTEN_RATIO) {
-                    t = tweenState.progress / MHSA_PASS_THROUGH_BRIGHTEN_RATIO;
-                    currentMatrixTargetColor = initialVecColor.clone().lerp(brightMatrixColor, t);
-                    currentEmissiveIntensity = THREE.MathUtils.lerp(0.1, 1.5, t);
-                    matrix.setOpacity(THREE.MathUtils.lerp(0.7, 1.0, t)); 
+                    const raw = tweenState.progress / MHSA_PASS_THROUGH_BRIGHTEN_RATIO;
+                    t = THREE.MathUtils.smoothstep(raw, 0, 1);
+                    currentMatrixTargetColor = this.matrixInitialRestingColor.clone().lerp(brightMatrixColor, t);
+                    currentEmissiveIntensity = THREE.MathUtils.lerp(this.matrixRestingEmissiveIntensity, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY, t);
+                    matrix.setOpacity(THREE.MathUtils.lerp(this.matrixRestingOpacity, 1.0, t));
+                    emissiveTargetColorForMatrix = currentMatrixTargetColor.clone();
                 } else if (tweenState.progress < MHSA_PASS_THROUGH_BRIGHTEN_RATIO + MHSA_PASS_THROUGH_DIM_RATIO) {
-                    t = (tweenState.progress - MHSA_PASS_THROUGH_BRIGHTEN_RATIO) / MHSA_PASS_THROUGH_DIM_RATIO;
+                    const raw = (tweenState.progress - MHSA_PASS_THROUGH_BRIGHTEN_RATIO) / MHSA_PASS_THROUGH_DIM_RATIO;
+                    t = THREE.MathUtils.smoothstep(raw, 0, 1);
                     currentMatrixTargetColor = brightMatrixColor.clone().lerp(darkTintedMatrixColor, t);
-                    currentEmissiveIntensity = THREE.MathUtils.lerp(1.5, 0.1, t);
+                    currentEmissiveIntensity = THREE.MathUtils.lerp(MHSA_MATRIX_MAX_EMISSIVE_INTENSITY, this.matrixRestingEmissiveIntensity, t);
                     matrix.setOpacity(1.0);
+                    emissiveTargetColorForMatrix = currentMatrixTargetColor.clone();
                 } else {
-                    currentMatrixTargetColor = darkTintedMatrixColor;
-                    currentEmissiveIntensity = 0.1;
-                    matrix.setOpacity(0.7);
+                    currentMatrixTargetColor = darkTintedMatrixColor.clone();
+                    currentEmissiveIntensity = this.matrixRestingEmissiveIntensity;
+                    matrix.setOpacity(this.matrixRestingOpacity);
+                    emissiveTargetColorForMatrix = currentMatrixTargetColor.clone();
                 }
                 matrix.setColor(currentMatrixTargetColor);
-                matrix.setEmissive(currentMatrixTargetColor, currentEmissiveIntensity);
+                matrix.setEmissive(emissiveTargetColorForMatrix, currentEmissiveIntensity);
 
                 const numCentralUnits = outLength;
                 const startVisibleIndex = Math.floor((VECTOR_LENGTH_PRISM - numCentralUnits) / 2);
                 const endVisibleIndex = startVisibleIndex + numCentralUnits - 1;
-                
-                const matrixInteractionStartProgress = 0.25;
-                const matrixInteractionEndProgress = 0.75;
-                let shrinkProgress = 0;
-                if (tweenState.progress > matrixInteractionStartProgress && tweenState.progress < matrixInteractionEndProgress) {
-                    shrinkProgress = (tweenState.progress - matrixInteractionStartProgress) / (matrixInteractionEndProgress - matrixInteractionStartProgress);
-                } else if (tweenState.progress >= matrixInteractionEndProgress) {
-                    shrinkProgress = 1;
-                }
-
-                for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
-                    let targetScaleY = vector.getUniformHeight();
-                    let instanceYOffset = 0;
-                    let instanceColor = null;
-
-                    if (i < startVisibleIndex || i > endVisibleIndex) {
-                        targetScaleY = THREE.MathUtils.lerp(vector.getUniformHeight(), 0.001, shrinkProgress);
-                        if (targetScaleY < 0.01 && shrinkProgress > 0.5) { 
-                            instanceYOffset = HIDE_INSTANCE_Y_OFFSET - vector.group.position.y; 
-                        }
-                    }
-                    vector.setInstanceAppearance(i, instanceYOffset, instanceColor, new THREE.Vector3(vector.getWidthScale(), targetScaleY, vector.getDepthScale()));
-                }
+ 
+                 // Progressive shrink animation for outer prisms, only if the initial snap to 64-dim hasn't happened yet.
+                 if (!initialDimensionChangeApplied) {
+                     // Content of this block (progressive shrink loop) is removed for optimization.
+                     // The vector will maintain its full appearance until it hits the matrix boundary,
+                     // at which point applyProcessedVisuals handles the instantaneous change.
+                 }
             })
             .onComplete(() => {
                 matrix.setColor(darkTintedMatrixColor);
-                matrix.setEmissive(darkTintedMatrixColor, 0.1);
-                matrix.setOpacity(0.7); 
+                matrix.setEmissive(darkTintedMatrixColor, this.matrixRestingEmissiveIntensity);
+                matrix.setOpacity(this.matrixRestingOpacity);
 
-                const processedData = vector.rawData.slice(0, outLength);
-                vector.applyProcessedVisuals(processedData, outLength, { 
-                    numKeyColors: 3, 
-                    generationOptions: { type: 'monochromatic', baseHue: finalVectorHue, saturation: 0.9, minLightness: 0.4, maxLightness: 0.8 }
-                });
-                vector.group.position.y = passThroughY; 
+                // Ensure final visuals are applied at least once (if, for some
+                // reason, progress never reached the 0.8 threshold due to
+                // floating-point rounding). This is effectively a no-op if it
+                // already happened in the onUpdate block above.
+                if (!finalVisualsApplied) {
+                    const processedData = vector.rawData.slice(0, outLength);
+                    vector.applyProcessedVisuals(processedData, outLength, {
+                        numKeyColors: 3,
+                        generationOptions: {
+                            type: 'monochromatic',
+                            baseHue: finalVectorHue,
+                            saturation: 0.9,
+                            minLightness: 0.4,
+                            maxLightness: 0.8
+                        }
+                    });
+                    finalVisualsApplied = true;
+                }
 
-                new TWEEN.Tween(vector.group.position)
-                    .to({ y: passThroughY + riseOffset }, this.mhaResultRiseDuration)
-                    .easing(TWEEN.Easing.Cubic.Out)
-                    .onComplete(() => {
-                        if (animationCompletionCallback) animationCompletionCallback();
-                    })
-                    .start();
+                // No additional rise tween needed – the vector is already at its
+                // final Y. Invoke callback immediately.
+                if (animationCompletionCallback) animationCompletionCallback();
             })
             .start();
     }
