@@ -156,4 +156,4 @@ export const HEAD_VECTOR_STOP_BELOW = 35;
 // ------------------------------------------------------------
 // Global animation speed multiplier (1 = normal speed). Increase to speed up everything.
 // ------------------------------------------------------------
-export const GLOBAL_ANIM_SPEED_MULT = 10.0;
+export const GLOBAL_ANIM_SPEED_MULT = 50.0;

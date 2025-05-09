@@ -240,7 +240,8 @@ export function initLayerAnimation(container) {
             headIndex: 0,
             finalAscend: false,
             sideCopies: [],
-            sideTrails: []
+            sideTrails: [],
+            upwardTrails: []
         });
     }
 
@@ -397,6 +398,35 @@ export function initLayerAnimation(container) {
 
         if (needsToPushNewPoint) {
             if (pts.length < MAX_TRAIL_POINTS) {
+                const lastPos = pts.length > 0 ? pts[pts.length - 1] : null;
+                
+                // For high speeds (large jumps), add intermediate points
+                if (lastPos && SPEED_MULT > 10) {
+                    // Calculate the distance moved
+                    const dx = pos.x - lastPos[0];
+                    const dy = pos.y - lastPos[1];
+                    const dz = pos.z - lastPos[2];
+                    const distance = Math.sqrt(dx*dx + dy*dy + dz*dz);
+                    
+                    // If distance is large, add intermediate points
+                    if (distance > 5) {
+                        // Calculate number of points to add based on distance
+                        const steps = Math.min(10, Math.ceil(distance / 5));
+                        
+                        for (let i = 1; i < steps; i++) {
+                            const t = i / steps;
+                            const ix = lastPos[0] + dx * t;
+                            const iy = lastPos[1] + dy * t;
+                            const iz = lastPos[2] + dz * t;
+                            
+                            pts.push([ix, iy, iz]);
+                            const interpolatedIdx = pts.length - 1;
+                            trailObj.geometry.attributes.position.setXYZ(interpolatedIdx, ix, iy, iz);
+                        }
+                    }
+                }
+                
+                // Add the actual position
                 pts.push([pos.x, pos.y, pos.z]);
                 const idx = pts.length - 1;
                 trailObj.geometry.attributes.position.setXYZ(idx, pos.x, pos.y, pos.z);
@@ -664,6 +694,11 @@ export function initLayerAnimation(container) {
                         scene.add(upVec.group);
                         upVec.userData = { headIndex: targetHeadIdx, sideSpawned: false };
                         lane.upwardCopies.push(upVec);
+                        // Create trail for upward movement
+                        const upTrail = createTrailLine(0xffffff); // White color for all trails
+                        updateTrail(upTrail, upVec.group.position);
+                        lane.upwardTrails = lane.upwardTrails || [];
+                        lane.upwardTrails.push(upTrail);
 
                         // After duplicating at last head, hide travelling vector and mark finished
                         if (targetHeadIdx === NUM_HEAD_SETS_LAYER - 1) {
@@ -690,9 +725,13 @@ export function initLayerAnimation(container) {
             // --- Upward movement for copies under heads ---
             const headStopY = mhsa_matrix_center_y - HEAD_VECTOR_STOP_BELOW;
             if (lane.upwardCopies && lane.upwardCopies.length) {
-                lane.upwardCopies.forEach(upVec => {
+                lane.upwardCopies.forEach((upVec, idx) => {
                     if (upVec.group.position.y < headStopY) {
                         upVec.group.position.y = Math.min(headStopY, upVec.group.position.y + ANIM_RISE_SPEED_HEAD * SPEED_MULT * deltaTime);
+                        // Update vertical trail
+                        if (lane.upwardTrails && lane.upwardTrails[idx]) {
+                            updateTrail(lane.upwardTrails[idx], upVec.group.position);
+                        }
                     }
                 });
             }
@@ -716,8 +755,15 @@ export function initLayerAnimation(container) {
                             scene.add(rVec.group);
                             lane.sideCopies.push({ vec: lVec, targetX: coord.q });
                             lane.sideCopies.push({ vec: rVec, targetX: coord.v });
-                            lane.sideTrails.push(createTrailLine(0xffffff));
-                            lane.sideTrails.push(createTrailLine(0xffffff));
+                            
+                            // Create trails for both side copies with distinct colors
+                            lane.sideTrails.push(createTrailLine(0xffffff)); // White for all trails
+                            lane.sideTrails.push(createTrailLine(0xffffff)); // White for all trails
+                            
+                            // Initialize trail with current position
+                            updateTrail(lane.sideTrails[lane.sideTrails.length-2], lVec.group.position);
+                            updateTrail(lane.sideTrails[lane.sideTrails.length-1], rVec.group.position);
+                            
                             centerVec.userData.sideSpawned = true;
                         }
                     }
