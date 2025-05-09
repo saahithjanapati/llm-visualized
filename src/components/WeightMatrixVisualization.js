@@ -334,16 +334,33 @@ export class WeightMatrixVisualization {
                     mat.forEach(m => {
                         if (props.metalness !== undefined) m.metalness = props.metalness;
                         if (props.roughness !== undefined) m.roughness = props.roughness;
+                        if (props.emissive !== undefined) m.emissive.set(props.emissive);
+                        if (props.emissiveIntensity !== undefined) m.emissiveIntensity = props.emissiveIntensity;
+                        if (props.opacity !== undefined) m.opacity = props.opacity;
+                        if (props.transparent !== undefined) m.transparent = props.transparent;
                     });
                 } else {
                     if (props.metalness !== undefined) mat.metalness = props.metalness;
                     if (props.roughness !== undefined) mat.roughness = props.roughness;
+                    if (props.emissive !== undefined) mat.emissive.set(props.emissive);
+                    if (props.emissiveIntensity !== undefined) mat.emissiveIntensity = props.emissiveIntensity;
+                    if (props.opacity !== undefined) mat.opacity = props.opacity;
+                    if (props.transparent !== undefined) mat.transparent = props.transparent;
                 }
             }
-           
         };
         applyProps(this.mesh?.material);
-        applyProps(this.frontCapMesh?.material); // Apply to caps too
-        applyProps(this.backCapMesh?.material);  // Apply to caps too
+        applyProps(this.frontCapMesh?.material); 
+        applyProps(this.backCapMesh?.material);  
+    }
+
+    // Convenience method to set emissive color and intensity
+    setEmissive(color, intensity) {
+        this.setMaterialProperties({ emissive: color, emissiveIntensity: intensity });
+    }
+
+    // Convenience method to set opacity (and ensure transparency is enabled)
+    setOpacity(opacity) {
+        this.setMaterialProperties({ opacity: opacity, transparent: true });
     }
 }

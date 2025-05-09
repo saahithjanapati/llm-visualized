@@ -121,6 +121,9 @@ export function initLayerAnimation(container) {
     const darkGrayColor = new THREE.Color(0x404040); // Define dark gray color once
     const matrixOpacity = 0.7; // Define desired opacity
 
+    // MHSA Pass-Through Animation State - Reworked
+    let mhaPassThroughPhase = 'positioning_mha_vectors';
+
     for (let i = 0; i < NUM_HEAD_SETS_LAYER; i++) {
         const headSetWidth = MHA_INTERNAL_MATRIX_SPACING * 2 + MHA_MATRIX_PARAMS.width;
         const currentHeadSetBaseX = BRANCH_X - MHA_INTERNAL_MATRIX_SPACING + i * (headSetWidth + HEAD_SET_GAP_LAYER);
@@ -479,6 +482,160 @@ export function initLayerAnimation(container) {
     //  Animation loop
     // -------------------------------------------------------------------------
     const clock = new THREE.Clock();
+    const headStopY = mhsa_matrix_center_y - HEAD_VECTOR_STOP_BELOW; // Define once
+    const mhaPassThroughTargetY = mhsa_matrix_center_y + MHA_MATRIX_PARAMS.height / 2 + 20; // Target Y for vectors passing through (+20 overshoot)
+    const mhaPassThroughDuration = 2000 / SPEED_MULT; // Duration for pass-through - INCREASED
+    const outputVectorLength = 64; // Target length for output vectors
+    const mhaResultRiseOffsetY = 50; // New: Offset for final rise
+    const mhaResultRiseDuration = 500 / SPEED_MULT; // New: Duration for final rise
+
+    // Colors for matrix flash & final state
+    const brightGreen = new THREE.Color(0x33FF33);
+    const darkTintedGreen = new THREE.Color(0x002200);
+    const brightBlue = new THREE.Color(0x6666FF);
+    const darkTintedBlue = new THREE.Color(0x000022);
+    const brightRed = new THREE.Color(0xFF3333);
+    const darkTintedRed = new THREE.Color(0x220000);
+
+    // Helper function to check if all MHSA vectors are in their start positions for pass-through
+    function areAllMHAVectorsInPosition() {
+        if (!lanes.length) return false; // No lanes, nothing to check
+
+        for (const lane of lanes) {
+            if (!lane.upwardCopies || lane.upwardCopies.length !== NUM_HEAD_SETS_LAYER) {
+                // console.log(`Lane ${lanes.indexOf(lane)}: upwardCopies not fully populated or missing.`);
+                return false; // Not all K-vectors (upwardCopies) are created yet
+            }
+
+            for (let headIdx = 0; headIdx < NUM_HEAD_SETS_LAYER; headIdx++) {
+                const kVec = lane.upwardCopies[headIdx];
+                if (!kVec || Math.abs(kVec.group.position.y - headStopY) > 0.1) {
+                    // console.log(`Lane ${lanes.indexOf(lane)}, Head ${headIdx} (K): K-vector not at headStopY.`);
+                    return false; // K-vector not in position
+                }
+                if (!kVec.userData.sideSpawned) {
+                    // console.log(`Lane ${lanes.indexOf(lane)}, Head ${headIdx} (K): Side copies not spawned yet.`);
+                    return false; // Q/V side copies not spawned yet for this K-vector
+                }
+            }
+
+            // Check side copies for this lane
+            // Each K-vector (upwardCopy) should have spawned 2 side copies (Q & V)
+            // Total side copies per lane = NUM_HEAD_SETS_LAYER * 2
+            if (!lane.sideCopies || lane.sideCopies.length !== NUM_HEAD_SETS_LAYER * 2) {
+                 // console.log(`Lane ${lanes.indexOf(lane)}: Incorrect number of sideCopies. Expected ${NUM_HEAD_SETS_LAYER * 2}, got ${lane.sideCopies.length}`);
+                return false;
+            }
+
+            for (const sideCopyObj of lane.sideCopies) {
+                if (!sideCopyObj || !sideCopyObj.vec) {
+                    // console.log(`Lane ${lanes.indexOf(lane)}: Corrupt sideCopyObj.`);
+                    return false;
+                }
+                if (Math.abs(sideCopyObj.vec.group.position.y - headStopY) > 0.1) {
+                    // console.log(`Lane ${lanes.indexOf(lane)}, SideCopy (Q/V) TargetX ${sideCopyObj.targetX}: Not at headStopY.`);
+                    return false; // Q or V vector not at headStopY
+                }
+                if (Math.abs(sideCopyObj.vec.group.position.x - sideCopyObj.targetX) > 0.1) {
+                    // console.log(`Lane ${lanes.indexOf(lane)}, SideCopy (Q/V) TargetX ${sideCopyObj.targetX}: Not at targetX.`);
+                    return false; // Q or V vector not at targetX
+                }
+            }
+        }
+        return true; // All vectors in all lanes are correctly positioned
+    }
+
+    // Helper function to animate a single vector and its matrix
+    function animateVectorMatrixPassThrough(vector, matrix, brightMatrixColor, darkTintedMatrixColor, finalVectorHue, passThroughY, duration, riseOffset, riseDurationVal, outLength, animationCompletionCallback) {
+        if (!vector || !matrix) {
+            console.warn("Missing vector or matrix for pass-through animation.");
+            animationCompletionCallback(); // Decrement count as if it completed
+            return;
+        }
+
+        const originalMatrixEmissive = matrix.mesh.material.emissive.clone();
+        const originalMatrixIntensity = matrix.mesh.material.emissiveIntensity;
+        const tweenState = { y: vector.group.position.y, progress: 0, colorR: 1, colorG: 1, colorB: 1, matrixEmissiveIntensity: originalMatrixIntensity };
+        const initialVecColor = new THREE.Color();
+        if(vector.mesh.instanceColor) { vector.mesh.getColorAt(0, initialVecColor); } else { initialVecColor.setRGB(0.5,0.5,0.5); }
+        tweenState.colorR = initialVecColor.r; tweenState.colorG = initialVecColor.g; tweenState.colorB = initialVecColor.b;
+
+        new TWEEN.Tween(tweenState)
+            .to({ y: passThroughY, progress: 1.0, colorR: 1.0, colorG: 1.0, colorB: 1.0, matrixEmissiveIntensity: 1.5 }, duration)
+            .easing(TWEEN.Easing.Quadratic.InOut)
+            .onUpdate(() => {
+                vector.group.position.y = tweenState.y;
+                const numCentralUnits = outLength;
+                const startVisibleIndex = Math.floor((VECTOR_LENGTH_PRISM - numCentralUnits) / 2);
+                const endVisibleIndex = startVisibleIndex + numCentralUnits - 1;
+                const currentWhite = new THREE.Color(tweenState.colorR, tweenState.colorG, tweenState.colorB);
+                for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
+                    let targetScaleY = vector.getUniformHeight();
+                    let instanceYOffset = 0;
+                    if (i < startVisibleIndex || i > endVisibleIndex) {
+                        targetScaleY = THREE.MathUtils.lerp(vector.getUniformHeight(), 0.001, tweenState.progress);
+                        if (targetScaleY < 0.01 && tweenState.progress > 0.5) { instanceYOffset = HIDE_INSTANCE_Y_OFFSET - vector.group.position.y; }
+                    }
+                    vector.setInstanceAppearance(i, instanceYOffset, currentWhite, new THREE.Vector3(vector.getWidthScale(), targetScaleY, vector.getDepthScale()));
+                }
+                matrix.setColor(brightMatrixColor); matrix.setEmissive(brightMatrixColor, tweenState.matrixEmissiveIntensity); matrix.setOpacity(1.0);
+            })
+            .onComplete(() => {
+                const processedData = vector.rawData.slice(0, outLength);
+                vector.applyProcessedVisuals(processedData, outLength, { numKeyColors: 3, generationOptions: { type: 'monochromatic', baseHue: finalVectorHue, saturation: 0.9, minLightness: 0.4, maxLightness: 0.8 }});
+                vector.group.position.set(vector.group.position.x, passThroughY, vector.group.position.z);
+                matrix.setColor(darkTintedMatrixColor); matrix.setEmissive(darkTintedMatrixColor, 0.1); matrix.setOpacity(1.0);
+
+                new TWEEN.Tween(vector.group.position)
+                    .to({ y: passThroughY + riseOffset }, riseDurationVal)
+                    .easing(TWEEN.Easing.Cubic.Out)
+                    .onComplete(animationCompletionCallback) // Call the main completion callback
+                    .start();
+            })
+            .start();
+    }
+
+    // Main function to initiate parallel pass-through for all heads
+    function initiateParallelHeadPassThroughAnimations(allLanes) {
+        if (mhaPassThroughPhase !== 'ready_for_parallel_pass_through') return;
+        console.log("Initiating Parallel MHSA Head Pass-Through Animations...");
+        mhaPassThroughPhase = 'parallel_pass_through_active';
+
+        let totalAnimationsToComplete = allLanes.length * NUM_HEAD_SETS_LAYER * 3; // K, Q, V for each head in each lane
+        let animationsCompleted = 0;
+
+        function singleAnimationDone() {
+            animationsCompleted++;
+            if (animationsCompleted === totalAnimationsToComplete) {
+                console.log("All MHSA parallel pass-through animations complete.");
+                mhaPassThroughPhase = 'mha_pass_through_complete';
+            }
+        }
+
+        allLanes.forEach((lane) => {
+            for (let headIdx = 0; headIdx < NUM_HEAD_SETS_LAYER; headIdx++) {
+                const kVec = lane.upwardCopies[headIdx];
+                const kMatrix = mhaVisualizations[headIdx * 3 + 1];
+                animateVectorMatrixPassThrough(kVec, kMatrix, brightGreen, darkTintedGreen, 0.333, mhaPassThroughTargetY, mhaPassThroughDuration, mhaResultRiseOffsetY, mhaResultRiseDuration, outputVectorLength, singleAnimationDone);
+
+                const qSideCopy = lane.sideCopies.find(sc => sc.headIndex === headIdx && sc.type === 'Q');
+                if (qSideCopy && qSideCopy.vec) {
+                    animateVectorMatrixPassThrough(qSideCopy.vec, qSideCopy.matrixRef, brightBlue, darkTintedBlue, 0.666, mhaPassThroughTargetY, mhaPassThroughDuration, mhaResultRiseOffsetY, mhaResultRiseDuration, outputVectorLength, singleAnimationDone);
+                } else { totalAnimationsToComplete--; } // Adjust if Q-vec missing
+
+                const vSideCopy = lane.sideCopies.find(sc => sc.headIndex === headIdx && sc.type === 'V');
+                if (vSideCopy && vSideCopy.vec) {
+                    animateVectorMatrixPassThrough(vSideCopy.vec, vSideCopy.matrixRef, brightRed, darkTintedRed, 0.0, mhaPassThroughTargetY, mhaPassThroughDuration, mhaResultRiseOffsetY, mhaResultRiseDuration, outputVectorLength, singleAnimationDone);
+                } else { totalAnimationsToComplete--; } // Adjust if V-vec missing
+            }
+        });
+
+        if (totalAnimationsToComplete === 0 && allLanes.length > 0) { // Handle case where no animations were started
+             console.log("No valid K,Q,V vectors found to animate for parallel pass-through.");
+             mhaPassThroughPhase = 'mha_pass_through_complete'; // Still mark as complete
+        }
+    }
+
     function animate() {
         requestAnimationFrame(animate);
         const deltaTime = clock.getDelta();
@@ -776,7 +933,7 @@ export function initLayerAnimation(container) {
                     if (!centerVec.userData.sideSpawnRequested && Math.abs(centerVec.group.position.y - headStopY) < 0.1) {
                         // schedule side copy spawn
                         centerVec.userData.sideSpawnRequested = true;
-                        centerVec.userData.sideSpawnTime = timeNow + SIDE_COPY_DELAY_MS;
+                        centerVec.userData.sideSpawnTime = timeNow + SIDE_COPY_DELAY_MS / SPEED_MULT; // Respect SPEED_MULT
                         return; // wait for delay
                     }
                     // After delay has elapsed, spawn copies
@@ -784,18 +941,24 @@ export function initLayerAnimation(container) {
                         const hIdx = centerVec.userData.headIndex;
                         const coord = headCoords[hIdx];
                         if (coord) {
-                            const lVec = new VectorVisualizationInstancedPrism(centerVec.rawData.slice(), centerVec.group.position.clone());
-                            const rVec = new VectorVisualizationInstancedPrism(centerVec.rawData.slice(), centerVec.group.position.clone());
-                            scene.add(lVec.group);
-                            scene.add(rVec.group);
-                            lane.sideCopies.push({ vec: lVec, targetX: coord.q });
-                            lane.sideCopies.push({ vec: rVec, targetX: coord.v });
+                            const qMatrixForHead = mhaVisualizations[hIdx * 3];
+                            const vMatrixForHead = mhaVisualizations[hIdx * 3 + 2];
+
+                            const qVec = new VectorVisualizationInstancedPrism(centerVec.rawData.slice(), centerVec.group.position.clone());
+                            const vVec = new VectorVisualizationInstancedPrism(centerVec.rawData.slice(), centerVec.group.position.clone());
+                            scene.add(qVec.group);
+                            scene.add(vVec.group);
+                            
+                            // Add type and matrixRef to sideCopy objects
+                            lane.sideCopies.push({ vec: qVec, targetX: coord.q, type: 'Q', matrixRef: qMatrixForHead, headIndex: hIdx });
+                            lane.sideCopies.push({ vec: vVec, targetX: coord.v, type: 'V', matrixRef: vMatrixForHead, headIndex: hIdx });
+                            
                             // white trails
                             lane.sideTrails.push(createTrailLine(0xffffff));
                             lane.sideTrails.push(createTrailLine(0xffffff));
                             // initialize trail
-                            updateTrail(lane.sideTrails[lane.sideTrails.length-2], lVec.group.position);
-                            updateTrail(lane.sideTrails[lane.sideTrails.length-1], rVec.group.position);
+                            updateTrail(lane.sideTrails[lane.sideTrails.length-2], qVec.group.position);
+                            updateTrail(lane.sideTrails[lane.sideTrails.length-1], vVec.group.position);
                             centerVec.userData.sideSpawned = true;
                         }
                     }
@@ -803,7 +966,7 @@ export function initLayerAnimation(container) {
             }
 
             // Move side copies horizontally and vertically align
-            if (lane.sideCopies && lane.sideCopies.length) {
+            if (mhaPassThroughPhase === 'positioning_mha_vectors' && lane.sideCopies && lane.sideCopies.length) {
                 lane.sideCopies.forEach((obj, idx) => {
                     const v = obj.vec;
                     const dx = SIDE_COPY_HORIZ_SPEED * SPEED_MULT * deltaTime;
@@ -841,6 +1004,15 @@ export function initLayerAnimation(container) {
                 updateTrail(lane.branchTrail, branchPos);
             }
         });
+
+        // Check for MHSA pass-through readiness
+        if (mhaPassThroughPhase === 'positioning_mha_vectors') {
+            if (areAllMHAVectorsInPosition()) {
+                mhaPassThroughPhase = 'ready_for_parallel_pass_through';
+                console.log("All MHSA vectors are in position. Ready for PARALLEL pass-through.");
+                initiateParallelHeadPassThroughAnimations(lanes);
+            }
+        }
 
         // Update tweens
         if (typeof TWEEN !== 'undefined' && TWEEN.update) TWEEN.update();
