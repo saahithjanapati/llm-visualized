@@ -112,6 +112,7 @@ export function initLayerAnimation(container) {
 
     const mhaVisualizations = [];
     const headsCentersX = [];
+    const headCoords = [];
 
     for (let i = 0; i < NUM_HEAD_SETS_LAYER; i++) {
         const headSetWidth = MHA_INTERNAL_MATRIX_SPACING * 2 + MHA_MATRIX_PARAMS.width;
@@ -155,6 +156,7 @@ export function initLayerAnimation(container) {
         mhaVisualizations.push(valueMatrix);
 
         headsCentersX.push(x_k); // Use K matrix centre as canonical head centre
+        headCoords.push({ q: x_q, k: x_k, v: x_v });
     }
 
     // -------------------------------------------------------------------------
@@ -236,7 +238,9 @@ export function initLayerAnimation(container) {
             travellingVec: null,
             upwardCopies: [],
             headIndex: 0,
-            finalAscend: false
+            finalAscend: false,
+            sideCopies: [],
+            sideTrails: []
         });
     }
 
@@ -398,13 +402,8 @@ export function initLayerAnimation(container) {
                 trailObj.geometry.attributes.position.setXYZ(idx, pos.x, pos.y, pos.z);
                 trailObj.geometry.setDrawRange(0, pts.length);
                 trailObj.geometry.attributes.position.needsUpdate = true;
-                // Compute bounding sphere: if it's the first point, or every 20 points thereafter.
-                if (idx === 0 || (idx > 0 && idx % 20 === 0)) {
-                    trailObj.geometry.computeBoundingSphere();
-                }
+                if (idx === 0 || idx % 100 === 0) trailObj.geometry.computeBoundingSphere();
             }
-            // If MAX_TRAIL_POINTS is reached, the trail currently stops visually extending.
-            // No shifting logic is implemented in this version of LayerAnimation's trail.
         }
     }
 
@@ -659,16 +658,17 @@ export function initLayerAnimation(container) {
                     if (tVec.group.position.x < targetX - 0.01) {
                         tVec.group.position.x = Math.min(targetX, tVec.group.position.x + dx);
                     } else {
-                        // Arrived at (or passed) the head centre
-                        if (targetHeadIdx < NUM_HEAD_SETS_LAYER - 1) {
-                            // Duplicate: create upward copy that rises, original continues
-                            const dupeData = [...tVec.rawData];
-                            const upVec = new VectorVisualizationInstancedPrism(dupeData, tVec.group.position.clone());
-                            scene.add(upVec.group);
-                            lane.upwardCopies.push(upVec);
-                        } else {
-                            // Last head – current vector will rise instead of duplicating
-                            lane.finalAscend = true;
+                        // Arrived at (or passed) the head centre — duplicate upward copy for every head
+                        const dupeData = [...tVec.rawData];
+                        const upVec = new VectorVisualizationInstancedPrism(dupeData, tVec.group.position.clone());
+                        scene.add(upVec.group);
+                        upVec.userData = { headIndex: targetHeadIdx, sideSpawned: false };
+                        lane.upwardCopies.push(upVec);
+
+                        // After duplicating at last head, hide travelling vector and mark finished
+                        if (targetHeadIdx === NUM_HEAD_SETS_LAYER - 1) {
+                            tVec.group.visible = false;
+                            lane.horizPhase = 'finishedHeads';
                         }
                         lane.headIndex = targetHeadIdx + 1;
                         // If finished traversing all heads, stop horizontal motion
@@ -701,6 +701,45 @@ export function initLayerAnimation(container) {
                 if (tVec.group.position.y < headStopY) {
                     tVec.group.position.y = Math.min(headStopY, tVec.group.position.y + ANIM_RISE_SPEED_HEAD * SPEED_MULT * deltaTime);
                 }
+            }
+
+            // Spawn side copies once center vector settled
+            if (lane.upwardCopies) {
+                lane.upwardCopies.forEach(centerVec => {
+                    if (!centerVec.userData.sideSpawned && Math.abs(centerVec.group.position.y - headStopY) < 0.1) {
+                        const hIdx = centerVec.userData.headIndex;
+                        const coord = headCoords[hIdx];
+                        if (coord) {
+                            const lVec = new VectorVisualizationInstancedPrism(centerVec.rawData.slice(), centerVec.group.position.clone());
+                            const rVec = new VectorVisualizationInstancedPrism(centerVec.rawData.slice(), centerVec.group.position.clone());
+                            scene.add(lVec.group);
+                            scene.add(rVec.group);
+                            lane.sideCopies.push({ vec: lVec, targetX: coord.q });
+                            lane.sideCopies.push({ vec: rVec, targetX: coord.v });
+                            lane.sideTrails.push(createTrailLine(0xffffff));
+                            lane.sideTrails.push(createTrailLine(0xffffff));
+                            centerVec.userData.sideSpawned = true;
+                        }
+                    }
+                });
+            }
+
+            // Move side copies horizontally and vertically align
+            if (lane.sideCopies && lane.sideCopies.length) {
+                lane.sideCopies.forEach((obj, idx) => {
+                    const v = obj.vec;
+                    const dx = ANIM_HORIZ_SPEED * SPEED_MULT * deltaTime;
+                    if (Math.abs(v.group.position.x - obj.targetX) > 0.01) {
+                        const dir = v.group.position.x < obj.targetX ? 1 : -1;
+                        v.group.position.x += dir * dx;
+                        if ((dir === 1 && v.group.position.x > obj.targetX) || (dir === -1 && v.group.position.x < obj.targetX))
+                            v.group.position.x = obj.targetX;
+                    }
+                    // Ensure vertical position stays at headStopY
+                    v.group.position.y = headStopY;
+                    // Update trail
+                    if (lane.sideTrails[idx]) updateTrail(lane.sideTrails[idx], v.group.position);
+                });
             }
 
             // Determine which branched object position to follow for trail
