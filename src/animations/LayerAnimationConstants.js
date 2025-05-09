@@ -103,6 +103,24 @@ export const MLP_MATRIX_STYLE_PARAMS = {
 /** Visual representation of depth for d_model in MLP matrices. Used for scaling. */
 export const MLP_D_MODEL_VISUAL_DEPTH = 20;
 
+// -----------------------------------------------------------------------------
+// MHSA (Multi-Head Self-Attention) Specific Animation Constants
+// -----------------------------------------------------------------------------
+
+/** Speed at which duplicated vectors rise towards their attention head. */
+export const MHSA_DUPLICATE_VECTOR_RISE_SPEED = 6;
+
+/** Total duration for the MHSA vector pass-through animation sequence (ms). */
+export const MHSA_PASS_THROUGH_TOTAL_DURATION_MS = 90000; // Example: 3 seconds
+
+/** Ratio of total duration for matrix brightening phase (0.0 to 1.0). */
+export const MHSA_PASS_THROUGH_BRIGHTEN_RATIO = 0.4; // Example: Brightens over 40% of total duration
+
+/** Ratio of total duration for matrix dimming phase (0.0 to 1.0), starts after brightening. */
+export const MHSA_PASS_THROUGH_DIM_RATIO = 0.4; // Example: Dims over 40% of total duration
+
+/** Maximum emissive intensity for matrices during MHSA pass-through brightening phase. */
+export const MHSA_MATRIX_MAX_EMISSIVE_INTENSITY = 0.80;
 
 // -----------------------------------------------------------------------------
 // Animation Path & Behavior Constants

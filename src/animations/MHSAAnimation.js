@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization.js';
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
 import { createTrailLine, updateTrail } from '../utils/trailUtils.js';
+import { MHSA_DUPLICATE_VECTOR_RISE_SPEED, MHSA_PASS_THROUGH_TOTAL_DURATION_MS, MHSA_PASS_THROUGH_BRIGHTEN_RATIO, MHSA_PASS_THROUGH_DIM_RATIO, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY } from './LayerAnimationConstants.js';
 import {
     // Constants needed for setup & animation
     MHA_MATRIX_PARAMS,
@@ -9,7 +10,6 @@ import {
     HEAD_SET_GAP_LAYER,
     MHA_INTERNAL_MATRIX_SPACING,
     HEAD_VECTOR_STOP_BELOW,
-    ANIM_RISE_SPEED_HEAD,
     ANIM_HORIZ_SPEED,
     GLOBAL_ANIM_SPEED_MULT,
     SIDE_COPY_DELAY_MS,
@@ -36,7 +36,6 @@ export class MHSAAnimation {
         this.mhsa_matrix_center_y = this.mhsaBaseY + MHA_MATRIX_PARAMS.height / 2;
         this.headStopY = this.mhsa_matrix_center_y - HEAD_VECTOR_STOP_BELOW;
         this.mhaPassThroughTargetY = this.mhsa_matrix_center_y + MHA_MATRIX_PARAMS.height / 2 + 20;
-        this.mhaPassThroughDuration = 2000 / SPEED_MULT;
         this.outputVectorLength = 64;
         this.mhaResultRiseOffsetY = 50;
         this.mhaResultRiseDuration = 500 / SPEED_MULT;
@@ -169,6 +168,11 @@ export class MHSAAnimation {
             return;
         }
 
+        // Create a trail line that follows the vector only inside the matrix
+        const passThroughTrail = createTrailLine(this.scene, 0xffffff); // white trail
+        const matrixBottomY = this.mhsa_matrix_center_y - MHA_MATRIX_PARAMS.height / 2;
+        const matrixTopY = this.mhsa_matrix_center_y + MHA_MATRIX_PARAMS.height / 2;
+
         const originalMatrixEmissive = matrix.mesh.material.emissive.clone();
         const originalMatrixIntensity = matrix.mesh.material.emissiveIntensity;
         const tweenState = { y: vector.group.position.y, progress: 0, colorR: 1, colorG: 1, colorB: 1, matrixEmissiveIntensity: originalMatrixIntensity };
@@ -177,35 +181,84 @@ export class MHSAAnimation {
         tweenState.colorR = initialVecColor.r; tweenState.colorG = initialVecColor.g; tweenState.colorB = initialVecColor.b;
 
         new TWEEN.Tween(tweenState)
-            .to({ y: passThroughY, progress: 1.0, colorR: 1.0, colorG: 1.0, colorB: 1.0, matrixEmissiveIntensity: 1.5 }, duration)
+            .to({ y: passThroughY, progress: 1.0, colorR: 1.0, colorG: 1.0, colorB: 1.0, matrixEmissiveIntensity: MHSA_MATRIX_MAX_EMISSIVE_INTENSITY }, duration)
             .easing(TWEEN.Easing.Quadratic.InOut)
             .onUpdate(() => {
+                // Move vector
                 vector.group.position.y = tweenState.y;
+                // Only update trail while the vector is inside the matrix region
+                const y = vector.group.position.y;
+                if (y >= matrixBottomY && y <= matrixTopY) {
+                    updateTrail(passThroughTrail, vector.group.position);
+                }
+
+                let currentMatrixTargetColor = initialVecColor;
+                let currentEmissiveIntensity = 0.1;
+                let t = 0;
+
+                if (tweenState.progress < MHSA_PASS_THROUGH_BRIGHTEN_RATIO) {
+                    t = tweenState.progress / MHSA_PASS_THROUGH_BRIGHTEN_RATIO;
+                    currentMatrixTargetColor = initialVecColor.clone().lerp(brightMatrixColor, t);
+                    currentEmissiveIntensity = THREE.MathUtils.lerp(0.1, 1.5, t);
+                    matrix.setOpacity(THREE.MathUtils.lerp(0.7, 1.0, t)); 
+                } else if (tweenState.progress < MHSA_PASS_THROUGH_BRIGHTEN_RATIO + MHSA_PASS_THROUGH_DIM_RATIO) {
+                    t = (tweenState.progress - MHSA_PASS_THROUGH_BRIGHTEN_RATIO) / MHSA_PASS_THROUGH_DIM_RATIO;
+                    currentMatrixTargetColor = brightMatrixColor.clone().lerp(darkTintedMatrixColor, t);
+                    currentEmissiveIntensity = THREE.MathUtils.lerp(1.5, 0.1, t);
+                    matrix.setOpacity(1.0);
+                } else {
+                    currentMatrixTargetColor = darkTintedMatrixColor;
+                    currentEmissiveIntensity = 0.1;
+                    matrix.setOpacity(0.7);
+                }
+                matrix.setColor(currentMatrixTargetColor);
+                matrix.setEmissive(currentMatrixTargetColor, currentEmissiveIntensity);
+
                 const numCentralUnits = outLength;
                 const startVisibleIndex = Math.floor((VECTOR_LENGTH_PRISM - numCentralUnits) / 2);
                 const endVisibleIndex = startVisibleIndex + numCentralUnits - 1;
-                const currentWhite = new THREE.Color(tweenState.colorR, tweenState.colorG, tweenState.colorB);
+                
+                const matrixInteractionStartProgress = 0.25;
+                const matrixInteractionEndProgress = 0.75;
+                let shrinkProgress = 0;
+                if (tweenState.progress > matrixInteractionStartProgress && tweenState.progress < matrixInteractionEndProgress) {
+                    shrinkProgress = (tweenState.progress - matrixInteractionStartProgress) / (matrixInteractionEndProgress - matrixInteractionStartProgress);
+                } else if (tweenState.progress >= matrixInteractionEndProgress) {
+                    shrinkProgress = 1;
+                }
+
                 for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
                     let targetScaleY = vector.getUniformHeight();
                     let instanceYOffset = 0;
+                    let instanceColor = null;
+
                     if (i < startVisibleIndex || i > endVisibleIndex) {
-                        targetScaleY = THREE.MathUtils.lerp(vector.getUniformHeight(), 0.001, tweenState.progress);
-                        if (targetScaleY < 0.01 && tweenState.progress > 0.5) { instanceYOffset = HIDE_INSTANCE_Y_OFFSET - vector.group.position.y; }
+                        targetScaleY = THREE.MathUtils.lerp(vector.getUniformHeight(), 0.001, shrinkProgress);
+                        if (targetScaleY < 0.01 && shrinkProgress > 0.5) { 
+                            instanceYOffset = HIDE_INSTANCE_Y_OFFSET - vector.group.position.y; 
+                        }
                     }
-                    vector.setInstanceAppearance(i, instanceYOffset, currentWhite, new THREE.Vector3(vector.getWidthScale(), targetScaleY, vector.getDepthScale()));
+                    vector.setInstanceAppearance(i, instanceYOffset, instanceColor, new THREE.Vector3(vector.getWidthScale(), targetScaleY, vector.getDepthScale()));
                 }
-                matrix.setColor(brightMatrixColor); matrix.setEmissive(brightMatrixColor, tweenState.matrixEmissiveIntensity); matrix.setOpacity(1.0);
             })
             .onComplete(() => {
+                matrix.setColor(darkTintedMatrixColor);
+                matrix.setEmissive(darkTintedMatrixColor, 0.1);
+                matrix.setOpacity(0.7); 
+
                 const processedData = vector.rawData.slice(0, outLength);
-                vector.applyProcessedVisuals(processedData, outLength, { numKeyColors: 3, generationOptions: { type: 'monochromatic', baseHue: finalVectorHue, saturation: 0.9, minLightness: 0.4, maxLightness: 0.8 }});
-                vector.group.position.set(vector.group.position.x, passThroughY, vector.group.position.z);
-                matrix.setColor(darkTintedMatrixColor); matrix.setEmissive(darkTintedMatrixColor, 0.1); matrix.setOpacity(1.0);
+                vector.applyProcessedVisuals(processedData, outLength, { 
+                    numKeyColors: 3, 
+                    generationOptions: { type: 'monochromatic', baseHue: finalVectorHue, saturation: 0.9, minLightness: 0.4, maxLightness: 0.8 }
+                });
+                vector.group.position.y = passThroughY; 
 
                 new TWEEN.Tween(vector.group.position)
-                    .to({ y: passThroughY + riseOffset }, riseDurationVal)
+                    .to({ y: passThroughY + riseOffset }, this.mhaResultRiseDuration)
                     .easing(TWEEN.Easing.Cubic.Out)
-                    .onComplete(animationCompletionCallback)
+                    .onComplete(() => {
+                        if (animationCompletionCallback) animationCompletionCallback();
+                    })
                     .start();
             })
             .start();
@@ -292,7 +345,7 @@ export class MHSAAnimation {
             if (lane.upwardCopies && lane.upwardCopies.length) {
                 lane.upwardCopies.forEach((upVec, trailIdx) => {
                     if (upVec.group.position.y < this.headStopY) {
-                        upVec.group.position.y = Math.min(this.headStopY, upVec.group.position.y + ANIM_RISE_SPEED_HEAD * SPEED_MULT * deltaTime);
+                        upVec.group.position.y = Math.min(this.headStopY, upVec.group.position.y + MHSA_DUPLICATE_VECTOR_RISE_SPEED * SPEED_MULT * deltaTime);
                         if (lane.upwardTrails && lane.upwardTrails[trailIdx]) {
                             updateTrail(lane.upwardTrails[trailIdx], upVec.group.position);
                         }
