@@ -6,6 +6,8 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { LayerNormalizationVisualization } from '../components/LayerNormalizationVisualization.js';
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization.js';
+import { MHSAAnimation } from './MHSAAnimation.js';
+import { createTrailLine, updateTrail } from '../utils/trailUtils.js';
 import { 
     VECTOR_LENGTH,
     VECTOR_LENGTH_PRISM,
@@ -60,6 +62,9 @@ export function initLayerAnimation(container) {
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(window.devicePixelRatio);
 
+    // Initialize the clock earlier
+    const clock = new THREE.Clock(); 
+
     // -------------------------------------------------------------------------
     //  Post-processing (subtle bloom for emissive flashes)
     // -------------------------------------------------------------------------
@@ -112,80 +117,27 @@ export function initLayerAnimation(container) {
 
     const ln1_top_y = layerNorm1.group.position.y + LN_PARAMS.height / 2;
     const MHSA_BASE_Y = ln1_top_y + LN_TO_MHA_GAP;
-    const mhsa_matrix_center_y = MHSA_BASE_Y + MHA_MATRIX_PARAMS.height / 2;
+    // const mhsa_matrix_center_y = MHSA_BASE_Y + MHA_MATRIX_PARAMS.height / 2; // Moved to MHSAAnimation
 
-    const mhaVisualizations = [];
-    const headsCentersX = [];
-    const headCoords = [];
+    // const mhaVisualizations = []; // Managed by MHSAAnimation
+    // const headsCentersX = []; // Managed by MHSAAnimation
+    // const headCoords = []; // Managed by MHSAAnimation
 
-    const darkGrayColor = new THREE.Color(0x404040); // Define dark gray color once
-    const matrixOpacity = 0.7; // Define desired opacity
+    const darkGrayColor = new THREE.Color(0x404040);
+    const matrixOpacity = 0.7;
 
     // MHSA Pass-Through Animation State - Reworked
-    let mhaPassThroughPhase = 'positioning_mha_vectors';
+    // let mhaPassThroughPhase = 'positioning_mha_vectors'; // Managed by MHSAAnimation
 
+    // Instantiate MHSAAnimation
+    const mhsaAnimation = new MHSAAnimation(scene, BRANCH_X, MHSA_BASE_Y, clock); // Pass clock if TWEEN is updated there
+
+    // The MHSA visualization setup loop is now in MHSAAnimation constructor
+    /*
     for (let i = 0; i < NUM_HEAD_SETS_LAYER; i++) {
-        const headSetWidth = MHA_INTERNAL_MATRIX_SPACING * 2 + MHA_MATRIX_PARAMS.width;
-        const currentHeadSetBaseX = BRANCH_X - MHA_INTERNAL_MATRIX_SPACING + i * (headSetWidth + HEAD_SET_GAP_LAYER);
-
-        const x_q = currentHeadSetBaseX;
-        const x_k = currentHeadSetBaseX + MHA_INTERNAL_MATRIX_SPACING;
-        const x_v = currentHeadSetBaseX + MHA_INTERNAL_MATRIX_SPACING * 2;
-
-        const queryMatrix = new WeightMatrixVisualization(
-            null, new THREE.Vector3(x_q, mhsa_matrix_center_y, 0),
-            MHA_MATRIX_PARAMS.width, MHA_MATRIX_PARAMS.height, MHA_MATRIX_PARAMS.depth,
-            MHA_MATRIX_PARAMS.topWidthFactor, MHA_MATRIX_PARAMS.cornerRadius, MHA_MATRIX_PARAMS.numberOfSlits,
-            MHA_MATRIX_PARAMS.slitWidth, MHA_MATRIX_PARAMS.slitDepthFactor,
-            MHA_MATRIX_PARAMS.slitBottomWidthFactor, MHA_MATRIX_PARAMS.slitTopWidthFactor
-        );
-        queryMatrix.setColor(darkGrayColor);
-        queryMatrix.group.children.forEach(child => {
-            if (child.material) {
-                child.material.transparent = true;
-                child.material.opacity = matrixOpacity;
-            }
-        });
-        scene.add(queryMatrix.group);
-        mhaVisualizations.push(queryMatrix);
-
-        const keyMatrix = new WeightMatrixVisualization(
-            null, new THREE.Vector3(x_k, mhsa_matrix_center_y, 0),
-            MHA_MATRIX_PARAMS.width, MHA_MATRIX_PARAMS.height, MHA_MATRIX_PARAMS.depth,
-            MHA_MATRIX_PARAMS.topWidthFactor, MHA_MATRIX_PARAMS.cornerRadius, MHA_MATRIX_PARAMS.numberOfSlits,
-            MHA_MATRIX_PARAMS.slitWidth, MHA_MATRIX_PARAMS.slitDepthFactor,
-            MHA_MATRIX_PARAMS.slitBottomWidthFactor, MHA_MATRIX_PARAMS.slitTopWidthFactor
-        );
-        keyMatrix.setColor(darkGrayColor);
-        keyMatrix.group.children.forEach(child => {
-            if (child.material) {
-                child.material.transparent = true;
-                child.material.opacity = matrixOpacity;
-            }
-        });
-        scene.add(keyMatrix.group);
-        mhaVisualizations.push(keyMatrix);
-
-        const valueMatrix = new WeightMatrixVisualization(
-            null, new THREE.Vector3(x_v, mhsa_matrix_center_y, 0),
-            MHA_MATRIX_PARAMS.width, MHA_MATRIX_PARAMS.height, MHA_MATRIX_PARAMS.depth,
-            MHA_MATRIX_PARAMS.topWidthFactor, MHA_MATRIX_PARAMS.cornerRadius, MHA_MATRIX_PARAMS.numberOfSlits,
-            MHA_MATRIX_PARAMS.slitWidth, MHA_MATRIX_PARAMS.slitDepthFactor,
-            MHA_MATRIX_PARAMS.slitBottomWidthFactor, MHA_MATRIX_PARAMS.slitTopWidthFactor
-        );
-        valueMatrix.setColor(darkGrayColor);
-        valueMatrix.group.children.forEach(child => {
-            if (child.material) {
-                child.material.transparent = true;
-                child.material.opacity = matrixOpacity;
-            }
-        });
-        scene.add(valueMatrix.group);
-        mhaVisualizations.push(valueMatrix);
-
-        headsCentersX.push(x_k); // Use K matrix centre as canonical head centre
-        headCoords.push({ q: x_q, k: x_k, v: x_v });
+        // ... Entire MHSA setup loop removed ...
     }
+    */
 
     // -------------------------------------------------------------------------
     //  Main path parameters (Values from LayerAnimationConstants.js)
@@ -210,21 +162,9 @@ export function initLayerAnimation(container) {
     const lanes = [];
 
     // --- Trail line support --------------------------------------------------------
-    // const MAX_TRAIL_POINTS = 1500; // Now from constants
-    function createTrailLine(color) {
-        const geometry = new THREE.BufferGeometry();
-        const positions = new Float32Array(MAX_TRAIL_POINTS * 3);
-        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        geometry.setDrawRange(0, 0);
-        const material = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.12 });
-        const line = new THREE.Line(geometry, material);
-        // Ensure the trail line is always rendered (disable frustum culling)
-        line.frustumCulled = false;
-        // Initialize bounding sphere so frustum culling calculations include entire trail
-        geometry.computeBoundingSphere();
-        scene.add(line);
-        return { line, geometry, positions, points: [] };
-    }
+    // const MAX_TRAIL_POINTS = 1500; // Now from constants (used in trailUtils)
+    // function createTrailLine(color) { ... } // Moved to trailUtils.js
+    // function updateTrail(trailObj, pos) { ... } // Moved to trailUtils.js
 
     for (let i = 0; i < numVectors; i++) {
         const zPos = -LN_PARAMS.depth / 2 + slitSpacing * (i + 1);
@@ -247,9 +187,9 @@ export function initLayerAnimation(container) {
         const multTarget = new VectorVisualizationInstancedPrism(data.slice(), new THREE.Vector3(BRANCH_X, 3.3, zPos));
         scene.add(multTarget.group);
 
-        // Create trails
-        const origTrail = createTrailLine(0xffffff);
-        const branchTrail = createTrailLine(0xffffff);
+        // Create trails (now uses utility function, passing the scene)
+        const origTrail = createTrailLine(scene, 0xffffff);
+        const branchTrail = createTrailLine(scene, 0xffffff);
 
         lanes.push({
             zPos,
@@ -481,160 +421,30 @@ export function initLayerAnimation(container) {
     // -------------------------------------------------------------------------
     //  Animation loop
     // -------------------------------------------------------------------------
-    const clock = new THREE.Clock();
-    const headStopY = mhsa_matrix_center_y - HEAD_VECTOR_STOP_BELOW; // Define once
-    const mhaPassThroughTargetY = mhsa_matrix_center_y + MHA_MATRIX_PARAMS.height / 2 + 20; // Target Y for vectors passing through (+20 overshoot)
-    const mhaPassThroughDuration = 2000 / SPEED_MULT; // Duration for pass-through - INCREASED
-    const outputVectorLength = 64; // Target length for output vectors
-    const mhaResultRiseOffsetY = 50; // New: Offset for final rise
-    const mhaResultRiseDuration = 500 / SPEED_MULT; // New: Duration for final rise
+    // const clock = new THREE.Clock(); // Moved earlier
+    // const headStopY = mhsa_matrix_center_y - HEAD_VECTOR_STOP_BELOW; // Defined in MHSAAnimation
+    // const mhaPassThroughTargetY = mhsa_matrix_center_y + MHA_MATRIX_PARAMS.height / 2 + 20; // Defined in MHSAAnimation
+    // const mhaPassThroughDuration = 2000 / SPEED_MULT; // Defined in MHSAAnimation
+    // const outputVectorLength = 64; // Defined in MHSAAnimation
+    // const mhaResultRiseOffsetY = 50; // Defined in MHSAAnimation
+    // const mhaResultRiseDuration = 500 / SPEED_MULT; // Defined in MHSAAnimation
 
-    // Colors for matrix flash & final state
-    const brightGreen = new THREE.Color(0x33FF33);
-    const darkTintedGreen = new THREE.Color(0x002200);
-    const brightBlue = new THREE.Color(0x6666FF);
-    const darkTintedBlue = new THREE.Color(0x000022);
-    const brightRed = new THREE.Color(0xFF3333);
-    const darkTintedRed = new THREE.Color(0x220000);
+    // Colors for matrix flash & final state (MHSA specific colors moved to MHSAAnimation)
+    // const brightGreen = new THREE.Color(0x33FF33);
+    // const darkTintedGreen = new THREE.Color(0x002200);
+    // const brightBlue = new THREE.Color(0x6666FF);
+    // const darkTintedBlue = new THREE.Color(0x000022);
+    // const brightRed = new THREE.Color(0xFF3333);
+    // const darkTintedRed = new THREE.Color(0x220000);
 
     // Helper function to check if all MHSA vectors are in their start positions for pass-through
-    function areAllMHAVectorsInPosition() {
-        if (!lanes.length) return false; // No lanes, nothing to check
-
-        for (const lane of lanes) {
-            if (!lane.upwardCopies || lane.upwardCopies.length !== NUM_HEAD_SETS_LAYER) {
-                // console.log(`Lane ${lanes.indexOf(lane)}: upwardCopies not fully populated or missing.`);
-                return false; // Not all K-vectors (upwardCopies) are created yet
-            }
-
-            for (let headIdx = 0; headIdx < NUM_HEAD_SETS_LAYER; headIdx++) {
-                const kVec = lane.upwardCopies[headIdx];
-                if (!kVec || Math.abs(kVec.group.position.y - headStopY) > 0.1) {
-                    // console.log(`Lane ${lanes.indexOf(lane)}, Head ${headIdx} (K): K-vector not at headStopY.`);
-                    return false; // K-vector not in position
-                }
-                if (!kVec.userData.sideSpawned) {
-                    // console.log(`Lane ${lanes.indexOf(lane)}, Head ${headIdx} (K): Side copies not spawned yet.`);
-                    return false; // Q/V side copies not spawned yet for this K-vector
-                }
-            }
-
-            // Check side copies for this lane
-            // Each K-vector (upwardCopy) should have spawned 2 side copies (Q & V)
-            // Total side copies per lane = NUM_HEAD_SETS_LAYER * 2
-            if (!lane.sideCopies || lane.sideCopies.length !== NUM_HEAD_SETS_LAYER * 2) {
-                 // console.log(`Lane ${lanes.indexOf(lane)}: Incorrect number of sideCopies. Expected ${NUM_HEAD_SETS_LAYER * 2}, got ${lane.sideCopies.length}`);
-                return false;
-            }
-
-            for (const sideCopyObj of lane.sideCopies) {
-                if (!sideCopyObj || !sideCopyObj.vec) {
-                    // console.log(`Lane ${lanes.indexOf(lane)}: Corrupt sideCopyObj.`);
-                    return false;
-                }
-                if (Math.abs(sideCopyObj.vec.group.position.y - headStopY) > 0.1) {
-                    // console.log(`Lane ${lanes.indexOf(lane)}, SideCopy (Q/V) TargetX ${sideCopyObj.targetX}: Not at headStopY.`);
-                    return false; // Q or V vector not at headStopY
-                }
-                if (Math.abs(sideCopyObj.vec.group.position.x - sideCopyObj.targetX) > 0.1) {
-                    // console.log(`Lane ${lanes.indexOf(lane)}, SideCopy (Q/V) TargetX ${sideCopyObj.targetX}: Not at targetX.`);
-                    return false; // Q or V vector not at targetX
-                }
-            }
-        }
-        return true; // All vectors in all lanes are correctly positioned
-    }
+    // function areAllMHAVectorsInPosition() { ... } // Moved to MHSAAnimation.js
 
     // Helper function to animate a single vector and its matrix
-    function animateVectorMatrixPassThrough(vector, matrix, brightMatrixColor, darkTintedMatrixColor, finalVectorHue, passThroughY, duration, riseOffset, riseDurationVal, outLength, animationCompletionCallback) {
-        if (!vector || !matrix) {
-            console.warn("Missing vector or matrix for pass-through animation.");
-            animationCompletionCallback(); // Decrement count as if it completed
-            return;
-        }
-
-        const originalMatrixEmissive = matrix.mesh.material.emissive.clone();
-        const originalMatrixIntensity = matrix.mesh.material.emissiveIntensity;
-        const tweenState = { y: vector.group.position.y, progress: 0, colorR: 1, colorG: 1, colorB: 1, matrixEmissiveIntensity: originalMatrixIntensity };
-        const initialVecColor = new THREE.Color();
-        if(vector.mesh.instanceColor) { vector.mesh.getColorAt(0, initialVecColor); } else { initialVecColor.setRGB(0.5,0.5,0.5); }
-        tweenState.colorR = initialVecColor.r; tweenState.colorG = initialVecColor.g; tweenState.colorB = initialVecColor.b;
-
-        new TWEEN.Tween(tweenState)
-            .to({ y: passThroughY, progress: 1.0, colorR: 1.0, colorG: 1.0, colorB: 1.0, matrixEmissiveIntensity: 1.5 }, duration)
-            .easing(TWEEN.Easing.Quadratic.InOut)
-            .onUpdate(() => {
-                vector.group.position.y = tweenState.y;
-                const numCentralUnits = outLength;
-                const startVisibleIndex = Math.floor((VECTOR_LENGTH_PRISM - numCentralUnits) / 2);
-                const endVisibleIndex = startVisibleIndex + numCentralUnits - 1;
-                const currentWhite = new THREE.Color(tweenState.colorR, tweenState.colorG, tweenState.colorB);
-                for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
-                    let targetScaleY = vector.getUniformHeight();
-                    let instanceYOffset = 0;
-                    if (i < startVisibleIndex || i > endVisibleIndex) {
-                        targetScaleY = THREE.MathUtils.lerp(vector.getUniformHeight(), 0.001, tweenState.progress);
-                        if (targetScaleY < 0.01 && tweenState.progress > 0.5) { instanceYOffset = HIDE_INSTANCE_Y_OFFSET - vector.group.position.y; }
-                    }
-                    vector.setInstanceAppearance(i, instanceYOffset, currentWhite, new THREE.Vector3(vector.getWidthScale(), targetScaleY, vector.getDepthScale()));
-                }
-                matrix.setColor(brightMatrixColor); matrix.setEmissive(brightMatrixColor, tweenState.matrixEmissiveIntensity); matrix.setOpacity(1.0);
-            })
-            .onComplete(() => {
-                const processedData = vector.rawData.slice(0, outLength);
-                vector.applyProcessedVisuals(processedData, outLength, { numKeyColors: 3, generationOptions: { type: 'monochromatic', baseHue: finalVectorHue, saturation: 0.9, minLightness: 0.4, maxLightness: 0.8 }});
-                vector.group.position.set(vector.group.position.x, passThroughY, vector.group.position.z);
-                matrix.setColor(darkTintedMatrixColor); matrix.setEmissive(darkTintedMatrixColor, 0.1); matrix.setOpacity(1.0);
-
-                new TWEEN.Tween(vector.group.position)
-                    .to({ y: passThroughY + riseOffset }, riseDurationVal)
-                    .easing(TWEEN.Easing.Cubic.Out)
-                    .onComplete(animationCompletionCallback) // Call the main completion callback
-                    .start();
-            })
-            .start();
-    }
+    // function animateVectorMatrixPassThrough(...) { ... } // Moved to MHSAAnimation.js
 
     // Main function to initiate parallel pass-through for all heads
-    function initiateParallelHeadPassThroughAnimations(allLanes) {
-        if (mhaPassThroughPhase !== 'ready_for_parallel_pass_through') return;
-        console.log("Initiating Parallel MHSA Head Pass-Through Animations...");
-        mhaPassThroughPhase = 'parallel_pass_through_active';
-
-        let totalAnimationsToComplete = allLanes.length * NUM_HEAD_SETS_LAYER * 3; // K, Q, V for each head in each lane
-        let animationsCompleted = 0;
-
-        function singleAnimationDone() {
-            animationsCompleted++;
-            if (animationsCompleted === totalAnimationsToComplete) {
-                console.log("All MHSA parallel pass-through animations complete.");
-                mhaPassThroughPhase = 'mha_pass_through_complete';
-            }
-        }
-
-        allLanes.forEach((lane) => {
-            for (let headIdx = 0; headIdx < NUM_HEAD_SETS_LAYER; headIdx++) {
-                const kVec = lane.upwardCopies[headIdx];
-                const kMatrix = mhaVisualizations[headIdx * 3 + 1];
-                animateVectorMatrixPassThrough(kVec, kMatrix, brightGreen, darkTintedGreen, 0.333, mhaPassThroughTargetY, mhaPassThroughDuration, mhaResultRiseOffsetY, mhaResultRiseDuration, outputVectorLength, singleAnimationDone);
-
-                const qSideCopy = lane.sideCopies.find(sc => sc.headIndex === headIdx && sc.type === 'Q');
-                if (qSideCopy && qSideCopy.vec) {
-                    animateVectorMatrixPassThrough(qSideCopy.vec, qSideCopy.matrixRef, brightBlue, darkTintedBlue, 0.666, mhaPassThroughTargetY, mhaPassThroughDuration, mhaResultRiseOffsetY, mhaResultRiseDuration, outputVectorLength, singleAnimationDone);
-                } else { totalAnimationsToComplete--; } // Adjust if Q-vec missing
-
-                const vSideCopy = lane.sideCopies.find(sc => sc.headIndex === headIdx && sc.type === 'V');
-                if (vSideCopy && vSideCopy.vec) {
-                    animateVectorMatrixPassThrough(vSideCopy.vec, vSideCopy.matrixRef, brightRed, darkTintedRed, 0.0, mhaPassThroughTargetY, mhaPassThroughDuration, mhaResultRiseOffsetY, mhaResultRiseDuration, outputVectorLength, singleAnimationDone);
-                } else { totalAnimationsToComplete--; } // Adjust if V-vec missing
-            }
-        });
-
-        if (totalAnimationsToComplete === 0 && allLanes.length > 0) { // Handle case where no animations were started
-             console.log("No valid K,Q,V vectors found to animate for parallel pass-through.");
-             mhaPassThroughPhase = 'mha_pass_through_complete'; // Still mark as complete
-        }
-    }
+    // function initiateParallelHeadPassThroughAnimations(allLanes) { ... } // Moved to MHSAAnimation.js
 
     function animate() {
         requestAnimationFrame(animate);
@@ -833,7 +643,7 @@ export function initLayerAnimation(container) {
                                 lane.resultVec = resultVec;
 
                                 // Rise just above LN top
-                                const finalY = branchFinalY;
+                                const finalY = branchFinalY; // branchFinalY is meetY
                                 const distance = finalY - resultVec.group.position.y;
                                 const riseDuration = (distance / (ANIM_RISE_SPEED_INSIDE_LN * SPEED_MULT)) * 1000;
 
@@ -842,10 +652,12 @@ export function initLayerAnimation(container) {
                                     .easing(TWEEN.Easing.Linear.None)
                                     .onComplete(() => {
                                         // Vector has passed LN1 and is at branchX, finalY
-                                        lane.horizPhase = 'travelMHSA'; // Start moving through MHSA heads
+                                        // Now, this vector needs to interact with MHSA
+                                        // The 'travelMHSA' phase and related logic are handled by MHSAAnimation.update
+                                        lane.horizPhase = 'travelMHSA'; 
                                         lane.travellingVec = resultVec;
-                                        lane.headIndex = 0;
-                                        lane.upwardCopies = [];
+                                        // lane.headIndex = 0; // MHSAAnimation will initialize this if needed when phase starts
+                                        // lane.upwardCopies = []; // MHSAAnimation will manage this
                                     })
                                     .start();
                             }
@@ -863,125 +675,32 @@ export function initLayerAnimation(container) {
                     // }
                     break;
                 }
-                case 'travelMHSA': {
-                    const tVec = lane.travellingVec;
-                    if (!tVec) break;
-                    const targetHeadIdx = lane.headIndex || 0;
-                    const targetX = headsCentersX[Math.min(targetHeadIdx, headsCentersX.length - 1)];
-                    const dx = ANIM_HORIZ_SPEED * SPEED_MULT * deltaTime;
-                    if (tVec.group.position.x < targetX - 0.01) {
-                        tVec.group.position.x = Math.min(targetX, tVec.group.position.x + dx);
-                    } else {
-                        // Arrived at (or passed) the head centre — duplicate upward copy for every head
-                        const dupeData = [...tVec.rawData];
-                        const upVec = new VectorVisualizationInstancedPrism(dupeData, tVec.group.position.clone());
-                        scene.add(upVec.group);
-                        upVec.userData = { headIndex: targetHeadIdx, sideSpawned: false };
-                        lane.upwardCopies.push(upVec);
-                        // Create trail for upward movement
-                        const upTrail = createTrailLine(0xffffff); // White color for all trails
-                        updateTrail(upTrail, upVec.group.position);
-                        lane.upwardTrails = lane.upwardTrails || [];
-                        lane.upwardTrails.push(upTrail);
-
-                        // After duplicating at last head, hide travelling vector and mark finished
-                        if (targetHeadIdx === NUM_HEAD_SETS_LAYER - 1) {
-                            tVec.group.visible = false;
-                            lane.horizPhase = 'finishedHeads';
-                        }
-                        lane.headIndex = targetHeadIdx + 1;
-                        // If finished traversing all heads, stop horizontal motion
-                        if (lane.headIndex >= NUM_HEAD_SETS_LAYER) {
-                            lane.horizPhase = 'finishedHeads';
-                        }
-                    }
-                    break;
-                }
-                case 'finishedHeads': {
-                    // No-op for now; vectors already positioned under heads
-                    break;
-                }
-                case 'merged': // This case will no longer be triggered by the LN1 output
+                // MHSA specific phases are now handled by mhsaAnimation.update()
+                /*
+                case 'travelMHSA': { ... } // Moved to MHSAAnimation
+                case 'finishedHeads': { ... } // Moved to MHSAAnimation
+                */
+                case 'merged': 
                 default:
                     break;
             }
 
-            // --- Upward movement for copies under heads ---
+            // --- Upward movement for copies under heads --- // Moved to MHSAAnimation
+            /*
             const headStopY = mhsa_matrix_center_y - HEAD_VECTOR_STOP_BELOW;
-            if (lane.upwardCopies && lane.upwardCopies.length) {
-                lane.upwardCopies.forEach((upVec, idx) => {
-                    if (upVec.group.position.y < headStopY) {
-                        upVec.group.position.y = Math.min(headStopY, upVec.group.position.y + ANIM_RISE_SPEED_HEAD * SPEED_MULT * deltaTime);
-                        // Update vertical trail
-                        if (lane.upwardTrails && lane.upwardTrails[idx]) {
-                            updateTrail(lane.upwardTrails[idx], upVec.group.position);
-                        }
-                    }
-                });
-            }
-            if (lane.finalAscend && lane.travellingVec) {
-                const tVec = lane.travellingVec;
-                if (tVec.group.position.y < headStopY) {
-                    tVec.group.position.y = Math.min(headStopY, tVec.group.position.y + ANIM_RISE_SPEED_HEAD * SPEED_MULT * deltaTime);
-                }
-            }
+            if (lane.upwardCopies && lane.upwardCopies.length) { ... }
+            if (lane.finalAscend && lane.travellingVec) { ... }
+            */
 
-            // Spawn side copies once centre vector settled (with delay)
-            if (lane.upwardCopies) {
-                lane.upwardCopies.forEach(centerVec => {
-                    // If first time under centre, schedule spawn
-                    if (!centerVec.userData.sideSpawnRequested && Math.abs(centerVec.group.position.y - headStopY) < 0.1) {
-                        // schedule side copy spawn
-                        centerVec.userData.sideSpawnRequested = true;
-                        centerVec.userData.sideSpawnTime = timeNow + SIDE_COPY_DELAY_MS / SPEED_MULT; // Respect SPEED_MULT
-                        return; // wait for delay
-                    }
-                    // After delay has elapsed, spawn copies
-                    if (centerVec.userData.sideSpawnRequested && !centerVec.userData.sideSpawned && timeNow >= centerVec.userData.sideSpawnTime) {
-                        const hIdx = centerVec.userData.headIndex;
-                        const coord = headCoords[hIdx];
-                        if (coord) {
-                            const qMatrixForHead = mhaVisualizations[hIdx * 3];
-                            const vMatrixForHead = mhaVisualizations[hIdx * 3 + 2];
+            // Spawn side copies once centre vector settled (with delay) // Moved to MHSAAnimation
+            /*
+            if (lane.upwardCopies) { ... }
+            */
 
-                            const qVec = new VectorVisualizationInstancedPrism(centerVec.rawData.slice(), centerVec.group.position.clone());
-                            const vVec = new VectorVisualizationInstancedPrism(centerVec.rawData.slice(), centerVec.group.position.clone());
-                            scene.add(qVec.group);
-                            scene.add(vVec.group);
-                            
-                            // Add type and matrixRef to sideCopy objects
-                            lane.sideCopies.push({ vec: qVec, targetX: coord.q, type: 'Q', matrixRef: qMatrixForHead, headIndex: hIdx });
-                            lane.sideCopies.push({ vec: vVec, targetX: coord.v, type: 'V', matrixRef: vMatrixForHead, headIndex: hIdx });
-                            
-                            // white trails
-                            lane.sideTrails.push(createTrailLine(0xffffff));
-                            lane.sideTrails.push(createTrailLine(0xffffff));
-                            // initialize trail
-                            updateTrail(lane.sideTrails[lane.sideTrails.length-2], qVec.group.position);
-                            updateTrail(lane.sideTrails[lane.sideTrails.length-1], vVec.group.position);
-                            centerVec.userData.sideSpawned = true;
-                        }
-                    }
-                });
-            }
-
-            // Move side copies horizontally and vertically align
-            if (mhaPassThroughPhase === 'positioning_mha_vectors' && lane.sideCopies && lane.sideCopies.length) {
-                lane.sideCopies.forEach((obj, idx) => {
-                    const v = obj.vec;
-                    const dx = SIDE_COPY_HORIZ_SPEED * SPEED_MULT * deltaTime;
-                    if (Math.abs(v.group.position.x - obj.targetX) > 0.01) {
-                        const dir = v.group.position.x < obj.targetX ? 1 : -1;
-                        v.group.position.x += dir * dx;
-                        if ((dir === 1 && v.group.position.x > obj.targetX) || (dir === -1 && v.group.position.x < obj.targetX))
-                            v.group.position.x = obj.targetX;
-                    }
-                    // Ensure vertical position stays at headStopY
-                    v.group.position.y = headStopY;
-                    // Update trail
-                    if (lane.sideTrails[idx]) updateTrail(lane.sideTrails[idx], v.group.position);
-                });
-            }
+            // Move side copies horizontally and vertically align // Moved to MHSAAnimation
+            /*
+            if (mhaPassThroughPhase === 'positioning_mha_vectors' && lane.sideCopies && lane.sideCopies.length) { ... }
+            */
 
             // Determine which branched object position to follow for trail
             let branchPos = null;
@@ -1005,7 +724,13 @@ export function initLayerAnimation(container) {
             }
         });
 
-        // Check for MHSA pass-through readiness
+        // Call MHSAAnimation update method
+        if (mhsaAnimation) {
+            mhsaAnimation.update(deltaTime, timeNow, lanes);
+        }
+
+        // Check for MHSA pass-through readiness // Moved to MHSAAnimation
+        /*
         if (mhaPassThroughPhase === 'positioning_mha_vectors') {
             if (areAllMHAVectorsInPosition()) {
                 mhaPassThroughPhase = 'ready_for_parallel_pass_through';
@@ -1013,6 +738,7 @@ export function initLayerAnimation(container) {
                 initiateParallelHeadPassThroughAnimations(lanes);
             }
         }
+        */
 
         // Update tweens
         if (typeof TWEEN !== 'undefined' && TWEEN.update) TWEEN.update();
