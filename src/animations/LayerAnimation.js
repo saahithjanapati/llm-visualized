@@ -27,7 +27,9 @@ import {
     MAX_TRAIL_POINTS,
     ANIM_RISE_SPEED_HEAD,
     HEAD_VECTOR_STOP_BELOW,
-    GLOBAL_ANIM_SPEED_MULT
+    GLOBAL_ANIM_SPEED_MULT,
+    SIDE_COPY_DELAY_MS,
+    SIDE_COPY_HORIZ_SPEED
 } from '../utils/constants.js';
 import { mapValueToColor } from '../utils/colors.js';
 
@@ -190,6 +192,10 @@ export function initLayerAnimation(container) {
         geometry.setDrawRange(0, 0);
         const material = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.12 });
         const line = new THREE.Line(geometry, material);
+        // Ensure the trail line is always rendered (disable frustum culling)
+        line.frustumCulled = false;
+        // Initialize bounding sphere so frustum culling calculations include entire trail
+        geometry.computeBoundingSphere();
         scene.add(line);
         return { line, geometry, positions, points: [] };
     }
@@ -742,10 +748,18 @@ export function initLayerAnimation(container) {
                 }
             }
 
-            // Spawn side copies once center vector settled
+            // Spawn side copies once centre vector settled (with delay)
             if (lane.upwardCopies) {
                 lane.upwardCopies.forEach(centerVec => {
-                    if (!centerVec.userData.sideSpawned && Math.abs(centerVec.group.position.y - headStopY) < 0.1) {
+                    // If first time under centre, schedule spawn
+                    if (!centerVec.userData.sideSpawnRequested && Math.abs(centerVec.group.position.y - headStopY) < 0.1) {
+                        // schedule side copy spawn
+                        centerVec.userData.sideSpawnRequested = true;
+                        centerVec.userData.sideSpawnTime = timeNow + SIDE_COPY_DELAY_MS;
+                        return; // wait for delay
+                    }
+                    // After delay has elapsed, spawn copies
+                    if (centerVec.userData.sideSpawnRequested && !centerVec.userData.sideSpawned && timeNow >= centerVec.userData.sideSpawnTime) {
                         const hIdx = centerVec.userData.headIndex;
                         const coord = headCoords[hIdx];
                         if (coord) {
@@ -755,15 +769,12 @@ export function initLayerAnimation(container) {
                             scene.add(rVec.group);
                             lane.sideCopies.push({ vec: lVec, targetX: coord.q });
                             lane.sideCopies.push({ vec: rVec, targetX: coord.v });
-                            
-                            // Create trails for both side copies with distinct colors
-                            lane.sideTrails.push(createTrailLine(0xffffff)); // White for all trails
-                            lane.sideTrails.push(createTrailLine(0xffffff)); // White for all trails
-                            
-                            // Initialize trail with current position
+                            // white trails
+                            lane.sideTrails.push(createTrailLine(0xffffff));
+                            lane.sideTrails.push(createTrailLine(0xffffff));
+                            // initialize trail
                             updateTrail(lane.sideTrails[lane.sideTrails.length-2], lVec.group.position);
                             updateTrail(lane.sideTrails[lane.sideTrails.length-1], rVec.group.position);
-                            
                             centerVec.userData.sideSpawned = true;
                         }
                     }
@@ -774,7 +785,7 @@ export function initLayerAnimation(container) {
             if (lane.sideCopies && lane.sideCopies.length) {
                 lane.sideCopies.forEach((obj, idx) => {
                     const v = obj.vec;
-                    const dx = ANIM_HORIZ_SPEED * SPEED_MULT * deltaTime;
+                    const dx = SIDE_COPY_HORIZ_SPEED * SPEED_MULT * deltaTime;
                     if (Math.abs(v.group.position.x - obj.targetX) > 0.01) {
                         const dir = v.group.position.x < obj.targetX ? 1 : -1;
                         v.group.position.x += dir * dx;
