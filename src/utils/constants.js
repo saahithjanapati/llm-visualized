@@ -148,7 +148,7 @@ export const ANIM_RISE_SPEED_INSIDE_LN = 6;
 
 // Trail Line Constants
 /** Maximum number of points to store for each trail line, affecting trail length. */
-export const MAX_TRAIL_POINTS = 100000;
+export const MAX_TRAIL_POINTS = 2000;
 
 // Vector behaviour within MHSA heads ------------------------------------------------
 /** Vertical speed for vectors rising into heads. */

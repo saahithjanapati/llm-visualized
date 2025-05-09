@@ -200,20 +200,35 @@ export class MHSAAnimation {
                 const matrixBottomEntryY = this.mhsa_matrix_center_y - MHA_MATRIX_PARAMS.height / 2;
                 if (!initialDimensionChangeApplied && y >= matrixBottomEntryY) {
                     // ------------------------------------------------------------------
-                    // OPTIMISATION: Swap heavy 768-instance mesh for a light 64-instance
-                    // mesh instead of modifying each instance every frame.
-                    // ------------------------------------------------------------------
-
                     // 1) Create new lightweight vector (still uses the same class)
+                    // ------------------------------------------------------------------
                     const smallVec = new VectorVisualizationInstancedPrism(
                         vector.rawData.slice(0, outLength), // supply d_model slice
                         vector.group.position.clone(),
                         3 // subsection count for colour gradient
                     );
 
-                    // Apply final visuals immediately
-                    smallVec.applyProcessedVisuals(
-                        smallVec.rawData.slice(0, outLength),
+                    // ------------------------------------------------------------------
+                    // 2) Swap out the heavyweight 768-unit vector for the lightweight one
+                    // ------------------------------------------------------------------
+                    this.scene.add(smallVec.group);
+
+                    // Keep a handle to the original (large) vector before we overwrite
+                    const heavyVec = vector;
+
+                    // From now on animate using the lightweight reference
+                    vector = smallVec;
+                    initialDimensionChangeApplied = true;
+
+                    // Remove & dispose the heavyweight vector to free GPU/CPU resources
+                    this.scene.remove(heavyVec.group);
+                    if (typeof heavyVec.dispose === 'function') heavyVec.dispose();
+
+                    // ------------------------------------------------------------------
+                    // Apply final visuals immediately to the lightweight vector
+                    // ------------------------------------------------------------------
+                    vector.applyProcessedVisuals(
+                        vector.rawData.slice(0, outLength),
                         outLength,
                         {
                             numKeyColors: 3,
@@ -228,14 +243,9 @@ export class MHSAAnimation {
                         { setHiddenToBlack: false }
                     );
 
-                    this.scene.add(smallVec.group);
-
-                    // 2) Hide heavy original vector
-                    vector.group.visible = false;
-
-                    // 3) From now on animate using the small vector reference
-                    vector = smallVec;
-                    initialDimensionChangeApplied = true;
+                    // ------------------------------------------------------------------
+                    // END heavy → lightweight swap optimisation
+                    // ------------------------------------------------------------------
                 }
 
                 if (y >= matrixBottomY && y <= matrixTopY) {
