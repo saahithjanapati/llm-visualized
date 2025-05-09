@@ -6,6 +6,7 @@ import {
     PRISM_MAX_HEIGHT,
     PRISM_HEIGHT_SCALE_FACTOR,
 } from '../utils/constants.js';
+import { mapValueToColor } from '../utils/colors.js';
 
 // Base geometry has height 1, will be scaled by data
 const basePrismGeometry = new THREE.BoxGeometry(PRISM_BASE_WIDTH, 1, PRISM_BASE_DEPTH);
@@ -208,6 +209,79 @@ export class VectorVisualizationInstancedPrism {
             const randomHue = Math.random();
             this.currentKeyColors.push(new THREE.Color().setHSL(randomHue, 1.0, 0.5));
         }
+    }
+
+    _updateInstanceColors() {
+        if (!this.mesh || !this.mesh.instanceColor) {
+            console.warn("Mesh or instanceColor buffer not available for color update.");
+            return;
+        }
+        if (this.currentKeyColors.length === 0) {
+            // Fallback: Ensure some key colors exist if none were generated
+            // This might happen if updateKeyColorsFromData is called before _generateKeyColors
+            // or if _generateKeyColors itself had an issue.
+            this._generateKeyColors(); 
+        }
+        // Ensure there are at least two colors for interpolation if numSubsections > 0
+        // or at least one if numSubsections is 0 (or 1 key color implies 0 subsections effectively)
+        if (this.numSubsections > 0 && this.currentKeyColors.length < 2) {
+            console.warn("Not enough key colors for interpolation. Duplicating or defaulting.");
+            if (this.currentKeyColors.length === 1) {
+                this.currentKeyColors.push(this.currentKeyColors[0].clone()); // Duplicate
+            } else { // 0 key colors
+                this.currentKeyColors.push(new THREE.Color(0.5, 0.5, 0.5));
+                this.currentKeyColors.push(new THREE.Color(0.5, 0.5, 0.5));
+            }
+        } else if (this.numSubsections === 0 && this.currentKeyColors.length < 1 && VECTOR_LENGTH_PRISM > 0) {
+             this.currentKeyColors.push(new THREE.Color(0.5,0.5,0.5)); // Default single color
+        }
+
+
+        for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
+            this.mesh.setColorAt(i, this.getDefaultColorForIndex(i));
+        }
+        this.mesh.instanceColor.needsUpdate = true;
+    }
+
+    updateKeyColorsFromData(data, numKeyColorsToSample = 30) {
+        if (!data || data.length === 0) {
+            console.warn("No data provided to updateKeyColorsFromData. Using random colors.");
+            this.numSubsections = Math.max(1, numKeyColorsToSample -1);
+            this._generateKeyColors(); // Generate random colors as a fallback
+            this._updateInstanceColors();
+            return;
+        }
+
+        this.numSubsections = Math.max(1, numKeyColorsToSample - 1); // e.g., 30 samples -> 29 subsections
+        this.currentKeyColors = [];
+
+        if (numKeyColorsToSample === 1) { // Single key color desired
+            const value = data[Math.floor(data.length / 2)]; // Use middle value
+            this.currentKeyColors.push(mapValueToColor(value));
+        } else {
+            const step = (data.length -1) / (numKeyColorsToSample - 1);
+            for (let i = 0; i < numKeyColorsToSample; i++) {
+                const sampleIndex = Math.min(Math.round(i * step), data.length - 1);
+                const value = data[sampleIndex];
+                this.currentKeyColors.push(mapValueToColor(value));
+            }
+        }
+        
+        // Ensure getDefaultColorForIndex can work: needs at least 1 color if numSubsections is 0 (implies 1 color),
+        // or 2 colors if numSubsections > 0 for lerp.
+        if (this.numSubsections === 0 && this.currentKeyColors.length === 0 && numKeyColorsToSample === 1) {
+            // This case should be covered by the numKeyColorsToSample === 1 block.
+            // If still empty, add a default.
+             this.currentKeyColors.push(new THREE.Color(0.5,0.5,0.5));
+        } else if (this.numSubsections > 0 && this.currentKeyColors.length < 2) {
+            if (this.currentKeyColors.length === 1) {
+                this.currentKeyColors.push(this.currentKeyColors[0].clone()); // Duplicate if only one for lerp
+            } else { // 0 key colors after sampling (e.g. data was empty before)
+                this.currentKeyColors.push(new THREE.Color(0.5,0.5,0.5));
+                this.currentKeyColors.push(new THREE.Color(0.5,0.5,0.5));
+            }
+        }
+        this._updateInstanceColors();
     }
 
     getDefaultColorForIndex(index) {

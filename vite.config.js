@@ -31,6 +31,7 @@ export default defineConfig({
             prismRowVisualization: resolve(__dirname, 'tests/test_prism_row_visualization.html'),
             prismLayerNormAnimation: resolve(__dirname, 'tests/test_vector_instanced_prism_norm_anim.html'),
             prismAdditionAnimation: resolve(__dirname, 'tests/test_vector_instanced_prism_add_anim.html'),
+            prismMultiplicationAnimation: resolve(__dirname, 'tests/test_prism_multiplication_animation.html'),
             layerNorm: resolve(__dirname, 'tests/test_layer_norm.html'),
         }
     } 

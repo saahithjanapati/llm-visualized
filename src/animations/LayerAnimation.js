@@ -8,6 +8,7 @@ import { VectorVisualizationInstancedPrism } from '../components/VectorVisualiza
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization.js';
 import { 
     VECTOR_LENGTH,
+    VECTOR_LENGTH_PRISM,
     LN_TO_MHA_GAP,
     BRANCH_X,
     LAYER_NORM_1_Y_POS,
@@ -29,7 +30,8 @@ import {
     HEAD_VECTOR_STOP_BELOW,
     GLOBAL_ANIM_SPEED_MULT,
     SIDE_COPY_DELAY_MS,
-    SIDE_COPY_HORIZ_SPEED
+    SIDE_COPY_HORIZ_SPEED,
+    HIDE_INSTANCE_Y_OFFSET
 } from '../utils/constants.js';
 import { mapValueToColor } from '../utils/colors.js';
 
@@ -116,6 +118,9 @@ export function initLayerAnimation(container) {
     const headsCentersX = [];
     const headCoords = [];
 
+    const darkGrayColor = new THREE.Color(0x404040); // Define dark gray color once
+    const matrixOpacity = 0.7; // Define desired opacity
+
     for (let i = 0; i < NUM_HEAD_SETS_LAYER; i++) {
         const headSetWidth = MHA_INTERNAL_MATRIX_SPACING * 2 + MHA_MATRIX_PARAMS.width;
         const currentHeadSetBaseX = BRANCH_X - MHA_INTERNAL_MATRIX_SPACING + i * (headSetWidth + HEAD_SET_GAP_LAYER);
@@ -131,7 +136,13 @@ export function initLayerAnimation(container) {
             MHA_MATRIX_PARAMS.slitWidth, MHA_MATRIX_PARAMS.slitDepthFactor,
             MHA_MATRIX_PARAMS.slitBottomWidthFactor, MHA_MATRIX_PARAMS.slitTopWidthFactor
         );
-        queryMatrix.setColor(new THREE.Color(0x3333ff));
+        queryMatrix.setColor(darkGrayColor);
+        queryMatrix.group.children.forEach(child => {
+            if (child.material) {
+                child.material.transparent = true;
+                child.material.opacity = matrixOpacity;
+            }
+        });
         scene.add(queryMatrix.group);
         mhaVisualizations.push(queryMatrix);
 
@@ -142,7 +153,13 @@ export function initLayerAnimation(container) {
             MHA_MATRIX_PARAMS.slitWidth, MHA_MATRIX_PARAMS.slitDepthFactor,
             MHA_MATRIX_PARAMS.slitBottomWidthFactor, MHA_MATRIX_PARAMS.slitTopWidthFactor
         );
-        keyMatrix.setColor(new THREE.Color(0x33ff33));
+        keyMatrix.setColor(darkGrayColor);
+        keyMatrix.group.children.forEach(child => {
+            if (child.material) {
+                child.material.transparent = true;
+                child.material.opacity = matrixOpacity;
+            }
+        });
         scene.add(keyMatrix.group);
         mhaVisualizations.push(keyMatrix);
 
@@ -153,7 +170,13 @@ export function initLayerAnimation(container) {
             MHA_MATRIX_PARAMS.slitWidth, MHA_MATRIX_PARAMS.slitDepthFactor,
             MHA_MATRIX_PARAMS.slitBottomWidthFactor, MHA_MATRIX_PARAMS.slitTopWidthFactor
         );
-        valueMatrix.setColor(new THREE.Color(0xff3333));
+        valueMatrix.setColor(darkGrayColor);
+        valueMatrix.group.children.forEach(child => {
+            if (child.material) {
+                child.material.transparent = true;
+                child.material.opacity = matrixOpacity;
+            }
+        });
         scene.add(valueMatrix.group);
         mhaVisualizations.push(valueMatrix);
 
@@ -254,64 +277,62 @@ export function initLayerAnimation(container) {
     // -------------------------------------------------------------------------
     //  Helper: multiplication animation (copied from pipeline)
     // -------------------------------------------------------------------------
-    function startMultiplicationAnimation(vec1, vec2, onComplete) {
-        console.warn("startMultiplicationAnimation needs refactoring for InstancedPrism.");
-        if (onComplete) onComplete();
+    function startMultiplicationAnimation(vec1, vec2, onCompleteCallback) {
+        // vec1 is movingVec (source), vec2 is multTarget (destination/target of multiplication)
+        if (typeof TWEEN === 'undefined') {
+            console.error("Global TWEEN object not loaded!");
+            if (onCompleteCallback) onCompleteCallback();
+            return;
+        }
 
-        /*
-        const duration = 750;
-        const vectorLength = vec1.ellipses.length;
-        let moveTweensCompleted = 0;
+        const flashDuration = 150 / SPEED_MULT; // Adjusted by SPEED_MULT
+        const vectorLength = VECTOR_LENGTH_PRISM; // Prisms use VECTOR_LENGTH_PRISM
 
+        if (!vec1.rawData || !vec2.rawData || vec1.rawData.length !== vectorLength || vec2.rawData.length !== vectorLength) {
+            console.error("Vector data missing or length mismatch for prism multiplication.",
+                          `Vec1 length: ${vec1.rawData?.length}, Vec2 length: ${vec2.rawData?.length}, Expected: ${vectorLength}`);
+            if (onCompleteCallback) onCompleteCallback();
+            return;
+        }
+
+        // 1. Store original colors of vec2 and set all to white/bright for flash
+        // This assumes vec1 (movingVec) is already in position.
+        // The flash happens on vec2 (multTarget).
         for (let i = 0; i < vectorLength; i++) {
-            const e1 = vec1.ellipses[i];
-            const e2 = vec2.ellipses[i];
-            if (!e1 || !e2) continue;
-            const targetPosWorld = new THREE.Vector3();
-            e2.getWorldPosition(targetPosWorld);
-            const localTarget = e1.parent.worldToLocal(targetPosWorld.clone());
-
-            new TWEEN.Tween(e1.position)
-                .to({ y: localTarget.y }, duration)
-                .easing(TWEEN.Easing.Quadratic.InOut)
-                .onComplete(() => {
-                    e1.visible = false;
-                    moveTweensCompleted++;
-                    if (moveTweensCompleted === vectorLength) triggerFlash();
-                })
-                .start();
+            // Use setInstanceAppearance to change color temporarily. yOffset = 0 means no positional change.
+            vec2.setInstanceAppearance(i, 0, new THREE.Color(0xffffff)); 
         }
 
-        function triggerFlash() {
-            const flashDuration = 150;
-            const original = [];
-            for (let i = 0; i < vectorLength; i++) {
-                const e2 = vec2.ellipses[i];
-                original[i] = {
-                    color: e2.material.color.clone(),
-                    emissive: e2.material.emissive.clone(),
-                    emissiveIntensity: e2.material.emissiveIntensity
-                };
-                e2.material.color.set(0xffffff);
-                e2.material.emissive.set(0xffffff);
-                e2.material.emissiveIntensity = 1.5;
-            }
-            new TWEEN.Tween({}).to({}, flashDuration).onComplete(() => {
+        // 2. Create a single tween for the flash duration
+        new TWEEN.Tween({})
+            .to({}, flashDuration)
+            .onComplete(() => {
+                // 3. Calculate product, update vec2.rawData, set final colors on vec2, and "hide" vec1 instances
                 for (let i = 0; i < vectorLength; i++) {
-                    const e1 = vec1.ellipses[i];
-                    const e2 = vec2.ellipses[i];
-                    const product = vec1.data[i] * vec2.data[i];
-                    vec2.data[i] = product;
-                    const col = mapValueToColor(product);
-                    e2.material.color.copy(col);
-                    e2.material.emissive.copy(col);
-                    e2.material.emissiveIntensity = original[i].emissiveIntensity;
-                    if (e1) e1.visible = false;
+                    // Ensure rawData elements exist before multiplication
+                    if (typeof vec1.rawData[i] !== 'number' || typeof vec2.rawData[i] !== 'number') {
+                        console.warn(`Skipping multiplication for index ${i} due to missing data: vec1[${i}]=${vec1.rawData[i]}, vec2[${i}]=${vec2.rawData[i]}`);
+                        // Set product to a default or skip update for this element if data is bad
+                        // For now, if data is bad on one, we may result in NaN or error if not careful.
+                        // Let's assume valid numbers or that multiplication handles it gracefully (e.g. undefined * number = NaN)
+                        // vec2.rawData[i] might remain unchanged or become NaN.
+                    }
+                    
+                    const product = vec1.rawData[i] * vec2.rawData[i];
+                    vec2.rawData[i] = product; // Update underlying data of vec2 (multTarget)
+
+                    // "Hide" instance from vec1 (movingVec) by moving it far away
+                    vec1.setInstanceAppearance(i, HIDE_INSTANCE_Y_OFFSET, null); 
                 }
-                if (onComplete) onComplete();
-            }).start();
-        }
-        */
+
+                // Update vec2 (multTarget) colors based on the new rawData (product results) using a gradient
+                vec2.updateKeyColorsFromData(vec2.rawData, 30); // Use 30 samples for the gradient
+
+                if (onCompleteCallback) {
+                    onCompleteCallback();
+                }
+            })
+            .start();
     }
 
     // -------------------------------------------------------------------------
