@@ -8,6 +8,7 @@ import { VectorVisualizationInstancedPrism } from '../components/VectorVisualiza
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization.js';
 import { MHSAAnimation } from './MHSAAnimation.js';
 import { createTrailLine, updateTrail } from '../utils/trailUtils.js';
+import { TRAIL_LINE_COLOR } from './LayerAnimationConstants.js';
 import { 
     VECTOR_LENGTH,
     VECTOR_LENGTH_PRISM,
@@ -117,7 +118,7 @@ export function initLayerAnimation(container) {
 
     const ln1_top_y = layerNorm1.group.position.y + LN_PARAMS.height / 2;
     const MHSA_BASE_Y = ln1_top_y + LN_TO_MHA_GAP;
-    // const mhsa_matrix_center_y = MHSA_BASE_Y + MHA_MATRIX_PARAMS.height / 2; // Moved to MHSAAnimation
+    // const mha_matrix_center_y = MHSA_BASE_Y + MHA_MATRIX_PARAMS.height / 2; // Moved to MHSAAnimation
 
     // const mhaVisualizations = []; // Managed by MHSAAnimation
     // const headsCentersX = []; // Managed by MHSAAnimation
@@ -188,8 +189,8 @@ export function initLayerAnimation(container) {
         scene.add(multTarget.group);
 
         // Create trails (now uses utility function, passing the scene)
-        const origTrail = createTrailLine(scene, 0xffffff);
-        const branchTrail = createTrailLine(scene, 0xffffff);
+        const origTrail = createTrailLine(scene, TRAIL_LINE_COLOR);
+        const branchTrail = createTrailLine(scene, TRAIL_LINE_COLOR);
 
         lanes.push({
             zPos,

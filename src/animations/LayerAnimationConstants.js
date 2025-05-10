@@ -122,6 +122,25 @@ export const MHSA_PASS_THROUGH_DIM_RATIO = 0.4; // Example: Dims over 40% of tot
 /** Maximum emissive intensity for matrices during MHSA pass-through brightening phase. */
 export const MHSA_MATRIX_MAX_EMISSIVE_INTENSITY = 0.80;
 
+// MHSA color constants
+export const MHSA_MATRIX_INITIAL_RESTING_COLOR = 0x404040;
+export const MHSA_BRIGHT_GREEN = 0x33FF33;
+export const MHSA_DARK_TINTED_GREEN = 0x002200;
+export const MHSA_BRIGHT_BLUE = 0x6666FF;
+export const MHSA_DARK_TINTED_BLUE = 0x000022;
+export const MHSA_BRIGHT_RED = 0xFF3333;
+export const MHSA_DARK_TINTED_RED = 0x220000;
+
+// Vertical offset applied to vectors after pass-through through matrices
+export const MHSA_RESULT_RISE_OFFSET_Y = 60;
+
+// Distance below the matrix center where vectors should stop before entering
+export const MHSA_HEAD_VECTOR_STOP_BELOW = 70;
+
+// Trail line visual properties
+export const TRAIL_LINE_OPACITY = 0.05;
+export const TRAIL_LINE_COLOR = 0xffffff; // White color for trails
+
 // -----------------------------------------------------------------------------
 // Animation Path & Behavior Constants
 // -----------------------------------------------------------------------------

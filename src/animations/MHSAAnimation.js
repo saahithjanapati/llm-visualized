@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization.js';
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
 import { createTrailLine, updateTrail } from '../utils/trailUtils.js';
-import { MHSA_DUPLICATE_VECTOR_RISE_SPEED, MHSA_PASS_THROUGH_TOTAL_DURATION_MS, MHSA_PASS_THROUGH_BRIGHTEN_RATIO, MHSA_PASS_THROUGH_DIM_RATIO, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY } from './LayerAnimationConstants.js';
+import { MHSA_DUPLICATE_VECTOR_RISE_SPEED, MHSA_PASS_THROUGH_TOTAL_DURATION_MS, MHSA_PASS_THROUGH_BRIGHTEN_RATIO, MHSA_PASS_THROUGH_DIM_RATIO, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY, MHSA_MATRIX_INITIAL_RESTING_COLOR, MHSA_BRIGHT_GREEN, MHSA_DARK_TINTED_GREEN, MHSA_BRIGHT_BLUE, MHSA_DARK_TINTED_BLUE, MHSA_BRIGHT_RED, MHSA_DARK_TINTED_RED, MHSA_RESULT_RISE_OFFSET_Y, MHSA_HEAD_VECTOR_STOP_BELOW, TRAIL_LINE_COLOR } from './LayerAnimationConstants.js';
 import {
     // Constants needed for setup & animation
     MHA_MATRIX_PARAMS,
@@ -34,23 +34,23 @@ export class MHSAAnimation {
         this.mhaPassThroughPhase = 'positioning_mha_vectors';
 
         this.mhsa_matrix_center_y = this.mhsaBaseY + MHA_MATRIX_PARAMS.height / 2;
-        this.headStopY = this.mhsa_matrix_center_y - HEAD_VECTOR_STOP_BELOW;
+        this.headStopY = this.mhsa_matrix_center_y - MHSA_HEAD_VECTOR_STOP_BELOW;
         this.mhaPassThroughTargetY = this.mhsa_matrix_center_y + MHA_MATRIX_PARAMS.height / 2 + 20;
         this.outputVectorLength = 64;
-        this.mhaResultRiseOffsetY = 50;
+        this.mhaResultRiseOffsetY = MHSA_RESULT_RISE_OFFSET_Y;
         this.mhaResultRiseDuration = 500 / SPEED_MULT;
         this.mhaPassThroughDuration = MHSA_PASS_THROUGH_TOTAL_DURATION_MS / SPEED_MULT;
 
-        this.matrixInitialRestingColor = new THREE.Color(0x404040); // Initial dark grey for all matrices
+        this.matrixInitialRestingColor = new THREE.Color(MHSA_MATRIX_INITIAL_RESTING_COLOR);
         this.matrixRestingEmissiveIntensity = 0.1; // Default low emissive intensity
         this.matrixRestingOpacity = 0.7; // Default opacity for resting matrices
 
-        this.brightGreen = new THREE.Color(0x33FF33);
-        this.darkTintedGreen = new THREE.Color(0x002200);
-        this.brightBlue = new THREE.Color(0x6666FF);
-        this.darkTintedBlue = new THREE.Color(0x000022);
-        this.brightRed = new THREE.Color(0xFF3333);
-        this.darkTintedRed = new THREE.Color(0x220000);
+        this.brightGreen = new THREE.Color(MHSA_BRIGHT_GREEN);
+        this.darkTintedGreen = new THREE.Color(MHSA_DARK_TINTED_GREEN);
+        this.brightBlue = new THREE.Color(MHSA_BRIGHT_BLUE);
+        this.darkTintedBlue = new THREE.Color(MHSA_DARK_TINTED_BLUE);
+        this.brightRed = new THREE.Color(MHSA_BRIGHT_RED);
+        this.darkTintedRed = new THREE.Color(MHSA_DARK_TINTED_RED);
 
         this._setupMHSAVisualizations();
     }
@@ -174,7 +174,7 @@ export class MHSAAnimation {
         }
 
         // Create a trail line that follows the vector only inside the matrix
-        const passThroughTrail = createTrailLine(this.scene, 0xffffff); // white trail
+        const passThroughTrail = createTrailLine(this.scene, TRAIL_LINE_COLOR);
         const matrixBottomY = this.mhsa_matrix_center_y - MHA_MATRIX_PARAMS.height / 2;
         const matrixTopY = this.mhsa_matrix_center_y + MHA_MATRIX_PARAMS.height / 2;
 
@@ -248,7 +248,8 @@ export class MHSAAnimation {
                     // ------------------------------------------------------------------
                 }
 
-                if (y >= matrixBottomY && y <= matrixTopY) {
+                // Only update the trail while the vector is rising towards the matrix (below it)
+                if (y < matrixBottomY) {
                     updateTrail(passThroughTrail, vector.group.position);
                 }
 
@@ -295,12 +296,9 @@ export class MHSAAnimation {
             .onComplete(() => {
                 matrix.setColor(darkTintedMatrixColor);
                 matrix.setEmissive(darkTintedMatrixColor, this.matrixRestingEmissiveIntensity);
-                matrix.setOpacity(this.matrixRestingOpacity);
+                matrix.setOpacity(1.0);
 
-                // Ensure final visuals are applied at least once (if, for some
-                // reason, progress never reached the 0.8 threshold due to
-                // floating-point rounding). This is effectively a no-op if it
-                // already happened in the onUpdate block above.
+                // Ensure final visuals are applied at least once (in case progress never reached threshold).
                 if (!finalVisualsApplied) {
                     const processedData = vector.rawData.slice(0, outLength);
                     vector.applyProcessedVisuals(processedData, outLength, {
@@ -386,7 +384,7 @@ export class MHSAAnimation {
                     upVec.userData = { headIndex: targetHeadIdx, sideSpawned: false, sideSpawnRequested: false, sideSpawnTime: 0 };
                     lane.upwardCopies.push(upVec);
                     
-                    const upTrail = createTrailLine(this.scene, 0xffffff);
+                    const upTrail = createTrailLine(this.scene, TRAIL_LINE_COLOR);
                     updateTrail(upTrail, upVec.group.position);
                     lane.upwardTrails = lane.upwardTrails || [];
                     lane.upwardTrails.push(upTrail);
@@ -435,8 +433,8 @@ export class MHSAAnimation {
                             lane.sideCopies.push({ vec: vVec, targetX: coord.v, type: 'V', matrixRef: vMatrixForHead, headIndex: hIdx });
                             
                             lane.sideTrails = lane.sideTrails || [];
-                            lane.sideTrails.push(createTrailLine(this.scene, 0xffffff));
-                            lane.sideTrails.push(createTrailLine(this.scene, 0xffffff));
+                            lane.sideTrails.push(createTrailLine(this.scene, TRAIL_LINE_COLOR));
+                            lane.sideTrails.push(createTrailLine(this.scene, TRAIL_LINE_COLOR));
                             
                             updateTrail(lane.sideTrails[lane.sideTrails.length-2], qVec.group.position);
                             updateTrail(lane.sideTrails[lane.sideTrails.length-1], vVec.group.position);

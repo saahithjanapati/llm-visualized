@@ -1,14 +1,19 @@
 import * as THREE from 'three';
 import { MAX_TRAIL_POINTS, GLOBAL_ANIM_SPEED_MULT } from './constants.js'; // Assuming MAX_TRAIL_POINTS is in constants.js
+import { TRAIL_LINE_OPACITY, TRAIL_LINE_COLOR } from '../animations/LayerAnimationConstants.js';
 
 const SPEED_MULT = GLOBAL_ANIM_SPEED_MULT; // If SPEED_MULT is used by updateTrail
 
-export function createTrailLine(scene, color) { // Added scene parameter
+export function createTrailLine(scene, color = TRAIL_LINE_COLOR) { // Added scene parameter and default color
     const geometry = new THREE.BufferGeometry();
     const positions = new Float32Array(MAX_TRAIL_POINTS * 3);
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geometry.setDrawRange(0, 0);
-    const material = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.12 });
+    const material = new THREE.LineBasicMaterial({ 
+        color, 
+        transparent: true, 
+        opacity: TRAIL_LINE_OPACITY 
+    });
     const line = new THREE.Line(geometry, material);
     line.frustumCulled = false;
     geometry.computeBoundingSphere();
