@@ -163,3 +163,9 @@ export const SIDE_COPY_DELAY_MS = 500;
 // Global animation speed multiplier (1 = normal speed). Increase to speed up everything.
 // ------------------------------------------------------------
 export const GLOBAL_ANIM_SPEED_MULT = 25;
+
+/** Horizontal speed for decorative vectors merging into row output. */
+export const ROW_MERGE_HORIZ_SPEED = 20;
+
+/** Centre-to-centre spacing between 64-dim segments when assembling the 768-dim row. */
+export const ROW_SEGMENT_SPACING = PRISM_BASE_WIDTH * 1.5 * 64; // matches InstancedPrism width scaling

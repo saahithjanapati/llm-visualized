@@ -43,7 +43,7 @@ function init() {
     // Centering the MHSA block around X=0. Adjust mhsaBaseY so matrices are roughly centered vertically.
     const mhsaBaseY = 0; // MHA matrices will be centered around MHA_MATRIX_PARAMS.height / 2
     const branchX = 0;   // Center the whole MHSA block at X=0
-    mhsaAnimation = new MHSAAnimation(scene, branchX, mhsaBaseY, clock);
+    mhsaAnimation = new MHSAAnimation(scene, branchX, mhsaBaseY, clock, 'temp');
 
     // Prepare mock 'lanes' data with vectors in position
     prepareMockLanes();

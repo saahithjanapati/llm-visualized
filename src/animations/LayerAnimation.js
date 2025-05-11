@@ -9,6 +9,7 @@ import { WeightMatrixVisualization } from '../components/WeightMatrixVisualizati
 import { MHSAAnimation } from './MHSAAnimation.js';
 import { createTrailLine, updateTrail } from '../utils/trailUtils.js';
 import { TRAIL_LINE_COLOR } from './LayerAnimationConstants.js';
+import { PrismLayerNormAnimation } from '../animations/PrismLayerNormAnimation.js';
 import { 
     VECTOR_LENGTH,
     VECTOR_LENGTH_PRISM,
@@ -131,7 +132,7 @@ export function initLayerAnimation(container) {
     // let mhaPassThroughPhase = 'positioning_mha_vectors'; // Managed by MHSAAnimation
 
     // Instantiate MHSAAnimation
-    const mhsaAnimation = new MHSAAnimation(scene, BRANCH_X, MHSA_BASE_Y, clock); // Pass clock if TWEEN is updated there
+    const mhsaAnimation = new MHSAAnimation(scene, BRANCH_X, MHSA_BASE_Y, clock, 'temp'); // temp mode for in-progress behaviour
 
     // The MHSA visualization setup loop is now in MHSAAnimation constructor
     /*
@@ -188,6 +189,9 @@ export function initLayerAnimation(container) {
         const multTarget = new VectorVisualizationInstancedPrism(data.slice(), new THREE.Vector3(BRANCH_X, 3.3, zPos));
         scene.add(multTarget.group);
 
+        // Create layer norm animation controller for this lane's vector
+        const normAnimation = new PrismLayerNormAnimation(movingVec);
+
         // Create trails (now uses utility function, passing the scene)
         const origTrail = createTrailLine(scene, TRAIL_LINE_COLOR);
         const branchTrail = createTrailLine(scene, TRAIL_LINE_COLOR);
@@ -197,6 +201,7 @@ export function initLayerAnimation(container) {
             originalVec: origVec,
             movingVec,
             multTarget,
+            normAnimation,
             // Pipeline flags
             normStarted: false,
             multStarted: false,
@@ -593,22 +598,18 @@ export function initLayerAnimation(container) {
                     // Start normalization when reaching 35% height above bottom of current LN
                     const normStartY_abs = currentLN_bottomY_abs + (LN_PARAMS.height * 0.35);
                     if (!lane.normStarted && movingVec.group.position.y >= normStartY_abs) {
-                        // movingVec.startAnimation(); // VectorVisualizationInstancedPrism does not have startAnimation
-                        // TODO: Refactor for InstancedPrism - Trigger normalization effect if needed.
-                        // This might involve a custom animation loop that calls setInstanceAppearance on movingVec
-                        // or a method within VectorVisualizationInstancedPrism to animate its normalization.
-                        // For now, we assume normalization is reflected by updating its data.
-                        movingVec.updateDataInternal(movingVec.rawData.slice()); // This re-calculates normalizedData
+                        // Start normalization animation 
+                        lane.normAnimation.start(movingVec.rawData.slice());
                         lane.normStarted = true;
                     }
 
                     // Update normalization visuals
-                    // movingVec.update(timeNow); // VectorVisualizationInstancedPrism does not have update()
-                    // TODO: Refactor for InstancedPrism - If there's an ongoing animation for normalization, update it here.
+                    if (lane.normStarted && lane.normAnimation) {
+                        lane.normAnimation.update(deltaTime);
+                    }
 
                     // Move up (only when not actively normalizing)
-                    // const normAnimating = lane.normStarted && movingVec.animationState.isAnimating; // animationState doesn't exist
-                    const normAnimating = false; // Placeholder, as direct animation state isn't available
+                    const normAnimating = lane.normStarted && lane.normAnimation.isAnimating;
                     if (!lane.multStarted && !normAnimating) {
                         movingVec.group.position.y += ANIM_RISE_SPEED_INSIDE_LN * SPEED_MULT * deltaTime;
                     }

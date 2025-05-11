@@ -29,7 +29,7 @@ const clock = new THREE.Clock();
 // --- MHSAAnimation Setup ---
 const branchX = 0; // Centering the MHSA block for this test
 const mhsaBaseY = 0; // Base Y for the MHSA block
-const mhsaAnimation = new MHSAAnimation(scene, branchX, mhsaBaseY, clock);
+const mhsaAnimation = new MHSAAnimation(scene, branchX, mhsaBaseY, clock, 'temp');
 
 // --- Mocking 'lanes' data as if vectors are in position --- 
 const numTestLanes = 5; // Create 5 lanes of vectors

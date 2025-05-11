@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization.js';
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
 import { createTrailLine, updateTrail } from '../utils/trailUtils.js';
-import { MHSA_DUPLICATE_VECTOR_RISE_SPEED, MHSA_PASS_THROUGH_TOTAL_DURATION_MS, MHSA_PASS_THROUGH_BRIGHTEN_RATIO, MHSA_PASS_THROUGH_DIM_RATIO, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY, MHSA_MATRIX_INITIAL_RESTING_COLOR, MHSA_BRIGHT_GREEN, MHSA_DARK_TINTED_GREEN, MHSA_BRIGHT_BLUE, MHSA_DARK_TINTED_BLUE, MHSA_BRIGHT_RED, MHSA_DARK_TINTED_RED, MHSA_RESULT_RISE_OFFSET_Y, MHSA_HEAD_VECTOR_STOP_BELOW, TRAIL_LINE_COLOR } from './LayerAnimationConstants.js';
+import { MHSA_DUPLICATE_VECTOR_RISE_SPEED, MHSA_PASS_THROUGH_TOTAL_DURATION_MS, MHSA_PASS_THROUGH_BRIGHTEN_RATIO, MHSA_PASS_THROUGH_DIM_RATIO, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY, MHSA_MATRIX_INITIAL_RESTING_COLOR, MHSA_BRIGHT_GREEN, MHSA_DARK_TINTED_GREEN, MHSA_BRIGHT_BLUE, MHSA_DARK_TINTED_BLUE, MHSA_BRIGHT_RED, MHSA_DARK_TINTED_RED, MHSA_RESULT_RISE_OFFSET_Y, MHSA_HEAD_VECTOR_STOP_BELOW, TRAIL_LINE_COLOR, TRAIL_LINE_OPACITY } from './LayerAnimationConstants.js';
 import {
     // Constants needed for setup & animation
     MHA_MATRIX_PARAMS,
@@ -14,6 +14,8 @@ import {
     GLOBAL_ANIM_SPEED_MULT,
     SIDE_COPY_DELAY_MS,
     SIDE_COPY_HORIZ_SPEED,
+    ROW_MERGE_HORIZ_SPEED,
+    ROW_SEGMENT_SPACING,
     VECTOR_LENGTH_PRISM,
     HIDE_INSTANCE_Y_OFFSET,
 } from '../utils/constants.js';
@@ -22,7 +24,7 @@ import {
 const SPEED_MULT = GLOBAL_ANIM_SPEED_MULT;
 
 export class MHSAAnimation {
-    constructor(scene, branchX, mhsaBaseY, clock) {
+    constructor(scene, branchX, mhsaBaseY, clock, mode = 'temp') {
         this.scene = scene;
         this.branchX = branchX;
         this.mhsaBaseY = mhsaBaseY;
@@ -51,6 +53,14 @@ export class MHSAAnimation {
         this.darkTintedBlue = new THREE.Color(MHSA_DARK_TINTED_BLUE);
         this.brightRed = new THREE.Color(MHSA_BRIGHT_RED);
         this.darkTintedRed = new THREE.Color(MHSA_DARK_TINTED_RED);
+
+        // Mode control (e.g., 'temp', 'perm', etc.)
+        this.mode = mode;
+
+        // Temp-mode bookkeeping
+        this._tempModeCompleted = false;
+        this._tempAllOutputVectors = []; // K,Q,V combined
+        this._tempKOutputVectors = [];   // Only central K vectors
 
         this._setupMHSAVisualizations();
     }
@@ -161,7 +171,7 @@ export class MHSAAnimation {
         return true;
     }
 
-    animateVectorMatrixPassThrough(vector, matrix, brightMatrixColor, darkTintedMatrixColor, finalVectorHue, passThroughY, duration, riseOffset, riseDurationVal, outLength, animationCompletionCallback) {
+    animateVectorMatrixPassThrough(vector, matrix, brightMatrixColor, darkTintedMatrixColor, finalVectorHue, passThroughY, duration, riseOffset, riseDurationVal, outLength, animationCompletionCallback, vectorCategory = 'K') {
         if (typeof TWEEN === 'undefined') {
             console.error("Global TWEEN object not loaded for MHSAAnimation!");
             if (animationCompletionCallback) animationCompletionCallback();
@@ -315,7 +325,19 @@ export class MHSAAnimation {
                 }
 
                 // No additional rise tween needed – the vector is already at its
-                // final Y. Invoke callback immediately.
+                // final Y.
+
+                // ------------------------------------------------------------------
+                //  Temp-mode collection of finished vectors
+                // ------------------------------------------------------------------
+                if (this.mode === 'temp') {
+                    this._tempAllOutputVectors.push(vector);
+                    if (vectorCategory === 'K') {
+                        this._tempKOutputVectors.push(vector);
+                    }
+                }
+
+                // Invoke caller-supplied callback last so that state above is ready.
                 if (animationCompletionCallback) animationCompletionCallback();
             })
             .start();
@@ -334,6 +356,14 @@ export class MHSAAnimation {
             if (animationsCompleted >= totalAnimationsToComplete) {
                 console.log("MHSAAnimation: All MHSA parallel pass-through animations complete.");
                 this.mhaPassThroughPhase = 'mha_pass_through_complete';
+
+                // ---------------------------------------------------------------
+                //  TEMP MODE: post pass-through behaviour
+                // ---------------------------------------------------------------
+                if (this.mode === 'temp' && !this._tempModeCompleted) {
+                    this._applyTempModeBehaviour();
+                    this._tempModeCompleted = true;
+                }
             }
         };
 
@@ -341,16 +371,16 @@ export class MHSAAnimation {
             for (let headIdx = 0; headIdx < NUM_HEAD_SETS_LAYER; headIdx++) {
                 const kVec = lane.upwardCopies[headIdx];
                 const kMatrix = this.mhaVisualizations[headIdx * 3 + 1];
-                this.animateVectorMatrixPassThrough(kVec, kMatrix, this.brightGreen, this.darkTintedGreen, 0.333, this.mhaPassThroughTargetY, this.mhaPassThroughDuration, this.mhaResultRiseOffsetY, this.mhaResultRiseDuration, this.outputVectorLength, singleAnimationDone);
+                this.animateVectorMatrixPassThrough(kVec, kMatrix, this.brightGreen, this.darkTintedGreen, 0.333, this.mhaPassThroughTargetY, this.mhaPassThroughDuration, this.mhaResultRiseOffsetY, this.mhaResultRiseDuration, this.outputVectorLength, singleAnimationDone, 'K');
 
                 const qSideCopy = lane.sideCopies.find(sc => sc.headIndex === headIdx && sc.type === 'Q');
                 if (qSideCopy && qSideCopy.vec) {
-                    this.animateVectorMatrixPassThrough(qSideCopy.vec, qSideCopy.matrixRef, this.brightBlue, this.darkTintedBlue, 0.666, this.mhaPassThroughTargetY, this.mhaPassThroughDuration, this.mhaResultRiseOffsetY, this.mhaResultRiseDuration, this.outputVectorLength, singleAnimationDone);
+                    this.animateVectorMatrixPassThrough(qSideCopy.vec, qSideCopy.matrixRef, this.brightBlue, this.darkTintedBlue, 0.666, this.mhaPassThroughTargetY, this.mhaPassThroughDuration, this.mhaResultRiseOffsetY, this.mhaResultRiseDuration, this.outputVectorLength, singleAnimationDone, 'Q');
                 } else { totalAnimationsToComplete--; }
 
                 const vSideCopy = lane.sideCopies.find(sc => sc.headIndex === headIdx && sc.type === 'V');
                 if (vSideCopy && vSideCopy.vec) {
-                    this.animateVectorMatrixPassThrough(vSideCopy.vec, vSideCopy.matrixRef, this.brightRed, this.darkTintedRed, 0.0, this.mhaPassThroughTargetY, this.mhaPassThroughDuration, this.mhaResultRiseOffsetY, this.mhaResultRiseDuration, this.outputVectorLength, singleAnimationDone);
+                    this.animateVectorMatrixPassThrough(vSideCopy.vec, vSideCopy.matrixRef, this.brightRed, this.darkTintedRed, 0.0, this.mhaPassThroughTargetY, this.mhaPassThroughDuration, this.mhaResultRiseOffsetY, this.mhaResultRiseDuration, this.outputVectorLength, singleAnimationDone, 'V');
                 } else { totalAnimationsToComplete--; }
             }
         });
@@ -470,9 +500,210 @@ export class MHSAAnimation {
                 this.initiateParallelHeadPassThroughAnimations(lanes);
             }
         }
+
+        // Update merge trails
+        if (this._mergeLaneTrails) {
+            // Lane trails are updated during tweens; no continuous endpoint updates needed.
+        }
     }
 
     dispose() {
         // Standard THREE.js objects added to scene are usually handled by scene traversal on global cleanup.
+    }
+
+    _applyTempModeBehaviour() {
+        const grayColor = new THREE.Color(0x606060);
+        const startVisibleIdx = Math.floor((VECTOR_LENGTH_PRISM - this.outputVectorLength) / 2);
+        const endVisibleIdx = startVisibleIdx + this.outputVectorLength - 1;
+
+        this._tempAllOutputVectors.forEach(vec => {
+            if (!vec || !vec.mesh) return;
+
+            // Gray-out only the visible 64-dim region so outer hidden prisms stay hidden
+            for (let i = startVisibleIdx; i <= endVisibleIdx; i++) {
+                vec.setInstanceAppearance(i, 0, grayColor);
+            }
+
+            // Lower emissive intensity on the shared material (if present)
+            if (vec.mesh.material && typeof vec.mesh.material.emissiveIntensity === 'number') {
+                vec.mesh.material.emissiveIntensity = 0.05;
+            }
+
+            // Ensure material supports transparency
+            if (vec.mesh.material) {
+                vec.mesh.material.transparent = true;
+                vec.mesh.material.opacity = 1.0; // start fully opaque gray
+                vec.mesh.material.needsUpdate = true;
+            }
+
+            // Fade out the gray vectors to make them less visible
+            if (vec.mesh.material && typeof TWEEN !== 'undefined') {
+                new TWEEN.Tween({ op: 1.0 })
+                    .to({ op: 0.2 }, 600)
+                    .easing(TWEEN.Easing.Quadratic.Out)
+                    .onUpdate(function(obj){
+                        vec.mesh.material.opacity = obj.op;
+                        vec.mesh.material.needsUpdate = true;
+                    })
+                    .start();
+            } else if (vec.mesh.material) {
+                vec.mesh.material.opacity = 0.2;
+            }
+        });
+
+        // 2) Spawn new decorative vectors (64-dim) above each central K vector and fade them in
+        const verticalOffset = 60; // world units above existing vector
+
+        this._tempDecorativeVecs = []; // store objects {vec, laneZ} for later merge
+
+        this._tempKOutputVectors.forEach(kVec => {
+            if (!kVec || !kVec.group) return;
+
+            // Build raw 768-dim data with 3 random switch points for varied gradient
+            const rawData = [];
+            const switchPoints = new Set();
+            while (switchPoints.size < 3) {
+                const idx = Math.floor(Math.random() * VECTOR_LENGTH_PRISM);
+                switchPoints.add(idx);
+            }
+            const sortedSwitch = Array.from(switchPoints).sort((a, b) => a - b);
+            let curVal = Math.random() * 2 - 1;
+            let nextSwitch = sortedSwitch.shift();
+            for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
+                if (i === nextSwitch) {
+                    curVal = Math.random() * 2 - 1;
+                    nextSwitch = sortedSwitch.shift();
+                }
+                rawData.push(curVal);
+            }
+
+            const spawnPos = kVec.group.position.clone().add(new THREE.Vector3(0, verticalOffset, 0));
+            const decoVec = new VectorVisualizationInstancedPrism(rawData, spawnPos, 3);
+
+            // Hide outer prisms and snap decorative vec to 64-dim geometry
+            decoVec.applyProcessedVisuals(
+                rawData.slice(startVisibleIdx, startVisibleIdx + this.outputVectorLength),
+                this.outputVectorLength,
+                { numKeyColors: this.outputVectorLength },
+                { setHiddenToBlack: true }
+            );
+
+            // Override visible region with a random two-color gradient
+            const startColor = new THREE.Color().setHSL(Math.random(), 0.9, 0.6);
+            const endColor = new THREE.Color().setHSL(Math.random(), 0.9, 0.6);
+            const visibleCount = this.outputVectorLength;
+            for (let vi = 0; vi < visibleCount; vi++) {
+                const idx = startVisibleIdx + vi;
+                const t = visibleCount > 1 ? vi / (visibleCount - 1) : 0;
+                const col = startColor.clone().lerp(endColor, t);
+                decoVec.setInstanceAppearance(idx, 0, col);
+            }
+
+            this.scene.add(decoVec.group);
+
+            // Keep reference for merge phase
+            this._tempDecorativeVecs.push({ vec: decoVec, laneZ: kVec.group.position.z });
+
+            // Create a trail line connecting the grayed-out vector to its colored vector above
+            const connectionTrail = createTrailLine(this.scene, TRAIL_LINE_COLOR);
+            // Add the starting point (gray vector position)
+            updateTrail(connectionTrail, kVec.group.position);
+            // Add the ending point (colored vector position)
+            updateTrail(connectionTrail, spawnPos);
+
+            // Start invisible: set material opacity to 0
+            if (decoVec.mesh && decoVec.mesh.material) {
+                decoVec.mesh.material.transparent = true;
+                decoVec.mesh.material.opacity = 0.0;
+            }
+
+            if (typeof TWEEN !== 'undefined') {
+                const mat = decoVec.mesh.material;
+                new TWEEN.Tween({ op: 0.0 })
+                    .to({ op: 1.0 }, 800)
+                    .easing(TWEEN.Easing.Quadratic.InOut)
+                    .onUpdate(function(o){
+                        mat.opacity = o.op;
+                        mat.needsUpdate = true;
+                    })
+                    .start();
+            }
+        });
+
+        // After decorative vectors begin fading in, further dim gray vectors for subtlety
+        if (typeof TWEEN !== 'undefined') {
+            this._tempAllOutputVectors.forEach(vec => {
+                if (!vec || !vec.mesh || !vec.mesh.material) return;
+                const mat = vec.mesh.material;
+                new TWEEN.Tween({ op: mat.opacity })
+                    .to({ op: 0.05 }, 800)
+                    .delay(800)
+                    .easing(TWEEN.Easing.Quadratic.Out)
+                    .onUpdate(function(o){
+                        mat.opacity = o.op;
+                        mat.needsUpdate = true;
+                    })
+                    .start();
+            });
+        }
+
+        // ------------------------------------------------------
+        //   Begin merge-to-row-vector phase after fade-in delay
+        // ------------------------------------------------------
+        if (typeof TWEEN !== 'undefined') {
+            // Start after decorative fade-in completes (800 ms)
+            setTimeout(() => {
+                this._startMergeToRowVectors();
+            }, 900); // small extra buffer
+        }
+    }
+
+    _startMergeToRowVectors() {
+        if (!this._tempDecorativeVecs || this._tempDecorativeVecs.length === 0) return;
+
+        this._mergeLaneTrails = new Map(); // laneZ -> trailObj
+
+        // Build map laneZ -> array of decorative vectors
+        const laneVectors = new Map();
+        this._tempDecorativeVecs.forEach(obj => {
+            const laneZ = obj.laneZ;
+            if (!laneVectors.has(laneZ)) laneVectors.set(laneZ, []);
+            laneVectors.get(laneZ).push(obj.vec);
+        });
+
+        const targetX = this.headsCentersX.length ? this.headsCentersX[0] : 0;
+
+        laneVectors.forEach((vecList, laneZ) => {
+            // create trail per lane
+            const laneTrail = createTrailLine(this.scene, TRAIL_LINE_COLOR);
+            if (laneTrail.line && laneTrail.line.material) {
+                laneTrail.line.material.opacity = TRAIL_LINE_OPACITY / NUM_HEAD_SETS_LAYER;
+                laneTrail.line.material.needsUpdate = true;
+            }
+            this._mergeLaneTrails.set(laneZ, laneTrail);
+
+            // sort vectors by original x for consistent ordering
+            vecList.sort((a, b) => a.group.position.x - b.group.position.x);
+
+            vecList.forEach((vec, idx) => {
+                const destX = targetX + (idx - (NUM_HEAD_SETS_LAYER - 1) / 2) * ROW_SEGMENT_SPACING;
+
+                const distance = Math.abs(vec.group.position.x - destX);
+                const durationMs = (distance / (ROW_MERGE_HORIZ_SPEED * SPEED_MULT)) * 1000;
+
+                if (typeof TWEEN !== 'undefined') {
+                    new TWEEN.Tween(vec.group.position)
+                        .to({ x: destX }, durationMs)
+                        .easing(TWEEN.Easing.Quadratic.InOut)
+                        .onUpdate(() => {
+                            updateTrail(laneTrail, vec.group.position);
+                        })
+                        .start();
+                } else {
+                    vec.group.position.x = destX;
+                    updateTrail(laneTrail, vec.group.position);
+                }
+            });
+        });
     }
 } 
