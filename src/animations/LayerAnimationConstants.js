@@ -142,6 +142,13 @@ export const TRAIL_LINE_OPACITY = 0.05;
 export const TRAIL_LINE_COLOR = 0xffffff; // White color for trails
 
 // -----------------------------------------------------------------------------
+// Final MHA Head Colors
+// -----------------------------------------------------------------------------
+export const MHA_FINAL_Q_COLOR = 0x2d75da; // Blue, matching GPTModelVisualization
+export const MHA_FINAL_K_COLOR = 0x2ad471; // Green, matching GPTModelVisualization
+export const MHA_FINAL_V_COLOR = 0xb7263e; // Red, matching GPTModelVisualization
+
+// -----------------------------------------------------------------------------
 // Animation Path & Behavior Constants
 // -----------------------------------------------------------------------------
 
@@ -168,4 +175,36 @@ export const ANIM_RISE_SPEED_INSIDE_LN = 6;
 // -----------------------------------------------------------------------------
 
 /** Maximum number of points to store for each trail line, affecting trail length. */
-export const MAX_TRAIL_POINTS = 1500; 
+export const MAX_TRAIL_POINTS = 1500;
+
+// -----------------------------------------------------------------------------
+// MHA Output Projection Matrix (Post-Concatenation)
+// -----------------------------------------------------------------------------
+
+/** Vertical offset for the output projection matrix above the merged row of vectors. */
+export const MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW = 30;
+
+/** Color of the MHA output projection matrix. */
+export const MHA_OUTPUT_PROJECTION_MATRIX_COLOR = 0x7F7FFF; // A light blue/purple
+
+/**
+ * Parameters defining the geometry and appearance of the MHA output projection matrix.
+ * This matrix has a rectangular shape (topWidthFactor=1.0) to indicate it preserves 
+ * the full dimensionality on both input and output sides.
+ */
+export const MHA_OUTPUT_PROJECTION_MATRIX_PARAMS = {
+    // Size parameters
+    width: 150,                   // Same as MHA_MATRIX_PARAMS.width
+    heightFactor: 2.5,             // Height relative to standard MHA matrices
+    
+    // Shape parameters
+    topWidthFactor: 1.0,           // 1.0 = rectangular (no tapering)
+    cornerRadius: 1.2,             // Same as MHA_MATRIX_PARAMS.cornerRadius
+    
+    // Slit parameters
+    numberOfSlits: 5,              // Same as MHA_MATRIX_PARAMS.numberOfSlits
+    slitWidth: 5,               // Same as MHA_MATRIX_PARAMS.slitWidth
+    slitDepthFactor: 1.0,          // Same as MHA_MATRIX_PARAMS.slitDepthFactor
+    slitBottomWidthFactor: 0.92,   // Same as MHA_MATRIX_PARAMS.slitBottomWidthFactor
+    slitTopWidthFactor: 0.92      // Same as MHA_MATRIX_PARAMS.slitTopWidthFactor
+}; 

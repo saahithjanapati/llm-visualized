@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization.js';
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
 import { createTrailLine, updateTrail } from '../utils/trailUtils.js';
-import { MHSA_DUPLICATE_VECTOR_RISE_SPEED, MHSA_PASS_THROUGH_TOTAL_DURATION_MS, MHSA_PASS_THROUGH_BRIGHTEN_RATIO, MHSA_PASS_THROUGH_DIM_RATIO, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY, MHSA_MATRIX_INITIAL_RESTING_COLOR, MHSA_BRIGHT_GREEN, MHSA_DARK_TINTED_GREEN, MHSA_BRIGHT_BLUE, MHSA_DARK_TINTED_BLUE, MHSA_BRIGHT_RED, MHSA_DARK_TINTED_RED, MHSA_RESULT_RISE_OFFSET_Y, MHSA_HEAD_VECTOR_STOP_BELOW, TRAIL_LINE_COLOR, TRAIL_LINE_OPACITY } from './LayerAnimationConstants.js';
+import { MHSA_DUPLICATE_VECTOR_RISE_SPEED, MHSA_PASS_THROUGH_TOTAL_DURATION_MS, MHSA_PASS_THROUGH_BRIGHTEN_RATIO, MHSA_PASS_THROUGH_DIM_RATIO, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY, MHSA_MATRIX_INITIAL_RESTING_COLOR, MHSA_BRIGHT_GREEN, MHSA_DARK_TINTED_GREEN, MHSA_BRIGHT_BLUE, MHSA_DARK_TINTED_BLUE, MHSA_BRIGHT_RED, MHSA_DARK_TINTED_RED, MHSA_RESULT_RISE_OFFSET_Y, MHSA_HEAD_VECTOR_STOP_BELOW, TRAIL_LINE_COLOR, TRAIL_LINE_OPACITY, MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR, MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW, MHA_OUTPUT_PROJECTION_MATRIX_PARAMS, MHA_OUTPUT_PROJECTION_MATRIX_COLOR } from './LayerAnimationConstants.js';
 import {
     // Constants needed for setup & animation
     MHA_MATRIX_PARAMS,
@@ -63,6 +63,7 @@ export class MHSAAnimation {
         this._tempKOutputVectors = [];   // Only central K vectors
 
         this._setupMHSAVisualizations();
+        this._setupOutputProjectionMatrix();
     }
 
     _setupMHSAVisualizations() {
@@ -132,6 +133,68 @@ export class MHSAAnimation {
             this.headsCentersX.push(x_k);
             this.headCoords.push({ q: x_q, k: x_k, v: x_v });
         }
+    }
+
+    _setupOutputProjectionMatrix() {
+        // Positioned above the merged row, aligned with the first head's K matrix X-coordinate
+        const firstHeadKMatrixX = this.headCoords.length > 0 ? this.headCoords[0].k : this.branchX; // Fallback to branchX if no heads
+
+        // Y position calculation:
+        // Base Y of K vectors after passing through heads and initial rise:
+        const postPassThroughBaseY = this.mhaPassThroughTargetY + this.mhaResultRiseOffsetY;
+        // Y of the decorative vectors that form the merged row:
+        const decorativeVectorsY = postPassThroughBaseY + 60; // 60 is the verticalOffset from _applyTempModeBehaviour
+        // Center Y for the new output projection matrix:
+        const matrixHeight = MHA_MATRIX_PARAMS.height * MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.heightFactor;
+        const outputProjMatrixCenterY = decorativeVectorsY + MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW + matrixHeight / 2;
+
+        // Use same depth as other matrices for consistency
+        const inputDepth = MHA_MATRIX_PARAMS.depth;
+
+        this.outputProjectionMatrix = new WeightMatrixVisualization(
+            null, // No specific data array needed for this visualization
+            new THREE.Vector3(firstHeadKMatrixX, outputProjMatrixCenterY, 0),
+            MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.width,
+            matrixHeight,
+            inputDepth,
+            MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.topWidthFactor,
+            MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.cornerRadius,
+            MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.numberOfSlits,
+            MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitWidth,
+            MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitDepthFactor,
+            MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitBottomWidthFactor,
+            MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitTopWidthFactor
+        );
+
+        // Initialize with gray color
+        const grayColor = new THREE.Color(0x404040);
+        this.outputProjectionMatrix.setColor(grayColor);
+        this.outputProjectionMatrix.group.children.forEach(child => {
+            if (child.material) {
+                child.material.transparent = true;
+                child.material.opacity = 0.85;
+                child.material.emissive = grayColor;
+                child.material.emissiveIntensity = 0.1; // Low initial emissive intensity
+            }
+        });
+        this.scene.add(this.outputProjectionMatrix.group);
+        
+        // Store the matrix's Y position for later animations
+        this.outputProjMatrixCenterY = outputProjMatrixCenterY;
+        this.outputProjMatrixBasePosition = new THREE.Vector3(firstHeadKMatrixX, outputProjMatrixCenterY, 0);
+        this.outputProjMatrixHeight = matrixHeight;
+        
+        // Store default and target colors for animation
+        this.outputProjMatrixDefaultColor = grayColor;
+        this.outputProjMatrixActiveColor = new THREE.Color(MHA_OUTPUT_PROJECTION_MATRIX_COLOR);
+        
+        // Animation state
+        this.outputProjMatrixAnimationPhase = 'waiting'; // 'waiting', 'vectors_entering', 'vectors_inside', 'completed'
+        this.outputProjMatrixTrails = [];
+        this.outputProjMatrixVectors = [];
+        
+        // Log the matrix dimensions to confirm they match desired specifications
+        console.log(`MHSAAnimation: Output Projection Matrix added - Width: ${MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.width}, Height: ${matrixHeight}, Depth: ${inputDepth}`);
     }
 
     areAllMHAVectorsInPosition(lanes) {
@@ -274,14 +337,14 @@ export class MHSAAnimation {
                     t = THREE.MathUtils.smoothstep(raw, 0, 1);
                     currentMatrixTargetColor = this.matrixInitialRestingColor.clone().lerp(brightMatrixColor, t);
                     currentEmissiveIntensity = THREE.MathUtils.lerp(this.matrixRestingEmissiveIntensity, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY, t);
-                    matrix.setOpacity(THREE.MathUtils.lerp(this.matrixRestingOpacity, 1.0, t));
+                    matrix.setOpacity(this.matrixRestingOpacity);
                     emissiveTargetColorForMatrix = currentMatrixTargetColor.clone();
                 } else if (tweenState.progress < MHSA_PASS_THROUGH_BRIGHTEN_RATIO + MHSA_PASS_THROUGH_DIM_RATIO) {
                     const raw = (tweenState.progress - MHSA_PASS_THROUGH_BRIGHTEN_RATIO) / MHSA_PASS_THROUGH_DIM_RATIO;
                     t = THREE.MathUtils.smoothstep(raw, 0, 1);
                     currentMatrixTargetColor = brightMatrixColor.clone().lerp(darkTintedMatrixColor, t);
                     currentEmissiveIntensity = THREE.MathUtils.lerp(MHSA_MATRIX_MAX_EMISSIVE_INTENSITY, this.matrixRestingEmissiveIntensity, t);
-                    matrix.setOpacity(1.0);
+                    matrix.setOpacity(this.matrixRestingOpacity);
                     emissiveTargetColorForMatrix = currentMatrixTargetColor.clone();
                 } else {
                     currentMatrixTargetColor = darkTintedMatrixColor.clone();
@@ -306,7 +369,7 @@ export class MHSAAnimation {
             .onComplete(() => {
                 matrix.setColor(darkTintedMatrixColor);
                 matrix.setEmissive(darkTintedMatrixColor, this.matrixRestingEmissiveIntensity);
-                matrix.setOpacity(1.0);
+                matrix.setOpacity(this.matrixRestingOpacity);
 
                 // Ensure final visuals are applied at least once (in case progress never reached threshold).
                 if (!finalVisualsApplied) {
@@ -363,6 +426,9 @@ export class MHSAAnimation {
                 if (this.mode === 'temp' && !this._tempModeCompleted) {
                     this._applyTempModeBehaviour();
                     this._tempModeCompleted = true;
+                } else if (this.mode !== 'temp') {
+                    // For perm mode, trigger final color transition here
+                    this._transitionHeadColorsToFinal(1000); // 1 second duration
                 }
             }
         };
@@ -559,10 +625,10 @@ export class MHSAAnimation {
         this._tempKOutputVectors.forEach(kVec => {
             if (!kVec || !kVec.group) return;
 
-            // Build raw 768-dim data with 3 random switch points for varied gradient
+            // Build raw 768-dim data with 30 random switch points for varied gradient
             const rawData = [];
             const switchPoints = new Set();
-            while (switchPoints.size < 3) {
+            while (switchPoints.size < 30) {
                 const idx = Math.floor(Math.random() * VECTOR_LENGTH_PRISM);
                 switchPoints.add(idx);
             }
@@ -626,6 +692,7 @@ export class MHSAAnimation {
                         mat.opacity = o.op;
                         mat.needsUpdate = true;
                     })
+                    .delay(800)
                     .start();
             }
         });
@@ -638,7 +705,6 @@ export class MHSAAnimation {
                 new TWEEN.Tween({ op: mat.opacity })
                     .to({ op: 0.05 }, 800)
                     .delay(800)
-                    .easing(TWEEN.Easing.Quadratic.Out)
                     .onUpdate(function(o){
                         mat.opacity = o.op;
                         mat.needsUpdate = true;
@@ -672,6 +738,7 @@ export class MHSAAnimation {
         });
 
         const targetX = this.headsCentersX.length ? this.headsCentersX[0] : 0;
+        let maxDurationMs = 0;
 
         laneVectors.forEach((vecList, laneZ) => {
             // create trail per lane
@@ -690,6 +757,9 @@ export class MHSAAnimation {
 
                 const distance = Math.abs(vec.group.position.x - destX);
                 const durationMs = (distance / (ROW_MERGE_HORIZ_SPEED * SPEED_MULT)) * 1000;
+                if (durationMs > maxDurationMs) {
+                    maxDurationMs = durationMs;
+                }
 
                 if (typeof TWEEN !== 'undefined') {
                     new TWEEN.Tween(vec.group.position)
@@ -698,6 +768,9 @@ export class MHSAAnimation {
                         .onUpdate(() => {
                             updateTrail(laneTrail, vec.group.position);
                         })
+                        .onComplete(() => {
+                            // No onComplete here; final visuals & rise handled later after projection matrix
+                        })
                         .start();
                 } else {
                     vec.group.position.x = destX;
@@ -705,5 +778,310 @@ export class MHSAAnimation {
                 }
             });
         });
+
+        // After all merge tweens are initiated, schedule the output projection matrix animation
+        if (typeof TWEEN !== 'undefined') {
+            setTimeout(() => {
+                // First trigger the animation through the output projection matrix
+                this._startVectorsThroughOutputProjection(laneVectors);
+                
+                // Then, after that animation completes, transition the head colors
+                setTimeout(() => {
+                    this._transitionHeadColorsToFinal(1000); // 1 second duration
+                }, 2000); // Wait for output projection animation to complete
+                
+            }, maxDurationMs + 200); // Add a small buffer after merge animation
+        } else {
+            // If TWEEN is not available, transition immediately (though merge wouldn't be animated)
+            this._transitionHeadColorsToFinal(0);
+        }
+    }
+    
+    _startVectorsThroughOutputProjection(laneVectors) {
+        // Combine decorative vectors in each lane into a single vector, then animate those combined vectors
+        this.outputProjMatrixAnimationPhase = 'vectors_entering';
+
+        const combinedVectors = [];
+        const combinedTrails = [];
+
+        // Central X coordinate for combined vector (align with first head center)
+        const centerX = this.headsCentersX.length ? this.headsCentersX[0] : 0;
+
+        const startVisibleIdx = Math.floor((VECTOR_LENGTH_PRISM - this.outputVectorLength) / 2);
+
+        laneVectors.forEach((vecList, laneZ) => {
+            if (!vecList || vecList.length === 0) return;
+
+            // Ensure vecList is sorted by X position
+            vecList.sort((a, b) => a.group.position.x - b.group.position.x);
+
+            // Build combined raw data by concatenating the 64-dim slices of each decorative vector (preserves lane-specific data)
+            const combinedRaw = [];
+            vecList.forEach(v => {
+                const slice = v.rawData.slice(startVisibleIdx, startVisibleIdx + this.outputVectorLength);
+                combinedRaw.push(...slice);
+            });
+
+            // Ensure the final length is exactly VECTOR_LENGTH_PRISM (768)
+            if (combinedRaw.length < VECTOR_LENGTH_PRISM) {
+                while (combinedRaw.length < VECTOR_LENGTH_PRISM) combinedRaw.push(0);
+            } else if (combinedRaw.length > VECTOR_LENGTH_PRISM) {
+                combinedRaw.length = VECTOR_LENGTH_PRISM;
+            }
+
+            const spawnPos = new THREE.Vector3(centerX, vecList[0].group.position.y, laneZ);
+            const combinedVec = new VectorVisualizationInstancedPrism(combinedRaw, spawnPos, 3);
+
+            // Copy colors from the source decorative vectors so appearance matches
+            if (combinedVec.mesh && combinedVec.mesh.instanceColor) {
+                const tmpColor = new THREE.Color();
+                for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
+                    const segIdx = Math.floor(i / this.outputVectorLength); // which decorative vector
+                    const localIdx = i % this.outputVectorLength; // 0..63
+                    if (segIdx < vecList.length) {
+                        const srcVec = vecList[segIdx];
+                        const srcIndex = startVisibleIdx + localIdx;
+                        srcVec.mesh.getColorAt(srcIndex, tmpColor);
+                        combinedVec.mesh.setColorAt(i, tmpColor);
+                    }
+                }
+                combinedVec.mesh.instanceColor.needsUpdate = true;
+            }
+
+            this.scene.add(combinedVec.group);
+            combinedVectors.push(combinedVec);
+
+            // Hide original decorative vectors
+            vecList.forEach(v => { v.group.visible = false; });
+
+            // Create trail line for combined vector
+            const trail = createTrailLine(this.scene, TRAIL_LINE_COLOR);
+            combinedTrails.push(trail);
+            updateTrail(trail, combinedVec.group.position);
+        });
+
+        if (combinedVectors.length === 0) {
+            console.warn("No combined vectors created for output projection animation");
+            return;
+        }
+
+        // Store for later reference
+        this.outputProjMatrixVectors = combinedVectors;
+        this.outputProjMatrixTrails = combinedTrails;
+
+        // Matrix positions
+        const matrixBottomY = this.outputProjMatrixCenterY - this.outputProjMatrixHeight / 2;
+        const matrixTopY = this.outputProjMatrixCenterY + this.outputProjMatrixHeight / 2;
+        const targetYAboveMatrix = matrixTopY + 30;
+
+        // Durations
+        const duration1 = 1000;
+        const duration2 = 1000;
+        const duration3 = 500;
+
+        if (typeof TWEEN === 'undefined') {
+            console.warn("TWEEN not available for output projection matrix animation");
+            return;
+        }
+
+        combinedVectors.forEach((vec, idx) => {
+            new TWEEN.Tween(vec.group.position)
+                .to({ y: matrixBottomY }, duration1)
+                .easing(TWEEN.Easing.Quadratic.InOut)
+                .onUpdate(() => {
+                    if (combinedTrails[idx]) updateTrail(combinedTrails[idx], vec.group.position);
+                })
+                .onComplete(() => {
+                    if (idx === 0) {
+                        this._animateOutputMatrixBrightening(duration2);
+                    }
+                    new TWEEN.Tween(vec.group.position)
+                        .to({ y: matrixTopY }, duration2)
+                        .onStart(() => {
+                            // Apply transformation INSIDE the projection matrix
+                            const newRaw = this._generateRawDataWithSwitchPoints(30);
+                            vec.applyProcessedVisuals(
+                                newRaw.slice(),
+                                VECTOR_LENGTH_PRISM,
+                                { numKeyColors: 30, generationOptions: null },
+                                { setHiddenToBlack: false }
+                            );
+
+                            // Regenerate random key colors (similar to initial vectors)
+                            if (typeof vec._generateKeyColors === 'function' && typeof vec._updateInstanceColors === 'function') {
+                                vec._generateKeyColors();
+                                vec._updateInstanceColors();
+                            }
+                        })
+                        .onUpdate(() => {
+                            if (combinedTrails[idx]) updateTrail(combinedTrails[idx], vec.group.position);
+                        })
+                        .onComplete(() => {
+                            const extraRise = 30; // additional upward distance
+                            const finalY = targetYAboveMatrix + extraRise;
+
+                            // Final rise after transformation done
+                            new TWEEN.Tween(vec.group.position)
+                                .to({ y: finalY }, duration3)
+                                .easing(TWEEN.Easing.Quadratic.InOut)
+                                .onUpdate(() => {
+                                    if (combinedTrails[idx]) updateTrail(combinedTrails[idx], vec.group.position);
+                                })
+                                .onComplete(() => {
+                                    // Horizontal move to residual stream (x=0)
+                                    const horizDistance = Math.abs(vec.group.position.x);
+                                    const horizDur = (horizDistance / (ANIM_HORIZ_SPEED * SPEED_MULT)) * 1000;
+                                    new TWEEN.Tween(vec.group.position)
+                                        .to({ x: 0 }, horizDur)
+                                        .easing(TWEEN.Easing.Quadratic.InOut)
+                                        .onUpdate(() => {
+                                            if (combinedTrails[idx]) updateTrail(combinedTrails[idx], vec.group.position);
+                                        })
+                                        .start();
+                                })
+                                .start();
+                        })
+                        .start();
+                })
+                .start();
+        });
+
+        console.log("Starting animation of combined lane vectors through output projection matrix");
+    }
+    
+    _animateOutputMatrixBrightening(duration) {
+        if (typeof TWEEN === 'undefined') return;
+        
+        this.outputProjMatrixAnimationPhase = 'vectors_inside';
+        
+        // Animation parameters
+        const startColor = this.outputProjMatrixDefaultColor.clone();
+        const brightColor = this.outputProjMatrixActiveColor.clone();
+        const startEmissiveIntensity = 0.1;
+        const peakEmissiveIntensity = 0.8;
+        const endEmissiveIntensity = 0.3;
+        
+        // First brighten the matrix
+        const state = { 
+            r: startColor.r, 
+            g: startColor.g, 
+            b: startColor.b,
+            emissiveIntensity: startEmissiveIntensity
+        };
+        
+        new TWEEN.Tween(state)
+            .to({ 
+                r: brightColor.r, 
+                g: brightColor.g, 
+                b: brightColor.b,
+                emissiveIntensity: peakEmissiveIntensity
+            }, duration * 0.6) // 60% of the total duration
+            .easing(TWEEN.Easing.Quadratic.InOut)
+            .onUpdate(() => {
+                const currentColor = new THREE.Color(state.r, state.g, state.b);
+                this.outputProjectionMatrix.setColor(currentColor);
+                this.outputProjectionMatrix.setEmissive(currentColor, state.emissiveIntensity);
+            })
+            .onComplete(() => {
+                // Then dim slightly to the final state
+                new TWEEN.Tween(state)
+                    .to({ emissiveIntensity: endEmissiveIntensity }, duration * 0.4) // 40% of the total duration
+                    .easing(TWEEN.Easing.Quadratic.InOut)
+                    .onUpdate(() => {
+                        this.outputProjectionMatrix.setEmissive(brightColor, state.emissiveIntensity);
+                    })
+                    .onComplete(() => {
+                        this.outputProjMatrixAnimationPhase = 'completed';
+                    })
+                    .start();
+            })
+            .start();
+    }
+
+    _transitionHeadColorsToFinal(duration) {
+        if (typeof TWEEN === 'undefined') {
+            console.warn("TWEEN not available for final head color transition.");
+            // Set colors directly if TWEEN is not available
+            for (let i = 0; i < NUM_HEAD_SETS_LAYER; i++) {
+                const qMatrix = this.mhaVisualizations[i * 3];
+                const kMatrix = this.mhaVisualizations[i * 3 + 1];
+                const vMatrix = this.mhaVisualizations[i * 3 + 2];
+
+                if (qMatrix) qMatrix.setColor(new THREE.Color(MHA_FINAL_Q_COLOR));
+                if (kMatrix) kMatrix.setColor(new THREE.Color(MHA_FINAL_K_COLOR));
+                if (vMatrix) vMatrix.setColor(new THREE.Color(MHA_FINAL_V_COLOR));
+            }
+            return;
+        }
+
+        for (let i = 0; i < NUM_HEAD_SETS_LAYER; i++) {
+            const qMatrix = this.mhaVisualizations[i * 3];
+            const kMatrix = this.mhaVisualizations[i * 3 + 1];
+            const vMatrix = this.mhaVisualizations[i * 3 + 2];
+
+            const finalQColor = new THREE.Color(MHA_FINAL_Q_COLOR);
+            const finalKColor = new THREE.Color(MHA_FINAL_K_COLOR);
+            const finalVColor = new THREE.Color(MHA_FINAL_V_COLOR);
+
+            if (qMatrix && qMatrix.mesh && qMatrix.mesh.material) {
+                const initialQColor = qMatrix.mesh.material.color.clone();
+                new TWEEN.Tween(initialQColor)
+                    .to(finalQColor, duration)
+                    .easing(TWEEN.Easing.Quadratic.InOut)
+                    .onUpdate(() => {
+                        qMatrix.setColor(initialQColor);
+                         qMatrix.setEmissive(initialQColor, 0.3); // Add some emissiveness
+                    })
+                    .start();
+            }
+
+            if (kMatrix && kMatrix.mesh && kMatrix.mesh.material) {
+                const initialKColor = kMatrix.mesh.material.color.clone();
+                new TWEEN.Tween(initialKColor)
+                    .to(finalKColor, duration)
+                    .easing(TWEEN.Easing.Quadratic.InOut)
+                    .onUpdate(() => {
+                        kMatrix.setColor(initialKColor);
+                        kMatrix.setEmissive(initialKColor, 0.3); // Add some emissiveness
+                    })
+                    .start();
+            }
+
+            if (vMatrix && vMatrix.mesh && vMatrix.mesh.material) {
+                const initialVColor = vMatrix.mesh.material.color.clone();
+                new TWEEN.Tween(initialVColor)
+                    .to(finalVColor, duration)
+                    .easing(TWEEN.Easing.Quadratic.InOut)
+                    .onUpdate(() => {
+                        vMatrix.setColor(initialVColor);
+                        vMatrix.setEmissive(initialVColor, 0.3); // Add some emissiveness
+                    })
+                    .start();
+            }
+        }
+        console.log("MHSAAnimation: Initiated final head color transitions.");
+    }
+
+    // ----------------------------------------------------------------------
+    // Helper: Generate raw data with switch points (similar to earlier)
+    // ----------------------------------------------------------------------
+    _generateRawDataWithSwitchPoints(numSwitchPoints = 30) {
+        const raw = [];
+        const switchPoints = new Set();
+        while (switchPoints.size < numSwitchPoints) {
+            const idx = Math.floor(Math.random() * VECTOR_LENGTH_PRISM);
+            switchPoints.add(idx);
+        }
+        const sortedSwitches = Array.from(switchPoints).sort((a, b) => a - b);
+        let curVal = Math.random() * 2 - 1;
+        let nextSwitch = sortedSwitches.shift();
+        for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
+            if (i === nextSwitch) {
+                curVal = Math.random() * 2 - 1;
+                nextSwitch = sortedSwitches.shift();
+            }
+            raw.push(curVal);
+        }
+        return raw;
     }
 } 
