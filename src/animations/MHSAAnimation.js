@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization.js';
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
 import { createTrailLine, updateTrail } from '../utils/trailUtils.js';
+import { mapValueToColor } from '../utils/colors.js';
 import { MHSA_DUPLICATE_VECTOR_RISE_SPEED, MHSA_PASS_THROUGH_TOTAL_DURATION_MS, MHSA_PASS_THROUGH_BRIGHTEN_RATIO, MHSA_PASS_THROUGH_DIM_RATIO, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY, MHSA_MATRIX_INITIAL_RESTING_COLOR, MHSA_BRIGHT_GREEN, MHSA_DARK_TINTED_GREEN, MHSA_BRIGHT_BLUE, MHSA_DARK_TINTED_BLUE, MHSA_BRIGHT_RED, MHSA_DARK_TINTED_RED, MHSA_RESULT_RISE_OFFSET_Y, MHSA_HEAD_VECTOR_STOP_BELOW, TRAIL_LINE_COLOR, TRAIL_LINE_OPACITY, MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR, MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW, MHA_OUTPUT_PROJECTION_MATRIX_PARAMS, MHA_OUTPUT_PROJECTION_MATRIX_COLOR } from './LayerAnimationConstants.js';
 import {
     // Constants needed for setup & animation
@@ -18,6 +19,13 @@ import {
     ROW_SEGMENT_SPACING,
     VECTOR_LENGTH_PRISM,
     HIDE_INSTANCE_Y_OFFSET,
+    ANIM_RISE_SPEED_ORIGINAL,
+    ANIM_RISE_SPEED_POST_SPLIT,
+    ORIGINAL_TO_PROCESSED_GAP,
+    PRISM_ADD_ANIM_BASE_DURATION,
+    PRISM_ADD_ANIM_BASE_FLASH_DURATION,
+    PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS,
+    PRISM_ADD_ANIM_SPEED_MULT,
 } from '../utils/constants.js';
 
 // Define speed multiplier
@@ -195,6 +203,19 @@ export class MHSAAnimation {
         
         // Log the matrix dimensions to confirm they match desired specifications
         console.log(`MHSAAnimation: Output Projection Matrix added - Width: ${MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.width}, Height: ${matrixHeight}, Depth: ${inputDepth}`);
+
+        // ------------------------------------------------------------------
+        //  Pre-compute the Y coordinate where the processed vectors will finish
+        //  ("finalCombinedY"), and where the original residual-stream vectors
+        //  should end up ("finalOriginalY").  These values let us start moving
+        //  the original vectors immediately rather than waiting until the
+        //  Output-Projection phase kicks in.
+        // ------------------------------------------------------------------
+
+        // The processed vectors rise to:  matrixTopY + 60.
+        const matrixTopY = outputProjMatrixCenterY + matrixHeight / 2;
+        this.finalCombinedY = matrixTopY + 60; // 30 (rise to matrix) + 30 (extraRise)
+        this.finalOriginalY = this.finalCombinedY - ORIGINAL_TO_PROCESSED_GAP;
     }
 
     areAllMHAVectorsInPosition(lanes) {
@@ -457,6 +478,9 @@ export class MHSAAnimation {
     }
     
     update(deltaTime, timeNow, lanes) {
+        // Keep a reference to the latest lanes array so that other internal
+        // methods (triggered asynchronously) can access the original vectors.
+        this.currentLanes = lanes;
         lanes.forEach((lane, idx) => {
             if (lane.horizPhase === 'travelMHSA') {
                 const tVec = lane.travellingVec;
@@ -565,6 +589,32 @@ export class MHSAAnimation {
                 console.log("MHSAAnimation: All MHSA vectors are in position. Ready for PARALLEL pass-through.");
                 this.initiateParallelHeadPassThroughAnimations(lanes);
             }
+        }
+
+        // ------------------------------------------------------------------
+        //  CONTINUOUSLY MOVE ORIGINAL RESIDUAL-STREAM VECTORS UPWARDS
+        // ------------------------------------------------------------------
+        if (this.finalOriginalY !== undefined) {
+            const riseStep = ANIM_RISE_SPEED_POST_SPLIT * SPEED_MULT * deltaTime;
+            lanes.forEach(lane => {
+                if (!lane || !lane.originalVec || !lane.originalVec.group) return;
+
+                const curY = lane.originalVec.group.position.y;
+                // Skip rising movement for lanes where the original vector is frozen during addition
+                if (lane.originalVec.group.userData && lane.originalVec.group.userData.stopRise) {
+                    const targetGrp = lane.originalVec.group.userData.stopRiseTarget;
+                    if (targetGrp) {
+                        const desiredMaxY = targetGrp.position.y - ORIGINAL_TO_PROCESSED_GAP;
+                        if (curY < desiredMaxY) {
+                            lane.originalVec.group.position.y = Math.min(curY + riseStep, desiredMaxY);
+                        }
+                    }
+                } else {
+                    if (curY < this.finalOriginalY) {
+                        lane.originalVec.group.position.y = Math.min(curY + riseStep, this.finalOriginalY);
+                    }
+                }
+            });
         }
 
         // Update merge trails
@@ -779,20 +829,25 @@ export class MHSAAnimation {
             });
         });
 
-        // After all merge tweens are initiated, schedule the output projection matrix animation
+        // After all merge tweens are initiated, schedule the head color transition,
+        // then the output projection matrix animation.
         if (typeof TWEEN !== 'undefined') {
             setTimeout(() => {
-                // First trigger the animation through the output projection matrix
-                this._startVectorsThroughOutputProjection(laneVectors);
+                // First, transition the head colors. This happens after the merge visualization is complete.
+                this._transitionHeadColorsToFinal(1000); // 1 second duration for color transition
                 
-                // Then, after that animation completes, transition the head colors
+                // Then, after the color transition is visually complete, 
+                // trigger the animation of the combined vectors through the output projection matrix.
                 setTimeout(() => {
-                    this._transitionHeadColorsToFinal(1000); // 1 second duration
-                }, 2000); // Wait for output projection animation to complete
+                    this._startVectorsThroughOutputProjection(laneVectors);
+                }, 1000); // Wait for color transition to complete (matches the duration of _transitionHeadColorsToFinal)
                 
-            }, maxDurationMs + 200); // Add a small buffer after merge animation
+            }, maxDurationMs + 200); // Add a small buffer after all merge tweens are calculated to be finished.
         } else {
-            // If TWEEN is not available, transition immediately (though merge wouldn't be animated)
+            // If TWEEN is not available, merge animations were instant (or not run if they also depend on TWEEN). 
+            // Transition colors immediately.
+            // _startVectorsThroughOutputProjection itself checks for TWEEN and will return early if it's not available,
+            // so we don't need to conditionally call it here. The color transition should still happen.
             this._transitionHeadColorsToFinal(0);
         }
     }
@@ -849,7 +904,7 @@ export class MHSAAnimation {
             }
 
             this.scene.add(combinedVec.group);
-            combinedVectors.push(combinedVec);
+            combinedVectors.push({ vec: combinedVec, laneZ });
 
             // Hide original decorative vectors
             vecList.forEach(v => { v.group.visible = false; });
@@ -866,7 +921,7 @@ export class MHSAAnimation {
         }
 
         // Store for later reference
-        this.outputProjMatrixVectors = combinedVectors;
+        this.outputProjMatrixVectors = combinedVectors.map(obj => obj.vec);
         this.outputProjMatrixTrails = combinedTrails;
 
         // Matrix positions
@@ -884,12 +939,15 @@ export class MHSAAnimation {
             return;
         }
 
-        combinedVectors.forEach((vec, idx) => {
+        combinedVectors.forEach((vecObj, idx) => {
+            const vec = vecObj.vec;
+            const laneZ = vecObj.laneZ;
+
             new TWEEN.Tween(vec.group.position)
                 .to({ y: matrixBottomY }, duration1)
                 .easing(TWEEN.Easing.Quadratic.InOut)
                 .onUpdate(() => {
-                    if (combinedTrails[idx]) updateTrail(combinedTrails[idx], vec.group.position);
+                    if (this.outputProjMatrixTrails[idx]) updateTrail(this.outputProjMatrixTrails[idx], vec.group.position);
                 })
                 .onComplete(() => {
                     if (idx === 0) {
@@ -914,18 +972,18 @@ export class MHSAAnimation {
                             }
                         })
                         .onUpdate(() => {
-                            if (combinedTrails[idx]) updateTrail(combinedTrails[idx], vec.group.position);
+                            if (this.outputProjMatrixTrails[idx]) updateTrail(this.outputProjMatrixTrails[idx], vec.group.position);
                         })
                         .onComplete(() => {
                             const extraRise = 30; // additional upward distance
-                            const finalY = targetYAboveMatrix + extraRise;
+                            const finalCombinedY = targetYAboveMatrix + extraRise;
 
                             // Final rise after transformation done
                             new TWEEN.Tween(vec.group.position)
-                                .to({ y: finalY }, duration3)
+                                .to({ y: finalCombinedY }, duration3)
                                 .easing(TWEEN.Easing.Quadratic.InOut)
                                 .onUpdate(() => {
-                                    if (combinedTrails[idx]) updateTrail(combinedTrails[idx], vec.group.position);
+                                    if (this.outputProjMatrixTrails[idx]) updateTrail(this.outputProjMatrixTrails[idx], vec.group.position);
                                 })
                                 .onComplete(() => {
                                     // Horizontal move to residual stream (x=0)
@@ -935,7 +993,17 @@ export class MHSAAnimation {
                                         .to({ x: 0 }, horizDur)
                                         .easing(TWEEN.Easing.Quadratic.InOut)
                                         .onUpdate(() => {
-                                            if (combinedTrails[idx]) updateTrail(combinedTrails[idx], vec.group.position);
+                                            if (this.outputProjMatrixTrails[idx]) updateTrail(this.outputProjMatrixTrails[idx], vec.group.position);
+                                        })
+                                        .onComplete(() => {
+                                            // Nothing extra
+                                            // Trigger addition animation with original residual vector for this lane
+                                            if (this.currentLanes) {
+                                                const matchingLane = this.currentLanes.find(l => Math.abs(l.zPos - laneZ) < 0.1);
+                                                if (matchingLane && matchingLane.originalVec) {
+                                                    this._startAdditionAnimation(matchingLane.originalVec, vec);
+                                                }
+                                            }
                                         })
                                         .start();
                                 })
@@ -1083,5 +1151,148 @@ export class MHSAAnimation {
             raw.push(curVal);
         }
         return raw;
+    }
+
+    // ----------------------------------------------------------------------
+    // Helper: Addition animation between two InstancedPrism vectors
+    // ----------------------------------------------------------------------
+    _startAdditionAnimation(sourceVec, targetVec) {
+        // Safety checks
+        if (!sourceVec || !targetVec || !sourceVec.mesh || !targetVec.mesh) return;
+        if (typeof TWEEN === 'undefined') return;
+
+        // ------------------------------------------------------------------
+        //  Freeze upward movement of the original vector so its group
+        //  position remains static during the addition animation.
+        // ------------------------------------------------------------------
+        sourceVec.group.userData = sourceVec.group.userData || {};
+        sourceVec.group.userData.stopRise = true;
+        // Store a reference to the destination vector so we can compute the
+        // vertical gap during the main update loop and allow limited rising.
+        sourceVec.group.userData.stopRiseTarget = targetVec.group;
+
+        // ------------------------------------------------------------------
+        //  Prepare a trail that follows the centre instance of the bottom
+        //  (source) vector throughout the addition animation.
+        // ------------------------------------------------------------------
+        const vectorLength = VECTOR_LENGTH_PRISM;
+        const centreIndex = Math.floor(vectorLength / 2);
+
+        // Ensure a userData object exists on the THREE.Group that wraps the vector
+        const svGroupUD = sourceVec.group.userData;
+        let additionTrail = svGroupUD.additionTrail;
+        if (!additionTrail) {
+            additionTrail = createTrailLine(this.scene, TRAIL_LINE_COLOR);
+            svGroupUD.additionTrail = additionTrail; // cache for potential future additions
+            
+            // Push the initial centre-instance position into the trail.
+            const startMat = new THREE.Matrix4();
+            sourceVec.mesh.getMatrixAt(centreIndex, startMat);
+            const startPos = new THREE.Vector3().setFromMatrixPosition(startMat);
+            startPos.applyMatrix4(sourceVec.group.matrixWorld);
+            updateTrail(additionTrail, startPos);
+        }
+
+        // Durations scaled by the dedicated speed multiplier so users can
+        // tweak the addition process without affecting global timings.
+        const duration = PRISM_ADD_ANIM_BASE_DURATION / PRISM_ADD_ANIM_SPEED_MULT;
+        const flashDuration = PRISM_ADD_ANIM_BASE_FLASH_DURATION / PRISM_ADD_ANIM_SPEED_MULT;
+        const delayBetween = PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS / PRISM_ADD_ANIM_SPEED_MULT;
+
+        // Helper constant – centre Y of an instance at rest (relative to its group)
+        const basePrismCenterY = sourceVec.getUniformHeight() / 2;
+
+        for (let i = 0; i < vectorLength; i++) {
+            // Capture starting local Y offset
+            const srcLocalMatrix = new THREE.Matrix4();
+            sourceVec.mesh.getMatrixAt(i, srcLocalMatrix);
+            const srcLocalPos = new THREE.Vector3().setFromMatrixPosition(srcLocalMatrix);
+
+            // ------------------------------------------------------------------
+            //  Capture the current gradient color of the destination instance so
+            //  that we can keep the same palette throughout the animation.
+            // ------------------------------------------------------------------
+            const gradientCol = new THREE.Color();
+            targetVec.mesh.getColorAt(i, gradientCol);
+
+            // ------------------------------------------------------------------
+            //  Apply the same gradient colour to the travelling (source)
+            //  instance so its hue matches the bar it will merge into.
+            // ------------------------------------------------------------------
+            sourceVec.setInstanceAppearance(i, srcLocalPos.y, gradientCol);
+             
+            const tweenState = { t: 0 };
+
+            new TWEEN.Tween(tweenState)
+                .to({ t: 1 }, duration)
+                .delay(i * delayBetween)
+                .easing(TWEEN.Easing.Quadratic.InOut)
+                .onUpdate(obj => {
+                    // Re-compute target position dynamically each frame in case the target vector is still moving
+                    const trgWorldPos = new THREE.Vector3();
+                    const trgLocalMatrixDyn = new THREE.Matrix4();
+                    targetVec.mesh.getMatrixAt(i, trgLocalMatrixDyn);
+                    trgWorldPos.setFromMatrixPosition(trgLocalMatrixDyn);
+                    trgWorldPos.applyMatrix4(targetVec.group.matrixWorld);
+
+                    const targetLocalPos = sourceVec.group.worldToLocal(trgWorldPos.clone());
+                    // Compute the required *offset* relative to the prism's
+                    // base-centre, not the absolute Y, to avoid double-adding
+                    // the basePrismCenterY inside setInstanceAppearance.
+
+                    let interpY = THREE.MathUtils.lerp(srcLocalPos.y, targetLocalPos.y, obj.t);
+
+                    // Clamp so we never exceed the target position.
+                    if (targetLocalPos.y >= srcLocalPos.y) {
+                        interpY = Math.min(interpY, targetLocalPos.y);
+                    } else {
+                        interpY = Math.max(interpY, targetLocalPos.y);
+                    }
+
+                    const offsetY = interpY - basePrismCenterY;
+
+                    sourceVec.setInstanceAppearance(i, offsetY, null);
+
+                    // Update the trail so that it follows the centre instance.
+                    if (i === centreIndex && additionTrail) {
+                        const instMat = new THREE.Matrix4();
+                        sourceVec.mesh.getMatrixAt(i, instMat);
+                        const wPos = new THREE.Vector3().setFromMatrixPosition(instMat);
+                        wPos.applyMatrix4(sourceVec.group.matrixWorld);
+                        updateTrail(additionTrail, wPos);
+                    }
+                })
+                .onComplete(() => {
+                    // Flash target then update value/color (colour already set, but flash for effect)
+                    const originalColor = new THREE.Color();
+                    targetVec.mesh.getColorAt(i, originalColor);
+                    targetVec.setInstanceAppearance(i, 0, new THREE.Color(0xffffff));
+
+                    new TWEEN.Tween({})
+                        .to({}, flashDuration)
+                        .onComplete(() => {
+                            const sum = (sourceVec.rawData[i] ?? 0) + (targetVec.rawData[i] ?? 0);
+                            targetVec.rawData[i] = sum;
+                            // Restore the gradient colour captured earlier so
+                            // that the bar retains the palette rather than a
+                            // per-value hue.
+                            targetVec.setInstanceAppearance(i, 0, gradientCol);
+                             // Hide source instance
+                             sourceVec.setInstanceAppearance(i, HIDE_INSTANCE_Y_OFFSET, null);
+                        })
+                        .start();
+                })
+                .start();
+        }
+
+        // After all instance tweens are scheduled, queue a gradient refresh once complete
+        const totalAnimTime = duration + flashDuration + vectorLength * delayBetween;
+        setTimeout(() => {
+            // Allow the original vector to resume upward motion
+            if (sourceVec && sourceVec.group && sourceVec.group.userData) {
+                delete sourceVec.group.userData.stopRise;
+                delete sourceVec.group.userData.stopRiseTarget;
+            }
+        }, totalAnimTime + 100);
     }
 } 

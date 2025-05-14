@@ -30,11 +30,24 @@ export const PRISM_HEIGHT_SCALE_FACTOR = 0.75; // Scales normalized data to pris
 /** Distance (in world units) between adjacent vector lanes along Z. */
 export const VECTOR_DEPTH_SPACING = 100;
 
+// ------------------------------------------------------------
+// Lane / vector configuration – controls how many lanes/vectors
+// are present in the scene and component depths that depend on it.
+// ------------------------------------------------------------
+
+export const NUM_VECTOR_LANES = 10; // Master switch: number of vector "lanes" active in the scene
+
+// Depth large enough to fit all lanes plus one spacing margin at each end
+export const LANE_DEPENDENT_DEPTH = (NUM_VECTOR_LANES + 1) * VECTOR_DEPTH_SPACING;
+
 // Constants for PrismAdditionAnimation
 export const PRISM_ADD_ANIM_BASE_DURATION = 400 // ms, for one prism to move
 export const PRISM_ADD_ANIM_BASE_FLASH_DURATION = 80; // ms, for the target flash (if re-enabled)
 export const PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS = 15; // ms, delay between starting each prism's animation
 export const PRISM_ADD_ANIM_BASE_Y_OFFSET_FACTOR = 1.1; // How much higher source moves relative to target base
+/** Multiplier for the prism addition animation speed.  
+ * 1 = base speed; 2 = twice as fast (half the duration); 0.5 = half as fast (double duration). */
+export const PRISM_ADD_ANIM_SPEED_MULT = 2;
 
 // ------------------------------------------------------------
 // Constants from LayerAnimationConstants.js
@@ -65,9 +78,9 @@ export const LAYER_NORM_1_Y_POS = -10;
 export const LN_PARAMS = {
     width: 150,
     height: 100,
-    depth: 6 * VECTOR_DEPTH_SPACING,
+    depth: LANE_DEPENDENT_DEPTH,
     wallThickness: 1.0,
-    numberOfHoles: 5, // This is also used as numVectors for lanes
+    numberOfHoles: NUM_VECTOR_LANES,
     holeWidth: 5,
     holeWidthFactor: 20
 };
@@ -89,7 +102,7 @@ export const MHA_INTERNAL_MATRIX_SPACING = 130;
 export const MHA_MATRIX_PARAMS = {
     width: 120,
     height: 40,
-    depth: 6 * VECTOR_DEPTH_SPACING,
+    depth: LANE_DEPENDENT_DEPTH,
     topWidthFactor: 0.1,
     cornerRadius: 5,
     numberOfSlits: 5, // Visually, might want to link to VECTOR_LENGTH or a fraction
@@ -137,18 +150,24 @@ export const ANIM_MEET_Y_OFFSET_ABOVE_LN1 = 5;
 /** Speed at which original vectors rise along the main path (x=0). */
 export const ANIM_RISE_SPEED_ORIGINAL = 3;
 
+/**
+ * Speed at which original residual-stream vectors continue rising after
+ * splitting into the MHSA block.  Adjust independently from ANIM_RISE_SPEED_ORIGINAL.
+ */
+export const ANIM_RISE_SPEED_POST_SPLIT = 0.44;
+
 /** Horizontal speed for vectors moving towards/away from branched components. */
-export const ANIM_HORIZ_SPEED = 15;
+export const ANIM_HORIZ_SPEED = 25;
 
 /** Horizontal speed for side copies moving to Q/V matrices. */
-export const SIDE_COPY_HORIZ_SPEED = 5;
+export const SIDE_COPY_HORIZ_SPEED = 15;
 
 /** Vertical speed for vectors moving upwards inside the LayerNorm block. */
 export const ANIM_RISE_SPEED_INSIDE_LN = 6;
 
 // Trail Line Constants
-/** Maximum number of points to store for each trail line, affecting trail length. */
-export const MAX_TRAIL_POINTS = 2000;
+/** Maximum number of points to store for each trail line, affecting trail length.  Increase for longer-duration animations. */
+export const MAX_TRAIL_POINTS = 10000;
 
 // Vector behaviour within MHSA heads ------------------------------------------------
 /** Vertical speed for vectors rising into heads. */
@@ -169,3 +188,15 @@ export const ROW_MERGE_HORIZ_SPEED = 20;
 
 /** Centre-to-centre spacing between 64-dim segments when assembling the 768-dim row. */
 export const ROW_SEGMENT_SPACING = PRISM_BASE_WIDTH * 1.5 * 64; // matches InstancedPrism width scaling
+
+// -----------------------------------------------------------------------------
+// Residual Stream Alignment Constants
+// -----------------------------------------------------------------------------
+
+/**
+ * Vertical gap (in world units) between the *processed* vector (after it exits
+ * the Output-Projection matrix) and the *original* residual-stream vector that
+ * continues to flow underneath.  Increase this value to leave a larger space
+ * or set it to a negative number to let the original vector overlap.
+ */
+export const ORIGINAL_TO_PROCESSED_GAP = 10;
