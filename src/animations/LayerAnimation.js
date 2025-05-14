@@ -29,13 +29,19 @@ import {
     ANIM_RISE_SPEED_ORIGINAL,
     ANIM_HORIZ_SPEED,
     ANIM_RISE_SPEED_INSIDE_LN,
+    ANIM_RISE_SPEED_POST_SPLIT,
     MAX_TRAIL_POINTS,
     ANIM_RISE_SPEED_HEAD,
     HEAD_VECTOR_STOP_BELOW,
     GLOBAL_ANIM_SPEED_MULT,
     SIDE_COPY_DELAY_MS,
     SIDE_COPY_HORIZ_SPEED,
-    HIDE_INSTANCE_Y_OFFSET
+    HIDE_INSTANCE_Y_OFFSET,
+    LAYER_NORM_2_Y_POS,
+    LN2_TO_MLP_GAP,
+    MLP_INTER_MATRIX_GAP,
+    MLP_MATRIX_PARAMS_UP,
+    MLP_MATRIX_PARAMS_DOWN
 } from '../utils/constants.js';
 import { mapValueToColor } from '../utils/colors.js';
 
@@ -128,6 +134,85 @@ export function initLayerAnimation(container) {
     const darkGrayColor = new THREE.Color(0x404040);
     const matrixOpacity = 0.7;
 
+    // -------------------------------------------------------------------------
+    //  SECOND LayerNorm (LN2) and MLP block (Up-/Down-projection)
+    // -------------------------------------------------------------------------
+    // Colour/opacity settings reused from other matrices
+    const mlpDarkGray = new THREE.Color(0x404040);
+    const mlpMatrixOpacity = 0.7;
+
+    // ── LayerNorm 2 ───────────────────────────────────────────────────────────
+    const layerNorm2 = new LayerNormalizationVisualization(
+        new THREE.Vector3(BRANCH_X, LAYER_NORM_2_Y_POS, 0),
+        LN_PARAMS.width,
+        LN_PARAMS.height,
+        LN_PARAMS.depth,
+        LN_PARAMS.wallThickness,
+        LN_PARAMS.numberOfHoles,
+        LN_PARAMS.holeWidth,
+        LN_PARAMS.holeWidthFactor
+    );
+    scene.add(layerNorm2.group);
+
+    // Compute helper Y positions for the stacked MLP matrices
+    const ln2_top_y = layerNorm2.group.position.y + LN_PARAMS.height / 2;
+
+    // Basic dimensions – tweak as desired for visual clarity
+    const MLP_MATRIX_WIDTH = 150;
+    const MLP_MATRIX_HEIGHT = 40; // Taller than MHSA matrices for distinction
+    const MLP_MATRIX_DEPTH = LN_PARAMS.depth; // Keep depth equal so slits line up in Z
+
+    const mlpMatrixUp_centerY = ln2_top_y + LN2_TO_MLP_GAP + MLP_MATRIX_HEIGHT / 2;
+    const mlpMatrixDown_centerY = mlpMatrixUp_centerY + MLP_MATRIX_HEIGHT / 2 + MLP_INTER_MATRIX_GAP + MLP_MATRIX_HEIGHT / 2;
+
+    // ── Up-projection matrix (d_model → 4·d_model) ──
+    const mlpMatrixUp = new WeightMatrixVisualization(
+        null,
+        new THREE.Vector3(BRANCH_X, mlpMatrixUp_centerY, 0),
+        MLP_MATRIX_PARAMS_UP.width,
+        MLP_MATRIX_PARAMS_UP.height,
+        MLP_MATRIX_PARAMS_UP.depth,
+        MLP_MATRIX_PARAMS_UP.topWidthFactor,
+        MLP_MATRIX_PARAMS_UP.cornerRadius,
+        MLP_MATRIX_PARAMS_UP.numberOfSlits,
+        MLP_MATRIX_PARAMS_UP.slitWidth,
+        MLP_MATRIX_PARAMS_UP.slitDepthFactor,
+        MLP_MATRIX_PARAMS_UP.slitBottomWidthFactor,
+        MLP_MATRIX_PARAMS_UP.slitTopWidthFactor
+    );
+    mlpMatrixUp.setColor(mlpDarkGray);
+    mlpMatrixUp.group.children.forEach(child => {
+        if (child.material) {
+            child.material.transparent = true;
+            child.material.opacity = mlpMatrixOpacity;
+        }
+    });
+    scene.add(mlpMatrixUp.group);
+
+    // ── Down-projection matrix (4·d_model → d_model) ──
+    const mlpMatrixDown = new WeightMatrixVisualization(
+        null,
+        new THREE.Vector3(BRANCH_X, mlpMatrixDown_centerY, 0),
+        MLP_MATRIX_PARAMS_DOWN.width,
+        MLP_MATRIX_PARAMS_DOWN.height,
+        MLP_MATRIX_PARAMS_DOWN.depth,
+        MLP_MATRIX_PARAMS_DOWN.topWidthFactor,
+        MLP_MATRIX_PARAMS_DOWN.cornerRadius,
+        MLP_MATRIX_PARAMS_DOWN.numberOfSlits,
+        MLP_MATRIX_PARAMS_DOWN.slitWidth,
+        MLP_MATRIX_PARAMS_DOWN.slitDepthFactor,
+        MLP_MATRIX_PARAMS_DOWN.slitBottomWidthFactor,
+        MLP_MATRIX_PARAMS_DOWN.slitTopWidthFactor
+    );
+    mlpMatrixDown.setColor(mlpDarkGray);
+    mlpMatrixDown.group.children.forEach(child => {
+        if (child.material) {
+            child.material.transparent = true;
+            child.material.opacity = mlpMatrixOpacity;
+        }
+    });
+    scene.add(mlpMatrixDown.group);
+
     // MHSA Pass-Through Animation State - Reworked
     // let mhaPassThroughPhase = 'positioning_mha_vectors'; // Managed by MHSAAnimation
 
@@ -189,6 +274,16 @@ export function initLayerAnimation(container) {
         const multTarget = new VectorVisualizationInstancedPrism(data.slice(), new THREE.Vector3(BRANCH_X, 3.3, zPos));
         scene.add(multTarget.group);
 
+        // ---------- Static vectors inside SECOND LayerNorm (LN2) ----------
+        const multTargetLN2 = new VectorVisualizationInstancedPrism(data.slice(), new THREE.Vector3(
+            BRANCH_X,
+            LAYER_NORM_2_Y_POS + 3.3, // small offset inside LN2
+            zPos
+        ));
+        // Keep the multiplication target inside LN2 visible from the beginning
+        multTargetLN2.group.visible = true;
+        scene.add(multTargetLN2.group);
+
         // Create layer norm animation controller for this lane's vector
         const normAnimation = new PrismLayerNormAnimation(movingVec);
 
@@ -201,6 +296,7 @@ export function initLayerAnimation(container) {
             originalVec: origVec,
             movingVec,
             multTarget,
+            multTargetLN2,
             normAnimation,
             // Pipeline flags
             normStarted: false,
@@ -212,6 +308,7 @@ export function initLayerAnimation(container) {
             mergeStarted: false,
             origTrail,
             branchTrail,
+            branchTrailLN2: null,
             // New MHSA traversal properties
             travellingVec: null,
             upwardCopies: [],
@@ -219,7 +316,15 @@ export function initLayerAnimation(container) {
             finalAscend: false,
             sideCopies: [],
             sideTrails: [],
-            upwardTrails: []
+            upwardTrails: [],
+            // ---------------- LN2 pipeline flags / objects ----------------
+            ln2Phase: 'notStarted', // notStarted | preRise | right | insideLN | riseToMLP | done
+            postAdditionVec: null,  // residual vector after MHSA addition
+            movingVecLN2: null,
+            normAnimationLN2: null,
+            normStartedLN2: false,
+            multDoneLN2: false,
+            resultVecLN2: null,
         });
     }
 
@@ -470,6 +575,11 @@ export function initLayerAnimation(container) {
         const midY_ln1_abs = LAYER_NORM_1_Y_POS;
         const topY_ln1_abs = LAYER_NORM_1_Y_POS + LN_PARAMS.height / 2;
 
+        // LayerNorm2 positions - used for detecting when vectors pass through LN2
+        const bottomY_ln2_abs = LAYER_NORM_2_Y_POS - LN_PARAMS.height / 2;
+        const midY_ln2_abs = LAYER_NORM_2_Y_POS;
+        const topY_ln2_abs = LAYER_NORM_2_Y_POS + LN_PARAMS.height / 2;
+
         let targetColor = darkGray;
         let targetOpacity = opaqueOpacity;
         let lerpFactor = 0;
@@ -494,12 +604,66 @@ export function initLayerAnimation(container) {
             }
         } // Else (below) remains darkGray and opaque
 
+        // Update appearance of the FIRST LayerNorm only.  The second will
+        // remain grey until its own vectors reach it later in the pipeline.
         layerNorm1.group.children.forEach(child => {
             if (child instanceof THREE.Mesh && child.material) {
-                // Set transparent flag based on final opacity value
                 child.material.transparent = targetOpacity < 1.0;
                 child.material.color.copy(targetColor);
                 child.material.opacity = targetOpacity;
+                child.material.needsUpdate = true;
+            }
+        });
+
+        // Handle LayerNorm2 color separately, based on MHSA output vectors
+        // First find if any vectors have reached LayerNorm2
+        let ln2TargetColor = darkGray;
+        let ln2TargetOpacity = opaqueOpacity;
+        let ln2LerpFactor = 0;
+        
+        // Look for any traveling vector near or inside LN2
+        let vectorsNearLN2 = false;
+        let highestVectorY = -Infinity;
+        
+        // Check all lanes for vectors that might have reached LN2
+        lanes.forEach(lane => {
+            if (lane.travellingVec) {
+                const vecY = lane.travellingVec.group.position.y;
+                highestVectorY = Math.max(highestVectorY, vecY);
+                if (vecY >= bottomY_ln2_abs - 20) { // Consider vectors approaching LN2
+                    vectorsNearLN2 = true;
+                }
+            }
+        });
+        
+        // Apply color transitions to LN2 based on vector positions
+        if (vectorsNearLN2) {
+            if (highestVectorY >= bottomY_ln2_abs && highestVectorY < midY_ln2_abs) {
+                // Vector entering bottom half of LN2
+                ln2LerpFactor = (highestVectorY - bottomY_ln2_abs) / (midY_ln2_abs - bottomY_ln2_abs);
+                ln2TargetColor = darkGray.clone().lerp(lightYellow, ln2LerpFactor);
+                ln2TargetOpacity = opaqueOpacity + (semiTransparentOpacity - opaqueOpacity) * ln2LerpFactor;
+            } else if (highestVectorY >= midY_ln2_abs && highestVectorY < topY_ln2_abs) {
+                // Vector inside top half of LN2
+                ln2TargetColor = lightYellow;
+                ln2TargetOpacity = semiTransparentOpacity;
+            } else if (highestVectorY >= topY_ln2_abs) {
+                // Vector exiting LN2
+                ln2LerpFactor = Math.min(1, (highestVectorY - topY_ln2_abs) / exitTransitionRange);
+                ln2TargetColor = lightYellow.clone().lerp(brightYellow, ln2LerpFactor);
+                ln2TargetOpacity = semiTransparentOpacity + (opaqueOpacity - semiTransparentOpacity) * ln2LerpFactor;
+                if (ln2LerpFactor >= 1.0) {
+                    ln2TargetOpacity = opaqueOpacity;
+                }
+            }
+        }
+        
+        // Apply LN2 appearance updates
+        layerNorm2.group.children.forEach(child => {
+            if (child instanceof THREE.Mesh && child.material) {
+                child.material.transparent = ln2TargetOpacity < 1.0;
+                child.material.color.copy(ln2TargetColor);
+                child.material.opacity = ln2TargetOpacity;
                 child.material.needsUpdate = true;
             }
         });
@@ -586,6 +750,7 @@ export function initLayerAnimation(container) {
                         movingVec.group.position.x = BRANCH_X;
                         lane.horizPhase = 'insideLN';
                     }
+                    if (lane.branchTrailLN2) updateTrail(lane.branchTrailLN2, movingVec.group.position);
                     break;
                 }
                 case 'insideLN': {
@@ -665,6 +830,7 @@ export function initLayerAnimation(container) {
                             }
                         });
                     }
+                    if (lane.branchTrailLN2) updateTrail(lane.branchTrailLN2, movingVec.group.position);
                     break;
                 }
                 case 'moveLeft': {
@@ -716,13 +882,100 @@ export function initLayerAnimation(container) {
                 // TODO: Refactor for InstancedPrism - If a specific point on the prism is needed, calculate it.
                 // For now, using group position of multTarget (which is now the result's source).
                 branchPos = lane.multTarget.group.position;
+            } else if (lane.resultVecLN2 && lane.resultVecLN2.group.visible) {
+                branchPos = lane.resultVecLN2.group.position;
             } else if (lane.resultVec && lane.resultVec.group.visible) {
                 branchPos = lane.resultVec.group.position;
+            } else if (lane.movingVecLN2 && lane.movingVecLN2.group.visible) {
+                branchPos = lane.movingVecLN2.group.position;
             } else if (lane.movingVec.group.visible) {
                 branchPos = lane.movingVec.group.position;
             }
             if (branchPos) {
-                updateTrail(lane.branchTrail, branchPos);
+                const activeTrail = lane.branchTrailLN2 || lane.branchTrail;
+                updateTrail(activeTrail, branchPos);
+            }
+
+            // ---------------------------------------------------------------------
+            //  SECOND LAYERNORM / MLP ROUTING  (per-lane ln2Phase state machine)
+            // ---------------------------------------------------------------------
+            switch (lane.ln2Phase) {
+                case 'preRise': {
+                    const v = lane.postAdditionVec;
+                    if (!v) break;
+                    const targetY = bottomY_ln2_abs - 10; // stop a little below LN2
+                    if (v.group.position.y < targetY) {
+                        v.group.position.y = Math.min(targetY, v.group.position.y + ANIM_RISE_SPEED_POST_SPLIT * SPEED_MULT * deltaTime);
+                    } else {
+                        // Freeze previous branch trail (keep it for history) and start a fresh
+                        // one dedicated to the LN-2 branch so lines don't connect across phases.
+                        if (!lane.branchTrailLN2) {
+                            lane.branchTrailLN2 = createTrailLine(scene, TRAIL_LINE_COLOR);
+                            // seed with current position so the new trail starts cleanly
+                            updateTrail(lane.branchTrailLN2, v.group.position);
+                        }
+                        // Now create the duplicate that will travel into LN2.
+                        const mv = new VectorVisualizationInstancedPrism(v.rawData.slice(), v.group.position.clone());
+                        scene.add(mv.group);
+                        lane.movingVecLN2 = mv;
+                        lane.normAnimationLN2 = new PrismLayerNormAnimation(mv);
+                        lane.ln2Phase = 'right';
+                    }
+                    break;
+                }
+                case 'right': {
+                    const mv = lane.movingVecLN2;
+                    if (!mv) break;
+                    mv.group.visible = true;
+                    const dx2 = ANIM_HORIZ_SPEED * SPEED_MULT * deltaTime;
+                    mv.group.position.x = Math.min(BRANCH_X, mv.group.position.x + dx2);
+                    if (mv.group.position.x >= BRANCH_X - 0.01) {
+                        mv.group.position.x = BRANCH_X;
+                        lane.multTargetLN2.group.visible = true;
+                        lane.ln2Phase = 'insideLN';
+                    }
+                    if (lane.branchTrailLN2) updateTrail(lane.branchTrailLN2, mv.group.position);
+                    break;
+                }
+                case 'insideLN': {
+                    const mv = lane.movingVecLN2;
+                    if (!mv) break;
+                    const normStartY2 = bottomY_ln2_abs + LN_PARAMS.height * 0.15; // start a bit sooner for clearer visuals
+                    const normAnimating2 = lane.normStartedLN2 && lane.normAnimationLN2 && lane.normAnimationLN2.isAnimating;
+                    if (!lane.normStartedLN2 && mv.group.position.y >= normStartY2) {
+                        lane.normAnimationLN2.start(mv.rawData.slice());
+                        lane.normStartedLN2 = true;
+                    }
+                    if (lane.normStartedLN2 && lane.normAnimationLN2) {
+                        lane.normAnimationLN2.update(deltaTime);
+                    }
+                    if (!lane.multDoneLN2 && !normAnimating2) {
+                        mv.group.position.y += ANIM_RISE_SPEED_INSIDE_LN * SPEED_MULT * deltaTime;
+                    }
+                    if (!lane.multDoneLN2 && mv.group.position.y >= midY_ln2_abs) {
+                        lane.multDoneLN2 = true;
+                        startMultiplicationAnimation(mv, lane.multTargetLN2, () => {
+                            mv.group.visible = false;
+                            lane.multTargetLN2.group.visible = false;
+                            const resVec = new VectorVisualizationInstancedPrism(lane.multTargetLN2.rawData.slice(), lane.multTargetLN2.group.position.clone());
+                            scene.add(resVec.group);
+                            lane.resultVecLN2 = resVec;
+                            const destY = mlpMatrixUp_centerY - MLP_MATRIX_PARAMS_UP.height / 2 - 10; // just beneath first MLP matrix
+                            const dist2 = destY - resVec.group.position.y;
+                            const dur2 = (dist2 / (ANIM_RISE_SPEED_INSIDE_LN * SPEED_MULT)) * 1000;
+                            new TWEEN.Tween(resVec.group.position)
+                                .to({ y: destY }, dur2)
+                                .easing(TWEEN.Easing.Linear.None)
+                                .onComplete(() => { lane.ln2Phase = 'done'; })
+                                .start();
+                        });
+                    }
+                    if (lane.branchTrailLN2) updateTrail(lane.branchTrailLN2, mv.group.position);
+                    break;
+                }
+                case 'done':
+                default:
+                    break;
             }
         });
 
@@ -760,8 +1013,12 @@ export function initLayerAnimation(container) {
             l.movingVec.dispose();
             l.multTarget.dispose();
             if (l.resultVec) l.resultVec.dispose();
+            if (l.movingVecLN2) l.movingVecLN2.dispose && l.movingVecLN2.dispose();
+            if (l.multTargetLN2) l.multTargetLN2.dispose && l.multTargetLN2.dispose();
+            if (l.resultVecLN2) l.resultVecLN2.dispose && l.resultVecLN2.dispose();
         });
         layerNorm1.dispose && layerNorm1.dispose();
+        layerNorm2.dispose && layerNorm2.dispose();
 
         // mhaVisualizations and mlpMatrix1/mlpMatrix2 contain WeightMatrixVisualization instances.
         // Their groups and meshes will be handled by the scene.traverse below.

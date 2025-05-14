@@ -7,6 +7,7 @@ import { MHSA_DUPLICATE_VECTOR_RISE_SPEED, MHSA_PASS_THROUGH_TOTAL_DURATION_MS, 
 import {
     // Constants needed for setup & animation
     MHA_MATRIX_PARAMS,
+    NUM_VECTOR_LANES,
     NUM_HEAD_SETS_LAYER,
     HEAD_SET_GAP_LAYER,
     MHA_INTERNAL_MATRIX_SPACING,
@@ -167,7 +168,7 @@ export class MHSAAnimation {
             inputDepth,
             MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.topWidthFactor,
             MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.cornerRadius,
-            MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.numberOfSlits,
+            NUM_VECTOR_LANES,
             MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitWidth,
             MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitDepthFactor,
             MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitBottomWidthFactor,
@@ -505,6 +506,7 @@ export class MHSAAnimation {
                     lane.upwardCopies.push(upVec);
                     
                     const upTrail = createTrailLine(this.scene, TRAIL_LINE_COLOR);
+                    // Keep upward trail visible so users can see vector path
                     updateTrail(upTrail, upVec.group.position);
                     lane.upwardTrails = lane.upwardTrails || [];
                     lane.upwardTrails.push(upTrail);
@@ -552,12 +554,11 @@ export class MHSAAnimation {
                             lane.sideCopies.push({ vec: qVec, targetX: coord.q, type: 'Q', matrixRef: qMatrixForHead, headIndex: hIdx });
                             lane.sideCopies.push({ vec: vVec, targetX: coord.v, type: 'V', matrixRef: vMatrixForHead, headIndex: hIdx });
                             
-                            lane.sideTrails = lane.sideTrails || [];
-                            lane.sideTrails.push(createTrailLine(this.scene, TRAIL_LINE_COLOR));
-                            lane.sideTrails.push(createTrailLine(this.scene, TRAIL_LINE_COLOR));
-                            
-                            updateTrail(lane.sideTrails[lane.sideTrails.length-2], qVec.group.position);
-                            updateTrail(lane.sideTrails[lane.sideTrails.length-1], vVec.group.position);
+                            const qTrail = createTrailLine(this.scene, TRAIL_LINE_COLOR);
+                            const vTrail = createTrailLine(this.scene, TRAIL_LINE_COLOR);
+                            // Keep side copy trails visible
+                            lane.sideTrails.push(qTrail);
+                            lane.sideTrails.push(vTrail);
                             centerVec.userData.sideSpawned = true;
                         }
                     }
@@ -799,6 +800,14 @@ export class MHSAAnimation {
             }
             this._mergeLaneTrails.set(laneZ, laneTrail);
 
+            // Seed the trail with the current positions of all decorative vectors so we
+            // capture the starting points before any horizontal motion begins.
+            vecList.forEach(v => {
+                if (v && v.group) {
+                    updateTrail(laneTrail, v.group.position);
+                }
+            });
+
             // sort vectors by original x for consistent ordering
             vecList.sort((a, b) => a.group.position.x - b.group.position.x);
 
@@ -816,7 +825,8 @@ export class MHSAAnimation {
                         .to({ x: destX }, durationMs)
                         .easing(TWEEN.Easing.Quadratic.InOut)
                         .onUpdate(() => {
-                            updateTrail(laneTrail, vec.group.position);
+                            const laneTrailObj = this._mergeLaneTrails.get(laneZ);
+                            if (laneTrailObj) updateTrail(laneTrailObj, vec.group.position);
                         })
                         .onComplete(() => {
                             // No onComplete here; final visuals & rise handled later after projection matrix
@@ -824,7 +834,8 @@ export class MHSAAnimation {
                         .start();
                 } else {
                     vec.group.position.x = destX;
-                    updateTrail(laneTrail, vec.group.position);
+                    const laneTrailObj = this._mergeLaneTrails.get(laneZ);
+                    if (laneTrailObj) updateTrail(laneTrailObj, vec.group.position);
                 }
             });
         });
@@ -909,10 +920,11 @@ export class MHSAAnimation {
             // Hide original decorative vectors
             vecList.forEach(v => { v.group.visible = false; });
 
-            // Create trail line for combined vector
+            // Create a dedicated trail for the combined vector
             const trail = createTrailLine(this.scene, TRAIL_LINE_COLOR);
-            combinedTrails.push(trail);
+            // Seed trail with current position
             updateTrail(trail, combinedVec.group.position);
+            combinedTrails.push(trail);
         });
 
         if (combinedVectors.length === 0) {
@@ -986,9 +998,11 @@ export class MHSAAnimation {
                                     if (this.outputProjMatrixTrails[idx]) updateTrail(this.outputProjMatrixTrails[idx], vec.group.position);
                                 })
                                 .onComplete(() => {
-                                    // Horizontal move to residual stream (x=0)
+                                    // Horizontal move back to residual stream centre (x = 0),
+                                    // then perform the addition with the lane's original vector
                                     const horizDistance = Math.abs(vec.group.position.x);
                                     const horizDur = (horizDistance / (ANIM_HORIZ_SPEED * SPEED_MULT)) * 1000;
+
                                     new TWEEN.Tween(vec.group.position)
                                         .to({ x: 0 }, horizDur)
                                         .easing(TWEEN.Easing.Quadratic.InOut)
@@ -996,12 +1010,10 @@ export class MHSAAnimation {
                                             if (this.outputProjMatrixTrails[idx]) updateTrail(this.outputProjMatrixTrails[idx], vec.group.position);
                                         })
                                         .onComplete(() => {
-                                            // Nothing extra
-                                            // Trigger addition animation with original residual vector for this lane
                                             if (this.currentLanes) {
                                                 const matchingLane = this.currentLanes.find(l => Math.abs(l.zPos - laneZ) < 0.1);
                                                 if (matchingLane && matchingLane.originalVec) {
-                                                    this._startAdditionAnimation(matchingLane.originalVec, vec);
+                                                    this._startAdditionAnimation(matchingLane.originalVec, vec, matchingLane);
                                                 }
                                             }
                                         })
@@ -1156,7 +1168,7 @@ export class MHSAAnimation {
     // ----------------------------------------------------------------------
     // Helper: Addition animation between two InstancedPrism vectors
     // ----------------------------------------------------------------------
-    _startAdditionAnimation(sourceVec, targetVec) {
+    _startAdditionAnimation(sourceVec, targetVec, lane) {
         // Safety checks
         if (!sourceVec || !targetVec || !sourceVec.mesh || !targetVec.mesh) return;
         if (typeof TWEEN === 'undefined') return;
@@ -1292,6 +1304,17 @@ export class MHSAAnimation {
             if (sourceVec && sourceVec.group && sourceVec.group.userData) {
                 delete sourceVec.group.userData.stopRise;
                 delete sourceVec.group.userData.stopRiseTarget;
+            }
+
+            // ------------------------------------------------------------------
+            //  Notify lane (if provided) that the combined residual vector is now
+            //  ready to proceed to LayerNorm-2.  Replace its originalVec pointer
+            //  so subsequent generic rising logic keeps working.
+            // ------------------------------------------------------------------
+            if (lane) {
+                lane.originalVec = targetVec;   // treat combined vector as new residual
+                lane.postAdditionVec = targetVec;
+                lane.ln2Phase = 'preRise';
             }
         }, totalAnimTime + 100);
     }

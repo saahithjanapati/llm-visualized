@@ -35,7 +35,7 @@ export const VECTOR_DEPTH_SPACING = 100;
 // are present in the scene and component depths that depend on it.
 // ------------------------------------------------------------
 
-export const NUM_VECTOR_LANES = 10; // Master switch: number of vector "lanes" active in the scene
+export const NUM_VECTOR_LANES = 6; // Master switch: number of vector "lanes" active in the scene
 
 // Depth large enough to fit all lanes plus one spacing margin at each end
 export const LANE_DEPENDENT_DEPTH = (NUM_VECTOR_LANES + 1) * VECTOR_DEPTH_SPACING;
@@ -59,7 +59,7 @@ export const LN_TO_MHA_GAP = 150;
 export const VERTICAL_GAP_COMPONENTS = LN_TO_MHA_GAP; // Backwards-compat alias
 
 /** Horizontal X-offset from the main residual stream (x=0) for branched components like LayerNorms, MHSA, MLP. */
-export const BRANCH_X = 350;
+export const BRANCH_X = 400;
 
 // LayerNorm1 (LN1) Parameters
 /** Y-position for the center of the first LayerNormalization block. */
@@ -171,7 +171,7 @@ export const MAX_TRAIL_POINTS = 10000;
 
 // Vector behaviour within MHSA heads ------------------------------------------------
 /** Vertical speed for vectors rising into heads. */
-export const ANIM_RISE_SPEED_HEAD = 0.5;
+export const ANIM_RISE_SPEED_HEAD = 0.44;
 /** Distance below the centre of a head where vectors stop. */
 export const HEAD_VECTOR_STOP_BELOW = 35;
 
@@ -200,3 +200,47 @@ export const ROW_SEGMENT_SPACING = PRISM_BASE_WIDTH * 1.5 * 64; // matches Insta
  * or set it to a negative number to let the original vector overlap.
  */
 export const ORIGINAL_TO_PROCESSED_GAP = 10;
+
+// Vertical gap from LayerNorm2 top to first MLP matrix
+export const LN2_TO_MLP_GAP = 150;
+
+// Y-position for the centre of the second LayerNormalization block
+// (approximate – may be tweaked from the animation file for best fit)
+export const LAYER_NORM_2_Y_POS = 750; // Increased for clearer separation from MHSA block
+
+// Gap between the two stacked MLP weight matrices
+export const MLP_INTER_MATRIX_GAP = 120;
+
+// -----------------------------------------------------------------------------
+// MLP Up-/Down-Projection Weight Matrix Geometry Parameters
+// -----------------------------------------------------------------------------
+// Base width is aligned with d_model size (uses same width as MHSA matrices).
+export const MLP_MATRIX_BASE_WIDTH = MHA_MATRIX_PARAMS.width; // Represents 768-dim bottom width
+
+// Up-projection matrix: bottom width = d_model, top width = 4·d_model
+export const MLP_MATRIX_PARAMS_UP = {
+    width: MLP_MATRIX_BASE_WIDTH,                   // bottom (input: 768)
+    height: 120,                                     // visually taller than MHSA matrices
+    depth: LN_PARAMS.depth,                         // match component depth
+    topWidthFactor: MLP_VECTOR_MULTIPLIER,          // widens to 4× at the top (3072)
+    cornerRadius: 1.0,
+    numberOfSlits: LN_PARAMS.numberOfHoles, // indicate 4× channels
+    slitWidth: 5,
+    slitDepthFactor: 1.0,
+    slitBottomWidthFactor: 0.25,
+    slitTopWidthFactor: 1
+};
+
+// Down-projection matrix: bottom width = 4·d_model, top width = d_model
+export const MLP_MATRIX_PARAMS_DOWN = {
+    width: MLP_MATRIX_BASE_WIDTH * MLP_VECTOR_MULTIPLIER, // bottom (input: 3072)
+    height: 120,
+    depth: LN_PARAMS.depth,
+    topWidthFactor: 0.25,            // narrows back to d_model
+    cornerRadius: 1.0,
+    numberOfSlits: LN_PARAMS.numberOfHoles,               // back to original channels
+    slitWidth: 5,
+    slitDepthFactor: 1.0,
+    slitBottomWidthFactor: 0.95,
+    slitTopWidthFactor: 0.25
+};
