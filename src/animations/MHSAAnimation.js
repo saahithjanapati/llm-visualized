@@ -795,7 +795,7 @@ export class MHSAAnimation {
             // create trail per lane
             const laneTrail = createTrailLine(this.scene, TRAIL_LINE_COLOR);
             if (laneTrail.line && laneTrail.line.material) {
-                laneTrail.line.material.opacity = TRAIL_LINE_OPACITY / NUM_HEAD_SETS_LAYER;
+                laneTrail.line.material.opacity = TRAIL_LINE_OPACITY / (NUM_HEAD_SETS_LAYER * 2);
                 laneTrail.line.material.needsUpdate = true;
             }
             this._mergeLaneTrails.set(laneZ, laneTrail);
@@ -922,6 +922,11 @@ export class MHSAAnimation {
 
             // Create a dedicated trail for the combined vector
             const trail = createTrailLine(this.scene, TRAIL_LINE_COLOR);
+            // Reduce opacity so the resulting trail is consistent with others and not overly bright
+            if (trail.line && trail.line.material) {
+                trail.line.material.opacity = TRAIL_LINE_OPACITY / (NUM_HEAD_SETS_LAYER * 2);
+                trail.line.material.needsUpdate = true;
+            }
             // Seed trail with current position
             updateTrail(trail, combinedVec.group.position);
             combinedTrails.push(trail);

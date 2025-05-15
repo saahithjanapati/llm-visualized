@@ -45,33 +45,6 @@ export function updateTrail(trailObj, pos) {
 
     if (needsToPushNewPoint) {
         if (pts.length < MAX_TRAIL_POINTS) {
-            const lastPos = pts.length > 0 ? pts[pts.length - 1] : null;
-            
-            if (lastPos && SPEED_MULT > 10) { // SPEED_MULT needs to be defined or passed
-                const dx = pos.x - lastPos[0];
-                const dy = pos.y - lastPos[1];
-                const dz = pos.z - lastPos[2];
-                const distance = Math.sqrt(dx*dx + dy*dy + dz*dz);
-                
-                if (distance > 5) {
-                    const steps = Math.min(10, Math.ceil(distance / 5));
-                    for (let i = 1; i < steps; i++) {
-                        const t = i / steps;
-                        const ix = lastPos[0] + dx * t;
-                        const iy = lastPos[1] + dy * t;
-                        const iz = lastPos[2] + dz * t;
-                        
-                        if (pts.length < MAX_TRAIL_POINTS) { // Check again before pushing intermediate points
-                            pts.push([ix, iy, iz]);
-                            const interpolatedIdx = pts.length - 1;
-                            trailObj.geometry.attributes.position.setXYZ(interpolatedIdx, ix, iy, iz);
-                        } else {
-                            break; 
-                        }
-                    }
-                }
-            }
-            
             if (pts.length < MAX_TRAIL_POINTS) { // Check again before pushing the main point
                 pts.push([pos.x, pos.y, pos.z]);
                 const idx = pts.length - 1;

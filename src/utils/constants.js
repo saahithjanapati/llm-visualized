@@ -1,3 +1,10 @@
+
+// ------------------------------------------------------------
+// Global animation speed multiplier (1 = normal speed). Increase to speed up everything.
+// ------------------------------------------------------------
+export const GLOBAL_ANIM_SPEED_MULT = 45;
+
+
 export const VECTOR_LENGTH = 100;
 export const SPHERE_RADIUS = 0.15;
 export const SPHERE_DIAMETER = SPHERE_RADIUS * 2;
@@ -167,7 +174,7 @@ export const ANIM_RISE_SPEED_INSIDE_LN = 6;
 
 // Trail Line Constants
 /** Maximum number of points to store for each trail line, affecting trail length.  Increase for longer-duration animations. */
-export const MAX_TRAIL_POINTS = 10000;
+export const MAX_TRAIL_POINTS = 100000;
 
 // Vector behaviour within MHSA heads ------------------------------------------------
 /** Vertical speed for vectors rising into heads. */
@@ -178,10 +185,6 @@ export const HEAD_VECTOR_STOP_BELOW = 35;
 /** Delay (ms) between centre copy arriving and side copies spawning. */
 export const SIDE_COPY_DELAY_MS = 500;
 
-// ------------------------------------------------------------
-// Global animation speed multiplier (1 = normal speed). Increase to speed up everything.
-// ------------------------------------------------------------
-export const GLOBAL_ANIM_SPEED_MULT = 25;
 
 /** Horizontal speed for decorative vectors merging into row output. */
 export const ROW_MERGE_HORIZ_SPEED = 20;

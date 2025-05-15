@@ -8,7 +8,7 @@ import { VectorVisualizationInstancedPrism } from '../components/VectorVisualiza
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization.js';
 import { MHSAAnimation } from './MHSAAnimation.js';
 import { createTrailLine, updateTrail } from '../utils/trailUtils.js';
-import { TRAIL_LINE_COLOR } from './LayerAnimationConstants.js';
+import { TRAIL_LINE_COLOR, TRAIL_LINE_OPACITY } from './LayerAnimationConstants.js';
 import { PrismLayerNormAnimation } from '../animations/PrismLayerNormAnimation.js';
 import { 
     VECTOR_LENGTH,
@@ -455,6 +455,9 @@ export function initLayerAnimation(container) {
             return; // Invalid position, do nothing
         }
 
+        // Skip if trail has been frozen (for archival only).
+        if (trailObj.isFrozen) return;
+
         const pts = trailObj.points;
         let needsToPushNewPoint = false;
 
@@ -489,21 +492,21 @@ export function initLayerAnimation(container) {
                     const dz = pos.z - lastPos[2];
                     const distance = Math.sqrt(dx*dx + dy*dy + dz*dz);
                     
-                    // If distance is large, add intermediate points
-                    if (distance > 5) {
-                        // Calculate number of points to add based on distance
-                        const steps = Math.min(10, Math.ceil(distance / 5));
-                        
-                        for (let i = 1; i < steps; i++) {
-                            const t = i / steps;
-                            const ix = lastPos[0] + dx * t;
-                            const iy = lastPos[1] + dy * t;
-                            const iz = lastPos[2] + dz * t;
-                            
-                            pts.push([ix, iy, iz]);
-                            const interpolatedIdx = pts.length - 1;
-                            trailObj.geometry.attributes.position.setXYZ(interpolatedIdx, ix, iy, iz);
-                        }
+                    // Calculate a *smaller* number of intermediate points so we don't over-densify
+                    // the trail (too many overlapping segments in the same pixel can make the
+                    // line appear brighter/thicker). 4 extra points is generally sufficient for
+                    // smoothness even at high speeds.
+                    const steps = Math.min(4, Math.ceil(distance / 10));
+                    
+                    for (let i = 1; i < steps; i++) {
+                        const t = i / steps;
+                        const ix = lastPos[0] + dx * t;
+                        const iy = lastPos[1] + dy * t;
+                        const iz = lastPos[2] + dz * t;
+                    
+                        pts.push([ix, iy, iz]);
+                        const interpolatedIdx = pts.length - 1;
+                        trailObj.geometry.attributes.position.setXYZ(interpolatedIdx, ix, iy, iz);
                     }
                 }
                 
@@ -617,46 +620,62 @@ export function initLayerAnimation(container) {
 
         // Handle LayerNorm2 color separately, based on MHSA output vectors
         // First find if any vectors have reached LayerNorm2
-        let ln2TargetColor = darkGray;
+        let ln2TargetColor = darkGray.clone(); // Ensure it's a clone
         let ln2TargetOpacity = opaqueOpacity;
         let ln2LerpFactor = 0;
         
-        // Look for any traveling vector near or inside LN2
-        let vectorsNearLN2 = false;
-        let highestVectorY = -Infinity;
-        
-        // Check all lanes for vectors that might have reached LN2
+        // Find the highest Y position of any vector currently moving within or towards LN2
+        let highestMovingVecLN2_Y = -Infinity;
+        let anyVectorInOrNearLN2 = false;
+
         lanes.forEach(lane => {
-            if (lane.travellingVec) {
-                const vecY = lane.travellingVec.group.position.y;
-                highestVectorY = Math.max(highestVectorY, vecY);
-                if (vecY >= bottomY_ln2_abs - 20) { // Consider vectors approaching LN2
-                    vectorsNearLN2 = true;
+            let vecY_forLN2Color = -Infinity;
+
+            if (lane.movingVecLN2 && lane.movingVecLN2.group.visible) {
+                vecY_forLN2Color = lane.movingVecLN2.group.position.y;
+            } else if (lane.resultVecLN2 && lane.resultVecLN2.group.visible) {
+                // If movingVecLN2 is done/invisible, and resultVecLN2 is active,
+                // use resultVecLN2 for color calculation as it's the one exiting LN2.
+                vecY_forLN2Color = lane.resultVecLN2.group.position.y;
+            }
+
+            if (vecY_forLN2Color > -Infinity) {
+                highestMovingVecLN2_Y = Math.max(highestMovingVecLN2_Y, vecY_forLN2Color);
+                // Consider a vector "near" LN2 if it's above the bottom boundary or slightly below it
+                if (vecY_forLN2Color >= bottomY_ln2_abs - exitTransitionRange) { // Use exitTransitionRange as a buffer
+                    anyVectorInOrNearLN2 = true;
                 }
             }
         });
         
-        // Apply color transitions to LN2 based on vector positions
-        if (vectorsNearLN2) {
-            if (highestVectorY >= bottomY_ln2_abs && highestVectorY < midY_ln2_abs) {
+        // Apply color transitions to LN2 based on the highest vector's position
+        if (anyVectorInOrNearLN2 && highestMovingVecLN2_Y > -Infinity) {
+            if (highestMovingVecLN2_Y >= bottomY_ln2_abs && highestMovingVecLN2_Y < midY_ln2_abs) {
                 // Vector entering bottom half of LN2
-                ln2LerpFactor = (highestVectorY - bottomY_ln2_abs) / (midY_ln2_abs - bottomY_ln2_abs);
+                ln2LerpFactor = (highestMovingVecLN2_Y - bottomY_ln2_abs) / (midY_ln2_abs - bottomY_ln2_abs);
+                // Clamp lerpFactor to [0, 1] to avoid issues if vecY is slightly outside bounds due to timing
+                ln2LerpFactor = Math.max(0, Math.min(1, ln2LerpFactor));
                 ln2TargetColor = darkGray.clone().lerp(lightYellow, ln2LerpFactor);
                 ln2TargetOpacity = opaqueOpacity + (semiTransparentOpacity - opaqueOpacity) * ln2LerpFactor;
-            } else if (highestVectorY >= midY_ln2_abs && highestVectorY < topY_ln2_abs) {
+            } else if (highestMovingVecLN2_Y >= midY_ln2_abs && highestMovingVecLN2_Y < topY_ln2_abs) {
                 // Vector inside top half of LN2
-                ln2TargetColor = lightYellow;
+                ln2TargetColor = lightYellow.clone();
                 ln2TargetOpacity = semiTransparentOpacity;
-            } else if (highestVectorY >= topY_ln2_abs) {
+            } else if (highestMovingVecLN2_Y >= topY_ln2_abs) {
                 // Vector exiting LN2
-                ln2LerpFactor = Math.min(1, (highestVectorY - topY_ln2_abs) / exitTransitionRange);
+                ln2LerpFactor = (highestMovingVecLN2_Y - topY_ln2_abs) / exitTransitionRange;
+                // Clamp lerpFactor to [0, 1]
+                ln2LerpFactor = Math.max(0, Math.min(1, ln2LerpFactor));
                 ln2TargetColor = lightYellow.clone().lerp(brightYellow, ln2LerpFactor);
                 ln2TargetOpacity = semiTransparentOpacity + (opaqueOpacity - semiTransparentOpacity) * ln2LerpFactor;
                 if (ln2LerpFactor >= 1.0) {
                     ln2TargetOpacity = opaqueOpacity;
                 }
             }
+            // If highestMovingVecLN2_Y is below bottomY_ln2_abs but still considered "near"
+            // it will default to darkGray unless caught by the conditions above, which is fine.
         }
+        // If no vectors are in or near LN2, ln2TargetColor remains darkGray and ln2TargetOpacity remains opaqueOpacity
         
         // Apply LN2 appearance updates
         layerNorm2.group.children.forEach(child => {
@@ -907,18 +926,21 @@ export function initLayerAnimation(container) {
                     if (v.group.position.y < targetY) {
                         v.group.position.y = Math.min(targetY, v.group.position.y + ANIM_RISE_SPEED_POST_SPLIT * SPEED_MULT * deltaTime);
                     } else {
-                        // Freeze previous branch trail (keep it for history) and start a fresh
-                        // one dedicated to the LN-2 branch so lines don't connect across phases.
-                        if (!lane.branchTrailLN2) {
-                            lane.branchTrailLN2 = createTrailLine(scene, TRAIL_LINE_COLOR);
-                            // seed with current position so the new trail starts cleanly
-                            updateTrail(lane.branchTrailLN2, v.group.position);
+                        // Freeze the original branch trail (leave visible for history),
+                        // but we'll stop updating it once LN-2 phase begins so it no longer
+                        // accumulates overlapping segments.
+                        if (lane.branchTrail) {
+                            lane.branchTrail.isFrozen = true; // custom flag checked by updateTrail
                         }
                         // Now create the duplicate that will travel into LN2.
                         const mv = new VectorVisualizationInstancedPrism(v.rawData.slice(), v.group.position.clone());
                         scene.add(mv.group);
                         lane.movingVecLN2 = mv;
                         lane.normAnimationLN2 = new PrismLayerNormAnimation(mv);
+                        // Create a new trail for the LN2 branch so its motion is visualised
+                        lane.branchTrailLN2 = createTrailLine(scene, TRAIL_LINE_COLOR);
+                        // Push the current position as the first point of the new trail
+                        updateTrail(lane.branchTrailLN2, mv.group.position);
                         lane.ln2Phase = 'right';
                     }
                     break;
@@ -970,7 +992,10 @@ export function initLayerAnimation(container) {
                                 .start();
                         });
                     }
-                    if (lane.branchTrailLN2) updateTrail(lane.branchTrailLN2, mv.group.position);
+                    // Only update trail with the "moving" LN2 vector while it's actually moving.
+                    if (!lane.multDoneLN2 && lane.branchTrailLN2) {
+                        updateTrail(lane.branchTrailLN2, mv.group.position);
+                    }
                     break;
                 }
                 case 'done':
