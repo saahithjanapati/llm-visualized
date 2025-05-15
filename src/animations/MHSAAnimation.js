@@ -794,10 +794,9 @@ export class MHSAAnimation {
         laneVectors.forEach((vecList, laneZ) => {
             // create trail per lane
             const laneTrail = createTrailLine(this.scene, TRAIL_LINE_COLOR);
-            if (laneTrail.line && laneTrail.line.material) {
-                laneTrail.line.material.opacity = TRAIL_LINE_OPACITY / (NUM_HEAD_SETS_LAYER * 2);
-                laneTrail.line.material.needsUpdate = true;
-            }
+            // Keep merge-path trails subtle so they don't overpower the scene.
+            laneTrail.line.material.opacity = TRAIL_LINE_OPACITY / (NUM_HEAD_SETS_LAYER * 2);
+            laneTrail.line.material.needsUpdate = true;
             this._mergeLaneTrails.set(laneZ, laneTrail);
 
             // Seed the trail with the current positions of all decorative vectors so we
@@ -922,11 +921,10 @@ export class MHSAAnimation {
 
             // Create a dedicated trail for the combined vector
             const trail = createTrailLine(this.scene, TRAIL_LINE_COLOR);
-            // Reduce opacity so the resulting trail is consistent with others and not overly bright
-            if (trail.line && trail.line.material) {
-                trail.line.material.opacity = TRAIL_LINE_OPACITY / (NUM_HEAD_SETS_LAYER * 2);
-                trail.line.material.needsUpdate = true;
-            }
+            // Use the base trail opacity so the path through the output-projection
+            // matrix is clearly visible to the viewer.
+            trail.line.material.opacity = TRAIL_LINE_OPACITY;
+            trail.line.material.needsUpdate = true;
             // Seed trail with current position
             updateTrail(trail, combinedVec.group.position);
             combinedTrails.push(trail);

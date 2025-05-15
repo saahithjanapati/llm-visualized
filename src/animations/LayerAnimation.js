@@ -248,6 +248,15 @@ export function initLayerAnimation(container) {
     const originals = [];
     const lanes = [];
 
+    // -------------------------------------------------------------------------
+    //  State tracking for LayerNorm2 appearance so it doesn't revert to dark/black
+    //  once vectors have completely exited the block.
+    // -------------------------------------------------------------------------
+    let ln2ColorLocked = false;      // becomes true after the final bright transition
+    let ln2LockedColor = null;       // stores the color to keep (e.g., brightYellow)
+    let ln2LastColor = new THREE.Color(0x333333);
+    let ln2LastOpacity = 1.0;
+
     // --- Trail line support --------------------------------------------------------
     // const MAX_TRAIL_POINTS = 1500; // Now from constants (used in trailUtils)
     // function createTrailLine(color) { ... } // Moved to trailUtils.js
@@ -675,8 +684,23 @@ export function initLayerAnimation(container) {
             // If highestMovingVecLN2_Y is below bottomY_ln2_abs but still considered "near"
             // it will default to darkGray unless caught by the conditions above, which is fine.
         }
-        // If no vectors are in or near LN2, ln2TargetColor remains darkGray and ln2TargetOpacity remains opaqueOpacity
+        // If no vectors are in or near LN2, keep the last known colour/opacity so it doesn't snap to dark.
+        if (!anyVectorInOrNearLN2) {
+            ln2TargetColor.copy(ln2LastColor);
+            ln2TargetOpacity = ln2LastOpacity;
+        } else {
+            // Store for future frames
+            ln2LastColor.copy(ln2TargetColor);
+            ln2LastOpacity = ln2TargetOpacity;
+        }
         
+        // If the color has been locked, override the computed target so LN2 keeps
+        // its bright appearance.
+        if (ln2ColorLocked && ln2LockedColor) {
+            ln2TargetColor = ln2LockedColor;
+            ln2TargetOpacity = opaqueOpacity;
+        }
+
         // Apply LN2 appearance updates
         layerNorm2.group.children.forEach(child => {
             if (child instanceof THREE.Mesh && child.material) {
@@ -907,6 +931,8 @@ export function initLayerAnimation(container) {
                 branchPos = lane.resultVec.group.position;
             } else if (lane.movingVecLN2 && lane.movingVecLN2.group.visible) {
                 branchPos = lane.movingVecLN2.group.position;
+            } else if (lane.expandedVecGroup && lane.expandedVecGroup.visible) {
+                branchPos = lane.expandedVecGroup.position;
             } else if (lane.movingVec.group.visible) {
                 branchPos = lane.movingVec.group.position;
             }
@@ -1001,6 +1027,197 @@ export function initLayerAnimation(container) {
                 case 'done':
                 default:
                     break;
+            }
+        });
+
+        // Add MLP Up pass-through animation for vectors that have completed LN2
+        lanes.forEach(lane => {
+            if (lane.ln2Phase === 'done' && !lane.mlpUpStarted) {
+                lane.mlpUpStarted = true;
+                lane.mlpUpTrail = createTrailLine(scene, TRAIL_LINE_COLOR);
+                const vec = lane.resultVecLN2;
+                if (vec) {
+                    const bottomY = mlpMatrixUp_centerY - MLP_MATRIX_PARAMS_UP.height / 2;
+                    const topY = mlpMatrixUp_centerY + MLP_MATRIX_PARAMS_UP.height / 2;
+                    const distance = topY - vec.group.position.y;
+                    const duration = (distance / (ANIM_RISE_SPEED_INSIDE_LN * SPEED_MULT)) * 1000;
+                    const matrixStartColor = mlpDarkGray.clone();
+                    const matrixEndColor = new THREE.Color(0xFFA500); // bright orange
+                    new TWEEN.Tween({ t: 0 })
+                        .to({ t: 1 }, duration)
+                        .easing(TWEEN.Easing.Quadratic.InOut)
+                        .onUpdate(o => {
+                            const col = matrixStartColor.clone().lerp(matrixEndColor, o.t);
+                            mlpMatrixUp.setColor(col);
+                            mlpMatrixUp.setEmissive(col, 0.5);
+                        })
+                        .start();
+                    new TWEEN.Tween(vec.group.position)
+                        .to({ y: topY }, duration)
+                        .easing(TWEEN.Easing.Linear.None)
+                        .onUpdate(() => {
+                            updateTrail(lane.mlpUpTrail, vec.group.position);
+                        })
+                        .onStart(() => {
+                            // Instantly shrink vector to match matrix width as soon as it enters the matrix
+                            vec.group.scale.setScalar(0.6);
+                        })
+                        .onComplete(() => {
+                            // Restore scale before creating expanded vector
+                            vec.group.scale.setScalar(0.6);
+                            mlpMatrixUp.setColor(matrixEndColor);
+                            mlpMatrixUp.setEmissive(matrixEndColor, 0.5);
+
+                            // ------------------------------------------------------------
+                            //  Expand to 4× 768-dim segments (simulate 3072-dim output)
+                            // ------------------------------------------------------------
+                            const segments = 4;
+                            const segWidth = vec.getBaseWidthConstant() * vec.getWidthScale() * VECTOR_LENGTH_PRISM;
+                            const expandedGroup = new THREE.Group();
+                            const segmentVecs = [];
+
+                            for (let s = 0; s < segments; s++) {
+                                // Duplicate the raw data for each segment – for visual purposes this is acceptable
+                                const segVec = new VectorVisualizationInstancedPrism(vec.rawData.slice(), new THREE.Vector3());
+
+                                // Copy the key color gradient from the source vector so colour scheme matches
+                                if (Array.isArray(vec.currentKeyColors) && vec.currentKeyColors.length) {
+                                    segVec.currentKeyColors = vec.currentKeyColors.map(c => c.clone());
+                                    segVec.updateInstanceGeometryAndColors();
+                                }
+
+                                // Position the segment side-by-side along X so the overall width is 4×
+                                const localX = (s - (segments - 1) / 2) * segWidth;
+                                segVec.group.position.set(localX, 0, 0);
+                                expandedGroup.add(segVec.group);
+                                segmentVecs.push(segVec);
+                            }
+
+                            // Position the whole expanded group where the original vector ended
+                            expandedGroup.position.copy(vec.group.position);
+                            scene.add(expandedGroup);
+
+                            // Hide the original 768-dim vector
+                            vec.group.visible = false;
+
+                            // Store reference on lane for later stages / trail following
+                            lane.expandedVecGroup = expandedGroup;
+                            lane.expandedVecSegments = segmentVecs;
+
+                            // Continue trail updates with the new group centre
+                            if (lane.mlpUpTrail) {
+                                updateTrail(lane.mlpUpTrail, expandedGroup.position);
+                            }
+
+                            // ------------------------------------------------------------
+                            //  EXTRA RISE + PAUSE BEFORE DOWN-PROJECTION
+                            // ------------------------------------------------------------
+                            const extraRise = 60; // world units
+                            const pauseMs = 500;  // pause duration
+
+                            new TWEEN.Tween(expandedGroup.position)
+                                .to({ y: expandedGroup.position.y + extraRise }, 800)
+                                .easing(TWEEN.Easing.Quadratic.InOut)
+                                .onUpdate(() => {
+                                    updateTrail(lane.mlpUpTrail, expandedGroup.position);
+                                })
+                                .onComplete(() => {
+                                    // After the pause, start the down-projection pass-through
+                                    setTimeout(() => {
+                                        const orangeColor = new THREE.Color(0xFFA500);
+
+                                        const downBottomY = mlpMatrixDown_centerY - MLP_MATRIX_PARAMS_DOWN.height / 2;
+                                        const downTopY = mlpMatrixDown_centerY + MLP_MATRIX_PARAMS_DOWN.height / 2;
+
+                                        // Move vector to bottom of matrix first if below it
+                                        const startY = expandedGroup.position.y;
+                                        const totalDist = downTopY - startY;
+                                        const durationDown = (Math.abs(totalDist) / (ANIM_RISE_SPEED_INSIDE_LN * SPEED_MULT)) * 1000;
+
+                                        // Matrix color tween
+                                        new TWEEN.Tween({ t: 0 })
+                                            .to({ t: 1 }, durationDown)
+                                            .easing(TWEEN.Easing.Quadratic.InOut)
+                                            .onUpdate(o => {
+                                                const col = mlpDarkGray.clone().lerp(orangeColor, o.t);
+                                                mlpMatrixDown.setColor(col);
+                                                mlpMatrixDown.setEmissive(col, 0.5);
+                                            })
+                                            .start();
+
+                                        // Move the expanded vector through the matrix
+                                        new TWEEN.Tween(expandedGroup.position)
+                                            .to({ y: downTopY }, durationDown)
+                                            .easing(TWEEN.Easing.Linear.None)
+                                            .onUpdate(() => {
+                                                updateTrail(lane.mlpUpTrail, expandedGroup.position);
+                                            })
+                                            .onStart(() => {
+                                                // Instantly shrink the widened 3072-dim vector so it fits within the narrowing matrix
+                                                expandedGroup.scale.setScalar(0.25);
+                                            })
+                                            .onComplete(() => {
+                                                mlpMatrixDown.setColor(orangeColor);
+                                                mlpMatrixDown.setEmissive(orangeColor, 0.5);
+
+                                                // --------------------------------------------------
+                                                //  Collapse back to a single 768-dim vector
+                                                // --------------------------------------------------
+                                                const collapseVec = new VectorVisualizationInstancedPrism(segmentVecs[0].rawData.slice(), expandedGroup.position.clone());
+
+                                                // Copy gradient colours
+                                                if (Array.isArray(segmentVecs[0].currentKeyColors) && segmentVecs[0].currentKeyColors.length) {
+                                                    collapseVec.currentKeyColors = segmentVecs[0].currentKeyColors.map(c => c.clone());
+                                                    collapseVec.updateInstanceGeometryAndColors();
+                                                }
+
+                                                scene.add(collapseVec.group);
+
+                                                // Hide expanded 3072-dim group
+                                                expandedGroup.visible = false;
+
+                                                // Update lane reference for future phases (if any)
+                                                lane.finalVecAfterMlp = collapseVec;
+
+                                                // Ensure trail keeps following
+                                                updateTrail(lane.mlpUpTrail, collapseVec.group.position);
+
+                                                // ------------------------------
+                                                //  Rise a bit above the matrix
+                                                // ------------------------------
+                                                const riseAbove = 40; // units
+                                                const riseDur = (riseAbove / (ANIM_RISE_SPEED_INSIDE_LN * SPEED_MULT)) * 1000;
+
+                                                new TWEEN.Tween(collapseVec.group.position)
+                                                    .to({ y: collapseVec.group.position.y + riseAbove }, riseDur)
+                                                    .easing(TWEEN.Easing.Quadratic.InOut)
+                                                    .onUpdate(() => {
+                                                        updateTrail(lane.mlpUpTrail, collapseVec.group.position);
+                                                    })
+                                                    .onComplete(() => {
+                                                        // ------------------------------
+                                                        //  Move left to residual stream (x=0)
+                                                        // ------------------------------
+                                                        const horizDist = Math.abs(collapseVec.group.position.x);
+                                                        const horizDur = (horizDist / (ANIM_HORIZ_SPEED * SPEED_MULT)) * 1000;
+
+                                                        new TWEEN.Tween(collapseVec.group.position)
+                                                            .to({ x: 0 }, horizDur)
+                                                            .easing(TWEEN.Easing.Quadratic.InOut)
+                                                            .onUpdate(() => {
+                                                                updateTrail(lane.mlpUpTrail, collapseVec.group.position);
+                                                            })
+                                                            .start();
+                                                    })
+                                                    .start();
+                                            })
+                                            .start();
+                                    }, pauseMs);
+                                })
+                                .start();
+                        })
+                        .start();
+                }
             }
         });
 

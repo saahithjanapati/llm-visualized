@@ -231,7 +231,7 @@ export const MLP_MATRIX_PARAMS_UP = {
     slitWidth: 5,
     slitDepthFactor: 1.0,
     slitBottomWidthFactor: 0.25,
-    slitTopWidthFactor: 1
+    slitTopWidthFactor: 0.95
 };
 
 // Down-projection matrix: bottom width = 4·d_model, top width = d_model
