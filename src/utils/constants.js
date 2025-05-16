@@ -42,7 +42,7 @@ export const VECTOR_DEPTH_SPACING = 100;
 // are present in the scene and component depths that depend on it.
 // ------------------------------------------------------------
 
-export const NUM_VECTOR_LANES = 6; // Master switch: number of vector "lanes" active in the scene
+export const NUM_VECTOR_LANES = 5; // Master switch: number of vector "lanes" active in the scene
 
 // Depth large enough to fit all lanes plus one spacing margin at each end
 export const LANE_DEPENDENT_DEPTH = (NUM_VECTOR_LANES + 1) * VECTOR_DEPTH_SPACING;
@@ -226,7 +226,7 @@ export const MLP_MATRIX_PARAMS_UP = {
     height: 120,                                     // visually taller than MHSA matrices
     depth: LN_PARAMS.depth,                         // match component depth
     topWidthFactor: MLP_VECTOR_MULTIPLIER,          // widens to 4× at the top (3072)
-    cornerRadius: 3.0,
+    cornerRadius: 20.0,
     numberOfSlits: LN_PARAMS.numberOfHoles, // indicate 4× channels
     slitWidth: 5,
     slitDepthFactor: 1.0,
