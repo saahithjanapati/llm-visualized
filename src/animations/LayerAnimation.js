@@ -973,9 +973,7 @@ export function initLayerAnimation(container) {
                     if (v.group.position.y < targetY) {
                         v.group.position.y = Math.min(targetY, v.group.position.y + ANIM_RISE_SPEED_POST_SPLIT * SPEED_MULT * deltaTime);
                     } else {
-                        // Freeze the original branch trail (leave visible for history),
-                        // but we'll stop updating it once LN-2 phase begins so it no longer
-                        // accumulates overlapping segments.
+                        // Keep the original branch trail visible for context.
                         if (lane.branchTrail) {
                             lane.branchTrail.isFrozen = true; // custom flag checked by updateTrail
                         }
@@ -986,7 +984,12 @@ export function initLayerAnimation(container) {
                         lane.normAnimationLN2 = new PrismLayerNormAnimation(mv);
                         // Create a new trail for the LN2 branch so its motion is visualised
                         lane.branchTrailLN2 = createTrailLine(scene, TRAIL_LINE_COLOR);
-                        // Push the current position as the first point of the new trail
+                        // Slightly lower the opacity so overlapping with the frozen trail doesn't brighten excessively.
+                        if (lane.branchTrailLN2 && lane.branchTrailLN2.line && lane.branchTrailLN2.line.material) {
+                            lane.branchTrailLN2.line.material.opacity = TRAIL_LINE_OPACITY * 0.6;
+                            lane.branchTrailLN2.line.material.needsUpdate = true;
+                        }
+                        // Seed the LN2 branch trail with the starting position so it is visible immediately
                         updateTrail(lane.branchTrailLN2, mv.group.position);
                         lane.ln2Phase = 'right';
                     }

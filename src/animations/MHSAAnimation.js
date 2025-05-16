@@ -1176,10 +1176,19 @@ export class MHSAAnimation {
         const svGroupUD = sourceVec.group.userData;
         let additionTrail = svGroupUD.additionTrail;
         if (!additionTrail) {
+            // Create a dedicated trail for the addition phase.  Set its
+            // opacity lower so any overlap with the main vertical trail does
+            // not produce a noticeably brighter segment.
             additionTrail = createTrailLine(this.scene, TRAIL_LINE_COLOR);
-            svGroupUD.additionTrail = additionTrail; // cache for potential future additions
-            
-            // Push the initial centre-instance position into the trail.
+            if (additionTrail.line && additionTrail.line.material) {
+                additionTrail.line.material.opacity = TRAIL_LINE_OPACITY * 0.6;
+                additionTrail.line.material.needsUpdate = true;
+            }
+
+            svGroupUD.additionTrail = additionTrail; // cache for reuse
+
+            // Seed with the current centre-instance position so the viewer sees
+            // the trail from the very start of the merge movement.
             const startMat = new THREE.Matrix4();
             sourceVec.mesh.getMatrixAt(centreIndex, startMat);
             const startPos = new THREE.Vector3().setFromMatrixPosition(startMat);
