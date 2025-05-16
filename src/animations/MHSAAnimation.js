@@ -1221,9 +1221,13 @@ export class MHSAAnimation {
              
             const tweenState = { t: 0 };
 
+            // Make the centre prism start first (delay=0). For the rest we keep a stagger
+            // using their distance from the centre so motion still "fans out" symmetrically.
+            const centreDelay = Math.abs(i - centreIndex) * delayBetween;
+
             new TWEEN.Tween(tweenState)
                 .to({ t: 1 }, duration)
-                .delay(i * delayBetween)
+                .delay(centreDelay)
                 .easing(TWEEN.Easing.Quadratic.InOut)
                 .onUpdate(obj => {
                     // Re-compute target position dynamically each frame in case the target vector is still moving
