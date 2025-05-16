@@ -622,6 +622,34 @@ export class MHSAAnimation {
         if (this._mergeLaneTrails) {
             // Lane trails are updated during tweens; no continuous endpoint updates needed.
         }
+
+        // ------------------------------------------------------------------
+        //  Ensure addition trail follows centre prism even before tween starts
+        // ------------------------------------------------------------------
+        lanes.forEach(lane => {
+            if (!lane || !lane.originalVec) return;
+
+            const ud = lane.originalVec.group?.userData || {};
+            const trailObj = ud.additionTrail;
+            if (!trailObj) return; // no active addition trail
+
+            // Only follow while the addition animation is active (stopRise flag present)
+            if (!ud.stopRise) return;
+
+            const centreIdx = Math.floor(VECTOR_LENGTH_PRISM / 2);
+            const instMat = new THREE.Matrix4();
+
+            lane.originalVec.mesh.getMatrixAt(centreIdx, instMat);
+            const wPos = new THREE.Vector3().setFromMatrixPosition(instMat);
+            wPos.applyMatrix4(lane.originalVec.group.matrixWorld);
+
+            // Do not continue the trail once the instance has been "hidden"
+            // far away (HIDE_INSTANCE_Y_OFFSET ≈ 10000). Assuming the scene's
+            // meaningful Y range is < 2 000 units.
+            if (Math.abs(wPos.y) < 2000) {
+                updateTrail(trailObj, wPos);
+            }
+        });
     }
 
     dispose() {
@@ -1221,13 +1249,9 @@ export class MHSAAnimation {
              
             const tweenState = { t: 0 };
 
-            // Make the centre prism start first (delay=0). For the rest we keep a stagger
-            // using their distance from the centre so motion still "fans out" symmetrically.
-            const centreDelay = Math.abs(i - centreIndex) * delayBetween;
-
             new TWEEN.Tween(tweenState)
                 .to({ t: 1 }, duration)
-                .delay(centreDelay)
+                .delay(i * delayBetween)
                 .easing(TWEEN.Easing.Quadratic.InOut)
                 .onUpdate(obj => {
                     // Re-compute target position dynamically each frame in case the target vector is still moving
