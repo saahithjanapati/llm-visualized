@@ -1174,27 +1174,22 @@ export class MHSAAnimation {
 
         // Ensure a userData object exists on the THREE.Group that wraps the vector
         const svGroupUD = sourceVec.group.userData;
-        let additionTrail = svGroupUD.additionTrail;
+        let additionTrail = lane && lane.origTrail;
         if (!additionTrail) {
-            // Create a dedicated trail for the addition phase.  Set its
-            // opacity lower so any overlap with the main vertical trail does
-            // not produce a noticeably brighter segment.
             additionTrail = createTrailLine(this.scene, TRAIL_LINE_COLOR);
-            if (additionTrail.line && additionTrail.line.material) {
-                additionTrail.line.material.opacity = TRAIL_LINE_OPACITY * 0.6;
-                additionTrail.line.material.needsUpdate = true;
-            }
-
-            svGroupUD.additionTrail = additionTrail; // cache for reuse
-
-            // Seed with the current centre-instance position so the viewer sees
-            // the trail from the very start of the merge movement.
-            const startMat = new THREE.Matrix4();
-            sourceVec.mesh.getMatrixAt(centreIndex, startMat);
-            const startPos = new THREE.Vector3().setFromMatrixPosition(startMat);
-            startPos.applyMatrix4(sourceVec.group.matrixWorld);
-            updateTrail(additionTrail, startPos);
+            if (lane) lane.origTrail = additionTrail;
         }
+
+        // Cache reference for future calls
+        svGroupUD.additionTrail = additionTrail;
+
+        // Seed with the current centre-instance position so the vertical merge
+        // segment appears immediately.
+        const startMat = new THREE.Matrix4();
+        sourceVec.mesh.getMatrixAt(centreIndex, startMat);
+        const startPos = new THREE.Vector3().setFromMatrixPosition(startMat);
+        startPos.applyMatrix4(sourceVec.group.matrixWorld);
+        updateTrail(additionTrail, startPos);
 
         // Durations scaled by the dedicated speed multiplier so users can
         // tweak the addition process without affecting global timings.
@@ -1257,12 +1252,12 @@ export class MHSAAnimation {
                     sourceVec.setInstanceAppearance(i, offsetY, null);
 
                     // Update the trail so that it follows the centre instance.
-                    if (i === centreIndex && additionTrail) {
+                    if (i === centreIndex) {
                         const instMat = new THREE.Matrix4();
                         sourceVec.mesh.getMatrixAt(i, instMat);
                         const wPos = new THREE.Vector3().setFromMatrixPosition(instMat);
                         wPos.applyMatrix4(sourceVec.group.matrixWorld);
-                        updateTrail(additionTrail, wPos);
+                        if (additionTrail) updateTrail(additionTrail, wPos);
                     }
                 })
                 .onComplete(() => {
@@ -1306,6 +1301,13 @@ export class MHSAAnimation {
                 lane.originalVec = targetVec;   // treat combined vector as new residual
                 lane.postAdditionVec = targetVec;
                 lane.ln2Phase = 'preRise';
+
+                // Let the original vector skip trail updates until it has
+                // moved ABOVE the point reached during the addition animation.
+                if (sourceVec && sourceVec.group) {
+                    const topY = targetVec.group.position.y;
+                    sourceVec.group.userData.skipTrailResumeY = topY + 0.01; // small epsilon to ensure crossing
+                }
             }
         }, totalAnimTime + 100);
     }

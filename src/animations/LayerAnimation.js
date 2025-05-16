@@ -472,6 +472,41 @@ export function initLayerAnimation(container) {
                 .start();
         }
         */
+
+        const centreIndex = Math.floor(VECTOR_LENGTH_PRISM / 2);
+
+        // === guarantee we have only ONE trail per lane =========================
+        const uv = vec1.group.userData;
+
+        // If an old, separate addition-trail exists, remove it from the scene
+        // and from user-data so it can never be rendered again.
+        if (uv.additionTrail && uv.additionTrail !== vec1.origTrail) {
+            scene.remove(uv.additionTrail.line);  // detach mesh
+            uv.additionTrail.line.geometry.dispose();
+            uv.additionTrail.line.material.dispose();
+            delete uv.additionTrail;                    // forget it
+        }
+
+        // Always use the lane's main vertical trail
+        let laneTrail = vec1.origTrail;
+        if (!laneTrail) {
+            laneTrail            = createTrailLine(scene, TRAIL_LINE_COLOR);
+            vec1.origTrail       = laneTrail;
+        }
+        uv.additionTrail = laneTrail;   // cache the single reference
+
+        // seed once
+        const startMat  = new THREE.Matrix4();
+        vec1.mesh.getMatrixAt(centreIndex,startMat);
+        const startPos  = new THREE.Vector3().setFromMatrixPosition(startMat)
+                                         .applyMatrix4(vec1.group.matrixWorld);
+        updateTrail(laneTrail,startPos);
+
+        // later – every onUpdate for the centre prism
+        if (i===centreIndex){
+            /* compute wPos */
+            updateTrail(laneTrail,wPos);
+        }
     }
 
     // helper to push position into trail
@@ -782,18 +817,26 @@ export function initLayerAnimation(container) {
                 if (originalVec.group.position.y > originalTargetY) originalVec.group.position.y = originalTargetY;
             }
 
-            // Update original trail: track center ellipse during merge, else use group position
-            if (lane.mergeStarted) { // This mergeStarted will now only be for future merge operations, not LN1
-                const centerIndex = Math.floor(VECTOR_LENGTH / 2);
-                // const centerEllipse = originalVec.ellipses[centerIndex]; // No ellipses
-                // const worldPos = new THREE.Vector3();
-                // centerEllipse.getWorldPosition(worldPos);
-                // updateTrail(lane.origTrail, worldPos);
-                // TODO: Refactor for InstancedPrism - If a specific point on the prism is needed, calculate it.
-                // For now, using group position.
-                updateTrail(lane.origTrail, originalVec.group.position);
-            } else {
-                updateTrail(lane.origTrail, originalVec.group.position);
+            // Update original trail: track center prism during merge, else use group position –
+            // BUT skip updates while the vector is "frozen" for the addition animation (the
+            // MHSAAnimation._startAdditionAnimation method sets `group.userData.stopRise`).
+
+            const ud = originalVec.group.userData || {};
+            const isTrailSuspended = ud.stopRise || (typeof ud.skipTrailResumeY === 'number' && originalVec.group.position.y <= ud.skipTrailResumeY);
+
+            if (!isTrailSuspended) {
+                if (lane.mergeStarted) { // mergeStarted only used for future merges now
+                    // During merge we would normally track the centre prism, but for InstancedPrism the
+                    // group position is close enough for the trail visual.
+                    updateTrail(lane.origTrail, originalVec.group.position);
+                } else {
+                    updateTrail(lane.origTrail, originalVec.group.position);
+                }
+
+                // Once we've resumed updates beyond the suspension threshold, clean up the flag.
+                if (typeof ud.skipTrailResumeY === 'number' && originalVec.group.position.y > ud.skipTrailResumeY) {
+                    delete ud.skipTrailResumeY;
+                }
             }
 
             // -------------------- DUPLICATE / MOVING VEC LOGIC --------------------
@@ -1066,7 +1109,7 @@ export function initLayerAnimation(container) {
                     const distance = topY - vec.group.position.y;
                     const duration = (distance / (ANIM_RISE_SPEED_INSIDE_LN * SPEED_MULT)) * 1000;
                     const matrixStartColor = mlpDarkGray.clone();
-                    const matrixEndColor = new THREE.Color(0xFFA500); // bright orange
+                    const matrixEndColor = new THREE.Color(0xb07c13); // bright orange
                     new TWEEN.Tween({ t: 0 })
                         .to({ t: 1 }, duration)
                         .easing(TWEEN.Easing.Quadratic.InOut)
@@ -1148,7 +1191,7 @@ export function initLayerAnimation(container) {
                                 .onComplete(() => {
                                     // After the pause, start the down-projection pass-through
                                     setTimeout(() => {
-                                        const orangeColor = new THREE.Color(0xFFA500);
+                                        const orangeColor = new THREE.Color(0xb07c13);
 
                                         const downBottomY = mlpMatrixDown_centerY - MLP_MATRIX_PARAMS_DOWN.height / 2;
                                         const downTopY = mlpMatrixDown_centerY + MLP_MATRIX_PARAMS_DOWN.height / 2;
