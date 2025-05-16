@@ -1328,10 +1328,17 @@ export class MHSAAnimation {
             if (lane) {
                 lane.originalVec = targetVec;   // treat combined vector as new residual
                 lane.postAdditionVec = targetVec;
-                lane.ln2Phase = 'preRise';
 
-                // Let the original vector skip trail updates until it has
-                // moved ABOVE the point reached during the addition animation.
+                // Only reset ln2Phase to 'preRise' if the lane has not yet completed
+                // its second LayerNorm/MLP cycle. This prevents re-triggering the
+                // LN2 pipeline when we perform the *second* residual addition at
+                // the end of the MLP path.
+                if (lane.ln2Phase !== 'done') {
+                    lane.ln2Phase = 'preRise';
+                }
+
+                // Ensure the original (source) vector resumes trail updates only
+                // after it has moved above the merge point.
                 if (sourceVec && sourceVec.group) {
                     const topY = targetVec.group.position.y;
                     sourceVec.group.userData.skipTrailResumeY = topY + 0.01; // small epsilon to ensure crossing

@@ -41,7 +41,8 @@ import {
     LN2_TO_MLP_GAP,
     MLP_INTER_MATRIX_GAP,
     MLP_MATRIX_PARAMS_UP,
-    MLP_MATRIX_PARAMS_DOWN
+    MLP_MATRIX_PARAMS_DOWN,
+    ORIGINAL_TO_PROCESSED_GAP
 } from '../utils/constants.js';
 import { mapValueToColor } from '../utils/colors.js';
 
@@ -1016,10 +1017,28 @@ export function initLayerAnimation(container) {
                     if (v.group.position.y < targetY) {
                         v.group.position.y = Math.min(targetY, v.group.position.y + ANIM_RISE_SPEED_POST_SPLIT * SPEED_MULT * deltaTime);
                     } else {
-                        // Keep the original branch trail visible for context.
+                        // Keep the original branch trail active so it continues
+                        // to reflect the upward motion of the residual-stream
+                        // vector while the duplicate travels through LN2/MLP.
+                        // (Previously we froze the trail at this point.)
+
                         if (lane.branchTrail) {
-                            lane.branchTrail.isFrozen = true; // custom flag checked by updateTrail
+                            lane.branchTrail.isFrozen = false;
                         }
+
+                        // ------------------------------------------------------------------
+                        //  Let residual-stream vectors keep rising in parallel with the
+                        //  LN2/MLP branch by extending the global target height.  Bringing
+                        //  them just below the Up-projection matrix creates a pleasing
+                        //  stagger before the final merge.
+                        // ------------------------------------------------------------------
+                        if (mhsaAnimation && typeof mhsaAnimation.finalOriginalY === 'number') {
+                            const newTarget = mlpMatrixUp_centerY - MLP_MATRIX_PARAMS_UP.height / 2 - ORIGINAL_TO_PROCESSED_GAP;
+                            if (newTarget > mhsaAnimation.finalOriginalY) {
+                                mhsaAnimation.finalOriginalY = newTarget;
+                            }
+                        }
+
                         // Now create the duplicate that will travel into LN2.
                         const mv = new VectorVisualizationInstancedPrism(v.rawData.slice(), v.group.position.clone());
                         scene.add(mv.group);
@@ -1262,6 +1281,12 @@ export function initLayerAnimation(container) {
                                                         updateTrail(lane.mlpUpTrail, collapseVec.group.position);
                                                     })
                                                     .onComplete(() => {
+                                                        // Update the target height for the residual-stream vectors so they
+                                                        // continue to rise in parallel with the post-MLP vectors.
+                                                        if (mhsaAnimation) {
+                                                            mhsaAnimation.finalOriginalY = collapseVec.group.position.y - ORIGINAL_TO_PROCESSED_GAP;
+                                                        }
+
                                                         // ------------------------------
                                                         //  Move left to residual stream (x=0)
                                                         // ------------------------------
@@ -1273,6 +1298,13 @@ export function initLayerAnimation(container) {
                                                             .easing(TWEEN.Easing.Quadratic.InOut)
                                                             .onUpdate(() => {
                                                                 updateTrail(lane.mlpUpTrail, collapseVec.group.position);
+                                                            })
+                                                            .onComplete(() => {
+                                                                // Perform the residual addition once the processed vector
+                                                                // has aligned with the main stream.
+                                                                if (mhsaAnimation && lane.originalVec) {
+                                                                    mhsaAnimation._startAdditionAnimation(lane.originalVec, collapseVec, lane);
+                                                                }
                                                             })
                                                             .start();
                                                     })
