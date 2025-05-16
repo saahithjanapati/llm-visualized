@@ -73,6 +73,24 @@ export function initLayerAnimation(container) {
     // Initialize the clock earlier
     const clock = new THREE.Clock(); 
 
+    // Add pause/resume support for tab visibility
+    let isPaused = false;
+    function pauseAnimation() {
+        if (isPaused) return;
+        isPaused = true;
+        clock.stop();
+    }
+    function resumeAnimation() {
+        if (!isPaused) return;
+        isPaused = false;
+        clock.start();
+    }
+    const visibilityHandler = () => {
+        if (document.hidden) pauseAnimation();
+        else resumeAnimation();
+    };
+    document.addEventListener('visibilitychange', visibilityHandler);
+
     // -------------------------------------------------------------------------
     //  Post-processing (subtle bloom for emissive flashes)
     // -------------------------------------------------------------------------
@@ -571,6 +589,9 @@ export function initLayerAnimation(container) {
 
     function animate() {
         requestAnimationFrame(animate);
+        if (isPaused) {
+            return;
+        }
         const deltaTime = clock.getDelta();
         const timeNow = performance.now();
 
@@ -1249,6 +1270,7 @@ export function initLayerAnimation(container) {
     //  Cleanup (dispose resources)
     // -------------------------------------------------------------------------
     return () => {
+        document.removeEventListener('visibilitychange', visibilityHandler);
         controls.dispose();
         lanes.forEach(l => {
             l.originalVec.dispose();

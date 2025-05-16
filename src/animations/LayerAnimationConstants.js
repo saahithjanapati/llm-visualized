@@ -138,7 +138,7 @@ export const MHSA_RESULT_RISE_OFFSET_Y = 60;
 export const MHSA_HEAD_VECTOR_STOP_BELOW = 70;
 
 // Trail line visual properties
-export const TRAIL_LINE_OPACITY = 0.05;
+export const TRAIL_LINE_OPACITY = 0.1;
 export const TRAIL_LINE_COLOR = 0xffffff; // White color for trails
 
 // -----------------------------------------------------------------------------

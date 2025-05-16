@@ -212,7 +212,7 @@ export const LN2_TO_MLP_GAP = 150;
 export const LAYER_NORM_2_Y_POS = 750; // Increased for clearer separation from MHSA block
 
 // Gap between the two stacked MLP weight matrices
-export const MLP_INTER_MATRIX_GAP = 120;
+export const MLP_INTER_MATRIX_GAP = 180;
 
 // -----------------------------------------------------------------------------
 // MLP Up-/Down-Projection Weight Matrix Geometry Parameters
@@ -226,7 +226,7 @@ export const MLP_MATRIX_PARAMS_UP = {
     height: 120,                                     // visually taller than MHSA matrices
     depth: LN_PARAMS.depth,                         // match component depth
     topWidthFactor: MLP_VECTOR_MULTIPLIER,          // widens to 4× at the top (3072)
-    cornerRadius: 1.0,
+    cornerRadius: 3.0,
     numberOfSlits: LN_PARAMS.numberOfHoles, // indicate 4× channels
     slitWidth: 5,
     slitDepthFactor: 1.0,
@@ -240,7 +240,7 @@ export const MLP_MATRIX_PARAMS_DOWN = {
     height: 120,
     depth: LN_PARAMS.depth,
     topWidthFactor: 0.25,            // narrows back to d_model
-    cornerRadius: 1.0,
+    cornerRadius: 3.0,
     numberOfSlits: LN_PARAMS.numberOfHoles,               // back to original channels
     slitWidth: 5,
     slitDepthFactor: 1.0,

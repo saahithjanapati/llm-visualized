@@ -12,10 +12,22 @@ export function createTrailLine(scene, color = TRAIL_LINE_COLOR) { // Added scen
     const material = new THREE.LineBasicMaterial({ 
         color, 
         transparent: true, 
-        opacity: TRAIL_LINE_OPACITY 
+        opacity: TRAIL_LINE_OPACITY,
+        depthTest: true,
+        depthWrite: true,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
+        linewidth: 1
     });
+    
     const line = new THREE.Line(geometry, material);
     line.frustumCulled = false;
+    line.renderOrder = 15; // Ensure trails render on top of other objects
+    
+    // Apply matrix transformations once to avoid floating point errors on update
+    line.matrixAutoUpdate = true;
+    
     geometry.computeBoundingSphere();
     scene.add(line); // Add to scene here
     return { line, geometry, positions, points: [] };
@@ -29,13 +41,24 @@ export function updateTrail(trailObj, pos) {
     const pts = trailObj.points;
     let needsToPushNewPoint = false;
 
+    // Minimum distance threshold to add a new point (helps prevent flickering from tiny movements)
+    const MIN_DISTANCE_THRESHOLD = 0.05;
+
     if (pts.length === 0) {
         needsToPushNewPoint = true;
     } else {
         const lastPt = pts[pts.length - 1];
         if (Array.isArray(lastPt) && lastPt.length === 3 &&
             typeof lastPt[0] === 'number' && typeof lastPt[1] === 'number' && typeof lastPt[2] === 'number') {
-            if (pos.x !== lastPt[0] || pos.y !== lastPt[1] || pos.z !== lastPt[2]) {
+            
+            // Calculate distance to last point
+            const dx = pos.x - lastPt[0];
+            const dy = pos.y - lastPt[1];
+            const dz = pos.z - lastPt[2];
+            const distSquared = dx*dx + dy*dy + dz*dz;
+            
+            // Only add new point if it's meaningfully different from the last point
+            if (distSquared > MIN_DISTANCE_THRESHOLD * MIN_DISTANCE_THRESHOLD) {
                 needsToPushNewPoint = true;
             }
         } else {
@@ -45,13 +68,20 @@ export function updateTrail(trailObj, pos) {
 
     if (needsToPushNewPoint) {
         if (pts.length < MAX_TRAIL_POINTS) {
-            if (pts.length < MAX_TRAIL_POINTS) { // Check again before pushing the main point
-                pts.push([pos.x, pos.y, pos.z]);
-                const idx = pts.length - 1;
-                trailObj.geometry.attributes.position.setXYZ(idx, pos.x, pos.y, pos.z);
-                trailObj.geometry.setDrawRange(0, pts.length);
-                trailObj.geometry.attributes.position.needsUpdate = true;
-                if (idx === 0 || idx % 100 === 0) trailObj.geometry.computeBoundingSphere();
+            // Store rounded coordinates to reduce floating point errors
+            const roundedX = Math.round(pos.x * 1000) / 1000;
+            const roundedY = Math.round(pos.y * 1000) / 1000;
+            const roundedZ = Math.round(pos.z * 1000) / 1000;
+            
+            pts.push([roundedX, roundedY, roundedZ]);
+            const idx = pts.length - 1;
+            trailObj.geometry.attributes.position.setXYZ(idx, roundedX, roundedY, roundedZ);
+            trailObj.geometry.setDrawRange(0, pts.length);
+            trailObj.geometry.attributes.position.needsUpdate = true;
+            
+            // Compute bounding sphere less frequently to improve performance
+            if (idx === 0 || idx % 200 === 0) {
+                trailObj.geometry.computeBoundingSphere();
             }
         }
     }

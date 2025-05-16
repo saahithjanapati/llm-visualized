@@ -778,8 +778,6 @@ export class MHSAAnimation {
     _startMergeToRowVectors() {
         if (!this._tempDecorativeVecs || this._tempDecorativeVecs.length === 0) return;
 
-        this._mergeLaneTrails = new Map(); // laneZ -> trailObj
-
         // Build map laneZ -> array of decorative vectors
         const laneVectors = new Map();
         this._tempDecorativeVecs.forEach(obj => {
@@ -788,76 +786,57 @@ export class MHSAAnimation {
             laneVectors.get(laneZ).push(obj.vec);
         });
 
-        const targetX = this.headsCentersX.length ? this.headsCentersX[0] : 0;
+        // ------------------------------------------------------------------
+        //  NEW: static reference trail per lane (from last → first head set)
+        // ------------------------------------------------------------------
+        const firstHeadCenterX = this.headsCentersX.length ? this.headsCentersX[0] : 0;
+        const lastHeadCenterX  = this.headsCentersX.length ? this.headsCentersX[this.headsCentersX.length - 1] : 0;
+
+        const targetX = firstHeadCenterX; // Existing merge target for centralised row
         let maxDurationMs = 0;
 
         laneVectors.forEach((vecList, laneZ) => {
-            // create trail per lane
-            const laneTrail = createTrailLine(this.scene, TRAIL_LINE_COLOR);
-            // Keep merge-path trails subtle so they don't overpower the scene.
-            laneTrail.line.material.opacity = TRAIL_LINE_OPACITY / (NUM_HEAD_SETS_LAYER * 2);
-            laneTrail.line.material.needsUpdate = true;
-            this._mergeLaneTrails.set(laneZ, laneTrail);
-
-            // Seed the trail with the current positions of all decorative vectors so we
-            // capture the starting points before any horizontal motion begins.
-            vecList.forEach(v => {
-                if (v && v.group) {
-                    updateTrail(laneTrail, v.group.position);
-                }
-            });
-
-            // sort vectors by original x for consistent ordering
+            // Ensure vecList ordered so we can grab a representative Y coordinate
             vecList.sort((a, b) => a.group.position.x - b.group.position.x);
+            const yPos = vecList.length ? vecList[0].group.position.y : 0;
 
+            // Create a simple two-point trail line across the lane
+            const laneTrail = createTrailLine(this.scene, TRAIL_LINE_COLOR);
+            laneTrail.line.material.opacity = TRAIL_LINE_OPACITY; // keep default opacity
+            laneTrail.line.material.needsUpdate = true;
+            updateTrail(laneTrail, new THREE.Vector3(lastHeadCenterX, yPos, laneZ));
+            updateTrail(laneTrail, new THREE.Vector3(firstHeadCenterX, yPos, laneZ));
+            // Intentionally DO NOT update this trail afterwards – it is static.
+
+            // --------------------------------------------------------------
+            //  Launch horizontal merge tweens for the decorative vectors
+            // --------------------------------------------------------------
             vecList.forEach((vec, idx) => {
                 const destX = targetX + (idx - (NUM_HEAD_SETS_LAYER - 1) / 2) * ROW_SEGMENT_SPACING;
-
                 const distance = Math.abs(vec.group.position.x - destX);
                 const durationMs = (distance / (ROW_MERGE_HORIZ_SPEED * SPEED_MULT)) * 1000;
-                if (durationMs > maxDurationMs) {
-                    maxDurationMs = durationMs;
-                }
+                if (durationMs > maxDurationMs) maxDurationMs = durationMs;
 
                 if (typeof TWEEN !== 'undefined') {
                     new TWEEN.Tween(vec.group.position)
                         .to({ x: destX }, durationMs)
                         .easing(TWEEN.Easing.Quadratic.InOut)
-                        .onUpdate(() => {
-                            const laneTrailObj = this._mergeLaneTrails.get(laneZ);
-                            if (laneTrailObj) updateTrail(laneTrailObj, vec.group.position);
-                        })
-                        .onComplete(() => {
-                            // No onComplete here; final visuals & rise handled later after projection matrix
-                        })
                         .start();
                 } else {
                     vec.group.position.x = destX;
-                    const laneTrailObj = this._mergeLaneTrails.get(laneZ);
-                    if (laneTrailObj) updateTrail(laneTrailObj, vec.group.position);
                 }
             });
         });
 
-        // After all merge tweens are initiated, schedule the head color transition,
-        // then the output projection matrix animation.
+        // After all merge tweens are initiated, schedule the next phases.
         if (typeof TWEEN !== 'undefined') {
             setTimeout(() => {
-                // First, transition the head colors. This happens after the merge visualization is complete.
-                this._transitionHeadColorsToFinal(1000); // 1 second duration for color transition
-                
-                // Then, after the color transition is visually complete, 
-                // trigger the animation of the combined vectors through the output projection matrix.
+                this._transitionHeadColorsToFinal(1000);
                 setTimeout(() => {
                     this._startVectorsThroughOutputProjection(laneVectors);
-                }, 1000); // Wait for color transition to complete (matches the duration of _transitionHeadColorsToFinal)
-                
-            }, maxDurationMs + 200); // Add a small buffer after all merge tweens are calculated to be finished.
+                }, 1000);
+            }, maxDurationMs + 200);
         } else {
-            // If TWEEN is not available, merge animations were instant (or not run if they also depend on TWEEN). 
-            // Transition colors immediately.
-            // _startVectorsThroughOutputProjection itself checks for TWEEN and will return early if it's not available,
-            // so we don't need to conditionally call it here. The color transition should still happen.
             this._transitionHeadColorsToFinal(0);
         }
     }
