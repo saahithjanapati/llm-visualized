@@ -212,7 +212,7 @@ export const LN2_TO_MLP_GAP = 150;
 export const LAYER_NORM_2_Y_POS = 750; // Increased for clearer separation from MHSA block
 
 // Gap between the two stacked MLP weight matrices
-export const MLP_INTER_MATRIX_GAP = 155;
+export const MLP_INTER_MATRIX_GAP = 150;
 
 // -----------------------------------------------------------------------------
 // MLP Up-/Down-Projection Weight Matrix Geometry Parameters
