@@ -199,7 +199,7 @@ export const MHA_OUTPUT_PROJECTION_MATRIX_PARAMS = {
     
     // Shape parameters
     topWidthFactor: 1.0,           // 1.0 = rectangular (no tapering)
-    cornerRadius: 1.2,             // Same as MHA_MATRIX_PARAMS.cornerRadius
+    cornerRadius: 20,             // Same as MHA_MATRIX_PARAMS.cornerRadius
     
     // Slit parameters
     numberOfSlits: 5,              // Same as MHA_MATRIX_PARAMS.numberOfSlits

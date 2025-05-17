@@ -85,12 +85,33 @@ export class WeightMatrixVisualization {
 
         // Desired corner radius, clamped so that arcs never overlap.
         let cr = this.cornerRadius;
-        // How far we can go horizontally on bottom edge
-        const maxBottomRadius = Math.max(0, hw - hTopW);
-        // Length of the slanted sides
-        const sideLen = Math.hypot(hw - hTopW, this.height);
-        const maxSideRadius  = sideLen / 2; // can't exceed half the edge length
-        cr = Math.min(cr, maxBottomRadius, maxSideRadius);
+        // --- Determine safe maximum radius for all four corners ---
+        // 1. Along the bottom edge we previously limited the radius by the
+        //    horizontal difference (hw − hTopW).  This works when the *top* is
+        //    *narrower* than the bottom, but collapses to 0 when the top is
+        //    wider (the up-projection case).  In that scenario we can safely
+        //    allow the radius to grow up to the half-width of the bottom
+        //    edge itself.
+        const horizontalDiff = hw - hTopW;            // positive ⇒ top narrower
+        // If the top width equals the bottom width (horizontalDiff == 0) the
+        // shape is a true rectangle and we should still allow rounded
+        // corners.  In that case fall back to the half-width of the bottom
+        // edge instead of clamping the radius to zero.
+        const maxBottomRadius = horizontalDiff > 0 ? horizontalDiff : hw;
+
+        // 2. The top edge imposes its own limit: the radius cannot exceed
+        //    half the top width, otherwise the two arcs would overlap.
+        const maxTopRadius = hTopW;
+
+        // 3. Finally, the slanted sides limit the radius – it must not exceed
+        //    half the length of the side edges, otherwise arcs would intersect
+        //    before reaching the mid-point of the edge.
+        const sideLen       = Math.hypot(hw - hTopW, this.height);
+        const maxSideRadius = sideLen / 2;
+
+        // Choose the smallest of the candidate limits so the arcs never
+        // overlap or cross any edge.
+        cr = Math.min(cr, maxBottomRadius, maxTopRadius, maxSideRadius);
 
         // If radius is effectively zero, keep original sharp trapezoid
         if (cr < 1e-4) {
@@ -182,20 +203,25 @@ export class WeightMatrixVisualization {
 
             // Calculate the actual depth of the cut based on the factor
             const cutDepth = this.height * this.slitDepthFactor;
-            // Extend the box height by the corner radius so it fully intersects
-            // the bevelled top (and any rounded bottom if depth factor == 1).
-            const slitBoxHeight = cutDepth + this.cornerRadius * 2 + 0.001;
-            // Re‑compute its vertical centre so the box still starts flush with
-            // the very top of the matrix.
+            // The slit should span exactly `cutDepth` vertically.  No extra
+            // padding is necessary because the top and bottom faces of the
+            // trapezoid remain at ±height/2 even when corners are rounded.
+            const slitBoxHeight = cutDepth + 0.001; // tiny epsilon for CSG robustness
+
+            // Align the *top* of the box with the top of the matrix so the slit
+            // always starts flush with the flat portion of the cap.
             const cutCenterY = (this.height / 2) - (slitBoxHeight / 2);
-            
-            // Make the slit subtraction box wide enough to exceed the widest point
-            // of the trapezoid, including any curvature.  We simply take the
-            // larger of the bottom width and top width, then add twice the
-            // corner radius so the box always extends beyond the outer surface.
-            const widest = Math.max(this.width, this.width * this.topWidthFactor);
-            const constantBottomWidth = (widest + this.cornerRadius * 2) * this.slitBottomWidthFactor;
-            const constantTopWidth    = (widest + this.cornerRadius * 2) * this.slitTopWidthFactor;
+
+            // Compute the actual widths of the trapezoid at the bottom and at
+            // the very top (before rounding) and scale them by the user-supplied
+            // width factors.  Using the true shape widths avoids overshooting the
+            // wall when the top is significantly wider than the bottom (or vice
+            // versa) and prevents the slit from slicing through exterior faces.
+            const shapeBottomWidth = this.width;                       // d_model side
+            const shapeTopWidth    = this.width * this.topWidthFactor; // 4·d_model side (or vice-versa)
+
+            const constantBottomWidth = shapeBottomWidth * this.slitBottomWidthFactor;
+            const constantTopWidth    = shapeTopWidth    * this.slitTopWidthFactor;
 
             for (let i = 0; i < this.numberOfSlits; i++) {
                 const zPos = -this.depth / 2 + slitSpacing * (i + 1);
