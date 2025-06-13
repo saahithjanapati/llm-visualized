@@ -24,15 +24,16 @@ export const HIDE_INSTANCE_Y_OFFSET = 10000; // Used to "hide" instanced mesh in
 // ------------------------------------------------------------
 
 export const VECTOR_LENGTH_PRISM = 768;
-export const PRISM_BASE_WIDTH = 0.1; // Width of the prism along the main vector axis
+
+// Base width/height for square prisms composing a vector or a prism row
+export const PRISM_ROW_ELEMENT_SIZE = 0.25;
+
+// Use the same dimension for vector prisms
+export const PRISM_BASE_WIDTH = PRISM_ROW_ELEMENT_SIZE; // Width of the prism along the main vector axis
 export const PRISM_BASE_DEPTH = 3; // Depth of the prism
 export const PRISM_MAX_HEIGHT = 3; // Max height for a prism when data is at its peak
 export const PRISM_HEIGHT_SCALE_FACTOR = 0.75; // Scales normalized data to prism height
 
-// Width/height of each square prism used in PrismRowVisualization
-export const PRISM_ROW_ELEMENT_SIZE = 0.25;
-
-// ------------------------------------------------------------
 // Common depth spacing (Z-axis) — edit this to change spacing for
 // vectors/components across the entire scene.
 // ------------------------------------------------------------
