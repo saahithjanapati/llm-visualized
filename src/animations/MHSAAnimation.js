@@ -21,7 +21,8 @@ import {
     VECTOR_LENGTH_PRISM,
     HIDE_INSTANCE_Y_OFFSET,
     ANIM_RISE_SPEED_ORIGINAL,
-    ANIM_RISE_SPEED_POST_SPLIT,
+    ANIM_RISE_SPEED_POST_SPLIT_LN1,
+    ANIM_RISE_SPEED_POST_SPLIT_LN2,
     ORIGINAL_TO_PROCESSED_GAP,
 } from '../utils/constants.js';
 import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
@@ -35,6 +36,10 @@ export class MHSAAnimation {
         this.branchX = branchX;
         this.mhsaBaseY = mhsaBaseY;
         this.clock = clock;
+
+        // Speed at which residual-stream vectors rise while branched
+        // during MHSA/MLP processing. Starts with the LN1 value.
+        this.postSplitRiseSpeed = ANIM_RISE_SPEED_POST_SPLIT_LN1;
 
         this.mhaVisualizations = [];
         this.headsCentersX = [];
@@ -593,7 +598,7 @@ export class MHSAAnimation {
         //  CONTINUOUSLY MOVE ORIGINAL RESIDUAL-STREAM VECTORS UPWARDS
         // ------------------------------------------------------------------
         if (this.finalOriginalY !== undefined) {
-            const riseStep = ANIM_RISE_SPEED_POST_SPLIT * SPEED_MULT * deltaTime;
+            const riseStep = this.postSplitRiseSpeed * SPEED_MULT * deltaTime;
             lanes.forEach(lane => {
                 if (!lane || !lane.originalVec || !lane.originalVec.group) return;
 

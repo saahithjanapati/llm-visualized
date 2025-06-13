@@ -29,7 +29,8 @@ import {
     ANIM_RISE_SPEED_ORIGINAL,
     ANIM_HORIZ_SPEED,
     ANIM_RISE_SPEED_INSIDE_LN,
-    ANIM_RISE_SPEED_POST_SPLIT,
+    ANIM_RISE_SPEED_POST_SPLIT_LN1,
+    ANIM_RISE_SPEED_POST_SPLIT_LN2,
     MAX_TRAIL_POINTS,
     ANIM_RISE_SPEED_HEAD,
     HEAD_VECTOR_STOP_BELOW,
@@ -848,7 +849,7 @@ export function initLayerAnimation(container) {
                     if (!v) break;
                     const targetY = bottomY_ln2_abs - 10; // stop a little below LN2
                     if (v.group.position.y < targetY) {
-                        v.group.position.y = Math.min(targetY, v.group.position.y + ANIM_RISE_SPEED_POST_SPLIT * SPEED_MULT * deltaTime);
+                        v.group.position.y = Math.min(targetY, v.group.position.y + ANIM_RISE_SPEED_POST_SPLIT_LN2 * SPEED_MULT * deltaTime);
                     } else {
                         // Keep the original branch trail active so it continues
                         // to reflect the upward motion of the residual-stream
@@ -870,6 +871,7 @@ export function initLayerAnimation(container) {
                             if (newTarget > mhsaAnimation.finalOriginalY) {
                                 mhsaAnimation.finalOriginalY = newTarget;
                             }
+                            mhsaAnimation.postSplitRiseSpeed = ANIM_RISE_SPEED_POST_SPLIT_LN2;
                         }
 
                         // Now create the duplicate that will travel into LN2.

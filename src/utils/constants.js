@@ -158,10 +158,16 @@ export const ANIM_MEET_Y_OFFSET_ABOVE_LN1 = 5;
 export const ANIM_RISE_SPEED_ORIGINAL = 3;
 
 /**
- * Speed at which original residual-stream vectors continue rising after
- * splitting into the MHSA block.  Adjust independently from ANIM_RISE_SPEED_ORIGINAL.
+ * Speed at which residual-stream vectors rise after branching at the first
+ * LayerNorm (during the MHSA computation).
  */
-export const ANIM_RISE_SPEED_POST_SPLIT = 0.44;
+export const ANIM_RISE_SPEED_POST_SPLIT_LN1 = 0.5;
+
+/**
+ * Speed at which residual-stream vectors rise after branching at the second
+ * LayerNorm (during the MLP computation).
+ */
+export const ANIM_RISE_SPEED_POST_SPLIT_LN2 = 0.6;
 
 /** Horizontal speed for vectors moving towards/away from branched components. */
 export const ANIM_HORIZ_SPEED = 25;
