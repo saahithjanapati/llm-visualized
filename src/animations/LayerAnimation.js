@@ -471,6 +471,7 @@ export function initLayerAnimation(container) {
         const brightYellow = new THREE.Color(0xFFFF00); // For final opaque state
         const opaqueOpacity = 1.0;
         const semiTransparentOpacity = 0.6;
+        const transparentOpacity = 0.1; // used while vectors travel inside LN
         const exitTransitionRange = 10; // Y-distance over which the exit transition occurs
 
         const firstMovingVecY = lanes.length > 0 ? lanes[0].movingVec.group.position.y : startY;
@@ -488,19 +489,19 @@ export function initLayerAnimation(container) {
         let lerpFactor = 0;
 
         if (firstMovingVecY >= bottomY_ln1_abs && firstMovingVecY < midY_ln1_abs) {
-            // Entering (Bottom Half): Lerp from Dark Gray to Light Yellow / Semi-Transparent
+            // Entering (Bottom Half): Lerp from Dark Gray to Light Yellow and fade to transparent
             lerpFactor = (firstMovingVecY - bottomY_ln1_abs) / (midY_ln1_abs - bottomY_ln1_abs);
             targetColor = darkGray.clone().lerp(lightYellow, lerpFactor);
-            targetOpacity = opaqueOpacity + (semiTransparentOpacity - opaqueOpacity) * lerpFactor;
+            targetOpacity = opaqueOpacity + (transparentOpacity - opaqueOpacity) * lerpFactor;
         } else if (firstMovingVecY >= midY_ln1_abs && firstMovingVecY < topY_ln1_abs) {
-            // Inside (Top Half): Stay at Light Yellow / Semi-Transparent
+            // Inside (Top Half): Keep light yellow but fully transparent
             targetColor = lightYellow;
-            targetOpacity = semiTransparentOpacity;
+            targetOpacity = transparentOpacity;
         } else if (firstMovingVecY >= topY_ln1_abs) {
-            // Exiting: Lerp from Light Yellow / Semi-Transparent to Bright Yellow / Opaque
+            // Exiting: Lerp from transparent light yellow to bright yellow and opaque
             lerpFactor = Math.min(1, (firstMovingVecY - topY_ln1_abs) / exitTransitionRange);
             targetColor = lightYellow.clone().lerp(brightYellow, lerpFactor);
-            targetOpacity = semiTransparentOpacity + (opaqueOpacity - semiTransparentOpacity) * lerpFactor;
+            targetOpacity = transparentOpacity + (opaqueOpacity - transparentOpacity) * lerpFactor;
             // Ensure opacity reaches exactly 1.0 when lerpFactor is 1
             if (lerpFactor >= 1.0) {
                 targetOpacity = opaqueOpacity; // Force full opaqueness
@@ -549,29 +550,29 @@ export function initLayerAnimation(container) {
         });
         
         // Apply color transitions to LN2 based on the highest vector's position
-        if (anyVectorInOrNearLN2 && highestMovingVecLN2_Y > -Infinity) {
-            if (highestMovingVecLN2_Y >= bottomY_ln2_abs && highestMovingVecLN2_Y < midY_ln2_abs) {
-                // Vector entering bottom half of LN2
-                ln2LerpFactor = (highestMovingVecLN2_Y - bottomY_ln2_abs) / (midY_ln2_abs - bottomY_ln2_abs);
-                // Clamp lerpFactor to [0, 1] to avoid issues if vecY is slightly outside bounds due to timing
-                ln2LerpFactor = Math.max(0, Math.min(1, ln2LerpFactor));
-                ln2TargetColor = darkGray.clone().lerp(lightYellow, ln2LerpFactor);
-                ln2TargetOpacity = opaqueOpacity + (semiTransparentOpacity - opaqueOpacity) * ln2LerpFactor;
-            } else if (highestMovingVecLN2_Y >= midY_ln2_abs && highestMovingVecLN2_Y < topY_ln2_abs) {
-                // Vector inside top half of LN2
-                ln2TargetColor = lightYellow.clone();
-                ln2TargetOpacity = semiTransparentOpacity;
-            } else if (highestMovingVecLN2_Y >= topY_ln2_abs) {
-                // Vector exiting LN2
-                ln2LerpFactor = (highestMovingVecLN2_Y - topY_ln2_abs) / exitTransitionRange;
-                // Clamp lerpFactor to [0, 1]
-                ln2LerpFactor = Math.max(0, Math.min(1, ln2LerpFactor));
-                ln2TargetColor = lightYellow.clone().lerp(brightYellow, ln2LerpFactor);
-                ln2TargetOpacity = semiTransparentOpacity + (opaqueOpacity - semiTransparentOpacity) * ln2LerpFactor;
-                if (ln2LerpFactor >= 1.0) {
-                    ln2TargetOpacity = opaqueOpacity;
+            if (anyVectorInOrNearLN2 && highestMovingVecLN2_Y > -Infinity) {
+                if (highestMovingVecLN2_Y >= bottomY_ln2_abs && highestMovingVecLN2_Y < midY_ln2_abs) {
+                    // Vector entering bottom half of LN2
+                    ln2LerpFactor = (highestMovingVecLN2_Y - bottomY_ln2_abs) / (midY_ln2_abs - bottomY_ln2_abs);
+                    // Clamp lerpFactor to [0, 1] to avoid issues if vecY is slightly outside bounds due to timing
+                    ln2LerpFactor = Math.max(0, Math.min(1, ln2LerpFactor));
+                    ln2TargetColor = darkGray.clone().lerp(lightYellow, ln2LerpFactor);
+                    ln2TargetOpacity = opaqueOpacity + (transparentOpacity - opaqueOpacity) * ln2LerpFactor;
+                } else if (highestMovingVecLN2_Y >= midY_ln2_abs && highestMovingVecLN2_Y < topY_ln2_abs) {
+                    // Vector inside top half of LN2
+                    ln2TargetColor = lightYellow.clone();
+                    ln2TargetOpacity = transparentOpacity;
+                } else if (highestMovingVecLN2_Y >= topY_ln2_abs) {
+                    // Vector exiting LN2
+                    ln2LerpFactor = (highestMovingVecLN2_Y - topY_ln2_abs) / exitTransitionRange;
+                    // Clamp lerpFactor to [0, 1]
+                    ln2LerpFactor = Math.max(0, Math.min(1, ln2LerpFactor));
+                    ln2TargetColor = lightYellow.clone().lerp(brightYellow, ln2LerpFactor);
+                    ln2TargetOpacity = transparentOpacity + (opaqueOpacity - transparentOpacity) * ln2LerpFactor;
+                    if (ln2LerpFactor >= 1.0) {
+                        ln2TargetOpacity = opaqueOpacity;
+                    }
                 }
-            }
             // If highestMovingVecLN2_Y is below bottomY_ln2_abs but still considered "near"
             // it will default to darkGray unless caught by the conditions above, which is fine.
         }
