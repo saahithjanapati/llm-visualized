@@ -507,6 +507,16 @@ export function initLayerAnimation(container) {
             }
         } // Else (below) remains darkGray and opaque
 
+        // Once the first lane's vector has left LN1 horizontally, force the
+        // colour to the final bright state so it matches LN2.
+        const firstLane = lanes[0];
+        const pastLN1 = firstLane && firstLane.horizPhase && firstLane.horizPhase !== 'waiting' && firstLane.horizPhase !== 'insideLN';
+        if (pastLN1) {
+            targetColor.copy(brightYellow);
+            targetOpacity = opaqueOpacity;
+            lerpFactor = 1;
+        }
+
         // Update appearance of the FIRST LayerNorm only.  The second will
         // remain grey until its own vectors reach it later in the pipeline.
         layerNorm1.group.children.forEach(child => {
