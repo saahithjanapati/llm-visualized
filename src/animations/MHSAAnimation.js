@@ -558,6 +558,11 @@ export class MHSAAnimation {
                             
                             const qTrail = createTrailLine(this.scene, TRAIL_LINE_COLOR);
                             const vTrail = createTrailLine(this.scene, TRAIL_LINE_COLOR);
+                            // Seed the side-copy trails with the current position so they
+                            // start exactly at the split point, ensuring continuity with the
+                            // upward trail and avoiding a visual gap when the vector branches.
+                            updateTrail(qTrail, qVec.group.position);
+                            updateTrail(vTrail, vVec.group.position);
                             // Keep side copy trails visible
                             lane.sideTrails.push(qTrail);
                             lane.sideTrails.push(vTrail);

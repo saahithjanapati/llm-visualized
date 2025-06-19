@@ -867,7 +867,12 @@ export function initLayerAnimation(container) {
                         //  stagger before the final merge.
                         // ------------------------------------------------------------------
                         if (mhsaAnimation && typeof mhsaAnimation.finalOriginalY === 'number') {
-                            const newTarget = mlpMatrixUp_centerY - MLP_MATRIX_PARAMS_UP.height / 2 - ORIGINAL_TO_PROCESSED_GAP;
+                            // Extend the residual-stream target to just below the *top* of the
+                            // MLP Up-projection matrix (instead of its bottom).  This lets the
+                            // original vectors keep rising in parallel with the processed vector
+                            // while it travels through the matrix, eliminating the mid-animation
+                            // pause the user observed.
+                            const newTarget = mlpMatrixUp_centerY + MLP_MATRIX_PARAMS_UP.height / 2 - ORIGINAL_TO_PROCESSED_GAP;
                             if (newTarget > mhsaAnimation.finalOriginalY) {
                                 mhsaAnimation.finalOriginalY = newTarget;
                             }

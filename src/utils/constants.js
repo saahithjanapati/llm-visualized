@@ -1,4 +1,3 @@
-
 // ------------------------------------------------------------
 // Global animation speed multiplier (1 = normal speed). Increase to speed up everything.
 // ------------------------------------------------------------
@@ -25,8 +24,8 @@ export const HIDE_INSTANCE_Y_OFFSET = 10000; // Used to "hide" instanced mesh in
 
 export const VECTOR_LENGTH_PRISM = 768;
 export const PRISM_BASE_WIDTH = 0.1; // Width of the prism along the main vector axis
-export const PRISM_BASE_DEPTH = 3; // Depth of the prism
-export const PRISM_MAX_HEIGHT = 3; // Max height for a prism when data is at its peak
+export const PRISM_BASE_DEPTH = 5; // Depth of the prism
+export const PRISM_MAX_HEIGHT = 5; // Max height for a prism when data is at its peak
 export const PRISM_HEIGHT_SCALE_FACTOR = 0.75; // Scales normalized data to prism height
 
 // ------------------------------------------------------------
@@ -54,7 +53,7 @@ export const PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS = 15; // ms, delay between
 export const PRISM_ADD_ANIM_BASE_Y_OFFSET_FACTOR = 1.1; // How much higher source moves relative to target base
 /** Multiplier for the prism addition animation speed.  
  * 1 = base speed; 2 = twice as fast (half the duration); 0.5 = half as fast (double duration). */
-export const PRISM_ADD_ANIM_SPEED_MULT = 2;
+export const PRISM_ADD_ANIM_SPEED_MULT = 4;
 
 // ------------------------------------------------------------
 // Constants from LayerAnimationConstants.js
@@ -165,9 +164,10 @@ export const ANIM_RISE_SPEED_POST_SPLIT_LN1 = 0.5;
 
 /**
  * Speed at which residual-stream vectors rise after branching at the second
- * LayerNorm (during the MLP computation).
+ * LayerNorm (during the MLP computation).  Increased to quicken the upward
+ * motion during the MLP stage.
  */
-export const ANIM_RISE_SPEED_POST_SPLIT_LN2 = 0.6;
+export const ANIM_RISE_SPEED_POST_SPLIT_LN2 = 1.5;
 
 /** Horizontal speed for vectors moving towards/away from branched components. */
 export const ANIM_HORIZ_SPEED = 25;
@@ -189,7 +189,7 @@ export const ANIM_RISE_SPEED_HEAD = 0.44;
 export const HEAD_VECTOR_STOP_BELOW = 35;
 
 /** Delay (ms) between centre copy arriving and side copies spawning. */
-export const SIDE_COPY_DELAY_MS = 500;
+export const SIDE_COPY_DELAY_MS = 0;
 
 
 /** Horizontal speed for decorative vectors merging into row output. */

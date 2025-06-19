@@ -14,11 +14,12 @@ export class PrismLayerNormAnimation {
         
         // Faster / Higher Animation Config Defaults
         this.config = {
-            unitDelay: 5,       // Faster activation
-            unitDuration: 600,   // Shorter unit cycle
-            maxRiseHeight: 5.0,  // Higher rise offset
+            // Tweaked defaults for a snappier, higher bounce on both LayerNorm blocks
+            unitDelay: 3,        // Slightly faster stagger between units
+            unitDuration: 200,   // Quicker up-and-down cycle
+            maxRiseHeight: 12,  // Higher peak height for the centre unit
             falloffPower: 1.4,   
-            minRiseHeight: 0.9, // Slightly higher min rise
+            minRiseHeight: 2,  // Higher minimum rise near the ends
             ...config
         };
 
