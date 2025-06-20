@@ -24,6 +24,7 @@ import {
     VECTOR_LENGTH_PRISM,
     GLOBAL_ANIM_SPEED_MULT,
     ANIM_RISE_SPEED_INSIDE_LN,
+    ANIM_RISE_SPEED_POST_SPLIT_LN1,
     ANIM_RISE_SPEED_POST_SPLIT_LN2,
     ORIGINAL_TO_PROCESSED_GAP,
     ANIM_HORIZ_SPEED,
@@ -57,17 +58,27 @@ export default class Gpt2Layer extends BaseLayer {
     /**
      * @param {number} index – 0-based index of this layer in the transformer.
      * @param {object} random – object returned by createRandomSource().
+     * @param {number} yOffset – Optional y-offset for this layer.
+     * @param {Layer} waitForLayer – Optional layer to wait for before starting.
+     * @param {Array} externalLanes – Optional array of lanes to re-use.
+     * @param {Function} onFinished – Optional callback to invoke when all lanes finish.
      */
-    constructor(index, random) {
+    constructor(index, random, yOffset = 0, externalLanes = null, onFinished = null, isActive = true) {
         super(index);
         this.random = random;
+        this.yOffset = yOffset;
+        this.externalLanes = externalLanes;
+        this.onFinished = typeof onFinished === 'function' ? onFinished : null;
+        this.isActive = isActive;
+        this._completed = false;
+        this._pendingAdditions = 0; // Track ongoing addition animations
     }
 
     init(scene) {
         super.init(scene);
 
         // Offset root vertically for stack layout
-        this.root.position.y = this.index * VERTICAL_SPACING;
+        this.root.position.y = this.index * VERTICAL_SPACING + this.yOffset;
 
         const offsetX = BRANCH_X; // all branched components share this X
 
@@ -144,10 +155,11 @@ export default class Gpt2Layer extends BaseLayer {
         //  12-head attention block and subsequent merging logic.
         // ────────────────────────────────────────────────────────────────
 
-        const mhaBaseY = ln1TopY + LN_TO_MHA_GAP; // align with original animation maths
+        const mhaBaseY_local = ln1TopY + LN_TO_MHA_GAP;
+        const mhaBaseY = mhaBaseY_local;
         // Create an internal clock for sub-animations handled by the MHSA helper
         this._mhsaClock = new THREE.Clock();
-        this.mhsaAnimation = new MHSAAnimation(scene, BRANCH_X, mhaBaseY, this._mhsaClock, 'temp');
+        this.mhsaAnimation = new MHSAAnimation(this.root, BRANCH_X, mhaBaseY, this._mhsaClock, 'temp');
 
         // ────────────────────────────────────────────────────────────────
         // 2.5) Output-projection matrix (after MHSA concatenation)
@@ -251,72 +263,12 @@ export default class Gpt2Layer extends BaseLayer {
 
         // ---------- Residual vectors (original stream) ----------
         this.lanes = [];
-        const slitSpacing = LN_PARAMS.depth / (NUM_VECTOR_LANES + 1);
-        const startY = LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2 - ANIM_OFFSET_Y_ORIGINAL_SPAWN;
-        const meetY = ln1TopY + 5; // meet just above LN1 as in original
-
-        for (let laneIdx = 0; laneIdx < NUM_VECTOR_LANES; laneIdx++) {
-            const zPos = -LN_PARAMS.depth / 2 + slitSpacing * (laneIdx + 1);
-            const data = this.random.nextVector(VECTOR_LENGTH_PRISM);
-            // original vector (residual)
-            const originalVec = new VectorVisualizationInstancedPrism(data, new THREE.Vector3(0, startY, zPos));
-            this.root.add(originalVec.group);
-            const origTrail = createTrailLine(this.root, 0xffffff);
-            updateTrail(origTrail, originalVec.group.position);
-
-            // duplicate moving vector (hidden until branch)
-            const dupVec = new VectorVisualizationInstancedPrism(data.slice(), new THREE.Vector3(0, startY, zPos));
-            dupVec.group.visible = false;
-            this.root.add(dupVec.group);
-            const dupTrail = createTrailLine(this.root, 0xffffff);
-            const normAnim = new PrismLayerNormAnimation(dupVec);
-
-            // after imports add
-            const multTarget = new VectorVisualizationInstancedPrism(data.slice(), new THREE.Vector3(offsetX, ln1CenterY + 3.3, zPos));
-            this.root.add(multTarget.group);
-
-            // multiplication target inside LayerNorm2
-            const multTargetLN2 = new VectorVisualizationInstancedPrism(data.slice(), new THREE.Vector3(offsetX, ln2CenterY + 3.3, zPos));
-            this.root.add(multTargetLN2.group);
-
-            this.lanes.push({
-                originalVec,
-                dupVec,
-                multTarget,
-                multTargetLN2,
-                origTrail,
-                dupTrail,
-                normAnim,
-                horizPhase: 'waiting',
-                branchStartY: startY + 5,
-                ln1MidY: ln1CenterY,
-                normStarted:false,
-                multStarted:false,
-                resultVec:null,
-                targetY: meetY,
-                // MHSA-related state (initialised for helper class)
-                travellingVec: null,
-                upwardCopies: [],
-                sideCopies: [],
-                upwardTrails: [],
-                sideTrails: [],
-                headIndex: 0,
-                finalAscend: false,
-                // LN2/MLP pipeline state
-                ln2Phase: 'notStarted',
-                postAdditionVec: null,
-                movingVecLN2: null,
-                normAnimationLN2: null,
-                normStartedLN2: false,
-                multDoneLN2: false,
-                resultVecLN2: null,
-                mlpUpStarted: false,
-                mlpUpTrail: null,
-                expandedVecGroup: null,
-                expandedVecSegments: null,
-                finalVecAfterMlp: null,
-                zPos: zPos
-            });
+        if (this.isActive) {
+            if (this.externalLanes && this.externalLanes.length) {
+                this._createLanesFromExternal(this.externalLanes, offsetX, ln1CenterY, ln2CenterY, ln1TopY);
+            } else {
+                this._createFreshLanes(offsetX, ln1CenterY, ln2CenterY, ln1TopY);
+            }
         }
 
         // Keep references for per-frame updates
@@ -327,6 +279,32 @@ export default class Gpt2Layer extends BaseLayer {
     }
 
     update(dt) {
+        // Handle transition phase - wait for vectors to reach position
+        if (this._transitionPhase === 'positioning') {
+            const allVectorsInPosition = this.lanes.every(lane => {
+                const targetY = lane.branchStartY;
+                return lane.originalVec.group.position.y >= targetY - 5; // small tolerance
+            });
+            
+            if (allVectorsInPosition) {
+                this._transitionPhase = 'complete';
+                this.isActive = true; // now start the actual animation
+                console.log(`Layer ${this.index}: All vectors in position, starting animation`);
+            } else {
+                // Keep vectors rising toward the target
+                this.lanes.forEach(lane => {
+                    const targetY = lane.branchStartY;
+                    if (lane.originalVec.group.position.y < targetY) {
+                        lane.originalVec.group.position.y = Math.min(targetY, 
+                            lane.originalVec.group.position.y + ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT * dt);
+                        updateTrail(lane.origTrail, lane.originalVec.group.position);
+                    }
+                });
+                return; // keep waiting
+            }
+        }
+        
+        if (!this.isActive) return; // Skip processing when inactive / placeholder
         // ────────────────────────────────────────────────────────────
         // Dynamic colour / opacity transition for the FIRST LayerNorm
         // ────────────────────────────────────────────────────────────
@@ -440,22 +418,17 @@ export default class Gpt2Layer extends BaseLayer {
             }
         }
 
+        // ────────────────────────────────────────────────────────────
         const speedMult = GLOBAL_ANIM_SPEED_MULT;
         this.lanes.forEach(lane => {
             const { originalVec, dupVec } = lane;
-            // rise original - target will be dynamically updated by MHSAAnimation
-            const currentTargetY = this.mhsaAnimation && this.mhsaAnimation.finalOriginalY !== undefined 
-                ? this.mhsaAnimation.finalOriginalY 
-                : lane.targetY;
             
-            // Only handle rising if MHSA hasn't started handling it
-            if (!lane.travellingVec) {
-                if (originalVec.group.position.y < currentTargetY) {
-                    originalVec.group.position.y = Math.min(currentTargetY, originalVec.group.position.y + ANIM_RISE_SPEED_ORIGINAL * speedMult * dt);
-                    updateTrail(lane.origTrail, originalVec.group.position);
-                }
-            }
-            // Once MHSA starts, it will handle the original vector movement
+            // The Gpt2Layer's direct update logic is now ONLY responsible for
+            // handling the initial branching toward the first LayerNorm.
+            // ALL subsequent movement, including the continuous rise of the
+            // original residual-stream vector, is now managed by the
+            // dedicated MHSAAnimation controller. This prevents conflicting
+            // updates.
 
             // branch logic
             switch (lane.horizPhase) {
@@ -547,30 +520,30 @@ export default class Gpt2Layer extends BaseLayer {
                     const targetY = bottomY_ln2_abs - 10; // stop below LN2
                     if (v.group.position.y < targetY) {
                         v.group.position.y = Math.min(targetY, v.group.position.y + ANIM_RISE_SPEED_POST_SPLIT_LN2 * speedMult * dt);
-                        updateTrail(lane.origTrail, v.group.position);
                     } else {
-                        // Update residual stream to keep rising continuously at the same speed
-                        // This matches the behavior in LayerAnimation.js
+                        // ────────────────────────────────────────────────
+                        //  Reached staging height – begin LN-2 branch
+                        // ────────────────────────────────────────────────
+
+                        // Allow residual stream to keep rising while the
+                        // duplicate goes through LN-2/MLP.
                         if (this.mhsaAnimation && typeof this.mhsaAnimation.finalOriginalY === 'number') {
-                            // Extend the residual-stream target to just below the top of the
-                            // MLP Up-projection matrix so original vectors keep rising in parallel
                             const newTarget = this.mlpUp.group.position.y + MLP_MATRIX_PARAMS_UP.height / 2 - ORIGINAL_TO_PROCESSED_GAP;
                             if (newTarget > this.mhsaAnimation.finalOriginalY) {
                                 this.mhsaAnimation.finalOriginalY = newTarget;
                             }
                             this.mhsaAnimation.postSplitRiseSpeed = ANIM_RISE_SPEED_POST_SPLIT_LN2;
                         }
-                        
-                        // Create duplicate for LN2 processing
+
+                        // Spawn duplicate vector that will travel into LN-2
                         const mv = new VectorVisualizationInstancedPrism(v.rawData.slice(), v.group.position.clone());
                         this.root.add(mv.group);
                         lane.movingVecLN2 = mv;
                         lane.normAnimationLN2 = new PrismLayerNormAnimation(mv);
-                        
-                        // Create new trail for LN2 branch
+
                         lane.branchTrailLN2 = createTrailLine(this.root, 0xffffff);
                         updateTrail(lane.branchTrailLN2, mv.group.position);
-                        
+
                         lane.ln2Phase = 'right';
                     }
                     break;
@@ -679,6 +652,15 @@ export default class Gpt2Layer extends BaseLayer {
         // Update the MHSA controller so vectors travel to attention heads
         if (this.mhsaAnimation) {
             this.mhsaAnimation.update(dt, performance.now(), this.lanes);
+        }
+
+        // ----------------------------------------------------------
+        // Notify LayerPipeline once **all** lanes have finished AND all additions complete
+        // ----------------------------------------------------------
+        if (this.isActive && !this._completed && this.lanes.length && 
+            this.lanes.every(l => l.ln2Phase === 'done') && this._pendingAdditions === 0) {
+            this._completed = true;
+            if (this.onFinished) this.onFinished();
         }
     }
 
@@ -954,11 +936,144 @@ export default class Gpt2Layer extends BaseLayer {
             .onComplete(() => {
                 // Perform final addition with original vector
                 if (this.mhsaAnimation && lane.originalVec) {
+                    // Track this addition animation
+                    this._pendingAdditions++;
+                    
                     // This will trigger the final addition animation
                     this.mhsaAnimation._startAdditionAnimation(lane.originalVec, vec, lane);
+                    
+                    // Set up completion callback for when addition finishes
+                    this._scheduleAdditionCompletion(lane);
                 }
                 lane.ln2Phase = 'done';
             })
             .start();
+    }
+
+    // ------------------------------------------------------------
+    // Public helpers
+    // ------------------------------------------------------------
+
+    /** Inject external lanes from the previous layer and activate animation */
+    activateWithLanes(externalLanes) {
+        if (this.isActive) return; // already active
+        
+        // Set up lanes but don't start animation yet - wait for positioning
+        this.isActive = false; // keep inactive during transition
+        this._transitionPhase = 'positioning';
+        this._createLanesFromExternal(externalLanes, BRANCH_X, LAYER_NORM_1_Y_POS, LAYER_NORM_2_Y_POS, LAYER_NORM_1_Y_POS + LN_PARAMS.height/2);
+
+        // MHSAAnimation's constructor already sets the correct initial rise speed.
+        // No override is needed here.
+    }
+
+    /** Replace/assign onFinished callback after construction */
+    setOnFinished(cb) { this.onFinished = typeof cb === 'function' ? cb : null; }
+
+    // ------------------------------------------------------------
+    // Internal lane creation helpers (extracted from init)
+    // ------------------------------------------------------------
+
+    _createFreshLanes(offsetX, ln1CenterY, ln2CenterY, ln1TopY) {
+        const slitSpacing = LN_PARAMS.depth / (NUM_VECTOR_LANES + 1);
+        const startY = LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2 - ANIM_OFFSET_Y_ORIGINAL_SPAWN;
+        const meetY  = ln1TopY + 5;
+        for (let laneIdx = 0; laneIdx < NUM_VECTOR_LANES; laneIdx++) {
+            this._buildSingleLane(null, offsetX, ln1CenterY, ln2CenterY, startY, meetY, laneIdx, slitSpacing);
+        }
+    }
+
+    _createLanesFromExternal(externalLanes, offsetX, ln1CenterY, ln2CenterY, ln1TopY) {
+        const meetY = ln1TopY + 5; // where original vectors pause just above LN1
+
+        // DON'T reset position - let vectors continue from where they are after layer 1
+        externalLanes.forEach((oldLane, laneIdx) => {
+            this._buildSingleLane(oldLane, offsetX, ln1CenterY, ln2CenterY, null, meetY, laneIdx, null);
+        });
+    }
+
+    _buildSingleLane(oldLane, offsetX, ln1CenterY, ln2CenterY, startY_override, meetY, laneIdx, slitSpacing) {
+        let originalVec, zPos, startY;
+        if (oldLane && oldLane.originalVec) {
+            originalVec = oldLane.originalVec;
+            this.root.attach(originalVec.group);
+            zPos   = originalVec.group.position.z;
+            startY = originalVec.group.position.y; // Keep current position
+        } else {
+            zPos = -LN_PARAMS.depth / 2 + slitSpacing * (laneIdx + 1);
+            const data = this.random.nextVector(VECTOR_LENGTH_PRISM);
+            startY = startY_override;
+            originalVec = new VectorVisualizationInstancedPrism(data, new THREE.Vector3(0, startY, zPos));
+            this.root.add(originalVec.group);
+        }
+
+        const origTrail = createTrailLine(this.root, 0xffffff);
+        updateTrail(origTrail, originalVec.group.position);
+
+        const dupVec = new VectorVisualizationInstancedPrism(originalVec.rawData.slice(), originalVec.group.position.clone());
+        dupVec.group.visible = false;
+        this.root.add(dupVec.group);
+        const dupTrail = createTrailLine(this.root, 0xffffff);
+        const normAnim = new PrismLayerNormAnimation(dupVec);
+
+        const multTarget = new VectorVisualizationInstancedPrism(originalVec.rawData.slice(), new THREE.Vector3(offsetX, ln1CenterY + 3.3, zPos));
+        this.root.add(multTarget.group);
+
+        const multTargetLN2 = new VectorVisualizationInstancedPrism(originalVec.rawData.slice(), new THREE.Vector3(offsetX, ln2CenterY + 3.3, zPos));
+        this.root.add(multTargetLN2.group);
+
+        this.lanes.push({
+            originalVec,
+            dupVec,
+            multTarget,
+            multTargetLN2,
+            origTrail,
+            dupTrail,
+            normAnim,
+            horizPhase: 'waiting',
+            branchStartY: ln1CenterY - LN_PARAMS.height / 2 + 5,
+            ln1MidY: ln1CenterY,
+            normStarted:false,
+            multStarted:false,
+            resultVec:null,
+            targetY: meetY,
+            travellingVec: null,
+            upwardCopies: [],
+            sideCopies: [],
+            upwardTrails: [],
+            sideTrails: [],
+            headIndex: 0,
+            finalAscend: false,
+            ln2Phase: 'notStarted',
+            postAdditionVec: null,
+            movingVecLN2: null,
+            normAnimationLN2: null,
+            normStartedLN2: false,
+            multDoneLN2: false,
+            resultVecLN2: null,
+            mlpUpStarted: false,
+            mlpUpTrail: null,
+            expandedVecGroup: null,
+            expandedVecSegments: null,
+            finalVecAfterMlp: null,
+            zPos
+        });
+    }
+
+    /**
+     * Schedule callback for when addition animation completes
+     */
+    _scheduleAdditionCompletion(lane) {
+        // Calculate total animation time from additionUtils.js
+        const duration = 800; // PRISM_ADD_ANIM_BASE_DURATION / PRISM_ADD_ANIM_SPEED_MULT
+        const flashDuration = 200; // PRISM_ADD_ANIM_BASE_FLASH_DURATION / PRISM_ADD_ANIM_SPEED_MULT  
+        const delayBetween = 50; // PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS / PRISM_ADD_ANIM_SPEED_MULT
+        const vectorLength = 64; // VECTOR_LENGTH_PRISM
+        const totalAnimTime = duration + flashDuration + vectorLength * delayBetween;
+        
+        setTimeout(() => {
+            this._pendingAdditions--;
+            lane.additionComplete = true;
+        }, totalAnimTime + 100);
     }
 } 

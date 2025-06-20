@@ -22,13 +22,13 @@ import {
  * Animate element-wise addition of two instanced-prism vectors, visually moving
  * each prism from `sourceVec` into `targetVec` while updating colours & data.
  *
- * @param {THREE.Scene} scene         – the active Three.js scene (for trail lines)
+ * @param {THREE.Group} parentGroup   – the parent Three.js group (for trail lines)
  * @param {VectorVisualizationInstancedPrism} sourceVec – travelling vector
  * @param {VectorVisualizationInstancedPrism} targetVec – stationary vector that will hold the sum
  * @param {Object} [lane]             – optional lane object; if provided the helper
  *                                      will update lane.origTrail & lane fields
  */
-export function startPrismAdditionAnimation(scene, sourceVec, targetVec, lane) {
+export function startPrismAdditionAnimation(parentGroup, sourceVec, targetVec, lane) {
     if (!sourceVec || !targetVec || !sourceVec.mesh || !targetVec.mesh) return;
     if (typeof TWEEN === 'undefined') {
         console.warn('TWEEN not available – addition animation skipped');
@@ -36,10 +36,15 @@ export function startPrismAdditionAnimation(scene, sourceVec, targetVec, lane) {
     }
 
     // Freeze upward movement of the source so its group position remains static.
-    sourceVec.group.userData = sourceVec.group.userData || {};
-    const svUD = sourceVec.group.userData;
-    svUD.stopRise = true;
-    svUD.stopRiseTarget = targetVec.group;
+    if (lane) {
+        lane.stopRise = true;
+        lane.stopRiseTarget = targetVec.group;
+    } else {
+        sourceVec.group.userData = sourceVec.group.userData || {};
+        const svUD = sourceVec.group.userData;
+        svUD.stopRise = true;
+        svUD.stopRiseTarget = targetVec.group;
+    }
 
     const vectorLength = VECTOR_LENGTH_PRISM;
     const centreIndex = Math.floor(vectorLength / 2);
@@ -47,16 +52,26 @@ export function startPrismAdditionAnimation(scene, sourceVec, targetVec, lane) {
     // Prepare / re-use a vertical trail following the centre prism.
     let additionTrail = lane && lane.origTrail;
     if (!additionTrail) {
-        additionTrail = createTrailLine(scene, TRAIL_LINE_COLOR);
+        additionTrail = createTrailLine(parentGroup, TRAIL_LINE_COLOR);
         if (lane) lane.origTrail = additionTrail;
     }
-    svUD.additionTrail = additionTrail;
+
+    if (lane) {
+        lane.additionTrail = additionTrail;
+    } else {
+        sourceVec.group.userData = sourceVec.group.userData || {};
+        sourceVec.group.userData.additionTrail = additionTrail;
+    }
 
     // Seed trail with current centre-prism world-pos.
     const initMat = new THREE.Matrix4();
     sourceVec.mesh.getMatrixAt(centreIndex, initMat);
-    const initPos = new THREE.Vector3().setFromMatrixPosition(initMat).applyMatrix4(sourceVec.group.matrixWorld);
-    updateTrail(additionTrail, initPos);
+    // Convert world-space position to the parentGroup's local space so the
+    // trail line (which is a child of that group) stays correctly aligned
+    // even when the whole layer is offset in the scene stack.
+    const initPosWorld = new THREE.Vector3().setFromMatrixPosition(initMat).applyMatrix4(sourceVec.group.matrixWorld);
+    const initPosLocal = parentGroup.worldToLocal(initPosWorld.clone());
+    updateTrail(additionTrail, initPosLocal);
 
     // Timing params (scale by dedicated multiplier so we can tune independently).
     const duration      = PRISM_ADD_ANIM_BASE_DURATION            / PRISM_ADD_ANIM_SPEED_MULT;
@@ -101,8 +116,11 @@ export function startPrismAdditionAnimation(scene, sourceVec, targetVec, lane) {
                 if (i === centreIndex) {
                     const m = new THREE.Matrix4();
                     sourceVec.mesh.getMatrixAt(i, m);
+                    // Same coordinate-space fix as above: convert to the local
+                    // space of the parent group before updating the trail.
                     const worldP = new THREE.Vector3().setFromMatrixPosition(m).applyMatrix4(sourceVec.group.matrixWorld);
-                    updateTrail(additionTrail, worldP);
+                    const localP = parentGroup.worldToLocal(worldP.clone());
+                    updateTrail(additionTrail, localP);
                 }
             })
             .onComplete(() => {
@@ -122,7 +140,10 @@ export function startPrismAdditionAnimation(scene, sourceVec, targetVec, lane) {
 
     const totalAnimTime = duration + flashDuration + vectorLength * delayBetween;
     setTimeout(() => {
-        if (sourceVec && sourceVec.group && sourceVec.group.userData) {
+        if (lane) {
+            delete lane.stopRise;
+            delete lane.stopRiseTarget;
+        } else if (sourceVec && sourceVec.group && sourceVec.group.userData) {
             delete sourceVec.group.userData.stopRise;
             delete sourceVec.group.userData.stopRiseTarget;
         }
@@ -137,10 +158,8 @@ export function startPrismAdditionAnimation(scene, sourceVec, targetVec, lane) {
                     lane.horizPhase = 'postMHSAAddition';
                 }
             }
-            if (sourceVec && sourceVec.group) {
-                const topY = targetVec.group.position.y;
-                sourceVec.group.userData.skipTrailResumeY = topY + 0.01;
-            }
+            const topY = targetVec.group.position.y;
+            lane.skipTrailResumeY = topY + 0.01;
         }
     }, totalAnimTime + 100);
 } 

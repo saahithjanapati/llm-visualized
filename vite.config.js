@@ -34,6 +34,7 @@ export default defineConfig({
             layerNorm: resolve(__dirname, 'tests/test_layer_norm.html'),
             mhaAnimation: resolve(__dirname, 'tests/mha_visualization_test.html'),
             mhaPassThrough: resolve(__dirname, 'tests/test_mhsa_pass_through.html'),
+            twelveLayerStack: resolve(__dirname, 'tests/twelve-layer-stack.html'),
         }
     } 
   },

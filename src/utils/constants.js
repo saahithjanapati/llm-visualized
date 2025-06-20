@@ -1,7 +1,7 @@
 // ------------------------------------------------------------
 // Global animation speed multiplier (1 = normal speed). Increase to speed up everything.
 // ------------------------------------------------------------
-export const GLOBAL_ANIM_SPEED_MULT = 25;
+export const GLOBAL_ANIM_SPEED_MULT = 100;
 
 
 export const VECTOR_LENGTH = 100;
@@ -34,7 +34,7 @@ export const PRISM_HEIGHT_SCALE_FACTOR = 0.75; // Scales normalized data to pris
 // ------------------------------------------------------------
 
 /** Distance (in world units) between adjacent vector lanes along Z. */
-export const VECTOR_DEPTH_SPACING = 100;
+export const VECTOR_DEPTH_SPACING = 150;
 
 // ------------------------------------------------------------
 // Lane / vector configuration – controls how many lanes/vectors
@@ -96,7 +96,7 @@ export const LN_PARAMS = {
 export const NUM_HEAD_SETS_LAYER = 12;
 
 /** Horizontal gap between adjacent attention head sets. */
-export const HEAD_SET_GAP_LAYER = 40;
+export const HEAD_SET_GAP_LAYER = 100;
 
 /** Horizontal center-to-center spacing for Q, K, V matrices within a single attention head. */
 export const MHA_INTERNAL_MATRIX_SPACING = 130;
@@ -167,7 +167,7 @@ export const ANIM_RISE_SPEED_POST_SPLIT_LN1 = 0.5;
  * LayerNorm (during the MLP computation).  Increased to quicken the upward
  * motion during the MLP stage.
  */
-export const ANIM_RISE_SPEED_POST_SPLIT_LN2 = 1.5;
+export const ANIM_RISE_SPEED_POST_SPLIT_LN2 = 0.5;
 
 /** Horizontal speed for vectors moving towards/away from branched components. */
 export const ANIM_HORIZ_SPEED = 25;
