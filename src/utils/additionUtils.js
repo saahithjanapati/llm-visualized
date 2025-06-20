@@ -130,7 +130,13 @@ export function startPrismAdditionAnimation(scene, sourceVec, targetVec, lane) {
         if (lane) {
             lane.originalVec    = targetVec;
             lane.postAdditionVec= targetVec;
-            if (lane.ln2Phase !== 'done') lane.ln2Phase = 'preRise';
+            if (lane.ln2Phase !== 'done') {
+                lane.ln2Phase = 'preRise';
+                // Set horizPhase to trigger LN2 pipeline
+                if (lane.horizPhase === 'travelMHSA' || lane.horizPhase === 'finishedHeads') {
+                    lane.horizPhase = 'postMHSAAddition';
+                }
+            }
             if (sourceVec && sourceVec.group) {
                 const topY = targetVec.group.position.y;
                 sourceVec.group.userData.skipTrailResumeY = topY + 0.01;

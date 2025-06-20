@@ -154,7 +154,7 @@ export const ANIM_OFFSET_Y_ORIGINAL_SPAWN = 10;
 export const ANIM_MEET_Y_OFFSET_ABOVE_LN1 = 5;
 
 /** Speed at which original vectors rise along the main path (x=0). */
-export const ANIM_RISE_SPEED_ORIGINAL = 3;
+export const ANIM_RISE_SPEED_ORIGINAL = 1.5; // Slower rise speed for residual stream vectors
 
 /**
  * Speed at which residual-stream vectors rise after branching at the first

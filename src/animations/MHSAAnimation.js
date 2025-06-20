@@ -500,7 +500,16 @@ export class MHSAAnimation {
 
                 if (tVec.group.position.x < targetX - 0.01) {
                     tVec.group.position.x = Math.min(targetX, tVec.group.position.x + dx);
+                    // Continuously update the existing duplicate trail so horizontal
+                    // motion toward the attention head leaves a visible path.
+                    if (lane.dupTrail) {
+                        updateTrail(lane.dupTrail, tVec.group.position);
+                    }
                 } else {
+                    // Ensure final point on trail before spawning upward copy
+                    if (lane.dupTrail) {
+                        updateTrail(lane.dupTrail, tVec.group.position);
+                    }
                     const dupeData = [...tVec.rawData];
                     const upVec = new VectorVisualizationInstancedPrism(dupeData, tVec.group.position.clone());
                     this.scene.add(upVec.group);
@@ -620,6 +629,10 @@ export class MHSAAnimation {
                 } else {
                     if (curY < this.finalOriginalY) {
                         lane.originalVec.group.position.y = Math.min(curY + riseStep, this.finalOriginalY);
+                        // Update the original trail if it exists
+                        if (lane.origTrail) {
+                            updateTrail(lane.origTrail, lane.originalVec.group.position);
+                        }
                     }
                 }
             });
