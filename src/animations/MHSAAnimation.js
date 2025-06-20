@@ -177,14 +177,14 @@ export class MHSAAnimation {
             MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitTopWidthFactor
         );
 
-        // Initialize with gray color
-        const grayColor = new THREE.Color(0x404040);
-        this.outputProjectionMatrix.setColor(grayColor);
+        // Initialise pitch-black; will brighten once vectors pass through
+        const initDarkColor = new THREE.Color(0x202020);
+        this.outputProjectionMatrix.setColor(initDarkColor);
         this.outputProjectionMatrix.group.children.forEach(child => {
             if (child.material) {
                 child.material.transparent = true;
                 child.material.opacity = 0.85;
-                child.material.emissive = grayColor;
+                child.material.emissive = initDarkColor;
                 child.material.emissiveIntensity = 0.1; // Low initial emissive intensity
             }
         });
@@ -196,7 +196,7 @@ export class MHSAAnimation {
         this.outputProjMatrixHeight = matrixHeight;
         
         // Store default and target colors for animation
-        this.outputProjMatrixDefaultColor = grayColor;
+        this.outputProjMatrixDefaultColor = initDarkColor;
         this.outputProjMatrixActiveColor = new THREE.Color(MHA_OUTPUT_PROJECTION_MATRIX_COLOR);
         
         // Animation state

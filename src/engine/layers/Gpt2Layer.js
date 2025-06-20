@@ -12,6 +12,7 @@ import {
     LAYER_NORM_2_Y_POS,
     MLP_MATRIX_PARAMS_UP,
     MLP_MATRIX_PARAMS_DOWN,
+    MLP_INTER_MATRIX_GAP,
     MHA_MATRIX_PARAMS,
     NUM_HEAD_SETS_LAYER,
     HEAD_SET_GAP_LAYER,
@@ -178,13 +179,16 @@ export default class Gpt2Layer extends BaseLayer {
             OUT_BOT_FACTOR,
             OUT_TOP_WIDTH_FACTOR
         );
-        outProj.setColor(new THREE.Color(MHA_OUTPUT_PROJECTION_MATRIX_COLOR));
+        const outInitCol = new THREE.Color(0x202020);
+        outProj.setColor(outInitCol);
+        outProj.setEmissive(outInitCol, 0.05);
         this.root.add(outProj.group);
 
         // ────────────────────────────────────────────────────────────────
         // 3) LayerNorm 2
         // ────────────────────────────────────────────────────────────────
         const ln2CenterY = LAYER_NORM_2_Y_POS;
+        const inactiveDark = new THREE.Color(0x202020);
         const ln2 = new LayerNormalizationVisualization(
             new THREE.Vector3(offsetX, ln2CenterY, 0),
             LN_PARAMS.width,
@@ -195,7 +199,7 @@ export default class Gpt2Layer extends BaseLayer {
             LN_PARAMS.holeWidth,
             LN_PARAMS.holeWidthFactor
         );
-        ln2.setColor(lightYellow);
+        ln2.setColor(inactiveDark);
         ln2.setMaterialProperties({ opacity: 0.7, emissiveIntensity: 0.05 });
         this.root.add(ln2.group);
 
@@ -219,11 +223,11 @@ export default class Gpt2Layer extends BaseLayer {
             MLP_MATRIX_PARAMS_UP.slitBottomWidthFactor,
             MLP_MATRIX_PARAMS_UP.slitTopWidthFactor
         );
-        mlpUp.setColor(new THREE.Color(0xb07c13));
+        mlpUp.setColor(inactiveDark.clone());
         this.root.add(mlpUp.group);
 
         // 5) MLP Down-projection matrix (same orange)
-        const mlpDownCenterY = mlpUpCenterY + MLP_MATRIX_PARAMS_UP.height / 2 + 150 + MLP_MATRIX_PARAMS_DOWN.height / 2;
+        const mlpDownCenterY = mlpUpCenterY + MLP_MATRIX_PARAMS_UP.height / 2 + MLP_INTER_MATRIX_GAP + MLP_MATRIX_PARAMS_DOWN.height / 2;
         const mlpDown = new WeightMatrixVisualization(
             null,
             new THREE.Vector3(offsetX, mlpDownCenterY, 0),
@@ -238,7 +242,7 @@ export default class Gpt2Layer extends BaseLayer {
             MLP_MATRIX_PARAMS_DOWN.slitBottomWidthFactor,
             MLP_MATRIX_PARAMS_DOWN.slitTopWidthFactor
         );
-        mlpDown.setColor(new THREE.Color(0xb07c13));
+        mlpDown.setColor(inactiveDark.clone());
         this.root.add(mlpDown.group);
 
         // ---------- Residual vectors (original stream) ----------
@@ -298,7 +302,6 @@ export default class Gpt2Layer extends BaseLayer {
                 ln2Phase: 'notStarted',
                 postAdditionVec: null,
                 movingVecLN2: null,
-                multTargetLN2: null,
                 normAnimationLN2: null,
                 normStartedLN2: false,
                 multDoneLN2: false,
@@ -542,6 +545,18 @@ export default class Gpt2Layer extends BaseLayer {
                         v.group.position.y = Math.min(targetY, v.group.position.y + ANIM_RISE_SPEED_POST_SPLIT_LN2 * speedMult * dt);
                         updateTrail(lane.origTrail, v.group.position);
                     } else {
+                        // Update residual stream to keep rising continuously at the same speed
+                        // This matches the behavior in LayerAnimation.js
+                        if (this.mhsaAnimation && typeof this.mhsaAnimation.finalOriginalY === 'number') {
+                            // Extend the residual-stream target to just below the top of the
+                            // MLP Up-projection matrix so original vectors keep rising in parallel
+                            const newTarget = this.mlpUp.group.position.y + MLP_MATRIX_PARAMS_UP.height / 2 - ORIGINAL_TO_PROCESSED_GAP;
+                            if (newTarget > this.mhsaAnimation.finalOriginalY) {
+                                this.mhsaAnimation.finalOriginalY = newTarget;
+                            }
+                            this.mhsaAnimation.postSplitRiseSpeed = ANIM_RISE_SPEED_POST_SPLIT_LN2;
+                        }
+                        
                         // Create duplicate for LN2 processing
                         const mv = new VectorVisualizationInstancedPrism(v.rawData.slice(), v.group.position.clone());
                         this.root.add(mv.group);
@@ -677,7 +692,7 @@ export default class Gpt2Layer extends BaseLayer {
         const distance = topY - vec.group.position.y;
         const duration = (distance / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
         
-        const matrixStartColor = new THREE.Color(0x404040);
+        const matrixStartColor = new THREE.Color(0x202020);
         const matrixEndColor = new THREE.Color(0xb07c13); // orange
         
         // Animate matrix color
@@ -753,19 +768,17 @@ export default class Gpt2Layer extends BaseLayer {
         }
         
         // Rise and pause before down-projection
-        const extraRise = 60;
-        const pauseMs = 500;
+        const extraRise = 20;
+        const pauseMs = 0;
         
         new TWEEN.Tween(expandedGroup.position)
-            .to({ y: expandedGroup.position.y + extraRise }, 800)
+            .to({ y: expandedGroup.position.y + extraRise }, 500)
             .easing(TWEEN.Easing.Quadratic.InOut)
             .onUpdate(() => {
                 updateTrail(lane.mlpUpTrail, expandedGroup.position);
             })
             .onComplete(() => {
-                setTimeout(() => {
-                    this._animateMlpDownProjection(lane);
-                }, pauseMs);
+                this._animateMlpDownProjection(lane);
             })
             .start();
     }
@@ -790,7 +803,7 @@ export default class Gpt2Layer extends BaseLayer {
             .to({ t: 1 }, durationDown)
             .easing(TWEEN.Easing.Quadratic.InOut)
             .onUpdate(o => {
-                const col = new THREE.Color(0x404040).lerp(orangeColor, o.t);
+                const col = new THREE.Color(0x202020).lerp(orangeColor, o.t);
                 this.mlpDown.setColor(col);
                 this.mlpDown.setEmissive(col, 0.5);
             })
@@ -802,17 +815,63 @@ export default class Gpt2Layer extends BaseLayer {
             .easing(TWEEN.Easing.Linear.None)
             .onUpdate(() => {
                 updateTrail(lane.mlpUpTrail, expandedGroup.position);
-            })
-            .onStart(() => {
-                // Shrink to fit narrowing matrix
-                expandedGroup.scale.setScalar(0.25);
+
+                // Once the vector has fully entered the down-projection matrix, shrink its overall width
+                if (!lane.shrunkInsideDown && expandedGroup.position.y >= downBottomY) {
+                    lane.shrunkInsideDown = true;
+                    if (typeof TWEEN !== 'undefined') {
+                        new TWEEN.Tween(expandedGroup.scale)
+                            .to({ x:0.25, y:0.25, z:0.25 }, 300)
+                            .easing(TWEEN.Easing.Quadratic.InOut)
+                            .start();
+                    } else {
+                        expandedGroup.scale.setScalar(0.25);
+                    }
+                }
+
+                // Check if we've reached the middle of the down-projection matrix
+                const midY = this.mlpDown.group.position.y;
+                if (!lane.collapsedInMatrix && expandedGroup.position.y >= midY) {
+                    lane.collapsedInMatrix = true;
+                    
+                    // Create collapsed vector at current position
+                    const collapseVec = new VectorVisualizationInstancedPrism(
+                        lane.expandedVecSegments[0].rawData.slice(), 
+                        expandedGroup.position.clone()
+                    );
+                    
+                    // Copy gradient colors
+                    if (Array.isArray(lane.expandedVecSegments[0].currentKeyColors) && lane.expandedVecSegments[0].currentKeyColors.length) {
+                        collapseVec.currentKeyColors = lane.expandedVecSegments[0].currentKeyColors.map(c => c.clone());
+                        collapseVec.updateInstanceGeometryAndColors();
+                    }
+                    
+                    this.root.add(collapseVec.group);
+                    expandedGroup.visible = false;
+                    
+                    lane.finalVecAfterMlp = collapseVec;
+                    
+                    // Continue animating the collapsed vector for the rest of the journey
+                    new TWEEN.Tween(collapseVec.group.position)
+                        .to({ y: downTopY }, durationDown / 2) // Half duration since we're halfway
+                        .easing(TWEEN.Easing.Linear.None)
+                        .onUpdate(() => {
+                            updateTrail(lane.mlpUpTrail, collapseVec.group.position);
+                        })
+                        .start();
+                }
             })
             .onComplete(() => {
                 this.mlpDown.setColor(orangeColor);
                 this.mlpDown.setEmissive(orangeColor, 0.5);
                 
-                // Collapse back to single 768-dim vector
-                this._collapseToSingle(lane);
+                // If we haven't collapsed yet (shouldn't happen), do it now
+                if (!lane.collapsedInMatrix) {
+                    this._collapseToSingle(lane);
+                } else {
+                    // Continue with the rise animation
+                    this._riseAfterMlp(lane);
+                }
             })
             .start();
     }
@@ -843,24 +902,34 @@ export default class Gpt2Layer extends BaseLayer {
         lane.finalVecAfterMlp = collapseVec;
         updateTrail(lane.mlpUpTrail, collapseVec.group.position);
         
+        this._riseAfterMlp(lane);
+    }
+    
+    /**
+     * Rise above matrix after MLP processing
+     */
+    _riseAfterMlp(lane) {
+        const vec = lane.finalVecAfterMlp;
+        if (!vec) return;
+        
         // Rise above matrix
         const riseAbove = 40;
         const riseDur = (riseAbove / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
         
-        new TWEEN.Tween(collapseVec.group.position)
-            .to({ y: collapseVec.group.position.y + riseAbove }, riseDur)
+        new TWEEN.Tween(vec.group.position)
+            .to({ y: vec.group.position.y + riseAbove }, riseDur)
             .easing(TWEEN.Easing.Quadratic.InOut)
             .onUpdate(() => {
-                updateTrail(lane.mlpUpTrail, collapseVec.group.position);
+                updateTrail(lane.mlpUpTrail, vec.group.position);
             })
             .onComplete(() => {
                 // Update residual stream target height
                 if (this.mhsaAnimation) {
-                    this.mhsaAnimation.finalOriginalY = collapseVec.group.position.y - ORIGINAL_TO_PROCESSED_GAP;
+                    this.mhsaAnimation.finalOriginalY = vec.group.position.y - ORIGINAL_TO_PROCESSED_GAP;
                 }
                 
                 // Move back to residual stream
-                this._returnToResidualStream(lane, collapseVec);
+                this._returnToResidualStream(lane, vec);
             })
             .start();
     }
