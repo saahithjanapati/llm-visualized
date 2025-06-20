@@ -1,7 +1,7 @@
 // ------------------------------------------------------------
 // Global animation speed multiplier (1 = normal speed). Increase to speed up everything.
 // ------------------------------------------------------------
-export const GLOBAL_ANIM_SPEED_MULT = 100;
+export const GLOBAL_ANIM_SPEED_MULT = 50;
 
 
 export const VECTOR_LENGTH = 100;
