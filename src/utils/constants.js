@@ -253,3 +253,10 @@ export const MLP_MATRIX_PARAMS_DOWN = {
     slitBottomWidthFactor: 0.95,
     slitTopWidthFactor: 0.95
 };
+
+// -----------------------------------------------------------------------------
+// Shared colours
+// -----------------------------------------------------------------------------
+
+/** Base colour for inactive components (visible but dark). */
+export const INACTIVE_COMPONENT_COLOR = 0x202020;

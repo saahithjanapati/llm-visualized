@@ -4,6 +4,7 @@ import { VectorVisualizationInstancedPrism } from '../components/VectorVisualiza
 import { createTrailLine, updateTrail } from '../utils/trailUtils.js';
 import { mapValueToColor } from '../utils/colors.js';
 import { MHSA_DUPLICATE_VECTOR_RISE_SPEED, MHSA_PASS_THROUGH_TOTAL_DURATION_MS, MHSA_PASS_THROUGH_BRIGHTEN_RATIO, MHSA_PASS_THROUGH_DIM_RATIO, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY, MHSA_MATRIX_INITIAL_RESTING_COLOR, MHSA_BRIGHT_GREEN, MHSA_DARK_TINTED_GREEN, MHSA_BRIGHT_BLUE, MHSA_DARK_TINTED_BLUE, MHSA_BRIGHT_RED, MHSA_DARK_TINTED_RED, MHSA_RESULT_RISE_OFFSET_Y, MHSA_HEAD_VECTOR_STOP_BELOW, TRAIL_LINE_COLOR, TRAIL_LINE_OPACITY, MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR, MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW, MHA_OUTPUT_PROJECTION_MATRIX_PARAMS, MHA_OUTPUT_PROJECTION_MATRIX_COLOR } from './LayerAnimationConstants.js';
+import { INACTIVE_COMPONENT_COLOR } from '../utils/constants.js';
 import {
     // Constants needed for setup & animation
     MHA_MATRIX_PARAMS,
@@ -178,7 +179,7 @@ export class MHSAAnimation {
         );
 
         // Initialise pitch-black; will brighten once vectors pass through
-        const initDarkColor = new THREE.Color(0x202020);
+        const initDarkColor = new THREE.Color(INACTIVE_COMPONENT_COLOR);
         this.outputProjectionMatrix.setColor(initDarkColor);
         this.outputProjectionMatrix.group.children.forEach(child => {
             if (child.material) {

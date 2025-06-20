@@ -185,7 +185,7 @@ export const MAX_TRAIL_POINTS = 1500;
 export const MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW = 30;
 
 /** Color of the MHA output projection matrix. */
-export const MHA_OUTPUT_PROJECTION_MATRIX_COLOR = 0x7F7FFF; // A light blue/purple
+export const MHA_OUTPUT_PROJECTION_MATRIX_COLOR = 0xff99ff; // Slightly brighter bluish-purple
 
 /**
  * Parameters defining the geometry and appearance of the MHA output projection matrix.

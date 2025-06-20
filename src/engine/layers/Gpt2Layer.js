@@ -26,7 +26,8 @@ import {
     ANIM_RISE_SPEED_INSIDE_LN,
     ANIM_RISE_SPEED_POST_SPLIT_LN2,
     ORIGINAL_TO_PROCESSED_GAP,
-    ANIM_HORIZ_SPEED
+    ANIM_HORIZ_SPEED,
+    INACTIVE_COMPONENT_COLOR
 } from '../../utils/constants.js';
 import {
     MHA_FINAL_Q_COLOR,
@@ -165,6 +166,7 @@ export default class Gpt2Layer extends BaseLayer {
         const outHeight = MHA_MATRIX_PARAMS.height * OUT_HEIGHT_FACTOR;
         const extraAboveMha = 20 + MHSA_RESULT_RISE_OFFSET_Y + 60; // matches original animation chain
         const outCenterY = mhaCenterY + MHA_MATRIX_PARAMS.height / 2 + extraAboveMha + MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW + outHeight / 2;
+        const outInitCol = new THREE.Color(INACTIVE_COMPONENT_COLOR);
         const outProj = new WeightMatrixVisualization(
             null,
             new THREE.Vector3(offsetX, outCenterY, 0),
@@ -179,16 +181,16 @@ export default class Gpt2Layer extends BaseLayer {
             OUT_BOT_FACTOR,
             OUT_TOP_WIDTH_FACTOR
         );
-        const outInitCol = new THREE.Color(0x202020);
         outProj.setColor(outInitCol);
         outProj.setEmissive(outInitCol, 0.05);
+        outProj.setMaterialProperties({ opacity: 0.7, transparent: true });
         this.root.add(outProj.group);
 
         // ────────────────────────────────────────────────────────────────
         // 3) LayerNorm 2
         // ────────────────────────────────────────────────────────────────
         const ln2CenterY = LAYER_NORM_2_Y_POS;
-        const inactiveDark = new THREE.Color(0x202020);
+        const inactiveDark = new THREE.Color(INACTIVE_COMPONENT_COLOR);
         const ln2 = new LayerNormalizationVisualization(
             new THREE.Vector3(offsetX, ln2CenterY, 0),
             LN_PARAMS.width,
@@ -224,6 +226,7 @@ export default class Gpt2Layer extends BaseLayer {
             MLP_MATRIX_PARAMS_UP.slitTopWidthFactor
         );
         mlpUp.setColor(inactiveDark.clone());
+        mlpUp.setMaterialProperties({ opacity: 0.7, transparent: true });
         this.root.add(mlpUp.group);
 
         // 5) MLP Down-projection matrix (same orange)
@@ -243,6 +246,7 @@ export default class Gpt2Layer extends BaseLayer {
             MLP_MATRIX_PARAMS_DOWN.slitTopWidthFactor
         );
         mlpDown.setColor(inactiveDark.clone());
+        mlpDown.setMaterialProperties({ opacity: 0.7, transparent: true });
         this.root.add(mlpDown.group);
 
         // ---------- Residual vectors (original stream) ----------
@@ -328,7 +332,7 @@ export default class Gpt2Layer extends BaseLayer {
         // ────────────────────────────────────────────────────────────
         const darkGray = new THREE.Color(0x333333);
         const lightYellow = new THREE.Color(0xFFFF99);
-        const brightYellow = new THREE.Color(0xFFFF00);
+        const brightYellow = new THREE.Color(0xFFFF99);
         const opaqueOpacity = 1.0;
         const semiTransparentOpacity = 0.6;
         const exitTransitionRange = 10; // world–unit distance for final fade
@@ -692,7 +696,7 @@ export default class Gpt2Layer extends BaseLayer {
         const distance = topY - vec.group.position.y;
         const duration = (distance / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
         
-        const matrixStartColor = new THREE.Color(0x202020);
+        const matrixStartColor = new THREE.Color(INACTIVE_COMPONENT_COLOR);
         const matrixEndColor = new THREE.Color(0xb07c13); // orange
         
         // Animate matrix color
@@ -803,7 +807,7 @@ export default class Gpt2Layer extends BaseLayer {
             .to({ t: 1 }, durationDown)
             .easing(TWEEN.Easing.Quadratic.InOut)
             .onUpdate(o => {
-                const col = new THREE.Color(0x202020).lerp(orangeColor, o.t);
+                const col = new THREE.Color(INACTIVE_COMPONENT_COLOR).lerp(orangeColor, o.t);
                 this.mlpDown.setColor(col);
                 this.mlpDown.setEmissive(col, 0.5);
             })
