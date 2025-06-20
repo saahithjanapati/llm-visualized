@@ -683,7 +683,11 @@ export class MHSAAnimation {
             // far away (HIDE_INSTANCE_Y_OFFSET ≈ 10000). Assuming the scene's
             // meaningful Y range is < 2 000 units.
             if (Math.abs(wPos.y) < 2000) {
-                updateTrail(trailObj, wPos);
+                // Convert world-space centre-prism position to the local
+                // coordinate space of the layer's root group so the trail
+                // points remain consistent across stacked layers.
+                const localPos = this.parentGroup.worldToLocal(wPos.clone());
+                updateTrail(trailObj, localPos);
             }
         });
     }
