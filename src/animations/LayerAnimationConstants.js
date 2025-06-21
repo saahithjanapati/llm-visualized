@@ -104,6 +104,32 @@ export const MLP_MATRIX_STYLE_PARAMS = {
 export const MLP_D_MODEL_VISUAL_DEPTH = 20;
 
 // -----------------------------------------------------------------------------
+// Color Constants – keep **all** colour values in this one place
+// -----------------------------------------------------------------------------
+
+/** Base (resting) colour for MHSA matrices. */
+export const MHSA_MATRIX_INITIAL_RESTING_COLOR = 0x404040;
+
+/** Bright / activated colours used inside the MHSA animation. */
+export const MHSA_BRIGHT_GREEN        = 0x33FF33;
+export const MHSA_DARK_TINTED_GREEN   = 0x002200;
+export const MHSA_BRIGHT_BLUE         = 0x6666FF;
+export const MHSA_DARK_TINTED_BLUE    = 0x000022;
+export const MHSA_BRIGHT_RED          = 0xFF3333;
+export const MHSA_DARK_TINTED_RED     = 0x220000;
+
+/** Colour for trail lines behind moving prisms. */
+export const TRAIL_LINE_COLOR = 0xffffff;
+
+/** Final Q, K, V head colours used once attention heads have merged. */
+export const MHA_FINAL_Q_COLOR = 0x2d75da;
+export const MHA_FINAL_K_COLOR = 0x2ad471;
+export const MHA_FINAL_V_COLOR = 0xb7263e;
+
+/** Active colour of the output-projection matrix that follows MHSA. */
+export const MHA_OUTPUT_PROJECTION_MATRIX_COLOR = 0xff99ff;
+
+// -----------------------------------------------------------------------------
 // MHSA (Multi-Head Self-Attention) Specific Animation Constants
 // -----------------------------------------------------------------------------
 
@@ -122,15 +148,6 @@ export const MHSA_PASS_THROUGH_DIM_RATIO = 0.4; // Example: Dims over 40% of tot
 /** Maximum emissive intensity for matrices during MHSA pass-through brightening phase. */
 export const MHSA_MATRIX_MAX_EMISSIVE_INTENSITY = 0.80;
 
-// MHSA color constants
-export const MHSA_MATRIX_INITIAL_RESTING_COLOR = 0x404040;
-export const MHSA_BRIGHT_GREEN = 0x33FF33;
-export const MHSA_DARK_TINTED_GREEN = 0x002200;
-export const MHSA_BRIGHT_BLUE = 0x6666FF;
-export const MHSA_DARK_TINTED_BLUE = 0x000022;
-export const MHSA_BRIGHT_RED = 0xFF3333;
-export const MHSA_DARK_TINTED_RED = 0x220000;
-
 // Vertical offset applied to vectors after pass-through through matrices
 export const MHSA_RESULT_RISE_OFFSET_Y = 60;
 
@@ -139,14 +156,6 @@ export const MHSA_HEAD_VECTOR_STOP_BELOW = 70;
 
 // Trail line visual properties
 export const TRAIL_LINE_OPACITY = 0.06;
-export const TRAIL_LINE_COLOR = 0xffffff; // White color for trails
-
-// -----------------------------------------------------------------------------
-// Final MHA Head Colors
-// -----------------------------------------------------------------------------
-export const MHA_FINAL_Q_COLOR = 0x2d75da; // Blue, matching GPTModelVisualization
-export const MHA_FINAL_K_COLOR = 0x2ad471; // Green, matching GPTModelVisualization
-export const MHA_FINAL_V_COLOR = 0xb7263e; // Red, matching GPTModelVisualization
 
 // -----------------------------------------------------------------------------
 // Animation Path & Behavior Constants
@@ -183,9 +192,6 @@ export const MAX_TRAIL_POINTS = 1500;
 
 /** Vertical offset for the output projection matrix above the merged row of vectors. */
 export const MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW = 30;
-
-/** Color of the MHA output projection matrix. */
-export const MHA_OUTPUT_PROJECTION_MATRIX_COLOR = 0xff99ff; // Slightly brighter bluish-purple
 
 /**
  * Parameters defining the geometry and appearance of the MHA output projection matrix.
