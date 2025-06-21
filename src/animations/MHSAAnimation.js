@@ -4,6 +4,7 @@ import { VectorVisualizationInstancedPrism } from '../components/VectorVisualiza
 import { createTrailLine, updateTrail } from '../utils/trailUtils.js';
 import { mapValueToColor } from '../utils/colors.js';
 import { MHSA_DUPLICATE_VECTOR_RISE_SPEED, MHSA_PASS_THROUGH_TOTAL_DURATION_MS, MHSA_PASS_THROUGH_BRIGHTEN_RATIO, MHSA_PASS_THROUGH_DIM_RATIO, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY, MHSA_MATRIX_INITIAL_RESTING_COLOR, MHSA_BRIGHT_GREEN, MHSA_DARK_TINTED_GREEN, MHSA_BRIGHT_BLUE, MHSA_DARK_TINTED_BLUE, MHSA_BRIGHT_RED, MHSA_DARK_TINTED_RED, MHSA_RESULT_RISE_OFFSET_Y, MHSA_HEAD_VECTOR_STOP_BELOW, TRAIL_LINE_COLOR, TRAIL_LINE_OPACITY, MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR, MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW, MHA_OUTPUT_PROJECTION_MATRIX_PARAMS, MHA_OUTPUT_PROJECTION_MATRIX_COLOR } from './LayerAnimationConstants.js';
+import { INACTIVE_COMPONENT_COLOR } from '../utils/constants.js';
 import {
     // Constants needed for setup & animation
     MHA_MATRIX_PARAMS,
@@ -31,8 +32,8 @@ import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
 const SPEED_MULT = GLOBAL_ANIM_SPEED_MULT;
 
 export class MHSAAnimation {
-    constructor(scene, branchX, mhsaBaseY, clock, mode = 'temp') {
-        this.scene = scene;
+    constructor(parentGroup, branchX, mhsaBaseY, clock, mode = 'temp') {
+        this.parentGroup = parentGroup;
         this.branchX = branchX;
         this.mhsaBaseY = mhsaBaseY;
         this.clock = clock;
@@ -104,7 +105,7 @@ export class MHSAAnimation {
                     child.material.opacity = matrixOpacity;
                 }
             });
-            this.scene.add(queryMatrix.group);
+            this.parentGroup.add(queryMatrix.group);
             this.mhaVisualizations.push(queryMatrix);
 
             const keyMatrix = new WeightMatrixVisualization(
@@ -121,7 +122,7 @@ export class MHSAAnimation {
                     child.material.opacity = matrixOpacity;
                 }
             });
-            this.scene.add(keyMatrix.group);
+            this.parentGroup.add(keyMatrix.group);
             this.mhaVisualizations.push(keyMatrix);
 
             const valueMatrix = new WeightMatrixVisualization(
@@ -138,7 +139,7 @@ export class MHSAAnimation {
                     child.material.opacity = matrixOpacity;
                 }
             });
-            this.scene.add(valueMatrix.group);
+            this.parentGroup.add(valueMatrix.group);
             this.mhaVisualizations.push(valueMatrix);
 
             this.headsCentersX.push(x_k);
@@ -177,18 +178,18 @@ export class MHSAAnimation {
             MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitTopWidthFactor
         );
 
-        // Initialize with gray color
-        const grayColor = new THREE.Color(0x404040);
-        this.outputProjectionMatrix.setColor(grayColor);
+        // Initialise pitch-black; will brighten once vectors pass through
+        const initDarkColor = new THREE.Color(INACTIVE_COMPONENT_COLOR);
+        this.outputProjectionMatrix.setColor(initDarkColor);
         this.outputProjectionMatrix.group.children.forEach(child => {
             if (child.material) {
                 child.material.transparent = true;
                 child.material.opacity = 0.85;
-                child.material.emissive = grayColor;
+                child.material.emissive = initDarkColor;
                 child.material.emissiveIntensity = 0.1; // Low initial emissive intensity
             }
         });
-        this.scene.add(this.outputProjectionMatrix.group);
+        this.parentGroup.add(this.outputProjectionMatrix.group);
         
         // Store the matrix's Y position for later animations
         this.outputProjMatrixCenterY = outputProjMatrixCenterY;
@@ -196,7 +197,7 @@ export class MHSAAnimation {
         this.outputProjMatrixHeight = matrixHeight;
         
         // Store default and target colors for animation
-        this.outputProjMatrixDefaultColor = grayColor;
+        this.outputProjMatrixDefaultColor = initDarkColor;
         this.outputProjMatrixActiveColor = new THREE.Color(MHA_OUTPUT_PROJECTION_MATRIX_COLOR);
         
         // Animation state
@@ -271,7 +272,7 @@ export class MHSAAnimation {
         }
 
         // Create a trail line that follows the vector only inside the matrix
-        const passThroughTrail = createTrailLine(this.scene, TRAIL_LINE_COLOR);
+        const passThroughTrail = createTrailLine(this.parentGroup, TRAIL_LINE_COLOR);
         const matrixBottomY = this.mhsa_matrix_center_y - MHA_MATRIX_PARAMS.height / 2;
         const matrixTopY = this.mhsa_matrix_center_y + MHA_MATRIX_PARAMS.height / 2;
 
@@ -308,7 +309,7 @@ export class MHSAAnimation {
                     // ------------------------------------------------------------------
                     // 2) Swap out the heavyweight 768-unit vector for the lightweight one
                     // ------------------------------------------------------------------
-                    this.scene.add(smallVec.group);
+                    this.parentGroup.add(smallVec.group);
 
                     // Keep a handle to the original (large) vector before we overwrite
                     const heavyVec = vector;
@@ -318,7 +319,7 @@ export class MHSAAnimation {
                     initialDimensionChangeApplied = true;
 
                     // Remove & dispose the heavyweight vector to free GPU/CPU resources
-                    this.scene.remove(heavyVec.group);
+                    this.parentGroup.remove(heavyVec.group);
                     if (typeof heavyVec.dispose === 'function') heavyVec.dispose();
 
                     // ------------------------------------------------------------------
@@ -500,14 +501,23 @@ export class MHSAAnimation {
 
                 if (tVec.group.position.x < targetX - 0.01) {
                     tVec.group.position.x = Math.min(targetX, tVec.group.position.x + dx);
+                    // Continuously update the existing duplicate trail so horizontal
+                    // motion toward the attention head leaves a visible path.
+                    if (lane.dupTrail) {
+                        updateTrail(lane.dupTrail, tVec.group.position);
+                    }
                 } else {
+                    // Ensure final point on trail before spawning upward copy
+                    if (lane.dupTrail) {
+                        updateTrail(lane.dupTrail, tVec.group.position);
+                    }
                     const dupeData = [...tVec.rawData];
                     const upVec = new VectorVisualizationInstancedPrism(dupeData, tVec.group.position.clone());
-                    this.scene.add(upVec.group);
+                    this.parentGroup.add(upVec.group);
                     upVec.userData = { headIndex: targetHeadIdx, sideSpawned: false, sideSpawnRequested: false, sideSpawnTime: 0 };
                     lane.upwardCopies.push(upVec);
                     
-                    const upTrail = createTrailLine(this.scene, TRAIL_LINE_COLOR);
+                    const upTrail = createTrailLine(this.parentGroup, TRAIL_LINE_COLOR);
                     // Keep upward trail visible so users can see vector path
                     updateTrail(upTrail, upVec.group.position);
                     lane.upwardTrails = lane.upwardTrails || [];
@@ -523,54 +533,54 @@ export class MHSAAnimation {
                 // No-op
             }
 
-            if (lane.upwardCopies && lane.upwardCopies.length) {
-                lane.upwardCopies.forEach((upVec, trailIdx) => {
-                    if (upVec.group.position.y < this.headStopY) {
-                        upVec.group.position.y = Math.min(this.headStopY, upVec.group.position.y + MHSA_DUPLICATE_VECTOR_RISE_SPEED * SPEED_MULT * deltaTime);
-                        if (lane.upwardTrails && lane.upwardTrails[trailIdx]) {
-                            updateTrail(lane.upwardTrails[trailIdx], upVec.group.position);
-                        }
-                    }
-                });
-            }
+                         if (lane.upwardCopies && lane.upwardCopies.length) {
+                 lane.upwardCopies.forEach((upVec, trailIdx) => {
+                     if (upVec.group.position.y < this.headStopY) {
+                         upVec.group.position.y = Math.min(this.headStopY, upVec.group.position.y + MHSA_DUPLICATE_VECTOR_RISE_SPEED * SPEED_MULT * deltaTime);
+                         if (lane.upwardTrails && lane.upwardTrails[trailIdx]) {
+                             updateTrail(lane.upwardTrails[trailIdx], upVec.group.position);
+                         }
+                     }
+                 });
+             }
 
-            if (lane.upwardCopies) {
-                lane.upwardCopies.forEach(centerVec => {
-                    if (!centerVec.userData.sideSpawnRequested && Math.abs(centerVec.group.position.y - this.headStopY) < 0.1) {
-                        centerVec.userData.sideSpawnRequested = true;
-                        centerVec.userData.sideSpawnTime = timeNow + SIDE_COPY_DELAY_MS / SPEED_MULT;
-                    }
-                    if (centerVec.userData.sideSpawnRequested && !centerVec.userData.sideSpawned && timeNow >= centerVec.userData.sideSpawnTime) {
-                        const hIdx = centerVec.userData.headIndex;
-                        const coord = this.headCoords[hIdx];
-                        if (coord) {
-                            const qMatrixForHead = this.mhaVisualizations[hIdx * 3];
-                            const vMatrixForHead = this.mhaVisualizations[hIdx * 3 + 2];
+             if (lane.upwardCopies) {
+                 lane.upwardCopies.forEach(centerVec => {
+                     if (!centerVec.userData.sideSpawnRequested && Math.abs(centerVec.group.position.y - this.headStopY) < 0.1) {
+                         centerVec.userData.sideSpawnRequested = true;
+                         centerVec.userData.sideSpawnTime = timeNow + SIDE_COPY_DELAY_MS / SPEED_MULT;
+                     }
+                     if (centerVec.userData.sideSpawnRequested && !centerVec.userData.sideSpawned && timeNow >= centerVec.userData.sideSpawnTime) {
+                         const hIdx = centerVec.userData.headIndex;
+                         const coord = this.headCoords[hIdx];
+                         if (coord) {
+                             const qMatrixForHead = this.mhaVisualizations[hIdx * 3];
+                             const vMatrixForHead = this.mhaVisualizations[hIdx * 3 + 2];
 
-                            const qVec = new VectorVisualizationInstancedPrism(centerVec.rawData.slice(), centerVec.group.position.clone());
-                            const vVec = new VectorVisualizationInstancedPrism(centerVec.rawData.slice(), centerVec.group.position.clone());
-                            this.scene.add(qVec.group);
-                            this.scene.add(vVec.group);
-                            
-                            lane.sideCopies = lane.sideCopies || [];
-                            lane.sideCopies.push({ vec: qVec, targetX: coord.q, type: 'Q', matrixRef: qMatrixForHead, headIndex: hIdx });
-                            lane.sideCopies.push({ vec: vVec, targetX: coord.v, type: 'V', matrixRef: vMatrixForHead, headIndex: hIdx });
-                            
-                            const qTrail = createTrailLine(this.scene, TRAIL_LINE_COLOR);
-                            const vTrail = createTrailLine(this.scene, TRAIL_LINE_COLOR);
-                            // Seed the side-copy trails with the current position so they
-                            // start exactly at the split point, ensuring continuity with the
-                            // upward trail and avoiding a visual gap when the vector branches.
-                            updateTrail(qTrail, qVec.group.position);
-                            updateTrail(vTrail, vVec.group.position);
-                            // Keep side copy trails visible
-                            lane.sideTrails.push(qTrail);
-                            lane.sideTrails.push(vTrail);
-                            centerVec.userData.sideSpawned = true;
-                        }
-                    }
-                });
-            }
+                             const qVec = new VectorVisualizationInstancedPrism(centerVec.rawData.slice(), centerVec.group.position.clone());
+                             const vVec = new VectorVisualizationInstancedPrism(centerVec.rawData.slice(), centerVec.group.position.clone());
+                             this.parentGroup.add(qVec.group);
+                             this.parentGroup.add(vVec.group);
+                             
+                             lane.sideCopies = lane.sideCopies || [];
+                             lane.sideCopies.push({ vec: qVec, targetX: coord.q, type: 'Q', matrixRef: qMatrixForHead, headIndex: hIdx });
+                             lane.sideCopies.push({ vec: vVec, targetX: coord.v, type: 'V', matrixRef: vMatrixForHead, headIndex: hIdx });
+                             
+                             const qTrail = createTrailLine(this.parentGroup, TRAIL_LINE_COLOR);
+                             const vTrail = createTrailLine(this.parentGroup, TRAIL_LINE_COLOR);
+                             // Seed the side-copy trails with the current position so they
+                             // start exactly at the split point, ensuring continuity with the
+                             // upward trail and avoiding a visual gap when the vector branches.
+                             updateTrail(qTrail, qVec.group.position);
+                             updateTrail(vTrail, vVec.group.position);
+                             // Keep side copy trails visible
+                             lane.sideTrails.push(qTrail);
+                             lane.sideTrails.push(vTrail);
+                             centerVec.userData.sideSpawned = true;
+                         }
+                     }
+                 });
+             }
 
             if (this.mhaPassThroughPhase === 'positioning_mha_vectors' && lane.sideCopies && lane.sideCopies.length) {
                 lane.sideCopies.forEach((obj, trailIdx) => {
@@ -608,18 +618,33 @@ export class MHSAAnimation {
                 if (!lane || !lane.originalVec || !lane.originalVec.group) return;
 
                 const curY = lane.originalVec.group.position.y;
-                // Skip rising movement for lanes where the original vector is frozen during addition
-                if (lane.originalVec.group.userData && lane.originalVec.group.userData.stopRise) {
-                    const targetGrp = lane.originalVec.group.userData.stopRiseTarget;
-                    if (targetGrp) {
-                        const desiredMaxY = targetGrp.position.y - ORIGINAL_TO_PROCESSED_GAP;
-                        if (curY < desiredMaxY) {
-                            lane.originalVec.group.position.y = Math.min(curY + riseStep, desiredMaxY);
-                        }
+                let targetY = this.finalOriginalY;
+                let shouldMove = true;
+
+                // Enforce suspension during addition animation
+                if (lane.stopRise) {
+                    if (lane.stopRiseTarget) {
+                        // Allow drifting up to just below the target vector
+                        targetY = Math.min(targetY, lane.stopRiseTarget.position.y - ORIGINAL_TO_PROCESSED_GAP);
+                    } else {
+                        // If no target, freeze completely
+                        shouldMove = false;
                     }
-                } else {
-                    if (curY < this.finalOriginalY) {
-                        lane.originalVec.group.position.y = Math.min(curY + riseStep, this.finalOriginalY);
+                }
+                
+                // Move the vector if not frozen
+                if (shouldMove && curY < targetY) {
+                    lane.originalVec.group.position.y = Math.min(curY + riseStep, targetY);
+                }
+
+                // Update the trail unless it's explicitly suspended
+                const trailSuspended = lane.stopRise || (typeof lane.skipTrailResumeY === 'number' && curY <= lane.skipTrailResumeY);
+
+                if (!trailSuspended && lane.origTrail) {
+                    updateTrail(lane.origTrail, lane.originalVec.group.position);
+                    // Clean up the suspension flag once we've passed the resume threshold
+                    if (typeof lane.skipTrailResumeY === 'number' && curY > lane.skipTrailResumeY) {
+                        delete lane.skipTrailResumeY;
                     }
                 }
             });
@@ -636,12 +661,16 @@ export class MHSAAnimation {
         lanes.forEach(lane => {
             if (!lane || !lane.originalVec) return;
 
-            const ud = lane.originalVec.group?.userData || {};
-            const trailObj = ud.additionTrail;
+            const trailObj = lane.additionTrail;
             if (!trailObj) return; // no active addition trail
 
             // Only follow while the addition animation is active (stopRise flag present)
-            if (!ud.stopRise) return;
+            if (!lane.stopRise) {
+                // Once the addition is complete, we may need to clean up the
+                // reference on the lane to prevent this logic from running again.
+                if (lane.additionTrail) delete lane.additionTrail;
+                return;
+            }
 
             const centreIdx = Math.floor(VECTOR_LENGTH_PRISM / 2);
             const instMat = new THREE.Matrix4();
@@ -654,7 +683,11 @@ export class MHSAAnimation {
             // far away (HIDE_INSTANCE_Y_OFFSET ≈ 10000). Assuming the scene's
             // meaningful Y range is < 2 000 units.
             if (Math.abs(wPos.y) < 2000) {
-                updateTrail(trailObj, wPos);
+                // Convert world-space centre-prism position to the local
+                // coordinate space of the layer's root group so the trail
+                // points remain consistent across stacked layers.
+                const localPos = this.parentGroup.worldToLocal(wPos.clone());
+                updateTrail(trailObj, localPos);
             }
         });
     }
@@ -751,13 +784,13 @@ export class MHSAAnimation {
                 decoVec.setInstanceAppearance(idx, 0, col);
             }
 
-            this.scene.add(decoVec.group);
+            this.parentGroup.add(decoVec.group);
 
             // Keep reference for merge phase
             this._tempDecorativeVecs.push({ vec: decoVec, laneZ: kVec.group.position.z });
 
             // Create a trail line connecting the grayed-out vector to its colored vector above
-            const connectionTrail = createTrailLine(this.scene, TRAIL_LINE_COLOR);
+            const connectionTrail = createTrailLine(this.parentGroup, TRAIL_LINE_COLOR);
             // Add the starting point (gray vector position)
             updateTrail(connectionTrail, kVec.group.position);
             // Add the ending point (colored vector position)
@@ -836,7 +869,7 @@ export class MHSAAnimation {
             const yPos = vecList.length ? vecList[0].group.position.y : 0;
 
             // Create a simple two-point trail line across the lane
-            const laneTrail = createTrailLine(this.scene, TRAIL_LINE_COLOR);
+            const laneTrail = createTrailLine(this.parentGroup, TRAIL_LINE_COLOR);
             laneTrail.line.material.opacity = TRAIL_LINE_OPACITY; // keep default opacity
             laneTrail.line.material.needsUpdate = true;
             updateTrail(laneTrail, new THREE.Vector3(lastHeadCenterX, yPos, laneZ));
@@ -927,14 +960,14 @@ export class MHSAAnimation {
                 combinedVec.mesh.instanceColor.needsUpdate = true;
             }
 
-            this.scene.add(combinedVec.group);
+            this.parentGroup.add(combinedVec.group);
             combinedVectors.push({ vec: combinedVec, laneZ });
 
             // Hide original decorative vectors
             vecList.forEach(v => { v.group.visible = false; });
 
             // Create a dedicated trail for the combined vector
-            const trail = createTrailLine(this.scene, TRAIL_LINE_COLOR);
+            const trail = createTrailLine(this.parentGroup, TRAIL_LINE_COLOR);
             // Use the base trail opacity so the path through the output-projection
             // matrix is clearly visible to the viewer.
             trail.line.material.opacity = TRAIL_LINE_OPACITY;
@@ -1186,6 +1219,7 @@ export class MHSAAnimation {
     // Helper: Addition animation between two InstancedPrism vectors
     // ----------------------------------------------------------------------
     _startAdditionAnimation(sourceVec, targetVec, lane) {
-        startPrismAdditionAnimation(this.scene, sourceVec, targetVec, lane);
+        startPrismAdditionAnimation(this.parentGroup, sourceVec, targetVec, lane);
+        // Don't force position - let vectors maintain their natural flow
     }
 } 

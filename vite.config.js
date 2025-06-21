@@ -23,7 +23,7 @@ export default defineConfig({
     rollupOptions: {
         input: {
             main: resolve(__dirname, 'index.html'),
-
+            app: resolve(__dirname, 'app.html'),
             layer: resolve(__dirname, 'tests/layer-animation-test.html'),
             gptModel: resolve(__dirname, 'tests/gpt-model-test.html'),
             vectorInstancedPrism: resolve(__dirname, 'tests/test_vector_instanced_prism.html'),
@@ -34,6 +34,7 @@ export default defineConfig({
             layerNorm: resolve(__dirname, 'tests/test_layer_norm.html'),
             mhaAnimation: resolve(__dirname, 'tests/mha_visualization_test.html'),
             mhaPassThrough: resolve(__dirname, 'tests/test_mhsa_pass_through.html'),
+            twelveLayerStack: resolve(__dirname, 'tests/twelve-layer-stack.html'),
         }
     } 
   },

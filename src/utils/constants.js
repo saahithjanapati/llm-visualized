@@ -1,7 +1,7 @@
 // ------------------------------------------------------------
 // Global animation speed multiplier (1 = normal speed). Increase to speed up everything.
 // ------------------------------------------------------------
-export const GLOBAL_ANIM_SPEED_MULT = 25;
+export const GLOBAL_ANIM_SPEED_MULT = 50;
 
 
 export const VECTOR_LENGTH = 100;
@@ -34,7 +34,7 @@ export const PRISM_HEIGHT_SCALE_FACTOR = 0.75; // Scales normalized data to pris
 // ------------------------------------------------------------
 
 /** Distance (in world units) between adjacent vector lanes along Z. */
-export const VECTOR_DEPTH_SPACING = 100;
+export const VECTOR_DEPTH_SPACING = 150;
 
 // ------------------------------------------------------------
 // Lane / vector configuration – controls how many lanes/vectors
@@ -96,7 +96,7 @@ export const LN_PARAMS = {
 export const NUM_HEAD_SETS_LAYER = 12;
 
 /** Horizontal gap between adjacent attention head sets. */
-export const HEAD_SET_GAP_LAYER = 40;
+export const HEAD_SET_GAP_LAYER = 100;
 
 /** Horizontal center-to-center spacing for Q, K, V matrices within a single attention head. */
 export const MHA_INTERNAL_MATRIX_SPACING = 130;
@@ -154,7 +154,7 @@ export const ANIM_OFFSET_Y_ORIGINAL_SPAWN = 10;
 export const ANIM_MEET_Y_OFFSET_ABOVE_LN1 = 5;
 
 /** Speed at which original vectors rise along the main path (x=0). */
-export const ANIM_RISE_SPEED_ORIGINAL = 3;
+export const ANIM_RISE_SPEED_ORIGINAL = 1.5; // Slower rise speed for residual stream vectors
 
 /**
  * Speed at which residual-stream vectors rise after branching at the first
@@ -167,7 +167,7 @@ export const ANIM_RISE_SPEED_POST_SPLIT_LN1 = 0.5;
  * LayerNorm (during the MLP computation).  Increased to quicken the upward
  * motion during the MLP stage.
  */
-export const ANIM_RISE_SPEED_POST_SPLIT_LN2 = 1.5;
+export const ANIM_RISE_SPEED_POST_SPLIT_LN2 = 0.5;
 
 /** Horizontal speed for vectors moving towards/away from branched components. */
 export const ANIM_HORIZ_SPEED = 25;
@@ -218,7 +218,7 @@ export const LN2_TO_MLP_GAP = 150;
 export const LAYER_NORM_2_Y_POS = 750; // Increased for clearer separation from MHSA block
 
 // Gap between the two stacked MLP weight matrices
-export const MLP_INTER_MATRIX_GAP = 150;
+export const MLP_INTER_MATRIX_GAP = 100;
 
 // -----------------------------------------------------------------------------
 // MLP Up-/Down-Projection Weight Matrix Geometry Parameters
@@ -253,3 +253,10 @@ export const MLP_MATRIX_PARAMS_DOWN = {
     slitBottomWidthFactor: 0.95,
     slitTopWidthFactor: 0.95
 };
+
+// -----------------------------------------------------------------------------
+// Shared colours
+// -----------------------------------------------------------------------------
+
+/** Base colour for inactive components (visible but dark). */
+export const INACTIVE_COMPONENT_COLOR = 0x202020;

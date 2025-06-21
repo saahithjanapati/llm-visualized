@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Test – 12-Layer GPT-2 Stack</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #111; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <!-- A full-screen render surface -->
+    <canvas id="renderCanvas"></canvas>
+
+    <!-- Import map for all external / ESM modules used by the visualisation. -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://esm.sh/three@0.160.0",
+            "three/examples/jsm/controls/OrbitControls.js": "https://esm.sh/three@0.160.0/examples/jsm/controls/OrbitControls.js",
+            "three/examples/jsm/postprocessing/EffectComposer.js": "https://esm.sh/three@0.160.0/examples/jsm/postprocessing/EffectComposer.js",
+            "three/examples/jsm/postprocessing/RenderPass.js": "https://esm.sh/three@0.160.0/examples/jsm/postprocessing/RenderPass.js",
+            "three/examples/jsm/postprocessing/UnrealBloomPass.js": "https://esm.sh/three@0.160.0/examples/jsm/postprocessing/UnrealBloomPass.js",
+            "three-csg-ts": "https://esm.sh/three-csg-ts@3.2.0",
+            "../src/engine/CoreEngine.js": "../src/engine/CoreEngine.js",
+            "../src/engine/layers/Gpt2Layer.js": "../src/engine/layers/Gpt2Layer.js",
+            "../src/data/RandomActivationSource.js": "../src/data/RandomActivationSource.js",
+            "../src/engine/LayerPipeline.js": "../src/engine/LayerPipeline.js"
+        }
+    }
+    </script>
+
+    <!-- Global TWEEN.js for animations -->
+    <script src="https://unpkg.com/@tweenjs/tween.js@23.1.1/dist/tween.umd.js"></script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { startEngine } from '../src/engine/CoreEngine.js';
+        import Gpt2Layer from '../src/engine/layers/Gpt2Layer.js';
+        import { createRandomSource } from '../src/data/RandomActivationSource.js';
+        import { LayerPipeline } from '../src/engine/LayerPipeline.js';
+
+        const canvas = document.getElementById('renderCanvas');
+
+        // New pipeline controller – manages a single vector bundle through
+        // the stacked layers in strict sequence.
+        const NUM_LAYERS = 2;
+
+        // Position camera so the full 12-layer tower is visible
+        const camPos = new THREE.Vector3(0, 8000, 4500);
+        const camTarget = new THREE.Vector3(0, 6000, 0);
+
+        const pipeline = new LayerPipeline(canvas, NUM_LAYERS, {
+            cameraPosition: camPos,
+            cameraTarget: camTarget
+        });
+
+        const cleanup = () => pipeline.dispose();
+        window.addEventListener('beforeunload', () => {
+            if (typeof cleanup === 'function') cleanup();
+        });
+    </script>
+</body>
+</html> 
