@@ -1,4 +1,3 @@
-import * as THREE from 'three';
 import { CoreEngine } from './CoreEngine.js';
 import Gpt2Layer from './layers/Gpt2Layer.js';
 import { createRandomSource } from '../data/RandomActivationSource.js';

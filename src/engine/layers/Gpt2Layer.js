@@ -96,8 +96,10 @@ export default class Gpt2Layer extends BaseLayer {
             LN_PARAMS.holeWidth,
             LN_PARAMS.holeWidthFactor
         );
-        const lightYellow = new THREE.Color(0xFFFF99);
-        ln1.setColor(lightYellow);
+        // Start LN1 in the same "inactive" palette used for LN2 so it only lights up once
+        // vectors begin to enter the ring.
+        const inactiveDark = new THREE.Color(INACTIVE_COMPONENT_COLOR);
+        ln1.setColor(inactiveDark);
         ln1.setMaterialProperties({ opacity: 0.7, emissiveIntensity: 0.05 });
         this.root.add(ln1.group);
 
@@ -202,7 +204,6 @@ export default class Gpt2Layer extends BaseLayer {
         // 3) LayerNorm 2
         // ────────────────────────────────────────────────────────────────
         const ln2CenterY = LAYER_NORM_2_Y_POS;
-        const inactiveDark = new THREE.Color(INACTIVE_COMPONENT_COLOR);
         const ln2 = new LayerNormalizationVisualization(
             new THREE.Vector3(offsetX, ln2CenterY, 0),
             LN_PARAMS.width,
@@ -310,37 +311,74 @@ export default class Gpt2Layer extends BaseLayer {
         // ────────────────────────────────────────────────────────────
         const darkGray = new THREE.Color(0x333333);
         const lightYellow = new THREE.Color(0xFFFF99);
-        const brightYellow = new THREE.Color(0xFFFF99);
+        const brightYellow = new THREE.Color(0xFFFFFF);
         const opaqueOpacity = 1.0;
         const semiTransparentOpacity = 0.6;
-        const exitTransitionRange = 10; // world–unit distance for final fade
+        const exitTransitionRange = 5; // world–unit distance for final fade
 
         const bottomY_ln1_abs = LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2;
         const midY_ln1_abs    = LAYER_NORM_1_Y_POS;
         const topY_ln1_abs    = LAYER_NORM_1_Y_POS + LN_PARAMS.height / 2;
 
-        // Use the duplicate (branch) vector of the first lane as position probe
-        const firstLane = this.lanes.length ? this.lanes[0] : null;
-        const firstMovingVecY = firstLane ? firstLane.dupVec.group.position.y : bottomY_ln1_abs - ANIM_OFFSET_Y_ORIGINAL_SPAWN;
+        // Determine the highest Y position of any vector still interacting with LN-1
+        let highestLN1VecY = -Infinity;
+        let anyVectorInLN1 = false;
+
+        this.lanes.forEach(lane => {
+            // Duplicate vector that travels through LN-1
+            if (lane.dupVec && lane.dupVec.group.visible) {
+                const y = lane.dupVec.group.position.y;
+                highestLN1VecY = Math.max(highestLN1VecY, y);
+                if (y >= bottomY_ln1_abs - exitTransitionRange) anyVectorInLN1 = true;
+            }
+            // Result vector that rises out of LN-1
+            if (lane.resultVec && lane.resultVec.group.visible) {
+                const y = lane.resultVec.group.position.y;
+                highestLN1VecY = Math.max(highestLN1VecY, y);
+                if (y >= bottomY_ln1_abs - exitTransitionRange) anyVectorInLN1 = true;
+            }
+        });
 
         let targetColor = darkGray.clone();
         let targetOpacity = opaqueOpacity;
 
-        if (firstMovingVecY >= bottomY_ln1_abs && firstMovingVecY < midY_ln1_abs) {
-            // Entering LN – dark gray → light, semi-transparent yellow
-            const t = (firstMovingVecY - bottomY_ln1_abs) / (midY_ln1_abs - bottomY_ln1_abs);
-            targetColor = darkGray.clone().lerp(lightYellow, t);
-            targetOpacity = THREE.MathUtils.lerp(opaqueOpacity, semiTransparentOpacity, t);
-        } else if (firstMovingVecY >= midY_ln1_abs && firstMovingVecY < topY_ln1_abs) {
-            // Inside LN (upper half) – stay light & semi-transparent
-            targetColor = lightYellow.clone();
-            targetOpacity = semiTransparentOpacity;
-        } else if (firstMovingVecY >= topY_ln1_abs) {
-            // Exiting – light yellow → bright opaque yellow
-            const tRaw = (firstMovingVecY - topY_ln1_abs) / exitTransitionRange;
-            const t = Math.min(1, Math.max(0, tRaw));
-            targetColor = lightYellow.clone().lerp(brightYellow, t);
-            targetOpacity = THREE.MathUtils.lerp(semiTransparentOpacity, opaqueOpacity, t);
+        if (anyVectorInLN1 && highestLN1VecY > -Infinity) {
+            if (highestLN1VecY >= bottomY_ln1_abs && highestLN1VecY < midY_ln1_abs) {
+                // Entering LN-1
+                const t = (highestLN1VecY - bottomY_ln1_abs) / (midY_ln1_abs - bottomY_ln1_abs);
+                targetColor = darkGray.clone().lerp(lightYellow, t);
+                targetOpacity = THREE.MathUtils.lerp(opaqueOpacity, semiTransparentOpacity, t);
+            } else if (highestLN1VecY >= midY_ln1_abs && highestLN1VecY < topY_ln1_abs) {
+                // Inside LN-1
+                targetColor = lightYellow.clone();
+                targetOpacity = semiTransparentOpacity;
+            } else if (highestLN1VecY >= topY_ln1_abs) {
+                // Exiting LN-1
+                const tRaw = (highestLN1VecY - topY_ln1_abs) / exitTransitionRange;
+                const t = Math.min(1, Math.max(0, tRaw));
+                targetColor = lightYellow.clone().lerp(brightYellow, t);
+                targetOpacity = THREE.MathUtils.lerp(semiTransparentOpacity, opaqueOpacity, t);
+            }
+        }
+
+        // -------------------------------------------------------------
+        // Once a vector has risen sufficiently above LN-1 we want to
+        // "bake" the bright colour so the ring doesn't revert to the
+        // inactive palette when no vectors are nearby (e.g. while the
+        // MHSA animation runs).  We do this by latching a flag the first
+        // frame the exit transition completes.
+        if (!this._ln1ColorLocked) {
+            this._ln1ColorLocked = false; // ensure property exists
+        }
+
+        if (!this._ln1ColorLocked && highestLN1VecY >= topY_ln1_abs + exitTransitionRange) {
+            this._ln1ColorLocked = true;
+            this._ln1LockedColor = brightYellow.clone();
+        }
+
+        if (this._ln1ColorLocked) {
+            targetColor = this._ln1LockedColor.clone();
+            targetOpacity = opaqueOpacity;
         }
 
         // Apply to mesh material(s)
