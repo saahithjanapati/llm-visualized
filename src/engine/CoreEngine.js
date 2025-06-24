@@ -31,6 +31,39 @@ export class CoreEngine {
         this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 10000);
         this.camera.position.set(0, 150, 800);
 
+        // ────────────────────────────────────────────────────────────────────
+        // Apply optional camera overrides BEFORE creating OrbitControls so the
+        // controls inherit the correct initial target & position.
+        // -------------------------------------------------------------------
+        let customTarget = null;
+        if (opts.cameraPosition instanceof THREE.Vector3) {
+            this.camera.position.copy(opts.cameraPosition);
+        } else if (opts.cameraPosition && typeof opts.cameraPosition === 'object' &&
+                   'x' in opts.cameraPosition && 'y' in opts.cameraPosition && 'z' in opts.cameraPosition) {
+            this.camera.position.set(opts.cameraPosition.x, opts.cameraPosition.y, opts.cameraPosition.z);
+        }
+
+        if (opts.cameraTarget instanceof THREE.Vector3) {
+            customTarget = opts.cameraTarget.clone();
+        } else if (opts.cameraTarget && typeof opts.cameraTarget === 'object' &&
+                   'x' in opts.cameraTarget && 'y' in opts.cameraTarget && 'z' in opts.cameraTarget) {
+            customTarget = new THREE.Vector3(opts.cameraTarget.x, opts.cameraTarget.y, opts.cameraTarget.z);
+        }
+
+        // Allow callers to explicitly override the far clipping plane, or
+        // auto-expand it when a custom camera position is provided.
+        if (typeof opts.cameraFar === 'number' && opts.cameraFar > this.camera.near) {
+            this.camera.far = opts.cameraFar;
+            this.camera.updateProjectionMatrix();
+        } else if (opts.cameraPosition) {
+            const distFromOrigin = this.camera.position.length();
+            const suggestedFar = distFromOrigin * 2.5; // generous margin
+            if (suggestedFar > this.camera.far) {
+                this.camera.far = suggestedFar;
+                this.camera.updateProjectionMatrix();
+            }
+        }
+
         if (container instanceof HTMLCanvasElement) {
             this.renderer = new THREE.WebGLRenderer({ canvas: container, antialias: true });
         } else {
@@ -53,7 +86,11 @@ export class CoreEngine {
         // ────────────────────────────────────────────────────────────────────
         this.controls = new OrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = true;
-        this.controls.target.set(0, 66, 0);
+        if (customTarget) {
+            this.controls.target.copy(customTarget);
+        } else {
+            this.controls.target.set(0, 66, 0);
+        }
 
         this.scene.add(new THREE.AmbientLight(0xffffff, 0.7));
         const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);

@@ -42,11 +42,12 @@
 
         // New pipeline controller – manages a single vector bundle through
         // the stacked layers in strict sequence.
-        const NUM_LAYERS = 2;
+        const NUM_LAYERS = 12;
 
-        // Position camera so the full 12-layer tower is visible
-        const camPos = new THREE.Vector3(0, 8000, 4500);
-        const camTarget = new THREE.Vector3(0, 6000, 0);
+        // Move the camera further back & slightly higher so the entire
+        // 12-layer tower fits comfortably within the viewport.
+        const camPos    = new THREE.Vector3(0, 11000, 16000);
+        const camTarget = new THREE.Vector3(0, 9000, 0);
 
         const pipeline = new LayerPipeline(canvas, NUM_LAYERS, {
             cameraPosition: camPos,
