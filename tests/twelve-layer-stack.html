@@ -10,10 +10,12 @@
     </style>
 </head>
 <body>
+    <!-- Loading GIF overlay -->
+    <img id="loadingGif" src="../cool-fun.gif" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:4;max-width:30%;height:auto;" />
     <!-- Intro text animation canvas (on top) -->
     <canvas id="introCanvas" style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:2;"></canvas>
     <!-- GPT-2 tower canvas (below) -->
-    <canvas id="gptCanvas" style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:1;display:none;"></canvas>
+    <canvas id="gptCanvas" style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:1;"></canvas>
 
     <!-- Import map for all external / ESM modules used by the visualisation. -->
     <script type="importmap">
@@ -30,7 +32,8 @@
             "../src/data/RandomActivationSource.js": "../src/data/RandomActivationSource.js",
             "../src/engine/LayerPipeline.js": "../src/engine/LayerPipeline.js",
             "three/examples/jsm/loaders/FontLoader.js": "https://esm.sh/three@0.160.0/examples/jsm/loaders/FontLoader.js",
-            "three/examples/jsm/geometries/TextGeometry.js": "https://esm.sh/three@0.160.0/examples/jsm/geometries/TextGeometry.js"
+            "three/examples/jsm/geometries/TextGeometry.js": "https://esm.sh/three@0.160.0/examples/jsm/geometries/TextGeometry.js",
+            "three/examples/jsm/loaders/EXRLoader.js": "https://esm.sh/three@0.160.0/examples/jsm/loaders/EXRLoader.js"
         }
     }
     </script>
@@ -45,6 +48,7 @@
         import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
         import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
         import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
+        import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
         import { LayerPipeline } from '../src/engine/LayerPipeline.js';
 
         // ------------------------------------------------------------------
@@ -83,7 +87,7 @@
         controls.enableDamping = true;
         controls.dampingFactor = 0.05;
 
-        scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        // Ambient light replaced by HDRI environment; ambient removed.
         const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
         dirLight.position.set(5, 10, 7.5);
         scene.add(dirLight);
@@ -164,6 +168,36 @@
             setTimeout(() => revealChar(0), 500);
         });
 
+        // ─────────────────────────────────────────────────────────────────--
+        // HDRI Environment Map Lighting
+        // ─────────────────────────────────────────────────────────────────--
+        const exrLoader = new EXRLoader();
+        exrLoader.load('../rogland_clear_night_1k.exr', (texture) => {
+            texture.mapping = THREE.EquirectangularReflectionMapping;
+
+            // Apply environment to intro and GPT scenes
+            scene.environment = texture;
+            pipeline.engine.scene.environment = texture;
+
+            // Remove any ambient lights from both scenes
+            scene.traverse((obj) => { if (obj.isAmbientLight) scene.remove(obj); });
+            pipeline.engine.scene.traverse((obj) => { if (obj.isAmbientLight) pipeline.engine.scene.remove(obj); });
+
+            // Optionally adjust renderer tone mapping for HDR appearance
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 1.0;
+            pipeline.engine.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            pipeline.engine.renderer.toneMappingExposure = 1.0;
+
+            // Show GPT canvas now that environment is ready
+            gptCanvas.style.display = 'block';
+            introCanvas.style.display = 'none';
+
+            // Hide loading GIF
+            const gif = document.getElementById('loadingGif');
+            if (gif) gif.style.display = 'none';
+        });
+
         // Resize handling for both canvases
         window.addEventListener('resize', () => {
             const { innerWidth, innerHeight } = window;
@@ -205,6 +239,74 @@
         };
 
         window.addEventListener('beforeunload', () => cleanup());
+
+        // ------------------------------------------------------------------
+        // Typewriter caption underneath GPT tower (single scene)
+        // ------------------------------------------------------------------
+        const TYPE_TEXT  = 'Can machines think?';
+        const TYPE_DELAY_CAP = 120; // ms
+
+        const captionLoader = new FontLoader();
+        captionLoader.load('https://threejs.org/examples/fonts/helvetiker_regular.typeface.json', (font) => {
+            const charGroup = new THREE.Group();
+            pipeline.engine.scene.add(charGroup);
+
+            const charMeshes = [];
+            const charWidths = [];
+            let xOffset = 0;
+            const charSpacing = 100; // Adjust spacing for big text size
+
+            for (const ch of TYPE_TEXT) {
+                if (ch === ' ') {
+                    xOffset += 400; // space width
+                    charMeshes.push(null);
+                    charWidths.push(400);
+                    continue;
+                }
+
+                const geo = new TextGeometry(ch, {
+                    font,
+                    size: 800,
+                    height: 120,
+                    curveSegments: 10,
+                    bevelEnabled: true,
+                    bevelThickness: 20,
+                    bevelSize: 10,
+                    bevelOffset: 0,
+                    bevelSegments: 4
+                });
+                geo.computeBoundingBox();
+                const width = geo.boundingBox.max.x - geo.boundingBox.min.x;
+                const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0 });
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.x = xOffset;
+                charGroup.add(mesh);
+                charMeshes.push(mesh);
+                charWidths.push(width);
+                xOffset += width + charSpacing;
+            }
+
+            // Center group beneath tower (approx y = -1000)
+            charGroup.position.set(-xOffset / 2 + charSpacing / 2, -1000, 0);
+
+            const revealChar = (index) => {
+                if (index >= charMeshes.length) return;
+
+                const mesh = charMeshes[index];
+                if (mesh) {
+                    new TWEEN.Tween(mesh.material).to({ opacity: 1 }, TYPE_DELAY_CAP).start();
+                }
+
+                setTimeout(() => revealChar(index + 1), TYPE_DELAY_CAP);
+            };
+
+            // Kick off typing after short delay
+            setTimeout(() => revealChar(0), 500);
+
+            // Hide loading GIF now that caption is starting
+            const gif = document.getElementById('loadingGif');
+            if (gif) gif.style.display = 'none';
+        });
     </script>
 </body>
 </html> 
