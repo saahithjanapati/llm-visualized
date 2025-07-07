@@ -12,6 +12,8 @@
 <body>
     <!-- Loading GIF overlay -->
     <img id="loadingGif" src="../cool-fun.gif" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:4;max-width:30%;height:auto;" />
+    <!-- Status overlay (top-right) -->
+    <div id="statusOverlay" style="position:fixed;top:10px;right:10px;padding:8px 12px;font-family:monospace;font-size:14px;color:#fff;background:rgba(20,20,20,0.35);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);border-radius:8px;pointer-events:none;z-index:5;white-space:pre;">Layer 1 / 12\nStage: Loading</div>
     <!-- Intro text animation canvas (on top) -->
     <canvas id="introCanvas" style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:2;"></canvas>
     <!-- GPT-2 tower canvas (below) -->
@@ -307,6 +309,42 @@
             const gif = document.getElementById('loadingGif');
             if (gif) gif.style.display = 'none';
         });
+
+        // ------------------------------------------------------------------
+        // Status overlay updater
+        // ------------------------------------------------------------------
+        const statusDiv = document.getElementById('statusOverlay');
+        function updateStatus() {
+            if (!statusDiv) return;
+            const idx = pipeline._currentLayerIdx;
+            const total = NUM_LAYERS;
+            const layer = pipeline._layers[idx];
+            let displayStage = 'Loading...';
+
+            if (layer) {
+                // If MHSA is active but not complete – show MHA
+                if (layer.mhsaAnimation && layer.mhsaAnimation.mhaPassThroughPhase !== 'mha_pass_through_complete') {
+                    displayStage = 'Multi Head Attention';
+                } else {
+                    // Access first lane for LN2 / MLP state hints
+                    const lane = layer.lanes && layer.lanes.length ? layer.lanes[0] : null;
+
+                    if (lane) {
+                        // MLP started?
+                        if (lane.mlpUpStarted || lane.ln2Phase === 'mlpReady' || lane.ln2Phase === 'done') {
+                            displayStage = 'Multi-Layer Perceptron Block';
+                        } else if (lane.ln2Phase && lane.ln2Phase !== 'notStarted') {
+                            displayStage = 'LayerNorm 2';
+                        } else if (layer.isActive) {
+                            displayStage = 'LayerNorm 1';
+                        }
+                    }
+                }
+            }
+
+            statusDiv.textContent = `Layer ${idx + 1} / ${total}\n${displayStage}`;
+        }
+        setInterval(updateStatus, 250);
     </script>
 </body>
 </html> 

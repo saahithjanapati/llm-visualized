@@ -57,7 +57,7 @@ export class MHSAAnimation {
 
         this.matrixInitialRestingColor = new THREE.Color(MHSA_MATRIX_INITIAL_RESTING_COLOR);
         this.matrixRestingEmissiveIntensity = 0.1; // Default low emissive intensity
-        this.matrixRestingOpacity = 0.7; // Default opacity for resting matrices
+        this.matrixRestingOpacity = 1.0; // Default opacity for resting matrices (opaque)
 
         this.brightGreen = new THREE.Color(MHSA_BRIGHT_GREEN);
         this.darkTintedGreen = new THREE.Color(MHSA_DARK_TINTED_GREEN);
@@ -80,7 +80,7 @@ export class MHSAAnimation {
 
     _setupMHSAVisualizations() {
         const darkGrayColor = new THREE.Color(0x404040);
-        const matrixOpacity = 0.7;
+        const matrixOpacity = this.matrixRestingOpacity;
         const matrixCenterY = this.mhsaBaseY + MHA_MATRIX_PARAMS.height / 2;
 
         for (let i = 0; i < NUM_HEAD_SETS_LAYER; i++) {
@@ -101,7 +101,7 @@ export class MHSAAnimation {
             queryMatrix.setColor(darkGrayColor);
             queryMatrix.group.children.forEach(child => {
                 if (child.material) {
-                    child.material.transparent = true;
+                    child.material.transparent = matrixOpacity < 1.0;
                     child.material.opacity = matrixOpacity;
                 }
             });
@@ -118,7 +118,7 @@ export class MHSAAnimation {
             keyMatrix.setColor(darkGrayColor);
             keyMatrix.group.children.forEach(child => {
                 if (child.material) {
-                    child.material.transparent = true;
+                    child.material.transparent = matrixOpacity < 1.0;
                     child.material.opacity = matrixOpacity;
                 }
             });
@@ -135,7 +135,7 @@ export class MHSAAnimation {
             valueMatrix.setColor(darkGrayColor);
             valueMatrix.group.children.forEach(child => {
                 if (child.material) {
-                    child.material.transparent = true;
+                    child.material.transparent = matrixOpacity < 1.0;
                     child.material.opacity = matrixOpacity;
                 }
             });
