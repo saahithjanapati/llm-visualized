@@ -828,6 +828,17 @@ export class MHSAAnimation {
                         mat.opacity = o.op;
                         mat.needsUpdate = true;
                     })
+                    .onComplete(() => {
+                        // Once the gray vector has fully faded, remove it from the scene
+                        if (vec && vec.group) {
+                            // Hide, detach, and dispose to reclaim resources
+                            vec.group.visible = false;
+                            this.parentGroup.remove(vec.group);
+                            if (typeof vec.dispose === 'function') {
+                                vec.dispose();
+                            }
+                        }
+                    })
                     .start();
             });
         }
