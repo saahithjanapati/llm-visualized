@@ -480,6 +480,12 @@ export default class Gpt2Layer extends BaseLayer {
                 case 'right':
                     dupVec.group.position.x = Math.min(BRANCH_X, dupVec.group.position.x + ANIM_HORIZ_SPEED * speedMult * dt);
                     if (dupVec.group.position.x >= BRANCH_X - 0.01) {
+                        // Ensure alignment with LN-1 centre
+                        dupVec.group.position.x = BRANCH_X;
+                        // Show the multiplication target inside LN-1 (parity with LN-2 behaviour)
+                        if (lane.multTarget && lane.multTarget.group) {
+                            lane.multTarget.group.visible = true;
+                        }
                         lane.horizPhase = 'insideLN';
                     }
                     updateTrail(lane.dupTrail, dupVec.group.position);
