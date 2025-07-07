@@ -3,6 +3,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { QUALITY_PRESET } from '../utils/constants.js';
 
 /**
  * CoreEngine is responsible for creating the Three-JS renderer, camera, 
@@ -21,6 +22,9 @@ export class CoreEngine {
         this._container = container;
         this._layers = layers;
         this._speed  = typeof opts.speed === 'number' ? opts.speed : 1.0;
+        // Enable/disable expensive post-processing effects (e.g. bloom).
+        // Bloom is disabled by default to reduce initial load; set opts.enableBloom=true to re-enable.
+        this._enableBloom = typeof opts.enableBloom === 'boolean' ? opts.enableBloom : false;
 
         // ────────────────────────────────────────────────────────────────────
         // Scene / camera / renderer
@@ -28,7 +32,7 @@ export class CoreEngine {
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x111111);
 
-        this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 10000);
+        this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 5, 10000);
         this.camera.position.set(0, 150, 800);
 
         // ────────────────────────────────────────────────────────────────────
@@ -64,22 +68,31 @@ export class CoreEngine {
             }
         }
 
+        const antialiasEnabled = QUALITY_PRESET === 'high';
         if (container instanceof HTMLCanvasElement) {
-            this.renderer = new THREE.WebGLRenderer({ canvas: container, antialias: true });
+            this.renderer = new THREE.WebGLRenderer({ canvas: container, antialias: antialiasEnabled, logarithmicDepthBuffer: true });
         } else {
-            this.renderer = new THREE.WebGLRenderer({ antialias: true });
+            this.renderer = new THREE.WebGLRenderer({ antialias: antialiasEnabled, logarithmicDepthBuffer: true });
             container.appendChild(this.renderer.domElement);
         }
         this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        this.renderer.setPixelRatio(QUALITY_PRESET === 'high' ? Math.min(window.devicePixelRatio, 2) : 1);
 
         // ────────────────────────────────────────────────────────────────────
         // Post-processing (Bloom for emissive flashes)
         // ────────────────────────────────────────────────────────────────────
         this.composer = new EffectComposer(this.renderer);
         this.composer.addPass(new RenderPass(this.scene, this.camera));
-        const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.0, 0.4, 0.85);
-        this.composer.addPass(bloomPass);
+        // Add bloom only when explicitly enabled by caller *and* high-quality preset is active.
+        if (this._enableBloom && QUALITY_PRESET === 'high') {
+            const bloomPass = new UnrealBloomPass(
+                new THREE.Vector2(window.innerWidth, window.innerHeight),
+                1.0,   // strength
+                0.4,   // radius
+                0.85   // threshold
+            );
+            this.composer.addPass(bloomPass);
+        }
 
         // ────────────────────────────────────────────────────────────────────
         // Controls & basic lighting
@@ -111,6 +124,22 @@ export class CoreEngine {
         // Internal state
         this._clock  = new THREE.Clock();
         this._paused = false;
+
+        // ────────────────────────────────────────────────────────────────────
+        // Performance stats overlay (FPS, MS, MB) – injected if Stats.js is
+        // available on the global scope.  This keeps the CoreEngine agnostic
+        // of the hosting environment while providing useful runtime metrics
+        // during interactive demos.
+        // -------------------------------------------------------------------
+        this._stats = null;
+        if (typeof Stats !== 'undefined') {
+            this._stats = new Stats();
+            this._stats.showPanel(0); // 0 = FPS, 1 = ms/frame, 2 = MB
+            this._stats.dom.style.position = 'fixed';
+            this._stats.dom.style.left = '0px';
+            this._stats.dom.style.top  = '0px';
+            document.body.appendChild(this._stats.dom);
+        }
 
         // Bind methods so we can add/remove listeners cleanly.
         this._animate   = this._animate.bind(this);
@@ -167,8 +196,16 @@ export class CoreEngine {
         requestAnimationFrame(this._animate);
         if (this._paused) return;
 
+        // Begin performance stats collection (if enabled)
+        if (this._stats) this._stats.begin();
+
         const dt = this._clock.getDelta() * this._speed;
-        this._layers.forEach(layer => layer.update(dt));
+        this._layers.forEach(layer => {
+            if (!layer) return;
+            if (layer.isActive || layer._transitionPhase === 'positioning') {
+                layer.update(dt);
+            }
+        });
 
         // External libraries like @tweenjs/tween need ticking.
         if (typeof TWEEN !== 'undefined' && TWEEN.update) {
@@ -177,6 +214,9 @@ export class CoreEngine {
 
         this.controls.update();
         this.composer.render();
+
+        // End performance stats collection (if enabled)
+        if (this._stats) this._stats.end();
     };
 }
 

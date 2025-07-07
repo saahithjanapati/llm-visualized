@@ -239,7 +239,7 @@ export default class Gpt2Layer extends BaseLayer {
             MLP_MATRIX_PARAMS_UP.slitTopWidthFactor
         );
         mlpUp.setColor(inactiveDark.clone());
-        mlpUp.setMaterialProperties({ opacity: 0.7, transparent: true });
+        mlpUp.setMaterialProperties({ opacity: 1.0, transparent: false });
         this.root.add(mlpUp.group);
 
         // 5) MLP Down-projection matrix (same orange)
@@ -259,7 +259,7 @@ export default class Gpt2Layer extends BaseLayer {
             MLP_MATRIX_PARAMS_DOWN.slitTopWidthFactor
         );
         mlpDown.setColor(inactiveDark.clone());
-        mlpDown.setMaterialProperties({ opacity: 0.7, transparent: true });
+        mlpDown.setMaterialProperties({ opacity: 1.0, transparent: false });
         this.root.add(mlpDown.group);
 
         // ---------- Residual vectors (original stream) ----------
@@ -502,6 +502,7 @@ export default class Gpt2Layer extends BaseLayer {
                     if (dupVec.group.position.y >= lane.ln1MidY - 0.01) {
                         lane.multStarted = true;
                         if (lane.multTarget) {
+                            lane.multTarget.group.visible = true;
                             simplePrismMultiply(dupVec, lane.multTarget, () => {
                                 dupVec.group.visible = false;
                                 lane.multTarget.group.visible = false;
@@ -555,7 +556,10 @@ export default class Gpt2Layer extends BaseLayer {
                     const v = lane.postAdditionVec;
                     if (!v) break;
                     
-                    const targetY = bottomY_ln2_abs - 10; // stop below LN2
+                    // Stage the vector at the same relative position used for LayerNorm-1
+                    // (5 units above the bottom of the norm ring) so that the ensuing
+                    // normalisation begins at a consistent height across both LayerNorms.
+                    const targetY = bottomY_ln2_abs + 5; // align with LN1 offset
                     if (v.group.position.y < targetY) {
                         v.group.position.y = Math.min(targetY, v.group.position.y + ANIM_RISE_SPEED_POST_SPLIT_LN2 * speedMult * dt);
                     } else {
@@ -889,6 +893,10 @@ export default class Gpt2Layer extends BaseLayer {
                 this.mlpDown.setColor(orangeColor);
                 this.mlpDown.setEmissive(orangeColor, 0.5);
                 
+                // Ensure both MLP matrices are fully opaque at the end
+                this.mlpUp.setMaterialProperties({ opacity: 1.0, transparent: false });
+                this.mlpDown.setMaterialProperties({ opacity: 1.0, transparent: false });
+                
                 // If we haven't collapsed yet (shouldn't happen), do it now
                 if (!lane.collapsedInMatrix) {
                     this._collapseToSingle(lane);
@@ -1056,9 +1064,11 @@ export default class Gpt2Layer extends BaseLayer {
 
         const multTarget = new VectorVisualizationInstancedPrism(originalVec.rawData.slice(), new THREE.Vector3(offsetX, ln1CenterY + 3.3, zPos));
         this.root.add(multTarget.group);
+        multTarget.group.visible = false;
 
         const multTargetLN2 = new VectorVisualizationInstancedPrism(originalVec.rawData.slice(), new THREE.Vector3(offsetX, ln2CenterY + 3.3, zPos));
         this.root.add(multTargetLN2.group);
+        multTargetLN2.group.visible = false;
 
         this.lanes.push({
             originalVec,

@@ -133,6 +133,14 @@ export function initLayerAnimation(container) {
         LN_PARAMS.holeWidth,
         LN_PARAMS.holeWidthFactor
     );
+    // Match LayerNorm appearance to the light gray used for MHSA head matrices
+    layerNorm1.setColor(new THREE.Color(0x404040));
+    layerNorm1.group.children.forEach(child => {
+        if (child.material) {
+            child.material.transparent = true;
+            child.material.opacity = 0.7; // Same opacity as MHSA head matrices
+        }
+    });
     scene.add(layerNorm1.group);
 
     // -------------------------------------------------------------------------
@@ -159,7 +167,7 @@ export function initLayerAnimation(container) {
     // -------------------------------------------------------------------------
     // Colour/opacity settings reused from other matrices
     const mlpDarkGray = new THREE.Color(0x404040);
-    const mlpMatrixOpacity = 0.7;
+    const mlpMatrixOpacity = 1.0;
 
     // ── LayerNorm 2 ───────────────────────────────────────────────────────────
     const layerNorm2 = new LayerNormalizationVisualization(
@@ -172,6 +180,14 @@ export function initLayerAnimation(container) {
         LN_PARAMS.holeWidth,
         LN_PARAMS.holeWidthFactor
     );
+    // Apply the same light gray style to the second LayerNorm
+    layerNorm2.setColor(new THREE.Color(0x404040));
+    layerNorm2.group.children.forEach(child => {
+        if (child.material) {
+            child.material.transparent = false;
+            child.material.opacity = mlpMatrixOpacity;
+        }
+    });
     scene.add(layerNorm2.group);
 
     // Compute helper Y positions for the stacked MLP matrices
@@ -203,7 +219,7 @@ export function initLayerAnimation(container) {
     mlpMatrixUp.setColor(mlpDarkGray);
     mlpMatrixUp.group.children.forEach(child => {
         if (child.material) {
-            child.material.transparent = true;
+            child.material.transparent = false;
             child.material.opacity = mlpMatrixOpacity;
         }
     });
@@ -227,7 +243,7 @@ export function initLayerAnimation(container) {
     mlpMatrixDown.setColor(mlpDarkGray);
     mlpMatrixDown.group.children.forEach(child => {
         if (child.material) {
-            child.material.transparent = true;
+            child.material.transparent = false;
             child.material.opacity = mlpMatrixOpacity;
         }
     });
@@ -274,7 +290,7 @@ export function initLayerAnimation(container) {
     // -------------------------------------------------------------------------
     let ln2ColorLocked = false;      // becomes true after the final bright transition
     let ln2LockedColor = null;       // stores the color to keep (e.g., brightYellow)
-    let ln2LastColor = new THREE.Color(0x333333);
+    let ln2LastColor = new THREE.Color(0x404040);
     let ln2LastOpacity = 1.0;
 
     // --- Trail line support --------------------------------------------------------
@@ -304,9 +320,13 @@ export function initLayerAnimation(container) {
         scene.add(multTarget.group);
 
         // ---------- Static vectors inside SECOND LayerNorm (LN2) ----------
+        // Place the static vector higher inside LN2 so it matches the relative
+        // vertical position of the vector inside LN1 (≈13.3 units above the
+        // centre of the block).  This avoids the distracting "pop-in" that was
+        // visible when the camera first entered the second LayerNorm.
         const multTargetLN2 = new VectorVisualizationInstancedPrism(data.slice(), new THREE.Vector3(
             BRANCH_X,
-            LAYER_NORM_2_Y_POS + 3.3, // small offset inside LN2
+            LAYER_NORM_2_Y_POS + 13.3, // align with LN1 relative placement
             zPos
         ));
         // Keep the multiplication target inside LN2 visible from the beginning
@@ -466,7 +486,7 @@ export function initLayerAnimation(container) {
         const timeNow = performance.now();
 
         // --- LayerNorm Appearance Control ---
-        const darkGray = new THREE.Color(0x333333);
+        const darkGray = new THREE.Color(0x404040);
         const lightYellow = new THREE.Color(0xFFFF99); // For semi-transparent state
         const brightYellow = new THREE.Color(0xFFFF00); // For final opaque state
         const opaqueOpacity = 1.0;

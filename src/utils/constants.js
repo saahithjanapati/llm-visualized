@@ -3,6 +3,9 @@
 // ------------------------------------------------------------
 export const GLOBAL_ANIM_SPEED_MULT = 50;
 
+// Always render in high-quality mode. Remove lower-quality mobile detection.
+export const IS_MOBILE = false;
+export const QUALITY_PRESET = 'high';
 
 export const VECTOR_LENGTH = 100;
 export const SPHERE_RADIUS = 0.15;
@@ -15,7 +18,7 @@ export const SPAWN_Z_RANGE = 10;
 export const VECTOR_SPEED = 0.1;
 export const EPSILON = 1e-5; // Small value for Layer Norm stability
 export const SPAWN_INTERVAL = 120; // Faster spawning
-export const HIDE_INSTANCE_Y_OFFSET = 10000; // Used to "hide" instanced mesh instances by moving them far away
+export const HIDE_INSTANCE_Y_OFFSET = -50000; // Used to "hide" instanced mesh instances by moving them far away (placed well below the scene)
 
 
 // ------------------------------------------------------------
@@ -87,7 +90,7 @@ export const LN_PARAMS = {
     depth: LANE_DEPENDENT_DEPTH,
     wallThickness: 1.0,
     numberOfHoles: NUM_VECTOR_LANES,
-    holeWidth: 5,
+    holeWidth: 10,
     holeWidthFactor: 20
 };
 
@@ -96,7 +99,7 @@ export const LN_PARAMS = {
 export const NUM_HEAD_SETS_LAYER = 12;
 
 /** Horizontal gap between adjacent attention head sets. */
-export const HEAD_SET_GAP_LAYER = 100;
+export const HEAD_SET_GAP_LAYER = 180;
 
 /** Horizontal center-to-center spacing for Q, K, V matrices within a single attention head. */
 export const MHA_INTERNAL_MATRIX_SPACING = 130;
@@ -112,10 +115,10 @@ export const MHA_MATRIX_PARAMS = {
     topWidthFactor: 0.1,
     cornerRadius: 5,
     numberOfSlits: 5, // Visually, might want to link to VECTOR_LENGTH or a fraction
-    slitWidth: 5,
+    slitWidth: 20, // significantly wider slits for clearer view
     slitDepthFactor: 1.0,
     slitBottomWidthFactor: 1,
-    slitTopWidthFactor: 0.08
+    slitTopWidthFactor: 0.90
 };
 
 // MLP (Multi-Layer Perceptron) Layer Parameters
@@ -180,7 +183,7 @@ export const ANIM_RISE_SPEED_INSIDE_LN = 6;
 
 // Trail Line Constants
 /** Maximum number of points to store for each trail line, affecting trail length.  Increase for longer-duration animations. */
-export const MAX_TRAIL_POINTS = 100000;
+export const MAX_TRAIL_POINTS = QUALITY_PRESET === 'low' ? 4000 : 100000;
 
 // Vector behaviour within MHSA heads ------------------------------------------------
 /** Vertical speed for vectors rising into heads. */
@@ -234,7 +237,7 @@ export const MLP_MATRIX_PARAMS_UP = {
     topWidthFactor: MLP_VECTOR_MULTIPLIER,          // widens to 4× at the top (3072)
     cornerRadius: 30.0,
     numberOfSlits: LN_PARAMS.numberOfHoles, // indicate 4× channels
-    slitWidth: 5,
+    slitWidth: 10,
     slitDepthFactor: 1.0,
     slitBottomWidthFactor: 0.95,
     slitTopWidthFactor: 0.95
@@ -248,7 +251,7 @@ export const MLP_MATRIX_PARAMS_DOWN = {
     topWidthFactor: 1 / MLP_VECTOR_MULTIPLIER,            // narrows back to d_model
     cornerRadius: 30.0,
     numberOfSlits: LN_PARAMS.numberOfHoles,               // back to original channels
-    slitWidth: 5,
+    slitWidth: 10,
     slitDepthFactor: 1.0,
     slitBottomWidthFactor: 0.95,
     slitTopWidthFactor: 0.95

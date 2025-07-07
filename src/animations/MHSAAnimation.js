@@ -1122,6 +1122,8 @@ export class MHSAAnimation {
                     })
                     .onComplete(() => {
                         this.outputProjMatrixAnimationPhase = 'completed';
+                        // Ensure final opacity is fully opaque
+                        this.outputProjectionMatrix.setMaterialProperties({ opacity: 1.0, transparent: false });
                     })
                     .start();
             })
@@ -1148,6 +1150,11 @@ export class MHSAAnimation {
             const qMatrix = this.mhaVisualizations[i * 3];
             const kMatrix = this.mhaVisualizations[i * 3 + 1];
             const vMatrix = this.mhaVisualizations[i * 3 + 2];
+
+            // Ensure matrices are fully opaque before colour tween begins.
+            [qMatrix, kMatrix, vMatrix].forEach(m => {
+                if (m) m.setMaterialProperties({ opacity: 1.0, transparent: false });
+            });
 
             const finalQColor = new THREE.Color(MHA_FINAL_Q_COLOR);
             const finalKColor = new THREE.Color(MHA_FINAL_K_COLOR);

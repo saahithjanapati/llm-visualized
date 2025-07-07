@@ -36,7 +36,7 @@ export const LN_PARAMS = {
     depth: 120,
     wallThickness: 1.0,
     numberOfHoles: 5, // This is also used as numVectors for lanes
-    holeWidth: 2.5,
+    holeWidth: 5,
     holeWidthFactor: 3.75
 };
 
@@ -64,10 +64,10 @@ export const MHA_MATRIX_PARAMS = {
     topWidthFactor: 0.47,
     cornerRadius: 1.2,
     numberOfSlits: 5, // Visually, might want to link to VECTOR_LENGTH or a fraction
-    slitWidth: 1.85,
+    slitWidth: 8,
     slitDepthFactor: 1.0,
     slitBottomWidthFactor: 0.95,
-    slitTopWidthFactor: 0.37
+    slitTopWidthFactor: 0.90
 };
 
 // -----------------------------------------------------------------------------
@@ -94,7 +94,7 @@ export const MLP_MATRIX_STYLE_PARAMS = {
     topWidthFactor: 0.6,
     cornerRadius: 1.0,
     // numberOfSlits will be VECTOR_LENGTH for the d_model side, and VECTOR_LENGTH * MLP_VECTOR_MULTIPLIER for the 4*d_model side
-    slitWidth: 1.5,
+    slitWidth: 3,
     slitDepthFactor: 1.0,
     slitBottomWidthFactor: 0.9,
     slitTopWidthFactor: 0.5
@@ -209,7 +209,7 @@ export const MHA_OUTPUT_PROJECTION_MATRIX_PARAMS = {
     
     // Slit parameters
     numberOfSlits: 5,              // Same as MHA_MATRIX_PARAMS.numberOfSlits
-    slitWidth: 5,               // Same as MHA_MATRIX_PARAMS.slitWidth
+    slitWidth: 20,
     slitDepthFactor: 1.0,          // Same as MHA_MATRIX_PARAMS.slitDepthFactor
     slitBottomWidthFactor: 0.92,   // Same as MHA_MATRIX_PARAMS.slitBottomWidthFactor
     slitTopWidthFactor: 0.92      // Same as MHA_MATRIX_PARAMS.slitTopWidthFactor

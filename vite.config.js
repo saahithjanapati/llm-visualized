@@ -35,6 +35,7 @@ export default defineConfig({
             mhaAnimation: resolve(__dirname, 'tests/mha_visualization_test.html'),
             mhaPassThrough: resolve(__dirname, 'tests/test_mhsa_pass_through.html'),
             twelveLayerStack: resolve(__dirname, 'tests/twelve-layer-stack.html'),
+            canMachinesThink: resolve(__dirname, 'tests/can-machines-think-test.html'),
         }
     } 
   },

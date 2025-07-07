@@ -231,30 +231,38 @@ export class WeightMatrixVisualizationInstance {
         }
 
         // --- Create Meshes for *this* instance ---
-        const material = new THREE.MeshStandardMaterial({
+        const sideMaterial = new THREE.MeshStandardMaterial({
             color: 0x0077ff,
             metalness: 0.1,
             roughness: 0.7,
             flatShading: false,
-            side: THREE.DoubleSide,
+            side: THREE.FrontSide,
             transparent: true,
             opacity: 0.8
         });
 
+        const capMaterial = sideMaterial.clone();
+        capMaterial.polygonOffset = true;
+        capMaterial.polygonOffsetFactor = -1;
+        capMaterial.polygonOffsetUnits  = -4;
+
         // Side walls
-        this.mesh = new THREE.Mesh(baseGeometry, material);
+        this.mesh = new THREE.Mesh(baseGeometry, sideMaterial);
+        this.mesh.renderOrder = 0;
         this.group.add(this.mesh);
 
         // Caps use *the same* shape geometry.  We place them with a tiny epsilon
         // offset to avoid z-fighting exactly the same way the original visualisation did.
-        const epsilon = 0.001;
-        this.frontCapMesh = new THREE.Mesh(capShapeGeometry, material);
+        const epsilon = 0.05;
+        this.frontCapMesh = new THREE.Mesh(capShapeGeometry, capMaterial);
         this.frontCapMesh.position.z = this.depth / 2 + epsilon;
+        this.frontCapMesh.renderOrder = 1;
         this.group.add(this.frontCapMesh);
 
-        this.backCapMesh = new THREE.Mesh(capShapeGeometry, material);
+        this.backCapMesh = new THREE.Mesh(capShapeGeometry, capMaterial);
         this.backCapMesh.position.z = -this.depth / 2 - epsilon;
         this.backCapMesh.rotation.y = Math.PI;
+        this.backCapMesh.renderOrder = 2;
         this.group.add(this.backCapMesh);
     }
 

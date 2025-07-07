@@ -1,10 +1,41 @@
 import * as THREE from 'three';
 import { MAX_TRAIL_POINTS, GLOBAL_ANIM_SPEED_MULT } from './constants.js'; // Assuming MAX_TRAIL_POINTS is in constants.js
 import { TRAIL_LINE_OPACITY, TRAIL_LINE_COLOR } from '../animations/LayerAnimationConstants.js';
+import { QUALITY_PRESET } from './constants.js';
+
+// ────────────────────────────────────────────────────────────────────────────
+// Global toggle – set to `false` to completely disable trail line creation
+// and updates without touching calling code elsewhere.  This avoids large
+// ArrayBuffer allocations (MAX_TRAIL_POINTS * 3) when profiling memory.
+// ---------------------------------------------------------------------------
+export const TRAILS_ENABLED = false;
 
 const SPEED_MULT = GLOBAL_ANIM_SPEED_MULT; // If SPEED_MULT is used by updateTrail
 
-export function createTrailLine(scene, color = TRAIL_LINE_COLOR) { // Added scene parameter and default color
+export function createTrailLine(scene, color = TRAIL_LINE_COLOR) {
+    if (!TRAILS_ENABLED) {
+        // Provide a minimal placeholder line so callers can still tweak
+        // opacity/material without throwing, but allocate only 2 vertices.
+        const minimalGeometry = new THREE.BufferGeometry();
+        const pos = new Float32Array(6); // two 3-component points
+        minimalGeometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        minimalGeometry.setDrawRange(0, 2);
+        const material = new THREE.LineBasicMaterial({ 
+            color,
+            transparent: true,
+            opacity: TRAIL_LINE_OPACITY,
+            depthTest: true,
+            depthWrite: true,
+            polygonOffset: true,
+            polygonOffsetFactor: -2,
+            polygonOffsetUnits: -2,
+            linewidth: 1
+        });
+        const line = new THREE.Line(minimalGeometry, material);
+        line.frustumCulled = false;
+        scene.add(line);
+        return { line, geometry: minimalGeometry, positions: pos, points: [] };
+    }
     const geometry = new THREE.BufferGeometry();
     const positions = new Float32Array(MAX_TRAIL_POINTS * 3);
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
@@ -34,6 +65,15 @@ export function createTrailLine(scene, color = TRAIL_LINE_COLOR) { // Added scen
 }
 
 export function updateTrail(trailObj, pos) {
+    // Early-out when trails globally disabled or no geometry present
+    if (!TRAILS_ENABLED || !trailObj || !trailObj.geometry) return;
+
+    // Performance: skip every other frame on low-quality preset
+    if (QUALITY_PRESET === 'low') {
+        updateTrail._frame = (updateTrail._frame || 0) + 1;
+        if ((updateTrail._frame % 2) === 0) return;
+    }
+
     if (!pos || typeof pos.x !== 'number' || typeof pos.y !== 'number' || typeof pos.z !== 'number') {
         return;
     }

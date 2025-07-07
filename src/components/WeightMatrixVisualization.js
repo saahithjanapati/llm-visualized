@@ -1,5 +1,17 @@
 import * as THREE from 'three';
 import { CSG } from 'three-csg-ts'; // Import CSG
+import { QUALITY_PRESET } from '../utils/constants.js';
+
+// ------------------------------------------------------------------
+// Geometry cache (module-level) – keyed by a stringified set of the main
+// parameters that influence the vertex buffer.  Sharing geometries across
+// identical matrices avoids repeating expensive CSG operations and GPU
+// uploads.
+// ------------------------------------------------------------------
+const __geometryCache = new Map();
+function getCacheKey(width, height, depth, topWidthFactor, cornerRadius, numberOfSlits, slitWidth, slitDepthFactor, slitBottomWidthFactor, slitTopWidthFactor) {
+    return [width, height, depth, topWidthFactor, cornerRadius, numberOfSlits, slitWidth, slitDepthFactor, slitBottomWidthFactor, slitTopWidthFactor, QUALITY_PRESET].join('|');
+}
 
 export class WeightMatrixVisualization {
     constructor(
@@ -188,17 +200,33 @@ export class WeightMatrixVisualization {
             bevelSegments: Math.max(6, Math.round(this.cornerRadius * 3))
         };
 
-        // Create initial geometry by extruding the shape
-        const baseGeometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
-        baseGeometry.center(); // Center the resulting geometry
+        // --------------------------------------------------------------
+        //  1. Check the cache – if we have already built geometry for an
+        //     identical parameter set we can skip the heavy CSG work and
+        //     clone the cached BufferGeometry.
+        // --------------------------------------------------------------
+        const cacheKey = getCacheKey(this.width,this.height,this.depth,this.topWidthFactor,this.cornerRadius,this.numberOfSlits,this.slitWidth,this.slitDepthFactor,this.slitBottomWidthFactor,this.slitTopWidthFactor);
 
-        // Create a Mesh for the base geometry to use with CSG
-        const baseMesh = new THREE.Mesh(baseGeometry); // Material is not needed for CSG operation itself
+        let baseMesh;
+        if (__geometryCache.has(cacheKey)) {
+            // Re-use cached geometry (clone so each mesh can have its own matrix)
+            const cachedGeo = __geometryCache.get(cacheKey);
+            baseMesh = new THREE.Mesh(cachedGeo.clone());
+        } else {
+            // Create initial geometry by extruding the shape
+            const baseGeometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+            baseGeometry.center(); // Center the resulting geometry
+
+            // Create a Mesh for the base geometry to use with CSG
+            baseMesh = new THREE.Mesh(baseGeometry); // Material is not needed for CSG operation itself
+
+            // heavy CSG happens below (or skipped) – we'll add to cache at the end
+        }
 
         // --- Create and Subtract Slits using CSG (for the side walls) ---
         let finalMesh = baseMesh; // Start with the base mesh
 
-        if (this.numberOfSlits > 0 && this.slitWidth > 0) {
+        if (QUALITY_PRESET === 'high' && this.numberOfSlits > 0 && this.slitWidth > 0) {
             const slitSpacing = this.depth / (this.numberOfSlits + 1);
 
             // Calculate the actual depth of the cut based on the factor
@@ -260,20 +288,45 @@ export class WeightMatrixVisualization {
         }
 
         // --- Finalize the Side Walls Mesh ---
-        const material = new THREE.MeshStandardMaterial({
+        // Use two distinct materials so we can apply a polygon offset to the
+        // *cap* faces only.  Offsetting the depth values of the caps nudges
+        // them ever-so-slightly closer to the camera, eliminating the
+        // z-fighting flicker that still appeared when zoomed far out.
+
+        const sideMaterial = new THREE.MeshStandardMaterial({
             color: 0x0077ff, // Initial color (will be overridden by animation)
             metalness: 0.1,
             roughness: 0.7,
             flatShading: false,
-            side: THREE.DoubleSide, // Keep DoubleSide for the extruded part in case caps aren't perfectly flush
-            transparent: true, // Enable transparency
-            opacity: 0.8       // Set opacity level (0 = fully transparent, 1 = fully opaque)
+            side: THREE.FrontSide,
+            transparent: true,
+            opacity: 0.8
         });
 
+        const capMaterial = sideMaterial.clone();
+        capMaterial.polygonOffset = true;
+        capMaterial.polygonOffsetFactor = -1; // pull slightly forward
+        capMaterial.polygonOffsetUnits  = -4;
+
         // Assign the final CSG result geometry and the material to the main mesh (sides)
-        this.mesh = finalMesh; 
-        this.mesh.material = material;
-        this.mesh.geometry.computeVertexNormals(); 
+        this.mesh = finalMesh;
+        this.mesh.material = sideMaterial;
+        this.mesh.geometry.computeVertexNormals();
+
+        // Ensure transparent objects are rendered in a predictable order to
+        // avoid flickering caused by Three.js' painter-style sorting.  By
+        // explicitly rendering the side walls first, followed by the front
+        // cap and finally the back cap, we remove the ambiguity that appears
+        // when the camera is far away or at shallow angles.
+        this.mesh.renderOrder = 0;          // side walls first
+
+        // --------------------------------------------------------------
+        // Store completed geometry in cache for future instances
+        // (avoid re-computing CSG next time the same matrix appears).
+        // --------------------------------------------------------------
+        if (!__geometryCache.has(cacheKey)) {
+            __geometryCache.set(cacheKey, this.mesh.geometry.clone());
+        }
 
         // Add the side walls mesh (with holes) to the group
         this.group.add(this.mesh);
@@ -285,14 +338,20 @@ export class WeightMatrixVisualization {
         const capGeometry = new THREE.ShapeGeometry(shape);
         capGeometry.center();
 
-        const epsilon = 0.001; // small offset to prevent z‑fighting
-        this.frontCapMesh = new THREE.Mesh(capGeometry, material);
+        // Increase the cap offset to further separate it from the main body and
+        // avoid depth-buffer precision issues that show up when the camera is
+        // far away.  A larger gap (≈ 5 cm in world-space) is visually
+        // imperceptible but removes the flicker caused by z-fighting.
+        const epsilon = 0.05;
+        this.frontCapMesh = new THREE.Mesh(capGeometry, capMaterial);
         this.frontCapMesh.position.z = this.depth / 2 + epsilon;
+        this.frontCapMesh.renderOrder = 1;  // front cap after walls
         this.group.add(this.frontCapMesh);
 
-        this.backCapMesh = new THREE.Mesh(capGeometry, material);
+        this.backCapMesh = new THREE.Mesh(capGeometry, capMaterial);
         this.backCapMesh.position.z = -this.depth / 2 - epsilon;
         this.backCapMesh.rotation.y = Math.PI; // flip so normals face outwards
+        this.backCapMesh.renderOrder = 2;   // back cap last
         this.group.add(this.backCapMesh);
     }
 

@@ -10,8 +10,10 @@
     </style>
 </head>
 <body>
-    <!-- A full-screen render surface -->
-    <canvas id="renderCanvas"></canvas>
+    <!-- Intro text animation canvas (on top) -->
+    <canvas id="introCanvas" style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:2;"></canvas>
+    <!-- GPT-2 tower canvas (below) -->
+    <canvas id="gptCanvas" style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:1;display:none;"></canvas>
 
     <!-- Import map for all external / ESM modules used by the visualisation. -->
     <script type="importmap">
@@ -26,38 +28,183 @@
             "../src/engine/CoreEngine.js": "../src/engine/CoreEngine.js",
             "../src/engine/layers/Gpt2Layer.js": "../src/engine/layers/Gpt2Layer.js",
             "../src/data/RandomActivationSource.js": "../src/data/RandomActivationSource.js",
-            "../src/engine/LayerPipeline.js": "../src/engine/LayerPipeline.js"
+            "../src/engine/LayerPipeline.js": "../src/engine/LayerPipeline.js",
+            "three/examples/jsm/loaders/FontLoader.js": "https://esm.sh/three@0.160.0/examples/jsm/loaders/FontLoader.js",
+            "three/examples/jsm/geometries/TextGeometry.js": "https://esm.sh/three@0.160.0/examples/jsm/geometries/TextGeometry.js"
         }
     }
     </script>
 
     <!-- Global TWEEN.js for animations -->
     <script src="https://unpkg.com/@tweenjs/tween.js@23.1.1/dist/tween.umd.js"></script>
+    <!-- Stats.js for FPS / frame time monitoring -->
+    <script src="https://cdn.jsdelivr.net/npm/stats.js@0.17.0/build/stats.min.js"></script>
 
     <script type="module">
         import * as THREE from 'three';
+        import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+        import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
+        import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
         import { LayerPipeline } from '../src/engine/LayerPipeline.js';
 
-        const canvas = document.getElementById('renderCanvas');
+        // ------------------------------------------------------------------
+        // GPT-2 tower – initialise immediately (but canvas hidden until intro
+        // completes).  This allows heavy geometries/textures to load while the
+        // user watches the intro text.
+        // ------------------------------------------------------------------
+        const gptCanvas = document.getElementById('gptCanvas');
 
-        // New pipeline controller – manages a single vector bundle through
-        // the stacked layers in strict sequence.
         const NUM_LAYERS = 12;
-
-        // Move the camera further back & slightly higher so the entire
-        // 12-layer tower fits comfortably within the viewport.
         const camPos    = new THREE.Vector3(0, 11000, 16000);
         const camTarget = new THREE.Vector3(0, 9000, 0);
 
-        const pipeline = new LayerPipeline(canvas, NUM_LAYERS, {
+        const pipeline = new LayerPipeline(gptCanvas, NUM_LAYERS, {
             cameraPosition: camPos,
             cameraTarget: camTarget
         });
 
-        const cleanup = () => pipeline.dispose();
-        window.addEventListener('beforeunload', () => {
-            if (typeof cleanup === 'function') cleanup();
+        // ------------------------------------------------------------------
+        // Intro – "Can machines think?" Ghost-type animation (almost verbatim
+        // from can-machines-think-test.html but adapted for this page & API).
+        // ------------------------------------------------------------------
+        const introCanvas = document.getElementById('introCanvas');
+
+        const renderer = new THREE.WebGLRenderer({ canvas: introCanvas, antialias: true });
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x111111);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 20000);
+        camera.position.set(0, 0, 1500);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+
+        scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(5, 10, 7.5);
+        scene.add(dirLight);
+
+        const TEXT = 'Can machines think?';
+        const TYPE_DELAY = 120;
+
+        let cursorMesh;
+
+        // Load font and setup typing
+        const loader = new FontLoader();
+        loader.load('https://threejs.org/examples/fonts/helvetiker_regular.typeface.json', (font) => {
+            const charGroup = new THREE.Group();
+            scene.add(charGroup);
+
+            const charMeshes = [];
+            const charWidths = [];
+            let xOffset = 0;
+            const charSpacing = 10;
+            const extraCursorGap = 60;
+
+            for (const ch of TEXT) {
+                if (ch === ' ') {
+                    xOffset += 120;
+                    charWidths.push(120);
+                    charMeshes.push(null);
+                    continue;
+                }
+
+                const geo = new TextGeometry(ch, { font, size: 200, height: 40, curveSegments: 8,
+                    bevelEnabled: true, bevelThickness: 8, bevelSize: 6, bevelOffset: 0, bevelSegments: 3 });
+                geo.computeBoundingBox();
+                const width = geo.boundingBox.max.x - geo.boundingBox.min.x;
+                const mat = new THREE.MeshNormalMaterial({ transparent: true, opacity: 0 });
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.x = xOffset;
+                charGroup.add(mesh);
+                charMeshes.push(mesh);
+                charWidths.push(width);
+                xOffset += width + charSpacing;
+            }
+
+            charGroup.position.x = -xOffset / 2 + charSpacing / 2;
+            const bounds = new THREE.Box3().setFromObject(charGroup);
+            const textHeight = bounds.max.y - bounds.min.y;
+
+            const cursorGeo = new THREE.BoxGeometry(15, textHeight, 20);
+            const cursorMat = new THREE.MeshBasicMaterial({ color: 0x888888 });
+            cursorMesh = new THREE.Mesh(cursorGeo, cursorMat);
+            cursorMesh.position.set(charGroup.position.x, bounds.min.y + textHeight / 2, 25);
+            scene.add(cursorMesh);
+
+            const revealChar = (index) => {
+                if (index >= charMeshes.length) {
+                    blinkCursor();
+                    // Schedule switch-over once typing finishes & a short pause.
+                    setTimeout(transitionToGPT, 1500);
+                    return;
+                }
+
+                const mesh = charMeshes[index];
+                const width = charWidths[index];
+                const gap = (index === charMeshes.length - 1) ? extraCursorGap : charSpacing;
+
+                new TWEEN.Tween(cursorMesh.position)
+                    .to({ x: cursorMesh.position.x + width + gap }, TYPE_DELAY * 0.9)
+                    .start();
+
+                if (mesh) {
+                    new TWEEN.Tween(mesh.material).to({ opacity: 1 }, TYPE_DELAY).start();
+                }
+
+                setTimeout(() => revealChar(index + 1), TYPE_DELAY);
+            };
+
+            const blinkCursor = () => setInterval(() => { cursorMesh.visible = !cursorMesh.visible; }, 500);
+
+            setTimeout(() => revealChar(0), 500);
         });
+
+        // Resize handling for both canvases
+        window.addEventListener('resize', () => {
+            const { innerWidth, innerHeight } = window;
+            // intro
+            camera.aspect = innerWidth / innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(innerWidth, innerHeight);
+            // GPT canvas handled internally by CoreEngine resize listener.
+        });
+
+        // Animation loop for intro
+        const loopIntro = () => {
+            requestAnimationFrame(loopIntro);
+            controls.update();
+            if (typeof TWEEN !== 'undefined') TWEEN.update();
+            renderer.render(scene, camera);
+        };
+        loopIntro();
+
+        // ------------------------------------------------------------------
+        // Transition helper
+        // ------------------------------------------------------------------
+        function transitionToGPT() {
+            introCanvas.style.display = 'none';
+            gptCanvas.style.display   = 'block';
+        }
+
+        // Cleanup on unload
+        const cleanup = () => {
+            pipeline.dispose();
+            renderer.dispose();
+            scene.traverse((child) => {
+                if (child.geometry) child.geometry.dispose();
+                if (child.material) {
+                    if (Array.isArray(child.material)) child.material.forEach((m) => m.dispose());
+                    else child.material.dispose();
+                }
+            });
+        };
+
+        window.addEventListener('beforeunload', () => cleanup());
     </script>
 </body>
 </html> 
