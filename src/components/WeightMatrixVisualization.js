@@ -209,9 +209,11 @@ export class WeightMatrixVisualization {
 
         let baseMesh;
         if (__geometryCache.has(cacheKey)) {
-            // Re-use cached geometry (clone so each mesh can have its own matrix)
+            // Re-use cached geometry *without* cloning – sharing one BufferGeometry
+            // instance lets multiple meshes reference the same GPU buffers which
+            // dramatically cuts memory and speeds up uploads.
             const cachedGeo = __geometryCache.get(cacheKey);
-            baseMesh = new THREE.Mesh(cachedGeo.clone());
+            baseMesh = new THREE.Mesh(cachedGeo); // share geometry instance
         } else {
             // Create initial geometry by extruding the shape
             const baseGeometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);

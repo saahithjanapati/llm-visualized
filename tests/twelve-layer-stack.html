@@ -19,27 +19,6 @@
     <!-- GPT-2 tower canvas (below) -->
     <canvas id="gptCanvas" style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:1;"></canvas>
 
-    <!-- Import map for all external / ESM modules used by the visualisation. -->
-    <script type="importmap">
-    {
-        "imports": {
-            "three": "https://esm.sh/three@0.160.0",
-            "three/examples/jsm/controls/OrbitControls.js": "https://esm.sh/three@0.160.0/examples/jsm/controls/OrbitControls.js",
-            "three/examples/jsm/postprocessing/EffectComposer.js": "https://esm.sh/three@0.160.0/examples/jsm/postprocessing/EffectComposer.js",
-            "three/examples/jsm/postprocessing/RenderPass.js": "https://esm.sh/three@0.160.0/examples/jsm/postprocessing/RenderPass.js",
-            "three/examples/jsm/postprocessing/UnrealBloomPass.js": "https://esm.sh/three@0.160.0/examples/jsm/postprocessing/UnrealBloomPass.js",
-            "three-csg-ts": "https://esm.sh/three-csg-ts@3.2.0",
-            "../src/engine/CoreEngine.js": "../src/engine/CoreEngine.js",
-            "../src/engine/layers/Gpt2Layer.js": "../src/engine/layers/Gpt2Layer.js",
-            "../src/data/RandomActivationSource.js": "../src/data/RandomActivationSource.js",
-            "../src/engine/LayerPipeline.js": "../src/engine/LayerPipeline.js",
-            "three/examples/jsm/loaders/FontLoader.js": "https://esm.sh/three@0.160.0/examples/jsm/loaders/FontLoader.js",
-            "three/examples/jsm/geometries/TextGeometry.js": "https://esm.sh/three@0.160.0/examples/jsm/geometries/TextGeometry.js",
-            "three/examples/jsm/loaders/EXRLoader.js": "https://esm.sh/three@0.160.0/examples/jsm/loaders/EXRLoader.js"
-        }
-    }
-    </script>
-
     <!-- Global TWEEN.js for animations -->
     <script src="https://unpkg.com/@tweenjs/tween.js@23.1.1/dist/tween.umd.js"></script>
     <!-- Stats.js for FPS / frame time monitoring -->
@@ -69,6 +48,11 @@
             cameraTarget: camTarget
         });
 
+        // Show the GPT canvas right away so the tower is visible even while the
+        // HDRI environment map streams in.  The intro text still overlays it,
+        // so visual continuity is preserved.
+        gptCanvas.style.display = 'block';
+
         // ------------------------------------------------------------------
         // Intro – "Can machines think?" Ghost-type animation (almost verbatim
         // from can-machines-think-test.html but adapted for this page & API).
@@ -76,7 +60,7 @@
         const introCanvas = document.getElementById('introCanvas');
 
         const renderer = new THREE.WebGLRenderer({ canvas: introCanvas, antialias: true });
-        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
         renderer.setSize(window.innerWidth, window.innerHeight);
 
         const scene = new THREE.Scene();
@@ -119,8 +103,8 @@
                     continue;
                 }
 
-                const geo = new TextGeometry(ch, { font, size: 200, height: 40, curveSegments: 8,
-                    bevelEnabled: true, bevelThickness: 8, bevelSize: 6, bevelOffset: 0, bevelSegments: 3 });
+                const geo = new TextGeometry(ch, { font, size: 200, height: 40, curveSegments: 4,
+                    bevelEnabled: true, bevelThickness: 2, bevelSize: 2, bevelOffset: 0, bevelSegments: 1 });
                 geo.computeBoundingBox();
                 const width = geo.boundingBox.max.x - geo.boundingBox.min.x;
                 const mat = new THREE.MeshNormalMaterial({ transparent: true, opacity: 0 });
@@ -191,11 +175,16 @@
             pipeline.engine.renderer.toneMapping = THREE.ACESFilmicToneMapping;
             pipeline.engine.renderer.toneMappingExposure = 1.0;
 
-            // Show GPT canvas now that environment is ready
-            gptCanvas.style.display = 'block';
+            // HDRI now ready – remove intro canvas if it hasn't been hidden yet
             introCanvas.style.display = 'none';
 
             // Hide loading GIF
+            const gif = document.getElementById('loadingGif');
+            if (gif) gif.style.display = 'none';
+        }, undefined, (err) => {
+            console.warn('HDRI failed to load:', err);
+            // Fail-safe: still remove intro overlay so the app continues
+            introCanvas.style.display = 'none';
             const gif = document.getElementById('loadingGif');
             if (gif) gif.style.display = 'none';
         });
@@ -269,13 +258,13 @@
                 const geo = new TextGeometry(ch, {
                     font,
                     size: 800,
-                    height: 120,
-                    curveSegments: 10,
+                    height: 80,
+                    curveSegments: 6,
                     bevelEnabled: true,
-                    bevelThickness: 20,
-                    bevelSize: 10,
+                    bevelThickness: 4,
+                    bevelSize: 3,
                     bevelOffset: 0,
-                    bevelSegments: 4
+                    bevelSegments: 1
                 });
                 geo.computeBoundingBox();
                 const width = geo.boundingBox.max.x - geo.boundingBox.min.x;

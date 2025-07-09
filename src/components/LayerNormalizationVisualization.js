@@ -11,6 +11,22 @@ import { CSG } from 'three-csg-ts';
 // similar parameter set (width / height / depth …) and animated / coloured in
 // the same way.
 
+// ------------------------------------------------------------------
+// Geometry cache – stores BufferGeometry objects keyed by the parameters
+// that uniquely define a LayerNorm extrusion.  Re-using the same
+// BufferGeometry across layers slashes CPU time because the expensive CSG
+// subtraction and clean-up stages are executed only once per unique
+// parameter set.  Multiple THREE.Mesh instances can safely share the same
+// BufferGeometry as long as we do **not** modify the vertices afterwards –
+// which we never do.
+// ------------------------------------------------------------------
+
+const __geometryCache = new Map();
+
+function getCacheKey(width, height, depth, wallThickness, numberOfHoles, holeWidth, holeWidthFactor, segments) {
+    return [width, height, depth, wallThickness, numberOfHoles, holeWidth, holeWidthFactor, segments].join('|');
+}
+
 export class LayerNormalizationVisualization {
     constructor(
         position = new THREE.Vector3(0, 0, 0),
@@ -90,21 +106,38 @@ export class LayerNormalizationVisualization {
         innerPath.absellipse(0, 0, innerRadiusX, innerRadiusY, 0, Math.PI * 2, true, 0);
         outerShape.holes.push(innerPath);
 
-        // ==== STEP 2 — extrude the 2-D ring into a 3-D "tube" ====
-        const extrudeSettings = {
-            steps: 1,
-            depth: this.depth,
-            bevelEnabled: false,
-            curveSegments: this.segments
-        };
+        // Check cache first – if a geometry with identical parameters was
+        // already built we can skip **all** further processing and simply
+        // reuse the cached BufferGeometry.
+        const cacheKey = getCacheKey(this.width,this.height,this.depth,this.wallThickness,this.numberOfHoles,this.holeWidth,this.holeWidthFactor,this.segments);
 
-        const baseGeometry = new THREE.ExtrudeGeometry(outerShape, extrudeSettings);
-        baseGeometry.center(); // Align the geometry so the group's origin is in the middle
+        let finalMesh;
 
-        let finalMesh = new THREE.Mesh(baseGeometry);
+        if (__geometryCache.has(cacheKey)) {
+            // Directly create a mesh that *shares* the BufferGeometry.  This
+            // avoids cloning so all instances reference the same GPU buffers.
+            const sharedGeo = __geometryCache.get(cacheKey);
+            finalMesh = new THREE.Mesh(sharedGeo);
+        } else {
+            // ==== STEP 2 — extrude the 2-D ring into a 3-D "tube" ====
+            const extrudeSettings = {
+                steps: 1,
+                depth: this.depth,
+                bevelEnabled: false,
+                curveSegments: this.segments
+            };
+
+            const baseGeometry = new THREE.ExtrudeGeometry(outerShape, extrudeSettings);
+            baseGeometry.center(); // Align the geometry so the group's origin is in the middle
+
+            finalMesh = new THREE.Mesh(baseGeometry);
+        }
 
         // ==== STEP 3 — cut pass-through holes on the TOP and BOTTOM edges ====
-        if (this.numberOfHoles > 0 && this.holeWidth > 0) {
+        // Perform the expensive CSG subtraction **only** when we had to
+        // build a fresh geometry.  If we are sharing a cached geometry the
+        // slits were already carved out so we can skip this entire block.
+        if (!__geometryCache.has(cacheKey) && this.numberOfHoles > 0 && this.holeWidth > 0) {
             const spacing = this.depth / (this.numberOfHoles + 1);
             // Width of the subtraction box – calculating a width that ensures
             // complete penetration through the elliptical surface at any height
@@ -137,8 +170,8 @@ export class LayerNormalizationVisualization {
             }
         }
 
-        // ==== STEP 4 (re-implemented) — strip caps, inner wall and slot-edge leftovers ====
-        {
+        // ==== STEP 4 (re-implemented) — mesh clean-up for freshly built geometry ====
+        if (!__geometryCache.has(cacheKey)) {
             const g = finalMesh.geometry.toNonIndexed();
             const pos = g.getAttribute('position').array;
             const normals = g.getAttribute('normal').array;
@@ -230,8 +263,20 @@ export class LayerNormalizationVisualization {
             opacity: 0.85
         });
 
+        // After all geometry operations *and* potential caching we assign
+        // material and add the mesh to the parent group.  When the geometry
+        // was built from scratch we also remember it in the cache so future
+        // LayerNorms can share it.
+
         this.mesh = finalMesh;
         this.mesh.material = material;
+
+        if (!__geometryCache.has(cacheKey)) {
+            // Clone before caching?  No – we store the *exact* BufferGeometry
+            // instance so that all consumers share it.  This saves memory and
+            // makes renderer uploads even faster.
+            __geometryCache.set(cacheKey, this.mesh.geometry);
+        }
 
         // Add to parent group so it appears in the scene
         this.group.add(this.mesh);
