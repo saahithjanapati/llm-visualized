@@ -101,8 +101,10 @@ export const NUM_HEAD_SETS_LAYER = 12;
 /** Horizontal gap between adjacent attention head sets. */
 export const HEAD_SET_GAP_LAYER = 180;
 
-/** Horizontal center-to-center spacing for Q, K, V matrices within a single attention head. */
-export const MHA_INTERNAL_MATRIX_SPACING = 130;
+// Centre-to-centre spacing between the Q, K and V matrices within a single
+// attention head.  Setting this equal to the matrix width means the matrices
+// now sit flush against one another (touching edges) without any gap.
+export const MHA_INTERNAL_MATRIX_SPACING = 116;
 
 /**
  * Parameters defining the geometry of individual Q, K, V matrices in the MHSA block.

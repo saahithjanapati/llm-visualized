@@ -72,6 +72,10 @@ export default class Gpt2Layer extends BaseLayer {
         this.isActive = isActive;
         this._completed = false;
         this._pendingAdditions = 0; // Track ongoing addition animations
+        // Synchronisation flag – ensures all lanes begin the LN-2 branch at the exact same time.
+        this._ln2Ready = false;
+        // Flag to indicate that all lanes have reached MLP readiness.
+        this._mlpStart = false;
     }
 
     init(scene) {
@@ -457,6 +461,35 @@ export default class Gpt2Layer extends BaseLayer {
         }
 
         // ────────────────────────────────────────────────────────────
+        // LN-2 synchronisation check – only once all lanes have reached
+        // the staging height (ln2Phase === 'preRise' and held position)
+        // do we allow any of them to continue into the branch.
+        // ────────────────────────────────────────────────────────────
+        if (!this._ln2Ready) {
+            const syncY = bottomY_ln2_abs + 5; // target height used in 'preRise'
+            const allLn2Ready = this.lanes.length && this.lanes.every(l =>
+                l.ln2Phase === 'preRise' &&
+                l.postAdditionVec && l.postAdditionVec.group &&
+                l.postAdditionVec.group.position.y >= syncY - 0.01);
+
+            if (allLn2Ready) {
+                this._ln2Ready = true;
+                console.log(`Layer ${this.index}: All lanes ready – starting LN2 simultaneously`);
+            }
+        }
+
+        // ----------------------------------------------------------------
+        // MLP synchronisation: wait until every lane has completed LN-2 and
+        // is marked as 'mlpReady' before triggering the up-projection.
+        // ----------------------------------------------------------------
+        if (!this._mlpStart) {
+            const allMlpReady = this.lanes.length && this.lanes.every(l => l.ln2Phase === 'mlpReady');
+            if (allMlpReady) {
+                this._mlpStart = true;
+                console.log(`Layer ${this.index}: All lanes ready – starting MLP up-projection simultaneously`);
+            }
+        }
+
         const speedMult = GLOBAL_ANIM_SPEED_MULT;
         this.lanes.forEach(lane => {
             const { originalVec, dupVec } = lane;
@@ -569,6 +602,11 @@ export default class Gpt2Layer extends BaseLayer {
                     if (v.group.position.y < targetY) {
                         v.group.position.y = Math.min(targetY, v.group.position.y + ANIM_RISE_SPEED_POST_SPLIT_LN2 * speedMult * dt);
                     } else {
+                        if (!this._ln2Ready) {
+                            // Wait here until every lane reaches the staging height.
+                            break;
+                        }
+
                         // ────────────────────────────────────────────────
                         //  Reached staging height – begin LN-2 branch
                         // ────────────────────────────────────────────────
@@ -684,7 +722,12 @@ export default class Gpt2Layer extends BaseLayer {
                 }
                 
                 case 'mlpReady':
-                    // Ready for MLP animation - will be handled next
+                    // Ready for MLP animation – begin only once every lane
+                    // has reached this state to maintain synchronisation.
+                    if (!this._mlpStart) {
+                        break; // hold until global start flag set
+                    }
+
                     if (!lane.mlpUpStarted && lane.resultVecLN2) {
                         lane.mlpUpStarted = true;
                         this._animateMlpUpProjection(lane);
