@@ -28,7 +28,14 @@ import {
     ANIM_RISE_SPEED_POST_SPLIT_LN2,
     ORIGINAL_TO_PROCESSED_GAP,
     ANIM_HORIZ_SPEED,
-    INACTIVE_COMPONENT_COLOR
+    INACTIVE_COMPONENT_COLOR,
+    // NEW: Embedding / Un-Embedding parameters & colours
+    EMBEDDING_MATRIX_PARAMS,
+    UNEMBEDDING_MATRIX_PARAMS,
+    EMBEDDING_MATRIX_COLOR,
+    UNEMBEDDING_MATRIX_COLOR,
+    EMBEDDING_TO_LN1_GAP,
+    UNEMBED_AFTER_MLP_GAP
 } from '../../utils/constants.js';
 import {
     MHA_FINAL_Q_COLOR,
@@ -85,6 +92,81 @@ export default class Gpt2Layer extends BaseLayer {
         this.root.position.y = this.index * VERTICAL_SPACING + this.yOffset;
 
         const offsetX = BRANCH_X; // all branched components share this X
+
+        // ────────────────────────────────────────────────────────────────
+        // Optional Embedding / Un-Embedding matrices (index 0 / last layer)
+        // ────────────────────────────────────────────────────────────────
+        if (this.index === 0) {
+            const {
+                width: EMB_W,
+                height: EMB_H,
+                depth: EMB_D,
+                topWidthFactor: EMB_TOP_F,
+                cornerRadius: EMB_R,
+                numberOfSlits: EMB_SLITS,
+                slitWidth: EMB_SLIT_W,
+                slitDepthFactor: EMB_SLIT_DF,
+                slitBottomWidthFactor: EMB_BOT_F,
+                slitTopWidthFactor: EMB_TOP_F2
+            } = EMBEDDING_MATRIX_PARAMS;
+
+            // Align the *top* of the embedding matrix with the bottom of LN-1
+            const ln1BottomY = LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2;
+            const embCenterY = ln1BottomY - EMBEDDING_TO_LN1_GAP - EMB_H / 2;
+
+            const embMat = new WeightMatrixVisualization(
+                null,
+                new THREE.Vector3(0, embCenterY, 0), // centred on residual stream (x=0)
+                EMB_W,
+                EMB_H,
+                EMB_D,
+                EMB_TOP_F,
+                EMB_R,
+                EMB_SLITS,
+                EMB_SLIT_W,
+                EMB_SLIT_DF,
+                EMB_BOT_F,
+                EMB_TOP_F2
+            );
+            // Start pitch black & semi-transparent; will brighten as vectors pass through
+            const embInitColor = new THREE.Color(0x000000);
+            embMat.setColor(embInitColor);
+            embMat.setEmissive(embInitColor, 0.05);
+            embMat.setMaterialProperties({ opacity: 0.6, transparent: true });
+            this.root.add(embMat.group);
+            this.embeddingMatrix = embMat;
+            this.embeddingCenterY = embCenterY;
+            this.embeddingHeight = EMB_H;
+
+            // Add 3D text label below the embedding matrix
+            const textCanvas = document.createElement('canvas');
+            textCanvas.width = 1024;
+            textCanvas.height = 256;
+            const ctx = textCanvas.getContext('2d');
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '100px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('Can machines think', textCanvas.width / 2, textCanvas.height / 2);
+
+            const tex = new THREE.CanvasTexture(textCanvas);
+            const spriteMat = new THREE.SpriteMaterial({ map: tex, transparent: true });
+            const sprite = new THREE.Sprite(spriteMat);
+            const scaleFactor = 8; // adjust based on scene units
+            sprite.scale.set(textCanvas.width / 100 * scaleFactor, textCanvas.height / 100 * scaleFactor, 1);
+            // Position just below the embedding matrix
+            sprite.position.set(0, embCenterY - EMB_H / 2 - 120, 0); // lower for better separation
+            this.root.add(sprite);
+            this.embeddingLabel = sprite;
+
+            // Shift initial spawn height for vectors so they rise out of the embedding matrix
+            this._embeddingSpawnY = embCenterY - EMB_H / 2 + 5;
+
+            // Make initial residual rise faster through embedding
+            if (this.mhsaAnimation) {
+                this.mhsaAnimation.postSplitRiseSpeed = ANIM_RISE_SPEED_POST_SPLIT_LN1 * 2; // 2× faster while below LN-1
+            }
+        }
 
         // ────────────────────────────────────────────────────────────────
         // 1) LayerNorm 1
@@ -266,6 +348,49 @@ export default class Gpt2Layer extends BaseLayer {
         mlpDown.setMaterialProperties({ opacity: 1.0, transparent: false });
         this.root.add(mlpDown.group);
 
+        // ────────────────────────────────────────────────────────────────
+        // Optional Un-Embedding matrix (only on the final transformer layer)
+        // ────────────────────────────────────────────────────────────────
+        if (this.index === 11) { // hard-coded for 12-layer stack; adjust if needed
+            const {
+                width: UN_W,
+                height: UN_H,
+                depth: UN_D,
+                topWidthFactor: UN_TOP_F,
+                cornerRadius: UN_R,
+                numberOfSlits: UN_SLITS,
+                slitWidth: UN_SLIT_W,
+                slitDepthFactor: UN_SLIT_DF,
+                slitBottomWidthFactor: UN_BOT_F,
+                slitTopWidthFactor: UN_TOP_F2
+            } = UNEMBEDDING_MATRIX_PARAMS;
+
+            const unembedCenterY = mlpDownCenterY + MLP_MATRIX_PARAMS_DOWN.height / 2 + UNEMBED_AFTER_MLP_GAP + UN_H / 2;
+
+            const unembedMat = new WeightMatrixVisualization(
+                null,
+                new THREE.Vector3(0, unembedCenterY, 0),
+                UN_W,
+                UN_H,
+                UN_D,
+                UN_TOP_F,
+                UN_R,
+                UN_SLITS,
+                UN_SLIT_W,
+                UN_SLIT_DF,
+                UN_BOT_F,
+                UN_TOP_F2
+            );
+            const unInit = new THREE.Color(0x000000);
+            unembedMat.setColor(unInit);
+            unembedMat.setEmissive(unInit, 0.05);
+            unembedMat.setMaterialProperties({ opacity: 0.6, transparent: true });
+            this.root.add(unembedMat.group);
+            this.unembeddingMatrix = unembedMat;
+            this.unembeddingCenterY = unembedCenterY;
+            this.unembeddingHeight = UN_H;
+        }
+
         // ---------- Residual vectors (original stream) ----------
         this.lanes = [];
         if (this.isActive) {
@@ -300,8 +425,18 @@ export default class Gpt2Layer extends BaseLayer {
                 this.lanes.forEach(lane => {
                     const targetY = lane.branchStartY;
                     if (lane.originalVec.group.position.y < targetY) {
+                        let speed = ANIM_RISE_SPEED_ORIGINAL;
+                        if (this.index === 0 && this.embeddingMatrix) {
+                            const embTopY = this.embeddingCenterY + this.embeddingHeight/2;
+                            // If still inside the embedding matrix, boost rise a lot
+                            if (lane.originalVec.group.position.y < embTopY) {
+                                speed *= 10; // 10× faster while inside embedding
+                            } else {
+                                speed *= 4; // modest boost between emb top and LN-1 bottom
+                            }
+                        }
                         lane.originalVec.group.position.y = Math.min(targetY, 
-                            lane.originalVec.group.position.y + ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT * dt);
+                            lane.originalVec.group.position.y + speed * GLOBAL_ANIM_SPEED_MULT * dt);
                         updateTrail(lane.origTrail, lane.originalVec.group.position);
                     }
                 });
@@ -753,6 +888,73 @@ export default class Gpt2Layer extends BaseLayer {
             this._completed = true;
             if (this.onFinished) this.onFinished();
         }
+
+        // ────────────────────────────────────────────────────────────
+        // Dynamic colour / opacity transition for EMBEDDING matrix (first layer only)
+        // ────────────────────────────────────────────────────────────
+        if (this.embeddingMatrix) {
+            const embBottomY = this.embeddingCenterY - this.embeddingHeight / 2;
+            const embTopY    = this.embeddingCenterY + this.embeddingHeight / 2;
+            let highestEmbVecY = -Infinity;
+            let anyVecInEmb = false;
+            this.lanes.forEach(lane => {
+                const y = lane.originalVec.group.position.y;
+                if (y >= embBottomY - 2 && y <= embTopY + 10) {
+                    anyVecInEmb = true;
+                    highestEmbVecY = Math.max(highestEmbVecY, y);
+                }
+            });
+            const dark = new THREE.Color(0x000000);
+            const bright = new THREE.Color(EMBEDDING_MATRIX_COLOR);
+            let targetC = dark.clone();
+            let targetOp = 0.6;
+            if (anyVecInEmb && highestEmbVecY>-Infinity) {
+                const t = THREE.MathUtils.clamp((highestEmbVecY - embBottomY) / (embTopY - embBottomY),0,1);
+                targetC = dark.clone().lerp(bright, t);
+                targetOp = THREE.MathUtils.lerp(0.6,1.0,t);
+            }
+
+            // Lock bright state once vectors fully exit the embedding matrix
+            if (!this._embedColorLocked && highestEmbVecY >= embTopY + 5) {
+                this._embedColorLocked = true;
+                this._embedLockedColor = bright.clone();
+            }
+
+            if (this._embedColorLocked) {
+                targetC = this._embedLockedColor.clone();
+                targetOp = 1.0;
+            }
+            // Apply
+            this.embeddingMatrix.setColor(targetC);
+            this.embeddingMatrix.setEmissive(targetC, 0.3 + 0.7 * ((targetOp-0.6)/0.4));
+            this.embeddingMatrix.setMaterialProperties({ opacity: targetOp, transparent: targetOp<1 });
+        }
+
+        // ────────────────────────────────────────────────────────────
+        // Dynamic colour / opacity for UNEMBEDDING matrix (last layer only)
+        // ────────────────────────────────────────────────────────────
+        if (this.unembeddingMatrix) {
+            const unBottom = this.unembeddingCenterY - this.unembeddingHeight/2;
+            const unTop    = this.unembeddingCenterY + this.unembeddingHeight/2;
+            let vecBelow = Infinity;
+            this.lanes.forEach(lane=>{
+                if (lane.finalVecAfterMlp && lane.finalVecAfterMlp.group.visible) {
+                    vecBelow = Math.min(vecBelow, lane.finalVecAfterMlp.group.position.y);
+                }
+            });
+            const dark = new THREE.Color(0x000000);
+            const bright = new THREE.Color(UNEMBEDDING_MATRIX_COLOR);
+            let c = dark.clone();
+            let op = 0.6;
+            if (vecBelow !== Infinity) {
+                const t = THREE.MathUtils.clamp((unTop - vecBelow) / (unTop - unBottom),0,1);
+                c = dark.clone().lerp(bright, 1-t); // as vector rises, t decreases
+                op = THREE.MathUtils.lerp(0.6,1.0,1-t);
+            }
+            this.unembeddingMatrix.setColor(c);
+            this.unembeddingMatrix.setEmissive(c, 0.3 + 0.7*((op-0.6)/0.4));
+            this.unembeddingMatrix.setMaterialProperties({ opacity: op, transparent: op<1 });
+        }
     }
 
     /**
@@ -1097,7 +1299,7 @@ export default class Gpt2Layer extends BaseLayer {
         } else {
             zPos = -LN_PARAMS.depth / 2 + slitSpacing * (laneIdx + 1);
             const data = this.random.nextVector(VECTOR_LENGTH_PRISM);
-            startY = startY_override;
+            startY = this._embeddingSpawnY; // Use the new spawn height
             originalVec = new VectorVisualizationInstancedPrism(data, new THREE.Vector3(0, startY, zPos));
             this.root.add(originalVec.group);
         }

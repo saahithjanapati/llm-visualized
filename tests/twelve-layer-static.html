@@ -57,16 +57,94 @@
         };
         const colours = { ...defaultColours };
 
+        // ------------------------------------------------------------
+        // Global material parameters (shared across every component)
+        // ------------------------------------------------------------
+        const materialSettings = {
+            metalness: 0.15,
+            roughness: 0.6,
+            emissiveIntensity: 0.5,
+            opacity: 0.85,
+            materialType: 'Standard', // MeshStandardMaterial by default
+        };
+
+        // ------------------------------------------------------------
+        // Helpers
+        // ------------------------------------------------------------
         // Helper to safely set colour & emissive on either WeightMatrix or LayerNorm visualisations
-        function setComponentColour(component, colour, intensity = 0.5) {
+        function setComponentColour(component, colour) {
             if (!component) return;
             if (component.setColor) component.setColor(colour);
             // WeightMatrixVisualization implements setEmissive; LayerNorm does not.
-            if (typeof component.setEmissive === 'function') {
-                component.setEmissive(colour, intensity);
-            } else if (typeof component.setMaterialProperties === 'function') {
-                component.setMaterialProperties({ emissive: colour, emissiveIntensity: intensity });
+            const emissiveInt = materialSettings.emissiveIntensity;
+            // Apply emissive only if the underlying material supports it
+            const sampleMesh = component.mesh || component.frontCapMesh || component.backCapMesh;
+            let supportsEmissive = false;
+            if (sampleMesh) {
+                const mat = Array.isArray(sampleMesh.material) ? sampleMesh.material[0] : sampleMesh.material;
+                supportsEmissive = mat && mat.emissive !== undefined;
             }
+
+            // Optionally adjust emissive colour on materials that support it
+            if (supportsEmissive) {
+                const mats = [component.mesh, component.frontCapMesh, component.backCapMesh]
+                    .filter(Boolean)
+                    .flatMap(m => Array.isArray(m.material) ? m.material : [m.material]);
+                mats.forEach(mat => {
+                    if (mat && mat.emissive !== undefined) {
+                        mat.emissive.set(colour);
+                        mat.emissiveIntensity = emissiveInt;
+                    }
+                });
+            }
+        }
+
+        // Apply shared material properties (metalness, roughness, opacity …)
+        function applyMaterialProps(component) {
+            if (!component || typeof component.setMaterialProperties !== 'function') return;
+
+            // Map material type to THREE constructor
+            const typeMap = {
+                'Standard': THREE.MeshStandardMaterial,
+                'Phong': THREE.MeshPhongMaterial,
+                'Lambert': THREE.MeshLambertMaterial,
+                'Basic': THREE.MeshBasicMaterial,
+                'Physical': THREE.MeshPhysicalMaterial,
+            };
+
+            const TargetMat = typeMap[materialSettings.materialType] || THREE.MeshStandardMaterial;
+
+            // Helper to update or replace a mesh's material
+            const updateMeshMaterial = (mesh) => {
+                if (!mesh) return;
+                const current = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+                if (!(current instanceof TargetMat)) {
+                    const baseColor = current?.color ? current.color.clone() : new THREE.Color(0xffffff);
+                    const newMat = new TargetMat({ color: baseColor });
+                    mesh.material = newMat;
+                }
+                const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+                mats.forEach((mat) => {
+                    if ('metalness' in mat) mat.metalness = materialSettings.metalness;
+                    if ('roughness' in mat) mat.roughness = materialSettings.roughness;
+                    if ('emissiveIntensity' in mat) mat.emissiveIntensity = materialSettings.emissiveIntensity;
+                    mat.opacity = materialSettings.opacity;
+                    mat.transparent = materialSettings.opacity < 1;
+                });
+            };
+
+            // Common meshes to touch
+            updateMeshMaterial(component.mesh);
+            updateMeshMaterial(component.frontCapMesh);
+            updateMeshMaterial(component.backCapMesh);
+
+            component.setMaterialProperties({
+                metalness: materialSettings.metalness,
+                roughness: materialSettings.roughness,
+                emissiveIntensity: materialSettings.emissiveIntensity,
+                opacity: materialSettings.opacity,
+                transparent: materialSettings.opacity < 1,
+            });
         }
 
         function applyColours() {
@@ -85,20 +163,26 @@
                 for (let i = 0; i < vis.length; i++) {
                     const target = (i % 3 === 0) ? qCol : (i % 3 === 1) ? kCol : vCol;
                     setComponentColour(vis[i], target);
+                    applyMaterialProps(vis[i]);
                 }
 
                 // Output projection matrix
                 if (layer.mhsaAnimation?.outputProjectionMatrix) {
                     setComponentColour(layer.mhsaAnimation.outputProjectionMatrix, outCol);
+                    applyMaterialProps(layer.mhsaAnimation.outputProjectionMatrix);
                 }
 
                 // LayerNorms (share colour)
                 setComponentColour(layer.ln1, lnCol);
                 setComponentColour(layer.ln2, lnCol);
+                applyMaterialProps(layer.ln1);
+                applyMaterialProps(layer.ln2);
 
                 // MLP matrices
                 setComponentColour(layer.mlpUp,   mlpUpCol);
                 setComponentColour(layer.mlpDown, mlpDownCol);
+                applyMaterialProps(layer.mlpUp);
+                applyMaterialProps(layer.mlpDown);
             }
         }
 
@@ -121,7 +205,7 @@
         // ------------------------------------------------------------
         // GUI – live colour pickers
         // ------------------------------------------------------------
-        const gui = new window.dat.GUI({ width: 300 });
+        const gui = new window.dat.GUI({ width: 320 });
         gui.domElement.style.zIndex = 5;
 
         gui.addColor(colours, 'queryHeads').name('Query Heads').onChange(applyColours);
@@ -131,6 +215,15 @@
         gui.addColor(colours, 'layerNorms').name('LayerNorms').onChange(applyColours);
         gui.addColor(colours, 'mlpUp').name('MLP Up-Proj').onChange(applyColours);
         gui.addColor(colours, 'mlpDown').name('MLP Down-Proj').onChange(applyColours);
+
+        // Material folder
+        const matFolder = gui.addFolder('Material');
+        matFolder.add(materialSettings, 'materialType', ['Standard','Phong','Lambert','Basic','Physical']).name('Type').onChange(applyColours);
+        matFolder.add(materialSettings, 'metalness', 0, 1, 0.01).onChange(applyColours);
+        matFolder.add(materialSettings, 'roughness', 0, 1, 0.01).onChange(applyColours);
+        matFolder.add(materialSettings, 'emissiveIntensity', 0, 5, 0.05).onChange(applyColours);
+        matFolder.add(materialSettings, 'opacity', 0, 1, 0.01).onChange(applyColours);
+        matFolder.open();
 
         // Optional: reset button
         gui.add({ reset: () => { Object.assign(colours, defaultColours); applyColours(); gui.updateDisplay(); } }, 'reset').name('Reset Defaults');

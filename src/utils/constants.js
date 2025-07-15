@@ -265,3 +265,41 @@ export const MLP_MATRIX_PARAMS_DOWN = {
 
 /** Base colour for inactive components (visible but dark). */
 export const INACTIVE_COMPONENT_COLOR = 0x202020;
+
+// -----------------------------------------------------------------------------
+// Embedding & Un-Embedding matrices
+// -----------------------------------------------------------------------------
+
+export const EMBEDDING_MATRIX_COLOR   = 0x6699ff; // soft blue
+export const UNEMBEDDING_MATRIX_COLOR = 0xff6699; // soft pink
+
+// Gap constants
+export const EMBEDDING_TO_LN1_GAP = 50; // world-units between LN1 bottom and embedding top
+export const UNEMBED_AFTER_MLP_GAP = 150; // gap above last MLP down-proj
+
+// Geometry parameters for embedding (3072 -> 768) and un-embedding (768 -> 3072)
+export const EMBEDDING_MATRIX_PARAMS = {
+    width: MLP_MATRIX_BASE_WIDTH * 10,  // visually wide (simulate 3072-dim)
+    height: 360,
+    depth: LN_PARAMS.depth,
+    topWidthFactor: 1 / 10, // tapers to d_model
+    cornerRadius: 30,
+    numberOfSlits: LN_PARAMS.numberOfHoles,
+    slitWidth: 10,
+    slitDepthFactor: 1.0,
+    slitBottomWidthFactor: 0.95,
+    slitTopWidthFactor: 0.95
+};
+
+export const UNEMBEDDING_MATRIX_PARAMS = {
+    width: MLP_MATRIX_BASE_WIDTH,       // narrow at bottom (d_model)
+    height: 360,
+    depth: LN_PARAMS.depth,
+    topWidthFactor: 10,                // widens to simulate 3072-dim
+    cornerRadius: 30,
+    numberOfSlits: LN_PARAMS.numberOfHoles,
+    slitWidth: 10,
+    slitDepthFactor: 1.0,
+    slitBottomWidthFactor: 0.95,
+    slitTopWidthFactor: 0.95
+};
