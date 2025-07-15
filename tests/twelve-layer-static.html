@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>12-Layer GPT-2 Stack – Static Colour Picker Demo</title>
+    <style>
+        body { margin: 0; overflow: hidden; background:#111; }
+        canvas { display:block; }
+        /* dat.GUI fixes */
+        .dg.ac { z-index: 10 !important; }
+    </style>
+</head>
+<body>
+    <canvas id="gptCanvas" style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:1;"></canvas>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.9/dat.gui.min.js"></script>
+    <!-- Three.js & helpers -->
+    <script type="module">
+        import * as THREE from 'three';
+        import { CoreEngine } from '../src/engine/CoreEngine.js';
+        import Gpt2Layer from '../src/engine/layers/Gpt2Layer.js';
+        import { createRandomSource } from '../src/data/RandomActivationSource.js';
+        import { MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR, MHA_OUTPUT_PROJECTION_MATRIX_COLOR } from '../src/animations/LayerAnimationConstants.js';
+
+        // ------------------------------------------------------------
+        // Initialise static 12-layer stack (no vectors / no animation)
+        // ------------------------------------------------------------
+        const NUM_LAYERS = 12;
+        const layers = [];
+        for (let i = 0; i < NUM_LAYERS; i++) {
+            const rand = createRandomSource();
+            const layer = new Gpt2Layer(i, rand, 0, /*externalLanes*/null, /*onFinished*/null, /*isActive*/false);
+            layers.push(layer);
+        }
+
+        const camPos    = new THREE.Vector3(0, 11000, 16000);
+        const camTarget = new THREE.Vector3(0, 9000, 0);
+
+        const engine = new CoreEngine(document.getElementById('gptCanvas'), layers, {
+            cameraPosition: camPos,
+            cameraTarget:   camTarget,
+            enableBloom:    false,
+        });
+
+        // ------------------------------------------------------------
+        // Colour management helpers
+        // ------------------------------------------------------------
+        const defaultColours = {
+            queryHeads:       `#${MHA_FINAL_Q_COLOR.toString(16).padStart(6,'0')}`,
+            keyHeads:         `#${MHA_FINAL_K_COLOR.toString(16).padStart(6,'0')}`,
+            valueHeads:       `#${MHA_FINAL_V_COLOR.toString(16).padStart(6,'0')}`,
+            outputProjection: `#${MHA_OUTPUT_PROJECTION_MATRIX_COLOR.toString(16).padStart(6,'0')}`,
+            layerNorms:       '#ffff99', // light yellow
+            mlpUp:            '#b07c13', // orange
+            mlpDown:          '#b07c13', // same orange
+        };
+        const colours = { ...defaultColours };
+
+        // Helper to safely set colour & emissive on either WeightMatrix or LayerNorm visualisations
+        function setComponentColour(component, colour, intensity = 0.5) {
+            if (!component) return;
+            if (component.setColor) component.setColor(colour);
+            // WeightMatrixVisualization implements setEmissive; LayerNorm does not.
+            if (typeof component.setEmissive === 'function') {
+                component.setEmissive(colour, intensity);
+            } else if (typeof component.setMaterialProperties === 'function') {
+                component.setMaterialProperties({ emissive: colour, emissiveIntensity: intensity });
+            }
+        }
+
+        function applyColours() {
+            // Convert hex strings to THREE.Color once per update
+            const qCol  = new THREE.Color(colours.queryHeads);
+            const kCol  = new THREE.Color(colours.keyHeads);
+            const vCol  = new THREE.Color(colours.valueHeads);
+            const outCol= new THREE.Color(colours.outputProjection);
+            const lnCol = new THREE.Color(colours.layerNorms);
+            const mlpUpCol   = new THREE.Color(colours.mlpUp);
+            const mlpDownCol = new THREE.Color(colours.mlpDown);
+
+            for (const layer of layers) {
+                // MHSA matrices (Q, K, V)
+                const vis = layer.mhsaAnimation?.mhaVisualizations || [];
+                for (let i = 0; i < vis.length; i++) {
+                    const target = (i % 3 === 0) ? qCol : (i % 3 === 1) ? kCol : vCol;
+                    setComponentColour(vis[i], target);
+                }
+
+                // Output projection matrix
+                if (layer.mhsaAnimation?.outputProjectionMatrix) {
+                    setComponentColour(layer.mhsaAnimation.outputProjectionMatrix, outCol);
+                }
+
+                // LayerNorms (share colour)
+                setComponentColour(layer.ln1, lnCol);
+                setComponentColour(layer.ln2, lnCol);
+
+                // MLP matrices
+                setComponentColour(layer.mlpUp,   mlpUpCol);
+                setComponentColour(layer.mlpDown, mlpDownCol);
+            }
+        }
+
+        // Helper: repeatedly apply colours a few times during the first second to
+        // catch any late-built meshes (CSG generation can take >1 frame).
+        const applyWithRetries = () => {
+            let attempts = 0;
+            const maxAttempts = 20;             // ~1 s (20 × 50 ms)
+            const id = setInterval(() => {
+                applyColours();
+                if (++attempts >= maxAttempts) clearInterval(id);
+            }, 50);
+        };
+
+        // Kick off after initial render
+        requestAnimationFrame(() => {
+            applyWithRetries();
+        });
+
+        // ------------------------------------------------------------
+        // GUI – live colour pickers
+        // ------------------------------------------------------------
+        const gui = new window.dat.GUI({ width: 300 });
+        gui.domElement.style.zIndex = 5;
+
+        gui.addColor(colours, 'queryHeads').name('Query Heads').onChange(applyColours);
+        gui.addColor(colours, 'keyHeads').name('Key Heads').onChange(applyColours);
+        gui.addColor(colours, 'valueHeads').name('Value Heads').onChange(applyColours);
+        gui.addColor(colours, 'outputProjection').name('Output Projection').onChange(applyColours);
+        gui.addColor(colours, 'layerNorms').name('LayerNorms').onChange(applyColours);
+        gui.addColor(colours, 'mlpUp').name('MLP Up-Proj').onChange(applyColours);
+        gui.addColor(colours, 'mlpDown').name('MLP Down-Proj').onChange(applyColours);
+
+        // Optional: reset button
+        gui.add({ reset: () => { Object.assign(colours, defaultColours); applyColours(); gui.updateDisplay(); } }, 'reset').name('Reset Defaults');
+
+        // Cleanup on unload
+        window.addEventListener('beforeunload', () => engine.dispose());
+    </script>
+</body>
+</html> 

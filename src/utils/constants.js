@@ -99,7 +99,7 @@ export const LN_PARAMS = {
 export const NUM_HEAD_SETS_LAYER = 12;
 
 /** Horizontal gap between adjacent attention head sets. */
-export const HEAD_SET_GAP_LAYER = 180;
+export const HEAD_SET_GAP_LAYER = 240;
 
 // Centre-to-centre spacing between the Q, K and V matrices within a single
 // attention head.  Setting this equal to the matrix width means the matrices
