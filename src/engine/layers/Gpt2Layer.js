@@ -314,7 +314,7 @@ export default class Gpt2Layer extends BaseLayer {
         // Dynamic colour / opacity transition for the FIRST LayerNorm
         // ────────────────────────────────────────────────────────────
         const darkGray = new THREE.Color(0x333333);
-        const lightYellow = new THREE.Color(0xFFFF99);
+        const lightYellow = new THREE.Color(0xFFFFFF); // transition target updated to white
         const brightYellow = new THREE.Color(0xFFFFFF);
         const opaqueOpacity = 1.0;
         const semiTransparentOpacity = 0.6;
