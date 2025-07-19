@@ -168,41 +168,10 @@ export default class Gpt2Layer extends BaseLayer {
         this.mhsaAnimation = new MHSAAnimation(this.root, BRANCH_X, mhaBaseY, this._mhsaClock, 'temp');
 
         // ────────────────────────────────────────────────────────────────
-        // 2.5) Output-projection matrix (after MHSA concatenation)
-        // ────────────────────────────────────────────────────────────────
-        const {
-            width: OUT_WIDTH,
-            heightFactor: OUT_HEIGHT_FACTOR,
-            topWidthFactor: OUT_TOP_FACTOR,
-            cornerRadius: OUT_RADIUS,
-            numberOfSlits: OUT_SLITS,
-            slitWidth: OUT_SLIT_WIDTH,
-            slitDepthFactor: OUT_SLIT_DEPTH,
-            slitBottomWidthFactor: OUT_BOT_FACTOR,
-            slitTopWidthFactor: OUT_TOP_WIDTH_FACTOR
-        } = MHA_OUTPUT_PROJECTION_MATRIX_PARAMS;
-        const outHeight = MHA_MATRIX_PARAMS.height * OUT_HEIGHT_FACTOR;
-        const extraAboveMha = 20 + MHSA_RESULT_RISE_OFFSET_Y + 60; // matches original animation chain
-        const outCenterY = mhaCenterY + MHA_MATRIX_PARAMS.height / 2 + extraAboveMha + MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW + outHeight / 2;
-        const outInitCol = new THREE.Color(INACTIVE_COMPONENT_COLOR);
-        const outProj = new WeightMatrixVisualization(
-            null,
-            new THREE.Vector3(offsetX, outCenterY, 0),
-            OUT_WIDTH,
-            outHeight,
-            LN_PARAMS.depth,
-            OUT_TOP_FACTOR,
-            OUT_RADIUS,
-            OUT_SLITS,
-            OUT_SLIT_WIDTH,
-            OUT_SLIT_DEPTH,
-            OUT_BOT_FACTOR,
-            OUT_TOP_WIDTH_FACTOR
-        );
-        outProj.setColor(outInitCol);
-        outProj.setEmissive(outInitCol, 0.05);
-        outProj.setMaterialProperties({ opacity: 0.7, transparent: true });
-        this.root.add(outProj.group);
+        // 2.5) Output-projection matrix
+        //      Now created solely inside MHSAAnimation.  The former static
+        //      placeholder has been removed to stop overlapping transparent
+        //      meshes that caused colour flickering.
 
         // ────────────────────────────────────────────────────────────────
         // 3) LayerNorm 2

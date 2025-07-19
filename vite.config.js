@@ -37,6 +37,7 @@ export default defineConfig({
             twelveLayerStack: resolve(__dirname, 'tests/twelve-layer-stack.html'),
             canMachinesThink: resolve(__dirname, 'tests/can-machines-think-test.html'),
             staticColor: resolve(__dirname, 'tests/twelve-layer-static.html'),
+            outputProjectionMatrix: resolve(__dirname, 'tests/test_weight_matrix_2.html'),
 
         }
     } 
