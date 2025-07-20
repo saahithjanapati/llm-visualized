@@ -31,6 +31,18 @@ export const PRISM_BASE_DEPTH = 5; // Depth of the prism
 export const PRISM_MAX_HEIGHT = 5; // Max height for a prism when data is at its peak
 export const PRISM_HEIGHT_SCALE_FACTOR = 0.75; // Scales normalized data to prism height
 
+// ─────────────────────────────────────────────────────────────
+// Feature toggles
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * When true the app skips expensive CSG work and loads pre-baked
+ * BufferGeometries from `precomputed_components.glb`.
+ * You can disable it via a URL query string: `?fresh=1` or by setting
+ * `window.__USE_PRECOMPUTED_GEOMETRIES = false` in DevTools before reload.
+ */
+export const USE_PRECOMPUTED_GEOMETRIES = true;
+
 // ------------------------------------------------------------
 // Common depth spacing (Z-axis) — edit this to change spacing for
 // vectors/components across the entire scene.
@@ -67,8 +79,11 @@ export const PRISM_ADD_ANIM_SPEED_MULT = 4;
 export const LN_TO_MHA_GAP = 150;
 export const VERTICAL_GAP_COMPONENTS = LN_TO_MHA_GAP; // Backwards-compat alias
 
-/** Horizontal X-offset from the main residual stream (x=0) for branched components like LayerNorms, MHSA, MLP. */
-export const BRANCH_X = 400;
+// Increased horizontal separation between the residual stream (x=0) and
+// branched components (LayerNorms, MHSA, MLP).  A wider gap improves visual
+// clarity when many layers are stacked, and reduces the chance of artefacts
+// from overlapping transparent geometry.
+export const BRANCH_X = 600;
 
 // LayerNorm1 (LN1) Parameters
 /** Y-position for the center of the first LayerNormalization block. */

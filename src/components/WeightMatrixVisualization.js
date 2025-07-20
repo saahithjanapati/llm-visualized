@@ -209,22 +209,19 @@ export class WeightMatrixVisualization {
         // --------------------------------------------------------------
         const cacheKey = getCacheKey(this.width,this.height,this.depth,this.topWidthFactor,this.cornerRadius,this.numberOfSlits,this.slitWidth,this.slitDepthFactor,this.slitBottomWidthFactor,this.slitTopWidthFactor);
 
+        const t0 = performance.now();
         let baseMesh;
+        let cacheHit = false;
         if (__geometryCache.has(cacheKey)) {
-            // Re-use cached geometry *without* cloning – sharing one BufferGeometry
-            // instance lets multiple meshes reference the same GPU buffers which
-            // dramatically cuts memory and speeds up uploads.
+            cacheHit = true;
             const cachedGeo = __geometryCache.get(cacheKey);
-            baseMesh = new THREE.Mesh(cachedGeo); // share geometry instance
+            baseMesh = new THREE.Mesh(cachedGeo);
         } else {
             // Create initial geometry by extruding the shape
             const baseGeometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
-            baseGeometry.center(); // Center the resulting geometry
-
-            // Create a Mesh for the base geometry to use with CSG
-            baseMesh = new THREE.Mesh(baseGeometry); // Material is not needed for CSG operation itself
-
-            // heavy CSG happens below (or skipped) – we'll add to cache at the end
+            baseGeometry.center();
+            baseMesh = new THREE.Mesh(baseGeometry);
+            // heavy CSG operations proceed below
         }
 
         // --- Create and Subtract Slits using CSG (for the side walls) ---
@@ -316,6 +313,9 @@ export class WeightMatrixVisualization {
         this.mesh = finalMesh;
         this.mesh.material = sideMaterial;
         this.mesh.geometry.computeVertexNormals();
+
+        const dt = (performance.now() - t0).toFixed(1);
+        console.log(`[Perf] WeightMatrixVisualization (${cacheHit ? 'cache' : 'built'}) – ${dt} ms.`);
 
         // Ensure transparent objects are rendered in a predictable order to
         // avoid flickering caused by Three.js' painter-style sorting.  By
@@ -451,5 +451,18 @@ export class WeightMatrixVisualization {
     // Convenience method to set opacity (and ensure transparency is enabled)
     setOpacity(opacity) {
         this.setMaterialProperties({ opacity: opacity, transparent: true });
+    }
+
+    /**
+     * Register a pre-generated BufferGeometry so that future WeightMatrixVisualization
+     * instances can reuse it immediately without running the heavy CSG build.
+     * @param {string} cacheKey – The key returned by the internal getCacheKey(..) helper.
+     * @param {THREE.BufferGeometry} geometry – A **non-indexed** BufferGeometry to reuse.
+     */
+    static registerPrecomputedGeometry(cacheKey, geometry) {
+        if (!cacheKey || !geometry) return;
+        if (!__geometryCache.has(cacheKey)) {
+            __geometryCache.set(cacheKey, geometry);
+        }
     }
 }

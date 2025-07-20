@@ -1240,15 +1240,50 @@ export default class Gpt2Layer extends BaseLayer {
         });
     }
 
-    /** Exposed so LayerPipeline can cull heavy geometry after it has handed lanes to the next layer */
+    /**
+     * Remove heavy dynamic geometry (vectors & trails) after the layer has
+     * handed its residual stream to the next layer.  This is more aggressive
+     * than the previous implementation: we now detach the objects from the
+     * scene graph and dispose of their GPU resources so they no longer add
+     * draw-calls, memory pressure or ray-casting traversal cost.
+     */
     hideDynamicGeometry() {
-        this.root.traverse(obj => {
+        const disposeObj = (obj) => {
             if (!obj) return;
-            // Instanced prisms created by VectorVisualizationInstancedPrism have label 'Vector'
-            const isVector = obj.userData && obj.userData.label === 'Vector';
+
+            // Dispose materials
+            if (obj.material) {
+                const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+                materials.forEach(mat => mat && mat.dispose && mat.dispose());
+            }
+
+            // Dispose geometry
+            if (obj.geometry) {
+                obj.geometry.dispose();
+            }
+
+            // Recursively dispose children
+            if (obj.children && obj.children.length) {
+                [...obj.children].forEach(child => disposeObj(child));
+            }
+
+            // Finally, detach from parent to remove from scene traversal
+            if (obj.parent) {
+                obj.parent.remove(obj);
+            }
+        };
+
+        // We walk a *copy* of the children array because we'll be mutating
+        // the hierarchy while iterating.
+        [...this.root.children].forEach(obj => {
+            if (!obj) return;
+
+            const label = obj.userData && obj.userData.label;
+            const isVector = label === 'Vector' || label === 'Vector24';
             const isTrail  = obj.isLine === true; // THREE.Line for trails
+
             if (isVector || isTrail) {
-                obj.visible = false;
+                disposeObj(obj);
             }
         });
     }

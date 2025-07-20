@@ -11,7 +11,7 @@
 export const VERTICAL_GAP_COMPONENTS = 20;
 
 /** Horizontal X-offset from the main residual stream (x=0) for branched components like LayerNorms, MHSA, MLP. */
-export const BRANCH_X = 80;
+export const BRANCH_X = 250; // widened to maintain proportion with revised utils constant
 
 // -----------------------------------------------------------------------------
 // LayerNorm1 (LN1) Parameters

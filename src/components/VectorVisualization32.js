@@ -2,8 +2,9 @@ import * as THREE from 'three';
 import { PRISM_BASE_WIDTH, PRISM_BASE_DEPTH, PRISM_MAX_HEIGHT, PRISM_HEIGHT_SCALE_FACTOR } from '../utils/constants.js';
 
 // Number of grouped components and how many original prism-units each covers
-const GROUP_COUNT = 32;
-const UNITS_PER_GROUP = 24; // 24 * 32 = 768 (original d_model)
+// Changed from 32 to 24 to display fewer colour "swap" points.
+const GROUP_COUNT = 24;
+const UNITS_PER_GROUP = 24; // 24 * 24 = 576 (original d_model when using 24 groups)
 
 // Visual scaling factors (tweaked for readability – feel free to adjust)
 const WIDTH_SCALE  = 1.5;   // Same width scale used by existing InstancedPrism viz
@@ -65,7 +66,7 @@ export class VectorVisualization32 {
     constructor(startColor = null, endColor = null, initialPosition = new THREE.Vector3()) {
         this.group = new THREE.Group();
         this.group.position.copy(initialPosition);
-        this.group.userData.label = 'Vector32';
+        this.group.userData.label = 'Vector24';
 
         // ------------------------------------------------------------------
         // Generate key colours for 32 switches. 33 colours → 32 transitions.

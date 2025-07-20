@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 
 /**
- * Simple addition animation between two VectorVisualization32 instances.
- * Each of the 32 mesh components from the source vector travels vertically
+ * Simple addition animation between two VectorVisualization32 instances (now supporting any group count).
+ * Each of the mesh components from the source vector travels vertically
  * upward until it overlaps the corresponding component in the target vector,
  * then disappears (simulating the values being added).
  */
@@ -29,9 +29,10 @@ export class GroupedVectorAdditionAnimation {
 
         const yOffset = this.targetVis.group.position.y - this.sourceVis.group.position.y;
         this.isAnimating = true;
-        let remaining = 32;
+        const componentCount = this.sourceVis.group.children.length;
+        let remaining = componentCount;
 
-        for (let i = 0; i < 32; i++) {
+        for (let i = 0; i < componentCount; i++) {
             const mesh = this.sourceVis.group.children[i];
             if (!mesh) continue;
             const startY = mesh.position.y;

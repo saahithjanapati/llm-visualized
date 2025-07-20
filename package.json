@@ -9,6 +9,7 @@
   "scripts": {
     "predev": "node generate_index.js",
     "dev": "vite",
+    "precompute": "node scripts/generate_precomputed_components.mjs",
     "prebuild": "node generate_index.js",
     "build": "vite build",
     "preview": "vite preview",

@@ -26,6 +26,10 @@
 
     <script type="module">
         import * as THREE from 'three';
+        import { loadPrecomputedGeometries } from '../src/utils/precomputedGeometryLoader.js';
+
+        // Optionally load pre-baked geometries; returns instantly if disabled
+        await loadPrecomputedGeometries('../precomputed_components.glb');
         import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
         import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
         import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
