@@ -19,6 +19,8 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    // Allow modern syntax such as top-level await in bundled output
+    target: 'esnext',
     // Remove rollupOptions.input, Vite handles HTML entry points automatically
     rollupOptions: {
         input: {

@@ -2,6 +2,8 @@ import * as THREE from 'three';
 // OrbitControls is loaded via CDN and attached to THREE.OrbitControls
 // TWEEN is loaded via CDN and is available globally as TWEEN
 
+// FIRST_EDIT: Replace CDN reliance by explicit module import for OrbitControls
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { MHSAAnimation } from '../src/animations/MHSAAnimation.js';
 import { VectorVisualizationInstancedPrism } from '../src/components/VectorVisualizationInstancedPrism.js';
 import { NUM_HEAD_SETS_LAYER, VECTOR_LENGTH_PRISM, MHA_MATRIX_PARAMS, GLOBAL_ANIM_SPEED_MULT, HEAD_VECTOR_STOP_BELOW } from '../src/utils/constants.js';
@@ -26,7 +28,7 @@ function init() {
     document.body.appendChild(renderer.domElement);
 
     // Controls
-    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.target.set(0, MHA_MATRIX_PARAMS.height / 2, 0); // Target the center of where matrices will be
 
