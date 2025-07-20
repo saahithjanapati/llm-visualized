@@ -568,6 +568,16 @@ export default class Gpt2Layer extends BaseLayer {
                     if (!normAnimating) {
                         dupVec.group.position.y = Math.min(lane.ln1MidY, dupVec.group.position.y + ANIM_RISE_SPEED_INSIDE_LN * speedMult * dt);
                     }
+                    // --- NEW POST-MOVE SAFETY CHECK -----------------------------------
+                    // If the frame delta is large enough that the vector skipped over
+                    // the trigger height in a single update, the earlier check will
+                    // have missed it.  Run an extra guard here to ensure the
+                    // normalisation animation still begins.
+                    if (!lane.normStarted && dupVec.group.position.y >= normStartY) {
+                        lane.normAnim.start(dupVec.rawData.slice());
+                        lane.normStarted = true;
+                    }
+                    // -----------------------------------------------------------------
                     updateTrail(lane.dupTrail, dupVec.group.position);
                     if (dupVec.group.position.y >= lane.ln1MidY - 0.01) {
                         lane.multStarted = true;
@@ -705,19 +715,22 @@ export default class Gpt2Layer extends BaseLayer {
                     // LayerNorm’s height).
                     const normStartY2 = midY_ln2_abs - LN_PARAMS.height * 0.15;
                     const normAnimating2 = lane.normStartedLN2 && lane.normAnimationLN2 && lane.normAnimationLN2.isAnimating;
-                    
                     if (!lane.normStartedLN2 && mv.group.position.y >= normStartY2) {
                         lane.normAnimationLN2.start(mv.rawData.slice());
                         lane.normStartedLN2 = true;
                     }
-                    
                     if (lane.normStartedLN2 && lane.normAnimationLN2) {
                         lane.normAnimationLN2.update(dt);
                     }
-                    
                     if (!lane.multDoneLN2 && !normAnimating2) {
                         mv.group.position.y += ANIM_RISE_SPEED_INSIDE_LN * speedMult * dt;
                     }
+                    // --- NEW POST-MOVE SAFETY CHECK --------------------------------
+                    if (!lane.normStartedLN2 && mv.group.position.y >= normStartY2) {
+                        lane.normAnimationLN2.start(mv.rawData.slice());
+                        lane.normStartedLN2 = true;
+                    }
+                    // ----------------------------------------------------------------
                     
                     // Trigger multiplication at center of LN2
                     if (!lane.multDoneLN2 && mv.group.position.y >= midY_ln2_abs) {
