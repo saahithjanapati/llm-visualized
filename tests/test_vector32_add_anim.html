@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vector32 Addition Animation Test</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #111; color: #fff; }
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.65);
+            padding: 10px;
+            border-radius: 6px;
+            z-index: 5;
+        }
+        button {
+            background: #444;
+            color: #fff;
+            border: 1px solid #666;
+            padding: 6px 12px;
+            margin-right: 6px;
+            cursor: pointer;
+        }
+        button:hover { background: #555; }
+    </style>
+    <!-- Global TWEEN.js UMD build -->
+    <script src="https://unpkg.com/@tweenjs/tween.js@23.1.1/dist/tween.umd.js"></script>
+</head>
+<body>
+    <div id="controls">
+        <button id="randomize">Randomize Vectors</button>
+        <button id="animateAdd">Animate Addition</button>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.162.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.162.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { VectorVisualization32 } from '../src/components/VectorVisualization32.js';
+        import { GroupedVectorAdditionAnimation } from '../src/animations/GroupedVectorAdditionAnimation.js';
+
+        // Make THREE and TWEEN globally accessible for any libs expecting them
+        window.THREE = THREE;
+        window.TWEEN = TWEEN;
+
+        let scene, camera, renderer, controls, clock;
+        let vecTarget, vecSource, addAnim;
+
+        init();
+        animate();
+
+        function init() {
+            clock = new THREE.Clock();
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1a1a1a);
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2000);
+            camera.position.set(0, 25, 120);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+            document.body.appendChild(renderer.domElement);
+
+            const amb = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(amb);
+            const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+            dir.position.set(15, 30, 25);
+            scene.add(dir);
+
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+
+            createVectors();
+
+            document.getElementById('randomize').addEventListener('click', () => {
+                scene.remove(vecSource.group);
+                scene.remove(vecTarget.group);
+                createVectors();
+            });
+
+            document.getElementById('animateAdd').addEventListener('click', () => {
+                if (addAnim) addAnim.start();
+            });
+
+            window.addEventListener('resize', onResize);
+        }
+
+        function createVectors() {
+            const tgtPos = new THREE.Vector3(0, 0, 0);
+            const srcPos = new THREE.Vector3(0, -100, 0); // increased gap for clearer viewing
+
+            vecTarget = new VectorVisualization32();
+            vecTarget.group.position.copy(tgtPos);
+            scene.add(vecTarget.group);
+
+            vecSource = new VectorVisualization32();
+            vecSource.group.position.copy(srcPos);
+            scene.add(vecSource.group);
+
+            addAnim = new GroupedVectorAdditionAnimation(vecSource, vecTarget);
+        }
+
+        function onResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const dt = clock.getDelta();
+            TWEEN.update();
+            if (addAnim) addAnim.update(dt);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html> 

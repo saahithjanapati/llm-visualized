@@ -211,8 +211,9 @@ export class MHSAAnimation {
         }
         this.outputProjectionMatrix.group.children.forEach(child => {
             if (child.material) {
-                child.material.transparent = true;
-                child.material.opacity = 0.85;
+                // Ensure the output projection matrix starts fully opaque
+                child.material.transparent = false;
+                child.material.opacity = 1.0;
                 child.material.emissive = initDarkColor;
                 child.material.emissiveIntensity = 0.1; // Low initial emissive intensity
             }
