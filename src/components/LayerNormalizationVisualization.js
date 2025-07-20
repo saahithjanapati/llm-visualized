@@ -50,6 +50,7 @@ export class LayerNormalizationVisualization {
         // Public group that callers can add to their scene
         this.group = new THREE.Group();
         this.group.position.copy(position);
+        this.group.userData.label = 'LayerNorm';
 
         // Store parameters so `updateGeometry` can recreate the mesh later
         this.width = width;

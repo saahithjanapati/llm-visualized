@@ -85,6 +85,12 @@ export class LayerPipeline {
         if (!nextLayer) return;
 
         nextLayer.activateWithLanes(externalLanes);
+
+        // Now that the original residual vectors have been transferred, we can safely
+        // hide the remaining heavy geometry in the previous layer to save GPU work.
+        if (prevLayer && typeof prevLayer.hideDynamicGeometry === 'function') {
+            prevLayer.hideDynamicGeometry();
+        }
     }
 }
 

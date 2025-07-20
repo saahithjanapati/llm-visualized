@@ -99,6 +99,13 @@ export class MHSAAnimation {
                 MHA_MATRIX_PARAMS.slitBottomWidthFactor, MHA_MATRIX_PARAMS.slitTopWidthFactor
             );
             queryMatrix.setColor(darkGrayColor);
+            {
+                const lbl = 'Query Weight Matrix';
+                queryMatrix.group.userData.label = lbl;
+                if (queryMatrix.mesh) queryMatrix.mesh.userData.label = lbl;
+                if (queryMatrix.frontCapMesh) queryMatrix.frontCapMesh.userData.label = lbl;
+                if (queryMatrix.backCapMesh)  queryMatrix.backCapMesh.userData.label  = lbl;
+            }
             queryMatrix.group.children.forEach(child => {
                 if (child.material) {
                     child.material.transparent = matrixOpacity < 1.0;
@@ -116,6 +123,13 @@ export class MHSAAnimation {
                 MHA_MATRIX_PARAMS.slitBottomWidthFactor, MHA_MATRIX_PARAMS.slitTopWidthFactor
             );
             keyMatrix.setColor(darkGrayColor);
+            {
+                const lbl = 'Key Weight Matrix';
+                keyMatrix.group.userData.label = lbl;
+                if (keyMatrix.mesh) keyMatrix.mesh.userData.label = lbl;
+                if (keyMatrix.frontCapMesh) keyMatrix.frontCapMesh.userData.label = lbl;
+                if (keyMatrix.backCapMesh)  keyMatrix.backCapMesh.userData.label  = lbl;
+            }
             keyMatrix.group.children.forEach(child => {
                 if (child.material) {
                     child.material.transparent = matrixOpacity < 1.0;
@@ -133,6 +147,13 @@ export class MHSAAnimation {
                 MHA_MATRIX_PARAMS.slitBottomWidthFactor, MHA_MATRIX_PARAMS.slitTopWidthFactor
             );
             valueMatrix.setColor(darkGrayColor);
+            {
+                const lbl = 'Value Weight Matrix';
+                valueMatrix.group.userData.label = lbl;
+                if (valueMatrix.mesh) valueMatrix.mesh.userData.label = lbl;
+                if (valueMatrix.frontCapMesh) valueMatrix.frontCapMesh.userData.label = lbl;
+                if (valueMatrix.backCapMesh)  valueMatrix.backCapMesh.userData.label  = lbl;
+            }
             valueMatrix.group.children.forEach(child => {
                 if (child.material) {
                     child.material.transparent = matrixOpacity < 1.0;
@@ -181,6 +202,13 @@ export class MHSAAnimation {
         // Initialise pitch-black; will brighten once vectors pass through
         const initDarkColor = new THREE.Color(INACTIVE_COMPONENT_COLOR);
         this.outputProjectionMatrix.setColor(initDarkColor);
+        {
+            const lbl = 'Output Projection Matrix';
+            this.outputProjectionMatrix.group.userData.label = lbl;
+            if (this.outputProjectionMatrix.mesh) this.outputProjectionMatrix.mesh.userData.label = lbl;
+            if (this.outputProjectionMatrix.frontCapMesh) this.outputProjectionMatrix.frontCapMesh.userData.label = lbl;
+            if (this.outputProjectionMatrix.backCapMesh)  this.outputProjectionMatrix.backCapMesh.userData.label  = lbl;
+        }
         this.outputProjectionMatrix.group.children.forEach(child => {
             if (child.material) {
                 child.material.transparent = true;

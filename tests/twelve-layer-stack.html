@@ -31,6 +31,7 @@
         import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
         import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
         import { LayerPipeline } from '../src/engine/LayerPipeline.js';
+        import { CAPTION_TEXT_Y_POS } from '../src/utils/constants.js';
 
         // ------------------------------------------------------------------
         // GPT-2 tower – initialise immediately (but canvas hidden until intro
@@ -277,8 +278,8 @@
                 xOffset += width + charSpacing;
             }
 
-            // Center group beneath tower (approx y = -1000)
-            charGroup.position.set(-xOffset / 2 + charSpacing / 2, -1000, 0);
+            // Center group beneath tower using configurable constant
+            charGroup.position.set(-xOffset / 2 + charSpacing / 2, CAPTION_TEXT_Y_POS, 0);
 
             const revealChar = (index) => {
                 if (index >= charMeshes.length) return;

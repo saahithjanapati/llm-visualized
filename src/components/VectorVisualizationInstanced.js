@@ -15,6 +15,7 @@ export class VectorVisualizationInstanced {
         // Wrapper group to allow positioning the entire vector easily
         this.group = new THREE.Group();
         this.group.position.copy(initialPosition);
+        this.group.userData.label = 'Vector';
 
         // Prepare data arrays
         this.rawData = initialData || this.generateTestData();

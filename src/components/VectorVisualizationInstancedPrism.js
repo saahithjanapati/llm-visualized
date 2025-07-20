@@ -29,6 +29,7 @@ export class VectorVisualizationInstancedPrism {
     constructor(initialData = null, initialPosition = new THREE.Vector3(0, 0, 0), numSubsections = 30) {
         this.group = new THREE.Group();
         this.group.position.copy(initialPosition);
+        this.group.userData.label = 'Vector';
 
         this.rawData = initialData || this.generateTestData();
         this.normalizedData = []; // Will be populated by updateDataInternal

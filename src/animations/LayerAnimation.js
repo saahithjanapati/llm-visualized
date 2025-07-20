@@ -935,15 +935,20 @@ export function initLayerAnimation(container) {
                     const mv = lane.movingVecLN2;
                     if (!mv) break;
                     const normStartY2 = bottomY_ln2_abs + LN_PARAMS.height * 0.15; // start a bit sooner for clearer visuals
-                    const normAnimating2 = lane.normStartedLN2 && lane.normAnimationLN2 && lane.normAnimationLN2.isAnimating;
+                    // START NORMALISATION ONCE WE'VE REACHED THE THRESHOLD ---------------------------------
                     if (!lane.normStartedLN2 && mv.group.position.y >= normStartY2) {
                         lane.normAnimationLN2.start(mv.rawData.slice());
                         lane.normStartedLN2 = true;
                     }
+                    // Update the normalisation animation each frame
                     if (lane.normStartedLN2 && lane.normAnimationLN2) {
                         lane.normAnimationLN2.update(deltaTime);
                     }
-                    if (!lane.multDoneLN2 && !normAnimating2) {
+                    // Re-evaluate whether the animation is currently playing *after* possible start/update
+                    const isNormAnimating2 = lane.normStartedLN2 && lane.normAnimationLN2 && lane.normAnimationLN2.isAnimating;
+
+                    // Only let the vector rise when it is NOT actively normalising
+                    if (!lane.multDoneLN2 && !isNormAnimating2) {
                         mv.group.position.y += ANIM_RISE_SPEED_INSIDE_LN * SPEED_MULT * deltaTime;
                     }
                     if (!lane.multDoneLN2 && mv.group.position.y >= midY_ln2_abs) {

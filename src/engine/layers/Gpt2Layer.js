@@ -76,6 +76,9 @@ export default class Gpt2Layer extends BaseLayer {
         this._ln2Ready = false;
         // Flag to indicate that all lanes have reached MLP readiness.
         this._mlpStart = false;
+        // NEW: Barrier flags
+        this._ln1Start = false;        // start LN-1 branch
+        this._mhsaStart = false;       // start horizontal travel to heads
     }
 
     init(scene) {
@@ -104,7 +107,8 @@ export default class Gpt2Layer extends BaseLayer {
         // vectors begin to enter the ring.
         const inactiveDark = new THREE.Color(INACTIVE_COMPONENT_COLOR);
         ln1.setColor(inactiveDark);
-        ln1.setMaterialProperties({ opacity: 0.7, emissiveIntensity: 0.05 });
+        // Start fully opaque to avoid early depth-sorting costs.
+        ln1.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
         this.root.add(ln1.group);
 
         const ln1TopY = ln1CenterY + LN_PARAMS.height / 2;
@@ -188,7 +192,7 @@ export default class Gpt2Layer extends BaseLayer {
             LN_PARAMS.holeWidthFactor
         );
         ln2.setColor(inactiveDark);
-        ln2.setMaterialProperties({ opacity: 0.7, emissiveIntensity: 0.05 });
+        ln2.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
         this.root.add(ln2.group);
 
         const ln2TopY = ln2CenterY + LN_PARAMS.height / 2;
@@ -213,6 +217,13 @@ export default class Gpt2Layer extends BaseLayer {
         );
         mlpUp.setColor(inactiveDark.clone());
         mlpUp.setMaterialProperties({ opacity: 1.0, transparent: false });
+        {
+            const lbl = 'MLP Up Weight Matrix';
+            mlpUp.group.userData.label = lbl;
+            if (mlpUp.mesh) mlpUp.mesh.userData.label = lbl;
+            if (mlpUp.frontCapMesh) mlpUp.frontCapMesh.userData.label = lbl;
+            if (mlpUp.backCapMesh)  mlpUp.backCapMesh.userData.label  = lbl;
+        }
         this.root.add(mlpUp.group);
 
         // 5) MLP Down-projection matrix (same orange)
@@ -233,6 +244,13 @@ export default class Gpt2Layer extends BaseLayer {
         );
         mlpDown.setColor(inactiveDark.clone());
         mlpDown.setMaterialProperties({ opacity: 1.0, transparent: false });
+        {
+            const lbl = 'MLP Down Weight Matrix';
+            mlpDown.group.userData.label = lbl;
+            if (mlpDown.mesh) mlpDown.mesh.userData.label = lbl;
+            if (mlpDown.frontCapMesh) mlpDown.frontCapMesh.userData.label = lbl;
+            if (mlpDown.backCapMesh)  mlpDown.backCapMesh.userData.label  = lbl;
+        }
         this.root.add(mlpDown.group);
 
         // ---------- Residual vectors (original stream) ----------
@@ -460,6 +478,45 @@ export default class Gpt2Layer extends BaseLayer {
         }
 
         const speedMult = GLOBAL_ANIM_SPEED_MULT;
+
+        // ────────────────────────────────────────────────────────────────
+        //  NEW: LayerNorm-1 synchronisation barrier – wait until EVERY
+        //  lane's original residual-stream vector has reached the branching
+        //  height before triggering the horizontal duplicate move.  This
+        //  guarantees that all lanes enter LN-1 in perfect lock-step.
+        // ────────────────────────────────────────────────────────────────
+        if (!this._ln1Start) {
+            const allLn1Ready = this.lanes.length && this.lanes.every(l => l.originalVec.group.position.y >= l.branchStartY);
+            if (allLn1Ready) {
+                this._ln1Start = true;
+                console.log(`Layer ${this.index}: All lanes ready – starting LN-1 branch simultaneously`);
+
+                // Kick every lane out of the waiting state together.
+                this.lanes.forEach(l => {
+                    if (l.horizPhase === 'waiting') {
+                        l.horizPhase = 'right';
+                        l.dupVec.group.visible = true;
+                        l.dupVec.group.position.y = l.originalVec.group.position.y;
+                    }
+                });
+            }
+        }
+
+        //  NEW: MHSA travel synchronisation barrier – wait until every lane
+        //  has its duplicate result vector staged above LN-1 before letting
+        //  them begin horizontal travel to the attention heads.
+        // ────────────────────────────────────────────────────────────────
+        if (!this._mhsaStart) {
+            const allMHSAReady = this.lanes.length && this.lanes.every(l => l.horizPhase === 'readyMHSA');
+            if (allMHSAReady) {
+                this._mhsaStart = true;
+                console.log(`Layer ${this.index}: All lanes ready – starting travel to MHSA heads simultaneously`);
+                this.lanes.forEach(l => {
+                    if (l.horizPhase === 'readyMHSA') l.horizPhase = 'travelMHSA';
+                });
+            }
+        }
+
         this.lanes.forEach(lane => {
             const { originalVec, dupVec } = lane;
             
@@ -473,10 +530,15 @@ export default class Gpt2Layer extends BaseLayer {
             // branch logic
             switch (lane.horizPhase) {
                 case 'waiting':
+                    // Hold at the branching height until the global LN-1
+                    // barrier is released.
                     if (originalVec.group.position.y >= lane.branchStartY) {
-                        lane.horizPhase = 'right';
-                        dupVec.group.visible = true;
-                        dupVec.group.position.y = originalVec.group.position.y;
+                        // Clamp position so early-arriving lanes don’t drift.
+                        originalVec.group.position.y = lane.branchStartY;
+                    } else {
+                        // Continue rising towards the branching height.
+                        originalVec.group.position.y = Math.min(lane.branchStartY, originalVec.group.position.y + ANIM_RISE_SPEED_ORIGINAL * speedMult * dt);
+                        updateTrail(lane.origTrail, originalVec.group.position);
                     }
                     break;
                 case 'right':
@@ -531,11 +593,18 @@ export default class Gpt2Layer extends BaseLayer {
                             rv.group.position.y = Math.min(targetY, rv.group.position.y + ANIM_RISE_SPEED_INSIDE_LN * speedMult * dt);
                             updateTrail(lane.dupTrail, rv.group.position);
                         } else {
-                            // Now that we're above LN1, start travelling to heads
+                            // Now that we're above LN1, mark lane ready for MHSA travel.
                             lane.travellingVec = rv;
                             lane.headIndex = 0;
-                            lane.horizPhase = 'travelMHSA';
+                            lane.horizPhase = 'readyMHSA'; // wait for global barrier
                         }
+                    }
+                    break;
+                case 'readyMHSA':
+                    // Hold at staging height until global _mhsaStart flag triggers.
+                    // Ensure vector stays exactly at meetY.
+                    if (lane.travellingVec) {
+                        lane.travellingVec.group.position.y = this.ln1TopY + 5;
                     }
                     break;
                 case 'travelMHSA':
@@ -630,7 +699,11 @@ export default class Gpt2Layer extends BaseLayer {
                     const mv = lane.movingVecLN2;
                     if (!mv) break;
                     
-                    const normStartY2 = bottomY_ln2_abs + LN_PARAMS.height * 0.35;
+                    // Use the same threshold formula as LayerNorm-1 so the
+                    // normalisation animation begins at the identical
+                    // relative height inside the ring (centre − 15 % of the
+                    // LayerNorm’s height).
+                    const normStartY2 = midY_ln2_abs - LN_PARAMS.height * 0.15;
                     const normAnimating2 = lane.normStartedLN2 && lane.normAnimationLN2 && lane.normAnimationLN2.isAnimating;
                     
                     if (!lane.normStartedLN2 && mv.group.position.y >= normStartY2) {
@@ -720,6 +793,7 @@ export default class Gpt2Layer extends BaseLayer {
         if (this.isActive && !this._completed && this.lanes.length && 
             this.lanes.every(l => l.ln2Phase === 'done') && this._pendingAdditions === 0) {
             this._completed = true;
+            this._makeLayerOpaque(); // disable expensive transparency; dynamic vectors culled later by pipeline
             if (this.onFinished) this.onFinished();
         }
     }
@@ -1141,5 +1215,41 @@ export default class Gpt2Layer extends BaseLayer {
             this._pendingAdditions--;
             lane.additionComplete = true;
         }, totalAnimTime + 100);
+    }
+
+    /**
+     * Walk every mesh in this layer and turn off Three.js transparency for
+     * materials that are already fully opaque.  This removes them from the
+     * per-frame depth-sorting list, improving performance once the layer is
+     * finished and static.
+     */
+    _makeLayerOpaque() {
+        this.root.traverse(obj => {
+            if (obj.isMesh && obj.material) {
+                const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+                mats.forEach(mat => {
+                    // Only change materials that use blending but are visually opaque
+                    const fullyOpaque = (mat.opacity === undefined) || (mat.opacity >= 0.99);
+                    if (mat.transparent && fullyOpaque) {
+                        mat.transparent = false;
+                        mat.depthWrite = true;
+                        mat.needsUpdate = true;
+                    }
+                });
+            }
+        });
+    }
+
+    /** Exposed so LayerPipeline can cull heavy geometry after it has handed lanes to the next layer */
+    hideDynamicGeometry() {
+        this.root.traverse(obj => {
+            if (!obj) return;
+            // Instanced prisms created by VectorVisualizationInstancedPrism have label 'Vector'
+            const isVector = obj.userData && obj.userData.label === 'Vector';
+            const isTrail  = obj.isLine === true; // THREE.Line for trails
+            if (isVector || isTrail) {
+                obj.visible = false;
+            }
+        });
     }
 } 

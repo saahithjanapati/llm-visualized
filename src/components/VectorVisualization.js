@@ -19,6 +19,8 @@ export class VectorVisualization {
     constructor(initialData = null, initialPosition = new THREE.Vector3(0, 0, 0)) {
         this.group = new THREE.Group();
         this.group.position.copy(initialPosition);
+        // Label for raycasting hover info
+        this.group.userData.label = 'Vector';
         this.ellipses = []; // Keep track of meshes for potential updates
         // Assign a default speed, can be overridden later
         this.speed = 0; // Initialize speed, will be set externally in main.js
@@ -45,6 +47,8 @@ export class VectorVisualization {
             // every mesh.  This saves GPU memory and upload time because the
             // vertex data now exists only once.
             const ellipse = new THREE.Mesh(baseSphereGeometry, material);
+            // Set label for raycasting hover identification
+            ellipse.userData.label = 'Vector';
             ellipse.position.x = (i - VECTOR_LENGTH / 2) * SPHERE_DIAMETER;
             ellipse.position.y = 0; // Relative to the group
             this.group.add(ellipse);

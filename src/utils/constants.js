@@ -223,7 +223,7 @@ export const LN2_TO_MLP_GAP = 150;
 export const LAYER_NORM_2_Y_POS = 750; // Increased for clearer separation from MHSA block
 
 // Gap between the two stacked MLP weight matrices
-export const MLP_INTER_MATRIX_GAP = 100;
+export const MLP_INTER_MATRIX_GAP = 140; // increased gap for clearer visual separation between the two MLP weight matrices
 
 // -----------------------------------------------------------------------------
 // MLP Up-/Down-Projection Weight Matrix Geometry Parameters
@@ -265,3 +265,12 @@ export const MLP_MATRIX_PARAMS_DOWN = {
 
 /** Base colour for inactive components (visible but dark). */
 export const INACTIVE_COMPONENT_COLOR = 0x202020;
+
+// ------------------------------------------------------------
+// UI / Caption Constants
+// ------------------------------------------------------------
+
+/** Vertical Y-coordinate for the "Can machines think?" caption that sits under
+ *  the GPT-2 tower.  Negative values move the text downward (further away from
+ *  the camera).  Adjust here to reposition the caption globally. */
+export const CAPTION_TEXT_Y_POS = -2500;

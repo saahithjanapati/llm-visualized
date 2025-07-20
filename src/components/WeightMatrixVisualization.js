@@ -30,6 +30,8 @@ export class WeightMatrixVisualization {
     ) {
         this.group = new THREE.Group();
         this.group.position.copy(position);
+        // Label for raycasting hover info
+        this.group.userData.label = 'Weight Matrix';
 
         this.width = width;
         this.height = height;
