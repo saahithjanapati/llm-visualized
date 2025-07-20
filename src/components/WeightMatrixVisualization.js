@@ -227,7 +227,8 @@ export class WeightMatrixVisualization {
         // --- Create and Subtract Slits using CSG (for the side walls) ---
         let finalMesh = baseMesh; // Start with the base mesh
 
-        if (QUALITY_PRESET === 'high' && this.numberOfSlits > 0 && this.slitWidth > 0) {
+        // Only run the heavy CSG slit generation when we *didn't* hit the cache.
+        if (!cacheHit && QUALITY_PRESET === 'high' && this.numberOfSlits > 0 && this.slitWidth > 0) {
             const slitSpacing = this.depth / (this.numberOfSlits + 1);
 
             // Calculate the actual depth of the cut based on the factor
