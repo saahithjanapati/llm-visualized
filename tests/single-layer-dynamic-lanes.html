@@ -43,6 +43,11 @@
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
 
+        // Directional light as used in twelve-layer-stack.html
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(5, 10, 7.5);
+        scene.add(dirLight);
+
         // Load the same HDRI used in main scenes for consistent lighting
         const exrLoader = new EXRLoader();
         exrLoader.load('../rogland_clear_night_1k.exr', (tex) => {
