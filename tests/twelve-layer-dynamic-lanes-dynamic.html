@@ -154,18 +154,23 @@
             const wmTemplate = new WeightMatrixVisualization(null,new THREE.Vector3(),MHA_MATRIX_PARAMS.width,MHA_MATRIX_PARAMS.height,VECTOR_DEPTH_SPACING,MHA_MATRIX_PARAMS.topWidthFactor,MHA_MATRIX_PARAMS.cornerRadius,1,MHA_MATRIX_PARAMS.slitWidth,MHA_MATRIX_PARAMS.slitDepthFactor,MHA_MATRIX_PARAMS.slitBottomWidthFactor,MHA_MATRIX_PARAMS.slitTopWidthFactor);
             const wmGeo = wmTemplate.mesh.geometry.clone();
             const capGeo = wmTemplate.frontCapMesh.geometry.clone();
+            const capGeoBack = capGeo.clone();
+            capGeoBack.rotateY(Math.PI);
             wmTemplate.group.traverse(o=>{if(o.material) o.material.dispose();});
             
             for(let colIdx=0; colIdx<3; colIdx++){
                 const mat = wmTemplate.mesh.material.clone();
-                mat.color.set(colours[colIdx]);
+                const baseColor = new THREE.Color(colours[colIdx]);
+                mat.color.copy(baseColor);
+                mat.emissive = baseColor.clone();
+                mat.emissiveIntensity = 0.2;
                 mat.transparent = false;
                 mat.opacity = 1.0;
                 const inst = new InstancedMesh(wmGeo, mat, NUM_HEAD_SETS_LAYER*laneCount);
                 const capMatFront = mat.clone();
                 const capMatBack  = mat.clone();
                 const frontCaps = new InstancedMesh(capGeo, capMatFront, NUM_HEAD_SETS_LAYER);
-                const backCaps  = new InstancedMesh(capGeo, capMatBack,  NUM_HEAD_SETS_LAYER);
+                const backCaps  = new InstancedMesh(capGeoBack, capMatBack,  NUM_HEAD_SETS_LAYER);
                 const mtx=new Matrix4();
                 let instanceId = 0;
                 for(let head=0; head<NUM_HEAD_SETS_LAYER; head++){
@@ -224,6 +229,8 @@
                 const temp=new WeightMatrixVisualization(null,new THREE.Vector3(),params.width,params.height,VECTOR_DEPTH_SPACING,params.topWidthFactor,params.cornerRadius,1,params.slitWidth,params.slitDepthFactor,params.slitBottomWidthFactor,params.slitTopWidthFactor);
                 const geo=temp.mesh.geometry.clone();
                 const capGeo=temp.frontCapMesh.geometry.clone();
+                const capGeoBack=capGeo.clone();
+                capGeoBack.rotateY(Math.PI);
                 const mat=temp.mesh.material.clone();
                 mat.color.copy(orange);
                 mat.emissive=orange.clone();
@@ -232,7 +239,7 @@
                 mat.opacity = 1.0;
                 const inst=new InstancedMesh(geo, mat, laneCount);
                 const frontCaps=new InstancedMesh(capGeo, mat.clone(), 1);
-                const backCaps =new InstancedMesh(capGeo, mat.clone(), 1);
+                const backCaps =new InstancedMesh(capGeoBack, mat.clone(), 1);
                 const mtx=new Matrix4();
                 for(let i=0;i<laneCount;i++){
                     const z=(i-(laneCount-1)/2)*VECTOR_DEPTH_SPACING;
