@@ -43,6 +43,7 @@ export default defineConfig({
             vectorInstancedPrism32: resolve(__dirname, 'tests/test_vector_grouped_32.html'),
             vectorInstancedPrism21Add: resolve(__dirname, 'tests/test_vector32_add_anim.html'),
             singleLaneComponents: resolve(__dirname, 'tests/single-layer-dynamic-lanes.html'),
+            twelveLayerDynamicLanes: resolve(__dirname, 'tests/twelve-layer-dynamic-lanes-dynamic.html'),
 
         }
     } 
