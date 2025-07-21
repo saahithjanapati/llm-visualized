@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dynamic Lane Count – Single Layer Prototype</title>
+    <style>
+        body { margin: 0; overflow: hidden; background:#000; }
+        #ui { position:fixed; top:10px; left:10px; z-index:10; font-family:monospace; color:#fff; }
+        #c   { display:block; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        Lanes: <input type="range" id="laneSlider" min="1" max="20" value="5" />
+        <span id="laneLabel">5</span>
+    </div>
+    <canvas id="c"></canvas>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+        import { loadPrecomputedGeometries } from '../src/utils/precomputedGeometryLoader.js';
+        import { LayerNormalizationVisualization } from '../src/components/LayerNormalizationVisualization.js';
+        import { WeightMatrixVisualization } from '../src/components/WeightMatrixVisualization.js';
+        import { LN_PARAMS, LN_TO_MHA_GAP, BRANCH_X, LAYER_NORM_1_Y_POS, LAYER_NORM_2_Y_POS, LN2_TO_MLP_GAP, MLP_MATRIX_PARAMS_UP, MLP_MATRIX_PARAMS_DOWN, NUM_HEAD_SETS_LAYER, HEAD_SET_GAP_LAYER, MHA_INTERNAL_MATRIX_SPACING, MHA_MATRIX_PARAMS, VECTOR_DEPTH_SPACING, MLP_INTER_MATRIX_GAP, INACTIVE_COMPONENT_COLOR } from '../src/utils/constants.js';
+        import { MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR } from '../src/animations/LayerAnimationConstants.js';
+        import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
+
+        // Ensure single-lane geometries are cached before we build anything
+        await loadPrecomputedGeometries('../precomputed_components_slice.glb');
+
+        const canvas    = document.getElementById('c');
+        const renderer  = new THREE.WebGLRenderer({ canvas, antialias:true });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio,1.5));
+        renderer.setSize(window.innerWidth, window.innerHeight);
+
+        const scene   = new THREE.Scene();
+        scene.background = new THREE.Color(0x000000);
+
+        const camera  = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 1, 20000);
+        camera.position.set(800, 600, 2000);
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        // Load the same HDRI used in main scenes for consistent lighting
+        const exrLoader = new EXRLoader();
+        exrLoader.load('../rogland_clear_night_1k.exr', (tex) => {
+            tex.mapping = THREE.EquirectangularReflectionMapping;
+            scene.environment = tex;
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 1.0;
+        });
+
+        let currentLayerGroup = null;
+
+        function stripCaps(bufferGeo, keepFront, keepBack) {
+            // Removes triangles whose normals point nearly +Z (front) or -Z (back)
+            const geo = bufferGeo.toNonIndexed();
+            const pos = geo.getAttribute('position').array;
+            const nrm = geo.getAttribute('normal').array;
+
+            const newPositions = [];
+            const newNormals   = [];
+
+            for (let i=0; i<pos.length; i+=9) {
+                // Average normal of triangle
+                const nx = (nrm[i] + nrm[i+3] + nrm[i+6]) / 3;
+                const ny = (nrm[i+1] + nrm[i+4] + nrm[i+7]) / 3;
+                const nz = (nrm[i+2] + nrm[i+5] + nrm[i+8]) / 3;
+                // If facing roughly ±Z we classify as cap
+                const isFront = nz >  0.9;
+                const isBack  = nz < -0.9;
+                if ((isFront && !keepFront) || (isBack && !keepBack)) {
+                    continue; // skip this triangle
+                }
+                // push vertices
+                for(let j=0;j<9;j++) newPositions.push(pos[i+j]);
+                for(let j=0;j<9;j++) newNormals.push(nrm[i+j]);
+            }
+
+            const newGeo = new THREE.BufferGeometry();
+            newGeo.setAttribute('position', new THREE.Float32BufferAttribute(newPositions,3));
+            newGeo.setAttribute('normal',   new THREE.Float32BufferAttribute(newNormals,3));
+            return newGeo;
+        }
+
+        // Y positions and offsets using constants
+        const ln1CenterY = LAYER_NORM_1_Y_POS;
+        const ln1TopY    = ln1CenterY + LN_PARAMS.height/2;
+        const mhaCenterY = ln1TopY + LN_TO_MHA_GAP + MHA_MATRIX_PARAMS.height/2;
+        const ln2CenterY = LAYER_NORM_2_Y_POS;
+        const ln2TopY    = ln2CenterY + LN_PARAMS.height/2;
+        const mlpUpCenterY   = ln2TopY + LN2_TO_MLP_GAP + MLP_MATRIX_PARAMS_UP.height/2;
+        const mlpDownCenterY = mlpUpCenterY + MLP_MATRIX_PARAMS_UP.height / 2 + MLP_INTER_MATRIX_GAP + MLP_MATRIX_PARAMS_DOWN.height / 2;
+
+        function buildLayer(laneCount=5){
+         if(currentLayerGroup) scene.remove(currentLayerGroup);
+         const g=new THREE.Group();
+         // --- LayerNorm1 slices ---
+         for(let i=0;i<laneCount;i++){
+          const z=(i-(laneCount-1)/2)*VECTOR_DEPTH_SPACING;
+          const ln=new LayerNormalizationVisualization(new THREE.Vector3(BRANCH_X,ln1CenterY,z),LN_PARAMS.width,LN_PARAMS.height,VECTOR_DEPTH_SPACING,LN_PARAMS.wallThickness,1,LN_PARAMS.holeWidth,LN_PARAMS.holeWidthFactor);
+          const lnColor = new THREE.Color(0xffffff);
+          ln.setColor(lnColor);
+          ln.setMaterialProperties({ opacity:1.0, transparent:false, emissive: lnColor, emissiveIntensity: 0.2 });
+          if(ln.mesh&&ln.mesh.geometry){ln.mesh.geometry.dispose();ln.mesh.geometry= stripCaps(ln.mesh.geometry,false,false);} g.add(ln.group);
+         }
+         // --- MHSA Q,K,V slices across head sets ---
+         const matrixW=MHA_MATRIX_PARAMS.width;
+         const singleSetWidth=3*matrixW;
+         const firstQX=BRANCH_X - MHA_INTERNAL_MATRIX_SPACING + matrixW/2;
+         for(let head=0;head<NUM_HEAD_SETS_LAYER;head++){
+          const setOffsetX = head*(singleSetWidth+HEAD_SET_GAP_LAYER);
+          const localQX=firstQX+setOffsetX;
+          const localKX=localQX+matrixW;
+          const localVX=localKX+matrixW;
+          const colors=[MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR];
+          [localQX,localKX,localVX].forEach((x,idx)=>{
+           for(let i=0;i<laneCount;i++){
+             const z=(i-(laneCount-1)/2)*VECTOR_DEPTH_SPACING;
+             const wm=new WeightMatrixVisualization(null,new THREE.Vector3(x,mhaCenterY,z),MHA_MATRIX_PARAMS.width,MHA_MATRIX_PARAMS.height,VECTOR_DEPTH_SPACING,MHA_MATRIX_PARAMS.topWidthFactor,MHA_MATRIX_PARAMS.cornerRadius,1, MHA_MATRIX_PARAMS.slitWidth,MHA_MATRIX_PARAMS.slitDepthFactor,MHA_MATRIX_PARAMS.slitBottomWidthFactor,MHA_MATRIX_PARAMS.slitTopWidthFactor);
+             wm.setColor(new THREE.Color(colors[idx]));
+             wm.setMaterialProperties({ opacity:1.0, transparent:false });
+             if(i!==laneCount-1 && wm.frontCapMesh) wm.frontCapMesh.visible = false; // hide front for all except last
+             if(i!==0 && wm.backCapMesh) wm.backCapMesh.visible = false;           // hide back for all except first
+             g.add(wm.group);
+           }
+          });
+         }
+         // --- LayerNorm2 slices ---
+         for(let i=0;i<laneCount;i++){
+          const z=(i-(laneCount-1)/2)*VECTOR_DEPTH_SPACING;
+          const ln=new LayerNormalizationVisualization(new THREE.Vector3(BRANCH_X,ln2CenterY,z),LN_PARAMS.width,LN_PARAMS.height,VECTOR_DEPTH_SPACING,LN_PARAMS.wallThickness,1,LN_PARAMS.holeWidth,LN_PARAMS.holeWidthFactor);
+          const lnColor = new THREE.Color(0xffffff);
+          ln.setColor(lnColor.clone());
+          ln.setMaterialProperties({ opacity:1.0, transparent:false, emissive: lnColor.clone(), emissiveIntensity: 0.5 });
+          if(ln.mesh&&ln.mesh.geometry){ln.mesh.geometry.dispose();ln.mesh.geometry= stripCaps(ln.mesh.geometry,false,false);} g.add(ln.group);
+         }
+         // --- MLP Up and Down matrices ---
+         const mlpMatrices=[{y:mlpUpCenterY,params:MLP_MATRIX_PARAMS_UP},{y:mlpDownCenterY,params:MLP_MATRIX_PARAMS_DOWN}];
+         mlpMatrices.forEach(({y,params})=>{
+          for(let i=0;i<laneCount;i++){
+           const z=(i-(laneCount-1)/2)*VECTOR_DEPTH_SPACING;
+           const wm=new WeightMatrixVisualization(null,new THREE.Vector3(BRANCH_X,y,z),params.width,params.height,VECTOR_DEPTH_SPACING,params.topWidthFactor,params.cornerRadius,1,params.slitWidth,params.slitDepthFactor,params.slitBottomWidthFactor,params.slitTopWidthFactor);
+           const orange=new THREE.Color(0xb07c13);
+           wm.setColor(orange);
+           wm.setEmissive(orange,0.5);
+           wm.setMaterialProperties({ opacity:1.0, transparent:false });
+           if(i!==laneCount-1 && wm.frontCapMesh) wm.frontCapMesh.visible=false;
+           if(i!==0 && wm.backCapMesh) wm.backCapMesh.visible=false;
+           g.add(wm.group);
+          }
+         });
+         currentLayerGroup=g; scene.add(g);
+        }
+
+        // Initial build
+        const slider = document.getElementById('laneSlider');
+        const label  = document.getElementById('laneLabel');
+        buildLayer(parseInt(slider.value,10));
+        slider.addEventListener('input', () => {
+            const n = parseInt(slider.value,10);
+            label.textContent = n;
+            buildLayer(n);
+        });
+
+        window.addEventListener('resize', () => {
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+        });
+
+        (function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        })();
+
+    </script>
+</body>
+</html> 

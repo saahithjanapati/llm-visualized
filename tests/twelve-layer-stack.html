@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Test – 12-Layer GPT-2 Stack</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #111; }
+        body { margin: 0; overflow: hidden; background-color: #000; }
         canvas { display: block; }
     </style>
 </head>
@@ -69,7 +69,7 @@
         renderer.setSize(window.innerWidth, window.innerHeight);
 
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x111111);
+        scene.background = new THREE.Color(0x000000);
 
         const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 20000);
         camera.position.set(0, 0, 1500);

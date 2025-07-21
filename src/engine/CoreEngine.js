@@ -30,7 +30,7 @@ export class CoreEngine {
         // Scene / camera / renderer
         // ────────────────────────────────────────────────────────────────────
         this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x111111);
+        this.scene.background = new THREE.Color(0x000000);
 
         this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 5, 10000);
         this.camera.position.set(0, 150, 800);
