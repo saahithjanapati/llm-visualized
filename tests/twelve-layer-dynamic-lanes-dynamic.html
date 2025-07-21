@@ -9,6 +9,7 @@
         #ui { position:fixed;top:10px;left:10px;z-index:10;font-family:monospace;color:#fff; }
         canvas { display:block; }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/stats.js@0.17.0/build/stats.min.js"></script>
 </head>
 <body>
     <div id="ui">
@@ -23,6 +24,7 @@
         import { loadPrecomputedGeometries } from '../src/utils/precomputedGeometryLoader.js';
         import { LayerNormalizationVisualization } from '../src/components/LayerNormalizationVisualization.js';
         import { WeightMatrixVisualization } from '../src/components/WeightMatrixVisualization.js';
+        import { InstancedMesh, Matrix4 } from 'three';
 
         import {
             LN_PARAMS,
@@ -47,7 +49,7 @@
         await loadPrecomputedGeometries('../precomputed_components_slice.glb');
 
         const LAYER_COUNT = 12;
-        const LAYER_VERTICAL_SPACING = 1500; // matches Gpt2Layer.js
+        const LAYER_VERTICAL_SPACING = 2000; // increased spacing for clarity
 
         const canvas = document.getElementById('c');
         const renderer = new THREE.WebGLRenderer({ canvas, antialias:true });
@@ -61,6 +63,10 @@
         camera.position.set(4000, 8000, 16000);
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
+
+        // FPS meter
+        const stats = new Stats();
+        document.body.appendChild(stats.dom);
 
         // Lighting identical to twelve-layer-stack demo
         const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
@@ -110,58 +116,138 @@
             const lnColour = new THREE.Color(0xffffff);
             const orange   = new THREE.Color(0xb07c13);
 
-            // LN-1
-            for(let i=0;i<laneCount;i++){
-                const z=(i-(laneCount-1)/2)*VECTOR_DEPTH_SPACING;
-                const ln=new LayerNormalizationVisualization(new THREE.Vector3(BRANCH_X,ln1CenterY,z),LN_PARAMS.width,LN_PARAMS.height,VECTOR_DEPTH_SPACING,LN_PARAMS.wallThickness,1,LN_PARAMS.holeWidth,LN_PARAMS.holeWidthFactor);
-                ln.setColor(lnColour);
-                ln.setMaterialProperties({opacity:1,transparent:false,emissive:lnColour,emissiveIntensity:0.2});
-                if(ln.mesh&&ln.mesh.geometry){ln.mesh.geometry.dispose(); ln.mesh.geometry=stripCaps(ln.mesh.geometry,false,false);} // remove internal caps
-                group.add(ln.group);
+            // LN-1 as InstancedMesh
+            {
+                const tmpl = new LayerNormalizationVisualization(new THREE.Vector3(),
+                    LN_PARAMS.width,
+                    LN_PARAMS.height,
+                    VECTOR_DEPTH_SPACING,
+                    LN_PARAMS.wallThickness,
+                    1,
+                    LN_PARAMS.holeWidth,
+                    LN_PARAMS.holeWidthFactor);
+                const baseGeo = stripCaps(tmpl.mesh.geometry.clone(), false, false);
+                const baseMat = tmpl.mesh.material.clone();
+                baseMat.color.copy(lnColour);
+                baseMat.emissive = lnColour.clone();
+                baseMat.emissiveIntensity = 0.2;
+                baseMat.transparent = false;
+                baseMat.opacity = 1.0;
+                const inst = new InstancedMesh(baseGeo, baseMat, laneCount);
+                const mtx = new Matrix4();
+                for(let i=0;i<laneCount;i++){
+                    const z=(i-(laneCount-1)/2)*VECTOR_DEPTH_SPACING;
+                    mtx.makeTranslation(BRANCH_X, ln1CenterY, z);
+                    inst.setMatrixAt(i, mtx);
+                }
+                tmpl.group.traverse(obj=>{if(obj.material) obj.material.dispose();});
+                group.add(inst);
             }
 
-            // Q/K/V matrices
+            // Q/K/V matrices as InstancedMesh per colour per head-set per layer
             const matrixW=MHA_MATRIX_PARAMS.width;
             const singleSetWidth=3*matrixW;
             const firstQX = BRANCH_X - MHA_INTERNAL_MATRIX_SPACING + matrixW/2;
             const colours=[MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR];
-            for(let head=0;head<NUM_HEAD_SETS_LAYER;head++){
-                const setOffsetX = head*(singleSetWidth+HEAD_SET_GAP_LAYER);
-                const xs=[firstQX+setOffsetX, firstQX+setOffsetX+matrixW, firstQX+setOffsetX+2*matrixW];
-                xs.forEach((x,colIdx)=>{
+
+            // build template geometry/material once
+            const wmTemplate = new WeightMatrixVisualization(null,new THREE.Vector3(),MHA_MATRIX_PARAMS.width,MHA_MATRIX_PARAMS.height,VECTOR_DEPTH_SPACING,MHA_MATRIX_PARAMS.topWidthFactor,MHA_MATRIX_PARAMS.cornerRadius,1,MHA_MATRIX_PARAMS.slitWidth,MHA_MATRIX_PARAMS.slitDepthFactor,MHA_MATRIX_PARAMS.slitBottomWidthFactor,MHA_MATRIX_PARAMS.slitTopWidthFactor);
+            const wmGeo = wmTemplate.mesh.geometry.clone();
+            const capGeo = wmTemplate.frontCapMesh.geometry.clone();
+            wmTemplate.group.traverse(o=>{if(o.material) o.material.dispose();});
+            
+            for(let colIdx=0; colIdx<3; colIdx++){
+                const mat = wmTemplate.mesh.material.clone();
+                mat.color.set(colours[colIdx]);
+                mat.transparent = false;
+                mat.opacity = 1.0;
+                const inst = new InstancedMesh(wmGeo, mat, NUM_HEAD_SETS_LAYER*laneCount);
+                const capMatFront = mat.clone();
+                const capMatBack  = mat.clone();
+                const frontCaps = new InstancedMesh(capGeo, capMatFront, NUM_HEAD_SETS_LAYER);
+                const backCaps  = new InstancedMesh(capGeo, capMatBack,  NUM_HEAD_SETS_LAYER);
+                const mtx=new Matrix4();
+                let instanceId = 0;
+                for(let head=0; head<NUM_HEAD_SETS_LAYER; head++){
+                    const setOffsetX = head*(singleSetWidth+HEAD_SET_GAP_LAYER);
+                    const x = firstQX + setOffsetX + colIdx*matrixW;
+                    // Back cap (first slice)
+                    let backZ = (-(laneCount-1)/2)*VECTOR_DEPTH_SPACING - VECTOR_DEPTH_SPACING/2 - 0.05;
+                    mtx.makeTranslation(x, mhaCenterY, backZ);
+                    backCaps.setMatrixAt(head, mtx);
+                    // Front cap (last slice)
+                    let frontZ = ((laneCount-1)/2)*VECTOR_DEPTH_SPACING + VECTOR_DEPTH_SPACING/2 + 0.05;
+                    mtx.makeTranslation(x, mhaCenterY, frontZ);
+                    frontCaps.setMatrixAt(head, mtx);
                     for(let i=0;i<laneCount;i++){
                         const z=(i-(laneCount-1)/2)*VECTOR_DEPTH_SPACING;
-                        const wm=new WeightMatrixVisualization(null,new THREE.Vector3(x,mhaCenterY,z),MHA_MATRIX_PARAMS.width,MHA_MATRIX_PARAMS.height,VECTOR_DEPTH_SPACING,MHA_MATRIX_PARAMS.topWidthFactor,MHA_MATRIX_PARAMS.cornerRadius,1,MHA_MATRIX_PARAMS.slitWidth,MHA_MATRIX_PARAMS.slitDepthFactor,MHA_MATRIX_PARAMS.slitBottomWidthFactor,MHA_MATRIX_PARAMS.slitTopWidthFactor);
-                        wm.setColor(new THREE.Color(colours[colIdx]));
-                        wm.setMaterialProperties({opacity:1,transparent:false});
-                        if(i!==laneCount-1&&wm.frontCapMesh) wm.frontCapMesh.visible=false;
-                        if(i!==0&&wm.backCapMesh) wm.backCapMesh.visible=false;
-                        group.add(wm.group);
+                        mtx.makeTranslation(x, mhaCenterY, z);
+                        inst.setMatrixAt(instanceId++, mtx);
                     }
-                });
+                }
+                group.add(inst);
+                group.add(frontCaps);
+                group.add(backCaps);
             }
 
-            // LN-2
-            for(let i=0;i<laneCount;i++){
-                const z=(i-(laneCount-1)/2)*VECTOR_DEPTH_SPACING;
-                const ln=new LayerNormalizationVisualization(new THREE.Vector3(BRANCH_X,ln2CenterY,z),LN_PARAMS.width,LN_PARAMS.height,VECTOR_DEPTH_SPACING,LN_PARAMS.wallThickness,1,LN_PARAMS.holeWidth,LN_PARAMS.holeWidthFactor);
-                ln.setColor(lnColour);
-                ln.setMaterialProperties({opacity:1,transparent:false,emissive:lnColour,emissiveIntensity:0.2});
-                if(ln.mesh&&ln.mesh.geometry){ln.mesh.geometry.dispose(); ln.mesh.geometry=stripCaps(ln.mesh.geometry,false,false);} group.add(ln.group);
-            }
-
-            // MLP Up & Down
-            const mlpConfigs=[{y:mlpUpCenterY,params:MLP_MATRIX_PARAMS_UP},{y:mlpDownCenterY,params:MLP_MATRIX_PARAMS_DOWN}];
-            mlpConfigs.forEach(({y,params})=>{
+            // LN-2 instanced
+            {
+                const tmpl = new LayerNormalizationVisualization(new THREE.Vector3(),
+                    LN_PARAMS.width,
+                    LN_PARAMS.height,
+                    VECTOR_DEPTH_SPACING,
+                    LN_PARAMS.wallThickness,
+                    1,
+                    LN_PARAMS.holeWidth,
+                    LN_PARAMS.holeWidthFactor);
+                const geo = stripCaps(tmpl.mesh.geometry.clone(), false, false);
+                const mat = tmpl.mesh.material.clone();
+                mat.color.copy(lnColour);
+                mat.emissive = lnColour.clone();
+                mat.emissiveIntensity = 0.2;
+                mat.transparent = false;
+                mat.opacity = 1.0;
+                const inst = new InstancedMesh(geo, mat, laneCount);
+                const mtx=new Matrix4();
                 for(let i=0;i<laneCount;i++){
                     const z=(i-(laneCount-1)/2)*VECTOR_DEPTH_SPACING;
-                    const wm=new WeightMatrixVisualization(null,new THREE.Vector3(BRANCH_X,y,z),params.width,params.height,VECTOR_DEPTH_SPACING,params.topWidthFactor,params.cornerRadius,1,params.slitWidth,params.slitDepthFactor,params.slitBottomWidthFactor,params.slitTopWidthFactor);
-                    wm.setColor(orange);
-                    wm.setMaterialProperties({opacity:1,transparent:false,emissive:orange,emissiveIntensity:0.3});
-                    if(i!==laneCount-1&&wm.frontCapMesh) wm.frontCapMesh.visible=false;
-                    if(i!==0&&wm.backCapMesh) wm.backCapMesh.visible=false;
-                    group.add(wm.group);
+                    mtx.makeTranslation(BRANCH_X, ln2CenterY, z);
+                    inst.setMatrixAt(i, mtx);
                 }
+                tmpl.group.traverse(o=>{if(o.material) o.material.dispose();});
+                group.add(inst);
+            }
+
+            // MLP Up & Down instanced
+            const mlpTemplates=[{y:mlpUpCenterY,params:MLP_MATRIX_PARAMS_UP},{y:mlpDownCenterY,params:MLP_MATRIX_PARAMS_DOWN}];
+            mlpTemplates.forEach(({y,params})=>{
+                const temp=new WeightMatrixVisualization(null,new THREE.Vector3(),params.width,params.height,VECTOR_DEPTH_SPACING,params.topWidthFactor,params.cornerRadius,1,params.slitWidth,params.slitDepthFactor,params.slitBottomWidthFactor,params.slitTopWidthFactor);
+                const geo=temp.mesh.geometry.clone();
+                const capGeo=temp.frontCapMesh.geometry.clone();
+                const mat=temp.mesh.material.clone();
+                mat.color.copy(orange);
+                mat.emissive=orange.clone();
+                mat.emissiveIntensity=0.3;
+                mat.transparent = false;
+                mat.opacity = 1.0;
+                const inst=new InstancedMesh(geo, mat, laneCount);
+                const frontCaps=new InstancedMesh(capGeo, mat.clone(), 1);
+                const backCaps =new InstancedMesh(capGeo, mat.clone(), 1);
+                const mtx=new Matrix4();
+                for(let i=0;i<laneCount;i++){
+                    const z=(i-(laneCount-1)/2)*VECTOR_DEPTH_SPACING;
+                    mtx.makeTranslation(BRANCH_X, y, z);
+                    inst.setMatrixAt(i, mtx);
+                }
+                // Caps
+                mtx.makeTranslation(BRANCH_X, y, ((laneCount-1)/2)*VECTOR_DEPTH_SPACING + VECTOR_DEPTH_SPACING/2 + 0.05);
+                frontCaps.setMatrixAt(0, mtx);
+                mtx.makeTranslation(BRANCH_X, y, (-(laneCount-1)/2)*VECTOR_DEPTH_SPACING - VECTOR_DEPTH_SPACING/2 - 0.05);
+                backCaps.setMatrixAt(0, mtx);
+                temp.group.traverse(o=>{if(o.material) o.material.dispose();});
+                group.add(inst);
+                group.add(frontCaps);
+                group.add(backCaps);
             });
 
             return group;
@@ -195,6 +281,7 @@
         (function animate(){
             requestAnimationFrame(animate);
             controls.update();
+            stats.update();
             renderer.render(scene,camera);
         })();
 

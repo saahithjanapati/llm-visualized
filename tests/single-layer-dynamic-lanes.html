@@ -9,6 +9,7 @@
         #ui { position:fixed; top:10px; left:10px; z-index:10; font-family:monospace; color:#fff; }
         #c   { display:block; }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/stats.js@0.17.0/build/stats.min.js"></script>
 </head>
 <body>
     <div id="ui">
@@ -42,6 +43,10 @@
         camera.position.set(800, 600, 2000);
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
+
+        // FPS meter
+        const stats = new Stats();
+        document.body.appendChild(stats.dom);
 
         // Directional light as used in twelve-layer-stack.html
         const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
@@ -179,6 +184,7 @@
         (function animate() {
             requestAnimationFrame(animate);
             controls.update();
+            stats.update();
             renderer.render(scene, camera);
         })();
 
