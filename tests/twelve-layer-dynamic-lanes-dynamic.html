@@ -43,7 +43,7 @@
             MLP_INTER_MATRIX_GAP,
             INACTIVE_COMPONENT_COLOR
         } from '../src/utils/constants.js';
-        import { MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR } from '../src/animations/LayerAnimationConstants.js';
+        import { MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR, MHA_OUTPUT_PROJECTION_MATRIX_COLOR, MHA_OUTPUT_PROJECTION_MATRIX_PARAMS, MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW } from '../src/animations/LayerAnimationConstants.js';
 
         // Pre-load single-lane geometries
         await loadPrecomputedGeometries('../precomputed_components_slice.glb');
@@ -190,6 +190,70 @@
                         inst.setMatrixAt(instanceId++, mtx);
                     }
                 }
+                group.add(inst);
+                group.add(frontCaps);
+                group.add(backCaps);
+            }
+
+            // Output-Projection matrix (post-MHSA)
+            {
+                // Align X with the first head's K matrix (middle of the first QKV triplet)
+                const firstKX = firstQX + matrixW;
+
+                // Calculate geometry dimensions
+                const opHeight = MHA_MATRIX_PARAMS.height * MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.heightFactor;
+
+                const temp = new WeightMatrixVisualization(
+                    null,
+                    new THREE.Vector3(),
+                    MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.width,
+                    opHeight,
+                    VECTOR_DEPTH_SPACING,
+                    MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.topWidthFactor,
+                    MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.cornerRadius,
+                    1,
+                    MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitWidth,
+                    MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitDepthFactor,
+                    MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitBottomWidthFactor,
+                    MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitTopWidthFactor
+                );
+
+                const geo = temp.mesh.geometry.clone();
+                const capGeo = temp.frontCapMesh.geometry.clone();
+                const capGeoBack = capGeo.clone();
+                capGeoBack.rotateY(Math.PI);
+
+                const opColor = new THREE.Color(MHA_OUTPUT_PROJECTION_MATRIX_COLOR);
+                const mat = temp.mesh.material.clone();
+                mat.color.copy(opColor);
+                mat.emissive = opColor.clone();
+                mat.emissiveIntensity = 0.3;
+                mat.transparent = false;
+                mat.opacity = 1.0;
+
+                const inst = new InstancedMesh(geo, mat, laneCount);
+                const frontCaps = new InstancedMesh(capGeo, mat.clone(), 1);
+                const backCaps  = new InstancedMesh(capGeoBack, mat.clone(), 1);
+
+                // Y-position: derived from MHSA top plus intermediate offsets (matches animation logic)
+                const opCenterY = mhaCenterY + MHA_MATRIX_PARAMS.height / 2 + 20 + 60 + 60 + MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW + opHeight / 2;
+
+                const mtx = new Matrix4();
+                for (let i = 0; i < laneCount; i++) {
+                    const z = (i - (laneCount - 1) / 2) * VECTOR_DEPTH_SPACING;
+                    mtx.makeTranslation(firstKX, opCenterY, z);
+                    inst.setMatrixAt(i, mtx);
+                }
+
+                // Caps – one slice front & back
+                mtx.makeTranslation(firstKX, opCenterY, ((laneCount - 1) / 2) * VECTOR_DEPTH_SPACING + VECTOR_DEPTH_SPACING / 2 + 0.05);
+                frontCaps.setMatrixAt(0, mtx);
+                mtx.makeTranslation(firstKX, opCenterY, (-(laneCount - 1) / 2) * VECTOR_DEPTH_SPACING - VECTOR_DEPTH_SPACING / 2 - 0.05);
+                backCaps.setMatrixAt(0, mtx);
+
+                // Dispose temporary materials/geometries to free memory
+                temp.group.traverse(o => { if (o.material) o.material.dispose(); });
+
                 group.add(inst);
                 group.add(frontCaps);
                 group.add(backCaps);
