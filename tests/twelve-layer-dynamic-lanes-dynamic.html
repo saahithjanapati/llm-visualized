@@ -105,6 +105,10 @@
             const baseY = layerIdx * LAYER_VERTICAL_SPACING;
             const group = new THREE.Group();
 
+            // Shared X-coordinate so LayerNorms, Key matrices, MLP blocks and
+            // the Output-Projection matrix line up vertically.
+            const alignX  = BRANCH_X - MHA_INTERNAL_MATRIX_SPACING + 1.5 * MHA_MATRIX_PARAMS.width; // matches first head's K matrix X
+
             const ln1CenterY = baseY + LAYER_NORM_1_Y_POS;
             const ln1TopY    = ln1CenterY + LN_PARAMS.height/2;
             const mhaCenterY = ln1TopY + LN_TO_MHA_GAP + MHA_MATRIX_PARAMS.height/2;
@@ -137,7 +141,7 @@
                 const mtx = new Matrix4();
                 for(let i=0;i<laneCount;i++){
                     const z=(i-(laneCount-1)/2)*VECTOR_DEPTH_SPACING;
-                    mtx.makeTranslation(BRANCH_X, ln1CenterY, z);
+                    mtx.makeTranslation(alignX, ln1CenterY, z);
                     inst.setMatrixAt(i, mtx);
                 }
                 tmpl.group.traverse(obj=>{if(obj.material) obj.material.dispose();});
@@ -145,9 +149,8 @@
             }
 
             // Q/K/V matrices as InstancedMesh per colour per head-set per layer
-            const matrixW=MHA_MATRIX_PARAMS.width;
-            const singleSetWidth=3*matrixW;
-            const firstQX = BRANCH_X - MHA_INTERNAL_MATRIX_SPACING + matrixW/2;
+            const singleSetWidth=3*MHA_MATRIX_PARAMS.width;
+            const firstQX = BRANCH_X - MHA_INTERNAL_MATRIX_SPACING + MHA_MATRIX_PARAMS.width/2;
             const colours=[MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR];
 
             // build template geometry/material once
@@ -175,7 +178,7 @@
                 let instanceId = 0;
                 for(let head=0; head<NUM_HEAD_SETS_LAYER; head++){
                     const setOffsetX = head*(singleSetWidth+HEAD_SET_GAP_LAYER);
-                    const x = firstQX + setOffsetX + colIdx*matrixW;
+                    const x = firstQX + setOffsetX + colIdx*MHA_MATRIX_PARAMS.width;
                     // Back cap (first slice)
                     let backZ = (-(laneCount-1)/2)*VECTOR_DEPTH_SPACING - VECTOR_DEPTH_SPACING/2 - 0.05;
                     mtx.makeTranslation(x, mhaCenterY, backZ);
@@ -198,7 +201,7 @@
             // Output-Projection matrix (post-MHSA)
             {
                 // Align X with the first head's K matrix (middle of the first QKV triplet)
-                const firstKX = firstQX + matrixW;
+                const firstKX = firstQX + MHA_MATRIX_PARAMS.width;
 
                 // Calculate geometry dimensions
                 const opHeight = MHA_MATRIX_PARAMS.height * MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.heightFactor;
@@ -280,7 +283,7 @@
                 const mtx=new Matrix4();
                 for(let i=0;i<laneCount;i++){
                     const z=(i-(laneCount-1)/2)*VECTOR_DEPTH_SPACING;
-                    mtx.makeTranslation(BRANCH_X, ln2CenterY, z);
+                    mtx.makeTranslation(alignX, ln2CenterY, z);
                     inst.setMatrixAt(i, mtx);
                 }
                 tmpl.group.traverse(o=>{if(o.material) o.material.dispose();});
@@ -307,13 +310,13 @@
                 const mtx=new Matrix4();
                 for(let i=0;i<laneCount;i++){
                     const z=(i-(laneCount-1)/2)*VECTOR_DEPTH_SPACING;
-                    mtx.makeTranslation(BRANCH_X, y, z);
+                    mtx.makeTranslation(alignX, y, z);
                     inst.setMatrixAt(i, mtx);
                 }
                 // Caps
-                mtx.makeTranslation(BRANCH_X, y, ((laneCount-1)/2)*VECTOR_DEPTH_SPACING + VECTOR_DEPTH_SPACING/2 + 0.05);
+                mtx.makeTranslation(alignX, y, ((laneCount-1)/2)*VECTOR_DEPTH_SPACING + VECTOR_DEPTH_SPACING/2 + 0.05);
                 frontCaps.setMatrixAt(0, mtx);
-                mtx.makeTranslation(BRANCH_X, y, (-(laneCount-1)/2)*VECTOR_DEPTH_SPACING - VECTOR_DEPTH_SPACING/2 - 0.05);
+                mtx.makeTranslation(alignX, y, (-(laneCount-1)/2)*VECTOR_DEPTH_SPACING - VECTOR_DEPTH_SPACING/2 - 0.05);
                 backCaps.setMatrixAt(0, mtx);
                 temp.group.traverse(o=>{if(o.material) o.material.dispose();});
                 group.add(inst);
