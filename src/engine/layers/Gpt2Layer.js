@@ -54,6 +54,7 @@ function simplePrismMultiply(srcVec, tgtVec, onComplete) {
     if (onComplete) onComplete();
 }
 
+
 export default class Gpt2Layer extends BaseLayer {
     /**
      * @param {number} index – 0-based index of this layer in the transformer.
