@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CSG } from 'three-csg-ts'; // Import CSG
 import { QUALITY_PRESET } from '../utils/constants.js';
+import { NUM_VECTOR_LANES, VECTOR_DEPTH_SPACING } from '../utils/constants.js';
 
 // ------------------------------------------------------------------
 // Geometry cache (module-level) – keyed by a stringified set of the main
@@ -9,6 +10,9 @@ import { QUALITY_PRESET } from '../utils/constants.js';
 // uploads.
 // ------------------------------------------------------------------
 const __geometryCache = new Map();
+// Separate caches for front & back cap geometries when using slice instancing
+const __capFrontCache = new Map();
+const __capBackCache  = new Map();
 function getCacheKey(width, height, depth, topWidthFactor, cornerRadius, numberOfSlits, slitWidth, slitDepthFactor, slitBottomWidthFactor, slitTopWidthFactor) {
     return [width, height, depth, topWidthFactor, cornerRadius, numberOfSlits, slitWidth, slitDepthFactor, slitBottomWidthFactor, slitTopWidthFactor, QUALITY_PRESET].join('|');
 }
@@ -88,7 +92,20 @@ export class WeightMatrixVisualization {
     }
 
     _createMesh() {
-        this._clearMesh(); // Clear previous mesh and resources
+        this._clearMesh();
+
+        // --------------------------------------------------------------
+        // Fast path – if the requested depth covers multiple lanes we
+        // create ONE thin slice (depth = VECTOR_DEPTH_SPACING) and
+        // replicate it across lanes via an InstancedMesh.  This avoids
+        // the extremely heavy CSG work required for deep geometries and
+        // completely sidesteps the need for a matching pre-baked asset.
+        // --------------------------------------------------------------
+        const wantsInstancedSlices = this.depth > VECTOR_DEPTH_SPACING * 1.5;
+        if (wantsInstancedSlices) {
+            this._createInstancedSlices();
+            return;
+        }
 
         // --- Create Main Trapezoid Shape (used for extrusion AND caps) ---
         const shape = new THREE.Shape();
@@ -358,6 +375,162 @@ export class WeightMatrixVisualization {
         this.backCapMesh.rotation.y = Math.PI; // flip so normals face outwards
         this.backCapMesh.renderOrder = 2;   // back cap last
         this.group.add(this.backCapMesh);
+    }
+
+    /**
+     * Build a single-lane slice (depth = VECTOR_DEPTH_SPACING) and then
+     * replicate it across NUM_VECTOR_LANES via InstancedMesh.  This greatly
+     * reduces CPU load compared to carving a deep geometry with many CSG
+     * operations.
+     */
+    _createInstancedSlices() {
+        const sliceDepth = VECTOR_DEPTH_SPACING;
+        const sliceSlits = 1; // one slit per slice – channels separated by instancing
+
+        // ----------------------------------------------------------
+        // Re-use / build geometry for the single slice
+        // ----------------------------------------------------------
+        const sliceKey = getCacheKey(
+            this.width,
+            this.height,
+            sliceDepth,
+            this.topWidthFactor,
+            this.cornerRadius,
+            sliceSlits,
+            this.slitWidth,
+            this.slitDepthFactor,
+            this.slitBottomWidthFactor,
+            this.slitTopWidthFactor
+        );
+
+        let sliceGeometry;
+        let tmp = null; // temp builder (may remain null if cache hit)
+
+        // Attempt to pull slice + cap geometry from cache first
+        if (__geometryCache.has(sliceKey)) {
+            sliceGeometry = __geometryCache.get(sliceKey);
+        } else {
+            // Build a *temporary* WeightMatrixVisualization to generate the
+            // geometry for a single slice.  The recursive call will *not*
+            // enter the instanced-slice path because the depth is now small.
+            tmp = new WeightMatrixVisualization(
+                null,
+                new THREE.Vector3(),
+                this.width,
+                this.height,
+                sliceDepth,
+                this.topWidthFactor,
+                this.cornerRadius,
+                sliceSlits,
+                this.slitWidth,
+                this.slitDepthFactor,
+                this.slitBottomWidthFactor,
+                this.slitTopWidthFactor
+            );
+            sliceGeometry = tmp.mesh.geometry.clone();
+            // Cache for future re-use
+            __geometryCache.set(sliceKey, sliceGeometry);
+            // We'll cache cap geometries below once they're cloned
+        }
+
+        // ----------------------------------------------------------
+        // Material – clone defaults from standard path
+        // ----------------------------------------------------------
+        const mat = new THREE.MeshStandardMaterial({
+            color: 0x0077ff,
+            metalness: 0.1,
+            roughness: 0.7,
+            flatShading: false,
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.8
+        });
+
+        // ----------------------------------------------------------
+        // Build InstancedMesh for side walls across all lanes
+        // ----------------------------------------------------------
+        const inst = new THREE.InstancedMesh(sliceGeometry, mat, NUM_VECTOR_LANES);
+        const mtx = new THREE.Matrix4();
+        for (let i = 0; i < NUM_VECTOR_LANES; i++) {
+            const z = (i - (NUM_VECTOR_LANES - 1) / 2) * VECTOR_DEPTH_SPACING;
+            mtx.makeTranslation(0, 0, z);
+            inst.setMatrixAt(i, mtx);
+        }
+        inst.instanceMatrix.needsUpdate = true;
+
+        // ----------------------------------------------------------
+        // Front & back caps – clone geometries from the temporary build
+        // ----------------------------------------------------------
+        let capGeoFront, capGeoBack;
+        if (__capFrontCache.has(sliceKey) && __capBackCache.has(sliceKey)) {
+            capGeoFront = __capFrontCache.get(sliceKey);
+            capGeoBack  = __capBackCache.get(sliceKey);
+        } else {
+            if (!tmp) {
+                // Build a throw-away WeightMatrixVisualization to obtain cap geometry only
+                tmp = new WeightMatrixVisualization(
+                    null,
+                    new THREE.Vector3(),
+                    this.width,
+                    this.height,
+                    sliceDepth,
+                    this.topWidthFactor,
+                    this.cornerRadius,
+                    sliceSlits,
+                    this.slitWidth,
+                    this.slitDepthFactor,
+                    this.slitBottomWidthFactor,
+                    this.slitTopWidthFactor
+                );
+            }
+            capGeoFront = tmp.frontCapMesh.geometry.clone();
+            capGeoBack  = tmp.backCapMesh.geometry.clone();
+
+            // Cache for next time
+            __capFrontCache.set(sliceKey, capGeoFront);
+            __capBackCache.set(sliceKey, capGeoBack);
+        }
+
+        const capMatFront = mat.clone();
+        capMatFront.side = THREE.DoubleSide; // ensure visible from any angle
+        const capMatBack  = capMatFront.clone();
+
+        const frontCaps = new THREE.InstancedMesh(capGeoFront.clone(), capMatFront, NUM_VECTOR_LANES);
+        const backCaps  = new THREE.InstancedMesh(capGeoBack.clone(),  capMatBack,  NUM_VECTOR_LANES);
+
+        for (let i = 0; i < NUM_VECTOR_LANES; i++) {
+            const z = (i - (NUM_VECTOR_LANES - 1) / 2) * VECTOR_DEPTH_SPACING;
+            // front face sits slightly in front of slice
+            mtx.makeTranslation(0, 0, z + sliceDepth / 2 + 0.05);
+            frontCaps.setMatrixAt(i, mtx);
+            // back face slightly behind
+            mtx.makeTranslation(0, 0, z - sliceDepth / 2 - 0.05);
+            backCaps.setMatrixAt(i, mtx);
+        }
+
+        frontCaps.instanceMatrix.needsUpdate = true;
+        backCaps.instanceMatrix.needsUpdate  = true;
+
+        // ----------------------------------------------------------
+        // Store references and add to group
+        // ----------------------------------------------------------
+        this.mesh = inst;
+        this.frontCapMesh = frontCaps;
+        this.backCapMesh  = backCaps;
+
+        this.group.add(inst);
+        this.group.add(frontCaps);
+        this.group.add(backCaps);
+
+        // Render ordering – caps slightly after side walls to minimise z-fighting
+        this.mesh.renderOrder = 0;
+        this.frontCapMesh.renderOrder = 1;
+        this.backCapMesh.renderOrder  = 2;
+
+        // Dispose of the temporary object to free GPU resources
+        if (tmp) {
+            tmp.dispose && tmp.dispose();
+        }
     }
 
     updateData(data) {

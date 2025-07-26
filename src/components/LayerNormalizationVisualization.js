@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { CSG } from 'three-csg-ts';
+import { NUM_VECTOR_LANES, VECTOR_DEPTH_SPACING } from '../utils/constants.js';
 
 // A visualization for the Layer Normalization operation.
 // It renders an extruded ellipse (like a squashed cylinder) with a hollow interior
@@ -88,6 +89,18 @@ export class LayerNormalizationVisualization {
 
     _createMesh() {
         this._clearMesh();
+
+        // --------------------------------------------------------------
+        // Optimised path: if the requested depth spans multiple vector
+        // lanes we create a thin slice (depth = VECTOR_DEPTH_SPACING) and
+        // replicate it across NUM_VECTOR_LANES using InstancedMesh. This
+        // avoids expensive CSG work for deep extrusions.
+        // --------------------------------------------------------------
+        const wantsInstancedSlices = this.depth > VECTOR_DEPTH_SPACING * 1.5;
+        if (wantsInstancedSlices) {
+            this._createInstancedSlices();
+            return;
+        }
 
         // Radii of the outer ellipse
         const outerRadiusX = this.width / 2;
@@ -285,6 +298,69 @@ export class LayerNormalizationVisualization {
 
         const dt = (performance.now() - t0).toFixed(1);
         console.log(`[Perf] LayerNormalizationVisualization (${cacheHit ? 'cache' : 'built'}) – ${dt} ms.`);
+    }
+
+    _createInstancedSlices() {
+        const sliceDepth = VECTOR_DEPTH_SPACING;
+        const sliceHoles = 1;
+
+        // Cache key for slice geometry
+        const sliceKey = getCacheKey(
+            this.width,
+            this.height,
+            sliceDepth,
+            this.wallThickness,
+            sliceHoles,
+            this.holeWidth,
+            this.holeWidthFactor,
+            this.segments
+        );
+
+        let sliceGeometry;
+        if (__geometryCache.has(sliceKey)) {
+            sliceGeometry = __geometryCache.get(sliceKey);
+        } else {
+            const tmp = new LayerNormalizationVisualization(
+                new THREE.Vector3(),
+                this.width,
+                this.height,
+                sliceDepth,
+                this.wallThickness,
+                sliceHoles,
+                this.holeWidth,
+                this.holeWidthFactor,
+                this.segments
+            );
+            sliceGeometry = tmp.mesh.geometry.clone();
+            __geometryCache.set(sliceKey, sliceGeometry);
+            tmp.mesh.geometry.dispose();
+            if (tmp.mesh.material) {
+                if (Array.isArray(tmp.mesh.material)) tmp.mesh.material.forEach(m => m.dispose());
+                else tmp.mesh.material.dispose();
+            }
+        }
+
+        const mat = new THREE.MeshStandardMaterial({
+            color: 0xffffff,
+            metalness: 0.0,
+            roughness: 0.8,
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.9
+        });
+
+        const inst = new THREE.InstancedMesh(sliceGeometry, mat, NUM_VECTOR_LANES);
+        const mtx = new THREE.Matrix4();
+        for (let i = 0; i < NUM_VECTOR_LANES; i++) {
+            const z = (i - (NUM_VECTOR_LANES - 1) / 2) * VECTOR_DEPTH_SPACING;
+            mtx.makeTranslation(0, 0, z);
+            inst.setMatrixAt(i, mtx);
+        }
+        inst.instanceMatrix.needsUpdate = true;
+
+        this.mesh = inst;
+        this.group.add(inst);
+        this.mesh.renderOrder = 0;
     }
 
     // Public helper to update geometry when parameters change (e.g. from a GUI)
