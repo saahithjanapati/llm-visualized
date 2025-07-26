@@ -1,3 +1,4 @@
+import { NUM_VECTOR_LANES } from '../utils/constants.js';
 // export const VECTOR_LENGTH = 5; // REMOVED: This was causing the length mismatch.
 // The main VECTOR_LENGTH (100) should be imported from utils/constants.js directly where needed,
 // or LayerAnimationConstants.js should correctly re-export it if preferred as a central point for this animation.
@@ -63,7 +64,8 @@ export const MHA_MATRIX_PARAMS = {
     depth: 100,
     topWidthFactor: 0.47,
     cornerRadius: 1.2,
-    numberOfSlits: 5, // Visually, might want to link to VECTOR_LENGTH or a fraction
+    // Dynamically match the current lane count
+    numberOfSlits: NUM_VECTOR_LANES, // matches vector lanes
     slitWidth: 8,
     slitDepthFactor: 1.0,
     slitBottomWidthFactor: 0.95,
@@ -208,7 +210,8 @@ export const MHA_OUTPUT_PROJECTION_MATRIX_PARAMS = {
     cornerRadius: 20,             // Same as MHA_MATRIX_PARAMS.cornerRadius
     
     // Slit parameters
-    numberOfSlits: 5,              // Same as MHA_MATRIX_PARAMS.numberOfSlits
+    // Keep in sync with lane count
+    numberOfSlits: NUM_VECTOR_LANES,              // Same as MHA_MATRIX_PARAMS.numberOfSlits
     slitWidth: 20,
     slitDepthFactor: 1.0,          // Same as MHA_MATRIX_PARAMS.slitDepthFactor
     slitBottomWidthFactor: 0.92,   // Same as MHA_MATRIX_PARAMS.slitBottomWidthFactor

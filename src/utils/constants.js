@@ -49,14 +49,14 @@ export const USE_PRECOMPUTED_GEOMETRIES = true;
 // ------------------------------------------------------------
 
 /** Distance (in world units) between adjacent vector lanes along Z. */
-export const VECTOR_DEPTH_SPACING = 150;
+export const VECTOR_DEPTH_SPACING = 200;
 
 // ------------------------------------------------------------
 // Lane / vector configuration – controls how many lanes/vectors
 // are present in the scene and component depths that depend on it.
 // ------------------------------------------------------------
 
-export const NUM_VECTOR_LANES = 5; // Master switch: number of vector "lanes" active in the scene
+export const NUM_VECTOR_LANES = 10; // Master switch: number of vector "lanes" active in the scene
 
 // Depth large enough to fit all lanes plus one spacing margin at each end
 export const LANE_DEPENDENT_DEPTH = (NUM_VECTOR_LANES + 1) * VECTOR_DEPTH_SPACING;
@@ -131,7 +131,8 @@ export const MHA_MATRIX_PARAMS = {
     depth: LANE_DEPENDENT_DEPTH,
     topWidthFactor: 0.1,
     cornerRadius: 5,
-    numberOfSlits: 5, // Visually, might want to link to VECTOR_LENGTH or a fraction
+    // Match slit count to current lane count so each lane has its own channel.
+    numberOfSlits: NUM_VECTOR_LANES,
     slitWidth: 20, // significantly wider slits for clearer view
     slitDepthFactor: 1.0,
     slitBottomWidthFactor: 1,
@@ -253,7 +254,8 @@ export const MLP_MATRIX_PARAMS_UP = {
     depth: LN_PARAMS.depth,                         // match component depth
     topWidthFactor: MLP_VECTOR_MULTIPLIER,          // widens to 4× at the top (3072)
     cornerRadius: 30.0,
-    numberOfSlits: LN_PARAMS.numberOfHoles, // indicate 4× channels
+    // Keep slit count in sync with lane count (same as MHA_MATRIX_PARAMS)
+    numberOfSlits: NUM_VECTOR_LANES, // indicate 4× channels
     slitWidth: 10,
     slitDepthFactor: 1.0,
     slitBottomWidthFactor: 0.95,
@@ -267,7 +269,8 @@ export const MLP_MATRIX_PARAMS_DOWN = {
     depth: LN_PARAMS.depth,
     topWidthFactor: 1 / MLP_VECTOR_MULTIPLIER,            // narrows back to d_model
     cornerRadius: 30.0,
-    numberOfSlits: LN_PARAMS.numberOfHoles,               // back to original channels
+    // back to original channels
+    numberOfSlits: NUM_VECTOR_LANES,               // back to original channels
     slitWidth: 10,
     slitDepthFactor: 1.0,
     slitBottomWidthFactor: 0.95,
