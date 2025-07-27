@@ -1,8 +1,7 @@
 import * as THREE from 'three';
 import { 
     VECTOR_LENGTH_PRISM,
-    // PRISM_MAX_HEIGHT, PRISM_HEIGHT_SCALE_FACTOR are not directly used by controller for height calculation
-    // but are relevant for understanding the prismVis component's own scaling if it were to do it.
+    GROUPED_PRISM_SLOWDOWN
 } from '../utils/constants.js';
 import { mapValueToColor } from '../utils/colors.js'; // For color mapping if needed
 
@@ -12,14 +11,14 @@ export class PrismLayerNormAnimation {
         this.isAnimating = false;
         this.animationProgress = 0; // Overall animation progress (not currently used, but can be)
         
-        // Faster / Higher Animation Config Defaults
+        const slowdown = GROUPED_PRISM_SLOWDOWN;
         this.config = {
-            // Tweaked defaults for a snappier, higher bounce on both LayerNorm blocks
-            unitDelay: 3,        // Slightly faster stagger between units
-            unitDuration: 200,   // Quicker up-and-down cycle
-            maxRiseHeight: 12,  // Higher peak height for the centre unit
+            // Scale delays and durations so total effect length is preserved
+            unitDelay: 3 * slowdown,      // ms between activations
+            unitDuration: 200 * Math.sqrt(slowdown), // ms per unit cycle
+            maxRiseHeight: 12,  // unchanged visual height
             falloffPower: 1.4,   
-            minRiseHeight: 2,  // Higher minimum rise near the ends
+            minRiseHeight: 2,  
             ...config
         };
 

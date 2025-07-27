@@ -25,6 +25,8 @@ import {
     ANIM_RISE_SPEED_POST_SPLIT_LN1,
     ANIM_RISE_SPEED_POST_SPLIT_LN2,
     ORIGINAL_TO_PROCESSED_GAP,
+    PRISM_DIMENSIONS_PER_UNIT,
+    BRANCH_X
 } from '../utils/constants.js';
 import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
 
@@ -727,8 +729,10 @@ export class MHSAAnimation {
 
     _applyTempModeBehaviour() {
         const grayColor = new THREE.Color(0x606060);
-        const startVisibleIdx = Math.floor((VECTOR_LENGTH_PRISM - this.outputVectorLength) / 2);
-        const endVisibleIdx = startVisibleIdx + this.outputVectorLength - 1;
+        // Visible prism window for gray-out and gradient calculations
+        const visiblePrismCountTemp = Math.min(VECTOR_LENGTH_PRISM, Math.ceil(this.outputVectorLength / PRISM_DIMENSIONS_PER_UNIT));
+        const startVisibleIdx = Math.max(0, Math.floor((VECTOR_LENGTH_PRISM - visiblePrismCountTemp) / 2));
+        const endVisibleIdx = startVisibleIdx + visiblePrismCountTemp - 1;
 
         this._tempAllOutputVectors.forEach(vec => {
             if (!vec || !vec.mesh) return;
@@ -775,8 +779,9 @@ export class MHSAAnimation {
 
             // Build raw 768-dim data with 30 random switch points for varied gradient
             const rawData = [];
+            const desiredSwitches = Math.min(30, VECTOR_LENGTH_PRISM);
             const switchPoints = new Set();
-            while (switchPoints.size < 30) {
+            while (switchPoints.size < desiredSwitches) {
                 const idx = Math.floor(Math.random() * VECTOR_LENGTH_PRISM);
                 switchPoints.add(idx);
             }
@@ -796,19 +801,20 @@ export class MHSAAnimation {
 
             // Hide outer prisms and snap decorative vec to 64-dim geometry
             decoVec.applyProcessedVisuals(
-                rawData.slice(startVisibleIdx, startVisibleIdx + this.outputVectorLength),
+                rawData.slice(startVisibleIdx, startVisibleIdx + visiblePrismCountTemp),
                 this.outputVectorLength,
                 { numKeyColors: this.outputVectorLength },
                 { setHiddenToBlack: true }
             );
 
-            // Override visible region with a random two-color gradient
+            // Colour the visible prism(s) with a smooth two-colour gradient so
+            // each 64-D decorative vector has its own distinctive colour.
             const startColor = new THREE.Color().setHSL(Math.random(), 0.9, 0.6);
-            const endColor = new THREE.Color().setHSL(Math.random(), 0.9, 0.6);
-            const visibleCount = this.outputVectorLength;
+            const endColor   = new THREE.Color().setHSL(Math.random(), 0.9, 0.6);
+            const visibleCount = visiblePrismCountTemp;
             for (let vi = 0; vi < visibleCount; vi++) {
                 const idx = startVisibleIdx + vi;
-                const t = visibleCount > 1 ? vi / (visibleCount - 1) : 0;
+                const t   = visibleCount > 1 ? vi / (visibleCount - 1) : 0;
                 const col = startColor.clone().lerp(endColor, t);
                 decoVec.setInstanceAppearance(idx, 0, col);
             }
@@ -959,7 +965,12 @@ export class MHSAAnimation {
         // Central X coordinate for combined vector (align with first head center)
         const centerX = this.headsCentersX.length ? this.headsCentersX[0] : 0;
 
-        const startVisibleIdx = Math.floor((VECTOR_LENGTH_PRISM - this.outputVectorLength) / 2);
+        // Determine central prism range for visible region.  Each prism now
+        // represents 64 real dimensions, so calculate required prism count
+        // and clamp to avoid negative indices.
+        const visiblePrismCount = Math.min(VECTOR_LENGTH_PRISM, Math.ceil(this.outputVectorLength / PRISM_DIMENSIONS_PER_UNIT));
+        const startVisibleIdx = Math.max(0, Math.floor((VECTOR_LENGTH_PRISM - visiblePrismCount) / 2));
+        const endVisibleIdx = startVisibleIdx + visiblePrismCount - 1;
 
         laneVectors.forEach((vecList, laneZ) => {
             if (!vecList || vecList.length === 0) return;
@@ -970,7 +981,7 @@ export class MHSAAnimation {
             // Build combined raw data by concatenating the 64-dim slices of each decorative vector (preserves lane-specific data)
             const combinedRaw = [];
             vecList.forEach(v => {
-                const slice = v.rawData.slice(startVisibleIdx, startVisibleIdx + this.outputVectorLength);
+                const slice = v.rawData.slice(startVisibleIdx, startVisibleIdx + visiblePrismCount);
                 combinedRaw.push(...slice);
             });
 
@@ -984,21 +995,22 @@ export class MHSAAnimation {
             const spawnPos = new THREE.Vector3(centerX, vecList[0].group.position.y, laneZ);
             const combinedVec = new VectorVisualizationInstancedPrism(combinedRaw, spawnPos, 3);
 
-            // Copy colors from the source decorative vectors so appearance matches
-            if (combinedVec.mesh && combinedVec.mesh.instanceColor) {
-                const tmpColor = new THREE.Color();
-                for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
-                    const segIdx = Math.floor(i / this.outputVectorLength); // which decorative vector
-                    const localIdx = i % this.outputVectorLength; // 0..63
-                    if (segIdx < vecList.length) {
-                        const srcVec = vecList[segIdx];
-                        const srcIndex = startVisibleIdx + localIdx;
-                        srcVec.mesh.getColorAt(srcIndex, tmpColor);
-                        combinedVec.mesh.setColorAt(i, tmpColor);
-                    }
+            // ------------------------------------------------------------------
+            //  Re-colour combined vector with smooth gradient across its 12 prisms
+            // ------------------------------------------------------------------
+            // Copy colours from each decorative vector's visible prism so the
+            // combined vector visually matches its inputs (avoids a colour
+            // shift before the Output-Projection matrix).
+            const tmpColor = new THREE.Color();
+            vecList.forEach((srcVec, i) => {
+                const srcPrismIdx  = startVisibleIdx;      // only one visible prism
+                const destPrismIdx = startVisibleIdx + i;  // prism position in combined vector
+                if (srcVec.mesh && srcVec.mesh.getColorAt) {
+                    srcVec.mesh.getColorAt(srcPrismIdx, tmpColor);
+                    combinedVec.mesh.setColorAt(destPrismIdx, tmpColor);
                 }
-                combinedVec.mesh.instanceColor.needsUpdate = true;
-            }
+            });
+            if (combinedVec.mesh.instanceColor) combinedVec.mesh.instanceColor.needsUpdate = true;
 
             this.parentGroup.add(combinedVec.group);
             combinedVectors.push({ vec: combinedVec, laneZ });
@@ -1062,7 +1074,7 @@ export class MHSAAnimation {
                             const newRaw = this._generateRawDataWithSwitchPoints(30);
                             vec.applyProcessedVisuals(
                                 newRaw.slice(),
-                                VECTOR_LENGTH_PRISM,
+                                NUM_HEAD_SETS_LAYER * this.outputVectorLength, // 12 * 64  = 768 visible output units
                                 { numKeyColors: 30, generationOptions: null },
                                 { setHiddenToBlack: false }
                             );
@@ -1244,6 +1256,8 @@ export class MHSAAnimation {
     // ----------------------------------------------------------------------
     _generateRawDataWithSwitchPoints(numSwitchPoints = 30) {
         const raw = [];
+        // Clamp switch point count to available prisms to avoid infinite loop.
+        numSwitchPoints = Math.min(numSwitchPoints, VECTOR_LENGTH_PRISM);
         const switchPoints = new Set();
         while (switchPoints.size < numSwitchPoints) {
             const idx = Math.floor(Math.random() * VECTOR_LENGTH_PRISM);

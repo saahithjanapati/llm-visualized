@@ -5,7 +5,8 @@ import {
     PRISM_BASE_DEPTH,
     PRISM_MAX_HEIGHT,
     PRISM_HEIGHT_SCALE_FACTOR,
-    HIDE_INSTANCE_Y_OFFSET // Added for hiding prisms
+    HIDE_INSTANCE_Y_OFFSET,
+    PRISM_DIMENSIONS_PER_UNIT // Added for grouping visible units
 } from '../utils/constants.js';
 import { mapValueToColor } from '../utils/colors.js';
 
@@ -48,6 +49,67 @@ export class VectorVisualizationInstancedPrism {
         this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
         this.group.add(this.mesh);
         
+        // ------------------------------------------------------------
+        // Gradient setup – each prism will smoothly blend from the
+        // colour on its left edge (colorStart) to the colour on its
+        // right edge (colorEnd).  We store these as per-instance
+        // InstancedBufferAttributes and add a small shader patch that
+        // interpolates between them based on the local X-coordinate of
+        // the vertex.
+        // ------------------------------------------------------------
+
+        // Create (r,g,b) attribute arrays – one entry per instance
+        const colorStartArr = new Float32Array(VECTOR_LENGTH_PRISM * 3);
+        const colorEndArr   = new Float32Array(VECTOR_LENGTH_PRISM * 3);
+        this.mesh.geometry.setAttribute('colorStart', new THREE.InstancedBufferAttribute(colorStartArr, 3));
+        this.mesh.geometry.setAttribute('colorEnd',   new THREE.InstancedBufferAttribute(colorEndArr,   3));
+
+        // Helper to patch the basic material so it understands the two new
+        // attributes and outputs a left→right gradient.
+        const halfBaseWidth = (PRISM_BASE_WIDTH * _prismWidthScale) / 2;
+
+        // Ensure the material has a uniforms object (MeshBasicMaterial does)
+        this.mesh.material.onBeforeCompile = (shader) => {
+            // Inject custom uniform for half-width (used to normalise X)
+            shader.uniforms.prismHalfWidth = { value: halfBaseWidth };
+
+            // ───── Vertex shader injections ──────────────────────────
+            shader.vertexShader = shader.vertexShader.replace(
+                '#include <common>',
+                `#include <common>
+attribute vec3 colorStart;
+attribute vec3 colorEnd;
+varying vec3 vColorStart;
+varying vec3 vColorEnd;
+varying float vGradientT;
+uniform float prismHalfWidth;`
+            );
+
+            shader.vertexShader = shader.vertexShader.replace(
+                '#include <begin_vertex>',
+                `#include <begin_vertex>
+    vColorStart = colorStart;
+    vColorEnd   = colorEnd;
+    // Map local X from [-halfWidth, +halfWidth] → [0,1]
+    vGradientT  = clamp( (position.x + prismHalfWidth) / (2.0 * prismHalfWidth), 0.0, 1.0 );`
+            );
+
+            // ───── Fragment shader injections ───────────────────────
+            shader.fragmentShader = shader.fragmentShader.replace(
+                '#include <common>',
+                `#include <common>
+varying vec3 vColorStart;
+varying vec3 vColorEnd;
+varying float vGradientT;`
+            );
+
+            shader.fragmentShader = shader.fragmentShader.replace(
+                'vec4 diffuseColor = vec4( diffuse, opacity );',
+                `vec3 grad = mix( vColorStart, vColorEnd, vGradientT );
+    vec4 diffuseColor = vec4( grad, opacity );`
+            );
+        };
+
         this.updateDataInternal(this.rawData.slice()); // Process initial data
         this._generateKeyColors(); // Generate initial key colors
         this.updateInstanceGeometryAndColors();      // Set initial visual state (fixed dimensions, subsection colors)
@@ -113,6 +175,10 @@ export class VectorVisualizationInstancedPrism {
     updateInstanceGeometryAndColors() {
         const dummy = new THREE.Object3D();
 
+        // Prepare attribute references for gradient colours
+        const colorStartAttr = this.mesh.geometry.getAttribute('colorStart');
+        const colorEndAttr   = this.mesh.geometry.getAttribute('colorEnd');
+
         // Use the stored key colors
         if (this.currentKeyColors.length === 0) this._generateKeyColors();
 
@@ -124,8 +190,17 @@ export class VectorVisualizationInstancedPrism {
             dummy.updateMatrix();
             this.mesh.setMatrixAt(i, dummy.matrix);
 
-            // Set color using the stored key colors and getDefaultColorForIndex logic
-            this.mesh.setColorAt(i, this.getDefaultColorForIndex(i));
+            // Set colour using the stored key colours and getDefaultColorForIndex logic
+            const midColor = this.getDefaultColorForIndex(i);
+            this.mesh.setColorAt(i, midColor);
+
+            // Determine gradient edge colours
+            const leftColor  = this.getDefaultColorForIndex(Math.max(0, i - 1));
+            const rightColor = this.getDefaultColorForIndex(Math.min(VECTOR_LENGTH_PRISM - 1, i + 1));
+
+            // Store into instanced buffer attributes
+            colorStartAttr.setXYZ(i, leftColor.r, leftColor.g, leftColor.b);
+            colorEndAttr.setXYZ(  i, rightColor.r, rightColor.g, rightColor.b);
         }
 
         this.mesh.instanceMatrix.needsUpdate = true;
@@ -135,6 +210,10 @@ export class VectorVisualizationInstancedPrism {
             // This warning should ideally not appear with correct material setup
             console.warn("instanceColor buffer does NOT exist on the mesh after setColorAt!");
         }
+
+        // Mark gradient attributes "dirty" so Three.js re-uploads them
+        if (colorStartAttr) colorStartAttr.needsUpdate = true;
+        if (colorEndAttr)   colorEndAttr.needsUpdate   = true;
     }
 
     // Updates the visual appearance of a single instance for animation purposes
@@ -189,7 +268,10 @@ export class VectorVisualizationInstancedPrism {
 
     // Renamed from updateData. This is for internal data state update only.
     updateDataInternal(newData) {
-        if (!newData || !Array.isArray(newData) || newData.length !== VECTOR_LENGTH_PRISM) {
+        // Accept data arrays of any length – the visual component will still use
+        // a fixed physical prism count (VECTOR_LENGTH_PRISM).  If fewer data
+        // points are supplied than prisms, colours/heights default gracefully.
+        if (!newData || !Array.isArray(newData) || newData.length === 0) {
             this.rawData = this.generateTestData();
         } else {
             this.rawData = newData.slice();
@@ -258,8 +340,24 @@ export class VectorVisualizationInstancedPrism {
 
         for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
             this.mesh.setColorAt(i, this.getDefaultColorForIndex(i));
+
+            // Also refresh gradient edge colours so updates to key colours propagate
+            const colorStartAttr = this.mesh.geometry.getAttribute('colorStart');
+            const colorEndAttr   = this.mesh.geometry.getAttribute('colorEnd');
+            if (colorStartAttr && colorEndAttr) {
+                const leftColor  = this.getDefaultColorForIndex(Math.max(0, i - 1));
+                const rightColor = this.getDefaultColorForIndex(Math.min(VECTOR_LENGTH_PRISM - 1, i + 1));
+                colorStartAttr.setXYZ(i, leftColor.r, leftColor.g, leftColor.b);
+                colorEndAttr.setXYZ(  i, rightColor.r, rightColor.g, rightColor.b);
+            }
         }
         this.mesh.instanceColor.needsUpdate = true;
+
+        // Mark gradient attributes for update if they were modified
+        const cs = this.mesh.geometry.getAttribute('colorStart');
+        const ce = this.mesh.geometry.getAttribute('colorEnd');
+        if (cs) cs.needsUpdate = true;
+        if (ce) ce.needsUpdate = true;
     }
 
     updateKeyColorsFromData(data, numKeyColorsToSample = 30, colorGenerationOptions = null) {
@@ -419,13 +517,15 @@ export class VectorVisualizationInstancedPrism {
         //    The key colors will be applied to the centrally visible prisms.
         this.updateKeyColorsFromData(this.rawData, colorOptionsForKeyColors.numKeyColors, colorOptionsForKeyColors.generationOptions);
 
-        // 3. Determine the range of central prisms to make visible
-        if (numVisibleOutputUnits > VECTOR_LENGTH_PRISM) {
-            console.warn(`numVisibleOutputUnits (${numVisibleOutputUnits}) cannot exceed VECTOR_LENGTH_PRISM (${VECTOR_LENGTH_PRISM}). Clamping.`);
-            numVisibleOutputUnits = VECTOR_LENGTH_PRISM;
+        // 3. Determine how many *grouped* prisms should be visible.  Each
+        //    prism now represents PRISM_DIMENSIONS_PER_UNIT real dimensions.
+        let groupedVisibleUnits = Math.ceil(numVisibleOutputUnits / PRISM_DIMENSIONS_PER_UNIT);
+        if (groupedVisibleUnits > VECTOR_LENGTH_PRISM) {
+            console.warn(`Grouped visible units (${groupedVisibleUnits}) exceed VECTOR_LENGTH_PRISM (${VECTOR_LENGTH_PRISM}). Clamping.`);
+            groupedVisibleUnits = VECTOR_LENGTH_PRISM;
         }
-        const startIndexVisible = Math.floor((VECTOR_LENGTH_PRISM - numVisibleOutputUnits) / 2);
-        const endIndexVisible = startIndexVisible + numVisibleOutputUnits - 1;
+        const startIndexVisible = Math.floor((VECTOR_LENGTH_PRISM - groupedVisibleUnits) / 2);
+        const endIndexVisible = startIndexVisible + groupedVisibleUnits - 1;
 
         // 4. Set appearance for all physical prisms
         const dummy = new THREE.Object3D();
@@ -459,8 +559,9 @@ export class VectorVisualizationInstancedPrism {
                 // So, for the first visible prism (i=startIndexVisible), progress should be 0.
                 // For the last visible prism (i=endIndexVisible), progress should be 1.
                 let progressForColor = 0;
-                if (numVisibleOutputUnits > 1) {
-                    progressForColor = (i - startIndexVisible) / (numVisibleOutputUnits - 1);
+                // Progress along the *visible* portion (0 → 1 across the central prisms)
+                if (groupedVisibleUnits > 1) {
+                    progressForColor = (i - startIndexVisible) / (groupedVisibleUnits - 1);
                 }
                 // We need a way to get color based on this progress and `this.currentKeyColors`
                 // Let's make a temporary color fetching logic here, or enhance getDefaultColorForIndex

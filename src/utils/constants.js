@@ -25,8 +25,38 @@ export const HIDE_INSTANCE_Y_OFFSET = -50000; // Used to "hide" instanced mesh i
 // Prism constants
 // ------------------------------------------------------------
 
-export const VECTOR_LENGTH_PRISM = 768;
-export const PRISM_BASE_WIDTH = 0.1; // Width of the prism along the main vector axis
+// ------------------------------------------------------------
+// Prism visualisation parameters (grouped representation)
+// ------------------------------------------------------------
+
+/**
+ * How many real GPT-2 dimensions are grouped into a single prism for the
+ * visualisation.  The entire renderer now shows far fewer (but wider) prisms
+ * while occupying the exact same overall length as before.
+ */
+export const PRISM_DIMENSIONS_PER_UNIT = 64;
+
+/**
+ * Number of physical prisms used to represent a full 768-dimension vector.
+ * Using the grouping above this is simply 768 / 64 = 12.
+ */
+export const VECTOR_LENGTH_PRISM = Math.ceil(768 / PRISM_DIMENSIONS_PER_UNIT); // 12
+
+// ------------------------------------------------------------------
+// Geometry sizing – scale the base width so the final aggregated
+// prisms still cover the same overall length as the previous 768-prism
+// representation (≈115 world-units).
+//
+// Previous spacing between prism centres:  PRISM_BASE_WIDTH * 1.5 = 0.1 * 1.5 = 0.15
+// Overall length  = (768 – 1) * 0.15 ≈ 115.05
+// We now have 12 prisms, and the code that positions prisms uses (N * spacing)
+// when measuring overall width.  Keeping the maths simple we scale the base
+// width by exactly 64 so that:
+//   newSpacing = 64 × 0.15 = 9.6
+//   newTotal   = 12 × 9.6 = 115.2  (matches previous length).
+// Hence with width-scale 1.5 we set PRISM_BASE_WIDTH = 9.6 / 1.5 = **6.4**.
+//-------------------------------------------------------------------
+export const PRISM_BASE_WIDTH = 6.4; // Width of a single (grouped) prism along the vector axis
 export const PRISM_BASE_DEPTH = 5; // Depth of the prism
 export const PRISM_MAX_HEIGHT = 5; // Max height for a prism when data is at its peak
 export const PRISM_HEIGHT_SCALE_FACTOR = 0.75; // Scales normalized data to prism height
@@ -61,10 +91,23 @@ export const NUM_VECTOR_LANES = 10; // Master switch: number of vector "lanes" a
 // Depth large enough to fit all lanes plus one spacing margin at each end
 export const LANE_DEPENDENT_DEPTH = (NUM_VECTOR_LANES + 1) * VECTOR_DEPTH_SPACING;
 
+// ------------------------------------------------------------
+// Animation scaling when vectors are grouped into fewer prisms
+// ------------------------------------------------------------
+
+/**
+ * Ratio of original component count (768) to current prism count.  Used to
+ * slow down per-prism stagger timings so the overall animation duration
+ * remains visually similar to the original fine-grained version.
+ */
+export const GROUPED_PRISM_SLOWDOWN = PRISM_DIMENSIONS_PER_UNIT; // 64 when grouping 64 dims → 1 prism
+
 // Constants for PrismAdditionAnimation
-export const PRISM_ADD_ANIM_BASE_DURATION = 400 // ms, for one prism to move
-export const PRISM_ADD_ANIM_BASE_FLASH_DURATION = 80; // ms, for the target flash (if re-enabled)
-export const PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS = 15; // ms, delay between starting each prism's animation
+// Scale per-prism timings by the slowdown factor so total animation time is
+// roughly preserved (768 * 15 ms  ≈  12 * 960 ms, etc.)
+export const PRISM_ADD_ANIM_BASE_DURATION = 400 * Math.sqrt(GROUPED_PRISM_SLOWDOWN); // ms, for one prism to move
+export const PRISM_ADD_ANIM_BASE_FLASH_DURATION = 80 * Math.sqrt(GROUPED_PRISM_SLOWDOWN);
+export const PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS = 15 * GROUPED_PRISM_SLOWDOWN; // ms delay between prism starts
 export const PRISM_ADD_ANIM_BASE_Y_OFFSET_FACTOR = 1.1; // How much higher source moves relative to target base
 /** Multiplier for the prism addition animation speed.  
  * 1 = base speed; 2 = twice as fast (half the duration); 0.5 = half as fast (double duration). */
@@ -114,7 +157,7 @@ export const LN_PARAMS = {
 export const NUM_HEAD_SETS_LAYER = 12;
 
 /** Horizontal gap between adjacent attention head sets. */
-export const HEAD_SET_GAP_LAYER = 240;
+export const HEAD_SET_GAP_LAYER = 350;
 
 // Centre-to-centre spacing between the Q, K and V matrices within a single
 // attention head.  Setting this equal to the matrix width means the matrices
@@ -216,8 +259,13 @@ export const SIDE_COPY_DELAY_MS = 0;
 /** Horizontal speed for decorative vectors merging into row output. */
 export const ROW_MERGE_HORIZ_SPEED = 20;
 
-/** Centre-to-centre spacing between 64-dim segments when assembling the 768-dim row. */
-export const ROW_SEGMENT_SPACING = PRISM_BASE_WIDTH * 1.5 * 64; // matches InstancedPrism width scaling
+/**
+ * Centre-to-centre spacing between **grouped** 64-dimensional segments when
+ * assembling the 768-dim row vector (e.g. when merging MHSA head outputs).
+ * Each segment is one physical prism, so the spacing is simply the scaled
+ * prism width (no additional ×64 multiplier).
+ */
+export const ROW_SEGMENT_SPACING = PRISM_BASE_WIDTH * 1.5; // matches InstancedPrism width scaling
 
 // -----------------------------------------------------------------------------
 // Residual Stream Alignment Constants
