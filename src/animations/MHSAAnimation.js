@@ -535,10 +535,114 @@ export class MHSAAnimation {
                                     new TWEEN.Tween(activeBlue.group.position)
                                         .to({ x: targetX }, 600)
                                         .easing(TWEEN.Easing.Quadratic.Out)
-                                        .onComplete(singleAnimationDone)
+                                        .onComplete(() => {
+                                            // ------------------------------------------------------------------
+                                            //  Create a sphere between the green (K) and blue (Q) cubes once the
+                                            //  first blue cube has finished sliding into place. This visual cue
+                                            //  only appears for the very first lane/head combination to avoid
+                                            //  cluttering the scene.
+                                            // ------------------------------------------------------------------
+
+                                            if (!this._trainSphereCreated) {
+                                                const greenVecRef = processedKVec || kVec; // whichever instance is active
+                                                if (greenVecRef) {
+                                                    const bluePos  = activeBlue.group.position;
+                                                    const greenPos = greenVecRef.group.position;
+
+                                                    // Mid-point between blue and green cubes
+                                                    const midX = (bluePos.x + greenPos.x) / 2;
+                                                    const midY = (bluePos.y + greenPos.y) / 2;
+                                                    const midZ = (bluePos.z + greenPos.z) / 2;
+
+                                                    const sphereGeo = new THREE.SphereGeometry(10, 32, 32);
+                                                    // Random bright colour within existing colour palette range
+                                                    const randomHue   = Math.random();
+                                                    const sphereColor = new THREE.Color().setHSL(randomHue, 0.8, 0.5);
+                                                    const sphereMat   = new THREE.MeshStandardMaterial({ color: sphereColor });
+                                                    const sphereMesh  = new THREE.Mesh(sphereGeo, sphereMat);
+
+                                                    sphereMesh.position.set(midX, midY, midZ);
+                                                    this.parentGroup.add(sphereMesh);
+
+                                                    // Hide the blue cube now that the sphere will represent the merged state
+                                                    activeBlue.group.visible = false;
+
+                                                    // Store a reference so other parts of the animation (red-vector callback)
+                                                    // can trigger further behaviour such as rising & colour transition.
+                                                    this._trainSphereMesh = sphereMesh;
+
+                                                    this._trainSphereCreated = true;
+
+                                                    // If the red vector has already computed its final Y target, animate now
+                                                    if (this._trainSphereTargetY !== undefined && this._trainSphereTargetY !== null) {
+                                                        const tgtY = this._trainSphereTargetY;
+                                                        new TWEEN.Tween(sphereMesh.position)
+                                                            .to({ y: tgtY }, 600)
+                                                            .easing(TWEEN.Easing.Quadratic.Out)
+                                                            .start();
+
+                                                        new TWEEN.Tween(sphereMesh.material.color)
+                                                            .to({ r: 1, g: 1, b: 1 }, 600)
+                                                            .easing(TWEEN.Easing.Quadratic.Out)
+                                                            .start();
+
+                                                        this._trainSphereTargetY = null;
+                                                    }
+
+                                                }
+                                            }
+
+                                            // Continue with normal completion bookkeeping
+                                            singleAnimationDone();
+                                        })
                                         .start();
                                 } else {
                                     activeBlue.group.position.x = targetX;
+
+                                    // Non-Tween fallback sphere creation (instantaneous move)
+                                    if (!this._trainSphereCreated) {
+                                        const greenVecRef = processedKVec || kVec;
+                                        if (greenVecRef) {
+                                            const bluePos  = activeBlue.group.position;
+                                            const greenPos = greenVecRef.group.position;
+
+                                            const midX = (bluePos.x + greenPos.x) / 2;
+                                            const midY = (bluePos.y + greenPos.y) / 2;
+                                            const midZ = (bluePos.z + greenPos.z) / 2;
+
+                                            const sphereGeo = new THREE.SphereGeometry(10, 32, 32);
+                                            const randomHue   = Math.random();
+                                            const sphereColor = new THREE.Color().setHSL(randomHue, 0.8, 0.5);
+                                            const sphereMat   = new THREE.MeshStandardMaterial({ color: sphereColor });
+                                            const sphereMesh  = new THREE.Mesh(sphereGeo, sphereMat);
+                                            sphereMesh.position.set(midX, midY, midZ);
+                                            this.parentGroup.add(sphereMesh);
+
+                                            activeBlue.group.visible = false; // Hide the blue cube immediately
+
+                                            this._trainSphereMesh = sphereMesh;
+
+                                            this._trainSphereCreated = true;
+
+                                            // Trigger rise if target already known
+                                            if (this._trainSphereTargetY !== undefined && this._trainSphereTargetY !== null) {
+                                                const tgtY = this._trainSphereTargetY;
+                                                new TWEEN.Tween(sphereMesh.position)
+                                                    .to({ y: tgtY }, 600)
+                                                    .easing(TWEEN.Easing.Quadratic.Out)
+                                                    .start();
+
+                                                new TWEEN.Tween(sphereMesh.material.color)
+                                                    .to({ r: 1, g: 1, b: 1 }, 600)
+                                                    .easing(TWEEN.Easing.Quadratic.Out)
+                                                    .start();
+
+                                                this._trainSphereTargetY = null;
+                                            }
+
+                                        }
+                                    }
+
                                     singleAnimationDone();
                                 }
                             };
@@ -595,11 +699,44 @@ export class MHSAAnimation {
                         if (typeof TWEEN !== 'undefined') {
                             doExtraRise().onComplete(() => {
                                 moveGreenUnderRed();
+
+                                // -----------------------------------------------------------
+                                //  Once the red vector has completed its extra rise, animate
+                                //  the sphere (if present) to rise vertically to align with
+                                //  the red cube and transition its colour to white.
+                                // -----------------------------------------------------------
+                                const targetY = activeRed.group.position.y;
+                                if (this._trainSphereMesh) {
+                                    const sphere = this._trainSphereMesh;
+                                    new TWEEN.Tween(sphere.position)
+                                        .to({ y: targetY }, 600)
+                                        .easing(TWEEN.Easing.Quadratic.Out)
+                                        .start();
+
+                                    new TWEEN.Tween(sphere.material.color)
+                                        .to({ r: 1, g: 1, b: 1 }, 600)
+                                        .easing(TWEEN.Easing.Quadratic.Out)
+                                        .start();
+                                } else {
+                                    // Sphere not created yet – store the targetY for later
+                                    this._trainSphereTargetY = targetY;
+                                }
+
                                 singleAnimationDone();
                             });
                         } else {
                             doExtraRise();
                             moveGreenUnderRed();
+
+                            const targetYInst = activeRed.group.position.y;
+                            if (this._trainSphereMesh) {
+                                const sphere = this._trainSphereMesh;
+                                sphere.position.y = targetYInst;
+                                sphere.material.color.set(0xffffff);
+                            } else {
+                                this._trainSphereTargetY = targetYInst;
+                            }
+
                             singleAnimationDone();
                         }
                     };
