@@ -34,7 +34,7 @@ import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
 const SPEED_MULT = GLOBAL_ANIM_SPEED_MULT;
 
 export class MHSAAnimation {
-    constructor(parentGroup, branchX, mhsaBaseY, clock, mode = 'temp', options = {}) {
+    constructor(parentGroup, branchX, mhsaBaseY, clock, mode = 'temp') {
         this.parentGroup = parentGroup;
         this.branchX = branchX;
         this.mhsaBaseY = mhsaBaseY;
@@ -70,24 +70,14 @@ export class MHSAAnimation {
 
         // Mode control (e.g., 'temp', 'perm', etc.)
         this.mode = mode;
-        // NEW: flag indicating whether the animation should omit the
-        // output-projection stage (heads_only mode).
-        this.skipOutputProjection = (mode === 'heads_only');
-
-        // Experimental flags
-        this.enableTrainMotion = options.trainMotion || false;
 
         // Temp-mode bookkeeping
         this._tempModeCompleted = false;
         this._tempAllOutputVectors = []; // K,Q,V combined
         this._tempKOutputVectors = [];   // Only central K vectors
-        // Train-motion experiment flag
-        this._trainSphereCreated = false;
 
         this._setupMHSAVisualizations();
-        if (!this.skipOutputProjection) {
-            this._setupOutputProjectionMatrix();
-        }
+        this._setupOutputProjectionMatrix();
     }
 
     _setupMHSAVisualizations() {
@@ -466,10 +456,8 @@ export class MHSAAnimation {
                     }
                 }
 
-                // (Removed extra raise/lower logic – rise amount now controlled during pass-through phase.)
-
                 // Invoke caller-supplied callback last so that state above is ready.
-                if (animationCompletionCallback) animationCompletionCallback(vector);
+                if (animationCompletionCallback) animationCompletionCallback();
             })
             .start();
     }
@@ -491,10 +479,10 @@ export class MHSAAnimation {
                 // ---------------------------------------------------------------
                 //  TEMP MODE: post pass-through behaviour
                 // ---------------------------------------------------------------
-                if ((this.mode === 'temp' || this.mode === 'heads_only') && !this._tempModeCompleted) {
+                if (this.mode === 'temp' && !this._tempModeCompleted) {
                     this._applyTempModeBehaviour();
                     this._tempModeCompleted = true;
-                } else if (this.mode !== 'temp' && this.mode !== 'heads_only') {
+                } else if (this.mode !== 'temp') {
                     // For perm mode, trigger final color transition here
                     this._transitionHeadColorsToFinal(1000); // 1 second duration
                 }
@@ -503,245 +491,18 @@ export class MHSAAnimation {
 
         allLanes.forEach((lane) => {
             for (let headIdx = 0; headIdx < NUM_HEAD_SETS_LAYER; headIdx++) {
-                const BASE_RISE   = this.mhaResultRiseOffsetY;
-                const OTHER_RISE  = BASE_RISE * 0.3;        // initial rise for K and Q
-                const RED_FINAL   = BASE_RISE * 1.5;        // final desired rise for V
-                const RED_EXTRA   = RED_FINAL - OTHER_RISE; // additional rise after first tween
-
-                let processedKVec = null; // will hold lightweight K vector after tween
                 const kVec = lane.upwardCopies[headIdx];
                 const kMatrix = this.mhaVisualizations[headIdx * 3 + 1];
-                this.animateVectorMatrixPassThrough(kVec, kMatrix, this.brightGreen, this.darkTintedGreen, 0.333, this.mhaPassThroughTargetY, this.mhaPassThroughDuration, OTHER_RISE, this.mhaResultRiseDuration, this.outputVectorLength, (vec)=>{ processedKVec = vec; singleAnimationDone(); }, 'K');
+                this.animateVectorMatrixPassThrough(kVec, kMatrix, this.brightGreen, this.darkTintedGreen, 0.333, this.mhaPassThroughTargetY, this.mhaPassThroughDuration, this.mhaResultRiseOffsetY, this.mhaResultRiseDuration, this.outputVectorLength, singleAnimationDone, 'K');
 
                 const qSideCopy = lane.sideCopies.find(sc => sc.headIndex === headIdx && sc.type === 'Q');
                 if (qSideCopy && qSideCopy.vec) {
-                    if (this.enableTrainMotion) {
-                        const blueVec = qSideCopy.vec;
-                        const isFirstBlue = (!this._trainSphereCreated && lane === allLanes[0] && headIdx === 0);
-
-                        const onBlueProcessed = (vecProcessed) => {
-                            const activeBlue = vecProcessed || blueVec;
-
-                            if (!isFirstBlue) {
-                                singleAnimationDone();
-                                return;
-                            }
-
-                            // Wait until green vector has had time to slide under red (600 ms),
-                            // then move blue horizontally to align with green.
-                            const targetX = kVec.group.position.x;
-                            const moveBlue = () => {
-                                if (typeof TWEEN !== 'undefined') {
-                                    new TWEEN.Tween(activeBlue.group.position)
-                                        .to({ x: targetX }, 600)
-                                        .easing(TWEEN.Easing.Quadratic.Out)
-                                        .onComplete(() => {
-                                            // ------------------------------------------------------------------
-                                            //  Create a sphere between the green (K) and blue (Q) cubes once the
-                                            //  first blue cube has finished sliding into place. This visual cue
-                                            //  only appears for the very first lane/head combination to avoid
-                                            //  cluttering the scene.
-                                            // ------------------------------------------------------------------
-
-                                            if (!this._trainSphereCreated) {
-                                                const greenVecRef = processedKVec || kVec; // whichever instance is active
-                                                if (greenVecRef) {
-                                                    const bluePos  = activeBlue.group.position;
-                                                    const greenPos = greenVecRef.group.position;
-
-                                                    // Mid-point between blue and green cubes
-                                                    const midX = (bluePos.x + greenPos.x) / 2;
-                                                    const midY = (bluePos.y + greenPos.y) / 2;
-                                                    const midZ = (bluePos.z + greenPos.z) / 2;
-
-                                                    const sphereGeo = new THREE.SphereGeometry(10, 32, 32);
-                                                    // Random bright colour within existing colour palette range
-                                                    const randomHue   = Math.random();
-                                                    const sphereColor = new THREE.Color().setHSL(randomHue, 0.8, 0.5);
-                                                    const sphereMat   = new THREE.MeshStandardMaterial({ color: sphereColor });
-                                                    const sphereMesh  = new THREE.Mesh(sphereGeo, sphereMat);
-
-                                                    sphereMesh.position.set(midX, midY, midZ);
-                                                    this.parentGroup.add(sphereMesh);
-
-                                                    // Hide the blue cube now that the sphere will represent the merged state
-                                                    activeBlue.group.visible = false;
-
-                                                    // Store a reference so other parts of the animation (red-vector callback)
-                                                    // can trigger further behaviour such as rising & colour transition.
-                                                    this._trainSphereMesh = sphereMesh;
-
-                                                    this._trainSphereCreated = true;
-
-                                                    // If the red vector has already computed its final Y target, animate now
-                                                    if (this._trainSphereTargetY !== undefined && this._trainSphereTargetY !== null) {
-                                                        const tgtY = this._trainSphereTargetY;
-                                                        new TWEEN.Tween(sphereMesh.position)
-                                                            .to({ y: tgtY }, 600)
-                                                            .easing(TWEEN.Easing.Quadratic.Out)
-                                                            .start();
-
-                                                        new TWEEN.Tween(sphereMesh.material.color)
-                                                            .to({ r: 1, g: 1, b: 1 }, 600)
-                                                            .easing(TWEEN.Easing.Quadratic.Out)
-                                                            .start();
-
-                                                        this._trainSphereTargetY = null;
-                                                    }
-
-                                                }
-                                            }
-
-                                            // Continue with normal completion bookkeeping
-                                            singleAnimationDone();
-                                        })
-                                        .start();
-                                } else {
-                                    activeBlue.group.position.x = targetX;
-
-                                    // Non-Tween fallback sphere creation (instantaneous move)
-                                    if (!this._trainSphereCreated) {
-                                        const greenVecRef = processedKVec || kVec;
-                                        if (greenVecRef) {
-                                            const bluePos  = activeBlue.group.position;
-                                            const greenPos = greenVecRef.group.position;
-
-                                            const midX = (bluePos.x + greenPos.x) / 2;
-                                            const midY = (bluePos.y + greenPos.y) / 2;
-                                            const midZ = (bluePos.z + greenPos.z) / 2;
-
-                                            const sphereGeo = new THREE.SphereGeometry(10, 32, 32);
-                                            const randomHue   = Math.random();
-                                            const sphereColor = new THREE.Color().setHSL(randomHue, 0.8, 0.5);
-                                            const sphereMat   = new THREE.MeshStandardMaterial({ color: sphereColor });
-                                            const sphereMesh  = new THREE.Mesh(sphereGeo, sphereMat);
-                                            sphereMesh.position.set(midX, midY, midZ);
-                                            this.parentGroup.add(sphereMesh);
-
-                                            activeBlue.group.visible = false; // Hide the blue cube immediately
-
-                                            this._trainSphereMesh = sphereMesh;
-
-                                            this._trainSphereCreated = true;
-
-                                            // Trigger rise if target already known
-                                            if (this._trainSphereTargetY !== undefined && this._trainSphereTargetY !== null) {
-                                                const tgtY = this._trainSphereTargetY;
-                                                new TWEEN.Tween(sphereMesh.position)
-                                                    .to({ y: tgtY }, 600)
-                                                    .easing(TWEEN.Easing.Quadratic.Out)
-                                                    .start();
-
-                                                new TWEEN.Tween(sphereMesh.material.color)
-                                                    .to({ r: 1, g: 1, b: 1 }, 600)
-                                                    .easing(TWEEN.Easing.Quadratic.Out)
-                                                    .start();
-
-                                                this._trainSphereTargetY = null;
-                                            }
-
-                                        }
-                                    }
-
-                                    singleAnimationDone();
-                                }
-                            };
-
-                            if (typeof TWEEN !== 'undefined') {
-                                // schedule after green slide duration (+small buffer)
-                                setTimeout(moveBlue, 650);
-                            } else {
-                                moveBlue();
-                            }
-                        };
-
-                        this.animateVectorMatrixPassThrough(blueVec, qSideCopy.matrixRef, this.brightBlue, this.darkTintedBlue, 0.666, this.mhaPassThroughTargetY, this.mhaPassThroughDuration, OTHER_RISE, this.mhaResultRiseDuration, this.outputVectorLength, onBlueProcessed, 'Q');
-                    } else {
-                        this.animateVectorMatrixPassThrough(qSideCopy.vec, qSideCopy.matrixRef, this.brightBlue, this.darkTintedBlue, 0.666, this.mhaPassThroughTargetY, this.mhaPassThroughDuration, OTHER_RISE, this.mhaResultRiseDuration, this.outputVectorLength, singleAnimationDone, 'Q');
-                    }
+                    this.animateVectorMatrixPassThrough(qSideCopy.vec, qSideCopy.matrixRef, this.brightBlue, this.darkTintedBlue, 0.666, this.mhaPassThroughTargetY, this.mhaPassThroughDuration, this.mhaResultRiseOffsetY, this.mhaResultRiseDuration, this.outputVectorLength, singleAnimationDone, 'Q');
                 } else { totalAnimationsToComplete--; }
 
                 const vSideCopy = lane.sideCopies.find(sc => sc.headIndex === headIdx && sc.type === 'V');
                 if (vSideCopy && vSideCopy.vec) {
-                    const redVec = vSideCopy.vec;
-                    const afterFirstRise = (processedVec) => {
-                        const activeRed = processedVec || redVec;
-
-                        // 1) Extra upward rise for the red vector
-                        const doExtraRise = () => {
-                            if (typeof TWEEN !== 'undefined') {
-                                return new TWEEN.Tween(activeRed.group.position)
-                                    .to({ y: activeRed.group.position.y + RED_EXTRA }, 500)
-                                    .easing(TWEEN.Easing.Quadratic.Out)
-                                    .start();
-                            } else {
-                                activeRed.group.position.y += RED_EXTRA;
-                                return null;
-                            }
-                        };
-
-                        // 2) Horizontal shift for the green (K) vector so it sits beneath the red
-                        const moveGreenUnderRed = () => {
-                            const targetX = activeRed.group.position.x; // X where red is
-                            const greenVec = processedKVec || kVec;
-                            if (!greenVec) return;
-                            if (typeof TWEEN !== 'undefined') {
-                                new TWEEN.Tween(greenVec.group.position)
-                                    .to({ x: targetX }, 600)
-                                    .easing(TWEEN.Easing.Quadratic.Out)
-                                    .start();
-                            } else {
-                                greenVec.group.position.x = targetX;
-                            }
-                        };
-
-                        // Chain: extra rise then move green; finally mark complete
-                        if (typeof TWEEN !== 'undefined') {
-                            doExtraRise().onComplete(() => {
-                                moveGreenUnderRed();
-
-                                // -----------------------------------------------------------
-                                //  Once the red vector has completed its extra rise, animate
-                                //  the sphere (if present) to rise vertically to align with
-                                //  the red cube and transition its colour to white.
-                                // -----------------------------------------------------------
-                                const targetY = activeRed.group.position.y;
-                                if (this._trainSphereMesh) {
-                                    const sphere = this._trainSphereMesh;
-                                    new TWEEN.Tween(sphere.position)
-                                        .to({ y: targetY }, 600)
-                                        .easing(TWEEN.Easing.Quadratic.Out)
-                                        .start();
-
-                                    new TWEEN.Tween(sphere.material.color)
-                                        .to({ r: 1, g: 1, b: 1 }, 600)
-                                        .easing(TWEEN.Easing.Quadratic.Out)
-                                        .start();
-                                } else {
-                                    // Sphere not created yet – store the targetY for later
-                                    this._trainSphereTargetY = targetY;
-                                }
-
-                                singleAnimationDone();
-                            });
-                        } else {
-                            doExtraRise();
-                            moveGreenUnderRed();
-
-                            const targetYInst = activeRed.group.position.y;
-                            if (this._trainSphereMesh) {
-                                const sphere = this._trainSphereMesh;
-                                sphere.position.y = targetYInst;
-                                sphere.material.color.set(0xffffff);
-                            } else {
-                                this._trainSphereTargetY = targetYInst;
-                            }
-
-                            singleAnimationDone();
-                        }
-                    };
-
-                    this.animateVectorMatrixPassThrough(redVec, vSideCopy.matrixRef, this.brightRed, this.darkTintedRed, 0.0, this.mhaPassThroughTargetY, this.mhaPassThroughDuration, OTHER_RISE, this.mhaResultRiseDuration, this.outputVectorLength, afterFirstRise, 'V');
+                    this.animateVectorMatrixPassThrough(vSideCopy.vec, vSideCopy.matrixRef, this.brightRed, this.darkTintedRed, 0.0, this.mhaPassThroughTargetY, this.mhaPassThroughDuration, this.mhaResultRiseOffsetY, this.mhaResultRiseDuration, this.outputVectorLength, singleAnimationDone, 'V');
                 } else { totalAnimationsToComplete--; }
             }
         });
@@ -1182,23 +943,6 @@ export class MHSAAnimation {
         });
 
         // After all merge tweens are initiated, schedule the next phases.
-
-        // HEADS_ONLY MODE: stop after vectors have merged back into the residual
-        // stream and the head colours have transitioned. Skip the output-projection
-        // matrix stage.
-        if (this.mode === 'heads_only') {
-            if (typeof TWEEN !== 'undefined') {
-                setTimeout(() => {
-                    this._transitionHeadColorsToFinal(1000);
-                }, maxDurationMs + 200);
-            } else {
-                this._transitionHeadColorsToFinal(0);
-            }
-            return; // Do not proceed to output-projection.
-        }
-
-        // Default (temp) behaviour: transition colours, then run the
-        // output-projection animation.
         if (typeof TWEEN !== 'undefined') {
             setTimeout(() => {
                 this._transitionHeadColorsToFinal(1000);
