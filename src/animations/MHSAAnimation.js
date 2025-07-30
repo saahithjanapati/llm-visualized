@@ -29,12 +29,21 @@ import {
     BRANCH_X
 } from '../utils/constants.js';
 import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
+import { buildMHAVisuals, VectorRouter, PassThroughAnimator } from './mhsa/index.js';
+import { animateVectorMatrixPassThrough as animateVectorMatrixPassThroughExternal } from './mhsa/VectorMatrixPassThrough.js';
 
 // Define speed multiplier
 const SPEED_MULT = GLOBAL_ANIM_SPEED_MULT;
 
 export class MHSAAnimation {
-    constructor(parentGroup, branchX, mhsaBaseY, clock, mode = 'temp') {
+    /**
+     * Global toggle.  Set `MHSAAnimation.ENABLE_SELF_ATTENTION = true` **before**
+     * constructing an instance to activate the (placeholder) self-attention
+     * sub-animation.  The big 12-layer demo leaves this `false` so nothing runs.
+     */
+    static ENABLE_SELF_ATTENTION = false;
+
+    constructor(parentGroup, branchX, mhsaBaseY, clock, mode = 'temp', opts = {}) {
         this.parentGroup = parentGroup;
         this.branchX = branchX;
         this.mhsaBaseY = mhsaBaseY;
@@ -44,40 +53,112 @@ export class MHSAAnimation {
         // during MHSA/MLP processing. Starts with the LN1 value.
         this.postSplitRiseSpeed = ANIM_RISE_SPEED_POST_SPLIT_LN1;
 
-        this.mhaVisualizations = [];
-        this.headsCentersX = [];
-        this.headCoords = [];
+        // Core positional helpers & state flags
         this.mhaPassThroughPhase = 'positioning_mha_vectors';
 
         this.mhsa_matrix_center_y = this.mhsaBaseY + MHA_MATRIX_PARAMS.height / 2;
-        this.headStopY = this.mhsa_matrix_center_y - MHSA_HEAD_VECTOR_STOP_BELOW;
+        this.headStopY            = this.mhsa_matrix_center_y - MHSA_HEAD_VECTOR_STOP_BELOW;
         this.mhaPassThroughTargetY = this.mhsa_matrix_center_y + MHA_MATRIX_PARAMS.height / 2 + 20;
-        this.outputVectorLength = 64;
-        this.mhaResultRiseOffsetY = MHSA_RESULT_RISE_OFFSET_Y;
-        this.mhaResultRiseDuration = 500 / SPEED_MULT;
-        this.mhaPassThroughDuration = MHSA_PASS_THROUGH_TOTAL_DURATION_MS / SPEED_MULT;
 
-        this.matrixInitialRestingColor = new THREE.Color(MHSA_MATRIX_INITIAL_RESTING_COLOR);
-        this.matrixRestingEmissiveIntensity = 0.1; // Default low emissive intensity
-        this.matrixRestingOpacity = 1.0; // Default opacity for resting matrices (opaque)
+        // Durations & dimensional constants
+        this.outputVectorLength      = 64;
+        this.mhaResultRiseOffsetY    = MHSA_RESULT_RISE_OFFSET_Y;
+        this.mhaResultRiseDuration   = 500 / SPEED_MULT;
+        this.mhaPassThroughDuration  = MHSA_PASS_THROUGH_TOTAL_DURATION_MS / SPEED_MULT;
 
-        this.brightGreen = new THREE.Color(MHSA_BRIGHT_GREEN);
-        this.darkTintedGreen = new THREE.Color(MHSA_DARK_TINTED_GREEN);
-        this.brightBlue = new THREE.Color(MHSA_BRIGHT_BLUE);
-        this.darkTintedBlue = new THREE.Color(MHSA_DARK_TINTED_BLUE);
-        this.brightRed = new THREE.Color(MHSA_BRIGHT_RED);
-        this.darkTintedRed = new THREE.Color(MHSA_DARK_TINTED_RED);
+        // Colours & material defaults
+        this.matrixInitialRestingColor     = new THREE.Color(MHSA_MATRIX_INITIAL_RESTING_COLOR);
+        this.matrixRestingEmissiveIntensity = 0.1;
+        this.matrixRestingOpacity           = 1.0;
+
+        this.brightGreen      = new THREE.Color(MHSA_BRIGHT_GREEN);
+        this.darkTintedGreen  = new THREE.Color(MHSA_DARK_TINTED_GREEN);
+        this.brightBlue       = new THREE.Color(MHSA_BRIGHT_BLUE);
+        this.darkTintedBlue   = new THREE.Color(MHSA_DARK_TINTED_BLUE);
+        this.brightRed        = new THREE.Color(MHSA_BRIGHT_RED);
+        this.darkTintedRed    = new THREE.Color(MHSA_DARK_TINTED_RED);
+
+        // --------------------------------------------------------------
+        //   Build static visuals via new refactored helper
+        // --------------------------------------------------------------
+        const visuals = buildMHAVisuals(this.parentGroup, {
+            branchX: this.branchX,
+            mhsaBaseY: this.mhsaBaseY,
+            matrixRestingOpacity: 1.0, // retains original behaviour
+        });
+
+        this.mhaVisualizations           = visuals.mhaVisualizations;
+        this.headsCentersX               = visuals.headsCentersX;
+        this.headCoords                  = visuals.headCoords;
+        this.outputProjectionMatrix      = visuals.outputProjectionMatrix;
+        this.outputProjMatrixCenterY     = visuals.outputProjMatrixCenterY;
+        this.outputProjMatrixHeight      = visuals.outputProjMatrixHeight;
+        this.outputProjMatrixDefaultColor = visuals.outputProjMatrixDefaultColor;
+        this.outputProjMatrixActiveColor  = visuals.outputProjMatrixActiveColor;
+        this.finalCombinedY              = visuals.finalCombinedY;
+        this.finalOriginalY              = visuals.finalOriginalY;
+
+        // Additional arrays required by later stages
+        this.outputProjMatrixAnimationPhase = 'waiting';
+        this.outputProjMatrixTrails         = [];
+        this.outputProjMatrixVectors        = [];
 
         // Mode control (e.g., 'temp', 'perm', etc.)
         this.mode = mode;
 
+        // --------------------------------------------------------------
+        //  Self-attention toggle (defaults to global static value)
+        // --------------------------------------------------------------
+        this.enableSelfAttentionAnimation =
+            opts.enableSelfAttention ?? MHSAAnimation.ENABLE_SELF_ATTENTION;
+
+        // State flag used internally by PassThroughAnimator
+        this.selfAttentionPhase = 'waiting'; // 'waiting' | 'running' | 'complete'
+
         // Temp-mode bookkeeping
         this._tempModeCompleted = false;
         this._tempAllOutputVectors = []; // K,Q,V combined
-        this._tempKOutputVectors = [];   // Only central K vectors
+        this._tempKOutputVectors   = []; // Only central K vectors
 
-        this._setupMHSAVisualizations();
-        this._setupOutputProjectionMatrix();
+        // --------------------------------------------------------------
+        //   Vector router: handles all positioning before pass-through
+        // --------------------------------------------------------------
+        this.vectorRouter = new VectorRouter(this.parentGroup, this.headsCentersX, this.headCoords, this.headStopY, this.mhaVisualizations);
+        this.vectorRouter.onReady(() => {
+            this.mhaPassThroughPhase = 'ready_for_parallel_pass_through';
+            console.log("MHSAAnimation: All MHSA vectors are in position. Ready for PARALLEL pass-through.");
+            this.passThroughAnimator = new PassThroughAnimator(this);
+            this.passThroughAnimator.start(this.currentLanes);
+        });
+
+        // ----------------------------------------------
+        //  Stage pipeline scaffolding (legacy)
+        // ----------------------------------------------
+        // These two helper calls are replaced by the new builder.
+        // Keeping methods defined below for now so update() logic referring to
+        // them compiles, but we skip execution to avoid duplicate visuals.
+        // this._setupMHSAVisualizations();
+        // this._setupOutputProjectionMatrix();
+    }
+
+    // ------------------------------------------------------------------
+    //  Placeholder self-attention phase – waits 3 s before continuing
+    // ------------------------------------------------------------------
+    _runSelfAttentionPhase(onDone) {
+        if (this.selfAttentionPhase !== 'waiting') {
+            // Already running or finished – call through immediately
+            if (onDone) onDone();
+            return;
+        }
+
+        this.selfAttentionPhase = 'running';
+        console.log('MHSAAnimation: (placeholder) self-attention phase started');
+
+        setTimeout(() => {
+            this.selfAttentionPhase = 'complete';
+            console.log('MHSAAnimation: self-attention phase complete');
+            if (onDone) onDone();
+        }, 3000); // 3-second stand-in
     }
 
     _setupMHSAVisualizations() {
@@ -291,175 +372,22 @@ export class MHSAAnimation {
     }
 
     animateVectorMatrixPassThrough(vector, matrix, brightMatrixColor, darkTintedMatrixColor, finalVectorHue, passThroughY, duration, riseOffset, riseDurationVal, outLength, animationCompletionCallback, vectorCategory = 'K') {
-        if (typeof TWEEN === 'undefined') {
-            console.error("Global TWEEN object not loaded for MHSAAnimation!");
-            if (animationCompletionCallback) animationCompletionCallback();
-            return;
-        }
-        if (!vector || !matrix) {
-            console.warn("Missing vector or matrix for pass-through animation in MHSA.");
-            if (animationCompletionCallback) animationCompletionCallback();
-            return;
-        }
-
-        // Create a trail line that follows the vector only inside the matrix
-        const passThroughTrail = createTrailLine(this.parentGroup, TRAIL_LINE_COLOR);
-        const matrixBottomY = this.mhsa_matrix_center_y - MHA_MATRIX_PARAMS.height / 2;
-        const matrixTopY = this.mhsa_matrix_center_y + MHA_MATRIX_PARAMS.height / 2;
-
-        const originalMatrixEmissive = matrix.mesh.material.emissive.clone();
-        const originalMatrixIntensity = matrix.mesh.material.emissiveIntensity;
-        let finalVisualsApplied = false; // Flag to ensure processed visuals are applied once
-        let initialDimensionChangeApplied = false; // Flag for early dimension change
-        const tweenState = { y: vector.group.position.y, progress: 0, colorR: 1, colorG: 1, colorB: 1, matrixEmissiveIntensity: originalMatrixIntensity };
-        const initialVecColor = new THREE.Color();
-        if(vector.mesh.instanceColor) { vector.mesh.getColorAt(0, initialVecColor); } else { initialVecColor.setRGB(0.5,0.5,0.5); }
-        tweenState.colorR = initialVecColor.r; tweenState.colorG = initialVecColor.g; tweenState.colorB = initialVecColor.b;
-
-        new TWEEN.Tween(tweenState)
-            .to({ y: passThroughY + riseOffset, progress: 1.0, colorR: 1.0, colorG: 1.0, colorB: 1.0, matrixEmissiveIntensity: MHSA_MATRIX_MAX_EMISSIVE_INTENSITY }, duration)
-            .easing(TWEEN.Easing.Quadratic.InOut)
-            .onUpdate(() => {
-                // Move vector
-                vector.group.position.y = tweenState.y;
-                // Only update trail while the vector is inside the matrix region
-                const y = vector.group.position.y;
-
-                // Apply 64-dimensional conversion as vector enters the matrix bottom
-                const matrixBottomEntryY = this.mhsa_matrix_center_y - MHA_MATRIX_PARAMS.height / 2;
-                if (!initialDimensionChangeApplied && y >= matrixBottomEntryY) {
-                    // ------------------------------------------------------------------
-                    // 1) Create new lightweight vector (still uses the same class)
-                    // ------------------------------------------------------------------
-                    const smallVec = new VectorVisualizationInstancedPrism(
-                        vector.rawData.slice(0, outLength), // supply d_model slice
-                        vector.group.position.clone(),
-                        3 // subsection count for colour gradient
-                    );
-
-                    // ------------------------------------------------------------------
-                    // 2) Swap out the heavyweight 768-unit vector for the lightweight one
-                    // ------------------------------------------------------------------
-                    this.parentGroup.add(smallVec.group);
-
-                    // Keep a handle to the original (large) vector before we overwrite
-                    const heavyVec = vector;
-
-                    // From now on animate using the lightweight reference
-                    vector = smallVec;
-                    initialDimensionChangeApplied = true;
-
-                    // Remove & dispose the heavyweight vector to free GPU/CPU resources
-                    this.parentGroup.remove(heavyVec.group);
-                    if (typeof heavyVec.dispose === 'function') heavyVec.dispose();
-
-                    // ------------------------------------------------------------------
-                    // Apply final visuals immediately to the lightweight vector
-                    // ------------------------------------------------------------------
-                    vector.applyProcessedVisuals(
-                        vector.rawData.slice(0, outLength),
-                        outLength,
-                        {
-                            numKeyColors: 3,
-                            generationOptions: {
-                                type: 'monochromatic',
-                                baseHue: finalVectorHue,
-                                saturation: 0.9,
-                                minLightness: 0.4,
-                                maxLightness: 0.8
-                            }
-                        },
-                        { setHiddenToBlack: false }
-                    );
-
-                    // ------------------------------------------------------------------
-                    // END heavy → lightweight swap optimisation
-                    // ------------------------------------------------------------------
-                }
-
-                // Only update the trail while the vector is rising towards the matrix (below it)
-                if (y < matrixBottomY) {
-                    updateTrail(passThroughTrail, vector.group.position);
-                }
-
-                let currentMatrixTargetColor = new THREE.Color();
-                let currentEmissiveIntensity = this.matrixRestingEmissiveIntensity;
-                let t = 0;
-                let emissiveTargetColorForMatrix = new THREE.Color();
-
-                // Use smoothstep for a softer transition from dark → bright.
-                if (tweenState.progress < MHSA_PASS_THROUGH_BRIGHTEN_RATIO) {
-                    const raw = tweenState.progress / MHSA_PASS_THROUGH_BRIGHTEN_RATIO;
-                    t = THREE.MathUtils.smoothstep(raw, 0, 1);
-                    currentMatrixTargetColor = this.matrixInitialRestingColor.clone().lerp(brightMatrixColor, t);
-                    currentEmissiveIntensity = THREE.MathUtils.lerp(this.matrixRestingEmissiveIntensity, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY, t);
-                    matrix.setOpacity(this.matrixRestingOpacity);
-                    emissiveTargetColorForMatrix = currentMatrixTargetColor.clone();
-                } else if (tweenState.progress < MHSA_PASS_THROUGH_BRIGHTEN_RATIO + MHSA_PASS_THROUGH_DIM_RATIO) {
-                    const raw = (tweenState.progress - MHSA_PASS_THROUGH_BRIGHTEN_RATIO) / MHSA_PASS_THROUGH_DIM_RATIO;
-                    t = THREE.MathUtils.smoothstep(raw, 0, 1);
-                    currentMatrixTargetColor = brightMatrixColor.clone().lerp(darkTintedMatrixColor, t);
-                    currentEmissiveIntensity = THREE.MathUtils.lerp(MHSA_MATRIX_MAX_EMISSIVE_INTENSITY, this.matrixRestingEmissiveIntensity, t);
-                    matrix.setOpacity(this.matrixRestingOpacity);
-                    emissiveTargetColorForMatrix = currentMatrixTargetColor.clone();
-                } else {
-                    currentMatrixTargetColor = darkTintedMatrixColor.clone();
-                    currentEmissiveIntensity = this.matrixRestingEmissiveIntensity;
-                    matrix.setOpacity(this.matrixRestingOpacity);
-                    emissiveTargetColorForMatrix = currentMatrixTargetColor.clone();
-                }
-                matrix.setColor(currentMatrixTargetColor);
-                matrix.setEmissive(emissiveTargetColorForMatrix, currentEmissiveIntensity);
-
-                const numCentralUnits = outLength;
-                const startVisibleIndex = Math.floor((VECTOR_LENGTH_PRISM - numCentralUnits) / 2);
-                const endVisibleIndex = startVisibleIndex + numCentralUnits - 1;
- 
-                 // Progressive shrink animation for outer prisms, only if the initial snap to 64-dim hasn't happened yet.
-                 if (!initialDimensionChangeApplied) {
-                     // Content of this block (progressive shrink loop) is removed for optimization.
-                     // The vector will maintain its full appearance until it hits the matrix boundary,
-                     // at which point applyProcessedVisuals handles the instantaneous change.
-                 }
-            })
-            .onComplete(() => {
-                matrix.setColor(darkTintedMatrixColor);
-                matrix.setEmissive(darkTintedMatrixColor, this.matrixRestingEmissiveIntensity);
-                matrix.setOpacity(this.matrixRestingOpacity);
-
-                // Ensure final visuals are applied at least once (in case progress never reached threshold).
-                if (!finalVisualsApplied) {
-                    const processedData = vector.rawData.slice(0, outLength);
-                    vector.applyProcessedVisuals(processedData, outLength, {
-                        numKeyColors: 3,
-                        generationOptions: {
-                            type: 'monochromatic',
-                            baseHue: finalVectorHue,
-                            saturation: 0.9,
-                            minLightness: 0.4,
-                            maxLightness: 0.8
-                        }
-                    });
-                    finalVisualsApplied = true;
-                }
-
-                // No additional rise tween needed – the vector is already at its
-                // final Y.
-
-                // ------------------------------------------------------------------
-                //  Temp-mode collection of finished vectors
-                // ------------------------------------------------------------------
-                if (this.mode === 'temp') {
-                    this._tempAllOutputVectors.push(vector);
-                    if (vectorCategory === 'K') {
-                        this._tempKOutputVectors.push(vector);
-                    }
-                }
-
-                // Invoke caller-supplied callback last so that state above is ready.
-                if (animationCompletionCallback) animationCompletionCallback();
-            })
-            .start();
+        // Thin wrapper delegating to extracted helper for maintainability.
+        return animateVectorMatrixPassThroughExternal(
+            this,
+            vector,
+            matrix,
+            brightMatrixColor,
+            darkTintedMatrixColor,
+            finalVectorHue,
+            passThroughY,
+            duration,
+            riseOffset,
+            riseDurationVal,
+            outLength,
+            animationCompletionCallback,
+            vectorCategory
+        );
     }
 
     initiateParallelHeadPassThroughAnimations(allLanes) {
@@ -516,129 +444,15 @@ export class MHSAAnimation {
         // Keep a reference to the latest lanes array so that other internal
         // methods (triggered asynchronously) can access the original vectors.
         this.currentLanes = lanes;
-        lanes.forEach((lane, idx) => {
-            if (lane.horizPhase === 'travelMHSA') {
-                const tVec = lane.travellingVec;
-                if (!tVec) return;
 
-                const targetHeadIdx = lane.headIndex || 0;
-                if (targetHeadIdx >= this.headsCentersX.length) {
-                    tVec.group.visible = false;
-                    lane.horizPhase = 'finishedHeads';
-                    return; 
-                }
-                const targetX = this.headsCentersX[targetHeadIdx];
-                const dx = ANIM_HORIZ_SPEED * SPEED_MULT * deltaTime;
-
-                if (tVec.group.position.x < targetX - 0.01) {
-                    tVec.group.position.x = Math.min(targetX, tVec.group.position.x + dx);
-                    // Continuously update the existing duplicate trail so horizontal
-                    // motion toward the attention head leaves a visible path.
-                    if (lane.dupTrail) {
-                        updateTrail(lane.dupTrail, tVec.group.position);
-                    }
-                } else {
-                    // Ensure final point on trail before spawning upward copy
-                    if (lane.dupTrail) {
-                        updateTrail(lane.dupTrail, tVec.group.position);
-                    }
-                    const dupeData = [...tVec.rawData];
-                    const upVec = new VectorVisualizationInstancedPrism(dupeData, tVec.group.position.clone());
-                    this.parentGroup.add(upVec.group);
-                    upVec.userData = { headIndex: targetHeadIdx, sideSpawned: false, sideSpawnRequested: false, sideSpawnTime: 0 };
-                    lane.upwardCopies.push(upVec);
-                    
-                    const upTrail = createTrailLine(this.parentGroup, TRAIL_LINE_COLOR);
-                    // Keep upward trail visible so users can see vector path
-                    updateTrail(upTrail, upVec.group.position);
-                    lane.upwardTrails = lane.upwardTrails || [];
-                    lane.upwardTrails.push(upTrail);
-
-                    lane.headIndex = targetHeadIdx + 1;
-                    if (lane.headIndex >= NUM_HEAD_SETS_LAYER) {
-                        tVec.group.visible = false;
-                        lane.horizPhase = 'finishedHeads';
-                    }
-                }
-            } else if (lane.horizPhase === 'finishedHeads') {
-                // No-op
-            }
-
-                         if (lane.upwardCopies && lane.upwardCopies.length) {
-                 lane.upwardCopies.forEach((upVec, trailIdx) => {
-                     if (upVec.group.position.y < this.headStopY) {
-                         upVec.group.position.y = Math.min(this.headStopY, upVec.group.position.y + MHSA_DUPLICATE_VECTOR_RISE_SPEED * SPEED_MULT * deltaTime);
-                         if (lane.upwardTrails && lane.upwardTrails[trailIdx]) {
-                             updateTrail(lane.upwardTrails[trailIdx], upVec.group.position);
-                         }
-                     }
-                 });
-             }
-
-             if (lane.upwardCopies) {
-                 lane.upwardCopies.forEach(centerVec => {
-                     if (!centerVec.userData.sideSpawnRequested && Math.abs(centerVec.group.position.y - this.headStopY) < 0.1) {
-                         centerVec.userData.sideSpawnRequested = true;
-                         centerVec.userData.sideSpawnTime = timeNow + SIDE_COPY_DELAY_MS / SPEED_MULT;
-                     }
-                     if (centerVec.userData.sideSpawnRequested && !centerVec.userData.sideSpawned && timeNow >= centerVec.userData.sideSpawnTime) {
-                         const hIdx = centerVec.userData.headIndex;
-                         const coord = this.headCoords[hIdx];
-                         if (coord) {
-                             const qMatrixForHead = this.mhaVisualizations[hIdx * 3];
-                             const vMatrixForHead = this.mhaVisualizations[hIdx * 3 + 2];
-
-                             const qVec = new VectorVisualizationInstancedPrism(centerVec.rawData.slice(), centerVec.group.position.clone());
-                             const vVec = new VectorVisualizationInstancedPrism(centerVec.rawData.slice(), centerVec.group.position.clone());
-                             this.parentGroup.add(qVec.group);
-                             this.parentGroup.add(vVec.group);
-                             
-                             lane.sideCopies = lane.sideCopies || [];
-                             lane.sideCopies.push({ vec: qVec, targetX: coord.q, type: 'Q', matrixRef: qMatrixForHead, headIndex: hIdx });
-                             lane.sideCopies.push({ vec: vVec, targetX: coord.v, type: 'V', matrixRef: vMatrixForHead, headIndex: hIdx });
-                             
-                             const qTrail = createTrailLine(this.parentGroup, TRAIL_LINE_COLOR);
-                             const vTrail = createTrailLine(this.parentGroup, TRAIL_LINE_COLOR);
-                             // Seed the side-copy trails with the current position so they
-                             // start exactly at the split point, ensuring continuity with the
-                             // upward trail and avoiding a visual gap when the vector branches.
-                             updateTrail(qTrail, qVec.group.position);
-                             updateTrail(vTrail, vVec.group.position);
-                             // Keep side copy trails visible
-                             lane.sideTrails.push(qTrail);
-                             lane.sideTrails.push(vTrail);
-                             centerVec.userData.sideSpawned = true;
-                         }
-                     }
-                 });
-             }
-
-            if (this.mhaPassThroughPhase === 'positioning_mha_vectors' && lane.sideCopies && lane.sideCopies.length) {
-                lane.sideCopies.forEach((obj, trailIdx) => {
-                    const v = obj.vec;
-                    const dx = SIDE_COPY_HORIZ_SPEED * SPEED_MULT * deltaTime;
-                    if (Math.abs(v.group.position.x - obj.targetX) > 0.01) {
-                        const dir = v.group.position.x < obj.targetX ? 1 : -1;
-                        v.group.position.x += dir * dx;
-                        if ((dir === 1 && v.group.position.x > obj.targetX) || (dir === -1 && v.group.position.x < obj.targetX))
-                            v.group.position.x = obj.targetX;
-                    }
-                    v.group.position.y = this.headStopY;
-                    
-                    if (lane.sideTrails && lane.sideTrails[trailIdx]) {
-                         updateTrail(lane.sideTrails[trailIdx], v.group.position);
-                    }
-                });
-            }
-        });
-
-        if (this.mhaPassThroughPhase === 'positioning_mha_vectors') {
-            if (this.areAllMHAVectorsInPosition(lanes)) {
-                this.mhaPassThroughPhase = 'ready_for_parallel_pass_through';
-                console.log("MHSAAnimation: All MHSA vectors are in position. Ready for PARALLEL pass-through.");
-                this.initiateParallelHeadPassThroughAnimations(lanes);
-            }
+        // ---------------- Vector routing (refactored) ----------------
+        if (this.vectorRouter) {
+            this.vectorRouter.update(deltaTime, timeNow, lanes);
         }
+
+        // ---------------- End VectorRouter section -------------------
+        /* Legacy inline routing logic has been moved to VectorRouter.js
+           and will be removed once the migration is complete. */
 
         // ------------------------------------------------------------------
         //  CONTINUOUSLY MOVE ORIGINAL RESIDUAL-STREAM VECTORS UPWARDS

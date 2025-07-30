@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MHSA – Heads-Only Test (with Self-Attention Phase)</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <!-- Simple full-screen canvas -->
+    <canvas id="mhsaCanvas"></canvas>
+
+    <!-- Tween.js for animation timing -->
+    <script src="https://unpkg.com/@tweenjs/tween.js@23.1.1/dist/tween.umd.js"></script>
+
+    <script type="module">
+        // Enable the placeholder self-attention phase **before** constructing any animations.
+        import { MHSAAnimation } from '../src/animations/MHSAAnimation.js';
+        MHSAAnimation.ENABLE_SELF_ATTENTION = true;
+
+        import * as THREE from 'three';
+        import { loadPrecomputedGeometries } from '../src/utils/precomputedGeometryLoader.js';
+        import { LayerPipeline } from '../src/engine/LayerPipeline.js';
+
+        // Pre-load geometries (no-op if pre-compute disabled)
+        await loadPrecomputedGeometries('../precomputed_components.glb');
+
+        const canvas = document.getElementById('mhsaCanvas');
+
+        // Build a pipeline with **one** transformer layer so only the MHSA block is visible.
+        const NUM_LAYERS = 1;
+        const pipeline   = new LayerPipeline(canvas, NUM_LAYERS, {
+            cameraPosition: new THREE.Vector3(0, 3000, 8000),
+            cameraTarget:   new THREE.Vector3(0, 1500, 0),
+        });
+
+        // ------------------------------------------------------------------
+        // Limit animation scope: we want to see only
+        //  • vector fan-out to heads (including pass-through)
+        //  • optional self-attention pause (3 s)
+        //  • decorative vectors + their concatenation into a row
+        // Everything after (output-projection matrix, LN2/MLP, etc.) is disabled.
+        // ------------------------------------------------------------------
+
+        // The first (and only) layer is constructed synchronously.
+        const firstLayer = pipeline.engine._layers[0];
+        if (firstLayer) {
+            // Hide LayerNorm meshes so only MHSA visuals remain
+            if (firstLayer.ln1 && firstLayer.ln1.group) firstLayer.ln1.group.visible = false;
+            if (firstLayer.ln2 && firstLayer.ln2.group) firstLayer.ln2.group.visible = false;
+
+            const mha = firstLayer.mhsaAnimation;
+            if (mha) {
+                // Disable everything that happens *after* decorative vectors merge
+                mha._startVectorsThroughOutputProjection = () => {};
+                mha._animateOutputMatrixBrightening       = () => {};
+
+                // Hide the (now-unused) output-projection matrix mesh
+                if (mha.outputProjectionMatrix && mha.outputProjectionMatrix.group) {
+                    mha.outputProjectionMatrix.group.visible = false;
+                }
+            }
+        }
+
+        // Clean up WebGL / Three resources on unload.
+        window.addEventListener('beforeunload', () => pipeline.dispose());
+    </script>
+</body>
+</html> 

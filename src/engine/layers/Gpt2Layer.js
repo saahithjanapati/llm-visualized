@@ -170,7 +170,8 @@ export default class Gpt2Layer extends BaseLayer {
         const mhaBaseY = mhaBaseY_local;
         // Create an internal clock for sub-animations handled by the MHSA helper
         this._mhsaClock = new THREE.Clock();
-        this.mhsaAnimation = new MHSAAnimation(this.root, BRANCH_X, mhaBaseY, this._mhsaClock, 'temp');
+        // Pass empty opts – twelve-layer stack keeps self-attention disabled via global static flag.
+        this.mhsaAnimation = new MHSAAnimation(this.root, BRANCH_X, mhaBaseY, this._mhsaClock, 'temp', {});
 
         // ────────────────────────────────────────────────────────────────
         // 2.5) Output-projection matrix
