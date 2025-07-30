@@ -29,7 +29,7 @@ import {
     BRANCH_X
 } from '../utils/constants.js';
 import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
-import { buildMHAVisuals, VectorRouter, PassThroughAnimator } from './mhsa/index.js';
+import { buildMHAVisuals, VectorRouter, PassThroughAnimator, SelfAttentionAnimator } from './mhsa/index.js';
 import { animateVectorMatrixPassThrough as animateVectorMatrixPassThroughExternal } from './mhsa/VectorMatrixPassThrough.js';
 
 // Define speed multiplier
@@ -112,8 +112,8 @@ export class MHSAAnimation {
         this.enableSelfAttentionAnimation =
             opts.enableSelfAttention ?? MHSAAnimation.ENABLE_SELF_ATTENTION;
 
-        // State flag used internally by PassThroughAnimator
-        this.selfAttentionPhase = 'waiting'; // 'waiting' | 'running' | 'complete'
+        // Self-attention helper (placeholder)
+        this.selfAttentionAnimator = new SelfAttentionAnimator(this);
 
         // Temp-mode bookkeeping
         this._tempModeCompleted = false;
@@ -145,20 +145,11 @@ export class MHSAAnimation {
     //  Placeholder self-attention phase – waits 3 s before continuing
     // ------------------------------------------------------------------
     _runSelfAttentionPhase(onDone) {
-        if (this.selfAttentionPhase !== 'waiting') {
-            // Already running or finished – call through immediately
-            if (onDone) onDone();
-            return;
+        if (this.selfAttentionAnimator) {
+            this.selfAttentionAnimator.start(onDone);
+        } else if (onDone) {
+            onDone();
         }
-
-        this.selfAttentionPhase = 'running';
-        console.log('MHSAAnimation: (placeholder) self-attention phase started');
-
-        setTimeout(() => {
-            this.selfAttentionPhase = 'complete';
-            console.log('MHSAAnimation: self-attention phase complete');
-            if (onDone) onDone();
-        }, 3000); // 3-second stand-in
     }
 
     _setupMHSAVisualizations() {

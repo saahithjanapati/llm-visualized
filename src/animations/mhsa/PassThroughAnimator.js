@@ -30,8 +30,8 @@ export class PassThroughAnimator {
                     }
                 };
 
-                if (ctx.enableSelfAttentionAnimation) {
-                    ctx._runSelfAttentionPhase(continueAfterSelfAttn);
+                if (ctx.enableSelfAttentionAnimation && ctx.selfAttentionAnimator) {
+                    ctx.selfAttentionAnimator.start(continueAfterSelfAttn);
                 } else {
                     continueAfterSelfAttn();
                 }
