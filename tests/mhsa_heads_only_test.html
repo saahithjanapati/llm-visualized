@@ -24,6 +24,7 @@
         import * as THREE from 'three';
         import { loadPrecomputedGeometries } from '../src/utils/precomputedGeometryLoader.js';
         import { LayerPipeline } from '../src/engine/LayerPipeline.js';
+        import { BRANCH_X } from '../src/utils/constants.js';
 
         // Pre-load geometries (no-op if pre-compute disabled)
         await loadPrecomputedGeometries('../precomputed_components.glb');
@@ -51,6 +52,27 @@
             // Hide LayerNorm meshes so only MHSA visuals remain
             if (firstLayer.ln1 && firstLayer.ln1.group) firstLayer.ln1.group.visible = false;
             if (firstLayer.ln2 && firstLayer.ln2.group) firstLayer.ln2.group.visible = false;
+            // Hide MLP matrices and residual stream vectors
+            if (firstLayer.mlpUp && firstLayer.mlpUp.group)   firstLayer.mlpUp.group.visible   = false;
+            if (firstLayer.mlpDown && firstLayer.mlpDown.group) firstLayer.mlpDown.group.visible = false;
+            firstLayer.lanes.forEach(lane => {
+                if (lane.originalVec && lane.originalVec.group) lane.originalVec.group.visible = false;
+                if (lane.origTrail) lane.origTrail.visible = false;
+            });
+
+            // Fast-forward Layer to MHSA travel phase
+            firstLayer.lanes.forEach(lane => {
+                if (lane.dupVec) {
+                    lane.dupVec.group.visible = true;
+                    const targetY = firstLayer.ln1TopY + 5;
+                    lane.dupVec.group.position.set(BRANCH_X, targetY, lane.dupVec.group.position.z);
+                    lane.travellingVec = lane.dupVec;
+                    lane.horizPhase    = 'travelMHSA';
+                }
+            });
+            // Skip LN-1 synchronisation barriers
+            firstLayer._ln1Start = true;
+            firstLayer._mhsaStart = true;
 
             const mha = firstLayer.mhsaAnimation;
             if (mha) {
