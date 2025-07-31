@@ -61,6 +61,14 @@ export function animateVectorMatrixPassThrough(
     let finalVisualsApplied = false;
     let initialDimensionChangeApplied = false;
 
+    // ------------------------------
+    // Adjust rise height – custom tweak for heads-only test
+    // Lower overall rise by 20 units. Additional rise for V vectors is now handled
+    // by SelfAttentionAnimator for above-matrix animations.
+    // ------------------------------
+    const BASE_RISE_ADJUST = -30; // lower all coloured vectors
+    const targetRiseY = passThroughY + riseOffset + BASE_RISE_ADJUST;
+
     const tweenState = {
         y: vector.group.position.y,
         progress: 0,
@@ -82,7 +90,7 @@ export function animateVectorMatrixPassThrough(
     new TWEEN.Tween(tweenState)
         .to(
             {
-                y: passThroughY + riseOffset,
+                y: targetRiseY,
                 progress: 1.0,
                 colorR: 1.0,
                 colorG: 1.0,
@@ -114,6 +122,16 @@ export function animateVectorMatrixPassThrough(
                 ctx.parentGroup.add(smallVec.group);
                 const heavyVec = vector;
                 vector = smallVec; // continue animating this handle
+                // Preserve metadata such as headIndex for downstream alignment
+                vector.userData = heavyVec.userData ? { ...heavyVec.userData } : {};
+                // If this is a green (K) vector, update its parent lane reference
+                if (vectorCategory === 'K' && vector.userData.parentLane) {
+                    const pl = vector.userData.parentLane;
+                    const hIdx = vector.userData.headIndex;
+                    if (pl && typeof hIdx === 'number') {
+                        pl.upwardCopies[hIdx] = vector;
+                    }
+                }
                 initialDimensionChangeApplied = true;
                 ctx.parentGroup.remove(heavyVec.group);
                 if (typeof heavyVec.dispose === 'function') heavyVec.dispose();
@@ -192,6 +210,12 @@ export function animateVectorMatrixPassThrough(
                 finalVisualsApplied = true;
             }
 
+            // Delegate above-matrix animations to SelfAttentionAnimator
+            if (ctx.selfAttentionAnimator) {
+                ctx.selfAttentionAnimator.start(vector, vectorCategory, () => {
+                    // Continue with any additional post-animation logic if needed
+                });
+            }
             // --------------------------------------------------------------
             //  Temp-mode bookkeeping identical to legacy implementation
             // --------------------------------------------------------------
@@ -200,7 +224,14 @@ export function animateVectorMatrixPassThrough(
                 if (vectorCategory === 'K') ctx._tempKOutputVectors.push(vector);
             }
 
-            if (animationCompletionCallback) animationCompletionCallback();
+            // --------------------------------------------------------------
+            //  20-second hold before proceeding with the rest of the pipeline
+            // --------------------------------------------------------------
+            if (animationCompletionCallback) {
+                setTimeout(() => {
+                    animationCompletionCallback();
+                }, 20000); // 20 000 ms pause
+            }
         })
         .start();
 }

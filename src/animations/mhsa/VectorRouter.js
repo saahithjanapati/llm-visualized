@@ -73,7 +73,7 @@ export class VectorRouter {
 
                     const upVec = new VectorVisualizationInstancedPrism([...tVec.rawData], tVec.group.position.clone());
                     this.parentGroup.add(upVec.group);
-                    upVec.userData = { headIndex: targetHeadIdx, sideSpawned: false, sideSpawnRequested: false, sideSpawnTime: 0 };
+                    upVec.userData = { headIndex: targetHeadIdx, sideSpawned: false, sideSpawnRequested: false, sideSpawnTime: 0, parentLane: lane };
                     lane.upwardCopies.push(upVec);
 
                     const upTrail = createTrailLine(this.parentGroup, TRAIL_LINE_COLOR);
@@ -117,7 +117,9 @@ export class VectorRouter {
                         const coord = this.headCoords[hIdx];
                         if (coord) {
                             const qVec = new VectorVisualizationInstancedPrism(centerVec.rawData.slice(), centerVec.group.position.clone());
+                            qVec.userData = { headIndex: hIdx };
                             const vVec = new VectorVisualizationInstancedPrism(centerVec.rawData.slice(), centerVec.group.position.clone());
+                            vVec.userData = { headIndex: hIdx };
                             this.parentGroup.add(qVec.group);
                             this.parentGroup.add(vVec.group);
 
