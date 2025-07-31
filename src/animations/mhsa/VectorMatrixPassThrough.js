@@ -225,12 +225,10 @@ export function animateVectorMatrixPassThrough(
             }
 
             // --------------------------------------------------------------
-            //  20-second hold before proceeding with the rest of the pipeline
+            //  Notify upstream logic that this pass-through animation is done
             // --------------------------------------------------------------
             if (animationCompletionCallback) {
-                setTimeout(() => {
-                    animationCompletionCallback();
-                }, 20000); // 20 000 ms pause
+                animationCompletionCallback();
             }
         })
         .start();
