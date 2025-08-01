@@ -26,7 +26,8 @@
 
     <script type="module">
         import * as THREE from 'three';
-        import { loadPrecomputedGeometries } from '../src/utils/precomputedGeometryLoader.js';
+            import { MHSAAnimation } from '../src/animations/MHSAAnimation.js';
+            import { loadPrecomputedGeometries } from '../src/utils/precomputedGeometryLoader.js';
 
         // Optionally load pre-baked geometries; returns instantly if disabled
         await loadPrecomputedGeometries('../precomputed_components.glb');
@@ -42,6 +43,10 @@
         // completes).  This allows heavy geometries/textures to load while the
         // user watches the intro text.
         // ------------------------------------------------------------------
+
+        // Enable self-attention phase so MHSA runs to completion at each layer
+        MHSAAnimation.ENABLE_SELF_ATTENTION = true;
+
         const gptCanvas = document.getElementById('gptCanvas');
 
         const NUM_LAYERS = 12;
