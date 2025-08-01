@@ -57,8 +57,8 @@ export const VECTOR_LENGTH_PRISM = Math.ceil(768 / PRISM_DIMENSIONS_PER_UNIT); /
 // Hence with width-scale 1.5 we set PRISM_BASE_WIDTH = 9.6 / 1.5 = **6.4**.
 //-------------------------------------------------------------------
 export const PRISM_BASE_WIDTH = 6.4; // Width of a single (grouped) prism along the vector axis
-export const PRISM_BASE_DEPTH = 5; // Depth of the prism
-export const PRISM_MAX_HEIGHT = 5; // Max height for a prism when data is at its peak
+export const PRISM_BASE_DEPTH = 7; // Depth of the prism
+export const PRISM_MAX_HEIGHT = 7; // Max height for a prism when data is at its peak
 export const PRISM_HEIGHT_SCALE_FACTOR = 0.75; // Scales normalized data to prism height
 
 // ─────────────────────────────────────────────────────────────

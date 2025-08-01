@@ -275,24 +275,41 @@ export class SelfAttentionAnimator {
             .onComplete(() => {
                 // 2. Traverse along K vectors i times
                 this._traverseLanes(vector, laneZs, i, () => {
-                    // 3. Rise vertically to align with red (V) vector height while staying over K column
-                    new TWEEN.Tween(vector.group.position)
-                        .to({ y: vector.group.position.y + this.RED_EXTRA_RISE }, this.BLUE_HORIZ_DURATION)
+                    // 3. FADE OUT at the LAST green (K) vector, then TELEPORT to first red (V) vector
+                    new TWEEN.Tween(vector.group.scale)
+                        .to({ x: 0.001, y: 0.001, z: 0.001 }, this.BLUE_HORIZ_DURATION / 2)
                         .easing(QEasing)
                         .onComplete(() => {
-                            // 4. Traverse along lanes again i times at elevated height
-                            this._traverseLanes(vector, laneZs, i, () => {
-                                // 5. Fade / dispose
-                                new TWEEN.Tween(vector.group.scale)
-                                    .to({ x: 0.001, y: 0.001, z: 0.001 }, 500)
-                                    .onComplete(() => {
-                                        // Remove from scene & free GPU memory if possible
-                                        if (vector.group.parent) vector.group.parent.remove(vector.group);
-                                        if (typeof vector.dispose === 'function') vector.dispose();
-                                        allDoneCb && allDoneCb();
-                                    })
-                                    .start();
-                            });
+                            // Keep the blue vector over the green (K) column even during the red-vector phase
+                            const targetX = horizontalToK; // stay aligned with K matrix
+
+                            // Teleport the (now invisible) vector to the starting red position (top lane)
+                            vector.group.position.set(
+                                targetX,
+                                vector.group.position.y + this.RED_EXTRA_RISE, // raise to red height
+                                laneZs[0],                                    // top lane (first red vector)
+                            );
+
+                            // 4. FADE BACK IN
+                            new TWEEN.Tween(vector.group.scale)
+                                .to({ x: 1, y: 1, z: 1 }, this.BLUE_HORIZ_DURATION / 2)
+                                .easing(QEasing)
+                                .onComplete(() => {
+                                    // 5. Traverse along lanes again i times (over red vectors)
+                                    this._traverseLanes(vector, laneZs, i, () => {
+                                        // 6. Fade / dispose after finishing red traversal
+                                        new TWEEN.Tween(vector.group.scale)
+                                            .to({ x: 0.001, y: 0.001, z: 0.001 }, 500)
+                                            .onComplete(() => {
+                                                // Remove from scene & free GPU memory if possible
+                                                if (vector.group.parent) vector.group.parent.remove(vector.group);
+                                                if (typeof vector.dispose === 'function') vector.dispose();
+                                                allDoneCb && allDoneCb();
+                                            })
+                                            .start();
+                                    });
+                                })
+                                .start();
                         })
                         .start();
                 });
