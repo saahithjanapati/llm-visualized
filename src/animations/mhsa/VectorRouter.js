@@ -1,5 +1,4 @@
 import { VectorVisualizationInstancedPrism } from '../../components/VectorVisualizationInstancedPrism.js';
-import { createTrailLine, updateTrail } from '../../utils/trailUtils.js';
 import {
     ANIM_HORIZ_SPEED,
     GLOBAL_ANIM_SPEED_MULT,
@@ -12,6 +11,22 @@ import {
     MHSA_DUPLICATE_VECTOR_RISE_SPEED,
 
 } from '../LayerAnimationConstants.js';
+
+// Trail functionality removed – no-ops keep API intact
+function createTrailLine() {
+  return {
+    line: { material: { opacity: 0, needsUpdate: false } },
+    geometry: {
+      attributes: { position: { setXYZ: () => {}, needsUpdate: false } },
+      setDrawRange: () => {},
+      computeBoundingSphere: () => {},
+    },
+    positions: [],
+    points: [],
+    isFrozen: false,
+  };
+}
+function updateTrail() {}
 
 const SPEED_MULT = GLOBAL_ANIM_SPEED_MULT;
 

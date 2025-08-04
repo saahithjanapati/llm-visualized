@@ -7,7 +7,22 @@
 // dependency on the MHSAAnimation class.
 // -----------------------------------------------------------------------------
 import * as THREE from 'three';
-import { createTrailLine, updateTrail } from './trailUtils.js';
+// Trail functionality removed – no-ops keep API intact
+function createTrailLine() {
+  return {
+    line: { material: { opacity: 0, needsUpdate: false } },
+    geometry: {
+      attributes: { position: { setXYZ: () => {}, needsUpdate: false } },
+      setDrawRange: () => {},
+      computeBoundingSphere: () => {},
+    },
+    positions: [],
+    points: [],
+    isFrozen: false,
+  };
+}
+function updateTrail() {}
+
 
 import {
     VECTOR_LENGTH_PRISM,

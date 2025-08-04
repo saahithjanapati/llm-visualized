@@ -1,7 +1,22 @@
 import * as THREE from 'three';
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization.js';
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
-import { createTrailLine, updateTrail } from '../utils/trailUtils.js';
+// Trail functionality removed – no-ops keep API intact
+function createTrailLine() {
+  return {
+    line: { material: { opacity: 0, needsUpdate: false } },
+    geometry: {
+      attributes: { position: { setXYZ: () => {}, needsUpdate: false } },
+      setDrawRange: () => {},
+      computeBoundingSphere: () => {},
+    },
+    positions: [],
+    points: [],
+    isFrozen: false,
+  };
+}
+function updateTrail() {}
+
 import { mapValueToColor } from '../utils/colors.js';
 import { MHSA_DUPLICATE_VECTOR_RISE_SPEED, MHSA_PASS_THROUGH_TOTAL_DURATION_MS, MHSA_PASS_THROUGH_BRIGHTEN_RATIO, MHSA_PASS_THROUGH_DIM_RATIO, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY, MHSA_MATRIX_INITIAL_RESTING_COLOR, MHSA_BRIGHT_GREEN, MHSA_DARK_TINTED_GREEN, MHSA_BRIGHT_BLUE, MHSA_DARK_TINTED_BLUE, MHSA_BRIGHT_RED, MHSA_DARK_TINTED_RED, MHSA_RESULT_RISE_OFFSET_Y, MHSA_HEAD_VECTOR_STOP_BELOW,  MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR, MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW, MHA_OUTPUT_PROJECTION_MATRIX_PARAMS, MHA_OUTPUT_PROJECTION_MATRIX_COLOR } from './LayerAnimationConstants.js';
 import { INACTIVE_COMPONENT_COLOR } from '../utils/constants.js';

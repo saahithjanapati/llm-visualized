@@ -1,6 +1,21 @@
 import * as THREE from 'three';
 import { VectorVisualizationInstancedPrism } from '../../components/VectorVisualizationInstancedPrism.js';
-import { createTrailLine, updateTrail } from '../../utils/trailUtils.js';
+// Trail functionality removed – no-ops keep API intact
+function createTrailLine() {
+  return {
+    line: { material: { opacity: 0, needsUpdate: false } },
+    geometry: {
+      attributes: { position: { setXYZ: () => {}, needsUpdate: false } },
+      setDrawRange: () => {},
+      computeBoundingSphere: () => {},
+    },
+    positions: [],
+    points: [],
+    isFrozen: false,
+  };
+}
+function updateTrail() {}
+
 import {
     MHA_MATRIX_PARAMS,
     VECTOR_LENGTH_PRISM,

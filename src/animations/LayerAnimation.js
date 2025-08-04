@@ -7,7 +7,22 @@ import { LayerNormalizationVisualization } from '../components/LayerNormalizatio
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization.js';
 import { MHSAAnimation } from './MHSAAnimation.js';
-import { createTrailLine, updateTrail } from '../utils/trailUtils.js';
+// Trail functionality removed – no-ops keep API intact
+function createTrailLine() {
+  return {
+    line: { material: { opacity: 0, needsUpdate: false } },
+    geometry: {
+      attributes: { position: { setXYZ: () => {}, needsUpdate: false } },
+      setDrawRange: () => {},
+      computeBoundingSphere: () => {},
+    },
+    positions: [],
+    points: [],
+    isFrozen: false,
+  };
+}
+function updateTrail() {}
+
 
 import { PrismLayerNormAnimation } from '../animations/PrismLayerNormAnimation.js';
 import { 
@@ -293,10 +308,7 @@ export function initLayerAnimation(container) {
     let ln2LastColor = new THREE.Color(0x404040);
     let ln2LastOpacity = 1.0;
 
-    // --- Trail line support --------------------------------------------------------
-    // const MAX_TRAIL_POINTS = 1500; // Now from constants (used in trailUtils)
-    // function createTrailLine(color) { ... } // Moved to trailUtils.js
-    // function updateTrail(trailObj, pos) { ... } // Moved to trailUtils.js
+
 
     for (let i = 0; i < numVectors; i++) {
         const zPos = -LN_PARAMS.depth / 2 + slitSpacing * (i + 1);

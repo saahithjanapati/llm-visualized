@@ -39,9 +39,24 @@ import {
     MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW,
     MHSA_RESULT_RISE_OFFSET_Y
 } from '../../animations/LayerAnimationConstants.js';
-import { createTrailLine, updateTrail } from '../../utils/trailUtils.js';
 import { PrismLayerNormAnimation } from '../../animations/PrismLayerNormAnimation.js';
 import { MHSAAnimation } from '../../animations/MHSAAnimation.js';
+
+// Trail functionality removed – no-ops keep API intact
+function createTrailLine() {
+  return {
+    line: { material: { opacity: 0, needsUpdate: false } },
+    geometry: {
+      attributes: { position: { setXYZ: () => {}, needsUpdate: false } },
+      setDrawRange: () => {},
+      computeBoundingSphere: () => {},
+    },
+    positions: [],
+    points: [],
+    isFrozen: false,
+  };
+}
+function updateTrail() {}
 
 const VERTICAL_SPACING = 1500; // matches LayerAnimation.js vertical extent
 
