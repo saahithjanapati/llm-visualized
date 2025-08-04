@@ -246,12 +246,24 @@ export class SelfAttentionAnimator {
     }
 
     _shiftRemainingBlueVectors(queue, headIdx) {
+        // Existing logic (unchanged)
+
         const laneZs = (this.ctx.currentLanes || []).map(l => l.zPos).sort((a, b) => a - b);
         queue.forEach((vec, idx) => {
             if (!laneZs[idx]) return;
             new TWEEN.Tween(vec.group.position)
                 .to({ z: laneZs[idx] }, this.BLUE_QUEUE_SHIFT_DURATION)
                 .easing(TWEEN.Easing.Quadratic.InOut)
+                .start();
+        });
+    }
+
+    _riseSpheres(spheresArr) {
+        if (!Array.isArray(spheresArr) || spheresArr.length === 0) return;
+        spheresArr.forEach(sp => {
+            new TWEEN.Tween(sp.position)
+                .to({ y: sp.position.y + this.RED_EXTRA_RISE }, this.V_RISE_DURATION)
+                .easing(TWEEN.Easing.Quadratic.Out)
                 .start();
         });
     }
@@ -274,7 +286,10 @@ export class SelfAttentionAnimator {
             .easing(QEasing)
             .onComplete(() => {
                 // 2. Traverse along K vectors i times
-                this._traverseLanes(vector, laneZs, i, () => {
+                const spheres = [];
+                this._traverseLanes(vector, laneZs, i, spheres, true, () => {
+                    // Lift spheres upward to align with red vectors
+                    this._riseSpheres(spheres);
                     // 3. FADE OUT at the LAST green (K) vector, then TELEPORT to first red (V) vector
                     new TWEEN.Tween(vector.group.scale)
                         .to({ x: 0.001, y: 0.001, z: 0.001 }, this.BLUE_HORIZ_DURATION / 2)
@@ -296,7 +311,7 @@ export class SelfAttentionAnimator {
                                 .easing(QEasing)
                                 .onComplete(() => {
                                     // 5. Traverse along lanes again i times (over red vectors)
-                                    this._traverseLanes(vector, laneZs, i, () => {
+                                    this._traverseLanes(vector, laneZs, i, spheres, false, () => {
                                         // 6. Fade / dispose after finishing red traversal
                                         new TWEEN.Tween(vector.group.scale)
                                             .to({ x: 0.001, y: 0.001, z: 0.001 }, 500)
@@ -317,7 +332,7 @@ export class SelfAttentionAnimator {
             .start();
     }
 
-    _traverseLanes(vector, laneZs, count, doneCb, stepIdx = 0) {
+    _traverseLanes(vector, laneZs, count, spheresArr, createSpheres, doneCb, stepIdx = 0) {
         if (count === 0 || stepIdx >= count || laneZs.length === 0) {
             // Nothing to traverse
             doneCb && doneCb();
@@ -329,9 +344,55 @@ export class SelfAttentionAnimator {
             .to({ z: targetZ }, this.BLUE_VERT_DURATION)
             .easing(TWEEN.Easing.Quadratic.InOut)
             .onComplete(() => {
+                // Create a sphere between blue (vector) and corresponding green vector if enabled
+                if (createSpheres) {
+                    const headIdx = (vector.userData && typeof vector.userData.headIndex === 'number') ? vector.userData.headIndex : null;
+                    if (headIdx !== null && this.ctx.currentLanes) {
+                        const lane = this.ctx.currentLanes.find(l => Math.abs(l.zPos - targetZ) < 0.1);
+                        if (lane && lane.upwardCopies && lane.upwardCopies[headIdx]) {
+                            const greenVec = lane.upwardCopies[headIdx];
+                            if (greenVec && greenVec.group) {
+                                const midPoint = new THREE.Vector3().addVectors(vector.group.position, greenVec.group.position).multiplyScalar(0.5);
+                                const sphereGeom = new THREE.SphereGeometry(10, 24, 24);
+                                const hue = Math.random();
+                                const baseColor = new THREE.Color().setHSL(hue, 1.0, 0.75);
+                                const sphereMat = new THREE.MeshStandardMaterial({
+                                    color: baseColor,
+                                    emissive: baseColor,
+                                    emissiveIntensity: 0.8
+                                });
+                                const sphereMesh = new THREE.Mesh(sphereGeom, sphereMat);
+                                sphereMesh.position.copy(midPoint);
+                                sphereMesh.scale.set(0.001, 0.001, 0.001);
+                                this.ctx.parentGroup.add(sphereMesh);
+                                // Inflate animation
+                                new TWEEN.Tween(sphereMesh.scale)
+                                    .to({ x: 0.8, y: 0.8, z: 0.8 }, 350)
+                                    .easing(TWEEN.Easing.Quadratic.Out)
+                                    .start();
+                                if (Array.isArray(spheresArr)) spheresArr.push(sphereMesh);
+                            }
+                        }
+                    }
+                }
+                // Handle sphere removal during red-vector traversal
+                if (!createSpheres && Array.isArray(spheresArr)) {
+                    const idx = spheresArr.findIndex(s => Math.abs(s.position.z - targetZ) < 0.1);
+                    if (idx >= 0) {
+                        const sp = spheresArr[idx];
+                        new TWEEN.Tween(sp.scale)
+                            .to({ x: 0.001, y: 0.001, z: 0.001 }, 250)
+                            .easing(TWEEN.Easing.Quadratic.In)
+                            .onComplete(() => {
+                                if (sp.parent) sp.parent.remove(sp);
+                            })
+                            .start();
+                        spheresArr.splice(idx, 1);
+                    }
+                }
                 // Pause briefly, then recurse
                 setTimeout(() => {
-                    this._traverseLanes(vector, laneZs, count, doneCb, stepIdx + 1);
+                    this._traverseLanes(vector, laneZs, count, spheresArr, createSpheres, doneCb, stepIdx + 1);
                 }, this.BLUE_PAUSE_MS);
             })
             .start();
