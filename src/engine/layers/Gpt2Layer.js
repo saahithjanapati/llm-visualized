@@ -1066,8 +1066,9 @@ export default class Gpt2Layer extends BaseLayer {
                     // Track this addition animation
                     this._pendingAdditions++;
                     
-                    // This will trigger the final addition animation (vec ➔ originalVec)
-                    this.mhsaAnimation._startAdditionAnimation(vec, lane.originalVec, lane);
+                    // Trigger the final addition animation (originalVec ➔ vec)
+                    // Prisms should rise from the lower original vector up into the processed one.
+                    this.mhsaAnimation._startAdditionAnimation(lane.originalVec, vec, lane);
                     
                     // Set up completion callback for when addition finishes
                     this._scheduleAdditionCompletion(lane);
