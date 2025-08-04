@@ -121,7 +121,7 @@ export const MHSA_BRIGHT_RED          = 0xFF3333;
 export const MHSA_DARK_TINTED_RED     = 0x220000;
 
 /** Colour for trail lines behind moving prisms. */
-export const TRAIL_LINE_COLOR = 0xffffff;
+
 
 /** Final Q, K, V head colours used once attention heads have merged. */
 export const MHA_FINAL_Q_COLOR = 0x2d75da;
@@ -157,7 +157,7 @@ export const MHSA_RESULT_RISE_OFFSET_Y = 60;
 export const MHSA_HEAD_VECTOR_STOP_BELOW = 70;
 
 // Trail line visual properties
-export const TRAIL_LINE_OPACITY = 0.25;
+
 
 // -----------------------------------------------------------------------------
 // Animation Path & Behavior Constants
@@ -186,7 +186,7 @@ export const ANIM_RISE_SPEED_INSIDE_LN = 6;
 // -----------------------------------------------------------------------------
 
 /** Maximum number of points to store for each trail line, affecting trail length. */
-export const MAX_TRAIL_POINTS = 1500;
+
 
 // -----------------------------------------------------------------------------
 // MHA Output Projection Matrix (Post-Concatenation)

@@ -3,7 +3,7 @@ import { WeightMatrixVisualization } from '../components/WeightMatrixVisualizati
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
 import { createTrailLine, updateTrail } from '../utils/trailUtils.js';
 import { mapValueToColor } from '../utils/colors.js';
-import { MHSA_DUPLICATE_VECTOR_RISE_SPEED, MHSA_PASS_THROUGH_TOTAL_DURATION_MS, MHSA_PASS_THROUGH_BRIGHTEN_RATIO, MHSA_PASS_THROUGH_DIM_RATIO, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY, MHSA_MATRIX_INITIAL_RESTING_COLOR, MHSA_BRIGHT_GREEN, MHSA_DARK_TINTED_GREEN, MHSA_BRIGHT_BLUE, MHSA_DARK_TINTED_BLUE, MHSA_BRIGHT_RED, MHSA_DARK_TINTED_RED, MHSA_RESULT_RISE_OFFSET_Y, MHSA_HEAD_VECTOR_STOP_BELOW, TRAIL_LINE_COLOR, TRAIL_LINE_OPACITY, MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR, MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW, MHA_OUTPUT_PROJECTION_MATRIX_PARAMS, MHA_OUTPUT_PROJECTION_MATRIX_COLOR } from './LayerAnimationConstants.js';
+import { MHSA_DUPLICATE_VECTOR_RISE_SPEED, MHSA_PASS_THROUGH_TOTAL_DURATION_MS, MHSA_PASS_THROUGH_BRIGHTEN_RATIO, MHSA_PASS_THROUGH_DIM_RATIO, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY, MHSA_MATRIX_INITIAL_RESTING_COLOR, MHSA_BRIGHT_GREEN, MHSA_DARK_TINTED_GREEN, MHSA_BRIGHT_BLUE, MHSA_DARK_TINTED_BLUE, MHSA_BRIGHT_RED, MHSA_DARK_TINTED_RED, MHSA_RESULT_RISE_OFFSET_Y, MHSA_HEAD_VECTOR_STOP_BELOW,  MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR, MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW, MHA_OUTPUT_PROJECTION_MATRIX_PARAMS, MHA_OUTPUT_PROJECTION_MATRIX_COLOR } from './LayerAnimationConstants.js';
 import { INACTIVE_COMPONENT_COLOR } from '../utils/constants.js';
 import {
     // Constants needed for setup & animation
@@ -630,7 +630,7 @@ export class MHSAAnimation {
             this._tempDecorativeVecs.push({ vec: decoVec, laneZ: kVec.group.position.z });
 
             // Create a trail line connecting the grayed-out vector to its colored vector above
-            const connectionTrail = createTrailLine(this.parentGroup, TRAIL_LINE_COLOR);
+            const connectionTrail = createTrailLine(this.parentGroup);
             // Add the starting point (gray vector position)
             updateTrail(connectionTrail, kVec.group.position);
             // Add the ending point (colored vector position)
@@ -720,8 +720,8 @@ export class MHSAAnimation {
             const yPos = vecList.length ? vecList[0].group.position.y : 0;
 
             // Create a simple two-point trail line across the lane
-            const laneTrail = createTrailLine(this.parentGroup, TRAIL_LINE_COLOR);
-            laneTrail.line.material.opacity = TRAIL_LINE_OPACITY; // keep default opacity
+            const laneTrail = createTrailLine(this.parentGroup);
+            
             laneTrail.line.material.needsUpdate = true;
             updateTrail(laneTrail, new THREE.Vector3(lastHeadCenterX, yPos, laneZ));
             updateTrail(laneTrail, new THREE.Vector3(firstHeadCenterX, yPos, laneZ));
@@ -824,10 +824,10 @@ export class MHSAAnimation {
             vecList.forEach(v => { v.group.visible = false; });
 
             // Create a dedicated trail for the combined vector
-            const trail = createTrailLine(this.parentGroup, TRAIL_LINE_COLOR);
+            const trail = createTrailLine(this.parentGroup);
             // Use the base trail opacity so the path through the output-projection
             // matrix is clearly visible to the viewer.
-            trail.line.material.opacity = TRAIL_LINE_OPACITY;
+            
             trail.line.material.needsUpdate = true;
             // Seed trail with current position
             updateTrail(trail, combinedVec.group.position);

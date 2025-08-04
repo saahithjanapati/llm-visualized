@@ -10,7 +10,7 @@ import {
 } from '../../utils/constants.js';
 import {
     MHSA_DUPLICATE_VECTOR_RISE_SPEED,
-    TRAIL_LINE_COLOR,
+
 } from '../LayerAnimationConstants.js';
 
 const SPEED_MULT = GLOBAL_ANIM_SPEED_MULT;
@@ -76,7 +76,7 @@ export class VectorRouter {
                     upVec.userData = { headIndex: targetHeadIdx, sideSpawned: false, sideSpawnRequested: false, sideSpawnTime: 0, parentLane: lane };
                     lane.upwardCopies.push(upVec);
 
-                    const upTrail = createTrailLine(this.parentGroup, TRAIL_LINE_COLOR);
+                    const upTrail = createTrailLine(this.parentGroup);
                     updateTrail(upTrail, upVec.group.position);
                     lane.upwardTrails = lane.upwardTrails || [];
                     lane.upwardTrails.push(upTrail);
@@ -129,8 +129,8 @@ export class VectorRouter {
                             lane.sideCopies.push({ vec: qVec, targetX: coord.q, type: 'Q', matrixRef: qMatrixForHead, headIndex: hIdx });
                             lane.sideCopies.push({ vec: vVec, targetX: coord.v, type: 'V', matrixRef: vMatrixForHead, headIndex: hIdx });
 
-                            const qTrail = createTrailLine(this.parentGroup, TRAIL_LINE_COLOR);
-                            const vTrail = createTrailLine(this.parentGroup, TRAIL_LINE_COLOR);
+                            const qTrail = createTrailLine(this.parentGroup);
+                            const vTrail = createTrailLine(this.parentGroup);
                             updateTrail(qTrail, qVec.group.position);
                             updateTrail(vTrail, vVec.group.position);
                             lane.sideTrails = lane.sideTrails || [];

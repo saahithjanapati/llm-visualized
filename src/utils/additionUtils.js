@@ -8,7 +8,7 @@
 // -----------------------------------------------------------------------------
 import * as THREE from 'three';
 import { createTrailLine, updateTrail } from './trailUtils.js';
-import { TRAIL_LINE_COLOR } from '../animations/LayerAnimationConstants.js';
+
 import {
     VECTOR_LENGTH_PRISM,
     PRISM_ADD_ANIM_BASE_DURATION,
@@ -52,7 +52,7 @@ export function startPrismAdditionAnimation(parentGroup, sourceVec, targetVec, l
     // Prepare / re-use a vertical trail following the centre prism.
     let additionTrail = lane && lane.origTrail;
     if (!additionTrail) {
-        additionTrail = createTrailLine(parentGroup, TRAIL_LINE_COLOR);
+        additionTrail = createTrailLine(parentGroup);
         if (lane) lane.origTrail = additionTrail;
     }
 

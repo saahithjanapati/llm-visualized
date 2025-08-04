@@ -6,7 +6,7 @@ import {
     VECTOR_LENGTH_PRISM,
 } from '../../utils/constants.js';
 import {
-    TRAIL_LINE_COLOR,
+
     MHSA_MATRIX_MAX_EMISSIVE_INTENSITY,
     MHSA_PASS_THROUGH_BRIGHTEN_RATIO,
     MHSA_PASS_THROUGH_DIM_RATIO,
@@ -51,7 +51,7 @@ export function animateVectorMatrixPassThrough(
     // ------------------------------------------------------------------
     //  Trail line that follows the vector until it enters the matrix
     // ------------------------------------------------------------------
-    const passThroughTrail = createTrailLine(ctx.parentGroup, TRAIL_LINE_COLOR);
+    const passThroughTrail = createTrailLine(ctx.parentGroup);
     const matrixBottomY = ctx.mhsa_matrix_center_y - MHA_MATRIX_PARAMS.height / 2;
 
     // ------------------------------------------------------------------

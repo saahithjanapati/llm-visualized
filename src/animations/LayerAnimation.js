@@ -8,7 +8,7 @@ import { VectorVisualizationInstancedPrism } from '../components/VectorVisualiza
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization.js';
 import { MHSAAnimation } from './MHSAAnimation.js';
 import { createTrailLine, updateTrail } from '../utils/trailUtils.js';
-import { TRAIL_LINE_COLOR, TRAIL_LINE_OPACITY } from './LayerAnimationConstants.js';
+
 import { PrismLayerNormAnimation } from '../animations/PrismLayerNormAnimation.js';
 import { 
     VECTOR_LENGTH,
@@ -31,7 +31,7 @@ import {
     ANIM_RISE_SPEED_INSIDE_LN,
     ANIM_RISE_SPEED_POST_SPLIT_LN1,
     ANIM_RISE_SPEED_POST_SPLIT_LN2,
-    MAX_TRAIL_POINTS,
+    
     ANIM_RISE_SPEED_HEAD,
     HEAD_VECTOR_STOP_BELOW,
     GLOBAL_ANIM_SPEED_MULT,
@@ -337,8 +337,8 @@ export function initLayerAnimation(container) {
         const normAnimation = new PrismLayerNormAnimation(movingVec);
 
         // Create trails (now uses utility function, passing the scene)
-        const origTrail = createTrailLine(scene, TRAIL_LINE_COLOR);
-        const branchTrail = createTrailLine(scene, TRAIL_LINE_COLOR);
+        const origTrail = createTrailLine(scene);
+        const branchTrail = createTrailLine(scene);
 
         lanes.push({
             zPos,
@@ -905,10 +905,10 @@ export function initLayerAnimation(container) {
                         lane.movingVecLN2 = mv;
                         lane.normAnimationLN2 = new PrismLayerNormAnimation(mv);
                         // Create a new trail for the LN2 branch so its motion is visualised
-                        lane.branchTrailLN2 = createTrailLine(scene, TRAIL_LINE_COLOR);
+                        lane.branchTrailLN2 = createTrailLine(scene);
                         // Slightly lower the opacity so overlapping with the frozen trail doesn't brighten excessively.
                         if (lane.branchTrailLN2 && lane.branchTrailLN2.line && lane.branchTrailLN2.line.material) {
-                            lane.branchTrailLN2.line.material.opacity = TRAIL_LINE_OPACITY * 0.6;
+                            
                             lane.branchTrailLN2.line.material.needsUpdate = true;
                         }
                         // Seed the LN2 branch trail with the starting position so it is visible immediately
@@ -985,7 +985,7 @@ export function initLayerAnimation(container) {
         lanes.forEach(lane => {
             if (lane.ln2Phase === 'done' && !lane.mlpUpStarted) {
                 lane.mlpUpStarted = true;
-                lane.mlpUpTrail = createTrailLine(scene, TRAIL_LINE_COLOR);
+                lane.mlpUpTrail = createTrailLine(scene);
                 const vec = lane.resultVecLN2;
                 if (vec) {
                     const bottomY = mlpMatrixUp_centerY - MLP_MATRIX_PARAMS_UP.height / 2;
