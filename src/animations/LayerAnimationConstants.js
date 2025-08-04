@@ -157,7 +157,7 @@ export const MHSA_RESULT_RISE_OFFSET_Y = 60;
 export const MHSA_HEAD_VECTOR_STOP_BELOW = 70;
 
 // Trail line visual properties
-export const TRAIL_LINE_OPACITY = 0.06;
+export const TRAIL_LINE_OPACITY = 0.25;
 
 // -----------------------------------------------------------------------------
 // Animation Path & Behavior Constants

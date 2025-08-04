@@ -8,7 +8,8 @@ import { QUALITY_PRESET } from './constants.js';
 // and updates without touching calling code elsewhere.  This avoids large
 // ArrayBuffer allocations (MAX_TRAIL_POINTS * 3) when profiling memory.
 // ---------------------------------------------------------------------------
-export const TRAILS_ENABLED = false;
+// Enable actual trail rendering (set to false when profiling memory)
+export const TRAILS_ENABLED = true;
 
 const SPEED_MULT = GLOBAL_ANIM_SPEED_MULT; // If SPEED_MULT is used by updateTrail
 
@@ -145,7 +146,40 @@ export function updateTrail(trailObj, pos) {
                 }
             }
 
-            // Add the actual final position
+            // ------------------------------------------------------------------
+            //  Colinear-segment collapse
+            //  If the new point lies on the same straight line as the previous
+            //  segment, overwrite the tail vertex instead of pushing a new one.
+            // ------------------------------------------------------------------
+            if (pts.length >= 2) {
+                const pPrevPrev = pts[pts.length - 2];
+                const pPrev     = pts[pts.length - 1];
+
+                const ax = pPrev[0] - pPrevPrev[0];
+                const ay = pPrev[1] - pPrevPrev[1];
+                const az = pPrev[2] - pPrevPrev[2];
+
+                const bx = roundedX - pPrev[0];
+                const by = roundedY - pPrev[1];
+                const bz = roundedZ - pPrev[2];
+
+                // Cross-product magnitude squared – ~0 means colinear
+                const cx = ay * bz - az * by;
+                const cy = az * bx - ax * bz;
+                const cz = ax * by - ay * bx;
+                const crossMagSq = cx * cx + cy * cy + cz * cz;
+
+                // If almost colinear (threshold tuned for world-unit scale)
+                if (crossMagSq < 1e-10) {
+                    pPrev[0] = roundedX; pPrev[1] = roundedY; pPrev[2] = roundedZ;
+                    const lastIdx = pts.length - 1;
+                    trailObj.geometry.attributes.position.setXYZ(lastIdx, roundedX, roundedY, roundedZ);
+                    trailObj.geometry.attributes.position.needsUpdate = true;
+                    return; // skip push → no new vertex allocated
+                }
+            }
+
+            // Add the actual final position (non-colinear case)
             pts.push([roundedX, roundedY, roundedZ]);
             const idx = pts.length - 1;
             trailObj.geometry.attributes.position.setXYZ(idx, roundedX, roundedY, roundedZ);

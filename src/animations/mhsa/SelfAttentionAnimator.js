@@ -130,6 +130,20 @@ export class SelfAttentionAnimator {
     // ------------------------------------------------------------------
     // V / K alignment helpers
     // ------------------------------------------------------------------
+    /**
+     * Fixed Value (red) vectors rise in TWO separate stages:
+     * 1. VectorMatrixPassThrough.js – while passing vertically through the V-matrix
+     *    each red copy is tweened from its parking height (`headStopY`) up to
+     *    `ctx.mhaPassThroughTargetY + ctx.mhaResultRiseOffsetY - 30`.
+     *    This is the same base rise distance Q and K experience.
+     * 2. SelfAttentionAnimator.js – this method then adds an additional
+     *    `RED_EXTRA_RISE` (75 world-units) so the fixed V copies end up sitting
+     *    above the green K vectors.  At the end of this tween each fixed V copy
+     *    is located at the canonical "raised-V" height:
+     *        ctx.mhaPassThroughTargetY + ctx.mhaResultRiseOffsetY - 30 + RED_EXTRA_RISE
+     *    All subsequent duplicates and travelling red vectors snap to / match
+     *    this same Y so they remain perfectly level.
+     */
     _animateVVectorRise(vector, onDone) {
         new TWEEN.Tween({ y: vector.group.position.y })
             .to({ y: vector.group.position.y + this.RED_EXTRA_RISE }, this.V_RISE_DURATION)
