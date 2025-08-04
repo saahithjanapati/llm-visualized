@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { VECTOR_LENGTH_PRISM } from '../../utils/constants.js';
+import { VectorVisualizationInstancedPrism } from '../../components/VectorVisualizationInstancedPrism.js';
 
 /**
  * Self-attention specific, above-matrix animations.
@@ -259,6 +261,7 @@ export class SelfAttentionAnimator {
     }
 
     _riseSpheres(spheresArr) {
+
         if (!Array.isArray(spheresArr) || spheresArr.length === 0) return;
         spheresArr.forEach(sp => {
             // Position rise
@@ -289,6 +292,32 @@ export class SelfAttentionAnimator {
         });
     }
 
+    /**
+     * Helper to uniformly recolor a vector (all prisms) to the given THREE.Color.
+     */
+    _setVectorColor(vector, color) {
+        if (!vector || !vector.mesh) return;
+        const col = color instanceof THREE.Color ? color : new THREE.Color(color);
+        for (let idx = 0; idx < VECTOR_LENGTH_PRISM; idx++) {
+            if (vector.mesh.setColorAt) {
+                vector.mesh.setColorAt(idx, col);
+            }
+        }
+        if (vector.mesh.instanceColor) {
+            vector.mesh.instanceColor.needsUpdate = true;
+        }
+        const csAttr = vector.mesh.geometry.getAttribute('colorStart');
+        const ceAttr = vector.mesh.geometry.getAttribute('colorEnd');
+        if (csAttr && ceAttr) {
+            for (let idx = 0; idx < VECTOR_LENGTH_PRISM; idx++) {
+                csAttr.setXYZ(idx, col.r, col.g, col.b);
+                ceAttr.setXYZ(idx, col.r, col.g, col.b);
+            }
+            csAttr.needsUpdate = true;
+            ceAttr.needsUpdate = true;
+        }
+    }
+
     _animateBlueVector(vector, headIdx, i, laneZs, allDoneCb) {
         // Note: indices now start at 1, so the former i==0 no-movement case will not occur.
         const horizontalToK = this.ctx.headCoords && this.ctx.headCoords[headIdx]
@@ -311,22 +340,22 @@ export class SelfAttentionAnimator {
                 this._traverseLanes(vector, laneZs, i, spheres, true, () => {
                     // Lift spheres upward to align with red vectors
                     this._riseSpheres(spheres);
-                    // 3. FADE OUT at the LAST green (K) vector, then TELEPORT to first red (V) vector
+                    // 3. FADE OUT at the LAST green (K) vector, then TELEPORT & FADE IN as red over V column
                     new TWEEN.Tween(vector.group.scale)
                         .to({ x: 0.001, y: 0.001, z: 0.001 }, this.BLUE_HORIZ_DURATION / 2)
                         .easing(QEasing)
                         .onComplete(() => {
-                            // Keep the blue vector over the green (K) column even during the red-vector phase
-                            const targetX = horizontalToK; // stay aligned with K matrix
-
-                            // Teleport the (now invisible) vector to the starting red position (top lane)
+                            const targetX = horizontalToK; // stay aligned with K for pop-up effect
+                            // Move (instantly) to the red-vector height on the top lane
                             vector.group.position.set(
                                 targetX,
-                                vector.group.position.y + this.RED_EXTRA_RISE, // raise to red height
-                                laneZs[0],                                    // top lane (first red vector)
+                                vector.group.position.y + this.RED_EXTRA_RISE,
+                                laneZs[0]
                             );
+                            // Re-colour the vector to RED before popping back in
+                            this._setVectorColor(vector, this.ctx.brightRed || new THREE.Color(0xff0000));
 
-                            // 4. FADE BACK IN
+                            // 4. FADE BACK IN (now red)
                             new TWEEN.Tween(vector.group.scale)
                                 .to({ x: 1, y: 1, z: 1 }, this.BLUE_HORIZ_DURATION / 2)
                                 .easing(QEasing)
@@ -337,7 +366,6 @@ export class SelfAttentionAnimator {
                                         new TWEEN.Tween(vector.group.scale)
                                             .to({ x: 0.001, y: 0.001, z: 0.001 }, 500)
                                             .onComplete(() => {
-                                                // Remove from scene & free GPU memory if possible
                                                 if (vector.group.parent) vector.group.parent.remove(vector.group);
                                                 if (typeof vector.dispose === 'function') vector.dispose();
                                                 allDoneCb && allDoneCb();
@@ -403,14 +431,63 @@ export class SelfAttentionAnimator {
                     const idx = spheresArr.findIndex(s => Math.abs(s.position.z - targetZ) < 0.1);
                     if (idx >= 0) {
                         const sp = spheresArr[idx];
+                        const ContinueTraversal = () => {
+                            this._traverseLanes(vector, laneZs, count, spheresArr, createSpheres, doneCb, stepIdx + 1);
+                        };
+                        // ------------------------------------------------------------------
+                        //  Spawn duplicate red vector from the fixed V vector and animate it
+                        //  through the sphere and into the moving red vector.
+                        // ------------------------------------------------------------------
+                        const headIdx = (vector.userData && typeof vector.userData.headIndex === 'number') ? vector.userData.headIndex : null;
+                        const lane = this.ctx.currentLanes ? this.ctx.currentLanes.find(l => Math.abs(l.zPos - targetZ) < 0.1) : null;
+                        if (lane && headIdx !== null && Array.isArray(lane.sideCopies)) {
+                            const fixedObj = lane.sideCopies.find(sc => sc.headIndex === headIdx && sc.type === 'V');
+                            if (fixedObj && fixedObj.vec) {
+                                const fixedVec = fixedObj.vec;
+                                const startPos = new THREE.Vector3(fixedVec.group.position.x, vector.group.position.y, fixedVec.group.position.z);
+                                const dupVec = new VectorVisualizationInstancedPrism(fixedVec.rawData.slice(), startPos, 3);
+                                // Make duplicate visually match the travelling 64-dim vector
+                                dupVec.applyProcessedVisuals(
+                                    fixedVec.rawData.slice(),
+                                    this.ctx.outputVectorLength || 64,
+                                    { numKeyColors: this.ctx.outputVectorLength || 64 },
+                                    { setHiddenToBlack: true }
+                                );
+                                this.ctx.parentGroup.add(dupVec.group);
+                                dupVec.group.scale.set(0.001, 0.001, 0.001);
+                                // Optional quick pop-in
+                                new TWEEN.Tween(dupVec.group.scale).to({ x: 1, y: 1, z: 1 }, 120).start();
+                                // Direct: fixed V -> travelling red vector
+                                new TWEEN.Tween(dupVec.group.position)
+                                    .to({ x: vector.group.position.x, y: vector.group.position.y, z: vector.group.position.z }, 400)
+                                    .easing(TWEEN.Easing.Quadratic.InOut)
+                                    .onComplete(() => {
+                                                // Fade / dispose duplicate
+                                                new TWEEN.Tween(dupVec.group.scale)
+                                                    .to({ x: 0.001, y: 0.001, z: 0.001 }, 150)
+                                                    .onComplete(() => {
+                                                        if (dupVec.group.parent) dupVec.group.parent.remove(dupVec.group);
+                                                        if (typeof dupVec.dispose === 'function') dupVec.dispose();
+                                                        // Continue traversal AFTER merge completes
+                                                        ContinueTraversal();
+                                                    })
+                                                    .start();
+                                            }).start();
+                            }
+                        }
+
+                        // Shrink & remove sphere immediately after duplicate leaves
                         new TWEEN.Tween(sp.scale)
                             .to({ x: 0.001, y: 0.001, z: 0.001 }, 250)
+                            .delay(250)
                             .easing(TWEEN.Easing.Quadratic.In)
                             .onComplete(() => {
                                 if (sp.parent) sp.parent.remove(sp);
                             })
                             .start();
                         spheresArr.splice(idx, 1);
+                        // IMPORTANT: Return here so we do NOT recurse twice.
+                        return;
                     }
                 }
                 // Pause briefly, then recurse
