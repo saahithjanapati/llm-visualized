@@ -261,10 +261,31 @@ export class SelfAttentionAnimator {
     _riseSpheres(spheresArr) {
         if (!Array.isArray(spheresArr) || spheresArr.length === 0) return;
         spheresArr.forEach(sp => {
+            // Position rise
             new TWEEN.Tween(sp.position)
                 .to({ y: sp.position.y + this.RED_EXTRA_RISE }, this.V_RISE_DURATION)
                 .easing(TWEEN.Easing.Quadratic.Out)
                 .start();
+
+            // Colour desaturation → bright mono (white-ish)
+            if (sp.material) {
+                const c = sp.material.color.clone();
+                const state = { r: c.r, g: c.g, b: c.b, ei: sp.material.emissiveIntensity };
+                const isBright = Math.random() > 0.5;
+                const lightness = isBright ? THREE.MathUtils.lerp(0.75, 0.95, Math.random())
+                                            : THREE.MathUtils.lerp(0.2, 0.4,  Math.random());
+                const targetColor = new THREE.Color().setHSL(0, 0, lightness);
+                const targetEI = isBright ? 1.0 : 0.4;
+                new TWEEN.Tween(state)
+                    .to({ r: targetColor.r, g: targetColor.g, b: targetColor.b, ei: targetEI }, this.V_RISE_DURATION)
+                    .easing(TWEEN.Easing.Quadratic.Out)
+                    .onUpdate(() => {
+                        sp.material.color.setRGB(state.r, state.g, state.b);
+                        sp.material.emissive.setRGB(state.r, state.g, state.b);
+                        sp.material.emissiveIntensity = state.ei;
+                    })
+                    .start();
+            }
         });
     }
 
@@ -355,11 +376,13 @@ export class SelfAttentionAnimator {
                                 const midPoint = new THREE.Vector3().addVectors(vector.group.position, greenVec.group.position).multiplyScalar(0.5);
                                 const sphereGeom = new THREE.SphereGeometry(10, 24, 24);
                                 const hue = Math.random();
-                                const baseColor = new THREE.Color().setHSL(hue, 1.0, 0.75);
+                                const sat = THREE.MathUtils.lerp(0.85, 1.0, Math.random());
+                                const light = THREE.MathUtils.lerp(0.45, 0.6, Math.random());
+                                const baseColor = new THREE.Color().setHSL(hue, sat, light);
                                 const sphereMat = new THREE.MeshStandardMaterial({
                                     color: baseColor,
                                     emissive: baseColor,
-                                    emissiveIntensity: 0.8
+                                    emissiveIntensity: 0.9
                                 });
                                 const sphereMesh = new THREE.Mesh(sphereGeom, sphereMat);
                                 sphereMesh.position.copy(midPoint);
