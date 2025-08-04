@@ -12,21 +12,8 @@ import {
 
 } from '../LayerAnimationConstants.js';
 
-// Trail functionality removed – no-ops keep API intact
-function createTrailLine() {
-  return {
-    line: { material: { opacity: 0, needsUpdate: false } },
-    geometry: {
-      attributes: { position: { setXYZ: () => {}, needsUpdate: false } },
-      setDrawRange: () => {},
-      computeBoundingSphere: () => {},
-    },
-    positions: [],
-    points: [],
-    isFrozen: false,
-  };
-}
-function updateTrail() {}
+
+
 
 const SPEED_MULT = GLOBAL_ANIM_SPEED_MULT;
 
@@ -81,20 +68,13 @@ export class VectorRouter {
 
                 if (tVec.group.position.x < targetX - 0.01) {
                     tVec.group.position.x = Math.min(targetX, tVec.group.position.x + dx);
-                    if (lane.dupTrail) updateTrail(lane.dupTrail, tVec.group.position);
                 } else {
                     // Arrived: spawn upward copy used for K
-                    if (lane.dupTrail) updateTrail(lane.dupTrail, tVec.group.position);
 
                     const upVec = new VectorVisualizationInstancedPrism([...tVec.rawData], tVec.group.position.clone());
                     this.parentGroup.add(upVec.group);
                     upVec.userData = { headIndex: targetHeadIdx, sideSpawned: false, sideSpawnRequested: false, sideSpawnTime: 0, parentLane: lane };
                     lane.upwardCopies.push(upVec);
-
-                    const upTrail = createTrailLine(this.parentGroup);
-                    updateTrail(upTrail, upVec.group.position);
-                    lane.upwardTrails = lane.upwardTrails || [];
-                    lane.upwardTrails.push(upTrail);
 
                     lane.headIndex = targetHeadIdx + 1;
                     if (lane.headIndex >= NUM_HEAD_SETS_LAYER) {
@@ -108,12 +88,9 @@ export class VectorRouter {
             // 2) Vertical rise of the upward K copies
             // ------------------------------------------------------------------
             if (lane.upwardCopies && lane.upwardCopies.length) {
-                lane.upwardCopies.forEach((upVec, trailIdx) => {
+                lane.upwardCopies.forEach((upVec) => {
                     if (upVec.group.position.y < this.headStopY) {
                         upVec.group.position.y = Math.min(this.headStopY, upVec.group.position.y + MHSA_DUPLICATE_VECTOR_RISE_SPEED * SPEED_MULT * deltaTime);
-                        if (lane.upwardTrails && lane.upwardTrails[trailIdx]) {
-                            updateTrail(lane.upwardTrails[trailIdx], upVec.group.position);
-                        }
                     }
                 });
             }
@@ -144,13 +121,6 @@ export class VectorRouter {
                             lane.sideCopies.push({ vec: qVec, targetX: coord.q, type: 'Q', matrixRef: qMatrixForHead, headIndex: hIdx });
                             lane.sideCopies.push({ vec: vVec, targetX: coord.v, type: 'V', matrixRef: vMatrixForHead, headIndex: hIdx });
 
-                            const qTrail = createTrailLine(this.parentGroup);
-                            const vTrail = createTrailLine(this.parentGroup);
-                            updateTrail(qTrail, qVec.group.position);
-                            updateTrail(vTrail, vVec.group.position);
-                            lane.sideTrails = lane.sideTrails || [];
-                            lane.sideTrails.push(qTrail, vTrail);
-
                             centerVec.userData.sideSpawned = true;
                         }
                     }
@@ -161,7 +131,7 @@ export class VectorRouter {
             // 4) Slide the side copies horizontally toward their Q / V matrices
             // ------------------------------------------------------------------
             if (lane.sideCopies && lane.sideCopies.length) {
-                lane.sideCopies.forEach((obj, trailIdx) => {
+                lane.sideCopies.forEach((obj) => {
                     const v  = obj.vec;
                     const dx = SIDE_COPY_HORIZ_SPEED * SPEED_MULT * deltaTime;
                     if (Math.abs(v.group.position.x - obj.targetX) > 0.01) {
@@ -169,10 +139,7 @@ export class VectorRouter {
                         v.group.position.x += dir * dx;
                         if ((dir === 1 && v.group.position.x > obj.targetX) || (dir === -1 && v.group.position.x < obj.targetX)) v.group.position.x = obj.targetX;
                     }
-                    v.group.position.y = this.headStopY;
-                    if (lane.sideTrails && lane.sideTrails[trailIdx]) {
-                        updateTrail(lane.sideTrails[trailIdx], v.group.position);
-                    }
+                    v.group.position.y = this.headStopY; 
                 });
             }
         });

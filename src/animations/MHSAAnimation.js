@@ -1,21 +1,8 @@
 import * as THREE from 'three';
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization.js';
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
-// Trail functionality removed – no-ops keep API intact
-function createTrailLine() {
-  return {
-    line: { material: { opacity: 0, needsUpdate: false } },
-    geometry: {
-      attributes: { position: { setXYZ: () => {}, needsUpdate: false } },
-      setDrawRange: () => {},
-      computeBoundingSphere: () => {},
-    },
-    positions: [],
-    points: [],
-    isFrozen: false,
-  };
-}
-function updateTrail() {}
+
+
 
 import { mapValueToColor } from '../utils/colors.js';
 import { MHSA_DUPLICATE_VECTOR_RISE_SPEED, MHSA_PASS_THROUGH_TOTAL_DURATION_MS, MHSA_PASS_THROUGH_BRIGHTEN_RATIO, MHSA_PASS_THROUGH_DIM_RATIO, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY, MHSA_MATRIX_INITIAL_RESTING_COLOR, MHSA_BRIGHT_GREEN, MHSA_DARK_TINTED_GREEN, MHSA_BRIGHT_BLUE, MHSA_DARK_TINTED_BLUE, MHSA_BRIGHT_RED, MHSA_DARK_TINTED_RED, MHSA_RESULT_RISE_OFFSET_Y, MHSA_HEAD_VECTOR_STOP_BELOW,  MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR, MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW, MHA_OUTPUT_PROJECTION_MATRIX_PARAMS, MHA_OUTPUT_PROJECTION_MATRIX_COLOR } from './LayerAnimationConstants.js';
@@ -115,7 +102,6 @@ export class MHSAAnimation {
 
         // Additional arrays required by later stages
         this.outputProjMatrixAnimationPhase = 'waiting';
-        this.outputProjMatrixTrails         = [];
         this.outputProjMatrixVectors        = [];
 
         // Mode control (e.g., 'temp', 'perm', etc.)
@@ -320,7 +306,6 @@ export class MHSAAnimation {
         
         // Animation state
         this.outputProjMatrixAnimationPhase = 'waiting'; // 'waiting', 'vectors_entering', 'vectors_inside', 'completed'
-        this.outputProjMatrixTrails = [];
         this.outputProjMatrixVectors = [];
         
         // Log the matrix dimensions to confirm they match desired specifications
@@ -488,38 +473,16 @@ export class MHSAAnimation {
                     lane.originalVec.group.position.y = Math.min(curY + riseStep, targetY);
                 }
 
-                // Update the trail unless it's explicitly suspended
-                const trailSuspended = lane.stopRise || (typeof lane.skipTrailResumeY === 'number' && curY <= lane.skipTrailResumeY);
 
-                if (!trailSuspended && lane.origTrail) {
-                    updateTrail(lane.origTrail, lane.originalVec.group.position);
-                    // Clean up the suspension flag once we've passed the resume threshold
-                    if (typeof lane.skipTrailResumeY === 'number' && curY > lane.skipTrailResumeY) {
-                        delete lane.skipTrailResumeY;
-                    }
-                }
             });
         }
 
-        // Update merge trails
-        if (this._mergeLaneTrails) {
-            // Lane trails are updated during tweens; no continuous endpoint updates needed.
-        }
 
-        // ------------------------------------------------------------------
-        //  Ensure addition trail follows centre prism even before tween starts
-        // ------------------------------------------------------------------
-        lanes.forEach(lane => {
-            if (!lane || !lane.originalVec) return;
-
-            const trailObj = lane.additionTrail;
-            if (!trailObj) return; // no active addition trail
+        lanes.forEach(lane => { 
+            if (!lane || !lane.originalVec) return; 
 
             // Only follow while the addition animation is active (stopRise flag present)
             if (!lane.stopRise) {
-                // Once the addition is complete, we may need to clean up the
-                // reference on the lane to prevent this logic from running again.
-                if (lane.additionTrail) delete lane.additionTrail;
                 return;
             }
 
@@ -530,16 +493,7 @@ export class MHSAAnimation {
             const wPos = new THREE.Vector3().setFromMatrixPosition(instMat);
             wPos.applyMatrix4(lane.originalVec.group.matrixWorld);
 
-            // Do not continue the trail once the instance has been "hidden"
-            // far away (HIDE_INSTANCE_Y_OFFSET ≈ 10000). Assuming the scene's
-            // meaningful Y range is < 2 000 units.
-            if (Math.abs(wPos.y) < 2000) {
-                // Convert world-space centre-prism position to the local
-                // coordinate space of the layer's root group so the trail
-                // points remain consistent across stacked layers.
-                const localPos = this.parentGroup.worldToLocal(wPos.clone());
-                updateTrail(trailObj, localPos);
-            }
+
         });
     }
 
@@ -644,12 +598,7 @@ export class MHSAAnimation {
             // Keep reference for merge phase
             this._tempDecorativeVecs.push({ vec: decoVec, laneZ: kVec.group.position.z });
 
-            // Create a trail line connecting the grayed-out vector to its colored vector above
-            const connectionTrail = createTrailLine(this.parentGroup);
-            // Add the starting point (gray vector position)
-            updateTrail(connectionTrail, kVec.group.position);
-            // Add the ending point (colored vector position)
-            updateTrail(connectionTrail, spawnPos);
+
 
             // Start invisible: set material opacity to 0
             if (decoVec.mesh && decoVec.mesh.material) {
@@ -720,12 +669,7 @@ export class MHSAAnimation {
             laneVectors.get(laneZ).push(obj.vec);
         });
 
-        // ------------------------------------------------------------------
-        //  NEW: static reference trail per lane (from last → first head set)
-        // ------------------------------------------------------------------
-        const firstHeadCenterX = this.headsCentersX.length ? this.headsCentersX[0] : 0;
-        const lastHeadCenterX  = this.headsCentersX.length ? this.headsCentersX[this.headsCentersX.length - 1] : 0;
-
+        const firstHeadCenterX = this.headsCentersX.length ? this.headsCentersX[0] : 0; 
         const targetX = firstHeadCenterX; // Existing merge target for centralised row
         let maxDurationMs = 0;
 
@@ -734,13 +678,7 @@ export class MHSAAnimation {
             vecList.sort((a, b) => a.group.position.x - b.group.position.x);
             const yPos = vecList.length ? vecList[0].group.position.y : 0;
 
-            // Create a simple two-point trail line across the lane
-            const laneTrail = createTrailLine(this.parentGroup);
-            
-            laneTrail.line.material.needsUpdate = true;
-            updateTrail(laneTrail, new THREE.Vector3(lastHeadCenterX, yPos, laneZ));
-            updateTrail(laneTrail, new THREE.Vector3(firstHeadCenterX, yPos, laneZ));
-            // Intentionally DO NOT update this trail afterwards – it is static.
+
 
             // --------------------------------------------------------------
             //  Launch horizontal merge tweens for the decorative vectors
@@ -780,7 +718,6 @@ export class MHSAAnimation {
         this.outputProjMatrixAnimationPhase = 'vectors_entering';
 
         const combinedVectors = [];
-        const combinedTrails = [];
 
         // Central X coordinate for combined vector (align with first head center)
         const centerX = this.headsCentersX.length ? this.headsCentersX[0] : 0;
@@ -838,15 +775,7 @@ export class MHSAAnimation {
             // Hide original decorative vectors
             vecList.forEach(v => { v.group.visible = false; });
 
-            // Create a dedicated trail for the combined vector
-            const trail = createTrailLine(this.parentGroup);
-            // Use the base trail opacity so the path through the output-projection
-            // matrix is clearly visible to the viewer.
-            
-            trail.line.material.needsUpdate = true;
-            // Seed trail with current position
-            updateTrail(trail, combinedVec.group.position);
-            combinedTrails.push(trail);
+
         });
 
         if (combinedVectors.length === 0) {
@@ -856,7 +785,6 @@ export class MHSAAnimation {
 
         // Store for later reference
         this.outputProjMatrixVectors = combinedVectors.map(obj => obj.vec);
-        this.outputProjMatrixTrails = combinedTrails;
 
         // Matrix positions
         const matrixBottomY = this.outputProjMatrixCenterY - this.outputProjMatrixHeight / 2;
@@ -881,7 +809,6 @@ export class MHSAAnimation {
                 .to({ y: matrixBottomY }, duration1)
                 .easing(TWEEN.Easing.Quadratic.InOut)
                 .onUpdate(() => {
-                    if (this.outputProjMatrixTrails[idx]) updateTrail(this.outputProjMatrixTrails[idx], vec.group.position);
                 })
                 .onComplete(() => {
                     if (idx === 0) {
@@ -905,9 +832,7 @@ export class MHSAAnimation {
                                 vec._updateInstanceColors();
                             }
                         })
-                        .onUpdate(() => {
-                            if (this.outputProjMatrixTrails[idx]) updateTrail(this.outputProjMatrixTrails[idx], vec.group.position);
-                        })
+
                         .onComplete(() => {
                             const extraRise = 30; // additional upward distance
                             const finalCombinedY = targetYAboveMatrix + extraRise;
@@ -916,9 +841,6 @@ export class MHSAAnimation {
                             new TWEEN.Tween(vec.group.position)
                                 .to({ y: finalCombinedY }, duration3)
                                 .easing(TWEEN.Easing.Quadratic.InOut)
-                                .onUpdate(() => {
-                                    if (this.outputProjMatrixTrails[idx]) updateTrail(this.outputProjMatrixTrails[idx], vec.group.position);
-                                })
                                 .onComplete(() => {
                                     // Horizontal move back to residual stream centre (x = 0),
                                     // then perform the addition with the lane's original vector
@@ -928,9 +850,7 @@ export class MHSAAnimation {
                                     new TWEEN.Tween(vec.group.position)
                                         .to({ x: 0 }, horizDur)
                                         .easing(TWEEN.Easing.Quadratic.InOut)
-                                        .onUpdate(() => {
-                                            if (this.outputProjMatrixTrails[idx]) updateTrail(this.outputProjMatrixTrails[idx], vec.group.position);
-                                        })
+
                                         .onComplete(() => {
                                             if (this.currentLanes) {
                                                 const matchingLane = this.currentLanes.find(l => Math.abs(l.zPos - laneZ) < 0.1);
@@ -1100,7 +1020,12 @@ export class MHSAAnimation {
     // Helper: Addition animation between two InstancedPrism vectors
     // ----------------------------------------------------------------------
     _startAdditionAnimation(sourceVec, targetVec, lane) {
-        startPrismAdditionAnimation(this.parentGroup, sourceVec, targetVec, lane);
-        // Don't force position - let vectors maintain their natural flow
+        // Initiate prism-by-prism addition animation where prisms from sourceVec
+        // move into their corresponding positions in targetVec.
+        // The lane object is forwarded so the helper can update lane state
+        // (stopRise flags, phase transitions, etc.).
+        startPrismAdditionAnimation(sourceVec, targetVec, lane);
+        // Don't force absolute positions here – vectors should keep their
+        // natural flow handled by the tween callbacks inside the helper.
     }
 } 

@@ -5,8 +5,7 @@ import { WeightMatrixVisualizationInstance as WeightMatrixVisualization } from '
 import { VectorVisualizationInstanced } from '../components/VectorVisualizationInstanced.js';
 import { VECTOR_LENGTH } from '../utils/constants.js';
 
-// Maximum points per trail line
-const MAX_TRAIL_POINTS = 1000;
+
 
 // --- START NEW CONSTANTS ---
 // Number of attention head sets (each set has Q, K, V)
@@ -182,52 +181,24 @@ export function initMultiHeadAttentionAnimation(containerElement) {
     createOrUpdateAllMatrices(); // Create matrices using the function defined above
 
     // ---------------------------------------------------------------------
-    //  Vector & Trail Helpers (defined BEFORE vector initialization)
-    // ---------------------------------------------------------------------
 
-    // --- START MOVED FUNCTIONS ---
-    const createTrailForVector = (initPos) => {
-        const geometry = new THREE.BufferGeometry();
-        const positions = new Float32Array(MAX_TRAIL_POINTS * 3);
-        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        geometry.setDrawRange(0, 0);
-        const material = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.07 });
-        const line = new THREE.Line(geometry, material);
-        scene.add(line);
-        // seed first point
-        if (initPos && initPos.length === 3) {
-             geometry.getAttribute('position').setXYZ(0, ...initPos);
-             geometry.setDrawRange(0, 1);
-        }
-        return { line, geometry, positions, points: initPos ? [initPos] : [], isFull: false };
-    };
 
-    // Utility to create a VectorVisualization plus trail and register for a specific head
-    const addAnimatedVectorWithTrail = (vecVis, headIndex) => {
-        scene.add(vecVis.group);
-        animatedVectorsByHead[headIndex].push(vecVis);
 
-        const trail = createTrailForVector(vecVis.group.position.toArray());
-        animatedTrailLinesByHead[headIndex].push(trail);
-    };
-    // --- END MOVED FUNCTIONS ---
 
     // ---------------------------------------------------------------------
-    //  Vector & Trail Initialization (uses helpers defined above)
+    //  Vector Initialization (uses helpers defined above)
     // ---------------------------------------------------------------------
 
-    // Store vectors and trails per head set
+    // Store vectors per head set
     // originalVectorsByHead[headIndex] = [vecVis1, vecVis2, ...]
     // animatedVectorsByHead[headIndex] = [vecVis1, vecVis2, ...]
-    // animatedTrailLinesByHead[headIndex] = [trail1, trail2, ...]
     const originalVectorsByHead = Array.from({ length: NUM_HEAD_SETS }, () => []);
     const animatedVectorsByHead = Array.from({ length: NUM_HEAD_SETS }, () => []);
-    const animatedTrailLinesByHead = Array.from({ length: NUM_HEAD_SETS }, () => []);
 
     const vectorHeightOffset = 40; // distance beneath matrices to spawn
     const startY = -vectorHeightOffset;            // y below ground
 
-    // Generate original vectors & trails for EACH head set
+    // Generate original vectors for EACH head set
     console.log('[MultiHeadAttention] Generating initial vectors...');
     for (let h = 0; h < NUM_HEAD_SETS; h++) {
         const headSetMatrices = allMatrices[h];
@@ -246,7 +217,8 @@ export function initMultiHeadAttentionAnimation(containerElement) {
             // vecVis.data is now set by the helper
             const zPos = -keyMatrixDepth / 2 + slitSpacing * (i + 1);
             vecVis.group.position.set(keyMatrixPos.x, startY, zPos);
-            addAnimatedVectorWithTrail(vecVis, h);
+            scene.add(vecVis.group);
+            animatedVectorsByHead[h].push(vecVis);
             originalVectorsByHead[h].push(vecVis);
         }
         console.log(`[MultiHeadAttention]   Added ${originalVectorsByHead[h].length} vectors for head ${h}`);
@@ -330,7 +302,8 @@ export function initMultiHeadAttentionAnimation(containerElement) {
 
         // Position duplicate at the source's Z, target X, and current Y
         dup.group.position.set(targetXPos, sourceVec.group.position.y, sourceVec.group.position.z);
-        addAnimatedVectorWithTrail(dup, headIndex);
+        scene.add(dup.group);
+        animatedVectorsByHead[headIndex].push(dup);
 
         // Ascend tween for the duplicate
         new TWEEN.Tween(dup.group.position)
@@ -443,50 +416,6 @@ export function initMultiHeadAttentionAnimation(containerElement) {
 
         const delta = clock.getDelta();
 
-        // Update trails for ALL animated vectors across ALL head sets
-        animatedVectorsByHead.forEach((headVectors, headIndex) => {
-            headVectors.forEach((vecVis, vecIndex) => {
-                // Get the corresponding trail object
-                const trail = animatedTrailLinesByHead[headIndex][vecIndex];
-                if (!trail) return; // Safety check
-
-                const tList = trail.points;
-                const geom = trail.geometry;
-                const attr = geom.getAttribute('position');
-
-                const newPoint = [vecVis.group.position.x, vecVis.group.position.y, vecVis.group.position.z];
-                if (!trail.isFull) {
-                    tList.push(newPoint);
-                    if (tList.length >= MAX_TRAIL_POINTS) { // Use >= for safety
-                        trail.isFull = true;
-                        // Optional: Implement logic to shift points if trail becomes full
-                        // For now, it just stops adding new points implicitly
-                    }
-                } else {
-                     // If full, shift existing points and add the new one at the end
-                     // This creates a fixed-length moving trail
-                     for (let i = 0; i < MAX_TRAIL_POINTS - 1; i++) {
-                         attr.setXYZ(i, attr.getX(i + 1), attr.getY(i + 1), attr.getZ(i + 1));
-                         tList[i] = tList[i+1]; // Update internal points array too
-                     }
-                     const lastIdx = MAX_TRAIL_POINTS - 1;
-                     attr.setXYZ(lastIdx, ...newPoint);
-                     tList[lastIdx] = newPoint;
-                     geom.setDrawRange(0, MAX_TRAIL_POINTS); // Ensure draw range is full
-                     attr.needsUpdate = true;
-                     return; // Skip the normal update below if we handled the 'full' case
-                }
-
-
-                // Update for non-full or newly added point
-                const lastIdx = tList.length - 1;
-                if (lastIdx >= 0) { // Ensure there's at least one point
-                     attr.setXYZ(lastIdx, ...newPoint);
-                     geom.setDrawRange(0, tList.length);
-                     attr.needsUpdate = true;
-                }
-            });
-        });
 
         TWEEN.update();
 
@@ -511,12 +440,7 @@ export function initMultiHeadAttentionAnimation(containerElement) {
                 else o.material.dispose();
             }
         });
-        // Ensure vector trails are also disposed
-        animatedTrailLinesByHead.flat().forEach(trail => {
-             if (trail.geometry) trail.geometry.dispose();
-             if (trail.line && trail.line.material) trail.line.material.dispose();
-             if (trail.line) scene.remove(trail.line);
-        });
+
         // Ensure all matrix visualizations resources are released (handled by scene.traverse)
         // allMatrices.flat().forEach(matVis => {
         //     // Geometry/material disposed by scene.traverse if they are children

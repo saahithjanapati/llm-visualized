@@ -1,20 +1,6 @@
 import * as THREE from 'three';
 import { VectorVisualizationInstancedPrism } from '../../components/VectorVisualizationInstancedPrism.js';
-// Trail functionality removed – no-ops keep API intact
-function createTrailLine() {
-  return {
-    line: { material: { opacity: 0, needsUpdate: false } },
-    geometry: {
-      attributes: { position: { setXYZ: () => {}, needsUpdate: false } },
-      setDrawRange: () => {},
-      computeBoundingSphere: () => {},
-    },
-    positions: [],
-    points: [],
-    isFrozen: false,
-  };
-}
-function updateTrail() {}
+
 
 import {
     MHA_MATRIX_PARAMS,
@@ -64,9 +50,6 @@ export function animateVectorMatrixPassThrough(
     }
 
     // ------------------------------------------------------------------
-    //  Trail line that follows the vector until it enters the matrix
-    // ------------------------------------------------------------------
-    const passThroughTrail = createTrailLine(ctx.parentGroup);
     const matrixBottomY = ctx.mhsa_matrix_center_y - MHA_MATRIX_PARAMS.height / 2;
 
     // ------------------------------------------------------------------
@@ -117,12 +100,10 @@ export function animateVectorMatrixPassThrough(
         .easing(TWEEN.Easing.Quadratic.InOut)
         .onUpdate(() => {
             // --------------------------------------------------------------
-            //  Vector motion & trail update
+            //  Vector motion       
             // --------------------------------------------------------------
             vector.group.position.y = tweenState.y;
-            if (vector.group.position.y < matrixBottomY) {
-                updateTrail(passThroughTrail, vector.group.position);
-            }
+        
 
             // --------------------------------------------------------------
             //  Lightweight 64-dimensional swap as soon as we touch matrix

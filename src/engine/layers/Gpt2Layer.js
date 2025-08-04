@@ -42,21 +42,6 @@ import {
 import { PrismLayerNormAnimation } from '../../animations/PrismLayerNormAnimation.js';
 import { MHSAAnimation } from '../../animations/MHSAAnimation.js';
 
-// Trail functionality removed – no-ops keep API intact
-function createTrailLine() {
-  return {
-    line: { material: { opacity: 0, needsUpdate: false } },
-    geometry: {
-      attributes: { position: { setXYZ: () => {}, needsUpdate: false } },
-      setDrawRange: () => {},
-      computeBoundingSphere: () => {},
-    },
-    positions: [],
-    points: [],
-    isFrozen: false,
-  };
-}
-function updateTrail() {}
 
 const VERTICAL_SPACING = 1500; // matches LayerAnimation.js vertical extent
 
@@ -306,7 +291,6 @@ export default class Gpt2Layer extends BaseLayer {
                     if (lane.originalVec.group.position.y < targetY) {
                         lane.originalVec.group.position.y = Math.min(targetY, 
                             lane.originalVec.group.position.y + ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT * dt);
-                        updateTrail(lane.origTrail, lane.originalVec.group.position);
                     }
                 });
                 return; // keep waiting
@@ -555,7 +539,6 @@ export default class Gpt2Layer extends BaseLayer {
                     } else {
                         // Continue rising towards the branching height.
                         originalVec.group.position.y = Math.min(lane.branchStartY, originalVec.group.position.y + ANIM_RISE_SPEED_ORIGINAL * speedMult * dt);
-                        updateTrail(lane.origTrail, originalVec.group.position);
                     }
                     break;
                 case 'right':
@@ -569,7 +552,6 @@ export default class Gpt2Layer extends BaseLayer {
                         }
                         lane.horizPhase = 'insideLN';
                     }
-                    updateTrail(lane.dupTrail, dupVec.group.position);
                     break;
                 case 'insideLN':
                     // start norm animation after entering 35% of LN
@@ -595,7 +577,6 @@ export default class Gpt2Layer extends BaseLayer {
                         lane.normStarted = true;
                     }
                     // -----------------------------------------------------------------
-                    updateTrail(lane.dupTrail, dupVec.group.position);
                     if (dupVec.group.position.y >= lane.ln1MidY - 0.01) {
                         lane.multStarted = true;
                         if (lane.multTarget) {
@@ -618,7 +599,6 @@ export default class Gpt2Layer extends BaseLayer {
                         const targetY = this.ln1TopY + 5; // Same as meetY in original
                         if (rv.group.position.y < targetY) {
                             rv.group.position.y = Math.min(targetY, rv.group.position.y + ANIM_RISE_SPEED_INSIDE_LN * speedMult * dt);
-                            updateTrail(lane.dupTrail, rv.group.position);
                         } else {
                             // Now that we're above LN1, mark lane ready for MHSA travel.
                             lane.travellingVec = rv;
@@ -692,9 +672,6 @@ export default class Gpt2Layer extends BaseLayer {
                         lane.movingVecLN2 = mv;
                         lane.normAnimationLN2 = new PrismLayerNormAnimation(mv);
 
-                        lane.branchTrailLN2 = createTrailLine(this.root, 0xffffff);
-                        updateTrail(lane.branchTrailLN2, mv.group.position);
-
                         lane.ln2Phase = 'right';
                     }
                     break;
@@ -717,7 +694,6 @@ export default class Gpt2Layer extends BaseLayer {
                         lane.ln2Phase = 'insideLN';
                     }
                     
-                    if (lane.branchTrailLN2) updateTrail(lane.branchTrailLN2, mv.group.position);
                     break;
                 }
                 
@@ -776,7 +752,6 @@ export default class Gpt2Layer extends BaseLayer {
                                         .to({ y: destY }, dur)
                                         .easing(TWEEN.Easing.Linear.None)
                                         .onUpdate(() => {
-                                            if (lane.branchTrailLN2) updateTrail(lane.branchTrailLN2, resVec.group.position);
                                         })
                                         .onComplete(() => {
                                             lane.ln2Phase = 'mlpReady';
@@ -787,9 +762,7 @@ export default class Gpt2Layer extends BaseLayer {
                         }
                     }
                     
-                    if (lane.branchTrailLN2 && !lane.multDoneLN2) {
-                        updateTrail(lane.branchTrailLN2, mv.group.position);
-                    }
+
                     break;
                 }
                 
@@ -835,8 +808,6 @@ export default class Gpt2Layer extends BaseLayer {
         const vec = lane.resultVecLN2;
         if (!vec || typeof TWEEN === 'undefined') return;
 
-        lane.mlpUpTrail = createTrailLine(this.root, 0xffffff);
-        
         const bottomY = this.mlpUp.group.position.y - MLP_MATRIX_PARAMS_UP.height / 2;
         const topY = this.mlpUp.group.position.y + MLP_MATRIX_PARAMS_UP.height / 2;
         const distance = topY - vec.group.position.y;
@@ -861,7 +832,6 @@ export default class Gpt2Layer extends BaseLayer {
             .to({ y: topY }, duration)
             .easing(TWEEN.Easing.Linear.None)
             .onUpdate(() => {
-                updateTrail(lane.mlpUpTrail, vec.group.position);
             })
             .onStart(() => {
                 // Shrink to fit in narrowing matrix
@@ -912,11 +882,6 @@ export default class Gpt2Layer extends BaseLayer {
         lane.expandedVecGroup = expandedGroup;
         lane.expandedVecSegments = segmentVecs;
         
-        // Continue trail with expanded group
-        if (lane.mlpUpTrail) {
-            updateTrail(lane.mlpUpTrail, expandedGroup.position);
-        }
-        
         // Rise and pause before down-projection
         const extraRise = 20;
         const pauseMs = 0;
@@ -925,7 +890,6 @@ export default class Gpt2Layer extends BaseLayer {
             .to({ y: expandedGroup.position.y + extraRise }, 500)
             .easing(TWEEN.Easing.Quadratic.InOut)
             .onUpdate(() => {
-                updateTrail(lane.mlpUpTrail, expandedGroup.position);
             })
             .onComplete(() => {
                 this._animateMlpDownProjection(lane);
@@ -964,7 +928,6 @@ export default class Gpt2Layer extends BaseLayer {
             .to({ y: downTopY }, durationDown)
             .easing(TWEEN.Easing.Linear.None)
             .onUpdate(() => {
-                updateTrail(lane.mlpUpTrail, expandedGroup.position);
 
                 // Once the vector has fully entered the down-projection matrix, shrink its overall width
                 if (!lane.shrunkInsideDown && expandedGroup.position.y >= downBottomY) {
@@ -1006,7 +969,6 @@ export default class Gpt2Layer extends BaseLayer {
                         .to({ y: downTopY }, durationDown / 2) // Half duration since we're halfway
                         .easing(TWEEN.Easing.Linear.None)
                         .onUpdate(() => {
-                            updateTrail(lane.mlpUpTrail, collapseVec.group.position);
                         })
                         .start();
                 }
@@ -1054,7 +1016,6 @@ export default class Gpt2Layer extends BaseLayer {
         expandedGroup.visible = false;
         
         lane.finalVecAfterMlp = collapseVec;
-        updateTrail(lane.mlpUpTrail, collapseVec.group.position);
         
         this._riseAfterMlp(lane);
     }
@@ -1074,7 +1035,6 @@ export default class Gpt2Layer extends BaseLayer {
             .to({ y: vec.group.position.y + riseAbove }, riseDur)
             .easing(TWEEN.Easing.Quadratic.InOut)
             .onUpdate(() => {
-                updateTrail(lane.mlpUpTrail, vec.group.position);
             })
             .onComplete(() => {
                 // Update residual stream target height
@@ -1099,7 +1059,6 @@ export default class Gpt2Layer extends BaseLayer {
             .to({ x: 0 }, horizDur)
             .easing(TWEEN.Easing.Quadratic.InOut)
             .onUpdate(() => {
-                updateTrail(lane.mlpUpTrail, vec.group.position);
             })
             .onComplete(() => {
                 // Perform final addition with original vector
@@ -1107,8 +1066,8 @@ export default class Gpt2Layer extends BaseLayer {
                     // Track this addition animation
                     this._pendingAdditions++;
                     
-                    // This will trigger the final addition animation
-                    this.mhsaAnimation._startAdditionAnimation(lane.originalVec, vec, lane);
+                    // This will trigger the final addition animation (vec ➔ originalVec)
+                    this.mhsaAnimation._startAdditionAnimation(vec, lane.originalVec, lane);
                     
                     // Set up completion callback for when addition finishes
                     this._scheduleAdditionCompletion(lane);
@@ -1175,13 +1134,9 @@ export default class Gpt2Layer extends BaseLayer {
             this.root.add(originalVec.group);
         }
 
-        const origTrail = createTrailLine(this.root, 0xffffff);
-        updateTrail(origTrail, originalVec.group.position);
-
         const dupVec = new VectorVisualizationInstancedPrism(originalVec.rawData.slice(), originalVec.group.position.clone());
         dupVec.group.visible = false;
         this.root.add(dupVec.group);
-        const dupTrail = createTrailLine(this.root, 0xffffff);
         const normAnim = new PrismLayerNormAnimation(dupVec);
 
         const multTarget = new VectorVisualizationInstancedPrism(originalVec.rawData.slice(), new THREE.Vector3(offsetX, ln1CenterY + 3.3, zPos));
@@ -1197,8 +1152,6 @@ export default class Gpt2Layer extends BaseLayer {
             dupVec,
             multTarget,
             multTargetLN2,
-            origTrail,
-            dupTrail,
             normAnim,
             horizPhase: 'waiting',
             branchStartY: ln1CenterY - LN_PARAMS.height / 2 + 5,
@@ -1210,8 +1163,6 @@ export default class Gpt2Layer extends BaseLayer {
             travellingVec: null,
             upwardCopies: [],
             sideCopies: [],
-            upwardTrails: [],
-            sideTrails: [],
             headIndex: 0,
             finalAscend: false,
             ln2Phase: 'notStarted',
@@ -1222,7 +1173,6 @@ export default class Gpt2Layer extends BaseLayer {
             multDoneLN2: false,
             resultVecLN2: null,
             mlpUpStarted: false,
-            mlpUpTrail: null,
             expandedVecGroup: null,
             expandedVecSegments: null,
             finalVecAfterMlp: null,
@@ -1271,7 +1221,7 @@ export default class Gpt2Layer extends BaseLayer {
     }
 
     /**
-     * Remove heavy dynamic geometry (vectors & trails) after the layer has
+     * Remove heavy dynamic geometry (vectors) after the layer has
      * handed its residual stream to the next layer.  This is more aggressive
      * than the previous implementation: we now detach the objects from the
      * scene graph and dispose of their GPU resources so they no longer add
@@ -1310,9 +1260,8 @@ export default class Gpt2Layer extends BaseLayer {
 
             const label = obj.userData && obj.userData.label;
             const isVector = label === 'Vector' || label === 'Vector24';
-            const isTrail  = obj.isLine === true; // THREE.Line for trails
 
-            if (isVector || isTrail) {
+            if (isVector) {
                 disposeObj(obj);
             }
         });

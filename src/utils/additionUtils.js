@@ -7,21 +7,7 @@
 // dependency on the MHSAAnimation class.
 // -----------------------------------------------------------------------------
 import * as THREE from 'three';
-// Trail functionality removed – no-ops keep API intact
-function createTrailLine() {
-  return {
-    line: { material: { opacity: 0, needsUpdate: false } },
-    geometry: {
-      attributes: { position: { setXYZ: () => {}, needsUpdate: false } },
-      setDrawRange: () => {},
-      computeBoundingSphere: () => {},
-    },
-    positions: [],
-    points: [],
-    isFrozen: false,
-  };
-}
-function updateTrail() {}
+
 
 
 import {
@@ -37,13 +23,12 @@ import {
  * Animate element-wise addition of two instanced-prism vectors, visually moving
  * each prism from `sourceVec` into `targetVec` while updating colours & data.
  *
- * @param {THREE.Group} parentGroup   – the parent Three.js group (for trail lines)
  * @param {VectorVisualizationInstancedPrism} sourceVec – travelling vector
  * @param {VectorVisualizationInstancedPrism} targetVec – stationary vector that will hold the sum
  * @param {Object} [lane]             – optional lane object; if provided the helper
- *                                      will update lane.origTrail & lane fields
+*                                      will update lane fields
  */
-export function startPrismAdditionAnimation(parentGroup, sourceVec, targetVec, lane) {
+export function startPrismAdditionAnimation(sourceVec, targetVec, lane) {
     if (!sourceVec || !targetVec || !sourceVec.mesh || !targetVec.mesh) return;
     if (typeof TWEEN === 'undefined') {
         console.warn('TWEEN not available – addition animation skipped');
@@ -64,29 +49,9 @@ export function startPrismAdditionAnimation(parentGroup, sourceVec, targetVec, l
     const vectorLength = VECTOR_LENGTH_PRISM;
     const centreIndex = Math.floor(vectorLength / 2);
 
-    // Prepare / re-use a vertical trail following the centre prism.
-    let additionTrail = lane && lane.origTrail;
-    if (!additionTrail) {
-        additionTrail = createTrailLine(parentGroup);
-        if (lane) lane.origTrail = additionTrail;
-    }
 
-    if (lane) {
-        lane.additionTrail = additionTrail;
-    } else {
-        sourceVec.group.userData = sourceVec.group.userData || {};
-        sourceVec.group.userData.additionTrail = additionTrail;
-    }
 
-    // Seed trail with current centre-prism world-pos.
-    const initMat = new THREE.Matrix4();
-    sourceVec.mesh.getMatrixAt(centreIndex, initMat);
-    // Convert world-space position to the parentGroup's local space so the
-    // trail line (which is a child of that group) stays correctly aligned
-    // even when the whole layer is offset in the scene stack.
-    const initPosWorld = new THREE.Vector3().setFromMatrixPosition(initMat).applyMatrix4(sourceVec.group.matrixWorld);
-    const initPosLocal = parentGroup.worldToLocal(initPosWorld.clone());
-    updateTrail(additionTrail, initPosLocal);
+
 
     // Timing params (scale by dedicated multiplier so we can tune independently).
     const duration      = PRISM_ADD_ANIM_BASE_DURATION            / PRISM_ADD_ANIM_SPEED_MULT;
@@ -127,15 +92,7 @@ export function startPrismAdditionAnimation(parentGroup, sourceVec, targetVec, l
 
                 sourceVec.setInstanceAppearance(i, offsetY, null);
 
-                // Update trail for centre prism only
                 if (i === centreIndex) {
-                    const m = new THREE.Matrix4();
-                    sourceVec.mesh.getMatrixAt(i, m);
-                    // Same coordinate-space fix as above: convert to the local
-                    // space of the parent group before updating the trail.
-                    const worldP = new THREE.Vector3().setFromMatrixPosition(m).applyMatrix4(sourceVec.group.matrixWorld);
-                    const localP = parentGroup.worldToLocal(worldP.clone());
-                    updateTrail(additionTrail, localP);
                 }
             })
             .onComplete(() => {
@@ -174,7 +131,6 @@ export function startPrismAdditionAnimation(parentGroup, sourceVec, targetVec, l
                 }
             }
             const topY = targetVec.group.position.y;
-            lane.skipTrailResumeY = topY + 0.01;
         }
     }, totalAnimTime + 100);
 } 
