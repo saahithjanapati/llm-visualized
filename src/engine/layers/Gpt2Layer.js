@@ -3,6 +3,7 @@ import BaseLayer from '../BaseLayer.js';
 import { LayerNormalizationVisualization } from '../../components/LayerNormalizationVisualization.js';
 import { WeightMatrixVisualization } from '../../components/WeightMatrixVisualization.js';
 import { VectorVisualizationInstancedPrism } from '../../components/VectorVisualizationInstancedPrism.js';
+import { StraightLineTrail } from '../../utils/trailUtils.js';
 import {
     LN_PARAMS,
     LN_TO_MHA_GAP,
@@ -273,6 +274,44 @@ export default class Gpt2Layer extends BaseLayer {
     }
 
     update(dt) {
+        // ──────────────── Update straight-line trails ────────────────
+        if (this.lanes && this.lanes.length) {
+            this.lanes.forEach(lane => {
+                const vecsToCheck = [
+                    lane.originalVec,
+                    lane.dupVec,
+                    lane.travellingVec,
+                    lane.resultVec,
+                    lane.postAdditionVec,
+                    lane.movingVecLN2,
+                    lane.resultVecLN2,
+                    lane.finalVecAfterMlp
+                ];
+                vecsToCheck.forEach(v => {
+                    if (v && v.userData && v.userData.trail) {
+                        v.userData.trail.update(v.group.position);
+                    }
+                });
+
+                // Expanded 4× vector group trail
+                if (lane.expandedVecGroup && lane.expandedVecTrail) {
+                    lane.expandedVecTrail.update(lane.expandedVecGroup.position);
+                }
+
+                // Upward K copies and sideways Q/V copies (managed by VectorRouter but update again for safety)
+                if (lane.upwardCopies && lane.upwardCopies.length) {
+                    lane.upwardCopies.forEach(v => {
+                        if (v.userData && v.userData.trail) v.userData.trail.update(v.group.position);
+                    });
+                }
+                if (lane.sideCopies && lane.sideCopies.length) {
+                    lane.sideCopies.forEach(obj => {
+                        const v = obj.vec;
+                        if (v.userData && v.userData.trail) v.userData.trail.update(v.group.position);
+                    });
+                }
+            });
+        }
         // Handle transition phase - wait for vectors to reach position
         if (this._transitionPhase === 'positioning') {
             const allVectorsInPosition = this.lanes.every(lane => {
@@ -585,6 +624,11 @@ export default class Gpt2Layer extends BaseLayer {
                                 dupVec.group.visible = false;
                                 lane.multTarget.group.visible = false;
                                 const res = new VectorVisualizationInstancedPrism(lane.multTarget.rawData.slice(), lane.multTarget.group.position.clone());
+                                // Trail for the result vector that will travel to MHSA
+                                const resTrail = new StraightLineTrail(this.root, 0xffffff, 1);
+                                resTrail.start(res.group.position);
+                                res.userData = res.userData || {};
+                                res.userData.trail = resTrail;
                                 this.root.add(res.group);
                                 lane.resultVec = res;
                                 lane.horizPhase = 'riseAboveLN';
@@ -669,6 +713,11 @@ export default class Gpt2Layer extends BaseLayer {
                         // Spawn duplicate vector that will travel into LN-2
                         const mv = new VectorVisualizationInstancedPrism(v.rawData.slice(), v.group.position.clone());
                         this.root.add(mv.group);
+                        // ---- Trail for LN2 moving vector ----
+                        const mvTrail = new StraightLineTrail(this.root, 0xffffff, 1);
+                        mvTrail.start(mv.group.position);
+                        mv.userData = mv.userData || {};
+                        mv.userData.trail = mvTrail;
                         lane.movingVecLN2 = mv;
                         lane.normAnimationLN2 = new PrismLayerNormAnimation(mv);
 
@@ -740,6 +789,11 @@ export default class Gpt2Layer extends BaseLayer {
                                 const sourcePos = lane.multTargetLN2 && lane.multTargetLN2.group ? lane.multTargetLN2.group.position.clone() : mv.group.position.clone();
                                 const resVec = new VectorVisualizationInstancedPrism(sourceRaw, sourcePos);
                                 this.root.add(resVec.group);
+                                // ---- Trail for LN2 result vector ----
+                                const resTrail = new StraightLineTrail(this.root, 0xffffff, 1);
+                                resTrail.start(resVec.group.position);
+                                resVec.userData = resVec.userData || {};
+                                resVec.userData.trail = resTrail;
                                 lane.resultVecLN2 = resVec;
                                 
                                 // Rise to MLP
@@ -878,6 +932,11 @@ export default class Gpt2Layer extends BaseLayer {
         expandedGroup.position.copy(vec.group.position);
         this.root.add(expandedGroup);
         vec.group.visible = false;
+
+        // ---- Trail for expanded 4x vector group ----
+        const expTrail = new StraightLineTrail(this.root, 0xffffff, 1);
+        expTrail.start(expandedGroup.position);
+        lane.expandedVecTrail = expTrail;
         
         lane.expandedVecGroup = expandedGroup;
         lane.expandedVecSegments = segmentVecs;
@@ -952,6 +1011,11 @@ export default class Gpt2Layer extends BaseLayer {
                         lane.expandedVecSegments[0].rawData.slice(), 
                         expandedGroup.position.clone()
                     );
+                    // ---- Trail for vector after MLP collapse ----
+                    const collapseTrail = new StraightLineTrail(this.root, 0xffffff, 1);
+                    collapseTrail.start(collapseVec.group.position);
+                    collapseVec.userData = collapseVec.userData || {};
+                    collapseVec.userData.trail = collapseTrail;
                     
                     // Copy gradient colors
                     if (Array.isArray(lane.expandedVecSegments[0].currentKeyColors) && lane.expandedVecSegments[0].currentKeyColors.length) {
@@ -1005,6 +1069,11 @@ export default class Gpt2Layer extends BaseLayer {
             segmentVecs[0].rawData.slice(), 
             expandedGroup.position.clone()
         );
+        // ---- Trail for vector after MLP collapse ----
+        const collapseTrail = new StraightLineTrail(this.root, 0xffffff, 1);
+        collapseTrail.start(collapseVec.group.position);
+        collapseVec.userData = collapseVec.userData || {};
+        collapseVec.userData.trail = collapseTrail;
         
         // Copy gradient colors
         if (Array.isArray(segmentVecs[0].currentKeyColors) && segmentVecs[0].currentKeyColors.length) {
@@ -1121,7 +1190,9 @@ export default class Gpt2Layer extends BaseLayer {
     }
 
     _buildSingleLane(oldLane, offsetX, ln1CenterY, ln2CenterY, startY_override, meetY, laneIdx, slitSpacing) {
-        let originalVec, zPos, startY;
+        // Reuse existing trail when lanes are passed from a lower layer
+        let trailFromPrev = oldLane && oldLane.originalTrail ? oldLane.originalTrail : null;
+        let originalVec, zPos, startY, trail; // trail will be reused or created anew
         if (oldLane && oldLane.originalVec) {
             originalVec = oldLane.originalVec;
             this.root.attach(originalVec.group);
@@ -1133,12 +1204,30 @@ export default class Gpt2Layer extends BaseLayer {
             startY = startY_override;
             originalVec = new VectorVisualizationInstancedPrism(data, new THREE.Vector3(0, startY, zPos));
             this.root.add(originalVec.group);
+
+        // ────────────── Trail for the ORIGINAL vector ──────────────
+        trail = new StraightLineTrail(this.root, 0xffffff, 1);
+        trail.start(originalVec.group.position);
+        originalVec.userData = originalVec.userData || {};
+        originalVec.userData.trail = trail;
+
         }
 
         const dupVec = new VectorVisualizationInstancedPrism(originalVec.rawData.slice(), originalVec.group.position.clone());
         dupVec.group.visible = false;
         this.root.add(dupVec.group);
+        // Trail for duplicate vector inside LN1
+        const dupTrail = new StraightLineTrail(this.root, 0xffffff, 1);
+        dupTrail.start(dupVec.group.position);
+        dupVec.userData = dupVec.userData || {};
+        dupVec.userData.trail = dupTrail;
         const normAnim = new PrismLayerNormAnimation(dupVec);
+
+        // If we're reusing an existing lane we may not have created the trail yet
+        if (!trail) {
+            trail = new StraightLineTrail(this.root, 0xffffff, 1);
+            trail.start(originalVec.group.position);
+        }
 
         const multTarget = new VectorVisualizationInstancedPrism(originalVec.rawData.slice(), new THREE.Vector3(offsetX, ln1CenterY + 3.3, zPos));
         this.root.add(multTarget.group);
@@ -1148,8 +1237,18 @@ export default class Gpt2Layer extends BaseLayer {
         this.root.add(multTargetLN2.group);
         multTargetLN2.group.visible = false;
 
+        // Fallback to previous trail if a new one wasn't created in this constructor
+        if (!trail && trailFromPrev) trail = trailFromPrev;
+
+        // Ensure originalVec always has a trail reference
+        originalVec.userData = originalVec.userData || {};
+        if (!originalVec.userData.trail) {
+            originalVec.userData.trail = trail;
+        }
+
         this.lanes.push({
             originalVec,
+            originalTrail: trail,
             dupVec,
             multTarget,
             multTargetLN2,
@@ -1177,6 +1276,7 @@ export default class Gpt2Layer extends BaseLayer {
             expandedVecGroup: null,
             expandedVecSegments: null,
             finalVecAfterMlp: null,
+            expandedVecTrail: null,
             zPos
         });
     }

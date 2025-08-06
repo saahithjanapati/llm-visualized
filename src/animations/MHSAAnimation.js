@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization.js';
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
+import { StraightLineTrail } from '../utils/trailUtils.js';
 
 
 
@@ -441,6 +442,15 @@ export class MHSAAnimation {
             this.vectorRouter.update(deltaTime, timeNow, lanes);
         }
 
+        // ---- Update trails for combined vectors through Output Projection ----
+        if (this.outputProjMatrixVectors && this.outputProjMatrixVectors.length) {
+            this.outputProjMatrixVectors.forEach(v => {
+                if (v && v.userData && v.userData.trail) {
+                    v.userData.trail.update(v.group.position);
+                }
+            });
+        }
+
         // ---------------- End VectorRouter section -------------------
         /* Legacy inline routing logic has been moved to VectorRouter.js
            and will be removed once the migration is complete. */
@@ -473,6 +483,10 @@ export class MHSAAnimation {
                     lane.originalVec.group.position.y = Math.min(curY + riseStep, targetY);
                 }
 
+                // Update trail after movement
+                if (lane.originalVec && lane.originalVec.userData && lane.originalVec.userData.trail) {
+                    lane.originalVec.userData.trail.update(lane.originalVec.group.position);
+                }
 
             });
         }
@@ -770,6 +784,12 @@ export class MHSAAnimation {
             if (combinedVec.mesh.instanceColor) combinedVec.mesh.instanceColor.needsUpdate = true;
 
             this.parentGroup.add(combinedVec.group);
+            // ---- Trail for combined vector ----
+            const combTrail = new StraightLineTrail(this.parentGroup, 0xffffff, 1);
+            combTrail.start(combinedVec.group.position);
+            combinedVec.userData = combinedVec.userData || {};
+            combinedVec.userData.trail = combTrail;
+
             combinedVectors.push({ vec: combinedVec, laneZ });
 
             // Hide original decorative vectors

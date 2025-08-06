@@ -128,6 +128,11 @@ export function animateVectorMatrixPassThrough(
                         pl.upwardCopies[hIdx] = vector;
                     }
                 }
+                // For K vectors we keep the existing trail as a static line but
+                // stop updating it further by detaching the reference.
+                if (vectorCategory === 'K') {
+                    delete vector.userData.trail; // prevent future updates on new smallVec
+                }
                 initialDimensionChangeApplied = true;
                 ctx.parentGroup.remove(heavyVec.group);
                 if (typeof heavyVec.dispose === 'function') heavyVec.dispose();

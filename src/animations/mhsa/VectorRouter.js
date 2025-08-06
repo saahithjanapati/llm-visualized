@@ -1,4 +1,6 @@
 import { VectorVisualizationInstancedPrism } from '../../components/VectorVisualizationInstancedPrism.js';
+import { StraightLineTrail } from '../../utils/trailUtils.js';
+import { TRAIL_COLOR } from '../../utils/trailConstants.js';
 import {
     ANIM_HORIZ_SPEED,
     GLOBAL_ANIM_SPEED_MULT,
@@ -68,12 +70,19 @@ export class VectorRouter {
 
                 if (tVec.group.position.x < targetX - 0.01) {
                     tVec.group.position.x = Math.min(targetX, tVec.group.position.x + dx);
+                // Update trail for travelling vector
+                if (tVec.userData && tVec.userData.trail) tVec.userData.trail.update(tVec.group.position);
                 } else {
                     // Arrived: spawn upward copy used for K
 
                     const upVec = new VectorVisualizationInstancedPrism([...tVec.rawData], tVec.group.position.clone());
                     this.parentGroup.add(upVec.group);
-                    upVec.userData = { headIndex: targetHeadIdx, sideSpawned: false, sideSpawnRequested: false, sideSpawnTime: 0, parentLane: lane };
+                    // Trail for upward K copy
+                    const upTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1);
+                    upTrail.start(upVec.group.position);
+                    upVec.userData = upVec.userData || {};
+                    upVec.userData.trail = upTrail;
+                    Object.assign(upVec.userData, { headIndex: targetHeadIdx, sideSpawned: false, sideSpawnRequested: false, sideSpawnTime: 0, parentLane: lane });
                     lane.upwardCopies.push(upVec);
 
                     lane.headIndex = targetHeadIdx + 1;
@@ -91,6 +100,7 @@ export class VectorRouter {
                 lane.upwardCopies.forEach((upVec) => {
                     if (upVec.group.position.y < this.headStopY) {
                         upVec.group.position.y = Math.min(this.headStopY, upVec.group.position.y + MHSA_DUPLICATE_VECTOR_RISE_SPEED * SPEED_MULT * deltaTime);
+                        if (upVec.userData.trail) upVec.userData.trail.update(upVec.group.position);
                     }
                 });
             }
@@ -109,9 +119,17 @@ export class VectorRouter {
                         const coord = this.headCoords[hIdx];
                         if (coord) {
                             const qVec = new VectorVisualizationInstancedPrism(centerVec.rawData.slice(), centerVec.group.position.clone());
-                            qVec.userData = { headIndex: hIdx };
+                            const qTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1);
+                            qTrail.start(qVec.group.position);
+                            qVec.userData = qVec.userData || {};
+                            qVec.userData.trail = qTrail;
+                            Object.assign(qVec.userData, { headIndex: hIdx });
                             const vVec = new VectorVisualizationInstancedPrism(centerVec.rawData.slice(), centerVec.group.position.clone());
-                            vVec.userData = { headIndex: hIdx };
+                            const vTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1);
+                            vTrail.start(vVec.group.position);
+                            vVec.userData = vVec.userData || {};
+                            vVec.userData.trail = vTrail;
+                            Object.assign(vVec.userData, { headIndex: hIdx });
                             this.parentGroup.add(qVec.group);
                             this.parentGroup.add(vVec.group);
 
@@ -137,9 +155,11 @@ export class VectorRouter {
                     if (Math.abs(v.group.position.x - obj.targetX) > 0.01) {
                         const dir = v.group.position.x < obj.targetX ? 1 : -1;
                         v.group.position.x += dir * dx;
+                    if (v.userData.trail) v.userData.trail.update(v.group.position);
                         if ((dir === 1 && v.group.position.x > obj.targetX) || (dir === -1 && v.group.position.x < obj.targetX)) v.group.position.x = obj.targetX;
                     }
-                    v.group.position.y = this.headStopY; 
+                    v.group.position.y = this.headStopY;
+                    if (v.userData.trail) v.userData.trail.update(v.group.position);
                 });
             }
         });
