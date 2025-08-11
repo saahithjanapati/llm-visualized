@@ -58,14 +58,15 @@ import {
     MLP_INTER_MATRIX_GAP,
     MLP_MATRIX_PARAMS_UP,
     MLP_MATRIX_PARAMS_DOWN,
-    ORIGINAL_TO_PROCESSED_GAP
+    ORIGINAL_TO_PROCESSED_GAP,
+    DECORATIVE_FADE_MS,
+    DECORATIVE_FADE_DELAY_MS
 } from '../utils/constants.js';
 import { mapValueToColor } from '../utils/colors.js';
 
 // NOTE: Requires global TWEEN.js (loaded separately via <script>)
 
-// Define speed multiplier
-const SPEED_MULT = GLOBAL_ANIM_SPEED_MULT;
+// Use live binding of GLOBAL_ANIM_SPEED_MULT at each use; do not cache
 
 export function initLayerAnimation(container) {
     // -------------------------------------------------------------------------
@@ -400,7 +401,7 @@ export function initLayerAnimation(container) {
             return;
         }
 
-        const flashDuration = 150 / SPEED_MULT; // Adjusted by SPEED_MULT
+        const flashDuration = 150 / GLOBAL_ANIM_SPEED_MULT; // Adjusted by speed
         const vectorLength = VECTOR_LENGTH_PRISM; // Prisms use VECTOR_LENGTH_PRISM
 
         if (!vec1.rawData || !vec2.rawData || vec1.rawData.length !== vectorLength || vec2.rawData.length !== vectorLength) {
@@ -419,8 +420,8 @@ export function initLayerAnimation(container) {
         }
 
         // 2. Create a single tween for the flash duration
-        new TWEEN.Tween({})
-            .to({}, flashDuration)
+                    new TWEEN.Tween({})
+                        .to({}, flashDuration)
             .onComplete(() => {
                 // 3. Calculate product, update vec2.rawData, set final colors on vec2, and "hide" vec1 instances
                 for (let i = 0; i < vectorLength; i++) {
@@ -680,7 +681,7 @@ export function initLayerAnimation(container) {
             const originalTargetY = meetY;
 
             if (originalVec.group.position.y < originalTargetY) {
-                originalVec.group.position.y += ANIM_RISE_SPEED_ORIGINAL * SPEED_MULT * deltaTime;
+                originalVec.group.position.y += ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT * deltaTime;
                 if (originalVec.group.position.y > originalTargetY) originalVec.group.position.y = originalTargetY;
             }
 
@@ -718,7 +719,7 @@ export function initLayerAnimation(container) {
                 }
                 case 'right': {
                     // Horizontal move to LayerNorm X
-                    const dx = ANIM_HORIZ_SPEED * SPEED_MULT * deltaTime;
+                    const dx = ANIM_HORIZ_SPEED * GLOBAL_ANIM_SPEED_MULT * deltaTime;
                     movingVec.group.position.x = Math.min(BRANCH_X, movingVec.group.position.x + dx);
                     if (movingVec.group.position.x >= BRANCH_X) {
                         movingVec.group.position.x = BRANCH_X;
@@ -750,7 +751,7 @@ export function initLayerAnimation(container) {
                     // Move up (only when not actively normalizing)
                     const normAnimating = lane.normStarted && lane.normAnimation.isAnimating;
                     if (!lane.multStarted && !normAnimating) {
-                        movingVec.group.position.y += ANIM_RISE_SPEED_INSIDE_LN * SPEED_MULT * deltaTime;
+                        movingVec.group.position.y += ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT * deltaTime;
                     }
 
                     // Trigger multiplication at centre of current LN
@@ -786,7 +787,7 @@ export function initLayerAnimation(container) {
                                 // Rise just above LN top
                                 const finalY = branchFinalY; // branchFinalY is meetY
                                 const distance = finalY - resultVec.group.position.y;
-                                const riseDuration = (distance / (ANIM_RISE_SPEED_INSIDE_LN * SPEED_MULT)) * 1000;
+                                const riseDuration = (distance / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
 
                                 new TWEEN.Tween(resultVec.group.position)
                                     .to({ y: finalY }, riseDuration)
@@ -881,7 +882,7 @@ export function initLayerAnimation(container) {
                     if (!v) break;
                     const targetY = bottomY_ln2_abs - 10; // stop a little below LN2
                     if (v.group.position.y < targetY) {
-                        v.group.position.y = Math.min(targetY, v.group.position.y + ANIM_RISE_SPEED_POST_SPLIT_LN2 * SPEED_MULT * deltaTime);
+                        v.group.position.y = Math.min(targetY, v.group.position.y + ANIM_RISE_SPEED_POST_SPLIT_LN2 * GLOBAL_ANIM_SPEED_MULT * deltaTime);
                     } else {
                         // Keep the original branch trail active so it continues
                         // to reflect the upward motion of the residual-stream
@@ -933,7 +934,7 @@ export function initLayerAnimation(container) {
                     const mv = lane.movingVecLN2;
                     if (!mv) break;
                     mv.group.visible = true;
-                    const dx2 = ANIM_HORIZ_SPEED * SPEED_MULT * deltaTime;
+                    const dx2 = ANIM_HORIZ_SPEED * GLOBAL_ANIM_SPEED_MULT * deltaTime;
                     mv.group.position.x = Math.min(BRANCH_X, mv.group.position.x + dx2);
                     if (mv.group.position.x >= BRANCH_X - 0.01) {
                         mv.group.position.x = BRANCH_X;
@@ -961,7 +962,7 @@ export function initLayerAnimation(container) {
 
                     // Only let the vector rise when it is NOT actively normalising
                     if (!lane.multDoneLN2 && !isNormAnimating2) {
-                        mv.group.position.y += ANIM_RISE_SPEED_INSIDE_LN * SPEED_MULT * deltaTime;
+                        mv.group.position.y += ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT * deltaTime;
                     }
                     if (!lane.multDoneLN2 && mv.group.position.y >= midY_ln2_abs) {
                         lane.multDoneLN2 = true;
@@ -973,7 +974,7 @@ export function initLayerAnimation(container) {
                             lane.resultVecLN2 = resVec;
                             const destY = mlpMatrixUp_centerY - MLP_MATRIX_PARAMS_UP.height / 2 - 10; // just beneath first MLP matrix
                             const dist2 = destY - resVec.group.position.y;
-                            const dur2 = (dist2 / (ANIM_RISE_SPEED_INSIDE_LN * SPEED_MULT)) * 1000;
+                            const dur2 = (dist2 / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
                             new TWEEN.Tween(resVec.group.position)
                                 .to({ y: destY }, dur2)
                                 .easing(TWEEN.Easing.Linear.None)
@@ -1003,7 +1004,7 @@ export function initLayerAnimation(container) {
                     const bottomY = mlpMatrixUp_centerY - MLP_MATRIX_PARAMS_UP.height / 2;
                     const topY = mlpMatrixUp_centerY + MLP_MATRIX_PARAMS_UP.height / 2;
                     const distance = topY - vec.group.position.y;
-                    const duration = (distance / (ANIM_RISE_SPEED_INSIDE_LN * SPEED_MULT)) * 1000;
+                    const duration = (distance / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
                     const matrixStartColor = mlpDarkGray.clone();
                     const matrixEndColor = new THREE.Color(0xb07c13); // bright orange
                     new TWEEN.Tween({ t: 0 })
@@ -1076,7 +1077,7 @@ export function initLayerAnimation(container) {
                             //  EXTRA RISE + PAUSE BEFORE DOWN-PROJECTION
                             // ------------------------------------------------------------
                             const extraRise = 60; // world units
-                            const pauseMs = 500;  // pause duration
+                            const pauseMs = DECORATIVE_FADE_DELAY_MS;  // reuse decorative delay as pause
 
                             new TWEEN.Tween(expandedGroup.position)
                                 .to({ y: expandedGroup.position.y + extraRise }, 800)
@@ -1095,7 +1096,7 @@ export function initLayerAnimation(container) {
                                         // Move vector to bottom of matrix first if below it
                                         const startY = expandedGroup.position.y;
                                         const totalDist = downTopY - startY;
-                                        const durationDown = (Math.abs(totalDist) / (ANIM_RISE_SPEED_INSIDE_LN * SPEED_MULT)) * 1000;
+                                        const durationDown = (Math.abs(totalDist) / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
 
                                         // Matrix color tween
                                         new TWEEN.Tween({ t: 0 })
@@ -1149,7 +1150,7 @@ export function initLayerAnimation(container) {
                                                 //  Rise a bit above the matrix
                                                 // ------------------------------
                                                 const riseAbove = 40; // units
-                                                const riseDur = (riseAbove / (ANIM_RISE_SPEED_INSIDE_LN * SPEED_MULT)) * 1000;
+                                                const riseDur = (riseAbove / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
 
                                                 new TWEEN.Tween(collapseVec.group.position)
                                                     .to({ y: collapseVec.group.position.y + riseAbove }, riseDur)
@@ -1168,7 +1169,7 @@ export function initLayerAnimation(container) {
                                                         //  Move left to residual stream (x=0)
                                                         // ------------------------------
                                                         const horizDist = Math.abs(collapseVec.group.position.x);
-                                                        const horizDur = (horizDist / (ANIM_HORIZ_SPEED * SPEED_MULT)) * 1000;
+                                                        const horizDur = (horizDist / (ANIM_HORIZ_SPEED * GLOBAL_ANIM_SPEED_MULT)) * 1000;
 
                                                         new TWEEN.Tween(collapseVec.group.position)
                                                             .to({ x: 0 }, horizDur)

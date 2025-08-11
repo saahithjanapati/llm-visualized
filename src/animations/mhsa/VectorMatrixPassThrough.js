@@ -6,12 +6,7 @@ import {
     MHA_MATRIX_PARAMS,
     VECTOR_LENGTH_PRISM,
 } from '../../utils/constants.js';
-import {
-
-    MHSA_MATRIX_MAX_EMISSIVE_INTENSITY,
-    MHSA_PASS_THROUGH_BRIGHTEN_RATIO,
-    MHSA_PASS_THROUGH_DIM_RATIO,
-} from '../LayerAnimationConstants.js';
+import { MHSA_PASS_THROUGH_BRIGHTEN_RATIO, MHSA_PASS_THROUGH_DIM_RATIO, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY } from '../../utils/constants.js';
 
 /**
  * Animate a vector passing vertically through its corresponding weight matrix.

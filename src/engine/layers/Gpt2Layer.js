@@ -29,7 +29,11 @@ import {
     ANIM_RISE_SPEED_POST_SPLIT_LN2,
     ORIGINAL_TO_PROCESSED_GAP,
     ANIM_HORIZ_SPEED,
-    INACTIVE_COMPONENT_COLOR
+    INACTIVE_COMPONENT_COLOR,
+    PRISM_ADD_ANIM_BASE_DURATION,
+    PRISM_ADD_ANIM_BASE_FLASH_DURATION,
+    PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS,
+    PRISM_ADD_ANIM_SPEED_MULT
 } from '../../utils/constants.js';
 import {
     MHA_FINAL_Q_COLOR,
@@ -38,7 +42,6 @@ import {
     MHA_OUTPUT_PROJECTION_MATRIX_PARAMS,
     MHA_OUTPUT_PROJECTION_MATRIX_COLOR,
     MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW,
-    MHSA_RESULT_RISE_OFFSET_Y
 } from '../../animations/LayerAnimationConstants.js';
 import { PrismLayerNormAnimation } from '../../animations/PrismLayerNormAnimation.js';
 import { MHSAAnimation } from '../../animations/MHSAAnimation.js';
@@ -1285,13 +1288,13 @@ export default class Gpt2Layer extends BaseLayer {
      * Schedule callback for when addition animation completes
      */
     _scheduleAdditionCompletion(lane) {
-        // Calculate total animation time from additionUtils.js
-        const duration = 800; // PRISM_ADD_ANIM_BASE_DURATION / PRISM_ADD_ANIM_SPEED_MULT
-        const flashDuration = 200; // PRISM_ADD_ANIM_BASE_FLASH_DURATION / PRISM_ADD_ANIM_SPEED_MULT  
-        const delayBetween = 50; // PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS / PRISM_ADD_ANIM_SPEED_MULT
-        const vectorLength = 64; // VECTOR_LENGTH_PRISM
+        // Mirror timings from additionUtils to ensure consistent completion detection
+        const duration      = PRISM_ADD_ANIM_BASE_DURATION             / PRISM_ADD_ANIM_SPEED_MULT;
+        const flashDuration = PRISM_ADD_ANIM_BASE_FLASH_DURATION       / PRISM_ADD_ANIM_SPEED_MULT;
+        const delayBetween  = PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS / PRISM_ADD_ANIM_SPEED_MULT;
+        const vectorLength  = VECTOR_LENGTH_PRISM;
         const totalAnimTime = duration + flashDuration + vectorLength * delayBetween;
-        
+
         setTimeout(() => {
             this._pendingAdditions--;
             lane.additionComplete = true;

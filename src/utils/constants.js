@@ -1,7 +1,31 @@
 // ------------------------------------------------------------
 // Global animation speed multiplier (1 = normal speed). Increase to speed up everything.
+// Use setter to update at runtime; modules should always read the live binding.
 // ------------------------------------------------------------
-export const GLOBAL_ANIM_SPEED_MULT = 50;
+export let GLOBAL_ANIM_SPEED_MULT = 50;
+export function setGlobalAnimSpeedMult(mult) {
+    const m = Number(mult);
+    if (!Number.isFinite(m) || m <= 0) return;
+    GLOBAL_ANIM_SPEED_MULT = m;
+}
+
+// High-level presets for playback speed used by the settings UI.
+// This adjusts the global speed and certain animation multipliers together.
+export let PRISM_ADD_ANIM_SPEED_MULT = 4;
+export let SELF_ATTENTION_TIME_MULT = 1;
+export function setPlaybackSpeed(preset) {
+    // Accept string keys or fallback to medium
+    const cfg = {
+        slow:   { mult: 25,  addMult: 2, selfAttenTimeMult: 1 },
+        medium: { mult: 50,  addMult: 4, selfAttenTimeMult: 1 },
+        fast:   { mult: 100, addMult: 8, selfAttenTimeMult: 16 }
+    };
+    const p = typeof preset === 'string' ? preset.toLowerCase() : 'medium';
+    const sel = cfg[p] || cfg.medium;
+    setGlobalAnimSpeedMult(sel.mult);
+    PRISM_ADD_ANIM_SPEED_MULT = sel.addMult;
+    SELF_ATTENTION_TIME_MULT = sel.selfAttenTimeMult;
+}
 
 // Always render in high-quality mode. Remove lower-quality mobile detection.
 export const IS_MOBILE = false;
@@ -110,8 +134,36 @@ export const PRISM_ADD_ANIM_BASE_FLASH_DURATION = 80 * Math.sqrt(GROUPED_PRISM_S
 export const PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS = 15 * GROUPED_PRISM_SLOWDOWN; // ms delay between prism starts
 export const PRISM_ADD_ANIM_BASE_Y_OFFSET_FACTOR = 1.1; // How much higher source moves relative to target base
 /** Multiplier for the prism addition animation speed.  
- * 1 = base speed; 2 = twice as fast (half the duration); 0.5 = half as fast (double duration). */
-export const PRISM_ADD_ANIM_SPEED_MULT = 4;
+ * 1 = base speed; 2 = twice as fast (half the duration); 0.5 = half as fast (double duration).
+ * Runtime adjustable via setPlaybackSpeed(). */
+// NOTE: declaration moved earlier and converted to `let` so presets can update it
+
+// ------------------------------------------------------------
+// MHSA / Pass-through speed & timing (centralised)
+// ------------------------------------------------------------
+export const MHSA_DUPLICATE_VECTOR_RISE_SPEED = 6;            // Upward K copy rise speed (world units / sec)
+export const MHSA_PASS_THROUGH_TOTAL_DURATION_MS = 90000;     // Total duration of pass-through tween (ms)
+export const MHSA_PASS_THROUGH_BRIGHTEN_RATIO = 0.4;          // Fraction of total spent brightening
+export const MHSA_PASS_THROUGH_DIM_RATIO = 0.4;               // Fraction of total spent dimming
+export const MHSA_MATRIX_MAX_EMISSIVE_INTENSITY = 0.80;       // Max emissive intensity during brightening
+export const MHSA_RESULT_RISE_OFFSET_Y = 60;                  // Rise offset after pass-through
+export const MHSA_HEAD_VECTOR_STOP_BELOW = 70;                // Stop distance below matrix centre for head parking
+
+// Result rise duration base (scaled in code by SPEED_MULT)
+export const MHA_RESULT_RISE_DURATION_BASE_MS = 500;
+
+// Decorative/merge phase timings
+export const DECORATIVE_FADE_MS = 800;
+export const DECORATIVE_FADE_DELAY_MS = 800;
+export const MERGE_TO_ROW_DELAY_AFTER_FADE_MS = 900;          // Begin merge after decorative fade completes
+export const HEAD_COLOR_TRANSITION_MS = 1000;                 // Duration for head colour transition
+export const MERGE_POST_COLOR_TRANSITION_DELAY_MS = 1000;     // Delay before starting output projection after colours
+export const MERGE_EXTRA_BUFFER_MS = 200;                     // Extra buffer after merge duration
+
+// Output projection staged timings
+export const OUTPUT_PROJ_STAGE1_MS = 1000; // to matrix bottom
+export const OUTPUT_PROJ_STAGE2_MS = 1000; // through matrix
+export const OUTPUT_PROJ_STAGE3_MS = 500;  // final rise after matrix
 
 // ------------------------------------------------------------
 // Constants from LayerAnimationConstants.js
@@ -340,3 +392,31 @@ export const INACTIVE_COMPONENT_COLOR = 0x202020;
  *  the GPT-2 tower.  Negative values move the text downward (further away from
  *  the camera).  Adjust here to reposition the caption globally. */
 export const CAPTION_TEXT_Y_POS = -2500;
+
+// ------------------------------------------------------------
+// Self-Attention above-matrix timings (centralised)
+// ------------------------------------------------------------
+export const SA_RED_EXTRA_RISE = 75;                 // Additional V-vector rise (world units)
+export const SA_V_RISE_DURATION_MS = 600;            // Duration for V extra rise
+export const SA_K_ALIGN_DURATION_MS = 1000;          // Duration to align K to V
+export const SA_BLUE_HORIZ_DURATION_MS = 400;        // Horizontal slide duration for Q
+export const SA_BLUE_VERT_DURATION_MS = 400;         // Per-lane hop duration for Q/V traversal
+export const SA_BLUE_PAUSE_MS = 100;                 // Pause at each lane during traversal
+export const SA_BLUE_QUEUE_SHIFT_DURATION_MS = 400;  // Duration to shift remaining blue vectors
+
+// Self-attention duplicate vector micro-timings
+export const SA_DUPLICATE_POP_IN_MS = 120;
+export const SA_DUPLICATE_TRAVEL_MERGE_MS = 400;
+export const SA_DUPLICATE_POP_OUT_MS = 150;
+
+// ------------------------------------------------------------
+// Prism LayerNorm animation timings (centralised)
+// ------------------------------------------------------------
+export const PLN_UNIT_DELAY_MS = 3 * GROUPED_PRISM_SLOWDOWN;              // ms between activations
+export const PLN_UNIT_CYCLE_DURATION_MS = 200 * Math.sqrt(GROUPED_PRISM_SLOWDOWN); // ms per unit cycle
+
+// ------------------------------------------------------------
+// MLP specific micro-timings
+// ------------------------------------------------------------
+export const MLP_EXPAND_RISE_MS = 500;            // rise before down-projection
+export const MLP_SHRINK_INSIDE_DOWN_MS = 300;     // shrink duration inside down-projection

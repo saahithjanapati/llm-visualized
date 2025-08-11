@@ -9,15 +9,13 @@ import {
     NUM_HEAD_SETS_LAYER,
     VECTOR_LENGTH_PRISM,
 } from '../../utils/constants.js';
-import {
-    MHSA_DUPLICATE_VECTOR_RISE_SPEED,
-
-} from '../LayerAnimationConstants.js';
+// Speed-related constants centralised in utils/constants
+import { MHSA_DUPLICATE_VECTOR_RISE_SPEED } from '../../utils/constants.js';
 
 
 
 
-const SPEED_MULT = GLOBAL_ANIM_SPEED_MULT;
+// Read live binding each use to reflect UI changes at runtime
 
 /**
  * Responsible only for moving vectors to their parking positions
@@ -66,7 +64,7 @@ export class VectorRouter {
                 }
 
                 const targetX = this.headsCentersX[targetHeadIdx];
-                const dx      = ANIM_HORIZ_SPEED * SPEED_MULT * deltaTime;
+                const dx      = ANIM_HORIZ_SPEED * GLOBAL_ANIM_SPEED_MULT * deltaTime;
 
                 if (tVec.group.position.x < targetX - 0.01) {
                     tVec.group.position.x = Math.min(targetX, tVec.group.position.x + dx);
@@ -99,7 +97,7 @@ export class VectorRouter {
             if (lane.upwardCopies && lane.upwardCopies.length) {
                 lane.upwardCopies.forEach((upVec) => {
                     if (upVec.group.position.y < this.headStopY) {
-                        upVec.group.position.y = Math.min(this.headStopY, upVec.group.position.y + MHSA_DUPLICATE_VECTOR_RISE_SPEED * SPEED_MULT * deltaTime);
+                        upVec.group.position.y = Math.min(this.headStopY, upVec.group.position.y + MHSA_DUPLICATE_VECTOR_RISE_SPEED * GLOBAL_ANIM_SPEED_MULT * deltaTime);
                         if (upVec.userData.trail) upVec.userData.trail.update(upVec.group.position);
                     }
                 });
@@ -112,7 +110,7 @@ export class VectorRouter {
                 lane.upwardCopies.forEach(centerVec => {
                     if (!centerVec.userData.sideSpawnRequested && Math.abs(centerVec.group.position.y - this.headStopY) < 0.1) {
                         centerVec.userData.sideSpawnRequested = true;
-                        centerVec.userData.sideSpawnTime = timeNow + SIDE_COPY_DELAY_MS / SPEED_MULT;
+                        centerVec.userData.sideSpawnTime = timeNow + SIDE_COPY_DELAY_MS / GLOBAL_ANIM_SPEED_MULT;
                     }
                     if (centerVec.userData.sideSpawnRequested && !centerVec.userData.sideSpawned && timeNow >= centerVec.userData.sideSpawnTime) {
                         const hIdx  = centerVec.userData.headIndex;
@@ -151,7 +149,7 @@ export class VectorRouter {
             if (lane.sideCopies && lane.sideCopies.length) {
                 lane.sideCopies.forEach((obj) => {
                     const v  = obj.vec;
-                    const dx = SIDE_COPY_HORIZ_SPEED * SPEED_MULT * deltaTime;
+                    const dx = SIDE_COPY_HORIZ_SPEED * GLOBAL_ANIM_SPEED_MULT * deltaTime;
                     if (Math.abs(v.group.position.x - obj.targetX) > 0.01) {
                         const dir = v.group.position.x < obj.targetX ? 1 : -1;
                         v.group.position.x += dir * dx;

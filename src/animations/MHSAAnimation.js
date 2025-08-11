@@ -6,8 +6,8 @@ import { StraightLineTrail } from '../utils/trailUtils.js';
 
 
 import { mapValueToColor } from '../utils/colors.js';
-import { MHSA_DUPLICATE_VECTOR_RISE_SPEED, MHSA_PASS_THROUGH_TOTAL_DURATION_MS, MHSA_PASS_THROUGH_BRIGHTEN_RATIO, MHSA_PASS_THROUGH_DIM_RATIO, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY, MHSA_MATRIX_INITIAL_RESTING_COLOR, MHSA_BRIGHT_GREEN, MHSA_DARK_TINTED_GREEN, MHSA_BRIGHT_BLUE, MHSA_DARK_TINTED_BLUE, MHSA_BRIGHT_RED, MHSA_DARK_TINTED_RED, MHSA_RESULT_RISE_OFFSET_Y, MHSA_HEAD_VECTOR_STOP_BELOW,  MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR, MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW, MHA_OUTPUT_PROJECTION_MATRIX_PARAMS, MHA_OUTPUT_PROJECTION_MATRIX_COLOR } from './LayerAnimationConstants.js';
-import { INACTIVE_COMPONENT_COLOR } from '../utils/constants.js';
+import { MHSA_MATRIX_INITIAL_RESTING_COLOR, MHSA_BRIGHT_GREEN, MHSA_DARK_TINTED_GREEN, MHSA_BRIGHT_BLUE, MHSA_DARK_TINTED_BLUE, MHSA_BRIGHT_RED, MHSA_DARK_TINTED_RED, MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR, MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW, MHA_OUTPUT_PROJECTION_MATRIX_PARAMS, MHA_OUTPUT_PROJECTION_MATRIX_COLOR } from './LayerAnimationConstants.js';
+import { INACTIVE_COMPONENT_COLOR, MHSA_DUPLICATE_VECTOR_RISE_SPEED, MHSA_PASS_THROUGH_TOTAL_DURATION_MS, MHSA_RESULT_RISE_OFFSET_Y, MHSA_HEAD_VECTOR_STOP_BELOW, MHA_RESULT_RISE_DURATION_BASE_MS, DECORATIVE_FADE_MS, DECORATIVE_FADE_DELAY_MS, MERGE_TO_ROW_DELAY_AFTER_FADE_MS, HEAD_COLOR_TRANSITION_MS, MERGE_POST_COLOR_TRANSITION_DELAY_MS, MERGE_EXTRA_BUFFER_MS, OUTPUT_PROJ_STAGE1_MS, OUTPUT_PROJ_STAGE2_MS, OUTPUT_PROJ_STAGE3_MS, GLOBAL_ANIM_SPEED_MULT } from '../utils/constants.js';
 import {
     // Constants needed for setup & animation
     MHA_MATRIX_PARAMS,
@@ -17,7 +17,6 @@ import {
     MHA_INTERNAL_MATRIX_SPACING,
     HEAD_VECTOR_STOP_BELOW,
     ANIM_HORIZ_SPEED,
-    GLOBAL_ANIM_SPEED_MULT,
     SIDE_COPY_DELAY_MS,
     SIDE_COPY_HORIZ_SPEED,
     ROW_MERGE_HORIZ_SPEED,
@@ -35,8 +34,7 @@ import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
 import { buildMHAVisuals, VectorRouter, PassThroughAnimator, SelfAttentionAnimator } from './mhsa/index.js';
 import { animateVectorMatrixPassThrough as animateVectorMatrixPassThroughExternal } from './mhsa/VectorMatrixPassThrough.js';
 
-// Define speed multiplier
-const SPEED_MULT = GLOBAL_ANIM_SPEED_MULT;
+// Use live binding of GLOBAL_ANIM_SPEED_MULT at each use; do not cache
 
 export class MHSAAnimation {
     /**
@@ -66,8 +64,7 @@ export class MHSAAnimation {
         // Durations & dimensional constants
         this.outputVectorLength      = 64;
         this.mhaResultRiseOffsetY    = MHSA_RESULT_RISE_OFFSET_Y;
-        this.mhaResultRiseDuration   = 500 / SPEED_MULT;
-        this.mhaPassThroughDuration  = MHSA_PASS_THROUGH_TOTAL_DURATION_MS / SPEED_MULT;
+        // Note: durations are exposed as getters to reflect runtime speed changes
 
         // Colours & material defaults
         this.matrixInitialRestingColor     = new THREE.Color(MHSA_MATRIX_INITIAL_RESTING_COLOR);
@@ -141,6 +138,14 @@ export class MHSAAnimation {
         // them compiles, but we skip execution to avoid duplicate visuals.
         // this._setupMHSAVisualizations();
         // this._setupOutputProjectionMatrix();
+    }
+
+    // Dynamic durations that adapt to GLOBAL_ANIM_SPEED_MULT at access time
+    get mhaResultRiseDuration() {
+        return MHA_RESULT_RISE_DURATION_BASE_MS / GLOBAL_ANIM_SPEED_MULT;
+    }
+    get mhaPassThroughDuration() {
+        return MHSA_PASS_THROUGH_TOTAL_DURATION_MS / GLOBAL_ANIM_SPEED_MULT;
     }
 
     // ------------------------------------------------------------------
@@ -404,7 +409,7 @@ export class MHSAAnimation {
                     this._tempModeCompleted = true;
                 } else if (this.mode !== 'temp') {
                     // For perm mode, trigger final color transition here
-                    this._transitionHeadColorsToFinal(1000); // 1 second duration
+                    this._transitionHeadColorsToFinal(HEAD_COLOR_TRANSITION_MS); // 1 second duration
                 }
             }
         };
@@ -459,7 +464,7 @@ export class MHSAAnimation {
         //  CONTINUOUSLY MOVE ORIGINAL RESIDUAL-STREAM VECTORS UPWARDS
         // ------------------------------------------------------------------
         if (this.finalOriginalY !== undefined) {
-            const riseStep = this.postSplitRiseSpeed * SPEED_MULT * deltaTime;
+            const riseStep = this.postSplitRiseSpeed * GLOBAL_ANIM_SPEED_MULT * deltaTime;
             lanes.forEach(lane => {
                 if (!lane || !lane.originalVec || !lane.originalVec.group) return;
 
@@ -545,7 +550,7 @@ export class MHSAAnimation {
             // Fade out the gray vectors to make them less visible
             if (vec.mesh.material && typeof TWEEN !== 'undefined') {
                 new TWEEN.Tween({ op: 1.0 })
-                    .to({ op: 0.2 }, 600)
+                    .to({ op: 0.2 }, DECORATIVE_FADE_MS)
                     .easing(TWEEN.Easing.Quadratic.Out)
                     .onUpdate(function(obj){
                         vec.mesh.material.opacity = obj.op;
@@ -623,13 +628,13 @@ export class MHSAAnimation {
             if (typeof TWEEN !== 'undefined') {
                 const mat = decoVec.mesh.material;
                 new TWEEN.Tween({ op: 0.0 })
-                    .to({ op: 1.0 }, 800)
+                    .to({ op: 1.0 }, DECORATIVE_FADE_MS)
                     .easing(TWEEN.Easing.Quadratic.InOut)
                     .onUpdate(function(o){
                         mat.opacity = o.op;
                         mat.needsUpdate = true;
                     })
-                    .delay(800)
+                    .delay(DECORATIVE_FADE_DELAY_MS)
                     .start();
             }
         });
@@ -640,8 +645,8 @@ export class MHSAAnimation {
                 if (!vec || !vec.mesh || !vec.mesh.material) return;
                 const mat = vec.mesh.material;
                 new TWEEN.Tween({ op: mat.opacity })
-                    .to({ op: 0.05 }, 800)
-                    .delay(800)
+                    .to({ op: 0.05 }, DECORATIVE_FADE_MS)
+                    .delay(DECORATIVE_FADE_DELAY_MS)
                     .onUpdate(function(o){
                         mat.opacity = o.op;
                         mat.needsUpdate = true;
@@ -665,10 +670,10 @@ export class MHSAAnimation {
         //   Begin merge-to-row-vector phase after fade-in delay
         // ------------------------------------------------------
         if (typeof TWEEN !== 'undefined') {
-            // Start after decorative fade-in completes (800 ms)
+            // Start after decorative fade-in completes
             setTimeout(() => {
                 this._startMergeToRowVectors();
-            }, 900); // small extra buffer
+            }, MERGE_TO_ROW_DELAY_AFTER_FADE_MS / GLOBAL_ANIM_SPEED_MULT);
         }
     }
 
@@ -700,7 +705,7 @@ export class MHSAAnimation {
             vecList.forEach((vec, idx) => {
                 const destX = targetX + (idx - (NUM_HEAD_SETS_LAYER - 1) / 2) * ROW_SEGMENT_SPACING;
                 const distance = Math.abs(vec.group.position.x - destX);
-                const durationMs = (distance / (ROW_MERGE_HORIZ_SPEED * SPEED_MULT)) * 1000;
+                const durationMs = (distance / (ROW_MERGE_HORIZ_SPEED * GLOBAL_ANIM_SPEED_MULT)) * 1000;
                 if (durationMs > maxDurationMs) maxDurationMs = durationMs;
 
                 if (typeof TWEEN !== 'undefined') {
@@ -717,11 +722,11 @@ export class MHSAAnimation {
         // After all merge tweens are initiated, schedule the next phases.
         if (typeof TWEEN !== 'undefined') {
             setTimeout(() => {
-                this._transitionHeadColorsToFinal(1000);
+                this._transitionHeadColorsToFinal(HEAD_COLOR_TRANSITION_MS);
                 setTimeout(() => {
                     this._startVectorsThroughOutputProjection(laneVectors);
-                }, 1000);
-            }, maxDurationMs + 200);
+                }, MERGE_POST_COLOR_TRANSITION_DELAY_MS);
+            }, maxDurationMs + MERGE_EXTRA_BUFFER_MS);
         } else {
             this._transitionHeadColorsToFinal(0);
         }
@@ -812,9 +817,9 @@ export class MHSAAnimation {
         const targetYAboveMatrix = matrixTopY + 30;
 
         // Durations
-        const duration1 = 1000;
-        const duration2 = 1000;
-        const duration3 = 500;
+        const duration1 = OUTPUT_PROJ_STAGE1_MS / GLOBAL_ANIM_SPEED_MULT;
+        const duration2 = OUTPUT_PROJ_STAGE2_MS / GLOBAL_ANIM_SPEED_MULT;
+        const duration3 = OUTPUT_PROJ_STAGE3_MS / GLOBAL_ANIM_SPEED_MULT;
 
         if (typeof TWEEN === 'undefined') {
             console.warn("TWEEN not available for output projection matrix animation");
@@ -865,7 +870,7 @@ export class MHSAAnimation {
                                     // Horizontal move back to residual stream centre (x = 0),
                                     // then perform the addition with the lane's original vector
                                     const horizDistance = Math.abs(vec.group.position.x);
-                                    const horizDur = (horizDistance / (ANIM_HORIZ_SPEED * SPEED_MULT)) * 1000;
+                                    const horizDur = (horizDistance / (ANIM_HORIZ_SPEED * GLOBAL_ANIM_SPEED_MULT)) * 1000;
 
                                     new TWEEN.Tween(vec.group.position)
                                         .to({ x: 0 }, horizDur)

@@ -1,8 +1,5 @@
 import * as THREE from 'three';
-import { 
-    VECTOR_LENGTH_PRISM,
-    GROUPED_PRISM_SLOWDOWN
-} from '../utils/constants.js';
+import { VECTOR_LENGTH_PRISM, PLN_UNIT_DELAY_MS, PLN_UNIT_CYCLE_DURATION_MS } from '../utils/constants.js';
 import { mapValueToColor } from '../utils/colors.js'; // For color mapping if needed
 
 export class PrismLayerNormAnimation {
@@ -11,11 +8,10 @@ export class PrismLayerNormAnimation {
         this.isAnimating = false;
         this.animationProgress = 0; // Overall animation progress (not currently used, but can be)
         
-        const slowdown = GROUPED_PRISM_SLOWDOWN;
         this.config = {
             // Scale delays and durations so total effect length is preserved
-            unitDelay: 3 * slowdown,      // ms between activations
-            unitDuration: 200 * Math.sqrt(slowdown), // ms per unit cycle
+            unitDelay: PLN_UNIT_DELAY_MS,      // ms between activations
+            unitDuration: PLN_UNIT_CYCLE_DURATION_MS, // ms per unit cycle
             maxRiseHeight: 12,  // unchanged visual height
             falloffPower: 1.4,   
             minRiseHeight: 2,  

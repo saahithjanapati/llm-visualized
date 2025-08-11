@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { VECTOR_LENGTH_PRISM } from '../../utils/constants.js';
+import { VECTOR_LENGTH_PRISM, SA_RED_EXTRA_RISE, SA_V_RISE_DURATION_MS, SA_K_ALIGN_DURATION_MS, SA_BLUE_HORIZ_DURATION_MS, SA_BLUE_VERT_DURATION_MS, SA_BLUE_PAUSE_MS, SA_BLUE_QUEUE_SHIFT_DURATION_MS, SA_DUPLICATE_POP_IN_MS, SA_DUPLICATE_TRAVEL_MERGE_MS, SA_DUPLICATE_POP_OUT_MS, GLOBAL_ANIM_SPEED_MULT, SELF_ATTENTION_TIME_MULT } from '../../utils/constants.js';
 import { VectorVisualizationInstancedPrism } from '../../components/VectorVisualizationInstancedPrism.js';
 
 /**
@@ -35,19 +35,9 @@ export class SelfAttentionAnimator {
         this._callbacks = [];
 
         // ------------------------------------------------------------------
-        // V/K specific constants
+        // V/K constants (distances remain static; durations scale via getters)
         // ------------------------------------------------------------------
-        this.RED_EXTRA_RISE   = 75;   // additional rise for red (V) vectors
-        this.V_RISE_DURATION  = 600;  // ms
-        this.K_ALIGN_DURATION = 1000; // ms
-
-        // ------------------------------------------------------------------
-        // NEW – Query (blue) conveyor-belt constants
-        // ------------------------------------------------------------------
-        this.BLUE_HORIZ_DURATION      = 400;  // ms for horizontal slides
-        this.BLUE_VERT_DURATION       = 400;  // ms per lane hop (z-travel)
-        this.BLUE_PAUSE_MS            = 100;  // pause at each lane
-        this.BLUE_QUEUE_SHIFT_DURATION = 400; // remaining blues shift up
+        this.RED_EXTRA_RISE   = SA_RED_EXTRA_RISE;   // additional rise for red (V) vectors
 
         // Internal bookkeeping (per-head)
         this.blueQueues        = {};  // { headIdx: [vec, ...] }
@@ -55,6 +45,17 @@ export class SelfAttentionAnimator {
         this.blueProcessedCount = {}; // { headIdx: number }
         this.greensAligned     = {};  // { headIdx: boolean } – flagged once K vectors are in place
     }
+
+    // Durations dynamically scaled by GLOBAL_ANIM_SPEED_MULT
+    get V_RISE_DURATION() { return (SA_V_RISE_DURATION_MS / GLOBAL_ANIM_SPEED_MULT) * SELF_ATTENTION_TIME_MULT; }
+    get K_ALIGN_DURATION() { return (SA_K_ALIGN_DURATION_MS / GLOBAL_ANIM_SPEED_MULT) * SELF_ATTENTION_TIME_MULT; }
+    get BLUE_HORIZ_DURATION() { return (SA_BLUE_HORIZ_DURATION_MS / GLOBAL_ANIM_SPEED_MULT) * SELF_ATTENTION_TIME_MULT; }
+    get BLUE_VERT_DURATION() { return (SA_BLUE_VERT_DURATION_MS / GLOBAL_ANIM_SPEED_MULT) * SELF_ATTENTION_TIME_MULT; }
+    get BLUE_PAUSE_MS() { return (SA_BLUE_PAUSE_MS / GLOBAL_ANIM_SPEED_MULT) * SELF_ATTENTION_TIME_MULT; }
+    get BLUE_QUEUE_SHIFT_DURATION() { return (SA_BLUE_QUEUE_SHIFT_DURATION_MS / GLOBAL_ANIM_SPEED_MULT) * SELF_ATTENTION_TIME_MULT; }
+    get DUPLICATE_POP_IN_MS() { return (SA_DUPLICATE_POP_IN_MS / GLOBAL_ANIM_SPEED_MULT) * SELF_ATTENTION_TIME_MULT; }
+    get DUPLICATE_TRAVEL_MERGE_MS() { return (SA_DUPLICATE_TRAVEL_MERGE_MS / GLOBAL_ANIM_SPEED_MULT) * SELF_ATTENTION_TIME_MULT; }
+    get DUPLICATE_POP_OUT_MS() { return (SA_DUPLICATE_POP_OUT_MS / GLOBAL_ANIM_SPEED_MULT) * SELF_ATTENTION_TIME_MULT; }
 
     /**
      * Public entry – dual signature for backwards compatibility.
@@ -383,8 +384,8 @@ export class SelfAttentionAnimator {
                                     // 5. Traverse along lanes again i times (over red vectors)
                                     this._traverseLanes(vector, laneZs, i, spheres, false, () => {
                                         // 6. Fade / dispose after finishing red traversal
-                                        new TWEEN.Tween(vector.group.scale)
-                                            .to({ x: 0.001, y: 0.001, z: 0.001 }, 500)
+            new TWEEN.Tween(vector.group.scale)
+                .to({ x: 0.001, y: 0.001, z: 0.001 }, this.DUPLICATE_POP_OUT_MS)
                                             .onComplete(() => {
                                                 if (vector.group.parent) vector.group.parent.remove(vector.group);
                                                 if (typeof vector.dispose === 'function') vector.dispose();
@@ -440,7 +441,7 @@ export class SelfAttentionAnimator {
         // Begin traversal over red vectors
         this._traverseLanes(travellingVec, laneZs, hopCount, spheresArr, false, () => {
             new TWEEN.Tween(travellingVec.group.scale)
-                .to({ x: 0.001, y: 0.001, z: 0.001 }, 500)
+                .to({ x: 0.001, y: 0.001, z: 0.001 }, this.DUPLICATE_POP_OUT_MS)
                 .onComplete(() => {
                     if (travellingVec.group.parent) travellingVec.group.parent.remove(travellingVec.group);
                     if (typeof travellingVec.dispose === 'function') travellingVec.dispose();
@@ -531,22 +532,22 @@ export class SelfAttentionAnimator {
                                 this.ctx.parentGroup.add(dupVec.group);
                                 dupVec.group.scale.set(0.001, 0.001, 0.001);
                                 // Optional quick pop-in
-                                new TWEEN.Tween(dupVec.group.scale).to({ x: 1, y: 1, z: 1 }, 120).start();
+                new TWEEN.Tween(dupVec.group.scale).to({ x: 1, y: 1, z: 1 }, this.DUPLICATE_POP_IN_MS).start();
                                 // Direct: fixed V -> travelling red vector
                                 new TWEEN.Tween(dupVec.group.position)
-                                    .to({ x: vector.group.position.x, y: raisedY, z: vector.group.position.z }, 400)
+                                    .to({ x: vector.group.position.x, y: raisedY, z: vector.group.position.z }, this.DUPLICATE_TRAVEL_MERGE_MS)
                                     .easing(TWEEN.Easing.Quadratic.InOut)
                                     .onComplete(() => {
                                                 // Reveal travelling red vector on its first merge
                                                 if (vector.group.scale.x < 0.5) {
-                                                    new TWEEN.Tween(vector.group.scale)
-                                                        .to({ x: 1, y: 1, z: 1 }, 150)
+                                                new TWEEN.Tween(vector.group.scale)
+                                                    .to({ x: 1, y: 1, z: 1 }, this.DUPLICATE_POP_IN_MS)
                                                         .easing(TWEEN.Easing.Quadratic.Out)
                                                         .start();
                                                 }
                                             // Fade / dispose duplicate
                                                 new TWEEN.Tween(dupVec.group.scale)
-                                                    .to({ x: 0.001, y: 0.001, z: 0.001 }, 150)
+                                                    .to({ x: 0.001, y: 0.001, z: 0.001 }, this.DUPLICATE_POP_OUT_MS)
                                                     .onComplete(() => {
                                                         if (dupVec.group.parent) dupVec.group.parent.remove(dupVec.group);
                                                         if (typeof dupVec.dispose === 'function') dupVec.dispose();
