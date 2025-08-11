@@ -84,9 +84,11 @@ export class LayerPipeline {
         // world-space trails to the new engine scene (safety no-op if same).
         if (externalLanes && externalLanes.length) {
             externalLanes.forEach(lane => {
-                const v = lane && lane.originalVec;
-                if (v && v.userData && v.userData.trail && typeof v.userData.trail.reparent === 'function') {
-                    v.userData.trail.reparent(this._engine.scene);
+                // Prefer the dedicated world-space residual trail carried across lanes
+                const trailRef = (lane && lane.originalTrail)
+                    || (lane && lane.originalVec && lane.originalVec.userData && lane.originalVec.userData.trail);
+                if (trailRef && typeof trailRef.reparent === 'function') {
+                    trailRef.reparent(this._engine.scene);
                 }
             });
         }

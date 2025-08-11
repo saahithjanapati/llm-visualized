@@ -16,9 +16,9 @@ export let SELF_ATTENTION_TIME_MULT = 1;
 export function setPlaybackSpeed(preset) {
     // Accept string keys or fallback to medium
     const cfg = {
-        slow:   { mult: 25,  addMult: 2, selfAttenTimeMult: 1 },
-        medium: { mult: 50,  addMult: 4, selfAttenTimeMult: 1 },
-        fast:   { mult: 100, addMult: 8, selfAttenTimeMult: 16 }
+        slow:   { mult: 25,  addMult: 2, selfAttenTimeMult: 2   },  // slowest
+        medium: { mult: 50,  addMult: 4, selfAttenTimeMult: 1   },  // default
+        fast:   { mult: 100, addMult: 8, selfAttenTimeMult: 0.35 }  // fastest
     };
     const p = typeof preset === 'string' ? preset.toLowerCase() : 'medium';
     const sel = cfg[p] || cfg.medium;

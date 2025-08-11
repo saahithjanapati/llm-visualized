@@ -1365,7 +1365,9 @@ export default class Gpt2Layer extends BaseLayer {
                 const segmentsList = [];
                 const origTrailSet = new Set();
                 this.lanes.forEach(l => {
-                    const t = l && l.originalVec && l.originalVec.userData && l.originalVec.userData.trail;
+                    // Prefer the dedicated world-space residual trail reference if available
+                    const t = (l && l.originalTrail)
+                        || (l && l.originalVec && l.originalVec.userData && l.originalVec.userData.trail);
                     if (t) origTrailSet.add(t);
                     if (t && typeof t.extractSegmentsAndTrim === 'function') {
                         const seg = t.extractSegmentsAndTrim();
