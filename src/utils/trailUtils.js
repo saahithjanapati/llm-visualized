@@ -37,6 +37,9 @@ export class StraightLineTrail {
 
         this._material = new THREE.LineBasicMaterial({ color: this._color, linewidth: lineWidth, transparent: this._opacity < 1.0, opacity: this._opacity });
         this._line = new THREE.Line(this._geometry, this._material);
+        // Tag for discovery and back-reference
+        this._line.userData.isTrail = true;
+        this._line.userData.trailRef = this;
         scene.add(this._line);
 
         this._vertexCount = 0;
@@ -119,6 +122,57 @@ export class StraightLineTrail {
         this._material.dispose();
     }
 
+    /** Return a shallow copy of currently used positions (vertexCount * 3). */
+    copyUsedPositions() {
+        const n = Math.max(0, this._vertexCount);
+        const out = new Float32Array(n * 3);
+        out.set(this._positions.subarray(0, n * 3));
+        return out;
+    }
+
+    /** Convert current polyline vertices into LineSegments vertex pairs. */
+    toSegmentsFloat32() {
+        const n = this._vertexCount;
+        if (n < 2) return new Float32Array(0);
+        const segs = (n - 1);
+        const out = new Float32Array(segs * 2 * 3);
+        let o = 0;
+        for (let i = 0; i < n - 1; i++) {
+            const i0 = i * 3;
+            const i1 = (i + 1) * 3;
+            // v0
+            out[o++] = this._positions[i0 + 0];
+            out[o++] = this._positions[i0 + 1];
+            out[o++] = this._positions[i0 + 2];
+            // v1
+            out[o++] = this._positions[i1 + 0];
+            out[o++] = this._positions[i1 + 1];
+            out[o++] = this._positions[i1 + 2];
+        }
+        return out;
+    }
+
+    /**
+     * Extract current segments and trim the live trail down to its last point,
+     * so future updates continue from the same position without duplicating
+     * the already-frozen history.
+     */
+    extractSegmentsAndTrim() {
+        const seg = this.toSegmentsFloat32();
+        // Reset the live polyline to a degenerate 2-vertex line at the last pos
+        if (this._vertexCount > 0) {
+            const lastIdx = (this._vertexCount - 1) * 3;
+            const px = this._positions[lastIdx + 0];
+            const py = this._positions[lastIdx + 1];
+            const pz = this._positions[lastIdx + 2];
+            const v = new THREE.Vector3(px, py, pz);
+            // write two identical vertices
+            this._vertexCount = 0;
+            this.start(v);
+        }
+        return seg;
+    }
+
     // ------------------------------------------------------------------
     // Internal helpers
     // ------------------------------------------------------------------
@@ -129,4 +183,79 @@ export class StraightLineTrail {
         this._positions[i3 + 1] = vec3.y;
         this._positions[i3 + 2] = vec3.z;
     }
+}
+
+/** Traverse an Object3D subtree and collect StraightLineTrail refs. */
+export function collectTrailsUnder(root) {
+    const trails = [];
+    if (!root) return trails;
+    root.traverse(obj => {
+        if (obj && obj.userData && obj.userData.isTrail && obj.userData.trailRef) {
+            trails.push(obj.userData.trailRef);
+        }
+    });
+    return trails;
+}
+
+/** Merge multiple StraightLineTrail polylines into a single LineSegments. */
+export function mergeTrailsIntoLineSegments(trails, scene, color = TRAIL_COLOR, lineWidth = TRAIL_LINE_WIDTH, opacity = TRAIL_OPACITY) {
+    if (!Array.isArray(trails) || trails.length === 0 || !scene) return null;
+
+    // Concatenate segments for all trails
+    let totalFloats = 0;
+    const chunks = [];
+    for (const t of trails) {
+        if (!t || typeof t.toSegmentsFloat32 !== 'function') continue;
+        const seg = t.toSegmentsFloat32();
+        if (seg.length === 0) continue;
+        chunks.push(seg);
+        totalFloats += seg.length;
+    }
+    if (totalFloats === 0) return null;
+
+    const positions = new Float32Array(totalFloats);
+    let offset = 0;
+    for (const c of chunks) {
+        positions.set(c, offset);
+        offset += c.length;
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setDrawRange(0, positions.length / 3);
+
+    const material = new THREE.LineBasicMaterial({ color, linewidth: lineWidth, transparent: opacity < 1.0, opacity });
+    const merged = new THREE.LineSegments(geometry, material);
+    merged.userData.label = 'MergedTrails';
+    scene.add(merged);
+
+    // Dispose original individual trails
+    trails.forEach(t => t && typeof t.dispose === 'function' && t.dispose());
+
+    return merged;
+}
+
+/** Build one LineSegments object from a list of Float32Array segment buffers. */
+export function buildMergedLineSegmentsFromSegments(segmentsList, scene, color = TRAIL_COLOR, lineWidth = TRAIL_LINE_WIDTH, opacity = TRAIL_OPACITY) {
+    if (!Array.isArray(segmentsList) || segmentsList.length === 0 || !scene) return null;
+    let totalFloats = 0;
+    for (const seg of segmentsList) {
+        if (seg && seg.length) totalFloats += seg.length;
+    }
+    if (totalFloats === 0) return null;
+    const positions = new Float32Array(totalFloats);
+    let offset = 0;
+    for (const seg of segmentsList) {
+        if (!seg || !seg.length) continue;
+        positions.set(seg, offset);
+        offset += seg.length;
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setDrawRange(0, positions.length / 3);
+    const material = new THREE.LineBasicMaterial({ color, linewidth: lineWidth, transparent: opacity < 1.0, opacity });
+    const merged = new THREE.LineSegments(geometry, material);
+    merged.userData.label = 'MergedTrails';
+    scene.add(merged);
+    return merged;
 }

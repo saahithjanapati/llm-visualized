@@ -3,7 +3,7 @@ import BaseLayer from '../BaseLayer.js';
 import { LayerNormalizationVisualization } from '../../components/LayerNormalizationVisualization.js';
 import { WeightMatrixVisualization } from '../../components/WeightMatrixVisualization.js';
 import { VectorVisualizationInstancedPrism } from '../../components/VectorVisualizationInstancedPrism.js';
-import { StraightLineTrail } from '../../utils/trailUtils.js';
+import { StraightLineTrail, buildMergedLineSegmentsFromSegments, collectTrailsUnder, mergeTrailsIntoLineSegments } from '../../utils/trailUtils.js';
 import {
     LN_PARAMS,
     LN_TO_MHA_GAP,
@@ -1355,6 +1355,37 @@ export default class Gpt2Layer extends BaseLayer {
                 });
             }
         });
+
+        // After making meshes opaque, fuse the numerous per-lane residual
+        // trails into a single static LineSegments and trim the live trails so
+        // they can continue seamlessly in higher layers with minimal cost.
+        try {
+            // 1) Freeze residual trails completed so far into a static merged line
+            if (Array.isArray(this.lanes) && this.lanes.length) {
+                const segmentsList = [];
+                const origTrailSet = new Set();
+                this.lanes.forEach(l => {
+                    const t = l && l.originalVec && l.originalVec.userData && l.originalVec.userData.trail;
+                    if (t) origTrailSet.add(t);
+                    if (t && typeof t.extractSegmentsAndTrim === 'function') {
+                        const seg = t.extractSegmentsAndTrim();
+                        if (seg && seg.length) segmentsList.push(seg);
+                    }
+                });
+                if (segmentsList.length) {
+                    buildMergedLineSegmentsFromSegments(segmentsList, this._globalScene || this.root);
+                }
+
+                // 2) Merge all other per-layer (non-residual) trails under this.root
+                const allLayerTrails = collectTrailsUnder(this.root);
+                const otherTrails = allLayerTrails.filter(t => !origTrailSet.has(t));
+                if (otherTrails.length) {
+                    mergeTrailsIntoLineSegments(otherTrails, this.root);
+                }
+            }
+        } catch (e) {
+            // Best-effort optimisation; ignore failures to avoid breaking the demo.
+        }
     }
 
     /**
