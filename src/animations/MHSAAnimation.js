@@ -796,11 +796,7 @@ export class MHSAAnimation {
             if (combinedVec.mesh.instanceColor) combinedVec.mesh.instanceColor.needsUpdate = true;
 
             this.parentGroup.add(combinedVec.group);
-            // ---- Trail for combined vector ----
-            const combTrail = new StraightLineTrail(this.parentGroup, 0xffffff, 1);
-            combTrail.start(combinedVec.group.position);
-            combinedVec.userData = combinedVec.userData || {};
-            combinedVec.userData.trail = combTrail;
+            // No trail above matrices: do not create a trail for combined vectors
 
             combinedVectors.push({ vec: combinedVec, laneZ });
 
@@ -841,6 +837,10 @@ export class MHSAAnimation {
                 .to({ y: matrixBottomY }, duration1)
                 .easing(TWEEN.Easing.Quadratic.InOut)
                 .onUpdate(() => {
+                    // Keep trail brightness consistent during stage 1 rise
+                    if (vec && vec.userData && vec.userData.trail) {
+                        vec.userData.trail.update(vec.group.position);
+                    }
                 })
                 .onComplete(() => {
                     if (idx === 0) {
@@ -865,6 +865,12 @@ export class MHSAAnimation {
                             }
                         })
 
+                        .onUpdate(() => {
+                            // Continue updating trail through matrix travel
+                            if (vec && vec.userData && vec.userData.trail) {
+                                vec.userData.trail.update(vec.group.position);
+                            }
+                        })
                         .onComplete(() => {
                             const extraRise = 30; // additional upward distance
                             const finalCombinedY = targetYAboveMatrix + extraRise;
@@ -873,6 +879,11 @@ export class MHSAAnimation {
                             new TWEEN.Tween(vec.group.position)
                                 .to({ y: finalCombinedY }, duration3)
                                 .easing(TWEEN.Easing.Quadratic.InOut)
+                                .onUpdate(() => {
+                                    if (vec && vec.userData && vec.userData.trail) {
+                                        vec.userData.trail.update(vec.group.position);
+                                    }
+                                })
                                 .onComplete(() => {
                                     // Horizontal move back to residual stream centre (x = 0),
                                     // then perform the addition with the lane's original vector
@@ -882,6 +893,11 @@ export class MHSAAnimation {
                                     new TWEEN.Tween(vec.group.position)
                                         .to({ x: 0 }, horizDur)
                                         .easing(TWEEN.Easing.Quadratic.InOut)
+                                        .onUpdate(() => {
+                                            if (vec && vec.userData && vec.userData.trail) {
+                                                vec.userData.trail.update(vec.group.position);
+                                            }
+                                        })
 
                                         .onComplete(() => {
                                             if (this.currentLanes) {

@@ -98,6 +98,20 @@ export function animateVectorMatrixPassThrough(
             //  Vector motion       
             // --------------------------------------------------------------
             vector.group.position.y = tweenState.y;
+            // Update trails only while BELOW the matrix; no trails above matrices
+            try {
+                const ud = vector.userData || {};
+                const trail = ud.trail;
+                if (trail && tweenState.y < matrixBottomY) {
+                    if (ud.trailWorld) {
+                        const wp = new THREE.Vector3();
+                        vector.group.getWorldPosition(wp);
+                        trail.update(wp);
+                    } else {
+                        trail.update(vector.group.position);
+                    }
+                }
+            } catch (_) { /* no-op */ }
         
 
             // --------------------------------------------------------------
@@ -115,6 +129,11 @@ export function animateVectorMatrixPassThrough(
                 vector = smallVec; // continue animating this handle
                 // Preserve metadata such as headIndex for downstream alignment
                 vector.userData = heavyVec.userData ? { ...heavyVec.userData } : {};
+                // Ensure trails do NOT continue above matrices for any category
+                if (vector.userData) {
+                    delete vector.userData.trail;
+                    delete vector.userData.trailWorld;
+                }
                 // If this is a green (K) vector, update its parent lane reference
                 if (vectorCategory === 'K' && vector.userData.parentLane) {
                     const pl = vector.userData.parentLane;
@@ -123,11 +142,7 @@ export function animateVectorMatrixPassThrough(
                         pl.upwardCopies[hIdx] = vector;
                     }
                 }
-                // For K vectors we keep the existing trail as a static line but
-                // stop updating it further by detaching the reference.
-                if (vectorCategory === 'K') {
-                    delete vector.userData.trail; // prevent future updates on new smallVec
-                }
+                // heavyVec trail remains in scene as a static line below; do not update above
                 initialDimensionChangeApplied = true;
                 ctx.parentGroup.remove(heavyVec.group);
                 if (typeof heavyVec.dispose === 'function') heavyVec.dispose();

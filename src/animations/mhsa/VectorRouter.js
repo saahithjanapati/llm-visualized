@@ -98,7 +98,16 @@ export class VectorRouter {
                 lane.upwardCopies.forEach((upVec) => {
                     if (upVec.group.position.y < this.headStopY) {
                         upVec.group.position.y = Math.min(this.headStopY, upVec.group.position.y + MHSA_DUPLICATE_VECTOR_RISE_SPEED * GLOBAL_ANIM_SPEED_MULT * deltaTime);
-                        if (upVec.userData.trail) upVec.userData.trail.update(upVec.group.position);
+                        if (upVec.userData && upVec.userData.trail) {
+                            const ud = upVec.userData;
+                            if (ud.trailWorld) {
+                                const wp = new THREE.Vector3();
+                                upVec.group.getWorldPosition(wp);
+                                ud.trail.update(wp);
+                            } else {
+                                ud.trail.update(upVec.group.position);
+                            }
+                        }
                     }
                 });
             }
@@ -153,11 +162,36 @@ export class VectorRouter {
                     if (Math.abs(v.group.position.x - obj.targetX) > 0.01) {
                         const dir = v.group.position.x < obj.targetX ? 1 : -1;
                         v.group.position.x += dir * dx;
-                    if (v.userData.trail) v.userData.trail.update(v.group.position);
+                        if (v.userData && v.userData.trail) {
+                            const ud = v.userData;
+                            // Only update trail while below matrix level (consistent with other vectors)
+                            const matrixBottomY = this.headStopY; // Q/V vectors stop at headStopY which is just below matrices
+                            if (v.group.position.y < matrixBottomY) {
+                                if (ud.trailWorld) {
+                                    const wp = new THREE.Vector3();
+                                    v.group.getWorldPosition(wp);
+                                    ud.trail.update(wp);
+                                } else {
+                                    ud.trail.update(v.group.position);
+                                }
+                            }
+                        }
                         if ((dir === 1 && v.group.position.x > obj.targetX) || (dir === -1 && v.group.position.x < obj.targetX)) v.group.position.x = obj.targetX;
                     }
                     v.group.position.y = this.headStopY;
-                    if (v.userData.trail) v.userData.trail.update(v.group.position);
+                    if (v.userData && v.userData.trail) {
+                        // Only update trail while below matrix level (consistent with other vectors)
+                        const matrixBottomY = this.headStopY; // Q/V vectors stop at headStopY which is just below matrices
+                        if (v.group.position.y < matrixBottomY) {
+                            if (ud.trailWorld) {
+                                const wp = new THREE.Vector3();
+                                v.group.getWorldPosition(wp);
+                                ud.trail.update(wp);
+                            } else {
+                                ud.trail.update(v.group.position);
+                            }
+                        }
+                    }
                 });
             }
         });
