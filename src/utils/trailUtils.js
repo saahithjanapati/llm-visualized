@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { TRAIL_COLOR, TRAIL_LINE_WIDTH, TRAIL_OPACITY, TRAIL_MAX_SEGMENTS } from './trailConstants.js';
+import { TRAIL_COLOR, TRAIL_LINE_WIDTH, TRAIL_OPACITY, TRAIL_MAX_SEGMENTS, scaleOpacityForDisplay, scaleLineWidthForDisplay } from './trailConstants.js';
 
 /**
  * StraightLineTrail – memory-efficient trail renderer.
@@ -35,7 +35,9 @@ export class StraightLineTrail {
         this._geometry.setAttribute('position', this._attr);
         this._geometry.setDrawRange(0, 0); // nothing yet
 
-        this._material = new THREE.LineBasicMaterial({ color: this._color, linewidth: lineWidth, transparent: this._opacity < 1.0, opacity: this._opacity });
+        const effectiveOpacity = scaleOpacityForDisplay(this._opacity);
+        const effectiveWidth = scaleLineWidthForDisplay(lineWidth);
+        this._material = new THREE.LineBasicMaterial({ color: this._color, linewidth: effectiveWidth, transparent: effectiveOpacity < 1.0, opacity: effectiveOpacity });
         this._line = new THREE.Line(this._geometry, this._material);
         // Tag for discovery and back-reference
         this._line.userData.isTrail = true;
@@ -224,7 +226,9 @@ export function mergeTrailsIntoLineSegments(trails, scene, color = TRAIL_COLOR, 
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geometry.setDrawRange(0, positions.length / 3);
 
-    const material = new THREE.LineBasicMaterial({ color, linewidth: lineWidth, transparent: opacity < 1.0, opacity });
+    const effOpacity = scaleOpacityForDisplay(opacity);
+    const effWidth = scaleLineWidthForDisplay(lineWidth);
+    const material = new THREE.LineBasicMaterial({ color, linewidth: effWidth, transparent: effOpacity < 1.0, opacity: effOpacity });
     const merged = new THREE.LineSegments(geometry, material);
     merged.userData.label = 'MergedTrails';
     scene.add(merged);
@@ -253,7 +257,9 @@ export function buildMergedLineSegmentsFromSegments(segmentsList, scene, color =
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geometry.setDrawRange(0, positions.length / 3);
-    const material = new THREE.LineBasicMaterial({ color, linewidth: lineWidth, transparent: opacity < 1.0, opacity });
+    const effOpacity2 = scaleOpacityForDisplay(opacity);
+    const effWidth2 = scaleLineWidthForDisplay(lineWidth);
+    const material = new THREE.LineBasicMaterial({ color, linewidth: effWidth2, transparent: effOpacity2 < 1.0, opacity: effOpacity2 });
     const merged = new THREE.LineSegments(geometry, material);
     merged.userData.label = 'MergedTrails';
     scene.add(merged);

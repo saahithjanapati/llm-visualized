@@ -4,6 +4,7 @@ import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js';
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization.js';
 import { VectorVisualization } from '../components/VectorVisualization.js';
 import { VECTOR_LENGTH } from '../utils/constants.js';
+import { scaleOpacityForDisplay } from '../utils/trailConstants.js';
 
 // Maximum points per trail line
 const MAX_TRAIL_POINTS = 1000;
@@ -161,7 +162,7 @@ export function initAttentionHeadAnimation(containerElement) {
         const positions = new Float32Array(MAX_TRAIL_POINTS * 3);
         geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
         geometry.setDrawRange(0, 0);
-        const material = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.07 });
+        const material = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: scaleOpacityForDisplay(0.07) });
         const line = new THREE.Line(geometry, material);
         scene.add(line);
         // seed first point

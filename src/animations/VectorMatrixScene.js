@@ -4,6 +4,7 @@ import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js';
 import { VectorVisualization } from '../components/VectorVisualization';
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization';
 import { VECTOR_LENGTH } from '../utils/constants.js'; // Import VECTOR_LENGTH
+import { scaleOpacityForDisplay } from '../utils/trailConstants.js';
 
 // Maximum points per trail line (adjust for performance/length)
 const MAX_TRAIL_POINTS = 1000; // Further increased buffer size
@@ -18,7 +19,7 @@ export function initVectorMatrixScene(canvas) {
 
     const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 
     // --- Lighting ---
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
@@ -99,7 +100,7 @@ export function initVectorMatrixScene(canvas) {
         const positions = new Float32Array(MAX_TRAIL_POINTS * 3);
         trailGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 
-        const trailMaterial = new THREE.LineBasicMaterial({ color: 0x888888 }); // Gray color
+        const trailMaterial = new THREE.LineBasicMaterial({ color: 0x888888, transparent: true, opacity: scaleOpacityForDisplay(0.08) });
         const trailLine = new THREE.Line(trailGeometry, trailMaterial);
         scene.add(trailLine);
         allTrailLines.push({ line: trailLine, geometry: trailGeometry, material: trailMaterial });
