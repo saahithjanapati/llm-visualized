@@ -1144,6 +1144,33 @@ export default class Gpt2Layer extends BaseLayer {
             .onUpdate(() => {
             })
             .onComplete(() => {
+                // Prevent double-drawing along the residual stream: retire the local collapse
+                // trail (attached to this.root) and switch this vector to the world-space
+                // residual trail so only one trail continues at x=0.
+                try {
+                    // 1) Freeze the local collapse trail into a static segments object
+                    const localTrail = vec && vec.userData && vec.userData.trail;
+                    if (localTrail && localTrail._scene === this.root) {
+                        const colorHex = (localTrail._material && localTrail._material.color)
+                            ? localTrail._material.color.getHex() : undefined;
+                        mergeTrailsIntoLineSegments([localTrail], this.root, colorHex);
+                        if (vec.userData) delete vec.userData.trail;
+                    }
+
+                    // 2) Reassign the world-space residual trail to the collapsed vector
+                    const worldTrail = (lane && lane.originalTrail)
+                        || (lane && lane.originalVec && lane.originalVec.userData && lane.originalVec.userData.trail);
+                    if (worldTrail) {
+                        if (lane && lane.originalVec && lane.originalVec.userData) {
+                            delete lane.originalVec.userData.trail;
+                            delete lane.originalVec.userData.trailWorld;
+                        }
+                        vec.userData = vec.userData || {};
+                        vec.userData.trail = worldTrail;
+                        vec.userData.trailWorld = true;
+                    }
+                } catch (_) { /* no-op */ }
+
                 // Perform final addition with original vector
                 if (this.mhsaAnimation && lane.originalVec) {
                     // Track this addition animation
@@ -1364,25 +1391,44 @@ export default class Gpt2Layer extends BaseLayer {
             if (Array.isArray(this.lanes) && this.lanes.length) {
                 const segmentsList = [];
                 const origTrailSet = new Set();
+                let residualColor = null;
                 this.lanes.forEach(l => {
                     // Prefer the dedicated world-space residual trail reference if available
                     const t = (l && l.originalTrail)
                         || (l && l.originalVec && l.originalVec.userData && l.originalVec.userData.trail);
-                    if (t) origTrailSet.add(t);
+                    if (t) {
+                        origTrailSet.add(t);
+                        // Capture the color/opacity from the first trail so the merged line matches brightness
+                        if (residualColor === null && t._material && t._material.color) {
+                            residualColor = t._material.color.getHex();
+                        } else if (residualColor === null && typeof t._color !== 'undefined') {
+                            residualColor = t._color;
+                        }
+                    }
                     if (t && typeof t.extractSegmentsAndTrim === 'function') {
                         const seg = t.extractSegmentsAndTrim();
                         if (seg && seg.length) segmentsList.push(seg);
                     }
                 });
                 if (segmentsList.length) {
-                    buildMergedLineSegmentsFromSegments(segmentsList, this._globalScene || this.root);
+                    // Preserve brightness by using the same color as the live trails (default to white if unknown)
+                    const colorToUse = residualColor != null ? residualColor : 0xffffff;
+                    buildMergedLineSegmentsFromSegments(segmentsList, this._globalScene || this.root, colorToUse);
                 }
 
                 // 2) Merge all other per-layer (non-residual) trails under this.root
                 const allLayerTrails = collectTrailsUnder(this.root);
                 const otherTrails = allLayerTrails.filter(t => !origTrailSet.has(t));
                 if (otherTrails.length) {
-                    mergeTrailsIntoLineSegments(otherTrails, this.root);
+                    // Try to preserve their appearance by copying the first trail's color
+                    let otherColor = null;
+                    const firstTrail = otherTrails[0];
+                    if (firstTrail && firstTrail._material && firstTrail._material.color) {
+                        otherColor = firstTrail._material.color.getHex();
+                    } else if (firstTrail && typeof firstTrail._color !== 'undefined') {
+                        otherColor = firstTrail._color;
+                    }
+                    mergeTrailsIntoLineSegments(otherTrails, this.root, otherColor != null ? otherColor : undefined);
                 }
             }
         } catch (e) {
