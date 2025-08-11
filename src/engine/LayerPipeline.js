@@ -80,6 +80,16 @@ export class LayerPipeline {
             prevLayer.isActive = false;
         }
         const externalLanes = prevLayer.lanes;
+        // Ensure residual trails remain continuous by reparenting any
+        // world-space trails to the new engine scene (safety no-op if same).
+        if (externalLanes && externalLanes.length) {
+            externalLanes.forEach(lane => {
+                const v = lane && lane.originalVec;
+                if (v && v.userData && v.userData.trail && typeof v.userData.trail.reparent === 'function') {
+                    v.userData.trail.reparent(this._engine.scene);
+                }
+            });
+        }
 
         const nextLayer = this._layers[this._currentLayerIdx];
         if (!nextLayer) return;

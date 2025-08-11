@@ -89,6 +89,11 @@ export default class Gpt2Layer extends BaseLayer {
     init(scene) {
         super.init(scene);
 
+        // Keep a reference to the global scene so certain visuals (like the
+        // continuous residual-stream trails) can render in world-space and
+        // survive lane hand-offs between stacked layers.
+        this._globalScene = scene;
+
         // Offset root vertically for stack layout
         this.root.position.y = this.index * VERTICAL_SPACING + this.yOffset;
 
@@ -292,7 +297,13 @@ export default class Gpt2Layer extends BaseLayer {
                 ];
                 vecsToCheck.forEach(v => {
                     if (v && v.userData && v.userData.trail) {
-                        v.userData.trail.update(v.group.position);
+                        if (v.userData.trailWorld) {
+                            const wp = new THREE.Vector3();
+                            v.group.getWorldPosition(wp);
+                            v.userData.trail.update(wp);
+                        } else {
+                            v.userData.trail.update(v.group.position);
+                        }
                     }
                 });
 
@@ -1201,6 +1212,17 @@ export default class Gpt2Layer extends BaseLayer {
             this.root.attach(originalVec.group);
             zPos   = originalVec.group.position.z;
             startY = originalVec.group.position.y; // Keep current position
+            // Prefer to carry over the existing residual-stream trail so it
+            // remains a single continuous line across layer boundaries.
+            if (trailFromPrev) {
+                trail = trailFromPrev;
+                if (typeof trail.reparent === 'function') {
+                    trail.reparent(this._globalScene);
+                }
+                originalVec.userData = originalVec.userData || {};
+                originalVec.userData.trail = trail;
+                originalVec.userData.trailWorld = true;
+            }
         } else {
             zPos = -LN_PARAMS.depth / 2 + slitSpacing * (laneIdx + 1);
             const data = this.random.nextVector(VECTOR_LENGTH_PRISM);
@@ -1209,10 +1231,17 @@ export default class Gpt2Layer extends BaseLayer {
             this.root.add(originalVec.group);
 
         // ────────────── Trail for the ORIGINAL vector ──────────────
-        trail = new StraightLineTrail(this.root, 0xffffff, 1);
-        trail.start(originalVec.group.position);
+        // Attach to the GLOBAL scene and record WORLD positions so the trail
+        // remains continuous across layers as lanes are transferred upwards.
+        trail = new StraightLineTrail(this._globalScene, 0xffffff, 1);
+        {
+            const wp = new THREE.Vector3();
+            originalVec.group.getWorldPosition(wp);
+            trail.start(wp);
+        }
         originalVec.userData = originalVec.userData || {};
         originalVec.userData.trail = trail;
+        originalVec.userData.trailWorld = true; // mark as world-space trail
 
         }
 
@@ -1228,8 +1257,10 @@ export default class Gpt2Layer extends BaseLayer {
 
         // If we're reusing an existing lane we may not have created the trail yet
         if (!trail) {
-            trail = new StraightLineTrail(this.root, 0xffffff, 1);
-            trail.start(originalVec.group.position);
+            trail = new StraightLineTrail(this._globalScene, 0xffffff, 1);
+            const wp = new THREE.Vector3();
+            originalVec.group.getWorldPosition(wp);
+            trail.start(wp);
         }
 
         const multTarget = new VectorVisualizationInstancedPrism(originalVec.rawData.slice(), new THREE.Vector3(offsetX, ln1CenterY + 3.3, zPos));
@@ -1248,6 +1279,8 @@ export default class Gpt2Layer extends BaseLayer {
         if (!originalVec.userData.trail) {
             originalVec.userData.trail = trail;
         }
+        // Always mark world-space trail semantics so updates use world coords
+        originalVec.userData.trailWorld = true;
 
         this.lanes.push({
             originalVec,

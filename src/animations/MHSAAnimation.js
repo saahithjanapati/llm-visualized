@@ -488,10 +488,17 @@ export class MHSAAnimation {
                     lane.originalVec.group.position.y = Math.min(curY + riseStep, targetY);
                 }
 
-                // Update trail after movement
-                if (lane.originalVec && lane.originalVec.userData && lane.originalVec.userData.trail) {
-                    lane.originalVec.userData.trail.update(lane.originalVec.group.position);
+            // Update trail after movement – respect world-space trails
+            if (lane.originalVec && lane.originalVec.userData && lane.originalVec.userData.trail) {
+                const ud = lane.originalVec.userData;
+                if (ud.trailWorld) {
+                    const wp = new THREE.Vector3();
+                    lane.originalVec.group.getWorldPosition(wp);
+                    ud.trail.update(wp);
+                } else {
+                    ud.trail.update(lane.originalVec.group.position);
                 }
+            }
 
             });
         }

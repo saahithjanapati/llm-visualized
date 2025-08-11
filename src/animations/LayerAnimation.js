@@ -7,21 +7,31 @@ import { LayerNormalizationVisualization } from '../components/LayerNormalizatio
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization.js';
 import { MHSAAnimation } from './MHSAAnimation.js';
-// Trail functionality removed – no-ops keep API intact
-function createTrailLine() {
-  return {
-    line: { material: { opacity: 0, needsUpdate: false } },
-    geometry: {
-      attributes: { position: { setXYZ: () => {}, needsUpdate: false } },
-      setDrawRange: () => {},
-      computeBoundingSphere: () => {},
-    },
-    positions: [],
-    points: [],
-    isFrozen: false,
-  };
+import { StraightLineTrail } from '../utils/trailUtils.js';
+import { TRAIL_COLOR } from '../utils/trailConstants.js';
+
+// Real trail helpers backed by StraightLineTrail
+function createTrailLine(scene, color = TRAIL_COLOR) {
+  const trail = new StraightLineTrail(scene, color);
+  // Expose underlying THREE.Line for legacy checks in this file
+  // (some call sites peek at `.line.material.needsUpdate`).
+  // eslint-disable-next-line no-underscore-dangle
+  trail.line = trail._line;
+  return trail;
 }
-function updateTrail() {}
+
+function updateTrail(trail, position) {
+  if (!trail || !position) return;
+  // Lazily start on first use
+  // eslint-disable-next-line no-underscore-dangle
+  if (typeof trail.start === 'function' && trail._vertexCount === 0) {
+    trail.start(position);
+    return;
+  }
+  if (typeof trail.update === 'function') {
+    trail.update(position);
+  }
+}
 
 
 import { PrismLayerNormAnimation } from '../animations/PrismLayerNormAnimation.js';

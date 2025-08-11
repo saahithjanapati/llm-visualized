@@ -45,6 +45,21 @@ export class StraightLineTrail {
         this._updateCounter = 0; // for deferred bounding-sphere update
     }
 
+    /**
+     * Reparent the trail's THREE.Line to a new scene/group so future updates
+     * continue in the correct local coordinate space (useful when vectors are
+     * transferred between layer roots).
+     * @param {THREE.Object3D} newScene
+     */
+    reparent(newScene) {
+        if (!newScene || newScene === this._scene) return;
+        if (this._line && this._line.parent) {
+            this._line.parent.remove(this._line);
+        }
+        newScene.add(this._line);
+        this._scene = newScene;
+    }
+
     // ---------------------------------------------------------------------
     // Public API – same as previous implementation
     // ---------------------------------------------------------------------
