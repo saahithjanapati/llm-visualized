@@ -128,11 +128,11 @@
                             Slow
                         </label>
                         <label class="speed-option" data-value="medium">
-                            <input type="radio" name="playbackSpeed" value="medium" checked>
+                            <input type="radio" name="playbackSpeed" value="medium">
                             Medium
                         </label>
                         <label class="speed-option" data-value="fast">
-                            <input type="radio" name="playbackSpeed" value="fast">
+                            <input type="radio" name="playbackSpeed" value="fast" checked>
                             Fast
                         </label>
                     </div>
@@ -164,6 +164,9 @@
         import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
         import { LayerPipeline } from '../src/engine/LayerPipeline.js';
         import { CAPTION_TEXT_Y_POS, setPlaybackSpeed } from '../src/utils/constants.js';
+
+        // Set default playback speed to fast on load
+        try { setPlaybackSpeed('fast'); } catch (_) { /* no-op */ }
 
         // ------------------------------------------------------------------
         // GPT-2 tower – initialise immediately (but canvas hidden until intro

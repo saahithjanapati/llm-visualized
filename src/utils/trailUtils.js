@@ -124,6 +124,23 @@ export class StraightLineTrail {
         this._material.dispose();
     }
 
+    /** Adjust base opacity at runtime and update underlying material accordingly. */
+    setBaseOpacity(newBaseOpacity) {
+        if (typeof newBaseOpacity !== 'number' || !isFinite(newBaseOpacity)) return;
+        this._opacity = Math.max(0, Math.min(1, newBaseOpacity));
+        const eff = scaleOpacityForDisplay(this._opacity);
+        if (this._material) {
+            this._material.opacity = eff;
+            this._material.transparent = eff < 1.0;
+            this._material.needsUpdate = true;
+        }
+    }
+
+    /** Return current base opacity prior to DPR scaling. */
+    getBaseOpacity() {
+        return this._opacity;
+    }
+
     /** Return a shallow copy of currently used positions (vertexCount * 3). */
     copyUsedPositions() {
         const n = Math.max(0, this._vertexCount);

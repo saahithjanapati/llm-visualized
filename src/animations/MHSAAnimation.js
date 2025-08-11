@@ -488,38 +488,51 @@ export class MHSAAnimation {
                     lane.originalVec.group.position.y = Math.min(curY + riseStep, targetY);
                 }
 
-            // Update trail after movement – respect world-space trails
-            if (lane.originalVec && lane.originalVec.userData && lane.originalVec.userData.trail) {
-                const ud = lane.originalVec.userData;
-                if (ud.trailWorld) {
-                    const wp = new THREE.Vector3();
-                    lane.originalVec.group.getWorldPosition(wp);
-                    ud.trail.update(wp);
-                } else {
-                    ud.trail.update(lane.originalVec.group.position);
+                // Update trail after movement – respect world-space trails.
+                // During residual addition we update the trail using the centre prism's
+                // world position instead (handled just below), so skip the group-centre
+                // update while lane.stopRise is active to avoid double-writing.
+                if (!lane.stopRise) {
+                    // Prefer attached trail; fall back to lane.originalTrail if not attached yet
+                    const attached = lane.originalVec && lane.originalVec.userData && lane.originalVec.userData.trail;
+                    const residualTrail = attached || lane.originalTrail;
+                    if (residualTrail && typeof residualTrail.update === 'function') {
+                        const wp = new THREE.Vector3();
+                        lane.originalVec.group.getWorldPosition(wp);
+                        residualTrail.update(wp);
+                    }
                 }
-            }
 
             });
         }
 
 
-        lanes.forEach(lane => { 
-            if (!lane || !lane.originalVec) return; 
+        lanes.forEach(lane => {
+            if (!lane || !lane.originalVec) return;
 
             // Only follow while the addition animation is active (stopRise flag present)
-            if (!lane.stopRise) {
-                return;
-            }
+            if (!lane.stopRise) return;
 
+            // Compute world position of the centre prism for the ORIGINAL (source) vector
+            // so the residual trail extends continuously as prisms rise during addition.
             const centreIdx = Math.floor(VECTOR_LENGTH_PRISM / 2);
             const instMat = new THREE.Matrix4();
-
             lane.originalVec.mesh.getMatrixAt(centreIdx, instMat);
             const wPos = new THREE.Vector3().setFromMatrixPosition(instMat);
             wPos.applyMatrix4(lane.originalVec.group.matrixWorld);
 
+            // Skip bogus updates when the centre prism is hidden far below the scene
+            // during/addition (it is moved to HIDE_INSTANCE_Y_OFFSET to disappear).
+            const hideThreshold = HIDE_INSTANCE_Y_OFFSET / 10; // e.g. -5000 for -50000 offset
+            if (wPos.y < hideThreshold) return;
 
+            // Prefer the dedicated world-space residual trail reference carried by the lane.
+            const residualTrail = (lane.originalTrail)
+                || (lane.originalVec && lane.originalVec.userData && lane.originalVec.userData.trail)
+                || (lane.postAdditionVec && lane.postAdditionVec.userData && lane.postAdditionVec.userData.trail);
+            if (residualTrail && typeof residualTrail.update === 'function') {
+                residualTrail.update(wPos);
+            }
         });
     }
 

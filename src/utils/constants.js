@@ -2,7 +2,7 @@
 // Global animation speed multiplier (1 = normal speed). Increase to speed up everything.
 // Use setter to update at runtime; modules should always read the live binding.
 // ------------------------------------------------------------
-export let GLOBAL_ANIM_SPEED_MULT = 50;
+export let GLOBAL_ANIM_SPEED_MULT = 100;
 export function setGlobalAnimSpeedMult(mult) {
     const m = Number(mult);
     if (!Number.isFinite(m) || m <= 0) return;
@@ -11,8 +11,8 @@ export function setGlobalAnimSpeedMult(mult) {
 
 // High-level presets for playback speed used by the settings UI.
 // This adjusts the global speed and certain animation multipliers together.
-export let PRISM_ADD_ANIM_SPEED_MULT = 4;
-export let SELF_ATTENTION_TIME_MULT = 1;
+export let PRISM_ADD_ANIM_SPEED_MULT = 8;
+export let SELF_ATTENTION_TIME_MULT = 0.35;
 export function setPlaybackSpeed(preset) {
     // Accept string keys or fallback to medium
     const cfg = {

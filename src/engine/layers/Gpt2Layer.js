@@ -295,16 +295,28 @@ export default class Gpt2Layer extends BaseLayer {
                     lane.resultVecLN2,
                     lane.finalVecAfterMlp
                 ];
+
+                // Ensure we only update each unique trail once per frame per lane
+                const updatedTrailRefs = new Set();
+
                 vecsToCheck.forEach(v => {
-                    if (v && v.userData && v.userData.trail) {
-                        if (v.userData.trailWorld) {
-                            const wp = new THREE.Vector3();
-                            v.group.getWorldPosition(wp);
-                            v.userData.trail.update(wp);
-                        } else {
-                            v.userData.trail.update(v.group.position);
-                        }
+                    if (!v || !v.userData || !v.userData.trail) return;
+                    const trailRef = v.userData.trail;
+                    if (updatedTrailRefs.has(trailRef)) return;
+
+                    // During residual addition, let MHSAAnimation drive world-space
+                    // residual trail updates (it follows the centre prism). Skip here
+                    // to avoid double-writing the same world trail in the same frame.
+                    if (lane.stopRise && v.userData.trailWorld) return;
+
+                    if (v.userData.trailWorld) {
+                        const wp = new THREE.Vector3();
+                        v.group.getWorldPosition(wp);
+                        trailRef.update(wp);
+                    } else {
+                        trailRef.update(v.group.position);
                     }
+                    updatedTrailRefs.add(trailRef);
                 });
 
                 // Expanded 4× vector group trail
@@ -1153,7 +1165,9 @@ export default class Gpt2Layer extends BaseLayer {
                     if (localTrail && localTrail._scene === this.root) {
                         const colorHex = (localTrail._material && localTrail._material.color)
                             ? localTrail._material.color.getHex() : undefined;
-                        mergeTrailsIntoLineSegments([localTrail], this.root, colorHex);
+                        // Preserve original trail appearance (opacity/linewidth) when freezing
+                        const frozenOpacity = (typeof localTrail._opacity === 'number') ? localTrail._opacity : undefined;
+                        mergeTrailsIntoLineSegments([localTrail], this.root, colorHex, undefined, frozenOpacity);
                         if (vec.userData) delete vec.userData.trail;
                     }
 
@@ -1413,7 +1427,19 @@ export default class Gpt2Layer extends BaseLayer {
                 if (segmentsList.length) {
                     // Preserve brightness by using the same color as the live trails (default to white if unknown)
                     const colorToUse = residualColor != null ? residualColor : 0xffffff;
-                    buildMergedLineSegmentsFromSegments(segmentsList, this._globalScene || this.root, colorToUse);
+                    // Use the same effective opacity as the live trails to avoid brightening
+                    let residualOpacity = null;
+                    if (origTrailSet.size) {
+                        const first = origTrailSet.values().next().value;
+                        if (first && typeof first._opacity === 'number') residualOpacity = first._opacity;
+                    }
+                    buildMergedLineSegmentsFromSegments(
+                        segmentsList,
+                        this._globalScene || this.root,
+                        colorToUse,
+                        undefined,
+                        residualOpacity != null ? residualOpacity : undefined
+                    );
                 }
 
                 // 2) Merge all other per-layer (non-residual) trails under this.root
