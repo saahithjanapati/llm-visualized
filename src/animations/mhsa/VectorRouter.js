@@ -12,7 +12,8 @@ import {
 // Speed-related constants centralised in utils/constants
 import { MHSA_DUPLICATE_VECTOR_RISE_SPEED } from '../../utils/constants.js';
 
-
+// Add configurable opacity for trails specific to vector copies under Q/K/V to reduce visual prominence
+const FAINT_TRAIL_OPACITY = 0.06; // must be < default 0.1
 
 
 // Read live binding each use to reflect UI changes at runtime
@@ -76,7 +77,7 @@ export class VectorRouter {
                     const upVec = new VectorVisualizationInstancedPrism([...tVec.rawData], tVec.group.position.clone());
                     this.parentGroup.add(upVec.group);
                     // Trail for upward K copy
-                    const upTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1);
+                    const upTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1, undefined, FAINT_TRAIL_OPACITY);
                     upTrail.start(upVec.group.position);
                     upVec.userData = upVec.userData || {};
                     upVec.userData.trail = upTrail;
@@ -126,13 +127,13 @@ export class VectorRouter {
                         const coord = this.headCoords[hIdx];
                         if (coord) {
                             const qVec = new VectorVisualizationInstancedPrism(centerVec.rawData.slice(), centerVec.group.position.clone());
-                            const qTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1);
+                            const qTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1, undefined, FAINT_TRAIL_OPACITY);
                             qTrail.start(qVec.group.position);
                             qVec.userData = qVec.userData || {};
                             qVec.userData.trail = qTrail;
                             Object.assign(qVec.userData, { headIndex: hIdx });
                             const vVec = new VectorVisualizationInstancedPrism(centerVec.rawData.slice(), centerVec.group.position.clone());
-                            const vTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1);
+                            const vTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1, undefined, FAINT_TRAIL_OPACITY);
                             vTrail.start(vVec.group.position);
                             vVec.userData = vVec.userData || {};
                             vVec.userData.trail = vTrail;
