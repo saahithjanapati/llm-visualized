@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization.js';
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
-import { StraightLineTrail } from '../utils/trailUtils.js';
+import { StraightLineTrail, mergeTrailsIntoLineSegments } from '../utils/trailUtils.js';
 
 
 
@@ -809,7 +809,8 @@ export class MHSAAnimation {
             if (combinedVec.mesh.instanceColor) combinedVec.mesh.instanceColor.needsUpdate = true;
 
             this.parentGroup.add(combinedVec.group);
-            // No trail above matrices: do not create a trail for combined vectors
+            // Do NOT attach a trail yet. We only want a horizontal trail
+            // when returning to the residual stream (no vertical segments).
 
             combinedVectors.push({ vec: combinedVec, laneZ });
 
@@ -906,13 +907,34 @@ export class MHSAAnimation {
                                     new TWEEN.Tween(vec.group.position)
                                         .to({ x: 0 }, horizDur)
                                         .easing(TWEEN.Easing.Quadratic.InOut)
+                                        .onStart(() => {
+                                            // Create a dedicated horizontal-only trail starting at this moment
+                                            try {
+                                                vec.userData = vec.userData || {};
+                                                if (!vec.userData.horizTrail) {
+                                                    const ht = new StraightLineTrail(this.parentGroup);
+                                                    ht.start(vec.group.position.clone());
+                                                    vec.userData.horizTrail = ht;
+                                                }
+                                            } catch (_) { /* optional visual */ }
+                                        })
                                         .onUpdate(() => {
-                                            if (vec && vec.userData && vec.userData.trail) {
-                                                vec.userData.trail.update(vec.group.position);
+                                            const ht = vec && vec.userData && vec.userData.horizTrail;
+                                            if (ht) {
+                                                ht.update(vec.group.position);
                                             }
                                         })
 
                                         .onComplete(() => {
+                                            // Freeze the horizontal trail into static segments and remove live trail
+                                            try {
+                                                const ht = vec && vec.userData && vec.userData.horizTrail;
+                                                if (ht) {
+                                                    // Merge just this single trail into segments (keeps appearance)
+                                                    mergeTrailsIntoLineSegments([ht], this.parentGroup);
+                                                    if (vec.userData) delete vec.userData.horizTrail;
+                                                }
+                                            } catch (_) { /* optional visual */ }
                                             if (this.currentLanes) {
                                                 const matchingLane = this.currentLanes.find(l => Math.abs(l.zPos - laneZ) < 0.1);
                                                 if (matchingLane && matchingLane.originalVec) {
