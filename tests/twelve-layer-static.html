@@ -44,11 +44,94 @@
             enableBloom:    false,
         });
 
+        // ------------------------------------------------------------
+        // Axes helper + axis labels (sprites) near the camera target
+        // ------------------------------------------------------------
+        const axesSettings = { showAxes: true, length: 4000 };
+        const axesGroup = new THREE.Group();
+        engine.scene.add(axesGroup);
+
+        function createTextSprite(text, color) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512; canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.font = 'bold 128px system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial';
+            // Outline for legibility
+            ctx.lineWidth = 10; ctx.strokeStyle = 'rgba(0,0,0,0.65)';
+            ctx.strokeText(text, canvas.width/2, canvas.height/2);
+            ctx.fillStyle = color || '#ffffff';
+            ctx.fillText(text, canvas.width/2, canvas.height/2);
+            const tex = new THREE.CanvasTexture(canvas);
+            if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace;
+            const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false });
+            const sprite = new THREE.Sprite(mat);
+            return sprite;
+        }
+
+        function disposeSprite(sprite) {
+            if (!sprite) return;
+            const mat = sprite.material;
+            if (mat && mat.map && mat.map.dispose) mat.map.dispose();
+            if (mat && mat.dispose) mat.dispose();
+        }
+
+        function rebuildAxes() {
+            // Clear previous
+            while (axesGroup.children.length) {
+                const child = axesGroup.children.pop();
+                if (child.isSprite) disposeSprite(child);
+                if (child.geometry && child.geometry.dispose) child.geometry.dispose();
+                if (child.material && child.material.dispose) child.material.dispose();
+                if (child.parent) child.parent.remove(child);
+            }
+            const base = camTarget.clone();
+            const len = axesSettings.length;
+
+            // Axes helper
+            const axes = new THREE.AxesHelper(len);
+            axes.position.copy(base);
+            axesGroup.add(axes);
+
+            // Label scale relative to axis length
+            const s = Math.max(300, Math.min(10000, len * 0.25));
+            const offset = len + s * 0.2;
+
+            const lx = createTextSprite('X', '#ff6b6b');
+            lx.scale.set(s, s * 0.5, 1);
+            lx.position.set(base.x + offset, base.y, base.z);
+            axesGroup.add(lx);
+
+            const ly = createTextSprite('Y', '#63ff63');
+            ly.scale.set(s, s * 0.5, 1);
+            ly.position.set(base.x, base.y + offset, base.z);
+            axesGroup.add(ly);
+
+            const lz = createTextSprite('Z', '#6bb1ff');
+            lz.scale.set(s, s * 0.5, 1);
+            lz.position.set(base.x, base.y, base.z + offset);
+            axesGroup.add(lz);
+        }
+
+        function updateAxesVisibility() {
+            axesGroup.visible = !!axesSettings.showAxes;
+        }
+
+        rebuildAxes();
+        updateAxesVisibility();
+
         // Scene-level HDRI and toggles (shared across loaders and GUI)
         let hdriTexture = null;
         const sceneSettings = {
             showBackground: true,
             bottomFog: false,
+            fogType: 'Exponential',      // 'Exponential' | 'Linear'
+            fogColor: '#0a0a0a',
+            fogExpDensity: 0.00006,      // THREE.FogExp2 density
+            fogLinearNear: 2000,          // THREE.Fog near
+            fogLinearFar: 20000,          // THREE.Fog far
         };
         const applyBackgroundSetting = () => {
             if (!engine) return;
@@ -56,10 +139,17 @@
         };
         const applyFogSetting = () => {
             if (!engine) return;
-            if (sceneSettings.bottomFog) {
-                engine.scene.fog = new THREE.FogExp2(new THREE.Color(0x0a0a0a), 0.00006);
+            if (!sceneSettings.bottomFog) { engine.scene.fog = null; return; }
+            // Ensure valid linear range
+            if (sceneSettings.fogLinearFar <= sceneSettings.fogLinearNear) {
+                sceneSettings.fogLinearFar = sceneSettings.fogLinearNear + 1;
+            }
+            const color = new THREE.Color(sceneSettings.fogColor);
+            if (sceneSettings.fogType === 'Linear') {
+                engine.scene.fog = new THREE.Fog(color, sceneSettings.fogLinearNear, sceneSettings.fogLinearFar);
             } else {
-                engine.scene.fog = null;
+                const density = Math.max(0, Number(sceneSettings.fogExpDensity) || 0);
+                engine.scene.fog = new THREE.FogExp2(color, density);
             }
         };
         let __sceneFolderAdded = false;
@@ -69,6 +159,11 @@
                 const sceneFolder = gui.addFolder('Scene');
                 sceneFolder.add(sceneSettings, 'showBackground').name('Show Background').onChange(applyBackgroundSetting);
                 sceneFolder.add(sceneSettings, 'bottomFog').name('Bottom Fog').onChange(applyFogSetting);
+                sceneFolder.add(sceneSettings, 'fogType', ['Exponential', 'Linear']).name('Fog Type').onChange(applyFogSetting);
+                sceneFolder.addColor(sceneSettings, 'fogColor').name('Fog Color').onChange(applyFogSetting);
+                sceneFolder.add(sceneSettings, 'fogExpDensity', 0.0, 0.002, 0.00001).name('Exp Density').onChange(applyFogSetting);
+                sceneFolder.add(sceneSettings, 'fogLinearNear', 100, 100000, 100).name('Linear Near').onChange(applyFogSetting);
+                sceneFolder.add(sceneSettings, 'fogLinearFar',  100, 200000, 100).name('Linear Far').onChange(applyFogSetting);
                 __sceneFolderAdded = true;
             } catch (_) { /* no-op if GUI not ready yet */ }
         };
@@ -76,7 +171,7 @@
         // Load HDRI environment map to match twelve-layer-stack lighting
         try {
             const exrLoader = new EXRLoader();
-            const hdriUrl = new URL('../evening_museum_courtyard_1k.exr', import.meta.url).href;
+            const hdriUrl = new URL('../brown_photostudio_02_1k.exr', import.meta.url).href;
             exrLoader.load(hdriUrl, (texture) => {
                 texture.mapping = THREE.EquirectangularReflectionMapping;
                 // Apply environment to the main scene
@@ -369,6 +464,11 @@
         // Initialize scene toggles into GUI if HDRI already loaded
         addSceneTogglesIfNeeded();
 
+        // Axes controls
+        const axesFolder = gui.addFolder('Axes');
+        axesFolder.add(axesSettings, 'showAxes').name('Show Axes/Labels').onChange(updateAxesVisibility);
+        axesFolder.add(axesSettings, 'length', 500, 20000, 100).name('Axis Length').onChange(() => { rebuildAxes(); updateAxesVisibility(); });
+
         gui.addColor(colours, 'queryHeads').name('Query Heads').onChange(applyAllAppearance);
         gui.addColor(colours, 'keyHeads').name('Key Heads').onChange(applyAllAppearance);
         gui.addColor(colours, 'valueHeads').name('Value Heads').onChange(applyAllAppearance);
@@ -406,9 +506,21 @@
                     if (typeof sceneSettings !== 'undefined') {
                         sceneSettings.showBackground = true;
                         sceneSettings.bottomFog = false;
+                        sceneSettings.fogType = 'Exponential';
+                        sceneSettings.fogColor = '#0a0a0a';
+                        sceneSettings.fogExpDensity = 0.00006;
+                        sceneSettings.fogLinearNear = 2000;
+                        sceneSettings.fogLinearFar = 20000;
                         if (typeof applyBackgroundSetting === 'function') applyBackgroundSetting();
                         if (typeof applyFogSetting === 'function') applyFogSetting();
                     }
+                } catch (_) { /* no-op */ }
+                // Reset axes
+                try {
+                    axesSettings.showAxes = true;
+                    axesSettings.length = 4000;
+                    rebuildAxes();
+                    updateAxesVisibility();
                 } catch (_) { /* no-op */ }
                 applyAllAppearance(); 
                 gui.updateDisplay(); 
