@@ -12,6 +12,8 @@ export default defineConfig({
   root: '.', 
   // publicDir can remain 'public'
   publicDir: 'public', 
+  // Ensure EXR files are treated as assets and bundled
+  assetsInclude: ['**/*.exr'],
   plugins: [
     // Remove generateIndexPlugin()
     basicSsl() // Add the SSL plugin

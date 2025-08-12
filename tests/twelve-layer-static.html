@@ -47,7 +47,8 @@
         // Load HDRI environment map to match twelve-layer-stack lighting
         try {
             const exrLoader = new EXRLoader();
-            exrLoader.load('../evening_museum_courtyard_1k.exr', (texture) => {
+            const hdriUrl = new URL('../evening_museum_courtyard_1k.exr', import.meta.url).href;
+            exrLoader.load(hdriUrl, (texture) => {
                 texture.mapping = THREE.EquirectangularReflectionMapping;
                 // Apply environment to the main scene
                 engine.scene.environment = texture;
@@ -62,6 +63,8 @@
                 // Enable ACES Filmic tone mapping for HDR
                 engine.renderer.toneMapping = THREE.ACESFilmicToneMapping;
                 engine.renderer.toneMappingExposure = 1.0;
+            }, undefined, (err) => {
+                console.warn('HDRI failed to load:', err);
             });
         } catch (_) { /* no-op */ }
 
