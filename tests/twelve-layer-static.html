@@ -102,13 +102,199 @@
             }
         }
 
+        // ------------------------------------------------------------
+        // Global material controls (shared across all components)
+        // ------------------------------------------------------------
+        const materialDefaults = {
+            type: 'Standard',              // Standard | Physical | Phong | Lambert | Toon
+            roughness: 0.6,
+            metalness: 0.15,
+            emissiveIntensity: 0.3,
+            opacity: 1.0,
+            transparent: false,
+            wireframe: false,
+            flatShading: false,
+            doubleSided: false,
+            // Physical extras
+            clearcoat: 0.0,
+            clearcoatRoughness: 0.25,
+            transmission: 0.0,
+            ior: 1.5,
+            thickness: 0.0,
+        };
+        const materialSettings = { ...materialDefaults };
+
+        function toThreeSide(doubleSided) {
+            return doubleSided ? THREE.DoubleSide : THREE.FrontSide;
+        }
+
+        function createMaterialOfType(type, base) {
+            const common = {
+                color: base.color || new THREE.Color(0xffffff),
+                side: toThreeSide(materialSettings.doubleSided),
+                wireframe: materialSettings.wireframe,
+                flatShading: materialSettings.flatShading,
+                transparent: materialSettings.transparent || materialSettings.opacity < 1.0,
+                opacity: materialSettings.opacity,
+            };
+            let mat;
+            switch (type) {
+                case 'Physical': {
+                    mat = new THREE.MeshPhysicalMaterial({
+                        ...common,
+                        emissive: base.emissive || new THREE.Color(0x000000),
+                        emissiveIntensity: materialSettings.emissiveIntensity,
+                        metalness: materialSettings.metalness,
+                        roughness: materialSettings.roughness,
+                        clearcoat: materialSettings.clearcoat,
+                        clearcoatRoughness: materialSettings.clearcoatRoughness,
+                        transmission: materialSettings.transmission,
+                        ior: materialSettings.ior,
+                        thickness: materialSettings.thickness,
+                    });
+                    break;
+                }
+                case 'Phong': {
+                    mat = new THREE.MeshPhongMaterial({
+                        ...common,
+                        emissive: base.emissive || new THREE.Color(0x000000),
+                        emissiveIntensity: materialSettings.emissiveIntensity,
+                        shininess: Math.max(1, (1 - materialSettings.roughness) * 100),
+                    });
+                    break;
+                }
+                case 'Lambert': {
+                    mat = new THREE.MeshLambertMaterial({
+                        ...common,
+                        emissive: base.emissive || new THREE.Color(0x000000),
+                        emissiveIntensity: materialSettings.emissiveIntensity,
+                    });
+                    break;
+                }
+                case 'Toon': {
+                    mat = new THREE.MeshToonMaterial({
+                        ...common,
+                        emissive: base.emissive || new THREE.Color(0x000000),
+                        emissiveIntensity: materialSettings.emissiveIntensity,
+                    });
+                    break;
+                }
+                case 'Standard':
+                default: {
+                    mat = new THREE.MeshStandardMaterial({
+                        ...common,
+                        emissive: base.emissive || new THREE.Color(0x000000),
+                        emissiveIntensity: materialSettings.emissiveIntensity,
+                        metalness: materialSettings.metalness,
+                        roughness: materialSettings.roughness,
+                    });
+                    break;
+                }
+            }
+            // Preserve polygon offset settings from previous material to avoid z-fighting on caps
+            if (base.polygonOffset) {
+                mat.polygonOffset = true;
+                mat.polygonOffsetFactor = base.polygonOffsetFactor ?? -1;
+                mat.polygonOffsetUnits  = base.polygonOffsetUnits  ?? -4;
+            }
+            return mat;
+        }
+
+        function getMaterials(obj) {
+            if (!obj || !obj.material) return [];
+            return Array.isArray(obj.material) ? obj.material : [obj.material];
+        }
+
+        function ensureMaterialTypeOnObject(obj) {
+            if (!obj || !obj.material) return;
+            const desired = materialSettings.type;
+            const mats = getMaterials(obj);
+            const newMats = [];
+            let replaced = false;
+            for (const m of mats) {
+                const base = {
+                    color: (m && m.color) ? m.color.clone() : new THREE.Color(0xffffff),
+                    emissive: (m && m.emissive) ? m.emissive.clone() : new THREE.Color(0x000000),
+                    polygonOffset: !!(m && m.polygonOffset),
+                    polygonOffsetFactor: m && m.polygonOffsetFactor,
+                    polygonOffsetUnits: m && m.polygonOffsetUnits,
+                };
+                const currentType = obj.userData && obj.userData._matType ? obj.userData._matType : 'Standard';
+                if (currentType !== desired) {
+                    const nm = createMaterialOfType(desired, base);
+                    // Dispose old to avoid leaks
+                    if (m && typeof m.dispose === 'function') m.dispose();
+                    newMats.push(nm);
+                    replaced = true;
+                } else {
+                    newMats.push(m);
+                }
+            }
+            if (replaced) {
+                obj.material = Array.isArray(obj.material) ? newMats : newMats[0];
+                obj.userData = obj.userData || {};
+                obj.userData._matType = desired;
+            }
+        }
+
+        function applyPropsToMaterial(m) {
+            if (!m) return;
+            if ('roughness' in m) m.roughness = materialSettings.roughness;
+            if ('metalness' in m) m.metalness = materialSettings.metalness;
+            if ('emissiveIntensity' in m) m.emissiveIntensity = materialSettings.emissiveIntensity;
+            if ('shininess' in m) m.shininess = Math.max(1, (1 - materialSettings.roughness) * 100);
+            m.wireframe = !!materialSettings.wireframe;
+            m.flatShading = !!materialSettings.flatShading;
+            m.side = toThreeSide(materialSettings.doubleSided);
+            m.transparent = materialSettings.transparent || materialSettings.opacity < 1.0;
+            m.opacity = materialSettings.opacity;
+            if ('clearcoat' in m) m.clearcoat = materialSettings.clearcoat;
+            if ('clearcoatRoughness' in m) m.clearcoatRoughness = materialSettings.clearcoatRoughness;
+            if ('transmission' in m) m.transmission = materialSettings.transmission;
+            if ('ior' in m) m.ior = materialSettings.ior;
+            if ('thickness' in m) m.thickness = materialSettings.thickness;
+            m.needsUpdate = true;
+        }
+
+        function applyMaterialSettingsToComponent(component) {
+            if (!component || !component.group) return;
+            component.group.traverse(obj => {
+                if (obj.isMesh || obj.isInstancedMesh) {
+                    ensureMaterialTypeOnObject(obj);
+                    const mats = getMaterials(obj);
+                    mats.forEach(applyPropsToMaterial);
+                }
+            });
+        }
+
+        function applyMaterialSettingsGlobal() {
+            for (const layer of layers) {
+                // MHSA Q/K/V matrices
+                const vis = layer.mhsaAnimation?.mhaVisualizations || [];
+                for (let i = 0; i < vis.length; i++) applyMaterialSettingsToComponent(vis[i]);
+                // Output projection
+                if (layer.mhsaAnimation?.outputProjectionMatrix) applyMaterialSettingsToComponent(layer.mhsaAnimation.outputProjectionMatrix);
+                // LayerNorms
+                applyMaterialSettingsToComponent(layer.ln1);
+                applyMaterialSettingsToComponent(layer.ln2);
+                // MLP
+                applyMaterialSettingsToComponent(layer.mlpUp);
+                applyMaterialSettingsToComponent(layer.mlpDown);
+            }
+        }
+
+        function applyAllAppearance() {
+            applyColours();
+            applyMaterialSettingsGlobal();
+        }
+
         // Helper: repeatedly apply colours a few times during the first second to
         // catch any late-built meshes (CSG generation can take >1 frame).
         const applyWithRetries = () => {
             let attempts = 0;
             const maxAttempts = 20;             // ~1 s (20 × 50 ms)
             const id = setInterval(() => {
-                applyColours();
+                applyAllAppearance();
                 if (++attempts >= maxAttempts) clearInterval(id);
             }, 50);
         };
@@ -124,16 +310,42 @@
         const gui = new window.dat.GUI({ width: 300 });
         gui.domElement.style.zIndex = 5;
 
-        gui.addColor(colours, 'queryHeads').name('Query Heads').onChange(applyColours);
-        gui.addColor(colours, 'keyHeads').name('Key Heads').onChange(applyColours);
-        gui.addColor(colours, 'valueHeads').name('Value Heads').onChange(applyColours);
-        gui.addColor(colours, 'outputProjection').name('Output Projection').onChange(applyColours);
-        gui.addColor(colours, 'layerNorms').name('LayerNorms').onChange(applyColours);
-        gui.addColor(colours, 'mlpUp').name('MLP Up-Proj').onChange(applyColours);
-        gui.addColor(colours, 'mlpDown').name('MLP Down-Proj').onChange(applyColours);
+        gui.addColor(colours, 'queryHeads').name('Query Heads').onChange(applyAllAppearance);
+        gui.addColor(colours, 'keyHeads').name('Key Heads').onChange(applyAllAppearance);
+        gui.addColor(colours, 'valueHeads').name('Value Heads').onChange(applyAllAppearance);
+        gui.addColor(colours, 'outputProjection').name('Output Projection').onChange(applyAllAppearance);
+        gui.addColor(colours, 'layerNorms').name('LayerNorms').onChange(applyAllAppearance);
+        gui.addColor(colours, 'mlpUp').name('MLP Up-Proj').onChange(applyAllAppearance);
+        gui.addColor(colours, 'mlpDown').name('MLP Down-Proj').onChange(applyAllAppearance);
 
-        // Optional: reset button
-        gui.add({ reset: () => { Object.assign(colours, defaultColours); applyColours(); gui.updateDisplay(); } }, 'reset').name('Reset Defaults');
+        // Appearance controls
+        const appearance = gui.addFolder('Appearance');
+        appearance.add(materialSettings, 'type', ['Standard', 'Physical', 'Phong', 'Lambert', 'Toon']).name('Material Type').onChange(applyAllAppearance);
+        appearance.add(materialSettings, 'roughness', 0, 1, 0.01).name('Roughness').onChange(applyMaterialSettingsGlobal);
+        appearance.add(materialSettings, 'metalness', 0, 1, 0.01).name('Metalness').onChange(applyMaterialSettingsGlobal);
+        appearance.add(materialSettings, 'emissiveIntensity', 0, 2, 0.01).name('Emissive Int.').onChange(applyMaterialSettingsGlobal);
+        appearance.add(materialSettings, 'opacity', 0, 1, 0.01).name('Opacity').onChange(applyMaterialSettingsGlobal);
+        appearance.add(materialSettings, 'transparent').name('Use Transparency').onChange(applyMaterialSettingsGlobal);
+        appearance.add(materialSettings, 'wireframe').name('Wireframe').onChange(applyMaterialSettingsGlobal);
+        appearance.add(materialSettings, 'flatShading').name('Flat Shading').onChange(applyMaterialSettingsGlobal);
+        appearance.add(materialSettings, 'doubleSided').name('Double-Sided').onChange(applyMaterialSettingsGlobal);
+        // Physical extras
+        const physical = appearance.addFolder('Physical Extras');
+        physical.add(materialSettings, 'clearcoat', 0, 1, 0.01).name('Clearcoat').onChange(applyMaterialSettingsGlobal);
+        physical.add(materialSettings, 'clearcoatRoughness', 0, 1, 0.01).name('Clearcoat Rough.').onChange(applyMaterialSettingsGlobal);
+        physical.add(materialSettings, 'transmission', 0, 1, 0.01).name('Transmission').onChange(applyMaterialSettingsGlobal);
+        physical.add(materialSettings, 'ior', 1.0, 2.333, 0.01).name('IOR').onChange(applyMaterialSettingsGlobal);
+        physical.add(materialSettings, 'thickness', 0, 5, 0.01).name('Thickness').onChange(applyMaterialSettingsGlobal);
+
+        // Optional: reset buttons
+        gui.add({ 
+            reset: () => { 
+                Object.assign(colours, defaultColours); 
+                Object.assign(materialSettings, materialDefaults);
+                applyAllAppearance(); 
+                gui.updateDisplay(); 
+            } 
+        }, 'reset').name('Reset Defaults');
 
         // Cleanup on unload
         window.addEventListener('beforeunload', () => engine.dispose());
