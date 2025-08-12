@@ -193,6 +193,33 @@
         // so visual continuity is preserved.
         gptCanvas.style.display = 'block';
 
+        // Enable and configure shadow rendering for the GPT pipeline scene
+        try {
+            const eng = pipeline.engine;
+            eng.renderer.shadowMap.enabled = true;
+            eng.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            // Mark all meshes to cast and receive shadows
+            eng.scene.traverse((obj) => {
+                if (obj.isMesh) {
+                    obj.castShadow = true;
+                    obj.receiveShadow = true;
+                }
+            });
+            // Configure main directional light to cast shadows
+            const mainDir = eng.scene.children.find((o) => o.isDirectionalLight);
+            if (mainDir) {
+                mainDir.castShadow = true;
+                mainDir.shadow.mapSize.set(4096, 4096);
+                mainDir.shadow.camera.near = 10;
+                mainDir.shadow.camera.far = 120000;
+                mainDir.shadow.camera.left = -30000;
+                mainDir.shadow.camera.right = 30000;
+                mainDir.shadow.camera.top = 30000;
+                mainDir.shadow.camera.bottom = -30000;
+                mainDir.shadow.bias = -0.0005;
+            }
+        } catch (_) { /* no-op */ }
+
         // ------------------------------------------------------------------
         // Intro – "Can machines think?" Ghost-type animation (almost verbatim
         // from can-machines-think-test.html but adapted for this page & API).
@@ -200,6 +227,9 @@
         const introCanvas = document.getElementById('introCanvas');
 
         const renderer = new THREE.WebGLRenderer({ canvas: introCanvas, antialias: true });
+        // Enable shadows for the intro scene
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
         renderer.setSize(window.innerWidth, window.innerHeight);
 
@@ -216,6 +246,16 @@
         // Ambient light replaced by HDRI environment; ambient removed.
         const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
         dirLight.position.set(5, 10, 7.5);
+        // Configure shadows for intro directional light
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.set(2048, 2048);
+        dirLight.shadow.camera.near = 0.5;
+        dirLight.shadow.camera.far = 5000;
+        dirLight.shadow.camera.left = -2000;
+        dirLight.shadow.camera.right = 2000;
+        dirLight.shadow.camera.top = 2000;
+        dirLight.shadow.camera.bottom = -2000;
+        dirLight.shadow.bias = -0.0005;
         scene.add(dirLight);
 
         const TEXT = 'Can machines think?';
@@ -250,6 +290,9 @@
                 const mat = new THREE.MeshNormalMaterial({ transparent: true, opacity: 0 });
                 const mesh = new THREE.Mesh(geo, mat);
                 mesh.position.x = xOffset;
+                // Allow intro text to cast/receive shadows
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
                 charGroup.add(mesh);
                 charMeshes.push(mesh);
                 charWidths.push(width);
@@ -264,6 +307,8 @@
             const cursorMat = new THREE.MeshBasicMaterial({ color: 0x888888 });
             cursorMesh = new THREE.Mesh(cursorGeo, cursorMat);
             cursorMesh.position.set(charGroup.position.x, bounds.min.y + textHeight / 2, 25);
+            cursorMesh.castShadow = true;
+            cursorMesh.receiveShadow = true;
             scene.add(cursorMesh);
 
             const revealChar = (index) => {
@@ -415,6 +460,9 @@
                 const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0 });
                 const mesh = new THREE.Mesh(geo, mat);
                 mesh.position.x = xOffset;
+                // Caption meshes can cast/receive shadows in the GPT scene
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
                 charGroup.add(mesh);
                 charMeshes.push(mesh);
                 charWidths.push(width);

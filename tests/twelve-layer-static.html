@@ -18,6 +18,7 @@
     <!-- Three.js & helpers -->
     <script type="module">
         import * as THREE from 'three';
+        import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
         import { CoreEngine } from '../src/engine/CoreEngine.js';
         import Gpt2Layer from '../src/engine/layers/Gpt2Layer.js';
         import { createRandomSource } from '../src/data/RandomActivationSource.js';
@@ -42,6 +43,27 @@
             cameraTarget:   camTarget,
             enableBloom:    false,
         });
+
+        // Load HDRI environment map to match twelve-layer-stack lighting
+        try {
+            const exrLoader = new EXRLoader();
+            exrLoader.load('../evening_museum_courtyard_1k.exr', (texture) => {
+                texture.mapping = THREE.EquirectangularReflectionMapping;
+                // Apply environment to the main scene
+                engine.scene.environment = texture;
+                // Also set as background so the EXR is visible
+                engine.scene.background = texture;
+
+                // Remove any ambient lights (environment provides global illumination)
+                engine.scene.traverse((obj) => {
+                    if (obj.isAmbientLight) engine.scene.remove(obj);
+                });
+
+                // Enable ACES Filmic tone mapping for HDR
+                engine.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+                engine.renderer.toneMappingExposure = 1.0;
+            });
+        } catch (_) { /* no-op */ }
 
         // ------------------------------------------------------------
         // Colour management helpers
@@ -114,7 +136,7 @@
             transparent: false,
             wireframe: false,
             flatShading: false,
-            doubleSided: false,
+            doubleSided: true,
             // Physical extras
             clearcoat: 0.0,
             clearcoatRoughness: 0.25,

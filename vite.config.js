@@ -45,6 +45,7 @@ export default defineConfig({
             singleLaneComponents: resolve(__dirname, 'tests/single-layer-dynamic-lanes.html'),
             twelveLayerDynamicLanes: resolve(__dirname, 'tests/twelve-layer-dynamic-lanes-dynamic.html'),
             fullMHSA: resolve(__dirname, 'tests/mhsa_heads_only_test.html'),
+            mlpWeightMatrixMover: resolve(__dirname, 'tests/mlp_weight_matrix_mover.html'),
 
         }
     } 
