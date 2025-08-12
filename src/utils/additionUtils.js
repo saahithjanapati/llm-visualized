@@ -39,18 +39,7 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane) {
     if (lane) {
         lane.stopRise = true;
         lane.stopRiseTarget = targetVec.group;
-        // Dim residual world-space trail during addition to avoid overbright vertical span
-        try {
-            const trailRef = (lane.originalTrail)
-                || (lane.originalVec && lane.originalVec.userData && lane.originalVec.userData.trail)
-                || (lane.postAdditionVec && lane.postAdditionVec.userData && lane.postAdditionVec.userData.trail);
-            if (trailRef && typeof trailRef.setBaseOpacity === 'function') {
-                const currentBase = (typeof trailRef.getBaseOpacity === 'function') ? trailRef.getBaseOpacity() : undefined;
-                lane.__residualTrailOpacityBeforeAdd = (typeof currentBase === 'number') ? currentBase : undefined;
-                const dimmed = (typeof currentBase === 'number') ? Math.max(0.03, currentBase * 0.6) : 0.06;
-                trailRef.setBaseOpacity(dimmed);
-            }
-        } catch (_) { /* no-op */ }
+        // Keep residual trail brightness unchanged during addition
     } else {
         sourceVec.group.userData = sourceVec.group.userData || {};
         const svUD = sourceVec.group.userData;
@@ -127,18 +116,6 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane) {
         if (lane) {
             delete lane.stopRise;
             delete lane.stopRiseTarget;
-            // Restore residual world-space trail opacity after addition completes
-            try {
-                const trailRef = (lane.originalTrail)
-                    || (lane.originalVec && lane.originalVec.userData && lane.originalVec.userData.trail)
-                    || (lane.postAdditionVec && lane.postAdditionVec.userData && lane.postAdditionVec.userData.trail);
-                if (trailRef && typeof trailRef.setBaseOpacity === 'function') {
-                    const orig = lane.__residualTrailOpacityBeforeAdd;
-                    const restore = (typeof orig === 'number') ? orig : undefined;
-                    if (typeof restore === 'number') trailRef.setBaseOpacity(restore);
-                }
-            } catch (_) { /* no-op */ }
-            delete lane.__residualTrailOpacityBeforeAdd;
         } else if (sourceVec && sourceVec.group && sourceVec.group.userData) {
             delete sourceVec.group.userData.stopRise;
             delete sourceVec.group.userData.stopRiseTarget;
