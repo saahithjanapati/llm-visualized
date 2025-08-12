@@ -44,6 +44,35 @@
             enableBloom:    false,
         });
 
+        // Scene-level HDRI and toggles (shared across loaders and GUI)
+        let hdriTexture = null;
+        const sceneSettings = {
+            showBackground: true,
+            bottomFog: false,
+        };
+        const applyBackgroundSetting = () => {
+            if (!engine) return;
+            engine.scene.background = sceneSettings.showBackground ? hdriTexture : null;
+        };
+        const applyFogSetting = () => {
+            if (!engine) return;
+            if (sceneSettings.bottomFog) {
+                engine.scene.fog = new THREE.FogExp2(new THREE.Color(0x0a0a0a), 0.00006);
+            } else {
+                engine.scene.fog = null;
+            }
+        };
+        let __sceneFolderAdded = false;
+        const addSceneTogglesIfNeeded = () => {
+            try {
+                if (__sceneFolderAdded || typeof gui === 'undefined' || !gui) return;
+                const sceneFolder = gui.addFolder('Scene');
+                sceneFolder.add(sceneSettings, 'showBackground').name('Show Background').onChange(applyBackgroundSetting);
+                sceneFolder.add(sceneSettings, 'bottomFog').name('Bottom Fog').onChange(applyFogSetting);
+                __sceneFolderAdded = true;
+            } catch (_) { /* no-op if GUI not ready yet */ }
+        };
+
         // Load HDRI environment map to match twelve-layer-stack lighting
         try {
             const exrLoader = new EXRLoader();
@@ -53,7 +82,10 @@
                 // Apply environment to the main scene
                 engine.scene.environment = texture;
                 // Also set as background so the EXR is visible
-                engine.scene.background = texture;
+                hdriTexture = texture;
+                applyBackgroundSetting();
+                // Ensure toggles exist once HDRI is available
+                addSceneTogglesIfNeeded();
 
                 // Remove any ambient lights (environment provides global illumination)
                 engine.scene.traverse((obj) => {
@@ -334,6 +366,8 @@
         // ------------------------------------------------------------
         const gui = new window.dat.GUI({ width: 300 });
         gui.domElement.style.zIndex = 5;
+        // Initialize scene toggles into GUI if HDRI already loaded
+        addSceneTogglesIfNeeded();
 
         gui.addColor(colours, 'queryHeads').name('Query Heads').onChange(applyAllAppearance);
         gui.addColor(colours, 'keyHeads').name('Key Heads').onChange(applyAllAppearance);
@@ -367,6 +401,15 @@
             reset: () => { 
                 Object.assign(colours, defaultColours); 
                 Object.assign(materialSettings, materialDefaults);
+                // Reset scene toggles if present
+                try {
+                    if (typeof sceneSettings !== 'undefined') {
+                        sceneSettings.showBackground = true;
+                        sceneSettings.bottomFog = false;
+                        if (typeof applyBackgroundSetting === 'function') applyBackgroundSetting();
+                        if (typeof applyFogSetting === 'function') applyFogSetting();
+                    }
+                } catch (_) { /* no-op */ }
                 applyAllAppearance(); 
                 gui.updateDisplay(); 
             } 
