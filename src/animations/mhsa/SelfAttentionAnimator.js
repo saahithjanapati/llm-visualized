@@ -183,6 +183,8 @@ export class SelfAttentionAnimator {
                         if (alignmentsCompleted >= alignmentsInProgress) {
                             // Mark this head as ready for blue-vector conveyor processing.
                             this.greensAligned[headIdx] = true;
+                            // Merge fixed K/V vectors for this head to reduce draw calls
+                            try { this.ctx && this.ctx._mergeFixedVectorsForHead && this.ctx._mergeFixedVectorsForHead(headIdx); } catch (_) { /* optional */ }
                             this._kickoffBlueConveyor(headIdx);
                             onDone && onDone();
                         }
@@ -194,6 +196,8 @@ export class SelfAttentionAnimator {
         // No greens to align – still flag readiness so blue vectors can run.
         if (alignmentsInProgress === 0) {
             this.greensAligned[headIdx] = true;
+                // Merge fixed K/V vectors for this head immediately if nothing to align
+                try { this.ctx && this.ctx._mergeFixedVectorsForHead && this.ctx._mergeFixedVectorsForHead(headIdx); } catch (_) { /* optional */ }
             this._kickoffBlueConveyor(headIdx);
             onDone && onDone();
         }
@@ -594,6 +598,14 @@ export class SelfAttentionAnimator {
         if (this.phase === 'complete') return;
         if (this._isConveyorComplete()) {
             this.phase = 'complete';
+            // Notify parent to dispose merged K/V visuals immediately after
+            // the last blue vector finishes its conveyor belt.
+            try {
+                // Dispose merged instanced groups first, then strip any remaining
+                // individual K/V meshes to ensure nothing remains visible.
+                this.ctx && this.ctx._disposeMergedKVGroups && this.ctx._disposeMergedKVGroups();
+                this.ctx && this.ctx._disposeAllIndividualKandVVectorsImmediately && this.ctx._disposeAllIndividualKandVVectorsImmediately();
+            } catch (_) { /* optional */ }
             this._flushCallbacks();
         }
     }

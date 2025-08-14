@@ -22,6 +22,10 @@ import {
     ROW_MERGE_HORIZ_SPEED,
     ROW_SEGMENT_SPACING,
     VECTOR_LENGTH_PRISM,
+    PRISM_BASE_WIDTH,
+    PRISM_BASE_DEPTH,
+    PRISM_MAX_HEIGHT,
+    PRISM_HEIGHT_SCALE_FACTOR,
     HIDE_INSTANCE_Y_OFFSET,
     ANIM_RISE_SPEED_ORIGINAL,
     ANIM_RISE_SPEED_POST_SPLIT_LN1,
@@ -121,6 +125,11 @@ export class MHSAAnimation {
         this._tempModeCompleted = false;
         this._tempAllOutputVectors = []; // K,Q,V combined
         this._tempKOutputVectors   = []; // Only central K vectors
+
+        // Track per-head merged fixed vectors so we only merge once.
+        this._mergedHeads = new Set();
+        this._mergedGroupsByHead = new Map(); // headIdx -> { K: Group, V: Group }
+        this._allFixedMerged = false; // single merged K and V meshes across all heads created
 
         // --------------------------------------------------------------
         //   Vector router: handles all positioning before pass-through
@@ -422,6 +431,13 @@ export class MHSAAnimation {
                     // For perm mode, trigger final color transition here
                     this._transitionHeadColorsToFinal(HEAD_COLOR_TRANSITION_MS); // 1 second duration
                 }
+
+                // After pass-through completes for all vectors, try merging all fixed K/V across heads
+                try { this._mergeAllFixedKVIfReady(); } catch (_) { /* optional */ }
+
+                // Schedule disposal of merged K/V groups only AFTER the very last
+                // blue (Q) vector completes its conveyor-belt traversal.
+                try { this._waitAndDisposeMergedKVWhenBlueConveyorComplete(); } catch (_) { /* optional */ }
             }
         };
 
@@ -676,6 +692,326 @@ export class MHSAAnimation {
         // Standard THREE.js objects added to scene are usually handled by scene traversal on global cleanup.
     }
 
+    // ------------------------------------------------------------------
+    //  Merge fixed K (green) and V (red) vectors for a head into instanced
+    //  batches to reduce draw calls once alignment is complete. Original
+    //  VectorVisualizationInstancedPrism meshes are disposed, but their
+    //  empty groups remain for positional queries used by the conveyor.
+    // ------------------------------------------------------------------
+    _mergeFixedVectorsForHead(headIdx) {
+        if (this._mergedHeads.has(headIdx)) return; // already merged
+        if (!Array.isArray(this.currentLanes) || this.currentLanes.length === 0) return;
+
+        const greens = [];
+        const reds = [];
+
+        // Collect K and V vectors for this head across all lanes
+        this.currentLanes.forEach((lane) => {
+            if (!lane) return;
+            const kVec = lane.upwardCopies && lane.upwardCopies[headIdx];
+            if (kVec && kVec.mesh) greens.push(kVec);
+            if (Array.isArray(lane.sideCopies)) {
+                const vObj = lane.sideCopies.find(sc => sc && sc.headIndex === headIdx && sc.type === 'V');
+                if (vObj && vObj.vec && vObj.vec.mesh) reds.push(vObj.vec);
+            }
+        });
+
+        // Build merged instanced meshes (one for K, one for V) and add to scene
+        const mergedGroups = { K: null, V: null };
+        try {
+            if (greens.length) mergedGroups.K = this._buildMergedPrismsFromVectors(greens, `MergedK_head${headIdx}`);
+        } catch (_) { /* non-fatal */ }
+        try {
+            if (reds.length) mergedGroups.V = this._buildMergedPrismsFromVectors(reds, `MergedV_head${headIdx}`);
+        } catch (_) { /* non-fatal */ }
+
+        if (mergedGroups.K) this.parentGroup.add(mergedGroups.K);
+        if (mergedGroups.V) this.parentGroup.add(mergedGroups.V);
+
+        // For temp mode, simply hide original meshes to avoid double-drawing,
+        // but keep them around for any logic that still references them.
+        // For other modes, dispose meshes to reclaim resources.
+        const retireOriginalMesh = (vec) => {
+            try {
+                if (!vec || !vec.mesh) return;
+                if (this.mode === 'temp') {
+                    vec.mesh.visible = false;
+                } else {
+                    if (vec.mesh.material) vec.mesh.material.dispose();
+                    if (vec.mesh.geometry) vec.mesh.geometry.dispose();
+                    if (vec.group) vec.group.remove(vec.mesh);
+                    vec.mesh = null;
+                }
+            } catch (_) { /* ignore */ }
+        };
+        greens.forEach(retireOriginalMesh);
+        reds.forEach(retireOriginalMesh);
+
+        this._mergedHeads.add(headIdx);
+        this._mergedGroupsByHead.set(headIdx, mergedGroups);
+    }
+
+    // Helper to create a single InstancedMesh representing all prisms from a list of vectors
+    _buildMergedPrismsFromVectors(vecList, debugName = 'MergedKV') {
+        if (!Array.isArray(vecList) || vecList.length === 0) return null;
+
+        // Mirror VectorVisualizationInstancedPrism internal constants
+        const PRISM_WIDTH_SCALE = 1.5;
+        const PRISM_DEPTH_SCALE = 1.5;
+        const uniformCalculatedHeight = Math.max(0.01, PRISM_MAX_HEIGHT * PRISM_HEIGHT_SCALE_FACTOR * 2.0);
+        const baseWidth = PRISM_BASE_WIDTH;
+        const baseDepth = PRISM_BASE_DEPTH;
+        const hideY = HIDE_INSTANCE_Y_OFFSET;
+
+        // Determine if this merged group represents V (red) vectors.
+        // If so, we anchor them at the canonical above-matrix height rather than
+        // whatever transient Y the fixed copies happen to have when we merge.
+        const isRedCategory = /V(\b|_|head|$)/.test(debugName);
+        const extraRise = (this.selfAttentionAnimator && this.selfAttentionAnimator.RED_EXTRA_RISE) || 75;
+        // BASE_RISE_ADJUST from VectorMatrixPassThrough is -30; replicate here to match final resting height
+        const canonicalRaisedBaseY = this.mhaPassThroughTargetY + this.mhaResultRiseOffsetY - 30 + extraRise;
+
+        const totalInstances = vecList.length * VECTOR_LENGTH_PRISM;
+        const baseGeo = new THREE.BoxGeometry(baseWidth, 1, baseDepth);
+        const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
+        // Shader patch to support per-instance left→right gradient identical to VectorVisualizationInstancedPrism
+        material.customProgramCacheKey = () => 'InstancedPrismGradientV1';
+        material.onBeforeCompile = (shader) => {
+            shader.uniforms.prismHalfWidth = { value: (baseWidth * PRISM_WIDTH_SCALE) / 2 };
+            shader.vertexShader = shader.vertexShader.replace(
+                '#include <common>',
+                `#include <common>\nattribute vec3 colorStart;\nattribute vec3 colorEnd;\nvarying vec3 vColorStart;\nvarying vec3 vColorEnd;\nvarying float vGradientT;\nuniform float prismHalfWidth;`
+            );
+            shader.vertexShader = shader.vertexShader.replace(
+                '#include <begin_vertex>',
+                `#include <begin_vertex>\n    vColorStart = colorStart;\n    vColorEnd   = colorEnd;\n    vGradientT  = clamp( (position.x + prismHalfWidth) / (2.0 * prismHalfWidth), 0.0, 1.0 );`
+            );
+            shader.fragmentShader = shader.fragmentShader.replace(
+                '#include <common>',
+                `#include <common>\nvarying vec3 vColorStart;\nvarying vec3 vColorEnd;\nvarying float vGradientT;`
+            );
+            shader.fragmentShader = shader.fragmentShader.replace(
+                'vec4 diffuseColor = vec4( diffuse, opacity );',
+                `vec3 grad = mix( vColorStart, vColorEnd, vGradientT );\n    vec4 diffuseColor = vec4( grad, opacity );`
+            );
+        };
+
+        const instanced = new THREE.InstancedMesh(baseGeo, material, totalInstances);
+        instanced.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+
+        // Gradient buffers (per instance)
+        const colorStartArr = new Float32Array(totalInstances * 3);
+        const colorEndArr   = new Float32Array(totalInstances * 3);
+        const colorStartAttr = new THREE.InstancedBufferAttribute(colorStartArr, 3);
+        const colorEndAttr   = new THREE.InstancedBufferAttribute(colorEndArr, 3);
+        instanced.geometry.setAttribute('colorStart', colorStartAttr);
+        instanced.geometry.setAttribute('colorEnd',   colorEndAttr);
+
+        const tmpMatrix = new THREE.Matrix4();
+        const tmpPos = new THREE.Vector3();
+        const tmpQuat = new THREE.Quaternion();
+        const tmpScale = new THREE.Vector3();
+        const dummy = new THREE.Object3D();
+
+        // Populate instances by copying per-prism transforms and colours from the original vectors
+        let instIndex = 0;
+        // Build mapping so raycasts (instanceId) can be decoded back to vector/prism/head/lane
+        const vectorRefs = vecList.slice();
+        const headIdxs = vecList.map(v => (v && v.userData && typeof v.userData.headIndex === 'number') ? v.userData.headIndex : null);
+        const laneIdxs = vecList.map(v => {
+            const z = v && v.group ? v.group.position.z : NaN;
+            const lanes = this.currentLanes || [];
+            let best = -1, bestDist = Infinity;
+            for (let i = 0; i < lanes.length; i++) {
+                const d = Math.abs(lanes[i].zPos - z);
+                if (d < bestDist) { best = i; bestDist = d; }
+            }
+            return best;
+        });
+        for (let vIdx = 0; vIdx < vecList.length; vIdx++) {
+            const vec = vecList[vIdx];
+            if (!vec || !vec.group) { instIndex += VECTOR_LENGTH_PRISM; continue; }
+
+            // Access original gradient attrs if available
+            const srcCS = vec.mesh && vec.mesh.geometry && vec.mesh.geometry.getAttribute ? vec.mesh.geometry.getAttribute('colorStart') : null;
+            const srcCE = vec.mesh && vec.mesh.geometry && vec.mesh.geometry.getAttribute ? vec.mesh.geometry.getAttribute('colorEnd')   : null;
+
+            for (let i = 0; i < VECTOR_LENGTH_PRISM; i++, instIndex++) {
+                // Determine if this prism is visible or hidden in the source vector by reading its matrix
+                let hidden = false;
+                if (vec.mesh && typeof vec.mesh.getMatrixAt === 'function') {
+                    vec.mesh.getMatrixAt(i, tmpMatrix);
+                    tmpMatrix.decompose(tmpPos, tmpQuat, tmpScale);
+                    // Hidden prisms are scaled down and translated to a large negative Y
+                    if (tmpPos.y < hideY * 0.5 || tmpScale.y < 0.01) hidden = true;
+                }
+
+                // Compute world position for this prism
+                const baseX = (i - VECTOR_LENGTH_PRISM / 2) * (baseWidth * PRISM_WIDTH_SCALE);
+                const worldX = vec.group.position.x + baseX;
+                const baseYForCategory = isRedCategory ? canonicalRaisedBaseY : (vec.group && vec.group.position ? vec.group.position.y : 0);
+                const worldY = baseYForCategory + (hidden ? hideY : uniformCalculatedHeight / 2);
+                const worldZ = vec.group.position.z;
+
+                dummy.position.set(worldX, worldY, worldZ);
+                // Apply fixed uniform dimensions (mirrors original visual size)
+                dummy.scale.set(PRISM_WIDTH_SCALE, hidden ? 0.001 : uniformCalculatedHeight, PRISM_DEPTH_SCALE);
+                dummy.updateMatrix();
+                instanced.setMatrixAt(instIndex, dummy.matrix);
+
+                // Copy gradient colours from source if present; otherwise derive from vector helper
+                if (srcCS && srcCE) {
+                    const i3 = i * 3;
+                    colorStartArr[instIndex * 3 + 0] = srcCS.array[i3 + 0] || 0.5;
+                    colorStartArr[instIndex * 3 + 1] = srcCS.array[i3 + 1] || 0.5;
+                    colorStartArr[instIndex * 3 + 2] = srcCS.array[i3 + 2] || 0.5;
+                    colorEndArr[instIndex * 3 + 0] = srcCE.array[i3 + 0] || 0.5;
+                    colorEndArr[instIndex * 3 + 1] = srcCE.array[i3 + 1] || 0.5;
+                    colorEndArr[instIndex * 3 + 2] = srcCE.array[i3 + 2] || 0.5;
+                } else if (typeof vec.getDefaultColorForIndex === 'function') {
+                    const leftColor  = vec.getDefaultColorForIndex(Math.max(0, i - 1));
+                    const rightColor = vec.getDefaultColorForIndex(Math.min(VECTOR_LENGTH_PRISM - 1, i + 1));
+                    colorStartArr[instIndex * 3 + 0] = leftColor.r;  colorStartArr[instIndex * 3 + 1] = leftColor.g;  colorStartArr[instIndex * 3 + 2] = leftColor.b;
+                    colorEndArr[instIndex * 3 + 0]   = rightColor.r; colorEndArr[instIndex * 3 + 1]   = rightColor.g; colorEndArr[instIndex * 3 + 2]   = rightColor.b;
+                } else {
+                    // Neutral grey fallback
+                    colorStartArr[instIndex * 3 + 0] = 0.5; colorStartArr[instIndex * 3 + 1] = 0.5; colorStartArr[instIndex * 3 + 2] = 0.5;
+                    colorEndArr[instIndex * 3 + 0]   = 0.5; colorEndArr[instIndex * 3 + 1]   = 0.5; colorEndArr[instIndex * 3 + 2]   = 0.5;
+                }
+            }
+        }
+
+        instanced.instanceMatrix.needsUpdate = true;
+        colorStartAttr.needsUpdate = true;
+        colorEndAttr.needsUpdate = true;
+
+        const group = new THREE.Group();
+        group.name = debugName;
+        group.add(instanced);
+        // Attach metadata for decoding instanceId on raycast
+        const category = /V(\b|_|head|$)/.test(debugName) ? 'V' : 'K';
+        // Assign descriptive label so hover shows full text for merged groups
+        group.userData.label = (category === 'V') ? 'Merged Value Vectors (Red)' : 'Merged Key Vectors (Green)';
+        const mergedKVMeta = {
+            category,
+            vectorPrismCount: VECTOR_LENGTH_PRISM,
+            vectorRefs,
+            headIdxs,
+            laneIdxs
+        };
+        group.userData.mergedKVMeta = mergedKVMeta;
+        instanced.userData.mergedKVMeta = mergedKVMeta;
+        // Also set label on mesh for direct hits
+        instanced.userData.label = (category === 'V') ? 'Merged Value Vectors (Red)' : 'Merged Key Vectors (Green)';
+        return group;
+    }
+
+    /** Decode a THREE.Raycaster intersection against a merged K/V InstancedMesh. */
+    decodeMergedKVIntersection(intersection) {
+        if (!intersection || typeof intersection.instanceId !== 'number') return null;
+        const mesh = intersection.object;
+        if (!mesh || !mesh.isInstancedMesh) return null;
+        const meta = (mesh.userData && mesh.userData.mergedKVMeta)
+            || (mesh.parent && mesh.parent.userData && mesh.parent.userData.mergedKVMeta)
+            || null;
+        if (!meta) return null;
+        const instanceId = intersection.instanceId;
+        const vectorIndex = Math.floor(instanceId / meta.vectorPrismCount);
+        const prismIndex = instanceId % meta.vectorPrismCount;
+        const headIndex = Array.isArray(meta.headIdxs) ? meta.headIdxs[vectorIndex] : null;
+        const laneIndex = Array.isArray(meta.laneIdxs) ? meta.laneIdxs[vectorIndex] : null;
+        const vectorRef = Array.isArray(meta.vectorRefs) ? meta.vectorRefs[vectorIndex] : null;
+        return {
+            category: meta.category, // 'K' or 'V'
+            vectorIndex,
+            prismIndex,
+            headIndex,
+            laneIndex,
+            vectorRef
+        };
+    }
+
+    // Merge ALL fixed K and V vectors across heads into two meshes
+    _mergeAllFixedKVIfReady() {
+        if (this._allFixedMerged) return;
+        if (!Array.isArray(this.currentLanes) || this.currentLanes.length === 0) return;
+        if (this.mhaPassThroughPhase !== 'mha_pass_through_complete') return;
+        // Ensure all heads are aligned before collapsing geometry
+        for (let h = 0; h < NUM_HEAD_SETS_LAYER; h++) {
+            if (!this.selfAttentionAnimator || this.selfAttentionAnimator.greensAligned[h] !== true) {
+                return;
+            }
+        }
+
+        const allGreens = [];
+        const allReds = [];
+        this.currentLanes.forEach(lane => {
+            if (!lane) return;
+            if (Array.isArray(lane.upwardCopies)) {
+                for (let h = 0; h < NUM_HEAD_SETS_LAYER; h++) {
+                    const kVec = lane.upwardCopies[h];
+                    if (kVec && kVec.mesh) allGreens.push(kVec);
+                }
+            }
+            if (Array.isArray(lane.sideCopies)) {
+                lane.sideCopies.forEach(sc => {
+                    if (sc && sc.type === 'V' && sc.vec && sc.vec.mesh) allReds.push(sc.vec);
+                });
+            }
+        });
+        if (!allGreens.length && !allReds.length) return;
+
+        let mergedKGroup = null;
+        let mergedVGroup = null;
+        try { if (allGreens.length) mergedKGroup = this._buildMergedPrismsFromVectors(allGreens, 'MergedAllK'); } catch (_) {}
+        try { if (allReds.length)   mergedVGroup = this._buildMergedPrismsFromVectors(allReds,   'MergedAllV'); } catch (_) {}
+        if (mergedKGroup) this.parentGroup.add(mergedKGroup);
+        if (mergedVGroup) this.parentGroup.add(mergedVGroup);
+
+        const stripMeshKeepGroup = (vec) => {
+            try {
+                if (vec && vec.mesh) {
+                    if (vec.mesh.material) vec.mesh.material.dispose();
+                    if (vec.mesh.geometry) vec.mesh.geometry.dispose();
+                    if (vec.group) vec.group.remove(vec.mesh);
+                    vec.mesh = null;
+                }
+            } catch (_) {}
+        };
+        allGreens.forEach(stripMeshKeepGroup);
+        allReds.forEach(stripMeshKeepGroup);
+        this._allFixedMerged = true;
+        console.log('MHSAAnimation: Merged all fixed K and V vectors into two instanced meshes.');
+    }
+
+    // Fade any existing merged K/V instanced meshes to a target opacity
+    _fadeMergedKVOpacity(targetOpacity, durationMs, delayMs = 0) {
+        const doFade = (group) => {
+            if (!group) return;
+            const inst = group.children && group.children[0];
+            if (!inst || !inst.isMesh) return;
+            const mat = inst.material;
+            if (!mat) return;
+            mat.transparent = true;
+            const state = { op: typeof mat.opacity === 'number' ? mat.opacity : 1.0 };
+            if (typeof TWEEN !== 'undefined') {
+                new TWEEN.Tween(state)
+                    .to({ op: targetOpacity }, durationMs)
+                    .delay(delayMs)
+                    .easing(TWEEN.Easing.Quadratic.InOut)
+                    .onUpdate(() => { mat.opacity = state.op; mat.needsUpdate = true; })
+                    .start();
+            } else {
+                mat.opacity = targetOpacity;
+                mat.needsUpdate = true;
+            }
+        };
+        this._mergedGroupsByHead.forEach((grp) => {
+            if (grp && grp.K) doFade(grp.K);
+            if (grp && grp.V) doFade(grp.V);
+        });
+    }
+
     _applyTempModeBehaviour() {
         const grayColor = new THREE.Color(0x606060);
         // Visible prism window for gray-out and gradient calculations
@@ -892,6 +1228,9 @@ export class MHSAAnimation {
         // Combine decorative vectors in each lane into a single vector, then animate those combined vectors
         this.outputProjMatrixAnimationPhase = 'vectors_entering';
 
+        // Keep K/V visuals present during concatenation; they will be disposed
+        // once the very last blue (Q) vector finishes its conveyor belt.
+
         const combinedVectors = [];
 
         // Central X coordinate for combined vector (align with first head center)
@@ -1088,6 +1427,170 @@ export class MHSAAnimation {
         });
 
         console.log("Starting animation of combined lane vectors through output projection matrix");
+    }
+
+    // Hide all merged K/V instanced groups (both per-head and global-all)
+    _hideMergedKVGroups() {
+        // Per-head merged groups
+        if (this._mergedGroupsByHead && typeof this._mergedGroupsByHead.forEach === 'function') {
+            this._mergedGroupsByHead.forEach((grp) => {
+                if (grp && grp.K) grp.K.visible = false;
+                if (grp && grp.V) grp.V.visible = false;
+            });
+        }
+        // Global merged groups (if created)
+        if (this.parentGroup && typeof this.parentGroup.getObjectByName === 'function') {
+            const allK = this.parentGroup.getObjectByName('MergedAllK');
+            const allV = this.parentGroup.getObjectByName('MergedAllV');
+            if (allK) allK.visible = false;
+            if (allV) allV.visible = false;
+        }
+    }
+
+    // Dispose and remove any merged K/V instanced groups (both per-head and global)
+    _disposeMergedKVGroups() {
+        const safeDisposeGroup = (group) => {
+            if (!group) return;
+            try {
+                const inst = group.children && group.children[0];
+                if (inst && inst.isMesh) {
+                    if (inst.material) {
+                        if (Array.isArray(inst.material)) {
+                            inst.material.forEach((m) => { if (m && m.dispose) m.dispose(); });
+                        } else if (inst.material.dispose) {
+                            inst.material.dispose();
+                        }
+                    }
+                    if (inst.geometry && inst.geometry.dispose) inst.geometry.dispose();
+                }
+                if (group.parent) {
+                    group.parent.remove(group);
+                } else if (this.parentGroup) {
+                    this.parentGroup.remove(group);
+                }
+            } catch (_) { /* ignore */ }
+        };
+
+        // Per-head merged groups
+        if (this._mergedGroupsByHead && typeof this._mergedGroupsByHead.forEach === 'function') {
+            this._mergedGroupsByHead.forEach((grp) => {
+                if (grp && grp.K) safeDisposeGroup(grp.K);
+                if (grp && grp.V) safeDisposeGroup(grp.V);
+            });
+            try { this._mergedGroupsByHead.clear(); } catch (_) { /* ignore */ }
+        }
+
+        // Global merged groups (if created)
+        if (this.parentGroup && typeof this.parentGroup.getObjectByName === 'function') {
+            const allK = this.parentGroup.getObjectByName('MergedAllK');
+            const allV = this.parentGroup.getObjectByName('MergedAllV');
+            if (allK) safeDisposeGroup(allK);
+            if (allV) safeDisposeGroup(allV);
+        }
+
+        // Reset tracking flags/collections
+        try { if (this._mergedHeads && this._mergedHeads.clear) this._mergedHeads.clear(); } catch (_) { /* ignore */ }
+        this._allFixedMerged = false;
+    }
+
+    // Poll self-attention animator until all blue (Q) conveyors across heads
+    // have completed, then dispose merged K/V groups so they disappear exactly
+    // after the last blue finishes its path.
+    _waitAndDisposeMergedKVWhenBlueConveyorComplete() {
+        // Prefer a direct completion callback from SelfAttentionAnimator
+        try {
+            if (this.selfAttentionAnimator && typeof this.selfAttentionAnimator.start === 'function') {
+                this.selfAttentionAnimator.start(() => {
+                    try { this._disposeMergedKVGroups(); } catch (_) {}
+                });
+                return;
+            }
+        } catch (_) { /* ignore and fall back to polling */ }
+
+        // Fallback: poll phase with a safety timeout
+        const checkIntervalMs = 100;
+        const maxWaitMs = 120000;
+        let waited = 0;
+        const tick = () => {
+            try {
+                if (!this.selfAttentionAnimator || this.selfAttentionAnimator.phase === 'complete') {
+                    this._disposeMergedKVGroups();
+                    return;
+                }
+            } catch (_) { /* ignore */ }
+            waited += checkIntervalMs;
+            if (waited >= maxWaitMs) {
+                try { this._disposeMergedKVGroups(); } catch (_) {}
+                return;
+            }
+            setTimeout(tick, checkIntervalMs);
+        };
+        setTimeout(tick, checkIntervalMs);
+    }
+
+    // Immediately hide all K (green) and V (red) vectors, including any merged
+    // instanced groups and any leftover individual K/V copies in lanes.
+    _hideAllKandVVectorsImmediately() {
+        try { this._hideMergedKVGroups(); } catch (_) {}
+        const lanes = this.currentLanes || [];
+        lanes.forEach((lane) => {
+            // Hide K upward copies for every head
+            if (Array.isArray(lane.upwardCopies)) {
+                lane.upwardCopies.forEach((kVec) => {
+                    if (!kVec) return;
+                    try {
+                        if (kVec.mesh) kVec.mesh.visible = false;
+                        if (kVec.group) kVec.group.visible = false;
+                    } catch (_) {}
+                });
+            }
+            // Hide V side copies
+            if (Array.isArray(lane.sideCopies)) {
+                lane.sideCopies.forEach((sc) => {
+                    if (!sc || sc.type !== 'V') return;
+                    const v = sc.vec;
+                    if (!v) return;
+                    try {
+                        if (v.mesh) v.mesh.visible = false;
+                        if (v.group) v.group.visible = false;
+                    } catch (_) {}
+                });
+            }
+        });
+    }
+
+    // Permanently dispose any remaining individual K (green) and V (red) vectors
+    // across all lanes. Keeps the empty groups (for positional queries) but
+    // removes meshes and their GPU resources so nothing remains visible.
+    _disposeAllIndividualKandVVectorsImmediately() {
+        const stripMeshKeepGroup = (vec) => {
+            try {
+                if (!vec) return;
+                if (vec.mesh) {
+                    try { if (vec.mesh.material) vec.mesh.material.dispose(); } catch (_) {}
+                    try { if (vec.mesh.geometry) vec.mesh.geometry.dispose(); } catch (_) {}
+                    if (vec.group) vec.group.remove(vec.mesh);
+                    vec.mesh = null;
+                }
+                if (vec.group) vec.group.visible = false;
+            } catch (_) { /* ignore */ }
+        };
+        const lanes = this.currentLanes || [];
+        lanes.forEach((lane) => {
+            // Upward K copies for each head
+            if (Array.isArray(lane.upwardCopies)) {
+                lane.upwardCopies.forEach((kVec, idx) => {
+                    stripMeshKeepGroup(kVec);
+                });
+            }
+            // Side V copies for each head
+            if (Array.isArray(lane.sideCopies)) {
+                lane.sideCopies.forEach((sc) => {
+                    if (!sc || sc.type !== 'V') return;
+                    stripMeshKeepGroup(sc.vec);
+                });
+            }
+        });
     }
     
     _animateOutputMatrixBrightening(duration) {

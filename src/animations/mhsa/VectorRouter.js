@@ -48,6 +48,10 @@ export class VectorRouter {
      */
     update(deltaTime, timeNow, lanes) {
         if (!lanes || !lanes.length) return;
+        // Once all vectors are in their parking positions and the callback has
+        // fired, this router should stop mutating side-copy positions. This
+        // avoids fighting with above-matrix animations that take over later.
+        if (this._readyEmitted) return;
 
         lanes.forEach(lane => {
             // ------------------------------------------------------------------
@@ -82,6 +86,12 @@ export class VectorRouter {
                     upVec.userData = upVec.userData || {};
                     upVec.userData.trail = upTrail;
                     Object.assign(upVec.userData, { headIndex: targetHeadIdx, sideSpawned: false, sideSpawnRequested: false, sideSpawnTime: 0, parentLane: lane });
+                    // Label for hover – Key vector (green)
+                    try {
+                        const lbl = `Key Vector (Green)`;
+                        upVec.group.userData.label = lbl;
+                        if (upVec.mesh) upVec.mesh.userData = { ...(upVec.mesh.userData||{}), label: lbl };
+                    } catch (_) {}
                     lane.upwardCopies.push(upVec);
 
                     lane.headIndex = targetHeadIdx + 1;
@@ -131,13 +141,23 @@ export class VectorRouter {
                             qTrail.start(qVec.group.position);
                             qVec.userData = qVec.userData || {};
                             qVec.userData.trail = qTrail;
-                            Object.assign(qVec.userData, { headIndex: hIdx });
+                            Object.assign(qVec.userData, { headIndex: hIdx, parentLane: lane });
+                            try {
+                                const lblQ = `Query Vector (Blue)`;
+                                qVec.group.userData.label = lblQ;
+                                if (qVec.mesh) qVec.mesh.userData = { ...(qVec.mesh.userData||{}), label: lblQ };
+                            } catch (_) {}
                             const vVec = new VectorVisualizationInstancedPrism(centerVec.rawData.slice(), centerVec.group.position.clone());
                             const vTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1, undefined, FAINT_TRAIL_OPACITY);
                             vTrail.start(vVec.group.position);
                             vVec.userData = vVec.userData || {};
                             vVec.userData.trail = vTrail;
-                            Object.assign(vVec.userData, { headIndex: hIdx });
+                            Object.assign(vVec.userData, { headIndex: hIdx, parentLane: lane });
+                            try {
+                                const lblV = `Value Vector (Red)`;
+                                vVec.group.userData.label = lblV;
+                                if (vVec.mesh) vVec.mesh.userData = { ...(vVec.mesh.userData||{}), label: lblV };
+                            } catch (_) {}
                             this.parentGroup.add(qVec.group);
                             this.parentGroup.add(vVec.group);
 

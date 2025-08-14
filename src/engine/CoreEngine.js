@@ -243,10 +243,36 @@ export class CoreEngine {
 
         this._raycaster.setFromCamera(this._pointer, this.camera);
         const intersects = this._raycaster.intersectObjects(this.scene.children, true);
+        // Pass 1: Prefer detailed labels from merged K/V instanced meshes anywhere in the hit list
+        for (const hit of intersects) {
+            try {
+                const obj = hit.object;
+                if (obj && obj.isInstancedMesh) {
+                    // Walk up to find a MHSAAnimation context (via layer reference)
+                    for (const layer of this._layers) {
+                        if (!layer || !layer.mhsaAnimation) continue;
+                        const mhsa = layer.mhsaAnimation;
+                        if (typeof mhsa.decodeMergedKVIntersection === 'function') {
+                            const info = mhsa.decodeMergedKVIntersection(hit);
+                            if (info) {
+                                const headText = (typeof info.headIndex === 'number' && info.headIndex >= 0) ? `Head ${info.headIndex + 1}` : 'Head ?';
+                                const laneText = (typeof info.laneIndex === 'number' && info.laneIndex >= 0) ? `Lane ${info.laneIndex + 1}` : 'Lane ?';
+                                const catText  = info.category === 'V' ? 'Value (Red)' : 'Key (Green)';
+                                this._hoverLabelDiv.textContent = `${catText}\n${headText} • ${laneText}`;
+                                this._hoverLabelDiv.style.left = `${event.clientX + 12}px`;
+                                this._hoverLabelDiv.style.top  = `${event.clientY + 12}px`;
+                                this._hoverLabelDiv.style.display = 'block';
+                                return; // Prefer detailed merged K/V hit over any generic labels
+                            }
+                        }
+                    }
+                }
+            } catch (_) { /* non-fatal */ }
+        }
 
+        // Pass 2: Fallback – show the first generic label found
         for (const hit of intersects) {
             let obj = hit.object;
-            // climb to find label other than generic
             while (obj) {
                 const lbl = obj.userData?.label || obj.name;
                 if (lbl && lbl !== 'Weight Matrix') {
@@ -254,7 +280,7 @@ export class CoreEngine {
                     this._hoverLabelDiv.style.left = `${event.clientX + 12}px`;
                     this._hoverLabelDiv.style.top  = `${event.clientY + 12}px`;
                     this._hoverLabelDiv.style.display = 'block';
-                    return; // done
+                    return;
                 }
                 obj = obj.parent;
             }

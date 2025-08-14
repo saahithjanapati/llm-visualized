@@ -129,6 +129,14 @@ export function animateVectorMatrixPassThrough(
                 vector = smallVec; // continue animating this handle
                 // Preserve metadata such as headIndex for downstream alignment
                 vector.userData = heavyVec.userData ? { ...heavyVec.userData } : {};
+                // Preserve and refine hover label for clarity
+                try {
+                    const cat = vectorCategory === 'K' ? 'Key Vector (Green)'
+                              : vectorCategory === 'Q' ? 'Query Vector (Blue)'
+                              : 'Value Vector (Red)';
+                    vector.group.userData.label = cat;
+                    if (vector.mesh) vector.mesh.userData = { ...(vector.mesh.userData||{}), label: cat };
+                } catch (_) {}
                 // Ensure trails do NOT continue above matrices for any category
                 if (vector.userData) {
                     delete vector.userData.trail;
@@ -140,6 +148,18 @@ export function animateVectorMatrixPassThrough(
                     const hIdx = vector.userData.headIndex;
                     if (pl && typeof hIdx === 'number') {
                         pl.upwardCopies[hIdx] = vector;
+                    }
+                }
+                // If this is a side copy (Q or V), update the lane.sideCopies entry to
+                // reference the new lightweight 64-dim vector that will be raised/animated above the matrices.
+                if ((vectorCategory === 'Q' || vectorCategory === 'V') && vector.userData.parentLane) {
+                    const pl = vector.userData.parentLane;
+                    const hIdx = vector.userData.headIndex;
+                    if (pl && Array.isArray(pl.sideCopies) && typeof hIdx === 'number') {
+                        const entry = pl.sideCopies.find(sc => sc && sc.headIndex === hIdx && sc.type === vectorCategory);
+                        if (entry) {
+                            entry.vec = vector;
+                        }
                     }
                 }
                 // heavyVec trail remains in scene as a static line below; do not update above
