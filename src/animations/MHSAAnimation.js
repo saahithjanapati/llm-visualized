@@ -392,6 +392,11 @@ export class MHSAAnimation {
         console.log("MHSAAnimation: Initiating Parallel MHSA Head Pass-Through Animations...");
         this.mhaPassThroughPhase = 'parallel_pass_through_active';
 
+        // Before launching pass-through tweens, merge parked K/Q/V copy trails
+        // into a single static LineSegments to reduce draw calls and skip their
+        // per-frame updates while vectors move through matrices.
+        try { this._mergeCopyTrailsBeforePassThrough(); } catch (_) { /* optional */ }
+
         let totalAnimationsToComplete = allLanes.length * NUM_HEAD_SETS_LAYER * 3;
         let animationsCompleted = 0;
 
@@ -534,6 +539,67 @@ export class MHSAAnimation {
                 residualTrail.update(wPos);
             }
         });
+    }
+
+    // ------------------------------------------------------------------
+    //  Merge faint trails drawn by the parked K/Q/V copies (pre pass-through)
+    // ------------------------------------------------------------------
+    _mergeCopyTrailsBeforePassThrough() {
+        const lanes = this.currentLanes || [];
+        if (!lanes.length) return;
+
+        /** @type {import('../utils/trailUtils.js').StraightLineTrail[]} */
+        const trailsToMerge = [];
+        const vectorsWithTrails = [];
+
+        lanes.forEach(lane => {
+            // Upward K copies
+            if (Array.isArray(lane.upwardCopies)) {
+                lane.upwardCopies.forEach(v => {
+                    const t = v && v.userData && v.userData.trail;
+                    if (t) {
+                        trailsToMerge.push(t);
+                        vectorsWithTrails.push(v);
+                    }
+                });
+            }
+            // Side Q/V copies
+            if (Array.isArray(lane.sideCopies)) {
+                lane.sideCopies.forEach(obj => {
+                    const v = obj && obj.vec;
+                    const t = v && v.userData && v.userData.trail;
+                    if (t) {
+                        trailsToMerge.push(t);
+                        vectorsWithTrails.push(v);
+                    }
+                });
+            }
+            // Travelling vector trail inside MHSA branch (not the residual stream)
+            const tv = lane && lane.travellingVec;
+            const tvTrail = tv && tv.userData && tv.userData.trail;
+            if (tvTrail) {
+                trailsToMerge.push(tvTrail);
+                vectorsWithTrails.push(tv);
+            }
+        });
+
+        if (!trailsToMerge.length) return;
+
+        // Preserve appearance based on first trail
+        let colorHex = undefined;
+        let baseOpacity = undefined;
+        const first = trailsToMerge[0];
+        if (first) {
+            if (first._material && first._material.color) colorHex = first._material.color.getHex();
+            else if (typeof first._color !== 'undefined') colorHex = first._color;
+            if (typeof first._opacity === 'number') baseOpacity = first._opacity;
+        }
+
+        // Build merged static segments and dispose originals
+        mergeTrailsIntoLineSegments(trailsToMerge, this.parentGroup, colorHex, undefined, baseOpacity);
+
+        // Remove trail refs from vectors to avoid updating disposed trails
+        vectorsWithTrails.forEach(v => { if (v && v.userData) delete v.userData.trail; });
     }
 
     dispose() {

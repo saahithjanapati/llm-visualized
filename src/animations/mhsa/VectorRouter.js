@@ -184,6 +184,7 @@ export class VectorRouter {
                         // Only update trail while below matrix level (consistent with other vectors)
                         const matrixBottomY = this.headStopY; // Q/V vectors stop at headStopY which is just below matrices
                         if (v.group.position.y < matrixBottomY) {
+                            const ud = v.userData;
                             if (ud.trailWorld) {
                                 const wp = new THREE.Vector3();
                                 v.group.getWorldPosition(wp);

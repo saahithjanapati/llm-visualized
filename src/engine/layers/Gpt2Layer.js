@@ -324,18 +324,8 @@ export default class Gpt2Layer extends BaseLayer {
                     lane.expandedVecTrail.update(lane.expandedVecGroup.position);
                 }
 
-                // Upward K copies and sideways Q/V copies (managed by VectorRouter but update again for safety)
-                if (lane.upwardCopies && lane.upwardCopies.length) {
-                    lane.upwardCopies.forEach(v => {
-                        if (v.userData && v.userData.trail) v.userData.trail.update(v.group.position);
-                    });
-                }
-                if (lane.sideCopies && lane.sideCopies.length) {
-                    lane.sideCopies.forEach(obj => {
-                        const v = obj.vec;
-                        if (v.userData && v.userData.trail) v.userData.trail.update(v.group.position);
-                    });
-                }
+                // Trails for K/Q/V copies are updated inside VectorRouter.
+                // Avoid double-updating here to reduce CPU work.
             });
         }
         // Handle transition phase - wait for vectors to reach position

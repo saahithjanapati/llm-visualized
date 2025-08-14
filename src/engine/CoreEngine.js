@@ -70,13 +70,15 @@ export class CoreEngine {
 
         const antialiasEnabled = QUALITY_PRESET === 'high';
         if (container instanceof HTMLCanvasElement) {
-            this.renderer = new THREE.WebGLRenderer({ canvas: container, antialias: antialiasEnabled, logarithmicDepthBuffer: true });
+            this.renderer = new THREE.WebGLRenderer({ canvas: container, antialias: antialiasEnabled, logarithmicDepthBuffer: true, powerPreference: 'high-performance' });
         } else {
-            this.renderer = new THREE.WebGLRenderer({ antialias: antialiasEnabled, logarithmicDepthBuffer: true });
+            this.renderer = new THREE.WebGLRenderer({ antialias: antialiasEnabled, logarithmicDepthBuffer: true, powerPreference: 'high-performance' });
             container.appendChild(this.renderer.domElement);
         }
         this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.setPixelRatio(QUALITY_PRESET === 'high' ? Math.min(window.devicePixelRatio, 2) : 1);
+        // Slightly conservative DPR to improve FPS when many heads are visible.
+        const dprCap = QUALITY_PRESET === 'high' ? 1.5 : 1;
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, dprCap));
 
         // ────────────────────────────────────────────────────────────────────
         // Raycasting setup for hover labels
