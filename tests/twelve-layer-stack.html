@@ -252,6 +252,28 @@
         controls.enableDamping = true;
         controls.dampingFactor = 0.05;
 
+        // Gate and lifecycle for intro RAF/rendering so we can stop it after hand-off
+        let __introActive = true;
+        let __introRaf = 0;
+        let __introCleaned = false;
+        function cleanupIntro() {
+            if (__introCleaned) return;
+            __introCleaned = true;
+            __introActive = false;
+            try { cancelAnimationFrame(__introRaf); } catch (_) {}
+            try { controls && controls.dispose && controls.dispose(); } catch (_) {}
+            try { renderer && renderer.dispose && renderer.dispose(); } catch (_) { /* no-op */ }
+            try {
+                scene.traverse((child) => {
+                    if (child.geometry) child.geometry.dispose();
+                    if (child.material) {
+                        if (Array.isArray(child.material)) child.material.forEach((m) => m && m.dispose && m.dispose());
+                        else if (child.material.dispose) child.material.dispose();
+                    }
+                });
+            } catch (_) { /* no-op */ }
+        }
+
         // Ambient light replaced by HDRI environment; ambient removed.
         const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
         dirLight.position.set(5, 10, 7.5);
@@ -363,6 +385,8 @@
 
             // HDRI now ready – remove intro canvas if it hasn't been hidden yet
             introCanvas.style.display = 'none';
+            // Stop intro loop and dispose even if transition text hasn't fired yet
+            try { cleanupIntro(); } catch (_) {}
 
             // Hide loading GIF
             const gif = document.getElementById('loadingGif');
@@ -371,6 +395,8 @@
             console.warn('HDRI failed to load:', err);
             // Fail-safe: still remove intro overlay so the app continues
             introCanvas.style.display = 'none';
+            // Ensure intro loop is stopped on failure too
+            try { cleanupIntro(); } catch (_) {}
             const gif = document.getElementById('loadingGif');
             if (gif) gif.style.display = 'none';
         });
@@ -379,18 +405,21 @@
         window.addEventListener('resize', () => {
             const { innerWidth, innerHeight } = window;
             // intro
-            camera.aspect = innerWidth / innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(innerWidth, innerHeight);
+            if (typeof __introActive === 'undefined' || __introActive) {
+                camera.aspect = innerWidth / innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(innerWidth, innerHeight);
+            }
             // GPT canvas handled internally by CoreEngine resize listener.
         });
 
         // Track modal pause to also pause intro loop rendering
         let __modalPaused = false;
 
-        // Animation loop for intro
+        // Animation loop for intro (gated so we can stop it after transition)
         const loopIntro = () => {
-            requestAnimationFrame(loopIntro);
+            if (!__introActive) return;
+            __introRaf = requestAnimationFrame(loopIntro);
             if (__modalPaused) return;
             controls.update();
             if (typeof TWEEN !== 'undefined') TWEEN.update();
@@ -404,6 +433,8 @@
         function transitionToGPT() {
             introCanvas.style.display = 'none';
             gptCanvas.style.display   = 'block';
+            // Stop and dispose the intro resources immediately upon hand-off
+            cleanupIntro();
         }
 
         // Cleanup on unload

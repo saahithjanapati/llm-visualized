@@ -73,11 +73,12 @@ export function buildMHAVisuals(parentGroup, {
             if (mat.frontCapMesh) mat.frontCapMesh.userData.label = label;
             if (mat.backCapMesh)  mat.backCapMesh.userData.label  = label;
 
-            // Respect opacity setting so we can fade them later if needed
+            // Make heavy matrix materials opaque by default when fully opaque to avoid sorting
             mat.group.children.forEach(child => {
                 if (child.material) {
-                    child.material.transparent = matrixRestingOpacity < 1.0;
-                    child.material.opacity     = matrixRestingOpacity;
+                    const wantsTransparency = matrixRestingOpacity < 1.0;
+                    child.material.opacity = matrixRestingOpacity;
+                    child.material.transparent = wantsTransparency ? true : false;
                 }
             });
 
@@ -128,8 +129,8 @@ export function buildMHAVisuals(parentGroup, {
 
     outputProjectionMatrix.group.children.forEach(child => {
         if (child.material) {
-            child.material.transparent      = false;
             child.material.opacity          = 1.0;
+            child.material.transparent      = false;
             child.material.emissive         = initDarkColor;
             child.material.emissiveIntensity = 0.1;
         }
