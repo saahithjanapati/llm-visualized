@@ -127,48 +127,9 @@ export default class Gpt2Layer extends BaseLayer {
         // ────────────────────────────────────────────────────────────────
         // 2) Multi-Head Self-Attention matrices
         // ────────────────────────────────────────────────────────────────
-        const mhaGroup = new THREE.Group();
-        const matrixW = MHA_MATRIX_PARAMS.width;
-        const singleSetWidth = 3 * matrixW;
-        const totalWidth = NUM_HEAD_SETS_LAYER * singleSetWidth + (NUM_HEAD_SETS_LAYER - 1) * HEAD_SET_GAP_LAYER;
-        const firstSetQCentreX = offsetX - MHA_INTERNAL_MATRIX_SPACING + matrixW / 2; // align like original
-
-        const mhaCenterY = ln1TopY + LN_TO_MHA_GAP + MHA_MATRIX_PARAMS.height / 2;
-
-        for (let head = 0; head < NUM_HEAD_SETS_LAYER; head++) {
-            const setOffsetX = head * (singleSetWidth + HEAD_SET_GAP_LAYER);
-            const localQX = firstSetQCentreX + setOffsetX;
-            const localKX = localQX + matrixW;
-            const localVX = localKX + matrixW;
-
-            const makeMatrix = (x, colour) => {
-                const m = new WeightMatrixVisualization(
-                    null,
-                    new THREE.Vector3(x, mhaCenterY, 0),
-                    MHA_MATRIX_PARAMS.width,
-                    MHA_MATRIX_PARAMS.height,
-                    MHA_MATRIX_PARAMS.depth,
-                    MHA_MATRIX_PARAMS.topWidthFactor,
-                    MHA_MATRIX_PARAMS.cornerRadius,
-                    MHA_MATRIX_PARAMS.numberOfSlits,
-                    MHA_MATRIX_PARAMS.slitWidth,
-                    MHA_MATRIX_PARAMS.slitDepthFactor,
-                    MHA_MATRIX_PARAMS.slitBottomWidthFactor,
-                    MHA_MATRIX_PARAMS.slitTopWidthFactor
-                );
-                m.setColor(new THREE.Color(colour));
-                mhaGroup.add(m.group);
-            };
-            makeMatrix(localQX, MHA_FINAL_Q_COLOR);
-            makeMatrix(localKX, MHA_FINAL_K_COLOR);
-            makeMatrix(localVX, MHA_FINAL_V_COLOR);
-        }
-        this.root.add(mhaGroup);
-
-        // In the refactored architecture, MHSAMatrices (Q, K, V) are now created by
-        // MHSAAnimation.  The local `mhaGroup` is kept for compatibility but hidden
-        // to avoid duplicate visuals until the legacy code can be safely removed.
-        mhaGroup.visible = false;
+        // Skipped: Legacy per-layer Q/K/V matrix group construction.
+        // MHSA visuals are now created exclusively by MHSAAnimation to avoid
+        // duplicate geometry and unnecessary CPU/GPU overhead.
 
         // ────────────────────────────────────────────────────────────────
         //  MHSAAnimation controller – handles vector routing through the

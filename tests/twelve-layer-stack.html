@@ -102,6 +102,20 @@
         .speed-option:hover { background: rgba(255,255,255,0.08); }
         .speed-option input { position: absolute; opacity: 0; pointer-events: none; }
         .speed-option[data-checked="true"] { border-color: rgba(122,202,255,0.8); background: rgba(56,132,255,0.18); }
+
+        /* Simple toggle row */
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 12px;
+            background: rgba(255,255,255,0.04);
+            color: #e7e9ee;
+            user-select: none;
+        }
+        .toggle-row input { width: 18px; height: 18px; }
     </style>
 </head>
 <body>
@@ -136,6 +150,13 @@
                             Fast
                         </label>
                     </div>
+                </div>
+                <div class="settings-section">
+                    <label class="section-label">Interaction</label>
+                    <label class="toggle-row">
+                        <input id="toggleRaycast" type="checkbox" checked>
+                        Enable hover labels (raycasting)
+                    </label>
                 </div>
             </div>
         </div>
@@ -218,7 +239,7 @@
         const renderer = new THREE.WebGLRenderer({ canvas: introCanvas, antialias: true });
         // Disable shadows for the intro scene (mobile perf)
         renderer.shadowMap.enabled = false;
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
         renderer.setSize(window.innerWidth, window.innerHeight);
 
         const scene = new THREE.Scene();
@@ -533,6 +554,11 @@
                     const selectedLabel = checked.closest('.speed-option');
                     updateSpeedChecked(selectedLabel?.dataset.value || 'medium');
                 }
+                // Reflect current raycasting state in the checkbox
+                const rc = document.getElementById('toggleRaycast');
+                if (rc && pipeline?.engine?.isRaycastingEnabled) {
+                    rc.checked = !!pipeline.engine.isRaycastingEnabled();
+                }
             } catch (_) { /* no-op */ }
         }
 
@@ -575,6 +601,12 @@
                 updateSpeedChecked(value);
                 applySpeed(value);
             });
+        });
+
+        // Raycasting toggle wiring
+        const rayToggle = document.getElementById('toggleRaycast');
+        rayToggle?.addEventListener('change', () => {
+            try { pipeline?.engine?.setRaycastingEnabled?.(!!rayToggle.checked); } catch (_) { /* no-op */ }
         });
     </script>
 </body>

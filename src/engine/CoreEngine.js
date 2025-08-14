@@ -76,8 +76,8 @@ export class CoreEngine {
             container.appendChild(this.renderer.domElement);
         }
         this.renderer.setSize(window.innerWidth, window.innerHeight);
-        // Slightly conservative DPR to improve FPS when many heads are visible.
-        const dprCap = QUALITY_PRESET === 'high' ? 1.5 : 1;
+        // Slightly more conservative DPR to improve FPS when many heads are visible.
+        const dprCap = QUALITY_PRESET === 'high' ? 1.25 : 1;
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, dprCap));
 
         // ────────────────────────────────────────────────────────────────────
@@ -85,6 +85,7 @@ export class CoreEngine {
         // ────────────────────────────────────────────────────────────────────
         this._raycaster = new THREE.Raycaster();
         this._pointer   = new THREE.Vector2();
+        this._raycastingEnabled = true; // can be toggled via public API
 
         // Hover label DOM element (similar styling to status overlay)
         this._hoverLabelDiv = document.createElement('div');
@@ -114,10 +115,11 @@ export class CoreEngine {
         // ────────────────────────────────────────────────────────────────────
         // Post-processing (Bloom for emissive flashes)
         // ────────────────────────────────────────────────────────────────────
-        this.composer = new EffectComposer(this.renderer);
-        this.composer.addPass(new RenderPass(this.scene, this.camera));
-        // Add bloom only when explicitly enabled by caller *and* high-quality preset is active.
+        // Post-processing is optional. Only create the composer when bloom is enabled.
+        this.composer = null;
         if (this._enableBloom && QUALITY_PRESET === 'high') {
+            this.composer = new EffectComposer(this.renderer);
+            this.composer.addPass(new RenderPass(this.scene, this.camera));
             const bloomPass = new UnrealBloomPass(
                 new THREE.Vector2(window.innerWidth, window.innerHeight),
                 1.0,   // strength
@@ -195,6 +197,19 @@ export class CoreEngine {
         this._speed = multiplier;
     }
 
+    /** Enable or disable hover raycasting and label updates at runtime. */
+    setRaycastingEnabled(enabled) {
+        this._raycastingEnabled = !!enabled;
+        if (!this._raycastingEnabled && this._hoverLabelDiv) {
+            this._hoverLabelDiv.style.display = 'none';
+        }
+    }
+
+    /** Return current raycasting state. */
+    isRaycastingEnabled() {
+        return !!this._raycastingEnabled;
+    }
+
     pause() { this._paused = true; this._clock.stop(); }
     resume() { this._paused = false; this._clock.start(); }
 
@@ -227,7 +242,7 @@ export class CoreEngine {
         this.camera.aspect = window.innerWidth / window.innerHeight;
         this.camera.updateProjectionMatrix();
         this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.composer.setSize(window.innerWidth, window.innerHeight);
+        if (this.composer) this.composer.setSize(window.innerWidth, window.innerHeight);
     };
 
     _onVisibility = () => {
@@ -235,6 +250,7 @@ export class CoreEngine {
     };
 
     _onPointerMove = (event) => {
+        if (!this._raycastingEnabled) return;
         // Skip ray-casting while the camera is being manipulated to avoid frame hitches
         if (this._isUserNavigating) return;
         const rect = this.renderer.domElement.getBoundingClientRect();
@@ -310,7 +326,11 @@ export class CoreEngine {
         }
 
         this.controls.update();
-        this.composer.render();
+        if (this.composer) {
+            this.composer.render();
+        } else {
+            this.renderer.render(this.scene, this.camera);
+        }
 
         // End performance stats collection (if enabled)
         if (this._stats) this._stats.end();
