@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import { VECTOR_LENGTH_PRISM, SA_RED_EXTRA_RISE, SA_V_RISE_DURATION_MS, SA_K_ALIGN_DURATION_MS, SA_BLUE_HORIZ_DURATION_MS, SA_BLUE_VERT_DURATION_MS, SA_BLUE_PAUSE_MS, SA_BLUE_QUEUE_SHIFT_DURATION_MS, SA_DUPLICATE_POP_IN_MS, SA_DUPLICATE_TRAVEL_MERGE_MS, SA_DUPLICATE_POP_OUT_MS, GLOBAL_ANIM_SPEED_MULT, SELF_ATTENTION_TIME_MULT } from '../../utils/constants.js';
 import { VectorVisualizationInstancedPrism } from '../../components/VectorVisualizationInstancedPrism.js';
 
+// Shared lightweight geometry for self-attention highlight spheres
+const SHARED_SPHERE_GEOMETRY = new THREE.SphereGeometry(10, 12, 12);
+
 /**
  * Self-attention specific, above-matrix animations.
  *
@@ -292,7 +295,8 @@ export class SelfAttentionAnimator {
             // Colour desaturation → bright mono (white-ish)
             if (sp.material) {
                 const c = sp.material.color.clone();
-                const state = { r: c.r, g: c.g, b: c.b, ei: sp.material.emissiveIntensity };
+                const hasEmissive = ('emissive' in sp.material) && ('emissiveIntensity' in sp.material);
+                const state = { r: c.r, g: c.g, b: c.b, ei: hasEmissive ? sp.material.emissiveIntensity : 1.0 };
                 const isBright = Math.random() > 0.5;
                 const lightness = isBright ? THREE.MathUtils.lerp(0.75, 0.95, Math.random())
                                             : THREE.MathUtils.lerp(0.2, 0.4,  Math.random());
@@ -303,8 +307,10 @@ export class SelfAttentionAnimator {
                     .easing(TWEEN.Easing.Quadratic.Out)
                     .onUpdate(() => {
                         sp.material.color.setRGB(state.r, state.g, state.b);
-                        sp.material.emissive.setRGB(state.r, state.g, state.b);
-                        sp.material.emissiveIntensity = state.ei;
+                        if (hasEmissive) {
+                            sp.material.emissive.setRGB(state.r, state.g, state.b);
+                            sp.material.emissiveIntensity = state.ei;
+                        }
                     })
                     .start();
             }
@@ -476,16 +482,12 @@ export class SelfAttentionAnimator {
                             const greenVec = lane.upwardCopies[headIdx];
                             if (greenVec && greenVec.group) {
                                 const midPoint = new THREE.Vector3().addVectors(vector.group.position, greenVec.group.position).multiplyScalar(0.5);
-                                const sphereGeom = new THREE.SphereGeometry(10, 24, 24);
+                                const sphereGeom = SHARED_SPHERE_GEOMETRY;
                                 const hue = Math.random();
                                 const sat = THREE.MathUtils.lerp(0.85, 1.0, Math.random());
                                 const light = THREE.MathUtils.lerp(0.45, 0.6, Math.random());
                                 const baseColor = new THREE.Color().setHSL(hue, sat, light);
-                                const sphereMat = new THREE.MeshStandardMaterial({
-                                    color: baseColor,
-                                    emissive: baseColor,
-                                    emissiveIntensity: 0.9
-                                });
+                                const sphereMat = new THREE.MeshBasicMaterial({ color: baseColor });
                                 const sphereMesh = new THREE.Mesh(sphereGeom, sphereMat);
                                 sphereMesh.position.copy(midPoint);
                                 sphereMesh.scale.set(0.001, 0.001, 0.001);
