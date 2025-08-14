@@ -239,7 +239,13 @@
         const renderer = new THREE.WebGLRenderer({ canvas: introCanvas, antialias: true });
         // Disable shadows for the intro scene (mobile perf)
         renderer.shadowMap.enabled = false;
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
+        try {
+            // Match engine DPR strategy for consistent crispness
+            const cap = (window && window.__RENDER_DPR_CAP) ? window.__RENDER_DPR_CAP : 2.0;
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, cap));
+        } catch (_) {
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2.0));
+        }
         renderer.setSize(window.innerWidth, window.innerHeight);
 
         const scene = new THREE.Scene();

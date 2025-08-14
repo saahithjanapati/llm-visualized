@@ -31,6 +31,10 @@ export function setPlaybackSpeed(preset) {
 export const IS_MOBILE = false;
 export const QUALITY_PRESET = 'high';
 
+// Recommended maximum device pixel ratio per quality preset.
+// Higher caps produce crisper visuals on Retina/HiDPI displays.
+export const RENDER_DPR_CAP = 2.0; // used by CoreEngine and intro renderer
+
 export const VECTOR_LENGTH = 100;
 export const SPHERE_RADIUS = 0.15;
 export const SPHERE_DIAMETER = SPHERE_RADIUS * 2;

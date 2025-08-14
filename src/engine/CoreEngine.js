@@ -4,6 +4,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { QUALITY_PRESET } from '../utils/constants.js';
+import { RENDER_DPR_CAP } from '../utils/constants.js';
 
 /**
  * CoreEngine is responsible for creating the Three-JS renderer, camera, 
@@ -76,8 +77,10 @@ export class CoreEngine {
             container.appendChild(this.renderer.domElement);
         }
         this.renderer.setSize(window.innerWidth, window.innerHeight);
-        // Slightly more conservative DPR to improve FPS when many heads are visible.
-        const dprCap = QUALITY_PRESET === 'high' ? 1.25 : 1;
+        // Improve crispness on HiDPI displays with a higher cap; can be tuned via constants.
+        const dprCap = (typeof RENDER_DPR_CAP === 'number' && RENDER_DPR_CAP > 0)
+            ? RENDER_DPR_CAP
+            : (QUALITY_PRESET === 'high' ? 2.0 : 1.5);
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, dprCap));
 
         // ────────────────────────────────────────────────────────────────────
