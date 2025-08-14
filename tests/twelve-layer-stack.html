@@ -322,8 +322,8 @@
         // ─────────────────────────────────────────────────────────────────--
         // HDRI Environment Map Lighting
         // ─────────────────────────────────────────────────────────────────--
-        const exrLoader = new EXRLoader();
-        exrLoader.load('../rogland_clear_night_1k.exr', (texture) => {
+        const exrLoader = new EXRLoader().setDataType(THREE.HalfFloatType);
+        exrLoader.load('../rogland_clear_night_64.exr', (texture) => {
             texture.mapping = THREE.EquirectangularReflectionMapping;
 
             // Apply environment to intro and GPT scenes

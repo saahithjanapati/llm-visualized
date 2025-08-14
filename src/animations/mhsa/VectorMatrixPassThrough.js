@@ -165,45 +165,49 @@ export function animateVectorMatrixPassThrough(
             }
 
             // --------------------------------------------------------------
-            //  Matrix colour & emissive pulsing
+            //  Matrix colour & emissive pulsing (throttled)
+            //  Skip per-vector updates if a global pulse is active to reduce
+            //  material updates per frame.
             // --------------------------------------------------------------
-            let currentMatrixTargetColor;
-            let currentEmissiveIntensity;
-            const p = tweenState.progress;
-
-            if (p < MHSA_PASS_THROUGH_BRIGHTEN_RATIO) {
-                const t = THREE.MathUtils.smoothstep(p / MHSA_PASS_THROUGH_BRIGHTEN_RATIO, 0, 1);
-                currentMatrixTargetColor = ctx.matrixInitialRestingColor.clone().lerp(brightMatrixColor, t);
-                currentEmissiveIntensity = THREE.MathUtils.lerp(
-                    ctx.matrixRestingEmissiveIntensity,
-                    MHSA_MATRIX_MAX_EMISSIVE_INTENSITY,
-                    t,
-                );
-            } else if (p < MHSA_PASS_THROUGH_BRIGHTEN_RATIO + MHSA_PASS_THROUGH_DIM_RATIO) {
-                const t = THREE.MathUtils.smoothstep(
-                    (p - MHSA_PASS_THROUGH_BRIGHTEN_RATIO) / MHSA_PASS_THROUGH_DIM_RATIO,
-                    0,
-                    1,
-                );
-                currentMatrixTargetColor = brightMatrixColor.clone().lerp(darkTintedMatrixColor, t);
-                currentEmissiveIntensity = THREE.MathUtils.lerp(
-                    MHSA_MATRIX_MAX_EMISSIVE_INTENSITY,
-                    ctx.matrixRestingEmissiveIntensity,
-                    t,
-                );
-            } else {
-                currentMatrixTargetColor = darkTintedMatrixColor.clone();
-                currentEmissiveIntensity = ctx.matrixRestingEmissiveIntensity;
+            if (!ctx._mhaPulseActive) {
+                let currentMatrixTargetColor;
+                let currentEmissiveIntensity;
+                const p = tweenState.progress;
+                if (p < MHSA_PASS_THROUGH_BRIGHTEN_RATIO) {
+                    const t = THREE.MathUtils.smoothstep(p / MHSA_PASS_THROUGH_BRIGHTEN_RATIO, 0, 1);
+                    currentMatrixTargetColor = ctx.matrixInitialRestingColor.clone().lerp(brightMatrixColor, t);
+                    currentEmissiveIntensity = THREE.MathUtils.lerp(
+                        ctx.matrixRestingEmissiveIntensity,
+                        MHSA_MATRIX_MAX_EMISSIVE_INTENSITY,
+                        t,
+                    );
+                } else if (p < MHSA_PASS_THROUGH_BRIGHTEN_RATIO + MHSA_PASS_THROUGH_DIM_RATIO) {
+                    const t = THREE.MathUtils.smoothstep(
+                        (p - MHSA_PASS_THROUGH_BRIGHTEN_RATIO) / MHSA_PASS_THROUGH_DIM_RATIO,
+                        0,
+                        1,
+                    );
+                    currentMatrixTargetColor = brightMatrixColor.clone().lerp(darkTintedMatrixColor, t);
+                    currentEmissiveIntensity = THREE.MathUtils.lerp(
+                        MHSA_MATRIX_MAX_EMISSIVE_INTENSITY,
+                        ctx.matrixRestingEmissiveIntensity,
+                        t,
+                    );
+                } else {
+                    currentMatrixTargetColor = darkTintedMatrixColor.clone();
+                    currentEmissiveIntensity = ctx.matrixRestingEmissiveIntensity;
+                }
+                matrix.setColor(currentMatrixTargetColor);
+                matrix.setEmissive(currentMatrixTargetColor, currentEmissiveIntensity);
             }
-
-            matrix.setColor(currentMatrixTargetColor);
-            matrix.setEmissive(currentMatrixTargetColor, currentEmissiveIntensity);
         })
         .onComplete(() => {
-            // Ensure the matrix ends dimmed
-            matrix.setColor(darkTintedMatrixColor);
-            matrix.setEmissive(darkTintedMatrixColor, ctx.matrixRestingEmissiveIntensity);
-            matrix.setOpacity(ctx.matrixRestingOpacity);
+            // Ensure the matrix ends dimmed if no global pulse managed it
+            if (!ctx._mhaPulseActive) {
+                matrix.setColor(darkTintedMatrixColor);
+                matrix.setEmissive(darkTintedMatrixColor, ctx.matrixRestingEmissiveIntensity);
+                matrix.setOpacity(ctx.matrixRestingOpacity);
+            }
 
             // Guarantee processed visuals in case tween never hit swap point
             if (!finalVisualsApplied) {

@@ -26,6 +26,9 @@ _uniformCalculatedHeight = Math.max(0.01, _uniformCalculatedHeight); // Ensure m
 const _prismWidthScale = 1.5;
 const _prismDepthScale = 1.5;
 
+// Precompute half base width used in shader patch
+const __halfBaseWidth = (PRISM_BASE_WIDTH * _prismWidthScale) / 2;
+
 export class VectorVisualizationInstancedPrism {
     constructor(initialData = null, initialPosition = new THREE.Vector3(0, 0, 0), numSubsections = 30) {
         this.group = new THREE.Group();
@@ -40,40 +43,14 @@ export class VectorVisualizationInstancedPrism {
         // For storing individual instance animation states if needed by an external controller
         this.instanceUserData = Array(VECTOR_LENGTH_PRISM).fill(null).map(() => ({})); 
 
+        // Create a material per vector so we can vary opacity independently,
+        // but force program reuse by returning a stable cache key.
         const material = new THREE.MeshBasicMaterial({ 
-            color: new THREE.Color(0xffffff) // Base color for material, instance colors will override
+            color: new THREE.Color(0xffffff)
         });
-
-        const instancedGeometry = basePrismGeometry.clone();
-        this.mesh = new THREE.InstancedMesh(instancedGeometry, material, VECTOR_LENGTH_PRISM);
-        this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-        this.group.add(this.mesh);
-        
-        // ------------------------------------------------------------
-        // Gradient setup – each prism will smoothly blend from the
-        // colour on its left edge (colorStart) to the colour on its
-        // right edge (colorEnd).  We store these as per-instance
-        // InstancedBufferAttributes and add a small shader patch that
-        // interpolates between them based on the local X-coordinate of
-        // the vertex.
-        // ------------------------------------------------------------
-
-        // Create (r,g,b) attribute arrays – one entry per instance
-        const colorStartArr = new Float32Array(VECTOR_LENGTH_PRISM * 3);
-        const colorEndArr   = new Float32Array(VECTOR_LENGTH_PRISM * 3);
-        this.mesh.geometry.setAttribute('colorStart', new THREE.InstancedBufferAttribute(colorStartArr, 3));
-        this.mesh.geometry.setAttribute('colorEnd',   new THREE.InstancedBufferAttribute(colorEndArr,   3));
-
-        // Helper to patch the basic material so it understands the two new
-        // attributes and outputs a left→right gradient.
-        const halfBaseWidth = (PRISM_BASE_WIDTH * _prismWidthScale) / 2;
-
-        // Ensure the material has a uniforms object (MeshBasicMaterial does)
-        this.mesh.material.onBeforeCompile = (shader) => {
-            // Inject custom uniform for half-width (used to normalise X)
-            shader.uniforms.prismHalfWidth = { value: halfBaseWidth };
-
-            // ───── Vertex shader injections ──────────────────────────
+        material.customProgramCacheKey = () => 'InstancedPrismGradientV1';
+        material.onBeforeCompile = (shader) => {
+            shader.uniforms.prismHalfWidth = { value: __halfBaseWidth };
             shader.vertexShader = shader.vertexShader.replace(
                 '#include <common>',
                 `#include <common>
@@ -84,17 +61,13 @@ varying vec3 vColorEnd;
 varying float vGradientT;
 uniform float prismHalfWidth;`
             );
-
             shader.vertexShader = shader.vertexShader.replace(
                 '#include <begin_vertex>',
                 `#include <begin_vertex>
     vColorStart = colorStart;
     vColorEnd   = colorEnd;
-    // Map local X from [-halfWidth, +halfWidth] → [0,1]
     vGradientT  = clamp( (position.x + prismHalfWidth) / (2.0 * prismHalfWidth), 0.0, 1.0 );`
             );
-
-            // ───── Fragment shader injections ───────────────────────
             shader.fragmentShader = shader.fragmentShader.replace(
                 '#include <common>',
                 `#include <common>
@@ -102,13 +75,32 @@ varying vec3 vColorStart;
 varying vec3 vColorEnd;
 varying float vGradientT;`
             );
-
             shader.fragmentShader = shader.fragmentShader.replace(
                 'vec4 diffuseColor = vec4( diffuse, opacity );',
                 `vec3 grad = mix( vColorStart, vColorEnd, vGradientT );
     vec4 diffuseColor = vec4( grad, opacity );`
             );
         };
+
+        const instancedGeometry = basePrismGeometry.clone();
+        this.mesh = new THREE.InstancedMesh(instancedGeometry, material, VECTOR_LENGTH_PRISM);
+        this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        this.group.add(this.mesh);
+        
+        // ------------------------------------------------------------
+        // Gradient setup – each prism will smoothly blend from the
+        // colour on its left edge (colorStart) to the colour on its
+        // right edge (colorEnd).  We store these as per-instance
+        // InstancedBufferAttributes; the shared material's shader patch
+        // reads them to produce a left→right gradient.
+        // ------------------------------------------------------------
+
+        // Create (r,g,b) attribute arrays – one entry per instance
+        const colorStartArr = new Float32Array(VECTOR_LENGTH_PRISM * 3);
+        const colorEndArr   = new Float32Array(VECTOR_LENGTH_PRISM * 3);
+        this.mesh.geometry.setAttribute('colorStart', new THREE.InstancedBufferAttribute(colorStartArr, 3));
+        this.mesh.geometry.setAttribute('colorEnd',   new THREE.InstancedBufferAttribute(colorEndArr,   3));
+
 
         this.updateDataInternal(this.rawData.slice()); // Process initial data
         this._generateKeyColors(); // Generate initial key colors

@@ -7,7 +7,7 @@ import { StraightLineTrail, mergeTrailsIntoLineSegments } from '../utils/trailUt
 
 import { mapValueToColor } from '../utils/colors.js';
 import { MHSA_MATRIX_INITIAL_RESTING_COLOR, MHSA_BRIGHT_GREEN, MHSA_DARK_TINTED_GREEN, MHSA_BRIGHT_BLUE, MHSA_DARK_TINTED_BLUE, MHSA_BRIGHT_RED, MHSA_DARK_TINTED_RED, MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR, MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW, MHA_OUTPUT_PROJECTION_MATRIX_PARAMS, MHA_OUTPUT_PROJECTION_MATRIX_COLOR } from './LayerAnimationConstants.js';
-import { INACTIVE_COMPONENT_COLOR, MHSA_DUPLICATE_VECTOR_RISE_SPEED, MHSA_PASS_THROUGH_TOTAL_DURATION_MS, MHSA_RESULT_RISE_OFFSET_Y, MHSA_HEAD_VECTOR_STOP_BELOW, MHA_RESULT_RISE_DURATION_BASE_MS, DECORATIVE_FADE_MS, DECORATIVE_FADE_DELAY_MS, MERGE_TO_ROW_DELAY_AFTER_FADE_MS, HEAD_COLOR_TRANSITION_MS, MERGE_POST_COLOR_TRANSITION_DELAY_MS, MERGE_EXTRA_BUFFER_MS, OUTPUT_PROJ_STAGE1_MS, OUTPUT_PROJ_STAGE2_MS, OUTPUT_PROJ_STAGE3_MS, GLOBAL_ANIM_SPEED_MULT } from '../utils/constants.js';
+import { INACTIVE_COMPONENT_COLOR, MHSA_DUPLICATE_VECTOR_RISE_SPEED, MHSA_PASS_THROUGH_TOTAL_DURATION_MS, MHSA_RESULT_RISE_OFFSET_Y, MHSA_HEAD_VECTOR_STOP_BELOW, MHA_RESULT_RISE_DURATION_BASE_MS, DECORATIVE_FADE_MS, DECORATIVE_FADE_DELAY_MS, MERGE_TO_ROW_DELAY_AFTER_FADE_MS, HEAD_COLOR_TRANSITION_MS, MERGE_POST_COLOR_TRANSITION_DELAY_MS, MERGE_EXTRA_BUFFER_MS, OUTPUT_PROJ_STAGE1_MS, OUTPUT_PROJ_STAGE2_MS, OUTPUT_PROJ_STAGE3_MS, GLOBAL_ANIM_SPEED_MULT, MHSA_PASS_THROUGH_BRIGHTEN_RATIO, MHSA_PASS_THROUGH_DIM_RATIO, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY } from '../utils/constants.js';
 import {
     // Constants needed for setup & animation
     MHA_MATRIX_PARAMS,
@@ -104,6 +104,9 @@ export class MHSAAnimation {
 
         // Mode control (e.g., 'temp', 'perm', etc.)
         this.mode = mode;
+
+        // Flag to indicate a global matrix pulse is active (throttles per-vector updates)
+        this._mhaPulseActive = false;
 
         // --------------------------------------------------------------
         //  Self-attention toggle (defaults to global static value)
@@ -392,6 +395,9 @@ export class MHSAAnimation {
         console.log("MHSAAnimation: Initiating Parallel MHSA Head Pass-Through Animations...");
         this.mhaPassThroughPhase = 'parallel_pass_through_active';
 
+        // Start one shared pulse per matrix instead of per-vector material updates
+        try { this._startMatrixPulseDuringPassThrough(this.mhaPassThroughDuration); } catch (_) { /* optional */ }
+
         // Before launching pass-through tweens, merge parked K/Q/V copy trails
         // into a single static LineSegments to reduce draw calls and skip their
         // per-frame updates while vectors move through matrices.
@@ -439,6 +445,70 @@ export class MHSAAnimation {
         if (totalAnimationsToComplete === 0 && allLanes.length > 0) {
              console.log("MHSAAnimation: No valid K,Q,V vectors found to animate for parallel pass-through.");
              this.mhaPassThroughPhase = 'mha_pass_through_complete';
+        }
+    }
+
+    // ------------------------------------------------------------------
+    //  One shared pulse per Q/K/V matrix during pass-through (perf)
+    // ------------------------------------------------------------------
+    _startMatrixPulseDuringPassThrough(totalDurationMs) {
+        if (typeof TWEEN === 'undefined') return;
+        this._mhaPulseActive = true;
+
+        const restingColor = this.matrixInitialRestingColor.clone();
+        const restIntensity = this.matrixRestingEmissiveIntensity;
+
+        const makePulse = (matrix, brightCol, darkTintedCol) => {
+            if (!matrix || !matrix.mesh || !matrix.mesh.material) return null;
+            const state = { p: 0 };
+            return new TWEEN.Tween(state)
+                .to({ p: 1 }, totalDurationMs)
+                .easing(TWEEN.Easing.Quadratic.InOut)
+                .onUpdate(() => {
+                    const p = state.p;
+                    let currentColor;
+                    let currentEmissive;
+                    if (p < MHSA_PASS_THROUGH_BRIGHTEN_RATIO) {
+                        const t = THREE.MathUtils.smoothstep(p / MHSA_PASS_THROUGH_BRIGHTEN_RATIO, 0, 1);
+                        currentColor = restingColor.clone().lerp(brightCol, t);
+                        currentEmissive = THREE.MathUtils.lerp(restIntensity, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY, t);
+                    } else if (p < MHSA_PASS_THROUGH_BRIGHTEN_RATIO + MHSA_PASS_THROUGH_DIM_RATIO) {
+                        const t = THREE.MathUtils.smoothstep(
+                            (p - MHSA_PASS_THROUGH_BRIGHTEN_RATIO) / MHSA_PASS_THROUGH_DIM_RATIO,
+                            0, 1
+                        );
+                        currentColor = brightCol.clone().lerp(darkTintedCol, t);
+                        currentEmissive = THREE.MathUtils.lerp(MHSA_MATRIX_MAX_EMISSIVE_INTENSITY, restIntensity, t);
+                    } else {
+                        currentColor = darkTintedCol.clone();
+                        currentEmissive = restIntensity;
+                    }
+                    matrix.setColor(currentColor);
+                    matrix.setEmissive(currentColor, currentEmissive);
+                })
+                .onComplete(() => {
+                    matrix.setColor(darkTintedCol);
+                    matrix.setEmissive(darkTintedCol, restIntensity);
+                })
+                .start();
+        };
+
+        let pulsesStarted = 0;
+        const totalMatrices = NUM_HEAD_SETS_LAYER * 3;
+        for (let i = 0; i < NUM_HEAD_SETS_LAYER; i++) {
+            const qMatrix = this.mhaVisualizations[i * 3];
+            const kMatrix = this.mhaVisualizations[i * 3 + 1];
+            const vMatrix = this.mhaVisualizations[i * 3 + 2];
+            if (makePulse(qMatrix, this.brightBlue, this.darkTintedBlue)) pulsesStarted++;
+            if (makePulse(kMatrix, this.brightGreen, this.darkTintedGreen)) pulsesStarted++;
+            if (makePulse(vMatrix, this.brightRed, this.darkTintedRed)) pulsesStarted++;
+        }
+
+        // Safely clear the pulse flag after the pulses end
+        setTimeout(() => { this._mhaPulseActive = false; }, totalDurationMs + 50);
+        if (pulsesStarted !== totalMatrices) {
+            // If some matrices missing, still clear after duration to avoid stuck flag
+            setTimeout(() => { this._mhaPulseActive = false; }, totalDurationMs + 60);
         }
     }
     

@@ -54,8 +54,8 @@
         scene.add(dirLight);
 
         // Load the same HDRI used in main scenes for consistent lighting
-        const exrLoader = new EXRLoader();
-        exrLoader.load('../rogland_clear_night_1k.exr', (tex) => {
+        const exrLoader = new EXRLoader().setDataType(THREE.HalfFloatType);
+        exrLoader.load('../rogland_clear_night_64.exr', (tex) => {
             tex.mapping = THREE.EquirectangularReflectionMapping;
             scene.environment = tex;
             renderer.toneMapping = THREE.ACESFilmicToneMapping;

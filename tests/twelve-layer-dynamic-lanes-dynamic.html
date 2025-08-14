@@ -73,8 +73,8 @@
         dirLight.position.set(5,10,7.5);
         scene.add(dirLight);
 
-        const exrLoader = new EXRLoader();
-        exrLoader.load('../rogland_clear_night_1k.exr', (tex)=>{
+        const exrLoader = new EXRLoader().setDataType(THREE.HalfFloatType);
+        exrLoader.load('../rogland_clear_night_64.exr', (tex)=>{
             tex.mapping = THREE.EquirectangularReflectionMapping;
             scene.environment = tex;
             renderer.toneMapping = THREE.ACESFilmicToneMapping;

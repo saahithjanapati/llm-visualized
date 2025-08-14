@@ -11,6 +11,12 @@ export class PassThroughAnimator {
         console.log('PassThroughAnimator: starting parallel pass-through');
         ctx.mhaPassThroughPhase = 'parallel_pass_through_active';
 
+        // Kick off a single shared pulse per matrix to avoid per-vector
+        // material updates every frame during pass-through.
+        if (typeof ctx._startMatrixPulseDuringPassThrough === 'function') {
+            try { ctx._startMatrixPulseDuringPassThrough(ctx.mhaPassThroughDuration); } catch (_) {}
+        }
+
         let totalAnimationsToComplete = allLanes.length * NUM_HEAD_SETS_LAYER * 3;
         let animationsCompleted = 0;
 
