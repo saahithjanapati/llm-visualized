@@ -37,6 +37,7 @@ export class StraightLineTrail {
 
         const effectiveOpacity = scaleOpacityForDisplay(this._opacity);
         const effectiveWidth = scaleLineWidthForDisplay(lineWidth);
+        // Keep depthWrite disabled for transparent lines to avoid occluding scene content
         this._material = new THREE.LineBasicMaterial({ color: this._color, linewidth: effectiveWidth, transparent: effectiveOpacity < 1.0, opacity: effectiveOpacity, depthWrite: false, fog: false, toneMapped: false });
         this._line = new THREE.Line(this._geometry, this._material);
         // Tag for discovery and back-reference
@@ -245,6 +246,7 @@ export function mergeTrailsIntoLineSegments(trails, scene, color = TRAIL_COLOR, 
 
     const effOpacity = scaleOpacityForDisplay(opacity);
     const effWidth = scaleLineWidthForDisplay(lineWidth);
+    // Keep depthWrite disabled for static segments as well to prevent occlusion artifacts
     const material = new THREE.LineBasicMaterial({ color, linewidth: effWidth, transparent: effOpacity < 1.0, opacity: effOpacity, depthWrite: false, fog: false, toneMapped: false });
     const merged = new THREE.LineSegments(geometry, material);
     merged.userData.label = 'MergedTrails';

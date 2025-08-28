@@ -503,7 +503,7 @@ export default class Gpt2Layer extends BaseLayer {
         //  guarantees that all lanes enter LN-1 in perfect lock-step.
         // ────────────────────────────────────────────────────────────────
         if (!this._ln1Start) {
-            const allLn1Ready = this.lanes.length && this.lanes.every(l => l.originalVec.group.position.y >= l.branchStartY);
+            const allLn1Ready = this.lanes.length && this.lanes.every(l => l && l.originalVec && l.originalVec.group && typeof l.branchStartY === 'number' && l.originalVec.group.position.y >= l.branchStartY);
             if (allLn1Ready) {
                 this._ln1Start = true;
                 console.log(`Layer ${this.index}: All lanes ready – starting LN-1 branch simultaneously`);
@@ -1139,40 +1139,28 @@ export default class Gpt2Layer extends BaseLayer {
                 } catch (_) { /* optional */ }
             })
             .onComplete(() => {
-                // Freeze the post-MLP path trail into static segments
+                // Retire the temporary post-MLP path trail instead of freezing it.
+                // This avoids overlapping a static horizontal segment with the
+                // residual world-space trail at x=0 during the addition phase.
                 try {
                     const t = vec && vec.userData && vec.userData.mlpTrail;
-                    if (t) {
-                        mergeTrailsIntoLineSegments([t], this.root);
-                        if (vec.userData) delete vec.userData.mlpTrail;
+                    if (t && typeof t.dispose === 'function') {
+                        t.dispose();
                     }
+                    if (vec && vec.userData) delete vec.userData.mlpTrail;
                 } catch (_) { /* optional */ }
-                // Prevent double-drawing along the residual stream: retire the local collapse
-                // trail (attached to this.root) and switch this vector to the world-space
-                // residual trail so only one trail continues at x=0.
+                // Prevent double-drawing along the residual stream: retire any temporary
+                // local trail for the collapsed vector. Keep the existing world-space
+                // residual trail owned by the original vector/lane to avoid concurrent
+                // updates from both vectors at x=0.
                 try {
-                    // 1) Freeze the local collapse trail into a static segments object
                     const localTrail = vec && vec.userData && vec.userData.trail;
                     if (localTrail && localTrail._scene === this.root) {
                         const colorHex = (localTrail._material && localTrail._material.color)
                             ? localTrail._material.color.getHex() : undefined;
-                        // Preserve original trail appearance (opacity/linewidth) when freezing
                         const frozenOpacity = (typeof localTrail._opacity === 'number') ? localTrail._opacity : undefined;
                         mergeTrailsIntoLineSegments([localTrail], this.root, colorHex, undefined, frozenOpacity);
                         if (vec.userData) delete vec.userData.trail;
-                    }
-
-                    // 2) Reassign the world-space residual trail to the collapsed vector
-                    const worldTrail = (lane && lane.originalTrail)
-                        || (lane && lane.originalVec && lane.originalVec.userData && lane.originalVec.userData.trail);
-                    if (worldTrail) {
-                        if (lane && lane.originalVec && lane.originalVec.userData) {
-                            delete lane.originalVec.userData.trail;
-                            delete lane.originalVec.userData.trailWorld;
-                        }
-                        vec.userData = vec.userData || {};
-                        vec.userData.trail = worldTrail;
-                        vec.userData.trailWorld = true;
                     }
                 } catch (_) { /* no-op */ }
 
@@ -1270,6 +1258,7 @@ export default class Gpt2Layer extends BaseLayer {
             const wp = new THREE.Vector3();
             originalVec.group.getWorldPosition(wp);
             trail.start(wp);
+            // Seed monotonic Y tracker for residual trail when lane is created below
         }
         originalVec.userData = originalVec.userData || {};
         originalVec.userData.trail = trail;
@@ -1353,7 +1342,8 @@ export default class Gpt2Layer extends BaseLayer {
             expandedVecSegments: null,
             finalVecAfterMlp: null,
             expandedVecTrail: null,
-            zPos
+            zPos,
+            __residualMaxY: (function(){ const wp=new THREE.Vector3(); originalVec.group.getWorldPosition(wp); return wp.y; })()
         });
     }
 

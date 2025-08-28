@@ -587,18 +587,24 @@ export class MHSAAnimation {
                 // world position instead (handled just below), so skip the group-centre
                 // update while lane.stopRise is active to avoid double-writing.
                 if (!lane.stopRise) {
-                    // Prefer attached trail; fall back to lane.originalTrail if not attached yet
-                    const attached = lane.originalVec && lane.originalVec.userData && lane.originalVec.userData.trail;
-                    const residualTrail = attached || lane.originalTrail;
-                    if (residualTrail && typeof residualTrail.update === 'function') {
-                        const wp = new THREE.Vector3();
-                        lane.originalVec.group.getWorldPosition(wp);
-                        // Guard against accidental double-write in the same frame
-                        if (lane.__lastResidualTrailFrame !== this._frameCounter) {
-                            residualTrail.update(wp);
-                            lane.__lastResidualTrailFrame = this._frameCounter;
+                    try {
+                        // Prefer attached trail; fall back to lane.originalTrail if not attached yet
+                        const attached = lane.originalVec && lane.originalVec.userData && lane.originalVec.userData.trail;
+                        const residualTrail = attached || lane.originalTrail;
+                        if (residualTrail && typeof residualTrail.update === 'function') {
+                            const wp = new THREE.Vector3();
+                            lane.originalVec.group.getWorldPosition(wp);
+                            // Monotonic Y clamp: only extend the trail upwards
+                            if (typeof lane.__residualMaxY !== 'number') lane.__residualMaxY = wp.y;
+                            if (wp.y >= lane.__residualMaxY) {
+                                if (lane.__lastResidualTrailFrame !== this._frameCounter) {
+                                    residualTrail.update(wp);
+                                    lane.__lastResidualTrailFrame = this._frameCounter;
+                                }
+                                lane.__residualMaxY = wp.y;
+                            }
                         }
-                    }
+                    } catch (_) { /* defensive */ }
                 }
 
             });
@@ -611,30 +617,48 @@ export class MHSAAnimation {
             // Only follow while the addition animation is active (stopRise flag present)
             if (!lane.stopRise) return;
 
-            // Compute world position of the centre prism for the ORIGINAL (source) vector
-            // so the residual trail extends continuously as prisms rise during addition.
-            const centreIdx = Math.floor(VECTOR_LENGTH_PRISM / 2);
-            const instMat = new THREE.Matrix4();
-            lane.originalVec.mesh.getMatrixAt(centreIdx, instMat);
-            const wPos = new THREE.Vector3().setFromMatrixPosition(instMat);
-            wPos.applyMatrix4(lane.originalVec.group.matrixWorld);
+            try {
+                // Compute world position of the centre prism for the ORIGINAL (source) vector
+                // so the residual trail extends continuously as prisms rise during addition.
+                const centreIdx = Math.floor(VECTOR_LENGTH_PRISM / 2);
+                const instMat = new THREE.Matrix4();
+                lane.originalVec.mesh.getMatrixAt(centreIdx, instMat);
+                const wPos = new THREE.Vector3().setFromMatrixPosition(instMat);
+                wPos.applyMatrix4(lane.originalVec.group.matrixWorld);
 
-            // Skip bogus updates when the centre prism is hidden far below the scene
-            // during/addition (it is moved to HIDE_INSTANCE_Y_OFFSET to disappear).
-            const hideThreshold = HIDE_INSTANCE_Y_OFFSET / 10; // e.g. -5000 for -50000 offset
-            if (wPos.y < hideThreshold) return;
+                // Skip bogus updates when the centre prism is hidden far below the scene
+                // during/addition (it is moved to HIDE_INSTANCE_Y_OFFSET to disappear).
+                const hideThreshold = HIDE_INSTANCE_Y_OFFSET / 10; // e.g. -5000 for -50000 offset
+                if (wPos.y < hideThreshold) return;
 
-            // Prefer the dedicated world-space residual trail reference carried by the lane.
-            const residualTrail = (lane.originalTrail)
-                || (lane.originalVec && lane.originalVec.userData && lane.originalVec.userData.trail)
-                || (lane.postAdditionVec && lane.postAdditionVec.userData && lane.postAdditionVec.userData.trail);
-            if (residualTrail && typeof residualTrail.update === 'function') {
-                // Guard against accidental double-write in the same frame
-                if (lane.__lastResidualTrailFrame !== this._frameCounter) {
-                    residualTrail.update(wPos);
-                    lane.__lastResidualTrailFrame = this._frameCounter;
+                // Introduce a small no-write window just below the receiving (top) vector
+                // to avoid any overlapping trail brightness exactly at the merge point.
+                // Use the stopRiseTarget set during addition to determine the top Y.
+                try {
+                    const tgt = lane && lane.stopRiseTarget;
+                    if (tgt && tgt.position) {
+                        const targetY = tgt.position.y;
+                        const muteBand = Math.max(20, ORIGINAL_TO_PROCESSED_GAP * 0.5);
+                        if (wPos.y >= targetY - muteBand) return; // skip updates in the top overlap band
+                    }
+                } catch (_) { /* defensive */ }
+
+                // Prefer the dedicated world-space residual trail reference carried by the lane.
+                const residualTrail = (lane.originalTrail)
+                    || (lane.originalVec && lane.originalVec.userData && lane.originalVec.userData.trail)
+                    || (lane.postAdditionVec && lane.postAdditionVec.userData && lane.postAdditionVec.userData.trail);
+                if (residualTrail && typeof residualTrail.update === 'function') {
+                    // Guard against accidental double-write in the same frame and enforce monotonic Y extension
+                    if (typeof lane.__residualMaxY !== 'number') lane.__residualMaxY = wPos.y;
+                    if (wPos.y >= lane.__residualMaxY) {
+                        if (lane.__lastResidualTrailFrame !== this._frameCounter) {
+                            residualTrail.update(wPos);
+                            lane.__lastResidualTrailFrame = this._frameCounter;
+                        }
+                        lane.__residualMaxY = wPos.y;
+                    }
                 }
-            }
+            } catch (_) { /* defensive */ }
         });
     }
 
@@ -1414,10 +1438,8 @@ export class MHSAAnimation {
                                             // Freeze the trail into static segments and remove live trail
                                             try {
                                                 const tr = vec && vec.userData && vec.userData.trail;
-                                                if (tr) {
-                                                    mergeTrailsIntoLineSegments([tr], this.parentGroup);
-                                                    if (vec.userData) delete vec.userData.trail;
-                                                }
+                                                if (tr && typeof tr.dispose === 'function') tr.dispose();
+                                                if (vec && vec.userData) delete vec.userData.trail;
                                             } catch (_) { /* optional visual */ }
                                             if (this.currentLanes) {
                                                 const matchingLane = this.currentLanes.find(l => Math.abs(l.zPos - laneZ) < 0.1);
