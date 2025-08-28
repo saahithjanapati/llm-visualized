@@ -649,7 +649,8 @@ export class MHSAAnimation {
                     || (lane.postAdditionVec && lane.postAdditionVec.userData && lane.postAdditionVec.userData.trail);
                 if (residualTrail && typeof residualTrail.update === 'function') {
                     // Guard against accidental double-write in the same frame and enforce monotonic Y extension
-                    if (typeof lane.__residualMaxY !== 'number') lane.__residualMaxY = wPos.y;
+                    // Allow immediate extension from the centre prism upward when addition begins.
+                    if (typeof lane.__residualMaxY !== 'number') lane.__residualMaxY = wPos.y - 0.001;
                     if (wPos.y >= lane.__residualMaxY) {
                         if (lane.__lastResidualTrailFrame !== this._frameCounter) {
                             residualTrail.update(wPos);

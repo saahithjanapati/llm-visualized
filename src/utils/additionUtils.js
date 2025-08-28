@@ -40,6 +40,15 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane) {
         lane.stopRise = true;
         lane.stopRiseTarget = targetVec.group;
         // Keep residual trail brightness unchanged during addition
+        // Reset residual trail monotonic tracker to the centre prism's current Y
+        // so the trail extends immediately as the middle unit begins to rise.
+        try {
+            const centreIndex = Math.floor(VECTOR_LENGTH_PRISM / 2);
+            const instMat = new THREE.Matrix4();
+            sourceVec.mesh.getMatrixAt(centreIndex, instMat);
+            const centreWorld = new THREE.Vector3().setFromMatrixPosition(instMat).applyMatrix4(sourceVec.group.matrixWorld);
+            lane.__residualMaxY = (typeof centreWorld.y === 'number') ? centreWorld.y - 0.001 : undefined;
+        } catch (_) { /* non-fatal */ }
     } else {
         sourceVec.group.userData = sourceVec.group.userData || {};
         const svUD = sourceVec.group.userData;
