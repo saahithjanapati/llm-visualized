@@ -540,24 +540,27 @@
             const layer = pipeline._layers[idx];
             let displayStage = 'Loading...';
 
-            if (layer) {
-                // If MHSA is active but not complete – show MHA
-                if (layer.mhsaAnimation && layer.mhsaAnimation.mhaPassThroughPhase !== 'mha_pass_through_complete') {
-                    displayStage = 'Multi Head Attention';
-                } else {
-                    // Access first lane for LN2 / MLP state hints
-                    const lane = layer.lanes && layer.lanes.length ? layer.lanes[0] : null;
+            if (layer && Array.isArray(layer.lanes) && layer.lanes.length) {
+                const lanes = layer.lanes;
 
-                    if (lane) {
-                        // MLP started?
-                        if (lane.mlpUpStarted || lane.ln2Phase === 'mlpReady' || lane.ln2Phase === 'done') {
-                            displayStage = 'Multi-Layer Perceptron Block';
-                        } else if (lane.ln2Phase && lane.ln2Phase !== 'notStarted') {
-                            displayStage = 'LayerNorm 2';
-                        } else if (layer.isActive) {
-                            displayStage = 'LayerNorm 1';
-                        }
-                    }
+                const mlpActive = lanes.some(l => l.mlpUpStarted || l.ln2Phase === 'mlpReady' || l.ln2Phase === 'done');
+                const ln2Active = !mlpActive && lanes.some(l => l.ln2Phase && l.ln2Phase !== 'notStarted');
+                const ln1Active = !mlpActive && !ln2Active && lanes.some(l => ['waiting', 'right', 'insideLN'].includes(l.horizPhase));
+                const mhsaActive = !mlpActive && !ln2Active && !ln1Active && (
+                    (layer && layer._mhsaStart === true) ||
+                    lanes.some(l => ['riseAboveLN', 'readyMHSA', 'travelMHSA', 'postMHSAAddition', 'waitingForLN2'].includes(l.horizPhase))
+                );
+
+                if (mlpActive) {
+                    displayStage = 'Multi-Layer Perceptron Block';
+                } else if (ln2Active) {
+                    displayStage = 'LayerNorm 2';
+                } else if (ln1Active) {
+                    displayStage = 'LayerNorm 1';
+                } else if (mhsaActive) {
+                    displayStage = 'Multi Head Attention';
+                } else if (layer.isActive) {
+                    displayStage = 'LayerNorm 1';
                 }
             }
 
