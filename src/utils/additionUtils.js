@@ -103,6 +103,41 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane) {
                 sourceVec.setInstanceAppearance(i, offsetY, null);
 
                 if (i === centreIndex) {
+                    // Live-update the residual trail from the bottom vector while the
+                    // centre prism rises toward the top vector. This mirrors the
+                    // behaviour users expect: the connecting line grows as the
+                    // middle unit moves, rather than appearing only after addition.
+                    try {
+                        const instMat = new THREE.Matrix4();
+                        sourceVec.mesh.getMatrixAt(centreIndex, instMat);
+                        const wPos = new THREE.Vector3().setFromMatrixPosition(instMat).applyMatrix4(sourceVec.group.matrixWorld);
+
+                        // Skip if the prism is effectively hidden far below
+                        const hideThreshold = HIDE_INSTANCE_Y_OFFSET / 10;
+                        if (wPos.y >= hideThreshold) {
+                            // Avoid over-brightening exactly at the merge point
+                            try {
+                                const tgt = lane && lane.stopRiseTarget;
+                                if (tgt && tgt.position) {
+                                    const targetY = tgt.position.y;
+                                    const muteBand = Math.max(20, (typeof ORIGINAL_TO_PROCESSED_GAP !== 'undefined' ? ORIGINAL_TO_PROCESSED_GAP : 60) * 0.5);
+                                    if (wPos.y >= targetY - muteBand) return;
+                                }
+                            } catch (_) { /* defensive */ }
+
+                            // Use the lane's world-space residual trail if present
+                            const residualTrail = (lane && lane.originalTrail)
+                                || (sourceVec && sourceVec.userData && sourceVec.userData.trail)
+                                || null;
+                            if (residualTrail && typeof residualTrail.update === 'function') {
+                                if (typeof lane.__residualMaxY !== 'number') lane.__residualMaxY = wPos.y - 0.001;
+                                if (wPos.y >= lane.__residualMaxY) {
+                                    residualTrail.update(wPos);
+                                    lane.__residualMaxY = wPos.y;
+                                }
+                            }
+                        }
+                    } catch (_) { /* optional visual; never fatal */ }
                 }
             })
             .onComplete(() => {

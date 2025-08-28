@@ -1139,15 +1139,18 @@ export default class Gpt2Layer extends BaseLayer {
                 } catch (_) { /* optional */ }
             })
             .onComplete(() => {
-                // Retire the temporary post-MLP path trail instead of freezing it.
-                // This avoids overlapping a static horizontal segment with the
-                // residual world-space trail at x=0 during the addition phase.
+                // Freeze the temporary post-MLP path trail into a static line so
+                // the horizontal segment persists visually after the move back.
                 try {
                     const t = vec && vec.userData && vec.userData.mlpTrail;
-                    if (t && typeof t.dispose === 'function') {
-                        t.dispose();
+                    if (t) {
+                        const colorHex = (t._material && t._material.color)
+                            ? t._material.color.getHex() : undefined;
+                        const frozenOpacity = (typeof t._opacity === 'number') ? t._opacity : undefined;
+                        mergeTrailsIntoLineSegments([t], this.root, colorHex, undefined, frozenOpacity);
+                        if (typeof t.dispose === 'function') t.dispose();
+                        if (vec && vec.userData) delete vec.userData.mlpTrail;
                     }
-                    if (vec && vec.userData) delete vec.userData.mlpTrail;
                 } catch (_) { /* optional */ }
                 // Prevent double-drawing along the residual stream: retire any temporary
                 // local trail for the collapsed vector. Keep the existing world-space
