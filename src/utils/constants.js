@@ -333,7 +333,7 @@ export const ROW_SEGMENT_SPACING = PRISM_BASE_WIDTH * 1.5; // matches InstancedP
  * continues to flow underneath.  Increase this value to leave a larger space
  * or set it to a negative number to let the original vector overlap.
  */
-export const ORIGINAL_TO_PROCESSED_GAP = 10;
+export const ORIGINAL_TO_PROCESSED_GAP = 90;
 
 // Vertical gap from LayerNorm2 top to first MLP matrix
 export const LN2_TO_MLP_GAP = 150;
