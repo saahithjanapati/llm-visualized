@@ -636,10 +636,19 @@ export class MHSAAnimation {
                 // Use the stopRiseTarget set during addition to determine the top Y.
                 try {
                     const tgt = lane && lane.stopRiseTarget;
-                    if (tgt && tgt.position) {
-                        const targetY = tgt.position.y;
-                        const muteBand = Math.max(20, ORIGINAL_TO_PROCESSED_GAP * 0.5);
-                        if (wPos.y >= targetY - muteBand) return; // skip updates in the top overlap band
+                    if (tgt) {
+                        let targetYWorld = null;
+                        try {
+                            const tmp = new THREE.Vector3();
+                            tgt.getWorldPosition(tmp);
+                            targetYWorld = tmp.y;
+                        } catch (_) {
+                            if (tgt.position) targetYWorld = tgt.position.y; // fallback
+                        }
+                        if (targetYWorld != null) {
+                            const muteBand = Math.max(20, ORIGINAL_TO_PROCESSED_GAP * 0.5);
+                            if (wPos.y >= targetYWorld - muteBand) return; // skip updates in the top overlap band
+                        }
                     }
                 } catch (_) { /* defensive */ }
 

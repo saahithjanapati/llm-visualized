@@ -118,10 +118,20 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane) {
                             // Avoid over-brightening exactly at the merge point
                             try {
                                 const tgt = lane && lane.stopRiseTarget;
-                                if (tgt && tgt.position) {
-                                    const targetY = tgt.position.y;
-                                    const muteBand = Math.max(20, (typeof ORIGINAL_TO_PROCESSED_GAP !== 'undefined' ? ORIGINAL_TO_PROCESSED_GAP : 60) * 0.5);
-                                    if (wPos.y >= targetY - muteBand) return;
+                                if (tgt) {
+                                    let targetYWorld = null;
+                                    try {
+                                        const tmp = new THREE.Vector3();
+                                        tgt.getWorldPosition(tmp);
+                                        targetYWorld = tmp.y;
+                                    } catch (_) {
+                                        if (tgt.position) targetYWorld = tgt.position.y; // fallback to local if world fails
+                                    }
+                                    if (targetYWorld != null) {
+                                        const gap = (typeof ORIGINAL_TO_PROCESSED_GAP !== 'undefined' ? ORIGINAL_TO_PROCESSED_GAP : 60);
+                                        const muteBand = Math.max(20, gap * 0.5);
+                                        if (wPos.y >= targetYWorld - muteBand) return;
+                                    }
                                 }
                             } catch (_) { /* defensive */ }
 
