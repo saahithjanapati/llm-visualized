@@ -1435,11 +1435,14 @@ export class MHSAAnimation {
                                         })
 
                                         .onComplete(() => {
-                                            // Freeze the trail into static segments and remove live trail
+                                            // Freeze the trail into static segments so the horizontal
+                                            // return path remains visible, then remove live trail ref
                                             try {
                                                 const tr = vec && vec.userData && vec.userData.trail;
-                                                if (tr && typeof tr.dispose === 'function') tr.dispose();
-                                                if (vec && vec.userData) delete vec.userData.trail;
+                                                if (tr) {
+                                                    mergeTrailsIntoLineSegments([tr], this.parentGroup);
+                                                    if (vec && vec.userData) delete vec.userData.trail;
+                                                }
                                             } catch (_) { /* optional visual */ }
                                             if (this.currentLanes) {
                                                 const matchingLane = this.currentLanes.find(l => Math.abs(l.zPos - laneZ) < 0.1);
