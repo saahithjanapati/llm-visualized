@@ -529,6 +529,9 @@ export class MHSAAnimation {
     }
     
     update(deltaTime, timeNow, lanes) {
+        // Increment a lightweight frame counter to de-duplicate residual trail writes
+        if (typeof this._frameCounter !== 'number') this._frameCounter = 0;
+        this._frameCounter++;
         // Keep a reference to the latest lanes array so that other internal
         // methods (triggered asynchronously) can access the original vectors.
         this.currentLanes = lanes;
@@ -590,7 +593,11 @@ export class MHSAAnimation {
                     if (residualTrail && typeof residualTrail.update === 'function') {
                         const wp = new THREE.Vector3();
                         lane.originalVec.group.getWorldPosition(wp);
-                        residualTrail.update(wp);
+                        // Guard against accidental double-write in the same frame
+                        if (lane.__lastResidualTrailFrame !== this._frameCounter) {
+                            residualTrail.update(wp);
+                            lane.__lastResidualTrailFrame = this._frameCounter;
+                        }
                     }
                 }
 
@@ -622,7 +629,11 @@ export class MHSAAnimation {
                 || (lane.originalVec && lane.originalVec.userData && lane.originalVec.userData.trail)
                 || (lane.postAdditionVec && lane.postAdditionVec.userData && lane.postAdditionVec.userData.trail);
             if (residualTrail && typeof residualTrail.update === 'function') {
-                residualTrail.update(wPos);
+                // Guard against accidental double-write in the same frame
+                if (lane.__lastResidualTrailFrame !== this._frameCounter) {
+                    residualTrail.update(wPos);
+                    lane.__lastResidualTrailFrame = this._frameCounter;
+                }
             }
         });
     }
@@ -1368,6 +1379,17 @@ export class MHSAAnimation {
                             new TWEEN.Tween(vec.group.position)
                                 .to({ y: finalCombinedY }, duration3)
                                 .easing(TWEEN.Easing.Quadratic.InOut)
+                                .onStart(() => {
+                                    // Start a trail as the vector exits the output-projection matrix
+                                    try {
+                                        vec.userData = vec.userData || {};
+                                        if (!vec.userData.trail) {
+                                            const tr = new StraightLineTrail(this.parentGroup);
+                                            tr.start(vec.group.position.clone());
+                                            vec.userData.trail = tr;
+                                        }
+                                    } catch (_) { /* optional visual */ }
+                                })
                                 .onUpdate(() => {
                                     if (vec && vec.userData && vec.userData.trail) {
                                         vec.userData.trail.update(vec.group.position);
@@ -1382,32 +1404,19 @@ export class MHSAAnimation {
                                     new TWEEN.Tween(vec.group.position)
                                         .to({ x: 0 }, horizDur)
                                         .easing(TWEEN.Easing.Quadratic.InOut)
-                                        .onStart(() => {
-                                            // Create a dedicated horizontal-only trail starting at this moment
-                                            try {
-                                                vec.userData = vec.userData || {};
-                                                if (!vec.userData.horizTrail) {
-                                                    const ht = new StraightLineTrail(this.parentGroup);
-                                                    ht.start(vec.group.position.clone());
-                                                    vec.userData.horizTrail = ht;
-                                                }
-                                            } catch (_) { /* optional visual */ }
-                                        })
                                         .onUpdate(() => {
-                                            const ht = vec && vec.userData && vec.userData.horizTrail;
-                                            if (ht) {
-                                                ht.update(vec.group.position);
-                                            }
+                                            // Continue updating the same trail during horizontal travel
+                                            const tr = vec && vec.userData && vec.userData.trail;
+                                            if (tr) tr.update(vec.group.position);
                                         })
 
                                         .onComplete(() => {
-                                            // Freeze the horizontal trail into static segments and remove live trail
+                                            // Freeze the trail into static segments and remove live trail
                                             try {
-                                                const ht = vec && vec.userData && vec.userData.horizTrail;
-                                                if (ht) {
-                                                    // Merge just this single trail into segments (keeps appearance)
-                                                    mergeTrailsIntoLineSegments([ht], this.parentGroup);
-                                                    if (vec.userData) delete vec.userData.horizTrail;
+                                                const tr = vec && vec.userData && vec.userData.trail;
+                                                if (tr) {
+                                                    mergeTrailsIntoLineSegments([tr], this.parentGroup);
+                                                    if (vec.userData) delete vec.userData.trail;
                                                 }
                                             } catch (_) { /* optional visual */ }
                                             if (this.currentLanes) {

@@ -107,14 +107,14 @@ export const USE_PRECOMPUTED_GEOMETRIES = true;
 // ------------------------------------------------------------
 
 /** Distance (in world units) between adjacent vector lanes along Z. */
-export const VECTOR_DEPTH_SPACING = 200;
+export const VECTOR_DEPTH_SPACING = 400;
 
 // ------------------------------------------------------------
 // Lane / vector configuration – controls how many lanes/vectors
 // are present in the scene and component depths that depend on it.
 // ------------------------------------------------------------
 
-export const NUM_VECTOR_LANES = 10; // Master switch: number of vector "lanes" active in the scene
+export const NUM_VECTOR_LANES = 5; // Master switch: number of vector "lanes" active in the scene
 
 // Depth large enough to fit all lanes plus one spacing margin at each end
 export const LANE_DEPENDENT_DEPTH = (NUM_VECTOR_LANES + 1) * VECTOR_DEPTH_SPACING;

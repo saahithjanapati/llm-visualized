@@ -513,7 +513,13 @@ export default class Gpt2Layer extends BaseLayer {
                     if (l.horizPhase === 'waiting') {
                         l.horizPhase = 'right';
                         l.dupVec.group.visible = true;
-                        l.dupVec.group.position.y = l.originalVec.group.position.y;
+                        // Snap duplicate to the LN-1 branch staging height to avoid
+                        // any vertical drift while moving horizontally into the ring.
+                        if (typeof l.branchStartY === 'number') {
+                            l.dupVec.group.position.y = l.branchStartY;
+                        } else {
+                            l.dupVec.group.position.y = l.originalVec.group.position.y;
+                        }
                     }
                 });
             }
@@ -558,6 +564,10 @@ export default class Gpt2Layer extends BaseLayer {
                     }
                     break;
                 case 'right':
+                    // Mirror LN-2: lock Y at staging height and move X only.
+                    if (typeof lane.branchStartY === 'number') {
+                        dupVec.group.position.y = lane.branchStartY;
+                    }
                     dupVec.group.position.x = Math.min(BRANCH_X, dupVec.group.position.x + ANIM_HORIZ_SPEED * speedMult * dt);
                     if (dupVec.group.position.x >= BRANCH_X - 0.01) {
                         // Ensure alignment with LN-1 centre
@@ -988,11 +998,8 @@ export default class Gpt2Layer extends BaseLayer {
                         lane.expandedVecSegments[0].rawData.slice(), 
                         expandedGroup.position.clone()
                     );
-                    // ---- Trail for vector after MLP collapse ----
-                    const collapseTrail = new StraightLineTrail(this.root, 0xffffff, 1);
-                    collapseTrail.start(collapseVec.group.position);
-                    collapseVec.userData = collapseVec.userData || {};
-                    collapseVec.userData.trail = collapseTrail;
+                    // Do not start a local trail yet; we'll create a clean path trail
+                    // when rising above the MLP to avoid zig-zag artifacts.
                     
                     // Copy gradient colors
                     if (Array.isArray(lane.expandedVecSegments[0].currentKeyColors) && lane.expandedVecSegments[0].currentKeyColors.length) {
@@ -1046,11 +1053,7 @@ export default class Gpt2Layer extends BaseLayer {
             segmentVecs[0].rawData.slice(), 
             expandedGroup.position.clone()
         );
-        // ---- Trail for vector after MLP collapse ----
-        const collapseTrail = new StraightLineTrail(this.root, 0xffffff, 1);
-        collapseTrail.start(collapseVec.group.position);
-        collapseVec.userData = collapseVec.userData || {};
-        collapseVec.userData.trail = collapseTrail;
+        // Defer trail creation until after the rise above the MLP.
         
         // Copy gradient colors
         if (Array.isArray(segmentVecs[0].currentKeyColors) && segmentVecs[0].currentKeyColors.length) {
@@ -1080,7 +1083,22 @@ export default class Gpt2Layer extends BaseLayer {
         new TWEEN.Tween(vec.group.position)
             .to({ y: vec.group.position.y + riseAbove }, riseDur)
             .easing(TWEEN.Easing.Quadratic.InOut)
+            .onStart(() => {
+                // Start a dedicated post-MLP path trail for a clean rise-then-right
+                try {
+                    vec.userData = vec.userData || {};
+                    if (!vec.userData.mlpTrail) {
+                        const pathTrail = new StraightLineTrail(this.root, 0xffffff, 1);
+                        pathTrail.start(vec.group.position.clone());
+                        vec.userData.mlpTrail = pathTrail;
+                    }
+                } catch (_) { /* optional visual */ }
+            })
             .onUpdate(() => {
+                const t = vec && vec.userData && vec.userData.mlpTrail;
+                if (t && typeof t.update === 'function') {
+                    t.update(vec.group.position);
+                }
             })
             .onComplete(() => {
                 // Update residual stream target height
@@ -1100,13 +1118,35 @@ export default class Gpt2Layer extends BaseLayer {
     _returnToResidualStream(lane, vec) {
         const horizDist = Math.abs(vec.group.position.x);
         const horizDur = (horizDist / (ANIM_HORIZ_SPEED * GLOBAL_ANIM_SPEED_MULT)) * 1000;
-        
+        // Lock Y to eliminate tiny easing jitter at the corner so the trail
+        // forms a clean right-angle when switching from vertical to horizontal.
+        const lockedY = vec.group.position.y;
+
         new TWEEN.Tween(vec.group.position)
-            .to({ x: 0 }, horizDur)
+            .to({ x: 0, y: lockedY }, horizDur)
             .easing(TWEEN.Easing.Quadratic.InOut)
+            .onStart(() => {
+                vec.group.position.y = lockedY;
+            })
             .onUpdate(() => {
+                // Ensure Y stays perfectly constant during horizontal travel
+                // to avoid any up-then-down wobble in the trail.
+                vec.group.position.y = lockedY;
+                // Continue updating the post-MLP path trail during horizontal move
+                try {
+                    const t = vec && vec.userData && vec.userData.mlpTrail;
+                    if (t && typeof t.update === 'function') t.update(vec.group.position);
+                } catch (_) { /* optional */ }
             })
             .onComplete(() => {
+                // Freeze the post-MLP path trail into static segments
+                try {
+                    const t = vec && vec.userData && vec.userData.mlpTrail;
+                    if (t) {
+                        mergeTrailsIntoLineSegments([t], this.root);
+                        if (vec.userData) delete vec.userData.mlpTrail;
+                    }
+                } catch (_) { /* optional */ }
                 // Prevent double-drawing along the residual stream: retire the local collapse
                 // trail (attached to this.root) and switch this vector to the world-space
                 // residual trail so only one trail continues at x=0.
@@ -1237,7 +1277,15 @@ export default class Gpt2Layer extends BaseLayer {
 
         }
 
-        const dupVec = new VectorVisualizationInstancedPrism(originalVec.rawData.slice(), originalVec.group.position.clone());
+        // Spawn the LN-1 duplicate at the staging height (bottom + 5) so that
+        // when it becomes visible and starts the 'right' phase it travels purely
+        // horizontally, matching LN-2 behaviour.
+        const dupStartPos = new THREE.Vector3(
+            originalVec.group.position.x,
+            ln1CenterY - LN_PARAMS.height / 2 + 5,
+            originalVec.group.position.z
+        );
+        const dupVec = new VectorVisualizationInstancedPrism(originalVec.rawData.slice(), dupStartPos);
         dupVec.group.visible = false;
         this.root.add(dupVec.group);
         // Trail for duplicate vector inside LN1
