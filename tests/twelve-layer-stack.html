@@ -253,7 +253,11 @@
         import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
         import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
         import { LayerPipeline } from '../src/engine/LayerPipeline.js';
-        import { CAPTION_TEXT_Y_POS, setPlaybackSpeed } from '../src/utils/constants.js';
+        // Skip intro typing screen for direct animation entry
+        const SKIP_INTRO = true;
+        import { CAPTION_TEXT_Y_POS, setPlaybackSpeed, EMBEDDING_MATRIX_PARAMS_VOCAB, EMBEDDING_MATRIX_PARAMS_POSITION, LN_PARAMS, LAYER_NORM_1_Y_POS, MLP_MATRIX_PARAMS_DOWN, INACTIVE_COMPONENT_COLOR, EMBEDDING_BOTTOM_TOP_ALIGN_OFFSET_FROM_LN1_BOTTOM, EMBEDDING_BOTTOM_Y_ADJUST, EMBEDDING_BOTTOM_VOCAB_X_OFFSET, EMBEDDING_BOTTOM_PAIR_GAP_X, EMBEDDING_BOTTOM_POS_X_OFFSET, TOP_EMBED_VOCAB_X_OFFSET, TOP_EMBED_Y_GAP_ABOVE_TOWER, TOP_EMBED_Y_ADJUST } from '../src/utils/constants.js';
+        import { WeightMatrixVisualization } from '../src/components/WeightMatrixVisualization.js';
+        import { MHA_FINAL_Q_COLOR } from '../src/animations/LayerAnimationConstants.js';
 
         // Set default playback speed to fast on load
         try { setPlaybackSpeed('fast'); } catch (_) { /* no-op */ }
@@ -298,6 +302,95 @@
                 }
             });
         } catch (_) { /* no-op */ }
+
+        // ------------------------------------------------------------------
+        // Embedding matrices (static visuals)
+        //   - Bottom: vocab (aligned with residual at x=0), positional to its right
+        //   - Top: flipped vocab (narrow end down toward layers), aligned with residual at x=0
+        // ------------------------------------------------------------------
+        try {
+            const headBlue = new THREE.Color(MHA_FINAL_Q_COLOR);
+
+            // Bottom pair aligned so their TOP surfaces sit on the residual stream height near LN1 branching
+            const residualYBase = LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2 + EMBEDDING_BOTTOM_TOP_ALIGN_OFFSET_FROM_LN1_BOTTOM;
+
+            // --- Bottom Vocab Embedding (x = 0, aligned with residual stream) ---
+            const bottomVocabCenterY = residualYBase - EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2 + EMBEDDING_BOTTOM_Y_ADJUST;
+            const vocabBottom = new WeightMatrixVisualization(
+                null,
+                new THREE.Vector3(0 + EMBEDDING_BOTTOM_VOCAB_X_OFFSET, bottomVocabCenterY, 0),
+                EMBEDDING_MATRIX_PARAMS_VOCAB.width,
+                EMBEDDING_MATRIX_PARAMS_VOCAB.height,
+                EMBEDDING_MATRIX_PARAMS_VOCAB.depth,
+                EMBEDDING_MATRIX_PARAMS_VOCAB.topWidthFactor,
+                EMBEDDING_MATRIX_PARAMS_VOCAB.cornerRadius,
+                EMBEDDING_MATRIX_PARAMS_VOCAB.numberOfSlits,
+                EMBEDDING_MATRIX_PARAMS_VOCAB.slitWidth,
+                EMBEDDING_MATRIX_PARAMS_VOCAB.slitDepthFactor,
+                EMBEDDING_MATRIX_PARAMS_VOCAB.slitBottomWidthFactor,
+                EMBEDDING_MATRIX_PARAMS_VOCAB.slitTopWidthFactor
+            );
+            vocabBottom.group.userData.label = 'Vocab Embedding';
+            vocabBottom.setColor(headBlue);
+            vocabBottom.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
+            pipeline.engine.scene.add(vocabBottom.group);
+
+            // --- Bottom Positional Embedding (to the right of vocab) ---
+            const gapX = EMBEDDING_BOTTOM_PAIR_GAP_X;
+            const posX = (EMBEDDING_MATRIX_PARAMS_VOCAB.width / 2) + (EMBEDDING_MATRIX_PARAMS_POSITION.width / 2) + gapX + EMBEDDING_BOTTOM_POS_X_OFFSET + EMBEDDING_BOTTOM_VOCAB_X_OFFSET;
+            // Align bases: compute positional centerY so its bottom equals vocab bottom
+            const vocabBottomY = bottomVocabCenterY - EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2;
+            const bottomPosCenterY = vocabBottomY + EMBEDDING_MATRIX_PARAMS_POSITION.height / 2;
+            const posBottom = new WeightMatrixVisualization(
+                null,
+                new THREE.Vector3(posX, bottomPosCenterY, 0),
+                EMBEDDING_MATRIX_PARAMS_POSITION.width,
+                EMBEDDING_MATRIX_PARAMS_POSITION.height,
+                EMBEDDING_MATRIX_PARAMS_POSITION.depth,
+                EMBEDDING_MATRIX_PARAMS_POSITION.topWidthFactor,
+                EMBEDDING_MATRIX_PARAMS_POSITION.cornerRadius,
+                EMBEDDING_MATRIX_PARAMS_POSITION.numberOfSlits,
+                EMBEDDING_MATRIX_PARAMS_POSITION.slitWidth,
+                EMBEDDING_MATRIX_PARAMS_POSITION.slitDepthFactor,
+                EMBEDDING_MATRIX_PARAMS_POSITION.slitBottomWidthFactor,
+                EMBEDDING_MATRIX_PARAMS_POSITION.slitTopWidthFactor
+            );
+            posBottom.group.userData.label = 'Positional Embedding';
+            posBottom.setColor(headBlue);
+            posBottom.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
+            pipeline.engine.scene.add(posBottom.group);
+
+            // --- Top Vocab Embedding (flipped; narrow end facing downward toward layers) ---
+            const lastLayer = pipeline._layers[NUM_LAYERS - 1];
+            if (lastLayer && lastLayer.mlpDown && lastLayer.mlpDown.group) {
+                const tmp = new THREE.Vector3();
+                lastLayer.mlpDown.group.getWorldPosition(tmp);
+                const towerTopY = tmp.y + MLP_MATRIX_PARAMS_DOWN.height / 2;
+                const topGap = TOP_EMBED_Y_GAP_ABOVE_TOWER;
+                const topVocabCenterY = towerTopY + topGap + EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2 + TOP_EMBED_Y_ADJUST;
+
+                const vocabTop = new WeightMatrixVisualization(
+                    null,
+                    new THREE.Vector3(0 + TOP_EMBED_VOCAB_X_OFFSET, topVocabCenterY, 0),
+                    EMBEDDING_MATRIX_PARAMS_VOCAB.width,
+                    EMBEDDING_MATRIX_PARAMS_VOCAB.height,
+                    EMBEDDING_MATRIX_PARAMS_VOCAB.depth,
+                    EMBEDDING_MATRIX_PARAMS_VOCAB.topWidthFactor,
+                    EMBEDDING_MATRIX_PARAMS_VOCAB.cornerRadius,
+                    EMBEDDING_MATRIX_PARAMS_VOCAB.numberOfSlits,
+                    EMBEDDING_MATRIX_PARAMS_VOCAB.slitWidth,
+                    EMBEDDING_MATRIX_PARAMS_VOCAB.slitDepthFactor,
+                    EMBEDDING_MATRIX_PARAMS_VOCAB.slitBottomWidthFactor,
+                    EMBEDDING_MATRIX_PARAMS_VOCAB.slitTopWidthFactor
+                );
+                // Flip vertically so the narrow end faces the layers below
+                vocabTop.group.rotation.z = Math.PI;
+                vocabTop.group.userData.label = 'Vocab Embedding (Top)';
+                vocabTop.setColor(headBlue);
+                vocabTop.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
+                pipeline.engine.scene.add(vocabTop.group);
+            }
+        } catch (_) { /* optional – embedding visuals are non-critical */ }
 
         // ------------------------------------------------------------------
         // Intro – "Can machines think?" Ghost-type animation (almost verbatim
@@ -500,7 +593,14 @@
             if (typeof TWEEN !== 'undefined') TWEEN.update();
             renderer.render(scene, camera);
         };
-        loopIntro();
+        if (!SKIP_INTRO) {
+            loopIntro();
+        } else {
+            try { transitionToGPT(); } catch (_) {
+                try { const ic = document.getElementById('introCanvas'); if (ic) ic.style.display = 'none'; } catch (_) {}
+            }
+            try { const gif = document.getElementById('loadingGif'); if (gif) gif.style.display = 'none'; } catch (_) {}
+        }
 
         // ------------------------------------------------------------------
         // Transition helper

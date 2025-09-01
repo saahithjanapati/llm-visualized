@@ -250,44 +250,60 @@ export class WeightMatrixVisualization {
 
             // Calculate the actual depth of the cut based on the factor
             const cutDepth = this.height * this.slitDepthFactor;
-            // The slit should span exactly `cutDepth` vertically.  No extra
-            // padding is necessary because the top and bottom faces of the
-            // trapezoid remain at ±height/2 even when corners are rounded.
-            const slitBoxHeight = cutDepth + 0.001; // tiny epsilon for CSG robustness
+            // Robust CSG: push the cutting box a hair ABOVE the top face and
+            // extend it slightly so we avoid coplanar faces (which can lead to
+            // Boolean artefacts like split/duplicated holes).
+            const EPS_CSG = Math.max(0.02, this.height * 0.001);
+            const slitBoxHeight = cutDepth + EPS_CSG * 2; // extend both ends a touch
 
-            // Align the *top* of the box with the top of the matrix so the slit
-            // always starts flush with the flat portion of the cap.
-            const cutCenterY = (this.height / 2) - (slitBoxHeight / 2);
+            // Position so the top of the slit box sits just above the top face
+            // (at +height/2 + EPS_CSG), eliminating coplanar ambiguity.
+            const cutCenterY = (this.height / 2 + EPS_CSG) - (slitBoxHeight / 2);
 
-            // Compute the actual widths of the trapezoid at the bottom and at
-            // the very top (before rounding) and scale them by the user-supplied
-            // width factors.  Using the true shape widths avoids overshooting the
-            // wall when the top is significantly wider than the bottom (or vice
-            // versa) and prevents the slit from slicing through exterior faces.
-            const shapeBottomWidth = this.width;                       // d_model side
-            const shapeTopWidth    = this.width * this.topWidthFactor; // 4·d_model side (or vice-versa)
+            // Helper: compute the trapezoid width at an arbitrary Y (clamped to the body)
+            const hh = this.height / 2;
+            const shapeBottomWidth = this.width;                       // width at y = -hh
+            const shapeTopWidth    = this.width * this.topWidthFactor; // width at y = +hh
+            const widthAtY = (y) => {
+                const yc = Math.max(-hh, Math.min(hh, y));
+                const t = (yc + hh) / (2 * hh); // 0 at bottom, 1 at top
+                return THREE.MathUtils.lerp(shapeBottomWidth, shapeTopWidth, t);
+            };
 
-            const constantBottomWidth = shapeBottomWidth * this.slitBottomWidthFactor;
-            const constantTopWidth    = shapeTopWidth    * this.slitTopWidthFactor;
+            // Compute the top/bottom Y of the slit volume in the matrix’s local space
+            const yTopOfSlit = cutCenterY + slitBoxHeight / 2;
+            const yBottomOfSlit = cutCenterY - slitBoxHeight / 2;
+
+            // Slight inward inset so we never breach the side walls due to numerical issues
+            const INSET_X = Math.max(0.1, this.width * 0.001);
+
+            // Compute cutter widths to match the body profile exactly at the
+            // slit bounds, scaled by user factors and inset slightly.
+            const dynamicBottomWidth = Math.max(0,
+                widthAtY(yBottomOfSlit) * this.slitBottomWidthFactor - INSET_X * 2
+            );
+            const dynamicTopWidth = Math.max(0,
+                widthAtY(yTopOfSlit) * this.slitTopWidthFactor - INSET_X * 2
+            );
 
             for (let i = 0; i < this.numberOfSlits; i++) {
                 const zPos = -this.depth / 2 + slitSpacing * (i + 1);
 
                 let slitGeometry;
 
-                if (Math.abs(constantBottomWidth - constantTopWidth) < 1e-4) {
+                if (Math.abs(dynamicBottomWidth - dynamicTopWidth) < 1e-4) {
                     // Simple rectangular slit (top == bottom)
-                    slitGeometry = new THREE.BoxGeometry(constantBottomWidth, slitBoxHeight, this.slitWidth);
+                    slitGeometry = new THREE.BoxGeometry(dynamicBottomWidth, slitBoxHeight, this.slitWidth);
                 } else {
                     // Create tapered geometry (trapezoidal prism) by modifying a box geometry
-                    slitGeometry = new THREE.BoxGeometry(constantBottomWidth, slitBoxHeight, this.slitWidth, 1, 1, 1);
+                    slitGeometry = new THREE.BoxGeometry(dynamicBottomWidth, slitBoxHeight, this.slitWidth, 1, 1, 1);
                     const posAttr = slitGeometry.attributes.position;
                     const halfH = slitBoxHeight / 2;
                     for (let v = 0; v < posAttr.count; v++) {
                         const y = posAttr.getY(v);
                         const t = (y + halfH) / slitBoxHeight; // 0 at bottom, 1 at top
-                        const targetWidth = THREE.MathUtils.lerp(constantBottomWidth, constantTopWidth, t);
-                        const scale = targetWidth / constantBottomWidth;
+                        const targetWidth = THREE.MathUtils.lerp(dynamicBottomWidth, dynamicTopWidth, t);
+                        const scale = (dynamicBottomWidth > 0) ? (targetWidth / dynamicBottomWidth) : 1.0;
                         posAttr.setX(v, posAttr.getX(v) * scale);
                     }
                     posAttr.needsUpdate = true;
@@ -375,6 +391,14 @@ export class WeightMatrixVisualization {
         this.backCapMesh.rotation.y = Math.PI; // flip so normals face outwards
         this.backCapMesh.renderOrder = 2;   // back cap last
         this.group.add(this.backCapMesh);
+    }
+
+    // Hide or show caps to avoid visible seams when abutting multiple
+    // matrices along Z. For a chain of matrices: show back cap on the first,
+    // hide both on the middle ones, and show front cap on the last.
+    setCapVisibility(showFront = true, showBack = true) {
+        if (this.frontCapMesh) this.frontCapMesh.visible = !!showFront;
+        if (this.backCapMesh)  this.backCapMesh.visible  = !!showBack;
     }
 
     /**

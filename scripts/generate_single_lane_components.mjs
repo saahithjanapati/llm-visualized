@@ -48,6 +48,8 @@ import {
     MHA_MATRIX_PARAMS as MHA_ALL_PARAMS,
     MLP_MATRIX_PARAMS_UP as MLP_UP_ALL,
     MLP_MATRIX_PARAMS_DOWN as MLP_DOWN_ALL,
+    EMBEDDING_MATRIX_PARAMS_VOCAB,
+    EMBEDDING_MATRIX_PARAMS_POSITION,
     VECTOR_DEPTH_SPACING
 } from '../src/utils/constants.js';
 
@@ -194,6 +196,52 @@ function withDepth(original, depth = DEPTH_SLICE) {
         outParams.slitTopWidthFactor);
 
     const key = wmKey(outParams);
+    vis.group.traverse(obj => {
+        if (obj.isMesh && obj.geometry) obj.userData.cacheKey = `WM|${key}`;
+    });
+    scene.add(vis.group);
+}
+
+// === New: Token/Vocab Embedding slice (bottom wide → top = d_model) ===
+{
+    const vocabParams = withDepth({ ...EMBEDDING_MATRIX_PARAMS_VOCAB, numberOfSlits: 1 });
+
+    const vis = new WeightMatrixVisualization(null, new THREE.Vector3(0, 0, 10000),
+        vocabParams.width,
+        vocabParams.height,
+        vocabParams.depth,
+        vocabParams.topWidthFactor,
+        vocabParams.cornerRadius,
+        vocabParams.numberOfSlits,
+        vocabParams.slitWidth,
+        vocabParams.slitDepthFactor,
+        vocabParams.slitBottomWidthFactor,
+        vocabParams.slitTopWidthFactor);
+
+    const key = wmKey(vocabParams);
+    vis.group.traverse(obj => {
+        if (obj.isMesh && obj.geometry) obj.userData.cacheKey = `WM|${key}`;
+    });
+    scene.add(vis.group);
+}
+
+// === New: Positional Embedding slice (bottom wide → top = d_model) ===
+{
+    const posParams = withDepth({ ...EMBEDDING_MATRIX_PARAMS_POSITION, numberOfSlits: 1 });
+
+    const vis = new WeightMatrixVisualization(null, new THREE.Vector3(0, 0, 12000),
+        posParams.width,
+        posParams.height,
+        posParams.depth,
+        posParams.topWidthFactor,
+        posParams.cornerRadius,
+        posParams.numberOfSlits,
+        posParams.slitWidth,
+        posParams.slitDepthFactor,
+        posParams.slitBottomWidthFactor,
+        posParams.slitTopWidthFactor);
+
+    const key = wmKey(posParams);
     vis.group.traverse(obj => {
         if (obj.isMesh && obj.geometry) obj.userData.cacheKey = `WM|${key}`;
     });

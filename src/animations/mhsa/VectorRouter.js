@@ -13,7 +13,7 @@ import {
 import { MHSA_DUPLICATE_VECTOR_RISE_SPEED } from '../../utils/constants.js';
 
 // Add configurable opacity for trails specific to vector copies under Q/K/V to reduce visual prominence
-const FAINT_TRAIL_OPACITY = 0.06; // must be < default 0.1
+const FAINT_TRAIL_OPACITY = 0.13; // must be < default 0.1
 
 
 // Read live binding each use to reflect UI changes at runtime

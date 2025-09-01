@@ -233,6 +233,7 @@ export const MHA_MATRIX_PARAMS = {
     // Match slit count to current lane count so each lane has its own channel.
     numberOfSlits: NUM_VECTOR_LANES,
     slitWidth: 20, // significantly wider slits for clearer view
+    // Carve fully through so holes appear on both top and bottom faces
     slitDepthFactor: 1.0,
     slitBottomWidthFactor: 1,
     slitTopWidthFactor: 0.90
@@ -382,6 +383,70 @@ export const MLP_MATRIX_PARAMS_DOWN = {
 };
 
 // -----------------------------------------------------------------------------
+// Embedding Matrix Geometry Parameters (Token/Vocab and Positional)
+// -----------------------------------------------------------------------------
+// Control overall thickness of embedding blocks relative to MLP
+export const EMBEDDING_HEIGHT_EXTRA = 500;    // extra height compared to MLP matrices
+export const EMBEDDING_MIN_HEIGHT   = 160;   // ensure embeddings are visibly thicker
+
+// Separate extra height controls for vocab vs positional embeddings
+export const EMBEDDING_HEIGHT_EXTRA_VOCAB    = EMBEDDING_HEIGHT_EXTRA;
+export const EMBEDDING_HEIGHT_EXTRA_POSITION = 300;
+
+// Multipliers for bottom (input) width relative to d_model = MLP_MATRIX_BASE_WIDTH
+export const VOCAB_EMBED_BOTTOM_MULTIPLIER = 15;
+export const POS_EMBED_BOTTOM_MULTIPLIER   = 10;
+
+// Derived heights for embedding matrices (per type)
+export const EMBEDDING_MATRIX_HEIGHT = Math.max(MLP_MATRIX_PARAMS_UP.height + EMBEDDING_HEIGHT_EXTRA, EMBEDDING_MIN_HEIGHT); // legacy/default
+export const EMBEDDING_MATRIX_HEIGHT_VOCAB = Math.max(MLP_MATRIX_PARAMS_UP.height + EMBEDDING_HEIGHT_EXTRA_VOCAB, EMBEDDING_MIN_HEIGHT);
+export const EMBEDDING_MATRIX_HEIGHT_POSITION = Math.max(MLP_MATRIX_PARAMS_UP.height + EMBEDDING_HEIGHT_EXTRA_POSITION, EMBEDDING_MIN_HEIGHT);
+
+// Token/Vocab Embedding: bottom = 15× d_model, top = d_model
+export const EMBEDDING_MATRIX_PARAMS_VOCAB = {
+    width: MLP_MATRIX_BASE_WIDTH * VOCAB_EMBED_BOTTOM_MULTIPLIER,
+    height: EMBEDDING_MATRIX_HEIGHT_VOCAB,
+    depth: LN_PARAMS.depth, // lane-dependent so it instantiates across lanes
+    topWidthFactor: 1 / VOCAB_EMBED_BOTTOM_MULTIPLIER,
+    cornerRadius: MLP_MATRIX_PARAMS_UP.cornerRadius,
+    numberOfSlits: NUM_VECTOR_LANES,
+    slitWidth: MLP_MATRIX_PARAMS_UP.slitWidth,
+    slitDepthFactor: MLP_MATRIX_PARAMS_UP.slitDepthFactor,
+    slitBottomWidthFactor: MLP_MATRIX_PARAMS_UP.slitBottomWidthFactor,
+    slitTopWidthFactor: MLP_MATRIX_PARAMS_UP.slitTopWidthFactor
+};
+
+// Positional Embedding: bottom = 10× d_model, top = d_model
+export const EMBEDDING_MATRIX_PARAMS_POSITION = {
+    width: MLP_MATRIX_BASE_WIDTH * POS_EMBED_BOTTOM_MULTIPLIER,
+    height: EMBEDDING_MATRIX_HEIGHT_POSITION,
+    depth: LN_PARAMS.depth,
+    topWidthFactor: 1 / POS_EMBED_BOTTOM_MULTIPLIER,
+    cornerRadius: MLP_MATRIX_PARAMS_UP.cornerRadius,
+    numberOfSlits: NUM_VECTOR_LANES,
+    slitWidth: MLP_MATRIX_PARAMS_UP.slitWidth,
+    slitDepthFactor: MLP_MATRIX_PARAMS_UP.slitDepthFactor,
+    slitBottomWidthFactor: MLP_MATRIX_PARAMS_UP.slitBottomWidthFactor,
+    slitTopWidthFactor: MLP_MATRIX_PARAMS_UP.slitTopWidthFactor
+};
+
+// -----------------------------------------------------------------------------
+// Embedding placement controls (scene positioning)
+// -----------------------------------------------------------------------------
+// Bottom (under stack): align the TOP of the matrices to the residual stream
+// near LN1 branching height. Adjust these to reposition as needed.
+export const EMBEDDING_BOTTOM_TOP_ALIGN_OFFSET_FROM_LN1_BOTTOM = 5;   // baseline align (LN1 bottom + this)
+export const EMBEDDING_BOTTOM_Y_ADJUST = -600;                           // additional vertical nudge for both bottom embeddings
+export const EMBEDDING_BOTTOM_VOCAB_X_OFFSET = 0;                     // horizontal offset for bottom vocab relative to residual x=0
+export const EMBEDDING_BOTTOM_PAIR_GAP_X = 200;                       // horizontal gap between vocab and positional
+export const EMBEDDING_BOTTOM_POS_X_OFFSET = 0;                       // extra horizontal nudge for positional (in addition to pair gap)
+
+// Top (above stack): flipped vocab embedding sitting above the tower.
+export const TOP_EMBED_VOCAB_X_OFFSET = 0;                            // horizontal offset for the top vocab relative to residual x=0
+export const TOP_EMBED_Y_GAP_ABOVE_TOWER = 300;                       // vertical gap above the very top matrix of the top layer
+export const TOP_EMBED_Y_ADJUST = 0;                                   // fine vertical nudge for the top vocab
+
+// -----------------------------------------------------------------------------
 // Shared colours
 // -----------------------------------------------------------------------------
 
@@ -412,6 +477,28 @@ export const SA_BLUE_QUEUE_SHIFT_DURATION_MS = 400;  // Duration to shift remain
 export const SA_DUPLICATE_POP_IN_MS = 120;
 export const SA_DUPLICATE_TRAVEL_MERGE_MS = 400;
 export const SA_DUPLICATE_POP_OUT_MS = 150;
+
+// ------------------------------------------------------------
+// Positional embedding → residual merge controls
+// ------------------------------------------------------------
+/**
+ * Vertical offset (world units) above the rising vocab residual vector where
+ * positional-embedding vectors intersect the residual stream before addition.
+ * Increase to move the intersection higher.
+ */
+export const POS_VEC_Y_OFFSET_ABOVE_VOCAB = 300;
+
+/**
+ * Multiplier for the vertical rise speed of positional-embedding vectors
+ * relative to the base residual rise speed.
+ */
+export const POS_VEC_VERTICAL_SPEED_MULT = 1.6;
+
+/**
+ * Multiplier for the horizontal slide speed of positional-embedding vectors
+ * when moving into the residual stream at x = 0.
+ */
+export const POS_VEC_HORIZONTAL_SPEED_MULT = 1.2;
 
 // ------------------------------------------------------------
 // Prism LayerNorm animation timings (centralised)

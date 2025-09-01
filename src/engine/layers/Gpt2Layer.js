@@ -20,7 +20,6 @@ import {
     MHA_INTERNAL_MATRIX_SPACING,
     NUM_VECTOR_LANES,
     VECTOR_DEPTH_SPACING,
-    ANIM_OFFSET_Y_ORIGINAL_SPAWN,
     ANIM_RISE_SPEED_ORIGINAL,
     VECTOR_LENGTH_PRISM,
     GLOBAL_ANIM_SPEED_MULT,
@@ -33,7 +32,17 @@ import {
     PRISM_ADD_ANIM_BASE_DURATION,
     PRISM_ADD_ANIM_BASE_FLASH_DURATION,
     PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS,
-    PRISM_ADD_ANIM_SPEED_MULT
+    PRISM_ADD_ANIM_SPEED_MULT,
+    EMBEDDING_BOTTOM_TOP_ALIGN_OFFSET_FROM_LN1_BOTTOM,
+    EMBEDDING_BOTTOM_Y_ADJUST,
+    EMBEDDING_MATRIX_PARAMS_POSITION,
+    EMBEDDING_MATRIX_PARAMS_VOCAB,
+    EMBEDDING_BOTTOM_PAIR_GAP_X,
+    EMBEDDING_BOTTOM_POS_X_OFFSET,
+    EMBEDDING_BOTTOM_VOCAB_X_OFFSET,
+    POS_VEC_Y_OFFSET_ABOVE_VOCAB,
+    POS_VEC_VERTICAL_SPEED_MULT,
+    POS_VEC_HORIZONTAL_SPEED_MULT
 } from '../../utils/constants.js';
 import {
     MHA_FINAL_Q_COLOR,
@@ -45,6 +54,7 @@ import {
 } from '../../animations/LayerAnimationConstants.js';
 import { PrismLayerNormAnimation } from '../../animations/PrismLayerNormAnimation.js';
 import { MHSAAnimation } from '../../animations/MHSAAnimation.js';
+import { startPrismAdditionAnimation } from '../../utils/additionUtils.js';
 
 
 const VERTICAL_SPACING = 1500; // matches LayerAnimation.js vertical extent
@@ -254,7 +264,8 @@ export default class Gpt2Layer extends BaseLayer {
                     lane.postAdditionVec,
                     lane.movingVecLN2,
                     lane.resultVecLN2,
-                    lane.finalVecAfterMlp
+                    lane.finalVecAfterMlp,
+                    lane.posVec
                 ];
 
                 // Ensure we only update each unique trail once per frame per lane
@@ -1210,7 +1221,8 @@ export default class Gpt2Layer extends BaseLayer {
 
     _createFreshLanes(offsetX, ln1CenterY, ln2CenterY, ln1TopY) {
         const slitSpacing = LN_PARAMS.depth / (NUM_VECTOR_LANES + 1);
-        const startY = LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2 - ANIM_OFFSET_Y_ORIGINAL_SPAWN;
+        // Start vectors at the TOP of the bottom embedding matrix
+        const startY = (LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2 + EMBEDDING_BOTTOM_TOP_ALIGN_OFFSET_FROM_LN1_BOTTOM) + EMBEDDING_BOTTOM_Y_ADJUST;
         const meetY  = ln1TopY + 5;
         for (let laneIdx = 0; laneIdx < NUM_VECTOR_LANES; laneIdx++) {
             this._buildSingleLane(null, offsetX, ln1CenterY, ln2CenterY, startY, meetY, laneIdx, slitSpacing);
@@ -1348,6 +1360,76 @@ export default class Gpt2Layer extends BaseLayer {
             zPos,
             __residualMaxY: (function(){ const wp=new THREE.Vector3(); originalVec.group.getWorldPosition(wp); return wp.y; })()
         });
+
+        // ------------------------------------------------------------
+        // Initial positional-embedding vector (first layer only)
+        // ------------------------------------------------------------
+        if (this.index === 0) {
+            const lane = this.lanes[this.lanes.length - 1];
+
+            try {
+                // Start at the TOP of the bottom positional embedding, horizontally to the right
+                const residualTopY = (LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2 + EMBEDDING_BOTTOM_TOP_ALIGN_OFFSET_FROM_LN1_BOTTOM) + EMBEDDING_BOTTOM_Y_ADJUST;
+                const posStartY = residualTopY; // aligned tops
+                const posStartX = (EMBEDDING_MATRIX_PARAMS_VOCAB.width / 2)
+                                + (EMBEDDING_MATRIX_PARAMS_POSITION.width / 2)
+                                + EMBEDDING_BOTTOM_PAIR_GAP_X
+                                + EMBEDDING_BOTTOM_POS_X_OFFSET
+                                + EMBEDDING_BOTTOM_VOCAB_X_OFFSET;
+
+                // Give positional a distinct random pattern
+                const posData = this.random.nextVector(VECTOR_LENGTH_PRISM);
+                const posVec = new VectorVisualizationInstancedPrism(posData, new THREE.Vector3(posStartX, posStartY, zPos));
+                this.root.add(posVec.group);
+                // Trail (local to this layer) – enabled only until it reaches residual stream
+                const posTrail = new StraightLineTrail(this.root, 0xffffff, 1);
+                posTrail.start(posVec.group.position);
+                posVec.userData = posVec.userData || {};
+                posVec.userData.trail = posTrail;
+
+                lane.posVec = posVec;
+                lane.posTrail = posTrail;
+
+                // Two-phase motion: vertical rise, then perfectly horizontal slide
+                const targetYAbove = (startY_override != null ? startY_override : originalVec.group.position.y) + POS_VEC_Y_OFFSET_ABOVE_VOCAB;
+                const fasterRise = ANIM_RISE_SPEED_ORIGINAL * POS_VEC_VERTICAL_SPEED_MULT; // rises faster than vocab
+                const riseDist = Math.max(0, targetYAbove - posStartY);
+                const riseMs = (riseDist / (fasterRise * GLOBAL_ANIM_SPEED_MULT)) * 1000;
+
+                const horizDist = Math.abs(posStartX - 0);
+                const horizSpeed = ANIM_HORIZ_SPEED * POS_VEC_HORIZONTAL_SPEED_MULT * GLOBAL_ANIM_SPEED_MULT;
+                const horizMs = (horizDist / horizSpeed) * 1000;
+
+                if (typeof TWEEN !== 'undefined') {
+                    new TWEEN.Tween(posVec.group.position)
+                        .to({ y: targetYAbove }, Math.max(100, riseMs))
+                        .easing(TWEEN.Easing.Quadratic.InOut)
+                        .onComplete(() => {
+                            new TWEEN.Tween(posVec.group.position)
+                                .to({ x: 0, y: targetYAbove }, Math.max(100, horizMs))
+                                .easing(TWEEN.Easing.Quadratic.InOut)
+                                .onStart(() => {
+                                    // Hard-lock Y during horizontal travel to ensure a perfectly straight path
+                                    posVec.group.position.y = targetYAbove;
+                                })
+                                .onUpdate(() => {
+                                    // Maintain Y lock during horizontal interpolation
+                                    posVec.group.position.y = targetYAbove;
+                                })
+                                .onComplete(() => {
+                                    // Stop extending trail once we arrive at residual stream
+                                    try { if (posVec.userData) delete posVec.userData.trail; } catch (_) {}
+                                    // Trigger addition: positional (above) travels DOWN into vocab (rising)
+                                    try { startPrismAdditionAnimation(posVec, originalVec); } catch (_) {}
+                                })
+                                .start();
+                        })
+                        .start();
+                }
+            } catch (_) {
+                // Non-fatal – positional addition is a visual enhancement only
+            }
+        }
     }
 
     /**
