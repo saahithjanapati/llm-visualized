@@ -60,6 +60,10 @@ export class MHSAAnimation {
 
         // Core positional helpers & state flags
         this.mhaPassThroughPhase = 'positioning_mha_vectors';
+        // Track the merge-to-row phase so UI can switch equations as soon as
+        // vectors start travelling back toward the output projection matrix.
+        // Values: 'not_started' | 'merging' | 'merged'
+        this.rowMergePhase = 'not_started';
 
         this.mhsa_matrix_center_y = this.mhsaBaseY + MHA_MATRIX_PARAMS.height / 2;
         this.headStopY            = this.mhsa_matrix_center_y - MHSA_HEAD_VECTOR_STOP_BELOW;
@@ -1217,6 +1221,10 @@ export class MHSAAnimation {
     _startMergeToRowVectors() {
         if (!this._tempDecorativeVecs || this._tempDecorativeVecs.length === 0) return;
 
+        // Mark that decorative vectors are now travelling horizontally back
+        // toward the output projection alignment row.
+        this.rowMergePhase = 'merging';
+
         // Build map laneZ -> array of decorative vectors
         const laneVectors = new Map();
         this._tempDecorativeVecs.forEach(obj => {
@@ -1271,6 +1279,8 @@ export class MHSAAnimation {
     
     _startVectorsThroughOutputProjection(laneVectors) {
         // Combine decorative vectors in each lane into a single vector, then animate those combined vectors
+        // Mark merge as complete prior to entering the output projection stage
+        this.rowMergePhase = 'merged';
         this.outputProjMatrixAnimationPhase = 'vectors_entering';
 
         // Keep K/V visuals present during concatenation; they will be disposed

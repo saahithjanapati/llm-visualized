@@ -116,7 +116,63 @@
             user-select: none;
         }
         .toggle-row input { width: 18px; height: 18px; }
+        /* Equations panel (under status overlay) */
+        #equationsPanel {
+            position: fixed;
+            top: 110px; /* below the status overlay */
+            right: 10px;
+            z-index: 5;
+            max-width: min(92vw, 520px);
+            max-height: 46vh;
+            overflow: auto;
+            -webkit-overflow-scrolling: touch;
+            padding: 10px 12px;
+            color: #fff;
+            background: rgba(20,20,20,0.35);
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+            border-radius: 8px;
+            pointer-events: auto; /* allow scroll on small screens */
+            display: none; /* toggled on when enabled */
+        }
+        #equationsPanel .eq-title {
+            font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+            font-size: 12px;
+            color: #cfd3dc;
+            margin-bottom: 6px;
+            letter-spacing: .2px;
+        }
+        #equationsPanel .eq-body {
+            font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+            font-size: 16px;
+            line-height: 1.35;
+        }
+        /* KaTeX tweaks for dark bg */
+        .katex { color: #fff; }
+        .katex-display { margin: 0; }
+
+        /* Responsive adjustments */
+        @media (max-width: 900px) {
+            #equationsPanel { max-width: calc(100vw - 24px); right: 12px; }
+        }
+        @media (max-width: 600px) {
+            #equationsPanel {
+                left: 8px;
+                right: 8px;
+                top: 100px;
+                max-width: calc(100vw - 16px);
+                max-height: 40vh;
+                padding: 8px 10px;
+            }
+            #equationsPanel .eq-body { font-size: 14px; }
+        }
+        @media (max-height: 560px) {
+            #equationsPanel { max-height: 36vh; }
+        }
     </style>
+    <!-- KaTeX for equation rendering (fallbacks to plain text if blocked) -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
 </head>
 <body>
     <!-- Loading GIF overlay -->
@@ -158,6 +214,13 @@
                         Enable hover labels (raycasting)
                     </label>
                 </div>
+                <div class="settings-section">
+                    <label class="section-label">Display</label>
+                    <label class="toggle-row">
+                        <input id="toggleEquations" type="checkbox" checked>
+                        Show equations overlay
+                    </label>
+                </div>
             </div>
         </div>
     </div>
@@ -166,6 +229,12 @@
     <canvas id="introCanvas" style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:2;"></canvas>
     <!-- GPT-2 tower canvas (below) -->
     <canvas id="gptCanvas" style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:1;"></canvas>
+
+    <!-- Equations overlay (under status overlay) -->
+    <div id="equationsPanel" aria-live="polite">
+        <div class="eq-title" id="equationsTitle">Equations</div>
+        <div class="eq-body" id="equationsBody"></div>
+    </div>
 
     <!-- Global TWEEN.js for animations -->
     <script src="https://unpkg.com/@tweenjs/tween.js@23.1.1/dist/tween.umd.js"></script>
@@ -533,6 +602,125 @@
         // Status overlay updater
         // ------------------------------------------------------------------
         const statusDiv = document.getElementById('statusOverlay');
+        const equationsPanel = document.getElementById('equationsPanel');
+        const equationsTitle = document.getElementById('equationsTitle');
+        const equationsBody = document.getElementById('equationsBody');
+
+        // Persisted user preference for showing equations
+        const EQ_STORAGE_KEY = 'showEquations';
+        function getShowEquationsPref() {
+            try {
+                const v = localStorage.getItem(EQ_STORAGE_KEY);
+                return v === null ? true : v === '1';
+            } catch (_) { return true; }
+        }
+        function setShowEquationsPref(val) {
+            try { localStorage.setItem(EQ_STORAGE_KEY, val ? '1' : '0'); } catch (_) {}
+        }
+
+        let showEquations = getShowEquationsPref();
+        if (equationsPanel) equationsPanel.style.display = showEquations ? 'block' : 'none';
+
+        // Equations mapping (LaTeX)
+        const EQ = {
+            ln1: String.raw`x_{\text{ln}} = \mathrm{LN}(x) = \gamma \odot \frac{x - \mu}{\sqrt{\sigma^2+\epsilon}} + \beta` ,
+            qkv_per_head: String.raw`Q_k = x_{\text{ln}} W_k^Q,\quad K_k = x_{\text{ln}} W_k^K,\quad V_k = x_{\text{ln}} W_k^V\quad (k=1..h)`,
+            qkv_packed: String.raw`Q = x_{\text{ln}} W^Q,\quad K = x_{\text{ln}} W^K,\quad V = x_{\text{ln}} W^V,\quad Q,K,V\in\mathbb{R}^{B\times T\times h\times d_h}`,
+            attn: String.raw`A_k = \frac{Q_k K_k^\top}{\sqrt{d_h}} + M_{\text{causal}},\quad \alpha_k = \mathrm{softmax}(A_k)\ (\text{row-wise}),\quad H_k = \alpha_k V_k`,
+            concat_proj: String.raw`H = \mathrm{Concat}(H_1,\ldots,H_h)\in\mathbb{R}^{B\times T\times d},\quad \mathrm{SA}(x) = H W^O + b_o`,
+            resid1: String.raw`u = x + \mathrm{SA}(x_{\text{ln}})`,
+            ln2: String.raw`u_{\text{ln}} = \mathrm{LN}(u) = \gamma' \odot \frac{u - \mu'}{\sqrt{{\sigma'}^{2}+\epsilon}} + \beta'`,
+            mlp: String.raw`z = u_{\text{ln}} W_{\text{up}} + b_{\text{up}},\quad z' = \mathrm{GELU}(z),\quad \mathrm{MLP}(u_{\text{ln}}) = z' W_{\text{down}} + b_{\text{down}}`,
+            resid2: String.raw`x_{\text{out}} = u + \mathrm{MLP}(u_{\text{ln}})`
+        };
+
+        function renderEq(tex, title) {
+            if (!equationsPanel || !equationsBody) return;
+            if (!showEquations) return;
+            equationsTitle.textContent = title || 'Equations';
+            try {
+                if (window.katex && window.katex.render) {
+                    equationsBody.innerHTML = '';
+                    window.katex.render(tex, equationsBody, { throwOnError: false, displayMode: true });
+                } else {
+                    equationsBody.textContent = tex;
+                }
+            } catch (_) {
+                equationsBody.textContent = tex;
+            }
+        }
+
+        // Cache last rendered key to avoid re-render churn
+        let __lastEqKey = '';
+        function updateEquations(layer) {
+            if (!showEquations) return;
+            if (!layer) return;
+            const lanes = Array.isArray(layer.lanes) ? layer.lanes : [];
+            if (!lanes.length) return;
+
+            // Stage inference mirrors the status overlay but adds sub-phases
+            const mlpActive = lanes.some(l => l.mlpUpStarted || l.ln2Phase === 'mlpReady' || l.ln2Phase === 'done');
+            const ln2Active = !mlpActive && lanes.some(l => l.ln2Phase && l.ln2Phase !== 'notStarted');
+            const ln1Active = !mlpActive && !ln2Active && lanes.some(l => ['waiting','right','insideLN'].includes(l.horizPhase));
+            const mhsaActive = !mlpActive && !ln2Active && !ln1Active && (
+                (layer && layer._mhsaStart === true) ||
+                lanes.some(l => ['riseAboveLN','readyMHSA','travelMHSA','postMHSAAddition','waitingForLN2'].includes(l.horizPhase))
+            );
+
+            let key = '';
+            let title = '';
+
+            if (mlpActive) {
+                // During/after MLP; if addition back to residual is underway, show residual2
+                const adding = lanes.some(l => l.ln2Phase === 'done' && !l.additionComplete);
+                key = adding ? 'resid2' : 'mlp';
+                title = adding ? 'Residual Add 2' : 'MLP (FFN)';
+            } else if (ln2Active) {
+                key = 'ln2';
+                title = 'LayerNorm 2';
+            } else if (mhsaActive) {
+                const m = layer.mhsaAnimation;
+                const phase = m && m.mhaPassThroughPhase;
+                const outPhase = m && m.outputProjMatrixAnimationPhase; // 'waiting' | 'vectors_entering' | 'vectors_inside' | 'completed'
+
+                // Keep showing attention while the conveyor is active or until
+                // the combined vectors actually start moving into W^O.
+                if (phase === 'parallel_pass_through_active') {
+                    key = 'attn';
+                    title = 'Scaled Dot-Product Attention';
+                } else if (phase === 'mha_pass_through_complete') {
+                    const postAdd = lanes.some(l => ['postMHSAAddition','waitingForLN2'].includes(l.horizPhase));
+                    if (postAdd || outPhase === 'vectors_inside' || outPhase === 'completed') {
+                        // Show residual add once vectors are passing through W^O or after
+                        key = 'resid1';
+                        title = 'Residual Add 1';
+                    } else if (m?.rowMergePhase === 'merging' || outPhase === 'vectors_entering') {
+                        // As soon as vectors begin traveling back toward W^O
+                        key = 'concat_proj';
+                        title = 'Concat Heads + W^O';
+                    } else {
+                        // Between conveyor end and travel start (fade/prepare)
+                        key = 'attn';
+                        title = 'Scaled Dot-Product Attention';
+                    }
+                } else {
+                    // Early MHSA stages before conveyor fully starts
+                    key = 'qkv_per_head';
+                    title = 'Q/K/V Projections';
+                }
+            } else if (ln1Active || layer.isActive) {
+                key = 'ln1';
+                title = 'LayerNorm 1';
+            }
+
+            if (!key) return;
+            if (key === __lastEqKey) return;
+            __lastEqKey = key;
+
+            // LN1 note (don’t assign back to x) — add as small subtitle in title
+            const t = (key === 'ln1') ? 'LayerNorm 1 (no in-place assign)' : title;
+            renderEq(EQ[key], t);
+        }
         function updateStatus() {
             if (!statusDiv) return;
             const idx = pipeline._currentLayerIdx;
@@ -565,6 +753,7 @@
             }
 
             statusDiv.textContent = `Layer ${idx + 1} / ${total}\n${displayStage}`;
+            try { updateEquations(layer); } catch (_) {}
         }
         setInterval(updateStatus, 250);
 
@@ -599,6 +788,8 @@
                 if (rc && pipeline?.engine?.isRaycastingEnabled) {
                     rc.checked = !!pipeline.engine.isRaycastingEnabled();
                 }
+                const eq = document.getElementById('toggleEquations');
+                if (eq) eq.checked = !!showEquations;
             } catch (_) { /* no-op */ }
         }
 
@@ -647,6 +838,16 @@
         const rayToggle = document.getElementById('toggleRaycast');
         rayToggle?.addEventListener('change', () => {
             try { pipeline?.engine?.setRaycastingEnabled?.(!!rayToggle.checked); } catch (_) { /* no-op */ }
+        });
+
+        // Equations toggle wiring
+        const eqToggle = document.getElementById('toggleEquations');
+        eqToggle?.addEventListener('change', () => {
+            showEquations = !!eqToggle.checked;
+            setShowEquationsPref(showEquations);
+            if (equationsPanel) equationsPanel.style.display = showEquations ? 'block' : 'none';
+            // Force re-render next tick
+            __lastEqKey = '';
         });
     </script>
 </body>
