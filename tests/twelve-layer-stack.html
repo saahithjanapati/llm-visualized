@@ -257,7 +257,7 @@
         const SKIP_INTRO = true;
         import { CAPTION_TEXT_Y_POS, setPlaybackSpeed, EMBEDDING_MATRIX_PARAMS_VOCAB, EMBEDDING_MATRIX_PARAMS_POSITION, LN_PARAMS, LAYER_NORM_1_Y_POS, MLP_MATRIX_PARAMS_DOWN, INACTIVE_COMPONENT_COLOR, EMBEDDING_BOTTOM_TOP_ALIGN_OFFSET_FROM_LN1_BOTTOM, EMBEDDING_BOTTOM_Y_ADJUST, EMBEDDING_BOTTOM_VOCAB_X_OFFSET, EMBEDDING_BOTTOM_PAIR_GAP_X, EMBEDDING_BOTTOM_POS_X_OFFSET, TOP_EMBED_VOCAB_X_OFFSET, TOP_EMBED_Y_GAP_ABOVE_TOWER, TOP_EMBED_Y_ADJUST } from '../src/utils/constants.js';
         import { WeightMatrixVisualization } from '../src/components/WeightMatrixVisualization.js';
-        import { MHA_FINAL_Q_COLOR } from '../src/animations/LayerAnimationConstants.js';
+        import { MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR } from '../src/animations/LayerAnimationConstants.js';
 
         // Set default playback speed to fast on load
         try { setPlaybackSpeed('fast'); } catch (_) { /* no-op */ }
@@ -310,6 +310,7 @@
         // ------------------------------------------------------------------
         try {
             const headBlue = new THREE.Color(MHA_FINAL_Q_COLOR);
+            const headGreen = new THREE.Color(MHA_FINAL_K_COLOR);
 
             // Bottom pair aligned so their TOP surfaces sit on the residual stream height near LN1 branching
             const residualYBase = LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2 + EMBEDDING_BOTTOM_TOP_ALIGN_OFFSET_FROM_LN1_BOTTOM;
@@ -356,7 +357,7 @@
                 EMBEDDING_MATRIX_PARAMS_POSITION.slitTopWidthFactor
             );
             posBottom.group.userData.label = 'Positional Embedding';
-            posBottom.setColor(headBlue);
+            posBottom.setColor(headGreen);
             posBottom.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
             pipeline.engine.scene.add(posBottom.group);
 

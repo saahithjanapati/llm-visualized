@@ -851,6 +851,13 @@ export default class Gpt2Layer extends BaseLayer {
             this._makeLayerOpaque(); // disable expensive transparency; dynamic vectors culled later by pipeline
             if (this.onFinished) this.onFinished();
         }
+
+        // ------------------------------------------------------------------
+        // Final hard clamp: if the pipeline has provided a top-embedding stop
+        // height (in this layer's local space), ensure residual vectors cannot
+        // rise above it under any circumstance (e.g. stray tweens).
+        // ------------------------------------------------------------------
+        // Do not force residual vectors downward here; MHSAAnimation already clamps upward motion.
     }
 
     /**

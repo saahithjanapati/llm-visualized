@@ -568,6 +568,11 @@ export class MHSAAnimation {
 
                 const curY = lane.originalVec.group.position.y;
                 let targetY = this.finalOriginalY;
+                // Hard clamp: once the pipeline signals the top embedding stop height,
+                // never allow the residual vectors to rise past that entrance.
+                if (typeof this.topEmbeddingStopY === 'number') {
+                    targetY = Math.min(targetY, this.topEmbeddingStopY);
+                }
                 let shouldMove = true;
 
                 // Enforce suspension during addition animation
@@ -581,7 +586,7 @@ export class MHSAAnimation {
                     }
                 }
                 
-                // Move the vector if not frozen
+                // Only allow upward movement toward the target/clamp; never force downward snaps
                 if (shouldMove && curY < targetY) {
                     lane.originalVec.group.position.y = Math.min(curY + riseStep, targetY);
                 }
