@@ -255,8 +255,9 @@
         import { LayerPipeline } from '../src/engine/LayerPipeline.js';
         // Skip intro typing screen for direct animation entry
         const SKIP_INTRO = true;
-        import { CAPTION_TEXT_Y_POS, setPlaybackSpeed, EMBEDDING_MATRIX_PARAMS_VOCAB, EMBEDDING_MATRIX_PARAMS_POSITION, LN_PARAMS, LAYER_NORM_1_Y_POS, MLP_MATRIX_PARAMS_DOWN, INACTIVE_COMPONENT_COLOR, EMBEDDING_BOTTOM_TOP_ALIGN_OFFSET_FROM_LN1_BOTTOM, EMBEDDING_BOTTOM_Y_ADJUST, EMBEDDING_BOTTOM_VOCAB_X_OFFSET, EMBEDDING_BOTTOM_PAIR_GAP_X, EMBEDDING_BOTTOM_POS_X_OFFSET, TOP_EMBED_VOCAB_X_OFFSET, TOP_EMBED_Y_GAP_ABOVE_TOWER, TOP_EMBED_Y_ADJUST } from '../src/utils/constants.js';
+        import { CAPTION_TEXT_Y_POS, setPlaybackSpeed, EMBEDDING_MATRIX_PARAMS_VOCAB, EMBEDDING_MATRIX_PARAMS_POSITION, LN_PARAMS, LAYER_NORM_1_Y_POS, MLP_MATRIX_PARAMS_DOWN, INACTIVE_COMPONENT_COLOR, EMBEDDING_BOTTOM_TOP_ALIGN_OFFSET_FROM_LN1_BOTTOM, EMBEDDING_BOTTOM_Y_ADJUST, EMBEDDING_BOTTOM_VOCAB_X_OFFSET, EMBEDDING_BOTTOM_PAIR_GAP_X, EMBEDDING_BOTTOM_POS_X_OFFSET, TOP_EMBED_VOCAB_X_OFFSET, TOP_EMBED_Y_GAP_ABOVE_TOWER, TOP_EMBED_Y_ADJUST, TOP_LN_TO_TOP_EMBED_GAP } from '../src/utils/constants.js';
         import { WeightMatrixVisualization } from '../src/components/WeightMatrixVisualization.js';
+        import { LayerNormalizationVisualization } from '../src/components/LayerNormalizationVisualization.js';
         import { MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR } from '../src/animations/LayerAnimationConstants.js';
 
         // Set default playback speed to fast on load
@@ -281,6 +282,10 @@
             cameraPosition: camPos,
             cameraTarget: camTarget
         });
+
+        // Top embedding activation state
+        let vocabTopRef = null; // reference to top vocab embedding
+        let __topEmbedActivated = false; // color switched to blue
 
         // Show the GPT canvas right away so the tower is visible even while the
         // HDRI environment map streams in.  The intro text still overlays it,
@@ -361,14 +366,33 @@
             posBottom.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
             pipeline.engine.scene.add(posBottom.group);
 
-            // --- Top Vocab Embedding (flipped; narrow end facing downward toward layers) ---
+            // --- Top LayerNorm + Vocab Embedding (aligned with residual stream) ---
             const lastLayer = pipeline._layers[NUM_LAYERS - 1];
             if (lastLayer && lastLayer.mlpDown && lastLayer.mlpDown.group) {
                 const tmp = new THREE.Vector3();
                 lastLayer.mlpDown.group.getWorldPosition(tmp);
                 const towerTopY = tmp.y + MLP_MATRIX_PARAMS_DOWN.height / 2;
                 const topGap = TOP_EMBED_Y_GAP_ABOVE_TOWER;
-                const topVocabCenterY = towerTopY + topGap + EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2 + TOP_EMBED_Y_ADJUST;
+
+                // Place a LayerNorm ring just above the tower top
+                const topLnCenterY = towerTopY + topGap + LN_PARAMS.height / 2;
+                const lnTop = new LayerNormalizationVisualization(
+                    new THREE.Vector3(0 + TOP_EMBED_VOCAB_X_OFFSET, topLnCenterY, 0),
+                    LN_PARAMS.width,
+                    LN_PARAMS.height,
+                    LN_PARAMS.depth,
+                    LN_PARAMS.wallThickness,
+                    LN_PARAMS.numberOfHoles,
+                    LN_PARAMS.holeWidth,
+                    LN_PARAMS.holeWidthFactor
+                );
+                lnTop.group.userData.label = 'LayerNorm (Top)';
+                lnTop.setColor(new THREE.Color(INACTIVE_COMPONENT_COLOR));
+                lnTop.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
+                pipeline.engine.scene.add(lnTop.group);
+
+                // Position the final vocab embedding above the top LayerNorm
+                const topVocabCenterY = topLnCenterY + (LN_PARAMS.height / 2) + TOP_LN_TO_TOP_EMBED_GAP + (EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2) + TOP_EMBED_Y_ADJUST;
 
                 const vocabTop = new WeightMatrixVisualization(
                     null,
@@ -387,8 +411,10 @@
                 // Flip vertically so the narrow end faces the layers below
                 vocabTop.group.rotation.z = Math.PI;
                 vocabTop.group.userData.label = 'Vocab Embedding (Top)';
-                vocabTop.setColor(headBlue);
-                vocabTop.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
+                // Start black until vectors reach the entrance
+                vocabTop.setColor(new THREE.Color(0x000000));
+                vocabTop.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.0 });
+                vocabTopRef = vocabTop;
                 pipeline.engine.scene.add(vocabTop.group);
             }
         } catch (_) { /* optional – embedding visuals are non-critical */ }
@@ -822,6 +848,28 @@
             const t = (key === 'ln1') ? 'LayerNorm 1 (no in-place assign)' : title;
             renderEq(EQ[key], t);
         }
+        // Switch top vocab color to blue once residual vector reaches the entrance
+        function checkTopEmbeddingActivation() {
+            try {
+                if (__topEmbedActivated) return;
+                const lastLayer = pipeline._layers[NUM_LAYERS - 1];
+                if (!lastLayer || !vocabTopRef) return;
+                const stopY = lastLayer.__topEmbedStopYLocal;
+                if (typeof stopY !== 'number') return;
+                const lanes = Array.isArray(lastLayer.lanes) ? lastLayer.lanes : [];
+                for (const lane of lanes) {
+                    const v = lane && lane.originalVec;
+                    if (v && v.group && v.group.position.y >= stopY - 0.01) {
+                        const headBlue = new THREE.Color(MHA_FINAL_Q_COLOR);
+                        vocabTopRef.setColor(headBlue);
+                        vocabTopRef.setMaterialProperties({ emissiveIntensity: 0.05 });
+                        __topEmbedActivated = true;
+                        break;
+                    }
+                }
+            } catch (_) { /* ignore */ }
+        }
+
         function updateStatus() {
             if (!statusDiv) return;
             const idx = pipeline._currentLayerIdx;
@@ -855,6 +903,8 @@
 
             statusDiv.textContent = `Layer ${idx + 1} / ${total}\n${displayStage}`;
             try { updateEquations(layer); } catch (_) {}
+            // Also check if we should activate the top embedding color
+            try { checkTopEmbeddingActivation(); } catch (_) {}
         }
         setInterval(updateStatus, 250);
 

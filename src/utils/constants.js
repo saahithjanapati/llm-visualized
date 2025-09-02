@@ -445,6 +445,8 @@ export const EMBEDDING_BOTTOM_POS_X_OFFSET = 0;                       // extra h
 export const TOP_EMBED_VOCAB_X_OFFSET = 0;                            // horizontal offset for the top vocab relative to residual x=0
 export const TOP_EMBED_Y_GAP_ABOVE_TOWER = 300;                       // vertical gap above the very top matrix of the top layer
 export const TOP_EMBED_Y_ADJUST = 0;                                   // fine vertical nudge for the top vocab
+// Vertical separation between the top LayerNorm ring and the top vocab embedding
+export const TOP_LN_TO_TOP_EMBED_GAP = 140;
 
 // -----------------------------------------------------------------------------
 // Shared colours
