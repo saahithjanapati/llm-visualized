@@ -764,6 +764,14 @@ export function initLayerAnimation(container) {
                         movingVec.group.position.y += ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT * deltaTime;
                     }
 
+                    // If a large frame delta caused us to jump past the
+                    // threshold in a single step, ensure the normalisation
+                    // animation still begins.
+                    if (!lane.normStarted && movingVec.group.position.y >= normStartY_abs) {
+                        lane.normAnimation.start(movingVec.rawData.slice());
+                        lane.normStarted = true;
+                    }
+
                     // Trigger multiplication at centre of current LN
                     if (!lane.multStarted && movingVec.group.position.y >= currentLN_midY_abs) {
                         lane.multStarted = true;
@@ -973,6 +981,14 @@ export function initLayerAnimation(container) {
                     // Only let the vector rise when it is NOT actively normalising
                     if (!lane.multDoneLN2 && !isNormAnimating2) {
                         mv.group.position.y += ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT * deltaTime;
+                    }
+
+                    // Safeguard: if a low frame rate caused the vector to
+                    // skip past the trigger height in one update, start the
+                    // normalisation animation now.
+                    if (!lane.normStartedLN2 && mv.group.position.y >= normStartY2) {
+                        lane.normAnimationLN2.start(mv.rawData.slice());
+                        lane.normStartedLN2 = true;
                     }
                     if (!lane.multDoneLN2 && mv.group.position.y >= midY_ln2_abs) {
                         lane.multDoneLN2 = true;
