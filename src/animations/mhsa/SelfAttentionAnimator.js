@@ -218,8 +218,17 @@ export class SelfAttentionAnimator {
         const queue = this.blueQueues[headIdx];
 
         queue.push(vector);
-        // Keep queue ordered by z (ascending) so index == lane order (top → bottom)
-        queue.sort((a, b) => a.group.position.z - b.group.position.z);
+        // Keep queue ordered by lane z (ascending) so index == lane order (top → bottom).
+        // Using the parent lane's zPos avoids jitter while vectors are mid-shift.
+        queue.sort((a, b) => {
+            const az = (a.userData && a.userData.parentLane && typeof a.userData.parentLane.zPos === 'number')
+                ? a.userData.parentLane.zPos
+                : a.group.position.z;
+            const bz = (b.userData && b.userData.parentLane && typeof b.userData.parentLane.zPos === 'number')
+                ? b.userData.parentLane.zPos
+                : b.group.position.z;
+            return az - bz;
+        });
 
         // If the conveyor belt is already running for this head, newly
         // enqueued vectors may arrive slightly later than the initial batch.
@@ -284,10 +293,11 @@ export class SelfAttentionAnimator {
         // Existing logic (unchanged)
 
         const laneZs = (this.ctx.currentLanes || []).map(l => l.zPos).sort((a, b) => a - b);
+        if (!laneZs.length) return;
         queue.forEach((vec, idx) => {
-            if (!laneZs[idx]) return;
+            const targetZ = laneZs[idx < laneZs.length ? idx : laneZs.length - 1];
             new TWEEN.Tween(vec.group.position)
-                .to({ z: laneZs[idx] }, this.BLUE_QUEUE_SHIFT_DURATION)
+                .to({ z: targetZ }, this.BLUE_QUEUE_SHIFT_DURATION)
                 .easing(TWEEN.Easing.Quadratic.InOut)
                 .start();
         });
