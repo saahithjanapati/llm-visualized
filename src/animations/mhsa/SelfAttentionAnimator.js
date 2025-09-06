@@ -221,6 +221,17 @@ export class SelfAttentionAnimator {
         // Keep queue ordered by z (ascending) so index == lane order (top → bottom)
         queue.sort((a, b) => a.group.position.z - b.group.position.z);
 
+        // If the conveyor belt is already running for this head, newly
+        // enqueued vectors may arrive slightly later than the initial batch.
+        // Without an immediate shift they would remain at their original
+        // positions until the next dequeued vector triggers a queue update,
+        // causing a visible "lagging" query at the tail.  To keep all blue
+        // vectors synchronized from the very start, realign the queue right
+        // away whenever processing is active.
+        if (this.blueProcessing[headIdx]) {
+            this._shiftRemainingBlueVectors(queue, headIdx);
+        }
+
         // If greens are already in position we can start processing immediately.
         if (this.greensAligned[headIdx]) {
             this._kickoffBlueConveyor(headIdx);
