@@ -8,8 +8,24 @@ import {
     TOP_EMBED_Y_GAP_ABOVE_TOWER,
     TOP_EMBED_Y_ADJUST,
     GLOBAL_ANIM_SPEED_MULT,
-    ANIM_RISE_SPEED_ORIGINAL
+    ANIM_RISE_SPEED_ORIGINAL,
+    LN_PARAMS,
+    PRISM_ADD_ANIM_BASE_DURATION,
+    PRISM_ADD_ANIM_BASE_FLASH_DURATION,
+    PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS,
+    PRISM_ADD_ANIM_SPEED_MULT,
+    VECTOR_LENGTH_PRISM
 } from '../utils/constants.js';
+import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
+import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
+
+function simplePrismMultiply(srcVec, tgtVec, onComplete) {
+    for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
+        tgtVec.rawData[i] = (srcVec.rawData[i] || 0) * (tgtVec.rawData[i] || 0);
+    }
+    tgtVec.updateKeyColorsFromData(tgtVec.rawData, 30);
+    if (onComplete) onComplete();
+}
 
 /**
  * LayerPipeline orchestrates a single bundle of vectors ("lanes") through an
@@ -158,35 +174,114 @@ export class LayerPipeline {
             const topVocabCenterYLocal = towerTopYLocal + TOP_EMBED_Y_GAP_ABOVE_TOWER + EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2 + TOP_EMBED_Y_ADJUST;
             targetYLocal = topVocabCenterYLocal - EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2 + 5;
         }
-
         // Clamp MHSA's continuous residual rise target so vectors stop exactly at the
-        // entrance of the top (flipped) vocab embedding instead of drifting past it.
+        // entrance of the top embedding instead of drifting past it.
         try {
             if (lastLayer.mhsaAnimation) {
-                // Primary target in LOCAL coordinates
                 lastLayer.mhsaAnimation.finalOriginalY = targetYLocal;
-                // Absolute clamp so vectors never rise past the embedding entrance
                 lastLayer.mhsaAnimation.topEmbeddingStopY = targetYLocal;
-                // Ensure remaining drift (if any) moves toward this precise target
                 lastLayer.mhsaAnimation.postSplitRiseSpeed = ANIM_RISE_SPEED_ORIGINAL;
             }
-            // Also provide a defensive clamp on the layer itself (local space)
             lastLayer.__topEmbedStopYLocal = targetYLocal;
         } catch (_) { /* no-op */ }
 
+        // Locate the top LayerNorm, if present
+        let lnTopGroup = null;
+        try {
+            const scene = this._engine && this._engine.scene;
+            if (scene && typeof scene.traverse === 'function') {
+                scene.traverse(obj => {
+                    if (!lnTopGroup && obj && obj.userData && obj.userData.label === 'LayerNorm (Top)') {
+                        lnTopGroup = obj;
+                    }
+                });
+            }
+        } catch (_) { /* optional */ }
+
+        // If a top LayerNorm exists, run a mini LayerNorm pipeline before entering the vocab embedding
+        if (lnTopGroup) {
+            const lnCenterWorld = new THREE.Vector3();
+            lnTopGroup.getWorldPosition(lnCenterWorld);
+            const lnCenterLocal = lnCenterWorld.clone();
+            lastLayer.root.worldToLocal(lnCenterLocal);
+            const lnCenterY = lnCenterLocal.y;
+            const lnBottomY = lnCenterY - LN_PARAMS.height / 2;
+
+            const activateLnColor = () => {
+                const white = new THREE.Color(0xffffff);
+                lnTopGroup.traverse(obj => {
+                    if (obj.isMesh && obj.material) {
+                        const apply = mat => { mat.color.copy(white); mat.emissive.copy(white); mat.emissiveIntensity = 0.5; mat.transparent = false; mat.opacity = 1.0; };
+                        if (Array.isArray(obj.material)) obj.material.forEach(apply); else apply(obj.material);
+                    }
+                });
+            };
+
+            lastLayer.lanes.forEach(lane => {
+                const vec = lane && lane.originalVec;
+                if (!vec || !vec.group) return;
+                const startY = vec.group.position.y;
+                if (typeof startY !== 'number' || !isFinite(startY)) return;
+
+                const zPos = lane.zPos || 0;
+                const multVec = new VectorVisualizationInstancedPrism(vec.rawData.slice(), new THREE.Vector3(0, lnCenterY, zPos));
+                lastLayer.root.add(multVec.group);
+                multVec.group.visible = false;
+                const addVec = new VectorVisualizationInstancedPrism(vec.rawData.slice(), new THREE.Vector3(0, lnCenterY + LN_PARAMS.height / 4, zPos));
+                lastLayer.root.add(addVec.group);
+                addVec.group.visible = false;
+
+                const distToCenter = Math.max(0, lnCenterY - startY);
+                const durToCenter = (distToCenter / (ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT)) * 1000;
+
+                new TWEEN.Tween(vec.group.position)
+                    .to({ y: lnCenterY }, Math.max(100, durToCenter))
+                    .easing(TWEEN.Easing.Quadratic.InOut)
+                    .onUpdate(() => {
+                        if (!lane.__topLnEntered && vec.group.position.y >= lnBottomY) {
+                            lane.__topLnEntered = true;
+                            multVec.group.visible = true;
+                            addVec.group.visible = true;
+                            activateLnColor();
+                        }
+                    })
+                    .onComplete(() => {
+                        simplePrismMultiply(vec, multVec, () => {
+                            vec.group.visible = false;
+                            multVec.group.visible = false;
+
+                            const resVec = new VectorVisualizationInstancedPrism(multVec.rawData.slice(), multVec.group.position.clone());
+                            lastLayer.root.add(resVec.group);
+
+                            const addDur = (PRISM_ADD_ANIM_BASE_DURATION + PRISM_ADD_ANIM_BASE_FLASH_DURATION + VECTOR_LENGTH_PRISM * PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS) / PRISM_ADD_ANIM_SPEED_MULT;
+                            startPrismAdditionAnimation(addVec, resVec);
+
+                            setTimeout(() => {
+                                const riseDist = Math.max(0, targetYLocal - resVec.group.position.y);
+                                const durMs = (riseDist / (ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT)) * 1000;
+                                new TWEEN.Tween(resVec.group.position)
+                                    .to({ y: targetYLocal }, Math.max(100, durMs))
+                                    .easing(TWEEN.Easing.Quadratic.InOut)
+                                    .start();
+                            }, addDur + 100);
+                        });
+                    })
+                    .start();
+            });
+            return;
+        }
+
+        // Fallback: no top LayerNorm – simply rise into the embedding
         lastLayer.lanes.forEach(lane => {
             const vec = lane && lane.originalVec;
             if (!vec || !vec.group) return;
             const startY = vec.group.position.y;
             if (typeof startY !== 'number' || !isFinite(startY)) return;
-            if (startY >= targetYLocal - 0.01) return; // already at/above target
+            if (startY >= targetYLocal - 0.01) return;
 
             const riseDist = Math.max(0, targetYLocal - startY);
             const durMs = (riseDist / (ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT)) * 1000;
 
-            // Ensure the world-space residual trail keeps extending during the rise
-            // The last layer remains in the engine update list, which continues
-            // updating world-space trails each frame.
             new TWEEN.Tween(vec.group.position)
                 .to({ y: targetYLocal }, Math.max(100, durMs))
                 .easing(TWEEN.Easing.Quadratic.InOut)
