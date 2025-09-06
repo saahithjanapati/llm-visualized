@@ -874,15 +874,28 @@ export default class Gpt2Layer extends BaseLayer {
         
         const matrixStartColor = new THREE.Color(INACTIVE_COMPONENT_COLOR);
         const matrixEndColor = new THREE.Color(0xb07c13); // orange
-        
-        // Animate matrix color
-        new TWEEN.Tween({ t: 0 })
-            .to({ t: 1 }, duration)
+        const startIntensity = 0.1;
+        const peakIntensity = 0.8;
+        const finalIntensity = 0.3;
+
+        // Animate matrix colour and emissive intensity for a glow effect
+        const state = { t: 0, emissive: startIntensity };
+        new TWEEN.Tween(state)
+            .to({ t: 1, emissive: peakIntensity }, duration * 0.6)
             .easing(TWEEN.Easing.Quadratic.InOut)
-            .onUpdate(o => {
-                const col = matrixStartColor.clone().lerp(matrixEndColor, o.t);
+            .onUpdate(() => {
+                const col = matrixStartColor.clone().lerp(matrixEndColor, state.t);
                 this.mlpUp.setColor(col);
-                this.mlpUp.setEmissive(col, 0.5);
+                this.mlpUp.setEmissive(col, state.emissive);
+            })
+            .onComplete(() => {
+                new TWEEN.Tween(state)
+                    .to({ emissive: finalIntensity }, duration * 0.4)
+                    .easing(TWEEN.Easing.Quadratic.InOut)
+                    .onUpdate(() => {
+                        this.mlpUp.setEmissive(matrixEndColor, state.emissive);
+                    })
+                    .start();
             })
             .start();
             
@@ -900,7 +913,7 @@ export default class Gpt2Layer extends BaseLayer {
                 // Restore scale
                 vec.group.scale.setScalar(0.6);
                 this.mlpUp.setColor(matrixEndColor);
-                this.mlpUp.setEmissive(matrixEndColor, 0.5);
+                this.mlpUp.setEmissive(matrixEndColor, finalIntensity);
                 
                 // Expand to 4x width (3072 dimensions)
                 this._expandTo4x(lane, vec);
@@ -976,14 +989,28 @@ export default class Gpt2Layer extends BaseLayer {
         const totalDist = downTopY - startY;
         const durationDown = (Math.abs(totalDist) / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
         
-        // Matrix color animation
-        new TWEEN.Tween({ t: 0 })
-            .to({ t: 1 }, durationDown)
+        // Matrix colour + emissive animation for glow
+        const startIntensity = 0.1;
+        const peakIntensity = 0.8;
+        const finalIntensity = 0.3;
+        const downState = { t: 0, emissive: startIntensity };
+
+        new TWEEN.Tween(downState)
+            .to({ t: 1, emissive: peakIntensity }, durationDown * 0.6)
             .easing(TWEEN.Easing.Quadratic.InOut)
-            .onUpdate(o => {
-                const col = new THREE.Color(INACTIVE_COMPONENT_COLOR).lerp(orangeColor, o.t);
+            .onUpdate(() => {
+                const col = new THREE.Color(INACTIVE_COMPONENT_COLOR).lerp(orangeColor, downState.t);
                 this.mlpDown.setColor(col);
-                this.mlpDown.setEmissive(col, 0.5);
+                this.mlpDown.setEmissive(col, downState.emissive);
+            })
+            .onComplete(() => {
+                new TWEEN.Tween(downState)
+                    .to({ emissive: finalIntensity }, durationDown * 0.4)
+                    .easing(TWEEN.Easing.Quadratic.InOut)
+                    .onUpdate(() => {
+                        this.mlpDown.setEmissive(orangeColor, downState.emissive);
+                    })
+                    .start();
             })
             .start();
             
@@ -1041,7 +1068,7 @@ export default class Gpt2Layer extends BaseLayer {
             })
             .onComplete(() => {
                 this.mlpDown.setColor(orangeColor);
-                this.mlpDown.setEmissive(orangeColor, 0.5);
+                this.mlpDown.setEmissive(orangeColor, finalIntensity);
                 
                 // Ensure both MLP matrices are fully opaque at the end
                 this.mlpUp.setMaterialProperties({ opacity: 1.0, transparent: false });

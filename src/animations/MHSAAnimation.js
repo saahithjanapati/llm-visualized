@@ -1663,11 +1663,15 @@ export class MHSAAnimation {
         const startEmissiveIntensity = 0.1;
         const peakEmissiveIntensity = 0.8;
         const endEmissiveIntensity = 0.3;
-        
+
+        // Ensure matrix begins in its dark resting state
+        this.outputProjectionMatrix.setColor(startColor);
+        this.outputProjectionMatrix.setEmissive(startColor, startEmissiveIntensity);
+
         // First brighten the matrix
-        const state = { 
-            r: startColor.r, 
-            g: startColor.g, 
+        const state = {
+            r: startColor.r,
+            g: startColor.g,
             b: startColor.b,
             emissiveIntensity: startEmissiveIntensity
         };
