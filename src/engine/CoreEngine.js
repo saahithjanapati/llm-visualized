@@ -115,6 +115,10 @@ export class CoreEngine {
         this._onPointerMove = this._onPointerMove.bind(this);
         this.renderer.domElement.addEventListener('pointermove', this._onPointerMove);
 
+        // Bind pointer up handler for touch devices so taps trigger labels
+        this._onPointerUp = this._onPointerUp.bind(this);
+        this.renderer.domElement.addEventListener('pointerup', this._onPointerUp);
+
         // ────────────────────────────────────────────────────────────────────
         // Post-processing (Bloom for emissive flashes)
         // ────────────────────────────────────────────────────────────────────
@@ -233,6 +237,7 @@ export class CoreEngine {
         this.composer.passes.forEach(p => p.dispose && p.dispose());
         this.renderer.dispose();
         this.renderer.domElement.removeEventListener('pointermove', this._onPointerMove);
+        this.renderer.domElement.removeEventListener('pointerup', this._onPointerUp);
         if (this._hoverLabelDiv && this._hoverLabelDiv.parentElement) {
             this._hoverLabelDiv.parentElement.removeChild(this._hoverLabelDiv);
         }
@@ -250,6 +255,12 @@ export class CoreEngine {
 
     _onVisibility = () => {
         document.hidden ? this.pause() : this.resume();
+    };
+
+    _onPointerUp = (event) => {
+        if (event.pointerType === 'touch') {
+            this._onPointerMove(event);
+        }
     };
 
     _onPointerMove = (event) => {
