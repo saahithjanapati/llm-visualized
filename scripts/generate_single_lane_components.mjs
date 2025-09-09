@@ -260,6 +260,9 @@ exporter.parse(
         if (result instanceof ArrayBuffer) buffer = Buffer.from(result);
         else if (ArrayBuffer.isView(result)) buffer = Buffer.from(result.buffer);
         else buffer = Buffer.from(JSON.stringify(result), 'utf8');
+        // This GLB contains one precomputed slice of each heavy component. Demo
+        // pages that support dynamic lane counts load it and instance the slice
+        // across lanes at runtime.
         fs.writeFileSync('precomputed_components_slice.glb', buffer);
         console.log('✔  precomputed_components_slice.glb generated');
     },

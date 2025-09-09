@@ -34,7 +34,9 @@ Brief notes on the modules and assets used by `tests/twelve-layer-stack.html`.
 - `src/data/RandomActivationSource.js`: Factory used by `LayerPipeline` to seed per‑layer random vector data.
 
 - Assets referenced by the page:
-  - `precomputed_components.glb` (and optional `precomputed_components_slice.glb`): pre‑baked component geometries for faster startup.
+- `precomputed_components.glb`: pre‑baked component geometries for faster startup in the standard 12‑layer demo.
+- `precomputed_components_slice.glb`: contains a single lane slice of those components. Pages with dynamic lane counts load this
+  variant and instance the slice once per lane.
   - `rogland_clear_night_1k.exr`: HDRI environment map applied to both scenes.
   - `cool-fun.gif`: loading overlay GIF shown during startup.
 
