@@ -112,7 +112,7 @@ export const USE_GLB_MATERIALS = false;
  * When true, use THREE.MeshPhysicalMaterial instead of MeshStandardMaterial
  * across visualisations.
  */
-export const USE_PHYSICAL_MATERIALS = false;
+export const USE_PHYSICAL_MATERIALS = true;
 
 // ------------------------------------------------------------
 // Common depth spacing (Z-axis) — edit this to change spacing for
