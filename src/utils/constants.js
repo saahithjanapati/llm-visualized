@@ -207,7 +207,7 @@ export const LAYER_NORM_1_Y_POS = -10;
  */
 export const LN_PARAMS = {
     width: 150,
-    height: 100,
+    height: 150,
     depth: LANE_DEPENDENT_DEPTH,
     wallThickness: 1.0,
     numberOfHoles: NUM_VECTOR_LANES,
