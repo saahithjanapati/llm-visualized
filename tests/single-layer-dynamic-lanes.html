@@ -28,7 +28,10 @@
         import { MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR } from '../src/animations/LayerAnimationConstants.js';
         import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
 
-        // Ensure single-lane geometries are cached before we build anything
+        // Cache geometries for a single lane slice. The regular 12-layer demo
+        // uses `precomputed_components.glb`, but this prototype needs to vary
+        // the lane count at runtime, so we load the slice variant and instance
+        // that slice once per lane.
         await loadPrecomputedGeometries('../precomputed_components_slice.glb');
 
         const canvas    = document.getElementById('c');
