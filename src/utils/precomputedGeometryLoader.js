@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization.js';
 import { LayerNormalizationVisualization } from '../components/LayerNormalizationVisualization.js';
-import { USE_PRECOMPUTED_GEOMETRIES } from './constants.js';
+import { USE_PRECOMPUTED_GEOMETRIES, USE_GLB_MATERIALS } from './constants.js';
 
 /**
  * Load a GLB containing pre-exported component geometries and inject them
@@ -46,11 +46,12 @@ export function loadPrecomputedGeometries(url = '../precomputed_components.glb')
                 gltf.scene.traverse((obj) => {
                     if (obj.isMesh && obj.geometry && obj.userData && obj.userData.cacheKey) {
                         const cacheKey = obj.userData.cacheKey;
+                        const material = USE_GLB_MATERIALS ? obj.material : null;
                         if (cacheKey.startsWith('WM|')) {
-                            WeightMatrixVisualization.registerPrecomputedGeometry(cacheKey.substring(3), obj.geometry);
+                            WeightMatrixVisualization.registerPrecomputedGeometry(cacheKey.substring(3), obj.geometry, material);
                             wmCount++;
                         } else if (cacheKey.startsWith('LN|')) {
-                            LayerNormalizationVisualization.registerPrecomputedGeometry(cacheKey.substring(3), obj.geometry);
+                            LayerNormalizationVisualization.registerPrecomputedGeometry(cacheKey.substring(3), obj.geometry, material);
                             lnCount++;
                         }
                     }
