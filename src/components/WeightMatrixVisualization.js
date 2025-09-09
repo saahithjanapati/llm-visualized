@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { CSG } from 'three-csg-ts'; // Import CSG
-import { QUALITY_PRESET } from '../utils/constants.js';
-import { NUM_VECTOR_LANES, VECTOR_DEPTH_SPACING } from '../utils/constants.js';
+import { QUALITY_PRESET, NUM_VECTOR_LANES, VECTOR_DEPTH_SPACING, USE_GLB_MATERIALS } from '../utils/constants.js';
 
 // ------------------------------------------------------------------
 // Geometry cache (module-level) – keyed by a stringified set of the main
@@ -13,6 +12,7 @@ const __geometryCache = new Map();
 // Separate caches for front & back cap geometries when using slice instancing
 const __capFrontCache = new Map();
 const __capBackCache  = new Map();
+const __materialCache = new Map();
 function getCacheKey(width, height, depth, topWidthFactor, cornerRadius, numberOfSlits, slitWidth, slitDepthFactor, slitBottomWidthFactor, slitTopWidthFactor) {
     return [width, height, depth, topWidthFactor, cornerRadius, numberOfSlits, slitWidth, slitDepthFactor, slitBottomWidthFactor, slitTopWidthFactor, QUALITY_PRESET].join('|');
 }
@@ -328,15 +328,20 @@ export class WeightMatrixVisualization {
         // them ever-so-slightly closer to the camera, eliminating the
         // z-fighting flicker that still appeared when zoomed far out.
 
-        const sideMaterial = new THREE.MeshStandardMaterial({
-            color: 0x0077ff, // Initial color (will be overridden by animation)
-            metalness: 0.1,
-            roughness: 0.7,
-            flatShading: false,
-            side: THREE.FrontSide,
-            transparent: true,
-            opacity: 0.8
-        });
+        let sideMaterial;
+        if (USE_GLB_MATERIALS && __materialCache.has(cacheKey)) {
+            sideMaterial = __materialCache.get(cacheKey).clone();
+        } else {
+            sideMaterial = new THREE.MeshStandardMaterial({
+                color: 0x0077ff, // Initial color (will be overridden by animation)
+                metalness: 0.1,
+                roughness: 0.7,
+                flatShading: false,
+                side: THREE.FrontSide,
+                transparent: true,
+                opacity: 0.8
+            });
+        }
 
         const capMaterial = sideMaterial.clone();
         capMaterial.polygonOffset = true;
@@ -460,15 +465,20 @@ export class WeightMatrixVisualization {
         // ----------------------------------------------------------
         // Material – clone defaults from standard path
         // ----------------------------------------------------------
-        const mat = new THREE.MeshStandardMaterial({
-            color: 0x0077ff,
-            metalness: 0.1,
-            roughness: 0.7,
-            flatShading: false,
-            side: THREE.DoubleSide,
-            transparent: true,
-            opacity: 0.8
-        });
+        let mat;
+        if (USE_GLB_MATERIALS && __materialCache.has(sliceKey)) {
+            mat = __materialCache.get(sliceKey).clone();
+        } else {
+            mat = new THREE.MeshStandardMaterial({
+                color: 0x0077ff,
+                metalness: 0.1,
+                roughness: 0.7,
+                flatShading: false,
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.8
+            });
+        }
 
         // ----------------------------------------------------------
         // Build InstancedMesh for side walls across all lanes
@@ -657,10 +667,13 @@ export class WeightMatrixVisualization {
      * @param {string} cacheKey – The key returned by the internal getCacheKey(..) helper.
      * @param {THREE.BufferGeometry} geometry – A **non-indexed** BufferGeometry to reuse.
      */
-    static registerPrecomputedGeometry(cacheKey, geometry) {
+    static registerPrecomputedGeometry(cacheKey, geometry, material = null) {
         if (!cacheKey || !geometry) return;
         if (!__geometryCache.has(cacheKey)) {
             __geometryCache.set(cacheKey, geometry);
+        }
+        if (material && !__materialCache.has(cacheKey)) {
+            __materialCache.set(cacheKey, material);
         }
     }
 }

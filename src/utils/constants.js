@@ -101,6 +101,13 @@ export const PRISM_HEIGHT_SCALE_FACTOR = 0.75; // Scales normalized data to pris
  */
 export const USE_PRECOMPUTED_GEOMETRIES = true;
 
+/**
+ * When true, materials embedded in precomputed GLB files are applied
+ * to components. When false (default), materials in the GLB are
+ * ignored and constructed in code instead.
+ */
+export const USE_GLB_MATERIALS = false;
+
 // ------------------------------------------------------------
 // Common depth spacing (Z-axis) — edit this to change spacing for
 // vectors/components across the entire scene.
