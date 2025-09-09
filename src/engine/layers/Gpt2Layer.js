@@ -1419,7 +1419,10 @@ export default class Gpt2Layer extends BaseLayer {
             try {
                 // Start at the TOP of the bottom positional embedding, horizontally to the right
                 const residualTopY = (LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2 + EMBEDDING_BOTTOM_TOP_ALIGN_OFFSET_FROM_LN1_BOTTOM) + EMBEDDING_BOTTOM_Y_ADJUST;
-                const posStartY = residualTopY; // aligned tops
+                // The positional embedding matrix is shorter than the vocab matrix.  Drop the
+                // starting Y so the trail originates from the actual top of the positional
+                // matrix rather than the top of the taller vocab matrix.
+                const posStartY = residualTopY - (EMBEDDING_MATRIX_PARAMS_VOCAB.height - EMBEDDING_MATRIX_PARAMS_POSITION.height);
                 const posStartX = (EMBEDDING_MATRIX_PARAMS_VOCAB.width / 2)
                                 + (EMBEDDING_MATRIX_PARAMS_POSITION.width / 2)
                                 + EMBEDDING_BOTTOM_PAIR_GAP_X
