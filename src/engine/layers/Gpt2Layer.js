@@ -614,14 +614,22 @@ export default class Gpt2Layer extends BaseLayer {
                         lane.normStarted = true;
                     }
                     // -----------------------------------------------------------------
-                    if (dupVec.group.position.y >= lane.ln1MidY - 0.01) {
+                    if (
+                        !lane.multStarted &&
+                        lane.normStarted &&
+                        !lane.normAnim.isAnimating &&
+                        dupVec.group.position.y >= lane.ln1MidY - 0.01
+                    ) {
                         lane.multStarted = true;
                         if (lane.multTarget) {
                             lane.multTarget.group.visible = true;
                             simplePrismMultiply(dupVec, lane.multTarget, () => {
                                 dupVec.group.visible = false;
                                 lane.multTarget.group.visible = false;
-                                const res = new VectorVisualizationInstancedPrism(lane.multTarget.rawData.slice(), lane.multTarget.group.position.clone());
+                                const res = new VectorVisualizationInstancedPrism(
+                                    lane.multTarget.rawData.slice(),
+                                    lane.multTarget.group.position.clone()
+                                );
                                 // Trail for the result vector that will travel to MHSA
                                 const resTrail = new StraightLineTrail(this.root, 0xffffff, 1);
                                 resTrail.start(res.group.position);
@@ -773,7 +781,12 @@ export default class Gpt2Layer extends BaseLayer {
                     // ----------------------------------------------------------------
                     
                     // Trigger multiplication at center of LN2
-                    if (!lane.multDoneLN2 && mv.group.position.y >= midY_ln2_abs) {
+                    if (
+                        !lane.multDoneLN2 &&
+                        lane.normStartedLN2 &&
+                        !lane.normAnimationLN2.isAnimating &&
+                        mv.group.position.y >= midY_ln2_abs
+                    ) {
                         lane.multDoneLN2 = true;
                         if (lane.multTargetLN2) {
                             simplePrismMultiply(mv, lane.multTargetLN2, () => {
@@ -781,10 +794,13 @@ export default class Gpt2Layer extends BaseLayer {
                                 if (lane.multTargetLN2 && lane.multTargetLN2.group) {
                                     lane.multTargetLN2.group.visible = false;
                                 }
-                                
+
                                 // Create result vector
                                 const sourceRaw = lane.multTargetLN2 ? lane.multTargetLN2.rawData.slice() : mv.rawData.slice();
-                                const sourcePos = lane.multTargetLN2 && lane.multTargetLN2.group ? lane.multTargetLN2.group.position.clone() : mv.group.position.clone();
+                                const sourcePos =
+                                    lane.multTargetLN2 && lane.multTargetLN2.group
+                                        ? lane.multTargetLN2.group.position.clone()
+                                        : mv.group.position.clone();
                                 const resVec = new VectorVisualizationInstancedPrism(sourceRaw, sourcePos);
                                 this.root.add(resVec.group);
                                 // ---- Trail for LN2 result vector ----
@@ -793,18 +809,17 @@ export default class Gpt2Layer extends BaseLayer {
                                 resVec.userData = resVec.userData || {};
                                 resVec.userData.trail = resTrail;
                                 lane.resultVecLN2 = resVec;
-                                
+
                                 // Rise to MLP
                                 const destY = this.mlpUp.group.position.y - MLP_MATRIX_PARAMS_UP.height / 2 - 10;
                                 const dist = destY - resVec.group.position.y;
                                 const dur = (dist / (ANIM_RISE_SPEED_INSIDE_LN * speedMult)) * 1000;
-                                
+
                                 if (typeof TWEEN !== 'undefined') {
                                     new TWEEN.Tween(resVec.group.position)
                                         .to({ y: destY }, dur)
                                         .easing(TWEEN.Easing.Linear.None)
-                                        .onUpdate(() => {
-                                        })
+                                        .onUpdate(() => {})
                                         .onComplete(() => {
                                             lane.ln2Phase = 'mlpReady';
                                         })
