@@ -1,65 +1,246 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LLM Visualized - Select Page</title>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Test – 12-Layer GPT-2 Stack</title>
     <style>
-        body {
-            font-family: sans-serif;
-            padding: 2em;
-            background-color: #1a1a1a;
-            color: #e0e0e0;
-            line-height: 1.6;
+        body { margin: 0; overflow: hidden; background-color: #000; }
+        canvas { display: block; }
+
+        /* Settings button (top-right) */
+        #settingsBtn {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            z-index: 6; /* above status overlay (z=5) */
+            appearance: none;
+            -webkit-appearance: none;
+            border: 1px solid rgba(255,255,255,0.18);
+            background: rgba(30,30,30,0.55);
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+            color: #fff;
+            border-radius: 10px;
+            padding: 8px 10px;
+            line-height: 1;
+            cursor: pointer;
         }
-        h1 {
-            color: #ffffff;
-            border-bottom: 1px solid #444;
-            padding-bottom: 0.5em;
+        #settingsBtn:hover { background: rgba(40,40,40,0.65); }
+
+        /* Fullscreen blurred overlay */
+        #settingsOverlay {
+            position: fixed;
+            inset: 0;
+            display: none; /* toggled to flex when open */
+            align-items: center;
+            justify-content: center;
+            background: rgba(0,0,0,0.45);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            z-index: 10; /* above everything */
         }
-        ul {
-            list-style: none;
-            padding: 0;
+
+        /* Modal panel */
+        .settings-modal {
+            width: min(92vw, 420px);
+            background: rgba(20,20,24,0.85);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 16px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.45);
+            color: #fff;
+            font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+            overflow: hidden;
         }
-        li {
-            margin: 0.75em 0;
+
+        .settings-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 16px;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
         }
-        a {
-            text-decoration: none;
-            color: #58a6ff;
-            font-size: 1.1em;
+        .settings-title { font-size: 16px; font-weight: 600; }
+        #settingsClose {
+            appearance: none;
+            -webkit-appearance: none;
+            border: none;
+            background: transparent;
+            color: #bbb;
+            font-size: 20px;
+            line-height: 1;
+            cursor: pointer;
+            padding: 6px;
+            border-radius: 8px;
         }
-        a:hover {
-            text-decoration: underline;
-            color: #80bfff;
+        #settingsClose:hover { background: rgba(255,255,255,0.07); color: #fff; }
+
+        .settings-content { padding: 14px 16px 18px; }
+        .settings-section { margin-bottom: 14px; }
+        .settings-section:last-child { margin-bottom: 0; }
+        .section-label { display: block; margin-bottom: 8px; color: #cfd3dc; font-size: 13px; letter-spacing: .2px; }
+
+        /* Speed radio group */
+        .speed-group { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+        .speed-option {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 10px 12px;
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 12px;
+            background: rgba(255,255,255,0.04);
+            color: #e7e9ee;
+            cursor: pointer;
+            user-select: none;
+            transition: background .15s ease, border-color .15s ease;
+            text-align: center;
+            font-size: 13px;
+        }
+        .speed-option:hover { background: rgba(255,255,255,0.08); }
+        .speed-option input { position: absolute; opacity: 0; pointer-events: none; }
+        .speed-option[data-checked="true"] { border-color: rgba(122,202,255,0.8); background: rgba(56,132,255,0.18); }
+
+        /* Simple toggle row */
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 12px;
+            background: rgba(255,255,255,0.04);
+            color: #e7e9ee;
+            user-select: none;
+        }
+        .toggle-row input { width: 18px; height: 18px; }
+        /* Equations panel (under status overlay) */
+        #equationsPanel {
+            position: fixed;
+            top: 110px; /* below the status overlay */
+            right: 10px;
+            z-index: 5;
+            max-width: min(92vw, 520px);
+            max-height: 46vh;
+            overflow: auto;
+            -webkit-overflow-scrolling: touch;
+            padding: 10px 12px;
+            color: #fff;
+            background: rgba(20,20,20,0.35);
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+            border-radius: 8px;
+            pointer-events: auto; /* allow scroll on small screens */
+            display: none; /* toggled on when enabled */
+        }
+        #equationsPanel .eq-title {
+            font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+            font-size: 12px;
+            color: #cfd3dc;
+            margin-bottom: 6px;
+            letter-spacing: .2px;
+        }
+        #equationsPanel .eq-body {
+            font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+            font-size: 16px;
+            line-height: 1.35;
+        }
+        /* KaTeX tweaks for dark bg */
+        .katex { color: #fff; }
+        .katex-display { margin: 0; }
+
+        /* Responsive adjustments */
+        @media (max-width: 900px) {
+            #equationsPanel { max-width: calc(100vw - 24px); right: 12px; }
+        }
+        @media (max-width: 600px) {
+            #equationsPanel {
+                left: 8px;
+                right: 8px;
+                top: 100px;
+                max-width: calc(100vw - 16px);
+                max-height: 40vh;
+                padding: 8px 10px;
+            }
+            #equationsPanel .eq-body { font-size: 14px; }
+        }
+        @media (max-height: 560px) {
+            #equationsPanel { max-height: 36vh; }
         }
     </style>
+    <!-- KaTeX for equation rendering (fallbacks to plain text if blocked) -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
 </head>
 <body>
-    <h1>Select a Page</h1>
-    <ul>
-        <li><a href="/app.html">Main Application</a></li>
-                <li><a href="tests/can-machines-think-test.html">Test: Can Machines Think Test</a></li>
-        <li><a href="tests/embedding_mlp_test.html">Test: Embedding Mlp Test</a></li>
-        <li><a href="tests/gpt-model-test.html">Test: Gpt Model Test</a></li>
-        <li><a href="tests/layer-animation-test.html">Test: Layer Animation Test</a></li>
-        <li><a href="tests/mha_visualization_test.html">Test: Mha Visualization Test</a></li>
-        <li><a href="tests/mhsa_heads_only_test.html">Test: Mhsa Heads Only Test</a></li>
-        <li><a href="tests/mlp_weight_matrix_mover.html">Test: Mlp Weight Matrix Mover</a></li>
-        <li><a href="tests/single-layer-dynamic-lanes.html">Test: Single Layer Dynamic Lanes</a></li>
-        <li><a href="tests/test_layer_norm.html">Test: Test Layer Norm</a></li>
-        <li><a href="tests/test_mhsa_pass_through.html">Test: Test Mhsa Pass Through</a></li>
-        <li><a href="tests/test_prism_multiplication_animation.html">Test: Test Prism Multiplication Animation</a></li>
-        <li><a href="tests/test_prism_row_visualization.html">Test: Test Prism Row Visualization</a></li>
-        <li><a href="tests/test_vector32_add_anim.html">Test: Test Vector32 Add Anim</a></li>
-        <li><a href="tests/test_vector_grouped_32.html">Test: Test Vector Grouped 32</a></li>
-        <li><a href="tests/test_vector_instanced_prism.html">Test: Test Vector Instanced Prism</a></li>
-        <li><a href="tests/test_vector_instanced_prism_add_anim.html">Test: Test Vector Instanced Prism Add Anim</a></li>
-        <li><a href="tests/test_vector_instanced_prism_norm_anim.html">Test: Test Vector Instanced Prism Norm Anim</a></li>
-        <li><a href="tests/test_weight_matrix_2.html">Test: Test Weight Matrix 2</a></li>
-        <li><a href="tests/twelve-layer-dynamic-lanes-dynamic.html">Test: Twelve Layer Dynamic Lanes Dynamic</a></li>
-        <li><a href="tests/twelve-layer-stack.html">Test: Twelve Layer Stack</a></li>
-        <li><a href="tests/twelve-layer-static.html">Test: Twelve Layer Static</a></li>
-    </ul>
+    <!-- Loading GIF overlay -->
+    <img id="loadingGif" src="cool-fun.gif" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:4;max-width:30%;height:auto;" />
+    <!-- Status overlay (top-right) -->
+    <div id="statusOverlay" style="position:fixed;top:56px;right:10px;padding:8px 12px;font-family:monospace;font-size:14px;color:#fff;background:rgba(20,20,20,0.35);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);border-radius:8px;pointer-events:none;z-index:5;white-space:pre;">Layer 1 / 12\nStage: Loading</div>
+    <!-- Settings button (top-right) -->
+    <button id="settingsBtn" aria-haspopup="dialog" aria-controls="settingsOverlay" title="Settings">⚙️</button>
+
+    <!-- Blurred modal overlay -->
+    <div id="settingsOverlay" aria-hidden="true">
+        <div class="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+            <div class="settings-header">
+                <div id="settingsTitle" class="settings-title">Settings</div>
+                <button id="settingsClose" aria-label="Close settings">×</button>
+            </div>
+            <div class="settings-content">
+                <div class="settings-section">
+                    <label class="section-label">Playback speed</label>
+                    <div class="speed-group" role="radiogroup" aria-label="Playback speed">
+                        <label class="speed-option" data-value="slow">
+                            <input type="radio" name="playbackSpeed" value="slow">
+                            Slow
+                        </label>
+                        <label class="speed-option" data-value="medium">
+                            <input type="radio" name="playbackSpeed" value="medium">
+                            Medium
+                        </label>
+                        <label class="speed-option" data-value="fast">
+                            <input type="radio" name="playbackSpeed" value="fast" checked>
+                            Fast
+                        </label>
+                    </div>
+                </div>
+                <div class="settings-section">
+                    <label class="section-label">Interaction</label>
+                    <label class="toggle-row">
+                        <input id="toggleRaycast" type="checkbox" checked>
+                        Enable hover labels (raycasting)
+                    </label>
+                </div>
+                <div class="settings-section">
+                    <label class="section-label">Display</label>
+                    <label class="toggle-row">
+                        <input id="toggleEquations" type="checkbox" checked>
+                        Show equations overlay
+                    </label>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Intro text animation canvas (on top) -->
+    <canvas id="introCanvas" style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:2;"></canvas>
+    <!-- GPT-2 tower canvas (below) -->
+    <canvas id="gptCanvas" style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:1;"></canvas>
+
+    <!-- Equations overlay (under status overlay) -->
+    <div id="equationsPanel" aria-live="polite">
+        <div class="eq-title" id="equationsTitle">Equations</div>
+        <div class="eq-body" id="equationsBody"></div>
+    </div>
+
+    <!-- Global TWEEN.js for animations -->
+    <script src="https://unpkg.com/@tweenjs/tween.js@23.1.1/dist/tween.umd.js"></script>
+    <!-- Stats.js for FPS / frame time monitoring -->
+    <script src="https://cdn.jsdelivr.net/npm/stats.js@0.17.0/build/stats.min.js"></script>
+
+    <script type="module" src="tests/twelve-layer-stack.js"></script>
 </body>
 </html> 

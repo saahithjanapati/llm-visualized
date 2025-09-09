@@ -36,7 +36,8 @@ function getViteInputs() {
 
 const testsDir = path.join(__dirname, 'tests');
 const templatePath = path.join(__dirname, 'index.template.html');
-const outputPath = path.join(__dirname, 'index.html');
+// Write the generated index into the tests directory so /tests loads the test selector
+const outputPath = path.join(__dirname, 'tests', 'index.html');
 const placeholder = '<!-- TEST_LINKS_PLACEHOLDER -->';
 
 console.log(`Scanning directory: ${testsDir}`);
@@ -67,6 +68,7 @@ try {
     const testLinks = files
         .filter(file => {
             if (!file.endsWith('.html')) return false; // Only include HTML files
+            if (file === 'index.html') return false; // Exclude the generated index itself
             if (allowedTestFiles) { // If vite config was parsed successfully
                 return allowedTestFiles.includes(file);
             }
@@ -74,9 +76,9 @@ try {
         })
         .map(file => {
             const displayName = generateDisplayName(file);
-            const filePath = path.join('tests', file);
+            const filePath = file; // Links are relative within /tests
             // Ensure forward slashes for web paths, even on Windows
-            const webPath = filePath.replace(/\\/g, '/'); 
+            const webPath = filePath.replace(/\\/g, '/');
             return `        <li><a href="${webPath}">${displayName}</a></li>`;
         })
         .join('\n');
