@@ -26,8 +26,9 @@ export default defineConfig({
     // Remove rollupOptions.input, Vite handles HTML entry points automatically
     rollupOptions: {
         input: {
-            main: resolve(__dirname, 'index.html'),
-            app: resolve(__dirname, 'app.html'),
+              main: resolve(__dirname, 'index.html'),
+              testsIndex: resolve(__dirname, 'tests/index.html'),
+              app: resolve(__dirname, 'app.html'),
             layer: resolve(__dirname, 'tests/layer-animation-test.html'),
             gptModel: resolve(__dirname, 'tests/gpt-model-test.html'),
             vectorInstancedPrism: resolve(__dirname, 'tests/test_vector_instanced_prism.html'),
