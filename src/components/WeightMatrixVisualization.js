@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { TextureLoader } from 'three';
 import { CSG } from 'three-csg-ts'; // Import CSG
 import { QUALITY_PRESET, NUM_VECTOR_LANES, VECTOR_DEPTH_SPACING, USE_GLB_MATERIALS } from '../utils/constants.js';
 
@@ -13,6 +14,15 @@ const __geometryCache = new Map();
 const __capFrontCache = new Map();
 const __capBackCache  = new Map();
 const __materialCache = new Map();
+const __textureCache = new Map();
+
+function loadTexture(path) {
+    if (!__textureCache.has(path)) {
+        const tex = new TextureLoader().load(path);
+        __textureCache.set(path, tex);
+    }
+    return __textureCache.get(path);
+}
 function getCacheKey(width, height, depth, topWidthFactor, cornerRadius, numberOfSlits, slitWidth, slitDepthFactor, slitBottomWidthFactor, slitTopWidthFactor) {
     return [width, height, depth, topWidthFactor, cornerRadius, numberOfSlits, slitWidth, slitDepthFactor, slitBottomWidthFactor, slitTopWidthFactor, QUALITY_PRESET].join('|');
 }
@@ -332,10 +342,18 @@ export class WeightMatrixVisualization {
         if (USE_GLB_MATERIALS && __materialCache.has(cacheKey)) {
             sideMaterial = __materialCache.get(cacheKey).clone();
         } else {
-            sideMaterial = new THREE.MeshStandardMaterial({
+            const diffuseTex = loadTexture('/assets/textures/brushed-metal.jpg');
+            const normalTex  = loadTexture('/assets/textures/brushed-metal-normal.jpg');
+            sideMaterial = new THREE.MeshPhysicalMaterial({
                 color: 0x0077ff, // Initial color (will be overridden by animation)
-                metalness: 0.1,
-                roughness: 0.7,
+                map: diffuseTex,
+                normalMap: normalTex,
+                metalness: 0.2,
+                roughness: 0.6,
+                clearcoat: 0.1,
+                clearcoatRoughness: 0.9,
+                envMap: globalThis.scene?.environment || null,
+                envMapIntensity: 0.3,
                 flatShading: false,
                 side: THREE.FrontSide,
                 transparent: true,
@@ -469,10 +487,18 @@ export class WeightMatrixVisualization {
         if (USE_GLB_MATERIALS && __materialCache.has(sliceKey)) {
             mat = __materialCache.get(sliceKey).clone();
         } else {
-            mat = new THREE.MeshStandardMaterial({
+            const diffuseTex = loadTexture('/assets/textures/brushed-metal.jpg');
+            const normalTex  = loadTexture('/assets/textures/brushed-metal-normal.jpg');
+            mat = new THREE.MeshPhysicalMaterial({
                 color: 0x0077ff,
-                metalness: 0.1,
-                roughness: 0.7,
+                map: diffuseTex,
+                normalMap: normalTex,
+                metalness: 0.2,
+                roughness: 0.6,
+                clearcoat: 0.1,
+                clearcoatRoughness: 0.9,
+                envMap: globalThis.scene?.environment || null,
+                envMapIntensity: 0.3,
                 flatShading: false,
                 side: THREE.DoubleSide,
                 transparent: true,
@@ -627,10 +653,13 @@ export class WeightMatrixVisualization {
     setMaterialProperties(props) {
         const applyProps = (mat) => {
             if (mat) {
-                 if (Array.isArray(mat)) {
+                if (Array.isArray(mat)) {
                     mat.forEach(m => {
                         if (props.metalness !== undefined) m.metalness = props.metalness;
                         if (props.roughness !== undefined) m.roughness = props.roughness;
+                        if (props.envMapIntensity !== undefined) m.envMapIntensity = props.envMapIntensity;
+                        if (props.clearcoat !== undefined) m.clearcoat = props.clearcoat;
+                        if (props.clearcoatRoughness !== undefined) m.clearcoatRoughness = props.clearcoatRoughness;
                         if (props.emissive !== undefined) m.emissive.set(props.emissive);
                         if (props.emissiveIntensity !== undefined) m.emissiveIntensity = props.emissiveIntensity;
                         if (props.opacity !== undefined) m.opacity = props.opacity;
@@ -639,6 +668,9 @@ export class WeightMatrixVisualization {
                 } else {
                     if (props.metalness !== undefined) mat.metalness = props.metalness;
                     if (props.roughness !== undefined) mat.roughness = props.roughness;
+                    if (props.envMapIntensity !== undefined) mat.envMapIntensity = props.envMapIntensity;
+                    if (props.clearcoat !== undefined) mat.clearcoat = props.clearcoat;
+                    if (props.clearcoatRoughness !== undefined) mat.clearcoatRoughness = props.clearcoatRoughness;
                     if (props.emissive !== undefined) mat.emissive.set(props.emissive);
                     if (props.emissiveIntensity !== undefined) mat.emissiveIntensity = props.emissiveIntensity;
                     if (props.opacity !== undefined) mat.opacity = props.opacity;
