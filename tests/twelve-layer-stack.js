@@ -23,7 +23,8 @@ import {
     TOP_EMBED_VOCAB_X_OFFSET,
     TOP_EMBED_Y_GAP_ABOVE_TOWER,
     TOP_EMBED_Y_ADJUST,
-    TOP_LN_TO_TOP_EMBED_GAP
+    TOP_LN_TO_TOP_EMBED_GAP,
+    USE_PHYSICAL_MATERIALS
 } from '../src/utils/constants.js';
 import { WeightMatrixVisualization } from '../src/components/WeightMatrixVisualization.js';
 import { LayerNormalizationVisualization } from '../src/components/LayerNormalizationVisualization.js';
@@ -609,6 +610,8 @@ function checkTopEmbeddingActivation() {
     // Also check if we should activate the top embedding color
     try { checkTopEmbeddingActivation(); } catch (_) {}
 }
+
+try { applyPhysicalMaterial(USE_PHYSICAL_MATERIALS); } catch (_) {}
 setInterval(updateStatus, 250);
  // ─────────────────────────────────────────────────────────────────--
 // Settings modal behavior (UI only; not wired to animation)
@@ -693,12 +696,6 @@ eqToggle?.addEventListener('change', () => {
     if (equationsPanel) equationsPanel.style.display = showEquations ? 'block' : 'none';
     // Force re-render next tick
     __lastEqKey = '';
-});
-
-// Physical material toggle wiring
-const physToggle = document.getElementById('togglePhysical');
-physToggle?.addEventListener('change', () => {
-    applyPhysicalMaterial(!!physToggle.checked);
 });
 
 function applyPhysicalMaterial(enabled) {

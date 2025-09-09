@@ -108,6 +108,12 @@ export const USE_PRECOMPUTED_GEOMETRIES = true;
  */
 export const USE_GLB_MATERIALS = false;
 
+/**
+ * When true, use THREE.MeshPhysicalMaterial instead of MeshStandardMaterial
+ * across visualisations.
+ */
+export const USE_PHYSICAL_MATERIALS = false;
+
 // ------------------------------------------------------------
 // Common depth spacing (Z-axis) — edit this to change spacing for
 // vectors/components across the entire scene.
