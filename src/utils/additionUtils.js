@@ -115,27 +115,10 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane) {
                         // Skip if the prism is effectively hidden far below
                         const hideThreshold = HIDE_INSTANCE_Y_OFFSET / 10;
                         if (wPos.y >= hideThreshold) {
-                            // Avoid over-brightening exactly at the merge point
-                            try {
-                                const tgt = lane && lane.stopRiseTarget;
-                                if (tgt) {
-                                    let targetYWorld = null;
-                                    try {
-                                        const tmp = new THREE.Vector3();
-                                        tgt.getWorldPosition(tmp);
-                                        targetYWorld = tmp.y;
-                                    } catch (_) {
-                                        if (tgt.position) targetYWorld = tgt.position.y; // fallback to local if world fails
-                                    }
-                                    if (targetYWorld != null) {
-                                        const gap = (typeof ORIGINAL_TO_PROCESSED_GAP !== 'undefined' ? ORIGINAL_TO_PROCESSED_GAP : 60);
-                                        const muteBand = Math.max(20, gap * 0.5);
-                                        if (wPos.y >= targetYWorld - muteBand) return;
-                                    }
-                                }
-                            } catch (_) { /* defensive */ }
-
-                            // Use the lane's world-space residual trail if present
+                            // Update the residual trail continuously as the prism rises all the
+                            // way to the target vector. Previously, a muted band near the
+                            // merge point prevented trailing up to the very top, leaving a
+                            // visible gap.
                             const residualTrail = (lane && lane.originalTrail)
                                 || (sourceVec && sourceVec.userData && sourceVec.userData.trail)
                                 || null;
