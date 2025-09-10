@@ -140,12 +140,22 @@ export class LayerPipeline {
         const lastLayer = this._layers[this._numLayers - 1];
         if (!lastLayer || !Array.isArray(lastLayer.lanes) || !lastLayer.lanes.length) return;
 
-        // Compute the target Y (in the LAST LAYER'S LOCAL SPACE) corresponding to
-        // the entrance of the flipped top vocab embedding matrix.  Using LOCAL
-        // coordinates avoids mixing world-space values with the lane vectors'
-        // local positions.
         if (!lastLayer.mlpDown || !lastLayer.mlpDown.group) return;
-        // Prefer using the ACTUAL top embedding object in the scene if present
+
+        const targetYLocal = this._calculateTopEmbeddingTargetY(lastLayer);
+
+        const lnInfo = this._findTopLayerNorm(lastLayer);
+
+        this._animateResidualVectors(lastLayer, targetYLocal, lnInfo);
+    }
+
+    /**
+     * Determine the target local Y position for residual vectors entering the
+     * top vocabulary embedding and update MHSA animation boundaries.
+     * @param {Gpt2Layer} lastLayer
+     * @returns {number} Local-space Y coordinate where vectors should stop.
+     */
+    _calculateTopEmbeddingTargetY(lastLayer) {
         let targetYLocal = null;
         try {
             const scene = this._engine && this._engine.scene;
@@ -169,13 +179,11 @@ export class LayerPipeline {
         } catch (_) { /* fallback to formula below */ }
 
         if (targetYLocal == null) {
-            // Fallback: compute via relative geometry positions (local space)
             const towerTopYLocal = lastLayer.mlpDown.group.position.y + MLP_MATRIX_PARAMS_DOWN.height / 2;
             const topVocabCenterYLocal = towerTopYLocal + TOP_EMBED_Y_GAP_ABOVE_TOWER + EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2 + TOP_EMBED_Y_ADJUST;
             targetYLocal = topVocabCenterYLocal - EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2 + 5;
         }
-        // Clamp MHSA's continuous residual rise target so vectors stop exactly at the
-        // entrance of the top embedding instead of drifting past it.
+
         try {
             if (lastLayer.mhsaAnimation) {
                 lastLayer.mhsaAnimation.finalOriginalY = targetYLocal;
@@ -185,7 +193,17 @@ export class LayerPipeline {
             lastLayer.__topEmbedStopYLocal = targetYLocal;
         } catch (_) { /* no-op */ }
 
-        // Locate the top LayerNorm, if present
+        return targetYLocal;
+    }
+
+    /**
+     * Locate the optional top LayerNorm in the scene and compute useful
+     * positional data for animation.
+     * @param {Gpt2Layer} lastLayer
+     * @returns {{lnTopGroup: THREE.Object3D, lnCenterY: number, lnBottomY: number}|null}
+     *          LayerNorm group and position info if found.
+     */
+    _findTopLayerNorm(lastLayer) {
         let lnTopGroup = null;
         try {
             const scene = this._engine && this._engine.scene;
@@ -198,25 +216,42 @@ export class LayerPipeline {
             }
         } catch (_) { /* optional */ }
 
-        // If a top LayerNorm exists, run a mini LayerNorm pipeline before entering the vocab embedding
-        if (lnTopGroup) {
-            const lnCenterWorld = new THREE.Vector3();
-            lnTopGroup.getWorldPosition(lnCenterWorld);
-            const lnCenterLocal = lnCenterWorld.clone();
-            lastLayer.root.worldToLocal(lnCenterLocal);
-            const lnCenterY = lnCenterLocal.y;
-            const lnBottomY = lnCenterY - LN_PARAMS.height / 2;
+        if (!lnTopGroup) return null;
 
-            const activateLnColor = () => {
-                const white = new THREE.Color(0xffffff);
-                lnTopGroup.traverse(obj => {
-                    if (obj.isMesh && obj.material) {
-                        const apply = mat => { mat.color.copy(white); mat.emissive.copy(white); mat.emissiveIntensity = 0.5; mat.transparent = false; mat.opacity = 1.0; };
-                        if (Array.isArray(obj.material)) obj.material.forEach(apply); else apply(obj.material);
-                    }
-                });
-            };
+        const lnCenterWorld = new THREE.Vector3();
+        lnTopGroup.getWorldPosition(lnCenterWorld);
+        const lnCenterLocal = lnCenterWorld.clone();
+        lastLayer.root.worldToLocal(lnCenterLocal);
+        const lnCenterY = lnCenterLocal.y;
+        const lnBottomY = lnCenterY - LN_PARAMS.height / 2;
 
+        return { lnTopGroup, lnCenterY, lnBottomY };
+    }
+
+    /**
+     * Apply the bright activated appearance to a LayerNorm group.
+     * @param {THREE.Object3D} lnTopGroup
+     */
+    _activateLayerNormColor(lnTopGroup) {
+        const white = new THREE.Color(0xffffff);
+        lnTopGroup.traverse(obj => {
+            if (obj.isMesh && obj.material) {
+                const apply = mat => { mat.color.copy(white); mat.emissive.copy(white); mat.emissiveIntensity = 0.5; mat.transparent = false; mat.opacity = 1.0; };
+                if (Array.isArray(obj.material)) obj.material.forEach(apply); else apply(obj.material);
+            }
+        });
+    }
+
+    /**
+     * Animate residual vectors toward the vocab embedding, optionally passing
+     * through the top LayerNorm pipeline when present.
+     * @param {Gpt2Layer} lastLayer
+     * @param {number} targetYLocal
+     * @param {{lnTopGroup: THREE.Object3D, lnCenterY: number, lnBottomY: number}|null} lnInfo
+     */
+    _animateResidualVectors(lastLayer, targetYLocal, lnInfo) {
+        if (lnInfo && lnInfo.lnTopGroup) {
+            const { lnTopGroup, lnCenterY, lnBottomY } = lnInfo;
             lastLayer.lanes.forEach(lane => {
                 const vec = lane && lane.originalVec;
                 if (!vec || !vec.group) return;
@@ -242,7 +277,7 @@ export class LayerPipeline {
                             lane.__topLnEntered = true;
                             multVec.group.visible = true;
                             addVec.group.visible = true;
-                            activateLnColor();
+                            this._activateLayerNormColor(lnTopGroup);
                         }
                     })
                     .onComplete(() => {
@@ -271,7 +306,6 @@ export class LayerPipeline {
             return;
         }
 
-        // Fallback: no top LayerNorm – simply rise into the embedding
         lastLayer.lanes.forEach(lane => {
             const vec = lane && lane.originalVec;
             if (!vec || !vec.group) return;
