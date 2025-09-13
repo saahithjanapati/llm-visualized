@@ -30,6 +30,7 @@ import { WeightMatrixVisualization } from '../src/components/WeightMatrixVisuali
 import { LayerNormalizationVisualization } from '../src/components/LayerNormalizationVisualization.js';
 import { MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR } from '../src/animations/LayerAnimationConstants.js';
 import { appState } from '../src/state/appState.js';
+import { getPreference, setPreference } from '../src/utils/preferences.js';
 
 // Optionally load pre-baked geometries; returns instantly if disabled
 await loadPrecomputedGeometries('../precomputed_components.glb');
@@ -451,18 +452,8 @@ const statusDiv = document.getElementById('statusOverlay');
 const equationsPanel = document.getElementById('equationsPanel');
 const equationsTitle = document.getElementById('equationsTitle');
 const equationsBody = document.getElementById('equationsBody');
- // Persisted user preference for showing equations
-const EQ_STORAGE_KEY = 'showEquations';
-function getShowEquationsPref() {
-    try {
-        const v = localStorage.getItem(EQ_STORAGE_KEY);
-        return v === null ? true : v === '1';
-    } catch (_) { return true; }
-}
-function setShowEquationsPref(val) {
-    try { localStorage.setItem(EQ_STORAGE_KEY, val ? '1' : '0'); } catch (_) {}
-}
- appState.showEquations = getShowEquationsPref();
+// Persisted user preference for showing equations
+appState.showEquations = getPreference('showEquations', true);
 if (equationsPanel) equationsPanel.style.display = appState.showEquations ? 'block' : 'none';
  // Equations mapping (LaTeX)
 const EQ = {
@@ -691,7 +682,7 @@ rayToggle?.addEventListener('change', () => {
 const eqToggle = document.getElementById('toggleEquations');
 eqToggle?.addEventListener('change', () => {
     appState.showEquations = !!eqToggle.checked;
-    setShowEquationsPref(appState.showEquations);
+    setPreference('showEquations', appState.showEquations);
     if (equationsPanel) equationsPanel.style.display = appState.showEquations ? 'block' : 'none';
     // Force re-render next tick
     appState.lastEqKey = '';
