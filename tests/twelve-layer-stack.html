@@ -11,9 +11,9 @@
 </head>
 <body>
     <!-- Loading GIF overlay -->
-    <img id="loadingGif" src="../cool-fun.gif" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:4;max-width:30%;height:auto;" />
+    <img id="loadingGif" class="loading-gif" src="../cool-fun.gif" />
     <!-- Status overlay (top-right) -->
-    <div id="statusOverlay" style="position:fixed;top:56px;right:10px;padding:8px 12px;font-family:monospace;font-size:14px;color:#fff;background:rgba(20,20,20,0.35);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);border-radius:8px;pointer-events:none;z-index:5;white-space:pre;">Layer 1 / 12\nStage: Loading</div>
+    <div id="statusOverlay" class="status-overlay">Layer 1 / 12\nStage: Loading</div>
     <!-- Settings button (top-right) -->
     <button id="settingsBtn" aria-haspopup="dialog" aria-controls="settingsOverlay" title="Settings">⚙️</button>
 
@@ -61,9 +61,9 @@
     </div>
 
     <!-- Intro text animation canvas (on top) -->
-    <canvas id="introCanvas" style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:2;"></canvas>
+    <canvas id="introCanvas" class="intro-canvas"></canvas>
     <!-- GPT-2 tower canvas (below) -->
-    <canvas id="gptCanvas" style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:1;"></canvas>
+    <canvas id="gptCanvas" class="gpt-canvas"></canvas>
 
     <!-- Equations overlay (under status overlay) -->
     <div id="equationsPanel" aria-live="polite">
