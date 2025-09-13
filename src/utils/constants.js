@@ -518,8 +518,8 @@ export const POS_VEC_HORIZONTAL_SPEED_MULT = 1.2;
 // ------------------------------------------------------------
 // Prism LayerNorm animation timings (centralised)
 // ------------------------------------------------------------
-export const PLN_UNIT_DELAY_MS = 3 * GROUPED_PRISM_SLOWDOWN;              // ms between activations
-export const PLN_UNIT_CYCLE_DURATION_MS = 200 * Math.sqrt(GROUPED_PRISM_SLOWDOWN); // ms per unit cycle
+export const PLN_UNIT_DELAY_MS = 2 * GROUPED_PRISM_SLOWDOWN;              // ms between activations
+export const PLN_UNIT_CYCLE_DURATION_MS = 150 * Math.sqrt(GROUPED_PRISM_SLOWDOWN); // ms per unit cycle
 
 // ------------------------------------------------------------
 // MLP specific micro-timings
