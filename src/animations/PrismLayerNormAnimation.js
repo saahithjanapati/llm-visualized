@@ -12,9 +12,9 @@ export class PrismLayerNormAnimation {
             // Scale delays and durations so total effect length is preserved
             unitDelay: PLN_UNIT_DELAY_MS,      // ms between activations
             unitDuration: PLN_UNIT_CYCLE_DURATION_MS, // ms per unit cycle
-            maxRiseHeight: 12,  // unchanged visual height
-            falloffPower: 1.4,   
-            minRiseHeight: 2,  
+            maxRiseHeight: 18,  // increased visual height for stronger rise
+            falloffPower: 1.4,
+            minRiseHeight: 2,
             ...config
         };
 
