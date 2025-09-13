@@ -48,7 +48,9 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane) {
             sourceVec.mesh.getMatrixAt(centreIndex, instMat);
             const centreWorld = new THREE.Vector3().setFromMatrixPosition(instMat).applyMatrix4(sourceVec.group.matrixWorld);
             lane.__residualMaxY = (typeof centreWorld.y === 'number') ? centreWorld.y - 0.001 : undefined;
-        } catch (_) { /* non-fatal */ }
+        } catch (err) {
+            console.warn('Failed to init residual trail:', err);
+        }
     } else {
         sourceVec.group.userData = sourceVec.group.userData || {};
         const svUD = sourceVec.group.userData;
@@ -130,7 +132,9 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane) {
                                 }
                             }
                         }
-                    } catch (_) { /* optional visual; never fatal */ }
+                    } catch (err) {
+                        console.warn('Residual trail update failed:', err);
+                    }
                 }
             })
             .onComplete(() => {

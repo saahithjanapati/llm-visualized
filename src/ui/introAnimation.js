@@ -11,12 +11,8 @@ export function initIntroAnimation(pipeline, gptCanvas) {
     const introCanvas = document.getElementById('introCanvas');
     const renderer = new THREE.WebGLRenderer({ canvas: introCanvas, antialias: true });
     renderer.shadowMap.enabled = false;
-    try {
-        const cap = (window && window.__RENDER_DPR_CAP) ? window.__RENDER_DPR_CAP : 2.0;
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, cap));
-    } catch (_) {
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2.0));
-    }
+    const cap = window?.__RENDER_DPR_CAP ?? 2.0;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, cap));
     renderer.setSize(window.innerWidth, window.innerHeight);
 
     const scene = new THREE.Scene();
@@ -37,18 +33,16 @@ export function initIntroAnimation(pipeline, gptCanvas) {
         if (appState.introCleaned) return;
         appState.introCleaned = true;
         appState.introActive = false;
-        try { cancelAnimationFrame(appState.introRaf); } catch (_) {}
-        try { controls && controls.dispose && controls.dispose(); } catch (_) {}
-        try { renderer && renderer.dispose && renderer.dispose(); } catch (_) {}
-        try {
-            scene.traverse((child) => {
-                if (child.geometry) child.geometry.dispose();
-                if (child.material) {
-                    if (Array.isArray(child.material)) child.material.forEach((m) => m && m.dispose && m.dispose());
-                    else if (child.material.dispose) child.material.dispose();
-                }
-            });
-        } catch (_) {}
+        if (appState.introRaf) cancelAnimationFrame(appState.introRaf);
+        controls?.dispose?.();
+        renderer?.dispose?.();
+        scene.traverse((child) => {
+            if (child.geometry) child.geometry.dispose();
+            if (child.material) {
+                if (Array.isArray(child.material)) child.material.forEach((m) => m && m.dispose && m.dispose());
+                else if (child.material.dispose) child.material.dispose();
+            }
+        });
     }
 
     const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
@@ -135,13 +129,13 @@ export function initIntroAnimation(pipeline, gptCanvas) {
         pipeline.engine.renderer.toneMapping = THREE.ACESFilmicToneMapping;
         pipeline.engine.renderer.toneMappingExposure = 1.0;
         introCanvas.style.display = 'none';
-        try { cleanupIntro(); } catch (_) {}
+        cleanupIntro();
         const gif = document.getElementById('loadingGif');
         if (gif) gif.style.display = 'none';
     }, undefined, (err) => {
         console.warn('HDRI failed to load:', err);
         introCanvas.style.display = 'none';
-        try { cleanupIntro(); } catch (_) {}
+        cleanupIntro();
         const gif = document.getElementById('loadingGif');
         if (gif) gif.style.display = 'none';
     });
@@ -167,10 +161,15 @@ export function initIntroAnimation(pipeline, gptCanvas) {
     if (!appState.skipIntro) {
         loopIntro();
     } else {
-        try { transitionToGPT(); } catch (_) {
-            try { const ic = document.getElementById('introCanvas'); if (ic) ic.style.display = 'none'; } catch (_) {}
+        try {
+            transitionToGPT();
+        } catch (err) {
+            console.error('Failed to transition to GPT:', err);
+            const ic = document.getElementById('introCanvas');
+            if (ic) ic.style.display = 'none';
         }
-        try { const gif = document.getElementById('loadingGif'); if (gif) gif.style.display = 'none'; } catch (_) {}
+        const gif = document.getElementById('loadingGif');
+        if (gif) gif.style.display = 'none';
     }
 
     function transitionToGPT() {
