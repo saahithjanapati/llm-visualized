@@ -25,7 +25,8 @@ export function initGPTModelVisualization(container) {
     // We need a fairly tall view – position far on Z and shift a bit up on Y so
     // that the user immediately sees the whole tower.
     const NUM_LAYERS    = 12;
-    const LAYER_HEIGHT  = 300; // increased per-layer vertical span (world units)
+    // Slightly more compact per-layer vertical span for a tighter stack
+    const LAYER_HEIGHT  = 300; // vertical span per layer (world units)
     const totalHeight   = NUM_LAYERS * LAYER_HEIGHT;
 
     const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 10000);

@@ -57,7 +57,8 @@ import { MHSAAnimation } from '../../animations/MHSAAnimation.js';
 import { startPrismAdditionAnimation } from '../../utils/additionUtils.js';
 
 
-const VERTICAL_SPACING = 1500; // matches LayerAnimation.js vertical extent
+// Slightly reduced spacing between stacked layers for a tighter layout.
+const VERTICAL_SPACING = 1600; // matches LayerAnimation.js vertical extent
 
 function simplePrismMultiply(srcVec, tgtVec, onComplete) {
     // instant product; flash white then call onComplete
