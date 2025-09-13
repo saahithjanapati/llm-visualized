@@ -10,35 +10,33 @@ export function initSettingsModal(pipeline) {
     const equationsPanel = document.getElementById('equationsPanel');
 
     function applySpeed(value) {
-        try { setPlaybackSpeed(value); } catch (_) {}
+        setPlaybackSpeed(value);
     }
 
     function openSettings() {
         settingsOverlay.style.display = 'flex';
         settingsOverlay.setAttribute('aria-hidden', 'false');
         document.body.style.overflow = 'hidden';
-        try { pipeline?.engine?.pause?.(); } catch (_) {}
+        pipeline?.engine?.pause?.();
         appState.modalPaused = true;
-        try {
-            const checked = settingsOverlay.querySelector('input[name="playbackSpeed"]:checked');
-            if (checked) {
-                const selectedLabel = checked.closest('.speed-option');
-                updateSpeedChecked(selectedLabel?.dataset.value || 'medium');
-            }
-            const rc = document.getElementById('toggleRaycast');
-            if (rc && pipeline?.engine?.isRaycastingEnabled) {
-                rc.checked = !!pipeline.engine.isRaycastingEnabled();
-            }
-            const eq = document.getElementById('toggleEquations');
-            if (eq) eq.checked = !!appState.showEquations;
-        } catch (_) {}
+        const checked = settingsOverlay.querySelector('input[name="playbackSpeed"]:checked');
+        if (checked) {
+            const selectedLabel = checked.closest('.speed-option');
+            updateSpeedChecked(selectedLabel?.dataset.value || 'medium');
+        }
+        const rc = document.getElementById('toggleRaycast');
+        if (rc && pipeline?.engine?.isRaycastingEnabled) {
+            rc.checked = !!pipeline.engine.isRaycastingEnabled();
+        }
+        const eq = document.getElementById('toggleEquations');
+        if (eq) eq.checked = !!appState.showEquations;
     }
 
     function closeSettings() {
         settingsOverlay.style.display = 'none';
         settingsOverlay.setAttribute('aria-hidden', 'true');
         document.body.style.overflow = '';
-        try { pipeline?.engine?.resume?.(); } catch (_) {}
+        pipeline?.engine?.resume?.();
         appState.modalPaused = false;
     }
 
@@ -75,7 +73,7 @@ export function initSettingsModal(pipeline) {
 
     const rayToggle = document.getElementById('toggleRaycast');
     rayToggle?.addEventListener('change', () => {
-        try { pipeline?.engine?.setRaycastingEnabled?.(!!rayToggle.checked); } catch (_) {}
+        pipeline?.engine?.setRaycastingEnabled?.(!!rayToggle.checked);
     });
 
     const eqToggle = document.getElementById('toggleEquations');

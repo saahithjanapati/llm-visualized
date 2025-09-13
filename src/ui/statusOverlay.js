@@ -30,14 +30,15 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         if (!equationsPanel || !equationsBody) return;
         if (!appState.showEquations) return;
         equationsTitle.textContent = title || 'Equations';
-        try {
-            if (window.katex && window.katex.render) {
+        if (window.katex?.render) {
+            try {
                 equationsBody.innerHTML = '';
                 window.katex.render(tex, equationsBody, { throwOnError: false, displayMode: true });
-            } else {
+            } catch (err) {
+                console.error('KaTeX render failed:', err);
                 equationsBody.textContent = tex;
             }
-        } catch (_) {
+        } else {
             equationsBody.textContent = tex;
         }
     }
@@ -102,24 +103,22 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     }
 
     function checkTopEmbeddingActivation() {
-        try {
-            if (appState.topEmbedActivated) return;
-            const lastLayer = pipeline._layers[NUM_LAYERS - 1];
-            if (!lastLayer || !appState.vocabTopRef) return;
-            const stopY = lastLayer.__topEmbedStopYLocal;
-            if (typeof stopY !== 'number') return;
-            const lanes = Array.isArray(lastLayer.lanes) ? lastLayer.lanes : [];
-            for (const lane of lanes) {
-                const v = lane && lane.originalVec;
-                if (v && v.group && v.group.position.y >= stopY - 0.01) {
-                    const headBlue = new THREE.Color(MHA_FINAL_Q_COLOR);
-                    appState.vocabTopRef.setColor(headBlue);
-                    appState.vocabTopRef.setMaterialProperties({ emissiveIntensity: 0.05 });
-                    appState.topEmbedActivated = true;
-                    break;
-                }
+        if (appState.topEmbedActivated) return;
+        const lastLayer = pipeline._layers[NUM_LAYERS - 1];
+        if (!lastLayer || !appState.vocabTopRef) return;
+        const stopY = lastLayer.__topEmbedStopYLocal;
+        if (typeof stopY !== 'number') return;
+        const lanes = Array.isArray(lastLayer.lanes) ? lastLayer.lanes : [];
+        for (const lane of lanes) {
+            const v = lane && lane.originalVec;
+            if (v && v.group && v.group.position.y >= stopY - 0.01) {
+                const headBlue = new THREE.Color(MHA_FINAL_Q_COLOR);
+                appState.vocabTopRef.setColor(headBlue);
+                appState.vocabTopRef.setMaterialProperties({ emissiveIntensity: 0.05 });
+                appState.topEmbedActivated = true;
+                break;
             }
-        } catch (_) {}
+        }
     }
 
     function updateStatus() {
@@ -150,8 +149,8 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
             }
         }
         statusDiv.textContent = `Layer ${idx + 1} / ${total}\n${displayStage}`;
-        try { updateEquations(layer); } catch (_) {}
-        try { checkTopEmbeddingActivation(); } catch (_) {}
+        updateEquations(layer);
+        checkTopEmbeddingActivation();
     }
 
     function applyPhysicalMaterial(enabled) {
@@ -185,6 +184,6 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         });
     }
 
-    try { applyPhysicalMaterial(USE_PHYSICAL_MATERIALS); } catch (_) {}
+    applyPhysicalMaterial(USE_PHYSICAL_MATERIALS);
     setInterval(updateStatus, 250);
 }
