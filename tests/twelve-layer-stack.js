@@ -29,12 +29,13 @@ import {
 import { WeightMatrixVisualization } from '../src/components/WeightMatrixVisualization.js';
 import { LayerNormalizationVisualization } from '../src/components/LayerNormalizationVisualization.js';
 import { MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR } from '../src/animations/LayerAnimationConstants.js';
+import { appState } from '../src/state/appState.js';
 
 // Optionally load pre-baked geometries; returns instantly if disabled
 await loadPrecomputedGeometries('../precomputed_components.glb');
 
 // Skip intro typing screen for direct animation entry
-const SKIP_INTRO = true;
+appState.skipIntro = true;
 
 // Set default playback speed to fast on load
 try { setPlaybackSpeed('fast'); } catch (_) { /* no-op */ }
@@ -59,8 +60,7 @@ const pipeline = new LayerPipeline(gptCanvas, NUM_LAYERS, {
 });
 
 // Top embedding activation state
-let vocabTopRef = null; // reference to top vocab embedding
-let __topEmbedActivated = false; // color switched to blue
+// (managed centrally via appState)
 
 // Show the GPT canvas right away so the tower is visible even while the
 // HDRI environment map streams in.  The intro text still overlays it,
@@ -180,7 +180,7 @@ try {
         // Start black until vectors reach the entrance
         vocabTop.setColor(new THREE.Color(0x000000));
         vocabTop.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.0 });
-        vocabTopRef = vocabTop;
+        appState.vocabTopRef = vocabTop;
         pipeline.engine.scene.add(vocabTop.group);
     }
 } catch (_) { /* optional – embedding visuals are non-critical */ }
@@ -207,15 +207,15 @@ camera.position.set(0, 0, 1500);
  const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.05;
- // Gate and lifecycle for intro RAF/rendering so we can stop it after hand-off
-let __introActive = true;
-let __introRaf = 0;
-let __introCleaned = false;
+// Gate and lifecycle for intro RAF/rendering so we can stop it after hand-off
+appState.introActive = true;
+appState.introRaf = 0;
+appState.introCleaned = false;
 function cleanupIntro() {
-    if (__introCleaned) return;
-    __introCleaned = true;
-    __introActive = false;
-    try { cancelAnimationFrame(__introRaf); } catch (_) {}
+    if (appState.introCleaned) return;
+    appState.introCleaned = true;
+    appState.introActive = false;
+    try { cancelAnimationFrame(appState.introRaf); } catch (_) {}
     try { controls && controls.dispose && controls.dispose(); } catch (_) {}
     try { renderer && renderer.dispose && renderer.dispose(); } catch (_) { /* no-op */ }
     try {
@@ -337,25 +337,24 @@ exrLoader.load('../rogland_clear_night_64.exr', (texture) => {
 window.addEventListener('resize', () => {
     const { innerWidth, innerHeight } = window;
     // intro
-    if (typeof __introActive === 'undefined' || __introActive) {
+    if (appState.introActive) {
         camera.aspect = innerWidth / innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(innerWidth, innerHeight);
     }
     // GPT canvas handled internally by CoreEngine resize listener.
 });
- // Track modal pause to also pause intro loop rendering
-let __modalPaused = false;
+// Track modal pause to also pause intro loop rendering
  // Animation loop for intro (gated so we can stop it after transition)
 const loopIntro = () => {
-    if (!__introActive) return;
-    __introRaf = requestAnimationFrame(loopIntro);
-    if (__modalPaused) return;
+    if (!appState.introActive) return;
+    appState.introRaf = requestAnimationFrame(loopIntro);
+    if (appState.modalPaused) return;
     controls.update();
     if (typeof TWEEN !== 'undefined') TWEEN.update();
     renderer.render(scene, camera);
 };
-if (!SKIP_INTRO) {
+if (!appState.skipIntro) {
     loopIntro();
 } else {
     try { transitionToGPT(); } catch (_) {
@@ -463,8 +462,8 @@ function getShowEquationsPref() {
 function setShowEquationsPref(val) {
     try { localStorage.setItem(EQ_STORAGE_KEY, val ? '1' : '0'); } catch (_) {}
 }
- let showEquations = getShowEquationsPref();
-if (equationsPanel) equationsPanel.style.display = showEquations ? 'block' : 'none';
+ appState.showEquations = getShowEquationsPref();
+if (equationsPanel) equationsPanel.style.display = appState.showEquations ? 'block' : 'none';
  // Equations mapping (LaTeX)
 const EQ = {
     ln1: String.raw`x_{\text{ln}} = \mathrm{LN}(x) = \gamma \odot \frac{x - \mu}{\sqrt{\sigma^2+\epsilon}} + \beta` ,
@@ -477,9 +476,9 @@ const EQ = {
     mlp: String.raw`z = u_{\text{ln}} W_{\text{up}} + b_{\text{up}},\quad z' = \mathrm{GELU}(z),\quad \mathrm{MLP}(u_{\text{ln}}) = z' W_{\text{down}} + b_{\text{down}}`,
     resid2: String.raw`x_{\text{out}} = u + \mathrm{MLP}(u_{\text{ln}})`
 };
- function renderEq(tex, title) {
+function renderEq(tex, title) {
     if (!equationsPanel || !equationsBody) return;
-    if (!showEquations) return;
+    if (!appState.showEquations) return;
     equationsTitle.textContent = title || 'Equations';
     try {
         if (window.katex && window.katex.render) {
@@ -492,10 +491,10 @@ const EQ = {
         equationsBody.textContent = tex;
     }
 }
- // Cache last rendered key to avoid re-render churn
-let __lastEqKey = '';
+// Cache last rendered key to avoid re-render churn
+appState.lastEqKey = '';
 function updateEquations(layer) {
-    if (!showEquations) return;
+    if (!appState.showEquations) return;
     if (!layer) return;
     const lanes = Array.isArray(layer.lanes) ? layer.lanes : [];
     if (!lanes.length) return;
@@ -551,8 +550,8 @@ function updateEquations(layer) {
         title = 'LayerNorm 1';
     }
      if (!key) return;
-    if (key === __lastEqKey) return;
-    __lastEqKey = key;
+    if (key === appState.lastEqKey) return;
+    appState.lastEqKey = key;
      // LN1 note (don’t assign back to x) — add as small subtitle in title
     const t = (key === 'ln1') ? 'LayerNorm 1 (no in-place assign)' : title;
     renderEq(EQ[key], t);
@@ -560,9 +559,9 @@ function updateEquations(layer) {
 // Switch top vocab color to blue once residual vector reaches the entrance
 function checkTopEmbeddingActivation() {
     try {
-        if (__topEmbedActivated) return;
+        if (appState.topEmbedActivated) return;
         const lastLayer = pipeline._layers[NUM_LAYERS - 1];
-        if (!lastLayer || !vocabTopRef) return;
+        if (!lastLayer || !appState.vocabTopRef) return;
         const stopY = lastLayer.__topEmbedStopYLocal;
         if (typeof stopY !== 'number') return;
         const lanes = Array.isArray(lastLayer.lanes) ? lastLayer.lanes : [];
@@ -570,9 +569,9 @@ function checkTopEmbeddingActivation() {
             const v = lane && lane.originalVec;
             if (v && v.group && v.group.position.y >= stopY - 0.01) {
                 const headBlue = new THREE.Color(MHA_FINAL_Q_COLOR);
-                vocabTopRef.setColor(headBlue);
-                vocabTopRef.setMaterialProperties({ emissiveIntensity: 0.05 });
-                __topEmbedActivated = true;
+                appState.vocabTopRef.setColor(headBlue);
+                appState.vocabTopRef.setMaterialProperties({ emissiveIntensity: 0.05 });
+                appState.topEmbedActivated = true;
                 break;
             }
         }
@@ -630,7 +629,7 @@ function applySpeed(value) {
     document.body.style.overflow = 'hidden';
     // Pause the main visualisation engine and intro loop
     try { pipeline?.engine?.pause?.(); } catch (_) { /* no-op */ }
-    __modalPaused = true;
+    appState.modalPaused = true;
     try {
         const checked = settingsOverlay.querySelector('input[name="playbackSpeed"]:checked');
         if (checked) {
@@ -643,7 +642,7 @@ function applySpeed(value) {
             rc.checked = !!pipeline.engine.isRaycastingEnabled();
         }
         const eq = document.getElementById('toggleEquations');
-        if (eq) eq.checked = !!showEquations;
+        if (eq) eq.checked = !!appState.showEquations;
     } catch (_) { /* no-op */ }
 }
  function closeSettings() {
@@ -652,7 +651,7 @@ function applySpeed(value) {
     document.body.style.overflow = '';
     // Resume the main visualisation engine and intro loop
     try { pipeline?.engine?.resume?.(); } catch (_) { /* no-op */ }
-    __modalPaused = false;
+    appState.modalPaused = false;
 }
  function updateSpeedChecked(value) {
     const labels = settingsOverlay.querySelectorAll('.speed-option');
@@ -691,11 +690,11 @@ rayToggle?.addEventListener('change', () => {
  // Equations toggle wiring
 const eqToggle = document.getElementById('toggleEquations');
 eqToggle?.addEventListener('change', () => {
-    showEquations = !!eqToggle.checked;
-    setShowEquationsPref(showEquations);
-    if (equationsPanel) equationsPanel.style.display = showEquations ? 'block' : 'none';
+    appState.showEquations = !!eqToggle.checked;
+    setShowEquationsPref(appState.showEquations);
+    if (equationsPanel) equationsPanel.style.display = appState.showEquations ? 'block' : 'none';
     // Force re-render next tick
-    __lastEqKey = '';
+    appState.lastEqKey = '';
 });
 
 function applyPhysicalMaterial(enabled) {
