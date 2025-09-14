@@ -34,15 +34,13 @@ export class VectorVisualization {
             // const fixedColor = new THREE.Color(0x00ff00); // TEST: Use fixed bright green
 
             const material = new THREE.MeshStandardMaterial({
-                color: color, // Original
-                // color: fixedColor, // TEST
+                color: color, // Preserve original bead colour
                 metalness: 0.3,
                 roughness: 0.5,
-                emissive: color, // Original
-                // emissive: fixedColor, // TEST
-                // Increase base emissive intensity so vectors glow a bit more
-                emissiveIntensity: 0.6
-             });
+                emissive: color,
+                // Keep emissive contribution subtle so colours don't wash out
+                emissiveIntensity: 0.25
+            });
 
             // Re-use the single shared geometry instance instead of cloning it for
             // every mesh.  This saves GPU memory and upload time because the

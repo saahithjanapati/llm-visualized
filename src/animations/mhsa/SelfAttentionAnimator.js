@@ -512,7 +512,8 @@ export class SelfAttentionAnimator {
                                 const sphereMat = new THREE.MeshStandardMaterial({
                                     color: baseColor,
                                     emissive: baseColor.clone(),
-                                    emissiveIntensity: 0.8,
+                                    // Slight emissive boost without blowing out the hue
+                                    emissiveIntensity: 0.4,
                                     metalness: 0.0,
                                     roughness: 0.4
                                 });
