@@ -50,6 +50,7 @@ const pipeline = new LayerPipeline(gptCanvas, NUM_LAYERS, {
     cameraPosition: camPos,
     cameraTarget: camTarget
 });
+pipeline.engine.scene.rotation.y = Math.PI;
 
 // Show GPT canvas immediately
 gptCanvas.style.display = 'block';
@@ -192,7 +193,7 @@ captionLoader.load('https://threejs.org/examples/fonts/helvetiker_regular.typefa
         });
         geo.computeBoundingBox();
         const width = geo.boundingBox.max.x - geo.boundingBox.min.x;
-        const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0 });
+        const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0, side: THREE.DoubleSide });
         const mesh = new THREE.Mesh(geo, mat);
         mesh.position.x = xOffset;
         mesh.castShadow = false;
