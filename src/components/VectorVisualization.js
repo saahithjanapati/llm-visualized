@@ -40,7 +40,8 @@ export class VectorVisualization {
                 roughness: 0.5,
                 emissive: color, // Original
                 // emissive: fixedColor, // TEST
-                emissiveIntensity: 0.3
+                // Increase base emissive intensity so vectors glow a bit more
+                emissiveIntensity: 0.6
              });
 
             // Re-use the single shared geometry instance instead of cloning it for

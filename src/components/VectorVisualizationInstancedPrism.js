@@ -44,9 +44,16 @@ export class VectorVisualizationInstancedPrism {
         this.instanceUserData = Array(VECTOR_LENGTH_PRISM).fill(null).map(() => ({})); 
 
         // Create a material per vector so we can vary opacity independently,
-        // but force program reuse by returning a stable cache key.
-        const material = new THREE.MeshBasicMaterial({ 
-            color: new THREE.Color(0xffffff)
+        // but force program reuse by returning a stable cache key.  Switch to
+        // MeshStandardMaterial and bump the emissive intensity so the prisms
+        // (used for residual/attention vectors) glow a bit more.
+        const material = new THREE.MeshStandardMaterial({
+            color: new THREE.Color(0xffffff),
+            metalness: 0.3,
+            roughness: 0.5,
+            emissive: new THREE.Color(0xffffff),
+            emissiveIntensity: 0.5,
+            vertexColors: true
         });
         material.customProgramCacheKey = () => 'InstancedPrismGradientV1';
         material.onBeforeCompile = (shader) => {

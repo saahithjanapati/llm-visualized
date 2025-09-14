@@ -508,7 +508,14 @@ export class SelfAttentionAnimator {
                                 const sat = THREE.MathUtils.lerp(0.85, 1.0, Math.random());
                                 const light = THREE.MathUtils.lerp(0.45, 0.6, Math.random());
                                 const baseColor = new THREE.Color().setHSL(hue, sat, light);
-                                const sphereMat = new THREE.MeshBasicMaterial({ color: baseColor });
+                                // Use a standard material with emissive so highlight spheres glow more
+                                const sphereMat = new THREE.MeshStandardMaterial({
+                                    color: baseColor,
+                                    emissive: baseColor.clone(),
+                                    emissiveIntensity: 0.8,
+                                    metalness: 0.0,
+                                    roughness: 0.4
+                                });
                                 const sphereMesh = new THREE.Mesh(sphereGeom, sphereMat);
                                 sphereMesh.position.copy(midPoint);
                                 sphereMesh.scale.set(0.001, 0.001, 0.001);
