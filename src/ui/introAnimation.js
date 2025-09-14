@@ -120,6 +120,9 @@ export function initIntroAnimation(pipeline, gptCanvas) {
     const exrLoader = new EXRLoader().setDataType(THREE.HalfFloatType);
     exrLoader.load('../rogland_clear_night_64.exr', (texture) => {
         texture.mapping = THREE.EquirectangularReflectionMapping;
+        texture.center.set(0.5, 0.5);
+        texture.rotation = Math.PI;
+        texture.needsUpdate = true;
         scene.environment = texture;
         pipeline.engine.scene.environment = texture;
         scene.traverse((obj) => { if (obj.isAmbientLight) scene.remove(obj); });
