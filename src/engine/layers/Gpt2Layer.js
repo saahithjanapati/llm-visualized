@@ -95,6 +95,14 @@ export default class Gpt2Layer extends BaseLayer {
         // NEW: Barrier flags
         this._ln1Start = false;        // start LN-1 branch
         this._mhsaStart = false;       // start horizontal travel to heads
+        this._progressEmitter = null;  // external emitter for progress events
+    }
+
+    setProgressEmitter(emitter) { this._progressEmitter = emitter; }
+    _emitProgress() {
+        if (this._progressEmitter && typeof this._progressEmitter.dispatchEvent === 'function') {
+            this._progressEmitter.dispatchEvent(new Event('progress'));
+        }
     }
 
     init(scene) {
@@ -490,6 +498,7 @@ export default class Gpt2Layer extends BaseLayer {
 
             if (allLn2Ready) {
                 this._ln2Ready = true;
+                this._emitProgress();
                 console.log(`Layer ${this.index}: All lanes ready – starting LN2 simultaneously`);
             }
         }
@@ -502,6 +511,7 @@ export default class Gpt2Layer extends BaseLayer {
             const allMlpReady = this.lanes.length && this.lanes.every(l => l.ln2Phase === 'mlpReady');
             if (allMlpReady) {
                 this._mlpStart = true;
+                this._emitProgress();
                 console.log(`Layer ${this.index}: All lanes ready – starting MLP up-projection simultaneously`);
             }
         }
@@ -518,12 +528,14 @@ export default class Gpt2Layer extends BaseLayer {
             const allLn1Ready = this.lanes.length && this.lanes.every(l => l && l.originalVec && l.originalVec.group && typeof l.branchStartY === 'number' && l.originalVec.group.position.y >= l.branchStartY);
             if (allLn1Ready) {
                 this._ln1Start = true;
+                this._emitProgress();
                 console.log(`Layer ${this.index}: All lanes ready – starting LN-1 branch simultaneously`);
 
                 // Kick every lane out of the waiting state together.
                 this.lanes.forEach(l => {
                     if (l.horizPhase === 'waiting') {
                         l.horizPhase = 'right';
+                        this._emitProgress();
                         l.dupVec.group.visible = true;
                         // Snap duplicate to the LN-1 branch staging height to avoid
                         // any vertical drift while moving horizontally into the ring.
@@ -545,9 +557,13 @@ export default class Gpt2Layer extends BaseLayer {
             const allMHSAReady = this.lanes.length && this.lanes.every(l => l.horizPhase === 'readyMHSA');
             if (allMHSAReady) {
                 this._mhsaStart = true;
+                this._emitProgress();
                 console.log(`Layer ${this.index}: All lanes ready – starting travel to MHSA heads simultaneously`);
                 this.lanes.forEach(l => {
-                    if (l.horizPhase === 'readyMHSA') l.horizPhase = 'travelMHSA';
+                    if (l.horizPhase === 'readyMHSA') {
+                        l.horizPhase = 'travelMHSA';
+                        this._emitProgress();
+                    }
                 });
             }
         }
@@ -589,6 +605,7 @@ export default class Gpt2Layer extends BaseLayer {
                             lane.multTarget.group.visible = true;
                         }
                         lane.horizPhase = 'insideLN';
+                        this._emitProgress();
                     }
                     break;
                 case 'insideLN':
@@ -637,8 +654,9 @@ export default class Gpt2Layer extends BaseLayer {
                                 res.userData = res.userData || {};
                                 res.userData.trail = resTrail;
                                 this.root.add(res.group);
-                                lane.resultVec = res;
+                            lane.resultVec = res;
                                 lane.horizPhase = 'riseAboveLN';
+                                this._emitProgress();
                             });
                         }
                     }
@@ -655,6 +673,7 @@ export default class Gpt2Layer extends BaseLayer {
                             lane.travellingVec = rv;
                             lane.headIndex = 0;
                             lane.horizPhase = 'readyMHSA'; // wait for global barrier
+                            this._emitProgress();
                         }
                     }
                     break;
@@ -673,6 +692,7 @@ export default class Gpt2Layer extends BaseLayer {
                     // This state is set by MHSAAnimation._startAdditionAnimation
                     if (lane.ln2Phase === 'preRise' && lane.postAdditionVec) {
                         lane.horizPhase = 'waitingForLN2'; // Move to next state
+                        this._emitProgress();
                     }
                     break;
                 case 'waitingForLN2':
@@ -729,6 +749,7 @@ export default class Gpt2Layer extends BaseLayer {
                         lane.normAnimationLN2 = new PrismLayerNormAnimation(mv);
 
                         lane.ln2Phase = 'right';
+                        this._emitProgress();
                     }
                     break;
                 }
@@ -748,6 +769,7 @@ export default class Gpt2Layer extends BaseLayer {
                             lane.multTargetLN2.group.visible = true;
                         }
                         lane.ln2Phase = 'insideLN';
+                        this._emitProgress();
                     }
                     
                     break;
@@ -823,6 +845,7 @@ export default class Gpt2Layer extends BaseLayer {
                                         .onUpdate(() => {})
                                         .onComplete(() => {
                                             lane.ln2Phase = 'mlpReady';
+                                            this._emitProgress();
                                         })
                                         .start();
                                 }
@@ -843,6 +866,7 @@ export default class Gpt2Layer extends BaseLayer {
 
                     if (!lane.mlpUpStarted && lane.resultVecLN2) {
                         lane.mlpUpStarted = true;
+                        this._emitProgress();
                         this._animateMlpUpProjection(lane);
                     }
                     break;
@@ -1241,6 +1265,7 @@ export default class Gpt2Layer extends BaseLayer {
                     this._scheduleAdditionCompletion(lane);
                 }
                 lane.ln2Phase = 'done';
+                this._emitProgress();
             })
             .start();
     }
@@ -1377,6 +1402,7 @@ export default class Gpt2Layer extends BaseLayer {
         originalVec.userData.trailWorld = true;
 
         this.lanes.push({
+            layer: this,
             originalVec,
             originalTrail: trail,
             dupVec,

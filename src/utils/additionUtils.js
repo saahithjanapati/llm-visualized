@@ -167,9 +167,11 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane) {
             lane.postAdditionVec= targetVec;
             if (lane.ln2Phase !== 'done') {
                 lane.ln2Phase = 'preRise';
+                if (lane.layer && typeof lane.layer._emitProgress === 'function') lane.layer._emitProgress();
                 // Set horizPhase to trigger LN2 pipeline
                 if (lane.horizPhase === 'travelMHSA' || lane.horizPhase === 'finishedHeads') {
                     lane.horizPhase = 'postMHSAAddition';
+                    if (lane.layer && typeof lane.layer._emitProgress === 'function') lane.layer._emitProgress();
                 }
             }
             const topY = targetVec.group.position.y;
