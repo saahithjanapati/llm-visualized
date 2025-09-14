@@ -185,5 +185,8 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     }
 
     applyPhysicalMaterial(USE_PHYSICAL_MATERIALS);
-    setInterval(updateStatus, 250);
+    if (pipeline && typeof pipeline.addEventListener === 'function') {
+        pipeline.addEventListener('progress', updateStatus);
+    }
+    updateStatus();
 }

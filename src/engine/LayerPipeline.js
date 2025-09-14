@@ -34,7 +34,7 @@ function simplePrismMultiply(srcVec, tgtVec, onComplete) {
  * ONE set of vectors, then – once a layer finishes – hands those same Three
  * objects off to the next Gpt2Layer positioned above the previous.
  */
-export class LayerPipeline {
+export class LayerPipeline extends EventTarget {
     /**
      * @param {HTMLCanvasElement} canvas – Render target for the CoreEngine.
      * @param {number}           numLayers – Total layers in the stack.
@@ -42,6 +42,7 @@ export class LayerPipeline {
      * @param {() => any}        [opts.randomFactory] – Factory that produces a fresh random-source for each layer.
      */
     constructor(canvas, numLayers = 12, opts = {}) {
+        super();
         if (!canvas) throw new Error('LayerPipeline requires a renderCanvas element');
         this._numLayers = Math.max(1, numLayers);
         this._canvas    = canvas;
@@ -67,6 +68,7 @@ export class LayerPipeline {
 
             // Assign onFinished callback for chaining once layer becomes active
             layer.setOnFinished(() => this._advanceToNextLayer());
+            layer.setProgressEmitter(this);
 
             layer.init(this._engine.scene);
             this._layers.push(layer);
@@ -75,6 +77,7 @@ export class LayerPipeline {
 
         // Ensure first layer has active callback wired before start
         this._layers[0].setOnFinished(() => this._advanceToNextLayer());
+        this._layers[0].setProgressEmitter(this);
     }
 
     /** Dispose and tear down Three resources */
@@ -94,6 +97,7 @@ export class LayerPipeline {
      */
     _advanceToNextLayer() {
         this._currentLayerIdx += 1;
+        this.dispatchEvent(new Event('progress'));
         if (this._currentLayerIdx >= this._numLayers) {
             // All layers processed – trigger final rise into top embedding
             try { this._animateRiseIntoTopEmbedding(); } catch (_) { /* optional */ }
@@ -273,6 +277,7 @@ export class LayerPipeline {
                     .to({ y: lnCenterY }, Math.max(100, durToCenter))
                     .easing(TWEEN.Easing.Quadratic.InOut)
                     .onUpdate(() => {
+                        this.dispatchEvent(new Event('progress'));
                         if (!lane.__topLnEntered && vec.group.position.y >= lnBottomY) {
                             lane.__topLnEntered = true;
                             multVec.group.visible = true;
@@ -281,6 +286,7 @@ export class LayerPipeline {
                         }
                     })
                     .onComplete(() => {
+                        this.dispatchEvent(new Event('progress'));
                         simplePrismMultiply(vec, multVec, () => {
                             vec.group.visible = false;
                             multVec.group.visible = false;
@@ -297,6 +303,8 @@ export class LayerPipeline {
                                 new TWEEN.Tween(resVec.group.position)
                                     .to({ y: targetYLocal }, Math.max(100, durMs))
                                     .easing(TWEEN.Easing.Quadratic.InOut)
+                                    .onUpdate(() => this.dispatchEvent(new Event('progress')))
+                                    .onComplete(() => this.dispatchEvent(new Event('progress')))
                                     .start();
                             }, addDur + 100);
                         });
@@ -319,6 +327,8 @@ export class LayerPipeline {
             new TWEEN.Tween(vec.group.position)
                 .to({ y: targetYLocal }, Math.max(100, durMs))
                 .easing(TWEEN.Easing.Quadratic.InOut)
+                .onUpdate(() => this.dispatchEvent(new Event('progress')))
+                .onComplete(() => this.dispatchEvent(new Event('progress')))
                 .start();
         });
     }
