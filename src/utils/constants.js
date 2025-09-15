@@ -226,7 +226,7 @@ export const LN_PARAMS = {
 export const NUM_HEAD_SETS_LAYER = 12;
 
 /** Horizontal gap between adjacent attention head sets. */
-export const HEAD_SET_GAP_LAYER = 350;
+export const HEAD_SET_GAP_LAYER = 500;
 
 // Centre-to-centre spacing between the Q, K and V matrices within a single
 // attention head.  Setting this equal to the matrix width means the matrices
@@ -238,7 +238,7 @@ export const MHA_INTERNAL_MATRIX_SPACING = 116;
  * Properties are consistent with WeightMatrixVisualization constructor.
  */
 export const MHA_MATRIX_PARAMS = {
-    width: 120,
+    width: 160,
     height: 40,
     depth: LANE_DEPENDENT_DEPTH,
     topWidthFactor: 0.1,
