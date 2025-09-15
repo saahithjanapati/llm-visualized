@@ -3,6 +3,12 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js';
 import { LayerNormalizationVisualization } from '../components/LayerNormalizationVisualization.js';
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization.js';
+import {
+    NUM_HEAD_SETS_LAYER,
+    HEAD_SET_GAP_LAYER,
+    MHA_INTERNAL_MATRIX_SPACING,
+    MHA_MATRIX_PARAMS
+} from '../utils/constants.js';
 
 // Build a static (non-animated) visualisation of an entire 12-layer GPT block.
 // The layout is kept deliberately simple: every layer is placed one above the
@@ -29,8 +35,9 @@ export function initGPTModelVisualization(container) {
     const LAYER_HEIGHT  = 300; // vertical span per layer (world units)
     const totalHeight   = NUM_LAYERS * LAYER_HEIGHT;
 
+    const baseCameraZ = 1600;
     const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 10000);
-    camera.position.set(0, totalHeight * 0.55, 1600);
+    camera.position.set(0, totalHeight * 0.55, baseCameraZ);
 
     let renderer;
     if (container instanceof HTMLCanvasElement) {
@@ -59,16 +66,8 @@ export function initGPTModelVisualization(container) {
     // ───────────────────────────────────────────────────────────────────────────
     // Weight-matrix base parameters (matches MultiHeadAttentionAnimation)
     const matrixParams = {
-        width: 37.5,
-        height: 12,
-        depth: 200,
-        topWidthFactor: 0.47,
-        cornerRadius: 1.2,
-        numberOfSlits: 5,
-        slitWidth: 1.85,
-        slitDepthFactor: 1.0,
-        slitBottomWidthFactor: 0.95,
-        slitTopWidthFactor: 0.37
+        ...MHA_MATRIX_PARAMS,
+        depth: 200 // deeper than the animation for a more architectural look
     };
 
     // Build *one* WeightMatrixVisualization then harvest its geometry so all
@@ -89,7 +88,7 @@ export function initGPTModelVisualization(container) {
     const vMat = new THREE.MeshStandardMaterial({ color: 0xff3355, metalness: 0.2, roughness: 0.6, transparent: true, opacity: 0.85 });
 
     // Instanced meshes — one for each of Q, K, V
-    const MAX_HEADS   = 12; // GPT size (fewer for bigger models)
+    const MAX_HEADS   = NUM_HEAD_SETS_LAYER; // GPT size (fewer for bigger models)
     const MAX_LAYERS  = NUM_LAYERS; // constant for this viz
 
     // GUI-controlled state
@@ -117,10 +116,15 @@ export function initGPTModelVisualization(container) {
     const tmpScale = new THREE.Vector3(1, 1, 1);
 
     // Horizontal layout identical to MultiHeadAttentionAnimation
-    const singleSetWidth = 3 * matrixParams.width;
-    const HEAD_SET_GAP   = 60;
+    const matrixSpacing  = MHA_INTERNAL_MATRIX_SPACING;
+    const singleSetWidth = 2 * matrixSpacing + matrixParams.width;
+    const HEAD_SET_GAP   = HEAD_SET_GAP_LAYER;
     const totalWidth     = MAX_HEADS * singleSetWidth + (MAX_HEADS - 1) * HEAD_SET_GAP;
     const firstSet_Q_Center_X = -totalWidth / 2 + matrixParams.width / 2;
+
+    const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
+    const requiredCameraZ = (totalWidth / 2) / Math.tan(halfFov) + 400;
+    camera.position.z = Math.max(baseCameraZ, requiredCameraZ);
 
     // Dimensions for non-instanced blocks (defined BEFORE use)
     const lnWidth = 40;
@@ -146,8 +150,8 @@ export function initGPTModelVisualization(container) {
         for (let head = 0; head < MAX_HEADS; head++) {
             const setOffset = head * (singleSetWidth + HEAD_SET_GAP);
             const x_q = firstSet_Q_Center_X + setOffset;
-            const x_k = x_q + matrixParams.width;
-            const x_v = x_k + matrixParams.width;
+            const x_k = x_q + matrixSpacing;
+            const x_v = x_k + matrixSpacing;
 
             // Q
             tmpPos.set(x_q, layerBaseY + attentionYOffset, 0);
