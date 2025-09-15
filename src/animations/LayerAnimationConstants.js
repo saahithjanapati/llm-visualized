@@ -49,7 +49,7 @@ export const LN_PARAMS = {
 export const NUM_HEAD_SETS_LAYER = 12;
 
 /** Horizontal gap between adjacent attention head sets. */
-export const HEAD_SET_GAP_LAYER = 12.5;
+export const HEAD_SET_GAP_LAYER = 350;
 
 /**
  * Parameters defining the geometry of individual Q, K, V matrices in the MHSA block.
