@@ -49,10 +49,7 @@ export const LN_PARAMS = {
 export const NUM_HEAD_SETS_LAYER = 12;
 
 /** Horizontal gap between adjacent attention head sets. */
-export const HEAD_SET_GAP_LAYER = 15;
-
-/** Horizontal center-to-center spacing for Q, K, V matrices within a single attention head. */
-export const MHA_INTERNAL_MATRIX_SPACING = 37.5;
+export const HEAD_SET_GAP_LAYER = 12.5;
 
 /**
  * Parameters defining the geometry of individual Q, K, V matrices in the MHSA block.
@@ -71,6 +68,9 @@ export const MHA_MATRIX_PARAMS = {
     slitBottomWidthFactor: 0.95,
     slitTopWidthFactor: 0.90
 };
+
+/** Horizontal center-to-center spacing for Q, K, V matrices within a single attention head. */
+export const MHA_INTERNAL_MATRIX_SPACING = MHA_MATRIX_PARAMS.width + HEAD_SET_GAP_LAYER;
 
 // -----------------------------------------------------------------------------
 // LayerNorm2 (LN2) Parameters

@@ -226,12 +226,7 @@ export const LN_PARAMS = {
 export const NUM_HEAD_SETS_LAYER = 12;
 
 /** Horizontal gap between adjacent attention head sets. */
-export const HEAD_SET_GAP_LAYER = 500;
-
-// Centre-to-centre spacing between the Q, K and V matrices within a single
-// attention head.  Setting this equal to the matrix width means the matrices
-// now sit flush against one another (touching edges) without any gap.
-export const MHA_INTERNAL_MATRIX_SPACING = 116;
+export const HEAD_SET_GAP_LAYER = 12.5;
 
 /**
  * Parameters defining the geometry of individual Q, K, V matrices in the MHSA block.
@@ -251,6 +246,11 @@ export const MHA_MATRIX_PARAMS = {
     slitBottomWidthFactor: 1,
     slitTopWidthFactor: 0.90
 };
+
+// Centre-to-centre spacing between the Q, K and V matrices within a single
+// attention head. Provide at least HEAD_SET_GAP_LAYER clearance between the
+// bases of neighbouring matrices so their widened footprints no longer clash.
+export const MHA_INTERNAL_MATRIX_SPACING = MHA_MATRIX_PARAMS.width + HEAD_SET_GAP_LAYER;
 
 // MLP (Multi-Layer Perceptron) Layer Parameters
 /** Factor by which the vector dimension is multiplied in the MLP's up-projection. */
