@@ -221,6 +221,13 @@ export const LN_PARAMS = {
     holeWidthFactor: 20
 };
 
+/**
+ * Fraction of a LayerNorm's height (measured from the bottom of the ring)
+ * that a vector must travel before triggering the visual normalisation
+ * animation inside the solid.  Lower values start the effect earlier.
+ */
+export const LN_NORM_START_FRACTION_FROM_BOTTOM = 0.25;
+
 // Multi-Head Self-Attention (MHSA) Parameters
 /** Number of attention head sets (each set has Q, K, V matrices). */
 export const NUM_HEAD_SETS_LAYER = 12;
