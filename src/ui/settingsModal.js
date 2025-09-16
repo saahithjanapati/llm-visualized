@@ -30,6 +30,8 @@ export function initSettingsModal(pipeline) {
         }
         const eq = document.getElementById('toggleEquations');
         if (eq) eq.checked = !!appState.showEquations;
+        const bg = document.getElementById('toggleHdrBackground');
+        if (bg) bg.checked = !!appState.showHdrBackground;
     }
 
     function closeSettings() {
@@ -82,5 +84,12 @@ export function initSettingsModal(pipeline) {
         setPreference('showEquations', appState.showEquations);
         if (equationsPanel) equationsPanel.style.display = appState.showEquations ? 'block' : 'none';
         appState.lastEqKey = '';
+    });
+
+    const bgToggle = document.getElementById('toggleHdrBackground');
+    bgToggle?.addEventListener('change', () => {
+        appState.showHdrBackground = !!bgToggle.checked;
+        setPreference('showHdrBackground', appState.showHdrBackground);
+        appState.applyEnvironmentBackground(pipeline);
     });
 }
