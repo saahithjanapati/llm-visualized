@@ -6,6 +6,7 @@ import { VectorVisualizationInstancedPrism } from '../../components/VectorVisual
 import { StraightLineTrail, buildMergedLineSegmentsFromSegments, collectTrailsUnder, mergeTrailsIntoLineSegments } from '../../utils/trailUtils.js';
 import {
     LN_PARAMS,
+    LN_NORM_START_FRACTION_FROM_BOTTOM,
     LN_TO_MHA_GAP,
     BRANCH_X,
     LN2_TO_MLP_GAP,
@@ -609,8 +610,11 @@ export default class Gpt2Layer extends BaseLayer {
                     }
                     break;
                 case 'insideLN':
-                    // start norm animation after entering 35% of LN
-                    const normStartY = lane.ln1MidY - LN_PARAMS.height * 0.15;
+                    // Start the normalisation animation once the vector has
+                    // climbed the configured fraction of the LayerNorm's
+                    // height from its bottom edge.
+                    const normStartY =
+                        bottomY_ln1_abs + LN_PARAMS.height * LN_NORM_START_FRACTION_FROM_BOTTOM;
                     if (!lane.normStarted && dupVec.group.position.y >= normStartY) {
                         lane.normAnim.start(dupVec.rawData.slice());
                         lane.normStarted = true;
@@ -780,11 +784,11 @@ export default class Gpt2Layer extends BaseLayer {
                     const mv = lane.movingVecLN2;
                     if (!mv) break;
                     
-                    // Use the same threshold formula as LayerNorm-1 so the
-                    // normalisation animation begins at the identical
-                    // relative height inside the ring (centre − 15 % of the
-                    // LayerNorm’s height).
-                    const normStartY2 = midY_ln2_abs - LN_PARAMS.height * 0.15;
+                    // Use the same fraction as LayerNorm-1 so the
+                    // normalisation animation begins at an identical
+                    // relative height inside the ring.
+                    const normStartY2 =
+                        bottomY_ln2_abs + LN_PARAMS.height * LN_NORM_START_FRACTION_FROM_BOTTOM;
                     const normAnimating2 = lane.normStartedLN2 && lane.normAnimationLN2 && lane.normAnimationLN2.isAnimating;
                     if (!lane.normStartedLN2 && mv.group.position.y >= normStartY2) {
                         lane.normAnimationLN2.start(mv.rawData.slice());
