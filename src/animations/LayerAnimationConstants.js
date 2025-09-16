@@ -183,7 +183,7 @@ export const ANIM_RISE_SPEED_INSIDE_LN = 6;
 // -----------------------------------------------------------------------------
 
 /** Vertical offset for the output projection matrix above the merged row of vectors. */
-export const MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW = 30;
+export const MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW = 60;
 
 /**
  * Parameters defining the geometry and appearance of the MHA output projection matrix.
