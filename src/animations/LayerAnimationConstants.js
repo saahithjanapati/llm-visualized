@@ -49,17 +49,17 @@ export const LN_PARAMS = {
 export const NUM_HEAD_SETS_LAYER = 12;
 
 /** Horizontal gap between adjacent attention head sets. */
-export const HEAD_SET_GAP_LAYER = 10;
+export const HEAD_SET_GAP_LAYER = 14;
 
 /** Horizontal center-to-center spacing for Q, K, V matrices within a single attention head. */
-export const MHA_INTERNAL_MATRIX_SPACING = 37.5;
+export const MHA_INTERNAL_MATRIX_SPACING = 71.25; // wider than the base to leave visible gaps
 
 /**
  * Parameters defining the geometry of individual Q, K, V matrices in the MHSA block.
  * Properties are consistent with WeightMatrixVisualization constructor.
  */
 export const MHA_MATRIX_PARAMS = {
-    width: 37.5,
+    width: 56.25, // scaled-down counterpart to the widened 3D MHSA matrices
     height: 12,
     depth: 100,
     topWidthFactor: 0.47,
@@ -192,7 +192,7 @@ export const MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW = 30;
  */
 export const MHA_OUTPUT_PROJECTION_MATRIX_PARAMS = {
     // Size parameters
-    width: 150,                   // Same as MHA_MATRIX_PARAMS.width
+    width: 180,                   // Matches the widened MHSA matrices defined in utils/constants.js
     heightFactor: 2.5,             // Height relative to standard MHA matrices
     
     // Shape parameters

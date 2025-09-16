@@ -233,19 +233,19 @@ export const LN_NORM_START_FRACTION_FROM_BOTTOM = 0.25;
 export const NUM_HEAD_SETS_LAYER = 12;
 
 /** Horizontal gap between adjacent attention head sets. */
-export const HEAD_SET_GAP_LAYER = 350;
+export const HEAD_SET_GAP_LAYER = 500;
 
 // Centre-to-centre spacing between the Q, K and V matrices within a single
-// attention head.  Setting this equal to the matrix width means the matrices
-// now sit flush against one another (touching edges) without any gap.
-export const MHA_INTERNAL_MATRIX_SPACING = 116;
+// attention head.  Keeping this larger than the matrix width leaves a clear
+// gap between the tapered bases so neighbouring matrices no longer touch.
+export const MHA_INTERNAL_MATRIX_SPACING = 230;
 
 /**
  * Parameters defining the geometry of individual Q, K, V matrices in the MHSA block.
  * Properties are consistent with WeightMatrixVisualization constructor.
  */
 export const MHA_MATRIX_PARAMS = {
-    width: 120,
+    width: 180, // broadened so the base exceeds the prism vector length
     height: 40,
     depth: LANE_DEPENDENT_DEPTH,
     topWidthFactor: 0.1,
