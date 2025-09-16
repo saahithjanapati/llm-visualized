@@ -3,16 +3,20 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js';
 import { WeightMatrixVisualizationInstance as WeightMatrixVisualization } from '../components/WeightMatrixVisualizationInstance.js';
 import { VectorVisualizationInstanced } from '../components/VectorVisualizationInstanced.js';
-import { VECTOR_LENGTH } from '../utils/constants.js';
+import {
+    VECTOR_LENGTH,
+    NUM_HEAD_SETS_LAYER,
+    HEAD_SET_GAP_LAYER,
+    MHA_INTERNAL_MATRIX_SPACING,
+    MHA_MATRIX_PARAMS
+} from '../utils/constants.js';
 
 
 
-// --- START NEW CONSTANTS ---
 // Number of attention head sets (each set has Q, K, V)
-const NUM_HEAD_SETS = 12;
+const NUM_HEAD_SETS = NUM_HEAD_SETS_LAYER;
 // Horizontal gap between adjacent head sets
-const HEAD_SET_GAP = 15;
-// --- END NEW CONSTANTS ---
+const HEAD_SET_GAP = HEAD_SET_GAP_LAYER;
 
 // Simple animation for MULTIPLE self-attention heads.
 // TODO: Adapt logic for multiple heads beyond the first set.
@@ -54,16 +58,8 @@ export function initMultiHeadAttentionAnimation(containerElement) {
     //  Parameters (defined before functions that use them)
     // ---------------------------------------------------------------------
     const matrixParams = {
-        width: 37.5,
-        height: 12,
-        depth: 50,
-        topWidthFactor: 0.47,
-        cornerRadius: 1.2,
-        numberOfSlits: 5,
-        slitWidth: 1.85,
-        slitDepthFactor: 1.0,
-        slitBottomWidthFactor: 0.95,
-        slitTopWidthFactor: 0.37
+        ...MHA_MATRIX_PARAMS,
+        depth: 50 // keep the instanced demo lightweight in Z compared to the full scene
     };
 
     // ---------------------------------------------------------------------
@@ -94,15 +90,24 @@ export function initMultiHeadAttentionAnimation(containerElement) {
         });
         allMatrices.length = 0; // Clear the array
 
-        let matrixPosY = matrixParams.height / 2; // bottom rests on y = 0 plane
-        let matrixWidth = matrixParams.width;     // Width of a single Q/K/V matrix
-        let matrixSpacing = matrixWidth;        // spacing between Q/K/V centres within a set
+        const matrixPosY = matrixParams.height / 2; // bottom rests on y = 0 plane
+        const matrixWidth = matrixParams.width;     // Width of a single Q/K/V matrix
+        const matrixSpacing = MHA_INTERNAL_MATRIX_SPACING; // spacing between Q/K/V centres within a set
 
         // Calculate the starting X position for the center of the first set's Q matrix
         // to center the entire arrangement horizontally
-        const singleSetWidth = 3 * matrixWidth;
+        const singleSetWidth = 2 * matrixSpacing + matrixWidth;
         const totalWidth = NUM_HEAD_SETS * singleSetWidth + (NUM_HEAD_SETS - 1) * HEAD_SET_GAP;
         const firstSet_Q_Center_X = -totalWidth / 2 + matrixWidth / 2;
+
+        // Ensure the camera sits far enough back to view the wider layout
+        const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
+        const requiredZ = (totalWidth / 2) / Math.tan(halfFov) + 200;
+        if (camera.position.z < requiredZ) {
+            camera.position.z = requiredZ;
+        }
+
+        controls.target.set(0, matrixPosY, 0);
 
 
         for (let i = 0; i < NUM_HEAD_SETS; i++) {
