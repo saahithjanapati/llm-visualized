@@ -20,6 +20,9 @@ export function initIntroAnimation(pipeline, gptCanvas) {
     const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 20000);
     camera.position.set(0, 0, 1500);
 
+    appState.introSceneRef = scene;
+    appState.applyEnvironmentBackground(pipeline, scene);
+
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
@@ -123,8 +126,10 @@ export function initIntroAnimation(pipeline, gptCanvas) {
         texture.center.set(0.5, 0.5);
         texture.rotation = Math.PI;
         texture.needsUpdate = true;
+        appState.environmentTexture = texture;
         scene.environment = texture;
         pipeline.engine.scene.environment = texture;
+        appState.applyEnvironmentBackground(pipeline, scene);
         scene.traverse((obj) => { if (obj.isAmbientLight) scene.remove(obj); });
         pipeline.engine.scene.traverse((obj) => { if (obj.isAmbientLight) pipeline.engine.scene.remove(obj); });
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
