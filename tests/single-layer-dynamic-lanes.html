@@ -27,6 +27,7 @@
         import { LN_PARAMS, LN_TO_MHA_GAP, BRANCH_X, LAYER_NORM_1_Y_POS, LAYER_NORM_2_Y_POS, LN2_TO_MLP_GAP, MLP_MATRIX_PARAMS_UP, MLP_MATRIX_PARAMS_DOWN, NUM_HEAD_SETS_LAYER, HEAD_SET_GAP_LAYER, MHA_INTERNAL_MATRIX_SPACING, MHA_MATRIX_PARAMS, VECTOR_DEPTH_SPACING, MLP_INTER_MATRIX_GAP, INACTIVE_COMPONENT_COLOR } from '../src/utils/constants.js';
         import { MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR } from '../src/animations/LayerAnimationConstants.js';
         import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
+        import hdrBackgroundUrl from '../rogland_clear_night_64.exr?url';
 
         // Cache geometries for a single lane slice. The regular 12-layer demo
         // uses `precomputed_components.glb`, but this prototype needs to vary
@@ -58,7 +59,7 @@
 
         // Load the same HDRI used in main scenes for consistent lighting
         const exrLoader = new EXRLoader().setDataType(THREE.HalfFloatType);
-        exrLoader.load('../rogland_clear_night_64.exr', (tex) => {
+        exrLoader.load(hdrBackgroundUrl, (tex) => {
             tex.mapping = THREE.EquirectangularReflectionMapping;
             scene.environment = tex;
             renderer.toneMapping = THREE.ACESFilmicToneMapping;

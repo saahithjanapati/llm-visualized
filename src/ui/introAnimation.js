@@ -4,6 +4,7 @@ import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
 import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
 import { appState } from '../state/appState.js';
+import hdrBackgroundUrl from '../../rogland_clear_night_64.exr?url';
 
 // Sets up the intro typing animation and HDRI transition.
 // Returns a cleanup function for the intro resources.
@@ -19,6 +20,9 @@ export function initIntroAnimation(pipeline, gptCanvas) {
     scene.background = new THREE.Color(0x000000);
     const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 20000);
     camera.position.set(0, 0, 1500);
+
+    appState.introSceneRef = scene;
+    appState.applyEnvironmentBackground(pipeline, scene);
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
@@ -118,13 +122,15 @@ export function initIntroAnimation(pipeline, gptCanvas) {
     });
 
     const exrLoader = new EXRLoader().setDataType(THREE.HalfFloatType);
-    exrLoader.load('../rogland_clear_night_64.exr', (texture) => {
+    exrLoader.load(hdrBackgroundUrl, (texture) => {
         texture.mapping = THREE.EquirectangularReflectionMapping;
         texture.center.set(0.5, 0.5);
         texture.rotation = Math.PI;
         texture.needsUpdate = true;
+        appState.environmentTexture = texture;
         scene.environment = texture;
         pipeline.engine.scene.environment = texture;
+        appState.applyEnvironmentBackground(pipeline, scene);
         scene.traverse((obj) => { if (obj.isAmbientLight) scene.remove(obj); });
         pipeline.engine.scene.traverse((obj) => { if (obj.isAmbientLight) pipeline.engine.scene.remove(obj); });
         renderer.toneMapping = THREE.ACESFilmicToneMapping;

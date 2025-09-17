@@ -12,7 +12,9 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     const equationsBody = document.getElementById('equationsBody');
 
     appState.showEquations = getPreference('showEquations', true);
+    appState.showHdrBackground = getPreference('showHdrBackground', false);
     if (equationsPanel) equationsPanel.style.display = appState.showEquations ? 'block' : 'none';
+    appState.applyEnvironmentBackground(pipeline);
 
     const EQ = {
         ln1: String.raw`x_{\text{ln}} = \mathrm{LN}(x) = \gamma \odot \frac{x - \mu}{\sqrt{\sigma^2+\epsilon}} + \beta` ,

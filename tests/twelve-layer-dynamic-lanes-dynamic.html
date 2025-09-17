@@ -25,6 +25,7 @@
         import { LayerNormalizationVisualization } from '../src/components/LayerNormalizationVisualization.js';
         import { WeightMatrixVisualization } from '../src/components/WeightMatrixVisualization.js';
         import { InstancedMesh, Matrix4 } from 'three';
+        import hdrBackgroundUrl from '../rogland_clear_night_64.exr?url';
 
         import {
             LN_PARAMS,
@@ -77,7 +78,7 @@
         scene.add(dirLight);
 
         const exrLoader = new EXRLoader().setDataType(THREE.HalfFloatType);
-        exrLoader.load('../rogland_clear_night_64.exr', (tex)=>{
+        exrLoader.load(hdrBackgroundUrl, (tex)=>{
             tex.mapping = THREE.EquirectangularReflectionMapping;
             scene.environment = tex;
             renderer.toneMapping = THREE.ACESFilmicToneMapping;
