@@ -624,9 +624,6 @@ export default class Gpt2Layer extends BaseLayer {
                         if (lane.multTarget && lane.multTarget.group) {
                             lane.multTarget.group.visible = true;
                         }
-                        if (lane.addTarget && lane.addTarget.group) {
-                            lane.addTarget.group.visible = true;
-                        }
                         lane.horizPhase = 'insideLN';
                         this._emitProgress();
                     }
@@ -831,9 +828,6 @@ export default class Gpt2Layer extends BaseLayer {
                         mv.group.position.x = BRANCH_X;
                         if (lane.multTargetLN2 && lane.multTargetLN2.group) {
                             lane.multTargetLN2.group.visible = true;
-                        }
-                        if (lane.addTargetLN2 && lane.addTargetLN2.group) {
-                            lane.addTargetLN2.group.visible = true;
                         }
                         lane.ln2Phase = 'insideLN';
                         this._emitProgress();
@@ -1433,7 +1427,7 @@ export default class Gpt2Layer extends BaseLayer {
                     ln1PlaceholderData,
                     new THREE.Vector3(offsetX, ln1CenterY + addYOffset, zPos)
                 );
-                ln1Placeholder.group.visible = true;
+                ln1Placeholder.group.visible = false;
                 this.root.add(ln1Placeholder.group);
                 this._ln1AddPlaceholders[laneIdx] = ln1Placeholder;
 
@@ -1442,7 +1436,7 @@ export default class Gpt2Layer extends BaseLayer {
                     ln2PlaceholderData,
                     new THREE.Vector3(offsetX, ln2CenterY + addYOffset, zPos)
                 );
-                ln2Placeholder.group.visible = true;
+                ln2Placeholder.group.visible = false;
                 this.root.add(ln2Placeholder.group);
                 this._ln2AddPlaceholders[laneIdx] = ln2Placeholder;
             }
@@ -1552,6 +1546,9 @@ export default class Gpt2Layer extends BaseLayer {
             if (addTarget && addTarget.group && addTarget.group.parent !== this.root) {
                 this.root.add(addTarget.group);
             }
+            if (addTarget && addTarget.group) {
+                addTarget.group.visible = false;
+            }
         } else {
             const addTargetData = this.random.nextVector(VECTOR_LENGTH_PRISM);
             addTarget = new VectorVisualizationInstancedPrism(
@@ -1568,6 +1565,9 @@ export default class Gpt2Layer extends BaseLayer {
             this._ln2AddPlaceholders[laneIdx] = null;
             if (addTargetLN2 && addTargetLN2.group && addTargetLN2.group.parent !== this.root) {
                 this.root.add(addTargetLN2.group);
+            }
+            if (addTargetLN2 && addTargetLN2.group) {
+                addTargetLN2.group.visible = false;
             }
         } else {
             const addTargetDataLn2 = this.random.nextVector(VECTOR_LENGTH_PRISM);
