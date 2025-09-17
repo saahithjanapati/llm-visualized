@@ -60,6 +60,7 @@ import { startPrismAdditionAnimation } from '../../utils/additionUtils.js';
 
 // Slightly reduced spacing between stacked layers for a tighter layout.
 const VERTICAL_SPACING = 1600; // matches LayerAnimation.js vertical extent
+const LN_ADD_VECTOR_OFFSET_FRACTION = 0.25; // fraction of LN height above centre for bias addition
 
 function simplePrismMultiply(srcVec, tgtVec, onComplete) {
     // instant product; flash white then call onComplete
@@ -648,19 +649,46 @@ export default class Gpt2Layer extends BaseLayer {
                             simplePrismMultiply(dupVec, lane.multTarget, () => {
                                 dupVec.group.visible = false;
                                 lane.multTarget.group.visible = false;
-                                const res = new VectorVisualizationInstancedPrism(
+
+                                const multResult = new VectorVisualizationInstancedPrism(
                                     lane.multTarget.rawData.slice(),
                                     lane.multTarget.group.position.clone()
                                 );
-                                // Trail for the result vector that will travel to MHSA
-                                const resTrail = new StraightLineTrail(this.root, 0xffffff, 1);
-                                resTrail.start(res.group.position);
-                                res.userData = res.userData || {};
-                                res.userData.trail = resTrail;
-                                this.root.add(res.group);
-                            lane.resultVec = res;
-                                lane.horizPhase = 'riseAboveLN';
-                                this._emitProgress();
+                                this.root.add(multResult.group);
+
+                                if (lane.addTarget) {
+                                    lane.addTarget.group.visible = true;
+                                    lane.resultVec = lane.addTarget;
+                                    lane.ln1AddStarted = true;
+                                    startPrismAdditionAnimation(multResult, lane.addTarget, null, () => {
+                                        lane.ln1AddComplete = true;
+                                        if (multResult.userData && multResult.userData.trail && typeof multResult.userData.trail.dispose === 'function') {
+                                            multResult.userData.trail.dispose();
+                                            delete multResult.userData.trail;
+                                        }
+                                        if (multResult.group && multResult.group.parent) {
+                                            multResult.group.parent.remove(multResult.group);
+                                        }
+                                        lane.addTarget.userData = lane.addTarget.userData || {};
+                                        if (!lane.addTarget.userData.trail) {
+                                            const addTrail = new StraightLineTrail(this.root, 0xffffff, 1);
+                                            addTrail.start(lane.addTarget.group.position);
+                                            lane.addTarget.userData.trail = addTrail;
+                                        }
+                                        lane.addTarget.userData.trailWorld = false;
+                                        lane.horizPhase = 'riseAboveLN';
+                                        this._emitProgress();
+                                    });
+                                } else {
+                                    lane.resultVec = multResult;
+                                    lane.ln1AddComplete = true;
+                                    const resTrailFallback = new StraightLineTrail(this.root, 0xffffff, 1);
+                                    resTrailFallback.start(multResult.group.position);
+                                    multResult.userData = multResult.userData || {};
+                                    multResult.userData.trail = resTrailFallback;
+                                    lane.horizPhase = 'riseAboveLN';
+                                    this._emitProgress();
+                                }
                             });
                         }
                     }
@@ -783,7 +811,30 @@ export default class Gpt2Layer extends BaseLayer {
                     // Inside LayerNorm2 - normalize and multiply
                     const mv = lane.movingVecLN2;
                     if (!mv) break;
-                    
+
+                    const startLn2Rise = (vec) => {
+                        if (!vec) return;
+                        const destY = this.mlpUp.group.position.y - MLP_MATRIX_PARAMS_UP.height / 2 - 10;
+                        const dist = destY - vec.group.position.y;
+                        const durationMs = (dist / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
+
+                        if (typeof TWEEN !== 'undefined') {
+                            new TWEEN.Tween(vec.group.position)
+                                .to({ y: destY }, durationMs)
+                                .easing(TWEEN.Easing.Linear.None)
+                                .onUpdate(() => {})
+                                .onComplete(() => {
+                                    lane.ln2Phase = 'mlpReady';
+                                    this._emitProgress();
+                                })
+                                .start();
+                        } else {
+                            vec.group.position.y = destY;
+                            lane.ln2Phase = 'mlpReady';
+                            this._emitProgress();
+                        }
+                    };
+
                     // Use the same fraction as LayerNorm-1 so the
                     // normalisation animation begins at an identical
                     // relative height inside the ring.
@@ -830,33 +881,42 @@ export default class Gpt2Layer extends BaseLayer {
                                         : mv.group.position.clone();
                                 const resVec = new VectorVisualizationInstancedPrism(sourceRaw, sourcePos);
                                 this.root.add(resVec.group);
-                                // ---- Trail for LN2 result vector ----
-                                const resTrail = new StraightLineTrail(this.root, 0xffffff, 1);
-                                resTrail.start(resVec.group.position);
-                                resVec.userData = resVec.userData || {};
-                                resVec.userData.trail = resTrail;
-                                lane.resultVecLN2 = resVec;
 
-                                // Rise to MLP
-                                const destY = this.mlpUp.group.position.y - MLP_MATRIX_PARAMS_UP.height / 2 - 10;
-                                const dist = destY - resVec.group.position.y;
-                                const dur = (dist / (ANIM_RISE_SPEED_INSIDE_LN * speedMult)) * 1000;
-
-                                if (typeof TWEEN !== 'undefined') {
-                                    new TWEEN.Tween(resVec.group.position)
-                                        .to({ y: destY }, dur)
-                                        .easing(TWEEN.Easing.Linear.None)
-                                        .onUpdate(() => {})
-                                        .onComplete(() => {
-                                            lane.ln2Phase = 'mlpReady';
-                                            this._emitProgress();
-                                        })
-                                        .start();
+                                if (lane.addTargetLN2) {
+                                    lane.addTargetLN2.group.visible = true;
+                                    lane.resultVecLN2 = lane.addTargetLN2;
+                                    lane.ln2AddStarted = true;
+                                    startPrismAdditionAnimation(resVec, lane.addTargetLN2, null, () => {
+                                        lane.ln2AddComplete = true;
+                                        if (resVec.userData && resVec.userData.trail && typeof resVec.userData.trail.dispose === 'function') {
+                                            resVec.userData.trail.dispose();
+                                            delete resVec.userData.trail;
+                                        }
+                                        if (resVec.group && resVec.group.parent) {
+                                            resVec.group.parent.remove(resVec.group);
+                                        }
+                                        lane.addTargetLN2.userData = lane.addTargetLN2.userData || {};
+                                        if (!lane.addTargetLN2.userData.trail) {
+                                            const addTrailLn2 = new StraightLineTrail(this.root, 0xffffff, 1);
+                                            addTrailLn2.start(lane.addTargetLN2.group.position);
+                                            lane.addTargetLN2.userData.trail = addTrailLn2;
+                                        }
+                                        lane.addTargetLN2.userData.trailWorld = false;
+                                        startLn2Rise(lane.addTargetLN2);
+                                    });
+                                } else {
+                                    lane.resultVecLN2 = resVec;
+                                    lane.ln2AddComplete = true;
+                                    const resTrail = new StraightLineTrail(this.root, 0xffffff, 1);
+                                    resTrail.start(resVec.group.position);
+                                    resVec.userData = resVec.userData || {};
+                                    resVec.userData.trail = resTrail;
+                                    startLn2Rise(resVec);
                                 }
                             });
                         }
                     }
-                    
+
 
                     break;
                 }
@@ -1394,6 +1454,23 @@ export default class Gpt2Layer extends BaseLayer {
         this.root.add(multTargetLN2.group);
         multTargetLN2.group.visible = false;
 
+        const addYOffset = LN_PARAMS.height * LN_ADD_VECTOR_OFFSET_FRACTION;
+        const addTargetData = this.random.nextVector(VECTOR_LENGTH_PRISM);
+        const addTarget = new VectorVisualizationInstancedPrism(
+            addTargetData,
+            new THREE.Vector3(offsetX, ln1CenterY + addYOffset, zPos)
+        );
+        this.root.add(addTarget.group);
+        addTarget.group.visible = false;
+
+        const addTargetDataLn2 = this.random.nextVector(VECTOR_LENGTH_PRISM);
+        const addTargetLN2 = new VectorVisualizationInstancedPrism(
+            addTargetDataLn2,
+            new THREE.Vector3(offsetX, ln2CenterY + addYOffset, zPos)
+        );
+        this.root.add(addTargetLN2.group);
+        addTargetLN2.group.visible = false;
+
         // Fallback to previous trail if a new one wasn't created in this constructor
         if (!trail && trailFromPrev) trail = trailFromPrev;
 
@@ -1412,12 +1489,16 @@ export default class Gpt2Layer extends BaseLayer {
             dupVec,
             multTarget,
             multTargetLN2,
+            addTarget,
+            addTargetLN2,
             normAnim,
             horizPhase: 'waiting',
             branchStartY: ln1CenterY - LN_PARAMS.height / 2 + 5,
             ln1MidY: ln1CenterY,
             normStarted:false,
             multStarted:false,
+            ln1AddStarted:false,
+            ln1AddComplete:false,
             resultVec:null,
             targetY: meetY,
             travellingVec: null,
@@ -1431,6 +1512,8 @@ export default class Gpt2Layer extends BaseLayer {
             normAnimationLN2: null,
             normStartedLN2: false,
             multDoneLN2: false,
+            ln2AddStarted:false,
+            ln2AddComplete:false,
             resultVecLN2: null,
             mlpUpStarted: false,
             expandedVecGroup: null,

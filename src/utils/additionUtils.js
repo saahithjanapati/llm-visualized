@@ -28,7 +28,7 @@ import {
  * @param {Object} [lane]             – optional lane object; if provided the helper
 *                                      will update lane fields
  */
-export function startPrismAdditionAnimation(sourceVec, targetVec, lane) {
+export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComplete) {
     if (!sourceVec || !targetVec || !sourceVec.mesh || !targetVec.mesh) return;
     if (typeof TWEEN === 'undefined') {
         console.warn('TWEEN not available – addition animation skipped');
@@ -176,5 +176,12 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane) {
             }
             const topY = targetVec.group.position.y;
         }
+        if (typeof onComplete === 'function') {
+            try {
+                onComplete();
+            } catch (err) {
+                console.warn('Addition completion callback failed:', err);
+            }
+        }
     }, totalAnimTime + 100);
-} 
+}
