@@ -624,6 +624,9 @@ export default class Gpt2Layer extends BaseLayer {
                         if (lane.multTarget && lane.multTarget.group) {
                             lane.multTarget.group.visible = true;
                         }
+                        if (lane.addTarget && lane.addTarget.group) {
+                            lane.addTarget.group.visible = true;
+                        }
                         lane.horizPhase = 'insideLN';
                         this._emitProgress();
                     }
