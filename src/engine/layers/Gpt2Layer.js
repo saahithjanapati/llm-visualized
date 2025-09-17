@@ -98,6 +98,14 @@ export default class Gpt2Layer extends BaseLayer {
         this._ln1Start = false;        // start LN-1 branch
         this._mhsaStart = false;       // start horizontal travel to heads
         this._progressEmitter = null;  // external emitter for progress events
+
+        // Placeholder vectors shown inside inactive LayerNorms so the
+        // "addition" prisms are visible throughout the full stack even
+        // before a layer becomes active. When a layer is activated the
+        // placeholders are re-used as the live addition targets and removed
+        // from these arrays (see _buildSingleLane).
+        this._ln1AddPlaceholders = [];
+        this._ln2AddPlaceholders = [];
     }
 
     setProgressEmitter(emitter) { this._progressEmitter = emitter; }
@@ -189,6 +197,16 @@ export default class Gpt2Layer extends BaseLayer {
         this.root.add(ln2.group);
 
         const ln2TopY = ln2CenterY + LN_PARAMS.height / 2;
+
+        // When the layer is initially inactive (all layers above the first
+        // during tower construction) we still want the LayerNorm solids to
+        // display their static addition vectors. Create lightweight
+        // placeholders that will later be re-used by the live lane objects
+        // once the layer is activated. Active layers build their lanes
+        // immediately and therefore do not require placeholders.
+        if (!this.isActive) {
+            this._createAdditionPlaceholders(offsetX, ln1CenterY, ln2CenterY);
+        }
 
         // ────────────────────────────────────────────────────────────────
         // 4) MLP Up-projection matrix (orange)
@@ -1394,6 +1412,43 @@ export default class Gpt2Layer extends BaseLayer {
         for (let laneIdx = 0; laneIdx < NUM_VECTOR_LANES; laneIdx++) {
             this._buildSingleLane(null, offsetX, ln1CenterY, ln2CenterY, startY, meetY, laneIdx, slitSpacing);
         }
+        if (this._ln1AddPlaceholders && this._ln1AddPlaceholders.every(p => !p)) {
+            this._ln1AddPlaceholders = [];
+        }
+        if (this._ln2AddPlaceholders && this._ln2AddPlaceholders.every(p => !p)) {
+            this._ln2AddPlaceholders = [];
+        }
+    }
+
+    _createAdditionPlaceholders(offsetX, ln1CenterY, ln2CenterY) {
+        try {
+            const slitSpacing = LN_PARAMS.depth / (NUM_VECTOR_LANES + 1);
+            const addYOffset = LN_PARAMS.height * LN_ADD_VECTOR_OFFSET_FRACTION;
+
+            for (let laneIdx = 0; laneIdx < NUM_VECTOR_LANES; laneIdx++) {
+                const zPos = -LN_PARAMS.depth / 2 + slitSpacing * (laneIdx + 1);
+
+                const ln1PlaceholderData = this.random.nextVector(VECTOR_LENGTH_PRISM);
+                const ln1Placeholder = new VectorVisualizationInstancedPrism(
+                    ln1PlaceholderData,
+                    new THREE.Vector3(offsetX, ln1CenterY + addYOffset, zPos)
+                );
+                ln1Placeholder.group.visible = true;
+                this.root.add(ln1Placeholder.group);
+                this._ln1AddPlaceholders[laneIdx] = ln1Placeholder;
+
+                const ln2PlaceholderData = this.random.nextVector(VECTOR_LENGTH_PRISM);
+                const ln2Placeholder = new VectorVisualizationInstancedPrism(
+                    ln2PlaceholderData,
+                    new THREE.Vector3(offsetX, ln2CenterY + addYOffset, zPos)
+                );
+                ln2Placeholder.group.visible = true;
+                this.root.add(ln2Placeholder.group);
+                this._ln2AddPlaceholders[laneIdx] = ln2Placeholder;
+            }
+        } catch (_) {
+            // Placeholders are a visual aid only – failures shouldn't stop the demo.
+        }
     }
 
     _createLanesFromExternal(externalLanes, offsetX, ln1CenterY, ln2CenterY, ln1TopY) {
@@ -1403,6 +1458,12 @@ export default class Gpt2Layer extends BaseLayer {
         externalLanes.forEach((oldLane, laneIdx) => {
             this._buildSingleLane(oldLane, offsetX, ln1CenterY, ln2CenterY, null, meetY, laneIdx, null);
         });
+        if (this._ln1AddPlaceholders && this._ln1AddPlaceholders.every(p => !p)) {
+            this._ln1AddPlaceholders = [];
+        }
+        if (this._ln2AddPlaceholders && this._ln2AddPlaceholders.every(p => !p)) {
+            this._ln2AddPlaceholders = [];
+        }
     }
 
     _buildSingleLane(oldLane, offsetX, ln1CenterY, ln2CenterY, startY_override, meetY, laneIdx, slitSpacing) {
@@ -1483,21 +1544,40 @@ export default class Gpt2Layer extends BaseLayer {
         multTargetLN2.group.visible = false;
 
         const addYOffset = LN_PARAMS.height * LN_ADD_VECTOR_OFFSET_FRACTION;
-        const addTargetData = this.random.nextVector(VECTOR_LENGTH_PRISM);
-        const addTarget = new VectorVisualizationInstancedPrism(
-            addTargetData,
-            new THREE.Vector3(offsetX, ln1CenterY + addYOffset, zPos)
-        );
-        this.root.add(addTarget.group);
-        addTarget.group.visible = false;
 
-        const addTargetDataLn2 = this.random.nextVector(VECTOR_LENGTH_PRISM);
-        const addTargetLN2 = new VectorVisualizationInstancedPrism(
-            addTargetDataLn2,
-            new THREE.Vector3(offsetX, ln2CenterY + addYOffset, zPos)
-        );
-        this.root.add(addTargetLN2.group);
-        addTargetLN2.group.visible = false;
+        let addTarget = null;
+        if (this._ln1AddPlaceholders && this._ln1AddPlaceholders[laneIdx]) {
+            addTarget = this._ln1AddPlaceholders[laneIdx];
+            this._ln1AddPlaceholders[laneIdx] = null;
+            if (addTarget && addTarget.group && addTarget.group.parent !== this.root) {
+                this.root.add(addTarget.group);
+            }
+        } else {
+            const addTargetData = this.random.nextVector(VECTOR_LENGTH_PRISM);
+            addTarget = new VectorVisualizationInstancedPrism(
+                addTargetData,
+                new THREE.Vector3(offsetX, ln1CenterY + addYOffset, zPos)
+            );
+            this.root.add(addTarget.group);
+            if (addTarget.group) addTarget.group.visible = false;
+        }
+
+        let addTargetLN2 = null;
+        if (this._ln2AddPlaceholders && this._ln2AddPlaceholders[laneIdx]) {
+            addTargetLN2 = this._ln2AddPlaceholders[laneIdx];
+            this._ln2AddPlaceholders[laneIdx] = null;
+            if (addTargetLN2 && addTargetLN2.group && addTargetLN2.group.parent !== this.root) {
+                this.root.add(addTargetLN2.group);
+            }
+        } else {
+            const addTargetDataLn2 = this.random.nextVector(VECTOR_LENGTH_PRISM);
+            addTargetLN2 = new VectorVisualizationInstancedPrism(
+                addTargetDataLn2,
+                new THREE.Vector3(offsetX, ln2CenterY + addYOffset, zPos)
+            );
+            this.root.add(addTargetLN2.group);
+            if (addTargetLN2.group) addTargetLN2.group.visible = false;
+        }
 
         // Fallback to previous trail if a new one wasn't created in this constructor
         if (!trail && trailFromPrev) trail = trailFromPrev;
