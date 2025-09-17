@@ -662,6 +662,9 @@ export default class Gpt2Layer extends BaseLayer {
                         dupVec.group.position.y >= lane.ln1MidY - 0.01
                     ) {
                         lane.multStarted = true;
+                        if (lane.addTarget && lane.addTarget.group) {
+                            lane.addTarget.group.visible = true;
+                        }
                         if (lane.multTarget) {
                             lane.multTarget.group.visible = true;
                             simplePrismMultiply(dupVec, lane.multTarget, () => {
@@ -681,7 +684,6 @@ export default class Gpt2Layer extends BaseLayer {
                                     multResult.userData.trail = addTrail;
                                     multResult.userData.trailWorld = false;
 
-                                    lane.addTarget.group.visible = true;
                                     lane.resultVec = lane.addTarget;
                                     lane.ln1AddStarted = true;
                                     startPrismAdditionAnimation(multResult, lane.addTarget, null, () => {
@@ -829,10 +831,13 @@ export default class Gpt2Layer extends BaseLayer {
                         if (lane.multTargetLN2 && lane.multTargetLN2.group) {
                             lane.multTargetLN2.group.visible = true;
                         }
+                        if (lane.addTargetLN2 && lane.addTargetLN2.group) {
+                            lane.addTargetLN2.group.visible = true;
+                        }
                         lane.ln2Phase = 'insideLN';
                         this._emitProgress();
                     }
-                    
+
                     break;
                 }
                 
@@ -895,6 +900,9 @@ export default class Gpt2Layer extends BaseLayer {
                         mv.group.position.y >= midY_ln2_abs
                     ) {
                         lane.multDoneLN2 = true;
+                        if (lane.addTargetLN2 && lane.addTargetLN2.group) {
+                            lane.addTargetLN2.group.visible = true;
+                        }
                         if (lane.multTargetLN2) {
                             simplePrismMultiply(mv, lane.multTargetLN2, () => {
                                 mv.group.visible = false;
@@ -918,7 +926,6 @@ export default class Gpt2Layer extends BaseLayer {
                                     resVec.userData.trail = ln2AddTrail;
                                     resVec.userData.trailWorld = false;
 
-                                    lane.addTargetLN2.group.visible = true;
                                     lane.resultVecLN2 = lane.addTargetLN2;
                                     lane.ln2AddStarted = true;
                                     startPrismAdditionAnimation(resVec, lane.addTargetLN2, null, () => {
