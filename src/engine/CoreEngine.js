@@ -83,6 +83,10 @@ export class CoreEngine {
             : (QUALITY_PRESET === 'high' ? 2.0 : 1.5);
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, dprCap));
 
+        // Cache canvas bounds so pointer events can reuse them without forcing
+        // a layout read on every move event. Updated via the resize listener.
+        this._canvasRect = this.renderer.domElement.getBoundingClientRect();
+
         // ────────────────────────────────────────────────────────────────────
         // Raycasting setup for hover labels
         // ────────────────────────────────────────────────────────────────────
@@ -251,6 +255,7 @@ export class CoreEngine {
         this.camera.updateProjectionMatrix();
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         if (this.composer) this.composer.setSize(window.innerWidth, window.innerHeight);
+        this._canvasRect = this.renderer.domElement.getBoundingClientRect();
     };
 
     _onVisibility = () => {
@@ -267,7 +272,7 @@ export class CoreEngine {
         if (!this._raycastingEnabled) return;
         // Skip ray-casting while the camera is being manipulated to avoid frame hitches
         if (this._isUserNavigating) return;
-        const rect = this.renderer.domElement.getBoundingClientRect();
+        const rect = this._canvasRect;
         this._pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
         this._pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
