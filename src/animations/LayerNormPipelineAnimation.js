@@ -206,6 +206,7 @@ export function initLayerNormPipelineAnimation(container) {
         }
 
         const laneRef = lane && typeof lane === 'object' ? lane : null;
+        let resultVec = null;
         let resultRiseTrail = null;
         let trailBaseOpacity = 0;
         const trailUpdateVec = new THREE.Vector3();
@@ -214,7 +215,12 @@ export function initLayerNormPipelineAnimation(container) {
         const flashDuration = 150;
         const delayBetweenCubes = 75;
         const vectorLength = vec1.ellipses.length;
+        const centerIndex = Math.floor(vectorLength / 2);
         let completed = 0;
+        let riseStarted = false;
+        let riseCompleted = false;
+        let fadeStarted = false;
+        let additionCompleted = false;
 
         console.log("Starting vector addition animation sequence...");
 
@@ -251,19 +257,34 @@ export function initLayerNormPipelineAnimation(container) {
                             // Compute addition and update target
                             const sum = vec1.data[i] + vec2.data[i];
                             vec2.data[i] = sum;
-                            
+
                             // Apply new color based on sum
                             const newColor = mapValueToColor(sum);
                             ellipse2.material.color.copy(newColor);
                             ellipse2.material.emissive.copy(newColor);
                             ellipse2.material.emissiveIntensity = originalIntensity;
-                            
+
+                            if (resultVec && resultVec.ellipses[i]) {
+                                const resEllipse = resultVec.ellipses[i];
+                                if (resEllipse.material) {
+                                    resEllipse.material.color.copy(newColor);
+                                    resEllipse.material.emissive.copy(newColor);
+                                    resEllipse.material.emissiveIntensity = originalIntensity;
+                                }
+                                resultVec.data[i] = sum;
+                            }
+
                             // Hide source ellipse
                             ellipse1.visible = false;
-                            
+
+                            if (!riseStarted && i === centerIndex) {
+                                beginResultRise();
+                            }
+
                             completed++;
                             if (completed === vectorLength) {
-                                startRisePhase();
+                                additionCompleted = true;
+                                handleAdditionComplete();
                             }
                         });
                     flashTween.start();
@@ -271,39 +292,33 @@ export function initLayerNormPipelineAnimation(container) {
             moveTween.start();
         }
 
-        // After addition complete, create separate rise animation
-        function startRisePhase() {
-            console.log("Addition complete - rising phase starting");
-            
-            // Store data and appearance for rising vector
+        function ensureResultVector() {
+            if (resultVec) return resultVec;
+
             const resultData = [...vec2.data];
-            const resultMaterials = vec2.ellipses.map(e => ({
-                color: e.material.color.clone(),
-                emissive: e.material.emissive.clone(),
-                intensity: e.material.emissiveIntensity
-            }));
-            
-            // Create rising vector copy
-            const resultVec = new VectorVisualization(resultData, vec2.group.position.clone());
+            resultVec = new VectorVisualization(resultData, vec2.group.position.clone());
             resultVec.data = resultData;
             scene.add(resultVec.group);
             if (laneRef) laneRef.resultVec = resultVec;
 
-            // Apply stored appearance
             for (let i = 0; i < vectorLength; i++) {
-                if (resultMaterials[i] && resultVec.ellipses[i]) {
-                    resultVec.ellipses[i].material.color.copy(resultMaterials[i].color);
-                    resultVec.ellipses[i].material.emissive.copy(resultMaterials[i].emissive);
-                    resultVec.ellipses[i].material.emissiveIntensity = resultMaterials[i].intensity;
+                const src = vec2.ellipses[i];
+                const dst = resultVec.ellipses[i];
+                if (src && dst && src.material && dst.material) {
+                    dst.material.color.copy(src.material.color);
+                    dst.material.emissive.copy(src.material.emissive);
+                    dst.material.emissiveIntensity = src.material.emissiveIntensity;
                 }
             }
 
-            // Hide original vector
-            vec2.group.visible = false;
+            return resultVec;
+        }
 
-            // Create trail that follows the rising result vector immediately
+        function ensureTrail() {
+            if (resultRiseTrail) return;
             try {
-                resultVec.group.getWorldPosition(trailUpdateVec);
+                const vec = ensureResultVector();
+                vec.group.getWorldPosition(trailUpdateVec);
                 resultRiseTrail = new StraightLineTrail(scene);
                 resultRiseTrail.start(trailUpdateVec.clone());
                 trailBaseOpacity = typeof resultRiseTrail.getBaseOpacity === 'function'
@@ -314,54 +329,74 @@ export function initLayerNormPipelineAnimation(container) {
                 console.warn('Failed to initialise layernorm addition trail:', err);
                 resultRiseTrail = null;
             }
+        }
 
-            // Calculate rise with constant velocity
+        function beginResultRise() {
+            if (riseStarted) return;
+            const vec = ensureResultVector();
+            riseStarted = true;
+
+            ensureTrail();
+
             const finalY = lnParams.height / 2 + offsetY / 2;
-            const distance = finalY - resultVec.group.position.y;
+            const distance = finalY - vec.group.position.y;
             const riseSpeed = 5; // units per second
-            const riseDuration = (distance / riseSpeed) * 1000;
+            const riseDuration = Math.max(0, (distance / riseSpeed) * 1000);
 
-            // Rise animation
-            new TWEEN.Tween(resultVec.group.position)
+            new TWEEN.Tween(vec.group.position)
                 .to({ y: finalY }, riseDuration)
-                .easing(TWEEN.Easing.Linear.None) // Constant velocity
+                .easing(TWEEN.Easing.Linear.None)
                 .onUpdate(() => {
                     if (resultRiseTrail) {
-                        resultVec.group.getWorldPosition(trailUpdateVec);
+                        vec.group.getWorldPosition(trailUpdateVec);
                         resultRiseTrail.update(trailUpdateVec);
                     }
                 })
                 .onComplete(() => {
                     if (resultRiseTrail) {
-                        resultVec.group.getWorldPosition(trailUpdateVec);
+                        vec.group.getWorldPosition(trailUpdateVec);
                         resultRiseTrail.update(trailUpdateVec);
                     }
-                    // Fade out
-                    new TWEEN.Tween({ opacity: 1 })
-                        .to({ opacity: 0 }, 1000)
-                        .onUpdate(obj => {
-                            resultVec.ellipses.forEach(ellipse => {
-                                if (ellipse && ellipse.material) {
-                                    ellipse.material.opacity = obj.opacity;
-                                    ellipse.material.transparent = true;
-                                }
-                            });
-                            if (resultRiseTrail) {
-                                resultRiseTrail.setBaseOpacity(trailBaseOpacity * obj.opacity);
-                            }
-                        })
-                        .onComplete(() => {
-                            if (resultRiseTrail) {
-                                resultRiseTrail.dispose();
-                                resultRiseTrail = null;
-                                if (laneRef) laneRef.resultTrail = null;
-                            }
-                            if (laneRef) laneRef.resultVec = null;
-                            scene.remove(resultVec.group);
-                            resultVec.dispose();
-                            if (onComplete) onComplete();
-                        })
-                        .start();
+                    riseCompleted = true;
+                    maybeStartFade();
+                })
+                .start();
+        }
+
+        function handleAdditionComplete() {
+            if (!additionCompleted) additionCompleted = true;
+            if (vec2.group) vec2.group.visible = false;
+            beginResultRise();
+            maybeStartFade();
+        }
+
+        function maybeStartFade() {
+            if (fadeStarted || !riseCompleted || !additionCompleted || !resultVec) return;
+            fadeStarted = true;
+            new TWEEN.Tween({ opacity: 1 })
+                .to({ opacity: 0 }, 1000)
+                .onUpdate(obj => {
+                    resultVec.ellipses.forEach(ellipse => {
+                        if (ellipse && ellipse.material) {
+                            ellipse.material.opacity = obj.opacity;
+                            ellipse.material.transparent = true;
+                        }
+                    });
+                    if (resultRiseTrail) {
+                        resultRiseTrail.setBaseOpacity(trailBaseOpacity * obj.opacity);
+                    }
+                })
+                .onComplete(() => {
+                    if (resultRiseTrail) {
+                        resultRiseTrail.dispose();
+                        resultRiseTrail = null;
+                        if (laneRef) laneRef.resultTrail = null;
+                    }
+                    if (laneRef) laneRef.resultVec = null;
+                    scene.remove(resultVec.group);
+                    resultVec.dispose();
+                    resultVec = null;
+                    if (onComplete) onComplete();
                 })
                 .start();
         }
