@@ -210,22 +210,26 @@ export function initLayerNormPipelineAnimation(container) {
         let resultRiseTrail = null;
         let trailBaseOpacity = 0;
         const trailUpdateVec = new THREE.Vector3();
+        const centreWorldPos = new THREE.Vector3();
+        const centreStartWorldPos = new THREE.Vector3();
+        if (laneRef) laneRef.__lnTrailState = { lastY: -Infinity };
+        const laneTrailState = laneRef ? laneRef.__lnTrailState : null;
 
         const duration = 750;
         const flashDuration = 150;
         const delayBetweenCubes = 75;
         const vectorLength = vec1.ellipses.length;
         const centerIndex = Math.floor(vectorLength / 2);
-        const centerIndices = vectorLength % 2 === 0
-            ? new Set([Math.max(0, centerIndex - 1), centerIndex])
-            : new Set([centerIndex]);
+        const centerIndexArray = vectorLength % 2 === 0
+            ? [Math.max(0, centerIndex - 1), centerIndex]
+            : [centerIndex];
+        const centerIndices = new Set(centerIndexArray);
+        const leadCenterIndex = centerIndexArray[0];
         let completed = 0;
         let riseStarted = false;
         let riseCompleted = false;
         let fadeStarted = false;
         let additionCompleted = false;
-
-        console.log("Starting vector addition animation sequence...");
 
         for (let i = 0; i < vectorLength; i++) {
             const ellipse1 = vec1.ellipses[i];
@@ -239,6 +243,7 @@ export function initLayerNormPipelineAnimation(container) {
 
             // First movement phase
             const isCenterSlot = centerIndices.has(i);
+            const isLeadCenterSlot = i === leadCenterIndex;
 
             const moveTween = new TWEEN.Tween(ellipse1.position)
                 .to({ y: localTargetPosition.y }, duration)
@@ -283,7 +288,9 @@ export function initLayerNormPipelineAnimation(container) {
                             ellipse1.visible = false;
 
                             if (!riseStarted && isCenterSlot) {
-                                beginResultRise();
+                                ellipse1.getWorldPosition(centreWorldPos);
+                                if (laneTrailState) laneTrailState.lastY = centreWorldPos.y;
+                                beginResultRise(centreWorldPos);
                             }
 
                             completed++;
@@ -294,7 +301,25 @@ export function initLayerNormPipelineAnimation(container) {
                         });
                     flashTween.start();
                 });
-            if (isCenterSlot) {
+            if (isLeadCenterSlot) {
+                moveTween.onStart(() => {
+                    ellipse1.getWorldPosition(centreStartWorldPos);
+                    if (laneTrailState) laneTrailState.lastY = centreStartWorldPos.y;
+                    beginResultRise(centreStartWorldPos);
+                });
+                moveTween.onUpdate(() => {
+                    if (!riseStarted || !resultRiseTrail) return;
+                    ellipse1.getWorldPosition(centreWorldPos);
+                    const lastY = laneTrailState && typeof laneTrailState.lastY === 'number'
+                        ? laneTrailState.lastY
+                        : null;
+                    const threshold = 1e-3;
+                    if (lastY === null || centreWorldPos.y >= lastY - threshold) {
+                        resultRiseTrail.update(centreWorldPos);
+                        if (laneTrailState) laneTrailState.lastY = centreWorldPos.y;
+                    }
+                });
+            } else if (isCenterSlot) {
                 moveTween.onStart(() => {
                     beginResultRise();
                 });
@@ -324,13 +349,19 @@ export function initLayerNormPipelineAnimation(container) {
             return resultVec;
         }
 
-        function ensureTrail() {
+        function ensureTrail(initialWorldPos) {
             if (resultRiseTrail) return;
             try {
                 const vec = ensureResultVector();
-                vec.group.getWorldPosition(trailUpdateVec);
+                let startPos;
+                if (initialWorldPos) {
+                    startPos = initialWorldPos.clone();
+                } else {
+                    vec.group.getWorldPosition(trailUpdateVec);
+                    startPos = trailUpdateVec.clone();
+                }
                 resultRiseTrail = new StraightLineTrail(scene);
-                resultRiseTrail.start(trailUpdateVec.clone());
+                resultRiseTrail.start(startPos);
                 trailBaseOpacity = typeof resultRiseTrail.getBaseOpacity === 'function'
                     ? resultRiseTrail.getBaseOpacity()
                     : 0;
@@ -341,12 +372,20 @@ export function initLayerNormPipelineAnimation(container) {
             }
         }
 
-        function beginResultRise() {
+        function beginResultRise(initialTrailPos) {
             if (riseStarted) return;
             const vec = ensureResultVector();
             riseStarted = true;
 
-            ensureTrail();
+            ensureTrail(initialTrailPos);
+            if (laneTrailState) {
+                if (initialTrailPos) {
+                    laneTrailState.lastY = initialTrailPos.y;
+                } else {
+                    vec.group.getWorldPosition(trailUpdateVec);
+                    laneTrailState.lastY = trailUpdateVec.y;
+                }
+            }
 
             const finalY = lnParams.height / 2 + offsetY / 2;
             const distance = finalY - vec.group.position.y;
@@ -360,12 +399,24 @@ export function initLayerNormPipelineAnimation(container) {
                     if (resultRiseTrail) {
                         vec.group.getWorldPosition(trailUpdateVec);
                         resultRiseTrail.update(trailUpdateVec);
+                        if (laneTrailState) {
+                            const current = trailUpdateVec.y;
+                            if (!Number.isFinite(laneTrailState.lastY) || current >= laneTrailState.lastY) {
+                                laneTrailState.lastY = current;
+                            }
+                        }
                     }
                 })
                 .onComplete(() => {
                     if (resultRiseTrail) {
                         vec.group.getWorldPosition(trailUpdateVec);
                         resultRiseTrail.update(trailUpdateVec);
+                        if (laneTrailState) {
+                            const current = trailUpdateVec.y;
+                            if (!Number.isFinite(laneTrailState.lastY) || current >= laneTrailState.lastY) {
+                                laneTrailState.lastY = current;
+                            }
+                        }
                     }
                     riseCompleted = true;
                     maybeStartFade();
@@ -403,6 +454,7 @@ export function initLayerNormPipelineAnimation(container) {
                         if (laneRef) laneRef.resultTrail = null;
                     }
                     if (laneRef) laneRef.resultVec = null;
+                    if (laneRef) laneRef.__lnTrailState = null;
                     scene.remove(resultVec.group);
                     resultVec.dispose();
                     resultVec = null;
