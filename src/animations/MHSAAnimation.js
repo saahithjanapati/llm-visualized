@@ -845,6 +845,7 @@ export class MHSAAnimation {
         const tmpPos = new THREE.Vector3();
         const tmpQuat = new THREE.Quaternion();
         const tmpScale = new THREE.Vector3();
+        const tmpColor = new THREE.Color();
         const dummy = new THREE.Object3D();
 
         // Populate instances by copying per-prism transforms and colours from the original vectors
@@ -902,15 +903,34 @@ export class MHSAAnimation {
                     colorEndArr[instIndex * 3 + 0] = srcCE.array[i3 + 0] || 0.5;
                     colorEndArr[instIndex * 3 + 1] = srcCE.array[i3 + 1] || 0.5;
                     colorEndArr[instIndex * 3 + 2] = srcCE.array[i3 + 2] || 0.5;
+                    tmpColor.setRGB(
+                        (colorStartArr[instIndex * 3 + 0] + colorEndArr[instIndex * 3 + 0]) * 0.5,
+                        (colorStartArr[instIndex * 3 + 1] + colorEndArr[instIndex * 3 + 1]) * 0.5,
+                        (colorStartArr[instIndex * 3 + 2] + colorEndArr[instIndex * 3 + 2]) * 0.5,
+                    );
                 } else if (typeof vec.getDefaultColorForIndex === 'function') {
                     const leftColor  = vec.getDefaultColorForIndex(Math.max(0, i - 1));
                     const rightColor = vec.getDefaultColorForIndex(Math.min(VECTOR_LENGTH_PRISM - 1, i + 1));
                     colorStartArr[instIndex * 3 + 0] = leftColor.r;  colorStartArr[instIndex * 3 + 1] = leftColor.g;  colorStartArr[instIndex * 3 + 2] = leftColor.b;
                     colorEndArr[instIndex * 3 + 0]   = rightColor.r; colorEndArr[instIndex * 3 + 1]   = rightColor.g; colorEndArr[instIndex * 3 + 2]   = rightColor.b;
+                    tmpColor.copy(leftColor).lerp(rightColor, 0.5);
                 } else {
                     // Neutral grey fallback
                     colorStartArr[instIndex * 3 + 0] = 0.5; colorStartArr[instIndex * 3 + 1] = 0.5; colorStartArr[instIndex * 3 + 2] = 0.5;
                     colorEndArr[instIndex * 3 + 0]   = 0.5; colorEndArr[instIndex * 3 + 1]   = 0.5; colorEndArr[instIndex * 3 + 2]   = 0.5;
+                    tmpColor.setRGB(0.5, 0.5, 0.5);
+                }
+
+                // Preserve per-instance colour used by effects that rely on instanceColor buffers.
+                if (vec.mesh && typeof vec.mesh.getColorAt === 'function' && vec.mesh.instanceColor) {
+                    try {
+                        vec.mesh.getColorAt(i, tmpColor);
+                    } catch (_) {
+                        // Fall back to the average of gradient colours computed above.
+                    }
+                }
+                if (typeof instanced.setColorAt === 'function') {
+                    instanced.setColorAt(instIndex, tmpColor);
                 }
             }
         }
@@ -918,6 +938,9 @@ export class MHSAAnimation {
         instanced.instanceMatrix.needsUpdate = true;
         colorStartAttr.needsUpdate = true;
         colorEndAttr.needsUpdate = true;
+        if (instanced.instanceColor) {
+            instanced.instanceColor.needsUpdate = true;
+        }
 
         const group = new THREE.Group();
         group.name = debugName;
