@@ -219,12 +219,23 @@ export function initLayerNormPipelineAnimation(container) {
         const flashDuration = 150;
         const delayBetweenCubes = 75;
         const vectorLength = vec1.ellipses.length;
-        const centerIndex = Math.floor(vectorLength / 2);
+        const rawCenterIndex = Math.floor(vectorLength / 2);
         const centerIndexArray = vectorLength % 2 === 0
-            ? [Math.max(0, centerIndex - 1), centerIndex]
-            : [centerIndex];
+            ? [rawCenterIndex, Math.max(0, rawCenterIndex - 1)]
+            : [rawCenterIndex];
         const centerIndices = new Set(centerIndexArray);
-        const leadCenterIndex = centerIndexArray[0];
+        let leadCenterIndex = centerIndexArray[0];
+        let leadAbsX = Infinity;
+        for (const idx of centerIndexArray) {
+            const ellipse = vec1.ellipses[idx] || vec2.ellipses[idx];
+            if (!ellipse) continue;
+            const absX = Math.abs(ellipse.position.x ?? 0);
+            if (!Number.isFinite(absX)) continue;
+            if (absX < leadAbsX) {
+                leadAbsX = absX;
+                leadCenterIndex = idx;
+            }
+        }
         let completed = 0;
         let riseStarted = false;
         let riseCompleted = false;
