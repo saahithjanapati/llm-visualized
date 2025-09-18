@@ -242,6 +242,14 @@ export function initLayerNormPipelineAnimation(container) {
         let fadeStarted = false;
         let additionCompleted = false;
 
+        // Launch centre elements first so the perceived "middle" unit begins moving
+        // immediately, mirroring the residual stream animation and allowing the
+        // trail to appear while addition is still in progress.
+        const computeDelay = index => {
+            const offset = Math.abs(index - leadCenterIndex);
+            return offset * delayBetweenCubes;
+        };
+
         for (let i = 0; i < vectorLength; i++) {
             const ellipse1 = vec1.ellipses[i];
             const ellipse2 = vec2.ellipses[i];
@@ -259,7 +267,7 @@ export function initLayerNormPipelineAnimation(container) {
             const moveTween = new TWEEN.Tween(ellipse1.position)
                 .to({ y: localTargetPosition.y }, duration)
                 .easing(TWEEN.Easing.Quadratic.InOut)
-                .delay(i * delayBetweenCubes)
+                .delay(computeDelay(i))
                 .onComplete(() => {
                     // Store original properties for restoration later
                     const originalColor = ellipse2.material.color.clone();
@@ -387,6 +395,10 @@ export function initLayerNormPipelineAnimation(container) {
             if (riseStarted) return;
             const vec = ensureResultVector();
             riseStarted = true;
+
+            if (initialTrailPos) {
+                vec.group.position.copy(initialTrailPos);
+            }
 
             ensureTrail(initialTrailPos);
             if (laneTrailState) {
