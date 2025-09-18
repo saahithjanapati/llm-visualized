@@ -35,6 +35,11 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
         return;
     }
 
+    // Ensure a metadata container exists so we can store residual trail state
+    // even when no lane object is available (e.g. LayerNorm additions create
+    // temporary vectors without full lane context).
+    sourceVec.userData = sourceVec.userData || {};
+
     // Freeze upward movement of the source so its group position remains static.
     if (lane) {
         lane.stopRise = true;
@@ -56,6 +61,16 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
         const svUD = sourceVec.group.userData;
         svUD.stopRise = true;
         svUD.stopRiseTarget = targetVec.group;
+        try {
+            const centreIndex = Math.floor(VECTOR_LENGTH_PRISM / 2);
+            const instMat = new THREE.Matrix4();
+            sourceVec.mesh.getMatrixAt(centreIndex, instMat);
+            const centreWorld = new THREE.Vector3().setFromMatrixPosition(instMat).applyMatrix4(sourceVec.group.matrixWorld);
+            sourceVec.userData.__residualMaxY =
+                (typeof centreWorld.y === 'number') ? centreWorld.y - 0.001 : undefined;
+        } catch (err) {
+            console.warn('Failed to init residual trail:', err);
+        }
     }
 
     const vectorLength = VECTOR_LENGTH_PRISM;
@@ -124,11 +139,16 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
                             const residualTrail = (lane && lane.originalTrail)
                                 || (sourceVec && sourceVec.userData && sourceVec.userData.trail)
                                 || null;
-                            if (residualTrail && typeof residualTrail.update === 'function') {
-                                if (typeof lane.__residualMaxY !== 'number') lane.__residualMaxY = wPos.y - 0.001;
-                                if (wPos.y >= lane.__residualMaxY) {
+                            const residualOwner = lane
+                                || (sourceVec && sourceVec.userData)
+                                || null;
+                            if (residualTrail && residualOwner && typeof residualTrail.update === 'function') {
+                                if (typeof residualOwner.__residualMaxY !== 'number') {
+                                    residualOwner.__residualMaxY = wPos.y - 0.001;
+                                }
+                                if (wPos.y >= residualOwner.__residualMaxY) {
                                     residualTrail.update(wPos);
-                                    lane.__residualMaxY = wPos.y;
+                                    residualOwner.__residualMaxY = wPos.y;
                                 }
                             }
                         }
