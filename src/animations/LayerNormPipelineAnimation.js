@@ -216,6 +216,9 @@ export function initLayerNormPipelineAnimation(container) {
         const delayBetweenCubes = 75;
         const vectorLength = vec1.ellipses.length;
         const centerIndex = Math.floor(vectorLength / 2);
+        const centerIndices = vectorLength % 2 === 0
+            ? new Set([Math.max(0, centerIndex - 1), centerIndex])
+            : new Set([centerIndex]);
         let completed = 0;
         let riseStarted = false;
         let riseCompleted = false;
@@ -235,6 +238,8 @@ export function initLayerNormPipelineAnimation(container) {
             const localTargetPosition = ellipse1.parent.worldToLocal(targetPosition.clone());
 
             // First movement phase
+            const isCenterSlot = centerIndices.has(i);
+
             const moveTween = new TWEEN.Tween(ellipse1.position)
                 .to({ y: localTargetPosition.y }, duration)
                 .easing(TWEEN.Easing.Quadratic.InOut)
@@ -277,7 +282,7 @@ export function initLayerNormPipelineAnimation(container) {
                             // Hide source ellipse
                             ellipse1.visible = false;
 
-                            if (!riseStarted && i === centerIndex) {
+                            if (!riseStarted && isCenterSlot) {
                                 beginResultRise();
                             }
 
@@ -289,6 +294,11 @@ export function initLayerNormPipelineAnimation(container) {
                         });
                     flashTween.start();
                 });
+            if (isCenterSlot) {
+                moveTween.onStart(() => {
+                    beginResultRise();
+                });
+            }
             moveTween.start();
         }
 
