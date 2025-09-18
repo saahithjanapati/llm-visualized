@@ -8,6 +8,7 @@ import { VectorNormalizationVisualization } from '../components/VectorNormalizat
 import { VectorVisualization } from '../components/VectorVisualization.js';
 import { VECTOR_LENGTH } from '../utils/constants.js';
 import { mapValueToColor } from '../utils/colors.js';
+import { StraightLineTrail } from '../utils/trailUtils.js';
 
 // NOTE: Requires global TWEEN.js (as the individual animation helpers rely on it)
 
@@ -116,6 +117,8 @@ export function initLayerNormPipelineAnimation(container) {
             movingVec,
             multTarget,
             addVec,
+            resultVec: null,
+            resultTrail: null,
             // State flags
             normStarted: false,
             multStarted: false,
@@ -194,11 +197,22 @@ export function initLayerNormPipelineAnimation(container) {
         }
     }
 
-    // Helper: addition animation with callback - EXACT match to VectorAdditionAnimation.js
-    function startAdditionAnimation(vec1, vec2, onComplete) {
-        const duration = 750; 
+    // Helper: addition animation with callback - based on VectorAdditionAnimation.js
+    // but extended with residual-style trailing lines for the rising result vector.
+    function startAdditionAnimation(vec1, vec2, lane, onComplete) {
+        if (typeof lane === 'function' && onComplete === undefined) {
+            onComplete = lane;
+            lane = null;
+        }
+
+        const laneRef = lane && typeof lane === 'object' ? lane : null;
+        let resultRiseTrail = null;
+        let trailBaseOpacity = 0;
+        const trailUpdateVec = new THREE.Vector3();
+
+        const duration = 750;
         const flashDuration = 150;
-        const delayBetweenCubes = 75; 
+        const delayBetweenCubes = 75;
         const vectorLength = vec1.ellipses.length;
         let completed = 0;
 
@@ -273,7 +287,8 @@ export function initLayerNormPipelineAnimation(container) {
             const resultVec = new VectorVisualization(resultData, vec2.group.position.clone());
             resultVec.data = resultData;
             scene.add(resultVec.group);
-            
+            if (laneRef) laneRef.resultVec = resultVec;
+
             // Apply stored appearance
             for (let i = 0; i < vectorLength; i++) {
                 if (resultMaterials[i] && resultVec.ellipses[i]) {
@@ -282,21 +297,45 @@ export function initLayerNormPipelineAnimation(container) {
                     resultVec.ellipses[i].material.emissiveIntensity = resultMaterials[i].intensity;
                 }
             }
-            
+
             // Hide original vector
             vec2.group.visible = false;
-            
+
+            // Create trail that follows the rising result vector immediately
+            try {
+                resultVec.group.getWorldPosition(trailUpdateVec);
+                resultRiseTrail = new StraightLineTrail(scene);
+                resultRiseTrail.start(trailUpdateVec.clone());
+                trailBaseOpacity = typeof resultRiseTrail.getBaseOpacity === 'function'
+                    ? resultRiseTrail.getBaseOpacity()
+                    : 0;
+                if (laneRef) laneRef.resultTrail = resultRiseTrail;
+            } catch (err) {
+                console.warn('Failed to initialise layernorm addition trail:', err);
+                resultRiseTrail = null;
+            }
+
             // Calculate rise with constant velocity
             const finalY = lnParams.height / 2 + offsetY / 2;
             const distance = finalY - resultVec.group.position.y;
             const riseSpeed = 5; // units per second
             const riseDuration = (distance / riseSpeed) * 1000;
-            
+
             // Rise animation
             new TWEEN.Tween(resultVec.group.position)
                 .to({ y: finalY }, riseDuration)
                 .easing(TWEEN.Easing.Linear.None) // Constant velocity
+                .onUpdate(() => {
+                    if (resultRiseTrail) {
+                        resultVec.group.getWorldPosition(trailUpdateVec);
+                        resultRiseTrail.update(trailUpdateVec);
+                    }
+                })
                 .onComplete(() => {
+                    if (resultRiseTrail) {
+                        resultVec.group.getWorldPosition(trailUpdateVec);
+                        resultRiseTrail.update(trailUpdateVec);
+                    }
                     // Fade out
                     new TWEEN.Tween({ opacity: 1 })
                         .to({ opacity: 0 }, 1000)
@@ -307,8 +346,17 @@ export function initLayerNormPipelineAnimation(container) {
                                     ellipse.material.transparent = true;
                                 }
                             });
+                            if (resultRiseTrail) {
+                                resultRiseTrail.setBaseOpacity(trailBaseOpacity * obj.opacity);
+                            }
                         })
                         .onComplete(() => {
+                            if (resultRiseTrail) {
+                                resultRiseTrail.dispose();
+                                resultRiseTrail = null;
+                                if (laneRef) laneRef.resultTrail = null;
+                            }
+                            if (laneRef) laneRef.resultVec = null;
                             scene.remove(resultVec.group);
                             resultVec.dispose();
                             if (onComplete) onComplete();
@@ -392,7 +440,7 @@ export function initLayerNormPipelineAnimation(container) {
             if (l.multDone && !l.addStarted) {
                 l.addStarted = true;
                 // Swap the order so the *main* vector (multTarget) moves upward to the static addition vector.
-                startAdditionAnimation(l.multTarget, l.addVec, () => {
+                startAdditionAnimation(l.multTarget, l.addVec, l, () => {
                     l.addDone = true;
                     l.addVec.group.visible = false;
                 });
@@ -416,6 +464,15 @@ export function initLayerNormPipelineAnimation(container) {
             l.movingVec.dispose();
             l.multTarget.dispose();
             l.addVec.dispose();
+            if (l.resultVec) {
+                scene.remove(l.resultVec.group);
+                l.resultVec.dispose();
+                l.resultVec = null;
+            }
+            if (l.resultTrail) {
+                l.resultTrail.dispose();
+                l.resultTrail = null;
+            }
         });
         layerNormVis.dispose();
         scene.traverse(obj => {
