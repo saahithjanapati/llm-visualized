@@ -149,6 +149,13 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
                                         wPos.y = clampY;
                                     }
                                     if (typeof residualOwner.__residualMaxY === 'number' && residualOwner.__residualMaxY > clampY) {
+                                        if (typeof residualTrail.clampMaxY === 'function') {
+                                            try {
+                                                residualTrail.clampMaxY(clampY);
+                                            } catch (clampErr) {
+                                                console.warn('Residual trail clamp failed:', clampErr);
+                                            }
+                                        }
                                         residualOwner.__residualMaxY = clampY;
                                     }
                                 }
