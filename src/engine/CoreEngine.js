@@ -34,6 +34,9 @@ export class CoreEngine {
         this.scene.background = new THREE.Color(0x000000);
 
         this._cameraFarMargin = typeof opts.cameraFarMargin === 'number' ? opts.cameraFarMargin : 0;
+        this._cameraMaxDistance = (typeof opts.cameraMaxDistance === 'number' && opts.cameraMaxDistance > 0)
+            ? opts.cameraMaxDistance
+            : null;
 
         this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 5, 10000);
         this.camera.position.set(0, 150, 800);
@@ -160,6 +163,7 @@ export class CoreEngine {
         } else {
             this.controls.target.set(0, 66, 0);
         }
+        this._applyCameraZoomLimit();
         this._updateCameraFarFromControls();
 
         this.scene.add(new THREE.AmbientLight(0xffffff, 0.7));
@@ -351,6 +355,43 @@ export class CoreEngine {
         if (desiredFar > this.camera.far) {
             this.camera.far = desiredFar;
             this.camera.updateProjectionMatrix();
+        }
+    }
+
+    _applyCameraZoomLimit() {
+        if (!this.camera || !this.controls) return;
+        const margin = Math.max(0, this._cameraFarMargin || 0);
+        let maxDistance = this._cameraMaxDistance;
+
+        const targetClone = this.controls.target ? this.controls.target.clone() : null;
+        let distToTarget = 0;
+        try {
+            if (targetClone) {
+                distToTarget = this.camera.position.distanceTo(targetClone);
+            }
+        } catch (_) { /* non-fatal */ }
+
+        if (!distToTarget) {
+            try {
+                distToTarget = this.camera.position.length();
+            } catch (_) {
+                distToTarget = 0;
+            }
+        }
+
+        if (!(typeof maxDistance === 'number' && maxDistance > 0)) {
+            const baseDistance = distToTarget > 0 ? distToTarget : 1000;
+            if (margin > 0) {
+                maxDistance = baseDistance + margin * 0.85;
+            } else {
+                maxDistance = Math.max(baseDistance * 4, baseDistance + 2000);
+            }
+            maxDistance = Math.max(maxDistance, baseDistance + 1);
+        }
+
+        if (typeof maxDistance === 'number' && Number.isFinite(maxDistance) && maxDistance > 0) {
+            this._cameraMaxDistance = maxDistance;
+            this.controls.maxDistance = maxDistance;
         }
     }
 
