@@ -59,6 +59,14 @@ export class LayerPipeline extends EventTarget {
         // ------------------------------------------------------------------
 
         const engineOpts = { ...opts };
+        if (typeof engineOpts.cameraFarMargin !== 'number') {
+            const DEFAULT_CAMERA_FAR_MARGIN = 40000;
+            // Provide additional depth so tall transformer stacks remain visible
+            // when the user zooms far away from the tower. The allowance scales
+            // with layer count but never drops below the default margin.
+            const approxTowerAllowance = Math.max(DEFAULT_CAMERA_FAR_MARGIN, this._numLayers * 1800);
+            engineOpts.cameraFarMargin = approxTowerAllowance;
+        }
         this._engine = new CoreEngine(canvas, [], engineOpts);
 
         for (let i = 0; i < this._numLayers; i++) {

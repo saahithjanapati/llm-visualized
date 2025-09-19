@@ -33,6 +33,11 @@ export class CoreEngine {
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x000000);
 
+        this._cameraFarMargin = typeof opts.cameraFarMargin === 'number' ? opts.cameraFarMargin : 0;
+        this._cameraMaxDistance = (typeof opts.cameraMaxDistance === 'number' && opts.cameraMaxDistance > 0)
+            ? opts.cameraMaxDistance
+            : null;
+
         this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 5, 10000);
         this.camera.position.set(0, 150, 800);
 
@@ -62,7 +67,8 @@ export class CoreEngine {
             this.camera.updateProjectionMatrix();
         } else if (opts.cameraPosition) {
             const distFromOrigin = this.camera.position.length();
-            const suggestedFar = distFromOrigin * 2.5; // generous margin
+            const margin = Math.max(0, this._cameraFarMargin);
+            const suggestedFar = distFromOrigin * 2.5 + margin; // generous margin + scene allowance
             if (suggestedFar > this.camera.far) {
                 this.camera.far = suggestedFar;
                 this.camera.updateProjectionMatrix();
@@ -150,11 +156,15 @@ export class CoreEngine {
         // OrbitControls dispatches "start"/"end" events when interaction begins/ends
         this.controls.addEventListener('start', () => { this._isUserNavigating = true; });
         this.controls.addEventListener('end',   () => { this._isUserNavigating = false; });
+        this._updateCameraFarFromControls = this._updateCameraFarFromControls.bind(this);
+        this.controls.addEventListener('change', this._updateCameraFarFromControls);
         if (customTarget) {
             this.controls.target.copy(customTarget);
         } else {
             this.controls.target.set(0, 66, 0);
         }
+        this._applyCameraZoomLimit();
+        this._updateCameraFarFromControls();
 
         this.scene.add(new THREE.AmbientLight(0xffffff, 0.7));
         const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
@@ -227,7 +237,10 @@ export class CoreEngine {
     dispose() {
         window.removeEventListener('resize', this._onResize);
         document.removeEventListener('visibilitychange', this._onVisibility);
-        this.controls.dispose();
+        if (this.controls) {
+            this.controls.removeEventListener('change', this._updateCameraFarFromControls);
+            this.controls.dispose();
+        }
         this._layers.forEach(l => l.dispose());
 
         this.scene.traverse(obj => {
@@ -323,6 +336,64 @@ export class CoreEngine {
         // No intersection with a labelled object – hide overlay.
         this._hoverLabelDiv.style.display = 'none';
     };
+
+    _updateCameraFarFromControls() {
+        if (!this.camera || !this.controls) return;
+        const margin = Math.max(0, this._cameraFarMargin || 0);
+        let desiredFar = this.camera.far;
+        try {
+            const target = this.controls.target || new THREE.Vector3();
+            const distToTarget = this.camera.position.distanceTo(target);
+            desiredFar = Math.max(desiredFar, distToTarget + margin);
+        } catch (_) { /* non-fatal */ }
+
+        try {
+            const distFromOrigin = this.camera.position.length();
+            desiredFar = Math.max(desiredFar, distFromOrigin + margin);
+        } catch (_) { /* non-fatal */ }
+
+        if (desiredFar > this.camera.far) {
+            this.camera.far = desiredFar;
+            this.camera.updateProjectionMatrix();
+        }
+    }
+
+    _applyCameraZoomLimit() {
+        if (!this.camera || !this.controls) return;
+        const margin = Math.max(0, this._cameraFarMargin || 0);
+        let maxDistance = this._cameraMaxDistance;
+
+        const targetClone = this.controls.target ? this.controls.target.clone() : null;
+        let distToTarget = 0;
+        try {
+            if (targetClone) {
+                distToTarget = this.camera.position.distanceTo(targetClone);
+            }
+        } catch (_) { /* non-fatal */ }
+
+        if (!distToTarget) {
+            try {
+                distToTarget = this.camera.position.length();
+            } catch (_) {
+                distToTarget = 0;
+            }
+        }
+
+        if (!(typeof maxDistance === 'number' && maxDistance > 0)) {
+            const baseDistance = distToTarget > 0 ? distToTarget : 1000;
+            if (margin > 0) {
+                maxDistance = baseDistance + margin * 0.85;
+            } else {
+                maxDistance = Math.max(baseDistance * 4, baseDistance + 2000);
+            }
+            maxDistance = Math.max(maxDistance, baseDistance + 1);
+        }
+
+        if (typeof maxDistance === 'number' && Number.isFinite(maxDistance) && maxDistance > 0) {
+            this._cameraMaxDistance = maxDistance;
+            this.controls.maxDistance = maxDistance;
+        }
+    }
 
     _animate = () => {
         requestAnimationFrame(this._animate);
