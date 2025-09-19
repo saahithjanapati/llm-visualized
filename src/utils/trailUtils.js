@@ -125,6 +125,38 @@ export class StraightLineTrail {
         this._material.dispose();
     }
 
+    /** Return the most recent world-space position written to the live trail. */
+    getLastPosition() {
+        if (this._vertexCount === 0) return null;
+        return this._prevPos.clone();
+    }
+
+    /**
+     * Reset the live trail so future updates resume from the supplied position
+     * without drawing a connecting segment from the previous endpoint.  This
+     * is useful when reusing world-space residual trails between layers where
+     * the owning vector "teleports" downward before beginning a new rise.
+     */
+    resetToPosition(pos) {
+        if (!pos || typeof pos.x !== 'number' || typeof pos.y !== 'number' || typeof pos.z !== 'number') {
+            return;
+        }
+        if (this._vertexCount === 0) {
+            this.start(pos);
+            return;
+        }
+        // Collapse the live polyline to a degenerate segment anchored at pos.
+        this._writeVertex(0, pos);
+        this._writeVertex(1, pos);
+        this._vertexCount = 2;
+        this._geometry.setDrawRange(0, this._vertexCount);
+        this._attr.needsUpdate = true;
+        this._prevPos.copy(pos);
+        this._currentDir = null;
+        this._updateCounter = 0;
+        this._geometry.computeBoundingSphere();
+    }
+
     /** Adjust base opacity at runtime and update underlying material accordingly. */
     setBaseOpacity(newBaseOpacity) {
         if (typeof newBaseOpacity !== 'number' || !isFinite(newBaseOpacity)) return;

@@ -40,6 +40,33 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
     // temporary vectors without full lane context).
     sourceVec.userData = sourceVec.userData || {};
 
+    const maybeResetWorldResidualTrail = worldPos => {
+        if (!worldPos || typeof worldPos.y !== 'number' || !isFinite(worldPos.y)) return;
+
+        const residualTrail = (lane && lane.originalTrail)
+            || (lane && lane.originalVec && lane.originalVec.userData && lane.originalVec.userData.trail)
+            || (sourceVec && sourceVec.userData && sourceVec.userData.trail)
+            || null;
+        if (!residualTrail) return;
+
+        const ownerUserData = (lane && lane.originalVec && lane.originalVec.userData)
+            ? lane.originalVec.userData
+            : (sourceVec && sourceVec.userData);
+        const hasWorldTrail = Boolean(ownerUserData && ownerUserData.trailWorld);
+        if (!hasWorldTrail) return;
+
+        let lastPos = null;
+        if (typeof residualTrail.getLastPosition === 'function') {
+            lastPos = residualTrail.getLastPosition();
+        }
+        if (!lastPos || typeof lastPos.y !== 'number' || !isFinite(lastPos.y)) return;
+
+        const TRAIL_RESET_EPSILON = 0.001;
+        if (lastPos.y > worldPos.y + TRAIL_RESET_EPSILON && typeof residualTrail.resetToPosition === 'function') {
+            residualTrail.resetToPosition(worldPos);
+        }
+    };
+
     // Freeze upward movement of the source so its group position remains static.
     if (lane) {
         lane.stopRise = true;
@@ -52,6 +79,7 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
             const instMat = new THREE.Matrix4();
             sourceVec.mesh.getMatrixAt(centreIndex, instMat);
             const centreWorld = new THREE.Vector3().setFromMatrixPosition(instMat).applyMatrix4(sourceVec.group.matrixWorld);
+            maybeResetWorldResidualTrail(centreWorld);
             lane.__residualMaxY = (typeof centreWorld.y === 'number') ? centreWorld.y - 0.001 : undefined;
         } catch (err) {
             console.warn('Failed to init residual trail:', err);
@@ -66,6 +94,7 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
             const instMat = new THREE.Matrix4();
             sourceVec.mesh.getMatrixAt(centreIndex, instMat);
             const centreWorld = new THREE.Vector3().setFromMatrixPosition(instMat).applyMatrix4(sourceVec.group.matrixWorld);
+            maybeResetWorldResidualTrail(centreWorld);
             sourceVec.userData.__residualMaxY =
                 (typeof centreWorld.y === 'number') ? centreWorld.y - 0.001 : undefined;
         } catch (err) {
