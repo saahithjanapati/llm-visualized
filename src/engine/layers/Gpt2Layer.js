@@ -950,6 +950,9 @@ export default class Gpt2Layer extends BaseLayer {
                                             lane.addTargetLN2.userData.trail = ln2Trail;
                                             lane.addTargetLN2.userData.trailWorld = false;
                                             ln2Trail.update(lane.addTargetLN2.group.position);
+                                            if (this.index > 0) {
+                                                lane.addTargetLN2.userData.trailFrozen = true;
+                                            }
                                             delete resVec.userData.trail;
                                             delete resVec.userData.trailWorld;
                                         }
@@ -962,6 +965,9 @@ export default class Gpt2Layer extends BaseLayer {
                                             fallbackTrailLn2.start(lane.addTargetLN2.group.position);
                                             lane.addTargetLN2.userData.trail = fallbackTrailLn2;
                                             lane.addTargetLN2.userData.trailWorld = false;
+                                            if (this.index > 0) {
+                                                lane.addTargetLN2.userData.trailFrozen = true;
+                                            }
                                         }
                                         startLn2Rise(lane.addTargetLN2);
                                     });
