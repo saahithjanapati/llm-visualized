@@ -35,35 +35,55 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
         return;
     }
 
+    // Ensure a metadata container exists so we can store residual trail state
+    // even when no lane object is available (e.g. LayerNorm additions create
+    // temporary vectors without full lane context).
+    sourceVec.userData = sourceVec.userData || {};
+
+    const vectorLength = VECTOR_LENGTH_PRISM;
+    const centreIndex = Math.floor(vectorLength / 2);
+
+    const instMat = new THREE.Matrix4();
+    const srcCentreWorld = new THREE.Vector3();
+    let hasSourceCentre = false;
+    try {
+        sourceVec.mesh.getMatrixAt(centreIndex, instMat);
+        srcCentreWorld.setFromMatrixPosition(instMat).applyMatrix4(sourceVec.group.matrixWorld);
+        hasSourceCentre = Number.isFinite(srcCentreWorld.y);
+    } catch (err) {
+        console.warn('Failed to init residual trail:', err);
+    }
+
+    let residualOwner = null;
+    let residualTrail = null;
+
     // Freeze upward movement of the source so its group position remains static.
     if (lane) {
         lane.stopRise = true;
         lane.stopRiseTarget = targetVec.group;
-        // Keep residual trail brightness unchanged during addition
-        // Reset residual trail monotonic tracker to the centre prism's current Y
-        // so the trail extends immediately as the middle unit begins to rise.
-        try {
-            const centreIndex = Math.floor(VECTOR_LENGTH_PRISM / 2);
-            const instMat = new THREE.Matrix4();
-            sourceVec.mesh.getMatrixAt(centreIndex, instMat);
-            const centreWorld = new THREE.Vector3().setFromMatrixPosition(instMat).applyMatrix4(sourceVec.group.matrixWorld);
-            lane.__residualMaxY = (typeof centreWorld.y === 'number') ? centreWorld.y - 0.001 : undefined;
-        } catch (err) {
-            console.warn('Failed to init residual trail:', err);
-        }
+        residualOwner = lane;
+        residualTrail = (lane.originalTrail)
+            || (sourceVec && sourceVec.userData && sourceVec.userData.trail)
+            || null;
     } else {
         sourceVec.group.userData = sourceVec.group.userData || {};
         const svUD = sourceVec.group.userData;
         svUD.stopRise = true;
         svUD.stopRiseTarget = targetVec.group;
+        residualOwner = sourceVec.userData;
+        residualTrail = (sourceVec && sourceVec.userData && sourceVec.userData.trail) || null;
     }
 
-    const vectorLength = VECTOR_LENGTH_PRISM;
-    const centreIndex = Math.floor(vectorLength / 2);
+    if (residualTrail && typeof residualTrail.forceLastPoint === 'function' && hasSourceCentre) {
+        residualTrail.forceLastPoint(srcCentreWorld);
+    }
 
-
-
-
+    if (residualOwner) {
+        residualOwner.__residualMaxY = hasSourceCentre ? srcCentreWorld.y - 0.001 : undefined;
+    }
+    if (sourceVec && sourceVec.userData) {
+        sourceVec.userData.__residualMaxY = hasSourceCentre ? srcCentreWorld.y - 0.001 : undefined;
+    }
 
     // Timing params (scale by dedicated multiplier so we can tune independently).
     const duration      = PRISM_ADD_ANIM_BASE_DURATION            / PRISM_ADD_ANIM_SPEED_MULT;
@@ -124,11 +144,16 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
                             const residualTrail = (lane && lane.originalTrail)
                                 || (sourceVec && sourceVec.userData && sourceVec.userData.trail)
                                 || null;
-                            if (residualTrail && typeof residualTrail.update === 'function') {
-                                if (typeof lane.__residualMaxY !== 'number') lane.__residualMaxY = wPos.y - 0.001;
-                                if (wPos.y >= lane.__residualMaxY) {
+                            const residualOwner = lane
+                                || (sourceVec && sourceVec.userData)
+                                || null;
+                            if (residualTrail && residualOwner && typeof residualTrail.update === 'function') {
+                                if (typeof residualOwner.__residualMaxY !== 'number') {
+                                    residualOwner.__residualMaxY = wPos.y - 0.001;
+                                }
+                                if (wPos.y >= residualOwner.__residualMaxY) {
                                     residualTrail.update(wPos);
-                                    lane.__residualMaxY = wPos.y;
+                                    residualOwner.__residualMaxY = wPos.y;
                                 }
                             }
                         }

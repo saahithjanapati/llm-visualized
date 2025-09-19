@@ -119,6 +119,38 @@ export class StraightLineTrail {
         this._prevPos.copy(pos);
     }
 
+    /**
+     * Force the live trail to end at the supplied world position, trimming any
+     * previously recorded upward extension. Keeps the original base point so
+     * the visible segment becomes a straight line from the start to `pos`.
+     *
+     * @param {THREE.Vector3} pos
+     */
+    forceLastPoint(pos) {
+        if (!pos || typeof pos.x !== 'number' || typeof pos.y !== 'number' || typeof pos.z !== 'number') return;
+        if (this._vertexCount === 0) return;
+
+        // Ensure we always keep exactly two vertices: base and current tip.
+        const lastIndex = Math.max(0, this._vertexCount - 1);
+        this._writeVertex(lastIndex, pos);
+
+        if (this._vertexCount >= 2) {
+            // Keep the first vertex anchored to the original base; rewrite the
+            // visible tip (index 1) so the trail no longer extends past `pos`.
+            this._writeVertex(1, pos);
+            this._vertexCount = 2;
+        } else {
+            // Degenerate trail – mirror the supplied position.
+            this._writeVertex(0, pos);
+            this._vertexCount = 1;
+        }
+
+        this._geometry.setDrawRange(0, this._vertexCount);
+        this._attr.needsUpdate = true;
+        this._prevPos.copy(pos);
+        this._currentDir = null;
+    }
+
     dispose() {
         this._scene.remove(this._line);
         this._geometry.dispose();
