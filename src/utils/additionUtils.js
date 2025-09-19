@@ -147,7 +147,19 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
                                     residualOwner.__residualMaxY = wPos.y - 0.001;
                                 }
                                 if (wPos.y >= residualOwner.__residualMaxY) {
-                                    residualTrail.update(wPos);
+                                    let localPos = wPos;
+                                    try {
+                                        const parentObject = (residualTrail._line && residualTrail._line.parent)
+                                            || residualTrail._scene
+                                            || null;
+                                        if (parentObject && typeof parentObject.worldToLocal === 'function') {
+                                            localPos = parentObject.worldToLocal(wPos.clone());
+                                        }
+                                    } catch (conversionErr) {
+                                        console.warn('Residual trail coordinate conversion failed:', conversionErr);
+                                        localPos = wPos;
+                                    }
+                                    residualTrail.update(localPos);
                                     residualOwner.__residualMaxY = wPos.y;
                                 }
                             }
