@@ -87,6 +87,35 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
 
     const basePrismCenterY = sourceVec.getUniformHeight() / 2;
 
+    // Pre-sample the target vector's centre position so we can clamp the
+    // addition trail height to the actual merge point. This prevents the
+    // temporary addition trail from overshooting above the top vector – an
+    // artefact that was visible in higher layers where subsequent motion kept
+    // extending the trail upwards.
+    const targetCentreMatrix = new THREE.Matrix4();
+    const targetCentreWorld = new THREE.Vector3();
+    let targetCentreWorldY = undefined;
+
+    const canSampleTargetCentre =
+        !!targetVec &&
+        !!targetVec.mesh &&
+        !!targetVec.group &&
+        typeof targetVec.mesh.getMatrixAt === 'function';
+
+    if (canSampleTargetCentre) {
+        try {
+            targetVec.mesh.getMatrixAt(centreIndex, targetCentreMatrix);
+            targetCentreWorld
+                .setFromMatrixPosition(targetCentreMatrix)
+                .applyMatrix4(targetVec.group.matrixWorld);
+            targetCentreWorldY = Number.isFinite(targetCentreWorld.y)
+                ? targetCentreWorld.y
+                : undefined;
+        } catch (err) {
+            console.warn('Failed to sample target vector height for addition trail:', err);
+        }
+    }
+
     for (let i = 0; i < vectorLength; i++) {
         // Grab starting local Y offset of each instance
         const srcLocalMatrix = new THREE.Matrix4();
@@ -127,7 +156,33 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
                     try {
                         const instMat = new THREE.Matrix4();
                         sourceVec.mesh.getMatrixAt(centreIndex, instMat);
-                        const wPos = new THREE.Vector3().setFromMatrixPosition(instMat).applyMatrix4(sourceVec.group.matrixWorld);
+                        const wPos = new THREE.Vector3()
+                            .setFromMatrixPosition(instMat)
+                            .applyMatrix4(sourceVec.group.matrixWorld);
+
+                        // Determine the current target height. If the target vector is
+                        // moving (e.g. due to easing), re-sample each frame; otherwise
+                        // fall back to the pre-sampled value. Clamp the trail update so
+                        // it never extends beyond the top vector's Y position.
+                        let targetY = targetCentreWorldY;
+                        if (canSampleTargetCentre) {
+                            try {
+                                targetVec.mesh.getMatrixAt(centreIndex, targetCentreMatrix);
+                                targetCentreWorld
+                                    .setFromMatrixPosition(targetCentreMatrix)
+                                    .applyMatrix4(targetVec.group.matrixWorld);
+                                if (Number.isFinite(targetCentreWorld.y)) {
+                                    targetY = targetCentreWorld.y;
+                                    targetCentreWorldY = targetY;
+                                }
+                            } catch (_) {
+                                // Ignore sampling errors – we'll fall back to the last
+                                // known target height if available.
+                            }
+                        }
+                        if (typeof targetY === 'number' && wPos.y > targetY) {
+                            wPos.y = targetY;
+                        }
 
                         // Skip if the prism is effectively hidden far below
                         const hideThreshold = HIDE_INSTANCE_Y_OFFSET / 10;
