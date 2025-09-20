@@ -121,9 +121,20 @@ export class CoreEngine {
         });
         document.body.appendChild(this._hoverLabelDiv);
 
+        // Track primary touch interactions so quick taps can trigger raycasts
+        this._touchTapData = null;
+        this._touchTapMoveThresholdSq = 64; // ~8px movement allowance
+
         // Bind pointer move handler and add listener
         this._onPointerMove = this._onPointerMove.bind(this);
         this.renderer.domElement.addEventListener('pointermove', this._onPointerMove);
+
+        // Track pointer down / cancel to detect taps on touchscreens
+        this._onPointerDown = this._onPointerDown.bind(this);
+        this.renderer.domElement.addEventListener('pointerdown', this._onPointerDown);
+
+        this._onPointerCancel = this._onPointerCancel.bind(this);
+        this.renderer.domElement.addEventListener('pointercancel', this._onPointerCancel);
 
         // Bind pointer up handler for touch devices so taps trigger labels
         this._onPointerUp = this._onPointerUp.bind(this);
@@ -254,6 +265,8 @@ export class CoreEngine {
         this.composer.passes.forEach(p => p.dispose && p.dispose());
         this.renderer.dispose();
         this.renderer.domElement.removeEventListener('pointermove', this._onPointerMove);
+        this.renderer.domElement.removeEventListener('pointerdown', this._onPointerDown);
+        this.renderer.domElement.removeEventListener('pointercancel', this._onPointerCancel);
         this.renderer.domElement.removeEventListener('pointerup', this._onPointerUp);
         if (this._hoverLabelDiv && this._hoverLabelDiv.parentElement) {
             this._hoverLabelDiv.parentElement.removeChild(this._hoverLabelDiv);
@@ -275,19 +288,73 @@ export class CoreEngine {
         document.hidden ? this.pause() : this.resume();
     };
 
-    _onPointerUp = (event) => {
-        if (event.pointerType === 'touch') {
-            this._onPointerMove(event);
+    _onPointerDown = (event) => {
+        if (event.pointerType !== 'touch') return;
+        // Only track the primary tap candidate to avoid conflicts with multi-touch gestures
+        if (this._touchTapData && this._touchTapData.id !== event.pointerId) return;
+        const { clientX, clientY } = event;
+        if (typeof clientX !== 'number' || typeof clientY !== 'number') return;
+        this._touchTapData = {
+            id: event.pointerId,
+            startX: clientX,
+            startY: clientY,
+            lastX: clientX,
+            lastY: clientY,
+            moved: false
+        };
+    };
+
+    _onPointerCancel = (event) => {
+        if (this._touchTapData && this._touchTapData.id === event.pointerId) {
+            this._touchTapData = null;
         }
     };
 
+    _onPointerUp = (event) => {
+        if (event.pointerType !== 'touch') return;
+        const tapData = this._touchTapData;
+        const isSamePointer = tapData && tapData.id === event.pointerId;
+        const clientX = typeof event.clientX === 'number' ? event.clientX : (isSamePointer ? tapData.lastX : null);
+        const clientY = typeof event.clientY === 'number' ? event.clientY : (isSamePointer ? tapData.lastY : null);
+        const shouldTriggerTap = Boolean(isSamePointer && !tapData.moved && clientX !== null && clientY !== null);
+        this._touchTapData = null;
+
+        if (!shouldTriggerTap) return;
+        const x = clientX;
+        const y = clientY;
+        // Defer to the next frame to give OrbitControls a moment to emit its "end" event
+        requestAnimationFrame(() => {
+            this._performRaycastAt(x, y, { force: true });
+        });
+    };
+
     _onPointerMove = (event) => {
+        if (event.pointerType === 'touch' && this._touchTapData && this._touchTapData.id === event.pointerId) {
+            if (typeof event.clientX === 'number' && typeof event.clientY === 'number') {
+                this._touchTapData.lastX = event.clientX;
+                this._touchTapData.lastY = event.clientY;
+                if (!this._touchTapData.moved) {
+                    const dx = event.clientX - this._touchTapData.startX;
+                    const dy = event.clientY - this._touchTapData.startY;
+                    if (dx * dx + dy * dy > this._touchTapMoveThresholdSq) {
+                        this._touchTapData.moved = true;
+                    }
+                }
+            }
+        }
+        this._performRaycastAt(event.clientX, event.clientY);
+    };
+
+    _performRaycastAt(clientX, clientY, { force = false } = {}) {
         if (!this._raycastingEnabled) return;
-        // Skip ray-casting while the camera is being manipulated to avoid frame hitches
-        if (this._isUserNavigating) return;
+        if (!force && this._isUserNavigating) return;
+        if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return;
+
         const rect = this._canvasRect;
-        this._pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-        this._pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+        if (!rect || !rect.width || !rect.height) return;
+
+        this._pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+        this._pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
 
         this._raycaster.setFromCamera(this._pointer, this.camera);
         const intersects = this._raycaster.intersectObjects(this.scene.children, true);
@@ -307,8 +374,8 @@ export class CoreEngine {
                                 const laneText = (typeof info.laneIndex === 'number' && info.laneIndex >= 0) ? `Lane ${info.laneIndex + 1}` : 'Lane ?';
                                 const catText  = info.category === 'V' ? 'Value (Red)' : 'Key (Green)';
                                 this._hoverLabelDiv.textContent = `${catText}\n${headText} • ${laneText}`;
-                                this._hoverLabelDiv.style.left = `${event.clientX + 12}px`;
-                                this._hoverLabelDiv.style.top  = `${event.clientY + 12}px`;
+                                this._hoverLabelDiv.style.left = `${clientX + 12}px`;
+                                this._hoverLabelDiv.style.top  = `${clientY + 12}px`;
                                 this._hoverLabelDiv.style.display = 'block';
                                 return; // Prefer detailed merged K/V hit over any generic labels
                             }
@@ -325,8 +392,8 @@ export class CoreEngine {
                 const lbl = obj.userData?.label || obj.name;
                 if (lbl && lbl !== 'Weight Matrix') {
                     this._hoverLabelDiv.textContent = lbl;
-                    this._hoverLabelDiv.style.left = `${event.clientX + 12}px`;
-                    this._hoverLabelDiv.style.top  = `${event.clientY + 12}px`;
+                    this._hoverLabelDiv.style.left = `${clientX + 12}px`;
+                    this._hoverLabelDiv.style.top  = `${clientY + 12}px`;
                     this._hoverLabelDiv.style.display = 'block';
                     return;
                 }
@@ -335,7 +402,7 @@ export class CoreEngine {
         }
         // No intersection with a labelled object – hide overlay.
         this._hoverLabelDiv.style.display = 'none';
-    };
+    }
 
     _updateCameraFarFromControls() {
         if (!this.camera || !this.controls) return;
