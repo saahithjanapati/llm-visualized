@@ -18,6 +18,7 @@ import {
 } from '../utils/constants.js';
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
 import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
+import { createBounceTween } from '../utils/joyfulMotion.js';
 
 function simplePrismMultiply(srcVec, tgtVec, onComplete) {
     for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
@@ -281,19 +282,23 @@ export class LayerPipeline extends EventTarget {
                 const distToCenter = Math.max(0, lnCenterY - startY);
                 const durToCenter = (distToCenter / (ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT)) * 1000;
 
-                new TWEEN.Tween(vec.group.position)
-                    .to({ y: lnCenterY }, Math.max(100, durToCenter))
-                    .easing(TWEEN.Easing.Quadratic.InOut)
-                    .onUpdate(() => {
+                const bounceToCenter = createBounceTween(vec.group, {
+                    axis: 'y',
+                    start: startY,
+                    end: lnCenterY,
+                    overshoot: Math.max(12, distToCenter * 0.25),
+                    duration: Math.max(180, durToCenter),
+                    settleDuration: Math.max(160, durToCenter * 0.45),
+                    onProgress: (_, currentY) => {
                         this.dispatchEvent(new Event('progress'));
-                        if (!lane.__topLnEntered && vec.group.position.y >= lnBottomY) {
+                        if (!lane.__topLnEntered && currentY >= lnBottomY) {
                             lane.__topLnEntered = true;
                             multVec.group.visible = true;
                             addVec.group.visible = true;
                             this._activateLayerNormColor(lnTopGroup);
                         }
-                    })
-                    .onComplete(() => {
+                    },
+                    onComplete: () => {
                         this.dispatchEvent(new Event('progress'));
                         simplePrismMultiply(vec, multVec, () => {
                             vec.group.visible = false;
@@ -308,16 +313,78 @@ export class LayerPipeline extends EventTarget {
                             setTimeout(() => {
                                 const riseDist = Math.max(0, targetYLocal - resVec.group.position.y);
                                 const durMs = (riseDist / (ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT)) * 1000;
-                                new TWEEN.Tween(resVec.group.position)
-                                    .to({ y: targetYLocal }, Math.max(100, durMs))
-                                    .easing(TWEEN.Easing.Quadratic.InOut)
-                                    .onUpdate(() => this.dispatchEvent(new Event('progress')))
-                                    .onComplete(() => this.dispatchEvent(new Event('progress')))
-                                    .start();
+                                const bounceRise = createBounceTween(resVec.group, {
+                                    axis: 'y',
+                                    start: resVec.group.position.y,
+                                    end: targetYLocal,
+                                    overshoot: Math.max(10, riseDist * 0.25),
+                                    duration: Math.max(200, durMs),
+                                    settleDuration: Math.max(150, durMs * 0.45),
+                                    onProgress: () => this.dispatchEvent(new Event('progress')),
+                                    onComplete: () => this.dispatchEvent(new Event('progress'))
+                                });
+                                if (bounceRise && typeof bounceRise.start === 'function') {
+                                    bounceRise.start();
+                                } else if (typeof TWEEN !== 'undefined') {
+                                    new TWEEN.Tween(resVec.group.position)
+                                        .to({ y: targetYLocal }, Math.max(100, durMs))
+                                        .easing(TWEEN.Easing.Quadratic.InOut)
+                                        .onUpdate(() => this.dispatchEvent(new Event('progress')))
+                                        .onComplete(() => this.dispatchEvent(new Event('progress')))
+                                        .start();
+                                } else {
+                                    resVec.group.position.y = targetYLocal;
+                                    this.dispatchEvent(new Event('progress'));
+                                }
                             }, addDur + 100);
                         });
-                    })
-                    .start();
+                    }
+                });
+
+                if (bounceToCenter && typeof bounceToCenter.start === 'function') {
+                    bounceToCenter.start();
+                } else if (typeof TWEEN !== 'undefined') {
+                    new TWEEN.Tween(vec.group.position)
+                        .to({ y: lnCenterY }, Math.max(100, durToCenter))
+                        .easing(TWEEN.Easing.Quadratic.InOut)
+                        .onUpdate(() => {
+                            this.dispatchEvent(new Event('progress'));
+                            if (!lane.__topLnEntered && vec.group.position.y >= lnBottomY) {
+                                lane.__topLnEntered = true;
+                                multVec.group.visible = true;
+                                addVec.group.visible = true;
+                                this._activateLayerNormColor(lnTopGroup);
+                            }
+                        })
+                        .onComplete(() => {
+                            this.dispatchEvent(new Event('progress'));
+                            simplePrismMultiply(vec, multVec, () => {
+                                vec.group.visible = false;
+                                multVec.group.visible = false;
+
+                                const resVec = new VectorVisualizationInstancedPrism(multVec.rawData.slice(), multVec.group.position.clone());
+                                lastLayer.root.add(resVec.group);
+
+                                const addDur = (PRISM_ADD_ANIM_BASE_DURATION + PRISM_ADD_ANIM_BASE_FLASH_DURATION + VECTOR_LENGTH_PRISM * PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS) / PRISM_ADD_ANIM_SPEED_MULT;
+                                startPrismAdditionAnimation(addVec, resVec);
+
+                                setTimeout(() => {
+                                    const riseDist = Math.max(0, targetYLocal - resVec.group.position.y);
+                                    const durMs = (riseDist / (ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT)) * 1000;
+                                    new TWEEN.Tween(resVec.group.position)
+                                        .to({ y: targetYLocal }, Math.max(100, durMs))
+                                        .easing(TWEEN.Easing.Quadratic.InOut)
+                                        .onUpdate(() => this.dispatchEvent(new Event('progress')))
+                                        .onComplete(() => this.dispatchEvent(new Event('progress')))
+                                        .start();
+                                }, addDur + 100);
+                            });
+                        })
+                        .start();
+                } else {
+                    vec.group.position.y = lnCenterY;
+                    this.dispatchEvent(new Event('progress'));
+                }
             });
             return;
         }
@@ -332,12 +399,29 @@ export class LayerPipeline extends EventTarget {
             const riseDist = Math.max(0, targetYLocal - startY);
             const durMs = (riseDist / (ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT)) * 1000;
 
-            new TWEEN.Tween(vec.group.position)
-                .to({ y: targetYLocal }, Math.max(100, durMs))
-                .easing(TWEEN.Easing.Quadratic.InOut)
-                .onUpdate(() => this.dispatchEvent(new Event('progress')))
-                .onComplete(() => this.dispatchEvent(new Event('progress')))
-                .start();
+            const bounceRise = createBounceTween(vec.group, {
+                axis: 'y',
+                start: startY,
+                end: targetYLocal,
+                overshoot: Math.max(10, riseDist * 0.25),
+                duration: Math.max(200, durMs),
+                settleDuration: Math.max(150, durMs * 0.45),
+                onProgress: () => this.dispatchEvent(new Event('progress')),
+                onComplete: () => this.dispatchEvent(new Event('progress'))
+            });
+            if (bounceRise && typeof bounceRise.start === 'function') {
+                bounceRise.start();
+            } else if (typeof TWEEN !== 'undefined') {
+                new TWEEN.Tween(vec.group.position)
+                    .to({ y: targetYLocal }, Math.max(100, durMs))
+                    .easing(TWEEN.Easing.Quadratic.InOut)
+                    .onUpdate(() => this.dispatchEvent(new Event('progress')))
+                    .onComplete(() => this.dispatchEvent(new Event('progress')))
+                    .start();
+            } else {
+                vec.group.position.y = targetYLocal;
+                this.dispatchEvent(new Event('progress'));
+            }
         });
     }
 }
