@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CSG } from 'three-csg-ts'; // Import CSG
 import { QUALITY_PRESET, NUM_VECTOR_LANES, VECTOR_DEPTH_SPACING, USE_GLB_MATERIALS } from '../utils/constants.js';
+import { createHolographicPanelMaterial } from '../utils/sciFiMaterials.js';
 
 // ------------------------------------------------------------------
 // Geometry cache (module-level) – keyed by a stringified set of the main
@@ -332,15 +333,7 @@ export class WeightMatrixVisualization {
         if (USE_GLB_MATERIALS && __materialCache.has(cacheKey)) {
             sideMaterial = __materialCache.get(cacheKey).clone();
         } else {
-            sideMaterial = new THREE.MeshStandardMaterial({
-                color: 0x0077ff, // Initial color (will be overridden by animation)
-                metalness: 0.1,
-                roughness: 0.7,
-                flatShading: false,
-                side: THREE.FrontSide,
-                transparent: true,
-                opacity: 0.8
-            });
+            sideMaterial = createHolographicPanelMaterial();
         }
 
         const capMaterial = sideMaterial.clone();
@@ -469,15 +462,8 @@ export class WeightMatrixVisualization {
         if (USE_GLB_MATERIALS && __materialCache.has(sliceKey)) {
             mat = __materialCache.get(sliceKey).clone();
         } else {
-            mat = new THREE.MeshStandardMaterial({
-                color: 0x0077ff,
-                metalness: 0.1,
-                roughness: 0.7,
-                flatShading: false,
-                side: THREE.DoubleSide,
-                transparent: true,
-                opacity: 0.8
-            });
+            mat = createHolographicPanelMaterial();
+            mat.side = THREE.DoubleSide;
         }
 
         // ----------------------------------------------------------

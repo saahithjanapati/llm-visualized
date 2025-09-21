@@ -9,6 +9,7 @@ import {
     PRISM_DIMENSIONS_PER_UNIT // Added for grouping visible units
 } from '../utils/constants.js';
 import { mapValueToColor } from '../utils/colors.js';
+import { createPrismBeamMaterial } from '../utils/sciFiMaterials.js';
 
 // Helper for monochromatic colors
 function mapValueToMonochromaticColor(value, baseHue, saturation, minLightness, maxLightness) {
@@ -43,44 +44,7 @@ export class VectorVisualizationInstancedPrism {
         // For storing individual instance animation states if needed by an external controller
         this.instanceUserData = Array(VECTOR_LENGTH_PRISM).fill(null).map(() => ({})); 
 
-        // Create a material per vector so we can vary opacity independently,
-        // but force program reuse by returning a stable cache key.
-        const material = new THREE.MeshBasicMaterial({ 
-            color: new THREE.Color(0xffffff)
-        });
-        material.customProgramCacheKey = () => 'InstancedPrismGradientV1';
-        material.onBeforeCompile = (shader) => {
-            shader.uniforms.prismHalfWidth = { value: __halfBaseWidth };
-            shader.vertexShader = shader.vertexShader.replace(
-                '#include <common>',
-                `#include <common>
-attribute vec3 colorStart;
-attribute vec3 colorEnd;
-varying vec3 vColorStart;
-varying vec3 vColorEnd;
-varying float vGradientT;
-uniform float prismHalfWidth;`
-            );
-            shader.vertexShader = shader.vertexShader.replace(
-                '#include <begin_vertex>',
-                `#include <begin_vertex>
-    vColorStart = colorStart;
-    vColorEnd   = colorEnd;
-    vGradientT  = clamp( (position.x + prismHalfWidth) / (2.0 * prismHalfWidth), 0.0, 1.0 );`
-            );
-            shader.fragmentShader = shader.fragmentShader.replace(
-                '#include <common>',
-                `#include <common>
-varying vec3 vColorStart;
-varying vec3 vColorEnd;
-varying float vGradientT;`
-            );
-            shader.fragmentShader = shader.fragmentShader.replace(
-                'vec4 diffuseColor = vec4( diffuse, opacity );',
-                `vec3 grad = mix( vColorStart, vColorEnd, vGradientT );
-    vec4 diffuseColor = vec4( grad, opacity );`
-            );
-        };
+        const material = createPrismBeamMaterial({ prismHalfWidth: __halfBaseWidth });
 
         const instancedGeometry = basePrismGeometry.clone();
         this.mesh = new THREE.InstancedMesh(instancedGeometry, material, VECTOR_LENGTH_PRISM);
