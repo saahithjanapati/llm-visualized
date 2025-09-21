@@ -59,6 +59,9 @@ export class LayerPipeline extends EventTarget {
         // ------------------------------------------------------------------
 
         const engineOpts = { ...opts };
+        if (typeof engineOpts.enableBloom !== 'boolean') {
+            engineOpts.enableBloom = true;
+        }
         if (typeof engineOpts.cameraFarMargin !== 'number') {
             const DEFAULT_CAMERA_FAR_MARGIN = 40000;
             // Provide additional depth so tall transformer stacks remain visible

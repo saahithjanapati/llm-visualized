@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CSG } from 'three-csg-ts'; // Import CSG
 import { QUALITY_PRESET, NUM_VECTOR_LANES, VECTOR_DEPTH_SPACING, USE_GLB_MATERIALS } from '../utils/constants.js';
+import { createSciFiMaterial, cloneSciFiMaterial } from '../materials/sciFiMaterials.js';
 
 // ------------------------------------------------------------------
 // Geometry cache (module-level) – keyed by a stringified set of the main
@@ -328,22 +329,49 @@ export class WeightMatrixVisualization {
         // them ever-so-slightly closer to the camera, eliminating the
         // z-fighting flicker that still appeared when zoomed far out.
 
+        const gradientMin = -this.height / 2;
+        const gradientMax = this.height / 2;
+
         let sideMaterial;
         if (USE_GLB_MATERIALS && __materialCache.has(cacheKey)) {
             sideMaterial = __materialCache.get(cacheKey).clone();
         } else {
-            sideMaterial = new THREE.MeshStandardMaterial({
-                color: 0x0077ff, // Initial color (will be overridden by animation)
-                metalness: 0.1,
-                roughness: 0.7,
-                flatShading: false,
-                side: THREE.FrontSide,
-                transparent: true,
-                opacity: 0.8
+            sideMaterial = createSciFiMaterial({
+                baseColor: '#0b1634',
+                gradientColorA: '#050c2a',
+                gradientColorB: '#2be3ff',
+                rimColor: '#8ef9ff',
+                scanColor: '#63ffd6',
+                gridColor: '#162d73',
+                gradientMin,
+                gradientMax,
+                gradientMix: 0.78,
+                rimStrength: 0.72,
+                rimPower: 2.6,
+                scanFrequency: 4.5,
+                scanSpeed: 1.5,
+                scanSharpness: 5.0,
+                scanIntensity: 0.85,
+                gridDensity: 0.017,
+                gridIntensity: 0.4,
+                noiseScale: 3.6,
+                noiseSpeed: 1.25,
+                noiseIntensity: 0.22,
+                noiseEmission: 0.14,
+                emissiveScanBoost: 0.85,
+                emissiveRimBoost: 0.5,
+                baseEmissiveBoost: 0.16,
+                pulseFrequency: 1.0,
+                pulseAmplitude: 0.85,
+                opacity: 0.9,
+                emissiveColor: '#15d5ff',
+                emissiveIntensity: 0.72
             });
         }
 
-        const capMaterial = sideMaterial.clone();
+        const capMaterial = (USE_GLB_MATERIALS && __materialCache.has(cacheKey))
+            ? sideMaterial.clone()
+            : cloneSciFiMaterial(sideMaterial, { side: THREE.FrontSide, gradientMin, gradientMax });
         capMaterial.polygonOffset = true;
         capMaterial.polygonOffsetFactor = -1; // pull slightly forward
         capMaterial.polygonOffsetUnits  = -4;
@@ -465,18 +493,44 @@ export class WeightMatrixVisualization {
         // ----------------------------------------------------------
         // Material – clone defaults from standard path
         // ----------------------------------------------------------
+        const sliceGradientMin = -this.height / 2;
+        const sliceGradientMax = this.height / 2;
+
         let mat;
         if (USE_GLB_MATERIALS && __materialCache.has(sliceKey)) {
             mat = __materialCache.get(sliceKey).clone();
         } else {
-            mat = new THREE.MeshStandardMaterial({
-                color: 0x0077ff,
-                metalness: 0.1,
-                roughness: 0.7,
-                flatShading: false,
-                side: THREE.DoubleSide,
-                transparent: true,
-                opacity: 0.8
+            mat = createSciFiMaterial({
+                baseColor: '#0b1634',
+                gradientColorA: '#050c2a',
+                gradientColorB: '#2be3ff',
+                rimColor: '#8ef9ff',
+                scanColor: '#63ffd6',
+                gridColor: '#162d73',
+                gradientMin: sliceGradientMin,
+                gradientMax: sliceGradientMax,
+                gradientMix: 0.78,
+                rimStrength: 0.72,
+                rimPower: 2.6,
+                scanFrequency: 4.5,
+                scanSpeed: 1.5,
+                scanSharpness: 5.0,
+                scanIntensity: 0.85,
+                gridDensity: 0.017,
+                gridIntensity: 0.4,
+                noiseScale: 3.6,
+                noiseSpeed: 1.25,
+                noiseIntensity: 0.22,
+                noiseEmission: 0.14,
+                emissiveScanBoost: 0.85,
+                emissiveRimBoost: 0.5,
+                baseEmissiveBoost: 0.16,
+                pulseFrequency: 1.0,
+                pulseAmplitude: 0.85,
+                opacity: 0.9,
+                emissiveColor: '#15d5ff',
+                emissiveIntensity: 0.72,
+                side: THREE.DoubleSide
             });
         }
 
@@ -525,9 +579,14 @@ export class WeightMatrixVisualization {
             __capBackCache.set(sliceKey, capGeoBack);
         }
 
-        const capMatFront = mat.clone();
-        capMatFront.side = THREE.DoubleSide; // ensure visible from any angle
-        const capMatBack  = capMatFront.clone();
+        const capMatFront = (USE_GLB_MATERIALS && __materialCache.has(sliceKey))
+            ? mat.clone()
+            : cloneSciFiMaterial(mat, { side: THREE.DoubleSide, gradientMin: sliceGradientMin, gradientMax: sliceGradientMax });
+        const capMatBack  = (USE_GLB_MATERIALS && __materialCache.has(sliceKey))
+            ? mat.clone()
+            : cloneSciFiMaterial(mat, { side: THREE.DoubleSide, gradientMin: sliceGradientMin, gradientMax: sliceGradientMax });
+        capMatFront.side = THREE.DoubleSide;
+        capMatBack.side = THREE.DoubleSide;
 
         const frontCaps = new THREE.InstancedMesh(capGeoFront.clone(), capMatFront, NUM_VECTOR_LANES);
         const backCaps  = new THREE.InstancedMesh(capGeoBack.clone(),  capMatBack,  NUM_VECTOR_LANES);
@@ -563,7 +622,17 @@ export class WeightMatrixVisualization {
 
         // Dispose of the temporary object to free GPU resources
         if (tmp) {
-            tmp.dispose && tmp.dispose();
+            const disposeMaterial = (mat) => {
+                if (!mat) return;
+                if (Array.isArray(mat)) {
+                    mat.forEach(m => m && m.dispose && m.dispose());
+                } else if (mat.dispose) {
+                    mat.dispose();
+                }
+            };
+            disposeMaterial(tmp.mesh?.material);
+            disposeMaterial(tmp.frontCapMesh?.material);
+            disposeMaterial(tmp.backCapMesh?.material);
         }
     }
 
