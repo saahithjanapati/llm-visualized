@@ -227,7 +227,7 @@ export default class Gpt2Layer extends BaseLayer {
             MLP_MATRIX_PARAMS_UP.slitTopWidthFactor
         );
         mlpUp.setColor(inactiveDark.clone());
-        mlpUp.setMaterialProperties({ opacity: 1.0, transparent: false });
+        mlpUp.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
         {
             const lbl = 'MLP Up Weight Matrix';
             mlpUp.group.userData.label = lbl;
@@ -254,7 +254,7 @@ export default class Gpt2Layer extends BaseLayer {
             MLP_MATRIX_PARAMS_DOWN.slitTopWidthFactor
         );
         mlpDown.setColor(inactiveDark.clone());
-        mlpDown.setMaterialProperties({ opacity: 1.0, transparent: false });
+        mlpDown.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
         {
             const lbl = 'MLP Down Weight Matrix';
             mlpDown.group.userData.label = lbl;
