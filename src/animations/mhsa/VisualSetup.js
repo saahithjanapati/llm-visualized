@@ -42,7 +42,7 @@ export function buildMHAVisuals(parentGroup, {
     // 1) Build Q / K / V weight matrices for every head set
     // ------------------------------------------------------------
     const matrixCenterY = mhsaBaseY + MHA_MATRIX_PARAMS.height / 2;
-    const darkGrayColor = new THREE.Color(0x404040);
+    const inactiveMatrixColor = new THREE.Color(INACTIVE_COMPONENT_COLOR);
 
     for (let i = 0; i < NUM_HEAD_SETS_LAYER; i++) {
         const headSetWidth       = MHA_INTERNAL_MATRIX_SPACING * 2 + MHA_MATRIX_PARAMS.width;
@@ -67,19 +67,18 @@ export function buildMHAVisuals(parentGroup, {
                 MHA_MATRIX_PARAMS.slitBottomWidthFactor,
                 MHA_MATRIX_PARAMS.slitTopWidthFactor,
             );
-            mat.setColor(darkGrayColor);
+            mat.setColor(inactiveMatrixColor);
             mat.group.userData.label = label;
             if (mat.mesh)         mat.mesh.userData.label        = label;
             if (mat.frontCapMesh) mat.frontCapMesh.userData.label = label;
             if (mat.backCapMesh)  mat.backCapMesh.userData.label  = label;
 
             // Make heavy matrix materials opaque by default when fully opaque to avoid sorting
-            mat.group.children.forEach(child => {
-                if (child.material) {
-                    const wantsTransparency = matrixRestingOpacity < 1.0;
-                    child.material.opacity = matrixRestingOpacity;
-                    child.material.transparent = wantsTransparency ? true : false;
-                }
+            const wantsTransparency = matrixRestingOpacity < 1.0;
+            mat.setMaterialProperties({
+                opacity: matrixRestingOpacity,
+                transparent: wantsTransparency,
+                emissiveIntensity: 0.05,
             });
 
             parentGroup.add(mat.group);
@@ -120,7 +119,7 @@ export function buildMHAVisuals(parentGroup, {
         MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitTopWidthFactor,
     );
 
-    const initDarkColor = new THREE.Color(INACTIVE_COMPONENT_COLOR);
+    const initDarkColor = inactiveMatrixColor.clone();
     outputProjectionMatrix.setColor(initDarkColor);
     outputProjectionMatrix.group.userData.label = 'Output Projection Matrix';
     if (outputProjectionMatrix.mesh)         outputProjectionMatrix.mesh.userData.label        = 'Output Projection Matrix';
