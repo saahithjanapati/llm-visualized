@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CSG } from 'three-csg-ts';
 import { NUM_VECTOR_LANES, VECTOR_DEPTH_SPACING, USE_GLB_MATERIALS } from '../utils/constants.js';
+import { createSciFiPanelMaterial } from '../utils/sciFiMaterials.js';
 
 // A visualization for the Layer Normalization operation.
 // It renders an extruded ellipse (like a squashed cylinder) with a hollow interior
@@ -272,13 +273,19 @@ export class LayerNormalizationVisualization {
         // ==== STEP 5 — assign material & add to the outer group ====
         const material = (USE_GLB_MATERIALS && __materialCache.has(cacheKey))
             ? __materialCache.get(cacheKey).clone()
-            : new THREE.MeshStandardMaterial({
-                color: 0x00aa88,
-                metalness: 0.15,
-                roughness: 0.6,
-                side: THREE.DoubleSide,
-                transparent: true,
-                opacity: 0.85
+            : createSciFiPanelMaterial({
+                baseColor: 0xffffff,
+                emissiveColor: 0x26ffc5,
+                opacity: 0.88,
+                doubleSided: true,
+                mapRepeat: new THREE.Vector2(
+                    Math.max(2.2, this.width / 6),
+                    Math.max(1.6, this.height / 2.5)
+                ),
+                scanStrength: 0.4,
+                scanSpeed: 2.4,
+                fresnelPower: 2.3,
+                fresnelIntensity: 0.6
             });
 
         // After all geometry operations *and* potential caching we assign
@@ -345,13 +352,19 @@ export class LayerNormalizationVisualization {
 
         const mat = (USE_GLB_MATERIALS && __materialCache.has(sliceKey))
             ? __materialCache.get(sliceKey).clone()
-            : new THREE.MeshStandardMaterial({
-                color: 0xffffff,
-                metalness: 0.0,
-                roughness: 0.8,
-                side: THREE.DoubleSide,
-                transparent: true,
-                opacity: 0.9
+            : createSciFiPanelMaterial({
+                baseColor: 0xffffff,
+                emissiveColor: 0x26ffc5,
+                opacity: 0.88,
+                doubleSided: true,
+                mapRepeat: new THREE.Vector2(
+                    Math.max(2.2, this.width / 6),
+                    Math.max(1.6, this.height / 2.5)
+                ),
+                scanStrength: 0.4,
+                scanSpeed: 2.4,
+                fresnelPower: 2.3,
+                fresnelIntensity: 0.6
             });
 
         const inst = new THREE.InstancedMesh(sliceGeometry, mat, NUM_VECTOR_LANES);
@@ -391,7 +404,32 @@ export class LayerNormalizationVisualization {
 
     setMaterialProperties(props) {
         if (!this.mesh) return;
-        const apply = (mat) => Object.assign(mat, props);
+        const apply = (mat) => {
+            if (!mat) return;
+            if (props.color !== undefined) {
+                if (mat.color && props.color.isColor) mat.color.copy(props.color);
+                else if (mat.color) mat.color.set(props.color);
+            }
+            if (props.metalness !== undefined) mat.metalness = props.metalness;
+            if (props.roughness !== undefined) mat.roughness = props.roughness;
+            if (props.emissive !== undefined && mat.emissive) {
+                if (props.emissive.isColor) mat.emissive.copy(props.emissive);
+                else mat.emissive.set(props.emissive);
+            }
+            if (props.emissiveIntensity !== undefined) mat.emissiveIntensity = props.emissiveIntensity;
+            if (props.opacity !== undefined) mat.opacity = props.opacity;
+            if (props.transparent !== undefined) mat.transparent = props.transparent;
+            if (props.clearcoat !== undefined) mat.clearcoat = props.clearcoat;
+            if (props.clearcoatRoughness !== undefined) mat.clearcoatRoughness = props.clearcoatRoughness;
+            if (props.sheen !== undefined) mat.sheen = props.sheen;
+            if (props.sheenColor !== undefined && mat.sheenColor) {
+                if (props.sheenColor.isColor) mat.sheenColor.copy(props.sheenColor);
+                else mat.sheenColor.set(props.sheenColor);
+            }
+            if (props.transmission !== undefined) mat.transmission = props.transmission;
+            if (props.thickness !== undefined) mat.thickness = props.thickness;
+            if (props.envMapIntensity !== undefined) mat.envMapIntensity = props.envMapIntensity;
+        };
         if (Array.isArray(this.mesh.material)) {
             this.mesh.material.forEach(apply);
         } else {
