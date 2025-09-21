@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { mapValueToColor_LOG, mapValueToColor } from '../utils/colors.js';
 import { uniformRandom } from '../utils/mathUtils.js';
 import { VECTOR_LENGTH, SPHERE_RADIUS, EPSILON, SPHERE_DIAMETER } from '../utils/constants.js';
+import { createSciFiOrbMaterial } from '../utils/sciFiMaterials.js';
 
 // Generate a smoother, fully spherical geometry for each bead.  We increase
 // the width/height segments for better roundness and remove the previous
@@ -33,15 +34,7 @@ export class VectorVisualization {
             const color = mapValueToColor_LOG(value, i); // Call logging version
             // const fixedColor = new THREE.Color(0x00ff00); // TEST: Use fixed bright green
 
-            const material = new THREE.MeshStandardMaterial({
-                color: color, // Original
-                // color: fixedColor, // TEST
-                metalness: 0.3,
-                roughness: 0.5,
-                emissive: color, // Original
-                // emissive: fixedColor, // TEST
-                emissiveIntensity: 0.3
-             });
+            const material = createSciFiOrbMaterial(color);
 
             // Re-use the single shared geometry instance instead of cloning it for
             // every mesh.  This saves GPU memory and upload time because the

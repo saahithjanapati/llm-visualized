@@ -30,6 +30,7 @@ import { initStatusOverlay } from '../src/ui/statusOverlay.js';
 import { initSettingsModal } from '../src/ui/settingsModal.js';
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
+import { createSciFiPanelMaterial } from '../src/utils/sciFiMaterials.js';
 
 // Optionally load pre-baked geometries; returns instantly if disabled
 await loadPrecomputedGeometries('../precomputed_components.glb');
@@ -56,10 +57,47 @@ gptCanvas.style.display = 'block';
 try {
     const eng = pipeline.engine;
     eng.renderer.shadowMap.enabled = false;
-    eng.scene.traverse((obj) => {
+    const scene = eng.scene;
+    scene.traverse((obj) => {
         if (obj.isMesh) { obj.castShadow = false; obj.receiveShadow = false; }
         if (obj.isLight) { obj.castShadow = false; }
     });
+
+    scene.background = new THREE.Color(0x020718);
+    scene.fog = new THREE.FogExp2(0x020718, 0.00011);
+
+    if (eng.renderer) {
+        eng.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        eng.renderer.toneMappingExposure = 1.08;
+    }
+
+    const ambient = scene.children.find(child => child.isAmbientLight);
+    if (ambient) {
+        ambient.color.set(0x3f5fff);
+        ambient.intensity = 0.55;
+    }
+    const keyLight = scene.children.find(child => child.isDirectionalLight);
+    if (keyLight) {
+        keyLight.color.set(0x8bd7ff);
+        keyLight.intensity = 1.15;
+        keyLight.position.set(4200, 9200, 3600);
+        keyLight.castShadow = false;
+    }
+
+    const rimLight = new THREE.PointLight(0x1b8eff, 2.4, 0, 2);
+    rimLight.position.set(-14000, 9000, 16000);
+    rimLight.castShadow = false;
+    scene.add(rimLight);
+
+    const accentLight = new THREE.PointLight(0x22ffd2, 2.0, 0, 2);
+    accentLight.position.set(15000, 7000, -13000);
+    accentLight.castShadow = false;
+    scene.add(accentLight);
+
+    const floorGlow = new THREE.PointLight(0x4f7bff, 1.35, 0, 2);
+    floorGlow.position.set(0, 2200, 0);
+    floorGlow.castShadow = false;
+    scene.add(floorGlow);
 } catch (_) {}
 
 // Embedding matrices (static visuals)
@@ -84,7 +122,18 @@ try {
     );
     vocabBottom.group.userData.label = 'Vocab Embedding';
     vocabBottom.setColor(headBlue);
-    vocabBottom.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
+    vocabBottom.setMaterialProperties({
+        opacity: 0.92,
+        transparent: true,
+        emissiveIntensity: 1.15,
+        metalness: 0.7,
+        roughness: 0.22,
+        clearcoat: 0.85,
+        clearcoatRoughness: 0.12,
+        envMapIntensity: 1.4,
+        transmission: 0.08,
+        thickness: 1.45
+    });
     pipeline.engine.scene.add(vocabBottom.group);
 
     const gapX = EMBEDDING_BOTTOM_PAIR_GAP_X;
@@ -107,7 +156,18 @@ try {
     );
     posBottom.group.userData.label = 'Positional Embedding';
     posBottom.setColor(headGreen);
-    posBottom.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
+    posBottom.setMaterialProperties({
+        opacity: 0.9,
+        transparent: true,
+        emissiveIntensity: 1.05,
+        metalness: 0.68,
+        roughness: 0.24,
+        clearcoat: 0.82,
+        clearcoatRoughness: 0.14,
+        envMapIntensity: 1.35,
+        transmission: 0.06,
+        thickness: 1.35
+    });
     pipeline.engine.scene.add(posBottom.group);
 
     const lastLayer = pipeline._layers[NUM_LAYERS - 1];
@@ -128,8 +188,20 @@ try {
             LN_PARAMS.holeWidthFactor
         );
         lnTop.group.userData.label = 'LayerNorm (Top)';
-        lnTop.setColor(new THREE.Color(INACTIVE_COMPONENT_COLOR));
-        lnTop.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
+        const lnHue = new THREE.Color(INACTIVE_COMPONENT_COLOR).lerp(new THREE.Color(0x26ffc5), 0.35);
+        lnTop.setColor(lnHue);
+        lnTop.setMaterialProperties({
+            opacity: 0.95,
+            transparent: true,
+            emissiveIntensity: 0.55,
+            metalness: 0.6,
+            roughness: 0.28,
+            clearcoat: 0.78,
+            clearcoatRoughness: 0.16,
+            envMapIntensity: 1.25,
+            transmission: 0.04,
+            thickness: 1.2
+        });
         pipeline.engine.scene.add(lnTop.group);
 
         const topVocabCenterY = topLnCenterY + (LN_PARAMS.height / 2) + TOP_LN_TO_TOP_EMBED_GAP + (EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2) + TOP_EMBED_Y_ADJUST;
@@ -149,8 +221,19 @@ try {
         );
         vocabTop.group.rotation.z = Math.PI;
         vocabTop.group.userData.label = 'Vocab Embedding (Top)';
-        vocabTop.setColor(new THREE.Color(0x000000));
-        vocabTop.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.0 });
+        vocabTop.setColor(new THREE.Color(0x060c33));
+        vocabTop.setMaterialProperties({
+            opacity: 0.95,
+            transparent: true,
+            emissiveIntensity: 0.65,
+            metalness: 0.74,
+            roughness: 0.2,
+            clearcoat: 0.88,
+            clearcoatRoughness: 0.1,
+            envMapIntensity: 1.55,
+            transmission: 0.07,
+            thickness: 1.5
+        });
         appState.vocabTopRef = vocabTop;
         pipeline.engine.scene.add(vocabTop.group);
     }
@@ -192,7 +275,18 @@ captionLoader.load('https://threejs.org/examples/fonts/helvetiker_regular.typefa
         });
         geo.computeBoundingBox();
         const width = geo.boundingBox.max.x - geo.boundingBox.min.x;
-        const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0 });
+        const mat = createSciFiPanelMaterial({
+            baseColor: 0xffffff,
+            emissiveColor: 0x7acbff,
+            opacity: 0,
+            mapRepeat: new THREE.Vector2(1.6, 0.6),
+            scanStrength: 0.55,
+            scanSpeed: 1.6,
+            fresnelPower: 2.8,
+            fresnelIntensity: 0.75
+        });
+        mat.transparent = true;
+        mat.emissiveIntensity = 0.9;
         const mesh = new THREE.Mesh(geo, mat);
         mesh.position.x = xOffset;
         mesh.castShadow = false;

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CSG } from 'three-csg-ts'; // Import CSG
 import { QUALITY_PRESET, NUM_VECTOR_LANES, VECTOR_DEPTH_SPACING, USE_GLB_MATERIALS } from '../utils/constants.js';
+import { createSciFiPanelMaterial } from '../utils/sciFiMaterials.js';
 
 // ------------------------------------------------------------------
 // Geometry cache (module-level) – keyed by a stringified set of the main
@@ -332,18 +333,38 @@ export class WeightMatrixVisualization {
         if (USE_GLB_MATERIALS && __materialCache.has(cacheKey)) {
             sideMaterial = __materialCache.get(cacheKey).clone();
         } else {
-            sideMaterial = new THREE.MeshStandardMaterial({
-                color: 0x0077ff, // Initial color (will be overridden by animation)
-                metalness: 0.1,
-                roughness: 0.7,
-                flatShading: false,
-                side: THREE.FrontSide,
-                transparent: true,
-                opacity: 0.8
+            const repeat = new THREE.Vector2(
+                Math.max(2.4, this.width / 8),
+                Math.max(1.4, this.height / 3.5)
+            );
+            sideMaterial = createSciFiPanelMaterial({
+                baseColor: 0xffffff,
+                emissiveColor: 0x12c6ff,
+                opacity: 0.88,
+                mapRepeat: repeat,
+                scanStrength: 0.42,
+                scanSpeed: 3.1,
+                fresnelPower: 2.1,
+                fresnelIntensity: 0.7
             });
         }
 
-        const capMaterial = sideMaterial.clone();
+        const capMaterial = USE_GLB_MATERIALS && __materialCache.has(cacheKey)
+            ? sideMaterial.clone()
+            : createSciFiPanelMaterial({
+                baseColor: 0xffffff,
+                emissiveColor: 0x12c6ff,
+                opacity: 0.92,
+                mapRepeat: new THREE.Vector2(
+                    Math.max(2.1, this.width / 7),
+                    Math.max(1.1, this.height / 4)
+                ),
+                scanStrength: 0.38,
+                scanSpeed: 2.8,
+                fresnelPower: 2.2,
+                fresnelIntensity: 0.65,
+                doubleSided: true
+            });
         capMaterial.polygonOffset = true;
         capMaterial.polygonOffsetFactor = -1; // pull slightly forward
         capMaterial.polygonOffsetUnits  = -4;
@@ -469,14 +490,20 @@ export class WeightMatrixVisualization {
         if (USE_GLB_MATERIALS && __materialCache.has(sliceKey)) {
             mat = __materialCache.get(sliceKey).clone();
         } else {
-            mat = new THREE.MeshStandardMaterial({
-                color: 0x0077ff,
-                metalness: 0.1,
-                roughness: 0.7,
-                flatShading: false,
-                side: THREE.DoubleSide,
-                transparent: true,
-                opacity: 0.8
+            const repeat = new THREE.Vector2(
+                Math.max(2.4, this.width / 8),
+                Math.max(1.4, this.height / 3.5)
+            );
+            mat = createSciFiPanelMaterial({
+                baseColor: 0xffffff,
+                emissiveColor: 0x12c6ff,
+                opacity: 0.88,
+                mapRepeat: repeat,
+                scanStrength: 0.42,
+                scanSpeed: 3.1,
+                fresnelPower: 2.1,
+                fresnelIntensity: 0.7,
+                doubleSided: true
             });
         }
 
@@ -635,6 +662,19 @@ export class WeightMatrixVisualization {
                         if (props.emissiveIntensity !== undefined) m.emissiveIntensity = props.emissiveIntensity;
                         if (props.opacity !== undefined) m.opacity = props.opacity;
                         if (props.transparent !== undefined) m.transparent = props.transparent;
+                        if (props.clearcoat !== undefined) m.clearcoat = props.clearcoat;
+                        if (props.clearcoatRoughness !== undefined) m.clearcoatRoughness = props.clearcoatRoughness;
+                        if (props.sheen !== undefined) m.sheen = props.sheen;
+                        if (props.sheenColor !== undefined && m.sheenColor) {
+                            if (props.sheenColor.isColor) {
+                                m.sheenColor.copy(props.sheenColor);
+                            } else {
+                                m.sheenColor.set(props.sheenColor);
+                            }
+                        }
+                        if (props.transmission !== undefined) m.transmission = props.transmission;
+                        if (props.thickness !== undefined) m.thickness = props.thickness;
+                        if (props.envMapIntensity !== undefined) m.envMapIntensity = props.envMapIntensity;
                     });
                 } else {
                     if (props.metalness !== undefined) mat.metalness = props.metalness;
@@ -643,6 +683,19 @@ export class WeightMatrixVisualization {
                     if (props.emissiveIntensity !== undefined) mat.emissiveIntensity = props.emissiveIntensity;
                     if (props.opacity !== undefined) mat.opacity = props.opacity;
                     if (props.transparent !== undefined) mat.transparent = props.transparent;
+                    if (props.clearcoat !== undefined) mat.clearcoat = props.clearcoat;
+                    if (props.clearcoatRoughness !== undefined) mat.clearcoatRoughness = props.clearcoatRoughness;
+                    if (props.sheen !== undefined) mat.sheen = props.sheen;
+                    if (props.sheenColor !== undefined && mat.sheenColor) {
+                        if (props.sheenColor.isColor) {
+                            mat.sheenColor.copy(props.sheenColor);
+                        } else {
+                            mat.sheenColor.set(props.sheenColor);
+                        }
+                    }
+                    if (props.transmission !== undefined) mat.transmission = props.transmission;
+                    if (props.thickness !== undefined) mat.thickness = props.thickness;
+                    if (props.envMapIntensity !== undefined) mat.envMapIntensity = props.envMapIntensity;
                 }
             }
         };
