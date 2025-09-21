@@ -283,7 +283,7 @@ export class LayerPipeline extends EventTarget {
 
                 new TWEEN.Tween(vec.group.position)
                     .to({ y: lnCenterY }, Math.max(100, durToCenter))
-                    .easing(TWEEN.Easing.Quadratic.InOut)
+                    .easing(TWEEN.Easing.Cubic.InOut)
                     .onUpdate(() => {
                         this.dispatchEvent(new Event('progress'));
                         if (!lane.__topLnEntered && vec.group.position.y >= lnBottomY) {
@@ -308,11 +308,25 @@ export class LayerPipeline extends EventTarget {
                             setTimeout(() => {
                                 const riseDist = Math.max(0, targetYLocal - resVec.group.position.y);
                                 const durMs = (riseDist / (ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT)) * 1000;
+                                const updateRise = () => {
+                                    this.dispatchEvent(new Event('progress'));
+                                    if (resVec.group && typeof resVec.group.rotation !== 'undefined') {
+                                        const delta = targetYLocal - resVec.group.position.y;
+                                        const normalized = 1 - Math.max(0, Math.min(1, delta / Math.max(riseDist, 1)));
+                                        resVec.group.rotation.z = Math.sin(normalized * Math.PI) * 0.06;
+                                    }
+                                };
+                                const completeRise = () => {
+                                    this.dispatchEvent(new Event('progress'));
+                                    if (resVec.group && typeof resVec.group.rotation !== 'undefined') {
+                                        resVec.group.rotation.z = 0;
+                                    }
+                                };
                                 new TWEEN.Tween(resVec.group.position)
                                     .to({ y: targetYLocal }, Math.max(100, durMs))
-                                    .easing(TWEEN.Easing.Quadratic.InOut)
-                                    .onUpdate(() => this.dispatchEvent(new Event('progress')))
-                                    .onComplete(() => this.dispatchEvent(new Event('progress')))
+                                    .easing(TWEEN.Easing.Back.Out)
+                                    .onUpdate(updateRise)
+                                    .onComplete(completeRise)
                                     .start();
                             }, addDur + 100);
                         });
@@ -334,7 +348,7 @@ export class LayerPipeline extends EventTarget {
 
             new TWEEN.Tween(vec.group.position)
                 .to({ y: targetYLocal }, Math.max(100, durMs))
-                .easing(TWEEN.Easing.Quadratic.InOut)
+                .easing(TWEEN.Easing.Back.Out)
                 .onUpdate(() => this.dispatchEvent(new Event('progress')))
                 .onComplete(() => this.dispatchEvent(new Event('progress')))
                 .start();

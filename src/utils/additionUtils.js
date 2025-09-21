@@ -105,7 +105,7 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
         new TWEEN.Tween(tweenState)
             .to({ t: 1 }, duration)
             .delay(i * delayBetween)
-            .easing(TWEEN.Easing.Quadratic.InOut)
+            .easing(TWEEN.Easing.Sinusoidal.InOut)
             .onUpdate(obj => {
                 // Re-compute dynamic target position each frame (target may move)
                 const trgLocalMatrixDyn = new THREE.Matrix4();
@@ -192,6 +192,34 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
         } else if (sourceVec && sourceVec.group && sourceVec.group.userData) {
             delete sourceVec.group.userData.stopRise;
             delete sourceVec.group.userData.stopRiseTarget;
+        }
+
+        if (targetVec && targetVec.group && typeof TWEEN !== 'undefined') {
+            const targetGroup = targetVec.group;
+            targetGroup.userData = targetGroup.userData || {};
+            const baseScale = (targetGroup.userData._joyfulBaseScale && targetGroup.userData._joyfulBaseScale.clone)
+                ? targetGroup.userData._joyfulBaseScale.clone()
+                : targetGroup.scale.clone();
+            targetGroup.userData._joyfulBaseScale = baseScale.clone();
+            const bounceState = { s: 0 };
+            new TWEEN.Tween(bounceState)
+                .to({ s: 1 }, Math.max(180, 320 / PRISM_ADD_ANIM_SPEED_MULT))
+                .easing(TWEEN.Easing.Back.Out)
+                .onUpdate(obj => {
+                    const pulse = 1 + Math.sin(obj.s * Math.PI) * 0.12;
+                    const stretch = 1 + Math.sin(obj.s * Math.PI * 0.5) * 0.08;
+                    targetGroup.scale.set(
+                        baseScale.x * pulse,
+                        baseScale.y * stretch,
+                        baseScale.z * pulse,
+                    );
+                    targetGroup.rotation.z = Math.sin(obj.s * Math.PI) * 0.08;
+                })
+                .onComplete(() => {
+                    targetGroup.scale.copy(baseScale);
+                    targetGroup.rotation.z = 0;
+                })
+                .start();
         }
 
         if (lane) {
