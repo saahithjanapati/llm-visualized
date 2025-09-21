@@ -7,6 +7,7 @@ import {
     VECTOR_LENGTH_PRISM,
 } from '../../utils/constants.js';
 import { MHSA_PASS_THROUGH_BRIGHTEN_RATIO, MHSA_PASS_THROUGH_DIM_RATIO, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY } from '../../utils/constants.js';
+import { JoyEasing, applySquashStretchFromProgress, resetJoyfulTransform } from '../joyfulMotion.js';
 
 /**
  * Animate a vector passing vertically through its corresponding weight matrix.
@@ -92,10 +93,10 @@ export function animateVectorMatrixPassThrough(
             },
             duration,
         )
-        .easing(TWEEN.Easing.Quadratic.InOut)
+        .easing(JoyEasing.easeInOutSine)
         .onUpdate(() => {
             // --------------------------------------------------------------
-            //  Vector motion       
+            //  Vector motion
             // --------------------------------------------------------------
             vector.group.position.y = tweenState.y;
             // Update trails only while BELOW the matrix; no trails above matrices
@@ -220,8 +221,18 @@ export function animateVectorMatrixPassThrough(
                 matrix.setColor(currentMatrixTargetColor);
                 matrix.setEmissive(currentMatrixTargetColor, currentEmissiveIntensity);
             }
+
+            if (vector && vector.group) {
+                applySquashStretchFromProgress(vector.group, tweenState.progress, {
+                    intensity: 0.22,
+                    rotationAmplitude: 0.2,
+                });
+            }
         })
         .onComplete(() => {
+            if (vector && vector.group) {
+                resetJoyfulTransform(vector.group);
+            }
             // Ensure the matrix ends dimmed if no global pulse managed it
             if (!ctx._mhaPulseActive) {
                 matrix.setColor(darkTintedMatrixColor);

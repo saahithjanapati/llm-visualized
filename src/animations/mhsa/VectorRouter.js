@@ -1,3 +1,5 @@
+import * as THREE from 'three';
+
 import { VectorVisualizationInstancedPrism } from '../../components/VectorVisualizationInstancedPrism.js';
 import { StraightLineTrail } from '../../utils/trailUtils.js';
 import { TRAIL_COLOR } from '../../utils/trailConstants.js';
@@ -11,12 +13,82 @@ import {
 } from '../../utils/constants.js';
 // Speed-related constants centralised in utils/constants
 import { MHSA_DUPLICATE_VECTOR_RISE_SPEED } from '../../utils/constants.js';
+import { computeArcOffset, applySquashStretchFromProgress, resetJoyfulTransform } from '../joyfulMotion.js';
 
 // Add configurable opacity for trails specific to vector copies under Q/K/V to reduce visual prominence
 const FAINT_TRAIL_OPACITY = 0.13; // must be < default 0.1
 
 
 // Read live binding each use to reflect UI changes at runtime
+
+function ensureArcState(vector, baseYOverride = null) {
+    if (!vector || !vector.group) return null;
+    vector.userData = vector.userData || {};
+    let state = vector.userData.__joyfulArcState;
+    if (!state) {
+        state = {
+            startX: vector.group.position.x,
+            baseY: baseYOverride ?? vector.group.position.y,
+            amplitude: 14 + Math.random() * 8,
+            rotationAmplitude: 0.12 + Math.random() * 0.05,
+            intensity: 0.16 + Math.random() * 0.05,
+        };
+        vector.userData.__joyfulArcState = state;
+    } else {
+        if (state.startX == null) state.startX = vector.group.position.x;
+        if (state.amplitude == null) state.amplitude = 14 + Math.random() * 8;
+        if (state.rotationAmplitude == null) state.rotationAmplitude = 0.12 + Math.random() * 0.05;
+        if (state.intensity == null) state.intensity = 0.16 + Math.random() * 0.05;
+    }
+    if (baseYOverride != null) state.baseY = baseYOverride;
+    if (state.baseY == null) state.baseY = baseYOverride ?? vector.group.position.y;
+    return state;
+}
+
+function updateHorizontalJoyfulMotion(vector, targetX, state) {
+    if (!vector || !vector.group || !state) return 0;
+    const startX = state.startX;
+    const dist = Math.max(1e-4, Math.abs(targetX - startX));
+    const travelled = Math.abs(vector.group.position.x - startX);
+    const progress = THREE.MathUtils.clamp(travelled / dist, 0, 1);
+    const direction = targetX >= startX ? 1 : -1;
+    const offset = computeArcOffset(progress, state.amplitude);
+    vector.group.position.y = state.baseY + offset;
+    applySquashStretchFromProgress(vector.group, progress, {
+        intensity: state.intensity,
+        rotationAmplitude: state.rotationAmplitude * direction,
+    });
+    if (progress >= 0.999) {
+        vector.group.position.y = state.baseY;
+        resetJoyfulTransform(vector.group);
+    }
+    return progress;
+}
+
+function updateVerticalJoyfulRise(vector, targetY) {
+    if (!vector || !vector.group) return 0;
+    vector.userData = vector.userData || {};
+    let state = vector.userData.__joyfulVerticalState;
+    if (!state) {
+        state = {
+            startY: vector.group.position.y,
+            intensity: 0.15 + Math.random() * 0.04,
+            rotationAmplitude: 0.1 + Math.random() * 0.04,
+        };
+        vector.userData.__joyfulVerticalState = state;
+    }
+    const dist = Math.max(1e-4, targetY - state.startY);
+    const travelled = vector.group.position.y - state.startY;
+    const progress = dist <= 0 ? 1 : THREE.MathUtils.clamp(travelled / dist, 0, 1);
+    applySquashStretchFromProgress(vector.group, progress, {
+        intensity: state.intensity,
+        rotationAmplitude: state.rotationAmplitude,
+    });
+    if (progress >= 0.999) {
+        resetJoyfulTransform(vector.group);
+    }
+    return progress;
+}
 
 /**
  * Responsible only for moving vectors to their parking positions
@@ -70,14 +142,33 @@ export class VectorRouter {
 
                 const targetX = this.headsCentersX[targetHeadIdx];
                 const dx      = ANIM_HORIZ_SPEED * GLOBAL_ANIM_SPEED_MULT * deltaTime;
+                const arcState = ensureArcState(tVec);
 
-                if (tVec.group.position.x < targetX - 0.01) {
-                    tVec.group.position.x = Math.min(targetX, tVec.group.position.x + dx);
-                // Update trail for travelling vector
-                if (tVec.userData && tVec.userData.trail) tVec.userData.trail.update(tVec.group.position);
+                if (arcState && arcState.startX == null) {
+                    arcState.startX = tVec.group.position.x;
+                }
+
+                const direction = targetX >= tVec.group.position.x ? 1 : -1;
+                if (Math.abs(tVec.group.position.x - targetX) > 0.01) {
+                    tVec.group.position.x += direction * dx;
+                    if ((direction === 1 && tVec.group.position.x > targetX) || (direction === -1 && tVec.group.position.x < targetX)) {
+                        tVec.group.position.x = targetX;
+                    }
+                    if (tVec.userData && tVec.userData.trail) {
+                        tVec.userData.trail.update(tVec.group.position);
+                    }
                 } else {
-                    // Arrived: spawn upward copy used for K
+                    tVec.group.position.x = targetX;
+                }
 
+                updateHorizontalJoyfulMotion(tVec, targetX, arcState);
+
+                if (Math.abs(tVec.group.position.x - targetX) <= 0.01) {
+                    tVec.group.position.x = targetX;
+                    if (arcState) arcState.startX = targetX;
+                    resetJoyfulTransform(tVec.group);
+
+                    // Arrived: spawn upward copy used for K
                     const upVec = new VectorVisualizationInstancedPrism([...tVec.rawData], tVec.group.position.clone());
                     this.parentGroup.add(upVec.group);
                     // Trail for upward K copy
@@ -108,7 +199,10 @@ export class VectorRouter {
             if (lane.upwardCopies && lane.upwardCopies.length) {
                 lane.upwardCopies.forEach((upVec) => {
                     if (upVec.group.position.y < this.headStopY) {
-                        upVec.group.position.y = Math.min(this.headStopY, upVec.group.position.y + MHSA_DUPLICATE_VECTOR_RISE_SPEED * GLOBAL_ANIM_SPEED_MULT * deltaTime);
+                        upVec.group.position.y = Math.min(
+                            this.headStopY,
+                            upVec.group.position.y + MHSA_DUPLICATE_VECTOR_RISE_SPEED * GLOBAL_ANIM_SPEED_MULT * deltaTime,
+                        );
                         if (upVec.userData && upVec.userData.trail) {
                             const ud = upVec.userData;
                             if (ud.trailWorld) {
@@ -119,7 +213,10 @@ export class VectorRouter {
                                 ud.trail.update(upVec.group.position);
                             }
                         }
+                    } else {
+                        upVec.group.position.y = this.headStopY;
                     }
+                    updateVerticalJoyfulRise(upVec, this.headStopY);
                 });
             }
 
@@ -179,32 +276,32 @@ export class VectorRouter {
             if (lane.sideCopies && lane.sideCopies.length) {
                 lane.sideCopies.forEach((obj) => {
                     const v  = obj.vec;
+                    if (!v || !v.group) return;
                     const dx = SIDE_COPY_HORIZ_SPEED * GLOBAL_ANIM_SPEED_MULT * deltaTime;
+                    const arcState = ensureArcState(v, this.headStopY);
+                    if (arcState && arcState.startX == null) {
+                        arcState.startX = v.group.position.x;
+                    }
+
                     if (Math.abs(v.group.position.x - obj.targetX) > 0.01) {
                         const dir = v.group.position.x < obj.targetX ? 1 : -1;
                         v.group.position.x += dir * dx;
-                        if (v.userData && v.userData.trail) {
-                            const ud = v.userData;
-                            // Only update trail while below matrix level (consistent with other vectors)
-                            const matrixBottomY = this.headStopY; // Q/V vectors stop at headStopY which is just below matrices
-                            if (v.group.position.y < matrixBottomY) {
-                                if (ud.trailWorld) {
-                                    const wp = new THREE.Vector3();
-                                    v.group.getWorldPosition(wp);
-                                    ud.trail.update(wp);
-                                } else {
-                                    ud.trail.update(v.group.position);
-                                }
-                            }
+                        if ((dir === 1 && v.group.position.x > obj.targetX) || (dir === -1 && v.group.position.x < obj.targetX)) {
+                            v.group.position.x = obj.targetX;
                         }
-                        if ((dir === 1 && v.group.position.x > obj.targetX) || (dir === -1 && v.group.position.x < obj.targetX)) v.group.position.x = obj.targetX;
+                    } else {
+                        v.group.position.x = obj.targetX;
                     }
-                    v.group.position.y = this.headStopY;
+
+                    const progress = updateHorizontalJoyfulMotion(v, obj.targetX, arcState);
+                    if (progress >= 0.999 && arcState) {
+                        arcState.startX = v.group.position.x;
+                    }
+
                     if (v.userData && v.userData.trail) {
-                        // Only update trail while below matrix level (consistent with other vectors)
-                        const matrixBottomY = this.headStopY; // Q/V vectors stop at headStopY which is just below matrices
+                        const ud = v.userData;
+                        const matrixBottomY = this.headStopY;
                         if (v.group.position.y < matrixBottomY) {
-                            const ud = v.userData;
                             if (ud.trailWorld) {
                                 const wp = new THREE.Vector3();
                                 v.group.getWorldPosition(wp);
