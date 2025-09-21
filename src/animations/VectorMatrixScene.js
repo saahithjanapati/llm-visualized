@@ -6,13 +6,33 @@ import { WeightMatrixVisualization } from '../components/WeightMatrixVisualizati
 import { VECTOR_LENGTH } from '../utils/constants.js'; // Import VECTOR_LENGTH
 import { scaleOpacityForDisplay } from '../utils/trailConstants.js';
 
+const JOYFUL_PALETTE = [
+    0xff6f61, // lively coral
+    0xffd166, // warm sunshine
+    0x06d6a0, // mint green
+    0x118ab2, // vibrant blue
+    0x9d4edd, // playful violet
+];
+
+function easeInOutCubic(t) {
+    if (t < 0.5) {
+        return 4 * t * t * t;
+    }
+    const f = -2 * t + 2;
+    return 1 - (f * f * f) / 2;
+}
+
+function clamp01(value) {
+    return Math.min(1, Math.max(0, value));
+}
+
 // Maximum points per trail line (adjust for performance/length)
 const MAX_TRAIL_POINTS = 1000; // Further increased buffer size
 
 export function initVectorMatrixScene(canvas) {
     // --- Basic Three.js setup ---
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x111111); // Dark background
+    scene.background = new THREE.Color(0x0e1433); // Deep navy backdrop for contrast
 
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
     camera.position.set(0, 10, 25); // Position camera to view both objects
@@ -22,11 +42,17 @@ export function initVectorMatrixScene(canvas) {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 
     // --- Lighting ---
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    const ambientLight = new THREE.AmbientLight(0xfff3e0, 0.65);
     scene.add(ambientLight);
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    directionalLight.position.set(5, 10, 7.5);
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.6);
+    directionalLight.position.set(5, 12, 9);
     scene.add(directionalLight);
+    const magentaLight = new THREE.PointLight(0xff85a1, 0.6, 120);
+    magentaLight.position.set(-18, 6, 18);
+    scene.add(magentaLight);
+    const cyanLight = new THREE.PointLight(0x5af3ff, 0.55, 140);
+    cyanLight.position.set(18, 10, -16);
+    scene.add(cyanLight);
 
     // --- Controls ---
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -44,6 +70,7 @@ export function initVectorMatrixScene(canvas) {
     const allVectorVisualizations = []; // Array to hold all vector instances
     const allTrailLines = []; // Array to hold { line, geometry, material } for trails
     const allTrailPoints = []; // Array of arrays to hold points for each trail line [[x,y,z], ...]
+    const vectorAnimationStates = []; // Store per-vector joyful animation data
     const vectorHeightOffset = 40; // Significantly increased offset
 
     // Configure matrix with user specified defaults
@@ -93,6 +120,32 @@ export function initVectorMatrixScene(canvas) {
         scene.add(vectorVis.group);
         allVectorVisualizations.push(vectorVis); // Add to array for cleanup
 
+        const accentColor = new THREE.Color(JOYFUL_PALETTE[i % JOYFUL_PALETTE.length]);
+        vectorVis.group.userData.accentColor = accentColor;
+        vectorVis.ellipses.forEach((ellipse) => {
+            const tinted = ellipse.material.color.clone().lerp(accentColor, 0.35);
+            ellipse.material.color.copy(tinted);
+            ellipse.material.emissive.copy(accentColor);
+            ellipse.material.emissiveIntensity = 0.35;
+            ellipse.material.needsUpdate = true;
+        });
+
+        const highlightIndices = [
+            Math.floor(VECTOR_LENGTH * 0.2) + (i % 3),
+            Math.floor(VECTOR_LENGTH * 0.5),
+            Math.floor(VECTOR_LENGTH * 0.8) - (i % 4),
+        ].map(index => THREE.MathUtils.clamp(index, 0, VECTOR_LENGTH - 1));
+
+        vectorAnimationStates.push({
+            accentColor,
+            highlightIndices,
+            previousY: startY,
+            wobblePhase: Math.random() * Math.PI * 2,
+            wobbleSpeed: 1.4 + Math.random() * 0.6,
+            bobAmplitude: 1.2 + Math.random() * 1.0,
+            swayAmplitude: 0.4 + Math.random() * 0.3,
+        });
+
         // --- Create Trail Line for this Vector ---
         allTrailPoints.push([]); // Initialize points array for this trail
         const trailGeometry = new THREE.BufferGeometry();
@@ -100,7 +153,7 @@ export function initVectorMatrixScene(canvas) {
         const positions = new Float32Array(MAX_TRAIL_POINTS * 3);
         trailGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 
-        const trailMaterial = new THREE.LineBasicMaterial({ color: 0x888888, transparent: true, opacity: scaleOpacityForDisplay(0.08) });
+        const trailMaterial = new THREE.LineBasicMaterial({ color: accentColor, transparent: true, opacity: scaleOpacityForDisplay(0.22) });
         const trailLine = new THREE.Line(trailGeometry, trailMaterial);
         scene.add(trailLine);
         allTrailLines.push({ line: trailLine, geometry: trailGeometry, material: trailMaterial });
@@ -144,7 +197,8 @@ export function initVectorMatrixScene(canvas) {
     window.addEventListener('keyup', onKeyUp);
 
     const clock = new THREE.Clock(); // Clock for animation timing
-    let previousY = startY; // Initialize previous Y position tracking
+    let accumulatedTime = 0;
+    let previousProgress = 0;
 
     // --- Animation Loop ---
     function animate() {
@@ -200,25 +254,70 @@ export function initVectorMatrixScene(canvas) {
 
         controls.update(); // Required if enableDamping is true
 
-        const elapsedTime = clock.getElapsedTime();
+        const deltaTime = clock.getDelta();
+        accumulatedTime += deltaTime;
         const animationDuration = 5; // seconds for one full loop (up and down implied by modulo)
-        const loopTime = (elapsedTime % animationDuration) / animationDuration; // Normalized loop time (0 to 1)
+        const loopTime = (accumulatedTime % animationDuration) / animationDuration; // Normalized loop time (0 to 1)
+        const easedLoopTime = easeInOutCubic(loopTime);
 
-        // Calculate current Y position using linear interpolation within the loop
-        const currentY = startY + loopTime * animationDistance;
+        let currentY = startY + easedLoopTime * animationDistance;
+
+        const anticipationWindow = 0.12;
+        if (loopTime < anticipationWindow) {
+            const t = loopTime / anticipationWindow;
+            currentY -= Math.sin(t * Math.PI) * 3.5;
+        }
+        const followThroughWindow = 0.14;
+        if (loopTime > 1 - followThroughWindow) {
+            const t = (loopTime - (1 - followThroughWindow)) / followThroughWindow;
+            currentY += Math.sin(t * Math.PI) * 2.8;
+        }
 
         // --- Check for Animation Reset ---
-        const animationReset = currentY < previousY;
+        const animationReset = loopTime < previousProgress;
         if (animationReset) {
             // Clear points for all trails
             allTrailPoints.forEach(points => points.length = 0);
         }
+        previousProgress = loopTime;
+
+        const animatedYs = [];
+
+        allVectorVisualizations.forEach((vectorVis, index) => {
+            const state = vectorAnimationStates[index];
+            if (!state) return;
+
+            state.wobblePhase += deltaTime * state.wobbleSpeed;
+            const bob = Math.sin(state.wobblePhase) * state.bobAmplitude;
+            const lift = Math.sin((loopTime + index * 0.12) * Math.PI * 2) * 0.6;
+            const animatedY = currentY + bob + lift;
+            const velocity = deltaTime > 0 ? (animatedY - state.previousY) / deltaTime : 0;
+            const stretch = THREE.MathUtils.clamp(1 + velocity * 0.03, 0.78, 1.35);
+            const squash = 1 / Math.sqrt(stretch);
+
+            vectorVis.group.scale.set(squash, stretch, squash);
+            const sway = Math.sin(state.wobblePhase * 0.8 + loopTime * Math.PI * 2) * state.swayAmplitude;
+            vectorVis.group.position.set(sway, animatedY, vectorVis.group.position.z);
+            vectorVis.group.rotation.z = Math.sin(state.wobblePhase + loopTime * Math.PI * 2) * 0.15;
+
+            state.highlightIndices.forEach((highlightIdx, hi) => {
+                const ellipse = vectorVis.ellipses[highlightIdx];
+                if (!ellipse || !ellipse.material) return;
+                const pulse = (Math.sin(state.wobblePhase + hi * Math.PI * 0.75 + loopTime * Math.PI * 2) + 1) * 0.5;
+                ellipse.material.emissiveIntensity = THREE.MathUtils.lerp(0.35, 0.95, pulse);
+                ellipse.material.needsUpdate = true;
+            });
+
+            animatedYs[index] = animatedY;
+            state.previousY = animatedY;
+        });
 
         // --- Update Trail Lines ---
         allTrailLines.forEach((trail, index) => {
             const currentPoints = allTrailPoints[index];
-            const vectorZPos = allVectorVisualizations[index].group.position.z; // Get Z for this vector
-            const newPoint = [0, currentY, vectorZPos];
+            const vectorVis = allVectorVisualizations[index];
+            const vectorZPos = vectorVis.group.position.z; // Get Z for this vector
+            const newPoint = [vectorVis.group.position.x, animatedYs[index] ?? currentY, vectorZPos];
 
             // Add new point
             currentPoints.push(newPoint);
@@ -234,33 +333,29 @@ export function initVectorMatrixScene(canvas) {
         });
 
         // --- Matrix Color Animation ---
+        const referenceY = animatedYs[0] ?? currentY;
         const matrixBottomY = -matrixParams.height / 2;
         const matrixMidY = 0; // Center of the matrix
         const matrixTopY = matrixParams.height / 2;
 
         let t = 0;
-        if (currentY < matrixBottomY) {
+        if (referenceY < matrixBottomY) {
             matrixCurrentColor.copy(darkGray);
-        } else if (currentY >= matrixBottomY && currentY < matrixMidY) {
-            // Entering: Gray to Bright Yellow
-            t = (currentY - matrixBottomY) / (matrixMidY - matrixBottomY);
-            matrixCurrentColor.lerpColors(darkGray, brightYellow, t);
-        } else if (currentY >= matrixMidY && currentY < matrixTopY) {
+        } else if (referenceY >= matrixBottomY && referenceY < matrixMidY) {
+            // Entering: Gray to Bright Yellow with playful tint
+            t = clamp01((referenceY - matrixBottomY) / (matrixMidY - matrixBottomY));
+            const enterColor = brightYellow.clone().lerp(new THREE.Color(0xff8fab), 0.35);
+            matrixCurrentColor.lerpColors(darkGray, enterColor, t);
+        } else if (referenceY >= matrixMidY && referenceY < matrixTopY) {
             // Leaving: Bright Yellow to Dark Yellow
-            t = (currentY - matrixMidY) / (matrixTopY - matrixMidY);
-            matrixCurrentColor.lerpColors(brightYellow, darkYellow, t);
-        } else { // currentY >= matrixTopY
-            matrixCurrentColor.copy(darkYellow);
+            t = clamp01((referenceY - matrixMidY) / (matrixTopY - matrixMidY));
+            const exitColor = darkYellow.clone().lerp(new THREE.Color(0x7c3aed), 0.4);
+            matrixCurrentColor.lerpColors(brightYellow, exitColor, t);
+        } else { // referenceY >= matrixTopY
+            const finalColor = darkYellow.clone().lerp(new THREE.Color(0x5eead4), 0.45);
+            matrixCurrentColor.copy(finalColor);
         }
         matrixVis.setColor(matrixCurrentColor);
-
-        // Update vector positions
-        allVectorVisualizations.forEach(vectorVis => {
-            vectorVis.group.position.y = currentY;
-        });
-
-        // Update previous Y for next frame
-        previousY = currentY;
 
         renderer.render(scene, camera);
     }
