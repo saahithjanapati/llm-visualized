@@ -626,6 +626,25 @@ export default class Gpt2Layer extends BaseLayer {
                         lane.arcBaseY = lane.branchStartY;
                         dupVec.group.position.y = lane.branchStartY;
                     }
+                    {
+                        const startTime = lane.anticipationStartTime;
+                        const duration = lane.anticipationDuration;
+                        const now = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function')
+                            ? performance.now()
+                            : Date.now();
+                        if (typeof startTime === 'number' && typeof duration === 'number' && now - startTime >= duration + 100) {
+                            lane.branchProgress = 0;
+                            if (typeof lane.branchStartX === 'number') {
+                                dupVec.group.position.x = lane.branchStartX;
+                            }
+                            if (typeof lane.arcBaseY === 'number') {
+                                dupVec.group.position.y = lane.arcBaseY;
+                            }
+                            lane.horizPhase = 'right';
+                            delete lane.anticipationStartTime;
+                            delete lane.anticipationDuration;
+                        }
+                    }
                     break;
                 case 'right':
                     lane.arcBaseY = (typeof lane.arcBaseY === 'number')
@@ -719,8 +738,7 @@ export default class Gpt2Layer extends BaseLayer {
                                 this.root.add(multResult.group);
 
                                 if (lane.addTarget) {
-                                    const trailColor = lane.accentColor ? lane.accentColor.getHex() : 0xffffff;
-                                    const addTrail = new StraightLineTrail(this.root, trailColor, 1);
+                                    const addTrail = new StraightLineTrail(this.root, 0xffffff, 1);
                                     addTrail.start(multResult.group.position);
                                     multResult.userData = multResult.userData || {};
                                     multResult.userData.trail = addTrail;
@@ -744,7 +762,7 @@ export default class Gpt2Layer extends BaseLayer {
                                         }
                                         lane.addTarget.userData = lane.addTarget.userData || {};
                                         if (!lane.addTarget.userData.trail) {
-                                            const fallbackTrail = new StraightLineTrail(this.root, trailColor, 1);
+                                            const fallbackTrail = new StraightLineTrail(this.root, 0xffffff, 1);
                                             fallbackTrail.start(lane.addTarget.group.position);
                                             lane.addTarget.userData.trail = fallbackTrail;
                                             lane.addTarget.userData.trailWorld = false;
@@ -755,7 +773,7 @@ export default class Gpt2Layer extends BaseLayer {
                                 } else {
                                     lane.resultVec = multResult;
                                     lane.ln1AddComplete = true;
-                                    const resTrailFallback = new StraightLineTrail(this.root, trailColor, 1);
+                                    const resTrailFallback = new StraightLineTrail(this.root, 0xffffff, 1);
                                     resTrailFallback.start(multResult.group.position);
                                     multResult.userData = multResult.userData || {};
                                     multResult.userData.trail = resTrailFallback;
@@ -846,7 +864,7 @@ export default class Gpt2Layer extends BaseLayer {
                         const mv = new VectorVisualizationInstancedPrism(v.rawData.slice(), v.group.position.clone());
                         this.root.add(mv.group);
                         // ---- Trail for LN2 moving vector ----
-                        const mvTrail = new StraightLineTrail(this.root, lane.accentColor ? lane.accentColor.getHex() : 0xffffff, 1);
+                        const mvTrail = new StraightLineTrail(this.root, 0xffffff, 1);
                         mvTrail.start(mv.group.position);
                         mv.userData = mv.userData || {};
                         mv.userData.trail = mvTrail;
@@ -970,7 +988,7 @@ export default class Gpt2Layer extends BaseLayer {
                                 this.root.add(resVec.group);
 
                                 if (lane.addTargetLN2) {
-                                    const ln2AddTrail = new StraightLineTrail(this.root, lane.accentColor ? lane.accentColor.getHex() : 0xffffff, 1);
+                                    const ln2AddTrail = new StraightLineTrail(this.root, 0xffffff, 1);
                                     ln2AddTrail.start(resVec.group.position);
                                     resVec.userData = resVec.userData || {};
                                     resVec.userData.trail = ln2AddTrail;
@@ -994,7 +1012,7 @@ export default class Gpt2Layer extends BaseLayer {
                                         }
                                         lane.addTargetLN2.userData = lane.addTargetLN2.userData || {};
                                         if (!lane.addTargetLN2.userData.trail) {
-                                            const fallbackTrailLn2 = new StraightLineTrail(this.root, lane.accentColor ? lane.accentColor.getHex() : 0xffffff, 1);
+                                            const fallbackTrailLn2 = new StraightLineTrail(this.root, 0xffffff, 1);
                                             fallbackTrailLn2.start(lane.addTargetLN2.group.position);
                                             lane.addTargetLN2.userData.trail = fallbackTrailLn2;
                                             lane.addTargetLN2.userData.trailWorld = false;
@@ -1004,7 +1022,7 @@ export default class Gpt2Layer extends BaseLayer {
                                 } else {
                                     lane.resultVecLN2 = resVec;
                                     lane.ln2AddComplete = true;
-                                    const resTrail = new StraightLineTrail(this.root, lane.accentColor ? lane.accentColor.getHex() : 0xffffff, 1);
+                                    const resTrail = new StraightLineTrail(this.root, 0xffffff, 1);
                                     resTrail.start(resVec.group.position);
                                     resVec.userData = resVec.userData || {};
                                     resVec.userData.trail = resTrail;
@@ -1184,7 +1202,7 @@ export default class Gpt2Layer extends BaseLayer {
         vec.group.visible = false;
 
         // ---- Trail for expanded 4x vector group ----
-        const expTrail = new StraightLineTrail(this.root, lane.accentColor ? lane.accentColor.getHex() : 0xffffff, 1);
+        const expTrail = new StraightLineTrail(this.root, 0xffffff, 1);
         expTrail.start(expandedGroup.position);
         lane.expandedVecTrail = expTrail;
         
@@ -1365,7 +1383,7 @@ export default class Gpt2Layer extends BaseLayer {
                 try {
                     vec.userData = vec.userData || {};
                     if (!vec.userData.mlpTrail) {
-                        const pathTrail = new StraightLineTrail(this.root, lane.accentColor ? lane.accentColor.getHex() : 0xffffff, 1);
+                        const pathTrail = new StraightLineTrail(this.root, 0xffffff, 1);
                         pathTrail.start(vec.group.position.clone());
                         vec.userData.mlpTrail = pathTrail;
                     }
@@ -1567,13 +1585,21 @@ export default class Gpt2Layer extends BaseLayer {
         lane.branchProgress = 0;
         lane.horizPhase = 'anticipate';
 
+        const anticipationOffset = -10 - Math.random() * 6;
+        const duration = Math.max(80, 160 / Math.max(speedMult || 1, 0.0001));
+        const now = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function')
+            ? performance.now()
+            : Date.now();
+        lane.anticipationStartTime = now;
+        lane.anticipationDuration = duration * 2; // forward + return
+
         if (typeof TWEEN === 'undefined') {
             lane.horizPhase = 'right';
+            delete lane.anticipationStartTime;
+            delete lane.anticipationDuration;
             return;
         }
 
-        const anticipationOffset = -10 - Math.random() * 6;
-        const duration = Math.max(80, 160 / Math.max(speedMult || 1, 0.0001));
         new TWEEN.Tween(group.position)
             .to({ x: lane.branchStartX + anticipationOffset }, duration)
             .easing(TWEEN.Easing.Quadratic.Out)
@@ -1591,6 +1617,8 @@ export default class Gpt2Layer extends BaseLayer {
                 }
                 lane.branchProgress = 0;
                 lane.horizPhase = 'right';
+                delete lane.anticipationStartTime;
+                delete lane.anticipationDuration;
             })
             .start();
     }
@@ -1693,7 +1721,7 @@ export default class Gpt2Layer extends BaseLayer {
         // ────────────── Trail for the ORIGINAL vector ──────────────
         // Attach to the GLOBAL scene and record WORLD positions so the trail
         // remains continuous across layers as lanes are transferred upwards.
-        trail = new StraightLineTrail(this._globalScene, accentColor.getHex(), 1);
+        trail = new StraightLineTrail(this._globalScene, 0xffffff, 1);
         {
             const wp = new THREE.Vector3();
             originalVec.group.getWorldPosition(wp);
@@ -1723,7 +1751,7 @@ export default class Gpt2Layer extends BaseLayer {
         dupVec.group.visible = false;
         this.root.add(dupVec.group);
         // Trail for duplicate vector inside LN1
-        const dupTrail = new StraightLineTrail(this.root, accentColor.getHex(), 1);
+        const dupTrail = new StraightLineTrail(this.root, 0xffffff, 1);
         dupTrail.start(dupVec.group.position);
         dupVec.userData = dupVec.userData || {};
         dupVec.userData.trail = dupTrail;
@@ -1733,7 +1761,7 @@ export default class Gpt2Layer extends BaseLayer {
 
         // If we're reusing an existing lane we may not have created the trail yet
         if (!trail) {
-            trail = new StraightLineTrail(this._globalScene, accentColor.getHex(), 1);
+            trail = new StraightLineTrail(this._globalScene, 0xffffff, 1);
             const wp = new THREE.Vector3();
             originalVec.group.getWorldPosition(wp);
             trail.start(wp);
@@ -1884,7 +1912,7 @@ export default class Gpt2Layer extends BaseLayer {
                 const posVec = new VectorVisualizationInstancedPrism(posData, new THREE.Vector3(posStartX, posStartY, zPos));
                 this.root.add(posVec.group);
                 // Trail (local to this layer) – enabled only until it reaches residual stream
-                const posTrail = new StraightLineTrail(this.root, lane.accentColor ? lane.accentColor.getHex() : 0xffffff, 1);
+                const posTrail = new StraightLineTrail(this.root, 0xffffff, 1);
                 posTrail.start(posVec.group.position);
                 posVec.userData = posVec.userData || {};
                 posVec.userData.trail = posTrail;
