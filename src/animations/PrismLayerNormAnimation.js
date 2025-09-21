@@ -2,6 +2,12 @@ import * as THREE from 'three';
 import { VECTOR_LENGTH_PRISM, PLN_UNIT_DELAY_MS, PLN_UNIT_CYCLE_DURATION_MS } from '../utils/constants.js';
 import { mapValueToColor } from '../utils/colors.js'; // For color mapping if needed
 
+function easeOutBack(t, amount = 1.4) {
+    const c3 = amount + 1;
+    const tt = t - 1;
+    return 1 + c3 * tt * tt * tt + amount * tt * tt;
+}
+
 export class PrismLayerNormAnimation {
     constructor(prismVisualization, config = {}) {
         this.prismVis = prismVisualization;
@@ -128,7 +134,10 @@ export class PrismLayerNormAnimation {
                 const unitElapsedTime = currentTime - state.activationTime;
                 state.localProgress = Math.min(unitElapsedTime / this.config.unitDuration, 1.0);
 
-                const yOffset = state.riseHeight * Math.sin(Math.PI * state.localProgress);
+                const easedProgress = Math.min(1, easeOutBack(state.localProgress, 1.2));
+                const bounce = Math.sin(Math.PI * easedProgress);
+                const ripple = Math.sin(easedProgress * Math.PI * 2) * 0.2;
+                const yOffset = state.riseHeight * bounce + ripple * 2.0;
 
                 const tempDisplayColor = new THREE.Color();
                 const whiteColor = new THREE.Color(1, 1, 1);
@@ -139,6 +148,9 @@ export class PrismLayerNormAnimation {
                     const t = (state.localProgress - 0.5) * 2;
                     tempDisplayColor.copy(whiteColor).lerp(state.flashTargetColor, t);
                 }
+
+                const sparkle = Math.abs(Math.sin(easedProgress * Math.PI * 3)) * 0.25;
+                tempDisplayColor.lerp(whiteColor, sparkle * 0.4);
 
                 this.prismVis.setInstanceAppearance(i, yOffset, tempDisplayColor);
                 needsMatrixUpdate = true;

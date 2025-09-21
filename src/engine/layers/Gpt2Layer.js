@@ -4,6 +4,7 @@ import { LayerNormalizationVisualization } from '../../components/LayerNormaliza
 import { WeightMatrixVisualization } from '../../components/WeightMatrixVisualization.js';
 import { VectorVisualizationInstancedPrism } from '../../components/VectorVisualizationInstancedPrism.js';
 import { StraightLineTrail, buildMergedLineSegmentsFromSegments, collectTrailsUnder, mergeTrailsIntoLineSegments } from '../../utils/trailUtils.js';
+import { animateJoyfulRise, pulseMaterialEmissive, addJoyfulArc } from '../../animations/JoyfulMotion.js';
 import {
     LN_PARAMS,
     LN_NORM_START_FRACTION_FROM_BOTTOM,
@@ -824,18 +825,60 @@ export default class Gpt2Layer extends BaseLayer {
                     // Move horizontally to LN2
                     const mv = lane.movingVecLN2;
                     if (!mv) break;
-                    
+
                     mv.group.visible = true;
+                    if (!lane.__arcMeta) {
+                        const total = BRANCH_X - mv.group.position.x;
+                        lane.__arcMeta = {
+                            startX: mv.group.position.x,
+                            startY: mv.group.position.y,
+                            baseZ: mv.group.position.z || 0,
+                            baseRotZ: mv.group.rotation ? mv.group.rotation.z : 0,
+                            totalX: Math.abs(total) < 0.001 ? 1 : total,
+                            amplitude: Math.max(18, Math.min(120, Math.abs(total) * 0.08))
+                        };
+                        try {
+                            pulseMaterialEmissive(mv.group, { color: 0xbfe3ff, intensity: 0.7, duration: 380, repeat: 1 });
+                        } catch (_) { /* optional */ }
+                    }
+
                     const dx = ANIM_HORIZ_SPEED * speedMult * dt;
-                    mv.group.position.x = Math.min(BRANCH_X, mv.group.position.x + dx);
-                    
+                    const nextX = Math.min(BRANCH_X, mv.group.position.x + dx);
+                    const meta = lane.__arcMeta;
+                    let progress = 1;
+                    if (meta && Math.abs(meta.totalX) > 0.0001) {
+                        progress = THREE.MathUtils.clamp((nextX - meta.startX) / meta.totalX, 0, 1);
+                    }
+                    mv.group.position.x = nextX;
+                    if (meta) {
+                        const arcY = meta.startY + addJoyfulArc(progress, meta.amplitude);
+                        const arcZ = meta.baseZ + addJoyfulArc(progress, meta.amplitude * 0.2, 0.35);
+                        mv.group.position.y = arcY;
+                        mv.group.position.z = arcZ;
+                        if (mv.group.rotation) {
+                            mv.group.rotation.z = meta.baseRotZ + Math.sin(progress * Math.PI) * 0.28;
+                        }
+                    }
+
                     if (mv.group.position.x >= BRANCH_X - 0.01) {
                         mv.group.position.x = BRANCH_X;
+                        if (lane.__arcMeta) {
+                            mv.group.position.y = lane.__arcMeta.startY;
+                            mv.group.position.z = lane.__arcMeta.baseZ;
+                            if (mv.group.rotation) mv.group.rotation.z = lane.__arcMeta.baseRotZ;
+                            lane.__arcMeta = null;
+                        }
                         if (lane.multTargetLN2 && lane.multTargetLN2.group) {
                             lane.multTargetLN2.group.visible = true;
+                            try {
+                                pulseMaterialEmissive(lane.multTargetLN2.group, { color: 0xffffff, intensity: 0.8, duration: 420, repeat: 1 });
+                            } catch (_) { /* optional */ }
                         }
                         if (lane.addTargetLN2 && lane.addTargetLN2.group) {
                             lane.addTargetLN2.group.visible = true;
+                            try {
+                                pulseMaterialEmissive(lane.addTargetLN2.group, { color: 0xffffff, intensity: 0.8, duration: 420, repeat: 1 });
+                            } catch (_) { /* optional */ }
                         }
                         lane.ln2Phase = 'insideLN';
                         this._emitProgress();
@@ -852,24 +895,17 @@ export default class Gpt2Layer extends BaseLayer {
                     const startLn2Rise = (vec) => {
                         if (!vec) return;
                         const destY = this.mlpUp.group.position.y - MLP_MATRIX_PARAMS_UP.height / 2 - 10;
-                        const dist = destY - vec.group.position.y;
-                        const durationMs = (dist / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
-
-                        if (typeof TWEEN !== 'undefined') {
-                            new TWEEN.Tween(vec.group.position)
-                                .to({ y: destY }, durationMs)
-                                .easing(TWEEN.Easing.Linear.None)
-                                .onUpdate(() => {})
-                                .onComplete(() => {
-                                    lane.ln2Phase = 'mlpReady';
-                                    this._emitProgress();
-                                })
-                                .start();
-                        } else {
-                            vec.group.position.y = destY;
-                            lane.ln2Phase = 'mlpReady';
-                            this._emitProgress();
-                        }
+                        animateJoyfulRise(vec.group, destY, {
+                            speed: ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT,
+                            overshoot: LN_PARAMS.height * 0.1,
+                            anticipationOffset: -LN_PARAMS.height * 0.06,
+                            emissivePulse: { color: 0xffefd6, intensity: 0.75, pulseDuration: 420, repeat: 1 },
+                            onUpdate: () => {},
+                            onComplete: () => {
+                                lane.ln2Phase = 'mlpReady';
+                                this._emitProgress();
+                            }
+                        });
                     };
 
                     // Use the same fraction as LayerNorm-1 so the
@@ -1019,7 +1055,7 @@ export default class Gpt2Layer extends BaseLayer {
      */
     _animateMlpUpProjection(lane) {
         const vec = lane.resultVecLN2;
-        if (!vec || typeof TWEEN === 'undefined') return;
+        if (!vec) return;
 
         const bottomY = this.mlpUp.group.position.y - MLP_MATRIX_PARAMS_UP.height / 2;
         const topY = this.mlpUp.group.position.y + MLP_MATRIX_PARAMS_UP.height / 2;
@@ -1033,46 +1069,49 @@ export default class Gpt2Layer extends BaseLayer {
         const finalIntensity = 0.3;
 
         // Animate matrix colour and emissive intensity for a glow effect
-        const state = { t: 0, emissive: startIntensity };
-        new TWEEN.Tween(state)
-            .to({ t: 1, emissive: peakIntensity }, duration * 0.6)
-            .easing(TWEEN.Easing.Quadratic.InOut)
-            .onUpdate(() => {
-                const col = matrixStartColor.clone().lerp(matrixEndColor, state.t);
-                this.mlpUp.setColor(col);
-                this.mlpUp.setEmissive(col, state.emissive);
-            })
-            .onComplete(() => {
-                new TWEEN.Tween(state)
-                    .to({ emissive: finalIntensity }, duration * 0.4)
-                    .easing(TWEEN.Easing.Quadratic.InOut)
-                    .onUpdate(() => {
-                        this.mlpUp.setEmissive(matrixEndColor, state.emissive);
-                    })
-                    .start();
-            })
-            .start();
-            
-        // Move vector through matrix
-        new TWEEN.Tween(vec.group.position)
-            .to({ y: topY }, duration)
-            .easing(TWEEN.Easing.Linear.None)
-            .onUpdate(() => {
-            })
-            .onStart(() => {
-                // Shrink to fit in narrowing matrix
-                vec.group.scale.setScalar(0.6);
-            })
-            .onComplete(() => {
-                // Restore scale
-                vec.group.scale.setScalar(0.6);
+        if (typeof TWEEN !== 'undefined') {
+            const state = { t: 0, emissive: startIntensity };
+            new TWEEN.Tween(state)
+                .to({ t: 1, emissive: peakIntensity }, duration * 0.6)
+                .easing(TWEEN.Easing.Quadratic.InOut)
+                .onUpdate(() => {
+                    const col = matrixStartColor.clone().lerp(matrixEndColor, state.t);
+                    this.mlpUp.setColor(col);
+                    this.mlpUp.setEmissive(col, state.emissive);
+                })
+                .onComplete(() => {
+                    new TWEEN.Tween(state)
+                        .to({ emissive: finalIntensity }, duration * 0.4)
+                        .easing(TWEEN.Easing.Quadratic.InOut)
+                        .onUpdate(() => {
+                            this.mlpUp.setEmissive(matrixEndColor, state.emissive);
+                        })
+                        .start();
+                })
+                .start();
+        } else {
+            this.mlpUp.setColor(matrixEndColor);
+            this.mlpUp.setEmissive(matrixEndColor, finalIntensity);
+        }
+
+        // Move vector through matrix with squash-and-stretch flair
+        vec.group.scale.setScalar(0.6);
+        animateJoyfulRise(vec.group, topY, {
+            duration,
+            enableSwing: false,
+            squashAmount: 0.18,
+            stretchAmount: 0.28,
+            anticipationOffset: -20,
+            overshoot: 45,
+            emissivePulse: { color: matrixEndColor, intensity: 0.85, pulseDuration: 420, repeat: 1 },
+            onComplete: () => {
                 this.mlpUp.setColor(matrixEndColor);
                 this.mlpUp.setEmissive(matrixEndColor, finalIntensity);
-                
+
                 // Expand to 4x width (3072 dimensions)
                 this._expandTo4x(lane, vec);
-            })
-            .start();
+            }
+        });
     }
 
     /**
@@ -1277,38 +1316,37 @@ export default class Gpt2Layer extends BaseLayer {
         
         // Rise above matrix
         const riseAbove = 40;
-        const riseDur = (riseAbove / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
-        
-        new TWEEN.Tween(vec.group.position)
-            .to({ y: vec.group.position.y + riseAbove }, riseDur)
-            .easing(TWEEN.Easing.Quadratic.InOut)
-            .onStart(() => {
-                // Start a dedicated post-MLP path trail for a clean rise-then-right
-                try {
-                    vec.userData = vec.userData || {};
-                    if (!vec.userData.mlpTrail) {
-                        const pathTrail = new StraightLineTrail(this.root, 0xffffff, 1);
-                        pathTrail.start(vec.group.position.clone());
-                        vec.userData.mlpTrail = pathTrail;
-                    }
-                } catch (_) { /* optional visual */ }
-            })
-            .onUpdate(() => {
+        const targetY = vec.group.position.y + riseAbove;
+
+        // Start a dedicated post-MLP path trail for a clean rise-then-right
+        try {
+            vec.userData = vec.userData || {};
+            if (!vec.userData.mlpTrail) {
+                const pathTrail = new StraightLineTrail(this.root, 0xffffff, 1);
+                pathTrail.start(vec.group.position.clone());
+                vec.userData.mlpTrail = pathTrail;
+            }
+        } catch (_) { /* optional visual */ }
+
+        animateJoyfulRise(vec.group, targetY, {
+            speed: ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT,
+            overshoot: 18,
+            anticipationOffset: -12,
+            emissivePulse: { color: 0xfff7d9, intensity: 0.7, pulseDuration: 360, repeat: 1 },
+            onUpdate: () => {
                 const t = vec && vec.userData && vec.userData.mlpTrail;
                 if (t && typeof t.update === 'function') {
                     t.update(vec.group.position);
                 }
-            })
-            .onComplete(() => {
-                // Update residual stream target height
+            },
+            onComplete: () => {
                 if (this.mhsaAnimation) {
                     this.mhsaAnimation.finalOriginalY = vec.group.position.y - ORIGINAL_TO_PROCESSED_GAP;
                 }
-                
-                // Move back to residual stream
+
                 this._returnToResidualStream(lane, vec);
-            })
-            .start();
+            }
+        });
     }
 
     /**
