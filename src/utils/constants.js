@@ -35,6 +35,40 @@ export const QUALITY_PRESET = 'high';
 // Higher caps produce crisper visuals on Retina/HiDPI displays.
 export const RENDER_DPR_CAP = 2.0; // used by CoreEngine and intro renderer
 
+/**
+ * Determine the effective renderer DPR cap taking overrides and extremely
+ * dense displays into account. For very high DPI screens (DPR >= 2.5) we clamp
+ * further to avoid rendering at an excessively high resolution which can look
+ * harsh and cost extra GPU time. A runtime override can still lower the value
+ * via `window.__RENDER_DPR_CAP` before the bundles execute.
+ *
+ * @returns {number}
+ */
+export function resolveRenderDprCap() {
+    const baseCap = (typeof RENDER_DPR_CAP === 'number' && RENDER_DPR_CAP > 0)
+        ? RENDER_DPR_CAP
+        : (QUALITY_PRESET === 'high' ? 2.0 : 1.5);
+
+    if (typeof window === 'undefined') {
+        return baseCap;
+    }
+
+    const override = window.__RENDER_DPR_CAP;
+    if (typeof override === 'number' && override > 0) {
+        return Math.min(baseCap, override);
+    }
+
+    const deviceDpr = typeof window.devicePixelRatio === 'number'
+        ? window.devicePixelRatio
+        : 1;
+
+    if (deviceDpr >= 2.5) {
+        return Math.min(baseCap, 1.75);
+    }
+
+    return baseCap;
+}
+
 export const VECTOR_LENGTH = 100;
 export const SPHERE_RADIUS = 0.15;
 export const SPHERE_DIAMETER = SPHERE_RADIUS * 2;
