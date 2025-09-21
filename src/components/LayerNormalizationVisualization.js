@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CSG } from 'three-csg-ts';
 import { NUM_VECTOR_LANES, VECTOR_DEPTH_SPACING, USE_GLB_MATERIALS } from '../utils/constants.js';
+import { createEnergyRingMaterial } from '../utils/sciFiMaterials.js';
 
 // A visualization for the Layer Normalization operation.
 // It renders an extruded ellipse (like a squashed cylinder) with a hollow interior
@@ -272,14 +273,7 @@ export class LayerNormalizationVisualization {
         // ==== STEP 5 — assign material & add to the outer group ====
         const material = (USE_GLB_MATERIALS && __materialCache.has(cacheKey))
             ? __materialCache.get(cacheKey).clone()
-            : new THREE.MeshStandardMaterial({
-                color: 0x00aa88,
-                metalness: 0.15,
-                roughness: 0.6,
-                side: THREE.DoubleSide,
-                transparent: true,
-                opacity: 0.85
-            });
+            : createEnergyRingMaterial();
 
         // After all geometry operations *and* potential caching we assign
         // material and add the mesh to the parent group.  When the geometry
@@ -345,14 +339,7 @@ export class LayerNormalizationVisualization {
 
         const mat = (USE_GLB_MATERIALS && __materialCache.has(sliceKey))
             ? __materialCache.get(sliceKey).clone()
-            : new THREE.MeshStandardMaterial({
-                color: 0xffffff,
-                metalness: 0.0,
-                roughness: 0.8,
-                side: THREE.DoubleSide,
-                transparent: true,
-                opacity: 0.9
-            });
+            : createEnergyRingMaterial();
 
         const inst = new THREE.InstancedMesh(sliceGeometry, mat, NUM_VECTOR_LANES);
         const mtx = new THREE.Matrix4();
