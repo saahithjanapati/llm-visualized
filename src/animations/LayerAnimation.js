@@ -78,12 +78,20 @@ import { mapValueToColor } from '../utils/colors.js';
 
 // Use live binding of GLOBAL_ANIM_SPEED_MULT at each use; do not cache
 
+const LAYER_ACCENT_COLORS = [
+    0xff6f61,
+    0xffd166,
+    0x06d6a0,
+    0x118ab2,
+    0x9d4edd,
+].map(hex => new THREE.Color(hex));
+
 export function initLayerAnimation(container) {
     // -------------------------------------------------------------------------
     //  Basic Three.js setup
     // -------------------------------------------------------------------------
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x111111);
+    scene.background = new THREE.Color(0x081129);
 
     const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 10000);
     camera.position.set(2140, 150, 3500);
@@ -99,7 +107,74 @@ export function initLayerAnimation(container) {
     renderer.setPixelRatio(window.devicePixelRatio);
 
     // Initialize the clock earlier
-    const clock = new THREE.Clock(); 
+    const clock = new THREE.Clock();
+    const joyfulMotionStates = new Map();
+
+    function getJoyfulState(object) {
+        if (!object) return null;
+        let state = joyfulMotionStates.get(object);
+        if (!state) {
+            state = {
+                previousY: object.position ? object.position.y : 0,
+                wobblePhase: Math.random() * Math.PI * 2,
+                wobbleSpeed: 0.6 + Math.random() * 0.6,
+                baseScale: object.scale ? object.scale.clone() : new THREE.Vector3(1, 1, 1),
+                lastAppliedScale: object.scale ? object.scale.clone() : new THREE.Vector3(1, 1, 1),
+            };
+            joyfulMotionStates.set(object, state);
+        }
+        return state;
+    }
+
+    function applyJoyfulMotion(object, deltaTime, accentColor = null) {
+        if (!object || deltaTime <= 0) return;
+        const state = getJoyfulState(object);
+        if (!state || !object.position) return;
+
+        const currentY = object.position.y;
+        const velocity = (currentY - state.previousY) / Math.max(deltaTime, 1e-5);
+        if (!state.baseScale) {
+            state.baseScale = object.scale ? object.scale.clone() : new THREE.Vector3(1, 1, 1);
+        }
+
+        if (state.lastAppliedScale) {
+            const diff = Math.abs(object.scale.x - state.lastAppliedScale.x)
+                + Math.abs(object.scale.y - state.lastAppliedScale.y)
+                + Math.abs(object.scale.z - state.lastAppliedScale.z);
+            if (diff > 0.001) {
+                state.baseScale.copy(object.scale);
+            }
+        } else if (object.scale) {
+            state.baseScale = object.scale.clone();
+        }
+
+        const stretch = THREE.MathUtils.clamp(1 + velocity * 0.02, 0.82, 1.24);
+        const squash = 1 / Math.sqrt(stretch);
+
+        const baseScale = state.baseScale || new THREE.Vector3(1, 1, 1);
+        object.scale.set(
+            baseScale.x * squash,
+            baseScale.y * stretch,
+            baseScale.z * squash,
+        );
+        state.lastAppliedScale = object.scale.clone();
+
+        state.wobblePhase += deltaTime * state.wobbleSpeed;
+        object.rotation.z = Math.sin(state.wobblePhase) * 0.05;
+
+        state.previousY = currentY;
+
+        if (accentColor && object.children && object.children.length > 0) {
+            const pulse = (Math.sin(state.wobblePhase * 1.5) + 1) * 0.5;
+            object.children.forEach(child => {
+                if (child.material && 'emissive' in child.material) {
+                    child.material.emissive.copy(accentColor);
+                    child.material.emissiveIntensity = THREE.MathUtils.lerp(0.15, 0.55, pulse);
+                    child.material.needsUpdate = true;
+                }
+            });
+        }
+    }
 
     // Add pause/resume support for tab visibility
     let isPaused = false;
@@ -134,10 +209,17 @@ export function initLayerAnimation(container) {
     controls.enableDamping = true;
     controls.target.set(2140, 66, 0);
 
-    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    dirLight.position.set(10, 30, 10);
+    const ambientLight = new THREE.AmbientLight(0xfff7e6, 0.65);
+    scene.add(ambientLight);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.65);
+    dirLight.position.set(8, 32, 14);
     scene.add(dirLight);
+    const magentaFill = new THREE.PointLight(0xff85a1, 0.45, 600);
+    magentaFill.position.set(2120, 120, 320);
+    scene.add(magentaFill);
+    const cyanFill = new THREE.PointLight(0x5eead4, 0.5, 650);
+    cyanFill.position.set(2160, 80, -260);
+    scene.add(cyanFill);
 
     // -------------------------------------------------------------------------
     //  Component Parameters (Values from LayerAnimationConstants.js)
@@ -330,10 +412,14 @@ export function initLayerAnimation(container) {
         scene.add(origVec.group);
         originals.push(origVec);
 
+        const accentColor = LAYER_ACCENT_COLORS[i % LAYER_ACCENT_COLORS.length].clone();
+        origVec.group.userData.accentColor = accentColor;
+
         // ---------- Duplicate moving vector (will branch) ----------
         const movingVec = new VectorVisualizationInstancedPrism(data, new THREE.Vector3(0, startY, zPos));
         movingVec.updateDataInternal(data);
         scene.add(movingVec.group);
+        movingVec.group.userData.accentColor = accentColor;
 
         // Start hidden – will appear once branch begins
         movingVec.group.visible = false;
@@ -360,8 +446,8 @@ export function initLayerAnimation(container) {
         const normAnimation = new PrismLayerNormAnimation(movingVec);
 
         // Create trails (now uses utility function, passing the scene)
-        const origTrail = createTrailLine(scene);
-        const branchTrail = createTrailLine(scene);
+        const origTrail = createTrailLine(scene, accentColor.getHex());
+        const branchTrail = createTrailLine(scene, accentColor.getHex());
 
         lanes.push({
             zPos,
@@ -397,6 +483,7 @@ export function initLayerAnimation(container) {
             normStartedLN2: false,
             multDoneLN2: false,
             resultVecLN2: null,
+            accentColor,
         });
     }
 
@@ -936,7 +1023,7 @@ export function initLayerAnimation(container) {
                         lane.movingVecLN2 = mv;
                         lane.normAnimationLN2 = new PrismLayerNormAnimation(mv);
                         // Create a new trail for the LN2 branch so its motion is visualised
-                        lane.branchTrailLN2 = createTrailLine(scene);
+                        lane.branchTrailLN2 = createTrailLine(scene, lane.accentColor.getHex());
                         // Slightly lower the opacity so overlapping with the frozen trail doesn't brighten excessively.
                         if (lane.branchTrailLN2 && lane.branchTrailLN2.line && lane.branchTrailLN2.line.material) {
                             
@@ -1018,13 +1105,34 @@ export function initLayerAnimation(container) {
                 default:
                     break;
             }
+
+            applyJoyfulMotion(originalVec.group, deltaTime, lane.accentColor);
+            if (movingVec.group.visible) applyJoyfulMotion(movingVec.group, deltaTime, lane.accentColor);
+            if (lane.resultVec && lane.resultVec.group && lane.resultVec.group.visible) {
+                applyJoyfulMotion(lane.resultVec.group, deltaTime, lane.accentColor);
+            }
+            if (lane.postAdditionVec && lane.postAdditionVec.group && lane.postAdditionVec.group.visible) {
+                applyJoyfulMotion(lane.postAdditionVec.group, deltaTime, lane.accentColor);
+            }
+            if (lane.movingVecLN2 && lane.movingVecLN2.group && lane.movingVecLN2.group.visible) {
+                applyJoyfulMotion(lane.movingVecLN2.group, deltaTime, lane.accentColor);
+            }
+            if (lane.resultVecLN2 && lane.resultVecLN2.group && lane.resultVecLN2.group.visible) {
+                applyJoyfulMotion(lane.resultVecLN2.group, deltaTime, lane.accentColor);
+            }
+            if (lane.expandedVecGroup && lane.expandedVecGroup.visible) {
+                applyJoyfulMotion(lane.expandedVecGroup, deltaTime, lane.accentColor);
+            }
+            if (lane.finalVecAfterMlp && lane.finalVecAfterMlp.group && lane.finalVecAfterMlp.group.visible) {
+                applyJoyfulMotion(lane.finalVecAfterMlp.group, deltaTime, lane.accentColor);
+            }
         });
 
         // Add MLP Up pass-through animation for vectors that have completed LN2
         lanes.forEach(lane => {
             if (lane.ln2Phase === 'done' && !lane.mlpUpStarted) {
                 lane.mlpUpStarted = true;
-                lane.mlpUpTrail = createTrailLine(scene);
+                lane.mlpUpTrail = createTrailLine(scene, lane.accentColor.getHex());
                 const vec = lane.resultVecLN2;
                 if (vec) {
                     const bottomY = mlpMatrixUp_centerY - MLP_MATRIX_PARAMS_UP.height / 2;
