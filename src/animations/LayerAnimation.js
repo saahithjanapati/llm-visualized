@@ -9,6 +9,7 @@ import { WeightMatrixVisualization } from '../components/WeightMatrixVisualizati
 import { MHSAAnimation } from './MHSAAnimation.js';
 import { StraightLineTrail } from '../utils/trailUtils.js';
 import { TRAIL_COLOR } from '../utils/trailConstants.js';
+import { easeInOutSine, easeOutBack, clamp } from '../utils/animationCurves.js';
 
 // Real trail helpers backed by StraightLineTrail
 function createTrailLine(scene, color = TRAIL_COLOR) {
@@ -811,18 +812,81 @@ export function initLayerAnimation(container) {
                         lane.horizPhase = 'right';
                         movingVec.group.visible = true;
                         movingVec.group.position.y = originalVec.group.position.y; // sync Y
+                        const startX = movingVec.group.position.x;
+                        const distanceX = Math.abs(BRANCH_X - startX);
+                        lane.rightMotion = {
+                            phase: 'anticipate',
+                            elapsed: 0,
+                            startX,
+                            baseY: movingVec.group.position.y,
+                            targetX: BRANCH_X,
+                            backDistance: Math.min(160, distanceX * 0.18 + 20),
+                            arcHeight: 90,
+                            baseAnticipation: 0.18,
+                            baseTravel: Math.max(0.25, distanceX / Math.max(ANIM_HORIZ_SPEED, 1e-3)) * 1.25,
+                        };
+                        movingVec.group.scale.set(1, 1, 1);
                     }
                     break;
                 }
                 case 'right': {
-                    // Horizontal move to LayerNorm X
-                    const dx = ANIM_HORIZ_SPEED * GLOBAL_ANIM_SPEED_MULT * deltaTime;
-                    movingVec.group.position.x = Math.min(BRANCH_X, movingVec.group.position.x + dx);
-                    if (movingVec.group.position.x >= BRANCH_X) {
-                        movingVec.group.position.x = BRANCH_X;
-                        lane.horizPhase = 'insideLN';
+                    const motion = lane.rightMotion || (() => {
+                        const startX = movingVec.group.position.x;
+                        const distanceX = Math.abs(BRANCH_X - startX);
+                        lane.rightMotion = {
+                            phase: 'anticipate',
+                            elapsed: 0,
+                            startX,
+                            baseY: movingVec.group.position.y,
+                            targetX: BRANCH_X,
+                            backDistance: Math.min(160, distanceX * 0.18 + 20),
+                            arcHeight: 90,
+                            baseAnticipation: 0.18,
+                            baseTravel: Math.max(0.25, distanceX / Math.max(ANIM_HORIZ_SPEED, 1e-3)) * 1.25,
+                        };
+                        return lane.rightMotion;
+                    })();
+
+                    const speedScale = Math.max(GLOBAL_ANIM_SPEED_MULT, 1e-3);
+                    const anticipationDuration = motion.baseAnticipation / speedScale;
+                    const travelDuration = motion.baseTravel / speedScale;
+
+                    if (motion.phase === 'anticipate') {
+                        motion.elapsed += deltaTime;
+                        const t = anticipationDuration > 0 ? clamp(motion.elapsed / anticipationDuration, 0, 1) : 1;
+                        const eased = easeInOutSine(t);
+                        const drop = Math.sin(t * Math.PI) * 35;
+                        movingVec.group.position.x = motion.startX - motion.backDistance * eased;
+                        movingVec.group.position.y = motion.baseY - drop;
+                        const squash = eased * 0.18;
+                        movingVec.group.scale.set(1 + squash, 1 - squash, 1 + squash);
+                        if (lane.branchTrailLN2) updateTrail(lane.branchTrailLN2, movingVec.group.position);
+                        if (t >= 1) {
+                            motion.phase = 'launch';
+                            motion.elapsed = 0;
+                            motion.launchStartX = movingVec.group.position.x;
+                        }
+                        break;
                     }
+
+                    motion.elapsed += deltaTime;
+                    const t = travelDuration > 0 ? clamp(motion.elapsed / travelDuration, 0, 1) : 1;
+                    const eased = easeOutBack(t, 1.25);
+                    const launchStartX = motion.launchStartX ?? motion.startX;
+                    movingVec.group.position.x = THREE.MathUtils.lerp(launchStartX, motion.targetX, eased);
+                    const arc = Math.sin(t * Math.PI) * motion.arcHeight;
+                    movingVec.group.position.y = motion.baseY + arc;
+                    const stretch = Math.sin(t * Math.PI) * 0.15;
+                    movingVec.group.scale.set(1 - stretch * 0.35, 1 + stretch, 1 - stretch * 0.35);
                     if (lane.branchTrailLN2) updateTrail(lane.branchTrailLN2, movingVec.group.position);
+
+                    if (t >= 1) {
+                        movingVec.group.position.x = motion.targetX;
+                        movingVec.group.position.y = motion.baseY;
+                        movingVec.group.scale.set(1, 1, 1);
+                        lane.horizPhase = 'insideLN';
+                        lane.rightMotion = null;
+                    }
                     break;
                 }
                 case 'insideLN': {

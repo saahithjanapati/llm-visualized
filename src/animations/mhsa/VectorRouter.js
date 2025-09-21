@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { VectorVisualizationInstancedPrism } from '../../components/VectorVisualizationInstancedPrism.js';
 import { StraightLineTrail } from '../../utils/trailUtils.js';
 import { TRAIL_COLOR } from '../../utils/trailConstants.js';
@@ -11,6 +12,7 @@ import {
 } from '../../utils/constants.js';
 // Speed-related constants centralised in utils/constants
 import { MHSA_DUPLICATE_VECTOR_RISE_SPEED } from '../../utils/constants.js';
+import { easeInOutSine, easeOutBack, easeOutCubic, clamp } from '../../utils/animationCurves.js';
 
 // Add configurable opacity for trails specific to vector copies under Q/K/V to reduce visual prominence
 const FAINT_TRAIL_OPACITY = 0.13; // must be < default 0.1
@@ -61,43 +63,108 @@ export class VectorRouter {
                 const tVec = lane.travellingVec;
                 if (!tVec) return;
 
-                const targetHeadIdx = lane.headIndex || 0;
-                if (targetHeadIdx >= this.headsCentersX.length) {
+                const headIdx = lane.headIndex || 0;
+                if (headIdx >= this.headsCentersX.length) {
                     tVec.group.visible = false;
                     lane.horizPhase = 'finishedHeads';
                     return;
                 }
 
-                const targetX = this.headsCentersX[targetHeadIdx];
-                const dx      = ANIM_HORIZ_SPEED * GLOBAL_ANIM_SPEED_MULT * deltaTime;
+                const targetX = this.headsCentersX[headIdx];
+                const speedScale = Math.max(GLOBAL_ANIM_SPEED_MULT, 1e-3);
 
-                if (tVec.group.position.x < targetX - 0.01) {
-                    tVec.group.position.x = Math.min(targetX, tVec.group.position.x + dx);
-                // Update trail for travelling vector
-                if (tVec.userData && tVec.userData.trail) tVec.userData.trail.update(tVec.group.position);
-                } else {
-                    // Arrived: spawn upward copy used for K
+                if (!lane.travelMotion || lane.travelMotion.headIndex !== headIdx) {
+                    const startX = tVec.group.position.x;
+                    const baseY = tVec.group.position.y;
+                    const distanceX = Math.abs(targetX - startX);
+                    lane.travelMotion = {
+                        headIndex,
+                        phase: 'anticipate',
+                        elapsed: 0,
+                        startX,
+                        baseY,
+                        targetX,
+                        launchStartX: startX,
+                        backDistance: Math.min(180, distanceX * 0.2 + 30),
+                        arcHeight: 110 + headIdx * 8,
+                        baseAnticipation: 0.16,
+                        baseTravel: Math.max(0.25, distanceX / Math.max(ANIM_HORIZ_SPEED, 1e-3)) * 1.35,
+                        completed: false,
+                    };
+                    if (tVec.group.scale) tVec.group.scale.set(1, 1, 1);
+                }
 
-                    const upVec = new VectorVisualizationInstancedPrism([...tVec.rawData], tVec.group.position.clone());
-                    this.parentGroup.add(upVec.group);
-                    // Trail for upward K copy
-                    const upTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1, undefined, FAINT_TRAIL_OPACITY);
-                    upTrail.start(upVec.group.position);
-                    upVec.userData = upVec.userData || {};
-                    upVec.userData.trail = upTrail;
-                    Object.assign(upVec.userData, { headIndex: targetHeadIdx, sideSpawned: false, sideSpawnRequested: false, sideSpawnTime: 0, parentLane: lane });
-                    // Label for hover – Key vector (green)
-                    try {
-                        const lbl = `Key Vector (Green)`;
-                        upVec.group.userData.label = lbl;
-                        if (upVec.mesh) upVec.mesh.userData = { ...(upVec.mesh.userData||{}), label: lbl };
-                    } catch (_) {}
-                    lane.upwardCopies.push(upVec);
+                const motion = lane.travelMotion;
+                const anticipationDuration = motion.baseAnticipation / speedScale;
+                const travelDuration = motion.baseTravel / speedScale;
 
-                    lane.headIndex = targetHeadIdx + 1;
-                    if (lane.headIndex >= NUM_HEAD_SETS_LAYER) {
-                        tVec.group.visible = false;
-                        lane.horizPhase = 'finishedHeads';
+                if (motion.phase === 'anticipate') {
+                    motion.elapsed += deltaTime;
+                    const t = anticipationDuration > 0 ? clamp(motion.elapsed / anticipationDuration, 0, 1) : 1;
+                    const eased = easeInOutSine(t);
+                    const drop = Math.sin(t * Math.PI) * 40;
+                    tVec.group.position.x = motion.startX - motion.backDistance * eased;
+                    tVec.group.position.y = motion.baseY - drop;
+                    const squash = eased * 0.2;
+                    tVec.group.scale.set(1 + squash, 1 - squash, 1 + squash);
+                    if (tVec.userData && tVec.userData.trail) tVec.userData.trail.update(tVec.group.position);
+                    if (t >= 1) {
+                        motion.phase = 'launch';
+                        motion.elapsed = 0;
+                        motion.launchStartX = tVec.group.position.x;
+                    }
+                } else if (!motion.completed) {
+                    motion.elapsed += deltaTime;
+                    const t = travelDuration > 0 ? clamp(motion.elapsed / travelDuration, 0, 1) : 1;
+                    const eased = easeOutBack(t, 1.35);
+                    const arc = Math.sin(t * Math.PI) * motion.arcHeight;
+                    const currentX = THREE.MathUtils.lerp(motion.launchStartX, motion.targetX, eased);
+                    tVec.group.position.x = currentX;
+                    tVec.group.position.y = motion.baseY + arc;
+                    const stretch = Math.sin(t * Math.PI) * 0.18;
+                    tVec.group.scale.set(1 - stretch * 0.4, 1 + stretch, 1 - stretch * 0.4);
+                    if (tVec.userData && tVec.userData.trail) tVec.userData.trail.update(tVec.group.position);
+
+                    if (t >= 1) {
+                        motion.completed = true;
+                        tVec.group.position.x = motion.targetX;
+                        tVec.group.position.y = motion.baseY;
+                        tVec.group.scale.set(1, 1, 1);
+
+                        const upVec = new VectorVisualizationInstancedPrism([...tVec.rawData], tVec.group.position.clone());
+                        this.parentGroup.add(upVec.group);
+                        const upTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1, undefined, FAINT_TRAIL_OPACITY);
+                        upTrail.start(upVec.group.position);
+                        upVec.userData = upVec.userData || {};
+                        upVec.userData.trail = upTrail;
+                        Object.assign(upVec.userData, {
+                            headIndex: headIdx,
+                            sideSpawned: false,
+                            sideSpawnRequested: false,
+                            sideSpawnTime: 0,
+                            parentLane: lane,
+                            riseMeta: {
+                                startY: upVec.group.position.y,
+                                elapsed: 0,
+                                baseDuration: Math.max(
+                                    0.35,
+                                    Math.abs(this.headStopY - upVec.group.position.y) / Math.max(MHSA_DUPLICATE_VECTOR_RISE_SPEED, 1e-3)
+                                ),
+                            },
+                        });
+                        try {
+                            const lbl = `Key Vector (Green)`;
+                            upVec.group.userData.label = lbl;
+                            if (upVec.mesh) upVec.mesh.userData = { ...(upVec.mesh.userData || {}), label: lbl };
+                        } catch (_) {}
+                        lane.upwardCopies[headIdx] = upVec;
+
+                        lane.headIndex = headIdx + 1;
+                        lane.travelMotion = null;
+                        if (lane.headIndex >= NUM_HEAD_SETS_LAYER) {
+                            tVec.group.visible = false;
+                            lane.horizPhase = 'finishedHeads';
+                        }
                     }
                 }
             }
@@ -107,17 +174,35 @@ export class VectorRouter {
             // ------------------------------------------------------------------
             if (lane.upwardCopies && lane.upwardCopies.length) {
                 lane.upwardCopies.forEach((upVec) => {
-                    if (upVec.group.position.y < this.headStopY) {
-                        upVec.group.position.y = Math.min(this.headStopY, upVec.group.position.y + MHSA_DUPLICATE_VECTOR_RISE_SPEED * GLOBAL_ANIM_SPEED_MULT * deltaTime);
-                        if (upVec.userData && upVec.userData.trail) {
-                            const ud = upVec.userData;
-                            if (ud.trailWorld) {
-                                const wp = new THREE.Vector3();
-                                upVec.group.getWorldPosition(wp);
-                                ud.trail.update(wp);
-                            } else {
-                                ud.trail.update(upVec.group.position);
-                            }
+                    if (!upVec) return;
+                    const meta = (upVec.userData && upVec.userData.riseMeta) || null;
+                    if (!meta) {
+                        if (upVec.group.position.y < this.headStopY) {
+                            upVec.group.position.y = Math.min(this.headStopY, upVec.group.position.y + MHSA_DUPLICATE_VECTOR_RISE_SPEED * GLOBAL_ANIM_SPEED_MULT * deltaTime);
+                        }
+                    } else if (!meta.done) {
+                        const duration = meta.baseDuration / Math.max(GLOBAL_ANIM_SPEED_MULT, 1e-3);
+                        meta.elapsed += deltaTime;
+                        const t = duration > 0 ? clamp(meta.elapsed / duration, 0, 1) : 1;
+                        const eased = easeOutBack(t, 1.2);
+                        upVec.group.position.y = THREE.MathUtils.lerp(meta.startY, this.headStopY, eased);
+                        const bounce = Math.sin(t * Math.PI) * 0.14;
+                        upVec.group.scale.set(1 - bounce * 0.45, 1 + bounce, 1 - bounce * 0.45);
+                        if (t >= 1) {
+                            upVec.group.position.y = this.headStopY;
+                            upVec.group.scale.set(1, 1, 1);
+                            meta.done = true;
+                        }
+                    }
+
+                    if (upVec.userData && upVec.userData.trail) {
+                        const ud = upVec.userData;
+                        if (ud.trailWorld) {
+                            const wp = new THREE.Vector3();
+                            upVec.group.getWorldPosition(wp);
+                            ud.trail.update(wp);
+                        } else {
+                            ud.trail.update(upVec.group.position);
                         }
                     }
                 });
@@ -137,6 +222,7 @@ export class VectorRouter {
                         const coord = this.headCoords[hIdx];
                         if (coord) {
                             const qVec = new VectorVisualizationInstancedPrism(centerVec.rawData.slice(), centerVec.group.position.clone());
+                            qVec.group.scale.set(0.9, 1.15, 0.9);
                             const qTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1, undefined, FAINT_TRAIL_OPACITY);
                             qTrail.start(qVec.group.position);
                             qVec.userData = qVec.userData || {};
@@ -147,7 +233,9 @@ export class VectorRouter {
                                 qVec.group.userData.label = lblQ;
                                 if (qVec.mesh) qVec.mesh.userData = { ...(qVec.mesh.userData||{}), label: lblQ };
                             } catch (_) {}
+
                             const vVec = new VectorVisualizationInstancedPrism(centerVec.rawData.slice(), centerVec.group.position.clone());
+                            vVec.group.scale.set(0.9, 1.15, 0.9);
                             const vTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1, undefined, FAINT_TRAIL_OPACITY);
                             vTrail.start(vVec.group.position);
                             vVec.userData = vVec.userData || {};
@@ -158,14 +246,15 @@ export class VectorRouter {
                                 vVec.group.userData.label = lblV;
                                 if (vVec.mesh) vVec.mesh.userData = { ...(vVec.mesh.userData||{}), label: lblV };
                             } catch (_) {}
+
                             this.parentGroup.add(qVec.group);
                             this.parentGroup.add(vVec.group);
 
                             lane.sideCopies = lane.sideCopies || [];
                             const qMatrixForHead = this.mhaVisualizations[hIdx * 3];
                             const vMatrixForHead = this.mhaVisualizations[hIdx * 3 + 2];
-                            lane.sideCopies.push({ vec: qVec, targetX: coord.q, type: 'Q', matrixRef: qMatrixForHead, headIndex: hIdx });
-                            lane.sideCopies.push({ vec: vVec, targetX: coord.v, type: 'V', matrixRef: vMatrixForHead, headIndex: hIdx });
+                            lane.sideCopies.push({ vec: qVec, targetX: coord.q, type: 'Q', matrixRef: qMatrixForHead, headIndex: hIdx, arcHeight: -60, motion: null });
+                            lane.sideCopies.push({ vec: vVec, targetX: coord.v, type: 'V', matrixRef: vMatrixForHead, headIndex: hIdx, arcHeight: -60, motion: null });
 
                             centerVec.userData.sideSpawned = true;
                         }
@@ -179,32 +268,32 @@ export class VectorRouter {
             if (lane.sideCopies && lane.sideCopies.length) {
                 lane.sideCopies.forEach((obj) => {
                     const v  = obj.vec;
-                    const dx = SIDE_COPY_HORIZ_SPEED * GLOBAL_ANIM_SPEED_MULT * deltaTime;
-                    if (Math.abs(v.group.position.x - obj.targetX) > 0.01) {
-                        const dir = v.group.position.x < obj.targetX ? 1 : -1;
-                        v.group.position.x += dir * dx;
-                        if (v.userData && v.userData.trail) {
-                            const ud = v.userData;
-                            // Only update trail while below matrix level (consistent with other vectors)
-                            const matrixBottomY = this.headStopY; // Q/V vectors stop at headStopY which is just below matrices
-                            if (v.group.position.y < matrixBottomY) {
-                                if (ud.trailWorld) {
-                                    const wp = new THREE.Vector3();
-                                    v.group.getWorldPosition(wp);
-                                    ud.trail.update(wp);
-                                } else {
-                                    ud.trail.update(v.group.position);
-                                }
-                            }
-                        }
-                        if ((dir === 1 && v.group.position.x > obj.targetX) || (dir === -1 && v.group.position.x < obj.targetX)) v.group.position.x = obj.targetX;
+                    if (!v) return;
+                    if (!obj.motion) {
+                        obj.motion = {
+                            startX: v.group.position.x,
+                            baseY: v.group.position.y,
+                            elapsed: 0,
+                            baseDuration: Math.max(0.22, Math.abs(obj.targetX - v.group.position.x) / Math.max(SIDE_COPY_HORIZ_SPEED, 1e-3)) * 1.3,
+                            arcHeight: obj.arcHeight ?? -60,
+                        };
                     }
-                    v.group.position.y = this.headStopY;
+
+                    const motion = obj.motion;
+                    const duration = motion.baseDuration / Math.max(GLOBAL_ANIM_SPEED_MULT, 1e-3);
+                    motion.elapsed += deltaTime;
+                    const t = duration > 0 ? clamp(motion.elapsed / duration, 0, 1) : 1;
+                    const eased = easeOutCubic(t);
+                    v.group.position.x = THREE.MathUtils.lerp(motion.startX, obj.targetX, eased);
+                    const arc = Math.sin(t * Math.PI) * motion.arcHeight;
+                    v.group.position.y = motion.baseY + arc;
+                    const wobble = Math.sin(t * Math.PI) * 0.12;
+                    v.group.scale.set(0.9 + wobble * 0.15, 1.05 + wobble * 0.35, 0.9 + wobble * 0.15);
+
                     if (v.userData && v.userData.trail) {
-                        // Only update trail while below matrix level (consistent with other vectors)
-                        const matrixBottomY = this.headStopY; // Q/V vectors stop at headStopY which is just below matrices
-                        if (v.group.position.y < matrixBottomY) {
-                            const ud = v.userData;
+                        const ud = v.userData;
+                        const matrixBottomY = this.headStopY;
+                        if (v.group.position.y <= matrixBottomY) {
                             if (ud.trailWorld) {
                                 const wp = new THREE.Vector3();
                                 v.group.getWorldPosition(wp);
@@ -213,6 +302,13 @@ export class VectorRouter {
                                 ud.trail.update(v.group.position);
                             }
                         }
+                    }
+
+                    if (t >= 1) {
+                        v.group.position.x = obj.targetX;
+                        v.group.position.y = motion.baseY;
+                        v.group.scale.set(1, 1, 1);
+                        obj.motion = null;
                     }
                 });
             }

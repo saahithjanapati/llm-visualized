@@ -737,6 +737,7 @@ export default class Gpt2Layer extends BaseLayer {
                         } else {
                             // Now that we're above LN1, mark lane ready for MHSA travel.
                             lane.travellingVec = rv;
+                            lane.travelMotion = null;
                             lane.headIndex = 0;
                             lane.horizPhase = 'readyMHSA'; // wait for global barrier
                             this._emitProgress();
@@ -1611,6 +1612,7 @@ export default class Gpt2Layer extends BaseLayer {
             addTargetLN2,
             normAnim,
             horizPhase: 'waiting',
+            rightMotion: null,
             branchStartY: ln1CenterY - LN_PARAMS.height / 2 + 5,
             ln1MidY: ln1CenterY,
             normStarted:false,
@@ -1620,6 +1622,7 @@ export default class Gpt2Layer extends BaseLayer {
             resultVec:null,
             targetY: meetY,
             travellingVec: null,
+            travelMotion: null,
             upwardCopies: [],
             sideCopies: [],
             headIndex: 0,

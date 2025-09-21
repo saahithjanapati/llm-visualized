@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { VectorVisualizationInstancedPrism } from '../../components/VectorVisualizationInstancedPrism.js';
+import { easeInOutSine, clamp } from '../../utils/animationCurves.js';
 
 
 import {
@@ -62,6 +63,16 @@ export function animateVectorMatrixPassThrough(
     const BASE_RISE_ADJUST = -30; // lower all coloured vectors
     const targetRiseY = passThroughY + riseOffset + BASE_RISE_ADJUST;
 
+    let baseScale = vector.group && vector.group.scale
+        ? vector.group.scale.clone()
+        : new THREE.Vector3(1, 1, 1);
+    if (!vector.group.userData) vector.group.userData = {};
+    if (vector.group.userData.baseScale) {
+        baseScale = vector.group.userData.baseScale.clone();
+    } else {
+        vector.group.userData.baseScale = baseScale.clone();
+    }
+
     const tweenState = {
         y: vector.group.position.y,
         progress: 0,
@@ -92,7 +103,7 @@ export function animateVectorMatrixPassThrough(
             },
             duration,
         )
-        .easing(TWEEN.Easing.Quadratic.InOut)
+        .easing(TWEEN.Easing.Back.InOut)
         .onUpdate(() => {
             // --------------------------------------------------------------
             //  Vector motion       
@@ -112,7 +123,17 @@ export function animateVectorMatrixPassThrough(
                     }
                 }
             } catch (_) { /* no-op */ }
-        
+
+
+            const stretchPhase = easeInOutSine(clamp(tweenState.progress, 0, 1));
+            const squash = Math.sin(stretchPhase * Math.PI) * 0.2;
+            vector.group.scale.set(
+                baseScale.x * (1 + squash * 0.35),
+                baseScale.y * (1 + squash),
+                baseScale.z * (1 + squash * 0.35),
+            );
+            vector.group.rotation.z = Math.sin(tweenState.progress * Math.PI) * 0.12;
+
 
             // --------------------------------------------------------------
             //  Lightweight 64-dimensional swap as soon as we touch matrix
@@ -127,8 +148,12 @@ export function animateVectorMatrixPassThrough(
                 ctx.parentGroup.add(smallVec.group);
                 const heavyVec = vector;
                 vector = smallVec; // continue animating this handle
+                baseScale = vector.group && vector.group.scale
+                    ? vector.group.scale.clone()
+                    : new THREE.Vector3(1, 1, 1);
                 // Preserve metadata such as headIndex for downstream alignment
                 vector.userData = heavyVec.userData ? { ...heavyVec.userData } : {};
+                vector.group.userData = { ...(vector.group.userData || {}), ...vector.userData, baseScale: baseScale.clone() };
                 // Preserve and refine hover label for clarity
                 try {
                     const cat = vectorCategory === 'K' ? 'Key Vector (Green)'
@@ -227,6 +252,11 @@ export function animateVectorMatrixPassThrough(
                 matrix.setColor(darkTintedMatrixColor);
                 matrix.setEmissive(darkTintedMatrixColor, ctx.matrixRestingEmissiveIntensity);
                 matrix.setOpacity(ctx.matrixRestingOpacity);
+            }
+
+            if (vector && vector.group) {
+                vector.group.scale.copy(baseScale);
+                vector.group.rotation.z = 0;
             }
 
             // Guarantee processed visuals in case tween never hit swap point
