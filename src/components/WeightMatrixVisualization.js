@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CSG } from 'three-csg-ts'; // Import CSG
 import { QUALITY_PRESET, NUM_VECTOR_LANES, VECTOR_DEPTH_SPACING, USE_GLB_MATERIALS } from '../utils/constants.js';
+import { createSciFiMaterial, updateSciFiDimensions, updateSciFiMaterialColor } from '../utils/sciFiMaterial.js';
 
 // ------------------------------------------------------------------
 // Geometry cache (module-level) – keyed by a stringified set of the main
@@ -332,18 +333,35 @@ export class WeightMatrixVisualization {
         if (USE_GLB_MATERIALS && __materialCache.has(cacheKey)) {
             sideMaterial = __materialCache.get(cacheKey).clone();
         } else {
-            sideMaterial = new THREE.MeshStandardMaterial({
-                color: 0x0077ff, // Initial color (will be overridden by animation)
-                metalness: 0.1,
-                roughness: 0.7,
-                flatShading: false,
+            sideMaterial = createSciFiMaterial({
                 side: THREE.FrontSide,
                 transparent: true,
-                opacity: 0.8
+                opacity: 0.92,
+                dimensions: { width: this.width, height: this.height, depth: this.depth },
+                stripeFrequency: (Math.PI * 2) / Math.max(this.depth / 10, 1),
+                stripeStrength: 0.55,
+                rimIntensity: 0.55,
+                gradientSharpness: 1.25,
+                gradientBias: 0.025,
+                fresnelBoost: 0.28
             });
         }
 
-        const capMaterial = sideMaterial.clone();
+        const capMaterial = (USE_GLB_MATERIALS && __materialCache.has(cacheKey))
+            ? sideMaterial.clone()
+            : createSciFiMaterial({
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.96,
+                dimensions: { width: this.width, height: this.height, depth: Math.max(this.depth * 0.25, 1) },
+                stripeFrequency: (Math.PI * 2) / Math.max(this.width / 6, 1),
+                stripeStrength: 0.35,
+                rimIntensity: 0.75,
+                gradientSharpness: 1.45,
+                gradientBias: 0.04,
+                fresnelBoost: 0.4
+            });
+
         capMaterial.polygonOffset = true;
         capMaterial.polygonOffsetFactor = -1; // pull slightly forward
         capMaterial.polygonOffsetUnits  = -4;
@@ -396,6 +414,10 @@ export class WeightMatrixVisualization {
         this.backCapMesh.rotation.y = Math.PI; // flip so normals face outwards
         this.backCapMesh.renderOrder = 2;   // back cap last
         this.group.add(this.backCapMesh);
+
+        updateSciFiDimensions(this.mesh.material, { width: this.width, height: this.height, depth: this.depth });
+        updateSciFiDimensions(this.frontCapMesh.material, { width: this.width, height: this.height, depth: this.depth });
+        updateSciFiDimensions(this.backCapMesh.material, { width: this.width, height: this.height, depth: this.depth });
     }
 
     // Hide or show caps to avoid visible seams when abutting multiple
@@ -465,18 +487,22 @@ export class WeightMatrixVisualization {
         // ----------------------------------------------------------
         // Material – clone defaults from standard path
         // ----------------------------------------------------------
+        const sciFiSliceDims = { width: this.width, height: this.height, depth: sliceDepth };
         let mat;
         if (USE_GLB_MATERIALS && __materialCache.has(sliceKey)) {
             mat = __materialCache.get(sliceKey).clone();
         } else {
-            mat = new THREE.MeshStandardMaterial({
-                color: 0x0077ff,
-                metalness: 0.1,
-                roughness: 0.7,
-                flatShading: false,
+            mat = createSciFiMaterial({
                 side: THREE.DoubleSide,
                 transparent: true,
-                opacity: 0.8
+                opacity: 0.92,
+                dimensions: sciFiSliceDims,
+                stripeFrequency: (Math.PI * 2) / Math.max(sliceDepth / 6, 1),
+                stripeStrength: 0.5,
+                rimIntensity: 0.6,
+                gradientSharpness: 1.3,
+                gradientBias: 0.03,
+                fresnelBoost: 0.32
             });
         }
 
@@ -525,9 +551,30 @@ export class WeightMatrixVisualization {
             __capBackCache.set(sliceKey, capGeoBack);
         }
 
-        const capMatFront = mat.clone();
-        capMatFront.side = THREE.DoubleSide; // ensure visible from any angle
-        const capMatBack  = capMatFront.clone();
+        const capMatFront = createSciFiMaterial({
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.96,
+            dimensions: sciFiSliceDims,
+            stripeFrequency: (Math.PI * 2) / Math.max(this.width / 6, 1),
+            stripeStrength: 0.35,
+            rimIntensity: 0.8,
+            gradientSharpness: 1.45,
+            gradientBias: 0.045,
+            fresnelBoost: 0.4
+        });
+        const capMatBack  = createSciFiMaterial({
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.96,
+            dimensions: sciFiSliceDims,
+            stripeFrequency: (Math.PI * 2) / Math.max(this.width / 6, 1),
+            stripeStrength: 0.35,
+            rimIntensity: 0.8,
+            gradientSharpness: 1.45,
+            gradientBias: 0.045,
+            fresnelBoost: 0.4
+        });
 
         const frontCaps = new THREE.InstancedMesh(capGeoFront.clone(), capMatFront, NUM_VECTOR_LANES);
         const backCaps  = new THREE.InstancedMesh(capGeoBack.clone(),  capMatBack,  NUM_VECTOR_LANES);
@@ -555,6 +602,10 @@ export class WeightMatrixVisualization {
         this.group.add(inst);
         this.group.add(frontCaps);
         this.group.add(backCaps);
+
+        updateSciFiDimensions(mat, sciFiSliceDims);
+        updateSciFiDimensions(capMatFront, sciFiSliceDims);
+        updateSciFiDimensions(capMatBack, sciFiSliceDims);
 
         // Render ordering – caps slightly after side walls to minimise z-fighting
         this.mesh.renderOrder = 0;
@@ -611,12 +662,11 @@ export class WeightMatrixVisualization {
 
     setColor(color) {
         const applyColor = (mat) => {
-            if (mat) {
-                if (Array.isArray(mat)) {
-                    mat.forEach(m => m.color.set(color));
-                } else {
-                    mat.color.set(color);
-                }
+            if (!mat) return;
+            if (Array.isArray(mat)) {
+                mat.forEach(m => updateSciFiMaterialColor(m, color));
+            } else {
+                updateSciFiMaterialColor(mat, color);
             }
         };
         applyColor(this.mesh?.material);

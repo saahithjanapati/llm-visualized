@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CSG } from 'three-csg-ts';
 import { NUM_VECTOR_LANES, VECTOR_DEPTH_SPACING, USE_GLB_MATERIALS } from '../utils/constants.js';
+import { createSciFiMaterial, updateSciFiDimensions, updateSciFiMaterialColor } from '../utils/sciFiMaterial.js';
 
 // A visualization for the Layer Normalization operation.
 // It renders an extruded ellipse (like a squashed cylinder) with a hollow interior
@@ -272,13 +273,17 @@ export class LayerNormalizationVisualization {
         // ==== STEP 5 — assign material & add to the outer group ====
         const material = (USE_GLB_MATERIALS && __materialCache.has(cacheKey))
             ? __materialCache.get(cacheKey).clone()
-            : new THREE.MeshStandardMaterial({
-                color: 0x00aa88,
-                metalness: 0.15,
-                roughness: 0.6,
+            : createSciFiMaterial({
                 side: THREE.DoubleSide,
                 transparent: true,
-                opacity: 0.85
+                opacity: 0.88,
+                dimensions: { width: this.width, height: this.height, depth: this.depth },
+                stripeFrequency: (Math.PI * 2) / Math.max(this.depth / 8, 1),
+                stripeStrength: 0.45,
+                rimIntensity: 0.6,
+                gradientSharpness: 1.3,
+                gradientBias: 0.05,
+                fresnelBoost: 0.32
             });
 
         // After all geometry operations *and* potential caching we assign
@@ -288,6 +293,7 @@ export class LayerNormalizationVisualization {
 
         this.mesh = finalMesh;
         this.mesh.material = material;
+        updateSciFiDimensions(this.mesh.material, { width: this.width, height: this.height, depth: this.depth });
 
         if (!__geometryCache.has(cacheKey)) {
             // Clone before caching?  No – we store the *exact* BufferGeometry
@@ -343,15 +349,20 @@ export class LayerNormalizationVisualization {
             }
         }
 
+        const sciFiSliceDims = { width: this.width, height: this.height, depth: sliceDepth };
         const mat = (USE_GLB_MATERIALS && __materialCache.has(sliceKey))
             ? __materialCache.get(sliceKey).clone()
-            : new THREE.MeshStandardMaterial({
-                color: 0xffffff,
-                metalness: 0.0,
-                roughness: 0.8,
+            : createSciFiMaterial({
                 side: THREE.DoubleSide,
                 transparent: true,
-                opacity: 0.9
+                opacity: 0.9,
+                dimensions: sciFiSliceDims,
+                stripeFrequency: (Math.PI * 2) / Math.max(sliceDepth / 8, 1),
+                stripeStrength: 0.4,
+                rimIntensity: 0.65,
+                gradientSharpness: 1.35,
+                gradientBias: 0.05,
+                fresnelBoost: 0.35
             });
 
         const inst = new THREE.InstancedMesh(sliceGeometry, mat, NUM_VECTOR_LANES);
@@ -366,6 +377,7 @@ export class LayerNormalizationVisualization {
         this.mesh = inst;
         this.group.add(inst);
         this.mesh.renderOrder = 0;
+        updateSciFiDimensions(this.mesh.material, sciFiSliceDims);
     }
 
     // Public helper to update geometry when parameters change (e.g. from a GUI)
@@ -378,14 +390,10 @@ export class LayerNormalizationVisualization {
     // Convenience wrappers to change appearance after creation
     setColor(color) {
         if (!this.mesh) return;
-        const apply = (mat) => {
-            mat.color.copy(color);
-            mat.emissive.copy(color);
-        };
         if (Array.isArray(this.mesh.material)) {
-            this.mesh.material.forEach(apply);
+            this.mesh.material.forEach(mat => updateSciFiMaterialColor(mat, color));
         } else {
-            apply(this.mesh.material);
+            updateSciFiMaterialColor(this.mesh.material, color);
         }
     }
 
