@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CSG } from 'three-csg-ts';
 import { NUM_VECTOR_LANES, VECTOR_DEPTH_SPACING, USE_GLB_MATERIALS } from '../utils/constants.js';
+import { createSciFiMaterial, cloneSciFiMaterial } from '../materials/sciFiMaterials.js';
 
 // A visualization for the Layer Normalization operation.
 // It renders an extruded ellipse (like a squashed cylinder) with a hollow interior
@@ -270,16 +271,44 @@ export class LayerNormalizationVisualization {
         }
 
         // ==== STEP 5 — assign material & add to the outer group ====
+        const gradientMin = -this.height / 2;
+        const gradientMax = this.height / 2;
+
         const material = (USE_GLB_MATERIALS && __materialCache.has(cacheKey))
             ? __materialCache.get(cacheKey).clone()
-            : new THREE.MeshStandardMaterial({
-                color: 0x00aa88,
-                metalness: 0.15,
-                roughness: 0.6,
-                side: THREE.DoubleSide,
-                transparent: true,
-                opacity: 0.85
+            : createSciFiMaterial({
+                baseColor: '#140a26',
+                gradientColorA: '#120723',
+                gradientColorB: '#ff41ff',
+                rimColor: '#ffd6ff',
+                scanColor: '#5efdf4',
+                gridColor: '#37155f',
+                gradientMin,
+                gradientMax,
+                gradientMix: 0.82,
+                rimStrength: 0.68,
+                rimPower: 2.8,
+                scanFrequency: 3.8,
+                scanSpeed: 1.3,
+                scanSharpness: 4.5,
+                scanIntensity: 0.78,
+                gridDensity: 0.022,
+                gridIntensity: 0.34,
+                noiseScale: 2.9,
+                noiseSpeed: 0.95,
+                noiseIntensity: 0.2,
+                noiseEmission: 0.16,
+                emissiveScanBoost: 0.78,
+                emissiveRimBoost: 0.58,
+                baseEmissiveBoost: 0.18,
+                pulseFrequency: 0.9,
+                pulseAmplitude: 0.8,
+                opacity: 0.88,
+                emissiveColor: '#ff7dff',
+                emissiveIntensity: 0.68,
+                side: THREE.DoubleSide
             });
+        material.side = THREE.DoubleSide;
 
         // After all geometry operations *and* potential caching we assign
         // material and add the mesh to the parent group.  When the geometry
@@ -343,16 +372,44 @@ export class LayerNormalizationVisualization {
             }
         }
 
+        const sliceGradientMin = -this.height / 2;
+        const sliceGradientMax = this.height / 2;
+
         const mat = (USE_GLB_MATERIALS && __materialCache.has(sliceKey))
             ? __materialCache.get(sliceKey).clone()
-            : new THREE.MeshStandardMaterial({
-                color: 0xffffff,
-                metalness: 0.0,
-                roughness: 0.8,
-                side: THREE.DoubleSide,
-                transparent: true,
-                opacity: 0.9
+            : createSciFiMaterial({
+                baseColor: '#140a26',
+                gradientColorA: '#120723',
+                gradientColorB: '#ff41ff',
+                rimColor: '#ffd6ff',
+                scanColor: '#5efdf4',
+                gridColor: '#37155f',
+                gradientMin: sliceGradientMin,
+                gradientMax: sliceGradientMax,
+                gradientMix: 0.82,
+                rimStrength: 0.68,
+                rimPower: 2.8,
+                scanFrequency: 3.8,
+                scanSpeed: 1.3,
+                scanSharpness: 4.5,
+                scanIntensity: 0.78,
+                gridDensity: 0.022,
+                gridIntensity: 0.34,
+                noiseScale: 2.9,
+                noiseSpeed: 0.95,
+                noiseIntensity: 0.2,
+                noiseEmission: 0.16,
+                emissiveScanBoost: 0.78,
+                emissiveRimBoost: 0.58,
+                baseEmissiveBoost: 0.18,
+                pulseFrequency: 0.9,
+                pulseAmplitude: 0.8,
+                opacity: 0.88,
+                emissiveColor: '#ff7dff',
+                emissiveIntensity: 0.68,
+                side: THREE.DoubleSide
             });
+        mat.side = THREE.DoubleSide;
 
         const inst = new THREE.InstancedMesh(sliceGeometry, mat, NUM_VECTOR_LANES);
         const mtx = new THREE.Matrix4();

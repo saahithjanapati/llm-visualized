@@ -4,6 +4,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { QUALITY_PRESET, resolveRenderDprCap } from '../utils/constants.js';
+import { tickSciFiMaterials } from '../materials/sciFiMaterials.js';
 
 /**
  * CoreEngine is responsible for creating the Three-JS renderer, camera, 
@@ -467,6 +468,7 @@ export class CoreEngine {
         if (this._stats) this._stats.begin();
 
         const dt = this._clock.getDelta() * this._speed;
+        tickSciFiMaterials(dt);
         this._layers.forEach(layer => {
             if (!layer) return;
             if (layer.isActive || layer._transitionPhase === 'positioning') {

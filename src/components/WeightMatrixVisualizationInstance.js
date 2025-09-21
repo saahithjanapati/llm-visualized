@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { CSG } from 'three-csg-ts';
+import { createSciFiMaterial, cloneSciFiMaterial } from '../materials/sciFiMaterials.js';
 
 // A lightweight copy of `WeightMatrixVisualization` that re-uses a *single* geometry
 // instance across *all* objects.  This avoids repeating the very heavy CSG
@@ -231,17 +232,42 @@ export class WeightMatrixVisualizationInstance {
         }
 
         // --- Create Meshes for *this* instance ---
-        const sideMaterial = new THREE.MeshStandardMaterial({
-            color: 0x0077ff,
-            metalness: 0.1,
-            roughness: 0.7,
-            flatShading: false,
-            side: THREE.FrontSide,
-            transparent: true,
-            opacity: 0.8
+        const gradientMin = -this.height / 2;
+        const gradientMax = this.height / 2;
+
+        const sideMaterial = createSciFiMaterial({
+            baseColor: '#0b1634',
+            gradientColorA: '#050c2a',
+            gradientColorB: '#2be3ff',
+            rimColor: '#8ef9ff',
+            scanColor: '#63ffd6',
+            gridColor: '#162d73',
+            gradientMin,
+            gradientMax,
+            gradientMix: 0.78,
+            rimStrength: 0.72,
+            rimPower: 2.6,
+            scanFrequency: 4.5,
+            scanSpeed: 1.5,
+            scanSharpness: 5.0,
+            scanIntensity: 0.85,
+            gridDensity: 0.017,
+            gridIntensity: 0.4,
+            noiseScale: 3.6,
+            noiseSpeed: 1.25,
+            noiseIntensity: 0.22,
+            noiseEmission: 0.14,
+            emissiveScanBoost: 0.85,
+            emissiveRimBoost: 0.5,
+            baseEmissiveBoost: 0.16,
+            pulseFrequency: 1.0,
+            pulseAmplitude: 0.85,
+            opacity: 0.9,
+            emissiveColor: '#15d5ff',
+            emissiveIntensity: 0.72
         });
 
-        const capMaterial = sideMaterial.clone();
+        const capMaterial = cloneSciFiMaterial(sideMaterial, { side: THREE.FrontSide, gradientMin, gradientMax });
         capMaterial.polygonOffset = true;
         capMaterial.polygonOffsetFactor = -1;
         capMaterial.polygonOffsetUnits  = -4;
