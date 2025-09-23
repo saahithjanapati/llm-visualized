@@ -18,6 +18,7 @@ import {
 } from '../utils/constants.js';
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
 import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
+import { animateJoyfulRise, pulseMaterialEmissive } from '../animations/JoyfulMotion.js';
 
 function simplePrismMultiply(srcVec, tgtVec, onComplete) {
     for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
@@ -255,6 +256,9 @@ export class LayerPipeline extends EventTarget {
                 if (Array.isArray(obj.material)) obj.material.forEach(apply); else apply(obj.material);
             }
         });
+        try {
+            pulseMaterialEmissive(lnTopGroup, { color: white, intensity: 0.9, duration: 720, repeat: 1 });
+        } catch (_) { /* optional pulse */ }
     }
 
     /**
@@ -281,22 +285,26 @@ export class LayerPipeline extends EventTarget {
                 lastLayer.root.add(addVec.group);
                 addVec.group.visible = false;
 
-                const distToCenter = Math.max(0, lnCenterY - startY);
-                const durToCenter = (distToCenter / (ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT)) * 1000;
-
-                new TWEEN.Tween(vec.group.position)
-                    .to({ y: lnCenterY }, Math.max(100, durToCenter))
-                    .easing(TWEEN.Easing.Quadratic.InOut)
-                    .onUpdate(() => {
+                const travelSpeed = ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT;
+                animateJoyfulRise(vec.group, lnCenterY, {
+                    speed: travelSpeed,
+                    overshoot: LN_PARAMS.height * 0.12,
+                    anticipationOffset: -LN_PARAMS.height * 0.1,
+                    emissivePulse: { color: 0xfff1c2, intensity: 0.95, pulseDuration: 520, repeat: 1 },
+                    onUpdate: () => {
                         this.dispatchEvent(new Event('progress'));
                         if (!lane.__topLnEntered && vec.group.position.y >= lnBottomY) {
                             lane.__topLnEntered = true;
                             multVec.group.visible = true;
                             addVec.group.visible = true;
                             this._activateLayerNormColor(lnTopGroup);
+                            try {
+                                pulseMaterialEmissive(multVec.group, { color: 0xffffff, intensity: 0.85, duration: 420, repeat: 1 });
+                                pulseMaterialEmissive(addVec.group, { color: 0xffffff, intensity: 0.85, duration: 420, repeat: 1 });
+                            } catch (_) { /* optional */ }
                         }
-                    })
-                    .onComplete(() => {
+                    },
+                    onComplete: () => {
                         this.dispatchEvent(new Event('progress'));
                         simplePrismMultiply(vec, multVec, () => {
                             vec.group.visible = false;
@@ -309,18 +317,18 @@ export class LayerPipeline extends EventTarget {
                             startPrismAdditionAnimation(addVec, resVec);
 
                             setTimeout(() => {
-                                const riseDist = Math.max(0, targetYLocal - resVec.group.position.y);
-                                const durMs = (riseDist / (ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT)) * 1000;
-                                new TWEEN.Tween(resVec.group.position)
-                                    .to({ y: targetYLocal }, Math.max(100, durMs))
-                                    .easing(TWEEN.Easing.Quadratic.InOut)
-                                    .onUpdate(() => this.dispatchEvent(new Event('progress')))
-                                    .onComplete(() => this.dispatchEvent(new Event('progress')))
-                                    .start();
+                                animateJoyfulRise(resVec.group, targetYLocal, {
+                                    speed: travelSpeed,
+                                    overshoot: LN_PARAMS.height * 0.2,
+                                    anticipationOffset: -LN_PARAMS.height * 0.08,
+                                    emissivePulse: { color: 0xfff7d9, intensity: 0.8, pulseDuration: 460, repeat: 1 },
+                                    onUpdate: () => this.dispatchEvent(new Event('progress')),
+                                    onComplete: () => this.dispatchEvent(new Event('progress'))
+                                });
                             }, addDur + 100);
                         });
-                    })
-                    .start();
+                    }
+                });
             });
             return;
         }
@@ -332,15 +340,15 @@ export class LayerPipeline extends EventTarget {
             if (typeof startY !== 'number' || !isFinite(startY)) return;
             if (startY >= targetYLocal - 0.01) return;
 
-            const riseDist = Math.max(0, targetYLocal - startY);
-            const durMs = (riseDist / (ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT)) * 1000;
-
-            new TWEEN.Tween(vec.group.position)
-                .to({ y: targetYLocal }, Math.max(100, durMs))
-                .easing(TWEEN.Easing.Quadratic.InOut)
-                .onUpdate(() => this.dispatchEvent(new Event('progress')))
-                .onComplete(() => this.dispatchEvent(new Event('progress')))
-                .start();
+            const travelSpeed = ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT;
+            animateJoyfulRise(vec.group, targetYLocal, {
+                speed: travelSpeed,
+                overshoot: LN_PARAMS.height * 0.18,
+                anticipationOffset: -LN_PARAMS.height * 0.08,
+                emissivePulse: { color: 0xfff6d6, intensity: 0.85, pulseDuration: 480, repeat: 1 },
+                onUpdate: () => this.dispatchEvent(new Event('progress')),
+                onComplete: () => this.dispatchEvent(new Event('progress'))
+            });
         });
     }
 }
