@@ -4,6 +4,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { QUALITY_PRESET, resolveRenderDprCap } from '../utils/constants.js';
+import Gpt2Layer from './layers/Gpt2Layer.js';
 
 /**
  * CoreEngine is responsible for creating the Three-JS renderer, camera, 
@@ -96,6 +97,7 @@ export class CoreEngine {
         this._raycaster = new THREE.Raycaster();
         this._pointer   = new THREE.Vector2();
         this._raycastingEnabled = true; // can be toggled via public API
+        this._raycastRoots = [];
 
         // Hover label DOM element (similar styling to status overlay)
         this._hoverLabelDiv = document.createElement('div');
@@ -182,7 +184,12 @@ export class CoreEngine {
         // ────────────────────────────────────────────────────────────────────
         // Initialise layers
         // ────────────────────────────────────────────────────────────────────
-        this._layers.forEach(layer => layer.init(this.scene));
+        this._layers.forEach(layer => {
+            layer.init(this.scene);
+            if (layer instanceof Gpt2Layer && layer?.root) {
+                this.registerRaycastRoot(layer.root);
+            }
+        });
 
         // ────────────────────────────────────────────────────────────────────
         // Event listeners
@@ -234,6 +241,28 @@ export class CoreEngine {
         }
     }
 
+    /**
+     * Register an Object3D as a raycast root so hover labels include it.
+     * @param {THREE.Object3D} root
+     */
+    registerRaycastRoot(root) {
+        if (!root || typeof root !== 'object' || !root.isObject3D) return;
+        if (!this._raycastRoots.includes(root)) {
+            this._raycastRoots.push(root);
+        }
+    }
+
+    /**
+     * Remove an Object3D from the raycast root list.
+     * @param {THREE.Object3D} root
+     */
+    unregisterRaycastRoot(root) {
+        const idx = this._raycastRoots.indexOf(root);
+        if (idx !== -1) {
+            this._raycastRoots.splice(idx, 1);
+        }
+    }
+
     /** Return current raycasting state. */
     isRaycastingEnabled() {
         return !!this._raycastingEnabled;
@@ -250,6 +279,7 @@ export class CoreEngine {
             this.controls.dispose();
         }
         this._layers.forEach(l => l.dispose());
+        this._raycastRoots.length = 0;
 
         this.scene.traverse(obj => {
             if (obj.geometry) obj.geometry.dispose();
@@ -354,7 +384,12 @@ export class CoreEngine {
         this._pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
 
         this._raycaster.setFromCamera(this._pointer, this.camera);
-        const intersects = this._raycaster.intersectObjects(this.scene.children, true);
+        if (!this._raycastRoots.length) {
+            this._hoverLabelDiv.style.display = 'none';
+            return;
+        }
+
+        const intersects = this._raycaster.intersectObjects(this._raycastRoots, true);
         // Pass 1: Prefer detailed labels from merged K/V instanced meshes anywhere in the hit list
         for (const hit of intersects) {
             try {
