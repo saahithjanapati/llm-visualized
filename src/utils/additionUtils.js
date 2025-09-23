@@ -85,9 +85,35 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
     const flashDuration = PRISM_ADD_ANIM_BASE_FLASH_DURATION      / PRISM_ADD_ANIM_SPEED_MULT;
     const delayBetween  = PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS/ PRISM_ADD_ANIM_SPEED_MULT;
 
-    const basePrismCenterY = sourceVec.getUniformHeight() / 2;
+    const uniformHeight = (typeof sourceVec.getUniformHeight === 'function')
+        ? sourceVec.getUniformHeight()
+        : 0;
+    const basePrismCenterY = uniformHeight / 2;
+    const baseWidthScale = (typeof sourceVec.getWidthScale === 'function')
+        ? sourceVec.getWidthScale()
+        : 1;
+    const baseDepthScale = (typeof sourceVec.getDepthScale === 'function')
+        ? sourceVec.getDepthScale()
+        : 1;
+    const baseWidthConstant = (typeof sourceVec.getBaseWidthConstant === 'function')
+        ? sourceVec.getBaseWidthConstant()
+        : 1;
+    const targetUniformHeight = (typeof targetVec.getUniformHeight === 'function')
+        ? targetVec.getUniformHeight()
+        : uniformHeight;
+    const targetWidthScale = (typeof targetVec.getWidthScale === 'function')
+        ? targetVec.getWidthScale()
+        : baseWidthScale;
+    const targetDepthScale = (typeof targetVec.getDepthScale === 'function')
+        ? targetVec.getDepthScale()
+        : baseDepthScale;
+
+    const warmHighlight = new THREE.Color(0xfff2cc);
+    const whiteColor = new THREE.Color(0xffffff);
 
     for (let i = 0; i < vectorLength; i++) {
+        const isCentre = i === centreIndex;
+
         // Grab starting local Y offset of each instance
         const srcLocalMatrix = new THREE.Matrix4();
         sourceVec.mesh.getMatrixAt(i, srcLocalMatrix);
@@ -100,79 +126,166 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
         // Match travelling prism colour to destination gradient
         sourceVec.setInstanceAppearance(i, srcLocalPos.y, gradCol);
 
-        const tweenState = { t: 0 };
+        const arcDirection = i % 2 === 0 ? 1 : -1;
+        const arcMagnitude = baseWidthConstant * baseWidthScale * (0.45 + Math.random() * 0.35);
+        const anticipationDrop = Math.min(uniformHeight * (0.18 + Math.random() * 0.08), uniformHeight * 0.45);
+        const startDownY = srcLocalPos.y - anticipationDrop;
+        const wobblePhase = Math.random() * Math.PI * 2;
 
-        new TWEEN.Tween(tweenState)
-            .to({ t: 1 }, duration)
-            .delay(i * delayBetween)
-            .easing(TWEEN.Easing.Quadratic.InOut)
-            .onUpdate(obj => {
-                // Re-compute dynamic target position each frame (target may move)
-                const trgLocalMatrixDyn = new THREE.Matrix4();
-                targetVec.mesh.getMatrixAt(i, trgLocalMatrixDyn);
-                const trgWorld = new THREE.Vector3().setFromMatrixPosition(trgLocalMatrixDyn).applyMatrix4(targetVec.group.matrixWorld);
-                const trgLocal = sourceVec.group.worldToLocal(trgWorld.clone());
+        const accentColor = gradCol.clone().lerp(warmHighlight, 0.55);
+        const displayColor = accentColor.clone();
+        const sparkleColor = new THREE.Color().copy(whiteColor);
 
-                let interpY = THREE.MathUtils.lerp(srcLocalPos.y, trgLocal.y, obj.t);
-                interpY = trgLocal.y >= srcLocalPos.y ? Math.min(interpY, trgLocal.y) : Math.max(interpY, trgLocal.y);
-                const offsetY = interpY - basePrismCenterY;
+        const animatedScale = new THREE.Vector3(baseWidthScale, uniformHeight, baseDepthScale);
+        const targetBaseScale = new THREE.Vector3(targetWidthScale, targetUniformHeight, targetDepthScale);
+        const targetPulseScale = targetBaseScale.clone();
+        const flashColor = new THREE.Color();
 
-                sourceVec.setInstanceAppearance(i, offsetY, null);
+        const trgLocalMatrixDyn = new THREE.Matrix4();
+        const trgWorld = new THREE.Vector3();
+        const trgLocal = new THREE.Vector3();
+        const residualInstMat = new THREE.Matrix4();
+        const residualWorldPos = new THREE.Vector3();
+        const residualLocalPos = new THREE.Vector3();
 
-                if (i === centreIndex) {
-                    // Live-update the residual trail from the bottom vector while the
-                    // centre prism rises toward the top vector. This mirrors the
-                    // behaviour users expect: the connecting line grows as the
-                    // middle unit moves, rather than appearing only after addition.
-                    try {
-                        const instMat = new THREE.Matrix4();
-                        sourceVec.mesh.getMatrixAt(centreIndex, instMat);
-                        const wPos = new THREE.Vector3().setFromMatrixPosition(instMat).applyMatrix4(sourceVec.group.matrixWorld);
+        const getDynamicTargetLocalY = () => {
+            targetVec.mesh.getMatrixAt(i, trgLocalMatrixDyn);
+            trgWorld.setFromMatrixPosition(trgLocalMatrixDyn).applyMatrix4(targetVec.group.matrixWorld);
+            trgLocal.copy(trgWorld);
+            sourceVec.group.worldToLocal(trgLocal);
+            return trgLocal.y;
+        };
 
-                        // Skip if the prism is effectively hidden far below
-                        const hideThreshold = HIDE_INSTANCE_Y_OFFSET / 10;
-                        if (wPos.y >= hideThreshold) {
-                            // Update the residual trail continuously as the prism rises all the
-                            // way to the target vector. Previously, a muted band near the
-                            // merge point prevented trailing up to the very top, leaving a
-                            // visible gap.
-                            const residualTrail = (lane && lane.originalTrail)
-                                || (sourceVec && sourceVec.userData && sourceVec.userData.trail)
-                                || null;
-                            const residualOwner = lane
-                                || (sourceVec && sourceVec.userData)
-                                || null;
-                            if (residualTrail && residualOwner && typeof residualTrail.update === 'function') {
-                                if (typeof residualOwner.__residualMaxY !== 'number') {
-                                    residualOwner.__residualMaxY = wPos.y - 0.001;
-                                }
-                                if (wPos.y >= residualOwner.__residualMaxY) {
-                                    let localPos = wPos;
-                                    try {
-                                        const parentObject = (residualTrail._line && residualTrail._line.parent)
-                                            || residualTrail._scene
-                                            || null;
-                                        if (parentObject && typeof parentObject.worldToLocal === 'function') {
-                                            localPos = parentObject.worldToLocal(wPos.clone());
-                                        }
-                                    } catch (conversionErr) {
-                                        console.warn('Residual trail coordinate conversion failed:', conversionErr);
-                                        localPos = wPos;
-                                    }
-                                    residualTrail.update(localPos);
-                                    residualOwner.__residualMaxY = wPos.y;
-                                }
-                            }
+        const updateResidualTrail = () => {
+            if (!isCentre) return;
+            try {
+                sourceVec.mesh.getMatrixAt(centreIndex, residualInstMat);
+                residualWorldPos.setFromMatrixPosition(residualInstMat).applyMatrix4(sourceVec.group.matrixWorld);
+
+                const hideThreshold = HIDE_INSTANCE_Y_OFFSET / 10;
+                if (residualWorldPos.y >= hideThreshold) {
+                    const residualTrail = (lane && lane.originalTrail)
+                        || (sourceVec && sourceVec.userData && sourceVec.userData.trail)
+                        || null;
+                    const residualOwner = lane
+                        || (sourceVec && sourceVec.userData)
+                        || null;
+                    if (residualTrail && residualOwner && typeof residualTrail.update === 'function') {
+                        if (typeof residualOwner.__residualMaxY !== 'number') {
+                            residualOwner.__residualMaxY = residualWorldPos.y - 0.001;
                         }
-                    } catch (err) {
-                        console.warn('Residual trail update failed:', err);
+                        if (residualWorldPos.y >= residualOwner.__residualMaxY) {
+                            residualLocalPos.copy(residualWorldPos);
+                            try {
+                                const parentObject = (residualTrail._line && residualTrail._line.parent)
+                                    || residualTrail._scene
+                                    || null;
+                                if (parentObject && typeof parentObject.worldToLocal === 'function') {
+                                    parentObject.worldToLocal(residualLocalPos);
+                                }
+                            } catch (conversionErr) {
+                                console.warn('Residual trail coordinate conversion failed:', conversionErr);
+                            }
+                            residualTrail.update(residualLocalPos.clone());
+                            residualOwner.__residualMaxY = residualWorldPos.y;
+                        }
                     }
                 }
+            } catch (err) {
+                console.warn('Residual trail update failed:', err);
+            }
+        };
+
+        const timelineState = { progress: 0 };
+
+        new TWEEN.Tween(timelineState)
+            .to({ progress: 1 }, duration)
+            .delay(i * delayBetween)
+            .easing(TWEEN.Easing.Linear.None)
+            .onUpdate(({ progress }) => {
+                const anticipationPortion = 0.22;
+                const clampedProgress = THREE.MathUtils.clamp(progress, 0, 1);
+
+                let currentY = srcLocalPos.y;
+                let xOffset = 0;
+                let tilt = 0;
+
+                if (clampedProgress < anticipationPortion) {
+                    const localT = clampedProgress / anticipationPortion;
+                    const eased = TWEEN.Easing.Sine.InOut(localT);
+                    currentY = srcLocalPos.y - anticipationDrop * eased;
+
+                    const widthPulse = 1 + 0.25 * eased;
+                    const heightSquash = 1 - 0.35 * eased;
+                    animatedScale.set(
+                        baseWidthScale * widthPulse,
+                        uniformHeight * heightSquash,
+                        baseDepthScale * widthPulse
+                    );
+
+                    xOffset = arcDirection * arcMagnitude * eased * 0.35;
+                    tilt = arcDirection * 0.18 * eased;
+
+                    displayColor.copy(accentColor);
+                    const sparkle = Math.sin(eased * Math.PI) * 0.2;
+                    if (sparkle > 0) {
+                        displayColor.lerp(sparkleColor, sparkle * 0.25);
+                    }
+                } else {
+                    const travelT = (clampedProgress - anticipationPortion) / (1 - anticipationPortion);
+                    const easedBase = TWEEN.Easing.Sine.InOut(travelT);
+                    const overshootEase = TWEEN.Easing.Back.Out(easedBase);
+                    const targetY = getDynamicTargetLocalY();
+                    currentY = THREE.MathUtils.lerp(startDownY, targetY, overshootEase);
+
+                    const arc = Math.sin(easedBase * Math.PI);
+                    const sway = Math.sin(easedBase * Math.PI + wobblePhase);
+                    xOffset = arcDirection * arcMagnitude * arc;
+                    tilt = arcDirection * (0.28 * arc + 0.1 * sway);
+
+                    const stretch = 1 + 0.25 * Math.sin(easedBase * Math.PI);
+                    const squash = 1 - 0.18 * Math.sin(easedBase * Math.PI);
+                    animatedScale.set(
+                        baseWidthScale * squash,
+                        uniformHeight * stretch,
+                        baseDepthScale * squash
+                    );
+
+                    const fadeBack = Math.pow(travelT, 1.4);
+                    displayColor.copy(accentColor).lerp(gradCol, fadeBack);
+                    const sparkle = Math.sin(easedBase * Math.PI) * 0.18;
+                    if (sparkle > 0) {
+                        displayColor.lerp(sparkleColor, sparkle * 0.35);
+                    }
+                }
+
+                const offsetY = currentY - basePrismCenterY;
+
+                sourceVec.setInstanceAppearance(i, offsetY, displayColor, {
+                    scale: animatedScale,
+                    xOffset,
+                    tilt
+                });
+
+                updateResidualTrail();
             })
             .onComplete(() => {
-                targetVec.setInstanceAppearance(i, 0, new THREE.Color(0xffffff));
-                new TWEEN.Tween({})
-                    .to({}, flashDuration)
+                targetVec.setInstanceAppearance(i, 0, whiteColor);
+
+                const flashState = { pulse: 0 };
+                new TWEEN.Tween(flashState)
+                    .to({ pulse: 1 }, flashDuration)
+                    .easing(TWEEN.Easing.Sine.InOut)
+                    .onUpdate(({ pulse }) => {
+                        const wave = Math.sin(pulse * Math.PI);
+                        targetPulseScale.set(
+                            targetBaseScale.x * (1 - 0.1 * wave),
+                            targetBaseScale.y * (1 + 0.12 * wave),
+                            targetBaseScale.z * (1 - 0.1 * wave)
+                        );
+                        flashColor.copy(whiteColor).lerp(gradCol, pulse * 0.6);
+                        targetVec.setInstanceAppearance(i, 0, flashColor, { scale: targetPulseScale });
+                    })
                     .onComplete(() => {
                         const sum = (sourceVec.rawData[i] ?? 0) + (targetVec.rawData[i] ?? 0);
                         targetVec.rawData[i] = sum;

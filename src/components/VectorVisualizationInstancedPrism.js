@@ -28,6 +28,7 @@ const _prismDepthScale = 1.5;
 
 // Precompute half base width used in shader patch
 const __halfBaseWidth = (PRISM_BASE_WIDTH * _prismWidthScale) / 2;
+const __scratchEuler = new THREE.Euler();
 
 export class VectorVisualizationInstancedPrism {
     constructor(initialData = null, initialPosition = new THREE.Vector3(0, 0, 0), numSubsections = 30) {
@@ -209,7 +210,7 @@ varying float vGradientT;`
     }
 
     // Updates the visual appearance of a single instance for animation purposes
-    setInstanceAppearance(index, yOffset, tempColor, newScale = null) {
+    setInstanceAppearance(index, yOffset, tempColor, transformOverrides = null) {
         if (index < 0 || index >= VECTOR_LENGTH_PRISM) return;
         const currentMatrix = new THREE.Matrix4();
         this.mesh.getMatrixAt(index, currentMatrix);
@@ -217,22 +218,56 @@ varying float vGradientT;`
         const quaternion = new THREE.Quaternion();
         const scale = new THREE.Vector3();
         currentMatrix.decompose(position, quaternion, scale);
-        
+
         const baseX = (index - VECTOR_LENGTH_PRISM / 2) * (PRISM_BASE_WIDTH * _prismWidthScale);
         const basePrismYPos = _uniformCalculatedHeight / 2; // Assuming yOffset is additive to this base for animation
-        
-        position.set(baseX, basePrismYPos + yOffset, 0);
-        
-        // Apply newScale if provided, otherwise keep the decomposed scale (which should be the default)
-        if (newScale instanceof THREE.Vector3) {
-            scale.copy(newScale);
-        } else {
-            // Ensure scale is default if not specified, in case it was previously altered by another call
-            // This part is tricky if multiple effects are layered. For now, assume newScale is authoritative if provided.
-            // If not provided, it re-uses the one from decompose, which SHOULD be the default if other methods reset it.
-            // Let's explicitly set to default if no newScale, to be safe during complex animations.
-            scale.set(_prismWidthScale, _uniformCalculatedHeight, _prismDepthScale);
+
+        let extraX = 0;
+        let extraZ = 0;
+
+        // Reset to default scale/orientation before applying overrides so successive
+        // calls do not accumulate floating-point drift.
+        scale.set(_prismWidthScale, _uniformCalculatedHeight, _prismDepthScale);
+        quaternion.identity();
+
+        if (transformOverrides instanceof THREE.Vector3) {
+            scale.copy(transformOverrides);
+        } else if (transformOverrides && typeof transformOverrides === 'object') {
+            if (transformOverrides.scale instanceof THREE.Vector3) {
+                scale.copy(transformOverrides.scale);
+            } else {
+                if (typeof transformOverrides.scaleMultiplier === 'number') {
+                    scale.multiplyScalar(transformOverrides.scaleMultiplier);
+                }
+                if (typeof transformOverrides.scaleXMultiplier === 'number') {
+                    scale.x *= transformOverrides.scaleXMultiplier;
+                }
+                if (typeof transformOverrides.scaleYMultiplier === 'number') {
+                    scale.y *= transformOverrides.scaleYMultiplier;
+                }
+                if (typeof transformOverrides.scaleZMultiplier === 'number') {
+                    scale.z *= transformOverrides.scaleZMultiplier;
+                }
+            }
+
+            if (typeof transformOverrides.xOffset === 'number') {
+                extraX = transformOverrides.xOffset;
+            }
+            if (typeof transformOverrides.zOffset === 'number') {
+                extraZ = transformOverrides.zOffset;
+            }
+
+            if (transformOverrides.quaternion instanceof THREE.Quaternion) {
+                quaternion.copy(transformOverrides.quaternion);
+            } else if (transformOverrides.euler instanceof THREE.Euler) {
+                quaternion.setFromEuler(transformOverrides.euler);
+            } else if (typeof transformOverrides.tilt === 'number') {
+                __scratchEuler.set(0, 0, transformOverrides.tilt, 'XYZ');
+                quaternion.setFromEuler(__scratchEuler);
+            }
         }
+
+        position.set(baseX + extraX, basePrismYPos + yOffset, extraZ);
 
         currentMatrix.compose(position, quaternion, scale);
         this.mesh.setMatrixAt(index, currentMatrix);
