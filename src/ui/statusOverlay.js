@@ -123,6 +123,8 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         }
     }
 
+    let lastStatusText = '';
+
     function updateStatus() {
         if (!statusDiv) return;
         const idx = pipeline._currentLayerIdx;
@@ -150,10 +152,42 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
                 displayStage = 'LayerNorm 1';
             }
         }
-        statusDiv.textContent = `Layer ${idx + 1} / ${total}\n${displayStage}`;
+
         updateEquations(layer);
+
+        const nextStatusText = `Layer ${idx + 1} / ${total}\n${displayStage}`;
+        if (nextStatusText === lastStatusText) {
+            checkTopEmbeddingActivation();
+            return;
+        }
+
+        lastStatusText = nextStatusText;
+        statusDiv.textContent = nextStatusText;
         checkTopEmbeddingActivation();
     }
+
+    const scheduleFrame = (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function')
+        ? window.requestAnimationFrame.bind(window)
+        : (cb) => setTimeout(cb, 16);
+
+    let framePending = false;
+    let needsUpdate = false;
+
+    const scheduleStatusUpdate = () => {
+        if (framePending) return;
+        framePending = true;
+        scheduleFrame(() => {
+            framePending = false;
+            if (!needsUpdate) return;
+            needsUpdate = false;
+            updateStatus();
+        });
+    };
+
+    const onProgress = () => {
+        needsUpdate = true;
+        scheduleStatusUpdate();
+    };
 
     function applyPhysicalMaterial(enabled) {
         if (!pipeline?.engine?.scene) return;
@@ -188,7 +222,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
 
     applyPhysicalMaterial(USE_PHYSICAL_MATERIALS);
     if (pipeline && typeof pipeline.addEventListener === 'function') {
-        pipeline.addEventListener('progress', updateStatus);
+        pipeline.addEventListener('progress', onProgress);
     }
     updateStatus();
 }
