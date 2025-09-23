@@ -18,6 +18,7 @@ import {
 } from '../utils/constants.js';
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
 import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
+import { createJoyfulRiseTween } from '../animations/joyfulMotion.js';
 
 function simplePrismMultiply(srcVec, tgtVec, onComplete) {
     for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
@@ -284,43 +285,68 @@ export class LayerPipeline extends EventTarget {
                 const distToCenter = Math.max(0, lnCenterY - startY);
                 const durToCenter = (distToCenter / (ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT)) * 1000;
 
-                new TWEEN.Tween(vec.group.position)
-                    .to({ y: lnCenterY }, Math.max(100, durToCenter))
-                    .easing(TWEEN.Easing.Quadratic.InOut)
-                    .onUpdate(() => {
-                        this.dispatchEvent(new Event('progress'));
-                        if (!lane.__topLnEntered && vec.group.position.y >= lnBottomY) {
-                            lane.__topLnEntered = true;
-                            multVec.group.visible = true;
-                            addVec.group.visible = true;
-                            this._activateLayerNormColor(lnTopGroup);
-                        }
-                    })
-                    .onComplete(() => {
-                        this.dispatchEvent(new Event('progress'));
-                        simplePrismMultiply(vec, multVec, () => {
-                            vec.group.visible = false;
-                            multVec.group.visible = false;
+                const handleProgress = () => {
+                    this.dispatchEvent(new Event('progress'));
+                    if (!lane.__topLnEntered && vec.group.position.y >= lnBottomY) {
+                        lane.__topLnEntered = true;
+                        multVec.group.visible = true;
+                        addVec.group.visible = true;
+                        this._activateLayerNormColor(lnTopGroup);
+                    }
+                };
 
-                            const resVec = new VectorVisualizationInstancedPrism(multVec.rawData.slice(), multVec.group.position.clone());
-                            lastLayer.root.add(resVec.group);
+                const finishAtCenter = () => {
+                    this.dispatchEvent(new Event('progress'));
+                    simplePrismMultiply(vec, multVec, () => {
+                        vec.group.visible = false;
+                        multVec.group.visible = false;
 
-                            const addDur = (PRISM_ADD_ANIM_BASE_DURATION + PRISM_ADD_ANIM_BASE_FLASH_DURATION + VECTOR_LENGTH_PRISM * PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS) / PRISM_ADD_ANIM_SPEED_MULT;
-                            startPrismAdditionAnimation(addVec, resVec);
+                        const resVec = new VectorVisualizationInstancedPrism(multVec.rawData.slice(), multVec.group.position.clone());
+                        lastLayer.root.add(resVec.group);
 
-                            setTimeout(() => {
-                                const riseDist = Math.max(0, targetYLocal - resVec.group.position.y);
-                                const durMs = (riseDist / (ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT)) * 1000;
+                        const addDur = (PRISM_ADD_ANIM_BASE_DURATION + PRISM_ADD_ANIM_BASE_FLASH_DURATION + VECTOR_LENGTH_PRISM * PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS) / PRISM_ADD_ANIM_SPEED_MULT;
+                        startPrismAdditionAnimation(addVec, resVec);
+
+                        const startFinalRise = () => {
+                            const riseDist = Math.max(0, targetYLocal - resVec.group.position.y);
+                            const durMs = (riseDist / (ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT)) * 1000;
+                            const joyfulFinal = createJoyfulRiseTween(resVec.group, targetYLocal, {
+                                duration: Math.max(400, durMs + 250),
+                                intensity: 0.24,
+                                rotationAmplitude: 0.18,
+                                onProgress: () => this.dispatchEvent(new Event('progress')),
+                                onComplete: () => this.dispatchEvent(new Event('progress')),
+                            });
+                            if (!joyfulFinal) {
                                 new TWEEN.Tween(resVec.group.position)
                                     .to({ y: targetYLocal }, Math.max(100, durMs))
                                     .easing(TWEEN.Easing.Quadratic.InOut)
                                     .onUpdate(() => this.dispatchEvent(new Event('progress')))
                                     .onComplete(() => this.dispatchEvent(new Event('progress')))
                                     .start();
-                            }, addDur + 100);
-                        });
-                    })
-                    .start();
+                            }
+                        };
+
+                        setTimeout(startFinalRise, addDur + 100);
+                    });
+                };
+
+                const joyfulRise = createJoyfulRiseTween(vec.group, lnCenterY, {
+                    duration: Math.max(300, durToCenter + 200),
+                    intensity: 0.22,
+                    rotationAmplitude: 0.16,
+                    onProgress: handleProgress,
+                    onComplete: finishAtCenter,
+                });
+
+                if (!joyfulRise) {
+                    new TWEEN.Tween(vec.group.position)
+                        .to({ y: lnCenterY }, Math.max(100, durToCenter))
+                        .easing(TWEEN.Easing.Quadratic.InOut)
+                        .onUpdate(handleProgress)
+                        .onComplete(finishAtCenter)
+                        .start();
+                }
             });
             return;
         }
@@ -335,12 +361,22 @@ export class LayerPipeline extends EventTarget {
             const riseDist = Math.max(0, targetYLocal - startY);
             const durMs = (riseDist / (ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT)) * 1000;
 
-            new TWEEN.Tween(vec.group.position)
-                .to({ y: targetYLocal }, Math.max(100, durMs))
-                .easing(TWEEN.Easing.Quadratic.InOut)
-                .onUpdate(() => this.dispatchEvent(new Event('progress')))
-                .onComplete(() => this.dispatchEvent(new Event('progress')))
-                .start();
+            const joyfulRise = createJoyfulRiseTween(vec.group, targetYLocal, {
+                duration: Math.max(300, durMs + 200),
+                intensity: 0.24,
+                rotationAmplitude: 0.18,
+                onProgress: () => this.dispatchEvent(new Event('progress')),
+                onComplete: () => this.dispatchEvent(new Event('progress')),
+            });
+
+            if (!joyfulRise) {
+                new TWEEN.Tween(vec.group.position)
+                    .to({ y: targetYLocal }, Math.max(100, durMs))
+                    .easing(TWEEN.Easing.Quadratic.InOut)
+                    .onUpdate(() => this.dispatchEvent(new Event('progress')))
+                    .onComplete(() => this.dispatchEvent(new Event('progress')))
+                    .start();
+            }
         });
     }
 }
