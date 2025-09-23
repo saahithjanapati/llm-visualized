@@ -56,6 +56,12 @@ import {
 import { PrismLayerNormAnimation } from '../../animations/PrismLayerNormAnimation.js';
 import { MHSAAnimation } from '../../animations/MHSAAnimation.js';
 import { startPrismAdditionAnimation } from '../../utils/additionUtils.js';
+import {
+    createAnticipationTween,
+    createArcTween,
+    createBounceTween,
+    createLoopingFloatTween
+} from '../../utils/joyfulMotion.js';
 
 
 // Slightly reduced spacing between stacked layers for a tighter layout.
@@ -612,23 +618,93 @@ export default class Gpt2Layer extends BaseLayer {
                     }
                     break;
                 case 'right':
-                    // Mirror LN-2: lock Y at staging height and move X only.
+                    // Introduce anticipation + joyful arc into LN-1.
+                    dupVec.group.visible = true;
                     if (typeof lane.branchStartY === 'number') {
                         dupVec.group.position.y = lane.branchStartY;
                     }
-                    dupVec.group.position.x = Math.min(BRANCH_X, dupVec.group.position.x + ANIM_HORIZ_SPEED * speedMult * dt);
-                    if (dupVec.group.position.x >= BRANCH_X - 0.01) {
-                        // Ensure alignment with LN-1 centre
-                        dupVec.group.position.x = BRANCH_X;
-                        // Show the multiplication target inside LN-1 (parity with LN-2 behaviour)
-                        if (lane.multTarget && lane.multTarget.group) {
-                            lane.multTarget.group.visible = true;
+
+                    lane.joyTweens = lane.joyTweens || {};
+                    if (!lane.joyTweens.ln1SlideStarted) {
+                        lane.joyTweens.ln1SlideStarted = true;
+                        const startPos = dupVec.group.position.clone();
+                        const targetPos = new THREE.Vector3(
+                            BRANCH_X,
+                            typeof lane.branchStartY === 'number' ? lane.branchStartY : startPos.y,
+                            startPos.z
+                        );
+                        const distance = Math.max(1, targetPos.x - startPos.x);
+                        const baseDuration = Math.max(320, (distance / (ANIM_HORIZ_SPEED * speedMult)) * 1000);
+                        const anticipationOffset = Math.min(60, distance * 0.35);
+                        const anticipationDuration = Math.min(baseDuration * 0.45, 260);
+                        const lift = Math.min(140, Math.max(45, distance * 0.35));
+                        let targetsShown = false;
+
+                        const showTargets = () => {
+                            if (targetsShown) return;
+                            targetsShown = true;
+                            if (lane.multTarget && lane.multTarget.group) {
+                                lane.multTarget.group.visible = true;
+                            }
+                            if (lane.addTarget && lane.addTarget.group) {
+                                lane.addTarget.group.visible = true;
+                            }
+                        };
+
+                        const launchArc = () => {
+                            const arcStart = dupVec.group.position.clone();
+                            const arcTween = createArcTween(dupVec.group, {
+                                start: arcStart,
+                                end: targetPos,
+                                lift,
+                                duration: baseDuration,
+                                squashAmount: 0.18,
+                                rotationAmount: 0.2,
+                                onProgress: (t) => {
+                                    if (!targetsShown && t > 0.55) {
+                                        showTargets();
+                                    }
+                                },
+                                onComplete: () => {
+                                    showTargets();
+                                    dupVec.group.position.x = BRANCH_X;
+                                    dupVec.group.position.y = targetPos.y;
+                                    lane.horizPhase = 'insideLN';
+                                    this._emitProgress();
+                                }
+                            });
+                            lane.joyTweens.ln1Arc = arcTween;
+                            if (arcTween && typeof arcTween.start === 'function') {
+                                arcTween.start();
+                            } else {
+                                // Fallback if tween unavailable
+                                showTargets();
+                                dupVec.group.position.copy(targetPos);
+                                lane.horizPhase = 'insideLN';
+                                this._emitProgress();
+                            }
+                        };
+
+                        if (anticipationOffset > 1) {
+                            const anticipTween = createAnticipationTween(
+                                dupVec.group,
+                                'x',
+                                anticipationOffset,
+                                anticipationDuration,
+                                {
+                                    squashAmount: 0.12,
+                                    onComplete: launchArc
+                                }
+                            );
+                            lane.joyTweens.ln1Anticipation = anticipTween;
+                            if (anticipTween && typeof anticipTween.start === 'function') {
+                                anticipTween.start();
+                            } else {
+                                launchArc();
+                            }
+                        } else {
+                            launchArc();
                         }
-                        if (lane.addTarget && lane.addTarget.group) {
-                            lane.addTarget.group.visible = true;
-                        }
-                        lane.horizPhase = 'insideLN';
-                        this._emitProgress();
                     }
                     break;
                 case 'insideLN':
@@ -728,30 +804,74 @@ export default class Gpt2Layer extends BaseLayer {
                     }
                     break;
                 case 'riseAboveLN':
-                    // Rise to just above LN1 before starting horizontal travel
+                    // Rise with a buoyant bounce before staging for MHSA.
                     const rv = lane.resultVec;
                     if (rv) {
-                        const targetY = this.ln1TopY + 5; // Same as meetY in original
-                        if (rv.group.position.y < targetY) {
-                            rv.group.position.y = Math.min(targetY, rv.group.position.y + ANIM_RISE_SPEED_INSIDE_LN * speedMult * dt);
-                        } else {
-                            // Now that we're above LN1, mark lane ready for MHSA travel.
+                        lane.joyTweens = lane.joyTweens || {};
+                        const targetY = this.ln1TopY + 5;
+                        if (rv.group.position.y >= targetY - 0.01 && !lane.joyTweens.ln1RiseBounce) {
                             lane.travellingVec = rv;
                             lane.headIndex = 0;
-                            lane.horizPhase = 'readyMHSA'; // wait for global barrier
+                            lane.horizPhase = 'readyMHSA';
                             this._emitProgress();
+                            break;
+                        }
+                        if (!lane.joyTweens.ln1RiseBounce) {
+                            const distance = Math.max(1, targetY - rv.group.position.y);
+                            const duration = Math.max(260, (distance / (ANIM_RISE_SPEED_INSIDE_LN * speedMult)) * 1000);
+                            const bounce = createBounceTween(rv.group, {
+                                axis: 'y',
+                                start: rv.group.position.y,
+                                end: targetY,
+                                overshoot: Math.max(12, distance * 0.25),
+                                duration,
+                                settleDuration: duration * 0.45,
+                                onComplete: () => {
+                                    lane.travellingVec = rv;
+                                    lane.headIndex = 0;
+                                    lane.horizPhase = 'readyMHSA';
+                                    this._emitProgress();
+                                }
+                            });
+                            lane.joyTweens.ln1RiseBounce = bounce;
+                            if (bounce && typeof bounce.start === 'function') {
+                                bounce.start();
+                            } else {
+                                rv.group.position.y = targetY;
+                                lane.travellingVec = rv;
+                                lane.headIndex = 0;
+                                lane.horizPhase = 'readyMHSA';
+                                this._emitProgress();
+                            }
                         }
                     }
                     break;
                 case 'readyMHSA':
-                    // Hold at staging height until global _mhsaStart flag triggers.
-                    // Ensure vector stays exactly at meetY.
+                    // Hold at staging height with a gentle float until released.
                     if (lane.travellingVec) {
-                        lane.travellingVec.group.position.y = this.ln1TopY + 5;
+                        const baseY = this.ln1TopY + 5;
+                        lane.travellingVec.group.position.y = baseY;
+                        lane.joyTweens = lane.joyTweens || {};
+                        if (!lane.joyTweens.readyFloat && typeof createLoopingFloatTween === 'function') {
+                            const floatTween = createLoopingFloatTween(lane.travellingVec.group, {
+                                axis: 'y',
+                                amplitude: 6,
+                                duration: 1400,
+                                base: baseY
+                            });
+                            lane.joyTweens.readyFloat = floatTween;
+                            if (floatTween && typeof floatTween.start === 'function') {
+                                floatTween.start();
+                            }
+                        }
                     }
                     break;
                 case 'travelMHSA':
                     // MHSAAnimation will handle the horizontal movement
+                    if (lane.joyTweens && lane.joyTweens.readyFloat) {
+                        lane.joyTweens.readyFloat.stop();
+                        delete lane.joyTweens.readyFloat;
+                    }
                     break;
                 case 'postMHSAAddition':
                     // After MHSA addition completes, start LN2 phase
@@ -776,69 +896,162 @@ export default class Gpt2Layer extends BaseLayer {
                     // Rise the post-addition vector before branching to LN2
                     const v = lane.postAdditionVec;
                     if (!v) break;
-                    
+
                     // Stage the vector at the same relative position used for LayerNorm-1
                     // (5 units above the bottom of the norm ring) so that the ensuing
                     // normalisation begins at a consistent height across both LayerNorms.
                     const targetY = bottomY_ln2_abs + 5; // align with LN1 offset
-                    if (v.group.position.y < targetY) {
-                        v.group.position.y = Math.min(targetY, v.group.position.y + ANIM_RISE_SPEED_POST_SPLIT_LN2 * speedMult * dt);
-                    } else {
-                        if (!this._ln2Ready) {
-                            // Wait here until every lane reaches the staging height.
+                    lane.joyTweens = lane.joyTweens || {};
+                    lane.joyFlags = lane.joyFlags || {};
+
+                    if (!lane.joyFlags.ln2RiseReached) {
+                        if (v.group.position.y >= targetY - 0.01 && !lane.joyTweens.ln2PreRise) {
+                            lane.joyFlags.ln2RiseReached = true;
+                        } else if (!lane.joyTweens.ln2PreRise) {
+                            const distance = Math.max(1, targetY - v.group.position.y);
+                            const duration = Math.max(260, (distance / (ANIM_RISE_SPEED_POST_SPLIT_LN2 * speedMult)) * 1000);
+                            const bounce = createBounceTween(v.group, {
+                                axis: 'y',
+                                start: v.group.position.y,
+                                end: targetY,
+                                overshoot: Math.max(10, distance * 0.25),
+                                duration,
+                                settleDuration: duration * 0.45,
+                                onComplete: () => {
+                                    lane.joyFlags.ln2RiseReached = true;
+                                }
+                            });
+                            lane.joyTweens.ln2PreRise = bounce;
+                            if (bounce && typeof bounce.start === 'function') {
+                                bounce.start();
+                                break;
+                            }
+                            // Fallback
+                            v.group.position.y = targetY;
+                            lane.joyFlags.ln2RiseReached = true;
+                        } else {
                             break;
                         }
-
-                        // ────────────────────────────────────────────────
-                        //  Reached staging height – begin LN-2 branch
-                        // ────────────────────────────────────────────────
-
-                        // Allow residual stream to keep rising while the
-                        // duplicate goes through LN-2/MLP.
-                        if (this.mhsaAnimation && typeof this.mhsaAnimation.finalOriginalY === 'number') {
-                            const newTarget = this.mlpUp.group.position.y + MLP_MATRIX_PARAMS_UP.height / 2 - ORIGINAL_TO_PROCESSED_GAP;
-                            if (newTarget > this.mhsaAnimation.finalOriginalY) {
-                                this.mhsaAnimation.finalOriginalY = newTarget;
-                            }
-                            this.mhsaAnimation.postSplitRiseSpeed = ANIM_RISE_SPEED_POST_SPLIT_LN2;
-                        }
-
-                        // Spawn duplicate vector that will travel into LN-2
-                        const mv = new VectorVisualizationInstancedPrism(v.rawData.slice(), v.group.position.clone());
-                        this.root.add(mv.group);
-                        // ---- Trail for LN2 moving vector ----
-                        const mvTrail = new StraightLineTrail(this.root, 0xffffff, 1);
-                        mvTrail.start(mv.group.position);
-                        mv.userData = mv.userData || {};
-                        mv.userData.trail = mvTrail;
-                        lane.movingVecLN2 = mv;
-                        lane.normAnimationLN2 = new PrismLayerNormAnimation(mv);
-
-                        lane.ln2Phase = 'right';
-                        this._emitProgress();
                     }
+
+                    if (!lane.joyFlags.ln2RiseReached) {
+                        break;
+                    }
+
+                    if (!this._ln2Ready) {
+                        // Wait here until every lane reaches the staging height.
+                        break;
+                    }
+
+                    if (lane.joyFlags.ln2BranchStarted) {
+                        break;
+                    }
+
+                    lane.joyFlags.ln2BranchStarted = true;
+
+                    // ────────────────────────────────────────────────
+                    //  Reached staging height – begin LN-2 branch
+                    // ────────────────────────────────────────────────
+
+                    // Allow residual stream to keep rising while the
+                    // duplicate goes through LN-2/MLP.
+                    if (this.mhsaAnimation && typeof this.mhsaAnimation.finalOriginalY === 'number') {
+                        const newTarget = this.mlpUp.group.position.y + MLP_MATRIX_PARAMS_UP.height / 2 - ORIGINAL_TO_PROCESSED_GAP;
+                        if (newTarget > this.mhsaAnimation.finalOriginalY) {
+                            this.mhsaAnimation.finalOriginalY = newTarget;
+                        }
+                        this.mhsaAnimation.postSplitRiseSpeed = ANIM_RISE_SPEED_POST_SPLIT_LN2;
+                    }
+
+                    // Spawn duplicate vector that will travel into LN-2
+                    const mv = new VectorVisualizationInstancedPrism(v.rawData.slice(), v.group.position.clone());
+                    this.root.add(mv.group);
+                    // ---- Trail for LN2 moving vector ----
+                    const mvTrail = new StraightLineTrail(this.root, 0xffffff, 1);
+                    mvTrail.start(mv.group.position);
+                    mv.userData = mv.userData || {};
+                    mv.userData.trail = mvTrail;
+                    lane.movingVecLN2 = mv;
+                    lane.normAnimationLN2 = new PrismLayerNormAnimation(mv);
+
+                    lane.ln2Phase = 'right';
+                    this._emitProgress();
                     break;
                 }
-                
+
                 case 'right': {
                     // Move horizontally to LN2
                     const mv = lane.movingVecLN2;
                     if (!mv) break;
-                    
+
                     mv.group.visible = true;
-                    const dx = ANIM_HORIZ_SPEED * speedMult * dt;
-                    mv.group.position.x = Math.min(BRANCH_X, mv.group.position.x + dx);
-                    
-                    if (mv.group.position.x >= BRANCH_X - 0.01) {
-                        mv.group.position.x = BRANCH_X;
-                        if (lane.multTargetLN2 && lane.multTargetLN2.group) {
-                            lane.multTargetLN2.group.visible = true;
+                    lane.joyTweens = lane.joyTweens || {};
+                    if (!lane.joyTweens.ln2SlideStarted) {
+                        lane.joyTweens.ln2SlideStarted = true;
+                        const startPos = mv.group.position.clone();
+                        const targetPos = new THREE.Vector3(BRANCH_X, startPos.y, startPos.z);
+                        const distance = Math.max(1, targetPos.x - startPos.x);
+                        const duration = Math.max(320, (distance / (ANIM_HORIZ_SPEED * speedMult)) * 1000);
+                        const anticipationOffset = Math.min(50, distance * 0.3);
+                        const lift = Math.min(130, Math.max(40, distance * 0.35));
+                        let revealedTargets = false;
+
+                        const reveal = () => {
+                            if (revealedTargets) return;
+                            revealedTargets = true;
+                            if (lane.multTargetLN2 && lane.multTargetLN2.group) {
+                                lane.multTargetLN2.group.visible = true;
+                            }
+                            if (lane.addTargetLN2 && lane.addTargetLN2.group) {
+                                lane.addTargetLN2.group.visible = true;
+                            }
+                        };
+
+                        const startArc = () => {
+                            const arcTween = createArcTween(mv.group, {
+                                start: mv.group.position.clone(),
+                                end: targetPos,
+                                lift,
+                                duration,
+                                squashAmount: 0.17,
+                                rotationAmount: 0.18,
+                                onProgress: (t) => {
+                                    if (!revealedTargets && t > 0.55) {
+                                        reveal();
+                                    }
+                                },
+                                onComplete: () => {
+                                    reveal();
+                                    mv.group.position.copy(targetPos);
+                                    lane.ln2Phase = 'insideLN';
+                                    this._emitProgress();
+                                }
+                            });
+                            lane.joyTweens.ln2Arc = arcTween;
+                            if (arcTween && typeof arcTween.start === 'function') {
+                                arcTween.start();
+                            } else {
+                                reveal();
+                                mv.group.position.copy(targetPos);
+                                lane.ln2Phase = 'insideLN';
+                                this._emitProgress();
+                            }
+                        };
+
+                        if (anticipationOffset > 1) {
+                            const anticip = createAnticipationTween(mv.group, 'x', anticipationOffset, Math.min(duration * 0.4, 220), {
+                                squashAmount: 0.1,
+                                onComplete: startArc
+                            });
+                            lane.joyTweens.ln2Anticipation = anticip;
+                            if (anticip && typeof anticip.start === 'function') {
+                                anticip.start();
+                            } else {
+                                startArc();
+                            }
+                        } else {
+                            startArc();
                         }
-                        if (lane.addTargetLN2 && lane.addTargetLN2.group) {
-                            lane.addTargetLN2.group.visible = true;
-                        }
-                        lane.ln2Phase = 'insideLN';
-                        this._emitProgress();
                     }
 
                     break;
@@ -853,18 +1066,23 @@ export default class Gpt2Layer extends BaseLayer {
                         if (!vec) return;
                         const destY = this.mlpUp.group.position.y - MLP_MATRIX_PARAMS_UP.height / 2 - 10;
                         const dist = destY - vec.group.position.y;
-                        const durationMs = (dist / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
+                        const durationMs = Math.max(280, (Math.abs(dist) / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000);
 
-                        if (typeof TWEEN !== 'undefined') {
-                            new TWEEN.Tween(vec.group.position)
-                                .to({ y: destY }, durationMs)
-                                .easing(TWEEN.Easing.Linear.None)
-                                .onUpdate(() => {})
-                                .onComplete(() => {
-                                    lane.ln2Phase = 'mlpReady';
-                                    this._emitProgress();
-                                })
-                                .start();
+                        const bounce = createBounceTween(vec.group, {
+                            axis: 'y',
+                            start: vec.group.position.y,
+                            end: destY,
+                            overshoot: Math.max(14, Math.abs(dist) * 0.25),
+                            duration: durationMs,
+                            settleDuration: durationMs * 0.45,
+                            onComplete: () => {
+                                lane.ln2Phase = 'mlpReady';
+                                this._emitProgress();
+                            }
+                        });
+
+                        if (bounce && typeof bounce.start === 'function') {
+                            bounce.start();
                         } else {
                             vec.group.position.y = destY;
                             lane.ln2Phase = 'mlpReady';
@@ -1639,7 +1857,9 @@ export default class Gpt2Layer extends BaseLayer {
             finalVecAfterMlp: null,
             expandedVecTrail: null,
             zPos,
-            __residualMaxY: (function(){ const wp=new THREE.Vector3(); originalVec.group.getWorldPosition(wp); return wp.y; })()
+            __residualMaxY: (function(){ const wp=new THREE.Vector3(); originalVec.group.getWorldPosition(wp); return wp.y; })(),
+            joyTweens: {},
+            joyFlags: {}
         });
 
         // ------------------------------------------------------------
