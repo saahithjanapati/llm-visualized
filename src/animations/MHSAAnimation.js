@@ -38,6 +38,10 @@ import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
 import { buildMHAVisuals, VectorRouter, PassThroughAnimator, SelfAttentionAnimator } from './mhsa/index.js';
 import { animateVectorMatrixPassThrough as animateVectorMatrixPassThroughExternal } from './mhsa/VectorMatrixPassThrough.js';
 
+const _tmpWorld = new THREE.Vector3();
+const _tmpWorld2 = new THREE.Vector3();
+const _tmpMatrix = new THREE.Matrix4();
+
 // Use live binding of GLOBAL_ANIM_SPEED_MULT at each use; do not cache
 
 export class MHSAAnimation {
@@ -601,7 +605,7 @@ export class MHSAAnimation {
                         const attached = lane.originalVec && lane.originalVec.userData && lane.originalVec.userData.trail;
                         const residualTrail = attached || lane.originalTrail;
                         if (residualTrail && typeof residualTrail.update === 'function') {
-                            const wp = new THREE.Vector3();
+                            const wp = _tmpWorld;
                             lane.originalVec.group.getWorldPosition(wp);
                             // Monotonic Y clamp: only extend the trail upwards
                             if (typeof lane.__residualMaxY !== 'number') lane.__residualMaxY = wp.y;
@@ -630,9 +634,10 @@ export class MHSAAnimation {
                 // Compute world position of the centre prism for the ORIGINAL (source) vector
                 // so the residual trail extends continuously as prisms rise during addition.
                 const centreIdx = Math.floor(VECTOR_LENGTH_PRISM / 2);
-                const instMat = new THREE.Matrix4();
+                const instMat = _tmpMatrix;
                 lane.originalVec.mesh.getMatrixAt(centreIdx, instMat);
-                const wPos = new THREE.Vector3().setFromMatrixPosition(instMat);
+                const wPos = _tmpWorld2;
+                wPos.setFromMatrixPosition(instMat);
                 wPos.applyMatrix4(lane.originalVec.group.matrixWorld);
 
                 // Skip bogus updates when the centre prism is hidden far below the scene
