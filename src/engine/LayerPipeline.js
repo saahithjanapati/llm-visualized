@@ -10,6 +10,7 @@ import {
     GLOBAL_ANIM_SPEED_MULT,
     ANIM_RISE_SPEED_ORIGINAL,
     LN_PARAMS,
+    LN_NORM_START_FRACTION_FROM_BOTTOM,
     PRISM_ADD_ANIM_BASE_DURATION,
     PRISM_ADD_ANIM_BASE_FLASH_DURATION,
     PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS,
@@ -18,6 +19,7 @@ import {
 } from '../utils/constants.js';
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
 import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
+import { PrismLayerNormAnimation } from '../animations/PrismLayerNormAnimation.js';
 
 function simplePrismMultiply(srcVec, tgtVec, onComplete) {
     for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
@@ -26,6 +28,10 @@ function simplePrismMultiply(srcVec, tgtVec, onComplete) {
     tgtVec.updateKeyColorsFromData(tgtVec.rawData, 30);
     if (onComplete) onComplete();
 }
+
+const COLOR_DARK_GRAY = new THREE.Color(0x333333);
+const COLOR_LIGHT_YELLOW = new THREE.Color(0xffffff);
+const COLOR_BRIGHT_YELLOW = new THREE.Color(0xffffff);
 
 /**
  * LayerPipeline orchestrates a single bundle of vectors ("lanes") through an
@@ -267,61 +273,292 @@ export class LayerPipeline extends EventTarget {
     _animateResidualVectors(lastLayer, targetYLocal, lnInfo) {
         if (lnInfo && lnInfo.lnTopGroup) {
             const { lnTopGroup, lnCenterY, lnBottomY } = lnInfo;
+            const lnMeshes = [];
+            lnTopGroup.traverse(obj => {
+                if (obj && obj.isMesh && obj.material) {
+                    lnMeshes.push(obj);
+                }
+            });
+
+            const lnColorState = {
+                highestY: -Infinity,
+                locked: false,
+                lockedColor: new THREE.Color(COLOR_BRIGHT_YELLOW),
+                currentColor: new THREE.Color(COLOR_DARK_GRAY),
+                currentOpacity: 1.0
+            };
+            const tempColor = new THREE.Color();
+            const applyTopLnColor = () => {
+                lnMeshes.forEach(mesh => {
+                    const applyMaterial = mat => {
+                        if (!mat) return;
+                        if (mat.color) mat.color.copy(lnColorState.currentColor);
+                        if (mat.emissive) mat.emissive.copy(lnColorState.currentColor);
+                        mat.transparent = lnColorState.currentOpacity < 1.0;
+                        mat.opacity = lnColorState.currentOpacity;
+                        mat.needsUpdate = true;
+                    };
+                    if (Array.isArray(mesh.material)) {
+                        mesh.material.forEach(applyMaterial);
+                    } else {
+                        applyMaterial(mesh.material);
+                    }
+                });
+            };
+            applyTopLnColor();
+
+            const lnHeight = LN_PARAMS.height || 0;
+            const lnTopY = lnCenterY + lnHeight / 2;
+            const normStartY = lnBottomY + lnHeight * LN_NORM_START_FRACTION_FROM_BOTTOM;
+            const exitTransitionRange = 5;
+            const tmpWorldPos = new THREE.Vector3();
+            const tmpLocalPos = new THREE.Vector3();
+
+            const updateTopLnColor = (y) => {
+                if (!Number.isFinite(y)) return;
+                if (y > lnColorState.highestY) {
+                    lnColorState.highestY = y;
+                }
+
+                const highest = lnColorState.highestY;
+                if (lnColorState.locked) {
+                    lnColorState.currentColor.copy(lnColorState.lockedColor);
+                    lnColorState.currentOpacity = 1.0;
+                } else {
+                    if (highest >= lnBottomY && highest < lnCenterY) {
+                        const denom = Math.max(lnCenterY - lnBottomY, 1e-6);
+                        const t = (highest - lnBottomY) / denom;
+                        tempColor.copy(COLOR_DARK_GRAY).lerp(COLOR_LIGHT_YELLOW, t);
+                        lnColorState.currentColor.copy(tempColor);
+                        lnColorState.currentOpacity = THREE.MathUtils.lerp(1.0, 0.6, t);
+                    } else if (highest >= lnCenterY && highest < lnTopY) {
+                        lnColorState.currentColor.copy(COLOR_LIGHT_YELLOW);
+                        lnColorState.currentOpacity = 0.6;
+                    } else if (highest >= lnTopY) {
+                        const tRaw = (highest - lnTopY) / exitTransitionRange;
+                        const t = Math.min(1, Math.max(0, tRaw));
+                        tempColor.copy(COLOR_LIGHT_YELLOW).lerp(COLOR_BRIGHT_YELLOW, t);
+                        lnColorState.currentColor.copy(tempColor);
+                        lnColorState.currentOpacity = THREE.MathUtils.lerp(0.6, 1.0, t);
+                    } else {
+                        lnColorState.currentColor.copy(COLOR_DARK_GRAY);
+                        lnColorState.currentOpacity = 1.0;
+                    }
+
+                    if (highest >= lnTopY + exitTransitionRange) {
+                        lnColorState.locked = true;
+                        lnColorState.lockedColor.copy(COLOR_BRIGHT_YELLOW);
+                        lnColorState.currentColor.copy(lnColorState.lockedColor);
+                        lnColorState.currentOpacity = 1.0;
+                    }
+                }
+
+                applyTopLnColor();
+            };
+
+            const additionDuration = (PRISM_ADD_ANIM_BASE_DURATION + PRISM_ADD_ANIM_BASE_FLASH_DURATION + VECTOR_LENGTH_PRISM * PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS) / PRISM_ADD_ANIM_SPEED_MULT;
+
+            const updateTrailPosition = (vector) => {
+                if (!vector || !vector.userData || !vector.userData.trail) return;
+                const trail = vector.userData.trail;
+                if (typeof trail.update !== 'function') return;
+                vector.group.getWorldPosition(tmpWorldPos);
+                if (vector.userData.trailWorld) {
+                    tmpLocalPos.copy(tmpWorldPos);
+                    trail.update(tmpLocalPos);
+                } else {
+                    tmpLocalPos.copy(tmpWorldPos);
+                    try {
+                        const parentObject = (trail._line && trail._line.parent) || trail._scene || null;
+                        if (parentObject && typeof parentObject.worldToLocal === 'function') {
+                            parentObject.worldToLocal(tmpLocalPos);
+                        }
+                    } catch (_) {
+                        // fall back to world position already copied into tmpLocalPos
+                    }
+                    trail.update(tmpLocalPos);
+                }
+            };
+
             lastLayer.lanes.forEach(lane => {
                 const vec = lane && lane.originalVec;
                 if (!vec || !vec.group) return;
                 const startY = vec.group.position.y;
-                if (typeof startY !== 'number' || !isFinite(startY)) return;
+                if (!Number.isFinite(startY)) return;
 
                 const zPos = lane.zPos || 0;
                 const multVec = new VectorVisualizationInstancedPrism(vec.rawData.slice(), new THREE.Vector3(0, lnCenterY, zPos));
                 lastLayer.root.add(multVec.group);
                 multVec.group.visible = false;
+
                 const addVec = new VectorVisualizationInstancedPrism(vec.rawData.slice(), new THREE.Vector3(0, lnCenterY + LN_PARAMS.height / 4, zPos));
                 lastLayer.root.add(addVec.group);
                 addVec.group.visible = false;
 
-                const distToCenter = Math.max(0, lnCenterY - startY);
-                const durToCenter = (distToCenter / (ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT)) * 1000;
+                const normAnim = new PrismLayerNormAnimation(vec);
+                let normLoopActive = false;
 
-                new TWEEN.Tween(vec.group.position)
-                    .to({ y: lnCenterY }, Math.max(100, durToCenter))
-                    .easing(TWEEN.Easing.Quadratic.InOut)
-                    .onUpdate(() => {
-                        this.dispatchEvent(new Event('progress'));
-                        if (!lane.__topLnEntered && vec.group.position.y >= lnBottomY) {
-                            lane.__topLnEntered = true;
-                            multVec.group.visible = true;
-                            addVec.group.visible = true;
-                            this._activateLayerNormColor(lnTopGroup);
+                if (startY >= lnBottomY) {
+                    multVec.group.visible = true;
+                    addVec.group.visible = true;
+                    lane.__topLnEntered = true;
+                }
+
+                const startFinalRise = (resVec) => {
+                    const riseDist = Math.max(0, targetYLocal - resVec.group.position.y);
+                    const durMs = (riseDist / (ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT)) * 1000;
+                    new TWEEN.Tween(resVec.group.position)
+                        .to({ y: targetYLocal }, Math.max(100, durMs))
+                        .easing(TWEEN.Easing.Quadratic.InOut)
+                        .onUpdate(() => {
+                            updateTopLnColor(resVec.group.position.y);
+                            updateTrailPosition(resVec);
+                            this.dispatchEvent(new Event('progress'));
+                        })
+                        .onComplete(() => {
+                            updateTopLnColor(targetYLocal + exitTransitionRange);
+                            updateTrailPosition(resVec);
+                            this.dispatchEvent(new Event('progress'));
+                        })
+                        .start();
+                };
+
+                const beginMultiply = () => {
+                    if (lane.__topLnMultStarted) return;
+                    lane.__topLnMultStarted = true;
+                    multVec.group.visible = true;
+                    addVec.group.visible = true;
+
+                    simplePrismMultiply(vec, multVec, () => {
+                        updateTopLnColor(multVec.group.position.y);
+                        vec.group.visible = false;
+                        multVec.group.visible = false;
+
+                        const resVec = new VectorVisualizationInstancedPrism(multVec.rawData.slice(), multVec.group.position.clone());
+                        lastLayer.root.add(resVec.group);
+
+                        if (multVec.group && multVec.group.parent) {
+                            multVec.group.parent.remove(multVec.group);
                         }
-                    })
-                    .onComplete(() => {
+
+                        resVec.userData = resVec.userData || {};
+                        if (vec.userData && vec.userData.trail) {
+                            resVec.userData.trail = vec.userData.trail;
+                            resVec.userData.trailWorld = vec.userData.trailWorld;
+                        }
+                        lane.originalVec = resVec;
+
+                        updateTopLnColor(resVec.group.position.y);
                         this.dispatchEvent(new Event('progress'));
-                        simplePrismMultiply(vec, multVec, () => {
-                            vec.group.visible = false;
-                            multVec.group.visible = false;
 
-                            const resVec = new VectorVisualizationInstancedPrism(multVec.rawData.slice(), multVec.group.position.clone());
-                            lastLayer.root.add(resVec.group);
-
-                            const addDur = (PRISM_ADD_ANIM_BASE_DURATION + PRISM_ADD_ANIM_BASE_FLASH_DURATION + VECTOR_LENGTH_PRISM * PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS) / PRISM_ADD_ANIM_SPEED_MULT;
-                            startPrismAdditionAnimation(addVec, resVec);
-
-                            setTimeout(() => {
-                                const riseDist = Math.max(0, targetYLocal - resVec.group.position.y);
-                                const durMs = (riseDist / (ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT)) * 1000;
-                                new TWEEN.Tween(resVec.group.position)
-                                    .to({ y: targetYLocal }, Math.max(100, durMs))
-                                    .easing(TWEEN.Easing.Quadratic.InOut)
-                                    .onUpdate(() => this.dispatchEvent(new Event('progress')))
-                                    .onComplete(() => this.dispatchEvent(new Event('progress')))
-                                    .start();
-                            }, addDur + 100);
+                        startPrismAdditionAnimation(addVec, resVec, null, () => {
+                            if (addVec.group) addVec.group.visible = false;
+                            if (addVec.group && addVec.group.parent) {
+                                addVec.group.parent.remove(addVec.group);
+                            }
                         });
-                    })
-                    .start();
+
+                        new TWEEN.Tween({ t: 0 })
+                            .to({ t: 1 }, additionDuration)
+                            .onUpdate(() => {
+                                updateTopLnColor(resVec.group.position.y);
+                                updateTrailPosition(resVec);
+                                this.dispatchEvent(new Event('progress'));
+                            })
+                            .start();
+
+                        setTimeout(() => {
+                            updateTopLnColor(resVec.group.position.y);
+                            startFinalRise(resVec);
+                        }, additionDuration + 100);
+                    });
+                };
+
+                const riseToCenter = () => {
+                    const targetY = Math.max(vec.group.position.y, lnCenterY);
+                    if (vec.group.position.y >= targetY - 0.01) {
+                        vec.group.position.y = targetY;
+                        beginMultiply();
+                        return;
+                    }
+
+                    const distance = Math.max(0, targetY - vec.group.position.y);
+                    const duration = (distance / (ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT)) * 1000;
+                    new TWEEN.Tween(vec.group.position)
+                        .to({ y: targetY }, Math.max(100, duration))
+                        .easing(TWEEN.Easing.Quadratic.InOut)
+                        .onUpdate(() => {
+                            updateTopLnColor(vec.group.position.y);
+                            this.dispatchEvent(new Event('progress'));
+                        })
+                        .onComplete(() => {
+                            updateTopLnColor(vec.group.position.y);
+                            this.dispatchEvent(new Event('progress'));
+                            beginMultiply();
+                        })
+                        .start();
+                };
+
+                const startNormalization = () => {
+                    if (normLoopActive) return;
+                    normLoopActive = true;
+                    try {
+                        normAnim.start(vec.rawData.slice());
+                    } catch (_) {
+                        normLoopActive = false;
+                        riseToCenter();
+                        return;
+                    }
+
+                    const runLoop = () => {
+                        normAnim.update(0);
+                        updateTopLnColor(vec.group.position.y);
+                        this.dispatchEvent(new Event('progress'));
+                        if (normAnim.isAnimating) {
+                            requestAnimationFrame(runLoop);
+                        } else {
+                            normLoopActive = false;
+                            riseToCenter();
+                        }
+                    };
+                    runLoop();
+                };
+
+                const moveToNormStart = () => {
+                    updateTopLnColor(vec.group.position.y);
+                    const stageTarget = Math.max(vec.group.position.y, normStartY);
+
+                    if (vec.group.position.y >= stageTarget - 0.01) {
+                        vec.group.position.y = stageTarget;
+                        startNormalization();
+                        return;
+                    }
+
+                    const distance = Math.max(0, stageTarget - vec.group.position.y);
+                    const duration = (distance / (ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT)) * 1000;
+                    new TWEEN.Tween(vec.group.position)
+                        .to({ y: stageTarget }, Math.max(100, duration))
+                        .easing(TWEEN.Easing.Quadratic.InOut)
+                        .onUpdate(() => {
+                            updateTopLnColor(vec.group.position.y);
+                            if (!lane.__topLnEntered && vec.group.position.y >= lnBottomY) {
+                                lane.__topLnEntered = true;
+                                multVec.group.visible = true;
+                                addVec.group.visible = true;
+                            }
+                            this.dispatchEvent(new Event('progress'));
+                        })
+                        .onComplete(() => {
+                            updateTopLnColor(vec.group.position.y);
+                            this.dispatchEvent(new Event('progress'));
+                            startNormalization();
+                        })
+                        .start();
+                };
+
+                moveToNormStart();
             });
+
             return;
         }
 
