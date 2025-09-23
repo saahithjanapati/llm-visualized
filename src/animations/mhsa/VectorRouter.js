@@ -1,3 +1,5 @@
+import * as THREE from 'three';
+
 import { VectorVisualizationInstancedPrism } from '../../components/VectorVisualizationInstancedPrism.js';
 import { StraightLineTrail } from '../../utils/trailUtils.js';
 import { TRAIL_COLOR } from '../../utils/trailConstants.js';
@@ -7,7 +9,6 @@ import {
     SIDE_COPY_DELAY_MS,
     SIDE_COPY_HORIZ_SPEED,
     NUM_HEAD_SETS_LAYER,
-    VECTOR_LENGTH_PRISM,
 } from '../../utils/constants.js';
 // Speed-related constants centralised in utils/constants
 import { MHSA_DUPLICATE_VECTOR_RISE_SPEED } from '../../utils/constants.js';
