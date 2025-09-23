@@ -86,6 +86,9 @@ try {
     vocabBottom.setColor(headBlue);
     vocabBottom.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
     pipeline.engine.scene.add(vocabBottom.group);
+    if (pipeline.engine && typeof pipeline.engine.registerRaycastRoot === 'function') {
+        pipeline.engine.registerRaycastRoot(vocabBottom.group);
+    }
 
     const gapX = EMBEDDING_BOTTOM_PAIR_GAP_X;
     const posX = (EMBEDDING_MATRIX_PARAMS_VOCAB.width / 2) + (EMBEDDING_MATRIX_PARAMS_POSITION.width / 2) + gapX + EMBEDDING_BOTTOM_POS_X_OFFSET + EMBEDDING_BOTTOM_VOCAB_X_OFFSET;
@@ -109,6 +112,9 @@ try {
     posBottom.setColor(headGreen);
     posBottom.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
     pipeline.engine.scene.add(posBottom.group);
+    if (pipeline.engine && typeof pipeline.engine.registerRaycastRoot === 'function') {
+        pipeline.engine.registerRaycastRoot(posBottom.group);
+    }
 
     const lastLayer = pipeline._layers[NUM_LAYERS - 1];
     if (lastLayer && lastLayer.mlpDown && lastLayer.mlpDown.group) {
@@ -131,6 +137,9 @@ try {
         lnTop.setColor(new THREE.Color(INACTIVE_COMPONENT_COLOR));
         lnTop.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
         pipeline.engine.scene.add(lnTop.group);
+        if (pipeline.engine && typeof pipeline.engine.registerRaycastRoot === 'function') {
+            pipeline.engine.registerRaycastRoot(lnTop.group);
+        }
 
         const topVocabCenterY = topLnCenterY + (LN_PARAMS.height / 2) + TOP_LN_TO_TOP_EMBED_GAP + (EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2) + TOP_EMBED_Y_ADJUST;
         const vocabTop = new WeightMatrixVisualization(
@@ -153,6 +162,9 @@ try {
         vocabTop.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.0 });
         appState.vocabTopRef = vocabTop;
         pipeline.engine.scene.add(vocabTop.group);
+        if (pipeline.engine && typeof pipeline.engine.registerRaycastRoot === 'function') {
+            pipeline.engine.registerRaycastRoot(vocabTop.group);
+        }
     }
 } catch (_) { /* optional – embedding visuals are non-critical */ }
 
