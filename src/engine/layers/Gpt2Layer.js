@@ -62,6 +62,10 @@ import { startPrismAdditionAnimation } from '../../utils/additionUtils.js';
 const VERTICAL_SPACING = 1600; // matches LayerAnimation.js vertical extent
 const LN_ADD_VECTOR_OFFSET_FRACTION = 0.25; // fraction of LN height above centre for bias addition
 
+// Reusable scratch vector to avoid per-frame allocations when working with
+// world-space trail coordinates.
+const TMP_WORLD_POS = new THREE.Vector3();
+
 function simplePrismMultiply(srcVec, tgtVec, onComplete) {
     // instant product; flash white then call onComplete
     for (let i=0;i<VECTOR_LENGTH_PRISM;i++) {
@@ -311,9 +315,8 @@ export default class Gpt2Layer extends BaseLayer {
                     if (lane.stopRise && v.userData.trailWorld) return;
 
                     if (v.userData.trailWorld) {
-                        const wp = new THREE.Vector3();
-                        v.group.getWorldPosition(wp);
-                        trailRef.update(wp);
+                        v.group.getWorldPosition(TMP_WORLD_POS);
+                        trailRef.update(TMP_WORLD_POS);
                     } else {
                         trailRef.update(v.group.position);
                     }
@@ -1502,9 +1505,8 @@ export default class Gpt2Layer extends BaseLayer {
         // remains continuous across layers as lanes are transferred upwards.
         trail = new StraightLineTrail(this._globalScene, 0xffffff, 1);
         {
-            const wp = new THREE.Vector3();
-            originalVec.group.getWorldPosition(wp);
-            trail.start(wp);
+            originalVec.group.getWorldPosition(TMP_WORLD_POS);
+            trail.start(TMP_WORLD_POS);
             // Seed monotonic Y tracker for residual trail when lane is created below
         }
         originalVec.userData = originalVec.userData || {};
@@ -1534,9 +1536,8 @@ export default class Gpt2Layer extends BaseLayer {
         // If we're reusing an existing lane we may not have created the trail yet
         if (!trail) {
             trail = new StraightLineTrail(this._globalScene, 0xffffff, 1);
-            const wp = new THREE.Vector3();
-            originalVec.group.getWorldPosition(wp);
-            trail.start(wp);
+            originalVec.group.getWorldPosition(TMP_WORLD_POS);
+            trail.start(TMP_WORLD_POS);
         }
 
         const multTarget = new VectorVisualizationInstancedPrism(originalVec.rawData.slice(), new THREE.Vector3(offsetX, ln1CenterY + 3.3, zPos));
@@ -1639,7 +1640,7 @@ export default class Gpt2Layer extends BaseLayer {
             finalVecAfterMlp: null,
             expandedVecTrail: null,
             zPos,
-            __residualMaxY: (function(){ const wp=new THREE.Vector3(); originalVec.group.getWorldPosition(wp); return wp.y; })()
+            __residualMaxY: (function(){ originalVec.group.getWorldPosition(TMP_WORLD_POS); return TMP_WORLD_POS.y; })()
         });
 
         // ------------------------------------------------------------
