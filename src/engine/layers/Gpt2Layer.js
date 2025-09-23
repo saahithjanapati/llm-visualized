@@ -66,6 +66,13 @@ const LN_ADD_VECTOR_OFFSET_FRACTION = 0.25; // fraction of LN height above centr
 // world-space trail coordinates.
 const TMP_WORLD_POS = new THREE.Vector3();
 
+// Shared colour constants reused across the layer to avoid per-frame
+// allocations inside the animation loop.
+const COLOR_DARK_GRAY = new THREE.Color(0x333333);
+const COLOR_LIGHT_YELLOW = new THREE.Color(0xffffff);
+const COLOR_BRIGHT_YELLOW = new THREE.Color(0xffffff);
+const COLOR_INACTIVE_COMPONENT = new THREE.Color(INACTIVE_COMPONENT_COLOR);
+
 function simplePrismMultiply(srcVec, tgtVec, onComplete) {
     // instant product; flash white then call onComplete
     for (let i=0;i<VECTOR_LENGTH_PRISM;i++) {
@@ -110,6 +117,12 @@ export default class Gpt2Layer extends BaseLayer {
         // from these arrays (see _buildSingleLane).
         this._ln1AddPlaceholders = [];
         this._ln2AddPlaceholders = [];
+
+        // Cached colours reused during per-frame updates to avoid heap churn.
+        this._ln1TargetColor = new THREE.Color();
+        this._ln2TargetColor = new THREE.Color();
+        this._ln1LockedColor = new THREE.Color();
+        this._ln1ColorLocked = false;
     }
 
     setProgressEmitter(emitter) { this._progressEmitter = emitter; }
@@ -148,7 +161,7 @@ export default class Gpt2Layer extends BaseLayer {
         );
         // Start LN1 in the same "inactive" palette used for LN2 so it only lights up once
         // vectors begin to enter the ring.
-        const inactiveDark = new THREE.Color(INACTIVE_COMPONENT_COLOR);
+        const inactiveDark = COLOR_INACTIVE_COMPONENT;
         ln1.setColor(inactiveDark);
         // Start fully opaque to avoid early depth-sorting costs.
         ln1.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
@@ -360,9 +373,6 @@ export default class Gpt2Layer extends BaseLayer {
         // ────────────────────────────────────────────────────────────
         // Dynamic colour / opacity transition for the FIRST LayerNorm
         // ────────────────────────────────────────────────────────────
-        const darkGray = new THREE.Color(0x333333);
-        const lightYellow = new THREE.Color(0xFFFFFF); // transition target updated to white
-        const brightYellow = new THREE.Color(0xFFFFFF);
         const opaqueOpacity = 1.0;
         const semiTransparentOpacity = 0.6;
         const exitTransitionRange = 5; // world–unit distance for final fade
@@ -390,24 +400,25 @@ export default class Gpt2Layer extends BaseLayer {
             }
         });
 
-        let targetColor = darkGray.clone();
+        const ln1TargetColor = this._ln1TargetColor;
+        ln1TargetColor.copy(COLOR_DARK_GRAY);
         let targetOpacity = opaqueOpacity;
 
         if (anyVectorInLN1 && highestLN1VecY > -Infinity) {
             if (highestLN1VecY >= bottomY_ln1_abs && highestLN1VecY < midY_ln1_abs) {
                 // Entering LN-1
                 const t = (highestLN1VecY - bottomY_ln1_abs) / (midY_ln1_abs - bottomY_ln1_abs);
-                targetColor = darkGray.clone().lerp(lightYellow, t);
+                ln1TargetColor.lerpColors(COLOR_DARK_GRAY, COLOR_LIGHT_YELLOW, t);
                 targetOpacity = THREE.MathUtils.lerp(opaqueOpacity, semiTransparentOpacity, t);
             } else if (highestLN1VecY >= midY_ln1_abs && highestLN1VecY < topY_ln1_abs) {
                 // Inside LN-1
-                targetColor = lightYellow.clone();
+                ln1TargetColor.copy(COLOR_LIGHT_YELLOW);
                 targetOpacity = semiTransparentOpacity;
             } else if (highestLN1VecY >= topY_ln1_abs) {
                 // Exiting LN-1
                 const tRaw = (highestLN1VecY - topY_ln1_abs) / exitTransitionRange;
                 const t = Math.min(1, Math.max(0, tRaw));
-                targetColor = lightYellow.clone().lerp(brightYellow, t);
+                ln1TargetColor.lerpColors(COLOR_LIGHT_YELLOW, COLOR_BRIGHT_YELLOW, t);
                 targetOpacity = THREE.MathUtils.lerp(semiTransparentOpacity, opaqueOpacity, t);
             }
         }
@@ -418,17 +429,13 @@ export default class Gpt2Layer extends BaseLayer {
         // inactive palette when no vectors are nearby (e.g. while the
         // MHSA animation runs).  We do this by latching a flag the first
         // frame the exit transition completes.
-        if (!this._ln1ColorLocked) {
-            this._ln1ColorLocked = false; // ensure property exists
-        }
-
         if (!this._ln1ColorLocked && highestLN1VecY >= topY_ln1_abs + exitTransitionRange) {
             this._ln1ColorLocked = true;
-            this._ln1LockedColor = brightYellow.clone();
+            this._ln1LockedColor.copy(COLOR_BRIGHT_YELLOW);
         }
 
         if (this._ln1ColorLocked) {
-            targetColor = this._ln1LockedColor.clone();
+            ln1TargetColor.copy(this._ln1LockedColor);
             targetOpacity = opaqueOpacity;
         }
 
@@ -436,8 +443,8 @@ export default class Gpt2Layer extends BaseLayer {
         if (this.ln1 && this.ln1.group) {
             this.ln1.group.children.forEach(child => {
                 if (child instanceof THREE.Mesh && child.material) {
-                    child.material.color.copy(targetColor);
-                    child.material.emissive.copy(targetColor);
+                    child.material.color.copy(ln1TargetColor);
+                    child.material.emissive.copy(ln1TargetColor);
                     child.material.transparent = targetOpacity < 1.0;
                     child.material.opacity = targetOpacity;
                     child.material.needsUpdate = true;
@@ -473,23 +480,24 @@ export default class Gpt2Layer extends BaseLayer {
         });
 
         if (anyVectorInLN2 && highestLN2VecY > -Infinity) {
-            let ln2TargetColor = darkGray.clone();
+            const ln2TargetColor = this._ln2TargetColor;
+            ln2TargetColor.copy(COLOR_DARK_GRAY);
             let ln2TargetOpacity = opaqueOpacity;
 
             if (highestLN2VecY >= bottomY_ln2_abs && highestLN2VecY < midY_ln2_abs) {
                 // Entering LN2
                 const t = (highestLN2VecY - bottomY_ln2_abs) / (midY_ln2_abs - bottomY_ln2_abs);
-                ln2TargetColor = darkGray.clone().lerp(lightYellow, t);
+                ln2TargetColor.lerpColors(COLOR_DARK_GRAY, COLOR_LIGHT_YELLOW, t);
                 ln2TargetOpacity = THREE.MathUtils.lerp(opaqueOpacity, semiTransparentOpacity, t);
             } else if (highestLN2VecY >= midY_ln2_abs && highestLN2VecY < topY_ln2_abs) {
                 // Inside LN2
-                ln2TargetColor = lightYellow.clone();
+                ln2TargetColor.copy(COLOR_LIGHT_YELLOW);
                 ln2TargetOpacity = semiTransparentOpacity;
             } else if (highestLN2VecY >= topY_ln2_abs) {
                 // Exiting LN2
                 const tRaw = (highestLN2VecY - topY_ln2_abs) / exitTransitionRange;
                 const t = Math.min(1, Math.max(0, tRaw));
-                ln2TargetColor = lightYellow.clone().lerp(brightYellow, t);
+                ln2TargetColor.lerpColors(COLOR_LIGHT_YELLOW, COLOR_BRIGHT_YELLOW, t);
                 ln2TargetOpacity = THREE.MathUtils.lerp(semiTransparentOpacity, opaqueOpacity, t);
             }
 
