@@ -62,6 +62,14 @@ import { startPrismAdditionAnimation } from '../../utils/additionUtils.js';
 const VERTICAL_SPACING = 1600; // matches LayerAnimation.js vertical extent
 const LN_ADD_VECTOR_OFFSET_FRACTION = 0.25; // fraction of LN height above centre for bias addition
 
+const JOYFUL_ACCENT_COLORS = [
+    0xff6f61,
+    0xffd166,
+    0x06d6a0,
+    0x118ab2,
+    0x9d4edd,
+].map(hex => new THREE.Color(hex));
+
 function simplePrismMultiply(srcVec, tgtVec, onComplete) {
     // instant product; flash white then call onComplete
     for (let i=0;i<VECTOR_LENGTH_PRISM;i++) {
@@ -106,6 +114,8 @@ export default class Gpt2Layer extends BaseLayer {
         // from these arrays (see _buildSingleLane).
         this._ln1AddPlaceholders = [];
         this._ln2AddPlaceholders = [];
+
+        this._joyfulStates = new WeakMap();
     }
 
     setProgressEmitter(emitter) { this._progressEmitter = emitter; }
@@ -554,16 +564,14 @@ export default class Gpt2Layer extends BaseLayer {
                 // Kick every lane out of the waiting state together.
                 this.lanes.forEach(l => {
                     if (l.horizPhase === 'waiting') {
-                        l.horizPhase = 'right';
-                        this._emitProgress();
                         l.dupVec.group.visible = true;
-                        // Snap duplicate to the LN-1 branch staging height to avoid
-                        // any vertical drift while moving horizontally into the ring.
                         if (typeof l.branchStartY === 'number') {
                             l.dupVec.group.position.y = l.branchStartY;
                         } else {
                             l.dupVec.group.position.y = l.originalVec.group.position.y;
                         }
+                        this._startBranchAnticipation(l, speedMult);
+                        this._emitProgress();
                     }
                 });
             }
@@ -611,16 +619,56 @@ export default class Gpt2Layer extends BaseLayer {
                         originalVec.group.position.y = Math.min(lane.branchStartY, originalVec.group.position.y + ANIM_RISE_SPEED_ORIGINAL * speedMult * dt);
                     }
                     break;
-                case 'right':
-                    // Mirror LN-2: lock Y at staging height and move X only.
-                    if (typeof lane.branchStartY === 'number') {
+                case 'anticipate':
+                    if (typeof lane.arcBaseY === 'number') {
+                        dupVec.group.position.y = lane.arcBaseY;
+                    } else if (typeof lane.branchStartY === 'number') {
+                        lane.arcBaseY = lane.branchStartY;
                         dupVec.group.position.y = lane.branchStartY;
                     }
-                    dupVec.group.position.x = Math.min(BRANCH_X, dupVec.group.position.x + ANIM_HORIZ_SPEED * speedMult * dt);
-                    if (dupVec.group.position.x >= BRANCH_X - 0.01) {
-                        // Ensure alignment with LN-1 centre
+                    {
+                        const startTime = lane.anticipationStartTime;
+                        const duration = lane.anticipationDuration;
+                        const now = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function')
+                            ? performance.now()
+                            : Date.now();
+                        if (typeof startTime === 'number' && typeof duration === 'number' && now - startTime >= duration + 100) {
+                            lane.branchProgress = 0;
+                            if (typeof lane.branchStartX === 'number') {
+                                dupVec.group.position.x = lane.branchStartX;
+                            }
+                            if (typeof lane.arcBaseY === 'number') {
+                                dupVec.group.position.y = lane.arcBaseY;
+                            }
+                            lane.horizPhase = 'right';
+                            delete lane.anticipationStartTime;
+                            delete lane.anticipationDuration;
+                        }
+                    }
+                    break;
+                case 'right':
+                    lane.arcBaseY = (typeof lane.arcBaseY === 'number')
+                        ? lane.arcBaseY
+                        : (typeof lane.branchStartY === 'number' ? lane.branchStartY : dupVec.group.position.y);
+                    const startX = (typeof lane.branchStartX === 'number') ? lane.branchStartX : dupVec.group.position.x;
+                    lane.branchStartX = startX;
+                    const totalDist = BRANCH_X - startX;
+                    const horizSpeed = ANIM_HORIZ_SPEED * speedMult;
+                    if (totalDist <= 0.0001 || !isFinite(totalDist)) {
                         dupVec.group.position.x = BRANCH_X;
-                        // Show the multiplication target inside LN-1 (parity with LN-2 behaviour)
+                    } else {
+                        const progress = THREE.MathUtils.clamp(lane.branchProgress ?? 0, 0, 1);
+                        const deltaP = Math.max(0, (horizSpeed * dt) / totalDist);
+                        lane.branchProgress = Math.min(1, progress + deltaP);
+                        const eased = THREE.MathUtils.smootherstep(0, 1, lane.branchProgress);
+                        dupVec.group.position.x = startX + totalDist * eased;
+                        const amplitude = lane.arcAmplitude ?? 0;
+                        dupVec.group.position.y = lane.arcBaseY + Math.sin(eased * Math.PI) * amplitude;
+                    }
+                    if (dupVec.group.position.x >= BRANCH_X - 0.005) {
+                        dupVec.group.position.x = BRANCH_X;
+                        dupVec.group.position.y = lane.arcBaseY;
+                        lane.branchProgress = 1;
                         if (lane.multTarget && lane.multTarget.group) {
                             lane.multTarget.group.visible = true;
                         }
@@ -646,7 +694,16 @@ export default class Gpt2Layer extends BaseLayer {
                     }
                     const normAnimating = lane.normStarted && lane.normAnim.isAnimating;
                     if (!normAnimating) {
-                        dupVec.group.position.y = Math.min(lane.ln1MidY, dupVec.group.position.y + ANIM_RISE_SPEED_INSIDE_LN * speedMult * dt);
+                        const baseStep = ANIM_RISE_SPEED_INSIDE_LN * speedMult * dt;
+                        const baseY = (typeof lane.arcBaseY === 'number') ? lane.arcBaseY : (typeof lane.branchStartY === 'number' ? lane.branchStartY : dupVec.group.position.y);
+                        const totalRise = lane.ln1MidY - baseY;
+                        let progress = 0;
+                        if (totalRise > 0.0001) {
+                            progress = THREE.MathUtils.clamp((dupVec.group.position.y - baseY) / totalRise, 0, 1);
+                        }
+                        const easeFactor = 0.35 + 0.65 * (1 - Math.sin(progress * Math.PI * 0.5));
+                        const step = baseStep * easeFactor;
+                        dupVec.group.position.y = Math.min(lane.ln1MidY, dupVec.group.position.y + step);
                     }
                     // --- NEW POST-MOVE SAFETY CHECK -----------------------------------
                     // If the frame delta is large enough that the vector skipped over
@@ -886,7 +943,15 @@ export default class Gpt2Layer extends BaseLayer {
                         lane.normAnimationLN2.update(dt);
                     }
                     if (!lane.multDoneLN2 && !normAnimating2) {
-                        mv.group.position.y += ANIM_RISE_SPEED_INSIDE_LN * speedMult * dt;
+                        lane.ln2BaseY = (typeof lane.ln2BaseY === 'number') ? lane.ln2BaseY : mv.group.position.y;
+                        const baseStep2 = ANIM_RISE_SPEED_INSIDE_LN * speedMult * dt;
+                        const totalRise2 = midY_ln2_abs - lane.ln2BaseY;
+                        let progress2 = 0;
+                        if (totalRise2 > 0.0001) {
+                            progress2 = THREE.MathUtils.clamp((mv.group.position.y - lane.ln2BaseY) / totalRise2, 0, 1);
+                        }
+                        const ease2 = 0.4 + 0.6 * (1 - Math.sin(progress2 * Math.PI * 0.5));
+                        mv.group.position.y = Math.min(midY_ln2_abs, mv.group.position.y + baseStep2 * ease2);
                     }
                     // --- NEW POST-MOVE SAFETY CHECK --------------------------------
                     if (!lane.normStartedLN2 && mv.group.position.y >= normStartY2) {
@@ -988,6 +1053,37 @@ export default class Gpt2Layer extends BaseLayer {
                 case 'done':
                 default:
                     break;
+            }
+        });
+
+        const applyJoy = (obj, accent, options = {}) => {
+            if (!obj) return;
+            const group = obj.group ? obj.group : obj;
+            if (!group || group.visible === false) return;
+            this._applyJoyfulMotion(group, dt, accent, options);
+        };
+        this.lanes.forEach(lane => {
+            const accent = lane.accentColor || null;
+            applyJoy(lane.originalVec, accent);
+            applyJoy(lane.dupVec, accent);
+            applyJoy(lane.resultVec, accent);
+            applyJoy(lane.postAdditionVec, accent);
+            applyJoy(lane.movingVecLN2, accent);
+            applyJoy(lane.resultVecLN2, accent);
+            applyJoy(lane.finalVecAfterMlp, accent);
+            applyJoy(lane.expandedVecGroup, accent, { wobbleAmplitude: 0.035 });
+            applyJoy(lane.travellingVec, accent);
+            if (lane.upwardCopies && lane.upwardCopies.length) {
+                lane.upwardCopies.forEach(vec => applyJoy(vec, accent, { wobbleAmplitude: 0.04 }));
+            }
+            if (lane.sideCopies && lane.sideCopies.length) {
+                lane.sideCopies.forEach(entry => {
+                    const target = entry && entry.vec ? entry.vec : entry;
+                    applyJoy(target, accent, { wobbleAmplitude: 0.04 });
+                });
+            }
+            if (lane.posVec) {
+                applyJoy(lane.posVec, accent, { wobbleAmplitude: 0.03 });
             }
         });
 
@@ -1408,6 +1504,125 @@ export default class Gpt2Layer extends BaseLayer {
     // Internal lane creation helpers (extracted from init)
     // ------------------------------------------------------------
 
+    _getJoyfulState(object) {
+        if (!object) return null;
+        let state = this._joyfulStates.get(object);
+        if (!state) {
+            state = {
+                baseScale: object.scale ? object.scale.clone() : new THREE.Vector3(1, 1, 1),
+                previousY: object.position ? object.position.y : 0,
+                wobblePhase: Math.random() * Math.PI * 2,
+                wobbleSpeed: 0.6 + Math.random() * 0.6,
+                lastAppliedScale: object.scale ? object.scale.clone() : null,
+            };
+            this._joyfulStates.set(object, state);
+        }
+        return state;
+    }
+
+    _applyJoyfulMotion(object, deltaTime, accentColor = null, options = {}) {
+        if (!object || deltaTime <= 0) return;
+        const state = this._getJoyfulState(object);
+        if (!state || !object.position) return;
+
+        const currentY = object.position.y;
+        const velocity = (currentY - state.previousY) / Math.max(deltaTime, 1e-5);
+
+        if (!state.baseScale && object.scale) {
+            state.baseScale = object.scale.clone();
+        }
+
+        if (state.lastAppliedScale) {
+            const delta = Math.abs(object.scale.x - state.lastAppliedScale.x)
+                + Math.abs(object.scale.y - state.lastAppliedScale.y)
+                + Math.abs(object.scale.z - state.lastAppliedScale.z);
+            if (delta > 0.001 && object.scale) {
+                state.baseScale.copy(object.scale);
+            }
+        }
+
+        const squashFactor = THREE.MathUtils.clamp(1 + velocity * 0.02, 0.82, 1.24);
+        const stretchY = squashFactor;
+        const squash = 1 / Math.sqrt(squashFactor);
+
+        const baseScale = state.baseScale || new THREE.Vector3(1, 1, 1);
+        object.scale.set(
+            baseScale.x * squash,
+            baseScale.y * stretchY,
+            baseScale.z * squash,
+        );
+        state.lastAppliedScale = object.scale.clone();
+
+        state.wobblePhase += deltaTime * state.wobbleSpeed;
+        const wobbleAmount = options.wobbleAmplitude ?? 0.05;
+        if (object.rotation) {
+            object.rotation.z = Math.sin(state.wobblePhase) * wobbleAmount;
+        }
+
+        state.previousY = currentY;
+
+        if (accentColor && object.children && object.children.length) {
+            const pulse = (Math.sin(state.wobblePhase * 1.5) + 1) * 0.5;
+            object.children.forEach(child => {
+                if (child.material && 'emissive' in child.material) {
+                    child.material.emissive.copy(accentColor);
+                    child.material.emissiveIntensity = THREE.MathUtils.lerp(0.1, 0.45, pulse);
+                    child.material.needsUpdate = true;
+                }
+            });
+        }
+    }
+
+    _startBranchAnticipation(lane, speedMult) {
+        if (!lane || !lane.dupVec || !lane.dupVec.group) {
+            if (lane) lane.horizPhase = 'right';
+            return;
+        }
+        const group = lane.dupVec.group;
+        lane.arcBaseY = typeof lane.branchStartY === 'number' ? lane.branchStartY : group.position.y;
+        lane.arcAmplitude = lane.arcAmplitude ?? (6 + Math.random() * 6);
+        lane.branchStartX = group.position.x;
+        lane.branchProgress = 0;
+        lane.horizPhase = 'anticipate';
+
+        const anticipationOffset = -10 - Math.random() * 6;
+        const duration = Math.max(80, 160 / Math.max(speedMult || 1, 0.0001));
+        const now = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function')
+            ? performance.now()
+            : Date.now();
+        lane.anticipationStartTime = now;
+        lane.anticipationDuration = duration * 2; // forward + return
+
+        if (typeof TWEEN === 'undefined') {
+            lane.horizPhase = 'right';
+            delete lane.anticipationStartTime;
+            delete lane.anticipationDuration;
+            return;
+        }
+
+        new TWEEN.Tween(group.position)
+            .to({ x: lane.branchStartX + anticipationOffset }, duration)
+            .easing(TWEEN.Easing.Quadratic.Out)
+            .yoyo(true)
+            .repeat(1)
+            .onUpdate(() => {
+                if (typeof lane.arcBaseY === 'number') {
+                    group.position.y = lane.arcBaseY;
+                }
+            })
+            .onComplete(() => {
+                group.position.x = lane.branchStartX;
+                if (typeof lane.arcBaseY === 'number') {
+                    group.position.y = lane.arcBaseY;
+                }
+                lane.branchProgress = 0;
+                lane.horizPhase = 'right';
+                delete lane.anticipationStartTime;
+                delete lane.anticipationDuration;
+            })
+            .start();
+    }
+
     _createFreshLanes(offsetX, ln1CenterY, ln2CenterY, ln1TopY) {
         const slitSpacing = LN_PARAMS.depth / (NUM_VECTOR_LANES + 1);
         // Start vectors at the TOP of the bottom embedding matrix
@@ -1474,6 +1689,12 @@ export default class Gpt2Layer extends BaseLayer {
         // Reuse existing trail when lanes are passed from a lower layer
         let trailFromPrev = oldLane && oldLane.originalTrail ? oldLane.originalTrail : null;
         let originalVec, zPos, startY, trail; // trail will be reused or created anew
+        const accentSource = oldLane && oldLane.accentColor ? oldLane.accentColor : null;
+        const accentColor = accentSource && accentSource.isColor
+            ? accentSource.clone()
+            : accentSource
+                ? new THREE.Color(accentSource)
+                : JOYFUL_ACCENT_COLORS[laneIdx % JOYFUL_ACCENT_COLORS.length].clone();
         if (oldLane && oldLane.originalVec) {
             originalVec = oldLane.originalVec;
             this.root.attach(originalVec.group);
@@ -1510,8 +1731,13 @@ export default class Gpt2Layer extends BaseLayer {
         originalVec.userData = originalVec.userData || {};
         originalVec.userData.trail = trail;
         originalVec.userData.trailWorld = true; // mark as world-space trail
+        originalVec.group.userData = originalVec.group.userData || {};
+        originalVec.group.userData.accentColor = accentColor;
 
         }
+
+        originalVec.group.userData = originalVec.group.userData || {};
+        originalVec.group.userData.accentColor = accentColor;
 
         // Spawn the LN-1 duplicate at the staging height (bottom + 5) so that
         // when it becomes visible and starts the 'right' phase it travels purely
@@ -1529,6 +1755,8 @@ export default class Gpt2Layer extends BaseLayer {
         dupTrail.start(dupVec.group.position);
         dupVec.userData = dupVec.userData || {};
         dupVec.userData.trail = dupTrail;
+        dupVec.group.userData = dupVec.group.userData || {};
+        dupVec.group.userData.accentColor = accentColor;
         const normAnim = new PrismLayerNormAnimation(dupVec);
 
         // If we're reusing an existing lane we may not have created the trail yet
@@ -1542,10 +1770,14 @@ export default class Gpt2Layer extends BaseLayer {
         const multTarget = new VectorVisualizationInstancedPrism(originalVec.rawData.slice(), new THREE.Vector3(offsetX, ln1CenterY + 3.3, zPos));
         this.root.add(multTarget.group);
         multTarget.group.visible = false;
+        multTarget.group.userData = multTarget.group.userData || {};
+        multTarget.group.userData.accentColor = accentColor;
 
         const multTargetLN2 = new VectorVisualizationInstancedPrism(originalVec.rawData.slice(), new THREE.Vector3(offsetX, ln2CenterY + 3.3, zPos));
         this.root.add(multTargetLN2.group);
         multTargetLN2.group.visible = false;
+        multTargetLN2.group.userData = multTargetLN2.group.userData || {};
+        multTargetLN2.group.userData.accentColor = accentColor;
 
         const addYOffset = LN_PARAMS.height * LN_ADD_VECTOR_OFFSET_FRACTION;
 
@@ -1568,6 +1800,10 @@ export default class Gpt2Layer extends BaseLayer {
             this.root.add(addTarget.group);
             if (addTarget.group) addTarget.group.visible = false;
         }
+        if (addTarget && addTarget.group) {
+            addTarget.group.userData = addTarget.group.userData || {};
+            addTarget.group.userData.accentColor = accentColor;
+        }
 
         let addTargetLN2 = null;
         if (this._ln2AddPlaceholders && this._ln2AddPlaceholders[laneIdx]) {
@@ -1587,6 +1823,10 @@ export default class Gpt2Layer extends BaseLayer {
             );
             this.root.add(addTargetLN2.group);
             if (addTargetLN2.group) addTargetLN2.group.visible = false;
+        }
+        if (addTargetLN2 && addTargetLN2.group) {
+            addTargetLN2.group.userData = addTargetLN2.group.userData || {};
+            addTargetLN2.group.userData.accentColor = accentColor;
         }
 
         // Fallback to previous trail if a new one wasn't created in this constructor
@@ -1639,7 +1879,13 @@ export default class Gpt2Layer extends BaseLayer {
             finalVecAfterMlp: null,
             expandedVecTrail: null,
             zPos,
-            __residualMaxY: (function(){ const wp=new THREE.Vector3(); originalVec.group.getWorldPosition(wp); return wp.y; })()
+            __residualMaxY: (function(){ const wp=new THREE.Vector3(); originalVec.group.getWorldPosition(wp); return wp.y; })(),
+            accentColor,
+            branchStartX: dupVec.group.position.x,
+            branchProgress: 0,
+            arcBaseY: dupVec.group.position.y,
+            arcAmplitude: null,
+            ln2BaseY: null,
         });
 
         // ------------------------------------------------------------

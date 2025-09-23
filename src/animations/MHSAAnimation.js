@@ -135,6 +135,8 @@ export class MHSAAnimation {
         this._mergedGroupsByHead = new Map(); // headIdx -> { K: Group, V: Group }
         this._allFixedMerged = false; // single merged K and V meshes across all heads created
 
+        this._joyfulStates = new WeakMap();
+
         // --------------------------------------------------------------
         //   Vector router: handles all positioning before pass-through
         // --------------------------------------------------------------
@@ -659,6 +661,102 @@ export class MHSAAnimation {
                 }
             } catch (_) { /* defensive */ }
         });
+
+        const applyJoy = (obj, accent, options = {}) => {
+            if (!obj) return;
+            const group = obj.group ? obj.group : obj;
+            if (!group || group.visible === false) return;
+            this._applyJoyfulMotion(group, deltaTime, accent, options);
+        };
+        lanes.forEach(lane => {
+            if (!lane) return;
+            const accent = lane.accentColor || null;
+            if (lane.horizPhase === 'travelMHSA' && lane.travellingVec) {
+                applyJoy(lane.travellingVec, accent, { wobbleAmplitude: 0.035 });
+            }
+            if (lane.postAdditionVec && lane.ln2Phase === 'preRise') {
+                applyJoy(lane.postAdditionVec, accent, { wobbleAmplitude: 0.03 });
+            }
+            if (Array.isArray(lane.upwardCopies)) {
+                lane.upwardCopies.forEach(vec => applyJoy(vec, accent, { wobbleAmplitude: 0.045 }));
+            }
+            if (Array.isArray(lane.sideCopies)) {
+                lane.sideCopies.forEach(entry => {
+                    const target = entry && entry.vec ? entry.vec : entry;
+                    applyJoy(target, accent, { wobbleAmplitude: 0.05 });
+                });
+            }
+        });
+        if (Array.isArray(this.outputProjMatrixVectors)) {
+            this.outputProjMatrixVectors.forEach(vec => applyJoy(vec, null, { wobbleAmplitude: 0.028 }));
+        }
+    }
+
+    _getJoyfulState(object) {
+        if (!object) return null;
+        let state = this._joyfulStates.get(object);
+        if (!state) {
+            state = {
+                baseScale: object.scale ? object.scale.clone() : new THREE.Vector3(1, 1, 1),
+                previousY: object.position ? object.position.y : 0,
+                wobblePhase: Math.random() * Math.PI * 2,
+                wobbleSpeed: 0.5 + Math.random() * 0.6,
+                lastAppliedScale: object.scale ? object.scale.clone() : null,
+            };
+            this._joyfulStates.set(object, state);
+        }
+        return state;
+    }
+
+    _applyJoyfulMotion(object, deltaTime, accentColor = null, options = {}) {
+        if (!object || deltaTime <= 0) return;
+        const state = this._getJoyfulState(object);
+        if (!state || !object.position) return;
+
+        const currentY = object.position.y;
+        const velocity = (currentY - state.previousY) / Math.max(deltaTime, 1e-5);
+
+        if (!state.baseScale && object.scale) {
+            state.baseScale = object.scale.clone();
+        }
+
+        if (state.lastAppliedScale && object.scale) {
+            const delta = Math.abs(object.scale.x - state.lastAppliedScale.x)
+                + Math.abs(object.scale.y - state.lastAppliedScale.y)
+                + Math.abs(object.scale.z - state.lastAppliedScale.z);
+            if (delta > 0.001) {
+                state.baseScale.copy(object.scale);
+            }
+        }
+
+        const stretch = THREE.MathUtils.clamp(1 + velocity * 0.018, 0.86, 1.2);
+        const squash = 1 / Math.sqrt(stretch);
+        const baseScale = state.baseScale || new THREE.Vector3(1, 1, 1);
+        object.scale.set(
+            baseScale.x * squash,
+            baseScale.y * stretch,
+            baseScale.z * squash,
+        );
+        state.lastAppliedScale = object.scale.clone();
+
+        state.wobblePhase += deltaTime * state.wobbleSpeed;
+        const wobbleAmplitude = options.wobbleAmplitude ?? 0.04;
+        if (object.rotation) {
+            object.rotation.z = Math.sin(state.wobblePhase) * wobbleAmplitude;
+        }
+
+        state.previousY = currentY;
+
+        if (accentColor && object.children && object.children.length) {
+            const pulse = (Math.sin(state.wobblePhase * 1.5) + 1) * 0.5;
+            object.children.forEach(child => {
+                if (child.material && 'emissive' in child.material) {
+                    child.material.emissive.copy(accentColor);
+                    child.material.emissiveIntensity = THREE.MathUtils.lerp(0.12, 0.4, pulse);
+                    child.material.needsUpdate = true;
+                }
+            });
+        }
     }
 
     // ------------------------------------------------------------------
