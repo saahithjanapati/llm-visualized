@@ -12,6 +12,10 @@ import {
 // Speed-related constants centralised in utils/constants
 import { MHSA_DUPLICATE_VECTOR_RISE_SPEED } from '../../utils/constants.js';
 
+const _scratchWorld = new THREE.Vector3();
+const _scratchWorld2 = new THREE.Vector3();
+const _scratchSpawn = new THREE.Vector3();
+
 // Add configurable opacity for trails specific to vector copies under Q/K/V to reduce visual prominence
 const FAINT_TRAIL_OPACITY = 0.13; // must be < default 0.1
 
@@ -73,12 +77,12 @@ export class VectorRouter {
 
                 if (tVec.group.position.x < targetX - 0.01) {
                     tVec.group.position.x = Math.min(targetX, tVec.group.position.x + dx);
-                // Update trail for travelling vector
-                if (tVec.userData && tVec.userData.trail) tVec.userData.trail.update(tVec.group.position);
+                    // Update trail for travelling vector
+                    if (tVec.userData && tVec.userData.trail) tVec.userData.trail.update(tVec.group.position);
                 } else {
                     // Arrived: spawn upward copy used for K
 
-                    const upVec = new VectorVisualizationInstancedPrism([...tVec.rawData], tVec.group.position.clone());
+                    const upVec = new VectorVisualizationInstancedPrism([...tVec.rawData], _scratchSpawn.copy(tVec.group.position));
                     this.parentGroup.add(upVec.group);
                     // Trail for upward K copy
                     const upTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1, undefined, FAINT_TRAIL_OPACITY);
@@ -112,9 +116,8 @@ export class VectorRouter {
                         if (upVec.userData && upVec.userData.trail) {
                             const ud = upVec.userData;
                             if (ud.trailWorld) {
-                                const wp = new THREE.Vector3();
-                                upVec.group.getWorldPosition(wp);
-                                ud.trail.update(wp);
+                                upVec.group.getWorldPosition(_scratchWorld);
+                                ud.trail.update(_scratchWorld);
                             } else {
                                 ud.trail.update(upVec.group.position);
                             }
@@ -136,7 +139,7 @@ export class VectorRouter {
                         const hIdx  = centerVec.userData.headIndex;
                         const coord = this.headCoords[hIdx];
                         if (coord) {
-                            const qVec = new VectorVisualizationInstancedPrism(centerVec.rawData.slice(), centerVec.group.position.clone());
+                            const qVec = new VectorVisualizationInstancedPrism(centerVec.rawData.slice(), _scratchSpawn.copy(centerVec.group.position));
                             const qTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1, undefined, FAINT_TRAIL_OPACITY);
                             qTrail.start(qVec.group.position);
                             qVec.userData = qVec.userData || {};
@@ -147,7 +150,7 @@ export class VectorRouter {
                                 qVec.group.userData.label = lblQ;
                                 if (qVec.mesh) qVec.mesh.userData = { ...(qVec.mesh.userData||{}), label: lblQ };
                             } catch (_) {}
-                            const vVec = new VectorVisualizationInstancedPrism(centerVec.rawData.slice(), centerVec.group.position.clone());
+                            const vVec = new VectorVisualizationInstancedPrism(centerVec.rawData.slice(), _scratchSpawn.copy(centerVec.group.position));
                             const vTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1, undefined, FAINT_TRAIL_OPACITY);
                             vTrail.start(vVec.group.position);
                             vVec.userData = vVec.userData || {};
@@ -189,9 +192,8 @@ export class VectorRouter {
                             const matrixBottomY = this.headStopY; // Q/V vectors stop at headStopY which is just below matrices
                             if (v.group.position.y < matrixBottomY) {
                                 if (ud.trailWorld) {
-                                    const wp = new THREE.Vector3();
-                                    v.group.getWorldPosition(wp);
-                                    ud.trail.update(wp);
+                                    v.group.getWorldPosition(_scratchWorld);
+                                    ud.trail.update(_scratchWorld);
                                 } else {
                                     ud.trail.update(v.group.position);
                                 }
@@ -206,9 +208,8 @@ export class VectorRouter {
                         if (v.group.position.y < matrixBottomY) {
                             const ud = v.userData;
                             if (ud.trailWorld) {
-                                const wp = new THREE.Vector3();
-                                v.group.getWorldPosition(wp);
-                                ud.trail.update(wp);
+                                v.group.getWorldPosition(_scratchWorld2);
+                                ud.trail.update(_scratchWorld2);
                             } else {
                                 ud.trail.update(v.group.position);
                             }
