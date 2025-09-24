@@ -205,6 +205,17 @@ export class CoreEngine {
             ? TWEEN.now()
             : (typeof performance !== 'undefined' ? performance.now() : Date.now());
         this._tweenTimelineMs = Number.isFinite(initialTweenNow) ? initialTweenNow : 0;
+        this._tweenStartRestore = null;
+        if (typeof TWEEN !== 'undefined' && TWEEN?.Tween?.prototype?.start) {
+            const originalStart = TWEEN.Tween.prototype.start;
+            const engine = this;
+            this._tweenStartRestore = originalStart;
+            TWEEN.Tween.prototype.start = function patchedStart(time) {
+                const hasExplicitTime = typeof time === 'number' && Number.isFinite(time);
+                const effectiveTime = hasExplicitTime ? time : engine._tweenTimelineMs;
+                return originalStart.call(this, effectiveTime);
+            };
+        }
 
         // ────────────────────────────────────────────────────────────────────
         // Performance stats overlay (FPS, MS, MB) – injected if Stats.js is
@@ -315,6 +326,12 @@ export class CoreEngine {
         this.renderer.domElement.removeEventListener('pointerup', this._onPointerUp);
         if (this._hoverLabelDiv && this._hoverLabelDiv.parentElement) {
             this._hoverLabelDiv.parentElement.removeChild(this._hoverLabelDiv);
+        }
+        if (this._tweenStartRestore && typeof TWEEN !== 'undefined' && TWEEN?.Tween?.prototype) {
+            try {
+                TWEEN.Tween.prototype.start = this._tweenStartRestore;
+            } catch (_) { /* restore best-effort */ }
+            this._tweenStartRestore = null;
         }
     }
 
