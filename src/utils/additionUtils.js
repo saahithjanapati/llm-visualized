@@ -185,7 +185,7 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
     }
 
     const totalAnimTime = duration + flashDuration + vectorLength * delayBetween;
-    setTimeout(() => {
+    const finishAddition = () => {
         if (lane) {
             delete lane.stopRise;
             delete lane.stopRiseTarget;
@@ -215,5 +215,14 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
                 console.warn('Addition completion callback failed:', err);
             }
         }
-    }, totalAnimTime + 100);
+    };
+
+    if (typeof TWEEN !== 'undefined') {
+        new TWEEN.Tween({ progress: 0 })
+            .to({ progress: 1 }, totalAnimTime + 100)
+            .onComplete(finishAddition)
+            .start();
+    } else {
+        setTimeout(finishAddition, totalAnimTime + 100);
+    }
 }
