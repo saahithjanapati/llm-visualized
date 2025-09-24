@@ -209,7 +209,12 @@ varying float vGradientT;`
     }
 
     // Updates the visual appearance of a single instance for animation purposes
-    setInstanceAppearance(index, yOffset, tempColor, newScale = null) {
+    // - yOffset: offset from the base prism centre along Y
+    // - tempColor: optional temporary colour override
+    // - newScale: optional THREE.Vector3 for squash/stretch adjustments
+    // - positionOffset: optional THREE.Vector3 added to the computed position (for arcs, sway, etc.)
+    // - newRotation: optional THREE.Quaternion for temporary orientation tweaks
+    setInstanceAppearance(index, yOffset, tempColor, newScale = null, positionOffset = null, newRotation = null) {
         if (index < 0 || index >= VECTOR_LENGTH_PRISM) return;
         const currentMatrix = new THREE.Matrix4();
         this.mesh.getMatrixAt(index, currentMatrix);
@@ -222,7 +227,10 @@ varying float vGradientT;`
         const basePrismYPos = _uniformCalculatedHeight / 2; // Assuming yOffset is additive to this base for animation
         
         position.set(baseX, basePrismYPos + yOffset, 0);
-        
+        if (positionOffset instanceof THREE.Vector3) {
+            position.add(positionOffset);
+        }
+
         // Apply newScale if provided, otherwise keep the decomposed scale (which should be the default)
         if (newScale instanceof THREE.Vector3) {
             scale.copy(newScale);
@@ -232,6 +240,10 @@ varying float vGradientT;`
             // If not provided, it re-uses the one from decompose, which SHOULD be the default if other methods reset it.
             // Let's explicitly set to default if no newScale, to be safe during complex animations.
             scale.set(_prismWidthScale, _uniformCalculatedHeight, _prismDepthScale);
+        }
+
+        if (newRotation instanceof THREE.Quaternion) {
+            quaternion.copy(newRotation);
         }
 
         currentMatrix.compose(position, quaternion, scale);
