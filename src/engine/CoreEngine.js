@@ -200,6 +200,22 @@ export class CoreEngine {
         // Internal state
         this._clock  = new THREE.Clock();
         this._paused = false;
+        this._pauseReasons = new Set();
+        const initialTweenNow = (typeof TWEEN !== 'undefined' && typeof TWEEN.now === 'function')
+            ? TWEEN.now()
+            : (typeof performance !== 'undefined' ? performance.now() : Date.now());
+        this._tweenTimelineMs = Number.isFinite(initialTweenNow) ? initialTweenNow : 0;
+        this._tweenStartRestore = null;
+        if (typeof TWEEN !== 'undefined' && TWEEN?.Tween?.prototype?.start) {
+            const originalStart = TWEEN.Tween.prototype.start;
+            const engine = this;
+            this._tweenStartRestore = originalStart;
+            TWEEN.Tween.prototype.start = function patchedStart(time) {
+                const hasExplicitTime = typeof time === 'number' && Number.isFinite(time);
+                const effectiveTime = hasExplicitTime ? time : engine._tweenTimelineMs;
+                return originalStart.call(this, effectiveTime);
+            };
+        }
 
         // ────────────────────────────────────────────────────────────────────
         // Performance stats overlay (FPS, MS, MB) – injected if Stats.js is
@@ -268,8 +284,21 @@ export class CoreEngine {
         return !!this._raycastingEnabled;
     }
 
-    pause() { this._paused = true; this._clock.stop(); }
-    resume() { this._paused = false; this._clock.start(); }
+    pause(reason = 'generic') {
+        this._pauseReasons.add(reason);
+        if (!this._paused) {
+            this._paused = true;
+            this._clock.stop();
+        }
+    }
+
+    resume(reason = 'generic') {
+        this._pauseReasons.delete(reason);
+        if (this._pauseReasons.size === 0 && this._paused) {
+            this._paused = false;
+            this._clock.start();
+        }
+    }
 
     dispose() {
         window.removeEventListener('resize', this._onResize);
@@ -298,6 +327,12 @@ export class CoreEngine {
         if (this._hoverLabelDiv && this._hoverLabelDiv.parentElement) {
             this._hoverLabelDiv.parentElement.removeChild(this._hoverLabelDiv);
         }
+        if (this._tweenStartRestore && typeof TWEEN !== 'undefined' && TWEEN?.Tween?.prototype) {
+            try {
+                TWEEN.Tween.prototype.start = this._tweenStartRestore;
+            } catch (_) { /* restore best-effort */ }
+            this._tweenStartRestore = null;
+        }
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -312,7 +347,7 @@ export class CoreEngine {
     };
 
     _onVisibility = () => {
-        document.hidden ? this.pause() : this.resume();
+        document.hidden ? this.pause('visibility') : this.resume('visibility');
     };
 
     _onPointerDown = (event) => {
@@ -496,22 +531,25 @@ export class CoreEngine {
 
     _animate = () => {
         requestAnimationFrame(this._animate);
-        if (this._paused) return;
 
-        // Begin performance stats collection (if enabled)
+        const visibilityPauseOnly = this._paused && this._pauseReasons.size === 1 && this._pauseReasons.has('visibility');
+        if (visibilityPauseOnly) return;
+
         if (this._stats) this._stats.begin();
 
-        const dt = this._clock.getDelta() * this._speed;
-        this._layers.forEach(layer => {
-            if (!layer) return;
-            if (layer.isActive || layer._transitionPhase === 'positioning') {
-                layer.update(dt);
-            }
-        });
+        if (!this._paused) {
+            const dt = this._clock.getDelta() * this._speed;
+            this._layers.forEach(layer => {
+                if (!layer) return;
+                if (layer.isActive || layer._transitionPhase === 'positioning') {
+                    layer.update(dt);
+                }
+            });
 
-        // External libraries like @tweenjs/tween need ticking.
-        if (typeof TWEEN !== 'undefined' && TWEEN.update) {
-            TWEEN.update();
+            if (typeof TWEEN !== 'undefined' && typeof TWEEN.update === 'function') {
+                this._tweenTimelineMs += dt * 1000;
+                TWEEN.update(this._tweenTimelineMs);
+            }
         }
 
         this.controls.update();
@@ -521,7 +559,6 @@ export class CoreEngine {
             this.renderer.render(this.scene, this.camera);
         }
 
-        // End performance stats collection (if enabled)
         if (this._stats) this._stats.end();
     };
 }

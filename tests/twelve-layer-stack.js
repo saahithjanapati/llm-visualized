@@ -28,6 +28,7 @@ import { appState } from '../src/state/appState.js';
 import { initIntroAnimation } from '../src/ui/introAnimation.js';
 import { initStatusOverlay } from '../src/ui/statusOverlay.js';
 import { initSettingsModal } from '../src/ui/settingsModal.js';
+import { initPauseButton } from '../src/ui/pauseButton.js';
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
 
@@ -171,6 +172,7 @@ try {
 // Initialise UI modules
 initIntroAnimation(pipeline, gptCanvas);
 initStatusOverlay(pipeline, NUM_LAYERS);
+initPauseButton(pipeline);
 initSettingsModal(pipeline);
 
 // Typewriter caption underneath GPT tower

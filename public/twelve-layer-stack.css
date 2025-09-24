@@ -1,12 +1,17 @@
 body { margin: 0; overflow: hidden; background-color: #000; }
 canvas { display: block; }
 
-/* Settings button (top-right) */
-#settingsBtn {
+/* Top-right controls */
+#topControls {
     position: fixed;
     top: 10px;
     right: 10px;
     z-index: 6; /* above status overlay (z=5) */
+    display: flex;
+    gap: 8px;
+}
+
+#topControls button {
     appearance: none;
     -webkit-appearance: none;
     border: 1px solid rgba(255,255,255,0.18);
@@ -15,11 +20,37 @@ canvas { display: block; }
     -webkit-backdrop-filter: blur(6px);
     color: #fff;
     border-radius: 10px;
-    padding: 8px 10px;
+    padding: 8px 12px;
     line-height: 1;
     cursor: pointer;
+    transition: background .15s ease, border-color .15s ease, color .15s ease;
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
 }
-#settingsBtn:hover { background: rgba(40,40,40,0.65); }
+
+#topControls button:hover {
+    background: rgba(40,40,40,0.65);
+}
+
+#topControls button:focus-visible {
+    outline: 2px solid rgba(122,202,255,0.9);
+    outline-offset: 2px;
+}
+
+#pauseBtn {
+    font-size: 14px;
+    letter-spacing: 0.2px;
+    min-width: 80px;
+}
+
+#pauseBtn[data-state="paused"] {
+    background: rgba(56,132,255,0.18);
+    border-color: rgba(122,202,255,0.8);
+}
+
+#settingsBtn {
+    font-size: 18px;
+    padding-inline: 10px;
+}
 
 /* Fullscreen blurred overlay */
 #settingsOverlay {

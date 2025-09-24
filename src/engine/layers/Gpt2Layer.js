@@ -1736,10 +1736,28 @@ export default class Gpt2Layer extends BaseLayer {
         const vectorLength  = VECTOR_LENGTH_PRISM;
         const totalAnimTime = duration + flashDuration + vectorLength * delayBetween;
 
-        setTimeout(() => {
-            this._pendingAdditions--;
+        lane.additionComplete = false;
+
+        const complete = () => {
+            if (this._pendingAdditions > 0) {
+                this._pendingAdditions--;
+            }
             lane.additionComplete = true;
-        }, totalAnimTime + 100);
+            if (lane._additionCompletionTween) {
+                try { lane._additionCompletionTween.stop(); } catch (_) { /* no-op */ }
+                lane._additionCompletionTween = null;
+            }
+        };
+
+        if (typeof TWEEN !== 'undefined') {
+            const tween = new TWEEN.Tween({ progress: 0 })
+                .to({ progress: 1 }, totalAnimTime + 100)
+                .onComplete(complete)
+                .start();
+            lane._additionCompletionTween = tween;
+        } else {
+            setTimeout(complete, totalAnimTime + 100);
+        }
     }
 
     /**

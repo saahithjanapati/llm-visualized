@@ -17,7 +17,7 @@ export function initSettingsModal(pipeline) {
         settingsOverlay.style.display = 'flex';
         settingsOverlay.setAttribute('aria-hidden', 'false');
         document.body.style.overflow = 'hidden';
-        pipeline?.engine?.pause?.();
+        pipeline?.engine?.pause?.('modal');
         appState.modalPaused = true;
         const checked = settingsOverlay.querySelector('input[name="playbackSpeed"]:checked');
         if (checked) {
@@ -38,7 +38,7 @@ export function initSettingsModal(pipeline) {
         settingsOverlay.style.display = 'none';
         settingsOverlay.setAttribute('aria-hidden', 'true');
         document.body.style.overflow = '';
-        pipeline?.engine?.resume?.();
+        pipeline?.engine?.resume?.('modal');
         appState.modalPaused = false;
     }
 
