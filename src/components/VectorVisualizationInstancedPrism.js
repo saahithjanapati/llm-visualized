@@ -209,7 +209,7 @@ varying float vGradientT;`
     }
 
     // Updates the visual appearance of a single instance for animation purposes
-    setInstanceAppearance(index, yOffset, tempColor, newScale = null) {
+    setInstanceAppearance(index, yOffset, tempColor, newScale = null, options = null) {
         if (index < 0 || index >= VECTOR_LENGTH_PRISM) return;
         const currentMatrix = new THREE.Matrix4();
         this.mesh.getMatrixAt(index, currentMatrix);
@@ -217,12 +217,17 @@ varying float vGradientT;`
         const quaternion = new THREE.Quaternion();
         const scale = new THREE.Vector3();
         currentMatrix.decompose(position, quaternion, scale);
-        
+
         const baseX = (index - VECTOR_LENGTH_PRISM / 2) * (PRISM_BASE_WIDTH * _prismWidthScale);
         const basePrismYPos = _uniformCalculatedHeight / 2; // Assuming yOffset is additive to this base for animation
-        
-        position.set(baseX, basePrismYPos + yOffset, 0);
-        
+
+        let extraX = 0;
+        let extraZ = 0;
+        if (options && typeof options.xOffset === 'number') extraX = options.xOffset;
+        if (options && typeof options.zOffset === 'number') extraZ = options.zOffset;
+
+        position.set(baseX + extraX, basePrismYPos + yOffset, extraZ);
+
         // Apply newScale if provided, otherwise keep the decomposed scale (which should be the default)
         if (newScale instanceof THREE.Vector3) {
             scale.copy(newScale);
@@ -232,6 +237,14 @@ varying float vGradientT;`
             // If not provided, it re-uses the one from decompose, which SHOULD be the default if other methods reset it.
             // Let's explicitly set to default if no newScale, to be safe during complex animations.
             scale.set(_prismWidthScale, _uniformCalculatedHeight, _prismDepthScale);
+        }
+
+        if (options) {
+            if (options.quaternion instanceof THREE.Quaternion) {
+                quaternion.copy(options.quaternion);
+            } else if (options.rotationEuler instanceof THREE.Euler) {
+                quaternion.setFromEuler(options.rotationEuler);
+            }
         }
 
         currentMatrix.compose(position, quaternion, scale);
