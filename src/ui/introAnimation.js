@@ -163,7 +163,7 @@ export function initIntroAnimation(pipeline, gptCanvas) {
     const loopIntro = () => {
         if (!appState.introActive) return;
         appState.introRaf = requestAnimationFrame(loopIntro);
-        if (appState.modalPaused) return;
+        if (appState.modalPaused || appState.userPaused) return;
         controls.update();
         if (typeof TWEEN !== 'undefined') TWEEN.update();
         renderer.render(scene, camera);

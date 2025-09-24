@@ -5,6 +5,7 @@ export class AppState {
         this.introRaf = 0;
         this.introCleaned = false;
         this.modalPaused = false;
+        this.userPaused = false;
         this.vocabTopRef = null;
         this.topEmbedActivated = false;
         this.showEquations = true;
