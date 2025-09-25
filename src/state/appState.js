@@ -11,12 +11,24 @@ export class AppState {
         this.showEquations = true;
         this.lastEqKey = '';
         this.showHdrBackground = false;
+        this.sciFiModeEnabled = false;
         this.environmentTexture = null;
         this.initialPipelineBackground = null;
         this.initialPipelineBackgroundCaptured = false;
         this.initialIntroBackground = null;
         this.initialIntroBackgroundCaptured = false;
         this.introSceneRef = null;
+    }
+
+    applySciFiMode(pipeline) {
+        if (!pipeline) return;
+        if (typeof pipeline.setSciFiModeEnabled === 'function') {
+            pipeline.setSciFiModeEnabled(this.sciFiModeEnabled);
+            return;
+        }
+        if (pipeline?.engine?.setSciFiModeEnabled) {
+            pipeline.engine.setSciFiModeEnabled(this.sciFiModeEnabled);
+        }
     }
 
     applyEnvironmentBackground(pipeline, introScene = null) {

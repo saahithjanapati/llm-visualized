@@ -103,6 +103,21 @@ export class LayerPipeline extends EventTarget {
     /** Return reference to internal CoreEngine (for advanced use-cases). */
     get engine() { return this._engine; }
 
+    /** Enable or disable the optional sci-fi environment visuals. */
+    setSciFiModeEnabled(enabled) {
+        if (this._engine && typeof this._engine.setSciFiModeEnabled === 'function') {
+            this._engine.setSciFiModeEnabled(!!enabled);
+        }
+    }
+
+    /** Determine whether the sci-fi environment visuals are active. */
+    isSciFiModeEnabled() {
+        if (this._engine && typeof this._engine.isSciFiModeEnabled === 'function') {
+            return !!this._engine.isSciFiModeEnabled();
+        }
+        return false;
+    }
+
     // ----------------------------------------------------------------------
     // Private helpers
     // ----------------------------------------------------------------------

@@ -5,6 +5,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { QUALITY_PRESET, resolveRenderDprCap } from '../utils/constants.js';
 import Gpt2Layer from './layers/Gpt2Layer.js';
+import { SciFiEnvironment } from './SciFiEnvironment.js';
 
 /**
  * CoreEngine is responsible for creating the Three-JS renderer, camera, 
@@ -32,6 +33,8 @@ export class CoreEngine {
         // ────────────────────────────────────────────────────────────────────
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x000000);
+        this._sciFiEnvironment = null;
+        this._sciFiModeEnabled = false;
 
         this._cameraFarMargin = typeof opts.cameraFarMargin === 'number' ? opts.cameraFarMargin : 0;
         this._cameraMaxDistance = (typeof opts.cameraMaxDistance === 'number' && opts.cameraMaxDistance > 0)
@@ -257,6 +260,24 @@ export class CoreEngine {
         }
     }
 
+    setSciFiModeEnabled(enabled) {
+        const next = !!enabled;
+        if (next === this._sciFiModeEnabled) return;
+        this._sciFiModeEnabled = next;
+        if (next) {
+            if (!this._sciFiEnvironment) {
+                this._sciFiEnvironment = new SciFiEnvironment();
+            }
+            this._sciFiEnvironment.addToScene(this.scene);
+        } else if (this._sciFiEnvironment) {
+            this._sciFiEnvironment.removeFromScene();
+        }
+    }
+
+    isSciFiModeEnabled() {
+        return !!this._sciFiModeEnabled;
+    }
+
     /**
      * Register an Object3D as a raycast root so hover labels include it.
      * @param {THREE.Object3D} root
@@ -310,6 +331,12 @@ export class CoreEngine {
         this._layers.forEach(l => l.dispose());
         this._raycastRoots.length = 0;
 
+        if (this._sciFiEnvironment) {
+            this._sciFiEnvironment.dispose();
+            this._sciFiEnvironment = null;
+            this._sciFiModeEnabled = false;
+        }
+
         this.scene.traverse(obj => {
             if (obj.geometry) obj.geometry.dispose();
             if (obj.material) {
@@ -318,7 +345,9 @@ export class CoreEngine {
             }
         });
 
-        this.composer.passes.forEach(p => p.dispose && p.dispose());
+        if (this.composer) {
+            this.composer.passes.forEach(p => p.dispose && p.dispose());
+        }
         this.renderer.dispose();
         this.renderer.domElement.removeEventListener('pointermove', this._onPointerMove);
         this.renderer.domElement.removeEventListener('pointerdown', this._onPointerDown);
@@ -549,6 +578,10 @@ export class CoreEngine {
             if (typeof TWEEN !== 'undefined' && typeof TWEEN.update === 'function') {
                 this._tweenTimelineMs += dt * 1000;
                 TWEEN.update(this._tweenTimelineMs);
+            }
+
+            if (this._sciFiModeEnabled && this._sciFiEnvironment) {
+                this._sciFiEnvironment.update(dt);
             }
         }
 
