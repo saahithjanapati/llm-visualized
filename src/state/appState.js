@@ -11,6 +11,7 @@ export class AppState {
         this.showEquations = true;
         this.lastEqKey = '';
         this.showHdrBackground = false;
+        this.showOrbitingStars = true;
         this.environmentTexture = null;
         this.initialPipelineBackground = null;
         this.initialPipelineBackgroundCaptured = false;
