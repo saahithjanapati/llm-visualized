@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CoreEngine } from './CoreEngine.js';
 import Gpt2Layer from './layers/Gpt2Layer.js';
+import { OrbitingStarField } from './effects/OrbitingStarField.js';
 import { createRandomSource } from '../data/RandomActivationSource.js';
 import {
     MLP_MATRIX_PARAMS_DOWN,
@@ -20,6 +21,8 @@ import {
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
 import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
 import { PrismLayerNormAnimation } from '../animations/PrismLayerNormAnimation.js';
+import { getPreference } from '../utils/preferences.js';
+import { appState } from '../state/appState.js';
 
 function simplePrismMultiply(srcVec, tgtVec, onComplete) {
     for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
@@ -57,6 +60,7 @@ export class LayerPipeline extends EventTarget {
 
         this._layers = [];
         this._currentLayerIdx = 0;
+        this._orbitingStars = null;
 
         // ------------------------------------------------------------------
         // Pre-create *all* layers so their static visuals are visible upfront.
@@ -74,6 +78,27 @@ export class LayerPipeline extends EventTarget {
             engineOpts.cameraFarMargin = approxTowerAllowance;
         }
         this._engine = new CoreEngine(canvas, [], engineOpts);
+
+        const baseLayerBottom = LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2;
+        const starField = new OrbitingStarField({
+            baseHeight: baseLayerBottom,
+            minHeightOffset: 220,
+            maxHeightOffset: 920,
+            minRadius: 900,
+            maxRadius: 1550,
+            minSpeed: 0.08,
+            maxSpeed: 0.18,
+            count: Math.min(36, Math.max(18, Math.floor(this._numLayers * 2.5))),
+            size: 18,
+            twinkleAmount: 0.18,
+            color: 0xf8f9ff
+        });
+        starField.init(this._engine.scene);
+        const starPref = getPreference('showOrbitingStars', appState.showOrbitingStars ?? true);
+        appState.showOrbitingStars = !!starPref;
+        starField.setEnabled(appState.showOrbitingStars);
+        this._engine._layers.push(starField);
+        this._orbitingStars = starField;
 
         for (let i = 0; i < this._numLayers; i++) {
             const rand = this._randFactory();
@@ -95,6 +120,11 @@ export class LayerPipeline extends EventTarget {
         // Ensure first layer has active callback wired before start
         this._layers[0].setOnFinished(() => this._advanceToNextLayer());
         this._layers[0].setProgressEmitter(this);
+
+        if (this._layers[0] && this._layers[0].root) {
+            const bottomY = this._layers[0].root.position.y + baseLayerBottom;
+            this._orbitingStars?.setBaseHeight(bottomY);
+        }
     }
 
     /** Dispose and tear down Three resources */
@@ -102,6 +132,17 @@ export class LayerPipeline extends EventTarget {
 
     /** Return reference to internal CoreEngine (for advanced use-cases). */
     get engine() { return this._engine; }
+
+    /** Enable or disable the decorative orbiting stars. */
+    setOrbitingStarsEnabled(enabled) {
+        appState.showOrbitingStars = !!enabled;
+        this._orbitingStars?.setEnabled(appState.showOrbitingStars);
+    }
+
+    /** Returns whether the orbiting stars are currently visible. */
+    isOrbitingStarsEnabled() {
+        return this._orbitingStars?.isEnabled() ?? false;
+    }
 
     // ----------------------------------------------------------------------
     // Private helpers
