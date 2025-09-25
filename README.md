@@ -1,6 +1,28 @@
 # llm-visualized
 3d visualization of gpt2
 
+## GPT-2 activation trace exporter
+
+`scripts/collect_gpt2_trace.py` provides an interactive workflow for sampling
+GPT-2 completions and exporting the activation checkpoints required by the
+visualisation.  The script can be launched with
+
+```
+python scripts/collect_gpt2_trace.py --max-new-tokens 40 --top-k 50 --top-p 0.95
+```
+
+Key features:
+
+- Choose quantisation mode (`float32`, `float16`, `int8`) and sampling stride for
+  residual, attention-head and MLP vectors.
+- Inspect multiple candidate completions, manually edit or truncate the selected
+  continuation, or provide an explicit completion string.
+- Capture per-step sampling logs (top-k / top-p logits) alongside the activation
+  trace.
+- Export compact JSON payloads that follow the schema documented in
+  `gpt_extraction/DATA_SPEC.md`.  Pass `--parameters-output` once to create a
+  reusable parameter-count file.
+
 ### 12‑Layer GPT‑2 Stack demo (tests/twelve-layer-stack.html)
 Brief notes on the modules and assets used by `tests/twelve-layer-stack.html`.
 
