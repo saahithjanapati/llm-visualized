@@ -52,6 +52,214 @@ const pipeline = new LayerPipeline(gptCanvas, NUM_LAYERS, {
     cameraTarget: camTarget
 });
 
+const scene = pipeline.engine.scene;
+const renderer = pipeline.engine.renderer;
+
+// Futuristic tone mapping & atmosphere -------------------------------------------------
+renderer.setClearColor(0x040612, 1);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.08;
+scene.background = null;
+scene.fog = new THREE.FogExp2(0x040612, 0.000035);
+
+const stackBounds = new THREE.Box3();
+for (const layer of pipeline._layers) {
+    if (layer?.root) {
+        stackBounds.expandByObject(layer.root);
+    }
+}
+const fallbackHeight = NUM_LAYERS * 1600;
+const stackHeight = stackBounds.isEmpty() ? fallbackHeight : Math.max(fallbackHeight * 0.45, stackBounds.max.y - stackBounds.min.y);
+const stackCenterY = stackBounds.isEmpty() ? 0 : (stackBounds.max.y + stackBounds.min.y) / 2;
+const stackBottomY = stackBounds.isEmpty() ? CAPTION_TEXT_Y_POS + 1400 : stackBounds.min.y;
+const stackTopY = stackBottomY + stackHeight;
+
+const ambientLight = scene.children.find(child => child?.isAmbientLight);
+if (ambientLight) {
+    ambientLight.color.set(0x1a7dff);
+    ambientLight.intensity = 0.45;
+}
+const keyLight = scene.children.find(child => child?.isDirectionalLight);
+if (keyLight) {
+    keyLight.color.set(0xff66ff);
+    keyLight.intensity = 0.75;
+    keyLight.position.set(9000, stackTopY + 5000, 6000);
+}
+
+// Neon starfield backdrop ---------------------------------------------------------------
+const starGeometry = new THREE.BufferGeometry();
+const STAR_COUNT = 2200;
+const starPositions = new Float32Array(STAR_COUNT * 3);
+for (let i = 0; i < STAR_COUNT; i++) {
+    const radius = 42000 + Math.random() * 22000;
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(THREE.MathUtils.randFloatSpread(2));
+    const x = radius * Math.sin(phi) * Math.cos(theta);
+    const y = radius * Math.cos(phi);
+    const z = radius * Math.sin(phi) * Math.sin(theta);
+    starPositions[i * 3] = x;
+    starPositions[i * 3 + 1] = y;
+    starPositions[i * 3 + 2] = z;
+}
+starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+const starMaterial = new THREE.PointsMaterial({
+    color: new THREE.Color(0x59e5ff),
+    size: 220,
+    sizeAttenuation: true,
+    transparent: true,
+    opacity: 0.7,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false
+});
+const starField = new THREE.Points(starGeometry, starMaterial);
+starField.name = 'SciFiStarfield';
+scene.add(starField);
+
+// Energy platform & holographic rings ---------------------------------------------------
+const platformMaterial = new THREE.MeshStandardMaterial({
+    color: 0x060b17,
+    metalness: 0.85,
+    roughness: 0.25,
+    emissive: new THREE.Color(0x08204b),
+    emissiveIntensity: 0.9
+});
+const platformHeight = 380;
+const platformGeometry = new THREE.CylinderGeometry(6200, 6600, platformHeight, 48, 1, false);
+const basePlatform = new THREE.Mesh(platformGeometry, platformMaterial);
+basePlatform.position.set(0, stackBottomY - platformHeight * 0.4, 0);
+basePlatform.receiveShadow = false;
+basePlatform.castShadow = false;
+scene.add(basePlatform);
+
+const hologramMaterial = new THREE.MeshBasicMaterial({
+    color: 0x49f5ff,
+    transparent: true,
+    opacity: 0.32,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false
+});
+const hologramMaterialTop = hologramMaterial.clone();
+hologramMaterialTop.color = new THREE.Color(0xff4df2);
+const ringInner = 3200;
+const ringOuter = 4100;
+const bottomRingGeo = new THREE.RingGeometry(ringInner, ringOuter, 128, 1);
+const bottomRing = new THREE.Mesh(bottomRingGeo, hologramMaterial);
+bottomRing.rotation.x = Math.PI / 2;
+bottomRing.position.y = stackBottomY + 400;
+scene.add(bottomRing);
+
+const topRing = new THREE.Mesh(new THREE.RingGeometry(ringInner * 0.7, ringOuter * 0.72, 128, 1), hologramMaterialTop);
+topRing.rotation.x = Math.PI / 2;
+topRing.position.y = stackTopY - 1200;
+scene.add(topRing);
+
+const energyHeight = stackHeight + 5200;
+const energyMaterial = new THREE.MeshBasicMaterial({
+    color: 0x1fe4ff,
+    transparent: true,
+    opacity: 0.16,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+    depthWrite: false
+});
+const energyColumn = new THREE.Mesh(new THREE.CylinderGeometry(1900, 1900, energyHeight, 80, 1, true), energyMaterial);
+energyColumn.position.set(0, stackCenterY + 600, 0);
+scene.add(energyColumn);
+
+// Vertical holo pylons for extra framing
+const pylonMaterial = new THREE.MeshBasicMaterial({
+    color: 0x00f0ff,
+    transparent: true,
+    opacity: 0.24,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    side: THREE.DoubleSide
+});
+const pylonGeometry = new THREE.CylinderGeometry(120, 200, stackHeight + 3600, 12, 1, true);
+const pylons = [];
+const pylonRadius = 4800;
+for (let i = 0; i < 4; i++) {
+    const angle = (i / 4) * Math.PI * 2;
+    const pylon = new THREE.Mesh(pylonGeometry, pylonMaterial);
+    pylon.position.set(Math.cos(angle) * pylonRadius, stackCenterY, Math.sin(angle) * pylonRadius);
+    pylon.rotation.y = angle;
+    scene.add(pylon);
+    pylons.push(pylon);
+}
+
+// Infinite neon grid floor ----------------------------------------------------------------
+const grid = new THREE.GridHelper(64000, 140, 0x06d8ff, 0x0834ff);
+grid.position.y = stackBottomY - 800;
+if (Array.isArray(grid.material)) {
+    grid.material.forEach(mat => {
+        mat.opacity = 0.18;
+        mat.transparent = true;
+        mat.depthWrite = false;
+    });
+} else if (grid.material) {
+    grid.material.opacity = 0.18;
+    grid.material.transparent = true;
+    grid.material.depthWrite = false;
+}
+scene.add(grid);
+
+// Dynamic accent lights -------------------------------------------------------------------
+const cyanLight = new THREE.PointLight(0x39e0ff, 180, 0, 2);
+cyanLight.position.set(0, stackTopY + 2000, 8000);
+scene.add(cyanLight);
+const magentaLight = new THREE.PointLight(0xff4cf5, 160, 0, 2);
+magentaLight.position.set(0, stackBottomY + 3000, -7600);
+scene.add(magentaLight);
+
+const neonElements = {
+    starField,
+    rings: [bottomRing, topRing],
+    energyColumn,
+    pylons,
+    lights: [cyanLight, magentaLight]
+};
+
+const prevOnBeforeRender = scene.onBeforeRender;
+const animationClock = new THREE.Clock();
+scene.onBeforeRender = function onBeforeRender(rendererInstance, sceneInstance, cameraInstance, geometry, material, group) {
+    if (typeof prevOnBeforeRender === 'function') {
+        prevOnBeforeRender.call(this, rendererInstance, sceneInstance, cameraInstance, geometry, material, group);
+    }
+    const t = animationClock.getElapsedTime();
+    if (neonElements.starField) {
+        neonElements.starField.rotation.y += 0.00025;
+        neonElements.starField.rotation.x = Math.sin(t * 0.07) * 0.08;
+    }
+    neonElements.rings.forEach((ring, idx) => {
+        if (!ring) return;
+        const scale = 1 + Math.sin(t * 1.25 + idx) * 0.08;
+        ring.scale.set(scale, scale, scale);
+        const pulse = 0.22 + Math.sin(t * 3.4 + idx * 1.7) * 0.12;
+        ring.material.opacity = THREE.MathUtils.clamp(pulse, 0.08, 0.45);
+        ring.rotation.z += 0.0008 * (idx % 2 === 0 ? 1 : -1);
+    });
+    if (neonElements.energyColumn) {
+        const flicker = 0.16 + Math.sin(t * 2.8) * 0.04;
+        neonElements.energyColumn.material.opacity = THREE.MathUtils.clamp(flicker, 0.08, 0.28);
+        neonElements.energyColumn.scale.x = 1 + Math.sin(t * 1.9) * 0.02;
+        neonElements.energyColumn.scale.z = neonElements.energyColumn.scale.x;
+    }
+    neonElements.pylons.forEach((pylon, idx) => {
+        const offset = Math.sin(t * 1.6 + idx * Math.PI * 0.5) * 0.12;
+        pylon.material.opacity = THREE.MathUtils.clamp(0.16 + offset, 0.08, 0.32);
+    });
+    neonElements.lights.forEach((light, idx) => {
+        if (!light) return;
+        const radius = idx === 0 ? 13200 : 9800;
+        const speed = idx === 0 ? 0.28 : -0.34;
+        light.position.x = Math.cos(t * speed + idx) * radius;
+        light.position.z = Math.sin(t * speed + idx) * radius;
+        light.position.y = stackCenterY + Math.sin(t * 0.7 + idx) * 3600;
+        light.intensity = idx === 0 ? 160 + Math.sin(t * 1.4) * 20 : 140 + Math.cos(t * 1.2) * 18;
+    });
+};
+
 // Show GPT canvas immediately
 gptCanvas.style.display = 'block';
 try {
@@ -85,7 +293,14 @@ try {
     );
     vocabBottom.group.userData.label = 'Vocab Embedding';
     vocabBottom.setColor(headBlue);
-    vocabBottom.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
+    vocabBottom.setMaterialProperties({
+        metalness: 0.65,
+        roughness: 0.35,
+        emissive: new THREE.Color(0x0b4dff),
+        emissiveIntensity: 0.7,
+        opacity: 0.95,
+        transparent: true
+    });
     pipeline.engine.scene.add(vocabBottom.group);
     if (pipeline.engine && typeof pipeline.engine.registerRaycastRoot === 'function') {
         pipeline.engine.registerRaycastRoot(vocabBottom.group);
@@ -111,7 +326,14 @@ try {
     );
     posBottom.group.userData.label = 'Positional Embedding';
     posBottom.setColor(headGreen);
-    posBottom.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
+    posBottom.setMaterialProperties({
+        metalness: 0.6,
+        roughness: 0.3,
+        emissive: new THREE.Color(0x12ffdc),
+        emissiveIntensity: 0.65,
+        opacity: 0.95,
+        transparent: true
+    });
     pipeline.engine.scene.add(posBottom.group);
     if (pipeline.engine && typeof pipeline.engine.registerRaycastRoot === 'function') {
         pipeline.engine.registerRaycastRoot(posBottom.group);
@@ -136,7 +358,14 @@ try {
         );
         lnTop.group.userData.label = 'LayerNorm (Top)';
         lnTop.setColor(new THREE.Color(INACTIVE_COMPONENT_COLOR));
-        lnTop.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
+        lnTop.setMaterialProperties({
+            metalness: 0.55,
+            roughness: 0.2,
+            emissive: new THREE.Color(0x1a9fff),
+            emissiveIntensity: 0.55,
+            opacity: 0.98,
+            transparent: true
+        });
         pipeline.engine.scene.add(lnTop.group);
         if (pipeline.engine && typeof pipeline.engine.registerRaycastRoot === 'function') {
             pipeline.engine.registerRaycastRoot(lnTop.group);
@@ -159,8 +388,15 @@ try {
         );
         vocabTop.group.rotation.z = Math.PI;
         vocabTop.group.userData.label = 'Vocab Embedding (Top)';
-        vocabTop.setColor(new THREE.Color(0x000000));
-        vocabTop.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.0 });
+        vocabTop.setColor(new THREE.Color(0x0c162a));
+        vocabTop.setMaterialProperties({
+            metalness: 0.7,
+            roughness: 0.25,
+            emissive: new THREE.Color(0x45f2ff),
+            emissiveIntensity: 0.6,
+            opacity: 0.9,
+            transparent: true
+        });
         appState.vocabTopRef = vocabTop;
         pipeline.engine.scene.add(vocabTop.group);
         if (pipeline.engine && typeof pipeline.engine.registerRaycastRoot === 'function') {
@@ -206,7 +442,15 @@ captionLoader.load('https://threejs.org/examples/fonts/helvetiker_regular.typefa
         });
         geo.computeBoundingBox();
         const width = geo.boundingBox.max.x - geo.boundingBox.min.x;
-        const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0 });
+        const mat = new THREE.MeshStandardMaterial({
+            color: 0xa8f3ff,
+            transparent: true,
+            opacity: 0,
+            emissive: new THREE.Color(0x27dcff),
+            emissiveIntensity: 0.9,
+            metalness: 0.35,
+            roughness: 0.2
+        });
         const mesh = new THREE.Mesh(geo, mat);
         mesh.position.x = xOffset;
         mesh.castShadow = false;
