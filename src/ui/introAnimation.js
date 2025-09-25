@@ -56,8 +56,8 @@ export function initIntroAnimation(pipeline, gptCanvas) {
     dirLight.castShadow = false;
     scene.add(dirLight);
 
-    const TEXT = '// INITIALIZING GPT-2 CORE';
-    const TYPE_DELAY = 110;
+    const TEXT = 'Can machines think?';
+    const TYPE_DELAY = 120;
     let cursorMesh;
     const loader = new FontLoader();
     loader.load('https://threejs.org/examples/fonts/helvetiker_regular.typeface.json', (font) => {
