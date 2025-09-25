@@ -124,12 +124,12 @@ export const MHSA_DARK_TINTED_RED     = 0x220000;
 
 
 /** Final Q, K, V head colours used once attention heads have merged. */
-export const MHA_FINAL_Q_COLOR = 0x2d75da;
-export const MHA_FINAL_K_COLOR = 0x2ad471;
-export const MHA_FINAL_V_COLOR = 0xb7263e;
+export const MHA_FINAL_Q_COLOR = 0x1e5299;
+export const MHA_FINAL_K_COLOR = 0x1d9752;
+export const MHA_FINAL_V_COLOR = 0x811b2d;
 
 /** Active colour of the output-projection matrix that follows MHSA. */
-export const MHA_OUTPUT_PROJECTION_MATRIX_COLOR = 0xff99ff;
+export const MHA_OUTPUT_PROJECTION_MATRIX_COLOR = 0xaf5faf;
 
 // -----------------------------------------------------------------------------
 // MHSA (Multi-Head Self-Attention) Specific Animation Constants
