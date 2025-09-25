@@ -11,6 +11,7 @@ export class AppState {
         this.showEquations = true;
         this.lastEqKey = '';
         this.showHdrBackground = false;
+        this.sciFiMode = false;
         this.environmentTexture = null;
         this.initialPipelineBackground = null;
         this.initialPipelineBackgroundCaptured = false;
@@ -50,6 +51,13 @@ export class AppState {
                 this.initialPipelineBackgroundCaptured = true;
             }
             pipelineScene.background = desiredTexture ?? this.initialPipelineBackground ?? null;
+        }
+    }
+
+    applySciFiMode(pipeline, enabled = this.sciFiMode) {
+        this.sciFiMode = !!enabled;
+        if (pipeline?.engine?.setSciFiModeEnabled) {
+            pipeline.engine.setSciFiModeEnabled(this.sciFiMode);
         }
     }
 }
