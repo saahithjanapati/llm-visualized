@@ -13,8 +13,10 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
 
     appState.showEquations = getPreference('showEquations', true);
     appState.showHdrBackground = getPreference('showHdrBackground', false);
+    appState.showOrbitingStars = getPreference('showOrbitingStars', true);
     if (equationsPanel) equationsPanel.style.display = appState.showEquations ? 'block' : 'none';
     appState.applyEnvironmentBackground(pipeline);
+    pipeline?.setOrbitingStarsEnabled?.(appState.showOrbitingStars);
 
     const EQ = {
         ln1: String.raw`x_{\text{ln}} = \mathrm{LN}(x) = \gamma \odot \frac{x - \mu}{\sqrt{\sigma^2+\epsilon}} + \beta` ,

@@ -201,6 +201,7 @@ export class CoreEngine {
         this._clock  = new THREE.Clock();
         this._paused = false;
         this._pauseReasons = new Set();
+        this._updatables = new Set();
         const initialTweenNow = (typeof TWEEN !== 'undefined' && typeof TWEEN.now === 'function')
             ? TWEEN.now()
             : (typeof performance !== 'undefined' ? performance.now() : Date.now());
@@ -279,6 +280,18 @@ export class CoreEngine {
         }
     }
 
+    /** Register an updatable helper that runs each frame alongside layers. */
+    registerUpdatable(updatable) {
+        if (!updatable || typeof updatable.update !== 'function') return;
+        this._updatables.add(updatable);
+    }
+
+    /** Remove a previously registered updatable helper. */
+    unregisterUpdatable(updatable) {
+        if (!updatable) return;
+        this._updatables.delete(updatable);
+    }
+
     /** Return current raycasting state. */
     isRaycastingEnabled() {
         return !!this._raycastingEnabled;
@@ -309,6 +322,7 @@ export class CoreEngine {
         }
         this._layers.forEach(l => l.dispose());
         this._raycastRoots.length = 0;
+        this._updatables.clear();
 
         this.scene.traverse(obj => {
             if (obj.geometry) obj.geometry.dispose();
@@ -545,6 +559,17 @@ export class CoreEngine {
                     layer.update(dt);
                 }
             });
+
+            if (this._updatables.size) {
+                for (const helper of this._updatables) {
+                    if (!helper || typeof helper.update !== 'function') continue;
+                    try {
+                        helper.update(dt);
+                    } catch (err) {
+                        console.error('Auxiliary update failed:', err);
+                    }
+                }
+            }
 
             if (typeof TWEEN !== 'undefined' && typeof TWEEN.update === 'function') {
                 this._tweenTimelineMs += dt * 1000;

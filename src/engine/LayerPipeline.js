@@ -20,6 +20,8 @@ import {
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
 import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
 import { PrismLayerNormAnimation } from '../animations/PrismLayerNormAnimation.js';
+import { OrbitingStarfield } from '../components/OrbitingStarfield.js';
+import { appState } from '../state/appState.js';
 
 function simplePrismMultiply(srcVec, tgtVec, onComplete) {
     for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
@@ -57,6 +59,7 @@ export class LayerPipeline extends EventTarget {
 
         this._layers = [];
         this._currentLayerIdx = 0;
+        this._orbitingStars = null;
 
         // ------------------------------------------------------------------
         // Pre-create *all* layers so their static visuals are visible upfront.
@@ -74,6 +77,23 @@ export class LayerPipeline extends EventTarget {
             engineOpts.cameraFarMargin = approxTowerAllowance;
         }
         this._engine = new CoreEngine(canvas, [], engineOpts);
+
+        if (this._engine?.scene) {
+            try {
+                this._orbitingStars = new OrbitingStarfield();
+                this._engine.scene.add(this._orbitingStars.group);
+                if (typeof this._engine.registerUpdatable === 'function') {
+                    this._engine.registerUpdatable(this._orbitingStars);
+                }
+                const initialEnabled = typeof appState.showOrbitingStars === 'boolean'
+                    ? appState.showOrbitingStars
+                    : true;
+                this._orbitingStars.setEnabled(initialEnabled);
+            } catch (err) {
+                console.warn('Orbiting starfield initialisation failed:', err);
+                this._orbitingStars = null;
+            }
+        }
 
         for (let i = 0; i < this._numLayers; i++) {
             const rand = this._randFactory();
@@ -102,6 +122,13 @@ export class LayerPipeline extends EventTarget {
 
     /** Return reference to internal CoreEngine (for advanced use-cases). */
     get engine() { return this._engine; }
+
+    /** Enable or disable the decorative orbiting starfield. */
+    setOrbitingStarsEnabled(enabled) {
+        if (this._orbitingStars) {
+            this._orbitingStars.setEnabled(enabled);
+        }
+    }
 
     // ----------------------------------------------------------------------
     // Private helpers
