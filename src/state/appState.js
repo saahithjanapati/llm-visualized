@@ -11,6 +11,7 @@ export class AppState {
         this.showEquations = true;
         this.lastEqKey = '';
         this.showHdrBackground = false;
+        this.sciFiModeEnabled = false;
         this.environmentTexture = null;
         this.initialPipelineBackground = null;
         this.initialPipelineBackgroundCaptured = false;
@@ -24,7 +25,7 @@ export class AppState {
             this.introSceneRef = introScene;
         }
 
-        const desiredTexture = (this.showHdrBackground && this.environmentTexture)
+        const desiredTexture = (this.showHdrBackground && !this.sciFiModeEnabled && this.environmentTexture)
             ? this.environmentTexture
             : null;
 
@@ -37,7 +38,9 @@ export class AppState {
                     : current;
                 this.initialIntroBackgroundCaptured = true;
             }
-            introTarget.background = desiredTexture ?? this.initialIntroBackground ?? null;
+            if (!this.sciFiModeEnabled || desiredTexture) {
+                introTarget.background = desiredTexture ?? this.initialIntroBackground ?? null;
+            }
         }
 
         if (pipeline?.engine?.scene) {
@@ -49,8 +52,21 @@ export class AppState {
                     : current;
                 this.initialPipelineBackgroundCaptured = true;
             }
-            pipelineScene.background = desiredTexture ?? this.initialPipelineBackground ?? null;
+            if (!this.sciFiModeEnabled || desiredTexture) {
+                pipelineScene.background = desiredTexture ?? this.initialPipelineBackground ?? null;
+            }
         }
+    }
+
+    applySciFiMode(pipeline, introScene = null) {
+        if (pipeline?.engine?.setSciFiModeEnabled) {
+            pipeline.engine.setSciFiModeEnabled(!!this.sciFiModeEnabled);
+        }
+
+        // When sci-fi mode toggles it can change how the background should be
+        // resolved (e.g. HDRI backgrounds are suppressed while the starfield
+        // dome is active), so re-apply the background preferences now.
+        this.applyEnvironmentBackground(pipeline, introScene);
     }
 }
 export const appState = new AppState();
