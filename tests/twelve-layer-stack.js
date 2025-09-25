@@ -23,7 +23,6 @@ import {
 } from '../src/utils/constants.js';
 import { WeightMatrixVisualization } from '../src/components/WeightMatrixVisualization.js';
 import { LayerNormalizationVisualization } from '../src/components/LayerNormalizationVisualization.js';
-import { MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR } from '../src/animations/LayerAnimationConstants.js';
 import { appState } from '../src/state/appState.js';
 import { initIntroAnimation } from '../src/ui/introAnimation.js';
 import { initStatusOverlay } from '../src/ui/statusOverlay.js';
@@ -49,7 +48,8 @@ const camPos    = new THREE.Vector3(0, 11000, 16000);
 const camTarget = new THREE.Vector3(0, 9000, 0);
 const pipeline = new LayerPipeline(gptCanvas, NUM_LAYERS, {
     cameraPosition: camPos,
-    cameraTarget: camTarget
+    cameraTarget: camTarget,
+    enableBloom: true
 });
 
 // Show GPT canvas immediately
@@ -61,12 +61,140 @@ try {
         if (obj.isMesh) { obj.castShadow = false; obj.receiveShadow = false; }
         if (obj.isLight) { obj.castShadow = false; }
     });
+
+    // Transform the base scene into a neon sci-fi space dock aesthetic.
+    const scene = eng.scene;
+    const renderer = eng.renderer;
+    scene.background = new THREE.Color(0x020010);
+    scene.fog = new THREE.FogExp2(0x020010, 0.000018);
+    renderer.setClearColor(0x020010, 1);
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.35;
+    if (eng.composer) {
+        eng.composer.passes.forEach((pass) => {
+            if (pass && pass.constructor && pass.constructor.name === 'UnrealBloomPass') {
+                pass.strength = 1.05;
+                pass.radius = 0.65;
+                pass.threshold = 0.52;
+            }
+        });
+    }
+
+    const ambient = scene.children.find((c) => c.isAmbientLight);
+    if (ambient) {
+        ambient.color.set(0x2060ff);
+        ambient.intensity = 0.42;
+    }
+    const mainDir = scene.children.find((c) => c.isDirectionalLight);
+    if (mainDir) {
+        mainDir.color.set(0x5cdfff);
+        mainDir.intensity = 1.15;
+        mainDir.position.set(18000, 22000, 12000);
+    }
+
+    const rimLight = new THREE.DirectionalLight(0xff67ff, 0.55);
+    rimLight.position.set(-16000, 14000, -9000);
+    scene.add(rimLight);
+
+    const hemi = new THREE.HemisphereLight(0x2af3ff, 0x050011, 0.55);
+    scene.add(hemi);
+
+    const starGeometry = new THREE.BufferGeometry();
+    const STAR_COUNT = 2500;
+    const starPositions = new Float32Array(STAR_COUNT * 3);
+    const radiusMin = 28000;
+    const radiusMax = 120000;
+    for (let i = 0; i < STAR_COUNT; i++) {
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos(THREE.MathUtils.randFloatSpread(2));
+        const radius = THREE.MathUtils.lerp(radiusMin, radiusMax, Math.random() ** 0.6);
+        const sinPhi = Math.sin(phi);
+        const x = Math.cos(theta) * sinPhi * radius;
+        const y = Math.cos(phi) * radius;
+        const z = Math.sin(theta) * sinPhi * radius;
+        starPositions[i * 3] = x;
+        starPositions[i * 3 + 1] = y;
+        starPositions[i * 3 + 2] = z;
+    }
+    starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+    const starMaterial = new THREE.PointsMaterial({
+        color: 0x74faff,
+        size: 280,
+        sizeAttenuation: true,
+        transparent: true,
+        opacity: 0.45,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+    });
+    const starField = new THREE.Points(starGeometry, starMaterial);
+    starField.name = 'StarfieldBackdrop';
+    starField.renderOrder = -10;
+    scene.add(starField);
+
+    const grid = new THREE.GridHelper(80000, 60, 0x1fefff, 0x1fefff);
+    grid.position.y = -4500;
+    const gridMaterials = Array.isArray(grid.material) ? grid.material : [grid.material];
+    gridMaterials.forEach((mat, idx) => {
+        mat.transparent = true;
+        mat.opacity = idx === 0 ? 0.18 : 0.07;
+        mat.depthWrite = false;
+        mat.color.set(idx === 0 ? 0x19f0ff : 0x5b8cff);
+    });
+    grid.renderOrder = -9;
+    scene.add(grid);
+
+    const ringGeometry = new THREE.RingGeometry(18000, 26000, 128, 1);
+    const ringMaterial = new THREE.MeshBasicMaterial({
+        color: 0x18f6ff,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.22,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+    });
+    const energyRing = new THREE.Mesh(ringGeometry, ringMaterial);
+    energyRing.rotation.x = Math.PI / 2;
+    energyRing.position.y = -2500;
+    energyRing.name = 'EnergyRing';
+    scene.add(energyRing);
+
+    const haloGeometry = new THREE.CylinderGeometry(0, 18000, 2800, 36, 1, true);
+    const haloMaterial = new THREE.MeshBasicMaterial({
+        color: 0x944dff,
+        transparent: true,
+        opacity: 0.16,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        depthWrite: false
+    });
+    const holoCone = new THREE.Mesh(haloGeometry, haloMaterial);
+    holoCone.position.y = -2500;
+    holoCone.name = 'HoloCone';
+    scene.add(holoCone);
+
+    const startTime = performance.now();
+    const priorOnBeforeRender = scene.onBeforeRender;
+    scene.onBeforeRender = function (...args) {
+        if (typeof priorOnBeforeRender === 'function') {
+            priorOnBeforeRender.apply(this, args);
+        }
+        const elapsed = (performance.now() - startTime) * 0.001;
+        starField.rotation.y = elapsed * 0.04;
+        starField.rotation.x = Math.sin(elapsed * 0.12) * 0.05;
+        energyRing.rotation.z = elapsed * 0.18;
+        energyRing.material.opacity = 0.18 + Math.sin(elapsed * 2.2) * 0.05;
+        haloMaterial.opacity = 0.12 + Math.cos(elapsed * 1.6) * 0.04;
+        gridMaterials.forEach((mat, idx) => {
+            const base = idx === 0 ? 0.16 : 0.06;
+            mat.opacity = base + Math.sin(elapsed * 0.7 + idx) * 0.015;
+        });
+    };
 } catch (_) {}
 
 // Embedding matrices (static visuals)
 try {
-    const headBlue = new THREE.Color(MHA_FINAL_Q_COLOR);
-    const headGreen = new THREE.Color(MHA_FINAL_K_COLOR);
+    const headBlue = new THREE.Color(0x18f6ff);
+    const headGreen = new THREE.Color(0x944dff);
     const residualYBase = LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2 + EMBEDDING_BOTTOM_TOP_ALIGN_OFFSET_FROM_LN1_BOTTOM;
     const bottomVocabCenterY = residualYBase - EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2 + EMBEDDING_BOTTOM_Y_ADJUST;
     const vocabBottom = new WeightMatrixVisualization(
@@ -85,7 +213,14 @@ try {
     );
     vocabBottom.group.userData.label = 'Vocab Embedding';
     vocabBottom.setColor(headBlue);
-    vocabBottom.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
+    vocabBottom.setMaterialProperties({
+        opacity: 1.0,
+        transparent: false,
+        emissive: new THREE.Color(0x047f8c),
+        emissiveIntensity: 0.8,
+        metalness: 0.75,
+        roughness: 0.25
+    });
     pipeline.engine.scene.add(vocabBottom.group);
     if (pipeline.engine && typeof pipeline.engine.registerRaycastRoot === 'function') {
         pipeline.engine.registerRaycastRoot(vocabBottom.group);
@@ -111,7 +246,14 @@ try {
     );
     posBottom.group.userData.label = 'Positional Embedding';
     posBottom.setColor(headGreen);
-    posBottom.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
+    posBottom.setMaterialProperties({
+        opacity: 1.0,
+        transparent: false,
+        emissive: new THREE.Color(0x340079),
+        emissiveIntensity: 0.9,
+        metalness: 0.78,
+        roughness: 0.22
+    });
     pipeline.engine.scene.add(posBottom.group);
     if (pipeline.engine && typeof pipeline.engine.registerRaycastRoot === 'function') {
         pipeline.engine.registerRaycastRoot(posBottom.group);
@@ -135,8 +277,15 @@ try {
             LN_PARAMS.holeWidthFactor
         );
         lnTop.group.userData.label = 'LayerNorm (Top)';
-        lnTop.setColor(new THREE.Color(INACTIVE_COMPONENT_COLOR));
-        lnTop.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
+        lnTop.setColor(new THREE.Color(0x0d1027));
+        lnTop.setMaterialProperties({
+            opacity: 1.0,
+            transparent: false,
+            emissive: new THREE.Color(0x1c2cff),
+            emissiveIntensity: 0.45,
+            metalness: 0.65,
+            roughness: 0.35
+        });
         pipeline.engine.scene.add(lnTop.group);
         if (pipeline.engine && typeof pipeline.engine.registerRaycastRoot === 'function') {
             pipeline.engine.registerRaycastRoot(lnTop.group);
@@ -159,8 +308,15 @@ try {
         );
         vocabTop.group.rotation.z = Math.PI;
         vocabTop.group.userData.label = 'Vocab Embedding (Top)';
-        vocabTop.setColor(new THREE.Color(0x000000));
-        vocabTop.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.0 });
+        vocabTop.setColor(new THREE.Color(0x18f6ff));
+        vocabTop.setMaterialProperties({
+            opacity: 0.92,
+            transparent: true,
+            emissive: new THREE.Color(0x0d9be0),
+            emissiveIntensity: 1.1,
+            metalness: 0.5,
+            roughness: 0.18
+        });
         appState.vocabTopRef = vocabTop;
         pipeline.engine.scene.add(vocabTop.group);
         if (pipeline.engine && typeof pipeline.engine.registerRaycastRoot === 'function') {
@@ -176,8 +332,8 @@ initPauseButton(pipeline);
 initSettingsModal(pipeline);
 
 // Typewriter caption underneath GPT tower
-const TYPE_TEXT = 'Can machines think?';
-const TYPE_DELAY_CAP = 120; // ms
+const TYPE_TEXT = '// INITIALIZING GPT-2 CORE';
+const TYPE_DELAY_CAP = 110; // ms
 const captionLoader = new FontLoader();
 captionLoader.load('https://threejs.org/examples/fonts/helvetiker_regular.typeface.json', (font) => {
     const charGroup = new THREE.Group();
@@ -206,7 +362,15 @@ captionLoader.load('https://threejs.org/examples/fonts/helvetiker_regular.typefa
         });
         geo.computeBoundingBox();
         const width = geo.boundingBox.max.x - geo.boundingBox.min.x;
-        const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0 });
+        const mat = new THREE.MeshStandardMaterial({
+            color: 0x18f6ff,
+            emissive: new THREE.Color(0x0d9be0),
+            emissiveIntensity: 1.2,
+            metalness: 0.5,
+            roughness: 0.25,
+            transparent: true,
+            opacity: 0
+        });
         const mesh = new THREE.Mesh(geo, mat);
         mesh.position.x = xOffset;
         mesh.castShadow = false;

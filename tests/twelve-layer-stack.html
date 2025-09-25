@@ -4,6 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Test – 12-Layer GPT-2 Stack</title>
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600&family=Rajdhani:wght@400;500;700&display=swap">
     <link rel="stylesheet" href="../public/twelve-layer-stack.css">
     <!-- KaTeX for equation rendering (fallbacks to plain text if blocked) -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
@@ -11,9 +13,9 @@
 </head>
 <body>
     <!-- Loading GIF overlay -->
-    <img id="loadingGif" src="../cool-fun.gif" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:4;max-width:30%;height:auto;" />
+    <img id="loadingGif" src="../cool-fun.gif" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:4;max-width:30%;height:auto;filter:hue-rotate(210deg) saturate(2);mix-blend-mode:screen;" />
     <!-- Status overlay (top-right) -->
-    <div id="statusOverlay" style="position:fixed;top:56px;right:10px;padding:8px 12px;font-family:monospace;font-size:14px;color:#fff;background:rgba(20,20,20,0.35);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);border-radius:8px;pointer-events:none;z-index:5;white-space:pre;">Layer 1 / 12\nStage: Loading</div>
+    <div id="statusOverlay" style="position:fixed;top:56px;right:10px;padding:10px 14px;font-family:'Orbitron', monospace;font-size:13px;letter-spacing:0.08em;color:#74faff;text-shadow:0 0 12px rgba(80,240,255,0.7);background:linear-gradient(135deg,rgba(14,32,74,0.92),rgba(8,9,30,0.6));border:1px solid rgba(82,196,255,0.45);box-shadow:0 0 18px rgba(25,118,210,0.45);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-radius:14px;pointer-events:none;z-index:5;white-space:pre;">Layer 1 / 12\nStage: Loading</div>
     <!-- Settings button (top-right) -->
     <button id="settingsBtn" aria-haspopup="dialog" aria-controls="settingsOverlay" title="Settings">⚙️</button>
 

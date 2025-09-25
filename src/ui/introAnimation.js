@@ -51,13 +51,13 @@ export function initIntroAnimation(pipeline, gptCanvas) {
         });
     }
 
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    dirLight.position.set(5, 10, 7.5);
+    const dirLight = new THREE.DirectionalLight(0x45d7ff, 0.9);
+    dirLight.position.set(6, 12, 10);
     dirLight.castShadow = false;
     scene.add(dirLight);
 
-    const TEXT = 'Can machines think?';
-    const TYPE_DELAY = 120;
+    const TEXT = '// INITIALIZING GPT-2 CORE';
+    const TYPE_DELAY = 110;
     let cursorMesh;
     const loader = new FontLoader();
     loader.load('https://threejs.org/examples/fonts/helvetiker_regular.typeface.json', (font) => {
@@ -81,7 +81,15 @@ export function initIntroAnimation(pipeline, gptCanvas) {
                 bevelEnabled: true, bevelThickness: 2, bevelSize: 2, bevelOffset: 0, bevelSegments: 1 });
             geo.computeBoundingBox();
             const width = geo.boundingBox.max.x - geo.boundingBox.min.x;
-            const mat = new THREE.MeshNormalMaterial({ transparent: true, opacity: 0 });
+            const mat = new THREE.MeshStandardMaterial({
+                color: 0x18f6ff,
+                emissive: new THREE.Color(0x0d9be0),
+                emissiveIntensity: 1.4,
+                metalness: 0.6,
+                roughness: 0.25,
+                transparent: true,
+                opacity: 0
+            });
             const mesh = new THREE.Mesh(geo, mat);
             mesh.position.x = xOffset;
             mesh.castShadow = false;
@@ -96,8 +104,8 @@ export function initIntroAnimation(pipeline, gptCanvas) {
         const bounds = new THREE.Box3().setFromObject(charGroup);
         const textHeight = bounds.max.y - bounds.min.y;
 
-        const cursorGeo = new THREE.BoxGeometry(15, textHeight, 20);
-        const cursorMat = new THREE.MeshBasicMaterial({ color: 0x888888 });
+        const cursorGeo = new THREE.BoxGeometry(18, textHeight, 20);
+        const cursorMat = new THREE.MeshBasicMaterial({ color: 0x72faff });
         cursorMesh = new THREE.Mesh(cursorGeo, cursorMat);
         cursorMesh.position.set(charGroup.position.x, bounds.min.y + textHeight / 2, 25);
         cursorMesh.castShadow = false;
