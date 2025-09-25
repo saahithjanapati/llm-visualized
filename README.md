@@ -1,6 +1,20 @@
 # llm-visualized
 3d visualization of gpt2
 
+## GPT-2 data extraction utilities
+
+The `scripts/extract_gpt2_data.py` helper samples GPT-2 Small completions and
+records the activation checkpoints required by the visualisation.  Run the
+script with a prompt to collect a JSON payload plus sampling metadata:
+
+```bash
+pip install torch transformers
+python scripts/extract_gpt2_data.py --prompt "The future of transformers" --output out.json
+```
+
+The output format is documented in `docs/GPT2TraceFormat.md`, and a workflow
+summary is available in `docs/ExtractionWorkflow.md`.
+
 ### 12‑Layer GPT‑2 Stack demo (tests/twelve-layer-stack.html)
 Brief notes on the modules and assets used by `tests/twelve-layer-stack.html`.
 
