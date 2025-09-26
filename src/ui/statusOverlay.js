@@ -13,7 +13,11 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
 
     appState.showEquations = getPreference('showEquations', true);
     appState.showHdrBackground = getPreference('showHdrBackground', false);
+    appState.showStarfield = getPreference('showStarfield', true);
     if (equationsPanel) equationsPanel.style.display = appState.showEquations ? 'block' : 'none';
+    if (pipeline?.engine?.setStarfieldEnabled) {
+        try { pipeline.engine.setStarfieldEnabled(appState.showStarfield); } catch (_) { /* optional */ }
+    }
     appState.applyEnvironmentBackground(pipeline);
 
     const EQ = {

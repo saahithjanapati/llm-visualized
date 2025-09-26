@@ -32,6 +32,13 @@ export function initSettingsModal(pipeline) {
         if (eq) eq.checked = !!appState.showEquations;
         const bg = document.getElementById('toggleHdrBackground');
         if (bg) bg.checked = !!appState.showHdrBackground;
+        const starfield = document.getElementById('toggleStarfield');
+        if (starfield) {
+            const enabled = typeof pipeline?.engine?.isStarfieldEnabled === 'function'
+                ? pipeline.engine.isStarfieldEnabled()
+                : appState.showStarfield;
+            starfield.checked = !!enabled;
+        }
     }
 
     function closeSettings() {
@@ -91,5 +98,12 @@ export function initSettingsModal(pipeline) {
         appState.showHdrBackground = !!bgToggle.checked;
         setPreference('showHdrBackground', appState.showHdrBackground);
         appState.applyEnvironmentBackground(pipeline);
+    });
+
+    const starToggle = document.getElementById('toggleStarfield');
+    starToggle?.addEventListener('change', () => {
+        appState.showStarfield = !!starToggle.checked;
+        setPreference('showStarfield', appState.showStarfield);
+        pipeline?.engine?.setStarfieldEnabled?.(appState.showStarfield);
     });
 }

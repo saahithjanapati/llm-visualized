@@ -167,6 +167,10 @@ try {
             pipeline.engine.registerRaycastRoot(vocabTop.group);
         }
     }
+
+    if (pipeline.engine?.refreshStarfieldBounds) {
+        try { pipeline.engine.refreshStarfieldBounds(); } catch (_) { /* optional */ }
+    }
 } catch (_) { /* optional – embedding visuals are non-critical */ }
 
 // Initialise UI modules
