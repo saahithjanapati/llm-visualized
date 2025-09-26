@@ -32,6 +32,8 @@ export function initSettingsModal(pipeline) {
         if (eq) eq.checked = !!appState.showEquations;
         const bg = document.getElementById('toggleHdrBackground');
         if (bg) bg.checked = !!appState.showHdrBackground;
+        const stars = document.getElementById('toggleSkyStars');
+        if (stars) stars.checked = !!appState.showSkyStars;
     }
 
     function closeSettings() {
@@ -91,5 +93,12 @@ export function initSettingsModal(pipeline) {
         appState.showHdrBackground = !!bgToggle.checked;
         setPreference('showHdrBackground', appState.showHdrBackground);
         appState.applyEnvironmentBackground(pipeline);
+    });
+
+    const starToggle = document.getElementById('toggleSkyStars');
+    starToggle?.addEventListener('change', () => {
+        appState.showSkyStars = !!starToggle.checked;
+        setPreference('showSkyStars', appState.showSkyStars);
+        appState.applySkyStars(pipeline);
     });
 }
