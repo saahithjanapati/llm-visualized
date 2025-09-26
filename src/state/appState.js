@@ -11,12 +11,14 @@ export class AppState {
         this.showEquations = true;
         this.lastEqKey = '';
         this.showHdrBackground = false;
+        this.showRotatingStars = true;
         this.environmentTexture = null;
         this.initialPipelineBackground = null;
         this.initialPipelineBackgroundCaptured = false;
         this.initialIntroBackground = null;
         this.initialIntroBackgroundCaptured = false;
         this.introSceneRef = null;
+        this.skyStarField = null;
     }
 
     applyEnvironmentBackground(pipeline, introScene = null) {
@@ -51,6 +53,11 @@ export class AppState {
             }
             pipelineScene.background = desiredTexture ?? this.initialPipelineBackground ?? null;
         }
+    }
+
+    applyRotatingStars() {
+        if (!this.skyStarField || typeof this.skyStarField.setEnabled !== 'function') return;
+        this.skyStarField.setEnabled(this.showRotatingStars);
     }
 }
 export const appState = new AppState();

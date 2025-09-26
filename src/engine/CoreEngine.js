@@ -26,6 +26,7 @@ export class CoreEngine {
         // Enable/disable expensive post-processing effects (e.g. bloom).
         // Bloom is disabled by default to reduce initial load; set opts.enableBloom=true to re-enable.
         this._enableBloom = typeof opts.enableBloom === 'boolean' ? opts.enableBloom : false;
+        this._frameUpdateCallbacks = new Set();
 
         // ────────────────────────────────────────────────────────────────────
         // Scene / camera / renderer
@@ -257,6 +258,19 @@ export class CoreEngine {
         }
     }
 
+    /** Register a callback that receives (deltaSeconds) every frame. */
+    registerFrameUpdate(callback) {
+        if (typeof callback !== 'function') return () => {};
+        this._frameUpdateCallbacks.add(callback);
+        return () => this.unregisterFrameUpdate(callback);
+    }
+
+    /** Remove a previously registered frame update callback. */
+    unregisterFrameUpdate(callback) {
+        if (typeof callback !== 'function') return;
+        this._frameUpdateCallbacks.delete(callback);
+    }
+
     /**
      * Register an Object3D as a raycast root so hover labels include it.
      * @param {THREE.Object3D} root
@@ -309,6 +323,7 @@ export class CoreEngine {
         }
         this._layers.forEach(l => l.dispose());
         this._raycastRoots.length = 0;
+        this._frameUpdateCallbacks.clear();
 
         this.scene.traverse(obj => {
             if (obj.geometry) obj.geometry.dispose();
@@ -545,6 +560,16 @@ export class CoreEngine {
                     layer.update(dt);
                 }
             });
+
+            if (this._frameUpdateCallbacks.size) {
+                this._frameUpdateCallbacks.forEach((cb) => {
+                    try {
+                        cb(dt);
+                    } catch (err) {
+                        console.error('Frame update callback failed:', err);
+                    }
+                });
+            }
 
             if (typeof TWEEN !== 'undefined' && typeof TWEEN.update === 'function') {
                 this._tweenTimelineMs += dt * 1000;
