@@ -672,8 +672,29 @@ export function initMainScene(canvas) { // Renamed function here
         }
 
         // Rotate the ambient star field slowly for subtle motion parallax.
-        starField.rotation.y += 0.00025;
-        starField.rotation.x += 0.0001;
+        starField.rotation.y += 0.00045;
+        starField.rotation.x += 0.00018;
+
+        const twinkleTime = performance.now() * 0.001;
+        starField.children.forEach(points => {
+            if (!(points instanceof THREE.Points)) return;
+            const { baseOpacities, twinkleOffsets, twinkleSpeeds, twinkleAmount } = points.userData || {};
+            if (!baseOpacities || !twinkleOffsets || !twinkleSpeeds) return;
+
+            const opacityAttribute = points.geometry.getAttribute('opacity');
+            if (!opacityAttribute) return;
+
+            for (let i = 0; i < opacityAttribute.count; i++) {
+                const base = baseOpacities[i];
+                const speed = twinkleSpeeds[i];
+                const offset = twinkleOffsets[i];
+                const twinkle = Math.sin(twinkleTime * speed + offset) * twinkleAmount * 0.6;
+                const value = THREE.MathUtils.clamp(base + twinkle, 0.2, 1.0);
+                opacityAttribute.setX(i, value);
+            }
+
+            opacityAttribute.needsUpdate = true;
+        });
 
         // --- Handle Keyboard Movement ---
         const cameraRight = new THREE.Vector3();
@@ -1015,53 +1036,127 @@ export function initMainScene(canvas) { // Renamed function here
     function createRotatingStarField() {
         const group = new THREE.Group();
 
-        const starCount = 1000;
-        const positions = new Float32Array(starCount * 3);
-        const colors = new Float32Array(starCount * 3);
+        const starSprite = createStarSpriteTexture();
+        group.userData.starTexture = starSprite;
+
+        const layers = [
+            { count: 1400, minRadius: 160, maxRadius: 520, size: 5.0, twinkle: 0.2 },
+            { count: 600, minRadius: 90, maxRadius: 220, size: 7.5, twinkle: 0.35 },
+        ];
 
         const colorOuter = new THREE.Color(0x4f91ff);
         const colorInner = new THREE.Color(0xffffff);
 
-        for (let i = 0; i < starCount; i++) {
-            // Distribute stars within a spherical shell to surround the scene.
-            const radius = THREE.MathUtils.randFloat(120, 420);
-            const theta = THREE.MathUtils.randFloat(0, Math.PI * 2);
-            const phi = Math.acos(THREE.MathUtils.randFloatSpread(2));
+        layers.forEach(({ count, minRadius, maxRadius, size, twinkle }) => {
+            const positions = new Float32Array(count * 3);
+            const colors = new Float32Array(count * 3);
+            const opacities = new Float32Array(count);
+            const baseOpacities = new Float32Array(count);
+            const twinkleOffsets = new Float32Array(count);
+            const twinkleSpeeds = new Float32Array(count);
 
-            const sinPhi = Math.sin(phi);
-            const x = radius * sinPhi * Math.cos(theta);
-            const y = radius * Math.cos(phi);
-            const z = radius * sinPhi * Math.sin(theta);
+            for (let i = 0; i < count; i++) {
+                const radius = THREE.MathUtils.randFloat(minRadius, maxRadius);
+                const theta = THREE.MathUtils.randFloat(0, Math.PI * 2);
+                const phi = Math.acos(THREE.MathUtils.randFloatSpread(2));
 
-            positions[i * 3] = x;
-            positions[i * 3 + 1] = y;
-            positions[i * 3 + 2] = z;
+                const sinPhi = Math.sin(phi);
+                const x = radius * sinPhi * Math.cos(theta);
+                const y = radius * Math.cos(phi);
+                const z = radius * sinPhi * Math.sin(theta);
 
-            // Blend star colours so distant stars skew cooler.
-            const lerpT = THREE.MathUtils.inverseLerp(120, 420, radius);
-            const starColor = colorInner.clone().lerp(colorOuter, lerpT);
-            colors[i * 3] = starColor.r;
-            colors[i * 3 + 1] = starColor.g;
-            colors[i * 3 + 2] = starColor.b;
-        }
+                positions[i * 3] = x;
+                positions[i * 3 + 1] = y;
+                positions[i * 3 + 2] = z;
 
-        const geometry = new THREE.BufferGeometry();
-        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+                const lerpT = THREE.MathUtils.inverseLerp(minRadius, maxRadius, radius);
+                const starColor = colorInner.clone().lerp(colorOuter, lerpT);
 
-        const material = new THREE.PointsMaterial({
-            size: 1.6,
-            sizeAttenuation: true,
-            transparent: true,
-            opacity: 0.85,
-            depthWrite: false,
-            vertexColors: true,
+                colors[i * 3] = starColor.r;
+                colors[i * 3 + 1] = starColor.g;
+                colors[i * 3 + 2] = starColor.b;
+
+                const baseOpacity = 0.55 + Math.random() * twinkle;
+                baseOpacities[i] = baseOpacity;
+                opacities[i] = baseOpacity;
+                twinkleOffsets[i] = Math.random() * Math.PI * 2;
+                twinkleSpeeds[i] = THREE.MathUtils.randFloat(0.35, 0.75);
+            }
+
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            geometry.setAttribute('opacity', new THREE.BufferAttribute(opacities, 1));
+
+            const material = new THREE.PointsMaterial({
+                size,
+                sizeAttenuation: false,
+                transparent: true,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending,
+                vertexColors: true,
+                map: starSprite,
+                alphaTest: 0.01,
+            });
+
+            // Custom shader chunks to pass per-point opacity to fragment shader.
+            material.onBeforeCompile = (shader) => {
+                shader.vertexShader = shader.vertexShader.replace(
+                    '#include <common>',
+                    `#include <common>\nattribute float opacity;\nvarying float vOpacity;`
+                );
+
+                shader.vertexShader = shader.vertexShader.replace(
+                    '#include <begin_vertex>',
+                    '#include <begin_vertex>\nvOpacity = opacity;'
+                );
+
+                shader.fragmentShader = shader.fragmentShader.replace(
+                    '#include <common>',
+                    '#include <common>\nvarying float vOpacity;'
+                );
+
+                shader.fragmentShader = shader.fragmentShader.replace(
+                    'gl_FragColor = vec4( outgoingLight, diffuseColor.a );',
+                    'gl_FragColor = vec4( outgoingLight, diffuseColor.a * vOpacity );'
+                );
+            };
+
+            const points = new THREE.Points(geometry, material);
+            points.userData = {
+                material,
+                geometry,
+                baseOpacities,
+                twinkleOffsets,
+                twinkleSpeeds,
+                twinkleAmount: twinkle,
+            };
+            group.add(points);
         });
 
-        const points = new THREE.Points(geometry, material);
-        group.add(points);
-
         return group;
+    }
+
+    function createStarSpriteTexture() {
+        const size = 128;
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const context = canvas.getContext('2d');
+
+        const gradient = context.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+        gradient.addColorStop(0, 'rgba(255, 255, 255, 0.95)');
+        gradient.addColorStop(0.25, 'rgba(120, 180, 255, 0.7)');
+        gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+        context.fillStyle = gradient;
+        context.fillRect(0, 0, size, size);
+
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.needsUpdate = true;
+
+        return texture;
     }
 
     animate(); // Start the animation loop
@@ -1110,18 +1205,26 @@ export function initMainScene(canvas) { // Renamed function here
         });
 
         if (starField) {
+            const disposedTextures = new Set();
             starField.children.forEach(child => {
                 if (child.geometry && typeof child.geometry.dispose === 'function') {
                     child.geometry.dispose();
                 }
-                if (child.material) {
-                    if (Array.isArray(child.material)) {
-                        child.material.forEach(mat => mat.dispose && mat.dispose());
-                    } else if (typeof child.material.dispose === 'function') {
-                        child.material.dispose();
-                    }
-                }
+                const materials = Array.isArray(child.material) ? child.material : [child.material];
+                materials
+                    .filter(Boolean)
+                    .forEach(mat => {
+                        if (mat.map && !disposedTextures.has(mat.map)) {
+                            disposedTextures.add(mat.map);
+                            mat.map.dispose();
+                        }
+                        mat.dispose && mat.dispose();
+                    });
             });
+            if (starField.userData && starField.userData.starTexture && !disposedTextures.has(starField.userData.starTexture)) {
+                starField.userData.starTexture.dispose();
+            }
+            starField.clear();
             scene.remove(starField);
         }
 
