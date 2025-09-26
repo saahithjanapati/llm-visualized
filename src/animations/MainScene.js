@@ -22,6 +22,9 @@ export function initMainScene(canvas) { // Renamed function here
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x111111); // Dark background
 
+    const starField = createRotatingStarField();
+    scene.add(starField);
+
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 3000);
     camera.position.set(0, 10, 25); // Position camera to view both objects
 
@@ -668,6 +671,10 @@ export function initMainScene(canvas) { // Renamed function here
             return; // Nothing else to do this frame
         }
 
+        // Rotate the ambient star field slowly for subtle motion parallax.
+        starField.rotation.y += 0.00025;
+        starField.rotation.x += 0.0001;
+
         // --- Handle Keyboard Movement ---
         const cameraRight = new THREE.Vector3();
         camera.getWorldDirection(cameraRight); // Get forward direction first
@@ -1005,6 +1012,58 @@ export function initMainScene(canvas) { // Renamed function here
         // renderer.render(scene, camera); // Replaced by composer.render()
     }
 
+    function createRotatingStarField() {
+        const group = new THREE.Group();
+
+        const starCount = 1000;
+        const positions = new Float32Array(starCount * 3);
+        const colors = new Float32Array(starCount * 3);
+
+        const colorOuter = new THREE.Color(0x4f91ff);
+        const colorInner = new THREE.Color(0xffffff);
+
+        for (let i = 0; i < starCount; i++) {
+            // Distribute stars within a spherical shell to surround the scene.
+            const radius = THREE.MathUtils.randFloat(120, 420);
+            const theta = THREE.MathUtils.randFloat(0, Math.PI * 2);
+            const phi = Math.acos(THREE.MathUtils.randFloatSpread(2));
+
+            const sinPhi = Math.sin(phi);
+            const x = radius * sinPhi * Math.cos(theta);
+            const y = radius * Math.cos(phi);
+            const z = radius * sinPhi * Math.sin(theta);
+
+            positions[i * 3] = x;
+            positions[i * 3 + 1] = y;
+            positions[i * 3 + 2] = z;
+
+            // Blend star colours so distant stars skew cooler.
+            const lerpT = THREE.MathUtils.inverseLerp(120, 420, radius);
+            const starColor = colorInner.clone().lerp(colorOuter, lerpT);
+            colors[i * 3] = starColor.r;
+            colors[i * 3 + 1] = starColor.g;
+            colors[i * 3 + 2] = starColor.b;
+        }
+
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+        const material = new THREE.PointsMaterial({
+            size: 1.6,
+            sizeAttenuation: true,
+            transparent: true,
+            opacity: 0.85,
+            depthWrite: false,
+            vertexColors: true,
+        });
+
+        const points = new THREE.Points(geometry, material);
+        group.add(points);
+
+        return group;
+    }
+
     animate(); // Start the animation loop
 
     // Return cleanup function
@@ -1049,6 +1108,22 @@ export function initMainScene(canvas) { // Renamed function here
             }
             matVis._clearMesh();
         });
+
+        if (starField) {
+            starField.children.forEach(child => {
+                if (child.geometry && typeof child.geometry.dispose === 'function') {
+                    child.geometry.dispose();
+                }
+                if (child.material) {
+                    if (Array.isArray(child.material)) {
+                        child.material.forEach(mat => mat.dispose && mat.dispose());
+                    } else if (typeof child.material.dispose === 'function') {
+                        child.material.dispose();
+                    }
+                }
+            });
+            scene.remove(starField);
+        }
 
         renderer.dispose();
     };
