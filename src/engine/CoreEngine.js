@@ -5,6 +5,48 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { QUALITY_PRESET, resolveRenderDprCap } from '../utils/constants.js';
 import Gpt2Layer from './layers/Gpt2Layer.js';
+import { SkyStarField } from './SkyStarField.js';
+
+const DEFAULT_SKY_STAR_OPTIONS = Object.freeze({
+    baseY: 0,
+    minHeight: 600,
+    maxHeight: 26000,
+    minRadius: 600,
+    maxRadius: 12000,
+    starCount: 1600,
+    rotationSpeed: 0.1
+});
+
+function sanitizeSkyStarOptions(options = {}) {
+    const merged = { ...DEFAULT_SKY_STAR_OPTIONS, ...(typeof options === 'object' ? options : {}) };
+
+    const sanitizeNumber = (value, fallback) => (Number.isFinite(value) ? value : fallback);
+
+    const config = {
+        baseY: sanitizeNumber(merged.baseY, DEFAULT_SKY_STAR_OPTIONS.baseY),
+        minHeight: sanitizeNumber(merged.minHeight, DEFAULT_SKY_STAR_OPTIONS.minHeight),
+        maxHeight: sanitizeNumber(merged.maxHeight, DEFAULT_SKY_STAR_OPTIONS.maxHeight),
+        minRadius: sanitizeNumber(merged.minRadius, DEFAULT_SKY_STAR_OPTIONS.minRadius),
+        maxRadius: sanitizeNumber(merged.maxRadius, DEFAULT_SKY_STAR_OPTIONS.maxRadius),
+        rotationSpeed: sanitizeNumber(merged.rotationSpeed, DEFAULT_SKY_STAR_OPTIONS.rotationSpeed),
+        starCount: Math.max(0, Math.floor(sanitizeNumber(merged.starCount, DEFAULT_SKY_STAR_OPTIONS.starCount)))
+    };
+
+    if (config.maxHeight <= config.minHeight) {
+        config.maxHeight = config.minHeight + 1;
+    }
+    if (config.maxRadius <= config.minRadius) {
+        config.maxRadius = config.minRadius + 1;
+    }
+
+    return config;
+}
+
+function skyStarConfigsDiffer(prev, next) {
+    if (!prev) return true;
+    const keys = ['baseY', 'minHeight', 'maxHeight', 'minRadius', 'maxRadius', 'starCount', 'rotationSpeed'];
+    return keys.some(key => prev[key] !== next[key]);
+}
 
 /**
  * CoreEngine is responsible for creating the Three-JS renderer, camera, 
@@ -98,6 +140,9 @@ export class CoreEngine {
         this._pointer   = new THREE.Vector2();
         this._raycastingEnabled = true; // can be toggled via public API
         this._raycastRoots = [];
+
+        this._starField = null;
+        this._skyStarOptions = null;
 
         // Hover label DOM element (similar styling to status overlay)
         this._hoverLabelDiv = document.createElement('div');
@@ -257,6 +302,41 @@ export class CoreEngine {
         }
     }
 
+    /** Enable or disable the rotating star field that surrounds the tower. */
+    setSkyStarsEnabled(enabled, options = {}) {
+        if (!enabled) {
+            if (this._starField) {
+                if (this._starField.group && this._starField.group.parent === this.scene) {
+                    this.scene.remove(this._starField.group);
+                }
+                this._starField.dispose();
+                this._starField = null;
+            }
+            this._skyStarOptions = null;
+            return;
+        }
+
+        const config = sanitizeSkyStarOptions({ ...this._skyStarOptions, ...options });
+        const needsRebuild = skyStarConfigsDiffer(this._skyStarOptions, config) || !this._starField;
+
+        if (needsRebuild) {
+            if (this._starField) {
+                if (this._starField.group && this._starField.group.parent === this.scene) {
+                    this.scene.remove(this._starField.group);
+                }
+                this._starField.dispose();
+            }
+            this._starField = new SkyStarField(config);
+            if (this._starField.group) {
+                this.scene.add(this._starField.group);
+            }
+        } else if (this._starField && this._starField.group && this._starField.group.parent !== this.scene) {
+            this.scene.add(this._starField.group);
+        }
+
+        this._skyStarOptions = { ...config };
+    }
+
     /**
      * Register an Object3D as a raycast root so hover labels include it.
      * @param {THREE.Object3D} root
@@ -317,6 +397,11 @@ export class CoreEngine {
                 else obj.material.dispose();
             }
         });
+
+        if (this._starField) {
+            this._starField.dispose();
+            this._starField = null;
+        }
 
         this.composer.passes.forEach(p => p.dispose && p.dispose());
         this.renderer.dispose();
@@ -537,8 +622,9 @@ export class CoreEngine {
 
         if (this._stats) this._stats.begin();
 
+        let dt = 0;
         if (!this._paused) {
-            const dt = this._clock.getDelta() * this._speed;
+            dt = this._clock.getDelta() * this._speed;
             this._layers.forEach(layer => {
                 if (!layer) return;
                 if (layer.isActive || layer._transitionPhase === 'positioning') {
@@ -550,6 +636,10 @@ export class CoreEngine {
                 this._tweenTimelineMs += dt * 1000;
                 TWEEN.update(this._tweenTimelineMs);
             }
+        }
+
+        if (this._starField) {
+            this._starField.update(dt);
         }
 
         this.controls.update();
