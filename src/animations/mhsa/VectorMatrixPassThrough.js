@@ -131,9 +131,9 @@ export function animateVectorMatrixPassThrough(
                 vector.userData = heavyVec.userData ? { ...heavyVec.userData } : {};
                 // Preserve and refine hover label for clarity
                 try {
-                    const cat = vectorCategory === 'K' ? 'Key Vector (Green)'
+                    const cat = vectorCategory === 'K' ? 'Key Vector (Red)'
                               : vectorCategory === 'Q' ? 'Query Vector (Blue)'
-                              : 'Value Vector (Red)';
+                              : 'Value Vector (Green)';
                     vector.group.userData.label = cat;
                     if (vector.mesh) vector.mesh.userData = { ...(vector.mesh.userData||{}), label: cat };
                 } catch (_) {}
@@ -142,7 +142,7 @@ export function animateVectorMatrixPassThrough(
                     delete vector.userData.trail;
                     delete vector.userData.trailWorld;
                 }
-                // If this is a green (K) vector, update its parent lane reference
+                // If this is a red (K) vector, update its parent lane reference
                 if (vectorCategory === 'K' && vector.userData.parentLane) {
                     const pl = vector.userData.parentLane;
                     const hIdx = vector.userData.headIndex;

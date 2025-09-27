@@ -127,7 +127,7 @@ export function initMultiHeadAttentionAnimation(containerElement) {
             scene.add(queryMatrix.group);
             headSetMatrices.push(queryMatrix);
 
-            // Create Key Matrix (Green)
+            // Create Key Matrix (Red)
             const keyMatrix = new WeightMatrixVisualization(
                 null, new THREE.Vector3(x_k, matrixPosY, 0),
                 matrixParams.width, matrixParams.height, matrixParams.depth,
@@ -135,12 +135,12 @@ export function initMultiHeadAttentionAnimation(containerElement) {
                 matrixParams.slitWidth, matrixParams.slitDepthFactor,
                 matrixParams.slitBottomWidthFactor, matrixParams.slitTopWidthFactor
             );
-            keyMatrix.setColor(new THREE.Color(0x00ff00));
+            keyMatrix.setColor(new THREE.Color(0xff0000));
             keyMatrix.group.userData.label = 'Key Weight Matrix';
             scene.add(keyMatrix.group);
             headSetMatrices.push(keyMatrix);
 
-            // Create Value Matrix (Red)
+            // Create Value Matrix (Green)
             const valueMatrix = new WeightMatrixVisualization(
                 null, new THREE.Vector3(x_v, matrixPosY, 0),
                 matrixParams.width, matrixParams.height, matrixParams.depth,
@@ -148,7 +148,7 @@ export function initMultiHeadAttentionAnimation(containerElement) {
                 matrixParams.slitWidth, matrixParams.slitDepthFactor,
                 matrixParams.slitBottomWidthFactor, matrixParams.slitTopWidthFactor
             );
-            valueMatrix.setColor(new THREE.Color(0xff0000));
+            valueMatrix.setColor(new THREE.Color(0x00ff00));
             valueMatrix.group.userData.label = 'Value Weight Matrix';
             scene.add(valueMatrix.group);
             headSetMatrices.push(valueMatrix);

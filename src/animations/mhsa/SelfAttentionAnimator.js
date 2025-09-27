@@ -10,19 +10,19 @@ const SHARED_SPHERE_GEOMETRY = new THREE.SphereGeometry(10, 12, 12);
  *
  * Responsibilities:
  * 1. Handle the legacy placeholder flow (for backwards compatibility)
- * 2. Extra rise for Value (red) vectors + horizontal alignment of
- *    corresponding Key (green) vectors underneath them.
+ * 2. Extra rise for Value (green) vectors + horizontal alignment of
+ *    corresponding Key (red) vectors underneath them.
  * 3. NEW – "conveyor-belt" style animation for Query (blue) vectors:
  *    • After the V/K alignment for a given head finishes we begin processing
  *      that head's queue of blue vectors.
  *    • The blue vectors are processed one-by-one in their ORIGINAL order
  *      (top → bottom along the slit index / lane order).
  *    • For the i-th blue vector we:
- *        a) Slide horizontally so it sits over the green matrix (x = K)
- *        b) Travel i positions along the green vectors (positive z direction
+ *        a) Slide horizontally so it sits over the red matrix (x = K)
+ *        b) Travel i positions along the red key vectors (positive z direction
  *           – lanes are sorted by z). We pause briefly at each K vector.
- *        c) Slide horizontally so it sits over the red matrix (x = V)
- *        d) Travel i positions visiting the red vectors, pausing at each.
+ *        c) Slide horizontally so it sits over the green matrix (x = V)
+ *        d) Travel i positions visiting the green value vectors, pausing at each.
  *        e) Fade the vector out (dispose + remove from scene).
  *    • When a blue vector leaves the queue we shift the remaining blue vectors
  *      up by one position so they visually fill the gap (like a conveyor belt).
@@ -40,13 +40,13 @@ export class SelfAttentionAnimator {
         // ------------------------------------------------------------------
         // V/K constants (distances remain static; durations scale via getters)
         // ------------------------------------------------------------------
-        this.RED_EXTRA_RISE   = SA_RED_EXTRA_RISE;   // additional rise for red (V) vectors
+        this.RED_EXTRA_RISE   = SA_RED_EXTRA_RISE;   // additional rise for value (V) vectors
 
         // Internal bookkeeping (per-head)
         this.blueQueues        = {};  // { headIdx: [vec, ...] }
         this.blueProcessing    = {};  // { headIdx: boolean }
         this.blueProcessedCount = {}; // { headIdx: number }
-        this.greensAligned     = {};  // { headIdx: boolean } – flagged once K vectors are in place
+        this.keysAligned       = {};  // { headIdx: boolean } – flagged once K vectors are in place
     }
 
     // Durations decoupled from GLOBAL_ANIM_SPEED_MULT to make presets clearly visible
@@ -115,7 +115,7 @@ export class SelfAttentionAnimator {
         }
 
         if (vectorCategory === 'V') {
-            // Value (red) vector: extra rise then trigger K alignment.
+            // Value (green) vector: extra rise then trigger K alignment.
             this._animateVVectorRise(vector, onDone);
             return;
         }
@@ -135,17 +135,17 @@ export class SelfAttentionAnimator {
     // V / K alignment helpers
     // ------------------------------------------------------------------
     /**
-     * Fixed Value (red) vectors rise in TWO separate stages:
+     * Fixed Value (green) vectors rise in TWO separate stages:
      * 1. VectorMatrixPassThrough.js – while passing vertically through the V-matrix
-     *    each red copy is tweened from its parking height (`headStopY`) up to
+     *    each green copy is tweened from its parking height (`headStopY`) up to
      *    `ctx.mhaPassThroughTargetY + ctx.mhaResultRiseOffsetY - 30`.
      *    This is the same base rise distance Q and K experience.
      * 2. SelfAttentionAnimator.js – this method then adds an additional
      *    `RED_EXTRA_RISE` (75 world-units) so the fixed V copies end up sitting
-     *    above the green K vectors.  At the end of this tween each fixed V copy
+     *    above the red K vectors.  At the end of this tween each fixed V copy
      *    is located at the canonical "raised-V" height:
      *        ctx.mhaPassThroughTargetY + ctx.mhaResultRiseOffsetY - 30 + RED_EXTRA_RISE
-     *    All subsequent duplicates and travelling red vectors snap to / match
+     *    All subsequent duplicates and travelling value vectors snap to / match
      *    this same Y so they remain perfectly level.
      */
     _animateVVectorRise(vector, onDone) {
@@ -159,11 +159,11 @@ export class SelfAttentionAnimator {
             .start();
     }
 
-    _alignKVectorsUnderV(redVector, onDone) {
-        const redX = redVector.group.position.x;
-        const redZ = redVector.group.position.z;
-        const headIdx = (redVector.userData && typeof redVector.userData.headIndex === 'number')
-            ? redVector.userData.headIndex : null;
+    _alignKVectorsUnderV(valueVector, onDone) {
+        const valueX = valueVector.group.position.x;
+        const valueZ = valueVector.group.position.z;
+        const headIdx = (valueVector.userData && typeof valueVector.userData.headIndex === 'number')
+            ? valueVector.userData.headIndex : null;
 
         if (headIdx === null || !this.ctx.currentLanes) {
             onDone && onDone();
@@ -174,18 +174,18 @@ export class SelfAttentionAnimator {
         let alignmentsCompleted  = 0;
 
         this.ctx.currentLanes.forEach(lane => {
-            if (Math.abs(lane.zPos - redZ) < 0.1 && lane.upwardCopies && lane.upwardCopies[headIdx]) {
-                const green = lane.upwardCopies[headIdx];
+            if (Math.abs(lane.zPos - valueZ) < 0.1 && lane.upwardCopies && lane.upwardCopies[headIdx]) {
+                const key = lane.upwardCopies[headIdx];
                 alignmentsInProgress++;
 
-                new TWEEN.Tween(green.group.position)
-                    .to({ x: redX }, this.K_ALIGN_DURATION)
+                new TWEEN.Tween(key.group.position)
+                    .to({ x: valueX }, this.K_ALIGN_DURATION)
                     .easing(TWEEN.Easing.Quadratic.Out)
                     .onComplete(() => {
                         alignmentsCompleted++;
                         if (alignmentsCompleted >= alignmentsInProgress) {
                             // Mark this head as ready for blue-vector conveyor processing.
-                            this.greensAligned[headIdx] = true;
+                            this.keysAligned[headIdx] = true;
                             // Merge fixed K/V vectors for this head to reduce draw calls
                             try { this.ctx && this.ctx._mergeFixedVectorsForHead && this.ctx._mergeFixedVectorsForHead(headIdx); } catch (_) { /* optional */ }
                             this._kickoffBlueConveyor(headIdx);
@@ -196,9 +196,9 @@ export class SelfAttentionAnimator {
             }
         });
 
-        // No greens to align – still flag readiness so blue vectors can run.
+        // No keys to align – still flag readiness so blue vectors can run.
         if (alignmentsInProgress === 0) {
-            this.greensAligned[headIdx] = true;
+            this.keysAligned[headIdx] = true;
                 // Merge fixed K/V vectors for this head immediately if nothing to align
                 try { this.ctx && this.ctx._mergeFixedVectorsForHead && this.ctx._mergeFixedVectorsForHead(headIdx); } catch (_) { /* optional */ }
             this._kickoffBlueConveyor(headIdx);
@@ -241,8 +241,8 @@ export class SelfAttentionAnimator {
             this._shiftRemainingBlueVectors(queue, headIdx);
         }
 
-        // If greens are already in position we can start processing immediately.
-        if (this.greensAligned[headIdx]) {
+        // If keys are already in position we can start processing immediately.
+        if (this.keysAligned[headIdx]) {
             this._kickoffBlueConveyor(headIdx);
         }
     }
@@ -381,40 +381,40 @@ export class SelfAttentionAnimator {
             .to({ x: horizontalToK }, this.BLUE_HORIZ_DURATION)
             .easing(QEasing)
             .onComplete(() => {
-                // 2. Traverse along K vectors i times
+                // 2. Traverse along key (red) vectors i times
                 const spheres = [];
                 this._traverseLanes(vector, laneZs, i, spheres, true, () => {
-                    // Lift spheres upward to align with red vectors
+                    // Lift spheres upward to align with value (green) vectors
                     this._riseSpheres(spheres);
-                    // 3. FADE OUT at the LAST green (K) vector, then TELEPORT & FADE IN as red over V column
+                    // 3. FADE OUT at the LAST red (K) vector, then TELEPORT & FADE IN as green over V column
                     new TWEEN.Tween(vector.group.scale)
                         .to({ x: 0.001, y: 0.001, z: 0.001 }, this.BLUE_HORIZ_DURATION / 2)
                         .easing(QEasing)
                         .onComplete(() => {
-                            // BEGIN NEW LOGIC – start red traversal using the first V copy and skip spawning a pre-visible red vector
+                            // BEGIN NEW LOGIC – start green traversal using the first V copy and skip spawning a pre-visible value vector
                                 if (vector.group.parent) vector.group.parent.remove(vector.group);
                                 if (typeof vector.dispose === 'function') vector.dispose();
-                                this._startRedTraversalFromFirstCopy(headIdx, i, laneZs, spheres, allDoneCb);
+                                this._startValueTraversalFromFirstCopy(headIdx, i, laneZs, spheres, allDoneCb);
                                 return;
                                 // (legacy logic kept for reference below)
                                 const targetX = horizontalToK; // stay aligned with K for pop-up effect
-                            // Move (instantly) to the red-vector height on the top lane
+                            // Move (instantly) to the value-vector height on the top lane
                             vector.group.position.set(
                                 targetX,
                                 vector.group.position.y + this.RED_EXTRA_RISE,
                                 laneZs[0]
                             );
-                            // Re-colour the vector to RED before popping back in
-                            this._setVectorColor(vector, this.ctx.brightRed || new THREE.Color(0xff0000));
+                            // Re-colour the vector to green before popping back in
+                            this._setVectorColor(vector, this.ctx.brightValue || new THREE.Color(0x33ff33));
 
-                            // 4. FADE BACK IN (now red)
+                            // 4. FADE BACK IN (now green)
                             new TWEEN.Tween(vector.group.scale)
                                 .to({ x: 1, y: 1, z: 1 }, this.BLUE_HORIZ_DURATION / 2)
                                 .easing(QEasing)
                                 .onComplete(() => {
-                                    // 5. Traverse along lanes again i times (over red vectors)
+                                    // 5. Traverse along lanes again i times (over green vectors)
                                     this._traverseLanes(vector, laneZs, i, spheres, false, () => {
-                                        // 6. Fade / dispose after finishing red traversal
+                                        // 6. Fade / dispose after finishing green traversal
             new TWEEN.Tween(vector.group.scale)
                 .to({ x: 0.001, y: 0.001, z: 0.001 }, this.DUPLICATE_POP_OUT_MS)
                                             .onComplete(() => {
@@ -433,7 +433,7 @@ export class SelfAttentionAnimator {
             .start();
     }
 
-    _startRedTraversalFromFirstCopy(headIdx, hopCount, laneZs, spheresArr, doneCb) {
+    _startValueTraversalFromFirstCopy(headIdx, hopCount, laneZs, spheresArr, doneCb) {
         if (!this.ctx.currentLanes || laneZs.length === 0) {
             doneCb && doneCb();
             return;
@@ -450,10 +450,10 @@ export class SelfAttentionAnimator {
             return;
         }
         const fixedVec = fixedObj.vec;
-        // Spawn travelling red vector OVER K column (horizontally offset) and ABOVE green vectors.
+        // Spawn travelling green vector OVER K column (horizontally offset) and ABOVE red key vectors.
         const kX = (this.ctx.headCoords && this.ctx.headCoords[headIdx]) ? this.ctx.headCoords[headIdx].k : fixedVec.group.position.x;
         // Set vertical position to the **canonical** raised-V height so it always matches
-        // fixed red vectors and highlight spheres, even if the fixed copy is still
+        // fixed value vectors and highlight spheres, even if the fixed copy is still
         // mid-animation.
         const spawnY = this.ctx.mhaPassThroughTargetY + this.ctx.mhaResultRiseOffsetY - 30 + this.RED_EXTRA_RISE;
         const spawnPos = new THREE.Vector3(kX, spawnY, fixedVec.group.position.z);
@@ -469,7 +469,7 @@ export class SelfAttentionAnimator {
         // Start invisible – will be revealed on first merge
         travellingVec.group.scale.set(0.001, 0.001, 0.001);
 
-        // Begin traversal over red vectors
+        // Begin traversal over value (green) vectors
         this._traverseLanes(travellingVec, laneZs, hopCount, spheresArr, false, () => {
             new TWEEN.Tween(travellingVec.group.scale)
                 .to({ x: 0.001, y: 0.001, z: 0.001 }, this.DUPLICATE_POP_OUT_MS)
@@ -494,15 +494,15 @@ export class SelfAttentionAnimator {
             .to({ z: targetZ }, this.BLUE_VERT_DURATION)
             .easing(TWEEN.Easing.Quadratic.InOut)
             .onComplete(() => {
-                // Create a sphere between blue (vector) and corresponding green vector if enabled
+                // Create a sphere between blue (vector) and corresponding red key vector if enabled
                 if (createSpheres) {
                     const headIdx = (vector.userData && typeof vector.userData.headIndex === 'number') ? vector.userData.headIndex : null;
                     if (headIdx !== null && this.ctx.currentLanes) {
                         const lane = this.ctx.currentLanes.find(l => Math.abs(l.zPos - targetZ) < 0.1);
                         if (lane && lane.upwardCopies && lane.upwardCopies[headIdx]) {
-                            const greenVec = lane.upwardCopies[headIdx];
-                            if (greenVec && greenVec.group) {
-                                const midPoint = new THREE.Vector3().addVectors(vector.group.position, greenVec.group.position).multiplyScalar(0.5);
+                            const keyVec = lane.upwardCopies[headIdx];
+                            if (keyVec && keyVec.group) {
+                                const midPoint = new THREE.Vector3().addVectors(vector.group.position, keyVec.group.position).multiplyScalar(0.5);
                                 const sphereGeom = SHARED_SPHERE_GEOMETRY;
                                 const hue = Math.random();
                                 const sat = THREE.MathUtils.lerp(0.85, 1.0, Math.random());
@@ -523,7 +523,7 @@ export class SelfAttentionAnimator {
                         }
                     }
                 }
-                // Handle sphere removal during red-vector traversal
+                // Handle sphere removal during value-vector traversal
                 if (!createSpheres && Array.isArray(spheresArr)) {
                     const idx = spheresArr.findIndex(s => Math.abs(s.position.z - targetZ) < 0.1);
                     if (idx >= 0) {
@@ -532,8 +532,8 @@ export class SelfAttentionAnimator {
                             this._traverseLanes(vector, laneZs, count, spheresArr, createSpheres, doneCb, stepIdx + 1);
                         };
                         // ------------------------------------------------------------------
-                        //  Spawn duplicate red vector from the fixed V vector and animate it
-                        //  through the sphere and into the moving red vector.
+                        //  Spawn duplicate value vector from the fixed V vector and animate it
+                        //  through the sphere and into the moving travelling copy.
                         // ------------------------------------------------------------------
                         const headIdx = (vector.userData && typeof vector.userData.headIndex === 'number') ? vector.userData.headIndex : null;
                         const lane = this.ctx.currentLanes ? this.ctx.currentLanes.find(l => Math.abs(l.zPos - targetZ) < 0.1) : null;
@@ -541,7 +541,7 @@ export class SelfAttentionAnimator {
                             const fixedObj = lane.sideCopies.find(sc => sc.headIndex === headIdx && sc.type === 'V');
                             if (fixedObj && fixedObj.vec) {
                                 const fixedVec = fixedObj.vec;
-                                // Ensure duplicates spawn at the **raised** red-vector height (match the highlight spheres).
+                                // Ensure duplicates spawn at the **raised** value-vector height (match the highlight spheres).
                                 const raisedY = sp ? sp.position.y : vector.group.position.y;
                                 const startPos = new THREE.Vector3(
                                     fixedVec.group.position.x,
@@ -560,12 +560,12 @@ export class SelfAttentionAnimator {
                                 dupVec.group.scale.set(0.001, 0.001, 0.001);
                                 // Optional quick pop-in
                 new TWEEN.Tween(dupVec.group.scale).to({ x: 1, y: 1, z: 1 }, this.DUPLICATE_POP_IN_MS).start();
-                                // Direct: fixed V -> travelling red vector
+                                // Direct: fixed V -> travelling value vector
                                 new TWEEN.Tween(dupVec.group.position)
                                     .to({ x: vector.group.position.x, y: raisedY, z: vector.group.position.z }, this.DUPLICATE_TRAVEL_MERGE_MS)
                                     .easing(TWEEN.Easing.Quadratic.InOut)
                                     .onComplete(() => {
-                                                // Reveal travelling red vector on its first merge
+                                                // Reveal travelling value vector on its first merge
                                                 if (vector.group.scale.x < 0.5) {
                                                 new TWEEN.Tween(vector.group.scale)
                                                     .to({ x: 1, y: 1, z: 1 }, this.DUPLICATE_POP_IN_MS)

@@ -6,7 +6,7 @@ import { StraightLineTrail, mergeTrailsIntoLineSegments } from '../utils/trailUt
 
 
 import { mapValueToColor } from '../utils/colors.js';
-import { MHSA_MATRIX_INITIAL_RESTING_COLOR, MHSA_BRIGHT_GREEN, MHSA_DARK_TINTED_GREEN, MHSA_BRIGHT_BLUE, MHSA_DARK_TINTED_BLUE, MHSA_BRIGHT_RED, MHSA_DARK_TINTED_RED, MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR, MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW, MHA_OUTPUT_PROJECTION_MATRIX_PARAMS, MHA_OUTPUT_PROJECTION_MATRIX_COLOR } from './LayerAnimationConstants.js';
+import { MHSA_MATRIX_INITIAL_RESTING_COLOR, MHSA_BRIGHT_KEY, MHSA_DARK_TINTED_KEY, MHSA_BRIGHT_BLUE, MHSA_DARK_TINTED_BLUE, MHSA_BRIGHT_VALUE, MHSA_DARK_TINTED_VALUE, MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR, MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW, MHA_OUTPUT_PROJECTION_MATRIX_PARAMS, MHA_OUTPUT_PROJECTION_MATRIX_COLOR } from './LayerAnimationConstants.js';
 import { INACTIVE_COMPONENT_COLOR, MHSA_DUPLICATE_VECTOR_RISE_SPEED, MHSA_PASS_THROUGH_TOTAL_DURATION_MS, MHSA_RESULT_RISE_OFFSET_Y, MHSA_HEAD_VECTOR_STOP_BELOW, MHA_RESULT_RISE_DURATION_BASE_MS, DECORATIVE_FADE_MS, DECORATIVE_FADE_DELAY_MS, MERGE_TO_ROW_DELAY_AFTER_FADE_MS, HEAD_COLOR_TRANSITION_MS, MERGE_POST_COLOR_TRANSITION_DELAY_MS, MERGE_EXTRA_BUFFER_MS, OUTPUT_PROJ_STAGE1_MS, OUTPUT_PROJ_STAGE2_MS, OUTPUT_PROJ_STAGE3_MS, GLOBAL_ANIM_SPEED_MULT, MHSA_PASS_THROUGH_BRIGHTEN_RATIO, MHSA_PASS_THROUGH_DIM_RATIO, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY } from '../utils/constants.js';
 import {
     // Constants needed for setup & animation
@@ -83,12 +83,12 @@ export class MHSAAnimation {
         this.matrixRestingEmissiveIntensity = 0.1;
         this.matrixRestingOpacity           = 1.0;
 
-        this.brightGreen      = new THREE.Color(MHSA_BRIGHT_GREEN);
-        this.darkTintedGreen  = new THREE.Color(MHSA_DARK_TINTED_GREEN);
         this.brightBlue       = new THREE.Color(MHSA_BRIGHT_BLUE);
         this.darkTintedBlue   = new THREE.Color(MHSA_DARK_TINTED_BLUE);
-        this.brightRed        = new THREE.Color(MHSA_BRIGHT_RED);
-        this.darkTintedRed    = new THREE.Color(MHSA_DARK_TINTED_RED);
+        this.brightKey        = new THREE.Color(MHSA_BRIGHT_KEY);
+        this.darkTintedKey    = new THREE.Color(MHSA_DARK_TINTED_KEY);
+        this.brightValue      = new THREE.Color(MHSA_BRIGHT_VALUE);
+        this.darkTintedValue  = new THREE.Color(MHSA_DARK_TINTED_VALUE);
 
         // --------------------------------------------------------------
         //   Build static visuals via new refactored helper
@@ -453,7 +453,7 @@ export class MHSAAnimation {
             for (let headIdx = 0; headIdx < NUM_HEAD_SETS_LAYER; headIdx++) {
                 const kVec = lane.upwardCopies[headIdx];
                 const kMatrix = this.mhaVisualizations[headIdx * 3 + 1];
-                this.animateVectorMatrixPassThrough(kVec, kMatrix, this.brightGreen, this.darkTintedGreen, 0.333, this.mhaPassThroughTargetY, this.mhaPassThroughDuration, this.mhaResultRiseOffsetY, this.mhaResultRiseDuration, this.outputVectorLength, singleAnimationDone, 'K');
+                this.animateVectorMatrixPassThrough(kVec, kMatrix, this.brightKey, this.darkTintedKey, 0.333, this.mhaPassThroughTargetY, this.mhaPassThroughDuration, this.mhaResultRiseOffsetY, this.mhaResultRiseDuration, this.outputVectorLength, singleAnimationDone, 'K');
 
                 const qSideCopy = lane.sideCopies.find(sc => sc.headIndex === headIdx && sc.type === 'Q');
                 if (qSideCopy && qSideCopy.vec) {
@@ -462,7 +462,7 @@ export class MHSAAnimation {
 
                 const vSideCopy = lane.sideCopies.find(sc => sc.headIndex === headIdx && sc.type === 'V');
                 if (vSideCopy && vSideCopy.vec) {
-                    this.animateVectorMatrixPassThrough(vSideCopy.vec, vSideCopy.matrixRef, this.brightRed, this.darkTintedRed, 0.0, this.mhaPassThroughTargetY, this.mhaPassThroughDuration, this.mhaResultRiseOffsetY, this.mhaResultRiseDuration, this.outputVectorLength, singleAnimationDone, 'V');
+                this.animateVectorMatrixPassThrough(vSideCopy.vec, vSideCopy.matrixRef, this.brightValue, this.darkTintedValue, 0.0, this.mhaPassThroughTargetY, this.mhaPassThroughDuration, this.mhaResultRiseOffsetY, this.mhaResultRiseDuration, this.outputVectorLength, singleAnimationDone, 'V');
                 } else { totalAnimationsToComplete--; }
             }
         });
@@ -524,8 +524,8 @@ export class MHSAAnimation {
             const kMatrix = this.mhaVisualizations[i * 3 + 1];
             const vMatrix = this.mhaVisualizations[i * 3 + 2];
             if (makePulse(qMatrix, this.brightBlue, this.darkTintedBlue)) pulsesStarted++;
-            if (makePulse(kMatrix, this.brightGreen, this.darkTintedGreen)) pulsesStarted++;
-            if (makePulse(vMatrix, this.brightRed, this.darkTintedRed)) pulsesStarted++;
+            if (makePulse(kMatrix, this.brightKey, this.darkTintedKey)) pulsesStarted++;
+            if (makePulse(vMatrix, this.brightValue, this.darkTintedValue)) pulsesStarted++;
         }
 
         // Safely clear the pulse flag after the pulses end
@@ -953,7 +953,7 @@ export class MHSAAnimation {
         // Attach metadata for decoding instanceId on raycast
         const category = /V(\b|_|head|$)/.test(debugName) ? 'V' : 'K';
         // Assign descriptive label so hover shows full text for merged groups
-        group.userData.label = (category === 'V') ? 'Merged Value Vectors (Red)' : 'Merged Key Vectors (Green)';
+        group.userData.label = (category === 'V') ? 'Merged Value Vectors (Green)' : 'Merged Key Vectors (Red)';
         const mergedKVMeta = {
             category,
             vectorPrismCount: VECTOR_LENGTH_PRISM,
@@ -964,7 +964,7 @@ export class MHSAAnimation {
         group.userData.mergedKVMeta = mergedKVMeta;
         instanced.userData.mergedKVMeta = mergedKVMeta;
         // Also set label on mesh for direct hits
-        instanced.userData.label = (category === 'V') ? 'Merged Value Vectors (Red)' : 'Merged Key Vectors (Green)';
+        instanced.userData.label = (category === 'V') ? 'Merged Value Vectors (Green)' : 'Merged Key Vectors (Red)';
         return group;
     }
 
@@ -1000,33 +1000,33 @@ export class MHSAAnimation {
         if (this.mhaPassThroughPhase !== 'mha_pass_through_complete') return;
         // Ensure all heads are aligned before collapsing geometry
         for (let h = 0; h < NUM_HEAD_SETS_LAYER; h++) {
-            if (!this.selfAttentionAnimator || this.selfAttentionAnimator.greensAligned[h] !== true) {
+            if (!this.selfAttentionAnimator || this.selfAttentionAnimator.keysAligned[h] !== true) {
                 return;
             }
         }
 
-        const allGreens = [];
-        const allReds = [];
+        const allKeys = [];
+        const allValues = [];
         this.currentLanes.forEach(lane => {
             if (!lane) return;
             if (Array.isArray(lane.upwardCopies)) {
                 for (let h = 0; h < NUM_HEAD_SETS_LAYER; h++) {
                     const kVec = lane.upwardCopies[h];
-                    if (kVec && kVec.mesh) allGreens.push(kVec);
+                    if (kVec && kVec.mesh) allKeys.push(kVec);
                 }
             }
             if (Array.isArray(lane.sideCopies)) {
                 lane.sideCopies.forEach(sc => {
-                    if (sc && sc.type === 'V' && sc.vec && sc.vec.mesh) allReds.push(sc.vec);
+                    if (sc && sc.type === 'V' && sc.vec && sc.vec.mesh) allValues.push(sc.vec);
                 });
             }
         });
-        if (!allGreens.length && !allReds.length) return;
+        if (!allKeys.length && !allValues.length) return;
 
         let mergedKGroup = null;
         let mergedVGroup = null;
-        try { if (allGreens.length) mergedKGroup = this._buildMergedPrismsFromVectors(allGreens, 'MergedAllK'); } catch (_) {}
-        try { if (allReds.length)   mergedVGroup = this._buildMergedPrismsFromVectors(allReds,   'MergedAllV'); } catch (_) {}
+        try { if (allKeys.length)   mergedKGroup = this._buildMergedPrismsFromVectors(allKeys,   'MergedAllK'); } catch (_) {}
+        try { if (allValues.length) mergedVGroup = this._buildMergedPrismsFromVectors(allValues, 'MergedAllV'); } catch (_) {}
         if (mergedKGroup) this.parentGroup.add(mergedKGroup);
         if (mergedVGroup) this.parentGroup.add(mergedVGroup);
 
@@ -1040,8 +1040,8 @@ export class MHSAAnimation {
                 }
             } catch (_) {}
         };
-        allGreens.forEach(stripMeshKeepGroup);
-        allReds.forEach(stripMeshKeepGroup);
+        allKeys.forEach(stripMeshKeepGroup);
+        allValues.forEach(stripMeshKeepGroup);
         this._allFixedMerged = true;
         console.log('MHSAAnimation: Merged all fixed K and V vectors into two instanced meshes.');
     }

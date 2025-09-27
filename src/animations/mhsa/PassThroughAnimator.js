@@ -52,8 +52,8 @@ export class PassThroughAnimator {
                 ctx.animateVectorMatrixPassThrough(
                     kVec,
                     kMatrix,
-                    ctx.brightGreen,
-                    ctx.darkTintedGreen,
+                    ctx.brightKey,
+                    ctx.darkTintedKey,
                     0.333,
                     ctx.mhaPassThroughTargetY,
                     ctx.mhaPassThroughDuration,
@@ -91,8 +91,8 @@ export class PassThroughAnimator {
                     ctx.animateVectorMatrixPassThrough(
                         vSideCopy.vec,
                         vSideCopy.matrixRef,
-                        ctx.brightRed,
-                        ctx.darkTintedRed,
+                        ctx.brightValue,
+                        ctx.darkTintedValue,
                         0.0,
                         ctx.mhaPassThroughTargetY,
                         ctx.mhaPassThroughDuration,
