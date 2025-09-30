@@ -283,7 +283,11 @@ export class LayerNormalizationVisualization {
                 rimIntensity: 0.6,
                 gradientSharpness: 1.3,
                 gradientBias: 0.05,
-                fresnelBoost: 0.32
+                fresnelBoost: 0.38,
+                circuitFrequency: 19.0,
+                circuitStrength: 0.24,
+                circuitContrast: 3.0,
+                circuitMix: 0.4
             });
 
         // After all geometry operations *and* potential caching we assign
@@ -362,7 +366,11 @@ export class LayerNormalizationVisualization {
                 rimIntensity: 0.65,
                 gradientSharpness: 1.35,
                 gradientBias: 0.05,
-                fresnelBoost: 0.35
+                fresnelBoost: 0.41,
+                circuitFrequency: 21.0,
+                circuitStrength: 0.28,
+                circuitContrast: 3.2,
+                circuitMix: 0.45
             });
 
         const inst = new THREE.InstancedMesh(sliceGeometry, mat, NUM_VECTOR_LANES);

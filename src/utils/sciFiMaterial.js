@@ -40,34 +40,39 @@ function resolveDimensions(dimensions) {
  */
 export function createSciFiMaterial(options = {}) {
     const {
-        baseColor = 0x060913,
-        accentColor = 0x33e0ff,
-        secondaryColor = 0x09111f,
-        edgeColor = 0x7fffff,
-        emissiveColor = 0x2fffff,
-        emissiveIntensity = 0.35,
-        metalness = 0.65,
-        roughness = 0.18,
-        clearcoat = 0.7,
-        clearcoatRoughness = 0.3,
-        transmission = 0.08,
-        thickness = 1.2,
-        iridescence = 0.35,
-        iridescenceIOR = 1.25,
-        sheen = 0.45,
-        sheenColor = 0x99ffff,
-        sheenRoughness = 0.6,
-        envMapIntensity = 1.4,
+        baseColor = 0x071226,
+        accentColor = 0x49f3ff,
+        secondaryColor = 0x0a1b2d,
+        edgeColor = 0x9cf6ff,
+        emissiveColor = 0x4ff6ff,
+        emissiveIntensity = 0.45,
+        metalness = 0.78,
+        roughness = 0.12,
+        clearcoat = 0.92,
+        clearcoatRoughness = 0.22,
+        transmission = 0.12,
+        thickness = 1.6,
+        iridescence = 0.42,
+        iridescenceIOR = 1.32,
+        sheen = 0.52,
+        sheenColor = 0xa9ffff,
+        sheenRoughness = 0.48,
+        envMapIntensity = 1.65,
         transparent = true,
         opacity = 0.9,
         side = THREE.FrontSide,
         dimensions = new THREE.Vector3(1, 1, 1),
         stripeFrequency = 8.0,
-        stripeStrength = 0.45,
-        rimIntensity = 0.65,
-        gradientSharpness = 1.4,
-        gradientBias = 0.04,
-        fresnelBoost = 0.35,
+        stripeStrength = 0.58,
+        rimIntensity = 0.72,
+        gradientSharpness = 1.55,
+        gradientBias = 0.05,
+        fresnelBoost = 0.4,
+        circuitColor = 0x73e7ff,
+        circuitFrequency = 16.0,
+        circuitStrength = 0.22,
+        circuitContrast = 2.6,
+        circuitMix = 0.35,
         extraUniforms = {}
     } = options;
 
@@ -95,16 +100,21 @@ export function createSciFiMaterial(options = {}) {
     const dims = resolveDimensions(dimensions);
 
     const uniforms = {
-        uAccentColor: { value: toColor(accentColor, 0x33e0ff) },
-        uSecondaryColor: { value: toColor(secondaryColor, 0x09111f) },
-        uEdgeColor: { value: toColor(edgeColor, 0x7fffff) },
+        uAccentColor: { value: toColor(accentColor, 0x49f3ff) },
+        uSecondaryColor: { value: toColor(secondaryColor, 0x0a1b2d) },
+        uEdgeColor: { value: toColor(edgeColor, 0x9cf6ff) },
         uDimensions: { value: dims },
         uStripeFrequency: { value: stripeFrequency },
         uStripeStrength: { value: stripeStrength },
         uRimIntensity: { value: rimIntensity },
         uGradientSharpness: { value: gradientSharpness },
         uGradientBias: { value: gradientBias },
-        uFresnelBoost: { value: fresnelBoost }
+        uFresnelBoost: { value: fresnelBoost },
+        uCircuitColor: { value: toColor(circuitColor, 0x73e7ff) },
+        uCircuitFrequency: { value: circuitFrequency },
+        uCircuitStrength: { value: circuitStrength },
+        uCircuitContrast: { value: circuitContrast },
+        uCircuitMix: { value: circuitMix }
     };
 
     for (const [key, value] of Object.entries(extraUniforms)) {
@@ -123,7 +133,7 @@ export function createSciFiMaterial(options = {}) {
         shader.fragmentShader = shader.fragmentShader
             .replace(
                 '#include <common>',
-                '#include <common>\nvarying vec3 vLocalPos;\nvarying vec3 vWorldNormal;\nuniform vec3 uAccentColor;\nuniform vec3 uSecondaryColor;\nuniform vec3 uEdgeColor;\nuniform vec3 uDimensions;\nuniform float uStripeFrequency;\nuniform float uStripeStrength;\nuniform float uRimIntensity;\nuniform float uGradientSharpness;\nuniform float uGradientBias;\nuniform float uFresnelBoost;\n'
+                '#include <common>\nvarying vec3 vLocalPos;\nvarying vec3 vWorldNormal;\nuniform vec3 uAccentColor;\nuniform vec3 uSecondaryColor;\nuniform vec3 uEdgeColor;\nuniform vec3 uDimensions;\nuniform float uStripeFrequency;\nuniform float uStripeStrength;\nuniform float uRimIntensity;\nuniform float uGradientSharpness;\nuniform float uGradientBias;\nuniform float uFresnelBoost;\nuniform vec3 uCircuitColor;\nuniform float uCircuitFrequency;\nuniform float uCircuitStrength;\nuniform float uCircuitContrast;\nuniform float uCircuitMix;\n'
             )
             .replace(
                 '#include <color_fragment>',
@@ -146,9 +156,23 @@ export function createSciFiMaterial(options = {}) {
 
                 vec3 rimColor = uEdgeColor * (rim * uRimIntensity + fresnel * uFresnelBoost);
 
+                vec2 circuitUv = vec2(vLocalPos.x / max(dims.x, 0.0001), vLocalPos.z / max(dims.z, 0.0001));
+                float circuitA = abs(sin((circuitUv.x + circuitUv.y) * uCircuitFrequency));
+                float circuitB = abs(sin((circuitUv.x - circuitUv.y) * (uCircuitFrequency * 0.62)));
+                float circuitC = abs(sin((vLocalPos.y / max(dims.y, 0.0001)) * uCircuitFrequency * 0.5));
+                float circuitry = pow(clamp(circuitA + circuitB, 0.0, 1.0), max(uCircuitContrast, 0.001));
+                circuitry = mix(circuitry, pow(clamp(circuitC, 0.0, 1.0), max(uCircuitContrast * 1.25, 0.001)), clamp(uCircuitMix, 0.0, 1.0));
+                vec3 circuitColor = uCircuitColor * circuitry * uCircuitStrength;
+
+                vec3 local01 = clamp((vLocalPos / dims) * 0.5 + 0.5, 0.0, 1.0);
+                float edgeGlow = pow(1.0 - min(min(local01.x, local01.z), local01.y), 4.0);
+                vec3 panelGlow = uCircuitColor * edgeGlow * (uCircuitStrength * 0.18);
+
                 diffuseColor.rgb = mix(diffuseColor.rgb, gradColor, 0.85);
                 diffuseColor.rgb += stripeColor;
                 diffuseColor.rgb += rimColor;
+                diffuseColor.rgb += circuitColor;
+                diffuseColor.rgb += panelGlow;
             `
             );
     };
@@ -184,6 +208,9 @@ export function updateSciFiMaterialColor(material, color) {
         uniforms.uAccentColor.value.copy(accent);
         uniforms.uSecondaryColor.value.copy(secondary);
         uniforms.uEdgeColor.value.copy(edge);
+        if (uniforms.uCircuitColor) {
+            uniforms.uCircuitColor.value.copy(edge);
+        }
 
         if (mat.color) mat.color.copy(secondary);
         if (mat.emissive) mat.emissive.copy(edge);
