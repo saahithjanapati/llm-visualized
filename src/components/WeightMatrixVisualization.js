@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { CSG } from 'three-csg-ts'; // Import CSG
 import { QUALITY_PRESET, NUM_VECTOR_LANES, VECTOR_DEPTH_SPACING, USE_GLB_MATERIALS } from '../utils/constants.js';
-import { createSciFiMaterial, updateSciFiDimensions, updateSciFiMaterialColor } from '../utils/sciFiMaterial.js';
+import { createSciFiMaterial, towerMaterialPreset, updateSciFiDimensions, updateSciFiMaterialColor } from '../utils/sciFiMaterial.js';
 
 // ------------------------------------------------------------------
 // Geometry cache (module-level) – keyed by a stringified set of the main
@@ -333,34 +333,26 @@ export class WeightMatrixVisualization {
         if (USE_GLB_MATERIALS && __materialCache.has(cacheKey)) {
             sideMaterial = __materialCache.get(cacheKey).clone();
         } else {
-            sideMaterial = createSciFiMaterial({
+            sideMaterial = createSciFiMaterial(towerMaterialPreset('matrixSide', {
                 side: THREE.FrontSide,
-                transparent: true,
-                opacity: 0.92,
                 dimensions: { width: this.width, height: this.height, depth: this.depth },
                 stripeFrequency: (Math.PI * 2) / Math.max(this.depth / 10, 1),
-                stripeStrength: 0.55,
-                rimIntensity: 0.55,
-                gradientSharpness: 1.25,
-                gradientBias: 0.025,
-                fresnelBoost: 0.28
-            });
+                gradientSharpness: 1.6,
+                gradientBias: 0.065,
+                fresnelBoost: 0.52
+            }));
         }
 
         const capMaterial = (USE_GLB_MATERIALS && __materialCache.has(cacheKey))
             ? sideMaterial.clone()
-            : createSciFiMaterial({
+            : createSciFiMaterial(towerMaterialPreset('matrixCap', {
                 side: THREE.DoubleSide,
-                transparent: true,
-                opacity: 0.96,
                 dimensions: { width: this.width, height: this.height, depth: Math.max(this.depth * 0.25, 1) },
                 stripeFrequency: (Math.PI * 2) / Math.max(this.width / 6, 1),
-                stripeStrength: 0.35,
-                rimIntensity: 0.75,
-                gradientSharpness: 1.45,
-                gradientBias: 0.04,
-                fresnelBoost: 0.4
-            });
+                gradientSharpness: 1.65,
+                gradientBias: 0.085,
+                fresnelBoost: 0.55
+            }));
 
         capMaterial.polygonOffset = true;
         capMaterial.polygonOffsetFactor = -1; // pull slightly forward
@@ -492,18 +484,14 @@ export class WeightMatrixVisualization {
         if (USE_GLB_MATERIALS && __materialCache.has(sliceKey)) {
             mat = __materialCache.get(sliceKey).clone();
         } else {
-            mat = createSciFiMaterial({
+            mat = createSciFiMaterial(towerMaterialPreset('matrixSlice', {
                 side: THREE.DoubleSide,
-                transparent: true,
-                opacity: 0.92,
                 dimensions: sciFiSliceDims,
                 stripeFrequency: (Math.PI * 2) / Math.max(sliceDepth / 6, 1),
-                stripeStrength: 0.5,
-                rimIntensity: 0.6,
-                gradientSharpness: 1.3,
-                gradientBias: 0.03,
-                fresnelBoost: 0.32
-            });
+                gradientSharpness: 1.62,
+                gradientBias: 0.07,
+                fresnelBoost: 0.54
+            }));
         }
 
         // ----------------------------------------------------------
@@ -551,30 +539,22 @@ export class WeightMatrixVisualization {
             __capBackCache.set(sliceKey, capGeoBack);
         }
 
-        const capMatFront = createSciFiMaterial({
+        const capMatFront = createSciFiMaterial(towerMaterialPreset('matrixSliceCap', {
             side: THREE.DoubleSide,
-            transparent: true,
-            opacity: 0.96,
             dimensions: sciFiSliceDims,
             stripeFrequency: (Math.PI * 2) / Math.max(this.width / 6, 1),
-            stripeStrength: 0.35,
-            rimIntensity: 0.8,
-            gradientSharpness: 1.45,
-            gradientBias: 0.045,
-            fresnelBoost: 0.4
-        });
-        const capMatBack  = createSciFiMaterial({
+            gradientSharpness: 1.68,
+            gradientBias: 0.09,
+            fresnelBoost: 0.56
+        }));
+        const capMatBack  = createSciFiMaterial(towerMaterialPreset('matrixSliceCap', {
             side: THREE.DoubleSide,
-            transparent: true,
-            opacity: 0.96,
             dimensions: sciFiSliceDims,
             stripeFrequency: (Math.PI * 2) / Math.max(this.width / 6, 1),
-            stripeStrength: 0.35,
-            rimIntensity: 0.8,
-            gradientSharpness: 1.45,
-            gradientBias: 0.045,
-            fresnelBoost: 0.4
-        });
+            gradientSharpness: 1.68,
+            gradientBias: 0.09,
+            fresnelBoost: 0.56
+        }));
 
         const frontCaps = new THREE.InstancedMesh(capGeoFront.clone(), capMatFront, NUM_VECTOR_LANES);
         const backCaps  = new THREE.InstancedMesh(capGeoBack.clone(),  capMatBack,  NUM_VECTOR_LANES);

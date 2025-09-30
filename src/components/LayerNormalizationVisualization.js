@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { CSG } from 'three-csg-ts';
 import { NUM_VECTOR_LANES, VECTOR_DEPTH_SPACING, USE_GLB_MATERIALS } from '../utils/constants.js';
-import { createSciFiMaterial, updateSciFiDimensions, updateSciFiMaterialColor } from '../utils/sciFiMaterial.js';
+import { createSciFiMaterial, towerMaterialPreset, updateSciFiDimensions, updateSciFiMaterialColor } from '../utils/sciFiMaterial.js';
 
 // A visualization for the Layer Normalization operation.
 // It renders an extruded ellipse (like a squashed cylinder) with a hollow interior
@@ -273,18 +273,15 @@ export class LayerNormalizationVisualization {
         // ==== STEP 5 — assign material & add to the outer group ====
         const material = (USE_GLB_MATERIALS && __materialCache.has(cacheKey))
             ? __materialCache.get(cacheKey).clone()
-            : createSciFiMaterial({
+            : createSciFiMaterial(towerMaterialPreset('layerNorm', {
                 side: THREE.DoubleSide,
-                transparent: true,
-                opacity: 0.88,
                 dimensions: { width: this.width, height: this.height, depth: this.depth },
                 stripeFrequency: (Math.PI * 2) / Math.max(this.depth / 8, 1),
-                stripeStrength: 0.45,
-                rimIntensity: 0.6,
-                gradientSharpness: 1.3,
-                gradientBias: 0.05,
-                fresnelBoost: 0.32
-            });
+                rimIntensity: 0.92,
+                gradientSharpness: 1.48,
+                gradientBias: 0.06,
+                fresnelBoost: 0.5
+            }));
 
         // After all geometry operations *and* potential caching we assign
         // material and add the mesh to the parent group.  When the geometry
@@ -352,18 +349,15 @@ export class LayerNormalizationVisualization {
         const sciFiSliceDims = { width: this.width, height: this.height, depth: sliceDepth };
         const mat = (USE_GLB_MATERIALS && __materialCache.has(sliceKey))
             ? __materialCache.get(sliceKey).clone()
-            : createSciFiMaterial({
+            : createSciFiMaterial(towerMaterialPreset('layerNormSlice', {
                 side: THREE.DoubleSide,
-                transparent: true,
-                opacity: 0.9,
                 dimensions: sciFiSliceDims,
                 stripeFrequency: (Math.PI * 2) / Math.max(sliceDepth / 8, 1),
-                stripeStrength: 0.4,
-                rimIntensity: 0.65,
-                gradientSharpness: 1.35,
-                gradientBias: 0.05,
-                fresnelBoost: 0.35
-            });
+                rimIntensity: 0.95,
+                gradientSharpness: 1.52,
+                gradientBias: 0.06,
+                fresnelBoost: 0.52
+            }));
 
         const inst = new THREE.InstancedMesh(sliceGeometry, mat, NUM_VECTOR_LANES);
         const mtx = new THREE.Matrix4();

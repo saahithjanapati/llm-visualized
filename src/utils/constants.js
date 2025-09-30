@@ -507,7 +507,7 @@ export const TOP_LN_TO_TOP_EMBED_GAP = 140;
 // -----------------------------------------------------------------------------
 
 /** Base colour for inactive components (visible but dark). */
-export const INACTIVE_COMPONENT_COLOR = 0x202020;
+export const INACTIVE_COMPONENT_COLOR = 0x131d2c;
 
 // ------------------------------------------------------------
 // UI / Caption Constants
