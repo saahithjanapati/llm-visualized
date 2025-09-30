@@ -3,6 +3,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js';
 import { LayerNormalizationVisualization } from '../components/LayerNormalizationVisualization.js';
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization.js';
+import { createSciFiMaterial } from '../utils/sciFiMaterial.js';
 
 // Build a static (non-animated) visualisation of an entire 12-layer GPT block.
 // The layout is kept deliberately simple: every layer is placed one above the
@@ -84,9 +85,85 @@ export function initGPTModelVisualization(container) {
     const baseGeometry = geomFactory.mesh.geometry; // shared across all heads
 
     // Materials – bright distinct colours
-    const qMat = new THREE.MeshStandardMaterial({ color: 0x3388ff, metalness: 0.2, roughness: 0.6, transparent: true, opacity: 0.85 });
-    const kMat = new THREE.MeshStandardMaterial({ color: 0x33ff88, metalness: 0.2, roughness: 0.6, transparent: true, opacity: 0.85 });
-    const vMat = new THREE.MeshStandardMaterial({ color: 0xff3355, metalness: 0.2, roughness: 0.6, transparent: true, opacity: 0.85 });
+    const sharedMatrixDimensions = new THREE.Vector3(matrixParams.width, matrixParams.height, matrixParams.depth);
+    const qMat = createSciFiMaterial({
+        baseColor: 0x05142b,
+        accentColor: 0x3ff6ff,
+        secondaryColor: 0x030916,
+        edgeColor: 0x9bffff,
+        emissiveColor: 0x2cdcff,
+        emissiveIntensity: 0.6,
+        metalness: 0.82,
+        roughness: 0.2,
+        clearcoat: 0.9,
+        clearcoatRoughness: 0.24,
+        transmission: 0.12,
+        thickness: 1.8,
+        iridescence: 0.45,
+        iridescenceIOR: 1.32,
+        sheen: 0.55,
+        sheenColor: 0x90f7ff,
+        envMapIntensity: 1.7,
+        dimensions: sharedMatrixDimensions,
+        stripeFrequency: 9.0,
+        stripeStrength: 0.55,
+        rimIntensity: 0.78,
+        gradientSharpness: 1.9,
+        gradientBias: 0.02,
+        fresnelBoost: 0.48,
+    });
+    const kMat = createSciFiMaterial({
+        baseColor: 0x180c2c,
+        accentColor: 0xa575ff,
+        secondaryColor: 0x100620,
+        edgeColor: 0xe2b6ff,
+        emissiveColor: 0x7c3dff,
+        emissiveIntensity: 0.55,
+        metalness: 0.8,
+        roughness: 0.22,
+        clearcoat: 0.88,
+        clearcoatRoughness: 0.28,
+        transmission: 0.1,
+        thickness: 1.5,
+        iridescence: 0.52,
+        iridescenceIOR: 1.34,
+        sheen: 0.5,
+        sheenColor: 0xd8baff,
+        envMapIntensity: 1.6,
+        dimensions: sharedMatrixDimensions,
+        stripeFrequency: 8.4,
+        stripeStrength: 0.5,
+        rimIntensity: 0.74,
+        gradientSharpness: 1.7,
+        gradientBias: 0.015,
+        fresnelBoost: 0.46,
+    });
+    const vMat = createSciFiMaterial({
+        baseColor: 0x26080f,
+        accentColor: 0xff6fa3,
+        secondaryColor: 0x15040a,
+        edgeColor: 0xffbfd6,
+        emissiveColor: 0xff4f8c,
+        emissiveIntensity: 0.58,
+        metalness: 0.78,
+        roughness: 0.24,
+        clearcoat: 0.87,
+        clearcoatRoughness: 0.26,
+        transmission: 0.11,
+        thickness: 1.6,
+        iridescence: 0.48,
+        iridescenceIOR: 1.31,
+        sheen: 0.52,
+        sheenColor: 0xffa7c9,
+        envMapIntensity: 1.65,
+        dimensions: sharedMatrixDimensions,
+        stripeFrequency: 8.8,
+        stripeStrength: 0.52,
+        rimIntensity: 0.76,
+        gradientSharpness: 1.8,
+        gradientBias: 0.018,
+        fresnelBoost: 0.47,
+    });
 
     // Instanced meshes — one for each of Q, K, V
     const MAX_HEADS   = 12; // GPT size (fewer for bigger models)
@@ -180,10 +257,106 @@ export function initGPTModelVisualization(container) {
     // ───────────────────────────────────────────────────────────────────────────
     // Per-layer: LayerNorms & MLP (non-instanced; lighter count)
     // ───────────────────────────────────────────────────────────────────────────
-    const lnColour1 = new THREE.Color(0x00e0ff);
-    const lnColour2 = new THREE.Color(0xff00ff);
-    const mlpColour1 = new THREE.Color(0xffcc00);
-    const mlpColour2 = new THREE.Color(0xff8800);
+    const lnMaterialLower = createSciFiMaterial({
+        baseColor: 0x040b18,
+        accentColor: 0x38e8ff,
+        secondaryColor: 0x020610,
+        edgeColor: 0x73faff,
+        emissiveColor: 0x22d9ff,
+        emissiveIntensity: 0.48,
+        metalness: 0.75,
+        roughness: 0.22,
+        clearcoat: 0.88,
+        clearcoatRoughness: 0.25,
+        transmission: 0.1,
+        thickness: 1.4,
+        iridescence: 0.4,
+        sheen: 0.5,
+        sheenColor: 0x88f4ff,
+        envMapIntensity: 1.5,
+        dimensions: new THREE.Vector3(lnWidth, lnHeight, lnDepth),
+        stripeFrequency: 6.2,
+        stripeStrength: 0.36,
+        rimIntensity: 0.65,
+        gradientSharpness: 1.6,
+        gradientBias: 0.05,
+        fresnelBoost: 0.42,
+    });
+    const lnMaterialUpper = createSciFiMaterial({
+        baseColor: 0x14041c,
+        accentColor: 0xff6df4,
+        secondaryColor: 0x0d0213,
+        edgeColor: 0xffb5fb,
+        emissiveColor: 0xff45f0,
+        emissiveIntensity: 0.5,
+        metalness: 0.74,
+        roughness: 0.24,
+        clearcoat: 0.88,
+        clearcoatRoughness: 0.27,
+        transmission: 0.1,
+        thickness: 1.3,
+        iridescence: 0.44,
+        sheen: 0.52,
+        sheenColor: 0xffa3f9,
+        envMapIntensity: 1.55,
+        dimensions: new THREE.Vector3(lnWidth, lnHeight, lnDepth),
+        stripeFrequency: 6.8,
+        stripeStrength: 0.38,
+        rimIntensity: 0.68,
+        gradientSharpness: 1.7,
+        gradientBias: 0.045,
+        fresnelBoost: 0.44,
+    });
+    const mlpMaterialUp = createSciFiMaterial({
+        baseColor: 0x190d02,
+        accentColor: 0xffd26a,
+        secondaryColor: 0x100701,
+        edgeColor: 0xfff0c2,
+        emissiveColor: 0xffb347,
+        emissiveIntensity: 0.52,
+        metalness: 0.76,
+        roughness: 0.27,
+        clearcoat: 0.86,
+        clearcoatRoughness: 0.3,
+        transmission: 0.09,
+        thickness: 1.4,
+        iridescence: 0.38,
+        sheen: 0.48,
+        sheenColor: 0xffe2a0,
+        envMapIntensity: 1.45,
+        dimensions: new THREE.Vector3(mlpWidth, mlpHeight, mlpDepth),
+        stripeFrequency: 5.8,
+        stripeStrength: 0.34,
+        rimIntensity: 0.62,
+        gradientSharpness: 1.5,
+        gradientBias: 0.06,
+        fresnelBoost: 0.4,
+    });
+    const mlpMaterialDown = createSciFiMaterial({
+        baseColor: 0x220603,
+        accentColor: 0xff8c4b,
+        secondaryColor: 0x140301,
+        edgeColor: 0xffc0a1,
+        emissiveColor: 0xff5e1f,
+        emissiveIntensity: 0.54,
+        metalness: 0.78,
+        roughness: 0.25,
+        clearcoat: 0.85,
+        clearcoatRoughness: 0.28,
+        transmission: 0.09,
+        thickness: 1.5,
+        iridescence: 0.36,
+        sheen: 0.5,
+        sheenColor: 0xffaf88,
+        envMapIntensity: 1.48,
+        dimensions: new THREE.Vector3(mlpWidth, mlpHeight, mlpDepth),
+        stripeFrequency: 6.0,
+        stripeStrength: 0.35,
+        rimIntensity: 0.64,
+        gradientSharpness: 1.55,
+        gradientBias: 0.055,
+        fresnelBoost: 0.41,
+    });
 
     // We reuse geometry by holding one base LayerNormVis & one base MLP matrix
     const lnFactory = new LayerNormalizationVisualization(new THREE.Vector3(), lnWidth, lnHeight, lnDepth, 1.0, 5, 2.5, 3.75);
@@ -200,14 +373,14 @@ export function initGPTModelVisualization(container) {
 
         // Bottom LayerNorm ------------------------------------------------------
         {
-            const mesh = new THREE.Mesh(lnBaseGeom, new THREE.MeshStandardMaterial({ color: lnColour1, metalness: 0.2, roughness: 0.6, transparent: true, opacity: 0.85 }));
+            const mesh = new THREE.Mesh(lnBaseGeom, lnMaterialLower);
             mesh.position.set(lnCentreX, baseY + 10, 0);
             scene.add(mesh);
         }
 
         // Top LayerNorm (after attention) --------------------------------------
         {
-            const mesh = new THREE.Mesh(lnBaseGeom, new THREE.MeshStandardMaterial({ color: lnColour2, metalness: 0.2, roughness: 0.6, transparent: true, opacity: 0.85 }));
+            const mesh = new THREE.Mesh(lnBaseGeom, lnMaterialUpper);
             mesh.position.set(lnCentreX, baseY + attentionYOffset + 35, 0);
             scene.add(mesh);
         }
@@ -215,13 +388,13 @@ export function initGPTModelVisualization(container) {
         // MLP block (two matrices) ---------------------------------------------
         {
             // Bottom (upsample) matrix
-            const upMesh = new THREE.Mesh(mlpUpFactory.mesh.geometry, new THREE.MeshStandardMaterial({ color: mlpColour1, metalness: 0.15, roughness: 0.65, transparent: true, opacity: 0.85 }));
+            const upMesh = new THREE.Mesh(mlpUpFactory.mesh.geometry, mlpMaterialUp);
             const upCenterY = baseY + attentionYOffset + 60;
             upMesh.position.set(mlpCentreX, upCenterY, 0);
             scene.add(upMesh);
 
             // Top (downsample) matrix – placed directly above the upsample block
-            const downMesh = new THREE.Mesh(mlpDownFactory.mesh.geometry, new THREE.MeshStandardMaterial({ color: mlpColour2, metalness: 0.15, roughness: 0.65, transparent: true, opacity: 0.85 }));
+            const downMesh = new THREE.Mesh(mlpDownFactory.mesh.geometry, mlpMaterialDown);
             downMesh.position.set(mlpCentreX, upCenterY + mlpHeight, 0);
             scene.add(downMesh);
         }
