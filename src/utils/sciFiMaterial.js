@@ -40,34 +40,41 @@ function resolveDimensions(dimensions) {
  */
 export function createSciFiMaterial(options = {}) {
     const {
-        baseColor = 0x060913,
-        accentColor = 0x33e0ff,
-        secondaryColor = 0x09111f,
-        edgeColor = 0x7fffff,
-        emissiveColor = 0x2fffff,
-        emissiveIntensity = 0.35,
-        metalness = 0.65,
-        roughness = 0.18,
-        clearcoat = 0.7,
-        clearcoatRoughness = 0.3,
-        transmission = 0.08,
-        thickness = 1.2,
-        iridescence = 0.35,
-        iridescenceIOR = 1.25,
-        sheen = 0.45,
-        sheenColor = 0x99ffff,
-        sheenRoughness = 0.6,
-        envMapIntensity = 1.4,
+        baseColor = 0x041021,
+        accentColor = 0x4cd8ff,
+        secondaryColor = 0x050d1a,
+        edgeColor = 0xa5f6ff,
+        emissiveColor = 0x53e2ff,
+        emissiveIntensity = 0.48,
+        metalness = 0.78,
+        roughness = 0.12,
+        clearcoat = 0.92,
+        clearcoatRoughness = 0.18,
+        transmission = 0.16,
+        thickness = 1.6,
+        iridescence = 0.55,
+        iridescenceIOR = 1.32,
+        sheen = 0.55,
+        sheenColor = 0xb9ffff,
+        sheenRoughness = 0.42,
+        envMapIntensity = 1.8,
         transparent = true,
-        opacity = 0.9,
+        opacity = 0.88,
         side = THREE.FrontSide,
         dimensions = new THREE.Vector3(1, 1, 1),
         stripeFrequency = 8.0,
         stripeStrength = 0.45,
-        rimIntensity = 0.65,
-        gradientSharpness = 1.4,
-        gradientBias = 0.04,
-        fresnelBoost = 0.35,
+        rimIntensity = 0.72,
+        gradientSharpness = 1.55,
+        gradientBias = 0.035,
+        fresnelBoost = 0.42,
+        accentMix = 0.9,
+        glowFalloff = 1.9,
+        depthAccentStrength = 0.25,
+        scanlineFrequency = 14.0,
+        scanlineStrength = 0.2,
+        glintStrength = 0.16,
+        noiseStrength = 0.035,
         extraUniforms = {}
     } = options;
 
@@ -104,7 +111,14 @@ export function createSciFiMaterial(options = {}) {
         uRimIntensity: { value: rimIntensity },
         uGradientSharpness: { value: gradientSharpness },
         uGradientBias: { value: gradientBias },
-        uFresnelBoost: { value: fresnelBoost }
+        uFresnelBoost: { value: fresnelBoost },
+        uAccentMix: { value: accentMix },
+        uGlowFalloff: { value: glowFalloff },
+        uDepthAccentStrength: { value: depthAccentStrength },
+        uScanlineFrequency: { value: scanlineFrequency },
+        uScanlineStrength: { value: scanlineStrength },
+        uGlintStrength: { value: glintStrength },
+        uNoiseStrength: { value: noiseStrength }
     };
 
     for (const [key, value] of Object.entries(extraUniforms)) {
@@ -123,7 +137,7 @@ export function createSciFiMaterial(options = {}) {
         shader.fragmentShader = shader.fragmentShader
             .replace(
                 '#include <common>',
-                '#include <common>\nvarying vec3 vLocalPos;\nvarying vec3 vWorldNormal;\nuniform vec3 uAccentColor;\nuniform vec3 uSecondaryColor;\nuniform vec3 uEdgeColor;\nuniform vec3 uDimensions;\nuniform float uStripeFrequency;\nuniform float uStripeStrength;\nuniform float uRimIntensity;\nuniform float uGradientSharpness;\nuniform float uGradientBias;\nuniform float uFresnelBoost;\n'
+                '#include <common>\nvarying vec3 vLocalPos;\nvarying vec3 vWorldNormal;\nuniform vec3 uAccentColor;\nuniform vec3 uSecondaryColor;\nuniform vec3 uEdgeColor;\nuniform vec3 uDimensions;\nuniform float uStripeFrequency;\nuniform float uStripeStrength;\nuniform float uRimIntensity;\nuniform float uGradientSharpness;\nuniform float uGradientBias;\nuniform float uFresnelBoost;\nuniform float uAccentMix;\nuniform float uGlowFalloff;\nuniform float uDepthAccentStrength;\nuniform float uScanlineFrequency;\nuniform float uScanlineStrength;\nuniform float uGlintStrength;\nuniform float uNoiseStrength;\n'
             )
             .replace(
                 '#include <color_fragment>',
@@ -144,11 +158,29 @@ export function createSciFiMaterial(options = {}) {
                 vec3 fresnelDir = normalize(vViewPosition);
                 float fresnel = pow(1.0 - max(dot(nrm, fresnelDir), 0.0), 3.0);
 
+                float scanline = 0.5 + 0.5 * sin((vLocalPos.y + dims.y * 0.5) * uScanlineFrequency);
+                vec3 scanColor = uAccentColor * (pow(scanline, 6.0) * uScanlineStrength);
+
+                float depthNorm = clamp((vLocalPos.z / dims.z) * 0.5 + 0.5, 0.0, 1.0);
+                float glow = exp(-abs(vLocalPos.x) / max(dims.x, 0.0001) * uGlowFalloff);
+                vec3 depthAccent = mix(uSecondaryColor, uAccentColor, depthNorm) * glow * uDepthAccentStrength;
+
                 vec3 rimColor = uEdgeColor * (rim * uRimIntensity + fresnel * uFresnelBoost);
 
-                diffuseColor.rgb = mix(diffuseColor.rgb, gradColor, 0.85);
+                vec3 highlightDir = normalize(vec3(0.35, 0.85, 0.2));
+                float glint = pow(max(dot(nrm, highlightDir), 0.0), 16.0) * uGlintStrength;
+                vec3 glintColor = uEdgeColor * glint;
+
+                float holoNoise = fract(sin(dot(vLocalPos.xz, vec2(12.9898, 78.233))) * 43758.5453);
+                vec3 noiseColor = uEdgeColor * pow(holoNoise, 4.0) * uNoiseStrength;
+
+                diffuseColor.rgb = mix(diffuseColor.rgb, gradColor, clamp(uAccentMix, 0.0, 1.0));
                 diffuseColor.rgb += stripeColor;
                 diffuseColor.rgb += rimColor;
+                diffuseColor.rgb += scanColor;
+                diffuseColor.rgb += depthAccent;
+                diffuseColor.rgb += glintColor;
+                diffuseColor.rgb += noiseColor;
             `
             );
     };
@@ -176,17 +208,23 @@ export function updateSciFiMaterialColor(material, color) {
         }
         const uniforms = mat.userData.sciFiUniforms;
         const accent = toColor(color, color);
+        accent.offsetHSL(0.02, 0.08, 0.05);
         const secondary = accent.clone();
-        secondary.offsetHSL(0, -0.18, -0.4);
+        secondary.offsetHSL(0, -0.22, -0.48);
         const edge = accent.clone();
-        edge.offsetHSL(0, -0.05, 0.2);
+        edge.offsetHSL(-0.04, -0.08, 0.32);
+        const emissive = accent.clone();
+        emissive.offsetHSL(-0.02, -0.12, 0.28);
 
         uniforms.uAccentColor.value.copy(accent);
         uniforms.uSecondaryColor.value.copy(secondary);
         uniforms.uEdgeColor.value.copy(edge);
 
         if (mat.color) mat.color.copy(secondary);
-        if (mat.emissive) mat.emissive.copy(edge);
+        if (mat.emissive) mat.emissive.copy(emissive);
+        if (typeof mat.emissiveIntensity === 'number') {
+            mat.emissiveIntensity = Math.max(mat.emissiveIntensity, 0.48);
+        }
     }
 }
 
