@@ -343,7 +343,11 @@ export class WeightMatrixVisualization {
                 rimIntensity: 0.55,
                 gradientSharpness: 1.25,
                 gradientBias: 0.025,
-                fresnelBoost: 0.28
+                fresnelBoost: 0.34,
+                circuitFrequency: 18.0,
+                circuitStrength: 0.28,
+                circuitContrast: 3.2,
+                circuitMix: 0.42
             });
         }
 
@@ -359,7 +363,11 @@ export class WeightMatrixVisualization {
                 rimIntensity: 0.75,
                 gradientSharpness: 1.45,
                 gradientBias: 0.04,
-                fresnelBoost: 0.4
+                fresnelBoost: 0.46,
+                circuitFrequency: 22.0,
+                circuitStrength: 0.33,
+                circuitContrast: 3.4,
+                circuitMix: 0.5
             });
 
         capMaterial.polygonOffset = true;
@@ -502,7 +510,11 @@ export class WeightMatrixVisualization {
                 rimIntensity: 0.6,
                 gradientSharpness: 1.3,
                 gradientBias: 0.03,
-                fresnelBoost: 0.32
+                fresnelBoost: 0.38,
+                circuitFrequency: 20.0,
+                circuitStrength: 0.26,
+                circuitContrast: 3.0,
+                circuitMix: 0.46
             });
         }
 
@@ -561,7 +573,11 @@ export class WeightMatrixVisualization {
             rimIntensity: 0.8,
             gradientSharpness: 1.45,
             gradientBias: 0.045,
-            fresnelBoost: 0.4
+            fresnelBoost: 0.48,
+            circuitFrequency: 22.5,
+            circuitStrength: 0.35,
+            circuitContrast: 3.5,
+            circuitMix: 0.52
         });
         const capMatBack  = createSciFiMaterial({
             side: THREE.DoubleSide,
@@ -573,7 +589,11 @@ export class WeightMatrixVisualization {
             rimIntensity: 0.8,
             gradientSharpness: 1.45,
             gradientBias: 0.045,
-            fresnelBoost: 0.4
+            fresnelBoost: 0.48,
+            circuitFrequency: 22.5,
+            circuitStrength: 0.35,
+            circuitContrast: 3.5,
+            circuitMix: 0.52
         });
 
         const frontCaps = new THREE.InstancedMesh(capGeoFront.clone(), capMatFront, NUM_VECTOR_LANES);
