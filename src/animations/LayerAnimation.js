@@ -1140,7 +1140,7 @@ export function initLayerAnimation(container) {
                     const distance = topY - vec.group.position.y;
                     const duration = (distance / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
                     const matrixStartColor = mlpDarkGray.clone();
-                    const matrixEndColor = new THREE.Color(0xb07c13); // bright orange
+                    const matrixEndColor = new THREE.Color(0x8c4b00); // darker orange
                     new TWEEN.Tween({ t: 0 })
                         .to({ t: 1 }, duration)
                         .easing(TWEEN.Easing.Quadratic.InOut)
@@ -1222,7 +1222,7 @@ export function initLayerAnimation(container) {
                                 .onComplete(() => {
                                     // After the pause, start the down-projection pass-through
                                     setTimeout(() => {
-                                        const orangeColor = new THREE.Color(0xb07c13);
+                                        const orangeColor = new THREE.Color(0x8c4b00);
 
                                         const downBottomY = mlpMatrixDown_centerY - MLP_MATRIX_PARAMS_DOWN.height / 2;
                                         const downTopY = mlpMatrixDown_centerY + MLP_MATRIX_PARAMS_DOWN.height / 2;
