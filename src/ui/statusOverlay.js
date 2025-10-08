@@ -3,6 +3,7 @@ import { appState } from '../state/appState.js';
 import { getPreference } from '../utils/preferences.js';
 import { MHA_FINAL_Q_COLOR } from '../animations/LayerAnimationConstants.js';
 import { USE_PHYSICAL_MATERIALS } from '../utils/constants.js';
+import { onThemeChange } from '../state/themeState.js';
 
 // Initializes status overlay and equations panel updates.
 export function initStatusOverlay(pipeline, NUM_LAYERS) {
@@ -172,6 +173,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
 
     let framePending = false;
     let needsUpdate = false;
+    let detachTheme = () => {};
 
     const scheduleStatusUpdate = () => {
         if (framePending) return;
@@ -183,6 +185,13 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
             updateStatus();
         });
     };
+
+    detachTheme = onThemeChange(() => {
+        if (appState.vocabTopRef) {
+            appState.vocabTopRef.setColor(new THREE.Color(MHA_FINAL_Q_COLOR));
+        }
+        scheduleStatusUpdate();
+    });
 
     const onProgress = () => {
         needsUpdate = true;
@@ -225,4 +234,8 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         pipeline.addEventListener('progress', onProgress);
     }
     updateStatus();
+
+    if (typeof window !== 'undefined') {
+        window.addEventListener('unload', () => detachTheme(), { once: true });
+    }
 }

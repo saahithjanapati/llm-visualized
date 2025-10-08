@@ -13,7 +13,7 @@
     <!-- Loading GIF overlay -->
     <img id="loadingGif" src="cool-fun.gif" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:4;max-width:30%;height:auto;" />
     <!-- Status overlay (top-right) -->
-    <div id="statusOverlay" style="position:fixed;top:56px;right:10px;padding:8px 12px;font-family:monospace;font-size:14px;color:#fff;background:rgba(20,20,20,0.35);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);border-radius:8px;pointer-events:none;z-index:5;white-space:pre;">Layer 1 / 12\nStage: Loading</div>
+    <div id="statusOverlay">Layer 1 / 12\nStage: Loading</div>
     <!-- Top-right controls -->
     <div id="topControls">
         <button id="pauseBtn" type="button" aria-pressed="false" aria-label="Pause animation" title="Pause animation">Pause</button>
@@ -44,6 +44,10 @@
                             Fast
                         </label>
                     </div>
+                </div>
+                <div class="settings-section">
+                    <label class="section-label">Color theme</label>
+                    <div id="themeOptions" class="theme-group" role="radiogroup" aria-label="Color theme"></div>
                 </div>
                 <div class="settings-section">
                     <label class="section-label">Interaction</label>
