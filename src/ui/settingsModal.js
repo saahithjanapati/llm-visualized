@@ -1,6 +1,7 @@
 import { setPlaybackSpeed } from '../utils/constants.js';
 import { setPreference } from '../utils/preferences.js';
 import { appState } from '../state/appState.js';
+import { getThemeOptions, getCurrentThemeId, applyTheme } from '../state/themeState.js';
 
 // Wires up the settings modal controls.
 export function initSettingsModal(pipeline) {
@@ -8,6 +9,18 @@ export function initSettingsModal(pipeline) {
     const settingsOverlay = document.getElementById('settingsOverlay');
     const settingsClose = document.getElementById('settingsClose');
     const equationsPanel = document.getElementById('equationsPanel');
+    const themeSelect = document.getElementById('themeSelect');
+
+    if (themeSelect && !themeSelect.options.length) {
+        const options = getThemeOptions();
+        for (const { id, label } of options) {
+            const opt = document.createElement('option');
+            opt.value = id;
+            opt.textContent = label;
+            themeSelect.appendChild(opt);
+        }
+        themeSelect.value = getCurrentThemeId();
+    }
 
     function applySpeed(value) {
         setPlaybackSpeed(value);
@@ -32,6 +45,7 @@ export function initSettingsModal(pipeline) {
         if (eq) eq.checked = !!appState.showEquations;
         const bg = document.getElementById('toggleHdrBackground');
         if (bg) bg.checked = !!appState.showHdrBackground;
+        if (themeSelect) themeSelect.value = getCurrentThemeId();
     }
 
     function closeSettings() {
@@ -91,5 +105,9 @@ export function initSettingsModal(pipeline) {
         appState.showHdrBackground = !!bgToggle.checked;
         setPreference('showHdrBackground', appState.showHdrBackground);
         appState.applyEnvironmentBackground(pipeline);
+    });
+
+    themeSelect?.addEventListener('change', () => {
+        applyTheme(themeSelect.value, pipeline);
     });
 }

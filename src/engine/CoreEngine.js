@@ -176,10 +176,11 @@ export class CoreEngine {
         this._applyCameraZoomLimit();
         this._updateCameraFarFromControls();
 
-        this.scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-        const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
-        dirLight.position.set(25, 40, 40);
-        this.scene.add(dirLight);
+        this._ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+        this.scene.add(this._ambientLight);
+        this._directionalLight = new THREE.DirectionalLight(0xffffff, 0.9);
+        this._directionalLight.position.set(25, 40, 40);
+        this.scene.add(this._directionalLight);
 
         // ────────────────────────────────────────────────────────────────────
         // Initialise layers
@@ -282,6 +283,50 @@ export class CoreEngine {
     /** Return current raycasting state. */
     isRaycastingEnabled() {
         return !!this._raycastingEnabled;
+    }
+
+    applyTheme(theme) {
+        if (!theme || !theme.three) return;
+        const { three } = theme;
+
+        if (typeof three.sceneBackground !== 'undefined') {
+            const desired = three.sceneBackground;
+            const isTexture = this.scene.background && typeof this.scene.background.isTexture === 'boolean' && this.scene.background.isTexture;
+            if (!isTexture) {
+                if (this.scene.background instanceof THREE.Color) {
+                    this.scene.background.set(desired);
+                } else {
+                    this.scene.background = new THREE.Color(desired);
+                }
+            }
+        }
+
+        if (this._ambientLight && three.ambientLight) {
+            if (typeof three.ambientLight.color !== 'undefined') {
+                this._ambientLight.color.set(three.ambientLight.color);
+            }
+            if (typeof three.ambientLight.intensity === 'number') {
+                this._ambientLight.intensity = three.ambientLight.intensity;
+            }
+        }
+
+        if (this._directionalLight && three.directionalLight) {
+            if (typeof three.directionalLight.color !== 'undefined') {
+                this._directionalLight.color.set(three.directionalLight.color);
+            }
+            if (typeof three.directionalLight.intensity === 'number') {
+                this._directionalLight.intensity = three.directionalLight.intensity;
+            }
+        }
+
+        if (this._hoverLabelDiv && three.hoverLabel) {
+            if (typeof three.hoverLabel.background === 'string') {
+                this._hoverLabelDiv.style.background = three.hoverLabel.background;
+            }
+            if (typeof three.hoverLabel.color === 'string') {
+                this._hoverLabelDiv.style.color = three.hoverLabel.color;
+            }
+        }
     }
 
     pause(reason = 'generic') {

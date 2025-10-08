@@ -37,6 +37,7 @@ import {
 import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
 import { buildMHAVisuals, VectorRouter, PassThroughAnimator, SelfAttentionAnimator } from './mhsa/index.js';
 import { animateVectorMatrixPassThrough as animateVectorMatrixPassThroughExternal } from './mhsa/VectorMatrixPassThrough.js';
+import { getCurrentTheme, subscribeThemeChange } from '../state/themeState.js';
 
 const _tmpWorld = new THREE.Vector3();
 const _tmpWorld2 = new THREE.Vector3();
@@ -78,17 +79,23 @@ export class MHSAAnimation {
         this.mhaResultRiseOffsetY    = MHSA_RESULT_RISE_OFFSET_Y;
         // Note: durations are exposed as getters to reflect runtime speed changes
 
+        const initialTheme = getCurrentTheme();
+        this._themeColors = initialTheme?.three || {};
+        const resolveThemeColor = (key, fallback) => ((this._themeColors && typeof this._themeColors[key] !== 'undefined')
+            ? this._themeColors[key]
+            : fallback);
+
         // Colours & material defaults
-        this.matrixInitialRestingColor     = new THREE.Color(MHSA_MATRIX_INITIAL_RESTING_COLOR);
+        this.matrixInitialRestingColor     = new THREE.Color(resolveThemeColor('mhsaMatrixRestingColor', MHSA_MATRIX_INITIAL_RESTING_COLOR));
         this.matrixRestingEmissiveIntensity = 0.1;
         this.matrixRestingOpacity           = 1.0;
 
-        this.brightGreen      = new THREE.Color(MHSA_BRIGHT_GREEN);
-        this.darkTintedGreen  = new THREE.Color(MHSA_DARK_TINTED_GREEN);
-        this.brightBlue       = new THREE.Color(MHSA_BRIGHT_BLUE);
-        this.darkTintedBlue   = new THREE.Color(MHSA_DARK_TINTED_BLUE);
-        this.brightRed        = new THREE.Color(MHSA_BRIGHT_RED);
-        this.darkTintedRed    = new THREE.Color(MHSA_DARK_TINTED_RED);
+        this.brightGreen      = new THREE.Color(resolveThemeColor('mhsaBrightGreen', MHSA_BRIGHT_GREEN));
+        this.darkTintedGreen  = new THREE.Color(resolveThemeColor('mhsaDarkGreen', MHSA_DARK_TINTED_GREEN));
+        this.brightBlue       = new THREE.Color(resolveThemeColor('mhsaBrightBlue', MHSA_BRIGHT_BLUE));
+        this.darkTintedBlue   = new THREE.Color(resolveThemeColor('mhsaDarkBlue', MHSA_DARK_TINTED_BLUE));
+        this.brightRed        = new THREE.Color(resolveThemeColor('mhsaBrightRed', MHSA_BRIGHT_RED));
+        this.darkTintedRed    = new THREE.Color(resolveThemeColor('mhsaDarkRed', MHSA_DARK_TINTED_RED));
 
         // --------------------------------------------------------------
         //   Build static visuals via new refactored helper
@@ -97,7 +104,7 @@ export class MHSAAnimation {
             branchX: this.branchX,
             mhsaBaseY: this.mhsaBaseY,
             matrixRestingOpacity: 1.0, // retains original behaviour
-        });
+        }, this._themeColors);
 
         this.mhaVisualizations           = visuals.mhaVisualizations;
         this.headsCentersX               = visuals.headsCentersX;
@@ -109,6 +116,10 @@ export class MHSAAnimation {
         this.outputProjMatrixActiveColor  = visuals.outputProjMatrixActiveColor;
         this.finalCombinedY              = visuals.finalCombinedY;
         this.finalOriginalY              = visuals.finalOriginalY;
+
+        this.finalQColor = new THREE.Color(resolveThemeColor('mhaFinalQColor', MHA_FINAL_Q_COLOR));
+        this.finalKColor = new THREE.Color(resolveThemeColor('mhaFinalKColor', MHA_FINAL_K_COLOR));
+        this.finalVColor = new THREE.Color(resolveThemeColor('mhaFinalVColor', MHA_FINAL_V_COLOR));
 
         // Additional arrays required by later stages
         this.outputProjMatrixAnimationPhase = 'waiting';
@@ -150,6 +161,9 @@ export class MHSAAnimation {
             this.passThroughAnimator.start(this.currentLanes);
         });
 
+        this.applyTheme(initialTheme);
+        this._themeUnsubscribe = subscribeThemeChange((nextTheme) => this.applyTheme(nextTheme));
+
         // ----------------------------------------------
         //  Stage pipeline scaffolding (legacy)
         // ----------------------------------------------
@@ -158,6 +172,41 @@ export class MHSAAnimation {
         // them compiles, but we skip execution to avoid duplicate visuals.
         // this._setupMHSAVisualizations();
         // this._setupOutputProjectionMatrix();
+    }
+
+    applyTheme(theme) {
+        const colors = theme?.three || this._themeColors || {};
+        this._themeColors = colors;
+        const resolve = (key, fallback) => (typeof colors[key] !== 'undefined' ? colors[key] : fallback);
+
+        this.matrixInitialRestingColor.set(resolve('mhsaMatrixRestingColor', MHSA_MATRIX_INITIAL_RESTING_COLOR));
+        this.brightGreen.set(resolve('mhsaBrightGreen', MHSA_BRIGHT_GREEN));
+        this.darkTintedGreen.set(resolve('mhsaDarkGreen', MHSA_DARK_TINTED_GREEN));
+        this.brightBlue.set(resolve('mhsaBrightBlue', MHSA_BRIGHT_BLUE));
+        this.darkTintedBlue.set(resolve('mhsaDarkBlue', MHSA_DARK_TINTED_BLUE));
+        this.brightRed.set(resolve('mhsaBrightRed', MHSA_BRIGHT_RED));
+        this.darkTintedRed.set(resolve('mhsaDarkRed', MHSA_DARK_TINTED_RED));
+
+        const inactiveHex = resolve('inactiveComponentColor', INACTIVE_COMPONENT_COLOR);
+        this.outputProjMatrixDefaultColor.set(inactiveHex);
+        const activeHex = resolve('mhaOutputProjectionActiveColor', MHA_OUTPUT_PROJECTION_MATRIX_COLOR);
+        this.outputProjMatrixActiveColor.set(activeHex);
+
+        if (!this.finalQColor) this.finalQColor = new THREE.Color();
+        if (!this.finalKColor) this.finalKColor = new THREE.Color();
+        if (!this.finalVColor) this.finalVColor = new THREE.Color();
+        this.finalQColor.set(resolve('mhaFinalQColor', MHA_FINAL_Q_COLOR));
+        this.finalKColor.set(resolve('mhaFinalKColor', MHA_FINAL_K_COLOR));
+        this.finalVColor.set(resolve('mhaFinalVColor', MHA_FINAL_V_COLOR));
+
+        if (Array.isArray(this.mhaVisualizations)) {
+            this.mhaVisualizations.forEach((mat) => {
+                mat?.setColor(this.matrixInitialRestingColor);
+            });
+        }
+        if (this.outputProjectionMatrix) {
+            this.outputProjectionMatrix.setColor(this.outputProjMatrixDefaultColor);
+        }
     }
 
     // Dynamic durations that adapt to GLOBAL_ANIM_SPEED_MULT at access time
@@ -300,8 +349,11 @@ export class MHSAAnimation {
             MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitTopWidthFactor
         );
 
-        // Initialise pitch-black; will brighten once vectors pass through
-        const initDarkColor = new THREE.Color(INACTIVE_COMPONENT_COLOR);
+        // Initialise using the current theme's inactive colour; will brighten once vectors pass through
+        const inactiveHex = (this._themeColors && typeof this._themeColors.inactiveComponentColor !== 'undefined')
+            ? this._themeColors.inactiveComponentColor
+            : INACTIVE_COMPONENT_COLOR;
+        const initDarkColor = new THREE.Color(inactiveHex);
         this.outputProjectionMatrix.setColor(initDarkColor);
         {
             const lbl = 'Output Projection Matrix';
@@ -327,8 +379,11 @@ export class MHSAAnimation {
         this.outputProjMatrixHeight = matrixHeight;
         
         // Store default and target colors for animation
-        this.outputProjMatrixDefaultColor = initDarkColor;
-        this.outputProjMatrixActiveColor = new THREE.Color(MHA_OUTPUT_PROJECTION_MATRIX_COLOR);
+        this.outputProjMatrixDefaultColor = initDarkColor.clone();
+        const activeHex = (this._themeColors && typeof this._themeColors.mhaOutputProjectionActiveColor !== 'undefined')
+            ? this._themeColors.mhaOutputProjectionActiveColor
+            : MHA_OUTPUT_PROJECTION_MATRIX_COLOR;
+        this.outputProjMatrixActiveColor = new THREE.Color(activeHex);
         
         // Animation state
         this.outputProjMatrixAnimationPhase = 'waiting'; // 'waiting', 'vectors_entering', 'vectors_inside', 'completed'
@@ -1724,9 +1779,9 @@ export class MHSAAnimation {
                 const kMatrix = this.mhaVisualizations[i * 3 + 1];
                 const vMatrix = this.mhaVisualizations[i * 3 + 2];
 
-                if (qMatrix) qMatrix.setColor(new THREE.Color(MHA_FINAL_Q_COLOR));
-                if (kMatrix) kMatrix.setColor(new THREE.Color(MHA_FINAL_K_COLOR));
-                if (vMatrix) vMatrix.setColor(new THREE.Color(MHA_FINAL_V_COLOR));
+                if (qMatrix) qMatrix.setColor(this.finalQColor.clone());
+                if (kMatrix) kMatrix.setColor(this.finalKColor.clone());
+                if (vMatrix) vMatrix.setColor(this.finalVColor.clone());
             }
             return;
         }
@@ -1741,9 +1796,9 @@ export class MHSAAnimation {
                 if (m) m.setMaterialProperties({ opacity: 1.0, transparent: false });
             });
 
-            const finalQColor = new THREE.Color(MHA_FINAL_Q_COLOR);
-            const finalKColor = new THREE.Color(MHA_FINAL_K_COLOR);
-            const finalVColor = new THREE.Color(MHA_FINAL_V_COLOR);
+            const finalQColor = this.finalQColor.clone();
+            const finalKColor = this.finalKColor.clone();
+            const finalVColor = this.finalVColor.clone();
 
             if (qMatrix && qMatrix.mesh && qMatrix.mesh.material) {
                 const initialQColor = qMatrix.mesh.material.color.clone();

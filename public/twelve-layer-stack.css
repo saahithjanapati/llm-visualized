@@ -1,4 +1,29 @@
-body { margin: 0; overflow: hidden; background-color: #000; }
+:root {
+    --app-body-bg: #000000;
+    --app-text-primary: #ffffff;
+    --app-control-border: rgba(255,255,255,0.18);
+    --app-control-bg: rgba(30,30,30,0.55);
+    --app-control-hover-bg: rgba(40,40,40,0.65);
+    --app-control-focus-outline: rgba(122,202,255,0.9);
+    --app-control-active-bg: rgba(56,132,255,0.18);
+    --app-control-active-border: rgba(122,202,255,0.8);
+    --app-overlay-bg: rgba(0,0,0,0.45);
+    --app-status-bg: rgba(20,20,20,0.35);
+    --app-status-text: #ffffff;
+    --app-panel-bg: rgba(255,255,255,0.04);
+    --app-panel-border: rgba(255,255,255,0.12);
+    --app-panel-hover-bg: rgba(255,255,255,0.08);
+    --app-panel-checked-bg: rgba(56,132,255,0.18);
+    --app-panel-checked-border: rgba(122,202,255,0.8);
+    --app-muted-text: #cfd3dc;
+    --app-equation-bg: rgba(20,20,20,0.35);
+    --app-equation-text: #ffffff;
+    --app-katex-color: #ffffff;
+    --app-hover-label-bg: rgba(20,20,20,0.35);
+    --app-hover-label-text: #ffffff;
+}
+
+body { margin: 0; overflow: hidden; background-color: var(--app-body-bg); color: var(--app-text-primary); }
 canvas { display: block; }
 
 /* Top-right controls */
@@ -14,11 +39,11 @@ canvas { display: block; }
 #topControls button {
     appearance: none;
     -webkit-appearance: none;
-    border: 1px solid rgba(255,255,255,0.18);
-    background: rgba(30,30,30,0.55);
+    border: 1px solid var(--app-control-border);
+    background: var(--app-control-bg);
     backdrop-filter: blur(6px);
     -webkit-backdrop-filter: blur(6px);
-    color: #fff;
+    color: var(--app-text-primary);
     border-radius: 10px;
     padding: 8px 12px;
     line-height: 1;
@@ -27,12 +52,10 @@ canvas { display: block; }
     font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
 }
 
-#topControls button:hover {
-    background: rgba(40,40,40,0.65);
-}
+#topControls button:hover { background: var(--app-control-hover-bg); }
 
 #topControls button:focus-visible {
-    outline: 2px solid rgba(122,202,255,0.9);
+    outline: 2px solid var(--app-control-focus-outline);
     outline-offset: 2px;
 }
 
@@ -43,8 +66,8 @@ canvas { display: block; }
 }
 
 #pauseBtn[data-state="paused"] {
-    background: rgba(56,132,255,0.18);
-    border-color: rgba(122,202,255,0.8);
+    background: var(--app-control-active-bg);
+    border-color: var(--app-control-active-border);
 }
 
 #settingsBtn {
@@ -59,7 +82,7 @@ canvas { display: block; }
     display: none; /* toggled to flex when open */
     align-items: center;
     justify-content: center;
-    background: rgba(0,0,0,0.45);
+    background: var(--app-overlay-bg);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
     z-index: 10; /* above everything */
@@ -68,11 +91,11 @@ canvas { display: block; }
 /* Modal panel */
 .settings-modal {
     width: min(92vw, 420px);
-    background: rgba(20,20,24,0.85);
-    border: 1px solid rgba(255,255,255,0.1);
+    background: var(--app-panel-bg);
+    border: 1px solid var(--app-panel-border);
     border-radius: 16px;
     box-shadow: 0 10px 40px rgba(0,0,0,0.45);
-    color: #fff;
+    color: var(--app-text-primary);
     font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
     overflow: hidden;
 }
@@ -82,7 +105,7 @@ canvas { display: block; }
     align-items: center;
     justify-content: space-between;
     padding: 14px 16px;
-    border-bottom: 1px solid rgba(255,255,255,0.08);
+    border-bottom: 1px solid var(--app-panel-border);
 }
 .settings-title { font-size: 16px; font-weight: 600; }
 #settingsClose {
@@ -90,19 +113,32 @@ canvas { display: block; }
     -webkit-appearance: none;
     border: none;
     background: transparent;
-    color: #bbb;
+    color: var(--app-muted-text);
     font-size: 20px;
     line-height: 1;
     cursor: pointer;
     padding: 6px;
     border-radius: 8px;
 }
-#settingsClose:hover { background: rgba(255,255,255,0.07); color: #fff; }
+#settingsClose:hover { background: var(--app-panel-hover-bg); color: var(--app-text-primary); }
 
 .settings-content { padding: 14px 16px 18px; }
 .settings-section { margin-bottom: 14px; }
 .settings-section:last-child { margin-bottom: 0; }
-.section-label { display: block; margin-bottom: 8px; color: #cfd3dc; font-size: 13px; letter-spacing: .2px; }
+.section-label { display: block; margin-bottom: 8px; color: var(--app-muted-text); font-size: 13px; letter-spacing: .2px; }
+.theme-select {
+    width: 100%;
+    border-radius: 12px;
+    border: 1px solid var(--app-panel-border);
+    background: var(--app-panel-bg);
+    color: var(--app-text-primary);
+    padding: 10px 12px;
+    font-size: 13px;
+}
+.theme-select:focus-visible {
+    outline: 2px solid var(--app-control-focus-outline);
+    outline-offset: 2px;
+}
 
 /* Speed radio group */
 .speed-group { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
@@ -113,19 +149,19 @@ canvas { display: block; }
     justify-content: center;
     gap: 8px;
     padding: 10px 12px;
-    border: 1px solid rgba(255,255,255,0.12);
+    border: 1px solid var(--app-panel-border);
     border-radius: 12px;
-    background: rgba(255,255,255,0.04);
-    color: #e7e9ee;
+    background: var(--app-panel-bg);
+    color: var(--app-text-primary);
     cursor: pointer;
     user-select: none;
     transition: background .15s ease, border-color .15s ease;
     text-align: center;
     font-size: 13px;
 }
-.speed-option:hover { background: rgba(255,255,255,0.08); }
+.speed-option:hover { background: var(--app-panel-hover-bg); }
 .speed-option input { position: absolute; opacity: 0; pointer-events: none; }
-.speed-option[data-checked="true"] { border-color: rgba(122,202,255,0.8); background: rgba(56,132,255,0.18); }
+.speed-option[data-checked="true"] { border-color: var(--app-panel-checked-border); background: var(--app-panel-checked-bg); }
 
 /* Simple toggle row */
 .toggle-row {
@@ -133,14 +169,30 @@ canvas { display: block; }
     align-items: center;
     gap: 10px;
     padding: 10px 12px;
-    border: 1px solid rgba(255,255,255,0.12);
+    border: 1px solid var(--app-panel-border);
     border-radius: 12px;
-    background: rgba(255,255,255,0.04);
-    color: #e7e9ee;
+    background: var(--app-panel-bg);
+    color: var(--app-text-primary);
     user-select: none;
 }
 .toggle-row input { width: 18px; height: 18px; }
 /* Equations panel (under status overlay) */
+#statusOverlay {
+    position: fixed;
+    top: 56px;
+    right: 10px;
+    padding: 8px 12px;
+    font-family: monospace;
+    font-size: 14px;
+    color: var(--app-status-text);
+    background: var(--app-status-bg);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border-radius: 8px;
+    pointer-events: none;
+    z-index: 5;
+    white-space: pre;
+}
 #equationsPanel {
     position: fixed;
     top: 110px; /* below the status overlay */
@@ -151,8 +203,8 @@ canvas { display: block; }
     overflow: auto;
     -webkit-overflow-scrolling: touch;
     padding: 10px 12px;
-    color: #fff;
-    background: rgba(20,20,20,0.35);
+    color: var(--app-equation-text);
+    background: var(--app-equation-bg);
     backdrop-filter: blur(6px);
     -webkit-backdrop-filter: blur(6px);
     border-radius: 8px;
@@ -162,7 +214,7 @@ canvas { display: block; }
 #equationsPanel .eq-title {
     font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
     font-size: 12px;
-    color: #cfd3dc;
+    color: var(--app-muted-text);
     margin-bottom: 6px;
     letter-spacing: .2px;
 }
@@ -172,7 +224,7 @@ canvas { display: block; }
     line-height: 1.35;
 }
 /* KaTeX tweaks for dark bg */
-.katex { color: #fff; }
+.katex { color: var(--app-katex-color); }
 .katex-display { margin: 0; }
 
 /* Responsive adjustments */

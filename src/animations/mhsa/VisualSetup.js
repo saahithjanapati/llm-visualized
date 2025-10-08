@@ -33,7 +33,7 @@ export function buildMHAVisuals(parentGroup, {
     branchX = 0,
     mhsaBaseY = 0,
     matrixRestingOpacity = 1.0,
-} = {}) {
+} = {}, themeColors = null) {
     const mhaVisualizations = [];
     const headsCentersX      = [];
     const headCoords         = [];
@@ -42,7 +42,10 @@ export function buildMHAVisuals(parentGroup, {
     // 1) Build Q / K / V weight matrices for every head set
     // ------------------------------------------------------------
     const matrixCenterY = mhsaBaseY + MHA_MATRIX_PARAMS.height / 2;
-    const inactiveMatrixColor = new THREE.Color(INACTIVE_COMPONENT_COLOR);
+    const inactiveMatrixHex = (themeColors && typeof themeColors.inactiveComponentColor !== 'undefined')
+        ? themeColors.inactiveComponentColor
+        : INACTIVE_COMPONENT_COLOR;
+    const inactiveMatrixColor = new THREE.Color(inactiveMatrixHex);
 
     for (let i = 0; i < NUM_HEAD_SETS_LAYER; i++) {
         const headSetWidth       = MHA_INTERNAL_MATRIX_SPACING * 2 + MHA_MATRIX_PARAMS.width;
@@ -151,8 +154,12 @@ export function buildMHAVisuals(parentGroup, {
         outputProjectionMatrix,
         outputProjMatrixCenterY,
         outputProjMatrixHeight: matrixHeight,
-        outputProjMatrixDefaultColor : initDarkColor,
-        outputProjMatrixActiveColor  : new THREE.Color(MHA_OUTPUT_PROJECTION_MATRIX_COLOR),
+        outputProjMatrixDefaultColor : initDarkColor.clone(),
+        outputProjMatrixActiveColor  : new THREE.Color(
+            (themeColors && typeof themeColors.mhaOutputProjectionActiveColor !== 'undefined')
+                ? themeColors.mhaOutputProjectionActiveColor
+                : MHA_OUTPUT_PROJECTION_MATRIX_COLOR
+        ),
 
         // Pre-computed Y positions useful for later stages
         finalCombinedY,
