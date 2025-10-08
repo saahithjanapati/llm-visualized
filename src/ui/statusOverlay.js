@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import { appState } from '../state/appState.js';
 import { getPreference } from '../utils/preferences.js';
-import { MHA_FINAL_Q_COLOR } from '../animations/LayerAnimationConstants.js';
 import { USE_PHYSICAL_MATERIALS } from '../utils/constants.js';
+import { getCurrentTheme, subscribeThemeChange } from '../state/themeState.js';
+import { MHA_FINAL_Q_COLOR } from '../animations/LayerAnimationConstants.js';
 
 // Initializes status overlay and equations panel updates.
 export function initStatusOverlay(pipeline, NUM_LAYERS) {
@@ -10,6 +11,22 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     const equationsPanel = document.getElementById('equationsPanel');
     const equationsTitle = document.getElementById('equationsTitle');
     const equationsBody = document.getElementById('equationsBody');
+
+    const initialTheme = getCurrentTheme();
+    const resolveFinalQ = () => {
+        const themeColor = initialTheme?.three?.mhaFinalQColor;
+        return (typeof themeColor !== 'undefined') ? themeColor : MHA_FINAL_Q_COLOR;
+    };
+    const topEmbedThemeColor = new THREE.Color(resolveFinalQ());
+    subscribeThemeChange((theme) => {
+        const hex = (theme?.three && typeof theme.three.mhaFinalQColor !== 'undefined')
+            ? theme.three.mhaFinalQColor
+            : MHA_FINAL_Q_COLOR;
+        topEmbedThemeColor.set(hex);
+        if (appState.topEmbedActivated && appState.vocabTopRef) {
+            appState.vocabTopRef.setColor(topEmbedThemeColor.clone());
+        }
+    });
 
     appState.showEquations = getPreference('showEquations', true);
     appState.showHdrBackground = getPreference('showHdrBackground', false);
@@ -114,8 +131,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         for (const lane of lanes) {
             const v = lane && lane.originalVec;
             if (v && v.group && v.group.position.y >= stopY - 0.01) {
-                const headBlue = new THREE.Color(MHA_FINAL_Q_COLOR);
-                appState.vocabTopRef.setColor(headBlue);
+                appState.vocabTopRef.setColor(topEmbedThemeColor.clone());
                 appState.vocabTopRef.setMaterialProperties({ emissiveIntensity: 0.05 });
                 appState.topEmbedActivated = true;
                 break;

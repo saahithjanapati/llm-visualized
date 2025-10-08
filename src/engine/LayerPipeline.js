@@ -103,6 +103,26 @@ export class LayerPipeline extends EventTarget {
     /** Return reference to internal CoreEngine (for advanced use-cases). */
     get engine() { return this._engine; }
 
+    applyTheme(theme) {
+        this._engine?.applyTheme?.(theme);
+        this._layers.forEach((layer) => {
+            if (typeof layer?.applyTheme === 'function') {
+                layer.applyTheme(theme);
+            }
+        });
+        if (theme?.three && typeof theme.three.trailColor !== 'undefined') {
+            const target = new THREE.Color(theme.three.trailColor);
+            if (this._engine?.scene) {
+                this._engine.scene.traverse((obj) => {
+                    if (obj?.userData?.isTrail && obj.material && obj.material.color) {
+                        obj.material.color.copy(target);
+                        obj.material.needsUpdate = true;
+                    }
+                });
+            }
+        }
+    }
+
     // ----------------------------------------------------------------------
     // Private helpers
     // ----------------------------------------------------------------------

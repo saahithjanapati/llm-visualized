@@ -4,6 +4,7 @@ import { LayerNormalizationVisualization } from '../../components/LayerNormaliza
 import { WeightMatrixVisualization } from '../../components/WeightMatrixVisualization.js';
 import { VectorVisualizationInstancedPrism } from '../../components/VectorVisualizationInstancedPrism.js';
 import { StraightLineTrail, buildMergedLineSegmentsFromSegments, collectTrailsUnder, mergeTrailsIntoLineSegments } from '../../utils/trailUtils.js';
+import { getCurrentTheme, subscribeThemeChange } from '../../state/themeState.js';
 import {
     LN_PARAMS,
     LN_NORM_START_FRACTION_FROM_BOTTOM,
@@ -71,7 +72,6 @@ const TMP_WORLD_POS = new THREE.Vector3();
 const COLOR_DARK_GRAY = new THREE.Color(0x333333);
 const COLOR_LIGHT_YELLOW = new THREE.Color(0xffffff);
 const COLOR_BRIGHT_YELLOW = new THREE.Color(0xffffff);
-const COLOR_INACTIVE_COMPONENT = new THREE.Color(INACTIVE_COMPONENT_COLOR);
 
 function simplePrismMultiply(srcVec, tgtVec, onComplete) {
     // instant product; flash white then call onComplete
@@ -123,6 +123,21 @@ export default class Gpt2Layer extends BaseLayer {
         this._ln2TargetColor = new THREE.Color();
         this._ln1LockedColor = new THREE.Color();
         this._ln1ColorLocked = false;
+
+        const theme = getCurrentTheme();
+        const themeColors = theme?.three || {};
+        const inactive = themeColors.inactiveComponentColor ?? INACTIVE_COMPONENT_COLOR;
+        this._inactiveColor = new THREE.Color(inactive);
+        this._themeColors = themeColors;
+        this._themeUnsubscribe = subscribeThemeChange((nextTheme) => {
+            const colors = nextTheme?.three || {};
+            this._themeColors = colors;
+            const nextInactive = colors.inactiveComponentColor ?? INACTIVE_COMPONENT_COLOR;
+            this._inactiveColor.set(nextInactive);
+            if (typeof this.applyTheme === 'function') {
+                this.applyTheme(nextTheme);
+            }
+        });
     }
 
     setProgressEmitter(emitter) { this._progressEmitter = emitter; }
@@ -161,7 +176,7 @@ export default class Gpt2Layer extends BaseLayer {
         );
         // Start LN1 in the same "inactive" palette used for LN2 so it only lights up once
         // vectors begin to enter the ring.
-        const inactiveDark = COLOR_INACTIVE_COMPONENT;
+        const inactiveDark = this._inactiveColor;
         ln1.setColor(inactiveDark);
         // Start fully opaque to avoid early depth-sorting costs.
         ln1.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
@@ -296,6 +311,22 @@ export default class Gpt2Layer extends BaseLayer {
         this.ln2 = ln2;
         this.mlpUp = mlpUp;
         this.mlpDown = mlpDown;
+    }
+
+    applyTheme(theme) {
+        const colors = theme?.three || this._themeColors || {};
+        const inactiveHex = colors.inactiveComponentColor ?? INACTIVE_COMPONENT_COLOR;
+        if (!this._inactiveColor) {
+            this._inactiveColor = new THREE.Color(inactiveHex);
+        } else {
+            this._inactiveColor.set(inactiveHex);
+        }
+        const inactiveColor = this._inactiveColor;
+        this.ln1?.setColor(inactiveColor);
+        this.ln2?.setColor(inactiveColor);
+        if (this.mlpUp) this.mlpUp.setColor(inactiveColor.clone());
+        if (this.mlpDown) this.mlpDown.setColor(inactiveColor.clone());
+        this.mhsaAnimation?.applyTheme?.(theme);
     }
 
     update(dt) {
@@ -1037,7 +1068,7 @@ export default class Gpt2Layer extends BaseLayer {
         const distance = topY - vec.group.position.y;
         const duration = (distance / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
         
-        const matrixStartColor = new THREE.Color(INACTIVE_COMPONENT_COLOR);
+        const matrixStartColor = this._inactiveColor.clone();
         const matrixEndColor = new THREE.Color(0xb07c13); // orange
         const startIntensity = 0.1;
         const peakIntensity = 0.8;
@@ -1164,7 +1195,7 @@ export default class Gpt2Layer extends BaseLayer {
             .to({ t: 1, emissive: peakIntensity }, durationDown * 0.6)
             .easing(TWEEN.Easing.Quadratic.InOut)
             .onUpdate(() => {
-                const col = new THREE.Color(INACTIVE_COMPONENT_COLOR).lerp(orangeColor, downState.t);
+                const col = this._inactiveColor.clone().lerp(orangeColor, downState.t);
                 this.mlpDown.setColor(col);
                 this.mlpDown.setEmissive(col, downState.emissive);
             })

@@ -31,6 +31,7 @@ import { initSettingsModal } from '../src/ui/settingsModal.js';
 import { initPauseButton } from '../src/ui/pauseButton.js';
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
+import { initializeTheme, subscribeThemeChange, getCurrentTheme } from '../src/state/themeState.js';
 
 // Optionally load pre-baked geometries; returns instantly if disabled
 await loadPrecomputedGeometries('../precomputed_components.glb');
@@ -52,6 +53,8 @@ const pipeline = new LayerPipeline(gptCanvas, NUM_LAYERS, {
     cameraTarget: camTarget
 });
 
+initializeTheme(pipeline);
+
 // Show GPT canvas immediately
 gptCanvas.style.display = 'block';
 try {
@@ -65,8 +68,14 @@ try {
 
 // Embedding matrices (static visuals)
 try {
-    const headBlue = new THREE.Color(MHA_FINAL_Q_COLOR);
-    const headGreen = new THREE.Color(MHA_FINAL_K_COLOR);
+    const theme = getCurrentTheme();
+    const themeColors = theme?.three || {};
+    const headBlue = new THREE.Color(
+        typeof themeColors.embeddingVocabColor !== 'undefined' ? themeColors.embeddingVocabColor : MHA_FINAL_Q_COLOR
+    );
+    const headGreen = new THREE.Color(
+        typeof themeColors.embeddingPosColor !== 'undefined' ? themeColors.embeddingPosColor : MHA_FINAL_K_COLOR
+    );
     const residualYBase = LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2 + EMBEDDING_BOTTOM_TOP_ALIGN_OFFSET_FROM_LN1_BOTTOM;
     const bottomVocabCenterY = residualYBase - EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2 + EMBEDDING_BOTTOM_Y_ADJUST;
     const vocabBottom = new WeightMatrixVisualization(
@@ -135,7 +144,12 @@ try {
             LN_PARAMS.holeWidthFactor
         );
         lnTop.group.userData.label = 'LayerNorm (Top)';
-        lnTop.setColor(new THREE.Color(INACTIVE_COMPONENT_COLOR));
+        const lnColor = new THREE.Color(
+            typeof themeColors.inactiveComponentColor !== 'undefined'
+                ? themeColors.inactiveComponentColor
+                : INACTIVE_COMPONENT_COLOR
+        );
+        lnTop.setColor(lnColor);
         lnTop.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
         pipeline.engine.scene.add(lnTop.group);
         if (pipeline.engine && typeof pipeline.engine.registerRaycastRoot === 'function') {
@@ -159,7 +173,12 @@ try {
         );
         vocabTop.group.rotation.z = Math.PI;
         vocabTop.group.userData.label = 'Vocab Embedding (Top)';
-        vocabTop.setColor(new THREE.Color(0x000000));
+        const topBase = new THREE.Color(
+            typeof themeColors.embeddingTopColor !== 'undefined'
+                ? themeColors.embeddingTopColor
+                : 0x000000
+        );
+        vocabTop.setColor(topBase);
         vocabTop.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.0 });
         appState.vocabTopRef = vocabTop;
         pipeline.engine.scene.add(vocabTop.group);
@@ -170,10 +189,40 @@ try {
 } catch (_) { /* optional – embedding visuals are non-critical */ }
 
 // Initialise UI modules
-initIntroAnimation(pipeline, gptCanvas);
-initStatusOverlay(pipeline, NUM_LAYERS);
-initPauseButton(pipeline);
-initSettingsModal(pipeline);
+    initIntroAnimation(pipeline, gptCanvas);
+    initStatusOverlay(pipeline, NUM_LAYERS);
+    initPauseButton(pipeline);
+    initSettingsModal(pipeline);
+
+    const applyEmbeddingTheme = (themeConfig) => {
+        const colors = themeConfig?.three || {};
+        const vocabColor = new THREE.Color(
+            typeof colors.embeddingVocabColor !== 'undefined' ? colors.embeddingVocabColor : MHA_FINAL_Q_COLOR
+        );
+        const posColor = new THREE.Color(
+            typeof colors.embeddingPosColor !== 'undefined' ? colors.embeddingPosColor : MHA_FINAL_K_COLOR
+        );
+        const inactiveColor = new THREE.Color(
+            typeof colors.inactiveComponentColor !== 'undefined' ? colors.inactiveComponentColor : INACTIVE_COMPONENT_COLOR
+        );
+        const topBaseColor = new THREE.Color(
+            typeof colors.embeddingTopColor !== 'undefined' ? colors.embeddingTopColor : 0x000000
+        );
+        const activatedColor = new THREE.Color(
+            typeof colors.mhaFinalQColor !== 'undefined' ? colors.mhaFinalQColor : MHA_FINAL_Q_COLOR
+        );
+
+        if (vocabBottom) vocabBottom.setColor(vocabColor.clone());
+        if (posBottom) posBottom.setColor(posColor.clone());
+        if (lnTop) lnTop.setColor(inactiveColor.clone());
+        if (appState.vocabTopRef) {
+            const target = appState.topEmbedActivated ? activatedColor : topBaseColor;
+            appState.vocabTopRef.setColor(target.clone());
+        }
+    };
+
+    applyEmbeddingTheme(getCurrentTheme());
+    subscribeThemeChange(applyEmbeddingTheme);
 
 // Typewriter caption underneath GPT tower
 const TYPE_TEXT = 'Can machines think?';
