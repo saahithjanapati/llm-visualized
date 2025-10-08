@@ -1,4 +1,5 @@
 import { NUM_VECTOR_LANES } from '../utils/constants.js';
+import { getThemeMhsaColors, onThemeChange } from '../state/themeState.js';
 // export const VECTOR_LENGTH = 5; // REMOVED: This was causing the length mismatch.
 // The main VECTOR_LENGTH (100) should be imported from utils/constants.js directly where needed,
 // or LayerAnimationConstants.js should correctly re-export it if preferred as a central point for this animation.
@@ -109,27 +110,41 @@ export const MLP_D_MODEL_VISUAL_DEPTH = 20;
 // Color Constants – keep **all** colour values in this one place
 // -----------------------------------------------------------------------------
 
+const INITIAL_MHSA_THEME = getThemeMhsaColors() || {};
+
 /** Base (resting) colour for MHSA matrices. */
-export const MHSA_MATRIX_INITIAL_RESTING_COLOR = 0x404040;
+export let MHSA_MATRIX_INITIAL_RESTING_COLOR = INITIAL_MHSA_THEME.rest ?? 0x404040;
 
 /** Bright / activated colours used inside the MHSA animation. */
-export const MHSA_BRIGHT_GREEN        = 0x33FF33;
-export const MHSA_DARK_TINTED_GREEN   = 0x002200;
-export const MHSA_BRIGHT_BLUE         = 0x6666FF;
-export const MHSA_DARK_TINTED_BLUE    = 0x000022;
-export const MHSA_BRIGHT_RED          = 0xFF3333;
-export const MHSA_DARK_TINTED_RED     = 0x220000;
-
-/** Colour for trail lines behind moving prisms. */
-
+export let MHSA_BRIGHT_GREEN      = INITIAL_MHSA_THEME.brightGreen ?? 0x33ff33;
+export let MHSA_DARK_TINTED_GREEN = INITIAL_MHSA_THEME.darkGreen ?? 0x002200;
+export let MHSA_BRIGHT_BLUE       = INITIAL_MHSA_THEME.brightBlue ?? 0x6666ff;
+export let MHSA_DARK_TINTED_BLUE  = INITIAL_MHSA_THEME.darkBlue ?? 0x000022;
+export let MHSA_BRIGHT_RED        = INITIAL_MHSA_THEME.brightRed ?? 0xff3333;
+export let MHSA_DARK_TINTED_RED   = INITIAL_MHSA_THEME.darkRed ?? 0x220000;
 
 /** Final Q, K, V head colours used once attention heads have merged. */
-export const MHA_FINAL_Q_COLOR = 0x1e5299;
-export const MHA_FINAL_K_COLOR = 0x1d9752;
-export const MHA_FINAL_V_COLOR = 0x811b2d;
+export let MHA_FINAL_Q_COLOR = INITIAL_MHSA_THEME.finalQ ?? 0x1e5299;
+export let MHA_FINAL_K_COLOR = INITIAL_MHSA_THEME.finalK ?? 0x1d9752;
+export let MHA_FINAL_V_COLOR = INITIAL_MHSA_THEME.finalV ?? 0x811b2d;
 
 /** Active colour of the output-projection matrix that follows MHSA. */
-export const MHA_OUTPUT_PROJECTION_MATRIX_COLOR = 0xaf5faf;
+export let MHA_OUTPUT_PROJECTION_MATRIX_COLOR = INITIAL_MHSA_THEME.output ?? 0xaf5faf;
+
+onThemeChange(() => {
+    const theme = getThemeMhsaColors() || {};
+    if (typeof theme.rest === 'number') MHSA_MATRIX_INITIAL_RESTING_COLOR = theme.rest;
+    if (typeof theme.brightGreen === 'number') MHSA_BRIGHT_GREEN = theme.brightGreen;
+    if (typeof theme.darkGreen === 'number') MHSA_DARK_TINTED_GREEN = theme.darkGreen;
+    if (typeof theme.brightBlue === 'number') MHSA_BRIGHT_BLUE = theme.brightBlue;
+    if (typeof theme.darkBlue === 'number') MHSA_DARK_TINTED_BLUE = theme.darkBlue;
+    if (typeof theme.brightRed === 'number') MHSA_BRIGHT_RED = theme.brightRed;
+    if (typeof theme.darkRed === 'number') MHSA_DARK_TINTED_RED = theme.darkRed;
+    if (typeof theme.finalQ === 'number') MHA_FINAL_Q_COLOR = theme.finalQ;
+    if (typeof theme.finalK === 'number') MHA_FINAL_K_COLOR = theme.finalK;
+    if (typeof theme.finalV === 'number') MHA_FINAL_V_COLOR = theme.finalV;
+    if (typeof theme.output === 'number') MHA_OUTPUT_PROJECTION_MATRIX_COLOR = theme.output;
+});
 
 // -----------------------------------------------------------------------------
 // MHSA (Multi-Head Self-Attention) Specific Animation Constants

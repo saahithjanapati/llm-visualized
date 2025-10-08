@@ -142,6 +142,15 @@ export class StraightLineTrail {
         return this._opacity;
     }
 
+    /** Update the trail colour at runtime. */
+    setColor(newColor) {
+        if (!this._material) return;
+        const next = (newColor instanceof THREE.Color) ? newColor : new THREE.Color(newColor);
+        this._color = next.getHex();
+        this._material.color.copy(next);
+        this._material.needsUpdate = true;
+    }
+
     /** Return a shallow copy of currently used positions (vertexCount * 3). */
     copyUsedPositions() {
         const n = Math.max(0, this._vertexCount);

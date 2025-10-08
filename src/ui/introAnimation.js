@@ -5,6 +5,7 @@ import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
 import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
 import { appState } from '../state/appState.js';
 import { resolveRenderDprCap } from '../utils/constants.js';
+import { getThemeIntroBackground, onThemeChange } from '../state/themeState.js';
 import hdrBackgroundUrl from '../../rogland_clear_night_64.exr?url';
 
 // Sets up the intro typing animation and HDRI transition.
@@ -19,7 +20,13 @@ export function initIntroAnimation(pipeline, gptCanvas) {
     renderer.setSize(window.innerWidth, window.innerHeight);
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x000000);
+    scene.background = new THREE.Color(getThemeIntroBackground());
+    const detachTheme = onThemeChange(() => {
+        const bg = getThemeIntroBackground();
+        if (scene?.background instanceof THREE.Color) {
+            scene.background.set(bg);
+        }
+    });
     const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 20000);
     camera.position.set(0, 0, 1500);
 
@@ -49,6 +56,7 @@ export function initIntroAnimation(pipeline, gptCanvas) {
                 else if (child.material.dispose) child.material.dispose();
             }
         });
+        detachTheme?.();
     }
 
     const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
@@ -199,6 +207,7 @@ export function initIntroAnimation(pipeline, gptCanvas) {
                 else child.material.dispose();
             }
         });
+        detachTheme?.();
     };
     window.addEventListener('beforeunload', () => cleanup());
 

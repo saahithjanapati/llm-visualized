@@ -37,6 +37,7 @@ import {
 import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
 import { buildMHAVisuals, VectorRouter, PassThroughAnimator, SelfAttentionAnimator } from './mhsa/index.js';
 import { animateVectorMatrixPassThrough as animateVectorMatrixPassThroughExternal } from './mhsa/VectorMatrixPassThrough.js';
+import { onThemeChange, getThemeMhsaColors } from '../state/themeState.js';
 
 const _tmpWorld = new THREE.Vector3();
 const _tmpWorld2 = new THREE.Vector3();
@@ -110,6 +111,11 @@ export class MHSAAnimation {
         this.finalCombinedY              = visuals.finalCombinedY;
         this.finalOriginalY              = visuals.finalOriginalY;
 
+        this.applyThemeColors();
+        this._detachThemeListener = onThemeChange(() => {
+            try { this.applyThemeColors(); } catch (err) { console.error('Theme update failed:', err); }
+        });
+
         // Additional arrays required by later stages
         this.outputProjMatrixAnimationPhase = 'waiting';
         this.outputProjMatrixVectors        = [];
@@ -180,7 +186,7 @@ export class MHSAAnimation {
     }
 
     _setupMHSAVisualizations() {
-        const darkGrayColor = new THREE.Color(0x404040);
+        const darkGrayColor = new THREE.Color(MHSA_MATRIX_INITIAL_RESTING_COLOR);
         const matrixOpacity = this.matrixRestingOpacity;
         const matrixCenterY = this.mhsaBaseY + MHA_MATRIX_PARAMS.height / 2;
 
@@ -727,7 +733,50 @@ export class MHSAAnimation {
         vectorsWithTrails.forEach(v => { if (v && v.userData) delete v.userData.trail; });
     }
 
+    applyThemeColors() {
+        const theme = getThemeMhsaColors() || {};
+
+        if (this.matrixInitialRestingColor) {
+            this.matrixInitialRestingColor.set(MHSA_MATRIX_INITIAL_RESTING_COLOR);
+        }
+        if (this.brightGreen) this.brightGreen.set(MHSA_BRIGHT_GREEN);
+        if (this.darkTintedGreen) this.darkTintedGreen.set(MHSA_DARK_TINTED_GREEN);
+        if (this.brightBlue) this.brightBlue.set(MHSA_BRIGHT_BLUE);
+        if (this.darkTintedBlue) this.darkTintedBlue.set(MHSA_DARK_TINTED_BLUE);
+        if (this.brightRed) this.brightRed.set(MHSA_BRIGHT_RED);
+        if (this.darkTintedRed) this.darkTintedRed.set(MHSA_DARK_TINTED_RED);
+
+        const baseQHex = typeof theme.baseQ === 'number' ? theme.baseQ : MHSA_MATRIX_INITIAL_RESTING_COLOR;
+        const baseKHex = typeof theme.baseK === 'number' ? theme.baseK : MHSA_MATRIX_INITIAL_RESTING_COLOR;
+        const baseVHex = typeof theme.baseV === 'number' ? theme.baseV : MHSA_MATRIX_INITIAL_RESTING_COLOR;
+
+        if (Array.isArray(this.mhaVisualizations) && this.mhaVisualizations.length) {
+            for (let i = 0; i < this.mhaVisualizations.length; i += 3) {
+                const qMatrix = this.mhaVisualizations[i];
+                const kMatrix = this.mhaVisualizations[i + 1];
+                const vMatrix = this.mhaVisualizations[i + 2];
+                if (qMatrix?.setColor) qMatrix.setColor(new THREE.Color(baseQHex));
+                if (kMatrix?.setColor) kMatrix.setColor(new THREE.Color(baseKHex));
+                if (vMatrix?.setColor) vMatrix.setColor(new THREE.Color(baseVHex));
+            }
+        }
+
+        if (this.outputProjectionMatrix?.setColor) {
+            this.outputProjectionMatrix.setColor(new THREE.Color(MHA_OUTPUT_PROJECTION_MATRIX_COLOR));
+        }
+        if (this.outputProjMatrixDefaultColor instanceof THREE.Color) {
+            this.outputProjMatrixDefaultColor.set(MHSA_MATRIX_INITIAL_RESTING_COLOR);
+        }
+        if (this.outputProjMatrixActiveColor instanceof THREE.Color) {
+            this.outputProjMatrixActiveColor.set(MHA_OUTPUT_PROJECTION_MATRIX_COLOR);
+        }
+    }
+
     dispose() {
+        if (typeof this._detachThemeListener === 'function') {
+            this._detachThemeListener();
+            this._detachThemeListener = null;
+        }
         // Standard THREE.js objects added to scene are usually handled by scene traversal on global cleanup.
     }
 

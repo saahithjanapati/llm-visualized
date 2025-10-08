@@ -1,51 +1,76 @@
 import * as THREE from 'three';
-import { VECTOR_LENGTH } from './constants.js'; // Added import for logging
+import { VECTOR_LENGTH } from './constants.js';
+import { getThemeColorStops } from '../state/themeState.js';
 
-// Map a value (normalized, potentially outside -1 to 1) to a rainbow color (HSL)
-export function mapValueToColor(value) {
-    // console.log(`mapValueToColor input value: ${value}`); // Log input value
+function mapValueUsingStops(value, stops) {
+    if (!Array.isArray(stops) || stops.length === 0) return null;
+    const clamped = Math.max(-1, Math.min(1, Number(value)));
+    const sorted = stops.slice().sort((a, b) => (a.stop ?? 0) - (b.stop ?? 0));
+    const first = sorted[0];
+    const last = sorted[sorted.length - 1];
 
-    // Clamp or scale the normalized value to the -1 to 1 range for hue mapping
-    // Simple clamping for now:
-    const clampedValue = Math.max(-1, Math.min(1, value / 2)); // Divide by 2 assuming norm keeps most data in [-2, 2]
-
-    const hue = (clampedValue + 1) / 2; // Full hue range based on clamped value
-    const saturation = 1.0;
-    // Increase lightness for brighter instances
-    const lightness = 0.4;
-    const finalColor = new THREE.Color().setHSL(hue, saturation, lightness);
-    // console.log(`mapValueToColor output: value=${value}, clamped=${clampedValue}, hue=${hue}, color R=${finalColor.r} G=${finalColor.g} B=${finalColor.b}`);
-    return finalColor;
-}
-
-// Add a counter to limit logging if needed, e.g., for mapValueToColor
-// let mapValueToColorCallCount = 0;
-// export function mapValueToColor(value) {
-//     mapValueToColorCallCount++;
-//     if (mapValueToColorCallCount <= 10 || mapValueToColorCallCount > VECTOR_LENGTH - 10) { // Log first 10 and last 10 for a typical vector
-//         console.log(`mapValueToColor (call #${mapValueToColorCallCount}) input value: ${value}`);
-//     }
-// ... (rest of the function) ...
-//     if (mapValueToColorCallCount <= 10 || mapValueToColorCallCount > VECTOR_LENGTH - 10) {
-//        console.log(`mapValueToColor output: value=${value}, clamped=${clampedValue}, hue=${hue}, color R=${finalColor.r} G=${finalColor.g} B=${finalColor.b}`);
-//     }
-//     return finalColor;
-// }
-// For more targeted logging from VectorVisualization:
-// Modify mapValueToColor to accept an optional index for logging context
-let mapValueToColorCallCount = 0;
-export function mapValueToColor_LOG(value, index) {
-    mapValueToColorCallCount++;
-    // Log for first 5, last 5, and a few in the middle to avoid excessive logging for VECTOR_LENGTH=100
-    const shouldLog = index < 5 || 
-                      index >= VECTOR_LENGTH - 5 || 
-                      (index >= Math.floor(VECTOR_LENGTH/2) - 2 && index <= Math.floor(VECTOR_LENGTH/2) + 2);
-
-    if (shouldLog) {
-        console.log(`mapValueToColor_LOG (idx ${index}, call #${mapValueToColorCallCount}): input=${value !== undefined && value !== null ? value.toFixed(3) : value}`);
+    if (clamped <= (first.stop ?? -1)) {
+        return new THREE.Color(first.color ?? 0xffffff);
+    }
+    if (clamped >= (last.stop ?? 1)) {
+        return new THREE.Color(last.color ?? 0xffffff);
     }
 
-    // Original logic from mapValueToColor
+    for (let i = 1; i < sorted.length; i += 1) {
+        const prev = sorted[i - 1];
+        const next = sorted[i];
+        const start = prev.stop ?? -1;
+        const end = next.stop ?? 1;
+        if (clamped <= end) {
+            const span = Math.max(1e-6, end - start);
+            const t = THREE.MathUtils.clamp((clamped - start) / span, 0, 1);
+            const startColor = new THREE.Color(prev.color ?? 0xffffff);
+            const endColor = new THREE.Color(next.color ?? 0xffffff);
+            return startColor.lerp(endColor, t);
+        }
+    }
+
+    return new THREE.Color(last.color ?? 0xffffff);
+}
+
+export function mapValueToColor(value) {
+    const stops = getThemeColorStops();
+    if (Array.isArray(stops) && stops.length) {
+        const gradient = mapValueUsingStops(value, stops);
+        if (gradient) return gradient;
+    }
+
+    const clampedValue = Math.max(-1, Math.min(1, value / 2));
+    const hue = (clampedValue + 1) / 2;
+    const saturation = 1.0;
+    const lightness = 0.4;
+    return new THREE.Color().setHSL(hue, saturation, lightness);
+}
+
+let mapValueToColorCallCount = 0;
+
+export function mapValueToColor_LOG(value, index) {
+    mapValueToColorCallCount += 1;
+    const shouldLog = index < 5
+        || index >= VECTOR_LENGTH - 5
+        || (index >= Math.floor(VECTOR_LENGTH / 2) - 2 && index <= Math.floor(VECTOR_LENGTH / 2) + 2);
+
+    if (shouldLog) {
+        const formatted = (typeof value === 'number' && Number.isFinite(value)) ? value.toFixed(3) : value;
+        console.log(`mapValueToColor_LOG (idx ${index}, call #${mapValueToColorCallCount}): input=${formatted}`);
+    }
+
+    const stops = getThemeColorStops();
+    if (Array.isArray(stops) && stops.length) {
+        const gradient = mapValueUsingStops(value, stops);
+        if (gradient) {
+            if (shouldLog) {
+                console.log(` -> gradient RGB=(${gradient.r.toFixed(3)}, ${gradient.g.toFixed(3)}, ${gradient.b.toFixed(3)})`);
+            }
+            return gradient;
+        }
+    }
+
     const clampedValue = Math.max(-1, Math.min(1, value / 2));
     const hue = (clampedValue + 1) / 2;
     const saturation = 1.0;
@@ -58,50 +83,18 @@ export function mapValueToColor_LOG(value, index) {
     return finalColor;
 }
 
-// Original function if the _LOG version is not used or for easy revert
-// export function mapValueToColor(value) {
-//     const clampedValue = Math.max(-1, Math.min(1, value / 2));
-//     const hue = (clampedValue + 1) / 2;
-//     const saturation = 1.0;
-//     const lightness = 0.4;
-//     return new THREE.Color().setHSL(hue, saturation, lightness);
-// }
-
-// To use the logging version, you'd call mapValueToColor_LOG from VectorVisualization.js
-// For now, let's make the original function log directly but less frequently to avoid flooding.
-
-// Re-defining the original function with some conditional logging:
-// A global variable to import VECTOR_LENGTH if not already available for logging conditions
-// import { VECTOR_LENGTH } from './constants.js'; // Assuming this path is correct from colors.js
-// ^ This import might cause circular dependency issues if constants.js imports from colors.js implicitly or explicitly.
-// It's safer to pass VECTOR_LENGTH or index if complex conditional logging is needed.
-
-// Simpler logging for now in the main function, will be very verbose for VECTOR_LENGTH=100
-// export function mapValueToColor(value) {
-//     console.log(`mapValueToColor input value: ${value}`); // Log input value
-//     const clampedValue = Math.max(-1, Math.min(1, value / 2));
-//     const hue = (clampedValue + 1) / 2;
-//     const saturation = 1.0;
-//     const lightness = 0.4;
-//     const finalColor = new THREE.Color().setHSL(hue, saturation, lightness);
-//     console.log(`mapValueToColor output: value=${value}, clamped=${clampedValue}, hue=${hue}, color R=${finalColor.r} G=${finalColor.g} B=${finalColor.b}`);
-//     return finalColor;
-// }
-
 export function mapNormalizedValueToBrightColor(value, targetColorInstance) {
-    let h = 0.33; // Default hue (green)
-    let s = 0.9;  // Default saturation
-    let l = 0.6;  // Default lightness
+    let h = 0.33;
+    let s = 0.9;
+    let l = 0.6;
 
     if (typeof value === 'number' && isFinite(value)) {
         const clampedValue = Math.max(0, Math.min(1, value));
-        h = clampedValue * 0.8; // Map the 0-1 value to a hue range (e.g., 0 to 0.8 for red to blue)
-        s = 0.9; // High saturation
-        l = 0.7;  // High lightness
-    } else {
-        // console.warn(`mapNormalizedValueToBrightColor received non-finite value: ${value}. Defaulting color.`);
-        // Using a less intrusive log, or remove if too noisy during normal operation with fixed layerNormalize
-        if (typeof value !== 'number') console.log(`Bad color value: ${value}`); 
+        h = clampedValue * 0.8;
+        s = 0.9;
+        l = 0.7;
+    } else if (typeof value !== 'number') {
+        console.log(`Bad color value: ${value}`);
     }
 
     if (targetColorInstance) {

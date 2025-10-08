@@ -9,6 +9,7 @@ import { WeightMatrixVisualization } from '../components/WeightMatrixVisualizati
 import { MHSAAnimation } from './MHSAAnimation.js';
 import { StraightLineTrail } from '../utils/trailUtils.js';
 import { TRAIL_COLOR } from '../utils/trailConstants.js';
+import { getThemeLayerAccents, getThemeSceneBackground, onThemeChange } from '../state/themeState.js';
 
 // Real trail helpers backed by StraightLineTrail
 function createTrailLine(scene, color = TRAIL_COLOR) {
@@ -78,20 +79,29 @@ import { mapValueToColor } from '../utils/colors.js';
 
 // Use live binding of GLOBAL_ANIM_SPEED_MULT at each use; do not cache
 
-const LAYER_ACCENT_COLORS = [
-    0xff6f61,
-    0xffd166,
-    0x06d6a0,
-    0x118ab2,
-    0x9d4edd,
-].map(hex => new THREE.Color(hex));
+function buildAccentColorInstances(accents = null) {
+    const list = Array.isArray(accents) && accents.length ? accents : getThemeLayerAccents();
+    const safe = Array.isArray(list) && list.length ? list : [0xffffff];
+    return safe.map((hex) => new THREE.Color(hex));
+}
+
+let LAYER_ACCENT_COLORS = buildAccentColorInstances();
 
 export function initLayerAnimation(container) {
     // -------------------------------------------------------------------------
     //  Basic Three.js setup
     // -------------------------------------------------------------------------
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x081129);
+    scene.background = new THREE.Color(getThemeSceneBackground());
+
+    onThemeChange(() => {
+        const accents = getThemeLayerAccents();
+        LAYER_ACCENT_COLORS = buildAccentColorInstances(accents);
+        const bg = getThemeSceneBackground();
+        if (typeof bg === 'number' && scene?.background instanceof THREE.Color) {
+            scene.background.set(bg);
+        }
+    });
 
     const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 10000);
     camera.position.set(2140, 150, 3500);
@@ -412,7 +422,8 @@ export function initLayerAnimation(container) {
         scene.add(origVec.group);
         originals.push(origVec);
 
-        const accentColor = LAYER_ACCENT_COLORS[i % LAYER_ACCENT_COLORS.length].clone();
+        const palette = LAYER_ACCENT_COLORS.length ? LAYER_ACCENT_COLORS : buildAccentColorInstances();
+        const accentColor = palette[i % palette.length].clone();
         origVec.group.userData.accentColor = accentColor;
 
         // ---------- Duplicate moving vector (will branch) ----------

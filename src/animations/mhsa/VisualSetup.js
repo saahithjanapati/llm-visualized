@@ -22,6 +22,7 @@ import {
 } from '../LayerAnimationConstants.js';
 
 import { INACTIVE_COMPONENT_COLOR } from '../../utils/constants.js';
+import { getThemeMhsaColors } from '../../state/themeState.js';
 
 /**
  * Build all static visual elements required for a Multi-Head Self-Attention (MHSA) layer.
@@ -42,7 +43,16 @@ export function buildMHAVisuals(parentGroup, {
     // 1) Build Q / K / V weight matrices for every head set
     // ------------------------------------------------------------
     const matrixCenterY = mhsaBaseY + MHA_MATRIX_PARAMS.height / 2;
-    const inactiveMatrixColor = new THREE.Color(INACTIVE_COMPONENT_COLOR);
+    const theme = getThemeMhsaColors() || {};
+    const baseRestHex = typeof theme.rest === 'number' ? theme.rest : INACTIVE_COMPONENT_COLOR;
+    const baseQHex = typeof theme.baseQ === 'number' ? theme.baseQ : baseRestHex;
+    const baseKHex = typeof theme.baseK === 'number' ? theme.baseK : baseRestHex;
+    const baseVHex = typeof theme.baseV === 'number' ? theme.baseV : baseRestHex;
+
+    const baseRestColor = new THREE.Color(baseRestHex);
+    const baseQColor = new THREE.Color(baseQHex);
+    const baseKColor = new THREE.Color(baseKHex);
+    const baseVColor = new THREE.Color(baseVHex);
 
     for (let i = 0; i < NUM_HEAD_SETS_LAYER; i++) {
         const headSetWidth       = MHA_INTERNAL_MATRIX_SPACING * 2 + MHA_MATRIX_PARAMS.width;
@@ -67,7 +77,10 @@ export function buildMHAVisuals(parentGroup, {
                 MHA_MATRIX_PARAMS.slitBottomWidthFactor,
                 MHA_MATRIX_PARAMS.slitTopWidthFactor,
             );
-            mat.setColor(inactiveMatrixColor);
+            if (label.startsWith('Query')) mat.setColor(baseQColor.clone());
+            else if (label.startsWith('Key')) mat.setColor(baseKColor.clone());
+            else if (label.startsWith('Value')) mat.setColor(baseVColor.clone());
+            else mat.setColor(baseRestColor.clone());
             mat.group.userData.label = label;
             if (mat.mesh)         mat.mesh.userData.label        = label;
             if (mat.frontCapMesh) mat.frontCapMesh.userData.label = label;
@@ -119,7 +132,7 @@ export function buildMHAVisuals(parentGroup, {
         MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitTopWidthFactor,
     );
 
-    const initDarkColor = inactiveMatrixColor.clone();
+    const initDarkColor = baseRestColor.clone();
     outputProjectionMatrix.setColor(initDarkColor);
     outputProjectionMatrix.group.userData.label = 'Output Projection Matrix';
     if (outputProjectionMatrix.mesh)         outputProjectionMatrix.mesh.userData.label        = 'Output Projection Matrix';

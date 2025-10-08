@@ -1,6 +1,7 @@
 import { setPlaybackSpeed } from '../utils/constants.js';
 import { setPreference } from '../utils/preferences.js';
 import { appState } from '../state/appState.js';
+import { getAvailableThemes, getCurrentThemeId, onThemeChange, setTheme } from '../state/themeState.js';
 
 // Wires up the settings modal controls.
 export function initSettingsModal(pipeline) {
@@ -24,6 +25,7 @@ export function initSettingsModal(pipeline) {
             const selectedLabel = checked.closest('.speed-option');
             updateSpeedChecked(selectedLabel?.dataset.value || 'medium');
         }
+        updateThemeChecked(getCurrentThemeId());
         const rc = document.getElementById('toggleRaycast');
         if (rc && pipeline?.engine?.isRaycastingEnabled) {
             rc.checked = !!pipeline.engine.isRaycastingEnabled();
@@ -73,6 +75,62 @@ export function initSettingsModal(pipeline) {
         });
     });
 
+    const themeGroup = document.getElementById('themeOptions');
+
+    function updateThemeChecked(themeId) {
+        if (!themeGroup) return;
+        themeGroup.querySelectorAll('.theme-option').forEach((label) => {
+            const value = label.getAttribute('data-value');
+            label.setAttribute('data-checked', String(value === themeId));
+            const input = label.querySelector('input');
+            if (input) input.checked = value === themeId;
+        });
+    }
+
+    if (themeGroup) {
+        const themes = getAvailableThemes();
+        themeGroup.innerHTML = '';
+        const currentTheme = getCurrentThemeId();
+        themes.forEach((theme) => {
+            const label = document.createElement('label');
+            label.className = 'theme-option';
+            label.setAttribute('data-value', theme.id);
+
+            const input = document.createElement('input');
+            input.type = 'radio';
+            input.name = 'colorTheme';
+            input.value = theme.id;
+            input.checked = theme.id === currentTheme;
+            label.appendChild(input);
+
+            const name = document.createElement('div');
+            name.className = 'theme-name';
+            name.textContent = theme.label;
+            label.appendChild(name);
+
+            const swatch = document.createElement('div');
+            swatch.className = 'theme-swatch';
+            if (Array.isArray(theme.swatch) && theme.swatch.length >= 2) {
+                swatch.style.background = `linear-gradient(90deg, ${theme.swatch[0]}, ${theme.swatch[1]})`;
+            }
+            label.appendChild(swatch);
+
+            label.addEventListener('click', (e) => {
+                e.preventDefault();
+                const value = label.getAttribute('data-value');
+                if (!value || value === getCurrentThemeId()) return;
+                setTheme(value);
+            });
+
+            themeGroup.appendChild(label);
+        });
+        updateThemeChecked(currentTheme);
+    }
+
+    const detachThemeListener = onThemeChange((theme) => {
+        updateThemeChecked(theme?.id ?? getCurrentThemeId());
+    });
+
     const rayToggle = document.getElementById('toggleRaycast');
     rayToggle?.addEventListener('change', () => {
         pipeline?.engine?.setRaycastingEnabled?.(!!rayToggle.checked);
@@ -92,4 +150,8 @@ export function initSettingsModal(pipeline) {
         setPreference('showHdrBackground', appState.showHdrBackground);
         appState.applyEnvironmentBackground(pipeline);
     });
+
+    if (typeof window !== 'undefined') {
+        window.addEventListener('unload', detachThemeListener, { once: true });
+    }
 }
