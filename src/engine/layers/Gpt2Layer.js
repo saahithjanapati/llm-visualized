@@ -1038,7 +1038,7 @@ export default class Gpt2Layer extends BaseLayer {
         const duration = (distance / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
         
         const matrixStartColor = new THREE.Color(INACTIVE_COMPONENT_COLOR);
-        const matrixEndColor = new THREE.Color(0xb07c13); // orange
+        const matrixEndColor = new THREE.Color(0xaf5faf); // purple-pink
         const startIntensity = 0.1;
         const peakIntensity = 0.8;
         const finalIntensity = 0.3;
@@ -1146,7 +1146,7 @@ export default class Gpt2Layer extends BaseLayer {
         const expandedGroup = lane.expandedVecGroup;
         if (!expandedGroup || typeof TWEEN === 'undefined') return;
         
-        const orangeColor = new THREE.Color(0xb07c13);
+        const mlpHighlightColor = new THREE.Color(0xaf5faf);
         const downBottomY = this.mlpDown.group.position.y - MLP_MATRIX_PARAMS_DOWN.height / 2;
         const downTopY = this.mlpDown.group.position.y + MLP_MATRIX_PARAMS_DOWN.height / 2;
         
@@ -1164,7 +1164,7 @@ export default class Gpt2Layer extends BaseLayer {
             .to({ t: 1, emissive: peakIntensity }, durationDown * 0.6)
             .easing(TWEEN.Easing.Quadratic.InOut)
             .onUpdate(() => {
-                const col = new THREE.Color(INACTIVE_COMPONENT_COLOR).lerp(orangeColor, downState.t);
+                const col = new THREE.Color(INACTIVE_COMPONENT_COLOR).lerp(mlpHighlightColor, downState.t);
                 this.mlpDown.setColor(col);
                 this.mlpDown.setEmissive(col, downState.emissive);
             })
@@ -1173,7 +1173,7 @@ export default class Gpt2Layer extends BaseLayer {
                     .to({ emissive: finalIntensity }, durationDown * 0.4)
                     .easing(TWEEN.Easing.Quadratic.InOut)
                     .onUpdate(() => {
-                        this.mlpDown.setEmissive(orangeColor, downState.emissive);
+                        this.mlpDown.setEmissive(mlpHighlightColor, downState.emissive);
                     })
                     .start();
             })
@@ -1232,8 +1232,8 @@ export default class Gpt2Layer extends BaseLayer {
                 }
             })
             .onComplete(() => {
-                this.mlpDown.setColor(orangeColor);
-                this.mlpDown.setEmissive(orangeColor, finalIntensity);
+                this.mlpDown.setColor(mlpHighlightColor);
+                this.mlpDown.setEmissive(mlpHighlightColor, finalIntensity);
                 
                 // Ensure both MLP matrices are fully opaque at the end
                 this.mlpUp.setMaterialProperties({ opacity: 1.0, transparent: false });
