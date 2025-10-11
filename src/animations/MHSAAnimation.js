@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization.js';
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
 import { StraightLineTrail, mergeTrailsIntoLineSegments } from '../utils/trailUtils.js';
+import { getCurrentTheme } from '../state/themeManager.js';
 
 
 
@@ -149,6 +150,8 @@ export class MHSAAnimation {
             this.passThroughAnimator = new PassThroughAnimator(this);
             this.passThroughAnimator.start(this.currentLanes);
         });
+
+        this.applyTheme(getCurrentTheme());
 
         // ----------------------------------------------
         //  Stage pipeline scaffolding (legacy)
@@ -1782,6 +1785,40 @@ export class MHSAAnimation {
             }
         }
         console.log("MHSAAnimation: Initiated final head color transitions.");
+    }
+
+    applyTheme(theme) {
+        const mhsa = theme?.scene?.mhsa;
+        if (!mhsa) return;
+        const assign = (target, value) => {
+            if (typeof value === 'number') target.setHex(value);
+        };
+        assign(this.matrixInitialRestingColor, mhsa.matrixRest);
+        assign(this.brightGreen, mhsa.brightGreen);
+        assign(this.darkTintedGreen, mhsa.darkGreen);
+        assign(this.brightBlue, mhsa.brightBlue);
+        assign(this.darkTintedBlue, mhsa.darkBlue);
+        assign(this.brightRed, mhsa.brightRed);
+        assign(this.darkTintedRed, mhsa.darkRed);
+
+        const restColor = this.matrixInitialRestingColor.clone();
+        if (Array.isArray(this.mhaVisualizations)) {
+            this.mhaVisualizations.forEach((mat) => {
+                if (typeof mat.setColor === 'function') {
+                    mat.setColor(restColor.clone());
+                }
+            });
+        }
+
+        if (this.outputProjectionMatrix && typeof this.outputProjectionMatrix.setColor === 'function') {
+            this.outputProjectionMatrix.setColor(restColor.clone());
+        }
+        this.outputProjMatrixDefaultColor = restColor.clone();
+        this.outputProjMatrixActiveColor = new THREE.Color(
+            typeof mhsa.outputProjection === 'number'
+                ? mhsa.outputProjection
+                : this.outputProjMatrixActiveColor.getHex()
+        );
     }
 
     // ----------------------------------------------------------------------

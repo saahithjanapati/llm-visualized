@@ -31,6 +31,7 @@ import { initSettingsModal } from '../src/ui/settingsModal.js';
 import { initPauseButton } from '../src/ui/pauseButton.js';
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
+import { getCurrentTheme, subscribeToThemeChanges } from '../src/state/themeManager.js';
 
 // Optionally load pre-baked geometries; returns instantly if disabled
 await loadPrecomputedGeometries('../precomputed_components.glb');
@@ -52,6 +53,11 @@ const pipeline = new LayerPipeline(gptCanvas, NUM_LAYERS, {
     cameraTarget: camTarget
 });
 
+let vocabBottom = null;
+let posBottom = null;
+let lnTop = null;
+let vocabTop = null;
+
 // Show GPT canvas immediately
 gptCanvas.style.display = 'block';
 try {
@@ -69,7 +75,7 @@ try {
     const headGreen = new THREE.Color(MHA_FINAL_K_COLOR);
     const residualYBase = LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2 + EMBEDDING_BOTTOM_TOP_ALIGN_OFFSET_FROM_LN1_BOTTOM;
     const bottomVocabCenterY = residualYBase - EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2 + EMBEDDING_BOTTOM_Y_ADJUST;
-    const vocabBottom = new WeightMatrixVisualization(
+    vocabBottom = new WeightMatrixVisualization(
         null,
         new THREE.Vector3(0 + EMBEDDING_BOTTOM_VOCAB_X_OFFSET, bottomVocabCenterY, 0),
         EMBEDDING_MATRIX_PARAMS_VOCAB.width,
@@ -95,7 +101,7 @@ try {
     const posX = (EMBEDDING_MATRIX_PARAMS_VOCAB.width / 2) + (EMBEDDING_MATRIX_PARAMS_POSITION.width / 2) + gapX + EMBEDDING_BOTTOM_POS_X_OFFSET + EMBEDDING_BOTTOM_VOCAB_X_OFFSET;
     const vocabBottomY = bottomVocabCenterY - EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2;
     const bottomPosCenterY = vocabBottomY + EMBEDDING_MATRIX_PARAMS_POSITION.height / 2;
-    const posBottom = new WeightMatrixVisualization(
+    posBottom = new WeightMatrixVisualization(
         null,
         new THREE.Vector3(posX, bottomPosCenterY, 0),
         EMBEDDING_MATRIX_PARAMS_POSITION.width,
@@ -124,7 +130,7 @@ try {
         const towerTopY = tmp.y + MLP_MATRIX_PARAMS_DOWN.height / 2;
         const topGap = TOP_EMBED_Y_GAP_ABOVE_TOWER;
         const topLnCenterY = towerTopY + topGap + LN_PARAMS.height / 2;
-        const lnTop = new LayerNormalizationVisualization(
+        lnTop = new LayerNormalizationVisualization(
             new THREE.Vector3(0 + TOP_EMBED_VOCAB_X_OFFSET, topLnCenterY, 0),
             LN_PARAMS.width,
             LN_PARAMS.height,
@@ -143,7 +149,7 @@ try {
         }
 
         const topVocabCenterY = topLnCenterY + (LN_PARAMS.height / 2) + TOP_LN_TO_TOP_EMBED_GAP + (EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2) + TOP_EMBED_Y_ADJUST;
-        const vocabTop = new WeightMatrixVisualization(
+        vocabTop = new WeightMatrixVisualization(
             null,
             new THREE.Vector3(0 + TOP_EMBED_VOCAB_X_OFFSET, topVocabCenterY, 0),
             EMBEDDING_MATRIX_PARAMS_VOCAB.width,
@@ -168,6 +174,40 @@ try {
         }
     }
 } catch (_) { /* optional – embedding visuals are non-critical */ }
+
+function applyThemeToScene(theme) {
+    if (!theme || !theme.scene) return;
+    pipeline.applyTheme?.(theme);
+
+    const mhsa = theme.scene.mhsa || {};
+    const inactiveHex = theme.scene.inactiveComponent ?? INACTIVE_COMPONENT_COLOR;
+    const inactiveColor = new THREE.Color(inactiveHex);
+    const qHex = mhsa.finalQ ?? MHA_FINAL_Q_COLOR;
+    const kHex = mhsa.finalK ?? MHA_FINAL_K_COLOR;
+    const qColor = new THREE.Color(qHex);
+    const kColor = new THREE.Color(kHex);
+
+    if (vocabBottom) {
+        vocabBottom.setColor(qColor.clone());
+    }
+    if (posBottom) {
+        posBottom.setColor(kColor.clone());
+    }
+    if (lnTop) {
+        lnTop.setColor(inactiveColor.clone());
+    }
+    if (vocabTop) {
+        const topColor = appState.topEmbedActivated ? qColor.clone() : inactiveColor.clone();
+        vocabTop.setColor(topColor);
+    }
+    if (appState.vocabTopRef) {
+        const topColor = appState.topEmbedActivated ? qColor.clone() : inactiveColor.clone();
+        appState.vocabTopRef.setColor(topColor);
+    }
+}
+
+applyThemeToScene(getCurrentTheme());
+subscribeToThemeChanges(applyThemeToScene);
 
 // Initialise UI modules
 initIntroAnimation(pipeline, gptCanvas);

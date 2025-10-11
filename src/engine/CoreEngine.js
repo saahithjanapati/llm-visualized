@@ -4,6 +4,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { QUALITY_PRESET, resolveRenderDprCap } from '../utils/constants.js';
+import { getCurrentTheme, subscribeToThemeChanges } from '../state/themeManager.js';
 import Gpt2Layer from './layers/Gpt2Layer.js';
 
 /**
@@ -101,23 +102,8 @@ export class CoreEngine {
 
         // Hover label DOM element (similar styling to status overlay)
         this._hoverLabelDiv = document.createElement('div');
-        Object.assign(this._hoverLabelDiv.style, {
-            position: 'fixed',
-            top: '0px',
-            left: '0px',
-            padding: '6px 10px',
-            fontFamily: 'monospace',
-            fontSize: '14px',
-            color: '#fff',
-            background: 'rgba(20,20,20,0.35)',
-            backdropFilter: 'blur(6px)',
-            WebkitBackdropFilter: 'blur(6px)',
-            borderRadius: '8px',
-            pointerEvents: 'none',
-            zIndex: 6,
-            whiteSpace: 'pre',
-            display: 'none'
-        });
+        this._hoverLabelDiv.className = 'hover-label';
+        this._hoverLabelDiv.style.display = 'none';
         document.body.appendChild(this._hoverLabelDiv);
 
         // Track primary touch interactions so quick taps can trigger raycasts
@@ -176,10 +162,14 @@ export class CoreEngine {
         this._applyCameraZoomLimit();
         this._updateCameraFarFromControls();
 
-        this.scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-        const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
-        dirLight.position.set(25, 40, 40);
-        this.scene.add(dirLight);
+        this._ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+        this.scene.add(this._ambientLight);
+        this._directionalLight = new THREE.DirectionalLight(0xffffff, 0.9);
+        this._directionalLight.position.set(25, 40, 40);
+        this.scene.add(this._directionalLight);
+
+        this.applyTheme(getCurrentTheme());
+        this._themeUnsub = subscribeToThemeChanges((theme) => this.applyTheme(theme));
 
         // ────────────────────────────────────────────────────────────────────
         // Initialise layers
@@ -240,6 +230,39 @@ export class CoreEngine {
 
         // Kick off RAF loop
         requestAnimationFrame(this._animate);
+    }
+
+    applyTheme(theme) {
+        if (!theme || !theme.scene) return;
+        const { background, ambientLight, directionalLight } = theme.scene;
+        if (typeof background === 'number') {
+            if (this.scene) {
+                if (this.scene.background instanceof THREE.Color) {
+                    this.scene.background.setHex(background);
+                } else {
+                    this.scene.background = new THREE.Color(background);
+                }
+            }
+            if (this.renderer) {
+                this.renderer.setClearColor(background, 1);
+            }
+        }
+        if (this._ambientLight && ambientLight) {
+            if (typeof ambientLight.color === 'number') {
+                this._ambientLight.color.setHex(ambientLight.color);
+            }
+            if (typeof ambientLight.intensity === 'number') {
+                this._ambientLight.intensity = ambientLight.intensity;
+            }
+        }
+        if (this._directionalLight && directionalLight) {
+            if (typeof directionalLight.color === 'number') {
+                this._directionalLight.color.setHex(directionalLight.color);
+            }
+            if (typeof directionalLight.intensity === 'number') {
+                this._directionalLight.intensity = directionalLight.intensity;
+            }
+        }
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -326,6 +349,10 @@ export class CoreEngine {
         this.renderer.domElement.removeEventListener('pointerup', this._onPointerUp);
         if (this._hoverLabelDiv && this._hoverLabelDiv.parentElement) {
             this._hoverLabelDiv.parentElement.removeChild(this._hoverLabelDiv);
+        }
+        if (typeof this._themeUnsub === 'function') {
+            this._themeUnsub();
+            this._themeUnsub = null;
         }
         if (this._tweenStartRestore && typeof TWEEN !== 'undefined' && TWEEN?.Tween?.prototype) {
             try {

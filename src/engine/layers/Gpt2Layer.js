@@ -56,6 +56,7 @@ import {
 import { PrismLayerNormAnimation } from '../../animations/PrismLayerNormAnimation.js';
 import { MHSAAnimation } from '../../animations/MHSAAnimation.js';
 import { startPrismAdditionAnimation } from '../../utils/additionUtils.js';
+import { getCurrentTheme } from '../../state/themeManager.js';
 
 
 // Slightly reduced spacing between stacked layers for a tighter layout.
@@ -68,10 +69,8 @@ const TMP_WORLD_POS = new THREE.Vector3();
 
 // Shared colour constants reused across the layer to avoid per-frame
 // allocations inside the animation loop.
-const COLOR_DARK_GRAY = new THREE.Color(0x333333);
 const COLOR_LIGHT_YELLOW = new THREE.Color(0xffffff);
 const COLOR_BRIGHT_YELLOW = new THREE.Color(0xffffff);
-const COLOR_INACTIVE_COMPONENT = new THREE.Color(INACTIVE_COMPONENT_COLOR);
 
 function simplePrismMultiply(srcVec, tgtVec, onComplete) {
     // instant product; flash white then call onComplete
@@ -118,6 +117,13 @@ export default class Gpt2Layer extends BaseLayer {
         this._ln1AddPlaceholders = [];
         this._ln2AddPlaceholders = [];
 
+        const theme = getCurrentTheme();
+        const inactiveHex = theme?.scene?.inactiveComponent ?? INACTIVE_COMPONENT_COLOR;
+        const activeHex = theme?.scene?.mlpActive ?? 0xb07c13;
+        this._inactiveColor = new THREE.Color(inactiveHex);
+        this._mlpActiveColor = new THREE.Color(activeHex);
+        this._trailColor = theme?.scene?.trailColor ?? 0xffffff;
+
         // Cached colours reused during per-frame updates to avoid heap churn.
         this._ln1TargetColor = new THREE.Color();
         this._ln2TargetColor = new THREE.Color();
@@ -161,7 +167,7 @@ export default class Gpt2Layer extends BaseLayer {
         );
         // Start LN1 in the same "inactive" palette used for LN2 so it only lights up once
         // vectors begin to enter the ring.
-        const inactiveDark = COLOR_INACTIVE_COMPONENT;
+        const inactiveDark = this._inactiveColor.clone();
         ln1.setColor(inactiveDark);
         // Start fully opaque to avoid early depth-sorting costs.
         ln1.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
@@ -209,7 +215,7 @@ export default class Gpt2Layer extends BaseLayer {
             LN_PARAMS.holeWidth,
             LN_PARAMS.holeWidthFactor
         );
-        ln2.setColor(inactiveDark);
+        ln2.setColor(inactiveDark.clone());
         ln2.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
         this.root.add(ln2.group);
 
@@ -400,15 +406,16 @@ export default class Gpt2Layer extends BaseLayer {
             }
         });
 
+        const inactiveBase = this._inactiveColor || new THREE.Color(INACTIVE_COMPONENT_COLOR);
         const ln1TargetColor = this._ln1TargetColor;
-        ln1TargetColor.copy(COLOR_DARK_GRAY);
+        ln1TargetColor.copy(inactiveBase);
         let targetOpacity = opaqueOpacity;
 
         if (anyVectorInLN1 && highestLN1VecY > -Infinity) {
             if (highestLN1VecY >= bottomY_ln1_abs && highestLN1VecY < midY_ln1_abs) {
                 // Entering LN-1
                 const t = (highestLN1VecY - bottomY_ln1_abs) / (midY_ln1_abs - bottomY_ln1_abs);
-                ln1TargetColor.lerpColors(COLOR_DARK_GRAY, COLOR_LIGHT_YELLOW, t);
+                ln1TargetColor.lerpColors(inactiveBase, COLOR_LIGHT_YELLOW, t);
                 targetOpacity = THREE.MathUtils.lerp(opaqueOpacity, semiTransparentOpacity, t);
             } else if (highestLN1VecY >= midY_ln1_abs && highestLN1VecY < topY_ln1_abs) {
                 // Inside LN-1
@@ -481,13 +488,13 @@ export default class Gpt2Layer extends BaseLayer {
 
         if (anyVectorInLN2 && highestLN2VecY > -Infinity) {
             const ln2TargetColor = this._ln2TargetColor;
-            ln2TargetColor.copy(COLOR_DARK_GRAY);
+            ln2TargetColor.copy(inactiveBase);
             let ln2TargetOpacity = opaqueOpacity;
 
             if (highestLN2VecY >= bottomY_ln2_abs && highestLN2VecY < midY_ln2_abs) {
                 // Entering LN2
                 const t = (highestLN2VecY - bottomY_ln2_abs) / (midY_ln2_abs - bottomY_ln2_abs);
-                ln2TargetColor.lerpColors(COLOR_DARK_GRAY, COLOR_LIGHT_YELLOW, t);
+                ln2TargetColor.lerpColors(inactiveBase, COLOR_LIGHT_YELLOW, t);
                 ln2TargetOpacity = THREE.MathUtils.lerp(opaqueOpacity, semiTransparentOpacity, t);
             } else if (highestLN2VecY >= midY_ln2_abs && highestLN2VecY < topY_ln2_abs) {
                 // Inside LN2
@@ -692,7 +699,7 @@ export default class Gpt2Layer extends BaseLayer {
                                 this.root.add(multResult.group);
 
                                 if (lane.addTarget) {
-                                    const addTrail = new StraightLineTrail(this.root, 0xffffff, 1);
+                                    const addTrail = new StraightLineTrail(this.root, this._trailColor, 1);
                                     addTrail.start(multResult.group.position);
                                     multResult.userData = multResult.userData || {};
                                     multResult.userData.trail = addTrail;
@@ -716,7 +723,7 @@ export default class Gpt2Layer extends BaseLayer {
                                         }
                                         lane.addTarget.userData = lane.addTarget.userData || {};
                                         if (!lane.addTarget.userData.trail) {
-                                            const fallbackTrail = new StraightLineTrail(this.root, 0xffffff, 1);
+                                            const fallbackTrail = new StraightLineTrail(this.root, this._trailColor, 1);
                                             fallbackTrail.start(lane.addTarget.group.position);
                                             lane.addTarget.userData.trail = fallbackTrail;
                                             lane.addTarget.userData.trailWorld = false;
@@ -727,7 +734,7 @@ export default class Gpt2Layer extends BaseLayer {
                                 } else {
                                     lane.resultVec = multResult;
                                     lane.ln1AddComplete = true;
-                                    const resTrailFallback = new StraightLineTrail(this.root, 0xffffff, 1);
+                                    const resTrailFallback = new StraightLineTrail(this.root, this._trailColor, 1);
                                     resTrailFallback.start(multResult.group.position);
                                     multResult.userData = multResult.userData || {};
                                     multResult.userData.trail = resTrailFallback;
@@ -818,7 +825,7 @@ export default class Gpt2Layer extends BaseLayer {
                         const mv = new VectorVisualizationInstancedPrism(v.rawData.slice(), v.group.position.clone());
                         this.root.add(mv.group);
                         // ---- Trail for LN2 moving vector ----
-                        const mvTrail = new StraightLineTrail(this.root, 0xffffff, 1);
+                        const mvTrail = new StraightLineTrail(this.root, this._trailColor, 1);
                         mvTrail.start(mv.group.position);
                         mv.userData = mv.userData || {};
                         mv.userData.trail = mvTrail;
@@ -934,7 +941,7 @@ export default class Gpt2Layer extends BaseLayer {
                                 this.root.add(resVec.group);
 
                                 if (lane.addTargetLN2) {
-                                    const ln2AddTrail = new StraightLineTrail(this.root, 0xffffff, 1);
+                                    const ln2AddTrail = new StraightLineTrail(this.root, this._trailColor, 1);
                                     ln2AddTrail.start(resVec.group.position);
                                     resVec.userData = resVec.userData || {};
                                     resVec.userData.trail = ln2AddTrail;
@@ -958,7 +965,7 @@ export default class Gpt2Layer extends BaseLayer {
                                         }
                                         lane.addTargetLN2.userData = lane.addTargetLN2.userData || {};
                                         if (!lane.addTargetLN2.userData.trail) {
-                                            const fallbackTrailLn2 = new StraightLineTrail(this.root, 0xffffff, 1);
+                                            const fallbackTrailLn2 = new StraightLineTrail(this.root, this._trailColor, 1);
                                             fallbackTrailLn2.start(lane.addTargetLN2.group.position);
                                             lane.addTargetLN2.userData.trail = fallbackTrailLn2;
                                             lane.addTargetLN2.userData.trailWorld = false;
@@ -968,7 +975,7 @@ export default class Gpt2Layer extends BaseLayer {
                                 } else {
                                     lane.resultVecLN2 = resVec;
                                     lane.ln2AddComplete = true;
-                                    const resTrail = new StraightLineTrail(this.root, 0xffffff, 1);
+                                    const resTrail = new StraightLineTrail(this.root, this._trailColor, 1);
                                     resTrail.start(resVec.group.position);
                                     resVec.userData = resVec.userData || {};
                                     resVec.userData.trail = resTrail;
@@ -1037,8 +1044,8 @@ export default class Gpt2Layer extends BaseLayer {
         const distance = topY - vec.group.position.y;
         const duration = (distance / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
         
-        const matrixStartColor = new THREE.Color(INACTIVE_COMPONENT_COLOR);
-        const matrixEndColor = new THREE.Color(0xb07c13); // orange
+        const matrixStartColor = this._inactiveColor.clone();
+        const matrixEndColor = this._mlpActiveColor.clone();
         const startIntensity = 0.1;
         const peakIntensity = 0.8;
         const finalIntensity = 0.3;
@@ -1117,7 +1124,7 @@ export default class Gpt2Layer extends BaseLayer {
         vec.group.visible = false;
 
         // ---- Trail for expanded 4x vector group ----
-        const expTrail = new StraightLineTrail(this.root, 0xffffff, 1);
+        const expTrail = new StraightLineTrail(this.root, this._trailColor, 1);
         expTrail.start(expandedGroup.position);
         lane.expandedVecTrail = expTrail;
         
@@ -1146,7 +1153,7 @@ export default class Gpt2Layer extends BaseLayer {
         const expandedGroup = lane.expandedVecGroup;
         if (!expandedGroup || typeof TWEEN === 'undefined') return;
         
-        const orangeColor = new THREE.Color(0xb07c13);
+        const activeColor = this._mlpActiveColor.clone();
         const downBottomY = this.mlpDown.group.position.y - MLP_MATRIX_PARAMS_DOWN.height / 2;
         const downTopY = this.mlpDown.group.position.y + MLP_MATRIX_PARAMS_DOWN.height / 2;
         
@@ -1164,7 +1171,7 @@ export default class Gpt2Layer extends BaseLayer {
             .to({ t: 1, emissive: peakIntensity }, durationDown * 0.6)
             .easing(TWEEN.Easing.Quadratic.InOut)
             .onUpdate(() => {
-                const col = new THREE.Color(INACTIVE_COMPONENT_COLOR).lerp(orangeColor, downState.t);
+                const col = this._inactiveColor.clone().lerp(activeColor, downState.t);
                 this.mlpDown.setColor(col);
                 this.mlpDown.setEmissive(col, downState.emissive);
             })
@@ -1232,8 +1239,8 @@ export default class Gpt2Layer extends BaseLayer {
                 }
             })
             .onComplete(() => {
-                this.mlpDown.setColor(orangeColor);
-                this.mlpDown.setEmissive(orangeColor, finalIntensity);
+                this.mlpDown.setColor(activeColor);
+                this.mlpDown.setEmissive(activeColor, finalIntensity);
                 
                 // Ensure both MLP matrices are fully opaque at the end
                 this.mlpUp.setMaterialProperties({ opacity: 1.0, transparent: false });
@@ -1298,7 +1305,7 @@ export default class Gpt2Layer extends BaseLayer {
                 try {
                     vec.userData = vec.userData || {};
                     if (!vec.userData.mlpTrail) {
-                        const pathTrail = new StraightLineTrail(this.root, 0xffffff, 1);
+                        const pathTrail = new StraightLineTrail(this.root, this._trailColor, 1);
                         pathTrail.start(vec.group.position.clone());
                         vec.userData.mlpTrail = pathTrail;
                     }
@@ -1511,7 +1518,7 @@ export default class Gpt2Layer extends BaseLayer {
         // ────────────── Trail for the ORIGINAL vector ──────────────
         // Attach to the GLOBAL scene and record WORLD positions so the trail
         // remains continuous across layers as lanes are transferred upwards.
-        trail = new StraightLineTrail(this._globalScene, 0xffffff, 1);
+        trail = new StraightLineTrail(this._globalScene, this._trailColor, 1);
         {
             originalVec.group.getWorldPosition(TMP_WORLD_POS);
             trail.start(TMP_WORLD_POS);
@@ -1535,7 +1542,7 @@ export default class Gpt2Layer extends BaseLayer {
         dupVec.group.visible = false;
         this.root.add(dupVec.group);
         // Trail for duplicate vector inside LN1
-        const dupTrail = new StraightLineTrail(this.root, 0xffffff, 1);
+        const dupTrail = new StraightLineTrail(this.root, this._trailColor, 1);
         dupTrail.start(dupVec.group.position);
         dupVec.userData = dupVec.userData || {};
         dupVec.userData.trail = dupTrail;
@@ -1543,7 +1550,7 @@ export default class Gpt2Layer extends BaseLayer {
 
         // If we're reusing an existing lane we may not have created the trail yet
         if (!trail) {
-            trail = new StraightLineTrail(this._globalScene, 0xffffff, 1);
+            trail = new StraightLineTrail(this._globalScene, this._trailColor, 1);
             originalVec.group.getWorldPosition(TMP_WORLD_POS);
             trail.start(TMP_WORLD_POS);
         }
@@ -1675,7 +1682,7 @@ export default class Gpt2Layer extends BaseLayer {
                 const posVec = new VectorVisualizationInstancedPrism(posData, new THREE.Vector3(posStartX, posStartY, zPos));
                 this.root.add(posVec.group);
                 // Trail (local to this layer) – enabled only until it reaches residual stream
-                const posTrail = new StraightLineTrail(this.root, 0xffffff, 1);
+                const posTrail = new StraightLineTrail(this.root, this._trailColor, 1);
                 posTrail.start(posVec.group.position);
                 posVec.userData = posVec.userData || {};
                 posVec.userData.trail = posTrail;
@@ -1854,6 +1861,40 @@ export default class Gpt2Layer extends BaseLayer {
      * scene graph and dispose of their GPU resources so they no longer add
      * draw-calls, memory pressure or ray-casting traversal cost.
      */
+    applyTheme(theme) {
+        if (!theme || !theme.scene) return;
+        const inactiveHex = theme.scene.inactiveComponent ?? INACTIVE_COMPONENT_COLOR;
+        const activeHex = theme.scene.mlpActive ?? 0xb07c13;
+        const trailHex = theme.scene.trailColor ?? 0xffffff;
+        this._inactiveColor = new THREE.Color(inactiveHex);
+        this._mlpActiveColor = new THREE.Color(activeHex);
+        this._trailColor = trailHex;
+
+        const inactiveColor = this._inactiveColor.clone();
+        if (this.ln1) this.ln1.setColor(inactiveColor.clone());
+        if (this.ln2) this.ln2.setColor(inactiveColor.clone());
+        if (this.mlpUp) this.mlpUp.setColor(inactiveColor.clone());
+        if (this.mlpDown) this.mlpDown.setColor(inactiveColor.clone());
+
+        if (this.mhsaAnimation && typeof this.mhsaAnimation.applyTheme === 'function') {
+            this.mhsaAnimation.applyTheme(theme);
+        }
+
+        const traverseTargets = new Set();
+        if (this.root) traverseTargets.add(this.root);
+        if (this._globalScene) traverseTargets.add(this._globalScene);
+        traverseTargets.forEach((target) => {
+            if (target && typeof target.traverse === 'function') {
+                target.traverse((obj) => {
+                    const trailRef = obj?.userData?.trailRef;
+                    if (trailRef && typeof trailRef.setColor === 'function') {
+                        trailRef.setColor(this._trailColor);
+                    }
+                });
+            }
+        });
+    }
+
     hideDynamicGeometry() {
         const disposeObj = (obj) => {
             if (!obj) return;

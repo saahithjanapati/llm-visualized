@@ -9,6 +9,7 @@ import { WeightMatrixVisualization } from '../components/WeightMatrixVisualizati
 import { MHSAAnimation } from './MHSAAnimation.js';
 import { StraightLineTrail } from '../utils/trailUtils.js';
 import { TRAIL_COLOR } from '../utils/trailConstants.js';
+import { getCurrentTheme, subscribeToThemeChanges } from '../state/themeManager.js';
 
 // Real trail helpers backed by StraightLineTrail
 function createTrailLine(scene, color = TRAIL_COLOR) {
@@ -78,20 +79,34 @@ import { mapValueToColor } from '../utils/colors.js';
 
 // Use live binding of GLOBAL_ANIM_SPEED_MULT at each use; do not cache
 
-const LAYER_ACCENT_COLORS = [
+const DEFAULT_LAYER_ACCENTS = [
     0xff6f61,
     0xffd166,
     0x06d6a0,
     0x118ab2,
     0x9d4edd,
-].map(hex => new THREE.Color(hex));
+];
+
+function createAccentPalette(theme) {
+    const palette = theme?.scene?.layerAccents;
+    const source = Array.isArray(palette) && palette.length ? palette : DEFAULT_LAYER_ACCENTS;
+    return source.map(hex => new THREE.Color(hex));
+}
+
+let LAYER_ACCENT_COLORS = createAccentPalette(getCurrentTheme());
+
+subscribeToThemeChanges((theme) => {
+    LAYER_ACCENT_COLORS = createAccentPalette(theme);
+});
 
 export function initLayerAnimation(container) {
     // -------------------------------------------------------------------------
     //  Basic Three.js setup
     // -------------------------------------------------------------------------
+    const theme = getCurrentTheme();
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x081129);
+    const backgroundHex = theme?.scene?.background ?? 0x081129;
+    scene.background = new THREE.Color(backgroundHex);
 
     const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 10000);
     camera.position.set(2140, 150, 3500);
@@ -209,9 +224,17 @@ export function initLayerAnimation(container) {
     controls.enableDamping = true;
     controls.target.set(2140, 66, 0);
 
-    const ambientLight = new THREE.AmbientLight(0xfff7e6, 0.65);
+    const ambientConfig = theme?.scene?.ambientLight;
+    const dirConfig = theme?.scene?.directionalLight;
+    const ambientLight = new THREE.AmbientLight(
+        ambientConfig?.color ?? 0xfff7e6,
+        ambientConfig?.intensity ?? 0.65
+    );
     scene.add(ambientLight);
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.65);
+    const dirLight = new THREE.DirectionalLight(
+        dirConfig?.color ?? 0xffffff,
+        dirConfig?.intensity ?? 0.65
+    );
     dirLight.position.set(8, 32, 14);
     scene.add(dirLight);
     const magentaFill = new THREE.PointLight(0xff85a1, 0.45, 600);
