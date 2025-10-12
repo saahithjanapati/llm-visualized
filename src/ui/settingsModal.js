@@ -1,5 +1,5 @@
 import { setPlaybackSpeed } from '../utils/constants.js';
-import { setPreference } from '../utils/preferences.js';
+import { getPreference, setPreference } from '../utils/preferences.js';
 import { appState } from '../state/appState.js';
 
 // Wires up the settings modal controls.
@@ -8,6 +8,9 @@ export function initSettingsModal(pipeline) {
     const settingsOverlay = document.getElementById('settingsOverlay');
     const settingsClose = document.getElementById('settingsClose');
     const equationsPanel = document.getElementById('equationsPanel');
+
+    appState.autoCameraFollow = getPreference('autoCameraFollow', true);
+    pipeline?.setAutoCameraFollow?.(appState.autoCameraFollow, { immediate: true });
 
     function applySpeed(value) {
         setPlaybackSpeed(value);
@@ -32,6 +35,13 @@ export function initSettingsModal(pipeline) {
         if (eq) eq.checked = !!appState.showEquations;
         const bg = document.getElementById('toggleHdrBackground');
         if (bg) bg.checked = !!appState.showHdrBackground;
+        const autoCam = document.getElementById('toggleAutoCamera');
+        if (autoCam) {
+            const enabled = typeof pipeline?.isAutoCameraFollowEnabled === 'function'
+                ? pipeline.isAutoCameraFollowEnabled()
+                : appState.autoCameraFollow;
+            autoCam.checked = !!enabled;
+        }
     }
 
     function closeSettings() {
@@ -91,5 +101,12 @@ export function initSettingsModal(pipeline) {
         appState.showHdrBackground = !!bgToggle.checked;
         setPreference('showHdrBackground', appState.showHdrBackground);
         appState.applyEnvironmentBackground(pipeline);
+    });
+
+    const autoCamToggle = document.getElementById('toggleAutoCamera');
+    autoCamToggle?.addEventListener('change', () => {
+        appState.autoCameraFollow = !!autoCamToggle.checked;
+        setPreference('autoCameraFollow', appState.autoCameraFollow);
+        pipeline?.setAutoCameraFollow?.(appState.autoCameraFollow, { immediate: appState.autoCameraFollow });
     });
 }

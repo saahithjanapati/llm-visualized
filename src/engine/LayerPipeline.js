@@ -58,6 +58,19 @@ export class LayerPipeline extends EventTarget {
         this._layers = [];
         this._currentLayerIdx = 0;
 
+        this._autoCameraFollow = opts.autoCameraFollow !== false;
+        this._autoCameraLerp = (typeof opts.autoCameraLerp === 'number' && Number.isFinite(opts.autoCameraLerp))
+            ? THREE.MathUtils.clamp(opts.autoCameraLerp, 0.01, 1)
+            : 0.12;
+        this._autoCameraLastUpdate = 0;
+        this._autoCameraMinIntervalMs = 80;
+        this._autoCameraBox = new THREE.Box3();
+        this._autoCameraCenter = new THREE.Vector3();
+        this._autoCameraTargetScratch = new THREE.Vector3();
+        this._autoCameraOffsetScratch = new THREE.Vector3();
+        this._onAutoCameraProgress = () => { this._maybeAutoCameraFocus(); };
+        this.addEventListener('progress', this._onAutoCameraProgress);
+
         // ------------------------------------------------------------------
         // Pre-create *all* layers so their static visuals are visible upfront.
         // Only the first layer is active immediately; higher layers remain
@@ -95,13 +108,43 @@ export class LayerPipeline extends EventTarget {
         // Ensure first layer has active callback wired before start
         this._layers[0].setOnFinished(() => this._advanceToNextLayer());
         this._layers[0].setProgressEmitter(this);
+
+        this._maybeAutoCameraFocus({ immediate: true });
     }
 
     /** Dispose and tear down Three resources */
-    dispose() { this._engine && this._engine.dispose(); }
+    dispose() {
+        if (this._onAutoCameraProgress) {
+            this.removeEventListener('progress', this._onAutoCameraProgress);
+            this._onAutoCameraProgress = null;
+        }
+        if (this._engine) {
+            this._engine.dispose();
+        }
+    }
 
     /** Return reference to internal CoreEngine (for advanced use-cases). */
     get engine() { return this._engine; }
+
+    /** Enable or disable automatic camera tracking of the active layer. */
+    setAutoCameraFollow(enabled, { immediate = false } = {}) {
+        const nextValue = !!enabled;
+        if (nextValue === this._autoCameraFollow) {
+            if (nextValue && immediate) {
+                this._maybeAutoCameraFocus({ immediate: true });
+            }
+            return;
+        }
+        this._autoCameraFollow = nextValue;
+        if (this._autoCameraFollow) {
+            this._maybeAutoCameraFocus({ immediate: true });
+        }
+    }
+
+    /** Check whether automatic camera tracking is enabled. */
+    isAutoCameraFollowEnabled() {
+        return !!this._autoCameraFollow;
+    }
 
     // ----------------------------------------------------------------------
     // Private helpers
@@ -145,6 +188,8 @@ export class LayerPipeline extends EventTarget {
         if (!nextLayer) return;
 
         nextLayer.activateWithLanes(externalLanes);
+
+        this._maybeAutoCameraFocus({ immediate: true });
 
         // Now that the original residual vectors have been transferred, we can safely
         // hide the remaining heavy geometry in the previous layer to save GPU work.
@@ -579,6 +624,49 @@ export class LayerPipeline extends EventTarget {
                 .onComplete(() => this.dispatchEvent(new Event('progress')))
                 .start();
         });
+    }
+
+    _maybeAutoCameraFocus({ immediate = false } = {}) {
+        if (!this._autoCameraFollow) return;
+        const engine = this._engine;
+        if (!engine || !engine.camera || !engine.controls) return;
+        if (typeof engine.isUserNavigating === 'function' && engine.isUserNavigating()) return;
+
+        const now = (typeof performance !== 'undefined' && performance?.now)
+            ? performance.now()
+            : Date.now();
+        if (!immediate && now - this._autoCameraLastUpdate < this._autoCameraMinIntervalMs) return;
+        this._autoCameraLastUpdate = now;
+
+        const layerIndex = Math.min(this._currentLayerIdx, this._layers.length - 1);
+        const layer = this._layers[layerIndex];
+        if (!layer || !layer.root) return;
+
+        const bbox = this._autoCameraBox;
+        bbox.makeEmpty();
+        bbox.setFromObject(layer.root);
+        if (bbox.isEmpty()) return;
+
+        const center = bbox.getCenter(this._autoCameraCenter);
+        if (!Number.isFinite(center.x) || !Number.isFinite(center.y) || !Number.isFinite(center.z)) return;
+
+        const controls = engine.controls;
+        const camera = engine.camera;
+        if (!controls || !camera) return;
+
+        const currentTarget = this._autoCameraTargetScratch.copy(controls.target);
+        const offset = this._autoCameraOffsetScratch.copy(camera.position).sub(currentTarget);
+
+        const desiredTarget = center;
+        const desiredCameraPos = center.clone().add(offset);
+        const alpha = immediate ? 1 : this._autoCameraLerp;
+
+        controls.target.lerp(desiredTarget, alpha);
+        camera.position.lerp(desiredCameraPos, alpha);
+
+        if (typeof engine.notifyCameraUpdated === 'function') {
+            engine.notifyCameraUpdated();
+        }
     }
 }
 
