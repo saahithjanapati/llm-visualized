@@ -4,6 +4,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { QUALITY_PRESET, resolveRenderDprCap } from '../utils/constants.js';
+import { OrbitingStars } from './effects/OrbitingStars.js';
 import Gpt2Layer from './layers/Gpt2Layer.js';
 
 /**
@@ -181,6 +182,13 @@ export class CoreEngine {
         dirLight.position.set(25, 40, 40);
         this.scene.add(dirLight);
 
+        // Optional ambience: minimal orbiting star field around the tower base.
+        this._orbitingStars = new OrbitingStars(this.scene, opts.orbitingStarsOptions);
+        const starsInitiallyEnabled = typeof opts.enableOrbitingStars === 'boolean'
+            ? opts.enableOrbitingStars
+            : false;
+        this._orbitingStars.setEnabled(starsInitiallyEnabled);
+
         // ────────────────────────────────────────────────────────────────────
         // Initialise layers
         // ────────────────────────────────────────────────────────────────────
@@ -257,6 +265,13 @@ export class CoreEngine {
         }
     }
 
+    /** Enable or disable the ambient orbiting stars. */
+    setOrbitingStarsEnabled(enabled) {
+        if (this._orbitingStars) {
+            this._orbitingStars.setEnabled(enabled);
+        }
+    }
+
     /**
      * Register an Object3D as a raycast root so hover labels include it.
      * @param {THREE.Object3D} root
@@ -309,6 +324,11 @@ export class CoreEngine {
         }
         this._layers.forEach(l => l.dispose());
         this._raycastRoots.length = 0;
+
+        if (this._orbitingStars) {
+            this._orbitingStars.dispose();
+            this._orbitingStars = null;
+        }
 
         this.scene.traverse(obj => {
             if (obj.geometry) obj.geometry.dispose();
@@ -537,8 +557,9 @@ export class CoreEngine {
 
         if (this._stats) this._stats.begin();
 
+        let dt = 0;
         if (!this._paused) {
-            const dt = this._clock.getDelta() * this._speed;
+            dt = this._clock.getDelta() * this._speed;
             this._layers.forEach(layer => {
                 if (!layer) return;
                 if (layer.isActive || layer._transitionPhase === 'positioning') {
@@ -549,6 +570,9 @@ export class CoreEngine {
             if (typeof TWEEN !== 'undefined' && typeof TWEEN.update === 'function') {
                 this._tweenTimelineMs += dt * 1000;
                 TWEEN.update(this._tweenTimelineMs);
+            }
+            if (this._orbitingStars) {
+                this._orbitingStars.update(dt);
             }
         }
 
