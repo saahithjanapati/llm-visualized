@@ -5,6 +5,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { QUALITY_PRESET, resolveRenderDprCap } from '../utils/constants.js';
 import Gpt2Layer from './layers/Gpt2Layer.js';
+import SciFiEnvironment from './SciFiEnvironment.js';
 
 /**
  * CoreEngine is responsible for creating the Three-JS renderer, camera, 
@@ -32,6 +33,9 @@ export class CoreEngine {
         // ────────────────────────────────────────────────────────────────────
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x000000);
+
+        this._sciFiEnvironment = new SciFiEnvironment();
+        this.scene.add(this._sciFiEnvironment.group);
 
         this._cameraFarMargin = typeof opts.cameraFarMargin === 'number' ? opts.cameraFarMargin : 0;
         this._cameraMaxDistance = (typeof opts.cameraMaxDistance === 'number' && opts.cameraMaxDistance > 0)
@@ -257,6 +261,12 @@ export class CoreEngine {
         }
     }
 
+    setSciFiModeEnabled(enabled) {
+        if (this._sciFiEnvironment) {
+            this._sciFiEnvironment.setEnabled(!!enabled);
+        }
+    }
+
     /**
      * Register an Object3D as a raycast root so hover labels include it.
      * @param {THREE.Object3D} root
@@ -332,6 +342,12 @@ export class CoreEngine {
                 TWEEN.Tween.prototype.start = this._tweenStartRestore;
             } catch (_) { /* restore best-effort */ }
             this._tweenStartRestore = null;
+        }
+
+        if (this._sciFiEnvironment) {
+            try { this.scene.remove(this._sciFiEnvironment.group); } catch (_) { /* no-op */ }
+            this._sciFiEnvironment.dispose();
+            this._sciFiEnvironment = null;
         }
     }
 
@@ -537,8 +553,9 @@ export class CoreEngine {
 
         if (this._stats) this._stats.begin();
 
+        let dt = 0;
         if (!this._paused) {
-            const dt = this._clock.getDelta() * this._speed;
+            dt = this._clock.getDelta() * this._speed;
             this._layers.forEach(layer => {
                 if (!layer) return;
                 if (layer.isActive || layer._transitionPhase === 'positioning') {
@@ -550,6 +567,12 @@ export class CoreEngine {
                 this._tweenTimelineMs += dt * 1000;
                 TWEEN.update(this._tweenTimelineMs);
             }
+        } else {
+            this._clock.getDelta();
+        }
+
+        if (this._sciFiEnvironment) {
+            this._sciFiEnvironment.update(dt);
         }
 
         this.controls.update();
