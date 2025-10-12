@@ -6,8 +6,95 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { QUALITY_PRESET, resolveRenderDprCap } from '../utils/constants.js';
 import Gpt2Layer from './layers/Gpt2Layer.js';
 
+const SCI_FI_BACKGROUND_COLOR = new THREE.Color(0x020713);
+const SCI_FI_WORLD_RADIUS = 60000;
+const SCI_FI_STARFIELD_RADIUS_MIN = 52000;
+const SCI_FI_STARFIELD_RADIUS_MAX = 64000;
+const SCI_FI_STAR_COUNT = 1800;
+
+function createSciFiElements() {
+    const group = new THREE.Group();
+    group.visible = false;
+    group.name = 'SciFiModeGroup';
+
+    // Rotating "world" shell – a translucent dome that encloses the scene to
+    // add depth and colour variation behind the tower.
+    const worldGeometry = new THREE.SphereGeometry(SCI_FI_WORLD_RADIUS, 64, 48);
+    const worldMaterial = new THREE.MeshStandardMaterial({
+        color: 0x061a2f,
+        emissive: 0x0c2d55,
+        emissiveIntensity: 0.35,
+        roughness: 0.85,
+        metalness: 0.15,
+        opacity: 0.55,
+        transparent: true,
+        side: THREE.BackSide,
+        depthWrite: false
+    });
+    const worldShell = new THREE.Mesh(worldGeometry, worldMaterial);
+    worldShell.name = 'SciFiWorldShell';
+    group.add(worldShell);
+
+    // Starfield sprinkled on the inside of the dome.  Uses a single
+    // BufferGeometry with point sprites for performance.
+    const starPositions = new Float32Array(SCI_FI_STAR_COUNT * 3);
+    for (let i = 0; i < SCI_FI_STAR_COUNT; i++) {
+        const radius = THREE.MathUtils.lerp(SCI_FI_STARFIELD_RADIUS_MIN, SCI_FI_STARFIELD_RADIUS_MAX, Math.random());
+        const u = Math.random();
+        const v = Math.random();
+        const theta = 2 * Math.PI * u;
+        const phi = Math.acos(2 * v - 1);
+        const sinPhi = Math.sin(phi);
+        const idx = i * 3;
+        starPositions[idx] = radius * sinPhi * Math.cos(theta);
+        starPositions[idx + 1] = radius * Math.cos(phi);
+        starPositions[idx + 2] = radius * sinPhi * Math.sin(theta);
+    }
+    const starGeometry = new THREE.BufferGeometry();
+    starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+    const starMaterial = new THREE.PointsMaterial({
+        color: 0x6de0ff,
+        size: 6,
+        sizeAttenuation: false,
+        transparent: true,
+        opacity: 0.65,
+        depthWrite: false
+    });
+    const starField = new THREE.Points(starGeometry, starMaterial);
+    starField.name = 'SciFiStarField';
+    starField.frustumCulled = false;
+    group.add(starField);
+
+    // Tron-like ground grid that sits beneath the GPT-2 tower for scale cues.
+    const gridSize = 120000;
+    const gridDivisions = 160;
+    const gridHelper = new THREE.GridHelper(gridSize, gridDivisions, 0x1cefff, 0x0a5b9a);
+    gridHelper.name = 'SciFiGroundGrid';
+    gridHelper.position.y = -1000;
+    const gridMaterials = Array.isArray(gridHelper.material) ? gridHelper.material : [gridHelper.material];
+    gridMaterials.forEach((mat, idx) => {
+        if (!mat) return;
+        mat.depthWrite = false;
+        mat.transparent = true;
+        mat.opacity = idx === 0 ? 0.55 : 0.35;
+        if (mat.color) {
+            mat.color.setHex(idx === 0 ? 0x25f6ff : 0x0d6fb3);
+        }
+    });
+    group.add(gridHelper);
+
+    return {
+        group,
+        worldShell,
+        starField,
+        gridHelper,
+        starGeometry,
+        starMaterial
+    };
+}
+
 /**
- * CoreEngine is responsible for creating the Three-JS renderer, camera, 
+ * CoreEngine is responsible for creating the Three-JS renderer, camera,
  * post-processing stack and the single requestAnimationFrame loop that drives
  * the entire visualisation.  It receives an ordered list of "layers" that
  * implement the small BaseLayer interface (init / update / dispose).
@@ -32,6 +119,10 @@ export class CoreEngine {
         // ────────────────────────────────────────────────────────────────────
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x000000);
+        this._sciFiBackgroundColor = SCI_FI_BACKGROUND_COLOR.clone();
+        this._sciFiStoredBackground = (this.scene.background && typeof this.scene.background.clone === 'function')
+            ? this.scene.background.clone()
+            : this.scene.background;
 
         this._cameraFarMargin = typeof opts.cameraFarMargin === 'number' ? opts.cameraFarMargin : 0;
         this._cameraMaxDistance = (typeof opts.cameraMaxDistance === 'number' && opts.cameraMaxDistance > 0)
@@ -181,6 +272,12 @@ export class CoreEngine {
         dirLight.position.set(25, 40, 40);
         this.scene.add(dirLight);
 
+        this._sciFiModeEnabled = false;
+        this._sciFiElements = createSciFiElements();
+        if (this._sciFiElements?.group) {
+            this.scene.add(this._sciFiElements.group);
+        }
+
         // ────────────────────────────────────────────────────────────────────
         // Initialise layers
         // ────────────────────────────────────────────────────────────────────
@@ -254,6 +351,34 @@ export class CoreEngine {
         this._raycastingEnabled = !!enabled;
         if (!this._raycastingEnabled && this._hoverLabelDiv) {
             this._hoverLabelDiv.style.display = 'none';
+        }
+    }
+
+    setSciFiModeEnabled(enabled) {
+        const nextEnabled = !!enabled;
+        if (!this._sciFiElements?.group) {
+            this._sciFiModeEnabled = nextEnabled;
+            return;
+        }
+
+        if (!this._sciFiStoredBackground && this._sciFiStoredBackground !== 0) {
+            this._sciFiStoredBackground = (this.scene.background && typeof this.scene.background.clone === 'function')
+                ? this.scene.background.clone()
+                : this.scene.background;
+        }
+
+        this._sciFiModeEnabled = nextEnabled;
+        this._sciFiElements.group.visible = this._sciFiModeEnabled;
+
+        if (this._sciFiModeEnabled) {
+            this.scene.background = this._sciFiBackgroundColor.clone();
+        } else {
+            const base = this._sciFiStoredBackground;
+            if (base && typeof base.clone === 'function') {
+                this.scene.background = base.clone();
+            } else {
+                this.scene.background = base ?? null;
+            }
         }
     }
 
@@ -549,6 +674,15 @@ export class CoreEngine {
             if (typeof TWEEN !== 'undefined' && typeof TWEEN.update === 'function') {
                 this._tweenTimelineMs += dt * 1000;
                 TWEEN.update(this._tweenTimelineMs);
+            }
+
+            if (this._sciFiModeEnabled && this._sciFiElements) {
+                if (this._sciFiElements.worldShell) {
+                    this._sciFiElements.worldShell.rotation.y += dt * 0.02;
+                }
+                if (this._sciFiElements.starField) {
+                    this._sciFiElements.starField.rotation.y += dt * 0.01;
+                }
             }
         }
 
