@@ -33,6 +33,14 @@ export class CoreEngine {
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x000000);
 
+        // Decorative rotating starfield (can be toggled via settings)
+        this._starfieldEnabled = true;
+        this._starfieldGroup = null;
+        this._starfieldPoints = null;
+        this._starfieldRotationSpeed = 0.05;
+        this._starfieldDirty = true;
+        this._starfieldBounds = null;
+
         this._cameraFarMargin = typeof opts.cameraFarMargin === 'number' ? opts.cameraFarMargin : 0;
         this._cameraMaxDistance = (typeof opts.cameraMaxDistance === 'number' && opts.cameraMaxDistance > 0)
             ? opts.cameraMaxDistance
@@ -191,6 +199,8 @@ export class CoreEngine {
             }
         });
 
+        this.refreshStarfieldBounds();
+
         // ────────────────────────────────────────────────────────────────────
         // Event listeners
         // ────────────────────────────────────────────────────────────────────
@@ -257,6 +267,39 @@ export class CoreEngine {
         }
     }
 
+    /** Enable or disable the decorative rotating starfield. */
+    setStarfieldEnabled(enabled) {
+        const next = !!enabled;
+        const wasEnabled = this._starfieldEnabled;
+        this._starfieldEnabled = next;
+        if (next) {
+            if (this._starfieldDirty || !this._starfieldGroup) {
+                this._rebuildStarfield();
+            }
+            if (this._starfieldGroup) {
+                this._starfieldGroup.visible = true;
+            }
+        } else if (this._starfieldGroup && wasEnabled) {
+            this._starfieldGroup.visible = false;
+        }
+    }
+
+    /** Return current starfield visibility preference. */
+    isStarfieldEnabled() {
+        return !!this._starfieldEnabled;
+    }
+
+    /** Mark the starfield bounds dirty and rebuild if currently enabled. */
+    refreshStarfieldBounds() {
+        this._starfieldDirty = true;
+        if (this._starfieldEnabled) {
+            this._rebuildStarfield();
+            if (this._starfieldGroup) {
+                this._starfieldGroup.visible = true;
+            }
+        }
+    }
+
     /**
      * Register an Object3D as a raycast root so hover labels include it.
      * @param {THREE.Object3D} root
@@ -310,6 +353,13 @@ export class CoreEngine {
         this._layers.forEach(l => l.dispose());
         this._raycastRoots.length = 0;
 
+        if (this._starfieldGroup) {
+            this.scene.remove(this._starfieldGroup);
+        }
+        this._disposeStarfieldResources();
+        this._starfieldGroup = null;
+        this._starfieldPoints = null;
+
         this.scene.traverse(obj => {
             if (obj.geometry) obj.geometry.dispose();
             if (obj.material) {
@@ -349,6 +399,121 @@ export class CoreEngine {
     _onVisibility = () => {
         document.hidden ? this.pause('visibility') : this.resume('visibility');
     };
+
+    _rebuildStarfield() {
+        if (!this.scene) return;
+
+        const previousGroup = this._starfieldGroup;
+        const previousPoints = this._starfieldPoints;
+        if (previousGroup) {
+            this.scene.remove(previousGroup);
+        }
+
+        const bbox = new THREE.Box3().setFromObject(this.scene);
+        const bboxValid = bbox && !bbox.isEmpty() &&
+            Number.isFinite(bbox.min.x) && Number.isFinite(bbox.min.y) && Number.isFinite(bbox.min.z) &&
+            Number.isFinite(bbox.max.x) && Number.isFinite(bbox.max.y) && Number.isFinite(bbox.max.z);
+
+        if (!bboxValid) {
+            if (previousGroup) {
+                this.scene.add(previousGroup);
+            }
+            return;
+        }
+
+        const baseY = bbox.min.y;
+        const topY = bbox.max.y;
+        const height = Math.max(100, topY - baseY);
+        const pivotY = baseY + height * 0.5;
+        const minY = baseY + Math.max(50, height * 0.15);
+        const maxY = baseY + height * 1.8;
+
+        const spanX = bbox.max.x - bbox.min.x;
+        const spanZ = bbox.max.z - bbox.min.z;
+        const horizontalSpan = Math.max(400, Math.max(spanX, spanZ));
+        const minRadius = Math.max(800, horizontalSpan * 0.7);
+        const maxRadius = Math.max(minRadius + horizontalSpan * 0.8, minRadius + 1200);
+
+        const starCount = Math.max(300, Math.min(1200, Math.floor(maxRadius / 3)));
+        const positions = new Float32Array(starCount * 3);
+        const colors = new Float32Array(starCount * 3);
+
+        for (let i = 0; i < starCount; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const radius = THREE.MathUtils.lerp(minRadius, maxRadius, Math.random());
+            const yWorld = THREE.MathUtils.lerp(minY, maxY, Math.random());
+            const jitter = (Math.random() - 0.5) * radius * 0.1;
+            const x = Math.cos(angle) * radius + jitter;
+            const z = Math.sin(angle) * radius + jitter;
+            const yLocal = yWorld - pivotY;
+
+            positions[i * 3] = x;
+            positions[i * 3 + 1] = yLocal;
+            positions[i * 3 + 2] = z;
+
+            const brightness = 0.75 + Math.random() * 0.25;
+            const coolTint = 0.85 + Math.random() * 0.1;
+            colors[i * 3] = brightness;
+            colors[i * 3 + 1] = brightness;
+            colors[i * 3 + 2] = Math.min(1, brightness * coolTint);
+        }
+
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+        geometry.computeBoundingSphere();
+
+        const baseSize = Math.min(220, Math.max(60, maxRadius * 0.012));
+        const material = new THREE.PointsMaterial({
+            vertexColors: true,
+            size: baseSize,
+            sizeAttenuation: true,
+            transparent: true,
+            opacity: 0.85,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending
+        });
+
+        const points = new THREE.Points(geometry, material);
+        points.frustumCulled = false;
+
+        const group = new THREE.Group();
+        group.name = 'RotatingStarfield';
+        group.userData.__starfield = true;
+        group.position.set(0, pivotY, 0);
+        group.add(points);
+
+        this.scene.add(group);
+
+        this._starfieldGroup = group;
+        this._starfieldPoints = points;
+        this._starfieldBounds = bbox.clone();
+        this._starfieldDirty = false;
+        group.visible = this._starfieldEnabled;
+
+        if (previousGroup || previousPoints) {
+            this._disposeStarfieldResources(previousGroup, previousPoints);
+        }
+    }
+
+    _disposeStarfieldResources(group = this._starfieldGroup, points = this._starfieldPoints) {
+        const disposeMaterial = (mat) => {
+            if (!mat) return;
+            if (Array.isArray(mat)) {
+                mat.forEach(m => { try { m.dispose?.(); } catch (_) { /* noop */ } });
+            } else if (typeof mat.dispose === 'function') {
+                try { mat.dispose(); } catch (_) { /* noop */ }
+            }
+        };
+
+        if (points) {
+            try { points.geometry?.dispose?.(); } catch (_) { /* noop */ }
+            disposeMaterial(points.material);
+        }
+        if (group) {
+            try { group.clear(); } catch (_) { /* noop */ }
+        }
+    }
 
     _onPointerDown = (event) => {
         if (event.pointerType !== 'touch') return;
@@ -537,8 +702,9 @@ export class CoreEngine {
 
         if (this._stats) this._stats.begin();
 
+        let dt = 0;
         if (!this._paused) {
-            const dt = this._clock.getDelta() * this._speed;
+            dt = this._clock.getDelta() * this._speed;
             this._layers.forEach(layer => {
                 if (!layer) return;
                 if (layer.isActive || layer._transitionPhase === 'positioning') {
@@ -550,6 +716,10 @@ export class CoreEngine {
                 this._tweenTimelineMs += dt * 1000;
                 TWEEN.update(this._tweenTimelineMs);
             }
+        }
+
+        if (dt > 0 && this._starfieldGroup && this._starfieldEnabled) {
+            this._starfieldGroup.rotation.y += dt * this._starfieldRotationSpeed;
         }
 
         this.controls.update();
