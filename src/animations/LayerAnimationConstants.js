@@ -113,20 +113,20 @@ export const MLP_D_MODEL_VISUAL_DEPTH = 20;
 export const MHSA_MATRIX_INITIAL_RESTING_COLOR = 0x404040;
 
 /** Bright / activated colours used inside the MHSA animation. */
-export const MHSA_BRIGHT_GREEN        = 0x33FF33;
-export const MHSA_DARK_TINTED_GREEN   = 0x002200;
-export const MHSA_BRIGHT_BLUE         = 0x6666FF;
+export const MHSA_BRIGHT_BLUE         = 0x6666FF; // Query (blue)
 export const MHSA_DARK_TINTED_BLUE    = 0x000022;
-export const MHSA_BRIGHT_RED          = 0xFF3333;
-export const MHSA_DARK_TINTED_RED     = 0x220000;
+export const MHSA_BRIGHT_KEY          = 0xFF3333; // Key (red)
+export const MHSA_DARK_TINTED_KEY     = 0x220000;
+export const MHSA_BRIGHT_VALUE        = 0x33FF33; // Value (green)
+export const MHSA_DARK_TINTED_VALUE   = 0x002200;
 
 /** Colour for trail lines behind moving prisms. */
 
 
 /** Final Q, K, V head colours used once attention heads have merged. */
-export const MHA_FINAL_Q_COLOR = 0x1e5299;
-export const MHA_FINAL_K_COLOR = 0x1d9752;
-export const MHA_FINAL_V_COLOR = 0x811b2d;
+export const MHA_FINAL_Q_COLOR = 0x1e5299; // Blue
+export const MHA_FINAL_K_COLOR = 0x811b2d; // Red
+export const MHA_FINAL_V_COLOR = 0x1d9752; // Green
 
 /** Active colour of the output-projection matrix that follows MHSA. */
 export const MHA_OUTPUT_PROJECTION_MATRIX_COLOR = 0xaf5faf;

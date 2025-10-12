@@ -78,7 +78,7 @@ export function initAttentionHeadAnimation(containerElement) {
     matrixFolder.open();
 
     // ---------------------------------------------------------------------
-    //  Create Q, K, V matrices (left-to-right) – order QKV; colours B,G,R
+    //  Create Q, K, V matrices (left-to-right) – order QKV; colours B,R,G
     // ---------------------------------------------------------------------
     let matrixPosY = matrixParams.height / 2; // bottom rests on y = 0 plane
     let spacingX = matrixParams.width;        // centres separated so bottoms touch
@@ -114,7 +114,7 @@ export function initAttentionHeadAnimation(containerElement) {
         matrixParams.slitBottomWidthFactor,
         matrixParams.slitTopWidthFactor
     );
-    keyMatrix.setColor(new THREE.Color(0x00ff00)); // Green
+    keyMatrix.setColor(new THREE.Color(0xff0000)); // Red
     scene.add(keyMatrix.group);
 
     const valueMatrix = new WeightMatrixVisualization(
@@ -131,7 +131,7 @@ export function initAttentionHeadAnimation(containerElement) {
         matrixParams.slitBottomWidthFactor,
         matrixParams.slitTopWidthFactor
     );
-    valueMatrix.setColor(new THREE.Color(0xff0000)); // Red
+    valueMatrix.setColor(new THREE.Color(0x00ff00)); // Green
     scene.add(valueMatrix.group);
 
     const allMatrices = [queryMatrix, keyMatrix, valueMatrix];
@@ -210,8 +210,8 @@ export function initAttentionHeadAnimation(containerElement) {
 
         // Restore intended colours in case recreated materials reset
         queryMatrix.setColor(0x0000ff);
-        keyMatrix.setColor(0x00ff00);
-        valueMatrix.setColor(0xff0000);
+        keyMatrix.setColor(0xff0000);
+        valueMatrix.setColor(0x00ff00);
 
         // Update vectors Z alignment
         updateVectorsPositions();

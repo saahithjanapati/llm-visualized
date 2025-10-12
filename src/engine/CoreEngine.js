@@ -439,7 +439,7 @@ export class CoreEngine {
                             if (info) {
                                 const headText = (typeof info.headIndex === 'number' && info.headIndex >= 0) ? `Head ${info.headIndex + 1}` : 'Head ?';
                                 const laneText = (typeof info.laneIndex === 'number' && info.laneIndex >= 0) ? `Lane ${info.laneIndex + 1}` : 'Lane ?';
-                                const catText  = info.category === 'V' ? 'Value (Red)' : 'Key (Green)';
+                                const catText  = info.category === 'V' ? 'Value (Green)' : 'Key (Red)';
                                 this._hoverLabelDiv.textContent = `${catText}\n${headText} • ${laneText}`;
                                 this._hoverLabelDiv.style.left = `${clientX + 12}px`;
                                 this._hoverLabelDiv.style.top  = `${clientY + 12}px`;

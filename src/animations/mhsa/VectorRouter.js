@@ -91,9 +91,9 @@ export class VectorRouter {
                     upVec.userData = upVec.userData || {};
                     upVec.userData.trail = upTrail;
                     Object.assign(upVec.userData, { headIndex: targetHeadIdx, sideSpawned: false, sideSpawnRequested: false, sideSpawnTime: 0, parentLane: lane });
-                    // Label for hover – Key vector (green)
+                    // Label for hover – Key vector (red)
                     try {
-                        const lbl = `Key Vector (Green)`;
+                        const lbl = `Key Vector (Red)`;
                         upVec.group.userData.label = lbl;
                         if (upVec.mesh) upVec.mesh.userData = { ...(upVec.mesh.userData||{}), label: lbl };
                     } catch (_) {}
@@ -158,7 +158,7 @@ export class VectorRouter {
                             vVec.userData.trail = vTrail;
                             Object.assign(vVec.userData, { headIndex: hIdx, parentLane: lane });
                             try {
-                                const lblV = `Value Vector (Red)`;
+                                const lblV = `Value Vector (Green)`;
                                 vVec.group.userData.label = lblV;
                                 if (vVec.mesh) vVec.mesh.userData = { ...(vVec.mesh.userData||{}), label: lblV };
                             } catch (_) {}

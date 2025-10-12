@@ -571,12 +571,12 @@ export function initLayerAnimation(container) {
     // const mhaResultRiseDuration = 500 / SPEED_MULT; // Defined in MHSAAnimation
 
     // Colors for matrix flash & final state (MHSA specific colors moved to MHSAAnimation)
-    // const brightGreen = new THREE.Color(0x33FF33);
-    // const darkTintedGreen = new THREE.Color(0x002200);
     // const brightBlue = new THREE.Color(0x6666FF);
     // const darkTintedBlue = new THREE.Color(0x000022);
-    // const brightRed = new THREE.Color(0xFF3333);
-    // const darkTintedRed = new THREE.Color(0x220000);
+    // const brightKey = new THREE.Color(0xFF3333);
+    // const darkTintedKey = new THREE.Color(0x220000);
+    // const brightValue = new THREE.Color(0x33FF33);
+    // const darkTintedValue = new THREE.Color(0x002200);
 
     // Helper function to check if all MHSA vectors are in their start positions for pass-through
     // function areAllMHAVectorsInPosition() { ... } // Moved to MHSAAnimation.js
