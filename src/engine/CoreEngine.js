@@ -201,6 +201,8 @@ export class CoreEngine {
         this._clock  = new THREE.Clock();
         this._paused = false;
         this._pauseReasons = new Set();
+        this._minFrameIntervalMs = 1000 / 60; // Cap render/update loop to 60 FPS
+        this._lastFrameTime = null;
         const initialTweenNow = (typeof TWEEN !== 'undefined' && typeof TWEEN.now === 'function')
             ? TWEEN.now()
             : (typeof performance !== 'undefined' ? performance.now() : Date.now());
@@ -542,6 +544,14 @@ export class CoreEngine {
 
     _animate = () => {
         requestAnimationFrame(this._animate);
+
+        const now = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+            ? performance.now()
+            : Date.now();
+        if (this._lastFrameTime !== null && (now - this._lastFrameTime) < this._minFrameIntervalMs) {
+            return;
+        }
+        this._lastFrameTime = now;
 
         const visibilityPauseOnly = this._paused && this._pauseReasons.size === 1 && this._pauseReasons.has('visibility');
         if (visibilityPauseOnly) return;
