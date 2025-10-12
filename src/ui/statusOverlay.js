@@ -13,6 +13,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
 
     appState.showEquations = getPreference('showEquations', true);
     appState.showHdrBackground = getPreference('showHdrBackground', false);
+    appState.sciFiMode = getPreference('sciFiMode', true);
     if (equationsPanel) equationsPanel.style.display = appState.showEquations ? 'block' : 'none';
     appState.applyEnvironmentBackground(pipeline);
 

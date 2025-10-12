@@ -17,6 +17,7 @@ export class AppState {
         this.initialIntroBackground = null;
         this.initialIntroBackgroundCaptured = false;
         this.introSceneRef = null;
+        this.sciFiMode = true;
     }
 
     applyEnvironmentBackground(pipeline, introScene = null) {

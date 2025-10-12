@@ -31,12 +31,15 @@ import { initSettingsModal } from '../src/ui/settingsModal.js';
 import { initPauseButton } from '../src/ui/pauseButton.js';
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
+import { getPreference } from '../src/utils/preferences.js';
 
 // Optionally load pre-baked geometries; returns instantly if disabled
 await loadPrecomputedGeometries('../precomputed_components.glb');
 
 // Skip intro typing screen for direct animation entry
 appState.skipIntro = true;
+appState.sciFiMode = getPreference('sciFiMode', true);
+const SCI_FI_MODE = appState.sciFiMode !== false;
 
 // Set default playback speed to fast on load
 try { setPlaybackSpeed('fast'); } catch (_) { /* no-op */ }
@@ -47,10 +50,14 @@ const gptCanvas = document.getElementById('gptCanvas');
 const NUM_LAYERS = 12;
 const camPos    = new THREE.Vector3(0, 11000, 16000);
 const camTarget = new THREE.Vector3(0, 9000, 0);
-const pipeline = new LayerPipeline(gptCanvas, NUM_LAYERS, {
+const pipelineOptions = {
     cameraPosition: camPos,
     cameraTarget: camTarget
-});
+};
+if (SCI_FI_MODE) {
+    pipelineOptions.enableBloom = true;
+}
+const pipeline = new LayerPipeline(gptCanvas, NUM_LAYERS, pipelineOptions);
 
 // Show GPT canvas immediately
 gptCanvas.style.display = 'block';
@@ -61,6 +68,105 @@ try {
         if (obj.isMesh) { obj.castShadow = false; obj.receiveShadow = false; }
         if (obj.isLight) { obj.castShadow = false; }
     });
+
+    if (SCI_FI_MODE) {
+        // Transform the base scene into a neon sci-fi space dock aesthetic.
+        const scene = eng.scene;
+        const renderer = eng.renderer;
+        scene.background = new THREE.Color(0x020010);
+        scene.fog = new THREE.FogExp2(0x020010, 0.000018);
+        renderer.setClearColor(0x020010, 1);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.35;
+        if (eng.composer) {
+            eng.composer.passes.forEach((pass) => {
+                if (pass && pass.constructor && pass.constructor.name === 'UnrealBloomPass') {
+                    pass.strength = 1.05;
+                    pass.radius = 0.65;
+                    pass.threshold = 0.52;
+                }
+            });
+        }
+
+        const ambient = scene.children.find((c) => c.isAmbientLight);
+        if (ambient) {
+            ambient.color.set(0x2060ff);
+            ambient.intensity = 0.42;
+        }
+        const mainDir = scene.children.find((c) => c.isDirectionalLight);
+        if (mainDir) {
+            mainDir.color.set(0x5cdfff);
+            mainDir.intensity = 1.15;
+            mainDir.position.set(18000, 22000, 12000);
+        }
+
+        const rimLight = new THREE.DirectionalLight(0xff67ff, 0.55);
+        rimLight.position.set(-16000, 14000, -9000);
+        scene.add(rimLight);
+
+        const hemi = new THREE.HemisphereLight(0x2af3ff, 0x050011, 0.55);
+        scene.add(hemi);
+
+        const starGeometry = new THREE.BufferGeometry();
+        const STAR_COUNT = 2500;
+        const starPositions = new Float32Array(STAR_COUNT * 3);
+        const radiusMin = 28000;
+        const radiusMax = 120000;
+        for (let i = 0; i < STAR_COUNT; i++) {
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.acos(THREE.MathUtils.randFloatSpread(2));
+            const radius = THREE.MathUtils.lerp(radiusMin, radiusMax, Math.random() ** 0.6);
+            const sinPhi = Math.sin(phi);
+            const x = Math.cos(theta) * sinPhi * radius;
+            const rawY = Math.cos(phi) * radius;
+            const y = Math.abs(rawY);
+            const z = Math.sin(theta) * sinPhi * radius;
+            starPositions[i * 3] = x;
+            starPositions[i * 3 + 1] = y;
+            starPositions[i * 3 + 2] = z;
+        }
+        starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+        const starMaterial = new THREE.PointsMaterial({
+            color: 0x74faff,
+            size: 280,
+            sizeAttenuation: true,
+            transparent: true,
+            opacity: 0.45,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false
+        });
+        const starField = new THREE.Points(starGeometry, starMaterial);
+        starField.name = 'StarfieldBackdrop';
+        starField.renderOrder = -10;
+        scene.add(starField);
+
+        const grid = new THREE.GridHelper(80000, 60, 0x1fefff, 0x1fefff);
+        grid.position.y = -4500;
+        const gridMaterials = Array.isArray(grid.material) ? grid.material : [grid.material];
+        gridMaterials.forEach((mat, idx) => {
+            mat.transparent = true;
+            mat.opacity = idx === 0 ? 0.18 : 0.07;
+            mat.depthWrite = false;
+            mat.color.set(idx === 0 ? 0x19f0ff : 0x5b8cff);
+        });
+        grid.renderOrder = -9;
+        scene.add(grid);
+
+        const startTime = performance.now();
+        const priorOnBeforeRender = scene.onBeforeRender;
+        scene.onBeforeRender = function (...args) {
+            if (typeof priorOnBeforeRender === 'function') {
+                priorOnBeforeRender.apply(this, args);
+            }
+            const elapsed = (performance.now() - startTime) * 0.001;
+            starField.rotation.y = elapsed * 0.04;
+            starField.rotation.x = Math.sin(elapsed * 0.12) * 0.05;
+            gridMaterials.forEach((mat, idx) => {
+                const base = idx === 0 ? 0.16 : 0.06;
+                mat.opacity = base + Math.sin(elapsed * 0.7 + idx) * 0.015;
+            });
+        };
+    }
 } catch (_) {}
 
 // Embedding matrices (static visuals)
