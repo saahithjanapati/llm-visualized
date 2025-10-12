@@ -62,12 +62,30 @@ export class LayerPipeline extends EventTarget {
         this._autoCameraLerp = (typeof opts.autoCameraLerp === 'number' && Number.isFinite(opts.autoCameraLerp))
             ? THREE.MathUtils.clamp(opts.autoCameraLerp, 0.01, 1)
             : 0.12;
+        // Bias the automatic camera focus so it hugs the left edge of the tower and
+        // looks slightly above the geometric centre.  These defaults were tuned to
+        // align the frame with the MLP matrices while letting the vertical motion
+        // feel more like a continuous rise instead of a series of jumps.
+        this._autoCameraHorizontalBias = (typeof opts.autoCameraHorizontalBias === 'number')
+            ? THREE.MathUtils.clamp(opts.autoCameraHorizontalBias, 0, 1)
+            : 0.18;
+        this._autoCameraVerticalBias = (typeof opts.autoCameraVerticalBias === 'number')
+            ? THREE.MathUtils.clamp(opts.autoCameraVerticalBias, 0, 1)
+            : 0.62;
+        this._autoCameraMaxDownStep = (typeof opts.autoCameraMaxDownStep === 'number' && Number.isFinite(opts.autoCameraMaxDownStep))
+            ? Math.max(0, opts.autoCameraMaxDownStep)
+            : 45;
         this._autoCameraLastUpdate = 0;
         this._autoCameraMinIntervalMs = 80;
         this._autoCameraBox = new THREE.Box3();
         this._autoCameraCenter = new THREE.Vector3();
         this._autoCameraTargetScratch = new THREE.Vector3();
         this._autoCameraOffsetScratch = new THREE.Vector3();
+        this._autoCameraDesiredTargetScratch = new THREE.Vector3();
+        this._autoCameraDesiredCameraPosScratch = new THREE.Vector3();
+        this._autoCameraSmoothedTarget = new THREE.Vector3();
+        this._autoCameraSmoothedCameraPos = new THREE.Vector3();
+        this._autoCameraHasSmoothedState = false;
         this._onAutoCameraProgress = () => { this._maybeAutoCameraFocus(); };
         this.addEventListener('progress', this._onAutoCameraProgress);
 
@@ -136,6 +154,7 @@ export class LayerPipeline extends EventTarget {
             return;
         }
         this._autoCameraFollow = nextValue;
+        this._autoCameraHasSmoothedState = false;
         if (this._autoCameraFollow) {
             this._maybeAutoCameraFocus({ immediate: true });
         }
@@ -657,12 +676,33 @@ export class LayerPipeline extends EventTarget {
         const currentTarget = this._autoCameraTargetScratch.copy(controls.target);
         const offset = this._autoCameraOffsetScratch.copy(camera.position).sub(currentTarget);
 
-        const desiredTarget = center;
-        const desiredCameraPos = center.clone().add(offset);
+        const desiredTarget = this._autoCameraDesiredTargetScratch.set(
+            THREE.MathUtils.lerp(bbox.min.x, bbox.max.x, this._autoCameraHorizontalBias),
+            THREE.MathUtils.lerp(bbox.min.y, bbox.max.y, this._autoCameraVerticalBias),
+            THREE.MathUtils.lerp(bbox.min.z, bbox.max.z, 0.5)
+        );
+
+        if (!immediate && this._autoCameraHasSmoothedState) {
+            const minY = this._autoCameraSmoothedTarget.y - this._autoCameraMaxDownStep;
+            if (desiredTarget.y < minY) {
+                desiredTarget.y = minY;
+            }
+        }
+
+        const desiredCameraPos = this._autoCameraDesiredCameraPosScratch.copy(desiredTarget).add(offset);
         const alpha = immediate ? 1 : this._autoCameraLerp;
 
-        controls.target.lerp(desiredTarget, alpha);
-        camera.position.lerp(desiredCameraPos, alpha);
+        if (!this._autoCameraHasSmoothedState || immediate) {
+            this._autoCameraSmoothedTarget.copy(desiredTarget);
+            this._autoCameraSmoothedCameraPos.copy(desiredCameraPos);
+            this._autoCameraHasSmoothedState = true;
+        } else {
+            this._autoCameraSmoothedTarget.lerp(desiredTarget, alpha);
+            this._autoCameraSmoothedCameraPos.lerp(desiredCameraPos, alpha);
+        }
+
+        controls.target.copy(this._autoCameraSmoothedTarget);
+        camera.position.copy(this._autoCameraSmoothedCameraPos);
 
         if (typeof engine.notifyCameraUpdated === 'function') {
             engine.notifyCameraUpdated();
