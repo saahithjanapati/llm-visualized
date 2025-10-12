@@ -66,6 +66,7 @@ export class LayerPipeline extends EventTarget {
             : null;
         this._controlsChangeHandler = null;
         this._onAutoCameraProgress = () => { this._maybeAutoCameraFocus(); };
+        this._cameraOverlayRaf = null;
         this.addEventListener('progress', this._onAutoCameraProgress);
 
         // ------------------------------------------------------------------
@@ -116,6 +117,9 @@ export class LayerPipeline extends EventTarget {
         this._layers[0].setProgressEmitter(this);
 
         this._maybeAutoCameraFocus({ immediate: true });
+        if (this._autoCameraFollow) {
+            this._startCameraOverlayLoop();
+        }
     }
 
     /** Dispose and tear down Three resources */
@@ -131,6 +135,7 @@ export class LayerPipeline extends EventTarget {
         if (this._cameraOffsetDiv) {
             this._cameraOffsetDiv.style.display = 'none';
         }
+        this._stopCameraOverlayLoop();
         if (this._engine) {
             this._engine.dispose();
         }
@@ -154,6 +159,11 @@ export class LayerPipeline extends EventTarget {
         }
         this._autoCameraFollow = nextValue;
         this._updateCameraOffsetOverlay();
+        if (this._autoCameraFollow) {
+            this._startCameraOverlayLoop();
+        } else {
+            this._stopCameraOverlayLoop();
+        }
     }
 
     /** Check whether automatic camera tracking is enabled. */
@@ -694,6 +704,29 @@ export class LayerPipeline extends EventTarget {
             return;
         }
         this._updateCameraOffsetOverlay();
+    }
+
+    _startCameraOverlayLoop() {
+        if (this._cameraOverlayRaf !== null) return;
+        if (typeof requestAnimationFrame !== 'function') return;
+
+        const tick = () => {
+            if (!this._autoCameraFollow) {
+                this._stopCameraOverlayLoop();
+                return;
+            }
+            this._updateCameraOffsetOverlay();
+            this._cameraOverlayRaf = requestAnimationFrame(tick);
+        };
+
+        this._cameraOverlayRaf = requestAnimationFrame(tick);
+    }
+
+    _stopCameraOverlayLoop() {
+        if (this._cameraOverlayRaf !== null && typeof cancelAnimationFrame === 'function') {
+            cancelAnimationFrame(this._cameraOverlayRaf);
+        }
+        this._cameraOverlayRaf = null;
     }
 }
 
