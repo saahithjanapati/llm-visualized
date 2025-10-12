@@ -62,12 +62,48 @@ export class LayerPipeline extends EventTarget {
         this._autoCameraLerp = (typeof opts.autoCameraLerp === 'number' && Number.isFinite(opts.autoCameraLerp))
             ? THREE.MathUtils.clamp(opts.autoCameraLerp, 0.01, 1)
             : 0.12;
+        // Bias the automatic camera focus so it hugs the left edge of the tower and
+        // looks slightly above the geometric centre.  These defaults were tuned to
+        // align the frame with the MLP matrices while letting the vertical motion
+        // feel more like a continuous rise instead of a series of jumps.
+        this._autoCameraHorizontalBias = (typeof opts.autoCameraHorizontalBias === 'number')
+            ? THREE.MathUtils.clamp(opts.autoCameraHorizontalBias, 0, 1)
+            : 0.18;
+        this._autoCameraVerticalBias = (typeof opts.autoCameraVerticalBias === 'number')
+            ? THREE.MathUtils.clamp(opts.autoCameraVerticalBias, 0, 1)
+            : 0.62;
+        this._autoCameraMaxDownStep = (typeof opts.autoCameraMaxDownStep === 'number' && Number.isFinite(opts.autoCameraMaxDownStep))
+            ? Math.max(0, opts.autoCameraMaxDownStep)
+            : 45;
+        this._autoCameraSmoothingLambda = (typeof opts.autoCameraSmoothingLambda === 'number' && Number.isFinite(opts.autoCameraSmoothingLambda) && opts.autoCameraSmoothingLambda > 0)
+            ? opts.autoCameraSmoothingLambda
+            : 2.8;
+        this._autoCameraMaxRisePerSecond = (typeof opts.autoCameraMaxRisePerSecond === 'number' && Number.isFinite(opts.autoCameraMaxRisePerSecond) && opts.autoCameraMaxRisePerSecond > 0)
+            ? opts.autoCameraMaxRisePerSecond
+            : 140;
+        const preferredOffset = opts.autoCameraPreferredOffset || {};
+        this._autoCameraPreferredOffset = new THREE.Vector3(
+            Number.isFinite(preferredOffset.x) ? preferredOffset.x : -340,
+            Number.isFinite(preferredOffset.y) ? preferredOffset.y : 230,
+            Number.isFinite(preferredOffset.z) ? preferredOffset.z : 460
+        );
+        const offsetMultipliers = opts.autoCameraOffsetMultipliers || {};
+        this._autoCameraOffsetMultipliers = {
+            horizontal: Number.isFinite(offsetMultipliers.horizontal) ? Math.max(0, offsetMultipliers.horizontal) : 0.55,
+            vertical: Number.isFinite(offsetMultipliers.vertical) ? Math.max(0, offsetMultipliers.vertical) : 0.7,
+            forward: Number.isFinite(offsetMultipliers.forward) ? Math.max(0, offsetMultipliers.forward) : 1.45
+        };
         this._autoCameraLastUpdate = 0;
-        this._autoCameraMinIntervalMs = 80;
+        this._autoCameraMinIntervalMs = 32;
         this._autoCameraBox = new THREE.Box3();
         this._autoCameraCenter = new THREE.Vector3();
-        this._autoCameraTargetScratch = new THREE.Vector3();
         this._autoCameraOffsetScratch = new THREE.Vector3();
+        this._autoCameraDesiredTargetScratch = new THREE.Vector3();
+        this._autoCameraDesiredCameraPosScratch = new THREE.Vector3();
+        this._autoCameraSizeScratch = new THREE.Vector3();
+        this._autoCameraSmoothedTarget = new THREE.Vector3();
+        this._autoCameraSmoothedCameraPos = new THREE.Vector3();
+        this._autoCameraHasSmoothedState = false;
         this._onAutoCameraProgress = () => { this._maybeAutoCameraFocus(); };
         this.addEventListener('progress', this._onAutoCameraProgress);
 
@@ -136,6 +172,7 @@ export class LayerPipeline extends EventTarget {
             return;
         }
         this._autoCameraFollow = nextValue;
+        this._autoCameraHasSmoothedState = false;
         if (this._autoCameraFollow) {
             this._maybeAutoCameraFocus({ immediate: true });
         }
@@ -635,7 +672,11 @@ export class LayerPipeline extends EventTarget {
         const now = (typeof performance !== 'undefined' && performance?.now)
             ? performance.now()
             : Date.now();
-        if (!immediate && now - this._autoCameraLastUpdate < this._autoCameraMinIntervalMs) return;
+        const deltaSinceLastUpdate = now - this._autoCameraLastUpdate;
+        if (!immediate && deltaSinceLastUpdate < this._autoCameraMinIntervalMs) return;
+        const deltaSeconds = (!immediate && this._autoCameraHasSmoothedState && deltaSinceLastUpdate > 0)
+            ? Math.min(deltaSinceLastUpdate / 1000, 0.5)
+            : 0;
         this._autoCameraLastUpdate = now;
 
         const layerIndex = Math.min(this._currentLayerIdx, this._layers.length - 1);
@@ -654,15 +695,68 @@ export class LayerPipeline extends EventTarget {
         const camera = engine.camera;
         if (!controls || !camera) return;
 
-        const currentTarget = this._autoCameraTargetScratch.copy(controls.target);
-        const offset = this._autoCameraOffsetScratch.copy(camera.position).sub(currentTarget);
+        const desiredTarget = this._autoCameraDesiredTargetScratch.set(
+            THREE.MathUtils.lerp(bbox.min.x, bbox.max.x, this._autoCameraHorizontalBias),
+            THREE.MathUtils.lerp(bbox.min.y, bbox.max.y, this._autoCameraVerticalBias),
+            THREE.MathUtils.lerp(bbox.min.z, bbox.max.z, 0.5)
+        );
 
-        const desiredTarget = center;
-        const desiredCameraPos = center.clone().add(offset);
-        const alpha = immediate ? 1 : this._autoCameraLerp;
+        if (!immediate && this._autoCameraHasSmoothedState) {
+            const previousY = this._autoCameraSmoothedTarget.y;
+            const minY = previousY - this._autoCameraMaxDownStep;
+            if (desiredTarget.y < minY) {
+                desiredTarget.y = minY;
+            }
+            if (deltaSeconds > 0) {
+                const maxRise = this._autoCameraMaxRisePerSecond * deltaSeconds;
+                const maxY = previousY + maxRise;
+                if (desiredTarget.y > maxY) {
+                    desiredTarget.y = maxY;
+                }
+            }
+        }
 
-        controls.target.lerp(desiredTarget, alpha);
-        camera.position.lerp(desiredCameraPos, alpha);
+        const size = bbox.getSize(this._autoCameraSizeScratch);
+        const desiredOffset = this._autoCameraOffsetScratch.copy(this._autoCameraPreferredOffset);
+        if (Number.isFinite(size.x) && Number.isFinite(size.y) && Number.isFinite(size.z)) {
+            const horizontalSign = Math.sign(desiredOffset.x) || -1;
+            const horizMag = Math.max(Math.abs(desiredOffset.x), size.x * this._autoCameraOffsetMultipliers.horizontal);
+            desiredOffset.x = horizMag * horizontalSign;
+            const verticalMag = Math.max(desiredOffset.y, size.y * this._autoCameraOffsetMultipliers.vertical);
+            desiredOffset.y = verticalMag;
+            const forwardSign = Math.sign(desiredOffset.z) || 1;
+            const forwardMag = Math.max(Math.abs(desiredOffset.z), (size.z + size.x) * this._autoCameraOffsetMultipliers.forward);
+            desiredOffset.z = forwardMag * forwardSign;
+        }
+        const desiredCameraPos = this._autoCameraDesiredCameraPosScratch.copy(desiredTarget).add(desiredOffset);
+
+        if (!this._autoCameraHasSmoothedState || immediate) {
+            this._autoCameraSmoothedTarget.copy(desiredTarget);
+            this._autoCameraSmoothedCameraPos.copy(desiredCameraPos);
+            this._autoCameraHasSmoothedState = true;
+        } else {
+            const lambda = this._autoCameraSmoothingLambda;
+            if (deltaSeconds <= 0 || !Number.isFinite(lambda) || lambda <= 0) {
+                this._autoCameraSmoothedTarget.lerp(desiredTarget, this._autoCameraLerp);
+                this._autoCameraSmoothedCameraPos.lerp(desiredCameraPos, this._autoCameraLerp);
+            } else {
+                const smoothedTarget = this._autoCameraSmoothedTarget;
+                smoothedTarget.set(
+                    THREE.MathUtils.damp(smoothedTarget.x, desiredTarget.x, lambda, deltaSeconds),
+                    THREE.MathUtils.damp(smoothedTarget.y, desiredTarget.y, lambda, deltaSeconds),
+                    THREE.MathUtils.damp(smoothedTarget.z, desiredTarget.z, lambda, deltaSeconds)
+                );
+                const smoothedCameraPos = this._autoCameraSmoothedCameraPos;
+                smoothedCameraPos.set(
+                    THREE.MathUtils.damp(smoothedCameraPos.x, desiredCameraPos.x, lambda, deltaSeconds),
+                    THREE.MathUtils.damp(smoothedCameraPos.y, desiredCameraPos.y, lambda, deltaSeconds),
+                    THREE.MathUtils.damp(smoothedCameraPos.z, desiredCameraPos.z, lambda, deltaSeconds)
+                );
+            }
+        }
+
+        controls.target.copy(this._autoCameraSmoothedTarget);
+        camera.position.copy(this._autoCameraSmoothedCameraPos);
 
         if (typeof engine.notifyCameraUpdated === 'function') {
             engine.notifyCameraUpdated();
