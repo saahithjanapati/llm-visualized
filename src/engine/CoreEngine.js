@@ -201,6 +201,7 @@ export class CoreEngine {
         this._clock  = new THREE.Clock();
         this._paused = false;
         this._pauseReasons = new Set();
+        this._externalUpdaters = new Set();
         const initialTweenNow = (typeof TWEEN !== 'undefined' && typeof TWEEN.now === 'function')
             ? TWEEN.now()
             : (typeof performance !== 'undefined' ? performance.now() : Date.now());
@@ -247,6 +248,19 @@ export class CoreEngine {
     // ────────────────────────────────────────────────────────────────────────
     setSpeed(multiplier) {
         this._speed = multiplier;
+    }
+
+    addGlobalUpdater(callback) {
+        if (typeof callback !== 'function') return () => {};
+        this._externalUpdaters.add(callback);
+        return () => {
+            this._externalUpdaters.delete(callback);
+        };
+    }
+
+    removeGlobalUpdater(callback) {
+        if (typeof callback !== 'function') return;
+        this._externalUpdaters.delete(callback);
     }
 
     /** Enable or disable hover raycasting and label updates at runtime. */
@@ -309,6 +323,7 @@ export class CoreEngine {
         }
         this._layers.forEach(l => l.dispose());
         this._raycastRoots.length = 0;
+        this._externalUpdaters.clear();
 
         this.scene.traverse(obj => {
             if (obj.geometry) obj.geometry.dispose();
@@ -549,6 +564,16 @@ export class CoreEngine {
             if (typeof TWEEN !== 'undefined' && typeof TWEEN.update === 'function') {
                 this._tweenTimelineMs += dt * 1000;
                 TWEEN.update(this._tweenTimelineMs);
+            }
+
+            if (this._externalUpdaters.size) {
+                for (const updater of this._externalUpdaters) {
+                    try {
+                        updater(dt);
+                    } catch (err) {
+                        console.error('CoreEngine global updater failed:', err);
+                    }
+                }
             }
         }
 

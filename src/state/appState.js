@@ -11,12 +11,15 @@ export class AppState {
         this.showEquations = true;
         this.lastEqKey = '';
         this.showHdrBackground = false;
+        this.showRotatingStars = true;
         this.environmentTexture = null;
         this.initialPipelineBackground = null;
         this.initialPipelineBackgroundCaptured = false;
         this.initialIntroBackground = null;
         this.initialIntroBackgroundCaptured = false;
         this.introSceneRef = null;
+        this.rotatingStarField = null;
+        this.rotatingStarsUpdateCleanup = null;
     }
 
     applyEnvironmentBackground(pipeline, introScene = null) {
@@ -50,6 +53,33 @@ export class AppState {
                 this.initialPipelineBackgroundCaptured = true;
             }
             pipelineScene.background = desiredTexture ?? this.initialPipelineBackground ?? null;
+        }
+    }
+
+    setRotatingStarField(field, updateCleanup = null) {
+        if (this.rotatingStarsUpdateCleanup) {
+            try { this.rotatingStarsUpdateCleanup(); } catch (_) { /* cleanup best-effort */ }
+            this.rotatingStarsUpdateCleanup = null;
+        }
+
+        if (this.rotatingStarField && this.rotatingStarField !== field && typeof this.rotatingStarField.dispose === 'function') {
+            try { this.rotatingStarField.dispose(); } catch (_) { /* optional */ }
+        }
+
+        this.rotatingStarField = field || null;
+        if (typeof updateCleanup === 'function') {
+            this.rotatingStarsUpdateCleanup = updateCleanup;
+        }
+
+        if (this.rotatingStarField && typeof this.rotatingStarField.setEnabled === 'function') {
+            this.rotatingStarField.setEnabled(this.showRotatingStars);
+        }
+    }
+
+    setRotatingStarsEnabled(enabled) {
+        this.showRotatingStars = !!enabled;
+        if (this.rotatingStarField && typeof this.rotatingStarField.setEnabled === 'function') {
+            this.rotatingStarField.setEnabled(this.showRotatingStars);
         }
     }
 }

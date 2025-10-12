@@ -31,6 +31,7 @@ import { initSettingsModal } from '../src/ui/settingsModal.js';
 import { initPauseButton } from '../src/ui/pauseButton.js';
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
+import { initRotatingStars } from '../src/ui/rotatingStars.js';
 
 // Optionally load pre-baked geometries; returns instantly if disabled
 await loadPrecomputedGeometries('../precomputed_components.glb');
@@ -172,6 +173,7 @@ try {
 // Initialise UI modules
 initIntroAnimation(pipeline, gptCanvas);
 initStatusOverlay(pipeline, NUM_LAYERS);
+initRotatingStars(pipeline);
 initPauseButton(pipeline);
 initSettingsModal(pipeline);
 
