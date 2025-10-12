@@ -66,44 +66,57 @@ export class VectorRouter {
                 const tVec = lane.travellingVec;
                 if (!tVec) return;
 
-                const targetHeadIdx = lane.headIndex || 0;
-                if (targetHeadIdx >= this.headsCentersX.length) {
-                    tVec.group.visible = false;
-                    lane.horizPhase = 'finishedHeads';
-                    return;
-                }
+                let remaining = ANIM_HORIZ_SPEED * GLOBAL_ANIM_SPEED_MULT * deltaTime;
+                let safety    = 0; // prevent runaway loops in pathological cases
 
-                const targetX = this.headsCentersX[targetHeadIdx];
-                const dx      = ANIM_HORIZ_SPEED * GLOBAL_ANIM_SPEED_MULT * deltaTime;
+                while (remaining > 0.0001 && lane.horizPhase === 'travelMHSA') {
+                    if (++safety > 32) break;
 
-                if (tVec.group.position.x < targetX - 0.01) {
-                    tVec.group.position.x = Math.min(targetX, tVec.group.position.x + dx);
-                    // Update trail for travelling vector
-                    if (tVec.userData && tVec.userData.trail) tVec.userData.trail.update(tVec.group.position);
-                } else {
-                    // Arrived: spawn upward copy used for K
-
-                    const upVec = new VectorVisualizationInstancedPrism([...tVec.rawData], _scratchSpawn.copy(tVec.group.position));
-                    this.parentGroup.add(upVec.group);
-                    // Trail for upward K copy
-                    const upTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1, undefined, FAINT_TRAIL_OPACITY);
-                    upTrail.start(upVec.group.position);
-                    upVec.userData = upVec.userData || {};
-                    upVec.userData.trail = upTrail;
-                    Object.assign(upVec.userData, { headIndex: targetHeadIdx, sideSpawned: false, sideSpawnRequested: false, sideSpawnTime: 0, parentLane: lane });
-                    // Label for hover – Key vector (green)
-                    try {
-                        const lbl = `Key Vector (Green)`;
-                        upVec.group.userData.label = lbl;
-                        if (upVec.mesh) upVec.mesh.userData = { ...(upVec.mesh.userData||{}), label: lbl };
-                    } catch (_) {}
-                    lane.upwardCopies.push(upVec);
-
-                    lane.headIndex = targetHeadIdx + 1;
-                    if (lane.headIndex >= NUM_HEAD_SETS_LAYER) {
+                    const targetHeadIdx = lane.headIndex || 0;
+                    if (targetHeadIdx >= this.headsCentersX.length) {
                         tVec.group.visible = false;
                         lane.horizPhase = 'finishedHeads';
+                        break;
                     }
+
+                    const targetX     = this.headsCentersX[targetHeadIdx];
+                    const currentX    = tVec.group.position.x;
+                    const deltaToHead = targetX - currentX;
+                    const absDelta    = Math.abs(deltaToHead);
+
+                    // Already within tolerance of the head location – treat as arrival.
+                    if (absDelta <= 0.0005) {
+                        this._spawnUpwardCopyForHead(lane, targetHeadIdx, tVec);
+                        lane.headIndex = targetHeadIdx + 1;
+                        if (lane.headIndex >= NUM_HEAD_SETS_LAYER) {
+                            tVec.group.visible = false;
+                            lane.horizPhase = 'finishedHeads';
+                        }
+                        if (tVec.userData && tVec.userData.trail) tVec.userData.trail.update(tVec.group.position);
+                        continue;
+                    }
+
+                    const dir     = Math.sign(deltaToHead) || 1;
+                    const step    = Math.min(absDelta, remaining);
+                    const newX    = currentX + dir * step;
+                    const arrived = Math.abs(targetX - newX) <= 0.0005;
+
+                    tVec.group.position.x = newX;
+                    remaining -= step;
+
+                    if (arrived) {
+                        this._spawnUpwardCopyForHead(lane, targetHeadIdx, tVec);
+                        lane.headIndex = targetHeadIdx + 1;
+                        if (lane.headIndex >= NUM_HEAD_SETS_LAYER) {
+                            tVec.group.visible = false;
+                            lane.horizPhase = 'finishedHeads';
+                        }
+                    }
+
+                    // Update trail for travelling vector after movement (even if arrived)
+                    if (tVec.userData && tVec.userData.trail) tVec.userData.trail.update(tVec.group.position);
+
+                    if (!arrived) break; // Still en route this frame
                 }
             }
 
@@ -225,6 +238,36 @@ export class VectorRouter {
             this._readyEmitted = true;
             this._callbacks.forEach(cb => cb());
         }
+    }
+
+    _spawnUpwardCopyForHead(lane, targetHeadIdx, sourceVec) {
+        if (!lane || !sourceVec) return null;
+        lane.upwardCopies = lane.upwardCopies || [];
+        if (lane.upwardCopies[targetHeadIdx]) return lane.upwardCopies[targetHeadIdx];
+
+        const upVec = new VectorVisualizationInstancedPrism([...sourceVec.rawData], _scratchSpawn.copy(sourceVec.group.position));
+        this.parentGroup.add(upVec.group);
+
+        const upTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1, undefined, FAINT_TRAIL_OPACITY);
+        upTrail.start(upVec.group.position);
+        upVec.userData = upVec.userData || {};
+        upVec.userData.trail = upTrail;
+        Object.assign(upVec.userData, {
+            headIndex: targetHeadIdx,
+            sideSpawned: false,
+            sideSpawnRequested: false,
+            sideSpawnTime: 0,
+            parentLane: lane,
+        });
+
+        try {
+            const lbl = `Key Vector (Green)`;
+            upVec.group.userData.label = lbl;
+            if (upVec.mesh) upVec.mesh.userData = { ...(upVec.mesh.userData || {}), label: lbl };
+        } catch (_) {}
+
+        lane.upwardCopies[targetHeadIdx] = upVec;
+        return upVec;
     }
 
     // ------------------------------------------------------------------
