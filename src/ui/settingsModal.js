@@ -32,6 +32,8 @@ export function initSettingsModal(pipeline) {
         if (eq) eq.checked = !!appState.showEquations;
         const bg = document.getElementById('toggleHdrBackground');
         if (bg) bg.checked = !!appState.showHdrBackground;
+        const sciFi = document.getElementById('toggleSciFiMode');
+        if (sciFi) sciFi.checked = !!appState.sciFiModeEnabled;
     }
 
     function closeSettings() {
@@ -91,5 +93,12 @@ export function initSettingsModal(pipeline) {
         appState.showHdrBackground = !!bgToggle.checked;
         setPreference('showHdrBackground', appState.showHdrBackground);
         appState.applyEnvironmentBackground(pipeline);
+    });
+
+    const sciFiToggle = document.getElementById('toggleSciFiMode');
+    sciFiToggle?.addEventListener('change', () => {
+        appState.sciFiModeEnabled = !!sciFiToggle.checked;
+        setPreference('sciFiModeEnabled', appState.sciFiModeEnabled);
+        appState.applySciFiMode(pipeline);
     });
 }
