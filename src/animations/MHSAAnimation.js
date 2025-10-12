@@ -301,7 +301,7 @@ export class MHSAAnimation {
         );
 
         // Initialise pitch-black; will brighten once vectors pass through
-        const initDarkColor = new THREE.Color(INACTIVE_COMPONENT_COLOR);
+        const initDarkColor = new THREE.Color(MHSA_MATRIX_INITIAL_RESTING_COLOR);
         this.outputProjectionMatrix.setColor(initDarkColor);
         {
             const lbl = 'Output Projection Matrix';
