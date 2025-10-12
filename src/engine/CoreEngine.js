@@ -284,6 +284,17 @@ export class CoreEngine {
         return !!this._raycastingEnabled;
     }
 
+    /** Determine whether the user is actively manipulating the orbit controls. */
+    isUserNavigating() {
+        return !!this._isUserNavigating;
+    }
+
+    /** Inform the engine that the camera or controls were changed programmatically. */
+    notifyCameraUpdated() {
+        if (!this.controls) return;
+        this._updateCameraFarFromControls();
+    }
+
     pause(reason = 'generic') {
         this._pauseReasons.add(reason);
         if (!this._paused) {
