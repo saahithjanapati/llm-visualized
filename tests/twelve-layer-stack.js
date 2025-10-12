@@ -31,12 +31,15 @@ import { initSettingsModal } from '../src/ui/settingsModal.js';
 import { initPauseButton } from '../src/ui/pauseButton.js';
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
+import { SkyStarField } from '../src/components/SkyStarField.js';
+import { getPreference } from '../src/utils/preferences.js';
 
 // Optionally load pre-baked geometries; returns instantly if disabled
 await loadPrecomputedGeometries('../precomputed_components.glb');
 
 // Skip intro typing screen for direct animation entry
 appState.skipIntro = true;
+appState.showRotatingStars = getPreference('showRotatingStars', true);
 
 // Set default playback speed to fast on load
 try { setPlaybackSpeed('fast'); } catch (_) { /* no-op */ }
@@ -51,6 +54,20 @@ const pipeline = new LayerPipeline(gptCanvas, NUM_LAYERS, {
     cameraPosition: camPos,
     cameraTarget: camTarget
 });
+
+try {
+    const starField = new SkyStarField(pipeline, {
+        starCount: 1100,
+        rotationSpeed: 0.01,
+        minHeightOffset: 500,
+        verticalPadding: 8000,
+        innerRadiusPadding: 2000
+    });
+    appState.skyStarField = starField;
+    appState.applyRotatingStars();
+} catch (err) {
+    console.warn('Failed to initialize sky star field:', err);
+}
 
 // Show GPT canvas immediately
 gptCanvas.style.display = 'block';
