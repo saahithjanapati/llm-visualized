@@ -31,6 +31,7 @@ import { initSettingsModal } from '../src/ui/settingsModal.js';
 import { initPauseButton } from '../src/ui/pauseButton.js';
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
+import { OrbitalStarField } from '../src/components/OrbitalStarField.js';
 
 // Optionally load pre-baked geometries; returns instantly if disabled
 await loadPrecomputedGeometries('../precomputed_components.glb');
@@ -116,6 +117,26 @@ try {
     if (pipeline.engine && typeof pipeline.engine.registerRaycastRoot === 'function') {
         pipeline.engine.registerRaycastRoot(posBottom.group);
     }
+
+    try {
+        const orbitBaseHeight = bottomVocabCenterY + EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2 + 120;
+        const orbitField = new OrbitalStarField({
+            baseHeight: orbitBaseHeight,
+            heightOffset: 220,
+            verticalJitter: 160,
+            radiusRange: [900, 1600],
+            count: 28,
+            speedRange: [0.18, 0.36],
+            opacity: 0.85,
+            color: 0xffffff
+        });
+        pipeline.engine.scene.add(orbitField.group);
+        if (typeof pipeline.engine.registerUpdater === 'function') {
+            const updateFn = (dt) => orbitField.update(dt);
+            pipeline.engine.registerUpdater(updateFn);
+        }
+        appState.setOrbitingStarsController(orbitField);
+    } catch (_) { /* optional */ }
 
     const lastLayer = pipeline._layers[NUM_LAYERS - 1];
     if (lastLayer && lastLayer.mlpDown && lastLayer.mlpDown.group) {

@@ -191,6 +191,8 @@ export class CoreEngine {
             }
         });
 
+        this._externalUpdaters = new Set();
+
         // ────────────────────────────────────────────────────────────────────
         // Event listeners
         // ────────────────────────────────────────────────────────────────────
@@ -284,6 +286,18 @@ export class CoreEngine {
         return !!this._raycastingEnabled;
     }
 
+    /** Register an external updater callback invoked every frame. */
+    registerUpdater(fn) {
+        if (typeof fn !== 'function') return;
+        this._externalUpdaters.add(fn);
+    }
+
+    /** Remove a previously registered external updater callback. */
+    unregisterUpdater(fn) {
+        if (typeof fn !== 'function') return;
+        this._externalUpdaters.delete(fn);
+    }
+
     pause(reason = 'generic') {
         this._pauseReasons.add(reason);
         if (!this._paused) {
@@ -309,6 +323,7 @@ export class CoreEngine {
         }
         this._layers.forEach(l => l.dispose());
         this._raycastRoots.length = 0;
+        this._externalUpdaters.clear();
 
         this.scene.traverse(obj => {
             if (obj.geometry) obj.geometry.dispose();
@@ -537,8 +552,9 @@ export class CoreEngine {
 
         if (this._stats) this._stats.begin();
 
+        let dt = 0;
         if (!this._paused) {
-            const dt = this._clock.getDelta() * this._speed;
+            dt = this._clock.getDelta() * this._speed;
             this._layers.forEach(layer => {
                 if (!layer) return;
                 if (layer.isActive || layer._transitionPhase === 'positioning') {
@@ -550,6 +566,14 @@ export class CoreEngine {
                 this._tweenTimelineMs += dt * 1000;
                 TWEEN.update(this._tweenTimelineMs);
             }
+        }
+
+        if (this._externalUpdaters.size) {
+            this._externalUpdaters.forEach((fn) => {
+                try {
+                    fn(dt);
+                } catch (_) { /* non-fatal */ }
+            });
         }
 
         this.controls.update();

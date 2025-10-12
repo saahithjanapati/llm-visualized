@@ -11,12 +11,14 @@ export class AppState {
         this.showEquations = true;
         this.lastEqKey = '';
         this.showHdrBackground = false;
+        this.showOrbitingStars = true;
         this.environmentTexture = null;
         this.initialPipelineBackground = null;
         this.initialPipelineBackgroundCaptured = false;
         this.initialIntroBackground = null;
         this.initialIntroBackgroundCaptured = false;
         this.introSceneRef = null;
+        this.orbitingStarsController = null;
     }
 
     applyEnvironmentBackground(pipeline, introScene = null) {
@@ -50,6 +52,20 @@ export class AppState {
                 this.initialPipelineBackgroundCaptured = true;
             }
             pipelineScene.background = desiredTexture ?? this.initialPipelineBackground ?? null;
+        }
+    }
+
+    setOrbitingStarsController(controller) {
+        this.orbitingStarsController = controller || null;
+        this.applyOrbitingStarsVisibility();
+    }
+
+    applyOrbitingStarsVisibility() {
+        if (!this.orbitingStarsController) return;
+        if (typeof this.orbitingStarsController.setEnabled === 'function') {
+            this.orbitingStarsController.setEnabled(!!this.showOrbitingStars);
+        } else if (this.orbitingStarsController.group) {
+            this.orbitingStarsController.group.visible = !!this.showOrbitingStars;
         }
     }
 }
