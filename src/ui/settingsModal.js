@@ -1,6 +1,7 @@
 import { setPlaybackSpeed } from '../utils/constants.js';
 import { setPreference } from '../utils/preferences.js';
 import { appState } from '../state/appState.js';
+import { getAvailableThemes, getCurrentThemeId, setTheme } from '../state/themeManager.js';
 
 // Wires up the settings modal controls.
 export function initSettingsModal(pipeline) {
@@ -8,6 +9,21 @@ export function initSettingsModal(pipeline) {
     const settingsOverlay = document.getElementById('settingsOverlay');
     const settingsClose = document.getElementById('settingsClose');
     const equationsPanel = document.getElementById('equationsPanel');
+    const themeSelect = document.getElementById('colorThemeSelect');
+
+    if (themeSelect && themeSelect.children.length === 0) {
+        const themes = getAvailableThemes();
+        themes.forEach(({ id, label }) => {
+            const option = document.createElement('option');
+            option.value = id;
+            option.textContent = label;
+            themeSelect.appendChild(option);
+        });
+    }
+
+    if (themeSelect) {
+        themeSelect.value = getCurrentThemeId();
+    }
 
     function applySpeed(value) {
         setPlaybackSpeed(value);
@@ -32,6 +48,9 @@ export function initSettingsModal(pipeline) {
         if (eq) eq.checked = !!appState.showEquations;
         const bg = document.getElementById('toggleHdrBackground');
         if (bg) bg.checked = !!appState.showHdrBackground;
+        if (themeSelect) {
+            themeSelect.value = getCurrentThemeId();
+        }
     }
 
     function closeSettings() {
@@ -91,5 +110,12 @@ export function initSettingsModal(pipeline) {
         appState.showHdrBackground = !!bgToggle.checked;
         setPreference('showHdrBackground', appState.showHdrBackground);
         appState.applyEnvironmentBackground(pipeline);
+    });
+
+    themeSelect?.addEventListener('change', () => {
+        const nextTheme = themeSelect.value;
+        if (nextTheme) {
+            setTheme(nextTheme);
+        }
     });
 }

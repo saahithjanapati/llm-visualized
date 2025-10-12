@@ -17,6 +17,7 @@ import {
     PRISM_ADD_ANIM_SPEED_MULT,
     VECTOR_LENGTH_PRISM
 } from '../utils/constants.js';
+import { getCurrentTheme, subscribeToThemeChanges } from '../state/themeManager.js';
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
 import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
 import { PrismLayerNormAnimation } from '../animations/PrismLayerNormAnimation.js';
@@ -95,10 +96,19 @@ export class LayerPipeline extends EventTarget {
         // Ensure first layer has active callback wired before start
         this._layers[0].setOnFinished(() => this._advanceToNextLayer());
         this._layers[0].setProgressEmitter(this);
+
+        this.applyTheme(getCurrentTheme());
+        this._themeUnsub = subscribeToThemeChanges((theme) => this.applyTheme(theme));
     }
 
     /** Dispose and tear down Three resources */
-    dispose() { this._engine && this._engine.dispose(); }
+    dispose() {
+        if (typeof this._themeUnsub === 'function') {
+            this._themeUnsub();
+            this._themeUnsub = null;
+        }
+        this._engine && this._engine.dispose();
+    }
 
     /** Return reference to internal CoreEngine (for advanced use-cases). */
     get engine() { return this._engine; }
@@ -151,6 +161,18 @@ export class LayerPipeline extends EventTarget {
         if (prevLayer && typeof prevLayer.hideDynamicGeometry === 'function') {
             prevLayer.hideDynamicGeometry();
         }
+    }
+
+    applyTheme(theme) {
+        if (!theme) return;
+        if (this._engine && typeof this._engine.applyTheme === 'function') {
+            this._engine.applyTheme(theme);
+        }
+        this._layers.forEach((layer) => {
+            if (typeof layer.applyTheme === 'function') {
+                layer.applyTheme(theme);
+            }
+        });
     }
 
     /**

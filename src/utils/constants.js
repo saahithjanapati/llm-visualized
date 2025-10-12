@@ -1,3 +1,5 @@
+import { getCurrentTheme, subscribeToThemeChanges } from '../state/themeManager.js';
+
 // ------------------------------------------------------------
 // Global animation speed multiplier (1 = normal speed). Increase to speed up everything.
 // Use setter to update at runtime; modules should always read the live binding.
@@ -507,7 +509,13 @@ export const TOP_LN_TO_TOP_EMBED_GAP = 140;
 // -----------------------------------------------------------------------------
 
 /** Base colour for inactive components (visible but dark). */
-export const INACTIVE_COMPONENT_COLOR = 0x202020;
+const theme = getCurrentTheme();
+export let INACTIVE_COMPONENT_COLOR = theme?.scene?.inactiveComponent ?? 0x202020;
+subscribeToThemeChanges((nextTheme) => {
+    if (nextTheme?.scene) {
+        INACTIVE_COMPONENT_COLOR = nextTheme.scene.inactiveComponent ?? INACTIVE_COMPONENT_COLOR;
+    }
+});
 
 // ------------------------------------------------------------
 // UI / Caption Constants

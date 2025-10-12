@@ -1,7 +1,10 @@
+import { getCurrentTheme, subscribeToThemeChanges } from '../state/themeManager.js';
+
 // Centralised visual parameters for StraightLineTrail lines
 // Modify these values to tweak trail appearance globally
 
-export const TRAIL_COLOR = 0xffffff;          // Default hex colour (match other trails)
+const theme = getCurrentTheme();
+export let TRAIL_COLOR = theme?.scene?.trailColor ?? 0xffffff;          // Default hex colour (match other trails)
 export const TRAIL_LINE_WIDTH = 1;            // Pixel width (hardware-dependent)
 export const TRAIL_OPACITY = 0.13;             // 0 (fully transparent) → 1 (fully opaque)
 export const TRAIL_MAX_SEGMENTS = 5000;       // Preallocated straight-line segments
@@ -9,6 +12,12 @@ export const TRAIL_MAX_SEGMENTS = 5000;       // Preallocated straight-line segm
 // Reserved for future extensions – THREE.LineBasicMaterial has no emissive term but
 // we expose a placeholder in case the implementation switches materials later.
 export const TRAIL_EMISSIVE_INTENSITY = 0.0;
+
+subscribeToThemeChanges((nextTheme) => {
+    if (nextTheme?.scene) {
+        TRAIL_COLOR = nextTheme.scene.trailColor ?? TRAIL_COLOR;
+    }
+});
 
 // ---------------------------------------------------------------------------
 // DPI-aware helpers to normalize trail appearance across displays

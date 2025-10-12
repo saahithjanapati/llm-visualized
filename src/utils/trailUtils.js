@@ -125,6 +125,21 @@ export class StraightLineTrail {
         this._material.dispose();
     }
 
+    setColor(newColor) {
+        if (!this._material) return;
+        let hex;
+        if (newColor instanceof THREE.Color) {
+            hex = newColor.getHex();
+        } else if (typeof newColor === 'number') {
+            hex = newColor;
+        } else {
+            return;
+        }
+        this._color = hex;
+        this._material.color.setHex(hex);
+        this._material.needsUpdate = true;
+    }
+
     /** Adjust base opacity at runtime and update underlying material accordingly. */
     setBaseOpacity(newBaseOpacity) {
         if (typeof newBaseOpacity !== 'number' || !isFinite(newBaseOpacity)) return;
