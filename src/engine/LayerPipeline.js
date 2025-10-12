@@ -59,16 +59,18 @@ export class LayerPipeline extends EventTarget {
         this._currentLayerIdx = 0;
 
         this._autoCameraFollow = opts.autoCameraFollow !== false;
-        this._autoCameraLerp = (typeof opts.autoCameraLerp === 'number' && Number.isFinite(opts.autoCameraLerp))
-            ? THREE.MathUtils.clamp(opts.autoCameraLerp, 0.01, 1)
-            : 0.12;
-        this._autoCameraLastUpdate = 0;
-        this._autoCameraMinIntervalMs = 80;
-        this._autoCameraBox = new THREE.Box3();
         this._autoCameraCenter = new THREE.Vector3();
-        this._autoCameraTargetScratch = new THREE.Vector3();
         this._autoCameraOffsetScratch = new THREE.Vector3();
+        this._autoCameraDesiredCameraOffset = new THREE.Vector3();
+        this._autoCameraDesiredTargetOffset = new THREE.Vector3();
+        this._hasAutoCameraOffsets = false;
+        this._suppressControlsChange = false;
+        this._cameraOffsetDiv = (typeof document !== 'undefined')
+            ? document.getElementById('cameraOffsetOverlay')
+            : null;
+        this._controlsChangeHandler = null;
         this._onAutoCameraProgress = () => { this._maybeAutoCameraFocus(); };
+        this._cameraOverlayRaf = null;
         this.addEventListener('progress', this._onAutoCameraProgress);
 
         // ------------------------------------------------------------------
@@ -87,6 +89,17 @@ export class LayerPipeline extends EventTarget {
             engineOpts.cameraFarMargin = approxTowerAllowance;
         }
         this._engine = new CoreEngine(canvas, [], engineOpts);
+
+        if (this._engine?.controls) {
+            this._controlsChangeHandler = () => {
+                if (!this._autoCameraFollow || this._suppressControlsChange) {
+                    return;
+                }
+                this._captureAutoCameraOffsets();
+                this._updateCameraOffsetOverlay();
+            };
+            this._engine.controls.addEventListener('change', this._controlsChangeHandler);
+        }
 
         for (let i = 0; i < this._numLayers; i++) {
             const rand = this._randFactory();
@@ -110,6 +123,9 @@ export class LayerPipeline extends EventTarget {
         this._layers[0].setProgressEmitter(this);
 
         this._maybeAutoCameraFocus({ immediate: true });
+        if (this._autoCameraFollow) {
+            this._startCameraOverlayLoop();
+        }
     }
 
     /** Dispose and tear down Three resources */
@@ -118,6 +134,14 @@ export class LayerPipeline extends EventTarget {
             this.removeEventListener('progress', this._onAutoCameraProgress);
             this._onAutoCameraProgress = null;
         }
+        if (this._engine?.controls && this._controlsChangeHandler) {
+            this._engine.controls.removeEventListener('change', this._controlsChangeHandler);
+        }
+        this._controlsChangeHandler = null;
+        if (this._cameraOffsetDiv) {
+            this._cameraOffsetDiv.style.display = 'none';
+        }
+        this._stopCameraOverlayLoop();
         if (this._engine) {
             this._engine.dispose();
         }
@@ -130,14 +154,22 @@ export class LayerPipeline extends EventTarget {
     setAutoCameraFollow(enabled, { immediate = false } = {}) {
         const nextValue = !!enabled;
         if (nextValue === this._autoCameraFollow) {
-            if (nextValue && immediate) {
-                this._maybeAutoCameraFocus({ immediate: true });
+            if (nextValue) {
+                if (immediate) {
+                    this._updateCameraOffsetOverlay();
+                }
+            } else {
+                this._updateCameraOffsetOverlay();
             }
             return;
         }
         this._autoCameraFollow = nextValue;
+        this._updateCameraOffsetOverlay();
         if (this._autoCameraFollow) {
-            this._maybeAutoCameraFocus({ immediate: true });
+            this._startCameraOverlayLoop();
+        } else {
+            this._clearAutoCameraOffsets();
+            this._stopCameraOverlayLoop();
         }
     }
 
@@ -626,47 +658,184 @@ export class LayerPipeline extends EventTarget {
         });
     }
 
-    _maybeAutoCameraFocus({ immediate = false } = {}) {
-        if (!this._autoCameraFollow) return;
-        const engine = this._engine;
-        if (!engine || !engine.camera || !engine.controls) return;
-        if (typeof engine.isUserNavigating === 'function' && engine.isUserNavigating()) return;
-
-        const now = (typeof performance !== 'undefined' && performance?.now)
-            ? performance.now()
-            : Date.now();
-        if (!immediate && now - this._autoCameraLastUpdate < this._autoCameraMinIntervalMs) return;
-        this._autoCameraLastUpdate = now;
-
-        const layerIndex = Math.min(this._currentLayerIdx, this._layers.length - 1);
-        const layer = this._layers[layerIndex];
-        if (!layer || !layer.root) return;
-
-        const bbox = this._autoCameraBox;
-        bbox.makeEmpty();
-        bbox.setFromObject(layer.root);
-        if (bbox.isEmpty()) return;
-
-        const center = bbox.getCenter(this._autoCameraCenter);
-        if (!Number.isFinite(center.x) || !Number.isFinite(center.y) || !Number.isFinite(center.z)) return;
-
-        const controls = engine.controls;
-        const camera = engine.camera;
-        if (!controls || !camera) return;
-
-        const currentTarget = this._autoCameraTargetScratch.copy(controls.target);
-        const offset = this._autoCameraOffsetScratch.copy(camera.position).sub(currentTarget);
-
-        const desiredTarget = center;
-        const desiredCameraPos = center.clone().add(offset);
-        const alpha = immediate ? 1 : this._autoCameraLerp;
-
-        controls.target.lerp(desiredTarget, alpha);
-        camera.position.lerp(desiredCameraPos, alpha);
-
-        if (typeof engine.notifyCameraUpdated === 'function') {
-            engine.notifyCameraUpdated();
+    _resolveActiveLanePosition(targetVec = null) {
+        const layers = this._layers;
+        if (!Array.isArray(layers) || layers.length === 0) {
+            return { laneIndex: -1, laneCount: 0 };
         }
+
+        const layerIndex = Math.min(this._currentLayerIdx, layers.length - 1);
+        const layer = layers[layerIndex];
+        const lanes = Array.isArray(layer?.lanes) ? layer.lanes : [];
+        const laneCount = lanes.length;
+        if (!laneCount) {
+            return { laneIndex: -1, laneCount };
+        }
+
+        const laneIndex = Math.min(laneCount - 1, Math.floor(laneCount / 2));
+        const lane = lanes[laneIndex];
+        const vecGroup = lane?.originalVec?.group;
+        if (!vecGroup || typeof vecGroup.getWorldPosition !== 'function') {
+            return { laneIndex: -1, laneCount };
+        }
+
+        if (targetVec) {
+            vecGroup.getWorldPosition(targetVec);
+        }
+
+        return { laneIndex, laneCount };
+    }
+
+    _clearAutoCameraOffsets() {
+        this._hasAutoCameraOffsets = false;
+        this._autoCameraDesiredCameraOffset.set(0, 0, 0);
+        this._autoCameraDesiredTargetOffset.set(0, 0, 0);
+    }
+
+    _captureAutoCameraOffsets(existingReference = null) {
+        const engine = this._engine;
+        const camera = engine?.camera;
+        if (!camera) return false;
+
+        const reference = existingReference || this._autoCameraCenter;
+        if (!existingReference) {
+            const laneInfo = this._resolveActiveLanePosition(reference);
+            if (laneInfo.laneIndex < 0) {
+                this._clearAutoCameraOffsets();
+                return false;
+            }
+        }
+
+        this._autoCameraDesiredCameraOffset.copy(camera.position).sub(reference);
+        if (!Number.isFinite(this._autoCameraDesiredCameraOffset.x)
+            || !Number.isFinite(this._autoCameraDesiredCameraOffset.y)
+            || !Number.isFinite(this._autoCameraDesiredCameraOffset.z)) {
+            this._clearAutoCameraOffsets();
+            return false;
+        }
+
+        const controls = engine?.controls;
+        if (controls && controls.target) {
+            this._autoCameraDesiredTargetOffset.copy(controls.target).sub(reference);
+        } else {
+            this._autoCameraDesiredTargetOffset.set(0, 0, 0);
+        }
+
+        this._hasAutoCameraOffsets = true;
+        return true;
+    }
+
+    _applyAutoCamera(reference) {
+        if (!this._autoCameraFollow || !this._hasAutoCameraOffsets) {
+            return;
+        }
+
+        const engine = this._engine;
+        const camera = engine?.camera;
+        if (!engine || !camera) return;
+
+        if (!Number.isFinite(reference?.x) || !Number.isFinite(reference?.y) || !Number.isFinite(reference?.z)) {
+            return;
+        }
+
+        if (!Number.isFinite(this._autoCameraDesiredCameraOffset.x)
+            || !Number.isFinite(this._autoCameraDesiredCameraOffset.y)
+            || !Number.isFinite(this._autoCameraDesiredCameraOffset.z)) {
+            return;
+        }
+
+        this._suppressControlsChange = true;
+        try {
+            camera.position.copy(reference).add(this._autoCameraDesiredCameraOffset);
+
+            const controls = engine.controls;
+            if (controls && controls.target) {
+                controls.target.copy(reference).add(this._autoCameraDesiredTargetOffset);
+                if (typeof controls.update === 'function') {
+                    controls.update();
+                }
+            }
+
+            if (typeof engine.notifyCameraUpdated === 'function') {
+                engine.notifyCameraUpdated();
+            }
+        } finally {
+            this._suppressControlsChange = false;
+        }
+    }
+
+    _updateCameraOffsetOverlay() {
+        const overlay = this._cameraOffsetDiv;
+        if (!overlay) return;
+
+        if (!this._autoCameraFollow) {
+            overlay.style.display = 'none';
+            return;
+        }
+
+        const engine = this._engine;
+        const camera = engine?.camera;
+        if (!camera) {
+            overlay.style.display = 'block';
+            overlay.textContent = 'Offset vs Residual Lane —\nΔx: —\nΔy: —\nΔz: —';
+            this._clearAutoCameraOffsets();
+            return;
+        }
+
+        const reference = this._autoCameraCenter;
+        const { laneIndex } = this._resolveActiveLanePosition(reference);
+        if (laneIndex < 0 || !Number.isFinite(reference.x) || !Number.isFinite(reference.y) || !Number.isFinite(reference.z)) {
+            overlay.style.display = 'block';
+            overlay.textContent = 'Offset vs Residual Lane —\nΔx: —\nΔy: —\nΔz: —';
+            this._clearAutoCameraOffsets();
+            return;
+        }
+
+        if (!this._hasAutoCameraOffsets) {
+            this._captureAutoCameraOffsets(reference);
+        }
+
+        this._applyAutoCamera(reference);
+
+        const offset = this._autoCameraOffsetScratch;
+        offset.copy(camera.position).sub(reference);
+        const format = (value) => (Number.isFinite(value) ? value.toFixed(2) : '—');
+        const laneLabel = Number.isInteger(laneIndex) && laneIndex >= 0 ? (laneIndex + 1) : '—';
+
+        overlay.style.display = 'block';
+        overlay.textContent = `Offset vs Residual Lane ${laneLabel}\nΔx: ${format(offset.x)}\nΔy: ${format(offset.y)}\nΔz: ${format(offset.z)}`;
+    }
+
+    _maybeAutoCameraFocus({ immediate = false } = {}) {
+        // Retained for compatibility with existing progress hooks; now only updates the debug overlay.
+        if (!this._autoCameraFollow && !immediate) {
+            this._updateCameraOffsetOverlay();
+            return;
+        }
+        this._updateCameraOffsetOverlay();
+    }
+
+    _startCameraOverlayLoop() {
+        if (this._cameraOverlayRaf !== null) return;
+        if (typeof requestAnimationFrame !== 'function') return;
+
+        const tick = () => {
+            if (!this._autoCameraFollow) {
+                this._stopCameraOverlayLoop();
+                return;
+            }
+            this._updateCameraOffsetOverlay();
+            this._cameraOverlayRaf = requestAnimationFrame(tick);
+        };
+
+        this._cameraOverlayRaf = requestAnimationFrame(tick);
+    }
+
+    _stopCameraOverlayLoop() {
+        if (this._cameraOverlayRaf !== null && typeof cancelAnimationFrame === 'function') {
+            cancelAnimationFrame(this._cameraOverlayRaf);
+        }
+        this._cameraOverlayRaf = null;
     }
 }
 
