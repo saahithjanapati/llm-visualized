@@ -119,7 +119,7 @@ export function buildMHAVisuals(parentGroup, {
         MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitTopWidthFactor,
     );
 
-    const initDarkColor = inactiveMatrixColor.clone();
+    const initDarkColor = new THREE.Color(MHSA_MATRIX_INITIAL_RESTING_COLOR);
     outputProjectionMatrix.setColor(initDarkColor);
     outputProjectionMatrix.group.userData.label = 'Output Projection Matrix';
     if (outputProjectionMatrix.mesh)         outputProjectionMatrix.mesh.userData.label        = 'Output Projection Matrix';
