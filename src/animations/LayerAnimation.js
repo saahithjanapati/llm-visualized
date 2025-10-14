@@ -70,7 +70,8 @@ import {
     MLP_MATRIX_PARAMS_DOWN,
     ORIGINAL_TO_PROCESSED_GAP,
     DECORATIVE_FADE_MS,
-    DECORATIVE_FADE_DELAY_MS
+    DECORATIVE_FADE_DELAY_MS,
+    INACTIVE_COMPONENT_COLOR
 } from '../utils/constants.js';
 import { mapValueToColor } from '../utils/colors.js';
 
@@ -241,8 +242,9 @@ export function initLayerAnimation(container) {
         LN_PARAMS.holeWidth,
         LN_PARAMS.holeWidthFactor
     );
-    // Match LayerNorm appearance to the light gray used for MHSA head matrices
-    layerNorm1.setColor(new THREE.Color(0x404040));
+    const layerNormBaseColor = new THREE.Color(INACTIVE_COMPONENT_COLOR);
+    // Start LayerNorm with the shared inactive dark-gray appearance
+    layerNorm1.setColor(layerNormBaseColor.clone());
     layerNorm1.group.children.forEach(child => {
         if (child.material) {
             child.material.transparent = true;
@@ -288,8 +290,8 @@ export function initLayerAnimation(container) {
         LN_PARAMS.holeWidth,
         LN_PARAMS.holeWidthFactor
     );
-    // Apply the same light gray style to the second LayerNorm
-    layerNorm2.setColor(new THREE.Color(0x404040));
+    // Apply the same dark-gray style to the second LayerNorm
+    layerNorm2.setColor(layerNormBaseColor.clone());
     layerNorm2.group.children.forEach(child => {
         if (child.material) {
             child.material.transparent = false;
@@ -398,7 +400,7 @@ export function initLayerAnimation(container) {
     // -------------------------------------------------------------------------
     let ln2ColorLocked = false;      // becomes true after the final bright transition
     let ln2LockedColor = null;       // stores the color to keep (e.g., brightYellow)
-    let ln2LastColor = new THREE.Color(0x404040);
+    let ln2LastColor = layerNormBaseColor.clone();
     let ln2LastOpacity = 1.0;
 
 
@@ -596,7 +598,7 @@ export function initLayerAnimation(container) {
         const timeNow = performance.now();
 
         // --- LayerNorm Appearance Control ---
-        const darkGray = new THREE.Color(0x404040);
+        const darkGray = layerNormBaseColor.clone();
         const lightYellow = new THREE.Color(0xFFFF99); // For semi-transparent state
         const brightYellow = new THREE.Color(0xFFFF00); // For final opaque state
         const opaqueOpacity = 1.0;
