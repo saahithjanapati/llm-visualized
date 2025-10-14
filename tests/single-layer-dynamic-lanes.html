@@ -115,7 +115,7 @@
          for(let i=0;i<laneCount;i++){
           const z=(i-(laneCount-1)/2)*VECTOR_DEPTH_SPACING;
           const ln=new LayerNormalizationVisualization(new THREE.Vector3(BRANCH_X,ln1CenterY,z),LN_PARAMS.width,LN_PARAMS.height,VECTOR_DEPTH_SPACING,LN_PARAMS.wallThickness,1,LN_PARAMS.holeWidth,LN_PARAMS.holeWidthFactor);
-          const lnColor = new THREE.Color(0xffffff);
+          const lnColor = new THREE.Color(0xD9CFA0);
           ln.setColor(lnColor);
           ln.setMaterialProperties({ opacity:1.0, transparent:false, emissive: lnColor, emissiveIntensity: 0.2 });
           if(ln.mesh&&ln.mesh.geometry){ln.mesh.geometry.dispose();ln.mesh.geometry= stripCaps(ln.mesh.geometry,false,false);} g.add(ln.group);
@@ -146,7 +146,7 @@
          for(let i=0;i<laneCount;i++){
           const z=(i-(laneCount-1)/2)*VECTOR_DEPTH_SPACING;
           const ln=new LayerNormalizationVisualization(new THREE.Vector3(BRANCH_X,ln2CenterY,z),LN_PARAMS.width,LN_PARAMS.height,VECTOR_DEPTH_SPACING,LN_PARAMS.wallThickness,1,LN_PARAMS.holeWidth,LN_PARAMS.holeWidthFactor);
-          const lnColor = new THREE.Color(0xffffff);
+          const lnColor = new THREE.Color(0xD9CFA0);
           ln.setColor(lnColor.clone());
           ln.setMaterialProperties({ opacity:1.0, transparent:false, emissive: lnColor.clone(), emissiveIntensity: 0.5 });
           if(ln.mesh&&ln.mesh.geometry){ln.mesh.geometry.dispose();ln.mesh.geometry= stripCaps(ln.mesh.geometry,false,false);} g.add(ln.group);
@@ -157,9 +157,9 @@
           for(let i=0;i<laneCount;i++){
            const z=(i-(laneCount-1)/2)*VECTOR_DEPTH_SPACING;
            const wm=new WeightMatrixVisualization(null,new THREE.Vector3(BRANCH_X,y,z),params.width,params.height,VECTOR_DEPTH_SPACING,params.topWidthFactor,params.cornerRadius,1,params.slitWidth,params.slitDepthFactor,params.slitBottomWidthFactor,params.slitTopWidthFactor);
-           const orange=new THREE.Color(0xb07c13);
-           wm.setColor(orange);
-           wm.setEmissive(orange,0.5);
+           const mlpColour=new THREE.Color(0x0275DB);
+           wm.setColor(mlpColour);
+           wm.setEmissive(mlpColour,0.5);
            wm.setMaterialProperties({ opacity:1.0, transparent:false });
            if(i!==laneCount-1 && wm.frontCapMesh) wm.frontCapMesh.visible=false;
            if(i!==0 && wm.backCapMesh) wm.backCapMesh.visible=false;

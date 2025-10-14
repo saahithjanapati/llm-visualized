@@ -112,24 +112,24 @@ export const MLP_D_MODEL_VISUAL_DEPTH = 20;
 /** Base (resting) colour for MHSA matrices. */
 export const MHSA_MATRIX_INITIAL_RESTING_COLOR = 0x404040;
 
-/** Bright / activated colours used inside the MHSA animation. */
-export const MHSA_BRIGHT_GREEN        = 0x33FF33;
-export const MHSA_DARK_TINTED_GREEN   = 0x002200;
-export const MHSA_BRIGHT_BLUE         = 0x6666FF;
-export const MHSA_DARK_TINTED_BLUE    = 0x000022;
-export const MHSA_BRIGHT_RED          = 0xFF3333;
-export const MHSA_DARK_TINTED_RED     = 0x220000;
+/** Bright / activated colours used inside the MHSA animation (names kept for compatibility). */
+export const MHSA_BRIGHT_GREEN        = 0x35658F;
+export const MHSA_DARK_TINTED_GREEN   = 0x101E2A;
+export const MHSA_BRIGHT_BLUE         = 0x06DBCE;
+export const MHSA_DARK_TINTED_BLUE    = 0x012B29;
+export const MHSA_BRIGHT_RED          = 0x266662;
+export const MHSA_DARK_TINTED_RED     = 0x0B1E1D;
 
 /** Colour for trail lines behind moving prisms. */
 
 
 /** Final Q, K, V head colours used once attention heads have merged. */
-export const MHA_FINAL_Q_COLOR = 0x1e5299;
-export const MHA_FINAL_K_COLOR = 0x1d9752;
-export const MHA_FINAL_V_COLOR = 0x811b2d;
+export const MHA_FINAL_Q_COLOR = 0x06DBCE;
+export const MHA_FINAL_K_COLOR = 0x35658F;
+export const MHA_FINAL_V_COLOR = 0x266662;
 
 /** Active colour of the output-projection matrix that follows MHSA. */
-export const MHA_OUTPUT_PROJECTION_MATRIX_COLOR = 0xaf5faf;
+export const MHA_OUTPUT_PROJECTION_MATRIX_COLOR = 0xDB8700;
 
 // -----------------------------------------------------------------------------
 // MHSA (Multi-Head Self-Attention) Specific Animation Constants

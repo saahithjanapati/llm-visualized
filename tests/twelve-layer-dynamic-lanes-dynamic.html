@@ -121,8 +121,8 @@
             const mlpUpCenterY   = ln2TopY + LN2_TO_MLP_GAP + MLP_MATRIX_PARAMS_UP.height/2;
             const mlpDownCenterY = mlpUpCenterY + MLP_MATRIX_PARAMS_UP.height/2 + MLP_INTER_MATRIX_GAP + MLP_MATRIX_PARAMS_DOWN.height/2;
 
-            const lnColour = new THREE.Color(0xffffff);
-            const orange   = new THREE.Color(0xb07c13);
+            const lnColour = new THREE.Color(0xD9CFA0);
+            const mlpColour   = new THREE.Color(0x0275DB);
 
             // LN-1 as InstancedMesh
             {
@@ -303,8 +303,8 @@
                 const capGeoBack=capGeo.clone();
                 capGeoBack.rotateY(Math.PI);
                 const mat=temp.mesh.material.clone();
-                mat.color.copy(orange);
-                mat.emissive=orange.clone();
+                mat.color.copy(mlpColour);
+                mat.emissive=mlpColour.clone();
                 mat.emissiveIntensity=0.3;
                 mat.transparent = false;
                 mat.opacity = 1.0;
