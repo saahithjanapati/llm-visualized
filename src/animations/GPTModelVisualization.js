@@ -182,8 +182,8 @@ export function initGPTModelVisualization(container) {
     // ───────────────────────────────────────────────────────────────────────────
     const lnColour1 = new THREE.Color(0x00e0ff);
     const lnColour2 = new THREE.Color(0xff00ff);
-    const mlpColour1 = new THREE.Color(0xffcc00);
-    const mlpColour2 = new THREE.Color(0xff8800);
+    const mlpColour1 = new THREE.Color(0xdca9dc);
+    const mlpColour2 = new THREE.Color(0xaf5faf);
 
     // We reuse geometry by holding one base LayerNormVis & one base MLP matrix
     const lnFactory = new LayerNormalizationVisualization(new THREE.Vector3(), lnWidth, lnHeight, lnDepth, 1.0, 5, 2.5, 3.75);
