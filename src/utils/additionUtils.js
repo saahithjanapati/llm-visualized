@@ -143,8 +143,28 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
                                 || (sourceVec && sourceVec.userData)
                                 || null;
                             if (residualTrail && residualOwner && typeof residualTrail.update === 'function') {
+                                const clampY = Number.isFinite(trgWorld.y) ? trgWorld.y : null;
+                                if (clampY !== null) {
+                                    if (wPos.y > clampY) {
+                                        wPos.y = clampY;
+                                    }
+                                    if (typeof residualOwner.__residualMaxY === 'number' && residualOwner.__residualMaxY > clampY) {
+                                        if (typeof residualTrail.clampMaxY === 'function') {
+                                            try {
+                                                residualTrail.clampMaxY(clampY);
+                                            } catch (clampErr) {
+                                                console.warn('Residual trail clamp failed:', clampErr);
+                                            }
+                                        }
+                                        residualOwner.__residualMaxY = clampY;
+                                    }
+                                }
                                 if (typeof residualOwner.__residualMaxY !== 'number') {
-                                    residualOwner.__residualMaxY = wPos.y - 0.001;
+                                    const seed = wPos.y - 0.001;
+                                    residualOwner.__residualMaxY = clampY !== null ? Math.min(seed, clampY) : seed;
+                                }
+                                if (clampY !== null && residualOwner.__residualMaxY > clampY) {
+                                    residualOwner.__residualMaxY = clampY;
                                 }
                                 if (wPos.y >= residualOwner.__residualMaxY) {
                                     let localPos = wPos;

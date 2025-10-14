@@ -173,6 +173,59 @@ export class StraightLineTrail {
     }
 
     /**
+     * Clamp all stored vertices so their world-space Y value does not exceed
+     * `maxY`.  This is useful when the owning animation determines that the
+     * visual trail should never extend past a certain height (e.g. the top
+     * vector in a residual addition) even if earlier updates overshot.
+     *
+     * @param {number} maxY
+     */
+    clampMaxY(maxY) {
+        if (typeof maxY !== 'number' || !isFinite(maxY)) return;
+        if (this._vertexCount === 0) return;
+
+        let mutated = false;
+        for (let i = 0; i < this._vertexCount; i++) {
+            const base = i * 3 + 1; // y component within flat array
+            if (this._positions[base] > maxY) {
+                this._positions[base] = maxY;
+                mutated = true;
+            }
+        }
+
+        if (!mutated) return;
+
+        this._attr.needsUpdate = true;
+
+        // Recompute cached "previous" position so the next update() call
+        // continues smoothly from the clamped vertex.
+        const lastIndex = (this._vertexCount - 1) * 3;
+        const lastX = this._positions[lastIndex];
+        const lastY = this._positions[lastIndex + 1];
+        const lastZ = this._positions[lastIndex + 2];
+        this._prevPos.set(lastX, lastY, lastZ);
+
+        if (this._vertexCount >= 2) {
+            const prevIndex = (this._vertexCount - 2) * 3;
+            const dir = new THREE.Vector3(
+                lastX - this._positions[prevIndex + 0],
+                lastY - this._positions[prevIndex + 1],
+                lastZ - this._positions[prevIndex + 2]
+            );
+            const lenSq = dir.lengthSq();
+            if (lenSq === 0) {
+                this._currentDir = null;
+            } else {
+                dir.multiplyScalar(1 / Math.sqrt(lenSq));
+                if (!this._currentDir) this._currentDir = new THREE.Vector3();
+                this._currentDir.copy(dir);
+            }
+        } else {
+            this._currentDir = null;
+        }
+    }
+
+    /**
      * Extract current segments and trim the live trail down to its last point,
      * so future updates continue from the same position without duplicating
      * the already-frozen history.
