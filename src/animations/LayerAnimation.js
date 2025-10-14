@@ -1140,7 +1140,7 @@ export function initLayerAnimation(container) {
                     const distance = topY - vec.group.position.y;
                     const duration = (distance / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
                     const matrixStartColor = mlpDarkGray.clone();
-                    const matrixEndColor = new THREE.Color(0xb07c13); // bright orange
+                    const matrixEndColor = new THREE.Color(0x0275DB); // vivid MLP blue
                     new TWEEN.Tween({ t: 0 })
                         .to({ t: 1 }, duration)
                         .easing(TWEEN.Easing.Quadratic.InOut)
@@ -1222,7 +1222,7 @@ export function initLayerAnimation(container) {
                                 .onComplete(() => {
                                     // After the pause, start the down-projection pass-through
                                     setTimeout(() => {
-                                        const orangeColor = new THREE.Color(0xb07c13);
+                                        const mlpActiveColor = new THREE.Color(0x0275DB);
 
                                         const downBottomY = mlpMatrixDown_centerY - MLP_MATRIX_PARAMS_DOWN.height / 2;
                                         const downTopY = mlpMatrixDown_centerY + MLP_MATRIX_PARAMS_DOWN.height / 2;
@@ -1237,7 +1237,7 @@ export function initLayerAnimation(container) {
                                             .to({ t: 1 }, durationDown)
                                             .easing(TWEEN.Easing.Quadratic.InOut)
                                             .onUpdate(o => {
-                                                const col = mlpDarkGray.clone().lerp(orangeColor, o.t);
+                                                const col = mlpDarkGray.clone().lerp(mlpActiveColor, o.t);
                                                 mlpMatrixDown.setColor(col);
                                                 mlpMatrixDown.setEmissive(col, 0.5);
                                             })
@@ -1255,8 +1255,8 @@ export function initLayerAnimation(container) {
                                                 expandedGroup.scale.setScalar(0.25);
                                             })
                                             .onComplete(() => {
-                                                mlpMatrixDown.setColor(orangeColor);
-                                                mlpMatrixDown.setEmissive(orangeColor, 0.5);
+                                                mlpMatrixDown.setColor(mlpActiveColor);
+                                                mlpMatrixDown.setEmissive(mlpActiveColor, 0.5);
 
                                                 // --------------------------------------------------
                                                 //  Collapse back to a single 768-dim vector

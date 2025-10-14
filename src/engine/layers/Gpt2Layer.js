@@ -1038,7 +1038,7 @@ export default class Gpt2Layer extends BaseLayer {
         const duration = (distance / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
         
         const matrixStartColor = new THREE.Color(INACTIVE_COMPONENT_COLOR);
-        const matrixEndColor = new THREE.Color(0xb07c13); // orange
+        const mlpActiveColor = new THREE.Color(0x0275DB); // electric blue highlight
         const startIntensity = 0.1;
         const peakIntensity = 0.8;
         const finalIntensity = 0.3;
@@ -1049,7 +1049,7 @@ export default class Gpt2Layer extends BaseLayer {
             .to({ t: 1, emissive: peakIntensity }, duration * 0.6)
             .easing(TWEEN.Easing.Quadratic.InOut)
             .onUpdate(() => {
-                const col = matrixStartColor.clone().lerp(matrixEndColor, state.t);
+                const col = matrixStartColor.clone().lerp(mlpActiveColor, state.t);
                 this.mlpUp.setColor(col);
                 this.mlpUp.setEmissive(col, state.emissive);
             })
@@ -1058,7 +1058,7 @@ export default class Gpt2Layer extends BaseLayer {
                     .to({ emissive: finalIntensity }, duration * 0.4)
                     .easing(TWEEN.Easing.Quadratic.InOut)
                     .onUpdate(() => {
-                        this.mlpUp.setEmissive(matrixEndColor, state.emissive);
+                        this.mlpUp.setEmissive(mlpActiveColor, state.emissive);
                     })
                     .start();
             })
@@ -1077,8 +1077,8 @@ export default class Gpt2Layer extends BaseLayer {
             .onComplete(() => {
                 // Restore scale
                 vec.group.scale.setScalar(0.6);
-                this.mlpUp.setColor(matrixEndColor);
-                this.mlpUp.setEmissive(matrixEndColor, finalIntensity);
+                this.mlpUp.setColor(mlpActiveColor);
+                this.mlpUp.setEmissive(mlpActiveColor, finalIntensity);
                 
                 // Expand to 4x width (3072 dimensions)
                 this._expandTo4x(lane, vec);
@@ -1146,7 +1146,7 @@ export default class Gpt2Layer extends BaseLayer {
         const expandedGroup = lane.expandedVecGroup;
         if (!expandedGroup || typeof TWEEN === 'undefined') return;
         
-        const orangeColor = new THREE.Color(0xb07c13);
+        const mlpActiveColor = new THREE.Color(0x0275DB);
         const downBottomY = this.mlpDown.group.position.y - MLP_MATRIX_PARAMS_DOWN.height / 2;
         const downTopY = this.mlpDown.group.position.y + MLP_MATRIX_PARAMS_DOWN.height / 2;
         
@@ -1164,7 +1164,7 @@ export default class Gpt2Layer extends BaseLayer {
             .to({ t: 1, emissive: peakIntensity }, durationDown * 0.6)
             .easing(TWEEN.Easing.Quadratic.InOut)
             .onUpdate(() => {
-                const col = new THREE.Color(INACTIVE_COMPONENT_COLOR).lerp(orangeColor, downState.t);
+                const col = new THREE.Color(INACTIVE_COMPONENT_COLOR).lerp(mlpActiveColor, downState.t);
                 this.mlpDown.setColor(col);
                 this.mlpDown.setEmissive(col, downState.emissive);
             })
@@ -1173,7 +1173,7 @@ export default class Gpt2Layer extends BaseLayer {
                     .to({ emissive: finalIntensity }, durationDown * 0.4)
                     .easing(TWEEN.Easing.Quadratic.InOut)
                     .onUpdate(() => {
-                        this.mlpDown.setEmissive(orangeColor, downState.emissive);
+                        this.mlpDown.setEmissive(mlpActiveColor, downState.emissive);
                     })
                     .start();
             })
