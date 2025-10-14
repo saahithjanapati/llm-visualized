@@ -400,8 +400,6 @@ export function initLayerAnimation(container) {
     //  State tracking for LayerNorm2 appearance so it doesn't revert to dark/black
     //  once vectors have completely exited the block.
     // -------------------------------------------------------------------------
-    let ln2ColorLocked = false;      // becomes true after the final highlight transition
-    let ln2LockedColor = null;       // stores the color to keep once LN2 finishes its highlight
     let ln2LastColor = layerNormBaseColor.clone();
     let ln2LastOpacity = 1.0;
 
@@ -607,7 +605,6 @@ export function initLayerAnimation(container) {
         const semiTransparentOpacity = 0.6;
         const exitTransitionRange = 10; // Y-distance over which the exit transition occurs
 
-        const firstMovingVecY = lanes.length > 0 ? lanes[0].movingVec.group.position.y : startY;
         const bottomY_ln1_abs = LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2;
         const midY_ln1_abs = LAYER_NORM_1_Y_POS;
         const topY_ln1_abs = LAYER_NORM_1_Y_POS + LN_PARAMS.height / 2;
@@ -617,38 +614,63 @@ export function initLayerAnimation(container) {
         const midY_ln2_abs = LAYER_NORM_2_Y_POS;
         const topY_ln2_abs = LAYER_NORM_2_Y_POS + LN_PARAMS.height / 2;
 
-        let targetColor = baseColor;
-        let targetOpacity = opaqueOpacity;
-        let lerpFactor = 0;
+        let ln1TargetColor = baseColor.clone();
+        let ln1TargetOpacity = opaqueOpacity;
 
-        if (firstMovingVecY >= bottomY_ln1_abs && firstMovingVecY < midY_ln1_abs) {
-            // Entering (Bottom Half): Lerp from the base tone to a translucent highlight
-            lerpFactor = (firstMovingVecY - bottomY_ln1_abs) / (midY_ln1_abs - bottomY_ln1_abs);
-            targetColor = baseColor.clone().lerp(translucentColor, lerpFactor);
-            targetOpacity = opaqueOpacity + (semiTransparentOpacity - opaqueOpacity) * lerpFactor;
-        } else if (firstMovingVecY >= midY_ln1_abs && firstMovingVecY < topY_ln1_abs) {
-            // Inside (Top Half): Stay at the translucent highlight state
-            targetColor = translucentColor;
-            targetOpacity = semiTransparentOpacity;
-        } else if (firstMovingVecY >= topY_ln1_abs) {
-            // Exiting: Lerp from translucent highlight back towards the opaque base tone
-            lerpFactor = Math.min(1, (firstMovingVecY - topY_ln1_abs) / exitTransitionRange);
-            targetColor = translucentColor.clone().lerp(highlightColor, lerpFactor);
-            targetOpacity = semiTransparentOpacity + (opaqueOpacity - semiTransparentOpacity) * lerpFactor;
-            // Ensure opacity reaches exactly 1.0 when lerpFactor is 1
-            if (lerpFactor >= 1.0) {
-                targetColor = baseColor.clone();
-                targetOpacity = opaqueOpacity; // Force full opaqueness
+        let highestMovingVecLN1_Y = -Infinity;
+        let anyVectorInOrNearLN1 = false;
+
+        lanes.forEach(lane => {
+            if (lane.movingVec && lane.movingVec.group.visible) {
+                const y = lane.movingVec.group.position.y;
+                highestMovingVecLN1_Y = Math.max(highestMovingVecLN1_Y, y);
+                if (y >= bottomY_ln1_abs - exitTransitionRange) {
+                    anyVectorInOrNearLN1 = true;
+                }
+            } else if (lane.resultVec && lane.resultVec.group.visible) {
+                const pos = lane.resultVec.group.position;
+                if (Math.abs(pos.x - BRANCH_X) <= 0.01 && pos.y <= topY_ln1_abs + exitTransitionRange) {
+                    highestMovingVecLN1_Y = Math.max(highestMovingVecLN1_Y, pos.y);
+                    if (pos.y >= bottomY_ln1_abs - exitTransitionRange) {
+                        anyVectorInOrNearLN1 = true;
+                    }
+                }
             }
-        } // Else (below) remains at the base tone and opaque
+        });
+
+        if (anyVectorInOrNearLN1 && highestMovingVecLN1_Y > -Infinity) {
+            if (highestMovingVecLN1_Y >= bottomY_ln1_abs && highestMovingVecLN1_Y < midY_ln1_abs) {
+                // Entering (Bottom Half): Lerp from the base tone to a translucent highlight
+                const ln1EnterLerp = (highestMovingVecLN1_Y - bottomY_ln1_abs) / (midY_ln1_abs - bottomY_ln1_abs);
+                ln1TargetColor = baseColor.clone().lerp(translucentColor, ln1EnterLerp);
+                ln1TargetOpacity = opaqueOpacity + (semiTransparentOpacity - opaqueOpacity) * ln1EnterLerp;
+            } else if (highestMovingVecLN1_Y >= midY_ln1_abs && highestMovingVecLN1_Y < topY_ln1_abs) {
+                // Inside (Top Half): Stay at the translucent highlight state
+                ln1TargetColor = translucentColor.clone();
+                ln1TargetOpacity = semiTransparentOpacity;
+            } else if (highestMovingVecLN1_Y >= topY_ln1_abs) {
+                // Exiting: Lerp from translucent highlight back towards the opaque base tone
+                const ln1ExitLerp = Math.min(1, (highestMovingVecLN1_Y - topY_ln1_abs) / exitTransitionRange);
+                ln1TargetColor = translucentColor.clone().lerp(highlightColor, ln1ExitLerp);
+                ln1TargetOpacity = semiTransparentOpacity + (opaqueOpacity - semiTransparentOpacity) * ln1ExitLerp;
+                if (ln1ExitLerp >= 1.0) {
+                    ln1TargetColor = baseColor.clone();
+                    ln1TargetOpacity = opaqueOpacity;
+                }
+            }
+        } else {
+            // No vectors nearby: ensure LN1 sits on its final colour/opacity.
+            ln1TargetColor = baseColor.clone();
+            ln1TargetOpacity = opaqueOpacity;
+        }
 
         // Update appearance of the FIRST LayerNorm only.  The second will
         // remain at the base tone until its own vectors reach it later in the pipeline.
         layerNorm1.group.children.forEach(child => {
             if (child instanceof THREE.Mesh && child.material) {
-                child.material.transparent = targetOpacity < 1.0;
-                child.material.color.copy(targetColor);
-                child.material.opacity = targetOpacity;
+                child.material.transparent = ln1TargetOpacity < 1.0;
+                child.material.color.copy(ln1TargetColor);
+                child.material.opacity = ln1TargetOpacity;
                 child.material.needsUpdate = true;
             }
         });
@@ -713,19 +735,14 @@ export function initLayerAnimation(container) {
         }
         // If no vectors are in or near LN2, keep the last known colour/opacity so it doesn't snap to dark.
         if (!anyVectorInOrNearLN2) {
-            ln2TargetColor.copy(ln2LastColor);
-            ln2TargetOpacity = ln2LastOpacity;
+            ln2TargetColor.copy(baseColor);
+            ln2TargetOpacity = opaqueOpacity;
+            ln2LastColor.copy(baseColor);
+            ln2LastOpacity = opaqueOpacity;
         } else {
             // Store for future frames
             ln2LastColor.copy(ln2TargetColor);
             ln2LastOpacity = ln2TargetOpacity;
-        }
-        
-        // If the color has been locked, override the computed target so LN2 keeps
-        // its bright appearance.
-        if (ln2ColorLocked && ln2LockedColor) {
-            ln2TargetColor = ln2LockedColor;
-            ln2TargetOpacity = opaqueOpacity;
         }
 
         // Apply LN2 appearance updates
