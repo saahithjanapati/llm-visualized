@@ -71,7 +71,7 @@ import {
     ORIGINAL_TO_PROCESSED_GAP,
     DECORATIVE_FADE_MS,
     DECORATIVE_FADE_DELAY_MS,
-    INACTIVE_COMPONENT_COLOR
+    LAYER_NORM_FINAL_COLOR
 } from '../utils/constants.js';
 import { mapValueToColor } from '../utils/colors.js';
 
@@ -242,8 +242,10 @@ export function initLayerAnimation(container) {
         LN_PARAMS.holeWidth,
         LN_PARAMS.holeWidthFactor
     );
-    const layerNormBaseColor = new THREE.Color(INACTIVE_COMPONENT_COLOR);
-    // Start LayerNorm with the shared inactive dark-gray appearance
+    const layerNormBaseColor = new THREE.Color(LAYER_NORM_FINAL_COLOR);
+    const layerNormTranslucentColor = layerNormBaseColor.clone().lerp(new THREE.Color(0xffffff), 0.35);
+    const layerNormHighlightColor = layerNormBaseColor.clone().lerp(new THREE.Color(0xffffff), 0.55);
+    // Start LayerNorm with its final warm neutral appearance
     layerNorm1.setColor(layerNormBaseColor.clone());
     layerNorm1.group.children.forEach(child => {
         if (child.material) {
@@ -290,7 +292,7 @@ export function initLayerAnimation(container) {
         LN_PARAMS.holeWidth,
         LN_PARAMS.holeWidthFactor
     );
-    // Apply the same dark-gray style to the second LayerNorm
+    // Apply the same final-tone style to the second LayerNorm
     layerNorm2.setColor(layerNormBaseColor.clone());
     layerNorm2.group.children.forEach(child => {
         if (child.material) {
@@ -398,8 +400,8 @@ export function initLayerAnimation(container) {
     //  State tracking for LayerNorm2 appearance so it doesn't revert to dark/black
     //  once vectors have completely exited the block.
     // -------------------------------------------------------------------------
-    let ln2ColorLocked = false;      // becomes true after the final bright transition
-    let ln2LockedColor = null;       // stores the color to keep (e.g., brightYellow)
+    let ln2ColorLocked = false;      // becomes true after the final highlight transition
+    let ln2LockedColor = null;       // stores the color to keep once LN2 finishes its highlight
     let ln2LastColor = layerNormBaseColor.clone();
     let ln2LastOpacity = 1.0;
 
@@ -598,9 +600,9 @@ export function initLayerAnimation(container) {
         const timeNow = performance.now();
 
         // --- LayerNorm Appearance Control ---
-        const darkGray = layerNormBaseColor.clone();
-        const lightYellow = new THREE.Color(0xFFFF99); // For semi-transparent state
-        const brightYellow = new THREE.Color(0xFFFF00); // For final opaque state
+        const baseColor = layerNormBaseColor.clone();
+        const translucentColor = layerNormTranslucentColor.clone();
+        const highlightColor = layerNormHighlightColor.clone();
         const opaqueOpacity = 1.0;
         const semiTransparentOpacity = 0.6;
         const exitTransitionRange = 10; // Y-distance over which the exit transition occurs
@@ -615,32 +617,33 @@ export function initLayerAnimation(container) {
         const midY_ln2_abs = LAYER_NORM_2_Y_POS;
         const topY_ln2_abs = LAYER_NORM_2_Y_POS + LN_PARAMS.height / 2;
 
-        let targetColor = darkGray;
+        let targetColor = baseColor;
         let targetOpacity = opaqueOpacity;
         let lerpFactor = 0;
 
         if (firstMovingVecY >= bottomY_ln1_abs && firstMovingVecY < midY_ln1_abs) {
-            // Entering (Bottom Half): Lerp from Dark Gray to Light Yellow / Semi-Transparent
+            // Entering (Bottom Half): Lerp from the base tone to a translucent highlight
             lerpFactor = (firstMovingVecY - bottomY_ln1_abs) / (midY_ln1_abs - bottomY_ln1_abs);
-            targetColor = darkGray.clone().lerp(lightYellow, lerpFactor);
+            targetColor = baseColor.clone().lerp(translucentColor, lerpFactor);
             targetOpacity = opaqueOpacity + (semiTransparentOpacity - opaqueOpacity) * lerpFactor;
         } else if (firstMovingVecY >= midY_ln1_abs && firstMovingVecY < topY_ln1_abs) {
-            // Inside (Top Half): Stay at Light Yellow / Semi-Transparent
-            targetColor = lightYellow;
+            // Inside (Top Half): Stay at the translucent highlight state
+            targetColor = translucentColor;
             targetOpacity = semiTransparentOpacity;
         } else if (firstMovingVecY >= topY_ln1_abs) {
-            // Exiting: Lerp from Light Yellow / Semi-Transparent to Bright Yellow / Opaque
+            // Exiting: Lerp from translucent highlight back towards the opaque base tone
             lerpFactor = Math.min(1, (firstMovingVecY - topY_ln1_abs) / exitTransitionRange);
-            targetColor = lightYellow.clone().lerp(brightYellow, lerpFactor);
+            targetColor = translucentColor.clone().lerp(highlightColor, lerpFactor);
             targetOpacity = semiTransparentOpacity + (opaqueOpacity - semiTransparentOpacity) * lerpFactor;
             // Ensure opacity reaches exactly 1.0 when lerpFactor is 1
             if (lerpFactor >= 1.0) {
+                targetColor = baseColor.clone();
                 targetOpacity = opaqueOpacity; // Force full opaqueness
             }
-        } // Else (below) remains darkGray and opaque
+        } // Else (below) remains at the base tone and opaque
 
         // Update appearance of the FIRST LayerNorm only.  The second will
-        // remain grey until its own vectors reach it later in the pipeline.
+        // remain at the base tone until its own vectors reach it later in the pipeline.
         layerNorm1.group.children.forEach(child => {
             if (child instanceof THREE.Mesh && child.material) {
                 child.material.transparent = targetOpacity < 1.0;
@@ -652,7 +655,7 @@ export function initLayerAnimation(container) {
 
         // Handle LayerNorm2 color separately, based on MHSA output vectors
         // First find if any vectors have reached LayerNorm2
-        let ln2TargetColor = darkGray.clone(); // Ensure it's a clone
+        let ln2TargetColor = baseColor.clone(); // Ensure it's a clone
         let ln2TargetOpacity = opaqueOpacity;
         let ln2LerpFactor = 0;
         
@@ -687,25 +690,26 @@ export function initLayerAnimation(container) {
                 ln2LerpFactor = (highestMovingVecLN2_Y - bottomY_ln2_abs) / (midY_ln2_abs - bottomY_ln2_abs);
                 // Clamp lerpFactor to [0, 1] to avoid issues if vecY is slightly outside bounds due to timing
                 ln2LerpFactor = Math.max(0, Math.min(1, ln2LerpFactor));
-                ln2TargetColor = darkGray.clone().lerp(lightYellow, ln2LerpFactor);
+                ln2TargetColor = baseColor.clone().lerp(translucentColor, ln2LerpFactor);
                 ln2TargetOpacity = opaqueOpacity + (semiTransparentOpacity - opaqueOpacity) * ln2LerpFactor;
             } else if (highestMovingVecLN2_Y >= midY_ln2_abs && highestMovingVecLN2_Y < topY_ln2_abs) {
                 // Vector inside top half of LN2
-                ln2TargetColor = lightYellow.clone();
+                ln2TargetColor = translucentColor.clone();
                 ln2TargetOpacity = semiTransparentOpacity;
             } else if (highestMovingVecLN2_Y >= topY_ln2_abs) {
                 // Vector exiting LN2
                 ln2LerpFactor = (highestMovingVecLN2_Y - topY_ln2_abs) / exitTransitionRange;
                 // Clamp lerpFactor to [0, 1]
                 ln2LerpFactor = Math.max(0, Math.min(1, ln2LerpFactor));
-                ln2TargetColor = lightYellow.clone().lerp(brightYellow, ln2LerpFactor);
+                ln2TargetColor = translucentColor.clone().lerp(highlightColor, ln2LerpFactor);
                 ln2TargetOpacity = semiTransparentOpacity + (opaqueOpacity - semiTransparentOpacity) * ln2LerpFactor;
                 if (ln2LerpFactor >= 1.0) {
+                    ln2TargetColor = baseColor.clone();
                     ln2TargetOpacity = opaqueOpacity;
                 }
             }
             // If highestMovingVecLN2_Y is below bottomY_ln2_abs but still considered "near"
-            // it will default to darkGray unless caught by the conditions above, which is fine.
+            // it will default to the base tone unless caught by the conditions above, which is fine.
         }
         // If no vectors are in or near LN2, keep the last known colour/opacity so it doesn't snap to dark.
         if (!anyVectorInOrNearLN2) {

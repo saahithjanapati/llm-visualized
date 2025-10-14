@@ -509,6 +509,9 @@ export const TOP_LN_TO_TOP_EMBED_GAP = 140;
 /** Base colour for inactive components (visible but dark). */
 export const INACTIVE_COMPONENT_COLOR = 0x202020;
 
+/** Final resting colour for LayerNorm blocks once their animation completes. */
+export const LAYER_NORM_FINAL_COLOR = 0x363124;
+
 // ------------------------------------------------------------
 // UI / Caption Constants
 // ------------------------------------------------------------
