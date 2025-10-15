@@ -58,6 +58,7 @@ import { PrismLayerNormAnimation } from '../../animations/PrismLayerNormAnimatio
 import { MHSAAnimation } from '../../animations/MHSAAnimation.js';
 import { startPrismAdditionAnimation } from '../../utils/additionUtils.js';
 import { updateSciFiMaterialColor } from '../../utils/sciFiMaterial.js';
+import { buildLayerNormPalette } from '../../utils/layerNormPalette.js';
 
 
 // Slightly reduced spacing between stacked layers for a tighter layout.
@@ -70,12 +71,12 @@ const TMP_WORLD_POS = new THREE.Vector3();
 
 // Shared colour constants reused across the layer to avoid per-frame
 // allocations inside the animation loop.
-const COLOR_LAYER_NORM_FINAL = new THREE.Color(LAYER_NORM_FINAL_COLOR);
-const COLOR_DARK_GRAY = COLOR_LAYER_NORM_FINAL.clone();
-COLOR_DARK_GRAY.lerp(new THREE.Color(0x000000), 0.6);
-const COLOR_LIGHT_YELLOW = COLOR_LAYER_NORM_FINAL.clone();
-COLOR_LIGHT_YELLOW.lerp(new THREE.Color(0xffffff), 0.3);
-const COLOR_BRIGHT_YELLOW = COLOR_LAYER_NORM_FINAL.clone();
+const {
+    final: COLOR_LAYER_NORM_FINAL,
+    dark: COLOR_DARK_GRAY,
+    mid: COLOR_LIGHT_YELLOW,
+    bright: COLOR_BRIGHT_YELLOW
+} = buildLayerNormPalette(LAYER_NORM_FINAL_COLOR);
 
 function applyLayerNormMaterialColor(material, color, opacity) {
     if (!material || !color) return;

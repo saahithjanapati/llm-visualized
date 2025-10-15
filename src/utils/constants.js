@@ -510,7 +510,9 @@ export const TOP_LN_TO_TOP_EMBED_GAP = 140;
 export const INACTIVE_COMPONENT_COLOR = 0x202020;
 
 /** Final resting colour for LayerNorm blocks once their animation completes. */
-export const LAYER_NORM_FINAL_COLOR = 0x363124;
+// Final hue used when a LayerNorm fully activates. This remains configurable so
+// future experiments can tweak the tone without touching animation code.
+export const LAYER_NORM_FINAL_COLOR = 0xffffff;
 
 // ------------------------------------------------------------
 // UI / Caption Constants

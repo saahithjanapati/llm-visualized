@@ -22,6 +22,7 @@ import { VectorVisualizationInstancedPrism } from '../components/VectorVisualiza
 import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
 import { PrismLayerNormAnimation } from '../animations/PrismLayerNormAnimation.js';
 import { updateSciFiMaterialColor } from '../utils/sciFiMaterial.js';
+import { buildLayerNormPalette } from '../utils/layerNormPalette.js';
 
 function simplePrismMultiply(srcVec, tgtVec, onComplete) {
     for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
@@ -31,12 +32,12 @@ function simplePrismMultiply(srcVec, tgtVec, onComplete) {
     if (onComplete) onComplete();
 }
 
-const COLOR_LAYER_NORM_FINAL = new THREE.Color(LAYER_NORM_FINAL_COLOR);
-const COLOR_DARK_GRAY = COLOR_LAYER_NORM_FINAL.clone();
-COLOR_DARK_GRAY.lerp(new THREE.Color(0x000000), 0.6);
-const COLOR_LIGHT_YELLOW = COLOR_LAYER_NORM_FINAL.clone();
-COLOR_LIGHT_YELLOW.lerp(new THREE.Color(0xffffff), 0.3);
-const COLOR_BRIGHT_YELLOW = COLOR_LAYER_NORM_FINAL.clone();
+const {
+    final: COLOR_LAYER_NORM_FINAL,
+    dark: COLOR_DARK_GRAY,
+    mid: COLOR_LIGHT_YELLOW,
+    bright: COLOR_BRIGHT_YELLOW
+} = buildLayerNormPalette(LAYER_NORM_FINAL_COLOR);
 
 /**
  * LayerPipeline orchestrates a single bundle of vectors ("lanes") through an
