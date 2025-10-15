@@ -129,7 +129,7 @@ export const MHA_FINAL_K_COLOR = 0x1d9752;
 export const MHA_FINAL_V_COLOR = 0x811b2d;
 
 /** Active colour of the output-projection matrix that follows MHSA. */
-export const MHA_OUTPUT_PROJECTION_MATRIX_COLOR = 0x3a1c71;
+export const MHA_OUTPUT_PROJECTION_MATRIX_COLOR = 0x5d3bac;
 
 // -----------------------------------------------------------------------------
 // MHSA (Multi-Head Self-Attention) Specific Animation Constants
