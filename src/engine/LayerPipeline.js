@@ -15,11 +15,13 @@ import {
     PRISM_ADD_ANIM_BASE_FLASH_DURATION,
     PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS,
     PRISM_ADD_ANIM_SPEED_MULT,
-    VECTOR_LENGTH_PRISM
+    VECTOR_LENGTH_PRISM,
+    LAYER_NORM_FINAL_COLOR
 } from '../utils/constants.js';
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
 import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
 import { PrismLayerNormAnimation } from '../animations/PrismLayerNormAnimation.js';
+import { updateSciFiMaterialColor } from '../utils/sciFiMaterial.js';
 
 function simplePrismMultiply(srcVec, tgtVec, onComplete) {
     for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
@@ -331,10 +333,23 @@ export class LayerPipeline extends EventTarget {
      * @param {THREE.Object3D} lnTopGroup
      */
     _activateLayerNormColor(lnTopGroup) {
-        const white = new THREE.Color(0xffffff);
+        const finalColor = new THREE.Color(LAYER_NORM_FINAL_COLOR);
         lnTopGroup.traverse(obj => {
             if (obj.isMesh && obj.material) {
-                const apply = mat => { mat.color.copy(white); mat.emissive.copy(white); mat.emissiveIntensity = 0.5; mat.transparent = false; mat.opacity = 1.0; };
+                const apply = mat => {
+                    if (!mat) return;
+                    if (mat.userData && mat.userData.sciFiUniforms) {
+                        updateSciFiMaterialColor(mat, finalColor);
+                    } else {
+                        if (mat.color) mat.color.copy(finalColor);
+                        if (mat.emissive) mat.emissive.copy(finalColor);
+                    }
+                    if (typeof mat.emissiveIntensity === 'number') {
+                        mat.emissiveIntensity = Math.max(mat.emissiveIntensity, 0.5);
+                    }
+                    mat.transparent = false;
+                    mat.opacity = 1.0;
+                };
                 if (Array.isArray(obj.material)) obj.material.forEach(apply); else apply(obj.material);
             }
         });
