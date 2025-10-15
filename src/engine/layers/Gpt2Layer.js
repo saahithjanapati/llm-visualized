@@ -1038,7 +1038,7 @@ export default class Gpt2Layer extends BaseLayer {
         const duration = (distance / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
         
         const matrixStartColor = new THREE.Color(INACTIVE_COMPONENT_COLOR);
-        const matrixEndColor = new THREE.Color(0xcc5500); // deep orange
+        const matrixEndColor = new THREE.Color(0xffea00); // bright yellow
         const startIntensity = 0.1;
         const peakIntensity = 0.8;
         const finalIntensity = 0.3;
@@ -1146,7 +1146,7 @@ export default class Gpt2Layer extends BaseLayer {
         const expandedGroup = lane.expandedVecGroup;
         if (!expandedGroup || typeof TWEEN === 'undefined') return;
         
-        const orangeColor = new THREE.Color(0xcc5500);
+        const orangeColor = new THREE.Color(0xffea00);
         const downBottomY = this.mlpDown.group.position.y - MLP_MATRIX_PARAMS_DOWN.height / 2;
         const downTopY = this.mlpDown.group.position.y + MLP_MATRIX_PARAMS_DOWN.height / 2;
         
