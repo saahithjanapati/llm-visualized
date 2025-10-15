@@ -25,6 +25,12 @@ let _uniformCalculatedHeight = PRISM_MAX_HEIGHT * PRISM_HEIGHT_SCALE_FACTOR * 2.
 _uniformCalculatedHeight = Math.max(0.01, _uniformCalculatedHeight); // Ensure minimum
 const _prismWidthScale = 1.5;
 const _prismDepthScale = 1.5;
+const _prismSpacing = PRISM_BASE_WIDTH * _prismWidthScale;
+const _prismCenterOffset = (VECTOR_LENGTH_PRISM - 1) / 2;
+
+function computePrismX(index) {
+    return (index - _prismCenterOffset) * _prismSpacing;
+}
 
 // Precompute half base width used in shader patch
 const __halfBaseWidth = (PRISM_BASE_WIDTH * _prismWidthScale) / 2;
@@ -176,7 +182,7 @@ varying float vGradientT;`
 
         for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
             // Apply fixed, uniform dimensions
-            const x = (i - VECTOR_LENGTH_PRISM / 2) * (PRISM_BASE_WIDTH * _prismWidthScale);
+            const x = computePrismX(i);
             dummy.scale.set(_prismWidthScale, _uniformCalculatedHeight, _prismDepthScale);
             dummy.position.set(x, _uniformCalculatedHeight / 2, 0); 
             dummy.updateMatrix();
@@ -218,7 +224,7 @@ varying float vGradientT;`
         const scale = new THREE.Vector3();
         currentMatrix.decompose(position, quaternion, scale);
         
-        const baseX = (index - VECTOR_LENGTH_PRISM / 2) * (PRISM_BASE_WIDTH * _prismWidthScale);
+        const baseX = computePrismX(index);
         const basePrismYPos = _uniformCalculatedHeight / 2; // Assuming yOffset is additive to this base for animation
         
         position.set(baseX, basePrismYPos + yOffset, 0);
@@ -251,7 +257,7 @@ varying float vGradientT;`
         if (index < 0 || index >= VECTOR_LENGTH_PRISM) return;
         
         const dummy = new THREE.Object3D();
-        const x = (index - VECTOR_LENGTH_PRISM / 2) * (PRISM_BASE_WIDTH * _prismWidthScale);
+        const x = computePrismX(index);
         dummy.scale.set(_prismWidthScale, _uniformCalculatedHeight, _prismDepthScale);
         dummy.position.set(x, _uniformCalculatedHeight / 2, 0); 
         dummy.updateMatrix();
@@ -474,7 +480,7 @@ varying float vGradientT;`
 
         for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
             // Base X position for this instance
-            const baseX = (i - VECTOR_LENGTH_PRISM / 2) * (PRISM_BASE_WIDTH * _prismWidthScale);
+            const baseX = computePrismX(i);
             
             // Apply new scale or default scale
             if (uniformScaleVec) {
@@ -522,7 +528,7 @@ varying float vGradientT;`
         // 4. Set appearance for all physical prisms
         const dummy = new THREE.Object3D();
         for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
-            const baseX = (i - VECTOR_LENGTH_PRISM / 2) * (PRISM_BASE_WIDTH * _prismWidthScale);
+            const baseX = computePrismX(i);
             if (i >= startIndexVisible && i <= endIndexVisible) {
                 // This is a VISIBLE central prism
                 dummy.scale.set(_prismWidthScale, _uniformCalculatedHeight, _prismDepthScale); // Standard scale
