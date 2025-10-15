@@ -272,14 +272,14 @@ export const HEAD_SET_GAP_LAYER = 400;
 // Centre-to-centre spacing between the Q, K and V matrices within a single
 // attention head.  Setting this equal to the matrix width means the matrices
 // now sit flush against one another (touching edges) without any gap.
-export const MHA_INTERNAL_MATRIX_SPACING = 116;
+export const MHA_INTERNAL_MATRIX_SPACING = 140;
 
 /**
  * Parameters defining the geometry of individual Q, K, V matrices in the MHSA block.
  * Properties are consistent with WeightMatrixVisualization constructor.
  */
 export const MHA_MATRIX_PARAMS = {
-    width: 120,
+    width: 140,
     height: 40,
     depth: LANE_DEPENDENT_DEPTH,
     topWidthFactor: 0.1,
