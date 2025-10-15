@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-const DEFAULT_FINAL_COLOR = 0xffffff;
+const DEFAULT_FINAL_COLOR = 0xf2ede4;
 const DEFAULT_DARK_TARGET = new THREE.Color(0x1f1f1f);
 const DEFAULT_WARM_HIGHLIGHT = new THREE.Color(0xfff4cc);
 const DEFAULT_COOL_HIGHLIGHT = new THREE.Color(0xd4e4ff);
