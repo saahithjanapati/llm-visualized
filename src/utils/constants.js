@@ -409,7 +409,7 @@ export const MLP_MATRIX_BASE_WIDTH = MHA_MATRIX_PARAMS.width; // Represents 768-
 // Up-projection matrix: bottom width = d_model, top width = 4·d_model
 export const MLP_MATRIX_PARAMS_UP = {
     width: MLP_MATRIX_BASE_WIDTH,                   // bottom (input: 768)
-    height: 120,                                     // visually taller than MHSA matrices
+    height: 140,                                     // visually taller than MHSA matrices
     depth: LN_PARAMS.depth,                         // match component depth
     topWidthFactor: MLP_VECTOR_MULTIPLIER,          // widens to 4× at the top (3072)
     cornerRadius: 30.0,
@@ -424,7 +424,7 @@ export const MLP_MATRIX_PARAMS_UP = {
 // Down-projection matrix: bottom width = 4·d_model, top width = d_model
 export const MLP_MATRIX_PARAMS_DOWN = {
     width: MLP_MATRIX_BASE_WIDTH * MLP_VECTOR_MULTIPLIER, // bottom (input: 3072)
-    height: 120,
+    height: 140,
     depth: LN_PARAMS.depth,
     topWidthFactor: 1 / MLP_VECTOR_MULTIPLIER,            // narrows back to d_model
     cornerRadius: 30.0,
