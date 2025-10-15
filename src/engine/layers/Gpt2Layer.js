@@ -43,7 +43,8 @@ import {
     EMBEDDING_BOTTOM_VOCAB_X_OFFSET,
     POS_VEC_Y_OFFSET_ABOVE_VOCAB,
     POS_VEC_VERTICAL_SPEED_MULT,
-    POS_VEC_HORIZONTAL_SPEED_MULT
+    POS_VEC_HORIZONTAL_SPEED_MULT,
+    LAYER_NORM_FINAL_COLOR
 } from '../../utils/constants.js';
 import {
     MHA_FINAL_Q_COLOR,
@@ -56,6 +57,8 @@ import {
 import { PrismLayerNormAnimation } from '../../animations/PrismLayerNormAnimation.js';
 import { MHSAAnimation } from '../../animations/MHSAAnimation.js';
 import { startPrismAdditionAnimation } from '../../utils/additionUtils.js';
+import { updateSciFiMaterialColor } from '../../utils/sciFiMaterial.js';
+import { buildLayerNormPalette } from '../../utils/layerNormPalette.js';
 
 
 // Slightly reduced spacing between stacked layers for a tighter layout.
@@ -68,9 +71,38 @@ const TMP_WORLD_POS = new THREE.Vector3();
 
 // Shared colour constants reused across the layer to avoid per-frame
 // allocations inside the animation loop.
-const COLOR_DARK_GRAY = new THREE.Color(0x333333);
-const COLOR_LIGHT_YELLOW = new THREE.Color(0xffffff);
-const COLOR_BRIGHT_YELLOW = new THREE.Color(0xffffff);
+const {
+    final: COLOR_LAYER_NORM_FINAL,
+    dark: COLOR_DARK_GRAY,
+    mid: COLOR_LIGHT_YELLOW,
+    bright: COLOR_BRIGHT_YELLOW
+} = buildLayerNormPalette(LAYER_NORM_FINAL_COLOR);
+
+function applyLayerNormMaterialColor(material, color, opacity) {
+    if (!material || !color) return;
+    const materials = Array.isArray(material) ? material : [material];
+    const clampedOpacity = typeof opacity === 'number'
+        ? Math.max(0, Math.min(1, opacity))
+        : undefined;
+
+    materials.forEach(mat => {
+        if (!mat) return;
+        if (mat.userData && mat.userData.sciFiUniforms) {
+            updateSciFiMaterialColor(mat, color);
+        } else {
+            if (mat.color) mat.color.copy(color);
+            if (mat.emissive) mat.emissive.copy(color);
+        }
+        if (clampedOpacity !== undefined) {
+            mat.transparent = clampedOpacity < 1.0;
+            mat.opacity = clampedOpacity;
+        }
+        if (typeof mat.emissiveIntensity === 'number' && (!mat.transparent || mat.opacity >= 1.0)) {
+            mat.emissiveIntensity = Math.max(mat.emissiveIntensity, 0.5);
+        }
+        mat.needsUpdate = true;
+    });
+}
 const COLOR_INACTIVE_COMPONENT = new THREE.Color(INACTIVE_COMPONENT_COLOR);
 
 function simplePrismMultiply(srcVec, tgtVec, onComplete) {
@@ -443,11 +475,7 @@ export default class Gpt2Layer extends BaseLayer {
         if (this.ln1 && this.ln1.group) {
             this.ln1.group.children.forEach(child => {
                 if (child instanceof THREE.Mesh && child.material) {
-                    child.material.color.copy(ln1TargetColor);
-                    child.material.emissive.copy(ln1TargetColor);
-                    child.material.transparent = targetOpacity < 1.0;
-                    child.material.opacity = targetOpacity;
-                    child.material.needsUpdate = true;
+                    applyLayerNormMaterialColor(child.material, ln1TargetColor, targetOpacity);
                 }
             });
         }
@@ -505,11 +533,7 @@ export default class Gpt2Layer extends BaseLayer {
             if (this.ln2 && this.ln2.group) {
                 this.ln2.group.children.forEach(child => {
                     if (child instanceof THREE.Mesh && child.material) {
-                        child.material.color.copy(ln2TargetColor);
-                        child.material.emissive.copy(ln2TargetColor);
-                        child.material.transparent = ln2TargetOpacity < 1.0;
-                        child.material.opacity = ln2TargetOpacity;
-                        child.material.needsUpdate = true;
+                        applyLayerNormMaterialColor(child.material, ln2TargetColor, ln2TargetOpacity);
                     }
                 });
             }

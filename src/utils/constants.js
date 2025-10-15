@@ -510,6 +510,10 @@ export const TOP_LN_TO_TOP_EMBED_GAP = 140;
 export const INACTIVE_COMPONENT_COLOR = 0x202020;
 
 /** Final resting colour for LayerNorm blocks once their animation completes. */
+// Final hue used when a LayerNorm fully activates. This remains configurable so
+// future experiments can tweak the tone without touching animation code.
+// Restores the original deep bronze finish that the scene shipped with by
+// default while keeping the tone easily adjustable for future themes.
 export const LAYER_NORM_FINAL_COLOR = 0x363124;
 
 // ------------------------------------------------------------

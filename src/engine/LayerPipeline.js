@@ -15,11 +15,14 @@ import {
     PRISM_ADD_ANIM_BASE_FLASH_DURATION,
     PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS,
     PRISM_ADD_ANIM_SPEED_MULT,
-    VECTOR_LENGTH_PRISM
+    VECTOR_LENGTH_PRISM,
+    LAYER_NORM_FINAL_COLOR
 } from '../utils/constants.js';
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
 import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
 import { PrismLayerNormAnimation } from '../animations/PrismLayerNormAnimation.js';
+import { updateSciFiMaterialColor } from '../utils/sciFiMaterial.js';
+import { buildLayerNormPalette } from '../utils/layerNormPalette.js';
 
 function simplePrismMultiply(srcVec, tgtVec, onComplete) {
     for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
@@ -29,9 +32,12 @@ function simplePrismMultiply(srcVec, tgtVec, onComplete) {
     if (onComplete) onComplete();
 }
 
-const COLOR_DARK_GRAY = new THREE.Color(0x333333);
-const COLOR_LIGHT_YELLOW = new THREE.Color(0xffffff);
-const COLOR_BRIGHT_YELLOW = new THREE.Color(0xffffff);
+const {
+    final: COLOR_LAYER_NORM_FINAL,
+    dark: COLOR_DARK_GRAY,
+    mid: COLOR_LIGHT_YELLOW,
+    bright: COLOR_BRIGHT_YELLOW
+} = buildLayerNormPalette(LAYER_NORM_FINAL_COLOR);
 
 /**
  * LayerPipeline orchestrates a single bundle of vectors ("lanes") through an
@@ -331,10 +337,23 @@ export class LayerPipeline extends EventTarget {
      * @param {THREE.Object3D} lnTopGroup
      */
     _activateLayerNormColor(lnTopGroup) {
-        const white = new THREE.Color(0xffffff);
+        const finalColor = COLOR_LAYER_NORM_FINAL.clone();
         lnTopGroup.traverse(obj => {
             if (obj.isMesh && obj.material) {
-                const apply = mat => { mat.color.copy(white); mat.emissive.copy(white); mat.emissiveIntensity = 0.5; mat.transparent = false; mat.opacity = 1.0; };
+                const apply = mat => {
+                    if (!mat) return;
+                    if (mat.userData && mat.userData.sciFiUniforms) {
+                        updateSciFiMaterialColor(mat, finalColor);
+                    } else {
+                        if (mat.color) mat.color.copy(finalColor);
+                        if (mat.emissive) mat.emissive.copy(finalColor);
+                    }
+                    if (typeof mat.emissiveIntensity === 'number') {
+                        mat.emissiveIntensity = Math.max(mat.emissiveIntensity, 0.5);
+                    }
+                    mat.transparent = false;
+                    mat.opacity = 1.0;
+                };
                 if (Array.isArray(obj.material)) obj.material.forEach(apply); else apply(obj.material);
             }
         });
@@ -360,8 +379,8 @@ export class LayerPipeline extends EventTarget {
             const lnColorState = {
                 highestY: -Infinity,
                 locked: false,
-                lockedColor: new THREE.Color(COLOR_BRIGHT_YELLOW),
-                currentColor: new THREE.Color(COLOR_DARK_GRAY),
+                lockedColor: COLOR_BRIGHT_YELLOW.clone(),
+                currentColor: COLOR_DARK_GRAY.clone(),
                 currentOpacity: 1.0
             };
             const tempColor = new THREE.Color();
@@ -369,10 +388,17 @@ export class LayerPipeline extends EventTarget {
                 lnMeshes.forEach(mesh => {
                     const applyMaterial = mat => {
                         if (!mat) return;
-                        if (mat.color) mat.color.copy(lnColorState.currentColor);
-                        if (mat.emissive) mat.emissive.copy(lnColorState.currentColor);
+                        if (mat.userData && mat.userData.sciFiUniforms) {
+                            updateSciFiMaterialColor(mat, lnColorState.currentColor);
+                        } else {
+                            if (mat.color) mat.color.copy(lnColorState.currentColor);
+                            if (mat.emissive) mat.emissive.copy(lnColorState.currentColor);
+                        }
                         mat.transparent = lnColorState.currentOpacity < 1.0;
                         mat.opacity = lnColorState.currentOpacity;
+                        if (typeof mat.emissiveIntensity === 'number' && lnColorState.currentOpacity >= 1.0) {
+                            mat.emissiveIntensity = Math.max(mat.emissiveIntensity, 0.5);
+                        }
                         mat.needsUpdate = true;
                     };
                     if (Array.isArray(mesh.material)) {
@@ -427,6 +453,7 @@ export class LayerPipeline extends EventTarget {
                         lnColorState.lockedColor.copy(COLOR_BRIGHT_YELLOW);
                         lnColorState.currentColor.copy(lnColorState.lockedColor);
                         lnColorState.currentOpacity = 1.0;
+                        this._activateLayerNormColor(lnTopGroup);
                     }
                 }
 
