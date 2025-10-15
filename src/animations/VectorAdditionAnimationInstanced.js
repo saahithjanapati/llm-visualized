@@ -4,7 +4,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { VectorVisualizationInstanced } from '../components/VectorVisualizationInstanced.js';
-import { VECTOR_LENGTH, SPHERE_DIAMETER } from '../utils/constants.js';
+import { VECTOR_LENGTH, SPHERE_DIAMETER, HIDE_INSTANCE_Y_OFFSET } from '../utils/constants.js';
 import { mapValueToColor } from '../utils/colors.js';
 
 // Note: Assumes TWEEN is loaded globally via <script> tag
@@ -106,7 +106,7 @@ export function initVectorAdditionAnimationInstanced(containerElement) {
                         v2.setInstanceColor(i, newColor);
 
                         // Hide the moving instance by putting it far away
-                        v1.setInstanceYOffset(i, -999);
+                        v1.setInstanceYOffset(i, HIDE_INSTANCE_Y_OFFSET);
                         // Remove flash mesh
                         scene.remove(flashMesh);
                         flashMat.dispose();
