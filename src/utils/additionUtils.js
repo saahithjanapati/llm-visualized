@@ -18,6 +18,36 @@ import {
     PRISM_ADD_ANIM_SPEED_MULT,
     HIDE_INSTANCE_Y_OFFSET,
 } from './constants.js';
+import { getCentralPrismIndices } from './prismLayout.js';
+
+const TMP_MATRIX_A = new THREE.Matrix4();
+const TMP_MATRIX_B = new THREE.Matrix4();
+const TMP_WORLD_A = new THREE.Vector3();
+const TMP_WORLD_B = new THREE.Vector3();
+const TMP_WORLD_AVG = new THREE.Vector3();
+
+function computeMidlineWorldPosition(vec, length = VECTOR_LENGTH_PRISM, out = new THREE.Vector3()) {
+    if (!vec || !vec.mesh || typeof vec.mesh.getMatrixAt !== 'function' || !vec.group) {
+        return out.set(0, 0, 0);
+    }
+
+    const centreIndices = getCentralPrismIndices(length);
+    if (!centreIndices.length) {
+        return out.set(0, 0, 0);
+    }
+
+    vec.mesh.getMatrixAt(centreIndices[0], TMP_MATRIX_A);
+    TMP_WORLD_A.setFromMatrixPosition(TMP_MATRIX_A).applyMatrix4(vec.group.matrixWorld);
+
+    if (centreIndices.length === 1) {
+        return out.copy(TMP_WORLD_A);
+    }
+
+    vec.mesh.getMatrixAt(centreIndices[1], TMP_MATRIX_B);
+    TMP_WORLD_B.setFromMatrixPosition(TMP_MATRIX_B).applyMatrix4(vec.group.matrixWorld);
+
+    return out.copy(TMP_WORLD_A).add(TMP_WORLD_B).multiplyScalar(0.5);
+}
 
 /**
  * Animate element-wise addition of two instanced-prism vectors, visually moving
@@ -40,6 +70,9 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
     // temporary vectors without full lane context).
     sourceVec.userData = sourceVec.userData || {};
 
+    const vectorLength = VECTOR_LENGTH_PRISM;
+    const centreIndices = getCentralPrismIndices(vectorLength);
+
     // Freeze upward movement of the source so its group position remains static.
     if (lane) {
         lane.stopRise = true;
@@ -48,11 +81,8 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
         // Reset residual trail monotonic tracker to the centre prism's current Y
         // so the trail extends immediately as the middle unit begins to rise.
         try {
-            const centreIndex = Math.floor(VECTOR_LENGTH_PRISM / 2);
-            const instMat = new THREE.Matrix4();
-            sourceVec.mesh.getMatrixAt(centreIndex, instMat);
-            const centreWorld = new THREE.Vector3().setFromMatrixPosition(instMat).applyMatrix4(sourceVec.group.matrixWorld);
-            lane.__residualMaxY = (typeof centreWorld.y === 'number') ? centreWorld.y - 0.001 : undefined;
+            const centreWorld = computeMidlineWorldPosition(sourceVec, vectorLength, TMP_WORLD_AVG);
+            lane.__residualMaxY = Number.isFinite(centreWorld.y) ? centreWorld.y - 0.001 : undefined;
         } catch (err) {
             console.warn('Failed to init residual trail:', err);
         }
@@ -62,23 +92,13 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
         svUD.stopRise = true;
         svUD.stopRiseTarget = targetVec.group;
         try {
-            const centreIndex = Math.floor(VECTOR_LENGTH_PRISM / 2);
-            const instMat = new THREE.Matrix4();
-            sourceVec.mesh.getMatrixAt(centreIndex, instMat);
-            const centreWorld = new THREE.Vector3().setFromMatrixPosition(instMat).applyMatrix4(sourceVec.group.matrixWorld);
+            const centreWorld = computeMidlineWorldPosition(sourceVec, vectorLength, TMP_WORLD_AVG);
             sourceVec.userData.__residualMaxY =
-                (typeof centreWorld.y === 'number') ? centreWorld.y - 0.001 : undefined;
+                Number.isFinite(centreWorld.y) ? centreWorld.y - 0.001 : undefined;
         } catch (err) {
             console.warn('Failed to init residual trail:', err);
         }
     }
-
-    const vectorLength = VECTOR_LENGTH_PRISM;
-    const centreIndex = Math.floor(vectorLength / 2);
-
-
-
-
 
     // Timing params (scale by dedicated multiplier so we can tune independently).
     const duration      = PRISM_ADD_ANIM_BASE_DURATION            / PRISM_ADD_ANIM_SPEED_MULT;
@@ -119,15 +139,13 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
 
                 sourceVec.setInstanceAppearance(i, offsetY, null);
 
-                if (i === centreIndex) {
+                if (centreIndices.includes(i)) {
                     // Live-update the residual trail from the bottom vector while the
                     // centre prism rises toward the top vector. This mirrors the
                     // behaviour users expect: the connecting line grows as the
                     // middle unit moves, rather than appearing only after addition.
                     try {
-                        const instMat = new THREE.Matrix4();
-                        sourceVec.mesh.getMatrixAt(centreIndex, instMat);
-                        const wPos = new THREE.Vector3().setFromMatrixPosition(instMat).applyMatrix4(sourceVec.group.matrixWorld);
+                        const wPos = computeMidlineWorldPosition(sourceVec, vectorLength, TMP_WORLD_AVG);
 
                         // Skip if the prism is effectively hidden far below
                         const hideThreshold = HIDE_INSTANCE_Y_OFFSET / 10;
@@ -143,7 +161,7 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
                                 || (sourceVec && sourceVec.userData)
                                 || null;
                             if (residualTrail && residualOwner && typeof residualTrail.update === 'function') {
-                                if (typeof residualOwner.__residualMaxY !== 'number') {
+                                if (!Number.isFinite(residualOwner.__residualMaxY)) {
                                     residualOwner.__residualMaxY = wPos.y - 0.001;
                                 }
                                 if (wPos.y >= residualOwner.__residualMaxY) {

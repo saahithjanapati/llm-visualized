@@ -35,6 +35,7 @@ import {
     BRANCH_X
 } from '../utils/constants.js';
 import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
+import { computeCenteredPrismX, getPrismSpacing, PRISM_INSTANCE_WIDTH_SCALE } from '../utils/prismLayout.js';
 import { buildMHAVisuals, VectorRouter, PassThroughAnimator, SelfAttentionAnimator } from './mhsa/index.js';
 import { animateVectorMatrixPassThrough as animateVectorMatrixPassThroughExternal } from './mhsa/VectorMatrixPassThrough.js';
 
@@ -795,7 +796,7 @@ export class MHSAAnimation {
         if (!Array.isArray(vecList) || vecList.length === 0) return null;
 
         // Mirror VectorVisualizationInstancedPrism internal constants
-        const PRISM_WIDTH_SCALE = 1.5;
+        const PRISM_WIDTH_SCALE = PRISM_INSTANCE_WIDTH_SCALE;
         const PRISM_DEPTH_SCALE = 1.5;
         const uniformCalculatedHeight = Math.max(0.01, PRISM_MAX_HEIGHT * PRISM_HEIGHT_SCALE_FACTOR * 2.0);
         const baseWidth = PRISM_BASE_WIDTH;
@@ -816,7 +817,7 @@ export class MHSAAnimation {
         // Shader patch to support per-instance left→right gradient identical to VectorVisualizationInstancedPrism
         material.customProgramCacheKey = () => 'InstancedPrismGradientV1';
         material.onBeforeCompile = (shader) => {
-            shader.uniforms.prismHalfWidth = { value: (baseWidth * PRISM_WIDTH_SCALE) / 2 };
+            shader.uniforms.prismHalfWidth = { value: getPrismSpacing(PRISM_WIDTH_SCALE) / 2 };
             shader.vertexShader = shader.vertexShader.replace(
                 '#include <common>',
                 `#include <common>\nattribute vec3 colorStart;\nattribute vec3 colorEnd;\nvarying vec3 vColorStart;\nvarying vec3 vColorEnd;\nvarying float vGradientT;\nuniform float prismHalfWidth;`
@@ -887,7 +888,7 @@ export class MHSAAnimation {
                 }
 
                 // Compute world position for this prism
-                const baseX = (i - VECTOR_LENGTH_PRISM / 2) * (baseWidth * PRISM_WIDTH_SCALE);
+                const baseX = computeCenteredPrismX(i);
                 const worldX = vec.group.position.x + baseX;
                 const baseYForCategory = isRedCategory ? canonicalRaisedBaseY : (vec.group && vec.group.position ? vec.group.position.y : 0);
                 const worldY = baseYForCategory + (hidden ? hideY : uniformCalculatedHeight / 2);
