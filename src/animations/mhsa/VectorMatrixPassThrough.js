@@ -8,6 +8,8 @@ import {
 } from '../../utils/constants.js';
 import { MHSA_PASS_THROUGH_BRIGHTEN_RATIO, MHSA_PASS_THROUGH_DIM_RATIO, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY } from '../../utils/constants.js';
 
+const _matrixWorldScratch = new THREE.Vector3();
+
 /**
  * Animate a vector passing vertically through its corresponding weight matrix.
  * The heavy 768-dimensional vector is swapped for a lightweight 64-dimensional
@@ -80,6 +82,17 @@ export function animateVectorMatrixPassThrough(
     tweenState.colorG = initialVecColor.g;
     tweenState.colorB = initialVecColor.b;
 
+    const alignVectorHorizontallyWithMatrix = (vec) => {
+        if (!vec || !vec.group || !matrix || !matrix.group) return;
+        try {
+            const parent = vec.group.parent;
+            if (!parent) return;
+            matrix.group.getWorldPosition(_matrixWorldScratch);
+            parent.worldToLocal(_matrixWorldScratch);
+            vec.group.position.x = _matrixWorldScratch.x;
+        } catch (_) { /* no-op */ }
+    };
+
     new TWEEN.Tween(tweenState)
         .to(
             {
@@ -98,6 +111,9 @@ export function animateVectorMatrixPassThrough(
             //  Vector motion       
             // --------------------------------------------------------------
             vector.group.position.y = tweenState.y;
+            if (!initialDimensionChangeApplied && tweenState.y >= matrixBottomY) {
+                alignVectorHorizontallyWithMatrix(vector);
+            }
             // Update trails only while BELOW the matrix; no trails above matrices
             try {
                 const ud = vector.userData || {};
@@ -118,6 +134,7 @@ export function animateVectorMatrixPassThrough(
             //  Lightweight 64-dimensional swap as soon as we touch matrix
             // --------------------------------------------------------------
             if (!initialDimensionChangeApplied && tweenState.y >= matrixBottomY) {
+                alignVectorHorizontallyWithMatrix(vector);
                 const smallVec = new VectorVisualizationInstancedPrism(
                     vector.rawData.slice(0, outLength),
                     vector.group.position.clone(),
@@ -127,6 +144,7 @@ export function animateVectorMatrixPassThrough(
                 ctx.parentGroup.add(smallVec.group);
                 const heavyVec = vector;
                 vector = smallVec; // continue animating this handle
+                alignVectorHorizontallyWithMatrix(vector);
                 // Preserve metadata such as headIndex for downstream alignment
                 vector.userData = heavyVec.userData ? { ...heavyVec.userData } : {};
                 // Preserve and refine hover label for clarity
