@@ -25,6 +25,7 @@ const TMP_MATRIX_B = new THREE.Matrix4();
 const TMP_WORLD_A = new THREE.Vector3();
 const TMP_WORLD_B = new THREE.Vector3();
 const TMP_WORLD_AVG = new THREE.Vector3();
+const TMP_LOCAL_POS = new THREE.Vector3();
 
 function computeMidlineWorldPosition(vec, length = VECTOR_LENGTH_PRISM, out = new THREE.Vector3()) {
     if (!vec || !vec.mesh || typeof vec.mesh.getMatrixAt !== 'function' || !vec.group) {
@@ -83,6 +84,11 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
         try {
             const centreWorld = computeMidlineWorldPosition(sourceVec, vectorLength, TMP_WORLD_AVG);
             lane.__residualMaxY = Number.isFinite(centreWorld.y) ? centreWorld.y - 0.001 : undefined;
+            if (Number.isFinite(centreWorld.x) && Number.isFinite(centreWorld.z)) {
+                if (!lane.__residualTrailBaseWorld) {
+                    lane.__residualTrailBaseWorld = centreWorld.clone();
+                }
+            }
         } catch (err) {
             console.warn('Failed to init residual trail:', err);
         }
@@ -95,6 +101,11 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
             const centreWorld = computeMidlineWorldPosition(sourceVec, vectorLength, TMP_WORLD_AVG);
             sourceVec.userData.__residualMaxY =
                 Number.isFinite(centreWorld.y) ? centreWorld.y - 0.001 : undefined;
+            if (Number.isFinite(centreWorld.x) && Number.isFinite(centreWorld.z)) {
+                if (!sourceVec.userData.__residualTrailBaseWorld) {
+                    sourceVec.userData.__residualTrailBaseWorld = centreWorld.clone();
+                }
+            }
         } catch (err) {
             console.warn('Failed to init residual trail:', err);
         }
@@ -157,6 +168,14 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
                             const residualTrail = (lane && lane.originalTrail)
                                 || (sourceVec && sourceVec.userData && sourceVec.userData.trail)
                                 || null;
+
+                            // Determine whether the residual trail expects world-space
+                            // coordinates (used by the main residual stream) or local
+                            // coordinates (used inside side branches such as LayerNorms).
+                            const ownerVec = (lane && lane.originalVec) || sourceVec || null;
+                            const ownerUserData = ownerVec && ownerVec.userData;
+                            const useWorldSpace = !!(ownerUserData && ownerUserData.trailWorld);
+
                             const residualOwner = lane
                                 || (sourceVec && sourceVec.userData)
                                 || null;
@@ -164,20 +183,55 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
                                 if (!Number.isFinite(residualOwner.__residualMaxY)) {
                                     residualOwner.__residualMaxY = wPos.y - 0.001;
                                 }
+                                if (!residualOwner.__residualTrailBaseWorld
+                                    && Number.isFinite(wPos.x)
+                                    && Number.isFinite(wPos.z)) {
+                                    residualOwner.__residualTrailBaseWorld = wPos.clone();
+                                }
                                 if (wPos.y >= residualOwner.__residualMaxY) {
-                                    let localPos = wPos;
-                                    try {
+                                    if (useWorldSpace) {
+                                        const baseWorld = residualOwner.__residualTrailBaseWorld;
+                                        if (baseWorld) {
+                                            wPos.x = baseWorld.x;
+                                            wPos.z = baseWorld.z;
+                                        }
+                                        residualTrail.update(wPos);
+                                    } else {
                                         const parentObject = (residualTrail._line && residualTrail._line.parent)
                                             || residualTrail._scene
                                             || null;
-                                        if (parentObject && typeof parentObject.worldToLocal === 'function') {
-                                            localPos = parentObject.worldToLocal(wPos.clone());
+                                        let localPos = TMP_LOCAL_POS.copy(wPos);
+                                        try {
+                                            if (parentObject && typeof parentObject.worldToLocal === 'function') {
+                                                parentObject.worldToLocal(localPos);
+                                            }
+                                        } catch (conversionErr) {
+                                            console.warn('Residual trail coordinate conversion failed:', conversionErr);
+                                            localPos.copy(wPos);
                                         }
-                                    } catch (conversionErr) {
-                                        console.warn('Residual trail coordinate conversion failed:', conversionErr);
-                                        localPos = wPos;
+
+                                        let baseLocal = residualOwner.__residualTrailBaseLocal;
+                                        if (!baseLocal) {
+                                            if (parentObject && typeof parentObject.worldToLocal === 'function'
+                                                && residualOwner.__residualTrailBaseWorld) {
+                                                try {
+                                                    baseLocal = parentObject.worldToLocal(residualOwner.__residualTrailBaseWorld.clone());
+                                                } catch (baseConvErr) {
+                                                    console.warn('Residual trail base conversion failed:', baseConvErr);
+                                                    baseLocal = localPos.clone();
+                                                }
+                                            } else {
+                                                baseLocal = localPos.clone();
+                                            }
+                                            residualOwner.__residualTrailBaseLocal = baseLocal;
+                                        }
+
+                                        if (baseLocal) {
+                                            localPos.x = baseLocal.x;
+                                            localPos.z = baseLocal.z;
+                                        }
+                                        residualTrail.update(localPos);
                                     }
-                                    residualTrail.update(localPos);
                                     residualOwner.__residualMaxY = wPos.y;
                                 }
                             }
