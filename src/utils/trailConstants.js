@@ -3,7 +3,7 @@
 
 export const TRAIL_COLOR = 0xffffff;          // Default hex colour (match other trails)
 export const TRAIL_LINE_WIDTH = 1;            // Pixel width (hardware-dependent)
-export const TRAIL_OPACITY = 0.13;             // 0 (fully transparent) → 1 (fully opaque)
+export const TRAIL_OPACITY = 0.14;             // 0 (fully transparent) → 1 (fully opaque)
 export const TRAIL_MAX_SEGMENTS = 5000;       // Preallocated straight-line segments
 
 // Reserved for future extensions – THREE.LineBasicMaterial has no emissive term but
@@ -31,7 +31,12 @@ export function getEffectiveDevicePixelRatio() {
  */
 export function scaleOpacityForDisplay(baseOpacity) {
     const dpr = getEffectiveDevicePixelRatio();
-    const scaled = baseOpacity * Math.sqrt(dpr);
+    // On standard-density panels (≈1 DPR) thin 1px lines lose brightness due to
+    // limited pixel coverage and anti-alias falloff.  Give them a gentle boost
+    // so they match the perceived brightness of the same trail on Retina/hi-DPI
+    // displays where multiple physical pixels contribute to each fragment.
+    const lowDprBoost = 1 + 0.6 * Math.max(0, (1 / Math.max(dpr, 1)) - 0.5);
+    const scaled = baseOpacity * Math.sqrt(dpr) * lowDprBoost;
     return Math.min(1, scaled);
 }
 
