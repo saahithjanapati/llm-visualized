@@ -157,6 +157,14 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
                             const residualTrail = (lane && lane.originalTrail)
                                 || (sourceVec && sourceVec.userData && sourceVec.userData.trail)
                                 || null;
+
+                            // Determine whether the residual trail expects world-space
+                            // coordinates (used by the main residual stream) or local
+                            // coordinates (used inside side branches such as LayerNorms).
+                            const ownerVec = (lane && lane.originalVec) || sourceVec || null;
+                            const ownerUserData = ownerVec && ownerVec.userData;
+                            const useWorldSpace = !!(ownerUserData && ownerUserData.trailWorld);
+
                             const residualOwner = lane
                                 || (sourceVec && sourceVec.userData)
                                 || null;
@@ -165,19 +173,23 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
                                     residualOwner.__residualMaxY = wPos.y - 0.001;
                                 }
                                 if (wPos.y >= residualOwner.__residualMaxY) {
-                                    let localPos = wPos;
-                                    try {
-                                        const parentObject = (residualTrail._line && residualTrail._line.parent)
-                                            || residualTrail._scene
-                                            || null;
-                                        if (parentObject && typeof parentObject.worldToLocal === 'function') {
-                                            localPos = parentObject.worldToLocal(wPos.clone());
+                                    if (useWorldSpace) {
+                                        residualTrail.update(wPos);
+                                    } else {
+                                        let localPos = wPos;
+                                        try {
+                                            const parentObject = (residualTrail._line && residualTrail._line.parent)
+                                                || residualTrail._scene
+                                                || null;
+                                            if (parentObject && typeof parentObject.worldToLocal === 'function') {
+                                                localPos = parentObject.worldToLocal(wPos.clone());
+                                            }
+                                        } catch (conversionErr) {
+                                            console.warn('Residual trail coordinate conversion failed:', conversionErr);
+                                            localPos = wPos;
                                         }
-                                    } catch (conversionErr) {
-                                        console.warn('Residual trail coordinate conversion failed:', conversionErr);
-                                        localPos = wPos;
+                                        residualTrail.update(localPos);
                                     }
-                                    residualTrail.update(localPos);
                                     residualOwner.__residualMaxY = wPos.y;
                                 }
                             }
