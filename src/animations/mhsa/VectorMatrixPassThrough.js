@@ -78,6 +78,10 @@ export function animateVectorMatrixPassThrough(
         initialVecColor.setRGB(0.5, 0.5, 0.5);
     }
 
+    if (vector.userData) {
+        vector.userData.vectorCategory = vectorCategory;
+    }
+
     tweenState.colorR = initialVecColor.r;
     tweenState.colorG = initialVecColor.g;
     tweenState.colorB = initialVecColor.b;
@@ -87,6 +91,38 @@ export function animateVectorMatrixPassThrough(
         try {
             const parent = vec.group.parent;
             if (!parent) return;
+            const lane = vec.userData ? vec.userData.parentLane : null;
+            const headIdx = vec.userData ? vec.userData.headIndex : null;
+            let desiredX = null;
+
+            if (lane && typeof headIdx === 'number') {
+                if (vectorCategory === 'K') {
+                    if (Array.isArray(ctx.headsCentersX) && headIdx < ctx.headsCentersX.length) {
+                        desiredX = ctx.headsCentersX[headIdx];
+                    }
+                } else if (vectorCategory === 'Q' || vectorCategory === 'V') {
+                    if (Array.isArray(lane.sideCopies)) {
+                        const entry = lane.sideCopies.find(sc => sc && sc.vec === vec);
+                        if (entry && typeof entry.targetX === 'number') {
+                            desiredX = entry.targetX;
+                        }
+                    }
+                }
+            }
+
+            if (typeof desiredX === 'number' && Number.isFinite(desiredX)) {
+                // Convert the desired X (expressed in ctx.parentGroup space) into the vector's parent space.
+                if (ctx && ctx.parentGroup && parent !== ctx.parentGroup) {
+                    _matrixWorldScratch.set(desiredX, 0, 0);
+                    ctx.parentGroup.localToWorld(_matrixWorldScratch);
+                    parent.worldToLocal(_matrixWorldScratch);
+                    vec.group.position.x = _matrixWorldScratch.x;
+                } else {
+                    vec.group.position.x = desiredX;
+                }
+                return;
+            }
+
             matrix.group.getWorldPosition(_matrixWorldScratch);
             parent.worldToLocal(_matrixWorldScratch);
             vec.group.position.x = _matrixWorldScratch.x;
@@ -147,6 +183,7 @@ export function animateVectorMatrixPassThrough(
                 alignVectorHorizontallyWithMatrix(vector);
                 // Preserve metadata such as headIndex for downstream alignment
                 vector.userData = heavyVec.userData ? { ...heavyVec.userData } : {};
+                vector.userData.vectorCategory = vectorCategory;
                 // Preserve and refine hover label for clarity
                 try {
                     const cat = vectorCategory === 'K' ? 'Key Vector (Green)'
