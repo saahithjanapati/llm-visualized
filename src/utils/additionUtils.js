@@ -36,15 +36,24 @@ function computeMidlineWorldPosition(vec, length = VECTOR_LENGTH_PRISM, out = ne
         return out.set(0, 0, 0);
     }
 
+    if (vec && vec.group && typeof vec.group.updateMatrixWorld === 'function') {
+        vec.group.updateMatrixWorld(true);
+    }
+
+    const worldMatrix = (vec.mesh && vec.mesh.matrixWorld) || (vec.group && vec.group.matrixWorld);
+    if (!worldMatrix) {
+        return out.set(0, 0, 0);
+    }
+
     vec.mesh.getMatrixAt(centreIndices[0], TMP_MATRIX_A);
-    TMP_WORLD_A.setFromMatrixPosition(TMP_MATRIX_A).applyMatrix4(vec.group.matrixWorld);
+    TMP_WORLD_A.setFromMatrixPosition(TMP_MATRIX_A).applyMatrix4(worldMatrix);
 
     if (centreIndices.length === 1) {
         return out.copy(TMP_WORLD_A);
     }
 
     vec.mesh.getMatrixAt(centreIndices[1], TMP_MATRIX_B);
-    TMP_WORLD_B.setFromMatrixPosition(TMP_MATRIX_B).applyMatrix4(vec.group.matrixWorld);
+    TMP_WORLD_B.setFromMatrixPosition(TMP_MATRIX_B).applyMatrix4(worldMatrix);
 
     return out.copy(TMP_WORLD_A).add(TMP_WORLD_B).multiplyScalar(0.5);
 }
@@ -83,6 +92,11 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
         try {
             const centreWorld = computeMidlineWorldPosition(sourceVec, vectorLength, TMP_WORLD_AVG);
             lane.__residualMaxY = Number.isFinite(centreWorld.y) ? centreWorld.y - 0.001 : undefined;
+            if (Number.isFinite(centreWorld.x) && Number.isFinite(centreWorld.z)) {
+                if (!lane.__residualAnchorWorld) lane.__residualAnchorWorld = { x: 0, z: 0 };
+                lane.__residualAnchorWorld.x = centreWorld.x;
+                lane.__residualAnchorWorld.z = centreWorld.z;
+            }
         } catch (err) {
             console.warn('Failed to init residual trail:', err);
         }
@@ -95,6 +109,13 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
             const centreWorld = computeMidlineWorldPosition(sourceVec, vectorLength, TMP_WORLD_AVG);
             sourceVec.userData.__residualMaxY =
                 Number.isFinite(centreWorld.y) ? centreWorld.y - 0.001 : undefined;
+            if (Number.isFinite(centreWorld.x) && Number.isFinite(centreWorld.z)) {
+                if (!sourceVec.userData.__residualAnchorWorld) {
+                    sourceVec.userData.__residualAnchorWorld = { x: 0, z: 0 };
+                }
+                sourceVec.userData.__residualAnchorWorld.x = centreWorld.x;
+                sourceVec.userData.__residualAnchorWorld.z = centreWorld.z;
+            }
         } catch (err) {
             console.warn('Failed to init residual trail:', err);
         }
@@ -146,6 +167,13 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
                     // middle unit moves, rather than appearing only after addition.
                     try {
                         const wPos = computeMidlineWorldPosition(sourceVec, vectorLength, TMP_WORLD_AVG);
+                        const residualAnchor = (lane && lane.__residualAnchorWorld)
+                            || (sourceVec && sourceVec.userData && sourceVec.userData.__residualAnchorWorld)
+                            || null;
+                        if (residualAnchor) {
+                            if (Number.isFinite(residualAnchor.x)) wPos.x = residualAnchor.x;
+                            if (Number.isFinite(residualAnchor.z)) wPos.z = residualAnchor.z;
+                        }
 
                         // Skip if the prism is effectively hidden far below
                         const hideThreshold = HIDE_INSTANCE_Y_OFFSET / 10;
