@@ -162,7 +162,13 @@ export function initAttentionHeadAnimation(containerElement) {
         const positions = new Float32Array(MAX_TRAIL_POINTS * 3);
         geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
         geometry.setDrawRange(0, 0);
-        const material = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: scaleOpacityForDisplay(0.07) });
+        const material = new THREE.LineBasicMaterial({
+            color: 0xffffff,
+            transparent: true,
+            opacity: scaleOpacityForDisplay(0.07),
+            depthWrite: false,
+            depthTest: false
+        });
         const line = new THREE.Line(geometry, material);
         scene.add(line);
         // seed first point
