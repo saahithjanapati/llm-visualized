@@ -83,6 +83,18 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
         try {
             const centreWorld = computeMidlineWorldPosition(sourceVec, vectorLength, TMP_WORLD_AVG);
             lane.__residualMaxY = Number.isFinite(centreWorld.y) ? centreWorld.y - 0.001 : undefined;
+            if (
+                lane
+                && lane.originalVec
+                && lane.originalVec.userData
+                && lane.originalVec.userData.trailWorld
+                && Number.isFinite(centreWorld.x)
+                && Number.isFinite(centreWorld.z)
+            ) {
+                if (!lane.__residualAnchorWorld) lane.__residualAnchorWorld = { x: 0, z: 0 };
+                lane.__residualAnchorWorld.x = centreWorld.x;
+                lane.__residualAnchorWorld.z = centreWorld.z;
+            }
         } catch (err) {
             console.warn('Failed to init residual trail:', err);
         }
@@ -95,6 +107,18 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
             const centreWorld = computeMidlineWorldPosition(sourceVec, vectorLength, TMP_WORLD_AVG);
             sourceVec.userData.__residualMaxY =
                 Number.isFinite(centreWorld.y) ? centreWorld.y - 0.001 : undefined;
+            if (
+                sourceVec.userData
+                && sourceVec.userData.trailWorld
+                && Number.isFinite(centreWorld.x)
+                && Number.isFinite(centreWorld.z)
+            ) {
+                if (!sourceVec.userData.__residualAnchorWorld) {
+                    sourceVec.userData.__residualAnchorWorld = { x: 0, z: 0 };
+                }
+                sourceVec.userData.__residualAnchorWorld.x = centreWorld.x;
+                sourceVec.userData.__residualAnchorWorld.z = centreWorld.z;
+            }
         } catch (err) {
             console.warn('Failed to init residual trail:', err);
         }
@@ -146,6 +170,13 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
                     // middle unit moves, rather than appearing only after addition.
                     try {
                         const wPos = computeMidlineWorldPosition(sourceVec, vectorLength, TMP_WORLD_AVG);
+                        const residualAnchor = (lane && lane.__residualAnchorWorld)
+                            || (sourceVec && sourceVec.userData && sourceVec.userData.__residualAnchorWorld)
+                            || null;
+                        if (residualAnchor) {
+                            if (Number.isFinite(residualAnchor.x)) wPos.x = residualAnchor.x;
+                            if (Number.isFinite(residualAnchor.z)) wPos.z = residualAnchor.z;
+                        }
 
                         // Skip if the prism is effectively hidden far below
                         const hideThreshold = HIDE_INSTANCE_Y_OFFSET / 10;
