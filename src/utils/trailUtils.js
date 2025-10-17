@@ -38,7 +38,18 @@ export class StraightLineTrail {
         const effectiveOpacity = scaleOpacityForDisplay(this._opacity);
         const effectiveWidth = scaleLineWidthForDisplay(lineWidth);
         // Keep depthWrite disabled for transparent lines to avoid occluding scene content
-        this._material = new THREE.LineBasicMaterial({ color: this._color, linewidth: effectiveWidth, transparent: effectiveOpacity < 1.0, opacity: effectiveOpacity, depthWrite: false, fog: false, toneMapped: false });
+        this._material = new THREE.LineBasicMaterial({
+            color: this._color,
+            linewidth: effectiveWidth,
+            transparent: effectiveOpacity < 1.0,
+            opacity: effectiveOpacity,
+            depthWrite: false,
+            // Disable depth testing so trails remain visible inside enclosed structures
+            // like LayerNorm shells even when the camera is very close.
+            depthTest: false,
+            fog: false,
+            toneMapped: false,
+        });
         this._line = new THREE.Line(this._geometry, this._material);
         // Tag for discovery and back-reference
         this._line.userData.isTrail = true;
