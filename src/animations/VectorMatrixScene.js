@@ -153,13 +153,7 @@ export function initVectorMatrixScene(canvas) {
         const positions = new Float32Array(MAX_TRAIL_POINTS * 3);
         trailGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 
-        const trailMaterial = new THREE.LineBasicMaterial({
-            color: accentColor,
-            transparent: true,
-            opacity: scaleOpacityForDisplay(0.22),
-            depthWrite: false,
-            depthTest: false
-        });
+        const trailMaterial = new THREE.LineBasicMaterial({ color: accentColor, transparent: true, opacity: scaleOpacityForDisplay(0.22) });
         const trailLine = new THREE.Line(trailGeometry, trailMaterial);
         scene.add(trailLine);
         allTrailLines.push({ line: trailLine, geometry: trailGeometry, material: trailMaterial });

@@ -12,6 +12,8 @@ import { TRAIL_COLOR, TRAIL_LINE_WIDTH, TRAIL_OPACITY, TRAIL_MAX_SEGMENTS, scale
  * API is unchanged from the earlier version so existing integration continues
  * to work:  constructor → start(pos) → update(pos) → dispose().
  */
+const _trailInstances = new Set();
+
 export class StraightLineTrail {
     /**
      * @param {THREE.Object3D} scene        Scene (or Group) to attach the trail.
@@ -44,7 +46,7 @@ export class StraightLineTrail {
             transparent: effectiveOpacity < 1.0,
             opacity: effectiveOpacity,
             depthWrite: false,
-            depthTest: false,
+            depthTest: true,
             fog: false,
             toneMapped: false
         });
@@ -53,6 +55,8 @@ export class StraightLineTrail {
         this._line.userData.isTrail = true;
         this._line.userData.trailRef = this;
         scene.add(this._line);
+
+        _trailInstances.add(this);
 
         this._vertexCount = 0;
         this._prevPos = new THREE.Vector3();
@@ -132,6 +136,8 @@ export class StraightLineTrail {
         this._scene.remove(this._line);
         this._geometry.dispose();
         this._material.dispose();
+
+        _trailInstances.delete(this);
     }
 
     /** Adjust base opacity at runtime and update underlying material accordingly. */
@@ -144,6 +150,38 @@ export class StraightLineTrail {
             this._material.transparent = eff < 1.0;
             this._material.needsUpdate = true;
         }
+    }
+
+    /** Enable or disable depth testing for this trail's line material. */
+    setDepthTestEnabled(enabled) {
+        if (!this._material) return;
+        const flag = Boolean(enabled);
+        if (this._material.depthTest === flag) return;
+        this._material.depthTest = flag;
+        this._material.needsUpdate = true;
+    }
+
+    /** Return whether depth testing is currently enabled on the material. */
+    isDepthTestEnabled() {
+        return !!(this._material && this._material.depthTest);
+    }
+
+    /** Retrieve the underlying THREE.Line instance for scene membership checks. */
+    getLineObject() {
+        return this._line;
+    }
+
+    /** Retrieve the current parent scene/group for the trail. */
+    getScene() {
+        return this._scene;
+    }
+
+    /** Iterate over all live StraightLineTrail instances. */
+    static forEachInstance(callback) {
+        if (typeof callback !== 'function') return;
+        _trailInstances.forEach(trail => {
+            if (trail) callback(trail);
+        });
     }
 
     /** Return current base opacity prior to DPR scaling. */
@@ -262,7 +300,6 @@ export function mergeTrailsIntoLineSegments(trails, scene, color = TRAIL_COLOR, 
         transparent: effOpacity < 1.0,
         opacity: effOpacity,
         depthWrite: false,
-        depthTest: false,
         fog: false,
         toneMapped: false
     });
@@ -302,7 +339,6 @@ export function buildMergedLineSegmentsFromSegments(segmentsList, scene, color =
         transparent: effOpacity2 < 1.0,
         opacity: effOpacity2,
         depthWrite: false,
-        depthTest: false,
         fog: false,
         toneMapped: false
     });

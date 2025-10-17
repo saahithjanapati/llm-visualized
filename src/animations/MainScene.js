@@ -494,13 +494,7 @@ export function initMainScene(canvas) { // Renamed function here
         const branchedTrailGeometry = new THREE.BufferGeometry();
         const branchedPositions = new Float32Array(MAX_TRAIL_POINTS * 3);
         branchedTrailGeometry.setAttribute('position', new THREE.BufferAttribute(branchedPositions, 3));
-        const branchedTrailMaterial = new THREE.LineBasicMaterial({
-            color: 0xffffff,
-            transparent: true,
-            opacity: scaleOpacityForDisplay(0.05),
-            depthWrite: false,
-            depthTest: false
-        });
+        const branchedTrailMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: scaleOpacityForDisplay(0.05) });
         const branchedTrailLine = new THREE.Line(branchedTrailGeometry, branchedTrailMaterial);
         scene.add(branchedTrailLine);
         // Seed branched trail starting directly beneath the right‑hand matrix
@@ -525,13 +519,7 @@ export function initMainScene(canvas) { // Renamed function here
         const positions = new Float32Array(MAX_TRAIL_POINTS * 3);
         trailGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 
-        const trailMaterial = new THREE.LineBasicMaterial({
-            color: 0xffffff,
-            transparent: true,
-            opacity: scaleOpacityForDisplay(0.05),
-            depthWrite: false,
-            depthTest: false
-        });
+        const trailMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: scaleOpacityForDisplay(0.05) });
         const trailLine = new THREE.Line(trailGeometry, trailMaterial);
         scene.add(trailLine);
         // Seed original trail with first point as well
