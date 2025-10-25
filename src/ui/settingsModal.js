@@ -25,7 +25,7 @@ export function initSettingsModal(pipeline) {
         const checked = settingsOverlay.querySelector('input[name="playbackSpeed"]:checked');
         if (checked) {
             const selectedLabel = checked.closest('.speed-option');
-            updateSpeedChecked(selectedLabel?.dataset.value || 'medium');
+            updateSpeedChecked(selectedLabel?.dataset.value || 'normal');
         }
         const rc = document.getElementById('toggleRaycast');
         if (rc && pipeline?.engine?.isRaycastingEnabled) {
