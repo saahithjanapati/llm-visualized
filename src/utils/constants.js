@@ -14,14 +14,16 @@ export function setGlobalAnimSpeedMult(mult) {
 export let PRISM_ADD_ANIM_SPEED_MULT = 8;
 export let SELF_ATTENTION_TIME_MULT = 0.35;
 export function setPlaybackSpeed(preset) {
-    // Accept string keys or fallback to medium
+    // Accept string keys or fallback to normal. Both exposed options (normal/fast)
+    // currently share the same configuration, matching the previous "fast" preset.
+    const fastestPreset = { mult: 100, addMult: 8, selfAttenTimeMult: 0.35 };
     const cfg = {
-        slow:   { mult: 25,  addMult: 2, selfAttenTimeMult: 2   },  // slowest
-        medium: { mult: 50,  addMult: 4, selfAttenTimeMult: 1   },  // default
-        fast:   { mult: 100, addMult: 8, selfAttenTimeMult: 0.35 }  // fastest
+        normal: fastestPreset,
+        fast:   fastestPreset,
+        medium: fastestPreset // legacy alias for any lingering callers
     };
-    const p = typeof preset === 'string' ? preset.toLowerCase() : 'medium';
-    const sel = cfg[p] || cfg.medium;
+    const p = typeof preset === 'string' ? preset.toLowerCase() : 'normal';
+    const sel = cfg[p] || cfg.normal;
     setGlobalAnimSpeedMult(sel.mult);
     PRISM_ADD_ANIM_SPEED_MULT = sel.addMult;
     SELF_ATTENTION_TIME_MULT = sel.selfAttenTimeMult;
