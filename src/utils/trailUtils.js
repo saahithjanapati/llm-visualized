@@ -249,7 +249,8 @@ export function mergeTrailsIntoLineSegments(trails, scene, color = TRAIL_COLOR, 
     // Keep depthWrite disabled for static segments as well to prevent occlusion artifacts
     const material = new THREE.LineBasicMaterial({ color, linewidth: effWidth, transparent: effOpacity < 1.0, opacity: effOpacity, depthWrite: false, fog: false, toneMapped: false });
     const merged = new THREE.LineSegments(geometry, material);
-    merged.userData.label = 'MergedTrails';
+    // Intentionally omit a hover label so merged trail lines remain non-interactive
+    // in raycast tooltips (they are purely decorative).
     scene.add(merged);
 
     // Dispose original individual trails
@@ -280,7 +281,8 @@ export function buildMergedLineSegmentsFromSegments(segmentsList, scene, color =
     const effWidth2 = scaleLineWidthForDisplay(lineWidth);
     const material = new THREE.LineBasicMaterial({ color, linewidth: effWidth2, transparent: effOpacity2 < 1.0, opacity: effOpacity2, depthWrite: false, fog: false, toneMapped: false });
     const merged = new THREE.LineSegments(geometry, material);
-    merged.userData.label = 'MergedTrails';
+    // Intentionally omit a hover label so merged trail lines remain non-interactive
+    // in raycast tooltips (they are purely decorative).
     scene.add(merged);
     return merged;
 }
