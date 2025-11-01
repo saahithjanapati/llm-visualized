@@ -166,16 +166,23 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
                                 }
                                 if (wPos.y >= residualOwner.__residualMaxY) {
                                     let localPos = wPos;
-                                    try {
-                                        const parentObject = (residualTrail._line && residualTrail._line.parent)
-                                            || residualTrail._scene
-                                            || null;
-                                        if (parentObject && typeof parentObject.worldToLocal === 'function') {
-                                            localPos = parentObject.worldToLocal(wPos.clone());
+                                    const expectsWorldSpace = Boolean(
+                                        (lane && lane.originalVec && lane.originalVec.userData && lane.originalVec.userData.trailWorld)
+                                        || (sourceVec && sourceVec.userData && sourceVec.userData.trailWorld)
+                                        || (residualOwner && residualOwner.trailWorld)
+                                    );
+                                    if (!expectsWorldSpace) {
+                                        try {
+                                            const parentObject = (residualTrail._line && residualTrail._line.parent)
+                                                || residualTrail._scene
+                                                || null;
+                                            if (parentObject && typeof parentObject.worldToLocal === 'function') {
+                                                localPos = parentObject.worldToLocal(wPos.clone());
+                                            }
+                                        } catch (conversionErr) {
+                                            console.warn('Residual trail coordinate conversion failed:', conversionErr);
+                                            localPos = wPos;
                                         }
-                                    } catch (conversionErr) {
-                                        console.warn('Residual trail coordinate conversion failed:', conversionErr);
-                                        localPos = wPos;
                                     }
                                     residualTrail.update(localPos);
                                     residualOwner.__residualMaxY = wPos.y;
