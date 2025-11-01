@@ -220,11 +220,21 @@ varying float vGradientT;`
         
         const baseX = computeCenteredPrismX(index);
         const basePrismYPos = _uniformCalculatedHeight / 2; // Assuming yOffset is additive to this base for animation
-        
+
         position.set(baseX, basePrismYPos + yOffset, 0);
-        
-        // Apply newScale if provided, otherwise keep the decomposed scale (which should be the default)
-        if (newScale instanceof THREE.Vector3) {
+
+        const isHidden = yOffset <= (HIDE_INSTANCE_Y_OFFSET + 1); // treat values at or below the sentinel as hidden
+
+        if (isHidden) {
+            // When hiding, collapse scale so nothing is rendered even if the
+            // instance remains inside the camera frustum.  Position is already
+            // far below the tower, but the previous implementation left the
+            // default scale in place which meant the prisms could still be seen
+            // when the user zoomed far out.  Shrinking them removes the
+            // artefact entirely.
+            scale.set(0.001, 0.001, 0.001);
+            position.y = HIDE_INSTANCE_Y_OFFSET;
+        } else if (newScale instanceof THREE.Vector3) {
             scale.copy(newScale);
         } else {
             // Ensure scale is default if not specified, in case it was previously altered by another call
