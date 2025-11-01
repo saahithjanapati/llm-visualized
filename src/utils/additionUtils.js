@@ -49,6 +49,15 @@ function computeMidlineWorldPosition(vec, length = VECTOR_LENGTH_PRISM, out = ne
     return out.copy(TMP_WORLD_A).add(TMP_WORLD_B).multiplyScalar(0.5);
 }
 
+const ANTICIPATION_PORTION = 0.2;
+const FOLLOW_THROUGH_PORTION = 0.25;
+const TRAVEL_PORTION = Math.max(0.0001, 1 - ANTICIPATION_PORTION - FOLLOW_THROUGH_PORTION);
+const BASE_SQUASH_FACTOR = 0.28;
+const MIN_HEIGHT_SCALE = 0.55;
+const ARC_SWAY_NOISE = 0.35;
+const SECONDARY_WIGGLE_MULT = 0.28;
+const ADDITION_ACCENT_COLOR = new THREE.Color(1.0, 0.92, 0.6);
+
 /**
  * Animate element-wise addition of two instanced-prism vectors, visually moving
  * each prism from `sourceVec` into `targetVec` while updating colours & data.
@@ -108,17 +117,46 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
     const basePrismCenterY = sourceVec.getUniformHeight() / 2;
 
     for (let i = 0; i < vectorLength; i++) {
-        // Grab starting local Y offset of each instance
         const srcLocalMatrix = new THREE.Matrix4();
         sourceVec.mesh.getMatrixAt(i, srcLocalMatrix);
         const srcLocalPos = new THREE.Vector3().setFromMatrixPosition(srcLocalMatrix);
+        const srcBaseScale = new THREE.Vector3();
+        srcLocalMatrix.decompose(new THREE.Vector3(), new THREE.Quaternion(), srcBaseScale);
 
-        // Capture target gradient colour so we can flash & restore
         const gradCol = new THREE.Color();
         targetVec.mesh.getColorAt(i, gradCol);
+        const highlightColor = gradCol.clone().lerp(ADDITION_ACCENT_COLOR, 0.45);
 
-        // Match travelling prism colour to destination gradient
-        sourceVec.setInstanceAppearance(i, srcLocalPos.y, gradCol);
+        const initialYOffset = srcLocalPos.y - basePrismCenterY;
+        sourceVec.setInstanceAppearance(i, initialYOffset, highlightColor);
+
+        const targetInitialMatrix = new THREE.Matrix4();
+        targetVec.mesh.getMatrixAt(i, targetInitialMatrix);
+        const targetInitialWorld = new THREE.Vector3().setFromMatrixPosition(targetInitialMatrix).applyMatrix4(targetVec.group.matrixWorld);
+        const targetInitialLocal = targetInitialWorld.clone();
+        sourceVec.group.worldToLocal(targetInitialLocal);
+
+        const baseTravelDistance = targetInitialLocal.y - srcLocalPos.y;
+        let travelDirection = Math.sign(baseTravelDistance);
+        if (travelDirection === 0) travelDirection = 1;
+
+        const baseHeight = srcBaseScale.y || sourceVec.getUniformHeight();
+        const anticipationMagnitude = Math.min(baseHeight * 0.5, Math.max(baseHeight * 0.08, Math.abs(baseTravelDistance) * 0.18 + baseHeight * 0.02));
+        const overshootMagnitudeAbs = Math.min(baseHeight * 0.45, Math.max(baseHeight * 0.08, Math.abs(baseTravelDistance) * 0.14 + baseHeight * 0.01));
+        const arcMagnitude = Math.min(baseHeight * 0.35, Math.max(baseHeight * 0.05, Math.abs(baseTravelDistance) * 0.12 + baseHeight * 0.01));
+
+        const anticipationOffset = -travelDirection * anticipationMagnitude;
+        const overshootOffset = travelDirection * overshootMagnitudeAbs;
+        const travelStartY = srcLocalPos.y + anticipationOffset;
+        const arcPhase = (i / Math.max(1, vectorLength - 1)) * Math.PI;
+        const arcSign = (i % 2 === 0) ? 1 : -1;
+
+        const dynamicColor = new THREE.Color();
+        const dynamicScale = new THREE.Vector3();
+        const offsetVec = new THREE.Vector3();
+        const targetMatrixDyn = new THREE.Matrix4();
+        const targetWorldPos = new THREE.Vector3();
+        const targetLocalPos = new THREE.Vector3();
 
         const tweenState = { t: 0 };
 
@@ -127,17 +165,63 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
             .delay(i * delayBetween)
             .easing(TWEEN.Easing.Quadratic.InOut)
             .onUpdate(obj => {
-                // Re-compute dynamic target position each frame (target may move)
-                const trgLocalMatrixDyn = new THREE.Matrix4();
-                targetVec.mesh.getMatrixAt(i, trgLocalMatrixDyn);
-                const trgWorld = new THREE.Vector3().setFromMatrixPosition(trgLocalMatrixDyn).applyMatrix4(targetVec.group.matrixWorld);
-                const trgLocal = sourceVec.group.worldToLocal(trgWorld.clone());
+                targetVec.mesh.getMatrixAt(i, targetMatrixDyn);
+                targetWorldPos.setFromMatrixPosition(targetMatrixDyn).applyMatrix4(targetVec.group.matrixWorld);
+                targetLocalPos.copy(targetWorldPos);
+                sourceVec.group.worldToLocal(targetLocalPos);
 
-                let interpY = THREE.MathUtils.lerp(srcLocalPos.y, trgLocal.y, obj.t);
-                interpY = trgLocal.y >= srcLocalPos.y ? Math.min(interpY, trgLocal.y) : Math.max(interpY, trgLocal.y);
-                const offsetY = interpY - basePrismCenterY;
+                const targetY = targetLocalPos.y;
+                const overshootTargetY = targetY + overshootOffset;
+                const finalTargetY = targetY;
 
-                sourceVec.setInstanceAppearance(i, offsetY, null);
+                let desiredY = srcLocalPos.y;
+                let arcOffsetZ = 0;
+                let arcOffsetX = 0;
+                let heightScale = 1;
+                let colorBlend = 0;
+
+                if (obj.t < ANTICIPATION_PORTION) {
+                    const stageT = obj.t / ANTICIPATION_PORTION;
+                    const ease = TWEEN.Easing.Quadratic.Out(stageT);
+                    desiredY = srcLocalPos.y + anticipationOffset * ease;
+                    heightScale = Math.max(MIN_HEIGHT_SCALE, 1 - BASE_SQUASH_FACTOR * ease);
+                    const swing = Math.sin(ease * Math.PI);
+                    arcOffsetZ = swing * arcMagnitude * 0.2 * arcSign;
+                    arcOffsetX = Math.sin((ease + arcPhase) * Math.PI) * arcMagnitude * 0.15 * arcSign;
+                    colorBlend = 0.25 + 0.35 * ease;
+                } else if (obj.t < ANTICIPATION_PORTION + TRAVEL_PORTION) {
+                    const stageT = (obj.t - ANTICIPATION_PORTION) / TRAVEL_PORTION;
+                    const ease = TWEEN.Easing.Cubic.InOut(stageT);
+                    desiredY = THREE.MathUtils.lerp(travelStartY, overshootTargetY, ease);
+                    heightScale = Math.max(MIN_HEIGHT_SCALE, 1 + BASE_SQUASH_FACTOR * TWEEN.Easing.Quadratic.Out(stageT));
+                    const swing = Math.sin(ease * Math.PI);
+                    arcOffsetZ = swing * arcMagnitude * arcSign;
+                    arcOffsetX = Math.sin((ease + ARC_SWAY_NOISE + arcPhase) * Math.PI) * arcMagnitude * 0.35 * arcSign;
+                    colorBlend = 0.55 + 0.35 * ease;
+                } else {
+                    const stageT = (obj.t - ANTICIPATION_PORTION - TRAVEL_PORTION) / FOLLOW_THROUGH_PORTION;
+                    const ease = TWEEN.Easing.Bounce.Out(stageT);
+                    desiredY = THREE.MathUtils.lerp(overshootTargetY, finalTargetY, ease);
+                    heightScale = Math.max(MIN_HEIGHT_SCALE, THREE.MathUtils.lerp(1 + BASE_SQUASH_FACTOR * 0.2, 1, ease));
+                    const wiggle = Math.sin((stageT * (3 + (i % 3))) * Math.PI + arcPhase) * (1 - ease) * arcMagnitude * SECONDARY_WIGGLE_MULT * arcSign;
+                    arcOffsetZ = wiggle;
+                    arcOffsetX = Math.sin((stageT + arcPhase) * Math.PI * 2) * (1 - ease) * arcMagnitude * 0.2 * arcSign;
+                    colorBlend = (1 - ease) * 0.4;
+                }
+
+                const widthFactor = 1 / Math.sqrt(Math.max(0.01, heightScale));
+                dynamicScale.set(
+                    srcBaseScale.x * widthFactor,
+                    srcBaseScale.y * heightScale,
+                    srcBaseScale.z * widthFactor
+                );
+
+                const offsetY = desiredY - basePrismCenterY;
+                const colorMix = Math.min(1, Math.max(0, colorBlend));
+                dynamicColor.copy(gradCol).lerp(highlightColor, colorMix);
+                offsetVec.set(arcOffsetX, 0, arcOffsetZ);
+
+                sourceVec.setInstanceAppearance(i, offsetY, dynamicColor, dynamicScale, offsetVec);
 
                 if (centreIndices.includes(i)) {
                     // Live-update the residual trail from the bottom vector while the
