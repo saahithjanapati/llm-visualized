@@ -87,6 +87,9 @@ const LAYER_ACCENT_COLORS = [
     0x9d4edd,
 ].map(hex => new THREE.Color(hex));
 
+const TMP_MATRIX_LN = new THREE.Matrix4();
+const TMP_WORLD_POS_LN = new THREE.Vector3();
+
 export function initLayerAnimation(container) {
     // -------------------------------------------------------------------------
     //  Basic Three.js setup
@@ -825,6 +828,36 @@ export function initLayerAnimation(container) {
                 if (typeof ud.skipTrailResumeY === 'number' && originalVec.group.position.y > ud.skipTrailResumeY) {
                     delete ud.skipTrailResumeY;
                 }
+            } else {
+                try {
+                    const residualTrail =
+                        (originalVec && originalVec.userData && originalVec.userData.trail)
+                        || lane.origTrail;
+                    if (residualTrail && originalVec.mesh && typeof residualTrail.update === 'function') {
+                        const centreIndex = Math.floor(VECTOR_LENGTH_PRISM / 2);
+                        originalVec.mesh.getMatrixAt(centreIndex, TMP_MATRIX_LN);
+                        TMP_WORLD_POS_LN.setFromMatrixPosition(TMP_MATRIX_LN);
+                        TMP_WORLD_POS_LN.applyMatrix4(originalVec.group.matrixWorld);
+
+                        const hideThreshold = HIDE_INSTANCE_Y_OFFSET / 10;
+                        if (TMP_WORLD_POS_LN.y >= hideThreshold) {
+                            if (typeof lane.__residualMaxY !== 'number') {
+                                lane.__residualMaxY = TMP_WORLD_POS_LN.y - 0.001;
+                            }
+                            if (TMP_WORLD_POS_LN.y >= lane.__residualMaxY - 1e-6) {
+                                const anchor = lane.__residualTrailAnchor;
+                                if (anchor) {
+                                    if (Number.isFinite(anchor.x)) TMP_WORLD_POS_LN.x = anchor.x;
+                                    if (Number.isFinite(anchor.z)) TMP_WORLD_POS_LN.z = anchor.z;
+                                }
+                                residualTrail.update(TMP_WORLD_POS_LN);
+                                lane.__residualMaxY = TMP_WORLD_POS_LN.y;
+                            }
+                        }
+                    }
+                } catch (_) {
+                    // Defensive: if the residual update fails we simply skip this frame.
+                }
             }
 
             // -------------------- DUPLICATE / MOVING VEC LOGIC --------------------
@@ -845,7 +878,6 @@ export function initLayerAnimation(container) {
                         movingVec.group.position.x = BRANCH_X;
                         lane.horizPhase = 'insideLN';
                     }
-                    if (lane.branchTrailLN2) updateTrail(lane.branchTrailLN2, movingVec.group.position);
                     break;
                 }
                 case 'insideLN': {
@@ -933,7 +965,6 @@ export function initLayerAnimation(container) {
                             }
                         });
                     }
-                    if (lane.branchTrailLN2) updateTrail(lane.branchTrailLN2, movingVec.group.position);
                     break;
                 }
                 case 'moveLeft': {
@@ -1047,10 +1078,22 @@ export function initLayerAnimation(container) {
                         lane.normAnimationLN2 = new PrismLayerNormAnimation(mv);
                         // Create a new trail for the LN2 branch so its motion is visualised
                         lane.branchTrailLN2 = createTrailLine(scene, lane.accentColor.getHex());
-                        // Slightly lower the opacity so overlapping with the frozen trail doesn't brighten excessively.
-                        if (lane.branchTrailLN2 && lane.branchTrailLN2.line && lane.branchTrailLN2.line.material) {
-                            
-                            lane.branchTrailLN2.line.material.needsUpdate = true;
+                        if (lane.branchTrail && typeof lane.branchTrail.getBaseOpacity === 'function'
+                            && lane.branchTrailLN2 && typeof lane.branchTrailLN2.setBaseOpacity === 'function') {
+                            const baseOpacity = lane.branchTrail.getBaseOpacity();
+                            if (typeof baseOpacity === 'number' && isFinite(baseOpacity)) {
+                                lane.branchTrailLN2.setBaseOpacity(baseOpacity);
+                            }
+                        }
+                        if (lane.branchTrail && lane.branchTrail.line && lane.branchTrailLN2 && lane.branchTrailLN2.line) {
+                            const srcMat = lane.branchTrail.line.material;
+                            const dstMat = lane.branchTrailLN2.line.material;
+                            if (srcMat && dstMat) {
+                                dstMat.opacity = srcMat.opacity;
+                                dstMat.transparent = srcMat.transparent;
+                                dstMat.linewidth = srcMat.linewidth;
+                                dstMat.needsUpdate = true;
+                            }
                         }
                         // Seed the LN2 branch trail with the starting position so it is visible immediately
                         updateTrail(lane.branchTrailLN2, mv.group.position);
@@ -1069,7 +1112,6 @@ export function initLayerAnimation(container) {
                         lane.multTargetLN2.group.visible = true;
                         lane.ln2Phase = 'insideLN';
                     }
-                    if (lane.branchTrailLN2) updateTrail(lane.branchTrailLN2, mv.group.position);
                     break;
                 }
                 case 'insideLN': {
@@ -1119,9 +1161,6 @@ export function initLayerAnimation(container) {
                         });
                     }
                     // Only update trail with the "moving" LN2 vector while it's actually moving.
-                    if (!lane.multDoneLN2 && lane.branchTrailLN2) {
-                        updateTrail(lane.branchTrailLN2, mv.group.position);
-                    }
                     break;
                 }
                 case 'done':
