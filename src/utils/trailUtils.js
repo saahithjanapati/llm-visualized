@@ -42,7 +42,10 @@ export class StraightLineTrail {
         const effectiveWidth = scaleLineWidthForDisplay(lineWidth);
         // Keep depthWrite disabled for transparent lines to avoid occluding scene content
         this._material = new THREE.LineBasicMaterial({ color: this._color, linewidth: effectiveWidth, transparent: effectiveOpacity < 1.0, opacity: effectiveOpacity, depthWrite: false, fog: false, toneMapped: false });
+        // Ensure trails stay visible during camera fly-throughs by bypassing frustum
+        // culling; depth testing remains enabled so solids continue to occlude trails.
         this._line = new THREE.Line(this._geometry, this._material);
+        this._line.frustumCulled = false;
         // Tag for discovery and back-reference
         this._line.userData.isTrail = true;
         this._line.userData.trailRef = this;
