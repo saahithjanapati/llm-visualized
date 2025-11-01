@@ -140,57 +140,63 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
                 sourceVec.setInstanceAppearance(i, offsetY, null);
 
                 if (centreIndices.includes(i)) {
-                    // Live-update the residual trail from the bottom vector while the
-                    // centre prism rises toward the top vector. This mirrors the
-                    // behaviour users expect: the connecting line grows as the
-                    // middle unit moves, rather than appearing only after addition.
-                    try {
-                        const wPos = computeMidlineWorldPosition(sourceVec, vectorLength, TMP_WORLD_AVG);
+                    // When the animation is running within a lane (e.g. inside the
+                    // MHSA pipeline) the owning animation loop already updates the
+                    // residual trail in world-space each frame.  Duplicating those
+                    // updates here introduces slightly different sample points which
+                    // produce small horizontal kinks in the polyline.  Rely on the
+                    // lane-managed updates instead to keep the trail perfectly
+                    // vertical.
+                    if (!lane) {
+                        // For standalone additions (no lane object) we own the trail updates.
+                        // Live-update the residual trail from the bottom vector while the
+                        // centre prism rises toward the top vector. This mirrors the
+                        // behaviour users expect: the connecting line grows as the
+                        // middle unit moves, rather than appearing only after addition.
+                        try {
+                            const wPos = computeMidlineWorldPosition(sourceVec, vectorLength, TMP_WORLD_AVG);
 
-                        // Skip if the prism is effectively hidden far below
-                        const hideThreshold = HIDE_INSTANCE_Y_OFFSET / 10;
-                        if (wPos.y >= hideThreshold) {
-                            // Update the residual trail continuously as the prism rises all the
-                            // way to the target vector. Previously, a muted band near the
-                            // merge point prevented trailing up to the very top, leaving a
-                            // visible gap.
-                            const residualTrail = (lane && lane.originalTrail)
-                                || (sourceVec && sourceVec.userData && sourceVec.userData.trail)
-                                || null;
-                            const residualOwner = lane
-                                || (sourceVec && sourceVec.userData)
-                                || null;
-                            if (residualTrail && residualOwner && typeof residualTrail.update === 'function') {
-                                if (!Number.isFinite(residualOwner.__residualMaxY)) {
-                                    residualOwner.__residualMaxY = wPos.y - 0.001;
-                                }
-                                if (wPos.y >= residualOwner.__residualMaxY) {
-                                    let localPos = wPos;
-                                    const expectsWorldSpace = Boolean(
-                                        (lane && lane.originalVec && lane.originalVec.userData && lane.originalVec.userData.trailWorld)
-                                        || (sourceVec && sourceVec.userData && sourceVec.userData.trailWorld)
-                                        || (residualOwner && residualOwner.trailWorld)
-                                    );
-                                    if (!expectsWorldSpace) {
-                                        try {
-                                            const parentObject = (residualTrail._line && residualTrail._line.parent)
-                                                || residualTrail._scene
-                                                || null;
-                                            if (parentObject && typeof parentObject.worldToLocal === 'function') {
-                                                localPos = parentObject.worldToLocal(wPos.clone());
-                                            }
-                                        } catch (conversionErr) {
-                                            console.warn('Residual trail coordinate conversion failed:', conversionErr);
-                                            localPos = wPos;
-                                        }
+                            // Skip if the prism is effectively hidden far below
+                            const hideThreshold = HIDE_INSTANCE_Y_OFFSET / 10;
+                            if (wPos.y >= hideThreshold) {
+                                // Update the residual trail continuously as the prism rises all the
+                                // way to the target vector. Previously, a muted band near the
+                                // merge point prevented trailing up to the very top, leaving a
+                                // visible gap.
+                                const residualTrail = (sourceVec && sourceVec.userData && sourceVec.userData.trail)
+                                    || null;
+                                const residualOwner = (sourceVec && sourceVec.userData) || null;
+                                if (residualTrail && residualOwner && typeof residualTrail.update === 'function') {
+                                    if (!Number.isFinite(residualOwner.__residualMaxY)) {
+                                        residualOwner.__residualMaxY = wPos.y - 0.001;
                                     }
-                                    residualTrail.update(localPos);
-                                    residualOwner.__residualMaxY = wPos.y;
+                                    if (wPos.y >= residualOwner.__residualMaxY) {
+                                        let localPos = wPos;
+                                        const expectsWorldSpace = Boolean(
+                                            (sourceVec && sourceVec.userData && sourceVec.userData.trailWorld)
+                                            || (residualOwner && residualOwner.trailWorld)
+                                        );
+                                        if (!expectsWorldSpace) {
+                                            try {
+                                                const parentObject = (residualTrail._line && residualTrail._line.parent)
+                                                    || residualTrail._scene
+                                                    || null;
+                                                if (parentObject && typeof parentObject.worldToLocal === 'function') {
+                                                    localPos = parentObject.worldToLocal(wPos.clone());
+                                                }
+                                            } catch (conversionErr) {
+                                                console.warn('Residual trail coordinate conversion failed:', conversionErr);
+                                                localPos = wPos;
+                                            }
+                                        }
+                                        residualTrail.update(localPos);
+                                        residualOwner.__residualMaxY = wPos.y;
+                                    }
                                 }
                             }
+                        } catch (err) {
+                            console.warn('Residual trail update failed:', err);
                         }
-                    } catch (err) {
-                        console.warn('Residual trail update failed:', err);
                     }
                 }
             })
