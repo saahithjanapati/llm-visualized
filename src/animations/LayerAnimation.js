@@ -33,6 +33,40 @@ function updateTrail(trail, position) {
   }
 }
 
+const BRANCH_TRAIL_ANCHORS = new WeakMap();
+const TMP_BRANCH_TRAIL_POS = new THREE.Vector3();
+
+function updateBranchTrail(trail, sourceObject, shouldLockAxis = true) {
+  if (!trail || !sourceObject || !sourceObject.position) return;
+
+  let anchor = BRANCH_TRAIL_ANCHORS.get(trail);
+  if (shouldLockAxis) {
+    if (!anchor) {
+      anchor = { x: sourceObject.position.x, z: sourceObject.position.z };
+      BRANCH_TRAIL_ANCHORS.set(trail, anchor);
+    }
+  } else if (anchor) {
+    BRANCH_TRAIL_ANCHORS.delete(trail);
+    anchor = null;
+  }
+
+  TMP_BRANCH_TRAIL_POS.copy(sourceObject.position);
+  if (shouldLockAxis && anchor) {
+    if (Number.isFinite(anchor.x)) TMP_BRANCH_TRAIL_POS.x = anchor.x;
+    if (Number.isFinite(anchor.z)) TMP_BRANCH_TRAIL_POS.z = anchor.z;
+  }
+
+  if (trail._vertexCount > 0
+      && trail._lastSourceObject
+      && trail._lastSourceObject !== sourceObject
+      && typeof trail.snapLastPointTo === 'function') {
+    trail.snapLastPointTo(TMP_BRANCH_TRAIL_POS);
+  }
+
+  updateTrail(trail, TMP_BRANCH_TRAIL_POS);
+  trail._lastSourceObject = sourceObject;
+}
+
 
 import { PrismLayerNormAnimation } from '../animations/PrismLayerNormAnimation.js';
 import { 
@@ -1005,31 +1039,30 @@ export function initLayerAnimation(container) {
             */
 
             // Determine which branched object position to follow for trail
-            let branchPos = null;
-            const centerIndex = Math.floor(VECTOR_LENGTH / 2);
+            let branchObject = null;
             // During addition inside LayerNorm, follow the center ellipse movement
             if (lane.multStarted && lane.multDone && !lane.resultVec) {
-                // const centerEllipse = lane.multTarget.ellipses[centerIndex]; // No ellipses
-                // const worldPos = new THREE.Vector3();
-                // centerEllipse.getWorldPosition(worldPos);
-                // branchPos = worldPos;
-                // TODO: Refactor for InstancedPrism - If a specific point on the prism is needed, calculate it.
-                // For now, using group position of multTarget (which is now the result's source).
-                branchPos = lane.multTarget.group.position;
+                branchObject = lane.multTarget.group;
             } else if (lane.resultVecLN2 && lane.resultVecLN2.group.visible) {
-                branchPos = lane.resultVecLN2.group.position;
+                branchObject = lane.resultVecLN2.group;
             } else if (lane.resultVec && lane.resultVec.group.visible) {
-                branchPos = lane.resultVec.group.position;
+                branchObject = lane.resultVec.group;
             } else if (lane.movingVecLN2 && lane.movingVecLN2.group.visible) {
-                branchPos = lane.movingVecLN2.group.position;
+                branchObject = lane.movingVecLN2.group;
             } else if (lane.expandedVecGroup && lane.expandedVecGroup.visible) {
-                branchPos = lane.expandedVecGroup.position;
+                branchObject = lane.expandedVecGroup;
             } else if (lane.movingVec.group.visible) {
-                branchPos = lane.movingVec.group.position;
+                branchObject = lane.movingVec.group;
             }
-            if (branchPos) {
+            if (branchObject) {
                 const activeTrail = lane.branchTrailLN2 || lane.branchTrail;
-                updateTrail(activeTrail, branchPos);
+                if (activeTrail) {
+                    const usingLn2Trail = Boolean(lane.branchTrailLN2) && activeTrail === lane.branchTrailLN2;
+                    const shouldLockAxis = usingLn2Trail
+                        ? lane.ln2Phase === 'insideLN'
+                        : lane.horizPhase === 'insideLN';
+                    updateBranchTrail(activeTrail, branchObject, shouldLockAxis);
+                }
             }
 
             // ---------------------------------------------------------------------
