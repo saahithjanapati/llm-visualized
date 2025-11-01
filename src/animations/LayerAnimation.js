@@ -33,6 +33,120 @@ function updateTrail(trail, position) {
   }
 }
 
+const BRANCH_TRAIL_STATE = new WeakMap();
+const TMP_BRANCH_TRAIL_LOCAL = new THREE.Vector3();
+const TMP_BRANCH_TRAIL_POS = new THREE.Vector3();
+const TMP_BRANCH_TRAIL_MATRIX = new THREE.Matrix4();
+
+function getBranchTrailState(trail) {
+  let state = BRANCH_TRAIL_STATE.get(trail);
+  if (!state) {
+    state = { anchor: null, lastSource: null, lastPosition: null };
+    BRANCH_TRAIL_STATE.set(trail, state);
+  }
+  return state;
+}
+
+function extractVectorWorldPosition(vectorVis) {
+  if (!vectorVis || !vectorVis.mesh || !vectorVis.group) return null;
+  const centreIndex = Math.floor(VECTOR_LENGTH_PRISM / 2);
+  if (typeof vectorVis.mesh.getMatrixAt !== 'function') return null;
+  const instanceCount = typeof vectorVis.mesh.count === 'number'
+    ? vectorVis.mesh.count
+    : (vectorVis.mesh.instanceMatrix && typeof vectorVis.mesh.instanceMatrix.count === 'number'
+        ? vectorVis.mesh.instanceMatrix.count
+        : VECTOR_LENGTH_PRISM);
+  if (centreIndex >= instanceCount) return null;
+  vectorVis.mesh.getMatrixAt(centreIndex, TMP_BRANCH_TRAIL_MATRIX);
+  TMP_BRANCH_TRAIL_LOCAL.setFromMatrixPosition(TMP_BRANCH_TRAIL_MATRIX);
+  if (TMP_BRANCH_TRAIL_LOCAL.y <= HIDE_INSTANCE_Y_OFFSET + 1) {
+    return null;
+  }
+  TMP_BRANCH_TRAIL_POS.copy(TMP_BRANCH_TRAIL_LOCAL);
+  vectorVis.group.localToWorld(TMP_BRANCH_TRAIL_POS);
+  if (TMP_BRANCH_TRAIL_POS.y <= HIDE_INSTANCE_Y_OFFSET + 1) {
+    return null;
+  }
+  return TMP_BRANCH_TRAIL_POS;
+}
+
+function extractObjectWorldPosition(object) {
+  if (!object) return null;
+  if (typeof object.getWorldPosition === 'function') {
+    object.getWorldPosition(TMP_BRANCH_TRAIL_POS);
+    return TMP_BRANCH_TRAIL_POS;
+  }
+  if (object.position) {
+    TMP_BRANCH_TRAIL_POS.copy(object.position);
+    return TMP_BRANCH_TRAIL_POS;
+  }
+  return null;
+}
+
+function resolveLaneVectorForGroup(lane, group) {
+  if (!lane || !group) return null;
+  const candidates = [
+    lane.movingVec,
+    lane.multTarget,
+    lane.resultVec,
+    lane.movingVecLN2,
+    lane.multTargetLN2,
+    lane.resultVecLN2,
+  ];
+  for (let i = 0; i < candidates.length; i++) {
+    const candidate = candidates[i];
+    if (candidate && candidate.group === group) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function updateBranchTrail(trail, { object: sourceObject = null, vector: sourceVector = null, lockAxis = true } = {}) {
+  if (!trail) return;
+
+  const state = getBranchTrailState(trail);
+
+  const primarySource = sourceVector || sourceObject;
+
+  let sourcePosition = null;
+  if (sourceVector) {
+    sourcePosition = extractVectorWorldPosition(sourceVector);
+    if (!sourcePosition && sourceVector.group) {
+      sourcePosition = extractObjectWorldPosition(sourceVector.group);
+    }
+  }
+
+  if (!sourcePosition && sourceObject) {
+    sourcePosition = extractObjectWorldPosition(sourceObject);
+  }
+
+  if (!sourcePosition) return;
+
+  if (lockAxis) {
+    if (!state.anchor) {
+      state.anchor = { x: sourcePosition.x, z: sourcePosition.z };
+    }
+    if (Number.isFinite(state.anchor.x)) sourcePosition.x = state.anchor.x;
+    if (Number.isFinite(state.anchor.z)) sourcePosition.z = state.anchor.z;
+  } else if (state.anchor) {
+    state.anchor = null;
+  }
+
+  if (trail._vertexCount > 0
+      && state.lastSource
+      && state.lastSource !== primarySource
+      && typeof trail.snapLastPointTo === 'function') {
+    trail.snapLastPointTo(sourcePosition);
+  }
+
+  updateTrail(trail, sourcePosition);
+
+  if (!state.lastPosition) state.lastPosition = new THREE.Vector3();
+  state.lastPosition.copy(sourcePosition);
+  state.lastSource = primarySource;
+}
+
 
 import { PrismLayerNormAnimation } from '../animations/PrismLayerNormAnimation.js';
 import { 
@@ -86,6 +200,9 @@ const LAYER_ACCENT_COLORS = [
     0x118ab2,
     0x9d4edd,
 ].map(hex => new THREE.Color(hex));
+
+const TMP_MATRIX_LN = new THREE.Matrix4();
+const TMP_WORLD_POS_LN = new THREE.Vector3();
 
 export function initLayerAnimation(container) {
     // -------------------------------------------------------------------------
@@ -825,6 +942,36 @@ export function initLayerAnimation(container) {
                 if (typeof ud.skipTrailResumeY === 'number' && originalVec.group.position.y > ud.skipTrailResumeY) {
                     delete ud.skipTrailResumeY;
                 }
+            } else {
+                try {
+                    const residualTrail =
+                        (originalVec && originalVec.userData && originalVec.userData.trail)
+                        || lane.origTrail;
+                    if (residualTrail && originalVec.mesh && typeof residualTrail.update === 'function') {
+                        const centreIndex = Math.floor(VECTOR_LENGTH_PRISM / 2);
+                        originalVec.mesh.getMatrixAt(centreIndex, TMP_MATRIX_LN);
+                        TMP_WORLD_POS_LN.setFromMatrixPosition(TMP_MATRIX_LN);
+                        TMP_WORLD_POS_LN.applyMatrix4(originalVec.group.matrixWorld);
+
+                        const hideThreshold = HIDE_INSTANCE_Y_OFFSET / 10;
+                        if (TMP_WORLD_POS_LN.y >= hideThreshold) {
+                            if (typeof lane.__residualMaxY !== 'number') {
+                                lane.__residualMaxY = TMP_WORLD_POS_LN.y - 0.001;
+                            }
+                            if (TMP_WORLD_POS_LN.y >= lane.__residualMaxY - 1e-6) {
+                                const anchor = lane.__residualTrailAnchor;
+                                if (anchor) {
+                                    if (Number.isFinite(anchor.x)) TMP_WORLD_POS_LN.x = anchor.x;
+                                    if (Number.isFinite(anchor.z)) TMP_WORLD_POS_LN.z = anchor.z;
+                                }
+                                residualTrail.update(TMP_WORLD_POS_LN);
+                                lane.__residualMaxY = TMP_WORLD_POS_LN.y;
+                            }
+                        }
+                    }
+                } catch (_) {
+                    // Defensive: if the residual update fails we simply skip this frame.
+                }
             }
 
             // -------------------- DUPLICATE / MOVING VEC LOGIC --------------------
@@ -845,7 +992,6 @@ export function initLayerAnimation(container) {
                         movingVec.group.position.x = BRANCH_X;
                         lane.horizPhase = 'insideLN';
                     }
-                    if (lane.branchTrailLN2) updateTrail(lane.branchTrailLN2, movingVec.group.position);
                     break;
                 }
                 case 'insideLN': {
@@ -933,7 +1079,6 @@ export function initLayerAnimation(container) {
                             }
                         });
                     }
-                    if (lane.branchTrailLN2) updateTrail(lane.branchTrailLN2, movingVec.group.position);
                     break;
                 }
                 case 'moveLeft': {
@@ -974,31 +1119,35 @@ export function initLayerAnimation(container) {
             */
 
             // Determine which branched object position to follow for trail
-            let branchPos = null;
-            const centerIndex = Math.floor(VECTOR_LENGTH / 2);
+            let branchObject = null;
             // During addition inside LayerNorm, follow the center ellipse movement
             if (lane.multStarted && lane.multDone && !lane.resultVec) {
-                // const centerEllipse = lane.multTarget.ellipses[centerIndex]; // No ellipses
-                // const worldPos = new THREE.Vector3();
-                // centerEllipse.getWorldPosition(worldPos);
-                // branchPos = worldPos;
-                // TODO: Refactor for InstancedPrism - If a specific point on the prism is needed, calculate it.
-                // For now, using group position of multTarget (which is now the result's source).
-                branchPos = lane.multTarget.group.position;
+                branchObject = lane.multTarget.group;
             } else if (lane.resultVecLN2 && lane.resultVecLN2.group.visible) {
-                branchPos = lane.resultVecLN2.group.position;
+                branchObject = lane.resultVecLN2.group;
             } else if (lane.resultVec && lane.resultVec.group.visible) {
-                branchPos = lane.resultVec.group.position;
+                branchObject = lane.resultVec.group;
             } else if (lane.movingVecLN2 && lane.movingVecLN2.group.visible) {
-                branchPos = lane.movingVecLN2.group.position;
+                branchObject = lane.movingVecLN2.group;
             } else if (lane.expandedVecGroup && lane.expandedVecGroup.visible) {
-                branchPos = lane.expandedVecGroup.position;
+                branchObject = lane.expandedVecGroup;
             } else if (lane.movingVec.group.visible) {
-                branchPos = lane.movingVec.group.position;
+                branchObject = lane.movingVec.group;
             }
-            if (branchPos) {
+            if (branchObject) {
                 const activeTrail = lane.branchTrailLN2 || lane.branchTrail;
-                updateTrail(activeTrail, branchPos);
+                if (activeTrail) {
+                    const usingLn2Trail = Boolean(lane.branchTrailLN2) && activeTrail === lane.branchTrailLN2;
+                    const shouldLockAxis = usingLn2Trail
+                        ? lane.ln2Phase === 'insideLN'
+                        : lane.horizPhase === 'insideLN';
+                    const branchVector = resolveLaneVectorForGroup(lane, branchObject);
+                    updateBranchTrail(activeTrail, {
+                        object: branchObject,
+                        vector: branchVector,
+                        lockAxis: shouldLockAxis,
+                    });
+                }
             }
 
             // ---------------------------------------------------------------------
@@ -1047,10 +1196,22 @@ export function initLayerAnimation(container) {
                         lane.normAnimationLN2 = new PrismLayerNormAnimation(mv);
                         // Create a new trail for the LN2 branch so its motion is visualised
                         lane.branchTrailLN2 = createTrailLine(scene, lane.accentColor.getHex());
-                        // Slightly lower the opacity so overlapping with the frozen trail doesn't brighten excessively.
-                        if (lane.branchTrailLN2 && lane.branchTrailLN2.line && lane.branchTrailLN2.line.material) {
-                            
-                            lane.branchTrailLN2.line.material.needsUpdate = true;
+                        if (lane.branchTrail && typeof lane.branchTrail.getBaseOpacity === 'function'
+                            && lane.branchTrailLN2 && typeof lane.branchTrailLN2.setBaseOpacity === 'function') {
+                            const baseOpacity = lane.branchTrail.getBaseOpacity();
+                            if (typeof baseOpacity === 'number' && isFinite(baseOpacity)) {
+                                lane.branchTrailLN2.setBaseOpacity(baseOpacity);
+                            }
+                        }
+                        if (lane.branchTrail && lane.branchTrail.line && lane.branchTrailLN2 && lane.branchTrailLN2.line) {
+                            const srcMat = lane.branchTrail.line.material;
+                            const dstMat = lane.branchTrailLN2.line.material;
+                            if (srcMat && dstMat) {
+                                dstMat.opacity = srcMat.opacity;
+                                dstMat.transparent = srcMat.transparent;
+                                dstMat.linewidth = srcMat.linewidth;
+                                dstMat.needsUpdate = true;
+                            }
                         }
                         // Seed the LN2 branch trail with the starting position so it is visible immediately
                         updateTrail(lane.branchTrailLN2, mv.group.position);
@@ -1069,7 +1230,6 @@ export function initLayerAnimation(container) {
                         lane.multTargetLN2.group.visible = true;
                         lane.ln2Phase = 'insideLN';
                     }
-                    if (lane.branchTrailLN2) updateTrail(lane.branchTrailLN2, mv.group.position);
                     break;
                 }
                 case 'insideLN': {
@@ -1119,9 +1279,6 @@ export function initLayerAnimation(container) {
                         });
                     }
                     // Only update trail with the "moving" LN2 vector while it's actually moving.
-                    if (!lane.multDoneLN2 && lane.branchTrailLN2) {
-                        updateTrail(lane.branchTrailLN2, mv.group.position);
-                    }
                     break;
                 }
                 case 'done':
