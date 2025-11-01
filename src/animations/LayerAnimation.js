@@ -33,38 +33,100 @@ function updateTrail(trail, position) {
   }
 }
 
-const BRANCH_TRAIL_ANCHORS = new WeakMap();
+const BRANCH_TRAIL_STATE = new WeakMap();
+const TMP_BRANCH_TRAIL_LOCAL = new THREE.Vector3();
 const TMP_BRANCH_TRAIL_POS = new THREE.Vector3();
+const TMP_BRANCH_TRAIL_MATRIX = new THREE.Matrix4();
 
-function updateBranchTrail(trail, sourceObject, shouldLockAxis = true) {
-  if (!trail || !sourceObject || !sourceObject.position) return;
+function getBranchTrailState(trail) {
+  let state = BRANCH_TRAIL_STATE.get(trail);
+  if (!state) {
+    state = { anchor: null, lastSource: null };
+    BRANCH_TRAIL_STATE.set(trail, state);
+  }
+  return state;
+}
 
-  let anchor = BRANCH_TRAIL_ANCHORS.get(trail);
-  if (shouldLockAxis) {
-    if (!anchor) {
-      anchor = { x: sourceObject.position.x, z: sourceObject.position.z };
-      BRANCH_TRAIL_ANCHORS.set(trail, anchor);
+function extractVectorWorldPosition(vectorVis) {
+  if (!vectorVis || !vectorVis.mesh || !vectorVis.group) return null;
+  const centreIndex = Math.floor(VECTOR_LENGTH_PRISM / 2);
+  if (typeof vectorVis.mesh.getMatrixAt !== 'function') return null;
+  const instanceCount = typeof vectorVis.mesh.count === 'number'
+    ? vectorVis.mesh.count
+    : (vectorVis.mesh.instanceMatrix && typeof vectorVis.mesh.instanceMatrix.count === 'number'
+        ? vectorVis.mesh.instanceMatrix.count
+        : VECTOR_LENGTH_PRISM);
+  if (centreIndex >= instanceCount) return null;
+  vectorVis.mesh.getMatrixAt(centreIndex, TMP_BRANCH_TRAIL_MATRIX);
+  TMP_BRANCH_TRAIL_LOCAL.setFromMatrixPosition(TMP_BRANCH_TRAIL_MATRIX);
+  TMP_BRANCH_TRAIL_POS.copy(TMP_BRANCH_TRAIL_LOCAL);
+  vectorVis.group.localToWorld(TMP_BRANCH_TRAIL_POS);
+  return TMP_BRANCH_TRAIL_POS;
+}
+
+function extractObjectWorldPosition(object) {
+  if (!object) return null;
+  if (typeof object.getWorldPosition === 'function') {
+    object.getWorldPosition(TMP_BRANCH_TRAIL_POS);
+    return TMP_BRANCH_TRAIL_POS;
+  }
+  if (object.position) {
+    TMP_BRANCH_TRAIL_POS.copy(object.position);
+    return TMP_BRANCH_TRAIL_POS;
+  }
+  return null;
+}
+
+function resolveLaneVectorForGroup(lane, group) {
+  if (!lane || !group) return null;
+  const candidates = [
+    lane.movingVec,
+    lane.multTarget,
+    lane.resultVec,
+    lane.movingVecLN2,
+    lane.multTargetLN2,
+    lane.resultVecLN2,
+  ];
+  for (let i = 0; i < candidates.length; i++) {
+    const candidate = candidates[i];
+    if (candidate && candidate.group === group) {
+      return candidate;
     }
-  } else if (anchor) {
-    BRANCH_TRAIL_ANCHORS.delete(trail);
-    anchor = null;
+  }
+  return null;
+}
+
+function updateBranchTrail(trail, { object: sourceObject = null, vector: sourceVector = null, lockAxis = true } = {}) {
+  if (!trail) return;
+
+  const state = getBranchTrailState(trail);
+
+  const sourcePosition = sourceVector
+    ? extractVectorWorldPosition(sourceVector)
+    : extractObjectWorldPosition(sourceObject);
+
+  if (!sourcePosition) return;
+
+  if (lockAxis) {
+    if (!state.anchor) {
+      state.anchor = { x: sourcePosition.x, z: sourcePosition.z };
+    }
+    if (Number.isFinite(state.anchor.x)) sourcePosition.x = state.anchor.x;
+    if (Number.isFinite(state.anchor.z)) sourcePosition.z = state.anchor.z;
+  } else if (state.anchor) {
+    state.anchor = null;
   }
 
-  TMP_BRANCH_TRAIL_POS.copy(sourceObject.position);
-  if (shouldLockAxis && anchor) {
-    if (Number.isFinite(anchor.x)) TMP_BRANCH_TRAIL_POS.x = anchor.x;
-    if (Number.isFinite(anchor.z)) TMP_BRANCH_TRAIL_POS.z = anchor.z;
-  }
-
+  const currentSource = sourceVector || sourceObject;
   if (trail._vertexCount > 0
-      && trail._lastSourceObject
-      && trail._lastSourceObject !== sourceObject
+      && state.lastSource
+      && state.lastSource !== currentSource
       && typeof trail.snapLastPointTo === 'function') {
-    trail.snapLastPointTo(TMP_BRANCH_TRAIL_POS);
+    trail.snapLastPointTo(sourcePosition);
   }
 
-  updateTrail(trail, TMP_BRANCH_TRAIL_POS);
-  trail._lastSourceObject = sourceObject;
+  updateTrail(trail, sourcePosition);
+  state.lastSource = currentSource;
 }
 
 
@@ -1061,7 +1123,12 @@ export function initLayerAnimation(container) {
                     const shouldLockAxis = usingLn2Trail
                         ? lane.ln2Phase === 'insideLN'
                         : lane.horizPhase === 'insideLN';
-                    updateBranchTrail(activeTrail, branchObject, shouldLockAxis);
+                    const branchVector = resolveLaneVectorForGroup(lane, branchObject);
+                    updateBranchTrail(activeTrail, {
+                        object: branchObject,
+                        vector: branchVector,
+                        lockAxis: shouldLockAxis,
+                    });
                 }
             }
 
