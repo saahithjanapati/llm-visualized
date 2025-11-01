@@ -44,3 +44,18 @@ External CDN/runtime deps (not in this repo):
 - `@tweenjs/tween.js` UMD (global `TWEEN`), used throughout animations.
 - `stats.js` (optional FPS overlay).
 - Fonts via `FontLoader` from three.js examples.
+
+### GPT-2 capture utility
+
+The repository includes an interactive CLI (`scripts/extract_gpt2_data.py`) for sampling real GPT-2 activations. It loads the pretrained 124M GPT-2 checkpoint via 🤗 Transformers, lets you enter a seed prompt, shows multiple sampled completions, and then records compact vector states (residual stream, QKV heads, MLP activations, attention scores, etc.) for the selected prompt + completion. The output JSON also carries approximate FLOP and parameter tallies for the visualisation checkpoints alongside the logits relevant to the configured sampler (top-k/top-p).
+
+```
+pip install transformers torch  # if not already installed
+python scripts/extract_gpt2_data.py --max-new-tokens 40 --num-completions 6 --output capture.json
+```
+
+Key flags:
+
+- `--quantisation`: choose between `float16` (default), `int8`, or `float32` encodings for stored activations.
+- `--residual-stride`, `--attention-stride`, `--mlp-stride`: control the sampling stride for 768-d residual vectors, 64-d head vectors, and 3072-d MLP activations respectively (default stride = 32).
+- `--top-k` / `--top-p`: match the sampler used during completion generation so the stored logits line up with the visualiser’s needs.
