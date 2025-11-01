@@ -111,6 +111,52 @@ export function initLayerAnimation(container) {
     const clock = new THREE.Clock();
     const joyfulMotionStates = new Map();
 
+    const _layerNormCenter = new THREE.Vector3();
+    const _cameraLocalPos = new THREE.Vector3();
+    let layerNormTrailDepthEnabled = true;
+
+    function isObjectDescendantOf(object, root) {
+        let current = object;
+        while (current) {
+            if (current === root) return true;
+            current = current.parent;
+        }
+        return false;
+    }
+
+    function isCameraInsideLayerNorm(layerNormVis) {
+        if (!layerNormVis || !layerNormVis.group) return false;
+        layerNormVis.group.getWorldPosition(_layerNormCenter);
+        _cameraLocalPos.copy(camera.position).sub(_layerNormCenter);
+
+        const innerHalfWidth = Math.max((layerNormVis.width / 2) - layerNormVis.wallThickness, 0.1);
+        const innerHalfDepth = Math.max((layerNormVis.depth / 2) - layerNormVis.wallThickness, 0.1);
+        const halfHeight = Math.max(layerNormVis.height / 2, 0.1);
+
+        const insideY = Math.abs(_cameraLocalPos.y) <= halfHeight;
+        const ellipseNorm = (
+            (_cameraLocalPos.x * _cameraLocalPos.x) / (innerHalfWidth * innerHalfWidth)
+            + (_cameraLocalPos.z * _cameraLocalPos.z) / (innerHalfDepth * innerHalfDepth)
+        );
+
+        return insideY && ellipseNorm <= 1;
+    }
+
+    function updateLayerNormTrailDepth(cameraInsideLayerNorm) {
+        const enableDepthTest = !cameraInsideLayerNorm;
+        if (layerNormTrailDepthEnabled === enableDepthTest && enableDepthTest) {
+            return;
+        }
+        layerNormTrailDepthEnabled = enableDepthTest;
+
+        StraightLineTrail.forEachInstance(trail => {
+            if (!trail || typeof trail.setDepthTestEnabled !== 'function') return;
+            const lineObj = typeof trail.getLineObject === 'function' ? trail.getLineObject() : null;
+            if (!lineObj || !isObjectDescendantOf(lineObj, scene)) return;
+            trail.setDepthTestEnabled(enableDepthTest);
+        });
+    }
+
     function getJoyfulState(object) {
         if (!object) return null;
         let state = joyfulMotionStates.get(object);
@@ -596,6 +642,9 @@ export function initLayerAnimation(container) {
         }
         const deltaTime = clock.getDelta();
         const timeNow = performance.now();
+
+        const cameraInsideAnyLayerNorm = isCameraInsideLayerNorm(layerNorm1) || isCameraInsideLayerNorm(layerNorm2);
+        updateLayerNormTrailDepth(cameraInsideAnyLayerNorm);
 
         // --- LayerNorm Appearance Control ---
         const baseColor = layerNormBaseColor.clone();
