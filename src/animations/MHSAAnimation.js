@@ -656,6 +656,11 @@ export class MHSAAnimation {
                     // Allow immediate extension from the centre prism upward when addition begins.
                     if (typeof lane.__residualMaxY !== 'number') lane.__residualMaxY = wPos.y - 0.001;
                     if (wPos.y >= lane.__residualMaxY) {
+                        const anchor = lane.__residualTrailAnchor;
+                        if (anchor) {
+                            if (Number.isFinite(anchor.x)) wPos.x = anchor.x;
+                            if (Number.isFinite(anchor.z)) wPos.z = anchor.z;
+                        }
                         if (lane.__lastResidualTrailFrame !== this._frameCounter) {
                             residualTrail.update(wPos);
                             lane.__lastResidualTrailFrame = this._frameCounter;
