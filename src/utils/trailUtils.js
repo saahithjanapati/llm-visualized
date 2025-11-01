@@ -12,6 +12,9 @@ import { TRAIL_COLOR, TRAIL_LINE_WIDTH, TRAIL_OPACITY, TRAIL_MAX_SEGMENTS, scale
  * API is unchanged from the earlier version so existing integration continues
  * to work:  constructor → start(pos) → update(pos) → dispose().
  */
+const _snapPrev = new THREE.Vector3();
+const _snapDir = new THREE.Vector3();
+
 export class StraightLineTrail {
     /**
      * @param {THREE.Object3D} scene        Scene (or Group) to attach the trail.
@@ -117,6 +120,35 @@ export class StraightLineTrail {
         }
 
         this._prevPos.copy(pos);
+    }
+
+    /**
+     * Force the most recent vertex to match the provided position. Useful when
+     * a consumer needs to "snap" the live trail endpoint to a final resting
+     * coordinate (e.g. after a tween finishes) to avoid tiny gaps or overlaps
+     * when the trail is later frozen into a static mesh.
+     * @param {THREE.Vector3} pos
+     */
+    snapLastPointTo(pos) {
+        if (!pos || this._vertexCount === 0) return;
+        this._writeVertex(this._vertexCount - 1, pos);
+        if (this._vertexCount >= 2) {
+            const prevIdx = (this._vertexCount - 2) * 3;
+            _snapPrev.set(
+                this._positions[prevIdx],
+                this._positions[prevIdx + 1],
+                this._positions[prevIdx + 2]
+            );
+            _snapDir.subVectors(pos, _snapPrev);
+            const lenSq = _snapDir.lengthSq();
+            if (lenSq > 0) {
+                _snapDir.multiplyScalar(1 / Math.sqrt(lenSq));
+                if (!this._currentDir) this._currentDir = new THREE.Vector3();
+                this._currentDir.copy(_snapDir);
+            }
+        }
+        this._prevPos.copy(pos);
+        this._attr.needsUpdate = true;
     }
 
     dispose() {

@@ -1354,6 +1354,9 @@ export default class Gpt2Layer extends BaseLayer {
                 try {
                     const t = vec && vec.userData && vec.userData.mlpTrail;
                     if (t) {
+                        if (typeof t.snapLastPointTo === 'function') {
+                            t.snapLastPointTo(vec.group.position);
+                        }
                         const colorHex = (t._material && t._material.color)
                             ? t._material.color.getHex() : undefined;
                         const frozenOpacity = (typeof t._opacity === 'number') ? t._opacity : undefined;
@@ -1369,6 +1372,9 @@ export default class Gpt2Layer extends BaseLayer {
                 try {
                     const localTrail = vec && vec.userData && vec.userData.trail;
                     if (localTrail && localTrail._scene === this.root) {
+                        if (typeof localTrail.snapLastPointTo === 'function') {
+                            localTrail.snapLastPointTo(vec.group.position);
+                        }
                         const colorHex = (localTrail._material && localTrail._material.color)
                             ? localTrail._material.color.getHex() : undefined;
                         const frozenOpacity = (typeof localTrail._opacity === 'number') ? localTrail._opacity : undefined;
