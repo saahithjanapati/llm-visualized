@@ -1,6 +1,28 @@
 import * as THREE from 'three';
 import { TRAIL_COLOR, TRAIL_LINE_WIDTH, TRAIL_OPACITY, TRAIL_MAX_SEGMENTS, scaleOpacityForDisplay, scaleLineWidthForDisplay } from './trailConstants.js';
 
+// Nudge trail vertices slightly towards the camera in clip space so they remain
+// visible when nearly coplanar with nearby geometry (e.g. the inside of a
+// LayerNorm shell) without fully disabling depth testing.
+const TRAIL_DEPTH_BIAS = 5e-4;
+
+function addDepthBiasToLineMaterial(material, depthBias = TRAIL_DEPTH_BIAS) {
+    if (!(material instanceof THREE.LineBasicMaterial)) return;
+
+    material.onBeforeCompile = (shader) => {
+        shader.uniforms.uDepthBias = { value: depthBias };
+        shader.vertexShader = shader.vertexShader.replace(
+            'gl_Position = projectionMatrix * mvPosition;',
+            `gl_Position = projectionMatrix * mvPosition;\n            gl_Position.z -= uDepthBias * gl_Position.w;`
+        );
+    };
+
+    // Ensure cached programs include the bias customisation.
+    material.customProgramCacheKey = () => `line-depth-bias-${depthBias}`;
+    material.userData.depthBias = depthBias;
+    material.needsUpdate = true;
+}
+
 /**
  * StraightLineTrail – memory-efficient trail renderer.
  * ---------------------------------------------------
@@ -41,7 +63,17 @@ export class StraightLineTrail {
         const effectiveOpacity = scaleOpacityForDisplay(this._opacity);
         const effectiveWidth = scaleLineWidthForDisplay(lineWidth);
         // Keep depthWrite disabled for transparent lines to avoid occluding scene content
-        this._material = new THREE.LineBasicMaterial({ color: this._color, linewidth: effectiveWidth, transparent: effectiveOpacity < 1.0, opacity: effectiveOpacity, depthWrite: false, fog: false, toneMapped: false });
+        this._material = new THREE.LineBasicMaterial({
+            color: this._color,
+            linewidth: effectiveWidth,
+            transparent: effectiveOpacity < 1.0,
+            opacity: effectiveOpacity,
+            depthWrite: false,
+            depthTest: true,
+            fog: false,
+            toneMapped: false,
+        });
+        addDepthBiasToLineMaterial(this._material);
         this._line = new THREE.Line(this._geometry, this._material);
         // Tag for discovery and back-reference
         this._line.userData.isTrail = true;
