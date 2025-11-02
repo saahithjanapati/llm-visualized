@@ -140,6 +140,10 @@ export class MHSAAnimation {
         this._mergedGroupsByHead = new Map(); // headIdx -> { K: Group, V: Group }
         this._allFixedMerged = false; // single merged K and V meshes across all heads created
 
+        // Pause-aware scheduling helpers ensure delayed callbacks respect manual pauses.
+        this._scheduledDelayTweens = new Set();
+        this._scheduledTimeoutIds = new Set();
+
         // --------------------------------------------------------------
         //   Vector router: handles all positioning before pass-through
         // --------------------------------------------------------------
@@ -530,10 +534,10 @@ export class MHSAAnimation {
         }
 
         // Safely clear the pulse flag after the pulses end
-        setTimeout(() => { this._mhaPulseActive = false; }, totalDurationMs + 50);
+        this._scheduleAfterDelay(() => { this._mhaPulseActive = false; }, totalDurationMs + 50);
         if (pulsesStarted !== totalMatrices) {
             // If some matrices missing, still clear after duration to avoid stuck flag
-            setTimeout(() => { this._mhaPulseActive = false; }, totalDurationMs + 60);
+            this._scheduleAfterDelay(() => { this._mhaPulseActive = false; }, totalDurationMs + 60);
         }
     }
     
@@ -735,6 +739,7 @@ export class MHSAAnimation {
 
     dispose() {
         // Standard THREE.js objects added to scene are usually handled by scene traversal on global cleanup.
+        this._clearScheduledDelays();
     }
 
     // ------------------------------------------------------------------
@@ -1231,7 +1236,7 @@ export class MHSAAnimation {
         // ------------------------------------------------------
         if (typeof TWEEN !== 'undefined') {
             // Start after decorative fade-in completes
-            setTimeout(() => {
+            this._scheduleAfterDelay(() => {
                 this._startMergeToRowVectors();
             }, MERGE_TO_ROW_DELAY_AFTER_FADE_MS / GLOBAL_ANIM_SPEED_MULT);
         }
@@ -1285,9 +1290,9 @@ export class MHSAAnimation {
 
         // After all merge tweens are initiated, schedule the next phases.
         if (typeof TWEEN !== 'undefined') {
-            setTimeout(() => {
+            this._scheduleAfterDelay(() => {
                 this._transitionHeadColorsToFinal(HEAD_COLOR_TRANSITION_MS);
-                setTimeout(() => {
+                this._scheduleAfterDelay(() => {
                     this._startVectorsThroughOutputProjection(laneVectors);
                 }, MERGE_POST_COLOR_TRANSITION_DELAY_MS);
             }, maxDurationMs + MERGE_EXTRA_BUFFER_MS);
@@ -1596,9 +1601,9 @@ export class MHSAAnimation {
                 try { this._disposeMergedKVGroups(); } catch (_) {}
                 return;
             }
-            setTimeout(tick, checkIntervalMs);
+            this._scheduleAfterDelay(tick, checkIntervalMs);
         };
-        setTimeout(tick, checkIntervalMs);
+        this._scheduleAfterDelay(tick, checkIntervalMs);
     }
 
     // Immediately hide all K (green) and V (red) vectors, including any merged
@@ -1813,6 +1818,54 @@ export class MHSAAnimation {
             raw.push(curVal);
         }
         return raw;
+    }
+
+    _scheduleAfterDelay(callback, delayMs) {
+        if (typeof callback !== 'function') return () => {};
+        const clampedDelay = Math.max(0, Number(delayMs) || 0);
+
+        if (typeof TWEEN !== 'undefined' && typeof TWEEN.Tween === 'function') {
+            const state = { t: 0 };
+            const tween = new TWEEN.Tween(state)
+                .to({ t: 1 }, clampedDelay)
+                .onComplete(() => {
+                    this._scheduledDelayTweens.delete(tween);
+                    try {
+                        callback();
+                    } catch (err) {
+                        console.error(err);
+                    }
+                })
+                .onStop(() => {
+                    this._scheduledDelayTweens.delete(tween);
+                })
+                .start();
+            this._scheduledDelayTweens.add(tween);
+            return () => {
+                try {
+                    tween.stop();
+                } catch (_) { /* ignore */ }
+            };
+        }
+
+        const timeoutId = setTimeout(() => {
+            this._scheduledTimeoutIds.delete(timeoutId);
+            callback();
+        }, clampedDelay);
+        this._scheduledTimeoutIds.add(timeoutId);
+        return () => {
+            clearTimeout(timeoutId);
+            this._scheduledTimeoutIds.delete(timeoutId);
+        };
+    }
+
+    _clearScheduledDelays() {
+        this._scheduledDelayTweens.forEach((tween) => {
+            try { tween.stop(); } catch (_) { /* ignore */ }
+        });
+        this._scheduledDelayTweens.clear();
+        this._scheduledTimeoutIds.forEach((id) => clearTimeout(id));
+        this._scheduledTimeoutIds.clear();
     }
 
     // ----------------------------------------------------------------------
