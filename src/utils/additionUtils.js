@@ -247,7 +247,14 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
 
     const totalAnimTime = duration + flashDuration + vectorLength * delayBetween;
     const finishAddition = () => {
+        let priorOriginalVec = null;
+        let residualTrail = null;
         if (lane) {
+            priorOriginalVec = lane.originalVec || null;
+            // Reuse the existing world-space residual trail so the brightness stays consistent
+            residualTrail = lane.originalTrail
+                || (priorOriginalVec && priorOriginalVec.userData && priorOriginalVec.userData.trail)
+                || null;
             delete lane.stopRise;
             delete lane.stopRiseTarget;
             delete lane.__residualTrailAnchor;
@@ -261,6 +268,42 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
         }
 
         if (lane) {
+            // Hand the world-space residual trail over to the post-addition vector and
+            // retire any temporary local trails that would otherwise overlap and appear brighter.
+            if (targetVec) {
+                targetVec.userData = targetVec.userData || {};
+                const existingTrail = targetVec.userData.trail || null;
+                if (!residualTrail && existingTrail && existingTrail !== lane.originalTrail) {
+                    residualTrail = existingTrail;
+                }
+                if (existingTrail && residualTrail && existingTrail !== residualTrail) {
+                    try {
+                        if (typeof existingTrail.snapLastPointTo === 'function' && targetVec.group) {
+                            existingTrail.snapLastPointTo(targetVec.group.position);
+                        }
+                    } catch (_) { /* optional */ }
+                    try {
+                        if (typeof existingTrail.dispose === 'function') existingTrail.dispose();
+                    } catch (_) { /* optional */ }
+                }
+                if (residualTrail) {
+                    targetVec.userData.trail = residualTrail;
+                    targetVec.userData.trailWorld = true;
+                    lane.originalTrail = residualTrail;
+                } else if (targetVec.userData.trailWorld !== true && targetVec.userData.trail) {
+                    // Ensure we do not leave a lingering non-world trail which could double-draw.
+                    try {
+                        const extraTrail = targetVec.userData.trail;
+                        if (typeof extraTrail.dispose === 'function') extraTrail.dispose();
+                    } catch (_) { /* optional */ }
+                    delete targetVec.userData.trail;
+                }
+            }
+            if (priorOriginalVec && priorOriginalVec !== targetVec && priorOriginalVec.userData) {
+                if (priorOriginalVec.userData.trail === residualTrail) {
+                    delete priorOriginalVec.userData.trail;
+                }
+            }
             lane.originalVec    = targetVec;
             lane.postAdditionVec= targetVec;
             if (lane.ln2Phase !== 'done') {
