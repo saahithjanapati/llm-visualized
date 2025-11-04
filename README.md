@@ -1,6 +1,15 @@
 # llm-visualized
 3d visualization of gpt2
 
+## Activation capture pipeline
+
+Real GPT-2 activations can be recorded with the interactive Python utility in
+[`gpt_extraction/extract_gpt2_data.py`](gpt_extraction/extract_gpt2_data.py).
+The script samples completions, lets you choose or edit them, and exports a
+compact JSON blob ready for the Three.js renderer. See
+[`gpt_extraction/README.md`](gpt_extraction/README.md) for setup and usage
+instructions plus a detailed [data specification](gpt_extraction/DATA_SPEC.md).
+
 ### 12‑Layer GPT‑2 Stack demo (tests/twelve-layer-stack.html)
 Brief notes on the modules and assets used by `tests/twelve-layer-stack.html`.
 
