@@ -177,7 +177,10 @@ export const LANE_DEPENDENT_DEPTH = (NUM_VECTOR_LANES + 1) * VECTOR_DEPTH_SPACIN
  * slow down per-prism stagger timings so the overall animation duration
  * remains visually similar to the original fine-grained version.
  */
-export const GROUPED_PRISM_SLOWDOWN = PRISM_DIMENSIONS_PER_UNIT; // 64 when grouping 64 dims → 1 prism
+// Slow down grouped-prism animations a little so the wider prisms remain readable.
+// Use the cube root instead of the full grouping factor to avoid excessively long
+// animations when many dimensions collapse into a single prism (e.g. 64 → 1).
+export const GROUPED_PRISM_SLOWDOWN = Math.cbrt(PRISM_DIMENSIONS_PER_UNIT); // ≈4 for 64:1 grouping
 
 // Constants for PrismAdditionAnimation
 // Scale per-prism timings by the slowdown factor so total animation time is
