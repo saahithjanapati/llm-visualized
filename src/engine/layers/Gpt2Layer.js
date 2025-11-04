@@ -322,6 +322,11 @@ export default class Gpt2Layer extends BaseLayer {
                     const trailRef = v.userData.trail;
                     if (updatedTrailRefs.has(trailRef)) return;
 
+                    if (this.index > 0 && v.userData.trailFrozen) {
+                        updatedTrailRefs.add(trailRef);
+                        return;
+                    }
+
                     // During residual addition, let MHSAAnimation drive world-space
                     // residual trail updates (it follows the centre prism). Skip here
                     // to avoid double-writing the same world trail in the same frame.
@@ -713,6 +718,9 @@ export default class Gpt2Layer extends BaseLayer {
                                             lane.addTarget.userData.trail = additionTrail;
                                             lane.addTarget.userData.trailWorld = false;
                                             additionTrail.update(lane.addTarget.group.position);
+                                            if (this.index > 0) {
+                                                lane.addTarget.userData.trailFrozen = true;
+                                            }
                                             delete multResult.userData.trail;
                                             delete multResult.userData.trailWorld;
                                         }
@@ -725,6 +733,9 @@ export default class Gpt2Layer extends BaseLayer {
                                             fallbackTrail.start(lane.addTarget.group.position);
                                             lane.addTarget.userData.trail = fallbackTrail;
                                             lane.addTarget.userData.trailWorld = false;
+                                            if (this.index > 0) {
+                                                lane.addTarget.userData.trailFrozen = true;
+                                            }
                                         }
                                         lane.horizPhase = 'riseAboveLN';
                                         this._emitProgress();
@@ -960,6 +971,9 @@ export default class Gpt2Layer extends BaseLayer {
                                             lane.addTargetLN2.userData.trail = ln2Trail;
                                             lane.addTargetLN2.userData.trailWorld = false;
                                             ln2Trail.update(lane.addTargetLN2.group.position);
+                                            if (this.index > 0) {
+                                                lane.addTargetLN2.userData.trailFrozen = true;
+                                            }
                                             delete resVec.userData.trail;
                                             delete resVec.userData.trailWorld;
                                         }
@@ -972,6 +986,9 @@ export default class Gpt2Layer extends BaseLayer {
                                             fallbackTrailLn2.start(lane.addTargetLN2.group.position);
                                             lane.addTargetLN2.userData.trail = fallbackTrailLn2;
                                             lane.addTargetLN2.userData.trailWorld = false;
+                                            if (this.index > 0) {
+                                                lane.addTargetLN2.userData.trailFrozen = true;
+                                            }
                                         }
                                         startLn2Rise(lane.addTargetLN2);
                                     });
