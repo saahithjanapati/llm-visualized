@@ -695,6 +695,9 @@ export default class Gpt2Layer extends BaseLayer {
                             }
                             lane.multTarget.group.visible = true;
                             simplePrismMultiply(dupVec, lane.multTarget, () => {
+                                const existingTrail = dupVec.userData && dupVec.userData.trail;
+                                const existingTrailWorld = dupVec.userData && dupVec.userData.trailWorld;
+
                                 dupVec.group.visible = false;
                                 lane.multTarget.group.visible = false;
 
@@ -706,12 +709,31 @@ export default class Gpt2Layer extends BaseLayer {
                                 );
                                 this.root.add(multResult.group);
 
+                                multResult.userData = multResult.userData || {};
+
+                                if (existingTrail) {
+                                    multResult.userData.trail = existingTrail;
+                                    if (existingTrailWorld) {
+                                        multResult.userData.trailWorld = true;
+                                        dupVec.group.getWorldPosition(TMP_WORLD_POS);
+                                        existingTrail.update(TMP_WORLD_POS);
+                                    } else {
+                                        multResult.userData.trailWorld = false;
+                                        existingTrail.update(multResult.group.position);
+                                    }
+                                    if (dupVec.userData) {
+                                        delete dupVec.userData.trail;
+                                        delete dupVec.userData.trailWorld;
+                                    }
+                                }
+
                                 if (lane.addTarget) {
-                                    const addTrail = new StraightLineTrail(this.root, 0xffffff, 1);
-                                    addTrail.start(multResult.group.position);
-                                    multResult.userData = multResult.userData || {};
-                                    multResult.userData.trail = addTrail;
-                                    multResult.userData.trailWorld = false;
+                                    if (!existingTrail) {
+                                        const addTrail = new StraightLineTrail(this.root, 0xffffff, 1);
+                                        addTrail.start(multResult.group.position);
+                                        multResult.userData.trail = addTrail;
+                                        multResult.userData.trailWorld = false;
+                                    }
 
                                     lane.resultVec = lane.addTarget;
                                     lane.ln1AddStarted = true;
@@ -721,7 +743,7 @@ export default class Gpt2Layer extends BaseLayer {
                                         if (additionTrail) {
                                             lane.addTarget.userData = lane.addTarget.userData || {};
                                             lane.addTarget.userData.trail = additionTrail;
-                                            lane.addTarget.userData.trailWorld = false;
+                                            lane.addTarget.userData.trailWorld = Boolean(multResult.userData.trailWorld);
                                             additionTrail.update(lane.addTarget.group.position);
                                             delete multResult.userData.trail;
                                             delete multResult.userData.trailWorld;
@@ -742,10 +764,14 @@ export default class Gpt2Layer extends BaseLayer {
                                 } else {
                                     lane.resultVec = multResult;
                                     lane.ln1AddComplete = true;
-                                    const resTrailFallback = new StraightLineTrail(this.root, 0xffffff, 1);
-                                    resTrailFallback.start(multResult.group.position);
-                                    multResult.userData = multResult.userData || {};
-                                    multResult.userData.trail = resTrailFallback;
+
+                                    if (!existingTrail) {
+                                        const resTrailFallback = new StraightLineTrail(this.root, 0xffffff, 1);
+                                        resTrailFallback.start(multResult.group.position);
+                                        multResult.userData.trail = resTrailFallback;
+                                        multResult.userData.trailWorld = false;
+                                    }
+
                                     lane.horizPhase = 'riseAboveLN';
                                     this._emitProgress();
                                 }
@@ -948,6 +974,9 @@ export default class Gpt2Layer extends BaseLayer {
                                 lane.multTargetLN2.group.position.y = ln2RiseTargetY;
                             }
                             simplePrismMultiply(mv, lane.multTargetLN2, () => {
+                                const mvTrail = mv.userData && mv.userData.trail;
+                                const mvTrailWorld = mv.userData && mv.userData.trailWorld;
+
                                 mv.group.visible = false;
                                 if (lane.multTargetLN2 && lane.multTargetLN2.group) {
                                     lane.multTargetLN2.group.visible = false;
@@ -962,12 +991,31 @@ export default class Gpt2Layer extends BaseLayer {
                                 const resVec = new VectorVisualizationInstancedPrism(sourceRaw, sourcePos);
                                 this.root.add(resVec.group);
 
+                                resVec.userData = resVec.userData || {};
+
+                                if (mvTrail) {
+                                    resVec.userData.trail = mvTrail;
+                                    if (mvTrailWorld) {
+                                        resVec.userData.trailWorld = true;
+                                        mv.group.getWorldPosition(TMP_WORLD_POS);
+                                        mvTrail.update(TMP_WORLD_POS);
+                                    } else {
+                                        resVec.userData.trailWorld = false;
+                                        mvTrail.update(resVec.group.position);
+                                    }
+                                    if (mv.userData) {
+                                        delete mv.userData.trail;
+                                        delete mv.userData.trailWorld;
+                                    }
+                                }
+
                                 if (lane.addTargetLN2) {
-                                    const ln2AddTrail = new StraightLineTrail(this.root, 0xffffff, 1);
-                                    ln2AddTrail.start(resVec.group.position);
-                                    resVec.userData = resVec.userData || {};
-                                    resVec.userData.trail = ln2AddTrail;
-                                    resVec.userData.trailWorld = false;
+                                    if (!mvTrail) {
+                                        const ln2AddTrail = new StraightLineTrail(this.root, 0xffffff, 1);
+                                        ln2AddTrail.start(resVec.group.position);
+                                        resVec.userData.trail = ln2AddTrail;
+                                        resVec.userData.trailWorld = false;
+                                    }
 
                                     lane.resultVecLN2 = lane.addTargetLN2;
                                     lane.ln2AddStarted = true;
@@ -977,7 +1025,7 @@ export default class Gpt2Layer extends BaseLayer {
                                         if (ln2Trail) {
                                             lane.addTargetLN2.userData = lane.addTargetLN2.userData || {};
                                             lane.addTargetLN2.userData.trail = ln2Trail;
-                                            lane.addTargetLN2.userData.trailWorld = false;
+                                            lane.addTargetLN2.userData.trailWorld = Boolean(resVec.userData.trailWorld);
                                             ln2Trail.update(lane.addTargetLN2.group.position);
                                             delete resVec.userData.trail;
                                             delete resVec.userData.trailWorld;
@@ -997,10 +1045,14 @@ export default class Gpt2Layer extends BaseLayer {
                                 } else {
                                     lane.resultVecLN2 = resVec;
                                     lane.ln2AddComplete = true;
-                                    const resTrail = new StraightLineTrail(this.root, 0xffffff, 1);
-                                    resTrail.start(resVec.group.position);
-                                    resVec.userData = resVec.userData || {};
-                                    resVec.userData.trail = resTrail;
+
+                                    if (!mvTrail) {
+                                        const resTrail = new StraightLineTrail(this.root, 0xffffff, 1);
+                                        resTrail.start(resVec.group.position);
+                                        resVec.userData.trail = resTrail;
+                                        resVec.userData.trailWorld = false;
+                                    }
+
                                     startLn2Rise(resVec);
                                 }
                             });
