@@ -14,6 +14,7 @@ import { USE_PRECOMPUTED_GEOMETRIES, USE_GLB_MATERIALS } from './constants.js';
  * indicate which component the geometry belongs to (WeightMatrix or
  * LayerNorm).  We strip the prefix and forward the geometry to the relevant
  * component class.
+ * 
  *
  * @param {string} [url='/precomputed_components.glb'] – Path or URL to the GLB asset.
  * @returns {Promise<void>} Resolves once the asset is fully loaded and caches are primed.
