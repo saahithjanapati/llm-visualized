@@ -26,6 +26,8 @@ const TMP_WORLD_A = new THREE.Vector3();
 const TMP_WORLD_B = new THREE.Vector3();
 const TMP_WORLD_AVG = new THREE.Vector3();
 const TMP_WORLD_ANCHOR = new THREE.Vector3();
+const TMP_WORLD_SNAP = new THREE.Vector3();
+const TMP_LOCAL_SNAP = new THREE.Vector3();
 
 function computeMidlineWorldPosition(vec, length = VECTOR_LENGTH_PRISM, out = new THREE.Vector3()) {
     if (!vec || !vec.mesh || typeof vec.mesh.getMatrixAt !== 'function' || !vec.group) {
@@ -246,6 +248,34 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
     }
 
     const totalAnimTime = duration + flashDuration + vectorLength * delayBetween;
+    const snapResidualTrailEndpoint = (trail, expectsWorldSpace, ownerVec) => {
+        if (!trail || !ownerVec || !ownerVec.group) return;
+        try {
+            ownerVec.group.getWorldPosition(TMP_WORLD_SNAP);
+            if (expectsWorldSpace) {
+                if (typeof trail.snapLastPointTo === 'function') {
+                    trail.snapLastPointTo(TMP_WORLD_SNAP);
+                } else if (typeof trail.update === 'function') {
+                    trail.update(TMP_WORLD_SNAP);
+                }
+            } else {
+                const parentObject = (trail._line && trail._line.parent) || trail._scene || null;
+                if (parentObject && typeof parentObject.worldToLocal === 'function') {
+                    TMP_LOCAL_SNAP.copy(TMP_WORLD_SNAP);
+                    parentObject.worldToLocal(TMP_LOCAL_SNAP);
+                    if (typeof trail.snapLastPointTo === 'function') {
+                        trail.snapLastPointTo(TMP_LOCAL_SNAP);
+                    } else if (typeof trail.update === 'function') {
+                        trail.update(TMP_LOCAL_SNAP);
+                    }
+                }
+            }
+            return TMP_WORLD_SNAP.y;
+        } catch (_) {
+            return undefined;
+        }
+    };
+
     const finishAddition = () => {
         if (lane) {
             delete lane.stopRise;
@@ -258,6 +288,41 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
 
         if (sourceVec && sourceVec.userData) {
             delete sourceVec.userData.__residualTrailAnchor;
+        }
+
+        if (lane) {
+            const ownerVec = lane.originalVec || targetVec;
+            const attachedTrail = ownerVec && ownerVec.userData && ownerVec.userData.trail;
+            const fallbackTrail = lane.originalTrail;
+            const trail = attachedTrail || fallbackTrail;
+            if (trail && ownerVec) {
+                const expectsWorldSpace = Boolean(
+                    (ownerVec.userData && ownerVec.userData.trailWorld) ||
+                    (trail._scene && trail._scene.isScene)
+                );
+                const snappedY = snapResidualTrailEndpoint(trail, expectsWorldSpace, ownerVec);
+                if (Number.isFinite(snappedY)) {
+                    lane.__residualMaxY = snappedY;
+                    lane.__residualTrailAnchor = lane.__residualTrailAnchor || { x: undefined, z: undefined };
+                    lane.__residualTrailAnchor.x = TMP_WORLD_SNAP.x;
+                    lane.__residualTrailAnchor.z = TMP_WORLD_SNAP.z;
+                }
+            }
+        } else if (targetVec && targetVec.userData) {
+            const trail = targetVec.userData.trail;
+            if (trail) {
+                const expectsWorldSpace = Boolean(
+                    targetVec.userData.trailWorld ||
+                    (trail._scene && trail._scene.isScene)
+                );
+                const snappedY = snapResidualTrailEndpoint(trail, expectsWorldSpace, targetVec);
+                if (Number.isFinite(snappedY)) {
+                    targetVec.userData.__residualMaxY = snappedY;
+                    targetVec.userData.__residualTrailAnchor = targetVec.userData.__residualTrailAnchor || { x: undefined, z: undefined };
+                    targetVec.userData.__residualTrailAnchor.x = TMP_WORLD_SNAP.x;
+                    targetVec.userData.__residualTrailAnchor.z = TMP_WORLD_SNAP.z;
+                }
+            }
         }
 
         if (lane) {
