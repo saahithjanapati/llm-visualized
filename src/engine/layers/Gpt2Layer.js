@@ -707,8 +707,21 @@ export default class Gpt2Layer extends BaseLayer {
                                 this.root.add(multResult.group);
 
                                 if (lane.addTarget) {
-                                    const addTrail = new StraightLineTrail(this.root, 0xffffff, 1);
-                                    addTrail.start(multResult.group.position);
+                                    let addTrail = null;
+                                    if (lane.dupVec && lane.dupVec.userData && lane.dupVec.userData.trail) {
+                                        addTrail = lane.dupVec.userData.trail;
+                                        if (typeof addTrail.snapLastPointTo === 'function') {
+                                            addTrail.snapLastPointTo(multResult.group.position);
+                                        }
+                                        try {
+                                            delete lane.dupVec.userData.trail;
+                                            delete lane.dupVec.userData.trailWorld;
+                                        } catch (_) { /* no-op */ }
+                                    }
+                                    if (!addTrail) {
+                                        addTrail = new StraightLineTrail(this.root, 0xffffff, 1);
+                                        addTrail.start(multResult.group.position);
+                                    }
                                     multResult.userData = multResult.userData || {};
                                     multResult.userData.trail = addTrail;
                                     multResult.userData.trailWorld = false;
@@ -963,8 +976,21 @@ export default class Gpt2Layer extends BaseLayer {
                                 this.root.add(resVec.group);
 
                                 if (lane.addTargetLN2) {
-                                    const ln2AddTrail = new StraightLineTrail(this.root, 0xffffff, 1);
-                                    ln2AddTrail.start(resVec.group.position);
+                                    let ln2AddTrail = null;
+                                    if (lane.movingVecLN2 && lane.movingVecLN2.userData && lane.movingVecLN2.userData.trail) {
+                                        ln2AddTrail = lane.movingVecLN2.userData.trail;
+                                        if (typeof ln2AddTrail.snapLastPointTo === 'function') {
+                                            ln2AddTrail.snapLastPointTo(resVec.group.position);
+                                        }
+                                        try {
+                                            delete lane.movingVecLN2.userData.trail;
+                                            delete lane.movingVecLN2.userData.trailWorld;
+                                        } catch (_) { /* no-op */ }
+                                    }
+                                    if (!ln2AddTrail) {
+                                        ln2AddTrail = new StraightLineTrail(this.root, 0xffffff, 1);
+                                        ln2AddTrail.start(resVec.group.position);
+                                    }
                                     resVec.userData = resVec.userData || {};
                                     resVec.userData.trail = ln2AddTrail;
                                     resVec.userData.trailWorld = false;
