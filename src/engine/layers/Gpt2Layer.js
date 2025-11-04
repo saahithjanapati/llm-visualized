@@ -34,6 +34,7 @@ import {
     PRISM_ADD_ANIM_BASE_FLASH_DURATION,
     PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS,
     PRISM_ADD_ANIM_SPEED_MULT,
+    HIDE_INSTANCE_Y_OFFSET,
     EMBEDDING_BOTTOM_TOP_ALIGN_OFFSET_FROM_LN1_BOTTOM,
     EMBEDDING_BOTTOM_Y_ADJUST,
     EMBEDDING_MATRIX_PARAMS_POSITION,
@@ -74,12 +75,46 @@ const COLOR_BRIGHT_YELLOW = new THREE.Color(0xffffff);
 const COLOR_INACTIVE_COMPONENT = new THREE.Color(INACTIVE_COMPONENT_COLOR);
 
 function simplePrismMultiply(srcVec, tgtVec, onComplete) {
-    // instant product; flash white then call onComplete
-    for (let i=0;i<VECTOR_LENGTH_PRISM;i++) {
-        tgtVec.rawData[i] = srcVec.rawData[i]*tgtVec.rawData[i];
+    for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
+        const lhs = srcVec.rawData?.[i] ?? 0;
+        const rhs = tgtVec.rawData?.[i] ?? 0;
+        tgtVec.rawData[i] = lhs * rhs;
     }
-    tgtVec.updateKeyColorsFromData(tgtVec.rawData,30);
+    tgtVec.updateKeyColorsFromData(tgtVec.rawData, 30);
     if (onComplete) onComplete();
+}
+
+function animatePrismMultiply(srcVec, tgtVec, onComplete) {
+    if (!srcVec || !tgtVec || !srcVec.mesh || !tgtVec.mesh) {
+        if (onComplete) onComplete();
+        return;
+    }
+
+    if (typeof TWEEN === 'undefined' || typeof TWEEN.Tween !== 'function') {
+        simplePrismMultiply(srcVec, tgtVec, onComplete);
+        return;
+    }
+
+    const flashDuration = 150 / GLOBAL_ANIM_SPEED_MULT;
+    const white = new THREE.Color(0xffffff);
+
+    for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
+        tgtVec.setInstanceAppearance(i, 0, white);
+    }
+
+    new TWEEN.Tween({ t: 0 })
+        .to({ t: 1 }, flashDuration)
+        .onComplete(() => {
+            for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
+                const lhs = srcVec.rawData?.[i] ?? 0;
+                const rhs = tgtVec.rawData?.[i] ?? 0;
+                tgtVec.rawData[i] = lhs * rhs;
+                srcVec.setInstanceAppearance(i, HIDE_INSTANCE_Y_OFFSET, null);
+            }
+            tgtVec.updateKeyColorsFromData(tgtVec.rawData, 30);
+            if (onComplete) onComplete();
+        })
+        .start();
 }
 
 
@@ -686,7 +721,7 @@ export default class Gpt2Layer extends BaseLayer {
                         }
                         if (lane.multTarget) {
                             lane.multTarget.group.visible = true;
-                            simplePrismMultiply(dupVec, lane.multTarget, () => {
+                            animatePrismMultiply(dupVec, lane.multTarget, () => {
                                 dupVec.group.visible = false;
                                 lane.multTarget.group.visible = false;
 
@@ -928,7 +963,7 @@ export default class Gpt2Layer extends BaseLayer {
                             lane.addTargetLN2.group.visible = true;
                         }
                         if (lane.multTargetLN2) {
-                            simplePrismMultiply(mv, lane.multTargetLN2, () => {
+                            animatePrismMultiply(mv, lane.multTargetLN2, () => {
                                 mv.group.visible = false;
                                 if (lane.multTargetLN2 && lane.multTargetLN2.group) {
                                     lane.multTargetLN2.group.visible = false;
