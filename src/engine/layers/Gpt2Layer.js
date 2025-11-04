@@ -34,6 +34,7 @@ import {
     PRISM_ADD_ANIM_BASE_FLASH_DURATION,
     PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS,
     PRISM_ADD_ANIM_SPEED_MULT,
+    HIDE_INSTANCE_Y_OFFSET,
     EMBEDDING_BOTTOM_TOP_ALIGN_OFFSET_FROM_LN1_BOTTOM,
     EMBEDDING_BOTTOM_Y_ADJUST,
     EMBEDDING_MATRIX_PARAMS_POSITION,
@@ -74,12 +75,46 @@ const COLOR_BRIGHT_YELLOW = new THREE.Color(0xffffff);
 const COLOR_INACTIVE_COMPONENT = new THREE.Color(INACTIVE_COMPONENT_COLOR);
 
 function simplePrismMultiply(srcVec, tgtVec, onComplete) {
-    // instant product; flash white then call onComplete
-    for (let i=0;i<VECTOR_LENGTH_PRISM;i++) {
-        tgtVec.rawData[i] = srcVec.rawData[i]*tgtVec.rawData[i];
+    for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
+        const lhs = srcVec.rawData?.[i] ?? 0;
+        const rhs = tgtVec.rawData?.[i] ?? 0;
+        tgtVec.rawData[i] = lhs * rhs;
     }
-    tgtVec.updateKeyColorsFromData(tgtVec.rawData,30);
+    tgtVec.updateKeyColorsFromData(tgtVec.rawData, 30);
     if (onComplete) onComplete();
+}
+
+function animatePrismMultiply(srcVec, tgtVec, onComplete) {
+    if (!srcVec || !tgtVec || !srcVec.mesh || !tgtVec.mesh) {
+        if (onComplete) onComplete();
+        return;
+    }
+
+    if (typeof TWEEN === 'undefined' || typeof TWEEN.Tween !== 'function') {
+        simplePrismMultiply(srcVec, tgtVec, onComplete);
+        return;
+    }
+
+    const flashDuration = 150 / GLOBAL_ANIM_SPEED_MULT;
+    const white = new THREE.Color(0xffffff);
+
+    for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
+        tgtVec.setInstanceAppearance(i, 0, white);
+    }
+
+    new TWEEN.Tween({ t: 0 })
+        .to({ t: 1 }, flashDuration)
+        .onComplete(() => {
+            for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
+                const lhs = srcVec.rawData?.[i] ?? 0;
+                const rhs = tgtVec.rawData?.[i] ?? 0;
+                tgtVec.rawData[i] = lhs * rhs;
+                srcVec.setInstanceAppearance(i, HIDE_INSTANCE_Y_OFFSET, null);
+            }
+            tgtVec.updateKeyColorsFromData(tgtVec.rawData, 30);
+            if (onComplete) onComplete();
+        })
+        .start();
 }
 
 
@@ -648,6 +683,10 @@ export default class Gpt2Layer extends BaseLayer {
                     // height from its bottom edge.
                     const normStartY =
                         bottomY_ln1_abs + LN_PARAMS.height * LN_NORM_START_FRACTION_FROM_BOTTOM;
+                    const additionTargetY =
+                        lane.addTarget && lane.addTarget.group
+                            ? lane.addTarget.group.position.y
+                            : lane.ln1MidY;
                     if (!lane.normStarted && dupVec.group.position.y >= normStartY) {
                         lane.normAnim.start(dupVec.rawData.slice());
                         lane.normStarted = true;
@@ -657,7 +696,8 @@ export default class Gpt2Layer extends BaseLayer {
                     }
                     const normAnimating = lane.normStarted && lane.normAnim.isAnimating;
                     if (!normAnimating) {
-                        dupVec.group.position.y = Math.min(lane.ln1MidY, dupVec.group.position.y + ANIM_RISE_SPEED_INSIDE_LN * speedMult * dt);
+                        const nextY = dupVec.group.position.y + ANIM_RISE_SPEED_INSIDE_LN * speedMult * dt;
+                        dupVec.group.position.y = Math.min(additionTargetY, nextY);
                     }
                     // --- NEW POST-MOVE SAFETY CHECK -----------------------------------
                     // If the frame delta is large enough that the vector skipped over
@@ -673,7 +713,7 @@ export default class Gpt2Layer extends BaseLayer {
                         !lane.multStarted &&
                         lane.normStarted &&
                         !lane.normAnim.isAnimating &&
-                        dupVec.group.position.y >= lane.ln1MidY - 0.01
+                        dupVec.group.position.y >= additionTargetY - 0.01
                     ) {
                         lane.multStarted = true;
                         if (lane.addTarget && lane.addTarget.group) {
@@ -681,7 +721,7 @@ export default class Gpt2Layer extends BaseLayer {
                         }
                         if (lane.multTarget) {
                             lane.multTarget.group.visible = true;
-                            simplePrismMultiply(dupVec, lane.multTarget, () => {
+                            animatePrismMultiply(dupVec, lane.multTarget, () => {
                                 dupVec.group.visible = false;
                                 lane.multTarget.group.visible = false;
 
@@ -888,6 +928,10 @@ export default class Gpt2Layer extends BaseLayer {
                     // relative height inside the ring.
                     const normStartY2 =
                         bottomY_ln2_abs + LN_PARAMS.height * LN_NORM_START_FRACTION_FROM_BOTTOM;
+                    const additionTargetY2 =
+                        lane.addTargetLN2 && lane.addTargetLN2.group
+                            ? lane.addTargetLN2.group.position.y
+                            : midY_ln2_abs;
                     const normAnimating2 = lane.normStartedLN2 && lane.normAnimationLN2 && lane.normAnimationLN2.isAnimating;
                     if (!lane.normStartedLN2 && mv.group.position.y >= normStartY2) {
                         lane.normAnimationLN2.start(mv.rawData.slice());
@@ -897,7 +941,8 @@ export default class Gpt2Layer extends BaseLayer {
                         lane.normAnimationLN2.update(dt);
                     }
                     if (!lane.multDoneLN2 && !normAnimating2) {
-                        mv.group.position.y += ANIM_RISE_SPEED_INSIDE_LN * speedMult * dt;
+                        const nextY = mv.group.position.y + ANIM_RISE_SPEED_INSIDE_LN * speedMult * dt;
+                        mv.group.position.y = Math.min(additionTargetY2, nextY);
                     }
                     // --- NEW POST-MOVE SAFETY CHECK --------------------------------
                     if (!lane.normStartedLN2 && mv.group.position.y >= normStartY2) {
@@ -911,14 +956,14 @@ export default class Gpt2Layer extends BaseLayer {
                         !lane.multDoneLN2 &&
                         lane.normStartedLN2 &&
                         !lane.normAnimationLN2.isAnimating &&
-                        mv.group.position.y >= midY_ln2_abs
+                        mv.group.position.y >= additionTargetY2 - 0.01
                     ) {
                         lane.multDoneLN2 = true;
                         if (lane.addTargetLN2 && lane.addTargetLN2.group) {
                             lane.addTargetLN2.group.visible = true;
                         }
                         if (lane.multTargetLN2) {
-                            simplePrismMultiply(mv, lane.multTargetLN2, () => {
+                            animatePrismMultiply(mv, lane.multTargetLN2, () => {
                                 mv.group.visible = false;
                                 if (lane.multTargetLN2 && lane.multTargetLN2.group) {
                                     lane.multTargetLN2.group.visible = false;
@@ -1554,15 +1599,21 @@ export default class Gpt2Layer extends BaseLayer {
             trail.start(TMP_WORLD_POS);
         }
 
-        const multTarget = new VectorVisualizationInstancedPrism(originalVec.rawData.slice(), new THREE.Vector3(offsetX, ln1CenterY + 3.3, zPos));
+        const addYOffset = LN_PARAMS.height * LN_ADD_VECTOR_OFFSET_FRACTION;
+
+        const multTarget = new VectorVisualizationInstancedPrism(
+            originalVec.rawData.slice(),
+            new THREE.Vector3(offsetX, ln1CenterY + addYOffset, zPos)
+        );
         this.root.add(multTarget.group);
         multTarget.group.visible = false;
 
-        const multTargetLN2 = new VectorVisualizationInstancedPrism(originalVec.rawData.slice(), new THREE.Vector3(offsetX, ln2CenterY + 3.3, zPos));
+        const multTargetLN2 = new VectorVisualizationInstancedPrism(
+            originalVec.rawData.slice(),
+            new THREE.Vector3(offsetX, ln2CenterY + addYOffset, zPos)
+        );
         this.root.add(multTargetLN2.group);
         multTargetLN2.group.visible = false;
-
-        const addYOffset = LN_PARAMS.height * LN_ADD_VECTOR_OFFSET_FRACTION;
 
         let addTarget = null;
         if (this._ln1AddPlaceholders && this._ln1AddPlaceholders[laneIdx]) {
@@ -1627,7 +1678,9 @@ export default class Gpt2Layer extends BaseLayer {
             normAnim,
             horizPhase: 'waiting',
             branchStartY: ln1CenterY - LN_PARAMS.height / 2 + 5,
-            ln1MidY: ln1CenterY,
+            // Store the actual addition height (slightly above centre) so the duplicate
+            // climbs to the same Y-level where the bias addition occurs.
+            ln1MidY: ln1CenterY + addYOffset,
             normStarted:false,
             multStarted:false,
             ln1AddStarted:false,
