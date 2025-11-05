@@ -21,11 +21,15 @@ export class StraightLineTrail {
      * @param {number}         color        Hex colour.
      * @param {number}         lineWidth    Width in pixels (ignored on most HW).
      * @param {number}         maxSegments  Preallocated straight-line segments.
+     * @param {number}         opacity      Base opacity before DPR scaling.
+     * @param {number}         minSegmentDistance Minimum distance between trail points before recording.
      */
-    constructor(scene, color = TRAIL_COLOR, lineWidth = TRAIL_LINE_WIDTH, maxSegments = TRAIL_MAX_SEGMENTS, opacity = TRAIL_OPACITY) {
+    constructor(scene, color = TRAIL_COLOR, lineWidth = TRAIL_LINE_WIDTH, maxSegments = TRAIL_MAX_SEGMENTS, opacity = TRAIL_OPACITY, minSegmentDistance = 0) {
         this._scene = scene;
         this._color = color;
         this._opacity = opacity;
+        const clampedMin = Math.max(0, minSegmentDistance);
+        this._minSegmentDistanceSq = clampedMin * clampedMin;
 
         // Preallocate vertex buffer (N segments ⇒ N+1 vertices; we duplicate the
         // first vertex to create a zero-length segment so drawRange ≥2).  Each
@@ -88,6 +92,23 @@ export class StraightLineTrail {
         this._currentDir = null;
     }
 
+    /**
+     * Clear existing segments and restart the trail from the supplied position.
+     * Useful when reassigning a trail to a different vector so history does not
+     * overlap and appear brighter.
+     */
+    resetToPosition(pos) {
+        if (!pos) return;
+        this._vertexCount = 0;
+        this._currentDir = null;
+        this._prevPos.copy(pos);
+        this._writeVertex(0, pos);
+        this._writeVertex(1, pos);
+        this._vertexCount = 2;
+        this._geometry.setDrawRange(0, this._vertexCount);
+        this._attr.needsUpdate = true;
+    }
+
     update(pos) {
         if (this._vertexCount === 0) return; // not started yet
         if (pos.equals(this._prevPos)) return; // no movement
@@ -95,6 +116,7 @@ export class StraightLineTrail {
         const dir = new THREE.Vector3().subVectors(pos, this._prevPos);
         const lenSq = dir.lengthSq();
         if (lenSq === 0) return;
+        if (this._minSegmentDistanceSq > 0 && lenSq < this._minSegmentDistanceSq) return;
         dir.multiplyScalar(1 / Math.sqrt(lenSq)); // normalise
 
         const DOT_THRESHOLD = 0.999; // ~2.5° angle tolerance

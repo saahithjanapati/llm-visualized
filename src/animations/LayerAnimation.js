@@ -8,26 +8,44 @@ import { VectorVisualizationInstancedPrism } from '../components/VectorVisualiza
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization.js';
 import { MHSAAnimation } from './MHSAAnimation.js';
 import { StraightLineTrail } from '../utils/trailUtils.js';
-import { TRAIL_COLOR } from '../utils/trailConstants.js';
+import { TRAIL_COLOR, TRAIL_OPACITY } from '../utils/trailConstants.js';
+
+const TRAIL_MIN_VISIBLE_DISTANCE = 0.75;
+const TRAIL_MIN_SEGMENT_DISTANCE = 0.32;
 
 // Real trail helpers backed by StraightLineTrail
 function createTrailLine(scene, color = TRAIL_COLOR) {
-  const trail = new StraightLineTrail(scene, color);
+  const trail = new StraightLineTrail(scene, color, undefined, undefined, undefined, TRAIL_MIN_SEGMENT_DISTANCE);
   // Expose underlying THREE.Line for legacy checks in this file
   // (some call sites peek at `.line.material.needsUpdate`).
   // eslint-disable-next-line no-underscore-dangle
   trail.line = trail._line;
+  trail.__trailStarted = false;
+  trail.__pendingStartCaptured = false;
+  trail.__pendingStartPos = new THREE.Vector3();
+  trail.__minStartDistanceSq = TRAIL_MIN_VISIBLE_DISTANCE * TRAIL_MIN_VISIBLE_DISTANCE;
   return trail;
 }
 
 function updateTrail(trail, position) {
   if (!trail || !position) return;
-  // Lazily start on first use
-  // eslint-disable-next-line no-underscore-dangle
-  if (typeof trail.start === 'function' && trail._vertexCount === 0) {
-    trail.start(position);
-    return;
+  if (trail.isFrozen) return;
+  if (!trail.__trailStarted) {
+    if (!trail.__pendingStartCaptured) {
+      trail.__pendingStartPos.copy(position);
+      trail.__pendingStartCaptured = true;
+      return;
+    }
+    if (trail.__pendingStartPos.distanceToSquared(position) < trail.__minStartDistanceSq) {
+      return;
+    }
+    if (typeof trail.start === 'function') {
+      trail.start(trail.__pendingStartPos);
+    }
+    trail.__trailStarted = true;
+    trail.__pendingStartCaptured = false;
   }
+  // eslint-disable-next-line no-underscore-dangle
   if (typeof trail.update === 'function') {
     trail.update(position);
   }
@@ -975,30 +993,35 @@ export function initLayerAnimation(container) {
 
             // Determine which branched object position to follow for trail
             let branchPos = null;
-            const centerIndex = Math.floor(VECTOR_LENGTH / 2);
+            let branchTrailRef = null;
             // During addition inside LayerNorm, follow the center ellipse movement
             if (lane.multStarted && lane.multDone && !lane.resultVec) {
-                // const centerEllipse = lane.multTarget.ellipses[centerIndex]; // No ellipses
+                // const centerEllipse = lane.multTarget.ellipses[Math.floor(VECTOR_LENGTH / 2)]; // No ellipses
                 // const worldPos = new THREE.Vector3();
                 // centerEllipse.getWorldPosition(worldPos);
                 // branchPos = worldPos;
                 // TODO: Refactor for InstancedPrism - If a specific point on the prism is needed, calculate it.
                 // For now, using group position of multTarget (which is now the result's source).
                 branchPos = lane.multTarget.group.position;
+                branchTrailRef = lane.branchTrail;
             } else if (lane.resultVecLN2 && lane.resultVecLN2.group.visible) {
                 branchPos = lane.resultVecLN2.group.position;
+                branchTrailRef = lane.branchTrailLN2;
             } else if (lane.resultVec && lane.resultVec.group.visible) {
                 branchPos = lane.resultVec.group.position;
+                branchTrailRef = lane.branchTrail;
             } else if (lane.movingVecLN2 && lane.movingVecLN2.group.visible) {
                 branchPos = lane.movingVecLN2.group.position;
+                branchTrailRef = lane.branchTrailLN2;
             } else if (lane.expandedVecGroup && lane.expandedVecGroup.visible) {
                 branchPos = lane.expandedVecGroup.position;
+                branchTrailRef = lane.branchTrailLN2 || lane.branchTrail;
             } else if (lane.movingVec.group.visible) {
                 branchPos = lane.movingVec.group.position;
+                branchTrailRef = lane.branchTrail;
             }
-            if (branchPos) {
-                const activeTrail = lane.branchTrailLN2 || lane.branchTrail;
-                updateTrail(activeTrail, branchPos);
+            if (branchPos && branchTrailRef) {
+                updateTrail(branchTrailRef, branchPos);
             }
 
             // ---------------------------------------------------------------------
@@ -1048,9 +1071,11 @@ export function initLayerAnimation(container) {
                         // Create a new trail for the LN2 branch so its motion is visualised
                         lane.branchTrailLN2 = createTrailLine(scene, lane.accentColor.getHex());
                         // Slightly lower the opacity so overlapping with the frozen trail doesn't brighten excessively.
-                        if (lane.branchTrailLN2 && lane.branchTrailLN2.line && lane.branchTrailLN2.line.material) {
-                            
-                            lane.branchTrailLN2.line.material.needsUpdate = true;
+                        if (lane.branchTrailLN2 && typeof lane.branchTrailLN2.setBaseOpacity === 'function') {
+                            const baseOpacity = (lane.branchTrail && typeof lane.branchTrail.getBaseOpacity === 'function')
+                                ? lane.branchTrail.getBaseOpacity()
+                                : TRAIL_OPACITY;
+                            lane.branchTrailLN2.setBaseOpacity(baseOpacity * 0.65);
                         }
                         // Seed the LN2 branch trail with the starting position so it is visible immediately
                         updateTrail(lane.branchTrailLN2, mv.group.position);

@@ -73,6 +73,8 @@ const COLOR_LIGHT_YELLOW = new THREE.Color(0xffffff);
 const COLOR_BRIGHT_YELLOW = new THREE.Color(0xffffff);
 const COLOR_INACTIVE_COMPONENT = new THREE.Color(INACTIVE_COMPONENT_COLOR);
 
+const LN_INTERNAL_TRAIL_MIN_SEGMENT = 0.15;
+
 function simplePrismMultiply(srcVec, tgtVec, onComplete) {
     // instant product; flash white then call onComplete
     for (let i=0;i<VECTOR_LENGTH_PRISM;i++) {
@@ -706,12 +708,41 @@ export default class Gpt2Layer extends BaseLayer {
                                 );
                                 this.root.add(multResult.group);
 
+                                const reusedTrail = dupVec && dupVec.userData && dupVec.userData.trail;
+                                const reusedTrailIsWorld = Boolean(dupVec && dupVec.userData && dupVec.userData.trailWorld);
+                                const laneIndex = typeof lane.laneIndex === 'number' ? lane.laneIndex : this.lanes.indexOf(lane);
+                                let trailForResult;
+                                if (reusedTrail) {
+                                    trailForResult = reusedTrail;
+                                    if (reusedTrailIsWorld) {
+                                        multResult.group.getWorldPosition(TMP_WORLD_POS);
+                                        if (typeof trailForResult.snapLastPointTo === 'function') {
+                                            trailForResult.snapLastPointTo(TMP_WORLD_POS);
+                                        } else if (typeof trailForResult.update === 'function') {
+                                            trailForResult.update(TMP_WORLD_POS);
+                                        }
+                                    } else if (typeof trailForResult.snapLastPointTo === 'function') {
+                                            trailForResult.snapLastPointTo(multResult.group.position);
+                                        } else if (typeof trailForResult.update === 'function') {
+                                            trailForResult.update(multResult.group.position);
+                                        }
+                                    if (dupVec.userData) {
+                                        delete dupVec.userData.trail;
+                                        delete dupVec.userData.trailWorld;
+                                    }
+                                } else {
+                                    trailForResult = new StraightLineTrail(this.root, 0xffffff, 1);
+                                    trailForResult.start(multResult.group.position);
+                                }
+                                multResult.userData = multResult.userData || {};
+                                multResult.userData.trail = trailForResult;
+                                if (reusedTrailIsWorld) {
+                                    multResult.userData.trailWorld = true;
+                                } else if (multResult.userData.trailWorld) {
+                                    delete multResult.userData.trailWorld;
+                                }
+
                                 if (lane.addTarget) {
-                                    const addTrail = new StraightLineTrail(this.root, 0xffffff, 1);
-                                    addTrail.start(multResult.group.position);
-                                    multResult.userData = multResult.userData || {};
-                                    multResult.userData.trail = addTrail;
-                                    multResult.userData.trailWorld = false;
 
                                     lane.resultVec = lane.addTarget;
                                     lane.ln1AddStarted = true;
@@ -720,9 +751,33 @@ export default class Gpt2Layer extends BaseLayer {
                                         const additionTrail = multResult.userData && multResult.userData.trail;
                                         if (additionTrail) {
                                             lane.addTarget.userData = lane.addTarget.userData || {};
+                                            const additionTrailIsWorld = Boolean(multResult.userData && multResult.userData.trailWorld);
+                                            const prevTrail = lane.addTarget.userData.trail;
+                                            if (prevTrail && prevTrail !== additionTrail) {
+                                                try {
+                                                    if (typeof prevTrail.dispose === 'function') {
+                                                        prevTrail.dispose();
+                                                    } else if (prevTrail._line && prevTrail._line.parent) {
+                                                        prevTrail._line.parent.remove(prevTrail._line);
+                                                    }
+                                                } catch (_) { /* non-fatal cleanup */ }
+                                            }
                                             lane.addTarget.userData.trail = additionTrail;
-                                            lane.addTarget.userData.trailWorld = false;
-                                            additionTrail.update(lane.addTarget.group.position);
+                                            lane.addTarget.userData.trailWorld = additionTrailIsWorld;
+                                            if (additionTrailIsWorld) {
+                                                lane.addTarget.group.getWorldPosition(TMP_WORLD_POS);
+                                                if (typeof additionTrail.snapLastPointTo === 'function') {
+                                                    additionTrail.snapLastPointTo(TMP_WORLD_POS);
+                                                } else {
+                                                    additionTrail.update(TMP_WORLD_POS);
+                                                }
+                                            } else {
+                                                if (typeof additionTrail.snapLastPointTo === 'function') {
+                                                    additionTrail.snapLastPointTo(lane.addTarget.group.position);
+                                                } else {
+                                                    additionTrail.update(lane.addTarget.group.position);
+                                                }
+                                            }
                                             delete multResult.userData.trail;
                                             delete multResult.userData.trailWorld;
                                         }
@@ -742,10 +797,6 @@ export default class Gpt2Layer extends BaseLayer {
                                 } else {
                                     lane.resultVec = multResult;
                                     lane.ln1AddComplete = true;
-                                    const resTrailFallback = new StraightLineTrail(this.root, 0xffffff, 1);
-                                    resTrailFallback.start(multResult.group.position);
-                                    multResult.userData = multResult.userData || {};
-                                    multResult.userData.trail = resTrailFallback;
                                     lane.horizPhase = 'riseAboveLN';
                                     this._emitProgress();
                                 }
@@ -833,7 +884,7 @@ export default class Gpt2Layer extends BaseLayer {
                         const mv = new VectorVisualizationInstancedPrism(v.rawData.slice(), v.group.position.clone());
                         this.root.add(mv.group);
                         // ---- Trail for LN2 moving vector ----
-                        const mvTrail = new StraightLineTrail(this.root, 0xffffff, 1);
+                        const mvTrail = new StraightLineTrail(this.root, 0xffffff, 1, undefined, undefined, LN_INTERNAL_TRAIL_MIN_SEGMENT);
                         mvTrail.start(mv.group.position);
                         mv.userData = mv.userData || {};
                         mv.userData.trail = mvTrail;
@@ -962,12 +1013,41 @@ export default class Gpt2Layer extends BaseLayer {
                                 const resVec = new VectorVisualizationInstancedPrism(sourceRaw, sourcePos);
                                 this.root.add(resVec.group);
 
+                                const reusedTrailLn2 = mv && mv.userData && mv.userData.trail;
+                                const reusedTrailLn2IsWorld = Boolean(mv && mv.userData && mv.userData.trailWorld);
+                                const laneIndex = typeof lane.laneIndex === 'number' ? lane.laneIndex : this.lanes.indexOf(lane);
+                                let trailForLn2Result;
+                                if (reusedTrailLn2) {
+                                    trailForLn2Result = reusedTrailLn2;
+                                    if (reusedTrailLn2IsWorld) {
+                                        resVec.group.getWorldPosition(TMP_WORLD_POS);
+                                        if (typeof trailForLn2Result.snapLastPointTo === 'function') {
+                                            trailForLn2Result.snapLastPointTo(TMP_WORLD_POS);
+                                        } else if (typeof trailForLn2Result.update === 'function') {
+                                            trailForLn2Result.update(TMP_WORLD_POS);
+                                        }
+                                    } else if (typeof trailForLn2Result.snapLastPointTo === 'function') {
+                                            trailForLn2Result.snapLastPointTo(resVec.group.position);
+                                        } else if (typeof trailForLn2Result.update === 'function') {
+                                            trailForLn2Result.update(resVec.group.position);
+                                        }
+                                    if (mv.userData) {
+                                        delete mv.userData.trail;
+                                        delete mv.userData.trailWorld;
+                                    }
+                                } else {
+                                    trailForLn2Result = new StraightLineTrail(this.root, 0xffffff, 1);
+                                    trailForLn2Result.start(resVec.group.position);
+                                }
+                                resVec.userData = resVec.userData || {};
+                                resVec.userData.trail = trailForLn2Result;
+                                if (reusedTrailLn2IsWorld) {
+                                    resVec.userData.trailWorld = true;
+                                } else if (resVec.userData.trailWorld) {
+                                    delete resVec.userData.trailWorld;
+                                }
+
                                 if (lane.addTargetLN2) {
-                                    const ln2AddTrail = new StraightLineTrail(this.root, 0xffffff, 1);
-                                    ln2AddTrail.start(resVec.group.position);
-                                    resVec.userData = resVec.userData || {};
-                                    resVec.userData.trail = ln2AddTrail;
-                                    resVec.userData.trailWorld = false;
 
                                     lane.resultVecLN2 = lane.addTargetLN2;
                                     lane.ln2AddStarted = true;
@@ -976,9 +1056,33 @@ export default class Gpt2Layer extends BaseLayer {
                                         const ln2Trail = resVec.userData && resVec.userData.trail;
                                         if (ln2Trail) {
                                             lane.addTargetLN2.userData = lane.addTargetLN2.userData || {};
+                                            const ln2TrailIsWorld = Boolean(resVec.userData && resVec.userData.trailWorld);
+                                            const prevTrailLN2 = lane.addTargetLN2.userData.trail;
+                                            if (prevTrailLN2 && prevTrailLN2 !== ln2Trail) {
+                                                try {
+                                                    if (typeof prevTrailLN2.dispose === 'function') {
+                                                        prevTrailLN2.dispose();
+                                                    } else if (prevTrailLN2._line && prevTrailLN2._line.parent) {
+                                                        prevTrailLN2._line.parent.remove(prevTrailLN2._line);
+                                                    }
+                                                } catch (_) { /* cleanup best-effort */ }
+                                            }
                                             lane.addTargetLN2.userData.trail = ln2Trail;
-                                            lane.addTargetLN2.userData.trailWorld = false;
-                                            ln2Trail.update(lane.addTargetLN2.group.position);
+                                            lane.addTargetLN2.userData.trailWorld = ln2TrailIsWorld;
+                                            if (ln2TrailIsWorld) {
+                                                lane.addTargetLN2.group.getWorldPosition(TMP_WORLD_POS);
+                                                if (typeof ln2Trail.snapLastPointTo === 'function') {
+                                                    ln2Trail.snapLastPointTo(TMP_WORLD_POS);
+                                                } else {
+                                                    ln2Trail.update(TMP_WORLD_POS);
+                                                }
+                                            } else {
+                                                if (typeof ln2Trail.snapLastPointTo === 'function') {
+                                                    ln2Trail.snapLastPointTo(lane.addTargetLN2.group.position);
+                                                } else {
+                                                    ln2Trail.update(lane.addTargetLN2.group.position);
+                                                }
+                                            }
                                             delete resVec.userData.trail;
                                             delete resVec.userData.trailWorld;
                                         }
@@ -997,10 +1101,6 @@ export default class Gpt2Layer extends BaseLayer {
                                 } else {
                                     lane.resultVecLN2 = resVec;
                                     lane.ln2AddComplete = true;
-                                    const resTrail = new StraightLineTrail(this.root, 0xffffff, 1);
-                                    resTrail.start(resVec.group.position);
-                                    resVec.userData = resVec.userData || {};
-                                    resVec.userData.trail = resTrail;
                                     startLn2Rise(resVec);
                                 }
                             });
@@ -1527,15 +1627,15 @@ export default class Gpt2Layer extends BaseLayer {
             startY = originalVec.group.position.y; // Keep current position
             // Prefer to carry over the existing residual-stream trail so it
             // remains a single continuous line across layer boundaries.
-            if (trailFromPrev) {
-                trail = trailFromPrev;
-                if (typeof trail.reparent === 'function') {
-                    trail.reparent(this._globalScene);
+                if (trailFromPrev) {
+                    trail = trailFromPrev;
+                    if (typeof trail.reparent === 'function') {
+                        trail.reparent(this._globalScene);
+                    }
+                    originalVec.userData = originalVec.userData || {};
+                    originalVec.userData.trail = trail;
+                    originalVec.userData.trailWorld = true;
                 }
-                originalVec.userData = originalVec.userData || {};
-                originalVec.userData.trail = trail;
-                originalVec.userData.trailWorld = true;
-            }
         } else {
             zPos = -LN_PARAMS.depth / 2 + slitSpacing * (laneIdx + 1);
             const data = this.random.nextVector(VECTOR_LENGTH_PRISM);
@@ -1570,7 +1670,7 @@ export default class Gpt2Layer extends BaseLayer {
         dupVec.group.visible = false;
         this.root.add(dupVec.group);
         // Trail for duplicate vector inside LN1
-        const dupTrail = new StraightLineTrail(this.root, 0xffffff, 1);
+        const dupTrail = new StraightLineTrail(this.root, 0xffffff, 1, undefined, undefined, LN_INTERNAL_TRAIL_MIN_SEGMENT);
         dupTrail.start(dupVec.group.position);
         dupVec.userData = dupVec.userData || {};
         dupVec.userData.trail = dupTrail;
@@ -1646,6 +1746,7 @@ export default class Gpt2Layer extends BaseLayer {
 
         this.lanes.push({
             layer: this,
+            laneIndex: laneIdx,
             originalVec,
             originalTrail: trail,
             dupVec,
