@@ -33,6 +33,8 @@ const COLOR_DARK_GRAY = new THREE.Color(0x333333);
 const COLOR_LIGHT_YELLOW = new THREE.Color(0xffffff);
 const COLOR_BRIGHT_YELLOW = new THREE.Color(0xffffff);
 
+const TMP_WORLD_POS = new THREE.Vector3();
+
 /**
  * LayerPipeline orchestrates a single bundle of vectors ("lanes") through an
  * arbitrary stack of GPT-2 transformer layers.  Unlike the old approach that
@@ -207,9 +209,24 @@ export class LayerPipeline extends EventTarget {
         // world-space trails to the new engine scene (safety no-op if same).
         if (externalLanes && externalLanes.length) {
             externalLanes.forEach(lane => {
+                if (!lane) return;
+
+                const originalVec = lane.originalVec;
+                const originalGroup = originalVec && originalVec.group;
+
                 // Prefer the dedicated world-space residual trail carried across lanes
-                const trailRef = (lane && lane.originalTrail)
-                    || (lane && lane.originalVec && lane.originalVec.userData && lane.originalVec.userData.trail);
+                const trailRef = lane.originalTrail
+                    || (originalVec && originalVec.userData && originalVec.userData.trail);
+
+                if (originalGroup && typeof originalGroup.updateMatrixWorld === 'function') {
+                    originalGroup.updateMatrixWorld(true);
+                }
+
+                if (trailRef && typeof trailRef.snapLastPointTo === 'function' && originalGroup) {
+                    originalGroup.getWorldPosition(TMP_WORLD_POS);
+                    trailRef.snapLastPointTo(TMP_WORLD_POS);
+                }
+
                 if (trailRef && typeof trailRef.reparent === 'function') {
                     trailRef.reparent(this._engine.scene);
                 }
