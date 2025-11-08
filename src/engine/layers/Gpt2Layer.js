@@ -1941,7 +1941,7 @@ export default class Gpt2Layer extends BaseLayer {
                         }
                     }
                     if (t && typeof t.extractSegmentsAndTrim === 'function') {
-                        const seg = t.extractSegmentsAndTrim();
+                        const seg = t.extractSegmentsAndTrim({ preserveSegments: 1 });
                         if (seg && seg.length) segmentsList.push(seg);
                     }
                 });

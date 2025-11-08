@@ -14,6 +14,7 @@ import { TRAIL_COLOR, TRAIL_LINE_WIDTH, TRAIL_OPACITY, TRAIL_MAX_SEGMENTS, scale
  */
 const _snapPrev = new THREE.Vector3();
 const _snapDir = new THREE.Vector3();
+const _trimLast = new THREE.Vector3();
 
 export class StraightLineTrail {
     /**
@@ -230,23 +231,69 @@ export class StraightLineTrail {
     }
 
     /**
-     * Extract current segments and trim the live trail down to its last point,
-     * so future updates continue from the same position without duplicating
-     * the already-frozen history.
+     * Extract current segments and trim the live trail so future updates pick
+     * up from the same endpoint. Optionally keep the most recent N segments
+     * attached to the live trail to avoid visible gaps during hand-offs.
+     * @param {object} [options]
+     * @param {number} [options.preserveSegments=0] – number of newest segments to keep live.
      */
-    extractSegmentsAndTrim() {
-        const seg = this.toSegmentsFloat32();
-        // Reset the live polyline to a degenerate 2-vertex line at the last pos
-        if (this._vertexCount > 0) {
-            const lastIdx = (this._vertexCount - 1) * 3;
-            const px = this._positions[lastIdx + 0];
-            const py = this._positions[lastIdx + 1];
-            const pz = this._positions[lastIdx + 2];
-            const v = new THREE.Vector3(px, py, pz);
-            // write two identical vertices
-            this._vertexCount = 0;
-            this.start(v);
+    extractSegmentsAndTrim(options = {}) {
+        const { preserveSegments = 0 } = options;
+        if (this._vertexCount < 2) return new Float32Array(0);
+
+        const totalSegments = this._vertexCount - 1;
+        const clampedPreserve = Math.max(
+            0,
+            Math.min(preserveSegments, totalSegments - 1)
+        );
+        const segmentsToExtract = totalSegments - clampedPreserve;
+        if (segmentsToExtract <= 0) return new Float32Array(0);
+
+        const segFloats = segmentsToExtract * 2 * 3;
+        const seg = new Float32Array(segFloats);
+        let o = 0;
+        for (let i = 0; i < segmentsToExtract; i++) {
+            const i0 = i * 3;
+            const i1 = (i + 1) * 3;
+            seg[o++] = this._positions[i0 + 0];
+            seg[o++] = this._positions[i0 + 1];
+            seg[o++] = this._positions[i0 + 2];
+            seg[o++] = this._positions[i1 + 0];
+            seg[o++] = this._positions[i1 + 1];
+            seg[o++] = this._positions[i1 + 2];
         }
+
+        if (clampedPreserve === 0) {
+            const lastIdx = (this._vertexCount - 1) * 3;
+            _trimLast.set(
+                this._positions[lastIdx + 0],
+                this._positions[lastIdx + 1],
+                this._positions[lastIdx + 2]
+            );
+            this.resetToPosition(_trimLast);
+            return seg;
+        }
+
+        const verticesToKeep = clampedPreserve + 1;
+        const startVertex = this._vertexCount - verticesToKeep;
+        for (let i = 0; i < verticesToKeep; i++) {
+            const srcIdx = (startVertex + i) * 3;
+            const dstIdx = i * 3;
+            this._positions[dstIdx + 0] = this._positions[srcIdx + 0];
+            this._positions[dstIdx + 1] = this._positions[srcIdx + 1];
+            this._positions[dstIdx + 2] = this._positions[srcIdx + 2];
+        }
+        this._vertexCount = verticesToKeep;
+        this._geometry.setDrawRange(0, this._vertexCount);
+        this._attr.needsUpdate = true;
+        const lastIdx = (this._vertexCount - 1) * 3;
+        this._prevPos.set(
+            this._positions[lastIdx + 0],
+            this._positions[lastIdx + 1],
+            this._positions[lastIdx + 2]
+        );
+        this._currentDir = null;
+
         return seg;
     }
 
