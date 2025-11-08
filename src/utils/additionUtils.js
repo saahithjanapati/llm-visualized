@@ -52,6 +52,37 @@ function computeMidlineWorldPosition(vec, length = VECTOR_LENGTH_PRISM, out = ne
     return out.copy(TMP_WORLD_A).add(TMP_WORLD_B).multiplyScalar(0.5);
 }
 
+function resolveResidualTrailContext(lane, sourceVec) {
+    if (lane) {
+        const attached = lane.originalVec && lane.originalVec.userData && lane.originalVec.userData.trail;
+        const trail = attached || lane.originalTrail || null;
+        const expectsWorldSpace = Boolean(
+            (lane.originalVec && lane.originalVec.userData && lane.originalVec.userData.trailWorld) ||
+            (trail && trail._scene && trail._scene.isScene)
+        );
+        return {
+            trail,
+            expectsWorldSpace,
+            anchor: lane.__residualTrailAnchor,
+            getMaxY: () => lane.__residualMaxY,
+            setMaxY: (val) => { lane.__residualMaxY = val; }
+        };
+    }
+    const owner = (sourceVec && sourceVec.userData) || null;
+    const trail = (owner && owner.trail) || null;
+    const expectsWorldSpace = Boolean(
+        (owner && owner.trailWorld) ||
+        (trail && trail._scene && trail._scene.isScene)
+    );
+    return {
+        trail,
+        expectsWorldSpace,
+        anchor: owner && owner.__residualTrailAnchor,
+        getMaxY: () => owner ? owner.__residualMaxY : undefined,
+        setMaxY: (val) => { if (owner) owner.__residualMaxY = val; }
+    };
+}
+
 /**
  * Animate element-wise addition of two instanced-prism vectors, visually moving
  * each prism from `sourceVec` into `targetVec` while updating colours & data.
@@ -167,47 +198,33 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
                 sourceVec.setInstanceAppearance(i, offsetY, null);
 
                 if (centreIndices.includes(i)) {
-                    // When the animation is running within a lane (e.g. inside the
-                    // MHSA pipeline) the owning animation loop already updates the
-                    // residual trail in world-space each frame.  Duplicating those
-                    // updates here introduces slightly different sample points which
-                    // produce small horizontal kinks in the polyline.  Rely on the
-                    // lane-managed updates instead to keep the trail perfectly
-                    // vertical.
-                    if (!lane) {
-                        // For standalone additions (no lane object) we own the trail updates.
-                        // Live-update the residual trail from the bottom vector while the
-                        // centre prism rises toward the top vector. This mirrors the
-                        // behaviour users expect: the connecting line grows as the
-                        // middle unit moves, rather than appearing only after addition.
+                    const laneFrozen = lane && lane.stopRise;
+                    if (!lane || laneFrozen) {
                         try {
                             const wPos = computeMidlineWorldPosition(sourceVec, vectorLength, TMP_WORLD_AVG);
 
-                            // Skip if the prism is effectively hidden far below
                             const hideThreshold = HIDE_INSTANCE_Y_OFFSET / 10;
                             if (wPos.y >= hideThreshold) {
-                                // Update the residual trail continuously as the prism rises all the
-                                // way to the target vector. Previously, a muted band near the
-                                // merge point prevented trailing up to the very top, leaving a
-                                // visible gap.
-                                const residualTrail = (sourceVec && sourceVec.userData && sourceVec.userData.trail)
-                                    || null;
-                                const residualOwner = (sourceVec && sourceVec.userData) || null;
-                                if (residualTrail && residualOwner && typeof residualTrail.update === 'function') {
-                                    if (!Number.isFinite(residualOwner.__residualMaxY)) {
-                                        residualOwner.__residualMaxY = wPos.y - 0.001;
+                                const {
+                                    trail: residualTrail,
+                                    expectsWorldSpace,
+                                    anchor,
+                                    getMaxY,
+                                    setMaxY
+                                } = resolveResidualTrailContext(lane, sourceVec);
+
+                                if (residualTrail && typeof residualTrail.update === 'function') {
+                                    let maxY = getMaxY();
+                                    if (!Number.isFinite(maxY)) {
+                                        maxY = wPos.y - 0.001;
+                                        setMaxY(maxY);
                                     }
-                                    if (wPos.y >= residualOwner.__residualMaxY) {
-                                        const anchor = residualOwner.__residualTrailAnchor;
+                                    if (wPos.y >= maxY) {
                                         if (anchor) {
                                             if (Number.isFinite(anchor.x)) wPos.x = anchor.x;
                                             if (Number.isFinite(anchor.z)) wPos.z = anchor.z;
                                         }
                                         let localPos = wPos;
-                                        const expectsWorldSpace = Boolean(
-                                            (sourceVec && sourceVec.userData && sourceVec.userData.trailWorld)
-                                            || (residualOwner && residualOwner.trailWorld)
-                                        );
                                         if (!expectsWorldSpace) {
                                             try {
                                                 const parentObject = (residualTrail._line && residualTrail._line.parent)
@@ -222,7 +239,7 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
                                             }
                                         }
                                         residualTrail.update(localPos);
-                                        residualOwner.__residualMaxY = wPos.y;
+                                        setMaxY(wPos.y);
                                     }
                                 }
                             }
