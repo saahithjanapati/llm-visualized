@@ -65,12 +65,20 @@ export function initMainScene(canvas) { // Renamed function here
     const panSpeed = 0.2; // Speed for panning
     const zoomSpeed = 0.5; // Speed for zooming
     const rotateSpeed = 0.02; // Adjust rotation speed as needed
+    const cameraRightTemp = new THREE.Vector3();
+    const cameraUpTemp = new THREE.Vector3();
+    const panOffsetTemp = new THREE.Vector3();
+    const targetOffsetTemp = new THREE.Vector3();
 
     // --- Visualizations ---
     const allVectorVisualizations = []; // Array to hold all vector instances
     const allTrailLines = []; // Array to hold { line, geometry, material } for trails
     const allTrailPoints = []; // Array of arrays to hold points for each trail line [[x,y,z], ...]
     const vectorHeightOffset = 60; // Start even lower so vectors appear further beneath the matrix
+    const originalCenterWorlds = []; // Cached vector to store original center world positions per vector
+    const branchedCenterWorlds = []; // Cached vector to store branched center world positions per vector
+    const tempMatrixOriginals = []; // Cached matrix to read original instance transforms per vector
+    const tempMatrixBranched = []; // Cached matrix to read branched instance transforms per vector
 
     // --- Branching / Duplicate Vector Setup ---
     // Arrays to hold duplicate vectors and their trails
@@ -488,6 +496,10 @@ export function initMainScene(canvas) { // Renamed function here
         scene.add(branchedVectorVis.group);
         branchedVectorVisualizations.push(branchedVectorVis);
         additionPlayedFlags.push(false);
+        originalCenterWorlds.push(new THREE.Vector3());
+        branchedCenterWorlds.push(new THREE.Vector3());
+        tempMatrixOriginals.push(new THREE.Matrix4());
+        tempMatrixBranched.push(new THREE.Matrix4());
 
         // Trail for duplicate
         branchedTrailPoints.push([]);
@@ -669,53 +681,51 @@ export function initMainScene(canvas) { // Renamed function here
         }
 
         // --- Handle Keyboard Movement ---
-        const cameraRight = new THREE.Vector3();
+        const cameraRight = cameraRightTemp;
         camera.getWorldDirection(cameraRight); // Get forward direction first
         cameraRight.cross(camera.up).normalize(); // Calculate right vector
-        const cameraUp = new THREE.Vector3().copy(camera.up); // Use world up for panning usually
-        const cameraForward = new THREE.Vector3(); // Vector to store forward direction
-        camera.getWorldDirection(cameraForward); // Get the camera's forward direction
+        const cameraUp = cameraUpTemp.copy(camera.up); // Use world up for panning usually
 
         // WASD for Panning (Move camera and target together)
         if (keysPressed['w']) {
-            const panOffset = cameraUp.clone().multiplyScalar(panSpeed);
-            camera.position.add(panOffset);
-            controls.target.add(panOffset);
+            panOffsetTemp.copy(cameraUp).multiplyScalar(panSpeed);
+            camera.position.add(panOffsetTemp);
+            controls.target.add(panOffsetTemp);
         }
         if (keysPressed['s']) {
-            const panOffset = cameraUp.clone().multiplyScalar(-panSpeed);
-            camera.position.add(panOffset);
-            controls.target.add(panOffset);
+            panOffsetTemp.copy(cameraUp).multiplyScalar(-panSpeed);
+            camera.position.add(panOffsetTemp);
+            controls.target.add(panOffsetTemp);
         }
         if (keysPressed['a']) {
-            const panOffset = cameraRight.clone().multiplyScalar(-panSpeed);
-            camera.position.add(panOffset);
-            controls.target.add(panOffset);
+            panOffsetTemp.copy(cameraRight).multiplyScalar(-panSpeed);
+            camera.position.add(panOffsetTemp);
+            controls.target.add(panOffsetTemp);
         }
         if (keysPressed['d']) {
-            const panOffset = cameraRight.clone().multiplyScalar(panSpeed);
-            camera.position.add(panOffset);
-            controls.target.add(panOffset);
+            panOffsetTemp.copy(cameraRight).multiplyScalar(panSpeed);
+            camera.position.add(panOffsetTemp);
+            controls.target.add(panOffsetTemp);
         }
 
         // Arrow Up/Down for Rotating View Angle (Adjusting OrbitControls target vertically)
         if (keysPressed['ArrowUp']) {
-            const targetOffset = cameraUp.clone().multiplyScalar(rotateSpeed * 10); // Tilt view upward
-            controls.target.add(targetOffset);
+            targetOffsetTemp.copy(cameraUp).multiplyScalar(rotateSpeed * 10); // Tilt view upward
+            controls.target.add(targetOffsetTemp);
         }
         if (keysPressed['ArrowDown']) {
-            const targetOffset = cameraUp.clone().multiplyScalar(-rotateSpeed * 10); // Tilt view downward
-            controls.target.add(targetOffset);
+            targetOffsetTemp.copy(cameraUp).multiplyScalar(-rotateSpeed * 10); // Tilt view downward
+            controls.target.add(targetOffsetTemp);
         }
 
         // Arrow Left/Right for Rotating View Angle (Adjusting OrbitControls target horizontally)
         if (keysPressed['ArrowLeft']) {
-            const targetOffset = cameraRight.clone().multiplyScalar(-rotateSpeed * 10); // Adjust target left
-            controls.target.add(targetOffset);
+            targetOffsetTemp.copy(cameraRight).multiplyScalar(-rotateSpeed * 10); // Adjust target left
+            controls.target.add(targetOffsetTemp);
         }
         if (keysPressed['ArrowRight']) {
-            const targetOffset = cameraRight.clone().multiplyScalar(rotateSpeed * 10); // Adjust target right
-            controls.target.add(targetOffset);
+            targetOffsetTemp.copy(cameraRight).multiplyScalar(rotateSpeed * 10); // Adjust target right
+            controls.target.add(targetOffsetTemp);
         }
 
         controls.update(); // Required if enableDamping is true
@@ -772,22 +782,22 @@ export function initMainScene(canvas) { // Renamed function here
             const vectorZPos = allVectorVisualizations[index].group.position.z; // Z is constant per vector
             // Before computing trailY, insert retrieval of center ellipses
             const centerIndex = Math.floor(VECTOR_LENGTH / 2);
-            const origCenterWorld = new THREE.Vector3();
-            const branchedCenterWorld = new THREE.Vector3();
+            const origCenterWorld = originalCenterWorlds[index];
+            const branchedCenterWorld = branchedCenterWorlds[index];
 
             // Get world positions for the center instances
             if (allVectorVisualizations[index] && allVectorVisualizations[index].mesh) {
                 const originalVec = allVectorVisualizations[index];
-                const tempMatrixOrig = new THREE.Matrix4();
+                const tempMatrixOrig = tempMatrixOriginals[index];
                 originalVec.mesh.getMatrixAt(centerIndex, tempMatrixOrig);
                 origCenterWorld.setFromMatrixPosition(tempMatrixOrig);
                 origCenterWorld.applyMatrix4(originalVec.group.matrixWorld);
             }
             if (branchedVectorVisualizations[index] && branchedVectorVisualizations[index].mesh) {
                 const branchedVec = branchedVectorVisualizations[index];
-                const tempMatrixBranched = new THREE.Matrix4();
-                branchedVec.mesh.getMatrixAt(centerIndex, tempMatrixBranched);
-                branchedCenterWorld.setFromMatrixPosition(tempMatrixBranched);
+                const branchedMatrix = tempMatrixBranched[index];
+                branchedVec.mesh.getMatrixAt(centerIndex, branchedMatrix);
+                branchedCenterWorld.setFromMatrixPosition(branchedMatrix);
                 branchedCenterWorld.applyMatrix4(branchedVec.group.matrixWorld);
             }
 
