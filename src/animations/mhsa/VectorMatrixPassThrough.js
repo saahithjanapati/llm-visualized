@@ -8,6 +8,8 @@ import {
 } from '../../utils/constants.js';
 import { MHSA_PASS_THROUGH_BRIGHTEN_RATIO, MHSA_PASS_THROUGH_DIM_RATIO, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY } from '../../utils/constants.js';
 
+const _matrixWorldScratch = new THREE.Vector3();
+
 /**
  * Animate a vector passing vertically through its corresponding weight matrix.
  * The heavy 768-dimensional vector is swapped for a lightweight 64-dimensional
@@ -76,9 +78,56 @@ export function animateVectorMatrixPassThrough(
         initialVecColor.setRGB(0.5, 0.5, 0.5);
     }
 
+    if (vector.userData) {
+        vector.userData.vectorCategory = vectorCategory;
+    }
+
     tweenState.colorR = initialVecColor.r;
     tweenState.colorG = initialVecColor.g;
     tweenState.colorB = initialVecColor.b;
+
+    const alignVectorHorizontallyWithMatrix = (vec) => {
+        if (!vec || !vec.group || !matrix || !matrix.group) return;
+        try {
+            const parent = vec.group.parent;
+            if (!parent) return;
+            const lane = vec.userData ? vec.userData.parentLane : null;
+            const headIdx = vec.userData ? vec.userData.headIndex : null;
+            let desiredX = null;
+
+            if (lane && typeof headIdx === 'number') {
+                if (vectorCategory === 'K') {
+                    if (Array.isArray(ctx.headsCentersX) && headIdx < ctx.headsCentersX.length) {
+                        desiredX = ctx.headsCentersX[headIdx];
+                    }
+                } else if (vectorCategory === 'Q' || vectorCategory === 'V') {
+                    if (Array.isArray(lane.sideCopies)) {
+                        const entry = lane.sideCopies.find(sc => sc && sc.vec === vec);
+                        if (entry && typeof entry.targetX === 'number') {
+                            desiredX = entry.targetX;
+                        }
+                    }
+                }
+            }
+
+            if (typeof desiredX === 'number' && Number.isFinite(desiredX)) {
+                // Convert the desired X (expressed in ctx.parentGroup space) into the vector's parent space.
+                if (ctx && ctx.parentGroup && parent !== ctx.parentGroup) {
+                    _matrixWorldScratch.set(desiredX, 0, 0);
+                    ctx.parentGroup.localToWorld(_matrixWorldScratch);
+                    parent.worldToLocal(_matrixWorldScratch);
+                    vec.group.position.x = _matrixWorldScratch.x;
+                } else {
+                    vec.group.position.x = desiredX;
+                }
+                return;
+            }
+
+            matrix.group.getWorldPosition(_matrixWorldScratch);
+            parent.worldToLocal(_matrixWorldScratch);
+            vec.group.position.x = _matrixWorldScratch.x;
+        } catch (_) { /* no-op */ }
+    };
 
     new TWEEN.Tween(tweenState)
         .to(
@@ -98,6 +147,9 @@ export function animateVectorMatrixPassThrough(
             //  Vector motion       
             // --------------------------------------------------------------
             vector.group.position.y = tweenState.y;
+            if (!initialDimensionChangeApplied && tweenState.y >= matrixBottomY) {
+                alignVectorHorizontallyWithMatrix(vector);
+            }
             // Update trails only while BELOW the matrix; no trails above matrices
             try {
                 const ud = vector.userData || {};
@@ -118,6 +170,7 @@ export function animateVectorMatrixPassThrough(
             //  Lightweight 64-dimensional swap as soon as we touch matrix
             // --------------------------------------------------------------
             if (!initialDimensionChangeApplied && tweenState.y >= matrixBottomY) {
+                alignVectorHorizontallyWithMatrix(vector);
                 const smallVec = new VectorVisualizationInstancedPrism(
                     vector.rawData.slice(0, outLength),
                     vector.group.position.clone(),
@@ -127,8 +180,10 @@ export function animateVectorMatrixPassThrough(
                 ctx.parentGroup.add(smallVec.group);
                 const heavyVec = vector;
                 vector = smallVec; // continue animating this handle
+                alignVectorHorizontallyWithMatrix(vector);
                 // Preserve metadata such as headIndex for downstream alignment
                 vector.userData = heavyVec.userData ? { ...heavyVec.userData } : {};
+                vector.userData.vectorCategory = vectorCategory;
                 // Preserve and refine hover label for clarity
                 try {
                     const cat = vectorCategory === 'K' ? 'Key Vector (Green)'
