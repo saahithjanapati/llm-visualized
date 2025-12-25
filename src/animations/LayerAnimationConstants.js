@@ -124,7 +124,7 @@ export const MHSA_DARK_TINTED_RED     = 0x220000;
 
 
 /** Final Q, K, V head colours used once attention heads have merged. */
-export const MHA_FINAL_Q_COLOR = 0x19457a;
+export const MHA_FINAL_Q_COLOR = 0x1e5590;
 export const MHA_FINAL_K_COLOR = 0x177a43;
 export const MHA_FINAL_V_COLOR = 0x6f1827;
 
