@@ -50,6 +50,7 @@ export default defineConfig({
             fullMHSA: resolve(__dirname, 'tests/mhsa_heads_only_test.html'),
             mlpWeightMatrixMover: resolve(__dirname, 'tests/mlp_weight_matrix_mover.html'),
             embeddingMlp: resolve(__dirname, 'tests/embedding_mlp_test.html'),
+            captureViewer: resolve(__dirname, 'tests/capture-viewer.html'),
 
         }
     } 

@@ -28,6 +28,7 @@ import argparse
 import dataclasses
 import json
 import math
+import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -52,6 +53,14 @@ class BaseQuantiser:
 
     name: str = "base"
 
+    def __init__(self, round_decimals: Optional[int] = None) -> None:
+        self.round_decimals = round_decimals
+
+    def _round_values(self, values: List[float]) -> List[float]:
+        if self.round_decimals is None:
+            return values
+        return [round(float(val), self.round_decimals) for val in values]
+
     def encode(self, tensor: torch.Tensor) -> Dict[str, object]:  # pragma: no cover - interface
         raise NotImplementedError
 
@@ -61,8 +70,7 @@ class Float16Quantiser(BaseQuantiser):
 
     def encode(self, tensor: torch.Tensor) -> Dict[str, object]:
         return {
-            "q": self.name,
-            "v": tensor.detach().cpu().to(torch.float16).tolist(),
+            "v": self._round_values(tensor.detach().cpu().to(torch.float16).tolist()),
         }
 
 
@@ -70,7 +78,7 @@ class Float32Quantiser(BaseQuantiser):
     name = "float32"
 
     def encode(self, tensor: torch.Tensor) -> Dict[str, object]:
-        return {"q": self.name, "v": tensor.detach().cpu().to(torch.float32).tolist()}
+        return {"v": self._round_values(tensor.detach().cpu().to(torch.float32).tolist())}
 
 
 class Int8SymmetricQuantiser(BaseQuantiser):
@@ -87,17 +95,19 @@ class Int8SymmetricQuantiser(BaseQuantiser):
             scale = max_abs / 127.0
         if scale == 0.0:
             scale = 1.0
+        if self.round_decimals is not None:
+            scale = round(scale, self.round_decimals)
         quantised = torch.clamp(torch.round(cpu / scale), -127, 127).to(torch.int8)
-        return {"q": self.name, "s": scale, "v": quantised.tolist()}
+        return {"s": scale, "v": quantised.tolist()}
 
 
-def build_quantiser(name: str) -> BaseQuantiser:
+def build_quantiser(name: str, round_decimals: Optional[int]) -> BaseQuantiser:
     if name == "float16":
-        return Float16Quantiser()
+        return Float16Quantiser(round_decimals)
     if name == "float32":
-        return Float32Quantiser()
+        return Float32Quantiser(round_decimals)
     if name in {"int8", "int8_sym"}:
-        return Int8SymmetricQuantiser()
+        return Int8SymmetricQuantiser(round_decimals)
     raise ValueError(f"Unknown quantisation mode: {name}")
 
 
@@ -351,6 +361,7 @@ def extract_sampling_logits(
     logits: torch.Tensor,
     top_k: Optional[int],
     top_p: Optional[float],
+    round_decimals: Optional[int],
 ) -> List[List[Dict[str, object]]]:
     """Return token/logit metadata matching the sampler configuration."""
 
@@ -385,12 +396,124 @@ def extract_sampling_logits(
             candidate_indices = prob_row.argmax(dim=-1, keepdim=True)
 
         for idx in candidate_indices.tolist():
-            token_entries.append({"token_id": int(idx), "logit": float(logit_row[idx])})
+            logit = float(logit_row[idx])
+            if round_decimals is not None:
+                logit = round(logit, round_decimals)
+            token_entries.append({"token_id": int(idx), "logit": logit})
         entries.append(token_entries)
 
     return entries
 
 
+# ---------------------------------------------------------------------------
+# Completion verification helpers
+# ---------------------------------------------------------------------------
+
+
+def token_allowed_by_sampler(
+    logits: torch.Tensor,
+    token_id: int,
+    top_k: Optional[int],
+    top_p: Optional[float],
+    temperature: float,
+) -> Tuple[bool, Optional[str]]:
+    """Return whether token_id survives top-k/top-p sampling filters."""
+
+    scores = logits.detach().to(torch.float32)
+    if temperature and temperature != 1.0:
+        temperature = max(1e-6, float(temperature))
+        scores = scores / temperature
+
+    vocab_size = scores.numel()
+    topk_indices = None
+    if top_k is not None and top_k > 0:
+        top_k = min(top_k, vocab_size)
+        _, topk_indices = torch.topk(scores, top_k)
+        if not bool((topk_indices == token_id).any()):
+            return False, f"outside top-k ({top_k})"
+        mask = torch.full_like(scores, float("-inf"))
+        mask[topk_indices] = scores[topk_indices]
+        scores = mask
+
+    if top_p is not None and 0.0 < top_p < 1.0:
+        sorted_scores, sorted_indices = torch.sort(scores, descending=True)
+        probs = torch.softmax(sorted_scores, dim=-1)
+        cumulative = torch.cumsum(probs, dim=-1)
+        sorted_mask = cumulative <= top_p
+        if not bool(sorted_mask.any()):
+            sorted_mask[0] = True
+        allowed = sorted_indices[sorted_mask]
+        if not bool((allowed == token_id).any()):
+            return False, f"outside top-p ({top_p})"
+
+    return True, None
+
+
+def check_completion_feasibility(
+    model: GPT2LMHeadModel,
+    tokenizer: GPT2TokenizerFast,
+    prompt_ids: List[int],
+    completion_ids: List[int],
+    top_k: Optional[int],
+    top_p: Optional[float],
+    temperature: float,
+    device: str,
+) -> Tuple[bool, str]:
+    """Check if completion tokens are allowed by the sampling filters."""
+
+    if not prompt_ids:
+        return False, "Prompt is empty; cannot verify completion."
+    if not completion_ids:
+        return False, "Completion is empty."
+
+    all_ids = torch.tensor([prompt_ids + completion_ids], dtype=torch.long, device=device)
+    with torch.no_grad():
+        logits = model(all_ids).logits[0]
+
+    prompt_len = len(prompt_ids)
+    for idx, token_id in enumerate(completion_ids):
+        logit_row = logits[prompt_len - 1 + idx]
+        allowed, reason = token_allowed_by_sampler(logit_row, token_id, top_k, top_p, temperature)
+        if not allowed:
+            token_str = tokenizer.convert_ids_to_tokens([token_id])[0]
+            return (
+                False,
+                f"Token {idx + 1} ('{token_str}', id {token_id}) is {reason}.",
+            )
+
+    return True, f"Completion is compatible with top-k/top-p at temperature {temperature}."
+
+
+def print_next_token_topk(
+    model: GPT2LMHeadModel,
+    tokenizer: GPT2TokenizerFast,
+    prompt_ids: torch.Tensor,
+    top_k: int,
+    temperature: float,
+) -> None:
+    """Print the top-k next-token candidates for the prompt."""
+
+    if top_k <= 0:
+        print("Top-k preview skipped (k <= 0).")
+        return
+
+    with torch.no_grad():
+        logits = model(prompt_ids).logits[0, -1]
+
+    scores = logits.detach().to(torch.float32)
+    if temperature and temperature != 1.0:
+        temperature = max(1e-6, float(temperature))
+        scores = scores / temperature
+
+    probs = torch.softmax(scores, dim=-1)
+    k = min(int(top_k), probs.numel())
+    values, indices = torch.topk(probs, k)
+
+    print(f"\nTop-{k} next-token candidates (temperature={temperature}):\n")
+    for rank, (prob, token_id) in enumerate(zip(values.tolist(), indices.tolist()), start=1):
+        token = tokenizer.convert_ids_to_tokens([int(token_id)])[0]
+        token_display = token.replace("\n", "\\n").replace("\t", "\\t")
+        print(f"{rank:>2}. id={token_id:<5} p={prob:.4f} token={token_display}")
 # ---------------------------------------------------------------------------
 # GPT-2 forward instrumentation
 # ---------------------------------------------------------------------------
@@ -402,6 +525,7 @@ class CaptureConfig:
     attention_stride: int = 32
     mlp_stride: int = 32
     quantisation: str = "float16"
+    round_decimals: Optional[int] = None
 
 
 def layer_norm_states(x: torch.Tensor, ln: torch.nn.LayerNorm) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -425,7 +549,7 @@ def run_instrumented_pass(
     config: CaptureConfig,
 ) -> CaptureResult:
     device = next(model.parameters()).device
-    quantiser = build_quantiser(config.quantisation)
+    quantiser = build_quantiser(config.quantisation, config.round_decimals)
     attention_quantiser = quantiser
     mlp_quantiser = quantiser
 
@@ -562,10 +686,12 @@ def pick_completion(options: Sequence[str]) -> str:
         print(f"[{idx}] {text}\n")
 
     while True:
-        choice = prompt_user("Select completion [number], 'c' to craft your own, or 'r' to re-run sampling: ")
+        choice = prompt_user("Select completion [number], 'c' to craft your own, 'v' to verify a completion, or 'r' to re-run sampling: ")
         choice = choice.strip().lower()
         if choice == "c":
             return prompt_user("Enter custom completion text: ")
+        if choice == "v":
+            return "__verify__"
         if choice == "r":
             return "__rerun__"
         if choice.isdigit():
@@ -592,6 +718,26 @@ def maybe_truncate_completion(tokenizer: GPT2TokenizerFast, prompt_text: str, co
     return completion, prompt_ids, completion_ids
 
 
+def parse_token_list(value: Optional[str], label: str) -> List[int]:
+    if value is None:
+        return []
+    raw = value.strip()
+    if not raw:
+        return []
+    try:
+        if raw.startswith("["):
+            items = json.loads(raw)
+            if not isinstance(items, list):
+                raise ValueError
+            return [int(item) for item in items]
+        parts = [part for part in re.split(r"[,\s]+", raw) if part]
+        return [int(part) for part in parts]
+    except Exception as exc:
+        raise ValueError(f"Invalid {label}: expected JSON list or comma-separated ints.") from exc
+
+
+
+
 # ---------------------------------------------------------------------------
 # Main CLI entry point
 # ---------------------------------------------------------------------------
@@ -600,6 +746,8 @@ def maybe_truncate_completion(tokenizer: GPT2TokenizerFast, prompt_text: str, co
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--prompt", type=str, default=None, help="Seed prompt text. If omitted, the user is prompted interactively.")
+    parser.add_argument("--prompt-tokens", type=str, default=None, help="Prompt token ids (JSON list or comma-separated).")
+    parser.add_argument("--completion-tokens", type=str, default=None, help="Completion token ids (JSON list or comma-separated).")
     parser.add_argument("--num-completions", type=int, default=5, help="Number of candidate completions to sample.")
     parser.add_argument("--max-new-tokens", type=int, default=32, help="Maximum number of tokens to generate for each completion.")
     parser.add_argument("--temperature", type=float, default=1.0, help="Sampling temperature.")
@@ -612,6 +760,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--attention-stride", type=int, default=32, help="Stride for 64-d head vectors.")
     parser.add_argument("--mlp-stride", type=int, default=32, help="Stride for 3072-d MLP activations.")
     parser.add_argument("--quantisation", type=str, default="float16", choices=["float16", "float32", "int8"], help="Quantisation mode for stored activations.")
+    parser.add_argument("--round-decimals", type=int, default=None, help="Round stored floats to this many decimal places.")
+    parser.add_argument("--inspect-next-top-k", type=int, default=None, help="Print top-k next-token candidates for the prompt.")
 
     args = parser.parse_args(argv)
 
@@ -622,46 +772,113 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     model.to(args.device)
     model.eval()
 
-    prompt_text = args.prompt or prompt_user("Enter a seed prompt: ")
-    if not prompt_text:
-        print("No prompt provided. Exiting.")
-        return 1
+    prompt_text = args.prompt
+    prompt_id_list: List[int] = []
+    completion_id_list: List[int] = []
+    completion_text = ""
 
-    generate_kwargs = dict(
-        max_new_tokens=args.max_new_tokens,
-        do_sample=True,
-        temperature=args.temperature,
-    )
-    if args.top_k is not None:
-        generate_kwargs["top_k"] = args.top_k
-    if args.top_p is not None:
-        generate_kwargs["top_p"] = args.top_p
+    use_token_override = args.prompt_tokens is not None or args.completion_tokens is not None
+    if use_token_override:
+        if args.prompt_tokens is None or args.completion_tokens is None:
+            print("Both --prompt-tokens and --completion-tokens are required.")
+            return 1
+        try:
+            prompt_id_list = parse_token_list(args.prompt_tokens, "prompt tokens")
+            completion_id_list = parse_token_list(args.completion_tokens, "completion tokens")
+        except ValueError as exc:
+            print(str(exc))
+            return 1
+        if not prompt_id_list:
+            print("Prompt tokens are empty. Exiting.")
+            return 1
+        if prompt_text is None:
+            prompt_text = tokenizer.decode(prompt_id_list, clean_up_tokenization_spaces=False)
+        completion_text = tokenizer.decode(completion_id_list, clean_up_tokenization_spaces=False)
+    else:
+        prompt_text = prompt_text or prompt_user("Enter a seed prompt: ")
+        if not prompt_text:
+            print("No prompt provided. Exiting.")
+            return 1
 
-    completions: List[str] = []
-    while True:
-        prompt_ids = tokenizer.encode(prompt_text, return_tensors="pt")
-        prompt_ids = prompt_ids.to(args.device)
-
-        outputs = model.generate(
-            prompt_ids,
-            num_return_sequences=args.num_completions,
-            pad_token_id=tokenizer.eos_token_id,
-            **generate_kwargs,
+        generate_kwargs = dict(
+            max_new_tokens=args.max_new_tokens,
+            do_sample=True,
+            temperature=args.temperature,
         )
+        if args.top_k is not None:
+            generate_kwargs["top_k"] = args.top_k
+        if args.top_p is not None:
+            generate_kwargs["top_p"] = args.top_p
 
-        completions = []
-        for seq in outputs:
-            completion_ids = seq[len(prompt_ids[0]) :]
-            text = tokenizer.decode(completion_ids, skip_special_tokens=True)
-            completions.append(text.strip())
+        completions: List[str] = []
+        while True:
+            prompt_ids = tokenizer.encode(prompt_text, return_tensors="pt")
+            prompt_ids = prompt_ids.to(args.device)
 
-        selected = pick_completion(completions)
-        if selected == "__rerun__":
-            continue
-        completion_text, prompt_id_list, completion_id_list = maybe_truncate_completion(
-            tokenizer, prompt_text, selected
-        )
-        break
+            if args.inspect_next_top_k is not None:
+                print_next_token_topk(
+                    model=model,
+                    tokenizer=tokenizer,
+                    prompt_ids=prompt_ids,
+                    top_k=args.inspect_next_top_k,
+                    temperature=args.temperature,
+                )
+
+            outputs = model.generate(
+                prompt_ids,
+                num_return_sequences=args.num_completions,
+                pad_token_id=tokenizer.eos_token_id,
+                **generate_kwargs,
+            )
+
+            completions = []
+            for seq in outputs:
+                completion_ids = seq[len(prompt_ids[0]) :]
+                text = tokenizer.decode(completion_ids, skip_special_tokens=True)
+                completions.append(text.strip())
+
+            completion_text = ""
+            prompt_id_list = []
+            completion_id_list = []
+            while True:
+                selected = pick_completion(completions)
+                if selected == "__rerun__":
+                    break
+                if selected == "__verify__":
+                    candidate = prompt_user("Enter completion to verify: ").strip()
+                    if not candidate:
+                        print("No completion entered.")
+                        continue
+                    prompt_id_list = tokenizer.encode(prompt_text, add_special_tokens=False)
+                    candidate_ids = tokenizer.encode(candidate, add_special_tokens=False)
+                    ok, message = check_completion_feasibility(
+                        model=model,
+                        tokenizer=tokenizer,
+                        prompt_ids=prompt_id_list,
+                        completion_ids=candidate_ids,
+                        top_k=args.top_k,
+                        top_p=args.top_p,
+                        temperature=args.temperature,
+                        device=args.device,
+                    )
+                    print(message)
+                    if ok:
+                        use = prompt_user("Use this completion? [y/N]: ").strip().lower()
+                        if use in {"y", "yes"}:
+                            completion_text, prompt_id_list, completion_id_list = maybe_truncate_completion(
+                                tokenizer, prompt_text, candidate
+                            )
+                            break
+                    continue
+                completion_text, prompt_id_list, completion_id_list = maybe_truncate_completion(
+                    tokenizer, prompt_text, selected
+                )
+                break
+
+            if selected == "__rerun__":
+                continue
+            if completion_text:
+                break
 
     all_token_ids = torch.tensor([prompt_id_list + completion_id_list], dtype=torch.long)
 
@@ -670,11 +887,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         attention_stride=args.attention_stride,
         mlp_stride=args.mlp_stride,
         quantisation=args.quantisation,
+        round_decimals=args.round_decimals,
     )
 
     capture = run_instrumented_pass(model, all_token_ids.to(args.device), capture_config)
 
-    top_logits = extract_sampling_logits(capture.logits, args.top_k, args.top_p)
+    top_logits = extract_sampling_logits(capture.logits, args.top_k, args.top_p, args.round_decimals)
 
     prompt_len = len(prompt_id_list)
     generation_len = len(completion_id_list)
@@ -714,4 +932,3 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover - CLI entry
     raise SystemExit(main())
-
