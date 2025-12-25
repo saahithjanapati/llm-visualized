@@ -1188,7 +1188,7 @@ export function initLayerAnimation(container) {
                     const distance = topY - vec.group.position.y;
                     const duration = (distance / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
                     const matrixStartColor = mlpDarkGray.clone();
-                    const matrixEndColor = new THREE.Color(0xb07c13); // bright orange
+                    const matrixEndColor = new THREE.Color(0x9a6a12); // darker orange
                     new TWEEN.Tween({ t: 0 })
                         .to({ t: 1 }, duration)
                         .easing(TWEEN.Easing.Quadratic.InOut)
