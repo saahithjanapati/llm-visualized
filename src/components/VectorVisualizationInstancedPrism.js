@@ -14,7 +14,8 @@ import { mapValueToColor } from '../utils/colors.js';
 // Helper for monochromatic colors
 function mapValueToMonochromaticColor(value, baseHue, saturation, minLightness, maxLightness) {
     // Assuming value is 0-1 (e.g., normalized data point or progress)
-    const lightness = THREE.MathUtils.lerp(minLightness, maxLightness, value);
+    const t = THREE.MathUtils.clamp(value, 0, 1);
+    const lightness = THREE.MathUtils.lerp(minLightness, maxLightness, t);
     return new THREE.Color().setHSL(baseHue, saturation, lightness);
 }
 
@@ -30,18 +31,19 @@ const _prismDepthScale = 1.5;
 const __halfBaseWidth = (PRISM_BASE_WIDTH * _prismWidthScale) / 2;
 
 export class VectorVisualizationInstancedPrism {
-    constructor(initialData = null, initialPosition = new THREE.Vector3(0, 0, 0), numSubsections = 30) {
+    constructor(initialData = null, initialPosition = new THREE.Vector3(0, 0, 0), numSubsections = 30, instanceCount = VECTOR_LENGTH_PRISM) {
         this.group = new THREE.Group();
         this.group.position.copy(initialPosition);
         this.group.userData.label = 'Vector';
 
+        this.instanceCount = Math.max(1, Math.floor(instanceCount));
         this.rawData = initialData || this.generateTestData();
         this.normalizedData = []; // Will be populated by updateDataInternal
         this.numSubsections = numSubsections;
         this.currentKeyColors = []; // To store the current random key colors for subsections
 
         // For storing individual instance animation states if needed by an external controller
-        this.instanceUserData = Array(VECTOR_LENGTH_PRISM).fill(null).map(() => ({})); 
+        this.instanceUserData = Array(this.instanceCount).fill(null).map(() => ({})); 
 
         // Create a material per vector so we can vary opacity independently,
         // but force program reuse by returning a stable cache key.
@@ -83,7 +85,7 @@ varying float vGradientT;`
         };
 
         const instancedGeometry = basePrismGeometry.clone();
-        this.mesh = new THREE.InstancedMesh(instancedGeometry, material, VECTOR_LENGTH_PRISM);
+        this.mesh = new THREE.InstancedMesh(instancedGeometry, material, this.instanceCount);
         this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
         this.group.add(this.mesh);
         
@@ -96,8 +98,8 @@ varying float vGradientT;`
         // ------------------------------------------------------------
 
         // Create (r,g,b) attribute arrays – one entry per instance
-        const colorStartArr = new Float32Array(VECTOR_LENGTH_PRISM * 3);
-        const colorEndArr   = new Float32Array(VECTOR_LENGTH_PRISM * 3);
+        const colorStartArr = new Float32Array(this.instanceCount * 3);
+        const colorEndArr   = new Float32Array(this.instanceCount * 3);
         this.mesh.geometry.setAttribute('colorStart', new THREE.InstancedBufferAttribute(colorStartArr, 3));
         this.mesh.geometry.setAttribute('colorEnd',   new THREE.InstancedBufferAttribute(colorEndArr,   3));
 
@@ -109,7 +111,7 @@ varying float vGradientT;`
 
     generateTestData() {
         const data = [];
-        for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
+        for (let i = 0; i < this.instanceCount; i++) {
             data.push(Math.random() * 2 - 1); // Values between -1 and 1 for more dynamic range
         }
         return data;
@@ -174,9 +176,9 @@ varying float vGradientT;`
         // Use the stored key colors
         if (this.currentKeyColors.length === 0) this._generateKeyColors();
 
-        for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
+        for (let i = 0; i < this.instanceCount; i++) {
             // Apply fixed, uniform dimensions
-            const x = computeCenteredPrismX(i);
+            const x = computeCenteredPrismX(i, this.instanceCount, _prismWidthScale);
             dummy.scale.set(_prismWidthScale, _uniformCalculatedHeight, _prismDepthScale);
             dummy.position.set(x, _uniformCalculatedHeight / 2, 0); 
             dummy.updateMatrix();
@@ -188,7 +190,7 @@ varying float vGradientT;`
 
             // Determine gradient edge colours
             const leftColor  = this.getDefaultColorForIndex(Math.max(0, i - 1));
-            const rightColor = this.getDefaultColorForIndex(Math.min(VECTOR_LENGTH_PRISM - 1, i + 1));
+            const rightColor = this.getDefaultColorForIndex(Math.min(this.instanceCount - 1, i + 1));
 
             // Store into instanced buffer attributes
             colorStartAttr.setXYZ(i, leftColor.r, leftColor.g, leftColor.b);
@@ -210,7 +212,7 @@ varying float vGradientT;`
 
     // Updates the visual appearance of a single instance for animation purposes
     setInstanceAppearance(index, yOffset, tempColor, newScale = null) {
-        if (index < 0 || index >= VECTOR_LENGTH_PRISM) return;
+        if (index < 0 || index >= this.instanceCount) return;
         const currentMatrix = new THREE.Matrix4();
         this.mesh.getMatrixAt(index, currentMatrix);
         const position = new THREE.Vector3();
@@ -218,7 +220,7 @@ varying float vGradientT;`
         const scale = new THREE.Vector3();
         currentMatrix.decompose(position, quaternion, scale);
         
-        const baseX = computeCenteredPrismX(index);
+        const baseX = computeCenteredPrismX(index, this.instanceCount, _prismWidthScale);
         const basePrismYPos = _uniformCalculatedHeight / 2; // Assuming yOffset is additive to this base for animation
 
         position.set(baseX, basePrismYPos + yOffset, 0);
@@ -258,10 +260,10 @@ varying float vGradientT;`
 
     // Resets a single instance to its default appearance (fixed dimensions, subsection color)
     resetInstanceAppearance(index) {
-        if (index < 0 || index >= VECTOR_LENGTH_PRISM) return;
+        if (index < 0 || index >= this.instanceCount) return;
         
         const dummy = new THREE.Object3D();
-        const x = computeCenteredPrismX(index);
+        const x = computeCenteredPrismX(index, this.instanceCount, _prismWidthScale);
         dummy.scale.set(_prismWidthScale, _uniformCalculatedHeight, _prismDepthScale);
         dummy.position.set(x, _uniformCalculatedHeight / 2, 0); 
         dummy.updateMatrix();
@@ -271,7 +273,7 @@ varying float vGradientT;`
     // Renamed from updateData. This is for internal data state update only.
     updateDataInternal(newData) {
         // Accept data arrays of any length – the visual component will still use
-        // a fixed physical prism count (VECTOR_LENGTH_PRISM).  If fewer data
+        // a fixed physical prism count (this.instanceCount).  If fewer data
         // points are supplied than prisms, colours/heights default gracefully.
         if (!newData || !Array.isArray(newData) || newData.length === 0) {
             this.rawData = this.generateTestData();
@@ -335,12 +337,12 @@ varying float vGradientT;`
                 this.currentKeyColors.push(new THREE.Color(0.5, 0.5, 0.5));
                 this.currentKeyColors.push(new THREE.Color(0.5, 0.5, 0.5));
             }
-        } else if (this.numSubsections === 0 && this.currentKeyColors.length < 1 && VECTOR_LENGTH_PRISM > 0) {
+        } else if (this.numSubsections === 0 && this.currentKeyColors.length < 1 && this.instanceCount > 0) {
              this.currentKeyColors.push(new THREE.Color(0.5,0.5,0.5)); // Default single color
         }
 
 
-        for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
+        for (let i = 0; i < this.instanceCount; i++) {
             this.mesh.setColorAt(i, this.getDefaultColorForIndex(i));
 
             // Also refresh gradient edge colours so updates to key colours propagate
@@ -348,7 +350,7 @@ varying float vGradientT;`
             const colorEndAttr   = this.mesh.geometry.getAttribute('colorEnd');
             if (colorStartAttr && colorEndAttr) {
                 const leftColor  = this.getDefaultColorForIndex(Math.max(0, i - 1));
-                const rightColor = this.getDefaultColorForIndex(Math.min(VECTOR_LENGTH_PRISM - 1, i + 1));
+                const rightColor = this.getDefaultColorForIndex(Math.min(this.instanceCount - 1, i + 1));
                 colorStartAttr.setXYZ(i, leftColor.r, leftColor.g, leftColor.b);
                 colorEndAttr.setXYZ(  i, rightColor.r, rightColor.g, rightColor.b);
             }
@@ -439,14 +441,14 @@ varying float vGradientT;`
 
     getDefaultColorForIndex(index) {
         const tempColor = new THREE.Color();
-        if (index < 0 || index >= VECTOR_LENGTH_PRISM || this.currentKeyColors.length === 0) {
+        if (index < 0 || index >= this.instanceCount || this.currentKeyColors.length === 0) {
              return tempColor.setRGB(0.5, 0.5, 0.5); 
         }
         const currentNumSubsections = Math.max(1, this.numSubsections);
-        if (VECTOR_LENGTH_PRISM <= 1) {
+        if (this.instanceCount <= 1) {
             tempColor.copy(this.currentKeyColors[0]);
         } else {
-            const globalProgress = index / (VECTOR_LENGTH_PRISM - 1);
+            const globalProgress = index / (this.instanceCount - 1);
             const segmentProgress = globalProgress * currentNumSubsections;
             const idx1 = Math.floor(segmentProgress);
             const safeIdx1 = Math.min(idx1, this.currentKeyColors.length - 1);
@@ -482,9 +484,9 @@ varying float vGradientT;`
         if (!this.mesh) return;
         const dummy = new THREE.Object3D(); // Re-use a single dummy
 
-        for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
+        for (let i = 0; i < this.instanceCount; i++) {
             // Base X position for this instance
-            const baseX = computeCenteredPrismX(i);
+            const baseX = computeCenteredPrismX(i, this.instanceCount, _prismWidthScale);
             
             // Apply new scale or default scale
             if (uniformScaleVec) {
@@ -522,17 +524,17 @@ varying float vGradientT;`
         // 3. Determine how many *grouped* prisms should be visible.  Each
         //    prism now represents PRISM_DIMENSIONS_PER_UNIT real dimensions.
         let groupedVisibleUnits = Math.ceil(numVisibleOutputUnits / PRISM_DIMENSIONS_PER_UNIT);
-        if (groupedVisibleUnits > VECTOR_LENGTH_PRISM) {
-            console.warn(`Grouped visible units (${groupedVisibleUnits}) exceed VECTOR_LENGTH_PRISM (${VECTOR_LENGTH_PRISM}). Clamping.`);
-            groupedVisibleUnits = VECTOR_LENGTH_PRISM;
+        if (groupedVisibleUnits > this.instanceCount) {
+            console.warn(`Grouped visible units (${groupedVisibleUnits}) exceed instanceCount (${this.instanceCount}). Clamping.`);
+            groupedVisibleUnits = this.instanceCount;
         }
-        const startIndexVisible = Math.floor((VECTOR_LENGTH_PRISM - groupedVisibleUnits) / 2);
+        const startIndexVisible = Math.floor((this.instanceCount - groupedVisibleUnits) / 2);
         const endIndexVisible = startIndexVisible + groupedVisibleUnits - 1;
 
         // 4. Set appearance for all physical prisms
         const dummy = new THREE.Object3D();
-        for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
-            const baseX = computeCenteredPrismX(i);
+        for (let i = 0; i < this.instanceCount; i++) {
+            const baseX = computeCenteredPrismX(i, this.instanceCount, _prismWidthScale);
             if (i >= startIndexVisible && i <= endIndexVisible) {
                 // This is a VISIBLE central prism
                 dummy.scale.set(_prismWidthScale, _uniformCalculatedHeight, _prismDepthScale); // Standard scale

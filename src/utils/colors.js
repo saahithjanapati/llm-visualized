@@ -5,14 +5,15 @@ import { VECTOR_LENGTH } from './constants.js'; // Added import for logging
 export function mapValueToColor(value) {
     // console.log(`mapValueToColor input value: ${value}`); // Log input value
 
-    // Clamp or scale the normalized value to the -1 to 1 range for hue mapping
-    // Simple clamping for now:
-    const clampedValue = Math.max(-1, Math.min(1, value / 2)); // Divide by 2 assuming norm keeps most data in [-2, 2]
+    // Clamp raw values to the visualised range before mapping to hue.
+    const clampedInput = Math.max(-2, Math.min(2, value));
+    const clampedValue = clampedInput / 2; // Map [-2, 2] -> [-1, 1] for hue
 
-    const hue = (clampedValue + 1) / 2; // Full hue range based on clamped value
+    // Map [-1, 1] -> [0, 0.8] so the spectrum ends at purple (no wrap to red).
+    const hue = (clampedValue + 1) * 0.4;
     const saturation = 1.0;
-    // Increase lightness for brighter instances
-    const lightness = 0.4;
+    // Keep lightness higher so colors remain readable on black backgrounds.
+    const lightness = 0.6;
     const finalColor = new THREE.Color().setHSL(hue, saturation, lightness);
     // console.log(`mapValueToColor output: value=${value}, clamped=${clampedValue}, hue=${hue}, color R=${finalColor.r} G=${finalColor.g} B=${finalColor.b}`);
     return finalColor;
@@ -46,8 +47,9 @@ export function mapValueToColor_LOG(value, index) {
     }
 
     // Original logic from mapValueToColor
-    const clampedValue = Math.max(-1, Math.min(1, value / 2));
-    const hue = (clampedValue + 1) / 2;
+    const clampedInput = Math.max(-2, Math.min(2, value));
+    const clampedValue = clampedInput / 2;
+    const hue = (clampedValue + 1) * 0.4;
     const saturation = 1.0;
     const lightness = 0.6;
     const finalColor = new THREE.Color().setHSL(hue, saturation, lightness);

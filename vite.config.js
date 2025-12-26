@@ -51,6 +51,7 @@ export default defineConfig({
             mlpWeightMatrixMover: resolve(__dirname, 'tests/mlp_weight_matrix_mover.html'),
             embeddingMlp: resolve(__dirname, 'tests/embedding_mlp_test.html'),
             captureViewer: resolve(__dirname, 'tests/capture-viewer.html'),
+            captureVectorViewer: resolve(__dirname, 'tests/capture-vector-viewer.html'),
 
         }
     } 
