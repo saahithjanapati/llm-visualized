@@ -29,6 +29,7 @@ import { initIntroAnimation } from '../src/ui/introAnimation.js';
 import { initStatusOverlay } from '../src/ui/statusOverlay.js';
 import { initSettingsModal } from '../src/ui/settingsModal.js';
 import { initPauseButton } from '../src/ui/pauseButton.js';
+import { initSelectionPanel } from '../src/ui/selectionPanel.js';
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
 
@@ -496,3 +497,10 @@ initIntroAnimation(pipeline, gptCanvas);
 initStatusOverlay(pipeline, NUM_LAYERS);
 initPauseButton(pipeline);
 initSettingsModal(pipeline);
+
+const selectionPanel = initSelectionPanel();
+if (pipeline.engine && typeof pipeline.engine.setRaycastSelectionHandler === 'function') {
+    pipeline.engine.setRaycastSelectionHandler(selection => {
+        selectionPanel.handleSelection(selection);
+    });
+}

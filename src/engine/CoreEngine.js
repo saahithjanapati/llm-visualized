@@ -107,6 +107,9 @@ export class CoreEngine {
         this._raycastRaf = null;
         this._lastPointerX = null;
         this._lastPointerY = null;
+        this._raycastSelectionHandler = null;
+        this._clickTapData = null;
+        this._clickTapMoveThresholdSq = 36; // ~6px movement allowance
 
         // Hover label DOM element (similar styling to status overlay)
         this._hoverLabelDiv = document.createElement('div');
@@ -210,6 +213,8 @@ export class CoreEngine {
         // ────────────────────────────────────────────────────────────────────
         window.addEventListener('resize', this._onResize);
         document.addEventListener('visibilitychange', this._onVisibility);
+        window.addEventListener('blur', this._onWindowBlur);
+        window.addEventListener('pagehide', this._onWindowBlur);
 
         // Internal state
         this._clock  = new THREE.Clock();
@@ -253,6 +258,7 @@ export class CoreEngine {
         this._animate   = this._animate.bind(this);
         this._onResize  = this._onResize.bind(this);
         this._onVisibility = this._onVisibility.bind(this);
+        this._onWindowBlur = this._onWindowBlur.bind(this);
 
         // Kick off RAF loop
         requestAnimationFrame(this._animate);
@@ -271,6 +277,11 @@ export class CoreEngine {
         if (!this._raycastingEnabled && this._hoverLabelDiv) {
             this._hoverLabelDiv.style.display = 'none';
         }
+    }
+
+    /** Register a handler for click/tap selection via raycasting. */
+    setRaycastSelectionHandler(handler) {
+        this._raycastSelectionHandler = (typeof handler === 'function') ? handler : null;
     }
 
     /**
@@ -330,6 +341,8 @@ export class CoreEngine {
     dispose() {
         window.removeEventListener('resize', this._onResize);
         document.removeEventListener('visibilitychange', this._onVisibility);
+        window.removeEventListener('blur', this._onWindowBlur);
+        window.removeEventListener('pagehide', this._onWindowBlur);
         if (this.controls) {
             this.controls.removeEventListener('change', this._updateCameraFarFromControls);
             this.controls.dispose();
@@ -380,16 +393,71 @@ export class CoreEngine {
     };
 
     _onVisibility = () => {
-        document.hidden ? this.pause('visibility') : this.resume('visibility');
+        if (document.hidden) {
+            this.pause('visibility');
+            this._resetControlsState();
+        } else {
+            this.resume('visibility');
+        }
+    };
+
+    _onWindowBlur = () => {
+        this._resetControlsState();
+    };
+
+    _resetControlsState = () => {
+        const controls = this.controls;
+        if (!controls) return;
+        const domElement = controls.domElement;
+        const pointers = Array.isArray(controls._pointers) ? controls._pointers : null;
+        if (domElement && typeof domElement.releasePointerCapture === 'function' && pointers) {
+            for (const pointerId of pointers) {
+                try {
+                    domElement.releasePointerCapture(pointerId);
+                } catch (_) { /* best-effort */ }
+            }
+        }
+        if (pointers) pointers.length = 0;
+        if (controls._pointerPositions && typeof controls._pointerPositions === 'object') {
+            controls._pointerPositions = {};
+        }
+        if (typeof controls._controlActive === 'boolean') {
+            controls._controlActive = false;
+        }
+        if (typeof controls.state === 'number') {
+            controls.state = -1;
+        }
+        this._isUserNavigating = false;
+        if (this._hoverLabelDiv) {
+            this._hoverLabelDiv.style.display = 'none';
+        }
+        if (typeof controls.dispatchEvent === 'function') {
+            controls.dispatchEvent({ type: 'end' });
+        }
     };
 
     _onPointerDown = (event) => {
-        if (event.pointerType !== 'touch') return;
-        // Only track the primary tap candidate to avoid conflicts with multi-touch gestures
-        if (this._touchTapData && this._touchTapData.id !== event.pointerId) return;
+        if (event.pointerType === 'touch') {
+            // Only track the primary tap candidate to avoid conflicts with multi-touch gestures
+            if (this._touchTapData && this._touchTapData.id !== event.pointerId) return;
+            const { clientX, clientY } = event;
+            if (typeof clientX !== 'number' || typeof clientY !== 'number') return;
+            this._touchTapData = {
+                id: event.pointerId,
+                startX: clientX,
+                startY: clientY,
+                lastX: clientX,
+                lastY: clientY,
+                moved: false
+            };
+            return;
+        }
+
+        if (event.button !== 0) return;
+        if (this._clickTapData && this._clickTapData.id !== event.pointerId) return;
         const { clientX, clientY } = event;
         if (typeof clientX !== 'number' || typeof clientY !== 'number') return;
-        this._touchTapData = {
+        this._clickTapData = {
             id: event.pointerId,
             startX: clientX,
             startY: clientY,
@@ -403,23 +471,42 @@ export class CoreEngine {
         if (this._touchTapData && this._touchTapData.id === event.pointerId) {
             this._touchTapData = null;
         }
+        if (this._clickTapData && this._clickTapData.id === event.pointerId) {
+            this._clickTapData = null;
+        }
     };
 
     _onPointerUp = (event) => {
-        if (event.pointerType !== 'touch') return;
-        const tapData = this._touchTapData;
-        const isSamePointer = tapData && tapData.id === event.pointerId;
-        const clientX = typeof event.clientX === 'number' ? event.clientX : (isSamePointer ? tapData.lastX : null);
-        const clientY = typeof event.clientY === 'number' ? event.clientY : (isSamePointer ? tapData.lastY : null);
-        const shouldTriggerTap = Boolean(isSamePointer && !tapData.moved && clientX !== null && clientY !== null);
-        this._touchTapData = null;
+        if (event.pointerType === 'touch') {
+            const tapData = this._touchTapData;
+            const isSamePointer = tapData && tapData.id === event.pointerId;
+            const clientX = typeof event.clientX === 'number' ? event.clientX : (isSamePointer ? tapData.lastX : null);
+            const clientY = typeof event.clientY === 'number' ? event.clientY : (isSamePointer ? tapData.lastY : null);
+            const shouldTriggerTap = Boolean(isSamePointer && !tapData.moved && clientX !== null && clientY !== null);
+            this._touchTapData = null;
 
-        if (!shouldTriggerTap) return;
+            if (!shouldTriggerTap) return;
+            const x = clientX;
+            const y = clientY;
+            // Defer to the next frame to give OrbitControls a moment to emit its "end" event
+            requestAnimationFrame(() => {
+                this._performRaycastAt(x, y, { force: true });
+                this._performSelectionAt(x, y, { force: true });
+            });
+            return;
+        }
+
+        const clickData = this._clickTapData;
+        const isSamePointer = clickData && clickData.id === event.pointerId;
+        const clientX = typeof event.clientX === 'number' ? event.clientX : (isSamePointer ? clickData.lastX : null);
+        const clientY = typeof event.clientY === 'number' ? event.clientY : (isSamePointer ? clickData.lastY : null);
+        const shouldTriggerClick = Boolean(isSamePointer && !clickData.moved && clientX !== null && clientY !== null);
+        this._clickTapData = null;
+        if (!shouldTriggerClick) return;
         const x = clientX;
         const y = clientY;
-        // Defer to the next frame to give OrbitControls a moment to emit its "end" event
         requestAnimationFrame(() => {
-            this._performRaycastAt(x, y, { force: true });
+            this._performSelectionAt(x, y, { force: true });
         });
     };
 
@@ -445,10 +532,67 @@ export class CoreEngine {
                 }
             }
         }
+        if (event.pointerType !== 'touch' && this._clickTapData && this._clickTapData.id === event.pointerId) {
+            if (typeof event.clientX === 'number' && typeof event.clientY === 'number') {
+                this._clickTapData.lastX = event.clientX;
+                this._clickTapData.lastY = event.clientY;
+                if (!this._clickTapData.moved) {
+                    const dx = event.clientX - this._clickTapData.startX;
+                    const dy = event.clientY - this._clickTapData.startY;
+                    if (dx * dx + dy * dy > this._clickTapMoveThresholdSq) {
+                        this._clickTapData.moved = true;
+                    }
+                }
+            }
+        }
         this._lastPointerX = event.clientX;
         this._lastPointerY = event.clientY;
         this._scheduleRaycast();
     };
+
+    _resolveRaycastLabel(intersects) {
+        if (!intersects || !intersects.length) return null;
+        // Pass 1: Prefer detailed labels from merged K/V instanced meshes anywhere in the hit list
+        for (const hit of intersects) {
+            try {
+                const obj = hit.object;
+                if (obj && obj.isInstancedMesh) {
+                    // Walk up to find a MHSAAnimation context (via layer reference)
+                    for (const layer of this._layers) {
+                        if (!layer || !layer.mhsaAnimation) continue;
+                        const mhsa = layer.mhsaAnimation;
+                        if (typeof mhsa.decodeMergedKVIntersection === 'function') {
+                            const info = mhsa.decodeMergedKVIntersection(hit);
+                            if (info) {
+                                const headText = (typeof info.headIndex === 'number' && info.headIndex >= 0) ? `Head ${info.headIndex + 1}` : 'Head ?';
+                                const laneText = (typeof info.laneIndex === 'number' && info.laneIndex >= 0) ? `Lane ${info.laneIndex + 1}` : 'Lane ?';
+                                const catText  = info.category === 'V' ? 'Value (Red)' : 'Key (Green)';
+                                return {
+                                    label: `${catText}\n${headText} • ${laneText}`,
+                                    hit,
+                                    info,
+                                    kind: 'mergedKV'
+                                };
+                            }
+                        }
+                    }
+                }
+            } catch (_) { /* non-fatal */ }
+        }
+
+        // Pass 2: Fallback – show the first generic label found
+        for (const hit of intersects) {
+            let obj = hit.object;
+            while (obj) {
+                const lbl = obj.userData?.label || obj.name;
+                if (lbl && lbl !== 'Weight Matrix') {
+                    return { label: lbl, hit, object: obj, kind: 'label' };
+                }
+                obj = obj.parent;
+            }
+        }
+        return null;
+    }
 
     _performRaycastAt(clientX, clientY, { force = false } = {}) {
         if (!this._raycastingEnabled) return;
@@ -468,50 +612,43 @@ export class CoreEngine {
         }
 
         const intersects = this._raycaster.intersectObjects(this._raycastRoots, true);
-        // Pass 1: Prefer detailed labels from merged K/V instanced meshes anywhere in the hit list
-        for (const hit of intersects) {
-            try {
-                const obj = hit.object;
-                if (obj && obj.isInstancedMesh) {
-                    // Walk up to find a MHSAAnimation context (via layer reference)
-                    for (const layer of this._layers) {
-                        if (!layer || !layer.mhsaAnimation) continue;
-                        const mhsa = layer.mhsaAnimation;
-                        if (typeof mhsa.decodeMergedKVIntersection === 'function') {
-                            const info = mhsa.decodeMergedKVIntersection(hit);
-                            if (info) {
-                                const headText = (typeof info.headIndex === 'number' && info.headIndex >= 0) ? `Head ${info.headIndex + 1}` : 'Head ?';
-                                const laneText = (typeof info.laneIndex === 'number' && info.laneIndex >= 0) ? `Lane ${info.laneIndex + 1}` : 'Lane ?';
-                                const catText  = info.category === 'V' ? 'Value (Red)' : 'Key (Green)';
-                                this._hoverLabelDiv.textContent = `${catText}\n${headText} • ${laneText}`;
-                                this._hoverLabelDiv.style.left = `${clientX + 12}px`;
-                                this._hoverLabelDiv.style.top  = `${clientY + 12}px`;
-                                this._hoverLabelDiv.style.display = 'block';
-                                return; // Prefer detailed merged K/V hit over any generic labels
-                            }
-                        }
-                    }
-                }
-            } catch (_) { /* non-fatal */ }
-        }
-
-        // Pass 2: Fallback – show the first generic label found
-        for (const hit of intersects) {
-            let obj = hit.object;
-            while (obj) {
-                const lbl = obj.userData?.label || obj.name;
-                if (lbl && lbl !== 'Weight Matrix') {
-                    this._hoverLabelDiv.textContent = lbl;
-                    this._hoverLabelDiv.style.left = `${clientX + 12}px`;
-                    this._hoverLabelDiv.style.top  = `${clientY + 12}px`;
-                    this._hoverLabelDiv.style.display = 'block';
-                    return;
-                }
-                obj = obj.parent;
-            }
+        const resolved = this._resolveRaycastLabel(intersects);
+        if (resolved && resolved.label) {
+            this._hoverLabelDiv.textContent = resolved.label;
+            this._hoverLabelDiv.style.left = `${clientX + 12}px`;
+            this._hoverLabelDiv.style.top  = `${clientY + 12}px`;
+            this._hoverLabelDiv.style.display = 'block';
+            return;
         }
         // No intersection with a labelled object – hide overlay.
         this._hoverLabelDiv.style.display = 'none';
+    }
+
+    _performSelectionAt(clientX, clientY, { force = false } = {}) {
+        if (!this._raycastingEnabled) return;
+        if (!force && this._isUserNavigating) return;
+        if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return;
+
+        const rect = this._canvasRect;
+        if (!rect || !rect.width || !rect.height) return;
+
+        this._pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+        this._pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+        this._raycaster.setFromCamera(this._pointer, this.camera);
+        if (!this._raycastRoots.length) return;
+
+        const intersects = this._raycaster.intersectObjects(this._raycastRoots, true);
+        const resolved = this._resolveRaycastLabel(intersects);
+        if (!resolved || !resolved.label) return;
+        if (this._raycastSelectionHandler) {
+            this._raycastSelectionHandler({
+                label: resolved.label,
+                kind: resolved.kind || null,
+                info: resolved.info || null,
+                object: resolved.object || resolved.hit?.object || null,
+                hit: resolved.hit || null
+            });
+        }
     }
 
     _scheduleRaycast() {
