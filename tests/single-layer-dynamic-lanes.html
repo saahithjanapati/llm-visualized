@@ -157,7 +157,7 @@
           for(let i=0;i<laneCount;i++){
            const z=(i-(laneCount-1)/2)*VECTOR_DEPTH_SPACING;
            const wm=new WeightMatrixVisualization(null,new THREE.Vector3(BRANCH_X,y,z),params.width,params.height,VECTOR_DEPTH_SPACING,params.topWidthFactor,params.cornerRadius,1,params.slitWidth,params.slitDepthFactor,params.slitBottomWidthFactor,params.slitTopWidthFactor);
-           const orange=new THREE.Color(0xb07c13);
+           const orange=new THREE.Color(0xc07a12);
            wm.setColor(orange);
            wm.setEmissive(orange,0.5);
            wm.setMaterialProperties({ opacity:1.0, transparent:false });
