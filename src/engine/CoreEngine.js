@@ -86,6 +86,12 @@ export class CoreEngine {
         // Improve crispness on HiDPI displays with a higher cap; can be tuned via constants.
         const dprCap = resolveRenderDprCap();
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, dprCap));
+        // Avoid long-press text selection/context menus hijacking touch controls.
+        this.renderer.domElement.style.touchAction = 'none';
+        this.renderer.domElement.style.userSelect = 'none';
+        this.renderer.domElement.style.webkitUserSelect = 'none';
+        this.renderer.domElement.style.webkitTouchCallout = 'none';
+        this.renderer.domElement.style.msUserSelect = 'none';
 
         // Cache canvas bounds so pointer events can reuse them without forcing
         // a layout read on every move event. Updated via the resize listener.
@@ -98,6 +104,9 @@ export class CoreEngine {
         this._pointer   = new THREE.Vector2();
         this._raycastingEnabled = true; // can be toggled via public API
         this._raycastRoots = [];
+        this._raycastRaf = null;
+        this._lastPointerX = null;
+        this._lastPointerY = null;
 
         // Hover label DOM element (similar styling to status overlay)
         this._hoverLabelDiv = document.createElement('div');
@@ -138,6 +147,11 @@ export class CoreEngine {
         // Bind pointer up handler for touch devices so taps trigger labels
         this._onPointerUp = this._onPointerUp.bind(this);
         this.renderer.domElement.addEventListener('pointerup', this._onPointerUp);
+        // Prevent long-press selection and context menus on touch devices.
+        this._onContextMenu = this._onContextMenu.bind(this);
+        this.renderer.domElement.addEventListener('contextmenu', this._onContextMenu);
+        this._onSelectStart = this._onSelectStart.bind(this);
+        this.renderer.domElement.addEventListener('selectstart', this._onSelectStart);
 
         // ────────────────────────────────────────────────────────────────────
         // Post-processing (Bloom for emissive flashes)
@@ -337,6 +351,8 @@ export class CoreEngine {
         this.renderer.domElement.removeEventListener('pointerdown', this._onPointerDown);
         this.renderer.domElement.removeEventListener('pointercancel', this._onPointerCancel);
         this.renderer.domElement.removeEventListener('pointerup', this._onPointerUp);
+        this.renderer.domElement.removeEventListener('contextmenu', this._onContextMenu);
+        this.renderer.domElement.removeEventListener('selectstart', this._onSelectStart);
         if (this._hoverLabelDiv && this._hoverLabelDiv.parentElement) {
             this._hoverLabelDiv.parentElement.removeChild(this._hoverLabelDiv);
         }
@@ -345,6 +361,10 @@ export class CoreEngine {
                 TWEEN.Tween.prototype.start = this._tweenStartRestore;
             } catch (_) { /* restore best-effort */ }
             this._tweenStartRestore = null;
+        }
+        if (this._raycastRaf !== null && typeof cancelAnimationFrame === 'function') {
+            cancelAnimationFrame(this._raycastRaf);
+            this._raycastRaf = null;
         }
     }
 
@@ -403,6 +423,14 @@ export class CoreEngine {
         });
     };
 
+    _onContextMenu = (event) => {
+        event.preventDefault();
+    };
+
+    _onSelectStart = (event) => {
+        event.preventDefault();
+    };
+
     _onPointerMove = (event) => {
         if (event.pointerType === 'touch' && this._touchTapData && this._touchTapData.id === event.pointerId) {
             if (typeof event.clientX === 'number' && typeof event.clientY === 'number') {
@@ -417,7 +445,9 @@ export class CoreEngine {
                 }
             }
         }
-        this._performRaycastAt(event.clientX, event.clientY);
+        this._lastPointerX = event.clientX;
+        this._lastPointerY = event.clientY;
+        this._scheduleRaycast();
     };
 
     _performRaycastAt(clientX, clientY, { force = false } = {}) {
@@ -482,6 +512,15 @@ export class CoreEngine {
         }
         // No intersection with a labelled object – hide overlay.
         this._hoverLabelDiv.style.display = 'none';
+    }
+
+    _scheduleRaycast() {
+        if (this._raycastRaf !== null) return;
+        if (typeof requestAnimationFrame !== 'function') return;
+        this._raycastRaf = requestAnimationFrame(() => {
+            this._raycastRaf = null;
+            this._performRaycastAt(this._lastPointerX, this._lastPointerY);
+        });
     }
 
     _updateCameraFarFromControls() {

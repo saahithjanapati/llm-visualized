@@ -76,6 +76,18 @@ const COLOR_INACTIVE_COMPONENT = new THREE.Color(INACTIVE_COMPONENT_COLOR);
 const LN_INTERNAL_TRAIL_MIN_SEGMENT = 0.15;
 const LN_MATERIAL_EPSILON = 1e-4;
 
+function freezeStaticTransforms(object3d, includeChildren = false) {
+    if (!object3d) return;
+    object3d.matrixAutoUpdate = false;
+    object3d.updateMatrix();
+    if (!includeChildren || typeof object3d.traverse !== 'function') return;
+    object3d.traverse(child => {
+        if (child === object3d) return;
+        child.matrixAutoUpdate = false;
+        child.updateMatrix();
+    });
+}
+
 function applyLayerNormMaterial(group, targetColor, targetOpacity, state) {
     if (!group || !state) return;
     const transparent = targetOpacity < 1.0;
@@ -197,6 +209,7 @@ export default class Gpt2Layer extends BaseLayer {
 
         // Offset root vertically for stack layout
         this.root.position.y = this.index * VERTICAL_SPACING + this.yOffset;
+        freezeStaticTransforms(this.root);
 
         const offsetX = BRANCH_X; // all branched components share this X
 
@@ -221,6 +234,7 @@ export default class Gpt2Layer extends BaseLayer {
         // Start fully opaque to avoid early depth-sorting costs.
         ln1.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
         this.root.add(ln1.group);
+        freezeStaticTransforms(ln1.group, true);
 
         const ln1TopY = ln1CenterY + LN_PARAMS.height / 2;
         this.ln1TopY = ln1TopY;
@@ -267,6 +281,7 @@ export default class Gpt2Layer extends BaseLayer {
         ln2.setColor(inactiveDark);
         ln2.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
         this.root.add(ln2.group);
+        freezeStaticTransforms(ln2.group, true);
 
         const ln2TopY = ln2CenterY + LN_PARAMS.height / 2;
 
@@ -308,6 +323,7 @@ export default class Gpt2Layer extends BaseLayer {
             if (mlpUp.backCapMesh)  mlpUp.backCapMesh.userData.label  = lbl;
         }
         this.root.add(mlpUp.group);
+        freezeStaticTransforms(mlpUp.group, true);
 
         // 5) MLP Down-projection matrix (same orange)
         const mlpDownCenterY = mlpUpCenterY + MLP_MATRIX_PARAMS_UP.height / 2 + MLP_INTER_MATRIX_GAP + MLP_MATRIX_PARAMS_DOWN.height / 2;
@@ -335,6 +351,7 @@ export default class Gpt2Layer extends BaseLayer {
             if (mlpDown.backCapMesh)  mlpDown.backCapMesh.userData.label  = lbl;
         }
         this.root.add(mlpDown.group);
+        freezeStaticTransforms(mlpDown.group, true);
 
         // ---------- Residual vectors (original stream) ----------
         this.lanes = [];
