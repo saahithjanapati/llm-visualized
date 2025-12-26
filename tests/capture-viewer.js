@@ -410,6 +410,13 @@ function renderArchitectureTree() {
         root.appendChild(layersGroup.details);
     }
 
+    const finalResidual = resolvePath(state.data, activationsPath.concat('final_residual'));
+    if (finalResidual) {
+        const finalResidualGroup = createGroup('Final residual stream', null, false, activationsPath.concat('final_residual'));
+        addPath(finalResidualGroup.container, 'Residual before final LayerNorm', activationsPath.concat('final_residual'));
+        root.appendChild(finalResidualGroup.details);
+    }
+
     const finalLn = resolvePath(state.data, activationsPath.concat('final_layernorm'));
     if (finalLn) {
         const finalGroup = createGroup('Final layernorm', null, false, activationsPath.concat('final_layernorm'));

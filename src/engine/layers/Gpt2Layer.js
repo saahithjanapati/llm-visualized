@@ -74,6 +74,57 @@ const COLOR_BRIGHT_YELLOW = new THREE.Color(0xffffff);
 const COLOR_INACTIVE_COMPONENT = new THREE.Color(INACTIVE_COMPONENT_COLOR);
 
 const LN_INTERNAL_TRAIL_MIN_SEGMENT = 0.15;
+const LN_MATERIAL_EPSILON = 1e-4;
+
+function applyLayerNormMaterial(group, targetColor, targetOpacity, state) {
+    if (!group || !state) return;
+    const transparent = targetOpacity < 1.0;
+    const hasState = state.initialized === true;
+    const colorChanged = !hasState || !state.color.equals(targetColor);
+    const opacityChanged = !hasState || Math.abs((state.opacity ?? 0) - targetOpacity) > LN_MATERIAL_EPSILON;
+    const transparentChanged = !hasState || state.transparent !== transparent;
+
+    if (!colorChanged && !opacityChanged && !transparentChanged) return;
+
+    state.color.copy(targetColor);
+    state.opacity = targetOpacity;
+    state.transparent = transparent;
+    state.initialized = true;
+
+    const children = group.children || [];
+    for (let i = 0; i < children.length; i++) {
+        const child = children[i];
+        if (!(child instanceof THREE.Mesh) || !child.material) continue;
+        if (Array.isArray(child.material)) {
+            child.material.forEach(mat => {
+                if (colorChanged) {
+                    mat.color.copy(targetColor);
+                    mat.emissive.copy(targetColor);
+                }
+                if (opacityChanged) {
+                    mat.opacity = targetOpacity;
+                }
+                if (transparentChanged) {
+                    mat.transparent = transparent;
+                    mat.needsUpdate = true;
+                }
+            });
+        } else {
+            const mat = child.material;
+            if (colorChanged) {
+                mat.color.copy(targetColor);
+                mat.emissive.copy(targetColor);
+            }
+            if (opacityChanged) {
+                mat.opacity = targetOpacity;
+            }
+            if (transparentChanged) {
+                mat.transparent = transparent;
+                mat.needsUpdate = true;
+            }
+        }
+    }
+}
 
 function simplePrismMultiply(srcVec, tgtVec, onComplete) {
     // instant product; flash white then call onComplete
@@ -125,6 +176,8 @@ export default class Gpt2Layer extends BaseLayer {
         this._ln2TargetColor = new THREE.Color();
         this._ln1LockedColor = new THREE.Color();
         this._ln1ColorLocked = false;
+        this._ln1MaterialState = { color: new THREE.Color(), opacity: 1.0, transparent: false, initialized: false };
+        this._ln2MaterialState = { color: new THREE.Color(), opacity: 1.0, transparent: false, initialized: false };
     }
 
     setProgressEmitter(emitter) { this._progressEmitter = emitter; }
@@ -442,17 +495,7 @@ export default class Gpt2Layer extends BaseLayer {
         }
 
         // Apply to mesh material(s)
-        if (this.ln1 && this.ln1.group) {
-            this.ln1.group.children.forEach(child => {
-                if (child instanceof THREE.Mesh && child.material) {
-                    child.material.color.copy(ln1TargetColor);
-                    child.material.emissive.copy(ln1TargetColor);
-                    child.material.transparent = targetOpacity < 1.0;
-                    child.material.opacity = targetOpacity;
-                    child.material.needsUpdate = true;
-                }
-            });
-        }
+        applyLayerNormMaterial(this.ln1 && this.ln1.group, ln1TargetColor, targetOpacity, this._ln1MaterialState);
 
         // ────────────────────────────────────────────────────────────
         // Dynamic colour / opacity transition for the SECOND LayerNorm
@@ -504,17 +547,7 @@ export default class Gpt2Layer extends BaseLayer {
             }
 
             // Apply to LN2
-            if (this.ln2 && this.ln2.group) {
-                this.ln2.group.children.forEach(child => {
-                    if (child instanceof THREE.Mesh && child.material) {
-                        child.material.color.copy(ln2TargetColor);
-                        child.material.emissive.copy(ln2TargetColor);
-                        child.material.transparent = ln2TargetOpacity < 1.0;
-                        child.material.opacity = ln2TargetOpacity;
-                        child.material.needsUpdate = true;
-                    }
-                });
-            }
+            applyLayerNormMaterial(this.ln2 && this.ln2.group, ln2TargetColor, ln2TargetOpacity, this._ln2MaterialState);
         }
 
         // ────────────────────────────────────────────────────────────
@@ -558,7 +591,10 @@ export default class Gpt2Layer extends BaseLayer {
         //  guarantees that all lanes enter LN-1 in perfect lock-step.
         // ────────────────────────────────────────────────────────────────
         if (!this._ln1Start) {
-            const allLn1Ready = this.lanes.length && this.lanes.every(l => l && l.originalVec && l.originalVec.group && typeof l.branchStartY === 'number' && l.originalVec.group.position.y >= l.branchStartY);
+            const posAddDone = this.index !== 0 || this.lanes.every(l => !l.posVec || l.posAddComplete);
+            const allLn1Ready = this.lanes.length
+                && posAddDone
+                && this.lanes.every(l => l && l.originalVec && l.originalVec.group && typeof l.branchStartY === 'number' && l.originalVec.group.position.y >= l.branchStartY);
             if (allLn1Ready) {
                 this._ln1Start = true;
                 this._emitProgress();
@@ -1794,6 +1830,7 @@ export default class Gpt2Layer extends BaseLayer {
             const lane = this.lanes[this.lanes.length - 1];
 
             try {
+                lane.posAddComplete = false;
                 // Start at the TOP of the bottom positional embedding, horizontally to the right
                 const residualTopY = (LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2 + EMBEDDING_BOTTOM_TOP_ALIGN_OFFSET_FROM_LN1_BOTTOM) + EMBEDDING_BOTTOM_Y_ADJUST;
                 // The positional embedding matrix is shorter than the vocab matrix.  Drop the
@@ -1849,7 +1886,13 @@ export default class Gpt2Layer extends BaseLayer {
                                     // Stop extending trail once we arrive at residual stream
                                     try { if (posVec.userData) delete posVec.userData.trail; } catch (_) {}
                                     // Trigger addition: positional (above) travels DOWN into vocab (rising)
-                                    try { startPrismAdditionAnimation(posVec, originalVec); } catch (_) {}
+                                    try {
+                                        startPrismAdditionAnimation(posVec, originalVec, null, () => {
+                                            lane.posAddComplete = true;
+                                        });
+                                    } catch (_) {
+                                        lane.posAddComplete = true;
+                                    }
                                 })
                                 .start();
                         })

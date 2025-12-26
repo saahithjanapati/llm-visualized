@@ -59,6 +59,7 @@ export class StraightLineTrail {
         this._vertexCount = 0;
         this._prevPos = new THREE.Vector3();
         this._currentDir = null;
+        this._tmpDir = new THREE.Vector3();
         this._updateCounter = 0; // for deferred bounding-sphere update
     }
 
@@ -114,7 +115,8 @@ export class StraightLineTrail {
         if (this._vertexCount === 0) return; // not started yet
         if (pos.equals(this._prevPos)) return; // no movement
 
-        const dir = new THREE.Vector3().subVectors(pos, this._prevPos);
+        const dir = this._tmpDir;
+        dir.subVectors(pos, this._prevPos);
         const lenSq = dir.lengthSq();
         if (lenSq === 0) return;
         if (this._minSegmentDistanceSq > 0 && lenSq < this._minSegmentDistanceSq) return;
@@ -123,7 +125,8 @@ export class StraightLineTrail {
         const DOT_THRESHOLD = 0.999; // ~2.5° angle tolerance
         if (!this._currentDir) {
             // first real move – simply update last vertex
-            this._currentDir = dir.clone();
+            this._currentDir = new THREE.Vector3();
+            this._currentDir.copy(dir);
             this._writeVertex(this._vertexCount - 1, pos);
         } else if (dir.dot(this._currentDir) > DOT_THRESHOLD) {
             // still same direction – extend last vertex

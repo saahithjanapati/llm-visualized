@@ -134,6 +134,13 @@
             outline: none;
         }
 
+        .input-row label {
+            color: var(--muted);
+            font-size: 12px;
+            letter-spacing: 0.01em;
+            white-space: nowrap;
+        }
+
         .input-row button {
             border: none;
             background: var(--accent-2);
@@ -437,6 +444,16 @@
                     <label for="rotationSpeed">Rotation</label>
                     <input id="rotationSpeed" type="range" min="0" max="1.2" step="0.02" value="0.35" />
                     <span id="rotationValue">0.35</span>
+                </div>
+                <div class="input-row">
+                    <label for="backgroundSelect">Background</label>
+                    <select id="backgroundSelect">
+                        <option value="black" selected>Black</option>
+                        <option value="charcoal">Charcoal</option>
+                        <option value="slate">Slate</option>
+                        <option value="dusk">Dusk</option>
+                        <option value="warm">Warm</option>
+                    </select>
                 </div>
             </div>
 

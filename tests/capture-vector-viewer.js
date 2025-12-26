@@ -14,6 +14,7 @@ const searchInput = document.getElementById('searchInput');
 const rotationSpeedInput = document.getElementById('rotationSpeed');
 const rotationValue = document.getElementById('rotationValue');
 const viewButtons = Array.from(document.querySelectorAll('[data-view]'));
+const backgroundSelect = document.getElementById('backgroundSelect');
 
 const treeRoot = document.getElementById('treeRoot');
 const rawValuesEl = document.getElementById('rawValues');
@@ -49,6 +50,13 @@ const HEAD_SCHEMES = {
     v: { label: 'V', color: new THREE.Color(MHA_FINAL_V_COLOR) },
 };
 
+const BACKGROUND_PRESETS = {
+    black: 0x000000,
+    charcoal: 0x141414,
+    slate: 0x1a2128,
+    dusk: 0x191c2b,
+    warm: 0x1f1a14,
+};
 
 const state = {
     data: null,
@@ -73,6 +81,12 @@ function resetViewerCamera() {
     state.engine.controls.target.set(0, 0, 0);
     state.engine.notifyCameraUpdated();
     state.engine.controls.update();
+}
+
+function applySceneBackground(presetKey) {
+    if (!state.engine || !state.engine.scene) return;
+    const colorValue = BACKGROUND_PRESETS[presetKey] ?? BACKGROUND_PRESETS.black;
+    state.engine.scene.background = new THREE.Color(colorValue);
 }
 
 class VectorInspectorLayer extends BaseLayer {
@@ -606,6 +620,13 @@ function renderArchitectureTree() {
         root.appendChild(layersGroup.details);
     }
 
+    const finalResidual = resolvePath(state.data, activationsPath.concat('final_residual'));
+    if (finalResidual) {
+        const finalResidualGroup = createGroup('Final residual stream', null, false, activationsPath.concat('final_residual'));
+        addPath(finalResidualGroup.container, 'Residual before final LayerNorm', activationsPath.concat('final_residual'));
+        root.appendChild(finalResidualGroup.details);
+    }
+
     const finalLn = resolvePath(state.data, activationsPath.concat('final_layernorm'));
     if (finalLn) {
         const finalGroup = createGroup('Final layernorm', null, false, activationsPath.concat('final_layernorm'));
@@ -993,6 +1014,9 @@ function initEngine() {
     engine.controls.update();
     state.engine = engine;
     state.layer = layer;
+    if (backgroundSelect) {
+        applySceneBackground(backgroundSelect.value);
+    }
 }
 
 function attachHandlers() {
@@ -1015,6 +1039,12 @@ function attachHandlers() {
         rotationValue.textContent = speed.toFixed(2);
         if (state.layer) state.layer.setRotationSpeed(speed);
     });
+
+    if (backgroundSelect) {
+        backgroundSelect.addEventListener('change', () => {
+            applySceneBackground(backgroundSelect.value);
+        });
+    }
 
     viewButtons.forEach((button) => {
         button.addEventListener('click', () => {

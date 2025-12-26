@@ -44,6 +44,12 @@ export class VectorVisualizationInstancedPrism {
 
         // For storing individual instance animation states if needed by an external controller
         this.instanceUserData = Array(this.instanceCount).fill(null).map(() => ({})); 
+        // Reuse temp objects to avoid per-frame allocations in animation updates.
+        this._scratchMatrix = new THREE.Matrix4();
+        this._scratchPosition = new THREE.Vector3();
+        this._scratchQuaternion = new THREE.Quaternion();
+        this._scratchScale = new THREE.Vector3();
+        this._scratchDummy = new THREE.Object3D();
 
         // Create a material per vector so we can vary opacity independently,
         // but force program reuse by returning a stable cache key.
@@ -211,13 +217,13 @@ varying float vGradientT;`
     }
 
     // Updates the visual appearance of a single instance for animation purposes
-    setInstanceAppearance(index, yOffset, tempColor, newScale = null) {
+    setInstanceAppearance(index, yOffset, tempColor, newScale = null, markNeedsUpdate = true) {
         if (index < 0 || index >= this.instanceCount) return;
-        const currentMatrix = new THREE.Matrix4();
+        const currentMatrix = this._scratchMatrix;
         this.mesh.getMatrixAt(index, currentMatrix);
-        const position = new THREE.Vector3();
-        const quaternion = new THREE.Quaternion();
-        const scale = new THREE.Vector3();
+        const position = this._scratchPosition;
+        const quaternion = this._scratchQuaternion;
+        const scale = this._scratchScale;
         currentMatrix.decompose(position, quaternion, scale);
         
         const baseX = computeCenteredPrismX(index, this.instanceCount, _prismWidthScale);
@@ -248,26 +254,31 @@ varying float vGradientT;`
 
         currentMatrix.compose(position, quaternion, scale);
         this.mesh.setMatrixAt(index, currentMatrix);
-        this.mesh.instanceMatrix.needsUpdate = true;
+        if (markNeedsUpdate) {
+            this.mesh.instanceMatrix.needsUpdate = true;
+        }
 
         if (tempColor instanceof THREE.Color) {
             this.mesh.setColorAt(index, tempColor);
-            if (this.mesh.instanceColor) {
+            if (markNeedsUpdate && this.mesh.instanceColor) {
                 this.mesh.instanceColor.needsUpdate = true;
             }
         }
     }
 
     // Resets a single instance to its default appearance (fixed dimensions, subsection color)
-    resetInstanceAppearance(index) {
+    resetInstanceAppearance(index, markNeedsUpdate = false) {
         if (index < 0 || index >= this.instanceCount) return;
         
-        const dummy = new THREE.Object3D();
+        const dummy = this._scratchDummy;
         const x = computeCenteredPrismX(index, this.instanceCount, _prismWidthScale);
         dummy.scale.set(_prismWidthScale, _uniformCalculatedHeight, _prismDepthScale);
         dummy.position.set(x, _uniformCalculatedHeight / 2, 0); 
         dummy.updateMatrix();
         this.mesh.setMatrixAt(index, dummy.matrix);
+        if (markNeedsUpdate) {
+            this.mesh.instanceMatrix.needsUpdate = true;
+        }
     }
 
     // Renamed from updateData. This is for internal data state update only.

@@ -131,14 +131,20 @@ export function initIntroAnimation(pipeline, gptCanvas) {
         texture.needsUpdate = true;
         appState.environmentTexture = texture;
         scene.environment = texture;
-        pipeline.engine.scene.environment = texture;
+        if (pipeline?.engine?.scene) {
+            pipeline.engine.scene.environment = texture;
+        }
         appState.applyEnvironmentBackground(pipeline, scene);
         scene.traverse((obj) => { if (obj.isAmbientLight) scene.remove(obj); });
-        pipeline.engine.scene.traverse((obj) => { if (obj.isAmbientLight) pipeline.engine.scene.remove(obj); });
+        if (pipeline?.engine?.scene && typeof pipeline.engine.scene.traverse === 'function') {
+            pipeline.engine.scene.traverse((obj) => { if (obj.isAmbientLight) pipeline.engine.scene.remove(obj); });
+        }
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
         renderer.toneMappingExposure = 1.0;
-        pipeline.engine.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        pipeline.engine.renderer.toneMappingExposure = 1.0;
+        if (pipeline?.engine?.renderer) {
+            pipeline.engine.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            pipeline.engine.renderer.toneMappingExposure = 1.0;
+        }
         introCanvas.style.display = 'none';
         cleanupIntro();
         const gif = document.getElementById('loadingGif');

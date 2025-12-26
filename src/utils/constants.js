@@ -446,11 +446,11 @@ export const EMBEDDING_HEIGHT_EXTRA = 500;    // extra height compared to MLP ma
 export const EMBEDDING_MIN_HEIGHT   = 160;   // ensure embeddings are visibly thicker
 
 // Separate extra height controls for vocab vs positional embeddings
-export const EMBEDDING_HEIGHT_EXTRA_VOCAB    = EMBEDDING_HEIGHT_EXTRA;
+export const EMBEDDING_HEIGHT_EXTRA_VOCAB    = 900; // taller vocab embedding for clearer token landing area
 export const EMBEDDING_HEIGHT_EXTRA_POSITION = 300;
 
 // Multipliers for bottom (input) width relative to d_model = MLP_MATRIX_BASE_WIDTH
-export const VOCAB_EMBED_BOTTOM_MULTIPLIER = 15;
+export const VOCAB_EMBED_BOTTOM_MULTIPLIER = 20; // wider base for vocab embedding
 export const POS_EMBED_BOTTOM_MULTIPLIER   = 10;
 
 // Derived heights for embedding matrices (per type)

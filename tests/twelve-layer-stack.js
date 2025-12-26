@@ -3,11 +3,11 @@ import { MHSAAnimation } from '../src/animations/MHSAAnimation.js';
 import { loadPrecomputedGeometries } from '../src/utils/precomputedGeometryLoader.js';
 import { LayerPipeline } from '../src/engine/LayerPipeline.js';
 import {
-    CAPTION_TEXT_Y_POS,
     setPlaybackSpeed,
     EMBEDDING_MATRIX_PARAMS_VOCAB,
     EMBEDDING_MATRIX_PARAMS_POSITION,
     LN_PARAMS,
+    NUM_VECTOR_LANES,
     LAYER_NORM_1_Y_POS,
     MLP_MATRIX_PARAMS_DOWN,
     INACTIVE_COMPONENT_COLOR,
@@ -31,6 +31,211 @@ import { initSettingsModal } from '../src/ui/settingsModal.js';
 import { initPauseButton } from '../src/ui/pauseButton.js';
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
+
+const PROMPT_TOKENS = ['Can', '\u0120machines', '\u0120think', '?', '\u0120'];
+const POSITION_TOKENS = ['1', '2', '3', '4', '5'];
+const TOKEN_CHIP_STYLE = {
+    padding: 140,
+    minWidth: 440,
+    minHeight: 150,
+    height: 170,
+    cornerRadius: 24,
+    depth: 12,
+    textSize: 90,
+    textDepth: 0, // unused for flat text
+    textOffset: 0.6,
+    riseDistance: 220,
+    riseDelay: 120,
+    riseDuration: 1200,
+    vocabSlowdown: 1.6,
+    positionSlowdown: 1.0,
+    inset: 0,
+    zOffset: 0,
+    scale: 2.6,
+    staticGap: 200,
+    staticZOffset: 0,
+    cameraHoldMs: 800,
+    cameraReturnMs: 0
+};
+const POSITION_CHIP_STYLE = {
+    ...TOKEN_CHIP_STYLE,
+    padding: 80,
+    minWidth: 260,
+    minHeight: 120,
+    height: 130,
+    textSize: 70,
+    scale: 2.0
+};
+
+function formatTokenLabel(token) {
+    return token.replace(/^\u0120/, ' ');
+}
+
+function buildRoundedRectShape(width, height, radius) {
+    const clampedRadius = Math.max(0, Math.min(radius, Math.min(width, height) / 2 - 1));
+    const halfW = width / 2;
+    const halfH = height / 2;
+    const shape = new THREE.Shape();
+    shape.moveTo(-halfW + clampedRadius, -halfH);
+    shape.lineTo(halfW - clampedRadius, -halfH);
+    shape.quadraticCurveTo(halfW, -halfH, halfW, -halfH + clampedRadius);
+    shape.lineTo(halfW, halfH - clampedRadius);
+    shape.quadraticCurveTo(halfW, halfH, halfW - clampedRadius, halfH);
+    shape.lineTo(-halfW + clampedRadius, halfH);
+    shape.quadraticCurveTo(-halfW, halfH, -halfW, halfH - clampedRadius);
+    shape.lineTo(-halfW, -halfH + clampedRadius);
+    shape.quadraticCurveTo(-halfW, -halfH, -halfW + clampedRadius, -halfH);
+    shape.closePath();
+    return shape;
+}
+
+function createTokenChip(label, font, style) {
+    let textGeo = null;
+    let bounds = null;
+    if (font && label.trim().length) {
+        const shapes = font.generateShapes(label, style.textSize, 2);
+        textGeo = new THREE.ShapeGeometry(shapes);
+        textGeo.computeBoundingBox();
+        textGeo.computeVertexNormals();
+        bounds = textGeo.boundingBox;
+    }
+    let textWidth = 0;
+    let textHeight = 0;
+    if (bounds && Number.isFinite(bounds.max.x) && Number.isFinite(bounds.min.x)) {
+        textWidth = Math.max(0, bounds.max.x - bounds.min.x);
+        textHeight = Math.max(0, bounds.max.y - bounds.min.y);
+    }
+
+    const chipWidth = Math.max(style.minWidth, textWidth + style.padding);
+    const chipHeight = typeof style.height === 'number' && Number.isFinite(style.height)
+        ? style.height
+        : Math.max(style.minHeight, textHeight + style.padding);
+    const chipRadius = Math.min(style.cornerRadius, Math.min(chipWidth, chipHeight) / 2 - 1);
+    const chipShape = buildRoundedRectShape(chipWidth, chipHeight, chipRadius);
+    const chipGeo = new THREE.ExtrudeGeometry(chipShape, {
+        depth: style.depth,
+        bevelEnabled: false
+    });
+    chipGeo.translate(0, 0, -style.depth / 2);
+    chipGeo.computeVertexNormals();
+
+    const chipMat = new THREE.MeshStandardMaterial({
+        color: 0xf2e8d5,
+        roughness: 0.35,
+        metalness: 0.15,
+        side: THREE.DoubleSide
+    });
+    const chipMesh = new THREE.Mesh(chipGeo, chipMat);
+
+    const group = new THREE.Group();
+    group.add(chipMesh);
+
+    const capMat = chipMat.clone();
+    capMat.polygonOffset = true;
+    capMat.polygonOffsetFactor = -1;
+    capMat.polygonOffsetUnits = -2;
+    const capGeo = new THREE.ShapeGeometry(chipShape);
+    capGeo.computeVertexNormals();
+    const capOffset = 0.05;
+    const frontCap = new THREE.Mesh(capGeo, capMat);
+    frontCap.position.z = style.depth / 2 + capOffset;
+    const backCap = new THREE.Mesh(capGeo, capMat);
+    backCap.position.z = -style.depth / 2 - capOffset;
+    backCap.rotation.y = Math.PI;
+    group.add(frontCap, backCap);
+
+    if (textGeo && textWidth > 0 && textHeight > 0) {
+        const textMat = new THREE.MeshBasicMaterial({
+            color: 0xffffff,
+            side: THREE.DoubleSide,
+            depthWrite: true,
+            depthTest: true,
+            polygonOffset: true,
+            polygonOffsetFactor: -0.5,
+            polygonOffsetUnits: -0.5
+        });
+        const textMesh = new THREE.Mesh(textGeo, textMat);
+        const centerX = (bounds.min.x + bounds.max.x) / 2;
+        const centerY = (bounds.min.y + bounds.max.y) / 2;
+        const textFrontOffset = style.depth / 2 + style.textOffset;
+        textMesh.position.set(-centerX, -centerY, textFrontOffset);
+        group.add(textMesh);
+    } else if (textGeo) {
+        textGeo.dispose();
+    }
+
+    if (typeof style.scale === 'number' && Number.isFinite(style.scale) && style.scale > 0) {
+        group.scale.setScalar(style.scale);
+    }
+    const scaleFactor = (typeof style.scale === 'number' && Number.isFinite(style.scale) && style.scale > 0)
+        ? style.scale
+        : 1;
+    group.userData.size = { width: chipWidth * scaleFactor, height: chipHeight * scaleFactor };
+    return group;
+}
+
+function stageChipCamera(pipeline, startPos, startTarget, endPos, endTarget, holdMs, returnMs) {
+    const engine = pipeline?.engine;
+    if (!engine || !engine.camera || !engine.controls) return;
+    const hadAutoFollow = typeof pipeline.isAutoCameraFollowEnabled === 'function'
+        ? pipeline.isAutoCameraFollowEnabled()
+        : false;
+    if (hadAutoFollow && typeof pipeline.setAutoCameraFollow === 'function') {
+        pipeline.setAutoCameraFollow(false, { immediate: true });
+    }
+
+    engine.camera.position.copy(startPos);
+    engine.controls.target.copy(startTarget);
+    engine.notifyCameraUpdated();
+    engine.controls.update();
+
+    const restoreAutoFollow = () => {
+        if (hadAutoFollow && typeof pipeline.setAutoCameraFollow === 'function') {
+            pipeline.setAutoCameraFollow(true, { immediate: true });
+        }
+    };
+
+    const shouldReturn = Number.isFinite(returnMs) && returnMs > 0 && endPos && endTarget;
+    if (!shouldReturn) {
+        if (hadAutoFollow) {
+            const delayMs = Math.max(0, holdMs);
+            if (delayMs > 0) {
+                setTimeout(restoreAutoFollow, delayMs);
+            } else {
+                restoreAutoFollow();
+            }
+        }
+        return;
+    }
+
+    if (typeof TWEEN !== 'undefined') {
+        new TWEEN.Tween(engine.camera.position)
+            .to({ x: endPos.x, y: endPos.y, z: endPos.z }, returnMs)
+            .delay(holdMs)
+            .easing(TWEEN.Easing.Quadratic.InOut)
+            .onUpdate(() => engine.notifyCameraUpdated())
+            .start();
+
+        new TWEEN.Tween(engine.controls.target)
+            .to({ x: endTarget.x, y: endTarget.y, z: endTarget.z }, returnMs)
+            .delay(holdMs)
+            .easing(TWEEN.Easing.Quadratic.InOut)
+            .onUpdate(() => {
+                engine.notifyCameraUpdated();
+                engine.controls.update();
+            })
+            .onComplete(restoreAutoFollow)
+            .start();
+    } else {
+        setTimeout(() => {
+            engine.camera.position.copy(endPos);
+            engine.controls.target.copy(endTarget);
+            engine.notifyCameraUpdated();
+            engine.controls.update();
+            restoreAutoFollow();
+        }, holdMs);
+    }
+}
 
 // Optionally load pre-baked geometries; returns instantly if disabled
 await loadPrecomputedGeometries('../precomputed_components.glb');
@@ -69,9 +274,10 @@ try {
     const headGreen = new THREE.Color(MHA_FINAL_K_COLOR);
     const residualYBase = LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2 + EMBEDDING_BOTTOM_TOP_ALIGN_OFFSET_FROM_LN1_BOTTOM;
     const bottomVocabCenterY = residualYBase - EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2 + EMBEDDING_BOTTOM_Y_ADJUST;
+    const vocabX = 0 + EMBEDDING_BOTTOM_VOCAB_X_OFFSET;
     const vocabBottom = new WeightMatrixVisualization(
         null,
-        new THREE.Vector3(0 + EMBEDDING_BOTTOM_VOCAB_X_OFFSET, bottomVocabCenterY, 0),
+        new THREE.Vector3(vocabX, bottomVocabCenterY, 0),
         EMBEDDING_MATRIX_PARAMS_VOCAB.width,
         EMBEDDING_MATRIX_PARAMS_VOCAB.height,
         EMBEDDING_MATRIX_PARAMS_VOCAB.depth,
@@ -116,6 +322,122 @@ try {
     if (pipeline.engine && typeof pipeline.engine.registerRaycastRoot === 'function') {
         pipeline.engine.registerRaycastRoot(posBottom.group);
     }
+
+    const laneCount = Math.min(NUM_VECTOR_LANES, PROMPT_TOKENS.length);
+    const laneSpacing = LN_PARAMS.depth / (NUM_VECTOR_LANES + 1);
+    const laneZs = [];
+    for (let i = 0; i < laneCount; i++) {
+        laneZs.push(-LN_PARAMS.depth / 2 + laneSpacing * (i + 1));
+    }
+
+    const vocabMatrixBottomY = bottomVocabCenterY - EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2;
+    const posMatrixBottomY = bottomPosCenterY - EMBEDDING_MATRIX_PARAMS_POSITION.height / 2;
+    const chipStartZOffset = TOKEN_CHIP_STYLE.zOffset;
+    const chipFontLoader = new FontLoader();
+    const spawnTokenChips = (font) => {
+        const vocabRiseDuration = TOKEN_CHIP_STYLE.riseDuration * (TOKEN_CHIP_STYLE.vocabSlowdown || 1);
+        const posRiseDuration = TOKEN_CHIP_STYLE.riseDuration * (TOKEN_CHIP_STYLE.positionSlowdown || 1);
+        const laneSpanMs = TOKEN_CHIP_STYLE.riseDelay * Math.max(0, laneCount - 1);
+        const maxRiseDuration = Math.max(vocabRiseDuration, posRiseDuration) + laneSpanMs;
+        const cameraStartPos = new THREE.Vector3(
+            vocabX + EMBEDDING_MATRIX_PARAMS_VOCAB.width * 0.4,
+            bottomVocabCenterY - EMBEDDING_MATRIX_PARAMS_VOCAB.height * 0.8,
+            EMBEDDING_MATRIX_PARAMS_VOCAB.depth * 1.8
+        );
+        const cameraStartTarget = new THREE.Vector3(
+            vocabX,
+            bottomVocabCenterY + EMBEDDING_MATRIX_PARAMS_VOCAB.height * 0.2,
+            0
+        );
+        const adjustedHoldMs = maxRiseDuration + TOKEN_CHIP_STYLE.cameraHoldMs;
+        stageChipCamera(
+            pipeline,
+            cameraStartPos,
+            cameraStartTarget,
+            camPos,
+            camTarget,
+            adjustedHoldMs,
+            TOKEN_CHIP_STYLE.cameraReturnMs
+        );
+
+        const tokenLabels = PROMPT_TOKENS.slice(0, laneCount).map(formatTokenLabel);
+        tokenLabels.forEach((label, idx) => {
+            const chip = createTokenChip(label, font, TOKEN_CHIP_STYLE);
+            const chipHeight = chip.userData.size.height;
+            const targetY = vocabMatrixBottomY + chipHeight / 2 + TOKEN_CHIP_STYLE.inset;
+            const targetZ = laneZs[idx];
+            const startZ = targetZ + chipStartZOffset;
+
+            const staticY = vocabMatrixBottomY - chipHeight / 2 - TOKEN_CHIP_STYLE.staticGap;
+            const staticZ = targetZ + TOKEN_CHIP_STYLE.staticZOffset;
+            const startY = staticY;
+
+            chip.position.set(vocabX, startY, startZ);
+            pipeline.engine.scene.add(chip);
+
+            const staticChip = createTokenChip(label, font, TOKEN_CHIP_STYLE);
+            staticChip.position.set(vocabX, staticY, staticZ);
+            pipeline.engine.scene.add(staticChip);
+
+            if (typeof TWEEN !== 'undefined') {
+                new TWEEN.Tween(chip.position)
+                    .to({ y: targetY, z: targetZ }, vocabRiseDuration)
+                    .delay(idx * TOKEN_CHIP_STYLE.riseDelay)
+                    .easing(TWEEN.Easing.Quadratic.Out)
+                    .start();
+            } else {
+                chip.position.y = targetY;
+                chip.position.z = targetZ;
+            }
+        });
+    };
+    const spawnPositionChips = (font) => {
+        const posRiseDuration = TOKEN_CHIP_STYLE.riseDuration * (TOKEN_CHIP_STYLE.positionSlowdown || 1);
+        const style = POSITION_CHIP_STYLE;
+        const positionLabels = POSITION_TOKENS.slice(0, laneCount);
+        positionLabels.forEach((label, idx) => {
+            const chip = createTokenChip(label, font, style);
+            const chipHeight = chip.userData.size.height;
+            const targetY = posMatrixBottomY + chipHeight / 2 + style.inset;
+            const targetZ = laneZs[idx];
+            const startZ = targetZ + chipStartZOffset;
+
+            const staticY = posMatrixBottomY - chipHeight / 2 - style.staticGap;
+            const staticZ = targetZ + style.staticZOffset;
+            const startY = staticY;
+
+            chip.position.set(posX, startY, startZ);
+            pipeline.engine.scene.add(chip);
+
+            const staticChip = createTokenChip(label, font, style);
+            staticChip.position.set(posX, staticY, staticZ);
+            pipeline.engine.scene.add(staticChip);
+
+            if (typeof TWEEN !== 'undefined') {
+                new TWEEN.Tween(chip.position)
+                    .to({ y: targetY, z: targetZ }, posRiseDuration)
+                    .delay(idx * TOKEN_CHIP_STYLE.riseDelay)
+                    .easing(TWEEN.Easing.Quadratic.Out)
+                    .start();
+            } else {
+                chip.position.y = targetY;
+                chip.position.z = targetZ;
+            }
+        });
+    };
+    chipFontLoader.load(
+        'https://threejs.org/examples/fonts/helvetiker_regular.typeface.json',
+        (font) => {
+            spawnTokenChips(font);
+            spawnPositionChips(font);
+        },
+        undefined,
+        (err) => {
+            console.warn('Token chip font failed to load, rendering without labels.', err);
+            spawnTokenChips(null);
+            spawnPositionChips(null);
+        }
+    );
 
     const lastLayer = pipeline._layers[NUM_LAYERS - 1];
     if (lastLayer && lastLayer.mlpDown && lastLayer.mlpDown.group) {
@@ -174,58 +496,3 @@ initIntroAnimation(pipeline, gptCanvas);
 initStatusOverlay(pipeline, NUM_LAYERS);
 initPauseButton(pipeline);
 initSettingsModal(pipeline);
-
-// Typewriter caption underneath GPT tower
-const TYPE_TEXT = 'Can machines think?';
-const TYPE_DELAY_CAP = 120; // ms
-const captionLoader = new FontLoader();
-captionLoader.load('https://threejs.org/examples/fonts/helvetiker_regular.typeface.json', (font) => {
-    const charGroup = new THREE.Group();
-    pipeline.engine.scene.add(charGroup);
-    const charMeshes = [];
-    const charWidths = [];
-    let xOffset = 0;
-    const charSpacing = 100;
-    for (const ch of TYPE_TEXT) {
-        if (ch === ' ') {
-            xOffset += 400;
-            charMeshes.push(null);
-            charWidths.push(400);
-            continue;
-        }
-        const geo = new TextGeometry(ch, {
-            font,
-            size: 800,
-            height: 80,
-            curveSegments: 6,
-            bevelEnabled: true,
-            bevelThickness: 4,
-            bevelSize: 3,
-            bevelOffset: 0,
-            bevelSegments: 1
-        });
-        geo.computeBoundingBox();
-        const width = geo.boundingBox.max.x - geo.boundingBox.min.x;
-        const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0 });
-        const mesh = new THREE.Mesh(geo, mat);
-        mesh.position.x = xOffset;
-        mesh.castShadow = false;
-        mesh.receiveShadow = false;
-        charGroup.add(mesh);
-        charMeshes.push(mesh);
-        charWidths.push(width);
-        xOffset += width + charSpacing;
-    }
-    charGroup.position.set(-xOffset / 2 + charSpacing / 2, CAPTION_TEXT_Y_POS, 0);
-    const revealChar = (index) => {
-        if (index >= charMeshes.length) return;
-        const mesh = charMeshes[index];
-        if (mesh) {
-            new TWEEN.Tween(mesh.material).to({ opacity: 1 }, TYPE_DELAY_CAP).start();
-        }
-        setTimeout(() => revealChar(index + 1), TYPE_DELAY_CAP);
-    };
-    setTimeout(() => revealChar(0), 500);
-    const gif = document.getElementById('loadingGif');
-    if (gif) gif.style.display = 'none';
-});

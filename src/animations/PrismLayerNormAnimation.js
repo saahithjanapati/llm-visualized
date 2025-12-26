@@ -20,6 +20,8 @@ export class PrismLayerNormAnimation {
 
         this.activationOrder = [];
         this.unitAnimationStates = []; // To store per-unit animation details
+        this._tempDisplayColor = new THREE.Color();
+        this._whiteColor = new THREE.Color(1, 1, 1);
     }
 
     _calculateActivationOrder() {
@@ -130,8 +132,8 @@ export class PrismLayerNormAnimation {
 
                 const yOffset = state.riseHeight * Math.sin(Math.PI * state.localProgress);
 
-                const tempDisplayColor = new THREE.Color();
-                const whiteColor = new THREE.Color(1, 1, 1);
+                const tempDisplayColor = this._tempDisplayColor;
+                const whiteColor = this._whiteColor;
                 if (state.localProgress < 0.5) {
                     const t = state.localProgress * 2;
                     tempDisplayColor.copy(state.originalColor).lerp(whiteColor, t);
@@ -140,7 +142,7 @@ export class PrismLayerNormAnimation {
                     tempDisplayColor.copy(whiteColor).lerp(state.flashTargetColor, t);
                 }
 
-                this.prismVis.setInstanceAppearance(i, yOffset, tempDisplayColor);
+                this.prismVis.setInstanceAppearance(i, yOffset, tempDisplayColor, null, false);
                 needsMatrixUpdate = true;
                 needsColorUpdate = true;
 

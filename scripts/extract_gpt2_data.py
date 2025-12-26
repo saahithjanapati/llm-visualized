@@ -655,6 +655,7 @@ def run_instrumented_pass(
 
             data["layers"].append(layer_entry)
 
+        data["final_residual"] = encode_vector_states(residual, config.residual_stride, quantiser)
         final_norm, final_scaled, final_shifted = layer_norm_states(residual, transformer.ln_f)
         data["final_layernorm"] = {
             "norm": encode_vector_states(final_norm, config.residual_stride, quantiser),
