@@ -335,6 +335,11 @@ try {
     const posMatrixBottomY = bottomPosCenterY - EMBEDDING_MATRIX_PARAMS_POSITION.height / 2;
     const chipStartZOffset = TOKEN_CHIP_STYLE.zOffset;
     const chipFontLoader = new FontLoader();
+    const registerChip = (chip) => {
+        if (pipeline.engine && typeof pipeline.engine.registerRaycastRoot === 'function') {
+            pipeline.engine.registerRaycastRoot(chip);
+        }
+    };
     const spawnTokenChips = (font) => {
         const vocabRiseDuration = TOKEN_CHIP_STYLE.riseDuration * (TOKEN_CHIP_STYLE.vocabSlowdown || 1);
         const posRiseDuration = TOKEN_CHIP_STYLE.riseDuration * (TOKEN_CHIP_STYLE.positionSlowdown || 1);
@@ -364,6 +369,9 @@ try {
         const tokenLabels = PROMPT_TOKENS.slice(0, laneCount).map(formatTokenLabel);
         tokenLabels.forEach((label, idx) => {
             const chip = createTokenChip(label, font, TOKEN_CHIP_STYLE);
+            const chipLabel = `Token: ${label}`;
+            chip.userData.label = chipLabel;
+            chip.name = chipLabel;
             const chipHeight = chip.userData.size.height;
             const targetY = vocabMatrixBottomY + chipHeight / 2 + TOKEN_CHIP_STYLE.inset;
             const targetZ = laneZs[idx];
@@ -375,10 +383,14 @@ try {
 
             chip.position.set(vocabX, startY, startZ);
             pipeline.engine.scene.add(chip);
+            registerChip(chip);
 
             const staticChip = createTokenChip(label, font, TOKEN_CHIP_STYLE);
+            staticChip.userData.label = chipLabel;
+            staticChip.name = chipLabel;
             staticChip.position.set(vocabX, staticY, staticZ);
             pipeline.engine.scene.add(staticChip);
+            registerChip(staticChip);
 
             if (typeof TWEEN !== 'undefined') {
                 new TWEEN.Tween(chip.position)
@@ -398,6 +410,9 @@ try {
         const positionLabels = POSITION_TOKENS.slice(0, laneCount);
         positionLabels.forEach((label, idx) => {
             const chip = createTokenChip(label, font, style);
+            const chipLabel = `Position: ${label}`;
+            chip.userData.label = chipLabel;
+            chip.name = chipLabel;
             const chipHeight = chip.userData.size.height;
             const targetY = posMatrixBottomY + chipHeight / 2 + style.inset;
             const targetZ = laneZs[idx];
@@ -409,10 +424,14 @@ try {
 
             chip.position.set(posX, startY, startZ);
             pipeline.engine.scene.add(chip);
+            registerChip(chip);
 
             const staticChip = createTokenChip(label, font, style);
+            staticChip.userData.label = chipLabel;
+            staticChip.name = chipLabel;
             staticChip.position.set(posX, staticY, staticZ);
             pipeline.engine.scene.add(staticChip);
+            registerChip(staticChip);
 
             if (typeof TWEEN !== 'undefined') {
                 new TWEEN.Tween(chip.position)

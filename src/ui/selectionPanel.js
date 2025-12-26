@@ -22,6 +22,17 @@ const PREVIEW_LANE_SPACING = 80;
 const PREVIEW_TARGET_SIZE = 140;
 const PREVIEW_ROTATION_SPEED = 0.0035;
 
+const TOKEN_CHIP_STYLE = {
+    padding: 80,
+    minWidth: 220,
+    minHeight: 100,
+    height: 120,
+    cornerRadius: 18,
+    depth: 12,
+    textSize: 52,
+    textOffset: 1.2
+};
+
 const D_MODEL = 768;
 const VOCAB_SIZE = 50257;
 const CONTEXT_LEN = 1024;
@@ -38,6 +49,9 @@ function formatDims(rows, cols) {
 
 function resolveMetadata(label, kind = null) {
     const lower = (label || '').toLowerCase();
+    if (lower.startsWith('token:') || lower.startsWith('position:')) {
+        return { params: 'TBD', dims: 'TBD' };
+    }
     if (lower.includes('query weight matrix')) {
         return { params: formatNumber(D_MODEL * D_MODEL), dims: formatDims(D_MODEL, D_MODEL) };
     }
@@ -69,6 +83,110 @@ function resolveMetadata(label, kind = null) {
         return { params: 'TBD', dims: 'TBD' };
     }
     return { params: 'TBD', dims: 'TBD' };
+}
+
+function extractTokenText(label) {
+    if (!label) return '';
+    const match = label.match(/^(token|position)\s*:\s*(.*)$/i);
+    if (!match) return label.trim();
+    return (match[2] || '').trim();
+}
+
+function buildRoundedRectShape(width, height, radius) {
+    const clampedRadius = Math.max(0, Math.min(radius, Math.min(width, height) / 2 - 1));
+    const halfW = width / 2;
+    const halfH = height / 2;
+    const shape = new THREE.Shape();
+    shape.moveTo(-halfW + clampedRadius, -halfH);
+    shape.lineTo(halfW - clampedRadius, -halfH);
+    shape.quadraticCurveTo(halfW, -halfH, halfW, -halfH + clampedRadius);
+    shape.lineTo(halfW, halfH - clampedRadius);
+    shape.quadraticCurveTo(halfW, halfH, halfW - clampedRadius, halfH);
+    shape.lineTo(-halfW + clampedRadius, halfH);
+    shape.quadraticCurveTo(-halfW, halfH, -halfW, halfH - clampedRadius);
+    shape.lineTo(-halfW, -halfH + clampedRadius);
+    shape.quadraticCurveTo(-halfW, -halfH, -halfW + clampedRadius, -halfH);
+    shape.closePath();
+    return shape;
+}
+
+function createTokenChipShared(labelText) {
+    const text = (labelText && labelText.trim().length) ? labelText.trim() : 'Token';
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const fontSize = TOKEN_CHIP_STYLE.textSize;
+    ctx.font = `600 ${fontSize}px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial`;
+    const textMetrics = ctx.measureText(text);
+    const textWidth = Math.ceil(textMetrics.width);
+    const textHeight = Math.ceil(fontSize * 1.15);
+    canvas.width = Math.max(256, textWidth + 80);
+    canvas.height = Math.max(128, textHeight + 60);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `600 ${fontSize}px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial`;
+    ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.needsUpdate = true;
+
+    const chipWidth = Math.max(TOKEN_CHIP_STYLE.minWidth, textWidth + TOKEN_CHIP_STYLE.padding);
+    const chipHeight = typeof TOKEN_CHIP_STYLE.height === 'number'
+        ? TOKEN_CHIP_STYLE.height
+        : Math.max(TOKEN_CHIP_STYLE.minHeight, textHeight + TOKEN_CHIP_STYLE.padding);
+    const chipRadius = Math.min(TOKEN_CHIP_STYLE.cornerRadius, Math.min(chipWidth, chipHeight) / 2 - 1);
+    const chipShape = buildRoundedRectShape(chipWidth, chipHeight, chipRadius);
+    const chipGeo = new THREE.ExtrudeGeometry(chipShape, { depth: TOKEN_CHIP_STYLE.depth, bevelEnabled: false });
+    chipGeo.translate(0, 0, -TOKEN_CHIP_STYLE.depth / 2);
+
+    const chipMat = new THREE.MeshStandardMaterial({
+        color: 0xf2e8d5,
+        roughness: 0.35,
+        metalness: 0.15,
+        side: THREE.DoubleSide
+    });
+    const chipMesh = new THREE.Mesh(chipGeo, chipMat);
+
+    const aspect = canvas.width / canvas.height;
+    let textPlaneHeight = chipHeight * 0.38;
+    let textPlaneWidth = textPlaneHeight * aspect;
+    const maxTextWidth = chipWidth * 0.8;
+    if (textPlaneWidth > maxTextWidth) {
+        textPlaneWidth = maxTextWidth;
+        textPlaneHeight = textPlaneWidth / aspect;
+    }
+    const textGeo = new THREE.PlaneGeometry(textPlaneWidth, textPlaneHeight);
+    const textMat = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
+    const textMesh = new THREE.Mesh(textGeo, textMat);
+    textMesh.position.z = TOKEN_CHIP_STYLE.depth / 2 + TOKEN_CHIP_STYLE.textOffset;
+
+    const group = new THREE.Group();
+    group.add(chipMesh, textMesh);
+
+    return {
+        group,
+        dispose: () => {
+            chipGeo.dispose();
+            chipMat.dispose();
+            textGeo.dispose();
+            textMat.dispose();
+            texture.dispose();
+        }
+    };
+}
+
+function buildTokenChipPreview(labelText) {
+    const shared = createTokenChipShared(labelText);
+    const group = new THREE.Group();
+    for (let i = 0; i < PREVIEW_LANES; i++) {
+        const chip = (i === 0) ? shared.group : shared.group.clone(true);
+        chip.position.z = (i - (PREVIEW_LANES - 1) / 2) * PREVIEW_LANE_SPACING * 0.6;
+        group.add(chip);
+    }
+    return { object: group, dispose: shared.dispose };
 }
 
 function buildWeightMatrixPreview(params, colorHex) {
@@ -158,6 +276,12 @@ function buildStackedBoxPreview(colorHex) {
 
 function resolvePreviewObject(label, selectionInfo) {
     const lower = (label || '').toLowerCase();
+    if (lower.startsWith('token:')) {
+        return buildTokenChipPreview(extractTokenText(label));
+    }
+    if (lower.startsWith('position:')) {
+        return buildTokenChipPreview(extractTokenText(label));
+    }
     if (lower.includes('query weight matrix')) {
         return buildWeightMatrixPreview(MHA_MATRIX_PARAMS, MHA_FINAL_Q_COLOR);
     }
