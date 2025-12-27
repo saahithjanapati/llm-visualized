@@ -9,7 +9,8 @@ import {
     MLP_MATRIX_PARAMS_DOWN,
     EMBEDDING_MATRIX_PARAMS_VOCAB,
     EMBEDDING_MATRIX_PARAMS_POSITION,
-    LAYER_NORM_FINAL_COLOR
+    LAYER_NORM_FINAL_COLOR,
+    VECTOR_LENGTH_PRISM
 } from '../utils/constants.js';
 import {
     MHA_FINAL_Q_COLOR,
@@ -23,11 +24,31 @@ const PREVIEW_LANES = 3;
 const PREVIEW_MATRIX_DEPTH = 320;
 const PREVIEW_LANE_SPACING = 80;
 const PREVIEW_TARGET_SIZE = 140;
-const PREVIEW_ROTATION_SPEED = 0.0035;
+const PREVIEW_ROTATION_SPEED = 0.0011;
+const PREVIEW_BASE_TILT_X = -0.12;
+const PREVIEW_BASE_ROTATION_Y = 0.38;
+const PREVIEW_TILT_AMPLITUDE = 0.02;
+const PREVIEW_TILT_OSC_SPEED = 0.32;
 const FINAL_MLP_COLOR = 0xc07a12;
 const FINAL_VOCAB_TOP_COLOR = 0x000000;
 const PREVIEW_QKV_LANES = 3;
 const PREVIEW_QKV_LANE_SPACING = 360;
+const PREVIEW_VECTOR_LARGE_SCALE = 1.0;
+const PREVIEW_VECTOR_SMALL_SCALE = 0.38;
+const PREVIEW_TRAIL_COLOR = 0x6ea0ff;
+const PREVIEW_QKV_X_SPREAD = 72;
+const PREVIEW_QKV_START_Y = -150;
+const PREVIEW_QKV_MATRIX_Y = -15;
+const PREVIEW_QKV_OUTPUT_Y = 95;
+const PREVIEW_QKV_EXIT_Y = PREVIEW_QKV_OUTPUT_Y + 60;
+const PREVIEW_QKV_RISE_DURATION = 900;
+const PREVIEW_QKV_CONVERT_DURATION = 420;
+const PREVIEW_QKV_HOLD_DURATION = 520;
+const PREVIEW_QKV_EXIT_DURATION = 420;
+const PREVIEW_QKV_IDLE_DURATION = 260;
+const PREVIEW_QKV_LANE_STAGGER = 0;
+const PREVIEW_VECTOR_HEAD_INSTANCES = 1;
+const PREVIEW_VECTOR_BODY_INSTANCES = VECTOR_LENGTH_PRISM;
 
 const TOKEN_CHIP_STYLE = {
     padding: 80,
@@ -91,6 +112,30 @@ function formatActivationData(data) {
     }
     if (data.notes) lines.push(String(data.notes));
     return lines.join('\n');
+}
+
+function clamp01(value) {
+    if (!Number.isFinite(value)) return 0;
+    return Math.min(1, Math.max(0, value));
+}
+
+function easeInOutCubic(t) {
+    const clamped = clamp01(t);
+    return clamped < 0.5
+        ? 4 * clamped * clamped * clamped
+        : 1 - Math.pow(-2 * clamped + 2, 3) / 2;
+}
+
+function inferQkvType(label, selectionInfo) {
+    const lower = (label || '').toLowerCase();
+    if (selectionInfo?.info?.category === 'V') return 'V';
+    if (selectionInfo?.info?.category === 'Q') return 'Q';
+    if (selectionInfo?.info?.category === 'K') return 'K';
+    if (lower.includes('value')) return 'V';
+    if (lower.includes('query')) return 'Q';
+    if (lower.includes('key')) return 'K';
+    if (selectionInfo?.kind === 'mergedKV') return 'K';
+    return 'K';
 }
 
 const TMP_BOX = new THREE.Box3();
@@ -481,15 +526,74 @@ function buildWeightMatrixPreview(params, colorHex) {
     };
 }
 
-function buildVectorPreview(colorHex) {
-    const group = new THREE.Group();
-    const vectors = [];
-    const color = new THREE.Color(colorHex || 0xffffff);
-    for (let i = 0; i < PREVIEW_LANES; i++) {
-        const vec = new VectorVisualizationInstancedPrism(null, new THREE.Vector3(0, 0, 0), 1);
-        vec.numSubsections = 1;
+function extractPreviewVectorData(selectionInfo) {
+    const candidates = [
+        selectionInfo?.info?.activationData?.values,
+        selectionInfo?.object?.userData?.activationData?.values,
+        selectionInfo?.hit?.object?.userData?.activationData?.values,
+        selectionInfo?.info?.vectorData,
+        selectionInfo?.info?.values
+    ];
+    for (const arr of candidates) {
+        if (Array.isArray(arr) && arr.length > 0) {
+            return Array.from(arr).map((v) => Number.isFinite(v) ? v : 0);
+        }
+    }
+    return null;
+}
+
+function mapDataToInstanceCount(data, instanceCount) {
+    if (!Array.isArray(data) || !Number.isFinite(instanceCount) || instanceCount < 1) return null;
+    const count = Math.max(1, Math.floor(instanceCount));
+    if (data.length === count) return data.slice();
+    const buckets = [];
+    const step = data.length / count;
+    for (let i = 0; i < count; i++) {
+        const start = Math.floor(i * step);
+        const end = Math.floor((i + 1) * step);
+        if (end <= start) {
+            buckets.push(data[Math.min(start, data.length - 1)] ?? 0);
+            continue;
+        }
+        let sum = 0;
+        let n = 0;
+        for (let j = start; j < end; j++) {
+            sum += data[j];
+            n += 1;
+        }
+        buckets.push(n > 0 ? sum / n : 0);
+    }
+    return buckets;
+}
+
+function applyDataToPreviewVector(vec, data) {
+    if (!vec || !Array.isArray(data) || data.length === 0) return;
+    vec.updateDataAndSnapVisuals(data.slice());
+    const numKeyColors = Math.max(2, Math.min(12, data.length));
+    vec.updateKeyColorsFromData(data, numKeyColors, null, data);
+}
+
+function createPreviewVector(options = {}) {
+    const { colorHex, data = null, instanceCount = PREVIEW_VECTOR_BODY_INSTANCES } = options;
+    const vec = new VectorVisualizationInstancedPrism(null, new THREE.Vector3(0, 0, 0), 1, instanceCount);
+    vec.numSubsections = 1;
+    if (Array.isArray(data) && data.length > 0) {
+        const mapped = mapDataToInstanceCount(data, instanceCount) || data;
+        applyDataToPreviewVector(vec, mapped);
+    } else {
+        const color = new THREE.Color(colorHex || 0xffffff);
         vec.currentKeyColors = [color.clone(), color.clone()];
         vec.updateInstanceGeometryAndColors();
+    }
+    return vec;
+}
+
+function buildVectorPreview(colorHex, selectionInfo = null) {
+    const group = new THREE.Group();
+    const vectors = [];
+    const data = extractPreviewVectorData(selectionInfo);
+    for (let i = 0; i < PREVIEW_LANES; i++) {
+        const vec = createPreviewVector({ colorHex, data });
         vec.group.position.z = (i - (PREVIEW_LANES - 1) / 2) * PREVIEW_LANE_SPACING;
         group.add(vec.group);
         vectors.push(vec);
@@ -502,6 +606,205 @@ function buildVectorPreview(colorHex) {
                 if (vec.mesh?.material) vec.mesh.material.dispose();
             });
         }
+    };
+}
+
+function createTrailLine(colorHex) {
+    const points = [new THREE.Vector3(), new THREE.Vector3()];
+    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+    const material = new THREE.LineBasicMaterial({
+        color: colorHex || PREVIEW_TRAIL_COLOR,
+        transparent: true,
+        opacity: 0.85,
+        depthWrite: false,
+        depthTest: true
+    });
+    const line = new THREE.Line(geometry, material);
+    return {
+        line,
+        update: (start, end, opacity = 1.0) => {
+            const pos = geometry.attributes.position.array;
+            pos[0] = start.x; pos[1] = start.y; pos[2] = start.z;
+            pos[3] = end.x; pos[4] = end.y; pos[5] = end.z;
+            geometry.attributes.position.needsUpdate = true;
+            if (material) {
+                material.opacity = THREE.MathUtils.clamp(opacity, 0, 1);
+            }
+        },
+        dispose: () => {
+            geometry.dispose();
+            material.dispose();
+        }
+    };
+}
+
+function buildQkvFlowPreview(highlightType, selectionInfo = null) {
+    // Animated depiction of post-LN vectors rising into the Q/K/V projection,
+    // leaving a trail, and emitting a smaller head vector above.
+    const group = new THREE.Group();
+    const lanes = [];
+    const laneSpacing = PREVIEW_QKV_LANE_SPACING;
+    const totalDuration = PREVIEW_QKV_RISE_DURATION + PREVIEW_QKV_CONVERT_DURATION
+        + PREVIEW_QKV_HOLD_DURATION + PREVIEW_QKV_EXIT_DURATION + PREVIEW_QKV_IDLE_DURATION;
+    const startTime = performance.now();
+    const neutralColor = 0xa7b3c2;
+    const highlightKey = typeof highlightType === 'string' ? highlightType.toUpperCase() : '';
+    const highlightScale = (type) => (highlightKey === type ? 1.1 : 1.0);
+    const highlightColor = (type) => {
+        if (type === 'Q') return MHA_FINAL_Q_COLOR;
+        if (type === 'K') return MHA_FINAL_K_COLOR;
+        return MHA_FINAL_V_COLOR;
+    };
+    const baseData = extractPreviewVectorData(selectionInfo);
+    const headData = Array.isArray(baseData) && baseData.length > 0
+        ? [baseData.reduce((sum, v) => sum + v, 0) / baseData.length]
+        : baseData;
+
+    for (let i = 0; i < PREVIEW_QKV_LANES; i++) {
+        const z = (i - (PREVIEW_QKV_LANES - 1) / 2) * laneSpacing;
+        const x = (highlightKey === 'Q') ? -PREVIEW_QKV_X_SPREAD : (highlightKey === 'V' ? PREVIEW_QKV_X_SPREAD : 0);
+        const incoming = createPreviewVector({
+            colorHex: neutralColor,
+            data: baseData,
+            instanceCount: PREVIEW_VECTOR_BODY_INSTANCES
+        });
+        const outgoing = createPreviewVector({
+            colorHex: highlightColor(highlightKey || 'K'),
+            data: headData,
+            instanceCount: PREVIEW_VECTOR_HEAD_INSTANCES
+        });
+        const trail = createTrailLine(PREVIEW_TRAIL_COLOR);
+
+        incoming.group.position.set(x, PREVIEW_QKV_START_Y, z);
+        outgoing.group.position.set(x, PREVIEW_QKV_START_Y, z);
+        incoming.group.scale.setScalar(PREVIEW_VECTOR_LARGE_SCALE);
+        outgoing.group.scale.setScalar(PREVIEW_VECTOR_SMALL_SCALE * highlightScale(highlightKey || 'K'));
+
+        group.add(incoming.group, outgoing.group, trail.line);
+        lanes.push({ incoming, outgoing, trail, x, z });
+        incoming.group.visible = false;
+        outgoing.group.visible = false;
+        trail.line.visible = false;
+    }
+
+    const disposeVector = (vec) => {
+        if (vec?.dispose) vec.dispose();
+    };
+
+    const dispose = () => {
+        lanes.forEach((lane) => {
+            disposeVector(lane.incoming);
+            disposeVector(lane.outgoing);
+            if (lane.trail?.dispose) lane.trail.dispose();
+        });
+    };
+
+    const updateLane = (lane, localTime) => {
+        const { incoming, outgoing, trail, x, z } = lane;
+        const endRise = PREVIEW_QKV_RISE_DURATION;
+        const endConvert = endRise + PREVIEW_QKV_CONVERT_DURATION;
+        const endHold = endConvert + PREVIEW_QKV_HOLD_DURATION;
+        const endExit = endHold + PREVIEW_QKV_EXIT_DURATION;
+
+        if (localTime < 0) {
+            incoming.group.visible = false;
+            outgoing.group.visible = false;
+            trail.line.visible = false;
+            incoming.group.position.set(x, PREVIEW_QKV_START_Y, z);
+            outgoing.group.position.set(x, PREVIEW_QKV_START_Y, z);
+            return;
+        }
+
+        if (localTime <= endRise) {
+            const t = easeInOutCubic(localTime / PREVIEW_QKV_RISE_DURATION);
+            incoming.group.visible = true;
+            outgoing.group.visible = false;
+            trail.line.visible = true;
+            const y = THREE.MathUtils.lerp(PREVIEW_QKV_START_Y, PREVIEW_QKV_MATRIX_Y, t);
+            incoming.group.position.set(x, y, z);
+            trail.update(new THREE.Vector3(x, PREVIEW_QKV_START_Y, z), new THREE.Vector3(x, y, z), 0.85);
+            return;
+        }
+
+        if (localTime <= endConvert) {
+            const t = easeInOutCubic((localTime - endRise) / PREVIEW_QKV_CONVERT_DURATION);
+            incoming.group.visible = true;
+            outgoing.group.visible = true;
+            trail.line.visible = true;
+
+            const incomingScale = THREE.MathUtils.lerp(PREVIEW_VECTOR_LARGE_SCALE, PREVIEW_VECTOR_LARGE_SCALE * 0.45, t);
+            incoming.group.scale.setScalar(incomingScale);
+            incoming.group.position.set(x, PREVIEW_QKV_MATRIX_Y, z);
+
+            const y = THREE.MathUtils.lerp(PREVIEW_QKV_MATRIX_Y, PREVIEW_QKV_OUTPUT_Y, t);
+            outgoing.group.position.set(x, y, z);
+            trail.update(new THREE.Vector3(x, PREVIEW_QKV_START_Y, z), new THREE.Vector3(x, y, z), 1.0 - t * 0.4);
+            return;
+        }
+
+        if (localTime <= endHold) {
+            incoming.group.visible = false;
+            outgoing.group.visible = true;
+            trail.line.visible = true;
+            outgoing.group.position.set(x, PREVIEW_QKV_OUTPUT_Y, z);
+            trail.update(new THREE.Vector3(x, PREVIEW_QKV_START_Y, z), new THREE.Vector3(x, PREVIEW_QKV_OUTPUT_Y, z), 0.55);
+            return;
+        }
+
+        if (localTime <= endExit) {
+            incoming.group.visible = false;
+            const t = easeInOutCubic((localTime - endHold) / PREVIEW_QKV_EXIT_DURATION);
+            const y = THREE.MathUtils.lerp(PREVIEW_QKV_OUTPUT_Y, PREVIEW_QKV_EXIT_Y, t);
+            outgoing.group.position.set(x, y, z);
+            const visible = t < 0.96;
+            outgoing.group.visible = visible;
+            trail.update(new THREE.Vector3(x, PREVIEW_QKV_START_Y, z), new THREE.Vector3(x, y, z), visible ? 0.35 : 0.0);
+            return;
+        }
+
+        incoming.group.visible = false;
+        outgoing.group.visible = false;
+        trail.line.visible = false;
+        incoming.group.position.set(x, PREVIEW_QKV_START_Y, z);
+        outgoing.group.position.set(x, PREVIEW_QKV_START_Y, z);
+    };
+
+    const animate = (_, nowMs) => {
+        const elapsed = ((nowMs - startTime) % totalDuration + totalDuration) % totalDuration;
+        lanes.forEach((lane, idx) => {
+            const laneTime = elapsed - idx * PREVIEW_QKV_LANE_STAGGER;
+            updateLane(lane, laneTime);
+        });
+    };
+
+    return { object: group, dispose, animate };
+}
+
+function buildQkvMatrixFlowPreview(label, selectionInfo) {
+    const type = inferQkvType(label, selectionInfo);
+    const flow = buildQkvFlowPreview(type, selectionInfo);
+    const matrixColor = type === 'Q' ? MHA_FINAL_Q_COLOR : (type === 'V' ? MHA_FINAL_V_COLOR : MHA_FINAL_K_COLOR);
+    const matrixPreview = buildSelectionClonePreview(selectionInfo, label)
+        || buildWeightMatrixPreview(MHA_MATRIX_PARAMS, matrixColor);
+    const group = new THREE.Group();
+    const x = (type === 'Q') ? -PREVIEW_QKV_X_SPREAD : (type === 'V' ? PREVIEW_QKV_X_SPREAD : 0);
+
+    if (matrixPreview?.object) {
+        matrixPreview.object.position.x = x;
+        matrixPreview.object.position.y = PREVIEW_QKV_MATRIX_Y;
+        group.add(matrixPreview.object);
+    }
+    if (flow?.object) {
+        group.add(flow.object);
+    }
+
+    return {
+        object: group,
+        dispose: () => {
+            if (flow?.dispose) flow.dispose();
+            if (matrixPreview?.dispose) matrixPreview.dispose();
+        },
+        animate: flow?.animate || null
     };
 }
 
@@ -539,18 +842,12 @@ function resolvePreviewObject(label, selectionInfo) {
     if (lower.startsWith('position:')) {
         return buildTokenChipPreview(extractTokenText(label));
     }
+    if (isQkvMatrixLabel(lower)) {
+        return buildQkvMatrixFlowPreview(label, selectionInfo);
+    }
     if (isWeightMatrixLabel(lower)) {
         const clonePreview = buildSelectionClonePreview(selectionInfo, label);
         if (clonePreview) return clonePreview;
-    }
-    if (lower.includes('query weight matrix')) {
-        return buildWeightMatrixPreview(MHA_MATRIX_PARAMS, MHA_FINAL_Q_COLOR);
-    }
-    if (lower.includes('key weight matrix')) {
-        return buildWeightMatrixPreview(MHA_MATRIX_PARAMS, MHA_FINAL_K_COLOR);
-    }
-    if (lower.includes('value weight matrix')) {
-        return buildWeightMatrixPreview(MHA_MATRIX_PARAMS, MHA_FINAL_V_COLOR);
     }
     if (lower.includes('output projection matrix')) {
         const height = MHA_MATRIX_PARAMS.height * MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.heightFactor;
@@ -582,19 +879,17 @@ function resolvePreviewObject(label, selectionInfo) {
     }
 
     if (lower.includes('query vector')) {
-        return buildVectorPreview(MHA_FINAL_Q_COLOR);
+        return buildQkvFlowPreview('Q', selectionInfo);
     }
     if (lower.includes('key vector')) {
-        return buildVectorPreview(MHA_FINAL_K_COLOR);
+        return buildQkvFlowPreview('K', selectionInfo);
     }
     if (lower.includes('value vector')) {
-        return buildVectorPreview(MHA_FINAL_V_COLOR);
+        return buildQkvFlowPreview('V', selectionInfo);
     }
     if (selectionInfo?.kind === 'mergedKV') {
-        if (selectionInfo.info?.category === 'V') {
-            return buildVectorPreview(MHA_FINAL_V_COLOR);
-        }
-        return buildVectorPreview(MHA_FINAL_K_COLOR);
+        const category = (selectionInfo.info?.category === 'V') ? 'V' : 'K';
+        return buildQkvFlowPreview(category, selectionInfo);
     }
 
     if (lower.includes('layernorm') || lower.includes('layer norm')) {
@@ -671,7 +966,9 @@ class SelectionPanel {
 
         this.currentPreview = null;
         this.currentDispose = null;
+        this.currentAnimator = null;
         this.isOpen = false;
+        this._lastFrameTime = performance.now();
 
         this._animate = this._animate.bind(this);
         this._onResize = this._onResize.bind(this);
@@ -730,12 +1027,30 @@ class SelectionPanel {
         requestAnimationFrame(this._animate);
     }
 
-    _animate() {
+    _animate(time) {
         requestAnimationFrame(this._animate);
+        const now = (typeof time === 'number') ? time : performance.now();
+        const deltaMs = this._lastFrameTime ? (now - this._lastFrameTime) : 16.6667;
+        this._lastFrameTime = now;
+
         if (!this.isReady || !this.isOpen || !this.currentPreview) return;
         this._syncEnvironment();
-        this.currentPreview.rotation.y += PREVIEW_ROTATION_SPEED;
-        this.currentPreview.rotation.x += PREVIEW_ROTATION_SPEED * 0.45;
+
+        if (typeof this.currentAnimator === 'function') {
+            try {
+                this.currentAnimator(deltaMs, now);
+            } catch (err) {
+                // Keep selection preview resilient to animation errors.
+                console.warn('Selection preview animation error:', err);
+            }
+        }
+
+        const rotationStep = PREVIEW_ROTATION_SPEED * (deltaMs / 16.6667);
+        this.currentPreview.rotation.y += rotationStep;
+        const timeSeconds = now * 0.001;
+        this.currentPreview.rotation.x = PREVIEW_BASE_TILT_X
+            + Math.sin(timeSeconds * PREVIEW_TILT_OSC_SPEED) * PREVIEW_TILT_AMPLITUDE;
+        this.currentPreview.rotation.z = 0;
         this.renderer.render(this.scene, this.camera);
     }
 
@@ -776,13 +1091,22 @@ class SelectionPanel {
             }
             this.currentPreview = null;
             this.currentDispose = null;
+            this.currentAnimator = null;
         }
 
         const preview = resolvePreviewObject(label, selection);
         this.currentPreview = preview.object;
         this.currentDispose = preview.dispose;
-        this.currentPreview.rotation.set(-0.35, 0.35, 0);
+        this.currentAnimator = preview.animate || null;
+        const desiredRotation = new THREE.Euler(PREVIEW_BASE_TILT_X, PREVIEW_BASE_ROTATION_Y, 0);
+        if (this.currentPreview?.rotation) {
+            this.currentPreview.rotation.set(0, 0, 0);
+        }
+        this._lastFrameTime = performance.now();
         fitObjectToView(this.currentPreview, this.camera);
+        if (this.currentPreview?.rotation) {
+            this.currentPreview.rotation.copy(desiredRotation);
+        }
         this.scene.add(this.currentPreview);
 
         this.open();
