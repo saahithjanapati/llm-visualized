@@ -877,12 +877,11 @@ export default class Gpt2Layer extends BaseLayer {
                                 }
 
                                 if (lane.addTarget) {
-
+                                    const ln1ShiftedData = this._getLn1Data(lane, 'shift');
                                     lane.resultVec = lane.addTarget;
                                     lane.ln1AddStarted = true;
                                     startPrismAdditionAnimation(multResult, lane.addTarget, null, () => {
                                         lane.ln1AddComplete = true;
-                                        const ln1ShiftedData = this._getLn1Data(lane, 'shift');
                                         if (ln1ShiftedData) {
                                             applyVectorData(
                                                 lane.addTarget,
@@ -936,7 +935,7 @@ export default class Gpt2Layer extends BaseLayer {
                                         }
                                         lane.horizPhase = 'riseAboveLN';
                                         this._emitProgress();
-                                    });
+                                    }, { finalData: ln1ShiftedData });
                                 } else {
                                     lane.resultVec = multResult;
                                     lane.ln1AddComplete = true;
@@ -1230,12 +1229,11 @@ export default class Gpt2Layer extends BaseLayer {
                                 }
 
                                 if (lane.addTargetLN2) {
-
+                                    const ln2ShiftedData = this._getLn2Data(lane, 'shift');
                                     lane.resultVecLN2 = lane.addTargetLN2;
                                     lane.ln2AddStarted = true;
                                     startPrismAdditionAnimation(resVec, lane.addTargetLN2, null, () => {
                                         lane.ln2AddComplete = true;
-                                        const ln2ShiftedData = this._getLn2Data(lane, 'shift');
                                         if (ln2ShiftedData) {
                                             applyVectorData(
                                                 lane.addTargetLN2,
@@ -1285,10 +1283,10 @@ export default class Gpt2Layer extends BaseLayer {
                                             const fallbackTrailLn2 = new StraightLineTrail(this.root, 0xffffff, 1);
                                             fallbackTrailLn2.start(lane.addTargetLN2.group.position);
                                             lane.addTargetLN2.userData.trail = fallbackTrailLn2;
-                                            lane.addTargetLN2.userData.trailWorld = false;
+                                        lane.addTargetLN2.userData.trailWorld = false;
                                         }
                                         startLn2Rise(lane.addTargetLN2);
-                                    });
+                                    }, { finalData: ln2ShiftedData });
                                 } else {
                                     lane.resultVecLN2 = resVec;
                                     lane.ln2AddComplete = true;
@@ -1802,8 +1800,11 @@ export default class Gpt2Layer extends BaseLayer {
                     
                     // Trigger the final addition animation (originalVec ➔ vec)
                     // Prisms should rise from the lower original vector up into the processed one.
+                    const postMlpData = this._getPostMlpResidualData(lane);
+                    if (postMlpData) {
+                        lane.additionTargetData = postMlpData;
+                    }
                     this.mhsaAnimation._startAdditionAnimation(lane.originalVec, vec, lane, () => {
-                        const postMlpData = this._getPostMlpResidualData(lane);
                         if (postMlpData) {
                             applyVectorData(
                                 lane.originalVec,
@@ -2313,8 +2314,8 @@ export default class Gpt2Layer extends BaseLayer {
                                     try { if (posVec.userData) delete posVec.userData.trail; } catch (_) {}
                                     // Trigger addition: positional (above) travels DOWN into vocab (rising)
                                     try {
+                                        const sumData = this._getEmbeddingData(lane, 'sum');
                                         startPrismAdditionAnimation(posVec, originalVec, null, () => {
-                                            const sumData = this._getEmbeddingData(lane, 'sum');
                                             if (sumData) {
                                                 applyVectorData(
                                                     originalVec,
@@ -2324,7 +2325,7 @@ export default class Gpt2Layer extends BaseLayer {
                                                 );
                                             }
                                             lane.posAddComplete = true;
-                                        });
+                                        }, { finalData: sumData });
                                     } catch (_) {
                                         lane.posAddComplete = true;
                                     }

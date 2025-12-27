@@ -7,7 +7,7 @@ import {
     VECTOR_LENGTH_PRISM,
 } from '../../utils/constants.js';
 import { MHSA_PASS_THROUGH_BRIGHTEN_RATIO, MHSA_PASS_THROUGH_DIM_RATIO, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY } from '../../utils/constants.js';
-import { buildMonochromeOptions } from '../../utils/colors.js';
+import { buildMonochromeOptions, mapValueToMonochrome } from '../../utils/colors.js';
 import { buildActivationData, applyActivationDataToVector } from '../../utils/activationMetadata.js';
 
 /**
@@ -190,6 +190,11 @@ export function animateVectorMatrixPassThrough(
                     { numKeyColors, generationOptions: monoOptions },
                     { setHiddenToBlack: false },
                 );
+                if (Number.isFinite(scalar) && typeof vector.setUniformColor === 'function') {
+                    const monoColor = mapValueToMonochrome(scalar, monoOptions);
+                    vector.setUniformColor(monoColor);
+                }
+                finalVisualsApplied = true;
                 if (Number.isFinite(scalar)) {
                     const label = vectorCategory === 'K'
                         ? 'Key Vector (Green)'
@@ -262,6 +267,10 @@ export function animateVectorMatrixPassThrough(
                     numKeyColors: 3,
                     generationOptions: monoOptions,
                 });
+                if (processedData.length === 1 && typeof vector.setUniformColor === 'function') {
+                    const monoColor = mapValueToMonochrome(processedData[0], monoOptions);
+                    vector.setUniformColor(monoColor);
+                }
                 finalVisualsApplied = true;
             }
 

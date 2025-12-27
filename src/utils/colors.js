@@ -2,18 +2,57 @@ import * as THREE from 'three';
 import { VECTOR_LENGTH } from './constants.js'; // Added import for logging
 
 const MONO_MIN_LIGHTNESS = 0.45;
-const MONO_MAX_LIGHTNESS = 0.75;
+const MONO_MAX_LIGHTNESS = 0.35;
+const SPECTRUM_CLAMP_MAX = 2;
+const SPECTRUM_HUE_MIN = 0;
+const SPECTRUM_HUE_MID = 0.5; // cyan/light blue at zero
+const SPECTRUM_HUE_MAX = 2 / 3; // blue at max
+const SPECTRUM_CENTER_RANGE = 0.35; // Portion of value range treated as "center" (0-1, normalized)
+const SPECTRUM_CENTER_SPAN = 0.9; // Portion of hue span reserved for center values (0-1)
+
+function applySpectrumStretch(normalized) {
+    const safeRange = Number.isFinite(SPECTRUM_CENTER_RANGE)
+        ? Math.max(0, Math.min(1, SPECTRUM_CENTER_RANGE))
+        : 0;
+    const safeSpan = Number.isFinite(SPECTRUM_CENTER_SPAN)
+        ? Math.max(0, Math.min(1, SPECTRUM_CENTER_SPAN))
+        : 0;
+
+    if (safeRange <= 0 || safeRange >= 1 || safeSpan <= 0 || safeSpan >= 1) {
+        return normalized;
+    }
+
+    const absNorm = Math.abs(normalized);
+    if (absNorm <= safeRange) {
+        const t = safeRange > 0 ? absNorm / safeRange : 0;
+        return Math.sign(normalized) * t * safeSpan;
+    }
+
+    const t = (absNorm - safeRange) / (1 - safeRange);
+    return Math.sign(normalized) * (safeSpan + t * (1 - safeSpan));
+}
+
+function mapCurvedToHue(curved) {
+    if (curved <= 0) {
+        const t = curved + 1; // [-1, 0] -> [0, 1]
+        return THREE.MathUtils.lerp(SPECTRUM_HUE_MIN, SPECTRUM_HUE_MID, t);
+    }
+    const t = curved; // [0, 1] -> [0, 1]
+    return THREE.MathUtils.lerp(SPECTRUM_HUE_MID, SPECTRUM_HUE_MAX, t);
+}
 
 // Map a value (normalized, potentially outside -1 to 1) to a rainbow color (HSL)
 export function mapValueToColor(value) {
     // console.log(`mapValueToColor input value: ${value}`); // Log input value
 
     // Clamp raw values to the visualised range before mapping to hue.
-    const clampedInput = Math.max(-2, Math.min(2, value));
-    const clampedValue = clampedInput / 2; // Map [-2, 2] -> [-1, 1] for hue
+    const safeValue = Number.isFinite(value) ? value : 0;
+    const clampedValue = Math.max(-SPECTRUM_CLAMP_MAX, Math.min(SPECTRUM_CLAMP_MAX, safeValue));
+    const normalized = clampedValue / SPECTRUM_CLAMP_MAX;
+    const curved = applySpectrumStretch(normalized);
 
-    // Map [-1, 1] -> [0, 0.8] so the spectrum ends at purple (no wrap to red).
-    const hue = (clampedValue + 1) * 0.4;
+    // Map [-1, 0, 1] -> [red, cyan, blue] with a shifted midpoint.
+    const hue = mapCurvedToHue(curved);
     const saturation = 1.0;
     // Keep lightness higher so colors remain readable on black backgrounds.
     const lightness = 0.6;
@@ -22,10 +61,18 @@ export function mapValueToColor(value) {
     return finalColor;
 }
 
-export function buildMonochromeOptions(color) {
+export function buildMonochromeOptions(color, { valueMin = -2, valueMax = 2 } = {}) {
     const hsl = { h: 0, s: 0, l: 0 };
-    if (color && typeof color.getHSL === 'function') {
-        color.getHSL(hsl);
+    let sourceColor = color;
+    if ((typeof color === 'number' || typeof color === 'string') && THREE.Color) {
+        try {
+            sourceColor = new THREE.Color(color);
+        } catch (_) {
+            sourceColor = null;
+        }
+    }
+    if (sourceColor && typeof sourceColor.getHSL === 'function') {
+        sourceColor.getHSL(hsl);
     }
     const baseSat = Number.isFinite(hsl.s) ? hsl.s : 0.9;
     return {
@@ -34,7 +81,23 @@ export function buildMonochromeOptions(color) {
         saturation: Math.min(1, Math.max(0.85, baseSat * 1.2)),
         minLightness: MONO_MIN_LIGHTNESS,
         maxLightness: MONO_MAX_LIGHTNESS,
+        valueMin,
+        valueMax,
     };
+}
+
+export function mapValueToMonochrome(value, options = {}) {
+    const minLightness = Number.isFinite(options.minLightness) ? options.minLightness : MONO_MIN_LIGHTNESS;
+    const maxLightness = Number.isFinite(options.maxLightness) ? options.maxLightness : MONO_MAX_LIGHTNESS;
+    const baseHue = Number.isFinite(options.baseHue) ? options.baseHue : 0;
+    const saturation = Number.isFinite(options.saturation) ? options.saturation : 0.9;
+    const valueMin = Number.isFinite(options.valueMin) ? options.valueMin : -2;
+    const valueMax = Number.isFinite(options.valueMax) ? options.valueMax : 2;
+    const denom = valueMax - valueMin;
+    const clamped = Number.isFinite(value) ? THREE.MathUtils.clamp(value, valueMin, valueMax) : valueMin + denom * 0.5;
+    const t = denom > 0 ? (clamped - valueMin) / denom : 0.5;
+    const lightness = THREE.MathUtils.lerp(minLightness, maxLightness, t);
+    return new THREE.Color().setHSL(baseHue, saturation, lightness);
 }
 
 export function mapValueToGrayscale(value) {
@@ -70,15 +133,17 @@ export function mapValueToColor_LOG(value, index) {
     }
 
     // Original logic from mapValueToColor
-    const clampedInput = Math.max(-2, Math.min(2, value));
-    const clampedValue = clampedInput / 2;
-    const hue = (clampedValue + 1) * 0.4;
+    const safeValue = Number.isFinite(value) ? value : 0;
+    const clampedValue = Math.max(-SPECTRUM_CLAMP_MAX, Math.min(SPECTRUM_CLAMP_MAX, safeValue));
+    const normalized = clampedValue / SPECTRUM_CLAMP_MAX;
+    const curved = applySpectrumStretch(normalized);
+    const hue = mapCurvedToHue(curved);
     const saturation = 1.0;
     const lightness = 0.6;
     const finalColor = new THREE.Color().setHSL(hue, saturation, lightness);
 
     if (shouldLog) {
-        console.log(` -> clamped=${clampedValue.toFixed(3)}, hue=${hue.toFixed(3)}, L=0.6, RGB=(${finalColor.r.toFixed(3)}, ${finalColor.g.toFixed(3)}, ${finalColor.b.toFixed(3)})`);
+        console.log(` -> clamped=${clampedValue.toFixed(3)}, curved=${curved.toFixed(3)}, hue=${hue.toFixed(3)}, L=0.6, RGB=(${finalColor.r.toFixed(3)}, ${finalColor.g.toFixed(3)}, ${finalColor.b.toFixed(3)})`);
     }
     return finalColor;
 }

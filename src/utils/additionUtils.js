@@ -19,6 +19,7 @@ import {
     HIDE_INSTANCE_Y_OFFSET,
 } from './constants.js';
 import { getCentralPrismIndices } from './prismLayout.js';
+import { mapValueToColor } from './colors.js';
 
 const TMP_MATRIX_A = new THREE.Matrix4();
 const TMP_MATRIX_B = new THREE.Matrix4();
@@ -28,6 +29,168 @@ const TMP_WORLD_AVG = new THREE.Vector3();
 const TMP_WORLD_ANCHOR = new THREE.Vector3();
 const TMP_WORLD_SNAP = new THREE.Vector3();
 const TMP_LOCAL_SNAP = new THREE.Vector3();
+const TMP_COLOR_A = new THREE.Color();
+const TMP_COLOR_B = new THREE.Color();
+const TMP_COLOR_C = new THREE.Color();
+
+function isArrayLike(value) {
+    return Array.isArray(value) || ArrayBuffer.isView(value);
+}
+
+function buildKeyColorsFromData(data, numKeyColors) {
+    const keyColors = [];
+    const dataLength = data.length || 0;
+    if (numKeyColors <= 1) {
+        const midIndex = dataLength > 0 ? Math.floor(dataLength / 2) : 0;
+        const midValue = dataLength > 0 ? data[midIndex] : 0;
+        keyColors.push(mapValueToColor(midValue));
+        return keyColors;
+    }
+
+    const step = dataLength > 1 ? (dataLength - 1) / (numKeyColors - 1) : 0;
+    for (let i = 0; i < numKeyColors; i++) {
+        const sampleIndex = dataLength > 0
+            ? Math.min(Math.round(i * step), dataLength - 1)
+            : 0;
+        const value = dataLength > 0 ? data[sampleIndex] : 0;
+        keyColors.push(mapValueToColor(value));
+    }
+    return keyColors;
+}
+
+function getGradientColorForIndex(index, instanceCount, keyColors, numSubsections, outColor) {
+    if (!keyColors || keyColors.length === 0) {
+        return outColor.setRGB(0.5, 0.5, 0.5);
+    }
+    if (instanceCount <= 1) {
+        return outColor.copy(keyColors[0]);
+    }
+    const currentNumSubsections = Math.max(1, numSubsections);
+    const globalProgress = index / (instanceCount - 1);
+    const segmentProgress = globalProgress * currentNumSubsections;
+    const idx1 = Math.floor(segmentProgress);
+    const safeIdx1 = Math.min(idx1, keyColors.length - 1);
+    const safeIdx2 = Math.min(idx1 + 1, keyColors.length - 1);
+    const localT = segmentProgress - idx1;
+    return outColor.copy(keyColors[safeIdx1]).lerp(keyColors[safeIdx2], localT);
+}
+
+function buildFinalColorBuffers(finalData, instanceCount) {
+    if (!isArrayLike(finalData) || finalData.length === 0) {
+        return null;
+    }
+    const count = Math.max(1, Math.floor(instanceCount));
+    const numKeyColors = Math.min(30, Math.max(1, finalData.length || 1));
+    const keyColors = buildKeyColorsFromData(finalData, numKeyColors);
+    const numSubsections = Math.max(0, numKeyColors - 1);
+
+    const colorStart = new Float32Array(count * 3);
+    const colorEnd = new Float32Array(count * 3);
+    const instanceColors = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+        const midColor = getGradientColorForIndex(i, count, keyColors, numSubsections, TMP_COLOR_A);
+        const leftColor = getGradientColorForIndex(Math.max(0, i - 1), count, keyColors, numSubsections, TMP_COLOR_B);
+        const rightColor = getGradientColorForIndex(Math.min(count - 1, i + 1), count, keyColors, numSubsections, TMP_COLOR_C);
+        const i3 = i * 3;
+        instanceColors[i3] = midColor.r;
+        instanceColors[i3 + 1] = midColor.g;
+        instanceColors[i3 + 2] = midColor.b;
+        colorStart[i3] = leftColor.r;
+        colorStart[i3 + 1] = leftColor.g;
+        colorStart[i3 + 2] = leftColor.b;
+        colorEnd[i3] = rightColor.r;
+        colorEnd[i3 + 1] = rightColor.g;
+        colorEnd[i3 + 2] = rightColor.b;
+    }
+
+    return {
+        colorStart,
+        colorEnd,
+        instanceColors,
+        dataLength: finalData.length,
+        instanceCount: count,
+    };
+}
+
+function getMappedDataValue(data, index, instanceCount) {
+    if (!isArrayLike(data) || data.length === 0) {
+        return undefined;
+    }
+    if (data.length === 1) {
+        return data[0];
+    }
+    const t = instanceCount > 1 ? index / (instanceCount - 1) : 0;
+    const mappedIndex = Math.min(data.length - 1, Math.max(0, Math.round(t * (data.length - 1))));
+    return data[mappedIndex];
+}
+
+function applyFinalColorAtIndex(targetVec, index, finalBuffers) {
+    if (!targetVec || !targetVec.mesh || !finalBuffers) return;
+    const i3 = index * 3;
+    const colorStartAttr = targetVec.mesh.geometry?.getAttribute?.('colorStart');
+    const colorEndAttr = targetVec.mesh.geometry?.getAttribute?.('colorEnd');
+
+    if (colorStartAttr && finalBuffers.colorStart) {
+        colorStartAttr.array[i3] = finalBuffers.colorStart[i3];
+        colorStartAttr.array[i3 + 1] = finalBuffers.colorStart[i3 + 1];
+        colorStartAttr.array[i3 + 2] = finalBuffers.colorStart[i3 + 2];
+        colorStartAttr.needsUpdate = true;
+    }
+    if (colorEndAttr && finalBuffers.colorEnd) {
+        colorEndAttr.array[i3] = finalBuffers.colorEnd[i3];
+        colorEndAttr.array[i3 + 1] = finalBuffers.colorEnd[i3 + 1];
+        colorEndAttr.array[i3 + 2] = finalBuffers.colorEnd[i3 + 2];
+        colorEndAttr.needsUpdate = true;
+    }
+
+    if (!targetVec.mesh.instanceColor) {
+        targetVec.mesh.instanceColor = new THREE.InstancedBufferAttribute(
+            new Float32Array(targetVec.instanceCount * 3),
+            3
+        );
+    }
+    if (finalBuffers.instanceColors && targetVec.mesh.instanceColor) {
+        const instanceColors = targetVec.mesh.instanceColor.array;
+        instanceColors[i3] = finalBuffers.instanceColors[i3];
+        instanceColors[i3 + 1] = finalBuffers.instanceColors[i3 + 1];
+        instanceColors[i3 + 2] = finalBuffers.instanceColors[i3 + 2];
+        targetVec.mesh.instanceColor.needsUpdate = true;
+    }
+}
+
+function applySingleColorAtIndex(targetVec, index, color) {
+    if (!targetVec || !targetVec.mesh || !(color instanceof THREE.Color)) return;
+    const i3 = index * 3;
+    const colorStartAttr = targetVec.mesh.geometry?.getAttribute?.('colorStart');
+    const colorEndAttr = targetVec.mesh.geometry?.getAttribute?.('colorEnd');
+
+    if (colorStartAttr) {
+        colorStartAttr.array[i3] = color.r;
+        colorStartAttr.array[i3 + 1] = color.g;
+        colorStartAttr.array[i3 + 2] = color.b;
+        colorStartAttr.needsUpdate = true;
+    }
+    if (colorEndAttr) {
+        colorEndAttr.array[i3] = color.r;
+        colorEndAttr.array[i3 + 1] = color.g;
+        colorEndAttr.array[i3 + 2] = color.b;
+        colorEndAttr.needsUpdate = true;
+    }
+
+    if (!targetVec.mesh.instanceColor) {
+        targetVec.mesh.instanceColor = new THREE.InstancedBufferAttribute(
+            new Float32Array(targetVec.instanceCount * 3),
+            3
+        );
+    }
+    if (targetVec.mesh.instanceColor) {
+        const instanceColors = targetVec.mesh.instanceColor.array;
+        instanceColors[i3] = color.r;
+        instanceColors[i3 + 1] = color.g;
+        instanceColors[i3 + 2] = color.b;
+        targetVec.mesh.instanceColor.needsUpdate = true;
+    }
+}
 
 function computeMidlineWorldPosition(vec, length = VECTOR_LENGTH_PRISM, out = new THREE.Vector3()) {
     if (!vec || !vec.mesh || typeof vec.mesh.getMatrixAt !== 'function' || !vec.group) {
@@ -68,7 +231,7 @@ function getVectorInstanceCount(vec, fallback = VECTOR_LENGTH_PRISM) {
  * @param {Object} [lane]             – optional lane object; if provided the helper
 *                                      will update lane fields
  */
-export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComplete) {
+export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComplete, options = null) {
     if (!sourceVec || !targetVec || !sourceVec.mesh || !targetVec.mesh) return;
     if (typeof TWEEN === 'undefined') {
         console.warn('TWEEN not available – addition animation skipped');
@@ -86,6 +249,14 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
     const targetLen = Array.isArray(targetVec.rawData) ? targetVec.rawData.length : targetCount;
     const vectorLength = Math.min(sourceCount, targetCount, sourceLen, targetLen);
     const centreIndices = getCentralPrismIndices(vectorLength);
+    const finalDataCandidate = (options && isArrayLike(options.finalData))
+        ? options.finalData
+        : (lane && isArrayLike(lane.additionTargetData))
+            ? lane.additionTargetData
+            : null;
+    const finalBuffers = finalDataCandidate
+        ? buildFinalColorBuffers(finalDataCandidate, vectorLength)
+        : null;
 
     // Freeze upward movement of the source so its group position remains static.
     if (lane) {
@@ -235,8 +406,20 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
                     .to({}, flashDuration)
                     .onComplete(() => {
                         const sum = (sourceVec.rawData[i] ?? 0) + (targetVec.rawData[i] ?? 0);
-                        targetVec.rawData[i] = sum;
-                        targetVec.setInstanceAppearance(i, 0, gradCol);
+                        const finalValue = finalDataCandidate
+                            ? getMappedDataValue(finalDataCandidate, i, vectorLength)
+                            : sum;
+                        if (Number.isFinite(finalValue)) {
+                            targetVec.rawData[i] = finalValue;
+                        } else {
+                            targetVec.rawData[i] = sum;
+                        }
+
+                        if (finalBuffers) {
+                            applyFinalColorAtIndex(targetVec, i, finalBuffers);
+                        } else {
+                            applySingleColorAtIndex(targetVec, i, gradCol);
+                        }
                         sourceVec.setInstanceAppearance(i, HIDE_INSTANCE_Y_OFFSET, null);
                     })
                     .start();

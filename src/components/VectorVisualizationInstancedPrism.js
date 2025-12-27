@@ -13,9 +13,15 @@ import { mapValueToColor } from '../utils/colors.js';
 import { perfStats } from '../utils/perfStats.js';
 
 // Helper for monochromatic colors
-function mapValueToMonochromaticColor(value, baseHue, saturation, minLightness, maxLightness) {
-    // Assuming value is 0-1 (e.g., normalized data point or progress)
-    const t = THREE.MathUtils.clamp(value, 0, 1);
+function mapValueToMonochromaticColor(value, baseHue, saturation, minLightness, maxLightness, valueMin = 0, valueMax = 1) {
+    const safeMin = Number.isFinite(valueMin) ? valueMin : 0;
+    const safeMax = Number.isFinite(valueMax) ? valueMax : 1;
+    const fallback = safeMin + (safeMax - safeMin) * 0.5;
+    const rawValue = Number.isFinite(value) ? value : fallback;
+    const denom = safeMax - safeMin;
+    const t = denom > 0
+        ? (THREE.MathUtils.clamp(rawValue, safeMin, safeMax) - safeMin) / denom
+        : 0.5;
     const lightness = THREE.MathUtils.lerp(minLightness, maxLightness, t);
     return new THREE.Color().setHSL(baseHue, saturation, lightness);
 }
@@ -328,6 +334,119 @@ varying float vGradientT;`
         }
     }
 
+    setUniformColor(color) {
+        if (!this.mesh) return;
+        const col = color instanceof THREE.Color ? color : new THREE.Color(color);
+        const count = this.instanceCount;
+        const colorStartAttr = this.mesh.geometry.getAttribute('colorStart');
+        const colorEndAttr = this.mesh.geometry.getAttribute('colorEnd');
+
+        if (!this.mesh.instanceColor) {
+            this.mesh.instanceColor = new THREE.InstancedBufferAttribute(
+                new Float32Array(this.instanceCount * 3),
+                3
+            );
+        }
+        const instanceColors = this.mesh.instanceColor.array;
+        for (let i = 0; i < count; i++) {
+            const i3 = i * 3;
+            instanceColors[i3] = col.r;
+            instanceColors[i3 + 1] = col.g;
+            instanceColors[i3 + 2] = col.b;
+            if (colorStartAttr && colorStartAttr.array) {
+                colorStartAttr.array[i3] = col.r;
+                colorStartAttr.array[i3 + 1] = col.g;
+                colorStartAttr.array[i3 + 2] = col.b;
+            }
+            if (colorEndAttr && colorEndAttr.array) {
+                colorEndAttr.array[i3] = col.r;
+                colorEndAttr.array[i3 + 1] = col.g;
+                colorEndAttr.array[i3 + 2] = col.b;
+            }
+        }
+        this.mesh.instanceColor.needsUpdate = true;
+        if (colorStartAttr) colorStartAttr.needsUpdate = true;
+        if (colorEndAttr) colorEndAttr.needsUpdate = true;
+    }
+
+    copyColorsFrom(source) {
+        if (!source || !source.mesh || !this.mesh) return;
+        const srcMesh = source.mesh;
+        const dstMesh = this.mesh;
+        const srcCount = Number.isFinite(source.instanceCount) ? source.instanceCount : 0;
+        const dstCount = Number.isFinite(this.instanceCount) ? this.instanceCount : 0;
+        const count = Math.min(srcCount, dstCount);
+        if (count <= 0) return;
+
+        const srcInstanceColor = srcMesh.instanceColor;
+        if (srcInstanceColor && srcInstanceColor.array) {
+            if (!dstMesh.instanceColor) {
+                dstMesh.instanceColor = new THREE.InstancedBufferAttribute(
+                    new Float32Array(dstCount * 3),
+                    3
+                );
+            }
+            const srcArray = srcInstanceColor.array;
+            const dstArray = dstMesh.instanceColor.array;
+            const copyLen = Math.min(srcArray.length, dstArray.length, count * 3);
+            for (let i = 0; i < copyLen; i++) {
+                dstArray[i] = srcArray[i];
+            }
+            if (dstArray.length > copyLen && copyLen >= 3) {
+                const lastR = dstArray[copyLen - 3];
+                const lastG = dstArray[copyLen - 2];
+                const lastB = dstArray[copyLen - 1];
+                for (let i = copyLen; i < dstArray.length; i += 3) {
+                    dstArray[i] = lastR;
+                    dstArray[i + 1] = lastG;
+                    dstArray[i + 2] = lastB;
+                }
+            }
+            dstMesh.instanceColor.needsUpdate = true;
+        } else if (srcMesh.getColorAt && dstMesh.setColorAt) {
+            const tempColor = new THREE.Color();
+            for (let i = 0; i < count; i++) {
+                srcMesh.getColorAt(i, tempColor);
+                dstMesh.setColorAt(i, tempColor);
+            }
+            if (dstMesh.instanceColor) dstMesh.instanceColor.needsUpdate = true;
+        }
+
+        const srcCS = srcMesh.geometry?.getAttribute?.('colorStart');
+        const srcCE = srcMesh.geometry?.getAttribute?.('colorEnd');
+        const dstCS = dstMesh.geometry?.getAttribute?.('colorStart');
+        const dstCE = dstMesh.geometry?.getAttribute?.('colorEnd');
+        if (srcCS && srcCE && dstCS && dstCE) {
+            const srcStart = srcCS.array;
+            const srcEnd = srcCE.array;
+            const dstStart = dstCS.array;
+            const dstEnd = dstCE.array;
+            const copyLen = Math.min(srcStart.length, dstStart.length, count * 3);
+            for (let i = 0; i < copyLen; i++) {
+                dstStart[i] = srcStart[i];
+                dstEnd[i] = srcEnd[i];
+            }
+            if (dstStart.length > copyLen && copyLen >= 3) {
+                const lastSR = dstStart[copyLen - 3];
+                const lastSG = dstStart[copyLen - 2];
+                const lastSB = dstStart[copyLen - 1];
+                const lastER = dstEnd[copyLen - 3];
+                const lastEG = dstEnd[copyLen - 2];
+                const lastEB = dstEnd[copyLen - 1];
+                for (let i = copyLen; i < dstStart.length; i += 3) {
+                    dstStart[i] = lastSR;
+                    dstStart[i + 1] = lastSG;
+                    dstStart[i + 2] = lastSB;
+                    dstEnd[i] = lastER;
+                    dstEnd[i + 1] = lastEG;
+                    dstEnd[i + 2] = lastEB;
+                }
+            }
+            dstCS.needsUpdate = true;
+            dstCE.needsUpdate = true;
+        }
+    }
+
     // Renamed from updateData. This is for internal data state update only.
     updateDataInternal(newData) {
         // Accept data arrays of any length – the visual component will still use
@@ -493,12 +612,16 @@ varying float vGradientT;`
         if (numKeyColorsToSample === 1) {
             const value = dataLengthForSampling > 0 ? data[Math.floor(dataLengthForSampling / 2)] : 0.5; // Use middle value or default
             if (colorGenerationOptions && colorGenerationOptions.type === 'monochromatic') {
+                const valueMin = Number.isFinite(colorGenerationOptions.valueMin) ? colorGenerationOptions.valueMin : 0;
+                const valueMax = Number.isFinite(colorGenerationOptions.valueMax) ? colorGenerationOptions.valueMax : 1;
                 this.currentKeyColors.push(mapValueToMonochromaticColor(
                     value, // This assumes 'value' is somehow normalized or mapValueToMonochromaticColor handles its range
                     colorGenerationOptions.baseHue,
                     colorGenerationOptions.saturation,
                     colorGenerationOptions.minLightness,
-                    colorGenerationOptions.maxLightness
+                    colorGenerationOptions.maxLightness,
+                    valueMin,
+                    valueMax
                 ));
             } else {
                 this.currentKeyColors.push(mapValueToColor(value));
@@ -521,7 +644,9 @@ varying float vGradientT;`
                         colorGenerationOptions.baseHue,
                         colorGenerationOptions.saturation,
                         colorGenerationOptions.minLightness,
-                        colorGenerationOptions.maxLightness
+                        colorGenerationOptions.maxLightness,
+                        0,
+                        1
                     ));
                 } else {
                     this.currentKeyColors.push(mapValueToColor(value));
@@ -532,7 +657,15 @@ varying float vGradientT;`
         // Ensure getDefaultColorForIndex can work (same logic as before)
         if (this.numSubsections === 0 && this.currentKeyColors.length === 0 && numKeyColorsToSample === 1) {
              if (colorGenerationOptions && colorGenerationOptions.type === 'monochromatic') {
-                this.currentKeyColors.push(mapValueToMonochromaticColor(0.5, colorGenerationOptions.baseHue, colorGenerationOptions.saturation, colorGenerationOptions.minLightness, colorGenerationOptions.maxLightness));
+                this.currentKeyColors.push(mapValueToMonochromaticColor(
+                    0.5,
+                    colorGenerationOptions.baseHue,
+                    colorGenerationOptions.saturation,
+                    colorGenerationOptions.minLightness,
+                    colorGenerationOptions.maxLightness,
+                    0,
+                    1
+                ));
             } else {
                 this.currentKeyColors.push(new THREE.Color(0.5,0.5,0.5));
             }

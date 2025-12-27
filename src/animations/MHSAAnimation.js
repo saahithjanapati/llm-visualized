@@ -1532,31 +1532,34 @@ export class MHSAAnimation {
                                             if (this.currentLanes) {
                                                 const matchingLane = this.currentLanes.find(l => Math.abs(l.zPos - laneZ) < 0.1);
                                                 if (matchingLane && matchingLane.originalVec) {
+                                                    const postData = (this.activationSource && Number.isFinite(this.layerIndex))
+                                                        ? this.activationSource.getPostAttentionResidual(this.layerIndex, matchingLane.tokenIndex, this.vectorPrismCount)
+                                                        : null;
+                                                    if (postData) {
+                                                        matchingLane.additionTargetData = postData;
+                                                    }
                                                     this._startAdditionAnimation(matchingLane.originalVec, vec, matchingLane, () => {
-                                                        if (this.activationSource && Number.isFinite(this.layerIndex)) {
-                                                            const postData = this.activationSource.getPostAttentionResidual(this.layerIndex, matchingLane.tokenIndex, this.vectorPrismCount);
-                                                            if (postData) {
-                                                                const label = matchingLane.tokenLabel
-                                                                    ? `Post-Attention Residual - ${matchingLane.tokenLabel}`
-                                                                    : 'Post-Attention Residual';
-                                                                matchingLane.originalVec.rawData = postData.slice();
-                                                                const numKeyColors = Math.min(30, Math.max(1, postData.length || 1));
-                                                                matchingLane.originalVec.updateKeyColorsFromData(
-                                                                    matchingLane.originalVec.rawData,
-                                                                    numKeyColors,
-                                                                    null,
-                                                                    postData
-                                                                );
-                                                                const activationData = buildActivationData({
-                                                                    label,
-                                                                    stage: 'residual.post_attention',
-                                                                    layerIndex: this.layerIndex,
-                                                                    tokenIndex: matchingLane.tokenIndex,
-                                                                    tokenLabel: matchingLane.tokenLabel,
-                                                                    values: postData,
-                                                                });
-                                                                applyActivationDataToVector(matchingLane.originalVec, activationData, label);
-                                                            }
+                                                        if (postData) {
+                                                            const label = matchingLane.tokenLabel
+                                                                ? `Post-Attention Residual - ${matchingLane.tokenLabel}`
+                                                                : 'Post-Attention Residual';
+                                                            matchingLane.originalVec.rawData = postData.slice();
+                                                            const numKeyColors = Math.min(30, Math.max(1, postData.length || 1));
+                                                            matchingLane.originalVec.updateKeyColorsFromData(
+                                                                matchingLane.originalVec.rawData,
+                                                                numKeyColors,
+                                                                null,
+                                                                postData
+                                                            );
+                                                            const activationData = buildActivationData({
+                                                                label,
+                                                                stage: 'residual.post_attention',
+                                                                layerIndex: this.layerIndex,
+                                                                tokenIndex: matchingLane.tokenIndex,
+                                                                tokenLabel: matchingLane.tokenLabel,
+                                                                values: postData,
+                                                            });
+                                                            applyActivationDataToVector(matchingLane.originalVec, activationData, label);
                                                         }
                                                     });
                                                 }
@@ -1943,13 +1946,17 @@ export class MHSAAnimation {
         // move into their corresponding positions in targetVec.
         // The lane object is forwarded so the helper can update lane state
         // (stopRise flags, phase transitions, etc.).
+        const finalData = lane && lane.additionTargetData ? lane.additionTargetData : null;
+        if (lane && lane.additionTargetData) {
+            delete lane.additionTargetData;
+        }
         startPrismAdditionAnimation(sourceVec, targetVec, lane, () => {
             if (typeof onComplete === 'function') {
                 try {
                     onComplete();
                 } catch (_) { /* no-op */ }
             }
-        });
+        }, { finalData });
         // Don't force absolute positions here – vectors should keep their
         // natural flow handled by the tween callbacks inside the helper.
     }

@@ -159,6 +159,9 @@ export class VectorRouter {
                                 30,
                                 centerVec.instanceCount
                             );
+                            if (typeof qVec.copyColorsFrom === 'function') {
+                                qVec.copyColorsFrom(centerVec);
+                            }
                             const qTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1, undefined, FAINT_TRAIL_OPACITY);
                             qTrail.start(qVec.group.position);
                             qVec.userData = qVec.userData || {};
@@ -175,6 +178,9 @@ export class VectorRouter {
                                 30,
                                 centerVec.instanceCount
                             );
+                            if (typeof vVec.copyColorsFrom === 'function') {
+                                vVec.copyColorsFrom(centerVec);
+                            }
                             const vTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1, undefined, FAINT_TRAIL_OPACITY);
                             vTrail.start(vVec.group.position);
                             vVec.userData = vVec.userData || {};
@@ -261,6 +267,9 @@ export class VectorRouter {
             30,
             sourceVec.instanceCount
         );
+        if (typeof upVec.copyColorsFrom === 'function') {
+            upVec.copyColorsFrom(sourceVec);
+        }
         this.parentGroup.add(upVec.group);
 
         const upTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1, undefined, FAINT_TRAIL_OPACITY);
