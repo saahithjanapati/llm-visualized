@@ -24,7 +24,7 @@ const PREVIEW_LANES = 3;
 const PREVIEW_MATRIX_DEPTH = 320;
 const PREVIEW_LANE_SPACING = 80;
 const PREVIEW_TARGET_SIZE = 140;
-const PREVIEW_ROTATION_SPEED = 0.0011;
+const PREVIEW_ROTATION_SPEED = 0.0035;
 const PREVIEW_BASE_TILT_X = -0.12;
 const PREVIEW_BASE_ROTATION_Y = 0.38;
 const PREVIEW_TILT_AMPLITUDE = 0.02;
@@ -782,30 +782,18 @@ function buildQkvFlowPreview(highlightType, selectionInfo = null) {
 
 function buildQkvMatrixFlowPreview(label, selectionInfo) {
     const type = inferQkvType(label, selectionInfo);
-    const flow = buildQkvFlowPreview(type, selectionInfo);
     const matrixColor = type === 'Q' ? MHA_FINAL_Q_COLOR : (type === 'V' ? MHA_FINAL_V_COLOR : MHA_FINAL_K_COLOR);
     const matrixPreview = buildSelectionClonePreview(selectionInfo, label)
         || buildWeightMatrixPreview(MHA_MATRIX_PARAMS, matrixColor);
-    const group = new THREE.Group();
     const x = (type === 'Q') ? -PREVIEW_QKV_X_SPREAD : (type === 'V' ? PREVIEW_QKV_X_SPREAD : 0);
 
     if (matrixPreview?.object) {
         matrixPreview.object.position.x = x;
         matrixPreview.object.position.y = PREVIEW_QKV_MATRIX_Y;
-        group.add(matrixPreview.object);
-    }
-    if (flow?.object) {
-        group.add(flow.object);
+        return { ...matrixPreview, animate: null };
     }
 
-    return {
-        object: group,
-        dispose: () => {
-            if (flow?.dispose) flow.dispose();
-            if (matrixPreview?.dispose) matrixPreview.dispose();
-        },
-        animate: flow?.animate || null
-    };
+    return buildStackedBoxPreview(matrixColor);
 }
 
 function buildStackedBoxPreview(colorHex) {
@@ -879,17 +867,21 @@ function resolvePreviewObject(label, selectionInfo) {
     }
 
     if (lower.includes('query vector')) {
-        return buildQkvFlowPreview('Q', selectionInfo);
+        return buildSelectionClonePreview(selectionInfo, label)
+            || buildVectorPreview(MHA_FINAL_Q_COLOR, selectionInfo);
     }
     if (lower.includes('key vector')) {
-        return buildQkvFlowPreview('K', selectionInfo);
+        return buildSelectionClonePreview(selectionInfo, label)
+            || buildVectorPreview(MHA_FINAL_K_COLOR, selectionInfo);
     }
     if (lower.includes('value vector')) {
-        return buildQkvFlowPreview('V', selectionInfo);
+        return buildSelectionClonePreview(selectionInfo, label)
+            || buildVectorPreview(MHA_FINAL_V_COLOR, selectionInfo);
     }
     if (selectionInfo?.kind === 'mergedKV') {
         const category = (selectionInfo.info?.category === 'V') ? 'V' : 'K';
-        return buildQkvFlowPreview(category, selectionInfo);
+        return buildSelectionClonePreview(selectionInfo, label)
+            || buildVectorPreview(category === 'V' ? MHA_FINAL_V_COLOR : MHA_FINAL_K_COLOR, selectionInfo);
     }
 
     if (lower.includes('layernorm') || lower.includes('layer norm')) {
