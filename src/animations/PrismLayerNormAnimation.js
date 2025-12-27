@@ -24,10 +24,11 @@ export class PrismLayerNormAnimation {
         this._whiteColor = new THREE.Color(1, 1, 1);
     }
 
-    _calculateActivationOrder() {
+    _calculateActivationOrder(length) {
+        const count = Number.isFinite(length) ? Math.max(1, Math.floor(length)) : VECTOR_LENGTH_PRISM;
         const order = [];
-        const centerIndex = Math.floor(VECTOR_LENGTH_PRISM / 2);
-        const visited = new Array(VECTOR_LENGTH_PRISM).fill(false);
+        const centerIndex = Math.floor(count / 2);
+        const visited = new Array(count).fill(false);
 
         for (let offset = 0; ; offset++) {
             let activatedInStep = false;
@@ -35,13 +36,13 @@ export class PrismLayerNormAnimation {
             const leftIndex = centerIndex - offset;
 
             if (offset === 0) { // Center element first
-                if (rightIndex < VECTOR_LENGTH_PRISM && !visited[rightIndex]) {
+                if (rightIndex < count && !visited[rightIndex]) {
                     order.push(rightIndex);
                     visited[rightIndex] = true;
                     activatedInStep = true;
                 }
             } else {
-                if (rightIndex < VECTOR_LENGTH_PRISM && !visited[rightIndex]) {
+                if (rightIndex < count && !visited[rightIndex]) {
                     order.push(rightIndex);
                     visited[rightIndex] = true;
                     activatedInStep = true;
@@ -52,8 +53,8 @@ export class PrismLayerNormAnimation {
                     activatedInStep = true;
                 }
             }
-            if (!activatedInStep && order.length === VECTOR_LENGTH_PRISM) break; // All added
-            if (offset > VECTOR_LENGTH_PRISM) break; // Safety break
+            if (!activatedInStep && order.length === count) break; // All added
+            if (offset > count) break; // Safety break
         }
         return order;
     }
@@ -64,15 +65,15 @@ export class PrismLayerNormAnimation {
         this.prismVis.updateDataInternal(newData); // Update underlying data for target colors
         this.isAnimating = true;
         this.animationStartTime = performance.now();
-        this.activationOrder = this._calculateActivationOrder();
-        
-        // Re-generate key colors in prismVis if needed (e.g., if numSubsections changed via GUI before this call)
-        // Although updateColorSubsections should handle this, doing it here ensures consistency for this animation run.
-        this.prismVis._generateKeyColors(); 
+        this._instanceCount = this.prismVis?.instanceCount || VECTOR_LENGTH_PRISM;
+        this.activationOrder = this._calculateActivationOrder(this._instanceCount);
 
-        this.unitAnimationStates = Array(VECTOR_LENGTH_PRISM).fill(null).map((_, index) => {
-            const distanceFromCenter = Math.abs(index - Math.floor(VECTOR_LENGTH_PRISM / 2));
-            const normalizedDistance = VECTOR_LENGTH_PRISM > 1 ? distanceFromCenter / (VECTOR_LENGTH_PRISM / 2) : 0;
+        const numKeyColors = Math.min(30, Math.max(1, this.prismVis.rawData.length || 1));
+        this.prismVis.updateKeyColorsFromData(this.prismVis.rawData, numKeyColors, null, newData);
+
+        this.unitAnimationStates = Array(this._instanceCount).fill(null).map((_, index) => {
+            const distanceFromCenter = Math.abs(index - Math.floor(this._instanceCount / 2));
+            const normalizedDistance = this._instanceCount > 1 ? distanceFromCenter / (this._instanceCount / 2) : 0;
             const falloff = Math.pow(1 - normalizedDistance, this.config.falloffPower);
             const riseHeight = this.config.minRiseHeight + (this.config.maxRiseHeight - this.config.minRiseHeight) * falloff;
             
@@ -89,7 +90,7 @@ export class PrismLayerNormAnimation {
         });
         
         // Reset all instances to default before starting new animation sequence
-        for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
+        for (let i = 0; i < this._instanceCount; i++) {
             this.prismVis.resetInstanceAppearance(i);
             this.prismVis.mesh.setColorAt(i, this.unitAnimationStates[i].finalRestingColor); // Set initial color explicitly
         }
@@ -121,7 +122,7 @@ export class PrismLayerNormAnimation {
         let needsMatrixUpdate = false;
         let needsColorUpdate = false;
 
-        for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
+        for (let i = 0; i < this._instanceCount; i++) {
             const state = this.unitAnimationStates[i];
             if (!state) continue; 
 

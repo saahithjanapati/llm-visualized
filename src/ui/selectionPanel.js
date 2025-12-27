@@ -47,6 +47,45 @@ function formatDims(rows, cols) {
     return `${rows} x ${cols}`;
 }
 
+function formatValues(values, perLine = 8) {
+    if (!values || typeof values.length !== 'number' || values.length === 0) return '(empty)';
+    let result = '';
+    for (let idx = 0; idx < values.length; idx += 1) {
+        const num = Number(values[idx]);
+        const formatted = Number.isFinite(num) ? num.toFixed(4) : '0.0000';
+        const sep = idx === 0 ? '' : idx % perLine === 0 ? '\n' : ', ';
+        result += sep + formatted;
+    }
+    return result;
+}
+
+function formatActivationData(data) {
+    if (!data || typeof data !== 'object') return 'No activation data.';
+    const lines = [];
+    if (data.stage) lines.push(`Stage: ${data.stage}`);
+    if (Number.isFinite(data.layerIndex)) lines.push(`Layer: ${data.layerIndex + 1}`);
+    if (Number.isFinite(data.tokenIndex)) {
+        const tokenText = data.tokenLabel ? ` (${data.tokenLabel})` : '';
+        lines.push(`Token: ${data.tokenIndex + 1}${tokenText}`);
+    }
+    if (Number.isFinite(data.keyTokenIndex)) {
+        const keyText = data.keyTokenLabel ? ` (${data.keyTokenLabel})` : '';
+        lines.push(`Key: ${data.keyTokenIndex + 1}${keyText}`);
+    }
+    if (Number.isFinite(data.headIndex)) lines.push(`Head: ${data.headIndex + 1}`);
+    if (Number.isFinite(data.segmentIndex)) lines.push(`Segment: ${data.segmentIndex + 1}`);
+    if (Number.isFinite(data.preScore) || Number.isFinite(data.postScore)) {
+        if (Number.isFinite(data.preScore)) lines.push(`Pre-softmax: ${data.preScore.toFixed(4)}`);
+        if (Number.isFinite(data.postScore)) lines.push(`Post-softmax: ${data.postScore.toFixed(4)}`);
+    }
+    if (data.values && typeof data.values.length === 'number') {
+        lines.push(`Values (${data.values.length}):`);
+        lines.push(formatValues(data.values));
+    }
+    if (data.notes) lines.push(String(data.notes));
+    return lines.join('\n');
+}
+
 function resolveMetadata(label, kind = null) {
     const lower = (label || '').toLowerCase();
     if (lower.startsWith('token:') || lower.startsWith('position:')) {
@@ -377,6 +416,7 @@ class SelectionPanel {
         this.dims = document.getElementById('detailDims');
         this.closeBtn = document.getElementById('detailClose');
         this.canvas = document.getElementById('detailCanvas');
+        this.dataEl = document.getElementById('detailData');
 
         if (!this.panel || !this.canvas || !this.title) {
             this.isReady = false;
@@ -473,6 +513,13 @@ class SelectionPanel {
         this.title.textContent = label;
         if (this.params) this.params.textContent = metadata.params;
         if (this.dims) this.dims.textContent = metadata.dims;
+        if (this.dataEl) {
+            const activationData = (selection.object && selection.object.userData && selection.object.userData.activationData)
+                || (selection.info && selection.info.activationData)
+                || (selection.hit && selection.hit.object && selection.hit.object.userData && selection.hit.object.userData.activationData)
+                || null;
+            this.dataEl.textContent = formatActivationData(activationData);
+        }
 
         if (this.currentPreview) {
             this.scene.remove(this.currentPreview);

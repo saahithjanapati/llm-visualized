@@ -153,7 +153,12 @@ export class VectorRouter {
                         const hIdx  = centerVec.userData.headIndex;
                         const coord = this.headCoords[hIdx];
                         if (coord) {
-                            const qVec = new VectorVisualizationInstancedPrism(centerVec.rawData.slice(), _scratchSpawn.copy(centerVec.group.position));
+                            const qVec = new VectorVisualizationInstancedPrism(
+                                centerVec.rawData.slice(),
+                                _scratchSpawn.copy(centerVec.group.position),
+                                30,
+                                centerVec.instanceCount
+                            );
                             const qTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1, undefined, FAINT_TRAIL_OPACITY);
                             qTrail.start(qVec.group.position);
                             qVec.userData = qVec.userData || {};
@@ -164,7 +169,12 @@ export class VectorRouter {
                                 qVec.group.userData.label = lblQ;
                                 if (qVec.mesh) qVec.mesh.userData = { ...(qVec.mesh.userData||{}), label: lblQ };
                             } catch (_) {}
-                            const vVec = new VectorVisualizationInstancedPrism(centerVec.rawData.slice(), _scratchSpawn.copy(centerVec.group.position));
+                            const vVec = new VectorVisualizationInstancedPrism(
+                                centerVec.rawData.slice(),
+                                _scratchSpawn.copy(centerVec.group.position),
+                                30,
+                                centerVec.instanceCount
+                            );
                             const vTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1, undefined, FAINT_TRAIL_OPACITY);
                             vTrail.start(vVec.group.position);
                             vVec.userData = vVec.userData || {};
@@ -245,7 +255,12 @@ export class VectorRouter {
         lane.upwardCopies = lane.upwardCopies || [];
         if (lane.upwardCopies[targetHeadIdx]) return lane.upwardCopies[targetHeadIdx];
 
-        const upVec = new VectorVisualizationInstancedPrism([...sourceVec.rawData], _scratchSpawn.copy(sourceVec.group.position));
+        const upVec = new VectorVisualizationInstancedPrism(
+            [...sourceVec.rawData],
+            _scratchSpawn.copy(sourceVec.group.position),
+            30,
+            sourceVec.instanceCount
+        );
         this.parentGroup.add(upVec.group);
 
         const upTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1, undefined, FAINT_TRAIL_OPACITY);

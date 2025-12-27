@@ -1,6 +1,9 @@
 import * as THREE from 'three';
 import { VECTOR_LENGTH } from './constants.js'; // Added import for logging
 
+const MONO_MIN_LIGHTNESS = 0.45;
+const MONO_MAX_LIGHTNESS = 0.75;
+
 // Map a value (normalized, potentially outside -1 to 1) to a rainbow color (HSL)
 export function mapValueToColor(value) {
     // console.log(`mapValueToColor input value: ${value}`); // Log input value
@@ -17,6 +20,26 @@ export function mapValueToColor(value) {
     const finalColor = new THREE.Color().setHSL(hue, saturation, lightness);
     // console.log(`mapValueToColor output: value=${value}, clamped=${clampedValue}, hue=${hue}, color R=${finalColor.r} G=${finalColor.g} B=${finalColor.b}`);
     return finalColor;
+}
+
+export function buildMonochromeOptions(color) {
+    const hsl = { h: 0, s: 0, l: 0 };
+    if (color && typeof color.getHSL === 'function') {
+        color.getHSL(hsl);
+    }
+    const baseSat = Number.isFinite(hsl.s) ? hsl.s : 0.9;
+    return {
+        type: 'monochromatic',
+        baseHue: hsl.h,
+        saturation: Math.min(1, Math.max(0.85, baseSat * 1.2)),
+        minLightness: MONO_MIN_LIGHTNESS,
+        maxLightness: MONO_MAX_LIGHTNESS,
+    };
+}
+
+export function mapValueToGrayscale(value) {
+    const t = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
+    return new THREE.Color(t, t, t);
 }
 
 // Add a counter to limit logging if needed, e.g., for mapValueToColor

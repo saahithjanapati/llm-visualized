@@ -56,9 +56,14 @@ export function initPrismMultiplicationAnimation(containerElement) {
         }
 
         const duration = 750; // Movement duration
-        const vectorLength = VECTOR_LENGTH_PRISM; // Use prism vector length
+        const vectorLength = Math.min(
+            vec1?.instanceCount || VECTOR_LENGTH_PRISM,
+            vec2?.instanceCount || VECTOR_LENGTH_PRISM,
+            Array.isArray(vec1?.rawData) ? vec1.rawData.length : VECTOR_LENGTH_PRISM,
+            Array.isArray(vec2?.rawData) ? vec2.rawData.length : VECTOR_LENGTH_PRISM
+        );
 
-        if (!vec1.rawData || !vec2.rawData || vec1.rawData.length !== vectorLength || vec2.rawData.length !== vectorLength) {
+        if (!vec1.rawData || !vec2.rawData || vectorLength <= 0) {
             console.error("Vector data missing or length mismatch."); return;
         }
 
@@ -106,7 +111,12 @@ export function initPrismMultiplicationAnimation(containerElement) {
     // Function to handle the simultaneous flash and color update
     function triggerSimultaneousFlash(vec1, vec2, initialYPositionsVec1) {
         const flashDuration = 150;
-        const vectorLength = VECTOR_LENGTH_PRISM;
+        const vectorLength = Math.min(
+            vec1?.instanceCount || VECTOR_LENGTH_PRISM,
+            vec2?.instanceCount || VECTOR_LENGTH_PRISM,
+            Array.isArray(vec1?.rawData) ? vec1.rawData.length : VECTOR_LENGTH_PRISM,
+            Array.isArray(vec2?.rawData) ? vec2.rawData.length : VECTOR_LENGTH_PRISM
+        );
         const originalColorsVec2 = [];
 
         console.log("All move tweens completed. Triggering flash...");

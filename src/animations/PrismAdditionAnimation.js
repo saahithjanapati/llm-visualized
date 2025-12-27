@@ -69,7 +69,12 @@ export class PrismAdditionAnimation {
         const targetBaseY = this.targetVis.group.position.y + uniformPrismHeight / 2;
         const targetYOffset = targetBaseY - sourceBaseY;
 
-        const totalDuration = this.config.duration + this.config.flashDuration + (VECTOR_LENGTH_PRISM - 1) * this.config.delayBetweenPrisms;
+        const sourceCount = this.sourceVis?.instanceCount || VECTOR_LENGTH_PRISM;
+        const targetCount = this.targetVis?.instanceCount || VECTOR_LENGTH_PRISM;
+        const sourceLen = Array.isArray(this.sourceVis?.rawData) ? this.sourceVis.rawData.length : sourceCount;
+        const targetLen = Array.isArray(this.targetVis?.rawData) ? this.targetVis.rawData.length : targetCount;
+        const vectorLength = Math.min(sourceCount, targetCount, sourceLen, targetLen);
+        const totalDuration = this.config.duration + this.config.flashDuration + (vectorLength - 1) * this.config.delayBetweenPrisms;
         console.log(`Starting Addition Animation (Restored TWEEN). Expected duration: ${totalDuration}ms`);
         console.log(`Source Group Y: ${this.sourceVis.group.position.y}, Target Group Y: ${this.targetVis.group.position.y}`);
         console.log(`Uniform Prism Height: ${uniformPrismHeight}`);
@@ -82,10 +87,10 @@ export class PrismAdditionAnimation {
             return;
         }
 
-        const finalTargetRawData = this.targetVis.rawData.slice();
-        let activeTweens = VECTOR_LENGTH_PRISM; // Count down tweens
+        const finalTargetRawData = this.targetVis.rawData.slice(0, vectorLength);
+        let activeTweens = vectorLength; // Count down tweens
 
-        for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
+        for (let i = 0; i < vectorLength; i++) {
             const startYOffset = 0; 
             const tweenData = { yOffset: startYOffset };
 

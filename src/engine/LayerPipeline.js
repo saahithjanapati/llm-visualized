@@ -22,10 +22,16 @@ import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
 import { PrismLayerNormAnimation } from '../animations/PrismLayerNormAnimation.js';
 
 function simplePrismMultiply(srcVec, tgtVec, onComplete) {
-    for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
+    const srcCount = srcVec && Number.isFinite(srcVec.instanceCount) ? srcVec.instanceCount : VECTOR_LENGTH_PRISM;
+    const tgtCount = tgtVec && Number.isFinite(tgtVec.instanceCount) ? tgtVec.instanceCount : VECTOR_LENGTH_PRISM;
+    const srcLen = srcVec && Array.isArray(srcVec.rawData) ? srcVec.rawData.length : srcCount;
+    const tgtLen = tgtVec && Array.isArray(tgtVec.rawData) ? tgtVec.rawData.length : tgtCount;
+    const length = Math.min(srcCount, tgtCount, srcLen, tgtLen);
+    for (let i = 0; i < length; i++) {
         tgtVec.rawData[i] = (srcVec.rawData[i] || 0) * (tgtVec.rawData[i] || 0);
     }
-    tgtVec.updateKeyColorsFromData(tgtVec.rawData, 30);
+    const numKeyColors = Math.min(30, Math.max(1, tgtVec.rawData.length || 1));
+    tgtVec.updateKeyColorsFromData(tgtVec.rawData, numKeyColors);
     if (onComplete) onComplete();
 }
 
@@ -56,6 +62,7 @@ export class LayerPipeline extends EventTarget {
         this._canvas    = canvas;
         this._opts      = opts;
         this._randFactory = typeof opts.randomFactory === 'function' ? opts.randomFactory : createRandomSource;
+        this._activationSource = opts.activationSource || null;
 
         this._layers = [];
         this._currentLayerIdx = 0;
@@ -106,7 +113,15 @@ export class LayerPipeline extends EventTarget {
         for (let i = 0; i < this._numLayers; i++) {
             const rand = this._randFactory();
             const isActive = i === 0; // only first layer active initially
-            const layer = new Gpt2Layer(i, rand, 0, /*externalLanes*/ null, /*onFinished*/ null, isActive);
+            const layer = new Gpt2Layer(
+                i,
+                rand,
+                0,
+                /*externalLanes*/ null,
+                /*onFinished*/ null,
+                isActive,
+                this._activationSource
+            );
 
             // Assign onFinished callback for chaining once layer becomes active
             layer.setOnFinished(() => this._advanceToNextLayer());
@@ -450,7 +465,10 @@ export class LayerPipeline extends EventTarget {
                 applyTopLnColor();
             };
 
-            const additionDuration = (PRISM_ADD_ANIM_BASE_DURATION + PRISM_ADD_ANIM_BASE_FLASH_DURATION + VECTOR_LENGTH_PRISM * PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS) / PRISM_ADD_ANIM_SPEED_MULT;
+            const additionDurationFor = (vec) => {
+                const length = vec?.instanceCount || VECTOR_LENGTH_PRISM;
+                return (PRISM_ADD_ANIM_BASE_DURATION + PRISM_ADD_ANIM_BASE_FLASH_DURATION + length * PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS) / PRISM_ADD_ANIM_SPEED_MULT;
+            };
 
             const updateTrailPosition = (vector) => {
                 if (!vector || !vector.userData || !vector.userData.trail) return;
@@ -481,11 +499,21 @@ export class LayerPipeline extends EventTarget {
                 if (!Number.isFinite(startY)) return;
 
                 const zPos = lane.zPos || 0;
-                const multVec = new VectorVisualizationInstancedPrism(vec.rawData.slice(), new THREE.Vector3(0, lnCenterY, zPos));
+                const multVec = new VectorVisualizationInstancedPrism(
+                    vec.rawData.slice(),
+                    new THREE.Vector3(0, lnCenterY, zPos),
+                    30,
+                    vec.instanceCount
+                );
                 lastLayer.root.add(multVec.group);
                 multVec.group.visible = false;
 
-                const addVec = new VectorVisualizationInstancedPrism(vec.rawData.slice(), new THREE.Vector3(0, lnCenterY + LN_PARAMS.height / 4, zPos));
+                const addVec = new VectorVisualizationInstancedPrism(
+                    vec.rawData.slice(),
+                    new THREE.Vector3(0, lnCenterY + LN_PARAMS.height / 4, zPos),
+                    30,
+                    vec.instanceCount
+                );
                 lastLayer.root.add(addVec.group);
                 addVec.group.visible = false;
 
@@ -528,7 +556,12 @@ export class LayerPipeline extends EventTarget {
                         vec.group.visible = false;
                         multVec.group.visible = false;
 
-                        const resVec = new VectorVisualizationInstancedPrism(multVec.rawData.slice(), multVec.group.position.clone());
+                        const resVec = new VectorVisualizationInstancedPrism(
+                            multVec.rawData.slice(),
+                            multVec.group.position.clone(),
+                            30,
+                            multVec.instanceCount
+                        );
                         lastLayer.root.add(resVec.group);
 
                         if (multVec.group && multVec.group.parent) {
@@ -552,6 +585,7 @@ export class LayerPipeline extends EventTarget {
                             }
                         });
 
+                        const additionDuration = additionDurationFor(resVec);
                         new TWEEN.Tween({ t: 0 })
                             .to({ t: 1 }, additionDuration)
                             .onUpdate(() => {

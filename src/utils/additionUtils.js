@@ -52,6 +52,13 @@ function computeMidlineWorldPosition(vec, length = VECTOR_LENGTH_PRISM, out = ne
     return out.copy(TMP_WORLD_A).add(TMP_WORLD_B).multiplyScalar(0.5);
 }
 
+function getVectorInstanceCount(vec, fallback = VECTOR_LENGTH_PRISM) {
+    if (vec && Number.isFinite(vec.instanceCount)) {
+        return Math.max(1, Math.floor(vec.instanceCount));
+    }
+    return Math.max(1, Math.floor(fallback));
+}
+
 /**
  * Animate element-wise addition of two instanced-prism vectors, visually moving
  * each prism from `sourceVec` into `targetVec` while updating colours & data.
@@ -73,7 +80,11 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
     // temporary vectors without full lane context).
     sourceVec.userData = sourceVec.userData || {};
 
-    const vectorLength = VECTOR_LENGTH_PRISM;
+    const sourceCount = getVectorInstanceCount(sourceVec, VECTOR_LENGTH_PRISM);
+    const targetCount = getVectorInstanceCount(targetVec, VECTOR_LENGTH_PRISM);
+    const sourceLen = Array.isArray(sourceVec.rawData) ? sourceVec.rawData.length : sourceCount;
+    const targetLen = Array.isArray(targetVec.rawData) ? targetVec.rawData.length : targetCount;
+    const vectorLength = Math.min(sourceCount, targetCount, sourceLen, targetLen);
     const centreIndices = getCentralPrismIndices(vectorLength);
 
     // Freeze upward movement of the source so its group position remains static.

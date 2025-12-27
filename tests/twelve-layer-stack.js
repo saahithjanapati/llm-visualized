@@ -30,9 +30,13 @@ import { initStatusOverlay } from '../src/ui/statusOverlay.js';
 import { initSettingsModal } from '../src/ui/settingsModal.js';
 import { initPauseButton } from '../src/ui/pauseButton.js';
 import { initSelectionPanel } from '../src/ui/selectionPanel.js';
+import { initPerfOverlay } from '../src/ui/perfOverlay.js';
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
+import { CaptureActivationSource } from '../src/data/CaptureActivationSource.js';
+import { precomputeActivationCaches } from '../src/utils/activationPrecompute.js';
 
+const NUM_LAYERS = 12;
 const PROMPT_TOKENS = ['Can', '\u0120machines', '\u0120think', '?', '\u0120'];
 const POSITION_TOKENS = ['1', '2', '3', '4', '5'];
 const TOKEN_CHIP_STYLE = {
@@ -241,6 +245,47 @@ function stageChipCamera(pipeline, startPos, startTarget, endPos, endTarget, hol
 // Optionally load pre-baked geometries; returns instantly if disabled
 await loadPrecomputedGeometries('../precomputed_components.glb');
 
+let activationSource = null;
+let laneTokenIndices = null;
+const statusDiv = document.getElementById('statusOverlay');
+const setLoadingStatus = (text) => {
+    if (statusDiv) statusDiv.textContent = text;
+};
+try {
+    const params = new URLSearchParams(window.location.search);
+    const captureFile = params.get('capture') || params.get('file') || 'capture_2.json';
+    const captureUrl = captureFile.startsWith('http')
+        ? captureFile
+        : `/${captureFile.replace(/^\/+/, '')}`;
+    activationSource = await CaptureActivationSource.load(captureUrl);
+    laneTokenIndices = activationSource.getLaneTokenIndices(NUM_VECTOR_LANES);
+} catch (err) {
+    console.warn('Capture data unavailable; falling back to random vectors.', err);
+}
+if (activationSource && laneTokenIndices) {
+    try {
+        setLoadingStatus('Preparing activation cache...');
+        await precomputeActivationCaches(activationSource, {
+            layerCount: NUM_LAYERS,
+            laneTokenIndices,
+            onProgress: ({ message }) => {
+                if (message) {
+                    setLoadingStatus(message);
+                }
+            }
+        });
+    } catch (err) {
+        console.warn('Activation cache precompute failed; continuing without warm cache.', err);
+    }
+}
+
+const tokenLabelsFromCapture = activationSource && laneTokenIndices
+    ? laneTokenIndices.map((idx) => activationSource.getTokenString(idx) || '')
+    : PROMPT_TOKENS;
+const positionLabelsFromCapture = activationSource && laneTokenIndices
+    ? laneTokenIndices.map((idx) => String(idx + 1))
+    : POSITION_TOKENS;
+
 // Skip intro typing screen for direct animation entry
 appState.skipIntro = true;
 
@@ -250,12 +295,12 @@ try { setPlaybackSpeed('fast'); } catch (_) { /* no-op */ }
 // GPT-2 tower – initialise immediately
 MHSAAnimation.ENABLE_SELF_ATTENTION = true;
 const gptCanvas = document.getElementById('gptCanvas');
-const NUM_LAYERS = 12;
 const camPos    = new THREE.Vector3(0, 11000, 16000);
 const camTarget = new THREE.Vector3(0, 9000, 0);
 const pipeline = new LayerPipeline(gptCanvas, NUM_LAYERS, {
     cameraPosition: camPos,
-    cameraTarget: camTarget
+    cameraTarget: camTarget,
+    activationSource
 });
 
 // Show GPT canvas immediately
@@ -324,7 +369,7 @@ try {
         pipeline.engine.registerRaycastRoot(posBottom.group);
     }
 
-    const laneCount = Math.min(NUM_VECTOR_LANES, PROMPT_TOKENS.length);
+    const laneCount = Math.min(NUM_VECTOR_LANES, tokenLabelsFromCapture.length);
     const laneSpacing = LN_PARAMS.depth / (NUM_VECTOR_LANES + 1);
     const laneZs = [];
     for (let i = 0; i < laneCount; i++) {
@@ -366,7 +411,7 @@ try {
             TOKEN_CHIP_STYLE.cameraReturnMs
         );
 
-        const tokenLabels = PROMPT_TOKENS.slice(0, laneCount).map(formatTokenLabel);
+        const tokenLabels = tokenLabelsFromCapture.slice(0, laneCount).map(formatTokenLabel);
         tokenLabels.forEach((label, idx) => {
             const chip = createTokenChip(label, font, TOKEN_CHIP_STYLE);
             const chipLabel = `Token: ${label}`;
@@ -407,7 +452,7 @@ try {
     const spawnPositionChips = (font) => {
         const posRiseDuration = TOKEN_CHIP_STYLE.riseDuration * (TOKEN_CHIP_STYLE.positionSlowdown || 1);
         const style = POSITION_CHIP_STYLE;
-        const positionLabels = POSITION_TOKENS.slice(0, laneCount);
+        const positionLabels = positionLabelsFromCapture.slice(0, laneCount);
         positionLabels.forEach((label, idx) => {
             const chip = createTokenChip(label, font, style);
             const chipLabel = `Position: ${label}`;
@@ -516,6 +561,7 @@ initIntroAnimation(pipeline, gptCanvas);
 initStatusOverlay(pipeline, NUM_LAYERS);
 initPauseButton(pipeline);
 initSettingsModal(pipeline);
+initPerfOverlay();
 
 const selectionPanel = initSelectionPanel();
 if (pipeline.engine && typeof pipeline.engine.setRaycastSelectionHandler === 'function') {

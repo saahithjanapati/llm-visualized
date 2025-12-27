@@ -56,6 +56,8 @@ import {
 import { PrismLayerNormAnimation } from '../../animations/PrismLayerNormAnimation.js';
 import { MHSAAnimation } from '../../animations/MHSAAnimation.js';
 import { startPrismAdditionAnimation } from '../../utils/additionUtils.js';
+import { buildActivationData, applyActivationDataToVector } from '../../utils/activationMetadata.js';
+import { perfStats } from '../../utils/perfStats.js';
 
 
 // Slightly reduced spacing between stacked layers for a tighter layout.
@@ -75,6 +77,39 @@ const COLOR_INACTIVE_COMPONENT = new THREE.Color(INACTIVE_COMPONENT_COLOR);
 
 const LN_INTERNAL_TRAIL_MIN_SEGMENT = 0.15;
 const LN_MATERIAL_EPSILON = 1e-4;
+
+function formatTokenLabel(token) {
+    if (!token) return null;
+    return token.replace(/^\u0120/, ' ');
+}
+
+function getKeyColorCount(values) {
+    const length = Array.isArray(values) ? values.length : 0;
+    return Math.min(30, Math.max(1, length || 1));
+}
+
+function applyVectorData(vec, values, label, meta, colorOptions = null) {
+    const isArrayLike = Array.isArray(values) || ArrayBuffer.isView(values);
+    if (!vec || !isArrayLike || values.length === 0) return false;
+    if (perfStats.enabled) {
+        perfStats.inc('vectorUpdates');
+    }
+    vec.rawData = values.slice();
+    const numKeyColors = getKeyColorCount(vec.rawData);
+    if (colorOptions) {
+        vec.updateKeyColorsFromData(vec.rawData, numKeyColors, colorOptions, values);
+    } else {
+        vec.updateKeyColorsFromData(vec.rawData, numKeyColors, null, values);
+    }
+    const activationData = buildActivationData({
+        label,
+        values,
+        copyValues: false,
+        ...meta
+    });
+    applyActivationDataToVector(vec, activationData, label);
+    return true;
+}
 
 function freezeStaticTransforms(object3d, includeChildren = false) {
     if (!object3d) return;
@@ -140,10 +175,16 @@ function applyLayerNormMaterial(group, targetColor, targetOpacity, state) {
 
 function simplePrismMultiply(srcVec, tgtVec, onComplete) {
     // instant product; flash white then call onComplete
-    for (let i=0;i<VECTOR_LENGTH_PRISM;i++) {
-        tgtVec.rawData[i] = srcVec.rawData[i]*tgtVec.rawData[i];
+    const srcCount = srcVec && Number.isFinite(srcVec.instanceCount) ? srcVec.instanceCount : VECTOR_LENGTH_PRISM;
+    const tgtCount = tgtVec && Number.isFinite(tgtVec.instanceCount) ? tgtVec.instanceCount : VECTOR_LENGTH_PRISM;
+    const srcLen = srcVec && Array.isArray(srcVec.rawData) ? srcVec.rawData.length : srcCount;
+    const tgtLen = tgtVec && Array.isArray(tgtVec.rawData) ? tgtVec.rawData.length : tgtCount;
+    const length = Math.min(srcCount, tgtCount, srcLen, tgtLen);
+    for (let i = 0; i < length; i++) {
+        tgtVec.rawData[i] = (srcVec.rawData[i] || 0) * (tgtVec.rawData[i] || 0);
     }
-    tgtVec.updateKeyColorsFromData(tgtVec.rawData,30);
+    const numKeyColors = Math.min(30, Math.max(1, tgtVec.rawData.length || 1));
+    tgtVec.updateKeyColorsFromData(tgtVec.rawData, numKeyColors);
     if (onComplete) onComplete();
 }
 
@@ -156,14 +197,19 @@ export default class Gpt2Layer extends BaseLayer {
      * @param {Layer} waitForLayer – Optional layer to wait for before starting.
      * @param {Array} externalLanes – Optional array of lanes to re-use.
      * @param {Function} onFinished – Optional callback to invoke when all lanes finish.
+     * @param {object} activationSource – Optional capture data source for real activations.
      */
-    constructor(index, random, yOffset = 0, externalLanes = null, onFinished = null, isActive = true) {
+    constructor(index, random, yOffset = 0, externalLanes = null, onFinished = null, isActive = true, activationSource = null) {
         super(index);
         this.random = random;
         this.yOffset = yOffset;
         this.externalLanes = externalLanes;
         this.onFinished = typeof onFinished === 'function' ? onFinished : null;
         this.isActive = isActive;
+        this.activationSource = activationSource || null;
+        this._baseVectorLength = (this.activationSource && typeof this.activationSource.getBaseVectorLength === 'function')
+            ? this.activationSource.getBaseVectorLength()
+            : VECTOR_LENGTH_PRISM;
         this._completed = false;
         this._pendingAdditions = 0; // Track ongoing addition animations
         // Synchronisation flag – ensures all lanes begin the LN-2 branch at the exact same time.
@@ -256,7 +302,11 @@ export default class Gpt2Layer extends BaseLayer {
         // Create an internal clock for sub-animations handled by the MHSA helper
         this._mhsaClock = new THREE.Clock();
         // Pass empty opts – twelve-layer stack keeps self-attention disabled via global static flag.
-        this.mhsaAnimation = new MHSAAnimation(this.root, BRANCH_X, mhaBaseY, this._mhsaClock, 'temp', {});
+        this.mhsaAnimation = new MHSAAnimation(this.root, BRANCH_X, mhaBaseY, this._mhsaClock, 'temp', {
+            activationSource: this.activationSource,
+            layerIndex: this.index,
+            vectorPrismCount: this._getBaseVectorLength(),
+        });
 
         // ────────────────────────────────────────────────────────────────
         // 2.5) Output-projection matrix
@@ -711,7 +761,17 @@ export default class Gpt2Layer extends BaseLayer {
                         return lane.ln1MidY;
                     })();
                     if (!lane.normStarted && dupVec.group.position.y >= normStartY) {
-                        lane.normAnim.start(dupVec.rawData.slice());
+                        const ln1NormData = this._getLn1Data(lane, 'norm');
+                        const normInput = ln1NormData ? ln1NormData.slice() : dupVec.rawData.slice();
+                        if (ln1NormData) {
+                            applyVectorData(
+                                dupVec,
+                                ln1NormData,
+                                lane.tokenLabel ? `LN1 Normed - ${lane.tokenLabel}` : 'LN1 Normed',
+                                this._getLaneMeta(lane, 'ln1.norm')
+                            );
+                        }
+                        lane.normAnim.start(normInput);
                         lane.normStarted = true;
                     }
                     if (lane.normStarted) {
@@ -730,7 +790,17 @@ export default class Gpt2Layer extends BaseLayer {
                     // have missed it.  Run an extra guard here to ensure the
                     // normalisation animation still begins.
                     if (!lane.normStarted && dupVec.group.position.y >= normStartY) {
-                        lane.normAnim.start(dupVec.rawData.slice());
+                        const ln1NormData = this._getLn1Data(lane, 'norm');
+                        const normInput = ln1NormData ? ln1NormData.slice() : dupVec.rawData.slice();
+                        if (ln1NormData) {
+                            applyVectorData(
+                                dupVec,
+                                ln1NormData,
+                                lane.tokenLabel ? `LN1 Normed - ${lane.tokenLabel}` : 'LN1 Normed',
+                                this._getLaneMeta(lane, 'ln1.norm')
+                            );
+                        }
+                        lane.normAnim.start(normInput);
                         lane.normStarted = true;
                     }
                     // -----------------------------------------------------------------
@@ -753,13 +823,24 @@ export default class Gpt2Layer extends BaseLayer {
                                 dupVec.group.visible = false;
                                 lane.multTarget.group.visible = false;
 
-                                const multResult = new VectorVisualizationInstancedPrism(
+                                const multResult = this._createPrismVector(
                                     lane.multTarget.rawData.slice(),
                                     (lane.multTarget && lane.multTarget.group)
                                         ? lane.multTarget.group.position.clone()
-                                        : dupVec.group.position.clone()
+                                        : dupVec.group.position.clone(),
+                                    30,
+                                    lane.multTarget.instanceCount
                                 );
                                 this.root.add(multResult.group);
+                                const ln1ScaledData = this._getLn1Data(lane, 'scale');
+                                if (ln1ScaledData) {
+                                    applyVectorData(
+                                        multResult,
+                                        ln1ScaledData,
+                                        lane.tokenLabel ? `LN1 Scaled - ${lane.tokenLabel}` : 'LN1 Scaled',
+                                        this._getLaneMeta(lane, 'ln1.scale')
+                                    );
+                                }
 
                                 const reusedTrail = dupVec && dupVec.userData && dupVec.userData.trail;
                                 const reusedTrailIsWorld = Boolean(dupVec && dupVec.userData && dupVec.userData.trailWorld);
@@ -801,6 +882,15 @@ export default class Gpt2Layer extends BaseLayer {
                                     lane.ln1AddStarted = true;
                                     startPrismAdditionAnimation(multResult, lane.addTarget, null, () => {
                                         lane.ln1AddComplete = true;
+                                        const ln1ShiftedData = this._getLn1Data(lane, 'shift');
+                                        if (ln1ShiftedData) {
+                                            applyVectorData(
+                                                lane.addTarget,
+                                                ln1ShiftedData,
+                                                lane.tokenLabel ? `LN1 Shifted - ${lane.tokenLabel}` : 'LN1 Shifted',
+                                                this._getLaneMeta(lane, 'ln1.shift')
+                                            );
+                                        }
                                         const additionTrail = multResult.userData && multResult.userData.trail;
                                         if (additionTrail) {
                                             lane.addTarget.userData = lane.addTarget.userData || {};
@@ -934,7 +1024,12 @@ export default class Gpt2Layer extends BaseLayer {
                         }
 
                         // Spawn duplicate vector that will travel into LN-2
-                        const mv = new VectorVisualizationInstancedPrism(v.rawData.slice(), v.group.position.clone());
+                        const mv = this._createPrismVector(
+                            v.rawData.slice(),
+                            v.group.position.clone(),
+                            30,
+                            v.instanceCount
+                        );
                         this.root.add(mv.group);
                         // ---- Trail for LN2 moving vector ----
                         const mvTrail = new StraightLineTrail(this.root, 0xffffff, 1, undefined, undefined, LN_INTERNAL_TRAIL_MIN_SEGMENT);
@@ -1017,7 +1112,17 @@ export default class Gpt2Layer extends BaseLayer {
                         bottomY_ln2_abs + LN_PARAMS.height * LN_NORM_START_FRACTION_FROM_BOTTOM;
                     const normAnimating2 = lane.normStartedLN2 && lane.normAnimationLN2 && lane.normAnimationLN2.isAnimating;
                     if (!lane.normStartedLN2 && mv.group.position.y >= normStartY2) {
-                        lane.normAnimationLN2.start(mv.rawData.slice());
+                        const ln2NormData = this._getLn2Data(lane, 'norm');
+                        const normInput = ln2NormData ? ln2NormData.slice() : mv.rawData.slice();
+                        if (ln2NormData) {
+                            applyVectorData(
+                                mv,
+                                ln2NormData,
+                                lane.tokenLabel ? `LN2 Normed - ${lane.tokenLabel}` : 'LN2 Normed',
+                                this._getLaneMeta(lane, 'ln2.norm')
+                            );
+                        }
+                        lane.normAnimationLN2.start(normInput);
                         lane.normStartedLN2 = true;
                     }
                     if (lane.normStartedLN2 && lane.normAnimationLN2) {
@@ -1031,7 +1136,17 @@ export default class Gpt2Layer extends BaseLayer {
                     }
                     // --- NEW POST-MOVE SAFETY CHECK --------------------------------
                     if (!lane.normStartedLN2 && mv.group.position.y >= normStartY2) {
-                        lane.normAnimationLN2.start(mv.rawData.slice());
+                        const ln2NormData = this._getLn2Data(lane, 'norm');
+                        const normInput = ln2NormData ? ln2NormData.slice() : mv.rawData.slice();
+                        if (ln2NormData) {
+                            applyVectorData(
+                                mv,
+                                ln2NormData,
+                                lane.tokenLabel ? `LN2 Normed - ${lane.tokenLabel}` : 'LN2 Normed',
+                                this._getLaneMeta(lane, 'ln2.norm')
+                            );
+                        }
+                        lane.normAnimationLN2.start(normInput);
                         lane.normStartedLN2 = true;
                     }
                     // ----------------------------------------------------------------
@@ -1063,8 +1178,22 @@ export default class Gpt2Layer extends BaseLayer {
                                     lane.multTargetLN2 && lane.multTargetLN2.group
                                         ? lane.multTargetLN2.group.position.clone()
                                         : mv.group.position.clone();
-                                const resVec = new VectorVisualizationInstancedPrism(sourceRaw, sourcePos);
+                                const resVec = this._createPrismVector(
+                                    sourceRaw,
+                                    sourcePos,
+                                    30,
+                                    lane.multTargetLN2?.instanceCount ?? mv.instanceCount
+                                );
                                 this.root.add(resVec.group);
+                                const ln2ScaledData = this._getLn2Data(lane, 'scale');
+                                if (ln2ScaledData) {
+                                    applyVectorData(
+                                        resVec,
+                                        ln2ScaledData,
+                                        lane.tokenLabel ? `LN2 Scaled - ${lane.tokenLabel}` : 'LN2 Scaled',
+                                        this._getLaneMeta(lane, 'ln2.scale')
+                                    );
+                                }
 
                                 const reusedTrailLn2 = mv && mv.userData && mv.userData.trail;
                                 const reusedTrailLn2IsWorld = Boolean(mv && mv.userData && mv.userData.trailWorld);
@@ -1106,6 +1235,15 @@ export default class Gpt2Layer extends BaseLayer {
                                     lane.ln2AddStarted = true;
                                     startPrismAdditionAnimation(resVec, lane.addTargetLN2, null, () => {
                                         lane.ln2AddComplete = true;
+                                        const ln2ShiftedData = this._getLn2Data(lane, 'shift');
+                                        if (ln2ShiftedData) {
+                                            applyVectorData(
+                                                lane.addTargetLN2,
+                                                ln2ShiftedData,
+                                                lane.tokenLabel ? `LN2 Shifted - ${lane.tokenLabel}` : 'LN2 Shifted',
+                                                this._getLaneMeta(lane, 'ln2.shift')
+                                            );
+                                        }
                                         const ln2Trail = resVec.userData && resVec.userData.trail;
                                         if (ln2Trail) {
                                             lane.addTargetLN2.userData = lane.addTargetLN2.userData || {};
@@ -1261,9 +1399,10 @@ export default class Gpt2Layer extends BaseLayer {
                 vec.group.scale.setScalar(0.6);
                 this.mlpUp.setColor(matrixEndColor);
                 this.mlpUp.setEmissive(matrixEndColor, finalIntensity);
-                
+
+                const mlpUpData = this._getMlpUpData(lane);
                 // Expand to 4x width (3072 dimensions)
-                this._expandTo4x(lane, vec);
+                this._expandTo4x(lane, vec, mlpUpData);
             })
             .start();
     }
@@ -1271,20 +1410,43 @@ export default class Gpt2Layer extends BaseLayer {
     /**
      * Expand vector to 4x width representing 3072 dimensions
      */
-    _expandTo4x(lane, vec) {
+    _expandTo4x(lane, vec, mlpUpData = null) {
         const segments = 4;
-        const segWidth = vec.getBaseWidthConstant() * vec.getWidthScale() * VECTOR_LENGTH_PRISM;
+        const segmentLength = Number.isFinite(vec?.instanceCount) ? vec.instanceCount : this._getBaseVectorLength();
+        const segWidth = vec.getBaseWidthConstant() * vec.getWidthScale() * segmentLength;
         const expandedGroup = new THREE.Group();
         const segmentVecs = [];
+        const paddedData = Array.isArray(mlpUpData) ? mlpUpData.slice() : null;
+        if (paddedData && paddedData.length < segments * segmentLength) {
+            while (paddedData.length < segments * segmentLength) paddedData.push(0);
+        }
 
         // Create 4 segments side by side
         for (let s = 0; s < segments; s++) {
-            const segVec = new VectorVisualizationInstancedPrism(vec.rawData.slice(), new THREE.Vector3());
+            const segVec = this._createPrismVector(
+                vec.rawData.slice(),
+                new THREE.Vector3(),
+                30,
+                segmentLength
+            );
             
             // Copy color gradient
             if (Array.isArray(vec.currentKeyColors) && vec.currentKeyColors.length) {
                 segVec.currentKeyColors = vec.currentKeyColors.map(c => c.clone());
                 segVec.updateInstanceGeometryAndColors();
+            }
+
+            if (paddedData) {
+                const start = s * segmentLength;
+                const slice = paddedData.slice(start, start + segmentLength);
+                applyVectorData(
+                    segVec,
+                    slice,
+                    lane && lane.tokenLabel
+                        ? `MLP Up Projection - ${lane.tokenLabel}`
+                        : 'MLP Up Projection',
+                    this._getLaneMeta(lane, 'mlp.up', { segmentIndex: s })
+                );
             }
             
             // Position segments horizontally
@@ -1308,15 +1470,52 @@ export default class Gpt2Layer extends BaseLayer {
         
         // Rise and pause before down-projection
         const extraRise = 20;
-        const pauseMs = 0;
-        
+        const pauseMs = 400;
+        const activationDelayMs = 350;
+
         new TWEEN.Tween(expandedGroup.position)
             .to({ y: expandedGroup.position.y + extraRise }, 500)
             .easing(TWEEN.Easing.Quadratic.InOut)
             .onUpdate(() => {
             })
             .onComplete(() => {
-                this._animateMlpDownProjection(lane);
+                const startDown = () => this._animateMlpDownProjection(lane);
+                const activationData = this._getMlpActivationData(lane);
+                const applyActivation = () => {
+                    if (activationData && lane.expandedVecSegments) {
+                        const activationSlices = activationData.slice();
+                        while (activationSlices.length < segments * segmentLength) activationSlices.push(0);
+                        lane.expandedVecSegments.forEach((segVec, idx) => {
+                            const start = idx * segmentLength;
+                            const slice = activationSlices.slice(start, start + segmentLength);
+                            applyVectorData(
+                                segVec,
+                                slice,
+                                lane && lane.tokenLabel
+                                    ? `MLP Activation - ${lane.tokenLabel}`
+                                    : 'MLP Activation',
+                                this._getLaneMeta(lane, 'mlp.activation', { segmentIndex: idx })
+                            );
+                        });
+                    }
+                    if (typeof TWEEN !== 'undefined' && activationDelayMs > 0) {
+                        new TWEEN.Tween({ t: 0 })
+                            .to({ t: 1 }, activationDelayMs)
+                            .onComplete(startDown)
+                            .start();
+                    } else {
+                        startDown();
+                    }
+                };
+
+                if (typeof TWEEN !== 'undefined' && pauseMs > 0) {
+                    new TWEEN.Tween({ t: 0 })
+                        .to({ t: 1 }, pauseMs)
+                        .onComplete(applyActivation)
+                        .start();
+                } else {
+                    applyActivation();
+                }
             })
             .start();
     }
@@ -1386,9 +1585,11 @@ export default class Gpt2Layer extends BaseLayer {
                     lane.collapsedInMatrix = true;
                     
                     // Create collapsed vector at current position
-                    const collapseVec = new VectorVisualizationInstancedPrism(
-                        lane.expandedVecSegments[0].rawData.slice(), 
-                        expandedGroup.position.clone()
+                    const collapseVec = this._createPrismVector(
+                        lane.expandedVecSegments[0].rawData.slice(),
+                        expandedGroup.position.clone(),
+                        30,
+                        lane.expandedVecSegments[0].instanceCount
                     );
                     // Do not start a local trail yet; we'll create a clean path trail
                     // when rising above the MLP to avoid zig-zag artifacts.
@@ -1403,6 +1604,15 @@ export default class Gpt2Layer extends BaseLayer {
                     expandedGroup.visible = false;
                     
                     lane.finalVecAfterMlp = collapseVec;
+                    const mlpDownData = this._getMlpDownData(lane);
+                    if (mlpDownData) {
+                        applyVectorData(
+                            collapseVec,
+                            mlpDownData,
+                            lane.tokenLabel ? `MLP Down Projection - ${lane.tokenLabel}` : 'MLP Down Projection',
+                            this._getLaneMeta(lane, 'mlp.down')
+                        );
+                    }
                     
                     // Continue animating the collapsed vector for the rest of the journey
                     new TWEEN.Tween(collapseVec.group.position)
@@ -1425,6 +1635,15 @@ export default class Gpt2Layer extends BaseLayer {
                 if (!lane.collapsedInMatrix) {
                     this._collapseToSingle(lane);
                 } else {
+                    const mlpDownData = this._getMlpDownData(lane);
+                    if (mlpDownData && lane.finalVecAfterMlp) {
+                        applyVectorData(
+                            lane.finalVecAfterMlp,
+                            mlpDownData,
+                            lane.tokenLabel ? `MLP Down Projection - ${lane.tokenLabel}` : 'MLP Down Projection',
+                            this._getLaneMeta(lane, 'mlp.down')
+                        );
+                    }
                     // Continue with the rise animation
                     this._riseAfterMlp(lane);
                 }
@@ -1441,9 +1660,11 @@ export default class Gpt2Layer extends BaseLayer {
         if (!expandedGroup || !segmentVecs || segmentVecs.length === 0) return;
         
         // Create collapsed vector
-        const collapseVec = new VectorVisualizationInstancedPrism(
-            segmentVecs[0].rawData.slice(), 
-            expandedGroup.position.clone()
+        const collapseVec = this._createPrismVector(
+            segmentVecs[0].rawData.slice(),
+            expandedGroup.position.clone(),
+            30,
+            segmentVecs[0].instanceCount
         );
         // Defer trail creation until after the rise above the MLP.
         
@@ -1457,6 +1678,15 @@ export default class Gpt2Layer extends BaseLayer {
         expandedGroup.visible = false;
         
         lane.finalVecAfterMlp = collapseVec;
+        const mlpDownData = this._getMlpDownData(lane);
+        if (mlpDownData) {
+            applyVectorData(
+                collapseVec,
+                mlpDownData,
+                lane.tokenLabel ? `MLP Down Projection - ${lane.tokenLabel}` : 'MLP Down Projection',
+                this._getLaneMeta(lane, 'mlp.down')
+            );
+        }
         
         this._riseAfterMlp(lane);
     }
@@ -1572,7 +1802,17 @@ export default class Gpt2Layer extends BaseLayer {
                     
                     // Trigger the final addition animation (originalVec ➔ vec)
                     // Prisms should rise from the lower original vector up into the processed one.
-                    this.mhsaAnimation._startAdditionAnimation(lane.originalVec, vec, lane);
+                    this.mhsaAnimation._startAdditionAnimation(lane.originalVec, vec, lane, () => {
+                        const postMlpData = this._getPostMlpResidualData(lane);
+                        if (postMlpData) {
+                            applyVectorData(
+                                lane.originalVec,
+                                postMlpData,
+                                lane.tokenLabel ? `Post-MLP Residual - ${lane.tokenLabel}` : 'Post-MLP Residual',
+                                this._getLaneMeta(lane, 'residual.post_mlp')
+                            );
+                        }
+                    });
                     
                     // Set up completion callback for when addition finishes
                     this._scheduleAdditionCompletion(lane);
@@ -1603,6 +1843,102 @@ export default class Gpt2Layer extends BaseLayer {
     /** Replace/assign onFinished callback after construction */
     setOnFinished(cb) { this.onFinished = typeof cb === 'function' ? cb : null; }
 
+    _getLaneMeta(lane, stage, extra = {}) {
+        return {
+            stage,
+            layerIndex: this.index,
+            tokenIndex: lane && Number.isFinite(lane.tokenIndex) ? lane.tokenIndex : undefined,
+            tokenLabel: lane && lane.tokenLabel ? lane.tokenLabel : undefined,
+            ...extra
+        };
+    }
+
+    _getBaseVectorLength() {
+        return Number.isFinite(this._baseVectorLength) ? this._baseVectorLength : VECTOR_LENGTH_PRISM;
+    }
+
+    _getInstanceCountFromData(values, fallback = null) {
+        if (Array.isArray(values) || ArrayBuffer.isView(values)) {
+            return Math.max(1, values.length || 1);
+        }
+        const base = Number.isFinite(fallback) ? fallback : this._getBaseVectorLength();
+        return Math.max(1, base);
+    }
+
+    _createPrismVector(values, position, numSubsections = 30, instanceCount = null) {
+        const count = Number.isFinite(instanceCount)
+            ? Math.max(1, Math.floor(instanceCount))
+            : this._getInstanceCountFromData(values);
+        const data = Array.isArray(values)
+            ? values
+            : ArrayBuffer.isView(values)
+                ? Array.from(values)
+                : null;
+        return new VectorVisualizationInstancedPrism(data, position, numSubsections, count);
+    }
+
+    _getTokenIndexForLane(laneIdx) {
+        if (!this.activationSource) return laneIdx;
+        return this.activationSource.getLaneTokenIndex(laneIdx, NUM_VECTOR_LANES);
+    }
+
+    _getTokenLabel(tokenIndex) {
+        if (!this.activationSource) return null;
+        return formatTokenLabel(this.activationSource.getTokenString(tokenIndex));
+    }
+
+    _getEmbeddingData(lane, kind) {
+        if (!this.activationSource || !lane) return null;
+        return this.activationSource.getEmbedding(kind, lane.tokenIndex, this._getBaseVectorLength());
+    }
+
+    _getLayerIncomingData(lane) {
+        if (!this.activationSource || !lane) return null;
+        return this.activationSource.getLayerIncoming(this.index, lane.tokenIndex, this._getBaseVectorLength());
+    }
+
+    _getLn1Data(lane, stage) {
+        if (!this.activationSource || !lane) return null;
+        return this.activationSource.getLayerLn1(this.index, stage, lane.tokenIndex, this._getBaseVectorLength());
+    }
+
+    _getLn2Data(lane, stage) {
+        if (!this.activationSource || !lane) return null;
+        return this.activationSource.getLayerLn2(this.index, stage, lane.tokenIndex, this._getBaseVectorLength());
+    }
+
+    _getAttentionOutputProjectionData(lane) {
+        if (!this.activationSource || !lane) return null;
+        return this.activationSource.getAttentionOutputProjection(this.index, lane.tokenIndex, this._getBaseVectorLength());
+    }
+
+    _getPostAttentionResidualData(lane) {
+        if (!this.activationSource || !lane) return null;
+        return this.activationSource.getPostAttentionResidual(this.index, lane.tokenIndex, this._getBaseVectorLength());
+    }
+
+    _getMlpUpData(lane) {
+        if (!this.activationSource || !lane) return null;
+        const targetLength = this._getBaseVectorLength() * 4;
+        return this.activationSource.getMlpUp(this.index, lane.tokenIndex, targetLength);
+    }
+
+    _getMlpActivationData(lane) {
+        if (!this.activationSource || !lane) return null;
+        const targetLength = this._getBaseVectorLength() * 4;
+        return this.activationSource.getMlpActivation(this.index, lane.tokenIndex, targetLength);
+    }
+
+    _getMlpDownData(lane) {
+        if (!this.activationSource || !lane) return null;
+        return this.activationSource.getMlpDown(this.index, lane.tokenIndex, this._getBaseVectorLength());
+    }
+
+    _getPostMlpResidualData(lane) {
+        if (!this.activationSource || !lane) return null;
+        return this.activationSource.getPostMlpResidual(this.index, lane.tokenIndex, this._getBaseVectorLength());
+    }
+
     // ------------------------------------------------------------
     // Internal lane creation helpers (extracted from init)
     // ------------------------------------------------------------
@@ -1631,19 +1967,23 @@ export default class Gpt2Layer extends BaseLayer {
             for (let laneIdx = 0; laneIdx < NUM_VECTOR_LANES; laneIdx++) {
                 const zPos = -LN_PARAMS.depth / 2 + slitSpacing * (laneIdx + 1);
 
-                const ln1PlaceholderData = this.random.nextVector(VECTOR_LENGTH_PRISM);
-                const ln1Placeholder = new VectorVisualizationInstancedPrism(
+                const ln1PlaceholderData = this.random.nextVector(this._getBaseVectorLength());
+                const ln1Placeholder = this._createPrismVector(
                     ln1PlaceholderData,
-                    new THREE.Vector3(offsetX, ln1CenterY + addYOffset, zPos)
+                    new THREE.Vector3(offsetX, ln1CenterY + addYOffset, zPos),
+                    30,
+                    ln1PlaceholderData.length
                 );
                 ln1Placeholder.group.visible = false;
                 this.root.add(ln1Placeholder.group);
                 this._ln1AddPlaceholders[laneIdx] = ln1Placeholder;
 
-                const ln2PlaceholderData = this.random.nextVector(VECTOR_LENGTH_PRISM);
-                const ln2Placeholder = new VectorVisualizationInstancedPrism(
+                const ln2PlaceholderData = this.random.nextVector(this._getBaseVectorLength());
+                const ln2Placeholder = this._createPrismVector(
                     ln2PlaceholderData,
-                    new THREE.Vector3(offsetX, ln2CenterY + addYOffset, zPos)
+                    new THREE.Vector3(offsetX, ln2CenterY + addYOffset, zPos),
+                    30,
+                    ln2PlaceholderData.length
                 );
                 ln2Placeholder.group.visible = false;
                 this.root.add(ln2Placeholder.group);
@@ -1672,6 +2012,12 @@ export default class Gpt2Layer extends BaseLayer {
     _buildSingleLane(oldLane, offsetX, ln1CenterY, ln2CenterY, startY_override, meetY, laneIdx, slitSpacing) {
         // Reuse existing trail when lanes are passed from a lower layer
         let trailFromPrev = oldLane && oldLane.originalTrail ? oldLane.originalTrail : null;
+        const laneTokenIndex = (oldLane && Number.isFinite(oldLane.tokenIndex))
+            ? oldLane.tokenIndex
+            : this._getTokenIndexForLane(laneIdx);
+        const laneTokenLabel = (oldLane && oldLane.tokenLabel)
+            ? oldLane.tokenLabel
+            : this._getTokenLabel(laneTokenIndex);
         let originalVec, zPos, startY, trail; // trail will be reused or created anew
         if (oldLane && oldLane.originalVec) {
             originalVec = oldLane.originalVec;
@@ -1691,10 +2037,25 @@ export default class Gpt2Layer extends BaseLayer {
                 }
         } else {
             zPos = -LN_PARAMS.depth / 2 + slitSpacing * (laneIdx + 1);
-            const data = this.random.nextVector(VECTOR_LENGTH_PRISM);
+            let data = this.random.nextVector(this._getBaseVectorLength());
+            if (this.activationSource) {
+                const tokenData = this._getEmbeddingData({ tokenIndex: laneTokenIndex }, 'token');
+                if (tokenData) data = tokenData;
+            }
             startY = startY_override;
-            originalVec = new VectorVisualizationInstancedPrism(data, new THREE.Vector3(0, startY, zPos));
+            originalVec = this._createPrismVector(
+                data,
+                new THREE.Vector3(0, startY, zPos),
+                30,
+                this._getInstanceCountFromData(data)
+            );
             this.root.add(originalVec.group);
+            applyVectorData(
+                originalVec,
+                data,
+                laneTokenLabel ? `Token Embedding - ${laneTokenLabel}` : 'Token Embedding',
+                this._getLaneMeta({ tokenIndex: laneTokenIndex, tokenLabel: laneTokenLabel }, 'embedding.token')
+            );
 
         // ────────────── Trail for the ORIGINAL vector ──────────────
         // Attach to the GLOBAL scene and record WORLD positions so the trail
@@ -1711,6 +2072,18 @@ export default class Gpt2Layer extends BaseLayer {
 
         }
 
+        if (oldLane && this.activationSource) {
+            const incomingData = this._getLayerIncomingData({ tokenIndex: laneTokenIndex });
+            if (incomingData) {
+                applyVectorData(
+                    originalVec,
+                    incomingData,
+                    laneTokenLabel ? `Incoming Residual (Pre-LN1) - ${laneTokenLabel}` : 'Incoming Residual (Pre-LN1)',
+                    this._getLaneMeta({ tokenIndex: laneTokenIndex, tokenLabel: laneTokenLabel }, 'layer.incoming')
+                );
+            }
+        }
+
         // Spawn the LN-1 duplicate at the staging height (bottom + 5) so that
         // when it becomes visible and starts the 'right' phase it travels purely
         // horizontally, matching LN-2 behaviour.
@@ -1719,7 +2092,12 @@ export default class Gpt2Layer extends BaseLayer {
             ln1CenterY - LN_PARAMS.height / 2 + 5,
             originalVec.group.position.z
         );
-        const dupVec = new VectorVisualizationInstancedPrism(originalVec.rawData.slice(), dupStartPos);
+        const dupVec = this._createPrismVector(
+            originalVec.rawData.slice(),
+            dupStartPos,
+            30,
+            originalVec.instanceCount
+        );
         dupVec.group.visible = false;
         this.root.add(dupVec.group);
         // Trail for duplicate vector inside LN1
@@ -1736,11 +2114,21 @@ export default class Gpt2Layer extends BaseLayer {
             trail.start(TMP_WORLD_POS);
         }
 
-        const multTarget = new VectorVisualizationInstancedPrism(originalVec.rawData.slice(), new THREE.Vector3(offsetX, ln1CenterY + 3.3, zPos));
+        const multTarget = this._createPrismVector(
+            originalVec.rawData.slice(),
+            new THREE.Vector3(offsetX, ln1CenterY + 3.3, zPos),
+            30,
+            originalVec.instanceCount
+        );
         this.root.add(multTarget.group);
         multTarget.group.visible = false;
 
-        const multTargetLN2 = new VectorVisualizationInstancedPrism(originalVec.rawData.slice(), new THREE.Vector3(offsetX, ln2CenterY + 3.3, zPos));
+        const multTargetLN2 = this._createPrismVector(
+            originalVec.rawData.slice(),
+            new THREE.Vector3(offsetX, ln2CenterY + 3.3, zPos),
+            30,
+            originalVec.instanceCount
+        );
         this.root.add(multTargetLN2.group);
         multTargetLN2.group.visible = false;
 
@@ -1757,10 +2145,12 @@ export default class Gpt2Layer extends BaseLayer {
                 addTarget.group.visible = false;
             }
         } else {
-            const addTargetData = this.random.nextVector(VECTOR_LENGTH_PRISM);
-            addTarget = new VectorVisualizationInstancedPrism(
+            const addTargetData = this.random.nextVector(this._getBaseVectorLength());
+            addTarget = this._createPrismVector(
                 addTargetData,
-                new THREE.Vector3(offsetX, ln1CenterY + addYOffset, zPos)
+                new THREE.Vector3(offsetX, ln1CenterY + addYOffset, zPos),
+                30,
+                addTargetData.length
             );
             this.root.add(addTarget.group);
             if (addTarget.group) addTarget.group.visible = false;
@@ -1777,10 +2167,12 @@ export default class Gpt2Layer extends BaseLayer {
                 addTargetLN2.group.visible = false;
             }
         } else {
-            const addTargetDataLn2 = this.random.nextVector(VECTOR_LENGTH_PRISM);
-            addTargetLN2 = new VectorVisualizationInstancedPrism(
+            const addTargetDataLn2 = this.random.nextVector(this._getBaseVectorLength());
+            addTargetLN2 = this._createPrismVector(
                 addTargetDataLn2,
-                new THREE.Vector3(offsetX, ln2CenterY + addYOffset, zPos)
+                new THREE.Vector3(offsetX, ln2CenterY + addYOffset, zPos),
+                30,
+                addTargetDataLn2.length
             );
             this.root.add(addTargetLN2.group);
             if (addTargetLN2.group) addTargetLN2.group.visible = false;
@@ -1800,6 +2192,8 @@ export default class Gpt2Layer extends BaseLayer {
         this.lanes.push({
             layer: this,
             laneIndex: laneIdx,
+            tokenIndex: laneTokenIndex,
+            tokenLabel: laneTokenLabel,
             originalVec,
             originalTrail: trail,
             dupVec,
@@ -1861,9 +2255,24 @@ export default class Gpt2Layer extends BaseLayer {
                                 + EMBEDDING_BOTTOM_VOCAB_X_OFFSET;
 
                 // Give positional a distinct random pattern
-                const posData = this.random.nextVector(VECTOR_LENGTH_PRISM);
-                const posVec = new VectorVisualizationInstancedPrism(posData, new THREE.Vector3(posStartX, posStartY, zPos));
+                let posData = this.random.nextVector(this._getBaseVectorLength());
+                if (this.activationSource) {
+                    const posEmbedding = this._getEmbeddingData(lane, 'position');
+                    if (posEmbedding) posData = posEmbedding;
+                }
+                const posVec = this._createPrismVector(
+                    posData,
+                    new THREE.Vector3(posStartX, posStartY, zPos),
+                    30,
+                    this._getInstanceCountFromData(posData)
+                );
                 this.root.add(posVec.group);
+                applyVectorData(
+                    posVec,
+                    posData,
+                    lane.tokenLabel ? `Position Embedding - ${lane.tokenLabel}` : 'Position Embedding',
+                    this._getLaneMeta(lane, 'embedding.position')
+                );
                 // Trail (local to this layer) – enabled only until it reaches residual stream
                 const posTrail = new StraightLineTrail(this.root, 0xffffff, 1);
                 posTrail.start(posVec.group.position);
@@ -1905,6 +2314,15 @@ export default class Gpt2Layer extends BaseLayer {
                                     // Trigger addition: positional (above) travels DOWN into vocab (rising)
                                     try {
                                         startPrismAdditionAnimation(posVec, originalVec, null, () => {
+                                            const sumData = this._getEmbeddingData(lane, 'sum');
+                                            if (sumData) {
+                                                applyVectorData(
+                                                    originalVec,
+                                                    sumData,
+                                                    lane.tokenLabel ? `Embedding Sum - ${lane.tokenLabel}` : 'Embedding Sum',
+                                                    this._getLaneMeta(lane, 'embedding.sum')
+                                                );
+                                            }
                                             lane.posAddComplete = true;
                                         });
                                     } catch (_) {
@@ -1929,7 +2347,9 @@ export default class Gpt2Layer extends BaseLayer {
         const duration      = PRISM_ADD_ANIM_BASE_DURATION             / PRISM_ADD_ANIM_SPEED_MULT;
         const flashDuration = PRISM_ADD_ANIM_BASE_FLASH_DURATION       / PRISM_ADD_ANIM_SPEED_MULT;
         const delayBetween  = PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS / PRISM_ADD_ANIM_SPEED_MULT;
-        const vectorLength  = VECTOR_LENGTH_PRISM;
+        const vectorLength = lane?.addTarget?.instanceCount
+            || lane?.originalVec?.instanceCount
+            || this._getBaseVectorLength();
         const totalAnimTime = duration + flashDuration + vectorLength * delayBetween;
 
         lane.additionComplete = false;

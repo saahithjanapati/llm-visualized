@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { VECTOR_LENGTH_PRISM, SA_RED_EXTRA_RISE, SA_V_RISE_DURATION_MS, SA_K_ALIGN_DURATION_MS, SA_BLUE_HORIZ_DURATION_MS, SA_BLUE_VERT_DURATION_MS, SA_BLUE_PAUSE_MS, SA_BLUE_QUEUE_SHIFT_DURATION_MS, SA_DUPLICATE_POP_IN_MS, SA_DUPLICATE_TRAVEL_MERGE_MS, SA_DUPLICATE_POP_OUT_MS, GLOBAL_ANIM_SPEED_MULT, SELF_ATTENTION_TIME_MULT } from '../../utils/constants.js';
 import { VectorVisualizationInstancedPrism } from '../../components/VectorVisualizationInstancedPrism.js';
+import { mapValueToColor, mapValueToGrayscale } from '../../utils/colors.js';
+import { buildActivationData, applyActivationDataToObject } from '../../utils/activationMetadata.js';
 
 // Shared lightweight geometry for self-attention highlight spheres
 const SHARED_SPHERE_GEOMETRY = new THREE.SphereGeometry(10, 12, 12);
@@ -318,11 +320,12 @@ export class SelfAttentionAnimator {
                 const c = sp.material.color.clone();
                 const hasEmissive = ('emissive' in sp.material) && ('emissiveIntensity' in sp.material);
                 const state = { r: c.r, g: c.g, b: c.b, ei: hasEmissive ? sp.material.emissiveIntensity : 1.0 };
-                const isBright = Math.random() > 0.5;
-                const lightness = isBright ? THREE.MathUtils.lerp(0.75, 0.95, Math.random())
-                                            : THREE.MathUtils.lerp(0.2, 0.4,  Math.random());
-                const targetColor = new THREE.Color().setHSL(0, 0, lightness);
-                const targetEI = isBright ? 1.0 : 0.4;
+                const activationData = sp.userData ? sp.userData.activationData : null;
+                const postScore = activationData && Number.isFinite(activationData.postScore) ? activationData.postScore : null;
+                const targetColor = Number.isFinite(postScore)
+                    ? mapValueToGrayscale(postScore)
+                    : new THREE.Color().setHSL(0, 0, THREE.MathUtils.lerp(0.2, 0.9, Math.random()));
+                const targetEI = Number.isFinite(postScore) ? 0.6 : 0.8;
                 new TWEEN.Tween(state)
                     .to({ r: targetColor.r, g: targetColor.g, b: targetColor.b, ei: targetEI }, this.V_RISE_DURATION)
                     .easing(TWEEN.Easing.Quadratic.Out)
@@ -334,6 +337,12 @@ export class SelfAttentionAnimator {
                         }
                     })
                     .start();
+                if (activationData) {
+                    activationData.stage = 'attention.post';
+                    applyActivationDataToObject(sp, activationData, 'Attention Score (Post-softmax)');
+                } else {
+                    applyActivationDataToObject(sp, null, 'Attention Score (Post-softmax)');
+                }
             }
         });
     }
@@ -344,7 +353,8 @@ export class SelfAttentionAnimator {
     _setVectorColor(vector, color) {
         if (!vector || !vector.mesh) return;
         const col = color instanceof THREE.Color ? color : new THREE.Color(color);
-        for (let idx = 0; idx < VECTOR_LENGTH_PRISM; idx++) {
+        const count = vector.instanceCount || VECTOR_LENGTH_PRISM;
+        for (let idx = 0; idx < count; idx++) {
             if (vector.mesh.setColorAt) {
                 vector.mesh.setColorAt(idx, col);
             }
@@ -355,7 +365,7 @@ export class SelfAttentionAnimator {
         const csAttr = vector.mesh.geometry.getAttribute('colorStart');
         const ceAttr = vector.mesh.geometry.getAttribute('colorEnd');
         if (csAttr && ceAttr) {
-            for (let idx = 0; idx < VECTOR_LENGTH_PRISM; idx++) {
+            for (let idx = 0; idx < count; idx++) {
                 csAttr.setXYZ(idx, col.r, col.g, col.b);
                 ceAttr.setXYZ(idx, col.r, col.g, col.b);
             }
@@ -457,7 +467,12 @@ export class SelfAttentionAnimator {
         // mid-animation.
         const spawnY = this.ctx.mhaPassThroughTargetY + this.ctx.mhaResultRiseOffsetY - 30 + this.RED_EXTRA_RISE;
         const spawnPos = new THREE.Vector3(kX, spawnY, fixedVec.group.position.z);
-        const travellingVec = new VectorVisualizationInstancedPrism(fixedVec.rawData.slice(), spawnPos, 3);
+        const travellingVec = new VectorVisualizationInstancedPrism(
+            fixedVec.rawData.slice(),
+            spawnPos,
+            3,
+            fixedVec.instanceCount
+        );
         travellingVec.userData = { headIndex: headIdx };
         this.ctx.parentGroup.add(travellingVec.group);
         travellingVec.applyProcessedVisuals(
@@ -504,15 +519,39 @@ export class SelfAttentionAnimator {
                             if (greenVec && greenVec.group) {
                                 const midPoint = new THREE.Vector3().addVectors(vector.group.position, greenVec.group.position).multiplyScalar(0.5);
                                 const sphereGeom = SHARED_SPHERE_GEOMETRY;
-                                const hue = Math.random();
-                                const sat = THREE.MathUtils.lerp(0.85, 1.0, Math.random());
-                                const light = THREE.MathUtils.lerp(0.45, 0.6, Math.random());
-                                const baseColor = new THREE.Color().setHSL(hue, sat, light);
+                                const queryLane = vector.userData ? vector.userData.parentLane : null;
+                                const queryTokenIndex = queryLane && Number.isFinite(queryLane.tokenIndex) ? queryLane.tokenIndex : null;
+                                const keyTokenIndex = lane && Number.isFinite(lane.tokenIndex) ? lane.tokenIndex : null;
+                                const layerIndex = Number.isFinite(this.ctx?.layerIndex) ? this.ctx.layerIndex : null;
+                                const preScore = (this.ctx && this.ctx.activationSource && Number.isFinite(layerIndex) && Number.isFinite(headIdx))
+                                    ? this.ctx.activationSource.getAttentionScore(layerIndex, 'pre', headIdx, queryTokenIndex, keyTokenIndex)
+                                    : null;
+                                const postScore = (this.ctx && this.ctx.activationSource && Number.isFinite(layerIndex) && Number.isFinite(headIdx))
+                                    ? this.ctx.activationSource.getAttentionScore(layerIndex, 'post', headIdx, queryTokenIndex, keyTokenIndex)
+                                    : null;
+                                const baseColor = Number.isFinite(preScore)
+                                    ? mapValueToColor(preScore)
+                                    : new THREE.Color().setHSL(Math.random(), THREE.MathUtils.lerp(0.85, 1.0, Math.random()), THREE.MathUtils.lerp(0.45, 0.6, Math.random()));
                                 const sphereMat = new THREE.MeshBasicMaterial({ color: baseColor });
                                 const sphereMesh = new THREE.Mesh(sphereGeom, sphereMat);
                                 sphereMesh.position.copy(midPoint);
                                 sphereMesh.scale.set(0.001, 0.001, 0.001);
                                 this.ctx.parentGroup.add(sphereMesh);
+                                const activationData = buildActivationData({
+                                    label: 'Attention Score (Pre-softmax)',
+                                    stage: 'attention.pre',
+                                    layerIndex,
+                                    tokenIndex: queryTokenIndex,
+                                    tokenLabel: queryLane ? queryLane.tokenLabel : null,
+                                    headIndex: headIdx,
+                                    preScore,
+                                    postScore,
+                                });
+                                if (activationData && Number.isFinite(keyTokenIndex)) {
+                                    activationData.keyTokenIndex = keyTokenIndex;
+                                    activationData.keyTokenLabel = lane ? lane.tokenLabel : null;
+                                }
+                                applyActivationDataToObject(sphereMesh, activationData, 'Attention Score (Pre-softmax)');
                                 // Inflate animation
                                 new TWEEN.Tween(sphereMesh.scale)
                                     .to({ x: 0.8, y: 0.8, z: 0.8 }, 350)
@@ -548,7 +587,12 @@ export class SelfAttentionAnimator {
                                     raisedY,
                                     fixedVec.group.position.z
                                 );
-                                const dupVec = new VectorVisualizationInstancedPrism(fixedVec.rawData.slice(), startPos, 3);
+                                const dupVec = new VectorVisualizationInstancedPrism(
+                                    fixedVec.rawData.slice(),
+                                    startPos,
+                                    3,
+                                    fixedVec.instanceCount
+                                );
                                 // Make duplicate visually match the travelling 64-dim vector
                                 dupVec.applyProcessedVisuals(
                                     fixedVec.rawData.slice(),

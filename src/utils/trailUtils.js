@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { TRAIL_COLOR, TRAIL_LINE_WIDTH, TRAIL_OPACITY, TRAIL_MAX_SEGMENTS, scaleOpacityForDisplay, scaleLineWidthForDisplay } from './trailConstants.js';
+import { perfStats } from './perfStats.js';
 
 /**
  * StraightLineTrail – memory-efficient trail renderer.
@@ -142,6 +143,9 @@ export class StraightLineTrail {
         }
 
         this._attr.needsUpdate = true;
+        if (perfStats.enabled) {
+            perfStats.inc('trailUpdates');
+        }
 
         // Update bounding sphere every ~50 modifications to avoid CPU cost
         if (++this._updateCounter % 50 === 0) {

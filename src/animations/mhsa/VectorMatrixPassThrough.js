@@ -7,6 +7,8 @@ import {
     VECTOR_LENGTH_PRISM,
 } from '../../utils/constants.js';
 import { MHSA_PASS_THROUGH_BRIGHTEN_RATIO, MHSA_PASS_THROUGH_DIM_RATIO, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY } from '../../utils/constants.js';
+import { buildMonochromeOptions } from '../../utils/colors.js';
+import { buildActivationData, applyActivationDataToVector } from '../../utils/activationMetadata.js';
 
 /**
  * Animate a vector passing vertically through its corresponding weight matrix.
@@ -23,7 +25,7 @@ export function animateVectorMatrixPassThrough(
     matrix,
     brightMatrixColor,
     darkTintedMatrixColor,
-    finalVectorHue,
+    finalVectorColor,
     passThroughY,
     duration,
     riseOffset,
@@ -118,14 +120,15 @@ export function animateVectorMatrixPassThrough(
             //  Lightweight 64-dimensional swap as soon as we touch matrix
             // --------------------------------------------------------------
             if (!initialDimensionChangeApplied && tweenState.y >= matrixBottomY) {
+                const heavyVec = vector;
                 const smallVec = new VectorVisualizationInstancedPrism(
-                    vector.rawData.slice(0, outLength),
-                    vector.group.position.clone(),
+                    heavyVec.rawData.slice(0, outLength),
+                    heavyVec.group.position.clone(),
                     3,
+                    heavyVec.instanceCount || ctx.vectorPrismCount,
                 );
 
                 ctx.parentGroup.add(smallVec.group);
-                const heavyVec = vector;
                 vector = smallVec; // continue animating this handle
                 // Preserve metadata such as headIndex for downstream alignment
                 vector.userData = heavyVec.userData ? { ...heavyVec.userData } : {};
@@ -167,21 +170,43 @@ export function animateVectorMatrixPassThrough(
                 ctx.parentGroup.remove(heavyVec.group);
                 if (typeof heavyVec.dispose === 'function') heavyVec.dispose();
 
+                const activationSource = ctx && ctx.activationSource ? ctx.activationSource : null;
+                const layerIndex = Number.isFinite(ctx?.layerIndex) ? ctx.layerIndex : null;
+                const headIndex = vector?.userData?.headIndex;
+                const tokenIndex = vector?.userData?.parentLane?.tokenIndex;
+                const tokenLabel = vector?.userData?.parentLane?.tokenLabel;
+                const kind = vectorCategory === 'Q' ? 'q' : vectorCategory === 'K' ? 'k' : 'v';
+                const scalar = activationSource && Number.isFinite(layerIndex)
+                    ? activationSource.getLayerQKVScalar(layerIndex, kind, headIndex, tokenIndex)
+                    : null;
+                const data = Number.isFinite(scalar)
+                    ? [scalar]
+                    : vector.rawData.slice(0, outLength);
+                const monoOptions = buildMonochromeOptions(finalVectorColor);
+                const numKeyColors = Number.isFinite(scalar) ? 1 : 3;
                 vector.applyProcessedVisuals(
-                    vector.rawData.slice(0, outLength),
+                    data,
                     outLength,
-                    {
-                        numKeyColors: 3,
-                        generationOptions: {
-                            type: 'monochromatic',
-                            baseHue: finalVectorHue,
-                            saturation: 0.9,
-                            minLightness: 0.4,
-                            maxLightness: 0.8,
-                        },
-                    },
+                    { numKeyColors, generationOptions: monoOptions },
                     { setHiddenToBlack: false },
                 );
+                if (Number.isFinite(scalar)) {
+                    const label = vectorCategory === 'K'
+                        ? 'Key Vector (Green)'
+                        : vectorCategory === 'Q'
+                            ? 'Query Vector (Blue)'
+                            : 'Value Vector (Red)';
+                    const activationData = buildActivationData({
+                        label,
+                        values: data,
+                        stage: `qkv.${kind}`,
+                        layerIndex,
+                        tokenIndex,
+                        tokenLabel,
+                        headIndex,
+                    });
+                    applyActivationDataToVector(vector, activationData, label);
+                }
             }
 
             // --------------------------------------------------------------
@@ -232,15 +257,10 @@ export function animateVectorMatrixPassThrough(
             // Guarantee processed visuals in case tween never hit swap point
             if (!finalVisualsApplied) {
                 const processedData = vector.rawData.slice(0, outLength);
+                const monoOptions = buildMonochromeOptions(finalVectorColor);
                 vector.applyProcessedVisuals(processedData, outLength, {
                     numKeyColors: 3,
-                    generationOptions: {
-                        type: 'monochromatic',
-                        baseHue: finalVectorHue,
-                        saturation: 0.9,
-                        minLightness: 0.4,
-                        maxLightness: 0.8,
-                    },
+                    generationOptions: monoOptions,
                 });
                 finalVisualsApplied = true;
             }

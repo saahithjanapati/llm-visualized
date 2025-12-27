@@ -4,6 +4,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { QUALITY_PRESET, resolveRenderDprCap } from '../utils/constants.js';
+import { perfStats } from '../utils/perfStats.js';
 import Gpt2Layer from './layers/Gpt2Layer.js';
 
 /**
@@ -612,6 +613,10 @@ export class CoreEngine {
         }
 
         const intersects = this._raycaster.intersectObjects(this._raycastRoots, true);
+        if (perfStats.enabled) {
+            perfStats.inc('raycasts');
+            perfStats.inc('raycastIntersects', intersects.length);
+        }
         const resolved = this._resolveRaycastLabel(intersects);
         if (resolved && resolved.label) {
             this._hoverLabelDiv.textContent = resolved.label;
@@ -638,6 +643,10 @@ export class CoreEngine {
         if (!this._raycastRoots.length) return;
 
         const intersects = this._raycaster.intersectObjects(this._raycastRoots, true);
+        if (perfStats.enabled) {
+            perfStats.inc('selectRaycasts');
+            perfStats.inc('raycastIntersects', intersects.length);
+        }
         const resolved = this._resolveRaycastLabel(intersects);
         if (!resolved || !resolved.label) return;
         if (this._raycastSelectionHandler) {
@@ -732,9 +741,16 @@ export class CoreEngine {
         const visibilityPauseOnly = this._paused && this._pauseReasons.size === 1 && this._pauseReasons.has('visibility');
         if (visibilityPauseOnly) return;
 
+        if (perfStats.enabled) {
+            perfStats.beginFrame(now);
+        }
+
         if (this._stats) this._stats.begin();
 
         if (!this._paused) {
+            const updateStart = perfStats.enabled
+                ? ((typeof performance !== 'undefined' && typeof performance.now === 'function') ? performance.now() : Date.now())
+                : 0;
             const dt = this._clock.getDelta() * this._speed;
             this._layers.forEach(layer => {
                 if (!layer) return;
@@ -742,21 +758,54 @@ export class CoreEngine {
                     layer.update(dt);
                 }
             });
+            if (perfStats.enabled) {
+                const updateEnd = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+                    ? performance.now()
+                    : Date.now();
+                perfStats.addTime('update', updateEnd - updateStart);
+            }
 
             if (typeof TWEEN !== 'undefined' && typeof TWEEN.update === 'function') {
+                const tweenStart = perfStats.enabled
+                    ? ((typeof performance !== 'undefined' && typeof performance.now === 'function') ? performance.now() : Date.now())
+                    : 0;
                 this._tweenTimelineMs += dt * 1000;
                 TWEEN.update(this._tweenTimelineMs);
+                if (perfStats.enabled) {
+                    const tweenEnd = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+                        ? performance.now()
+                        : Date.now();
+                    perfStats.addTime('tween', tweenEnd - tweenStart);
+                    if (typeof TWEEN.getAll === 'function') {
+                        perfStats.setGauge('tweens', TWEEN.getAll().length);
+                    }
+                }
             }
         }
 
         this.controls.update();
+        const renderStart = perfStats.enabled
+            ? ((typeof performance !== 'undefined' && typeof performance.now === 'function') ? performance.now() : Date.now())
+            : 0;
         if (this.composer) {
             this.composer.render();
         } else {
             this.renderer.render(this.scene, this.camera);
         }
+        if (perfStats.enabled) {
+            const renderEnd = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+                ? performance.now()
+                : Date.now();
+            perfStats.addTime('render', renderEnd - renderStart);
+        }
 
         if (this._stats) this._stats.end();
+        if (perfStats.enabled) {
+            const endNow = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+                ? performance.now()
+                : Date.now();
+            perfStats.endFrame(endNow);
+        }
     };
 }
 

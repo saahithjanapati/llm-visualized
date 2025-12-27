@@ -10,6 +10,7 @@ import {
 } from '../utils/constants.js';
 import { computeCenteredPrismX, PRISM_INSTANCE_WIDTH_SCALE } from '../utils/prismLayout.js';
 import { mapValueToColor } from '../utils/colors.js';
+import { perfStats } from '../utils/perfStats.js';
 
 // Helper for monochromatic colors
 function mapValueToMonochromaticColor(value, baseHue, saturation, minLightness, maxLightness) {
@@ -29,6 +30,52 @@ const _prismWidthScale = PRISM_INSTANCE_WIDTH_SCALE;
 const _prismDepthScale = 1.5;
 // Precompute half base width used in shader patch
 const __halfBaseWidth = (PRISM_BASE_WIDTH * _prismWidthScale) / 2;
+
+const COLOR_CACHE = new WeakMap();
+
+function isArrayLike(data) {
+    return Array.isArray(data) || ArrayBuffer.isView(data);
+}
+
+function formatOptionNumber(value) {
+    if (!Number.isFinite(value)) return '0';
+    return value.toFixed(4);
+}
+
+function buildColorCacheKey(numKeyColors, instanceCount, colorGenerationOptions) {
+    const safeNum = Math.max(0, Math.floor(numKeyColors || 0));
+    const safeCount = Math.max(1, Math.floor(instanceCount || 1));
+    let key = `n:${safeNum}|c:${safeCount}`;
+    if (!colorGenerationOptions || typeof colorGenerationOptions !== 'object') {
+        return `${key}|t:default`;
+    }
+    if (colorGenerationOptions.type === 'monochromatic') {
+        key += `|t:mono|h:${formatOptionNumber(colorGenerationOptions.baseHue)}`;
+        key += `|s:${formatOptionNumber(colorGenerationOptions.saturation)}`;
+        key += `|min:${formatOptionNumber(colorGenerationOptions.minLightness)}`;
+        key += `|max:${formatOptionNumber(colorGenerationOptions.maxLightness)}`;
+        return key;
+    }
+    const type = colorGenerationOptions.type ? String(colorGenerationOptions.type) : 'custom';
+    return `${key}|t:${type}`;
+}
+
+function getColorCacheEntry(data, cacheKey) {
+    if (!isArrayLike(data)) return null;
+    const bucket = COLOR_CACHE.get(data);
+    if (!bucket) return null;
+    return bucket.get(cacheKey) || null;
+}
+
+function setColorCacheEntry(data, cacheKey, entry) {
+    if (!isArrayLike(data)) return;
+    let bucket = COLOR_CACHE.get(data);
+    if (!bucket) {
+        bucket = new Map();
+        COLOR_CACHE.set(data, bucket);
+    }
+    bucket.set(cacheKey, entry);
+}
 
 export class VectorVisualizationInstancedPrism {
     constructor(initialData = null, initialPosition = new THREE.Vector3(0, 0, 0), numSubsections = 30, instanceCount = VECTOR_LENGTH_PRISM) {
@@ -328,8 +375,8 @@ varying float vGradientT;`
     }
 
     _updateInstanceColors() {
-        if (!this.mesh || !this.mesh.instanceColor) {
-            console.warn("Mesh or instanceColor buffer not available for color update.");
+        if (!this.mesh) {
+            console.warn("Mesh not available for color update.");
             return;
         }
         if (this.currentKeyColors.length === 0) {
@@ -353,35 +400,85 @@ varying float vGradientT;`
         }
 
 
-        for (let i = 0; i < this.instanceCount; i++) {
-            this.mesh.setColorAt(i, this.getDefaultColorForIndex(i));
-
-            // Also refresh gradient edge colours so updates to key colours propagate
-            const colorStartAttr = this.mesh.geometry.getAttribute('colorStart');
-            const colorEndAttr   = this.mesh.geometry.getAttribute('colorEnd');
-            if (colorStartAttr && colorEndAttr) {
-                const leftColor  = this.getDefaultColorForIndex(Math.max(0, i - 1));
-                const rightColor = this.getDefaultColorForIndex(Math.min(this.instanceCount - 1, i + 1));
-                colorStartAttr.setXYZ(i, leftColor.r, leftColor.g, leftColor.b);
-                colorEndAttr.setXYZ(  i, rightColor.r, rightColor.g, rightColor.b);
-            }
-        }
-        this.mesh.instanceColor.needsUpdate = true;
-
-        // Mark gradient attributes for update if they were modified
-        const cs = this.mesh.geometry.getAttribute('colorStart');
-        const ce = this.mesh.geometry.getAttribute('colorEnd');
-        if (cs) cs.needsUpdate = true;
-        if (ce) ce.needsUpdate = true;
+        const buffers = this._buildColorBuffers();
+        this._applyColorBuffers(buffers);
     }
 
-    updateKeyColorsFromData(data, numKeyColorsToSample = 30, colorGenerationOptions = null) {
+    _buildColorBuffers() {
+        const count = this.instanceCount;
+        const colorStart = new Float32Array(count * 3);
+        const colorEnd = new Float32Array(count * 3);
+        const instanceColors = new Float32Array(count * 3);
+        for (let i = 0; i < count; i++) {
+            const midColor = this.getDefaultColorForIndex(i);
+            const leftColor = this.getDefaultColorForIndex(Math.max(0, i - 1));
+            const rightColor = this.getDefaultColorForIndex(Math.min(count - 1, i + 1));
+            const i3 = i * 3;
+            instanceColors[i3] = midColor.r;
+            instanceColors[i3 + 1] = midColor.g;
+            instanceColors[i3 + 2] = midColor.b;
+            colorStart[i3] = leftColor.r;
+            colorStart[i3 + 1] = leftColor.g;
+            colorStart[i3 + 2] = leftColor.b;
+            colorEnd[i3] = rightColor.r;
+            colorEnd[i3 + 1] = rightColor.g;
+            colorEnd[i3 + 2] = rightColor.b;
+        }
+        return { colorStart, colorEnd, instanceColors };
+    }
+
+    _applyColorBuffers(buffers) {
+        if (!buffers) return;
+        const colorStartAttr = this.mesh.geometry.getAttribute('colorStart');
+        const colorEndAttr = this.mesh.geometry.getAttribute('colorEnd');
+        if (colorStartAttr && buffers.colorStart) {
+            colorStartAttr.array.set(buffers.colorStart);
+            colorStartAttr.needsUpdate = true;
+        }
+        if (colorEndAttr && buffers.colorEnd) {
+            colorEndAttr.array.set(buffers.colorEnd);
+            colorEndAttr.needsUpdate = true;
+        }
+        if (!this.mesh.instanceColor) {
+            this.mesh.instanceColor = new THREE.InstancedBufferAttribute(
+                new Float32Array(this.instanceCount * 3),
+                3
+            );
+        }
+        if (buffers.instanceColors) {
+            this.mesh.instanceColor.array.set(buffers.instanceColors);
+            this.mesh.instanceColor.needsUpdate = true;
+        }
+    }
+
+    updateKeyColorsFromData(data, numKeyColorsToSample = 30, colorGenerationOptions = null, cacheKeyData = null) {
         if (!data || data.length === 0) {
             console.warn("No data provided to updateKeyColorsFromData. Using random colors.");
             this.numSubsections = Math.max(1, numKeyColorsToSample -1);
             this._generateKeyColors(); // Generate random colors as a fallback
             this._updateInstanceColors();
             return;
+        }
+
+        if (perfStats.enabled) {
+            perfStats.inc('colorUpdates');
+        }
+
+        const cacheSource = isArrayLike(cacheKeyData) ? cacheKeyData : null;
+        const cacheKey = cacheSource
+            ? buildColorCacheKey(numKeyColorsToSample, this.instanceCount, colorGenerationOptions)
+            : null;
+        if (cacheSource && cacheKey) {
+            const cached = getColorCacheEntry(cacheSource, cacheKey);
+            if (cached && cached.instanceCount === this.instanceCount) {
+                this.numSubsections = cached.numSubsections;
+                this.currentKeyColors = cached.keyColors;
+                this._applyColorBuffers(cached);
+                if (perfStats.enabled) {
+                    perfStats.inc('colorCacheHits');
+                }
+                return;
+            }
         }
 
         this.numSubsections = Math.max(0, numKeyColorsToSample - 1); // e.g., 3 samples -> 2 subsections
@@ -447,7 +544,19 @@ varying float vGradientT;`
                 this.currentKeyColors.push(new THREE.Color(0.5,0.5,0.5));
             }
         }
-        this._updateInstanceColors();
+        const buffers = this._buildColorBuffers();
+        this._applyColorBuffers(buffers);
+
+        if (cacheSource && cacheKey) {
+            setColorCacheEntry(cacheSource, cacheKey, {
+                instanceCount: this.instanceCount,
+                numSubsections: this.numSubsections,
+                keyColors: this.currentKeyColors,
+                colorStart: buffers.colorStart,
+                colorEnd: buffers.colorEnd,
+                instanceColors: buffers.instanceColors,
+            });
+        }
     }
 
     getDefaultColorForIndex(index) {
@@ -523,14 +632,20 @@ varying float vGradientT;`
     }
 
     // Applies final visual state after processing (e.g., shrinking and coloring output vectors)
-    applyProcessedVisuals(processedData, numVisibleOutputUnits, colorOptionsForKeyColors, visualOptions = { setHiddenToBlack: true }) {
+    applyProcessedVisuals(processedData, numVisibleOutputUnits, colorOptionsForKeyColors, visualOptions = { setHiddenToBlack: true }, cacheKeyData = null) {
         // 1. Update internal rawData with the new (potentially shorter) processedData
         // This rawData will be used by updateKeyColorsFromData for the visible units.
         this.rawData = processedData.slice(); 
 
         // 2. Generate new key colors based on processedData and colorOptions
         //    The key colors will be applied to the centrally visible prisms.
-        this.updateKeyColorsFromData(this.rawData, colorOptionsForKeyColors.numKeyColors, colorOptionsForKeyColors.generationOptions);
+        const cacheSource = isArrayLike(cacheKeyData) ? cacheKeyData : processedData;
+        this.updateKeyColorsFromData(
+            this.rawData,
+            colorOptionsForKeyColors.numKeyColors,
+            colorOptionsForKeyColors.generationOptions,
+            cacheSource
+        );
 
         // 3. Determine how many *grouped* prisms should be visible.  Each
         //    prism now represents PRISM_DIMENSIONS_PER_UNIT real dimensions.

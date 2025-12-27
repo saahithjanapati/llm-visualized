@@ -6,6 +6,7 @@ import { StraightLineTrail, mergeTrailsIntoLineSegments } from '../utils/trailUt
 
 
 import { mapValueToColor } from '../utils/colors.js';
+import { buildActivationData, applyActivationDataToVector } from '../utils/activationMetadata.js';
 import { MHSA_MATRIX_INITIAL_RESTING_COLOR, MHSA_BRIGHT_GREEN, MHSA_DARK_TINTED_GREEN, MHSA_BRIGHT_BLUE, MHSA_DARK_TINTED_BLUE, MHSA_BRIGHT_RED, MHSA_DARK_TINTED_RED, MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR, MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW, MHA_OUTPUT_PROJECTION_MATRIX_PARAMS, MHA_OUTPUT_PROJECTION_MATRIX_COLOR } from './LayerAnimationConstants.js';
 import { INACTIVE_COMPONENT_COLOR, MHSA_DUPLICATE_VECTOR_RISE_SPEED, MHSA_PASS_THROUGH_TOTAL_DURATION_MS, MHSA_RESULT_RISE_OFFSET_Y, MHSA_HEAD_VECTOR_STOP_BELOW, MHA_RESULT_RISE_DURATION_BASE_MS, DECORATIVE_FADE_MS, DECORATIVE_FADE_DELAY_MS, MERGE_TO_ROW_DELAY_AFTER_FADE_MS, HEAD_COLOR_TRANSITION_MS, MERGE_POST_COLOR_TRANSITION_DELAY_MS, MERGE_EXTRA_BUFFER_MS, OUTPUT_PROJ_STAGE1_MS, OUTPUT_PROJ_STAGE2_MS, OUTPUT_PROJ_STAGE3_MS, GLOBAL_ANIM_SPEED_MULT, MHSA_PASS_THROUGH_BRIGHTEN_RATIO, MHSA_PASS_THROUGH_DIM_RATIO, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY } from '../utils/constants.js';
 import {
@@ -58,6 +59,11 @@ export class MHSAAnimation {
         this.branchX = branchX;
         this.mhsaBaseY = mhsaBaseY;
         this.clock = clock;
+        this.activationSource = opts.activationSource || null;
+        this.layerIndex = Number.isFinite(opts.layerIndex) ? opts.layerIndex : null;
+        this.vectorPrismCount = Number.isFinite(opts.vectorPrismCount)
+            ? Math.max(1, Math.floor(opts.vectorPrismCount))
+            : VECTOR_LENGTH_PRISM;
 
         // Speed at which residual-stream vectors rise while branched
         // during MHSA/MLP processing. Starts with the LN1 value.
@@ -90,6 +96,11 @@ export class MHSAAnimation {
         this.darkTintedBlue   = new THREE.Color(MHSA_DARK_TINTED_BLUE);
         this.brightRed        = new THREE.Color(MHSA_BRIGHT_RED);
         this.darkTintedRed    = new THREE.Color(MHSA_DARK_TINTED_RED);
+        this.finalHeadColors = {
+            Q: new THREE.Color(MHA_FINAL_Q_COLOR),
+            K: new THREE.Color(MHA_FINAL_K_COLOR),
+            V: new THREE.Color(MHA_FINAL_V_COLOR),
+        };
 
         // --------------------------------------------------------------
         //   Build static visuals via new refactored helper
@@ -393,7 +404,7 @@ export class MHSAAnimation {
         return true;
     }
 
-    animateVectorMatrixPassThrough(vector, matrix, brightMatrixColor, darkTintedMatrixColor, finalVectorHue, passThroughY, duration, riseOffset, riseDurationVal, outLength, animationCompletionCallback, vectorCategory = 'K') {
+    animateVectorMatrixPassThrough(vector, matrix, brightMatrixColor, darkTintedMatrixColor, finalVectorColor, passThroughY, duration, riseOffset, riseDurationVal, outLength, animationCompletionCallback, vectorCategory = 'K') {
         // Thin wrapper delegating to extracted helper for maintainability.
         return animateVectorMatrixPassThroughExternal(
             this,
@@ -401,7 +412,7 @@ export class MHSAAnimation {
             matrix,
             brightMatrixColor,
             darkTintedMatrixColor,
-            finalVectorHue,
+            finalVectorColor,
             passThroughY,
             duration,
             riseOffset,
@@ -458,16 +469,16 @@ export class MHSAAnimation {
             for (let headIdx = 0; headIdx < NUM_HEAD_SETS_LAYER; headIdx++) {
                 const kVec = lane.upwardCopies[headIdx];
                 const kMatrix = this.mhaVisualizations[headIdx * 3 + 1];
-                this.animateVectorMatrixPassThrough(kVec, kMatrix, this.brightGreen, this.darkTintedGreen, 0.333, this.mhaPassThroughTargetY, this.mhaPassThroughDuration, this.mhaResultRiseOffsetY, this.mhaResultRiseDuration, this.outputVectorLength, singleAnimationDone, 'K');
+                this.animateVectorMatrixPassThrough(kVec, kMatrix, this.brightGreen, this.darkTintedGreen, this.finalHeadColors.K, this.mhaPassThroughTargetY, this.mhaPassThroughDuration, this.mhaResultRiseOffsetY, this.mhaResultRiseDuration, this.outputVectorLength, singleAnimationDone, 'K');
 
                 const qSideCopy = lane.sideCopies.find(sc => sc.headIndex === headIdx && sc.type === 'Q');
                 if (qSideCopy && qSideCopy.vec) {
-                    this.animateVectorMatrixPassThrough(qSideCopy.vec, qSideCopy.matrixRef, this.brightBlue, this.darkTintedBlue, 0.666, this.mhaPassThroughTargetY, this.mhaPassThroughDuration, this.mhaResultRiseOffsetY, this.mhaResultRiseDuration, this.outputVectorLength, singleAnimationDone, 'Q');
+                    this.animateVectorMatrixPassThrough(qSideCopy.vec, qSideCopy.matrixRef, this.brightBlue, this.darkTintedBlue, this.finalHeadColors.Q, this.mhaPassThroughTargetY, this.mhaPassThroughDuration, this.mhaResultRiseOffsetY, this.mhaResultRiseDuration, this.outputVectorLength, singleAnimationDone, 'Q');
                 } else { totalAnimationsToComplete--; }
 
                 const vSideCopy = lane.sideCopies.find(sc => sc.headIndex === headIdx && sc.type === 'V');
                 if (vSideCopy && vSideCopy.vec) {
-                    this.animateVectorMatrixPassThrough(vSideCopy.vec, vSideCopy.matrixRef, this.brightRed, this.darkTintedRed, 0.0, this.mhaPassThroughTargetY, this.mhaPassThroughDuration, this.mhaResultRiseOffsetY, this.mhaResultRiseDuration, this.outputVectorLength, singleAnimationDone, 'V');
+                    this.animateVectorMatrixPassThrough(vSideCopy.vec, vSideCopy.matrixRef, this.brightRed, this.darkTintedRed, this.finalHeadColors.V, this.mhaPassThroughTargetY, this.mhaPassThroughDuration, this.mhaResultRiseOffsetY, this.mhaResultRiseDuration, this.outputVectorLength, singleAnimationDone, 'V');
                 } else { totalAnimationsToComplete--; }
             }
         });
@@ -638,7 +649,9 @@ export class MHSAAnimation {
             try {
                 // Compute world position of the centre prism for the ORIGINAL (source) vector
                 // so the residual trail extends continuously as prisms rise during addition.
-                const centreIdx = Math.floor(VECTOR_LENGTH_PRISM / 2);
+                const centreIdx = Math.floor(
+                    ((lane.originalVec && lane.originalVec.instanceCount) ? lane.originalVec.instanceCount : this.vectorPrismCount) / 2
+                );
                 const instMat = _tmpMatrix;
                 lane.originalVec.mesh.getMatrixAt(centreIdx, instMat);
                 const wPos = _tmpWorld2;
@@ -821,7 +834,8 @@ export class MHSAAnimation {
         // BASE_RISE_ADJUST from VectorMatrixPassThrough is -30; replicate here to match final resting height
         const canonicalRaisedBaseY = this.mhaPassThroughTargetY + this.mhaResultRiseOffsetY - 30 + extraRise;
 
-        const totalInstances = vecList.length * VECTOR_LENGTH_PRISM;
+        const vectorLength = vecList[0]?.instanceCount || this.vectorPrismCount || VECTOR_LENGTH_PRISM;
+        const totalInstances = vecList.length * vectorLength;
         const baseGeo = new THREE.BoxGeometry(baseWidth, 1, baseDepth);
         const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
         // Shader patch to support per-instance left→right gradient identical to VectorVisualizationInstancedPrism
@@ -881,13 +895,13 @@ export class MHSAAnimation {
         });
         for (let vIdx = 0; vIdx < vecList.length; vIdx++) {
             const vec = vecList[vIdx];
-            if (!vec || !vec.group) { instIndex += VECTOR_LENGTH_PRISM; continue; }
+            if (!vec || !vec.group) { instIndex += vectorLength; continue; }
 
             // Access original gradient attrs if available
             const srcCS = vec.mesh && vec.mesh.geometry && vec.mesh.geometry.getAttribute ? vec.mesh.geometry.getAttribute('colorStart') : null;
             const srcCE = vec.mesh && vec.mesh.geometry && vec.mesh.geometry.getAttribute ? vec.mesh.geometry.getAttribute('colorEnd')   : null;
 
-            for (let i = 0; i < VECTOR_LENGTH_PRISM; i++, instIndex++) {
+            for (let i = 0; i < vectorLength; i++, instIndex++) {
                 // Determine if this prism is visible or hidden in the source vector by reading its matrix
                 let hidden = false;
                 if (vec.mesh && typeof vec.mesh.getMatrixAt === 'function') {
@@ -898,7 +912,7 @@ export class MHSAAnimation {
                 }
 
                 // Compute world position for this prism
-                const baseX = computeCenteredPrismX(i);
+                const baseX = computeCenteredPrismX(i, vectorLength);
                 const worldX = vec.group.position.x + baseX;
                 const baseYForCategory = isRedCategory ? canonicalRaisedBaseY : (vec.group && vec.group.position ? vec.group.position.y : 0);
                 const worldY = baseYForCategory + (hidden ? hideY : uniformCalculatedHeight / 2);
@@ -926,7 +940,7 @@ export class MHSAAnimation {
                     );
                 } else if (typeof vec.getDefaultColorForIndex === 'function') {
                     const leftColor  = vec.getDefaultColorForIndex(Math.max(0, i - 1));
-                    const rightColor = vec.getDefaultColorForIndex(Math.min(VECTOR_LENGTH_PRISM - 1, i + 1));
+                    const rightColor = vec.getDefaultColorForIndex(Math.min(vectorLength - 1, i + 1));
                     colorStartArr[instIndex * 3 + 0] = leftColor.r;  colorStartArr[instIndex * 3 + 1] = leftColor.g;  colorStartArr[instIndex * 3 + 2] = leftColor.b;
                     colorEndArr[instIndex * 3 + 0]   = rightColor.r; colorEndArr[instIndex * 3 + 1]   = rightColor.g; colorEndArr[instIndex * 3 + 2]   = rightColor.b;
                     tmpColor.copy(leftColor).lerp(rightColor, 0.5);
@@ -967,7 +981,7 @@ export class MHSAAnimation {
         group.userData.label = (category === 'V') ? 'Merged Value Vectors (Red)' : 'Merged Key Vectors (Green)';
         const mergedKVMeta = {
             category,
-            vectorPrismCount: VECTOR_LENGTH_PRISM,
+            vectorPrismCount: vectorLength,
             vectorRefs,
             headIdxs,
             laneIdxs
@@ -994,13 +1008,15 @@ export class MHSAAnimation {
         const headIndex = Array.isArray(meta.headIdxs) ? meta.headIdxs[vectorIndex] : null;
         const laneIndex = Array.isArray(meta.laneIdxs) ? meta.laneIdxs[vectorIndex] : null;
         const vectorRef = Array.isArray(meta.vectorRefs) ? meta.vectorRefs[vectorIndex] : null;
+        const activationData = vectorRef && vectorRef.userData ? vectorRef.userData.activationData : null;
         return {
             category: meta.category, // 'K' or 'V'
             vectorIndex,
             prismIndex,
             headIndex,
             laneIndex,
-            vectorRef
+            vectorRef,
+            activationData
         };
     }
 
@@ -1088,8 +1104,8 @@ export class MHSAAnimation {
     _applyTempModeBehaviour() {
         const grayColor = new THREE.Color(0x606060);
         // Visible prism window for gray-out and gradient calculations
-        const visiblePrismCountTemp = Math.min(VECTOR_LENGTH_PRISM, Math.ceil(this.outputVectorLength / PRISM_DIMENSIONS_PER_UNIT));
-        const startVisibleIdx = Math.max(0, Math.floor((VECTOR_LENGTH_PRISM - visiblePrismCountTemp) / 2));
+        const visiblePrismCountTemp = Math.min(this.vectorPrismCount, Math.ceil(this.outputVectorLength / PRISM_DIMENSIONS_PER_UNIT));
+        const startVisibleIdx = Math.max(0, Math.floor((this.vectorPrismCount - visiblePrismCountTemp) / 2));
         const endVisibleIdx = startVisibleIdx + visiblePrismCountTemp - 1;
 
         this._tempAllOutputVectors.forEach(vec => {
@@ -1137,16 +1153,16 @@ export class MHSAAnimation {
 
             // Build raw 768-dim data with 30 random switch points for varied gradient
             const rawData = [];
-            const desiredSwitches = Math.min(30, VECTOR_LENGTH_PRISM);
+            const desiredSwitches = Math.min(30, this.vectorPrismCount);
             const switchPoints = new Set();
             while (switchPoints.size < desiredSwitches) {
-                const idx = Math.floor(Math.random() * VECTOR_LENGTH_PRISM);
+                const idx = Math.floor(Math.random() * this.vectorPrismCount);
                 switchPoints.add(idx);
             }
             const sortedSwitch = Array.from(switchPoints).sort((a, b) => a - b);
             let curVal = Math.random() * 2 - 1;
             let nextSwitch = sortedSwitch.shift();
-            for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
+            for (let i = 0; i < this.vectorPrismCount; i++) {
                 if (i === nextSwitch) {
                     curVal = Math.random() * 2 - 1;
                     nextSwitch = sortedSwitch.shift();
@@ -1155,7 +1171,12 @@ export class MHSAAnimation {
             }
 
             const spawnPos = kVec.group.position.clone().add(new THREE.Vector3(0, verticalOffset, 0));
-            const decoVec = new VectorVisualizationInstancedPrism(rawData, spawnPos, 3);
+            const decoVec = new VectorVisualizationInstancedPrism(
+                rawData,
+                spawnPos,
+                3,
+                this.vectorPrismCount
+            );
 
             // Hide outer prisms and snap decorative vec to 64-dim geometry
             decoVec.applyProcessedVisuals(
@@ -1318,8 +1339,8 @@ export class MHSAAnimation {
         // Determine central prism range for visible region.  Each prism now
         // represents 64 real dimensions, so calculate required prism count
         // and clamp to avoid negative indices.
-        const visiblePrismCount = Math.min(VECTOR_LENGTH_PRISM, Math.ceil(this.outputVectorLength / PRISM_DIMENSIONS_PER_UNIT));
-        const startVisibleIdx = Math.max(0, Math.floor((VECTOR_LENGTH_PRISM - visiblePrismCount) / 2));
+        const visiblePrismCount = Math.min(this.vectorPrismCount, Math.ceil(this.outputVectorLength / PRISM_DIMENSIONS_PER_UNIT));
+        const startVisibleIdx = Math.max(0, Math.floor((this.vectorPrismCount - visiblePrismCount) / 2));
         const endVisibleIdx = startVisibleIdx + visiblePrismCount - 1;
 
         laneVectors.forEach((vecList, laneZ) => {
@@ -1335,15 +1356,20 @@ export class MHSAAnimation {
                 combinedRaw.push(...slice);
             });
 
-            // Ensure the final length is exactly VECTOR_LENGTH_PRISM (768)
-            if (combinedRaw.length < VECTOR_LENGTH_PRISM) {
-                while (combinedRaw.length < VECTOR_LENGTH_PRISM) combinedRaw.push(0);
-            } else if (combinedRaw.length > VECTOR_LENGTH_PRISM) {
-                combinedRaw.length = VECTOR_LENGTH_PRISM;
+            // Ensure the final length is exactly the configured prism count
+            if (combinedRaw.length < this.vectorPrismCount) {
+                while (combinedRaw.length < this.vectorPrismCount) combinedRaw.push(0);
+            } else if (combinedRaw.length > this.vectorPrismCount) {
+                combinedRaw.length = this.vectorPrismCount;
             }
 
             const spawnPos = new THREE.Vector3(centerX, vecList[0].group.position.y, laneZ);
-            const combinedVec = new VectorVisualizationInstancedPrism(combinedRaw, spawnPos, 3);
+            const combinedVec = new VectorVisualizationInstancedPrism(
+                combinedRaw,
+                spawnPos,
+                3,
+                this.vectorPrismCount
+            );
 
             // ------------------------------------------------------------------
             //  Re-colour combined vector with smooth gradient across its 12 prisms
@@ -1418,19 +1444,34 @@ export class MHSAAnimation {
                         .to({ y: matrixTopY }, duration2)
                         .onStart(() => {
                             // Apply transformation INSIDE the projection matrix
-                            const newRaw = this._generateRawDataWithSwitchPoints(30);
+                            const lane = this.currentLanes
+                                ? this.currentLanes.find(l => Math.abs(l.zPos - laneZ) < 0.1)
+                                : null;
+                            const outputData = (this.activationSource && lane && Number.isFinite(this.layerIndex))
+                                ? this.activationSource.getAttentionOutputProjection(this.layerIndex, lane.tokenIndex, this.vectorPrismCount)
+                                : null;
+                            const newRaw = outputData || this._generateRawDataWithSwitchPoints(30);
+                            const cacheKeyData = outputData || null;
+                            const numKeyColors = Math.min(30, Math.max(1, newRaw.length || 1));
                             vec.applyProcessedVisuals(
-                                newRaw.slice(),
+                                newRaw,
                                 NUM_HEAD_SETS_LAYER * this.outputVectorLength, // 12 * 64  = 768 visible output units
-                                { numKeyColors: 30, generationOptions: null },
-                                { setHiddenToBlack: false }
+                                { numKeyColors, generationOptions: null },
+                                { setHiddenToBlack: false },
+                                cacheKeyData
                             );
-
-                            // Regenerate random key colors (similar to initial vectors)
-                            if (typeof vec._generateKeyColors === 'function' && typeof vec._updateInstanceColors === 'function') {
-                                vec._generateKeyColors();
-                                vec._updateInstanceColors();
-                            }
+                            const label = lane && lane.tokenLabel
+                                ? `Attention Output Projection - ${lane.tokenLabel}`
+                                : 'Attention Output Projection';
+                            const activationData = buildActivationData({
+                                label,
+                                stage: 'attention.output_projection',
+                                layerIndex: this.layerIndex,
+                                tokenIndex: lane ? lane.tokenIndex : undefined,
+                                tokenLabel: lane ? lane.tokenLabel : undefined,
+                                values: newRaw,
+                            });
+                            applyActivationDataToVector(vec, activationData, label);
                         })
 
                         .onUpdate(() => {
@@ -1491,7 +1532,33 @@ export class MHSAAnimation {
                                             if (this.currentLanes) {
                                                 const matchingLane = this.currentLanes.find(l => Math.abs(l.zPos - laneZ) < 0.1);
                                                 if (matchingLane && matchingLane.originalVec) {
-                                                    this._startAdditionAnimation(matchingLane.originalVec, vec, matchingLane);
+                                                    this._startAdditionAnimation(matchingLane.originalVec, vec, matchingLane, () => {
+                                                        if (this.activationSource && Number.isFinite(this.layerIndex)) {
+                                                            const postData = this.activationSource.getPostAttentionResidual(this.layerIndex, matchingLane.tokenIndex, this.vectorPrismCount);
+                                                            if (postData) {
+                                                                const label = matchingLane.tokenLabel
+                                                                    ? `Post-Attention Residual - ${matchingLane.tokenLabel}`
+                                                                    : 'Post-Attention Residual';
+                                                                matchingLane.originalVec.rawData = postData.slice();
+                                                                const numKeyColors = Math.min(30, Math.max(1, postData.length || 1));
+                                                                matchingLane.originalVec.updateKeyColorsFromData(
+                                                                    matchingLane.originalVec.rawData,
+                                                                    numKeyColors,
+                                                                    null,
+                                                                    postData
+                                                                );
+                                                                const activationData = buildActivationData({
+                                                                    label,
+                                                                    stage: 'residual.post_attention',
+                                                                    layerIndex: this.layerIndex,
+                                                                    tokenIndex: matchingLane.tokenIndex,
+                                                                    tokenLabel: matchingLane.tokenLabel,
+                                                                    values: postData,
+                                                                });
+                                                                applyActivationDataToVector(matchingLane.originalVec, activationData, label);
+                                                            }
+                                                        }
+                                                    });
                                                 }
                                             }
                                         })
@@ -1801,16 +1868,16 @@ export class MHSAAnimation {
     _generateRawDataWithSwitchPoints(numSwitchPoints = 30) {
         const raw = [];
         // Clamp switch point count to available prisms to avoid infinite loop.
-        numSwitchPoints = Math.min(numSwitchPoints, VECTOR_LENGTH_PRISM);
+        numSwitchPoints = Math.min(numSwitchPoints, this.vectorPrismCount);
         const switchPoints = new Set();
         while (switchPoints.size < numSwitchPoints) {
-            const idx = Math.floor(Math.random() * VECTOR_LENGTH_PRISM);
+            const idx = Math.floor(Math.random() * this.vectorPrismCount);
             switchPoints.add(idx);
         }
         const sortedSwitches = Array.from(switchPoints).sort((a, b) => a - b);
         let curVal = Math.random() * 2 - 1;
         let nextSwitch = sortedSwitches.shift();
-        for (let i = 0; i < VECTOR_LENGTH_PRISM; i++) {
+        for (let i = 0; i < this.vectorPrismCount; i++) {
             if (i === nextSwitch) {
                 curVal = Math.random() * 2 - 1;
                 nextSwitch = sortedSwitches.shift();
@@ -1871,13 +1938,19 @@ export class MHSAAnimation {
     // ----------------------------------------------------------------------
     // Helper: Addition animation between two InstancedPrism vectors
     // ----------------------------------------------------------------------
-    _startAdditionAnimation(sourceVec, targetVec, lane) {
+    _startAdditionAnimation(sourceVec, targetVec, lane, onComplete = null) {
         // Initiate prism-by-prism addition animation where prisms from sourceVec
         // move into their corresponding positions in targetVec.
         // The lane object is forwarded so the helper can update lane state
         // (stopRise flags, phase transitions, etc.).
-        startPrismAdditionAnimation(sourceVec, targetVec, lane);
+        startPrismAdditionAnimation(sourceVec, targetVec, lane, () => {
+            if (typeof onComplete === 'function') {
+                try {
+                    onComplete();
+                } catch (_) { /* no-op */ }
+            }
+        });
         // Don't force absolute positions here – vectors should keep their
         // natural flow handled by the tween callbacks inside the helper.
     }
-} 
+}
