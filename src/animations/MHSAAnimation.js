@@ -1833,7 +1833,7 @@ export class MHSAAnimation {
                     .easing(TWEEN.Easing.Quadratic.InOut)
                     .onUpdate(() => {
                         qMatrix.setColor(initialQColor);
-                        qMatrix.setEmissive(initialQColor, 0.18); // Subtle emissiveness
+                        qMatrix.setEmissive(initialQColor, 0.30); // Subtle emissiveness
                     })
                     .start();
             }
@@ -1845,7 +1845,7 @@ export class MHSAAnimation {
                     .easing(TWEEN.Easing.Quadratic.InOut)
                     .onUpdate(() => {
                         kMatrix.setColor(initialKColor);
-                        kMatrix.setEmissive(initialKColor, 0.18); // Subtle emissiveness
+                        kMatrix.setEmissive(initialKColor, 0.30); // Subtle emissiveness
                     })
                     .start();
             }
@@ -1857,7 +1857,7 @@ export class MHSAAnimation {
                     .easing(TWEEN.Easing.Quadratic.InOut)
                     .onUpdate(() => {
                         vMatrix.setColor(initialVColor);
-                        vMatrix.setEmissive(initialVColor, 0.18); // Subtle emissiveness
+                        vMatrix.setEmissive(initialVColor, 0.30); // Subtle emissiveness
                     })
                     .start();
             }
