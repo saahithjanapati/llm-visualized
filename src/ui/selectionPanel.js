@@ -27,7 +27,11 @@ const PREVIEW_LANES = 3;
 const PREVIEW_MATRIX_DEPTH = 320;
 const PREVIEW_LANE_SPACING = 80;
 const PREVIEW_TARGET_SIZE = 140;
-const PREVIEW_FRAME_PADDING = 4.0;
+// Base framing for most objects; vector previews can request additional padding.
+const PREVIEW_FRAME_PADDING = 1.25;
+const PREVIEW_BASE_DISTANCE_MULT = 1.15;
+const PREVIEW_VECTOR_PADDING_MULT = 3.0;
+const PREVIEW_VECTOR_DISTANCE_MULT = 2.4;
 const PREVIEW_ROTATION_SPEED = 0.0035;
 const PREVIEW_BASE_TILT_X = -0.12;
 const PREVIEW_BASE_ROTATION_Y = 0.38;
@@ -1070,7 +1074,7 @@ function resolvePreviewObject(label, selectionInfo) {
     return buildStackedBoxPreview(0x202020);
 }
 
-function fitObjectToView(object, camera) {
+function fitObjectToView(object, camera, options = {}) {
     if (!object) return;
     const box = getObjectBounds(object);
     if (box.isEmpty()) return;
@@ -1079,8 +1083,10 @@ function fitObjectToView(object, camera) {
     box.getSize(size);
     box.getCenter(center);
     object.position.sub(center);
+    const paddingMult = Number.isFinite(options.paddingMultiplier) ? options.paddingMultiplier : 1;
+    const distanceMult = Number.isFinite(options.distanceMultiplier) ? options.distanceMultiplier : 1;
     const maxDim = Math.max(size.x, size.y, size.z);
-    const scale = maxDim > 0 ? PREVIEW_TARGET_SIZE / (maxDim * PREVIEW_FRAME_PADDING) : 1;
+    const scale = maxDim > 0 ? PREVIEW_TARGET_SIZE / (maxDim * PREVIEW_FRAME_PADDING * paddingMult) : 1;
     object.scale.setScalar(scale);
 
     const scaledBox = getObjectBounds(object);
@@ -1088,7 +1094,7 @@ function fitObjectToView(object, camera) {
     scaledBox.getSize(scaledSize);
     const scaledMax = Math.max(scaledSize.x, scaledSize.y, scaledSize.z);
     const fov = THREE.MathUtils.degToRad(camera.fov);
-    const distance = ((scaledMax / 2) / Math.tan(fov / 2)) * 3.2;
+    const distance = ((scaledMax / 2) / Math.tan(fov / 2)) * PREVIEW_BASE_DISTANCE_MULT * distanceMult;
 
     camera.near = Math.max(0.1, distance / 50);
     camera.far = distance * 20;
@@ -1270,7 +1276,10 @@ class SelectionPanel {
             this.currentPreview.rotation.set(0, 0, 0);
         }
         this._lastFrameTime = performance.now();
-        fitObjectToView(this.currentPreview, this.camera);
+        const isVectorPreview = isLikelyVectorSelection(label, selection);
+        const paddingMultiplier = isVectorPreview ? PREVIEW_VECTOR_PADDING_MULT : 1;
+        const distanceMultiplier = isVectorPreview ? PREVIEW_VECTOR_DISTANCE_MULT : 1;
+        fitObjectToView(this.currentPreview, this.camera, { paddingMultiplier, distanceMultiplier });
         if (this.currentPreview?.rotation) {
             this.currentPreview.rotation.copy(desiredRotation);
         }

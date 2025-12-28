@@ -4,6 +4,7 @@ import { loadPrecomputedGeometries } from '../src/utils/precomputedGeometryLoade
 import { LayerPipeline } from '../src/engine/LayerPipeline.js';
 import {
     setPlaybackSpeed,
+    setNumVectorLanes,
     EMBEDDING_MATRIX_PARAMS_VOCAB,
     EMBEDDING_MATRIX_PARAMS_POSITION,
     LN_PARAMS,
@@ -23,7 +24,11 @@ import {
 } from '../src/utils/constants.js';
 import { WeightMatrixVisualization } from '../src/components/WeightMatrixVisualization.js';
 import { LayerNormalizationVisualization } from '../src/components/LayerNormalizationVisualization.js';
-import { MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR } from '../src/animations/LayerAnimationConstants.js';
+import {
+    MHA_FINAL_Q_COLOR,
+    MHA_FINAL_K_COLOR,
+    setAnimationLaneCount
+} from '../src/animations/LayerAnimationConstants.js';
 import { appState } from '../src/state/appState.js';
 import { initIntroAnimation } from '../src/ui/introAnimation.js';
 import { initStatusOverlay } from '../src/ui/statusOverlay.js';
@@ -247,21 +252,33 @@ await loadPrecomputedGeometries('../precomputed_components.glb');
 
 let activationSource = null;
 let laneTokenIndices = null;
+let laneCount = NUM_VECTOR_LANES;
 const statusDiv = document.getElementById('statusOverlay');
 const setLoadingStatus = (text) => {
     if (statusDiv) statusDiv.textContent = text;
 };
 try {
     const params = new URLSearchParams(window.location.search);
-    const captureFile = params.get('capture') || params.get('file') || 'capture_2.json';
+    const captureFile = params.get('capture') || params.get('file') || 'capture.json';
     const captureUrl = captureFile.startsWith('http')
         ? captureFile
         : `/${captureFile.replace(/^\/+/, '')}`;
     activationSource = await CaptureActivationSource.load(captureUrl);
-    laneTokenIndices = activationSource.getLaneTokenIndices(NUM_VECTOR_LANES);
+    const tokensInCapture = typeof activationSource.getTokenCount === 'function'
+        ? activationSource.getTokenCount()
+        : 0;
+    laneCount = Math.max(1, tokensInCapture || laneCount);
+    laneTokenIndices = activationSource.getLaneTokenIndices(laneCount);
 } catch (err) {
     console.warn('Capture data unavailable; falling back to random vectors.', err);
 }
+if (!activationSource) {
+    laneCount = Math.max(1, PROMPT_TOKENS.length);
+}
+
+setNumVectorLanes(laneCount);
+setAnimationLaneCount(laneCount);
+
 if (activationSource && laneTokenIndices) {
     try {
         setLoadingStatus('Preparing activation cache...');
@@ -300,7 +317,8 @@ const camTarget = new THREE.Vector3(0, 9000, 0);
 const pipeline = new LayerPipeline(gptCanvas, NUM_LAYERS, {
     cameraPosition: camPos,
     cameraTarget: camTarget,
-    activationSource
+    activationSource,
+    laneCount
 });
 
 // Show GPT canvas immediately
@@ -369,8 +387,7 @@ try {
         pipeline.engine.registerRaycastRoot(posBottom.group);
     }
 
-    const laneCount = Math.min(NUM_VECTOR_LANES, tokenLabelsFromCapture.length);
-    const laneSpacing = LN_PARAMS.depth / (NUM_VECTOR_LANES + 1);
+    const laneSpacing = LN_PARAMS.depth / (laneCount + 1);
     const laneZs = [];
     for (let i = 0; i < laneCount; i++) {
         laneZs.push(-LN_PARAMS.depth / 2 + laneSpacing * (i + 1));

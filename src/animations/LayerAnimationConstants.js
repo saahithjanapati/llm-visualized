@@ -36,7 +36,7 @@ export const LN_PARAMS = {
     height: 35,
     depth: 120,
     wallThickness: 1.0,
-    numberOfHoles: 5, // This is also used as numVectors for lanes
+    numberOfHoles: NUM_VECTOR_LANES, // This is also used as numVectors for lanes
     holeWidth: 5,
     holeWidthFactor: 3.75
 };
@@ -207,3 +207,11 @@ export const MHA_OUTPUT_PROJECTION_MATRIX_PARAMS = {
     slitBottomWidthFactor: 0.92,   // Same as MHA_MATRIX_PARAMS.slitBottomWidthFactor
     slitTopWidthFactor: 0.92      // Same as MHA_MATRIX_PARAMS.slitTopWidthFactor
 }; 
+
+export function setAnimationLaneCount(laneCount = NUM_VECTOR_LANES) {
+    const clamped = Math.max(1, Math.floor(laneCount || 1));
+    LN_PARAMS.numberOfHoles = clamped;
+    MHA_MATRIX_PARAMS.numberOfSlits = clamped;
+    MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.numberOfSlits = clamped;
+    return clamped;
+}

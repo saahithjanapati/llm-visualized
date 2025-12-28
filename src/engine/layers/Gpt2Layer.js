@@ -199,7 +199,7 @@ export default class Gpt2Layer extends BaseLayer {
      * @param {Function} onFinished – Optional callback to invoke when all lanes finish.
      * @param {object} activationSource – Optional capture data source for real activations.
      */
-    constructor(index, random, yOffset = 0, externalLanes = null, onFinished = null, isActive = true, activationSource = null) {
+    constructor(index, random, yOffset = 0, externalLanes = null, onFinished = null, isActive = true, activationSource = null, laneCount = NUM_VECTOR_LANES) {
         super(index);
         this.random = random;
         this.yOffset = yOffset;
@@ -207,6 +207,7 @@ export default class Gpt2Layer extends BaseLayer {
         this.onFinished = typeof onFinished === 'function' ? onFinished : null;
         this.isActive = isActive;
         this.activationSource = activationSource || null;
+        this._laneCount = Math.max(1, Math.floor(laneCount || NUM_VECTOR_LANES));
         this._baseVectorLength = (this.activationSource && typeof this.activationSource.getBaseVectorLength === 'function')
             ? this.activationSource.getBaseVectorLength()
             : VECTOR_LENGTH_PRISM;
@@ -1880,7 +1881,7 @@ export default class Gpt2Layer extends BaseLayer {
 
     _getTokenIndexForLane(laneIdx) {
         if (!this.activationSource) return laneIdx;
-        return this.activationSource.getLaneTokenIndex(laneIdx, NUM_VECTOR_LANES);
+        return this.activationSource.getLaneTokenIndex(laneIdx, this._laneCount);
     }
 
     _getTokenLabel(tokenIndex) {
@@ -1945,11 +1946,11 @@ export default class Gpt2Layer extends BaseLayer {
     // ------------------------------------------------------------
 
     _createFreshLanes(offsetX, ln1CenterY, ln2CenterY, ln1TopY) {
-        const slitSpacing = LN_PARAMS.depth / (NUM_VECTOR_LANES + 1);
+        const slitSpacing = LN_PARAMS.depth / (this._laneCount + 1);
         // Start vectors at the TOP of the bottom embedding matrix
         const startY = (LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2 + EMBEDDING_BOTTOM_TOP_ALIGN_OFFSET_FROM_LN1_BOTTOM) + EMBEDDING_BOTTOM_Y_ADJUST;
         const meetY  = ln1TopY + 5;
-        for (let laneIdx = 0; laneIdx < NUM_VECTOR_LANES; laneIdx++) {
+        for (let laneIdx = 0; laneIdx < this._laneCount; laneIdx++) {
             this._buildSingleLane(null, offsetX, ln1CenterY, ln2CenterY, startY, meetY, laneIdx, slitSpacing);
         }
         if (this._ln1AddPlaceholders && this._ln1AddPlaceholders.every(p => !p)) {
@@ -1962,10 +1963,10 @@ export default class Gpt2Layer extends BaseLayer {
 
     _createAdditionPlaceholders(offsetX, ln1CenterY, ln2CenterY) {
         try {
-            const slitSpacing = LN_PARAMS.depth / (NUM_VECTOR_LANES + 1);
+            const slitSpacing = LN_PARAMS.depth / (this._laneCount + 1);
             const addYOffset = LN_PARAMS.height * LN_ADD_VECTOR_OFFSET_FRACTION;
 
-            for (let laneIdx = 0; laneIdx < NUM_VECTOR_LANES; laneIdx++) {
+            for (let laneIdx = 0; laneIdx < this._laneCount; laneIdx++) {
                 const zPos = -LN_PARAMS.depth / 2 + slitSpacing * (laneIdx + 1);
 
                 const ln1PlaceholderData = this.random.nextVector(this._getBaseVectorLength());

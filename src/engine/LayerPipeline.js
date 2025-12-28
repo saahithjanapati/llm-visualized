@@ -15,7 +15,8 @@ import {
     PRISM_ADD_ANIM_BASE_FLASH_DURATION,
     PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS,
     PRISM_ADD_ANIM_SPEED_MULT,
-    VECTOR_LENGTH_PRISM
+    VECTOR_LENGTH_PRISM,
+    NUM_VECTOR_LANES
 } from '../utils/constants.js';
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
 import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
@@ -63,6 +64,7 @@ export class LayerPipeline extends EventTarget {
         this._opts      = opts;
         this._randFactory = typeof opts.randomFactory === 'function' ? opts.randomFactory : createRandomSource;
         this._activationSource = opts.activationSource || null;
+        this._laneCount = Math.max(1, Math.floor(opts.laneCount || NUM_VECTOR_LANES));
 
         this._layers = [];
         this._currentLayerIdx = 0;
@@ -89,6 +91,7 @@ export class LayerPipeline extends EventTarget {
         // ------------------------------------------------------------------
 
         const engineOpts = { ...opts };
+        delete engineOpts.laneCount;
         if (typeof engineOpts.cameraFarMargin !== 'number') {
             const DEFAULT_CAMERA_FAR_MARGIN = 40000;
             // Provide additional depth so tall transformer stacks remain visible
@@ -120,7 +123,8 @@ export class LayerPipeline extends EventTarget {
                 /*externalLanes*/ null,
                 /*onFinished*/ null,
                 isActive,
-                this._activationSource
+                this._activationSource,
+                this._laneCount
             );
 
             // Assign onFinished callback for chaining once layer becomes active

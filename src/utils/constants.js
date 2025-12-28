@@ -155,18 +155,26 @@ export const USE_PHYSICAL_MATERIALS = true;
 // vectors/components across the entire scene.
 // ------------------------------------------------------------
 
-/** Distance (in world units) between adjacent vector lanes along Z. */
-export const VECTOR_DEPTH_SPACING = 400;
+/** Baseline distance (in world units) between adjacent vector lanes along Z. */
+export const VECTOR_DEPTH_SPACING_BASE = 400;
+/** Hard cap (fraction) for max lane depth relative to the historical depth. */
+export const MAX_LANE_DEPTH_RATIO = 0.6;
+/** Default lane count used for deriving the depth cap. */
+export const DEFAULT_NUM_VECTOR_LANES = 5;
+/** Live lane spacing that may change when lane count is adjusted. */
+export let VECTOR_DEPTH_SPACING = VECTOR_DEPTH_SPACING_BASE;
 
 // ------------------------------------------------------------
 // Lane / vector configuration – controls how many lanes/vectors
 // are present in the scene and component depths that depend on it.
 // ------------------------------------------------------------
 
-export const NUM_VECTOR_LANES = 5; // Master switch: number of vector "lanes" active in the scene
+export let NUM_VECTOR_LANES = DEFAULT_NUM_VECTOR_LANES; // Master switch: number of vector "lanes" active in the scene
 
 // Depth large enough to fit all lanes plus one spacing margin at each end
-export const LANE_DEPENDENT_DEPTH = (NUM_VECTOR_LANES + 1) * VECTOR_DEPTH_SPACING;
+const initialDepth = (NUM_VECTOR_LANES + 1) * VECTOR_DEPTH_SPACING_BASE * MAX_LANE_DEPTH_RATIO;
+VECTOR_DEPTH_SPACING = initialDepth / (NUM_VECTOR_LANES + 1);
+export let LANE_DEPENDENT_DEPTH = initialDepth;
 
 // ------------------------------------------------------------
 // Animation scaling when vectors are grouped into fewer prisms
@@ -485,6 +493,45 @@ export const EMBEDDING_MATRIX_PARAMS_POSITION = {
     slitBottomWidthFactor: MLP_MATRIX_PARAMS_UP.slitBottomWidthFactor,
     slitTopWidthFactor: MLP_MATRIX_PARAMS_UP.slitTopWidthFactor
 };
+
+/**
+ * Update the global lane count and propagate lane-dependent dimensions so
+ * instanced meshes and slit counts stay aligned with the available tokens.
+ */
+export function setNumVectorLanes(nextCount) {
+    const clamped = Math.max(1, Math.floor(nextCount || 1));
+
+    NUM_VECTOR_LANES = clamped;
+
+    const desiredDepth = (NUM_VECTOR_LANES + 1) * VECTOR_DEPTH_SPACING_BASE;
+    const cappedDepth = desiredDepth * MAX_LANE_DEPTH_RATIO;
+    const laneGap = cappedDepth / (NUM_VECTOR_LANES + 1);
+
+    VECTOR_DEPTH_SPACING = laneGap;
+    LANE_DEPENDENT_DEPTH = cappedDepth;
+
+    const laneDepthTargets = [
+        LN_PARAMS,
+        MHA_MATRIX_PARAMS,
+        MLP_MATRIX_PARAMS_UP,
+        MLP_MATRIX_PARAMS_DOWN,
+        EMBEDDING_MATRIX_PARAMS_VOCAB,
+        EMBEDDING_MATRIX_PARAMS_POSITION
+    ];
+
+    LN_PARAMS.depth = LANE_DEPENDENT_DEPTH;
+    LN_PARAMS.numberOfHoles = NUM_VECTOR_LANES;
+
+    laneDepthTargets.forEach((params) => {
+        if (!params) return;
+        params.depth = LANE_DEPENDENT_DEPTH;
+        if (typeof params.numberOfSlits === 'number') {
+            params.numberOfSlits = NUM_VECTOR_LANES;
+        }
+    });
+
+    return NUM_VECTOR_LANES;
+}
 
 // -----------------------------------------------------------------------------
 // Embedding placement controls (scene positioning)
