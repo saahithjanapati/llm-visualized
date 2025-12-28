@@ -49,6 +49,10 @@ export class SelfAttentionAnimator {
         this.blueProcessing    = {};  // { headIdx: boolean }
         this.blueProcessedCount = {}; // { headIdx: number }
         this.greensAligned     = {};  // { headIdx: boolean } – flagged once K vectors are in place
+        this.skipRequested     = false;
+        this._activeBlueVectors = {}; // { headIdx: Vector }
+        this._pendingTimeouts   = new Set();
+        this._spawnedSpheres    = new Set();
     }
 
     // Durations decoupled from GLOBAL_ANIM_SPEED_MULT to make presets clearly visible
@@ -61,6 +65,82 @@ export class SelfAttentionAnimator {
     get DUPLICATE_POP_IN_MS() { return SA_DUPLICATE_POP_IN_MS * SELF_ATTENTION_TIME_MULT; }
     get DUPLICATE_TRAVEL_MERGE_MS() { return SA_DUPLICATE_TRAVEL_MERGE_MS * SELF_ATTENTION_TIME_MULT; }
     get DUPLICATE_POP_OUT_MS() { return SA_DUPLICATE_POP_OUT_MS * SELF_ATTENTION_TIME_MULT; }
+
+    // ------------------------------------------------------------------
+    // Skip / cleanup helpers
+    // ------------------------------------------------------------------
+    _registerTimeout(id) {
+        if (!id) return;
+        this._pendingTimeouts.add(id);
+    }
+
+    _clearPendingTimeouts() {
+        this._pendingTimeouts.forEach((id) => clearTimeout(id));
+        this._pendingTimeouts.clear();
+    }
+
+    _retireVector(vec) {
+        if (!vec) return;
+        try {
+            if (vec.userData && vec.userData.trail && typeof vec.userData.trail.dispose === 'function') {
+                vec.userData.trail.dispose();
+                delete vec.userData.trail;
+            }
+        } catch (_) { /* optional cleanup */ }
+        try {
+            if (vec.group) {
+                vec.group.visible = false;
+                vec.group.scale.set(0.001, 0.001, 0.001);
+            }
+        } catch (_) { /* optional cleanup */ }
+    }
+
+    _finishBlueImmediately(vector, headIdx, doneCb) {
+        this._retireVector(vector);
+        if (typeof headIdx === 'number' && this._activeBlueVectors) {
+            delete this._activeBlueVectors[headIdx];
+        }
+        if (typeof doneCb === 'function') doneCb();
+    }
+
+    /**
+     * Immediately complete the conveyor belt, clear queues, and fire callbacks.
+     */
+    forceComplete() {
+        if (this.phase === 'complete') {
+            this._flushCallbacks();
+            return;
+        }
+        this.skipRequested = true;
+        this._clearPendingTimeouts();
+        // Retire any active vectors and queued blues
+        Object.values(this._activeBlueVectors || {}).forEach((vec) => this._retireVector(vec));
+        Object.values(this.blueQueues || {}).forEach((queue) => {
+            if (Array.isArray(queue)) queue.forEach((vec) => this._retireVector(vec));
+        });
+        this.blueQueues = {};
+        this.blueProcessing = {};
+        this.blueProcessedCount = {};
+        this.phase = 'complete';
+        // Clean up any lingering highlight spheres
+        this._spawnedSpheres.forEach((sp) => {
+            try {
+                if (sp.parent) sp.parent.remove(sp);
+            } catch (_) { /* optional cleanup */ }
+        });
+        this._spawnedSpheres.clear();
+        // Dispose K/V visuals so they disappear alongside the skipped conveyor
+        try { this.ctx && this.ctx._disposeMergedKVGroups && this.ctx._disposeMergedKVGroups(); } catch (_) {}
+        try { this.ctx && this.ctx._disposeAllIndividualKandVVectorsImmediately && this.ctx._disposeAllIndividualKandVVectorsImmediately(); } catch (_) {}
+        this._flushCallbacks();
+    }
+
+    /**
+     * Public helper so UI can decide whether a skip button should be visible.
+     */
+    isConveyorActive() {
+        return !this._isConveyorComplete();
+    }
 
     /**
      * Public entry – dual signature for backwards compatibility.
@@ -110,6 +190,11 @@ export class SelfAttentionAnimator {
     // Per-vector dispatch
     // ------------------------------------------------------------------
     _handleAboveMatrixAnimations(vector, vectorCategory, onDone) {
+        if (this.skipRequested) {
+            onDone && onDone();
+            return;
+        }
+        if (this.phase === 'waiting') this.phase = 'running';
         if (typeof TWEEN === 'undefined') {
             console.error('Global TWEEN object not loaded for SelfAttentionAnimator!');
             onDone && onDone();
@@ -151,6 +236,11 @@ export class SelfAttentionAnimator {
      *    this same Y so they remain perfectly level.
      */
     _animateVVectorRise(vector, onDone) {
+        if (this.skipRequested) {
+            this._retireVector(vector);
+            onDone && onDone();
+            return;
+        }
         new TWEEN.Tween({ y: vector.group.position.y })
             .to({ y: vector.group.position.y + this.RED_EXTRA_RISE }, this.V_RISE_DURATION)
             .easing(TWEEN.Easing.Quadratic.Out)
@@ -162,6 +252,10 @@ export class SelfAttentionAnimator {
     }
 
     _alignKVectorsUnderV(redVector, onDone) {
+        if (this.skipRequested) {
+            onDone && onDone();
+            return;
+        }
         const redX = redVector.group.position.x;
         const redZ = redVector.group.position.z;
         const headIdx = (redVector.userData && typeof redVector.userData.headIndex === 'number')
@@ -212,6 +306,8 @@ export class SelfAttentionAnimator {
     // Blue (Query) conveyor-belt logic
     // ------------------------------------------------------------------
     _enqueueBlueVector(vector) {
+        if (this.skipRequested) return;
+        if (this.phase === 'waiting') this.phase = 'running';
         const headIdx = (vector.userData && typeof vector.userData.headIndex === 'number')
             ? vector.userData.headIndex : null;
         if (headIdx === null) return;
@@ -250,6 +346,7 @@ export class SelfAttentionAnimator {
     }
 
     _kickoffBlueConveyor(headIdx) {
+        if (this.skipRequested) return;
         if (this.blueProcessing[headIdx]) return; // already running
         if (!this.blueQueues[headIdx] || this.blueQueues[headIdx].length === 0) {
             // Nothing queued – might be done already
@@ -265,6 +362,12 @@ export class SelfAttentionAnimator {
 
     _processNextBlueVector(headIdx) {
         const queue = this.blueQueues[headIdx];
+        if (this.skipRequested) {
+            if (Array.isArray(queue)) queue.length = 0;
+            this.blueProcessing[headIdx] = false;
+            this._checkGlobalCompletion();
+            return;
+        }
         if (!queue || queue.length === 0) {
             // Finished all blues for this head
             this.blueProcessing[headIdx] = false;
@@ -285,13 +388,16 @@ export class SelfAttentionAnimator {
         // Pre-compute sorted lane z positions (top → bottom)
         const laneZs = (this.ctx.currentLanes || []).map(l => l.zPos).sort((a, b) => a - b);
 
+        this._activeBlueVectors[headIdx] = vector;
         this._animateBlueVector(vector, headIdx, i, laneZs, () => {
+            delete this._activeBlueVectors[headIdx];
             // Recursive continuation
             this._processNextBlueVector(headIdx);
         });
     }
 
     _shiftRemainingBlueVectors(queue, headIdx) {
+        if (this.skipRequested) return;
         // Existing logic (unchanged)
 
         const laneZs = (this.ctx.currentLanes || []).map(l => l.zPos).sort((a, b) => a - b);
@@ -307,6 +413,7 @@ export class SelfAttentionAnimator {
 
     _riseSpheres(spheresArr) {
 
+        if (this.skipRequested) return;
         if (!Array.isArray(spheresArr) || spheresArr.length === 0) return;
         spheresArr.forEach(sp => {
             // Position rise
@@ -375,6 +482,10 @@ export class SelfAttentionAnimator {
     }
 
     _animateBlueVector(vector, headIdx, i, laneZs, allDoneCb) {
+        if (this.skipRequested) {
+            this._finishBlueImmediately(vector, headIdx, allDoneCb);
+            return;
+        }
         // Note: indices now start at 1, so the former i==0 no-movement case will not occur.
         const horizontalToK = this.ctx.headCoords && this.ctx.headCoords[headIdx]
             ? this.ctx.headCoords[headIdx].k
@@ -391,6 +502,10 @@ export class SelfAttentionAnimator {
             .to({ x: horizontalToK }, this.BLUE_HORIZ_DURATION)
             .easing(QEasing)
             .onComplete(() => {
+                if (this.skipRequested) {
+                    this._finishBlueImmediately(vector, headIdx, allDoneCb);
+                    return;
+                }
                 // 2. Traverse along K vectors i times
                 const spheres = [];
                 this._traverseLanes(vector, laneZs, i, spheres, true, () => {
@@ -444,6 +559,10 @@ export class SelfAttentionAnimator {
     }
 
     _startRedTraversalFromFirstCopy(headIdx, hopCount, laneZs, spheresArr, doneCb) {
+        if (this.skipRequested) {
+            doneCb && doneCb();
+            return;
+        }
         if (!this.ctx.currentLanes || laneZs.length === 0) {
             doneCb && doneCb();
             return;
@@ -474,6 +593,7 @@ export class SelfAttentionAnimator {
             fixedVec.instanceCount
         );
         travellingVec.userData = { headIndex: headIdx };
+        this._activeBlueVectors[headIdx] = travellingVec;
         this.ctx.parentGroup.add(travellingVec.group);
         travellingVec.applyProcessedVisuals(
             fixedVec.rawData.slice(),
@@ -489,6 +609,7 @@ export class SelfAttentionAnimator {
             new TWEEN.Tween(travellingVec.group.scale)
                 .to({ x: 0.001, y: 0.001, z: 0.001 }, this.DUPLICATE_POP_OUT_MS)
                 .onComplete(() => {
+                    delete this._activeBlueVectors[headIdx];
                     if (travellingVec.group.parent) travellingVec.group.parent.remove(travellingVec.group);
                     if (typeof travellingVec.dispose === 'function') travellingVec.dispose();
                     doneCb && doneCb();
@@ -498,6 +619,10 @@ export class SelfAttentionAnimator {
     }
 
     _traverseLanes(vector, laneZs, count, spheresArr, createSpheres, doneCb, stepIdx = 0) {
+        if (this.skipRequested) {
+            doneCb && doneCb();
+            return;
+        }
         if (count === 0 || stepIdx >= count || laneZs.length === 0) {
             // Nothing to traverse
             doneCb && doneCb();
@@ -537,6 +662,7 @@ export class SelfAttentionAnimator {
                                 sphereMesh.position.copy(midPoint);
                                 sphereMesh.scale.set(0.001, 0.001, 0.001);
                                 this.ctx.parentGroup.add(sphereMesh);
+                                this._spawnedSpheres.add(sphereMesh);
                                 const activationData = buildActivationData({
                                     label: 'Attention Score (Pre-softmax)',
                                     stage: 'attention.pre',
@@ -636,6 +762,7 @@ export class SelfAttentionAnimator {
                             .delay(250)
                             .easing(TWEEN.Easing.Quadratic.In)
                             .onComplete(() => {
+                                this._spawnedSpheres.delete(sp);
                                 if (sp.parent) sp.parent.remove(sp);
                             })
                             .start();
@@ -645,9 +772,15 @@ export class SelfAttentionAnimator {
                     }
                 }
                 // Pause briefly, then recurse
-                setTimeout(() => {
+                const timeoutId = setTimeout(() => {
+                    this._pendingTimeouts.delete(timeoutId);
+                    if (this.skipRequested) {
+                        doneCb && doneCb();
+                        return;
+                    }
                     this._traverseLanes(vector, laneZs, count, spheresArr, createSpheres, doneCb, stepIdx + 1);
                 }, this.BLUE_PAUSE_MS);
+                this._registerTimeout(timeoutId);
             })
             .start();
     }

@@ -50,6 +50,14 @@ canvas { display: block; }
     border-color: rgba(122,202,255,0.8);
 }
 
+#skipConveyorBtn {
+    font-size: 14px;
+    min-width: 130px;
+}
+#skipConveyorBtn:not([data-visible="true"]) {
+    display: none;
+}
+
 #settingsBtn {
     font-size: 18px;
     padding-inline: 10px;

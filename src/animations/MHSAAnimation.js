@@ -1264,6 +1264,7 @@ export class MHSAAnimation {
     }
 
     _startMergeToRowVectors() {
+        if (this.rowMergePhase && this.rowMergePhase !== 'not_started') return;
         if (!this._tempDecorativeVecs || this._tempDecorativeVecs.length === 0) return;
 
         // Mark that decorative vectors are now travelling horizontally back
@@ -1707,6 +1708,24 @@ export class MHSAAnimation {
         });
     }
 
+    // Hide all Q vectors (blue side copies) so a manual skip can immediately clear conveyors.
+    _hideAllQVectorsImmediately() {
+        const lanes = this.currentLanes || [];
+        lanes.forEach((lane) => {
+            if (Array.isArray(lane.sideCopies)) {
+                lane.sideCopies.forEach((sc) => {
+                    if (!sc || sc.type !== 'Q') return;
+                    const q = sc.vec;
+                    if (!q) return;
+                    try {
+                        if (q.mesh) q.mesh.visible = false;
+                        if (q.group) q.group.visible = false;
+                    } catch (_) {}
+                });
+            }
+        });
+    }
+
     // Permanently dispose any remaining individual K (green) and V (red) vectors
     // across all lanes. Keeps the empty groups (for positional queries) but
     // removes meshes and their GPU resources so nothing remains visible.
@@ -1739,6 +1758,23 @@ export class MHSAAnimation {
                 });
             }
         });
+    }
+
+    /**
+     * Skip the attention conveyor belt animation and jump straight into the concatenation phase.
+     */
+    skipSelfAttentionAndStartConcat() {
+        if (this.mhaPassThroughPhase !== 'mha_pass_through_complete') return;
+        try { if (this.selfAttentionAnimator?.forceComplete) this.selfAttentionAnimator.forceComplete(); } catch (_) {}
+        try { this._hideAllQVectorsImmediately(); } catch (_) {}
+        try { this._hideAllKandVVectorsImmediately(); } catch (_) {}
+        // Ensure decorative vectors exist before starting the merge/concat sequence
+        if (!this._tempModeCompleted) {
+            try { this._applyTempModeBehaviour(); this._tempModeCompleted = true; } catch (_) {}
+        }
+        if (this.rowMergePhase === 'not_started' && this._tempDecorativeVecs && this._tempDecorativeVecs.length) {
+            this._startMergeToRowVectors();
+        }
     }
     
     _animateOutputMatrixBrightening(duration) {
