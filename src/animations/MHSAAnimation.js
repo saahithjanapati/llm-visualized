@@ -1751,7 +1751,7 @@ export class MHSAAnimation {
         const brightColor = this.outputProjMatrixActiveColor.clone();
         const startEmissiveIntensity = 0.12;
         const peakEmissiveIntensity = 0.3;
-        const endEmissiveIntensity = 0.18;
+        const endEmissiveIntensity = 0.30;
 
         // Ensure matrix begins in its dark resting state
         this.outputProjectionMatrix.setColor(startColor);

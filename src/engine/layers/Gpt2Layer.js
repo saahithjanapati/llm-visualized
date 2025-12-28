@@ -1360,7 +1360,7 @@ export default class Gpt2Layer extends BaseLayer {
         const matrixEndColor = new THREE.Color(0xc07a12); // orange
         const startIntensity = 0.1;
         const peakIntensity = 0.24;
-        const finalIntensity = 0.16;
+        const finalIntensity = 0.30;
 
         // Animate matrix colour and emissive intensity for a glow effect
         const state = { t: 0, emissive: startIntensity };
@@ -1537,7 +1537,7 @@ export default class Gpt2Layer extends BaseLayer {
         // Matrix colour + emissive animation for glow
         const startIntensity = 0.1;
         const peakIntensity = 0.24;
-        const finalIntensity = 0.16;
+        const finalIntensity = 0.30;
         const downState = { t: 0, emissive: startIntensity };
 
         new TWEEN.Tween(downState)
