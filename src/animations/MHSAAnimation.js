@@ -1749,9 +1749,9 @@ export class MHSAAnimation {
         // Animation parameters
         const startColor = this.outputProjMatrixDefaultColor.clone();
         const brightColor = this.outputProjMatrixActiveColor.clone();
-        const startEmissiveIntensity = 0.1;
-        const peakEmissiveIntensity = 0.8;
-        const endEmissiveIntensity = 0.3;
+        const startEmissiveIntensity = 0.12;
+        const peakEmissiveIntensity = 0.3;
+        const endEmissiveIntensity = 0.18;
 
         // Ensure matrix begins in its dark resting state
         this.outputProjectionMatrix.setColor(startColor);
@@ -1833,7 +1833,7 @@ export class MHSAAnimation {
                     .easing(TWEEN.Easing.Quadratic.InOut)
                     .onUpdate(() => {
                         qMatrix.setColor(initialQColor);
-                         qMatrix.setEmissive(initialQColor, 0.3); // Add some emissiveness
+                        qMatrix.setEmissive(initialQColor, 0.08); // Subtle emissiveness
                     })
                     .start();
             }
@@ -1845,7 +1845,7 @@ export class MHSAAnimation {
                     .easing(TWEEN.Easing.Quadratic.InOut)
                     .onUpdate(() => {
                         kMatrix.setColor(initialKColor);
-                        kMatrix.setEmissive(initialKColor, 0.3); // Add some emissiveness
+                        kMatrix.setEmissive(initialKColor, 0.08); // Subtle emissiveness
                     })
                     .start();
             }
@@ -1857,7 +1857,7 @@ export class MHSAAnimation {
                     .easing(TWEEN.Easing.Quadratic.InOut)
                     .onUpdate(() => {
                         vMatrix.setColor(initialVColor);
-                        vMatrix.setEmissive(initialVColor, 0.3); // Add some emissiveness
+                        vMatrix.setEmissive(initialVColor, 0.08); // Subtle emissiveness
                     })
                     .start();
             }

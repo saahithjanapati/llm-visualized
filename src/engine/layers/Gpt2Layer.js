@@ -365,7 +365,7 @@ export default class Gpt2Layer extends BaseLayer {
             MLP_MATRIX_PARAMS_UP.slitTopWidthFactor
         );
         mlpUp.setColor(inactiveDark.clone());
-        mlpUp.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
+        mlpUp.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.06 });
         {
             const lbl = 'MLP Up Weight Matrix';
             mlpUp.group.userData.label = lbl;
@@ -393,7 +393,7 @@ export default class Gpt2Layer extends BaseLayer {
             MLP_MATRIX_PARAMS_DOWN.slitTopWidthFactor
         );
         mlpDown.setColor(inactiveDark.clone());
-        mlpDown.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
+        mlpDown.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.06 });
         {
             const lbl = 'MLP Down Weight Matrix';
             mlpDown.group.userData.label = lbl;
@@ -1358,9 +1358,9 @@ export default class Gpt2Layer extends BaseLayer {
         
         const matrixStartColor = new THREE.Color(INACTIVE_COMPONENT_COLOR);
         const matrixEndColor = new THREE.Color(0xc07a12); // orange
-        const startIntensity = 0.1;
-        const peakIntensity = 0.8;
-        const finalIntensity = 0.3;
+        const startIntensity = 0.08;
+        const peakIntensity = 0.22;
+        const finalIntensity = 0.12;
 
         // Animate matrix colour and emissive intensity for a glow effect
         const state = { t: 0, emissive: startIntensity };
@@ -1535,9 +1535,9 @@ export default class Gpt2Layer extends BaseLayer {
         const durationDown = (Math.abs(totalDist) / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
         
         // Matrix colour + emissive animation for glow
-        const startIntensity = 0.1;
-        const peakIntensity = 0.8;
-        const finalIntensity = 0.3;
+        const startIntensity = 0.08;
+        const peakIntensity = 0.22;
+        const finalIntensity = 0.12;
         const downState = { t: 0, emissive: startIntensity };
 
         new TWEEN.Tween(downState)

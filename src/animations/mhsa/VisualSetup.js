@@ -78,7 +78,7 @@ export function buildMHAVisuals(parentGroup, {
             mat.setMaterialProperties({
                 opacity: matrixRestingOpacity,
                 transparent: wantsTransparency,
-                emissiveIntensity: 0.05,
+                emissiveIntensity: 0.02,
             });
 
             parentGroup.add(mat.group);
@@ -131,7 +131,7 @@ export function buildMHAVisuals(parentGroup, {
             child.material.opacity          = 1.0;
             child.material.transparent      = false;
             child.material.emissive         = initDarkColor;
-            child.material.emissiveIntensity = 0.1;
+            child.material.emissiveIntensity = 0.12;
         }
     });
 

@@ -160,7 +160,7 @@ export const VECTOR_DEPTH_SPACING_BASE = 400;
 /** Hard cap (fraction) for max lane depth relative to the historical depth. */
 export const MAX_LANE_DEPTH_RATIO = 0.6;
 /** Minimum total depth to keep visuals thick when lane count is low. */
-export const MIN_LANE_DEPTH = 2800;
+export const MIN_LANE_DEPTH = 3000;
 /** Default lane count used for deriving the depth cap. */
 export const DEFAULT_NUM_VECTOR_LANES = 5;
 /** Live lane spacing that may change when lane count is adjusted. */
@@ -209,7 +209,7 @@ export const MHSA_DUPLICATE_VECTOR_RISE_SPEED = 6;            // Upward K copy r
 export const MHSA_PASS_THROUGH_TOTAL_DURATION_MS = 90000;     // Total duration of pass-through tween (ms)
 export const MHSA_PASS_THROUGH_BRIGHTEN_RATIO = 0.4;          // Fraction of total spent brightening
 export const MHSA_PASS_THROUGH_DIM_RATIO = 0.4;               // Fraction of total spent dimming
-export const MHSA_MATRIX_MAX_EMISSIVE_INTENSITY = 0.80;       // Max emissive intensity during brightening
+export const MHSA_MATRIX_MAX_EMISSIVE_INTENSITY = 0.2;        // Max emissive intensity during brightening
 export const MHSA_RESULT_RISE_OFFSET_Y = 60;                  // Rise offset after pass-through
 export const MHSA_HEAD_VECTOR_STOP_BELOW = 70;                // Stop distance below matrix centre for head parking
 
