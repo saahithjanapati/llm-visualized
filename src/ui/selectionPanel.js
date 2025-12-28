@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization.js';
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
+import { LayerNormalizationVisualization } from '../components/LayerNormalizationVisualization.js';
 import { appState } from '../state/appState.js';
 import { createSciFiMaterial, updateSciFiMaterialColor } from '../utils/sciFiMaterial.js';
 import {
@@ -10,20 +11,23 @@ import {
     EMBEDDING_MATRIX_PARAMS_VOCAB,
     EMBEDDING_MATRIX_PARAMS_POSITION,
     LAYER_NORM_FINAL_COLOR,
-    VECTOR_LENGTH_PRISM
+    VECTOR_LENGTH_PRISM,
+    HIDE_INSTANCE_Y_OFFSET
 } from '../utils/constants.js';
 import {
     MHA_FINAL_Q_COLOR,
     MHA_FINAL_K_COLOR,
     MHA_FINAL_V_COLOR,
     MHA_OUTPUT_PROJECTION_MATRIX_COLOR,
-    MHA_OUTPUT_PROJECTION_MATRIX_PARAMS
+    MHA_OUTPUT_PROJECTION_MATRIX_PARAMS,
+    LN_PARAMS
 } from '../animations/LayerAnimationConstants.js';
 
 const PREVIEW_LANES = 3;
 const PREVIEW_MATRIX_DEPTH = 320;
 const PREVIEW_LANE_SPACING = 80;
 const PREVIEW_TARGET_SIZE = 140;
+const PREVIEW_FRAME_PADDING = 4.0;
 const PREVIEW_ROTATION_SPEED = 0.0035;
 const PREVIEW_BASE_TILT_X = -0.12;
 const PREVIEW_BASE_ROTATION_Y = 0.38;
@@ -140,6 +144,9 @@ function inferQkvType(label, selectionInfo) {
 
 const TMP_BOX = new THREE.Box3();
 const TMP_MATRIX = new THREE.Matrix4();
+const TMP_POS = new THREE.Vector3();
+const TMP_QUAT = new THREE.Quaternion();
+const TMP_SCALE = new THREE.Vector3();
 
 function isWeightMatrixLabel(label) {
     const lower = (label || '').toLowerCase();
@@ -253,6 +260,28 @@ function cloneMaterialsForPreview(object) {
     return materials;
 }
 
+function cloneGeometriesForPreview(object) {
+    const geometries = [];
+    object.traverse((child) => {
+        if (!child.geometry || typeof child.geometry.clone !== 'function') return;
+        const clonedGeo = child.geometry.clone();
+        child.geometry = clonedGeo;
+        geometries.push(clonedGeo);
+
+        if (child.isInstancedMesh) {
+            if (child.instanceMatrix && typeof child.instanceMatrix.clone === 'function') {
+                child.instanceMatrix = child.instanceMatrix.clone();
+                child.instanceMatrix.needsUpdate = true;
+            }
+            if (child.instanceColor && typeof child.instanceColor.clone === 'function') {
+                child.instanceColor = child.instanceColor.clone();
+                child.instanceColor.needsUpdate = true;
+            }
+        }
+    });
+    return geometries;
+}
+
 function applyLaneOverrideToInstancedMeshes(object, laneCount, laneSpacing) {
     if (!object || !Number.isFinite(laneCount) || laneCount < 1) return;
     const spacing = Number.isFinite(laneSpacing) ? laneSpacing : PREVIEW_QKV_LANE_SPACING;
@@ -304,6 +333,7 @@ function buildSelectionClonePreview(selectionInfo, label) {
     clone.traverse((child) => {
         child.matrixAutoUpdate = true;
     });
+    const previewGeometries = cloneGeometriesForPreview(clone);
     const previewMaterials = cloneMaterialsForPreview(clone);
     if (isQkvMatrixLabel(label)) {
         applyLaneOverrideToInstancedMeshes(clone, PREVIEW_QKV_LANES, PREVIEW_QKV_LANE_SPACING);
@@ -313,6 +343,25 @@ function buildSelectionClonePreview(selectionInfo, label) {
     return {
         object: clone,
         dispose: () => {
+            previewGeometries.forEach((geo) => geo && geo.dispose && geo.dispose());
+            previewMaterials.forEach((mat) => mat && mat.dispose && mat.dispose());
+        }
+    };
+}
+
+function buildDirectClonePreview(selectionInfo) {
+    const source = selectionInfo?.object || selectionInfo?.hit?.object;
+    if (!source || source.isScene) return null;
+    const clone = source.clone(true);
+    clone.traverse((child) => {
+        child.matrixAutoUpdate = true;
+    });
+    const previewGeometries = cloneGeometriesForPreview(clone);
+    const previewMaterials = cloneMaterialsForPreview(clone);
+    return {
+        object: clone,
+        dispose: () => {
+            previewGeometries.forEach((geo) => geo && geo.dispose && geo.dispose());
             previewMaterials.forEach((mat) => mat && mat.dispose && mat.dispose());
         }
     };
@@ -333,6 +382,10 @@ function getObjectBounds(object) {
                 : (child.instanceMatrix?.count ?? 0);
             for (let i = 0; i < instanceCount; i++) {
                 child.getMatrixAt(i, TMP_MATRIX);
+                TMP_MATRIX.decompose(TMP_POS, TMP_QUAT, TMP_SCALE);
+                // Skip hidden instances (moved to sentinel Y or shrunk)
+                if (TMP_POS.y <= HIDE_INSTANCE_Y_OFFSET * 0.5 || TMP_SCALE.y < 0.01) continue;
+                TMP_MATRIX.compose(TMP_POS, TMP_QUAT, TMP_SCALE);
                 TMP_MATRIX.multiplyMatrices(child.matrixWorld, TMP_MATRIX);
                 TMP_BOX.copy(child.geometry.boundingBox).applyMatrix4(TMP_MATRIX);
                 bounds.union(TMP_BOX);
@@ -822,8 +875,121 @@ function buildStackedBoxPreview(colorHex) {
     };
 }
 
+function findVectorLikeObject(selectionInfo) {
+    const directRef = selectionInfo?.info?.vectorRef;
+    if (directRef?.group?.isObject3D) return directRef.group;
+    if (directRef?.isObject3D) return directRef;
+    const sources = [];
+    if (selectionInfo?.hit?.object) sources.push(selectionInfo.hit.object);
+    if (selectionInfo?.object) sources.push(selectionInfo.object);
+    if (!sources.length) return null;
+
+    const hasVectorAttributes = (obj) => {
+        const geo = obj?.geometry;
+        if (!geo || typeof geo.getAttribute !== 'function') return false;
+        return !!(
+            geo.getAttribute('colorStart')
+            || geo.getAttribute('colorEnd')
+            || geo.getAttribute('instanceColor')
+            || obj.instanceColor
+        );
+    };
+
+    const findInHierarchy = (root) => {
+        let found = null;
+        root.traverse((child) => {
+            if (found) return;
+            if (hasVectorAttributes(child) && (child.isMesh || child.isInstancedMesh)) {
+                found = child;
+            }
+        });
+        return found;
+    };
+
+    let vectorMesh = null;
+    for (const src of sources) {
+        vectorMesh = findInHierarchy(src);
+        if (vectorMesh) break;
+    }
+    if (!vectorMesh) return null;
+
+    // Prefer the nearest ancestor labeled as a vector if present.
+    let candidate = vectorMesh;
+    let walker = vectorMesh.parent;
+    while (walker && !walker.isScene) {
+        const lbl = walker.userData?.label;
+        if (lbl && String(lbl).toLowerCase().includes('vector')) {
+            candidate = walker;
+        }
+        walker = walker.parent;
+    }
+    return candidate;
+}
+
+function buildVectorClonePreview(selectionInfo) {
+    const vectorObject = findVectorLikeObject(selectionInfo);
+    if (!vectorObject || typeof vectorObject.clone !== 'function' || !vectorObject.isObject3D) return null;
+    const clone = vectorObject.clone(true);
+    clone.traverse((child) => {
+        child.matrixAutoUpdate = true;
+        child.visible = true;
+        if (child.isInstancedMesh && child.instanceMatrix) {
+            // Ensure instanced meshes render at least one instance.
+            const instanceCount = child.instanceMatrix.count || child.count || 1;
+            child.count = Math.max(1, instanceCount);
+        }
+    });
+    const previewGeometries = cloneGeometriesForPreview(clone);
+    const previewMaterials = cloneMaterialsForPreview(clone);
+    return {
+        object: clone,
+        dispose: () => {
+            previewGeometries.forEach((geo) => geo && geo.dispose && geo.dispose());
+            previewMaterials.forEach((mat) => mat && mat.dispose && mat.dispose());
+        }
+    };
+}
+
+function buildLayerNormPreview(label, selectionInfo) {
+    const clonePreview = buildSelectionClonePreview(selectionInfo, label);
+    if (clonePreview?.object) {
+        applyFinalColorToObject(clonePreview.object, 0xffffff);
+        return clonePreview;
+    }
+
+    const params = LN_PARAMS;
+    const ln = new LayerNormalizationVisualization(
+        new THREE.Vector3(0, 0, 0),
+        params.width,
+        params.height,
+        params.depth,
+        params.wallThickness,
+        params.numberOfHoles,
+        params.holeWidth,
+        params.holeWidthFactor
+    );
+    ln.setColor(new THREE.Color(0xffffff));
+    return {
+        object: ln.group,
+        dispose: () => ln.dispose()
+    };
+}
+
+function isLikelyVectorSelection(label, selectionInfo) {
+    const lower = (label || '').toLowerCase();
+    if (lower.includes('vector') || lower.includes('residual')) return true;
+    const cat = selectionInfo?.info?.category;
+    if (cat && ['q', 'k', 'v', 'vector', 'residual'].includes(String(cat).toLowerCase())) return true;
+    const kind = selectionInfo?.kind;
+    if (kind && ['vector', 'residual', 'mergedkv'].includes(String(kind).toLowerCase())) return true;
+    if (findVectorLikeObject(selectionInfo)) return true;
+    return false;
+}
+
 function resolvePreviewObject(label, selectionInfo) {
     const lower = (label || '').toLowerCase();
+    const vectorClone = buildVectorClonePreview(selectionInfo);
+    if (vectorClone) return vectorClone;
     if (lower.startsWith('token:')) {
         return buildTokenChipPreview(extractTokenText(label));
     }
@@ -867,25 +1033,34 @@ function resolvePreviewObject(label, selectionInfo) {
     }
 
     if (lower.includes('query vector')) {
-        return buildSelectionClonePreview(selectionInfo, label)
+        return buildDirectClonePreview(selectionInfo)
+            || buildSelectionClonePreview(selectionInfo, label)
             || buildVectorPreview(MHA_FINAL_Q_COLOR, selectionInfo);
     }
     if (lower.includes('key vector')) {
-        return buildSelectionClonePreview(selectionInfo, label)
+        return buildDirectClonePreview(selectionInfo)
+            || buildSelectionClonePreview(selectionInfo, label)
             || buildVectorPreview(MHA_FINAL_K_COLOR, selectionInfo);
     }
     if (lower.includes('value vector')) {
-        return buildSelectionClonePreview(selectionInfo, label)
+        return buildDirectClonePreview(selectionInfo)
+            || buildSelectionClonePreview(selectionInfo, label)
             || buildVectorPreview(MHA_FINAL_V_COLOR, selectionInfo);
     }
     if (selectionInfo?.kind === 'mergedKV') {
         const category = (selectionInfo.info?.category === 'V') ? 'V' : 'K';
-        return buildSelectionClonePreview(selectionInfo, label)
+        return buildDirectClonePreview(selectionInfo)
+            || buildSelectionClonePreview(selectionInfo, label)
             || buildVectorPreview(category === 'V' ? MHA_FINAL_V_COLOR : MHA_FINAL_K_COLOR, selectionInfo);
+    }
+    if (isLikelyVectorSelection(label, selectionInfo)) {
+        return buildDirectClonePreview(selectionInfo)
+            || buildSelectionClonePreview(selectionInfo, label)
+            || buildVectorPreview(null, selectionInfo);
     }
 
     if (lower.includes('layernorm') || lower.includes('layer norm')) {
-        return buildStackedBoxPreview(LAYER_NORM_FINAL_COLOR);
+        return buildLayerNormPreview(label, selectionInfo);
     }
 
     if (lower.includes('attention')) {
@@ -905,7 +1080,7 @@ function fitObjectToView(object, camera) {
     box.getCenter(center);
     object.position.sub(center);
     const maxDim = Math.max(size.x, size.y, size.z);
-    const scale = maxDim > 0 ? PREVIEW_TARGET_SIZE / maxDim : 1;
+    const scale = maxDim > 0 ? PREVIEW_TARGET_SIZE / (maxDim * PREVIEW_FRAME_PADDING) : 1;
     object.scale.setScalar(scale);
 
     const scaledBox = getObjectBounds(object);
@@ -913,7 +1088,7 @@ function fitObjectToView(object, camera) {
     scaledBox.getSize(scaledSize);
     const scaledMax = Math.max(scaledSize.x, scaledSize.y, scaledSize.z);
     const fov = THREE.MathUtils.degToRad(camera.fov);
-    const distance = (scaledMax / 2) / Math.tan(fov / 2);
+    const distance = ((scaledMax / 2) / Math.tan(fov / 2)) * 3.2;
 
     camera.near = Math.max(0.1, distance / 50);
     camera.far = distance * 20;
