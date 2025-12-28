@@ -187,7 +187,7 @@ export class VectorRouter {
                             vVec.userData.trail = vTrail;
                             Object.assign(vVec.userData, { headIndex: hIdx, parentLane: lane });
                             try {
-                                const lblV = `Value Vector (Red)`;
+                                const lblV = `Value Vector (Orange)`;
                                 vVec.group.userData.label = lblV;
                                 if (vVec.mesh) vVec.mesh.userData = { ...(vVec.mesh.userData||{}), label: lblV };
                             } catch (_) {}

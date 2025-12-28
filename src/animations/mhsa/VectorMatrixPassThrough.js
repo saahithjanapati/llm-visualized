@@ -136,7 +136,7 @@ export function animateVectorMatrixPassThrough(
                 try {
                     const cat = vectorCategory === 'K' ? 'Key Vector (Green)'
                               : vectorCategory === 'Q' ? 'Query Vector (Blue)'
-                              : 'Value Vector (Red)';
+                              : 'Value Vector (Orange)';
                     vector.group.userData.label = cat;
                     if (vector.mesh) vector.mesh.userData = { ...(vector.mesh.userData||{}), label: cat };
                 } catch (_) {}
@@ -200,7 +200,7 @@ export function animateVectorMatrixPassThrough(
                         ? 'Key Vector (Green)'
                         : vectorCategory === 'Q'
                             ? 'Query Vector (Blue)'
-                            : 'Value Vector (Red)';
+                            : 'Value Vector (Orange)';
                     const activationData = buildActivationData({
                         label,
                         values: data,

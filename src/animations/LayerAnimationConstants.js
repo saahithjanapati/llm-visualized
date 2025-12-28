@@ -117,8 +117,8 @@ export const MHSA_BRIGHT_GREEN        = 0x33FF33;
 export const MHSA_DARK_TINTED_GREEN   = 0x002200;
 export const MHSA_BRIGHT_BLUE         = 0x6666FF;
 export const MHSA_DARK_TINTED_BLUE    = 0x000022;
-export const MHSA_BRIGHT_RED          = 0xFF3333;
-export const MHSA_DARK_TINTED_RED     = 0x220000;
+export const MHSA_BRIGHT_RED          = 0xFF7A33;
+export const MHSA_DARK_TINTED_RED     = 0x2B1100;
 
 /** Colour for trail lines behind moving prisms. */
 
@@ -126,7 +126,7 @@ export const MHSA_DARK_TINTED_RED     = 0x220000;
 /** Final Q, K, V head colours used once attention heads have merged. */
 export const MHA_FINAL_Q_COLOR = 0x276ebb;
 export const MHA_FINAL_K_COLOR = 0x1e9f57;
-export const MHA_FINAL_V_COLOR = 0x901f33;
+export const MHA_FINAL_V_COLOR = 0xaa3420;
 
 /** Active colour of the output-projection matrix that follows MHSA. */
 export const MHA_OUTPUT_PROJECTION_MATRIX_COLOR = 0x9C27B0;

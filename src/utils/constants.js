@@ -159,6 +159,8 @@ export const USE_PHYSICAL_MATERIALS = true;
 export const VECTOR_DEPTH_SPACING_BASE = 400;
 /** Hard cap (fraction) for max lane depth relative to the historical depth. */
 export const MAX_LANE_DEPTH_RATIO = 0.6;
+/** Minimum total depth to keep visuals thick when lane count is low. */
+export const MIN_LANE_DEPTH = 2800;
 /** Default lane count used for deriving the depth cap. */
 export const DEFAULT_NUM_VECTOR_LANES = 5;
 /** Live lane spacing that may change when lane count is adjusted. */
@@ -172,7 +174,8 @@ export let VECTOR_DEPTH_SPACING = VECTOR_DEPTH_SPACING_BASE;
 export let NUM_VECTOR_LANES = DEFAULT_NUM_VECTOR_LANES; // Master switch: number of vector "lanes" active in the scene
 
 // Depth large enough to fit all lanes plus one spacing margin at each end
-const initialDepth = (NUM_VECTOR_LANES + 1) * VECTOR_DEPTH_SPACING_BASE * MAX_LANE_DEPTH_RATIO;
+const initialDepthRaw = (NUM_VECTOR_LANES + 1) * VECTOR_DEPTH_SPACING_BASE * MAX_LANE_DEPTH_RATIO;
+const initialDepth = Math.max(initialDepthRaw, MIN_LANE_DEPTH);
 VECTOR_DEPTH_SPACING = initialDepth / (NUM_VECTOR_LANES + 1);
 export let LANE_DEPENDENT_DEPTH = initialDepth;
 
@@ -504,7 +507,8 @@ export function setNumVectorLanes(nextCount) {
     NUM_VECTOR_LANES = clamped;
 
     const desiredDepth = (NUM_VECTOR_LANES + 1) * VECTOR_DEPTH_SPACING_BASE;
-    const cappedDepth = desiredDepth * MAX_LANE_DEPTH_RATIO;
+    const cappedDepthRaw = desiredDepth * MAX_LANE_DEPTH_RATIO;
+    const cappedDepth = Math.max(MIN_LANE_DEPTH, cappedDepthRaw);
     const laneGap = cappedDepth / (NUM_VECTOR_LANES + 1);
 
     VECTOR_DEPTH_SPACING = laneGap;

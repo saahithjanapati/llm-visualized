@@ -978,7 +978,7 @@ export class MHSAAnimation {
         // Attach metadata for decoding instanceId on raycast
         const category = /V(\b|_|head|$)/.test(debugName) ? 'V' : 'K';
         // Assign descriptive label so hover shows full text for merged groups
-        group.userData.label = (category === 'V') ? 'Merged Value Vectors (Red)' : 'Merged Key Vectors (Green)';
+        group.userData.label = (category === 'V') ? 'Merged Value Vectors (Orange)' : 'Merged Key Vectors (Green)';
         const mergedKVMeta = {
             category,
             vectorPrismCount: vectorLength,
@@ -989,7 +989,7 @@ export class MHSAAnimation {
         group.userData.mergedKVMeta = mergedKVMeta;
         instanced.userData.mergedKVMeta = mergedKVMeta;
         // Also set label on mesh for direct hits
-        instanced.userData.label = (category === 'V') ? 'Merged Value Vectors (Red)' : 'Merged Key Vectors (Green)';
+        instanced.userData.label = (category === 'V') ? 'Merged Value Vectors (Orange)' : 'Merged Key Vectors (Green)';
         return group;
     }
 

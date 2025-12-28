@@ -253,6 +253,7 @@ await loadPrecomputedGeometries('../precomputed_components.glb');
 let activationSource = null;
 let laneTokenIndices = null;
 let laneCount = NUM_VECTOR_LANES;
+const MAX_CAPTURE_LANES = 5;
 const statusDiv = document.getElementById('statusOverlay');
 const setLoadingStatus = (text) => {
     if (statusDiv) statusDiv.textContent = text;
@@ -267,7 +268,8 @@ try {
     const tokensInCapture = typeof activationSource.getTokenCount === 'function'
         ? activationSource.getTokenCount()
         : 0;
-    laneCount = Math.max(1, tokensInCapture || laneCount);
+    const desiredLanes = Math.max(1, tokensInCapture || laneCount);
+    laneCount = Math.min(MAX_CAPTURE_LANES, desiredLanes);
     laneTokenIndices = activationSource.getLaneTokenIndices(laneCount);
 } catch (err) {
     console.warn('Capture data unavailable; falling back to random vectors.', err);
