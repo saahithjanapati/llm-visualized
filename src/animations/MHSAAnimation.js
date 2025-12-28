@@ -87,7 +87,7 @@ export class MHSAAnimation {
 
         // Colours & material defaults
         this.matrixInitialRestingColor     = new THREE.Color(MHSA_MATRIX_INITIAL_RESTING_COLOR);
-        this.matrixRestingEmissiveIntensity = 0.1;
+        this.matrixRestingEmissiveIntensity = 0.0;
         this.matrixRestingOpacity           = 1.0;
 
         this.brightGreen      = new THREE.Color(MHSA_BRIGHT_GREEN);

@@ -209,7 +209,7 @@ export const MHSA_DUPLICATE_VECTOR_RISE_SPEED = 6;            // Upward K copy r
 export const MHSA_PASS_THROUGH_TOTAL_DURATION_MS = 90000;     // Total duration of pass-through tween (ms)
 export const MHSA_PASS_THROUGH_BRIGHTEN_RATIO = 0.4;          // Fraction of total spent brightening
 export const MHSA_PASS_THROUGH_DIM_RATIO = 0.4;               // Fraction of total spent dimming
-export const MHSA_MATRIX_MAX_EMISSIVE_INTENSITY = 0.2;        // Max emissive intensity during brightening
+export const MHSA_MATRIX_MAX_EMISSIVE_INTENSITY = 0.24;       // Max emissive intensity during brightening
 export const MHSA_RESULT_RISE_OFFSET_Y = 60;                  // Rise offset after pass-through
 export const MHSA_HEAD_VECTOR_STOP_BELOW = 70;                // Stop distance below matrix centre for head parking
 
