@@ -9,6 +9,7 @@ import {
 import { MHSA_PASS_THROUGH_BRIGHTEN_RATIO, MHSA_PASS_THROUGH_DIM_RATIO, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY } from '../../utils/constants.js';
 import { buildMonochromeOptions, mapValueToMonochrome } from '../../utils/colors.js';
 import { buildActivationData, applyActivationDataToVector } from '../../utils/activationMetadata.js';
+import { MHA_VALUE_SPECTRUM_COLOR } from '../LayerAnimationConstants.js';
 
 /**
  * Animate a vector passing vertically through its corresponding weight matrix.
@@ -182,7 +183,10 @@ export function animateVectorMatrixPassThrough(
                 const data = Number.isFinite(scalar)
                     ? [scalar]
                     : vector.rawData.slice(0, outLength);
-                const monoOptions = buildMonochromeOptions(finalVectorColor);
+                // Map values into a monochrome spectrum derived from the head's final tint.
+                // Use an orange-leaning spectrum for V outputs without changing head colours.
+                const monoBase = vectorCategory === 'V' ? MHA_VALUE_SPECTRUM_COLOR : finalVectorColor;
+                const monoOptions = buildMonochromeOptions(monoBase);
                 const numKeyColors = Number.isFinite(scalar) ? 1 : 3;
                 vector.applyProcessedVisuals(
                     data,
@@ -191,6 +195,7 @@ export function animateVectorMatrixPassThrough(
                     { setHiddenToBlack: false },
                 );
                 if (Number.isFinite(scalar) && typeof vector.setUniformColor === 'function') {
+                    // Scalar case: map the single value to a uniform mono tint.
                     const monoColor = mapValueToMonochrome(scalar, monoOptions);
                     vector.setUniformColor(monoColor);
                 }
@@ -262,7 +267,8 @@ export function animateVectorMatrixPassThrough(
             // Guarantee processed visuals in case tween never hit swap point
             if (!finalVisualsApplied) {
                 const processedData = vector.rawData.slice(0, outLength);
-                const monoOptions = buildMonochromeOptions(finalVectorColor);
+                const monoBase = vectorCategory === 'V' ? MHA_VALUE_SPECTRUM_COLOR : finalVectorColor;
+                const monoOptions = buildMonochromeOptions(monoBase);
                 vector.applyProcessedVisuals(processedData, outLength, {
                     numKeyColors: 3,
                     generationOptions: monoOptions,

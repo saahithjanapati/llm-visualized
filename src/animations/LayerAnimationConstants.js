@@ -126,7 +126,10 @@ export const MHSA_DARK_TINTED_RED     = 0x2B1100;
 /** Final Q, K, V head colours used once attention heads have merged. */
 export const MHA_FINAL_Q_COLOR = 0x276ebb;
 export const MHA_FINAL_K_COLOR = 0x1e9f57;
+// Base tint for V vectors (head visuals). Value-spectrum tint for the lightweight V outputs is separate.
 export const MHA_FINAL_V_COLOR = 0xaa3420;
+// Base tint for the value-spectrum applied to lightweight V vectors after head projection.
+export const MHA_VALUE_SPECTRUM_COLOR = 0xf28b30;
 
 /** Active colour of the output-projection matrix that follows MHSA. */
 export const MHA_OUTPUT_PROJECTION_MATRIX_COLOR = 0x9C27B0;
