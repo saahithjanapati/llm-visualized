@@ -36,7 +36,6 @@ import { initSettingsModal } from '../src/ui/settingsModal.js';
 import { initPauseButton } from '../src/ui/pauseButton.js';
 import { initConveyorSkipButton } from '../src/ui/conveyorSkipButton.js';
 import { initSelectionPanel } from '../src/ui/selectionPanel.js';
-import { initPerfOverlay } from '../src/ui/perfOverlay.js';
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
 import { CaptureActivationSource } from '../src/data/CaptureActivationSource.js';
@@ -582,7 +581,6 @@ initStatusOverlay(pipeline, NUM_LAYERS);
 initPauseButton(pipeline);
 initConveyorSkipButton(pipeline);
 initSettingsModal(pipeline);
-initPerfOverlay();
 
 const selectionPanel = initSelectionPanel();
 if (pipeline.engine && typeof pipeline.engine.setRaycastSelectionHandler === 'function') {
