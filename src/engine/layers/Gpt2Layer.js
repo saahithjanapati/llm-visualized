@@ -111,6 +111,31 @@ function applyVectorData(vec, values, label, meta, colorOptions = null) {
     return true;
 }
 
+function copyVectorAppearance(targetVec, sourceVec, fallbackLabel = null, fallbackMeta = null) {
+    if (!targetVec || !sourceVec) return false;
+    const activation = sourceVec.userData && sourceVec.userData.activationData;
+    const label = (sourceVec.group && sourceVec.group.userData && sourceVec.group.userData.label) || fallbackLabel;
+    const meta = activation
+        ? {
+            stage: activation.stage,
+            layerIndex: activation.layerIndex,
+            tokenIndex: activation.tokenIndex,
+            tokenLabel: activation.tokenLabel,
+            headIndex: activation.headIndex,
+            keyTokenIndex: activation.keyTokenIndex,
+            keyTokenLabel: activation.keyTokenLabel,
+            segmentIndex: activation.segmentIndex,
+            preScore: activation.preScore,
+            postScore: activation.postScore,
+            notes: activation.notes
+        }
+        : fallbackMeta;
+    const values = (activation && (Array.isArray(activation.values) || ArrayBuffer.isView(activation.values)))
+        ? activation.values
+        : sourceVec.rawData;
+    return applyVectorData(targetVec, values, label, meta || null);
+}
+
 function freezeStaticTransforms(object3d, includeChildren = false) {
     if (!object3d) return;
     object3d.matrixAutoUpdate = false;
@@ -673,6 +698,9 @@ export default class Gpt2Layer extends BaseLayer {
                     if (l.horizPhase === 'waiting') {
                         l.horizPhase = 'right';
                         this._emitProgress();
+                        // Ensure the branch duplicate matches the latest residual data
+                        // (e.g., after positional embedding addition).
+                        copyVectorAppearance(l.dupVec, l.originalVec);
                         l.dupVec.group.visible = true;
                         // Snap duplicate to the LN-1 branch staging height to avoid
                         // any vertical drift while moving horizontally into the ring.
@@ -764,21 +792,28 @@ export default class Gpt2Layer extends BaseLayer {
                     if (!lane.normStarted && dupVec.group.position.y >= normStartY) {
                         const ln1NormData = this._getLn1Data(lane, 'norm');
                         const normInput = ln1NormData ? ln1NormData.slice() : dupVec.rawData.slice();
-                        if (ln1NormData) {
-                            applyVectorData(
-                                dupVec,
-                                ln1NormData,
-                                lane.tokenLabel ? `LN1 Normed - ${lane.tokenLabel}` : 'LN1 Normed',
-                                this._getLaneMeta(lane, 'ln1.norm')
-                            );
-                        }
-                        lane.normAnim.start(normInput);
+                        lane.pendingNormData = ln1NormData || null;
+                        lane.pendingNormLabel = lane.tokenLabel ? `LN1 Normed - ${lane.tokenLabel}` : 'LN1 Normed';
+                        lane.pendingNormMeta = this._getLaneMeta(lane, 'ln1.norm');
+                        lane.normApplied = false;
+                        lane.normAnim.start(normInput, { deferDataUpdate: true });
                         lane.normStarted = true;
                     }
                     if (lane.normStarted) {
                         lane.normAnim.update(dt);
                     }
                     const normAnimating = lane.normStarted && lane.normAnim.isAnimating;
+                    if (lane.normStarted && !normAnimating && !lane.normApplied) {
+                        if (lane.pendingNormData) {
+                            applyVectorData(
+                                dupVec,
+                                lane.pendingNormData,
+                                lane.pendingNormLabel,
+                                lane.pendingNormMeta
+                            );
+                        }
+                        lane.normApplied = true;
+                    }
                     if (!normAnimating) {
                         dupVec.group.position.y = Math.min(
                             ln1RiseTargetY,
@@ -793,15 +828,11 @@ export default class Gpt2Layer extends BaseLayer {
                     if (!lane.normStarted && dupVec.group.position.y >= normStartY) {
                         const ln1NormData = this._getLn1Data(lane, 'norm');
                         const normInput = ln1NormData ? ln1NormData.slice() : dupVec.rawData.slice();
-                        if (ln1NormData) {
-                            applyVectorData(
-                                dupVec,
-                                ln1NormData,
-                                lane.tokenLabel ? `LN1 Normed - ${lane.tokenLabel}` : 'LN1 Normed',
-                                this._getLaneMeta(lane, 'ln1.norm')
-                            );
-                        }
-                        lane.normAnim.start(normInput);
+                        lane.pendingNormData = ln1NormData || null;
+                        lane.pendingNormLabel = lane.tokenLabel ? `LN1 Normed - ${lane.tokenLabel}` : 'LN1 Normed';
+                        lane.pendingNormMeta = this._getLaneMeta(lane, 'ln1.norm');
+                        lane.normApplied = false;
+                        lane.normAnim.start(normInput, { deferDataUpdate: true });
                         lane.normStarted = true;
                     }
                     // -----------------------------------------------------------------
@@ -1030,6 +1061,7 @@ export default class Gpt2Layer extends BaseLayer {
                             30,
                             v.instanceCount
                         );
+                        copyVectorAppearance(mv, v);
                         this.root.add(mv.group);
                         // ---- Trail for LN2 moving vector ----
                         const mvTrail = new StraightLineTrail(this.root, 0xffffff, 1, undefined, undefined, LN_INTERNAL_TRAIL_MIN_SEGMENT);
@@ -1114,19 +1146,26 @@ export default class Gpt2Layer extends BaseLayer {
                     if (!lane.normStartedLN2 && mv.group.position.y >= normStartY2) {
                         const ln2NormData = this._getLn2Data(lane, 'norm');
                         const normInput = ln2NormData ? ln2NormData.slice() : mv.rawData.slice();
-                        if (ln2NormData) {
-                            applyVectorData(
-                                mv,
-                                ln2NormData,
-                                lane.tokenLabel ? `LN2 Normed - ${lane.tokenLabel}` : 'LN2 Normed',
-                                this._getLaneMeta(lane, 'ln2.norm')
-                            );
-                        }
-                        lane.normAnimationLN2.start(normInput);
+                        lane.pendingNormDataLN2 = ln2NormData || null;
+                        lane.pendingNormLabelLN2 = lane.tokenLabel ? `LN2 Normed - ${lane.tokenLabel}` : 'LN2 Normed';
+                        lane.pendingNormMetaLN2 = this._getLaneMeta(lane, 'ln2.norm');
+                        lane.normAppliedLN2 = false;
+                        lane.normAnimationLN2.start(normInput, { deferDataUpdate: true });
                         lane.normStartedLN2 = true;
                     }
                     if (lane.normStartedLN2 && lane.normAnimationLN2) {
                         lane.normAnimationLN2.update(dt);
+                    }
+                    if (lane.normStartedLN2 && !normAnimating2 && !lane.normAppliedLN2) {
+                        if (lane.pendingNormDataLN2) {
+                            applyVectorData(
+                                mv,
+                                lane.pendingNormDataLN2,
+                                lane.pendingNormLabelLN2,
+                                lane.pendingNormMetaLN2
+                            );
+                        }
+                        lane.normAppliedLN2 = true;
                     }
                     if (!lane.multDoneLN2 && !normAnimating2) {
                         mv.group.position.y = Math.min(
@@ -1138,15 +1177,11 @@ export default class Gpt2Layer extends BaseLayer {
                     if (!lane.normStartedLN2 && mv.group.position.y >= normStartY2) {
                         const ln2NormData = this._getLn2Data(lane, 'norm');
                         const normInput = ln2NormData ? ln2NormData.slice() : mv.rawData.slice();
-                        if (ln2NormData) {
-                            applyVectorData(
-                                mv,
-                                ln2NormData,
-                                lane.tokenLabel ? `LN2 Normed - ${lane.tokenLabel}` : 'LN2 Normed',
-                                this._getLaneMeta(lane, 'ln2.norm')
-                            );
-                        }
-                        lane.normAnimationLN2.start(normInput);
+                        lane.pendingNormDataLN2 = ln2NormData || null;
+                        lane.pendingNormLabelLN2 = lane.tokenLabel ? `LN2 Normed - ${lane.tokenLabel}` : 'LN2 Normed';
+                        lane.pendingNormMetaLN2 = this._getLaneMeta(lane, 'ln2.norm');
+                        lane.normAppliedLN2 = false;
+                        lane.normAnimationLN2.start(normInput, { deferDataUpdate: true });
                         lane.normStartedLN2 = true;
                     }
                     // ----------------------------------------------------------------
@@ -2101,6 +2136,7 @@ export default class Gpt2Layer extends BaseLayer {
             originalVec.instanceCount
         );
         dupVec.group.visible = false;
+        copyVectorAppearance(dupVec, originalVec);
         this.root.add(dupVec.group);
         // Trail for duplicate vector inside LN1
         const dupTrail = new StraightLineTrail(this.root, 0xffffff, 1, undefined, undefined, LN_INTERNAL_TRAIL_MIN_SEGMENT);
@@ -2208,6 +2244,10 @@ export default class Gpt2Layer extends BaseLayer {
             branchStartY: ln1CenterY - LN_PARAMS.height / 2 + 5,
             ln1MidY: ln1CenterY,
             normStarted:false,
+            normApplied:false,
+            pendingNormData: null,
+            pendingNormLabel: null,
+            pendingNormMeta: null,
             multStarted:false,
             ln1AddStarted:false,
             ln1AddComplete:false,
@@ -2223,6 +2263,10 @@ export default class Gpt2Layer extends BaseLayer {
             movingVecLN2: null,
             normAnimationLN2: null,
             normStartedLN2: false,
+            normAppliedLN2: false,
+            pendingNormDataLN2: null,
+            pendingNormLabelLN2: null,
+            pendingNormMetaLN2: null,
             multDoneLN2: false,
             ln2AddStarted:false,
             ln2AddComplete:false,

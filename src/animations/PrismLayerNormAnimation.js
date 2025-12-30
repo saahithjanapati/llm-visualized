@@ -59,17 +59,31 @@ export class PrismLayerNormAnimation {
         return order;
     }
 
-    start(newData) {
+    start(newData, options = {}) {
         if (!this.prismVis) return;
 
-        this.prismVis.updateDataInternal(newData); // Update underlying data for target colors
+        const deferDataUpdate = options && options.deferDataUpdate === true;
+        const dataArray = Array.isArray(newData)
+            ? newData
+            : ArrayBuffer.isView(newData)
+                ? Array.from(newData)
+                : [];
+        let normalizedData = null;
+        if (deferDataUpdate) {
+            normalizedData = this.prismVis.layerNormalize(dataArray);
+        } else {
+            this.prismVis.updateDataInternal(dataArray); // Update underlying data for target colors
+            normalizedData = this.prismVis.normalizedData;
+        }
         this.isAnimating = true;
         this.animationStartTime = performance.now();
         this._instanceCount = this.prismVis?.instanceCount || VECTOR_LENGTH_PRISM;
         this.activationOrder = this._calculateActivationOrder(this._instanceCount);
 
-        const numKeyColors = Math.min(30, Math.max(1, this.prismVis.rawData.length || 1));
-        this.prismVis.updateKeyColorsFromData(this.prismVis.rawData, numKeyColors, null, newData);
+        if (!deferDataUpdate) {
+            const numKeyColors = Math.min(30, Math.max(1, this.prismVis.rawData.length || 1));
+            this.prismVis.updateKeyColorsFromData(this.prismVis.rawData, numKeyColors, null, dataArray);
+        }
 
         this.unitAnimationStates = Array(this._instanceCount).fill(null).map((_, index) => {
             const distanceFromCenter = Math.abs(index - Math.floor(this._instanceCount / 2));
@@ -84,7 +98,7 @@ export class PrismLayerNormAnimation {
                 hasCompleted: false,
                 riseHeight: riseHeight,
                 originalColor: new THREE.Color(), // Will store before flash
-                flashTargetColor: mapValueToColor(this.prismVis.normalizedData[index] || 0), // Color based on norm data
+                flashTargetColor: mapValueToColor((normalizedData && normalizedData[index]) || 0), // Color based on norm data
                 finalRestingColor: this.prismVis.getDefaultColorForIndex(index) // Default subsection gradient color
             };
         });
