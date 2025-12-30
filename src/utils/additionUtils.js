@@ -257,6 +257,7 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
     const finalBuffers = finalDataCandidate
         ? buildFinalColorBuffers(finalDataCandidate, vectorLength)
         : null;
+    const preserveSourceColors = options ? options.preserveSourceColors !== false : true;
 
     // Freeze upward movement of the source so its group position remains static.
     if (lane) {
@@ -326,8 +327,10 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
         const gradCol = new THREE.Color();
         targetVec.mesh.getColorAt(i, gradCol);
 
-        // Match travelling prism colour to destination gradient
-        sourceVec.setInstanceAppearance(i, srcLocalPos.y, gradCol);
+        // Optionally match travelling prism colour to destination gradient.
+        if (!preserveSourceColors) {
+            sourceVec.setInstanceAppearance(i, srcLocalPos.y, gradCol);
+        }
 
         const tweenState = { t: 0 };
 
