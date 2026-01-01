@@ -44,6 +44,7 @@ import { precomputeActivationCaches } from '../src/utils/activationPrecompute.js
 const NUM_LAYERS = 12;
 const PROMPT_TOKENS = ['Can', '\u0120machines', '\u0120think', '?', '\u0120'];
 const POSITION_TOKENS = ['1', '2', '3', '4', '5'];
+const DEFAULT_PROMPT_LANES = Math.max(1, PROMPT_TOKENS.length);
 const TOKEN_CHIP_STYLE = {
     padding: 140,
     minWidth: 440,
@@ -253,7 +254,10 @@ await loadPrecomputedGeometries('../precomputed_components.glb');
 let activationSource = null;
 let laneTokenIndices = null;
 let laneCount = NUM_VECTOR_LANES;
-const MAX_CAPTURE_LANES = 5;
+const isFullTokenMode = (() => {
+    const path = window.location.pathname.replace(/\/+$/, '');
+    return path.endsWith('/full');
+})();
 const statusDiv = document.getElementById('statusOverlay');
 const setLoadingStatus = (text) => {
     if (statusDiv) statusDiv.textContent = text;
@@ -268,14 +272,20 @@ try {
     const tokensInCapture = typeof activationSource.getTokenCount === 'function'
         ? activationSource.getTokenCount()
         : 0;
-    const desiredLanes = Math.max(1, tokensInCapture || laneCount);
-    laneCount = Math.min(MAX_CAPTURE_LANES, desiredLanes);
+    const safeTokenCount = Math.max(0, tokensInCapture || 0);
+    const desiredLanes = Math.max(1, safeTokenCount || laneCount);
+    if (isFullTokenMode) {
+        laneCount = desiredLanes;
+    } else {
+        const cappedLanes = safeTokenCount ? Math.min(safeTokenCount, DEFAULT_PROMPT_LANES) : DEFAULT_PROMPT_LANES;
+        laneCount = Math.min(desiredLanes, cappedLanes);
+    }
     laneTokenIndices = activationSource.getLaneTokenIndices(laneCount);
 } catch (err) {
     console.warn('Capture data unavailable; falling back to random vectors.', err);
 }
 if (!activationSource) {
-    laneCount = Math.max(1, PROMPT_TOKENS.length);
+    laneCount = DEFAULT_PROMPT_LANES;
 }
 
 setNumVectorLanes(laneCount);
@@ -298,10 +308,10 @@ if (activationSource && laneTokenIndices) {
     }
 }
 
-const tokenLabelsFromCapture = activationSource && laneTokenIndices
+const tokenLabelsFromCapture = isFullTokenMode && activationSource && laneTokenIndices
     ? laneTokenIndices.map((idx) => activationSource.getTokenString(idx) || '')
     : PROMPT_TOKENS;
-const positionLabelsFromCapture = activationSource && laneTokenIndices
+const positionLabelsFromCapture = isFullTokenMode && activationSource && laneTokenIndices
     ? laneTokenIndices.map((idx) => String(idx + 1))
     : POSITION_TOKENS;
 
