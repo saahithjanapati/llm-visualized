@@ -58,6 +58,18 @@ canvas { display: block; }
     display: none;
 }
 
+#skipToEndBtn {
+    font-size: 14px;
+    min-width: 130px;
+}
+#skipToEndBtn:not([data-visible="true"]) {
+    display: none;
+}
+#skipToEndBtn[data-state="skipping"] {
+    background: rgba(255, 148, 76, 0.2);
+    border-color: rgba(255, 196, 140, 0.7);
+}
+
 #settingsBtn {
     font-size: 18px;
     padding-inline: 10px;

@@ -79,10 +79,10 @@ export class SelfAttentionAnimator {
         this._pendingTimeouts.clear();
     }
 
-    _retireVector(vec) {
+    _retireVector(vec, { preserveTrail = false } = {}) {
         if (!vec) return;
         try {
-            if (vec.userData && vec.userData.trail && typeof vec.userData.trail.dispose === 'function') {
+            if (!preserveTrail && vec.userData && vec.userData.trail && typeof vec.userData.trail.dispose === 'function') {
                 vec.userData.trail.dispose();
                 delete vec.userData.trail;
             }
@@ -95,8 +95,8 @@ export class SelfAttentionAnimator {
         } catch (_) { /* optional cleanup */ }
     }
 
-    _finishBlueImmediately(vector, headIdx, doneCb) {
-        this._retireVector(vector);
+    _finishBlueImmediately(vector, headIdx, doneCb, options = null) {
+        this._retireVector(vector, options || undefined);
         if (typeof headIdx === 'number' && this._activeBlueVectors) {
             delete this._activeBlueVectors[headIdx];
         }
@@ -106,17 +106,18 @@ export class SelfAttentionAnimator {
     /**
      * Immediately complete the conveyor belt, clear queues, and fire callbacks.
      */
-    forceComplete() {
+    forceComplete(options = {}) {
         if (this.phase === 'complete') {
             this._flushCallbacks();
             return;
         }
+        const preserveTrails = !!options.preserveTrails;
         this.skipRequested = true;
         this._clearPendingTimeouts();
         // Retire any active vectors and queued blues
-        Object.values(this._activeBlueVectors || {}).forEach((vec) => this._retireVector(vec));
+        Object.values(this._activeBlueVectors || {}).forEach((vec) => this._retireVector(vec, { preserveTrail: preserveTrails }));
         Object.values(this.blueQueues || {}).forEach((queue) => {
-            if (Array.isArray(queue)) queue.forEach((vec) => this._retireVector(vec));
+            if (Array.isArray(queue)) queue.forEach((vec) => this._retireVector(vec, { preserveTrail: preserveTrails }));
         });
         this.blueQueues = {};
         this.blueProcessing = {};

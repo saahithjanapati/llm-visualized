@@ -88,6 +88,7 @@ export class VectorVisualizationInstancedPrism {
         this.group = new THREE.Group();
         this.group.position.copy(initialPosition);
         this.group.userData.label = 'Vector';
+        this.group.userData.isVector = true;
 
         this.instanceCount = Math.max(1, Math.floor(instanceCount));
         this.rawData = initialData || this.generateTestData();
@@ -146,6 +147,7 @@ varying float vGradientT;`
         const instancedGeometry = basePrismGeometry.clone();
         this.mesh = new THREE.InstancedMesh(instancedGeometry, material, this.instanceCount);
         this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        this.mesh.userData.isVector = true;
         this.group.add(this.mesh);
         
         // ------------------------------------------------------------

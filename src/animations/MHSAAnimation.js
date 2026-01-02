@@ -154,6 +154,7 @@ export class MHSAAnimation {
         // Pause-aware scheduling helpers ensure delayed callbacks respect manual pauses.
         this._scheduledDelayTweens = new Set();
         this._scheduledTimeoutIds = new Set();
+        this._skipToEndActive = false;
 
         // --------------------------------------------------------------
         //   Vector router: handles all positioning before pass-through
@@ -689,6 +690,13 @@ export class MHSAAnimation {
         });
     }
 
+    setSkipToEndMode(enabled = false) {
+        this._skipToEndActive = !!enabled;
+        if (this.vectorRouter && typeof this.vectorRouter.setSkipToEndMode === 'function') {
+            this.vectorRouter.setSkipToEndMode(this._skipToEndActive);
+        }
+    }
+
     // ------------------------------------------------------------------
     //  Merge faint trails drawn by the parked K/Q/V copies (pre pass-through)
     // ------------------------------------------------------------------
@@ -979,6 +987,7 @@ export class MHSAAnimation {
         const category = /V(\b|_|head|$)/.test(debugName) ? 'V' : 'K';
         // Assign descriptive label so hover shows full text for merged groups
         group.userData.label = (category === 'V') ? 'Merged Value Vectors (Orange)' : 'Merged Key Vectors (Green)';
+        group.userData.isVector = true;
         const mergedKVMeta = {
             category,
             vectorPrismCount: vectorLength,
@@ -990,6 +999,7 @@ export class MHSAAnimation {
         instanced.userData.mergedKVMeta = mergedKVMeta;
         // Also set label on mesh for direct hits
         instanced.userData.label = (category === 'V') ? 'Merged Value Vectors (Orange)' : 'Merged Key Vectors (Green)';
+        instanced.userData.isVector = true;
         return group;
     }
 
@@ -1103,6 +1113,8 @@ export class MHSAAnimation {
 
     _applyTempModeBehaviour() {
         const grayColor = new THREE.Color(0x606060);
+        const fadeDuration = this._resolveSkipDuration(DECORATIVE_FADE_MS);
+        const fadeDelay = this._resolveSkipDelay(DECORATIVE_FADE_DELAY_MS);
         // Visible prism window for gray-out and gradient calculations
         const visiblePrismCountTemp = Math.min(this.vectorPrismCount, Math.ceil(this.outputVectorLength / PRISM_DIMENSIONS_PER_UNIT));
         const startVisibleIdx = Math.max(0, Math.floor((this.vectorPrismCount - visiblePrismCountTemp) / 2));
@@ -1131,7 +1143,7 @@ export class MHSAAnimation {
             // Fade out the gray vectors to make them less visible
             if (vec.mesh.material && typeof TWEEN !== 'undefined') {
                 new TWEEN.Tween({ op: 1.0 })
-                    .to({ op: 0.2 }, DECORATIVE_FADE_MS)
+                    .to({ op: 0.2 }, fadeDuration)
                     .easing(TWEEN.Easing.Quadratic.Out)
                     .onUpdate(function(obj){
                         vec.mesh.material.opacity = obj.op;
@@ -1214,14 +1226,17 @@ export class MHSAAnimation {
             if (typeof TWEEN !== 'undefined') {
                 const mat = decoVec.mesh.material;
                 new TWEEN.Tween({ op: 0.0 })
-                    .to({ op: 1.0 }, DECORATIVE_FADE_MS)
+                    .to({ op: 1.0 }, fadeDuration)
                     .easing(TWEEN.Easing.Quadratic.InOut)
                     .onUpdate(function(o){
                         mat.opacity = o.op;
                         mat.needsUpdate = true;
                     })
-                    .delay(DECORATIVE_FADE_DELAY_MS)
+                    .delay(fadeDelay)
                     .start();
+            } else if (decoVec.mesh && decoVec.mesh.material) {
+                decoVec.mesh.material.opacity = 1.0;
+                decoVec.mesh.material.needsUpdate = true;
             }
         });
 
@@ -1231,8 +1246,8 @@ export class MHSAAnimation {
                 if (!vec || !vec.mesh || !vec.mesh.material) return;
                 const mat = vec.mesh.material;
                 new TWEEN.Tween({ op: mat.opacity })
-                    .to({ op: 0.05 }, DECORATIVE_FADE_MS)
-                    .delay(DECORATIVE_FADE_DELAY_MS)
+                    .to({ op: 0.05 }, fadeDuration)
+                    .delay(fadeDelay)
                     .onUpdate(function(o){
                         mat.opacity = o.op;
                         mat.needsUpdate = true;
@@ -1415,9 +1430,9 @@ export class MHSAAnimation {
         const targetYAboveMatrix = matrixTopY + 30;
 
         // Durations
-        const duration1 = OUTPUT_PROJ_STAGE1_MS / GLOBAL_ANIM_SPEED_MULT;
-        const duration2 = OUTPUT_PROJ_STAGE2_MS / GLOBAL_ANIM_SPEED_MULT;
-        const duration3 = OUTPUT_PROJ_STAGE3_MS / GLOBAL_ANIM_SPEED_MULT;
+        const duration1 = this._resolveSkipDuration(OUTPUT_PROJ_STAGE1_MS / GLOBAL_ANIM_SPEED_MULT);
+        const duration2 = this._resolveSkipDuration(OUTPUT_PROJ_STAGE2_MS / GLOBAL_ANIM_SPEED_MULT);
+        const duration3 = this._resolveSkipDuration(OUTPUT_PROJ_STAGE3_MS / GLOBAL_ANIM_SPEED_MULT);
 
         if (typeof TWEEN === 'undefined') {
             console.warn("TWEEN not available for output projection matrix animation");
@@ -1765,7 +1780,8 @@ export class MHSAAnimation {
      */
     skipSelfAttentionAndStartConcat() {
         if (this.mhaPassThroughPhase !== 'mha_pass_through_complete') return;
-        try { if (this.selfAttentionAnimator?.forceComplete) this.selfAttentionAnimator.forceComplete(); } catch (_) {}
+        const preserveTrails = !!this._skipToEndActive;
+        try { if (this.selfAttentionAnimator?.forceComplete) this.selfAttentionAnimator.forceComplete({ preserveTrails }); } catch (_) {}
         try { this._hideAllQVectorsImmediately(); } catch (_) {}
         try { this._hideAllKandVVectorsImmediately(); } catch (_) {}
         // Ensure decorative vectors exist before starting the merge/concat sequence
@@ -1779,6 +1795,7 @@ export class MHSAAnimation {
     
     _animateOutputMatrixBrightening(duration) {
         if (typeof TWEEN === 'undefined') return;
+        const effectiveDuration = this._resolveSkipDuration(duration);
         
         this.outputProjMatrixAnimationPhase = 'vectors_inside';
         
@@ -1807,7 +1824,7 @@ export class MHSAAnimation {
                 g: brightColor.g, 
                 b: brightColor.b,
                 emissiveIntensity: peakEmissiveIntensity
-            }, duration * 0.6) // 60% of the total duration
+            }, effectiveDuration * 0.6) // 60% of the total duration
             .easing(TWEEN.Easing.Quadratic.InOut)
             .onUpdate(() => {
                 const currentColor = new THREE.Color(state.r, state.g, state.b);
@@ -1817,7 +1834,7 @@ export class MHSAAnimation {
             .onComplete(() => {
                 // Then dim slightly to the final state
                 new TWEEN.Tween(state)
-                    .to({ emissiveIntensity: endEmissiveIntensity }, duration * 0.4) // 40% of the total duration
+                    .to({ emissiveIntensity: endEmissiveIntensity }, effectiveDuration * 0.4) // 40% of the total duration
                     .easing(TWEEN.Easing.Quadratic.InOut)
                     .onUpdate(() => {
                         this.outputProjectionMatrix.setEmissive(brightColor, state.emissiveIntensity);
@@ -1833,6 +1850,7 @@ export class MHSAAnimation {
     }
 
     _transitionHeadColorsToFinal(duration) {
+        const effectiveDuration = this._resolveSkipDuration(duration);
         if (typeof TWEEN === 'undefined') {
             console.warn("TWEEN not available for final head color transition.");
             // Set colors directly if TWEEN is not available
@@ -1865,7 +1883,7 @@ export class MHSAAnimation {
             if (qMatrix && qMatrix.mesh && qMatrix.mesh.material) {
                 const initialQColor = qMatrix.mesh.material.color.clone();
                 new TWEEN.Tween(initialQColor)
-                    .to(finalQColor, duration)
+                    .to(finalQColor, effectiveDuration)
                     .easing(TWEEN.Easing.Quadratic.InOut)
                     .onUpdate(() => {
                         qMatrix.setColor(initialQColor);
@@ -1877,7 +1895,7 @@ export class MHSAAnimation {
             if (kMatrix && kMatrix.mesh && kMatrix.mesh.material) {
                 const initialKColor = kMatrix.mesh.material.color.clone();
                 new TWEEN.Tween(initialKColor)
-                    .to(finalKColor, duration)
+                    .to(finalKColor, effectiveDuration)
                     .easing(TWEEN.Easing.Quadratic.InOut)
                     .onUpdate(() => {
                         kMatrix.setColor(initialKColor);
@@ -1889,7 +1907,7 @@ export class MHSAAnimation {
             if (vMatrix && vMatrix.mesh && vMatrix.mesh.material) {
                 const initialVColor = vMatrix.mesh.material.color.clone();
                 new TWEEN.Tween(initialVColor)
-                    .to(finalVColor, duration)
+                    .to(finalVColor, effectiveDuration)
                     .easing(TWEEN.Easing.Quadratic.InOut)
                     .onUpdate(() => {
                         vMatrix.setColor(initialVColor);
@@ -1926,9 +1944,21 @@ export class MHSAAnimation {
         return raw;
     }
 
+    _resolveSkipDelay(delayMs) {
+        const clamped = Math.max(0, Number(delayMs) || 0);
+        if (!this._skipToEndActive) return clamped;
+        return Math.min(clamped, 1);
+    }
+
+    _resolveSkipDuration(durationMs) {
+        const clamped = Math.max(0, Number(durationMs) || 0);
+        if (!this._skipToEndActive) return clamped;
+        return Math.min(clamped, 1);
+    }
+
     _scheduleAfterDelay(callback, delayMs) {
         if (typeof callback !== 'function') return () => {};
-        const clampedDelay = Math.max(0, Number(delayMs) || 0);
+        const clampedDelay = this._resolveSkipDelay(delayMs);
 
         if (typeof TWEEN !== 'undefined' && typeof TWEEN.Tween === 'function') {
             const state = { t: 0 };

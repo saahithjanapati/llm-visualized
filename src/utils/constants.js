@@ -29,6 +29,18 @@ export function setPlaybackSpeed(preset) {
     SELF_ATTENTION_TIME_MULT = sel.selfAttenTimeMult;
 }
 
+export function setPrismAddAnimSpeedMult(mult) {
+    const next = Number(mult);
+    if (!Number.isFinite(next) || next <= 0) return;
+    PRISM_ADD_ANIM_SPEED_MULT = next;
+}
+
+export function setSelfAttentionTimeMult(mult) {
+    const next = Number(mult);
+    if (!Number.isFinite(next) || next <= 0) return;
+    SELF_ATTENTION_TIME_MULT = next;
+}
+
 // Always render in high-quality mode. Remove lower-quality mobile detection.
 export const IS_MOBILE = false;
 export const QUALITY_PRESET = 'high';

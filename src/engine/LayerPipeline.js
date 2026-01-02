@@ -8,6 +8,7 @@ import {
     TOP_EMBED_Y_GAP_ABOVE_TOWER,
     TOP_EMBED_Y_ADJUST,
     GLOBAL_ANIM_SPEED_MULT,
+    SELF_ATTENTION_TIME_MULT,
     ANIM_RISE_SPEED_ORIGINAL,
     LN_PARAMS,
     LN_NORM_START_FRACTION_FROM_BOTTOM,
@@ -15,6 +16,9 @@ import {
     PRISM_ADD_ANIM_BASE_FLASH_DURATION,
     PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS,
     PRISM_ADD_ANIM_SPEED_MULT,
+    setGlobalAnimSpeedMult,
+    setPrismAddAnimSpeedMult,
+    setSelfAttentionTimeMult,
     VECTOR_LENGTH_PRISM,
     NUM_VECTOR_LANES
 } from '../utils/constants.js';
@@ -68,6 +72,10 @@ export class LayerPipeline extends EventTarget {
 
         this._layers = [];
         this._currentLayerIdx = 0;
+        this._skipToEndActive = false;
+        this._skipToEndRestore = null;
+        this._skipToEndRaf = null;
+        this._forwardPassComplete = false;
 
         this._autoCameraFollow = opts.autoCameraFollow !== false;
         this._autoCameraCenter = new THREE.Vector3();
@@ -162,6 +170,14 @@ export class LayerPipeline extends EventTarget {
         if (this._cameraOffsetDiv) {
             this._cameraOffsetDiv.style.display = 'none';
         }
+        if (this._skipToEndRaf) {
+            if (typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
+                window.cancelAnimationFrame(this._skipToEndRaf);
+            } else {
+                clearTimeout(this._skipToEndRaf);
+            }
+            this._skipToEndRaf = null;
+        }
         this._stopCameraOverlayLoop();
         if (this._engine) {
             this._engine.dispose();
@@ -199,9 +215,127 @@ export class LayerPipeline extends EventTarget {
         return !!this._autoCameraFollow;
     }
 
+    isSkipToEndActive() {
+        return !!this._skipToEndActive;
+    }
+
+    isForwardPassComplete() {
+        return this._checkForwardPassComplete();
+    }
+
+    skipToEndForwardPass(opts = {}) {
+        if (this._skipToEndActive || this._checkForwardPassComplete()) return;
+        this._skipToEndActive = true;
+
+        const engine = this._engine;
+        if (engine && typeof engine.resume === 'function') {
+            engine.resume('manual');
+        }
+
+        this._skipToEndRestore = {
+            engineSpeed: engine && typeof engine._speed === 'number' ? engine._speed : 1,
+            globalSpeed: GLOBAL_ANIM_SPEED_MULT,
+            prismAddSpeed: PRISM_ADD_ANIM_SPEED_MULT,
+            selfAttentionSpeed: SELF_ATTENTION_TIME_MULT
+        };
+
+        const {
+            engineSpeed = 6,
+            globalSpeed = 800,
+            prismAddSpeed = 200,
+            selfAttentionSpeed = 0.03
+        } = opts || {};
+
+        if (engine && typeof engine.setSpeed === 'function') {
+            engine.setSpeed(engineSpeed);
+        }
+        setGlobalAnimSpeedMult(globalSpeed);
+        setPrismAddAnimSpeedMult(prismAddSpeed);
+        setSelfAttentionTimeMult(selfAttentionSpeed);
+
+        this._layers.forEach(layer => {
+            if (layer && typeof layer.setSkipToEndMode === 'function') {
+                layer.setSkipToEndMode(true);
+            }
+        });
+
+        this._startSkipCompletionWatch();
+    }
+
     // ----------------------------------------------------------------------
     // Private helpers
     // ----------------------------------------------------------------------
+
+    _checkForwardPassComplete() {
+        if (this._forwardPassComplete) return true;
+        if (!Array.isArray(this._layers) || !this._layers.length) return false;
+        const allLayersDone = this._layers.every(layer => layer && layer._completed);
+        if (!allLayersDone) return false;
+
+        const lastLayer = this._layers[this._numLayers - 1];
+        const stopY = lastLayer && lastLayer.__topEmbedStopYLocal;
+        if (Number.isFinite(stopY)) {
+            const lanes = Array.isArray(lastLayer.lanes) ? lastLayer.lanes : [];
+            if (!lanes.length) return false;
+            const allAtTop = lanes.every(lane => {
+                const y = lane && lane.originalVec && lane.originalVec.group && lane.originalVec.group.position
+                    ? lane.originalVec.group.position.y
+                    : NaN;
+                return Number.isFinite(y) && y >= stopY - 0.5;
+            });
+            if (!allAtTop) return false;
+        }
+
+        this._forwardPassComplete = true;
+        return true;
+    }
+
+    _startSkipCompletionWatch() {
+        if (this._skipToEndRaf) {
+            if (typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
+                window.cancelAnimationFrame(this._skipToEndRaf);
+            } else {
+                clearTimeout(this._skipToEndRaf);
+            }
+            this._skipToEndRaf = null;
+        }
+
+        const schedule = (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function')
+            ? window.requestAnimationFrame.bind(window)
+            : (cb) => setTimeout(cb, 50);
+        const tick = () => {
+            if (!this._skipToEndActive) return;
+            if (this._checkForwardPassComplete()) {
+                this._finalizeSkipToEnd();
+                return;
+            }
+            this._skipToEndRaf = schedule(tick);
+        };
+        this._skipToEndRaf = schedule(tick);
+    }
+
+    _finalizeSkipToEnd() {
+        this._skipToEndActive = false;
+        if (this._skipToEndRaf) {
+            if (typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
+                window.cancelAnimationFrame(this._skipToEndRaf);
+            } else {
+                clearTimeout(this._skipToEndRaf);
+            }
+            this._skipToEndRaf = null;
+        }
+
+        const restore = this._skipToEndRestore;
+        if (restore) {
+            if (this._engine && typeof this._engine.setSpeed === 'function') {
+                this._engine.setSpeed(restore.engineSpeed);
+            }
+            setGlobalAnimSpeedMult(restore.globalSpeed);
+            setPrismAddAnimSpeedMult(restore.prismAddSpeed);
+            setSelfAttentionTimeMult(restore.selfAttentionSpeed);
+            this._skipToEndRestore = null;
+        }
+    }
 
     /**
      * Called when the currently active layer reports completion via its
@@ -633,6 +767,11 @@ export class LayerPipeline extends EventTarget {
 
                 const startNormalization = () => {
                     if (normLoopActive) return;
+                    if (this._skipToEndActive) {
+                        normLoopActive = true;
+                        riseToCenter();
+                        return;
+                    }
                     normLoopActive = true;
                     try {
                         normAnim.start(vec.rawData.slice());
@@ -643,6 +782,12 @@ export class LayerPipeline extends EventTarget {
                     }
 
                     const runLoop = () => {
+                        if (this._skipToEndActive) {
+                            normAnim.isAnimating = false;
+                            normLoopActive = false;
+                            riseToCenter();
+                            return;
+                        }
                         normAnim.update(0);
                         updateTopLnColor(vec.group.position.y);
                         this.dispatchEvent(new Event('progress'));

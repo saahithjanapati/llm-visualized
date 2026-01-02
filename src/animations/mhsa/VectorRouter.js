@@ -18,7 +18,7 @@ const _scratchWorld2 = new THREE.Vector3();
 const _scratchSpawn = new THREE.Vector3();
 
 // Add configurable opacity for trails specific to vector copies under Q/K/V to reduce visual prominence
-const FAINT_TRAIL_OPACITY = 0.13; // must be < default 0.1
+const FAINT_TRAIL_OPACITY = 0.08;
 
 
 // Read live binding each use to reflect UI changes at runtime
@@ -39,10 +39,15 @@ export class VectorRouter {
 
         this._readyEmitted = false;
         this._callbacks    = new Set();
+        this._skipToEndActive = false;
     }
 
     onReady(cb) {
         if (typeof cb === 'function') this._callbacks.add(cb);
+    }
+
+    setSkipToEndMode(enabled = false) {
+        this._skipToEndActive = !!enabled;
     }
 
     /**
@@ -126,15 +131,18 @@ export class VectorRouter {
             if (lane.upwardCopies && lane.upwardCopies.length) {
                 lane.upwardCopies.forEach((upVec) => {
                     if (upVec.group.position.y < this.headStopY) {
-                        upVec.group.position.y = Math.min(this.headStopY, upVec.group.position.y + MHSA_DUPLICATE_VECTOR_RISE_SPEED * GLOBAL_ANIM_SPEED_MULT * deltaTime);
-                        if (upVec.userData && upVec.userData.trail) {
-                            const ud = upVec.userData;
-                            if (ud.trailWorld) {
-                                upVec.group.getWorldPosition(_scratchWorld);
-                                ud.trail.update(_scratchWorld);
-                            } else {
-                                ud.trail.update(upVec.group.position);
-                            }
+                        upVec.group.position.y = Math.min(
+                            this.headStopY,
+                            upVec.group.position.y + MHSA_DUPLICATE_VECTOR_RISE_SPEED * GLOBAL_ANIM_SPEED_MULT * deltaTime
+                        );
+                    }
+                    if (upVec.userData && upVec.userData.trail) {
+                        const ud = upVec.userData;
+                        if (ud.trailWorld) {
+                            upVec.group.getWorldPosition(_scratchWorld);
+                            ud.trail.update(_scratchWorld);
+                        } else {
+                            ud.trail.update(upVec.group.position);
                         }
                     }
                 });
@@ -213,29 +221,16 @@ export class VectorRouter {
                 lane.sideCopies.forEach((obj) => {
                     const v  = obj.vec;
                     const dx = SIDE_COPY_HORIZ_SPEED * GLOBAL_ANIM_SPEED_MULT * deltaTime;
-                    if (Math.abs(v.group.position.x - obj.targetX) > 0.01) {
-                        const dir = v.group.position.x < obj.targetX ? 1 : -1;
-                        v.group.position.x += dir * dx;
-                        if (v.userData && v.userData.trail) {
-                            const ud = v.userData;
-                            // Only update trail while below matrix level (consistent with other vectors)
-                            const matrixBottomY = this.headStopY; // Q/V vectors stop at headStopY which is just below matrices
-                            if (v.group.position.y < matrixBottomY) {
-                                if (ud.trailWorld) {
-                                    v.group.getWorldPosition(_scratchWorld);
-                                    ud.trail.update(_scratchWorld);
-                                } else {
-                                    ud.trail.update(v.group.position);
-                                }
-                            }
-                        }
-                        if ((dir === 1 && v.group.position.x > obj.targetX) || (dir === -1 && v.group.position.x < obj.targetX)) v.group.position.x = obj.targetX;
+                    const deltaToTarget = obj.targetX - v.group.position.x;
+                    if (Math.abs(deltaToTarget) > 0.01) {
+                        const step = Math.min(Math.abs(deltaToTarget), dx);
+                        v.group.position.x += Math.sign(deltaToTarget || 1) * step;
                     }
                     v.group.position.y = this.headStopY;
                     if (v.userData && v.userData.trail) {
                         // Only update trail while below matrix level (consistent with other vectors)
                         const matrixBottomY = this.headStopY; // Q/V vectors stop at headStopY which is just below matrices
-                        if (v.group.position.y < matrixBottomY) {
+                        if (v.group.position.y <= matrixBottomY + 0.001 || this._skipToEndActive) {
                             const ud = v.userData;
                             if (ud.trailWorld) {
                                 v.group.getWorldPosition(_scratchWorld2);

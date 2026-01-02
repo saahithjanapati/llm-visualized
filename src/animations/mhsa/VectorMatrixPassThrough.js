@@ -11,6 +11,8 @@ import { buildMonochromeOptions, mapValueToMonochrome } from '../../utils/colors
 import { buildActivationData, applyActivationDataToVector } from '../../utils/activationMetadata.js';
 import { MHA_VALUE_SPECTRUM_COLOR } from '../LayerAnimationConstants.js';
 
+const _trailScratch = new THREE.Vector3();
+
 /**
  * Animate a vector passing vertically through its corresponding weight matrix.
  * The heavy 768-dimensional vector is swapped for a lightweight 64-dimensional
@@ -105,13 +107,19 @@ export function animateVectorMatrixPassThrough(
             try {
                 const ud = vector.userData || {};
                 const trail = ud.trail;
-                if (trail && tweenState.y < matrixBottomY) {
+                if (trail) {
+                    // Clamp to just below the matrix bottom so skip-to-end jumps
+                    // still leave a visible vertical trail segment.
+                    const clampY = Math.min(tweenState.y, matrixBottomY - 0.001);
                     if (ud.trailWorld) {
-                        const wp = new THREE.Vector3();
-                        vector.group.getWorldPosition(wp);
-                        trail.update(wp);
+                        vector.group.getWorldPosition(_trailScratch);
+                        const deltaY = tweenState.y - clampY;
+                        if (deltaY !== 0) _trailScratch.y -= deltaY;
+                        trail.update(_trailScratch);
                     } else {
-                        trail.update(vector.group.position);
+                        _trailScratch.copy(vector.group.position);
+                        _trailScratch.y = clampY;
+                        trail.update(_trailScratch);
                     }
                 }
             } catch (_) { /* no-op */ }

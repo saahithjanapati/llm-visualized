@@ -77,6 +77,7 @@ const COLOR_INACTIVE_COMPONENT = new THREE.Color(INACTIVE_COMPONENT_COLOR);
 
 const LN_INTERNAL_TRAIL_MIN_SEGMENT = 0.15;
 const LN_MATERIAL_EPSILON = 1e-4;
+const TMP_LN_TRAIL_POS = new THREE.Vector3();
 
 function formatTokenLabel(token) {
     if (!token) return null;
@@ -251,6 +252,9 @@ export default class Gpt2Layer extends BaseLayer {
         this._ln1Start = false;        // start LN-1 branch
         this._mhsaStart = false;       // start horizontal travel to heads
         this._progressEmitter = null;  // external emitter for progress events
+        this._skipToEndActive = false;
+        this._skipConcatTriggered = false;
+        this._skipHiddenMaterials = new WeakSet();
 
         // Placeholder vectors shown inside inactive LayerNorms so the
         // "addition" prisms are visible throughout the full stack even
@@ -452,6 +456,13 @@ export default class Gpt2Layer extends BaseLayer {
     }
 
     update(dt) {
+        const skipActive = this._skipToEndActive;
+        const bottomY_ln1_abs = LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2;
+        const midY_ln1_abs    = LAYER_NORM_1_Y_POS;
+        const topY_ln1_abs    = LAYER_NORM_1_Y_POS + LN_PARAMS.height / 2;
+        const bottomY_ln2_abs = LAYER_NORM_2_Y_POS - LN_PARAMS.height / 2;
+        const midY_ln2_abs    = LAYER_NORM_2_Y_POS;
+        const topY_ln2_abs    = LAYER_NORM_2_Y_POS + LN_PARAMS.height / 2;
         // ──────────────── Update straight-line trails ────────────────
         if (this.lanes && this.lanes.length) {
             this.lanes.forEach(lane => {
@@ -479,6 +490,30 @@ export default class Gpt2Layer extends BaseLayer {
                     // residual trail updates (it follows the centre prism). Skip here
                     // to avoid double-writing the same world trail in the same frame.
                     if (lane.stopRise && v.userData.trailWorld) return;
+
+                    if (!v.userData.trailWorld) {
+                        const zPos = Number.isFinite(lane.zPos) ? lane.zPos : v.group.position.z;
+                        if (
+                            lane.horizPhase === 'insideLN'
+                            && (v === lane.dupVec || v === lane.resultVec)
+                        ) {
+                            const clampedY = Math.min(topY_ln1_abs, Math.max(bottomY_ln1_abs, v.group.position.y));
+                            TMP_LN_TRAIL_POS.set(BRANCH_X, clampedY, zPos);
+                            trailRef.update(TMP_LN_TRAIL_POS);
+                            updatedTrailRefs.add(trailRef);
+                            return;
+                        }
+                        if (
+                            lane.ln2Phase === 'insideLN'
+                            && (v === lane.movingVecLN2 || v === lane.resultVecLN2)
+                        ) {
+                            const clampedY = Math.min(topY_ln2_abs, Math.max(bottomY_ln2_abs, v.group.position.y));
+                            TMP_LN_TRAIL_POS.set(BRANCH_X, clampedY, zPos);
+                            trailRef.update(TMP_LN_TRAIL_POS);
+                            updatedTrailRefs.add(trailRef);
+                            return;
+                        }
+                    }
 
                     if (v.userData.trailWorld) {
                         v.group.getWorldPosition(TMP_WORLD_POS);
@@ -518,21 +553,29 @@ export default class Gpt2Layer extends BaseLayer {
                             lane.originalVec.group.position.y + ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT * dt);
                     }
                 });
+                if (skipActive) this._applySkipVectorVisibility();
                 return; // keep waiting
             }
         }
-        
-        if (!this.isActive) return; // Skip processing when inactive / placeholder
+
+        if (!this.isActive) {
+            if (skipActive) this._applySkipVectorVisibility();
+            return; // Skip processing when inactive / placeholder
+        }
+
+        if (skipActive && this.mhsaAnimation && !this._skipConcatTriggered) {
+            if (this.mhsaAnimation.mhaPassThroughPhase === 'mha_pass_through_complete'
+                && typeof this.mhsaAnimation.skipSelfAttentionAndStartConcat === 'function') {
+                this.mhsaAnimation.skipSelfAttentionAndStartConcat();
+                this._skipConcatTriggered = true;
+            }
+        }
         // ────────────────────────────────────────────────────────────
         // Dynamic colour / opacity transition for the FIRST LayerNorm
         // ────────────────────────────────────────────────────────────
         const opaqueOpacity = 1.0;
         const semiTransparentOpacity = 0.6;
         const exitTransitionRange = 5; // world–unit distance for final fade
-
-        const bottomY_ln1_abs = LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2;
-        const midY_ln1_abs    = LAYER_NORM_1_Y_POS;
-        const topY_ln1_abs    = LAYER_NORM_1_Y_POS + LN_PARAMS.height / 2;
 
         // Determine the highest Y position of any vector still interacting with LN-1
         let highestLN1VecY = -Infinity;
@@ -598,10 +641,6 @@ export default class Gpt2Layer extends BaseLayer {
         // ────────────────────────────────────────────────────────────
         // Dynamic colour / opacity transition for the SECOND LayerNorm
         // ────────────────────────────────────────────────────────────
-        const bottomY_ln2_abs = LAYER_NORM_2_Y_POS - LN_PARAMS.height / 2;
-        const midY_ln2_abs = LAYER_NORM_2_Y_POS;
-        const topY_ln2_abs = LAYER_NORM_2_Y_POS + LN_PARAMS.height / 2;
-
         // Find the highest Y position of any vector moving through LN2
         let highestLN2VecY = -Infinity;
         let anyVectorInLN2 = false;
@@ -794,20 +833,40 @@ export default class Gpt2Layer extends BaseLayer {
                         }
                         return lane.ln1MidY;
                     })();
-                    if (!lane.normStarted && dupVec.group.position.y >= normStartY) {
+                    const startLn1Norm = () => {
                         const ln1NormData = this._getLn1Data(lane, 'norm');
                         const normInput = ln1NormData ? ln1NormData.slice() : dupVec.rawData.slice();
                         lane.pendingNormData = ln1NormData || null;
                         lane.pendingNormLabel = lane.tokenLabel ? `LN1 Normed - ${lane.tokenLabel}` : 'LN1 Normed';
                         lane.pendingNormMeta = this._getLaneMeta(lane, 'ln1.norm');
                         lane.normApplied = false;
-                        lane.normAnim.start(normInput, { deferDataUpdate: true });
+                        if (!skipActive && lane.normAnim) {
+                            lane.normAnim.start(normInput, { deferDataUpdate: true });
+                        }
                         lane.normStarted = true;
+                        if (skipActive) {
+                            if (lane.pendingNormData) {
+                                applyVectorData(
+                                    dupVec,
+                                    lane.pendingNormData,
+                                    lane.pendingNormLabel,
+                                    lane.pendingNormMeta
+                                );
+                            }
+                            lane.normApplied = true;
+                        }
+                    };
+                    if (!lane.normStarted && dupVec.group.position.y >= normStartY) {
+                        startLn1Norm();
                     }
-                    if (lane.normStarted) {
-                        lane.normAnim.update(dt);
+                    if (lane.normStarted && lane.normAnim) {
+                        if (!skipActive) {
+                            lane.normAnim.update(dt);
+                        } else if (lane.normAnim.isAnimating) {
+                            lane.normAnim.isAnimating = false;
+                        }
                     }
-                    const normAnimating = lane.normStarted && lane.normAnim.isAnimating;
+                    const normAnimating = !skipActive && lane.normStarted && lane.normAnim && lane.normAnim.isAnimating;
                     if (lane.normStarted && !normAnimating && !lane.normApplied) {
                         if (lane.pendingNormData) {
                             applyVectorData(
@@ -831,14 +890,7 @@ export default class Gpt2Layer extends BaseLayer {
                     // have missed it.  Run an extra guard here to ensure the
                     // normalisation animation still begins.
                     if (!lane.normStarted && dupVec.group.position.y >= normStartY) {
-                        const ln1NormData = this._getLn1Data(lane, 'norm');
-                        const normInput = ln1NormData ? ln1NormData.slice() : dupVec.rawData.slice();
-                        lane.pendingNormData = ln1NormData || null;
-                        lane.pendingNormLabel = lane.tokenLabel ? `LN1 Normed - ${lane.tokenLabel}` : 'LN1 Normed';
-                        lane.pendingNormMeta = this._getLaneMeta(lane, 'ln1.norm');
-                        lane.normApplied = false;
-                        lane.normAnim.start(normInput, { deferDataUpdate: true });
-                        lane.normStarted = true;
+                        startLn1Norm();
                     }
                     // -----------------------------------------------------------------
                     if (
@@ -881,6 +933,14 @@ export default class Gpt2Layer extends BaseLayer {
 
                                 const reusedTrail = dupVec && dupVec.userData && dupVec.userData.trail;
                                 const reusedTrailIsWorld = Boolean(dupVec && dupVec.userData && dupVec.userData.trailWorld);
+                                if (this._skipToEndActive && reusedTrail && !reusedTrailIsWorld && dupVec && dupVec.group) {
+                                    const zPos = Number.isFinite(lane.zPos) ? lane.zPos : dupVec.group.position.z;
+                                    const clampedY = Math.min(topY_ln1_abs, Math.max(bottomY_ln1_abs, dupVec.group.position.y));
+                                    TMP_LN_TRAIL_POS.set(BRANCH_X, clampedY, zPos);
+                                    if (typeof reusedTrail.update === 'function') {
+                                        reusedTrail.update(TMP_LN_TRAIL_POS);
+                                    }
+                                }
                                 const laneIndex = typeof lane.laneIndex === 'number' ? lane.laneIndex : this.lanes.indexOf(lane);
                                 let trailForResult;
                                 if (reusedTrail) {
@@ -1147,20 +1207,40 @@ export default class Gpt2Layer extends BaseLayer {
                     // relative height inside the ring.
                     const normStartY2 =
                         bottomY_ln2_abs + LN_PARAMS.height * LN_NORM_START_FRACTION_FROM_BOTTOM;
-                    const normAnimating2 = lane.normStartedLN2 && lane.normAnimationLN2 && lane.normAnimationLN2.isAnimating;
-                    if (!lane.normStartedLN2 && mv.group.position.y >= normStartY2) {
+                    const startLn2Norm = () => {
                         const ln2NormData = this._getLn2Data(lane, 'norm');
                         const normInput = ln2NormData ? ln2NormData.slice() : mv.rawData.slice();
                         lane.pendingNormDataLN2 = ln2NormData || null;
                         lane.pendingNormLabelLN2 = lane.tokenLabel ? `LN2 Normed - ${lane.tokenLabel}` : 'LN2 Normed';
                         lane.pendingNormMetaLN2 = this._getLaneMeta(lane, 'ln2.norm');
                         lane.normAppliedLN2 = false;
-                        lane.normAnimationLN2.start(normInput, { deferDataUpdate: true });
+                        if (!skipActive && lane.normAnimationLN2) {
+                            lane.normAnimationLN2.start(normInput, { deferDataUpdate: true });
+                        }
                         lane.normStartedLN2 = true;
+                        if (skipActive) {
+                            if (lane.pendingNormDataLN2) {
+                                applyVectorData(
+                                    mv,
+                                    lane.pendingNormDataLN2,
+                                    lane.pendingNormLabelLN2,
+                                    lane.pendingNormMetaLN2
+                                );
+                            }
+                            lane.normAppliedLN2 = true;
+                        }
+                    };
+                    if (!lane.normStartedLN2 && mv.group.position.y >= normStartY2) {
+                        startLn2Norm();
                     }
                     if (lane.normStartedLN2 && lane.normAnimationLN2) {
-                        lane.normAnimationLN2.update(dt);
+                        if (!skipActive) {
+                            lane.normAnimationLN2.update(dt);
+                        } else if (lane.normAnimationLN2.isAnimating) {
+                            lane.normAnimationLN2.isAnimating = false;
+                        }
                     }
+                    const normAnimating2 = !skipActive && lane.normStartedLN2 && lane.normAnimationLN2 && lane.normAnimationLN2.isAnimating;
                     if (lane.normStartedLN2 && !normAnimating2 && !lane.normAppliedLN2) {
                         if (lane.pendingNormDataLN2) {
                             applyVectorData(
@@ -1180,14 +1260,7 @@ export default class Gpt2Layer extends BaseLayer {
                     }
                     // --- NEW POST-MOVE SAFETY CHECK --------------------------------
                     if (!lane.normStartedLN2 && mv.group.position.y >= normStartY2) {
-                        const ln2NormData = this._getLn2Data(lane, 'norm');
-                        const normInput = ln2NormData ? ln2NormData.slice() : mv.rawData.slice();
-                        lane.pendingNormDataLN2 = ln2NormData || null;
-                        lane.pendingNormLabelLN2 = lane.tokenLabel ? `LN2 Normed - ${lane.tokenLabel}` : 'LN2 Normed';
-                        lane.pendingNormMetaLN2 = this._getLaneMeta(lane, 'ln2.norm');
-                        lane.normAppliedLN2 = false;
-                        lane.normAnimationLN2.start(normInput, { deferDataUpdate: true });
-                        lane.normStartedLN2 = true;
+                        startLn2Norm();
                     }
                     // ----------------------------------------------------------------
                     
@@ -1237,6 +1310,14 @@ export default class Gpt2Layer extends BaseLayer {
 
                                 const reusedTrailLn2 = mv && mv.userData && mv.userData.trail;
                                 const reusedTrailLn2IsWorld = Boolean(mv && mv.userData && mv.userData.trailWorld);
+                                if (this._skipToEndActive && reusedTrailLn2 && !reusedTrailLn2IsWorld && mv && mv.group) {
+                                    const zPos = Number.isFinite(lane.zPos) ? lane.zPos : mv.group.position.z;
+                                    const clampedY = Math.min(topY_ln2_abs, Math.max(bottomY_ln2_abs, mv.group.position.y));
+                                    TMP_LN_TRAIL_POS.set(BRANCH_X, clampedY, zPos);
+                                    if (typeof reusedTrailLn2.update === 'function') {
+                                        reusedTrailLn2.update(TMP_LN_TRAIL_POS);
+                                    }
+                                }
                                 const laneIndex = typeof lane.laneIndex === 'number' ? lane.laneIndex : this.lanes.indexOf(lane);
                                 let trailForLn2Result;
                                 if (reusedTrailLn2) {
@@ -1382,6 +1463,7 @@ export default class Gpt2Layer extends BaseLayer {
         // rise above it under any circumstance (e.g. stray tweens).
         // ------------------------------------------------------------------
         // Do not force residual vectors downward here; MHSAAnimation already clamps upward motion.
+        if (skipActive) this._applySkipVectorVisibility();
     }
 
     /**
@@ -1507,9 +1589,9 @@ export default class Gpt2Layer extends BaseLayer {
         lane.expandedVecGroup = expandedGroup;
         lane.expandedVecSegments = segmentVecs;
         
-        // Rise and pause before down-projection
+        // Rise before down-projection
         const extraRise = 30;
-        const pauseMs = 400;
+        const pauseMs = 0;
 
         new TWEEN.Tween(expandedGroup.position)
             .to({ y: expandedGroup.position.y + extraRise }, 500)
@@ -1971,6 +2053,48 @@ export default class Gpt2Layer extends BaseLayer {
 
     /** Replace/assign onFinished callback after construction */
     setOnFinished(cb) { this.onFinished = typeof cb === 'function' ? cb : null; }
+
+    setSkipToEndMode(enabled = true) {
+        this._skipToEndActive = !!enabled;
+        if (this._skipToEndActive) {
+            this._applySkipVectorVisibility();
+        }
+        if (this.mhsaAnimation && typeof this.mhsaAnimation.setSkipToEndMode === 'function') {
+            this.mhsaAnimation.setSkipToEndMode(this._skipToEndActive);
+        }
+    }
+
+    _isVectorVisual(obj) {
+        if (!obj) return false;
+        const data = obj.userData;
+        if (data && data.isVector) return true;
+        if (data && data.mergedKVMeta) return true;
+        if (data && typeof data.label === 'string' && data.label.includes('Vector')) return true;
+        const parent = obj.parent;
+        if (parent && parent.userData && parent.userData.isVector) return true;
+        if (parent && parent.userData && typeof parent.userData.label === 'string' && parent.userData.label.includes('Vector')) return true;
+        return false;
+    }
+
+    _applySkipVectorVisibility() {
+        if (!this._skipToEndActive || !this.root) return;
+        const hidden = this._skipHiddenMaterials;
+        this.root.traverse(obj => {
+            if (!obj || !obj.isMesh || !obj.material) return;
+            if (!this._isVectorVisual(obj)) return;
+            const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+            mats.forEach(mat => {
+                if (!mat) return;
+                const needsUpdate = mat.opacity !== 0 || mat.transparent !== true || mat.depthWrite !== false;
+                mat.transparent = true;
+                mat.opacity = 0;
+                mat.depthWrite = false;
+                if (needsUpdate) mat.needsUpdate = true;
+                hidden.add(mat);
+            });
+            obj.visible = false;
+        });
+    }
 
     _getLaneMeta(lane, stage, extra = {}) {
         return {
@@ -2587,13 +2711,23 @@ export default class Gpt2Layer extends BaseLayer {
                 if (otherTrails.length) {
                     // Try to preserve their appearance by copying the first trail's color
                     let otherColor = null;
+                    let otherOpacity = null;
                     const firstTrail = otherTrails[0];
                     if (firstTrail && firstTrail._material && firstTrail._material.color) {
                         otherColor = firstTrail._material.color.getHex();
                     } else if (firstTrail && typeof firstTrail._color !== 'undefined') {
                         otherColor = firstTrail._color;
                     }
-                    mergeTrailsIntoLineSegments(otherTrails, this.root, otherColor != null ? otherColor : undefined);
+                    if (firstTrail && typeof firstTrail._opacity === 'number') {
+                        otherOpacity = firstTrail._opacity;
+                    }
+                    mergeTrailsIntoLineSegments(
+                        otherTrails,
+                        this.root,
+                        otherColor != null ? otherColor : undefined,
+                        undefined,
+                        otherOpacity != null ? otherOpacity : undefined
+                    );
                 }
             }
         } catch (e) {

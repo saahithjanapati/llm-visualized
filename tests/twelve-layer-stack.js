@@ -35,6 +35,7 @@ import { initStatusOverlay } from '../src/ui/statusOverlay.js';
 import { initSettingsModal } from '../src/ui/settingsModal.js';
 import { initPauseButton } from '../src/ui/pauseButton.js';
 import { initConveyorSkipButton } from '../src/ui/conveyorSkipButton.js';
+import { initSkipToEndButton } from '../src/ui/skipToEndButton.js';
 import { initSelectionPanel } from '../src/ui/selectionPanel.js';
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
@@ -590,6 +591,7 @@ initIntroAnimation(pipeline, gptCanvas);
 initStatusOverlay(pipeline, NUM_LAYERS);
 initPauseButton(pipeline);
 initConveyorSkipButton(pipeline);
+initSkipToEndButton(pipeline);
 initSettingsModal(pipeline);
 
 const selectionPanel = initSelectionPanel();
