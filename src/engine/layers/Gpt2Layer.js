@@ -136,6 +136,11 @@ function copyVectorAppearance(targetVec, sourceVec, fallbackLabel = null, fallba
     return applyVectorData(targetVec, values, label, meta || null);
 }
 
+function geluApprox(x) {
+    const coeff = Math.sqrt(2 / Math.PI);
+    return 0.5 * x * (1 + Math.tanh(coeff * (x + 0.044715 * Math.pow(x, 3))));
+}
+
 function freezeStaticTransforms(object3d, includeChildren = false) {
     if (!object3d) return;
     object3d.matrixAutoUpdate = false;
@@ -1503,9 +1508,8 @@ export default class Gpt2Layer extends BaseLayer {
         lane.expandedVecSegments = segmentVecs;
         
         // Rise and pause before down-projection
-        const extraRise = 20;
+        const extraRise = 30;
         const pauseMs = 400;
-        const activationDelayMs = 350;
 
         new TWEEN.Tween(expandedGroup.position)
             .to({ y: expandedGroup.position.y + extraRise }, 500)
@@ -1532,24 +1536,112 @@ export default class Gpt2Layer extends BaseLayer {
                             );
                         });
                     }
-                    if (typeof TWEEN !== 'undefined' && activationDelayMs > 0) {
-                        new TWEEN.Tween({ t: 0 })
-                            .to({ t: 1 }, activationDelayMs)
-                            .onComplete(startDown)
-                            .start();
-                    } else {
-                        startDown();
-                    }
+                };
+                const runGeluTransition = () => {
+                    this._animateMlpActivationGelu(lane, applyActivation, startDown);
                 };
 
                 if (typeof TWEEN !== 'undefined' && pauseMs > 0) {
                     new TWEEN.Tween({ t: 0 })
                         .to({ t: 1 }, pauseMs)
-                        .onComplete(applyActivation)
+                        .onComplete(runGeluTransition)
                         .start();
                 } else {
-                    applyActivation();
+                    runGeluTransition();
                 }
+            })
+            .start();
+    }
+
+    _animateMlpActivationGelu(lane, applyActivation, onComplete, options = {}) {
+        const expandedGroup = lane.expandedVecGroup;
+        const segmentVecs = lane.expandedVecSegments;
+        const durationMs = Number.isFinite(options.durationMs) ? options.durationMs : 500;
+        const riseExtra = Number.isFinite(options.riseExtra) ? options.riseExtra : 24;
+        const curveHeight = Number.isFinite(options.curveHeight) ? options.curveHeight : 36;
+        const curveDomain = Number.isFinite(options.curveDomain) ? options.curveDomain : 2.5;
+        const negativeScale = Number.isFinite(options.negativeScale) ? options.negativeScale : 2.6;
+        const activationSwitchT = THREE.MathUtils.clamp(
+            Number.isFinite(options.activationSwitchT) ? options.activationSwitchT : 0.35,
+            0,
+            0.9
+        );
+        const safeCurveDomain = curveDomain > 0 ? curveDomain : 1;
+
+        if (!expandedGroup || !segmentVecs || segmentVecs.length === 0) {
+            if (typeof applyActivation === 'function') applyActivation();
+            if (typeof onComplete === 'function') onComplete();
+            return;
+        }
+        if (typeof TWEEN === 'undefined' || durationMs <= 0) {
+            if (typeof applyActivation === 'function') applyActivation();
+            if (typeof onComplete === 'function') onComplete();
+            return;
+        }
+
+        const segmentCounts = segmentVecs.map(seg => Math.max(1, Math.floor(seg.instanceCount || 1)));
+        const totalCount = segmentCounts.reduce((sum, count) => sum + count, 0);
+        const offsets = segmentVecs.map((_, idx) => new Float32Array(segmentCounts[idx]));
+        let globalIndex = 0;
+        for (let s = 0; s < segmentVecs.length; s++) {
+            const count = segmentCounts[s];
+            for (let i = 0; i < count; i++) {
+                const t = totalCount > 1 ? globalIndex / (totalCount - 1) : 0.5;
+                const x = (t * 2 - 1) * safeCurveDomain;
+                const y = geluApprox(x);
+                const scaledY = y < 0 ? y * negativeScale : y;
+                offsets[s][i] = (scaledY / safeCurveDomain) * curveHeight;
+                globalIndex++;
+            }
+        }
+
+        const baseY = expandedGroup.position.y;
+        let activationApplied = false;
+        const state = { t: 0 };
+
+        const applyActivationOnce = () => {
+            if (activationApplied) return;
+            activationApplied = true;
+            if (typeof applyActivation === 'function') applyActivation();
+        };
+
+        // Bend into a GELU curve, switch colors mid-flight, then return to the flat vector.
+        new TWEEN.Tween(state)
+            .to({ t: 1 }, durationMs)
+            .easing(TWEEN.Easing.Quadratic.InOut)
+            .onUpdate(() => {
+                const curveT = Math.sin(Math.PI * state.t);
+                if (state.t >= activationSwitchT) {
+                    applyActivationOnce();
+                }
+                const liftProgress = state.t >= activationSwitchT
+                    ? (state.t - activationSwitchT) / Math.max(1e-6, 1 - activationSwitchT)
+                    : 0;
+                const liftT = TWEEN.Easing.Quadratic.Out(THREE.MathUtils.clamp(liftProgress, 0, 1));
+                expandedGroup.position.y = baseY + riseExtra * liftT;
+
+                for (let s = 0; s < segmentVecs.length; s++) {
+                    const segVec = segmentVecs[s];
+                    const offsetRow = offsets[s];
+                    const count = segmentCounts[s];
+                    for (let i = 0; i < count; i++) {
+                        segVec.setInstanceAppearance(i, offsetRow[i] * curveT, null, null, false);
+                    }
+                    if (segVec.mesh) segVec.mesh.instanceMatrix.needsUpdate = true;
+                }
+            })
+            .onComplete(() => {
+                applyActivationOnce();
+                expandedGroup.position.y = baseY + riseExtra;
+                for (let s = 0; s < segmentVecs.length; s++) {
+                    const segVec = segmentVecs[s];
+                    const count = segmentCounts[s];
+                    for (let i = 0; i < count; i++) {
+                        segVec.resetInstanceAppearance(i);
+                    }
+                    if (segVec.mesh) segVec.mesh.instanceMatrix.needsUpdate = true;
+                }
+                if (typeof onComplete === 'function') onComplete();
             })
             .start();
     }

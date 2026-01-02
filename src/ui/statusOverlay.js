@@ -74,21 +74,33 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
             const m = layer.mhsaAnimation;
             const phase = m && m.mhaPassThroughPhase;
             const outPhase = m && m.outputProjMatrixAnimationPhase;
-            if (phase === 'parallel_pass_through_active') {
+            const postAdd = lanes.some(l => ['postMHSAAddition','waitingForLN2'].includes(l.horizPhase));
+            const selfAttentionActive = Boolean(
+                m?.enableSelfAttentionAnimation
+                && m?.selfAttentionAnimator
+                && (
+                    m.selfAttentionAnimator.phase === 'running'
+                    || (typeof m.selfAttentionAnimator.isConveyorActive === 'function'
+                        && m.selfAttentionAnimator.isConveyorActive())
+                )
+            );
+            const concatActive = m?.rowMergePhase === 'merging'
+                || outPhase === 'vectors_entering'
+                || outPhase === 'vectors_inside'
+                || outPhase === 'completed';
+
+            if (postAdd) {
+                key = 'resid1';
+                title = 'Residual Add 1';
+            } else if (selfAttentionActive) {
                 key = 'attn';
                 title = 'Scaled Dot-Product Attention';
-            } else if (phase === 'mha_pass_through_complete') {
-                const postAdd = lanes.some(l => ['postMHSAAddition','waitingForLN2'].includes(l.horizPhase));
-                if (postAdd || outPhase === 'vectors_inside' || outPhase === 'completed') {
-                    key = 'resid1';
-                    title = 'Residual Add 1';
-                } else if (m?.rowMergePhase === 'merging' || outPhase === 'vectors_entering') {
-                    key = 'concat_proj';
-                    title = 'Concat Heads + W^O';
-                } else {
-                    key = 'attn';
-                    title = 'Scaled Dot-Product Attention';
-                }
+            } else if (concatActive) {
+                key = 'concat_proj';
+                title = 'Concat Heads + W^O';
+            } else if (phase === 'parallel_pass_through_active' || phase === 'mha_pass_through_complete') {
+                key = 'attn';
+                title = 'Scaled Dot-Product Attention';
             } else {
                 key = 'qkv_per_head';
                 title = 'Q/K/V Projections';
@@ -225,4 +237,13 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         pipeline.addEventListener('progress', onProgress);
     }
     updateStatus();
+
+    const tickEquations = () => {
+        if (appState.showEquations && pipeline?._layers?.length) {
+            const idx = pipeline._currentLayerIdx ?? 0;
+            updateEquations(pipeline._layers[idx]);
+        }
+        scheduleFrame(tickEquations);
+    };
+    tickEquations();
 }
