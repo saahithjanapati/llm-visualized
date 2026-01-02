@@ -9,6 +9,7 @@ export class AppState {
         this.vocabTopRef = null;
         this.topEmbedActivated = false;
         this.showEquations = true;
+        this.equationsSuppressed = false;
         this.lastEqKey = '';
         this.showHdrBackground = false;
         this.autoCameraFollow = true;

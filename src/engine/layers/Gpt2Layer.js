@@ -15,12 +15,7 @@ import {
     MLP_MATRIX_PARAMS_UP,
     MLP_MATRIX_PARAMS_DOWN,
     MLP_INTER_MATRIX_GAP,
-    MHA_MATRIX_PARAMS,
-    NUM_HEAD_SETS_LAYER,
-    HEAD_SET_GAP_LAYER,
-    MHA_INTERNAL_MATRIX_SPACING,
     NUM_VECTOR_LANES,
-    VECTOR_DEPTH_SPACING,
     ANIM_RISE_SPEED_ORIGINAL,
     VECTOR_LENGTH_PRISM,
     GLOBAL_ANIM_SPEED_MULT,
@@ -33,37 +28,31 @@ import {
     PRISM_ADD_ANIM_BASE_DURATION,
     PRISM_ADD_ANIM_BASE_FLASH_DURATION,
     PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS,
-    PRISM_ADD_ANIM_SPEED_MULT,
-    EMBEDDING_BOTTOM_TOP_ALIGN_OFFSET_FROM_LN1_BOTTOM,
-    EMBEDDING_BOTTOM_Y_ADJUST,
-    EMBEDDING_MATRIX_PARAMS_POSITION,
-    EMBEDDING_MATRIX_PARAMS_VOCAB,
-    EMBEDDING_BOTTOM_PAIR_GAP_X,
-    EMBEDDING_BOTTOM_POS_X_OFFSET,
-    EMBEDDING_BOTTOM_VOCAB_X_OFFSET,
-    POS_VEC_Y_OFFSET_ABOVE_VOCAB,
-    POS_VEC_VERTICAL_SPEED_MULT,
-    POS_VEC_HORIZONTAL_SPEED_MULT
+    PRISM_ADD_ANIM_SPEED_MULT
 } from '../../utils/constants.js';
-import {
-    MHA_FINAL_Q_COLOR,
-    MHA_FINAL_K_COLOR,
-    MHA_FINAL_V_COLOR,
-    MHA_OUTPUT_PROJECTION_MATRIX_PARAMS,
-    MHA_OUTPUT_PROJECTION_MATRIX_COLOR,
-    MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW,
-} from '../../animations/LayerAnimationConstants.js';
 import { PrismLayerNormAnimation } from '../../animations/PrismLayerNormAnimation.js';
 import { MHSAAnimation } from '../../animations/MHSAAnimation.js';
 import { startPrismAdditionAnimation } from '../../utils/additionUtils.js';
-import { buildActivationData, applyActivationDataToVector } from '../../utils/activationMetadata.js';
-import { perfStats } from '../../utils/perfStats.js';
+import {
+    applyLayerNormMaterial,
+    applyVectorData,
+    copyVectorAppearance,
+    freezeStaticTransforms,
+    formatTokenLabel,
+    geluApprox,
+    simplePrismMultiply,
+    LN_INTERNAL_TRAIL_MIN_SEGMENT
+} from './gpt2LayerUtils.js';
+import {
+    buildSingleLane,
+    createAdditionPlaceholders,
+    createFreshLanes,
+    createLanesFromExternal
+} from './gpt2LaneBuilder.js';
 
 
 // Slightly reduced spacing between stacked layers for a tighter layout.
 const VERTICAL_SPACING = 1600; // matches LayerAnimation.js vertical extent
-const LN_ADD_VECTOR_OFFSET_FRACTION = 0.25; // fraction of LN height above centre for bias addition
-
 // Reusable scratch vector to avoid per-frame allocations when working with
 // world-space trail coordinates.
 const TMP_WORLD_POS = new THREE.Vector3();
@@ -75,149 +64,7 @@ const COLOR_LIGHT_YELLOW = new THREE.Color(0xffffff);
 const COLOR_BRIGHT_YELLOW = new THREE.Color(0xffffff);
 const COLOR_INACTIVE_COMPONENT = new THREE.Color(INACTIVE_COMPONENT_COLOR);
 
-const LN_INTERNAL_TRAIL_MIN_SEGMENT = 0.15;
-const LN_MATERIAL_EPSILON = 1e-4;
 const TMP_LN_TRAIL_POS = new THREE.Vector3();
-
-function formatTokenLabel(token) {
-    if (!token) return null;
-    return token.replace(/^\u0120/, ' ');
-}
-
-function getKeyColorCount(values) {
-    const length = Array.isArray(values) ? values.length : 0;
-    return Math.min(30, Math.max(1, length || 1));
-}
-
-function applyVectorData(vec, values, label, meta, colorOptions = null) {
-    const isArrayLike = Array.isArray(values) || ArrayBuffer.isView(values);
-    if (!vec || !isArrayLike || values.length === 0) return false;
-    if (perfStats.enabled) {
-        perfStats.inc('vectorUpdates');
-    }
-    vec.rawData = values.slice();
-    const numKeyColors = getKeyColorCount(vec.rawData);
-    if (colorOptions) {
-        vec.updateKeyColorsFromData(vec.rawData, numKeyColors, colorOptions, values);
-    } else {
-        vec.updateKeyColorsFromData(vec.rawData, numKeyColors, null, values);
-    }
-    const activationData = buildActivationData({
-        label,
-        values,
-        copyValues: false,
-        ...meta
-    });
-    applyActivationDataToVector(vec, activationData, label);
-    return true;
-}
-
-function copyVectorAppearance(targetVec, sourceVec, fallbackLabel = null, fallbackMeta = null) {
-    if (!targetVec || !sourceVec) return false;
-    const activation = sourceVec.userData && sourceVec.userData.activationData;
-    const label = (sourceVec.group && sourceVec.group.userData && sourceVec.group.userData.label) || fallbackLabel;
-    const meta = activation
-        ? {
-            stage: activation.stage,
-            layerIndex: activation.layerIndex,
-            tokenIndex: activation.tokenIndex,
-            tokenLabel: activation.tokenLabel,
-            headIndex: activation.headIndex,
-            keyTokenIndex: activation.keyTokenIndex,
-            keyTokenLabel: activation.keyTokenLabel,
-            segmentIndex: activation.segmentIndex,
-            preScore: activation.preScore,
-            postScore: activation.postScore,
-            notes: activation.notes
-        }
-        : fallbackMeta;
-    const values = (activation && (Array.isArray(activation.values) || ArrayBuffer.isView(activation.values)))
-        ? activation.values
-        : sourceVec.rawData;
-    return applyVectorData(targetVec, values, label, meta || null);
-}
-
-function geluApprox(x) {
-    const coeff = Math.sqrt(2 / Math.PI);
-    return 0.5 * x * (1 + Math.tanh(coeff * (x + 0.044715 * Math.pow(x, 3))));
-}
-
-function freezeStaticTransforms(object3d, includeChildren = false) {
-    if (!object3d) return;
-    object3d.matrixAutoUpdate = false;
-    object3d.updateMatrix();
-    if (!includeChildren || typeof object3d.traverse !== 'function') return;
-    object3d.traverse(child => {
-        if (child === object3d) return;
-        child.matrixAutoUpdate = false;
-        child.updateMatrix();
-    });
-}
-
-function applyLayerNormMaterial(group, targetColor, targetOpacity, state) {
-    if (!group || !state) return;
-    const transparent = targetOpacity < 1.0;
-    const hasState = state.initialized === true;
-    const colorChanged = !hasState || !state.color.equals(targetColor);
-    const opacityChanged = !hasState || Math.abs((state.opacity ?? 0) - targetOpacity) > LN_MATERIAL_EPSILON;
-    const transparentChanged = !hasState || state.transparent !== transparent;
-
-    if (!colorChanged && !opacityChanged && !transparentChanged) return;
-
-    state.color.copy(targetColor);
-    state.opacity = targetOpacity;
-    state.transparent = transparent;
-    state.initialized = true;
-
-    const children = group.children || [];
-    for (let i = 0; i < children.length; i++) {
-        const child = children[i];
-        if (!(child instanceof THREE.Mesh) || !child.material) continue;
-        if (Array.isArray(child.material)) {
-            child.material.forEach(mat => {
-                if (colorChanged) {
-                    mat.color.copy(targetColor);
-                    mat.emissive.copy(targetColor);
-                }
-                if (opacityChanged) {
-                    mat.opacity = targetOpacity;
-                }
-                if (transparentChanged) {
-                    mat.transparent = transparent;
-                    mat.needsUpdate = true;
-                }
-            });
-        } else {
-            const mat = child.material;
-            if (colorChanged) {
-                mat.color.copy(targetColor);
-                mat.emissive.copy(targetColor);
-            }
-            if (opacityChanged) {
-                mat.opacity = targetOpacity;
-            }
-            if (transparentChanged) {
-                mat.transparent = transparent;
-                mat.needsUpdate = true;
-            }
-        }
-    }
-}
-
-function simplePrismMultiply(srcVec, tgtVec, onComplete) {
-    // instant product; flash white then call onComplete
-    const srcCount = srcVec && Number.isFinite(srcVec.instanceCount) ? srcVec.instanceCount : VECTOR_LENGTH_PRISM;
-    const tgtCount = tgtVec && Number.isFinite(tgtVec.instanceCount) ? tgtVec.instanceCount : VECTOR_LENGTH_PRISM;
-    const srcLen = srcVec && Array.isArray(srcVec.rawData) ? srcVec.rawData.length : srcCount;
-    const tgtLen = tgtVec && Array.isArray(tgtVec.rawData) ? tgtVec.rawData.length : tgtCount;
-    const length = Math.min(srcCount, tgtCount, srcLen, tgtLen);
-    for (let i = 0; i < length; i++) {
-        tgtVec.rawData[i] = (srcVec.rawData[i] || 0) * (tgtVec.rawData[i] || 0);
-    }
-    const numKeyColors = Math.min(30, Math.max(1, tgtVec.rawData.length || 1));
-    tgtVec.updateKeyColorsFromData(tgtVec.rawData, numKeyColors);
-    if (onComplete) onComplete();
-}
 
 
 export default class Gpt2Layer extends BaseLayer {
@@ -2193,412 +2040,23 @@ export default class Gpt2Layer extends BaseLayer {
     }
 
     // ------------------------------------------------------------
-    // Internal lane creation helpers (extracted from init)
+    // Internal lane creation helpers (delegated to gpt2LaneBuilder.js)
     // ------------------------------------------------------------
 
     _createFreshLanes(offsetX, ln1CenterY, ln2CenterY, ln1TopY) {
-        const slitSpacing = LN_PARAMS.depth / (this._laneCount + 1);
-        // Start vectors at the TOP of the bottom embedding matrix
-        const startY = (LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2 + EMBEDDING_BOTTOM_TOP_ALIGN_OFFSET_FROM_LN1_BOTTOM) + EMBEDDING_BOTTOM_Y_ADJUST;
-        const meetY  = ln1TopY + 5;
-        for (let laneIdx = 0; laneIdx < this._laneCount; laneIdx++) {
-            this._buildSingleLane(null, offsetX, ln1CenterY, ln2CenterY, startY, meetY, laneIdx, slitSpacing);
-        }
-        if (this._ln1AddPlaceholders && this._ln1AddPlaceholders.every(p => !p)) {
-            this._ln1AddPlaceholders = [];
-        }
-        if (this._ln2AddPlaceholders && this._ln2AddPlaceholders.every(p => !p)) {
-            this._ln2AddPlaceholders = [];
-        }
+        createFreshLanes(this, offsetX, ln1CenterY, ln2CenterY, ln1TopY);
     }
 
     _createAdditionPlaceholders(offsetX, ln1CenterY, ln2CenterY) {
-        try {
-            const slitSpacing = LN_PARAMS.depth / (this._laneCount + 1);
-            const addYOffset = LN_PARAMS.height * LN_ADD_VECTOR_OFFSET_FRACTION;
-
-            for (let laneIdx = 0; laneIdx < this._laneCount; laneIdx++) {
-                const zPos = -LN_PARAMS.depth / 2 + slitSpacing * (laneIdx + 1);
-
-                const ln1PlaceholderData = this.random.nextVector(this._getBaseVectorLength());
-                const ln1Placeholder = this._createPrismVector(
-                    ln1PlaceholderData,
-                    new THREE.Vector3(offsetX, ln1CenterY + addYOffset, zPos),
-                    30,
-                    ln1PlaceholderData.length
-                );
-                ln1Placeholder.group.visible = false;
-                this.root.add(ln1Placeholder.group);
-                this._ln1AddPlaceholders[laneIdx] = ln1Placeholder;
-
-                const ln2PlaceholderData = this.random.nextVector(this._getBaseVectorLength());
-                const ln2Placeholder = this._createPrismVector(
-                    ln2PlaceholderData,
-                    new THREE.Vector3(offsetX, ln2CenterY + addYOffset, zPos),
-                    30,
-                    ln2PlaceholderData.length
-                );
-                ln2Placeholder.group.visible = false;
-                this.root.add(ln2Placeholder.group);
-                this._ln2AddPlaceholders[laneIdx] = ln2Placeholder;
-            }
-        } catch (_) {
-            // Placeholders are a visual aid only – failures shouldn't stop the demo.
-        }
+        createAdditionPlaceholders(this, offsetX, ln1CenterY, ln2CenterY);
     }
 
     _createLanesFromExternal(externalLanes, offsetX, ln1CenterY, ln2CenterY, ln1TopY) {
-        const meetY = ln1TopY + 5; // where original vectors pause just above LN1
-
-        // DON'T reset position - let vectors continue from where they are after layer 1
-        externalLanes.forEach((oldLane, laneIdx) => {
-            this._buildSingleLane(oldLane, offsetX, ln1CenterY, ln2CenterY, null, meetY, laneIdx, null);
-        });
-        if (this._ln1AddPlaceholders && this._ln1AddPlaceholders.every(p => !p)) {
-            this._ln1AddPlaceholders = [];
-        }
-        if (this._ln2AddPlaceholders && this._ln2AddPlaceholders.every(p => !p)) {
-            this._ln2AddPlaceholders = [];
-        }
+        createLanesFromExternal(this, externalLanes, offsetX, ln1CenterY, ln2CenterY, ln1TopY);
     }
 
     _buildSingleLane(oldLane, offsetX, ln1CenterY, ln2CenterY, startY_override, meetY, laneIdx, slitSpacing) {
-        // Reuse existing trail when lanes are passed from a lower layer
-        let trailFromPrev = oldLane && oldLane.originalTrail ? oldLane.originalTrail : null;
-        const laneTokenIndex = (oldLane && Number.isFinite(oldLane.tokenIndex))
-            ? oldLane.tokenIndex
-            : this._getTokenIndexForLane(laneIdx);
-        const laneTokenLabel = (oldLane && oldLane.tokenLabel)
-            ? oldLane.tokenLabel
-            : this._getTokenLabel(laneTokenIndex);
-        let originalVec, zPos, startY, trail; // trail will be reused or created anew
-        if (oldLane && oldLane.originalVec) {
-            originalVec = oldLane.originalVec;
-            this.root.attach(originalVec.group);
-            zPos   = originalVec.group.position.z;
-            startY = originalVec.group.position.y; // Keep current position
-            // Prefer to carry over the existing residual-stream trail so it
-            // remains a single continuous line across layer boundaries.
-                if (trailFromPrev) {
-                    trail = trailFromPrev;
-                    if (typeof trail.reparent === 'function') {
-                        trail.reparent(this._globalScene);
-                    }
-                    originalVec.userData = originalVec.userData || {};
-                    originalVec.userData.trail = trail;
-                    originalVec.userData.trailWorld = true;
-                }
-        } else {
-            zPos = -LN_PARAMS.depth / 2 + slitSpacing * (laneIdx + 1);
-            let data = this.random.nextVector(this._getBaseVectorLength());
-            if (this.activationSource) {
-                const tokenData = this._getEmbeddingData({ tokenIndex: laneTokenIndex }, 'token');
-                if (tokenData) data = tokenData;
-            }
-            startY = startY_override;
-            originalVec = this._createPrismVector(
-                data,
-                new THREE.Vector3(0, startY, zPos),
-                30,
-                this._getInstanceCountFromData(data)
-            );
-            this.root.add(originalVec.group);
-            applyVectorData(
-                originalVec,
-                data,
-                laneTokenLabel ? `Token Embedding - ${laneTokenLabel}` : 'Token Embedding',
-                this._getLaneMeta({ tokenIndex: laneTokenIndex, tokenLabel: laneTokenLabel }, 'embedding.token')
-            );
-
-        // ────────────── Trail for the ORIGINAL vector ──────────────
-        // Attach to the GLOBAL scene and record WORLD positions so the trail
-        // remains continuous across layers as lanes are transferred upwards.
-        trail = new StraightLineTrail(this._globalScene, 0xffffff, 1);
-        {
-            originalVec.group.getWorldPosition(TMP_WORLD_POS);
-            trail.start(TMP_WORLD_POS);
-            // Seed monotonic Y tracker for residual trail when lane is created below
-        }
-        originalVec.userData = originalVec.userData || {};
-        originalVec.userData.trail = trail;
-        originalVec.userData.trailWorld = true; // mark as world-space trail
-
-        }
-
-        if (oldLane && this.activationSource) {
-            const incomingData = this._getLayerIncomingData({ tokenIndex: laneTokenIndex });
-            if (incomingData) {
-                applyVectorData(
-                    originalVec,
-                    incomingData,
-                    laneTokenLabel ? `Incoming Residual (Pre-LN1) - ${laneTokenLabel}` : 'Incoming Residual (Pre-LN1)',
-                    this._getLaneMeta({ tokenIndex: laneTokenIndex, tokenLabel: laneTokenLabel }, 'layer.incoming')
-                );
-            }
-        }
-
-        // Spawn the LN-1 duplicate at the staging height (bottom + 5) so that
-        // when it becomes visible and starts the 'right' phase it travels purely
-        // horizontally, matching LN-2 behaviour.
-        const dupStartPos = new THREE.Vector3(
-            originalVec.group.position.x,
-            ln1CenterY - LN_PARAMS.height / 2 + 5,
-            originalVec.group.position.z
-        );
-        const dupVec = this._createPrismVector(
-            originalVec.rawData.slice(),
-            dupStartPos,
-            30,
-            originalVec.instanceCount
-        );
-        dupVec.group.visible = false;
-        copyVectorAppearance(dupVec, originalVec);
-        this.root.add(dupVec.group);
-        // Trail for duplicate vector inside LN1
-        const dupTrail = new StraightLineTrail(this.root, 0xffffff, 1, undefined, undefined, LN_INTERNAL_TRAIL_MIN_SEGMENT);
-        dupTrail.start(dupVec.group.position);
-        dupVec.userData = dupVec.userData || {};
-        dupVec.userData.trail = dupTrail;
-        const normAnim = new PrismLayerNormAnimation(dupVec);
-
-        // If we're reusing an existing lane we may not have created the trail yet
-        if (!trail) {
-            trail = new StraightLineTrail(this._globalScene, 0xffffff, 1);
-            originalVec.group.getWorldPosition(TMP_WORLD_POS);
-            trail.start(TMP_WORLD_POS);
-        }
-
-        const multTarget = this._createPrismVector(
-            originalVec.rawData.slice(),
-            new THREE.Vector3(offsetX, ln1CenterY + 3.3, zPos),
-            30,
-            originalVec.instanceCount
-        );
-        this.root.add(multTarget.group);
-        multTarget.group.visible = false;
-
-        const multTargetLN2 = this._createPrismVector(
-            originalVec.rawData.slice(),
-            new THREE.Vector3(offsetX, ln2CenterY + 3.3, zPos),
-            30,
-            originalVec.instanceCount
-        );
-        this.root.add(multTargetLN2.group);
-        multTargetLN2.group.visible = false;
-
-        const addYOffset = LN_PARAMS.height * LN_ADD_VECTOR_OFFSET_FRACTION;
-
-        let addTarget = null;
-        if (this._ln1AddPlaceholders && this._ln1AddPlaceholders[laneIdx]) {
-            addTarget = this._ln1AddPlaceholders[laneIdx];
-            this._ln1AddPlaceholders[laneIdx] = null;
-            if (addTarget && addTarget.group && addTarget.group.parent !== this.root) {
-                this.root.add(addTarget.group);
-            }
-            if (addTarget && addTarget.group) {
-                addTarget.group.visible = false;
-            }
-        } else {
-            const addTargetData = this.random.nextVector(this._getBaseVectorLength());
-            addTarget = this._createPrismVector(
-                addTargetData,
-                new THREE.Vector3(offsetX, ln1CenterY + addYOffset, zPos),
-                30,
-                addTargetData.length
-            );
-            this.root.add(addTarget.group);
-            if (addTarget.group) addTarget.group.visible = false;
-        }
-
-        let addTargetLN2 = null;
-        if (this._ln2AddPlaceholders && this._ln2AddPlaceholders[laneIdx]) {
-            addTargetLN2 = this._ln2AddPlaceholders[laneIdx];
-            this._ln2AddPlaceholders[laneIdx] = null;
-            if (addTargetLN2 && addTargetLN2.group && addTargetLN2.group.parent !== this.root) {
-                this.root.add(addTargetLN2.group);
-            }
-            if (addTargetLN2 && addTargetLN2.group) {
-                addTargetLN2.group.visible = false;
-            }
-        } else {
-            const addTargetDataLn2 = this.random.nextVector(this._getBaseVectorLength());
-            addTargetLN2 = this._createPrismVector(
-                addTargetDataLn2,
-                new THREE.Vector3(offsetX, ln2CenterY + addYOffset, zPos),
-                30,
-                addTargetDataLn2.length
-            );
-            this.root.add(addTargetLN2.group);
-            if (addTargetLN2.group) addTargetLN2.group.visible = false;
-        }
-
-        // Fallback to previous trail if a new one wasn't created in this constructor
-        if (!trail && trailFromPrev) trail = trailFromPrev;
-
-        // Ensure originalVec always has a trail reference
-        originalVec.userData = originalVec.userData || {};
-        if (!originalVec.userData.trail) {
-            originalVec.userData.trail = trail;
-        }
-        // Always mark world-space trail semantics so updates use world coords
-        originalVec.userData.trailWorld = true;
-
-        this.lanes.push({
-            layer: this,
-            laneIndex: laneIdx,
-            tokenIndex: laneTokenIndex,
-            tokenLabel: laneTokenLabel,
-            originalVec,
-            originalTrail: trail,
-            dupVec,
-            multTarget,
-            multTargetLN2,
-            addTarget,
-            addTargetLN2,
-            normAnim,
-            horizPhase: 'waiting',
-            branchStartY: ln1CenterY - LN_PARAMS.height / 2 + 5,
-            ln1MidY: ln1CenterY,
-            normStarted:false,
-            normApplied:false,
-            pendingNormData: null,
-            pendingNormLabel: null,
-            pendingNormMeta: null,
-            multStarted:false,
-            ln1AddStarted:false,
-            ln1AddComplete:false,
-            resultVec:null,
-            targetY: meetY,
-            travellingVec: null,
-            upwardCopies: [],
-            sideCopies: [],
-            headIndex: 0,
-            finalAscend: false,
-            ln2Phase: 'notStarted',
-            postAdditionVec: null,
-            movingVecLN2: null,
-            normAnimationLN2: null,
-            normStartedLN2: false,
-            normAppliedLN2: false,
-            pendingNormDataLN2: null,
-            pendingNormLabelLN2: null,
-            pendingNormMetaLN2: null,
-            multDoneLN2: false,
-            ln2AddStarted:false,
-            ln2AddComplete:false,
-            resultVecLN2: null,
-            mlpUpStarted: false,
-            expandedVecGroup: null,
-            expandedVecSegments: null,
-            finalVecAfterMlp: null,
-            expandedVecTrail: null,
-            zPos,
-            __residualMaxY: (function(){ originalVec.group.getWorldPosition(TMP_WORLD_POS); return TMP_WORLD_POS.y; })()
-        });
-
-        // ------------------------------------------------------------
-        // Initial positional-embedding vector (first layer only)
-        // ------------------------------------------------------------
-        if (this.index === 0) {
-            const lane = this.lanes[this.lanes.length - 1];
-
-            try {
-                lane.posAddComplete = false;
-                // Start at the TOP of the bottom positional embedding, horizontally to the right
-                const residualTopY = (LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2 + EMBEDDING_BOTTOM_TOP_ALIGN_OFFSET_FROM_LN1_BOTTOM) + EMBEDDING_BOTTOM_Y_ADJUST;
-                // The positional embedding matrix is shorter than the vocab matrix.  Drop the
-                // starting Y so the trail originates from the actual top of the positional
-                // matrix rather than the top of the taller vocab matrix.
-                const posStartY = residualTopY - (EMBEDDING_MATRIX_PARAMS_VOCAB.height - EMBEDDING_MATRIX_PARAMS_POSITION.height);
-                const posStartX = (EMBEDDING_MATRIX_PARAMS_VOCAB.width / 2)
-                                + (EMBEDDING_MATRIX_PARAMS_POSITION.width / 2)
-                                + EMBEDDING_BOTTOM_PAIR_GAP_X
-                                + EMBEDDING_BOTTOM_POS_X_OFFSET
-                                + EMBEDDING_BOTTOM_VOCAB_X_OFFSET;
-
-                // Give positional a distinct random pattern
-                let posData = this.random.nextVector(this._getBaseVectorLength());
-                if (this.activationSource) {
-                    const posEmbedding = this._getEmbeddingData(lane, 'position');
-                    if (posEmbedding) posData = posEmbedding;
-                }
-                const posVec = this._createPrismVector(
-                    posData,
-                    new THREE.Vector3(posStartX, posStartY, zPos),
-                    30,
-                    this._getInstanceCountFromData(posData)
-                );
-                this.root.add(posVec.group);
-                applyVectorData(
-                    posVec,
-                    posData,
-                    lane.tokenLabel ? `Position Embedding - ${lane.tokenLabel}` : 'Position Embedding',
-                    this._getLaneMeta(lane, 'embedding.position')
-                );
-                // Trail (local to this layer) – enabled only until it reaches residual stream
-                const posTrail = new StraightLineTrail(this.root, 0xffffff, 1);
-                posTrail.start(posVec.group.position);
-                posVec.userData = posVec.userData || {};
-                posVec.userData.trail = posTrail;
-
-                lane.posVec = posVec;
-                lane.posTrail = posTrail;
-
-                // Two-phase motion: vertical rise, then perfectly horizontal slide
-                const targetYAbove = (startY_override != null ? startY_override : originalVec.group.position.y) + POS_VEC_Y_OFFSET_ABOVE_VOCAB;
-                const fasterRise = ANIM_RISE_SPEED_ORIGINAL * POS_VEC_VERTICAL_SPEED_MULT; // rises faster than vocab
-                const riseDist = Math.max(0, targetYAbove - posStartY);
-                const riseMs = (riseDist / (fasterRise * GLOBAL_ANIM_SPEED_MULT)) * 1000;
-
-                const horizDist = Math.abs(posStartX - 0);
-                const horizSpeed = ANIM_HORIZ_SPEED * POS_VEC_HORIZONTAL_SPEED_MULT * GLOBAL_ANIM_SPEED_MULT;
-                const horizMs = (horizDist / horizSpeed) * 1000;
-
-                if (typeof TWEEN !== 'undefined') {
-                    new TWEEN.Tween(posVec.group.position)
-                        .to({ y: targetYAbove }, Math.max(100, riseMs))
-                        .easing(TWEEN.Easing.Quadratic.InOut)
-                        .onComplete(() => {
-                            new TWEEN.Tween(posVec.group.position)
-                                .to({ x: 0, y: targetYAbove }, Math.max(100, horizMs))
-                                .easing(TWEEN.Easing.Quadratic.InOut)
-                                .onStart(() => {
-                                    // Hard-lock Y during horizontal travel to ensure a perfectly straight path
-                                    posVec.group.position.y = targetYAbove;
-                                })
-                                .onUpdate(() => {
-                                    // Maintain Y lock during horizontal interpolation
-                                    posVec.group.position.y = targetYAbove;
-                                })
-                                .onComplete(() => {
-                                    // Stop extending trail once we arrive at residual stream
-                                    try { if (posVec.userData) delete posVec.userData.trail; } catch (_) {}
-                                    // Trigger addition: positional (above) travels DOWN into vocab (rising)
-                                    try {
-                                        const sumData = this._getEmbeddingData(lane, 'sum');
-                                        startPrismAdditionAnimation(posVec, originalVec, null, () => {
-                                            if (sumData) {
-                                                applyVectorData(
-                                                    originalVec,
-                                                    sumData,
-                                                    lane.tokenLabel ? `Embedding Sum - ${lane.tokenLabel}` : 'Embedding Sum',
-                                                    this._getLaneMeta(lane, 'embedding.sum')
-                                                );
-                                            }
-                                            lane.posAddComplete = true;
-                                        }, { finalData: sumData });
-                                    } catch (_) {
-                                        lane.posAddComplete = true;
-                                    }
-                                })
-                                .start();
-                        })
-                        .start();
-                }
-            } catch (_) {
-                // Non-fatal – positional addition is a visual enhancement only
-            }
-        }
+        buildSingleLane(this, oldLane, offsetX, ln1CenterY, ln2CenterY, startY_override, meetY, laneIdx, slitSpacing);
     }
 
     /**

@@ -42,10 +42,14 @@ import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
 import { CaptureActivationSource } from '../src/data/CaptureActivationSource.js';
 import { precomputeActivationCaches } from '../src/utils/activationPrecompute.js';
 
+// -----------------------------------------------------------------------------
+// Demo configuration for the 12-layer GPT-2 stack entrypoint.
+// -----------------------------------------------------------------------------
 const NUM_LAYERS = 12;
 const PROMPT_TOKENS = ['Can', '\u0120machines', '\u0120think', '?', '\u0120'];
 const POSITION_TOKENS = ['1', '2', '3', '4', '5'];
 const DEFAULT_PROMPT_LANES = Math.max(1, PROMPT_TOKENS.length);
+// Visual config for the floating "token chip" labels at the base of the stack.
 const TOKEN_CHIP_STYLE = {
     padding: 140,
     minWidth: 440,
@@ -79,10 +83,12 @@ const POSITION_CHIP_STYLE = {
     scale: 2.0
 };
 
+// GPT-2 BPE uses a leading U+0120 to indicate a space; render as a normal space.
 function formatTokenLabel(token) {
     return token.replace(/^\u0120/, ' ');
 }
 
+// Build a rounded rectangle shape used for the token chip body.
 function buildRoundedRectShape(width, height, radius) {
     const clampedRadius = Math.max(0, Math.min(radius, Math.min(width, height) / 2 - 1));
     const halfW = width / 2;
@@ -101,6 +107,7 @@ function buildRoundedRectShape(width, height, radius) {
     return shape;
 }
 
+// Create a 3D chip group with optional text mesh, plus a cached size in userData.
 function createTokenChip(label, font, style) {
     let textGeo = null;
     let bounds = null;
@@ -142,6 +149,7 @@ function createTokenChip(label, font, style) {
     const group = new THREE.Group();
     group.add(chipMesh);
 
+    // Add thin caps to avoid transparent edges when viewed from the sides.
     const capMat = chipMat.clone();
     capMat.polygonOffset = true;
     capMat.polygonOffsetFactor = -1;
@@ -156,6 +164,7 @@ function createTokenChip(label, font, style) {
     backCap.rotation.y = Math.PI;
     group.add(frontCap, backCap);
 
+    // Optional text mesh, centered on the front cap.
     if (textGeo && textWidth > 0 && textHeight > 0) {
         const textMat = new THREE.MeshBasicMaterial({
             color: 0xffffff,
@@ -186,6 +195,7 @@ function createTokenChip(label, font, style) {
     return group;
 }
 
+// Temporarily stage the camera near the chips, then optionally return to tower view.
 function stageChipCamera(pipeline, startPos, startTarget, endPos, endTarget, holdMs, returnMs) {
     const engine = pipeline?.engine;
     if (!engine || !engine.camera || !engine.controls) return;
@@ -249,12 +259,14 @@ function stageChipCamera(pipeline, startPos, startTarget, endPos, endTarget, hol
     }
 }
 
-// Optionally load pre-baked geometries; returns instantly if disabled
+// Optionally load pre-baked geometries to skip heavy procedural work.
 await loadPrecomputedGeometries('../precomputed_components.glb');
 
+// Activation data + lane count selection (defaults to static prompt if no capture).
 let activationSource = null;
 let laneTokenIndices = null;
 let laneCount = NUM_VECTOR_LANES;
+// Special "/full" path shows all capture tokens instead of the prompt subset.
 const isFullTokenMode = (() => {
     const path = window.location.pathname.replace(/\/+$/, '');
     return path.endsWith('/full');
@@ -264,6 +276,7 @@ const setLoadingStatus = (text) => {
     if (statusDiv) statusDiv.textContent = text;
 };
 try {
+    // Load activation capture data from ?capture= or ?file= query param.
     const params = new URLSearchParams(window.location.search);
     const captureFile = params.get('capture') || params.get('file') || 'capture.json';
     const captureUrl = captureFile.startsWith('http')
@@ -289,9 +302,11 @@ if (!activationSource) {
     laneCount = DEFAULT_PROMPT_LANES;
 }
 
+// Sync global lane counts so component spacing/animation widths align.
 setNumVectorLanes(laneCount);
 setAnimationLaneCount(laneCount);
 
+// Warm activation caches so lane startup avoids async stalls.
 if (activationSource && laneTokenIndices) {
     try {
         setLoadingStatus('Preparing activation cache...');
@@ -309,6 +324,7 @@ if (activationSource && laneTokenIndices) {
     }
 }
 
+// Labels for the token/position chips at the base of the stack.
 const tokenLabelsFromCapture = isFullTokenMode && activationSource && laneTokenIndices
     ? laneTokenIndices.map((idx) => activationSource.getTokenString(idx) || '')
     : PROMPT_TOKENS;
@@ -316,17 +332,18 @@ const positionLabelsFromCapture = isFullTokenMode && activationSource && laneTok
     ? laneTokenIndices.map((idx) => String(idx + 1))
     : POSITION_TOKENS;
 
-// Skip intro typing screen for direct animation entry
+// Skip intro typing screen for direct animation entry.
 appState.skipIntro = true;
 
-// Set default playback speed to fast on load
+// Set default playback speed to fast on load.
 try { setPlaybackSpeed('fast'); } catch (_) { /* no-op */ }
 
-// GPT-2 tower – initialise immediately
+// GPT-2 tower - initialize immediately.
 MHSAAnimation.ENABLE_SELF_ATTENTION = true;
 const gptCanvas = document.getElementById('gptCanvas');
 const camPos    = new THREE.Vector3(0, 11000, 16000);
 const camTarget = new THREE.Vector3(0, 9000, 0);
+// LayerPipeline builds all static visuals first, then advances active lanes upward.
 const pipeline = new LayerPipeline(gptCanvas, NUM_LAYERS, {
     cameraPosition: camPos,
     cameraTarget: camTarget,
@@ -334,10 +351,11 @@ const pipeline = new LayerPipeline(gptCanvas, NUM_LAYERS, {
     laneCount
 });
 
-// Show GPT canvas immediately
+// Show GPT canvas immediately.
 gptCanvas.style.display = 'block';
 try {
     const eng = pipeline.engine;
+    // Keep shadows off for this demo to reduce GPU cost.
     eng.renderer.shadowMap.enabled = false;
     eng.scene.traverse((obj) => {
         if (obj.isMesh) { obj.castShadow = false; obj.receiveShadow = false; }
@@ -345,7 +363,7 @@ try {
     });
 } catch (_) {}
 
-// Embedding matrices (static visuals)
+// Embedding matrices + token chips (static visuals at tower base).
 try {
     const headBlue = new THREE.Color(MHA_FINAL_Q_COLOR);
     const headGreen = new THREE.Color(MHA_FINAL_K_COLOR);
@@ -400,6 +418,7 @@ try {
         pipeline.engine.registerRaycastRoot(posBottom.group);
     }
 
+    // Precompute Z positions for each lane so chips align with vector lanes.
     const laneSpacing = LN_PARAMS.depth / (laneCount + 1);
     const laneZs = [];
     for (let i = 0; i < laneCount; i++) {
@@ -416,6 +435,7 @@ try {
         }
     };
     const spawnTokenChips = (font) => {
+        // Animate the token chips upward from a resting "stash" position.
         const vocabRiseDuration = TOKEN_CHIP_STYLE.riseDuration * (TOKEN_CHIP_STYLE.vocabSlowdown || 1);
         const posRiseDuration = TOKEN_CHIP_STYLE.riseDuration * (TOKEN_CHIP_STYLE.positionSlowdown || 1);
         const laneSpanMs = TOKEN_CHIP_STYLE.riseDelay * Math.max(0, laneCount - 1);
@@ -460,6 +480,7 @@ try {
             pipeline.engine.scene.add(chip);
             registerChip(chip);
 
+            // Keep a static chip below the stack for context once the animated one rises.
             const staticChip = createTokenChip(label, font, TOKEN_CHIP_STYLE);
             staticChip.userData.label = chipLabel;
             staticChip.name = chipLabel;
@@ -501,6 +522,7 @@ try {
             pipeline.engine.scene.add(chip);
             registerChip(chip);
 
+            // Static chip for the position stream, matching the token chips below.
             const staticChip = createTokenChip(label, font, style);
             staticChip.userData.label = chipLabel;
             staticChip.name = chipLabel;
@@ -534,6 +556,7 @@ try {
         }
     );
 
+    // Top-of-tower LayerNorm + vocab projection marker.
     const lastLayer = pipeline._layers[NUM_LAYERS - 1];
     if (lastLayer && lastLayer.mlpDown && lastLayer.mlpDown.group) {
         const tmp = new THREE.Vector3();
@@ -586,7 +609,7 @@ try {
     }
 } catch (_) { /* optional – embedding visuals are non-critical */ }
 
-// Initialise UI modules
+// Initialize UI modules (status, settings, pause/skip, selection panel).
 initIntroAnimation(pipeline, gptCanvas);
 initStatusOverlay(pipeline, NUM_LAYERS);
 initPauseButton(pipeline);

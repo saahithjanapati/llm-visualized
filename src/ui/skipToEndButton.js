@@ -1,8 +1,11 @@
+import { appState } from '../state/appState.js';
+
 export function initSkipToEndButton(pipeline) {
     if (!pipeline) return () => {};
 
     const existingButton = document.getElementById('skipToEndBtn');
     const topControls = document.getElementById('topControls');
+    const equationsPanel = document.getElementById('equationsPanel');
     const button = existingButton || (() => {
         const btn = document.createElement('button');
         btn.id = 'skipToEndBtn';
@@ -18,6 +21,15 @@ export function initSkipToEndButton(pipeline) {
         }
         return btn;
     })();
+
+    const applyEquationsVisibility = () => {
+        if (!equationsPanel) return;
+        const shouldShow = appState.showEquations && !appState.equationsSuppressed;
+        const nextDisplay = shouldShow ? 'block' : 'none';
+        if (equationsPanel.style.display !== nextDisplay) {
+            equationsPanel.style.display = nextDisplay;
+        }
+    };
 
     const setVisible = (show) => {
         const next = show ? 'true' : 'false';
@@ -51,6 +63,10 @@ export function initSkipToEndButton(pipeline) {
         }
 
         const skipping = typeof pipeline.isSkipToEndActive === 'function' && pipeline.isSkipToEndActive();
+        if (appState.equationsSuppressed !== skipping) {
+            appState.equationsSuppressed = skipping;
+            applyEquationsVisibility();
+        }
         setVisible(true);
         button.disabled = !!skipping;
         button.dataset.state = skipping ? 'skipping' : 'ready';

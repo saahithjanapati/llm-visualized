@@ -92,7 +92,11 @@ export function initSettingsModal(pipeline) {
     eqToggle?.addEventListener('change', () => {
         appState.showEquations = !!eqToggle.checked;
         setPreference('showEquations', appState.showEquations);
-        if (equationsPanel) equationsPanel.style.display = appState.showEquations ? 'block' : 'none';
+        if (equationsPanel) {
+            equationsPanel.style.display = (appState.showEquations && !appState.equationsSuppressed)
+                ? 'block'
+                : 'none';
+        }
         appState.lastEqKey = '';
     });
 

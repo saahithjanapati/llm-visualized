@@ -10,10 +10,11 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     const equationsPanel = document.getElementById('equationsPanel');
     const equationsTitle = document.getElementById('equationsTitle');
     const equationsBody = document.getElementById('equationsBody');
+    const shouldShowEquations = () => appState.showEquations && !appState.equationsSuppressed;
 
     appState.showEquations = getPreference('showEquations', true);
     appState.showHdrBackground = getPreference('showHdrBackground', false);
-    if (equationsPanel) equationsPanel.style.display = appState.showEquations ? 'block' : 'none';
+    if (equationsPanel) equationsPanel.style.display = shouldShowEquations() ? 'block' : 'none';
     appState.applyEnvironmentBackground(pipeline);
 
     const EQ = {
@@ -30,7 +31,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
 
     function renderEq(tex, title) {
         if (!equationsPanel || !equationsBody) return;
-        if (!appState.showEquations) return;
+        if (!shouldShowEquations()) return;
         equationsTitle.textContent = title || 'Equations';
         if (window.katex?.render) {
             try {
@@ -48,7 +49,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     appState.lastEqKey = '';
 
     function updateEquations(layer) {
-        if (!appState.showEquations) return;
+        if (!shouldShowEquations()) return;
         if (!layer) return;
         const lanes = Array.isArray(layer.lanes) ? layer.lanes : [];
         if (!lanes.length) return;
@@ -239,7 +240,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     updateStatus();
 
     const tickEquations = () => {
-        if (appState.showEquations && pipeline?._layers?.length) {
+        if (shouldShowEquations() && pipeline?._layers?.length) {
             const idx = pipeline._currentLayerIdx ?? 0;
             updateEquations(pipeline._layers[idx]);
         }
