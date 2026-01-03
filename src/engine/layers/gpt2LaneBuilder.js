@@ -317,6 +317,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
         expandedVecSegments: null,
         finalVecAfterMlp: null,
         expandedVecTrail: null,
+        mlpDownStarted: false,
         zPos,
         __residualMaxY: (function(){ originalVec.group.getWorldPosition(TMP_WORLD_POS); return TMP_WORLD_POS.y; })()
     });

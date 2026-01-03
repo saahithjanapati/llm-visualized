@@ -716,7 +716,9 @@ export class LayerPipeline extends EventTarget {
                         updateTopLnColor(resVec.group.position.y);
                         this.dispatchEvent(new Event('progress'));
 
+                        lane.__topLnShiftStarted = true;
                         startPrismAdditionAnimation(addVec, resVec, null, () => {
+                            lane.__topLnShiftComplete = true;
                             if (addVec.group) addVec.group.visible = false;
                             if (addVec.group && addVec.group.parent) {
                                 addVec.group.parent.remove(addVec.group);

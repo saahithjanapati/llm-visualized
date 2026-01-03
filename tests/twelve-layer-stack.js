@@ -32,6 +32,7 @@ import {
 import { appState } from '../src/state/appState.js';
 import { initIntroAnimation } from '../src/ui/introAnimation.js';
 import { initStatusOverlay } from '../src/ui/statusOverlay.js';
+import { initParameterCounter } from '../src/ui/parameterCounter.js';
 import { initSettingsModal } from '../src/ui/settingsModal.js';
 import { initPauseButton } from '../src/ui/pauseButton.js';
 import { initConveyorSkipButton } from '../src/ui/conveyorSkipButton.js';
@@ -612,6 +613,7 @@ try {
 // Initialize UI modules (status, settings, pause/skip, selection panel).
 initIntroAnimation(pipeline, gptCanvas);
 initStatusOverlay(pipeline, NUM_LAYERS);
+initParameterCounter(pipeline, NUM_LAYERS);
 initPauseButton(pipeline);
 initConveyorSkipButton(pipeline);
 initSkipToEndButton(pipeline);

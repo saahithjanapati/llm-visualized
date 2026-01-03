@@ -1581,6 +1581,7 @@ export default class Gpt2Layer extends BaseLayer {
     _animateMlpDownProjection(lane) {
         const expandedGroup = lane.expandedVecGroup;
         if (!expandedGroup || typeof TWEEN === 'undefined') return;
+        lane.mlpDownStarted = true;
         
         const orangeColor = new THREE.Color(0xc07a12);
         const downBottomY = this.mlpDown.group.position.y - MLP_MATRIX_PARAMS_DOWN.height / 2;

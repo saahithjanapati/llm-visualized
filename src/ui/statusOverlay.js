@@ -18,14 +18,14 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     appState.applyEnvironmentBackground(pipeline);
 
     const EQ = {
-        ln1: String.raw`x_{\text{ln}} = \mathrm{LN}(x) = \gamma \odot \frac{x - \mu}{\sqrt{\sigma^2+\epsilon}} + \beta` ,
-        qkv_per_head: String.raw`Q_k = x_{\text{ln}} W_k^Q,\quad K_k = x_{\text{ln}} W_k^K,\quad V_k = x_{\text{ln}} W_k^V\quad (k=1..h)`,
-        qkv_packed: String.raw`Q = x_{\text{ln}} W^Q,\quad K = x_{\text{ln}} W^K,\quad V = x_{\text{ln}} W^V,\quad Q,K,V\in\mathbb{R}^{B\times T\times h\times d_h}`,
-        attn: String.raw`A_k = \frac{Q_k K_k^\top}{\sqrt{d_h}} + M_{\text{causal}},\quad \alpha_k = \mathrm{softmax}(A_k)\ (\text{row-wise}),\quad H_k = \alpha_k V_k`,
-        concat_proj: String.raw`H = \mathrm{Concat}(H_1,\ldots,H_h)\in\mathbb{R}^{B\times T\times d},\quad \mathrm{SA}(x) = H W^O + b_o`,
+        ln1: String.raw`x_{\text{ln}} = \mathrm{LN}(x)`,
+        qkv_per_head: String.raw`\begin{aligned} Q &= x_{\text{ln}} W^Q \\ K &= x_{\text{ln}} W^K \\ V &= x_{\text{ln}} W^V \end{aligned}`,
+        qkv_packed: String.raw`\begin{aligned} Q &= x_{\text{ln}} W^Q \\ K &= x_{\text{ln}} W^K \\ V &= x_{\text{ln}} W^V \end{aligned}`,
+        attn: String.raw`\begin{aligned} A &= \mathrm{softmax}\left(\frac{QK^\top}{\sqrt{d_h}} + M\right) \\ H &= AV \end{aligned}`,
+        concat_proj: String.raw`\begin{aligned} H &= \mathrm{Concat}(H_1,\dots,H_h) \\ \mathrm{SA}(x) &= H W^O + b_o \end{aligned}`,
         resid1: String.raw`u = x + \mathrm{SA}(x_{\text{ln}})`,
-        ln2: String.raw`u_{\text{ln}} = \mathrm{LN}(u) = \gamma' \odot \frac{u - \mu'}{\sqrt{{\sigma'}^{2}+\epsilon}} + \beta'`,
-        mlp: String.raw`z = u_{\text{ln}} W_{\text{up}} + b_{\text{up}},\quad z' = \mathrm{GELU}(z),\quad \mathrm{MLP}(u_{\text{ln}}) = z' W_{\text{down}} + b_{\text{down}}`,
+        ln2: String.raw`u_{\text{ln}} = \mathrm{LN}(u)`,
+        mlp: String.raw`\begin{aligned} z &= \mathrm{GELU}(u_{\text{ln}} W_{\text{up}} + b_{\text{up}}) \\ \mathrm{MLP}(u_{\text{ln}}) &= z W_{\text{down}} + b_{\text{down}} \end{aligned}`,
         resid2: String.raw`x_{\text{out}} = u + \mathrm{MLP}(u_{\text{ln}})`
     };
 
@@ -168,7 +168,10 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
 
         updateEquations(layer);
 
-        const nextStatusText = `Layer ${idx + 1} / ${total}\n${displayStage}`;
+        const includeStageLine = !equationsPanel || !shouldShowEquations();
+        const nextStatusText = includeStageLine
+            ? `Layer ${idx + 1} / ${total}\n${displayStage}`
+            : `Layer ${idx + 1} / ${total}`;
         if (nextStatusText === lastStatusText) {
             checkTopEmbeddingActivation();
             return;

@@ -2,7 +2,7 @@
 
 This script runs an instrumented forward pass through GPT-2 (124M) and
 records compact activation "vector states" alongside lightweight
-metadata (flop/parameter counts, sampling logits, etc.).
+metadata (sampling logits, capture config, etc.).
 
 Usage (interactive example):
 
@@ -18,8 +18,6 @@ Notes
 * Vector states are sampled every 32 dims by default (configurable).
 * Values are quantised to float16 by default; int8 quantisation is
   available via ``--quantisation int8``.
-* FLOP counts are approximate and only cover generation tokens (prompt
-  tokens are ignored as described in the project brief).
 """
 
 from __future__ import annotations
@@ -895,11 +893,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     top_logits = extract_sampling_logits(capture.logits, args.top_k, args.top_p, args.round_decimals)
 
-    prompt_len = len(prompt_id_list)
-    generation_len = len(completion_id_list)
-
-    params_entries = parameter_accounting(model)
-
     payload = {
         "meta": {
             "prompt": prompt_text,
@@ -911,7 +904,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         },
         "activations": capture.payload,
         "logits": top_logits,
-        "parameters": [dataclasses.asdict(entry) for entry in params_entries],
     }
 
     with open(args.output, "w", encoding="utf-8") as fh:

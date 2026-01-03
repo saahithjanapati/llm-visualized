@@ -1,3 +1,5 @@
+import { PARAMETER_CHECKPOINTS } from '../src/data/parameterCheckpoints.js';
+
 const fileInput = document.getElementById('fileInput');
 const urlInput = document.getElementById('urlInput');
 const loadUrlBtn = document.getElementById('loadUrl');
@@ -565,6 +567,9 @@ function renderDetails(path) {
 }
 
 function loadParsedData(data, sourceLabel) {
+    if (data && typeof data === 'object' && Array.isArray(PARAMETER_CHECKPOINTS)) {
+        data.parameters = PARAMETER_CHECKPOINTS;
+    }
     state.data = data;
     state.source = sourceLabel;
     setStatus(`Loaded ${sourceLabel}`);

@@ -109,6 +109,7 @@ export class CoreEngine {
         this._lastPointerX = null;
         this._lastPointerY = null;
         this._raycastSelectionHandler = null;
+        this._hoveringClickable = false;
         this._clickTapData = null;
         this._clickTapMoveThresholdSq = 36; // ~6px movement allowance
 
@@ -277,6 +278,9 @@ export class CoreEngine {
         this._raycastingEnabled = !!enabled;
         if (!this._raycastingEnabled && this._hoverLabelDiv) {
             this._hoverLabelDiv.style.display = 'none';
+        }
+        if (!this._raycastingEnabled) {
+            this._setCanvasCursor(false);
         }
     }
 
@@ -595,6 +599,14 @@ export class CoreEngine {
         return null;
     }
 
+    _setCanvasCursor(isPointer) {
+        if (!this.renderer?.domElement) return;
+        const next = isPointer ? 'pointer' : '';
+        if (this._hoveringClickable === isPointer) return;
+        this._hoveringClickable = isPointer;
+        this.renderer.domElement.style.cursor = next;
+    }
+
     _performRaycastAt(clientX, clientY, { force = false } = {}) {
         if (!this._raycastingEnabled) return;
         if (!force && this._isUserNavigating) return;
@@ -609,6 +621,7 @@ export class CoreEngine {
         this._raycaster.setFromCamera(this._pointer, this.camera);
         if (!this._raycastRoots.length) {
             this._hoverLabelDiv.style.display = 'none';
+            this._setCanvasCursor(false);
             return;
         }
 
@@ -623,10 +636,12 @@ export class CoreEngine {
             this._hoverLabelDiv.style.left = `${clientX + 12}px`;
             this._hoverLabelDiv.style.top  = `${clientY + 12}px`;
             this._hoverLabelDiv.style.display = 'block';
+            this._setCanvasCursor(true);
             return;
         }
         // No intersection with a labelled object – hide overlay.
         this._hoverLabelDiv.style.display = 'none';
+        this._setCanvasCursor(false);
     }
 
     _performSelectionAt(clientX, clientY, { force = false } = {}) {

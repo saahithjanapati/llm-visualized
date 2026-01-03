@@ -5,6 +5,7 @@ import { VectorVisualizationInstancedPrism } from '../src/components/VectorVisua
 import { VECTOR_LENGTH_PRISM } from '../src/utils/constants.js';
 import { mapValueToColor } from '../src/utils/colors.js';
 import { MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR } from '../src/animations/LayerAnimationConstants.js';
+import { PARAMETER_CHECKPOINTS } from '../src/data/parameterCheckpoints.js';
 
 const fileInput = document.getElementById('fileInput');
 const urlInput = document.getElementById('urlInput');
@@ -953,6 +954,9 @@ function drawSchemeCanvas(canvas, scheme) {
 }
 
 function loadJsonData(data, sourceLabel) {
+    if (data && typeof data === 'object' && Array.isArray(PARAMETER_CHECKPOINTS)) {
+        data.parameters = PARAMETER_CHECKPOINTS;
+    }
     state.data = data;
     const meta = data && data.meta && data.meta.config ? data.meta.config : {};
     state.config.quantisation = meta.quantisation || null;
