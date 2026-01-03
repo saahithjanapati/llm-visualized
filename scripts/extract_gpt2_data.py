@@ -898,15 +898,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     prompt_len = len(prompt_id_list)
     generation_len = len(completion_id_list)
 
-    flops_entries = approximate_layer_flops(
-        hidden_size=model.config.n_embd,
-        intermediate_size=model.config.n_inner or model.config.n_embd * 4,
-        num_heads=model.config.n_head,
-        num_layers=model.config.n_layer,
-        prompt_len=prompt_len,
-        generation_len=generation_len,
-    )
-
     params_entries = parameter_accounting(model)
 
     payload = {
@@ -920,7 +911,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         },
         "activations": capture.payload,
         "logits": top_logits,
-        "flops": [dataclasses.asdict(entry) for entry in flops_entries],
         "parameters": [dataclasses.asdict(entry) for entry in params_entries],
     }
 
