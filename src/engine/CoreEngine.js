@@ -149,7 +149,6 @@ export class CoreEngine {
 
         this._onPointerCancel = this._onPointerCancel.bind(this);
         this.renderer.domElement.addEventListener('pointercancel', this._onPointerCancel);
-        this.renderer.domElement.addEventListener('pointerleave', this._onPointerLeave);
 
         // Bind pointer up handler for touch devices so taps trigger labels
         this._onPointerUp = this._onPointerUp.bind(this);
@@ -371,7 +370,6 @@ export class CoreEngine {
         this.renderer.domElement.removeEventListener('pointermove', this._onPointerMove);
         this.renderer.domElement.removeEventListener('pointerdown', this._onPointerDown);
         this.renderer.domElement.removeEventListener('pointercancel', this._onPointerCancel);
-        this.renderer.domElement.removeEventListener('pointerleave', this._onPointerLeave);
         this.renderer.domElement.removeEventListener('pointerup', this._onPointerUp);
         this.renderer.domElement.removeEventListener('contextmenu', this._onContextMenu);
         this.renderer.domElement.removeEventListener('selectstart', this._onSelectStart);
@@ -448,7 +446,6 @@ export class CoreEngine {
     _onPointerDown = (event) => {
         this._updateHoverLabelMode(event.pointerType);
         if (event.pointerType === 'touch') {
-            event.preventDefault();
             // Only track the primary tap candidate to avoid conflicts with multi-touch gestures
             if (this._touchTapData && this._touchTapData.id !== event.pointerId) return;
             const { clientX, clientY } = event;
@@ -485,11 +482,6 @@ export class CoreEngine {
         if (this._clickTapData && this._clickTapData.id === event.pointerId) {
             this._clickTapData = null;
         }
-        this._resetControlsState();
-    };
-
-    _onPointerLeave = () => {
-        this._resetControlsState();
     };
 
     _onPointerUp = (event) => {
