@@ -24,6 +24,7 @@ export class CoreEngine {
         this._container = container;
         this._layers = layers;
         this._speed  = typeof opts.speed === 'number' ? opts.speed : 1.0;
+        this._devMode = !!opts.devMode;
         // Enable/disable expensive post-processing effects (e.g. bloom).
         // Bloom is disabled by default to reduce initial load; set opts.enableBloom=true to re-enable.
         this._enableBloom = typeof opts.enableBloom === 'boolean' ? opts.enableBloom : false;
@@ -255,6 +256,8 @@ export class CoreEngine {
             this._stats.dom.style.left = '0px';
             this._stats.dom.style.top = 'auto';
             this._stats.dom.style.bottom = '0px';
+            this._stats.dom.style.pointerEvents = 'none';
+            this._stats.dom.style.display = this._devMode ? 'block' : 'none';
             document.body.appendChild(this._stats.dom);
         }
 
@@ -283,6 +286,13 @@ export class CoreEngine {
         }
         if (!this._raycastingEnabled) {
             this._setCanvasCursor(false);
+        }
+    }
+
+    setDevMode(enabled) {
+        this._devMode = !!enabled;
+        if (this._stats && this._stats.dom) {
+            this._stats.dom.style.display = this._devMode ? 'block' : 'none';
         }
     }
 
@@ -789,7 +799,7 @@ export class CoreEngine {
             perfStats.beginFrame(now);
         }
 
-        if (this._stats) this._stats.begin();
+        if (this._devMode && this._stats) this._stats.begin();
 
         if (!this._paused) {
             const updateStart = perfStats.enabled
@@ -843,7 +853,7 @@ export class CoreEngine {
             perfStats.addTime('render', renderEnd - renderStart);
         }
 
-        if (this._stats) this._stats.end();
+        if (this._devMode && this._stats) this._stats.end();
         if (perfStats.enabled) {
             const endNow = (typeof performance !== 'undefined' && typeof performance.now === 'function')
                 ? performance.now()

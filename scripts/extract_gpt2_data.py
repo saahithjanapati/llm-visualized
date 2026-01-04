@@ -750,7 +750,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--num-completions", type=int, default=5, help="Number of candidate completions to sample.")
     parser.add_argument("--max-new-tokens", type=int, default=32, help="Maximum number of tokens to generate for each completion.")
     parser.add_argument("--temperature", type=float, default=1.0, help="Sampling temperature.")
-    parser.add_argument("--top-k", type=int, default=None, help="Top-k sampling.")
+    parser.add_argument("--top-k", type=int, default=40, help="Top-k sampling.")
     parser.add_argument("--top-p", type=float, default=None, help="Top-p (nucleus) sampling.")
     parser.add_argument("--seed", type=int, default=42, help="RNG seed for reproducible sampling.")
     parser.add_argument("--output", type=str, default="gpt2_capture.json", help="Output JSON path.")

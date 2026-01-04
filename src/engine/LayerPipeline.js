@@ -84,6 +84,7 @@ export class LayerPipeline extends EventTarget {
         this._autoCameraDesiredTargetOffset = new THREE.Vector3();
         this._hasAutoCameraOffsets = false;
         this._suppressControlsChange = false;
+        this._devMode = !!opts.devMode;
         this._cameraOffsetDiv = (typeof document !== 'undefined')
             ? document.getElementById('cameraOffsetOverlay')
             : null;
@@ -968,7 +969,10 @@ export class LayerPipeline extends EventTarget {
 
     _updateCameraOffsetOverlay() {
         const overlay = this._cameraOffsetDiv;
-        if (!overlay) return;
+        if (!overlay || !this._devMode) {
+            if (overlay) overlay.style.display = 'none';
+            return;
+        }
 
         if (!this._autoCameraFollow) {
             overlay.style.display = 'none';
@@ -1038,6 +1042,15 @@ export class LayerPipeline extends EventTarget {
             cancelAnimationFrame(this._cameraOverlayRaf);
         }
         this._cameraOverlayRaf = null;
+    }
+
+    setDevMode(enabled) {
+        this._devMode = !!enabled;
+        if (!this._devMode && this._cameraOffsetDiv) {
+            this._cameraOffsetDiv.style.display = 'none';
+        } else {
+            this._updateCameraOffsetOverlay();
+        }
     }
 }
 

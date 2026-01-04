@@ -10,7 +10,10 @@ export function initSettingsModal(pipeline) {
     const equationsPanel = document.getElementById('equationsPanel');
 
     appState.autoCameraFollow = getPreference('autoCameraFollow', true);
+    appState.devMode = getPreference('devMode', false);
     pipeline?.setAutoCameraFollow?.(appState.autoCameraFollow, { immediate: true });
+    pipeline?.setDevMode?.(appState.devMode);
+    pipeline?.engine?.setDevMode?.(appState.devMode);
 
     function applySpeed(value) {
         setPlaybackSpeed(value);
@@ -42,6 +45,8 @@ export function initSettingsModal(pipeline) {
                 : appState.autoCameraFollow;
             autoCam.checked = !!enabled;
         }
+        const devMode = document.getElementById('toggleDevMode');
+        if (devMode) devMode.checked = !!appState.devMode;
     }
 
     function closeSettings() {
@@ -112,5 +117,13 @@ export function initSettingsModal(pipeline) {
         appState.autoCameraFollow = !!autoCamToggle.checked;
         setPreference('autoCameraFollow', appState.autoCameraFollow);
         pipeline?.setAutoCameraFollow?.(appState.autoCameraFollow, { immediate: appState.autoCameraFollow });
+    });
+
+    const devToggle = document.getElementById('toggleDevMode');
+    devToggle?.addEventListener('change', () => {
+        appState.devMode = !!devToggle.checked;
+        setPreference('devMode', appState.devMode);
+        pipeline?.setDevMode?.(appState.devMode);
+        pipeline?.engine?.setDevMode?.(appState.devMode);
     });
 }

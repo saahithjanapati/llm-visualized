@@ -13,6 +13,7 @@ export class AppState {
         this.lastEqKey = '';
         this.showHdrBackground = false;
         this.autoCameraFollow = true;
+        this.devMode = false;
         this.environmentTexture = null;
         this.initialPipelineBackground = null;
         this.initialPipelineBackgroundCaptured = false;
