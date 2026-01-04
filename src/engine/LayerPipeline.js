@@ -142,7 +142,7 @@ export class LayerPipeline extends EventTarget {
 
             layer.init(this._engine.scene);
             if (typeof this._engine.registerRaycastRoot === 'function') {
-                this._engine.registerRaycastRoot(layer.root);
+                this._engine.registerRaycastRoot(layer.raycastRoot || layer.root);
             }
             this._layers.push(layer);
             this._engine._layers.push(layer); // add to engine update list

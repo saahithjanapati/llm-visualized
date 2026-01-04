@@ -4,6 +4,7 @@ import { LayerNormalizationVisualization } from '../../components/LayerNormaliza
 import { WeightMatrixVisualization } from '../../components/WeightMatrixVisualization.js';
 import { VectorVisualizationInstancedPrism } from '../../components/VectorVisualizationInstancedPrism.js';
 import { StraightLineTrail, buildMergedLineSegmentsFromSegments, collectTrailsUnder, mergeTrailsIntoLineSegments } from '../../utils/trailUtils.js';
+import { TRAIL_MIN_SEGMENT_DISTANCE } from '../../utils/trailConstants.js';
 import {
     LN_PARAMS,
     LN_NORM_START_FRACTION_FROM_BOTTOM,
@@ -102,6 +103,7 @@ export default class Gpt2Layer extends BaseLayer {
         this._skipToEndActive = false;
         this._skipConcatTriggered = false;
         this._skipHiddenMaterials = new WeakSet();
+        this.raycastRoot = null;
 
         // Placeholder vectors shown inside inactive LayerNorms so the
         // "addition" prisms are visible throughout the full stack even
@@ -141,6 +143,10 @@ export default class Gpt2Layer extends BaseLayer {
         this.root.position.y = this.index * VERTICAL_SPACING + this.yOffset;
         freezeStaticTransforms(this.root);
 
+        this.raycastRoot = new THREE.Group();
+        this.raycastRoot.name = `Layer${this.index}_RaycastRoot`;
+        this.root.add(this.raycastRoot);
+
         const offsetX = BRANCH_X; // all branched components share this X
 
         // ────────────────────────────────────────────────────────────────
@@ -163,7 +169,7 @@ export default class Gpt2Layer extends BaseLayer {
         ln1.setColor(inactiveDark);
         // Start fully opaque to avoid early depth-sorting costs.
         ln1.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
-        this.root.add(ln1.group);
+        this.raycastRoot.add(ln1.group);
         freezeStaticTransforms(ln1.group, true);
 
         const ln1TopY = ln1CenterY + LN_PARAMS.height / 2;
@@ -186,7 +192,7 @@ export default class Gpt2Layer extends BaseLayer {
         // Create an internal clock for sub-animations handled by the MHSA helper
         this._mhsaClock = new THREE.Clock();
         // Pass empty opts – twelve-layer stack keeps self-attention disabled via global static flag.
-        this.mhsaAnimation = new MHSAAnimation(this.root, BRANCH_X, mhaBaseY, this._mhsaClock, 'temp', {
+        this.mhsaAnimation = new MHSAAnimation(this.raycastRoot, BRANCH_X, mhaBaseY, this._mhsaClock, 'temp', {
             activationSource: this.activationSource,
             layerIndex: this.index,
             vectorPrismCount: this._getBaseVectorLength(),
@@ -214,7 +220,7 @@ export default class Gpt2Layer extends BaseLayer {
         );
         ln2.setColor(inactiveDark);
         ln2.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
-        this.root.add(ln2.group);
+        this.raycastRoot.add(ln2.group);
         freezeStaticTransforms(ln2.group, true);
 
         const ln2TopY = ln2CenterY + LN_PARAMS.height / 2;
@@ -256,7 +262,7 @@ export default class Gpt2Layer extends BaseLayer {
             if (mlpUp.frontCapMesh) mlpUp.frontCapMesh.userData.label = lbl;
             if (mlpUp.backCapMesh)  mlpUp.backCapMesh.userData.label  = lbl;
         }
-        this.root.add(mlpUp.group);
+        this.raycastRoot.add(mlpUp.group);
         freezeStaticTransforms(mlpUp.group, true);
 
         // 5) MLP Down-projection matrix (same orange)
@@ -284,7 +290,7 @@ export default class Gpt2Layer extends BaseLayer {
             if (mlpDown.frontCapMesh) mlpDown.frontCapMesh.userData.label = lbl;
             if (mlpDown.backCapMesh)  mlpDown.backCapMesh.userData.label  = lbl;
         }
-        this.root.add(mlpDown.group);
+        this.raycastRoot.add(mlpDown.group);
         freezeStaticTransforms(mlpDown.group, true);
 
         // ---------- Residual vectors (original stream) ----------
@@ -312,10 +318,25 @@ export default class Gpt2Layer extends BaseLayer {
         const bottomY_ln2_abs = LAYER_NORM_2_Y_POS - LN_PARAMS.height / 2;
         const midY_ln2_abs    = LAYER_NORM_2_Y_POS;
         const topY_ln2_abs    = LAYER_NORM_2_Y_POS + LN_PARAMS.height / 2;
+        const lanes = Array.isArray(this.lanes) ? this.lanes : [];
+        const laneCount = lanes.length;
+        const exitTransitionRange = 5; // world–unit distance for final fade
+        const needsPositioningCheck = this._transitionPhase === 'positioning';
+        let allVectorsInPosition = needsPositioningCheck && laneCount > 0;
+        let posAddDone = true;
+        let allLn1Ready = !this._ln1Start && laneCount > 0;
+        let allMhsaReady = !this._mhsaStart && laneCount > 0;
+        let allLn2Ready = !this._ln2Ready && laneCount > 0;
+        let allMlpReady = !this._mlpStart && laneCount > 0;
+        let highestLN1VecY = -Infinity;
+        let anyVectorInLN1 = false;
+        let highestLN2VecY = -Infinity;
+        let anyVectorInLN2 = false;
+        const ln2SyncY = bottomY_ln2_abs + 5;
         this._trailUpdateFrameId = (this._trailUpdateFrameId + 1) | 0;
         // ──────────────── Update straight-line trails ────────────────
-        if (this.lanes && this.lanes.length) {
-            this.lanes.forEach(lane => {
+        if (laneCount) {
+            lanes.forEach(lane => {
                 const vecsToCheck = this._vecsToCheckScratch;
                 vecsToCheck[0] = lane.originalVec;
                 vecsToCheck[1] = lane.dupVec;
@@ -371,6 +392,67 @@ export default class Gpt2Layer extends BaseLayer {
                     }
                 }
 
+                // Aggregate LN1/LN2 state and readiness flags in a single pass.
+                const dupVec = lane.dupVec;
+                if (dupVec && dupVec.group && dupVec.group.visible) {
+                    const y = dupVec.group.position.y;
+                    highestLN1VecY = Math.max(highestLN1VecY, y);
+                    if (y >= bottomY_ln1_abs - exitTransitionRange) anyVectorInLN1 = true;
+                }
+                const resultVec = lane.resultVec;
+                if (resultVec && resultVec.group && resultVec.group.visible) {
+                    const y = resultVec.group.position.y;
+                    highestLN1VecY = Math.max(highestLN1VecY, y);
+                    if (y >= bottomY_ln1_abs - exitTransitionRange) anyVectorInLN1 = true;
+                }
+
+                const movingLn2 = lane.movingVecLN2;
+                if (movingLn2 && movingLn2.group && movingLn2.group.visible) {
+                    const y = movingLn2.group.position.y;
+                    highestLN2VecY = Math.max(highestLN2VecY, y);
+                    if (y >= bottomY_ln2_abs - exitTransitionRange) anyVectorInLN2 = true;
+                } else {
+                    const resultLn2 = lane.resultVecLN2;
+                    if (resultLn2 && resultLn2.group && resultLn2.group.visible) {
+                        const y = resultLn2.group.position.y;
+                        highestLN2VecY = Math.max(highestLN2VecY, y);
+                        if (y >= bottomY_ln2_abs - exitTransitionRange) anyVectorInLN2 = true;
+                    }
+                }
+
+                if (needsPositioningCheck && allVectorsInPosition) {
+                    const ov = lane.originalVec;
+                    const targetY = lane.branchStartY;
+                    if (!ov || !ov.group || !Number.isFinite(targetY) || ov.group.position.y < targetY - 5) {
+                        allVectorsInPosition = false;
+                    }
+                }
+                if (this.index === 0 && posAddDone) {
+                    if (lane.posVec && !lane.posAddComplete) {
+                        posAddDone = false;
+                    }
+                }
+                if (allLn1Ready) {
+                    const ov = lane.originalVec;
+                    const targetY = lane.branchStartY;
+                    if (!ov || !ov.group || !Number.isFinite(targetY) || ov.group.position.y < targetY) {
+                        allLn1Ready = false;
+                    }
+                }
+                if (allMhsaReady && lane.horizPhase !== 'readyMHSA') {
+                    allMhsaReady = false;
+                }
+                if (allLn2Ready) {
+                    const ready = lane.ln2Phase === 'preRise'
+                        && lane.postAdditionVec
+                        && lane.postAdditionVec.group
+                        && lane.postAdditionVec.group.position.y >= ln2SyncY - 0.01;
+                    if (!ready) allLn2Ready = false;
+                }
+                if (allMlpReady && lane.ln2Phase !== 'mlpReady') {
+                    allMlpReady = false;
+                }
+
                 // Expanded 4× vector group trail
                 if (lane.expandedVecGroup && lane.expandedVecTrail) {
                     lane.expandedVecTrail.update(lane.expandedVecGroup.position);
@@ -382,18 +464,13 @@ export default class Gpt2Layer extends BaseLayer {
         }
         // Handle transition phase - wait for vectors to reach position
         if (this._transitionPhase === 'positioning') {
-            const allVectorsInPosition = this.lanes.every(lane => {
-                const targetY = lane.branchStartY;
-                return lane.originalVec.group.position.y >= targetY - 5; // small tolerance
-            });
-            
             if (allVectorsInPosition) {
                 this._transitionPhase = 'complete';
                 this.isActive = true; // now start the actual animation
                 console.log(`Layer ${this.index}: All vectors in position, starting animation`);
             } else {
                 // Keep vectors rising toward the target
-                this.lanes.forEach(lane => {
+                lanes.forEach(lane => {
                     const targetY = lane.branchStartY;
                     if (lane.originalVec.group.position.y < targetY) {
                         lane.originalVec.group.position.y = Math.min(targetY, 
@@ -422,26 +499,6 @@ export default class Gpt2Layer extends BaseLayer {
         // ────────────────────────────────────────────────────────────
         const opaqueOpacity = 1.0;
         const semiTransparentOpacity = 0.6;
-        const exitTransitionRange = 5; // world–unit distance for final fade
-
-        // Determine the highest Y position of any vector still interacting with LN-1
-        let highestLN1VecY = -Infinity;
-        let anyVectorInLN1 = false;
-
-        this.lanes.forEach(lane => {
-            // Duplicate vector that travels through LN-1
-            if (lane.dupVec && lane.dupVec.group.visible) {
-                const y = lane.dupVec.group.position.y;
-                highestLN1VecY = Math.max(highestLN1VecY, y);
-                if (y >= bottomY_ln1_abs - exitTransitionRange) anyVectorInLN1 = true;
-            }
-            // Result vector that rises out of LN-1
-            if (lane.resultVec && lane.resultVec.group.visible) {
-                const y = lane.resultVec.group.position.y;
-                highestLN1VecY = Math.max(highestLN1VecY, y);
-                if (y >= bottomY_ln1_abs - exitTransitionRange) anyVectorInLN1 = true;
-            }
-        });
 
         const ln1TargetColor = this._ln1TargetColor;
         ln1TargetColor.copy(COLOR_DARK_GRAY);
@@ -489,24 +546,6 @@ export default class Gpt2Layer extends BaseLayer {
         // Dynamic colour / opacity transition for the SECOND LayerNorm
         // ────────────────────────────────────────────────────────────
         // Find the highest Y position of any vector moving through LN2
-        let highestLN2VecY = -Infinity;
-        let anyVectorInLN2 = false;
-
-        this.lanes.forEach(lane => {
-            if (lane.movingVecLN2 && lane.movingVecLN2.group.visible) {
-                const y = lane.movingVecLN2.group.position.y;
-                highestLN2VecY = Math.max(highestLN2VecY, y);
-                if (y >= bottomY_ln2_abs - exitTransitionRange) {
-                    anyVectorInLN2 = true;
-                }
-            } else if (lane.resultVecLN2 && lane.resultVecLN2.group.visible) {
-                const y = lane.resultVecLN2.group.position.y;
-                highestLN2VecY = Math.max(highestLN2VecY, y);
-                if (y >= bottomY_ln2_abs - exitTransitionRange) {
-                    anyVectorInLN2 = true;
-                }
-            }
-        });
 
         if (anyVectorInLN2 && highestLN2VecY > -Infinity) {
             const ln2TargetColor = this._ln2TargetColor;
@@ -539,31 +578,20 @@ export default class Gpt2Layer extends BaseLayer {
         // the staging height (ln2Phase === 'preRise' and held position)
         // do we allow any of them to continue into the branch.
         // ────────────────────────────────────────────────────────────
-        if (!this._ln2Ready) {
-            const syncY = bottomY_ln2_abs + 5; // target height used in 'preRise'
-            const allLn2Ready = this.lanes.length && this.lanes.every(l =>
-                l.ln2Phase === 'preRise' &&
-                l.postAdditionVec && l.postAdditionVec.group &&
-                l.postAdditionVec.group.position.y >= syncY - 0.01);
-
-            if (allLn2Ready) {
-                this._ln2Ready = true;
-                this._emitProgress();
-                console.log(`Layer ${this.index}: All lanes ready – starting LN2 simultaneously`);
-            }
+        if (!this._ln2Ready && allLn2Ready) {
+            this._ln2Ready = true;
+            this._emitProgress();
+            console.log(`Layer ${this.index}: All lanes ready – starting LN2 simultaneously`);
         }
 
         // ----------------------------------------------------------------
         // MLP synchronisation: wait until every lane has completed LN-2 and
         // is marked as 'mlpReady' before triggering the up-projection.
         // ----------------------------------------------------------------
-        if (!this._mlpStart) {
-            const allMlpReady = this.lanes.length && this.lanes.every(l => l.ln2Phase === 'mlpReady');
-            if (allMlpReady) {
-                this._mlpStart = true;
-                this._emitProgress();
-                console.log(`Layer ${this.index}: All lanes ready – starting MLP up-projection simultaneously`);
-            }
+        if (!this._mlpStart && allMlpReady) {
+            this._mlpStart = true;
+            this._emitProgress();
+            console.log(`Layer ${this.index}: All lanes ready – starting MLP up-projection simultaneously`);
         }
 
         const speedMult = GLOBAL_ANIM_SPEED_MULT;
@@ -575,11 +603,8 @@ export default class Gpt2Layer extends BaseLayer {
         //  guarantees that all lanes enter LN-1 in perfect lock-step.
         // ────────────────────────────────────────────────────────────────
         if (!this._ln1Start) {
-            const posAddDone = this.index !== 0 || this.lanes.every(l => !l.posVec || l.posAddComplete);
-            const allLn1Ready = this.lanes.length
-                && posAddDone
-                && this.lanes.every(l => l && l.originalVec && l.originalVec.group && typeof l.branchStartY === 'number' && l.originalVec.group.position.y >= l.branchStartY);
-            if (allLn1Ready) {
+            const readyToStartLn1 = allLn1Ready && posAddDone;
+            if (readyToStartLn1) {
                 this._ln1Start = true;
                 this._emitProgress();
                 console.log(`Layer ${this.index}: All lanes ready – starting LN-1 branch simultaneously`);
@@ -609,19 +634,16 @@ export default class Gpt2Layer extends BaseLayer {
         //  has its duplicate result vector staged above LN-1 before letting
         //  them begin horizontal travel to the attention heads.
         // ────────────────────────────────────────────────────────────────
-        if (!this._mhsaStart) {
-            const allMHSAReady = this.lanes.length && this.lanes.every(l => l.horizPhase === 'readyMHSA');
-            if (allMHSAReady) {
-                this._mhsaStart = true;
-                this._emitProgress();
-                console.log(`Layer ${this.index}: All lanes ready – starting travel to MHSA heads simultaneously`);
-                this.lanes.forEach(l => {
-                    if (l.horizPhase === 'readyMHSA') {
-                        l.horizPhase = 'travelMHSA';
-                        this._emitProgress();
-                    }
-                });
-            }
+        if (!this._mhsaStart && allMhsaReady) {
+            this._mhsaStart = true;
+            this._emitProgress();
+            console.log(`Layer ${this.index}: All lanes ready – starting travel to MHSA heads simultaneously`);
+            this.lanes.forEach(l => {
+                if (l.horizPhase === 'readyMHSA') {
+                    l.horizPhase = 'travelMHSA';
+                    this._emitProgress();
+                }
+            });
         }
 
         this.lanes.forEach(lane => {
@@ -767,7 +789,7 @@ export default class Gpt2Layer extends BaseLayer {
                                     30,
                                     lane.multTarget.instanceCount
                                 );
-                                this.root.add(multResult.group);
+                                this.raycastRoot.add(multResult.group);
                                 const ln1ScaledData = this._getLn1Data(lane, 'scale');
                                 if (ln1ScaledData) {
                                     applyVectorData(
@@ -809,7 +831,7 @@ export default class Gpt2Layer extends BaseLayer {
                                         delete dupVec.userData.trailWorld;
                                     }
                                 } else {
-                                    trailForResult = new StraightLineTrail(this.root, 0xffffff, 1);
+                                    trailForResult = new StraightLineTrail(this.root, 0xffffff, 1, undefined, undefined, TRAIL_MIN_SEGMENT_DISTANCE);
                                     trailForResult.start(multResult.group.position);
                                 }
                                 multResult.userData = multResult.userData || {};
@@ -872,7 +894,7 @@ export default class Gpt2Layer extends BaseLayer {
                                         }
                                         lane.addTarget.userData = lane.addTarget.userData || {};
                                         if (!lane.addTarget.userData.trail) {
-                                            const fallbackTrail = new StraightLineTrail(this.root, 0xffffff, 1);
+                                            const fallbackTrail = new StraightLineTrail(this.root, 0xffffff, 1, undefined, undefined, TRAIL_MIN_SEGMENT_DISTANCE);
                                             fallbackTrail.start(lane.addTarget.group.position);
                                             lane.addTarget.userData.trail = fallbackTrail;
                                             lane.addTarget.userData.trailWorld = false;
@@ -974,7 +996,7 @@ export default class Gpt2Layer extends BaseLayer {
                             v.instanceCount
                         );
                         copyVectorAppearance(mv, v);
-                        this.root.add(mv.group);
+                        this.raycastRoot.add(mv.group);
                         // ---- Trail for LN2 moving vector ----
                         const mvTrail = new StraightLineTrail(this.root, 0xffffff, 1, undefined, undefined, LN_INTERNAL_TRAIL_MIN_SEGMENT);
                         mvTrail.start(mv.group.position);
@@ -1144,7 +1166,7 @@ export default class Gpt2Layer extends BaseLayer {
                                     30,
                                     lane.multTargetLN2?.instanceCount ?? mv.instanceCount
                                 );
-                                this.root.add(resVec.group);
+                                this.raycastRoot.add(resVec.group);
                                 const ln2ScaledData = this._getLn2Data(lane, 'scale');
                                 if (ln2ScaledData) {
                                     applyVectorData(
@@ -1186,7 +1208,7 @@ export default class Gpt2Layer extends BaseLayer {
                                         delete mv.userData.trailWorld;
                                     }
                                 } else {
-                                    trailForLn2Result = new StraightLineTrail(this.root, 0xffffff, 1);
+                                    trailForLn2Result = new StraightLineTrail(this.root, 0xffffff, 1, undefined, undefined, TRAIL_MIN_SEGMENT_DISTANCE);
                                     trailForLn2Result.start(resVec.group.position);
                                 }
                                 resVec.userData = resVec.userData || {};
@@ -1249,7 +1271,7 @@ export default class Gpt2Layer extends BaseLayer {
                                         }
                                         lane.addTargetLN2.userData = lane.addTargetLN2.userData || {};
                                         if (!lane.addTargetLN2.userData.trail) {
-                                            const fallbackTrailLn2 = new StraightLineTrail(this.root, 0xffffff, 1);
+                                            const fallbackTrailLn2 = new StraightLineTrail(this.root, 0xffffff, 1, undefined, undefined, TRAIL_MIN_SEGMENT_DISTANCE);
                                             fallbackTrailLn2.start(lane.addTargetLN2.group.position);
                                             lane.addTargetLN2.userData.trail = fallbackTrailLn2;
                                         lane.addTargetLN2.userData.trailWorld = false;
@@ -1425,11 +1447,11 @@ export default class Gpt2Layer extends BaseLayer {
         }
 
         expandedGroup.position.copy(vec.group.position);
-        this.root.add(expandedGroup);
+        this.raycastRoot.add(expandedGroup);
         vec.group.visible = false;
 
         // ---- Trail for expanded 4x vector group ----
-        const expTrail = new StraightLineTrail(this.root, 0xffffff, 1);
+        const expTrail = new StraightLineTrail(this.root, 0xffffff, 1, undefined, undefined, TRAIL_MIN_SEGMENT_DISTANCE);
         expTrail.start(expandedGroup.position);
         lane.expandedVecTrail = expTrail;
         
@@ -1656,7 +1678,7 @@ export default class Gpt2Layer extends BaseLayer {
                         collapseVec.updateInstanceGeometryAndColors();
                     }
                     
-                    this.root.add(collapseVec.group);
+                    this.raycastRoot.add(collapseVec.group);
                     expandedGroup.visible = false;
                     
                     lane.finalVecAfterMlp = collapseVec;
@@ -1730,7 +1752,7 @@ export default class Gpt2Layer extends BaseLayer {
             collapseVec.updateInstanceGeometryAndColors();
         }
         
-        this.root.add(collapseVec.group);
+        this.raycastRoot.add(collapseVec.group);
         expandedGroup.visible = false;
         
         lane.finalVecAfterMlp = collapseVec;
@@ -1766,7 +1788,7 @@ export default class Gpt2Layer extends BaseLayer {
                 try {
                     vec.userData = vec.userData || {};
                     if (!vec.userData.mlpTrail) {
-                        const pathTrail = new StraightLineTrail(this.root, 0xffffff, 1);
+                        const pathTrail = new StraightLineTrail(this.root, 0xffffff, 1, undefined, undefined, TRAIL_MIN_SEGMENT_DISTANCE);
                         pathTrail.start(vec.group.position.clone());
                         vec.userData.mlpTrail = pathTrail;
                     }
@@ -2227,17 +2249,15 @@ export default class Gpt2Layer extends BaseLayer {
             }
         };
 
-        // We walk a *copy* of the children array because we'll be mutating
-        // the hierarchy while iterating.
-        [...this.root.children].forEach(obj => {
-            if (!obj) return;
-
-            const label = obj.userData && obj.userData.label;
-            const isVector = label === 'Vector' || label === 'Vector24';
-
-            if (isVector) {
-                disposeObj(obj);
+        const vectorGroups = [];
+        this.root.traverse(obj => {
+            if (!obj || !obj.userData) return;
+            if (!obj.isGroup) return;
+            if (obj.userData.isVector || obj.userData.label === 'Vector' || obj.userData.label === 'Vector24') {
+                vectorGroups.push(obj);
             }
         });
+
+        vectorGroups.forEach(obj => disposeObj(obj));
     }
-} 
+}

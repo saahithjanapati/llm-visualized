@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization.js';
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
 import { StraightLineTrail, mergeTrailsIntoLineSegments } from '../utils/trailUtils.js';
+import { TRAIL_MIN_SEGMENT_DISTANCE } from '../utils/trailConstants.js';
 
 
 
@@ -1509,7 +1510,7 @@ export class MHSAAnimation {
                                     try {
                                         vec.userData = vec.userData || {};
                                         if (!vec.userData.trail) {
-                                            const tr = new StraightLineTrail(this.parentGroup);
+                                            const tr = new StraightLineTrail(this.parentGroup, undefined, undefined, undefined, undefined, TRAIL_MIN_SEGMENT_DISTANCE);
                                             tr.start(vec.group.position.clone());
                                             vec.userData.trail = tr;
                                         }

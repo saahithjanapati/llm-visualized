@@ -207,8 +207,11 @@ export class CoreEngine {
         // ────────────────────────────────────────────────────────────────────
         this._layers.forEach(layer => {
             layer.init(this.scene);
-            if (layer instanceof Gpt2Layer && layer?.root) {
-                this.registerRaycastRoot(layer.root);
+            if (layer instanceof Gpt2Layer) {
+                const raycastRoot = layer?.raycastRoot || layer?.root;
+                if (raycastRoot) {
+                    this.registerRaycastRoot(raycastRoot);
+                }
             }
         });
 

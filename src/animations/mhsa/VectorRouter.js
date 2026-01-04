@@ -2,7 +2,7 @@ import * as THREE from 'three';
 
 import { VectorVisualizationInstancedPrism } from '../../components/VectorVisualizationInstancedPrism.js';
 import { StraightLineTrail } from '../../utils/trailUtils.js';
-import { TRAIL_COLOR } from '../../utils/trailConstants.js';
+import { TRAIL_COLOR, TRAIL_MIN_SEGMENT_DISTANCE } from '../../utils/trailConstants.js';
 import {
     ANIM_HORIZ_SPEED,
     GLOBAL_ANIM_SPEED_MULT,
@@ -170,7 +170,7 @@ export class VectorRouter {
                             if (typeof qVec.copyColorsFrom === 'function') {
                                 qVec.copyColorsFrom(centerVec);
                             }
-                            const qTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1, undefined, FAINT_TRAIL_OPACITY);
+                            const qTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1, undefined, FAINT_TRAIL_OPACITY, TRAIL_MIN_SEGMENT_DISTANCE);
                             qTrail.start(qVec.group.position);
                             qVec.userData = qVec.userData || {};
                             qVec.userData.trail = qTrail;
@@ -189,7 +189,7 @@ export class VectorRouter {
                             if (typeof vVec.copyColorsFrom === 'function') {
                                 vVec.copyColorsFrom(centerVec);
                             }
-                            const vTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1, undefined, FAINT_TRAIL_OPACITY);
+                            const vTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1, undefined, FAINT_TRAIL_OPACITY, TRAIL_MIN_SEGMENT_DISTANCE);
                             vTrail.start(vVec.group.position);
                             vVec.userData = vVec.userData || {};
                             vVec.userData.trail = vTrail;
@@ -267,7 +267,7 @@ export class VectorRouter {
         }
         this.parentGroup.add(upVec.group);
 
-        const upTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1, undefined, FAINT_TRAIL_OPACITY);
+        const upTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1, undefined, FAINT_TRAIL_OPACITY, TRAIL_MIN_SEGMENT_DISTANCE);
         upTrail.start(upVec.group.position);
         upVec.userData = upVec.userData || {};
         upVec.userData.trail = upTrail;

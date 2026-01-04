@@ -5,6 +5,8 @@ export const TRAIL_COLOR = 0xffffff;          // Default hex colour (match other
 export const TRAIL_LINE_WIDTH = 1;            // Pixel width (hardware-dependent)
 export const TRAIL_OPACITY = 0.14;             // 0 (fully transparent) → 1 (fully opaque)
 export const TRAIL_MAX_SEGMENTS = 5000;       // Preallocated straight-line segments
+// Minimum distance (world units) between recorded trail points to reduce churn.
+export const TRAIL_MIN_SEGMENT_DISTANCE = 0.4;
 
 // Reserved for future extensions – THREE.LineBasicMaterial has no emissive term but
 // we expose a placeholder in case the implementation switches materials later.

@@ -55,6 +55,8 @@ export class StraightLineTrail {
         // Tag for discovery and back-reference
         this._line.userData.isTrail = true;
         this._line.userData.trailRef = this;
+        // Trails are decorative; skip raycast intersection work.
+        this._line.raycast = () => {};
         scene.add(this._line);
 
         this._vertexCount = 0;

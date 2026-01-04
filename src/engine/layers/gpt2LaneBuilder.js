@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { StraightLineTrail } from '../../utils/trailUtils.js';
+import { TRAIL_MIN_SEGMENT_DISTANCE } from '../../utils/trailConstants.js';
 import { PrismLayerNormAnimation } from '../../animations/PrismLayerNormAnimation.js';
 import { startPrismAdditionAnimation } from '../../utils/additionUtils.js';
 import { applyVectorData, copyVectorAppearance, LN_INTERNAL_TRAIL_MIN_SEGMENT } from './gpt2LayerUtils.js';
@@ -44,6 +45,7 @@ export function createAdditionPlaceholders(layer, offsetX, ln1CenterY, ln2Center
     try {
         const slitSpacing = LN_PARAMS.depth / (layer._laneCount + 1);
         const addYOffset = LN_PARAMS.height * LN_ADD_VECTOR_OFFSET_FRACTION;
+        const raycastRoot = layer.raycastRoot || layer.root;
 
         for (let laneIdx = 0; laneIdx < layer._laneCount; laneIdx++) {
             const zPos = -LN_PARAMS.depth / 2 + slitSpacing * (laneIdx + 1);
@@ -56,7 +58,7 @@ export function createAdditionPlaceholders(layer, offsetX, ln1CenterY, ln2Center
                 ln1PlaceholderData.length
             );
             ln1Placeholder.group.visible = false;
-            layer.root.add(ln1Placeholder.group);
+            raycastRoot.add(ln1Placeholder.group);
             layer._ln1AddPlaceholders[laneIdx] = ln1Placeholder;
 
             const ln2PlaceholderData = layer.random.nextVector(layer._getBaseVectorLength());
@@ -67,7 +69,7 @@ export function createAdditionPlaceholders(layer, offsetX, ln1CenterY, ln2Center
                 ln2PlaceholderData.length
             );
             ln2Placeholder.group.visible = false;
-            layer.root.add(ln2Placeholder.group);
+            raycastRoot.add(ln2Placeholder.group);
             layer._ln2AddPlaceholders[laneIdx] = ln2Placeholder;
         }
     } catch (_) {
@@ -91,6 +93,7 @@ export function createLanesFromExternal(layer, externalLanes, offsetX, ln1Center
 }
 
 export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY, startY_override, meetY, laneIdx, slitSpacing) {
+    const raycastRoot = layer.raycastRoot || layer.root;
     // Reuse existing trail when lanes are passed from a lower layer.
     let trailFromPrev = oldLane && oldLane.originalTrail ? oldLane.originalTrail : null;
     const laneTokenIndex = (oldLane && Number.isFinite(oldLane.tokenIndex))
@@ -103,7 +106,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
 
     if (oldLane && oldLane.originalVec) {
         originalVec = oldLane.originalVec;
-        layer.root.attach(originalVec.group);
+        raycastRoot.attach(originalVec.group);
         zPos = originalVec.group.position.z;
         startY = originalVec.group.position.y; // Keep current position.
         // Prefer to carry over the existing residual-stream trail so it
@@ -131,7 +134,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
             30,
             layer._getInstanceCountFromData(data)
         );
-        layer.root.add(originalVec.group);
+        raycastRoot.add(originalVec.group);
         applyVectorData(
             originalVec,
             data,
@@ -142,7 +145,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
         // Trail for the ORIGINAL vector.
         // Attach to the GLOBAL scene and record WORLD positions so the trail
         // remains continuous across layers as lanes are transferred upwards.
-        trail = new StraightLineTrail(layer._globalScene, 0xffffff, 1);
+        trail = new StraightLineTrail(layer._globalScene, 0xffffff, 1, undefined, undefined, TRAIL_MIN_SEGMENT_DISTANCE);
         originalVec.group.getWorldPosition(TMP_WORLD_POS);
         trail.start(TMP_WORLD_POS);
         originalVec.userData = originalVec.userData || {};
@@ -178,7 +181,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
     );
     dupVec.group.visible = false;
     copyVectorAppearance(dupVec, originalVec);
-    layer.root.add(dupVec.group);
+    raycastRoot.add(dupVec.group);
     // Trail for duplicate vector inside LN1.
     const dupTrail = new StraightLineTrail(layer.root, 0xffffff, 1, undefined, undefined, LN_INTERNAL_TRAIL_MIN_SEGMENT);
     dupTrail.start(dupVec.group.position);
@@ -188,7 +191,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
 
     // If we're reusing an existing lane we may not have created the trail yet.
     if (!trail) {
-        trail = new StraightLineTrail(layer._globalScene, 0xffffff, 1);
+        trail = new StraightLineTrail(layer._globalScene, 0xffffff, 1, undefined, undefined, TRAIL_MIN_SEGMENT_DISTANCE);
         originalVec.group.getWorldPosition(TMP_WORLD_POS);
         trail.start(TMP_WORLD_POS);
     }
@@ -199,7 +202,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
         30,
         originalVec.instanceCount
     );
-    layer.root.add(multTarget.group);
+    raycastRoot.add(multTarget.group);
     multTarget.group.visible = false;
 
     const multTargetLN2 = layer._createPrismVector(
@@ -208,7 +211,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
         30,
         originalVec.instanceCount
     );
-    layer.root.add(multTargetLN2.group);
+    raycastRoot.add(multTargetLN2.group);
     multTargetLN2.group.visible = false;
 
     const addYOffset = LN_PARAMS.height * LN_ADD_VECTOR_OFFSET_FRACTION;
@@ -217,8 +220,8 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
     if (layer._ln1AddPlaceholders && layer._ln1AddPlaceholders[laneIdx]) {
         addTarget = layer._ln1AddPlaceholders[laneIdx];
         layer._ln1AddPlaceholders[laneIdx] = null;
-        if (addTarget && addTarget.group && addTarget.group.parent !== layer.root) {
-            layer.root.add(addTarget.group);
+        if (addTarget && addTarget.group && addTarget.group.parent !== raycastRoot) {
+            raycastRoot.add(addTarget.group);
         }
         if (addTarget && addTarget.group) {
             addTarget.group.visible = false;
@@ -231,7 +234,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
             30,
             addTargetData.length
         );
-        layer.root.add(addTarget.group);
+        raycastRoot.add(addTarget.group);
         if (addTarget.group) addTarget.group.visible = false;
     }
 
@@ -239,8 +242,8 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
     if (layer._ln2AddPlaceholders && layer._ln2AddPlaceholders[laneIdx]) {
         addTargetLN2 = layer._ln2AddPlaceholders[laneIdx];
         layer._ln2AddPlaceholders[laneIdx] = null;
-        if (addTargetLN2 && addTargetLN2.group && addTargetLN2.group.parent !== layer.root) {
-            layer.root.add(addTargetLN2.group);
+        if (addTargetLN2 && addTargetLN2.group && addTargetLN2.group.parent !== raycastRoot) {
+            raycastRoot.add(addTargetLN2.group);
         }
         if (addTargetLN2 && addTargetLN2.group) {
             addTargetLN2.group.visible = false;
@@ -253,7 +256,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
             30,
             addTargetDataLn2.length
         );
-        layer.root.add(addTargetLN2.group);
+        raycastRoot.add(addTargetLN2.group);
         if (addTargetLN2.group) addTargetLN2.group.visible = false;
     }
 
@@ -354,7 +357,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
                 30,
                 layer._getInstanceCountFromData(posData)
             );
-            layer.root.add(posVec.group);
+            raycastRoot.add(posVec.group);
             applyVectorData(
                 posVec,
                 posData,
@@ -362,7 +365,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
                 layer._getLaneMeta(lane, 'embedding.position')
             );
             // Trail (local to this layer) - enabled only until it reaches residual stream.
-            const posTrail = new StraightLineTrail(layer.root, 0xffffff, 1);
+            const posTrail = new StraightLineTrail(layer.root, 0xffffff, 1, undefined, undefined, TRAIL_MIN_SEGMENT_DISTANCE);
             posTrail.start(posVec.group.position);
             posVec.userData = posVec.userData || {};
             posVec.userData.trail = posTrail;
