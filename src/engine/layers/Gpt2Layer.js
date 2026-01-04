@@ -118,6 +118,8 @@ export default class Gpt2Layer extends BaseLayer {
         this._ln1ColorLocked = false;
         this._ln1MaterialState = { color: new THREE.Color(), opacity: 1.0, transparent: false, initialized: false };
         this._ln2MaterialState = { color: new THREE.Color(), opacity: 1.0, transparent: false, initialized: false };
+        this._trailUpdateFrameId = 0;
+        this._vecsToCheckScratch = new Array(9);
     }
 
     setProgressEmitter(emitter) { this._progressEmitter = emitter; }
@@ -310,33 +312,34 @@ export default class Gpt2Layer extends BaseLayer {
         const bottomY_ln2_abs = LAYER_NORM_2_Y_POS - LN_PARAMS.height / 2;
         const midY_ln2_abs    = LAYER_NORM_2_Y_POS;
         const topY_ln2_abs    = LAYER_NORM_2_Y_POS + LN_PARAMS.height / 2;
+        this._trailUpdateFrameId = (this._trailUpdateFrameId + 1) | 0;
         // ──────────────── Update straight-line trails ────────────────
         if (this.lanes && this.lanes.length) {
             this.lanes.forEach(lane => {
-                const vecsToCheck = [
-                    lane.originalVec,
-                    lane.dupVec,
-                    lane.travellingVec,
-                    lane.resultVec,
-                    lane.postAdditionVec,
-                    lane.movingVecLN2,
-                    lane.resultVecLN2,
-                    lane.finalVecAfterMlp,
-                    lane.posVec
-                ];
+                const vecsToCheck = this._vecsToCheckScratch;
+                vecsToCheck[0] = lane.originalVec;
+                vecsToCheck[1] = lane.dupVec;
+                vecsToCheck[2] = lane.travellingVec;
+                vecsToCheck[3] = lane.resultVec;
+                vecsToCheck[4] = lane.postAdditionVec;
+                vecsToCheck[5] = lane.movingVecLN2;
+                vecsToCheck[6] = lane.resultVecLN2;
+                vecsToCheck[7] = lane.finalVecAfterMlp;
+                vecsToCheck[8] = lane.posVec;
 
-                // Ensure we only update each unique trail once per frame per lane
-                const updatedTrailRefs = new Set();
+                const trailFrameId = this._trailUpdateFrameId;
 
-                vecsToCheck.forEach(v => {
-                    if (!v || !v.userData || !v.userData.trail) return;
+                for (let i = 0; i < vecsToCheck.length; i++) {
+                    const v = vecsToCheck[i];
+                    if (!v || !v.userData || !v.userData.trail) continue;
                     const trailRef = v.userData.trail;
-                    if (updatedTrailRefs.has(trailRef)) return;
+                    if (trailRef.__lastUpdateFrameId === trailFrameId) continue;
+                    trailRef.__lastUpdateFrameId = trailFrameId;
 
                     // During residual addition, let MHSAAnimation drive world-space
                     // residual trail updates (it follows the centre prism). Skip here
                     // to avoid double-writing the same world trail in the same frame.
-                    if (lane.stopRise && v.userData.trailWorld) return;
+                    if (lane.stopRise && v.userData.trailWorld) continue;
 
                     if (!v.userData.trailWorld) {
                         const zPos = Number.isFinite(lane.zPos) ? lane.zPos : v.group.position.z;
@@ -347,8 +350,7 @@ export default class Gpt2Layer extends BaseLayer {
                             const clampedY = Math.min(topY_ln1_abs, Math.max(bottomY_ln1_abs, v.group.position.y));
                             TMP_LN_TRAIL_POS.set(BRANCH_X, clampedY, zPos);
                             trailRef.update(TMP_LN_TRAIL_POS);
-                            updatedTrailRefs.add(trailRef);
-                            return;
+                            continue;
                         }
                         if (
                             lane.ln2Phase === 'insideLN'
@@ -357,8 +359,7 @@ export default class Gpt2Layer extends BaseLayer {
                             const clampedY = Math.min(topY_ln2_abs, Math.max(bottomY_ln2_abs, v.group.position.y));
                             TMP_LN_TRAIL_POS.set(BRANCH_X, clampedY, zPos);
                             trailRef.update(TMP_LN_TRAIL_POS);
-                            updatedTrailRefs.add(trailRef);
-                            return;
+                            continue;
                         }
                     }
 
@@ -368,8 +369,7 @@ export default class Gpt2Layer extends BaseLayer {
                     } else {
                         trailRef.update(v.group.position);
                     }
-                    updatedTrailRefs.add(trailRef);
-                });
+                }
 
                 // Expanded 4× vector group trail
                 if (lane.expandedVecGroup && lane.expandedVecTrail) {
