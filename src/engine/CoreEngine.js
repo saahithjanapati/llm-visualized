@@ -110,6 +110,7 @@ export class CoreEngine {
         this._lastPointerY = null;
         this._raycastSelectionHandler = null;
         this._hoveringClickable = false;
+        this._hoverLabelsEnabled = true;
         this._clickTapData = null;
         this._clickTapMoveThresholdSq = 36; // ~6px movement allowance
 
@@ -148,6 +149,7 @@ export class CoreEngine {
 
         this._onPointerCancel = this._onPointerCancel.bind(this);
         this.renderer.domElement.addEventListener('pointercancel', this._onPointerCancel);
+        this.renderer.domElement.addEventListener('pointerleave', this._onPointerLeave);
 
         // Bind pointer up handler for touch devices so taps trigger labels
         this._onPointerUp = this._onPointerUp.bind(this);
@@ -252,7 +254,8 @@ export class CoreEngine {
             this._stats.showPanel(0); // 0 = FPS, 1 = ms/frame, 2 = MB
             this._stats.dom.style.position = 'fixed';
             this._stats.dom.style.left = '0px';
-            this._stats.dom.style.top  = '0px';
+            this._stats.dom.style.top = 'auto';
+            this._stats.dom.style.bottom = '0px';
             document.body.appendChild(this._stats.dom);
         }
 
@@ -368,6 +371,7 @@ export class CoreEngine {
         this.renderer.domElement.removeEventListener('pointermove', this._onPointerMove);
         this.renderer.domElement.removeEventListener('pointerdown', this._onPointerDown);
         this.renderer.domElement.removeEventListener('pointercancel', this._onPointerCancel);
+        this.renderer.domElement.removeEventListener('pointerleave', this._onPointerLeave);
         this.renderer.domElement.removeEventListener('pointerup', this._onPointerUp);
         this.renderer.domElement.removeEventListener('contextmenu', this._onContextMenu);
         this.renderer.domElement.removeEventListener('selectstart', this._onSelectStart);
@@ -442,7 +446,9 @@ export class CoreEngine {
     };
 
     _onPointerDown = (event) => {
+        this._updateHoverLabelMode(event.pointerType);
         if (event.pointerType === 'touch') {
+            event.preventDefault();
             // Only track the primary tap candidate to avoid conflicts with multi-touch gestures
             if (this._touchTapData && this._touchTapData.id !== event.pointerId) return;
             const { clientX, clientY } = event;
@@ -479,6 +485,11 @@ export class CoreEngine {
         if (this._clickTapData && this._clickTapData.id === event.pointerId) {
             this._clickTapData = null;
         }
+        this._resetControlsState();
+    };
+
+    _onPointerLeave = () => {
+        this._resetControlsState();
     };
 
     _onPointerUp = (event) => {
@@ -524,6 +535,7 @@ export class CoreEngine {
     };
 
     _onPointerMove = (event) => {
+        this._updateHoverLabelMode(event.pointerType);
         if (event.pointerType === 'touch' && this._touchTapData && this._touchTapData.id === event.pointerId) {
             if (typeof event.clientX === 'number' && typeof event.clientY === 'number') {
                 this._touchTapData.lastX = event.clientX;
@@ -549,6 +561,11 @@ export class CoreEngine {
                     }
                 }
             }
+        }
+        if (!this._hoverLabelsEnabled) {
+            if (this._hoverLabelDiv) this._hoverLabelDiv.style.display = 'none';
+            this._setCanvasCursor(false);
+            return;
         }
         this._lastPointerX = event.clientX;
         this._lastPointerY = event.clientY;
@@ -599,6 +616,16 @@ export class CoreEngine {
         return null;
     }
 
+    _updateHoverLabelMode(pointerType) {
+        const enabled = pointerType !== 'touch';
+        if (this._hoverLabelsEnabled === enabled) return;
+        this._hoverLabelsEnabled = enabled;
+        if (!enabled) {
+            if (this._hoverLabelDiv) this._hoverLabelDiv.style.display = 'none';
+            this._setCanvasCursor(false);
+        }
+    }
+
     _setCanvasCursor(isPointer) {
         if (!this.renderer?.domElement) return;
         const next = isPointer ? 'pointer' : '';
@@ -609,6 +636,7 @@ export class CoreEngine {
 
     _performRaycastAt(clientX, clientY, { force = false } = {}) {
         if (!this._raycastingEnabled) return;
+        if (!this._hoverLabelsEnabled) return;
         if (!force && this._isUserNavigating) return;
         if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return;
 
@@ -645,7 +673,10 @@ export class CoreEngine {
     }
 
     _performSelectionAt(clientX, clientY, { force = false } = {}) {
-        if (!this._raycastingEnabled) return;
+        if (!this._raycastingEnabled) {
+            if (this._raycastSelectionHandler) this._raycastSelectionHandler(null);
+            return;
+        }
         if (!force && this._isUserNavigating) return;
         if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return;
 
@@ -655,7 +686,10 @@ export class CoreEngine {
         this._pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
         this._pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
         this._raycaster.setFromCamera(this._pointer, this.camera);
-        if (!this._raycastRoots.length) return;
+        if (!this._raycastRoots.length) {
+            if (this._raycastSelectionHandler) this._raycastSelectionHandler(null);
+            return;
+        }
 
         const intersects = this._raycaster.intersectObjects(this._raycastRoots, true);
         if (perfStats.enabled) {
@@ -663,7 +697,10 @@ export class CoreEngine {
             perfStats.inc('raycastIntersects', intersects.length);
         }
         const resolved = this._resolveRaycastLabel(intersects);
-        if (!resolved || !resolved.label) return;
+        if (!resolved || !resolved.label) {
+            if (this._raycastSelectionHandler) this._raycastSelectionHandler(null);
+            return;
+        }
         if (this._raycastSelectionHandler) {
             this._raycastSelectionHandler({
                 label: resolved.label,

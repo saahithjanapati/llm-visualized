@@ -1107,6 +1107,7 @@ function fitObjectToView(object, camera, options = {}) {
 class SelectionPanel {
     constructor() {
         this.panel = document.getElementById('detailPanel');
+        this.hudPanel = document.getElementById('hudPanel');
         this.title = document.getElementById('detailTitle');
         this.params = document.getElementById('detailParams');
         this.dims = document.getElementById('detailDims');
@@ -1232,6 +1233,7 @@ class SelectionPanel {
         if (!this.isReady) return;
         this.isOpen = true;
         this.panel.classList.add('is-open');
+        this.hudPanel?.classList.add('detail-open');
         this.panel.setAttribute('aria-hidden', 'false');
     }
 
@@ -1239,6 +1241,7 @@ class SelectionPanel {
         if (!this.isReady) return;
         this.isOpen = false;
         this.panel.classList.remove('is-open');
+        this.hudPanel?.classList.remove('detail-open');
         this.panel.setAttribute('aria-hidden', 'true');
     }
 

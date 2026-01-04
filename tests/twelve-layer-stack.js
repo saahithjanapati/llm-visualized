@@ -619,9 +619,43 @@ initConveyorSkipButton(pipeline);
 initSkipToEndButton(pipeline);
 initSettingsModal(pipeline);
 
+const topControls = document.getElementById('topControls');
+const isSkinnyScreen = () => window.matchMedia('(max-aspect-ratio: 1/1), (max-width: 880px)').matches;
+let topControlsHideTimer = null;
+
+const showTopControls = () => {
+    if (!topControls) return;
+    topControls.removeAttribute('data-auto-hidden');
+    if (isSkinnyScreen()) {
+        clearTimeout(topControlsHideTimer);
+        topControlsHideTimer = setTimeout(() => {
+            if (isSkinnyScreen()) {
+                topControls.setAttribute('data-auto-hidden', 'true');
+            }
+        }, 5000);
+    }
+};
+
+const handleViewportChange = () => {
+    if (!topControls) return;
+    if (isSkinnyScreen()) {
+        showTopControls();
+    } else {
+        clearTimeout(topControlsHideTimer);
+        topControls.removeAttribute('data-auto-hidden');
+    }
+};
+
+handleViewportChange();
+window.addEventListener('resize', handleViewportChange);
+
 const selectionPanel = initSelectionPanel();
 if (pipeline.engine && typeof pipeline.engine.setRaycastSelectionHandler === 'function') {
     pipeline.engine.setRaycastSelectionHandler(selection => {
+        if (!selection || !selection.label) {
+            showTopControls();
+            return;
+        }
         selectionPanel.handleSelection(selection);
     });
 }

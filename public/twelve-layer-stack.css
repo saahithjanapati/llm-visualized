@@ -9,6 +9,15 @@ canvas { display: block; }
     z-index: 6; /* above status overlay (z=5) */
     display: flex;
     gap: 8px;
+    transition: opacity 0.25s ease, transform 0.25s ease;
+}
+#topControls[data-auto-hidden="true"] {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-14px);
+}
+#topControls[data-auto-hidden="true"] ~ #hudStack {
+    top: max(10px, env(safe-area-inset-top));
 }
 
 #topControls button {
@@ -83,10 +92,11 @@ canvas { display: block; }
     z-index: 6;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 0;
     width: min(420px, 36vw);
     max-width: min(520px, 92vw);
     pointer-events: auto;
+    transition: top 0.25s ease;
 }
 
 #hudPanel {
@@ -101,6 +111,11 @@ canvas { display: block; }
     box-shadow: 0 10px 28px rgba(0,0,0,0.32);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
+}
+#hudPanel.detail-open {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    border-bottom: none;
 }
 
 #statusOverlay {
@@ -269,6 +284,7 @@ canvas { display: block; }
 
 /* Detail side panel */
 #detailPanel {
+    grid-column: 1 / -1;
     position: relative;
     width: 100%;
     height: auto;
@@ -279,8 +295,9 @@ canvas { display: block; }
     padding: 0;
     box-sizing: border-box;
     background: rgba(12,12,12,0.9);
+    border: 0 solid transparent;
     border-radius: 16px;
-    box-shadow: 0 10px 28px rgba(0,0,0,0.32);
+    box-shadow: none;
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
     z-index: 7;
@@ -299,6 +316,9 @@ canvas { display: block; }
     gap: 12px;
     padding-bottom: 12px;
     border: 1px solid rgba(255,255,255,0.12);
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    box-shadow: 0 10px 28px rgba(0,0,0,0.32);
     max-height: 62vh;
 }
 .detail-header {
@@ -330,6 +350,8 @@ canvas { display: block; }
     border: 1px solid rgba(255,255,255,0.1);
     background: linear-gradient(180deg, rgba(24,24,24,0.95), rgba(16,16,16,0.92));
     color: #d9dee6;
+    font-size: 18px;
+    line-height: 1;
     cursor: pointer;
     padding: 0;
     border-radius: 10px;
@@ -338,10 +360,6 @@ canvas { display: block; }
     transition: transform 0.18s ease, background 0.18s ease, color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
-}
-#detailClose span {
-    font-size: 18px;
-    line-height: 1;
 }
 #detailClose:hover {
     background: rgba(255,255,255,0.06);
@@ -426,7 +444,7 @@ canvas { display: block; }
 
 /* Responsive adjustments */
 @media (max-width: 900px) {
-    #hudStack { width: min(480px, 92vw); gap: 10px; }
+    #hudStack { width: min(480px, 92vw); gap: 0; }
     #hudPanel { padding: 10px 12px; gap: 8px 12px; }
 }
 @media (max-width: 600px) {
@@ -435,7 +453,7 @@ canvas { display: block; }
         right: 8px;
         width: auto;
         max-width: calc(100vw - 16px);
-        gap: 8px;
+        gap: 0;
     }
     #hudPanel { padding: 8px 10px; gap: 6px 10px; }
     #statusOverlay { font-size: 12px; }
@@ -453,7 +471,7 @@ canvas { display: block; }
         right: 8px;
         width: auto;
         max-width: calc(100vw - 16px);
-        gap: 8px;
+        gap: 0;
     }
     #hudPanel { padding: 8px 10px; gap: 6px 10px; }
     #statusOverlay { font-size: 12px; }
@@ -463,6 +481,7 @@ canvas { display: block; }
     #equationsPanel .eq-title { font-size: 11px; margin-bottom: 4px; }
     #equationsPanel .eq-body { font-size: 13px; }
     #detailPanel {
+        display: flex;
         position: fixed;
         top: auto;
         bottom: 0;
@@ -474,13 +493,28 @@ canvas { display: block; }
         padding-bottom: max(12px, env(safe-area-inset-bottom));
         padding-left: env(safe-area-inset-left);
         padding-right: env(safe-area-inset-right);
+        background: rgba(12,12,12,0.9);
+        border: 1px solid rgba(255,255,255,0.12);
         border-left: none;
-        border-top: 1px solid rgba(255,255,255,0.12);
+        border-right: none;
+        border-bottom: none;
         border-radius: 16px 16px 0 0;
+        box-shadow: 0 10px 28px rgba(0,0,0,0.32);
         transform: translateY(100%);
     }
     #detailPanel.is-open {
         transform: translateY(0);
+        border-top-left-radius: 16px;
+        border-top-right-radius: 16px;
+        border-left: none;
+        border-right: none;
+        border-bottom: none;
+        border-top: 1px solid rgba(255,255,255,0.12);
+    }
+    #hudPanel.detail-open {
+        border-bottom-left-radius: 16px;
+        border-bottom-right-radius: 16px;
+        border-bottom: 1px solid rgba(255,255,255,0.12);
     }
     #detailClose {
         position: sticky;
