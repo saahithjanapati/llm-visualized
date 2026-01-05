@@ -2147,68 +2147,77 @@ export default class Gpt2Layer extends BaseLayer {
         try {
             // 1) Freeze residual trails completed so far into a static merged line
             if (Array.isArray(this.lanes) && this.lanes.length) {
-                const segmentsList = [];
                 const origTrailSet = new Set();
-                let residualColor = null;
+                const residualGroups = new Map();
+                const getTrailStyle = (trail) => {
+                    let color = null;
+                    if (trail && trail._material && trail._material.color) {
+                        color = trail._material.color.clone();
+                    } else if (trail && typeof trail._color !== 'undefined') {
+                        color = new THREE.Color(trail._color);
+                    }
+                    const opacity = (trail && typeof trail._opacity === 'number') ? trail._opacity : null;
+                    const colorKey = color
+                        ? `${color.r.toFixed(4)},${color.g.toFixed(4)},${color.b.toFixed(4)}`
+                        : 'default';
+                    const opacityKey = opacity != null ? opacity.toFixed(4) : 'default';
+                    return { color, opacity, key: `${colorKey}|${opacityKey}` };
+                };
                 this.lanes.forEach(l => {
                     // Prefer the dedicated world-space residual trail reference if available
                     const t = (l && l.originalTrail)
                         || (l && l.originalVec && l.originalVec.userData && l.originalVec.userData.trail);
                     if (t) {
                         origTrailSet.add(t);
-                        // Capture the color/opacity from the first trail so the merged line matches brightness
-                        if (residualColor === null && t._material && t._material.color) {
-                            residualColor = t._material.color.getHex();
-                        } else if (residualColor === null && typeof t._color !== 'undefined') {
-                            residualColor = t._color;
-                        }
                     }
                     if (t && typeof t.extractSegmentsAndTrim === 'function') {
                         const seg = t.extractSegmentsAndTrim({ preserveSegments: 1 });
-                        if (seg && seg.length) segmentsList.push(seg);
+                        if (seg && seg.length) {
+                            const style = getTrailStyle(t);
+                            let group = residualGroups.get(style.key);
+                            if (!group) {
+                                group = { segments: [], color: style.color, opacity: style.opacity };
+                                residualGroups.set(style.key, group);
+                            }
+                            group.segments.push(seg);
+                        }
                     }
                 });
-                if (segmentsList.length) {
-                    // Preserve brightness by using the same color as the live trails (default to white if unknown)
-                    const colorToUse = residualColor != null ? residualColor : 0xffffff;
-                    // Use the same effective opacity as the live trails to avoid brightening
-                    let residualOpacity = null;
-                    if (origTrailSet.size) {
-                        const first = origTrailSet.values().next().value;
-                        if (first && typeof first._opacity === 'number') residualOpacity = first._opacity;
-                    }
+                residualGroups.forEach((group) => {
+                    if (!group.segments.length) return;
                     buildMergedLineSegmentsFromSegments(
-                        segmentsList,
+                        group.segments,
                         this._globalScene || this.root,
-                        colorToUse,
+                        group.color || undefined,
                         undefined,
-                        residualOpacity != null ? residualOpacity : undefined
+                        group.opacity != null ? group.opacity : undefined
                     );
-                }
+                });
 
                 // 2) Merge all other per-layer (non-residual) trails under this.root
                 const allLayerTrails = collectTrailsUnder(this.root);
                 const otherTrails = allLayerTrails.filter(t => !origTrailSet.has(t));
                 if (otherTrails.length) {
-                    // Try to preserve their appearance by copying the first trail's color
-                    let otherColor = null;
-                    let otherOpacity = null;
-                    const firstTrail = otherTrails[0];
-                    if (firstTrail && firstTrail._material && firstTrail._material.color) {
-                        otherColor = firstTrail._material.color.getHex();
-                    } else if (firstTrail && typeof firstTrail._color !== 'undefined') {
-                        otherColor = firstTrail._color;
-                    }
-                    if (firstTrail && typeof firstTrail._opacity === 'number') {
-                        otherOpacity = firstTrail._opacity;
-                    }
-                    mergeTrailsIntoLineSegments(
-                        otherTrails,
-                        this.root,
-                        otherColor != null ? otherColor : undefined,
-                        undefined,
-                        otherOpacity != null ? otherOpacity : undefined
-                    );
+                    const groups = new Map();
+                    otherTrails.forEach((trail) => {
+                        const style = getTrailStyle(trail);
+                        let group = groups.get(style.key);
+                        if (!group) {
+                            group = { trails: [], color: style.color, opacity: style.opacity };
+                            groups.set(style.key, group);
+                        }
+                        group.trails.push(trail);
+                    });
+                    groups.forEach((group) => {
+                        if (!group.trails.length) return;
+                        mergeTrailsIntoLineSegments(
+                            group.trails,
+                            this.root,
+                            group.color || undefined,
+                            undefined,
+                            group.opacity != null ? group.opacity : undefined
+                        );
+                    });
                 }
             }
         } catch (e) {

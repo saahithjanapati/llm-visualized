@@ -53,6 +53,7 @@ export class SelfAttentionAnimator {
         this._activeBlueVectors = {}; // { headIdx: Vector }
         this._pendingTimeouts   = new Set();
         this._spawnedSpheres    = new Set();
+        this._spawnedTempVectors = new Set();
     }
 
     // Durations decoupled from GLOBAL_ANIM_SPEED_MULT to make presets clearly visible
@@ -79,6 +80,30 @@ export class SelfAttentionAnimator {
         this._pendingTimeouts.clear();
     }
 
+    _cleanupAttentionScoreMeshes() {
+        const root = this.ctx && this.ctx.parentGroup;
+        if (!root || typeof root.traverse !== 'function') return;
+        const toRemove = [];
+        root.traverse((obj) => {
+            if (!obj || !obj.isMesh) return;
+            const ud = obj.userData || {};
+            const label = typeof ud.label === 'string' ? ud.label : '';
+            const stage = ud.activationData && ud.activationData.stage;
+            if (label.includes('Attention Score') || stage === 'attention.pre' || stage === 'attention.post') {
+                toRemove.push(obj);
+            }
+        });
+        toRemove.forEach((obj) => {
+            try { if (obj.parent) obj.parent.remove(obj); } catch (_) { /* optional cleanup */ }
+            try { if (obj.material && typeof obj.material.dispose === 'function') obj.material.dispose(); } catch (_) { /* optional cleanup */ }
+            try {
+                if (obj.geometry && obj.geometry !== SHARED_SPHERE_GEOMETRY && typeof obj.geometry.dispose === 'function') {
+                    obj.geometry.dispose();
+                }
+            } catch (_) { /* optional cleanup */ }
+        });
+    }
+
     _retireVector(vec, { preserveTrail = false } = {}) {
         if (!vec) return;
         try {
@@ -89,10 +114,15 @@ export class SelfAttentionAnimator {
         } catch (_) { /* optional cleanup */ }
         try {
             if (vec.group) {
+                if (vec.group.parent) vec.group.parent.remove(vec.group);
                 vec.group.visible = false;
                 vec.group.scale.set(0.001, 0.001, 0.001);
             }
         } catch (_) { /* optional cleanup */ }
+        try {
+            if (typeof vec.dispose === 'function') vec.dispose();
+        } catch (_) { /* optional cleanup */ }
+        if (this._spawnedTempVectors) this._spawnedTempVectors.delete(vec);
     }
 
     _finishBlueImmediately(vector, headIdx, doneCb, options = null) {
@@ -127,9 +157,14 @@ export class SelfAttentionAnimator {
         this._spawnedSpheres.forEach((sp) => {
             try {
                 if (sp.parent) sp.parent.remove(sp);
+                if (sp.material && typeof sp.material.dispose === 'function') sp.material.dispose();
             } catch (_) { /* optional cleanup */ }
         });
         this._spawnedSpheres.clear();
+        this._cleanupAttentionScoreMeshes();
+        // Dispose any transient attention vectors (duplicates / travellers)
+        this._spawnedTempVectors.forEach((vec) => this._retireVector(vec, { preserveTrail: preserveTrails }));
+        this._spawnedTempVectors.clear();
         // Dispose K/V visuals so they disappear alongside the skipped conveyor
         try { this.ctx && this.ctx._disposeMergedKVGroups && this.ctx._disposeMergedKVGroups(); } catch (_) {}
         try { this.ctx && this.ctx._disposeAllIndividualKandVVectorsImmediately && this.ctx._disposeAllIndividualKandVVectorsImmediately(); } catch (_) {}
@@ -596,6 +631,7 @@ export class SelfAttentionAnimator {
         travellingVec.userData = { headIndex: headIdx };
         this._activeBlueVectors[headIdx] = travellingVec;
         this.ctx.parentGroup.add(travellingVec.group);
+        this._spawnedTempVectors.add(travellingVec);
         travellingVec.applyProcessedVisuals(
             fixedVec.rawData.slice(),
             this.ctx.outputVectorLength || 64,
@@ -611,6 +647,7 @@ export class SelfAttentionAnimator {
                 .to({ x: 0.001, y: 0.001, z: 0.001 }, this.DUPLICATE_POP_OUT_MS)
                 .onComplete(() => {
                     delete this._activeBlueVectors[headIdx];
+                    this._spawnedTempVectors.delete(travellingVec);
                     if (travellingVec.group.parent) travellingVec.group.parent.remove(travellingVec.group);
                     if (typeof travellingVec.dispose === 'function') travellingVec.dispose();
                     doneCb && doneCb();
@@ -621,7 +658,6 @@ export class SelfAttentionAnimator {
 
     _traverseLanes(vector, laneZs, count, spheresArr, createSpheres, doneCb, stepIdx = 0) {
         if (this.skipRequested) {
-            doneCb && doneCb();
             return;
         }
         if (count === 0 || stepIdx >= count || laneZs.length === 0) {
@@ -635,6 +671,7 @@ export class SelfAttentionAnimator {
             .to({ z: targetZ }, this.BLUE_VERT_DURATION)
             .easing(TWEEN.Easing.Quadratic.InOut)
             .onComplete(() => {
+                if (this.skipRequested) return;
                 // Create a sphere between blue (vector) and corresponding green vector if enabled
                 if (createSpheres) {
                     const headIdx = (vector.userData && typeof vector.userData.headIndex === 'number') ? vector.userData.headIndex : null;
@@ -728,6 +765,7 @@ export class SelfAttentionAnimator {
                                     { setHiddenToBlack: true }
                                 );
                                 this.ctx.parentGroup.add(dupVec.group);
+                                this._spawnedTempVectors.add(dupVec);
                                 dupVec.group.scale.set(0.001, 0.001, 0.001);
                                 // Optional quick pop-in
                 new TWEEN.Tween(dupVec.group.scale).to({ x: 1, y: 1, z: 1 }, this.DUPLICATE_POP_IN_MS).start();
@@ -747,6 +785,7 @@ export class SelfAttentionAnimator {
                                                 new TWEEN.Tween(dupVec.group.scale)
                                                     .to({ x: 0.001, y: 0.001, z: 0.001 }, this.DUPLICATE_POP_OUT_MS)
                                                     .onComplete(() => {
+                                                        this._spawnedTempVectors.delete(dupVec);
                                                         if (dupVec.group.parent) dupVec.group.parent.remove(dupVec.group);
                                                         if (typeof dupVec.dispose === 'function') dupVec.dispose();
                                                         // Continue traversal AFTER merge completes
