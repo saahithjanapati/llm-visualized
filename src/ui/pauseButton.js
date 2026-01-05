@@ -15,7 +15,7 @@ export function initPauseButton(pipeline) {
         const label = isPaused ? 'Resume animation' : 'Pause animation';
         button.setAttribute('aria-label', label);
         button.setAttribute('title', label);
-        button.textContent = isPaused ? 'Resume' : 'Pause';
+        button.textContent = isPaused ? '▶' : '⏸︎';
     };
 
     const applyPauseState = (nextPaused) => {
