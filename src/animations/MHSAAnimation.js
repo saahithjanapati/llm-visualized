@@ -587,6 +587,7 @@ export class MHSAAnimation {
             const riseStep = this.postSplitRiseSpeed * GLOBAL_ANIM_SPEED_MULT * deltaTime;
             lanes.forEach(lane => {
                 if (!lane || !lane.originalVec || !lane.originalVec.group) return;
+                if (lane.horizPhase === 'waiting') return;
 
                 const curY = lane.originalVec.group.position.y;
                 let targetY = this.finalOriginalY;
