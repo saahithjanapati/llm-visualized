@@ -32,21 +32,14 @@ export function getEffectiveDevicePixelRatio() {
 }
 
 /**
- * Scale a base trail opacity for the current display so perceived brightness of
- * thin 1px lines remains similar on Retina/high-DPI screens, plus a lane-count
- * brightness factor to keep dense trails readable.
- * Uses a gentle sqrt growth with DPR and a soft lane scaling curve.
+ * Scale a base trail opacity for the current display. DPR scaling is intentionally
+ * disabled so trails keep a consistent brightness across devices; only the
+ * lane-count boost remains.
  */
 export function scaleOpacityForDisplay(baseOpacity) {
-    const dpr = getEffectiveDevicePixelRatio();
     const laneScale = getLaneOpacityScale();
-    // On standard-density panels (≈1 DPR) thin 1px lines lose brightness due to
-    // limited pixel coverage and anti-alias falloff.  Give them a gentle boost
-    // so they match the perceived brightness of the same trail on Retina/hi-DPI
-    // displays where multiple physical pixels contribute to each fragment.
-    const lowDprBoost = 1 + 0.6 * Math.max(0, (1 / Math.max(dpr, 1)) - 0.5);
-    const scaled = baseOpacity * laneScale * Math.sqrt(dpr) * lowDprBoost;
-    return Math.min(1, scaled);
+    const scaled = baseOpacity * laneScale;
+    return Math.min(1, Math.max(0, scaled));
 }
 
 /**

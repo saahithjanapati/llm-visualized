@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { StraightLineTrail } from '../../utils/trailUtils.js';
-import { TRAIL_MIN_SEGMENT_DISTANCE, TRAIL_OPACITY } from '../../utils/trailConstants.js';
+import { TRAIL_MIN_SEGMENT_DISTANCE } from '../../utils/trailConstants.js';
 import { PrismLayerNormAnimation } from '../../animations/PrismLayerNormAnimation.js';
 import { startPrismAdditionAnimation } from '../../utils/additionUtils.js';
 import { applyVectorData, copyVectorAppearance, LN_INTERNAL_TRAIL_MIN_SEGMENT } from './gpt2LayerUtils.js';
@@ -369,20 +369,11 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
             posTrail.start(posVec.group.position);
             posVec.userData = posVec.userData || {};
             posVec.userData.trail = posTrail;
-            const posTrailBaseOpacity = (posTrail && typeof posTrail.getBaseOpacity === 'function')
-                ? posTrail.getBaseOpacity()
-                : TRAIL_OPACITY;
             let posTrailDisposed = false;
             const retirePosTrail = () => {
                 if (posTrailDisposed) return;
                 posTrailDisposed = true;
                 try { if (posVec.userData) delete posVec.userData.trail; } catch (_) {}
-                if (posTrail && typeof posTrail.setBaseOpacity === 'function') {
-                    posTrail.setBaseOpacity(0);
-                }
-                if (posTrail && typeof posTrail.dispose === 'function') {
-                    posTrail.dispose();
-                }
                 lane.posTrail = null;
             };
 
@@ -398,8 +389,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
             const horizDist = Math.abs(posStartX - 0);
             const horizSpeed = ANIM_HORIZ_SPEED * POS_VEC_HORIZONTAL_SPEED_MULT * GLOBAL_ANIM_SPEED_MULT;
             const horizMs = (horizDist / horizSpeed) * 1000;
-            const posTrailFadeStartX = Math.max(40, Math.min(160, horizDist * 0.2));
-            const posTrailRetireX = Math.max(12, Math.min(30, posTrailFadeStartX * 0.35));
+            const posTrailRetireX = Math.max(12, Math.min(30, horizDist * 0.07));
 
             if (typeof TWEEN !== 'undefined') {
                 new TWEEN.Tween(posVec.group.position)
@@ -417,12 +407,6 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
                                 // Maintain Y lock during horizontal interpolation.
                                 posVec.group.position.y = targetYAbove;
                                 const absX = Math.abs(posVec.group.position.x);
-                                if (!posTrailDisposed && posTrail && typeof posTrail.setBaseOpacity === 'function') {
-                                    const fadeT = absX <= posTrailFadeStartX
-                                        ? THREE.MathUtils.clamp(absX / posTrailFadeStartX, 0, 1)
-                                        : 1;
-                                    posTrail.setBaseOpacity(posTrailBaseOpacity * fadeT);
-                                }
                                 // Retire the positional trail slightly before x=0 so it never overlaps
                                 // the residual trail and brightens the line segment.
                                 if (absX <= posTrailRetireX) {
