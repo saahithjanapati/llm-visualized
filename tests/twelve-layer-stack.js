@@ -39,7 +39,6 @@ import { initConveyorSkipButton } from '../src/ui/conveyorSkipButton.js';
 import { initSkipToEndButton } from '../src/ui/skipToEndButton.js';
 import { initSelectionPanel } from '../src/ui/selectionPanel.js';
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
-import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
 import { CaptureActivationSource } from '../src/data/CaptureActivationSource.js';
 import { precomputeActivationCaches } from '../src/utils/activationPrecompute.js';
 
@@ -59,7 +58,7 @@ const TOKEN_CHIP_STYLE = {
     cornerRadius: 24,
     depth: 12,
     textSize: 90,
-    textDepth: 0, // unused for flat text
+    textDepth: 16,
     textOffset: 0.6,
     riseDistance: 220,
     riseDelay: 120,
@@ -111,12 +110,24 @@ function buildRoundedRectShape(width, height, radius) {
 // Create a 3D chip group with optional text mesh, plus a cached size in userData.
 function createTokenChip(label, font, style) {
     let textGeo = null;
+    let textShapes = null;
+    let textDepth = 0;
     let bounds = null;
+    const capOffset = 0.05;
     if (font && label.trim().length) {
-        const shapes = font.generateShapes(label, style.textSize, 2);
-        textGeo = new THREE.ShapeGeometry(shapes);
+        const desiredDepth = Number.isFinite(style.textDepth) ? style.textDepth : 0;
+        const chipDepth = Number.isFinite(style.depth) ? style.depth : desiredDepth;
+        textDepth = Number.isFinite(chipDepth) ? chipDepth + capOffset * 2 : desiredDepth;
+        textShapes = font.generateShapes(label, style.textSize, 2);
+        textGeo = new THREE.ExtrudeGeometry(textShapes, {
+            depth: textDepth,
+            curveSegments: 4,
+            bevelEnabled: false
+        });
         textGeo.computeBoundingBox();
         textGeo.computeVertexNormals();
+        textGeo.translate(0, 0, -textDepth / 2);
+        textGeo.computeBoundingBox();
         bounds = textGeo.boundingBox;
     }
     let textWidth = 0;
@@ -152,12 +163,11 @@ function createTokenChip(label, font, style) {
 
     // Add thin caps to avoid transparent edges when viewed from the sides.
     const capMat = chipMat.clone();
-    capMat.polygonOffset = true;
-    capMat.polygonOffsetFactor = -1;
-    capMat.polygonOffsetUnits = -2;
+    capMat.polygonOffset = false;
+    capMat.polygonOffsetFactor = 0;
+    capMat.polygonOffsetUnits = 0;
     const capGeo = new THREE.ShapeGeometry(chipShape);
     capGeo.computeVertexNormals();
-    const capOffset = 0.05;
     const frontCap = new THREE.Mesh(capGeo, capMat);
     frontCap.position.z = style.depth / 2 + capOffset;
     const backCap = new THREE.Mesh(capGeo, capMat);
@@ -165,9 +175,9 @@ function createTokenChip(label, font, style) {
     backCap.rotation.y = Math.PI;
     group.add(frontCap, backCap);
 
-    // Optional text mesh, centered on the front cap.
+    // Optional 3D text mesh, centered to span the chip depth.
     if (textGeo && textWidth > 0 && textHeight > 0) {
-        const textMat = new THREE.MeshBasicMaterial({
+        const textBaseMat = new THREE.MeshBasicMaterial({
             color: 0xffffff,
             side: THREE.DoubleSide,
             depthWrite: true,
@@ -176,12 +186,28 @@ function createTokenChip(label, font, style) {
             polygonOffsetFactor: -0.5,
             polygonOffsetUnits: -0.5
         });
-        const textMesh = new THREE.Mesh(textGeo, textMat);
+        const textCullMat = textBaseMat.clone();
+        textCullMat.colorWrite = false;
+        textCullMat.depthWrite = false;
+        textCullMat.transparent = true;
+        textCullMat.opacity = 0;
+        const textGroup = new THREE.Group();
+        const textMesh = new THREE.Mesh(textGeo, [textCullMat, textBaseMat]);
+        textGroup.add(textMesh);
+        if (textShapes) {
+            const faceGeo = new THREE.ShapeGeometry(textShapes);
+            faceGeo.computeVertexNormals();
+            const faceOffset = 0.02;
+            const frontFace = new THREE.Mesh(faceGeo, textBaseMat);
+            frontFace.position.z = textDepth / 2 + faceOffset;
+            const backFace = new THREE.Mesh(faceGeo, textBaseMat);
+            backFace.position.z = -textDepth / 2 - faceOffset;
+            textGroup.add(frontFace, backFace);
+        }
         const centerX = (bounds.min.x + bounds.max.x) / 2;
         const centerY = (bounds.min.y + bounds.max.y) / 2;
-        const textFrontOffset = style.depth / 2 + style.textOffset;
-        textMesh.position.set(-centerX, -centerY, textFrontOffset);
-        group.add(textMesh);
+        textGroup.position.set(-centerX, -centerY, 0);
+        group.add(textGroup);
     } else if (textGeo) {
         textGeo.dispose();
     }

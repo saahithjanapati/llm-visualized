@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization.js';
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
 import { LayerNormalizationVisualization } from '../components/LayerNormalizationVisualization.js';
@@ -24,7 +25,7 @@ import {
 } from '../animations/LayerAnimationConstants.js';
 
 const PREVIEW_LANES = 3;
-//hi
+const PREVIEW_TOKEN_LANES = 1;
 const PREVIEW_MATRIX_DEPTH = 320;
 const PREVIEW_LANE_SPACING = 80;
 const PREVIEW_TARGET_SIZE = 140;
@@ -66,9 +67,35 @@ const TOKEN_CHIP_STYLE = {
     height: 120,
     cornerRadius: 18,
     depth: 12,
+    textDepth: 16,
     textSize: 52,
     textOffset: 1.2
 };
+
+const TOKEN_CHIP_FONT_URL = 'https://threejs.org/examples/fonts/helvetiker_regular.typeface.json';
+let tokenChipFont = null;
+let tokenChipFontPromise = null;
+
+function requestTokenChipFont() {
+    if (tokenChipFont) return Promise.resolve(tokenChipFont);
+    if (tokenChipFontPromise) return tokenChipFontPromise;
+    const loader = new FontLoader();
+    tokenChipFontPromise = new Promise((resolve) => {
+        loader.load(
+            TOKEN_CHIP_FONT_URL,
+            (font) => {
+                tokenChipFont = font;
+                resolve(font);
+            },
+            undefined,
+            (err) => {
+                console.warn('Selection token font failed to load, falling back to canvas text.', err);
+                resolve(null);
+            }
+        );
+    });
+    return tokenChipFontPromise;
+}
 
 const D_MODEL = 768;
 const VOCAB_SIZE = 50257;
@@ -469,27 +496,69 @@ function buildRoundedRectShape(width, height, radius) {
 }
 
 function createTokenChipShared(labelText) {
-    const text = (labelText && labelText.trim().length) ? labelText.trim() : 'Token';
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    const fontSize = TOKEN_CHIP_STYLE.textSize;
-    ctx.font = `600 ${fontSize}px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial`;
-    const textMetrics = ctx.measureText(text);
-    const textWidth = Math.ceil(textMetrics.width);
-    const textHeight = Math.ceil(fontSize * 1.15);
-    canvas.width = Math.max(256, textWidth + 80);
-    canvas.height = Math.max(128, textHeight + 60);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#ffffff';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.font = `600 ${fontSize}px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial`;
-    ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+    const rawText = (typeof labelText === 'string') ? labelText : '';
+    const text = rawText.trim().length ? rawText : 'Token';
+    const font = tokenChipFont;
+    let textGeo = null;
+    let textMat = null;
+    let textCullMat = null;
+    let textMesh = null;
+    let textGroup = null;
+    let textTexture = null;
+    let textPlaneAspect = 1;
+    let textShapes = null;
+    let textDepth = 0;
+    let textFaceGeo = null;
+    let bounds = null;
+    let textWidth = 0;
+    let textHeight = 0;
+    let useGeometryText = false;
+    const capOffset = 0.05;
 
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.minFilter = THREE.LinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    texture.needsUpdate = true;
+    if (font && text.trim().length) {
+        const desiredDepth = Number.isFinite(TOKEN_CHIP_STYLE.textDepth) ? TOKEN_CHIP_STYLE.textDepth : 0;
+        const chipDepth = Number.isFinite(TOKEN_CHIP_STYLE.depth) ? TOKEN_CHIP_STYLE.depth : desiredDepth;
+        textDepth = Number.isFinite(chipDepth) ? chipDepth + capOffset * 2 : desiredDepth;
+        textShapes = font.generateShapes(text, TOKEN_CHIP_STYLE.textSize, 2);
+        textGeo = new THREE.ExtrudeGeometry(textShapes, {
+            depth: textDepth,
+            curveSegments: 4,
+            bevelEnabled: false
+        });
+        textGeo.computeBoundingBox();
+        textGeo.computeVertexNormals();
+        const textBounds = textGeo.boundingBox;
+        if (textBounds && Number.isFinite(textBounds.max.x) && Number.isFinite(textBounds.min.x)) {
+            textWidth = Math.max(0, textBounds.max.x - textBounds.min.x);
+            textHeight = Math.max(0, textBounds.max.y - textBounds.min.y);
+        }
+        textGeo.translate(0, 0, -textDepth / 2);
+        textGeo.computeBoundingBox();
+        bounds = textGeo.boundingBox;
+        useGeometryText = true;
+    } else {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const fontSize = TOKEN_CHIP_STYLE.textSize;
+        ctx.font = `600 ${fontSize}px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial`;
+        const textMetrics = ctx.measureText(text);
+        textWidth = Math.ceil(textMetrics.width);
+        textHeight = Math.ceil(fontSize * 1.15);
+        canvas.width = Math.max(256, textWidth + 80);
+        canvas.height = Math.max(128, textHeight + 60);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = `600 ${fontSize}px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial`;
+        ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+
+        textTexture = new THREE.CanvasTexture(canvas);
+        textTexture.minFilter = THREE.LinearFilter;
+        textTexture.magFilter = THREE.LinearFilter;
+        textTexture.needsUpdate = true;
+        textPlaneAspect = canvas.width / canvas.height;
+    }
 
     const chipWidth = Math.max(TOKEN_CHIP_STYLE.minWidth, textWidth + TOKEN_CHIP_STYLE.padding);
     const chipHeight = typeof TOKEN_CHIP_STYLE.height === 'number'
@@ -499,6 +568,7 @@ function createTokenChipShared(labelText) {
     const chipShape = buildRoundedRectShape(chipWidth, chipHeight, chipRadius);
     const chipGeo = new THREE.ExtrudeGeometry(chipShape, { depth: TOKEN_CHIP_STYLE.depth, bevelEnabled: false });
     chipGeo.translate(0, 0, -TOKEN_CHIP_STYLE.depth / 2);
+    chipGeo.computeVertexNormals();
 
     const chipMat = new THREE.MeshStandardMaterial({
         color: 0xf2e8d5,
@@ -508,30 +578,97 @@ function createTokenChipShared(labelText) {
     });
     const chipMesh = new THREE.Mesh(chipGeo, chipMat);
 
-    const aspect = canvas.width / canvas.height;
-    let textPlaneHeight = chipHeight * 0.38;
-    let textPlaneWidth = textPlaneHeight * aspect;
-    const maxTextWidth = chipWidth * 0.8;
-    if (textPlaneWidth > maxTextWidth) {
-        textPlaneWidth = maxTextWidth;
-        textPlaneHeight = textPlaneWidth / aspect;
+    const capMat = chipMat.clone();
+    capMat.polygonOffset = false;
+    capMat.polygonOffsetFactor = 0;
+    capMat.polygonOffsetUnits = 0;
+    const capGeo = new THREE.ShapeGeometry(chipShape);
+    capGeo.computeVertexNormals();
+    const frontCap = new THREE.Mesh(capGeo, capMat);
+    frontCap.position.z = TOKEN_CHIP_STYLE.depth / 2 + capOffset;
+    const backCap = new THREE.Mesh(capGeo, capMat);
+    backCap.position.z = -TOKEN_CHIP_STYLE.depth / 2 - capOffset;
+    backCap.rotation.y = Math.PI;
+
+    if (useGeometryText) {
+        if (textGeo && textWidth > 0 && textHeight > 0) {
+            textMat = new THREE.MeshBasicMaterial({
+                color: 0xffffff,
+                side: THREE.DoubleSide,
+                depthWrite: true,
+                depthTest: true,
+                polygonOffset: true,
+                polygonOffsetFactor: -0.5,
+                polygonOffsetUnits: -0.5
+            });
+            textCullMat = textMat.clone();
+            textCullMat.colorWrite = false;
+            textCullMat.depthWrite = false;
+            textCullMat.transparent = true;
+            textCullMat.opacity = 0;
+            textGroup = new THREE.Group();
+            textMesh = new THREE.Mesh(textGeo, [textCullMat, textMat]);
+            textGroup.add(textMesh);
+            if (textShapes) {
+                const faceGeo = new THREE.ShapeGeometry(textShapes);
+                faceGeo.computeVertexNormals();
+                textFaceGeo = faceGeo;
+                const faceOffset = 0.02;
+                const frontFace = new THREE.Mesh(faceGeo, textMat);
+                frontFace.position.z = textDepth / 2 + faceOffset;
+                const backFace = new THREE.Mesh(faceGeo, textMat);
+                backFace.position.z = -textDepth / 2 - faceOffset;
+                textGroup.add(frontFace, backFace);
+            }
+            if (bounds) {
+                const centerX = (bounds.min.x + bounds.max.x) / 2;
+                const centerY = (bounds.min.y + bounds.max.y) / 2;
+                textGroup.position.set(-centerX, -centerY, 0);
+            }
+        }
+    } else if (textTexture) {
+        let textPlaneHeight = chipHeight * 0.38;
+        let textPlaneWidth = textPlaneHeight * textPlaneAspect;
+        const maxTextWidth = chipWidth * 0.8;
+        if (textPlaneWidth > maxTextWidth) {
+            textPlaneWidth = maxTextWidth;
+            textPlaneHeight = textPlaneWidth / textPlaneAspect;
+        }
+        textGeo = new THREE.PlaneGeometry(textPlaneWidth, textPlaneHeight);
+        textMat = new THREE.MeshBasicMaterial({
+            map: textTexture,
+            transparent: true,
+            depthWrite: true,
+            depthTest: true,
+            polygonOffset: true,
+            polygonOffsetFactor: -0.5,
+            polygonOffsetUnits: -0.5,
+            side: THREE.DoubleSide
+        });
+        textMesh = new THREE.Mesh(textGeo, textMat);
+        textMesh.position.z = TOKEN_CHIP_STYLE.depth / 2 + TOKEN_CHIP_STYLE.textOffset;
     }
-    const textGeo = new THREE.PlaneGeometry(textPlaneWidth, textPlaneHeight);
-    const textMat = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
-    const textMesh = new THREE.Mesh(textGeo, textMat);
-    textMesh.position.z = TOKEN_CHIP_STYLE.depth / 2 + TOKEN_CHIP_STYLE.textOffset;
 
     const group = new THREE.Group();
-    group.add(chipMesh, textMesh);
+    group.add(chipMesh, frontCap, backCap);
+    if (textGroup) {
+        group.add(textGroup);
+    } else if (textMesh) {
+        group.add(textMesh);
+    }
 
     return {
         group,
         dispose: () => {
             chipGeo.dispose();
             chipMat.dispose();
-            textGeo.dispose();
-            textMat.dispose();
-            texture.dispose();
+            capGeo.dispose();
+            capMat.dispose();
+            if (textGeo) textGeo.dispose();
+            if (textFaceGeo) textFaceGeo.dispose();
+            if (textMat) textMat.dispose();
+            if (textCullMat) textCullMat.dispose();
+            if (textTexture) textTexture.dispose();
         }
     };
 }
@@ -539,9 +676,10 @@ function createTokenChipShared(labelText) {
 function buildTokenChipPreview(labelText) {
     const shared = createTokenChipShared(labelText);
     const group = new THREE.Group();
-    for (let i = 0; i < PREVIEW_LANES; i++) {
+    const laneCount = Math.max(1, Math.floor(PREVIEW_TOKEN_LANES));
+    for (let i = 0; i < laneCount; i++) {
         const chip = (i === 0) ? shared.group : shared.group.clone(true);
-        chip.position.z = (i - (PREVIEW_LANES - 1) / 2) * PREVIEW_LANE_SPACING * 0.6;
+        chip.position.z = (i - (laneCount - 1) / 2) * PREVIEW_LANE_SPACING * 0.6;
         group.add(chip);
     }
     return { object: group, dispose: shared.dispose };
@@ -995,10 +1133,9 @@ function resolvePreviewObject(label, selectionInfo) {
     const lower = (label || '').toLowerCase();
     const vectorClone = buildVectorClonePreview(selectionInfo);
     if (vectorClone) return vectorClone;
-    if (lower.startsWith('token:')) {
-        return buildTokenChipPreview(extractTokenText(label));
-    }
-    if (lower.startsWith('position:')) {
+    if (lower.startsWith('token:') || lower.startsWith('position:')) {
+        const clonePreview = buildSelectionClonePreview(selectionInfo, label);
+        if (clonePreview) return clonePreview;
         return buildTokenChipPreview(extractTokenText(label));
     }
     if (isQkvMatrixLabel(lower)) {
@@ -1294,6 +1431,7 @@ class SelectionPanel {
 }
 
 export function initSelectionPanel() {
+    requestTokenChipFont();
     const panel = new SelectionPanel();
     if (!panel.isReady) {
         return { handleSelection: () => {}, close: () => {} };
