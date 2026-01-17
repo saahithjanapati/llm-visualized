@@ -15,6 +15,7 @@ const __capFrontCache = new Map();
 const __capBackCache  = new Map();
 const __materialCache = new Map();
 const SLIT_CLEANUP_FLAG = 'slitCleanupApplied';
+const TOP_BOTTOM_SMOOTH_FLAG = 'topBottomNormalsSmoothedV2';
 
 function parseCacheKeyForSlits(cacheKey) {
     if (!cacheKey || typeof cacheKey !== 'string') return null;
@@ -167,6 +168,87 @@ function cleanSlitLedgeFaces(geometry, params) {
     cleaned.computeBoundingBox();
     cleaned.userData = { ...(geometry.userData || {}), [SLIT_CLEANUP_FLAG]: true };
     return cleaned;
+}
+
+function smoothTopBottomNormals(geometry, params) {
+    if (!geometry || !params || !Number.isFinite(params.height)) return geometry;
+    if (geometry.userData && geometry.userData[TOP_BOTTOM_SMOOTH_FLAG]) return geometry;
+
+    let target = geometry;
+    if (target.index) {
+        const nonIndexed = target.toNonIndexed();
+        nonIndexed.userData = { ...(target.userData || {}) };
+        target = nonIndexed;
+    }
+
+    const posAttr = target.getAttribute('position');
+    if (!posAttr) {
+        target.userData = { ...(target.userData || {}), [TOP_BOTTOM_SMOOTH_FLAG]: true };
+        return target;
+    }
+
+    target.computeVertexNormals();
+    const normAttr = target.getAttribute('normal');
+    if (!normAttr) {
+        target.userData = { ...(target.userData || {}), [TOP_BOTTOM_SMOOTH_FLAG]: true };
+        return target;
+    }
+
+    const hasSlits = params.numberOfSlits > 0 && params.slitDepthFactor > 0;
+    if (!hasSlits) {
+        target.userData = { ...(target.userData || {}), [TOP_BOTTOM_SMOOTH_FLAG]: true };
+        return target;
+    }
+
+    const halfHeight = Math.abs(params.height) / 2;
+    const yTol = Math.max(0.1, Math.abs(params.height) * 0.005);
+    let touchedPositions = false;
+
+    for (let i = 0; i < posAttr.count; i += 3) {
+        const ax = posAttr.getX(i);
+        const ay = posAttr.getY(i);
+        const az = posAttr.getZ(i);
+        const bx = posAttr.getX(i + 1);
+        const by = posAttr.getY(i + 1);
+        const bz = posAttr.getZ(i + 1);
+        const cx = posAttr.getX(i + 2);
+        const cy = posAttr.getY(i + 2);
+        const cz = posAttr.getZ(i + 2);
+
+        const topMatch = Math.abs(ay - halfHeight) <= yTol
+            && Math.abs(by - halfHeight) <= yTol
+            && Math.abs(cy - halfHeight) <= yTol;
+        const bottomMatch = Math.abs(ay + halfHeight) <= yTol
+            && Math.abs(by + halfHeight) <= yTol
+            && Math.abs(cy + halfHeight) <= yTol;
+
+        if (topMatch) {
+            normAttr.setXYZ(i, 0, 1, 0);
+            normAttr.setXYZ(i + 1, 0, 1, 0);
+            normAttr.setXYZ(i + 2, 0, 1, 0);
+            if (Math.abs(ay - halfHeight) > 1e-4 || Math.abs(by - halfHeight) > 1e-4 || Math.abs(cy - halfHeight) > 1e-4) {
+                posAttr.setY(i, halfHeight);
+                posAttr.setY(i + 1, halfHeight);
+                posAttr.setY(i + 2, halfHeight);
+                touchedPositions = true;
+            }
+        } else if (bottomMatch) {
+            normAttr.setXYZ(i, 0, -1, 0);
+            normAttr.setXYZ(i + 1, 0, -1, 0);
+            normAttr.setXYZ(i + 2, 0, -1, 0);
+            if (Math.abs(ay + halfHeight) > 1e-4 || Math.abs(by + halfHeight) > 1e-4 || Math.abs(cy + halfHeight) > 1e-4) {
+                posAttr.setY(i, -halfHeight);
+                posAttr.setY(i + 1, -halfHeight);
+                posAttr.setY(i + 2, -halfHeight);
+                touchedPositions = true;
+            }
+        }
+    }
+
+    if (touchedPositions) posAttr.needsUpdate = true;
+    normAttr.needsUpdate = true;
+    target.userData = { ...(target.userData || {}), [TOP_BOTTOM_SMOOTH_FLAG]: true };
+    return target;
 }
 
 function getCacheKey(width, height, depth, topWidthFactor, cornerRadius, numberOfSlits, slitWidth, slitDepthFactor, slitBottomWidthFactor, slitTopWidthFactor) {
@@ -584,9 +666,18 @@ export class WeightMatrixVisualization {
             }
         }
 
+        const smoothedGeometry = smoothTopBottomNormals(finalMesh.geometry, {
+            height: this.height,
+            numberOfSlits: this.numberOfSlits,
+            slitDepthFactor: this.slitDepthFactor
+        });
+        if (smoothedGeometry !== finalMesh.geometry) {
+            finalMesh.geometry.dispose();
+            finalMesh.geometry = smoothedGeometry;
+        }
+
         this.mesh = finalMesh;
         this.mesh.material = sideMaterial;
-        this.mesh.geometry.computeVertexNormals();
 
         const dt = (performance.now() - t0).toFixed(1);
         console.log(`[Perf] WeightMatrixVisualization (${cacheHit ? 'cache' : 'built'}) – ${dt} ms.`);
@@ -1002,6 +1093,7 @@ export class WeightMatrixVisualization {
         if (params) {
             const updated = cleanSlitLedgeFaces(geometry, params);
             cleanedGeometry = updated || geometry;
+            cleanedGeometry = smoothTopBottomNormals(cleanedGeometry, params);
         }
         if (!__geometryCache.has(cacheKey)) {
             __geometryCache.set(cacheKey, cleanedGeometry);
