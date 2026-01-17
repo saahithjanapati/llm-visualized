@@ -15,7 +15,8 @@ const __capFrontCache = new Map();
 const __capBackCache  = new Map();
 const __materialCache = new Map();
 const SLIT_CLEANUP_FLAG = 'slitCleanupApplied';
-const TOP_BOTTOM_SMOOTH_FLAG = 'topBottomNormalsSmoothedV2';
+const TOP_BOTTOM_SMOOTH_FLAG = 'topBottomNormalsSmoothedV3';
+const SLICE_CAPS_STRIPPED_FLAG = 'sliceEndCapsStripped';
 
 function parseCacheKeyForSlits(cacheKey) {
     if (!cacheKey || typeof cacheKey !== 'string') return null;
@@ -249,6 +250,85 @@ function smoothTopBottomNormals(geometry, params) {
     normAttr.needsUpdate = true;
     target.userData = { ...(target.userData || {}), [TOP_BOTTOM_SMOOTH_FLAG]: true };
     return target;
+}
+
+function stripSliceEndCaps(geometry, depth) {
+    if (!geometry || !Number.isFinite(depth)) return geometry;
+    if (geometry.userData && geometry.userData[SLICE_CAPS_STRIPPED_FLAG]) return geometry;
+
+    let target = geometry;
+    if (target.index) {
+        const nonIndexed = target.toNonIndexed();
+        nonIndexed.userData = { ...(target.userData || {}) };
+        target = nonIndexed;
+    }
+
+    const posAttr = target.getAttribute('position');
+    if (!posAttr) {
+        target.userData = { ...(target.userData || {}), [SLICE_CAPS_STRIPPED_FLAG]: true };
+        return target;
+    }
+
+    const pos = posAttr.array;
+    const kept = [];
+    const halfDepth = Math.abs(depth) / 2;
+    const zTol = Math.max(0.05, Math.abs(depth) * 0.002);
+
+    for (let i = 0; i < pos.length; i += 9) {
+        const ax = pos[i];
+        const ay = pos[i + 1];
+        const az = pos[i + 2];
+        const bx = pos[i + 3];
+        const by = pos[i + 4];
+        const bz = pos[i + 5];
+        const cx = pos[i + 6];
+        const cy = pos[i + 7];
+        const cz = pos[i + 8];
+
+        const abx = bx - ax;
+        const aby = by - ay;
+        const abz = bz - az;
+        const acx = cx - ax;
+        const acy = cy - ay;
+        const acz = cz - az;
+
+        const nx = aby * acz - abz * acy;
+        const ny = abz * acx - abx * acz;
+        const nz = abx * acy - aby * acx;
+        const nLen = Math.hypot(nx, ny, nz);
+
+        let drop = false;
+        if (nLen > 1e-9) {
+            const nzNorm = nz / nLen;
+            if (Math.abs(nzNorm) > 0.9) {
+                const czAvg = (az + bz + cz) / 3;
+                if (Math.abs(Math.abs(czAvg) - halfDepth) <= zTol) {
+                    drop = true;
+                }
+            }
+        }
+
+        if (!drop) {
+            kept.push(
+                ax, ay, az,
+                bx, by, bz,
+                cx, cy, cz
+            );
+        }
+    }
+
+    if (kept.length === pos.length) {
+        target.userData = { ...(target.userData || {}), [SLICE_CAPS_STRIPPED_FLAG]: true };
+        return target;
+    }
+
+    const cleaned = new THREE.BufferGeometry();
+    cleaned.setAttribute('position', new THREE.Float32BufferAttribute(kept, 3));
+    cleaned.computeVertexNormals();
+    cleaned.computeBoundingSphere();
+    cleaned.computeBoundingBox();
+    cleaned.userData = { ...(target.userData || {}), [SLICE_CAPS_STRIPPED_FLAG]: true };
+    return cleaned;
 }
 
 function getCacheKey(width, height, depth, topWidthFactor, cornerRadius, numberOfSlits, slitWidth, slitDepthFactor, slitBottomWidthFactor, slitTopWidthFactor) {
@@ -791,6 +871,18 @@ export class WeightMatrixVisualization {
             __geometryCache.set(sliceKey, sliceGeometry);
             // We'll cache cap geometries below once they're cloned
         }
+
+        const cleanedSliceGeometry = stripSliceEndCaps(sliceGeometry, sliceDepth);
+        sliceGeometry = cleanedSliceGeometry !== sliceGeometry ? cleanedSliceGeometry : sliceGeometry;
+        const smoothedSliceGeometry = smoothTopBottomNormals(sliceGeometry, {
+            height: this.height,
+            numberOfSlits: sliceSlits,
+            slitDepthFactor: this.slitDepthFactor
+        });
+        if (smoothedSliceGeometry !== sliceGeometry) {
+            sliceGeometry = smoothedSliceGeometry;
+        }
+        __geometryCache.set(sliceKey, sliceGeometry);
 
         // ----------------------------------------------------------
         // Material – clone defaults from standard path
