@@ -34,6 +34,7 @@ import {
 import { PrismLayerNormAnimation } from '../../animations/PrismLayerNormAnimation.js';
 import { MHSAAnimation } from '../../animations/MHSAAnimation.js';
 import { startPrismAdditionAnimation } from '../../utils/additionUtils.js';
+import { getLayerNormParamData } from '../../data/layerNormParams.js';
 import {
     applyLayerNormMaterial,
     applyVectorData,
@@ -695,6 +696,7 @@ export default class Gpt2Layer extends BaseLayer {
                     // height from its bottom edge.
                     const normStartY =
                         bottomY_ln1_abs + LN_PARAMS.height * LN_NORM_START_FRACTION_FROM_BOTTOM;
+                    const riseStep = ANIM_RISE_SPEED_INSIDE_LN * speedMult * dt;
                     const ln1RiseTargetY = (() => {
                         const multTargetGroup = lane.multTarget && lane.multTarget.group;
                         if (multTargetGroup && Number.isFinite(multTargetGroup.position.y)) {
@@ -725,8 +727,16 @@ export default class Gpt2Layer extends BaseLayer {
                             lane.normApplied = true;
                         }
                     };
-                    if (!lane.normStarted && dupVec.group.position.y >= normStartY) {
-                        startLn1Norm();
+                    if (!lane.normStarted) {
+                        if (dupVec.group.position.y >= normStartY) {
+                            dupVec.group.position.y = normStartY;
+                            startLn1Norm();
+                        } else {
+                            dupVec.group.position.y = Math.min(normStartY, dupVec.group.position.y + riseStep);
+                            if (dupVec.group.position.y >= normStartY) {
+                                startLn1Norm();
+                            }
+                        }
                     }
                     if (lane.normStarted && lane.normAnim) {
                         if (!skipActive) {
@@ -747,21 +757,12 @@ export default class Gpt2Layer extends BaseLayer {
                         }
                         lane.normApplied = true;
                     }
-                    if (!normAnimating) {
+                    if (lane.normStarted && !normAnimating) {
                         dupVec.group.position.y = Math.min(
                             ln1RiseTargetY,
-                            dupVec.group.position.y + ANIM_RISE_SPEED_INSIDE_LN * speedMult * dt
+                            dupVec.group.position.y + riseStep
                         );
                     }
-                    // --- NEW POST-MOVE SAFETY CHECK -----------------------------------
-                    // If the frame delta is large enough that the vector skipped over
-                    // the trigger height in a single update, the earlier check will
-                    // have missed it.  Run an extra guard here to ensure the
-                    // normalisation animation still begins.
-                    if (!lane.normStarted && dupVec.group.position.y >= normStartY) {
-                        startLn1Norm();
-                    }
-                    // -----------------------------------------------------------------
                     if (
                         !lane.multStarted &&
                         lane.normStarted &&
@@ -1076,6 +1077,7 @@ export default class Gpt2Layer extends BaseLayer {
                     // relative height inside the ring.
                     const normStartY2 =
                         bottomY_ln2_abs + LN_PARAMS.height * LN_NORM_START_FRACTION_FROM_BOTTOM;
+                    const riseStep = ANIM_RISE_SPEED_INSIDE_LN * speedMult * dt;
                     const startLn2Norm = () => {
                         const ln2NormData = this._getLn2Data(lane, 'norm');
                         const normInput = ln2NormData ? ln2NormData.slice() : mv.rawData.slice();
@@ -1099,8 +1101,16 @@ export default class Gpt2Layer extends BaseLayer {
                             lane.normAppliedLN2 = true;
                         }
                     };
-                    if (!lane.normStartedLN2 && mv.group.position.y >= normStartY2) {
-                        startLn2Norm();
+                    if (!lane.normStartedLN2) {
+                        if (mv.group.position.y >= normStartY2) {
+                            mv.group.position.y = normStartY2;
+                            startLn2Norm();
+                        } else {
+                            mv.group.position.y = Math.min(normStartY2, mv.group.position.y + riseStep);
+                            if (mv.group.position.y >= normStartY2) {
+                                startLn2Norm();
+                            }
+                        }
                     }
                     if (lane.normStartedLN2 && lane.normAnimationLN2) {
                         if (!skipActive) {
@@ -1121,17 +1131,12 @@ export default class Gpt2Layer extends BaseLayer {
                         }
                         lane.normAppliedLN2 = true;
                     }
-                    if (!lane.multDoneLN2 && !normAnimating2) {
+                    if (!lane.multDoneLN2 && lane.normStartedLN2 && !normAnimating2) {
                         mv.group.position.y = Math.min(
                             ln2RiseTargetY,
-                            mv.group.position.y + ANIM_RISE_SPEED_INSIDE_LN * speedMult * dt
+                            mv.group.position.y + riseStep
                         );
                     }
-                    // --- NEW POST-MOVE SAFETY CHECK --------------------------------
-                    if (!lane.normStartedLN2 && mv.group.position.y >= normStartY2) {
-                        startLn2Norm();
-                    }
-                    // ----------------------------------------------------------------
                     
                     // Trigger multiplication at center of LN2
                     if (
@@ -1998,6 +2003,28 @@ export default class Gpt2Layer extends BaseLayer {
                 ? Array.from(values)
                 : null;
         return new VectorVisualizationInstancedPrism(data, position, numSubsections, count);
+    }
+
+    _getLayerNormParamData(kind, param) {
+        const baseLength = this._getBaseVectorLength();
+        return getLayerNormParamData(this.index, kind, param, baseLength);
+    }
+
+    _applyLayerNormParamVector(targetVec, kind, param) {
+        if (!targetVec) return false;
+        const data = this._getLayerNormParamData(kind, param);
+        if (!data) return false;
+        const lnLabel = kind === 'ln1' ? 'LN1' : kind === 'ln2' ? 'LN2' : String(kind).toUpperCase();
+        const paramLabel = param === 'scale' ? 'Scale (gamma)' : 'Shift (beta)';
+        const label = `${lnLabel} ${paramLabel}`;
+        const meta = {
+            stage: `${kind}.param.${param}`,
+            layerIndex: this.index,
+            notes: param === 'scale'
+                ? 'LayerNorm scale (gamma) parameter'
+                : 'LayerNorm shift (beta) parameter'
+        };
+        return applyVectorData(targetVec, data, label, meta);
     }
 
     _getTokenIndexForLane(laneIdx) {

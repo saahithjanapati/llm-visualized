@@ -132,7 +132,10 @@ export function createSciFiMaterial(options = {}) {
 
         shader.vertexShader = shader.vertexShader
             .replace('#include <common>', '#include <common>\nvarying vec3 vLocalPos;\nvarying vec3 vWorldNormal;\n')
-            .replace('#include <begin_vertex>', '#include <begin_vertex>\n    vLocalPos = position;\n    vWorldNormal = normalize(normalMatrix * normal);\n');
+            .replace(
+                '#include <begin_vertex>',
+                '#include <begin_vertex>\n    #ifdef USE_INSTANCING\n        vec4 instPos = instanceMatrix * vec4(position, 1.0);\n        vLocalPos = instPos.xyz;\n    #else\n        vLocalPos = position;\n    #endif\n    vWorldNormal = normalize(normalMatrix * normal);\n'
+            );
 
         shader.fragmentShader = shader.fragmentShader
             .replace(
@@ -241,6 +244,30 @@ export function updateSciFiDimensions(material, dimensions) {
         const target = mat.userData.sciFiUniforms.uDimensions;
         if (target && target.value) {
             target.value.copy(dims);
+        }
+    }
+}
+
+/**
+ * Update numeric sci-fi shader uniforms for a material.
+ * Accepts keys like `stripeStrength` or `uStripeStrength`.
+ */
+export function updateSciFiMaterialUniforms(material, updates = {}) {
+    if (!material || !updates) return;
+    const materials = Array.isArray(material) ? material : [material];
+    for (const mat of materials) {
+        const uniforms = mat && mat.userData ? mat.userData.sciFiUniforms : null;
+        if (!uniforms) continue;
+        for (const [key, value] of Object.entries(updates)) {
+            if (value === undefined || value === null) continue;
+            const uniformKey = key.startsWith('u')
+                ? key
+                : `u${key.charAt(0).toUpperCase()}${key.slice(1)}`;
+            const uniform = uniforms[uniformKey];
+            if (!uniform || typeof uniform.value !== 'number') continue;
+            if (typeof value === 'number' && Number.isFinite(value)) {
+                uniform.value = value;
+            }
         }
     }
 }

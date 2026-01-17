@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { VECTOR_LENGTH_PRISM } from '../../utils/constants.js';
 import { buildActivationData, applyActivationDataToVector } from '../../utils/activationMetadata.js';
 import { perfStats } from '../../utils/perfStats.js';
+import { updateSciFiMaterialColor } from '../../utils/sciFiMaterial.js';
 
 const LN_MATERIAL_EPSILON = 1e-4;
 
@@ -106,8 +107,7 @@ export function applyLayerNormMaterial(group, targetColor, targetOpacity, state)
         if (Array.isArray(child.material)) {
             child.material.forEach(mat => {
                 if (colorChanged) {
-                    mat.color.copy(targetColor);
-                    mat.emissive.copy(targetColor);
+                    updateSciFiMaterialColor(mat, targetColor);
                 }
                 if (opacityChanged) {
                     mat.opacity = targetOpacity;
@@ -120,8 +120,7 @@ export function applyLayerNormMaterial(group, targetColor, targetOpacity, state)
         } else {
             const mat = child.material;
             if (colorChanged) {
-                mat.color.copy(targetColor);
-                mat.emissive.copy(targetColor);
+                updateSciFiMaterialColor(mat, targetColor);
             }
             if (opacityChanged) {
                 mat.opacity = targetOpacity;

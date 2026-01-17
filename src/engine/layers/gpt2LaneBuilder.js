@@ -57,6 +57,7 @@ export function createAdditionPlaceholders(layer, offsetX, ln1CenterY, ln2Center
                 30,
                 ln1PlaceholderData.length
             );
+            layer._applyLayerNormParamVector(ln1Placeholder, 'ln1', 'shift');
             ln1Placeholder.group.visible = false;
             raycastRoot.add(ln1Placeholder.group);
             layer._ln1AddPlaceholders[laneIdx] = ln1Placeholder;
@@ -68,6 +69,7 @@ export function createAdditionPlaceholders(layer, offsetX, ln1CenterY, ln2Center
                 30,
                 ln2PlaceholderData.length
             );
+            layer._applyLayerNormParamVector(ln2Placeholder, 'ln2', 'shift');
             ln2Placeholder.group.visible = false;
             raycastRoot.add(ln2Placeholder.group);
             layer._ln2AddPlaceholders[laneIdx] = ln2Placeholder;
@@ -202,6 +204,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
         30,
         originalVec.instanceCount
     );
+    layer._applyLayerNormParamVector(multTarget, 'ln1', 'scale');
     raycastRoot.add(multTarget.group);
     multTarget.group.visible = false;
 
@@ -211,6 +214,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
         30,
         originalVec.instanceCount
     );
+    layer._applyLayerNormParamVector(multTargetLN2, 'ln2', 'scale');
     raycastRoot.add(multTargetLN2.group);
     multTargetLN2.group.visible = false;
 
@@ -237,6 +241,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
         raycastRoot.add(addTarget.group);
         if (addTarget.group) addTarget.group.visible = false;
     }
+    layer._applyLayerNormParamVector(addTarget, 'ln1', 'shift');
 
     let addTargetLN2 = null;
     if (layer._ln2AddPlaceholders && layer._ln2AddPlaceholders[laneIdx]) {
@@ -259,6 +264,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
         raycastRoot.add(addTargetLN2.group);
         if (addTargetLN2.group) addTargetLN2.group.visible = false;
     }
+    layer._applyLayerNormParamVector(addTargetLN2, 'ln2', 'shift');
 
     // Fallback to previous trail if a new one wasn't created in this constructor.
     if (!trail && trailFromPrev) trail = trailFromPrev;
@@ -389,8 +395,6 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
             const horizDist = Math.abs(posStartX - 0);
             const horizSpeed = ANIM_HORIZ_SPEED * POS_VEC_HORIZONTAL_SPEED_MULT * GLOBAL_ANIM_SPEED_MULT;
             const horizMs = (horizDist / horizSpeed) * 1000;
-            const posTrailRetireX = Math.max(12, Math.min(30, horizDist * 0.07));
-
             if (typeof TWEEN !== 'undefined') {
                 new TWEEN.Tween(posVec.group.position)
                     .to({ y: targetYAbove }, Math.max(100, riseMs))
@@ -406,14 +410,11 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
                             .onUpdate(() => {
                                 // Maintain Y lock during horizontal interpolation.
                                 posVec.group.position.y = targetYAbove;
-                                const absX = Math.abs(posVec.group.position.x);
-                                // Retire the positional trail slightly before x=0 so it never overlaps
-                                // the residual trail and brightens the line segment.
-                                if (absX <= posTrailRetireX) {
-                                    retirePosTrail();
-                                }
                             })
                             .onComplete(() => {
+                                if (posTrail && !posTrailDisposed) {
+                                    posTrail.snapLastPointTo(posVec.group.position);
+                                }
                                 // Stop extending trail once we arrive at residual stream.
                                 retirePosTrail();
                                 // Trigger addition: positional (above) travels DOWN into vocab (rising).

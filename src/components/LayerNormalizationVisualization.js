@@ -30,6 +30,40 @@ function getCacheKey(width, height, depth, wallThickness, numberOfHoles, holeWid
     return [width, height, depth, wallThickness, numberOfHoles, holeWidth, holeWidthFactor, segments].join('|');
 }
 
+function stripCapsGeometry(bufferGeo) {
+    const geo = bufferGeo.toNonIndexed();
+    const posAttr = geo.getAttribute('position');
+    const nrmAttr = geo.getAttribute('normal');
+    if (!posAttr || !nrmAttr) {
+        geo.dispose();
+        return bufferGeo.clone();
+    }
+
+    const pos = posAttr.array;
+    const nrm = nrmAttr.array;
+    const newPositions = [];
+    const newNormals = [];
+
+    for (let i = 0; i < pos.length; i += 9) {
+        const nz = (nrm[i + 2] + nrm[i + 5] + nrm[i + 8]) / 3;
+        const isFront = nz > 0.9;
+        const isBack = nz < -0.9;
+        if (isFront || isBack) continue;
+        for (let j = 0; j < 9; j++) {
+            newPositions.push(pos[i + j]);
+            newNormals.push(nrm[i + j]);
+        }
+    }
+
+    geo.dispose();
+
+    const newGeo = new THREE.BufferGeometry();
+    newGeo.setAttribute('position', new THREE.Float32BufferAttribute(newPositions, 3));
+    newGeo.setAttribute('normal', new THREE.Float32BufferAttribute(newNormals, 3));
+    newGeo.computeBoundingSphere();
+    return newGeo;
+}
+
 export class LayerNormalizationVisualization {
     constructor(
         position = new THREE.Vector3(0, 0, 0),
@@ -67,6 +101,8 @@ export class LayerNormalizationVisualization {
 
         // Hold reference to the mesh for later disposal / replacement
         this.mesh = null;
+        this.frontCapMesh = null;
+        this.backCapMesh = null;
 
         this._createMesh();
     }
@@ -86,6 +122,19 @@ export class LayerNormalizationVisualization {
                 }
             }
             this.mesh = null;
+        }
+
+        if (this.frontCapMesh) {
+            this.group.remove(this.frontCapMesh);
+            if (this.frontCapMesh.geometry) this.frontCapMesh.geometry.dispose();
+            if (this.frontCapMesh.material) this.frontCapMesh.material.dispose();
+            this.frontCapMesh = null;
+        }
+        if (this.backCapMesh) {
+            this.group.remove(this.backCapMesh);
+            if (this.backCapMesh.geometry) this.backCapMesh.geometry.dispose();
+            if (this.backCapMesh.material) this.backCapMesh.material.dispose();
+            this.backCapMesh = null;
         }
     }
 
@@ -372,6 +421,7 @@ export class LayerNormalizationVisualization {
         }
 
         const sciFiSliceDims = { width: this.width, height: this.height, depth: sliceDepth };
+        const sciFiStackDims = { width: this.width, height: this.height, depth: sliceDepth * NUM_VECTOR_LANES };
         const mat = (USE_GLB_MATERIALS && __materialCache.has(sliceKey))
             ? __materialCache.get(sliceKey).clone()
             : createSciFiMaterial({
@@ -398,7 +448,7 @@ export class LayerNormalizationVisualization {
                 depthAccentStrength: 0.33,
                 scanlineFrequency: (Math.PI * 2) / Math.max(this.height / 6, 1),
                 scanlineStrength: 0.26,
-                dimensions: sciFiSliceDims,
+                dimensions: sciFiStackDims,
                 stripeFrequency: (Math.PI * 2) / Math.max(sliceDepth / 8, 1),
                 stripeStrength: 0.52,
                 rimIntensity: 0.7,
@@ -409,7 +459,8 @@ export class LayerNormalizationVisualization {
                 noiseStrength: 0.05
             });
 
-        const inst = new THREE.InstancedMesh(sliceGeometry, mat, NUM_VECTOR_LANES);
+        const sideWallGeometry = stripCapsGeometry(sliceGeometry);
+        const inst = new THREE.InstancedMesh(sideWallGeometry, mat, NUM_VECTOR_LANES);
         const mtx = new THREE.Matrix4();
         for (let i = 0; i < NUM_VECTOR_LANES; i++) {
             const z = (i - (NUM_VECTOR_LANES - 1) / 2) * VECTOR_DEPTH_SPACING;
@@ -421,7 +472,42 @@ export class LayerNormalizationVisualization {
         this.mesh = inst;
         this.group.add(inst);
         this.mesh.renderOrder = 0;
-        updateSciFiDimensions(this.mesh.material, sciFiSliceDims);
+        updateSciFiDimensions(this.mesh.material, sciFiStackDims);
+
+        // Add front/back caps at the outer edges so the stack reads as one solid.
+        const capShape = new THREE.Shape();
+        const outerRadiusX = this.width / 2;
+        const outerRadiusY = this.height / 2;
+        const innerRadiusX = Math.max(outerRadiusX - this.wallThickness, 0.01);
+        const innerRadiusY = Math.max(outerRadiusY - this.wallThickness, 0.01);
+        capShape.absellipse(0, 0, outerRadiusX, outerRadiusY, 0, Math.PI * 2, false, 0);
+        const innerPath = new THREE.Path();
+        innerPath.absellipse(0, 0, innerRadiusX, innerRadiusY, 0, Math.PI * 2, true, 0);
+        capShape.holes.push(innerPath);
+
+        const capGeometry = new THREE.ShapeGeometry(capShape);
+        capGeometry.center();
+
+        const capMaterial = mat.clone();
+        capMaterial.polygonOffset = true;
+        capMaterial.polygonOffsetFactor = -1;
+        capMaterial.polygonOffsetUnits = -4;
+
+        const stackDepth = NUM_VECTOR_LANES * sliceDepth;
+        const capOffset = 0.05;
+        const frontCap = new THREE.Mesh(capGeometry, capMaterial);
+        frontCap.position.z = stackDepth / 2 + capOffset;
+        frontCap.renderOrder = 1;
+
+        const backCap = new THREE.Mesh(capGeometry.clone(), capMaterial.clone());
+        backCap.position.z = -stackDepth / 2 - capOffset;
+        backCap.rotation.y = Math.PI;
+        backCap.renderOrder = 2;
+
+        this.frontCapMesh = frontCap;
+        this.backCapMesh = backCap;
+        this.group.add(frontCap);
+        this.group.add(backCap);
     }
 
     // Public helper to update geometry when parameters change (e.g. from a GUI)

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 
 // Visual dependencies
 import { WeightMatrixVisualization } from '../../components/WeightMatrixVisualization.js';
+import { updateSciFiMaterialUniforms } from '../../utils/sciFiMaterial.js';
 
 // Animation constants
 import {
@@ -43,6 +44,20 @@ export function buildMHAVisuals(parentGroup, {
     // ------------------------------------------------------------
     const matrixCenterY = mhsaBaseY + MHA_MATRIX_PARAMS.height / 2;
     const inactiveMatrixColor = new THREE.Color(INACTIVE_COMPONENT_COLOR);
+
+    const inactiveMatrixUniforms = {
+        stripeStrength: 0.0,
+        scanlineStrength: 0.0,
+        rimIntensity: 0.28,
+        depthAccentStrength: 0.08,
+        glintStrength: 0.04
+    };
+    const tuneInactiveMatrix = (matrix) => {
+        if (!matrix) return;
+        updateSciFiMaterialUniforms(matrix.mesh?.material, inactiveMatrixUniforms);
+        updateSciFiMaterialUniforms(matrix.frontCapMesh?.material, inactiveMatrixUniforms);
+        updateSciFiMaterialUniforms(matrix.backCapMesh?.material, inactiveMatrixUniforms);
+    };
 
     for (let i = 0; i < NUM_HEAD_SETS_LAYER; i++) {
         const headSetWidth       = MHA_INTERNAL_MATRIX_SPACING * 2 + MHA_MATRIX_PARAMS.width;
@@ -86,9 +101,13 @@ export function buildMHAVisuals(parentGroup, {
             return mat;
         };
 
-        buildMatrix(x_q, 'Query Weight Matrix');
+        const qMatrix = buildMatrix(x_q, 'Query Weight Matrix');
         const kMatrix = buildMatrix(x_k, 'Key Weight Matrix');
-        buildMatrix(x_v, 'Value Weight Matrix');
+        const vMatrix = buildMatrix(x_v, 'Value Weight Matrix');
+
+        tuneInactiveMatrix(qMatrix);
+        tuneInactiveMatrix(kMatrix);
+        tuneInactiveMatrix(vMatrix);
 
         headsCentersX.push(x_k);
         headCoords.push({ q: x_q, k: x_k, v: x_v });

@@ -139,6 +139,7 @@ export class CoreEngine {
         // Track primary touch interactions so quick taps can trigger raycasts
         this._touchTapData = null;
         this._touchTapMoveThresholdSq = 64; // ~8px movement allowance
+        this._touchActiveCount = 0;
 
         // Bind pointer move handler and add listener
         this._onPointerMove = this._onPointerMove.bind(this);
@@ -150,6 +151,13 @@ export class CoreEngine {
 
         this._onPointerCancel = this._onPointerCancel.bind(this);
         this.renderer.domElement.addEventListener('pointercancel', this._onPointerCancel);
+
+        // Track touch counts to keep OrbitControls pointers in sync on mobile.
+        this._onTouchStateChange = this._onTouchStateChange.bind(this);
+        this.renderer.domElement.addEventListener('touchstart', this._onTouchStateChange, { passive: true });
+        this.renderer.domElement.addEventListener('touchmove', this._onTouchStateChange, { passive: true });
+        this.renderer.domElement.addEventListener('touchend', this._onTouchStateChange, { passive: true });
+        this.renderer.domElement.addEventListener('touchcancel', this._onTouchStateChange, { passive: true });
 
         // Bind pointer up handler for touch devices so taps trigger labels
         this._onPointerUp = this._onPointerUp.bind(this);
@@ -384,6 +392,10 @@ export class CoreEngine {
         this.renderer.domElement.removeEventListener('pointerdown', this._onPointerDown);
         this.renderer.domElement.removeEventListener('pointercancel', this._onPointerCancel);
         this.renderer.domElement.removeEventListener('pointerup', this._onPointerUp);
+        this.renderer.domElement.removeEventListener('touchstart', this._onTouchStateChange);
+        this.renderer.domElement.removeEventListener('touchmove', this._onTouchStateChange);
+        this.renderer.domElement.removeEventListener('touchend', this._onTouchStateChange);
+        this.renderer.domElement.removeEventListener('touchcancel', this._onTouchStateChange);
         this.renderer.domElement.removeEventListener('contextmenu', this._onContextMenu);
         this.renderer.domElement.removeEventListener('selectstart', this._onSelectStart);
         if (this._hoverLabelDiv && this._hoverLabelDiv.parentElement) {
@@ -459,6 +471,12 @@ export class CoreEngine {
     _onPointerDown = (event) => {
         this._updateHoverLabelMode(event.pointerType);
         if (event.pointerType === 'touch') {
+            const domElement = this.renderer?.domElement;
+            if (domElement && typeof domElement.setPointerCapture === 'function') {
+                try {
+                    domElement.setPointerCapture(event.pointerId);
+                } catch (_) { /* best-effort */ }
+            }
             // Only track the primary tap candidate to avoid conflicts with multi-touch gestures
             if (this._touchTapData && this._touchTapData.id !== event.pointerId) return;
             const { clientX, clientY } = event;
@@ -494,6 +512,16 @@ export class CoreEngine {
         }
         if (this._clickTapData && this._clickTapData.id === event.pointerId) {
             this._clickTapData = null;
+        }
+    };
+
+    _onTouchStateChange = (event) => {
+        if (!event || !event.touches) return;
+        this._touchActiveCount = event.touches.length;
+        const controls = this.controls;
+        if (!controls || !Array.isArray(controls._pointers)) return;
+        if (controls._pointers.length > this._touchActiveCount) {
+            this._resetControlsState();
         }
     };
 

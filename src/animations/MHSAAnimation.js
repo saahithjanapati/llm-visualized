@@ -887,6 +887,7 @@ export class MHSAAnimation {
         const tmpScale = new THREE.Vector3();
         const tmpColor = new THREE.Color();
         const dummy = new THREE.Object3D();
+        const hiddenScale = 0.001;
 
         // Populate instances by copying per-prism transforms and colours from the original vectors
         let instIndex = 0;
@@ -930,7 +931,12 @@ export class MHSAAnimation {
 
                 dummy.position.set(worldX, worldY, worldZ);
                 // Apply fixed uniform dimensions (mirrors original visual size)
-                dummy.scale.set(PRISM_WIDTH_SCALE, hidden ? 0.001 : uniformCalculatedHeight, PRISM_DEPTH_SCALE);
+                // Fully collapse hidden prisms so they never show up below the tower.
+                if (hidden) {
+                    dummy.scale.set(hiddenScale, hiddenScale, hiddenScale);
+                } else {
+                    dummy.scale.set(PRISM_WIDTH_SCALE, uniformCalculatedHeight, PRISM_DEPTH_SCALE);
+                }
                 dummy.updateMatrix();
                 instanced.setMatrixAt(instIndex, dummy.matrix);
 
