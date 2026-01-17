@@ -194,6 +194,17 @@ function isQkvMatrixLabel(label) {
         || lower.includes('value weight matrix');
 }
 
+function isAttentionScoreSelection(label, selectionInfo) {
+    const lower = (label || '').toLowerCase();
+    if (lower.includes('attention score')) return true;
+    const stage = selectionInfo?.info?.activationData?.stage
+        || selectionInfo?.object?.userData?.activationData?.stage
+        || selectionInfo?.hit?.object?.userData?.activationData?.stage;
+    if (typeof stage === 'string' && stage.startsWith('attention.')) return true;
+    const obj = selectionInfo?.object || selectionInfo?.hit?.object;
+    return !!(obj && obj.isMesh && obj.geometry && obj.geometry.type === 'SphereGeometry');
+}
+
 function resolveFinalPreviewColor(label) {
     const lower = (label || '').toLowerCase();
     if (lower.includes('query weight matrix')) return MHA_FINAL_Q_COLOR;
@@ -1203,6 +1214,12 @@ function resolvePreviewObject(label, selectionInfo) {
 
     if (lower.includes('layernorm') || lower.includes('layer norm')) {
         return buildLayerNormPreview(label, selectionInfo);
+    }
+
+    if (isAttentionScoreSelection(label, selectionInfo)) {
+        return buildDirectClonePreview(selectionInfo)
+            || buildSelectionClonePreview(selectionInfo, label)
+            || buildStackedBoxPreview(0x1b1b1b);
     }
 
     if (lower.includes('attention')) {
