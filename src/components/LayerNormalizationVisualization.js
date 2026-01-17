@@ -25,6 +25,7 @@ import { createSciFiMaterial, updateSciFiDimensions, updateSciFiMaterialColor } 
 
 const __geometryCache = new Map();
 const __materialCache = new Map();
+const STRIP_END_CAPS = true;
 
 function getCacheKey(width, height, depth, wallThickness, numberOfHoles, holeWidth, holeWidthFactor, segments) {
     return [width, height, depth, wallThickness, numberOfHoles, holeWidth, holeWidthFactor, segments].join('|');
@@ -49,6 +50,52 @@ function stripCapsGeometry(bufferGeo) {
         const isFront = nz > 0.9;
         const isBack = nz < -0.9;
         if (isFront || isBack) continue;
+        for (let j = 0; j < 9; j++) {
+            newPositions.push(pos[i + j]);
+            newNormals.push(nrm[i + j]);
+        }
+    }
+
+    geo.dispose();
+
+    const newGeo = new THREE.BufferGeometry();
+    newGeo.setAttribute('position', new THREE.Float32BufferAttribute(newPositions, 3));
+    newGeo.setAttribute('normal', new THREE.Float32BufferAttribute(newNormals, 3));
+    newGeo.computeBoundingSphere();
+    return newGeo;
+}
+
+function stripEndCapsGeometry(bufferGeo) {
+    const geo = bufferGeo.toNonIndexed();
+    const posAttr = geo.getAttribute('position');
+    const nrmAttr = geo.getAttribute('normal');
+    if (!posAttr || !nrmAttr) {
+        geo.dispose();
+        return bufferGeo.clone();
+    }
+
+    geo.computeBoundingBox();
+    const bounds = geo.boundingBox;
+    const capZ = bounds ? Math.max(Math.abs(bounds.min.z), Math.abs(bounds.max.z)) : 0;
+    if (!Number.isFinite(capZ) || capZ <= 0) {
+        geo.dispose();
+        return bufferGeo.clone();
+    }
+
+    const capInset = Math.max(0.05, capZ * 0.005);
+    const capThreshold = capZ - capInset;
+
+    const pos = posAttr.array;
+    const nrm = nrmAttr.array;
+    const newPositions = [];
+    const newNormals = [];
+
+    for (let i = 0; i < pos.length; i += 9) {
+        const nz = (nrm[i + 2] + nrm[i + 5] + nrm[i + 8]) / 3;
+        if (Math.abs(nz) > 0.9) {
+            const cz = (pos[i + 2] + pos[i + 5] + pos[i + 8]) / 3;
+            if (Math.abs(cz) >= capThreshold) continue;
+        }
         for (let j = 0; j < 9; j++) {
             newPositions.push(pos[i + j]);
             newNormals.push(nrm[i + j]);
@@ -319,6 +366,14 @@ export class LayerNormalizationVisualization {
             finalMesh.geometry = newGeom;
         }
 
+        let strippedCaps = false;
+        if (STRIP_END_CAPS && !(finalMesh.geometry && finalMesh.geometry.userData && finalMesh.geometry.userData.noCaps)) {
+            const strippedGeo = stripEndCapsGeometry(finalMesh.geometry);
+            strippedGeo.userData = { ...(finalMesh.geometry.userData || {}), noCaps: true };
+            finalMesh.geometry = strippedGeo;
+            strippedCaps = true;
+        }
+
         // ==== STEP 5 — assign material & add to the outer group ====
         const material = (USE_GLB_MATERIALS && __materialCache.has(cacheKey))
             ? __materialCache.get(cacheKey).clone()
@@ -331,30 +386,30 @@ export class LayerNormalizationVisualization {
                 edgeColor: 0xcefbff,
                 emissiveColor: 0x4fd4ff,
                 emissiveIntensity: 0.52,
-                metalness: 0.8,
-                roughness: 0.12,
-                clearcoat: 0.94,
-                clearcoatRoughness: 0.18,
-                transmission: 0.18,
-                thickness: 1.7,
-                iridescence: 0.58,
-                sheen: 0.6,
+                metalness: 0.2,
+                roughness: 0.55,
+                clearcoat: 0.0,
+                clearcoatRoughness: 0.0,
+                transmission: 0.0,
+                thickness: 0.0,
+                iridescence: 0.0,
+                sheen: 0.0,
                 sheenColor: 0xd0feff,
-                envMapIntensity: 1.85,
+                envMapIntensity: 0.6,
                 accentMix: 0.92,
                 glowFalloff: 2.0,
-                depthAccentStrength: 0.3,
+                depthAccentStrength: 0.0,
                 scanlineFrequency: (Math.PI * 2) / Math.max(this.height / 6, 1),
-                scanlineStrength: 0.22,
+                scanlineStrength: 0.0,
                 dimensions: { width: this.width, height: this.height, depth: this.depth },
                 stripeFrequency: (Math.PI * 2) / Math.max(this.depth / 8, 1),
-                stripeStrength: 0.5,
-                rimIntensity: 0.68,
+                stripeStrength: 0.0,
+                rimIntensity: 0.0,
                 gradientSharpness: 1.38,
                 gradientBias: 0.04,
-                fresnelBoost: 0.38,
-                glintStrength: 0.2,
-                noiseStrength: 0.045
+                fresnelBoost: 0.0,
+                glintStrength: 0.0,
+                noiseStrength: 0.0
             });
 
         // After all geometry operations *and* potential caching we assign
@@ -366,7 +421,7 @@ export class LayerNormalizationVisualization {
         this.mesh.material = material;
         updateSciFiDimensions(this.mesh.material, { width: this.width, height: this.height, depth: this.depth });
 
-        if (!__geometryCache.has(cacheKey)) {
+        if (!__geometryCache.has(cacheKey) || strippedCaps) {
             // Clone before caching?  No – we store the *exact* BufferGeometry
             // instance so that all consumers share it.  This saves memory and
             // makes renderer uploads even faster.
@@ -433,33 +488,33 @@ export class LayerNormalizationVisualization {
                 edgeColor: 0xd6fbff,
                 emissiveColor: 0x51d7ff,
                 emissiveIntensity: 0.54,
-                metalness: 0.82,
-                roughness: 0.11,
-                clearcoat: 0.95,
-                clearcoatRoughness: 0.16,
-                transmission: 0.2,
-                thickness: 1.78,
-                iridescence: 0.6,
-                sheen: 0.62,
+                metalness: 0.2,
+                roughness: 0.55,
+                clearcoat: 0.0,
+                clearcoatRoughness: 0.0,
+                transmission: 0.0,
+                thickness: 0.0,
+                iridescence: 0.0,
+                sheen: 0.0,
                 sheenColor: 0xd6ffff,
-                envMapIntensity: 1.92,
+                envMapIntensity: 0.6,
                 accentMix: 0.93,
                 glowFalloff: 2.15,
-                depthAccentStrength: 0.33,
+                depthAccentStrength: 0.0,
                 scanlineFrequency: (Math.PI * 2) / Math.max(this.height / 6, 1),
-                scanlineStrength: 0.26,
+                scanlineStrength: 0.0,
                 dimensions: sciFiStackDims,
                 stripeFrequency: (Math.PI * 2) / Math.max(sliceDepth / 8, 1),
-                stripeStrength: 0.52,
-                rimIntensity: 0.7,
+                stripeStrength: 0.0,
+                rimIntensity: 0.0,
                 gradientSharpness: 1.4,
                 gradientBias: 0.04,
-                fresnelBoost: 0.4,
-                glintStrength: 0.24,
-                noiseStrength: 0.05
+                fresnelBoost: 0.0,
+                glintStrength: 0.0,
+                noiseStrength: 0.0
             });
 
-        const sideWallGeometry = stripCapsGeometry(sliceGeometry);
+        const sideWallGeometry = STRIP_END_CAPS ? sliceGeometry : stripCapsGeometry(sliceGeometry);
         const inst = new THREE.InstancedMesh(sideWallGeometry, mat, NUM_VECTOR_LANES);
         const mtx = new THREE.Matrix4();
         for (let i = 0; i < NUM_VECTOR_LANES; i++) {
@@ -473,6 +528,8 @@ export class LayerNormalizationVisualization {
         this.group.add(inst);
         this.mesh.renderOrder = 0;
         updateSciFiDimensions(this.mesh.material, sciFiStackDims);
+
+        if (STRIP_END_CAPS) return;
 
         // Add front/back caps at the outer edges so the stack reads as one solid.
         const capShape = new THREE.Shape();
