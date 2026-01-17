@@ -69,6 +69,9 @@ export class MHSAAnimation {
         // Speed at which residual-stream vectors rise while branched
         // during MHSA/MLP processing. Starts with the LN1 value.
         this.postSplitRiseSpeed = ANIM_RISE_SPEED_POST_SPLIT_LN1;
+        // Allow the pipeline to pause residual rise when a higher-level
+        // animation sequence (e.g. final LayerNorm) takes over.
+        this.suppressResidualRise = false;
 
         // Core positional helpers & state flags
         this.mhaPassThroughPhase = 'positioning_mha_vectors';
@@ -583,7 +586,7 @@ export class MHSAAnimation {
         // ------------------------------------------------------------------
         //  CONTINUOUSLY MOVE ORIGINAL RESIDUAL-STREAM VECTORS UPWARDS
         // ------------------------------------------------------------------
-        if (this.finalOriginalY !== undefined) {
+        if (this.finalOriginalY !== undefined && !this.suppressResidualRise) {
             const riseStep = this.postSplitRiseSpeed * GLOBAL_ANIM_SPEED_MULT * deltaTime;
             lanes.forEach(lane => {
                 if (!lane || !lane.originalVec || !lane.originalVec.group) return;

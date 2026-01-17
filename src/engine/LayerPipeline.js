@@ -520,6 +520,9 @@ export class LayerPipeline extends EventTarget {
      */
     _animateResidualVectors(lastLayer, targetYLocal, lnInfo) {
         if (lnInfo && lnInfo.lnTopGroup) {
+            if (lastLayer.mhsaAnimation) {
+                lastLayer.mhsaAnimation.suppressResidualRise = true;
+            }
             const { lnTopGroup, lnCenterY, lnBottomY } = lnInfo;
             const lnMeshes = [];
             lnTopGroup.traverse(obj => {
@@ -634,6 +637,13 @@ export class LayerPipeline extends EventTarget {
             lastLayer.lanes.forEach(lane => {
                 const vec = lane && lane.originalVec;
                 if (!vec || !vec.group) return;
+                if (lane && lane.originalTrail) {
+                    vec.userData = vec.userData || {};
+                    if (!vec.userData.trail) {
+                        vec.userData.trail = lane.originalTrail;
+                        vec.userData.trailWorld = true;
+                    }
+                }
                 const startY = vec.group.position.y;
                 if (!Number.isFinite(startY)) return;
 
@@ -718,12 +728,46 @@ export class LayerPipeline extends EventTarget {
                         this.dispatchEvent(new Event('progress'));
 
                         lane.__topLnShiftStarted = true;
-                        startPrismAdditionAnimation(addVec, resVec, null, () => {
+                        startPrismAdditionAnimation(resVec, addVec, null, () => {
                             lane.__topLnShiftComplete = true;
-                            if (addVec.group) addVec.group.visible = false;
-                            if (addVec.group && addVec.group.parent) {
-                                addVec.group.parent.remove(addVec.group);
+                            const additionTrail = resVec.userData && resVec.userData.trail;
+                            if (additionTrail) {
+                                addVec.userData = addVec.userData || {};
+                                const additionTrailIsWorld = Boolean(resVec.userData && resVec.userData.trailWorld);
+                                const prevTrail = addVec.userData.trail;
+                                if (prevTrail && prevTrail !== additionTrail) {
+                                    try {
+                                        if (typeof prevTrail.dispose === 'function') {
+                                            prevTrail.dispose();
+                                        } else if (prevTrail._line && prevTrail._line.parent) {
+                                            prevTrail._line.parent.remove(prevTrail._line);
+                                        }
+                                    } catch (_) { /* optional cleanup */ }
+                                }
+                                addVec.userData.trail = additionTrail;
+                                addVec.userData.trailWorld = additionTrailIsWorld;
+                                if (additionTrailIsWorld) {
+                                    addVec.group.getWorldPosition(TMP_WORLD_POS);
+                                    if (typeof additionTrail.snapLastPointTo === 'function') {
+                                        additionTrail.snapLastPointTo(TMP_WORLD_POS);
+                                    } else {
+                                        additionTrail.update(TMP_WORLD_POS);
+                                    }
+                                } else {
+                                    if (typeof additionTrail.snapLastPointTo === 'function') {
+                                        additionTrail.snapLastPointTo(addVec.group.position);
+                                    } else {
+                                        additionTrail.update(addVec.group.position);
+                                    }
+                                }
+                                delete resVec.userData.trail;
+                                delete resVec.userData.trailWorld;
                             }
+                            if (resVec.group && resVec.group.parent) {
+                                resVec.group.parent.remove(resVec.group);
+                            }
+                            lane.originalVec = addVec;
+                            startFinalRise(addVec);
                         });
 
                         const additionDuration = additionDurationFor(resVec);
@@ -735,11 +779,6 @@ export class LayerPipeline extends EventTarget {
                                 this.dispatchEvent(new Event('progress'));
                             })
                             .start();
-
-                        setTimeout(() => {
-                            updateTopLnColor(resVec.group.position.y);
-                            startFinalRise(resVec);
-                        }, additionDuration + 100);
                     });
                 };
 
@@ -747,6 +786,9 @@ export class LayerPipeline extends EventTarget {
                     const targetY = Math.max(vec.group.position.y, lnCenterY);
                     if (vec.group.position.y >= targetY - 0.01) {
                         vec.group.position.y = targetY;
+                        updateTopLnColor(vec.group.position.y);
+                        updateTrailPosition(vec);
+                        this.dispatchEvent(new Event('progress'));
                         beginMultiply();
                         return;
                     }
@@ -758,10 +800,12 @@ export class LayerPipeline extends EventTarget {
                         .easing(TWEEN.Easing.Quadratic.InOut)
                         .onUpdate(() => {
                             updateTopLnColor(vec.group.position.y);
+                            updateTrailPosition(vec);
                             this.dispatchEvent(new Event('progress'));
                         })
                         .onComplete(() => {
                             updateTopLnColor(vec.group.position.y);
+                            updateTrailPosition(vec);
                             this.dispatchEvent(new Event('progress'));
                             beginMultiply();
                         })
@@ -810,6 +854,9 @@ export class LayerPipeline extends EventTarget {
 
                     if (vec.group.position.y >= stageTarget - 0.01) {
                         vec.group.position.y = stageTarget;
+                        updateTopLnColor(vec.group.position.y);
+                        updateTrailPosition(vec);
+                        this.dispatchEvent(new Event('progress'));
                         startNormalization();
                         return;
                     }
@@ -821,6 +868,7 @@ export class LayerPipeline extends EventTarget {
                         .easing(TWEEN.Easing.Quadratic.InOut)
                         .onUpdate(() => {
                             updateTopLnColor(vec.group.position.y);
+                            updateTrailPosition(vec);
                             if (!lane.__topLnEntered && vec.group.position.y >= lnBottomY) {
                                 lane.__topLnEntered = true;
                                 multVec.group.visible = true;
@@ -830,6 +878,7 @@ export class LayerPipeline extends EventTarget {
                         })
                         .onComplete(() => {
                             updateTopLnColor(vec.group.position.y);
+                            updateTrailPosition(vec);
                             this.dispatchEvent(new Event('progress'));
                             startNormalization();
                         })
