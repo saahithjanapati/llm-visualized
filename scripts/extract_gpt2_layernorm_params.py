@@ -37,8 +37,22 @@ def _maybe_round(values: List[float], decimals: Optional[int]) -> List[float]:
     return [round(float(v), decimals) for v in values]
 
 
-def _tensor_to_list(tensor: torch.Tensor, decimals: Optional[int]) -> List[float]:
+def _sample_values(values: List[float], stride: Optional[int]) -> List[float]:
+    if stride is None:
+        return values
+    step = int(stride)
+    if step <= 1:
+        return values
+    return [values[i] for i in range(0, len(values), step)]
+
+
+def _tensor_to_list(
+    tensor: torch.Tensor,
+    decimals: Optional[int],
+    stride: Optional[int],
+) -> List[float]:
     values = tensor.detach().cpu().to(torch.float32).tolist()
+    values = _sample_values(values, stride)
     return _maybe_round(values, decimals)
 
 
@@ -103,6 +117,7 @@ def build_payload_from_state(
     config: Dict[str, Any],
     model_name: str,
     decimals: Optional[int],
+    stride: Optional[int],
 ) -> Dict[str, Any]:
     n_layer = config.get("n_layer") or config.get("num_hidden_layers") or _infer_n_layer(state)
     hidden_size = config.get("n_embd") or config.get("hidden_size")
@@ -119,12 +134,12 @@ def build_payload_from_state(
         layers.append(
             {
                 "ln1": {
-                    "scale": _tensor_to_list(state[f"{h_prefix}{layer_idx}.ln_1.weight"], decimals),
-                    "shift": _tensor_to_list(state[f"{h_prefix}{layer_idx}.ln_1.bias"], decimals),
+                    "scale": _tensor_to_list(state[f"{h_prefix}{layer_idx}.ln_1.weight"], decimals, stride),
+                    "shift": _tensor_to_list(state[f"{h_prefix}{layer_idx}.ln_1.bias"], decimals, stride),
                 },
                 "ln2": {
-                    "scale": _tensor_to_list(state[f"{h_prefix}{layer_idx}.ln_2.weight"], decimals),
-                    "shift": _tensor_to_list(state[f"{h_prefix}{layer_idx}.ln_2.bias"], decimals),
+                    "scale": _tensor_to_list(state[f"{h_prefix}{layer_idx}.ln_2.weight"], decimals, stride),
+                    "shift": _tensor_to_list(state[f"{h_prefix}{layer_idx}.ln_2.bias"], decimals, stride),
                 },
             }
         )
@@ -137,10 +152,12 @@ def build_payload_from_state(
         },
         "layers": layers,
         "final": {
-            "scale": _tensor_to_list(state[f"{ln_f_prefix}weight"], decimals),
-            "shift": _tensor_to_list(state[f"{ln_f_prefix}bias"], decimals),
+            "scale": _tensor_to_list(state[f"{ln_f_prefix}weight"], decimals, stride),
+            "shift": _tensor_to_list(state[f"{ln_f_prefix}bias"], decimals, stride),
         },
     }
+    if stride is not None and stride > 1:
+        payload["meta"]["param_stride"] = stride
     return payload
     layers: List[Dict[str, Any]] = []
     for block in model.transformer.h:
@@ -193,6 +210,12 @@ def parse_args() -> argparse.Namespace:
         default=6,
         help="Round parameter values to this many decimals (default: 6).",
     )
+    parser.add_argument(
+        "--stride",
+        type=int,
+        default=64,
+        help="Stride for sampling vectors (default: 64; set to 1 to keep full size).",
+    )
     return parser.parse_args()
 
 
@@ -201,6 +224,7 @@ def main() -> None:
     model_name = args.model
     output_path = Path(args.output)
     round_decimals = args.round_decimals if args.round_decimals is not None else None
+    stride = args.stride if args.stride is not None else None
 
     local_paths = _resolve_local_paths(model_name)
     if local_paths:
@@ -212,7 +236,13 @@ def main() -> None:
     state = _load_state(weights_path)
 
     with torch.no_grad():
-        payload = build_payload_from_state(state, config, model_name, round_decimals)
+        payload = build_payload_from_state(
+            state,
+            config,
+            model_name,
+            round_decimals,
+            stride,
+        )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(payload, indent=2))
