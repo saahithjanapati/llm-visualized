@@ -83,6 +83,13 @@ export class LayerPipeline extends EventTarget {
         this._autoCameraDesiredCameraOffset = new THREE.Vector3();
         this._autoCameraDesiredTargetOffset = new THREE.Vector3();
         this._hasAutoCameraOffsets = false;
+        this._autoCameraManualDelayMs = 4000;
+        this._autoCameraManualResumeAt = 0;
+        this._autoCameraReturnActive = false;
+        this._autoCameraReturnLerpAlpha = 0.12;
+        this._autoCameraReturnSnapThresholdSq = 0.5 * 0.5;
+        this._autoCameraReturnCameraScratch = new THREE.Vector3();
+        this._autoCameraReturnTargetScratch = new THREE.Vector3();
         this._suppressControlsChange = false;
         this._devMode = !!opts.devMode;
         this._cameraOffsetDiv = (typeof document !== 'undefined')
@@ -116,7 +123,7 @@ export class LayerPipeline extends EventTarget {
                 if (!this._autoCameraFollow || this._suppressControlsChange) {
                     return;
                 }
-                this._captureAutoCameraOffsets();
+                this._onUserCameraInteraction();
                 this._updateCameraOffsetOverlay();
             };
             this._engine.controls.addEventListener('change', this._controlsChangeHandler);
@@ -202,6 +209,7 @@ export class LayerPipeline extends EventTarget {
             return;
         }
         this._autoCameraFollow = nextValue;
+        this._cancelAutoCameraReturn();
         this._updateCameraOffsetOverlay();
         if (this._autoCameraFollow) {
             this._startCameraOverlayLoop();
@@ -953,6 +961,26 @@ export class LayerPipeline extends EventTarget {
         this._autoCameraDesiredTargetOffset.set(0, 0, 0);
     }
 
+    _cancelAutoCameraReturn() {
+        this._autoCameraReturnActive = false;
+        this._autoCameraManualResumeAt = 0;
+    }
+
+    _getNow() {
+        if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+            return performance.now();
+        }
+        return Date.now();
+    }
+
+    _onUserCameraInteraction() {
+        if (!this._hasAutoCameraOffsets) {
+            this._captureAutoCameraOffsets();
+        }
+        this._autoCameraManualResumeAt = this._getNow() + this._autoCameraManualDelayMs;
+        this._autoCameraReturnActive = false;
+    }
+
     _captureAutoCameraOffsets(existingReference = null) {
         const engine = this._engine;
         const camera = engine?.camera;
@@ -986,7 +1014,7 @@ export class LayerPipeline extends EventTarget {
         return true;
     }
 
-    _applyAutoCamera(reference) {
+    _applyAutoCamera(reference, { smooth = false } = {}) {
         if (!this._autoCameraFollow || !this._hasAutoCameraOffsets) {
             return;
         }
@@ -1005,13 +1033,65 @@ export class LayerPipeline extends EventTarget {
             return;
         }
 
+        const desiredCamera = this._autoCameraReturnCameraScratch;
+        desiredCamera.copy(reference).add(this._autoCameraDesiredCameraOffset);
+
+        const controls = engine.controls;
+        const hasControlsTarget = controls && controls.target;
+        const desiredTarget = hasControlsTarget ? this._autoCameraReturnTargetScratch.copy(reference).add(this._autoCameraDesiredTargetOffset) : null;
+
+        if (smooth) {
+            this._suppressControlsChange = true;
+            try {
+                camera.position.lerp(desiredCamera, this._autoCameraReturnLerpAlpha);
+
+                if (hasControlsTarget && desiredTarget) {
+                    controls.target.lerp(desiredTarget, this._autoCameraReturnLerpAlpha);
+                    if (typeof controls.update === 'function') {
+                        controls.update();
+                    }
+                }
+
+                if (typeof engine.notifyCameraUpdated === 'function') {
+                    engine.notifyCameraUpdated();
+                }
+            } finally {
+                this._suppressControlsChange = false;
+            }
+
+            const cameraClose = camera.position.distanceToSquared(desiredCamera) <= this._autoCameraReturnSnapThresholdSq;
+            let targetClose = true;
+            if (hasControlsTarget && desiredTarget) {
+                targetClose = controls.target.distanceToSquared(desiredTarget) <= this._autoCameraReturnSnapThresholdSq;
+            }
+
+            if (cameraClose && targetClose) {
+                this._suppressControlsChange = true;
+                try {
+                    camera.position.copy(desiredCamera);
+                    if (hasControlsTarget && desiredTarget) {
+                        controls.target.copy(desiredTarget);
+                        if (typeof controls.update === 'function') {
+                            controls.update();
+                        }
+                    }
+                    if (typeof engine.notifyCameraUpdated === 'function') {
+                        engine.notifyCameraUpdated();
+                    }
+                } finally {
+                    this._suppressControlsChange = false;
+                }
+                this._autoCameraReturnActive = false;
+            }
+            return;
+        }
+
         this._suppressControlsChange = true;
         try {
-            camera.position.copy(reference).add(this._autoCameraDesiredCameraOffset);
+            camera.position.copy(desiredCamera);
 
-            const controls = engine.controls;
-            if (controls && controls.target) {
-                controls.target.copy(reference).add(this._autoCameraDesiredTargetOffset);
+            if (hasControlsTarget && desiredTarget) {
+                controls.target.copy(desiredTarget);
                 if (typeof controls.update === 'function') {
                     controls.update();
                 }
@@ -1023,6 +1103,7 @@ export class LayerPipeline extends EventTarget {
         } finally {
             this._suppressControlsChange = false;
         }
+        this._autoCameraReturnActive = false;
     }
 
     _updateCameraOffsetOverlay() {
@@ -1059,7 +1140,18 @@ export class LayerPipeline extends EventTarget {
             this._captureAutoCameraOffsets(reference);
         }
 
-        this._applyAutoCamera(reference);
+        if (this._autoCameraManualResumeAt > 0) {
+            const now = this._getNow();
+            if (now >= this._autoCameraManualResumeAt) {
+                this._autoCameraManualResumeAt = 0;
+                this._autoCameraReturnActive = true;
+            }
+        }
+
+        const manualActive = this._autoCameraManualResumeAt > 0;
+        if (!manualActive || this._autoCameraReturnActive) {
+            this._applyAutoCamera(reference, { smooth: this._autoCameraReturnActive });
+        }
 
         const offset = this._autoCameraOffsetScratch;
         offset.copy(camera.position).sub(reference);
