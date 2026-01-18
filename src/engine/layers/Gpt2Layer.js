@@ -1451,6 +1451,7 @@ export default class Gpt2Layer extends BaseLayer {
             segmentVecs.push(segVec);
         }
 
+        expandedGroup.userData.fullWidth = segWidth * segments;
         expandedGroup.position.copy(vec.group.position);
         this.raycastRoot.add(expandedGroup);
         vec.group.visible = false;
@@ -1617,6 +1618,30 @@ export default class Gpt2Layer extends BaseLayer {
         const startY = expandedGroup.position.y;
         const totalDist = downTopY - startY;
         const durationDown = (Math.abs(totalDist) / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
+
+        const matrixBottomWidth = MLP_MATRIX_PARAMS_DOWN.width;
+        const matrixTopWidth = MLP_MATRIX_PARAMS_DOWN.width * MLP_MATRIX_PARAMS_DOWN.topWidthFactor;
+        const widthPadding = 0.95;
+        let expandedFullWidth = Number.isFinite(expandedGroup.userData.fullWidth)
+            ? expandedGroup.userData.fullWidth
+            : null;
+        if (!Number.isFinite(expandedFullWidth) && lane.expandedVecSegments && lane.expandedVecSegments[0]) {
+            const baseSegment = lane.expandedVecSegments[0];
+            const segLength = Number.isFinite(baseSegment.instanceCount)
+                ? baseSegment.instanceCount
+                : this._getBaseVectorLength();
+            const segWidth = baseSegment.getBaseWidthConstant() * baseSegment.getWidthScale() * segLength;
+            expandedFullWidth = segWidth * 4;
+        }
+        const clampScaleForY = (yPos) => {
+            if (!Number.isFinite(expandedFullWidth) || expandedFullWidth <= 0) return null;
+            const denom = downTopY - downBottomY;
+            if (!Number.isFinite(denom) || denom === 0) return null;
+            const t = THREE.MathUtils.clamp((yPos - downBottomY) / denom, 0, 1);
+            const matrixWidth = THREE.MathUtils.lerp(matrixBottomWidth, matrixTopWidth, t);
+            const maxScale = (matrixWidth * widthPadding) / expandedFullWidth;
+            return Math.min(1, Math.max(0.01, maxScale));
+        };
         
         // Matrix colour + emissive animation for glow
         const startIntensity = 0.1;
@@ -1648,17 +1673,13 @@ export default class Gpt2Layer extends BaseLayer {
             .to({ y: downTopY }, durationDown)
             .easing(TWEEN.Easing.Linear.None)
             .onUpdate(() => {
-
-                // Once the vector has fully entered the down-projection matrix, shrink its overall width
-                if (!lane.shrunkInsideDown && expandedGroup.position.y >= downBottomY) {
-                    lane.shrunkInsideDown = true;
-                    if (typeof TWEEN !== 'undefined') {
-                        new TWEEN.Tween(expandedGroup.scale)
-                            .to({ x:0.25, y:0.25, z:0.25 }, 300)
-                            .easing(TWEEN.Easing.Quadratic.InOut)
-                            .start();
-                    } else {
-                        expandedGroup.scale.setScalar(0.25);
+                if (expandedGroup.position.y >= downBottomY) {
+                    const maxScale = clampScaleForY(expandedGroup.position.y);
+                    if (Number.isFinite(maxScale)) {
+                        const nextScale = Math.min(expandedGroup.scale.x, maxScale);
+                        if (nextScale !== expandedGroup.scale.x) {
+                            expandedGroup.scale.setScalar(nextScale);
+                        }
                     }
                 }
 
