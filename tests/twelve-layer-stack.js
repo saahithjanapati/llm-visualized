@@ -22,14 +22,20 @@ import {
     TOP_EMBED_Y_ADJUST,
     TOP_LN_TO_TOP_EMBED_GAP,
     TOP_LOGIT_BAR_MAX_COUNT,
-    TOP_LOGIT_BAR_HEIGHT_SCALE,
     TOP_LOGIT_BAR_MIN_HEIGHT,
+    TOP_LOGIT_BAR_MAX_HEIGHT,
+    TOP_LOGIT_BAR_HEIGHT_GAMMA,
+    TOP_LOGIT_BAR_LOW_SPLIT,
+    TOP_LOGIT_BAR_LOW_GAMMA,
     TOP_LOGIT_BAR_WIDTH_SCALE,
+    TOP_LOGIT_BAR_GAP_FRACTION,
     TOP_LOGIT_BAR_DEPTH_SCALE,
     TOP_LOGIT_BAR_INSET_X,
     TOP_LOGIT_BAR_Y_OFFSET,
     TOP_LOGIT_BAR_COLOR,
-    TOP_LOGIT_BAR_OPACITY
+    TOP_LOGIT_BAR_OPACITY,
+    TOP_LOGIT_BAR_RISE_DURATION_MS,
+    TOP_LOGIT_BAR_RISE_STAGGER_MS
 } from '../src/utils/constants.js';
 import { WeightMatrixVisualization } from '../src/components/WeightMatrixVisualization.js';
 import { LayerNormalizationVisualization } from '../src/components/LayerNormalizationVisualization.js';
@@ -231,6 +237,63 @@ function createTokenChip(label, font, style) {
     return group;
 }
 
+function hashStringToSeed(value) {
+    if (!value) return 0;
+    let hash = 0;
+    for (let i = 0; i < value.length; i += 1) {
+        hash = ((hash << 5) - hash + value.charCodeAt(i)) | 0;
+    }
+    return hash >>> 0;
+}
+
+function hashToUnit(seed) {
+    let x = seed >>> 0;
+    x ^= x >>> 16;
+    x = Math.imul(x, 0x7feb352d);
+    x ^= x >>> 15;
+    x = Math.imul(x, 0x846ca68b);
+    x ^= x >>> 16;
+    return (x >>> 0) / 4294967295;
+}
+
+function resolveTokenSeed(entry, fallbackIndex) {
+    if (entry && Number.isFinite(entry.token_id)) {
+        return Math.floor(entry.token_id) >>> 0;
+    }
+    if (entry && typeof entry.token === 'string') {
+        return hashStringToSeed(entry.token);
+    }
+    return (fallbackIndex ?? 0) >>> 0;
+}
+
+function getBrightTokenColor(seed, cache) {
+    if (cache.has(seed)) return cache.get(seed);
+    const hue = hashToUnit(seed);
+    const saturation = 0.78 + 0.18 * hashToUnit(seed ^ 0x9e3779b9);
+    const lightness = 0.5 + 0.18 * hashToUnit(seed ^ 0x85ebca6b);
+    const color = new THREE.Color().setHSL(hue, saturation, lightness);
+    cache.set(seed, color);
+    return color;
+}
+
+function computeLogitBarHeight(prob, maxProb) {
+    const minHeight = TOP_LOGIT_BAR_MIN_HEIGHT;
+    const maxHeight = Math.max(minHeight + 1, TOP_LOGIT_BAR_MAX_HEIGHT);
+    const maxProbSafe = Number.isFinite(maxProb) ? maxProb : 0;
+    if (maxProbSafe <= 0) return minHeight;
+    const linearT = Math.min(1, Math.max(0, Math.max(0, prob) / maxProbSafe));
+    const split = Math.min(0.9, Math.max(0.05, TOP_LOGIT_BAR_LOW_SPLIT));
+    let t = 0;
+    if (linearT <= split) {
+        const localT = split > 0 ? (linearT / split) : 0;
+        t = Math.pow(localT, TOP_LOGIT_BAR_LOW_GAMMA) * split;
+    } else {
+        const localT = (linearT - split) / (1 - split);
+        t = split + Math.pow(localT, TOP_LOGIT_BAR_HEIGHT_GAMMA) * (1 - split);
+    }
+    return minHeight + t * (maxHeight - minHeight);
+}
+
 function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vocabCenter, scene, engine }) {
     if (!activationSource || !Array.isArray(laneZs) || !laneZs.length) return;
     if (typeof activationSource.getLogitsForToken !== 'function') return;
@@ -252,7 +315,8 @@ function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vocabCent
     if (!usableWidth) return;
 
     const barSpacing = usableWidth / barCount;
-    const barWidth = Math.max(0.5, barSpacing * TOP_LOGIT_BAR_WIDTH_SCALE);
+    const maxBarWidth = Math.max(0.1, barSpacing * Math.max(0.1, 1 - TOP_LOGIT_BAR_GAP_FRACTION));
+    const barWidth = Math.max(0.5, Math.min(barSpacing * TOP_LOGIT_BAR_WIDTH_SCALE, maxBarWidth));
     const barDepth = Math.max(0.5, EMBEDDING_MATRIX_PARAMS_VOCAB.slitWidth * TOP_LOGIT_BAR_DEPTH_SCALE);
     const baseX = vocabCenter.x - usableWidth / 2 + barSpacing / 2;
     const baseY = vocabCenter.y + EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2 + TOP_LOGIT_BAR_Y_OFFSET;
@@ -263,33 +327,68 @@ function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vocabCent
         color: barColor,
         roughness: 0.35,
         metalness: 0.1,
-        emissive: barColor.clone().multiplyScalar(0.18),
-        emissiveIntensity: 0.25,
+        emissive: new THREE.Color(0x000000),
+        emissiveIntensity: 0.3,
         transparent: TOP_LOGIT_BAR_OPACITY < 1,
         opacity: TOP_LOGIT_BAR_OPACITY
     });
 
     const barGroup = new THREE.Group();
     barGroup.name = 'TopLogitBars';
+    barGroup.visible = false;
+    barGroup.userData.revealed = false;
+
+    const colorCache = new Map();
+    const materialCache = new Map();
+    const getBarMaterial = (seed) => {
+        const key = seed >>> 0;
+        if (materialCache.has(key)) return materialCache.get(key);
+        const color = getBrightTokenColor(key, colorCache);
+        const mat = barMaterial.clone();
+        mat.color.copy(color);
+        mat.emissive.copy(color).multiplyScalar(0.35);
+        mat.emissiveIntensity = 0.35;
+        materialCache.set(key, mat);
+        return mat;
+    };
 
     const tokenIndices = Array.isArray(laneTokenIndices)
         ? laneTokenIndices
         : laneZs.map((_, idx) => idx);
 
+    const laneRows = [];
+    let globalMaxProb = 0;
+
     for (let laneIdx = 0; laneIdx < laneZs.length; laneIdx += 1) {
         const tokenIndex = tokenIndices[laneIdx] ?? laneIdx;
         const logitRow = activationSource.getLogitsForToken(tokenIndex, barCount);
         if (!Array.isArray(logitRow) || !logitRow.length) continue;
+        laneRows.push({ laneIdx, logitRow });
+        logitRow.forEach(entry => {
+            const prob = Number(entry?.prob);
+            if (Number.isFinite(prob) && prob > globalMaxProb) {
+                globalMaxProb = prob;
+            }
+        });
+    }
+
+    for (let rowIdx = 0; rowIdx < laneRows.length; rowIdx += 1) {
+        const { laneIdx, logitRow } = laneRows[rowIdx];
         const laneZ = laneZs[laneIdx] ?? 0;
 
         for (let i = 0; i < Math.min(barCount, logitRow.length); i += 1) {
             const entry = logitRow[i];
             const prob = Number(entry?.prob);
             if (!Number.isFinite(prob)) continue;
-            const height = Math.max(TOP_LOGIT_BAR_MIN_HEIGHT, prob * TOP_LOGIT_BAR_HEIGHT_SCALE);
-            const bar = new THREE.Mesh(barGeometry, barMaterial);
-            bar.scale.set(barWidth, height, barDepth);
-            bar.position.set(baseX + i * barSpacing, baseY + height / 2, laneZ);
+            const height = computeLogitBarHeight(prob, globalMaxProb);
+            const seed = resolveTokenSeed(entry, i);
+            const bar = new THREE.Mesh(barGeometry, getBarMaterial(seed));
+            const startHeight = Math.max(0.1, TOP_LOGIT_BAR_MIN_HEIGHT * 0.15);
+            bar.scale.set(barWidth, startHeight, barDepth);
+            bar.position.set(baseX + i * barSpacing, baseY + startHeight / 2, laneZ);
+            bar.userData.targetHeight = height;
+            bar.userData.baseY = baseY;
+            bar.userData.startHeight = startHeight;
             if (entry) {
                 const tokenText = typeof entry.token === 'string'
                     ? formatTokenLabel(entry.token.replace(/\n/g, '\\n').replace(/\t/g, '\\t'))
@@ -313,6 +412,46 @@ function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vocabCent
     if (engine && typeof engine.registerRaycastRoot === 'function') {
         engine.registerRaycastRoot(barGroup);
     }
+    return barGroup;
+}
+
+function revealTopLogitBars(barGroup, { immediate = false } = {}) {
+    if (!barGroup || barGroup.userData.revealed) return;
+    barGroup.userData.revealed = true;
+    barGroup.visible = true;
+
+    const bars = barGroup.children || [];
+    const useTween = !immediate && typeof TWEEN !== 'undefined';
+    bars.forEach((bar, idx) => {
+        if (!bar || !bar.userData) return;
+        const targetHeight = Number.isFinite(bar.userData.targetHeight)
+            ? bar.userData.targetHeight
+            : TOP_LOGIT_BAR_MIN_HEIGHT;
+        const baseY = Number.isFinite(bar.userData.baseY) ? bar.userData.baseY : 0;
+        const startHeight = Number.isFinite(bar.userData.startHeight)
+            ? bar.userData.startHeight
+            : Math.max(0.1, TOP_LOGIT_BAR_MIN_HEIGHT * 0.15);
+
+        bar.scale.y = startHeight;
+        bar.position.y = baseY + startHeight / 2;
+
+        if (!useTween) {
+            bar.scale.y = targetHeight;
+            bar.position.y = baseY + targetHeight / 2;
+            return;
+        }
+
+        const tweenState = { h: startHeight };
+        new TWEEN.Tween(tweenState)
+            .to({ h: targetHeight }, TOP_LOGIT_BAR_RISE_DURATION_MS)
+            .delay(idx * TOP_LOGIT_BAR_RISE_STAGGER_MS)
+            .easing(TWEEN.Easing.Quadratic.Out)
+            .onUpdate(() => {
+                bar.scale.y = tweenState.h;
+                bar.position.y = baseY + tweenState.h / 2;
+            })
+            .start();
+    });
 }
 
 // Temporarily stage the camera near the chips, then optionally return to tower view.
@@ -728,7 +867,7 @@ try {
         }
         const vocabTopPos = new THREE.Vector3();
         vocabTop.group.getWorldPosition(vocabTopPos);
-        addTopLogitBars({
+        const topLogitBars = addTopLogitBars({
             activationSource,
             laneTokenIndices,
             laneZs,
@@ -736,6 +875,25 @@ try {
             scene: pipeline.engine.scene,
             engine: pipeline.engine
         });
+        if (topLogitBars && pipeline && typeof pipeline.addEventListener === 'function') {
+            const maybeReveal = () => {
+                if (typeof pipeline.isForwardPassComplete !== 'function' || !pipeline.isForwardPassComplete()) {
+                    return false;
+                }
+                const immediate = typeof pipeline.isSkipToEndActive === 'function'
+                    ? pipeline.isSkipToEndActive()
+                    : false;
+                revealTopLogitBars(topLogitBars, { immediate });
+                return true;
+            };
+            const onProgress = () => {
+                if (maybeReveal()) {
+                    pipeline.removeEventListener('progress', onProgress);
+                }
+            };
+            pipeline.addEventListener('progress', onProgress);
+            onProgress();
+        }
     }
 } catch (_) { /* optional – embedding visuals are non-critical */ }
 

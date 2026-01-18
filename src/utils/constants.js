@@ -570,14 +570,20 @@ export const TOP_EMBED_Y_ADJUST = 0;                                   // fine v
 export const TOP_LN_TO_TOP_EMBED_GAP = 140;
 // Top-of-tower logit bar styling (unembedding output histogram).
 export const TOP_LOGIT_BAR_MAX_COUNT = 40;
-export const TOP_LOGIT_BAR_HEIGHT_SCALE = 400;
 export const TOP_LOGIT_BAR_MIN_HEIGHT = 6;
+export const TOP_LOGIT_BAR_MAX_HEIGHT = 320;
+export const TOP_LOGIT_BAR_HEIGHT_GAMMA = 1.8;
+export const TOP_LOGIT_BAR_LOW_SPLIT = 0.22;
+export const TOP_LOGIT_BAR_LOW_GAMMA = 0.6;
 export const TOP_LOGIT_BAR_WIDTH_SCALE = 1.05;
+export const TOP_LOGIT_BAR_GAP_FRACTION = 0.08;
 export const TOP_LOGIT_BAR_DEPTH_SCALE = 1.1;
 export const TOP_LOGIT_BAR_INSET_X = 0;
 export const TOP_LOGIT_BAR_Y_OFFSET = 4;
 export const TOP_LOGIT_BAR_COLOR = 0xf2d96b;
 export const TOP_LOGIT_BAR_OPACITY = 0.9;
+export const TOP_LOGIT_BAR_RISE_DURATION_MS = 450;
+export const TOP_LOGIT_BAR_RISE_STAGGER_MS = 12;
 
 // -----------------------------------------------------------------------------
 // Shared colours
