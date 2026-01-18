@@ -229,7 +229,12 @@ function getVectorInstanceCount(vec, fallback = VECTOR_LENGTH_PRISM) {
  * @param {VectorVisualizationInstancedPrism} sourceVec – travelling vector
  * @param {VectorVisualizationInstancedPrism} targetVec – stationary vector that will hold the sum
  * @param {Object} [lane]             – optional lane object; if provided the helper
-*                                      will update lane fields
+ *                                     will update lane fields
+ * @param {Object} [options]
+ * @param {boolean} [options.suppressResidualTrailUpdates=false] – skip residual
+ *                                     trail updates from per-instance motion
+ *                                     (useful when a higher-level controller
+ *                                     already manages the trail).
  */
 export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComplete, options = null) {
     if (!sourceVec || !targetVec || !sourceVec.mesh || !targetVec.mesh) return;
@@ -237,6 +242,8 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
         console.warn('TWEEN not available – addition animation skipped');
         return;
     }
+
+    const suppressResidualTrailUpdates = options && options.suppressResidualTrailUpdates === true;
 
     // Ensure a metadata container exists so we can store residual trail state
     // even when no lane object is available (e.g. LayerNorm additions create
@@ -355,7 +362,7 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
                     // When running inside a lane (MHSA/MLP pipelines) the owning animation loop
                     // already updates the residual trail to avoid redundant sample points. Only
                     // handle standalone additions here.
-                    if (!lane) {
+                    if (!lane && !suppressResidualTrailUpdates) {
                         try {
                             const wPos = computeMidlineWorldPosition(sourceVec, vectorLength, TMP_WORLD_AVG);
 

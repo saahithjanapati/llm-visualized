@@ -440,7 +440,7 @@ export const MLP_MATRIX_PARAMS_UP = {
     cornerRadius: 30.0,
     // Keep slit count in sync with lane count (same as MHA_MATRIX_PARAMS)
     numberOfSlits: NUM_VECTOR_LANES, // indicate 4× channels
-    slitWidth: 10,
+    slitWidth: 20,
     slitDepthFactor: 1.0,
     slitBottomWidthFactor: 0.95,
     slitTopWidthFactor: 0.95
@@ -455,7 +455,7 @@ export const MLP_MATRIX_PARAMS_DOWN = {
     cornerRadius: 30.0,
     // back to original channels
     numberOfSlits: NUM_VECTOR_LANES,               // back to original channels
-    slitWidth: 10,
+    slitWidth: 20,
     slitDepthFactor: 1.0,
     slitBottomWidthFactor: 0.95,
     slitTopWidthFactor: 0.95
@@ -481,6 +481,8 @@ export const EMBEDDING_MATRIX_HEIGHT = Math.max(MLP_MATRIX_PARAMS_UP.height + EM
 export const EMBEDDING_MATRIX_HEIGHT_VOCAB = Math.max(MLP_MATRIX_PARAMS_UP.height + EMBEDDING_HEIGHT_EXTRA_VOCAB, EMBEDDING_MIN_HEIGHT);
 export const EMBEDDING_MATRIX_HEIGHT_POSITION = Math.max(MLP_MATRIX_PARAMS_UP.height + EMBEDDING_HEIGHT_EXTRA_POSITION, EMBEDDING_MIN_HEIGHT);
 
+const EMBEDDING_SLIT_WIDTH = MLP_MATRIX_PARAMS_UP.slitWidth * 2; // Wider than token chips.
+
 // Token/Vocab Embedding: bottom = 15× d_model, top = d_model
 export const EMBEDDING_MATRIX_PARAMS_VOCAB = {
     width: MLP_MATRIX_BASE_WIDTH * VOCAB_EMBED_BOTTOM_MULTIPLIER,
@@ -489,7 +491,7 @@ export const EMBEDDING_MATRIX_PARAMS_VOCAB = {
     topWidthFactor: 1 / VOCAB_EMBED_BOTTOM_MULTIPLIER,
     cornerRadius: MLP_MATRIX_PARAMS_UP.cornerRadius,
     numberOfSlits: NUM_VECTOR_LANES,
-    slitWidth: MLP_MATRIX_PARAMS_UP.slitWidth,
+    slitWidth: EMBEDDING_SLIT_WIDTH,
     slitDepthFactor: MLP_MATRIX_PARAMS_UP.slitDepthFactor,
     slitBottomWidthFactor: MLP_MATRIX_PARAMS_UP.slitBottomWidthFactor,
     slitTopWidthFactor: MLP_MATRIX_PARAMS_UP.slitTopWidthFactor
@@ -503,7 +505,7 @@ export const EMBEDDING_MATRIX_PARAMS_POSITION = {
     topWidthFactor: 1 / POS_EMBED_BOTTOM_MULTIPLIER,
     cornerRadius: MLP_MATRIX_PARAMS_UP.cornerRadius,
     numberOfSlits: NUM_VECTOR_LANES,
-    slitWidth: MLP_MATRIX_PARAMS_UP.slitWidth,
+    slitWidth: EMBEDDING_SLIT_WIDTH,
     slitDepthFactor: MLP_MATRIX_PARAMS_UP.slitDepthFactor,
     slitBottomWidthFactor: MLP_MATRIX_PARAMS_UP.slitBottomWidthFactor,
     slitTopWidthFactor: MLP_MATRIX_PARAMS_UP.slitTopWidthFactor

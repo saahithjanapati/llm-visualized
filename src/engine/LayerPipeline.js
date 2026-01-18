@@ -778,7 +778,7 @@ export class LayerPipeline extends EventTarget {
                             }
                             lane.originalVec = addVec;
                             startFinalRise(addVec);
-                        });
+                        }, { suppressResidualTrailUpdates: true });
 
                         const additionDuration = additionDurationFor(resVec);
                         new TWEEN.Tween({ t: 0 })
