@@ -307,7 +307,7 @@ export const MHA_MATRIX_PARAMS = {
     width: 140,
     height: 40,
     depth: LANE_DEPENDENT_DEPTH,
-    topWidthFactor: 0.15,
+    topWidthFactor: 0.1,
     cornerRadius: 5,
     // Match slit count to current lane count so each lane has its own channel.
     numberOfSlits: NUM_VECTOR_LANES,

@@ -14,336 +14,6 @@ const __geometryCache = new Map();
 const __capFrontCache = new Map();
 const __capBackCache  = new Map();
 const __materialCache = new Map();
-const SLIT_CLEANUP_FLAG = 'slitCleanupAppliedV2';
-const TOP_BOTTOM_SMOOTH_FLAG = 'topBottomNormalsSmoothedV3';
-const SLICE_CAPS_STRIPPED_FLAG = 'sliceEndCapsStripped';
-
-function parseCacheKeyForSlits(cacheKey) {
-    if (!cacheKey || typeof cacheKey !== 'string') return null;
-    const parts = cacheKey.split('|');
-    if (parts.length < 10) return null;
-    const nums = parts.slice(0, 10).map(Number);
-    if (nums.some(val => !Number.isFinite(val))) return null;
-    return {
-        width: nums[0],
-        height: nums[1],
-        depth: nums[2],
-        topWidthFactor: nums[3],
-        cornerRadius: nums[4],
-        numberOfSlits: Math.max(0, Math.floor(nums[5])),
-        slitWidth: nums[6],
-        slitDepthFactor: nums[7],
-        slitBottomWidthFactor: nums[8],
-        slitTopWidthFactor: nums[9]
-    };
-}
-
-function cleanSlitLedgeFaces(geometry, params) {
-    if (!geometry) return geometry;
-    if (geometry.userData && geometry.userData[SLIT_CLEANUP_FLAG]) return geometry;
-    if (!params || params.numberOfSlits <= 0 || params.slitWidth <= 0 || params.slitDepthFactor <= 0) {
-        geometry.userData = { ...(geometry.userData || {}), [SLIT_CLEANUP_FLAG]: true };
-        return geometry;
-    }
-
-    const numSlits = Math.max(0, Math.floor(params.numberOfSlits));
-    if (!numSlits) {
-        geometry.userData = { ...(geometry.userData || {}), [SLIT_CLEANUP_FLAG]: true };
-        return geometry;
-    }
-
-    const cutDepth = params.height * params.slitDepthFactor;
-    const epsCsg = Math.max(0.02, params.height * 0.001);
-    const slitBoxHeight = cutDepth + epsCsg * 2;
-    if (!(slitBoxHeight > 0)) {
-        geometry.userData = { ...(geometry.userData || {}), [SLIT_CLEANUP_FLAG]: true };
-        return geometry;
-    }
-    const cutCenterY = (params.height / 2 + epsCsg) - (slitBoxHeight / 2);
-    const yTopOfSlit = cutCenterY + slitBoxHeight / 2;
-    const yBottomOfSlit = cutCenterY - slitBoxHeight / 2;
-
-    const halfHeight = params.height / 2;
-    const shapeBottomWidth = params.width;
-    const shapeTopWidth = params.width * params.topWidthFactor;
-    const widthAtY = (y) => {
-        const yc = Math.max(-halfHeight, Math.min(halfHeight, y));
-        const t = (yc + halfHeight) / (2 * halfHeight);
-        return THREE.MathUtils.lerp(shapeBottomWidth, shapeTopWidth, t);
-    };
-
-    const insetX = Math.max(0.1, params.width * 0.001);
-    const bottomWidth = Math.max(0, widthAtY(yBottomOfSlit) * params.slitBottomWidthFactor - insetX * 2);
-    const topWidth = Math.max(0, widthAtY(yTopOfSlit) * params.slitTopWidthFactor - insetX * 2);
-
-    const slitSpacing = params.depth / (numSlits + 1);
-    const slitCenters = new Array(numSlits);
-    for (let i = 0; i < numSlits; i++) {
-        slitCenters[i] = -params.depth / 2 + slitSpacing * (i + 1);
-    }
-
-    const halfSlitDepth = params.slitWidth / 2;
-    const extraX = Math.max(0.02, params.width * 0.001);
-    const extraZ = Math.max(0.02, params.depth * 0.001);
-    const topCullBand = Math.max(0.05, params.height * 0.01);
-    const allowBottomCull = params.slitDepthFactor >= 0.95;
-
-    const isPointInsideSlit = (px, py, pz) => {
-        if (py < yBottomOfSlit - epsCsg || py > yTopOfSlit + epsCsg) return false;
-        const t = THREE.MathUtils.clamp((py - yBottomOfSlit) / slitBoxHeight, 0, 1);
-        const widthAt = THREE.MathUtils.lerp(bottomWidth, topWidth, t);
-        if (!(widthAt > 0)) return false;
-        if (Math.abs(px) > widthAt * 0.5 + extraX) return false;
-        for (let i = 0; i < numSlits; i++) {
-            if (Math.abs(pz - slitCenters[i]) <= halfSlitDepth + extraZ) return true;
-        }
-        return false;
-    };
-
-    const source = geometry.index ? geometry.toNonIndexed() : geometry;
-    const posAttr = source.getAttribute('position');
-    if (!posAttr) {
-        geometry.userData = { ...(geometry.userData || {}), [SLIT_CLEANUP_FLAG]: true };
-        if (source !== geometry) source.dispose();
-        return geometry;
-    }
-
-    const pos = posAttr.array;
-    const kept = [];
-    for (let i = 0; i < pos.length; i += 9) {
-        const ax = pos[i];
-        const ay = pos[i + 1];
-        const az = pos[i + 2];
-        const bx = pos[i + 3];
-        const by = pos[i + 4];
-        const bz = pos[i + 5];
-        const cx = pos[i + 6];
-        const cy = pos[i + 7];
-        const cz = pos[i + 8];
-
-        const abx = bx - ax;
-        const aby = by - ay;
-        const abz = bz - az;
-        const acx = cx - ax;
-        const acy = cy - ay;
-        const acz = cz - az;
-        const nx = aby * acz - abz * acy;
-        const ny = abz * acx - abx * acz;
-        const nz = abx * acy - aby * acx;
-        const nLen = Math.hypot(nx, ny, nz);
-
-        let drop = false;
-        if (nLen > 1e-9) {
-            const nyNorm = ny / nLen;
-            const isHorizontal = Math.abs(nyNorm) > 0.9;
-            if (isHorizontal) {
-                const insideA = isPointInsideSlit(ax, ay, az);
-                const insideB = isPointInsideSlit(bx, by, bz);
-                const insideC = isPointInsideSlit(cx, cy, cz);
-                const insideCount = (insideA ? 1 : 0) + (insideB ? 1 : 0) + (insideC ? 1 : 0);
-
-                if (insideCount > 0) {
-                    const cxAvg = (ax + bx + cx) / 3;
-                    const cyAvg = (ay + by + cy) / 3;
-                    const czAvg = (az + bz + cz) / 3;
-                    const centroidInside = isPointInsideSlit(cxAvg, cyAvg, czAvg);
-
-                    if (centroidInside || insideCount === 3) {
-                        if (allowBottomCull) {
-                            drop = true;
-                        } else {
-                            const triTopY = Math.max(ay, by, cy);
-                            if (triTopY >= halfHeight - topCullBand) drop = true;
-                        }
-                    }
-                }
-            }
-        }
-
-        if (!drop) {
-            kept.push(
-                ax, ay, az,
-                bx, by, bz,
-                cx, cy, cz
-            );
-        }
-    }
-
-    if (source !== geometry) source.dispose();
-    if (kept.length === pos.length) {
-        geometry.userData = { ...(geometry.userData || {}), [SLIT_CLEANUP_FLAG]: true };
-        return geometry;
-    }
-
-    const cleaned = new THREE.BufferGeometry();
-    cleaned.setAttribute('position', new THREE.Float32BufferAttribute(kept, 3));
-    cleaned.computeVertexNormals();
-    cleaned.computeBoundingSphere();
-    cleaned.computeBoundingBox();
-    cleaned.userData = { ...(geometry.userData || {}), [SLIT_CLEANUP_FLAG]: true };
-    return cleaned;
-}
-
-function smoothTopBottomNormals(geometry, params) {
-    if (!geometry || !params || !Number.isFinite(params.height)) return geometry;
-    if (geometry.userData && geometry.userData[TOP_BOTTOM_SMOOTH_FLAG]) return geometry;
-
-    let target = geometry;
-    if (target.index) {
-        const nonIndexed = target.toNonIndexed();
-        nonIndexed.userData = { ...(target.userData || {}) };
-        target = nonIndexed;
-    }
-
-    const posAttr = target.getAttribute('position');
-    if (!posAttr) {
-        target.userData = { ...(target.userData || {}), [TOP_BOTTOM_SMOOTH_FLAG]: true };
-        return target;
-    }
-
-    target.computeVertexNormals();
-    const normAttr = target.getAttribute('normal');
-    if (!normAttr) {
-        target.userData = { ...(target.userData || {}), [TOP_BOTTOM_SMOOTH_FLAG]: true };
-        return target;
-    }
-
-    const hasSlits = params.numberOfSlits > 0 && params.slitDepthFactor > 0;
-    if (!hasSlits) {
-        target.userData = { ...(target.userData || {}), [TOP_BOTTOM_SMOOTH_FLAG]: true };
-        return target;
-    }
-
-    const halfHeight = Math.abs(params.height) / 2;
-    const yTol = Math.max(0.1, Math.abs(params.height) * 0.005);
-    let touchedPositions = false;
-
-    for (let i = 0; i < posAttr.count; i += 3) {
-        const ax = posAttr.getX(i);
-        const ay = posAttr.getY(i);
-        const az = posAttr.getZ(i);
-        const bx = posAttr.getX(i + 1);
-        const by = posAttr.getY(i + 1);
-        const bz = posAttr.getZ(i + 1);
-        const cx = posAttr.getX(i + 2);
-        const cy = posAttr.getY(i + 2);
-        const cz = posAttr.getZ(i + 2);
-
-        const topMatch = Math.abs(ay - halfHeight) <= yTol
-            && Math.abs(by - halfHeight) <= yTol
-            && Math.abs(cy - halfHeight) <= yTol;
-        const bottomMatch = Math.abs(ay + halfHeight) <= yTol
-            && Math.abs(by + halfHeight) <= yTol
-            && Math.abs(cy + halfHeight) <= yTol;
-
-        if (topMatch) {
-            normAttr.setXYZ(i, 0, 1, 0);
-            normAttr.setXYZ(i + 1, 0, 1, 0);
-            normAttr.setXYZ(i + 2, 0, 1, 0);
-            if (Math.abs(ay - halfHeight) > 1e-4 || Math.abs(by - halfHeight) > 1e-4 || Math.abs(cy - halfHeight) > 1e-4) {
-                posAttr.setY(i, halfHeight);
-                posAttr.setY(i + 1, halfHeight);
-                posAttr.setY(i + 2, halfHeight);
-                touchedPositions = true;
-            }
-        } else if (bottomMatch) {
-            normAttr.setXYZ(i, 0, -1, 0);
-            normAttr.setXYZ(i + 1, 0, -1, 0);
-            normAttr.setXYZ(i + 2, 0, -1, 0);
-            if (Math.abs(ay + halfHeight) > 1e-4 || Math.abs(by + halfHeight) > 1e-4 || Math.abs(cy + halfHeight) > 1e-4) {
-                posAttr.setY(i, -halfHeight);
-                posAttr.setY(i + 1, -halfHeight);
-                posAttr.setY(i + 2, -halfHeight);
-                touchedPositions = true;
-            }
-        }
-    }
-
-    if (touchedPositions) posAttr.needsUpdate = true;
-    normAttr.needsUpdate = true;
-    target.userData = { ...(target.userData || {}), [TOP_BOTTOM_SMOOTH_FLAG]: true };
-    return target;
-}
-
-function stripSliceEndCaps(geometry, depth) {
-    if (!geometry || !Number.isFinite(depth)) return geometry;
-    if (geometry.userData && geometry.userData[SLICE_CAPS_STRIPPED_FLAG]) return geometry;
-
-    let target = geometry;
-    if (target.index) {
-        const nonIndexed = target.toNonIndexed();
-        nonIndexed.userData = { ...(target.userData || {}) };
-        target = nonIndexed;
-    }
-
-    const posAttr = target.getAttribute('position');
-    if (!posAttr) {
-        target.userData = { ...(target.userData || {}), [SLICE_CAPS_STRIPPED_FLAG]: true };
-        return target;
-    }
-
-    const pos = posAttr.array;
-    const kept = [];
-    const halfDepth = Math.abs(depth) / 2;
-    const zTol = Math.max(0.05, Math.abs(depth) * 0.002);
-
-    for (let i = 0; i < pos.length; i += 9) {
-        const ax = pos[i];
-        const ay = pos[i + 1];
-        const az = pos[i + 2];
-        const bx = pos[i + 3];
-        const by = pos[i + 4];
-        const bz = pos[i + 5];
-        const cx = pos[i + 6];
-        const cy = pos[i + 7];
-        const cz = pos[i + 8];
-
-        const abx = bx - ax;
-        const aby = by - ay;
-        const abz = bz - az;
-        const acx = cx - ax;
-        const acy = cy - ay;
-        const acz = cz - az;
-
-        const nx = aby * acz - abz * acy;
-        const ny = abz * acx - abx * acz;
-        const nz = abx * acy - aby * acx;
-        const nLen = Math.hypot(nx, ny, nz);
-
-        let drop = false;
-        if (nLen > 1e-9) {
-            const nzNorm = nz / nLen;
-            if (Math.abs(nzNorm) > 0.9) {
-                const czAvg = (az + bz + cz) / 3;
-                if (Math.abs(Math.abs(czAvg) - halfDepth) <= zTol) {
-                    drop = true;
-                }
-            }
-        }
-
-        if (!drop) {
-            kept.push(
-                ax, ay, az,
-                bx, by, bz,
-                cx, cy, cz
-            );
-        }
-    }
-
-    if (kept.length === pos.length) {
-        target.userData = { ...(target.userData || {}), [SLICE_CAPS_STRIPPED_FLAG]: true };
-        return target;
-    }
-
-    const cleaned = new THREE.BufferGeometry();
-    cleaned.setAttribute('position', new THREE.Float32BufferAttribute(kept, 3));
-    cleaned.computeVertexNormals();
-    cleaned.computeBoundingSphere();
-    cleaned.computeBoundingBox();
-    cleaned.userData = { ...(target.userData || {}), [SLICE_CAPS_STRIPPED_FLAG]: true };
-    return cleaned;
-}
-
 function getCacheKey(width, height, depth, topWidthFactor, cornerRadius, numberOfSlits, slitWidth, slitDepthFactor, slitBottomWidthFactor, slitTopWidthFactor) {
     return [width, height, depth, topWidthFactor, cornerRadius, numberOfSlits, slitWidth, slitDepthFactor, slitBottomWidthFactor, slitTopWidthFactor, QUALITY_PRESET].join('|');
 }
@@ -686,9 +356,9 @@ export class WeightMatrixVisualization {
                 glowFalloff: 2.2,
                 depthAccentStrength: 0.34,
                 scanlineFrequency: (Math.PI * 2) / Math.max(this.height / 5, 1),
-                scanlineStrength: 0.0,
+                scanlineStrength: 0.26,
                 stripeFrequency: (Math.PI * 2) / Math.max(this.depth / 10, 1),
-                stripeStrength: 0.0,
+                stripeStrength: 0.6,
                 rimIntensity: 0.68,
                 gradientSharpness: 1.4,
                 gradientBias: 0.02,
@@ -723,10 +393,10 @@ export class WeightMatrixVisualization {
                 glowFalloff: 2.4,
                 depthAccentStrength: 0.38,
                 scanlineFrequency: (Math.PI * 2) / Math.max(this.height / 4, 1),
-                scanlineStrength: 0.0,
+                scanlineStrength: 0.3,
                 dimensions: { width: this.width, height: this.height, depth: Math.max(this.depth * 0.25, 1) },
                 stripeFrequency: (Math.PI * 2) / Math.max(this.width / 6, 1),
-                stripeStrength: 0.0,
+                stripeStrength: 0.42,
                 rimIntensity: 0.82,
                 gradientSharpness: 1.5,
                 gradientBias: 0.035,
@@ -740,37 +410,9 @@ export class WeightMatrixVisualization {
         capMaterial.polygonOffsetUnits  = -4;
 
         // Assign the final CSG result geometry and the material to the main mesh (sides)
-        if (!cacheHit) {
-            const cleanedGeometry = cleanSlitLedgeFaces(finalMesh.geometry, {
-                width: this.width,
-                height: this.height,
-                depth: this.depth,
-                topWidthFactor: this.topWidthFactor,
-                cornerRadius: this.cornerRadius,
-                numberOfSlits: this.numberOfSlits,
-                slitWidth: this.slitWidth,
-                slitDepthFactor: this.slitDepthFactor,
-                slitBottomWidthFactor: this.slitBottomWidthFactor,
-                slitTopWidthFactor: this.slitTopWidthFactor
-            });
-            if (cleanedGeometry !== finalMesh.geometry) {
-                finalMesh.geometry.dispose();
-                finalMesh.geometry = cleanedGeometry;
-            }
-        }
-
-        const smoothedGeometry = smoothTopBottomNormals(finalMesh.geometry, {
-            height: this.height,
-            numberOfSlits: this.numberOfSlits,
-            slitDepthFactor: this.slitDepthFactor
-        });
-        if (smoothedGeometry !== finalMesh.geometry) {
-            finalMesh.geometry.dispose();
-            finalMesh.geometry = smoothedGeometry;
-        }
-
         this.mesh = finalMesh;
         this.mesh.material = sideMaterial;
+        this.mesh.geometry.computeVertexNormals();
 
         const dt = (performance.now() - t0).toFixed(1);
         console.log(`[Perf] WeightMatrixVisualization (${cacheHit ? 'cache' : 'built'}) – ${dt} ms.`);
@@ -885,23 +527,10 @@ export class WeightMatrixVisualization {
             // We'll cache cap geometries below once they're cloned
         }
 
-        const cleanedSliceGeometry = stripSliceEndCaps(sliceGeometry, sliceDepth);
-        sliceGeometry = cleanedSliceGeometry !== sliceGeometry ? cleanedSliceGeometry : sliceGeometry;
-        const smoothedSliceGeometry = smoothTopBottomNormals(sliceGeometry, {
-            height: this.height,
-            numberOfSlits: sliceSlits,
-            slitDepthFactor: this.slitDepthFactor
-        });
-        if (smoothedSliceGeometry !== sliceGeometry) {
-            sliceGeometry = smoothedSliceGeometry;
-        }
-        __geometryCache.set(sliceKey, sliceGeometry);
-
         // ----------------------------------------------------------
         // Material – clone defaults from standard path
         // ----------------------------------------------------------
         const sciFiSliceDims = { width: this.width, height: this.height, depth: sliceDepth };
-        const sciFiStackDims = { width: this.width, height: this.height, depth: sliceDepth * NUM_VECTOR_LANES };
         let mat;
         if (USE_GLB_MATERIALS && __materialCache.has(sliceKey)) {
             mat = __materialCache.get(sliceKey).clone();
@@ -929,10 +558,10 @@ export class WeightMatrixVisualization {
                 glowFalloff: 2.1,
                 depthAccentStrength: 0.32,
                 scanlineFrequency: (Math.PI * 2) / Math.max(this.height / 5, 1),
-                scanlineStrength: 0.0,
-                dimensions: sciFiStackDims,
+                scanlineStrength: 0.24,
+                dimensions: sciFiSliceDims,
                 stripeFrequency: (Math.PI * 2) / Math.max(sliceDepth / 6, 1),
-                stripeStrength: 0.0,
+                stripeStrength: 0.55,
                 rimIntensity: 0.66,
                 gradientSharpness: 1.38,
                 gradientBias: 0.025,
@@ -1010,10 +639,10 @@ export class WeightMatrixVisualization {
             glowFalloff: 2.4,
             depthAccentStrength: 0.38,
             scanlineFrequency: (Math.PI * 2) / Math.max(this.height / 4, 1),
-            scanlineStrength: 0.0,
-            dimensions: sciFiStackDims,
+            scanlineStrength: 0.3,
+            dimensions: sciFiSliceDims,
             stripeFrequency: (Math.PI * 2) / Math.max(this.width / 6, 1),
-            stripeStrength: 0.0,
+            stripeStrength: 0.42,
             rimIntensity: 0.82,
             gradientSharpness: 1.5,
             gradientBias: 0.035,
@@ -1044,10 +673,10 @@ export class WeightMatrixVisualization {
             glowFalloff: 2.4,
             depthAccentStrength: 0.38,
             scanlineFrequency: (Math.PI * 2) / Math.max(this.height / 4, 1),
-            scanlineStrength: 0.0,
-            dimensions: sciFiStackDims,
+            scanlineStrength: 0.3,
+            dimensions: sciFiSliceDims,
             stripeFrequency: (Math.PI * 2) / Math.max(this.width / 6, 1),
-            stripeStrength: 0.0,
+            stripeStrength: 0.42,
             rimIntensity: 0.82,
             gradientSharpness: 1.5,
             gradientBias: 0.035,
@@ -1056,29 +685,36 @@ export class WeightMatrixVisualization {
             noiseStrength: 0.06
         });
 
-        const stackDepth = sciFiStackDims.depth;
-        const capOffset = 0.05;
+        const frontCaps = new THREE.InstancedMesh(capGeoFront.clone(), capMatFront, NUM_VECTOR_LANES);
+        const backCaps  = new THREE.InstancedMesh(capGeoBack.clone(),  capMatBack,  NUM_VECTOR_LANES);
 
-        const frontCap = new THREE.Mesh(capGeoFront.clone(), capMatFront);
-        frontCap.position.z = stackDepth / 2 + capOffset;
-        const backCap = new THREE.Mesh(capGeoBack.clone(), capMatBack);
-        backCap.position.z = -stackDepth / 2 - capOffset;
-        backCap.rotation.y = Math.PI;
+        for (let i = 0; i < NUM_VECTOR_LANES; i++) {
+            const z = (i - (NUM_VECTOR_LANES - 1) / 2) * VECTOR_DEPTH_SPACING;
+            // front face sits slightly in front of slice
+            mtx.makeTranslation(0, 0, z + sliceDepth / 2 + 0.05);
+            frontCaps.setMatrixAt(i, mtx);
+            // back face slightly behind
+            mtx.makeTranslation(0, 0, z - sliceDepth / 2 - 0.05);
+            backCaps.setMatrixAt(i, mtx);
+        }
+
+        frontCaps.instanceMatrix.needsUpdate = true;
+        backCaps.instanceMatrix.needsUpdate  = true;
 
         // ----------------------------------------------------------
         // Store references and add to group
         // ----------------------------------------------------------
         this.mesh = inst;
-        this.frontCapMesh = frontCap;
-        this.backCapMesh  = backCap;
+        this.frontCapMesh = frontCaps;
+        this.backCapMesh  = backCaps;
 
         this.group.add(inst);
-        this.group.add(frontCap);
-        this.group.add(backCap);
+        this.group.add(frontCaps);
+        this.group.add(backCaps);
 
-        updateSciFiDimensions(mat, sciFiStackDims);
-        updateSciFiDimensions(capMatFront, sciFiStackDims);
-        updateSciFiDimensions(capMatBack, sciFiStackDims);
+        updateSciFiDimensions(mat, sciFiSliceDims);
+        updateSciFiDimensions(capMatFront, sciFiSliceDims);
+        updateSciFiDimensions(capMatBack, sciFiSliceDims);
 
         // Render ordering – caps slightly after side walls to minimise z-fighting
         this.mesh.renderOrder = 0;
@@ -1181,8 +817,7 @@ export class WeightMatrixVisualization {
 
     // Convenience method to set opacity (and ensure transparency is enabled)
     setOpacity(opacity) {
-        const wantsTransparency = opacity < 1.0;
-        this.setMaterialProperties({ opacity: opacity, transparent: wantsTransparency });
+        this.setMaterialProperties({ opacity: opacity, transparent: true });
     }
 
     /**
@@ -1193,15 +828,8 @@ export class WeightMatrixVisualization {
      */
     static registerPrecomputedGeometry(cacheKey, geometry, material = null) {
         if (!cacheKey || !geometry) return;
-        let cleanedGeometry = geometry;
-        const params = parseCacheKeyForSlits(cacheKey);
-        if (params) {
-            const updated = cleanSlitLedgeFaces(geometry, params);
-            cleanedGeometry = updated || geometry;
-            cleanedGeometry = smoothTopBottomNormals(cleanedGeometry, params);
-        }
         if (!__geometryCache.has(cacheKey)) {
-            __geometryCache.set(cacheKey, cleanedGeometry);
+            __geometryCache.set(cacheKey, geometry);
         }
         if (material && !__materialCache.has(cacheKey)) {
             __materialCache.set(cacheKey, material);
