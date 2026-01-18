@@ -20,7 +20,16 @@ import {
     TOP_EMBED_VOCAB_X_OFFSET,
     TOP_EMBED_Y_GAP_ABOVE_TOWER,
     TOP_EMBED_Y_ADJUST,
-    TOP_LN_TO_TOP_EMBED_GAP
+    TOP_LN_TO_TOP_EMBED_GAP,
+    TOP_LOGIT_BAR_MAX_COUNT,
+    TOP_LOGIT_BAR_HEIGHT_SCALE,
+    TOP_LOGIT_BAR_MIN_HEIGHT,
+    TOP_LOGIT_BAR_WIDTH_SCALE,
+    TOP_LOGIT_BAR_DEPTH_SCALE,
+    TOP_LOGIT_BAR_INSET_X,
+    TOP_LOGIT_BAR_Y_OFFSET,
+    TOP_LOGIT_BAR_COLOR,
+    TOP_LOGIT_BAR_OPACITY
 } from '../src/utils/constants.js';
 import { WeightMatrixVisualization } from '../src/components/WeightMatrixVisualization.js';
 import { LayerNormalizationVisualization } from '../src/components/LayerNormalizationVisualization.js';
@@ -220,6 +229,90 @@ function createTokenChip(label, font, style) {
         : 1;
     group.userData.size = { width: chipWidth * scaleFactor, height: chipHeight * scaleFactor };
     return group;
+}
+
+function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vocabCenter, scene, engine }) {
+    if (!activationSource || !Array.isArray(laneZs) || !laneZs.length) return;
+    if (typeof activationSource.getLogitsForToken !== 'function') return;
+
+    const logitTopK = typeof activationSource.getLogitTopK === 'function'
+        ? activationSource.getLogitTopK()
+        : 0;
+    const barCount = Math.min(TOP_LOGIT_BAR_MAX_COUNT, logitTopK || TOP_LOGIT_BAR_MAX_COUNT);
+    if (!barCount) return;
+
+    const bottomWidth = EMBEDDING_MATRIX_PARAMS_VOCAB.width;
+    const topWidth = bottomWidth * EMBEDDING_MATRIX_PARAMS_VOCAB.topWidthFactor;
+    const useTopWidth = topWidth >= bottomWidth;
+    const surfaceWidth = useTopWidth ? topWidth : bottomWidth;
+    const slitWidthFactor = useTopWidth
+        ? (EMBEDDING_MATRIX_PARAMS_VOCAB.slitTopWidthFactor ?? 1)
+        : (EMBEDDING_MATRIX_PARAMS_VOCAB.slitBottomWidthFactor ?? 1);
+    const usableWidth = Math.max(0, surfaceWidth * slitWidthFactor - TOP_LOGIT_BAR_INSET_X * 2);
+    if (!usableWidth) return;
+
+    const barSpacing = usableWidth / barCount;
+    const barWidth = Math.max(0.5, barSpacing * TOP_LOGIT_BAR_WIDTH_SCALE);
+    const barDepth = Math.max(0.5, EMBEDDING_MATRIX_PARAMS_VOCAB.slitWidth * TOP_LOGIT_BAR_DEPTH_SCALE);
+    const baseX = vocabCenter.x - usableWidth / 2 + barSpacing / 2;
+    const baseY = vocabCenter.y + EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2 + TOP_LOGIT_BAR_Y_OFFSET;
+
+    const barGeometry = new THREE.BoxGeometry(1, 1, 1);
+    const barColor = new THREE.Color(TOP_LOGIT_BAR_COLOR);
+    const barMaterial = new THREE.MeshStandardMaterial({
+        color: barColor,
+        roughness: 0.35,
+        metalness: 0.1,
+        emissive: barColor.clone().multiplyScalar(0.18),
+        emissiveIntensity: 0.25,
+        transparent: TOP_LOGIT_BAR_OPACITY < 1,
+        opacity: TOP_LOGIT_BAR_OPACITY
+    });
+
+    const barGroup = new THREE.Group();
+    barGroup.name = 'TopLogitBars';
+
+    const tokenIndices = Array.isArray(laneTokenIndices)
+        ? laneTokenIndices
+        : laneZs.map((_, idx) => idx);
+
+    for (let laneIdx = 0; laneIdx < laneZs.length; laneIdx += 1) {
+        const tokenIndex = tokenIndices[laneIdx] ?? laneIdx;
+        const logitRow = activationSource.getLogitsForToken(tokenIndex, barCount);
+        if (!Array.isArray(logitRow) || !logitRow.length) continue;
+        const laneZ = laneZs[laneIdx] ?? 0;
+
+        for (let i = 0; i < Math.min(barCount, logitRow.length); i += 1) {
+            const entry = logitRow[i];
+            const prob = Number(entry?.prob);
+            if (!Number.isFinite(prob)) continue;
+            const height = Math.max(TOP_LOGIT_BAR_MIN_HEIGHT, prob * TOP_LOGIT_BAR_HEIGHT_SCALE);
+            const bar = new THREE.Mesh(barGeometry, barMaterial);
+            bar.scale.set(barWidth, height, barDepth);
+            bar.position.set(baseX + i * barSpacing, baseY + height / 2, laneZ);
+            if (entry) {
+                const tokenText = typeof entry.token === 'string'
+                    ? formatTokenLabel(entry.token.replace(/\n/g, '\\n').replace(/\t/g, '\\t'))
+                    : '';
+                const tokenId = Number.isFinite(entry.token_id) ? entry.token_id : null;
+                const labelParts = [];
+                if (tokenText) labelParts.push(`token \"${tokenText}\"`);
+                if (tokenId !== null) labelParts.push(`id ${tokenId}`);
+                if (Number.isFinite(prob)) labelParts.push(`p ${prob.toFixed(3)}`);
+                const label = labelParts.length ? `Logit ${labelParts.join(' | ')}` : 'Logit';
+                bar.userData.label = label;
+                bar.name = label;
+                bar.userData.logitEntry = entry;
+            }
+            barGroup.add(bar);
+        }
+    }
+
+    if (!barGroup.children.length) return;
+    scene.add(barGroup);
+    if (engine && typeof engine.registerRaycastRoot === 'function') {
+        engine.registerRaycastRoot(barGroup);
+    }
 }
 
 // Temporarily stage the camera near the chips, then optionally return to tower view.
@@ -633,6 +726,16 @@ try {
         if (pipeline.engine && typeof pipeline.engine.registerRaycastRoot === 'function') {
             pipeline.engine.registerRaycastRoot(vocabTop.group);
         }
+        const vocabTopPos = new THREE.Vector3();
+        vocabTop.group.getWorldPosition(vocabTopPos);
+        addTopLogitBars({
+            activationSource,
+            laneTokenIndices,
+            laneZs,
+            vocabCenter: vocabTopPos,
+            scene: pipeline.engine.scene,
+            engine: pipeline.engine
+        });
     }
 } catch (_) { /* optional – embedding visuals are non-critical */ }
 

@@ -92,6 +92,7 @@ export class CaptureActivationSource {
         this.embeddings = this.activations.embeddings || {};
         this.layers = Array.isArray(this.activations.layers) ? this.activations.layers : [];
         this.tokenStrings = Array.isArray(this.meta.token_strings) ? this.meta.token_strings : [];
+        this.logits = Array.isArray(this.data.logits) ? this.data.logits : [];
         this._laneTokenCache = new Map();
         this._vectorCache = new Map();
         this._attentionRowCache = new Map();
@@ -126,6 +127,23 @@ export class CaptureActivationSource {
         if (!this.tokenStrings.length) return null;
         const idx = clampIndex(tokenIndex, this.tokenStrings.length - 1);
         return this.tokenStrings[idx] ?? null;
+    }
+
+    getLogitTopK() {
+        const metaValue = Number(this.meta?.logit_top_k);
+        if (Number.isFinite(metaValue) && metaValue > 0) return Math.floor(metaValue);
+        if (this.logits.length && Array.isArray(this.logits[0])) return this.logits[0].length;
+        return 0;
+    }
+
+    getLogitsForToken(tokenIndex, limit = null) {
+        if (!this.logits.length) return null;
+        const idx = clampIndex(tokenIndex, this.logits.length - 1);
+        const row = Array.isArray(this.logits[idx]) ? this.logits[idx] : null;
+        if (!row) return null;
+        if (limit == null) return row;
+        const safeLimit = Math.max(0, Math.floor(limit));
+        return row.slice(0, safeLimit);
     }
 
     getBaseVectorLength() {

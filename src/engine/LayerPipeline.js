@@ -644,6 +644,11 @@ export class LayerPipeline extends EventTarget {
                         vec.userData.trailWorld = true;
                     }
                 }
+                if (lane && !lane.__topLnStopRise) {
+                    lane.__topLnStopRise = true;
+                    lane.stopRise = true;
+                    delete lane.stopRiseTarget;
+                }
                 const startY = vec.group.position.y;
                 if (!Number.isFinite(startY)) return;
 
@@ -689,6 +694,11 @@ export class LayerPipeline extends EventTarget {
                         .onComplete(() => {
                             updateTopLnColor(targetYLocal + exitTransitionRange);
                             updateTrailPosition(resVec);
+                            if (lane && lane.__topLnStopRise) {
+                                delete lane.stopRise;
+                                delete lane.stopRiseTarget;
+                                delete lane.__topLnStopRise;
+                            }
                             this.dispatchEvent(new Event('progress'));
                         })
                         .start();
@@ -775,7 +785,6 @@ export class LayerPipeline extends EventTarget {
                             .to({ t: 1 }, additionDuration)
                             .onUpdate(() => {
                                 updateTopLnColor(resVec.group.position.y);
-                                updateTrailPosition(resVec);
                                 this.dispatchEvent(new Event('progress'));
                             })
                             .start();

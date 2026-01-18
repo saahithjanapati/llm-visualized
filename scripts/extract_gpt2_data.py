@@ -351,53 +351,63 @@ def parameter_accounting(model: GPT2LMHeadModel) -> List[StageParameters]:
 
 
 # ---------------------------------------------------------------------------
-# Sampling logits helpers
+# Logits helpers
 # ---------------------------------------------------------------------------
 
 
-def extract_sampling_logits(
+def extract_top_logits(
     logits: torch.Tensor,
+    tokenizer: GPT2TokenizerFast,
     top_k: Optional[int],
-    top_p: Optional[float],
-    round_decimals: Optional[int],
+    logit_round_decimals: Optional[int],
+    prob_round_decimals: Optional[int],
 ) -> List[List[Dict[str, object]]]:
-    """Return token/logit metadata matching the sampler configuration."""
+    """Return per-token top-k logit metadata."""
 
     if logits.dim() != 2:
         raise ValueError("Expected logits with shape (seq, vocab)")
 
     seq_len, vocab_size = logits.shape
+    if top_k is None or top_k <= 0:
+        return [[] for _ in range(seq_len)]
+
+    k = min(int(top_k), vocab_size)
     probs = torch.softmax(logits, dim=-1)
     entries: List[List[Dict[str, object]]] = []
 
     for t in range(seq_len):
-        token_entries: List[Dict[str, object]] = []
         logit_row = logits[t]
         prob_row = probs[t]
 
-        candidate_indices: Optional[torch.Tensor] = None
-        if top_k is not None and top_k > 0:
-            values, indices = torch.topk(prob_row, min(top_k, vocab_size))
-            candidate_indices = indices
-        if top_p is not None and 0.0 < top_p < 1.0:
-            sorted_probs, sorted_indices = torch.sort(prob_row, descending=True)
-            cumulative = torch.cumsum(sorted_probs, dim=0)
-            mask = cumulative <= top_p
-            # ensure at least one token is kept
-            if not mask.any():
-                mask[0] = True
-            indices = sorted_indices[mask]
-            candidate_indices = indices if candidate_indices is None else torch.unique(torch.cat([candidate_indices, indices]))
+        top_logits, top_indices = torch.topk(logit_row, k)
+        top_probs = prob_row.index_select(0, top_indices)
 
-        if candidate_indices is None:
-            # default to argmax if no sampling constraints specified
-            candidate_indices = prob_row.argmax(dim=-1, keepdim=True)
+        token_ids = [int(idx) for idx in top_indices.tolist()]
+        tokens = tokenizer.convert_ids_to_tokens(token_ids)
 
-        for idx in candidate_indices.tolist():
-            logit = float(logit_row[idx])
-            if round_decimals is not None:
-                logit = round(logit, round_decimals)
-            token_entries.append({"token_id": int(idx), "logit": logit})
+        token_entries: List[Dict[str, object]] = []
+        for token_id, token, logit_value, prob_value in zip(
+            token_ids,
+            tokens,
+            top_logits.tolist(),
+            top_probs.tolist(),
+        ):
+            logit = float(logit_value)
+            prob = float(prob_value)
+            if logit_round_decimals is not None:
+                logit = round(logit, logit_round_decimals)
+            if prob_round_decimals is not None:
+                prob = round(prob, prob_round_decimals)
+            token_entries.append(
+                {
+                    "token_id": token_id,
+                    "token": token,
+                    "logit": logit,
+                    "prob": prob,
+                }
+            )
+        # Keep a stable ordering for visualization lookups.
+        token_entries.sort(key=lambda entry: entry["token_id"])
         entries.append(token_entries)
 
     return entries
@@ -752,6 +762,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--temperature", type=float, default=1.0, help="Sampling temperature.")
     parser.add_argument("--top-k", type=int, default=40, help="Top-k sampling.")
     parser.add_argument("--top-p", type=float, default=None, help="Top-p (nucleus) sampling.")
+    parser.add_argument("--logit-top-k", type=int, default=40, help="Top-k logits to store per token position.")
     parser.add_argument("--seed", type=int, default=42, help="RNG seed for reproducible sampling.")
     parser.add_argument("--output", type=str, default="gpt2_capture.json", help="Output JSON path.")
     parser.add_argument("--device", type=str, default="cpu", help="Torch device (cpu or cuda).")
@@ -760,6 +771,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--mlp-stride", type=int, default=64, help="Stride for 3072-d MLP activations.")
     parser.add_argument("--quantisation", type=str, default="float16", choices=["float16", "float32", "int8"], help="Quantisation mode for stored activations.")
     parser.add_argument("--round-decimals", type=int, default=2, help="Round stored floats to this many decimal places.")
+    parser.add_argument("--logit-round-decimals", type=int, default=None, help="Round stored logits to this many decimal places (defaults to --round-decimals).")
+    parser.add_argument("--prob-round-decimals", type=int, default=6, help="Round stored probabilities to this many decimal places.")
     parser.add_argument("--inspect-next-top-k", type=int, default=None, help="Print top-k next-token candidates for the prompt.")
 
     args = parser.parse_args(argv)
@@ -891,7 +904,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     capture = run_instrumented_pass(model, all_token_ids.to(args.device), capture_config)
 
-    top_logits = extract_sampling_logits(capture.logits, args.top_k, args.top_p, args.round_decimals)
+    logit_round_decimals = args.logit_round_decimals if args.logit_round_decimals is not None else args.round_decimals
+    prob_round_decimals = args.prob_round_decimals if args.prob_round_decimals is not None else args.round_decimals
+    top_logits = extract_top_logits(
+        capture.logits,
+        tokenizer,
+        args.logit_top_k,
+        logit_round_decimals,
+        prob_round_decimals,
+    )
 
     payload = {
         "meta": {
@@ -900,6 +921,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "prompt_tokens": prompt_id_list,
             "completion_tokens": completion_id_list,
             "token_strings": tokenizer.convert_ids_to_tokens(prompt_id_list + completion_id_list),
+            "logit_top_k": args.logit_top_k,
+            "logit_round_decimals": logit_round_decimals,
+            "prob_round_decimals": prob_round_decimals,
             "config": dataclasses.asdict(capture_config),
         },
         "activations": capture.payload,

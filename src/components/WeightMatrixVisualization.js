@@ -14,7 +14,7 @@ const __geometryCache = new Map();
 const __capFrontCache = new Map();
 const __capBackCache  = new Map();
 const __materialCache = new Map();
-const SLIT_CLEANUP_FLAG = 'slitCleanupApplied';
+const SLIT_CLEANUP_FLAG = 'slitCleanupAppliedV2';
 const TOP_BOTTOM_SMOOTH_FLAG = 'topBottomNormalsSmoothedV3';
 const SLICE_CAPS_STRIPPED_FLAG = 'sliceEndCapsStripped';
 
@@ -135,15 +135,28 @@ function cleanSlitLedgeFaces(geometry, params) {
         let drop = false;
         if (nLen > 1e-9) {
             const nyNorm = ny / nLen;
-            const isUp = nyNorm > 0.9;
-            const isDown = nyNorm < -0.9;
-            const nearTop = isUp && cy >= halfHeight - topCullBand;
-            const nearBottom = allowBottomCull && isDown && cy <= -halfHeight + topCullBand;
-            if (nearTop || nearBottom) {
+            const isHorizontal = Math.abs(nyNorm) > 0.9;
+            if (isHorizontal) {
                 const insideA = isPointInsideSlit(ax, ay, az);
                 const insideB = isPointInsideSlit(bx, by, bz);
                 const insideC = isPointInsideSlit(cx, cy, cz);
-                if (insideA && insideB && insideC) drop = true;
+                const insideCount = (insideA ? 1 : 0) + (insideB ? 1 : 0) + (insideC ? 1 : 0);
+
+                if (insideCount > 0) {
+                    const cxAvg = (ax + bx + cx) / 3;
+                    const cyAvg = (ay + by + cy) / 3;
+                    const czAvg = (az + bz + cz) / 3;
+                    const centroidInside = isPointInsideSlit(cxAvg, cyAvg, czAvg);
+
+                    if (centroidInside || insideCount === 3) {
+                        if (allowBottomCull) {
+                            drop = true;
+                        } else {
+                            const triTopY = Math.max(ay, by, cy);
+                            if (triTopY >= halfHeight - topCullBand) drop = true;
+                        }
+                    }
+                }
             }
         }
 
@@ -673,9 +686,9 @@ export class WeightMatrixVisualization {
                 glowFalloff: 2.2,
                 depthAccentStrength: 0.34,
                 scanlineFrequency: (Math.PI * 2) / Math.max(this.height / 5, 1),
-                scanlineStrength: 0.26,
+                scanlineStrength: 0.0,
                 stripeFrequency: (Math.PI * 2) / Math.max(this.depth / 10, 1),
-                stripeStrength: 0.6,
+                stripeStrength: 0.0,
                 rimIntensity: 0.68,
                 gradientSharpness: 1.4,
                 gradientBias: 0.02,
@@ -710,10 +723,10 @@ export class WeightMatrixVisualization {
                 glowFalloff: 2.4,
                 depthAccentStrength: 0.38,
                 scanlineFrequency: (Math.PI * 2) / Math.max(this.height / 4, 1),
-                scanlineStrength: 0.3,
+                scanlineStrength: 0.0,
                 dimensions: { width: this.width, height: this.height, depth: Math.max(this.depth * 0.25, 1) },
                 stripeFrequency: (Math.PI * 2) / Math.max(this.width / 6, 1),
-                stripeStrength: 0.42,
+                stripeStrength: 0.0,
                 rimIntensity: 0.82,
                 gradientSharpness: 1.5,
                 gradientBias: 0.035,
@@ -916,10 +929,10 @@ export class WeightMatrixVisualization {
                 glowFalloff: 2.1,
                 depthAccentStrength: 0.32,
                 scanlineFrequency: (Math.PI * 2) / Math.max(this.height / 5, 1),
-                scanlineStrength: 0.24,
+                scanlineStrength: 0.0,
                 dimensions: sciFiStackDims,
                 stripeFrequency: (Math.PI * 2) / Math.max(sliceDepth / 6, 1),
-                stripeStrength: 0.55,
+                stripeStrength: 0.0,
                 rimIntensity: 0.66,
                 gradientSharpness: 1.38,
                 gradientBias: 0.025,
@@ -997,10 +1010,10 @@ export class WeightMatrixVisualization {
             glowFalloff: 2.4,
             depthAccentStrength: 0.38,
             scanlineFrequency: (Math.PI * 2) / Math.max(this.height / 4, 1),
-            scanlineStrength: 0.3,
+            scanlineStrength: 0.0,
             dimensions: sciFiStackDims,
             stripeFrequency: (Math.PI * 2) / Math.max(this.width / 6, 1),
-            stripeStrength: 0.42,
+            stripeStrength: 0.0,
             rimIntensity: 0.82,
             gradientSharpness: 1.5,
             gradientBias: 0.035,
@@ -1031,10 +1044,10 @@ export class WeightMatrixVisualization {
             glowFalloff: 2.4,
             depthAccentStrength: 0.38,
             scanlineFrequency: (Math.PI * 2) / Math.max(this.height / 4, 1),
-            scanlineStrength: 0.3,
+            scanlineStrength: 0.0,
             dimensions: sciFiStackDims,
             stripeFrequency: (Math.PI * 2) / Math.max(this.width / 6, 1),
-            stripeStrength: 0.42,
+            stripeStrength: 0.0,
             rimIntensity: 0.82,
             gradientSharpness: 1.5,
             gradientBias: 0.035,
