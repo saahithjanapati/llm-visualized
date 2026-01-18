@@ -635,6 +635,24 @@ export class CoreEngine {
             } catch (_) { /* non-fatal */ }
         }
 
+        // Pass 1.5: Instance-specific labels for other instanced meshes (e.g. top logit bars)
+        for (const hit of intersects) {
+            const obj = hit.object;
+            if (!obj || !obj.isInstancedMesh) continue;
+            const labels = obj.userData?.instanceLabels;
+            if (!Array.isArray(labels) || typeof hit.instanceId !== 'number') continue;
+            const label = labels[hit.instanceId];
+            if (!label) continue;
+            const entries = obj.userData?.instanceEntries;
+            const info = Array.isArray(entries) ? { logitEntry: entries[hit.instanceId] } : null;
+            return {
+                label,
+                hit,
+                info,
+                kind: obj.userData?.instanceKind || 'instanced'
+            };
+        }
+
         // Pass 2: Fallback – show the first generic label found
         for (const hit of intersects) {
             let obj = hit.object;

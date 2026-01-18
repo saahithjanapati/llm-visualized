@@ -32,7 +32,6 @@ import {
     TOP_LOGIT_BAR_DEPTH_SCALE,
     TOP_LOGIT_BAR_INSET_X,
     TOP_LOGIT_BAR_Y_OFFSET,
-    TOP_LOGIT_BAR_COLOR,
     TOP_LOGIT_BAR_OPACITY,
     TOP_LOGIT_BAR_RISE_DURATION_MS,
     TOP_LOGIT_BAR_RISE_STAGGER_MS
@@ -322,15 +321,15 @@ function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vocabCent
     const baseY = vocabCenter.y + EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2 + TOP_LOGIT_BAR_Y_OFFSET;
 
     const barGeometry = new THREE.BoxGeometry(1, 1, 1);
-    const barColor = new THREE.Color(TOP_LOGIT_BAR_COLOR);
     const barMaterial = new THREE.MeshStandardMaterial({
-        color: barColor,
+        color: 0xffffff,
         roughness: 0.35,
         metalness: 0.1,
-        emissive: new THREE.Color(0x000000),
-        emissiveIntensity: 0.3,
+        emissive: new THREE.Color(0x111111),
+        emissiveIntensity: 0.2,
         transparent: TOP_LOGIT_BAR_OPACITY < 1,
-        opacity: TOP_LOGIT_BAR_OPACITY
+        opacity: TOP_LOGIT_BAR_OPACITY,
+        vertexColors: true
     });
 
     const barGroup = new THREE.Group();
@@ -339,18 +338,9 @@ function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vocabCent
     barGroup.userData.revealed = false;
 
     const colorCache = new Map();
-    const materialCache = new Map();
-    const getBarMaterial = (seed) => {
-        const key = seed >>> 0;
-        if (materialCache.has(key)) return materialCache.get(key);
-        const color = getBrightTokenColor(key, colorCache);
-        const mat = barMaterial.clone();
-        mat.color.copy(color);
-        mat.emissive.copy(color).multiplyScalar(0.35);
-        mat.emissiveIntensity = 0.35;
-        materialCache.set(key, mat);
-        return mat;
-    };
+    const instances = [];
+    const instanceLabels = [];
+    const instanceEntries = [];
 
     const tokenIndices = Array.isArray(laneTokenIndices)
         ? laneTokenIndices
@@ -382,13 +372,9 @@ function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vocabCent
             if (!Number.isFinite(prob)) continue;
             const height = computeLogitBarHeight(prob, globalMaxProb);
             const seed = resolveTokenSeed(entry, i);
-            const bar = new THREE.Mesh(barGeometry, getBarMaterial(seed));
+            const barColor = getBrightTokenColor(seed, colorCache);
             const startHeight = Math.max(0.1, TOP_LOGIT_BAR_MIN_HEIGHT * 0.15);
-            bar.scale.set(barWidth, startHeight, barDepth);
-            bar.position.set(baseX + i * barSpacing, baseY + startHeight / 2, laneZ);
-            bar.userData.targetHeight = height;
-            bar.userData.baseY = baseY;
-            bar.userData.startHeight = startHeight;
+            const xPos = baseX + i * barSpacing;
             if (entry) {
                 const tokenText = typeof entry.token === 'string'
                     ? formatTokenLabel(entry.token.replace(/\n/g, '\\n').replace(/\t/g, '\\t'))
@@ -399,15 +385,61 @@ function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vocabCent
                 if (tokenId !== null) labelParts.push(`id ${tokenId}`);
                 if (Number.isFinite(prob)) labelParts.push(`p ${prob.toFixed(3)}`);
                 const label = labelParts.length ? `Logit ${labelParts.join(' | ')}` : 'Logit';
-                bar.userData.label = label;
-                bar.name = label;
-                bar.userData.logitEntry = entry;
+                const instanceIndex = instances.length;
+                instanceLabels[instanceIndex] = label;
+                instanceEntries[instanceIndex] = entry;
+                instances.push({
+                    x: xPos,
+                    z: laneZ,
+                    baseY,
+                    startHeight,
+                    targetHeight: height,
+                    color: barColor
+                });
+            } else {
+                const instanceIndex = instances.length;
+                instanceLabels[instanceIndex] = 'Logit';
+                instanceEntries[instanceIndex] = entry;
+                instances.push({
+                    x: xPos,
+                    z: laneZ,
+                    baseY,
+                    startHeight,
+                    targetHeight: height,
+                    color: barColor
+                });
             }
-            barGroup.add(bar);
         }
     }
 
-    if (!barGroup.children.length) return;
+    if (!instances.length) return;
+    const instanced = new THREE.InstancedMesh(barGeometry, barMaterial, instances.length);
+    instanced.name = 'TopLogitBarsMesh';
+    instanced.frustumCulled = false;
+    instanced.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    instanced.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(instances.length * 3), 3);
+    instanced.instanceColor.setUsage(THREE.DynamicDrawUsage);
+    const dummy = new THREE.Object3D();
+    instances.forEach((instance, idx) => {
+        dummy.position.set(instance.x, instance.baseY + instance.startHeight / 2, instance.z);
+        dummy.scale.set(barWidth, instance.startHeight, barDepth);
+        dummy.updateMatrix();
+        instanced.setMatrixAt(idx, dummy.matrix);
+        instanced.setColorAt(idx, instance.color);
+    });
+    instanced.instanceMatrix.needsUpdate = true;
+    if (instanced.instanceColor) instanced.instanceColor.needsUpdate = true;
+    instanced.userData.label = 'Top Logit Bars';
+    instanced.userData.instanceLabels = instanceLabels;
+    instanced.userData.instanceEntries = instanceEntries;
+    instanced.userData.instanceKind = 'logitBar';
+
+    barGroup.userData.instancedMesh = instanced;
+    barGroup.userData.instances = instances;
+    barGroup.userData.barWidth = barWidth;
+    barGroup.userData.barDepth = barDepth;
+    barGroup.add(instanced);
+
     scene.add(barGroup);
     if (engine && typeof engine.registerRaycastRoot === 'function') {
         engine.registerRaycastRoot(barGroup);
@@ -420,38 +452,57 @@ function revealTopLogitBars(barGroup, { immediate = false } = {}) {
     barGroup.userData.revealed = true;
     barGroup.visible = true;
 
-    const bars = barGroup.children || [];
-    const useTween = !immediate && typeof TWEEN !== 'undefined';
-    bars.forEach((bar, idx) => {
-        if (!bar || !bar.userData) return;
-        const targetHeight = Number.isFinite(bar.userData.targetHeight)
-            ? bar.userData.targetHeight
-            : TOP_LOGIT_BAR_MIN_HEIGHT;
-        const baseY = Number.isFinite(bar.userData.baseY) ? bar.userData.baseY : 0;
-        const startHeight = Number.isFinite(bar.userData.startHeight)
-            ? bar.userData.startHeight
-            : Math.max(0.1, TOP_LOGIT_BAR_MIN_HEIGHT * 0.15);
+    const instanced = barGroup.userData.instancedMesh;
+    const instances = barGroup.userData.instances;
+    if (!instanced || !Array.isArray(instances) || !instances.length) return;
 
-        bar.scale.y = startHeight;
-        bar.position.y = baseY + startHeight / 2;
+    const barWidth = Number.isFinite(barGroup.userData.barWidth) ? barGroup.userData.barWidth : 1;
+    const barDepth = Number.isFinite(barGroup.userData.barDepth) ? barGroup.userData.barDepth : 1;
+    const dummy = new THREE.Object3D();
+    const applyHeight = (idx, height) => {
+        const instance = instances[idx];
+        if (!instance) return;
+        dummy.position.set(instance.x, instance.baseY + height / 2, instance.z);
+        dummy.scale.set(barWidth, height, barDepth);
+        dummy.updateMatrix();
+        instanced.setMatrixAt(idx, dummy.matrix);
+    };
 
-        if (!useTween) {
-            bar.scale.y = targetHeight;
-            bar.position.y = baseY + targetHeight / 2;
-            return;
+    if (immediate || typeof requestAnimationFrame !== 'function') {
+        instances.forEach((instance, idx) => {
+            applyHeight(idx, instance.targetHeight);
+        });
+        instanced.instanceMatrix.needsUpdate = true;
+        return;
+    }
+
+    const startTime = performance.now();
+    const duration = TOP_LOGIT_BAR_RISE_DURATION_MS;
+    const stagger = TOP_LOGIT_BAR_RISE_STAGGER_MS;
+    const easeOutQuad = (t) => 1 - (1 - t) * (1 - t);
+
+    const animate = (now) => {
+        let anyActive = false;
+        for (let i = 0; i < instances.length; i += 1) {
+            const instance = instances[i];
+            if (!instance) continue;
+            const localStart = startTime + i * stagger;
+            const elapsed = now - localStart;
+            let height = instance.startHeight;
+            if (elapsed > 0) {
+                const t = Math.min(1, elapsed / duration);
+                const eased = easeOutQuad(t);
+                height = instance.startHeight + (instance.targetHeight - instance.startHeight) * eased;
+                if (t < 1) anyActive = true;
+            } else {
+                anyActive = true;
+            }
+            applyHeight(i, height);
         }
-
-        const tweenState = { h: startHeight };
-        new TWEEN.Tween(tweenState)
-            .to({ h: targetHeight }, TOP_LOGIT_BAR_RISE_DURATION_MS)
-            .delay(idx * TOP_LOGIT_BAR_RISE_STAGGER_MS)
-            .easing(TWEEN.Easing.Quadratic.Out)
-            .onUpdate(() => {
-                bar.scale.y = tweenState.h;
-                bar.position.y = baseY + tweenState.h / 2;
-            })
-            .start();
-    });
+        instanced.instanceMatrix.needsUpdate = true;
+        if (anyActive) requestAnimationFrame(animate);
+    };
+    requestAnimationFrame(animate);
 }
 
 // Temporarily stage the camera near the chips, then optionally return to tower view.
