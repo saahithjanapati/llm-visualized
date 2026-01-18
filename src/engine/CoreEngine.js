@@ -190,6 +190,22 @@ export class CoreEngine {
         // ────────────────────────────────────────────────────────────────────
         this.controls = new OrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = true;
+        this.controls.dampingFactor = 0.08;
+        this.controls.minPolarAngle = 0.2;
+        this.controls.maxPolarAngle = Math.PI - 0.2;
+        this.camera.up.set(0, 1, 0);
+        this._keyState = new Set();
+        this._keyboardPanSpeed = 420;
+        this._keyboardRotateSpeed = 1.1;
+        this._keyboardZoomSpeed = 0.6;
+        this._keyboardZoomVector = new THREE.Vector3();
+        this._keyboardCodes = new Set([
+            'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown',
+            'KeyW', 'KeyA', 'KeyS', 'KeyD',
+            'Equal', 'Minus', 'NumpadAdd', 'NumpadSubtract',
+            'PageUp', 'PageDown'
+        ]);
+        this._keyboardActive = false;
         // Flag to detect when the user is actively orbiting/panning the scene
         this._isUserNavigating = false;
         // OrbitControls dispatches "start"/"end" events when interaction begins/ends
@@ -230,6 +246,8 @@ export class CoreEngine {
         document.addEventListener('visibilitychange', this._onVisibility);
         window.addEventListener('blur', this._onWindowBlur);
         window.addEventListener('pagehide', this._onWindowBlur);
+        window.addEventListener('keydown', this._onKeyDown);
+        window.addEventListener('keyup', this._onKeyUp);
 
         // Internal state
         this._clock  = new THREE.Clock();
@@ -277,6 +295,8 @@ export class CoreEngine {
         this._onResize  = this._onResize.bind(this);
         this._onVisibility = this._onVisibility.bind(this);
         this._onWindowBlur = this._onWindowBlur.bind(this);
+        this._onKeyDown = this._onKeyDown.bind(this);
+        this._onKeyUp = this._onKeyUp.bind(this);
 
         // Kick off RAF loop
         requestAnimationFrame(this._animate);
@@ -371,6 +391,8 @@ export class CoreEngine {
         document.removeEventListener('visibilitychange', this._onVisibility);
         window.removeEventListener('blur', this._onWindowBlur);
         window.removeEventListener('pagehide', this._onWindowBlur);
+        window.removeEventListener('keydown', this._onKeyDown);
+        window.removeEventListener('keyup', this._onKeyUp);
         if (this.controls) {
             this.controls.removeEventListener('change', this._updateCameraFarFromControls);
             this.controls.dispose();
@@ -466,6 +488,130 @@ export class CoreEngine {
         if (typeof controls.dispatchEvent === 'function') {
             controls.dispatchEvent({ type: 'end' });
         }
+        if (this._keyState) {
+            this._keyState.clear();
+        }
+        this._keyboardActive = false;
+    };
+
+    _onKeyDown = (event) => {
+        if (!this._shouldHandleKeyboardEvent(event)) return;
+        const code = event.code;
+        if (!this._keyboardCodes.has(code)) return;
+        this._keyState.add(code);
+        event.preventDefault();
+    };
+
+    _onKeyUp = (event) => {
+        const code = event.code;
+        if (this._keyState && this._keyState.has(code)) {
+            this._keyState.delete(code);
+            event.preventDefault();
+        }
+    };
+
+    _shouldHandleKeyboardEvent = (event) => {
+        if (!event || event.defaultPrevented) return false;
+        if (event.metaKey || event.ctrlKey) return false;
+        const target = event.target;
+        if (!target) return true;
+        if (target.isContentEditable) return false;
+        const tagName = target.tagName;
+        return !(tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT');
+    };
+
+    _applyKeyboardNavigation = (deltaSeconds) => {
+        const controls = this.controls;
+        if (!controls || !this._keyState || this._keyState.size === 0) {
+            if (this._keyboardActive) {
+                this._keyboardActive = false;
+                controls?.dispatchEvent?.({ type: 'end' });
+            }
+            return;
+        }
+
+        let didMove = false;
+        const rotateSpeed = this._keyboardRotateSpeed * deltaSeconds;
+        const panSpeed = this._keyboardPanSpeed * deltaSeconds;
+
+        if (controls.enableRotate) {
+            if (this._keyState.has('ArrowLeft')) {
+                controls._rotateLeft(rotateSpeed);
+                didMove = true;
+            }
+            if (this._keyState.has('ArrowRight')) {
+                controls._rotateLeft(-rotateSpeed);
+                didMove = true;
+            }
+            if (this._keyState.has('ArrowUp')) {
+                controls._rotateUp(rotateSpeed);
+                didMove = true;
+            }
+            if (this._keyState.has('ArrowDown')) {
+                controls._rotateUp(-rotateSpeed);
+                didMove = true;
+            }
+        }
+
+        if (controls.enablePan) {
+            if (this._keyState.has('KeyW')) {
+                controls._pan(0, panSpeed);
+                didMove = true;
+            }
+            if (this._keyState.has('KeyS')) {
+                controls._pan(0, -panSpeed);
+                didMove = true;
+            }
+            if (this._keyState.has('KeyA')) {
+                controls._pan(panSpeed, 0);
+                didMove = true;
+            }
+            if (this._keyState.has('KeyD')) {
+                controls._pan(-panSpeed, 0);
+                didMove = true;
+            }
+        }
+
+        if (controls.enableZoom) {
+            let zoomDirection = 0;
+            if (this._keyState.has('Equal') || this._keyState.has('NumpadAdd') || this._keyState.has('PageUp')) {
+                zoomDirection += 1;
+            }
+            if (this._keyState.has('Minus') || this._keyState.has('NumpadSubtract') || this._keyState.has('PageDown')) {
+                zoomDirection -= 1;
+            }
+            if (zoomDirection !== 0) {
+                this._applyKeyboardZoom(zoomDirection, deltaSeconds);
+                didMove = true;
+            }
+        }
+
+        if (didMove && !this._keyboardActive) {
+            this._keyboardActive = true;
+            controls.dispatchEvent?.({ type: 'start' });
+        } else if (!didMove && this._keyboardActive) {
+            this._keyboardActive = false;
+            controls.dispatchEvent?.({ type: 'end' });
+        }
+    };
+
+    _applyKeyboardZoom = (direction, deltaSeconds) => {
+        const controls = this.controls;
+        if (!controls || !this.camera || !controls.target) return;
+        const offset = this._keyboardZoomVector;
+        offset.subVectors(this.camera.position, controls.target);
+        const currentDistance = offset.length();
+        if (!currentDistance || !Number.isFinite(currentDistance)) return;
+
+        const zoomScale = Math.exp(-direction * this._keyboardZoomSpeed * deltaSeconds);
+        let desiredDistance = currentDistance * zoomScale;
+        const minDistance = (typeof controls.minDistance === 'number') ? controls.minDistance : 0;
+        const maxDistance = (typeof controls.maxDistance === 'number') ? controls.maxDistance : Infinity;
+        desiredDistance = Math.max(minDistance, Math.min(maxDistance, desiredDistance));
+        if (!Number.isFinite(desiredDistance) || desiredDistance === currentDistance) return;
+
+        offset.setLength(desiredDistance);
+        this.camera.position.copy(controls.target).add(offset);
     };
 
     _onPointerDown = (event) => {
@@ -836,10 +982,14 @@ export class CoreEngine {
         const now = (typeof performance !== 'undefined' && typeof performance.now === 'function')
             ? performance.now()
             : Date.now();
-        if (this._lastFrameTime !== null && (now - this._lastFrameTime) < this._minFrameIntervalMs) {
+        const lastFrameTime = this._lastFrameTime;
+        if (lastFrameTime !== null && (now - lastFrameTime) < this._minFrameIntervalMs) {
             return;
         }
         this._lastFrameTime = now;
+        const frameDelta = lastFrameTime !== null
+            ? Math.min((now - lastFrameTime) / 1000, 0.1)
+            : (1 / 60);
 
         const visibilityPauseOnly = this._paused && this._pauseReasons.size === 1 && this._pauseReasons.has('visibility');
         if (visibilityPauseOnly) return;
@@ -886,6 +1036,7 @@ export class CoreEngine {
             }
         }
 
+        this._applyKeyboardNavigation(frameDelta);
         this.controls.update();
         const renderStart = perfStats.enabled
             ? ((typeof performance !== 'undefined' && typeof performance.now === 'function') ? performance.now() : Date.now())
