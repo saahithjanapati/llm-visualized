@@ -1302,11 +1302,15 @@ class SelectionPanel {
         this._animate = this._animate.bind(this);
         this._onResize = this._onResize.bind(this);
         this._onKeydown = this._onKeydown.bind(this);
+        this._onClosePointerDown = this._onClosePointerDown.bind(this);
+        this._onDocumentPointerDown = this._onDocumentPointerDown.bind(this);
         this._startLoop();
 
         this.closeBtn?.addEventListener('click', () => this.close());
+        this.closeBtn?.addEventListener('pointerdown', this._onClosePointerDown);
         window.addEventListener('resize', this._onResize);
         document.addEventListener('keydown', this._onKeydown);
+        document.addEventListener('pointerdown', this._onDocumentPointerDown, { capture: true });
         this._observeResize();
         this._onResize();
     }
@@ -1331,6 +1335,26 @@ class SelectionPanel {
         if (event.key === 'Escape' && this.isOpen) {
             this.close();
         }
+    }
+
+    _onClosePointerDown(event) {
+        if (!this.isOpen) return;
+        event.preventDefault();
+        event.stopPropagation();
+        this.close();
+    }
+
+    _onDocumentPointerDown(event) {
+        if (!this.isOpen || !this.closeBtn) return;
+        if (!Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return;
+        if (event.target === this.closeBtn) return;
+        const hit = document.elementFromPoint(event.clientX, event.clientY);
+        if (!hit || typeof hit.closest !== 'function') return;
+        if (hit.closest('#detailClose') !== this.closeBtn) return;
+        // Close even if the canvas captured the pointer event.
+        event.preventDefault();
+        event.stopPropagation();
+        this.close();
     }
 
     _syncEnvironment() {
