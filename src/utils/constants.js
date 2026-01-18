@@ -570,8 +570,8 @@ export const TOP_EMBED_Y_ADJUST = 0;                                   // fine v
 export const TOP_LN_TO_TOP_EMBED_GAP = 140;
 // Top-of-tower logit bar styling (unembedding output histogram).
 export const TOP_LOGIT_BAR_MAX_COUNT = 40;
-export const TOP_LOGIT_BAR_MIN_HEIGHT = 6;
-export const TOP_LOGIT_BAR_MAX_HEIGHT = 320;
+export const TOP_LOGIT_BAR_MIN_HEIGHT = 10;
+export const TOP_LOGIT_BAR_MAX_HEIGHT = 480;
 export const TOP_LOGIT_BAR_HEIGHT_GAMMA = 1.8;
 export const TOP_LOGIT_BAR_LOW_SPLIT = 0.22;
 export const TOP_LOGIT_BAR_LOW_GAMMA = 0.6;
