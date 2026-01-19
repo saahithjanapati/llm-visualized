@@ -1887,15 +1887,30 @@ export default class Gpt2Layer extends BaseLayer {
                 // updates from both vectors at x=0.
                 try {
                     const localTrail = vec && vec.userData && vec.userData.trail;
-                    if (localTrail && localTrail._scene === this.root) {
+                    const canonicalTrail = (lane && lane.originalTrail)
+                        || (lane && lane.originalVec && lane.originalVec.userData && lane.originalVec.userData.trail)
+                        || null;
+                    const trailIsCanonical = Boolean(localTrail && canonicalTrail && localTrail === canonicalTrail);
+
+                    if (localTrail && !trailIsCanonical) {
+                        const mergeScene = localTrail._scene || this.root;
                         if (typeof localTrail.snapLastPointTo === 'function') {
                             localTrail.snapLastPointTo(vec.group.position);
                         }
                         const colorHex = (localTrail._material && localTrail._material.color)
                             ? localTrail._material.color.getHex() : undefined;
                         const frozenOpacity = (typeof localTrail._opacity === 'number') ? localTrail._opacity : undefined;
-                        mergeTrailsIntoLineSegments([localTrail], this.root, colorHex, undefined, frozenOpacity);
-                        if (vec.userData) delete vec.userData.trail;
+                        mergeTrailsIntoLineSegments([localTrail], mergeScene, colorHex, undefined, frozenOpacity);
+                        if (vec.userData) {
+                            delete vec.userData.trail;
+                            delete vec.userData.trailWorld;
+                        }
+                    }
+
+                    if (canonicalTrail) {
+                        vec.userData = vec.userData || {};
+                        vec.userData.trail = canonicalTrail;
+                        vec.userData.trailWorld = true;
                     }
                 } catch (_) { /* no-op */ }
 
