@@ -415,10 +415,10 @@ function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vocabCent
     if (!instances.length) return;
     const instanced = new THREE.InstancedMesh(barGeometry, barMaterial, instances.length);
     instanced.name = 'TopLogitBarsMesh';
-    instanced.frustumCulled = false;
+    instanced.frustumCulled = false; // enable once bounds are computed after the reveal
     instanced.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     instanced.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(instances.length * 3), 3);
-    instanced.instanceColor.setUsage(THREE.DynamicDrawUsage);
+    instanced.instanceColor.setUsage(THREE.StaticDrawUsage);
     const dummy = new THREE.Object3D();
     instances.forEach((instance, idx) => {
         dummy.position.set(instance.x, instance.baseY + instance.startHeight / 2, instance.z);
@@ -459,6 +459,12 @@ function revealTopLogitBars(barGroup, { immediate = false } = {}) {
     const barWidth = Number.isFinite(barGroup.userData.barWidth) ? barGroup.userData.barWidth : 1;
     const barDepth = Number.isFinite(barGroup.userData.barDepth) ? barGroup.userData.barDepth : 1;
     const dummy = new THREE.Object3D();
+    const finalizeInstancing = () => {
+        instanced.frustumCulled = true;
+        if (typeof instanced.computeBoundingBox === 'function') instanced.computeBoundingBox();
+        if (typeof instanced.computeBoundingSphere === 'function') instanced.computeBoundingSphere();
+        instanced.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+    };
     const applyHeight = (idx, height) => {
         const instance = instances[idx];
         if (!instance) return;
@@ -473,6 +479,7 @@ function revealTopLogitBars(barGroup, { immediate = false } = {}) {
             applyHeight(idx, instance.targetHeight);
         });
         instanced.instanceMatrix.needsUpdate = true;
+        finalizeInstancing();
         return;
     }
 
@@ -500,7 +507,11 @@ function revealTopLogitBars(barGroup, { immediate = false } = {}) {
             applyHeight(i, height);
         }
         instanced.instanceMatrix.needsUpdate = true;
-        if (anyActive) requestAnimationFrame(animate);
+        if (anyActive) {
+            requestAnimationFrame(animate);
+        } else {
+            finalizeInstancing();
+        }
     };
     requestAnimationFrame(animate);
 }
