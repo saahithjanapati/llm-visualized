@@ -8,8 +8,8 @@ export const TRAIL_LINE_WIDTH = 1;            // Pixel width (hardware-dependent
 export const TRAIL_OPACITY = 0.14;             // 0 (fully transparent) → 1 (fully opaque)
 export const TRAIL_MAX_SEGMENTS = 5000;       // Preallocated straight-line segments
 // Dim trails as lane count grows to reduce clutter.
-export const TRAIL_LANE_OPACITY_EXPONENT = 0.35;
-export const TRAIL_LANE_OPACITY_MIN_SCALE = 0.45;
+export const TRAIL_LANE_OPACITY_EXPONENT = 0.25;
+export const TRAIL_LANE_OPACITY_MIN_SCALE = 0.6;
 // Minimum distance (world units) between recorded trail points to reduce churn.
 export const TRAIL_MIN_SEGMENT_DISTANCE = 0.4;
 
