@@ -7,9 +7,9 @@ export const TRAIL_COLOR = 0xffffff;          // Default hex colour (match other
 export const TRAIL_LINE_WIDTH = 1;            // Pixel width (hardware-dependent)
 export const TRAIL_OPACITY = 0.14;             // 0 (fully transparent) → 1 (fully opaque)
 export const TRAIL_MAX_SEGMENTS = 5000;       // Preallocated straight-line segments
-// Subtle brightening as lane count grows to keep dense trails readable.
-export const TRAIL_LANE_OPACITY_EXPONENT = 0.1;
-export const TRAIL_LANE_OPACITY_MAX_SCALE = 1.1;
+// Dim trails as lane count grows to reduce clutter.
+export const TRAIL_LANE_OPACITY_EXPONENT = 0.35;
+export const TRAIL_LANE_OPACITY_MIN_SCALE = 0.45;
 // Minimum distance (world units) between recorded trail points to reduce churn.
 export const TRAIL_MIN_SEGMENT_DISTANCE = 0.4;
 
@@ -54,11 +54,11 @@ export function scaleLineWidthForDisplay(baseWidth) {
     return Math.max(1, scaled);
 }
 
-/** Brightens trails when there are more lanes than the baseline configuration. */
+/** Dims trails when there are more lanes than the baseline configuration. */
 export function getLaneOpacityScale(laneCount = NUM_VECTOR_LANES) {
     const lanes = Math.max(1, Math.floor(laneCount || 1));
     if (lanes <= DEFAULT_NUM_VECTOR_LANES) return 1;
     const ratio = lanes / DEFAULT_NUM_VECTOR_LANES;
-    const scaled = Math.pow(ratio, TRAIL_LANE_OPACITY_EXPONENT);
-    return Math.max(1, Math.min(TRAIL_LANE_OPACITY_MAX_SCALE, scaled));
+    const scaled = Math.pow(ratio, -TRAIL_LANE_OPACITY_EXPONENT);
+    return Math.min(1, Math.max(TRAIL_LANE_OPACITY_MIN_SCALE, scaled));
 }
