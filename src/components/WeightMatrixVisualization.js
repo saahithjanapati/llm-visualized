@@ -432,7 +432,7 @@ export class WeightMatrixVisualization {
         // Assign the final CSG result geometry and the material to the main mesh (sides)
         this.mesh = finalMesh;
         this.mesh.material = sideMaterial;
-        const snapEps = Math.max(1e-3, this.height * 1e-4);
+        const snapEps = Math.min(Math.max(0.02, this.height * 0.002), 0.5);
         const posAttr = this.mesh.geometry.attributes.position;
         if (posAttr) {
             for (let i = 0; i < posAttr.count; i++) {
@@ -449,7 +449,7 @@ export class WeightMatrixVisualization {
         const normalAttr = creasedGeometry.attributes.normal;
         const creasedPos = creasedGeometry.attributes.position;
         if (normalAttr && creasedPos) {
-            const planeEps = Math.max(1e-3, this.height * 1e-4);
+            const planeEps = Math.min(Math.max(0.05, this.height * 0.005), 0.6);
             const a = new THREE.Vector3();
             const b = new THREE.Vector3();
             const c = new THREE.Vector3();

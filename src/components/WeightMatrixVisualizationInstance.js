@@ -264,7 +264,7 @@ export class WeightMatrixVisualizationInstance {
                 }
             }
 
-            const snapEps = Math.max(1e-3, this.height * 1e-4);
+            const snapEps = Math.min(Math.max(0.02, this.height * 0.002), 0.5);
             const hh = this.height / 2;
             const posAttr = baseMesh.geometry.attributes.position;
             if (posAttr) {
@@ -282,7 +282,7 @@ export class WeightMatrixVisualizationInstance {
             const normalAttr = baseGeometry.attributes.normal;
             const posAttrNormals = baseGeometry.attributes.position;
             if (normalAttr && posAttrNormals) {
-                const planeEps = Math.max(1e-3, this.height * 1e-4);
+                const planeEps = Math.min(Math.max(0.05, this.height * 0.005), 0.6);
                 const a = new THREE.Vector3();
                 const b = new THREE.Vector3();
                 const c = new THREE.Vector3();

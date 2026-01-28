@@ -95,8 +95,7 @@ export function initAttentionHeadAnimation(containerElement) {
         matrixParams.slitWidth,
         matrixParams.slitDepthFactor,
         matrixParams.slitBottomWidthFactor,
-        matrixParams.slitTopWidthFactor,
-        false
+        matrixParams.slitTopWidthFactor
     );
     queryMatrix.setColor(new THREE.Color(0x0000ff)); // Blue
     scene.add(queryMatrix.group);
@@ -113,8 +112,7 @@ export function initAttentionHeadAnimation(containerElement) {
         matrixParams.slitWidth,
         matrixParams.slitDepthFactor,
         matrixParams.slitBottomWidthFactor,
-        matrixParams.slitTopWidthFactor,
-        false
+        matrixParams.slitTopWidthFactor
     );
     keyMatrix.setColor(new THREE.Color(0x00ff00)); // Green
     scene.add(keyMatrix.group);
@@ -131,8 +129,7 @@ export function initAttentionHeadAnimation(containerElement) {
         matrixParams.slitWidth,
         matrixParams.slitDepthFactor,
         matrixParams.slitBottomWidthFactor,
-        matrixParams.slitTopWidthFactor,
-        false
+        matrixParams.slitTopWidthFactor
     );
     valueMatrix.setColor(new THREE.Color(0xff0000)); // Red
     scene.add(valueMatrix.group);

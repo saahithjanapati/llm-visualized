@@ -59,6 +59,31 @@ export function buildMHAVisuals(parentGroup, {
         updateSciFiMaterialUniforms(matrix.backCapMesh?.material, inactiveMatrixUniforms);
     };
 
+    const softenedMatrixUniforms = {
+        stripeStrength: 0.0,
+        scanlineStrength: 0.0,
+        glintStrength: 0.0,
+        noiseStrength: 0.0,
+        rimIntensity: 0.42,
+        depthAccentStrength: 0.12
+    };
+
+    const softenMatrixSurface = (matrix) => {
+        if (!matrix) return;
+        const mats = [matrix.mesh?.material, matrix.frontCapMesh?.material, matrix.backCapMesh?.material];
+        mats.forEach((mat) => {
+            if (!mat) return;
+            if (typeof mat.roughness === 'number') mat.roughness = Math.max(mat.roughness, 0.24);
+            if (typeof mat.clearcoat === 'number') mat.clearcoat = Math.min(mat.clearcoat, 0.65);
+            if (typeof mat.clearcoatRoughness === 'number') mat.clearcoatRoughness = Math.max(mat.clearcoatRoughness, 0.22);
+            if (typeof mat.iridescence === 'number') mat.iridescence = Math.min(mat.iridescence, 0.4);
+            if (typeof mat.envMapIntensity === 'number') mat.envMapIntensity = Math.min(mat.envMapIntensity, 1.3);
+        });
+        updateSciFiMaterialUniforms(matrix.mesh?.material, softenedMatrixUniforms);
+        updateSciFiMaterialUniforms(matrix.frontCapMesh?.material, softenedMatrixUniforms);
+        updateSciFiMaterialUniforms(matrix.backCapMesh?.material, softenedMatrixUniforms);
+    };
+
     for (let i = 0; i < NUM_HEAD_SETS_LAYER; i++) {
         const headSetWidth       = MHA_INTERNAL_MATRIX_SPACING * 2 + MHA_MATRIX_PARAMS.width;
         const currentHeadSetX    = branchX - MHA_INTERNAL_MATRIX_SPACING + i * (headSetWidth + HEAD_SET_GAP_LAYER);
@@ -80,8 +105,7 @@ export function buildMHAVisuals(parentGroup, {
                 MHA_MATRIX_PARAMS.slitWidth,
                 MHA_MATRIX_PARAMS.slitDepthFactor,
                 MHA_MATRIX_PARAMS.slitBottomWidthFactor,
-                MHA_MATRIX_PARAMS.slitTopWidthFactor,
-                false
+                MHA_MATRIX_PARAMS.slitTopWidthFactor
             );
             mat.setColor(inactiveMatrixColor);
             mat.group.userData.label = label;
@@ -109,6 +133,9 @@ export function buildMHAVisuals(parentGroup, {
         tuneInactiveMatrix(qMatrix);
         tuneInactiveMatrix(kMatrix);
         tuneInactiveMatrix(vMatrix);
+        softenMatrixSurface(qMatrix);
+        softenMatrixSurface(kMatrix);
+        softenMatrixSurface(vMatrix);
 
         headsCentersX.push(x_k);
         headCoords.push({ q: x_q, k: x_k, v: x_v });
@@ -136,8 +163,7 @@ export function buildMHAVisuals(parentGroup, {
         MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitWidth,
         MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitDepthFactor,
         MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitBottomWidthFactor,
-        MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitTopWidthFactor,
-        false
+        MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitTopWidthFactor
     );
 
     const initDarkColor = new THREE.Color(MHSA_MATRIX_INITIAL_RESTING_COLOR);
@@ -155,6 +181,7 @@ export function buildMHAVisuals(parentGroup, {
             child.material.emissiveIntensity = 0.16;
         }
     });
+    softenMatrixSurface(outputProjectionMatrix);
 
     parentGroup.add(outputProjectionMatrix.group);
 

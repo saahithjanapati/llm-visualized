@@ -82,7 +82,7 @@ const scene = new THREE.Scene();
 
 // --- MHSA Q/K/V matrix geometry ---
 {
-    const vis = new WeightMatrixVisualization(null, new THREE.Vector3(), MHA_MATRIX_PARAMS.width, MHA_MATRIX_PARAMS.height, MHA_MATRIX_PARAMS.depth, MHA_MATRIX_PARAMS.topWidthFactor, MHA_MATRIX_PARAMS.cornerRadius, MHA_MATRIX_PARAMS.numberOfSlits, MHA_MATRIX_PARAMS.slitWidth, MHA_MATRIX_PARAMS.slitDepthFactor, MHA_MATRIX_PARAMS.slitBottomWidthFactor, MHA_MATRIX_PARAMS.slitTopWidthFactor, false);
+    const vis = new WeightMatrixVisualization(null, new THREE.Vector3(), MHA_MATRIX_PARAMS.width, MHA_MATRIX_PARAMS.height, MHA_MATRIX_PARAMS.depth, MHA_MATRIX_PARAMS.topWidthFactor, MHA_MATRIX_PARAMS.cornerRadius, MHA_MATRIX_PARAMS.numberOfSlits, MHA_MATRIX_PARAMS.slitWidth, MHA_MATRIX_PARAMS.slitDepthFactor, MHA_MATRIX_PARAMS.slitBottomWidthFactor, MHA_MATRIX_PARAMS.slitTopWidthFactor);
     const key = wmKey({ ...MHA_MATRIX_PARAMS });
     vis.group.traverse(obj => {
         if (obj.isMesh && obj.geometry) {
@@ -94,7 +94,7 @@ const scene = new THREE.Scene();
 
 // --- MLP Up-projection matrix ---
 {
-    const vis = new WeightMatrixVisualization(null, new THREE.Vector3(0, 0, 2000), MLP_MATRIX_PARAMS_UP.width, MLP_MATRIX_PARAMS_UP.height, MLP_MATRIX_PARAMS_UP.depth, MLP_MATRIX_PARAMS_UP.topWidthFactor, MLP_MATRIX_PARAMS_UP.cornerRadius, MLP_MATRIX_PARAMS_UP.numberOfSlits, MLP_MATRIX_PARAMS_UP.slitWidth, MLP_MATRIX_PARAMS_UP.slitDepthFactor, MLP_MATRIX_PARAMS_UP.slitBottomWidthFactor, MLP_MATRIX_PARAMS_UP.slitTopWidthFactor, false);
+    const vis = new WeightMatrixVisualization(null, new THREE.Vector3(0, 0, 2000), MLP_MATRIX_PARAMS_UP.width, MLP_MATRIX_PARAMS_UP.height, MLP_MATRIX_PARAMS_UP.depth, MLP_MATRIX_PARAMS_UP.topWidthFactor, MLP_MATRIX_PARAMS_UP.cornerRadius, MLP_MATRIX_PARAMS_UP.numberOfSlits, MLP_MATRIX_PARAMS_UP.slitWidth, MLP_MATRIX_PARAMS_UP.slitDepthFactor, MLP_MATRIX_PARAMS_UP.slitBottomWidthFactor, MLP_MATRIX_PARAMS_UP.slitTopWidthFactor);
     const key = wmKey({ ...MLP_MATRIX_PARAMS_UP });
     vis.group.traverse(obj => {
         if (obj.isMesh && obj.geometry) {
@@ -106,7 +106,7 @@ const scene = new THREE.Scene();
 
 // --- MLP Down-projection matrix ---
 {
-    const vis = new WeightMatrixVisualization(null, new THREE.Vector3(0, 0, 4000), MLP_MATRIX_PARAMS_DOWN.width, MLP_MATRIX_PARAMS_DOWN.height, MLP_MATRIX_PARAMS_DOWN.depth, MLP_MATRIX_PARAMS_DOWN.topWidthFactor, MLP_MATRIX_PARAMS_DOWN.cornerRadius, MLP_MATRIX_PARAMS_DOWN.numberOfSlits, MLP_MATRIX_PARAMS_DOWN.slitWidth, MLP_MATRIX_PARAMS_DOWN.slitDepthFactor, MLP_MATRIX_PARAMS_DOWN.slitBottomWidthFactor, MLP_MATRIX_PARAMS_DOWN.slitTopWidthFactor, false);
+    const vis = new WeightMatrixVisualization(null, new THREE.Vector3(0, 0, 4000), MLP_MATRIX_PARAMS_DOWN.width, MLP_MATRIX_PARAMS_DOWN.height, MLP_MATRIX_PARAMS_DOWN.depth, MLP_MATRIX_PARAMS_DOWN.topWidthFactor, MLP_MATRIX_PARAMS_DOWN.cornerRadius, MLP_MATRIX_PARAMS_DOWN.numberOfSlits, MLP_MATRIX_PARAMS_DOWN.slitWidth, MLP_MATRIX_PARAMS_DOWN.slitDepthFactor, MLP_MATRIX_PARAMS_DOWN.slitBottomWidthFactor, MLP_MATRIX_PARAMS_DOWN.slitTopWidthFactor);
     const key = wmKey({ ...MLP_MATRIX_PARAMS_DOWN });
     vis.group.traverse(obj => {
         if (obj.isMesh && obj.geometry) {
@@ -132,7 +132,7 @@ const scene = new THREE.Scene();
         slitTopWidthFactor: MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitTopWidthFactor
     };
 
-    const vis = new WeightMatrixVisualization(null, new THREE.Vector3(0, 0, 6000), params.width, params.height, params.depth, params.topWidthFactor, params.cornerRadius, params.numberOfSlits, params.slitWidth, params.slitDepthFactor, params.slitBottomWidthFactor, params.slitTopWidthFactor, false);
+    const vis = new WeightMatrixVisualization(null, new THREE.Vector3(0, 0, 6000), params.width, params.height, params.depth, params.topWidthFactor, params.cornerRadius, params.numberOfSlits, params.slitWidth, params.slitDepthFactor, params.slitBottomWidthFactor, params.slitTopWidthFactor);
 
     const key = wmKey(params);
     vis.group.traverse(obj => {
