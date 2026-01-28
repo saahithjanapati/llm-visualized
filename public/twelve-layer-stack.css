@@ -1,15 +1,17 @@
 body { margin: 0; overflow: hidden; background-color: #000; }
 canvas { display: block; }
+button { touch-action: manipulation; }
 
 /* Top-right controls */
 #topControls {
     position: fixed;
-    top: 10px;
-    right: 10px;
+    top: max(10px, env(safe-area-inset-top));
+    right: max(10px, env(safe-area-inset-right));
     z-index: 9; /* above HUD/detail panels, below settings overlay */
     display: flex;
     gap: 8px;
     transition: opacity 0.25s ease, transform 0.25s ease;
+    pointer-events: auto;
 }
 #topControls[data-auto-hidden="true"] {
     opacity: 0;

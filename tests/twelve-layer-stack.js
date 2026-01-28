@@ -1068,7 +1068,9 @@ updateFollowButton(pipeline?.isAutoCameraFollowEnabled?.());
 
 const topControls = document.getElementById('topControls');
 const isSkinnyScreen = () => window.matchMedia('(max-aspect-ratio: 1/1), (max-width: 880px)').matches;
+const isTouchUi = () => window.matchMedia('(hover: none) and (pointer: coarse)').matches;
 let topControlsHideTimer = null;
+const autoHideDelayMs = () => (isTouchUi() ? 9000 : 5000);
 
 const showTopControls = () => {
     if (!topControls) return;
@@ -1079,7 +1081,7 @@ const showTopControls = () => {
             if (isSkinnyScreen()) {
                 topControls.setAttribute('data-auto-hidden', 'true');
             }
-        }, 5000);
+        }, autoHideDelayMs());
     }
 };
 
@@ -1095,6 +1097,29 @@ const handleViewportChange = () => {
 
 handleViewportChange();
 window.addEventListener('resize', handleViewportChange);
+window.addEventListener('pointerdown', (event) => {
+    if (!topControls) return;
+    const wasHidden = topControls.dataset.autoHidden === 'true';
+    let rect = null;
+    if (wasHidden) {
+        try {
+            rect = topControls.getBoundingClientRect();
+        } catch (_) { /* no-op */ }
+    }
+    showTopControls();
+    if (wasHidden && rect && typeof event.clientX === 'number' && typeof event.clientY === 'number') {
+        const inside = event.clientX >= rect.left && event.clientX <= rect.right
+            && event.clientY >= rect.top && event.clientY <= rect.bottom;
+        if (inside) {
+            requestAnimationFrame(() => {
+                const hit = document.elementFromPoint(event.clientX, event.clientY);
+                if (hit && topControls.contains(hit) && typeof hit.click === 'function') {
+                    hit.click();
+                }
+            });
+        }
+    }
+}, { passive: true });
 
 const selectionPanel = initSelectionPanel();
 if (pipeline.engine && typeof pipeline.engine.setRaycastSelectionHandler === 'function') {
