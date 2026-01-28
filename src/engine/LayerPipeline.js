@@ -87,6 +87,8 @@ export class LayerPipeline extends EventTarget {
         this._autoCameraSmoothAlpha = Math.min(1, Math.max(0, smoothAlpha));
         const offsetAlpha = typeof opts.autoCameraOffsetLerpAlpha === 'number' ? opts.autoCameraOffsetLerpAlpha : 0.14;
         this._autoCameraOffsetLerpAlpha = Math.min(1, Math.max(0, offsetAlpha));
+        const mobileScale = typeof opts.autoCameraMobileScale === 'number' ? opts.autoCameraMobileScale : 1.0;
+        this._autoCameraMobileScale = Math.max(0.1, mobileScale);
         this._autoCameraCenter = new THREE.Vector3();
         this._autoCameraOffsetScratch = new THREE.Vector3();
         this._autoCameraDesiredCameraOffset = new THREE.Vector3();
@@ -147,41 +149,51 @@ export class LayerPipeline extends EventTarget {
             return fallback ? fallback.clone() : null;
         };
 
-        const defaultTargetOffset = parseVec3(opts.autoCameraDefaultTargetOffset, new THREE.Vector3(0, 0, 0));
+        const isMobileLayout = (typeof window !== 'undefined')
+            && (window.matchMedia?.('(max-aspect-ratio: 1/1), (max-width: 880px)')?.matches);
+        const effectiveScale = isMobileLayout ? this._autoCameraMobileScale : 1.0;
+
+        const applyScale = (vec) => {
+            if (!vec) return null;
+            vec.multiplyScalar(effectiveScale);
+            return vec;
+        };
+
+        const defaultTargetOffset = applyScale(parseVec3(opts.autoCameraDefaultTargetOffset, new THREE.Vector3(0, 0, 0)));
         const cameraTarget = this._engine?.controls?.target || new THREE.Vector3();
-        const defaultCameraOffset = parseVec3(
+        const defaultCameraOffset = applyScale(parseVec3(
             opts.autoCameraDefaultCameraOffset,
             this._engine?.camera?.position ? this._engine.camera.position.clone().sub(cameraTarget) : new THREE.Vector3(0, 2000, 16000)
-        );
+        ));
         if (defaultTargetOffset) this._autoCameraDefaultTargetOffset.copy(defaultTargetOffset);
         if (defaultCameraOffset) this._autoCameraDefaultCameraOffset.copy(defaultCameraOffset);
 
-        const mhsaCamOffset = parseVec3(opts.autoCameraMhsaCameraOffset, null);
-        const mhsaTargetOffset = parseVec3(opts.autoCameraMhsaTargetOffset, null);
+        const mhsaCamOffset = applyScale(parseVec3(opts.autoCameraMhsaCameraOffset, null));
+        const mhsaTargetOffset = applyScale(parseVec3(opts.autoCameraMhsaTargetOffset, null));
         if (mhsaCamOffset && mhsaTargetOffset) {
             this._autoCameraMhsaCameraOffset.copy(mhsaCamOffset);
             this._autoCameraMhsaTargetOffset.copy(mhsaTargetOffset);
             this._autoCameraMhsaOffsetsEnabled = true;
         }
 
-        const concatCamOffset = parseVec3(opts.autoCameraConcatCameraOffset, null);
-        const concatTargetOffset = parseVec3(opts.autoCameraConcatTargetOffset, null);
+        const concatCamOffset = applyScale(parseVec3(opts.autoCameraConcatCameraOffset, null));
+        const concatTargetOffset = applyScale(parseVec3(opts.autoCameraConcatTargetOffset, null));
         if (concatCamOffset && concatTargetOffset) {
             this._autoCameraConcatCameraOffset.copy(concatCamOffset);
             this._autoCameraConcatTargetOffset.copy(concatTargetOffset);
             this._autoCameraConcatOffsetsEnabled = true;
         }
 
-        const lnCamOffset = parseVec3(opts.autoCameraLnCameraOffset, null);
-        const lnTargetOffset = parseVec3(opts.autoCameraLnTargetOffset, null);
+        const lnCamOffset = applyScale(parseVec3(opts.autoCameraLnCameraOffset, null));
+        const lnTargetOffset = applyScale(parseVec3(opts.autoCameraLnTargetOffset, null));
         if (lnCamOffset && lnTargetOffset) {
             this._autoCameraLnCameraOffset.copy(lnCamOffset);
             this._autoCameraLnTargetOffset.copy(lnTargetOffset);
             this._autoCameraLnOffsetsEnabled = true;
         }
 
-        const travelCamOffset = parseVec3(opts.autoCameraTravelCameraOffset, null);
-        const travelTargetOffset = parseVec3(opts.autoCameraTravelTargetOffset, null);
+        const travelCamOffset = applyScale(parseVec3(opts.autoCameraTravelCameraOffset, null));
+        const travelTargetOffset = applyScale(parseVec3(opts.autoCameraTravelTargetOffset, null));
         if (travelCamOffset && travelTargetOffset) {
             this._autoCameraTravelCameraOffset.copy(travelCamOffset);
             this._autoCameraTravelTargetOffset.copy(travelTargetOffset);

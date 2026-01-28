@@ -693,6 +693,7 @@ const pipeline = new LayerPipeline(gptCanvas, NUM_LAYERS, {
     autoCameraLnTargetOffset: followLnTargetOffset,
     autoCameraTravelCameraOffset: followTravelCameraOffset,
     autoCameraTravelTargetOffset: followTravelTargetOffset,
+    autoCameraMobileScale: 1.35,
     autoCameraSmoothAlpha: 0.08,
     autoCameraOffsetLerpAlpha: 0.08,
     activationSource,
