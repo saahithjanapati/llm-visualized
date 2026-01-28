@@ -10,10 +10,111 @@ export function initSettingsModal(pipeline) {
     const equationsPanel = document.getElementById('equationsPanel');
 
     appState.autoCameraFollow = getPreference('autoCameraFollow', true);
+    appState.showCameraDebug = getPreference('showCameraDebug', false);
+    appState.showFollowViewInspector = getPreference('showFollowViewInspector', false);
     appState.devMode = getPreference('devMode', false);
     pipeline?.setAutoCameraFollow?.(appState.autoCameraFollow, { immediate: true });
+    pipeline?.engine?.setCameraDebugEnabled?.(appState.showCameraDebug);
     pipeline?.setDevMode?.(appState.devMode);
     pipeline?.engine?.setDevMode?.(appState.devMode);
+
+    let followInspectorEl = null;
+    let followInspectorRaf = null;
+
+    const ensureFollowInspector = () => {
+        if (followInspectorEl) return followInspectorEl;
+        const el = document.createElement('div');
+        el.id = 'followViewInspector';
+        Object.assign(el.style, {
+            position: 'fixed',
+            left: '10px',
+            bottom: '70px',
+            padding: '10px 12px',
+            fontFamily: 'monospace',
+            fontSize: '12px',
+            lineHeight: '1.35',
+            color: '#fff',
+            background: 'rgba(12,12,12,0.55)',
+            border: '1px solid rgba(255,255,255,0.18)',
+            borderRadius: '10px',
+            backdropFilter: 'blur(6px)',
+            WebkitBackdropFilter: 'blur(6px)',
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            maxWidth: 'min(360px, 90vw)',
+            pointerEvents: 'none',
+            zIndex: 6,
+            display: 'none'
+        });
+        document.body.appendChild(el);
+        followInspectorEl = el;
+        return el;
+    };
+
+    const formatNum = (value) => (Number.isFinite(value) ? value.toFixed(2) : '—');
+    const formatVec = (v) => (v ? `(${formatNum(v.x)}, ${formatNum(v.y)}, ${formatNum(v.z)})` : '(—, —, —)');
+
+    const updateFollowInspector = () => {
+        if (!appState.showFollowViewInspector) {
+            if (followInspectorEl) followInspectorEl.style.display = 'none';
+            followInspectorRaf = null;
+            return;
+        }
+
+        const el = ensureFollowInspector();
+        const cam = pipeline?.engine?.camera;
+        const target = pipeline?.engine?.controls?.target || null;
+        const refInfo = pipeline?.getAutoCameraReference?.();
+        const ref = refInfo?.position || null;
+        const laneLabel = Number.isFinite(refInfo?.laneIndex) ? refInfo.laneIndex + 1 : '—';
+
+        let camOffset = null;
+        let targetOffset = null;
+        if (cam && ref) {
+            camOffset = {
+                x: cam.position.x - ref.x,
+                y: cam.position.y - ref.y,
+                z: cam.position.z - ref.z
+            };
+        }
+        if (target && ref) {
+            targetOffset = {
+                x: target.x - ref.x,
+                y: target.y - ref.y,
+                z: target.z - ref.z
+            };
+        }
+
+        const enabled = pipeline?.isAutoCameraFollowEnabled?.() ? 'on' : 'off';
+        el.textContent = [
+            'Follow View Inspector',
+            `Follow mode: ${enabled}`,
+            `Lane ref: ${laneLabel}`,
+            `Ref: ${formatVec(ref)}`,
+            `Cam pos: ${cam ? formatVec(cam.position) : '(—, —, —)'}`,
+            `Cam offset: ${formatVec(camOffset)}`,
+            `Target: ${formatVec(target)}`,
+            `Target offset: ${formatVec(targetOffset)}`
+        ].join('\n');
+        el.style.display = 'block';
+        followInspectorRaf = requestAnimationFrame(updateFollowInspector);
+    };
+
+    const setFollowInspectorEnabled = (enabled) => {
+        appState.showFollowViewInspector = !!enabled;
+        setPreference('showFollowViewInspector', appState.showFollowViewInspector);
+        if (appState.showFollowViewInspector) {
+            if (followInspectorRaf === null) {
+                followInspectorRaf = requestAnimationFrame(updateFollowInspector);
+            }
+        } else {
+            if (followInspectorRaf !== null && typeof cancelAnimationFrame === 'function') {
+                cancelAnimationFrame(followInspectorRaf);
+                followInspectorRaf = null;
+            }
+            if (followInspectorEl) followInspectorEl.style.display = 'none';
+        }
+    };
 
     function applySpeed(value) {
         setPlaybackSpeed(value);
@@ -47,6 +148,10 @@ export function initSettingsModal(pipeline) {
         }
         const devMode = document.getElementById('toggleDevMode');
         if (devMode) devMode.checked = !!appState.devMode;
+        const camDebug = document.getElementById('toggleCameraDebug');
+        if (camDebug) camDebug.checked = !!appState.showCameraDebug;
+        const followInspector = document.getElementById('toggleFollowViewInspector');
+        if (followInspector) followInspector.checked = !!appState.showFollowViewInspector;
     }
 
     function closeSettings() {
@@ -116,7 +221,7 @@ export function initSettingsModal(pipeline) {
     autoCamToggle?.addEventListener('change', () => {
         appState.autoCameraFollow = !!autoCamToggle.checked;
         setPreference('autoCameraFollow', appState.autoCameraFollow);
-        pipeline?.setAutoCameraFollow?.(appState.autoCameraFollow, { immediate: appState.autoCameraFollow });
+        pipeline?.setAutoCameraFollow?.(appState.autoCameraFollow, { immediate: appState.autoCameraFollow, resetView: appState.autoCameraFollow });
     });
 
     const devToggle = document.getElementById('toggleDevMode');
@@ -126,4 +231,20 @@ export function initSettingsModal(pipeline) {
         pipeline?.setDevMode?.(appState.devMode);
         pipeline?.engine?.setDevMode?.(appState.devMode);
     });
+
+    const camDebugToggle = document.getElementById('toggleCameraDebug');
+    camDebugToggle?.addEventListener('change', () => {
+        appState.showCameraDebug = !!camDebugToggle.checked;
+        setPreference('showCameraDebug', appState.showCameraDebug);
+        pipeline?.engine?.setCameraDebugEnabled?.(appState.showCameraDebug);
+    });
+
+    const followInspectorToggle = document.getElementById('toggleFollowViewInspector');
+    followInspectorToggle?.addEventListener('change', () => {
+        setFollowInspectorEnabled(!!followInspectorToggle.checked);
+    });
+
+    if (appState.showFollowViewInspector) {
+        setFollowInspectorEnabled(true);
+    }
 }

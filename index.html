@@ -18,6 +18,7 @@
     <div id="topControls">
         <button id="pauseBtn" type="button" aria-pressed="false" aria-label="Pause animation" title="Pause animation">Pause</button>
         <button id="skipConveyorBtn" type="button" aria-label="Skip attention conveyor" title="Skip attention conveyor" data-visible="false">Skip attention</button>
+        <button id="followModeBtn" type="button" aria-pressed="true" aria-label="Follow mode enabled" title="Follow mode enabled">Follow mode on</button>
         <button id="settingsBtn" type="button" aria-haspopup="dialog" aria-controls="settingsOverlay" title="Settings">⚙️</button>
     </div>
 
@@ -99,6 +100,16 @@
                     <label class="toggle-row">
                         <span class="toggle-text">Show equations overlay</span>
                         <input id="toggleEquations" type="checkbox" checked>
+                        <span class="toggle-track" aria-hidden="true"></span>
+                    </label>
+                    <label class="toggle-row">
+                        <span class="toggle-text">Show follow view inspector</span>
+                        <input id="toggleFollowViewInspector" type="checkbox">
+                        <span class="toggle-track" aria-hidden="true"></span>
+                    </label>
+                    <label class="toggle-row">
+                        <span class="toggle-text">Show camera orbit gizmo</span>
+                        <input id="toggleCameraDebug" type="checkbox">
                         <span class="toggle-track" aria-hidden="true"></span>
                     </label>
                     <label class="toggle-row">

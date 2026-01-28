@@ -79,6 +79,22 @@ canvas { display: block; }
     border-color: rgba(255, 196, 140, 0.7);
 }
 
+#followModeBtn {
+    font-size: 13px;
+    min-width: 150px;
+    letter-spacing: 0.2px;
+}
+
+#followModeBtn[data-state="enabled"] {
+    background: rgba(56,132,255,0.18);
+    border-color: rgba(122,202,255,0.8);
+}
+
+#followModeBtn:disabled {
+    cursor: default;
+    opacity: 0.8;
+}
+
 #settingsBtn {
     padding-inline: 10px;
 }
@@ -451,6 +467,10 @@ canvas { display: block; }
     background: #000;
     border-radius: 14px;
     border: 1px solid rgba(255,255,255,0.1);
+    touch-action: none;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
 }
 
 .detail-meta {

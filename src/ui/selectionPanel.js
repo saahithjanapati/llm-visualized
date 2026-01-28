@@ -1304,10 +1304,18 @@ class SelectionPanel {
         this._onKeydown = this._onKeydown.bind(this);
         this._onClosePointerDown = this._onClosePointerDown.bind(this);
         this._onDocumentPointerDown = this._onDocumentPointerDown.bind(this);
+        this._blockPreviewGesture = this._blockPreviewGesture.bind(this);
         this._startLoop();
 
         this.closeBtn?.addEventListener('click', () => this.close());
         this.closeBtn?.addEventListener('pointerdown', this._onClosePointerDown);
+        this.canvas.addEventListener('pointerdown', this._blockPreviewGesture, { passive: false });
+        this.canvas.addEventListener('pointermove', this._blockPreviewGesture, { passive: false });
+        this.canvas.addEventListener('pointerup', this._blockPreviewGesture, { passive: false });
+        this.canvas.addEventListener('wheel', this._blockPreviewGesture, { passive: false });
+        this.canvas.addEventListener('touchstart', this._blockPreviewGesture, { passive: false });
+        this.canvas.addEventListener('touchmove', this._blockPreviewGesture, { passive: false });
+        this.canvas.addEventListener('touchend', this._blockPreviewGesture, { passive: false });
         window.addEventListener('resize', this._onResize);
         document.addEventListener('keydown', this._onKeydown);
         document.addEventListener('pointerdown', this._onDocumentPointerDown, { capture: true });
@@ -1342,6 +1350,13 @@ class SelectionPanel {
         event.preventDefault();
         event.stopPropagation();
         this.close();
+    }
+
+    _blockPreviewGesture(event) {
+        const isTouch = event.pointerType === 'touch' || event.type.startsWith('touch');
+        if (!isTouch) return;
+        if (event.cancelable) event.preventDefault();
+        event.stopPropagation();
     }
 
     _onDocumentPointerDown(event) {

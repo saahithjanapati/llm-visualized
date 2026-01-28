@@ -664,10 +664,37 @@ MHSAAnimation.ENABLE_SELF_ATTENTION = true;
 const gptCanvas = document.getElementById('gptCanvas');
 const camPos    = new THREE.Vector3(0, 11000, 16000);
 const camTarget = new THREE.Vector3(0, 9000, 0);
+const targetClampRadius = Math.max(8000, NUM_LAYERS * 900);
+const autoCameraHeadBias = 0.0;
+const followDefaultCameraOffset = new THREE.Vector3(-1215.87, 465.86, 3350.33);
+const followDefaultTargetOffset = new THREE.Vector3(1675.46, 227.33, -469.85);
+const followMhsaCameraOffset = new THREE.Vector3(1366.76, 1062.82, 1936.74);
+const followMhsaTargetOffset = new THREE.Vector3(3699.19, 110.55, 268.33);
+const followConcatCameraOffset = new THREE.Vector3(403.43, -14.39, 7.47);
+const followConcatTargetOffset = new THREE.Vector3(3383.52, 26.22, 364.05);
+const followLnCameraOffset = new THREE.Vector3(605.51, -78.03, 2433.13);
+const followLnTargetOffset = new THREE.Vector3(1026.71, 144.37, -607.81);
+const followTravelCameraOffset = new THREE.Vector3(539.33, -767.70, 1885.69);
+const followTravelTargetOffset = new THREE.Vector3(3220.06, -185.09, 1140.26);
 // LayerPipeline builds all static visuals first, then advances active lanes upward.
 const pipeline = new LayerPipeline(gptCanvas, NUM_LAYERS, {
     cameraPosition: camPos,
     cameraTarget: camTarget,
+    targetClampCenter: camTarget,
+    targetClampRadius,
+    autoCameraHeadBias,
+    autoCameraDefaultCameraOffset: followDefaultCameraOffset,
+    autoCameraDefaultTargetOffset: followDefaultTargetOffset,
+    autoCameraMhsaCameraOffset: followMhsaCameraOffset,
+    autoCameraMhsaTargetOffset: followMhsaTargetOffset,
+    autoCameraConcatCameraOffset: followConcatCameraOffset,
+    autoCameraConcatTargetOffset: followConcatTargetOffset,
+    autoCameraLnCameraOffset: followLnCameraOffset,
+    autoCameraLnTargetOffset: followLnTargetOffset,
+    autoCameraTravelCameraOffset: followTravelCameraOffset,
+    autoCameraTravelTargetOffset: followTravelTargetOffset,
+    autoCameraSmoothAlpha: 0.08,
+    autoCameraOffsetLerpAlpha: 0.08,
     activationSource,
     laneCount
 });
@@ -967,6 +994,55 @@ initPauseButton(pipeline);
 initConveyorSkipButton(pipeline);
 initSkipToEndButton(pipeline);
 initSettingsModal(pipeline);
+
+const followModeBtn = document.getElementById('followModeBtn');
+const followSettingsToggle = document.getElementById('toggleAutoCamera');
+const updateFollowButton = (enabled) => {
+    if (!followModeBtn) return;
+    const isOn = !!enabled;
+    followModeBtn.dataset.state = isOn ? 'enabled' : 'disabled';
+    followModeBtn.setAttribute('aria-pressed', String(isOn));
+    followModeBtn.textContent = isOn ? 'Follow mode on' : 'Enable Follow Mode';
+    followModeBtn.setAttribute('aria-label', isOn ? 'Follow mode enabled' : 'Enable follow mode');
+    followModeBtn.setAttribute('title', isOn ? 'Follow mode enabled' : 'Enable follow mode');
+    followModeBtn.disabled = isOn;
+};
+
+const setFollowMode = (enabled, { resetView = false } = {}) => {
+    const next = !!enabled;
+    if (appState.autoCameraFollow === next && pipeline?.isAutoCameraFollowEnabled?.() === next) {
+        updateFollowButton(next);
+        if (followSettingsToggle) followSettingsToggle.checked = next;
+        return;
+    }
+    appState.autoCameraFollow = next;
+    pipeline?.setAutoCameraFollow?.(next, { immediate: next, resetView: next && resetView });
+    updateFollowButton(next);
+    if (followSettingsToggle) followSettingsToggle.checked = next;
+};
+
+if (followModeBtn) {
+    followModeBtn.addEventListener('click', (event) => {
+        event.preventDefault();
+        setFollowMode(true, { resetView: true });
+    });
+}
+
+if (followSettingsToggle) {
+    followSettingsToggle.addEventListener('change', () => {
+        updateFollowButton(!!followSettingsToggle.checked);
+    });
+}
+
+if (pipeline?.engine?.controls?.addEventListener) {
+    pipeline.engine.controls.addEventListener('start', () => {
+        if (pipeline?.isAutoCameraFollowEnabled?.()) {
+            setFollowMode(false);
+        }
+    });
+}
+
+updateFollowButton(pipeline?.isAutoCameraFollowEnabled?.());
 
 const topControls = document.getElementById('topControls');
 const isSkinnyScreen = () => window.matchMedia('(max-aspect-ratio: 1/1), (max-width: 880px)').matches;

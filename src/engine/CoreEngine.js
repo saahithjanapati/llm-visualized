@@ -25,6 +25,20 @@ export class CoreEngine {
         this._layers = layers;
         this._speed  = typeof opts.speed === 'number' ? opts.speed : 1.0;
         this._devMode = !!opts.devMode;
+        this._cameraDebugEnabled = !!opts.cameraDebug;
+        this._cameraDebugGroup = null;
+        this._cameraDebugLine = null;
+        this._cameraDebugCameraMarker = null;
+        this._cameraDebugTargetMarker = null;
+        this._cameraDebugAxes = null;
+        this._cameraDebugCenter = new THREE.Vector3();
+        this._cameraDebugForward = new THREE.Vector3();
+        this._cameraDebugRight = new THREE.Vector3();
+        this._cameraDebugUp = new THREE.Vector3();
+        this._cameraDebugDir = new THREE.Vector3();
+        this._cameraDebugRadius = 260;
+        this._cameraDebugMinRadius = 140;
+        this._cameraDebugMaxRadius = 700;
         // Enable/disable expensive post-processing effects (e.g. bloom).
         // Bloom is disabled by default to reduce initial load; set opts.enableBloom=true to re-enable.
         this._enableBloom = typeof opts.enableBloom === 'boolean' ? opts.enableBloom : false;
@@ -226,6 +240,11 @@ export class CoreEngine {
         dirLight.position.set(25, 40, 40);
         this.scene.add(dirLight);
 
+        if (this._cameraDebugEnabled) {
+            this._initCameraDebugHelpers();
+            this._updateCameraDebug();
+        }
+
         // ────────────────────────────────────────────────────────────────────
         // Initialise layers
         // ────────────────────────────────────────────────────────────────────
@@ -325,6 +344,26 @@ export class CoreEngine {
         if (this._stats && this._stats.dom) {
             this._stats.dom.style.display = this._devMode ? 'block' : 'none';
         }
+    }
+
+    setCameraDebugEnabled(enabled) {
+        const nextValue = !!enabled;
+        this._cameraDebugEnabled = nextValue;
+        if (nextValue) {
+            if (!this._cameraDebugGroup) {
+                this._initCameraDebugHelpers();
+            }
+            if (this._cameraDebugGroup) {
+                this._cameraDebugGroup.visible = true;
+                this._updateCameraDebug();
+            }
+        } else if (this._cameraDebugGroup) {
+            this._cameraDebugGroup.visible = false;
+        }
+    }
+
+    isCameraDebugEnabled() {
+        return !!this._cameraDebugEnabled;
     }
 
     /** Register a handler for click/tap selection via raycasting. */
@@ -976,6 +1015,112 @@ export class CoreEngine {
         }
     }
 
+    _initCameraDebugHelpers() {
+        if (this._cameraDebugGroup) return;
+        const group = new THREE.Group();
+        group.name = 'CameraOrbitGizmo';
+        group.visible = this._cameraDebugEnabled;
+
+        const targetMat = new THREE.MeshBasicMaterial({ color: 0x9ad6ff, transparent: true, opacity: 0.9 });
+        const targetMesh = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 12), targetMat);
+        targetMesh.name = 'CameraOrbitTarget';
+        targetMesh.renderOrder = 50;
+        targetMesh.material.depthTest = false;
+        targetMesh.castShadow = false;
+        targetMesh.receiveShadow = false;
+        group.add(targetMesh);
+
+        const camMat = new THREE.MeshBasicMaterial({ color: 0xffc857 });
+        const camMesh = new THREE.Mesh(new THREE.ConeGeometry(0.6, 1.2, 12), camMat);
+        camMesh.name = 'CameraOrbitMarker';
+        camMesh.renderOrder = 51;
+        camMesh.material.depthTest = false;
+        camMesh.castShadow = false;
+        camMesh.receiveShadow = false;
+        camMesh.rotation.x = -Math.PI / 2;
+
+        const axes = new THREE.AxesHelper(1);
+        axes.name = 'CameraOrbitAxes';
+        axes.renderOrder = 52;
+        axes.material.depthTest = false;
+        camMesh.add(axes);
+
+        group.add(camMesh);
+
+        const lineGeom = new THREE.BufferGeometry();
+        const linePositions = new Float32Array(6);
+        lineGeom.setAttribute('position', new THREE.BufferAttribute(linePositions, 3));
+        const lineMat = new THREE.LineBasicMaterial({ color: 0x77d1ff, transparent: true, opacity: 0.7 });
+        const line = new THREE.Line(lineGeom, lineMat);
+        line.name = 'CameraOrbitLine';
+        line.renderOrder = 49;
+        line.material.depthTest = false;
+        group.add(line);
+
+        this._cameraDebugGroup = group;
+        this._cameraDebugTargetMarker = targetMesh;
+        this._cameraDebugCameraMarker = camMesh;
+        this._cameraDebugAxes = axes;
+        this._cameraDebugLine = line;
+
+        this.scene.add(group);
+    }
+
+    _updateCameraDebug() {
+        if (!this._cameraDebugEnabled || !this._cameraDebugGroup) return;
+        if (!this.camera || !this.controls || !this.controls.target) return;
+
+        const camera = this.camera;
+        const target = this.controls.target;
+        const distance = camera.position.distanceTo(target);
+        const radius = THREE.MathUtils.clamp(distance * 0.05, this._cameraDebugMinRadius, this._cameraDebugMaxRadius);
+        this._cameraDebugRadius = radius;
+
+        const forward = this._cameraDebugForward;
+        const right = this._cameraDebugRight;
+        const up = this._cameraDebugUp;
+        camera.getWorldDirection(forward);
+        right.crossVectors(forward, camera.up).normalize();
+        up.copy(camera.up).normalize();
+
+        const center = this._cameraDebugCenter;
+        center.copy(target);
+        center.addScaledVector(right, -radius * 2.6);
+        center.addScaledVector(up, -radius * 1.6);
+        center.addScaledVector(forward, -radius * 0.8);
+        this._cameraDebugGroup.position.copy(center);
+
+        const dir = this._cameraDebugDir;
+        dir.copy(camera.position).sub(target);
+        if (dir.lengthSq() < 0.0001) {
+            dir.set(0, 0, 1);
+        }
+        dir.normalize();
+
+        const camMarker = this._cameraDebugCameraMarker;
+        camMarker.position.copy(dir).multiplyScalar(radius);
+        camMarker.quaternion.copy(camera.quaternion);
+        camMarker.scale.setScalar(radius * 0.35);
+
+        if (this._cameraDebugAxes) {
+            this._cameraDebugAxes.scale.setScalar(radius * 0.65);
+        }
+        if (this._cameraDebugTargetMarker) {
+            this._cameraDebugTargetMarker.scale.setScalar(radius * 0.12);
+        }
+        if (this._cameraDebugLine) {
+            const attr = this._cameraDebugLine.geometry.attributes.position;
+            attr.array[0] = 0;
+            attr.array[1] = 0;
+            attr.array[2] = 0;
+            attr.array[3] = camMarker.position.x;
+            attr.array[4] = camMarker.position.y;
+            attr.array[5] = camMarker.position.z;
+            attr.needsUpdate = true;
+            this._cameraDebugLine.geometry.computeBoundingSphere();
+        }
+    }
+
     _animate = () => {
         requestAnimationFrame(this._animate);
 
@@ -1038,6 +1183,7 @@ export class CoreEngine {
 
         this._applyKeyboardNavigation(frameDelta);
         this.controls.update();
+        this._updateCameraDebug();
         const renderStart = perfStats.enabled
             ? ((typeof performance !== 'undefined' && typeof performance.now === 'function') ? performance.now() : Date.now())
             : 0;

@@ -19,6 +19,7 @@
         <button id="pauseBtn" type="button" aria-pressed="false" aria-label="Pause animation" title="Pause animation">⏸︎</button>
         <button id="skipConveyorBtn" type="button" aria-label="Skip attention conveyor" title="Skip attention conveyor" data-visible="false">Skip attention</button>
         <button id="skipToEndBtn" type="button" aria-label="Skip to end of forward pass" title="Skip to end of forward pass" data-visible="true">Skip to end</button>
+        <button id="followModeBtn" type="button" aria-pressed="true" aria-label="Follow mode enabled" title="Follow mode enabled">Follow mode on</button>
         <button id="settingsBtn" type="button" aria-haspopup="dialog" aria-controls="settingsOverlay" title="Settings">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                 <path d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1 1 0 0 0-1.1-.2a1 1 0 0 0-.6.9V20a2 2 0 0 1-4 0v-.1a1 1 0 0 0-.6-.9a1 1 0 0 0-1.1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1 1 0 0 0 .2-1.1a1 1 0 0 0-.9-.6H4a2 2 0 0 1 0-4h.1a1 1 0 0 0 .9-.6a1 1 0 0 0-.2-1.1l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1 1 0 0 0 1.1.2a1 1 0 0 0 .6-.9V4a2 2 0 0 1 4 0v.1a1 1 0 0 0 .6.9a1 1 0 0 0 1.1-.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1 1 0 0 0-.2 1.1a1 1 0 0 0 .9.6H20a2 2 0 0 1 0 4h-.1a1 1 0 0 0-.9.6z"></path>
@@ -106,6 +107,16 @@
                     <label class="toggle-row">
                         <span class="toggle-text">Show equations overlay</span>
                         <input id="toggleEquations" type="checkbox" checked>
+                        <span class="toggle-track" aria-hidden="true"></span>
+                    </label>
+                    <label class="toggle-row">
+                        <span class="toggle-text">Show follow view inspector</span>
+                        <input id="toggleFollowViewInspector" type="checkbox">
+                        <span class="toggle-track" aria-hidden="true"></span>
+                    </label>
+                    <label class="toggle-row">
+                        <span class="toggle-text">Show camera orbit gizmo</span>
+                        <input id="toggleCameraDebug" type="checkbox">
                         <span class="toggle-track" aria-hidden="true"></span>
                     </label>
                     <label class="toggle-row">

@@ -16,6 +16,7 @@ import {
     PRISM_ADD_ANIM_BASE_FLASH_DURATION,
     PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS,
     PRISM_ADD_ANIM_SPEED_MULT,
+    HIDE_INSTANCE_Y_OFFSET,
     setGlobalAnimSpeedMult,
     setPrismAddAnimSpeedMult,
     setSelfAttentionTimeMult,
@@ -45,6 +46,10 @@ const COLOR_LIGHT_YELLOW = new THREE.Color(0xffffff);
 const COLOR_BRIGHT_YELLOW = new THREE.Color(0xffffff);
 
 const TMP_WORLD_POS = new THREE.Vector3();
+const TMP_CENTER_A = new THREE.Vector3();
+const TMP_CENTER_B = new THREE.Vector3();
+const TMP_CENTER_MAT_A = new THREE.Matrix4();
+const TMP_CENTER_MAT_B = new THREE.Matrix4();
 
 /**
  * LayerPipeline orchestrates a single bundle of vectors ("lanes") through an
@@ -78,10 +83,33 @@ export class LayerPipeline extends EventTarget {
         this._forwardPassComplete = false;
 
         this._autoCameraFollow = opts.autoCameraFollow !== false;
+        const smoothAlpha = typeof opts.autoCameraSmoothAlpha === 'number' ? opts.autoCameraSmoothAlpha : 0.14;
+        this._autoCameraSmoothAlpha = Math.min(1, Math.max(0, smoothAlpha));
+        const offsetAlpha = typeof opts.autoCameraOffsetLerpAlpha === 'number' ? opts.autoCameraOffsetLerpAlpha : 0.14;
+        this._autoCameraOffsetLerpAlpha = Math.min(1, Math.max(0, offsetAlpha));
         this._autoCameraCenter = new THREE.Vector3();
         this._autoCameraOffsetScratch = new THREE.Vector3();
         this._autoCameraDesiredCameraOffset = new THREE.Vector3();
         this._autoCameraDesiredTargetOffset = new THREE.Vector3();
+        this._autoCameraCurrentCameraOffset = new THREE.Vector3();
+        this._autoCameraCurrentTargetOffset = new THREE.Vector3();
+        this._autoCameraSmoothedRef = new THREE.Vector3();
+        this._autoCameraSmoothValid = false;
+        this._autoCameraDefaultCameraOffset = new THREE.Vector3();
+        this._autoCameraDefaultTargetOffset = new THREE.Vector3();
+        this._autoCameraMhsaCameraOffset = new THREE.Vector3();
+        this._autoCameraMhsaTargetOffset = new THREE.Vector3();
+        this._autoCameraConcatCameraOffset = new THREE.Vector3();
+        this._autoCameraConcatTargetOffset = new THREE.Vector3();
+        this._autoCameraMhsaOffsetsEnabled = false;
+        this._autoCameraConcatOffsetsEnabled = false;
+        this._autoCameraLnCameraOffset = new THREE.Vector3();
+        this._autoCameraLnTargetOffset = new THREE.Vector3();
+        this._autoCameraTravelCameraOffset = new THREE.Vector3();
+        this._autoCameraTravelTargetOffset = new THREE.Vector3();
+        this._autoCameraLnOffsetsEnabled = false;
+        this._autoCameraTravelOffsetsEnabled = false;
+        this._autoCameraInspectorRef = new THREE.Vector3();
         this._hasAutoCameraOffsets = false;
         this._suppressControlsChange = false;
         this._devMode = !!opts.devMode;
@@ -110,6 +138,55 @@ export class LayerPipeline extends EventTarget {
             engineOpts.cameraFarMargin = approxTowerAllowance;
         }
         this._engine = new CoreEngine(canvas, [], engineOpts);
+
+        const parseVec3 = (value, fallback = null) => {
+            if (value instanceof THREE.Vector3) return value.clone();
+            if (value && typeof value === 'object' && 'x' in value && 'y' in value && 'z' in value) {
+                return new THREE.Vector3(value.x, value.y, value.z);
+            }
+            return fallback ? fallback.clone() : null;
+        };
+
+        const defaultTargetOffset = parseVec3(opts.autoCameraDefaultTargetOffset, new THREE.Vector3(0, 0, 0));
+        const cameraTarget = this._engine?.controls?.target || new THREE.Vector3();
+        const defaultCameraOffset = parseVec3(
+            opts.autoCameraDefaultCameraOffset,
+            this._engine?.camera?.position ? this._engine.camera.position.clone().sub(cameraTarget) : new THREE.Vector3(0, 2000, 16000)
+        );
+        if (defaultTargetOffset) this._autoCameraDefaultTargetOffset.copy(defaultTargetOffset);
+        if (defaultCameraOffset) this._autoCameraDefaultCameraOffset.copy(defaultCameraOffset);
+
+        const mhsaCamOffset = parseVec3(opts.autoCameraMhsaCameraOffset, null);
+        const mhsaTargetOffset = parseVec3(opts.autoCameraMhsaTargetOffset, null);
+        if (mhsaCamOffset && mhsaTargetOffset) {
+            this._autoCameraMhsaCameraOffset.copy(mhsaCamOffset);
+            this._autoCameraMhsaTargetOffset.copy(mhsaTargetOffset);
+            this._autoCameraMhsaOffsetsEnabled = true;
+        }
+
+        const concatCamOffset = parseVec3(opts.autoCameraConcatCameraOffset, null);
+        const concatTargetOffset = parseVec3(opts.autoCameraConcatTargetOffset, null);
+        if (concatCamOffset && concatTargetOffset) {
+            this._autoCameraConcatCameraOffset.copy(concatCamOffset);
+            this._autoCameraConcatTargetOffset.copy(concatTargetOffset);
+            this._autoCameraConcatOffsetsEnabled = true;
+        }
+
+        const lnCamOffset = parseVec3(opts.autoCameraLnCameraOffset, null);
+        const lnTargetOffset = parseVec3(opts.autoCameraLnTargetOffset, null);
+        if (lnCamOffset && lnTargetOffset) {
+            this._autoCameraLnCameraOffset.copy(lnCamOffset);
+            this._autoCameraLnTargetOffset.copy(lnTargetOffset);
+            this._autoCameraLnOffsetsEnabled = true;
+        }
+
+        const travelCamOffset = parseVec3(opts.autoCameraTravelCameraOffset, null);
+        const travelTargetOffset = parseVec3(opts.autoCameraTravelTargetOffset, null);
+        if (travelCamOffset && travelTargetOffset) {
+            this._autoCameraTravelCameraOffset.copy(travelCamOffset);
+            this._autoCameraTravelTargetOffset.copy(travelTargetOffset);
+            this._autoCameraTravelOffsetsEnabled = true;
+        }
 
         if (this._engine?.controls) {
             this._controlsChangeHandler = () => {
@@ -189,11 +266,12 @@ export class LayerPipeline extends EventTarget {
     get engine() { return this._engine; }
 
     /** Enable or disable automatic camera tracking of the active layer. */
-    setAutoCameraFollow(enabled, { immediate = false } = {}) {
+    setAutoCameraFollow(enabled, { immediate = false, resetView = false } = {}) {
         const nextValue = !!enabled;
         if (nextValue === this._autoCameraFollow) {
             if (nextValue) {
                 if (immediate) {
+                    this._updateAutoCameraFollow();
                     this._updateCameraOffsetOverlay();
                 }
             } else {
@@ -202,18 +280,42 @@ export class LayerPipeline extends EventTarget {
             return;
         }
         this._autoCameraFollow = nextValue;
-        this._updateCameraOffsetOverlay();
         if (this._autoCameraFollow) {
+            this._autoCameraSmoothValid = false;
+            if (resetView) {
+                this._setAutoCameraOffsets(
+                    this._autoCameraDefaultCameraOffset,
+                    this._autoCameraDefaultTargetOffset,
+                    { snap: false }
+                );
+            }
+        }
+        if (this._autoCameraFollow) {
+            if (immediate) {
+                this._updateAutoCameraFollow();
+            }
             this._startCameraOverlayLoop();
         } else {
             this._clearAutoCameraOffsets();
             this._stopCameraOverlayLoop();
         }
+        this._updateCameraOffsetOverlay();
     }
 
     /** Check whether automatic camera tracking is enabled. */
     isAutoCameraFollowEnabled() {
         return !!this._autoCameraFollow;
+    }
+
+    /** Get current follow reference position (residual stream center). */
+    getAutoCameraReference() {
+        const ref = this._autoCameraInspectorRef;
+        const info = this._resolveActiveLanePosition(ref);
+        if (!info || info.laneIndex < 0) return null;
+        return {
+            laneIndex: info.laneIndex,
+            position: { x: ref.x, y: ref.y, z: ref.z }
+        };
     }
 
     isSkipToEndActive() {
@@ -935,22 +1037,127 @@ export class LayerPipeline extends EventTarget {
 
         const laneIndex = Math.min(laneCount - 1, Math.floor(laneCount / 2));
         const lane = lanes[laneIndex];
-        const vecGroup = lane?.originalVec?.group;
+        const vec = lane?.originalVec;
+        const vecGroup = vec?.group;
         if (!vecGroup || typeof vecGroup.getWorldPosition !== 'function') {
             return { laneIndex: -1, laneCount };
         }
 
         if (targetVec) {
-            vecGroup.getWorldPosition(targetVec);
+            if (lane?.stopRise && lane?.stopRiseTarget) {
+                const sourceCenter = TMP_CENTER_A;
+                const targetCenter = TMP_CENTER_B;
+                const sourceOk = this._getVectorWorldCenter(vec, sourceCenter);
+                const targetVecRef = this._findVectorByGroup(lane, lane.stopRiseTarget);
+                const targetOk = targetVecRef
+                    ? this._getVectorWorldCenter(targetVecRef, targetCenter)
+                    : this._getGroupWorldPosition(lane.stopRiseTarget, targetCenter);
+
+                if (sourceOk && targetOk) {
+                    const hiddenThreshold = HIDE_INSTANCE_Y_OFFSET * 0.2;
+                    if (sourceCenter.y < hiddenThreshold) {
+                        const lastSource = lane.__followLastSourceVec || (lane.__followLastSourceVec = new THREE.Vector3());
+                        if (!lane.__followLastSourceValid) {
+                            lastSource.copy(targetCenter);
+                            lane.__followLastSourceValid = true;
+                        }
+                        const progress = Math.min(1, (lane.__followHiddenProgress || 0) + 0.12);
+                        lane.__followHiddenProgress = progress;
+                        targetVec.lerpVectors(lastSource, targetCenter, progress);
+                    } else {
+                        lane.__followHiddenProgress = 0;
+                        const lastSource = lane.__followLastSourceVec || (lane.__followLastSourceVec = new THREE.Vector3());
+                        lastSource.copy(sourceCenter);
+                        lane.__followLastSourceValid = true;
+                        targetVec.copy(sourceCenter);
+                    }
+                } else if (sourceOk) {
+                    lane.__followHiddenProgress = 0;
+                    targetVec.copy(sourceCenter);
+                } else if (targetOk) {
+                    targetVec.copy(targetCenter);
+                } else {
+                    vecGroup.getWorldPosition(targetVec);
+                }
+            } else if (!this._getVectorWorldCenter(vec, targetVec)) {
+                if (lane) {
+                    lane.__followHiddenProgress = 0;
+                }
+                vecGroup.getWorldPosition(targetVec);
+            }
         }
 
         return { laneIndex, laneCount };
+    }
+
+    _getGroupWorldPosition(group, out) {
+        if (!group || typeof group.getWorldPosition !== 'function') return false;
+        group.getWorldPosition(out);
+        return Number.isFinite(out.x) && Number.isFinite(out.y) && Number.isFinite(out.z);
+    }
+
+    _getVectorWorldCenter(vec, out) {
+        const vecGroup = vec?.group;
+        const mesh = vec?.mesh;
+        const canSample = mesh && typeof mesh.getMatrixAt === 'function' && vecGroup?.matrixWorld;
+        if (!canSample) {
+            return this._getGroupWorldPosition(vecGroup, out);
+        }
+        const rawLen = Array.isArray(vec.rawData) ? vec.rawData.length : Infinity;
+        const count = Number.isFinite(vec.instanceCount) ? vec.instanceCount : Infinity;
+        const length = Math.max(1, Math.min(rawLen, count));
+        const firstIndex = Math.max(0, Math.floor((length - 1) / 2));
+        const secondIndex = length % 2 === 0 ? Math.min(length - 1, firstIndex + 1) : firstIndex;
+        mesh.getMatrixAt(firstIndex, TMP_CENTER_MAT_A);
+        out.setFromMatrixPosition(TMP_CENTER_MAT_A).applyMatrix4(vecGroup.matrixWorld);
+        if (secondIndex !== firstIndex) {
+            mesh.getMatrixAt(secondIndex, TMP_CENTER_MAT_B);
+            TMP_CENTER_B.setFromMatrixPosition(TMP_CENTER_MAT_B).applyMatrix4(vecGroup.matrixWorld);
+            out.add(TMP_CENTER_B).multiplyScalar(0.5);
+        }
+        return Number.isFinite(out.x) && Number.isFinite(out.y) && Number.isFinite(out.z);
+    }
+
+    _findVectorByGroup(lane, group) {
+        if (!lane || !group) return null;
+        const candidates = [
+            lane.originalVec,
+            lane.dupVec,
+            lane.travellingVec,
+            lane.resultVec,
+            lane.postAdditionVec,
+            lane.movingVecLN2,
+            lane.resultVecLN2,
+            lane.finalVecAfterMlp,
+            lane.addTarget,
+            lane.addTargetLN2,
+            lane.multTarget,
+            lane.multTargetLN2,
+        ];
+        for (let i = 0; i < candidates.length; i++) {
+            const candidate = candidates[i];
+            if (candidate && candidate.group === group) return candidate;
+        }
+        return null;
     }
 
     _clearAutoCameraOffsets() {
         this._hasAutoCameraOffsets = false;
         this._autoCameraDesiredCameraOffset.set(0, 0, 0);
         this._autoCameraDesiredTargetOffset.set(0, 0, 0);
+        this._autoCameraCurrentCameraOffset.set(0, 0, 0);
+        this._autoCameraCurrentTargetOffset.set(0, 0, 0);
+        this._autoCameraSmoothValid = false;
+    }
+
+    _setAutoCameraOffsets(cameraOffset, targetOffset, { snap = false } = {}) {
+        if (cameraOffset) this._autoCameraDesiredCameraOffset.copy(cameraOffset);
+        if (targetOffset) this._autoCameraDesiredTargetOffset.copy(targetOffset);
+        if (snap || !this._hasAutoCameraOffsets) {
+            this._autoCameraCurrentCameraOffset.copy(this._autoCameraDesiredCameraOffset);
+            this._autoCameraCurrentTargetOffset.copy(this._autoCameraDesiredTargetOffset);
+        }
+        this._hasAutoCameraOffsets = true;
     }
 
     _captureAutoCameraOffsets(existingReference = null) {
@@ -982,7 +1189,7 @@ export class LayerPipeline extends EventTarget {
             this._autoCameraDesiredTargetOffset.set(0, 0, 0);
         }
 
-        this._hasAutoCameraOffsets = true;
+        this._setAutoCameraOffsets(this._autoCameraDesiredCameraOffset, this._autoCameraDesiredTargetOffset, { snap: true });
         return true;
     }
 
@@ -1007,11 +1214,27 @@ export class LayerPipeline extends EventTarget {
 
         this._suppressControlsChange = true;
         try {
-            camera.position.copy(reference).add(this._autoCameraDesiredCameraOffset);
+            const camOffset = this._autoCameraCurrentCameraOffset;
+            if (!Number.isFinite(camOffset.x) || !Number.isFinite(camOffset.y) || !Number.isFinite(camOffset.z)) {
+                camOffset.copy(this._autoCameraDesiredCameraOffset);
+            } else if (this._autoCameraOffsetLerpAlpha > 0) {
+                camOffset.lerp(this._autoCameraDesiredCameraOffset, this._autoCameraOffsetLerpAlpha);
+            } else {
+                camOffset.copy(this._autoCameraDesiredCameraOffset);
+            }
+            camera.position.copy(reference).add(camOffset);
 
             const controls = engine.controls;
             if (controls && controls.target) {
-                controls.target.copy(reference).add(this._autoCameraDesiredTargetOffset);
+                const targetOffset = this._autoCameraCurrentTargetOffset;
+                if (!Number.isFinite(targetOffset.x) || !Number.isFinite(targetOffset.y) || !Number.isFinite(targetOffset.z)) {
+                    targetOffset.copy(this._autoCameraDesiredTargetOffset);
+                } else if (this._autoCameraOffsetLerpAlpha > 0) {
+                    targetOffset.lerp(this._autoCameraDesiredTargetOffset, this._autoCameraOffsetLerpAlpha);
+                } else {
+                    targetOffset.copy(this._autoCameraDesiredTargetOffset);
+                }
+                controls.target.copy(reference).add(targetOffset);
                 if (typeof controls.update === 'function') {
                     controls.update();
                 }
@@ -1055,12 +1278,6 @@ export class LayerPipeline extends EventTarget {
             return;
         }
 
-        if (!this._hasAutoCameraOffsets) {
-            this._captureAutoCameraOffsets(reference);
-        }
-
-        this._applyAutoCamera(reference);
-
         const offset = this._autoCameraOffsetScratch;
         offset.copy(camera.position).sub(reference);
         const format = (value) => (Number.isFinite(value) ? value.toFixed(2) : '—');
@@ -1070,12 +1287,115 @@ export class LayerPipeline extends EventTarget {
         overlay.textContent = `Offset vs Residual Lane ${laneLabel}\nΔx: ${format(offset.x)}\nΔy: ${format(offset.y)}\nΔz: ${format(offset.z)}`;
     }
 
+    _resolveAutoCameraViewKey() {
+        const layers = this._layers;
+        if (!Array.isArray(layers) || !layers.length) return 'default';
+        const layerIndex = Math.min(this._currentLayerIdx, layers.length - 1);
+        const layer = layers[layerIndex];
+        const mhsa = layer?.mhsaAnimation;
+        const lanes = Array.isArray(layer?.lanes) ? layer.lanes : [];
+        const laneCount = lanes.length;
+        const laneIndex = laneCount ? Math.min(laneCount - 1, Math.floor(laneCount / 2)) : -1;
+        const lane = laneIndex >= 0 ? lanes[laneIndex] : null;
+        const inLn = !!(lane && (lane.horizPhase === 'insideLN' || lane.ln2Phase === 'insideLN'));
+        const passPhase = mhsa?.mhaPassThroughPhase || 'positioning_mha_vectors';
+        const inTravel = !!(lane && lane.horizPhase === 'travelMHSA'
+            && passPhase === 'positioning_mha_vectors');
+        const finishedHeads = !!(lane && lane.horizPhase === 'finishedHeads');
+        if (!mhsa) {
+            if (inLn) return 'ln';
+            return 'default';
+        }
+
+        if (inLn) {
+            return 'ln';
+        }
+        if (inTravel) {
+            return 'travel';
+        }
+
+        const outputPhase = mhsa.outputProjMatrixAnimationPhase || 'waiting';
+        const rowPhase = mhsa.rowMergePhase || 'not_started';
+        const concatActive = outputPhase === 'vectors_entering'
+            || outputPhase === 'vectors_inside'
+            || ((rowPhase === 'merging' || rowPhase === 'merged') && outputPhase !== 'completed');
+        if (concatActive) {
+            return 'concat';
+        }
+
+        const mhsaGate = rowPhase === 'not_started' && outputPhase === 'waiting';
+        const mhsaActive = mhsaGate && (finishedHeads
+            || passPhase === 'ready_for_parallel_pass_through'
+            || passPhase === 'parallel_pass_through_active'
+            || passPhase === 'mha_pass_through_complete');
+        if (mhsaActive) {
+            return 'mhsa';
+        }
+        return 'default';
+    }
+
+    _applyAutoCameraViewOffsets() {
+        const key = this._resolveAutoCameraViewKey();
+        let camOffset = this._autoCameraDefaultCameraOffset;
+        let targetOffset = this._autoCameraDefaultTargetOffset;
+
+        if (key === 'ln' && this._autoCameraLnOffsetsEnabled) {
+            camOffset = this._autoCameraLnCameraOffset;
+            targetOffset = this._autoCameraLnTargetOffset;
+        } else if (key === 'travel' && this._autoCameraTravelOffsetsEnabled) {
+            camOffset = this._autoCameraTravelCameraOffset;
+            targetOffset = this._autoCameraTravelTargetOffset;
+        } else if (key === 'mhsa' && this._autoCameraMhsaOffsetsEnabled) {
+            camOffset = this._autoCameraMhsaCameraOffset;
+            targetOffset = this._autoCameraMhsaTargetOffset;
+        } else if (key === 'concat' && this._autoCameraConcatOffsetsEnabled) {
+            camOffset = this._autoCameraConcatCameraOffset;
+            targetOffset = this._autoCameraConcatTargetOffset;
+        }
+
+        this._setAutoCameraOffsets(camOffset, targetOffset, { snap: false });
+    }
+
+    _updateAutoCameraFollow() {
+        if (!this._autoCameraFollow) return false;
+        const engine = this._engine;
+        const camera = engine?.camera;
+        if (!camera) return false;
+
+        this._applyAutoCameraViewOffsets();
+
+        const reference = this._autoCameraCenter;
+        const { laneIndex } = this._resolveActiveLanePosition(reference);
+        if (laneIndex < 0 || !Number.isFinite(reference.x) || !Number.isFinite(reference.y) || !Number.isFinite(reference.z)) {
+            this._clearAutoCameraOffsets();
+            return false;
+        }
+
+        let followRef = reference;
+        if (this._autoCameraSmoothAlpha > 0) {
+            if (!this._autoCameraSmoothValid) {
+                this._autoCameraSmoothedRef.copy(reference);
+                this._autoCameraSmoothValid = true;
+            } else {
+                this._autoCameraSmoothedRef.lerp(reference, this._autoCameraSmoothAlpha);
+            }
+            followRef = this._autoCameraSmoothedRef;
+        }
+
+        if (!this._hasAutoCameraOffsets) {
+            this._captureAutoCameraOffsets(followRef);
+        }
+
+        this._applyAutoCamera(followRef);
+        return true;
+    }
+
     _maybeAutoCameraFocus({ immediate = false } = {}) {
-        // Retained for compatibility with existing progress hooks; now only updates the debug overlay.
         if (!this._autoCameraFollow && !immediate) {
             this._updateCameraOffsetOverlay();
             return;
         }
+        this._updateAutoCameraFollow();
         this._updateCameraOffsetOverlay();
     }
 
@@ -1088,6 +1408,7 @@ export class LayerPipeline extends EventTarget {
                 this._stopCameraOverlayLoop();
                 return;
             }
+            this._updateAutoCameraFollow();
             this._updateCameraOffsetOverlay();
             this._cameraOverlayRaf = requestAnimationFrame(tick);
         };
