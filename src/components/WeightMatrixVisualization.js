@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { CSG } from 'three-csg-ts'; // Import CSG
+import { toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { QUALITY_PRESET, NUM_VECTOR_LANES, VECTOR_DEPTH_SPACING, USE_GLB_MATERIALS, USE_INSTANCED_MATRIX_SLICES } from '../utils/constants.js';
 import { createSciFiMaterial, updateSciFiDimensions, updateSciFiMaterialColor } from '../utils/sciFiMaterial.js';
 
@@ -31,7 +32,8 @@ export class WeightMatrixVisualization {
         slitWidth = 0.2,
         slitDepthFactor = 1.0,
         slitBottomWidthFactor = 0.9, // previously `slitWidthFactor`
-        slitTopWidthFactor = null    // allow different top factor; defaults to bottom
+        slitTopWidthFactor = null,    // allow different top factor; defaults to bottom
+        useInstancedSlices = true
     ) {
         this.group = new THREE.Group();
         this.group.position.copy(position);
@@ -48,6 +50,7 @@ export class WeightMatrixVisualization {
         this.slitDepthFactor = Math.max(0, Math.min(1, slitDepthFactor)); // Clamp between 0 and 1
         this.slitBottomWidthFactor = slitBottomWidthFactor; // bottom width factor
         this.slitTopWidthFactor = slitTopWidthFactor !== null ? slitTopWidthFactor : slitBottomWidthFactor; // default to bottom factor
+        this.useInstancedSlices = useInstancedSlices !== false;
 
         this.mesh = null; // Main trapezoid mesh (sides)
         this.frontCapMesh = null; // Front face mesh
@@ -102,7 +105,7 @@ export class WeightMatrixVisualization {
         // the extremely heavy CSG work required for deep geometries and
         // completely sidesteps the need for a matching pre-baked asset.
         // --------------------------------------------------------------
-        const wantsInstancedSlices = USE_INSTANCED_MATRIX_SLICES && this.depth > VECTOR_DEPTH_SPACING * 1.5;
+        const wantsInstancedSlices = USE_INSTANCED_MATRIX_SLICES && this.useInstancedSlices && this.depth > VECTOR_DEPTH_SPACING * 1.5;
         if (wantsInstancedSlices) {
             this._createInstancedSlices();
             return;
@@ -275,13 +278,22 @@ export class WeightMatrixVisualization {
             // Slight inward inset so we never breach the side walls due to numerical issues
             const INSET_X = Math.max(0.1, this.width * 0.001);
 
+            const CORNER_CLEARANCE_FACTOR = 0.35; // 1.0 = full 2*radius clearance
             const makeSlitGeometry = (yTopOfSlit, yBottomOfSlit) => {
-                const dynamicBottomWidth = Math.max(0,
+                let dynamicBottomWidth = Math.max(0,
                     widthAtY(yBottomOfSlit) * this.slitBottomWidthFactor - INSET_X * 2
                 );
-                const dynamicTopWidth = Math.max(0,
+                let dynamicTopWidth = Math.max(0,
                     widthAtY(yTopOfSlit) * this.slitTopWidthFactor - INSET_X * 2
                 );
+                const safeTopWidth = Math.max(0,
+                    widthAtY(yTopOfSlit) - this.cornerRadius * 2 * CORNER_CLEARANCE_FACTOR - INSET_X * 2
+                );
+                const safeBottomWidth = Math.max(0,
+                    widthAtY(yBottomOfSlit) - this.cornerRadius * 2 * CORNER_CLEARANCE_FACTOR - INSET_X * 2
+                );
+                if (safeTopWidth > 0) dynamicTopWidth = Math.min(dynamicTopWidth, safeTopWidth);
+                if (safeBottomWidth > 0) dynamicBottomWidth = Math.min(dynamicBottomWidth, safeBottomWidth);
 
                 if (Math.abs(dynamicBottomWidth - dynamicTopWidth) < 1e-4) {
                     // Simple rectangular slit (top == bottom)
@@ -420,7 +432,50 @@ export class WeightMatrixVisualization {
         // Assign the final CSG result geometry and the material to the main mesh (sides)
         this.mesh = finalMesh;
         this.mesh.material = sideMaterial;
-        this.mesh.geometry.computeVertexNormals();
+        const snapEps = Math.max(1e-3, this.height * 1e-4);
+        const posAttr = this.mesh.geometry.attributes.position;
+        if (posAttr) {
+            for (let i = 0; i < posAttr.count; i++) {
+                const y = posAttr.getY(i);
+                if (Math.abs(y - hh) < snapEps) {
+                    posAttr.setY(i, hh);
+                } else if (Math.abs(y + hh) < snapEps) {
+                    posAttr.setY(i, -hh);
+                }
+            }
+            posAttr.needsUpdate = true;
+        }
+        const creasedGeometry = toCreasedNormals(this.mesh.geometry, Math.PI / 3);
+        const normalAttr = creasedGeometry.attributes.normal;
+        const creasedPos = creasedGeometry.attributes.position;
+        if (normalAttr && creasedPos) {
+            const planeEps = Math.max(1e-3, this.height * 1e-4);
+            const a = new THREE.Vector3();
+            const b = new THREE.Vector3();
+            const c = new THREE.Vector3();
+            for (let i = 0; i < creasedPos.count; i += 3) {
+                a.fromBufferAttribute(creasedPos, i);
+                b.fromBufferAttribute(creasedPos, i + 1);
+                c.fromBufferAttribute(creasedPos, i + 2);
+                const isTop = Math.abs(a.y - hh) < planeEps
+                    && Math.abs(b.y - hh) < planeEps
+                    && Math.abs(c.y - hh) < planeEps;
+                const isBottom = Math.abs(a.y + hh) < planeEps
+                    && Math.abs(b.y + hh) < planeEps
+                    && Math.abs(c.y + hh) < planeEps;
+                if (isTop || isBottom) {
+                    const sign = isTop ? 1 : -1;
+                    normalAttr.setXYZ(i, 0, sign, 0);
+                    normalAttr.setXYZ(i + 1, 0, sign, 0);
+                    normalAttr.setXYZ(i + 2, 0, sign, 0);
+                }
+            }
+            normalAttr.needsUpdate = true;
+        }
+        if (creasedGeometry !== this.mesh.geometry) {
+            this.mesh.geometry.dispose();
+            this.mesh.geometry = creasedGeometry;
+        }
 
         const dt = (performance.now() - t0).toFixed(1);
         console.log(`[Perf] WeightMatrixVisualization (${cacheHit ? 'cache' : 'built'}) – ${dt} ms.`);

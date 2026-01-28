@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { CSG } from 'three-csg-ts';
+import { toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 // A lightweight copy of `WeightMatrixVisualization` that re-uses a *single* geometry
 // instance across *all* objects.  This avoids repeating the very heavy CSG
@@ -129,10 +130,12 @@ export class WeightMatrixVisualizationInstance {
             const hh     = this.height / 2;
 
             let cr = this.cornerRadius;
-            const maxBottomRadius = Math.max(0, hw - hTopW);
+            const horizontalDiff = hw - hTopW;
+            const maxBottomRadius = horizontalDiff > 0 ? horizontalDiff : hw;
+            const maxTopRadius = hTopW;
             const sideLen = Math.hypot(hw - hTopW, this.height);
             const maxSideRadius  = sideLen / 2;
-            cr = Math.min(cr, maxBottomRadius, maxSideRadius);
+            cr = Math.min(cr, maxBottomRadius, maxTopRadius, maxSideRadius);
 
             if (cr < 1e-4) {
                 shape.moveTo(-hw, -hh);
@@ -185,50 +188,123 @@ export class WeightMatrixVisualizationInstance {
             if (this.numberOfSlits > 0 && this.slitWidth > 0) {
                 const slitSpacing = this.depth / (this.numberOfSlits + 1);
                 const cutDepth = this.height * this.slitDepthFactor;
-                const slitBoxHeight = cutDepth + this.cornerRadius * 2 + 0.001;
-                const cutCenterYTop = (this.height / 2) - (slitBoxHeight / 2);
-                const cutCenterYBottom = (-this.height / 2) + (slitBoxHeight / 2);
+                const EPS_CSG = Math.max(0.02, this.height * 0.001);
+                const slitBoxHeight = cutDepth + EPS_CSG * 2;
+                const cutCenterYTop = (this.height / 2 + EPS_CSG) - (slitBoxHeight / 2);
+                const cutCenterYBottom = (-this.height / 2 - EPS_CSG) + (slitBoxHeight / 2);
 
-                const widest = Math.max(this.width, this.width * this.topWidthFactor);
-                const constantBottomWidth = (widest + this.cornerRadius * 2) * this.slitBottomWidthFactor;
-                const constantTopWidth    = (widest + this.cornerRadius * 2) * this.slitTopWidthFactor;
+                const hh = this.height / 2;
+                const shapeBottomWidth = this.width;
+                const shapeTopWidth = this.width * this.topWidthFactor;
+                const widthAtY = (y) => {
+                    const yc = Math.max(-hh, Math.min(hh, y));
+                    const t = (yc + hh) / (2 * hh);
+                    return THREE.MathUtils.lerp(shapeBottomWidth, shapeTopWidth, t);
+                };
+
+                const INSET_X = Math.max(0.1, this.width * 0.001);
+
+                const CORNER_CLEARANCE_FACTOR = 0.35; // 1.0 = full 2*radius clearance
+                const makeSlitGeometry = (yTopOfSlit, yBottomOfSlit) => {
+                    let dynamicBottomWidth = Math.max(0,
+                        widthAtY(yBottomOfSlit) * this.slitBottomWidthFactor - INSET_X * 2
+                    );
+                    let dynamicTopWidth = Math.max(0,
+                        widthAtY(yTopOfSlit) * this.slitTopWidthFactor - INSET_X * 2
+                    );
+                    const safeTopWidth = Math.max(0,
+                        widthAtY(yTopOfSlit) - this.cornerRadius * 2 * CORNER_CLEARANCE_FACTOR - INSET_X * 2
+                    );
+                    const safeBottomWidth = Math.max(0,
+                        widthAtY(yBottomOfSlit) - this.cornerRadius * 2 * CORNER_CLEARANCE_FACTOR - INSET_X * 2
+                    );
+                if (safeTopWidth > 0) dynamicTopWidth = Math.min(dynamicTopWidth, safeTopWidth);
+                if (safeBottomWidth > 0) dynamicBottomWidth = Math.min(dynamicBottomWidth, safeBottomWidth);
+
+                    if (Math.abs(dynamicBottomWidth - dynamicTopWidth) < 1e-4) {
+                        return new THREE.BoxGeometry(dynamicBottomWidth, slitBoxHeight, this.slitWidth);
+                    }
+                    const geom = new THREE.BoxGeometry(dynamicBottomWidth, slitBoxHeight, this.slitWidth, 1, 1, 1);
+                    const posAttr = geom.attributes.position;
+                    const halfH = slitBoxHeight / 2;
+                    for (let v = 0; v < posAttr.count; v++) {
+                        const y = posAttr.getY(v);
+                        const t = (y + halfH) / slitBoxHeight;
+                        const targetWidth = THREE.MathUtils.lerp(dynamicBottomWidth, dynamicTopWidth, t);
+                        const scale = dynamicBottomWidth > 0 ? (targetWidth / dynamicBottomWidth) : 1.0;
+                        posAttr.setX(v, posAttr.getX(v) * scale);
+                    }
+                    posAttr.needsUpdate = true;
+                    geom.computeVertexNormals();
+                    return geom;
+                };
 
                 const useDualCuts = this.slitDepthFactor < 0.95;
                 for (let i = 0; i < this.numberOfSlits; i++) {
                     const zPos = -this.depth / 2 + slitSpacing * (i + 1);
-                    let slitGeometry;
-                    if (Math.abs(constantBottomWidth - constantTopWidth) < 1e-4) {
-                        slitGeometry = new THREE.BoxGeometry(constantBottomWidth, slitBoxHeight, this.slitWidth);
-                    } else {
-                        slitGeometry = new THREE.BoxGeometry(constantBottomWidth, slitBoxHeight, this.slitWidth, 1, 1, 1);
-                        const posAttr = slitGeometry.attributes.position;
-                        const halfH = slitBoxHeight / 2;
-                        for (let v = 0; v < posAttr.count; v++) {
-                            const y = posAttr.getY(v);
-                            const t = (y + halfH) / slitBoxHeight;
-                            const targetWidth = THREE.MathUtils.lerp(constantBottomWidth, constantTopWidth, t);
-                            const scale = targetWidth / constantBottomWidth;
-                            posAttr.setX(v, posAttr.getX(v) * scale);
-                        }
-                        posAttr.needsUpdate = true;
-                        slitGeometry.computeVertexNormals();
-                    }
-                    const slitMeshTop = new THREE.Mesh(slitGeometry);
-                    slitMeshTop.position.set(0, cutCenterYTop, zPos);
+                    const topY = cutCenterYTop;
+                    const yTopOfSlitTop = topY + slitBoxHeight / 2;
+                    const yBottomOfSlitTop = topY - slitBoxHeight / 2;
+                    const slitGeometryTop = makeSlitGeometry(yTopOfSlitTop, yBottomOfSlitTop);
+                    const slitMeshTop = new THREE.Mesh(slitGeometryTop);
+                    slitMeshTop.position.set(0, topY, zPos);
                     slitMeshTop.updateMatrix();
                     baseMesh = CSG.subtract(baseMesh, slitMeshTop);
 
                     if (useDualCuts) {
-                        const slitMeshBottom = new THREE.Mesh(slitGeometry);
-                        slitMeshBottom.position.set(0, cutCenterYBottom, zPos);
+                        const bottomY = cutCenterYBottom;
+                        const yTopOfSlitBottom = bottomY + slitBoxHeight / 2;
+                        const yBottomOfSlitBottom = bottomY - slitBoxHeight / 2;
+                        const slitGeometryBottom = makeSlitGeometry(yTopOfSlitBottom, yBottomOfSlitBottom);
+                        const slitMeshBottom = new THREE.Mesh(slitGeometryBottom);
+                        slitMeshBottom.position.set(0, bottomY, zPos);
                         slitMeshBottom.updateMatrix();
                         baseMesh = CSG.subtract(baseMesh, slitMeshBottom);
                     }
                 }
             }
 
-            baseGeometry = baseMesh.geometry;
-            baseGeometry.computeVertexNormals();
+            const snapEps = Math.max(1e-3, this.height * 1e-4);
+            const hh = this.height / 2;
+            const posAttr = baseMesh.geometry.attributes.position;
+            if (posAttr) {
+                for (let i = 0; i < posAttr.count; i++) {
+                    const y = posAttr.getY(i);
+                    if (Math.abs(y - hh) < snapEps) {
+                        posAttr.setY(i, hh);
+                    } else if (Math.abs(y + hh) < snapEps) {
+                        posAttr.setY(i, -hh);
+                    }
+                }
+                posAttr.needsUpdate = true;
+            }
+            baseGeometry = toCreasedNormals(baseMesh.geometry, Math.PI / 3);
+            const normalAttr = baseGeometry.attributes.normal;
+            const posAttrNormals = baseGeometry.attributes.position;
+            if (normalAttr && posAttrNormals) {
+                const planeEps = Math.max(1e-3, this.height * 1e-4);
+                const a = new THREE.Vector3();
+                const b = new THREE.Vector3();
+                const c = new THREE.Vector3();
+                for (let i = 0; i < posAttrNormals.count; i += 3) {
+                    a.fromBufferAttribute(posAttrNormals, i);
+                    b.fromBufferAttribute(posAttrNormals, i + 1);
+                    c.fromBufferAttribute(posAttrNormals, i + 2);
+                    const isTop = Math.abs(a.y - hh) < planeEps
+                        && Math.abs(b.y - hh) < planeEps
+                        && Math.abs(c.y - hh) < planeEps;
+                    const isBottom = Math.abs(a.y + hh) < planeEps
+                        && Math.abs(b.y + hh) < planeEps
+                        && Math.abs(c.y + hh) < planeEps;
+                    if (isTop || isBottom) {
+                        const sign = isTop ? 1 : -1;
+                        normalAttr.setXYZ(i, 0, sign, 0);
+                        normalAttr.setXYZ(i + 1, 0, sign, 0);
+                        normalAttr.setXYZ(i + 2, 0, sign, 0);
+                    }
+                }
+                normalAttr.needsUpdate = true;
+            }
 
             // cap shape geometry (flat)
             capShapeGeometry = new THREE.ShapeGeometry(shape);

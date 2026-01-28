@@ -221,7 +221,8 @@ export class MHSAAnimation {
                 MHA_MATRIX_PARAMS.width, MHA_MATRIX_PARAMS.height, MHA_MATRIX_PARAMS.depth,
                 MHA_MATRIX_PARAMS.topWidthFactor, MHA_MATRIX_PARAMS.cornerRadius, MHA_MATRIX_PARAMS.numberOfSlits,
                 MHA_MATRIX_PARAMS.slitWidth, MHA_MATRIX_PARAMS.slitDepthFactor,
-                MHA_MATRIX_PARAMS.slitBottomWidthFactor, MHA_MATRIX_PARAMS.slitTopWidthFactor
+                MHA_MATRIX_PARAMS.slitBottomWidthFactor, MHA_MATRIX_PARAMS.slitTopWidthFactor,
+                false
             );
             queryMatrix.setColor(darkGrayColor);
             {
@@ -245,7 +246,8 @@ export class MHSAAnimation {
                 MHA_MATRIX_PARAMS.width, MHA_MATRIX_PARAMS.height, MHA_MATRIX_PARAMS.depth,
                 MHA_MATRIX_PARAMS.topWidthFactor, MHA_MATRIX_PARAMS.cornerRadius, MHA_MATRIX_PARAMS.numberOfSlits,
                 MHA_MATRIX_PARAMS.slitWidth, MHA_MATRIX_PARAMS.slitDepthFactor,
-                MHA_MATRIX_PARAMS.slitBottomWidthFactor, MHA_MATRIX_PARAMS.slitTopWidthFactor
+                MHA_MATRIX_PARAMS.slitBottomWidthFactor, MHA_MATRIX_PARAMS.slitTopWidthFactor,
+                false
             );
             keyMatrix.setColor(darkGrayColor);
             {
@@ -269,7 +271,8 @@ export class MHSAAnimation {
                 MHA_MATRIX_PARAMS.width, MHA_MATRIX_PARAMS.height, MHA_MATRIX_PARAMS.depth,
                 MHA_MATRIX_PARAMS.topWidthFactor, MHA_MATRIX_PARAMS.cornerRadius, MHA_MATRIX_PARAMS.numberOfSlits,
                 MHA_MATRIX_PARAMS.slitWidth, MHA_MATRIX_PARAMS.slitDepthFactor,
-                MHA_MATRIX_PARAMS.slitBottomWidthFactor, MHA_MATRIX_PARAMS.slitTopWidthFactor
+                MHA_MATRIX_PARAMS.slitBottomWidthFactor, MHA_MATRIX_PARAMS.slitTopWidthFactor,
+                false
             );
             valueMatrix.setColor(darkGrayColor);
             {
@@ -321,7 +324,8 @@ export class MHSAAnimation {
             MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitWidth,
             MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitDepthFactor,
             MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitBottomWidthFactor,
-            MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitTopWidthFactor
+            MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitTopWidthFactor,
+            false
         );
 
         // Initialise pitch-black; will brighten once vectors pass through

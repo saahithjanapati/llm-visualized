@@ -81,6 +81,7 @@ export function buildMHAVisuals(parentGroup, {
                 MHA_MATRIX_PARAMS.slitDepthFactor,
                 MHA_MATRIX_PARAMS.slitBottomWidthFactor,
                 MHA_MATRIX_PARAMS.slitTopWidthFactor,
+                false
             );
             mat.setColor(inactiveMatrixColor);
             mat.group.userData.label = label;
@@ -136,6 +137,7 @@ export function buildMHAVisuals(parentGroup, {
         MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitDepthFactor,
         MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitBottomWidthFactor,
         MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitTopWidthFactor,
+        false
     );
 
     const initDarkColor = new THREE.Color(MHSA_MATRIX_INITIAL_RESTING_COLOR);
