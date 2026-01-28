@@ -5,6 +5,7 @@ import { VectorVisualizationInstancedPrism } from '../components/VectorVisualiza
 import { LayerNormalizationVisualization } from '../components/LayerNormalizationVisualization.js';
 import { appState } from '../state/appState.js';
 import { createSciFiMaterial, updateSciFiMaterialColor } from '../utils/sciFiMaterial.js';
+import { mapValueToColor, mapValueToGrayscale } from '../utils/colors.js';
 import {
     MHA_MATRIX_PARAMS,
     MLP_MATRIX_PARAMS_UP,
@@ -59,6 +60,12 @@ const PREVIEW_QKV_IDLE_DURATION = 260;
 const PREVIEW_QKV_LANE_STAGGER = 0;
 const PREVIEW_VECTOR_HEAD_INSTANCES = 1;
 const PREVIEW_VECTOR_BODY_INSTANCES = VECTOR_LENGTH_PRISM;
+const ATTENTION_PREVIEW_MAX_TOKENS = 16;
+const ATTENTION_PREVIEW_TARGET_PX = 320;
+const ATTENTION_PREVIEW_MIN_CELL = 10;
+const ATTENTION_PREVIEW_MAX_CELL = 24;
+const ATTENTION_PREVIEW_GAP = 4;
+const ATTENTION_PREVIEW_TRIANGLE = 'lower';
 
 const TOKEN_CHIP_STYLE = {
     padding: 80,
@@ -148,6 +155,86 @@ function formatActivationData(data) {
     }
     if (data.notes) lines.push(String(data.notes));
     return lines.join('\n');
+}
+
+function colorToCss(color) {
+    if (!color) return 'transparent';
+    const target = color.isColor ? color : new THREE.Color(color);
+    return `#${target.getHexString()}`;
+}
+
+function formatTokenLabelForPreview(label) {
+    if (typeof label !== 'string') return '';
+    return label.replace(/^\u0120/, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function getActivationDataFromSelection(selectionInfo) {
+    return selectionInfo?.info?.activationData
+        || selectionInfo?.object?.userData?.activationData
+        || selectionInfo?.hit?.object?.userData?.activationData
+        || null;
+}
+
+function findUserDataNumber(selectionInfo, key) {
+    const direct = selectionInfo?.info?.[key];
+    if (Number.isFinite(direct)) return direct;
+    const infoActivation = selectionInfo?.info?.activationData?.[key];
+    if (Number.isFinite(infoActivation)) return infoActivation;
+    const candidates = [selectionInfo?.object, selectionInfo?.hit?.object];
+    for (const obj of candidates) {
+        let current = obj;
+        while (current && !current.isScene) {
+            const ud = current.userData;
+            if (ud && Number.isFinite(ud[key])) return ud[key];
+            if (ud?.activationData && Number.isFinite(ud.activationData[key])) return ud.activationData[key];
+            current = current.parent;
+        }
+    }
+    return null;
+}
+
+function resolveAttentionModeFromSelection(selectionInfo) {
+    const stage = getActivationDataFromSelection(selectionInfo)?.stage;
+    if (stage === 'attention.post') return 'post';
+    if (stage === 'attention.pre') return 'pre';
+    return null;
+}
+
+function isSelfAttentionSelection(label, selectionInfo) {
+    const lower = (label || '').toLowerCase();
+    if (isAttentionScoreSelection(label, selectionInfo)) return true;
+    if (selectionInfo?.kind === 'mergedKV') return true;
+    if (lower.includes('query vector') || lower.includes('key vector') || lower.includes('value vector')) return true;
+    if (lower.includes('query weight matrix') || lower.includes('key weight matrix') || lower.includes('value weight matrix')) return true;
+    if (lower.includes('merged key vectors') || lower.includes('merged value vectors')) return true;
+    const stage = getActivationDataFromSelection(selectionInfo)?.stage;
+    if (stage && (stage.startsWith('attention.') || stage.startsWith('qkv.'))) return true;
+    return false;
+}
+
+function computeAttentionCellSize(count) {
+    const safeCount = Math.max(1, Math.floor(count || 1));
+    const size = ATTENTION_PREVIEW_TARGET_PX / safeCount;
+    return Math.max(ATTENTION_PREVIEW_MIN_CELL, Math.min(ATTENTION_PREVIEW_MAX_CELL, size));
+}
+
+function buildAttentionMatrixValues({ activationSource, layerIndex, headIndex, tokenIndices, mode }) {
+    if (!activationSource || !Array.isArray(tokenIndices) || !tokenIndices.length) return null;
+    const values = [];
+    for (let i = 0; i < tokenIndices.length; i += 1) {
+        const queryTokenIndex = tokenIndices[i];
+        const row = activationSource.getAttentionScoresRow
+            ? activationSource.getAttentionScoresRow(layerIndex, mode, headIndex, queryTokenIndex)
+            : null;
+        const rowValues = [];
+        for (let j = 0; j < tokenIndices.length; j += 1) {
+            const keyTokenIndex = tokenIndices[j];
+            const value = Array.isArray(row) ? row[keyTokenIndex] : null;
+            rowValues.push(Number.isFinite(value) ? value : null);
+        }
+        values.push(rowValues);
+    }
+    return values;
 }
 
 function clamp01(value) {
@@ -1259,7 +1346,7 @@ function fitObjectToView(object, camera, options = {}) {
 }
 
 class SelectionPanel {
-    constructor() {
+    constructor(options = {}) {
         this.panel = document.getElementById('detailPanel');
         this.hudPanel = document.getElementById('hudPanel');
         this.title = document.getElementById('detailTitle');
@@ -1268,6 +1355,14 @@ class SelectionPanel {
         this.closeBtn = document.getElementById('detailClose');
         this.canvas = document.getElementById('detailCanvas');
         this.dataEl = document.getElementById('detailData');
+        this.attentionRoot = document.getElementById('detailAttention');
+        this.attentionToggle = document.getElementById('detailAttentionToggle');
+        this.attentionTokensTop = document.getElementById('detailAttentionTokensTop');
+        this.attentionTokensLeft = document.getElementById('detailAttentionTokensLeft');
+        this.attentionMatrix = document.getElementById('detailAttentionMatrix');
+        this.attentionEmpty = document.getElementById('detailAttentionEmpty');
+        this.attentionNote = document.getElementById('detailAttentionNote');
+        this.attentionValue = document.getElementById('detailAttentionValue');
 
         if (!this.panel || !this.canvas || !this.title) {
             this.isReady = false;
@@ -1305,7 +1400,24 @@ class SelectionPanel {
         this._onClosePointerDown = this._onClosePointerDown.bind(this);
         this._onDocumentPointerDown = this._onDocumentPointerDown.bind(this);
         this._blockPreviewGesture = this._blockPreviewGesture.bind(this);
+        this._onAttentionPointerMove = this._onAttentionPointerMove.bind(this);
+        this._clearAttentionHover = this._clearAttentionHover.bind(this);
         this._startLoop();
+
+        this.activationSource = options.activationSource || null;
+        this.laneTokenIndices = Array.isArray(options.laneTokenIndices) ? options.laneTokenIndices.slice() : null;
+        this.tokenLabels = Array.isArray(options.tokenLabels) ? options.tokenLabels.slice() : null;
+        this.maxAttentionTokens = Number.isFinite(options.maxAttentionTokens)
+            ? Math.max(1, Math.floor(options.maxAttentionTokens))
+            : ATTENTION_PREVIEW_MAX_TOKENS;
+        this.attentionMode = this.attentionToggle?.checked ? 'post' : 'pre';
+        this._attentionContext = null;
+        this._attentionTokenElsTop = [];
+        this._attentionTokenElsLeft = [];
+        this._attentionHoverCell = null;
+        this._attentionHoverRow = null;
+        this._attentionHoverCol = null;
+        this._attentionValueDefault = '';
 
         this.closeBtn?.addEventListener('click', () => this.close());
         this.closeBtn?.addEventListener('pointerdown', this._onClosePointerDown);
@@ -1316,6 +1428,16 @@ class SelectionPanel {
         this.canvas.addEventListener('touchstart', this._blockPreviewGesture, { passive: false });
         this.canvas.addEventListener('touchmove', this._blockPreviewGesture, { passive: false });
         this.canvas.addEventListener('touchend', this._blockPreviewGesture, { passive: false });
+        if (this.attentionToggle) {
+            this.attentionToggle.addEventListener('change', () => {
+                this.attentionMode = this.attentionToggle.checked ? 'post' : 'pre';
+                this._renderAttentionPreview();
+            });
+        }
+        if (this.attentionMatrix) {
+            this.attentionMatrix.addEventListener('pointermove', this._onAttentionPointerMove);
+            this.attentionMatrix.addEventListener('pointerleave', this._clearAttentionHover);
+        }
         window.addEventListener('resize', this._onResize);
         document.addEventListener('keydown', this._onKeydown);
         document.addEventListener('pointerdown', this._onDocumentPointerDown, { capture: true });
@@ -1357,6 +1479,253 @@ class SelectionPanel {
         if (!isTouch) return;
         if (event.cancelable) event.preventDefault();
         event.stopPropagation();
+    }
+
+    _setAttentionVisibility(visible) {
+        if (!this.attentionRoot) return;
+        if (visible) {
+            this.attentionRoot.classList.add('is-visible');
+            this.attentionRoot.setAttribute('aria-hidden', 'false');
+        } else {
+            this.attentionRoot.classList.remove('is-visible');
+            this.attentionRoot.setAttribute('aria-hidden', 'true');
+        }
+    }
+
+    _resolveAttentionContext(selection) {
+        const label = selection?.label || '';
+        if (!isSelfAttentionSelection(label, selection)) return null;
+        const headIndex = findUserDataNumber(selection, 'headIndex');
+        const layerIndex = findUserDataNumber(selection, 'layerIndex');
+        if (!Number.isFinite(headIndex) || !Number.isFinite(layerIndex)) return null;
+
+        let tokenIndices = Array.isArray(this.laneTokenIndices) ? this.laneTokenIndices.slice() : null;
+        if (!tokenIndices || !tokenIndices.length) {
+            const tokenCount = this.activationSource && typeof this.activationSource.getTokenCount === 'function'
+                ? this.activationSource.getTokenCount()
+                : 0;
+            const labelCount = Array.isArray(this.tokenLabels) ? this.tokenLabels.length : 0;
+            const fallbackCount = Math.max(
+                0,
+                Math.min(this.maxAttentionTokens, tokenCount || labelCount || this.maxAttentionTokens)
+            );
+            tokenIndices = Array.from({ length: fallbackCount }, (_, idx) => idx);
+        }
+        if (!tokenIndices.length) return null;
+
+        const totalCount = tokenIndices.length;
+        tokenIndices = tokenIndices.slice(0, this.maxAttentionTokens);
+        const trimmed = totalCount > tokenIndices.length;
+
+        const tokenLabels = tokenIndices.map((tokenIndex, idx) => {
+            let labelText = Array.isArray(this.tokenLabels) ? this.tokenLabels[idx] : null;
+            if (!labelText && this.activationSource && typeof this.activationSource.getTokenString === 'function') {
+                labelText = this.activationSource.getTokenString(tokenIndex);
+            }
+            const formatted = formatTokenLabelForPreview(labelText);
+            if (formatted) return formatted;
+            // If capture data exists, keep blanks blank instead of "Token N".
+            if (this.activationSource) return '';
+            return `Token ${tokenIndex + 1}`;
+        });
+
+        return {
+            headIndex,
+            layerIndex,
+            tokenIndices,
+            tokenLabels,
+            trimmed,
+            totalCount,
+            hasSource: !!this.activationSource
+        };
+    }
+
+    _updateAttentionPreview(selection) {
+        if (!this.attentionRoot) return;
+        const context = this._resolveAttentionContext(selection);
+        this._attentionContext = context;
+        const preferredMode = resolveAttentionModeFromSelection(selection);
+        if (preferredMode && preferredMode !== this.attentionMode) {
+            this.attentionMode = preferredMode;
+            if (this.attentionToggle) {
+                this.attentionToggle.checked = preferredMode === 'post';
+            }
+        }
+        this._renderAttentionPreview();
+    }
+
+    _renderAttentionPreview() {
+        if (!this.attentionRoot || !this.attentionMatrix || !this.attentionTokensTop || !this.attentionTokensLeft) return;
+        const context = this._attentionContext;
+        if (!context || !this.activationSource) {
+            this._setAttentionVisibility(false);
+            this._clearAttentionHover();
+            return;
+        }
+
+        const { tokenIndices, tokenLabels, headIndex, layerIndex, trimmed, totalCount, hasSource } = context;
+        const mode = this.attentionMode === 'post' ? 'post' : 'pre';
+        const values = hasSource
+            ? buildAttentionMatrixValues({
+                activationSource: this.activationSource,
+                layerIndex,
+                headIndex,
+                tokenIndices,
+                mode
+            })
+            : null;
+
+        this._setAttentionVisibility(true);
+        if (this.attentionEmpty) this.attentionEmpty.style.display = 'none';
+        if (this.attentionNote) {
+            if (!hasSource) {
+                this.attentionNote.textContent = 'Attention scores unavailable (no capture loaded).';
+            } else {
+                this.attentionNote.textContent = trimmed
+                    ? `Showing first ${tokenIndices.length} of ${totalCount} tokens`
+                    : '';
+            }
+        }
+        if (this.attentionValue) {
+            this._attentionValueDefault = hasSource
+                ? 'Hover a square to see its score.'
+                : '';
+            this.attentionValue.textContent = this._attentionValueDefault;
+        }
+
+        const count = tokenIndices.length;
+        const cellSize = computeAttentionCellSize(count);
+        const gap = ATTENTION_PREVIEW_GAP;
+
+        this.attentionRoot.style.setProperty('--cell-size', `${cellSize}px`);
+        this.attentionRoot.style.setProperty('--cell-gap', `${gap}px`);
+        this.attentionTokensTop.style.gridTemplateColumns = `repeat(${count}, ${cellSize}px)`;
+        this.attentionTokensTop.style.gap = `${gap}px`;
+        this.attentionTokensLeft.style.gridTemplateRows = `repeat(${count}, ${cellSize}px)`;
+        this.attentionTokensLeft.style.gap = `${gap}px`;
+        this.attentionMatrix.style.gridTemplateColumns = `repeat(${count}, ${cellSize}px)`;
+        this.attentionMatrix.style.gridTemplateRows = `repeat(${count}, ${cellSize}px)`;
+        this.attentionMatrix.style.gap = `${gap}px`;
+
+        this._attentionTokenElsTop = [];
+        this._attentionTokenElsLeft = [];
+
+        this.attentionTokensTop.innerHTML = '';
+        this.attentionTokensLeft.innerHTML = '';
+        this.attentionMatrix.innerHTML = '';
+
+        const topFrag = document.createDocumentFragment();
+        const leftFrag = document.createDocumentFragment();
+        const matrixFrag = document.createDocumentFragment();
+
+        for (let i = 0; i < count; i += 1) {
+            const topToken = document.createElement('div');
+            topToken.className = 'attention-token attention-token-top';
+            topToken.textContent = tokenLabels[i];
+            topToken.title = tokenLabels[i];
+            topFrag.appendChild(topToken);
+            this._attentionTokenElsTop.push(topToken);
+
+            const leftToken = document.createElement('div');
+            leftToken.className = 'attention-token attention-token-left';
+            leftToken.textContent = tokenLabels[i];
+            leftToken.title = tokenLabels[i];
+            leftFrag.appendChild(leftToken);
+            this._attentionTokenElsLeft.push(leftToken);
+        }
+
+        let hasAnyValue = false;
+        for (let row = 0; row < count; row += 1) {
+            for (let col = 0; col < count; col += 1) {
+                const cell = document.createElement('div');
+                cell.className = 'attention-cell';
+                cell.dataset.row = String(row);
+                cell.dataset.col = String(col);
+                const isVisible = ATTENTION_PREVIEW_TRIANGLE === 'upper'
+                    ? col >= row
+                    : col <= row;
+                const value = values ? values[row]?.[col] : null;
+                if (!isVisible || value === null) {
+                    cell.classList.add('is-empty');
+                } else {
+                    const color = mode === 'post' ? mapValueToGrayscale(value) : mapValueToColor(value);
+                    cell.style.backgroundColor = colorToCss(color);
+                    cell.title = `${tokenLabels[row]} → ${tokenLabels[col]} (${mode === 'post' ? 'post' : 'pre'}): ${value.toFixed(4)}`;
+                    cell.dataset.value = String(value);
+                    cell.dataset.rowLabel = tokenLabels[row] || '';
+                    cell.dataset.colLabel = tokenLabels[col] || '';
+                    hasAnyValue = true;
+                }
+                matrixFrag.appendChild(cell);
+            }
+        }
+
+        this.attentionTokensTop.appendChild(topFrag);
+        this.attentionTokensLeft.appendChild(leftFrag);
+        this.attentionMatrix.appendChild(matrixFrag);
+        if (this.attentionEmpty) {
+            this.attentionEmpty.style.display = hasAnyValue ? 'none' : 'block';
+        }
+        this._clearAttentionHover();
+    }
+
+    _onAttentionPointerMove(event) {
+        const target = event.target;
+        const cell = target && typeof target.closest === 'function'
+            ? target.closest('.attention-cell')
+            : null;
+        if (!cell || !this.attentionMatrix || !this.attentionMatrix.contains(cell)) {
+            this._clearAttentionHover();
+            return;
+        }
+        if (cell.classList.contains('is-empty')) {
+            this._clearAttentionHover();
+            return;
+        }
+        const row = Number(cell.dataset.row);
+        const col = Number(cell.dataset.col);
+        if (row === this._attentionHoverRow && col === this._attentionHoverCol) return;
+
+        this._clearAttentionHover();
+        this._attentionHoverCell = cell;
+        this._attentionHoverRow = row;
+        this._attentionHoverCol = col;
+        cell.classList.add('is-hovered');
+        const leftToken = this._attentionTokenElsLeft[row];
+        const topToken = this._attentionTokenElsTop[col];
+        if (leftToken) leftToken.classList.add('is-highlighted');
+        if (topToken) topToken.classList.add('is-highlighted');
+        if (this.attentionValue) {
+            const rawValue = cell.dataset.value;
+            const valueNum = Number(rawValue);
+            const rowLabel = cell.dataset.rowLabel || '';
+            const colLabel = cell.dataset.colLabel || '';
+            const label = rowLabel || colLabel
+                ? `${rowLabel || 'Token'} → ${colLabel || 'Token'}`
+                : 'Score';
+            const scoreText = Number.isFinite(valueNum) ? valueNum.toFixed(4) : String(rawValue || '');
+            this.attentionValue.textContent = `${label}: ${scoreText}`;
+        }
+    }
+
+    _clearAttentionHover() {
+        if (this._attentionHoverCell) {
+            this._attentionHoverCell.classList.remove('is-hovered');
+        }
+        if (Number.isFinite(this._attentionHoverRow)) {
+            const leftToken = this._attentionTokenElsLeft[this._attentionHoverRow];
+            if (leftToken) leftToken.classList.remove('is-highlighted');
+        }
+        if (Number.isFinite(this._attentionHoverCol)) {
+            const topToken = this._attentionTokenElsTop[this._attentionHoverCol];
+            if (topToken) topToken.classList.remove('is-highlighted');
+        }
+        this._attentionHoverCell = null;
+        this._attentionHoverRow = null;
+        this._attentionHoverCol = null;
+        if (this.attentionValue) {
+            this.attentionValue.textContent = this._attentionValueDefault || '';
+        }
     }
 
     _onDocumentPointerDown(event) {
@@ -1482,13 +1851,14 @@ class SelectionPanel {
         }
         this.scene.add(this.currentPreview);
 
+        this._updateAttentionPreview(selection);
         this.open();
     }
 }
 
-export function initSelectionPanel() {
+export function initSelectionPanel(options = {}) {
     requestTokenChipFont();
-    const panel = new SelectionPanel();
+    const panel = new SelectionPanel(options);
     if (!panel.isReady) {
         return { handleSelection: () => {}, close: () => {} };
     }

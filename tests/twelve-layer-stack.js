@@ -1124,7 +1124,11 @@ window.addEventListener('pointerdown', (event) => {
     }
 }, { passive: true });
 
-const selectionPanel = initSelectionPanel();
+const selectionPanel = initSelectionPanel({
+    activationSource,
+    laneTokenIndices,
+    tokenLabels: tokenLabelsFromCapture
+});
 if (pipeline.engine && typeof pipeline.engine.setRaycastSelectionHandler === 'function') {
     pipeline.engine.setRaycastSelectionHandler(selection => {
         if (!selection || !selection.label) {

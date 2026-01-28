@@ -146,6 +146,7 @@ export default class Gpt2Layer extends BaseLayer {
 
         this.raycastRoot = new THREE.Group();
         this.raycastRoot.name = `Layer${this.index}_RaycastRoot`;
+        this.raycastRoot.userData.layerIndex = this.index;
         this.root.add(this.raycastRoot);
 
         const offsetX = BRANCH_X; // all branched components share this X

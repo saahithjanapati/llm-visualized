@@ -177,6 +177,15 @@ export function animateVectorMatrixPassThrough(
                 vector = smallVec; // continue animating this handle
                 // Preserve metadata such as headIndex for downstream alignment
                 vector.userData = heavyVec.userData ? { ...heavyVec.userData } : {};
+                if (vector.group) {
+                    vector.group.userData = vector.group.userData || {};
+                    if (Number.isFinite(vector.userData?.headIndex)) {
+                        vector.group.userData.headIndex = vector.userData.headIndex;
+                    }
+                    if (Number.isFinite(ctx?.layerIndex)) {
+                        vector.group.userData.layerIndex = ctx.layerIndex;
+                    }
+                }
                 // Preserve and refine hover label for clarity
                 try {
                     const cat = vectorCategory === 'K' ? 'Key Vector (Green)'

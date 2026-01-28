@@ -51,6 +51,25 @@
             <div class="detail-preview">
                 <canvas id="detailCanvas"></canvas>
             </div>
+            <div id="detailAttention" class="detail-attention" aria-hidden="true">
+                <div class="detail-attention-header">
+                    <div class="detail-attention-title">Attention scores</div>
+                    <label class="toggle-row detail-attention-toggle">
+                        <span class="toggle-text">Post-softmax</span>
+                        <input id="detailAttentionToggle" type="checkbox" />
+                        <span class="toggle-track" aria-hidden="true"></span>
+                    </label>
+                </div>
+                <div class="detail-attention-grid">
+                    <div class="attention-corner"></div>
+                    <div id="detailAttentionTokensTop" class="attention-tokens attention-tokens-top"></div>
+                    <div id="detailAttentionTokensLeft" class="attention-tokens attention-tokens-left"></div>
+                    <div id="detailAttentionMatrix" class="attention-matrix"></div>
+                </div>
+                <div id="detailAttentionEmpty" class="attention-empty">No attention scores available.</div>
+                <div id="detailAttentionNote" class="attention-note"></div>
+                <div id="detailAttentionValue" class="attention-value"></div>
+            </div>
             <div class="detail-meta">
                 <div class="detail-row">
                     <span class="detail-label">Parameters</span>

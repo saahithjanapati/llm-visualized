@@ -175,6 +175,12 @@ export class VectorRouter {
                             qVec.userData = qVec.userData || {};
                             qVec.userData.trail = qTrail;
                             Object.assign(qVec.userData, { headIndex: hIdx, parentLane: lane });
+                            qVec.group.userData = qVec.group.userData || {};
+                            qVec.group.userData.headIndex = hIdx;
+                            const parentLayerIndex = Number.isFinite(this.parentGroup?.userData?.layerIndex)
+                                ? this.parentGroup.userData.layerIndex
+                                : null;
+                            if (Number.isFinite(parentLayerIndex)) qVec.group.userData.layerIndex = parentLayerIndex;
                             try {
                                 const lblQ = `Query Vector (Blue)`;
                                 qVec.group.userData.label = lblQ;
@@ -194,6 +200,12 @@ export class VectorRouter {
                             vVec.userData = vVec.userData || {};
                             vVec.userData.trail = vTrail;
                             Object.assign(vVec.userData, { headIndex: hIdx, parentLane: lane });
+                            vVec.group.userData = vVec.group.userData || {};
+                            vVec.group.userData.headIndex = hIdx;
+                            const parentLayerIndexV = Number.isFinite(this.parentGroup?.userData?.layerIndex)
+                                ? this.parentGroup.userData.layerIndex
+                                : null;
+                            if (Number.isFinite(parentLayerIndexV)) vVec.group.userData.layerIndex = parentLayerIndexV;
                             try {
                                 const lblV = `Value Vector (Orange)`;
                                 vVec.group.userData.label = lblV;
@@ -278,6 +290,12 @@ export class VectorRouter {
             sideSpawnTime: 0,
             parentLane: lane,
         });
+        upVec.group.userData = upVec.group.userData || {};
+        upVec.group.userData.headIndex = targetHeadIdx;
+        const parentLayerIndex = Number.isFinite(this.parentGroup?.userData?.layerIndex)
+            ? this.parentGroup.userData.layerIndex
+            : null;
+        if (Number.isFinite(parentLayerIndex)) upVec.group.userData.layerIndex = parentLayerIndex;
 
         try {
             const lbl = `Key Vector (Green)`;

@@ -34,6 +34,7 @@ export function buildMHAVisuals(parentGroup, {
     branchX = 0,
     mhsaBaseY = 0,
     matrixRestingOpacity = 1.0,
+    layerIndex = null,
 } = {}) {
     const mhaVisualizations = [];
     const headsCentersX      = [];
@@ -92,7 +93,7 @@ export function buildMHAVisuals(parentGroup, {
         const x_k = currentHeadSetX + MHA_INTERNAL_MATRIX_SPACING;
         const x_v = currentHeadSetX + MHA_INTERNAL_MATRIX_SPACING * 2;
 
-        const buildMatrix = (xPos, label) => {
+        const buildMatrix = (xPos, label, headIndex) => {
             const mat = new WeightMatrixVisualization(
                 null,
                 new THREE.Vector3(xPos, matrixCenterY, 0),
@@ -109,9 +110,23 @@ export function buildMHAVisuals(parentGroup, {
             );
             mat.setColor(inactiveMatrixColor);
             mat.group.userData.label = label;
+            mat.group.userData.headIndex = headIndex;
+            if (Number.isFinite(layerIndex)) mat.group.userData.layerIndex = layerIndex;
             if (mat.mesh)         mat.mesh.userData.label        = label;
-            if (mat.frontCapMesh) mat.frontCapMesh.userData.label = label;
-            if (mat.backCapMesh)  mat.backCapMesh.userData.label  = label;
+            if (mat.mesh) {
+                mat.mesh.userData.headIndex = headIndex;
+                if (Number.isFinite(layerIndex)) mat.mesh.userData.layerIndex = layerIndex;
+            }
+            if (mat.frontCapMesh) {
+                mat.frontCapMesh.userData.label = label;
+                mat.frontCapMesh.userData.headIndex = headIndex;
+                if (Number.isFinite(layerIndex)) mat.frontCapMesh.userData.layerIndex = layerIndex;
+            }
+            if (mat.backCapMesh)  {
+                mat.backCapMesh.userData.label  = label;
+                mat.backCapMesh.userData.headIndex = headIndex;
+                if (Number.isFinite(layerIndex)) mat.backCapMesh.userData.layerIndex = layerIndex;
+            }
 
             // Make heavy matrix materials opaque by default when fully opaque to avoid sorting
             const wantsTransparency = matrixRestingOpacity < 1.0;
@@ -126,9 +141,9 @@ export function buildMHAVisuals(parentGroup, {
             return mat;
         };
 
-        const qMatrix = buildMatrix(x_q, 'Query Weight Matrix');
-        const kMatrix = buildMatrix(x_k, 'Key Weight Matrix');
-        const vMatrix = buildMatrix(x_v, 'Value Weight Matrix');
+        const qMatrix = buildMatrix(x_q, 'Query Weight Matrix', i);
+        const kMatrix = buildMatrix(x_k, 'Key Weight Matrix', i);
+        const vMatrix = buildMatrix(x_v, 'Value Weight Matrix', i);
 
         tuneInactiveMatrix(qMatrix);
         tuneInactiveMatrix(kMatrix);

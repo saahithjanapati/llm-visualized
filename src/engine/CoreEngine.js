@@ -124,6 +124,7 @@ export class CoreEngine {
         this._lastPointerX = null;
         this._lastPointerY = null;
         this._raycastSelectionHandler = null;
+        this._raycastHoverHandler = null;
         this._hoveringClickable = false;
         this._hoverLabelsEnabled = true;
         this._clickTapData = null;
@@ -336,6 +337,7 @@ export class CoreEngine {
         }
         if (!this._raycastingEnabled) {
             this._setCanvasCursor(false);
+            if (this._raycastHoverHandler) this._raycastHoverHandler(null);
         }
     }
 
@@ -369,6 +371,14 @@ export class CoreEngine {
     /** Register a handler for click/tap selection via raycasting. */
     setRaycastSelectionHandler(handler) {
         this._raycastSelectionHandler = (typeof handler === 'function') ? handler : null;
+    }
+
+    /** Register a handler for hover updates via raycasting. */
+    setRaycastHoverHandler(handler) {
+        this._raycastHoverHandler = (typeof handler === 'function') ? handler : null;
+        if (!this._raycastHoverHandler && this._hoverLabelDiv) {
+            this._hoverLabelDiv.style.display = 'none';
+        }
     }
 
     /**
@@ -859,6 +869,7 @@ export class CoreEngine {
         if (!enabled) {
             if (this._hoverLabelDiv) this._hoverLabelDiv.style.display = 'none';
             this._setCanvasCursor(false);
+            if (this._raycastHoverHandler) this._raycastHoverHandler(null);
         }
     }
 

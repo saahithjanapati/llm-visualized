@@ -113,6 +113,7 @@ export class MHSAAnimation {
             branchX: this.branchX,
             mhsaBaseY: this.mhsaBaseY,
             matrixRestingOpacity: 1.0, // retains original behaviour
+            layerIndex: this.layerIndex,
         });
 
         this.mhaVisualizations           = visuals.mhaVisualizations;
@@ -1002,6 +1003,9 @@ export class MHSAAnimation {
         // Assign descriptive label so hover shows full text for merged groups
         group.userData.label = (category === 'V') ? 'Merged Value Vectors (Orange)' : 'Merged Key Vectors (Green)';
         group.userData.isVector = true;
+        if (Number.isFinite(this.layerIndex)) {
+            group.userData.layerIndex = this.layerIndex;
+        }
         const mergedKVMeta = {
             category,
             vectorPrismCount: vectorLength,
@@ -1014,6 +1018,9 @@ export class MHSAAnimation {
         // Also set label on mesh for direct hits
         instanced.userData.label = (category === 'V') ? 'Merged Value Vectors (Orange)' : 'Merged Key Vectors (Green)';
         instanced.userData.isVector = true;
+        if (Number.isFinite(this.layerIndex)) {
+            instanced.userData.layerIndex = this.layerIndex;
+        }
         return group;
     }
 

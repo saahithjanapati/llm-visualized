@@ -520,6 +520,150 @@ button { touch-action: manipulation; }
     user-select: none;
 }
 
+.detail-attention {
+    margin: 0 12px;
+    padding: 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.04);
+    display: none;
+    flex-direction: column;
+    gap: 10px;
+}
+.detail-attention.is-visible { display: flex; }
+.detail-attention-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+.detail-attention-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: #9aa3af;
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+}
+.detail-attention-toggle {
+    padding: 6px 8px;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.03);
+    font-size: 12px;
+    min-width: 140px;
+}
+.detail-attention-toggle .toggle-text { font-size: 12px; }
+
+.detail-attention-grid {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    grid-template-rows: auto 1fr;
+    gap: 8px;
+    align-items: start;
+    justify-content: center;
+    overflow: visible;
+}
+.attention-corner {
+    width: 6px;
+    height: 6px;
+}
+.attention-tokens {
+    display: grid;
+    align-items: center;
+    justify-items: center;
+    gap: var(--cell-gap, 4px);
+    color: #9aa3af;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+.attention-tokens-top {
+    overflow-x: auto;
+    overflow-y: visible;
+    padding-bottom: 18px;
+    padding-top: 6px;
+    min-height: calc(var(--cell-size, 18px) * 2.2);
+    align-items: end;
+    justify-self: center;
+    width: max-content;
+    max-width: 100%;
+}
+.attention-tokens-left {
+    overflow-y: auto;
+    padding-right: 4px;
+}
+.attention-token {
+    font-size: 10px;
+    line-height: 1.1;
+    text-align: center;
+    white-space: nowrap;
+    overflow: visible;
+    text-overflow: clip;
+    max-width: none;
+    width: var(--cell-size, 18px);
+    height: var(--cell-size, 18px);
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    transition: color .12s ease, text-shadow .12s ease;
+}
+.attention-token-top {
+    transform: rotate(-35deg);
+    transform-origin: center bottom;
+    text-align: center;
+}
+.attention-token.is-highlighted {
+    color: #ffffff;
+    text-shadow: 0 0 8px rgba(123,220,255,0.7);
+}
+.attention-matrix {
+    display: grid;
+    align-items: center;
+    justify-items: center;
+    gap: var(--cell-gap, 4px);
+    justify-self: center;
+    width: max-content;
+    max-width: 100%;
+    overflow-x: auto;
+}
+.attention-cell {
+    width: var(--cell-size, 18px);
+    height: var(--cell-size, 18px);
+    border-radius: 6px;
+    background: rgba(255,255,255,0.08);
+    transition: transform .12s ease, box-shadow .12s ease, filter .12s ease;
+    cursor: pointer;
+}
+.attention-cell.is-empty {
+    background: rgba(255,255,255,0.04);
+    opacity: 0.35;
+    pointer-events: none;
+}
+.attention-cell.is-hovered {
+    transform: scale(1.08);
+    z-index: 2;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.5), 0 8px 14px rgba(0,0,0,0.45);
+    filter: brightness(1.1);
+}
+.attention-empty {
+    font-size: 12px;
+    color: #9aa3af;
+    display: none;
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+}
+.attention-note {
+    font-size: 11px;
+    color: #7f8794;
+    min-height: 12px;
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+    text-align: center;
+}
+.attention-value {
+    font-size: 12px;
+    color: #e7e9ee;
+    min-height: 14px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    text-align: center;
+}
+
 .detail-meta {
     padding: 0 16px;
     display: grid;
@@ -591,6 +735,11 @@ button { touch-action: manipulation; }
     #equationsPanel { max-height: 30vh; }
     #equationsPanel .eq-body { font-size: 13px; }
     .detail-preview { min-height: 180px; }
+    .detail-attention { margin: 0 8px; padding: 10px; }
+    .attention-token { font-size: 9px; }
+    .attention-token-top { transform: rotate(-40deg); }
+    .attention-tokens-top { min-height: calc(var(--cell-size, 16px) * 2.4); }
+    .attention-value { font-size: 11px; }
 }
 @media (max-height: 560px) {
     #equationsPanel { max-height: 28vh; }
