@@ -292,8 +292,9 @@ export const LN_NORM_START_FRACTION_FROM_BOTTOM = 0.25;
 // Lane slits inside weight matrices (shallow cuts keep top holes without side dashes).
 export const SHOW_LANE_SLITS = true;
 const LANE_SLIT_WIDTH = SHOW_LANE_SLITS ? 20 : 0;
-const MHA_SLIT_DEPTH_FACTOR = SHOW_LANE_SLITS ? 1.0 : 0;
 const LANE_SLIT_DEPTH_FACTOR = SHOW_LANE_SLITS ? 0.3 : 0;
+// Keep MHA slits shallow so top openings read clean without side-wall dashes.
+const MHA_SLIT_DEPTH_FACTOR = SHOW_LANE_SLITS ? LANE_SLIT_DEPTH_FACTOR : 0;
 const MLP_STYLE_SLIT_WIDTH = SHOW_LANE_SLITS ? 5 : 0;
 const MLP_STYLE_SLIT_DEPTH_FACTOR = SHOW_LANE_SLITS ? 0.3 : 0;
 

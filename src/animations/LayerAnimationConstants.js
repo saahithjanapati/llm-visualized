@@ -67,7 +67,8 @@ export const MHA_MATRIX_PARAMS = {
     // Dynamically match the current lane count
     numberOfSlits: NUM_VECTOR_LANES, // matches vector lanes
     slitWidth: 8,
-    slitDepthFactor: 1.0,
+    // Keep slits shallow to avoid visible side dashes around the openings.
+    slitDepthFactor: 0.3,
     slitBottomWidthFactor: 0.95,
     slitTopWidthFactor: 0.90
 };
@@ -97,7 +98,8 @@ export const MLP_MATRIX_STYLE_PARAMS = {
     cornerRadius: 1.0,
     // numberOfSlits will be VECTOR_LENGTH for the d_model side, and VECTOR_LENGTH * MLP_VECTOR_MULTIPLIER for the 4*d_model side
     slitWidth: 3,
-    slitDepthFactor: 1.0,
+    // Match the shallow slit cut used in the main constants.
+    slitDepthFactor: 0.3,
     slitBottomWidthFactor: 0.9,
     slitTopWidthFactor: 0.5
 };
