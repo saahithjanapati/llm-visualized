@@ -1180,6 +1180,7 @@ export class LayerPipeline extends EventTarget {
         if (!canSample) {
             return this._getGroupWorldPosition(vecGroup, out);
         }
+        const hideThreshold = HIDE_INSTANCE_Y_OFFSET * 0.5;
         const rawLen = Array.isArray(vec.rawData) ? vec.rawData.length : Infinity;
         const count = Number.isFinite(vec.instanceCount) ? vec.instanceCount : Infinity;
         const length = Math.max(1, Math.min(rawLen, count));
@@ -1187,9 +1188,15 @@ export class LayerPipeline extends EventTarget {
         const secondIndex = length % 2 === 0 ? Math.min(length - 1, firstIndex + 1) : firstIndex;
         mesh.getMatrixAt(firstIndex, TMP_CENTER_MAT_A);
         out.setFromMatrixPosition(TMP_CENTER_MAT_A).applyMatrix4(vecGroup.matrixWorld);
+        if (!Number.isFinite(out.y) || out.y <= hideThreshold) {
+            return this._getGroupWorldPosition(vecGroup, out);
+        }
         if (secondIndex !== firstIndex) {
             mesh.getMatrixAt(secondIndex, TMP_CENTER_MAT_B);
             TMP_CENTER_B.setFromMatrixPosition(TMP_CENTER_MAT_B).applyMatrix4(vecGroup.matrixWorld);
+            if (!Number.isFinite(TMP_CENTER_B.y) || TMP_CENTER_B.y <= hideThreshold) {
+                return this._getGroupWorldPosition(vecGroup, out);
+            }
             out.add(TMP_CENTER_B).multiplyScalar(0.5);
         }
         return Number.isFinite(out.x) && Number.isFinite(out.y) && Number.isFinite(out.z);
