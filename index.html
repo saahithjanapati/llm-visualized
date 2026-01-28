@@ -17,7 +17,13 @@
     <!-- Top-right controls -->
     <div id="topControls">
         <button id="pauseBtn" type="button" aria-pressed="false" aria-label="Pause animation" title="Pause animation">Pause</button>
-        <button id="skipConveyorBtn" type="button" aria-label="Skip attention conveyor" title="Skip attention conveyor" data-visible="false">Skip attention</button>
+        <div id="skipMenu" data-open="false" data-visible="true">
+            <button id="skipMenuToggle" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Skip options" title="Skip options">Skip</button>
+            <div id="skipMenuItems" role="menu" aria-label="Skip options">
+                <button id="skipConveyorBtn" type="button" role="menuitem" aria-label="Skip attention conveyor" title="Skip attention conveyor" data-visible="false">Skip attention</button>
+                <button id="skipToEndBtn" type="button" role="menuitem" aria-label="Skip to end of forward pass" title="Skip to end of forward pass" data-visible="true">Skip to end</button>
+            </div>
+        </div>
         <button id="followModeBtn" type="button" aria-pressed="true" aria-label="Follow mode enabled" title="Follow mode enabled">Follow mode on</button>
         <button id="settingsBtn" type="button" aria-haspopup="dialog" aria-controls="settingsOverlay" title="Settings">⚙️</button>
     </div>

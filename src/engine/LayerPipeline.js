@@ -95,6 +95,9 @@ export class LayerPipeline extends EventTarget {
         this._autoCameraShiftMaxTravelX = travelShiftX;
         const mhsaShiftX = typeof opts.autoCameraMhsaMobileShiftX === 'number' ? opts.autoCameraMhsaMobileShiftX : 0;
         this._autoCameraShiftMaxMhsaX = mhsaShiftX;
+        this._autoCameraTravelMobileOverrideCameraOffset = null;
+        this._autoCameraTravelMobileOverrideTargetOffset = null;
+        this._autoCameraTravelMobileOverrideEnabled = false;
         this._autoCameraScaleMinWidth = Number.isFinite(opts.autoCameraScaleMinWidth)
             ? Math.max(200, opts.autoCameraScaleMinWidth)
             : 360;
@@ -173,6 +176,15 @@ export class LayerPipeline extends EventTarget {
             return fallback ? fallback.clone() : null;
         };
 
+        this._overviewCameraPosition = parseVec3(
+            (opts.skipToEndCameraPosition ?? opts.cameraPosition) ?? null,
+            null
+        );
+        this._overviewCameraTarget = parseVec3(
+            (opts.skipToEndCameraTarget ?? opts.cameraTarget) ?? null,
+            null
+        );
+
         const defaultTargetOffset = parseVec3(opts.autoCameraDefaultTargetOffset, new THREE.Vector3(0, 0, 0));
         const cameraTarget = this._engine?.controls?.target || new THREE.Vector3();
         const defaultCameraOffset = parseVec3(
@@ -212,6 +224,13 @@ export class LayerPipeline extends EventTarget {
             this._autoCameraTravelCameraOffsetBase.copy(travelCamOffset);
             this._autoCameraTravelTargetOffsetBase.copy(travelTargetOffset);
             this._autoCameraTravelOffsetsEnabled = true;
+        }
+        const travelMobileCamOffset = parseVec3(opts.autoCameraTravelMobileCameraOffset, null);
+        const travelMobileTargetOffset = parseVec3(opts.autoCameraTravelMobileTargetOffset, null);
+        if (travelMobileCamOffset && travelMobileTargetOffset) {
+            this._autoCameraTravelMobileOverrideCameraOffset = travelMobileCamOffset;
+            this._autoCameraTravelMobileOverrideTargetOffset = travelMobileTargetOffset;
+            this._autoCameraTravelMobileOverrideEnabled = true;
         }
 
         this._updateAutoCameraScaledOffsets(true);
@@ -333,6 +352,19 @@ export class LayerPipeline extends EventTarget {
     /** Check whether automatic camera tracking is enabled. */
     isAutoCameraFollowEnabled() {
         return !!this._autoCameraFollow;
+    }
+
+    /** Snap the camera to the overview framing (typically the initial tower view). */
+    focusOverview() {
+        const engine = this._engine;
+        const camera = engine?.camera;
+        const controls = engine?.controls;
+        if (!camera || !controls || !controls.target) return;
+        if (!this._overviewCameraPosition || !this._overviewCameraTarget) return;
+        camera.position.copy(this._overviewCameraPosition);
+        controls.target.copy(this._overviewCameraTarget);
+        if (typeof controls.update === 'function') controls.update();
+        engine?.notifyCameraUpdated?.();
     }
 
     /** Get current follow reference position (residual stream center). */
@@ -1329,7 +1361,8 @@ export class LayerPipeline extends EventTarget {
         const passPhase = mhsa?.mhaPassThroughPhase || 'positioning_mha_vectors';
         const inTravel = !!(lane && lane.horizPhase === 'travelMHSA'
             && passPhase === 'positioning_mha_vectors');
-        const finishedHeads = !!(lane && lane.horizPhase === 'finishedHeads');
+        const inCopyStage = !!(lane && lane.horizPhase === 'finishedHeads'
+            && (passPhase === 'positioning_mha_vectors' || passPhase === 'ready_for_parallel_pass_through'));
         if (!mhsa) {
             if (inLn) return 'ln';
             return 'default';
@@ -1338,27 +1371,24 @@ export class LayerPipeline extends EventTarget {
         if (inLn) {
             return 'ln';
         }
-        if (inTravel) {
+        if (inTravel || inCopyStage) {
             return 'travel';
         }
 
         const outputPhase = mhsa.outputProjMatrixAnimationPhase || 'waiting';
         const rowPhase = mhsa.rowMergePhase || 'not_started';
-        const outputVectorsActive = Array.isArray(mhsa.outputProjMatrixVectors) && mhsa.outputProjMatrixVectors.length > 0;
         const outputReturnComplete = mhsa.outputProjMatrixReturnComplete === true;
         const concatActive = outputPhase === 'vectors_entering'
             || outputPhase === 'vectors_inside'
-            || (outputVectorsActive && !outputReturnComplete)
-            || ((rowPhase === 'merging' || rowPhase === 'merged') && !outputReturnComplete);
+            || ((rowPhase === 'merging' || rowPhase === 'merged') && outputPhase !== 'completed' && !outputReturnComplete);
         if (concatActive) {
             return 'concat';
         }
 
         const mhsaGate = rowPhase === 'not_started' && outputPhase === 'waiting';
-        const mhsaActive = mhsaGate && (finishedHeads
-            || passPhase === 'ready_for_parallel_pass_through'
-            || passPhase === 'parallel_pass_through_active'
-            || passPhase === 'mha_pass_through_complete');
+        const mhsaActive = mhsaGate && (passPhase === 'parallel_pass_through_active'
+            || passPhase === 'mha_pass_through_complete'
+            || (passPhase === 'ready_for_parallel_pass_through' && !inCopyStage));
         if (mhsaActive) {
             return 'mhsa';
         }
@@ -1444,6 +1474,16 @@ export class LayerPipeline extends EventTarget {
         if (this._autoCameraTravelOffsetsEnabled) {
             applyScaleShift(this._autoCameraTravelCameraOffset, this._autoCameraTravelCameraOffsetBase, shiftTravelX);
             applyScaleShift(this._autoCameraTravelTargetOffset, this._autoCameraTravelTargetOffsetBase, shiftTravelX);
+            if (this._autoCameraTravelMobileOverrideEnabled && shiftFactor > 0.0001) {
+                this._autoCameraTravelCameraOffset.lerp(
+                    this._autoCameraTravelMobileOverrideCameraOffset,
+                    shiftFactor
+                );
+                this._autoCameraTravelTargetOffset.lerp(
+                    this._autoCameraTravelMobileOverrideTargetOffset,
+                    shiftFactor
+                );
+            }
         }
     }
 

@@ -11,7 +11,7 @@ export function initSettingsModal(pipeline) {
 
     appState.autoCameraFollow = getPreference('autoCameraFollow', true);
     appState.showCameraDebug = getPreference('showCameraDebug', false);
-    appState.showFollowViewInspector = getPreference('showFollowViewInspector', false);
+    appState.showFollowViewInspector = false;
     appState.devMode = getPreference('devMode', false);
     pipeline?.setAutoCameraFollow?.(appState.autoCameraFollow, { immediate: true });
     pipeline?.engine?.setCameraDebugEnabled?.(appState.showCameraDebug);
@@ -102,7 +102,6 @@ export function initSettingsModal(pipeline) {
 
     const setFollowInspectorEnabled = (enabled) => {
         appState.showFollowViewInspector = !!enabled;
-        setPreference('showFollowViewInspector', appState.showFollowViewInspector);
         if (appState.showFollowViewInspector) {
             if (followInspectorRaf === null) {
                 followInspectorRaf = requestAnimationFrame(updateFollowInspector);

@@ -6,7 +6,7 @@ canvas { display: block; }
     position: fixed;
     top: 10px;
     right: 10px;
-    z-index: 6; /* above status overlay (z=5) */
+    z-index: 9; /* above HUD/detail panels, below settings overlay */
     display: flex;
     gap: 8px;
     transition: opacity 0.25s ease, transform 0.25s ease;
@@ -57,6 +57,43 @@ canvas { display: block; }
 #pauseBtn[data-state="paused"] {
     background: rgba(56,132,255,0.18);
     border-color: rgba(122,202,255,0.8);
+}
+
+#skipMenu {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+}
+#skipMenu[data-visible="false"] {
+    display: none;
+}
+#skipMenuToggle {
+    font-size: 14px;
+    min-width: 70px;
+}
+#skipMenuItems {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 8px);
+    display: none;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    background: rgba(12,12,12,0.7);
+    border: 1px solid rgba(255,255,255,0.16);
+    border-radius: 12px;
+    box-shadow: 0 10px 24px rgba(0,0,0,0.35);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    z-index: 999;
+}
+#skipMenu[data-open="true"] #skipMenuItems {
+    display: flex;
+}
+#skipMenuItems button {
+    width: 150px;
+    text-align: left;
+    font-size: 13px;
 }
 
 #skipConveyorBtn {

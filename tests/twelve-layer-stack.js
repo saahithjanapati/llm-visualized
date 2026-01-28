@@ -51,6 +51,7 @@ import { initSettingsModal } from '../src/ui/settingsModal.js';
 import { initPauseButton } from '../src/ui/pauseButton.js';
 import { initConveyorSkipButton } from '../src/ui/conveyorSkipButton.js';
 import { initSkipToEndButton } from '../src/ui/skipToEndButton.js';
+import { initSkipMenu } from '../src/ui/skipMenu.js';
 import { initSelectionPanel } from '../src/ui/selectionPanel.js';
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import { CaptureActivationSource } from '../src/data/CaptureActivationSource.js';
@@ -674,8 +675,10 @@ const followConcatCameraOffset = new THREE.Vector3(403.43, -14.39, 7.47);
 const followConcatTargetOffset = new THREE.Vector3(3383.52, 26.22, 364.05);
 const followLnCameraOffset = new THREE.Vector3(605.51, -78.03, 2433.13);
 const followLnTargetOffset = new THREE.Vector3(1026.71, 144.37, -607.81);
-const followTravelCameraOffset = new THREE.Vector3(-1340.77, -929.75, 2101.70);
-const followTravelTargetOffset = new THREE.Vector3(2716.19, -137.70, 815.44);
+const followTravelCameraOffset = new THREE.Vector3(1106.53, -860.48, 1389.16);
+const followTravelTargetOffset = new THREE.Vector3(4038.68, -398.41, 601.18);
+const followTravelMobileCameraOffset = new THREE.Vector3(650.00, -731.41, 1165.51);
+const followTravelMobileTargetOffset = new THREE.Vector3(2339.23, -550.29, 738.49);
 // LayerPipeline builds all static visuals first, then advances active lanes upward.
 const pipeline = new LayerPipeline(gptCanvas, NUM_LAYERS, {
     cameraPosition: camPos,
@@ -693,14 +696,16 @@ const pipeline = new LayerPipeline(gptCanvas, NUM_LAYERS, {
     autoCameraLnTargetOffset: followLnTargetOffset,
     autoCameraTravelCameraOffset: followTravelCameraOffset,
     autoCameraTravelTargetOffset: followTravelTargetOffset,
+    autoCameraTravelMobileCameraOffset: followTravelMobileCameraOffset,
+    autoCameraTravelMobileTargetOffset: followTravelMobileTargetOffset,
     autoCameraMobileScale: 1.8,
     autoCameraMobileShiftX: -600,
     autoCameraMhsaMobileShiftX: -2000,
     autoCameraTravelMobileShiftX: -4500,
     autoCameraScaleMinWidth: 360,
     autoCameraScaleMaxWidth: 980,
-    autoCameraSmoothAlpha: 0.08,
-    autoCameraOffsetLerpAlpha: 0.08,
+    autoCameraSmoothAlpha: 0.06,
+    autoCameraOffsetLerpAlpha: 0.06,
     activationSource,
     laneCount
 });
@@ -999,6 +1004,7 @@ initParameterCounter(pipeline, NUM_LAYERS);
 initPauseButton(pipeline);
 initConveyorSkipButton(pipeline);
 initSkipToEndButton(pipeline);
+initSkipMenu();
 initSettingsModal(pipeline);
 
 const followModeBtn = document.getElementById('followModeBtn');
@@ -1043,6 +1049,15 @@ if (followSettingsToggle) {
 if (pipeline?.engine?.controls?.addEventListener) {
     pipeline.engine.controls.addEventListener('start', () => {
         if (pipeline?.isAutoCameraFollowEnabled?.()) {
+            setFollowMode(false);
+        }
+    });
+}
+
+if (typeof window !== 'undefined') {
+    window.addEventListener('autoCameraFollowRequest', (event) => {
+        const enabled = !!event?.detail?.enabled;
+        if (!enabled) {
             setFollowMode(false);
         }
     });

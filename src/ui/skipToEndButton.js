@@ -40,6 +40,17 @@ export function initSkipToEndButton(pipeline) {
 
     const onClick = (event) => {
         event.preventDefault();
+        if (pipeline?.setAutoCameraFollow) {
+            pipeline.setAutoCameraFollow(false, { immediate: true });
+        }
+        if (pipeline?.focusOverview) {
+            pipeline.focusOverview();
+        }
+        try {
+            if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+                window.dispatchEvent(new CustomEvent('autoCameraFollowRequest', { detail: { enabled: false, reason: 'skipToEnd' } }));
+            }
+        } catch (_) { /* ignore */ }
         if (pipeline && typeof pipeline.skipToEndForwardPass === 'function') {
             pipeline.skipToEndForwardPass();
         }
