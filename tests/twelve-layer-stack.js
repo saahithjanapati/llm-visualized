@@ -706,6 +706,7 @@ const pipeline = new LayerPipeline(gptCanvas, NUM_LAYERS, {
     autoCameraScaleMaxWidth: 980,
     autoCameraSmoothAlpha: 0.06,
     autoCameraOffsetLerpAlpha: 0.06,
+    autoCameraViewBlendAlpha: 0.05,
     activationSource,
     laneCount
 });
@@ -1028,7 +1029,7 @@ const setFollowMode = (enabled, { resetView = false } = {}) => {
         return;
     }
     appState.autoCameraFollow = next;
-    pipeline?.setAutoCameraFollow?.(next, { immediate: next, resetView: next && resetView });
+    pipeline?.setAutoCameraFollow?.(next, { immediate: next, resetView: next && resetView, smoothReset: next && resetView });
     updateFollowButton(next);
     if (followSettingsToggle) followSettingsToggle.checked = next;
 };

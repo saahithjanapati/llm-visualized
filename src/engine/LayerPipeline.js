@@ -87,6 +87,9 @@ export class LayerPipeline extends EventTarget {
         this._autoCameraSmoothAlpha = Math.min(1, Math.max(0, smoothAlpha));
         const offsetAlpha = typeof opts.autoCameraOffsetLerpAlpha === 'number' ? opts.autoCameraOffsetLerpAlpha : 0.14;
         this._autoCameraOffsetLerpAlpha = Math.min(1, Math.max(0, offsetAlpha));
+        const viewBlendAlpha = typeof opts.autoCameraViewBlendAlpha === 'number' ? opts.autoCameraViewBlendAlpha : 0.12;
+        this._autoCameraViewBlendAlpha = Math.min(1, Math.max(0, viewBlendAlpha));
+        this._autoCameraViewBlendAlphaActive = this._autoCameraViewBlendAlpha;
         const mobileScale = typeof opts.autoCameraMobileScale === 'number' ? opts.autoCameraMobileScale : 1.0;
         this._autoCameraScaleMax = Math.max(1.0, mobileScale);
         const mobileShiftX = typeof opts.autoCameraMobileShiftX === 'number' ? opts.autoCameraMobileShiftX : 0;
@@ -114,6 +117,15 @@ export class LayerPipeline extends EventTarget {
         this._autoCameraCurrentTargetOffset = new THREE.Vector3();
         this._autoCameraSmoothedRef = new THREE.Vector3();
         this._autoCameraSmoothValid = false;
+        this._autoCameraViewKey = 'default';
+        this._autoCameraViewBlendT = 1;
+        this._autoCameraViewFromCameraOffset = new THREE.Vector3();
+        this._autoCameraViewFromTargetOffset = new THREE.Vector3();
+        this._autoCameraViewToCameraOffset = new THREE.Vector3();
+        this._autoCameraViewToTargetOffset = new THREE.Vector3();
+        this._autoCameraViewBlendCameraOffset = new THREE.Vector3();
+        this._autoCameraViewBlendTargetOffset = new THREE.Vector3();
+        this._autoCameraViewContext = null;
         this._autoCameraDefaultCameraOffset = new THREE.Vector3();
         this._autoCameraDefaultTargetOffset = new THREE.Vector3();
         this._autoCameraMhsaCameraOffset = new THREE.Vector3();
@@ -313,7 +325,7 @@ export class LayerPipeline extends EventTarget {
     get engine() { return this._engine; }
 
     /** Enable or disable automatic camera tracking of the active layer. */
-    setAutoCameraFollow(enabled, { immediate = false, resetView = false } = {}) {
+    setAutoCameraFollow(enabled, { immediate = false, resetView = false, smoothReset = false } = {}) {
         const nextValue = !!enabled;
         if (nextValue === this._autoCameraFollow) {
             if (nextValue) {
@@ -330,10 +342,11 @@ export class LayerPipeline extends EventTarget {
         if (this._autoCameraFollow) {
             this._autoCameraSmoothValid = false;
             if (resetView) {
+                const canSmoothReset = smoothReset && this._captureAutoCameraOffsets();
                 this._setAutoCameraOffsets(
                     this._autoCameraDefaultCameraOffset,
                     this._autoCameraDefaultTargetOffset,
-                    { snap: false }
+                    { snap: !canSmoothReset }
                 );
             }
         }
@@ -1358,6 +1371,7 @@ export class LayerPipeline extends EventTarget {
         const laneIndex = laneCount ? Math.min(laneCount - 1, Math.floor(laneCount / 2)) : -1;
         const lane = laneIndex >= 0 ? lanes[laneIndex] : null;
         const inLn = !!(lane && (lane.horizPhase === 'insideLN' || lane.ln2Phase === 'insideLN'));
+        this._autoCameraViewContext = { lane, laneIndex, laneCount, inLn };
         const passPhase = mhsa?.mhaPassThroughPhase || 'positioning_mha_vectors';
         const inTravel = !!(lane && lane.horizPhase === 'travelMHSA'
             && passPhase === 'positioning_mha_vectors');
@@ -1398,6 +1412,7 @@ export class LayerPipeline extends EventTarget {
     _applyAutoCameraViewOffsets() {
         this._updateAutoCameraScaledOffsets();
         const key = this._resolveAutoCameraViewKey();
+        const viewContext = this._autoCameraViewContext;
         let camOffset = this._autoCameraDefaultCameraOffset;
         let targetOffset = this._autoCameraDefaultTargetOffset;
 
@@ -1413,6 +1428,41 @@ export class LayerPipeline extends EventTarget {
         } else if (key === 'concat' && this._autoCameraConcatOffsetsEnabled) {
             camOffset = this._autoCameraConcatCameraOffset;
             targetOffset = this._autoCameraConcatTargetOffset;
+        }
+
+        if (key !== this._autoCameraViewKey) {
+            const priorKey = this._autoCameraViewKey;
+            const isMlpTransition = priorKey === 'ln'
+                && key === 'default'
+                && viewContext
+                && viewContext.lane
+                && viewContext.lane.ln2Phase
+                && viewContext.lane.ln2Phase !== 'insideLN';
+            this._autoCameraViewBlendAlphaActive = isMlpTransition
+                ? this._autoCameraViewBlendAlpha * 0.5
+                : this._autoCameraViewBlendAlpha;
+            this._autoCameraViewKey = key;
+            if (!this._autoCameraSmoothValid) {
+                this._autoCameraViewBlendT = 1;
+                this._autoCameraViewFromCameraOffset.copy(camOffset);
+                this._autoCameraViewFromTargetOffset.copy(targetOffset);
+            } else {
+                this._autoCameraViewBlendT = 0;
+                this._autoCameraViewFromCameraOffset.copy(this._autoCameraCurrentCameraOffset);
+                this._autoCameraViewFromTargetOffset.copy(this._autoCameraCurrentTargetOffset);
+            }
+        }
+
+        this._autoCameraViewToCameraOffset.copy(camOffset);
+        this._autoCameraViewToTargetOffset.copy(targetOffset);
+
+        if (this._autoCameraViewBlendT < 1) {
+            this._autoCameraViewBlendT = Math.min(1, this._autoCameraViewBlendT + this._autoCameraViewBlendAlphaActive);
+            const t = this._autoCameraViewBlendT;
+            this._autoCameraViewBlendCameraOffset.copy(this._autoCameraViewFromCameraOffset).lerp(this._autoCameraViewToCameraOffset, t);
+            this._autoCameraViewBlendTargetOffset.copy(this._autoCameraViewFromTargetOffset).lerp(this._autoCameraViewToTargetOffset, t);
+            camOffset = this._autoCameraViewBlendCameraOffset;
+            targetOffset = this._autoCameraViewBlendTargetOffset;
         }
 
         this._setAutoCameraOffsets(camOffset, targetOffset, { snap: false });

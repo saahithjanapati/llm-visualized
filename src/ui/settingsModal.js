@@ -220,7 +220,11 @@ export function initSettingsModal(pipeline) {
     autoCamToggle?.addEventListener('change', () => {
         appState.autoCameraFollow = !!autoCamToggle.checked;
         setPreference('autoCameraFollow', appState.autoCameraFollow);
-        pipeline?.setAutoCameraFollow?.(appState.autoCameraFollow, { immediate: appState.autoCameraFollow, resetView: appState.autoCameraFollow });
+        pipeline?.setAutoCameraFollow?.(appState.autoCameraFollow, {
+            immediate: appState.autoCameraFollow,
+            resetView: appState.autoCameraFollow,
+            smoothReset: appState.autoCameraFollow
+        });
     });
 
     const devToggle = document.getElementById('toggleDevMode');
