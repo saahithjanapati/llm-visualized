@@ -81,6 +81,9 @@ export class LayerPipeline extends EventTarget {
         this._skipToEndRestore = null;
         this._skipToEndRaf = null;
         this._forwardPassComplete = false;
+        this._skipLayerActive = false;
+        this._skipLayerRestore = null;
+        this._skipLayerLast = false;
 
         this._autoCameraFollow = opts.autoCameraFollow !== false;
         const smoothAlpha = typeof opts.autoCameraSmoothAlpha === 'number' ? opts.autoCameraSmoothAlpha : 0.14;
@@ -399,12 +402,51 @@ export class LayerPipeline extends EventTarget {
         return !!this._skipToEndActive;
     }
 
+    isSkipLayerActive() {
+        return !!this._skipLayerActive;
+    }
+
     isForwardPassComplete() {
         return this._checkForwardPassComplete();
     }
 
+    skipCurrentLayer(opts = {}) {
+        if (this._skipLayerActive || this._skipToEndActive) return;
+        if (this._checkForwardPassComplete()) return;
+
+        const layer = this._layers[this._currentLayerIdx];
+        if (!layer || layer._completed) return;
+
+        const engine = this._engine;
+        this._skipLayerActive = true;
+        this._skipLayerLast = this._currentLayerIdx >= this._numLayers - 1;
+        this._skipLayerRestore = {
+            engineSpeed: engine && typeof engine._speed === 'number' ? engine._speed : 1,
+            globalSpeed: GLOBAL_ANIM_SPEED_MULT,
+            prismAddSpeed: PRISM_ADD_ANIM_SPEED_MULT,
+            selfAttentionSpeed: SELF_ATTENTION_TIME_MULT
+        };
+
+        const {
+            engineSpeed = 6,
+            globalSpeed = 800,
+            prismAddSpeed = 200,
+            selfAttentionSpeed = 0.03
+        } = opts || {};
+
+        if (engine && typeof engine.setSpeed === 'function') {
+            engine.setSpeed(engineSpeed);
+        }
+        setGlobalAnimSpeedMult(globalSpeed);
+        setPrismAddAnimSpeedMult(prismAddSpeed);
+        setSelfAttentionTimeMult(selfAttentionSpeed);
+    }
+
     skipToEndForwardPass(opts = {}) {
         if (this._skipToEndActive || this._checkForwardPassComplete()) return;
+        if (this._skipLayerActive) {
+            this._restoreSkipLayerSpeeds();
+        }
         this._skipToEndActive = true;
 
         const engine = this._engine;
@@ -517,6 +559,22 @@ export class LayerPipeline extends EventTarget {
         }
     }
 
+    _restoreSkipLayerSpeeds() {
+        if (!this._skipLayerActive) return;
+        const restore = this._skipLayerRestore;
+        if (restore) {
+            if (this._engine && typeof this._engine.setSpeed === 'function') {
+                this._engine.setSpeed(restore.engineSpeed);
+            }
+            setGlobalAnimSpeedMult(restore.globalSpeed);
+            setPrismAddAnimSpeedMult(restore.prismAddSpeed);
+            setSelfAttentionTimeMult(restore.selfAttentionSpeed);
+        }
+        this._skipLayerActive = false;
+        this._skipLayerLast = false;
+        this._skipLayerRestore = null;
+    }
+
     /**
      * Called when the currently active layer reports completion via its
      * `onFinished` callback.  This creates the next Gpt2Layer, injects the
@@ -573,6 +631,10 @@ export class LayerPipeline extends EventTarget {
 
         this._maybeAutoCameraFocus({ immediate: true });
 
+        if (this._skipLayerActive && !this._skipLayerLast) {
+            this._restoreSkipLayerSpeeds();
+        }
+
         // Now that the original residual vectors have been transferred, we can safely
         // hide the remaining heavy geometry in the previous layer to save GPU work.
         if (prevLayer && typeof prevLayer.hideDynamicGeometry === 'function') {
@@ -589,6 +651,10 @@ export class LayerPipeline extends EventTarget {
         if (!lastLayer || !Array.isArray(lastLayer.lanes) || !lastLayer.lanes.length) return;
 
         if (!lastLayer.mlpDown || !lastLayer.mlpDown.group) return;
+
+        if (this._skipLayerActive && this._skipLayerLast) {
+            this._restoreSkipLayerSpeeds();
+        }
 
         const targetYLocal = this._calculateTopEmbeddingTargetY(lastLayer);
 

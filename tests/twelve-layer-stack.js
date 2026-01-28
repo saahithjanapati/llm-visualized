@@ -51,6 +51,7 @@ import { initSettingsModal } from '../src/ui/settingsModal.js';
 import { initPauseButton } from '../src/ui/pauseButton.js';
 import { initConveyorSkipButton } from '../src/ui/conveyorSkipButton.js';
 import { initSkipToEndButton } from '../src/ui/skipToEndButton.js';
+import { initSkipLayerButton } from '../src/ui/skipLayerButton.js';
 import { initSkipMenu } from '../src/ui/skipMenu.js';
 import { initSelectionPanel } from '../src/ui/selectionPanel.js';
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
@@ -1005,6 +1006,7 @@ initParameterCounter(pipeline, NUM_LAYERS);
 initPauseButton(pipeline);
 initConveyorSkipButton(pipeline);
 initSkipToEndButton(pipeline);
+initSkipLayerButton(pipeline);
 initSkipMenu();
 initSettingsModal(pipeline);
 

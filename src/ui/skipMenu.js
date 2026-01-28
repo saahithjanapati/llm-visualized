@@ -2,6 +2,7 @@ export function initSkipMenu() {
     const menu = document.getElementById('skipMenu');
     const toggle = document.getElementById('skipMenuToggle');
     const items = document.getElementById('skipMenuItems');
+    const skipLayerBtn = document.getElementById('skipLayerBtn');
     const skipConveyorBtn = document.getElementById('skipConveyorBtn');
     const skipToEndBtn = document.getElementById('skipToEndBtn');
 
@@ -17,7 +18,7 @@ export function initSkipMenu() {
     };
 
     const updateVisibility = () => {
-        const anyVisible = isVisible(skipConveyorBtn) || isVisible(skipToEndBtn);
+        const anyVisible = isVisible(skipLayerBtn) || isVisible(skipConveyorBtn) || isVisible(skipToEndBtn);
         menu.dataset.visible = anyVisible ? 'true' : 'false';
         menu.style.display = anyVisible ? '' : 'none';
         if (!anyVisible) setOpen(false);
@@ -42,6 +43,7 @@ export function initSkipMenu() {
 
     toggle.addEventListener('click', onToggleClick);
     document.addEventListener('click', onDocumentClick);
+    skipLayerBtn?.addEventListener('click', onItemClick);
     skipConveyorBtn?.addEventListener('click', onItemClick);
     skipToEndBtn?.addEventListener('click', onItemClick);
 
@@ -62,6 +64,7 @@ export function initSkipMenu() {
     return () => {
         toggle.removeEventListener('click', onToggleClick);
         document.removeEventListener('click', onDocumentClick);
+        skipLayerBtn?.removeEventListener('click', onItemClick);
         skipConveyorBtn?.removeEventListener('click', onItemClick);
         skipToEndBtn?.removeEventListener('click', onItemClick);
         if (rafId !== null) cancelFrame(rafId);

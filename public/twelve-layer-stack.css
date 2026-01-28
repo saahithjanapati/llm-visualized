@@ -98,6 +98,14 @@ button { touch-action: manipulation; }
     font-size: 13px;
 }
 
+#skipLayerBtn {
+    font-size: 14px;
+    min-width: 130px;
+}
+#skipLayerBtn:not([data-visible="true"]) {
+    display: none;
+}
+
 #skipConveyorBtn {
     font-size: 14px;
     min-width: 130px;
