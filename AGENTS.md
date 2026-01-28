@@ -20,7 +20,7 @@ This repo is a Three.js-based 3D visualization of GPT-2 internals. The primary d
 - `src/state/appState.js` - Shared runtime state.
 
 ## Assets and precomputed geometry
-- `precomputed_components.glb` / `precomputed_components_slice.glb` - Cached geometry to speed startup.
+- `precomputed_components_slice.glb` / `precomputed_components_qkv.glb` - Cached geometry to speed startup (slice + full-depth QKV).
 - `metal_grate_rusty_1k.gltf` / `rogland_clear_night_64.exr` - Environment assets.
 - `cool-fun.gif` - Loading overlay asset.
 - `public/` - Static assets and CSS (including `public/twelve-layer-stack.css`).

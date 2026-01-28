@@ -46,10 +46,8 @@
         } from '../src/utils/constants.js';
         import { MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR, MHA_OUTPUT_PROJECTION_MATRIX_COLOR, MHA_OUTPUT_PROJECTION_MATRIX_PARAMS, MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW } from '../src/animations/LayerAnimationConstants.js';
 
-        // Load precomputed geometries that contain just one lane slice.
-        // The standard twelve-layer-stack demo uses `precomputed_components.glb`,
-        // but here we need the slice variant so we can instance that single slice
-        // for each lane when the lane count changes at runtime.
+        // Load precomputed geometries that contain just one lane slice so lane
+        // counts can change at runtime.
         await loadPrecomputedGeometries('../precomputed_components_slice.glb');
 
         const LAYER_COUNT = 12;

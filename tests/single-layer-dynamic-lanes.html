@@ -29,10 +29,7 @@
         import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
         import hdrBackgroundUrl from '../rogland_clear_night_64.exr?url';
 
-        // Cache geometries for a single lane slice. The regular 12-layer demo
-        // uses `precomputed_components.glb`, but this prototype needs to vary
-        // the lane count at runtime, so we load the slice variant and instance
-        // that slice once per lane.
+        // Cache geometries for a single lane slice so lane counts can vary.
         await loadPrecomputedGeometries('../precomputed_components_slice.glb');
 
         const canvas    = document.getElementById('c');
