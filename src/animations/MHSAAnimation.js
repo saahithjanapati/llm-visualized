@@ -129,6 +129,9 @@ export class MHSAAnimation {
         // Additional arrays required by later stages
         this.outputProjMatrixAnimationPhase = 'waiting';
         this.outputProjMatrixVectors        = [];
+        this.outputProjMatrixReturnComplete = false;
+        this._outputProjReturnCount = 0;
+        this._outputProjReturnTargetCount = 0;
 
         // Mode control (e.g., 'temp', 'perm', etc.)
         this.mode = mode;
@@ -1354,6 +1357,8 @@ export class MHSAAnimation {
         // Mark merge as complete prior to entering the output projection stage
         this.rowMergePhase = 'merged';
         this.outputProjMatrixAnimationPhase = 'vectors_entering';
+        this.outputProjMatrixReturnComplete = false;
+        this._outputProjReturnCount = 0;
 
         // Keep K/V visuals present during concatenation; they will be disposed
         // once the very last blue (Q) vector finishes its conveyor belt.
@@ -1431,6 +1436,8 @@ export class MHSAAnimation {
             console.warn("No combined vectors created for output projection animation");
             return;
         }
+
+        this._outputProjReturnTargetCount = combinedVectors.length;
 
         // Store for later reference
         this.outputProjMatrixVectors = combinedVectors.map(obj => obj.vec);
@@ -1590,6 +1597,10 @@ export class MHSAAnimation {
                                                         }
                                                     });
                                                 }
+                                            }
+                                            this._outputProjReturnCount += 1;
+                                            if (this._outputProjReturnCount >= this._outputProjReturnTargetCount) {
+                                                this.outputProjMatrixReturnComplete = true;
                                             }
                                         })
                                         .start();
@@ -1795,6 +1806,9 @@ export class MHSAAnimation {
         try { if (this.selfAttentionAnimator?.forceComplete) this.selfAttentionAnimator.forceComplete({ preserveTrails }); } catch (_) {}
         try { this._hideAllQVectorsImmediately(); } catch (_) {}
         try { this._hideAllKandVVectorsImmediately(); } catch (_) {}
+        this.outputProjMatrixReturnComplete = false;
+        this._outputProjReturnCount = 0;
+        this._outputProjReturnTargetCount = 0;
         // Ensure decorative vectors exist before starting the merge/concat sequence
         if (!this._tempModeCompleted) {
             try { this._applyTempModeBehaviour(); this._tempModeCompleted = true; } catch (_) {}

@@ -88,7 +88,21 @@ export class LayerPipeline extends EventTarget {
         const offsetAlpha = typeof opts.autoCameraOffsetLerpAlpha === 'number' ? opts.autoCameraOffsetLerpAlpha : 0.14;
         this._autoCameraOffsetLerpAlpha = Math.min(1, Math.max(0, offsetAlpha));
         const mobileScale = typeof opts.autoCameraMobileScale === 'number' ? opts.autoCameraMobileScale : 1.0;
-        this._autoCameraMobileScale = Math.max(0.1, mobileScale);
+        this._autoCameraScaleMax = Math.max(1.0, mobileScale);
+        const mobileShiftX = typeof opts.autoCameraMobileShiftX === 'number' ? opts.autoCameraMobileShiftX : 0;
+        this._autoCameraShiftMaxX = mobileShiftX;
+        const travelShiftX = typeof opts.autoCameraTravelMobileShiftX === 'number' ? opts.autoCameraTravelMobileShiftX : 0;
+        this._autoCameraShiftMaxTravelX = travelShiftX;
+        const mhsaShiftX = typeof opts.autoCameraMhsaMobileShiftX === 'number' ? opts.autoCameraMhsaMobileShiftX : 0;
+        this._autoCameraShiftMaxMhsaX = mhsaShiftX;
+        this._autoCameraScaleMinWidth = Number.isFinite(opts.autoCameraScaleMinWidth)
+            ? Math.max(200, opts.autoCameraScaleMinWidth)
+            : 360;
+        this._autoCameraScaleMaxWidth = Number.isFinite(opts.autoCameraScaleMaxWidth)
+            ? Math.max(this._autoCameraScaleMinWidth + 10, opts.autoCameraScaleMaxWidth)
+            : 880;
+        this._autoCameraScaleLast = 1.0;
+        this._autoCameraShiftLastX = 0;
         this._autoCameraCenter = new THREE.Vector3();
         this._autoCameraOffsetScratch = new THREE.Vector3();
         this._autoCameraDesiredCameraOffset = new THREE.Vector3();
@@ -111,6 +125,16 @@ export class LayerPipeline extends EventTarget {
         this._autoCameraTravelTargetOffset = new THREE.Vector3();
         this._autoCameraLnOffsetsEnabled = false;
         this._autoCameraTravelOffsetsEnabled = false;
+        this._autoCameraDefaultCameraOffsetBase = new THREE.Vector3();
+        this._autoCameraDefaultTargetOffsetBase = new THREE.Vector3();
+        this._autoCameraMhsaCameraOffsetBase = new THREE.Vector3();
+        this._autoCameraMhsaTargetOffsetBase = new THREE.Vector3();
+        this._autoCameraConcatCameraOffsetBase = new THREE.Vector3();
+        this._autoCameraConcatTargetOffsetBase = new THREE.Vector3();
+        this._autoCameraLnCameraOffsetBase = new THREE.Vector3();
+        this._autoCameraLnTargetOffsetBase = new THREE.Vector3();
+        this._autoCameraTravelCameraOffsetBase = new THREE.Vector3();
+        this._autoCameraTravelTargetOffsetBase = new THREE.Vector3();
         this._autoCameraInspectorRef = new THREE.Vector3();
         this._hasAutoCameraOffsets = false;
         this._suppressControlsChange = false;
@@ -149,56 +173,48 @@ export class LayerPipeline extends EventTarget {
             return fallback ? fallback.clone() : null;
         };
 
-        const isMobileLayout = (typeof window !== 'undefined')
-            && (window.matchMedia?.('(max-aspect-ratio: 1/1), (max-width: 880px)')?.matches);
-        const effectiveScale = isMobileLayout ? this._autoCameraMobileScale : 1.0;
-
-        const applyScale = (vec) => {
-            if (!vec) return null;
-            vec.multiplyScalar(effectiveScale);
-            return vec;
-        };
-
-        const defaultTargetOffset = applyScale(parseVec3(opts.autoCameraDefaultTargetOffset, new THREE.Vector3(0, 0, 0)));
+        const defaultTargetOffset = parseVec3(opts.autoCameraDefaultTargetOffset, new THREE.Vector3(0, 0, 0));
         const cameraTarget = this._engine?.controls?.target || new THREE.Vector3();
-        const defaultCameraOffset = applyScale(parseVec3(
+        const defaultCameraOffset = parseVec3(
             opts.autoCameraDefaultCameraOffset,
             this._engine?.camera?.position ? this._engine.camera.position.clone().sub(cameraTarget) : new THREE.Vector3(0, 2000, 16000)
-        ));
-        if (defaultTargetOffset) this._autoCameraDefaultTargetOffset.copy(defaultTargetOffset);
-        if (defaultCameraOffset) this._autoCameraDefaultCameraOffset.copy(defaultCameraOffset);
+        );
+        if (defaultTargetOffset) this._autoCameraDefaultTargetOffsetBase.copy(defaultTargetOffset);
+        if (defaultCameraOffset) this._autoCameraDefaultCameraOffsetBase.copy(defaultCameraOffset);
 
-        const mhsaCamOffset = applyScale(parseVec3(opts.autoCameraMhsaCameraOffset, null));
-        const mhsaTargetOffset = applyScale(parseVec3(opts.autoCameraMhsaTargetOffset, null));
+        const mhsaCamOffset = parseVec3(opts.autoCameraMhsaCameraOffset, null);
+        const mhsaTargetOffset = parseVec3(opts.autoCameraMhsaTargetOffset, null);
         if (mhsaCamOffset && mhsaTargetOffset) {
-            this._autoCameraMhsaCameraOffset.copy(mhsaCamOffset);
-            this._autoCameraMhsaTargetOffset.copy(mhsaTargetOffset);
+            this._autoCameraMhsaCameraOffsetBase.copy(mhsaCamOffset);
+            this._autoCameraMhsaTargetOffsetBase.copy(mhsaTargetOffset);
             this._autoCameraMhsaOffsetsEnabled = true;
         }
 
-        const concatCamOffset = applyScale(parseVec3(opts.autoCameraConcatCameraOffset, null));
-        const concatTargetOffset = applyScale(parseVec3(opts.autoCameraConcatTargetOffset, null));
+        const concatCamOffset = parseVec3(opts.autoCameraConcatCameraOffset, null);
+        const concatTargetOffset = parseVec3(opts.autoCameraConcatTargetOffset, null);
         if (concatCamOffset && concatTargetOffset) {
-            this._autoCameraConcatCameraOffset.copy(concatCamOffset);
-            this._autoCameraConcatTargetOffset.copy(concatTargetOffset);
+            this._autoCameraConcatCameraOffsetBase.copy(concatCamOffset);
+            this._autoCameraConcatTargetOffsetBase.copy(concatTargetOffset);
             this._autoCameraConcatOffsetsEnabled = true;
         }
 
-        const lnCamOffset = applyScale(parseVec3(opts.autoCameraLnCameraOffset, null));
-        const lnTargetOffset = applyScale(parseVec3(opts.autoCameraLnTargetOffset, null));
+        const lnCamOffset = parseVec3(opts.autoCameraLnCameraOffset, null);
+        const lnTargetOffset = parseVec3(opts.autoCameraLnTargetOffset, null);
         if (lnCamOffset && lnTargetOffset) {
-            this._autoCameraLnCameraOffset.copy(lnCamOffset);
-            this._autoCameraLnTargetOffset.copy(lnTargetOffset);
+            this._autoCameraLnCameraOffsetBase.copy(lnCamOffset);
+            this._autoCameraLnTargetOffsetBase.copy(lnTargetOffset);
             this._autoCameraLnOffsetsEnabled = true;
         }
 
-        const travelCamOffset = applyScale(parseVec3(opts.autoCameraTravelCameraOffset, null));
-        const travelTargetOffset = applyScale(parseVec3(opts.autoCameraTravelTargetOffset, null));
+        const travelCamOffset = parseVec3(opts.autoCameraTravelCameraOffset, null);
+        const travelTargetOffset = parseVec3(opts.autoCameraTravelTargetOffset, null);
         if (travelCamOffset && travelTargetOffset) {
-            this._autoCameraTravelCameraOffset.copy(travelCamOffset);
-            this._autoCameraTravelTargetOffset.copy(travelTargetOffset);
+            this._autoCameraTravelCameraOffsetBase.copy(travelCamOffset);
+            this._autoCameraTravelTargetOffsetBase.copy(travelTargetOffset);
             this._autoCameraTravelOffsetsEnabled = true;
         }
+
+        this._updateAutoCameraScaledOffsets(true);
 
         if (this._engine?.controls) {
             this._controlsChangeHandler = () => {
@@ -1328,9 +1344,12 @@ export class LayerPipeline extends EventTarget {
 
         const outputPhase = mhsa.outputProjMatrixAnimationPhase || 'waiting';
         const rowPhase = mhsa.rowMergePhase || 'not_started';
+        const outputVectorsActive = Array.isArray(mhsa.outputProjMatrixVectors) && mhsa.outputProjMatrixVectors.length > 0;
+        const outputReturnComplete = mhsa.outputProjMatrixReturnComplete === true;
         const concatActive = outputPhase === 'vectors_entering'
             || outputPhase === 'vectors_inside'
-            || ((rowPhase === 'merging' || rowPhase === 'merged') && outputPhase !== 'completed');
+            || (outputVectorsActive && !outputReturnComplete)
+            || ((rowPhase === 'merging' || rowPhase === 'merged') && !outputReturnComplete);
         if (concatActive) {
             return 'concat';
         }
@@ -1347,6 +1366,7 @@ export class LayerPipeline extends EventTarget {
     }
 
     _applyAutoCameraViewOffsets() {
+        this._updateAutoCameraScaledOffsets();
         const key = this._resolveAutoCameraViewKey();
         let camOffset = this._autoCameraDefaultCameraOffset;
         let targetOffset = this._autoCameraDefaultTargetOffset;
@@ -1366,6 +1386,65 @@ export class LayerPipeline extends EventTarget {
         }
 
         this._setAutoCameraOffsets(camOffset, targetOffset, { snap: false });
+    }
+
+    _computeAutoCameraScale() {
+        if (typeof window === 'undefined') return 1.0;
+        const width = window.innerWidth || 0;
+        if (!Number.isFinite(width) || width <= 0) return 1.0;
+        if (width >= this._autoCameraScaleMaxWidth) return 1.0;
+        if (width <= this._autoCameraScaleMinWidth) return this._autoCameraScaleMax;
+        const t = (this._autoCameraScaleMaxWidth - width)
+            / (this._autoCameraScaleMaxWidth - this._autoCameraScaleMinWidth);
+        return 1.0 + t * (this._autoCameraScaleMax - 1.0);
+    }
+
+    _updateAutoCameraScaledOffsets(force = false) {
+        const scale = this._computeAutoCameraScale();
+        const shiftFactor = (this._autoCameraScaleMax > 1.0)
+            ? (scale - 1.0) / Math.max(0.0001, this._autoCameraScaleMax - 1.0)
+            : 0;
+        const shiftX = Math.abs(this._autoCameraShiftMaxX) > 0.0001
+            ? this._autoCameraShiftMaxX * shiftFactor
+            : 0;
+        const shiftTravelX = Math.abs(this._autoCameraShiftMaxTravelX) > 0.0001
+            ? this._autoCameraShiftMaxTravelX * shiftFactor
+            : 0;
+        const shiftMhsaX = Math.abs(this._autoCameraShiftMaxMhsaX) > 0.0001
+            ? this._autoCameraShiftMaxMhsaX * shiftFactor
+            : 0;
+        if (!force
+            && Math.abs(scale - this._autoCameraScaleLast) < 0.001
+            && Math.abs(shiftX - this._autoCameraShiftLastX) < 0.5) {
+            return;
+        }
+        this._autoCameraScaleLast = scale;
+        this._autoCameraShiftLastX = shiftX;
+
+        const applyScaleShift = (dest, base, extraShiftX = 0) => {
+            dest.copy(base).multiplyScalar(scale);
+            if (shiftX || extraShiftX) dest.x += shiftX + extraShiftX;
+        };
+
+        applyScaleShift(this._autoCameraDefaultCameraOffset, this._autoCameraDefaultCameraOffsetBase);
+        applyScaleShift(this._autoCameraDefaultTargetOffset, this._autoCameraDefaultTargetOffsetBase);
+
+        if (this._autoCameraMhsaOffsetsEnabled) {
+            applyScaleShift(this._autoCameraMhsaCameraOffset, this._autoCameraMhsaCameraOffsetBase, shiftMhsaX);
+            applyScaleShift(this._autoCameraMhsaTargetOffset, this._autoCameraMhsaTargetOffsetBase, shiftMhsaX);
+        }
+        if (this._autoCameraConcatOffsetsEnabled) {
+            applyScaleShift(this._autoCameraConcatCameraOffset, this._autoCameraConcatCameraOffsetBase);
+            applyScaleShift(this._autoCameraConcatTargetOffset, this._autoCameraConcatTargetOffsetBase);
+        }
+        if (this._autoCameraLnOffsetsEnabled) {
+            applyScaleShift(this._autoCameraLnCameraOffset, this._autoCameraLnCameraOffsetBase);
+            applyScaleShift(this._autoCameraLnTargetOffset, this._autoCameraLnTargetOffsetBase);
+        }
+        if (this._autoCameraTravelOffsetsEnabled) {
+            applyScaleShift(this._autoCameraTravelCameraOffset, this._autoCameraTravelCameraOffsetBase, shiftTravelX);
+            applyScaleShift(this._autoCameraTravelTargetOffset, this._autoCameraTravelTargetOffsetBase, shiftTravelX);
+        }
     }
 
     _updateAutoCameraFollow() {
