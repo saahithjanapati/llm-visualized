@@ -278,7 +278,7 @@ export class WeightMatrixVisualization {
             // Slight inward inset so we never breach the side walls due to numerical issues
             const INSET_X = Math.max(0.1, this.width * 0.001);
 
-            const CORNER_CLEARANCE_FACTOR = 0.35; // 1.0 = full 2*radius clearance
+            const CORNER_CLEARANCE_FACTOR = 0.25; // 1.0 = full 2*radius clearance
             const makeSlitGeometry = (yTopOfSlit, yBottomOfSlit) => {
                 let dynamicBottomWidth = Math.max(0,
                     widthAtY(yBottomOfSlit) * this.slitBottomWidthFactor - INSET_X * 2

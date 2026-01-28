@@ -49,6 +49,42 @@ export function animateVectorMatrixPassThrough(
         return;
     }
 
+    const alignVectorToMatrixLane = (vec, mat) => {
+        if (!vec || !mat) return;
+        const lane = vec.userData ? vec.userData.parentLane : null;
+        let depth = Number.isFinite(mat.depth) ? mat.depth : MHA_MATRIX_PARAMS.depth;
+        const count = Number.isFinite(mat.numberOfSlits) ? mat.numberOfSlits : MHA_MATRIX_PARAMS.numberOfSlits;
+        if (!Number.isFinite(depth) || !Number.isFinite(count) || count <= 0) return;
+        let centerZ = mat.group && Number.isFinite(mat.group.position.z) ? mat.group.position.z : 0;
+        if (mat.mesh && mat.mesh.geometry && !mat.mesh.isInstancedMesh) {
+            const geom = mat.mesh.geometry;
+            if (!geom.boundingBox) geom.computeBoundingBox();
+            if (geom.boundingBox) {
+                const bb = geom.boundingBox;
+                depth = Math.max(1e-6, bb.max.z - bb.min.z);
+                const localCenterZ = (bb.min.z + bb.max.z) * 0.5;
+                const meshZ = mat.mesh.position && Number.isFinite(mat.mesh.position.z) ? mat.mesh.position.z : 0;
+                const meshScaleZ = mat.mesh.scale && Number.isFinite(mat.mesh.scale.z) ? mat.mesh.scale.z : 1;
+                centerZ = (mat.group && Number.isFinite(mat.group.position.z) ? mat.group.position.z : 0)
+                    + meshZ + localCenterZ * meshScaleZ;
+            }
+        }
+        const spacing = depth / (count + 1);
+        let laneIndex = lane && Number.isFinite(lane.laneIndex) ? lane.laneIndex : null;
+        if (!Number.isFinite(laneIndex)) {
+            const refZ = lane && Number.isFinite(lane.zPos) ? lane.zPos : vec.group.position.z;
+            laneIndex = Math.round((refZ - centerZ + depth / 2) / spacing - 1);
+        }
+        laneIndex = Math.max(0, Math.min(count - 1, Math.floor(laneIndex)));
+        const targetZ = centerZ - depth / 2 + spacing * (laneIndex + 1);
+        vec.group.position.z = targetZ;
+        if (mat.group && Number.isFinite(mat.group.position.x)) {
+            vec.group.position.x = mat.group.position.x;
+        }
+    };
+
+    alignVectorToMatrixLane(vector, matrix);
+
     // ------------------------------------------------------------------
     const matrixBottomY = ctx.mhsa_matrix_center_y - MHA_MATRIX_PARAMS.height / 2;
 

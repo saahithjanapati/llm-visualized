@@ -583,7 +583,8 @@ function stageChipCamera(pipeline, startPos, startTarget, endPos, endTarget, hol
 }
 
 // Optionally load pre-baked geometries to skip heavy procedural work.
-await loadPrecomputedGeometries('../precomputed_components_slice.glb');
+// Full GLB covers the Q/K/V matrices (no instanced slices) for the fastest startup.
+await loadPrecomputedGeometries('../precomputed_components.glb');
 
 // Activation data + lane count selection (defaults to static prompt if no capture).
 let activationSource = null;
