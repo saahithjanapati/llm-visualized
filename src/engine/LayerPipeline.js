@@ -89,6 +89,10 @@ export class LayerPipeline extends EventTarget {
         this._autoCameraOffsetLerpAlpha = Math.min(1, Math.max(0, offsetAlpha));
         const viewBlendAlpha = typeof opts.autoCameraViewBlendAlpha === 'number' ? opts.autoCameraViewBlendAlpha : 0.12;
         this._autoCameraViewBlendAlpha = Math.min(1, Math.max(0, viewBlendAlpha));
+        const mlpBlendAlpha = typeof opts.autoCameraViewBlendAlphaMlpReturn === 'number'
+            ? opts.autoCameraViewBlendAlphaMlpReturn
+            : (this._autoCameraViewBlendAlpha * 0.35);
+        this._autoCameraViewBlendAlphaMlpReturn = Math.min(1, Math.max(0, mlpBlendAlpha));
         this._autoCameraViewBlendAlphaActive = this._autoCameraViewBlendAlpha;
         const mobileScale = typeof opts.autoCameraMobileScale === 'number' ? opts.autoCameraMobileScale : 1.0;
         this._autoCameraScaleMax = Math.max(1.0, mobileScale);
@@ -1392,9 +1396,9 @@ export class LayerPipeline extends EventTarget {
         const outputPhase = mhsa.outputProjMatrixAnimationPhase || 'waiting';
         const rowPhase = mhsa.rowMergePhase || 'not_started';
         const outputReturnComplete = mhsa.outputProjMatrixReturnComplete === true;
-        const concatActive = outputPhase === 'vectors_entering'
-            || outputPhase === 'vectors_inside'
-            || ((rowPhase === 'merging' || rowPhase === 'merged') && outputPhase !== 'completed' && !outputReturnComplete);
+        const concatActive = (rowPhase === 'merging' || rowPhase === 'merged')
+            && outputPhase === 'waiting'
+            && !outputReturnComplete;
         if (concatActive) {
             return 'concat';
         }
@@ -1439,7 +1443,7 @@ export class LayerPipeline extends EventTarget {
                 && viewContext.lane.ln2Phase
                 && viewContext.lane.ln2Phase !== 'insideLN';
             this._autoCameraViewBlendAlphaActive = isMlpTransition
-                ? this._autoCameraViewBlendAlpha * 0.5
+                ? this._autoCameraViewBlendAlphaMlpReturn
                 : this._autoCameraViewBlendAlpha;
             this._autoCameraViewKey = key;
             if (!this._autoCameraSmoothValid) {

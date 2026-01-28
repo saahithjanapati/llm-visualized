@@ -161,6 +161,8 @@ export const USE_GLB_MATERIALS = false;
  * across visualisations.
  */
 export const USE_PHYSICAL_MATERIALS = true;
+// Disable instanced slice weight matrices to avoid visible seams between lanes.
+export const USE_INSTANCED_MATRIX_SLICES = true;
 
 // ------------------------------------------------------------
 // Common depth spacing (Z-axis) — edit this to change spacing for
@@ -287,6 +289,14 @@ export const LN_PARAMS = {
  */
 export const LN_NORM_START_FRACTION_FROM_BOTTOM = 0.25;
 
+// Lane slits inside weight matrices (shallow cuts keep top holes without side dashes).
+export const SHOW_LANE_SLITS = true;
+const LANE_SLIT_WIDTH = SHOW_LANE_SLITS ? 20 : 0;
+const MHA_SLIT_DEPTH_FACTOR = SHOW_LANE_SLITS ? 1.0 : 0;
+const LANE_SLIT_DEPTH_FACTOR = SHOW_LANE_SLITS ? 0.3 : 0;
+const MLP_STYLE_SLIT_WIDTH = SHOW_LANE_SLITS ? 5 : 0;
+const MLP_STYLE_SLIT_DEPTH_FACTOR = SHOW_LANE_SLITS ? 0.3 : 0;
+
 // Multi-Head Self-Attention (MHSA) Parameters
 /** Number of attention head sets (each set has Q, K, V matrices). */
 export const NUM_HEAD_SETS_LAYER = 12;
@@ -311,9 +321,9 @@ export const MHA_MATRIX_PARAMS = {
     cornerRadius: 5,
     // Match slit count to current lane count so each lane has its own channel.
     numberOfSlits: NUM_VECTOR_LANES,
-    slitWidth: 20, // significantly wider slits for clearer view
+    slitWidth: LANE_SLIT_WIDTH, // set to 0 to hide lane separators
     // Carve fully through so holes appear on both top and bottom faces
-    slitDepthFactor: 1.0,
+    slitDepthFactor: MHA_SLIT_DEPTH_FACTOR,
     slitBottomWidthFactor: 1,
     slitTopWidthFactor: 0.90
 };
@@ -332,8 +342,8 @@ export const MLP_MATRIX_STYLE_PARAMS = {
     topWidthFactor: 0.6,
     cornerRadius: 1.0,
     // numberOfSlits will be VECTOR_LENGTH for the d_model side, and VECTOR_LENGTH * MLP_VECTOR_MULTIPLIER for the 4*d_model side
-    slitWidth: 5,
-    slitDepthFactor: 1.0,
+    slitWidth: MLP_STYLE_SLIT_WIDTH,
+    slitDepthFactor: MLP_STYLE_SLIT_DEPTH_FACTOR,
     slitBottomWidthFactor: 0.9,
     slitTopWidthFactor: 0.5
 };
@@ -440,8 +450,8 @@ export const MLP_MATRIX_PARAMS_UP = {
     cornerRadius: 30.0,
     // Keep slit count in sync with lane count (same as MHA_MATRIX_PARAMS)
     numberOfSlits: NUM_VECTOR_LANES, // indicate 4× channels
-    slitWidth: 20,
-    slitDepthFactor: 1.0,
+    slitWidth: LANE_SLIT_WIDTH,
+    slitDepthFactor: LANE_SLIT_DEPTH_FACTOR,
     slitBottomWidthFactor: 0.95,
     slitTopWidthFactor: 0.95
 };
@@ -455,8 +465,8 @@ export const MLP_MATRIX_PARAMS_DOWN = {
     cornerRadius: 30.0,
     // back to original channels
     numberOfSlits: NUM_VECTOR_LANES,               // back to original channels
-    slitWidth: 20,
-    slitDepthFactor: 1.0,
+    slitWidth: LANE_SLIT_WIDTH,
+    slitDepthFactor: LANE_SLIT_DEPTH_FACTOR,
     slitBottomWidthFactor: 0.95,
     slitTopWidthFactor: 0.95
 };

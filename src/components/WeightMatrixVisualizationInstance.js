@@ -186,12 +186,14 @@ export class WeightMatrixVisualizationInstance {
                 const slitSpacing = this.depth / (this.numberOfSlits + 1);
                 const cutDepth = this.height * this.slitDepthFactor;
                 const slitBoxHeight = cutDepth + this.cornerRadius * 2 + 0.001;
-                const cutCenterY = (this.height / 2) - (slitBoxHeight / 2);
+                const cutCenterYTop = (this.height / 2) - (slitBoxHeight / 2);
+                const cutCenterYBottom = (-this.height / 2) + (slitBoxHeight / 2);
 
                 const widest = Math.max(this.width, this.width * this.topWidthFactor);
                 const constantBottomWidth = (widest + this.cornerRadius * 2) * this.slitBottomWidthFactor;
                 const constantTopWidth    = (widest + this.cornerRadius * 2) * this.slitTopWidthFactor;
 
+                const useDualCuts = this.slitDepthFactor < 0.95;
                 for (let i = 0; i < this.numberOfSlits; i++) {
                     const zPos = -this.depth / 2 + slitSpacing * (i + 1);
                     let slitGeometry;
@@ -211,10 +213,17 @@ export class WeightMatrixVisualizationInstance {
                         posAttr.needsUpdate = true;
                         slitGeometry.computeVertexNormals();
                     }
-                    const slitMesh = new THREE.Mesh(slitGeometry);
-                    slitMesh.position.set(0, cutCenterY, zPos);
-                    slitMesh.updateMatrix();
-                    baseMesh = CSG.subtract(baseMesh, slitMesh);
+                    const slitMeshTop = new THREE.Mesh(slitGeometry);
+                    slitMeshTop.position.set(0, cutCenterYTop, zPos);
+                    slitMeshTop.updateMatrix();
+                    baseMesh = CSG.subtract(baseMesh, slitMeshTop);
+
+                    if (useDualCuts) {
+                        const slitMeshBottom = new THREE.Mesh(slitGeometry);
+                        slitMeshBottom.position.set(0, cutCenterYBottom, zPos);
+                        slitMeshBottom.updateMatrix();
+                        baseMesh = CSG.subtract(baseMesh, slitMeshBottom);
+                    }
                 }
             }
 

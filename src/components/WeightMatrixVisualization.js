@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CSG } from 'three-csg-ts'; // Import CSG
-import { QUALITY_PRESET, NUM_VECTOR_LANES, VECTOR_DEPTH_SPACING, USE_GLB_MATERIALS } from '../utils/constants.js';
+import { QUALITY_PRESET, NUM_VECTOR_LANES, VECTOR_DEPTH_SPACING, USE_GLB_MATERIALS, USE_INSTANCED_MATRIX_SLICES } from '../utils/constants.js';
 import { createSciFiMaterial, updateSciFiDimensions, updateSciFiMaterialColor } from '../utils/sciFiMaterial.js';
 
 // ------------------------------------------------------------------
@@ -102,7 +102,7 @@ export class WeightMatrixVisualization {
         // the extremely heavy CSG work required for deep geometries and
         // completely sidesteps the need for a matching pre-baked asset.
         // --------------------------------------------------------------
-        const wantsInstancedSlices = this.depth > VECTOR_DEPTH_SPACING * 1.5;
+        const wantsInstancedSlices = USE_INSTANCED_MATRIX_SLICES && this.depth > VECTOR_DEPTH_SPACING * 1.5;
         if (wantsInstancedSlices) {
             this._createInstancedSlices();
             return;
@@ -257,9 +257,10 @@ export class WeightMatrixVisualization {
             const EPS_CSG = Math.max(0.02, this.height * 0.001);
             const slitBoxHeight = cutDepth + EPS_CSG * 2; // extend both ends a touch
 
-            // Position so the top of the slit box sits just above the top face
-            // (at +height/2 + EPS_CSG), eliminating coplanar ambiguity.
-            const cutCenterY = (this.height / 2 + EPS_CSG) - (slitBoxHeight / 2);
+            // Position so the top/bottom of the slit box sits just beyond the
+            // top/bottom faces, eliminating coplanar ambiguity.
+            const cutCenterYTop = (this.height / 2 + EPS_CSG) - (slitBoxHeight / 2);
+            const cutCenterYBottom = (-this.height / 2 - EPS_CSG) + (slitBoxHeight / 2);
 
             // Helper: compute the trapezoid width at an arbitrary Y (clamped to the body)
             const hh = this.height / 2;
@@ -271,55 +272,62 @@ export class WeightMatrixVisualization {
                 return THREE.MathUtils.lerp(shapeBottomWidth, shapeTopWidth, t);
             };
 
-            // Compute the top/bottom Y of the slit volume in the matrix’s local space
-            const yTopOfSlit = cutCenterY + slitBoxHeight / 2;
-            const yBottomOfSlit = cutCenterY - slitBoxHeight / 2;
-
             // Slight inward inset so we never breach the side walls due to numerical issues
             const INSET_X = Math.max(0.1, this.width * 0.001);
 
-            // Compute cutter widths to match the body profile exactly at the
-            // slit bounds, scaled by user factors and inset slightly.
-            const dynamicBottomWidth = Math.max(0,
-                widthAtY(yBottomOfSlit) * this.slitBottomWidthFactor - INSET_X * 2
-            );
-            const dynamicTopWidth = Math.max(0,
-                widthAtY(yTopOfSlit) * this.slitTopWidthFactor - INSET_X * 2
-            );
-
-            for (let i = 0; i < this.numberOfSlits; i++) {
-                const zPos = -this.depth / 2 + slitSpacing * (i + 1);
-
-                let slitGeometry;
+            const makeSlitGeometry = (yTopOfSlit, yBottomOfSlit) => {
+                const dynamicBottomWidth = Math.max(0,
+                    widthAtY(yBottomOfSlit) * this.slitBottomWidthFactor - INSET_X * 2
+                );
+                const dynamicTopWidth = Math.max(0,
+                    widthAtY(yTopOfSlit) * this.slitTopWidthFactor - INSET_X * 2
+                );
 
                 if (Math.abs(dynamicBottomWidth - dynamicTopWidth) < 1e-4) {
                     // Simple rectangular slit (top == bottom)
-                    slitGeometry = new THREE.BoxGeometry(dynamicBottomWidth, slitBoxHeight, this.slitWidth);
-                } else {
-                    // Create tapered geometry (trapezoidal prism) by modifying a box geometry
-                    slitGeometry = new THREE.BoxGeometry(dynamicBottomWidth, slitBoxHeight, this.slitWidth, 1, 1, 1);
-                    const posAttr = slitGeometry.attributes.position;
-                    const halfH = slitBoxHeight / 2;
-                    for (let v = 0; v < posAttr.count; v++) {
-                        const y = posAttr.getY(v);
-                        const t = (y + halfH) / slitBoxHeight; // 0 at bottom, 1 at top
-                        const targetWidth = THREE.MathUtils.lerp(dynamicBottomWidth, dynamicTopWidth, t);
-                        const scale = (dynamicBottomWidth > 0) ? (targetWidth / dynamicBottomWidth) : 1.0;
-                        posAttr.setX(v, posAttr.getX(v) * scale);
-                    }
-                    posAttr.needsUpdate = true;
-                    slitGeometry.computeVertexNormals();
+                    return new THREE.BoxGeometry(dynamicBottomWidth, slitBoxHeight, this.slitWidth);
                 }
+                // Create tapered geometry (trapezoidal prism) by modifying a box geometry
+                const geom = new THREE.BoxGeometry(dynamicBottomWidth, slitBoxHeight, this.slitWidth, 1, 1, 1);
+                const posAttr = geom.attributes.position;
+                const halfH = slitBoxHeight / 2;
+                for (let v = 0; v < posAttr.count; v++) {
+                    const y = posAttr.getY(v);
+                    const t = (y + halfH) / slitBoxHeight; // 0 at bottom, 1 at top
+                    const targetWidth = THREE.MathUtils.lerp(dynamicBottomWidth, dynamicTopWidth, t);
+                    const scale = (dynamicBottomWidth > 0) ? (targetWidth / dynamicBottomWidth) : 1.0;
+                    posAttr.setX(v, posAttr.getX(v) * scale);
+                }
+                posAttr.needsUpdate = true;
+                geom.computeVertexNormals();
+                return geom;
+            };
+
+            const useDualCuts = this.slitDepthFactor < 0.95;
+
+            for (let i = 0; i < this.numberOfSlits; i++) {
+                const zPos = -this.depth / 2 + slitSpacing * (i + 1);
                 
-                // Material not needed for CSG
-                const slitMesh = new THREE.Mesh(slitGeometry); 
+                const topY = cutCenterYTop;
+                const yTopOfSlitTop = topY + slitBoxHeight / 2;
+                const yBottomOfSlitTop = topY - slitBoxHeight / 2;
+                const slitGeometryTop = makeSlitGeometry(yTopOfSlitTop, yBottomOfSlitTop);
 
-                // Position the slit box so its center aligns with the desired cut midpoint
-                slitMesh.position.set(0, cutCenterY, zPos);
-                slitMesh.updateMatrix(); // IMPORTANT: Update matrix before CSG operation
+                const slitMeshTop = new THREE.Mesh(slitGeometryTop);
+                slitMeshTop.position.set(0, topY, zPos);
+                slitMeshTop.updateMatrix();
+                finalMesh = CSG.subtract(finalMesh, slitMeshTop);
 
-                // Subtract the slit mesh from the current result
-                finalMesh = CSG.subtract(finalMesh, slitMesh);
+                if (useDualCuts) {
+                    const bottomY = cutCenterYBottom;
+                    const yTopOfSlitBottom = bottomY + slitBoxHeight / 2;
+                    const yBottomOfSlitBottom = bottomY - slitBoxHeight / 2;
+                    const slitGeometryBottom = makeSlitGeometry(yTopOfSlitBottom, yBottomOfSlitBottom);
+                    const slitMeshBottom = new THREE.Mesh(slitGeometryBottom);
+                    slitMeshBottom.position.set(0, bottomY, zPos);
+                    slitMeshBottom.updateMatrix();
+                    finalMesh = CSG.subtract(finalMesh, slitMeshBottom);
+                }
             }
         }
 
@@ -479,6 +487,7 @@ export class WeightMatrixVisualization {
      */
     _createInstancedSlices() {
         const sliceDepth = VECTOR_DEPTH_SPACING;
+        const depthSpan = (NUM_VECTOR_LANES - 1) * VECTOR_DEPTH_SPACING + sliceDepth;
         const sliceSlits = 1; // one slit per slice – channels separated by instancing
 
         // ----------------------------------------------------------
@@ -530,7 +539,7 @@ export class WeightMatrixVisualization {
         // ----------------------------------------------------------
         // Material – clone defaults from standard path
         // ----------------------------------------------------------
-        const sciFiSliceDims = { width: this.width, height: this.height, depth: sliceDepth };
+        const sciFiSliceDims = { width: this.width, height: this.height, depth: depthSpan };
         let mat;
         if (USE_GLB_MATERIALS && __materialCache.has(sliceKey)) {
             mat = __materialCache.get(sliceKey).clone();
@@ -560,7 +569,7 @@ export class WeightMatrixVisualization {
                 scanlineFrequency: (Math.PI * 2) / Math.max(this.height / 5, 1),
                 scanlineStrength: 0.24,
                 dimensions: sciFiSliceDims,
-                stripeFrequency: (Math.PI * 2) / Math.max(sliceDepth / 6, 1),
+                stripeFrequency: (Math.PI * 2) / Math.max(depthSpan / 6, 1),
                 stripeStrength: 0.55,
                 rimIntensity: 0.66,
                 gradientSharpness: 1.38,
@@ -569,6 +578,24 @@ export class WeightMatrixVisualization {
                 glintStrength: 0.22,
                 noiseStrength: 0.05
             });
+        }
+        // Soften depth stripes for instanced slices to avoid lane seams.
+        if (mat && mat.userData && mat.userData.sciFiUniforms) {
+            if (mat.userData.sciFiUniforms.uStripeStrength) {
+                mat.userData.sciFiUniforms.uStripeStrength.value = 0.0;
+            }
+            if (mat.userData.sciFiUniforms.uDepthAccentStrength) {
+                mat.userData.sciFiUniforms.uDepthAccentStrength.value = 0.0;
+            }
+            if (mat.userData.sciFiUniforms.uScanlineStrength) {
+                mat.userData.sciFiUniforms.uScanlineStrength.value = 0.0;
+            }
+            if (mat.userData.sciFiUniforms.uNoiseStrength) {
+                mat.userData.sciFiUniforms.uNoiseStrength.value = 0.0;
+            }
+            if (mat.userData.sciFiUniforms.uGlintStrength) {
+                mat.userData.sciFiUniforms.uGlintStrength.value = 0.0;
+            }
         }
 
         // ----------------------------------------------------------
@@ -685,21 +712,12 @@ export class WeightMatrixVisualization {
             noiseStrength: 0.06
         });
 
-        const frontCaps = new THREE.InstancedMesh(capGeoFront.clone(), capMatFront, NUM_VECTOR_LANES);
-        const backCaps  = new THREE.InstancedMesh(capGeoBack.clone(),  capMatBack,  NUM_VECTOR_LANES);
-
-        for (let i = 0; i < NUM_VECTOR_LANES; i++) {
-            const z = (i - (NUM_VECTOR_LANES - 1) / 2) * VECTOR_DEPTH_SPACING;
-            // front face sits slightly in front of slice
-            mtx.makeTranslation(0, 0, z + sliceDepth / 2 + 0.05);
-            frontCaps.setMatrixAt(i, mtx);
-            // back face slightly behind
-            mtx.makeTranslation(0, 0, z - sliceDepth / 2 - 0.05);
-            backCaps.setMatrixAt(i, mtx);
-        }
-
-        frontCaps.instanceMatrix.needsUpdate = true;
-        backCaps.instanceMatrix.needsUpdate  = true;
+        const frontCaps = new THREE.Mesh(capGeoFront.clone(), capMatFront);
+        const backCaps  = new THREE.Mesh(capGeoBack.clone(),  capMatBack);
+        const capEps = 0.05;
+        frontCaps.position.z = depthSpan / 2 + capEps;
+        backCaps.position.z = -depthSpan / 2 - capEps;
+        backCaps.rotation.y = Math.PI;
 
         // ----------------------------------------------------------
         // Store references and add to group
