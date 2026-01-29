@@ -292,9 +292,12 @@ export const LN_NORM_START_FRACTION_FROM_BOTTOM = 0.25;
 // Lane slits inside weight matrices (shallow cuts keep top holes without side dashes).
 export const SHOW_LANE_SLITS = true;
 const LANE_SLIT_WIDTH = SHOW_LANE_SLITS ? 20 : 0;
+// Default shallow cut used by embedding blocks.
 const LANE_SLIT_DEPTH_FACTOR = SHOW_LANE_SLITS ? 0.3 : 0;
 // Q/K/V matrices should be clear-through so vector lanes have a visible path.
 const MHA_SLIT_DEPTH_FACTOR = SHOW_LANE_SLITS ? 1.0 : 0;
+// MLP matrices should also be clear-through for an uninterrupted top-to-bottom view.
+const MLP_SLIT_DEPTH_FACTOR = SHOW_LANE_SLITS ? 1.0 : 0;
 const MLP_STYLE_SLIT_WIDTH = SHOW_LANE_SLITS ? 5 : 0;
 const MLP_STYLE_SLIT_DEPTH_FACTOR = SHOW_LANE_SLITS ? 0.3 : 0;
 
@@ -452,7 +455,7 @@ export const MLP_MATRIX_PARAMS_UP = {
     // Keep slit count in sync with lane count (same as MHA_MATRIX_PARAMS)
     numberOfSlits: NUM_VECTOR_LANES, // indicate 4× channels
     slitWidth: LANE_SLIT_WIDTH,
-    slitDepthFactor: LANE_SLIT_DEPTH_FACTOR,
+    slitDepthFactor: MLP_SLIT_DEPTH_FACTOR,
     slitBottomWidthFactor: 0.95,
     slitTopWidthFactor: 0.95
 };
@@ -467,7 +470,7 @@ export const MLP_MATRIX_PARAMS_DOWN = {
     // back to original channels
     numberOfSlits: NUM_VECTOR_LANES,               // back to original channels
     slitWidth: LANE_SLIT_WIDTH,
-    slitDepthFactor: LANE_SLIT_DEPTH_FACTOR,
+    slitDepthFactor: MLP_SLIT_DEPTH_FACTOR,
     slitBottomWidthFactor: 0.95,
     slitTopWidthFactor: 0.95
 };
@@ -503,7 +506,7 @@ export const EMBEDDING_MATRIX_PARAMS_VOCAB = {
     cornerRadius: MLP_MATRIX_PARAMS_UP.cornerRadius,
     numberOfSlits: NUM_VECTOR_LANES,
     slitWidth: EMBEDDING_SLIT_WIDTH,
-    slitDepthFactor: MLP_MATRIX_PARAMS_UP.slitDepthFactor,
+    slitDepthFactor: LANE_SLIT_DEPTH_FACTOR,
     slitBottomWidthFactor: MLP_MATRIX_PARAMS_UP.slitBottomWidthFactor,
     slitTopWidthFactor: MLP_MATRIX_PARAMS_UP.slitTopWidthFactor
 };
@@ -517,7 +520,7 @@ export const EMBEDDING_MATRIX_PARAMS_POSITION = {
     cornerRadius: MLP_MATRIX_PARAMS_UP.cornerRadius,
     numberOfSlits: NUM_VECTOR_LANES,
     slitWidth: EMBEDDING_SLIT_WIDTH,
-    slitDepthFactor: MLP_MATRIX_PARAMS_UP.slitDepthFactor,
+    slitDepthFactor: LANE_SLIT_DEPTH_FACTOR,
     slitBottomWidthFactor: MLP_MATRIX_PARAMS_UP.slitBottomWidthFactor,
     slitTopWidthFactor: MLP_MATRIX_PARAMS_UP.slitTopWidthFactor
 };

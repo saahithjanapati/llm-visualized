@@ -24,6 +24,16 @@ import {
 
 const TMP_WORLD_POS = new THREE.Vector3();
 const LN_ADD_VECTOR_OFFSET_FRACTION = 0.25; // fraction of LN height above centre for bias addition
+const LN_PARAM_MONOCHROME = {
+    type: 'monochromatic',
+    baseHue: 0,
+    saturation: 0,
+    minLightness: 0.08,
+    maxLightness: 0.6,
+    useData: true,
+    valueMin: -1.8,
+    valueMax: 1.8
+};
 
 export function createFreshLanes(layer, offsetX, ln1CenterY, ln2CenterY, ln1TopY) {
     const slitSpacing = LN_PARAMS.depth / (layer._laneCount + 1);
@@ -39,6 +49,12 @@ export function createFreshLanes(layer, offsetX, ln1CenterY, ln2CenterY, ln1TopY
     if (layer._ln2AddPlaceholders && layer._ln2AddPlaceholders.every(p => !p)) {
         layer._ln2AddPlaceholders = [];
     }
+    if (layer._ln1ScalePlaceholders && layer._ln1ScalePlaceholders.every(p => !p)) {
+        layer._ln1ScalePlaceholders = [];
+    }
+    if (layer._ln2ScalePlaceholders && layer._ln2ScalePlaceholders.every(p => !p)) {
+        layer._ln2ScalePlaceholders = [];
+    }
 }
 
 export function createAdditionPlaceholders(layer, offsetX, ln1CenterY, ln2CenterY) {
@@ -46,31 +62,65 @@ export function createAdditionPlaceholders(layer, offsetX, ln1CenterY, ln2Center
         const slitSpacing = LN_PARAMS.depth / (layer._laneCount + 1);
         const addYOffset = LN_PARAMS.height * LN_ADD_VECTOR_OFFSET_FRACTION;
         const raycastRoot = layer.raycastRoot || layer.root;
+        const getLnParamData = (kind, param) => (
+            typeof layer._getLayerNormParamData === 'function'
+                ? layer._getLayerNormParamData(kind, param)
+                : null
+        );
+        const fallbackVector = () => layer.random.nextVector(layer._getBaseVectorLength());
+        if (!layer._ln1AddPlaceholders) layer._ln1AddPlaceholders = [];
+        if (!layer._ln2AddPlaceholders) layer._ln2AddPlaceholders = [];
+        if (!layer._ln1ScalePlaceholders) layer._ln1ScalePlaceholders = [];
+        if (!layer._ln2ScalePlaceholders) layer._ln2ScalePlaceholders = [];
 
         for (let laneIdx = 0; laneIdx < layer._laneCount; laneIdx++) {
             const zPos = -LN_PARAMS.depth / 2 + slitSpacing * (laneIdx + 1);
 
-            const ln1PlaceholderData = layer.random.nextVector(layer._getBaseVectorLength());
+            const ln1ScaleData = getLnParamData('ln1', 'scale') || fallbackVector();
+            const ln1Scale = layer._createPrismVector(
+                ln1ScaleData,
+                new THREE.Vector3(offsetX, ln1CenterY + 3.3, zPos),
+                30,
+                ln1ScaleData.length
+            );
+            layer._applyLayerNormParamVector(ln1Scale, 'ln1', 'scale', LN_PARAM_MONOCHROME);
+            ln1Scale.group.visible = true;
+            raycastRoot.add(ln1Scale.group);
+            layer._ln1ScalePlaceholders[laneIdx] = ln1Scale;
+
+            const ln1PlaceholderData = getLnParamData('ln1', 'shift') || fallbackVector();
             const ln1Placeholder = layer._createPrismVector(
                 ln1PlaceholderData,
                 new THREE.Vector3(offsetX, ln1CenterY + addYOffset, zPos),
                 30,
                 ln1PlaceholderData.length
             );
-            layer._applyLayerNormParamVector(ln1Placeholder, 'ln1', 'shift');
-            ln1Placeholder.group.visible = false;
+            layer._applyLayerNormParamVector(ln1Placeholder, 'ln1', 'shift', LN_PARAM_MONOCHROME);
+            ln1Placeholder.group.visible = true;
             raycastRoot.add(ln1Placeholder.group);
             layer._ln1AddPlaceholders[laneIdx] = ln1Placeholder;
 
-            const ln2PlaceholderData = layer.random.nextVector(layer._getBaseVectorLength());
+            const ln2ScaleData = getLnParamData('ln2', 'scale') || fallbackVector();
+            const ln2Scale = layer._createPrismVector(
+                ln2ScaleData,
+                new THREE.Vector3(offsetX, ln2CenterY + 3.3, zPos),
+                30,
+                ln2ScaleData.length
+            );
+            layer._applyLayerNormParamVector(ln2Scale, 'ln2', 'scale', LN_PARAM_MONOCHROME);
+            ln2Scale.group.visible = true;
+            raycastRoot.add(ln2Scale.group);
+            layer._ln2ScalePlaceholders[laneIdx] = ln2Scale;
+
+            const ln2PlaceholderData = getLnParamData('ln2', 'shift') || fallbackVector();
             const ln2Placeholder = layer._createPrismVector(
                 ln2PlaceholderData,
                 new THREE.Vector3(offsetX, ln2CenterY + addYOffset, zPos),
                 30,
                 ln2PlaceholderData.length
             );
-            layer._applyLayerNormParamVector(ln2Placeholder, 'ln2', 'shift');
-            ln2Placeholder.group.visible = false;
+            layer._applyLayerNormParamVector(ln2Placeholder, 'ln2', 'shift', LN_PARAM_MONOCHROME);
+            ln2Placeholder.group.visible = true;
             raycastRoot.add(ln2Placeholder.group);
             layer._ln2AddPlaceholders[laneIdx] = ln2Placeholder;
         }
@@ -92,10 +142,22 @@ export function createLanesFromExternal(layer, externalLanes, offsetX, ln1Center
     if (layer._ln2AddPlaceholders && layer._ln2AddPlaceholders.every(p => !p)) {
         layer._ln2AddPlaceholders = [];
     }
+    if (layer._ln1ScalePlaceholders && layer._ln1ScalePlaceholders.every(p => !p)) {
+        layer._ln1ScalePlaceholders = [];
+    }
+    if (layer._ln2ScalePlaceholders && layer._ln2ScalePlaceholders.every(p => !p)) {
+        layer._ln2ScalePlaceholders = [];
+    }
 }
 
 export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY, startY_override, meetY, laneIdx, slitSpacing) {
     const raycastRoot = layer.raycastRoot || layer.root;
+    const getLnParamData = (kind, param) => (
+        typeof layer._getLayerNormParamData === 'function'
+            ? layer._getLayerNormParamData(kind, param)
+            : null
+    );
+    const fallbackVector = () => layer.random.nextVector(layer._getBaseVectorLength());
     // Reuse existing trail when lanes are passed from a lower layer.
     let trailFromPrev = oldLane && oldLane.originalTrail ? oldLane.originalTrail : null;
     const laneTokenIndex = (oldLane && Number.isFinite(oldLane.tokenIndex))
@@ -198,29 +260,54 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
         trail.start(TMP_WORLD_POS);
     }
 
-    const multTarget = layer._createPrismVector(
-        originalVec.rawData.slice(),
-        new THREE.Vector3(offsetX, ln1CenterY + 3.3, zPos),
-        30,
-        originalVec.instanceCount
-    );
-    layer._applyLayerNormParamVector(multTarget, 'ln1', 'scale');
-    raycastRoot.add(multTarget.group);
-    multTarget.group.visible = false;
+    let multTarget = null;
+    const ln1ScaleData = getLnParamData('ln1', 'scale') || fallbackVector();
+    if (layer._ln1ScalePlaceholders && layer._ln1ScalePlaceholders[laneIdx]) {
+        multTarget = layer._ln1ScalePlaceholders[laneIdx];
+        layer._ln1ScalePlaceholders[laneIdx] = null;
+        if (multTarget && multTarget.group && multTarget.group.parent !== raycastRoot) {
+            raycastRoot.add(multTarget.group);
+        }
+        if (multTarget && multTarget.group) {
+            multTarget.group.visible = true;
+        }
+    } else {
+        multTarget = layer._createPrismVector(
+            ln1ScaleData,
+            new THREE.Vector3(offsetX, ln1CenterY + 3.3, zPos),
+            30,
+            ln1ScaleData.length
+        );
+        raycastRoot.add(multTarget.group);
+    }
+    layer._applyLayerNormParamVector(multTarget, 'ln1', 'scale', LN_PARAM_MONOCHROME);
 
-    const multTargetLN2 = layer._createPrismVector(
-        originalVec.rawData.slice(),
-        new THREE.Vector3(offsetX, ln2CenterY + 3.3, zPos),
-        30,
-        originalVec.instanceCount
-    );
-    layer._applyLayerNormParamVector(multTargetLN2, 'ln2', 'scale');
-    raycastRoot.add(multTargetLN2.group);
-    multTargetLN2.group.visible = false;
+    let multTargetLN2 = null;
+    const ln2ScaleData = getLnParamData('ln2', 'scale') || fallbackVector();
+    if (layer._ln2ScalePlaceholders && layer._ln2ScalePlaceholders[laneIdx]) {
+        multTargetLN2 = layer._ln2ScalePlaceholders[laneIdx];
+        layer._ln2ScalePlaceholders[laneIdx] = null;
+        if (multTargetLN2 && multTargetLN2.group && multTargetLN2.group.parent !== raycastRoot) {
+            raycastRoot.add(multTargetLN2.group);
+        }
+        if (multTargetLN2 && multTargetLN2.group) {
+            multTargetLN2.group.visible = true;
+        }
+    } else {
+        multTargetLN2 = layer._createPrismVector(
+            ln2ScaleData,
+            new THREE.Vector3(offsetX, ln2CenterY + 3.3, zPos),
+            30,
+            ln2ScaleData.length
+        );
+        raycastRoot.add(multTargetLN2.group);
+    }
+    layer._applyLayerNormParamVector(multTargetLN2, 'ln2', 'scale', LN_PARAM_MONOCHROME);
 
     const addYOffset = LN_PARAMS.height * LN_ADD_VECTOR_OFFSET_FRACTION;
 
     let addTarget = null;
+    const ln1ShiftData = getLnParamData('ln1', 'shift') || fallbackVector();
     if (layer._ln1AddPlaceholders && layer._ln1AddPlaceholders[laneIdx]) {
         addTarget = layer._ln1AddPlaceholders[laneIdx];
         layer._ln1AddPlaceholders[laneIdx] = null;
@@ -228,22 +315,22 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
             raycastRoot.add(addTarget.group);
         }
         if (addTarget && addTarget.group) {
-            addTarget.group.visible = false;
+            addTarget.group.visible = true;
         }
     } else {
-        const addTargetData = layer.random.nextVector(layer._getBaseVectorLength());
         addTarget = layer._createPrismVector(
-            addTargetData,
+            ln1ShiftData,
             new THREE.Vector3(offsetX, ln1CenterY + addYOffset, zPos),
             30,
-            addTargetData.length
+            ln1ShiftData.length
         );
         raycastRoot.add(addTarget.group);
-        if (addTarget.group) addTarget.group.visible = false;
+        if (addTarget.group) addTarget.group.visible = true;
     }
-    layer._applyLayerNormParamVector(addTarget, 'ln1', 'shift');
+    layer._applyLayerNormParamVector(addTarget, 'ln1', 'shift', LN_PARAM_MONOCHROME);
 
     let addTargetLN2 = null;
+    const ln2ShiftData = getLnParamData('ln2', 'shift') || fallbackVector();
     if (layer._ln2AddPlaceholders && layer._ln2AddPlaceholders[laneIdx]) {
         addTargetLN2 = layer._ln2AddPlaceholders[laneIdx];
         layer._ln2AddPlaceholders[laneIdx] = null;
@@ -251,20 +338,19 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
             raycastRoot.add(addTargetLN2.group);
         }
         if (addTargetLN2 && addTargetLN2.group) {
-            addTargetLN2.group.visible = false;
+            addTargetLN2.group.visible = true;
         }
     } else {
-        const addTargetDataLn2 = layer.random.nextVector(layer._getBaseVectorLength());
         addTargetLN2 = layer._createPrismVector(
-            addTargetDataLn2,
+            ln2ShiftData,
             new THREE.Vector3(offsetX, ln2CenterY + addYOffset, zPos),
             30,
-            addTargetDataLn2.length
+            ln2ShiftData.length
         );
         raycastRoot.add(addTargetLN2.group);
-        if (addTargetLN2.group) addTargetLN2.group.visible = false;
+        if (addTargetLN2.group) addTargetLN2.group.visible = true;
     }
-    layer._applyLayerNormParamVector(addTargetLN2, 'ln2', 'shift');
+    layer._applyLayerNormParamVector(addTargetLN2, 'ln2', 'shift', LN_PARAM_MONOCHROME);
 
     // Fallback to previous trail if a new one wasn't created in this constructor.
     if (!trail && trailFromPrev) trail = trailFromPrev;
@@ -301,6 +387,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
         multStarted: false,
         ln1AddStarted: false,
         ln1AddComplete: false,
+        ln1ParamColored: false,
         resultVec: null,
         targetY: meetY,
         travellingVec: null,
@@ -318,6 +405,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
         pendingNormLabelLN2: null,
         pendingNormMetaLN2: null,
         multDoneLN2: false,
+        ln2ParamColored: false,
         ln2AddStarted: false,
         ln2AddComplete: false,
         resultVecLN2: null,

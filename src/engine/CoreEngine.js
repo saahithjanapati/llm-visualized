@@ -127,6 +127,7 @@ export class CoreEngine {
         this._raycastHoverHandler = null;
         this._hoveringClickable = false;
         this._hoverLabelsEnabled = true;
+        this._hoverLabelsSuppressed = false;
         this._clickTapData = null;
         this._clickTapMoveThresholdSq = 36; // ~6px movement allowance
 
@@ -336,6 +337,21 @@ export class CoreEngine {
             this._hoverLabelDiv.style.display = 'none';
         }
         if (!this._raycastingEnabled) {
+            this._setCanvasCursor(false);
+            if (this._raycastHoverHandler) this._raycastHoverHandler(null);
+        }
+    }
+
+    /**
+     * Temporarily suppress hover labels without disabling selection raycasts.
+     * Useful when the pointer is over UI overlays.
+     */
+    setHoverLabelsSuppressed(suppressed) {
+        const next = !!suppressed;
+        if (this._hoverLabelsSuppressed === next) return;
+        this._hoverLabelsSuppressed = next;
+        if (next) {
+            if (this._hoverLabelDiv) this._hoverLabelDiv.style.display = 'none';
             this._setCanvasCursor(false);
             if (this._raycastHoverHandler) this._raycastHoverHandler(null);
         }
@@ -790,6 +806,12 @@ export class CoreEngine {
                 }
             }
         }
+        if (this._hoverLabelsSuppressed) {
+            if (this._hoverLabelDiv) this._hoverLabelDiv.style.display = 'none';
+            this._setCanvasCursor(false);
+            if (this._raycastHoverHandler) this._raycastHoverHandler(null);
+            return;
+        }
         if (!this._hoverLabelsEnabled) {
             if (this._hoverLabelDiv) this._hoverLabelDiv.style.display = 'none';
             this._setCanvasCursor(false);
@@ -883,6 +905,11 @@ export class CoreEngine {
 
     _performRaycastAt(clientX, clientY, { force = false } = {}) {
         if (!this._raycastingEnabled) return;
+        if (this._hoverLabelsSuppressed) {
+            if (this._hoverLabelDiv) this._hoverLabelDiv.style.display = 'none';
+            this._setCanvasCursor(false);
+            return;
+        }
         if (!this._hoverLabelsEnabled) return;
         if (!force && this._isUserNavigating) return;
         if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return;

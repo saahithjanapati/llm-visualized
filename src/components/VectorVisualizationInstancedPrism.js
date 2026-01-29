@@ -60,6 +60,11 @@ function buildColorCacheKey(numKeyColors, instanceCount, colorGenerationOptions)
         key += `|s:${formatOptionNumber(colorGenerationOptions.saturation)}`;
         key += `|min:${formatOptionNumber(colorGenerationOptions.minLightness)}`;
         key += `|max:${formatOptionNumber(colorGenerationOptions.maxLightness)}`;
+        if (colorGenerationOptions.useData) {
+            key += `|data:1`;
+            key += `|vmin:${formatOptionNumber(colorGenerationOptions.valueMin)}`;
+            key += `|vmax:${formatOptionNumber(colorGenerationOptions.valueMax)}`;
+        }
         return key;
     }
     const type = colorGenerationOptions.type ? String(colorGenerationOptions.type) : 'custom';
@@ -635,20 +640,18 @@ varying float vGradientT;`
                 const value = dataLengthForSampling > 0 ? data[sampleIndex] : 0.5; // Default if no data
 
                 if (colorGenerationOptions && colorGenerationOptions.type === 'monochromatic') {
-                     // For monochromatic, the 'value' parameter to mapValueToMonochromaticColor
-                     // should probably be the normalized progress (i / (numKeyColorsToSample - 1))
-                     // to ensure the gradient spreads across the key colors, rather than raw data values directly dictating lightness.
-                     // Or, if raw data should dictate lightness, it needs to be minMaxNormalized first.
-                     // Let's assume for now 'value' for monochromatic is progress along the gradient points.
+                    const valueMin = Number.isFinite(colorGenerationOptions.valueMin) ? colorGenerationOptions.valueMin : 0;
+                    const valueMax = Number.isFinite(colorGenerationOptions.valueMax) ? colorGenerationOptions.valueMax : 1;
+                    const useData = colorGenerationOptions.useData === true;
                     const progress = (numKeyColorsToSample > 1) ? i / (numKeyColorsToSample - 1) : 0.5;
                     this.currentKeyColors.push(mapValueToMonochromaticColor(
-                        progress, // Use progress for lightness variation
+                        useData ? value : progress,
                         colorGenerationOptions.baseHue,
                         colorGenerationOptions.saturation,
                         colorGenerationOptions.minLightness,
                         colorGenerationOptions.maxLightness,
-                        0,
-                        1
+                        useData ? valueMin : 0,
+                        useData ? valueMax : 1
                     ));
                 } else {
                     this.currentKeyColors.push(mapValueToColor(value));

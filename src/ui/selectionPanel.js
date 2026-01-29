@@ -62,10 +62,12 @@ const PREVIEW_VECTOR_HEAD_INSTANCES = 1;
 const PREVIEW_VECTOR_BODY_INSTANCES = VECTOR_LENGTH_PRISM;
 const ATTENTION_PREVIEW_MAX_TOKENS = 16;
 const ATTENTION_PREVIEW_TARGET_PX = 320;
-const ATTENTION_PREVIEW_MIN_CELL = 10;
+const ATTENTION_PREVIEW_MIN_CELL = 4;
 const ATTENTION_PREVIEW_MAX_CELL = 24;
 const ATTENTION_PREVIEW_GAP = 4;
 const ATTENTION_PREVIEW_TRIANGLE = 'lower';
+const ATTENTION_PREVIEW_GRID_GAP = 8; // matches .detail-attention-grid column gap in CSS
+const SPACE_TOKEN_DISPLAY = '" "';
 
 const TOKEN_CHIP_STYLE = {
     padding: 80,
@@ -165,7 +167,11 @@ function colorToCss(color) {
 
 function formatTokenLabelForPreview(label) {
     if (typeof label !== 'string') return '';
-    return label.replace(/^\u0120/, ' ').replace(/\s+/g, ' ').trim();
+    const normalized = label.replace(/^\u0120+/, (match) => ' '.repeat(match.length));
+    if (!normalized.length) return SPACE_TOKEN_DISPLAY;
+    const collapsed = normalized.replace(/\s+/g, ' ');
+    const trimmed = collapsed.trim();
+    return trimmed.length ? trimmed : SPACE_TOKEN_DISPLAY;
 }
 
 function getActivationDataFromSelection(selectionInfo) {
@@ -216,6 +222,37 @@ function computeAttentionCellSize(count) {
     const safeCount = Math.max(1, Math.floor(count || 1));
     const size = ATTENTION_PREVIEW_TARGET_PX / safeCount;
     return Math.max(ATTENTION_PREVIEW_MIN_CELL, Math.min(ATTENTION_PREVIEW_MAX_CELL, size));
+}
+
+function getContentWidth(el) {
+    if (!el || typeof window === 'undefined') return 0;
+    const style = window.getComputedStyle(el);
+    const paddingLeft = parseFloat(style.paddingLeft) || 0;
+    const paddingRight = parseFloat(style.paddingRight) || 0;
+    const width = (el.clientWidth || 0) - paddingLeft - paddingRight;
+    return Math.max(0, width);
+}
+
+function measureMaxTokenLabelWidth(labels, referenceEl) {
+    if (!Array.isArray(labels) || labels.length === 0 || !referenceEl || typeof window === 'undefined') return 0;
+    const style = window.getComputedStyle(referenceEl);
+    const fontStyle = style.fontStyle || 'normal';
+    const fontWeight = style.fontWeight || '400';
+    const fontSize = style.fontSize || '10px';
+    const fontFamily = style.fontFamily || 'monospace';
+    const font = `${fontStyle} ${fontWeight} ${fontSize} ${fontFamily}`;
+    const canvas = measureMaxTokenLabelWidth._canvas || (measureMaxTokenLabelWidth._canvas = document.createElement('canvas'));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return 0;
+    ctx.font = font;
+    let maxWidth = 0;
+    for (let i = 0; i < labels.length; i += 1) {
+        const text = typeof labels[i] === 'string' ? labels[i] : String(labels[i] ?? '');
+        const width = ctx.measureText(text).width;
+        if (width > maxWidth) maxWidth = width;
+    }
+    const padding = 4; // subtle breathing room; padding is handled separately
+    return maxWidth + padding;
 }
 
 function buildAttentionMatrixValues({ activationSource, layerIndex, headIndex, tokenIndices, mode }) {
@@ -568,11 +605,114 @@ function resolveMetadata(label, kind = null) {
     return { params: 'TBD', dims: 'TBD' };
 }
 
+function resolveDescription(label, kind = null, selectionInfo = null) {
+    const lower = (label || '').toLowerCase();
+    const activation = getActivationDataFromSelection(selectionInfo);
+    const stage = activation?.stage || '';
+
+    if (lower.startsWith('token:')) {
+        return 'This is a prompt token, the raw discrete symbol GPT-2 reads. It gets embedded into a dense vector and then combined with a positional embedding before flowing through the stack. The same token can influence many later tokens via attention.';
+    }
+    if (lower.startsWith('position:')) {
+        return 'This is the position embedding for a specific index in the sequence. It is added to the token embedding so the model can reason about order. Without this signal, GPT-2 would treat the sequence as a bag of tokens.';
+    }
+    if (lower.includes('vocab embedding (top)')) {
+        return 'This is the unembedding matrix used at the top of the model. It maps hidden states back into vocabulary logits to choose the next token. In GPT‑2 it is tied to the input token embedding weights.';
+    }
+    if (lower.includes('vocab embedding')) {
+        return 'This matrix maps discrete token ids into continuous vectors. It is the first learned projection the model applies to the prompt. Those vectors carry semantic and syntactic information into the residual stream.';
+    }
+    if (lower.includes('positional embedding')) {
+        return 'This adds position information so each token knows where it sits in the sequence. It is summed with the token embedding at the bottom of the model. This allows attention to distinguish “first” versus “last” occurrences.';
+    }
+    if (lower.includes('query weight matrix')) {
+        return 'This matrix projects residual vectors into query space for self‑attention. Queries determine what each token is looking for. They are matched against keys to produce attention scores.';
+    }
+    if (lower.includes('key weight matrix')) {
+        return 'This matrix projects residual vectors into key space for self‑attention. Keys represent what each token offers to be attended to. Queries score against keys to decide which tokens matter most.';
+    }
+    if (lower.includes('value weight matrix')) {
+        return 'This matrix projects residual vectors into value space for self‑attention. Values are the content that gets mixed together according to attention weights. The weighted sum of values becomes the attention output.';
+    }
+    if (lower.includes('output projection matrix')) {
+        return 'After heads are concatenated, this matrix projects them back to model dimension. It lets the model recombine head information into a single residual stream vector. This is the final linear step of attention.';
+    }
+    if (lower.includes('mlp up weight matrix')) {
+        return 'This matrix expands the hidden state into a larger MLP dimension. The expansion gives the model more capacity for nonlinear transformations. It precedes the GELU activation.';
+    }
+    if (lower.includes('mlp down weight matrix')) {
+        return 'This matrix projects the MLP hidden state back to model dimension. It compresses the nonlinear features into the residual stream. Together with the up‑projection it forms the feed‑forward block.';
+    }
+    if (lower.includes('layernorm') || lower.includes('layer norm')) {
+        if (lower.includes('scale') || lower.includes('gamma')) {
+            return 'This is the LayerNorm scale (gamma) vector. It rescales each normalized feature to restore useful magnitudes. Its values are learned per feature and are shared across tokens.';
+        }
+        if (lower.includes('shift') || lower.includes('beta')) {
+            return 'This is the LayerNorm shift (beta) vector. It offsets each normalized feature after scaling. It lets the model re‑center activations in a learned way.';
+        }
+        if (lower.includes('normed') || lower.includes('normalized')) {
+            return 'This is the LayerNorm output for a token after normalization. It has zero‑mean, unit‑variance statistics per token (before scale/shift). This stabilized vector feeds into attention or the MLP.';
+        }
+        return 'LayerNorm normalizes each token’s features and then applies learned scale and shift. It stabilizes training and keeps activations in a usable range. GPT‑2 uses pre‑LayerNorm, so it happens before each sublayer.';
+    }
+    if (lower.includes('merged key vectors')) {
+        return 'These are the key vectors from all heads stacked together. They represent what each token offers to be matched. The attention mechanism compares queries to these keys.';
+    }
+    if (lower.includes('merged value vectors')) {
+        return 'These are the value vectors from all heads stacked together. They hold the content that will be mixed by attention weights. The weighted mix becomes the attended representation.';
+    }
+    if (lower.includes('query vector')) {
+        return 'This is a query vector for a specific token. It encodes what the token is looking for in the rest of the sequence. It is used to score all key vectors.';
+    }
+    if (lower.includes('key vector')) {
+        return 'This is a key vector for a specific token. It encodes what the token offers to be attended to. Queries compare against it to compute attention scores.';
+    }
+    if (lower.includes('value vector')) {
+        return 'This is a value vector for a specific token. It is the information that gets mixed when other tokens attend to it. The final attention output is a weighted sum of values.';
+    }
+    if (lower.includes('attention score') || stage.startsWith('attention.')) {
+        if (stage === 'attention.pre') {
+            return 'This is a raw attention score from a source token to a target token. It is computed by a scaled dot‑product of query and key. A causal mask is added before softmax.';
+        }
+        if (stage === 'attention.post') {
+            return 'This is a normalized attention weight after softmax. It tells how much the source token reads from the target token. The weights sum to 1 for each source token.';
+        }
+        return 'This is an attention score connecting a source token to a target token. Scores determine how much information flows between tokens. They are computed per head.';
+    }
+    if (lower.includes('attention')) {
+        return 'Self‑attention lets tokens read from other tokens in the sequence. Queries, keys, and values are computed per head and combined. The result is added back into the residual stream.';
+    }
+    if (lower.includes('top logit bars')) {
+        return 'These are logits over the vocabulary before softmax. Higher values indicate more likely next tokens. The model samples from these to produce the next token.';
+    }
+    if (lower.includes('incoming residual') || lower.includes('residual')) {
+        return 'This is the residual stream vector for a token at this point in the model. It carries forward all information accumulated so far. Sub‑layers (attention, MLP) add their outputs back into it.';
+    }
+    if (lower.includes('mlp')) {
+        return 'The MLP is a token‑wise feed‑forward network. It expands, applies a nonlinearity, and compresses back to model dimension. This adds nonlinear capacity separate from attention.';
+    }
+    if (lower.includes('vector')) {
+        return 'This vector represents a token’s state at a particular stage. It is a slice of the residual stream or a derived representation (Q/K/V). It will be transformed or mixed by later layers.';
+    }
+    if (lower.includes('weight matrix')) {
+        return 'This is a learned linear transformation. It projects token representations into a new space. Different matrices specialize for attention or MLP roles.';
+    }
+    if (kind) {
+        return 'This selection is a GPT‑2 component involved in transforming token representations. It participates in the residual stream, attention, or MLP pipeline. Its role depends on the stage of the forward pass.';
+    }
+    return 'This selection is part of the GPT‑2 visualization. It represents a structure used to transform, normalize, or route token information. Look at nearby labels to see how it fits into the layer.';
+}
+
 function extractTokenText(label) {
     if (!label) return '';
     const match = label.match(/^(token|position)\s*:\s*(.*)$/i);
-    if (!match) return label.trim();
-    return (match[2] || '').trim();
+    if (!match) {
+        const trimmed = label.trim();
+        return trimmed.length ? trimmed : SPACE_TOKEN_DISPLAY;
+    }
+    const extracted = match[2] || '';
+    const trimmed = extracted.trim();
+    return trimmed.length ? trimmed : SPACE_TOKEN_DISPLAY;
 }
 
 function buildRoundedRectShape(width, height, radius) {
@@ -595,7 +735,7 @@ function buildRoundedRectShape(width, height, radius) {
 
 function createTokenChipShared(labelText) {
     const rawText = (typeof labelText === 'string') ? labelText : '';
-    const text = rawText.trim().length ? rawText : 'Token';
+    const text = rawText.trim().length ? rawText : SPACE_TOKEN_DISPLAY;
     const font = tokenChipFont;
     let textGeo = null;
     let textMat = null;
@@ -1354,6 +1494,7 @@ class SelectionPanel {
         this.dims = document.getElementById('detailDims');
         this.closeBtn = document.getElementById('detailClose');
         this.canvas = document.getElementById('detailCanvas');
+        this.description = document.getElementById('detailDescription');
         this.dataEl = document.getElementById('detailData');
         this.attentionRoot = document.getElementById('detailAttention');
         this.attentionToggle = document.getElementById('detailAttentionToggle');
@@ -1363,6 +1504,10 @@ class SelectionPanel {
         this.attentionEmpty = document.getElementById('detailAttentionEmpty');
         this.attentionNote = document.getElementById('detailAttentionNote');
         this.attentionValue = document.getElementById('detailAttentionValue');
+        this.attentionLegend = document.getElementById('detailAttentionLegend');
+        this.attentionLegendLow = document.getElementById('detailAttentionLegendLow');
+        this.attentionLegendHigh = document.getElementById('detailAttentionLegendHigh');
+        this.engine = options.engine || null;
 
         if (!this.panel || !this.canvas || !this.title) {
             this.isReady = false;
@@ -1393,6 +1538,8 @@ class SelectionPanel {
         this.currentAnimator = null;
         this.isOpen = false;
         this._lastFrameTime = performance.now();
+        this._mobilePauseActive = false;
+        this._mobileFocusActive = false;
 
         this._animate = this._animate.bind(this);
         this._onResize = this._onResize.bind(this);
@@ -1403,6 +1550,8 @@ class SelectionPanel {
         this._onAttentionPointerMove = this._onAttentionPointerMove.bind(this);
         this._onAttentionPointerDown = this._onAttentionPointerDown.bind(this);
         this._clearAttentionHover = this._clearAttentionHover.bind(this);
+        this._onPanelPointerEnter = this._onPanelPointerEnter.bind(this);
+        this._onPanelPointerLeave = this._onPanelPointerLeave.bind(this);
         this._startLoop();
 
         this.activationSource = options.activationSource || null;
@@ -1419,6 +1568,9 @@ class SelectionPanel {
         this._attentionHoverRow = null;
         this._attentionHoverCol = null;
         this._attentionValueDefault = '';
+        this._attentionPinned = false;
+        this._attentionPinnedRow = null;
+        this._attentionPinnedCol = null;
 
         this.closeBtn?.addEventListener('click', () => this.close());
         this.closeBtn?.addEventListener('pointerdown', this._onClosePointerDown);
@@ -1440,6 +1592,8 @@ class SelectionPanel {
             this.attentionMatrix.addEventListener('pointerdown', this._onAttentionPointerDown);
             this.attentionMatrix.addEventListener('pointerleave', this._clearAttentionHover);
         }
+        this.panel.addEventListener('pointerenter', this._onPanelPointerEnter);
+        this.panel.addEventListener('pointerleave', this._onPanelPointerLeave);
         window.addEventListener('resize', this._onResize);
         document.addEventListener('keydown', this._onKeydown);
         document.addEventListener('pointerdown', this._onDocumentPointerDown, { capture: true });
@@ -1461,6 +1615,7 @@ class SelectionPanel {
         this.renderer.setSize(width, height, false);
         this.camera.aspect = width / height;
         this.camera.updateProjectionMatrix();
+        this._updateMobileState();
     }
 
     _onKeydown(event) {
@@ -1481,6 +1636,50 @@ class SelectionPanel {
         if (!isTouch) return;
         if (event.cancelable) event.preventDefault();
         event.stopPropagation();
+    }
+
+    _setHoverLabelSuppression(suppressed) {
+        if (this.engine && typeof this.engine.setHoverLabelsSuppressed === 'function') {
+            this.engine.setHoverLabelsSuppressed(!!suppressed);
+        }
+    }
+
+    _isSmallScreen() {
+        if (typeof window === 'undefined') return false;
+        if (typeof window.matchMedia === 'function') {
+            return window.matchMedia('(max-aspect-ratio: 1/1), (max-width: 880px)').matches;
+        }
+        return window.innerWidth <= 880 || window.innerHeight <= window.innerWidth;
+    }
+
+    _updateMobileState() {
+        const shouldFocus = this.isOpen && this._isSmallScreen();
+        if (shouldFocus !== this._mobilePauseActive) {
+            this._mobilePauseActive = shouldFocus;
+            if (this.engine) {
+                if (shouldFocus) {
+                    this.engine.pause?.('detail-mobile');
+                } else {
+                    this.engine.resume?.('detail-mobile');
+                }
+            }
+        }
+        if (shouldFocus === this._mobileFocusActive) return;
+        this._mobileFocusActive = shouldFocus;
+        if (typeof document === 'undefined' || !document.body) return;
+        if (shouldFocus) {
+            document.body.classList.add('detail-mobile-focus');
+        } else {
+            document.body.classList.remove('detail-mobile-focus');
+        }
+    }
+
+    _onPanelPointerEnter() {
+        this._setHoverLabelSuppression(true);
+    }
+
+    _onPanelPointerLeave() {
+        this._setHoverLabelSuppression(false);
     }
 
     _setAttentionVisibility(visible) {
@@ -1526,8 +1725,8 @@ class SelectionPanel {
             }
             const formatted = formatTokenLabelForPreview(labelText);
             if (formatted) return formatted;
-            // If capture data exists, keep blanks blank instead of "Token N".
-            if (this.activationSource) return '';
+            // If capture data exists, keep blanks as a single space instead of "Token N".
+            if (this.activationSource) return SPACE_TOKEN_DISPLAY;
             return `Token ${tokenIndex + 1}`;
         });
 
@@ -1561,12 +1760,13 @@ class SelectionPanel {
         const context = this._attentionContext;
         if (!context || !this.activationSource) {
             this._setAttentionVisibility(false);
-            this._clearAttentionHover();
+            this._clearPinnedAttention();
             return;
         }
 
         const { tokenIndices, tokenLabels, headIndex, layerIndex, trimmed, totalCount, hasSource } = context;
         const mode = this.attentionMode === 'post' ? 'post' : 'pre';
+        this._updateAttentionLegend(mode);
         const values = hasSource
             ? buildAttentionMatrixValues({
                 activationSource: this.activationSource,
@@ -1596,11 +1796,30 @@ class SelectionPanel {
         }
 
         const count = tokenIndices.length;
-        const cellSize = computeAttentionCellSize(count);
-        const gap = ATTENTION_PREVIEW_GAP;
-
+        let cellSize = computeAttentionCellSize(count);
+        const densityScale = Math.min(1, Math.max(0.35, 8 / Math.max(1, count)));
+        const gap = Math.max(1, Math.round(ATTENTION_PREVIEW_GAP * densityScale));
+        const gridGap = Math.max(2, Math.round(ATTENTION_PREVIEW_GRID_GAP * densityScale));
+        const leftPad = Math.max(2, Math.round(4 * densityScale));
+        const leftTokenPad = Math.max(2, Math.round(6 * densityScale));
+        const labelWidth = measureMaxTokenLabelWidth(tokenLabels, this.attentionTokensLeft);
+        const availableWidth = getContentWidth(this.attentionRoot);
+        if (labelWidth > 0 && availableWidth > 0) {
+            const usable = availableWidth - labelWidth - gridGap - leftPad - leftTokenPad;
+            if (usable > 0) {
+                const maxCellByWidth = (usable - (count - 1) * gap) / count;
+                if (Number.isFinite(maxCellByWidth) && maxCellByWidth > 0) {
+                    cellSize = Math.min(cellSize, maxCellByWidth);
+                }
+            }
+        }
+        cellSize = Math.max(ATTENTION_PREVIEW_MIN_CELL, Math.min(ATTENTION_PREVIEW_MAX_CELL, Math.floor(cellSize)));
         this.attentionRoot.style.setProperty('--cell-size', `${cellSize}px`);
         this.attentionRoot.style.setProperty('--cell-gap', `${gap}px`);
+        this.attentionRoot.style.setProperty('--attention-grid-gap', `${gridGap}px`);
+        this.attentionRoot.style.setProperty('--attention-left-padding', `${leftPad}px`);
+        this.attentionRoot.style.setProperty('--attention-left-token-padding', `${leftTokenPad}px`);
+        this.attentionRoot.style.setProperty('--attention-matrix-justify', 'center');
         this.attentionTokensTop.style.gridTemplateColumns = `repeat(${count}, ${cellSize}px)`;
         this.attentionTokensTop.style.gap = `${gap}px`;
         this.attentionTokensLeft.style.gridTemplateRows = `repeat(${count}, ${cellSize}px)`;
@@ -1647,7 +1866,9 @@ class SelectionPanel {
                     ? col >= row
                     : col <= row;
                 const value = values ? values[row]?.[col] : null;
-                if (!isVisible || value === null) {
+                if (!isVisible) {
+                    cell.classList.add('is-hidden');
+                } else if (value === null) {
                     cell.classList.add('is-empty');
                 } else {
                     const color = mode === 'post' ? mapValueToGrayscale(value) : mapValueToColor(value);
@@ -1668,19 +1889,49 @@ class SelectionPanel {
         if (this.attentionEmpty) {
             this.attentionEmpty.style.display = hasAnyValue ? 'none' : 'block';
         }
-        this._clearAttentionHover();
+        if (!this._restorePinnedAttentionCell()) {
+            this._clearAttentionHover(true);
+        }
     }
 
-    _setAttentionHoverFromCell(cell) {
-        if (!cell || cell.classList.contains('is-empty')) {
-            this._clearAttentionHover();
+    _updateAttentionLegend(mode) {
+        if (!this.attentionLegend || !this.attentionLegendLow || !this.attentionLegendHigh) return;
+        const safeMode = mode === 'post' ? 'post' : 'pre';
+        if (this.attentionRoot) {
+            this.attentionRoot.dataset.attnMode = safeMode;
+        }
+
+        if (safeMode === 'post') {
+            const low = colorToCss(mapValueToGrayscale(0));
+            const high = colorToCss(mapValueToGrayscale(1));
+            this.attentionLegend.style.setProperty('--attention-legend-gradient', `linear-gradient(90deg, ${low}, ${high})`);
+            this.attentionLegend.style.setProperty('--attention-legend-mid-opacity', '0');
+            this.attentionLegend.dataset.mid = '';
+            this.attentionLegendLow.textContent = '0';
+            this.attentionLegendHigh.textContent = '1';
+            return;
+        }
+
+        const low = colorToCss(mapValueToColor(-2));
+        const mid = colorToCss(mapValueToColor(0));
+        const high = colorToCss(mapValueToColor(2));
+        this.attentionLegend.style.setProperty('--attention-legend-gradient', `linear-gradient(90deg, ${low}, ${mid}, ${high})`);
+        this.attentionLegend.style.setProperty('--attention-legend-mid-opacity', '1');
+        this.attentionLegend.dataset.mid = '0';
+        this.attentionLegendLow.textContent = '-2';
+        this.attentionLegendHigh.textContent = '+2';
+    }
+
+    _setAttentionHoverFromCell(cell, { force = false } = {}) {
+        if (!cell || cell.classList.contains('is-empty') || cell.classList.contains('is-hidden')) {
+            this._clearAttentionHover(force);
             return;
         }
         const row = Number(cell.dataset.row);
         const col = Number(cell.dataset.col);
         if (row === this._attentionHoverRow && col === this._attentionHoverCol) return;
 
-        this._clearAttentionHover();
+        this._clearAttentionHover(force);
         this._attentionHoverCell = cell;
         this._attentionHoverRow = row;
         this._attentionHoverCol = col;
@@ -1703,6 +1954,7 @@ class SelectionPanel {
     }
 
     _onAttentionPointerMove(event) {
+        if (this._attentionPinned) return;
         const target = event.target;
         const cell = target && typeof target.closest === 'function'
             ? target.closest('.attention-cell')
@@ -1719,14 +1971,34 @@ class SelectionPanel {
         const cell = target && typeof target.closest === 'function'
             ? target.closest('.attention-cell')
             : null;
+        const isDirectManipulation = event.pointerType === 'touch' || event.pointerType === 'pen';
         if (!cell || !this.attentionMatrix || !this.attentionMatrix.contains(cell)) {
+            if (isDirectManipulation) {
+                this._clearPinnedAttention();
+                return;
+            }
             this._clearAttentionHover();
+            return;
+        }
+        if (isDirectManipulation) {
+            const row = Number(cell.dataset.row);
+            const col = Number(cell.dataset.col);
+            if (this._attentionPinned && row === this._attentionPinnedRow && col === this._attentionPinnedCol) {
+                this._clearPinnedAttention();
+                return;
+            }
+            this._attentionPinned = true;
+            this._attentionPinnedRow = row;
+            this._attentionPinnedCol = col;
+            this._setAttentionHoverFromCell(cell, { force: true });
             return;
         }
         this._setAttentionHoverFromCell(cell);
     }
 
-    _clearAttentionHover() {
+    _clearAttentionHover(force = false) {
+        const forceFlag = force === true;
+        if (this._attentionPinned && !forceFlag) return;
         if (this._attentionHoverCell) {
             this._attentionHoverCell.classList.remove('is-hovered');
         }
@@ -1744,6 +2016,26 @@ class SelectionPanel {
         if (this.attentionValue) {
             this.attentionValue.textContent = this._attentionValueDefault || '';
         }
+    }
+
+    _clearPinnedAttention() {
+        this._attentionPinned = false;
+        this._attentionPinnedRow = null;
+        this._attentionPinnedCol = null;
+        this._clearAttentionHover(true);
+    }
+
+    _restorePinnedAttentionCell() {
+        if (!this._attentionPinned || !this.attentionMatrix) return false;
+        if (!Number.isFinite(this._attentionPinnedRow) || !Number.isFinite(this._attentionPinnedCol)) return false;
+        const selector = `.attention-cell[data-row="${this._attentionPinnedRow}"][data-col="${this._attentionPinnedCol}"]`;
+        const cell = this.attentionMatrix.querySelector(selector);
+        if (!cell || cell.classList.contains('is-empty') || cell.classList.contains('is-hidden')) {
+            this._clearPinnedAttention();
+            return false;
+        }
+        this._setAttentionHoverFromCell(cell, { force: true });
+        return true;
     }
 
     _onDocumentPointerDown(event) {
@@ -1815,6 +2107,7 @@ class SelectionPanel {
         this.panel.classList.add('is-open');
         this.hudPanel?.classList.add('detail-open');
         this.panel.setAttribute('aria-hidden', 'false');
+        this._updateMobileState();
     }
 
     close() {
@@ -1823,6 +2116,9 @@ class SelectionPanel {
         this.panel.classList.remove('is-open');
         this.hudPanel?.classList.remove('detail-open');
         this.panel.setAttribute('aria-hidden', 'true');
+        this._setHoverLabelSuppression(false);
+        this._updateMobileState();
+        if (this.description) this.description.textContent = '';
     }
 
     showSelection(selection) {
@@ -1833,6 +2129,10 @@ class SelectionPanel {
         this.title.textContent = label;
         if (this.params) this.params.textContent = metadata.params;
         if (this.dims) this.dims.textContent = metadata.dims;
+        if (this.description) {
+            const desc = resolveDescription(label, selection.kind, selection);
+            this.description.textContent = desc || '';
+        }
         if (this.dataEl) {
             const activationData = (selection.object && selection.object.userData && selection.object.userData.activationData)
                 || (selection.info && selection.info.activationData)

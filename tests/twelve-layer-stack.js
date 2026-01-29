@@ -99,9 +99,16 @@ const POSITION_CHIP_STYLE = {
     scale: 2.0
 };
 
-// GPT-2 BPE uses a leading U+0120 to indicate a space; render as a normal space.
+// GPT-2 BPE uses a leading U+0120 to indicate a space; render pure-space tokens visibly.
+const SPACE_TOKEN_DISPLAY = '" "';
+
 function formatTokenLabel(token) {
-    return token.replace(/^\u0120/, ' ');
+    if (token === null || token === undefined) return SPACE_TOKEN_DISPLAY;
+    const raw = String(token);
+    const normalized = raw.replace(/^\u0120+/, (match) => ' '.repeat(match.length));
+    if (!normalized.length) return SPACE_TOKEN_DISPLAY;
+    if (normalized.trim().length === 0) return SPACE_TOKEN_DISPLAY;
+    return normalized;
 }
 
 // Build a rounded rectangle shape used for the token chip body.
@@ -1127,7 +1134,8 @@ window.addEventListener('pointerdown', (event) => {
 const selectionPanel = initSelectionPanel({
     activationSource,
     laneTokenIndices,
-    tokenLabels: tokenLabelsFromCapture
+    tokenLabels: tokenLabelsFromCapture,
+    engine: pipeline.engine
 });
 if (pipeline.engine && typeof pipeline.engine.setRaycastSelectionHandler === 'function') {
     pipeline.engine.setRaycastSelectionHandler(selection => {

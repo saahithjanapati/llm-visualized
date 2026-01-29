@@ -9,10 +9,16 @@ const LN_MATERIAL_EPSILON = 1e-4;
 // Minimum segment length for LN-internal trails to reduce overdraw.
 export const LN_INTERNAL_TRAIL_MIN_SEGMENT = 0.15;
 
-// GPT-2 BPE uses a leading U+0120 to indicate a space; render as a normal space.
+// GPT-2 BPE uses a leading U+0120 to indicate a space; render pure-space tokens visibly.
+const SPACE_TOKEN_DISPLAY = '" "';
+
 export function formatTokenLabel(token) {
-    if (!token) return null;
-    return token.replace(/^\u0120/, ' ');
+    if (token === null || token === undefined) return null;
+    const raw = String(token);
+    const normalized = raw.replace(/^\u0120+/, (match) => ' '.repeat(match.length));
+    if (!normalized.length) return SPACE_TOKEN_DISPLAY;
+    if (normalized.trim().length === 0) return SPACE_TOKEN_DISPLAY;
+    return normalized;
 }
 
 function getKeyColorCount(values) {

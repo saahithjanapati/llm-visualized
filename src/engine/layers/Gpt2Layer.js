@@ -107,12 +107,14 @@ export default class Gpt2Layer extends BaseLayer {
         this.raycastRoot = null;
 
         // Placeholder vectors shown inside inactive LayerNorms so the
-        // "addition" prisms are visible throughout the full stack even
+        // scale/shift prisms are visible throughout the full stack even
         // before a layer becomes active. When a layer is activated the
-        // placeholders are re-used as the live addition targets and removed
+        // placeholders are re-used as the live targets and removed
         // from these arrays (see _buildSingleLane).
         this._ln1AddPlaceholders = [];
         this._ln2AddPlaceholders = [];
+        this._ln1ScalePlaceholders = [];
+        this._ln2ScalePlaceholders = [];
 
         // Cached colours reused during per-frame updates to avoid heap churn.
         this._ln1TargetColor = new THREE.Color();
@@ -680,6 +682,11 @@ export default class Gpt2Layer extends BaseLayer {
                     if (dupVec.group.position.x >= BRANCH_X - 0.01) {
                         // Ensure alignment with LN-1 centre
                         dupVec.group.position.x = BRANCH_X;
+                        if (!lane.ln1ParamColored) {
+                            this._applyLayerNormParamVector(lane.multTarget, 'ln1', 'scale');
+                            this._applyLayerNormParamVector(lane.addTarget, 'ln1', 'shift');
+                            lane.ln1ParamColored = true;
+                        }
                         // Show the multiplication target inside LN-1 (parity with LN-2 behaviour)
                         if (lane.multTarget && lane.multTarget.group) {
                             lane.multTarget.group.visible = true;
@@ -692,6 +699,11 @@ export default class Gpt2Layer extends BaseLayer {
                     }
                     break;
                 case 'insideLN':
+                    if (!lane.ln1ParamColored) {
+                        this._applyLayerNormParamVector(lane.multTarget, 'ln1', 'scale');
+                        this._applyLayerNormParamVector(lane.addTarget, 'ln1', 'shift');
+                        lane.ln1ParamColored = true;
+                    }
                     // Start the normalisation animation once the vector has
                     // climbed the configured fraction of the LayerNorm's
                     // height from its bottom edge.
@@ -1024,6 +1036,11 @@ export default class Gpt2Layer extends BaseLayer {
                     
                     if (mv.group.position.x >= BRANCH_X - 0.01) {
                         mv.group.position.x = BRANCH_X;
+                        if (!lane.ln2ParamColored) {
+                            this._applyLayerNormParamVector(lane.multTargetLN2, 'ln2', 'scale');
+                            this._applyLayerNormParamVector(lane.addTargetLN2, 'ln2', 'shift');
+                            lane.ln2ParamColored = true;
+                        }
                         if (lane.multTargetLN2 && lane.multTargetLN2.group) {
                             lane.multTargetLN2.group.visible = true;
                         }
@@ -1038,6 +1055,11 @@ export default class Gpt2Layer extends BaseLayer {
                 }
                 
                 case 'insideLN': {
+                    if (!lane.ln2ParamColored) {
+                        this._applyLayerNormParamVector(lane.multTargetLN2, 'ln2', 'scale');
+                        this._applyLayerNormParamVector(lane.addTargetLN2, 'ln2', 'shift');
+                        lane.ln2ParamColored = true;
+                    }
                     // Inside LayerNorm2 - normalize and multiply
                     const mv = lane.movingVecLN2;
                     if (!mv) break;
@@ -2032,7 +2054,7 @@ export default class Gpt2Layer extends BaseLayer {
         return getLayerNormParamData(this.index, kind, param, baseLength);
     }
 
-    _applyLayerNormParamVector(targetVec, kind, param) {
+    _applyLayerNormParamVector(targetVec, kind, param, colorOptions = null) {
         if (!targetVec) return false;
         const data = this._getLayerNormParamData(kind, param);
         if (!data) return false;
@@ -2046,7 +2068,7 @@ export default class Gpt2Layer extends BaseLayer {
                 ? 'LayerNorm scale (gamma) parameter'
                 : 'LayerNorm shift (beta) parameter'
         };
-        return applyVectorData(targetVec, data, label, meta);
+        return applyVectorData(targetVec, data, label, meta, colorOptions);
     }
 
     _getTokenIndexForLane(laneIdx) {
