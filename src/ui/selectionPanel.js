@@ -1484,6 +1484,11 @@ function isLayerNormLabel(label) {
 
 function resolvePreviewObject(label, selectionInfo) {
     const lower = (label || '').toLowerCase();
+    const isVectorSelection = isLikelyVectorSelection(label, selectionInfo);
+    if (isVectorSelection) {
+        const vectorClone = buildVectorClonePreview(selectionInfo);
+        if (vectorClone) return vectorClone;
+    }
     if (isQkvMatrixLabel(lower)) {
         const type = inferQkvType(label, selectionInfo);
         const matrixColor = type === 'Q' ? MHA_FINAL_Q_COLOR : (type === 'V' ? MHA_FINAL_V_COLOR : MHA_FINAL_K_COLOR);
@@ -1504,8 +1509,6 @@ function resolvePreviewObject(label, selectionInfo) {
         }
         return clonePreview;
     }
-    const vectorClone = buildVectorClonePreview(selectionInfo);
-    if (vectorClone) return vectorClone;
     if (lower.startsWith('token:') || lower.startsWith('position:')) {
         const clonePreview = buildSelectionClonePreview(selectionInfo, label);
         if (clonePreview) return clonePreview;
