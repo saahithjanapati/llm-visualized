@@ -129,7 +129,9 @@ export class LayerNormalizationVisualization {
         /* Controls the length of slits along the ellipse surface (0-1) */
         holeWidthFactor = 0.8,
         /* How many segments to approximate the ellipse – higher = smoother */
-        segments = 64
+        segments = 64,
+        /* Whether to use instanced slices for deep stacks */
+        useInstancedSlices = true
     ) {
         // Public group that callers can add to their scene
         this.group = new THREE.Group();
@@ -145,6 +147,7 @@ export class LayerNormalizationVisualization {
         this.holeWidth = holeWidth;
         this.holeWidthFactor = holeWidthFactor;
         this.segments = segments;
+        this.useInstancedSlices = useInstancedSlices !== false;
 
         // Hold reference to the mesh for later disposal / replacement
         this.mesh = null;
@@ -194,7 +197,7 @@ export class LayerNormalizationVisualization {
         // replicate it across NUM_VECTOR_LANES using InstancedMesh. This
         // avoids expensive CSG work for deep extrusions.
         // --------------------------------------------------------------
-        const wantsInstancedSlices = this.depth > VECTOR_DEPTH_SPACING * 1.5;
+        const wantsInstancedSlices = this.useInstancedSlices && this.depth > VECTOR_DEPTH_SPACING * 1.5;
         if (wantsInstancedSlices) {
             this._createInstancedSlices();
             return;
@@ -438,6 +441,7 @@ export class LayerNormalizationVisualization {
     _createInstancedSlices() {
         const sliceDepth = VECTOR_DEPTH_SPACING;
         const sliceHoles = 1;
+        const laneCount = Math.max(1, Math.floor(this.numberOfHoles || 1));
 
         // Cache key for slice geometry
         const sliceKey = getCacheKey(
@@ -476,7 +480,7 @@ export class LayerNormalizationVisualization {
         }
 
         const sciFiSliceDims = { width: this.width, height: this.height, depth: sliceDepth };
-        const sciFiStackDims = { width: this.width, height: this.height, depth: sliceDepth * NUM_VECTOR_LANES };
+        const sciFiStackDims = { width: this.width, height: this.height, depth: sliceDepth * laneCount };
         const mat = (USE_GLB_MATERIALS && __materialCache.has(sliceKey))
             ? __materialCache.get(sliceKey).clone()
             : createSciFiMaterial({
@@ -515,10 +519,10 @@ export class LayerNormalizationVisualization {
             });
 
         const sideWallGeometry = STRIP_END_CAPS ? sliceGeometry : stripCapsGeometry(sliceGeometry);
-        const inst = new THREE.InstancedMesh(sideWallGeometry, mat, NUM_VECTOR_LANES);
+        const inst = new THREE.InstancedMesh(sideWallGeometry, mat, laneCount);
         const mtx = new THREE.Matrix4();
-        for (let i = 0; i < NUM_VECTOR_LANES; i++) {
-            const z = (i - (NUM_VECTOR_LANES - 1) / 2) * VECTOR_DEPTH_SPACING;
+        for (let i = 0; i < laneCount; i++) {
+            const z = (i - (laneCount - 1) / 2) * VECTOR_DEPTH_SPACING;
             mtx.makeTranslation(0, 0, z);
             inst.setMatrixAt(i, mtx);
         }
@@ -550,7 +554,7 @@ export class LayerNormalizationVisualization {
         capMaterial.polygonOffsetFactor = -1;
         capMaterial.polygonOffsetUnits = -4;
 
-        const stackDepth = NUM_VECTOR_LANES * sliceDepth;
+        const stackDepth = laneCount * sliceDepth;
         const capOffset = 0.05;
         const frontCap = new THREE.Mesh(capGeometry, capMaterial);
         frontCap.position.z = stackDepth / 2 + capOffset;

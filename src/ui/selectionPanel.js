@@ -26,6 +26,7 @@ import {
 } from '../animations/LayerAnimationConstants.js';
 
 const PREVIEW_LANES = 3;
+const PREVIEW_SOLID_LANES = 5;
 const PREVIEW_TOKEN_LANES = 1;
 const PREVIEW_MATRIX_DEPTH = 320;
 const PREVIEW_LANE_SPACING = 80;
@@ -318,6 +319,17 @@ function isQkvMatrixLabel(label) {
         || lower.includes('value weight matrix');
 }
 
+function isParameterSelection(label) {
+    const lower = (label || '').toLowerCase();
+    if (isWeightMatrixLabel(lower)) return true;
+    if (lower.includes('layernorm') || lower.includes('layer norm')) {
+        if (lower.includes('scale') || lower.includes('shift') || lower.includes('gamma') || lower.includes('beta')) {
+            return true;
+        }
+    }
+    return false;
+}
+
 function isAttentionScoreSelection(label, selectionInfo) {
     const lower = (label || '').toLowerCase();
     if (lower.includes('attention score')) return true;
@@ -506,13 +518,42 @@ function buildSelectionClonePreview(selectionInfo, label) {
         applyLaneOverrideToInstancedMeshes(clone, PREVIEW_QKV_LANES, PREVIEW_QKV_LANE_SPACING);
     }
     const finalColor = resolveFinalPreviewColor(label);
-    applyFinalColorToObject(clone, finalColor);
+    if (!isLayerNormLabel(label)) {
+        applyFinalColorToObject(clone, finalColor);
+    }
     return {
         object: clone,
         dispose: () => {
             previewGeometries.forEach((geo) => geo && geo.dispose && geo.dispose());
             previewMaterials.forEach((mat) => mat && mat.dispose && mat.dispose());
         }
+    };
+}
+
+function buildSharedClonePreview(selectionInfo, label) {
+    const source = selectionInfo?.object || selectionInfo?.hit?.object;
+    if (!source || !label) return null;
+    let match = null;
+    let current = source;
+    while (current) {
+        if (current.userData?.label === label) {
+            match = current;
+        }
+        current = current.parent;
+    }
+    const root = match || source;
+    if (!root || root.isScene) return null;
+    const clone = root.clone(true);
+    clone.traverse((child) => {
+        child.matrixAutoUpdate = true;
+        if (child.isInstancedMesh) {
+            if (child.instanceMatrix) child.instanceMatrix.needsUpdate = true;
+            if (child.instanceColor) child.instanceColor.needsUpdate = true;
+        }
+    });
+    return {
+        object: clone,
+        dispose: () => {}
     };
 }
 
@@ -924,8 +965,8 @@ function buildTokenChipPreview(labelText) {
 }
 
 function buildWeightMatrixPreview(params, colorHex) {
-    const depth = Number.isFinite(params.depth) ? params.depth : PREVIEW_MATRIX_DEPTH;
-    const slitCount = Number.isFinite(params.numberOfSlits) ? params.numberOfSlits : PREVIEW_LANES;
+    const depth = PREVIEW_MATRIX_DEPTH;
+    const slitCount = PREVIEW_SOLID_LANES;
     const matrix = new WeightMatrixVisualization(
         null,
         new THREE.Vector3(0, 0, 0),
@@ -938,7 +979,8 @@ function buildWeightMatrixPreview(params, colorHex) {
         params.slitWidth,
         params.slitDepthFactor,
         params.slitBottomWidthFactor,
-        params.slitTopWidthFactor
+        params.slitTopWidthFactor,
+        true
     );
     if (colorHex !== null && colorHex !== undefined) {
         matrix.setColor(new THREE.Color(colorHex));
@@ -1217,8 +1259,7 @@ function buildQkvFlowPreview(highlightType, selectionInfo = null) {
 function buildQkvMatrixFlowPreview(label, selectionInfo) {
     const type = inferQkvType(label, selectionInfo);
     const matrixColor = type === 'Q' ? MHA_FINAL_Q_COLOR : (type === 'V' ? MHA_FINAL_V_COLOR : MHA_FINAL_K_COLOR);
-    const matrixPreview = buildSelectionClonePreview(selectionInfo, label)
-        || buildWeightMatrixPreview(MHA_MATRIX_PARAMS, matrixColor);
+    const matrixPreview = buildWeightMatrixPreview(MHA_MATRIX_PARAMS, matrixColor);
     const x = (type === 'Q') ? -PREVIEW_QKV_X_SPREAD : (type === 'V' ? PREVIEW_QKV_X_SPREAD : 0);
 
     if (matrixPreview?.object) {
@@ -1234,7 +1275,7 @@ function buildStackedBoxPreview(colorHex) {
     const group = new THREE.Group();
     const geometry = new THREE.BoxGeometry(140, 140, 8);
     const meshes = [];
-    for (let i = 0; i < PREVIEW_LANES; i++) {
+    for (let i = 0; i < PREVIEW_SOLID_LANES; i++) {
         const material = new THREE.MeshStandardMaterial({
             color: colorHex || 0x1f1f1f,
             metalness: 0.25,
@@ -1243,7 +1284,7 @@ function buildStackedBoxPreview(colorHex) {
             emissiveIntensity: 0.3
         });
         const mesh = new THREE.Mesh(geometry, material);
-        mesh.position.z = (i - (PREVIEW_LANES - 1) / 2) * 18;
+        mesh.position.z = (i - (PREVIEW_SOLID_LANES - 1) / 2) * 18;
         group.add(mesh);
         meshes.push(mesh);
     }
@@ -1307,6 +1348,65 @@ function findVectorLikeObject(selectionInfo) {
     return candidate;
 }
 
+function extractMaterialSnapshot(selectionInfo) {
+    const root = selectionInfo?.object || selectionInfo?.hit?.object;
+    if (!root) return null;
+    let material = null;
+    let current = root;
+    while (current && !material) {
+        if (current.material) {
+            material = Array.isArray(current.material) ? current.material.find(Boolean) : current.material;
+        }
+        current = current.parent;
+    }
+    if (!material) return null;
+    return {
+        color: material.color ? material.color.clone() : null,
+        emissiveIntensity: material.emissiveIntensity,
+        opacity: material.opacity,
+        transparent: material.transparent,
+        metalness: material.metalness,
+        roughness: material.roughness,
+        clearcoat: material.clearcoat,
+        clearcoatRoughness: material.clearcoatRoughness,
+        transmission: material.transmission,
+        thickness: material.thickness,
+        iridescence: material.iridescence,
+        sheen: material.sheen,
+        sheenColor: material.sheenColor && material.sheenColor.clone ? material.sheenColor.clone() : material.sheenColor,
+        envMapIntensity: material.envMapIntensity
+    };
+}
+
+function applyMaterialSnapshot(object, snapshot) {
+    if (!object || !snapshot) return;
+    object.traverse((child) => {
+        if (!child.material) return;
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        materials.forEach((mat) => {
+            if (!mat) return;
+            if (snapshot.color) {
+                updateSciFiMaterialColor(mat, snapshot.color);
+            }
+            if (Number.isFinite(snapshot.emissiveIntensity)) mat.emissiveIntensity = snapshot.emissiveIntensity;
+            if (Number.isFinite(snapshot.opacity)) mat.opacity = snapshot.opacity;
+            if (typeof snapshot.transparent === 'boolean') mat.transparent = snapshot.transparent;
+            if (Number.isFinite(snapshot.metalness)) mat.metalness = snapshot.metalness;
+            if (Number.isFinite(snapshot.roughness)) mat.roughness = snapshot.roughness;
+            if (Number.isFinite(snapshot.clearcoat)) mat.clearcoat = snapshot.clearcoat;
+            if (Number.isFinite(snapshot.clearcoatRoughness)) mat.clearcoatRoughness = snapshot.clearcoatRoughness;
+            if (Number.isFinite(snapshot.transmission)) mat.transmission = snapshot.transmission;
+            if (Number.isFinite(snapshot.thickness)) mat.thickness = snapshot.thickness;
+            if (Number.isFinite(snapshot.iridescence)) mat.iridescence = snapshot.iridescence;
+            if (Number.isFinite(snapshot.sheen)) mat.sheen = snapshot.sheen;
+            if (snapshot.sheenColor && mat.sheenColor && mat.sheenColor.copy) {
+                mat.sheenColor.copy(snapshot.sheenColor);
+            }
+            if (Number.isFinite(snapshot.envMapIntensity)) mat.envMapIntensity = snapshot.envMapIntensity;
+        });
+    });
+}
+
 function buildVectorClonePreview(selectionInfo) {
     const vectorObject = findVectorLikeObject(selectionInfo);
     if (!vectorObject || typeof vectorObject.clone !== 'function' || !vectorObject.isObject3D) return null;
@@ -1332,13 +1432,20 @@ function buildVectorClonePreview(selectionInfo) {
 }
 
 function buildLayerNormPreview(label, selectionInfo) {
-    const clonePreview = buildSelectionClonePreview(selectionInfo, label);
-    if (clonePreview?.object) {
+    const clonePreview = buildSelectionClonePreview(selectionInfo, label)
+        || buildDirectClonePreview(selectionInfo);
+    if (clonePreview) {
         applyFinalColorToObject(clonePreview.object, 0xffffff);
         return clonePreview;
     }
 
-    const params = LN_PARAMS;
+    const baseHoles = Number.isFinite(LN_PARAMS.numberOfHoles) ? LN_PARAMS.numberOfHoles : PREVIEW_SOLID_LANES;
+    const depthScale = PREVIEW_SOLID_LANES / Math.max(1, baseHoles);
+    const previewDepth = Math.max(
+        180,
+        Math.min(PREVIEW_MATRIX_DEPTH, LN_PARAMS.depth * depthScale)
+    );
+    const params = { ...LN_PARAMS, numberOfHoles: PREVIEW_SOLID_LANES, depth: previewDepth };
     const ln = new LayerNormalizationVisualization(
         new THREE.Vector3(0, 0, 0),
         params.width,
@@ -1347,7 +1454,9 @@ function buildLayerNormPreview(label, selectionInfo) {
         params.wallThickness,
         params.numberOfHoles,
         params.holeWidth,
-        params.holeWidthFactor
+        params.holeWidthFactor,
+        undefined,
+        true
     );
     ln.setColor(new THREE.Color(0xffffff));
     return {
@@ -1367,21 +1476,40 @@ function isLikelyVectorSelection(label, selectionInfo) {
     return false;
 }
 
+function isLayerNormLabel(label) {
+    const lower = (label || '').toLowerCase();
+    return lower.includes('layernorm') || lower.includes('layer norm');
+}
+
+
 function resolvePreviewObject(label, selectionInfo) {
     const lower = (label || '').toLowerCase();
+    if (isQkvMatrixLabel(lower)) {
+        const type = inferQkvType(label, selectionInfo);
+        const matrixColor = type === 'Q' ? MHA_FINAL_Q_COLOR : (type === 'V' ? MHA_FINAL_V_COLOR : MHA_FINAL_K_COLOR);
+        const sharedClone = buildSharedClonePreview(selectionInfo, label);
+        if (sharedClone) return sharedClone;
+        const preview = buildWeightMatrixPreview(MHA_MATRIX_PARAMS, matrixColor);
+        const snapshot = extractMaterialSnapshot(selectionInfo);
+        if (snapshot) {
+            applyMaterialSnapshot(preview.object, snapshot);
+        }
+        return preview;
+    }
+    const clonePreview = buildSelectionClonePreview(selectionInfo, label)
+        || buildDirectClonePreview(selectionInfo);
+    if (clonePreview) {
+        if (isLayerNormLabel(label)) {
+            applyFinalColorToObject(clonePreview.object, 0xffffff);
+        }
+        return clonePreview;
+    }
     const vectorClone = buildVectorClonePreview(selectionInfo);
     if (vectorClone) return vectorClone;
     if (lower.startsWith('token:') || lower.startsWith('position:')) {
         const clonePreview = buildSelectionClonePreview(selectionInfo, label);
         if (clonePreview) return clonePreview;
         return buildTokenChipPreview(extractTokenText(label));
-    }
-    if (isQkvMatrixLabel(lower)) {
-        return buildQkvMatrixFlowPreview(label, selectionInfo);
-    }
-    if (isWeightMatrixLabel(lower)) {
-        const clonePreview = buildSelectionClonePreview(selectionInfo, label);
-        if (clonePreview) return clonePreview;
     }
     if (lower.includes('output projection matrix')) {
         const height = MHA_MATRIX_PARAMS.height * MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.heightFactor;
@@ -1405,11 +1533,21 @@ function resolvePreviewObject(label, selectionInfo) {
         return buildWeightMatrixPreview(MLP_MATRIX_PARAMS_DOWN, FINAL_MLP_COLOR);
     }
     if (lower.includes('vocab embedding')) {
+        const clonePreview = buildSelectionClonePreview(selectionInfo, label)
+            || buildDirectClonePreview(selectionInfo);
+        if (clonePreview) return clonePreview;
         const color = lower.includes('top') ? FINAL_VOCAB_TOP_COLOR : MHA_FINAL_Q_COLOR;
         return buildWeightMatrixPreview(EMBEDDING_MATRIX_PARAMS_VOCAB, color);
     }
     if (lower.includes('positional embedding')) {
+        const clonePreview = buildSelectionClonePreview(selectionInfo, label)
+            || buildDirectClonePreview(selectionInfo);
+        if (clonePreview) return clonePreview;
         return buildWeightMatrixPreview(EMBEDDING_MATRIX_PARAMS_POSITION, MHA_FINAL_K_COLOR);
+    }
+    if (isWeightMatrixLabel(lower)) {
+        const color = resolveFinalPreviewColor(label);
+        return buildWeightMatrixPreview(MHA_MATRIX_PARAMS, color);
     }
 
     if (lower.includes('query vector')) {
@@ -1492,10 +1630,12 @@ class SelectionPanel {
         this.title = document.getElementById('detailTitle');
         this.params = document.getElementById('detailParams');
         this.dims = document.getElementById('detailDims');
+        this.metaSection = document.getElementById('detailMeta');
         this.closeBtn = document.getElementById('detailClose');
         this.canvas = document.getElementById('detailCanvas');
         this.description = document.getElementById('detailDescription');
         this.dataEl = document.getElementById('detailData');
+        this.dataSection = document.getElementById('detailDataSection');
         this.attentionRoot = document.getElementById('detailAttention');
         this.attentionToggle = document.getElementById('detailAttentionToggle');
         this.attentionTokensTop = document.getElementById('detailAttentionTokensTop');
@@ -2133,12 +2273,30 @@ class SelectionPanel {
             const desc = resolveDescription(label, selection.kind, selection);
             this.description.textContent = desc || '';
         }
+        const isParam = isParameterSelection(label);
+        if (this.dataSection) {
+            this.dataSection.style.display = isParam ? 'none' : '';
+        }
+        if (this.dataEl && isParam) {
+            this.dataEl.textContent = '';
+        }
+        if (this.metaSection && this.attentionRoot && this.panel) {
+            if (isQkvMatrixLabel(label)) {
+                if (this.attentionRoot.parentElement === this.panel) {
+                    this.panel.insertBefore(this.metaSection, this.attentionRoot);
+                }
+            } else if (this.dataSection && this.dataSection.parentElement === this.panel) {
+                this.panel.insertBefore(this.metaSection, this.dataSection);
+            }
+        }
         if (this.dataEl) {
             const activationData = (selection.object && selection.object.userData && selection.object.userData.activationData)
                 || (selection.info && selection.info.activationData)
                 || (selection.hit && selection.hit.object && selection.hit.object.userData && selection.hit.object.userData.activationData)
                 || null;
-            this.dataEl.textContent = formatActivationData(activationData);
+            if (!isParam) {
+                this.dataEl.textContent = formatActivationData(activationData);
+            }
         }
 
         if (this.currentPreview) {
@@ -2161,8 +2319,13 @@ class SelectionPanel {
         }
         this._lastFrameTime = performance.now();
         const isVectorPreview = isLikelyVectorSelection(label, selection);
-        const paddingMultiplier = isVectorPreview ? PREVIEW_VECTOR_PADDING_MULT : 1;
-        const distanceMultiplier = isVectorPreview ? PREVIEW_VECTOR_DISTANCE_MULT : 1;
+        const isQkvPreview = isQkvMatrixLabel(label);
+        const paddingMultiplier = isVectorPreview
+            ? PREVIEW_VECTOR_PADDING_MULT
+            : (isQkvPreview ? 0.75 : 1);
+        const distanceMultiplier = isVectorPreview
+            ? PREVIEW_VECTOR_DISTANCE_MULT
+            : (isQkvPreview ? 0.75 : 1);
         fitObjectToView(this.currentPreview, this.camera, { paddingMultiplier, distanceMultiplier });
         if (this.currentPreview?.rotation) {
             this.currentPreview.rotation.copy(desiredRotation);

@@ -542,7 +542,8 @@ export class WeightMatrixVisualization {
      */
     _createInstancedSlices() {
         const sliceDepth = VECTOR_DEPTH_SPACING;
-        const depthSpan = (NUM_VECTOR_LANES - 1) * VECTOR_DEPTH_SPACING + sliceDepth;
+        const laneCount = Math.max(1, Math.floor(this.numberOfSlits || 1));
+        const depthSpan = (laneCount - 1) * VECTOR_DEPTH_SPACING + sliceDepth;
         const sliceSlits = 1; // one slit per slice – channels separated by instancing
 
         // ----------------------------------------------------------
@@ -656,10 +657,10 @@ export class WeightMatrixVisualization {
         // ----------------------------------------------------------
         // Build InstancedMesh for side walls across all lanes
         // ----------------------------------------------------------
-        const inst = new THREE.InstancedMesh(sliceGeometry, mat, NUM_VECTOR_LANES);
+        const inst = new THREE.InstancedMesh(sliceGeometry, mat, laneCount);
         const mtx = new THREE.Matrix4();
-        for (let i = 0; i < NUM_VECTOR_LANES; i++) {
-            const z = (i - (NUM_VECTOR_LANES - 1) / 2) * VECTOR_DEPTH_SPACING;
+        for (let i = 0; i < laneCount; i++) {
+            const z = (i - (laneCount - 1) / 2) * VECTOR_DEPTH_SPACING;
             mtx.makeTranslation(0, 0, z);
             inst.setMatrixAt(i, mtx);
         }
