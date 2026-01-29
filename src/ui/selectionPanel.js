@@ -207,6 +207,17 @@ function resolveAttentionModeFromSelection(selectionInfo) {
     return null;
 }
 
+function isValueSelection(label, selectionInfo) {
+    const lower = (label || '').toLowerCase();
+    if (selectionInfo?.info?.category === 'V') return true;
+    const stage = getActivationDataFromSelection(selectionInfo)?.stage;
+    if (typeof stage === 'string' && stage.toLowerCase().startsWith('qkv.v')) return true;
+    if (lower.includes('value vector')) return true;
+    if (lower.includes('value weight matrix')) return true;
+    if (lower.includes('merged value vectors')) return true;
+    return false;
+}
+
 function isSelfAttentionSelection(label, selectionInfo) {
     const lower = (label || '').toLowerCase();
     if (isAttentionScoreSelection(label, selectionInfo)) return true;
@@ -1839,6 +1850,7 @@ class SelectionPanel {
     _resolveAttentionContext(selection) {
         const label = selection?.label || '';
         if (!isSelfAttentionSelection(label, selection)) return null;
+        if (isValueSelection(label, selection)) return null;
         const headIndex = findUserDataNumber(selection, 'headIndex');
         const layerIndex = findUserDataNumber(selection, 'layerIndex');
         if (!Number.isFinite(headIndex) || !Number.isFinite(layerIndex)) return null;
