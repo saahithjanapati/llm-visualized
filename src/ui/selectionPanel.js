@@ -1401,6 +1401,7 @@ class SelectionPanel {
         this._onDocumentPointerDown = this._onDocumentPointerDown.bind(this);
         this._blockPreviewGesture = this._blockPreviewGesture.bind(this);
         this._onAttentionPointerMove = this._onAttentionPointerMove.bind(this);
+        this._onAttentionPointerDown = this._onAttentionPointerDown.bind(this);
         this._clearAttentionHover = this._clearAttentionHover.bind(this);
         this._startLoop();
 
@@ -1436,6 +1437,7 @@ class SelectionPanel {
         }
         if (this.attentionMatrix) {
             this.attentionMatrix.addEventListener('pointermove', this._onAttentionPointerMove);
+            this.attentionMatrix.addEventListener('pointerdown', this._onAttentionPointerDown);
             this.attentionMatrix.addEventListener('pointerleave', this._clearAttentionHover);
         }
         window.addEventListener('resize', this._onResize);
@@ -1588,7 +1590,7 @@ class SelectionPanel {
         }
         if (this.attentionValue) {
             this._attentionValueDefault = hasSource
-                ? 'Hover a square to see its score.'
+                ? 'Tap or hover a square to see its score.'
                 : '';
             this.attentionValue.textContent = this._attentionValueDefault;
         }
@@ -1669,16 +1671,8 @@ class SelectionPanel {
         this._clearAttentionHover();
     }
 
-    _onAttentionPointerMove(event) {
-        const target = event.target;
-        const cell = target && typeof target.closest === 'function'
-            ? target.closest('.attention-cell')
-            : null;
-        if (!cell || !this.attentionMatrix || !this.attentionMatrix.contains(cell)) {
-            this._clearAttentionHover();
-            return;
-        }
-        if (cell.classList.contains('is-empty')) {
+    _setAttentionHoverFromCell(cell) {
+        if (!cell || cell.classList.contains('is-empty')) {
             this._clearAttentionHover();
             return;
         }
@@ -1706,6 +1700,30 @@ class SelectionPanel {
             const scoreText = Number.isFinite(valueNum) ? valueNum.toFixed(4) : String(rawValue || '');
             this.attentionValue.textContent = `${label}: ${scoreText}`;
         }
+    }
+
+    _onAttentionPointerMove(event) {
+        const target = event.target;
+        const cell = target && typeof target.closest === 'function'
+            ? target.closest('.attention-cell')
+            : null;
+        if (!cell || !this.attentionMatrix || !this.attentionMatrix.contains(cell)) {
+            this._clearAttentionHover();
+            return;
+        }
+        this._setAttentionHoverFromCell(cell);
+    }
+
+    _onAttentionPointerDown(event) {
+        const target = event.target;
+        const cell = target && typeof target.closest === 'function'
+            ? target.closest('.attention-cell')
+            : null;
+        if (!cell || !this.attentionMatrix || !this.attentionMatrix.contains(cell)) {
+            this._clearAttentionHover();
+            return;
+        }
+        this._setAttentionHoverFromCell(cell);
     }
 
     _clearAttentionHover() {
