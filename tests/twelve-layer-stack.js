@@ -1077,10 +1077,34 @@ if (typeof window !== 'undefined') {
 updateFollowButton(pipeline?.isAutoCameraFollowEnabled?.());
 
 const topControls = document.getElementById('topControls');
+const settingsOverlay = document.getElementById('settingsOverlay');
 const isSkinnyScreen = () => window.matchMedia('(max-aspect-ratio: 1/1), (max-width: 880px)').matches;
 const isTouchUi = () => window.matchMedia('(hover: none) and (pointer: coarse)').matches;
 let topControlsHideTimer = null;
 const autoHideDelayMs = () => (isTouchUi() ? 9000 : 5000);
+
+const isTopControlsVisible = () => {
+    if (!topControls || typeof window === 'undefined') return false;
+    const style = window.getComputedStyle(topControls);
+    if (!style || style.display === 'none' || style.visibility === 'hidden') return false;
+    const opacity = Number.parseFloat(style.opacity || '1');
+    if (Number.isFinite(opacity) && opacity < 0.15) return false;
+    return true;
+};
+
+const findTopControlButtonAt = (x, y) => {
+    if (!topControls) return null;
+    const buttons = topControls.querySelectorAll('button');
+    for (let i = buttons.length - 1; i >= 0; i -= 1) {
+        const button = buttons[i];
+        if (!button || button.disabled) continue;
+        const rect = button.getBoundingClientRect();
+        if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+            return button;
+        }
+    }
+    return null;
+};
 
 const showTopControls = () => {
     if (!topControls) return;
@@ -1107,6 +1131,23 @@ const handleViewportChange = () => {
 
 handleViewportChange();
 window.addEventListener('resize', handleViewportChange);
+document.addEventListener('pointerdown', (event) => {
+    if (!topControls) return;
+    if (topControls.contains(event.target)) return;
+    if (settingsOverlay && settingsOverlay.getAttribute('aria-hidden') === 'false') return;
+    if (!Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return;
+    if (!isTopControlsVisible()) return;
+    if (event.pointerType !== 'touch' && event.button !== 0) return;
+    const rect = topControls.getBoundingClientRect();
+    if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) {
+        return;
+    }
+    const button = findTopControlButtonAt(event.clientX, event.clientY);
+    if (!button) return;
+    event.preventDefault();
+    event.stopPropagation();
+    button.click();
+}, { capture: true });
 window.addEventListener('pointerdown', (event) => {
     if (!topControls) return;
     const wasHidden = topControls.dataset.autoHidden === 'true';
