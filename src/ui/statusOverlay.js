@@ -31,8 +31,8 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
 
     const EQ = {
         ln1: String.raw`x_{\text{ln}} = \frac{x - \mu}{\sqrt{\sigma^2 + \epsilon}} \odot \gamma + \beta`,
-        qkv_per_head: `\\begin{aligned} ${Q} &= x_{\\text{ln}} ${WQ} \\\\ ${K} &= x_{\\text{ln}} ${WK} \\\\ ${V} &= x_{\\text{ln}} ${WV} \\end{aligned}`,
-        qkv_packed: `\\begin{aligned} ${Q} &= x_{\\text{ln}} ${WQ} \\\\ ${K} &= x_{\\text{ln}} ${WK} \\\\ ${V} &= x_{\\text{ln}} ${WV} \\end{aligned}`,
+        qkv_per_head: `\\begin{aligned} ${Q} &= x_{\\text{ln}} ${WQ} \\qquad ${K} &= x_{\\text{ln}} ${WK} \\qquad ${V} &= x_{\\text{ln}} ${WV} \\end{aligned}`,
+        qkv_packed: `\\begin{aligned} ${Q} &= x_{\\text{ln}} ${WQ} \\qquad ${K} &= x_{\\text{ln}} ${WK} \\qquad ${V} &= x_{\\text{ln}} ${WV} \\end{aligned}`,
         attn: `A = \\mathrm{softmax}\\left(\\frac{${Q}${K}^\\top}{\\sqrt{d_h}} + M\\right),\\; H = A${V}`,
         concat_proj: String.raw`\begin{aligned} H &= \mathrm{Concat}(H_1,\dots,H_h) \\ \mathrm{SA}(x) &= H W^O + b_o \end{aligned}`,
         resid1: String.raw`u = x + \mathrm{SA}(x_{\text{ln}})`,
