@@ -630,7 +630,7 @@ button { touch-action: manipulation; }
 .attention-tokens-left {
     grid-column: 2;
     grid-row: 3;
-    overflow-y: auto;
+    overflow-y: hidden;
     padding-right: var(--attention-left-padding, 4px);
     overflow-x: hidden;
     width: max-content;
