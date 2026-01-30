@@ -136,6 +136,10 @@ export const MHA_VALUE_SPECTRUM_COLOR = 0xf28b30;
 /** Active colour of the output-projection matrix that follows MHSA. */
 export const MHA_OUTPUT_PROJECTION_MATRIX_COLOR = 0x9C27B0;
 
+/** Active colours for the MLP up-/down-projection matrices. */
+export const MLP_UP_MATRIX_COLOR = 0xe35400;
+export const MLP_DOWN_MATRIX_COLOR = 0xff6a00;
+
 // -----------------------------------------------------------------------------
 // MHSA (Multi-Head Self-Attention) Specific Animation Constants
 // -----------------------------------------------------------------------------

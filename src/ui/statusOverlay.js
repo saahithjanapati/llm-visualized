@@ -1,7 +1,14 @@
 import * as THREE from 'three';
 import { appState } from '../state/appState.js';
 import { getPreference } from '../utils/preferences.js';
-import { MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR } from '../animations/LayerAnimationConstants.js';
+import {
+    MHA_FINAL_Q_COLOR,
+    MHA_FINAL_K_COLOR,
+    MHA_FINAL_V_COLOR,
+    MHA_OUTPUT_PROJECTION_MATRIX_COLOR,
+    MLP_UP_MATRIX_COLOR,
+    MLP_DOWN_MATRIX_COLOR
+} from '../animations/LayerAnimationConstants.js';
 import { USE_PHYSICAL_MATERIALS } from '../utils/constants.js';
 
 // Initializes status overlay and equations panel updates.
@@ -22,22 +29,34 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     const qColor = colorHex(MHA_FINAL_Q_COLOR);
     const kColor = colorHex(MHA_FINAL_K_COLOR);
     const vColor = colorHex(MHA_FINAL_V_COLOR);
+    const woColor = colorHex(MHA_OUTPUT_PROJECTION_MATRIX_COLOR);
+    const mlpUpColor = colorHex(MLP_UP_MATRIX_COLOR);
+    const mlpDownColor = colorHex(MLP_DOWN_MATRIX_COLOR);
     const Q = colorize(qColor, 'Q');
     const K = colorize(kColor, 'K');
     const V = colorize(vColor, 'V');
     const WQ = colorize(qColor, 'W^Q');
     const WK = colorize(kColor, 'W^K');
     const WV = colorize(vColor, 'W^V');
+    const WO = colorize(woColor, 'W^O');
+    const WUp = colorize(mlpUpColor, 'W_{\\text{up}}');
+    const WDown = colorize(mlpDownColor, 'W_{\\text{down}}');
+    const bQ = colorize(qColor, 'b^Q');
+    const bK = colorize(kColor, 'b^K');
+    const bV = colorize(vColor, 'b^V');
+    const bO = colorize(woColor, 'b_o');
+    const bUp = colorize(mlpUpColor, 'b_{\\text{up}}');
+    const bDown = colorize(mlpDownColor, 'b_{\\text{down}}');
 
     const EQ = {
         ln1: String.raw`x_{\text{ln}} = \frac{x - \mu}{\sqrt{\sigma^2 + \epsilon}} \odot \gamma + \beta`,
-        qkv_per_head: `\\begin{aligned} ${Q} &= x_{\\text{ln}} ${WQ} \\qquad ${K} &= x_{\\text{ln}} ${WK} \\qquad ${V} &= x_{\\text{ln}} ${WV} \\end{aligned}`,
-        qkv_packed: `\\begin{aligned} ${Q} &= x_{\\text{ln}} ${WQ} \\qquad ${K} &= x_{\\text{ln}} ${WK} \\qquad ${V} &= x_{\\text{ln}} ${WV} \\end{aligned}`,
-        attn: `A = \\mathrm{softmax}\\left(\\frac{${Q}${K}^\\top}{\\sqrt{d_h}} + M\\right),\\; H = A${V}`,
-        concat_proj: String.raw`\begin{aligned} H &= \mathrm{Concat}(H_1,\dots,H_h) \\ \mathrm{SA}(x) &= H W^O + b_o \end{aligned}`,
-        resid1: String.raw`u = x + \mathrm{SA}(x_{\text{ln}})`,
+        qkv_per_head: `{\\scriptsize ${Q} = x_{\\text{ln}} ${WQ} + ${bQ} \\, ${K} = x_{\\text{ln}} ${WK} + ${bK} \\, ${V} = x_{\\text{ln}} ${WV} + ${bV}}`,
+        qkv_packed: `{\\scriptsize ${Q} = x_{\\text{ln}} ${WQ} + ${bQ} \\, ${K} = x_{\\text{ln}} ${WK} + ${bK} \\, ${V} = x_{\\text{ln}} ${WV} + ${bV}}`,
+        attn: `H_i = \\mathrm{softmax}\\left(\\frac{${Q}_i ${K}_i^\\top}{\\sqrt{d_h}} + M\\right) ${V}_i,\\; i=1\\dots h`,
+        concat_proj: String.raw`\begin{aligned} H &= \mathrm{Concat}(H_1,\dots,H_h) \\ \mathrm{SA}(x) &= H ${WO} + ${bO} \end{aligned}`,
+        resid1: String.raw`u = x + H ${WO} + ${bO}`,
         ln2: String.raw`u_{\text{ln}} = \frac{u - \mu}{\sqrt{\sigma^2 + \epsilon}} \odot \gamma + \beta`,
-        mlp: String.raw`\begin{aligned} z &= \mathrm{GELU}(u_{\text{ln}} W_{\text{up}} + b_{\text{up}}) \\ \mathrm{MLP}(u_{\text{ln}}) &= z W_{\text{down}} + b_{\text{down}} \end{aligned}`,
+        mlp: String.raw`\begin{aligned} z &= \mathrm{GELU}(u_{\text{ln}} ${WUp} + ${bUp}) \\ \mathrm{MLP}(u_{\text{ln}}) &= z ${WDown} + ${bDown} \end{aligned}`,
         resid2: String.raw`x_{\text{out}} = u + \mathrm{MLP}(u_{\text{ln}})`
     };
 
@@ -123,10 +142,11 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
             title = 'LayerNorm 1';
         }
         if (!key) return;
+        const eqBody = EQ[key];
         if (key === appState.lastEqKey) return;
         appState.lastEqKey = key;
         const t = (key === 'ln1') ? 'LayerNorm 1 (no in-place assign)' : title;
-        renderEq(EQ[key], t);
+        renderEq(eqBody, t);
     }
 
     function checkTopEmbeddingActivation() {

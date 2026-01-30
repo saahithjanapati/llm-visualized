@@ -1503,12 +1503,13 @@ function resolvePreviewObject(label, selectionInfo) {
     if (isQkvMatrixLabel(lower)) {
         const type = inferQkvType(label, selectionInfo);
         const matrixColor = type === 'Q' ? MHA_FINAL_Q_COLOR : (type === 'V' ? MHA_FINAL_V_COLOR : MHA_FINAL_K_COLOR);
-        const sharedClone = buildSharedClonePreview(selectionInfo, label);
-        if (sharedClone) return sharedClone;
+        const clonePreview = buildSelectionClonePreview(selectionInfo, label);
+        if (clonePreview) return clonePreview;
         const preview = buildWeightMatrixPreview(MHA_MATRIX_PARAMS, matrixColor);
         const snapshot = extractMaterialSnapshot(selectionInfo);
         if (snapshot) {
             applyMaterialSnapshot(preview.object, snapshot);
+            applyFinalColorToObject(preview.object, matrixColor);
         }
         return preview;
     }

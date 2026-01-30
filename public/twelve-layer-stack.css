@@ -374,9 +374,9 @@ button { touch-action: manipulation; }
     grid-column: 1 / -1;
     position: static;
     min-width: 0;
-    height: 140px;
-    min-height: 140px;
-    max-height: 140px;
+    height: 96px;
+    min-height: 96px;
+    max-height: 96px;
     overflow: auto;
     -webkit-overflow-scrolling: touch;
     padding: 0;
@@ -407,7 +407,7 @@ button { touch-action: manipulation; }
     max-width: 100%;
     overflow-x: auto;
     overflow-y: hidden;
-    padding-bottom: 2px;
+    padding-bottom: 0;
 }
 
 /* Detail side panel */
@@ -454,7 +454,7 @@ button { touch-action: manipulation; }
     align-items: center;
     justify-content: space-between;
     padding: 12px 52px 8px 16px;
-    border-bottom: 1px solid rgba(255,255,255,0.08);
+    border-bottom: none;
 }
 .detail-title {
     font-family: monospace;
@@ -839,9 +839,9 @@ button { touch-action: manipulation; }
     #statusOverlay { font-size: 12px; }
     #parameterCounter .param-value { font-size: 16px; }
     #equationsPanel {
-        height: 84px;
-        min-height: 84px;
-        max-height: 84px;
+        height: 72px;
+        min-height: 72px;
+        max-height: 72px;
     }
     #equationsPanel .eq-body { font-size: 13px; }
     .detail-preview { min-height: 180px; }
@@ -853,9 +853,9 @@ button { touch-action: manipulation; }
 }
 @media (max-height: 560px) {
     #equationsPanel {
-        height: 84px;
-        min-height: 84px;
-        max-height: 84px;
+        height: 72px;
+        min-height: 72px;
+        max-height: 72px;
     }
 }
 @media (max-aspect-ratio: 1/1), (max-width: 880px) {
@@ -879,9 +879,9 @@ button { touch-action: manipulation; }
     #parameterCounter .param-label { font-size: 10px; }
     #parameterCounter .param-value { font-size: 16px; }
     #equationsPanel {
-        height: 84px;
-        min-height: 84px;
-        max-height: 84px;
+        height: 72px;
+        min-height: 72px;
+        max-height: 72px;
     }
     #equationsPanel .eq-title { font-size: 11px; margin-bottom: 4px; }
     #equationsPanel .eq-body { font-size: 13px; }
