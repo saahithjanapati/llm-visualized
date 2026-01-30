@@ -836,11 +836,9 @@ export class CoreEngine {
                         if (typeof mhsa.decodeMergedKVIntersection === 'function') {
                             const info = mhsa.decodeMergedKVIntersection(hit);
                             if (info) {
-                                const headText = (typeof info.headIndex === 'number' && info.headIndex >= 0) ? `Head ${info.headIndex + 1}` : 'Head ?';
-                                const laneText = (typeof info.laneIndex === 'number' && info.laneIndex >= 0) ? `Lane ${info.laneIndex + 1}` : 'Lane ?';
-                                const catText  = info.category === 'V' ? 'Value (Red)' : 'Key (Green)';
+                                const catText  = info.category === 'V' ? 'Value Vector' : 'Key Vector';
                                 return {
-                                    label: `${catText}\n${headText} • ${laneText}`,
+                                    label: catText,
                                     hit,
                                     info,
                                     kind: 'mergedKV'

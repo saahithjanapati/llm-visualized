@@ -236,6 +236,22 @@ function computeAttentionCellSize(count) {
     return Math.max(ATTENTION_PREVIEW_MIN_CELL, Math.min(ATTENTION_PREVIEW_MAX_CELL, size));
 }
 
+function shouldRevealAttentionCell(progress, row, col, mode = 'pre') {
+    if (!progress) return true;
+    if (mode === 'post') {
+        const postCompletedRows = Number.isFinite(progress.postCompletedRows) ? progress.postCompletedRows : 0;
+        return row < postCompletedRows;
+    }
+    const completedRows = Number.isFinite(progress.completedRows) ? progress.completedRows : 0;
+    const activeRow = Number.isFinite(progress.activeRow) ? progress.activeRow : null;
+    const activeCol = Number.isFinite(progress.activeCol) ? progress.activeCol : null;
+    if (row < completedRows) return true;
+    if (activeRow !== null && activeCol !== null && row === activeRow) {
+        return col <= activeCol;
+    }
+    return false;
+}
+
 function getContentWidth(el) {
     if (!el || typeof window === 'undefined') return 0;
     const style = window.getComputedStyle(el);
@@ -1042,35 +1058,12 @@ function extractPreviewVectorData(selectionInfo) {
     return null;
 }
 
-function mapDataToInstanceCount(data, instanceCount) {
-    if (!Array.isArray(data) || !Number.isFinite(instanceCount) || instanceCount < 1) return null;
-    const count = Math.max(1, Math.floor(instanceCount));
-    if (data.length === count) return data.slice();
-    const buckets = [];
-    const step = data.length / count;
-    for (let i = 0; i < count; i++) {
-        const start = Math.floor(i * step);
-        const end = Math.floor((i + 1) * step);
-        if (end <= start) {
-            buckets.push(data[Math.min(start, data.length - 1)] ?? 0);
-            continue;
-        }
-        let sum = 0;
-        let n = 0;
-        for (let j = start; j < end; j++) {
-            sum += data[j];
-            n += 1;
-        }
-        buckets.push(n > 0 ? sum / n : 0);
-    }
-    return buckets;
-}
-
 function applyDataToPreviewVector(vec, data) {
     if (!vec || !Array.isArray(data) || data.length === 0) return;
-    vec.updateDataAndSnapVisuals(data.slice());
-    const numKeyColors = Math.max(2, Math.min(12, data.length));
-    vec.updateKeyColorsFromData(data, numKeyColors, null, data);
+    const raw = data.slice();
+    vec.updateDataAndSnapVisuals(raw);
+    const numKeyColors = Math.min(30, Math.max(2, raw.length));
+    vec.updateKeyColorsFromData(raw, numKeyColors, null, raw);
 }
 
 function createPreviewVector(options = {}) {
@@ -1078,8 +1071,7 @@ function createPreviewVector(options = {}) {
     const vec = new VectorVisualizationInstancedPrism(null, new THREE.Vector3(0, 0, 0), 1, instanceCount);
     vec.numSubsections = 1;
     if (Array.isArray(data) && data.length > 0) {
-        const mapped = mapDataToInstanceCount(data, instanceCount) || data;
-        applyDataToPreviewVector(vec, mapped);
+        applyDataToPreviewVector(vec, data);
     } else {
         const color = new THREE.Color(colorHex || 0xffffff);
         vec.currentKeyColors = [color.clone(), color.clone()];
@@ -1624,6 +1616,24 @@ function resolvePreviewObject(label, selectionInfo) {
 
 function fitObjectToView(object, camera, options = {}) {
     if (!object) return;
+    const { baseScale, basePosition } = (() => {
+        if (!object.userData) object.userData = {};
+        if (object.userData.__previewBaseScale instanceof THREE.Vector3) {
+            return {
+                baseScale: object.userData.__previewBaseScale.clone(),
+                basePosition: object.userData.__previewBasePosition instanceof THREE.Vector3
+                    ? object.userData.__previewBasePosition.clone()
+                    : new THREE.Vector3(object.position.x, object.position.y, object.position.z)
+            };
+        }
+        const stored = new THREE.Vector3(object.scale.x, object.scale.y, object.scale.z);
+        object.userData.__previewBaseScale = stored.clone();
+        const storedPos = new THREE.Vector3(object.position.x, object.position.y, object.position.z);
+        object.userData.__previewBasePosition = storedPos.clone();
+        return { baseScale: stored, basePosition: storedPos };
+    })();
+    object.scale.copy(baseScale);
+    object.position.copy(basePosition);
     const box = getObjectBounds(object);
     if (box.isEmpty()) return;
     const size = new THREE.Vector3();
@@ -1635,18 +1645,22 @@ function fitObjectToView(object, camera, options = {}) {
     const distanceMult = Number.isFinite(options.distanceMultiplier) ? options.distanceMultiplier : 1;
     const maxDim = Math.max(size.x, size.y, size.z);
     const scale = maxDim > 0 ? PREVIEW_TARGET_SIZE / (maxDim * PREVIEW_FRAME_PADDING * paddingMult) : 1;
-    object.scale.setScalar(scale);
+    object.scale.set(baseScale.x * scale, baseScale.y * scale, baseScale.z * scale);
 
     const scaledBox = getObjectBounds(object);
     const scaledSize = new THREE.Vector3();
     scaledBox.getSize(scaledSize);
     const scaledMax = Math.max(scaledSize.x, scaledSize.y, scaledSize.z);
-    const fov = THREE.MathUtils.degToRad(camera.fov);
-    const distance = ((scaledMax / 2) / Math.tan(fov / 2)) * PREVIEW_BASE_DISTANCE_MULT * distanceMult;
+    const vFov = THREE.MathUtils.degToRad(camera.fov);
+    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
+    const distY = (scaledSize.y / 2) / Math.tan(vFov / 2);
+    const distX = (scaledSize.x / 2) / Math.tan(hFov / 2);
+    const depthOffset = scaledSize.z * 0.5;
+    const distance = (Math.max(distX, distY) + depthOffset) * PREVIEW_BASE_DISTANCE_MULT * distanceMult;
 
     camera.near = Math.max(0.1, distance / 50);
-    camera.far = distance * 20;
-    camera.position.set(0, 0, distance * 1.6);
+    camera.far = Math.max(distance * 20, distance + scaledMax * 4);
+    camera.position.set(0, 0, distance * 1.1);
     camera.lookAt(0, 0, 0);
     camera.updateProjectionMatrix();
 }
@@ -1656,6 +1670,7 @@ class SelectionPanel {
         this.panel = document.getElementById('detailPanel');
         this.hudPanel = document.getElementById('hudPanel');
         this.title = document.getElementById('detailTitle');
+        this.subtitle = document.getElementById('detailSubtitle');
         this.params = document.getElementById('detailParams');
         this.dims = document.getElementById('detailDims');
         this.metaSection = document.getElementById('detailMeta');
@@ -1706,8 +1721,13 @@ class SelectionPanel {
         this.currentAnimator = null;
         this.isOpen = false;
         this._lastFrameTime = performance.now();
+        this._rotationSpeedMult = 1;
+        this._lastFitOptions = null;
         this._mobilePauseActive = false;
         this._mobileFocusActive = false;
+        this._pendingResizeRaf = null;
+        this._pendingResizeTimeout = null;
+        this._pendingReveal = false;
 
         this._animate = this._animate.bind(this);
         this._onResize = this._onResize.bind(this);
@@ -1720,6 +1740,7 @@ class SelectionPanel {
         this._clearAttentionHover = this._clearAttentionHover.bind(this);
         this._onPanelPointerEnter = this._onPanelPointerEnter.bind(this);
         this._onPanelPointerLeave = this._onPanelPointerLeave.bind(this);
+        this._scheduleResize = this._scheduleResize.bind(this);
         this._startLoop();
 
         this.activationSource = options.activationSource || null;
@@ -1739,6 +1760,13 @@ class SelectionPanel {
         this._attentionPinned = false;
         this._attentionPinnedRow = null;
         this._attentionPinnedCol = null;
+        this._attentionCells = null;
+        this._attentionValues = null;
+        this._attentionDynamic = false;
+        this._attentionDynamicKey = '';
+        this._attentionPostAnimQueue = new Set();
+        this._attentionPostAnimatedRows = new Set();
+        this._attentionLastPostCompleted = 0;
 
         this.closeBtn?.addEventListener('click', () => this.close());
         this.closeBtn?.addEventListener('pointerdown', this._onClosePointerDown);
@@ -1783,7 +1811,32 @@ class SelectionPanel {
         this.renderer.setSize(width, height, false);
         this.camera.aspect = width / height;
         this.camera.updateProjectionMatrix();
+        if (this.currentPreview) {
+            fitObjectToView(this.currentPreview, this.camera, this._lastFitOptions || {});
+        }
+        if (this._pendingReveal && this.canvas) {
+            this._pendingReveal = false;
+            this.canvas.style.opacity = '1';
+        }
         this._updateMobileState();
+    }
+
+    _scheduleResize() {
+        if (!this.isReady) return;
+        if (this._pendingResizeRaf) {
+            cancelAnimationFrame(this._pendingResizeRaf);
+        }
+        this._pendingResizeRaf = requestAnimationFrame(() => {
+            this._pendingResizeRaf = null;
+            this._onResize();
+        });
+        if (this._pendingResizeTimeout) {
+            clearTimeout(this._pendingResizeTimeout);
+        }
+        this._pendingResizeTimeout = setTimeout(() => {
+            this._pendingResizeTimeout = null;
+            this._onResize();
+        }, 280);
     }
 
     _onKeydown(event) {
@@ -1910,6 +1963,133 @@ class SelectionPanel {
         };
     }
 
+    _resolveAttentionProgress(context) {
+        if (!context || !this.engine) return null;
+        const layers = Array.isArray(this.engine._layers) ? this.engine._layers : null;
+        if (!layers || !Number.isFinite(context.layerIndex)) return null;
+        const layer = layers[context.layerIndex];
+        const animator = layer && layer.mhsaAnimation && layer.mhsaAnimation.selfAttentionAnimator;
+        if (!animator || typeof animator.getAttentionProgress !== 'function') return null;
+        return animator.getAttentionProgress(context.headIndex);
+    }
+
+    _updateDynamicAttentionProgress() {
+        if (!this._attentionContext) return;
+        const progress = this._resolveAttentionProgress(this._attentionContext);
+        if (progress) {
+            const nextPost = progress.postCompletedRows || 0;
+            if (Number.isFinite(nextPost) && nextPost > this._attentionLastPostCompleted) {
+                for (let row = this._attentionLastPostCompleted; row < nextPost; row += 1) {
+                    this._attentionPostAnimQueue.add(row);
+                }
+                this._attentionLastPostCompleted = nextPost;
+            }
+            const nextKey = `${progress.completedRows || 0}|${progress.postCompletedRows || 0}|${progress.activeRow ?? 'n'}|${progress.activeCol ?? 'n'}`;
+            if (!this._attentionDynamic || nextKey !== this._attentionDynamicKey) {
+                this._attentionDynamic = true;
+                this._attentionDynamicKey = nextKey;
+                this._applyAttentionReveal(progress);
+            }
+            return;
+        }
+        if (this._attentionDynamic) {
+            this._attentionDynamic = false;
+            this._attentionDynamicKey = '';
+            this._attentionPostAnimQueue.clear();
+            this._attentionPostAnimatedRows.clear();
+            this._attentionLastPostCompleted = 0;
+            this._applyAttentionReveal(null);
+        }
+    }
+
+    _applyAttentionReveal(progress) {
+        if (!this.attentionMatrix || !this._attentionCells || !this._attentionValues || !this._attentionContext) return;
+        const mode = this.attentionMode === 'post' ? 'post' : 'pre';
+        const tokenLabels = this._attentionContext.tokenLabels || [];
+        const count = this._attentionCells.length;
+        const rowAnimDuration = 180;
+        const rowAnimStagger = mode === 'post' && count > 1
+            ? Math.max(6, Math.round(180 / (count - 1)))
+            : 0;
+        let hasAnyValue = false;
+        for (let row = 0; row < count; row += 1) {
+            const rowCells = this._attentionCells[row];
+            if (!rowCells) continue;
+            const shouldAnimateRow = mode === 'post' && this._attentionPostAnimQueue.has(row);
+            for (let col = 0; col < count; col += 1) {
+                const cell = rowCells[col];
+                if (!cell || cell.classList.contains('is-hidden')) continue;
+                const value = this._attentionValues[row]?.[col];
+                if (!Number.isFinite(value)) {
+                    cell.classList.add('is-empty');
+                    cell.style.backgroundColor = '';
+                    continue;
+                }
+                const reveal = shouldRevealAttentionCell(progress, row, col, mode);
+                if (reveal) {
+                    const color = mode === 'post' ? mapValueToGrayscale(value) : mapValueToColor(value);
+                    cell.style.backgroundColor = colorToCss(color);
+                    const rowLabel = tokenLabels[row] || '';
+                    const colLabel = tokenLabels[col] || '';
+                    cell.title = `${rowLabel} → ${colLabel} (${mode === 'post' ? 'post' : 'pre'}): ${value.toFixed(4)}`;
+                    cell.dataset.value = String(value);
+                    cell.classList.remove('is-empty');
+                    hasAnyValue = true;
+                    if (mode === 'post') {
+                        if (shouldAnimateRow && !this._attentionPostAnimatedRows.has(row)) {
+                            cell.classList.add('post-softmax-reveal');
+                            cell.style.animationDelay = `${Math.round(col * rowAnimStagger)}ms`;
+                            cell.style.animationDuration = `${rowAnimDuration}ms`;
+                        } else if (!this._attentionPostAnimatedRows.has(row)) {
+                            cell.classList.remove('post-softmax-reveal');
+                            cell.style.animationDelay = '';
+                            cell.style.animationDuration = '';
+                        }
+                    }
+                } else {
+                    cell.classList.add('is-empty');
+                    cell.style.backgroundColor = '';
+                    cell.removeAttribute('data-value');
+                    cell.title = '';
+                    if (mode === 'post') {
+                        cell.classList.remove('post-softmax-reveal');
+                        cell.style.animationDelay = '';
+                        cell.style.animationDuration = '';
+                    }
+                }
+            }
+            if (mode === 'post' && shouldAnimateRow) {
+                this._attentionPostAnimQueue.delete(row);
+                this._attentionPostAnimatedRows.add(row);
+            }
+        }
+        if (this.attentionEmpty) {
+            const hasValues = !!this._attentionValues;
+            if (!hasValues) {
+                this.attentionEmpty.style.display = 'block';
+            } else {
+                this.attentionEmpty.style.display = (hasAnyValue || this._attentionDynamic) ? 'none' : 'block';
+            }
+        }
+        if (this._attentionPinned) {
+            if (!this._restorePinnedAttentionCell()) {
+                this._clearPinnedAttention();
+            }
+            return;
+        }
+        if (this._attentionHoverCell) {
+            const cell = this._attentionHoverCell;
+            const valid = this.attentionMatrix && this.attentionMatrix.contains(cell)
+                && !cell.classList.contains('is-hidden')
+                && !cell.classList.contains('is-empty');
+            if (!valid) {
+                this._clearAttentionHover(true);
+            } else {
+                this._setAttentionHoverFromCell(cell, { force: true });
+            }
+        }
+    }
+
     _updateAttentionPreview(selection) {
         if (!this.attentionRoot) return;
         const context = this._resolveAttentionContext(selection);
@@ -1930,6 +2110,13 @@ class SelectionPanel {
         if (!context || !this.activationSource) {
             this._setAttentionVisibility(false);
             this._clearPinnedAttention();
+            this._attentionDynamic = false;
+            this._attentionDynamicKey = '';
+            this._attentionValues = null;
+            this._attentionCells = null;
+            this._attentionPostAnimQueue.clear();
+            this._attentionPostAnimatedRows.clear();
+            this._attentionLastPostCompleted = 0;
             return;
         }
 
@@ -1945,6 +2132,15 @@ class SelectionPanel {
                 mode
             })
             : null;
+        const progress = this._resolveAttentionProgress(context);
+        this._attentionDynamic = !!progress;
+        this._attentionDynamicKey = progress
+            ? `${progress.completedRows || 0}|${progress.postCompletedRows || 0}|${progress.activeRow ?? 'n'}|${progress.activeCol ?? 'n'}`
+            : '';
+        this._attentionPostAnimQueue.clear();
+        this._attentionPostAnimatedRows.clear();
+        this._attentionLastPostCompleted = progress?.postCompletedRows || 0;
+        this._attentionValues = values;
 
         this._setAttentionVisibility(true);
         if (this.attentionEmpty) this.attentionEmpty.style.display = 'none';
@@ -1965,6 +2161,7 @@ class SelectionPanel {
         }
 
         const count = tokenIndices.length;
+        this._attentionCells = Array.from({ length: count }, () => Array(count).fill(null));
         let cellSize = computeAttentionCellSize(count);
         const densityScale = Math.min(1, Math.max(0.35, 8 / Math.max(1, count)));
         const gap = Math.max(1, Math.round(ATTENTION_PREVIEW_GAP * densityScale));
@@ -2037,17 +2234,23 @@ class SelectionPanel {
                 const value = values ? values[row]?.[col] : null;
                 if (!isVisible) {
                     cell.classList.add('is-hidden');
-                } else if (value === null) {
+                } else if (!Number.isFinite(value)) {
                     cell.classList.add('is-empty');
                 } else {
-                    const color = mode === 'post' ? mapValueToGrayscale(value) : mapValueToColor(value);
-                    cell.style.backgroundColor = colorToCss(color);
-                    cell.title = `${tokenLabels[row]} → ${tokenLabels[col]} (${mode === 'post' ? 'post' : 'pre'}): ${value.toFixed(4)}`;
-                    cell.dataset.value = String(value);
+                    const reveal = shouldRevealAttentionCell(progress, row, col, mode);
+                    if (reveal) {
+                        const color = mode === 'post' ? mapValueToGrayscale(value) : mapValueToColor(value);
+                        cell.style.backgroundColor = colorToCss(color);
+                        cell.title = `${tokenLabels[row]} → ${tokenLabels[col]} (${mode === 'post' ? 'post' : 'pre'}): ${value.toFixed(4)}`;
+                        cell.dataset.value = String(value);
+                        hasAnyValue = true;
+                    } else {
+                        cell.classList.add('is-empty');
+                    }
                     cell.dataset.rowLabel = tokenLabels[row] || '';
                     cell.dataset.colLabel = tokenLabels[col] || '';
-                    hasAnyValue = true;
                 }
+                this._attentionCells[row][col] = cell;
                 matrixFrag.appendChild(cell);
             }
         }
@@ -2056,7 +2259,7 @@ class SelectionPanel {
         this.attentionTokensLeft.appendChild(leftFrag);
         this.attentionMatrix.appendChild(matrixFrag);
         if (this.attentionEmpty) {
-            this.attentionEmpty.style.display = hasAnyValue ? 'none' : 'block';
+            this.attentionEmpty.style.display = (hasAnyValue || this._attentionDynamic) ? 'none' : 'block';
         }
         if (!this._restorePinnedAttentionCell()) {
             this._clearAttentionHover(true);
@@ -2261,12 +2464,14 @@ class SelectionPanel {
             }
         }
 
-        const rotationStep = PREVIEW_ROTATION_SPEED * (deltaMs / 16.6667);
+        const rotationSpeedMult = Number.isFinite(this._rotationSpeedMult) ? this._rotationSpeedMult : 1;
+        const rotationStep = PREVIEW_ROTATION_SPEED * rotationSpeedMult * (deltaMs / 16.6667);
         this.currentPreview.rotation.y += rotationStep;
         const timeSeconds = now * 0.001;
         this.currentPreview.rotation.x = PREVIEW_BASE_TILT_X
             + Math.sin(timeSeconds * PREVIEW_TILT_OSC_SPEED) * PREVIEW_TILT_AMPLITUDE;
         this.currentPreview.rotation.z = 0;
+        this._updateDynamicAttentionProgress();
         this.renderer.render(this.scene, this.camera);
     }
 
@@ -2277,6 +2482,7 @@ class SelectionPanel {
         this.hudPanel?.classList.add('detail-open');
         this.panel.setAttribute('aria-hidden', 'false');
         this._updateMobileState();
+        this._scheduleResize();
     }
 
     close() {
@@ -2288,6 +2494,14 @@ class SelectionPanel {
         this._setHoverLabelSuppression(false);
         this._updateMobileState();
         if (this.description) this.description.textContent = '';
+        if (this._pendingResizeRaf) {
+            cancelAnimationFrame(this._pendingResizeRaf);
+            this._pendingResizeRaf = null;
+        }
+        if (this._pendingResizeTimeout) {
+            clearTimeout(this._pendingResizeTimeout);
+            this._pendingResizeTimeout = null;
+        }
     }
 
     showSelection(selection) {
@@ -2296,6 +2510,18 @@ class SelectionPanel {
         const label = selection.label;
         const metadata = resolveMetadata(label, selection.kind);
         this.title.textContent = label;
+        if (this.subtitle) {
+            const layerIndex = findUserDataNumber(selection, 'layerIndex');
+            const headIndex = findUserDataNumber(selection, 'headIndex');
+            const showHead = isQkvMatrixLabel(label) || isAttentionScoreSelection(label, selection);
+            let subtitleText = Number.isFinite(layerIndex) ? `Layer ${layerIndex + 1}` : '';
+            if (showHead && Number.isFinite(headIndex)) {
+                subtitleText = subtitleText
+                    ? `${subtitleText} • Head ${headIndex + 1}`
+                    : `Head ${headIndex + 1}`;
+            }
+            this.subtitle.textContent = subtitleText;
+        }
         if (this.params) this.params.textContent = metadata.params;
         if (this.dims) this.dims.textContent = metadata.dims;
         if (this.description) {
@@ -2350,13 +2576,22 @@ class SelectionPanel {
         const isVectorPreview = isLikelyVectorSelection(label, selection);
         const isQkvPreview = isQkvMatrixLabel(label);
         const isOutputProjPreview = label.toLowerCase().includes('output projection matrix');
+        this._rotationSpeedMult = isQkvPreview ? 1.6 : 1;
         const paddingMultiplier = isVectorPreview
             ? PREVIEW_VECTOR_PADDING_MULT
             : (isQkvPreview ? 0.75 : (isOutputProjPreview ? 0.85 : 1));
         const distanceMultiplier = isVectorPreview
             ? PREVIEW_VECTOR_DISTANCE_MULT
-            : (isQkvPreview ? 0.45 : (isOutputProjPreview ? 0.8 : 1));
-        fitObjectToView(this.currentPreview, this.camera, { paddingMultiplier, distanceMultiplier });
+            : (isQkvPreview ? 0.85 : (isOutputProjPreview ? 0.8 : 1));
+        this._lastFitOptions = { paddingMultiplier, distanceMultiplier };
+        if (!this.isOpen) {
+            this._pendingReveal = true;
+            if (this.canvas) this.canvas.style.opacity = '0';
+        } else {
+            this._pendingReveal = false;
+            if (this.canvas) this.canvas.style.opacity = '1';
+            fitObjectToView(this.currentPreview, this.camera, { paddingMultiplier, distanceMultiplier });
+        }
         if (this.currentPreview?.rotation) {
             this.currentPreview.rotation.copy(desiredRotation);
         }

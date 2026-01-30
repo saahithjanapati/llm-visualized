@@ -188,9 +188,9 @@ export function animateVectorMatrixPassThrough(
                 }
                 // Preserve and refine hover label for clarity
                 try {
-                    const cat = vectorCategory === 'K' ? 'Key Vector (Green)'
-                              : vectorCategory === 'Q' ? 'Query Vector (Blue)'
-                              : 'Value Vector (Orange)';
+                    const cat = vectorCategory === 'K' ? 'Key Vector'
+                              : vectorCategory === 'Q' ? 'Query Vector'
+                              : 'Value Vector';
                     vector.group.userData.label = cat;
                     if (vector.mesh) vector.mesh.userData = { ...(vector.mesh.userData||{}), label: cat };
                 } catch (_) {}
@@ -255,10 +255,10 @@ export function animateVectorMatrixPassThrough(
                 finalVisualsApplied = true;
                 if (Number.isFinite(scalar)) {
                     const label = vectorCategory === 'K'
-                        ? 'Key Vector (Green)'
+                        ? 'Key Vector'
                         : vectorCategory === 'Q'
-                            ? 'Query Vector (Blue)'
-                            : 'Value Vector (Orange)';
+                            ? 'Query Vector'
+                            : 'Value Vector';
                     const activationData = buildActivationData({
                         label,
                         values: data,

@@ -54,6 +54,9 @@ export class SelfAttentionAnimator {
         this._pendingTimeouts   = new Set();
         this._spawnedSpheres    = new Set();
         this._spawnedTempVectors = new Set();
+        this.attentionProgress = {};
+        this.attentionCompletedRows = {};
+        this.attentionPostCompletedRows = {};
     }
 
     // Durations decoupled from GLOBAL_ANIM_SPEED_MULT to make presets clearly visible
@@ -102,6 +105,67 @@ export class SelfAttentionAnimator {
                 }
             } catch (_) { /* optional cleanup */ }
         });
+    }
+
+    _isHeadActive(headIdx) {
+        if (!Number.isFinite(headIdx)) return false;
+        const queued = this.blueQueues && this.blueQueues[headIdx];
+        return !!(this.blueProcessing && this.blueProcessing[headIdx])
+            || !!(this._activeBlueVectors && this._activeBlueVectors[headIdx])
+            || (Array.isArray(queued) && queued.length > 0);
+    }
+
+    _setAttentionProgress(headIdx, rowIndex, colIndex) {
+        if (!Number.isFinite(headIdx) || !Number.isFinite(rowIndex)) return;
+        const prev = this.attentionProgress[headIdx] || {};
+        const next = {
+            activeRow: rowIndex,
+            activeCol: Number.isFinite(colIndex) ? colIndex : prev.activeCol
+        };
+        this.attentionProgress[headIdx] = next;
+    }
+
+    _markAttentionRowComplete(headIdx, rowIndex) {
+        if (!Number.isFinite(headIdx) || !Number.isFinite(rowIndex)) return;
+        const completed = this.attentionCompletedRows[headIdx] || 0;
+        this.attentionCompletedRows[headIdx] = Math.max(completed, rowIndex + 1);
+        const progress = this.attentionProgress[headIdx];
+        if (progress && progress.activeRow === rowIndex) {
+            progress.activeRow = null;
+            progress.activeCol = null;
+        }
+    }
+
+    _markAttentionPostRowComplete(headIdx, rowIndex) {
+        if (!Number.isFinite(headIdx) || !Number.isFinite(rowIndex)) return;
+        const completed = this.attentionPostCompletedRows[headIdx] || 0;
+        this.attentionPostCompletedRows[headIdx] = Math.max(completed, rowIndex + 1);
+    }
+
+    _markAttentionHeadComplete(headIdx) {
+        if (!Number.isFinite(headIdx)) return;
+        const laneCount = Array.isArray(this.ctx?.currentLanes) ? this.ctx.currentLanes.length : 0;
+        if (laneCount > 0) {
+            const completed = this.attentionCompletedRows[headIdx] || 0;
+            this.attentionCompletedRows[headIdx] = Math.max(completed, laneCount);
+            const postCompleted = this.attentionPostCompletedRows[headIdx] || 0;
+            this.attentionPostCompletedRows[headIdx] = Math.max(postCompleted, laneCount);
+        }
+        const progress = this.attentionProgress[headIdx];
+        if (progress) {
+            progress.activeRow = null;
+            progress.activeCol = null;
+        }
+    }
+
+    getAttentionProgress(headIdx) {
+        if (!this._isHeadActive(headIdx)) return null;
+        const completedRows = this.attentionCompletedRows[headIdx] || 0;
+        const postCompletedRows = this.attentionPostCompletedRows[headIdx] || 0;
+        const progress = this.attentionProgress[headIdx] || {};
+        const activeRow = Number.isFinite(progress.activeRow) ? progress.activeRow : null;
+        const activeCol = Number.isFinite(progress.activeCol) ? progress.activeCol : null;
+        return { completedRows, postCompletedRows, activeRow, activeCol };
     }
 
     _retireVector(vec, { preserveTrail = false } = {}) {
@@ -162,6 +226,9 @@ export class SelfAttentionAnimator {
         });
         this._spawnedSpheres.clear();
         this._cleanupAttentionScoreMeshes();
+        this.attentionProgress = {};
+        this.attentionCompletedRows = {};
+        this.attentionPostCompletedRows = {};
         // Dispose any transient attention vectors (duplicates / travellers)
         this._spawnedTempVectors.forEach((vec) => this._retireVector(vec, { preserveTrail: preserveTrails }));
         this._spawnedTempVectors.clear();
@@ -401,12 +468,14 @@ export class SelfAttentionAnimator {
         if (this.skipRequested) {
             if (Array.isArray(queue)) queue.length = 0;
             this.blueProcessing[headIdx] = false;
+            this._markAttentionHeadComplete(headIdx);
             this._checkGlobalCompletion();
             return;
         }
         if (!queue || queue.length === 0) {
             // Finished all blues for this head
             this.blueProcessing[headIdx] = false;
+            this._markAttentionHeadComplete(headIdx);
             this._checkGlobalCompletion();
             return;
         }
@@ -420,6 +489,12 @@ export class SelfAttentionAnimator {
         // i == 1-based index of this vector in processing order (1 for first vector, 2 for second, ...)
         const i = this.blueProcessedCount[headIdx] + 1; // shift to 1-based
         this.blueProcessedCount[headIdx] += 1;
+        const rowIndex = i - 1;
+        if (vector) {
+            vector.userData = vector.userData || {};
+            vector.userData.attnRowIndex = rowIndex;
+        }
+        this._setAttentionProgress(headIdx, rowIndex, -1);
 
         // Pre-compute sorted lane z positions (top → bottom)
         const laneZs = (this.ctx.currentLanes || []).map(l => l.zPos).sort((a, b) => a - b);
@@ -447,11 +522,21 @@ export class SelfAttentionAnimator {
         });
     }
 
-    _riseSpheres(spheresArr) {
+    _riseSpheres(spheresArr, rowIndex = null, headIdx = null) {
 
         if (this.skipRequested) return;
         if (!Array.isArray(spheresArr) || spheresArr.length === 0) return;
-        spheresArr.forEach(sp => {
+        const resolvedHeadIdx = Number.isFinite(headIdx)
+            ? headIdx
+            : (() => {
+                const sp = spheresArr[0];
+                const activationData = sp && sp.userData ? sp.userData.activationData : null;
+                return activationData && Number.isFinite(activationData.headIndex) ? activationData.headIndex : null;
+            })();
+        if (Number.isFinite(resolvedHeadIdx) && Number.isFinite(rowIndex)) {
+            this._markAttentionPostRowComplete(resolvedHeadIdx, rowIndex);
+        }
+        spheresArr.forEach((sp) => {
             // Position rise
             new TWEEN.Tween(sp.position)
                 .to({ y: sp.position.y + this.RED_EXTRA_RISE }, this.V_RISE_DURATION)
@@ -464,7 +549,15 @@ export class SelfAttentionAnimator {
                 const hasEmissive = ('emissive' in sp.material) && ('emissiveIntensity' in sp.material);
                 const state = { r: c.r, g: c.g, b: c.b, ei: hasEmissive ? sp.material.emissiveIntensity : 1.0 };
                 const activationData = sp.userData ? sp.userData.activationData : null;
-                const postScore = activationData && Number.isFinite(activationData.postScore) ? activationData.postScore : null;
+                const layerIndex = activationData && Number.isFinite(activationData.layerIndex) ? activationData.layerIndex : null;
+                const headIdx = activationData && Number.isFinite(activationData.headIndex) ? activationData.headIndex : null;
+                const queryTokenIndex = activationData && Number.isFinite(activationData.tokenIndex) ? activationData.tokenIndex : null;
+                const keyTokenIndex = activationData && Number.isFinite(activationData.keyTokenIndex) ? activationData.keyTokenIndex : null;
+                const postScore = (this.ctx && this.ctx.activationSource
+                    && Number.isFinite(layerIndex) && Number.isFinite(headIdx)
+                    && Number.isFinite(queryTokenIndex) && Number.isFinite(keyTokenIndex))
+                    ? this.ctx.activationSource.getAttentionScore(layerIndex, 'post', headIdx, queryTokenIndex, keyTokenIndex)
+                    : null;
                 const targetColor = Number.isFinite(postScore)
                     ? mapValueToGrayscale(postScore)
                     : new THREE.Color().setHSL(0, 0, THREE.MathUtils.lerp(0.2, 0.9, Math.random()));
@@ -472,6 +565,15 @@ export class SelfAttentionAnimator {
                 new TWEEN.Tween(state)
                     .to({ r: targetColor.r, g: targetColor.g, b: targetColor.b, ei: targetEI }, this.V_RISE_DURATION)
                     .easing(TWEEN.Easing.Quadratic.Out)
+                    .onStart(() => {
+                        if (activationData) {
+                            activationData.stage = 'attention.post';
+                            if (Number.isFinite(postScore)) activationData.postScore = postScore;
+                            applyActivationDataToObject(sp, activationData, 'Post-Softmax Attention Score');
+                        } else {
+                            applyActivationDataToObject(sp, null, 'Post-Softmax Attention Score');
+                        }
+                    })
                     .onUpdate(() => {
                         sp.material.color.setRGB(state.r, state.g, state.b);
                         if (hasEmissive) {
@@ -480,12 +582,6 @@ export class SelfAttentionAnimator {
                         }
                     })
                     .start();
-                if (activationData) {
-                    activationData.stage = 'attention.post';
-                    applyActivationDataToObject(sp, activationData, 'Attention Score (Post-softmax)');
-                } else {
-                    applyActivationDataToObject(sp, null, 'Attention Score (Post-softmax)');
-                }
             }
         });
     }
@@ -545,8 +641,9 @@ export class SelfAttentionAnimator {
                 // 2. Traverse along K vectors i times
                 const spheres = [];
                 this._traverseLanes(vector, laneZs, i, spheres, true, () => {
+                    this._markAttentionRowComplete(headIdx, i - 1);
                     // Lift spheres upward to align with red vectors
-                    this._riseSpheres(spheres);
+                    this._riseSpheres(spheres, i - 1, headIdx);
                     // 3. FADE OUT at the LAST green (K) vector, then TELEPORT & FADE IN as red over V column
                     new TWEEN.Tween(vector.group.scale)
                         .to({ x: 0.001, y: 0.001, z: 0.001 }, this.BLUE_HORIZ_DURATION / 2)
@@ -672,6 +769,15 @@ export class SelfAttentionAnimator {
             .easing(TWEEN.Easing.Quadratic.InOut)
             .onComplete(() => {
                 if (this.skipRequested) return;
+                const headIdx = (vector.userData && typeof vector.userData.headIndex === 'number') ? vector.userData.headIndex : null;
+                if (createSpheres && Number.isFinite(headIdx)) {
+                    const rowIndex = (vector.userData && Number.isFinite(vector.userData.attnRowIndex))
+                        ? vector.userData.attnRowIndex
+                        : null;
+                    if (Number.isFinite(rowIndex)) {
+                        this._setAttentionProgress(headIdx, rowIndex, stepIdx);
+                    }
+                }
                 // Create a sphere between blue (vector) and corresponding green vector if enabled
                 if (createSpheres) {
                     const headIdx = (vector.userData && typeof vector.userData.headIndex === 'number') ? vector.userData.headIndex : null;
@@ -689,9 +795,6 @@ export class SelfAttentionAnimator {
                                 const preScore = (this.ctx && this.ctx.activationSource && Number.isFinite(layerIndex) && Number.isFinite(headIdx))
                                     ? this.ctx.activationSource.getAttentionScore(layerIndex, 'pre', headIdx, queryTokenIndex, keyTokenIndex)
                                     : null;
-                                const postScore = (this.ctx && this.ctx.activationSource && Number.isFinite(layerIndex) && Number.isFinite(headIdx))
-                                    ? this.ctx.activationSource.getAttentionScore(layerIndex, 'post', headIdx, queryTokenIndex, keyTokenIndex)
-                                    : null;
                                 const baseColor = Number.isFinite(preScore)
                                     ? mapValueToColor(preScore)
                                     : new THREE.Color().setHSL(Math.random(), THREE.MathUtils.lerp(0.85, 1.0, Math.random()), THREE.MathUtils.lerp(0.45, 0.6, Math.random()));
@@ -702,20 +805,19 @@ export class SelfAttentionAnimator {
                                 this.ctx.parentGroup.add(sphereMesh);
                                 this._spawnedSpheres.add(sphereMesh);
                                 const activationData = buildActivationData({
-                                    label: 'Attention Score (Pre-softmax)',
+                                    label: 'Pre-Softmax Attention Score',
                                     stage: 'attention.pre',
                                     layerIndex,
                                     tokenIndex: queryTokenIndex,
                                     tokenLabel: queryLane ? queryLane.tokenLabel : null,
                                     headIndex: headIdx,
                                     preScore,
-                                    postScore,
                                 });
                                 if (activationData && Number.isFinite(keyTokenIndex)) {
                                     activationData.keyTokenIndex = keyTokenIndex;
                                     activationData.keyTokenLabel = lane ? lane.tokenLabel : null;
                                 }
-                                applyActivationDataToObject(sphereMesh, activationData, 'Attention Score (Pre-softmax)');
+                                applyActivationDataToObject(sphereMesh, activationData, 'Pre-Softmax Attention Score');
                                 // Inflate animation
                                 new TWEEN.Tween(sphereMesh.scale)
                                     .to({ x: 0.8, y: 0.8, z: 0.8 }, 350)

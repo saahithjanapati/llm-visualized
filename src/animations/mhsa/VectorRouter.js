@@ -182,7 +182,7 @@ export class VectorRouter {
                                 : null;
                             if (Number.isFinite(parentLayerIndex)) qVec.group.userData.layerIndex = parentLayerIndex;
                             try {
-                                const lblQ = `Query Vector (Blue)`;
+                                const lblQ = 'Query Vector';
                                 qVec.group.userData.label = lblQ;
                                 if (qVec.mesh) qVec.mesh.userData = { ...(qVec.mesh.userData||{}), label: lblQ };
                             } catch (_) {}
@@ -207,7 +207,7 @@ export class VectorRouter {
                                 : null;
                             if (Number.isFinite(parentLayerIndexV)) vVec.group.userData.layerIndex = parentLayerIndexV;
                             try {
-                                const lblV = `Value Vector (Orange)`;
+                                const lblV = 'Value Vector';
                                 vVec.group.userData.label = lblV;
                                 if (vVec.mesh) vVec.mesh.userData = { ...(vVec.mesh.userData||{}), label: lblV };
                             } catch (_) {}
@@ -298,7 +298,7 @@ export class VectorRouter {
         if (Number.isFinite(parentLayerIndex)) upVec.group.userData.layerIndex = parentLayerIndex;
 
         try {
-            const lbl = `Key Vector (Green)`;
+            const lbl = 'Key Vector';
             upVec.group.userData.label = lbl;
             if (upVec.mesh) upVec.mesh.userData = { ...(upVec.mesh.userData || {}), label: lbl };
         } catch (_) {}

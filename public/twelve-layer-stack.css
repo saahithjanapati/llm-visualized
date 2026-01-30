@@ -456,11 +456,26 @@ button { touch-action: manipulation; }
     padding: 12px 52px 8px 16px;
     border-bottom: none;
 }
+.detail-title-group {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
 .detail-title {
     font-family: monospace;
     font-size: 15px;
     color: #fff;
     white-space: pre-line;
+}
+.detail-subtitle {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 11px;
+    letter-spacing: 0.3px;
+    color: #9aa4b2;
+    text-transform: none;
+}
+.detail-subtitle:empty {
+    display: none;
 }
 #detailClose {
     position: absolute;
@@ -508,6 +523,8 @@ button { touch-action: manipulation; }
     width: 100%;
     aspect-ratio: 16 / 9;
     min-height: 200px;
+    max-height: 42vh;
+    box-sizing: border-box;
 }
 .detail-preview canvas {
     width: 100%;
@@ -516,6 +533,8 @@ button { touch-action: manipulation; }
     background: #000;
     border-radius: 14px;
     border: 1px solid rgba(255,255,255,0.1);
+    opacity: 1;
+    transition: opacity 0.2s ease;
     touch-action: none;
     -webkit-touch-callout: none;
     -webkit-user-select: none;
@@ -732,6 +751,11 @@ button { touch-action: manipulation; }
     transition: transform .12s ease, box-shadow .12s ease, filter .12s ease;
     cursor: pointer;
 }
+.attention-cell.post-softmax-reveal {
+    animation-name: attentionPostSoftmaxReveal;
+    animation-timing-function: ease-out;
+    animation-fill-mode: both;
+}
 .attention-cell.is-empty {
     background: rgba(255,255,255,0.04);
     opacity: 0.35;
@@ -748,6 +772,18 @@ button { touch-action: manipulation; }
     z-index: 2;
     box-shadow: 0 0 0 1px rgba(255,255,255,0.5), 0 8px 14px rgba(0,0,0,0.45);
     filter: brightness(1.1);
+}
+@keyframes attentionPostSoftmaxReveal {
+    0% {
+        opacity: 0;
+        transform: scale(0.72);
+        filter: brightness(1.4);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1);
+        filter: brightness(1);
+    }
 }
 .attention-empty {
     font-size: 12px;
