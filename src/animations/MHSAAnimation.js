@@ -6,9 +6,8 @@ import { TRAIL_MIN_SEGMENT_DISTANCE } from '../utils/trailConstants.js';
 
 
 
-import { mapValueToColor } from '../utils/colors.js';
 import { buildActivationData, applyActivationDataToVector } from '../utils/activationMetadata.js';
-import { MHSA_MATRIX_INITIAL_RESTING_COLOR, MHSA_BRIGHT_GREEN, MHSA_DARK_TINTED_GREEN, MHSA_BRIGHT_BLUE, MHSA_DARK_TINTED_BLUE, MHSA_BRIGHT_RED, MHSA_DARK_TINTED_RED, MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR, MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW, MHA_OUTPUT_PROJECTION_MATRIX_PARAMS, MHA_OUTPUT_PROJECTION_MATRIX_COLOR } from './LayerAnimationConstants.js';
+import { MHSA_MATRIX_INITIAL_RESTING_COLOR, MHSA_BRIGHT_GREEN, MHSA_DARK_TINTED_GREEN, MHSA_BRIGHT_BLUE, MHSA_DARK_TINTED_BLUE, MHSA_BRIGHT_RED, MHSA_DARK_TINTED_RED, MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR, MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW, MHA_OUTPUT_PROJECTION_MATRIX_PARAMS, MHA_OUTPUT_PROJECTION_MATRIX_COLOR, MHA_VALUE_SPECTRUM_COLOR } from './LayerAnimationConstants.js';
 import { INACTIVE_COMPONENT_COLOR, MHSA_DUPLICATE_VECTOR_RISE_SPEED, MHSA_PASS_THROUGH_TOTAL_DURATION_MS, MHSA_RESULT_RISE_OFFSET_Y, MHSA_HEAD_VECTOR_STOP_BELOW, MHA_RESULT_RISE_DURATION_BASE_MS, DECORATIVE_FADE_MS, DECORATIVE_FADE_DELAY_MS, MERGE_TO_ROW_DELAY_AFTER_FADE_MS, HEAD_COLOR_TRANSITION_MS, MERGE_POST_COLOR_TRANSITION_DELAY_MS, MERGE_EXTRA_BUFFER_MS, OUTPUT_PROJ_STAGE1_MS, OUTPUT_PROJ_STAGE2_MS, OUTPUT_PROJ_STAGE3_MS, GLOBAL_ANIM_SPEED_MULT, MHSA_PASS_THROUGH_BRIGHTEN_RATIO, MHSA_PASS_THROUGH_DIM_RATIO, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY } from '../utils/constants.js';
 import {
     // Constants needed for setup & animation
@@ -56,6 +55,14 @@ export class MHSAAnimation {
     static ENABLE_SELF_ATTENTION = false;
 
     constructor(parentGroup, branchX, mhsaBaseY, clock, mode = 'temp', opts = {}) {
+        // ------------------------------------------------------------------
+        // MHSAAnimation flow map (high level):
+        // 1) Build head matrices + output projection visuals.
+        // 2) Route duplicated vectors to head parking positions (VectorRouter).
+        // 3) Pass-through animation inside Q/K/V matrices (VectorMatrixPassThrough).
+        // 4) Optional self-attention conveyor that produces weighted sums.
+        // 5) Merge weighted sums into a row, project, then add back to residual.
+        // ------------------------------------------------------------------
         this.parentGroup = parentGroup;
         this.branchX = branchX;
         this.mhsaBaseY = mhsaBaseY;
@@ -107,7 +114,7 @@ export class MHSAAnimation {
         };
 
         // --------------------------------------------------------------
-        //   Build static visuals via new refactored helper
+        //  Build static visuals (matrices, head layout, output projection)
         // --------------------------------------------------------------
         const visuals = buildMHAVisuals(this.parentGroup, {
             branchX: this.branchX,
@@ -126,6 +133,14 @@ export class MHSAAnimation {
         this.outputProjMatrixActiveColor  = visuals.outputProjMatrixActiveColor;
         this.finalCombinedY              = visuals.finalCombinedY;
         this.finalOriginalY              = visuals.finalOriginalY;
+        this.outputProjMatrixYOffset = 0;
+        if (!this.outputProjMatrixBasePosition && this.outputProjectionMatrix && this.outputProjectionMatrix.group) {
+            this.outputProjMatrixBasePosition = new THREE.Vector3(
+                this.outputProjectionMatrix.group.position.x,
+                this.outputProjMatrixCenterY,
+                this.outputProjectionMatrix.group.position.z
+            );
+        }
 
         // Additional arrays required by later stages
         this.outputProjMatrixAnimationPhase = 'waiting';
@@ -148,6 +163,44 @@ export class MHSAAnimation {
 
         // Self-attention helper (placeholder)
         this.selfAttentionAnimator = new SelfAttentionAnimator(this);
+        // Dock offset used when weighted sums park above V vectors.
+        this.weightedSumDockOffset = 30;
+
+        // Raise the output projection matrix to the weighted-sum row height immediately
+        // so it does not jump later during concatenation.
+        try {
+            if (!this.enableSelfAttentionAnimation) {
+                // Keep legacy placement when the conveyor belt is disabled.
+            } else {
+            const BASE_RISE_ADJUST = -30;
+            const weightedRowY = this.mhaPassThroughTargetY
+                + this.mhaResultRiseOffsetY
+                + BASE_RISE_ADJUST
+                + (this.selfAttentionAnimator ? this.selfAttentionAnimator.RED_EXTRA_RISE : 0)
+                + this.weightedSumDockOffset;
+            const desiredBottomY = weightedRowY + MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW;
+            const desiredCenterY = desiredBottomY + this.outputProjMatrixHeight / 2;
+            if (Number.isFinite(desiredCenterY) && Number.isFinite(this.outputProjMatrixCenterY)) {
+                this.outputProjMatrixYOffset = desiredCenterY - this.outputProjMatrixCenterY;
+                if (Math.abs(this.outputProjMatrixYOffset) > 0.01) {
+                    this.outputProjMatrixCenterY = desiredCenterY;
+                    if (this.outputProjMatrixBasePosition) {
+                        this.outputProjMatrixBasePosition.set(
+                            this.outputProjMatrixBasePosition.x,
+                            desiredCenterY,
+                            this.outputProjMatrixBasePosition.z
+                        );
+                    }
+                    if (this.outputProjectionMatrix && this.outputProjectionMatrix.group) {
+                        this.outputProjectionMatrix.group.position.y = desiredCenterY;
+                    }
+                    const matrixTopY = desiredCenterY + this.outputProjMatrixHeight / 2;
+                    this.finalCombinedY = matrixTopY + 60;
+                    this.finalOriginalY = this.finalCombinedY - ORIGINAL_TO_PROCESSED_GAP;
+                }
+            }
+            }
+        } catch (_) { /* optional */ }
 
         // Temp-mode bookkeeping
         this._tempModeCompleted = false;
@@ -158,6 +211,7 @@ export class MHSAAnimation {
         this._mergedHeads = new Set();
         this._mergedGroupsByHead = new Map(); // headIdx -> { K: Group, V: Group }
         this._allFixedMerged = false; // single merged K and V meshes across all heads created
+        this._attentionWeightedSums = new Map(); // key -> { vec, laneZ, headIdx, laneIndex }
 
         // Pause-aware scheduling helpers ensure delayed callbacks respect manual pauses.
         this._scheduledDelayTweens = new Set();
@@ -165,7 +219,8 @@ export class MHSAAnimation {
         this._skipToEndActive = false;
 
         // --------------------------------------------------------------
-        //   Vector router: handles all positioning before pass-through
+        //  Vector router: handles horizontal travel + K/Q/V parking.
+        //  Once all copies are parked it triggers the parallel pass-through.
         // --------------------------------------------------------------
         this.vectorRouter = new VectorRouter(this.parentGroup, this.headsCentersX, this.headCoords, this.headStopY, this.mhaVisualizations);
         this.vectorRouter.onReady(() => {
@@ -432,6 +487,7 @@ export class MHSAAnimation {
         );
     }
 
+    // Launch pass-through tweens for every head's K/Q/V copy in parallel.
     initiateParallelHeadPassThroughAnimations(allLanes) {
         if (this.mhaPassThroughPhase !== 'ready_for_parallel_pass_through') return;
         console.log("MHSAAnimation: Initiating Parallel MHSA Head Pass-Through Animations...");
@@ -562,6 +618,8 @@ export class MHSAAnimation {
     }
     
     update(deltaTime, timeNow, lanes) {
+        // Per-frame responsibilities: route vectors, update trails, and keep
+        // residual vectors rising while the MHSA branch is active.
         // Increment a lightweight frame counter to de-duplicate residual trail writes
         if (typeof this._frameCounter !== 'number') this._frameCounter = 0;
         this._frameCounter++;
@@ -650,6 +708,7 @@ export class MHSAAnimation {
         }
 
 
+        // Residual trail tracking during addition: follow the centre prism in world space.
         lanes.forEach(lane => {
             if (!lane || !lane.originalVec) return;
 
@@ -796,13 +855,14 @@ export class MHSAAnimation {
             }
         });
 
+        const keepRedMeshesVisible = !!this.enableSelfAttentionAnimation;
         // Build merged instanced meshes (one for K, one for V) and add to scene
         const mergedGroups = { K: null, V: null };
         try {
             if (greens.length) mergedGroups.K = this._buildMergedPrismsFromVectors(greens, `MergedK_head${headIdx}`);
         } catch (_) { /* non-fatal */ }
         try {
-            if (reds.length) mergedGroups.V = this._buildMergedPrismsFromVectors(reds, `MergedV_head${headIdx}`);
+            if (reds.length && !keepRedMeshesVisible) mergedGroups.V = this._buildMergedPrismsFromVectors(reds, `MergedV_head${headIdx}`);
         } catch (_) { /* non-fatal */ }
 
         if (mergedGroups.K) this.parentGroup.add(mergedGroups.K);
@@ -811,9 +871,10 @@ export class MHSAAnimation {
         // For temp mode, simply hide original meshes to avoid double-drawing,
         // but keep them around for any logic that still references them.
         // For other modes, dispose meshes to reclaim resources.
-        const retireOriginalMesh = (vec) => {
+        const retireOriginalMesh = (vec, { keepVisible = false } = {}) => {
             try {
                 if (!vec || !vec.mesh) return;
+                if (keepVisible) return;
                 if (this.mode === 'temp') {
                     vec.mesh.visible = false;
                 } else {
@@ -824,8 +885,8 @@ export class MHSAAnimation {
                 }
             } catch (_) { /* ignore */ }
         };
-        greens.forEach(retireOriginalMesh);
-        reds.forEach(retireOriginalMesh);
+        greens.forEach((vec) => retireOriginalMesh(vec));
+        reds.forEach((vec) => retireOriginalMesh(vec, { keepVisible: keepRedMeshesVisible }));
 
         this._mergedHeads.add(headIdx);
         this._mergedGroupsByHead.set(headIdx, mergedGroups);
@@ -1081,10 +1142,11 @@ export class MHSAAnimation {
         });
         if (!allGreens.length && !allReds.length) return;
 
+        const keepRedMeshesVisible = !!this.enableSelfAttentionAnimation;
         let mergedKGroup = null;
         let mergedVGroup = null;
         try { if (allGreens.length) mergedKGroup = this._buildMergedPrismsFromVectors(allGreens, 'MergedAllK'); } catch (_) {}
-        try { if (allReds.length)   mergedVGroup = this._buildMergedPrismsFromVectors(allReds,   'MergedAllV'); } catch (_) {}
+        try { if (allReds.length && !keepRedMeshesVisible) mergedVGroup = this._buildMergedPrismsFromVectors(allReds,   'MergedAllV'); } catch (_) {}
         if (mergedKGroup) this.parentGroup.add(mergedKGroup);
         if (mergedVGroup) this.parentGroup.add(mergedVGroup);
 
@@ -1099,9 +1161,15 @@ export class MHSAAnimation {
             } catch (_) {}
         };
         allGreens.forEach(stripMeshKeepGroup);
-        allReds.forEach(stripMeshKeepGroup);
+        if (!keepRedMeshesVisible) {
+            allReds.forEach(stripMeshKeepGroup);
+        }
         this._allFixedMerged = true;
-        console.log('MHSAAnimation: Merged all fixed K and V vectors into two instanced meshes.');
+        if (keepRedMeshesVisible) {
+            console.log('MHSAAnimation: Merged all fixed K vectors into one instanced mesh (kept V vectors visible).');
+        } else {
+            console.log('MHSAAnimation: Merged all fixed K and V vectors into two instanced meshes.');
+        }
     }
 
     // Fade any existing merged K/V instanced meshes to a target opacity
@@ -1132,6 +1200,7 @@ export class MHSAAnimation {
         });
     }
 
+    // Temp-mode pipeline: dim outputs, spawn decoratives, then schedule merge/projection.
     _applyTempModeBehaviour() {
         const grayColor = new THREE.Color(0x606060);
         const fadeDuration = this._resolveSkipDuration(DECORATIVE_FADE_MS);
@@ -1177,11 +1246,110 @@ export class MHSAAnimation {
         });
 
         // 2) Spawn new decorative vectors (64-dim) above each central K vector and fade them in
+        const weightedDecoratives = this._getWeightedSumDecoratives();
+        if (weightedDecoratives.length) {
+            this._tempDecorativeVecs = weightedDecoratives;
+            this._restoreWeightedSumColors(fadeDuration, 0);
+        } else {
+            this._spawnTempDecorativesFromK({ fadeDuration, fadeDelay });
+        }
+
+        // After decorative vectors begin fading in, further dim gray vectors for subtlety
+        if (typeof TWEEN !== 'undefined') {
+            this._tempAllOutputVectors.forEach(vec => {
+                if (!vec || !vec.mesh || !vec.mesh.material) return;
+                const mat = vec.mesh.material;
+                new TWEEN.Tween({ op: mat.opacity })
+                    .to({ op: 0.05 }, fadeDuration)
+                    .delay(fadeDelay)
+                    .onUpdate(function(o){
+                        mat.opacity = o.op;
+                        mat.needsUpdate = true;
+                    })
+                    .onComplete(() => {
+                        // Once the gray vector has fully faded, remove it from the scene
+                        if (vec && vec.group) {
+                            // Hide, detach, and dispose to reclaim resources
+                            vec.group.visible = false;
+                            this.parentGroup.remove(vec.group);
+                            if (typeof vec.dispose === 'function') {
+                                vec.dispose();
+                            }
+                        }
+                    })
+                    .start();
+            });
+        }
+
+        // ------------------------------------------------------
+        //   Begin merge-to-row-vector phase after fade-in delay
+        // ------------------------------------------------------
+        if (typeof TWEEN !== 'undefined') {
+            if (this.enableSelfAttentionAnimation && this.selfAttentionAnimator) {
+                // Wait for the conveyor to finish so all weighted sums exist
+                this.selfAttentionAnimator.start(() => {
+                    this._scheduleAfterDelay(() => {
+                        this._startMergeToRowVectors();
+                    }, MERGE_TO_ROW_DELAY_AFTER_FADE_MS / GLOBAL_ANIM_SPEED_MULT);
+                });
+            } else {
+                // Start after decorative fade-in completes
+                this._scheduleAfterDelay(() => {
+                    this._startMergeToRowVectors();
+                }, MERGE_TO_ROW_DELAY_AFTER_FADE_MS / GLOBAL_ANIM_SPEED_MULT);
+            }
+        } else if (this._tempDecorativeVecs && this._tempDecorativeVecs.length) {
+            this._startMergeToRowVectors();
+        }
+    }
+
+    _clearTempDecoratives(options = {}) {
+        const dispose = options && typeof options.dispose === 'boolean' ? options.dispose : true;
+        if (!Array.isArray(this._tempDecorativeVecs)) {
+            this._tempDecorativeVecs = [];
+            return;
+        }
+        this._tempDecorativeVecs.forEach((entry) => {
+            const vec = entry && entry.vec ? entry.vec : null;
+            if (!vec) return;
+            try {
+                if (vec.group && vec.group.parent) vec.group.parent.remove(vec.group);
+            } catch (_) { /* optional cleanup */ }
+            if (dispose && typeof vec.dispose === 'function') {
+                try { vec.dispose(); } catch (_) { /* optional cleanup */ }
+            }
+        });
+        this._tempDecorativeVecs = [];
+    }
+
+    _clearWeightedSumVectors(options = {}) {
+        const dispose = options && typeof options.dispose === 'boolean' ? options.dispose : true;
+        if (!this._attentionWeightedSums || this._attentionWeightedSums.size === 0) return;
+        this._attentionWeightedSums.forEach((entry) => {
+            const vec = entry && entry.vec ? entry.vec : null;
+            if (!vec) return;
+            try {
+                if (vec.group && vec.group.parent) vec.group.parent.remove(vec.group);
+            } catch (_) { /* optional cleanup */ }
+            if (dispose && typeof vec.dispose === 'function') {
+                try { vec.dispose(); } catch (_) { /* optional cleanup */ }
+            }
+        });
+        this._attentionWeightedSums.clear();
+    }
+
+    _spawnTempDecorativesFromK(options = {}) {
+        const fadeDuration = options && Number.isFinite(options.fadeDuration) ? options.fadeDuration : 0;
+        const fadeDelay = options && Number.isFinite(options.fadeDelay) ? options.fadeDelay : 0;
+        const clearExisting = options && typeof options.clearExisting === 'boolean' ? options.clearExisting : false;
+        if (clearExisting) this._clearTempDecoratives();
+
+        const visiblePrismCountTemp = Math.min(this.vectorPrismCount, Math.ceil(this.outputVectorLength / PRISM_DIMENSIONS_PER_UNIT));
+        const startVisibleIdx = Math.max(0, Math.floor((this.vectorPrismCount - visiblePrismCountTemp) / 2));
         const verticalOffset = 60; // world units above existing vector
 
-        this._tempDecorativeVecs = []; // store objects {vec, laneZ} for later merge
-
-        this._tempKOutputVectors.forEach(kVec => {
+        const nextDecoratives = [];
+        (this._tempKOutputVectors || []).forEach((kVec) => {
             if (!kVec || !kVec.group) return;
 
             // Build raw 768-dim data with 30 random switch points for varied gradient
@@ -1234,9 +1402,7 @@ export class MHSAAnimation {
             this.parentGroup.add(decoVec.group);
 
             // Keep reference for merge phase
-            this._tempDecorativeVecs.push({ vec: decoVec, laneZ: kVec.group.position.z });
-
-
+            nextDecoratives.push({ vec: decoVec, laneZ: kVec.group.position.z });
 
             // Start invisible: set material opacity to 0
             if (decoVec.mesh && decoVec.mesh.material) {
@@ -1261,46 +1427,139 @@ export class MHSAAnimation {
             }
         });
 
-        // After decorative vectors begin fading in, further dim gray vectors for subtlety
-        if (typeof TWEEN !== 'undefined') {
-            this._tempAllOutputVectors.forEach(vec => {
-                if (!vec || !vec.mesh || !vec.mesh.material) return;
+        this._tempDecorativeVecs = nextDecoratives;
+        return nextDecoratives;
+    }
+
+    _resolveLaneIndexFromZ(laneZ) {
+        if (!Array.isArray(this.currentLanes) || !Number.isFinite(laneZ)) return null;
+        let bestIdx = null;
+        let bestDist = Infinity;
+        for (let i = 0; i < this.currentLanes.length; i++) {
+            const lane = this.currentLanes[i];
+            const z = lane && Number.isFinite(lane.zPos) ? lane.zPos : null;
+            if (!Number.isFinite(z)) continue;
+            const dist = Math.abs(z - laneZ);
+            if (dist < bestDist) {
+                bestDist = dist;
+                bestIdx = i;
+            }
+        }
+        return bestDist <= 0.25 ? bestIdx : null;
+    }
+
+    registerWeightedSumVector(vec, laneZ, headIdx, lane = null) {
+        if (!vec || !vec.group) return;
+        const resolvedLaneZ = Number.isFinite(lane?.zPos) ? lane.zPos
+            : Number.isFinite(laneZ) ? laneZ : vec.group.position.z;
+        const laneIndex = Number.isFinite(lane?.laneIndex)
+            ? lane.laneIndex
+            : this._resolveLaneIndexFromZ(resolvedLaneZ);
+        const keyLane = Number.isFinite(laneIndex)
+            ? laneIndex
+            : Number.isFinite(resolvedLaneZ) ? resolvedLaneZ.toFixed(3) : 'unknown';
+        const key = `${headIdx}|${keyLane}`;
+        this._attentionWeightedSums.set(key, {
+            vec,
+            laneZ: resolvedLaneZ,
+            headIdx,
+            laneIndex
+        });
+    }
+
+    _getWeightedSumDecoratives() {
+        if (!this._attentionWeightedSums || this._attentionWeightedSums.size === 0) return [];
+        const entries = Array.from(this._attentionWeightedSums.values())
+            .filter(entry => entry && entry.vec && entry.vec.group);
+        entries.sort((a, b) => {
+            const laneA = Number.isFinite(a.laneIndex) ? a.laneIndex : 0;
+            const laneB = Number.isFinite(b.laneIndex) ? b.laneIndex : 0;
+            if (laneA !== laneB) return laneA - laneB;
+            const headA = Number.isFinite(a.headIdx) ? a.headIdx : 0;
+            const headB = Number.isFinite(b.headIdx) ? b.headIdx : 0;
+            return headA - headB;
+        });
+        return entries.map(entry => ({
+            vec: entry.vec,
+            laneZ: Number.isFinite(entry.laneZ) ? entry.laneZ : entry.vec.group.position.z
+        }));
+    }
+
+    _adjustOutputProjectionMatrixForRow(rowY) {
+        if (!Number.isFinite(rowY)) return;
+        if (!this.outputProjectionMatrix || !this.outputProjectionMatrix.group) return;
+        const desiredBottomY = rowY + MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW;
+        const newCenterY = desiredBottomY + this.outputProjMatrixHeight / 2;
+        if (!Number.isFinite(newCenterY)) return;
+        if (Math.abs(newCenterY - this.outputProjMatrixCenterY) < 0.01) return;
+
+        this.outputProjMatrixCenterY = newCenterY;
+        if (this.outputProjMatrixBasePosition) {
+            this.outputProjMatrixBasePosition.set(
+                this.outputProjMatrixBasePosition.x,
+                newCenterY,
+                this.outputProjMatrixBasePosition.z
+            );
+        }
+        this.outputProjectionMatrix.group.position.y = newCenterY;
+
+        const matrixTopY = newCenterY + this.outputProjMatrixHeight / 2;
+        this.finalCombinedY = matrixTopY + 60;
+        this.finalOriginalY = this.finalCombinedY - ORIGINAL_TO_PROCESSED_GAP;
+    }
+
+    _restoreWeightedSumColors(fadeDuration = 0, fadeDelay = 0) {
+        const entries = this._getWeightedSumDecoratives();
+        if (!entries.length) return;
+        const outputLength = this.outputVectorLength || 64;
+        entries.forEach(({ vec }) => {
+            if (!vec || !vec.mesh) return;
+            const raw = Array.isArray(vec.rawData)
+                ? vec.rawData.slice(0, outputLength)
+                : [];
+            const numKeyColors = raw.length <= 1 ? 1 : Math.min(30, raw.length);
+            vec.applyProcessedVisuals(
+                raw,
+                outputLength,
+                { numKeyColors, generationOptions: null },
+                { setHiddenToBlack: true },
+                raw
+            );
+            if (vec.userData) {
+                vec.userData.weightedSumReadyForConcat = true;
+            }
+            vec.group.visible = true;
+            if (vec.mesh) vec.mesh.visible = true;
+            if (vec.mesh.material) {
+                vec.mesh.material.transparent = true;
+                vec.mesh.material.opacity = 0.25;
+                vec.mesh.material.needsUpdate = true;
+            }
+            if (typeof TWEEN !== 'undefined' && vec.mesh && vec.mesh.material) {
                 const mat = vec.mesh.material;
                 new TWEEN.Tween({ op: mat.opacity })
-                    .to({ op: 0.05 }, fadeDuration)
+                    .to({ op: 1.0 }, fadeDuration)
+                    .easing(TWEEN.Easing.Quadratic.InOut)
                     .delay(fadeDelay)
-                    .onUpdate(function(o){
+                    .onUpdate((o) => {
                         mat.opacity = o.op;
                         mat.needsUpdate = true;
                     })
-                    .onComplete(() => {
-                        // Once the gray vector has fully faded, remove it from the scene
-                        if (vec && vec.group) {
-                            // Hide, detach, and dispose to reclaim resources
-                            vec.group.visible = false;
-                            this.parentGroup.remove(vec.group);
-                            if (typeof vec.dispose === 'function') {
-                                vec.dispose();
-                            }
-                        }
-                    })
                     .start();
-            });
-        }
-
-        // ------------------------------------------------------
-        //   Begin merge-to-row-vector phase after fade-in delay
-        // ------------------------------------------------------
-        if (typeof TWEEN !== 'undefined') {
-            // Start after decorative fade-in completes
-            this._scheduleAfterDelay(() => {
-                this._startMergeToRowVectors();
-            }, MERGE_TO_ROW_DELAY_AFTER_FADE_MS / GLOBAL_ANIM_SPEED_MULT);
-        }
+            } else if (vec.mesh && vec.mesh.material) {
+                vec.mesh.material.opacity = 1.0;
+                vec.mesh.material.needsUpdate = true;
+            }
+        });
     }
 
+    // Merge per-head decorative vectors into a single horizontal row per lane.
     _startMergeToRowVectors() {
         if (this.rowMergePhase && this.rowMergePhase !== 'not_started') return;
+        if (this.enableSelfAttentionAnimation) {
+            const weighted = this._getWeightedSumDecoratives();
+            if (weighted.length) this._tempDecorativeVecs = weighted;
+        }
         if (!this._tempDecorativeVecs || this._tempDecorativeVecs.length === 0) return;
 
         // Mark that decorative vectors are now travelling horizontally back
@@ -1359,6 +1618,7 @@ export class MHSAAnimation {
         }
     }
     
+    // Run output-projection matrix animation and return vectors to residual stream.
     _startVectorsThroughOutputProjection(laneVectors) {
         // Combine decorative vectors in each lane into a single vector, then animate those combined vectors
         // Mark merge as complete prior to entering the output projection stage
@@ -1418,8 +1678,8 @@ export class MHSAAnimation {
             // shift before the Output-Projection matrix).
             const tmpColor = new THREE.Color();
             vecList.forEach((srcVec, i) => {
-                const srcPrismIdx  = startVisibleIdx;      // only one visible prism
-                const destPrismIdx = startVisibleIdx + i;  // prism position in combined vector
+                const srcPrismIdx  = Math.min(startVisibleIdx, Math.max(0, (srcVec.instanceCount || this.vectorPrismCount) - 1));
+                const destPrismIdx = Math.min(i, Math.max(0, (combinedVec.instanceCount || this.vectorPrismCount) - 1));
                 if (srcVec.mesh && srcVec.mesh.getColorAt) {
                     srcVec.mesh.getColorAt(srcPrismIdx, tmpColor);
                     combinedVec.mesh.setColorAt(destPrismIdx, tmpColor);
@@ -1806,13 +2066,31 @@ export class MHSAAnimation {
 
     /**
      * Skip the attention conveyor belt animation and jump straight into the concatenation phase.
+     * Ensures weighted sums exist so concat/output-projection can proceed deterministically.
      */
     skipSelfAttentionAndStartConcat() {
         if (this.mhaPassThroughPhase !== 'mha_pass_through_complete') return;
         const preserveTrails = !!this._skipToEndActive;
-        try { if (this.selfAttentionAnimator?.forceComplete) this.selfAttentionAnimator.forceComplete({ preserveTrails }); } catch (_) {}
+        try {
+            if (this.selfAttentionAnimator?.forceComplete) {
+                this.selfAttentionAnimator.forceComplete({
+                    preserveTrails,
+                    createWeightedSums: true,
+                    replaceWeightedSums: true,
+                });
+            }
+        } catch (_) {}
         try { this._hideAllQVectorsImmediately(); } catch (_) {}
         try { this._hideAllKandVVectorsImmediately(); } catch (_) {}
+        const weightedDecoratives = this._getWeightedSumDecoratives();
+        if (weightedDecoratives.length) {
+            this._tempDecorativeVecs = weightedDecoratives;
+            const fadeDuration = this._resolveSkipDuration(DECORATIVE_FADE_MS);
+            this._restoreWeightedSumColors(fadeDuration, 0);
+        } else {
+            const fadeDuration = this._resolveSkipDuration(DECORATIVE_FADE_MS);
+            this._spawnTempDecorativesFromK({ fadeDuration, fadeDelay: 0, clearExisting: true });
+        }
         this.outputProjMatrixReturnComplete = false;
         this._outputProjReturnCount = 0;
         this._outputProjReturnTargetCount = 0;

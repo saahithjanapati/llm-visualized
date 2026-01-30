@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import { VECTOR_LENGTH_PRISM, SA_RED_EXTRA_RISE, SA_V_RISE_DURATION_MS, SA_K_ALIGN_DURATION_MS, SA_BLUE_HORIZ_DURATION_MS, SA_BLUE_VERT_DURATION_MS, SA_BLUE_PAUSE_MS, SA_BLUE_QUEUE_SHIFT_DURATION_MS, SA_DUPLICATE_POP_IN_MS, SA_DUPLICATE_TRAVEL_MERGE_MS, SA_DUPLICATE_POP_OUT_MS, GLOBAL_ANIM_SPEED_MULT, SELF_ATTENTION_TIME_MULT } from '../../utils/constants.js';
 import { VectorVisualizationInstancedPrism } from '../../components/VectorVisualizationInstancedPrism.js';
-import { mapValueToColor, mapValueToGrayscale } from '../../utils/colors.js';
+import { mapValueToColor, mapValueToGrayscale, buildMonochromeOptions, mapValueToMonochrome } from '../../utils/colors.js';
 import { buildActivationData, applyActivationDataToObject } from '../../utils/activationMetadata.js';
+import { MHA_VALUE_SPECTRUM_COLOR } from '../LayerAnimationConstants.js';
 
 // Shared lightweight geometry for self-attention highlight spheres
 const SHARED_SPHERE_GEOMETRY = new THREE.SphereGeometry(10, 12, 12);
@@ -54,6 +55,7 @@ export class SelfAttentionAnimator {
         this._pendingTimeouts   = new Set();
         this._spawnedSpheres    = new Set();
         this._spawnedTempVectors = new Set();
+        this._pendingDockCount  = 0;
         this.attentionProgress = {};
         this.attentionCompletedRows = {};
         this.attentionPostCompletedRows = {};
@@ -206,8 +208,13 @@ export class SelfAttentionAnimator {
             return;
         }
         const preserveTrails = !!options.preserveTrails;
+        const createWeightedSums = !!options.createWeightedSums;
+        const replaceWeightedSums = options.replaceWeightedSums !== false;
         this.skipRequested = true;
         this._clearPendingTimeouts();
+        if (createWeightedSums) {
+            try { this._createWeightedSumsImmediate({ replaceExisting: replaceWeightedSums }); } catch (_) {}
+        }
         // Retire any active vectors and queued blues
         Object.values(this._activeBlueVectors || {}).forEach((vec) => this._retireVector(vec, { preserveTrail: preserveTrails }));
         Object.values(this.blueQueues || {}).forEach((queue) => {
@@ -216,6 +223,7 @@ export class SelfAttentionAnimator {
         this.blueQueues = {};
         this.blueProcessing = {};
         this.blueProcessedCount = {};
+        this._pendingDockCount = 0;
         this.phase = 'complete';
         // Clean up any lingering highlight spheres
         this._spawnedSpheres.forEach((sp) => {
@@ -613,6 +621,229 @@ export class SelfAttentionAnimator {
         }
     }
 
+    _applyValueVectorScheme(vector, sourceData = null, options = {}) {
+        if (!vector) return;
+        const outputLength = (this.ctx && this.ctx.outputVectorLength) ? this.ctx.outputVectorLength : 64;
+        const setHiddenToBlack = options && typeof options.setHiddenToBlack === 'boolean'
+            ? options.setHiddenToBlack
+            : true;
+        const raw = Array.isArray(sourceData)
+            ? sourceData.slice(0, outputLength)
+            : (vector.rawData ? vector.rawData.slice(0, outputLength) : []);
+        const monoOptions = buildMonochromeOptions(MHA_VALUE_SPECTRUM_COLOR);
+        const numKeyColors = raw.length <= 1 ? 1 : 3;
+        vector.applyProcessedVisuals(
+            raw,
+            outputLength,
+            { numKeyColors, generationOptions: monoOptions },
+            { setHiddenToBlack },
+            raw
+        );
+        if (raw.length === 1 && typeof vector.setUniformColor === 'function') {
+            const monoColor = mapValueToMonochrome(raw[0], monoOptions);
+            vector.setUniformColor(monoColor);
+        }
+        vector.userData = vector.userData || {};
+        vector.userData.weightedSumVisuals = {
+            numKeyColors,
+            generationOptions: monoOptions,
+            outputLength
+        };
+    }
+
+    _applyWeightedSumScheme(vector, sourceData = null, options = {}) {
+        if (!vector) return;
+        const outputLength = (this.ctx && this.ctx.outputVectorLength) ? this.ctx.outputVectorLength : 64;
+        const setHiddenToBlack = options && typeof options.setHiddenToBlack === 'boolean'
+            ? options.setHiddenToBlack
+            : true;
+        const raw = Array.isArray(sourceData)
+            ? sourceData.slice(0, outputLength)
+            : (vector.rawData ? vector.rawData.slice(0, outputLength) : []);
+        const numKeyColors = raw.length <= 1 ? 1 : Math.min(30, raw.length);
+        vector.applyProcessedVisuals(
+            raw,
+            outputLength,
+            { numKeyColors, generationOptions: null },
+            { setHiddenToBlack },
+            raw
+        );
+        if (raw.length === 1 && typeof vector.setUniformColor === 'function') {
+            vector.setUniformColor(mapValueToColor(raw[0]));
+        }
+        vector.userData = vector.userData || {};
+        vector.userData.weightedSumVisuals = {
+            numKeyColors,
+            generationOptions: null,
+            outputLength
+        };
+    }
+
+    _buildWeightedSumData(headIdx, queryLane, lanes, outputLength) {
+        const activationSource = this.ctx && this.ctx.activationSource ? this.ctx.activationSource : null;
+        const layerIndex = Number.isFinite(this.ctx?.layerIndex) ? this.ctx.layerIndex : null;
+        const queryTokenIndex = queryLane && Number.isFinite(queryLane.tokenIndex) ? queryLane.tokenIndex : null;
+        const data = new Array(outputLength).fill(0);
+        let usedWeight = false;
+
+        if (activationSource && Number.isFinite(layerIndex) && Number.isFinite(queryTokenIndex)) {
+            lanes.forEach((keyLane) => {
+                const keyTokenIndex = keyLane && Number.isFinite(keyLane.tokenIndex) ? keyLane.tokenIndex : null;
+                if (!Number.isFinite(keyTokenIndex)) return;
+                const weight = activationSource.getAttentionScore
+                    ? activationSource.getAttentionScore(layerIndex, 'post', headIdx, queryTokenIndex, keyTokenIndex)
+                    : null;
+                if (!Number.isFinite(weight)) return;
+                const vObj = keyLane && Array.isArray(keyLane.sideCopies)
+                    ? keyLane.sideCopies.find(sc => sc && sc.type === 'V' && sc.headIndex === headIdx)
+                    : null;
+                const vVec = vObj && vObj.vec ? vObj.vec : null;
+                const vData = vVec && Array.isArray(vVec.rawData) ? vVec.rawData : null;
+                if (!vData || !vData.length) return;
+                usedWeight = true;
+                for (let i = 0; i < outputLength; i++) {
+                    data[i] += weight * (vData[i] ?? 0);
+                }
+            });
+        }
+
+        if (!usedWeight) {
+            const fallbackObj = queryLane && Array.isArray(queryLane.sideCopies)
+                ? queryLane.sideCopies.find(sc => sc && sc.type === 'V' && sc.headIndex === headIdx)
+                : null;
+            const fallbackVec = fallbackObj && fallbackObj.vec ? fallbackObj.vec : null;
+            const fallbackData = fallbackVec && Array.isArray(fallbackVec.rawData) ? fallbackVec.rawData : null;
+            if (fallbackData && fallbackData.length) {
+                return fallbackData.slice(0, outputLength);
+            }
+            return data;
+        }
+
+        return data;
+    }
+
+    _createWeightedSumsImmediate(options = {}) {
+        const ctx = this.ctx;
+        const lanes = Array.isArray(ctx?.currentLanes) ? ctx.currentLanes : [];
+        if (!lanes.length) return 0;
+        const headCount = Array.isArray(ctx?.headCoords) ? ctx.headCoords.length : 0;
+        if (!headCount) return 0;
+        const outputLength = Number.isFinite(ctx?.outputVectorLength) ? ctx.outputVectorLength : 64;
+        const replaceExisting = options && options.replaceExisting !== false;
+
+        if (replaceExisting) {
+            try { ctx && ctx._clearTempDecoratives && ctx._clearTempDecoratives(); } catch (_) {}
+            try { ctx && ctx._clearWeightedSumVectors && ctx._clearWeightedSumVectors(); } catch (_) {}
+        }
+
+        let created = 0;
+        const dockOffset = Number.isFinite(ctx?.weightedSumDockOffset) ? ctx.weightedSumDockOffset : 30;
+        const fallbackBaseY = Number.isFinite(ctx?.mhaPassThroughTargetY) && Number.isFinite(ctx?.mhaResultRiseOffsetY)
+            ? ctx.mhaPassThroughTargetY + ctx.mhaResultRiseOffsetY - 30 + this.RED_EXTRA_RISE
+            : (this.RED_EXTRA_RISE || 0);
+
+        lanes.forEach((lane) => {
+            const laneZ = Number.isFinite(lane?.zPos) ? lane.zPos : null;
+            for (let headIdx = 0; headIdx < headCount; headIdx++) {
+                const vObj = lane && Array.isArray(lane.sideCopies)
+                    ? lane.sideCopies.find(sc => sc && sc.type === 'V' && sc.headIndex === headIdx)
+                    : null;
+                const vVec = vObj && vObj.vec ? vObj.vec : null;
+                const instanceCount = Number.isFinite(vVec?.instanceCount)
+                    ? vVec.instanceCount
+                    : (Number.isFinite(ctx?.vectorPrismCount) ? ctx.vectorPrismCount : undefined);
+                const targetX = Number.isFinite(vVec?.group?.position?.x)
+                    ? vVec.group.position.x
+                    : (ctx?.headCoords && ctx.headCoords[headIdx] ? ctx.headCoords[headIdx].v : 0);
+                const baseY = Number.isFinite(vVec?.group?.position?.y)
+                    ? vVec.group.position.y
+                    : fallbackBaseY;
+                const targetY = baseY + dockOffset;
+                const zPos = Number.isFinite(laneZ)
+                    ? laneZ
+                    : (Number.isFinite(vVec?.group?.position?.z) ? vVec.group.position.z : 0);
+
+                const data = this._buildWeightedSumData(headIdx, lane, lanes, outputLength);
+                const spawnPos = new THREE.Vector3(targetX, targetY, zPos);
+                const wsVec = new VectorVisualizationInstancedPrism(
+                    data.slice(),
+                    spawnPos,
+                    3,
+                    instanceCount
+                );
+                wsVec.userData = wsVec.userData || {};
+                wsVec.userData.isWeightedSum = true;
+                wsVec.userData.headIndex = headIdx;
+                wsVec.userData.parentLane = lane || null;
+                wsVec.userData.weightedSumLaneZ = zPos;
+                wsVec.userData.weightedSumReadyForConcat = true;
+                wsVec.userData.weightedSumDocked = true;
+                wsVec.group.userData = wsVec.group.userData || {};
+                wsVec.group.userData.label = (lane && lane.tokenLabel)
+                    ? `Attention Weighted Sum - ${lane.tokenLabel}`
+                    : 'Attention Weighted Sum';
+                if (ctx && ctx.parentGroup) {
+                    ctx.parentGroup.add(wsVec.group);
+                }
+                this._applyWeightedSumScheme(wsVec, data);
+                try {
+                    if (ctx && typeof ctx.registerWeightedSumVector === 'function') {
+                        ctx.registerWeightedSumVector(wsVec, zPos, headIdx, lane);
+                    }
+                } catch (_) { /* optional */ }
+                created += 1;
+            }
+        });
+
+        return created;
+    }
+
+    _copyVectorAppearance(target, source) {
+        if (!target || !target.mesh || !source || !source.mesh) return;
+        const srcMesh = source.mesh;
+        const dstMesh = target.mesh;
+        const tmpMat = new THREE.Matrix4();
+        const instCount = Math.min(target.instanceCount || 0, source.instanceCount || 0);
+        for (let i = 0; i < instCount; i++) {
+            srcMesh.getMatrixAt(i, tmpMat);
+            dstMesh.setMatrixAt(i, tmpMat);
+        }
+        if (dstMesh.instanceMatrix) dstMesh.instanceMatrix.needsUpdate = true;
+        const srcCS = srcMesh.geometry?.getAttribute?.('colorStart');
+        const srcCE = srcMesh.geometry?.getAttribute?.('colorEnd');
+        const dstCS = dstMesh.geometry?.getAttribute?.('colorStart');
+        const dstCE = dstMesh.geometry?.getAttribute?.('colorEnd');
+        if (srcCS && dstCS && srcCS.array && dstCS.array) {
+            dstCS.array.set(srcCS.array);
+            dstCS.needsUpdate = true;
+        }
+        if (srcCE && dstCE && srcCE.array && dstCE.array) {
+            dstCE.array.set(srcCE.array);
+            dstCE.needsUpdate = true;
+        }
+        if (srcMesh.instanceColor) {
+            if (!dstMesh.instanceColor) {
+                dstMesh.instanceColor = new THREE.InstancedBufferAttribute(
+                    new Float32Array(target.instanceCount * 3),
+                    3
+                );
+            }
+            dstMesh.instanceColor.array.set(srcMesh.instanceColor.array);
+            dstMesh.instanceColor.needsUpdate = true;
+        }
+        if (srcMesh.material && dstMesh.material) {
+            dstMesh.material.transparent = srcMesh.material.transparent;
+            dstMesh.material.opacity = srcMesh.material.opacity;
+            if ('emissiveIntensity' in dstMesh.material && 'emissiveIntensity' in srcMesh.material) {
+                dstMesh.material.emissiveIntensity = srcMesh.material.emissiveIntensity;
+            }
+            if (dstMesh.material.emissive && srcMesh.material.emissive) {
+                dstMesh.material.emissive.copy(srcMesh.material.emissive);
+            }
+            dstMesh.material.needsUpdate = true;
+        }
+    }
+
     _animateBlueVector(vector, headIdx, i, laneZs, allDoneCb) {
         if (this.skipRequested) {
             this._finishBlueImmediately(vector, headIdx, allDoneCb);
@@ -700,6 +931,8 @@ export class SelfAttentionAnimator {
             doneCb && doneCb();
             return;
         }
+        const queryLaneZ = laneZs[Math.min(Math.max(0, hopCount - 1), laneZs.length - 1)];
+        const queryLane = this.ctx.currentLanes.find(l => Math.abs(l.zPos - queryLaneZ) < 0.1);
         const topLaneZ = laneZs[0];
         const topLane = this.ctx.currentLanes.find(l => Math.abs(l.zPos - topLaneZ) < 0.1);
         if (!topLane || !Array.isArray(topLane.sideCopies)) {
@@ -725,32 +958,99 @@ export class SelfAttentionAnimator {
             3,
             fixedVec.instanceCount
         );
-        travellingVec.userData = { headIndex: headIdx };
+        travellingVec.userData = { headIndex: headIdx, parentLane: queryLane, attnRowIndex: hopCount - 1 };
         this._activeBlueVectors[headIdx] = travellingVec;
         this.ctx.parentGroup.add(travellingVec.group);
         this._spawnedTempVectors.add(travellingVec);
-        travellingVec.applyProcessedVisuals(
-            fixedVec.rawData.slice(),
-            this.ctx.outputVectorLength || 64,
-            { numKeyColors: this.ctx.outputVectorLength || 64 },
-            { setHiddenToBlack: true }
-        );
+        this._applyWeightedSumScheme(travellingVec, fixedVec.rawData);
         // Start invisible – will be revealed on first merge
         travellingVec.group.scale.set(0.001, 0.001, 0.001);
 
         // Begin traversal over red vectors
         this._traverseLanes(travellingVec, laneZs, hopCount, spheresArr, false, () => {
-            new TWEEN.Tween(travellingVec.group.scale)
-                .to({ x: 0.001, y: 0.001, z: 0.001 }, this.DUPLICATE_POP_OUT_MS)
+            this._parkWeightedSumVector(travellingVec, headIdx, queryLane, queryLaneZ);
+            doneCb && doneCb();
+        });
+    }
+
+    _parkWeightedSumVector(vector, headIdx, lane, laneZ) {
+        if (!vector || !vector.group) return;
+        const resolvedLaneZ = Number.isFinite(lane?.zPos) ? lane.zPos : (Number.isFinite(laneZ) ? laneZ : vector.group.position.z);
+        const vObj = lane && Array.isArray(lane.sideCopies)
+            ? lane.sideCopies.find(sc => sc && sc.headIndex === headIdx && sc.type === 'V')
+            : null;
+        const vVec = vObj && vObj.vec ? vObj.vec : null;
+        const targetX = vVec && vVec.group ? vVec.group.position.x
+            : (this.ctx.headCoords && this.ctx.headCoords[headIdx] ? this.ctx.headCoords[headIdx].v : vector.group.position.x);
+        const baseY = vVec && vVec.group ? vVec.group.position.y : vector.group.position.y;
+        const dockOffset = Number.isFinite(this.ctx?.weightedSumDockOffset) ? this.ctx.weightedSumDockOffset : 30;
+        const targetY = baseY + dockOffset;
+        vector.group.scale.set(1, 1, 1);
+
+        vector.userData = vector.userData || {};
+        vector.userData.isWeightedSum = true;
+        vector.userData.headIndex = headIdx;
+        vector.userData.parentLane = lane || vector.userData.parentLane || null;
+        vector.userData.weightedSumLaneZ = resolvedLaneZ;
+        vector.userData.weightedSumReadyForConcat = false;
+        vector.userData.weightedSumDocked = false;
+        vector.group.userData.label = (lane && lane.tokenLabel)
+            ? `Attention Weighted Sum - ${lane.tokenLabel}`
+            : 'Attention Weighted Sum';
+
+        this._applyWeightedSumScheme(vector);
+
+        // Ensure weighted sums survive cleanup of temp conveyor vectors
+        this._spawnedTempVectors.delete(vector);
+        if (this._activeBlueVectors && this._activeBlueVectors[headIdx] === vector) {
+            delete this._activeBlueVectors[headIdx];
+        }
+
+        // Register with parent so it can drive concatenation later
+        try {
+            if (this.ctx && typeof this.ctx.registerWeightedSumVector === 'function') {
+                this.ctx.registerWeightedSumVector(vector, resolvedLaneZ, headIdx, lane);
+            }
+        } catch (_) { /* optional */ }
+
+        const applyGray = () => {
+            if (vector.userData && vector.userData.weightedSumReadyForConcat) return;
+            this._setVectorColor(vector, new THREE.Color(0x606060));
+        };
+        const grayDelayMs = 140;
+
+        this._pendingDockCount += 1;
+
+        const finalizeDock = () => {
+            if (vector.userData) {
+                vector.userData.weightedSumDocked = true;
+            }
+            this._pendingDockCount = Math.max(0, this._pendingDockCount - 1);
+            this._checkGlobalCompletion();
+        };
+
+        if (typeof TWEEN !== 'undefined') {
+            new TWEEN.Tween(vector.group.position)
+                .to({ x: targetX, y: targetY, z: resolvedLaneZ }, this.DUPLICATE_TRAVEL_MERGE_MS)
+                .easing(TWEEN.Easing.Quadratic.Out)
                 .onComplete(() => {
-                    delete this._activeBlueVectors[headIdx];
-                    this._spawnedTempVectors.delete(travellingVec);
-                    if (travellingVec.group.parent) travellingVec.group.parent.remove(travellingVec.group);
-                    if (typeof travellingVec.dispose === 'function') travellingVec.dispose();
-                    doneCb && doneCb();
+                    const delayId = setTimeout(() => {
+                        this._pendingTimeouts.delete(delayId);
+                        applyGray();
+                    }, grayDelayMs);
+                    this._registerTimeout(delayId);
+                    finalizeDock();
                 })
                 .start();
-        });
+        } else {
+            vector.group.position.set(targetX, targetY, resolvedLaneZ);
+            const delayId = setTimeout(() => {
+                this._pendingTimeouts.delete(delayId);
+                applyGray();
+            }, grayDelayMs);
+            this._registerTimeout(delayId);
+            finalizeDock();
+        }
     }
 
     _traverseLanes(vector, laneZs, count, spheresArr, createSpheres, doneCb, stepIdx = 0) {
@@ -848,60 +1148,132 @@ export class SelfAttentionAnimator {
                                 const fixedVec = fixedObj.vec;
                                 // Ensure duplicates spawn at the **raised** red-vector height (match the highlight spheres).
                                 const raisedY = sp ? sp.position.y : vector.group.position.y;
-                                const startPos = new THREE.Vector3(
-                                    fixedVec.group.position.x,
-                                    raisedY,
-                                    fixedVec.group.position.z
-                                );
+                                const activationData = sp && sp.userData ? sp.userData.activationData : null;
+                                const postScore = activationData && Number.isFinite(activationData.postScore)
+                                    ? activationData.postScore
+                                    : null;
+                                const weight = Number.isFinite(postScore)
+                                    ? THREE.MathUtils.clamp(postScore, 0, 1)
+                                    : null;
+                                const weightScale = 1.0;
+                                const weightOpacity = Number.isFinite(weight)
+                                    ? THREE.MathUtils.lerp(0.65, 1.0, weight)
+                                    : 1.0;
+                                const startPos = fixedVec.group.position.clone();
                                 const dupVec = new VectorVisualizationInstancedPrism(
                                     fixedVec.rawData.slice(),
                                     startPos,
                                     3,
                                     fixedVec.instanceCount
                                 );
-                                // Make duplicate visually match the travelling 64-dim vector
-                                dupVec.applyProcessedVisuals(
-                                    fixedVec.rawData.slice(),
-                                    this.ctx.outputVectorLength || 64,
-                                    { numKeyColors: this.ctx.outputVectorLength || 64 },
-                                    { setHiddenToBlack: true }
-                                );
+                                // Start with the ORIGINAL value-vector look.
+                                this._copyVectorAppearance(dupVec, fixedVec);
                                 this.ctx.parentGroup.add(dupVec.group);
                                 this._spawnedTempVectors.add(dupVec);
                                 dupVec.group.scale.set(0.001, 0.001, 0.001);
-                                // Optional quick pop-in
-                new TWEEN.Tween(dupVec.group.scale).to({ x: 1, y: 1, z: 1 }, this.DUPLICATE_POP_IN_MS).start();
-                                // Direct: fixed V -> travelling red vector
-                                new TWEEN.Tween(dupVec.group.position)
-                                    .to({ x: vector.group.position.x, y: raisedY, z: vector.group.position.z }, this.DUPLICATE_TRAVEL_MERGE_MS)
-                                    .easing(TWEEN.Easing.Quadratic.InOut)
-                                    .onComplete(() => {
-                                                // Reveal travelling red vector on its first merge
-                                                if (vector.group.scale.x < 0.5) {
-                                                new TWEEN.Tween(vector.group.scale)
-                                                    .to({ x: 1, y: 1, z: 1 }, this.DUPLICATE_POP_IN_MS)
-                                                        .easing(TWEEN.Easing.Quadratic.Out)
-                                                        .start();
-                                                }
-                                            // Fade / dispose duplicate
-                                                new TWEEN.Tween(dupVec.group.scale)
-                                                    .to({ x: 0.001, y: 0.001, z: 0.001 }, this.DUPLICATE_POP_OUT_MS)
-                                                    .onComplete(() => {
-                                                        this._spawnedTempVectors.delete(dupVec);
-                                                        if (dupVec.group.parent) dupVec.group.parent.remove(dupVec.group);
-                                                        if (typeof dupVec.dispose === 'function') dupVec.dispose();
-                                                        // Continue traversal AFTER merge completes
-                                                        ContinueTraversal();
-                                                    })
-                                                    .start();
-                                            }).start();
+                                // Optional quick pop-in (scale encodes weight)
+                                new TWEEN.Tween(dupVec.group.scale)
+                                    .to({ x: 1, y: 1, z: 1 }, this.DUPLICATE_POP_IN_MS)
+                                    .easing(TWEEN.Easing.Quadratic.Out)
+                                    .start();
+                                // Pulse the post-softmax score to visualize weighting
+                                if (sp) {
+                                    const baseScale = sp.scale ? sp.scale.x : 1;
+                                    const pulse = Number.isFinite(weight)
+                                        ? THREE.MathUtils.lerp(1.15, 1.9, weight)
+                                        : 1.4;
+                                    new TWEEN.Tween(sp.scale)
+                                        .to({ x: baseScale * pulse, y: baseScale * pulse, z: baseScale * pulse }, 180)
+                                        .easing(TWEEN.Easing.Quadratic.Out)
+                                        .yoyo(true)
+                                        .repeat(1)
+                                        .start();
+                                }
+                                const sumTarget = { x: vector.group.position.x, y: raisedY, z: vector.group.position.z };
+                                const sumDuration = sp ? this.DUPLICATE_TRAVEL_MERGE_MS * 0.55 : this.DUPLICATE_TRAVEL_MERGE_MS;
+                                const applyWeightedLook = () => {
+                                    this._applyWeightedSumScheme(dupVec, fixedVec.rawData, { setHiddenToBlack: true });
+                                    if (dupVec.mesh && dupVec.mesh.material) {
+                                        dupVec.mesh.material.transparent = true;
+                                        dupVec.mesh.material.opacity = weightOpacity;
+                                        dupVec.mesh.material.needsUpdate = true;
+                                    }
+                                    // Keep size identical; only opacity changes for weighting.
+                                    dupVec.group.scale.set(weightScale, weightScale, weightScale);
+                                };
+                                const flyToSum = () => {
+                                    new TWEEN.Tween(dupVec.group.position)
+                                        .to(sumTarget, sumDuration)
+                                        .easing(TWEEN.Easing.Quadratic.InOut)
+                                        .onComplete(() => {
+                                        const pulseSum = () => {
+                                            const baseScale = Math.max(1, vector.group.scale.x);
+                                            const pulseFactor = Number.isFinite(weight)
+                                                ? THREE.MathUtils.lerp(1.04, 1.14, weight)
+                                                : 1.08;
+                                            const state = { s: baseScale };
+                                            new TWEEN.Tween(state)
+                                                .to({ s: baseScale * pulseFactor }, 140)
+                                                .easing(TWEEN.Easing.Quadratic.Out)
+                                                .yoyo(true)
+                                                .repeat(1)
+                                                .onUpdate(() => {
+                                                    vector.group.scale.set(state.s, state.s, state.s);
+                                                })
+                                                .start();
+                                        };
+                                        // Reveal travelling red vector on its first merge
+                                        if (vector.group.scale.x < 0.5) {
+                                            new TWEEN.Tween(vector.group.scale)
+                                                .to({ x: 1, y: 1, z: 1 }, this.DUPLICATE_POP_IN_MS)
+                                                .easing(TWEEN.Easing.Quadratic.Out)
+                                                .onComplete(pulseSum)
+                                                .start();
+                                        } else {
+                                            pulseSum();
+                                        }
+                                        // Fade / dispose duplicate
+                                        new TWEEN.Tween(dupVec.group.scale)
+                                            .to({ x: 0.001, y: 0.001, z: 0.001 }, this.DUPLICATE_POP_OUT_MS)
+                                            .onComplete(() => {
+                                                this._spawnedTempVectors.delete(dupVec);
+                                                if (dupVec.group.parent) dupVec.group.parent.remove(dupVec.group);
+                                                if (typeof dupVec.dispose === 'function') dupVec.dispose();
+                                                // Continue traversal AFTER merge completes
+                                                ContinueTraversal();
+                                            })
+                                            .start();
+                                    }).start();
+                                };
+
+                                if (sp) {
+                                    const scoreTarget = { x: sp.position.x, y: sp.position.y, z: sp.position.z };
+                                    new TWEEN.Tween(dupVec.group.position)
+                                        .to(scoreTarget, this.DUPLICATE_TRAVEL_MERGE_MS * 0.45)
+                                        .easing(TWEEN.Easing.Quadratic.Out)
+                                        .onComplete(() => {
+                                            // Brief linger at the post-softmax score before merging into the running sum
+                                            const delayId = setTimeout(() => {
+                                                this._pendingTimeouts.delete(delayId);
+                                                if (this.skipRequested) return;
+                                                applyWeightedLook();
+                                                flyToSum();
+                                            }, 80);
+                                            this._registerTimeout(delayId);
+                                        })
+                                        .start();
+                                } else {
+                                    applyWeightedLook();
+                                    flyToSum();
+                                }
                             }
                         }
 
-                        // Shrink & remove sphere immediately after duplicate leaves
+                        // Shrink & remove sphere after the weighting merge completes
+                        const shrinkDelay = Math.max(250, this.DUPLICATE_TRAVEL_MERGE_MS * 0.8);
                         new TWEEN.Tween(sp.scale)
                             .to({ x: 0.001, y: 0.001, z: 0.001 }, 250)
-                            .delay(250)
+                            .delay(shrinkDelay)
                             .easing(TWEEN.Easing.Quadratic.In)
                             .onComplete(() => {
                                 this._spawnedSpheres.delete(sp);
@@ -933,7 +1305,7 @@ export class SelfAttentionAnimator {
     _isConveyorComplete() {
         const anyProcessing = Object.values(this.blueProcessing).some(v => v);
         const anyQueued = Object.values(this.blueQueues).some(q => q && q.length > 0);
-        return !anyProcessing && !anyQueued;
+        return !anyProcessing && !anyQueued && this._pendingDockCount === 0;
     }
 
     _checkGlobalCompletion() {

@@ -54,7 +54,7 @@ import {
 
 
 // Slightly reduced spacing between stacked layers for a tighter layout.
-const VERTICAL_SPACING = 1600; // matches LayerAnimation.js vertical extent
+const VERTICAL_SPACING = 1700; // matches LayerAnimation.js vertical extent (tuned gap above MLP)
 // Reusable scratch vector to avoid per-frame allocations when working with
 // world-space trail coordinates.
 const TMP_WORLD_POS = new THREE.Vector3();
@@ -211,7 +211,7 @@ export default class Gpt2Layer extends BaseLayer {
         // ────────────────────────────────────────────────────────────────
         // 3) LayerNorm 2
         // ────────────────────────────────────────────────────────────────
-        const ln2CenterY = LAYER_NORM_2_Y_POS;
+        const ln2CenterY = LAYER_NORM_2_Y_POS + (this.mhsaAnimation?.outputProjMatrixYOffset || 0);
         const ln2 = new LayerNormalizationVisualization(
             new THREE.Vector3(offsetX, ln2CenterY, 0),
             LN_PARAMS.width,
@@ -319,9 +319,16 @@ export default class Gpt2Layer extends BaseLayer {
         const bottomY_ln1_abs = LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2;
         const midY_ln1_abs    = LAYER_NORM_1_Y_POS;
         const topY_ln1_abs    = LAYER_NORM_1_Y_POS + LN_PARAMS.height / 2;
-        const bottomY_ln2_abs = LAYER_NORM_2_Y_POS - LN_PARAMS.height / 2;
-        const midY_ln2_abs    = LAYER_NORM_2_Y_POS;
-        const topY_ln2_abs    = LAYER_NORM_2_Y_POS + LN_PARAMS.height / 2;
+        const ln2CenterY = this.ln2 && this.ln2.group && Number.isFinite(this.ln2.group.position.y)
+            ? this.ln2.group.position.y
+            : LAYER_NORM_2_Y_POS;
+        const ln2CenterX = this.ln2 && this.ln2.group && Number.isFinite(this.ln2.group.position.x)
+            ? this.ln2.group.position.x
+            : BRANCH_X;
+        const ln2EntryXEpsilon = 0.5;
+        const bottomY_ln2_abs = ln2CenterY - LN_PARAMS.height / 2;
+        const midY_ln2_abs    = ln2CenterY;
+        const topY_ln2_abs    = ln2CenterY + LN_PARAMS.height / 2;
         const lanes = Array.isArray(this.lanes) ? this.lanes : [];
         const laneCount = lanes.length;
         const exitTransitionRange = 5; // world–unit distance for final fade
@@ -412,15 +419,21 @@ export default class Gpt2Layer extends BaseLayer {
 
                 const movingLn2 = lane.movingVecLN2;
                 if (movingLn2 && movingLn2.group && movingLn2.group.visible) {
-                    const y = movingLn2.group.position.y;
-                    highestLN2VecY = Math.max(highestLN2VecY, y);
-                    if (y >= bottomY_ln2_abs - exitTransitionRange) anyVectorInLN2 = true;
+                    const x = movingLn2.group.position.x;
+                    if (Math.abs(x - ln2CenterX) <= ln2EntryXEpsilon) {
+                        const y = movingLn2.group.position.y;
+                        highestLN2VecY = Math.max(highestLN2VecY, y);
+                        if (y >= bottomY_ln2_abs - exitTransitionRange) anyVectorInLN2 = true;
+                    }
                 } else {
                     const resultLn2 = lane.resultVecLN2;
                     if (resultLn2 && resultLn2.group && resultLn2.group.visible) {
-                        const y = resultLn2.group.position.y;
-                        highestLN2VecY = Math.max(highestLN2VecY, y);
-                        if (y >= bottomY_ln2_abs - exitTransitionRange) anyVectorInLN2 = true;
+                        const x = resultLn2.group.position.x;
+                        if (Math.abs(x - ln2CenterX) <= ln2EntryXEpsilon) {
+                            const y = resultLn2.group.position.y;
+                            highestLN2VecY = Math.max(highestLN2VecY, y);
+                            if (y >= bottomY_ln2_abs - exitTransitionRange) anyVectorInLN2 = true;
+                        }
                     }
                 }
 
@@ -1100,6 +1113,13 @@ export default class Gpt2Layer extends BaseLayer {
                     // relative height inside the ring.
                     const normStartY2 =
                         bottomY_ln2_abs + LN_PARAMS.height * LN_NORM_START_FRACTION_FROM_BOTTOM;
+                    const ln2HoleHeight = Math.min(
+                        LN_PARAMS.wallThickness * 1.5 * LN_PARAMS.holeWidthFactor,
+                        LN_PARAMS.height / 2
+                    );
+                    const ln2SolidEntryY = bottomY_ln2_abs + ln2HoleHeight;
+                    const minInsideY = Math.max(bottomY_ln2_abs + 6, ln2SolidEntryY);
+                    const effectiveNormStartY2 = Math.max(normStartY2, minInsideY);
                     const riseStep = ANIM_RISE_SPEED_INSIDE_LN * speedMult * dt;
                     const startLn2Norm = () => {
                         const ln2NormData = this._getLn2Data(lane, 'norm');
@@ -1125,12 +1145,14 @@ export default class Gpt2Layer extends BaseLayer {
                         }
                     };
                     if (!lane.normStartedLN2) {
-                        if (mv.group.position.y >= normStartY2) {
-                            mv.group.position.y = normStartY2;
+                        if (mv.group.position.y < minInsideY) {
+                            mv.group.position.y = Math.min(minInsideY, mv.group.position.y + riseStep);
+                        } else if (mv.group.position.y >= effectiveNormStartY2) {
+                            mv.group.position.y = effectiveNormStartY2;
                             startLn2Norm();
                         } else {
-                            mv.group.position.y = Math.min(normStartY2, mv.group.position.y + riseStep);
-                            if (mv.group.position.y >= normStartY2) {
+                            mv.group.position.y = Math.min(effectiveNormStartY2, mv.group.position.y + riseStep);
+                            if (mv.group.position.y >= effectiveNormStartY2) {
                                 startLn2Norm();
                             }
                         }

@@ -1087,8 +1087,12 @@ const isTopControlsVisible = () => {
     if (!topControls || typeof window === 'undefined') return false;
     const style = window.getComputedStyle(topControls);
     if (!style || style.display === 'none' || style.visibility === 'hidden') return false;
-    const opacity = Number.parseFloat(style.opacity || '1');
-    if (Number.isFinite(opacity) && opacity < 0.15) return false;
+    if (typeof document !== 'undefined' && document.body?.classList?.contains('detail-mobile-focus')) return false;
+    const autoHidden = topControls.dataset.autoHidden === 'true';
+    if (autoHidden) {
+        const opacity = Number.parseFloat(style.opacity || '1');
+        if (Number.isFinite(opacity) && opacity < 0.15) return false;
+    }
     return true;
 };
 
@@ -1144,6 +1148,7 @@ document.addEventListener('pointerdown', (event) => {
     }
     const button = findTopControlButtonAt(event.clientX, event.clientY);
     if (!button) return;
+    showTopControls();
     event.preventDefault();
     event.stopPropagation();
     button.click();
@@ -1151,24 +1156,38 @@ document.addEventListener('pointerdown', (event) => {
 window.addEventListener('pointerdown', (event) => {
     if (!topControls) return;
     const wasHidden = topControls.dataset.autoHidden === 'true';
-    let rect = null;
-    if (wasHidden) {
+    const hasPoint = wasHidden && typeof event.clientX === 'number' && typeof event.clientY === 'number';
+    const tapPoint = hasPoint ? { x: event.clientX, y: event.clientY } : null;
+    let preButton = null;
+    let insideBefore = false;
+    if (tapPoint) {
         try {
-            rect = topControls.getBoundingClientRect();
+            const rect = topControls.getBoundingClientRect();
+            insideBefore = tapPoint.x >= rect.left && tapPoint.x <= rect.right
+                && tapPoint.y >= rect.top && tapPoint.y <= rect.bottom;
+            if (insideBefore) {
+                preButton = findTopControlButtonAt(tapPoint.x, tapPoint.y);
+            }
         } catch (_) { /* no-op */ }
     }
     showTopControls();
-    if (wasHidden && rect && typeof event.clientX === 'number' && typeof event.clientY === 'number') {
-        const inside = event.clientX >= rect.left && event.clientX <= rect.right
-            && event.clientY >= rect.top && event.clientY <= rect.bottom;
-        if (inside) {
-            requestAnimationFrame(() => {
-                const hit = document.elementFromPoint(event.clientX, event.clientY);
-                if (hit && topControls.contains(hit) && typeof hit.click === 'function') {
-                    hit.click();
-                }
-            });
-        }
+    if (wasHidden && tapPoint) {
+        requestAnimationFrame(() => {
+            let button = preButton;
+            if (!button) {
+                try {
+                    const rect = topControls.getBoundingClientRect();
+                    const insideAfter = tapPoint.x >= rect.left && tapPoint.x <= rect.right
+                        && tapPoint.y >= rect.top && tapPoint.y <= rect.bottom;
+                    if (insideAfter) {
+                        button = findTopControlButtonAt(tapPoint.x, tapPoint.y);
+                    }
+                } catch (_) { /* no-op */ }
+            }
+            if (button && typeof button.click === 'function') {
+                button.click();
+            }
+        });
     }
 }, { passive: true });
 

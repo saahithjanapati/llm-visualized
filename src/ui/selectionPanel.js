@@ -41,6 +41,9 @@ const PREVIEW_BASE_TILT_X = -0.12;
 const PREVIEW_BASE_ROTATION_Y = 0.38;
 const PREVIEW_TILT_AMPLITUDE = 0.02;
 const PREVIEW_TILT_OSC_SPEED = 0.32;
+const PREVIEW_FIT_LOCK_MS = 500;
+const PREVIEW_FIT_LOCK_PX = 120;
+const PREVIEW_FIT_LOCK_RATIO = 0.18;
 const FINAL_MLP_COLOR = 0xc07a12;
 const FINAL_VOCAB_TOP_COLOR = 0x000000;
 const PREVIEW_QKV_LANES = 3;
@@ -532,6 +535,21 @@ function applyFinalColorToObject(object, color) {
     });
 }
 
+function stripPreviewTrails(object) {
+    if (!object || typeof object.traverse !== 'function') return;
+    const toRemove = [];
+    object.traverse((child) => {
+        if (!child || !child.parent) return;
+        const ud = child.userData || {};
+        if (ud.isTrail || ud.trailRef) {
+            toRemove.push(child);
+        }
+    });
+    toRemove.forEach((child) => {
+        try { if (child.parent) child.parent.remove(child); } catch (_) { /* optional cleanup */ }
+    });
+}
+
 function buildSelectionClonePreview(selectionInfo, label) {
     const source = selectionInfo?.object || selectionInfo?.hit?.object;
     if (!source || !label) return null;
@@ -546,6 +564,7 @@ function buildSelectionClonePreview(selectionInfo, label) {
     const root = match || source;
     if (!root || root.isScene) return null;
     const clone = root.clone(true);
+    stripPreviewTrails(clone);
     clone.traverse((child) => {
         child.matrixAutoUpdate = true;
     });
@@ -1684,6 +1703,8 @@ class SelectionPanel {
         this.attentionTokensTop = document.getElementById('detailAttentionTokensTop');
         this.attentionTokensLeft = document.getElementById('detailAttentionTokensLeft');
         this.attentionMatrix = document.getElementById('detailAttentionMatrix');
+        this.attentionGrid = this.attentionRoot?.querySelector('.detail-attention-grid') || null;
+        this.attentionAxisLeft = this.attentionRoot?.querySelector('.attention-axis-label--left') || null;
         this.attentionEmpty = document.getElementById('detailAttentionEmpty');
         this.attentionNote = document.getElementById('detailAttentionNote');
         this.attentionValue = document.getElementById('detailAttentionValue');
@@ -1728,6 +1749,10 @@ class SelectionPanel {
         this._pendingResizeRaf = null;
         this._pendingResizeTimeout = null;
         this._pendingReveal = false;
+        this._pendingRevealSize = null;
+        this._pendingRevealTimer = null;
+        this._fitLockUntil = 0;
+        this._lastFitSize = null;
 
         this._animate = this._animate.bind(this);
         this._onResize = this._onResize.bind(this);
@@ -1811,14 +1836,70 @@ class SelectionPanel {
         this.renderer.setSize(width, height, false);
         this.camera.aspect = width / height;
         this.camera.updateProjectionMatrix();
-        if (this.currentPreview) {
-            fitObjectToView(this.currentPreview, this.camera, this._lastFitOptions || {});
+        if (this._pendingReveal) {
+            const prev = this._pendingRevealSize;
+            const changed = !prev || prev.width !== width || prev.height !== height;
+            this._pendingRevealSize = { width, height };
+            if (changed) {
+                if (this._pendingRevealTimer) {
+                    clearTimeout(this._pendingRevealTimer);
+                }
+                this._pendingRevealTimer = setTimeout(() => {
+                    this._pendingRevealTimer = null;
+                    this._finalizePendingReveal();
+                }, 140);
+            }
+            this._updateMobileState();
+            return;
         }
-        if (this._pendingReveal && this.canvas) {
-            this._pendingReveal = false;
-            this.canvas.style.opacity = '1';
+        if (this.currentPreview) {
+            let allowFit = true;
+            const now = performance.now();
+            if (this._lastFitSize && now < this._fitLockUntil) {
+                const dw = Math.abs(width - this._lastFitSize.width);
+                const dh = Math.abs(height - this._lastFitSize.height);
+                const ratioW = this._lastFitSize.width ? dw / this._lastFitSize.width : 1;
+                const ratioH = this._lastFitSize.height ? dh / this._lastFitSize.height : 1;
+                const bigChange = dw > PREVIEW_FIT_LOCK_PX || dh > PREVIEW_FIT_LOCK_PX
+                    || ratioW > PREVIEW_FIT_LOCK_RATIO || ratioH > PREVIEW_FIT_LOCK_RATIO;
+                if (!bigChange) {
+                    allowFit = false;
+                }
+            }
+            if (allowFit) {
+                fitObjectToView(this.currentPreview, this.camera, this._lastFitOptions || {});
+                this._noteFit(width, height);
+            }
         }
         this._updateMobileState();
+    }
+
+    _finalizePendingReveal() {
+        if (!this.isReady || !this._pendingReveal) return;
+        this._pendingReveal = false;
+        if (this.currentPreview) {
+            fitObjectToView(this.currentPreview, this.camera, this._lastFitOptions || {});
+            this._noteFit(this._pendingRevealSize?.width, this._pendingRevealSize?.height);
+        }
+        if (this.canvas) {
+            this.canvas.style.opacity = '1';
+        }
+    }
+
+    _noteFit(width, height) {
+        let nextWidth = width;
+        let nextHeight = height;
+        if (!Number.isFinite(nextWidth) || !Number.isFinite(nextHeight)) {
+            const rect = this.canvas?.getBoundingClientRect?.();
+            if (rect) {
+                nextWidth = Math.max(1, Math.floor(rect.width));
+                nextHeight = Math.max(1, Math.floor(rect.height));
+            }
+        }
+        if (Number.isFinite(nextWidth) && Number.isFinite(nextHeight)) {
+            this._lastFitSize = { width: nextWidth, height: nextHeight };
+        }
+        this._fitLockUntil = performance.now() + PREVIEW_FIT_LOCK_MS;
     }
 
     _scheduleResize() {
@@ -1975,6 +2056,17 @@ class SelectionPanel {
 
     _updateDynamicAttentionProgress() {
         if (!this._attentionContext) return;
+        if (this._isSmallScreen && this._isSmallScreen()) {
+            if (this._attentionDynamic) {
+                this._attentionDynamic = false;
+                this._attentionDynamicKey = '';
+                this._attentionPostAnimQueue.clear();
+                this._attentionPostAnimatedRows.clear();
+                this._attentionLastPostCompleted = 0;
+                this._applyAttentionReveal(null);
+            }
+            return;
+        }
         const progress = this._resolveAttentionProgress(this._attentionContext);
         if (progress) {
             const nextPost = progress.postCompletedRows || 0;
@@ -2132,7 +2224,8 @@ class SelectionPanel {
                 mode
             })
             : null;
-        const progress = this._resolveAttentionProgress(context);
+        const allowDynamic = !(this._isSmallScreen && this._isSmallScreen());
+        const progress = allowDynamic ? this._resolveAttentionProgress(context) : null;
         this._attentionDynamic = !!progress;
         this._attentionDynamicKey = progress
             ? `${progress.completedRows || 0}|${progress.postCompletedRows || 0}|${progress.activeRow ?? 'n'}|${progress.activeCol ?? 'n'}`
@@ -2166,12 +2259,17 @@ class SelectionPanel {
         const densityScale = Math.min(1, Math.max(0.35, 8 / Math.max(1, count)));
         const gap = Math.max(1, Math.round(ATTENTION_PREVIEW_GAP * densityScale));
         const gridGap = Math.max(2, Math.round(ATTENTION_PREVIEW_GRID_GAP * densityScale));
+        const gridInset = Math.max(1, Math.round(gap * 0.5));
         const leftPad = Math.max(2, Math.round(4 * densityScale));
         const leftTokenPad = Math.max(2, Math.round(6 * densityScale));
         const labelWidth = measureMaxTokenLabelWidth(tokenLabels, this.attentionTokensLeft);
         const availableWidth = getContentWidth(this.attentionRoot);
+        const axisLeftWidth = this.attentionAxisLeft
+            ? Math.max(0, this.attentionAxisLeft.getBoundingClientRect().width || 0)
+            : 0;
         if (labelWidth > 0 && availableWidth > 0) {
-            const usable = availableWidth - labelWidth - gridGap - leftPad - leftTokenPad;
+            const usable = availableWidth - (gridInset * 2) - axisLeftWidth - (gridGap * 2)
+                - labelWidth - leftPad - leftTokenPad;
             if (usable > 0) {
                 const maxCellByWidth = (usable - (count - 1) * gap) / count;
                 if (Number.isFinite(maxCellByWidth) && maxCellByWidth > 0) {
@@ -2183,6 +2281,7 @@ class SelectionPanel {
         this.attentionRoot.style.setProperty('--cell-size', `${cellSize}px`);
         this.attentionRoot.style.setProperty('--cell-gap', `${gap}px`);
         this.attentionRoot.style.setProperty('--attention-grid-gap', `${gridGap}px`);
+        this.attentionRoot.style.setProperty('--attention-grid-inset', `${gridInset}px`);
         this.attentionRoot.style.setProperty('--attention-left-padding', `${leftPad}px`);
         this.attentionRoot.style.setProperty('--attention-left-token-padding', `${leftTokenPad}px`);
         this.attentionRoot.style.setProperty('--attention-matrix-justify', 'center');
@@ -2482,6 +2581,9 @@ class SelectionPanel {
         this.hudPanel?.classList.add('detail-open');
         this.panel.setAttribute('aria-hidden', 'false');
         this._updateMobileState();
+        if (this._pendingReveal) {
+            this._pendingRevealSize = null;
+        }
         this._scheduleResize();
     }
 
@@ -2502,6 +2604,11 @@ class SelectionPanel {
             clearTimeout(this._pendingResizeTimeout);
             this._pendingResizeTimeout = null;
         }
+        if (this._pendingRevealTimer) {
+            clearTimeout(this._pendingRevealTimer);
+            this._pendingRevealTimer = null;
+        }
+        this._pendingRevealSize = null;
     }
 
     showSelection(selection) {
@@ -2591,6 +2698,7 @@ class SelectionPanel {
             this._pendingReveal = false;
             if (this.canvas) this.canvas.style.opacity = '1';
             fitObjectToView(this.currentPreview, this.camera, { paddingMultiplier, distanceMultiplier });
+            this._noteFit();
         }
         if (this.currentPreview?.rotation) {
             this.currentPreview.rotation.copy(desiredRotation);
