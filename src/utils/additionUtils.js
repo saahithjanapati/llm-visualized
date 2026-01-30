@@ -270,6 +270,9 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
     if (lane) {
         lane.stopRise = true;
         lane.stopRiseTarget = targetVec.group;
+        if (lane.layer && typeof lane.layer._emitProgress === 'function') {
+            lane.layer._emitProgress();
+        }
         // Keep residual trail brightness unchanged during addition
         // Reset residual trail monotonic tracker to the centre prism's current Y
         // so the trail extends immediately as the middle unit begins to rise.

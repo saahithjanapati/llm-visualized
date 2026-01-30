@@ -478,6 +478,10 @@ function applyLaneOverrideToInstancedMeshes(object, laneCount, laneSpacing) {
     const mtx = new THREE.Matrix4();
     object.traverse((child) => {
         if (!child?.isInstancedMesh) return;
+        // Only override lane spacing for vector prisms (they carry colorStart/End).
+        const hasColorStart = child.geometry?.getAttribute?.('colorStart');
+        const hasColorEnd = child.geometry?.getAttribute?.('colorEnd');
+        if (!hasColorStart && !hasColorEnd) return;
         child.count = laneCount;
         for (let i = 0; i < laneCount; i++) {
             const z = (i - (laneCount - 1) / 2) * spacing;
@@ -485,6 +489,12 @@ function applyLaneOverrideToInstancedMeshes(object, laneCount, laneSpacing) {
             child.setMatrixAt(i, mtx);
         }
         child.instanceMatrix.needsUpdate = true;
+        // Prevent frustum culling from clipping widely spaced instances.
+        child.frustumCulled = false;
+        if (child.geometry) {
+            if (!child.geometry.boundingBox) child.geometry.computeBoundingBox();
+            child.geometry.computeBoundingSphere();
+        }
     });
 }
 
@@ -975,9 +985,12 @@ function buildTokenChipPreview(labelText) {
     return { object: group, dispose: shared.dispose };
 }
 
-function buildWeightMatrixPreview(params, colorHex) {
+function buildWeightMatrixPreview(params, colorHex, options = {}) {
     const depth = PREVIEW_MATRIX_DEPTH;
     const slitCount = PREVIEW_SOLID_LANES;
+    const useInstancedSlices = options.useInstancedSlices !== undefined
+        ? options.useInstancedSlices
+        : true;
     const matrix = new WeightMatrixVisualization(
         null,
         new THREE.Vector3(0, 0, 0),
@@ -991,7 +1004,7 @@ function buildWeightMatrixPreview(params, colorHex) {
         params.slitDepthFactor,
         params.slitBottomWidthFactor,
         params.slitTopWidthFactor,
-        true
+        useInstancedSlices
     );
     if (colorHex !== null && colorHex !== undefined) {
         matrix.setColor(new THREE.Color(colorHex));
@@ -2336,12 +2349,13 @@ class SelectionPanel {
         this._lastFrameTime = performance.now();
         const isVectorPreview = isLikelyVectorSelection(label, selection);
         const isQkvPreview = isQkvMatrixLabel(label);
+        const isOutputProjPreview = label.toLowerCase().includes('output projection matrix');
         const paddingMultiplier = isVectorPreview
             ? PREVIEW_VECTOR_PADDING_MULT
-            : (isQkvPreview ? 0.75 : 1);
+            : (isQkvPreview ? 0.75 : (isOutputProjPreview ? 0.85 : 1));
         const distanceMultiplier = isVectorPreview
             ? PREVIEW_VECTOR_DISTANCE_MULT
-            : (isQkvPreview ? 0.75 : 1);
+            : (isQkvPreview ? 0.45 : (isOutputProjPreview ? 0.8 : 1));
         fitObjectToView(this.currentPreview, this.camera, { paddingMultiplier, distanceMultiplier });
         if (this.currentPreview?.rotation) {
             this.currentPreview.rotation.copy(desiredRotation);

@@ -41,22 +41,16 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     const WO = colorize(woColor, 'W^O');
     const WUp = colorize(mlpUpColor, 'W_{\\text{up}}');
     const WDown = colorize(mlpDownColor, 'W_{\\text{down}}');
-    const bQ = colorize(qColor, 'b^Q');
-    const bK = colorize(kColor, 'b^K');
-    const bV = colorize(vColor, 'b^V');
-    const bO = colorize(woColor, 'b_o');
-    const bUp = colorize(mlpUpColor, 'b_{\\text{up}}');
-    const bDown = colorize(mlpDownColor, 'b_{\\text{down}}');
 
     const EQ = {
         ln1: String.raw`x_{\text{ln}} = \frac{x - \mu}{\sqrt{\sigma^2 + \epsilon}} \odot \gamma + \beta`,
-        qkv_per_head: `{\\scriptsize ${Q} = x_{\\text{ln}} ${WQ} + ${bQ} \\, ${K} = x_{\\text{ln}} ${WK} + ${bK} \\, ${V} = x_{\\text{ln}} ${WV} + ${bV}}`,
-        qkv_packed: `{\\scriptsize ${Q} = x_{\\text{ln}} ${WQ} + ${bQ} \\, ${K} = x_{\\text{ln}} ${WK} + ${bK} \\, ${V} = x_{\\text{ln}} ${WV} + ${bV}}`,
+        qkv_per_head: `${Q} = x_{\\text{ln}} ${WQ} \\, ${K} = x_{\\text{ln}} ${WK} \\, ${V} = x_{\\text{ln}} ${WV}`,
+        qkv_packed: `${Q} = x_{\\text{ln}} ${WQ} \\, ${K} = x_{\\text{ln}} ${WK} \\, ${V} = x_{\\text{ln}} ${WV}`,
         attn: `H_i = \\mathrm{softmax}\\left(\\frac{${Q}_i ${K}_i^\\top}{\\sqrt{d_h}} + M\\right) ${V}_i,\\; i=1\\dots h`,
-        concat_proj: String.raw`\begin{aligned} H &= \mathrm{Concat}(H_1,\dots,H_h) \\ \mathrm{SA}(x) &= H ${WO} + ${bO} \end{aligned}`,
-        resid1: String.raw`u = x + H ${WO} + ${bO}`,
+        concat_proj: String.raw`\begin{aligned} H &= \mathrm{Concat}(H_1,\dots,H_h) \\ O &= H ${WO} \end{aligned}`,
+        resid1: String.raw`u = x + O`,
         ln2: String.raw`u_{\text{ln}} = \frac{u - \mu}{\sqrt{\sigma^2 + \epsilon}} \odot \gamma + \beta`,
-        mlp: String.raw`\begin{aligned} z &= \mathrm{GELU}(u_{\text{ln}} ${WUp} + ${bUp}) \\ \mathrm{MLP}(u_{\text{ln}}) &= z ${WDown} + ${bDown} \end{aligned}`,
+        mlp: String.raw`\begin{aligned} z &= \mathrm{GELU}(u_{\text{ln}} ${WUp}) \\ \mathrm{MLP}(u_{\text{ln}}) &= z ${WDown} \end{aligned}`,
         resid2: String.raw`x_{\text{out}} = u + \mathrm{MLP}(u_{\text{ln}})`
     };
 
@@ -85,17 +79,31 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         const lanes = Array.isArray(layer.lanes) ? layer.lanes : [];
         if (!lanes.length) return;
 
-        const mlpActive = lanes.some(l => l.mlpUpStarted || l.ln2Phase === 'mlpReady' || l.ln2Phase === 'done');
-        const ln2Active = !mlpActive && lanes.some(l => l.ln2Phase && l.ln2Phase !== 'notStarted');
-        const ln1Active = !mlpActive && !ln2Active && lanes.some(l => ['waiting','right','insideLN'].includes(l.horizPhase));
-        const mhsaActive = !mlpActive && !ln2Active && !ln1Active && (
+        const resid2Active = lanes.some(l => l && l.stopRise && l.ln2Phase === 'done');
+        const resid1Active = !resid2Active && lanes.some(l => {
+            if (!l) return false;
+            if (l.stopRise && ['travelMHSA','finishedHeads','postMHSAAddition'].includes(l.horizPhase)) {
+                return true;
+            }
+            return l.horizPhase === 'postMHSAAddition' && l.ln2Phase === 'preRise';
+        });
+        const mlpActive = !resid2Active && lanes.some(l => l.mlpUpStarted || l.ln2Phase === 'mlpReady' || l.ln2Phase === 'done');
+        const ln2Active = !resid2Active && !mlpActive && lanes.some(l => l.ln2Phase && l.ln2Phase !== 'notStarted');
+        const ln1Active = !resid2Active && !mlpActive && !ln2Active && lanes.some(l => ['waiting','right','insideLN'].includes(l.horizPhase));
+        const mhsaActive = !resid2Active && !mlpActive && !ln2Active && !ln1Active && (
             (layer && layer._mhsaStart === true) ||
             lanes.some(l => ['riseAboveLN','readyMHSA','travelMHSA','postMHSAAddition','waitingForLN2'].includes(l.horizPhase))
         );
 
         let key = '';
         let title = '';
-        if (mlpActive) {
+        if (resid2Active) {
+            key = 'resid2';
+            title = 'Residual Add 2';
+        } else if (resid1Active) {
+            key = 'resid1';
+            title = 'Residual Add 1';
+        } else if (mlpActive) {
             const adding = lanes.some(l => l.ln2Phase === 'done' && !l.additionComplete);
             key = adding ? 'resid2' : 'mlp';
             title = adding ? 'Residual Add 2' : 'MLP (FFN)';
