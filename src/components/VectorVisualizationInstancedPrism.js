@@ -89,7 +89,7 @@ function setColorCacheEntry(data, cacheKey, entry) {
 }
 
 export class VectorVisualizationInstancedPrism {
-    constructor(initialData = null, initialPosition = new THREE.Vector3(0, 0, 0), numSubsections = 30, instanceCount = VECTOR_LENGTH_PRISM) {
+    constructor(initialData = null, initialPosition = new THREE.Vector3(0, 0, 0), numSubsections = 30, instanceCount = VECTOR_LENGTH_PRISM, options = {}) {
         this.group = new THREE.Group();
         this.group.position.copy(initialPosition);
         this.group.userData.label = 'Vector';
@@ -178,7 +178,8 @@ varying float vGradientT;`
         this.mesh.geometry.setAttribute('colorEnd',   new THREE.InstancedBufferAttribute(colorEndArr,   3));
 
 
-        this.updateDataInternal(this.rawData.slice()); // Process initial data
+        const copyData = options && options.copyData !== false;
+        this.updateDataInternal(this.rawData, { copyData }); // Process initial data
         this._generateKeyColors(); // Generate initial key colors
         this.updateInstanceGeometryAndColors();      // Set initial visual state (fixed dimensions, subsection colors)
     }
@@ -463,14 +464,21 @@ varying float vGradientT;`
     }
 
     // Renamed from updateData. This is for internal data state update only.
-    updateDataInternal(newData) {
+    updateDataInternal(newData, options = {}) {
         // Accept data arrays of any length – the visual component will still use
         // a fixed physical prism count (this.instanceCount).  If fewer data
         // points are supplied than prisms, colours/heights default gracefully.
-        if (!newData || !Array.isArray(newData) || newData.length === 0) {
+        const copyData = options && options.copyData !== false;
+        if (!newData || !isArrayLike(newData) || newData.length === 0) {
             this.rawData = this.generateTestData();
         } else {
-            this.rawData = newData.slice();
+            if (copyData) {
+                this.rawData = typeof newData.slice === 'function'
+                    ? newData.slice()
+                    : Array.from(newData);
+            } else {
+                this.rawData = newData;
+            }
         }
         this.normalizedData = this.layerNormalize(this.rawData);
     }

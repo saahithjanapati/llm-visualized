@@ -73,6 +73,15 @@ export class MHSAAnimation {
         this.vectorPrismCount = Number.isFinite(opts.vectorPrismCount)
             ? Math.max(1, Math.floor(opts.vectorPrismCount))
             : VECTOR_LENGTH_PRISM;
+        this.useBatchedPassThrough = opts.useBatchedPassThrough !== undefined
+            ? !!opts.useBatchedPassThrough
+            : true;
+        this._shareVectorData = opts.shareVectorData !== undefined
+            ? !!opts.shareVectorData
+            : true;
+        this._vectorPool = new Map();
+        this._vectorPoolSize = 0;
+        this._vectorPoolLimit = Number.isFinite(opts.vectorPoolLimit) ? Math.max(0, Math.floor(opts.vectorPoolLimit)) : 512;
 
         // Speed at which residual-stream vectors rise while branched
         // during MHSA/MLP processing. Starts with the LN1 value.
@@ -221,12 +230,17 @@ export class MHSAAnimation {
         this._scheduledDelayTweens = new Set();
         this._scheduledTimeoutIds = new Set();
         this._skipToEndActive = false;
+        this._passThroughJobs = [];
+        this._lastUpdateTimeNow = null;
 
         // --------------------------------------------------------------
         //  Vector router: handles horizontal travel + K/Q/V parking.
         //  Once all copies are parked it triggers the parallel pass-through.
         // --------------------------------------------------------------
-        this.vectorRouter = new VectorRouter(this.parentGroup, this.headsCentersX, this.headCoords, this.headStopY, this.mhaVisualizations);
+        this.vectorRouter = new VectorRouter(this.parentGroup, this.headsCentersX, this.headCoords, this.headStopY, this.mhaVisualizations, {
+            acquireVector: this._acquireVectorCopy.bind(this),
+            shareVectorData: this._shareVectorData
+        });
         this.vectorRouter.onReady(() => {
             this.mhaPassThroughPhase = 'ready_for_parallel_pass_through';
             console.log("MHSAAnimation: All MHSA vectors are in position. Ready for PARALLEL pass-through.");
@@ -284,6 +298,86 @@ export class MHSAAnimation {
         zList.sort((a, b) => a - b);
         this._laneZsSorted = zList;
         this.sortedLaneZs = zList;
+    }
+
+    _getVectorPoolBucket(instanceCount) {
+        const key = Number.isFinite(instanceCount) ? Math.max(1, Math.floor(instanceCount)) : this.vectorPrismCount;
+        let bucket = this._vectorPool.get(key);
+        if (!bucket) {
+            bucket = [];
+            this._vectorPool.set(key, bucket);
+        }
+        return { key, bucket };
+    }
+
+    _acquireVectorCopy({ rawData, position, instanceCount, numSubsections = 30, shareData = false } = {}) {
+        const { key, bucket } = this._getVectorPoolBucket(instanceCount);
+        let vec = null;
+        if (bucket.length) {
+            vec = bucket.pop();
+            this._vectorPoolSize = Math.max(0, this._vectorPoolSize - 1);
+        }
+        if (!vec) {
+            vec = new VectorVisualizationInstancedPrism(
+                rawData,
+                position ? position.clone() : new THREE.Vector3(),
+                numSubsections,
+                key,
+                { copyData: !shareData }
+            );
+        } else {
+            if (vec.group) {
+                vec.group.visible = true;
+                vec.group.scale.set(1, 1, 1);
+                if (position) {
+                    vec.group.position.copy(position);
+                }
+            }
+            if (typeof vec.updateDataInternal === 'function') {
+                vec.updateDataInternal(rawData, { copyData: !shareData });
+            }
+            if (vec.mesh) {
+                vec.mesh.visible = true;
+                if (vec.mesh.material) {
+                    vec.mesh.material.transparent = false;
+                    vec.mesh.material.opacity = 1.0;
+                    vec.mesh.material.needsUpdate = true;
+                }
+            }
+        }
+        if (this.parentGroup && vec.group && vec.group.parent !== this.parentGroup) {
+            this.parentGroup.add(vec.group);
+        }
+        return vec;
+    }
+
+    _releaseVectorCopy(vec) {
+        if (!vec) return;
+        try {
+            if (vec.group && vec.group.parent) vec.group.parent.remove(vec.group);
+        } catch (_) { /* ignore */ }
+        if (vec.group) {
+            vec.group.visible = false;
+        }
+        if (vec.mesh) {
+            vec.mesh.visible = false;
+        }
+        if (vec.userData) {
+            delete vec.userData.trail;
+            delete vec.userData.trailWorld;
+            delete vec.userData.parentLane;
+        }
+        try {
+            vec.rawData = [];
+            vec.normalizedData = [];
+        } catch (_) { /* ignore */ }
+        const { key, bucket } = this._getVectorPoolBucket(vec.instanceCount);
+        if (this._vectorPoolSize < this._vectorPoolLimit) {
+            bucket.push(vec);
+            this._vectorPoolSize += 1;
+        } else {
+            try { if (typeof vec.dispose === 'function') vec.dispose(); } catch (_) { /* ignore */ }
+        }
     }
 
     getLaneForZ(zPos) {
@@ -664,6 +758,7 @@ export class MHSAAnimation {
         // Increment a lightweight frame counter to de-duplicate residual trail writes
         if (typeof this._frameCounter !== 'number') this._frameCounter = 0;
         this._frameCounter++;
+        this._lastUpdateTimeNow = timeNow;
         // Keep a reference to the latest lanes array so that other internal
         // methods (triggered asynchronously) can access the original vectors.
         this.currentLanes = lanes;
@@ -672,6 +767,10 @@ export class MHSAAnimation {
         // ---------------- Vector routing (refactored) ----------------
         if (this.vectorRouter) {
             this.vectorRouter.update(deltaTime, timeNow, lanes);
+        }
+
+        if (this._passThroughJobs && this._passThroughJobs.length) {
+            this._updatePassThroughJobs(timeNow);
         }
 
         // ---- Update trails for combined vectors through Output Projection ----
@@ -798,6 +897,26 @@ export class MHSAAnimation {
                 }
             } catch (_) { /* defensive */ }
         });
+    }
+
+    _registerPassThroughJob(job) {
+        if (!job) return;
+        this._passThroughJobs.push(job);
+    }
+
+    _updatePassThroughJobs(timeNow) {
+        const jobs = this._passThroughJobs;
+        if (!jobs || jobs.length === 0) return;
+        let write = 0;
+        for (let i = 0; i < jobs.length; i++) {
+            const job = jobs[i];
+            if (!job || typeof job.update !== 'function') continue;
+            const done = job.update(timeNow);
+            if (!done) {
+                jobs[write++] = job;
+            }
+        }
+        jobs.length = write;
     }
 
     setSkipToEndMode(enabled = false) {

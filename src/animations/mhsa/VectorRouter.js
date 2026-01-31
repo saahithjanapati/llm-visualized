@@ -31,12 +31,14 @@ const FAINT_TRAIL_OPACITY = 0.08;
  * rest of the MHSA pipeline can begin the pass-through phase.
  */
 export class VectorRouter {
-    constructor(parentGroup, headsCentersX, headCoords, headStopY, mhaVisualizations) {
+    constructor(parentGroup, headsCentersX, headCoords, headStopY, mhaVisualizations, opts = {}) {
         this.parentGroup   = parentGroup;
         this.headsCentersX = headsCentersX;
         this.headCoords    = headCoords;
         this.headStopY     = headStopY;
         this.mhaVisualizations = mhaVisualizations;
+        this._acquireVector = typeof opts.acquireVector === 'function' ? opts.acquireVector : null;
+        this._shareVectorData = !!opts.shareVectorData;
 
         this._readyEmitted = false;
         this._callbacks    = new Set();
@@ -162,12 +164,7 @@ export class VectorRouter {
                         const hIdx  = centerVec.userData.headIndex;
                         const coord = this.headCoords[hIdx];
                         if (coord) {
-                            const qVec = new VectorVisualizationInstancedPrism(
-                                centerVec.rawData.slice(),
-                                _scratchSpawn.copy(centerVec.group.position),
-                                30,
-                                centerVec.instanceCount
-                            );
+                            const qVec = this._createVectorCopy(centerVec, _scratchSpawn.copy(centerVec.group.position), 30);
                             if (typeof qVec.copyColorsFrom === 'function') {
                                 qVec.copyColorsFrom(centerVec);
                             }
@@ -187,12 +184,7 @@ export class VectorRouter {
                                 qVec.group.userData.label = lblQ;
                                 if (qVec.mesh) qVec.mesh.userData = { ...(qVec.mesh.userData||{}), label: lblQ };
                             } catch (_) {}
-                            const vVec = new VectorVisualizationInstancedPrism(
-                                centerVec.rawData.slice(),
-                                _scratchSpawn.copy(centerVec.group.position),
-                                30,
-                                centerVec.instanceCount
-                            );
+                            const vVec = this._createVectorCopy(centerVec, _scratchSpawn.copy(centerVec.group.position), 30);
                             if (typeof vVec.copyColorsFrom === 'function') {
                                 vVec.copyColorsFrom(centerVec);
                             }
@@ -212,9 +204,6 @@ export class VectorRouter {
                                 vVec.group.userData.label = lblV;
                                 if (vVec.mesh) vVec.mesh.userData = { ...(vVec.mesh.userData||{}), label: lblV };
                             } catch (_) {}
-                            this.parentGroup.add(qVec.group);
-                            this.parentGroup.add(vVec.group);
-
                             lane.sideCopies = lane.sideCopies || [];
                             const qMatrixForHead = this.mhaVisualizations[hIdx * 3];
                             const vMatrixForHead = this.mhaVisualizations[hIdx * 3 + 2];
@@ -271,16 +260,10 @@ export class VectorRouter {
         lane.upwardCopies = lane.upwardCopies || [];
         if (lane.upwardCopies[targetHeadIdx]) return lane.upwardCopies[targetHeadIdx];
 
-        const upVec = new VectorVisualizationInstancedPrism(
-            [...sourceVec.rawData],
-            _scratchSpawn.copy(sourceVec.group.position),
-            30,
-            sourceVec.instanceCount
-        );
+        const upVec = this._createVectorCopy(sourceVec, _scratchSpawn.copy(sourceVec.group.position), 30);
         if (typeof upVec.copyColorsFrom === 'function') {
             upVec.copyColorsFrom(sourceVec);
         }
-        this.parentGroup.add(upVec.group);
 
         const upTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1, undefined, FAINT_TRAIL_OPACITY, TRAIL_MIN_SEGMENT_DISTANCE);
         upTrail.start(upVec.group.position);
@@ -308,6 +291,29 @@ export class VectorRouter {
 
         lane.upwardCopies[targetHeadIdx] = upVec;
         return upVec;
+    }
+
+    _createVectorCopy(sourceVec, position, numSubsections = 30) {
+        const rawData = this._shareVectorData ? sourceVec.rawData : (sourceVec.rawData ? sourceVec.rawData.slice() : []);
+        const instanceCount = sourceVec.instanceCount;
+        if (this._acquireVector) {
+            return this._acquireVector({
+                rawData,
+                position,
+                instanceCount,
+                numSubsections,
+                shareData: this._shareVectorData
+            });
+        }
+        const vec = new VectorVisualizationInstancedPrism(
+            rawData,
+            position ? position.clone() : new THREE.Vector3(),
+            numSubsections,
+            instanceCount,
+            { copyData: !this._shareVectorData }
+        );
+        this.parentGroup.add(vec.group);
+        return vec;
     }
 
     // ------------------------------------------------------------------

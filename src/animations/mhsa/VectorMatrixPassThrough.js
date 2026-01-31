@@ -13,6 +13,7 @@ import { MHA_VALUE_SPECTRUM_COLOR } from '../LayerAnimationConstants.js';
 import { getSideCopyEntry, setSideCopyEntry } from './laneIndex.js';
 
 const _trailScratch = new THREE.Vector3();
+const easeInOutQuad = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
 
 /**
  * Animate a vector passing vertically through its corresponding weight matrix.
@@ -38,11 +39,7 @@ export function animateVectorMatrixPassThrough(
     animationCompletionCallback,
     vectorCategory = 'K',
 ) {
-    if (typeof TWEEN === 'undefined') {
-        console.error('Global TWEEN object not loaded for MHSAAnimation!');
-        if (animationCompletionCallback) animationCompletionCallback();
-        return;
-    }
+    const useBatched = !!(ctx && ctx.useBatchedPassThrough && typeof ctx._registerPassThroughJob === 'function');
 
     if (!vector || !matrix) {
         console.warn('Missing vector or matrix for pass-through animation in MHSA.');
@@ -103,6 +100,230 @@ export function animateVectorMatrixPassThrough(
     // ------------------------------
     const BASE_RISE_ADJUST = -30; // lower all coloured vectors
     const targetRiseY = passThroughY + riseOffset + BASE_RISE_ADJUST;
+
+    if (useBatched) {
+        let vectorRef = vector;
+        const startY = vectorRef.group.position.y;
+        const startTime = Number.isFinite(ctx?._lastUpdateTimeNow)
+            ? ctx._lastUpdateTimeNow
+            : (typeof performance !== 'undefined' ? performance.now() : Date.now());
+        const matrixColorScratch = new THREE.Color();
+
+        const update = (timeNow) => {
+            const elapsed = timeNow - startTime;
+            const linearT = duration > 0 ? Math.min(Math.max(elapsed / duration, 0), 1) : 1;
+            const easedT = easeInOutQuad(linearT);
+            const y = startY + (targetRiseY - startY) * easedT;
+
+            if (vectorRef && vectorRef.group) {
+                vectorRef.group.position.y = y;
+            }
+
+            // Update trails only while BELOW the matrix; no trails above matrices
+            try {
+                const ud = vectorRef.userData || {};
+                const trail = ud.trail;
+                if (trail) {
+                    const clampY = Math.min(y, matrixBottomY - 0.001);
+                    if (ud.trailWorld) {
+                        vectorRef.group.getWorldPosition(_trailScratch);
+                        const deltaY = y - clampY;
+                        if (deltaY !== 0) _trailScratch.y -= deltaY;
+                        trail.update(_trailScratch);
+                    } else {
+                        _trailScratch.copy(vectorRef.group.position);
+                        _trailScratch.y = clampY;
+                        trail.update(_trailScratch);
+                    }
+                }
+            } catch (_) { /* no-op */ }
+
+            if (!initialDimensionChangeApplied && y >= matrixBottomY) {
+                const heavyVec = vectorRef;
+                const smallVec = new VectorVisualizationInstancedPrism(
+                    heavyVec.rawData.slice(0, outLength),
+                    heavyVec.group.position.clone(),
+                    3,
+                    heavyVec.instanceCount || ctx.vectorPrismCount,
+                );
+
+                if (ctx && ctx.parentGroup) {
+                    ctx.parentGroup.add(smallVec.group);
+                }
+                vectorRef = smallVec;
+                vectorRef.userData = heavyVec.userData ? { ...heavyVec.userData } : {};
+                if (vectorRef.group) {
+                    vectorRef.group.userData = vectorRef.group.userData || {};
+                    if (Number.isFinite(vectorRef.userData?.headIndex)) {
+                        vectorRef.group.userData.headIndex = vectorRef.userData.headIndex;
+                    }
+                    if (Number.isFinite(ctx?.layerIndex)) {
+                        vectorRef.group.userData.layerIndex = ctx.layerIndex;
+                    }
+                }
+                try {
+                    const cat = vectorCategory === 'K' ? 'Key Vector'
+                              : vectorCategory === 'Q' ? 'Query Vector'
+                              : 'Value Vector';
+                    vectorRef.group.userData.label = cat;
+                    if (vectorRef.mesh) vectorRef.mesh.userData = { ...(vectorRef.mesh.userData||{}), label: cat };
+                } catch (_) {}
+                if (vectorRef.userData) {
+                    delete vectorRef.userData.trail;
+                    delete vectorRef.userData.trailWorld;
+                }
+                if (vectorCategory === 'K' && vectorRef.userData.parentLane) {
+                    const pl = vectorRef.userData.parentLane;
+                    const hIdx = vectorRef.userData.headIndex;
+                    if (pl && typeof hIdx === 'number') {
+                        pl.upwardCopies[hIdx] = vectorRef;
+                    }
+                }
+                if ((vectorCategory === 'Q' || vectorCategory === 'V') && vectorRef.userData.parentLane) {
+                    const pl = vectorRef.userData.parentLane;
+                    const hIdx = vectorRef.userData.headIndex;
+                    if (pl && Array.isArray(pl.sideCopies) && typeof hIdx === 'number') {
+                        const entry = getSideCopyEntry(pl, hIdx, vectorCategory);
+                        if (entry) {
+                            entry.vec = vectorRef;
+                            setSideCopyEntry(pl, hIdx, vectorCategory, entry);
+                        }
+                    }
+                }
+                initialDimensionChangeApplied = true;
+                if (ctx && typeof ctx._releaseVectorCopy === 'function') {
+                    ctx._releaseVectorCopy(heavyVec);
+                } else {
+                    try { if (ctx && ctx.parentGroup) ctx.parentGroup.remove(heavyVec.group); } catch (_) {}
+                    try { if (typeof heavyVec.dispose === 'function') heavyVec.dispose(); } catch (_) {}
+                }
+
+                const activationSource = ctx && ctx.activationSource ? ctx.activationSource : null;
+                const layerIndex = Number.isFinite(ctx?.layerIndex) ? ctx.layerIndex : null;
+                const headIndex = vectorRef?.userData?.headIndex;
+                const tokenIndex = vectorRef?.userData?.parentLane?.tokenIndex;
+                const tokenLabel = vectorRef?.userData?.parentLane?.tokenLabel;
+                const kind = vectorCategory === 'Q' ? 'q' : vectorCategory === 'K' ? 'k' : 'v';
+                const scalar = activationSource && Number.isFinite(layerIndex)
+                    ? activationSource.getLayerQKVScalar(layerIndex, kind, headIndex, tokenIndex)
+                    : null;
+                const data = Number.isFinite(scalar)
+                    ? [scalar]
+                    : vectorRef.rawData.slice(0, outLength);
+                const monoBase = vectorCategory === 'V' ? MHA_VALUE_SPECTRUM_COLOR : finalVectorColor;
+                const monoOptions = buildMonochromeOptions(monoBase);
+                const numKeyColors = Number.isFinite(scalar) ? 1 : 3;
+                vectorRef.applyProcessedVisuals(
+                    data,
+                    outLength,
+                    { numKeyColors, generationOptions: monoOptions },
+                    { setHiddenToBlack: false },
+                );
+                if (Number.isFinite(scalar) && typeof vectorRef.setUniformColor === 'function') {
+                    const monoColor = mapValueToMonochrome(scalar, monoOptions);
+                    vectorRef.setUniformColor(monoColor);
+                }
+                finalVisualsApplied = true;
+                if (Number.isFinite(scalar)) {
+                    const label = vectorCategory === 'K'
+                        ? 'Key Vector'
+                        : vectorCategory === 'Q'
+                            ? 'Query Vector'
+                            : 'Value Vector';
+                    const activationData = buildActivationData({
+                        label,
+                        values: data,
+                        stage: `qkv.${kind}`,
+                        layerIndex,
+                        tokenIndex,
+                        tokenLabel,
+                        headIndex,
+                    });
+                    applyActivationDataToVector(vectorRef, activationData, label);
+                }
+            }
+
+            if (!ctx._mhaPulseActive) {
+                let currentEmissiveIntensity;
+                const p = easedT;
+                if (p < MHSA_PASS_THROUGH_BRIGHTEN_RATIO) {
+                    const t = THREE.MathUtils.smoothstep(p / MHSA_PASS_THROUGH_BRIGHTEN_RATIO, 0, 1);
+                    matrixColorScratch.copy(ctx.matrixInitialRestingColor).lerp(brightMatrixColor, t);
+                    currentEmissiveIntensity = THREE.MathUtils.lerp(
+                        ctx.matrixRestingEmissiveIntensity,
+                        MHSA_MATRIX_MAX_EMISSIVE_INTENSITY,
+                        t,
+                    );
+                } else if (p < MHSA_PASS_THROUGH_BRIGHTEN_RATIO + MHSA_PASS_THROUGH_DIM_RATIO) {
+                    const t = THREE.MathUtils.smoothstep(
+                        (p - MHSA_PASS_THROUGH_BRIGHTEN_RATIO) / MHSA_PASS_THROUGH_DIM_RATIO,
+                        0,
+                        1,
+                    );
+                    matrixColorScratch.copy(brightMatrixColor).lerp(darkTintedMatrixColor, t);
+                    currentEmissiveIntensity = THREE.MathUtils.lerp(
+                        MHSA_MATRIX_MAX_EMISSIVE_INTENSITY,
+                        ctx.matrixRestingEmissiveIntensity,
+                        t,
+                    );
+                } else {
+                    matrixColorScratch.copy(darkTintedMatrixColor);
+                    currentEmissiveIntensity = ctx.matrixRestingEmissiveIntensity;
+                }
+                matrix.setColor(matrixColorScratch);
+                matrix.setEmissive(matrixColorScratch, currentEmissiveIntensity);
+            }
+
+            if (linearT >= 1) {
+                if (!ctx._mhaPulseActive) {
+                    matrix.setColor(darkTintedMatrixColor);
+                    matrix.setEmissive(darkTintedMatrixColor, ctx.matrixRestingEmissiveIntensity);
+                    matrix.setOpacity(ctx.matrixRestingOpacity);
+                }
+
+                if (!finalVisualsApplied && vectorRef) {
+                    const processedData = vectorRef.rawData.slice(0, outLength);
+                    const monoBase = vectorCategory === 'V' ? MHA_VALUE_SPECTRUM_COLOR : finalVectorColor;
+                    const monoOptions = buildMonochromeOptions(monoBase);
+                    vectorRef.applyProcessedVisuals(processedData, outLength, {
+                        numKeyColors: 3,
+                        generationOptions: monoOptions,
+                    });
+                    if (processedData.length === 1 && typeof vectorRef.setUniformColor === 'function') {
+                        const monoColor = mapValueToMonochrome(processedData[0], monoOptions);
+                        vectorRef.setUniformColor(monoColor);
+                    }
+                    finalVisualsApplied = true;
+                }
+
+                if (ctx.selfAttentionAnimator) {
+                    ctx.selfAttentionAnimator.start(vectorRef, vectorCategory, () => {
+                        // Continue with any additional post-animation logic if needed
+                    });
+                }
+
+                if (ctx.mode === 'temp') {
+                    ctx._tempAllOutputVectors.push(vectorRef);
+                    if (vectorCategory === 'K') ctx._tempKOutputVectors.push(vectorRef);
+                }
+
+                if (animationCompletionCallback) {
+                    animationCompletionCallback();
+                }
+                return true;
+            }
+            return false;
+        };
+
+        ctx._registerPassThroughJob({ update });
+        return;
+    }
+
+    if (typeof TWEEN === 'undefined') {
+        console.error('Global TWEEN object not loaded for MHSAAnimation!');
+        if (animationCompletionCallback) animationCompletionCallback();
+        return;
+    }
 
     const tweenState = {
         y: vector.group.position.y,
