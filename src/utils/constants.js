@@ -434,7 +434,7 @@ export const LN2_TO_MLP_GAP = 150;
 
 // Y-position for the centre of the second LayerNormalization block
 // (approximate – may be tweaked from the animation file for best fit)
-export const LAYER_NORM_2_Y_POS = 750; // Increased for clearer separation from MHSA block
+export const LAYER_NORM_2_Y_POS = 700; // Reduced to tighten the MHSA -> LN2 gap
 
 // Gap between the two stacked MLP weight matrices
 export const MLP_INTER_MATRIX_GAP = 140; // increased gap for clearer visual separation between the two MLP weight matrices

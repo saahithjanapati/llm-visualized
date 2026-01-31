@@ -101,6 +101,14 @@ export class VectorVisualizationInstancedPrism {
         this.numSubsections = numSubsections;
         this.currentKeyColors = []; // To store the current random key colors for subsections
 
+        // Precompute centered X positions for each instance to avoid
+        // recalculating per-frame in hot paths.
+        this._instanceBaseX = new Float32Array(this.instanceCount);
+        for (let i = 0; i < this.instanceCount; i++) {
+            this._instanceBaseX[i] = computeCenteredPrismX(i, this.instanceCount, _prismWidthScale);
+        }
+        this._basePrismCenterY = _uniformCalculatedHeight / 2;
+
         // For storing individual instance animation states if needed by an external controller
         this.instanceUserData = Array(this.instanceCount).fill(null).map(() => ({})); 
         // Reuse temp objects to avoid per-frame allocations in animation updates.
@@ -233,7 +241,7 @@ varying float vGradientT;`
     // It's called for initial setup and when numSubsections changes.
     // Temporary visual changes (like animation offsets/colors) will be done by setInstanceAppearance.
     updateInstanceGeometryAndColors() {
-        const dummy = new THREE.Object3D();
+        const dummy = this._scratchDummy;
 
         // Prepare attribute references for gradient colours
         const colorStartAttr = this.mesh.geometry.getAttribute('colorStart');
@@ -244,9 +252,9 @@ varying float vGradientT;`
 
         for (let i = 0; i < this.instanceCount; i++) {
             // Apply fixed, uniform dimensions
-            const x = computeCenteredPrismX(i, this.instanceCount, _prismWidthScale);
+            const x = this._instanceBaseX[i];
             dummy.scale.set(_prismWidthScale, _uniformCalculatedHeight, _prismDepthScale);
-            dummy.position.set(x, _uniformCalculatedHeight / 2, 0); 
+            dummy.position.set(x, this._basePrismCenterY, 0);
             dummy.updateMatrix();
             this.mesh.setMatrixAt(i, dummy.matrix);
 
@@ -286,8 +294,8 @@ varying float vGradientT;`
         const scale = this._scratchScale;
         currentMatrix.decompose(position, quaternion, scale);
         
-        const baseX = computeCenteredPrismX(index, this.instanceCount, _prismWidthScale);
-        const basePrismYPos = _uniformCalculatedHeight / 2; // Assuming yOffset is additive to this base for animation
+        const baseX = this._instanceBaseX[index];
+        const basePrismYPos = this._basePrismCenterY; // Assuming yOffset is additive to this base for animation
 
         position.set(baseX, basePrismYPos + yOffset, 0);
 
@@ -331,9 +339,9 @@ varying float vGradientT;`
         if (index < 0 || index >= this.instanceCount) return;
         
         const dummy = this._scratchDummy;
-        const x = computeCenteredPrismX(index, this.instanceCount, _prismWidthScale);
+        const x = this._instanceBaseX[index];
         dummy.scale.set(_prismWidthScale, _uniformCalculatedHeight, _prismDepthScale);
-        dummy.position.set(x, _uniformCalculatedHeight / 2, 0); 
+        dummy.position.set(x, this._basePrismCenterY, 0);
         dummy.updateMatrix();
         this.mesh.setMatrixAt(index, dummy.matrix);
         if (markNeedsUpdate) {
@@ -740,11 +748,11 @@ varying float vGradientT;`
     // Note: yOffset is absolute here, not additive to base position. Scale is absolute.
     overrideAllInstancesTemporary(yPosition, color, uniformScaleVec = null) {
         if (!this.mesh) return;
-        const dummy = new THREE.Object3D(); // Re-use a single dummy
+        const dummy = this._scratchDummy; // Re-use a single dummy
 
         for (let i = 0; i < this.instanceCount; i++) {
             // Base X position for this instance
-            const baseX = computeCenteredPrismX(i, this.instanceCount, _prismWidthScale);
+            const baseX = this._instanceBaseX[i];
             
             // Apply new scale or default scale
             if (uniformScaleVec) {
@@ -755,7 +763,7 @@ varying float vGradientT;`
             
             // Set new Y position (absolute) and existing X, Z
             // Note: yPosition here is the new center of the prism.
-            dummy.position.set(baseX, yPosition, 0); 
+            dummy.position.set(baseX, yPosition, 0);
             dummy.updateMatrix();
             this.mesh.setMatrixAt(i, dummy.matrix);
 
@@ -796,13 +804,14 @@ varying float vGradientT;`
         const endIndexVisible = startIndexVisible + groupedVisibleUnits - 1;
 
         // 4. Set appearance for all physical prisms
-        const dummy = new THREE.Object3D();
+        const dummy = this._scratchDummy;
+        const colorForVisiblePrism = new THREE.Color();
         for (let i = 0; i < this.instanceCount; i++) {
-            const baseX = computeCenteredPrismX(i, this.instanceCount, _prismWidthScale);
+            const baseX = this._instanceBaseX[i];
             if (i >= startIndexVisible && i <= endIndexVisible) {
                 // This is a VISIBLE central prism
                 dummy.scale.set(_prismWidthScale, _uniformCalculatedHeight, _prismDepthScale); // Standard scale
-                dummy.position.set(baseX, _uniformCalculatedHeight / 2, 0); // Standard Y position
+                dummy.position.set(baseX, this._basePrismCenterY, 0); // Standard Y position
                 
                 // Map the processedData index to the current physical prism index `i` for color lookup.
                 // The `this.rawData` (now `processedData`) is of length `numVisibleOutputUnits`.
@@ -833,7 +842,7 @@ varying float vGradientT;`
                 }
                 // We need a way to get color based on this progress and `this.currentKeyColors`
                 // Let's make a temporary color fetching logic here, or enhance getDefaultColorForIndex
-                const colorForVisiblePrism = new THREE.Color();
+                colorForVisiblePrism.setRGB(1, 1, 1);
                 if (this.currentKeyColors.length > 0) {
                     if (this.currentKeyColors.length === 1) {
                         colorForVisiblePrism.copy(this.currentKeyColors[0]);

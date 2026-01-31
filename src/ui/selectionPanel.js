@@ -72,6 +72,7 @@ const ATTENTION_PREVIEW_GAP = 4;
 const ATTENTION_PREVIEW_TRIANGLE = 'lower';
 const ATTENTION_PREVIEW_GRID_GAP = 8; // matches .detail-attention-grid column gap in CSS
 const ATTENTION_PRE_COLOR_CLAMP = 5;
+const RESIDUAL_COLOR_CLAMP = 2;
 const SPACE_TOKEN_DISPLAY = '" "';
 
 const TOKEN_CHIP_STYLE = {
@@ -1526,6 +1527,26 @@ function isLikelyVectorSelection(label, selectionInfo) {
     return false;
 }
 
+function isResidualVectorSelection(label, selectionInfo) {
+    const lower = (label || '').toLowerCase();
+    if (lower.includes('residual')) return true;
+    const activation = getActivationDataFromSelection(selectionInfo);
+    const activationLabel = activation?.label;
+    if (typeof activationLabel === 'string' && activationLabel.toLowerCase().includes('residual')) return true;
+    const stage = activation?.stage;
+    if (typeof stage === 'string') {
+        const stageLower = stage.toLowerCase();
+        if (stageLower.includes('residual')) return true;
+        if (stageLower.startsWith('layer.incoming')) return true;
+        if (stageLower.startsWith('embedding.')) return true;
+    }
+    const cat = selectionInfo?.info?.category;
+    if (cat && String(cat).toLowerCase().includes('residual')) return true;
+    const kind = selectionInfo?.kind;
+    if (kind && String(kind).toLowerCase().includes('residual')) return true;
+    return false;
+}
+
 function isLayerNormLabel(label) {
     const lower = (label || '').toLowerCase();
     return lower.includes('layernorm') || lower.includes('layer norm');
@@ -1726,6 +1747,11 @@ class SelectionPanel {
         this.attentionLegend = document.getElementById('detailAttentionLegend');
         this.attentionLegendLow = document.getElementById('detailAttentionLegendLow');
         this.attentionLegendHigh = document.getElementById('detailAttentionLegendHigh');
+        this.vectorLegend = document.getElementById('detailVectorLegend');
+        this.vectorLegendBar = document.getElementById('detailVectorLegendBar');
+        this.vectorLegendLow = document.getElementById('detailVectorLegendLow');
+        this.vectorLegendMid = document.getElementById('detailVectorLegendMid');
+        this.vectorLegendHigh = document.getElementById('detailVectorLegendHigh');
         this.engine = options.engine || null;
 
         if (!this.panel || !this.canvas || !this.title) {
@@ -2413,6 +2439,30 @@ class SelectionPanel {
         this.attentionLegendHigh.textContent = `+${ATTENTION_PRE_COLOR_CLAMP}`;
     }
 
+    _updateVectorLegend(selection) {
+        if (!this.vectorLegend) return;
+        const show = isResidualVectorSelection(selection?.label, selection)
+            && isLikelyVectorSelection(selection?.label, selection);
+        if (!show) {
+            this.vectorLegend.classList.remove('is-visible');
+            this.vectorLegend.setAttribute('aria-hidden', 'true');
+            return;
+        }
+
+        const gradient = buildSpectrumLegendGradient({
+            clampMax: RESIDUAL_COLOR_CLAMP,
+            steps: 15
+        });
+        if (this.vectorLegendBar) {
+            this.vectorLegendBar.style.setProperty('--vector-legend-gradient', gradient);
+        }
+        if (this.vectorLegendLow) this.vectorLegendLow.textContent = `-${RESIDUAL_COLOR_CLAMP}`;
+        if (this.vectorLegendMid) this.vectorLegendMid.textContent = '0';
+        if (this.vectorLegendHigh) this.vectorLegendHigh.textContent = `+${RESIDUAL_COLOR_CLAMP}`;
+        this.vectorLegend.classList.add('is-visible');
+        this.vectorLegend.setAttribute('aria-hidden', 'false');
+    }
+
     _setAttentionHoverFromCell(cell, { force = false } = {}) {
         if (!cell || cell.classList.contains('is-empty') || cell.classList.contains('is-hidden')) {
             this._clearAttentionHover(force);
@@ -2680,6 +2730,7 @@ class SelectionPanel {
                 this.dataEl.textContent = formatActivationData(activationData);
             }
         }
+        this._updateVectorLegend(selection);
 
         if (this.currentPreview) {
             this.scene.remove(this.currentPreview);

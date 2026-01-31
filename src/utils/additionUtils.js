@@ -29,6 +29,7 @@ const TMP_WORLD_AVG = new THREE.Vector3();
 const TMP_WORLD_ANCHOR = new THREE.Vector3();
 const TMP_WORLD_SNAP = new THREE.Vector3();
 const TMP_LOCAL_SNAP = new THREE.Vector3();
+const COLOR_WHITE = new THREE.Color(0xffffff);
 const TMP_COLOR_A = new THREE.Color();
 const TMP_COLOR_B = new THREE.Color();
 const TMP_COLOR_C = new THREE.Color();
@@ -330,8 +331,10 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
     for (let i = 0; i < vectorLength; i++) {
         // Grab starting local Y offset of each instance
         const srcLocalMatrix = new THREE.Matrix4();
+        const srcLocalPos = new THREE.Vector3();
         sourceVec.mesh.getMatrixAt(i, srcLocalMatrix);
-        const srcLocalPos = new THREE.Vector3().setFromMatrixPosition(srcLocalMatrix);
+        srcLocalPos.setFromMatrixPosition(srcLocalMatrix);
+        const srcLocalY = srcLocalPos.y;
 
         // Capture target gradient colour so we can flash & restore
         const gradCol = new THREE.Color();
@@ -342,6 +345,10 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
             sourceVec.setInstanceAppearance(i, srcLocalPos.y, gradCol);
         }
 
+        // Per-instance scratch objects to avoid per-frame allocations.
+        const trgLocalMatrixDyn = new THREE.Matrix4();
+        const trgWorld = new THREE.Vector3();
+        const trgLocal = new THREE.Vector3();
         const tweenState = { t: 0 };
 
         new TWEEN.Tween(tweenState)
@@ -350,13 +357,13 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
             .easing(TWEEN.Easing.Quadratic.InOut)
             .onUpdate(obj => {
                 // Re-compute dynamic target position each frame (target may move)
-                const trgLocalMatrixDyn = new THREE.Matrix4();
                 targetVec.mesh.getMatrixAt(i, trgLocalMatrixDyn);
-                const trgWorld = new THREE.Vector3().setFromMatrixPosition(trgLocalMatrixDyn).applyMatrix4(targetVec.group.matrixWorld);
-                const trgLocal = sourceVec.group.worldToLocal(trgWorld.clone());
+                trgWorld.setFromMatrixPosition(trgLocalMatrixDyn).applyMatrix4(targetVec.group.matrixWorld);
+                trgLocal.copy(trgWorld);
+                sourceVec.group.worldToLocal(trgLocal);
 
-                let interpY = THREE.MathUtils.lerp(srcLocalPos.y, trgLocal.y, obj.t);
-                interpY = trgLocal.y >= srcLocalPos.y ? Math.min(interpY, trgLocal.y) : Math.max(interpY, trgLocal.y);
+                let interpY = THREE.MathUtils.lerp(srcLocalY, trgLocal.y, obj.t);
+                interpY = trgLocal.y >= srcLocalY ? Math.min(interpY, trgLocal.y) : Math.max(interpY, trgLocal.y);
                 const offsetY = interpY - basePrismCenterY;
 
                 sourceVec.setInstanceAppearance(i, offsetY, null);
@@ -414,7 +421,7 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
                 }
             })
             .onComplete(() => {
-                targetVec.setInstanceAppearance(i, 0, new THREE.Color(0xffffff));
+                targetVec.setInstanceAppearance(i, 0, COLOR_WHITE);
                 new TWEEN.Tween({})
                     .to({}, flashDuration)
                     .onComplete(() => {

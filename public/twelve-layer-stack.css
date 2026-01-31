@@ -551,6 +551,41 @@ button { touch-action: manipulation; }
     display: none;
 }
 
+.vector-legend {
+    margin: 0 12px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.03);
+    display: none;
+    flex-direction: column;
+    gap: 6px;
+}
+.vector-legend.is-visible { display: flex; }
+.vector-legend-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: #9aa3af;
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+}
+.vector-legend-bar {
+    height: 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(255,255,255,0.18);
+    background: var(--vector-legend-gradient, linear-gradient(90deg, #d24b2d, #7bdcff, #3a5bff));
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.25);
+}
+.vector-legend-labels {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    color: #9aa3af;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 10px;
+}
+
 .detail-attention {
     margin: 0 12px;
     padding: 12px;
