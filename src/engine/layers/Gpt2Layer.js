@@ -54,7 +54,8 @@ import {
 
 
 // Slightly reduced spacing between stacked layers for a tighter layout.
-const VERTICAL_SPACING = 1700; // matches LayerAnimation.js vertical extent (tuned gap above MLP)
+// Keep this just above the per-layer vertical extent so MLP tops don't collide.
+const VERTICAL_SPACING = 1600;
 // Reusable scratch vector to avoid per-frame allocations when working with
 // world-space trail coordinates.
 const TMP_WORLD_POS = new THREE.Vector3();

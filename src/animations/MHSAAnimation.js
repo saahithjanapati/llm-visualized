@@ -38,6 +38,7 @@ import {
 import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
 import { computeCenteredPrismX, getPrismSpacing, PRISM_INSTANCE_WIDTH_SCALE } from '../utils/prismLayout.js';
 import { buildMHAVisuals, VectorRouter, PassThroughAnimator, SelfAttentionAnimator } from './mhsa/index.js';
+import { getSideCopyEntry } from './mhsa/laneIndex.js';
 import { animateVectorMatrixPassThrough as animateVectorMatrixPassThroughExternal } from './mhsa/VectorMatrixPassThrough.js';
 
 const _tmpWorld = new THREE.Vector3();
@@ -212,6 +213,9 @@ export class MHSAAnimation {
         this._mergedGroupsByHead = new Map(); // headIdx -> { K: Group, V: Group }
         this._allFixedMerged = false; // single merged K and V meshes across all heads created
         this._attentionWeightedSums = new Map(); // key -> { vec, laneZ, headIdx, laneIndex }
+        this._laneByZ = new Map();
+        this._laneZsSorted = [];
+        this._laneZKeyPrecision = 10; // 0.1 world-unit resolution
 
         // Pause-aware scheduling helpers ensure delayed callbacks respect manual pauses.
         this._scheduledDelayTweens = new Set();
@@ -257,6 +261,43 @@ export class MHSAAnimation {
         } else if (onDone) {
             onDone();
         }
+    }
+
+    _laneKey(zPos) {
+        const precision = Number.isFinite(this._laneZKeyPrecision) ? this._laneZKeyPrecision : 10;
+        if (!Number.isFinite(zPos)) return null;
+        return Math.round(zPos * precision) / precision;
+    }
+
+    _rebuildLaneIndex(lanes) {
+        if (!this._laneByZ) this._laneByZ = new Map();
+        this._laneByZ.clear();
+        const zList = [];
+        (lanes || []).forEach((lane) => {
+            if (!lane || !Number.isFinite(lane.zPos)) return;
+            const key = this._laneKey(lane.zPos);
+            if (key !== null && !this._laneByZ.has(key)) {
+                this._laneByZ.set(key, lane);
+            }
+            zList.push(lane.zPos);
+        });
+        zList.sort((a, b) => a - b);
+        this._laneZsSorted = zList;
+        this.sortedLaneZs = zList;
+    }
+
+    getLaneForZ(zPos) {
+        if (!Number.isFinite(zPos)) return null;
+        if (this._laneByZ && this._laneByZ.size) {
+            const key = this._laneKey(zPos);
+            if (key !== null && this._laneByZ.has(key)) {
+                return this._laneByZ.get(key);
+            }
+        }
+        // Fallback for any small drift beyond the map tolerance.
+        const lanes = Array.isArray(this.currentLanes) ? this.currentLanes : null;
+        if (!lanes) return null;
+        return lanes.find(l => Math.abs(l.zPos - zPos) < 0.1) || null;
     }
 
     _setupMHSAVisualizations() {
@@ -536,12 +577,12 @@ export class MHSAAnimation {
                 const kMatrix = this.mhaVisualizations[headIdx * 3 + 1];
                 this.animateVectorMatrixPassThrough(kVec, kMatrix, this.brightGreen, this.darkTintedGreen, this.finalHeadColors.K, this.mhaPassThroughTargetY, this.mhaPassThroughDuration, this.mhaResultRiseOffsetY, this.mhaResultRiseDuration, this.outputVectorLength, singleAnimationDone, 'K');
 
-                const qSideCopy = lane.sideCopies.find(sc => sc.headIndex === headIdx && sc.type === 'Q');
+                const qSideCopy = getSideCopyEntry(lane, headIdx, 'Q');
                 if (qSideCopy && qSideCopy.vec) {
                     this.animateVectorMatrixPassThrough(qSideCopy.vec, qSideCopy.matrixRef, this.brightBlue, this.darkTintedBlue, this.finalHeadColors.Q, this.mhaPassThroughTargetY, this.mhaPassThroughDuration, this.mhaResultRiseOffsetY, this.mhaResultRiseDuration, this.outputVectorLength, singleAnimationDone, 'Q');
                 } else { totalAnimationsToComplete--; }
 
-                const vSideCopy = lane.sideCopies.find(sc => sc.headIndex === headIdx && sc.type === 'V');
+                const vSideCopy = getSideCopyEntry(lane, headIdx, 'V');
                 if (vSideCopy && vSideCopy.vec) {
                     this.animateVectorMatrixPassThrough(vSideCopy.vec, vSideCopy.matrixRef, this.brightRed, this.darkTintedRed, this.finalHeadColors.V, this.mhaPassThroughTargetY, this.mhaPassThroughDuration, this.mhaResultRiseOffsetY, this.mhaResultRiseDuration, this.outputVectorLength, singleAnimationDone, 'V');
                 } else { totalAnimationsToComplete--; }
@@ -626,6 +667,7 @@ export class MHSAAnimation {
         // Keep a reference to the latest lanes array so that other internal
         // methods (triggered asynchronously) can access the original vectors.
         this.currentLanes = lanes;
+        this._rebuildLaneIndex(lanes);
 
         // ---------------- Vector routing (refactored) ----------------
         if (this.vectorRouter) {
@@ -849,10 +891,8 @@ export class MHSAAnimation {
             if (!lane) return;
             const kVec = lane.upwardCopies && lane.upwardCopies[headIdx];
             if (kVec && kVec.mesh) greens.push(kVec);
-            if (Array.isArray(lane.sideCopies)) {
-                const vObj = lane.sideCopies.find(sc => sc && sc.headIndex === headIdx && sc.type === 'V');
-                if (vObj && vObj.vec && vObj.vec.mesh) reds.push(vObj.vec);
-            }
+            const vObj = getSideCopyEntry(lane, headIdx, 'V');
+            if (vObj && vObj.vec && vObj.vec.mesh) reds.push(vObj.vec);
         });
 
         const keepRedMeshesVisible = !!this.enableSelfAttentionAnimation;

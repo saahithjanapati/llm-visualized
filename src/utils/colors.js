@@ -7,8 +7,8 @@ const SPECTRUM_CLAMP_MAX = 2;
 const SPECTRUM_HUE_MIN = 0;
 const SPECTRUM_HUE_MID = 0.5; // cyan/light blue at zero
 const SPECTRUM_HUE_MAX = 2 / 3; // blue at max
-const SPECTRUM_CENTER_RANGE = 0.35; // Portion of value range treated as "center" (0-1, normalized)
-const SPECTRUM_CENTER_SPAN = 0.9; // Portion of hue span reserved for center values (0-1)
+const SPECTRUM_CENTER_RANGE = 0.75; // Portion of value range treated as "center" (0-1, normalized)
+const SPECTRUM_CENTER_SPAN = 0.97; // Portion of hue span reserved for center values (0-1)
 
 function applySpectrumStretch(normalized) {
     const safeRange = Number.isFinite(SPECTRUM_CENTER_RANGE)
@@ -42,13 +42,24 @@ function mapCurvedToHue(curved) {
 }
 
 // Map a value (normalized, potentially outside -1 to 1) to a rainbow color (HSL)
-export function mapValueToColor(value) {
+export function mapValueToColor(value, options = null, targetColor = null) {
     // console.log(`mapValueToColor input value: ${value}`); // Log input value
 
     // Clamp raw values to the visualised range before mapping to hue.
     const safeValue = Number.isFinite(value) ? value : 0;
-    const clampedValue = Math.max(-SPECTRUM_CLAMP_MAX, Math.min(SPECTRUM_CLAMP_MAX, safeValue));
-    const normalized = clampedValue / SPECTRUM_CLAMP_MAX;
+    let opts = options;
+    let target = targetColor;
+    if (opts && opts.isColor && !targetColor) {
+        target = opts;
+        opts = null;
+    }
+    const clampMax = (() => {
+        if (Number.isFinite(opts)) return Math.max(1e-6, Math.abs(opts));
+        if (opts && Number.isFinite(opts.clampMax)) return Math.max(1e-6, Math.abs(opts.clampMax));
+        return SPECTRUM_CLAMP_MAX;
+    })();
+    const clampedValue = Math.max(-clampMax, Math.min(clampMax, safeValue));
+    const normalized = clampedValue / clampMax;
     const curved = applySpectrumStretch(normalized);
 
     // Map [-1, 0, 1] -> [red, cyan, blue] with a shifted midpoint.
@@ -56,7 +67,7 @@ export function mapValueToColor(value) {
     const saturation = 1.0;
     // Keep lightness higher so colors remain readable on black backgrounds.
     const lightness = 0.6;
-    const finalColor = new THREE.Color().setHSL(hue, saturation, lightness);
+    const finalColor = (target && target.isColor ? target : new THREE.Color()).setHSL(hue, saturation, lightness);
     // console.log(`mapValueToColor output: value=${value}, clamped=${clampedValue}, hue=${hue}, color R=${finalColor.r} G=${finalColor.g} B=${finalColor.b}`);
     return finalColor;
 }

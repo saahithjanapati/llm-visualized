@@ -2,8 +2,9 @@ import * as THREE from 'three';
 import { VECTOR_LENGTH_PRISM, SA_RED_EXTRA_RISE, SA_V_RISE_DURATION_MS, SA_K_ALIGN_DURATION_MS, SA_BLUE_HORIZ_DURATION_MS, SA_BLUE_VERT_DURATION_MS, SA_BLUE_PAUSE_MS, SA_BLUE_QUEUE_SHIFT_DURATION_MS, SA_DUPLICATE_POP_IN_MS, SA_DUPLICATE_TRAVEL_MERGE_MS, SA_DUPLICATE_POP_OUT_MS, GLOBAL_ANIM_SPEED_MULT, SELF_ATTENTION_TIME_MULT } from '../../utils/constants.js';
 import { VectorVisualizationInstancedPrism } from '../../components/VectorVisualizationInstancedPrism.js';
 import { mapValueToColor, mapValueToGrayscale, buildMonochromeOptions, mapValueToMonochrome } from '../../utils/colors.js';
-import { buildActivationData, applyActivationDataToObject } from '../../utils/activationMetadata.js';
+import { buildActivationData } from '../../utils/activationMetadata.js';
 import { MHA_VALUE_SPECTRUM_COLOR } from '../LayerAnimationConstants.js';
+import { getSideCopyEntry } from './laneIndex.js';
 
 // Shared lightweight geometry for self-attention highlight spheres
 const SHARED_SPHERE_GEOMETRY = new THREE.SphereGeometry(10, 12, 12);
@@ -53,12 +54,26 @@ export class SelfAttentionAnimator {
         this.skipRequested     = false;
         this._activeBlueVectors = {}; // { headIdx: Vector }
         this._pendingTimeouts   = new Set();
-        this._spawnedSpheres    = new Set();
+        this._spawnedSpheres    = new Set(); // stores active attention-sphere instance ids
+        this._sphereMesh        = null;
+        this._sphereCapacity    = 0;
+        this._sphereNextIndex   = 0;
+        this._sphereFreeList    = [];
+        this._sphereInstances   = new Map(); // instanceId -> { position, scale, activationData }
+        this._sphereLabels      = [];
+        this._sphereEntries     = [];
+        this._sphereDummy       = new THREE.Object3D();
+        this._sphereColorTmp    = new THREE.Color();
+        this._dupVecPool        = [];
+        this._dupVecPoolLimit   = 32;
         this._spawnedTempVectors = new Set();
         this._pendingDockCount  = 0;
         this.attentionProgress = {};
         this.attentionCompletedRows = {};
         this.attentionPostCompletedRows = {};
+        this._attentionRowCache = new Map();
+        this._weightedSumCache = new Map();
+        this._tmpMidpoint = new THREE.Vector3();
     }
 
     // Durations decoupled from GLOBAL_ANIM_SPEED_MULT to make presets clearly visible
@@ -81,11 +96,42 @@ export class SelfAttentionAnimator {
     }
 
     _clearPendingTimeouts() {
-        this._pendingTimeouts.forEach((id) => clearTimeout(id));
+        this._pendingTimeouts.forEach((cancel) => {
+            try {
+                if (typeof cancel === 'function') {
+                    cancel();
+                } else {
+                    clearTimeout(cancel);
+                }
+            } catch (_) { /* ignore */ }
+        });
         this._pendingTimeouts.clear();
     }
 
+    _scheduleAfterDelay(callback, delayMs) {
+        if (typeof callback !== 'function') return null;
+        let cancelFn = null;
+        const wrapped = () => {
+            if (cancelFn) {
+                this._pendingTimeouts.delete(cancelFn);
+            }
+            try {
+                callback();
+            } catch (_) { /* ignore */ }
+        };
+        if (this.ctx && typeof this.ctx._scheduleAfterDelay === 'function') {
+            cancelFn = this.ctx._scheduleAfterDelay(wrapped, delayMs);
+        } else {
+            const timeoutId = setTimeout(wrapped, delayMs);
+            cancelFn = () => clearTimeout(timeoutId);
+        }
+        this._registerTimeout(cancelFn);
+        return cancelFn;
+    }
+
     _cleanupAttentionScoreMeshes() {
+        // Clear instanced attention spheres regardless of scene labels.
+        this._clearAttentionSphereInstances();
         const root = this.ctx && this.ctx.parentGroup;
         if (!root || typeof root.traverse !== 'function') return;
         const toRemove = [];
@@ -99,6 +145,10 @@ export class SelfAttentionAnimator {
             }
         });
         toRemove.forEach((obj) => {
+            if (obj.userData && obj.userData._attentionSphereInstanced) {
+                this._clearAttentionSphereInstances();
+                return;
+            }
             try { if (obj.parent) obj.parent.remove(obj); } catch (_) { /* optional cleanup */ }
             try { if (obj.material && typeof obj.material.dispose === 'function') obj.material.dispose(); } catch (_) { /* optional cleanup */ }
             try {
@@ -107,6 +157,218 @@ export class SelfAttentionAnimator {
                 }
             } catch (_) { /* optional cleanup */ }
         });
+    }
+
+    _ensureAttentionSphereMesh() {
+        if (this._sphereMesh || !this.ctx || !this.ctx.parentGroup) return;
+        const capacity = 512;
+        const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
+        const mesh = new THREE.InstancedMesh(SHARED_SPHERE_GEOMETRY, material, capacity);
+        mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        mesh.userData._attentionSphereInstanced = true;
+        mesh.userData.instanceKind = 'attentionSphere';
+        mesh.userData.instanceLabels = new Array(capacity).fill(null);
+        mesh.userData.instanceEntries = new Array(capacity).fill(null);
+        // Initialize all instances hidden.
+        const dummy = this._sphereDummy;
+        for (let i = 0; i < capacity; i += 1) {
+            dummy.position.set(0, -9999, 0);
+            dummy.scale.set(0.001, 0.001, 0.001);
+            dummy.updateMatrix();
+            mesh.setMatrixAt(i, dummy.matrix);
+            mesh.setColorAt(i, this._sphereColorTmp.setRGB(0.1, 0.1, 0.1));
+        }
+        mesh.instanceMatrix.needsUpdate = true;
+        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+        this.ctx.parentGroup.add(mesh);
+        this._sphereMesh = mesh;
+        this._sphereCapacity = capacity;
+        this._sphereNextIndex = 0;
+        this._sphereLabels = mesh.userData.instanceLabels;
+        this._sphereEntries = mesh.userData.instanceEntries;
+    }
+
+    _updateAttentionSphereInstance(instanceId) {
+        if (!this._sphereMesh || !Number.isFinite(instanceId)) return;
+        const data = this._sphereInstances.get(instanceId);
+        if (!data) return;
+        const dummy = this._sphereDummy;
+        dummy.position.copy(data.position);
+        dummy.scale.setScalar(data.scale);
+        dummy.updateMatrix();
+        this._sphereMesh.setMatrixAt(instanceId, dummy.matrix);
+        this._sphereMesh.instanceMatrix.needsUpdate = true;
+    }
+
+    _setAttentionSphereColor(instanceId, color) {
+        if (!this._sphereMesh || !Number.isFinite(instanceId) || !color) return;
+        this._sphereMesh.setColorAt(instanceId, color);
+        if (this._sphereMesh.instanceColor) {
+            this._sphereMesh.instanceColor.needsUpdate = true;
+        }
+    }
+
+    _acquireAttentionSphere(position, color, activationData) {
+        this._ensureAttentionSphereMesh();
+        if (!this._sphereMesh) return null;
+        let instanceId = this._sphereFreeList.pop();
+        if (!Number.isFinite(instanceId)) {
+            if (this._sphereNextIndex < this._sphereCapacity) {
+                instanceId = this._sphereNextIndex;
+                this._sphereNextIndex += 1;
+            } else {
+                // Recycle the oldest active sphere if we exceed capacity.
+                const iter = this._spawnedSpheres.values().next();
+                if (iter.done) return null;
+                instanceId = iter.value;
+                this._releaseAttentionSphere(instanceId);
+            }
+        }
+        const data = {
+            position: position.clone(),
+            scale: 0.001,
+            activationData: activationData || null
+        };
+        this._sphereInstances.set(instanceId, data);
+        this._spawnedSpheres.add(instanceId);
+        this._sphereLabels[instanceId] = 'Pre-Softmax Attention Score';
+        this._sphereEntries[instanceId] = { activationData: activationData || null };
+        this._setAttentionSphereColor(instanceId, color);
+        this._updateAttentionSphereInstance(instanceId);
+        return instanceId;
+    }
+
+    _releaseAttentionSphere(instanceId) {
+        if (!this._sphereMesh || !Number.isFinite(instanceId)) return;
+        this._spawnedSpheres.delete(instanceId);
+        this._sphereInstances.delete(instanceId);
+        this._sphereLabels[instanceId] = null;
+        this._sphereEntries[instanceId] = null;
+        this._sphereFreeList.push(instanceId);
+        const dummy = this._sphereDummy;
+        dummy.position.set(0, -9999, 0);
+        dummy.scale.set(0.001, 0.001, 0.001);
+        dummy.updateMatrix();
+        this._sphereMesh.setMatrixAt(instanceId, dummy.matrix);
+        this._sphereMesh.instanceMatrix.needsUpdate = true;
+    }
+
+    _clearAttentionSphereInstances() {
+        this._spawnedSpheres.forEach((instanceId) => {
+            this._releaseAttentionSphere(instanceId);
+        });
+        this._spawnedSpheres.clear();
+        this._sphereInstances.clear();
+        this._sphereFreeList = [];
+        this._sphereNextIndex = 0;
+    }
+
+    _getAttentionSphereData(instanceId) {
+        if (!Number.isFinite(instanceId)) return null;
+        return this._sphereInstances.get(instanceId) || null;
+    }
+
+    _tweenSphereScale(instanceId, targetScale, duration, options = {}) {
+        const data = this._getAttentionSphereData(instanceId);
+        if (!data) return;
+        const startScale = Number.isFinite(data.scale) ? data.scale : 0.001;
+        const state = { s: startScale };
+        const tween = new TWEEN.Tween(state)
+            .to({ s: targetScale }, duration)
+            .easing(options.easing || TWEEN.Easing.Quadratic.Out)
+            .onUpdate(() => {
+                data.scale = state.s;
+                this._updateAttentionSphereInstance(instanceId);
+            });
+        if (Number.isFinite(options.delay) && options.delay > 0) {
+            tween.delay(options.delay);
+        }
+        if (options.yoyo) {
+            tween.yoyo(true);
+            tween.repeat(Number.isFinite(options.repeat) ? options.repeat : 1);
+        }
+        if (typeof options.onComplete === 'function') {
+            tween.onComplete(options.onComplete);
+        }
+        tween.start();
+    }
+
+    _acquireDuplicateVector(sourceVec) {
+        const desiredCount = Number.isFinite(sourceVec?.instanceCount)
+            ? sourceVec.instanceCount
+            : (Number.isFinite(this.ctx?.vectorPrismCount) ? this.ctx.vectorPrismCount : VECTOR_LENGTH_PRISM);
+        let dupVec = null;
+        while (this._dupVecPool.length) {
+            const candidate = this._dupVecPool.pop();
+            if (candidate && candidate.instanceCount === desiredCount) {
+                dupVec = candidate;
+                break;
+            }
+            try { if (typeof candidate?.dispose === 'function') candidate.dispose(); } catch (_) { /* ignore */ }
+        }
+        if (!dupVec) {
+            const startPos = sourceVec?.group?.position ? sourceVec.group.position.clone() : new THREE.Vector3();
+            dupVec = new VectorVisualizationInstancedPrism(
+                sourceVec?.rawData ? sourceVec.rawData.slice() : [],
+                startPos,
+                3,
+                desiredCount
+            );
+        } else {
+            dupVec.group.visible = true;
+            dupVec.group.scale.set(1, 1, 1);
+            if (sourceVec?.group?.position) {
+                dupVec.group.position.copy(sourceVec.group.position);
+            }
+            if (typeof dupVec.updateDataInternal === 'function' && Array.isArray(sourceVec?.rawData)) {
+                dupVec.updateDataInternal(sourceVec.rawData.slice());
+            }
+            if (dupVec.mesh?.material) {
+                dupVec.mesh.material.transparent = false;
+                dupVec.mesh.material.opacity = 1;
+                dupVec.mesh.material.needsUpdate = true;
+            }
+        }
+        dupVec.userData = { isPooledDuplicate: true };
+        return dupVec;
+    }
+
+    _releaseDuplicateVector(vec) {
+        if (!vec) return;
+        try { if (vec.group?.parent) vec.group.parent.remove(vec.group); } catch (_) { /* ignore */ }
+        try {
+            vec.group.visible = false;
+            vec.group.scale.set(0.001, 0.001, 0.001);
+        } catch (_) { /* ignore */ }
+        if (this._dupVecPool.length < this._dupVecPoolLimit) {
+            this._dupVecPool.push(vec);
+        } else {
+            try { if (typeof vec.dispose === 'function') vec.dispose(); } catch (_) { /* ignore */ }
+        }
+    }
+
+    _getLaneForZ(zPos) {
+        if (this.ctx && typeof this.ctx.getLaneForZ === 'function') {
+            const lane = this.ctx.getLaneForZ(zPos);
+            if (lane) return lane;
+        }
+        const lanes = this.ctx && Array.isArray(this.ctx.currentLanes) ? this.ctx.currentLanes : null;
+        if (!lanes || !Number.isFinite(zPos)) return null;
+        return lanes.find(l => Math.abs(l.zPos - zPos) < 0.1) || null;
+    }
+
+    _getAttentionScoresRow(mode, layerIndex, headIdx, queryTokenIndex) {
+        if (!Number.isFinite(layerIndex) || !Number.isFinite(headIdx) || !Number.isFinite(queryTokenIndex)) return null;
+        const key = `${mode}|${layerIndex}|${headIdx}|${queryTokenIndex}`;
+        if (this._attentionRowCache.has(key)) {
+            return this._attentionRowCache.get(key);
+        }
+        const activationSource = this.ctx && this.ctx.activationSource ? this.ctx.activationSource : null;
+        const row = activationSource && typeof activationSource.getAttentionScoresRow === 'function'
+            ? activationSource.getAttentionScoresRow(layerIndex, mode, headIdx, queryTokenIndex)
+            : null;
+        if (row) this._attentionRowCache.set(key, row);
+        return row;
     }
 
     _isHeadActive(headIdx) {
@@ -227,18 +489,23 @@ export class SelfAttentionAnimator {
         this.phase = 'complete';
         // Clean up any lingering highlight spheres
         this._spawnedSpheres.forEach((sp) => {
-            try {
-                if (sp.parent) sp.parent.remove(sp);
-                if (sp.material && typeof sp.material.dispose === 'function') sp.material.dispose();
-            } catch (_) { /* optional cleanup */ }
+            this._releaseAttentionSphere(sp);
         });
         this._spawnedSpheres.clear();
         this._cleanupAttentionScoreMeshes();
         this.attentionProgress = {};
         this.attentionCompletedRows = {};
         this.attentionPostCompletedRows = {};
+        this._attentionRowCache.clear();
+        this._weightedSumCache.clear();
         // Dispose any transient attention vectors (duplicates / travellers)
-        this._spawnedTempVectors.forEach((vec) => this._retireVector(vec, { preserveTrail: preserveTrails }));
+        this._spawnedTempVectors.forEach((vec) => {
+            if (vec && vec.userData && vec.userData.isPooledDuplicate) {
+                this._releaseDuplicateVector(vec);
+            } else {
+                this._retireVector(vec, { preserveTrail: preserveTrails });
+            }
+        });
         this._spawnedTempVectors.clear();
         // Dispose K/V visuals so they disappear alongside the skipped conveyor
         try { this.ctx && this.ctx._disposeMergedKVGroups && this.ctx._disposeMergedKVGroups(); } catch (_) {}
@@ -290,7 +557,7 @@ export class SelfAttentionAnimator {
         this.phase = 'running';
         console.log('SelfAttentionAnimator: placeholder phase started');
 
-        setTimeout(() => {
+        this._scheduleAfterDelay(() => {
             this.phase = 'complete';
             console.log('SelfAttentionAnimator: placeholder phase complete');
             this._flushCallbacks();
@@ -380,7 +647,9 @@ export class SelfAttentionAnimator {
         let alignmentsInProgress = 0;
         let alignmentsCompleted  = 0;
 
-        this.ctx.currentLanes.forEach(lane => {
+        const laneHit = this._getLaneForZ(redZ);
+        const lanesToAlign = laneHit ? [laneHit] : this.ctx.currentLanes;
+        lanesToAlign.forEach(lane => {
             if (Math.abs(lane.zPos - redZ) < 0.1 && lane.upwardCopies && lane.upwardCopies[headIdx]) {
                 const green = lane.upwardCopies[headIdx];
                 alignmentsInProgress++;
@@ -505,7 +774,9 @@ export class SelfAttentionAnimator {
         this._setAttentionProgress(headIdx, rowIndex, -1);
 
         // Pre-compute sorted lane z positions (top → bottom)
-        const laneZs = (this.ctx.currentLanes || []).map(l => l.zPos).sort((a, b) => a - b);
+        const laneZs = Array.isArray(this.ctx?.sortedLaneZs) && this.ctx.sortedLaneZs.length
+            ? this.ctx.sortedLaneZs
+            : (this.ctx.currentLanes || []).map(l => l.zPos).sort((a, b) => a - b);
 
         this._activeBlueVectors[headIdx] = vector;
         this._animateBlueVector(vector, headIdx, i, laneZs, () => {
@@ -519,7 +790,9 @@ export class SelfAttentionAnimator {
         if (this.skipRequested) return;
         // Existing logic (unchanged)
 
-        const laneZs = (this.ctx.currentLanes || []).map(l => l.zPos).sort((a, b) => a - b);
+        const laneZs = Array.isArray(this.ctx?.sortedLaneZs) && this.ctx.sortedLaneZs.length
+            ? this.ctx.sortedLaneZs
+            : (this.ctx.currentLanes || []).map(l => l.zPos).sort((a, b) => a - b);
         if (!laneZs.length) return;
         queue.forEach((vec, idx) => {
             const targetZ = laneZs[idx < laneZs.length ? idx : laneZs.length - 1];
@@ -531,66 +804,85 @@ export class SelfAttentionAnimator {
     }
 
     _riseSpheres(spheresArr, rowIndex = null, headIdx = null) {
-
         if (this.skipRequested) return;
         if (!Array.isArray(spheresArr) || spheresArr.length === 0) return;
         const resolvedHeadIdx = Number.isFinite(headIdx)
             ? headIdx
             : (() => {
-                const sp = spheresArr[0];
-                const activationData = sp && sp.userData ? sp.userData.activationData : null;
+                const firstId = spheresArr[0];
+                const data = this._getAttentionSphereData(firstId);
+                const activationData = data ? data.activationData : null;
                 return activationData && Number.isFinite(activationData.headIndex) ? activationData.headIndex : null;
             })();
         if (Number.isFinite(resolvedHeadIdx) && Number.isFinite(rowIndex)) {
             this._markAttentionPostRowComplete(resolvedHeadIdx, rowIndex);
         }
-        spheresArr.forEach((sp) => {
-            // Position rise
-            new TWEEN.Tween(sp.position)
-                .to({ y: sp.position.y + this.RED_EXTRA_RISE }, this.V_RISE_DURATION)
+
+        spheresArr.forEach((instanceId) => {
+            const data = this._getAttentionSphereData(instanceId);
+            if (!data) return;
+            const startY = data.position.y;
+            const posState = { y: startY };
+            new TWEEN.Tween(posState)
+                .to({ y: startY + this.RED_EXTRA_RISE }, this.V_RISE_DURATION)
                 .easing(TWEEN.Easing.Quadratic.Out)
+                .onUpdate(() => {
+                    data.position.y = posState.y;
+                    this._updateAttentionSphereInstance(instanceId);
+                })
                 .start();
 
-            // Colour desaturation → bright mono (white-ish)
-            if (sp.material) {
-                const c = sp.material.color.clone();
-                const hasEmissive = ('emissive' in sp.material) && ('emissiveIntensity' in sp.material);
-                const state = { r: c.r, g: c.g, b: c.b, ei: hasEmissive ? sp.material.emissiveIntensity : 1.0 };
-                const activationData = sp.userData ? sp.userData.activationData : null;
-                const layerIndex = activationData && Number.isFinite(activationData.layerIndex) ? activationData.layerIndex : null;
-                const headIdx = activationData && Number.isFinite(activationData.headIndex) ? activationData.headIndex : null;
-                const queryTokenIndex = activationData && Number.isFinite(activationData.tokenIndex) ? activationData.tokenIndex : null;
-                const keyTokenIndex = activationData && Number.isFinite(activationData.keyTokenIndex) ? activationData.keyTokenIndex : null;
-                const postScore = (this.ctx && this.ctx.activationSource
-                    && Number.isFinite(layerIndex) && Number.isFinite(headIdx)
-                    && Number.isFinite(queryTokenIndex) && Number.isFinite(keyTokenIndex))
-                    ? this.ctx.activationSource.getAttentionScore(layerIndex, 'post', headIdx, queryTokenIndex, keyTokenIndex)
-                    : null;
-                const targetColor = Number.isFinite(postScore)
-                    ? mapValueToGrayscale(postScore)
-                    : new THREE.Color().setHSL(0, 0, THREE.MathUtils.lerp(0.2, 0.9, Math.random()));
-                const targetEI = Number.isFinite(postScore) ? 0.6 : 0.8;
-                new TWEEN.Tween(state)
-                    .to({ r: targetColor.r, g: targetColor.g, b: targetColor.b, ei: targetEI }, this.V_RISE_DURATION)
-                    .easing(TWEEN.Easing.Quadratic.Out)
-                    .onStart(() => {
-                        if (activationData) {
-                            activationData.stage = 'attention.post';
-                            if (Number.isFinite(postScore)) activationData.postScore = postScore;
-                            applyActivationDataToObject(sp, activationData, 'Post-Softmax Attention Score');
-                        } else {
-                            applyActivationDataToObject(sp, null, 'Post-Softmax Attention Score');
-                        }
-                    })
-                    .onUpdate(() => {
-                        sp.material.color.setRGB(state.r, state.g, state.b);
-                        if (hasEmissive) {
-                            sp.material.emissive.setRGB(state.r, state.g, state.b);
-                            sp.material.emissiveIntensity = state.ei;
-                        }
-                    })
-                    .start();
+            const activationData = data.activationData || null;
+            const layerIndex = activationData && Number.isFinite(activationData.layerIndex) ? activationData.layerIndex : null;
+            const headIdx = activationData && Number.isFinite(activationData.headIndex) ? activationData.headIndex : null;
+            const queryTokenIndex = activationData && Number.isFinite(activationData.tokenIndex) ? activationData.tokenIndex : null;
+            const keyTokenIndex = activationData && Number.isFinite(activationData.keyTokenIndex) ? activationData.keyTokenIndex : null;
+            let postScore = null;
+            if (this.ctx && this.ctx.activationSource
+                && Number.isFinite(layerIndex) && Number.isFinite(headIdx)
+                && Number.isFinite(queryTokenIndex) && Number.isFinite(keyTokenIndex)) {
+                const postRow = this._getAttentionScoresRow('post', layerIndex, headIdx, queryTokenIndex);
+                postScore = Array.isArray(postRow)
+                    ? postRow[Math.max(0, Math.min(postRow.length - 1, keyTokenIndex))]
+                    : this.ctx.activationSource.getAttentionScore(layerIndex, 'post', headIdx, queryTokenIndex, keyTokenIndex);
             }
+            const targetColor = Number.isFinite(postScore)
+                ? mapValueToGrayscale(postScore)
+                : this._sphereColorTmp.setHSL(0, 0, THREE.MathUtils.lerp(0.2, 0.9, Math.random()));
+
+            // Capture current color from the instance buffer if present.
+            let curR = 1, curG = 1, curB = 1;
+            if (this._sphereMesh && this._sphereMesh.instanceColor && this._sphereMesh.instanceColor.array) {
+                const arr = this._sphereMesh.instanceColor.array;
+                const idx3 = instanceId * 3;
+                curR = arr[idx3] ?? 1;
+                curG = arr[idx3 + 1] ?? 1;
+                curB = arr[idx3 + 2] ?? 1;
+            }
+            const colorState = { r: curR, g: curG, b: curB };
+            new TWEEN.Tween(colorState)
+                .to({ r: targetColor.r, g: targetColor.g, b: targetColor.b }, this.V_RISE_DURATION)
+                .easing(TWEEN.Easing.Quadratic.Out)
+                .onStart(() => {
+                    if (activationData) {
+                        activationData.stage = 'attention.post';
+                        if (Number.isFinite(postScore)) activationData.postScore = postScore;
+                    }
+                    data.activationData = activationData;
+                    if (this._sphereEntries[instanceId]) {
+                        this._sphereEntries[instanceId].activationData = activationData;
+                    } else {
+                        this._sphereEntries[instanceId] = { activationData };
+                    }
+                    if (Array.isArray(this._sphereLabels)) {
+                        this._sphereLabels[instanceId] = 'Post-Softmax Attention Score';
+                    }
+                })
+                .onUpdate(() => {
+                    this._sphereColorTmp.setRGB(colorState.r, colorState.g, colorState.b);
+                    this._setAttentionSphereColor(instanceId, this._sphereColorTmp);
+                })
+                .start();
         });
     }
 
@@ -683,23 +975,33 @@ export class SelfAttentionAnimator {
         const activationSource = this.ctx && this.ctx.activationSource ? this.ctx.activationSource : null;
         const layerIndex = Number.isFinite(this.ctx?.layerIndex) ? this.ctx.layerIndex : null;
         const queryTokenIndex = queryLane && Number.isFinite(queryLane.tokenIndex) ? queryLane.tokenIndex : null;
+        if (Number.isFinite(layerIndex) && Number.isFinite(headIdx) && Number.isFinite(queryTokenIndex)) {
+            const cacheKey = `${layerIndex}|${headIdx}|${queryTokenIndex}|${outputLength}`;
+            const cached = this._weightedSumCache.get(cacheKey);
+            if (cached) return cached;
+        }
         const data = new Array(outputLength).fill(0);
         let usedWeight = false;
+        let missingData = false;
 
         if (activationSource && Number.isFinite(layerIndex) && Number.isFinite(queryTokenIndex)) {
+            const weightRow = this._getAttentionScoresRow('post', layerIndex, headIdx, queryTokenIndex);
             lanes.forEach((keyLane) => {
                 const keyTokenIndex = keyLane && Number.isFinite(keyLane.tokenIndex) ? keyLane.tokenIndex : null;
                 if (!Number.isFinite(keyTokenIndex)) return;
-                const weight = activationSource.getAttentionScore
-                    ? activationSource.getAttentionScore(layerIndex, 'post', headIdx, queryTokenIndex, keyTokenIndex)
-                    : null;
+                const weight = Array.isArray(weightRow)
+                    ? weightRow[keyTokenIndex]
+                    : (activationSource.getAttentionScore
+                        ? activationSource.getAttentionScore(layerIndex, 'post', headIdx, queryTokenIndex, keyTokenIndex)
+                        : null);
                 if (!Number.isFinite(weight)) return;
-                const vObj = keyLane && Array.isArray(keyLane.sideCopies)
-                    ? keyLane.sideCopies.find(sc => sc && sc.type === 'V' && sc.headIndex === headIdx)
-                    : null;
+                const vObj = getSideCopyEntry(keyLane, headIdx, 'V');
                 const vVec = vObj && vObj.vec ? vObj.vec : null;
                 const vData = vVec && Array.isArray(vVec.rawData) ? vVec.rawData : null;
-                if (!vData || !vData.length) return;
+                if (!vData || !vData.length) {
+                    missingData = true;
+                    return;
+                }
                 usedWeight = true;
                 for (let i = 0; i < outputLength; i++) {
                     data[i] += weight * (vData[i] ?? 0);
@@ -708,15 +1010,18 @@ export class SelfAttentionAnimator {
         }
 
         if (!usedWeight) {
-            const fallbackObj = queryLane && Array.isArray(queryLane.sideCopies)
-                ? queryLane.sideCopies.find(sc => sc && sc.type === 'V' && sc.headIndex === headIdx)
-                : null;
+            const fallbackObj = getSideCopyEntry(queryLane, headIdx, 'V');
             const fallbackVec = fallbackObj && fallbackObj.vec ? fallbackObj.vec : null;
             const fallbackData = fallbackVec && Array.isArray(fallbackVec.rawData) ? fallbackVec.rawData : null;
             if (fallbackData && fallbackData.length) {
                 return fallbackData.slice(0, outputLength);
             }
             return data;
+        }
+
+        if (usedWeight && !missingData && Number.isFinite(layerIndex) && Number.isFinite(headIdx) && Number.isFinite(queryTokenIndex)) {
+            const cacheKey = `${layerIndex}|${headIdx}|${queryTokenIndex}|${outputLength}`;
+            this._weightedSumCache.set(cacheKey, data);
         }
 
         return data;
@@ -745,9 +1050,7 @@ export class SelfAttentionAnimator {
         lanes.forEach((lane) => {
             const laneZ = Number.isFinite(lane?.zPos) ? lane.zPos : null;
             for (let headIdx = 0; headIdx < headCount; headIdx++) {
-                const vObj = lane && Array.isArray(lane.sideCopies)
-                    ? lane.sideCopies.find(sc => sc && sc.type === 'V' && sc.headIndex === headIdx)
-                    : null;
+                const vObj = getSideCopyEntry(lane, headIdx, 'V');
                 const vVec = vObj && vObj.vec ? vObj.vec : null;
                 const instanceCount = Number.isFinite(vVec?.instanceCount)
                     ? vVec.instanceCount
@@ -932,14 +1235,14 @@ export class SelfAttentionAnimator {
             return;
         }
         const queryLaneZ = laneZs[Math.min(Math.max(0, hopCount - 1), laneZs.length - 1)];
-        const queryLane = this.ctx.currentLanes.find(l => Math.abs(l.zPos - queryLaneZ) < 0.1);
+        const queryLane = this._getLaneForZ(queryLaneZ);
         const topLaneZ = laneZs[0];
-        const topLane = this.ctx.currentLanes.find(l => Math.abs(l.zPos - topLaneZ) < 0.1);
+        const topLane = this._getLaneForZ(topLaneZ);
         if (!topLane || !Array.isArray(topLane.sideCopies)) {
             doneCb && doneCb();
             return;
         }
-        const fixedObj = topLane.sideCopies.find(sc => sc.headIndex === headIdx && sc.type === 'V');
+        const fixedObj = getSideCopyEntry(topLane, headIdx, 'V');
         if (!fixedObj || !fixedObj.vec) {
             doneCb && doneCb();
             return;
@@ -976,9 +1279,7 @@ export class SelfAttentionAnimator {
     _parkWeightedSumVector(vector, headIdx, lane, laneZ) {
         if (!vector || !vector.group) return;
         const resolvedLaneZ = Number.isFinite(lane?.zPos) ? lane.zPos : (Number.isFinite(laneZ) ? laneZ : vector.group.position.z);
-        const vObj = lane && Array.isArray(lane.sideCopies)
-            ? lane.sideCopies.find(sc => sc && sc.headIndex === headIdx && sc.type === 'V')
-            : null;
+        const vObj = getSideCopyEntry(lane, headIdx, 'V');
         const vVec = vObj && vObj.vec ? vObj.vec : null;
         const targetX = vVec && vVec.group ? vVec.group.position.x
             : (this.ctx.headCoords && this.ctx.headCoords[headIdx] ? this.ctx.headCoords[headIdx].v : vector.group.position.x);
@@ -1034,21 +1335,13 @@ export class SelfAttentionAnimator {
                 .to({ x: targetX, y: targetY, z: resolvedLaneZ }, this.DUPLICATE_TRAVEL_MERGE_MS)
                 .easing(TWEEN.Easing.Quadratic.Out)
                 .onComplete(() => {
-                    const delayId = setTimeout(() => {
-                        this._pendingTimeouts.delete(delayId);
-                        applyGray();
-                    }, grayDelayMs);
-                    this._registerTimeout(delayId);
+                    this._scheduleAfterDelay(applyGray, grayDelayMs);
                     finalizeDock();
                 })
                 .start();
         } else {
             vector.group.position.set(targetX, targetY, resolvedLaneZ);
-            const delayId = setTimeout(() => {
-                this._pendingTimeouts.delete(delayId);
-                applyGray();
-            }, grayDelayMs);
-            this._registerTimeout(delayId);
+            this._scheduleAfterDelay(applyGray, grayDelayMs);
             finalizeDock();
         }
     }
@@ -1082,28 +1375,30 @@ export class SelfAttentionAnimator {
                 if (createSpheres) {
                     const headIdx = (vector.userData && typeof vector.userData.headIndex === 'number') ? vector.userData.headIndex : null;
                     if (headIdx !== null && this.ctx.currentLanes) {
-                        const lane = this.ctx.currentLanes.find(l => Math.abs(l.zPos - targetZ) < 0.1);
+                        const lane = this._getLaneForZ(targetZ);
                         if (lane && lane.upwardCopies && lane.upwardCopies[headIdx]) {
                             const greenVec = lane.upwardCopies[headIdx];
                             if (greenVec && greenVec.group) {
-                                const midPoint = new THREE.Vector3().addVectors(vector.group.position, greenVec.group.position).multiplyScalar(0.5);
-                                const sphereGeom = SHARED_SPHERE_GEOMETRY;
+                                const midPoint = this._tmpMidpoint.addVectors(vector.group.position, greenVec.group.position).multiplyScalar(0.5);
                                 const queryLane = vector.userData ? vector.userData.parentLane : null;
                                 const queryTokenIndex = queryLane && Number.isFinite(queryLane.tokenIndex) ? queryLane.tokenIndex : null;
                                 const keyTokenIndex = lane && Number.isFinite(lane.tokenIndex) ? lane.tokenIndex : null;
                                 const layerIndex = Number.isFinite(this.ctx?.layerIndex) ? this.ctx.layerIndex : null;
-                                const preScore = (this.ctx && this.ctx.activationSource && Number.isFinite(layerIndex) && Number.isFinite(headIdx))
-                                    ? this.ctx.activationSource.getAttentionScore(layerIndex, 'pre', headIdx, queryTokenIndex, keyTokenIndex)
+                                const preRow = (this.ctx && this.ctx.activationSource && Number.isFinite(layerIndex) && Number.isFinite(headIdx))
+                                    ? this._getAttentionScoresRow('pre', layerIndex, headIdx, queryTokenIndex)
                                     : null;
+                                const preScore = Array.isArray(preRow) && preRow.length && Number.isFinite(keyTokenIndex)
+                                    ? preRow[Math.max(0, Math.min(preRow.length - 1, keyTokenIndex))]
+                                    : ((this.ctx && this.ctx.activationSource && Number.isFinite(layerIndex) && Number.isFinite(headIdx))
+                                        ? this.ctx.activationSource.getAttentionScore(layerIndex, 'pre', headIdx, queryTokenIndex, keyTokenIndex)
+                                        : null);
                                 const baseColor = Number.isFinite(preScore)
-                                    ? mapValueToColor(preScore)
-                                    : new THREE.Color().setHSL(Math.random(), THREE.MathUtils.lerp(0.85, 1.0, Math.random()), THREE.MathUtils.lerp(0.45, 0.6, Math.random()));
-                                const sphereMat = new THREE.MeshBasicMaterial({ color: baseColor });
-                                const sphereMesh = new THREE.Mesh(sphereGeom, sphereMat);
-                                sphereMesh.position.copy(midPoint);
-                                sphereMesh.scale.set(0.001, 0.001, 0.001);
-                                this.ctx.parentGroup.add(sphereMesh);
-                                this._spawnedSpheres.add(sphereMesh);
+                                    ? mapValueToColor(preScore, { clampMax: 5 }, this._sphereColorTmp)
+                                    : this._sphereColorTmp.setHSL(
+                                        Math.random(),
+                                        THREE.MathUtils.lerp(0.85, 1.0, Math.random()),
+                                        THREE.MathUtils.lerp(0.45, 0.6, Math.random())
+                                    );
                                 const activationData = buildActivationData({
                                     label: 'Pre-Softmax Attention Score',
                                     stage: 'attention.pre',
@@ -1117,22 +1412,25 @@ export class SelfAttentionAnimator {
                                     activationData.keyTokenIndex = keyTokenIndex;
                                     activationData.keyTokenLabel = lane ? lane.tokenLabel : null;
                                 }
-                                applyActivationDataToObject(sphereMesh, activationData, 'Pre-Softmax Attention Score');
-                                // Inflate animation
-                                new TWEEN.Tween(sphereMesh.scale)
-                                    .to({ x: 0.8, y: 0.8, z: 0.8 }, 350)
-                                    .easing(TWEEN.Easing.Quadratic.Out)
-                                    .start();
-                                if (Array.isArray(spheresArr)) spheresArr.push(sphereMesh);
+                                const sphereId = this._acquireAttentionSphere(midPoint, baseColor, activationData);
+                                if (Number.isFinite(sphereId)) {
+                                    this._tweenSphereScale(sphereId, 0.8, 350, { easing: TWEEN.Easing.Quadratic.Out });
+                                    if (Array.isArray(spheresArr)) spheresArr.push(sphereId);
+                                }
                             }
                         }
                     }
                 }
                 // Handle sphere removal during red-vector traversal
                 if (!createSpheres && Array.isArray(spheresArr)) {
-                    const idx = spheresArr.findIndex(s => Math.abs(s.position.z - targetZ) < 0.1);
+                    const idx = spheresArr.findIndex((id) => {
+                        const data = this._getAttentionSphereData(id);
+                        return data && Math.abs(data.position.z - targetZ) < 0.1;
+                    });
                     if (idx >= 0) {
-                        const sp = spheresArr[idx];
+                        const sphereId = spheresArr[idx];
+                        const spData = this._getAttentionSphereData(sphereId);
+                        const spPos = spData ? spData.position : null;
                         const ContinueTraversal = () => {
                             this._traverseLanes(vector, laneZs, count, spheresArr, createSpheres, doneCb, stepIdx + 1);
                         };
@@ -1141,14 +1439,14 @@ export class SelfAttentionAnimator {
                         //  through the sphere and into the moving red vector.
                         // ------------------------------------------------------------------
                         const headIdx = (vector.userData && typeof vector.userData.headIndex === 'number') ? vector.userData.headIndex : null;
-                        const lane = this.ctx.currentLanes ? this.ctx.currentLanes.find(l => Math.abs(l.zPos - targetZ) < 0.1) : null;
+                        const lane = this._getLaneForZ(targetZ);
                         if (lane && headIdx !== null && Array.isArray(lane.sideCopies)) {
-                            const fixedObj = lane.sideCopies.find(sc => sc.headIndex === headIdx && sc.type === 'V');
+                            const fixedObj = getSideCopyEntry(lane, headIdx, 'V');
                             if (fixedObj && fixedObj.vec) {
                                 const fixedVec = fixedObj.vec;
                                 // Ensure duplicates spawn at the **raised** red-vector height (match the highlight spheres).
-                                const raisedY = sp ? sp.position.y : vector.group.position.y;
-                                const activationData = sp && sp.userData ? sp.userData.activationData : null;
+                                const raisedY = spPos ? spPos.y : vector.group.position.y;
+                                const activationData = spData ? spData.activationData : null;
                                 const postScore = activationData && Number.isFinite(activationData.postScore)
                                     ? activationData.postScore
                                     : null;
@@ -1159,13 +1457,9 @@ export class SelfAttentionAnimator {
                                 const weightOpacity = Number.isFinite(weight)
                                     ? THREE.MathUtils.lerp(0.65, 1.0, weight)
                                     : 1.0;
+                                const dupVec = this._acquireDuplicateVector(fixedVec);
                                 const startPos = fixedVec.group.position.clone();
-                                const dupVec = new VectorVisualizationInstancedPrism(
-                                    fixedVec.rawData.slice(),
-                                    startPos,
-                                    3,
-                                    fixedVec.instanceCount
-                                );
+                                dupVec.group.position.copy(startPos);
                                 // Start with the ORIGINAL value-vector look.
                                 this._copyVectorAppearance(dupVec, fixedVec);
                                 this.ctx.parentGroup.add(dupVec.group);
@@ -1177,20 +1471,19 @@ export class SelfAttentionAnimator {
                                     .easing(TWEEN.Easing.Quadratic.Out)
                                     .start();
                                 // Pulse the post-softmax score to visualize weighting
-                                if (sp) {
-                                    const baseScale = sp.scale ? sp.scale.x : 1;
+                                if (Number.isFinite(sphereId) && spData) {
+                                    const baseScale = Number.isFinite(spData.scale) ? spData.scale : 1;
                                     const pulse = Number.isFinite(weight)
                                         ? THREE.MathUtils.lerp(1.15, 1.9, weight)
                                         : 1.4;
-                                    new TWEEN.Tween(sp.scale)
-                                        .to({ x: baseScale * pulse, y: baseScale * pulse, z: baseScale * pulse }, 180)
-                                        .easing(TWEEN.Easing.Quadratic.Out)
-                                        .yoyo(true)
-                                        .repeat(1)
-                                        .start();
+                                    this._tweenSphereScale(sphereId, baseScale * pulse, 180, {
+                                        easing: TWEEN.Easing.Quadratic.Out,
+                                        yoyo: true,
+                                        repeat: 1
+                                    });
                                 }
                                 const sumTarget = { x: vector.group.position.x, y: raisedY, z: vector.group.position.z };
-                                const sumDuration = sp ? this.DUPLICATE_TRAVEL_MERGE_MS * 0.55 : this.DUPLICATE_TRAVEL_MERGE_MS;
+                                const sumDuration = spData ? this.DUPLICATE_TRAVEL_MERGE_MS * 0.55 : this.DUPLICATE_TRAVEL_MERGE_MS;
                                 const applyWeightedLook = () => {
                                     this._applyWeightedSumScheme(dupVec, fixedVec.rawData, { setHiddenToBlack: true });
                                     if (dupVec.mesh && dupVec.mesh.material) {
@@ -1237,8 +1530,7 @@ export class SelfAttentionAnimator {
                                             .to({ x: 0.001, y: 0.001, z: 0.001 }, this.DUPLICATE_POP_OUT_MS)
                                             .onComplete(() => {
                                                 this._spawnedTempVectors.delete(dupVec);
-                                                if (dupVec.group.parent) dupVec.group.parent.remove(dupVec.group);
-                                                if (typeof dupVec.dispose === 'function') dupVec.dispose();
+                                                this._releaseDuplicateVector(dupVec);
                                                 // Continue traversal AFTER merge completes
                                                 ContinueTraversal();
                                             })
@@ -1246,20 +1538,18 @@ export class SelfAttentionAnimator {
                                     }).start();
                                 };
 
-                                if (sp) {
-                                    const scoreTarget = { x: sp.position.x, y: sp.position.y, z: sp.position.z };
+                                if (spData && spPos) {
+                                    const scoreTarget = { x: spPos.x, y: spPos.y, z: spPos.z };
                                     new TWEEN.Tween(dupVec.group.position)
                                         .to(scoreTarget, this.DUPLICATE_TRAVEL_MERGE_MS * 0.45)
                                         .easing(TWEEN.Easing.Quadratic.Out)
                                         .onComplete(() => {
                                             // Brief linger at the post-softmax score before merging into the running sum
-                                            const delayId = setTimeout(() => {
-                                                this._pendingTimeouts.delete(delayId);
+                                            this._scheduleAfterDelay(() => {
                                                 if (this.skipRequested) return;
                                                 applyWeightedLook();
                                                 flyToSum();
                                             }, 80);
-                                            this._registerTimeout(delayId);
                                         })
                                         .start();
                                 } else {
@@ -1271,30 +1561,28 @@ export class SelfAttentionAnimator {
 
                         // Shrink & remove sphere after the weighting merge completes
                         const shrinkDelay = Math.max(250, this.DUPLICATE_TRAVEL_MERGE_MS * 0.8);
-                        new TWEEN.Tween(sp.scale)
-                            .to({ x: 0.001, y: 0.001, z: 0.001 }, 250)
-                            .delay(shrinkDelay)
-                            .easing(TWEEN.Easing.Quadratic.In)
-                            .onComplete(() => {
-                                this._spawnedSpheres.delete(sp);
-                                if (sp.parent) sp.parent.remove(sp);
-                            })
-                            .start();
+                        if (Number.isFinite(sphereId)) {
+                            this._tweenSphereScale(sphereId, 0.001, 250, {
+                                delay: shrinkDelay,
+                                easing: TWEEN.Easing.Quadratic.In,
+                                onComplete: () => {
+                                    this._releaseAttentionSphere(sphereId);
+                                }
+                            });
+                        }
                         spheresArr.splice(idx, 1);
                         // IMPORTANT: Return here so we do NOT recurse twice.
                         return;
                     }
                 }
                 // Pause briefly, then recurse
-                const timeoutId = setTimeout(() => {
-                    this._pendingTimeouts.delete(timeoutId);
+                this._scheduleAfterDelay(() => {
                     if (this.skipRequested) {
                         doneCb && doneCb();
                         return;
                     }
                     this._traverseLanes(vector, laneZs, count, spheresArr, createSpheres, doneCb, stepIdx + 1);
                 }, this.BLUE_PAUSE_MS);
-                this._registerTimeout(timeoutId);
             })
             .start();
     }

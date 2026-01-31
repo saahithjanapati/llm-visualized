@@ -12,6 +12,7 @@ import {
 } from '../../utils/constants.js';
 // Speed-related constants centralised in utils/constants
 import { MHSA_DUPLICATE_VECTOR_RISE_SPEED } from '../../utils/constants.js';
+import { setSideCopyEntry } from './laneIndex.js';
 
 const _scratchWorld = new THREE.Vector3();
 const _scratchWorld2 = new THREE.Vector3();
@@ -219,6 +220,8 @@ export class VectorRouter {
                             const vMatrixForHead = this.mhaVisualizations[hIdx * 3 + 2];
                             lane.sideCopies.push({ vec: qVec, targetX: coord.q, type: 'Q', matrixRef: qMatrixForHead, headIndex: hIdx });
                             lane.sideCopies.push({ vec: vVec, targetX: coord.v, type: 'V', matrixRef: vMatrixForHead, headIndex: hIdx });
+                            setSideCopyEntry(lane, hIdx, 'Q', lane.sideCopies[lane.sideCopies.length - 2]);
+                            setSideCopyEntry(lane, hIdx, 'V', lane.sideCopies[lane.sideCopies.length - 1]);
 
                             centerVec.userData.sideSpawned = true;
                         }

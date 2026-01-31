@@ -46,14 +46,34 @@ export function initPauseButton(pipeline) {
         }
     };
 
+    const isTypingTarget = (target) => {
+        if (!target) return false;
+        const tag = target.tagName;
+        return target.isContentEditable
+            || tag === 'INPUT'
+            || tag === 'TEXTAREA'
+            || tag === 'SELECT';
+    };
+
+    const onGlobalKeyDown = (event) => {
+        if (event.defaultPrevented || event.repeat) return;
+        if (isTypingTarget(event.target)) return;
+        const isSpace = event.code === 'Space' || event.key === ' ' || event.key === 'Spacebar';
+        if (!isSpace) return;
+        event.preventDefault();
+        toggle();
+    };
+
     button.addEventListener('click', onClick);
     button.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keydown', onGlobalKeyDown, { passive: false });
 
     updateButtonVisuals();
 
     return () => {
         button.removeEventListener('click', onClick);
         button.removeEventListener('keydown', onKeyDown);
+        window.removeEventListener('keydown', onGlobalKeyDown);
     };
 }
 

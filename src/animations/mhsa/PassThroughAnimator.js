@@ -1,4 +1,5 @@
 import { NUM_HEAD_SETS_LAYER } from '../../utils/constants.js';
+import { getSideCopyEntry } from './laneIndex.js';
 
 export class PassThroughAnimator {
     constructor(ctx) {
@@ -65,7 +66,7 @@ export class PassThroughAnimator {
                 );
 
                 // Q side copy
-                const qSideCopy = lane.sideCopies.find(sc => sc.headIndex === headIdx && sc.type === 'Q');
+                const qSideCopy = getSideCopyEntry(lane, headIdx, 'Q');
                 if (qSideCopy && qSideCopy.vec) {
                     ctx.animateVectorMatrixPassThrough(
                         qSideCopy.vec,
@@ -86,7 +87,7 @@ export class PassThroughAnimator {
                 }
 
                 // V side copy
-                const vSideCopy = lane.sideCopies.find(sc => sc.headIndex === headIdx && sc.type === 'V');
+                const vSideCopy = getSideCopyEntry(lane, headIdx, 'V');
                 if (vSideCopy && vSideCopy.vec) {
                     ctx.animateVectorMatrixPassThrough(
                         vSideCopy.vec,

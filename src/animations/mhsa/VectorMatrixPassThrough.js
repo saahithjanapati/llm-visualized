@@ -10,6 +10,7 @@ import { MHSA_PASS_THROUGH_BRIGHTEN_RATIO, MHSA_PASS_THROUGH_DIM_RATIO, MHSA_MAT
 import { buildMonochromeOptions, mapValueToMonochrome } from '../../utils/colors.js';
 import { buildActivationData, applyActivationDataToVector } from '../../utils/activationMetadata.js';
 import { MHA_VALUE_SPECTRUM_COLOR } from '../LayerAnimationConstants.js';
+import { getSideCopyEntry, setSideCopyEntry } from './laneIndex.js';
 
 const _trailScratch = new THREE.Vector3();
 
@@ -213,9 +214,10 @@ export function animateVectorMatrixPassThrough(
                     const pl = vector.userData.parentLane;
                     const hIdx = vector.userData.headIndex;
                     if (pl && Array.isArray(pl.sideCopies) && typeof hIdx === 'number') {
-                        const entry = pl.sideCopies.find(sc => sc && sc.headIndex === hIdx && sc.type === vectorCategory);
+                        const entry = getSideCopyEntry(pl, hIdx, vectorCategory);
                         if (entry) {
                             entry.vec = vector;
+                            setSideCopyEntry(pl, hIdx, vectorCategory, entry);
                         }
                     }
                 }

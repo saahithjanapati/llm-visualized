@@ -850,6 +850,25 @@ export class CoreEngine {
             } catch (_) { /* non-fatal */ }
         }
 
+        // Pass 1.25: Attention-sphere instanced mesh (per-instance activation data)
+        for (const hit of intersects) {
+            const obj = hit.object;
+            if (!obj || !obj.isInstancedMesh || typeof hit.instanceId !== 'number') continue;
+            if (!obj.userData || !obj.userData._attentionSphereInstanced) continue;
+            const labels = obj.userData.instanceLabels;
+            const entries = obj.userData.instanceEntries;
+            const label = Array.isArray(labels) ? labels[hit.instanceId] : 'Attention Score';
+            const info = Array.isArray(entries) ? entries[hit.instanceId] : null;
+            if (label || info) {
+                return {
+                    label: label || 'Attention Score',
+                    hit,
+                    info,
+                    kind: 'attentionSphere'
+                };
+            }
+        }
+
         // Pass 1.5: Instance-specific labels for other instanced meshes (e.g. top logit bars)
         for (const hit of intersects) {
             const obj = hit.object;

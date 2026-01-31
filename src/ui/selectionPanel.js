@@ -71,6 +71,7 @@ const ATTENTION_PREVIEW_MAX_CELL = 24;
 const ATTENTION_PREVIEW_GAP = 4;
 const ATTENTION_PREVIEW_TRIANGLE = 'lower';
 const ATTENTION_PREVIEW_GRID_GAP = 8; // matches .detail-attention-grid column gap in CSS
+const ATTENTION_PRE_COLOR_CLAMP = 5;
 const SPACE_TOKEN_DISPLAY = '" "';
 
 const TOKEN_CHIP_STYLE = {
@@ -167,6 +168,20 @@ function colorToCss(color) {
     if (!color) return 'transparent';
     const target = color.isColor ? color : new THREE.Color(color);
     return `#${target.getHexString()}`;
+}
+
+function buildSpectrumLegendGradient({ clampMax, steps = 13 } = {}) {
+    const safeClamp = Number.isFinite(clampMax) ? Math.max(1e-6, Math.abs(clampMax)) : 1;
+    const safeSteps = Math.max(3, Math.min(41, Math.floor(steps)));
+    const stops = [];
+    for (let i = 0; i < safeSteps; i += 1) {
+        const t = safeSteps === 1 ? 0 : i / (safeSteps - 1);
+        const value = THREE.MathUtils.lerp(-safeClamp, safeClamp, t);
+        const color = colorToCss(mapValueToColor(value, { clampMax: safeClamp }));
+        const pct = (t * 100).toFixed(1);
+        stops.push(`${color} ${pct}%`);
+    }
+    return `linear-gradient(90deg, ${stops.join(', ')})`;
 }
 
 function formatTokenLabelForPreview(label) {
@@ -2119,7 +2134,9 @@ class SelectionPanel {
                 }
                 const reveal = shouldRevealAttentionCell(progress, row, col, mode);
                 if (reveal) {
-                    const color = mode === 'post' ? mapValueToGrayscale(value) : mapValueToColor(value);
+                    const color = mode === 'post'
+                        ? mapValueToGrayscale(value)
+                        : mapValueToColor(value, { clampMax: ATTENTION_PRE_COLOR_CLAMP });
                     cell.style.backgroundColor = colorToCss(color);
                     const rowLabel = tokenLabels[row] || '';
                     const colLabel = tokenLabels[col] || '';
@@ -2338,7 +2355,9 @@ class SelectionPanel {
                 } else {
                     const reveal = shouldRevealAttentionCell(progress, row, col, mode);
                     if (reveal) {
-                        const color = mode === 'post' ? mapValueToGrayscale(value) : mapValueToColor(value);
+                        const color = mode === 'post'
+                            ? mapValueToGrayscale(value)
+                            : mapValueToColor(value, { clampMax: ATTENTION_PRE_COLOR_CLAMP });
                         cell.style.backgroundColor = colorToCss(color);
                         cell.title = `${tokenLabels[row]} → ${tokenLabels[col]} (${mode === 'post' ? 'post' : 'pre'}): ${value.toFixed(4)}`;
                         cell.dataset.value = String(value);
@@ -2383,14 +2402,15 @@ class SelectionPanel {
             return;
         }
 
-        const low = colorToCss(mapValueToColor(-2));
-        const mid = colorToCss(mapValueToColor(0));
-        const high = colorToCss(mapValueToColor(2));
-        this.attentionLegend.style.setProperty('--attention-legend-gradient', `linear-gradient(90deg, ${low}, ${mid}, ${high})`);
+        const gradient = buildSpectrumLegendGradient({
+            clampMax: ATTENTION_PRE_COLOR_CLAMP,
+            steps: 15
+        });
+        this.attentionLegend.style.setProperty('--attention-legend-gradient', gradient);
         this.attentionLegend.style.setProperty('--attention-legend-mid-opacity', '1');
         this.attentionLegend.dataset.mid = '0';
-        this.attentionLegendLow.textContent = '-2';
-        this.attentionLegendHigh.textContent = '+2';
+        this.attentionLegendLow.textContent = `-${ATTENTION_PRE_COLOR_CLAMP}`;
+        this.attentionLegendHigh.textContent = `+${ATTENTION_PRE_COLOR_CLAMP}`;
     }
 
     _setAttentionHoverFromCell(cell, { force = false } = {}) {
