@@ -21,7 +21,8 @@ import {
     setPrismAddAnimSpeedMult,
     setSelfAttentionTimeMult,
     VECTOR_LENGTH_PRISM,
-    NUM_VECTOR_LANES
+    NUM_VECTOR_LANES,
+    LAYER_STACK_SPACING_Y
 } from '../utils/constants.js';
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
 import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
@@ -253,6 +254,8 @@ export class LayerPipeline extends EventTarget {
         }
 
         this._updateAutoCameraScaledOffsets(true);
+        const layerSpacingScale = Number.isFinite(this._autoCameraScaleLast) ? this._autoCameraScaleLast : 1.0;
+        const layerStackSpacing = LAYER_STACK_SPACING_Y * layerSpacingScale;
 
         if (this._engine?.controls) {
             this._controlsChangeHandler = () => {
@@ -276,7 +279,8 @@ export class LayerPipeline extends EventTarget {
                 /*onFinished*/ null,
                 isActive,
                 this._activationSource,
-                this._laneCount
+                this._laneCount,
+                layerStackSpacing
             );
 
             // Assign onFinished callback for chaining once layer becomes active

@@ -252,6 +252,9 @@ export const OUTPUT_PROJ_STAGE3_MS = 500;  // final rise after matrix
 export const LN_TO_MHA_GAP = 150;
 export const VERTICAL_GAP_COMPONENTS = LN_TO_MHA_GAP; // Backwards-compat alias
 
+/** Vertical spacing between stacked transformer layers (world units). */
+export const LAYER_STACK_SPACING_Y = 1650;
+
 // Increased horizontal separation between the residual stream (x=0) and
 // branched components (LayerNorms, MHSA, MLP).  A wider gap improves visual
 // clarity when many layers are stacked, and reduces the chance of artefacts

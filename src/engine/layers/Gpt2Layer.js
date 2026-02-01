@@ -29,7 +29,8 @@ import {
     PRISM_ADD_ANIM_BASE_DURATION,
     PRISM_ADD_ANIM_BASE_FLASH_DURATION,
     PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS,
-    PRISM_ADD_ANIM_SPEED_MULT
+    PRISM_ADD_ANIM_SPEED_MULT,
+    LAYER_STACK_SPACING_Y
 } from '../../utils/constants.js';
 import { PrismLayerNormAnimation } from '../../animations/PrismLayerNormAnimation.js';
 import { MHSAAnimation } from '../../animations/MHSAAnimation.js';
@@ -55,7 +56,7 @@ import {
 
 // Slightly reduced spacing between stacked layers for a tighter layout.
 // Keep this just above the per-layer vertical extent so MLP tops don't collide.
-const VERTICAL_SPACING = 1650;
+const DEFAULT_LAYER_STACK_SPACING = LAYER_STACK_SPACING_Y;
 // Reusable scratch vector to avoid per-frame allocations when working with
 // world-space trail coordinates.
 const TMP_WORLD_POS = new THREE.Vector3();
@@ -80,7 +81,7 @@ export default class Gpt2Layer extends BaseLayer {
      * @param {Function} onFinished – Optional callback to invoke when all lanes finish.
      * @param {object} activationSource – Optional capture data source for real activations.
      */
-    constructor(index, random, yOffset = 0, externalLanes = null, onFinished = null, isActive = true, activationSource = null, laneCount = NUM_VECTOR_LANES) {
+    constructor(index, random, yOffset = 0, externalLanes = null, onFinished = null, isActive = true, activationSource = null, laneCount = NUM_VECTOR_LANES, layerSpacing = DEFAULT_LAYER_STACK_SPACING) {
         super(index);
         this.random = random;
         this.yOffset = yOffset;
@@ -89,6 +90,7 @@ export default class Gpt2Layer extends BaseLayer {
         this.isActive = isActive;
         this.activationSource = activationSource || null;
         this._laneCount = Math.max(1, Math.floor(laneCount || NUM_VECTOR_LANES));
+        this._layerStackSpacing = Number.isFinite(layerSpacing) ? layerSpacing : DEFAULT_LAYER_STACK_SPACING;
         this._baseVectorLength = (this.activationSource && typeof this.activationSource.getBaseVectorLength === 'function')
             ? this.activationSource.getBaseVectorLength()
             : VECTOR_LENGTH_PRISM;
@@ -144,7 +146,7 @@ export default class Gpt2Layer extends BaseLayer {
         this._globalScene = scene;
 
         // Offset root vertically for stack layout
-        this.root.position.y = this.index * VERTICAL_SPACING + this.yOffset;
+        this.root.position.y = this.index * this._layerStackSpacing + this.yOffset;
         freezeStaticTransforms(this.root);
 
         this.raycastRoot = new THREE.Group();
