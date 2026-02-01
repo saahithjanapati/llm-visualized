@@ -350,6 +350,7 @@ const TMP_MATRIX = new THREE.Matrix4();
 const TMP_POS = new THREE.Vector3();
 const TMP_QUAT = new THREE.Quaternion();
 const TMP_SCALE = new THREE.Vector3();
+const TMP_CENTER = new THREE.Vector3();
 
 function isWeightMatrixLabel(label) {
     const lower = (label || '').toLowerCase();
@@ -678,6 +679,41 @@ function getObjectBounds(object) {
         bounds.union(TMP_BOX);
     });
     return bounds;
+}
+
+function centerPreviewPivot(object) {
+    if (!object) return;
+    if (object.userData && object.userData.__previewPivotCentered) return;
+    const bounds = getObjectBounds(object);
+    if (bounds.isEmpty()) return;
+    bounds.getCenter(TMP_CENTER);
+    if (object.parent) {
+        object.parent.updateWorldMatrix(true, true);
+        object.parent.worldToLocal(TMP_CENTER);
+    }
+    object.position.sub(TMP_CENTER);
+    if (!object.userData) object.userData = {};
+    object.userData.__previewPivotCentered = true;
+}
+
+function getPreviewLaneCount(object) {
+    if (!object) return 1;
+    let laneCount = 1;
+    object.traverse((child) => {
+        if (!child || !child.isInstancedMesh) return;
+        const count = Number.isFinite(child.count)
+            ? child.count
+            : (child.instanceMatrix?.count ?? 0);
+        if (count > laneCount) laneCount = count;
+    });
+    return laneCount;
+}
+
+function getLaneZoomMultiplier(object) {
+    const laneCount = getPreviewLaneCount(object);
+    if (!Number.isFinite(laneCount) || laneCount <= 1) return 1;
+    const extra = Math.min(0.35, (laneCount - 1) * 0.04);
+    return 1 + extra;
 }
 
 function resolveMetadata(label, kind = null) {
@@ -1708,10 +1744,15 @@ function fitObjectToView(object, camera, options = {}) {
     const scaledMax = Math.max(scaledSize.x, scaledSize.y, scaledSize.z);
     const vFov = THREE.MathUtils.degToRad(camera.fov);
     const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
-    const distY = (scaledSize.y / 2) / Math.tan(vFov / 2);
-    const distX = (scaledSize.x / 2) / Math.tan(hFov / 2);
-    const depthOffset = scaledSize.z * 0.5;
-    const distance = (Math.max(distX, distY) + depthOffset) * PREVIEW_BASE_DISTANCE_MULT * distanceMult;
+    const halfX = scaledSize.x * 0.5;
+    const halfY = scaledSize.y * 0.5;
+    const halfZ = scaledSize.z * 0.5;
+    const tilt = Math.abs(PREVIEW_BASE_TILT_X);
+    const verticalHalf = Math.abs(halfY * Math.cos(tilt)) + Math.abs(halfZ * Math.sin(tilt));
+    const horizontalHalf = Math.hypot(halfX, halfZ);
+    const distY = verticalHalf / Math.tan(vFov / 2);
+    const distX = horizontalHalf / Math.tan(hFov / 2);
+    const distance = Math.max(distX, distY) * PREVIEW_BASE_DISTANCE_MULT * distanceMult;
 
     camera.near = Math.max(0.1, distance / 50);
     camera.far = Math.max(distance * 20, distance + scaledMax * 4);
@@ -2350,7 +2391,10 @@ class SelectionPanel {
         for (let i = 0; i < count; i += 1) {
             const topToken = document.createElement('div');
             topToken.className = 'attention-token attention-token-top';
-            topToken.textContent = tokenLabels[i];
+            const topLabel = document.createElement('span');
+            topLabel.className = 'attention-token-top-label';
+            topLabel.textContent = tokenLabels[i];
+            topToken.appendChild(topLabel);
             topToken.title = tokenLabels[i];
             topFrag.appendChild(topToken);
             this._attentionTokenElsTop.push(topToken);
@@ -2634,11 +2678,10 @@ class SelectionPanel {
         }
 
         const rotationSpeedMult = Number.isFinite(this._rotationSpeedMult) ? this._rotationSpeedMult : 1;
-        const rotationStep = PREVIEW_ROTATION_SPEED * rotationSpeedMult * (deltaMs / 16.6667);
+        const clampedDelta = Math.min(Math.max(deltaMs, 0), 33.3334);
+        const rotationStep = PREVIEW_ROTATION_SPEED * rotationSpeedMult * (clampedDelta / 16.6667);
         this.currentPreview.rotation.y += rotationStep;
-        const timeSeconds = now * 0.001;
-        this.currentPreview.rotation.x = PREVIEW_BASE_TILT_X
-            + Math.sin(timeSeconds * PREVIEW_TILT_OSC_SPEED) * PREVIEW_TILT_AMPLITUDE;
+        this.currentPreview.rotation.x = PREVIEW_BASE_TILT_X;
         this.currentPreview.rotation.z = 0;
         this._updateDynamicAttentionProgress();
         this.renderer.render(this.scene, this.camera);
@@ -2743,7 +2786,12 @@ class SelectionPanel {
         }
 
         const preview = resolvePreviewObject(label, selection);
-        this.currentPreview = preview.object;
+        const previewRoot = new THREE.Group();
+        if (preview?.object) {
+            previewRoot.add(preview.object);
+            centerPreviewPivot(preview.object);
+        }
+        this.currentPreview = previewRoot;
         this.currentDispose = preview.dispose;
         this.currentAnimator = preview.animate || null;
         const desiredRotation = new THREE.Euler(PREVIEW_BASE_TILT_X, PREVIEW_BASE_ROTATION_Y, 0);
@@ -2752,23 +2800,25 @@ class SelectionPanel {
         }
         this._lastFrameTime = performance.now();
         const isVectorPreview = isLikelyVectorSelection(label, selection);
-        const isQkvPreview = isQkvMatrixLabel(label);
         const isOutputProjPreview = label.toLowerCase().includes('output projection matrix');
-        this._rotationSpeedMult = isQkvPreview ? 1.6 : 1;
         const paddingMultiplier = isVectorPreview
             ? PREVIEW_VECTOR_PADDING_MULT
-            : (isQkvPreview ? 0.75 : (isOutputProjPreview ? 0.85 : 1));
+            : (isQkvMatrixLabel(label) ? 0.75 : (isOutputProjPreview ? 0.85 : 1));
         const distanceMultiplier = isVectorPreview
             ? PREVIEW_VECTOR_DISTANCE_MULT
-            : (isQkvPreview ? 0.85 : (isOutputProjPreview ? 0.8 : 1));
-        this._lastFitOptions = { paddingMultiplier, distanceMultiplier };
+            : (isQkvMatrixLabel(label) ? 0.85 : (isOutputProjPreview ? 0.8 : 1));
+        const laneZoom = getLaneZoomMultiplier(this.currentPreview);
+        const finalPadding = paddingMultiplier * laneZoom;
+        const finalDistance = distanceMultiplier * laneZoom;
+        this._rotationSpeedMult = 1;
+        this._lastFitOptions = { paddingMultiplier: finalPadding, distanceMultiplier: finalDistance };
         if (!this.isOpen) {
             this._pendingReveal = true;
             if (this.canvas) this.canvas.style.opacity = '0';
         } else {
             this._pendingReveal = false;
             if (this.canvas) this.canvas.style.opacity = '1';
-            fitObjectToView(this.currentPreview, this.camera, { paddingMultiplier, distanceMultiplier });
+            fitObjectToView(this.currentPreview, this.camera, { paddingMultiplier: finalPadding, distanceMultiplier: finalDistance });
             this._noteFit();
         }
         if (this.currentPreview?.rotation) {

@@ -646,6 +646,13 @@ button { touch-action: manipulation; }
     font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
     line-height: 1;
     white-space: nowrap;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+}
+.attention-axis-label-text {
+    display: inline-block;
 }
 .attention-axis-label--top {
     grid-column: 3;
@@ -659,12 +666,17 @@ button { touch-action: manipulation; }
     grid-column: 1;
     grid-row: 3;
     justify-self: end;
-    align-self: center;
+    align-self: stretch;
     padding-right: 4px;
+}
+.attention-axis-label--left .attention-axis-label-text {
     writing-mode: vertical-rl;
     text-orientation: mixed;
-    transform: rotate(180deg);
-    transform-origin: center;
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%) rotate(180deg);
+    transform-origin: 50% 50%;
 }
 .attention-tokens {
     display: grid;
@@ -717,13 +729,20 @@ button { touch-action: manipulation; }
     text-align: right;
 }
 .attention-token-top {
-    writing-mode: vertical-rl;
-    text-orientation: mixed;
-    transform: rotate(180deg);
-    transform-origin: center center;
+    position: relative;
     text-align: center;
     align-items: center;
     justify-content: center;
+}
+.attention-token-top-label {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%) rotate(180deg);
+    transform-origin: 50% 50%;
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    white-space: nowrap;
 }
 .attention-token.is-highlighted {
     color: #ffffff;
