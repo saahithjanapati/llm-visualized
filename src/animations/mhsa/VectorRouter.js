@@ -20,6 +20,7 @@ const _scratchSpawn = new THREE.Vector3();
 
 // Add configurable opacity for trails specific to vector copies under Q/K/V to reduce visual prominence
 const FAINT_TRAIL_OPACITY = 0.08;
+const PRE_QKV_RESIDUAL_LABEL = 'Post-layernorm residual';
 
 
 // Read live binding each use to reflect UI changes at runtime
@@ -180,9 +181,8 @@ export class VectorRouter {
                                 : null;
                             if (Number.isFinite(parentLayerIndex)) qVec.group.userData.layerIndex = parentLayerIndex;
                             try {
-                                const lblQ = 'Query Vector';
-                                qVec.group.userData.label = lblQ;
-                                if (qVec.mesh) qVec.mesh.userData = { ...(qVec.mesh.userData||{}), label: lblQ };
+                                qVec.group.userData.label = PRE_QKV_RESIDUAL_LABEL;
+                                if (qVec.mesh) qVec.mesh.userData = { ...(qVec.mesh.userData||{}), label: PRE_QKV_RESIDUAL_LABEL };
                             } catch (_) {}
                             const vVec = this._createVectorCopy(centerVec, _scratchSpawn.copy(centerVec.group.position), 30);
                             if (typeof vVec.copyColorsFrom === 'function') {
@@ -200,9 +200,8 @@ export class VectorRouter {
                                 : null;
                             if (Number.isFinite(parentLayerIndexV)) vVec.group.userData.layerIndex = parentLayerIndexV;
                             try {
-                                const lblV = 'Value Vector';
-                                vVec.group.userData.label = lblV;
-                                if (vVec.mesh) vVec.mesh.userData = { ...(vVec.mesh.userData||{}), label: lblV };
+                                vVec.group.userData.label = PRE_QKV_RESIDUAL_LABEL;
+                                if (vVec.mesh) vVec.mesh.userData = { ...(vVec.mesh.userData||{}), label: PRE_QKV_RESIDUAL_LABEL };
                             } catch (_) {}
                             lane.sideCopies = lane.sideCopies || [];
                             const qMatrixForHead = this.mhaVisualizations[hIdx * 3];
@@ -284,9 +283,8 @@ export class VectorRouter {
         if (Number.isFinite(parentLayerIndex)) upVec.group.userData.layerIndex = parentLayerIndex;
 
         try {
-            const lbl = 'Key Vector';
-            upVec.group.userData.label = lbl;
-            if (upVec.mesh) upVec.mesh.userData = { ...(upVec.mesh.userData || {}), label: lbl };
+            upVec.group.userData.label = PRE_QKV_RESIDUAL_LABEL;
+            if (upVec.mesh) upVec.mesh.userData = { ...(upVec.mesh.userData || {}), label: PRE_QKV_RESIDUAL_LABEL };
         } catch (_) {}
 
         lane.upwardCopies[targetHeadIdx] = upVec;

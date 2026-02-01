@@ -41,6 +41,10 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     const WO = colorize(woColor, 'W^O');
     const WUp = colorize(mlpUpColor, 'W_{\\text{up}}');
     const WDown = colorize(mlpDownColor, 'W_{\\text{down}}');
+    const topEmbedBaseColor = new THREE.Color(0x000000);
+    const topEmbedTargetColor = new THREE.Color(MHA_FINAL_Q_COLOR);
+    const topEmbedWorkingColor = new THREE.Color();
+    const topEmbedMaxEmissive = 0.05;
 
     const EQ = {
         ln1: String.raw`x_{\text{ln}} = \frac{x - \mu}{\sqrt{\sigma^2 + \epsilon}} \odot \gamma + \beta`,
@@ -158,21 +162,37 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     }
 
     function checkTopEmbeddingActivation() {
-        if (appState.topEmbedActivated) return;
         const lastLayer = pipeline._layers[NUM_LAYERS - 1];
         if (!lastLayer || !appState.vocabTopRef) return;
-        const stopY = lastLayer.__topEmbedStopYLocal;
-        if (typeof stopY !== 'number') return;
+        const entryY = Number.isFinite(lastLayer.__topEmbedEntryYLocal)
+            ? lastLayer.__topEmbedEntryYLocal
+            : lastLayer.__topEmbedStopYLocal;
+        if (typeof entryY !== 'number') return;
+        const exitY = Number.isFinite(lastLayer.__topEmbedExitYLocal)
+            ? lastLayer.__topEmbedExitYLocal
+            : entryY;
         const lanes = Array.isArray(lastLayer.lanes) ? lastLayer.lanes : [];
+        let highestY = -Infinity;
         for (const lane of lanes) {
             const v = lane && lane.originalVec;
-            if (v && v.group && v.group.position.y >= stopY - 0.01) {
-                const headBlue = new THREE.Color(MHA_FINAL_Q_COLOR);
-                appState.vocabTopRef.setColor(headBlue);
-                appState.vocabTopRef.setMaterialProperties({ emissiveIntensity: 0.05 });
-                appState.topEmbedActivated = true;
-                break;
-            }
+            if (!v || !v.group) continue;
+            const y = v.group.position.y;
+            if (Number.isFinite(y) && y > highestY) highestY = y;
+        }
+        if (!Number.isFinite(highestY)) return;
+        let t = 0;
+        if (highestY >= entryY) {
+            const denom = Math.max(1e-6, exitY - entryY);
+            t = denom > 0 ? Math.min(1, (highestY - entryY) / denom) : 1;
+        }
+        const eased = t * t * (3 - 2 * t);
+        if (!appState.topEmbedActivated || eased >= 1) {
+            topEmbedWorkingColor.copy(topEmbedBaseColor).lerp(topEmbedTargetColor, eased);
+            appState.vocabTopRef.setColor(topEmbedWorkingColor);
+            appState.vocabTopRef.setMaterialProperties({ emissiveIntensity: topEmbedMaxEmissive * eased });
+        }
+        if (eased >= 1) {
+            appState.topEmbedActivated = true;
         }
     }
 

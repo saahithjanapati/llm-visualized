@@ -674,6 +674,8 @@ MHSAAnimation.ENABLE_SELF_ATTENTION = true;
 const gptCanvas = document.getElementById('gptCanvas');
 const camPos    = new THREE.Vector3(0, 11000, 16000);
 const camTarget = new THREE.Vector3(0, 9000, 0);
+const skipToEndCamPos = camPos.clone().add(new THREE.Vector3(0, 600, 36000));
+const skipToEndCamTarget = camTarget.clone().add(new THREE.Vector3(0, 5200, 0));
 const targetClampRadius = Math.max(8000, NUM_LAYERS * 900);
 const autoCameraHeadBias = 0.0;
 const followDefaultCameraOffset = new THREE.Vector3(-1215.87, 465.86, 3350.33);
@@ -692,6 +694,8 @@ const followTravelMobileTargetOffset = new THREE.Vector3(2339.23, -550.29, 738.4
 const pipeline = new LayerPipeline(gptCanvas, NUM_LAYERS, {
     cameraPosition: camPos,
     cameraTarget: camTarget,
+    skipToEndCameraPosition: skipToEndCamPos,
+    skipToEndCameraTarget: skipToEndCamTarget,
     targetClampCenter: camTarget,
     targetClampRadius,
     autoCameraHeadBias,

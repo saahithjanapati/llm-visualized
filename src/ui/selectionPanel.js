@@ -241,6 +241,7 @@ function isSelfAttentionSelection(label, selectionInfo) {
     const lower = (label || '').toLowerCase();
     if (isAttentionScoreSelection(label, selectionInfo)) return true;
     if (selectionInfo?.kind === 'mergedKV') return true;
+    if (lower.includes('post-layernorm residual') || lower.includes('post layernorm residual')) return true;
     if (lower.includes('query vector') || lower.includes('key vector') || lower.includes('value vector')) return true;
     if (lower.includes('query weight matrix') || lower.includes('key weight matrix') || lower.includes('value weight matrix')) return true;
     if (lower.includes('merged key vectors') || lower.includes('merged value vectors')) return true;
@@ -809,6 +810,9 @@ function resolveDescription(label, kind = null, selectionInfo = null) {
     }
     if (lower.includes('merged value vectors')) {
         return 'These are the value vectors from all heads stacked together. They hold the content that will be mixed by attention weights. The weighted mix becomes the attended representation.';
+    }
+    if (lower.includes('post-layernorm residual') || lower.includes('post layernorm residual')) {
+        return 'This is the residual stream vector immediately after LayerNorm, before it is projected into Q/K/V space. It is copied under each head so attention can compute queries, keys, and values.';
     }
     if (lower.includes('query vector')) {
         return 'This is a query vector for a specific token. It encodes what the token is looking for in the rest of the sequence. It is used to score all key vectors.';

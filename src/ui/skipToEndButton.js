@@ -44,7 +44,7 @@ export function initSkipToEndButton(pipeline) {
             pipeline.setAutoCameraFollow(false, { immediate: true });
         }
         if (pipeline?.focusOverview) {
-            pipeline.focusOverview();
+            pipeline.focusOverview({ immediate: false, durationMs: 1400 });
         }
         try {
             if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {

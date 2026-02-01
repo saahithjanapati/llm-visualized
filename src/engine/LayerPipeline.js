@@ -166,6 +166,8 @@ export class LayerPipeline extends EventTarget {
             ? document.getElementById('cameraOffsetOverlay')
             : null;
         this._controlsChangeHandler = null;
+        this._overviewCameraTween = null;
+        this._overviewTargetTween = null;
         this._onAutoCameraProgress = () => { this._maybeAutoCameraFocus(); };
         this._cameraOverlayRaf = null;
         this.addEventListener('progress', this._onAutoCameraProgress);
@@ -254,8 +256,9 @@ export class LayerPipeline extends EventTarget {
         }
 
         this._updateAutoCameraScaledOffsets(true);
-        const layerSpacingScale = Number.isFinite(this._autoCameraScaleLast) ? this._autoCameraScaleLast : 1.0;
-        const layerStackSpacing = LAYER_STACK_SPACING_Y * layerSpacingScale;
+        // Keep layer spacing consistent across devices; auto-camera scaling is
+        // for view offsets only and shouldn't stretch the stack.
+        const layerStackSpacing = LAYER_STACK_SPACING_Y;
 
         if (this._engine?.controls) {
             this._controlsChangeHandler = () => {
@@ -393,17 +396,53 @@ export class LayerPipeline extends EventTarget {
         return !!this._autoCameraFollow;
     }
 
-    /** Snap the camera to the overview framing (typically the initial tower view). */
-    focusOverview() {
+    /** Move the camera to the overview framing (typically the initial tower view). */
+    focusOverview({ immediate = true, durationMs = 1400 } = {}) {
         const engine = this._engine;
         const camera = engine?.camera;
         const controls = engine?.controls;
         if (!camera || !controls || !controls.target) return;
         if (!this._overviewCameraPosition || !this._overviewCameraTarget) return;
-        camera.position.copy(this._overviewCameraPosition);
-        controls.target.copy(this._overviewCameraTarget);
-        if (typeof controls.update === 'function') controls.update();
-        engine?.notifyCameraUpdated?.();
+        if (immediate || typeof TWEEN === 'undefined' || !TWEEN?.Tween) {
+            camera.position.copy(this._overviewCameraPosition);
+            controls.target.copy(this._overviewCameraTarget);
+            if (typeof controls.update === 'function') controls.update();
+            engine?.notifyCameraUpdated?.();
+            return;
+        }
+
+        const duration = Math.max(200, Number.isFinite(durationMs) ? durationMs : 1400);
+        const easing = TWEEN?.Easing?.Quadratic?.InOut;
+
+        if (this._overviewCameraTween && typeof this._overviewCameraTween.stop === 'function') {
+            this._overviewCameraTween.stop();
+        }
+        if (this._overviewTargetTween && typeof this._overviewTargetTween.stop === 'function') {
+            this._overviewTargetTween.stop();
+        }
+
+        this._overviewCameraTween = new TWEEN.Tween(camera.position)
+            .to({
+                x: this._overviewCameraPosition.x,
+                y: this._overviewCameraPosition.y,
+                z: this._overviewCameraPosition.z
+            }, duration)
+            .easing(typeof easing === 'function' ? easing : TWEEN.Easing.Quadratic.InOut)
+            .onUpdate(() => engine?.notifyCameraUpdated?.())
+            .start();
+
+        this._overviewTargetTween = new TWEEN.Tween(controls.target)
+            .to({
+                x: this._overviewCameraTarget.x,
+                y: this._overviewCameraTarget.y,
+                z: this._overviewCameraTarget.z
+            }, duration)
+            .easing(typeof easing === 'function' ? easing : TWEEN.Easing.Quadratic.InOut)
+            .onUpdate(() => {
+                if (typeof controls.update === 'function') controls.update();
+                engine?.notifyCameraUpdated?.();
+            })
+            .start();
     }
 
     /** Get current follow reference position (residual stream center). */
@@ -514,7 +553,9 @@ export class LayerPipeline extends EventTarget {
         if (!allLayersDone) return false;
 
         const lastLayer = this._layers[this._numLayers - 1];
-        const stopY = lastLayer && lastLayer.__topEmbedStopYLocal;
+        const stopY = lastLayer && (Number.isFinite(lastLayer.__topEmbedExitYLocal)
+            ? lastLayer.__topEmbedExitYLocal
+            : lastLayer.__topEmbedStopYLocal);
         if (Number.isFinite(stopY)) {
             const lanes = Array.isArray(lastLayer.lanes) ? lastLayer.lanes : [];
             if (!lanes.length) return false;
@@ -690,6 +731,9 @@ export class LayerPipeline extends EventTarget {
      */
     _calculateTopEmbeddingTargetY(lastLayer) {
         let targetYLocal = null;
+        let exitYLocal = null;
+        const embedHeight = EMBEDDING_MATRIX_PARAMS_VOCAB.height;
+        const embedInset = 5;
         try {
             const scene = this._engine && this._engine.scene;
             let topEmbedObj = null;
@@ -704,25 +748,36 @@ export class LayerPipeline extends EventTarget {
             if (topEmbedObj) {
                 const centerWorld = new THREE.Vector3();
                 topEmbedObj.getWorldPosition(centerWorld);
-                const stopWorldY = centerWorld.y - EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2 + 5;
-                const localVec = new THREE.Vector3(0, stopWorldY, 0);
-                lastLayer.root.worldToLocal(localVec);
-                targetYLocal = localVec.y;
+                const entryWorldY = centerWorld.y - embedHeight / 2 + embedInset;
+                const exitWorldY = centerWorld.y + embedHeight / 2 - embedInset;
+                const entryLocalVec = new THREE.Vector3(0, entryWorldY, 0);
+                lastLayer.root.worldToLocal(entryLocalVec);
+                targetYLocal = entryLocalVec.y;
+                const exitLocalVec = new THREE.Vector3(0, exitWorldY, 0);
+                lastLayer.root.worldToLocal(exitLocalVec);
+                exitYLocal = exitLocalVec.y;
             }
         } catch (_) { /* fallback to formula below */ }
 
         if (targetYLocal == null) {
             const towerTopYLocal = lastLayer.mlpDown.group.position.y + MLP_MATRIX_PARAMS_DOWN.height / 2;
-            const topVocabCenterYLocal = towerTopYLocal + TOP_EMBED_Y_GAP_ABOVE_TOWER + EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2 + TOP_EMBED_Y_ADJUST;
-            targetYLocal = topVocabCenterYLocal - EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2 + 5;
+            const topVocabCenterYLocal = towerTopYLocal + TOP_EMBED_Y_GAP_ABOVE_TOWER + embedHeight / 2 + TOP_EMBED_Y_ADJUST;
+            targetYLocal = topVocabCenterYLocal - embedHeight / 2 + embedInset;
+            exitYLocal = topVocabCenterYLocal + embedHeight / 2 - embedInset;
         }
 
         try {
+            if (Number.isFinite(exitYLocal) && Number.isFinite(targetYLocal) && exitYLocal < targetYLocal) {
+                exitYLocal = targetYLocal;
+            }
+            const finalStopY = Number.isFinite(exitYLocal) ? exitYLocal : targetYLocal;
             if (lastLayer.mhsaAnimation) {
-                lastLayer.mhsaAnimation.finalOriginalY = targetYLocal;
-                lastLayer.mhsaAnimation.topEmbeddingStopY = targetYLocal;
+                lastLayer.mhsaAnimation.finalOriginalY = finalStopY;
+                lastLayer.mhsaAnimation.topEmbeddingStopY = finalStopY;
                 lastLayer.mhsaAnimation.postSplitRiseSpeed = ANIM_RISE_SPEED_ORIGINAL;
             }
+            lastLayer.__topEmbedEntryYLocal = targetYLocal;
+            lastLayer.__topEmbedExitYLocal = Number.isFinite(exitYLocal) ? exitYLocal : targetYLocal;
             lastLayer.__topEmbedStopYLocal = targetYLocal;
         } catch (_) { /* no-op */ }
 
@@ -783,6 +838,30 @@ export class LayerPipeline extends EventTarget {
      * @param {{lnTopGroup: THREE.Object3D, lnCenterY: number, lnBottomY: number}|null} lnInfo
      */
     _animateResidualVectors(lastLayer, targetYLocal, lnInfo) {
+        const entryYLocal = targetYLocal;
+        const exitYLocal = Number.isFinite(lastLayer?.__topEmbedExitYLocal)
+            ? lastLayer.__topEmbedExitYLocal
+            : targetYLocal;
+        const startEmbedTraverse = (resVec, updateTrailFn = null) => {
+            if (!resVec || !resVec.group) return;
+            if (!Number.isFinite(exitYLocal) || exitYLocal <= entryYLocal + 0.01) return;
+            const dist = Math.max(0, exitYLocal - resVec.group.position.y);
+            if (dist <= 0.01) return;
+            const durMs = (dist / (ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT)) * 1000;
+            new TWEEN.Tween(resVec.group.position)
+                .to({ y: exitYLocal }, Math.max(100, durMs))
+                .easing(TWEEN.Easing.Quadratic.InOut)
+                .onUpdate(() => {
+                    if (typeof updateTrailFn === 'function') updateTrailFn(resVec);
+                    this.dispatchEvent(new Event('progress'));
+                })
+                .onComplete(() => {
+                    if (typeof updateTrailFn === 'function') updateTrailFn(resVec);
+                    this.dispatchEvent(new Event('progress'));
+                })
+                .start();
+        };
+
         if (lnInfo && lnInfo.lnTopGroup) {
             if (lastLayer.mhsaAnimation) {
                 lastLayer.mhsaAnimation.suppressResidualRise = true;
@@ -945,10 +1024,10 @@ export class LayerPipeline extends EventTarget {
                 }
 
                 const startFinalRise = (resVec) => {
-                    const riseDist = Math.max(0, targetYLocal - resVec.group.position.y);
+                    const riseDist = Math.max(0, entryYLocal - resVec.group.position.y);
                     const durMs = (riseDist / (ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT)) * 1000;
                     new TWEEN.Tween(resVec.group.position)
-                        .to({ y: targetYLocal }, Math.max(100, durMs))
+                        .to({ y: entryYLocal }, Math.max(100, durMs))
                         .easing(TWEEN.Easing.Quadratic.InOut)
                         .onUpdate(() => {
                             updateTopLnColor(resVec.group.position.y);
@@ -956,7 +1035,7 @@ export class LayerPipeline extends EventTarget {
                             this.dispatchEvent(new Event('progress'));
                         })
                         .onComplete(() => {
-                            updateTopLnColor(targetYLocal + exitTransitionRange);
+                            updateTopLnColor(entryYLocal + exitTransitionRange);
                             updateTrailPosition(resVec);
                             if (lane && lane.__topLnStopRise) {
                                 delete lane.stopRise;
@@ -964,6 +1043,7 @@ export class LayerPipeline extends EventTarget {
                                 delete lane.__topLnStopRise;
                             }
                             this.dispatchEvent(new Event('progress'));
+                            startEmbedTraverse(resVec, updateTrailPosition);
                         })
                         .start();
                 };
@@ -1169,16 +1249,22 @@ export class LayerPipeline extends EventTarget {
             if (!vec || !vec.group) return;
             const startY = vec.group.position.y;
             if (typeof startY !== 'number' || !isFinite(startY)) return;
-            if (startY >= targetYLocal - 0.01) return;
+            if (startY >= entryYLocal - 0.01) {
+                startEmbedTraverse(vec);
+                return;
+            }
 
-            const riseDist = Math.max(0, targetYLocal - startY);
+            const riseDist = Math.max(0, entryYLocal - startY);
             const durMs = (riseDist / (ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT)) * 1000;
 
             new TWEEN.Tween(vec.group.position)
-                .to({ y: targetYLocal }, Math.max(100, durMs))
+                .to({ y: entryYLocal }, Math.max(100, durMs))
                 .easing(TWEEN.Easing.Quadratic.InOut)
                 .onUpdate(() => this.dispatchEvent(new Event('progress')))
-                .onComplete(() => this.dispatchEvent(new Event('progress')))
+                .onComplete(() => {
+                    this.dispatchEvent(new Event('progress'));
+                    startEmbedTraverse(vec);
+                })
                 .start();
         });
     }
