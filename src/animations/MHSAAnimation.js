@@ -875,53 +875,57 @@ export class MHSAAnimation {
 
 
         // Residual trail tracking during addition: follow the centre prism in world space.
-        lanes.forEach(lane => {
-            if (!lane || !lane.originalVec) return;
+        // Skip when a higher-level animation (e.g. top LayerNorm) has taken over
+        // residual control to avoid double-updating the same trail.
+        if (!this.suppressResidualRise) {
+            lanes.forEach(lane => {
+                if (!lane || !lane.originalVec) return;
 
-            // Only follow while the addition animation is active (stopRise flag present)
-            if (!lane.stopRise) return;
+                // Only follow while the addition animation is active (stopRise flag present)
+                if (!lane.stopRise) return;
 
-            try {
-                // Compute world position of the centre prism for the ORIGINAL (source) vector
-                // so the residual trail extends continuously as prisms rise during addition.
-                const centreIdx = Math.floor(
-                    ((lane.originalVec && lane.originalVec.instanceCount) ? lane.originalVec.instanceCount : this.vectorPrismCount) / 2
-                );
-                const instMat = _tmpMatrix;
-                lane.originalVec.mesh.getMatrixAt(centreIdx, instMat);
-                const wPos = _tmpWorld2;
-                wPos.setFromMatrixPosition(instMat);
-                wPos.applyMatrix4(lane.originalVec.group.matrixWorld);
+                try {
+                    // Compute world position of the centre prism for the ORIGINAL (source) vector
+                    // so the residual trail extends continuously as prisms rise during addition.
+                    const centreIdx = Math.floor(
+                        ((lane.originalVec && lane.originalVec.instanceCount) ? lane.originalVec.instanceCount : this.vectorPrismCount) / 2
+                    );
+                    const instMat = _tmpMatrix;
+                    lane.originalVec.mesh.getMatrixAt(centreIdx, instMat);
+                    const wPos = _tmpWorld2;
+                    wPos.setFromMatrixPosition(instMat);
+                    wPos.applyMatrix4(lane.originalVec.group.matrixWorld);
 
-                // Skip bogus updates when the centre prism is hidden far below the scene
-                // during/addition (it is moved to HIDE_INSTANCE_Y_OFFSET to disappear).
-                const hideThreshold = HIDE_INSTANCE_Y_OFFSET / 10; // e.g. -5000 for -50000 offset
-                if (wPos.y < hideThreshold) return;
+                    // Skip bogus updates when the centre prism is hidden far below the scene
+                    // during/addition (it is moved to HIDE_INSTANCE_Y_OFFSET to disappear).
+                    const hideThreshold = HIDE_INSTANCE_Y_OFFSET / 10; // e.g. -5000 for -50000 offset
+                    if (wPos.y < hideThreshold) return;
 
-                // Update trail all the way to the top vector so there is no visible gap.
-                // Prefer the dedicated world-space residual trail reference carried by the lane.
-                const residualTrail = (lane.originalTrail)
-                    || (lane.originalVec && lane.originalVec.userData && lane.originalVec.userData.trail)
-                    || (lane.postAdditionVec && lane.postAdditionVec.userData && lane.postAdditionVec.userData.trail);
-                if (residualTrail && typeof residualTrail.update === 'function') {
-                    // Guard against accidental double-write in the same frame and enforce monotonic Y extension
-                    // Allow immediate extension from the centre prism upward when addition begins.
-                    if (typeof lane.__residualMaxY !== 'number') lane.__residualMaxY = wPos.y - 0.001;
-                    if (wPos.y >= lane.__residualMaxY) {
-                        const anchor = lane.__residualTrailAnchor;
-                        if (anchor) {
-                            if (Number.isFinite(anchor.x)) wPos.x = anchor.x;
-                            if (Number.isFinite(anchor.z)) wPos.z = anchor.z;
+                    // Update trail all the way to the top vector so there is no visible gap.
+                    // Prefer the dedicated world-space residual trail reference carried by the lane.
+                    const residualTrail = (lane.originalTrail)
+                        || (lane.originalVec && lane.originalVec.userData && lane.originalVec.userData.trail)
+                        || (lane.postAdditionVec && lane.postAdditionVec.userData && lane.postAdditionVec.userData.trail);
+                    if (residualTrail && typeof residualTrail.update === 'function') {
+                        // Guard against accidental double-write in the same frame and enforce monotonic Y extension
+                        // Allow immediate extension from the centre prism upward when addition begins.
+                        if (typeof lane.__residualMaxY !== 'number') lane.__residualMaxY = wPos.y - 0.001;
+                        if (wPos.y >= lane.__residualMaxY) {
+                            const anchor = lane.__residualTrailAnchor;
+                            if (anchor) {
+                                if (Number.isFinite(anchor.x)) wPos.x = anchor.x;
+                                if (Number.isFinite(anchor.z)) wPos.z = anchor.z;
+                            }
+                            if (lane.__lastResidualTrailFrame !== this._frameCounter) {
+                                residualTrail.update(wPos);
+                                lane.__lastResidualTrailFrame = this._frameCounter;
+                            }
+                            lane.__residualMaxY = wPos.y;
                         }
-                        if (lane.__lastResidualTrailFrame !== this._frameCounter) {
-                            residualTrail.update(wPos);
-                            lane.__lastResidualTrailFrame = this._frameCounter;
-                        }
-                        lane.__residualMaxY = wPos.y;
                     }
-                }
-            } catch (_) { /* defensive */ }
-        });
+                } catch (_) { /* defensive */ }
+            });
+        }
     }
 
     _registerPassThroughJob(job) {

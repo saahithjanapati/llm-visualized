@@ -98,8 +98,8 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     const EQ = {
         qkv_per_head: `${Q} = x_{\\text{ln}} ${WQ} \\, ${K} = x_{\\text{ln}} ${WK} \\, ${V} = x_{\\text{ln}} ${WV}`,
         qkv_packed: `${Q} = x_{\\text{ln}} ${WQ} \\, ${K} = x_{\\text{ln}} ${WK} \\, ${V} = x_{\\text{ln}} ${WV}`,
-        attn: `H_i = \\mathrm{softmax}\\left(\\frac{${Q}_i ${K}_i^\\top}{\\sqrt{d_h}} + M\\right) ${V}_i,\\; i=1\\dots h`,
-        concat_proj: String.raw`\begin{aligned} H &= \mathrm{Concat}(H_1,\dots,H_h) \\ O &= H ${WO} \end{aligned}`,
+        attn: `H_i = \\mathrm{softmax}\\left(\\frac{${Q}_i ${K}_i^\\top}{\\sqrt{d_h}} + M\\right) ${V}_i,\\; i=1\\dots 12`,
+        concat_proj: String.raw`\begin{aligned} H &= \mathrm{Concat}(H_1,\dots,H_{12}) \\ O &= H ${WO} \end{aligned}`,
         resid1: String.raw`u = x + O`,
         mlp: String.raw`\begin{aligned} z &= \mathrm{GELU}(u_{\text{ln}} ${WUp}) \\ \mathrm{MLP}(u_{\text{ln}}) &= z ${WDown} \end{aligned}`,
         resid2: String.raw`x_{\text{out}} = u + \mathrm{MLP}(u_{\text{ln}})`
