@@ -26,6 +26,10 @@ export class PassThroughAnimator {
             if (animationsCompleted >= totalAnimationsToComplete) {
                 console.log('PassThroughAnimator: all pass-through tweens complete');
                 ctx.mhaPassThroughPhase = 'mha_pass_through_complete';
+                if (ctx._skipMatrixColorsLocked && ctx._skipMatrixColorsPending && typeof ctx._applyFinalMatrixColorsImmediate === 'function') {
+                    ctx._applyFinalMatrixColorsImmediate();
+                    ctx._skipMatrixColorsPending = false;
+                }
 
                 const continueAfterSelfAttn = () => {
                     // Temp / perm mode branching identical to legacy implementation
@@ -112,6 +116,10 @@ export class PassThroughAnimator {
         if (totalAnimationsToComplete === 0 && allLanes.length > 0) {
             console.log('PassThroughAnimator: no valid vectors found to animate');
             ctx.mhaPassThroughPhase = 'mha_pass_through_complete';
+            if (ctx._skipMatrixColorsLocked && ctx._skipMatrixColorsPending && typeof ctx._applyFinalMatrixColorsImmediate === 'function') {
+                ctx._applyFinalMatrixColorsImmediate();
+                ctx._skipMatrixColorsPending = false;
+            }
         }
     }
 }

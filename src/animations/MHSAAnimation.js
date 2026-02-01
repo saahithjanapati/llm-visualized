@@ -8,7 +8,7 @@ import { TRAIL_MIN_SEGMENT_DISTANCE } from '../utils/trailConstants.js';
 
 import { buildActivationData, applyActivationDataToVector } from '../utils/activationMetadata.js';
 import { MHSA_MATRIX_INITIAL_RESTING_COLOR, MHSA_BRIGHT_GREEN, MHSA_DARK_TINTED_GREEN, MHSA_BRIGHT_BLUE, MHSA_DARK_TINTED_BLUE, MHSA_BRIGHT_RED, MHSA_DARK_TINTED_RED, MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR, MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW, MHA_OUTPUT_PROJECTION_MATRIX_PARAMS, MHA_OUTPUT_PROJECTION_MATRIX_COLOR, MHA_VALUE_SPECTRUM_COLOR } from './LayerAnimationConstants.js';
-import { INACTIVE_COMPONENT_COLOR, MHSA_DUPLICATE_VECTOR_RISE_SPEED, MHSA_PASS_THROUGH_TOTAL_DURATION_MS, MHSA_RESULT_RISE_OFFSET_Y, MHSA_HEAD_VECTOR_STOP_BELOW, MHA_RESULT_RISE_DURATION_BASE_MS, DECORATIVE_FADE_MS, DECORATIVE_FADE_DELAY_MS, MERGE_TO_ROW_DELAY_AFTER_FADE_MS, HEAD_COLOR_TRANSITION_MS, MERGE_POST_COLOR_TRANSITION_DELAY_MS, MERGE_EXTRA_BUFFER_MS, OUTPUT_PROJ_STAGE1_MS, OUTPUT_PROJ_STAGE2_MS, OUTPUT_PROJ_STAGE3_MS, GLOBAL_ANIM_SPEED_MULT, MHSA_PASS_THROUGH_BRIGHTEN_RATIO, MHSA_PASS_THROUGH_DIM_RATIO, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY } from '../utils/constants.js';
+import { INACTIVE_COMPONENT_COLOR, MHSA_DUPLICATE_VECTOR_RISE_SPEED, MHSA_PASS_THROUGH_TOTAL_DURATION_MS, MHSA_RESULT_RISE_OFFSET_Y, MHSA_HEAD_VECTOR_STOP_BELOW, MHA_RESULT_RISE_DURATION_BASE_MS, DECORATIVE_FADE_MS, DECORATIVE_FADE_DELAY_MS, MERGE_TO_ROW_DELAY_AFTER_FADE_MS, HEAD_COLOR_TRANSITION_MS, MERGE_POST_COLOR_TRANSITION_DELAY_MS, MERGE_EXTRA_BUFFER_MS, OUTPUT_PROJ_STAGE1_MS, OUTPUT_PROJ_STAGE2_MS, OUTPUT_PROJ_STAGE3_MS, GLOBAL_ANIM_SPEED_MULT, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY, SKIP_TRAIL_FADE_IN_MS } from '../utils/constants.js';
 import {
     // Constants needed for setup & animation
     MHA_MATRIX_PARAMS,
@@ -164,6 +164,10 @@ export class MHSAAnimation {
 
         // Flag to indicate a global matrix pulse is active (throttles per-vector updates)
         this._mhaPulseActive = false;
+        this._headColorsFinalized = false;
+        this._headFinalColorCallbackRegistered = false;
+        this._skipMatrixColorsLocked = false;
+        this._skipMatrixColorsPending = false;
 
         // --------------------------------------------------------------
         //  Self-attention toggle (defaults to global static value)
@@ -628,6 +632,13 @@ export class MHSAAnimation {
         console.log("MHSAAnimation: Initiating Parallel MHSA Head Pass-Through Animations...");
         this.mhaPassThroughPhase = 'parallel_pass_through_active';
 
+        if (this.enableSelfAttentionAnimation && this.selfAttentionAnimator && !this._headFinalColorCallbackRegistered) {
+            this._headFinalColorCallbackRegistered = true;
+            this.selfAttentionAnimator.start(() => {
+                this._transitionHeadColorsToFinal(HEAD_COLOR_TRANSITION_MS);
+            });
+        }
+
         // Start one shared pulse per matrix instead of per-vector material updates
         try { this._startMatrixPulseDuringPassThrough(this.mhaPassThroughDuration); } catch (_) { /* optional */ }
 
@@ -645,13 +656,18 @@ export class MHSAAnimation {
                 console.log("MHSAAnimation: All MHSA parallel pass-through animations complete.");
                 this.mhaPassThroughPhase = 'mha_pass_through_complete';
 
+                if (this._skipMatrixColorsLocked && this._skipMatrixColorsPending) {
+                    this._applyFinalMatrixColorsImmediate();
+                    this._skipMatrixColorsPending = false;
+                }
+
                 // ---------------------------------------------------------------
                 //  TEMP MODE: post pass-through behaviour
                 // ---------------------------------------------------------------
                 if (this.mode === 'temp' && !this._tempModeCompleted) {
                     this._applyTempModeBehaviour();
                     this._tempModeCompleted = true;
-                } else if (this.mode !== 'temp') {
+                } else if (this.mode !== 'temp' && !this.enableSelfAttentionAnimation) {
                     // For perm mode, trigger final color transition here
                     this._transitionHeadColorsToFinal(HEAD_COLOR_TRANSITION_MS); // 1 second duration
                 }
@@ -685,6 +701,10 @@ export class MHSAAnimation {
         if (totalAnimationsToComplete === 0 && allLanes.length > 0) {
              console.log("MHSAAnimation: No valid K,Q,V vectors found to animate for parallel pass-through.");
              this.mhaPassThroughPhase = 'mha_pass_through_complete';
+             if (this._skipMatrixColorsLocked && this._skipMatrixColorsPending) {
+                 this._applyFinalMatrixColorsImmediate();
+                 this._skipMatrixColorsPending = false;
+             }
         }
     }
 
@@ -693,55 +713,54 @@ export class MHSAAnimation {
     // ------------------------------------------------------------------
     _startMatrixPulseDuringPassThrough(totalDurationMs) {
         if (typeof TWEEN === 'undefined') return;
+        if (this._skipMatrixColorsLocked) {
+            return;
+        }
         this._mhaPulseActive = true;
+        this._headColorsFinalized = !this.enableSelfAttentionAnimation;
 
         const restingColor = this.matrixInitialRestingColor.clone();
         const restIntensity = this.matrixRestingEmissiveIntensity;
 
-        const makePulse = (matrix, brightCol, darkTintedCol) => {
+        const makePulse = (matrix, brightCol, finalCol) => {
             if (!matrix || !matrix.mesh || !matrix.mesh.material) return null;
             const state = { p: 0 };
             return new TWEEN.Tween(state)
                 .to({ p: 1 }, totalDurationMs)
                 .easing(TWEEN.Easing.Quadratic.InOut)
                 .onUpdate(() => {
-                    const p = state.p;
+                    const t = THREE.MathUtils.smoothstep(state.p, 0, 1);
+                    const pulse = Math.sin(Math.PI * t);
                     let currentColor;
-                    let currentEmissive;
-                    if (p < MHSA_PASS_THROUGH_BRIGHTEN_RATIO) {
-                        const t = THREE.MathUtils.smoothstep(p / MHSA_PASS_THROUGH_BRIGHTEN_RATIO, 0, 1);
-                        currentColor = restingColor.clone().lerp(brightCol, t);
-                        currentEmissive = THREE.MathUtils.lerp(restIntensity, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY, t);
-                    } else if (p < MHSA_PASS_THROUGH_BRIGHTEN_RATIO + MHSA_PASS_THROUGH_DIM_RATIO) {
-                        const t = THREE.MathUtils.smoothstep(
-                            (p - MHSA_PASS_THROUGH_BRIGHTEN_RATIO) / MHSA_PASS_THROUGH_DIM_RATIO,
-                            0, 1
-                        );
-                        currentColor = brightCol.clone().lerp(darkTintedCol, t);
-                        currentEmissive = THREE.MathUtils.lerp(MHSA_MATRIX_MAX_EMISSIVE_INTENSITY, restIntensity, t);
+                    if (t < 0.5) {
+                        currentColor = restingColor.clone().lerp(brightCol, t / 0.5);
                     } else {
-                        currentColor = darkTintedCol.clone();
-                        currentEmissive = restIntensity;
+                        currentColor = brightCol.clone().lerp(finalCol, (t - 0.5) / 0.5);
                     }
+                    const currentEmissive = THREE.MathUtils.lerp(restIntensity, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY, pulse);
                     matrix.setColor(currentColor);
                     matrix.setEmissive(currentColor, currentEmissive);
                 })
                 .onComplete(() => {
-                    matrix.setColor(darkTintedCol);
-                    matrix.setEmissive(darkTintedCol, restIntensity);
+                    matrix.setColor(finalCol);
+                    matrix.setEmissive(finalCol, restIntensity);
                 })
                 .start();
         };
 
         let pulsesStarted = 0;
         const totalMatrices = NUM_HEAD_SETS_LAYER * 3;
+        const useDarkFinal = this.enableSelfAttentionAnimation;
+        const qFinal = useDarkFinal ? this.darkTintedBlue : this.finalHeadColors.Q;
+        const kFinal = useDarkFinal ? this.darkTintedGreen : this.finalHeadColors.K;
+        const vFinal = useDarkFinal ? this.darkTintedRed : this.finalHeadColors.V;
         for (let i = 0; i < NUM_HEAD_SETS_LAYER; i++) {
             const qMatrix = this.mhaVisualizations[i * 3];
             const kMatrix = this.mhaVisualizations[i * 3 + 1];
             const vMatrix = this.mhaVisualizations[i * 3 + 2];
-            if (makePulse(qMatrix, this.brightBlue, this.darkTintedBlue)) pulsesStarted++;
-            if (makePulse(kMatrix, this.brightGreen, this.darkTintedGreen)) pulsesStarted++;
-            if (makePulse(vMatrix, this.brightRed, this.darkTintedRed)) pulsesStarted++;
+            if (makePulse(qMatrix, this.brightBlue, qFinal)) pulsesStarted++;
+            if (makePulse(kMatrix, this.brightGreen, kFinal)) pulsesStarted++;
+            if (makePulse(vMatrix, this.brightRed, vFinal)) pulsesStarted++;
         }
 
         // Safely clear the pulse flag after the pulses end
@@ -763,6 +782,12 @@ export class MHSAAnimation {
         // methods (triggered asynchronously) can access the original vectors.
         this.currentLanes = lanes;
         this._rebuildLaneIndex(lanes);
+
+        if (this._skipMatrixColorsLocked && this._skipMatrixColorsPending
+            && this.mhaPassThroughPhase === 'mha_pass_through_complete') {
+            this._applyFinalMatrixColorsImmediate();
+            this._skipMatrixColorsPending = false;
+        }
 
         // ---------------- Vector routing (refactored) ----------------
         if (this.vectorRouter) {
@@ -924,6 +949,36 @@ export class MHSAAnimation {
         if (this.vectorRouter && typeof this.vectorRouter.setSkipToEndMode === 'function') {
             this.vectorRouter.setSkipToEndMode(this._skipToEndActive);
         }
+        if (this._skipToEndActive) {
+            this._skipMatrixColorsLocked = true;
+            this._skipMatrixColorsPending = true;
+            this._headColorsFinalized = true;
+            if (this.mhaPassThroughPhase === 'mha_pass_through_complete') {
+                this._applyFinalMatrixColorsImmediate();
+                this._skipMatrixColorsPending = false;
+            }
+        } else {
+            this._skipMatrixColorsLocked = false;
+            this._skipMatrixColorsPending = false;
+        }
+    }
+
+    _applyFinalMatrixColorsImmediate() {
+        for (let i = 0; i < NUM_HEAD_SETS_LAYER; i++) {
+            const qMatrix = this.mhaVisualizations[i * 3];
+            const kMatrix = this.mhaVisualizations[i * 3 + 1];
+            const vMatrix = this.mhaVisualizations[i * 3 + 2];
+            const apply = (matrix, colorHex) => {
+                if (!matrix) return;
+                const col = new THREE.Color(colorHex);
+                matrix.setColor(col);
+                matrix.setEmissive(col, 0.30);
+                matrix.setMaterialProperties({ opacity: 1.0, transparent: false });
+            };
+            apply(qMatrix, MHA_FINAL_Q_COLOR);
+            apply(kMatrix, MHA_FINAL_K_COLOR);
+            apply(vMatrix, MHA_FINAL_V_COLOR);
+        }
     }
 
     // ------------------------------------------------------------------
@@ -981,7 +1036,14 @@ export class MHSAAnimation {
         }
 
         // Build merged static segments and dispose originals
-        mergeTrailsIntoLineSegments(trailsToMerge, this.parentGroup, colorHex, undefined, baseOpacity);
+        mergeTrailsIntoLineSegments(
+            trailsToMerge,
+            this.parentGroup,
+            colorHex,
+            undefined,
+            baseOpacity,
+            null
+        );
 
         // Remove trail refs from vectors to avoid updating disposed trails
         vectorsWithTrails.forEach(v => { if (v && v.userData) delete v.userData.trail; });
@@ -1985,7 +2047,14 @@ export class MHSAAnimation {
                                             try {
                                                 const tr = vec && vec.userData && vec.userData.trail;
                                                 if (tr) {
-                                                    mergeTrailsIntoLineSegments([tr], this.parentGroup);
+                                                    mergeTrailsIntoLineSegments(
+                                                        [tr],
+                                                        this.parentGroup,
+                                                        undefined,
+                                                        undefined,
+                                                        undefined,
+                                                        null
+                                                    );
                                                     if (vec && vec.userData) delete vec.userData.trail;
                                                 }
                                             } catch (_) { /* optional visual */ }
@@ -2229,6 +2298,10 @@ export class MHSAAnimation {
      */
     skipSelfAttentionAndStartConcat() {
         if (this.mhaPassThroughPhase !== 'mha_pass_through_complete') return;
+        if (this._skipMatrixColorsLocked && this._skipMatrixColorsPending) {
+            this._applyFinalMatrixColorsImmediate();
+            this._skipMatrixColorsPending = false;
+        }
         const preserveTrails = !!this._skipToEndActive;
         try {
             if (this.selfAttentionAnimator?.forceComplete) {
@@ -2319,6 +2392,7 @@ export class MHSAAnimation {
     }
 
     _transitionHeadColorsToFinal(duration) {
+        if (this._headColorsFinalized) return;
         const effectiveDuration = this._resolveSkipDuration(duration);
         if (typeof TWEEN === 'undefined') {
             console.warn("TWEEN not available for final head color transition.");
@@ -2332,9 +2406,11 @@ export class MHSAAnimation {
                 if (kMatrix) kMatrix.setColor(new THREE.Color(MHA_FINAL_K_COLOR));
                 if (vMatrix) vMatrix.setColor(new THREE.Color(MHA_FINAL_V_COLOR));
             }
+            this._headColorsFinalized = true;
             return;
         }
 
+        this._headColorsFinalized = true;
         for (let i = 0; i < NUM_HEAD_SETS_LAYER; i++) {
             const qMatrix = this.mhaVisualizations[i * 3];
             const kMatrix = this.mhaVisualizations[i * 3 + 1];

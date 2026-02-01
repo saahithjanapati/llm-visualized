@@ -1234,6 +1234,12 @@ export class CoreEngine {
                     }
                 }
             }
+
+            this._layers.forEach(layer => {
+                if (layer && typeof layer.postUpdate === 'function') {
+                    layer.postUpdate(dt);
+                }
+            });
         }
 
         this._applyKeyboardNavigation(frameDelta);

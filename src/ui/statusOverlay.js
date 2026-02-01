@@ -39,21 +39,68 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     const WK = colorize(kColor, 'W^K');
     const WV = colorize(vColor, 'W^V');
     const WO = colorize(woColor, 'W^O');
-    const WUp = colorize(mlpUpColor, 'W_{\\text{up}}');
-    const WDown = colorize(mlpDownColor, 'W_{\\text{down}}');
+    const WUpRaw = 'W_{\\text{up}}';
+    const WDownRaw = 'W_{\\text{down}}';
+    const WUp = colorize(mlpUpColor, WUpRaw);
+    const WDown = colorize(mlpDownColor, WDownRaw);
     const topEmbedBaseColor = new THREE.Color(0x000000);
     const topEmbedTargetColor = new THREE.Color(MHA_FINAL_Q_COLOR);
     const topEmbedWorkingColor = new THREE.Color();
     const topEmbedMaxEmissive = 0.05;
 
+    const LN_EQ_BASE_COLOR = '#6a6a6a';
+    const LN_EQ_ACTIVE_COLOR = '#ffffff';
+    const EQ_PROGRESS_STEPS = 14;
+    const eqBaseColor = new THREE.Color(LN_EQ_BASE_COLOR);
+    const eqActiveColor = new THREE.Color(LN_EQ_ACTIVE_COLOR);
+    const eqWorkingColor = new THREE.Color();
+    const clamp01 = (value) => Math.max(0, Math.min(1, value));
+    const normalizeHighlight = (value) => {
+        if (Number.isFinite(value)) return clamp01(value);
+        return value ? 1 : 0;
+    };
+    const quantizeHighlight = (value) => {
+        const t = normalizeHighlight(value);
+        const snapped = Math.round(t * EQ_PROGRESS_STEPS) / EQ_PROGRESS_STEPS;
+        return clamp01(snapped);
+    };
+    const eqColorFor = (value) => {
+        const t = clamp01(value);
+        eqWorkingColor.copy(eqBaseColor).lerp(eqActiveColor, t);
+        return `#${eqWorkingColor.getHexString()}`;
+    };
+    const buildLayerNormEquation = (inputSymbol, outputSymbol, highlights) => {
+        const normT = normalizeHighlight(highlights.norm);
+        const scaleT = normalizeHighlight(highlights.scale);
+        const shiftT = normalizeHighlight(highlights.shift);
+        const normExpr = colorize(eqColorFor(normT), `\\frac{${inputSymbol} - \\mu}{\\sqrt{\\sigma^2 + \\epsilon}}`);
+        const scaleExpr = colorize(eqColorFor(scaleT), `\\odot \\gamma`);
+        const shiftExpr = colorize(eqColorFor(shiftT), `+ \\beta`);
+        const body = `${outputSymbol} = ${normExpr} ${scaleExpr} ${shiftExpr}`;
+        return colorize(LN_EQ_BASE_COLOR, body);
+    };
+
+    const buildMlpEquation = (highlights) => {
+        const upT = normalizeHighlight(highlights.up);
+        const geluT = normalizeHighlight(highlights.gelu);
+        const downT = normalizeHighlight(highlights.down);
+        const upTerm = `u_{\\text{ln}} ${WUpRaw}`;
+        const upExpr = colorize(eqColorFor(upT), upTerm);
+        const geluExpr = geluT > 0
+            ? colorize(eqColorFor(geluT), `\\mathrm{GELU}(${upTerm})`)
+            : `\\mathrm{GELU}(${upExpr})`;
+        const downTerm = `z ${WDownRaw}`;
+        const downExpr = colorize(eqColorFor(downT), downTerm);
+        const body = String.raw`\begin{aligned} z &= ${geluExpr} \\ \mathrm{MLP}(u_{\text{ln}}) &= ${downExpr} \end{aligned}`;
+        return colorize(LN_EQ_BASE_COLOR, body);
+    };
+
     const EQ = {
-        ln1: String.raw`x_{\text{ln}} = \frac{x - \mu}{\sqrt{\sigma^2 + \epsilon}} \odot \gamma + \beta`,
         qkv_per_head: `${Q} = x_{\\text{ln}} ${WQ} \\, ${K} = x_{\\text{ln}} ${WK} \\, ${V} = x_{\\text{ln}} ${WV}`,
         qkv_packed: `${Q} = x_{\\text{ln}} ${WQ} \\, ${K} = x_{\\text{ln}} ${WK} \\, ${V} = x_{\\text{ln}} ${WV}`,
         attn: `H_i = \\mathrm{softmax}\\left(\\frac{${Q}_i ${K}_i^\\top}{\\sqrt{d_h}} + M\\right) ${V}_i,\\; i=1\\dots h`,
         concat_proj: String.raw`\begin{aligned} H &= \mathrm{Concat}(H_1,\dots,H_h) \\ O &= H ${WO} \end{aligned}`,
         resid1: String.raw`u = x + O`,
-        ln2: String.raw`u_{\text{ln}} = \frac{u - \mu}{\sqrt{\sigma^2 + \epsilon}} \odot \gamma + \beta`,
         mlp: String.raw`\begin{aligned} z &= \mathrm{GELU}(u_{\text{ln}} ${WUp}) \\ \mathrm{MLP}(u_{\text{ln}}) &= z ${WDown} \end{aligned}`,
         resid2: String.raw`x_{\text{out}} = u + \mathrm{MLP}(u_{\text{ln}})`
     };
@@ -76,6 +123,54 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     }
 
     appState.lastEqKey = '';
+    appState.lastEqSignature = '';
+
+    const SHIFT_DELAY_FRACTION = 0.2;
+    const applyShiftDelay = (progress) => {
+        const t = clamp01(progress);
+        if (t <= SHIFT_DELAY_FRACTION) return 0;
+        return clamp01((t - SHIFT_DELAY_FRACTION) / (1 - SHIFT_DELAY_FRACTION));
+    };
+
+    const getShiftProgress = (lanes, progressKey, startedKey, completeKey) => {
+        let maxProgress = 0;
+        for (const lane of lanes) {
+            if (!lane) continue;
+            const raw = lane[progressKey];
+            if (Number.isFinite(raw)) {
+                maxProgress = Math.max(maxProgress, raw);
+                continue;
+            }
+            if (lane[completeKey]) {
+                maxProgress = 1;
+                continue;
+            }
+            if (lane[startedKey]) {
+                maxProgress = Math.max(maxProgress, 0);
+            }
+        }
+        return applyShiftDelay(maxProgress);
+    };
+
+    const getLayerNormHighlights = (lanes, kind) => {
+        if (kind === 'ln1') {
+            const norm = lanes.some(l => l?.normAnim?.isAnimating || l?.normApplied) ? 1 : 0;
+            const scale = lanes.some(l => l?.multStarted) ? 1 : 0;
+            const shift = getShiftProgress(lanes, 'ln1ShiftProgress', 'ln1AddStarted', 'ln1AddComplete');
+            return { norm, scale, shift };
+        }
+        const norm = lanes.some(l => l?.normAnimationLN2?.isAnimating || l?.normAppliedLN2) ? 1 : 0;
+        const scale = lanes.some(l => l?.multDoneLN2) ? 1 : 0;
+        const shift = getShiftProgress(lanes, 'ln2ShiftProgress', 'ln2AddStarted', 'ln2AddComplete');
+        return { norm, scale, shift };
+    };
+
+    const getMlpHighlights = (lanes) => {
+        const up = lanes.some(l => l?.mlpUpStarted);
+        const gelu = lanes.some(l => l?.mlpGeluActive || l?.mlpGeluComplete);
+        const down = lanes.some(l => l?.mlpDownStarted || l?.mlpDownComplete);
+        return { up, gelu, down };
+    };
 
     function updateEquations(layer) {
         if (!shouldShowEquations()) return;
@@ -154,9 +249,30 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
             title = 'LayerNorm 1';
         }
         if (!key) return;
-        const eqBody = EQ[key];
-        if (key === appState.lastEqKey) return;
+        let eqBody = EQ[key];
+        let signature = key;
+        if (key === 'ln1') {
+            const highlights = getLayerNormHighlights(lanes, 'ln1');
+            const normT = quantizeHighlight(highlights.norm);
+            const scaleT = quantizeHighlight(highlights.scale);
+            const shiftT = quantizeHighlight(highlights.shift);
+            eqBody = buildLayerNormEquation('x', 'x_{\\text{ln}}', { norm: normT, scale: scaleT, shift: shiftT });
+            signature = `${key}|n${normT.toFixed(3)}|s${scaleT.toFixed(3)}|h${shiftT.toFixed(3)}`;
+        } else if (key === 'ln2') {
+            const highlights = getLayerNormHighlights(lanes, 'ln2');
+            const normT = quantizeHighlight(highlights.norm);
+            const scaleT = quantizeHighlight(highlights.scale);
+            const shiftT = quantizeHighlight(highlights.shift);
+            eqBody = buildLayerNormEquation('u', 'u_{\\text{ln}}', { norm: normT, scale: scaleT, shift: shiftT });
+            signature = `${key}|n${normT.toFixed(3)}|s${scaleT.toFixed(3)}|h${shiftT.toFixed(3)}`;
+        } else if (key === 'mlp') {
+            const highlights = getMlpHighlights(lanes);
+            eqBody = buildMlpEquation(highlights);
+            signature = `${key}|u${highlights.up ? 1 : 0}|g${highlights.gelu ? 1 : 0}|d${highlights.down ? 1 : 0}`;
+        }
+        if (signature === appState.lastEqSignature) return;
         appState.lastEqKey = key;
+        appState.lastEqSignature = signature;
         const t = (key === 'ln1') ? 'LayerNorm 1 (no in-place assign)' : title;
         renderEq(eqBody, t);
     }

@@ -30,7 +30,10 @@ import {
     PRISM_ADD_ANIM_BASE_FLASH_DURATION,
     PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS,
     PRISM_ADD_ANIM_SPEED_MULT,
-    LAYER_STACK_SPACING_Y
+    LAYER_STACK_SPACING_Y,
+    SKIP_COMPONENT_COLOR_LERP_ALPHA,
+    SKIP_MLP_COLOR_MIN_MS,
+    SKIP_TRAIL_FADE_IN_MS
 } from '../../utils/constants.js';
 import { PrismLayerNormAnimation } from '../../animations/PrismLayerNormAnimation.js';
 import { MHSAAnimation } from '../../animations/MHSAAnimation.js';
@@ -106,7 +109,7 @@ export default class Gpt2Layer extends BaseLayer {
         this._progressEmitter = null;  // external emitter for progress events
         this._skipToEndActive = false;
         this._skipConcatTriggered = false;
-        this._skipHiddenMaterials = new WeakSet();
+        this._skipHiddenMaterials = new WeakMap();
         this.raycastRoot = null;
 
         // Placeholder vectors shown inside inactive LayerNorms so the
@@ -124,6 +127,8 @@ export default class Gpt2Layer extends BaseLayer {
         this._ln2TargetColor = new THREE.Color();
         this._ln1LockedColor = new THREE.Color();
         this._ln1ColorLocked = false;
+        this._ln2LockedColor = new THREE.Color();
+        this._ln2ColorLocked = false;
         this._ln1MaterialState = { color: new THREE.Color(), opacity: 1.0, transparent: false, initialized: false };
         this._ln2MaterialState = { color: new THREE.Color(), opacity: 1.0, transparent: false, initialized: false };
         this._trailUpdateFrameId = 0;
@@ -559,6 +564,14 @@ export default class Gpt2Layer extends BaseLayer {
             targetOpacity = opaqueOpacity;
         }
 
+        if (skipActive && this._ln1MaterialState.initialized) {
+            const smoothAlpha = SKIP_COMPONENT_COLOR_LERP_ALPHA;
+            if (smoothAlpha > 0 && smoothAlpha < 1) {
+                ln1TargetColor.lerpColors(this._ln1MaterialState.color, ln1TargetColor, smoothAlpha);
+                targetOpacity = THREE.MathUtils.lerp(this._ln1MaterialState.opacity, targetOpacity, smoothAlpha);
+            }
+        }
+
         // Apply to mesh material(s)
         applyLayerNormMaterial(this.ln1 && this.ln1.group, ln1TargetColor, targetOpacity, this._ln1MaterialState);
 
@@ -567,11 +580,11 @@ export default class Gpt2Layer extends BaseLayer {
         // ────────────────────────────────────────────────────────────
         // Find the highest Y position of any vector moving through LN2
 
-        if (anyVectorInLN2 && highestLN2VecY > -Infinity) {
-            const ln2TargetColor = this._ln2TargetColor;
-            ln2TargetColor.copy(COLOR_DARK_GRAY);
-            let ln2TargetOpacity = opaqueOpacity;
+        const ln2TargetColor = this._ln2TargetColor;
+        ln2TargetColor.copy(COLOR_DARK_GRAY);
+        let ln2TargetOpacity = opaqueOpacity;
 
+        if (anyVectorInLN2 && highestLN2VecY > -Infinity) {
             if (highestLN2VecY >= bottomY_ln2_abs && highestLN2VecY < midY_ln2_abs) {
                 // Entering LN2
                 const t = (highestLN2VecY - bottomY_ln2_abs) / (midY_ln2_abs - bottomY_ln2_abs);
@@ -587,6 +600,26 @@ export default class Gpt2Layer extends BaseLayer {
                 const t = Math.min(1, Math.max(0, tRaw));
                 ln2TargetColor.lerpColors(COLOR_LIGHT_YELLOW, COLOR_BRIGHT_YELLOW, t);
                 ln2TargetOpacity = THREE.MathUtils.lerp(semiTransparentOpacity, opaqueOpacity, t);
+            }
+        }
+
+        if (!this._ln2ColorLocked && highestLN2VecY >= topY_ln2_abs + exitTransitionRange) {
+            this._ln2ColorLocked = true;
+            this._ln2LockedColor.copy(COLOR_BRIGHT_YELLOW);
+        }
+
+        if (this._ln2ColorLocked) {
+            ln2TargetColor.copy(this._ln2LockedColor);
+            ln2TargetOpacity = opaqueOpacity;
+        }
+
+        if ((anyVectorInLN2 && highestLN2VecY > -Infinity) || this._ln2ColorLocked) {
+            if (skipActive && this._ln2MaterialState.initialized) {
+                const smoothAlpha = SKIP_COMPONENT_COLOR_LERP_ALPHA;
+                if (smoothAlpha > 0 && smoothAlpha < 1) {
+                    ln2TargetColor.lerpColors(this._ln2MaterialState.color, ln2TargetColor, smoothAlpha);
+                    ln2TargetOpacity = THREE.MathUtils.lerp(this._ln2MaterialState.opacity, ln2TargetOpacity, smoothAlpha);
+                }
             }
 
             // Apply to LN2
@@ -931,7 +964,7 @@ export default class Gpt2Layer extends BaseLayer {
                                         }
                                         lane.horizPhase = 'riseAboveLN';
                                         this._emitProgress();
-                                    }, { finalData: ln1ShiftedData });
+                                    }, { finalData: ln1ShiftedData, progressTarget: lane, progressKey: 'ln1ShiftProgress' });
                                 } else {
                                     lane.resultVec = multResult;
                                     lane.ln1AddComplete = true;
@@ -1330,7 +1363,7 @@ export default class Gpt2Layer extends BaseLayer {
                                         lane.addTargetLN2.userData.trailWorld = false;
                                         }
                                         startLn2Rise(lane.addTargetLN2);
-                                    }, { finalData: ln2ShiftedData });
+                                    }, { finalData: ln2ShiftedData, progressTarget: lane, progressKey: 'ln2ShiftProgress' });
                                 } else {
                                     lane.resultVecLN2 = resVec;
                                     lane.ln2AddComplete = true;
@@ -1399,6 +1432,9 @@ export default class Gpt2Layer extends BaseLayer {
         const topY = this.mlpUp.group.position.y + MLP_MATRIX_PARAMS_UP.height / 2;
         const distance = topY - vec.group.position.y;
         const duration = (distance / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
+        const colorDuration = this._skipToEndActive
+            ? Math.max(duration, SKIP_MLP_COLOR_MIN_MS)
+            : duration;
         
         const matrixStartColor = new THREE.Color(INACTIVE_COMPONENT_COLOR);
         const matrixEndColor = new THREE.Color(0xc07a12); // orange
@@ -1409,7 +1445,7 @@ export default class Gpt2Layer extends BaseLayer {
         // Animate matrix colour and emissive intensity for a glow effect
         const state = { t: 0, emissive: startIntensity };
         new TWEEN.Tween(state)
-            .to({ t: 1, emissive: peakIntensity }, duration * 0.6)
+            .to({ t: 1, emissive: peakIntensity }, colorDuration * 0.6)
             .easing(TWEEN.Easing.Quadratic.InOut)
             .onUpdate(() => {
                 const col = matrixStartColor.clone().lerp(matrixEndColor, state.t);
@@ -1418,7 +1454,7 @@ export default class Gpt2Layer extends BaseLayer {
             })
             .onComplete(() => {
                 new TWEEN.Tween(state)
-                    .to({ emissive: finalIntensity }, duration * 0.4)
+                    .to({ emissive: finalIntensity }, colorDuration * 0.4)
                     .easing(TWEEN.Easing.Quadratic.InOut)
                     .onUpdate(() => {
                         this.mlpUp.setEmissive(matrixEndColor, state.emissive);
@@ -1573,12 +1609,24 @@ export default class Gpt2Layer extends BaseLayer {
         );
         const safeCurveDomain = curveDomain > 0 ? curveDomain : 1;
 
+        if (lane) {
+            lane.mlpGeluActive = true;
+            lane.mlpGeluComplete = false;
+        }
+        const finishGelu = () => {
+            if (!lane) return;
+            lane.mlpGeluActive = false;
+            lane.mlpGeluComplete = true;
+        };
+
         if (!expandedGroup || !segmentVecs || segmentVecs.length === 0) {
+            finishGelu();
             if (typeof applyActivation === 'function') applyActivation();
             if (typeof onComplete === 'function') onComplete();
             return;
         }
         if (typeof TWEEN === 'undefined' || durationMs <= 0) {
+            finishGelu();
             if (typeof applyActivation === 'function') applyActivation();
             if (typeof onComplete === 'function') onComplete();
             return;
@@ -1646,6 +1694,7 @@ export default class Gpt2Layer extends BaseLayer {
                     }
                     if (segVec.mesh) segVec.mesh.instanceMatrix.needsUpdate = true;
                 }
+                finishGelu();
                 if (typeof onComplete === 'function') onComplete();
             })
             .start();
@@ -1656,8 +1705,12 @@ export default class Gpt2Layer extends BaseLayer {
      */
     _animateMlpDownProjection(lane) {
         const expandedGroup = lane.expandedVecGroup;
-        if (!expandedGroup || typeof TWEEN === 'undefined') return;
+        if (!expandedGroup || typeof TWEEN === 'undefined') {
+            if (lane) lane.mlpDownComplete = true;
+            return;
+        }
         lane.mlpDownStarted = true;
+        lane.mlpDownComplete = false;
         
         const orangeColor = new THREE.Color(0xc07a12);
         const downBottomY = this.mlpDown.group.position.y - MLP_MATRIX_PARAMS_DOWN.height / 2;
@@ -1666,6 +1719,9 @@ export default class Gpt2Layer extends BaseLayer {
         const startY = expandedGroup.position.y;
         const totalDist = downTopY - startY;
         const durationDown = (Math.abs(totalDist) / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
+        const colorDurationDown = this._skipToEndActive
+            ? Math.max(durationDown, SKIP_MLP_COLOR_MIN_MS)
+            : durationDown;
 
         const matrixBottomWidth = MLP_MATRIX_PARAMS_DOWN.width;
         const matrixTopWidth = MLP_MATRIX_PARAMS_DOWN.width * MLP_MATRIX_PARAMS_DOWN.topWidthFactor;
@@ -1698,7 +1754,7 @@ export default class Gpt2Layer extends BaseLayer {
         const downState = { t: 0, emissive: startIntensity };
 
         new TWEEN.Tween(downState)
-            .to({ t: 1, emissive: peakIntensity }, durationDown * 0.6)
+            .to({ t: 1, emissive: peakIntensity }, colorDurationDown * 0.6)
             .easing(TWEEN.Easing.Quadratic.InOut)
             .onUpdate(() => {
                 const col = new THREE.Color(INACTIVE_COMPONENT_COLOR).lerp(orangeColor, downState.t);
@@ -1707,7 +1763,7 @@ export default class Gpt2Layer extends BaseLayer {
             })
             .onComplete(() => {
                 new TWEEN.Tween(downState)
-                    .to({ emissive: finalIntensity }, durationDown * 0.4)
+                    .to({ emissive: finalIntensity }, colorDurationDown * 0.4)
                     .easing(TWEEN.Easing.Quadratic.InOut)
                     .onUpdate(() => {
                         this.mlpDown.setEmissive(orangeColor, downState.emissive);
@@ -1776,6 +1832,7 @@ export default class Gpt2Layer extends BaseLayer {
                 }
             })
             .onComplete(() => {
+                lane.mlpDownComplete = true;
                 this.mlpDown.setColor(orangeColor);
                 this.mlpDown.setEmissive(orangeColor, finalIntensity);
                 
@@ -1924,7 +1981,14 @@ export default class Gpt2Layer extends BaseLayer {
                         const colorHex = (t._material && t._material.color)
                             ? t._material.color.getHex() : undefined;
                         const frozenOpacity = (typeof t._opacity === 'number') ? t._opacity : undefined;
-                        mergeTrailsIntoLineSegments([t], this.root, colorHex, undefined, frozenOpacity);
+                        mergeTrailsIntoLineSegments(
+                            [t],
+                            this.root,
+                            colorHex,
+                            undefined,
+                            frozenOpacity,
+                            null
+                        );
                         if (typeof t.dispose === 'function') t.dispose();
                         if (vec && vec.userData) delete vec.userData.mlpTrail;
                     }
@@ -1942,7 +2006,14 @@ export default class Gpt2Layer extends BaseLayer {
                         const colorHex = (localTrail._material && localTrail._material.color)
                             ? localTrail._material.color.getHex() : undefined;
                         const frozenOpacity = (typeof localTrail._opacity === 'number') ? localTrail._opacity : undefined;
-                        mergeTrailsIntoLineSegments([localTrail], this.root, colorHex, undefined, frozenOpacity);
+                        mergeTrailsIntoLineSegments(
+                            [localTrail],
+                            this.root,
+                            colorHex,
+                            undefined,
+                            frozenOpacity,
+                            null
+                        );
                         if (vec.userData) delete vec.userData.trail;
                     }
                 } catch (_) { /* no-op */ }
@@ -2008,6 +2079,48 @@ export default class Gpt2Layer extends BaseLayer {
         }
     }
 
+    postUpdate() {
+        if (this._skipToEndActive) {
+            this._applySkipVectorVisibility();
+        }
+    }
+
+    refreshSkipVisibility() {
+        if (this._skipToEndActive) {
+            this._applySkipVectorVisibility();
+        }
+    }
+
+    restoreResidualVectorVisibility(lanes) {
+        if (!Array.isArray(lanes) || !lanes.length) return;
+        lanes.forEach(lane => {
+            const vec = lane && lane.originalVec;
+            if (!vec || !vec.group) return;
+            this._restoreVectorVisibility(vec);
+        });
+    }
+
+    _restoreVectorVisibility(vec) {
+        if (!vec || !vec.group) return;
+        const hidden = this._skipHiddenMaterials;
+        vec.group.traverse(obj => {
+            if (!obj || !obj.isMesh || !obj.material) return;
+            obj.visible = true;
+            const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+            mats.forEach(mat => {
+                if (!mat) return;
+                const prev = hidden.get(mat);
+                if (prev) {
+                    mat.opacity = prev.opacity;
+                    mat.transparent = prev.transparent;
+                    mat.depthWrite = prev.depthWrite;
+                    mat.needsUpdate = true;
+                    hidden.delete(mat);
+                }
+            });
+        });
+    }
+
     _isVectorVisual(obj) {
         if (!obj) return false;
         const data = obj.userData;
@@ -2026,15 +2139,38 @@ export default class Gpt2Layer extends BaseLayer {
         this.root.traverse(obj => {
             if (!obj || !obj.isMesh || !obj.material) return;
             if (!this._isVectorVisual(obj)) return;
+            const allowVisible = (obj.userData && obj.userData.skipVisible)
+                || (obj.parent && obj.parent.userData && obj.parent.userData.skipVisible);
             const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+            if (allowVisible) {
+                obj.visible = true;
+                mats.forEach(mat => {
+                    if (!mat) return;
+                    const prev = hidden.get(mat);
+                    if (prev) {
+                        mat.opacity = prev.opacity;
+                        mat.transparent = prev.transparent;
+                        mat.depthWrite = prev.depthWrite;
+                        mat.needsUpdate = true;
+                        hidden.delete(mat);
+                    }
+                });
+                return;
+            }
             mats.forEach(mat => {
                 if (!mat) return;
+                if (!hidden.has(mat)) {
+                    hidden.set(mat, {
+                        opacity: mat.opacity,
+                        transparent: mat.transparent,
+                        depthWrite: mat.depthWrite
+                    });
+                }
                 const needsUpdate = mat.opacity !== 0 || mat.transparent !== true || mat.depthWrite !== false;
                 mat.transparent = true;
                 mat.opacity = 0;
                 mat.depthWrite = false;
                 if (needsUpdate) mat.needsUpdate = true;
-                hidden.add(mat);
             });
             obj.visible = false;
         });
@@ -2286,7 +2422,8 @@ export default class Gpt2Layer extends BaseLayer {
                         this._globalScene || this.root,
                         group.color || undefined,
                         undefined,
-                        group.opacity != null ? group.opacity : undefined
+                        group.opacity != null ? group.opacity : undefined,
+                        null
                     );
                 });
 
@@ -2311,7 +2448,8 @@ export default class Gpt2Layer extends BaseLayer {
                             this.root,
                             group.color || undefined,
                             undefined,
-                            group.opacity != null ? group.opacity : undefined
+                            group.opacity != null ? group.opacity : undefined,
+                            null
                         );
                     });
                 }

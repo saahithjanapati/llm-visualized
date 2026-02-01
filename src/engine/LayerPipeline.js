@@ -20,6 +20,8 @@ import {
     setGlobalAnimSpeedMult,
     setPrismAddAnimSpeedMult,
     setSelfAttentionTimeMult,
+    SKIP_TRAIL_MAX_STEP_DISTANCE,
+    SKIP_COMPONENT_COLOR_LERP_ALPHA,
     VECTOR_LENGTH_PRISM,
     NUM_VECTOR_LANES,
     LAYER_STACK_SPACING_Y
@@ -27,6 +29,7 @@ import {
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
 import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
 import { PrismLayerNormAnimation } from '../animations/PrismLayerNormAnimation.js';
+import { setGlobalTrailMaxStepDistance } from '../utils/trailUtils.js';
 
 function simplePrismMultiply(srcVec, tgtVec, onComplete) {
     const srcCount = srcVec && Number.isFinite(srcVec.instanceCount) ? srcVec.instanceCount : VECTOR_LENGTH_PRISM;
@@ -498,6 +501,11 @@ export class LayerPipeline extends EventTarget {
         setGlobalAnimSpeedMult(globalSpeed);
         setPrismAddAnimSpeedMult(prismAddSpeed);
         setSelfAttentionTimeMult(selfAttentionSpeed);
+        setGlobalTrailMaxStepDistance(SKIP_TRAIL_MAX_STEP_DISTANCE);
+
+        if (layer && typeof layer.setSkipToEndMode === 'function') {
+            layer.setSkipToEndMode(true);
+        }
     }
 
     skipToEndForwardPass(opts = {}) {
@@ -617,6 +625,7 @@ export class LayerPipeline extends EventTarget {
             setSelfAttentionTimeMult(restore.selfAttentionSpeed);
             this._skipToEndRestore = null;
         }
+        setGlobalTrailMaxStepDistance(0);
     }
 
     _restoreSkipLayerSpeeds() {
@@ -656,6 +665,9 @@ export class LayerPipeline extends EventTarget {
             prevLayer.isActive = false;
         }
         const externalLanes = prevLayer.lanes;
+        if (this._skipLayerActive && prevLayer && typeof prevLayer.restoreResidualVectorVisibility === 'function') {
+            prevLayer.restoreResidualVectorVisibility(externalLanes);
+        }
         // Ensure residual trails remain continuous by reparenting any
         // world-space trails to the new engine scene (safety no-op if same).
         if (externalLanes && externalLanes.length) {
@@ -842,6 +854,25 @@ export class LayerPipeline extends EventTarget {
         const exitYLocal = Number.isFinite(lastLayer?.__topEmbedExitYLocal)
             ? lastLayer.__topEmbedExitYLocal
             : targetYLocal;
+        const allowSkipVisible = this._skipToEndActive;
+        let needsSkipRefresh = false;
+        const markSkipVisible = (vec) => {
+            if (!allowSkipVisible || !vec || !vec.group) return;
+            vec.group.userData = vec.group.userData || {};
+            vec.group.userData.skipVisible = true;
+            if (vec.mesh) {
+                vec.mesh.userData = vec.mesh.userData || {};
+                vec.mesh.userData.skipVisible = true;
+            }
+            needsSkipRefresh = true;
+        };
+        const refreshSkipVisibility = () => {
+            if (!needsSkipRefresh || !allowSkipVisible) return;
+            if (lastLayer && typeof lastLayer.refreshSkipVisibility === 'function') {
+                lastLayer.refreshSkipVisibility();
+            }
+            needsSkipRefresh = false;
+        };
         const startEmbedTraverse = (resVec, updateTrailFn = null) => {
             if (!resVec || !resVec.group) return;
             if (!Number.isFinite(exitYLocal) || exitYLocal <= entryYLocal + 0.01) return;
@@ -915,36 +946,42 @@ export class LayerPipeline extends EventTarget {
                 }
 
                 const highest = lnColorState.highestY;
+                let desiredOpacity = 1.0;
                 if (lnColorState.locked) {
-                    lnColorState.currentColor.copy(lnColorState.lockedColor);
-                    lnColorState.currentOpacity = 1.0;
+                    tempColor.copy(lnColorState.lockedColor);
+                    desiredOpacity = 1.0;
+                } else if (highest >= lnBottomY && highest < lnCenterY) {
+                    const denom = Math.max(lnCenterY - lnBottomY, 1e-6);
+                    const t = (highest - lnBottomY) / denom;
+                    tempColor.copy(COLOR_DARK_GRAY).lerp(COLOR_LIGHT_YELLOW, t);
+                    desiredOpacity = THREE.MathUtils.lerp(1.0, 0.6, t);
+                } else if (highest >= lnCenterY && highest < lnTopY) {
+                    tempColor.copy(COLOR_LIGHT_YELLOW);
+                    desiredOpacity = 0.6;
+                } else if (highest >= lnTopY) {
+                    const tRaw = (highest - lnTopY) / exitTransitionRange;
+                    const t = Math.min(1, Math.max(0, tRaw));
+                    tempColor.copy(COLOR_LIGHT_YELLOW).lerp(COLOR_BRIGHT_YELLOW, t);
+                    desiredOpacity = THREE.MathUtils.lerp(0.6, 1.0, t);
                 } else {
-                    if (highest >= lnBottomY && highest < lnCenterY) {
-                        const denom = Math.max(lnCenterY - lnBottomY, 1e-6);
-                        const t = (highest - lnBottomY) / denom;
-                        tempColor.copy(COLOR_DARK_GRAY).lerp(COLOR_LIGHT_YELLOW, t);
-                        lnColorState.currentColor.copy(tempColor);
-                        lnColorState.currentOpacity = THREE.MathUtils.lerp(1.0, 0.6, t);
-                    } else if (highest >= lnCenterY && highest < lnTopY) {
-                        lnColorState.currentColor.copy(COLOR_LIGHT_YELLOW);
-                        lnColorState.currentOpacity = 0.6;
-                    } else if (highest >= lnTopY) {
-                        const tRaw = (highest - lnTopY) / exitTransitionRange;
-                        const t = Math.min(1, Math.max(0, tRaw));
-                        tempColor.copy(COLOR_LIGHT_YELLOW).lerp(COLOR_BRIGHT_YELLOW, t);
-                        lnColorState.currentColor.copy(tempColor);
-                        lnColorState.currentOpacity = THREE.MathUtils.lerp(0.6, 1.0, t);
-                    } else {
-                        lnColorState.currentColor.copy(COLOR_DARK_GRAY);
-                        lnColorState.currentOpacity = 1.0;
-                    }
+                    tempColor.copy(COLOR_DARK_GRAY);
+                    desiredOpacity = 1.0;
+                }
 
-                    if (highest >= lnTopY + exitTransitionRange) {
-                        lnColorState.locked = true;
-                        lnColorState.lockedColor.copy(COLOR_BRIGHT_YELLOW);
-                        lnColorState.currentColor.copy(lnColorState.lockedColor);
-                        lnColorState.currentOpacity = 1.0;
-                    }
+                if (highest >= lnTopY + exitTransitionRange) {
+                    lnColorState.locked = true;
+                    lnColorState.lockedColor.copy(COLOR_BRIGHT_YELLOW);
+                    tempColor.copy(lnColorState.lockedColor);
+                    desiredOpacity = 1.0;
+                }
+
+                const smoothAlpha = this._skipToEndActive ? SKIP_COMPONENT_COLOR_LERP_ALPHA : 1;
+                if (smoothAlpha >= 1) {
+                    lnColorState.currentColor.copy(tempColor);
+                    lnColorState.currentOpacity = desiredOpacity;
+                } else {
+                    lnColorState.currentColor.lerp(tempColor, smoothAlpha);
+                    lnColorState.currentOpacity = THREE.MathUtils.lerp(lnColorState.currentOpacity, desiredOpacity, smoothAlpha);
                 }
 
                 applyTopLnColor();
@@ -980,6 +1017,7 @@ export class LayerPipeline extends EventTarget {
             lastLayer.lanes.forEach(lane => {
                 const vec = lane && lane.originalVec;
                 if (!vec || !vec.group) return;
+                markSkipVisible(vec);
                 if (lane && lane.originalTrail) {
                     vec.userData = vec.userData || {};
                     if (!vec.userData.trail) {
@@ -1004,6 +1042,7 @@ export class LayerPipeline extends EventTarget {
                 );
                 lastLayer.root.add(multVec.group);
                 multVec.group.visible = false;
+                markSkipVisible(multVec);
 
                 const addVec = new VectorVisualizationInstancedPrism(
                     vec.rawData.slice(),
@@ -1013,6 +1052,7 @@ export class LayerPipeline extends EventTarget {
                 );
                 lastLayer.root.add(addVec.group);
                 addVec.group.visible = false;
+                markSkipVisible(addVec);
 
                 const normAnim = new PrismLayerNormAnimation(vec);
                 let normLoopActive = false;
@@ -1066,6 +1106,7 @@ export class LayerPipeline extends EventTarget {
                             multVec.instanceCount
                         );
                         lastLayer.root.add(resVec.group);
+                        markSkipVisible(resVec);
 
                         if (multVec.group && multVec.group.parent) {
                             multVec.group.parent.remove(multVec.group);
@@ -1121,6 +1162,7 @@ export class LayerPipeline extends EventTarget {
                                 resVec.group.parent.remove(resVec.group);
                             }
                             lane.originalVec = addVec;
+                            markSkipVisible(addVec);
                             startFinalRise(addVec);
                         }, { suppressResidualTrailUpdates: true });
 
@@ -1241,12 +1283,14 @@ export class LayerPipeline extends EventTarget {
                 moveToNormStart();
             });
 
+            refreshSkipVisibility();
             return;
         }
 
         lastLayer.lanes.forEach(lane => {
             const vec = lane && lane.originalVec;
             if (!vec || !vec.group) return;
+            markSkipVisible(vec);
             const startY = vec.group.position.y;
             if (typeof startY !== 'number' || !isFinite(startY)) return;
             if (startY >= entryYLocal - 0.01) {
@@ -1267,6 +1311,8 @@ export class LayerPipeline extends EventTarget {
                 })
                 .start();
         });
+
+        refreshSkipVisibility();
     }
 
     _resolveActiveLanePosition(targetVec = null) {

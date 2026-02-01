@@ -41,6 +41,19 @@ export function setSelfAttentionTimeMult(mult) {
     SELF_ATTENTION_TIME_MULT = next;
 }
 
+// ------------------------------------------------------------
+// Skip-to-end visual smoothing controls
+// ------------------------------------------------------------
+// Clamp how far trail lines can advance per frame during skip so they
+// extend smoothly instead of popping to their final length.
+export const SKIP_TRAIL_MAX_STEP_DISTANCE = 320;
+// Fade in merged trail segments during skip so static lines don't pop.
+export const SKIP_TRAIL_FADE_IN_MS = 800;
+// Low-pass factor for component color transitions while skipping.
+export const SKIP_COMPONENT_COLOR_LERP_ALPHA = 0.12;
+// Minimum color tween duration for MLP matrices during skip.
+export const SKIP_MLP_COLOR_MIN_MS = 800;
+
 // Always render in high-quality mode. Remove lower-quality mobile detection.
 export const IS_MOBILE = false;
 export const QUALITY_PRESET = 'high';

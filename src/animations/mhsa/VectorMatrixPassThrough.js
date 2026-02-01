@@ -243,7 +243,7 @@ export function animateVectorMatrixPassThrough(
                 }
             }
 
-            if (!ctx._mhaPulseActive) {
+            if (!ctx._mhaPulseActive && !ctx._skipMatrixColorsLocked) {
                 let currentEmissiveIntensity;
                 const p = easedT;
                 if (p < MHSA_PASS_THROUGH_BRIGHTEN_RATIO) {
@@ -275,7 +275,7 @@ export function animateVectorMatrixPassThrough(
             }
 
             if (linearT >= 1) {
-                if (!ctx._mhaPulseActive) {
+                if (!ctx._mhaPulseActive && !ctx._skipMatrixColorsLocked) {
                     matrix.setColor(darkTintedMatrixColor);
                     matrix.setEmissive(darkTintedMatrixColor, ctx.matrixRestingEmissiveIntensity);
                     matrix.setOpacity(ctx.matrixRestingOpacity);
@@ -500,7 +500,7 @@ export function animateVectorMatrixPassThrough(
             //  Skip per-vector updates if a global pulse is active to reduce
             //  material updates per frame.
             // --------------------------------------------------------------
-            if (!ctx._mhaPulseActive) {
+            if (!ctx._mhaPulseActive && !ctx._skipMatrixColorsLocked) {
                 let currentMatrixTargetColor;
                 let currentEmissiveIntensity;
                 const p = tweenState.progress;
@@ -534,7 +534,7 @@ export function animateVectorMatrixPassThrough(
         })
         .onComplete(() => {
             // Ensure the matrix ends dimmed if no global pulse managed it
-            if (!ctx._mhaPulseActive) {
+            if (!ctx._mhaPulseActive && !ctx._skipMatrixColorsLocked) {
                 matrix.setColor(darkTintedMatrixColor);
                 matrix.setEmissive(darkTintedMatrixColor, ctx.matrixRestingEmissiveIntensity);
                 matrix.setOpacity(ctx.matrixRestingOpacity);

@@ -239,10 +239,6 @@ function getVectorInstanceCount(vec, fallback = VECTOR_LENGTH_PRISM) {
  */
 export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComplete, options = null) {
     if (!sourceVec || !targetVec || !sourceVec.mesh || !targetVec.mesh) return;
-    if (typeof TWEEN === 'undefined') {
-        console.warn('TWEEN not available – addition animation skipped');
-        return;
-    }
 
     const suppressResidualTrailUpdates = options && options.suppressResidualTrailUpdates === true;
 
@@ -266,6 +262,19 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
         ? buildFinalColorBuffers(finalDataCandidate, vectorLength)
         : null;
     const preserveSourceColors = options ? options.preserveSourceColors !== false : true;
+    const progressTarget = options && options.progressTarget ? options.progressTarget : null;
+    const progressKey = options && typeof options.progressKey === 'string' ? options.progressKey : null;
+    const setProgress = (value) => {
+        if (!progressTarget || !progressKey) return;
+        const next = Math.max(0, Math.min(1, Number(value) || 0));
+        progressTarget[progressKey] = next;
+    };
+
+    if (typeof TWEEN === 'undefined') {
+        console.warn('TWEEN not available – addition animation skipped');
+        setProgress(1);
+        return;
+    }
 
     // Freeze upward movement of the source so its group position remains static.
     if (lane) {
@@ -477,6 +486,7 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
     };
 
     const finishAddition = () => {
+        setProgress(1);
         if (lane) {
             delete lane.stopRise;
             delete lane.stopRiseTarget;
@@ -549,12 +559,17 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
         }
     };
 
+    setProgress(0);
     if (typeof TWEEN !== 'undefined') {
         new TWEEN.Tween({ progress: 0 })
             .to({ progress: 1 }, totalAnimTime + 100)
+            .onUpdate(obj => {
+                setProgress(obj.progress);
+            })
             .onComplete(finishAddition)
             .start();
     } else {
+        setProgress(1);
         setTimeout(finishAddition, totalAnimTime + 100);
     }
 }

@@ -16,6 +16,14 @@ import { perfStats } from './perfStats.js';
 const _snapPrev = new THREE.Vector3();
 const _snapDir = new THREE.Vector3();
 const _trimLast = new THREE.Vector3();
+const _stepTarget = new THREE.Vector3();
+
+let GLOBAL_MAX_STEP_DISTANCE = 0;
+
+export function setGlobalTrailMaxStepDistance(distance) {
+    const next = Number(distance);
+    GLOBAL_MAX_STEP_DISTANCE = Number.isFinite(next) && next > 0 ? next : 0;
+}
 
 export class StraightLineTrail {
     /**
@@ -32,6 +40,7 @@ export class StraightLineTrail {
         this._opacity = opacity;
         const clampedMin = Math.max(0, minSegmentDistance);
         this._minSegmentDistanceSq = clampedMin * clampedMin;
+        this._maxStepDistance = 0;
 
         // Preallocate vertex buffer (N segments ⇒ N+1 vertices; we duplicate the
         // first vertex to create a zero-length segment so drawRange ≥2).  Each
@@ -116,10 +125,30 @@ export class StraightLineTrail {
 
     update(pos) {
         if (this._vertexCount === 0) return; // not started yet
-        if (pos.equals(this._prevPos)) return; // no movement
+        if (!pos) return;
+
+        const maxStep = this._maxStepDistance > 0 ? this._maxStepDistance : GLOBAL_MAX_STEP_DISTANCE;
+        let targetPos = pos;
+        if (maxStep > 0) {
+            const dx = pos.x - this._prevPos.x;
+            const dy = pos.y - this._prevPos.y;
+            const dz = pos.z - this._prevPos.z;
+            const distSq = dx * dx + dy * dy + dz * dz;
+            if (distSq > maxStep * maxStep) {
+                const invLen = 1 / Math.sqrt(distSq);
+                _stepTarget.set(
+                    this._prevPos.x + dx * invLen * maxStep,
+                    this._prevPos.y + dy * invLen * maxStep,
+                    this._prevPos.z + dz * invLen * maxStep
+                );
+                targetPos = _stepTarget;
+            }
+        }
+
+        if (targetPos.equals(this._prevPos)) return; // no movement
 
         const dir = this._tmpDir;
-        dir.subVectors(pos, this._prevPos);
+        dir.subVectors(targetPos, this._prevPos);
         const lenSq = dir.lengthSq();
         if (lenSq === 0) return;
         if (this._minSegmentDistanceSq > 0 && lenSq < this._minSegmentDistanceSq) return;
@@ -130,16 +159,16 @@ export class StraightLineTrail {
             // first real move – simply update last vertex
             this._currentDir = new THREE.Vector3();
             this._currentDir.copy(dir);
-            this._writeVertex(this._vertexCount - 1, pos);
+            this._writeVertex(this._vertexCount - 1, targetPos);
         } else if (dir.dot(this._currentDir) > DOT_THRESHOLD) {
             // still same direction – extend last vertex
-            this._writeVertex(this._vertexCount - 1, pos);
+            this._writeVertex(this._vertexCount - 1, targetPos);
         } else {
             // direction changed – append new vertex
             this._currentDir.copy(dir);
             // Ensure capacity; if we exceed, silently skip to avoid crashes.
             if (this._vertexCount >= this._attr.count) return;
-            this._writeVertex(this._vertexCount, pos);
+            this._writeVertex(this._vertexCount, targetPos);
             this._vertexCount += 1;
             this._geometry.setDrawRange(0, this._vertexCount);
         }
@@ -154,7 +183,7 @@ export class StraightLineTrail {
             this._geometry.computeBoundingSphere();
         }
 
-        this._prevPos.copy(pos);
+        this._prevPos.copy(targetPos);
     }
 
     /**
@@ -207,6 +236,12 @@ export class StraightLineTrail {
     /** Return current base opacity prior to DPR scaling. */
     getBaseOpacity() {
         return this._opacity;
+    }
+
+    /** Clamp how far the trail can advance per update (0 disables). */
+    setMaxStepDistance(distance) {
+        const next = Number(distance);
+        this._maxStepDistance = Number.isFinite(next) && next > 0 ? next : 0;
     }
 
     /** Return a shallow copy of currently used positions (vertexCount * 3). */
@@ -330,8 +365,35 @@ export function collectTrailsUnder(root) {
     return trails;
 }
 
+function applyFadeIn(material, targetOpacity, fadeInMs) {
+    if (!material) return;
+    if (!Number.isFinite(fadeInMs) || fadeInMs <= 0 || typeof TWEEN === 'undefined') {
+        material.opacity = targetOpacity;
+        material.transparent = targetOpacity < 1.0;
+        material.needsUpdate = true;
+        return;
+    }
+    const state = { t: 0 };
+    material.opacity = 0;
+    material.transparent = true;
+    material.needsUpdate = true;
+    new TWEEN.Tween(state)
+        .to({ t: 1 }, fadeInMs)
+        .easing(TWEEN.Easing.Quadratic.Out)
+        .onUpdate(() => {
+            material.opacity = targetOpacity * state.t;
+            material.needsUpdate = true;
+        })
+        .onComplete(() => {
+            material.opacity = targetOpacity;
+            material.transparent = targetOpacity < 1.0;
+            material.needsUpdate = true;
+        })
+        .start();
+}
+
 /** Merge multiple StraightLineTrail polylines into a single LineSegments. */
-export function mergeTrailsIntoLineSegments(trails, scene, color = TRAIL_COLOR, lineWidth = TRAIL_LINE_WIDTH, opacity = TRAIL_OPACITY) {
+export function mergeTrailsIntoLineSegments(trails, scene, color = TRAIL_COLOR, lineWidth = TRAIL_LINE_WIDTH, opacity = TRAIL_OPACITY, options = null) {
     if (!Array.isArray(trails) || trails.length === 0 || !scene) return null;
 
     // Concatenate segments for all trails
@@ -361,6 +423,9 @@ export function mergeTrailsIntoLineSegments(trails, scene, color = TRAIL_COLOR, 
     const effWidth = scaleLineWidthForDisplay(lineWidth);
     // Keep depthWrite disabled for static segments as well to prevent occlusion artifacts
     const material = new THREE.LineBasicMaterial({ color, linewidth: effWidth, transparent: effOpacity < 1.0, opacity: effOpacity, depthWrite: false, fog: false, toneMapped: false });
+    if (options && Number.isFinite(options.fadeInMs) && options.fadeInMs > 0) {
+        applyFadeIn(material, effOpacity, options.fadeInMs);
+    }
     const merged = new THREE.LineSegments(geometry, material);
     // Intentionally omit a hover label so merged trail lines remain non-interactive
     // in raycast tooltips (they are purely decorative).
@@ -373,7 +438,7 @@ export function mergeTrailsIntoLineSegments(trails, scene, color = TRAIL_COLOR, 
 }
 
 /** Build one LineSegments object from a list of Float32Array segment buffers. */
-export function buildMergedLineSegmentsFromSegments(segmentsList, scene, color = TRAIL_COLOR, lineWidth = TRAIL_LINE_WIDTH, opacity = TRAIL_OPACITY) {
+export function buildMergedLineSegmentsFromSegments(segmentsList, scene, color = TRAIL_COLOR, lineWidth = TRAIL_LINE_WIDTH, opacity = TRAIL_OPACITY, options = null) {
     if (!Array.isArray(segmentsList) || segmentsList.length === 0 || !scene) return null;
     let totalFloats = 0;
     for (const seg of segmentsList) {
@@ -393,6 +458,9 @@ export function buildMergedLineSegmentsFromSegments(segmentsList, scene, color =
     const effOpacity2 = scaleOpacityForDisplay(opacity);
     const effWidth2 = scaleLineWidthForDisplay(lineWidth);
     const material = new THREE.LineBasicMaterial({ color, linewidth: effWidth2, transparent: effOpacity2 < 1.0, opacity: effOpacity2, depthWrite: false, fog: false, toneMapped: false });
+    if (options && Number.isFinite(options.fadeInMs) && options.fadeInMs > 0) {
+        applyFadeIn(material, effOpacity2, options.fadeInMs);
+    }
     const merged = new THREE.LineSegments(geometry, material);
     // Intentionally omit a hover label so merged trail lines remain non-interactive
     // in raycast tooltips (they are purely decorative).
