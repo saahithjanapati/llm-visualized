@@ -653,6 +653,7 @@ button { touch-action: manipulation; }
     justify-self: center;
     align-self: end;
     padding-bottom: 2px;
+    transform: translateY(4px);
 }
 .attention-axis-label--left {
     grid-column: 1;
@@ -662,6 +663,8 @@ button { touch-action: manipulation; }
     padding-right: 4px;
     writing-mode: vertical-rl;
     text-orientation: mixed;
+    transform: rotate(180deg);
+    transform-origin: center;
 }
 .attention-tokens {
     display: grid;
@@ -714,9 +717,13 @@ button { touch-action: manipulation; }
     text-align: right;
 }
 .attention-token-top {
-    transform: rotate(-35deg);
-    transform-origin: center bottom;
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    transform: rotate(180deg);
+    transform-origin: center center;
     text-align: center;
+    align-items: center;
+    justify-content: center;
 }
 .attention-token.is-highlighted {
     color: #ffffff;
@@ -919,7 +926,6 @@ button { touch-action: manipulation; }
     .detail-preview { min-height: 180px; }
     .detail-attention { margin: 0 8px; padding: 10px; }
     .attention-token { font-size: 9px; }
-    .attention-token-top { transform: rotate(-40deg); }
     .attention-tokens-top { min-height: calc(var(--cell-size, 16px) * 2.4); }
     .attention-value { font-size: 11px; }
 }
