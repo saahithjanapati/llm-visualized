@@ -295,6 +295,21 @@ export class LayerPipeline extends EventTarget {
             this._engine._layers.push(layer); // add to engine update list
         }
 
+        // Drive auto-camera follow from the CoreEngine RAF instead of a
+        // secondary requestAnimationFrame loop.
+        this._autoCameraDriver = {
+            isActive: true,
+            update: () => {
+                if (!this._autoCameraFollow && !this._devMode) return;
+                if (this._autoCameraFollow) {
+                    this._updateAutoCameraFollow();
+                }
+                this._updateCameraOffsetOverlay();
+            },
+            dispose: () => {}
+        };
+        this._engine._layers.push(this._autoCameraDriver);
+
         // Ensure first layer has active callback wired before start
         this._layers[0].setOnFinished(() => this._advanceToNextLayer());
         this._layers[0].setProgressEmitter(this);
@@ -1662,27 +1677,11 @@ export class LayerPipeline extends EventTarget {
     }
 
     _startCameraOverlayLoop() {
-        if (this._cameraOverlayRaf !== null) return;
-        if (typeof requestAnimationFrame !== 'function') return;
-
-        const tick = () => {
-            if (!this._autoCameraFollow) {
-                this._stopCameraOverlayLoop();
-                return;
-            }
-            this._updateAutoCameraFollow();
-            this._updateCameraOffsetOverlay();
-            this._cameraOverlayRaf = requestAnimationFrame(tick);
-        };
-
-        this._cameraOverlayRaf = requestAnimationFrame(tick);
+        // No-op: auto-camera is driven by CoreEngine's RAF via _autoCameraDriver.
     }
 
     _stopCameraOverlayLoop() {
-        if (this._cameraOverlayRaf !== null && typeof cancelAnimationFrame === 'function') {
-            cancelAnimationFrame(this._cameraOverlayRaf);
-        }
-        this._cameraOverlayRaf = null;
+        // No-op: auto-camera is driven by CoreEngine's RAF via _autoCameraDriver.
     }
 
     setDevMode(enabled) {
