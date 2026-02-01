@@ -990,8 +990,22 @@ try {
             engine: pipeline.engine
         });
         if (topLogitBars && pipeline && typeof pipeline.addEventListener === 'function') {
+            const isTopEmbeddingTraversalComplete = () => {
+                const lastLayerRef = pipeline._layers?.[NUM_LAYERS - 1];
+                if (!lastLayerRef) return false;
+                const exitY = Number.isFinite(lastLayerRef.__topEmbedExitYLocal)
+                    ? lastLayerRef.__topEmbedExitYLocal
+                    : lastLayerRef.__topEmbedStopYLocal;
+                if (!Number.isFinite(exitY)) return false;
+                const lanes = Array.isArray(lastLayerRef.lanes) ? lastLayerRef.lanes : [];
+                if (!lanes.length) return false;
+                return lanes.every((lane) => {
+                    const y = lane?.originalVec?.group?.position?.y;
+                    return Number.isFinite(y) && y >= exitY - 0.5;
+                });
+            };
             const maybeReveal = () => {
-                if (typeof pipeline.isForwardPassComplete !== 'function' || !pipeline.isForwardPassComplete()) {
+                if (!isTopEmbeddingTraversalComplete()) {
                     return false;
                 }
                 const immediate = typeof pipeline.isSkipToEndActive === 'function'
