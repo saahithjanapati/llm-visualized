@@ -1509,6 +1509,18 @@ export class SelfAttentionAnimator {
                                 dupVec.group.position.copy(startPos);
                                 // Start with the ORIGINAL value-vector look.
                                 this._copyVectorAppearance(dupVec, fixedVec);
+                                // If the fixed V vector hasn't been collapsed to output length yet (first row can race),
+                                // shrink the duplicate to match processed V visuals so it doesn't look oversized.
+                                const outputLength = Number.isFinite(this.ctx?.outputVectorLength)
+                                    ? this.ctx.outputVectorLength
+                                    : 64;
+                                const fixedRaw = fixedVec.rawData;
+                                if (fixedRaw && typeof fixedRaw.length === 'number' && fixedRaw.length > outputLength) {
+                                    this._applyValueVectorScheme(dupVec, fixedRaw, {
+                                        setHiddenToBlack: false,
+                                        cacheKeyData: fixedRaw,
+                                    });
+                                }
                                 this.ctx.parentGroup.add(dupVec.group);
                                 this._spawnedTempVectors.add(dupVec);
                                 dupVec.group.scale.set(0.001, 0.001, 0.001);

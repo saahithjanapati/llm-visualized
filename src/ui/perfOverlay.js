@@ -61,6 +61,7 @@ export function initPerfOverlay({ intervalMs = 250 } = {}) {
         dispose: () => {
             clearInterval(timer);
             if (overlay.parentElement) overlay.parentElement.removeChild(overlay);
+            perfStats.enabled = false;
         }
     };
 }

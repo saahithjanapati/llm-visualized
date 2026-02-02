@@ -16,6 +16,7 @@ export class AppState {
         this.showCameraDebug = false;
         this.showFollowViewInspector = false;
         this.devMode = false;
+        this.showPerfOverlay = false;
         this.environmentTexture = null;
         this.initialPipelineBackground = null;
         this.initialPipelineBackgroundCaptured = false;

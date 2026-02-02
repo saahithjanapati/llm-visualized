@@ -1,6 +1,7 @@
 import { setPlaybackSpeed } from '../utils/constants.js';
 import { getPreference, setPreference } from '../utils/preferences.js';
 import { appState } from '../state/appState.js';
+import { initPerfOverlay } from './perfOverlay.js';
 
 // Wires up the settings modal controls.
 export function initSettingsModal(pipeline) {
@@ -13,6 +14,7 @@ export function initSettingsModal(pipeline) {
     appState.showCameraDebug = getPreference('showCameraDebug', false);
     appState.showFollowViewInspector = false;
     appState.devMode = getPreference('devMode', false);
+    appState.showPerfOverlay = getPreference('showPerfOverlay', false);
     pipeline?.setAutoCameraFollow?.(appState.autoCameraFollow, { immediate: true });
     pipeline?.engine?.setCameraDebugEnabled?.(appState.showCameraDebug);
     pipeline?.setDevMode?.(appState.devMode);
@@ -20,6 +22,24 @@ export function initSettingsModal(pipeline) {
 
     let followInspectorEl = null;
     let followInspectorRaf = null;
+    let perfOverlayController = null;
+
+    const setPerfOverlayEnabled = (enabled) => {
+        const nextValue = !!enabled;
+        if (nextValue === appState.showPerfOverlay && ((nextValue && perfOverlayController) || (!nextValue && !perfOverlayController))) {
+            return;
+        }
+        appState.showPerfOverlay = nextValue;
+        setPreference('showPerfOverlay', appState.showPerfOverlay);
+        if (appState.showPerfOverlay) {
+            if (!perfOverlayController) {
+                perfOverlayController = initPerfOverlay();
+            }
+        } else if (perfOverlayController) {
+            perfOverlayController.dispose();
+            perfOverlayController = null;
+        }
+    };
 
     const ensureFollowInspector = () => {
         if (followInspectorEl) return followInspectorEl;
@@ -151,6 +171,8 @@ export function initSettingsModal(pipeline) {
         if (camDebug) camDebug.checked = !!appState.showCameraDebug;
         const followInspector = document.getElementById('toggleFollowViewInspector');
         if (followInspector) followInspector.checked = !!appState.showFollowViewInspector;
+        const perfOverlay = document.getElementById('togglePerfOverlay');
+        if (perfOverlay) perfOverlay.checked = !!appState.showPerfOverlay;
     }
 
     function closeSettings() {
@@ -235,6 +257,11 @@ export function initSettingsModal(pipeline) {
         pipeline?.engine?.setDevMode?.(appState.devMode);
     });
 
+    const perfToggle = document.getElementById('togglePerfOverlay');
+    perfToggle?.addEventListener('change', () => {
+        setPerfOverlayEnabled(!!perfToggle.checked);
+    });
+
     const camDebugToggle = document.getElementById('toggleCameraDebug');
     camDebugToggle?.addEventListener('change', () => {
         appState.showCameraDebug = !!camDebugToggle.checked;
@@ -246,6 +273,10 @@ export function initSettingsModal(pipeline) {
     followInspectorToggle?.addEventListener('change', () => {
         setFollowInspectorEnabled(!!followInspectorToggle.checked);
     });
+
+    if (appState.showPerfOverlay) {
+        setPerfOverlayEnabled(true);
+    }
 
     if (appState.showFollowViewInspector) {
         setFollowInspectorEnabled(true);
