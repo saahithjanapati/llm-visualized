@@ -12,7 +12,8 @@ Source code for the visualization. This folder hosts the rendering engine, anima
 - ui/: DOM overlays and controls.
 - data/: activation sources and parameter data.
 - state/: shared runtime state.
+- app/gpt-tower/: main demo entry and helper modules.
 
 ## Where to start
-- For the main tower: `tests/twelve-layer-stack.js` (outside this folder) wires the pipeline.
+- For the main tower: `src/app/gpt-tower/index.js` wires the pipeline.
 - For per-layer visuals: `engine/layers/Gpt2Layer.js`.

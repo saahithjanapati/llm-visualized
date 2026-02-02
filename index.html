@@ -12,20 +12,20 @@
 
         gtag('config', 'G-E0WWTHCQQF');
     </script>
-    <title>Test – 12-Layer GPT-2 Stack</title>
-    <link rel="stylesheet" href="public/twelve-layer-stack.css">
+    <title>LLM Visualized – GPT-2 Tower</title>
+    <link rel="stylesheet" href="/twelve-layer-stack.css">
     <!-- KaTeX for equation rendering (fallbacks to plain text if blocked) -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
 </head>
 <body>
     <!-- Loading GIF overlay -->
-    <img id="loadingGif" src="cool-fun.gif" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:4;max-width:30%;height:auto;" />
+    <img id="loadingGif" src="/cool-fun.gif" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:4;max-width:30%;height:auto;" />
     <!-- Auto-camera debug overlay -->
     <div id="cameraOffsetOverlay" style="position:fixed;bottom:20px;right:10px;padding:8px 12px;font-family:monospace;font-size:13px;color:#fff;background:rgba(12,12,12,0.45);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);border-radius:8px;pointer-events:none;z-index:5;white-space:pre;display:none;">Offset vs Residual Lane 2\nΔx: —\nΔy: —\nΔz: —</div>
     <!-- Top-right controls -->
     <div id="topControls">
-        <button id="pauseBtn" type="button" aria-pressed="false" aria-label="Pause animation" title="Pause animation">Pause</button>
+        <button id="pauseBtn" type="button" aria-pressed="false" aria-label="Pause animation" title="Pause animation">⏸︎</button>
         <div id="skipMenu" data-open="false" data-visible="true">
             <button id="skipMenuToggle" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Skip options" title="Skip options">Skip</button>
             <div id="skipMenuItems" role="menu" aria-label="Skip options">
@@ -35,7 +35,12 @@
             </div>
         </div>
         <button id="followModeBtn" type="button" aria-pressed="true" aria-label="Follow mode enabled" title="Follow mode enabled">Follow mode on</button>
-        <button id="settingsBtn" type="button" aria-haspopup="dialog" aria-controls="settingsOverlay" title="Settings">⚙️</button>
+        <button id="settingsBtn" type="button" aria-haspopup="dialog" aria-controls="settingsOverlay" title="Settings">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1 1 0 0 0-1.1-.2a1 1 0 0 0-.6.9V20a2 2 0 0 1-4 0v-.1a1 1 0 0 0-.6-.9a1 1 0 0 0-1.1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1 1 0 0 0 .2-1.1a1 1 0 0 0-.9-.6H4a2 2 0 0 1 0-4h.1a1 1 0 0 0 .9-.6a1 1 0 0 0-.2-1.1l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1 1 0 0 0 1.1.2a1 1 0 0 0 .6-.9V4a2 2 0 0 1 4 0v.1a1 1 0 0 0 .6.9a1 1 0 0 0 1.1-.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1 1 0 0 0-.2 1.1a1 1 0 0 0 .9.6H20a2 2 0 0 1 0 4h-.1a1 1 0 0 0-.9.6z"></path>
+                <circle cx="12" cy="12" r="3.5"></circle>
+            </svg>
+        </button>
     </div>
 
     <!-- Consolidated HUD + selection stack -->
@@ -52,6 +57,7 @@
             </div>
         </div>
 
+        <!-- Detail side panel (click an object to open) -->
         <aside id="detailPanel" aria-hidden="true">
             <div class="detail-header">
                 <div class="detail-title-group">
@@ -68,9 +74,9 @@
                 <div class="vector-legend-title">Residual value colors</div>
                 <div id="detailVectorLegendBar" class="vector-legend-bar"></div>
                 <div class="vector-legend-labels">
-                    <span id="detailVectorLegendLow">-2</span>
+                    <span id="detailVectorLegendLow">&lt;= -2</span>
                     <span id="detailVectorLegendMid">0</span>
-                    <span id="detailVectorLegendHigh">+2</span>
+                    <span id="detailVectorLegendHigh">&gt;= +2</span>
                 </div>
             </div>
             <div id="detailAttention" class="detail-attention" aria-hidden="true">
@@ -98,9 +104,9 @@
                 <div id="detailAttentionNote" class="attention-note"></div>
                 <div id="detailAttentionValue" class="attention-value"></div>
                 <div class="attention-legend" aria-hidden="true">
-                    <span id="detailAttentionLegendLow" class="attention-legend-label">-5</span>
+                    <span id="detailAttentionLegendLow" class="attention-legend-label">&lt;= -5</span>
                     <div id="detailAttentionLegend" class="attention-legend-bar" data-mid="0"></div>
-                    <span id="detailAttentionLegendHigh" class="attention-legend-label">+5</span>
+                    <span id="detailAttentionLegendHigh" class="attention-legend-label">&gt;= +5</span>
                 </div>
             </div>
             <div id="detailMeta" class="detail-meta">
@@ -193,6 +199,6 @@
     <!-- Stats.js for FPS / frame time monitoring -->
     <script src="https://cdn.jsdelivr.net/npm/stats.js@0.17.0/build/stats.min.js"></script>
 
-    <script type="module" src="tests/twelve-layer-stack.js"></script>
+    <script type="module" src="/src/app/gpt-tower/index.js"></script>
 </body>
-</html> 
+</html>

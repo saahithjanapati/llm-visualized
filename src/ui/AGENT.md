@@ -11,4 +11,4 @@ DOM overlays and interactive controls for demos.
 
 ## Notes
 - UI modules expect specific DOM ids defined in `index.html` or demo HTML.
-- Styling lives in `public/twelve-layer-stack.css`.
+- Styling lives in `twelve-layer-stack.css`.

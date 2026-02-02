@@ -23,7 +23,7 @@ export class VectorVisualization {
         this.group.userData.label = 'Vector';
         this.ellipses = []; // Keep track of meshes for potential updates
         // Assign a default speed, can be overridden later
-        this.speed = 0; // Initialize speed, will be set externally in main.js
+        this.speed = 0; // Initialize speed; callers can override as needed
 
         const vectorData = initialData || this.generateTestData();
         // const normalizedVectorData = this.layerNormalize(vectorData); // REMOVED: Do not normalize for initial coloring

@@ -6,36 +6,20 @@ alwaysApply: false
 # Build & Testing Overview
 
 ## Build System
-The project uses [vite.config.js](mdc:vite.config.js) to bundle and serve assets.  Notable points:
+The project uses [vite.config.js](mdc:vite.config.js) to bundle and serve assets. Notable points:
 
 * `@vitejs/plugin-basic-ssl` enables local HTTPS.
 * `build.outDir` is `dist`, and the directory is emptied on each build.
-* `rollupOptions.input` lists multiple HTML entry points so they are compiled alongside the main `index.html`:
-  - **Main pages**: [index.html](mdc:index.html), [app.html](mdc:app.html)
-  - **Test pages** found under the *tests* directory (see below).
+* The main entry is [index.html](mdc:index.html).
 * During development `vite dev` opens `/index.html` automatically thanks to `server.open`.
-
-## Tests Linked in the Build
-All demo and regression pages live in the [tests](mdc:tests) folder.  Each HTML file under this directory is added as a separate Rollup input in `vite.config.js`, allowing you to open them directly while the dev server is running.
-
-When new test pages are created, simply drop the HTML file in `tests/` and register it in the `rollupOptions.input` map.  No further configuration is needed.
 
 ## Components Folder
 Reusable scene primitives live in [src/components](mdc:src/components):
 
 * [VectorVisualization.js](mdc:src/components/VectorVisualization.js) — converts an array of numbers into a vertical stack of cubes/ellipses, with utility helpers `layerNormalize` and disposal logic.
-* [WeightMatrixVisualization.js](mdc:src/components/WeightMatrixVisualization.js) — parametric trapezoidal prism with vertical slits that vectors pass through.  Exposes `updateGeometry` for live-GUI tweaks.
+* [WeightMatrixVisualization.js](mdc:src/components/WeightMatrixVisualization.js) — parametric trapezoidal prism with vertical slits that vectors pass through. Exposes `updateGeometry` for live-GUI tweaks.
 
-These components purposefully avoid direct scene references so they can be embedded in multiple animations/tests.
-
-## Forthcoming GPT Extraction Layer
-A nascent Python package under [`gpt_extraction`](mdc:gpt_extraction) will provide utilities to pull hidden states and other internals from a GPT forward pass.  Early stubs include:
-
-* [utils.py](mdc:gpt_extraction/utils.py)
-* [model.py](mdc:gpt_extraction/model.py)
-* [bpe.py](mdc:gpt_extraction/bpe.py)
-
-Expect tighter integration between the Three.js visualizer and these extraction scripts once the Python APIs solidify.
+These components purposefully avoid direct scene references so they can be embedded in multiple animations.
 
 ---
-Use this rule when you need context on how pages are built, where to find standalone demos, or which component handles a given 3-D primitive.
+Use this rule when you need context on how pages are built or which component handles a given 3-D primitive.
