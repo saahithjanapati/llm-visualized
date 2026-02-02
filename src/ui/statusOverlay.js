@@ -18,6 +18,9 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     const equationsTitle = document.getElementById('equationsTitle');
     const equationsBody = document.getElementById('equationsBody');
     const shouldShowEquations = () => appState.showEquations && !appState.equationsSuppressed;
+    const scheduleFrame = (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function')
+        ? window.requestAnimationFrame.bind(window)
+        : (cb) => setTimeout(cb, 16);
 
     appState.showEquations = getPreference('showEquations', true);
     appState.showHdrBackground = getPreference('showHdrBackground', false);
@@ -43,7 +46,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     const WDownRaw = 'W_{\\text{down}}';
     const WUp = colorize(mlpUpColor, WUpRaw);
     const WDown = colorize(mlpDownColor, WDownRaw);
-    const U = '\\mathrm{u}';
+    const U = 'u';
     const U_LN = `${U}_{\\text{ln}}`;
     const topEmbedBaseColor = new THREE.Color(0x000000);
     const topEmbedTargetColor = new THREE.Color(MHA_FINAL_Q_COLOR);
@@ -110,6 +113,97 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         resid2: String.raw`x_{\text{out}} = ${U} + \mathrm{MLP}(${U_LN})`
     };
 
+    const EQUATION_FONT_MIN_PX = 10;
+    const eqFitState = {
+        baseFontPx: null,
+        lastFontPx: null,
+        scheduled: false,
+        pending: false
+    };
+    const getPx = (value) => {
+        const parsed = Number.parseFloat(value);
+        return Number.isFinite(parsed) ? parsed : 0;
+    };
+    const readBaseFontPx = () => {
+        if (!equationsBody || typeof window === 'undefined') return 14;
+        const previous = equationsBody.style.fontSize;
+        equationsBody.style.fontSize = '';
+        const base = getPx(window.getComputedStyle(equationsBody).fontSize) || 14;
+        equationsBody.style.fontSize = previous;
+        return base;
+    };
+    const applyEquationFit = () => {
+        if (!equationsPanel || !equationsBody) return;
+        if (!shouldShowEquations()) return;
+        const panelRect = equationsPanel.getBoundingClientRect();
+        if (!(panelRect.width > 0 && panelRect.height > 0)) return;
+
+        const titleRect = equationsTitle ? equationsTitle.getBoundingClientRect() : { height: 0 };
+        const titleStyle = equationsTitle ? window.getComputedStyle(equationsTitle) : null;
+        const titleMarginBottom = titleStyle ? getPx(titleStyle.marginBottom) : 0;
+        const bodyStyle = window.getComputedStyle(equationsBody);
+        const paddingX = getPx(bodyStyle.paddingLeft) + getPx(bodyStyle.paddingRight);
+        const paddingY = getPx(bodyStyle.paddingTop) + getPx(bodyStyle.paddingBottom);
+
+        const availableWidth = Math.max(0, panelRect.width - paddingX);
+        const availableHeight = Math.max(0, panelRect.height - titleRect.height - titleMarginBottom - paddingY);
+        if (!(availableWidth > 0 && availableHeight > 0)) return;
+
+        const baseFontPx = readBaseFontPx();
+        if (eqFitState.baseFontPx === null || Math.abs(baseFontPx - eqFitState.baseFontPx) > 0.5) {
+            eqFitState.baseFontPx = baseFontPx;
+            eqFitState.lastFontPx = null;
+        }
+        equationsBody.style.fontSize = `${eqFitState.baseFontPx}px`;
+
+        const contentWidth = equationsBody.scrollWidth;
+        const contentHeight = equationsBody.scrollHeight;
+        if (!(contentWidth > 0 && contentHeight > 0)) return;
+
+        const widthScale = availableWidth / contentWidth;
+        const heightScale = availableHeight / contentHeight;
+        const scale = Math.min(widthScale, heightScale);
+        if (!Number.isFinite(scale) || scale <= 0) return;
+
+        const maxFontPx = Math.max(EQUATION_FONT_MIN_PX, availableHeight);
+        const targetFontPx = Math.min(
+            maxFontPx,
+            Math.max(EQUATION_FONT_MIN_PX, eqFitState.baseFontPx * scale)
+        );
+        if (eqFitState.lastFontPx !== null && Math.abs(targetFontPx - eqFitState.lastFontPx) < 0.1) return;
+
+        equationsBody.style.fontSize = `${targetFontPx.toFixed(2)}px`;
+        eqFitState.lastFontPx = targetFontPx;
+    };
+    const scheduleEquationFit = () => {
+        if (eqFitState.scheduled) {
+            eqFitState.pending = true;
+            return;
+        }
+        eqFitState.scheduled = true;
+        eqFitState.pending = false;
+        scheduleFrame(() => {
+            eqFitState.scheduled = false;
+            if (eqFitState.pending) {
+                eqFitState.pending = false;
+                scheduleEquationFit();
+                return;
+            }
+            applyEquationFit();
+        });
+    };
+
+    if (equationsPanel && typeof ResizeObserver !== 'undefined') {
+        const eqObserver = new ResizeObserver(() => scheduleEquationFit());
+        eqObserver.observe(equationsPanel);
+    }
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+        window.addEventListener('resize', scheduleEquationFit);
+        if (typeof document !== 'undefined' && document.fonts?.ready) {
+            document.fonts.ready.then(() => scheduleEquationFit());
+        }
+    }
+
     function renderEq(tex, title) {
         if (!equationsPanel || !equationsBody) return;
         if (!shouldShowEquations()) return;
@@ -118,12 +212,15 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
             try {
                 equationsBody.innerHTML = '';
                 window.katex.render(tex, equationsBody, { throwOnError: false, displayMode: true });
+                scheduleEquationFit();
             } catch (err) {
                 console.error('KaTeX render failed:', err);
                 equationsBody.textContent = tex;
+                scheduleEquationFit();
             }
         } else {
             equationsBody.textContent = tex;
+            scheduleEquationFit();
         }
     }
 
@@ -362,10 +459,6 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         statusDiv.textContent = nextStatusText;
         checkTopEmbeddingActivation();
     }
-
-    const scheduleFrame = (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function')
-        ? window.requestAnimationFrame.bind(window)
-        : (cb) => setTimeout(cb, 16);
 
     let framePending = false;
     let needsUpdate = false;

@@ -377,6 +377,7 @@ varying float vGradientT;`
 
     syncAll() {
         let boundsDirty = this._boundsDirty;
+        let didMatrixUpdate = false;
         for (let i = 0; i < this.vectorCount; i++) {
             const ref = this._vectorRefs[i];
             if (!ref) continue;
@@ -387,6 +388,7 @@ varying float vGradientT;`
                     ref._lastVisible = false;
                     ref._matricesInitialized = true;
                     boundsDirty = true;
+                    didMatrixUpdate = true;
                 }
                 continue;
             }
@@ -396,6 +398,7 @@ varying float vGradientT;`
                 ref._lastVisible = true;
                 ref._matricesInitialized = true;
                 boundsDirty = true;
+                didMatrixUpdate = true;
                 continue;
             }
             const dx = ref.group.position.x - ref._lastPos.x;
@@ -404,10 +407,13 @@ varying float vGradientT;`
             if (dx || dy || dz) {
                 this._offsetVectorMatrices(i, dx, dy, dz);
                 ref._lastPos.copy(ref.group.position);
+                didMatrixUpdate = true;
             }
             ref._lastVisible = true;
         }
-        this.mesh.instanceMatrix.needsUpdate = true;
+        if (didMatrixUpdate) {
+            this.mesh.instanceMatrix.needsUpdate = true;
+        }
         if (boundsDirty) {
             this.mesh.boundingSphere = null;
             this.mesh.boundingBox = null;

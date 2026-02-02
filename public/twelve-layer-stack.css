@@ -165,8 +165,8 @@ button { touch-action: manipulation; }
     display: flex;
     flex-direction: column;
     gap: 0;
-    width: min(420px, 36vw);
-    max-width: min(520px, 92vw);
+    width: clamp(320px, 32vw, 420px);
+    max-width: min(420px, 92vw);
     pointer-events: auto;
     transition: top 0.25s ease;
 }

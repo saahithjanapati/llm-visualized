@@ -11,3 +11,4 @@ Data extraction and precomputed geometry generation.
 
 ## Notes
 - Generated assets are large; check output paths before running.
+- Main app entry point lives in `index.html` and loads `src/app/gpt-tower/index.js`.

@@ -10,3 +10,4 @@ Static assets and CSS served by Vite.
 
 ## Notes
 - JS should not live here; keep it in `src/`.
+- Main app entry point lives in `index.html` and loads `src/app/gpt-tower/index.js`.
