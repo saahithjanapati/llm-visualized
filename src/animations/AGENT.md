@@ -7,7 +7,6 @@ Animation controllers and sequencing helpers.
 - `MHSAAnimation.js`: attention routing block used by the main tower.
 - `PrismLayerNormAnimation.js`: LN animation and prism flows.
 - `LayerAnimationConstants.js`: shared colors and lane settings.
-- `ForwardPassController.js`: demo-level sequencing glue.
 - `mhsa/`: detailed attention routing helpers.
 
 ## Notes

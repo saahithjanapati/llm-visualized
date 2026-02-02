@@ -199,7 +199,7 @@ export function mapValueToGrayscale(value) {
 //     }
 //     return finalColor;
 // }
-// For more targeted logging from VectorVisualization:
+// For more targeted logging from vector renderers:
 // Modify mapValueToColor to accept an optional index for logging context
 let mapValueToColorCallCount = 0;
 export function mapValueToColor_LOG(value, index) {
@@ -238,7 +238,7 @@ export function mapValueToColor_LOG(value, index) {
 //     return new THREE.Color().setHSL(hue, saturation, lightness);
 // }
 
-// To use the logging version, you'd call mapValueToColor_LOG from VectorVisualization.js
+// To use the logging version, call mapValueToColor_LOG from the vector renderer.
 // For now, let's make the original function log directly but less frequently to avoid flooding.
 
 // Re-defining the original function with some conditional logging:

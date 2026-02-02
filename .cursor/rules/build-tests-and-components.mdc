@@ -16,7 +16,7 @@ The project uses [vite.config.js](mdc:vite.config.js) to bundle and serve assets
 ## Components Folder
 Reusable scene primitives live in [src/components](mdc:src/components):
 
-* [VectorVisualization.js](mdc:src/components/VectorVisualization.js) — converts an array of numbers into a vertical stack of cubes/ellipses, with utility helpers `layerNormalize` and disposal logic.
+* [VectorVisualizationInstancedPrism.js](mdc:src/components/VectorVisualizationInstancedPrism.js) — instanced prism vectors used throughout the tower.
 * [WeightMatrixVisualization.js](mdc:src/components/WeightMatrixVisualization.js) — parametric trapezoidal prism with vertical slits that vectors pass through. Exposes `updateGeometry` for live-GUI tweaks.
 
 These components purposefully avoid direct scene references so they can be embedded in multiple animations.

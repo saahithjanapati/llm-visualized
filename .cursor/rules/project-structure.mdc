@@ -11,7 +11,7 @@ Key building blocks:
 
 * engine/layers/Gpt2Layer.js — per-layer visuals and sequencing.
 * animations/ — MHSA, LayerNorm, and vector animation controllers.
-* components/ — reusable geometry/visual primitives.
+* components/ — reusable geometry/visual primitives (primarily instanced prism vectors + matrices).
 * utils/ — shared constants, colors, trails, and loaders.
 * ui/ — DOM overlays and controls driven by `index.html`.
 

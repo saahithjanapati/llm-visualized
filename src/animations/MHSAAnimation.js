@@ -112,8 +112,8 @@ const softenMatrixSurface = (matrix, tweaks = BASE_MATRIX_SURFACE_TWEAKS) => {
 export class MHSAAnimation {
     /**
      * Global toggle.  Set `MHSAAnimation.ENABLE_SELF_ATTENTION = true` **before**
-     * constructing an instance to activate the (placeholder) self-attention
-     * sub-animation.  The big 12-layer demo leaves this `false` so nothing runs.
+     * constructing an instance to activate the self-attention sub-animation.
+     * The main tower demo enables this by default; other entrypoints may opt out.
      */
     static ENABLE_SELF_ATTENTION = false;
 

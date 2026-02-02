@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { CoreEngine } from './CoreEngine.js';
+import { AutoCameraController } from './AutoCameraController.js';
 import Gpt2Layer from './layers/Gpt2Layer.js';
 import { createRandomSource } from '../data/RandomActivationSource.js';
 import {
@@ -17,7 +18,6 @@ import {
     PRISM_ADD_ANIM_BASE_FLASH_DURATION,
     PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS,
     PRISM_ADD_ANIM_SPEED_MULT,
-    HIDE_INSTANCE_Y_OFFSET,
     setGlobalAnimSpeedMult,
     setPrismAddAnimSpeedMult,
     setSelfAttentionTimeMult,
@@ -51,10 +51,6 @@ const COLOR_LIGHT_YELLOW = new THREE.Color(0xffffff);
 const COLOR_BRIGHT_YELLOW = new THREE.Color(0xffffff);
 
 const TMP_WORLD_POS = new THREE.Vector3();
-const TMP_CENTER_A = new THREE.Vector3();
-const TMP_CENTER_B = new THREE.Vector3();
-const TMP_CENTER_MAT_A = new THREE.Matrix4();
-const TMP_CENTER_MAT_B = new THREE.Matrix4();
 
 /**
  * LayerPipeline orchestrates a single bundle of vectors ("lanes") through an
@@ -90,92 +86,6 @@ export class LayerPipeline extends EventTarget {
         this._skipLayerRestore = null;
         this._skipLayerLast = false;
 
-        this._autoCameraFollow = opts.autoCameraFollow !== false;
-        const smoothAlpha = typeof opts.autoCameraSmoothAlpha === 'number' ? opts.autoCameraSmoothAlpha : 0.14;
-        this._autoCameraSmoothAlpha = Math.min(1, Math.max(0, smoothAlpha));
-        const offsetAlpha = typeof opts.autoCameraOffsetLerpAlpha === 'number' ? opts.autoCameraOffsetLerpAlpha : 0.14;
-        this._autoCameraOffsetLerpAlpha = Math.min(1, Math.max(0, offsetAlpha));
-        const viewBlendAlpha = typeof opts.autoCameraViewBlendAlpha === 'number' ? opts.autoCameraViewBlendAlpha : 0.12;
-        this._autoCameraViewBlendAlpha = Math.min(1, Math.max(0, viewBlendAlpha));
-        const mlpBlendAlpha = typeof opts.autoCameraViewBlendAlphaMlpReturn === 'number'
-            ? opts.autoCameraViewBlendAlphaMlpReturn
-            : (this._autoCameraViewBlendAlpha * 0.35);
-        this._autoCameraViewBlendAlphaMlpReturn = Math.min(1, Math.max(0, mlpBlendAlpha));
-        this._autoCameraViewBlendAlphaActive = this._autoCameraViewBlendAlpha;
-        const mobileScale = typeof opts.autoCameraMobileScale === 'number' ? opts.autoCameraMobileScale : 1.0;
-        this._autoCameraScaleMax = Math.max(1.0, mobileScale);
-        const mobileShiftX = typeof opts.autoCameraMobileShiftX === 'number' ? opts.autoCameraMobileShiftX : 0;
-        this._autoCameraShiftMaxX = mobileShiftX;
-        const travelShiftX = typeof opts.autoCameraTravelMobileShiftX === 'number' ? opts.autoCameraTravelMobileShiftX : 0;
-        this._autoCameraShiftMaxTravelX = travelShiftX;
-        const mhsaShiftX = typeof opts.autoCameraMhsaMobileShiftX === 'number' ? opts.autoCameraMhsaMobileShiftX : 0;
-        this._autoCameraShiftMaxMhsaX = mhsaShiftX;
-        this._autoCameraTravelMobileOverrideCameraOffset = null;
-        this._autoCameraTravelMobileOverrideTargetOffset = null;
-        this._autoCameraTravelMobileOverrideEnabled = false;
-        this._autoCameraScaleMinWidth = Number.isFinite(opts.autoCameraScaleMinWidth)
-            ? Math.max(200, opts.autoCameraScaleMinWidth)
-            : 360;
-        this._autoCameraScaleMaxWidth = Number.isFinite(opts.autoCameraScaleMaxWidth)
-            ? Math.max(this._autoCameraScaleMinWidth + 10, opts.autoCameraScaleMaxWidth)
-            : 880;
-        this._autoCameraScaleLast = 1.0;
-        this._autoCameraShiftLastX = 0;
-        this._autoCameraCenter = new THREE.Vector3();
-        this._autoCameraOffsetScratch = new THREE.Vector3();
-        this._autoCameraDesiredCameraOffset = new THREE.Vector3();
-        this._autoCameraDesiredTargetOffset = new THREE.Vector3();
-        this._autoCameraCurrentCameraOffset = new THREE.Vector3();
-        this._autoCameraCurrentTargetOffset = new THREE.Vector3();
-        this._autoCameraSmoothedRef = new THREE.Vector3();
-        this._autoCameraSmoothValid = false;
-        this._autoCameraViewKey = 'default';
-        this._autoCameraViewBlendT = 1;
-        this._autoCameraViewFromCameraOffset = new THREE.Vector3();
-        this._autoCameraViewFromTargetOffset = new THREE.Vector3();
-        this._autoCameraViewToCameraOffset = new THREE.Vector3();
-        this._autoCameraViewToTargetOffset = new THREE.Vector3();
-        this._autoCameraViewBlendCameraOffset = new THREE.Vector3();
-        this._autoCameraViewBlendTargetOffset = new THREE.Vector3();
-        this._autoCameraViewContext = null;
-        this._autoCameraDefaultCameraOffset = new THREE.Vector3();
-        this._autoCameraDefaultTargetOffset = new THREE.Vector3();
-        this._autoCameraMhsaCameraOffset = new THREE.Vector3();
-        this._autoCameraMhsaTargetOffset = new THREE.Vector3();
-        this._autoCameraConcatCameraOffset = new THREE.Vector3();
-        this._autoCameraConcatTargetOffset = new THREE.Vector3();
-        this._autoCameraMhsaOffsetsEnabled = false;
-        this._autoCameraConcatOffsetsEnabled = false;
-        this._autoCameraLnCameraOffset = new THREE.Vector3();
-        this._autoCameraLnTargetOffset = new THREE.Vector3();
-        this._autoCameraTravelCameraOffset = new THREE.Vector3();
-        this._autoCameraTravelTargetOffset = new THREE.Vector3();
-        this._autoCameraLnOffsetsEnabled = false;
-        this._autoCameraTravelOffsetsEnabled = false;
-        this._autoCameraDefaultCameraOffsetBase = new THREE.Vector3();
-        this._autoCameraDefaultTargetOffsetBase = new THREE.Vector3();
-        this._autoCameraMhsaCameraOffsetBase = new THREE.Vector3();
-        this._autoCameraMhsaTargetOffsetBase = new THREE.Vector3();
-        this._autoCameraConcatCameraOffsetBase = new THREE.Vector3();
-        this._autoCameraConcatTargetOffsetBase = new THREE.Vector3();
-        this._autoCameraLnCameraOffsetBase = new THREE.Vector3();
-        this._autoCameraLnTargetOffsetBase = new THREE.Vector3();
-        this._autoCameraTravelCameraOffsetBase = new THREE.Vector3();
-        this._autoCameraTravelTargetOffsetBase = new THREE.Vector3();
-        this._autoCameraInspectorRef = new THREE.Vector3();
-        this._hasAutoCameraOffsets = false;
-        this._suppressControlsChange = false;
-        this._devMode = !!opts.devMode;
-        this._cameraOffsetDiv = (typeof document !== 'undefined')
-            ? document.getElementById('cameraOffsetOverlay')
-            : null;
-        this._controlsChangeHandler = null;
-        this._overviewCameraTween = null;
-        this._overviewTargetTween = null;
-        this._onAutoCameraProgress = () => { this._maybeAutoCameraFocus(); };
-        this._cameraOverlayRaf = null;
-        this.addEventListener('progress', this._onAutoCameraProgress);
-
         // ------------------------------------------------------------------
         // Pre-create *all* layers so their static visuals are visible upfront.
         // Only the first layer is active immediately; higher layers remain
@@ -193,88 +103,22 @@ export class LayerPipeline extends EventTarget {
             engineOpts.cameraFarMargin = approxTowerAllowance;
         }
         this._engine = new CoreEngine(canvas, [], engineOpts);
-
-        const parseVec3 = (value, fallback = null) => {
-            if (value instanceof THREE.Vector3) return value.clone();
-            if (value && typeof value === 'object' && 'x' in value && 'y' in value && 'z' in value) {
-                return new THREE.Vector3(value.x, value.y, value.z);
-            }
-            return fallback ? fallback.clone() : null;
-        };
-
-        this._overviewCameraPosition = parseVec3(
-            (opts.skipToEndCameraPosition ?? opts.cameraPosition) ?? null,
-            null
-        );
-        this._overviewCameraTarget = parseVec3(
-            (opts.skipToEndCameraTarget ?? opts.cameraTarget) ?? null,
-            null
-        );
-
-        const defaultTargetOffset = parseVec3(opts.autoCameraDefaultTargetOffset, new THREE.Vector3(0, 0, 0));
-        const cameraTarget = this._engine?.controls?.target || new THREE.Vector3();
-        const defaultCameraOffset = parseVec3(
-            opts.autoCameraDefaultCameraOffset,
-            this._engine?.camera?.position ? this._engine.camera.position.clone().sub(cameraTarget) : new THREE.Vector3(0, 2000, 16000)
-        );
-        if (defaultTargetOffset) this._autoCameraDefaultTargetOffsetBase.copy(defaultTargetOffset);
-        if (defaultCameraOffset) this._autoCameraDefaultCameraOffsetBase.copy(defaultCameraOffset);
-
-        const mhsaCamOffset = parseVec3(opts.autoCameraMhsaCameraOffset, null);
-        const mhsaTargetOffset = parseVec3(opts.autoCameraMhsaTargetOffset, null);
-        if (mhsaCamOffset && mhsaTargetOffset) {
-            this._autoCameraMhsaCameraOffsetBase.copy(mhsaCamOffset);
-            this._autoCameraMhsaTargetOffsetBase.copy(mhsaTargetOffset);
-            this._autoCameraMhsaOffsetsEnabled = true;
-        }
-
-        const concatCamOffset = parseVec3(opts.autoCameraConcatCameraOffset, null);
-        const concatTargetOffset = parseVec3(opts.autoCameraConcatTargetOffset, null);
-        if (concatCamOffset && concatTargetOffset) {
-            this._autoCameraConcatCameraOffsetBase.copy(concatCamOffset);
-            this._autoCameraConcatTargetOffsetBase.copy(concatTargetOffset);
-            this._autoCameraConcatOffsetsEnabled = true;
-        }
-
-        const lnCamOffset = parseVec3(opts.autoCameraLnCameraOffset, null);
-        const lnTargetOffset = parseVec3(opts.autoCameraLnTargetOffset, null);
-        if (lnCamOffset && lnTargetOffset) {
-            this._autoCameraLnCameraOffsetBase.copy(lnCamOffset);
-            this._autoCameraLnTargetOffsetBase.copy(lnTargetOffset);
-            this._autoCameraLnOffsetsEnabled = true;
-        }
-
-        const travelCamOffset = parseVec3(opts.autoCameraTravelCameraOffset, null);
-        const travelTargetOffset = parseVec3(opts.autoCameraTravelTargetOffset, null);
-        if (travelCamOffset && travelTargetOffset) {
-            this._autoCameraTravelCameraOffsetBase.copy(travelCamOffset);
-            this._autoCameraTravelTargetOffsetBase.copy(travelTargetOffset);
-            this._autoCameraTravelOffsetsEnabled = true;
-        }
-        const travelMobileCamOffset = parseVec3(opts.autoCameraTravelMobileCameraOffset, null);
-        const travelMobileTargetOffset = parseVec3(opts.autoCameraTravelMobileTargetOffset, null);
-        if (travelMobileCamOffset && travelMobileTargetOffset) {
-            this._autoCameraTravelMobileOverrideCameraOffset = travelMobileCamOffset;
-            this._autoCameraTravelMobileOverrideTargetOffset = travelMobileTargetOffset;
-            this._autoCameraTravelMobileOverrideEnabled = true;
-        }
-
-        this._updateAutoCameraScaledOffsets(true);
+        this._autoCamera = new AutoCameraController({
+            pipeline: this,
+            engine: this._engine,
+            opts
+        });
         // Keep layer spacing consistent across devices; auto-camera scaling is
         // for view offsets only and shouldn't stretch the stack.
         const layerStackSpacing = LAYER_STACK_SPACING_Y;
+        this._initLayers(layerStackSpacing);
+        this._initAutoCameraDriver();
 
-        if (this._engine?.controls) {
-            this._controlsChangeHandler = () => {
-                if (!this._autoCameraFollow || this._suppressControlsChange) {
-                    return;
-                }
-                this._captureAutoCameraOffsets();
-                this._updateCameraOffsetOverlay();
-            };
-            this._engine.controls.addEventListener('change', this._controlsChangeHandler);
-        }
+        this._autoCamera?.maybeFocus({ immediate: true });
+    }
 
+
+    _initLayers(layerStackSpacing) {
         for (let i = 0; i < this._numLayers; i++) {
             const rand = this._randFactory();
             const isActive = i === 0; // only first layer active initially
@@ -301,44 +145,26 @@ export class LayerPipeline extends EventTarget {
             this._layers.push(layer);
             this._engine._layers.push(layer); // add to engine update list
         }
+    }
 
+    _initAutoCameraDriver() {
         // Drive auto-camera follow from the CoreEngine RAF instead of a
         // secondary requestAnimationFrame loop.
         this._autoCameraDriver = {
             isActive: true,
             update: () => {
-                if (!this._autoCameraFollow && !this._devMode) return;
-                if (this._autoCameraFollow) {
-                    this._updateAutoCameraFollow();
-                }
-                this._updateCameraOffsetOverlay();
+                this._autoCamera?.update?.();
             },
             dispose: () => {}
         };
         this._engine._layers.push(this._autoCameraDriver);
-
-        // Ensure first layer has active callback wired before start
-        this._layers[0].setOnFinished(() => this._advanceToNextLayer());
-        this._layers[0].setProgressEmitter(this);
-
-        this._maybeAutoCameraFocus({ immediate: true });
-        if (this._autoCameraFollow) {
-            this._startCameraOverlayLoop();
-        }
     }
 
     /** Dispose and tear down Three resources */
     dispose() {
-        if (this._onAutoCameraProgress) {
-            this.removeEventListener('progress', this._onAutoCameraProgress);
-            this._onAutoCameraProgress = null;
-        }
-        if (this._engine?.controls && this._controlsChangeHandler) {
-            this._engine.controls.removeEventListener('change', this._controlsChangeHandler);
-        }
-        this._controlsChangeHandler = null;
-        if (this._cameraOffsetDiv) {
-            this._cameraOffsetDiv.style.display = 'none';
+        if (this._autoCamera) {
+            this._autoCamera.dispose?.();
+            this._autoCamera = null;
         }
         if (this._skipToEndRaf) {
             if (typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
@@ -359,105 +185,22 @@ export class LayerPipeline extends EventTarget {
 
     /** Enable or disable automatic camera tracking of the active layer. */
     setAutoCameraFollow(enabled, { immediate = false, resetView = false, smoothReset = false } = {}) {
-        const nextValue = !!enabled;
-        if (nextValue === this._autoCameraFollow) {
-            if (nextValue) {
-                if (immediate) {
-                    this._updateAutoCameraFollow();
-                    this._updateCameraOffsetOverlay();
-                }
-            } else {
-                this._updateCameraOffsetOverlay();
-            }
-            return;
-        }
-        this._autoCameraFollow = nextValue;
-        if (this._autoCameraFollow) {
-            this._autoCameraSmoothValid = false;
-            if (resetView) {
-                const canSmoothReset = smoothReset && this._captureAutoCameraOffsets();
-                this._setAutoCameraOffsets(
-                    this._autoCameraDefaultCameraOffset,
-                    this._autoCameraDefaultTargetOffset,
-                    { snap: !canSmoothReset }
-                );
-            }
-        }
-        if (this._autoCameraFollow) {
-            if (immediate) {
-                this._updateAutoCameraFollow();
-            }
-            this._startCameraOverlayLoop();
-        } else {
-            this._clearAutoCameraOffsets();
-            this._stopCameraOverlayLoop();
-        }
-        this._updateCameraOffsetOverlay();
+        this._autoCamera?.setEnabled?.(enabled, { immediate, resetView, smoothReset });
     }
 
     /** Check whether automatic camera tracking is enabled. */
     isAutoCameraFollowEnabled() {
-        return !!this._autoCameraFollow;
+        return !!this._autoCamera?.isEnabled?.();
     }
 
     /** Move the camera to the overview framing (typically the initial tower view). */
     focusOverview({ immediate = true, durationMs = 1400 } = {}) {
-        const engine = this._engine;
-        const camera = engine?.camera;
-        const controls = engine?.controls;
-        if (!camera || !controls || !controls.target) return;
-        if (!this._overviewCameraPosition || !this._overviewCameraTarget) return;
-        if (immediate || typeof TWEEN === 'undefined' || !TWEEN?.Tween) {
-            camera.position.copy(this._overviewCameraPosition);
-            controls.target.copy(this._overviewCameraTarget);
-            if (typeof controls.update === 'function') controls.update();
-            engine?.notifyCameraUpdated?.();
-            return;
-        }
-
-        const duration = Math.max(200, Number.isFinite(durationMs) ? durationMs : 1400);
-        const easing = TWEEN?.Easing?.Quadratic?.InOut;
-
-        if (this._overviewCameraTween && typeof this._overviewCameraTween.stop === 'function') {
-            this._overviewCameraTween.stop();
-        }
-        if (this._overviewTargetTween && typeof this._overviewTargetTween.stop === 'function') {
-            this._overviewTargetTween.stop();
-        }
-
-        this._overviewCameraTween = new TWEEN.Tween(camera.position)
-            .to({
-                x: this._overviewCameraPosition.x,
-                y: this._overviewCameraPosition.y,
-                z: this._overviewCameraPosition.z
-            }, duration)
-            .easing(typeof easing === 'function' ? easing : TWEEN.Easing.Quadratic.InOut)
-            .onUpdate(() => engine?.notifyCameraUpdated?.())
-            .start();
-
-        this._overviewTargetTween = new TWEEN.Tween(controls.target)
-            .to({
-                x: this._overviewCameraTarget.x,
-                y: this._overviewCameraTarget.y,
-                z: this._overviewCameraTarget.z
-            }, duration)
-            .easing(typeof easing === 'function' ? easing : TWEEN.Easing.Quadratic.InOut)
-            .onUpdate(() => {
-                if (typeof controls.update === 'function') controls.update();
-                engine?.notifyCameraUpdated?.();
-            })
-            .start();
+        this._autoCamera?.focusOverview?.({ immediate, durationMs });
     }
 
     /** Get current follow reference position (residual stream center). */
     getAutoCameraReference() {
-        const ref = this._autoCameraInspectorRef;
-        const info = this._resolveActiveLanePosition(ref);
-        if (!info || info.laneIndex < 0) return null;
-        return {
-            laneIndex: info.laneIndex,
-            position: { x: ref.x, y: ref.y, z: ref.z }
-        };
+        return this._autoCamera?.getReference?.() ?? null;
     }
 
     isSkipToEndActive() {
@@ -702,7 +445,7 @@ export class LayerPipeline extends EventTarget {
 
         nextLayer.activateWithLanes(externalLanes);
 
-        this._maybeAutoCameraFocus({ immediate: true });
+        this._autoCamera?.maybeFocus?.({ immediate: true });
 
         if (this._skipLayerActive && !this._skipLayerLast) {
             this._restoreSkipLayerSpeeds();
@@ -1326,514 +1069,8 @@ export class LayerPipeline extends EventTarget {
         refreshSkipVisibility();
     }
 
-    _resolveActiveLanePosition(targetVec = null) {
-        const layers = this._layers;
-        if (!Array.isArray(layers) || layers.length === 0) {
-            return { laneIndex: -1, laneCount: 0 };
-        }
-
-        const layerIndex = Math.min(this._currentLayerIdx, layers.length - 1);
-        const layer = layers[layerIndex];
-        const lanes = Array.isArray(layer?.lanes) ? layer.lanes : [];
-        const laneCount = lanes.length;
-        if (!laneCount) {
-            return { laneIndex: -1, laneCount };
-        }
-
-        const laneIndex = Math.min(laneCount - 1, Math.floor(laneCount / 2));
-        const lane = lanes[laneIndex];
-        const vec = lane?.originalVec;
-        const vecGroup = vec?.group;
-        if (!vecGroup || typeof vecGroup.getWorldPosition !== 'function') {
-            return { laneIndex: -1, laneCount };
-        }
-
-        if (targetVec) {
-            if (lane?.stopRise && lane?.stopRiseTarget) {
-                const sourceCenter = TMP_CENTER_A;
-                const targetCenter = TMP_CENTER_B;
-                const sourceOk = this._getVectorWorldCenter(vec, sourceCenter);
-                const targetVecRef = this._findVectorByGroup(lane, lane.stopRiseTarget);
-                const targetOk = targetVecRef
-                    ? this._getVectorWorldCenter(targetVecRef, targetCenter)
-                    : this._getGroupWorldPosition(lane.stopRiseTarget, targetCenter);
-
-                if (sourceOk && targetOk) {
-                    const hiddenThreshold = HIDE_INSTANCE_Y_OFFSET * 0.2;
-                    if (sourceCenter.y < hiddenThreshold) {
-                        const lastSource = lane.__followLastSourceVec || (lane.__followLastSourceVec = new THREE.Vector3());
-                        if (!lane.__followLastSourceValid) {
-                            lastSource.copy(targetCenter);
-                            lane.__followLastSourceValid = true;
-                        }
-                        const progress = Math.min(1, (lane.__followHiddenProgress || 0) + 0.12);
-                        lane.__followHiddenProgress = progress;
-                        targetVec.lerpVectors(lastSource, targetCenter, progress);
-                    } else {
-                        lane.__followHiddenProgress = 0;
-                        const lastSource = lane.__followLastSourceVec || (lane.__followLastSourceVec = new THREE.Vector3());
-                        lastSource.copy(sourceCenter);
-                        lane.__followLastSourceValid = true;
-                        targetVec.copy(sourceCenter);
-                    }
-                } else if (sourceOk) {
-                    lane.__followHiddenProgress = 0;
-                    targetVec.copy(sourceCenter);
-                } else if (targetOk) {
-                    targetVec.copy(targetCenter);
-                } else {
-                    vecGroup.getWorldPosition(targetVec);
-                }
-            } else if (!this._getVectorWorldCenter(vec, targetVec)) {
-                if (lane) {
-                    lane.__followHiddenProgress = 0;
-                }
-                vecGroup.getWorldPosition(targetVec);
-            }
-        }
-
-        return { laneIndex, laneCount };
-    }
-
-    _getGroupWorldPosition(group, out) {
-        if (!group || typeof group.getWorldPosition !== 'function') return false;
-        group.getWorldPosition(out);
-        return Number.isFinite(out.x) && Number.isFinite(out.y) && Number.isFinite(out.z);
-    }
-
-    _getVectorWorldCenter(vec, out) {
-        const vecGroup = vec?.group;
-        const mesh = vec?.mesh;
-        const canSample = mesh && typeof mesh.getMatrixAt === 'function' && vecGroup?.matrixWorld;
-        if (!canSample) {
-            return this._getGroupWorldPosition(vecGroup, out);
-        }
-        const hideThreshold = HIDE_INSTANCE_Y_OFFSET * 0.5;
-        const rawLen = Array.isArray(vec.rawData) ? vec.rawData.length : Infinity;
-        const count = Number.isFinite(vec.instanceCount) ? vec.instanceCount : Infinity;
-        const length = Math.max(1, Math.min(rawLen, count));
-        const firstIndex = Math.max(0, Math.floor((length - 1) / 2));
-        const secondIndex = length % 2 === 0 ? Math.min(length - 1, firstIndex + 1) : firstIndex;
-        mesh.getMatrixAt(firstIndex, TMP_CENTER_MAT_A);
-        out.setFromMatrixPosition(TMP_CENTER_MAT_A).applyMatrix4(vecGroup.matrixWorld);
-        if (!Number.isFinite(out.y) || out.y <= hideThreshold) {
-            return this._getGroupWorldPosition(vecGroup, out);
-        }
-        if (secondIndex !== firstIndex) {
-            mesh.getMatrixAt(secondIndex, TMP_CENTER_MAT_B);
-            TMP_CENTER_B.setFromMatrixPosition(TMP_CENTER_MAT_B).applyMatrix4(vecGroup.matrixWorld);
-            if (!Number.isFinite(TMP_CENTER_B.y) || TMP_CENTER_B.y <= hideThreshold) {
-                return this._getGroupWorldPosition(vecGroup, out);
-            }
-            out.add(TMP_CENTER_B).multiplyScalar(0.5);
-        }
-        return Number.isFinite(out.x) && Number.isFinite(out.y) && Number.isFinite(out.z);
-    }
-
-    _findVectorByGroup(lane, group) {
-        if (!lane || !group) return null;
-        const candidates = [
-            lane.originalVec,
-            lane.dupVec,
-            lane.travellingVec,
-            lane.resultVec,
-            lane.postAdditionVec,
-            lane.movingVecLN2,
-            lane.resultVecLN2,
-            lane.finalVecAfterMlp,
-            lane.addTarget,
-            lane.addTargetLN2,
-            lane.multTarget,
-            lane.multTargetLN2,
-        ];
-        for (let i = 0; i < candidates.length; i++) {
-            const candidate = candidates[i];
-            if (candidate && candidate.group === group) return candidate;
-        }
-        return null;
-    }
-
-    _clearAutoCameraOffsets() {
-        this._hasAutoCameraOffsets = false;
-        this._autoCameraDesiredCameraOffset.set(0, 0, 0);
-        this._autoCameraDesiredTargetOffset.set(0, 0, 0);
-        this._autoCameraCurrentCameraOffset.set(0, 0, 0);
-        this._autoCameraCurrentTargetOffset.set(0, 0, 0);
-        this._autoCameraSmoothValid = false;
-    }
-
-    _setAutoCameraOffsets(cameraOffset, targetOffset, { snap = false } = {}) {
-        if (cameraOffset) this._autoCameraDesiredCameraOffset.copy(cameraOffset);
-        if (targetOffset) this._autoCameraDesiredTargetOffset.copy(targetOffset);
-        if (snap || !this._hasAutoCameraOffsets) {
-            this._autoCameraCurrentCameraOffset.copy(this._autoCameraDesiredCameraOffset);
-            this._autoCameraCurrentTargetOffset.copy(this._autoCameraDesiredTargetOffset);
-        }
-        this._hasAutoCameraOffsets = true;
-    }
-
-    _captureAutoCameraOffsets(existingReference = null) {
-        const engine = this._engine;
-        const camera = engine?.camera;
-        if (!camera) return false;
-
-        const reference = existingReference || this._autoCameraCenter;
-        if (!existingReference) {
-            const laneInfo = this._resolveActiveLanePosition(reference);
-            if (laneInfo.laneIndex < 0) {
-                this._clearAutoCameraOffsets();
-                return false;
-            }
-        }
-
-        this._autoCameraDesiredCameraOffset.copy(camera.position).sub(reference);
-        if (!Number.isFinite(this._autoCameraDesiredCameraOffset.x)
-            || !Number.isFinite(this._autoCameraDesiredCameraOffset.y)
-            || !Number.isFinite(this._autoCameraDesiredCameraOffset.z)) {
-            this._clearAutoCameraOffsets();
-            return false;
-        }
-
-        const controls = engine?.controls;
-        if (controls && controls.target) {
-            this._autoCameraDesiredTargetOffset.copy(controls.target).sub(reference);
-        } else {
-            this._autoCameraDesiredTargetOffset.set(0, 0, 0);
-        }
-
-        this._setAutoCameraOffsets(this._autoCameraDesiredCameraOffset, this._autoCameraDesiredTargetOffset, { snap: true });
-        return true;
-    }
-
-    _applyAutoCamera(reference) {
-        if (!this._autoCameraFollow || !this._hasAutoCameraOffsets) {
-            return;
-        }
-
-        const engine = this._engine;
-        const camera = engine?.camera;
-        if (!engine || !camera) return;
-
-        if (!Number.isFinite(reference?.x) || !Number.isFinite(reference?.y) || !Number.isFinite(reference?.z)) {
-            return;
-        }
-
-        if (!Number.isFinite(this._autoCameraDesiredCameraOffset.x)
-            || !Number.isFinite(this._autoCameraDesiredCameraOffset.y)
-            || !Number.isFinite(this._autoCameraDesiredCameraOffset.z)) {
-            return;
-        }
-
-        this._suppressControlsChange = true;
-        try {
-            const camOffset = this._autoCameraCurrentCameraOffset;
-            if (!Number.isFinite(camOffset.x) || !Number.isFinite(camOffset.y) || !Number.isFinite(camOffset.z)) {
-                camOffset.copy(this._autoCameraDesiredCameraOffset);
-            } else if (this._autoCameraOffsetLerpAlpha > 0) {
-                camOffset.lerp(this._autoCameraDesiredCameraOffset, this._autoCameraOffsetLerpAlpha);
-            } else {
-                camOffset.copy(this._autoCameraDesiredCameraOffset);
-            }
-            camera.position.copy(reference).add(camOffset);
-
-            const controls = engine.controls;
-            if (controls && controls.target) {
-                const targetOffset = this._autoCameraCurrentTargetOffset;
-                if (!Number.isFinite(targetOffset.x) || !Number.isFinite(targetOffset.y) || !Number.isFinite(targetOffset.z)) {
-                    targetOffset.copy(this._autoCameraDesiredTargetOffset);
-                } else if (this._autoCameraOffsetLerpAlpha > 0) {
-                    targetOffset.lerp(this._autoCameraDesiredTargetOffset, this._autoCameraOffsetLerpAlpha);
-                } else {
-                    targetOffset.copy(this._autoCameraDesiredTargetOffset);
-                }
-                controls.target.copy(reference).add(targetOffset);
-                if (typeof controls.update === 'function') {
-                    controls.update();
-                }
-            }
-
-            if (typeof engine.notifyCameraUpdated === 'function') {
-                engine.notifyCameraUpdated();
-            }
-        } finally {
-            this._suppressControlsChange = false;
-        }
-    }
-
-    _updateCameraOffsetOverlay() {
-        const overlay = this._cameraOffsetDiv;
-        if (!overlay || !this._devMode) {
-            if (overlay) overlay.style.display = 'none';
-            return;
-        }
-
-        if (!this._autoCameraFollow) {
-            overlay.style.display = 'none';
-            return;
-        }
-
-        const engine = this._engine;
-        const camera = engine?.camera;
-        if (!camera) {
-            overlay.style.display = 'block';
-            overlay.textContent = 'Offset vs Residual Lane —\nΔx: —\nΔy: —\nΔz: —';
-            this._clearAutoCameraOffsets();
-            return;
-        }
-
-        const reference = this._autoCameraCenter;
-        const { laneIndex } = this._resolveActiveLanePosition(reference);
-        if (laneIndex < 0 || !Number.isFinite(reference.x) || !Number.isFinite(reference.y) || !Number.isFinite(reference.z)) {
-            overlay.style.display = 'block';
-            overlay.textContent = 'Offset vs Residual Lane —\nΔx: —\nΔy: —\nΔz: —';
-            this._clearAutoCameraOffsets();
-            return;
-        }
-
-        const offset = this._autoCameraOffsetScratch;
-        offset.copy(camera.position).sub(reference);
-        const format = (value) => (Number.isFinite(value) ? value.toFixed(2) : '—');
-        const laneLabel = Number.isInteger(laneIndex) && laneIndex >= 0 ? (laneIndex + 1) : '—';
-
-        overlay.style.display = 'block';
-        overlay.textContent = `Offset vs Residual Lane ${laneLabel}\nΔx: ${format(offset.x)}\nΔy: ${format(offset.y)}\nΔz: ${format(offset.z)}`;
-    }
-
-    _resolveAutoCameraViewKey() {
-        const layers = this._layers;
-        if (!Array.isArray(layers) || !layers.length) return 'default';
-        const layerIndex = Math.min(this._currentLayerIdx, layers.length - 1);
-        const layer = layers[layerIndex];
-        const mhsa = layer?.mhsaAnimation;
-        const lanes = Array.isArray(layer?.lanes) ? layer.lanes : [];
-        const laneCount = lanes.length;
-        const laneIndex = laneCount ? Math.min(laneCount - 1, Math.floor(laneCount / 2)) : -1;
-        const lane = laneIndex >= 0 ? lanes[laneIndex] : null;
-        const inLn = !!(lane && (lane.horizPhase === 'insideLN' || lane.ln2Phase === 'insideLN'));
-        this._autoCameraViewContext = { lane, laneIndex, laneCount, inLn };
-        const passPhase = mhsa?.mhaPassThroughPhase || 'positioning_mha_vectors';
-        const inTravel = !!(lane && lane.horizPhase === 'travelMHSA'
-            && passPhase === 'positioning_mha_vectors');
-        const inCopyStage = !!(lane && lane.horizPhase === 'finishedHeads'
-            && (passPhase === 'positioning_mha_vectors' || passPhase === 'ready_for_parallel_pass_through'));
-        if (!mhsa) {
-            if (inLn) return 'ln';
-            return 'default';
-        }
-
-        if (inLn) {
-            return 'ln';
-        }
-        if (inTravel || inCopyStage) {
-            return 'travel';
-        }
-
-        const outputPhase = mhsa.outputProjMatrixAnimationPhase || 'waiting';
-        const rowPhase = mhsa.rowMergePhase || 'not_started';
-        const outputReturnComplete = mhsa.outputProjMatrixReturnComplete === true;
-        const concatActive = (rowPhase === 'merging' || rowPhase === 'merged')
-            && outputPhase === 'waiting'
-            && !outputReturnComplete;
-        if (concatActive) {
-            return 'concat';
-        }
-
-        const mhsaGate = rowPhase === 'not_started' && outputPhase === 'waiting';
-        const mhsaActive = mhsaGate && (passPhase === 'parallel_pass_through_active'
-            || passPhase === 'mha_pass_through_complete'
-            || (passPhase === 'ready_for_parallel_pass_through' && !inCopyStage));
-        if (mhsaActive) {
-            return 'mhsa';
-        }
-        return 'default';
-    }
-
-    _applyAutoCameraViewOffsets() {
-        this._updateAutoCameraScaledOffsets();
-        const key = this._resolveAutoCameraViewKey();
-        const viewContext = this._autoCameraViewContext;
-        let camOffset = this._autoCameraDefaultCameraOffset;
-        let targetOffset = this._autoCameraDefaultTargetOffset;
-
-        if (key === 'ln' && this._autoCameraLnOffsetsEnabled) {
-            camOffset = this._autoCameraLnCameraOffset;
-            targetOffset = this._autoCameraLnTargetOffset;
-        } else if (key === 'travel' && this._autoCameraTravelOffsetsEnabled) {
-            camOffset = this._autoCameraTravelCameraOffset;
-            targetOffset = this._autoCameraTravelTargetOffset;
-        } else if (key === 'mhsa' && this._autoCameraMhsaOffsetsEnabled) {
-            camOffset = this._autoCameraMhsaCameraOffset;
-            targetOffset = this._autoCameraMhsaTargetOffset;
-        } else if (key === 'concat' && this._autoCameraConcatOffsetsEnabled) {
-            camOffset = this._autoCameraConcatCameraOffset;
-            targetOffset = this._autoCameraConcatTargetOffset;
-        }
-
-        if (key !== this._autoCameraViewKey) {
-            const priorKey = this._autoCameraViewKey;
-            const isMlpTransition = priorKey === 'ln'
-                && key === 'default'
-                && viewContext
-                && viewContext.lane
-                && viewContext.lane.ln2Phase
-                && viewContext.lane.ln2Phase !== 'insideLN';
-            this._autoCameraViewBlendAlphaActive = isMlpTransition
-                ? this._autoCameraViewBlendAlphaMlpReturn
-                : this._autoCameraViewBlendAlpha;
-            this._autoCameraViewKey = key;
-            if (!this._autoCameraSmoothValid) {
-                this._autoCameraViewBlendT = 1;
-                this._autoCameraViewFromCameraOffset.copy(camOffset);
-                this._autoCameraViewFromTargetOffset.copy(targetOffset);
-            } else {
-                this._autoCameraViewBlendT = 0;
-                this._autoCameraViewFromCameraOffset.copy(this._autoCameraCurrentCameraOffset);
-                this._autoCameraViewFromTargetOffset.copy(this._autoCameraCurrentTargetOffset);
-            }
-        }
-
-        this._autoCameraViewToCameraOffset.copy(camOffset);
-        this._autoCameraViewToTargetOffset.copy(targetOffset);
-
-        if (this._autoCameraViewBlendT < 1) {
-            this._autoCameraViewBlendT = Math.min(1, this._autoCameraViewBlendT + this._autoCameraViewBlendAlphaActive);
-            const t = this._autoCameraViewBlendT;
-            this._autoCameraViewBlendCameraOffset.copy(this._autoCameraViewFromCameraOffset).lerp(this._autoCameraViewToCameraOffset, t);
-            this._autoCameraViewBlendTargetOffset.copy(this._autoCameraViewFromTargetOffset).lerp(this._autoCameraViewToTargetOffset, t);
-            camOffset = this._autoCameraViewBlendCameraOffset;
-            targetOffset = this._autoCameraViewBlendTargetOffset;
-        }
-
-        this._setAutoCameraOffsets(camOffset, targetOffset, { snap: false });
-    }
-
-    _computeAutoCameraScale() {
-        if (typeof window === 'undefined') return 1.0;
-        const width = window.innerWidth || 0;
-        if (!Number.isFinite(width) || width <= 0) return 1.0;
-        if (width >= this._autoCameraScaleMaxWidth) return 1.0;
-        if (width <= this._autoCameraScaleMinWidth) return this._autoCameraScaleMax;
-        const t = (this._autoCameraScaleMaxWidth - width)
-            / (this._autoCameraScaleMaxWidth - this._autoCameraScaleMinWidth);
-        return 1.0 + t * (this._autoCameraScaleMax - 1.0);
-    }
-
-    _updateAutoCameraScaledOffsets(force = false) {
-        const scale = this._computeAutoCameraScale();
-        const shiftFactor = (this._autoCameraScaleMax > 1.0)
-            ? (scale - 1.0) / Math.max(0.0001, this._autoCameraScaleMax - 1.0)
-            : 0;
-        const shiftX = Math.abs(this._autoCameraShiftMaxX) > 0.0001
-            ? this._autoCameraShiftMaxX * shiftFactor
-            : 0;
-        const shiftTravelX = Math.abs(this._autoCameraShiftMaxTravelX) > 0.0001
-            ? this._autoCameraShiftMaxTravelX * shiftFactor
-            : 0;
-        const shiftMhsaX = Math.abs(this._autoCameraShiftMaxMhsaX) > 0.0001
-            ? this._autoCameraShiftMaxMhsaX * shiftFactor
-            : 0;
-        if (!force
-            && Math.abs(scale - this._autoCameraScaleLast) < 0.001
-            && Math.abs(shiftX - this._autoCameraShiftLastX) < 0.5) {
-            return;
-        }
-        this._autoCameraScaleLast = scale;
-        this._autoCameraShiftLastX = shiftX;
-
-        const applyScaleShift = (dest, base, extraShiftX = 0) => {
-            dest.copy(base).multiplyScalar(scale);
-            if (shiftX || extraShiftX) dest.x += shiftX + extraShiftX;
-        };
-
-        applyScaleShift(this._autoCameraDefaultCameraOffset, this._autoCameraDefaultCameraOffsetBase);
-        applyScaleShift(this._autoCameraDefaultTargetOffset, this._autoCameraDefaultTargetOffsetBase);
-
-        if (this._autoCameraMhsaOffsetsEnabled) {
-            applyScaleShift(this._autoCameraMhsaCameraOffset, this._autoCameraMhsaCameraOffsetBase, shiftMhsaX);
-            applyScaleShift(this._autoCameraMhsaTargetOffset, this._autoCameraMhsaTargetOffsetBase, shiftMhsaX);
-        }
-        if (this._autoCameraConcatOffsetsEnabled) {
-            applyScaleShift(this._autoCameraConcatCameraOffset, this._autoCameraConcatCameraOffsetBase);
-            applyScaleShift(this._autoCameraConcatTargetOffset, this._autoCameraConcatTargetOffsetBase);
-        }
-        if (this._autoCameraLnOffsetsEnabled) {
-            applyScaleShift(this._autoCameraLnCameraOffset, this._autoCameraLnCameraOffsetBase);
-            applyScaleShift(this._autoCameraLnTargetOffset, this._autoCameraLnTargetOffsetBase);
-        }
-        if (this._autoCameraTravelOffsetsEnabled) {
-            applyScaleShift(this._autoCameraTravelCameraOffset, this._autoCameraTravelCameraOffsetBase, shiftTravelX);
-            applyScaleShift(this._autoCameraTravelTargetOffset, this._autoCameraTravelTargetOffsetBase, shiftTravelX);
-            if (this._autoCameraTravelMobileOverrideEnabled && shiftFactor > 0.0001) {
-                this._autoCameraTravelCameraOffset.lerp(
-                    this._autoCameraTravelMobileOverrideCameraOffset,
-                    shiftFactor
-                );
-                this._autoCameraTravelTargetOffset.lerp(
-                    this._autoCameraTravelMobileOverrideTargetOffset,
-                    shiftFactor
-                );
-            }
-        }
-    }
-
-    _updateAutoCameraFollow() {
-        if (!this._autoCameraFollow) return false;
-        const engine = this._engine;
-        const camera = engine?.camera;
-        if (!camera) return false;
-
-        this._applyAutoCameraViewOffsets();
-
-        const reference = this._autoCameraCenter;
-        const { laneIndex } = this._resolveActiveLanePosition(reference);
-        if (laneIndex < 0 || !Number.isFinite(reference.x) || !Number.isFinite(reference.y) || !Number.isFinite(reference.z)) {
-            this._clearAutoCameraOffsets();
-            return false;
-        }
-
-        let followRef = reference;
-        if (this._autoCameraSmoothAlpha > 0) {
-            if (!this._autoCameraSmoothValid) {
-                this._autoCameraSmoothedRef.copy(reference);
-                this._autoCameraSmoothValid = true;
-            } else {
-                this._autoCameraSmoothedRef.lerp(reference, this._autoCameraSmoothAlpha);
-            }
-            followRef = this._autoCameraSmoothedRef;
-        }
-
-        if (!this._hasAutoCameraOffsets) {
-            this._captureAutoCameraOffsets(followRef);
-        }
-
-        this._applyAutoCamera(followRef);
-        return true;
-    }
-
-    _maybeAutoCameraFocus({ immediate = false } = {}) {
-        if (!this._autoCameraFollow && !immediate) {
-            this._updateCameraOffsetOverlay();
-            return;
-        }
-        this._updateAutoCameraFollow();
-        this._updateCameraOffsetOverlay();
-    }
-
-    _startCameraOverlayLoop() {
-        // No-op: auto-camera is driven by CoreEngine's RAF via _autoCameraDriver.
-    }
-
-    _stopCameraOverlayLoop() {
-        // No-op: auto-camera is driven by CoreEngine's RAF via _autoCameraDriver.
-    }
-
     setDevMode(enabled) {
-        this._devMode = !!enabled;
-        if (!this._devMode && this._cameraOffsetDiv) {
-            this._cameraOffsetDiv.style.display = 'none';
-        } else {
-            this._updateCameraOffsetOverlay();
-        }
+        this._autoCamera?.setDevMode?.(enabled);
     }
 }
 
