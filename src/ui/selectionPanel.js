@@ -766,105 +766,224 @@ function resolveMetadata(label, kind = null) {
     return { params: 'TBD', dims: 'TBD' };
 }
 
+function escapeHtml(value) {
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function renderDescriptionHtml(text) {
+    if (!text) return '';
+    const raw = String(text);
+    const katex = (typeof window !== 'undefined' && window.katex) ? window.katex : null;
+    if (!katex || typeof katex.renderToString !== 'function' || !raw.includes('$')) {
+        return escapeHtml(raw).replace(/\n/g, '<br />');
+    }
+
+    const parts = [];
+    let cursor = 0;
+    while (cursor < raw.length) {
+        const nextDisplay = raw.indexOf('$$', cursor);
+        const nextInline = raw.indexOf('$', cursor);
+        if (nextDisplay === -1 && nextInline === -1) {
+            parts.push({ type: 'text', value: raw.slice(cursor) });
+            break;
+        }
+        let start = nextInline;
+        let isDisplay = false;
+        if (nextDisplay !== -1 && (nextInline === -1 || nextDisplay <= nextInline)) {
+            start = nextDisplay;
+            isDisplay = true;
+        }
+        if (start > cursor) {
+            parts.push({ type: 'text', value: raw.slice(cursor, start) });
+        }
+        if (isDisplay) {
+            const end = raw.indexOf('$$', start + 2);
+            if (end === -1) {
+                parts.push({ type: 'text', value: raw.slice(start) });
+                break;
+            }
+            parts.push({ type: 'math', value: raw.slice(start + 2, end), display: true });
+            cursor = end + 2;
+        } else {
+            const end = raw.indexOf('$', start + 1);
+            if (end === -1) {
+                parts.push({ type: 'text', value: raw.slice(start) });
+                break;
+            }
+            parts.push({ type: 'math', value: raw.slice(start + 1, end), display: false });
+            cursor = end + 1;
+        }
+    }
+
+    return parts.map((part) => {
+        if (part.type === 'text') {
+            return escapeHtml(part.value).replace(/\n/g, '<br />');
+        }
+        try {
+            return katex.renderToString(part.value, { throwOnError: false, displayMode: part.display });
+        } catch (_) {
+            const fallback = part.display ? `$$${part.value}$$` : `$${part.value}$`;
+            return escapeHtml(fallback);
+        }
+    }).join('');
+}
+
+function setDescriptionContent(element, text) {
+    if (!element) return;
+    element.innerHTML = renderDescriptionHtml(text || '');
+}
+
 function resolveDescription(label, kind = null, selectionInfo = null) {
     const lower = (label || '').toLowerCase();
     const activation = getActivationDataFromSelection(selectionInfo);
     const stage = activation?.stage || '';
 
     if (lower.startsWith('token:')) {
-        return 'This is a prompt token, the raw discrete symbol GPT-2 reads. It gets embedded into a dense vector and then combined with a positional embedding before flowing through the stack. The same token can influence many later tokens via attention.';
+        return 'This is one input token (a subword piece). The model looks up its embedding vector and adds a position vector. That sum enters the residual stream and is transformed by each layer. Through attention, this token can influence later positions.';
     }
     if (lower.startsWith('position:')) {
-        return 'This is the position embedding for a specific index in the sequence. It is added to the token embedding so the model can reason about order. Without this signal, GPT-2 would treat the sequence as a bag of tokens.';
+        return 'This is the position embedding for a specific index in the sequence. It is added elementwise to the token embedding so the model knows order and distance. Without it, the model would treat the sequence as a bag of tokens. The same word at different positions gets different combined vectors.';
+    }
+    if (lower.includes('token embedding')) {
+        return 'This is the embedding vector for a specific token: a row of the embedding matrix. It is $E_{token}$ in the input sum $x_0 = E_{token} + E_{pos}$. This vector is the starting point for the residual stream.';
+    }
+    if (lower.includes('position embedding')) {
+        return 'This is the position embedding vector $E_{pos}$ for this token\'s index. It is added to the token embedding, so order is encoded before any attention or MLP layers run.';
+    }
+    if (lower.includes('embedding sum')) {
+        return 'This is the summed input vector after combining token and position information: $x_0 = E_{token} + E_{pos}$. This is the first residual-stream state that enters Layer 1.';
     }
     if (lower.includes('vocab embedding (top)')) {
-        return 'This is the unembedding matrix used at the top of the model. It maps hidden states back into vocabulary logits to choose the next token. In GPT‑2 it is tied to the input token embedding weights.';
+        return 'This is the output (unembedding) matrix at the top of the model. It maps a hidden state to vocabulary logits, e.g. $\\text{logits} = x W_U$. Softmax converts logits to probabilities and the model samples or selects the next token. In GPT-2, these weights are tied to the input embedding.';
     }
     if (lower.includes('vocab embedding')) {
-        return 'This matrix maps discrete token ids into continuous vectors. It is the first learned projection the model applies to the prompt. Those vectors carry semantic and syntactic information into the residual stream.';
+        return 'This matrix converts token IDs into vectors. It is a learned lookup table, often called $W_E$ or $E$, and the first step applied to the prompt. These vectors carry semantic and syntactic information into the residual stream. Everything else in the network builds on these representations.';
     }
     if (lower.includes('positional embedding')) {
-        return 'This adds position information so each token knows where it sits in the sequence. It is summed with the token embedding at the bottom of the model. This allows attention to distinguish “first” versus “last” occurrences.';
+        return 'This is the learned matrix of position vectors. Each position has its own vector that is summed with the token embedding at the bottom of the model. This gives the model a sense of order and distance. It lets attention distinguish first versus last occurrences.';
+    }
+    if ((lower.includes('ln1') || lower.includes('ln2')) && (lower.includes('scale') || lower.includes('gamma'))) {
+        const lnName = lower.includes('ln1') ? 'LN1' : 'LN2';
+        return `This is the ${lnName} scale (gamma) vector. After normalization, each feature is multiplied by a learned scale: $y = \\gamma \\odot \\hat{x} + \\beta$. These parameters are shared across tokens but applied per feature.`;
+    }
+    if ((lower.includes('ln1') || lower.includes('ln2')) && (lower.includes('shift') || lower.includes('beta'))) {
+        const lnName = lower.includes('ln1') ? 'LN1' : 'LN2';
+        return `This is the ${lnName} shift (beta) vector, the additive term in $y = \\gamma \\odot \\hat{x} + \\beta$. It lets the model re-center features after normalization.`;
     }
     if (lower.includes('query weight matrix')) {
-        return 'This matrix projects residual vectors into query space for self‑attention. Queries determine what each token is looking for. They are matched against keys to produce attention scores.';
+        return 'This matrix projects the residual stream into a query vector for a head ($W_Q$). Queries represent what a token is seeking. Each query is compared with all keys to form one row of the attention matrix shown below: $A = \\mathrm{softmax}(QK^T/\\sqrt{d_k})$.';
     }
     if (lower.includes('key weight matrix')) {
-        return 'This matrix projects residual vectors into key space for self‑attention. Keys represent what each token offers to be attended to. Queries score against keys to decide which tokens matter most.';
+        return 'This matrix projects the residual stream into a key vector for a head ($W_K$). A key represents what a token offers to be attended to. Queries score against keys to form the attention matrix shown below (one column per target token).';
     }
     if (lower.includes('value weight matrix')) {
-        return 'This matrix projects residual vectors into value space for self‑attention. Values are the content that gets mixed together according to attention weights. The weighted sum of values becomes the attention output.';
+        return 'This matrix projects the residual stream into a value vector for a head ($W_V$). Values are the content that gets mixed. The attention matrix shown below (after softmax) provides weights that combine values into the head output: $Z = A V$.';
     }
     if (lower.includes('output projection matrix')) {
-        return 'After heads are concatenated, this matrix projects them back to model dimension. It lets the model recombine head information into a single residual stream vector. This is the final linear step of attention.';
+        return 'After each head uses its attention matrix to mix values, the head outputs are concatenated. This matrix ($W_O$) projects the concatenation back to model width and mixes head information together. It does not build the attention matrix, but it combines the results of attention before the residual add.';
     }
     if (lower.includes('mlp up weight matrix')) {
-        return 'This matrix expands the hidden state into a larger MLP dimension. The expansion gives the model more capacity for nonlinear transformations. It precedes the GELU activation.';
+        return 'This matrix expands the model width to a larger MLP size (often 4×). It is typically the first step in the feed-forward block: $h = \\mathrm{GELU}(x W_1)$. This is applied independently to each token and increases nonlinear capacity.';
     }
     if (lower.includes('mlp down weight matrix')) {
-        return 'This matrix projects the MLP hidden state back to model dimension. It compresses the nonlinear features into the residual stream. Together with the up‑projection it forms the feed‑forward block.';
+        return 'This matrix compresses the expanded MLP activations back to model width: $y = h W_2$. It brings nonlinear features back into the residual stream. Together with the up matrix and the activation, it forms the feed-forward block.';
+    }
+    if (lower.includes('mlp up projection')) {
+        return 'This is the vector after the MLP up-projection $x W_1$, in the larger hidden dimension. It is the input to the nonlinearity (GELU) before being projected back down.';
+    }
+    if (lower.includes('mlp down projection')) {
+        return 'This is the vector after the MLP down-projection $h W_2$, back at model width. It will be added to the residual stream.';
+    }
+    if (lower.includes('mlp expanded segments')) {
+        return 'This is the expanded MLP vector split into multiple segments to show the 4× width. It is one high-dimensional vector, just partitioned for visualization.';
     }
     if (lower.includes('layernorm') || lower.includes('layer norm')) {
+        if (lower.includes('top')) {
+            return 'This is the final LayerNorm at the top of the model. It normalizes the residual stream before the unembedding step. The operation is $\\hat{x} = (x - \\mu)/\\sigma$ followed by $y = \\gamma \\odot \\hat{x} + \\beta$.';
+        }
         if (lower.includes('scale') || lower.includes('gamma')) {
-            return 'This is the LayerNorm scale (gamma) vector. It rescales each normalized feature to restore useful magnitudes. Its values are learned per feature and are shared across tokens.';
+            return 'This is the LayerNorm scale (gamma) vector. After normalization, each feature is multiplied by a learned scale: $y = \\gamma \\odot \\hat{x} + \\beta$. Values are learned per feature and shared across tokens.';
         }
         if (lower.includes('shift') || lower.includes('beta')) {
-            return 'This is the LayerNorm shift (beta) vector. It offsets each normalized feature after scaling. It lets the model re‑center activations in a learned way.';
+            return 'This is the LayerNorm shift (beta) vector, the additive term in $y = \\gamma \\odot \\hat{x} + \\beta$. It lets the model re-center activations and choose a useful baseline.';
         }
         if (lower.includes('normed') || lower.includes('normalized')) {
-            return 'This is the LayerNorm output for a token after normalization. It has zero‑mean, unit‑variance statistics per token (before scale/shift). This stabilized vector feeds into attention or the MLP.';
+            return 'This is the normalized vector for one token. Before scale and shift, it has zero mean and unit variance across features: $\\hat{x} = (x - \\mu)/\\sigma$. This stabilized vector becomes the input to the next sublayer.';
         }
-        return 'LayerNorm normalizes each token’s features and then applies learned scale and shift. It stabilizes training and keeps activations in a usable range. GPT‑2 uses pre‑LayerNorm, so it happens before each sublayer.';
+        return 'LayerNorm normalizes each token\'s features and then applies learned scale and shift. It keeps activations stable and improves training. GPT-2 uses pre-LayerNorm, so this happens before attention and before the MLP in each layer.';
     }
     if (lower.includes('merged key vectors')) {
-        return 'These are the key vectors from all heads stacked together. They represent what each token offers to be matched. The attention mechanism compares queries to these keys.';
+        return 'These are the key vectors from all heads stacked together. Each head uses its own keys to build its own attention matrix. This view lets you see all heads\' keys at once. Queries from the matching head compare against these keys to form the attention matrix shown below.';
     }
     if (lower.includes('merged value vectors')) {
-        return 'These are the value vectors from all heads stacked together. They hold the content that will be mixed by attention weights. The weighted mix becomes the attended representation.';
+        return 'These are the value vectors from all heads stacked together. For each head, the attention matrix shown below weights that head\'s values. This view shows all head values at once. The weighted sums become the per-head outputs.';
     }
     if (lower.includes('post-layernorm residual') || lower.includes('post layernorm residual')) {
-        return 'This is the residual stream vector immediately after LayerNorm, before it is projected into Q/K/V space. It is copied under each head so attention can compute queries, keys, and values.';
+        return 'This is the residual vector right after LayerNorm, before Q/K/V projection. It is copied for each head to make queries, keys, and values. Those Q and K vectors create the attention matrix shown below, which then mixes the values.';
+    }
+    if (lower.includes('incoming residual')) {
+        return 'This is the residual stream as it enters a layer, before the first LayerNorm (pre-LN1). It carries the accumulated information from earlier layers and will feed into attention and the MLP.';
+    }
+    if (lower.includes('post-attention residual')) {
+        return 'This is the residual stream after the attention output has been added. It represents the model state before the MLP block in this layer.';
+    }
+    if (lower.includes('post-mlp residual')) {
+        return 'This is the residual stream after the MLP output has been added. It is the final output of this layer and the input to the next layer.';
+    }
+    if (lower.includes('mhsa q copies')) {
+        return 'These are per-head copies of the residual stream that will be projected into queries. Each copy is multiplied by $W_Q$ to build the attention matrix shown below.';
+    }
+    if (lower.includes('mhsa k copies')) {
+        return 'These are per-head copies of the residual stream that will be projected into keys. Each copy is multiplied by $W_K$ and compared with queries to form the attention matrix shown below.';
+    }
+    if (lower.includes('mhsa v copies')) {
+        return 'These are per-head copies of the residual stream that will be projected into values. The attention matrix shown below provides weights that mix these values.';
     }
     if (lower.includes('query vector')) {
-        return 'This is a query vector for a specific token. It encodes what the token is looking for in the rest of the sequence. It is used to score all key vectors.';
+        return 'This is the query vector for one token in one head. It encodes what the token wants to read. It is compared with all key vectors to form one row of the attention matrix shown below. Each entry in that row is a score for another token.';
     }
     if (lower.includes('key vector')) {
-        return 'This is a key vector for a specific token. It encodes what the token offers to be attended to. Queries compare against it to compute attention scores.';
+        return 'This is the key vector for one token in one head. It encodes what this token offers. Queries compare against it to compute attention scores, contributing to one column of the attention matrix shown below. Higher dot products mean this token is more attendable.';
     }
     if (lower.includes('value vector')) {
-        return 'This is a value vector for a specific token. It is the information that gets mixed when other tokens attend to it. The final attention output is a weighted sum of values.';
+        return 'This is the value vector for one token in one head. It holds the information other tokens can read. The attention matrix shown below (after softmax) provides weights that mix these values. The head output is a weighted sum of values.';
     }
     if (lower.includes('attention score') || stage.startsWith('attention.')) {
         if (stage === 'attention.pre') {
-            return 'This is a raw attention score from a source token to a target token. It is computed by a scaled dot‑product of query and key. A causal mask is added before softmax.';
+            return 'This is a raw attention score from a source token to a target token in one head. It is the scaled dot product $QK^T/\\sqrt{d_k}$, one entry in the attention matrix shown below. A causal mask is applied so tokens cannot look ahead. Softmax will normalize these scores.';
         }
         if (stage === 'attention.post') {
-            return 'This is a normalized attention weight after softmax. It tells how much the source token reads from the target token. The weights sum to 1 for each source token.';
+            return 'This is a normalized attention weight after softmax. It is one entry in the attention matrix shown below for a head. Each row sums to 1 and shows how the source token distributes its attention. These weights are used to mix values.';
         }
-        return 'This is an attention score connecting a source token to a target token. Scores determine how much information flows between tokens. They are computed per head.';
+        return 'This is an attention score between two tokens in one head. All scores together form the attention matrix shown below (queries by keys). That matrix controls how much information flows between tokens. After softmax, it becomes weights applied to values.';
     }
     if (lower.includes('attention')) {
-        return 'Self‑attention lets tokens read from other tokens in the sequence. Queries, keys, and values are computed per head and combined. The result is added back into the residual stream.';
+        return 'Self-attention lets each token read information from other tokens in the sequence. Each head builds an attention matrix from queries and keys (scaled dot products + softmax), shown below: $A = \\mathrm{softmax}(QK^T/\\sqrt{d_k})$. That matrix weights the values to produce a head output $Z = A V$. Head outputs are concatenated, projected, and added back to the residual stream.';
     }
     if (lower.includes('top logit bars')) {
-        return 'These are logits over the vocabulary before softmax. Higher values indicate more likely next tokens. The model samples from these to produce the next token.';
+        return 'These are the vocabulary logits before softmax. Each bar is one token in the vocab; higher means more likely next token. You can think of them as $\\text{logits} = x W_U$. Softmax converts logits to probabilities, then sampling or argmax picks the next token.';
     }
-    if (lower.includes('incoming residual') || lower.includes('residual')) {
-        return 'This is the residual stream vector for a token at this point in the model. It carries forward all information accumulated so far. Sub‑layers (attention, MLP) add their outputs back into it.';
+    if (lower.includes('residual')) {
+        return 'This is the residual stream vector for a token at this point in the model. It carries information accumulated so far. Attention and MLP outputs are added back into it, which is why it is called a residual stream. It is the main highway of information.';
     }
     if (lower.includes('mlp')) {
-        return 'The MLP is a token‑wise feed‑forward network. It expands, applies a nonlinearity, and compresses back to model dimension. This adds nonlinear capacity separate from attention.';
+        return 'The MLP is a token-wise feed-forward network. It expands the vector, applies a nonlinearity (like GELU), then compresses back to model width. This adds nonlinear feature mixing that attention alone cannot provide. It operates independently on each token.';
     }
     if (lower.includes('vector')) {
-        return 'This vector represents a token’s state at a particular stage. It is a slice of the residual stream or a derived representation (Q/K/V). It will be transformed or mixed by later layers.';
+        return 'This vector represents a token\'s state at a particular stage. It may be part of the residual stream or a derived Q/K/V vector. Its coordinates are learned features. Later layers will transform or mix it.';
     }
     if (lower.includes('weight matrix')) {
-        return 'This is a learned linear transformation. It projects token representations into a new space. Different matrices specialize for attention or MLP roles.';
+        return 'This is a learned linear transformation matrix. Multiplying by this matrix changes the feature mix or coordinate system. Different matrices serve different roles, such as creating Q/K/V vectors or MLP features. These are core trainable parameters.';
     }
     if (kind) {
-        return 'This selection is a GPT‑2 component involved in transforming token representations. It participates in the residual stream, attention, or MLP pipeline. Its role depends on the stage of the forward pass.';
+        return 'This is a GPT-2 component that transforms token representations. It participates in the residual stream, attention, or MLP pipeline. If it is part of attention, it connects to the attention matrix for a specific head. Its role depends on the stage of the forward pass.';
     }
-    return 'This selection is part of the GPT‑2 visualization. It represents a structure used to transform, normalize, or route token information. Look at nearby labels to see how it fits into the layer.';
+    return 'This selection is part of the GPT-2 visualization. It represents a structure used to transform, normalize, or route token information. Nearby labels show where it fits in the layer. Follow the arrows and labels to see how information flows.';
 }
 
 function extractTokenText(label) {
@@ -2201,7 +2320,6 @@ class SelectionPanel {
     _resolveAttentionContext(selection) {
         const label = selection?.label || '';
         if (!isSelfAttentionSelection(label, selection)) return null;
-        if (isValueSelection(label, selection)) return null;
         const headIndex = findUserDataNumber(selection, 'headIndex');
         const layerIndex = findUserDataNumber(selection, 'layerIndex');
         if (!Number.isFinite(headIndex) || !Number.isFinite(layerIndex)) return null;
@@ -2853,7 +2971,7 @@ class SelectionPanel {
         this.panel.setAttribute('aria-hidden', 'true');
         this._setHoverLabelSuppression(false);
         this._updateMobileState();
-        if (this.description) this.description.textContent = '';
+        if (this.description) setDescriptionContent(this.description, '');
         if (this._pendingResizeRaf) {
             cancelAnimationFrame(this._pendingResizeRaf);
             this._pendingResizeRaf = null;
@@ -2894,7 +3012,7 @@ class SelectionPanel {
         if (dimsRow) dimsRow.style.display = hideLayerNormFields ? 'none' : '';
         if (this.description) {
             const desc = resolveDescription(label, selection.kind, selection);
-            this.description.textContent = desc || '';
+            setDescriptionContent(this.description, desc || '');
         }
         const isParam = isParameterSelection(label);
         if (this.dataSection) {

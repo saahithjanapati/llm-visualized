@@ -113,6 +113,8 @@ export const MLP_D_MODEL_VISUAL_DEPTH = 20;
 
 /** Base (resting) colour for MHSA matrices. */
 export const MHSA_MATRIX_INITIAL_RESTING_COLOR = 0x404040;
+/** Baseline emissive intensity for the top unembedding (vocab) matrix. */
+export const TOP_EMBED_BASE_EMISSIVE = 0.08;
 
 /** Bright / activated colours used inside the MHSA animation. */
 export const MHSA_BRIGHT_GREEN        = 0x33FF33;

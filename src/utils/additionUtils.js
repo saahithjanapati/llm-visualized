@@ -351,7 +351,8 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
 
         // Optionally match travelling prism colour to destination gradient.
         if (!preserveSourceColors) {
-            sourceVec.setInstanceAppearance(i, srcLocalPos.y, gradCol);
+            const initialOffsetY = srcLocalPos.y - basePrismCenterY;
+            sourceVec.setInstanceAppearance(i, initialOffsetY, gradCol);
         }
 
         // Per-instance scratch objects to avoid per-frame allocations.

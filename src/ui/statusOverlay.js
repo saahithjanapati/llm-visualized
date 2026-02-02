@@ -7,7 +7,9 @@ import {
     MHA_FINAL_V_COLOR,
     MHA_OUTPUT_PROJECTION_MATRIX_COLOR,
     MLP_UP_MATRIX_COLOR,
-    MLP_DOWN_MATRIX_COLOR
+    MLP_DOWN_MATRIX_COLOR,
+    MHSA_MATRIX_INITIAL_RESTING_COLOR,
+    TOP_EMBED_BASE_EMISSIVE
 } from '../animations/LayerAnimationConstants.js';
 import { USE_PHYSICAL_MATERIALS } from '../utils/constants.js';
 
@@ -48,7 +50,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     const WDown = colorize(mlpDownColor, WDownRaw);
     const U = 'u';
     const U_LN = `${U}_{\\text{ln}}`;
-    const topEmbedBaseColor = new THREE.Color(0x000000);
+    const topEmbedBaseColor = new THREE.Color(MHSA_MATRIX_INITIAL_RESTING_COLOR);
     const topEmbedTargetColor = new THREE.Color(MHA_FINAL_Q_COLOR);
     const topEmbedWorkingColor = new THREE.Color();
     const topEmbedMaxEmissive = 0.05;
@@ -79,10 +81,11 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         const scaleT = normalizeHighlight(highlights.scale);
         const shiftT = normalizeHighlight(highlights.shift);
         const lhsExpr = colorize(eqColorFor(1), outputSymbol);
+        const eqExpr = colorize(eqColorFor(1), '=');
         const normExpr = colorize(eqColorFor(normT), `\\frac{${inputSymbol} - \\mu}{\\sqrt{\\sigma^2 + \\epsilon}}`);
         const scaleExpr = colorize(eqColorFor(scaleT), `\\odot \\gamma`);
         const shiftExpr = colorize(eqColorFor(shiftT), `+ \\beta`);
-        const body = `${lhsExpr} = ${normExpr} ${scaleExpr} ${shiftExpr}`;
+        const body = `${lhsExpr} ${eqExpr} ${normExpr} ${scaleExpr} ${shiftExpr}`;
         return colorize(LN_EQ_BASE_COLOR, body);
     };
 
@@ -92,6 +95,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         const downT = normalizeHighlight(highlights.down);
         const lhsExpr = colorize(eqColorFor(1), 'z');
         const lhsMlp = colorize(eqColorFor(1), `\\mathrm{MLP}(${U_LN})`);
+        const eqExpr = colorize(eqColorFor(1), '=');
         const upTerm = `${U_LN} ${WUpRaw}`;
         const upExpr = colorize(eqColorFor(upT), upTerm);
         const geluExpr = geluT > 0
@@ -99,7 +103,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
             : `\\mathrm{GELU}(${upExpr})`;
         const downTerm = `z ${WDownRaw}`;
         const downExpr = colorize(eqColorFor(downT), downTerm);
-        const body = String.raw`\begin{aligned} ${lhsExpr} &= ${geluExpr} \\ ${lhsMlp} &= ${downExpr} \end{aligned}`;
+        const body = String.raw`\begin{aligned} ${lhsExpr} &${eqExpr} ${geluExpr} \\ ${lhsMlp} &${eqExpr} ${downExpr} \end{aligned}`;
         return colorize(LN_EQ_BASE_COLOR, body);
     };
 
@@ -407,7 +411,9 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         if (!appState.topEmbedActivated || eased >= 1) {
             topEmbedWorkingColor.copy(topEmbedBaseColor).lerp(topEmbedTargetColor, eased);
             appState.vocabTopRef.setColor(topEmbedWorkingColor);
-            appState.vocabTopRef.setMaterialProperties({ emissiveIntensity: topEmbedMaxEmissive * eased });
+            appState.vocabTopRef.setMaterialProperties({
+                emissiveIntensity: TOP_EMBED_BASE_EMISSIVE + topEmbedMaxEmissive * eased
+            });
         }
         if (eased >= 1) {
             appState.topEmbedActivated = true;

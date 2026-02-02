@@ -812,7 +812,7 @@ button { touch-action: manipulation; }
 .attention-cell {
     width: var(--cell-size, 18px);
     height: var(--cell-size, 18px);
-    border-radius: 6px;
+    border-radius: clamp(1px, calc(var(--cell-size, 18px) * 0.25), 6px);
     background: rgba(255,255,255,0.08);
     transition: transform .12s ease, box-shadow .12s ease, filter .12s ease;
     cursor: pointer;

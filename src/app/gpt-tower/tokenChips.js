@@ -21,7 +21,9 @@ import {
 } from '../../utils/constants.js';
 import {
     MHA_FINAL_Q_COLOR,
-    MHA_FINAL_K_COLOR
+    MHA_FINAL_K_COLOR,
+    MHSA_MATRIX_INITIAL_RESTING_COLOR,
+    TOP_EMBED_BASE_EMISSIVE
 } from '../../animations/LayerAnimationConstants.js';
 import { appState } from '../../state/appState.js';
 import { TOKEN_CHIP_STYLE, POSITION_CHIP_STYLE } from './config.js';
@@ -482,8 +484,12 @@ export function addEmbeddingAndTokenChips({
             );
             vocabTop.group.rotation.z = Math.PI;
             vocabTop.group.userData.label = 'Vocab Embedding (Top)';
-            vocabTop.setColor(new THREE.Color(0x000000));
-            vocabTop.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.0 });
+            vocabTop.setColor(new THREE.Color(MHSA_MATRIX_INITIAL_RESTING_COLOR));
+            vocabTop.setMaterialProperties({
+                opacity: 1.0,
+                transparent: false,
+                emissiveIntensity: TOP_EMBED_BASE_EMISSIVE
+            });
             appState.vocabTopRef = vocabTop;
             pipeline.engine.scene.add(vocabTop.group);
             if (pipeline.engine && typeof pipeline.engine.registerRaycastRoot === 'function') {
