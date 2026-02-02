@@ -40,6 +40,7 @@ export class VectorRouter {
         this.mhaVisualizations = mhaVisualizations;
         this._acquireVector = typeof opts.acquireVector === 'function' ? opts.acquireVector : null;
         this._shareVectorData = !!opts.shareVectorData;
+        this._trailFactory = typeof opts.trailFactory === 'function' ? opts.trailFactory : null;
 
         this._readyEmitted = false;
         this._callbacks    = new Set();
@@ -74,6 +75,23 @@ export class VectorRouter {
             if (lane.horizPhase === 'travelMHSA') {
                 const tVec = lane.travellingVec;
                 if (!tVec) return;
+
+                if (lane.__mhsaTrailCornerPending && tVec.userData && tVec.userData.trail) {
+                    const trail = tVec.userData.trail;
+                    if (tVec.userData.trailWorld) {
+                        tVec.group.getWorldPosition(_scratchWorld);
+                        if (typeof trail.snapLastPointTo === 'function') {
+                            trail.snapLastPointTo(_scratchWorld);
+                        } else if (typeof trail.update === 'function') {
+                            trail.update(_scratchWorld);
+                        }
+                    } else if (typeof trail.snapLastPointTo === 'function') {
+                        trail.snapLastPointTo(tVec.group.position);
+                    } else if (typeof trail.update === 'function') {
+                        trail.update(tVec.group.position);
+                    }
+                    lane.__mhsaTrailCornerPending = false;
+                }
 
                 let remaining = ANIM_HORIZ_SPEED * GLOBAL_ANIM_SPEED_MULT * deltaTime;
                 let safety    = 0; // prevent runaway loops in pathological cases
@@ -165,14 +183,22 @@ export class VectorRouter {
                         const hIdx  = centerVec.userData.headIndex;
                         const coord = this.headCoords[hIdx];
                         if (coord) {
-                            const qVec = this._createVectorCopy(centerVec, _scratchSpawn.copy(centerVec.group.position), 30);
+                            const qVec = this._createVectorCopy(centerVec, _scratchSpawn.copy(centerVec.group.position), 30, 'Q', hIdx, lane);
                             if (typeof qVec.copyColorsFrom === 'function') {
                                 qVec.copyColorsFrom(centerVec);
                             }
-                            const qTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1, undefined, FAINT_TRAIL_OPACITY, TRAIL_MIN_SEGMENT_DISTANCE);
-                            qTrail.start(qVec.group.position);
+                            const qTrail = this._createTrail({
+                                kind: 'Q',
+                                headIndex: hIdx,
+                                parentLane: lane,
+                                opacity: FAINT_TRAIL_OPACITY,
+                                minSegmentDistance: TRAIL_MIN_SEGMENT_DISTANCE,
+                            });
+                            if (qTrail && typeof qTrail.start === 'function') {
+                                qTrail.start(qVec.group.position);
+                            }
                             qVec.userData = qVec.userData || {};
-                            qVec.userData.trail = qTrail;
+                            if (qTrail) qVec.userData.trail = qTrail;
                             Object.assign(qVec.userData, { headIndex: hIdx, parentLane: lane });
                             qVec.group.userData = qVec.group.userData || {};
                             qVec.group.userData.headIndex = hIdx;
@@ -184,14 +210,25 @@ export class VectorRouter {
                                 qVec.group.userData.label = PRE_QKV_RESIDUAL_LABEL;
                                 if (qVec.mesh) qVec.mesh.userData = { ...(qVec.mesh.userData||{}), label: PRE_QKV_RESIDUAL_LABEL };
                             } catch (_) {}
-                            const vVec = this._createVectorCopy(centerVec, _scratchSpawn.copy(centerVec.group.position), 30);
+                            if (qVec && qVec.isBatchedVectorRef && qVec._batch?.updateVectorRaycastInfo) {
+                                qVec._batch.updateVectorRaycastInfo(qVec._index, qVec);
+                            }
+                            const vVec = this._createVectorCopy(centerVec, _scratchSpawn.copy(centerVec.group.position), 30, 'V', hIdx, lane);
                             if (typeof vVec.copyColorsFrom === 'function') {
                                 vVec.copyColorsFrom(centerVec);
                             }
-                            const vTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1, undefined, FAINT_TRAIL_OPACITY, TRAIL_MIN_SEGMENT_DISTANCE);
-                            vTrail.start(vVec.group.position);
+                            const vTrail = this._createTrail({
+                                kind: 'V',
+                                headIndex: hIdx,
+                                parentLane: lane,
+                                opacity: FAINT_TRAIL_OPACITY,
+                                minSegmentDistance: TRAIL_MIN_SEGMENT_DISTANCE,
+                            });
+                            if (vTrail && typeof vTrail.start === 'function') {
+                                vTrail.start(vVec.group.position);
+                            }
                             vVec.userData = vVec.userData || {};
-                            vVec.userData.trail = vTrail;
+                            if (vTrail) vVec.userData.trail = vTrail;
                             Object.assign(vVec.userData, { headIndex: hIdx, parentLane: lane });
                             vVec.group.userData = vVec.group.userData || {};
                             vVec.group.userData.headIndex = hIdx;
@@ -203,6 +240,9 @@ export class VectorRouter {
                                 vVec.group.userData.label = PRE_QKV_RESIDUAL_LABEL;
                                 if (vVec.mesh) vVec.mesh.userData = { ...(vVec.mesh.userData||{}), label: PRE_QKV_RESIDUAL_LABEL };
                             } catch (_) {}
+                            if (vVec && vVec.isBatchedVectorRef && vVec._batch?.updateVectorRaycastInfo) {
+                                vVec._batch.updateVectorRaycastInfo(vVec._index, vVec);
+                            }
                             lane.sideCopies = lane.sideCopies || [];
                             const qMatrixForHead = this.mhaVisualizations[hIdx * 3];
                             const vMatrixForHead = this.mhaVisualizations[hIdx * 3 + 2];
@@ -259,15 +299,23 @@ export class VectorRouter {
         lane.upwardCopies = lane.upwardCopies || [];
         if (lane.upwardCopies[targetHeadIdx]) return lane.upwardCopies[targetHeadIdx];
 
-        const upVec = this._createVectorCopy(sourceVec, _scratchSpawn.copy(sourceVec.group.position), 30);
+        const upVec = this._createVectorCopy(sourceVec, _scratchSpawn.copy(sourceVec.group.position), 30, 'K', targetHeadIdx, lane);
         if (typeof upVec.copyColorsFrom === 'function') {
             upVec.copyColorsFrom(sourceVec);
         }
 
-        const upTrail = new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1, undefined, FAINT_TRAIL_OPACITY, TRAIL_MIN_SEGMENT_DISTANCE);
-        upTrail.start(upVec.group.position);
+        const upTrail = this._createTrail({
+            kind: 'K',
+            headIndex: targetHeadIdx,
+            parentLane: lane,
+            opacity: FAINT_TRAIL_OPACITY,
+            minSegmentDistance: TRAIL_MIN_SEGMENT_DISTANCE,
+        });
+        if (upTrail && typeof upTrail.start === 'function') {
+            upTrail.start(upVec.group.position);
+        }
         upVec.userData = upVec.userData || {};
-        upVec.userData.trail = upTrail;
+        if (upTrail) upVec.userData.trail = upTrail;
         Object.assign(upVec.userData, {
             headIndex: targetHeadIdx,
             sideSpawned: false,
@@ -286,12 +334,15 @@ export class VectorRouter {
             upVec.group.userData.label = PRE_QKV_RESIDUAL_LABEL;
             if (upVec.mesh) upVec.mesh.userData = { ...(upVec.mesh.userData || {}), label: PRE_QKV_RESIDUAL_LABEL };
         } catch (_) {}
+        if (upVec && upVec.isBatchedVectorRef && upVec._batch?.updateVectorRaycastInfo) {
+            upVec._batch.updateVectorRaycastInfo(upVec._index, upVec);
+        }
 
         lane.upwardCopies[targetHeadIdx] = upVec;
         return upVec;
     }
 
-    _createVectorCopy(sourceVec, position, numSubsections = 30) {
+    _createVectorCopy(sourceVec, position, numSubsections = 30, kind = null, headIndex = null, lane = null) {
         const rawData = this._shareVectorData ? sourceVec.rawData : (sourceVec.rawData ? sourceVec.rawData.slice() : []);
         const instanceCount = sourceVec.instanceCount;
         if (this._acquireVector) {
@@ -300,7 +351,10 @@ export class VectorRouter {
                 position,
                 instanceCount,
                 numSubsections,
-                shareData: this._shareVectorData
+                shareData: this._shareVectorData,
+                kind,
+                headIndex,
+                lane,
             });
         }
         const vec = new VectorVisualizationInstancedPrism(
@@ -312,6 +366,25 @@ export class VectorRouter {
         );
         this.parentGroup.add(vec.group);
         return vec;
+    }
+
+    _createTrail({ kind = null, headIndex = null, parentLane = null, opacity = FAINT_TRAIL_OPACITY, minSegmentDistance = TRAIL_MIN_SEGMENT_DISTANCE } = {}) {
+        if (this._trailFactory) {
+            try {
+                const trail = this._trailFactory({
+                    kind,
+                    headIndex,
+                    parentLane,
+                    opacity,
+                    minSegmentDistance,
+                    parentGroup: this.parentGroup,
+                });
+                if (trail) return trail;
+            } catch (_) {
+                // fall through to default trail
+            }
+        }
+        return new StraightLineTrail(this.parentGroup, TRAIL_COLOR, 1, undefined, opacity, minSegmentDistance);
     }
 
     // ------------------------------------------------------------------

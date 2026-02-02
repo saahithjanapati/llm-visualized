@@ -878,7 +878,10 @@ export class CoreEngine {
             const label = labels[hit.instanceId];
             if (!label) continue;
             const entries = obj.userData?.instanceEntries;
-            const info = Array.isArray(entries) ? { logitEntry: entries[hit.instanceId] } : null;
+            const entry = Array.isArray(entries) ? entries[hit.instanceId] : null;
+            const info = entry && typeof entry === 'object'
+                ? entry
+                : (entry !== undefined && entry !== null ? { logitEntry: entry } : null);
             return {
                 label,
                 hit,

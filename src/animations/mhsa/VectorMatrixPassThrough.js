@@ -31,6 +31,87 @@ const QKV_VALUE_MIN = MHA_VALUE_RANGE_MIN;
 const QKV_VALUE_MAX = MHA_VALUE_RANGE_MAX;
 const QKV_VALUE_CLAMP_MAX = MHA_VALUE_CLAMP_MAX;
 
+const isBatchedVector = (vec) => !!(vec && vec.isBatchedVectorRef);
+
+const applyVectorCategoryLabel = (vectorRef, vectorCategory, ctx) => {
+    if (!vectorRef || !vectorRef.group) return;
+    const label = vectorCategory === 'K'
+        ? 'Key Vector'
+        : vectorCategory === 'Q'
+            ? 'Query Vector'
+            : 'Value Vector';
+    try {
+        vectorRef.group.userData = vectorRef.group.userData || {};
+        vectorRef.group.userData.label = label;
+        if (Number.isFinite(vectorRef.userData?.headIndex)) {
+            vectorRef.group.userData.headIndex = vectorRef.userData.headIndex;
+        }
+        if (Number.isFinite(ctx?.layerIndex)) {
+            vectorRef.group.userData.layerIndex = ctx.layerIndex;
+        }
+        if (vectorRef.mesh) {
+            vectorRef.mesh.userData = { ...(vectorRef.mesh.userData || {}), label };
+        }
+        if (vectorRef.isBatchedVectorRef && vectorRef._batch?.updateVectorRaycastInfo) {
+            vectorRef._batch.updateVectorRaycastInfo(vectorRef._index, vectorRef);
+        }
+    } catch (_) { /* no-op */ }
+};
+
+const applyQkvProcessedVisuals = (vectorRef, ctx, vectorCategory, outLength, finalVectorColor) => {
+    if (!vectorRef || typeof vectorRef.applyProcessedVisuals !== 'function') return false;
+    const activationSource = ctx && ctx.activationSource ? ctx.activationSource : null;
+    const layerIndex = Number.isFinite(ctx?.layerIndex) ? ctx.layerIndex : null;
+    const headIndex = vectorRef?.userData?.headIndex;
+    const tokenIndex = vectorRef?.userData?.parentLane?.tokenIndex;
+    const tokenLabel = vectorRef?.userData?.parentLane?.tokenLabel;
+    const kind = vectorCategory === 'Q' ? 'q' : vectorCategory === 'K' ? 'k' : 'v';
+    const scalar = activationSource && Number.isFinite(layerIndex)
+        ? activationSource.getLayerQKVScalar(layerIndex, kind, headIndex, tokenIndex)
+        : null;
+    const data = Number.isFinite(scalar)
+        ? [scalar]
+        : (vectorRef.rawData ? vectorRef.rawData.slice(0, outLength) : []);
+    const rangeBase = vectorCategory === 'V' ? MHA_VALUE_SPECTRUM_COLOR : finalVectorColor;
+    const rangeOptions = buildHueRangeOptions(rangeBase, {
+        hueSpread: QKV_HUE_SPREAD,
+        minLightness: QKV_MIN_LIGHTNESS,
+        maxLightness: QKV_MAX_LIGHTNESS,
+        valueMin: QKV_VALUE_MIN,
+        valueMax: QKV_VALUE_MAX,
+        valueClampMax: QKV_VALUE_CLAMP_MAX,
+    });
+    const numKeyColors = Number.isFinite(scalar) ? 1 : QKV_KEY_COLOR_COUNT;
+    vectorRef.applyProcessedVisuals(
+        data,
+        outLength,
+        { numKeyColors, generationOptions: rangeOptions },
+        { setHiddenToBlack: false },
+    );
+    if (Number.isFinite(scalar) && typeof vectorRef.setUniformColor === 'function') {
+        const rangeColor = mapValueToHueRange(scalar, rangeOptions);
+        vectorRef.setUniformColor(rangeColor);
+    }
+    if (Number.isFinite(scalar)) {
+        const label = vectorCategory === 'K'
+            ? 'Key Vector'
+            : vectorCategory === 'Q'
+                ? 'Query Vector'
+                : 'Value Vector';
+        const activationData = buildActivationData({
+            label,
+            values: data,
+            stage: `qkv.${kind}`,
+            layerIndex,
+            tokenIndex,
+            tokenLabel,
+            headIndex,
+        });
+        applyActivationDataToVector(vectorRef, activationData, label);
+    }
+    return true;
+};
+
 /**
  * Animate a vector passing vertically through its corresponding weight matrix.
  * The heavy 768-dimensional vector is swapped for a lightweight 64-dimensional
@@ -155,114 +236,69 @@ export function animateVectorMatrixPassThrough(
             } catch (_) { /* no-op */ }
 
             if (!initialDimensionChangeApplied && y >= matrixBottomY) {
-                const heavyVec = vectorRef;
-                const smallVec = new VectorVisualizationInstancedPrism(
-                    heavyVec.rawData.slice(0, outLength),
-                    heavyVec.group.position.clone(),
-                    3,
-                    heavyVec.instanceCount || ctx.vectorPrismCount,
-                );
+                const batched = isBatchedVector(vectorRef);
+                if (!batched) {
+                    const heavyVec = vectorRef;
+                    const smallVec = new VectorVisualizationInstancedPrism(
+                        heavyVec.rawData.slice(0, outLength),
+                        heavyVec.group.position.clone(),
+                        3,
+                        heavyVec.instanceCount || ctx.vectorPrismCount,
+                    );
 
-                if (ctx && ctx.parentGroup) {
-                    ctx.parentGroup.add(smallVec.group);
-                }
-                vectorRef = smallVec;
-                vectorRef.userData = heavyVec.userData ? { ...heavyVec.userData } : {};
-                if (vectorRef.group) {
-                    vectorRef.group.userData = vectorRef.group.userData || {};
-                    if (Number.isFinite(vectorRef.userData?.headIndex)) {
-                        vectorRef.group.userData.headIndex = vectorRef.userData.headIndex;
+                    if (ctx && ctx.parentGroup) {
+                        ctx.parentGroup.add(smallVec.group);
                     }
-                    if (Number.isFinite(ctx?.layerIndex)) {
-                        vectorRef.group.userData.layerIndex = ctx.layerIndex;
-                    }
-                }
-                try {
-                    const cat = vectorCategory === 'K' ? 'Key Vector'
-                              : vectorCategory === 'Q' ? 'Query Vector'
-                              : 'Value Vector';
-                    vectorRef.group.userData.label = cat;
-                    if (vectorRef.mesh) vectorRef.mesh.userData = { ...(vectorRef.mesh.userData||{}), label: cat };
-                } catch (_) {}
-                if (vectorRef.userData) {
-                    delete vectorRef.userData.trail;
-                    delete vectorRef.userData.trailWorld;
-                }
-                if (vectorCategory === 'K' && vectorRef.userData.parentLane) {
-                    const pl = vectorRef.userData.parentLane;
-                    const hIdx = vectorRef.userData.headIndex;
-                    if (pl && typeof hIdx === 'number') {
-                        pl.upwardCopies[hIdx] = vectorRef;
-                    }
-                }
-                if ((vectorCategory === 'Q' || vectorCategory === 'V') && vectorRef.userData.parentLane) {
-                    const pl = vectorRef.userData.parentLane;
-                    const hIdx = vectorRef.userData.headIndex;
-                    if (pl && Array.isArray(pl.sideCopies) && typeof hIdx === 'number') {
-                        const entry = getSideCopyEntry(pl, hIdx, vectorCategory);
-                        if (entry) {
-                            entry.vec = vectorRef;
-                            setSideCopyEntry(pl, hIdx, vectorCategory, entry);
+                    vectorRef = smallVec;
+                    vectorRef.userData = heavyVec.userData ? { ...heavyVec.userData } : {};
+                    if (vectorRef.group) {
+                        vectorRef.group.userData = vectorRef.group.userData || {};
+                        if (Number.isFinite(vectorRef.userData?.headIndex)) {
+                            vectorRef.group.userData.headIndex = vectorRef.userData.headIndex;
                         }
+                        if (Number.isFinite(ctx?.layerIndex)) {
+                            vectorRef.group.userData.layerIndex = ctx.layerIndex;
+                        }
+                    }
+                    applyVectorCategoryLabel(vectorRef, vectorCategory, ctx);
+                    if (vectorRef.userData) {
+                        delete vectorRef.userData.trail;
+                        delete vectorRef.userData.trailWorld;
+                    }
+                    if (vectorCategory === 'K' && vectorRef.userData.parentLane) {
+                        const pl = vectorRef.userData.parentLane;
+                        const hIdx = vectorRef.userData.headIndex;
+                        if (pl && typeof hIdx === 'number') {
+                            pl.upwardCopies[hIdx] = vectorRef;
+                        }
+                    }
+                    if ((vectorCategory === 'Q' || vectorCategory === 'V') && vectorRef.userData.parentLane) {
+                        const pl = vectorRef.userData.parentLane;
+                        const hIdx = vectorRef.userData.headIndex;
+                        if (pl && Array.isArray(pl.sideCopies) && typeof hIdx === 'number') {
+                            const entry = getSideCopyEntry(pl, hIdx, vectorCategory);
+                            if (entry) {
+                                entry.vec = vectorRef;
+                                setSideCopyEntry(pl, hIdx, vectorCategory, entry);
+                            }
+                        }
+                    }
+                    if (ctx && typeof ctx._releaseVectorCopy === 'function') {
+                        ctx._releaseVectorCopy(heavyVec);
+                    } else {
+                        try { if (ctx && ctx.parentGroup) ctx.parentGroup.remove(heavyVec.group); } catch (_) {}
+                        try { if (typeof heavyVec.dispose === 'function') heavyVec.dispose(); } catch (_) {}
+                    }
+                } else {
+                    applyVectorCategoryLabel(vectorRef, vectorCategory, ctx);
+                    if (vectorRef.userData) {
+                        delete vectorRef.userData.trail;
+                        delete vectorRef.userData.trailWorld;
                     }
                 }
                 initialDimensionChangeApplied = true;
-                if (ctx && typeof ctx._releaseVectorCopy === 'function') {
-                    ctx._releaseVectorCopy(heavyVec);
-                } else {
-                    try { if (ctx && ctx.parentGroup) ctx.parentGroup.remove(heavyVec.group); } catch (_) {}
-                    try { if (typeof heavyVec.dispose === 'function') heavyVec.dispose(); } catch (_) {}
-                }
-
-                const activationSource = ctx && ctx.activationSource ? ctx.activationSource : null;
-                const layerIndex = Number.isFinite(ctx?.layerIndex) ? ctx.layerIndex : null;
-                const headIndex = vectorRef?.userData?.headIndex;
-                const tokenIndex = vectorRef?.userData?.parentLane?.tokenIndex;
-                const tokenLabel = vectorRef?.userData?.parentLane?.tokenLabel;
-                const kind = vectorCategory === 'Q' ? 'q' : vectorCategory === 'K' ? 'k' : 'v';
-                const scalar = activationSource && Number.isFinite(layerIndex)
-                    ? activationSource.getLayerQKVScalar(layerIndex, kind, headIndex, tokenIndex)
-                    : null;
-                const data = Number.isFinite(scalar)
-                    ? [scalar]
-                    : vectorRef.rawData.slice(0, outLength);
-                const rangeBase = vectorCategory === 'V' ? MHA_VALUE_SPECTRUM_COLOR : finalVectorColor;
-                const rangeOptions = buildHueRangeOptions(rangeBase, {
-                    hueSpread: QKV_HUE_SPREAD,
-                    minLightness: QKV_MIN_LIGHTNESS,
-                    maxLightness: QKV_MAX_LIGHTNESS,
-                    valueMin: QKV_VALUE_MIN,
-                    valueMax: QKV_VALUE_MAX,
-                    valueClampMax: QKV_VALUE_CLAMP_MAX,
-                });
-                const numKeyColors = Number.isFinite(scalar) ? 1 : QKV_KEY_COLOR_COUNT;
-                vectorRef.applyProcessedVisuals(
-                    data,
-                    outLength,
-                    { numKeyColors, generationOptions: rangeOptions },
-                    { setHiddenToBlack: false },
-                );
-                if (Number.isFinite(scalar) && typeof vectorRef.setUniformColor === 'function') {
-                    const rangeColor = mapValueToHueRange(scalar, rangeOptions);
-                    vectorRef.setUniformColor(rangeColor);
-                }
-                finalVisualsApplied = true;
-                if (Number.isFinite(scalar)) {
-                    const label = vectorCategory === 'K'
-                        ? 'Key Vector'
-                        : vectorCategory === 'Q'
-                            ? 'Query Vector'
-                            : 'Value Vector';
-                    const activationData = buildActivationData({
-                        label,
-                        values: data,
-                        stage: `qkv.${kind}`,
-                        layerIndex,
-                        tokenIndex,
-                        tokenLabel,
-                        headIndex,
-                    });
-                    applyActivationDataToVector(vectorRef, activationData, label);
+                if (applyQkvProcessedVisuals(vectorRef, ctx, vectorCategory, outLength, finalVectorColor)) {
+                    finalVisualsApplied = true;
                 }
             }
 
@@ -305,25 +341,9 @@ export function animateVectorMatrixPassThrough(
                 }
 
                 if (!finalVisualsApplied && vectorRef) {
-                    const processedData = vectorRef.rawData.slice(0, outLength);
-                    const rangeBase = vectorCategory === 'V' ? MHA_VALUE_SPECTRUM_COLOR : finalVectorColor;
-                    const rangeOptions = buildHueRangeOptions(rangeBase, {
-                        hueSpread: QKV_HUE_SPREAD,
-                        minLightness: QKV_MIN_LIGHTNESS,
-                        maxLightness: QKV_MAX_LIGHTNESS,
-                        valueMin: QKV_VALUE_MIN,
-                        valueMax: QKV_VALUE_MAX,
-                        valueClampMax: QKV_VALUE_CLAMP_MAX,
-                    });
-                    vectorRef.applyProcessedVisuals(processedData, outLength, {
-                        numKeyColors: QKV_KEY_COLOR_COUNT,
-                        generationOptions: rangeOptions,
-                    });
-                    if (processedData.length === 1 && typeof vectorRef.setUniformColor === 'function') {
-                        const rangeColor = mapValueToHueRange(processedData[0], rangeOptions);
-                        vectorRef.setUniformColor(rangeColor);
+                    if (applyQkvProcessedVisuals(vectorRef, ctx, vectorCategory, outLength, finalVectorColor)) {
+                        finalVisualsApplied = true;
                     }
-                    finalVisualsApplied = true;
                 }
 
                 if (ctx.selfAttentionAnimator) {
@@ -417,118 +437,69 @@ export function animateVectorMatrixPassThrough(
             //  Lightweight 64-dimensional swap as soon as we touch matrix
             // --------------------------------------------------------------
             if (!initialDimensionChangeApplied && tweenState.y >= matrixBottomY) {
-                const heavyVec = vector;
-                const smallVec = new VectorVisualizationInstancedPrism(
-                    heavyVec.rawData.slice(0, outLength),
-                    heavyVec.group.position.clone(),
-                    3,
-                    heavyVec.instanceCount || ctx.vectorPrismCount,
-                );
+                const batched = isBatchedVector(vector);
+                if (!batched) {
+                    const heavyVec = vector;
+                    const smallVec = new VectorVisualizationInstancedPrism(
+                        heavyVec.rawData.slice(0, outLength),
+                        heavyVec.group.position.clone(),
+                        3,
+                        heavyVec.instanceCount || ctx.vectorPrismCount,
+                    );
 
-                ctx.parentGroup.add(smallVec.group);
-                vector = smallVec; // continue animating this handle
-                // Preserve metadata such as headIndex for downstream alignment
-                vector.userData = heavyVec.userData ? { ...heavyVec.userData } : {};
-                if (vector.group) {
-                    vector.group.userData = vector.group.userData || {};
-                    if (Number.isFinite(vector.userData?.headIndex)) {
-                        vector.group.userData.headIndex = vector.userData.headIndex;
-                    }
-                    if (Number.isFinite(ctx?.layerIndex)) {
-                        vector.group.userData.layerIndex = ctx.layerIndex;
-                    }
-                }
-                // Preserve and refine hover label for clarity
-                try {
-                    const cat = vectorCategory === 'K' ? 'Key Vector'
-                              : vectorCategory === 'Q' ? 'Query Vector'
-                              : 'Value Vector';
-                    vector.group.userData.label = cat;
-                    if (vector.mesh) vector.mesh.userData = { ...(vector.mesh.userData||{}), label: cat };
-                } catch (_) {}
-                // Ensure trails do NOT continue above matrices for any category
-                if (vector.userData) {
-                    delete vector.userData.trail;
-                    delete vector.userData.trailWorld;
-                }
-                // If this is a green (K) vector, update its parent lane reference
-                if (vectorCategory === 'K' && vector.userData.parentLane) {
-                    const pl = vector.userData.parentLane;
-                    const hIdx = vector.userData.headIndex;
-                    if (pl && typeof hIdx === 'number') {
-                        pl.upwardCopies[hIdx] = vector;
-                    }
-                }
-                // If this is a side copy (Q or V), update the lane.sideCopies entry to
-                // reference the new lightweight 64-dim vector that will be raised/animated above the matrices.
-                if ((vectorCategory === 'Q' || vectorCategory === 'V') && vector.userData.parentLane) {
-                    const pl = vector.userData.parentLane;
-                    const hIdx = vector.userData.headIndex;
-                    if (pl && Array.isArray(pl.sideCopies) && typeof hIdx === 'number') {
-                        const entry = getSideCopyEntry(pl, hIdx, vectorCategory);
-                        if (entry) {
-                            entry.vec = vector;
-                            setSideCopyEntry(pl, hIdx, vectorCategory, entry);
+                    ctx.parentGroup.add(smallVec.group);
+                    vector = smallVec; // continue animating this handle
+                    // Preserve metadata such as headIndex for downstream alignment
+                    vector.userData = heavyVec.userData ? { ...heavyVec.userData } : {};
+                    if (vector.group) {
+                        vector.group.userData = vector.group.userData || {};
+                        if (Number.isFinite(vector.userData?.headIndex)) {
+                            vector.group.userData.headIndex = vector.userData.headIndex;
+                        }
+                        if (Number.isFinite(ctx?.layerIndex)) {
+                            vector.group.userData.layerIndex = ctx.layerIndex;
                         }
                     }
+                    applyVectorCategoryLabel(vector, vectorCategory, ctx);
+                    // Ensure trails do NOT continue above matrices for any category
+                    if (vector.userData) {
+                        delete vector.userData.trail;
+                        delete vector.userData.trailWorld;
+                    }
+                    // If this is a green (K) vector, update its parent lane reference
+                    if (vectorCategory === 'K' && vector.userData.parentLane) {
+                        const pl = vector.userData.parentLane;
+                        const hIdx = vector.userData.headIndex;
+                        if (pl && typeof hIdx === 'number') {
+                            pl.upwardCopies[hIdx] = vector;
+                        }
+                    }
+                    // If this is a side copy (Q or V), update the lane.sideCopies entry to
+                    // reference the new lightweight 64-dim vector that will be raised/animated above the matrices.
+                    if ((vectorCategory === 'Q' || vectorCategory === 'V') && vector.userData.parentLane) {
+                        const pl = vector.userData.parentLane;
+                        const hIdx = vector.userData.headIndex;
+                        if (pl && Array.isArray(pl.sideCopies) && typeof hIdx === 'number') {
+                            const entry = getSideCopyEntry(pl, hIdx, vectorCategory);
+                            if (entry) {
+                                entry.vec = vector;
+                                setSideCopyEntry(pl, hIdx, vectorCategory, entry);
+                            }
+                        }
+                    }
+                    // heavyVec trail remains in scene as a static line below; do not update above
+                    ctx.parentGroup.remove(heavyVec.group);
+                    if (typeof heavyVec.dispose === 'function') heavyVec.dispose();
+                } else {
+                    applyVectorCategoryLabel(vector, vectorCategory, ctx);
+                    if (vector.userData) {
+                        delete vector.userData.trail;
+                        delete vector.userData.trailWorld;
+                    }
                 }
-                // heavyVec trail remains in scene as a static line below; do not update above
                 initialDimensionChangeApplied = true;
-                ctx.parentGroup.remove(heavyVec.group);
-                if (typeof heavyVec.dispose === 'function') heavyVec.dispose();
-
-                const activationSource = ctx && ctx.activationSource ? ctx.activationSource : null;
-                const layerIndex = Number.isFinite(ctx?.layerIndex) ? ctx.layerIndex : null;
-                const headIndex = vector?.userData?.headIndex;
-                const tokenIndex = vector?.userData?.parentLane?.tokenIndex;
-                const tokenLabel = vector?.userData?.parentLane?.tokenLabel;
-                const kind = vectorCategory === 'Q' ? 'q' : vectorCategory === 'K' ? 'k' : 'v';
-                const scalar = activationSource && Number.isFinite(layerIndex)
-                    ? activationSource.getLayerQKVScalar(layerIndex, kind, headIndex, tokenIndex)
-                    : null;
-                const data = Number.isFinite(scalar)
-                    ? [scalar]
-                    : vector.rawData.slice(0, outLength);
-                // Map values into a tinted spectrum derived from the head's final tint.
-                // Use an orange-leaning spectrum for V outputs without changing head colours.
-                const rangeBase = vectorCategory === 'V' ? MHA_VALUE_SPECTRUM_COLOR : finalVectorColor;
-                const rangeOptions = buildHueRangeOptions(rangeBase, {
-                    hueSpread: QKV_HUE_SPREAD,
-                    minLightness: QKV_MIN_LIGHTNESS,
-                    maxLightness: QKV_MAX_LIGHTNESS,
-                    valueMin: QKV_VALUE_MIN,
-                    valueMax: QKV_VALUE_MAX,
-                    valueClampMax: QKV_VALUE_CLAMP_MAX,
-                });
-                const numKeyColors = Number.isFinite(scalar) ? 1 : QKV_KEY_COLOR_COUNT;
-                vector.applyProcessedVisuals(
-                    data,
-                    outLength,
-                    { numKeyColors, generationOptions: rangeOptions },
-                    { setHiddenToBlack: false },
-                );
-                if (Number.isFinite(scalar) && typeof vector.setUniformColor === 'function') {
-                    // Scalar case: map the single value to a uniform tint.
-                    const rangeColor = mapValueToHueRange(scalar, rangeOptions);
-                    vector.setUniformColor(rangeColor);
-                }
-                finalVisualsApplied = true;
-                if (Number.isFinite(scalar)) {
-                    const label = vectorCategory === 'K'
-                        ? 'Key Vector'
-                        : vectorCategory === 'Q'
-                            ? 'Query Vector'
-                            : 'Value Vector';
-                    const activationData = buildActivationData({
-                        label,
-                        values: data,
-                        stage: `qkv.${kind}`,
-                        layerIndex,
-                        tokenIndex,
-                        tokenLabel,
-                        headIndex,
-                    });
-                    applyActivationDataToVector(vector, activationData, label);
+                if (applyQkvProcessedVisuals(vector, ctx, vectorCategory, outLength, finalVectorColor)) {
+                    finalVisualsApplied = true;
                 }
             }
 
@@ -579,25 +550,9 @@ export function animateVectorMatrixPassThrough(
 
             // Guarantee processed visuals in case tween never hit swap point
             if (!finalVisualsApplied) {
-                const processedData = vector.rawData.slice(0, outLength);
-                const rangeBase = vectorCategory === 'V' ? MHA_VALUE_SPECTRUM_COLOR : finalVectorColor;
-                const rangeOptions = buildHueRangeOptions(rangeBase, {
-                    hueSpread: QKV_HUE_SPREAD,
-                    minLightness: QKV_MIN_LIGHTNESS,
-                    maxLightness: QKV_MAX_LIGHTNESS,
-                    valueMin: QKV_VALUE_MIN,
-                    valueMax: QKV_VALUE_MAX,
-                    valueClampMax: QKV_VALUE_CLAMP_MAX,
-                });
-                vector.applyProcessedVisuals(processedData, outLength, {
-                    numKeyColors: QKV_KEY_COLOR_COUNT,
-                    generationOptions: rangeOptions,
-                });
-                if (processedData.length === 1 && typeof vector.setUniformColor === 'function') {
-                    const rangeColor = mapValueToHueRange(processedData[0], rangeOptions);
-                    vector.setUniformColor(rangeColor);
+                if (applyQkvProcessedVisuals(vector, ctx, vectorCategory, outLength, finalVectorColor)) {
+                    finalVisualsApplied = true;
                 }
-                finalVisualsApplied = true;
             }
 
             // Delegate above-matrix animations to SelfAttentionAnimator

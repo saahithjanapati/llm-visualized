@@ -1500,6 +1500,66 @@ function applyMaterialSnapshot(object, snapshot) {
 }
 
 function buildVectorClonePreview(selectionInfo) {
+    const batchedRef = selectionInfo?.info?.vectorRef;
+    if (batchedRef?.isBatchedVectorRef && batchedRef._batch?.mesh) {
+        const batch = batchedRef._batch;
+        const batchMesh = batch.mesh;
+        const prismCount = Math.max(1, Math.floor(batchedRef.instanceCount || batch.prismCount || 1));
+        const vectorIndex = Math.max(0, Math.floor(batchedRef._index || 0));
+        const geometry = batchMesh.geometry.clone();
+        const material = Array.isArray(batchMesh.material)
+            ? batchMesh.material.map((mat) => clonePreviewMaterial(mat))
+            : clonePreviewMaterial(batchMesh.material);
+        const instanced = new THREE.InstancedMesh(geometry, material, prismCount);
+        instanced.count = prismCount;
+        instanced.matrixAutoUpdate = true;
+        instanced.frustumCulled = false;
+
+        const baseIndex = vectorIndex * prismCount;
+        for (let i = 0; i < prismCount; i++) {
+            batchMesh.getMatrixAt(baseIndex + i, TMP_MATRIX);
+            instanced.setMatrixAt(i, TMP_MATRIX);
+        }
+        instanced.instanceMatrix.needsUpdate = true;
+
+        const colorStartAttr = batchMesh.geometry?.getAttribute?.('colorStart');
+        if (colorStartAttr && colorStartAttr.array) {
+            const startArray = new Float32Array(prismCount * 3);
+            const offset = baseIndex * 3;
+            startArray.set(colorStartAttr.array.subarray(offset, offset + prismCount * 3));
+            instanced.geometry.setAttribute('colorStart', new THREE.InstancedBufferAttribute(startArray, 3));
+        }
+        const colorEndAttr = batchMesh.geometry?.getAttribute?.('colorEnd');
+        if (colorEndAttr && colorEndAttr.array) {
+            const endArray = new Float32Array(prismCount * 3);
+            const offset = baseIndex * 3;
+            endArray.set(colorEndAttr.array.subarray(offset, offset + prismCount * 3));
+            instanced.geometry.setAttribute('colorEnd', new THREE.InstancedBufferAttribute(endArray, 3));
+        }
+
+        if (batchMesh.instanceColor?.array) {
+            const colors = new Float32Array(prismCount * 3);
+            const offset = baseIndex * 3;
+            colors.set(batchMesh.instanceColor.array.subarray(offset, offset + prismCount * 3));
+            instanced.instanceColor = new THREE.InstancedBufferAttribute(colors, 3);
+            instanced.instanceColor.needsUpdate = true;
+        }
+
+        const group = new THREE.Group();
+        group.add(instanced);
+        return {
+            object: group,
+            dispose: () => {
+                geometry.dispose();
+                if (Array.isArray(material)) {
+                    material.forEach((mat) => mat && mat.dispose && mat.dispose());
+                } else if (material) {
+                    material.dispose();
+                }
+            }
+        };
+    }
+
     const vectorObject = findVectorLikeObject(selectionInfo);
     if (!vectorObject || typeof vectorObject.clone !== 'function' || !vectorObject.isObject3D) return null;
     const clone = vectorObject.clone(true);

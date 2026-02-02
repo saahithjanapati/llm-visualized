@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { TRAIL_COLOR, TRAIL_LINE_WIDTH, TRAIL_OPACITY, TRAIL_MAX_SEGMENTS, scaleOpacityForDisplay, scaleLineWidthForDisplay } from './trailConstants.js';
+import { HIDE_INSTANCE_Y_OFFSET } from './constants.js';
 import { perfStats } from './perfStats.js';
 
 /**
@@ -350,6 +351,90 @@ export class StraightLineTrail {
         this._positions[i3] = vec3.x;
         this._positions[i3 + 1] = vec3.y;
         this._positions[i3 + 2] = vec3.z;
+    }
+}
+
+// ------------------------------------------------------------
+// Batched straight-line trails (one segment per trail)
+// ------------------------------------------------------------
+
+export class SegmentTrailBatch {
+    constructor(scene, capacity = 1, color = TRAIL_COLOR, lineWidth = TRAIL_LINE_WIDTH, opacity = TRAIL_OPACITY) {
+        this._scene = scene;
+        this._capacity = Math.max(1, Math.floor(capacity || 1));
+        this._positions = new Float32Array(this._capacity * 2 * 3);
+        this._attr = new THREE.BufferAttribute(this._positions, 3).setUsage(THREE.DynamicDrawUsage);
+        this._geometry = new THREE.BufferGeometry();
+        this._geometry.setAttribute('position', this._attr);
+        this._geometry.setDrawRange(0, this._capacity * 2);
+
+        const effectiveOpacity = scaleOpacityForDisplay(opacity);
+        const effectiveWidth = scaleLineWidthForDisplay(lineWidth);
+        this._material = new THREE.LineBasicMaterial({
+            color,
+            linewidth: effectiveWidth,
+            transparent: effectiveOpacity < 1.0,
+            opacity: effectiveOpacity,
+            depthWrite: false,
+            fog: false,
+            toneMapped: false,
+        });
+
+        this._line = new THREE.LineSegments(this._geometry, this._material);
+        this._line.frustumCulled = false;
+        this._line.userData.isTrail = true;
+        this._line.userData.trailBatch = true;
+        this._line.raycast = () => {};
+        if (scene) scene.add(this._line);
+
+        this._nextIndex = 0;
+    }
+
+    acquireTrail() {
+        if (this._nextIndex >= this._capacity) return null;
+        const idx = this._nextIndex++;
+        return new BatchedSegmentTrail(this, idx);
+    }
+
+    _setSegment(index, start, end) {
+        if (index < 0 || index >= this._capacity) return;
+        const i = index * 2 * 3;
+        this._positions[i] = start.x;
+        this._positions[i + 1] = start.y;
+        this._positions[i + 2] = start.z;
+        this._positions[i + 3] = end.x;
+        this._positions[i + 4] = end.y;
+        this._positions[i + 5] = end.z;
+        this._attr.needsUpdate = true;
+    }
+}
+
+export class BatchedSegmentTrail {
+    constructor(batch, index) {
+        this._batch = batch;
+        this._index = index;
+        this._start = new THREE.Vector3();
+        this.isBatchedTrail = true;
+    }
+
+    start(pos) {
+        if (!pos) return;
+        this._start.copy(pos);
+        this._batch._setSegment(this._index, pos, pos);
+    }
+
+    update(pos) {
+        if (!pos) return;
+        this._batch._setSegment(this._index, this._start, pos);
+    }
+
+    snapLastPointTo(pos) {
+        this.update(pos);
+    }
+
+    dispose() {
+        const hide = new THREE.Vector3(0, HIDE_INSTANCE_Y_OFFSET, 0);
+        this._batch._setSegment(this._index, hide, hide);
     }
 }
 

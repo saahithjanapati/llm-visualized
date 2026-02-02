@@ -60,4 +60,8 @@ export function applyActivationDataToVector(vector, activationData, label = null
             ...(activationData ? { activationData } : {}),
         };
     }
+    // Keep batched vector raycast metadata in sync for hover/selection UI.
+    if (vector.isBatchedVectorRef && vector._batch && typeof vector._batch.updateVectorRaycastInfo === 'function') {
+        vector._batch.updateVectorRaycastInfo(vector._index, vector);
+    }
 }

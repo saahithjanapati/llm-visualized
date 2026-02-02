@@ -4,6 +4,7 @@ import { TRAIL_MIN_SEGMENT_DISTANCE } from '../../utils/trailConstants.js';
 import { PrismLayerNormAnimation } from '../../animations/PrismLayerNormAnimation.js';
 import { startPrismAdditionAnimation } from '../../utils/additionUtils.js';
 import { applyVectorData, copyVectorAppearance, LN_INTERNAL_TRAIL_MIN_SEGMENT } from './gpt2LayerUtils.js';
+import { BatchedPrismVectorSet } from '../../components/BatchedPrismVectorSet.js';
 import {
     LN_PARAMS,
     LAYER_NORM_1_Y_POS,
@@ -24,7 +25,7 @@ import {
 
 const TMP_WORLD_POS = new THREE.Vector3();
 const LN_ADD_VECTOR_OFFSET_FRACTION = 0.25; // fraction of LN height above centre for bias addition
-const LN_PARAM_MONOCHROME = {
+export const LN_PARAM_MONOCHROME = {
     type: 'monochromatic',
     baseHue: 0,
     saturation: 0,
@@ -59,71 +60,60 @@ export function createFreshLanes(layer, offsetX, ln1CenterY, ln2CenterY, ln1TopY
 
 export function createAdditionPlaceholders(layer, offsetX, ln1CenterY, ln2CenterY) {
     try {
-        const slitSpacing = LN_PARAMS.depth / (layer._laneCount + 1);
+        const laneCount = Math.max(1, layer._laneCount || 1);
+        const slitSpacing = LN_PARAMS.depth / (laneCount + 1);
         const addYOffset = LN_PARAMS.height * LN_ADD_VECTOR_OFFSET_FRACTION;
         const raycastRoot = layer.raycastRoot || layer.root;
-        const getLnParamData = (kind, param) => (
-            typeof layer._getLayerNormParamData === 'function'
-                ? layer._getLayerNormParamData(kind, param)
-                : null
-        );
-        const fallbackVector = () => layer.random.nextVector(layer._getBaseVectorLength());
-        if (!layer._ln1AddPlaceholders) layer._ln1AddPlaceholders = [];
-        if (!layer._ln2AddPlaceholders) layer._ln2AddPlaceholders = [];
-        if (!layer._ln1ScalePlaceholders) layer._ln1ScalePlaceholders = [];
-        if (!layer._ln2ScalePlaceholders) layer._ln2ScalePlaceholders = [];
+        const prismCount = typeof layer._getBaseVectorLength === 'function'
+            ? layer._getBaseVectorLength()
+            : undefined;
 
-        for (let laneIdx = 0; laneIdx < layer._laneCount; laneIdx++) {
+        const makeBank = (label) => new BatchedPrismVectorSet({
+            vectorCount: laneCount,
+            prismCount,
+            parentGroup: raycastRoot,
+            label,
+        });
+
+        if (!layer._lnParamBanks || layer._lnParamBanks._laneCount !== laneCount) {
+            layer._lnParamBanks = {
+                _laneCount: laneCount,
+                ln1Scale: makeBank('LN1 Scale Params'),
+                ln1Shift: makeBank('LN1 Shift Params'),
+                ln2Scale: makeBank('LN2 Scale Params'),
+                ln2Shift: makeBank('LN2 Shift Params'),
+            };
+        }
+
+        const banks = layer._lnParamBanks;
+        for (let laneIdx = 0; laneIdx < laneCount; laneIdx++) {
             const zPos = -LN_PARAMS.depth / 2 + slitSpacing * (laneIdx + 1);
 
-            const ln1ScaleData = getLnParamData('ln1', 'scale') || fallbackVector();
-            const ln1Scale = layer._createPrismVector(
-                ln1ScaleData,
-                new THREE.Vector3(offsetX, ln1CenterY + 3.3, zPos),
-                30,
-                ln1ScaleData.length
-            );
-            layer._applyLayerNormParamVector(ln1Scale, 'ln1', 'scale', LN_PARAM_MONOCHROME);
-            ln1Scale.group.visible = true;
-            raycastRoot.add(ln1Scale.group);
-            layer._ln1ScalePlaceholders[laneIdx] = ln1Scale;
+            const ln1ScaleRef = banks.ln1Scale.getVectorRef(laneIdx);
+            ln1ScaleRef.group.position.set(offsetX, ln1CenterY + 3.3, zPos);
+            ln1ScaleRef.group.visible = true;
+            layer._applyLayerNormParamVector(ln1ScaleRef, 'ln1', 'scale', LN_PARAM_MONOCHROME);
 
-            const ln1PlaceholderData = getLnParamData('ln1', 'shift') || fallbackVector();
-            const ln1Placeholder = layer._createPrismVector(
-                ln1PlaceholderData,
-                new THREE.Vector3(offsetX, ln1CenterY + addYOffset, zPos),
-                30,
-                ln1PlaceholderData.length
-            );
-            layer._applyLayerNormParamVector(ln1Placeholder, 'ln1', 'shift', LN_PARAM_MONOCHROME);
-            ln1Placeholder.group.visible = true;
-            raycastRoot.add(ln1Placeholder.group);
-            layer._ln1AddPlaceholders[laneIdx] = ln1Placeholder;
+            const ln1ShiftRef = banks.ln1Shift.getVectorRef(laneIdx);
+            ln1ShiftRef.group.position.set(offsetX, ln1CenterY + addYOffset, zPos);
+            ln1ShiftRef.group.visible = true;
+            layer._applyLayerNormParamVector(ln1ShiftRef, 'ln1', 'shift', LN_PARAM_MONOCHROME);
 
-            const ln2ScaleData = getLnParamData('ln2', 'scale') || fallbackVector();
-            const ln2Scale = layer._createPrismVector(
-                ln2ScaleData,
-                new THREE.Vector3(offsetX, ln2CenterY + 3.3, zPos),
-                30,
-                ln2ScaleData.length
-            );
-            layer._applyLayerNormParamVector(ln2Scale, 'ln2', 'scale', LN_PARAM_MONOCHROME);
-            ln2Scale.group.visible = true;
-            raycastRoot.add(ln2Scale.group);
-            layer._ln2ScalePlaceholders[laneIdx] = ln2Scale;
+            const ln2ScaleRef = banks.ln2Scale.getVectorRef(laneIdx);
+            ln2ScaleRef.group.position.set(offsetX, ln2CenterY + 3.3, zPos);
+            ln2ScaleRef.group.visible = true;
+            layer._applyLayerNormParamVector(ln2ScaleRef, 'ln2', 'scale', LN_PARAM_MONOCHROME);
 
-            const ln2PlaceholderData = getLnParamData('ln2', 'shift') || fallbackVector();
-            const ln2Placeholder = layer._createPrismVector(
-                ln2PlaceholderData,
-                new THREE.Vector3(offsetX, ln2CenterY + addYOffset, zPos),
-                30,
-                ln2PlaceholderData.length
-            );
-            layer._applyLayerNormParamVector(ln2Placeholder, 'ln2', 'shift', LN_PARAM_MONOCHROME);
-            ln2Placeholder.group.visible = true;
-            raycastRoot.add(ln2Placeholder.group);
-            layer._ln2AddPlaceholders[laneIdx] = ln2Placeholder;
+            const ln2ShiftRef = banks.ln2Shift.getVectorRef(laneIdx);
+            ln2ShiftRef.group.position.set(offsetX, ln2CenterY + addYOffset, zPos);
+            ln2ShiftRef.group.visible = true;
+            layer._applyLayerNormParamVector(ln2ShiftRef, 'ln2', 'shift', LN_PARAM_MONOCHROME);
         }
+
+        banks.ln1Scale.syncAll();
+        banks.ln1Shift.syncAll();
+        banks.ln2Scale.syncAll();
+        banks.ln2Shift.syncAll();
     } catch (_) {
         // Placeholders are a visual aid only - failures shouldn't stop the demo.
     }
@@ -152,12 +142,6 @@ export function createLanesFromExternal(layer, externalLanes, offsetX, ln1Center
 
 export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY, startY_override, meetY, laneIdx, slitSpacing) {
     const raycastRoot = layer.raycastRoot || layer.root;
-    const getLnParamData = (kind, param) => (
-        typeof layer._getLayerNormParamData === 'function'
-            ? layer._getLayerNormParamData(kind, param)
-            : null
-    );
-    const fallbackVector = () => layer.random.nextVector(layer._getBaseVectorLength());
     // Reuse existing trail when lanes are passed from a lower layer.
     let trailFromPrev = oldLane && oldLane.originalTrail ? oldLane.originalTrail : null;
     const laneTokenIndex = (oldLane && Number.isFinite(oldLane.tokenIndex))
@@ -260,97 +244,29 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
         trail.start(TMP_WORLD_POS);
     }
 
-    let multTarget = null;
-    const ln1ScaleData = getLnParamData('ln1', 'scale') || fallbackVector();
-    if (layer._ln1ScalePlaceholders && layer._ln1ScalePlaceholders[laneIdx]) {
-        multTarget = layer._ln1ScalePlaceholders[laneIdx];
-        layer._ln1ScalePlaceholders[laneIdx] = null;
-        if (multTarget && multTarget.group && multTarget.group.parent !== raycastRoot) {
-            raycastRoot.add(multTarget.group);
-        }
-        if (multTarget && multTarget.group) {
-            multTarget.group.visible = true;
-        }
-    } else {
-        multTarget = layer._createPrismVector(
-            ln1ScaleData,
-            new THREE.Vector3(offsetX, ln1CenterY + 3.3, zPos),
-            30,
-            ln1ScaleData.length
-        );
-        raycastRoot.add(multTarget.group);
-    }
-    layer._applyLayerNormParamVector(multTarget, 'ln1', 'scale', LN_PARAM_MONOCHROME);
-
-    let multTargetLN2 = null;
-    const ln2ScaleData = getLnParamData('ln2', 'scale') || fallbackVector();
-    if (layer._ln2ScalePlaceholders && layer._ln2ScalePlaceholders[laneIdx]) {
-        multTargetLN2 = layer._ln2ScalePlaceholders[laneIdx];
-        layer._ln2ScalePlaceholders[laneIdx] = null;
-        if (multTargetLN2 && multTargetLN2.group && multTargetLN2.group.parent !== raycastRoot) {
-            raycastRoot.add(multTargetLN2.group);
-        }
-        if (multTargetLN2 && multTargetLN2.group) {
-            multTargetLN2.group.visible = true;
-        }
-    } else {
-        multTargetLN2 = layer._createPrismVector(
-            ln2ScaleData,
-            new THREE.Vector3(offsetX, ln2CenterY + 3.3, zPos),
-            30,
-            ln2ScaleData.length
-        );
-        raycastRoot.add(multTargetLN2.group);
-    }
-    layer._applyLayerNormParamVector(multTargetLN2, 'ln2', 'scale', LN_PARAM_MONOCHROME);
-
     const addYOffset = LN_PARAMS.height * LN_ADD_VECTOR_OFFSET_FRACTION;
+    const paramBanks = layer._lnParamBanks || null;
+    const multTarget = paramBanks && paramBanks.ln1Scale ? paramBanks.ln1Scale.getVectorRef(laneIdx) : null;
+    const addTarget = paramBanks && paramBanks.ln1Shift ? paramBanks.ln1Shift.getVectorRef(laneIdx) : null;
+    const multTargetLN2 = paramBanks && paramBanks.ln2Scale ? paramBanks.ln2Scale.getVectorRef(laneIdx) : null;
+    const addTargetLN2 = paramBanks && paramBanks.ln2Shift ? paramBanks.ln2Shift.getVectorRef(laneIdx) : null;
 
-    let addTarget = null;
-    const ln1ShiftData = getLnParamData('ln1', 'shift') || fallbackVector();
-    if (layer._ln1AddPlaceholders && layer._ln1AddPlaceholders[laneIdx]) {
-        addTarget = layer._ln1AddPlaceholders[laneIdx];
-        layer._ln1AddPlaceholders[laneIdx] = null;
-        if (addTarget && addTarget.group && addTarget.group.parent !== raycastRoot) {
-            raycastRoot.add(addTarget.group);
-        }
-        if (addTarget && addTarget.group) {
-            addTarget.group.visible = true;
-        }
-    } else {
-        addTarget = layer._createPrismVector(
-            ln1ShiftData,
-            new THREE.Vector3(offsetX, ln1CenterY + addYOffset, zPos),
-            30,
-            ln1ShiftData.length
-        );
-        raycastRoot.add(addTarget.group);
-        if (addTarget.group) addTarget.group.visible = true;
+    if (multTarget && multTarget.group) {
+        multTarget.group.position.set(offsetX, ln1CenterY + 3.3, zPos);
+        multTarget.group.visible = true;
     }
-    layer._applyLayerNormParamVector(addTarget, 'ln1', 'shift', LN_PARAM_MONOCHROME);
-
-    let addTargetLN2 = null;
-    const ln2ShiftData = getLnParamData('ln2', 'shift') || fallbackVector();
-    if (layer._ln2AddPlaceholders && layer._ln2AddPlaceholders[laneIdx]) {
-        addTargetLN2 = layer._ln2AddPlaceholders[laneIdx];
-        layer._ln2AddPlaceholders[laneIdx] = null;
-        if (addTargetLN2 && addTargetLN2.group && addTargetLN2.group.parent !== raycastRoot) {
-            raycastRoot.add(addTargetLN2.group);
-        }
-        if (addTargetLN2 && addTargetLN2.group) {
-            addTargetLN2.group.visible = true;
-        }
-    } else {
-        addTargetLN2 = layer._createPrismVector(
-            ln2ShiftData,
-            new THREE.Vector3(offsetX, ln2CenterY + addYOffset, zPos),
-            30,
-            ln2ShiftData.length
-        );
-        raycastRoot.add(addTargetLN2.group);
-        if (addTargetLN2.group) addTargetLN2.group.visible = true;
+    if (addTarget && addTarget.group) {
+        addTarget.group.position.set(offsetX, ln1CenterY + addYOffset, zPos);
+        addTarget.group.visible = true;
     }
-    layer._applyLayerNormParamVector(addTargetLN2, 'ln2', 'shift', LN_PARAM_MONOCHROME);
+    if (multTargetLN2 && multTargetLN2.group) {
+        multTargetLN2.group.position.set(offsetX, ln2CenterY + 3.3, zPos);
+        multTargetLN2.group.visible = true;
+    }
+    if (addTargetLN2 && addTargetLN2.group) {
+        addTargetLN2.group.position.set(offsetX, ln2CenterY + addYOffset, zPos);
+        addTargetLN2.group.visible = true;
+    }
 
     // Fallback to previous trail if a new one wasn't created in this constructor.
     if (!trail && trailFromPrev) trail = trailFromPrev;

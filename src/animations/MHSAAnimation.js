@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization.js';
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
-import { StraightLineTrail, mergeTrailsIntoLineSegments } from '../utils/trailUtils.js';
-import { TRAIL_MIN_SEGMENT_DISTANCE } from '../utils/trailConstants.js';
+import { BatchedPrismVectorSet } from '../components/BatchedPrismVectorSet.js';
+import { SegmentTrailBatch, StraightLineTrail, mergeTrailsIntoLineSegments } from '../utils/trailUtils.js';
+import { TRAIL_COLOR, TRAIL_MIN_SEGMENT_DISTANCE } from '../utils/trailConstants.js';
 
 
 
@@ -45,6 +46,7 @@ import { animateVectorMatrixPassThrough as animateVectorMatrixPassThroughExterna
 const _tmpWorld = new THREE.Vector3();
 const _tmpWorld2 = new THREE.Vector3();
 const _tmpMatrix = new THREE.Matrix4();
+const QKV_TRAIL_OPACITY = 0.08;
 
 // Use live binding of GLOBAL_ANIM_SPEED_MULT at each use; do not cache
 
@@ -74,6 +76,15 @@ export class MHSAAnimation {
         this.vectorPrismCount = Number.isFinite(opts.vectorPrismCount)
             ? Math.max(1, Math.floor(opts.vectorPrismCount))
             : VECTOR_LENGTH_PRISM;
+        this._laneCount = Number.isFinite(opts.laneCount)
+            ? Math.max(1, Math.floor(opts.laneCount))
+            : NUM_VECTOR_LANES;
+        this._useBatchedVectorCopies = opts.useBatchedVectorCopies !== false;
+        // Batched trails collapse to single segments; keep legacy multi-segment
+        // trails by default so paths show right-angle turns.
+        this._useBatchedTrails = opts.useBatchedTrails !== undefined
+            ? !!opts.useBatchedTrails
+            : false;
         this.useBatchedPassThrough = opts.useBatchedPassThrough !== undefined
             ? !!opts.useBatchedPassThrough
             : true;
@@ -83,6 +94,43 @@ export class MHSAAnimation {
         this._vectorPool = new Map();
         this._vectorPoolSize = 0;
         this._vectorPoolLimit = Number.isFinite(opts.vectorPoolLimit) ? Math.max(0, Math.floor(opts.vectorPoolLimit)) : 512;
+        this._batchedVectorSets = null;
+        if (this._useBatchedVectorCopies) {
+            const totalCopies = this._laneCount * NUM_HEAD_SETS_LAYER;
+            this._batchedVectorSets = {
+                K: new BatchedPrismVectorSet({
+                    vectorCount: totalCopies,
+                    prismCount: this.vectorPrismCount,
+                    parentGroup: this.parentGroup,
+                    label: 'MHSA K Copies',
+                }),
+                Q: new BatchedPrismVectorSet({
+                    vectorCount: totalCopies,
+                    prismCount: this.vectorPrismCount,
+                    parentGroup: this.parentGroup,
+                    label: 'MHSA Q Copies',
+                }),
+                V: new BatchedPrismVectorSet({
+                    vectorCount: totalCopies,
+                    prismCount: this.vectorPrismCount,
+                    parentGroup: this.parentGroup,
+                    label: 'MHSA V Copies',
+                }),
+            };
+        }
+        this._qkvTrailBatch = null;
+        this._trailFactory = null;
+        if (this._useBatchedTrails) {
+            const capacity = this._laneCount * NUM_HEAD_SETS_LAYER * 3;
+            this._qkvTrailBatch = new SegmentTrailBatch(
+                this.parentGroup,
+                capacity,
+                TRAIL_COLOR,
+                1,
+                QKV_TRAIL_OPACITY
+            );
+            this._trailFactory = () => (this._qkvTrailBatch ? this._qkvTrailBatch.acquireTrail() : null);
+        }
 
         // Speed at which residual-stream vectors rise while branched
         // during MHSA/MLP processing. Starts with the LN1 value.
@@ -244,7 +292,8 @@ export class MHSAAnimation {
         // --------------------------------------------------------------
         this.vectorRouter = new VectorRouter(this.parentGroup, this.headsCentersX, this.headCoords, this.headStopY, this.mhaVisualizations, {
             acquireVector: this._acquireVectorCopy.bind(this),
-            shareVectorData: this._shareVectorData
+            shareVectorData: this._shareVectorData,
+            trailFactory: this._trailFactory
         });
         this.vectorRouter.onReady(() => {
             this.mhaPassThroughPhase = 'ready_for_parallel_pass_through';
@@ -315,7 +364,23 @@ export class MHSAAnimation {
         return { key, bucket };
     }
 
-    _acquireVectorCopy({ rawData, position, instanceCount, numSubsections = 30, shareData = false } = {}) {
+    _acquireVectorCopy({ rawData, position, instanceCount, numSubsections = 30, shareData = false, kind = null, headIndex = null, lane = null } = {}) {
+        if (this._batchedVectorSets && kind && this._batchedVectorSets[kind]) {
+            const laneIndex = (lane && Number.isFinite(lane.laneIndex))
+                ? lane.laneIndex
+                : (this.currentLanes ? this.currentLanes.indexOf(lane) : -1);
+            const headIdx = Number.isFinite(headIndex) ? headIndex : 0;
+            const safeLaneIndex = laneIndex >= 0 ? laneIndex : 0;
+            const vectorIndex = safeLaneIndex * NUM_HEAD_SETS_LAYER + headIdx;
+            const batch = this._batchedVectorSets[kind];
+            const vec = batch.getVectorRef(vectorIndex);
+            vec.group.visible = true;
+            if (position) {
+                vec.group.position.copy(position);
+            }
+            vec.updateDataInternal(rawData, { copyData: true });
+            return vec;
+        }
         const { key, bucket } = this._getVectorPoolBucket(instanceCount);
         let vec = null;
         if (bucket.length) {
@@ -358,6 +423,21 @@ export class MHSAAnimation {
 
     _releaseVectorCopy(vec) {
         if (!vec) return;
+        if (vec.isBatchedVectorRef) {
+            if (vec.group) {
+                vec.group.visible = false;
+            }
+            if (vec.userData) {
+                delete vec.userData.trail;
+                delete vec.userData.trailWorld;
+                delete vec.userData.parentLane;
+            }
+            try {
+                vec.rawData = [];
+                vec.normalizedData = [];
+            } catch (_) { /* ignore */ }
+            return;
+        }
         try {
             if (vec.group && vec.group.parent) vec.group.parent.remove(vec.group);
         } catch (_) { /* ignore */ }
@@ -927,6 +1007,14 @@ export class MHSAAnimation {
                 } catch (_) { /* defensive */ }
             });
         }
+
+        if (this._batchedVectorSets) {
+            Object.values(this._batchedVectorSets).forEach((batch) => {
+                if (batch && typeof batch.syncAll === 'function') {
+                    batch.syncAll();
+                }
+            });
+        }
     }
 
     _registerPassThroughJob(job) {
@@ -1002,7 +1090,7 @@ export class MHSAAnimation {
             if (Array.isArray(lane.upwardCopies)) {
                 lane.upwardCopies.forEach(v => {
                     const t = v && v.userData && v.userData.trail;
-                    if (t) {
+                    if (t && !t.isBatchedTrail && typeof t.toSegmentsFloat32 === 'function') {
                         trailsToMerge.push(t);
                         vectorsWithTrails.push(v);
                     }
@@ -1013,7 +1101,7 @@ export class MHSAAnimation {
                 lane.sideCopies.forEach(obj => {
                     const v = obj && obj.vec;
                     const t = v && v.userData && v.userData.trail;
-                    if (t) {
+                    if (t && !t.isBatchedTrail && typeof t.toSegmentsFloat32 === 'function') {
                         trailsToMerge.push(t);
                         vectorsWithTrails.push(v);
                     }
@@ -1022,7 +1110,7 @@ export class MHSAAnimation {
             // Travelling vector trail inside MHSA branch (not the residual stream)
             const tv = lane && lane.travellingVec;
             const tvTrail = tv && tv.userData && tv.userData.trail;
-            if (tvTrail) {
+            if (tvTrail && !tvTrail.isBatchedTrail && typeof tvTrail.toSegmentsFloat32 === 'function') {
                 trailsToMerge.push(tvTrail);
                 vectorsWithTrails.push(tv);
             }

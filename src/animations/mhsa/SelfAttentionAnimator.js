@@ -451,6 +451,17 @@ export class SelfAttentionAnimator {
 
     _retireVector(vec, { preserveTrail = false } = {}) {
         if (!vec) return;
+        // Batched vector refs are owned by MHSAAnimation; hand them back to release/hide.
+        if (vec.isBatchedVectorRef) {
+            try {
+                if (this.ctx && typeof this.ctx._releaseVectorCopy === 'function') {
+                    this.ctx._releaseVectorCopy(vec);
+                } else if (vec.group) {
+                    vec.group.visible = false;
+                }
+            } catch (_) { /* optional cleanup */ }
+            return;
+        }
         try {
             if (!preserveTrail && vec.userData && vec.userData.trail && typeof vec.userData.trail.dispose === 'function') {
                 vec.userData.trail.dispose();
@@ -1223,8 +1234,7 @@ export class SelfAttentionAnimator {
                         .easing(QEasing)
                         .onComplete(() => {
                             // BEGIN NEW LOGIC – start red traversal using the first V copy and skip spawning a pre-visible red vector
-                                if (vector.group.parent) vector.group.parent.remove(vector.group);
-                                if (typeof vector.dispose === 'function') vector.dispose();
+                                this._retireVector(vector);
                                 this._startRedTraversalFromFirstCopy(headIdx, i, laneZs, spheres, allDoneCb);
                                 return;
                                 // (legacy logic kept for reference below)
@@ -1650,6 +1660,7 @@ export class SelfAttentionAnimator {
                 // individual K/V meshes to ensure nothing remains visible.
                 this.ctx && this.ctx._disposeMergedKVGroups && this.ctx._disposeMergedKVGroups();
                 this.ctx && this.ctx._disposeAllIndividualKandVVectorsImmediately && this.ctx._disposeAllIndividualKandVVectorsImmediately();
+                this.ctx && this.ctx._hideAllQVectorsImmediately && this.ctx._hideAllQVectorsImmediately();
             } catch (_) { /* optional */ }
             this._flushCallbacks();
         }
