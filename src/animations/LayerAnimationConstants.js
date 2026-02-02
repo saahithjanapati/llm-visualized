@@ -132,6 +132,14 @@ export const MHA_FINAL_K_COLOR = 0x1e9f57;
 export const MHA_FINAL_V_COLOR = 0xaa3420;
 // Base tint for the value-spectrum applied to lightweight V vectors after head projection.
 export const MHA_VALUE_SPECTRUM_COLOR = 0xf28b30;
+// Value-vector spectrum tuning (shared by V outputs + weighted sums).
+export const MHA_VALUE_HUE_SPREAD = 0.22;
+export const MHA_VALUE_LIGHTNESS_MIN = 0.3;
+export const MHA_VALUE_LIGHTNESS_MAX = 0.74;
+export const MHA_VALUE_RANGE_MIN = -2;
+export const MHA_VALUE_RANGE_MAX = 2;
+export const MHA_VALUE_CLAMP_MAX = 0.5;
+export const MHA_VALUE_KEY_COLOR_COUNT = 5;
 
 /** Active colour of the output-projection matrix that follows MHSA. */
 export const MHA_OUTPUT_PROJECTION_MATRIX_COLOR = 0x9C27B0;

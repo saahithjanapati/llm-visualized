@@ -7,7 +7,8 @@ import { TRAIL_MIN_SEGMENT_DISTANCE } from '../utils/trailConstants.js';
 
 
 import { buildActivationData, applyActivationDataToVector } from '../utils/activationMetadata.js';
-import { MHSA_MATRIX_INITIAL_RESTING_COLOR, MHSA_BRIGHT_GREEN, MHSA_DARK_TINTED_GREEN, MHSA_BRIGHT_BLUE, MHSA_DARK_TINTED_BLUE, MHSA_BRIGHT_RED, MHSA_DARK_TINTED_RED, MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR, MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW, MHA_OUTPUT_PROJECTION_MATRIX_PARAMS, MHA_OUTPUT_PROJECTION_MATRIX_COLOR, MHA_VALUE_SPECTRUM_COLOR } from './LayerAnimationConstants.js';
+import { buildHueRangeOptions, mapValueToHueRange } from '../utils/colors.js';
+import { MHSA_MATRIX_INITIAL_RESTING_COLOR, MHSA_BRIGHT_GREEN, MHSA_DARK_TINTED_GREEN, MHSA_BRIGHT_BLUE, MHSA_DARK_TINTED_BLUE, MHSA_BRIGHT_RED, MHSA_DARK_TINTED_RED, MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR, MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW, MHA_OUTPUT_PROJECTION_MATRIX_PARAMS, MHA_OUTPUT_PROJECTION_MATRIX_COLOR, MHA_VALUE_SPECTRUM_COLOR, MHA_VALUE_HUE_SPREAD, MHA_VALUE_LIGHTNESS_MIN, MHA_VALUE_LIGHTNESS_MAX, MHA_VALUE_RANGE_MIN, MHA_VALUE_RANGE_MAX, MHA_VALUE_CLAMP_MAX, MHA_VALUE_KEY_COLOR_COUNT } from './LayerAnimationConstants.js';
 import { INACTIVE_COMPONENT_COLOR, MHSA_DUPLICATE_VECTOR_RISE_SPEED, MHSA_PASS_THROUGH_TOTAL_DURATION_MS, MHSA_RESULT_RISE_OFFSET_Y, MHSA_HEAD_VECTOR_STOP_BELOW, MHA_RESULT_RISE_DURATION_BASE_MS, DECORATIVE_FADE_MS, DECORATIVE_FADE_DELAY_MS, MERGE_TO_ROW_DELAY_AFTER_FADE_MS, HEAD_COLOR_TRANSITION_MS, MERGE_POST_COLOR_TRANSITION_DELAY_MS, MERGE_EXTRA_BUFFER_MS, OUTPUT_PROJ_STAGE1_MS, OUTPUT_PROJ_STAGE2_MS, OUTPUT_PROJ_STAGE3_MS, GLOBAL_ANIM_SPEED_MULT, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY, SKIP_TRAIL_FADE_IN_MS } from '../utils/constants.js';
 import {
     // Constants needed for setup & animation
@@ -1737,19 +1738,30 @@ export class MHSAAnimation {
         const entries = this._getWeightedSumDecoratives();
         if (!entries.length) return;
         const outputLength = this.outputVectorLength || 64;
+        const rangeOptions = buildHueRangeOptions(MHA_VALUE_SPECTRUM_COLOR, {
+            hueSpread: MHA_VALUE_HUE_SPREAD,
+            minLightness: MHA_VALUE_LIGHTNESS_MIN,
+            maxLightness: MHA_VALUE_LIGHTNESS_MAX,
+            valueMin: MHA_VALUE_RANGE_MIN,
+            valueMax: MHA_VALUE_RANGE_MAX,
+            valueClampMax: MHA_VALUE_CLAMP_MAX,
+        });
         entries.forEach(({ vec }) => {
             if (!vec || !vec.mesh) return;
             const raw = Array.isArray(vec.rawData)
                 ? vec.rawData.slice(0, outputLength)
                 : [];
-            const numKeyColors = raw.length <= 1 ? 1 : Math.min(30, raw.length);
+            const numKeyColors = raw.length <= 1 ? 1 : Math.min(MHA_VALUE_KEY_COLOR_COUNT, raw.length);
             vec.applyProcessedVisuals(
                 raw,
                 outputLength,
-                { numKeyColors, generationOptions: null },
+                { numKeyColors, generationOptions: rangeOptions },
                 { setHiddenToBlack: true },
                 raw
             );
+            if (raw.length === 1 && typeof vec.setUniformColor === 'function') {
+                vec.setUniformColor(mapValueToHueRange(raw[0], rangeOptions));
+            }
             if (vec.userData) {
                 vec.userData.weightedSumReadyForConcat = true;
             }
@@ -1902,15 +1914,36 @@ export class MHSAAnimation {
             // combined vector visually matches its inputs (avoids a colour
             // shift before the Output-Projection matrix).
             const tmpColor = new THREE.Color();
+            const destCS = combinedVec.mesh?.geometry?.getAttribute?.('colorStart');
+            const destCE = combinedVec.mesh?.geometry?.getAttribute?.('colorEnd');
+            const destIC = combinedVec.mesh?.instanceColor;
             vecList.forEach((srcVec, i) => {
                 const srcPrismIdx  = Math.min(startVisibleIdx, Math.max(0, (srcVec.instanceCount || this.vectorPrismCount) - 1));
                 const destPrismIdx = Math.min(i, Math.max(0, (combinedVec.instanceCount || this.vectorPrismCount) - 1));
-                if (srcVec.mesh && srcVec.mesh.getColorAt) {
+                const srcCS = srcVec.mesh?.geometry?.getAttribute?.('colorStart');
+                const srcCE = srcVec.mesh?.geometry?.getAttribute?.('colorEnd');
+                if (srcCS && srcCE && destCS && destCE) {
+                    const srcIdx3 = srcPrismIdx * 3;
+                    const destIdx3 = destPrismIdx * 3;
+                    destCS.array[destIdx3] = srcCS.array[srcIdx3];
+                    destCS.array[destIdx3 + 1] = srcCS.array[srcIdx3 + 1];
+                    destCS.array[destIdx3 + 2] = srcCS.array[srcIdx3 + 2];
+                    destCE.array[destIdx3] = srcCE.array[srcIdx3];
+                    destCE.array[destIdx3 + 1] = srcCE.array[srcIdx3 + 1];
+                    destCE.array[destIdx3 + 2] = srcCE.array[srcIdx3 + 2];
+                    if (destIC && destIC.array) {
+                        destIC.array[destIdx3] = srcCS.array[srcIdx3];
+                        destIC.array[destIdx3 + 1] = srcCS.array[srcIdx3 + 1];
+                        destIC.array[destIdx3 + 2] = srcCS.array[srcIdx3 + 2];
+                    }
+                } else if (srcVec.mesh && srcVec.mesh.getColorAt && combinedVec.mesh) {
                     srcVec.mesh.getColorAt(srcPrismIdx, tmpColor);
                     combinedVec.mesh.setColorAt(destPrismIdx, tmpColor);
                 }
             });
-            if (combinedVec.mesh.instanceColor) combinedVec.mesh.instanceColor.needsUpdate = true;
+            if (destCS) destCS.needsUpdate = true;
+            if (destCE) destCE.needsUpdate = true;
+            if (destIC) destIC.needsUpdate = true;
 
             this.parentGroup.add(combinedVec.group);
             // Do NOT attach a trail yet. We only want a horizontal trail

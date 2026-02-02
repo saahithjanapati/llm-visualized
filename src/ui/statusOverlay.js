@@ -73,10 +73,11 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         const normT = normalizeHighlight(highlights.norm);
         const scaleT = normalizeHighlight(highlights.scale);
         const shiftT = normalizeHighlight(highlights.shift);
+        const lhsExpr = colorize(eqColorFor(1), outputSymbol);
         const normExpr = colorize(eqColorFor(normT), `\\frac{${inputSymbol} - \\mu}{\\sqrt{\\sigma^2 + \\epsilon}}`);
         const scaleExpr = colorize(eqColorFor(scaleT), `\\odot \\gamma`);
         const shiftExpr = colorize(eqColorFor(shiftT), `+ \\beta`);
-        const body = `${outputSymbol} = ${normExpr} ${scaleExpr} ${shiftExpr}`;
+        const body = `${lhsExpr} = ${normExpr} ${scaleExpr} ${shiftExpr}`;
         return colorize(LN_EQ_BASE_COLOR, body);
     };
 
@@ -84,6 +85,8 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         const upT = normalizeHighlight(highlights.up);
         const geluT = normalizeHighlight(highlights.gelu);
         const downT = normalizeHighlight(highlights.down);
+        const lhsExpr = colorize(eqColorFor(1), 'z');
+        const lhsMlp = colorize(eqColorFor(1), '\\mathrm{MLP}(u_{\\text{ln}})');
         const upTerm = `u_{\\text{ln}} ${WUpRaw}`;
         const upExpr = colorize(eqColorFor(upT), upTerm);
         const geluExpr = geluT > 0
@@ -91,7 +94,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
             : `\\mathrm{GELU}(${upExpr})`;
         const downTerm = `z ${WDownRaw}`;
         const downExpr = colorize(eqColorFor(downT), downTerm);
-        const body = String.raw`\begin{aligned} z &= ${geluExpr} \\ \mathrm{MLP}(u_{\text{ln}}) &= ${downExpr} \end{aligned}`;
+        const body = String.raw`\begin{aligned} ${lhsExpr} &= ${geluExpr} \\ ${lhsMlp} &= ${downExpr} \end{aligned}`;
         return colorize(LN_EQ_BASE_COLOR, body);
     };
 

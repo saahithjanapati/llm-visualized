@@ -97,6 +97,50 @@ export function buildMonochromeOptions(color, { valueMin = -2, valueMax = 2 } = 
     };
 }
 
+export function buildHueRangeOptions(
+    color,
+    {
+        hueSpread = 0.18,
+        valueMin = -2,
+        valueMax = 2,
+        valueClampMin = null,
+        valueClampMax = null,
+        minLightness = 0.32,
+        maxLightness = 0.7,
+        saturation = null,
+    } = {}
+) {
+    const hsl = { h: 0, s: 0, l: 0 };
+    let sourceColor = color;
+    if ((typeof color === 'number' || typeof color === 'string') && THREE.Color) {
+        try {
+            sourceColor = new THREE.Color(color);
+        } catch (_) {
+            sourceColor = null;
+        }
+    }
+    if (sourceColor && typeof sourceColor.getHSL === 'function') {
+        sourceColor.getHSL(hsl);
+    }
+    const baseSat = Number.isFinite(hsl.s) ? hsl.s : 0.9;
+    const tunedSat = Number.isFinite(saturation)
+        ? saturation
+        : Math.min(1, Math.max(0.75, baseSat * 1.1));
+    const safeSpread = Number.isFinite(hueSpread) ? Math.max(0, Math.min(1, hueSpread)) : 0.18;
+    return {
+        type: 'hueRange',
+        baseHue: hsl.h,
+        hueSpread: safeSpread,
+        saturation: tunedSat,
+        minLightness,
+        maxLightness,
+        valueMin,
+        valueMax,
+        valueClampMin,
+        valueClampMax,
+    };
+}
+
 export function mapValueToMonochrome(value, options = {}) {
     const minLightness = Number.isFinite(options.minLightness) ? options.minLightness : MONO_MIN_LIGHTNESS;
     const maxLightness = Number.isFinite(options.maxLightness) ? options.maxLightness : MONO_MAX_LIGHTNESS;
@@ -109,6 +153,32 @@ export function mapValueToMonochrome(value, options = {}) {
     const t = denom > 0 ? (clamped - valueMin) / denom : 0.5;
     const lightness = THREE.MathUtils.lerp(minLightness, maxLightness, t);
     return new THREE.Color().setHSL(baseHue, saturation, lightness);
+}
+
+export function mapValueToHueRange(value, options = {}) {
+    const minLightness = Number.isFinite(options.minLightness) ? options.minLightness : 0.32;
+    const maxLightness = Number.isFinite(options.maxLightness) ? options.maxLightness : 0.7;
+    const baseHue = Number.isFinite(options.baseHue) ? options.baseHue : 0;
+    const hueSpread = Number.isFinite(options.hueSpread) ? Math.max(0, Math.min(1, options.hueSpread)) : 0.18;
+    const saturation = Number.isFinite(options.saturation) ? options.saturation : 0.9;
+    const valueMin = Number.isFinite(options.valueMin) ? options.valueMin : -2;
+    const valueMax = Number.isFinite(options.valueMax) ? options.valueMax : 2;
+    const denom = valueMax - valueMin;
+    const fallback = valueMin + denom * 0.5;
+    let rawValue = Number.isFinite(value) ? value : fallback;
+    if (Number.isFinite(options.valueClampMin)) {
+        rawValue = Math.max(rawValue, options.valueClampMin);
+    }
+    if (Number.isFinite(options.valueClampMax)) {
+        rawValue = Math.min(rawValue, options.valueClampMax);
+    }
+    const clamped = THREE.MathUtils.clamp(rawValue, valueMin, valueMax);
+    const t = denom > 0 ? (clamped - valueMin) / denom : 0.5;
+    const halfSpread = hueSpread * 0.5;
+    let hue = baseHue - halfSpread + t * hueSpread;
+    hue = ((hue % 1) + 1) % 1;
+    const lightness = THREE.MathUtils.lerp(minLightness, maxLightness, t);
+    return new THREE.Color().setHSL(hue, saturation, lightness);
 }
 
 export function mapValueToGrayscale(value) {

@@ -574,6 +574,8 @@ button { touch-action: manipulation; }
     border-radius: 999px;
     border: 1px solid rgba(255,255,255,0.18);
     background: var(--vector-legend-gradient, linear-gradient(90deg, #d24b2d, #7bdcff, #3a5bff));
+    background-clip: padding-box;
+    background-origin: padding-box;
     box-shadow: inset 0 0 0 1px rgba(0,0,0,0.25);
 }
 .vector-legend-labels {
@@ -779,6 +781,8 @@ button { touch-action: manipulation; }
     border-radius: 999px;
     border: 1px solid rgba(255,255,255,0.18);
     background: var(--attention-legend-gradient, linear-gradient(90deg, #0b0b0b, #ffffff));
+    background-clip: padding-box;
+    background-origin: padding-box;
     box-shadow: inset 0 0 0 1px rgba(0,0,0,0.25);
 }
 .attention-legend-bar::before {
@@ -818,6 +822,11 @@ button { touch-action: manipulation; }
     animation-timing-function: ease-out;
     animation-fill-mode: both;
 }
+.attention-cell.pre-softmax-reveal {
+    animation-name: attentionPreSoftmaxReveal;
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+    animation-fill-mode: both;
+}
 .attention-cell.is-empty {
     background: rgba(255,255,255,0.04);
     opacity: 0.35;
@@ -839,12 +848,24 @@ button { touch-action: manipulation; }
     0% {
         opacity: 0;
         transform: scale(0.72);
-        filter: brightness(1.4);
     }
     100% {
         opacity: 1;
         transform: scale(1);
-        filter: brightness(1);
+    }
+}
+@keyframes attentionPreSoftmaxReveal {
+    0% {
+        opacity: 0;
+        transform: scale(0.6);
+    }
+    65% {
+        opacity: 1;
+        transform: scale(1.06);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1);
     }
 }
 .attention-empty {

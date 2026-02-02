@@ -28,8 +28,8 @@ const LN_PARAM_MONOCHROME = {
     type: 'monochromatic',
     baseHue: 0,
     saturation: 0,
-    minLightness: 0.08,
-    maxLightness: 0.6,
+    minLightness: 0.03,
+    maxLightness: 0.88,
     useData: true,
     valueMin: -1.8,
     valueMax: 1.8

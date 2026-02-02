@@ -1,9 +1,18 @@
 import * as THREE from 'three';
 import { VECTOR_LENGTH_PRISM, SA_RED_EXTRA_RISE, SA_V_RISE_DURATION_MS, SA_K_ALIGN_DURATION_MS, SA_BLUE_HORIZ_DURATION_MS, SA_BLUE_VERT_DURATION_MS, SA_BLUE_PAUSE_MS, SA_BLUE_QUEUE_SHIFT_DURATION_MS, SA_DUPLICATE_POP_IN_MS, SA_DUPLICATE_TRAVEL_MERGE_MS, SA_DUPLICATE_POP_OUT_MS, GLOBAL_ANIM_SPEED_MULT, SELF_ATTENTION_TIME_MULT } from '../../utils/constants.js';
 import { VectorVisualizationInstancedPrism } from '../../components/VectorVisualizationInstancedPrism.js';
-import { mapValueToColor, mapValueToGrayscale, buildMonochromeOptions, mapValueToMonochrome } from '../../utils/colors.js';
+import { mapValueToColor, mapValueToGrayscale, buildHueRangeOptions, mapValueToHueRange } from '../../utils/colors.js';
 import { buildActivationData } from '../../utils/activationMetadata.js';
-import { MHA_VALUE_SPECTRUM_COLOR } from '../LayerAnimationConstants.js';
+import {
+    MHA_VALUE_SPECTRUM_COLOR,
+    MHA_VALUE_HUE_SPREAD,
+    MHA_VALUE_LIGHTNESS_MIN,
+    MHA_VALUE_LIGHTNESS_MAX,
+    MHA_VALUE_RANGE_MIN,
+    MHA_VALUE_RANGE_MAX,
+    MHA_VALUE_CLAMP_MAX,
+    MHA_VALUE_KEY_COLOR_COUNT
+} from '../LayerAnimationConstants.js';
 import { getSideCopyEntry } from './laneIndex.js';
 
 // Shared lightweight geometry for self-attention highlight spheres
@@ -74,6 +83,14 @@ export class SelfAttentionAnimator {
         this._attentionRowCache = new Map();
         this._weightedSumCache = new Map();
         this._tmpMidpoint = new THREE.Vector3();
+        this._valueHueRangeOptions = buildHueRangeOptions(MHA_VALUE_SPECTRUM_COLOR, {
+            hueSpread: MHA_VALUE_HUE_SPREAD,
+            minLightness: MHA_VALUE_LIGHTNESS_MIN,
+            maxLightness: MHA_VALUE_LIGHTNESS_MAX,
+            valueMin: MHA_VALUE_RANGE_MIN,
+            valueMax: MHA_VALUE_RANGE_MAX,
+            valueClampMax: MHA_VALUE_CLAMP_MAX,
+        });
     }
 
     // Durations decoupled from GLOBAL_ANIM_SPEED_MULT to make presets clearly visible
@@ -919,56 +936,49 @@ export class SelfAttentionAnimator {
         const setHiddenToBlack = options && typeof options.setHiddenToBlack === 'boolean'
             ? options.setHiddenToBlack
             : true;
+        const disableCache = options && options.disableCache === true;
+        const cacheKeyData = options && Object.prototype.hasOwnProperty.call(options, 'cacheKeyData')
+            ? options.cacheKeyData
+            : null;
         const raw = Array.isArray(sourceData)
             ? sourceData.slice(0, outputLength)
             : (vector.rawData ? vector.rawData.slice(0, outputLength) : []);
-        const monoOptions = buildMonochromeOptions(MHA_VALUE_SPECTRUM_COLOR);
-        const numKeyColors = raw.length <= 1 ? 1 : 3;
+        const rangeOptions = this._valueHueRangeOptions || buildHueRangeOptions(MHA_VALUE_SPECTRUM_COLOR, {
+            hueSpread: MHA_VALUE_HUE_SPREAD,
+            minLightness: MHA_VALUE_LIGHTNESS_MIN,
+            maxLightness: MHA_VALUE_LIGHTNESS_MAX,
+            valueMin: MHA_VALUE_RANGE_MIN,
+            valueMax: MHA_VALUE_RANGE_MAX,
+            valueClampMax: MHA_VALUE_CLAMP_MAX,
+        });
+        const numKeyColors = raw.length <= 1
+            ? 1
+            : Math.min(MHA_VALUE_KEY_COLOR_COUNT, raw.length);
         vector.applyProcessedVisuals(
             raw,
             outputLength,
-            { numKeyColors, generationOptions: monoOptions },
+            { numKeyColors, generationOptions: rangeOptions },
             { setHiddenToBlack },
-            raw
+            disableCache ? null : (cacheKeyData !== null ? cacheKeyData : raw)
         );
         if (raw.length === 1 && typeof vector.setUniformColor === 'function') {
-            const monoColor = mapValueToMonochrome(raw[0], monoOptions);
-            vector.setUniformColor(monoColor);
+            const rangeColor = mapValueToHueRange(raw[0], rangeOptions);
+            vector.setUniformColor(rangeColor);
         }
         vector.userData = vector.userData || {};
         vector.userData.weightedSumVisuals = {
             numKeyColors,
-            generationOptions: monoOptions,
+            generationOptions: rangeOptions,
             outputLength
         };
     }
 
     _applyWeightedSumScheme(vector, sourceData = null, options = {}) {
-        if (!vector) return;
-        const outputLength = (this.ctx && this.ctx.outputVectorLength) ? this.ctx.outputVectorLength : 64;
-        const setHiddenToBlack = options && typeof options.setHiddenToBlack === 'boolean'
-            ? options.setHiddenToBlack
-            : true;
-        const raw = Array.isArray(sourceData)
-            ? sourceData.slice(0, outputLength)
-            : (vector.rawData ? vector.rawData.slice(0, outputLength) : []);
-        const numKeyColors = raw.length <= 1 ? 1 : Math.min(30, raw.length);
-        vector.applyProcessedVisuals(
-            raw,
-            outputLength,
-            { numKeyColors, generationOptions: null },
-            { setHiddenToBlack },
-            raw
-        );
-        if (raw.length === 1 && typeof vector.setUniformColor === 'function') {
-            vector.setUniformColor(mapValueToColor(raw[0]));
-        }
-        vector.userData = vector.userData || {};
-        vector.userData.weightedSumVisuals = {
-            numKeyColors,
-            generationOptions: null,
-            outputLength
+        const mergedOptions = {
+            ...options,
+            disableCache: true,
         };
+        this._applyValueVectorScheme(vector, sourceData, mergedOptions);
     }
 
     _buildWeightedSumData(headIdx, queryLane, lanes, outputLength) {
@@ -1025,6 +1035,35 @@ export class SelfAttentionAnimator {
         }
 
         return data;
+    }
+
+    _ensureRunningSumData(vector, outputLength) {
+        if (!vector) return null;
+        const length = Number.isFinite(outputLength)
+            ? Math.max(1, Math.floor(outputLength))
+            : (vector.rawData ? vector.rawData.length : 0);
+        if (length <= 0) return null;
+        vector.userData = vector.userData || {};
+        const current = vector.userData.runningSumData;
+        if (!Array.isArray(current) || current.length !== length) {
+            vector.userData.runningSumData = new Array(length).fill(0);
+        }
+        return vector.userData.runningSumData;
+    }
+
+    _accumulateWeightedSum(vector, sourceData, weight, outputLength) {
+        const isArrayLike = Array.isArray(sourceData) || ArrayBuffer.isView(sourceData);
+        if (!vector || !isArrayLike || !Number.isFinite(weight)) return;
+        const len = Number.isFinite(outputLength)
+            ? Math.max(1, Math.floor(outputLength))
+            : Math.min(sourceData.length, vector.rawData ? vector.rawData.length : sourceData.length);
+        if (len <= 0) return;
+        const running = this._ensureRunningSumData(vector, len);
+        if (!running) return;
+        for (let i = 0; i < len; i++) {
+            running[i] += weight * (sourceData[i] ?? 0);
+        }
+        this._applyWeightedSumScheme(vector, running, { setHiddenToBlack: true });
     }
 
     _createWeightedSumsImmediate(options = {}) {
@@ -1265,7 +1304,13 @@ export class SelfAttentionAnimator {
         this._activeBlueVectors[headIdx] = travellingVec;
         this.ctx.parentGroup.add(travellingVec.group);
         this._spawnedTempVectors.add(travellingVec);
-        this._applyWeightedSumScheme(travellingVec, fixedVec.rawData);
+        const outputLength = Number.isFinite(this.ctx?.outputVectorLength) ? this.ctx.outputVectorLength : 64;
+        const runningSum = this._ensureRunningSumData(travellingVec, outputLength);
+        if (runningSum) {
+            this._applyWeightedSumScheme(travellingVec, runningSum);
+        } else {
+            this._applyWeightedSumScheme(travellingVec, fixedVec.rawData);
+        }
         // Start invisible – will be revealed on first merge
         travellingVec.group.scale.set(0.001, 0.001, 0.001);
 
@@ -1314,12 +1359,6 @@ export class SelfAttentionAnimator {
             }
         } catch (_) { /* optional */ }
 
-        const applyGray = () => {
-            if (vector.userData && vector.userData.weightedSumReadyForConcat) return;
-            this._setVectorColor(vector, new THREE.Color(0x606060));
-        };
-        const grayDelayMs = 140;
-
         this._pendingDockCount += 1;
 
         const finalizeDock = () => {
@@ -1335,13 +1374,11 @@ export class SelfAttentionAnimator {
                 .to({ x: targetX, y: targetY, z: resolvedLaneZ }, this.DUPLICATE_TRAVEL_MERGE_MS)
                 .easing(TWEEN.Easing.Quadratic.Out)
                 .onComplete(() => {
-                    this._scheduleAfterDelay(applyGray, grayDelayMs);
                     finalizeDock();
                 })
                 .start();
         } else {
             vector.group.position.set(targetX, targetY, resolvedLaneZ);
-            this._scheduleAfterDelay(applyGray, grayDelayMs);
             finalizeDock();
         }
     }
@@ -1499,22 +1536,28 @@ export class SelfAttentionAnimator {
                                         .to(sumTarget, sumDuration)
                                         .easing(TWEEN.Easing.Quadratic.InOut)
                                         .onComplete(() => {
-                                        const pulseSum = () => {
-                                            const baseScale = Math.max(1, vector.group.scale.x);
-                                            const pulseFactor = Number.isFinite(weight)
-                                                ? THREE.MathUtils.lerp(1.04, 1.14, weight)
-                                                : 1.08;
-                                            const state = { s: baseScale };
-                                            new TWEEN.Tween(state)
-                                                .to({ s: baseScale * pulseFactor }, 140)
-                                                .easing(TWEEN.Easing.Quadratic.Out)
-                                                .yoyo(true)
-                                                .repeat(1)
-                                                .onUpdate(() => {
-                                                    vector.group.scale.set(state.s, state.s, state.s);
-                                                })
-                                                .start();
-                                        };
+                                            const outputLength = Number.isFinite(this.ctx?.outputVectorLength)
+                                                ? this.ctx.outputVectorLength
+                                                : (fixedVec.rawData ? fixedVec.rawData.length : 0);
+                                            if (Number.isFinite(weight) && fixedVec.rawData) {
+                                                this._accumulateWeightedSum(vector, fixedVec.rawData, weight, outputLength);
+                                            }
+                                            const pulseSum = () => {
+                                                const baseScale = Math.max(1, vector.group.scale.x);
+                                                const pulseFactor = Number.isFinite(weight)
+                                                    ? THREE.MathUtils.lerp(1.04, 1.14, weight)
+                                                    : 1.08;
+                                                const state = { s: baseScale };
+                                                new TWEEN.Tween(state)
+                                                    .to({ s: baseScale * pulseFactor }, 140)
+                                                    .easing(TWEEN.Easing.Quadratic.Out)
+                                                    .yoyo(true)
+                                                    .repeat(1)
+                                                    .onUpdate(() => {
+                                                        vector.group.scale.set(state.s, state.s, state.s);
+                                                    })
+                                                    .start();
+                                            };
                                         // Reveal travelling red vector on its first merge
                                         if (vector.group.scale.x < 0.5) {
                                             new TWEEN.Tween(vector.group.scale)

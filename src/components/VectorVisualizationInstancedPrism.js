@@ -9,7 +9,7 @@ import {
     PRISM_DIMENSIONS_PER_UNIT // Added for grouping visible units
 } from '../utils/constants.js';
 import { computeCenteredPrismX, PRISM_INSTANCE_WIDTH_SCALE } from '../utils/prismLayout.js';
-import { mapValueToColor } from '../utils/colors.js';
+import { mapValueToColor, mapValueToHueRange } from '../utils/colors.js';
 import { perfStats } from '../utils/perfStats.js';
 
 // Helper for monochromatic colors
@@ -65,6 +65,18 @@ function buildColorCacheKey(numKeyColors, instanceCount, colorGenerationOptions)
             key += `|vmin:${formatOptionNumber(colorGenerationOptions.valueMin)}`;
             key += `|vmax:${formatOptionNumber(colorGenerationOptions.valueMax)}`;
         }
+        return key;
+    }
+    if (colorGenerationOptions.type === 'hueRange') {
+        key += `|t:hueRange|h:${formatOptionNumber(colorGenerationOptions.baseHue)}`;
+        key += `|spread:${formatOptionNumber(colorGenerationOptions.hueSpread)}`;
+        key += `|s:${formatOptionNumber(colorGenerationOptions.saturation)}`;
+        key += `|min:${formatOptionNumber(colorGenerationOptions.minLightness)}`;
+        key += `|max:${formatOptionNumber(colorGenerationOptions.maxLightness)}`;
+        key += `|vmin:${formatOptionNumber(colorGenerationOptions.valueMin)}`;
+        key += `|vmax:${formatOptionNumber(colorGenerationOptions.valueMax)}`;
+        key += `|cmin:${formatOptionNumber(colorGenerationOptions.valueClampMin)}`;
+        key += `|cmax:${formatOptionNumber(colorGenerationOptions.valueClampMax)}`;
         return key;
     }
     const type = colorGenerationOptions.type ? String(colorGenerationOptions.type) : 'custom';
@@ -646,6 +658,8 @@ varying float vGradientT;`
                     valueMin,
                     valueMax
                 ));
+            } else if (colorGenerationOptions && colorGenerationOptions.type === 'hueRange') {
+                this.currentKeyColors.push(mapValueToHueRange(value, colorGenerationOptions));
             } else {
                 this.currentKeyColors.push(mapValueToColor(value));
             }
@@ -669,6 +683,8 @@ varying float vGradientT;`
                         useData ? valueMin : 0,
                         useData ? valueMax : 1
                     ));
+                } else if (colorGenerationOptions && colorGenerationOptions.type === 'hueRange') {
+                    this.currentKeyColors.push(mapValueToHueRange(value, colorGenerationOptions));
                 } else {
                     this.currentKeyColors.push(mapValueToColor(value));
                 }
@@ -687,6 +703,12 @@ varying float vGradientT;`
                     0,
                     1
                 ));
+            } else if (colorGenerationOptions && colorGenerationOptions.type === 'hueRange') {
+                this.currentKeyColors.push(mapValueToHueRange(0.5, {
+                    ...colorGenerationOptions,
+                    valueMin: 0,
+                    valueMax: 1,
+                }));
             } else {
                 this.currentKeyColors.push(new THREE.Color(0.5,0.5,0.5));
             }

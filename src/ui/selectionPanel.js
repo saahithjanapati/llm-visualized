@@ -352,6 +352,7 @@ const TMP_POS = new THREE.Vector3();
 const TMP_QUAT = new THREE.Quaternion();
 const TMP_SCALE = new THREE.Vector3();
 const TMP_CENTER = new THREE.Vector3();
+const TMP_COLOR = new THREE.Color();
 
 function isWeightMatrixLabel(label) {
     const lower = (label || '').toLowerCase();
@@ -1522,6 +1523,50 @@ function buildVectorClonePreview(selectionInfo) {
     };
 }
 
+function buildAttentionSpherePreview(selectionInfo) {
+    const hit = selectionInfo?.hit || null;
+    const source = selectionInfo?.object || hit?.object || null;
+    if (!source || !source.isInstancedMesh) return null;
+    if (!source.userData?._attentionSphereInstanced && selectionInfo?.kind !== 'attentionSphere') return null;
+    const instanceId = hit && typeof hit.instanceId === 'number' ? hit.instanceId : null;
+    if (!Number.isFinite(instanceId)) return null;
+    if (!source.geometry || typeof source.geometry.clone !== 'function') return null;
+
+    const geometry = source.geometry.clone();
+    const color = TMP_COLOR.copy(source.material?.color || 0xffffff);
+    if (typeof source.getColorAt === 'function') {
+        try { source.getColorAt(instanceId, color); } catch (_) { /* fallback to material color */ }
+    }
+    let instanceScale = 1;
+    if (typeof source.getMatrixAt === 'function') {
+        try {
+            source.getMatrixAt(instanceId, TMP_MATRIX);
+            TMP_MATRIX.decompose(TMP_POS, TMP_QUAT, TMP_SCALE);
+            if (Number.isFinite(TMP_SCALE.x)) {
+                instanceScale = Math.max(TMP_SCALE.x, TMP_SCALE.y, TMP_SCALE.z);
+            }
+        } catch (_) { /* ignore */ }
+    }
+    if (!Number.isFinite(instanceScale) || instanceScale < 0.1) instanceScale = 0.6;
+
+    const material = new THREE.MeshStandardMaterial({
+        color: color.clone(),
+        roughness: 0.35,
+        metalness: 0.1,
+        emissive: color.clone().multiplyScalar(0.35),
+        emissiveIntensity: 0.35
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.scale.setScalar(instanceScale);
+    return {
+        object: mesh,
+        dispose: () => {
+            geometry.dispose();
+            material.dispose();
+        }
+    };
+}
+
 function buildLayerNormPreview(label, selectionInfo) {
     const clonePreview = buildSelectionClonePreview(selectionInfo, label)
         || buildDirectClonePreview(selectionInfo);
@@ -1595,6 +1640,8 @@ function isLayerNormLabel(label) {
 
 function resolvePreviewObject(label, selectionInfo) {
     const lower = (label || '').toLowerCase();
+    const attentionSpherePreview = buildAttentionSpherePreview(selectionInfo);
+    if (attentionSpherePreview) return attentionSpherePreview;
     const isVectorSelection = isLikelyVectorSelection(label, selectionInfo);
     if (isVectorSelection) {
         const vectorClone = buildVectorClonePreview(selectionInfo);
@@ -2189,6 +2236,10 @@ class SelectionPanel {
         const rowAnimStagger = mode === 'post' && count > 1
             ? Math.max(6, Math.round(180 / (count - 1)))
             : 0;
+        const preAnimDuration = 210;
+        const preAnimStagger = mode === 'pre' && count > 1
+            ? Math.max(4, Math.round(120 / (count - 1)))
+            : 0;
         let hasAnyValue = false;
         for (let row = 0; row < count; row += 1) {
             const rowCells = this._attentionCells[row];
@@ -2201,10 +2252,16 @@ class SelectionPanel {
                 if (!Number.isFinite(value)) {
                     cell.classList.add('is-empty');
                     cell.style.backgroundColor = '';
+                    if (mode === 'pre') {
+                        cell.classList.remove('pre-softmax-reveal');
+                        cell.style.animationDelay = '';
+                        cell.style.animationDuration = '';
+                    }
                     continue;
                 }
                 const reveal = shouldRevealAttentionCell(progress, row, col, mode);
                 if (reveal) {
+                    const wasEmpty = cell.classList.contains('is-empty');
                     const color = mode === 'post'
                         ? mapValueToGrayscale(value)
                         : mapValueToColor(value, { clampMax: ATTENTION_PRE_COLOR_CLAMP });
@@ -2225,6 +2282,16 @@ class SelectionPanel {
                             cell.style.animationDelay = '';
                             cell.style.animationDuration = '';
                         }
+                    } else if (mode === 'pre') {
+                        if (wasEmpty) {
+                            cell.classList.add('pre-softmax-reveal');
+                            cell.style.animationDelay = `${Math.round(col * preAnimStagger)}ms`;
+                            cell.style.animationDuration = `${preAnimDuration}ms`;
+                        } else {
+                            cell.classList.remove('pre-softmax-reveal');
+                            cell.style.animationDelay = '';
+                            cell.style.animationDuration = '';
+                        }
                     }
                 } else {
                     cell.classList.add('is-empty');
@@ -2233,6 +2300,10 @@ class SelectionPanel {
                     cell.title = '';
                     if (mode === 'post') {
                         cell.classList.remove('post-softmax-reveal');
+                        cell.style.animationDelay = '';
+                        cell.style.animationDuration = '';
+                    } else if (mode === 'pre') {
+                        cell.classList.remove('pre-softmax-reveal');
                         cell.style.animationDelay = '';
                         cell.style.animationDuration = '';
                     }
@@ -2483,8 +2554,8 @@ class SelectionPanel {
         this.attentionLegend.style.setProperty('--attention-legend-gradient', gradient);
         this.attentionLegend.style.setProperty('--attention-legend-mid-opacity', '1');
         this.attentionLegend.dataset.mid = '0';
-        this.attentionLegendLow.textContent = `-${ATTENTION_PRE_COLOR_CLAMP}`;
-        this.attentionLegendHigh.textContent = `+${ATTENTION_PRE_COLOR_CLAMP}`;
+        this.attentionLegendLow.textContent = `<= -${ATTENTION_PRE_COLOR_CLAMP}`;
+        this.attentionLegendHigh.textContent = `>= +${ATTENTION_PRE_COLOR_CLAMP}`;
     }
 
     _updateVectorLegend(selection) {
@@ -2504,9 +2575,9 @@ class SelectionPanel {
         if (this.vectorLegendBar) {
             this.vectorLegendBar.style.setProperty('--vector-legend-gradient', gradient);
         }
-        if (this.vectorLegendLow) this.vectorLegendLow.textContent = `-${RESIDUAL_COLOR_CLAMP}`;
+        if (this.vectorLegendLow) this.vectorLegendLow.textContent = `<= -${RESIDUAL_COLOR_CLAMP}`;
         if (this.vectorLegendMid) this.vectorLegendMid.textContent = '0';
-        if (this.vectorLegendHigh) this.vectorLegendHigh.textContent = `+${RESIDUAL_COLOR_CLAMP}`;
+        if (this.vectorLegendHigh) this.vectorLegendHigh.textContent = `>= +${RESIDUAL_COLOR_CLAMP}`;
         this.vectorLegend.classList.add('is-visible');
         this.vectorLegend.setAttribute('aria-hidden', 'false');
     }
