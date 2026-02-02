@@ -40,6 +40,7 @@ import {
 import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
 import { computeCenteredPrismX, getPrismSpacing, PRISM_INSTANCE_WIDTH_SCALE } from '../utils/prismLayout.js';
 import { buildMHAVisuals, VectorRouter, PassThroughAnimator, SelfAttentionAnimator } from './mhsa/index.js';
+import { updateSciFiMaterialUniforms } from '../utils/sciFiMaterial.js';
 import { getSideCopyEntry } from './mhsa/laneIndex.js';
 import { animateVectorMatrixPassThrough as animateVectorMatrixPassThroughExternal } from './mhsa/VectorMatrixPassThrough.js';
 
@@ -47,6 +48,34 @@ const _tmpWorld = new THREE.Vector3();
 const _tmpWorld2 = new THREE.Vector3();
 const _tmpMatrix = new THREE.Matrix4();
 const QKV_TRAIL_OPACITY = 0.08;
+
+const SOFTENED_MATRIX_UNIFORMS = {
+    stripeStrength: 0.0,
+    scanlineStrength: 0.0,
+    glintStrength: 0.0,
+    noiseStrength: 0.0,
+    rimIntensity: 0.18,
+    depthAccentStrength: 0.06,
+    fresnelBoost: 0.12,
+    accentMix: 0.7
+};
+
+const softenMatrixSurface = (matrix) => {
+    if (!matrix) return;
+    const mats = [matrix.mesh?.material, matrix.frontCapMesh?.material, matrix.backCapMesh?.material];
+    mats.forEach((mat) => {
+        if (!mat) return;
+        if (typeof mat.roughness === 'number') mat.roughness = Math.max(mat.roughness, 0.55);
+        if (typeof mat.metalness === 'number') mat.metalness = Math.min(mat.metalness, 0.55);
+        if (typeof mat.clearcoat === 'number') mat.clearcoat = Math.min(mat.clearcoat, 0.25);
+        if (typeof mat.clearcoatRoughness === 'number') mat.clearcoatRoughness = Math.max(mat.clearcoatRoughness, 0.55);
+        if (typeof mat.iridescence === 'number') mat.iridescence = Math.min(mat.iridescence, 0.18);
+        if (typeof mat.envMapIntensity === 'number') mat.envMapIntensity = Math.min(mat.envMapIntensity, 0.7);
+    });
+    updateSciFiMaterialUniforms(matrix.mesh?.material, SOFTENED_MATRIX_UNIFORMS);
+    updateSciFiMaterialUniforms(matrix.frontCapMesh?.material, SOFTENED_MATRIX_UNIFORMS);
+    updateSciFiMaterialUniforms(matrix.backCapMesh?.material, SOFTENED_MATRIX_UNIFORMS);
+};
 
 // Use live binding of GLOBAL_ANIM_SPEED_MULT at each use; do not cache
 
@@ -515,6 +544,7 @@ export class MHSAAnimation {
             });
             this.parentGroup.add(queryMatrix.group);
             this.mhaVisualizations.push(queryMatrix);
+            softenMatrixSurface(queryMatrix);
 
             const keyMatrix = new WeightMatrixVisualization(
                 null, new THREE.Vector3(x_k, matrixCenterY, 0),
@@ -539,6 +569,7 @@ export class MHSAAnimation {
             });
             this.parentGroup.add(keyMatrix.group);
             this.mhaVisualizations.push(keyMatrix);
+            softenMatrixSurface(keyMatrix);
 
             const valueMatrix = new WeightMatrixVisualization(
                 null, new THREE.Vector3(x_v, matrixCenterY, 0),
@@ -563,6 +594,7 @@ export class MHSAAnimation {
             });
             this.parentGroup.add(valueMatrix.group);
             this.mhaVisualizations.push(valueMatrix);
+            softenMatrixSurface(valueMatrix);
 
             this.headsCentersX.push(x_k);
             this.headCoords.push({ q: x_q, k: x_k, v: x_v });
@@ -620,6 +652,7 @@ export class MHSAAnimation {
             }
         });
         this.parentGroup.add(this.outputProjectionMatrix.group);
+        softenMatrixSurface(this.outputProjectionMatrix);
         
         // Store the matrix's Y position for later animations
         this.outputProjMatrixCenterY = outputProjMatrixCenterY;

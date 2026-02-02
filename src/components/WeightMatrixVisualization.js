@@ -98,6 +98,19 @@ export class WeightMatrixVisualization {
     _createMesh() {
         this._clearMesh();
 
+        const cacheKey = getCacheKey(
+            this.width,
+            this.height,
+            this.depth,
+            this.topWidthFactor,
+            this.cornerRadius,
+            this.numberOfSlits,
+            this.slitWidth,
+            this.slitDepthFactor,
+            this.slitBottomWidthFactor,
+            this.slitTopWidthFactor
+        );
+
         // --------------------------------------------------------------
         // Fast path – if the requested depth covers multiple lanes we
         // create ONE thin slice (depth = VECTOR_DEPTH_SPACING) and
@@ -106,7 +119,7 @@ export class WeightMatrixVisualization {
         // completely sidesteps the need for a matching pre-baked asset.
         // --------------------------------------------------------------
         const wantsInstancedSlices = USE_INSTANCED_MATRIX_SLICES && this.useInstancedSlices && this.depth > VECTOR_DEPTH_SPACING * 1.5;
-        if (wantsInstancedSlices) {
+        if (wantsInstancedSlices && !__geometryCache.has(cacheKey)) {
             this._createInstancedSlices();
             return;
         }
@@ -228,8 +241,6 @@ export class WeightMatrixVisualization {
         //     identical parameter set we can skip the heavy CSG work and
         //     clone the cached BufferGeometry.
         // --------------------------------------------------------------
-        const cacheKey = getCacheKey(this.width,this.height,this.depth,this.topWidthFactor,this.cornerRadius,this.numberOfSlits,this.slitWidth,this.slitDepthFactor,this.slitBottomWidthFactor,this.slitTopWidthFactor);
-
         const t0 = performance.now();
         let baseMesh;
         let cacheHit = false;

@@ -7,6 +7,7 @@ import {
     EMBEDDING_MATRIX_PARAMS_VOCAB,
     TOP_EMBED_Y_GAP_ABOVE_TOWER,
     TOP_EMBED_Y_ADJUST,
+    TOP_EMBED_MAX_RISE_FRACTION,
     GLOBAL_ANIM_SPEED_MULT,
     SELF_ATTENTION_TIME_MULT,
     ANIM_RISE_SPEED_ORIGINAL,
@@ -776,6 +777,16 @@ export class LayerPipeline extends EventTarget {
             const topVocabCenterYLocal = towerTopYLocal + TOP_EMBED_Y_GAP_ABOVE_TOWER + embedHeight / 2 + TOP_EMBED_Y_ADJUST;
             targetYLocal = topVocabCenterYLocal - embedHeight / 2 + embedInset;
             exitYLocal = topVocabCenterYLocal + embedHeight / 2 - embedInset;
+        }
+
+        // Cap how far vectors rise within the top vocab embedding so they
+        // don't reach the logit bars above.
+        const riseFracRaw = Number.isFinite(TOP_EMBED_MAX_RISE_FRACTION) ? TOP_EMBED_MAX_RISE_FRACTION : 1;
+        const riseFrac = Math.max(0, Math.min(1, riseFracRaw));
+        if (Number.isFinite(targetYLocal) && Number.isFinite(exitYLocal) && riseFrac < 1) {
+            const maxRise = embedHeight * riseFrac;
+            const cappedExit = targetYLocal + maxRise;
+            if (exitYLocal > cappedExit) exitYLocal = cappedExit;
         }
 
         try {

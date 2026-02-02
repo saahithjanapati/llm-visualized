@@ -598,6 +598,9 @@ export const TOP_EMBED_Y_GAP_ABOVE_TOWER = 300;                       // vertica
 export const TOP_EMBED_Y_ADJUST = 0;                                   // fine vertical nudge for the top vocab
 // Vertical separation between the top LayerNorm ring and the top vocab embedding
 export const TOP_LN_TO_TOP_EMBED_GAP = 140;
+// Fraction of the top vocab embedding height that residual vectors are allowed to rise
+// before stopping (keeps them below the logit bars).
+export const TOP_EMBED_MAX_RISE_FRACTION = 0.35;
 // Top-of-tower logit bar styling (unembedding output histogram).
 export const TOP_LOGIT_BAR_MAX_COUNT = 40;
 export const TOP_LOGIT_BAR_MIN_HEIGHT = 10;
