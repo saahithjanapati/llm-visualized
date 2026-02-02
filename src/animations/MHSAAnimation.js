@@ -408,6 +408,10 @@ export class MHSAAnimation {
                 vec.group.position.copy(position);
             }
             vec.updateDataInternal(rawData, { copyData: true });
+            vec.userData = vec.userData || {};
+            vec.userData.qkvProcessed = false;
+            vec.userData.qkvOutputLength = null;
+            vec.userData.qkvProcessedCategory = null;
             return vec;
         }
         const { key, bucket } = this._getVectorPoolBucket(instanceCount);
@@ -444,6 +448,10 @@ export class MHSAAnimation {
                 }
             }
         }
+        vec.userData = vec.userData || {};
+        vec.userData.qkvProcessed = false;
+        vec.userData.qkvOutputLength = null;
+        vec.userData.qkvProcessedCategory = null;
         if (this.parentGroup && vec.group && vec.group.parent !== this.parentGroup) {
             this.parentGroup.add(vec.group);
         }

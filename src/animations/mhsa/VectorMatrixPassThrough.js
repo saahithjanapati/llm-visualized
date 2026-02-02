@@ -88,6 +88,12 @@ const applyQkvProcessedVisuals = (vectorRef, ctx, vectorCategory, outLength, fin
         { numKeyColors, generationOptions: rangeOptions },
         { setHiddenToBlack: false },
     );
+    if (vectorRef) {
+        vectorRef.userData = vectorRef.userData || {};
+        vectorRef.userData.qkvProcessed = true;
+        vectorRef.userData.qkvOutputLength = outLength;
+        vectorRef.userData.qkvProcessedCategory = vectorCategory;
+    }
     if (Number.isFinite(scalar) && typeof vectorRef.setUniformColor === 'function') {
         const rangeColor = mapValueToHueRange(scalar, rangeOptions);
         vectorRef.setUniformColor(rangeColor);

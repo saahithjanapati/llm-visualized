@@ -1515,7 +1515,9 @@ export class SelfAttentionAnimator {
                                     ? this.ctx.outputVectorLength
                                     : 64;
                                 const fixedRaw = fixedVec.rawData;
-                                if (fixedRaw && typeof fixedRaw.length === 'number' && fixedRaw.length > outputLength) {
+                                const fixedProcessed = !!(fixedVec.userData && fixedVec.userData.qkvProcessed);
+                                const hasMesh = !!(fixedVec.mesh && fixedVec.mesh.isMesh);
+                                if (!fixedProcessed || !hasMesh || (fixedRaw && fixedRaw.length > outputLength)) {
                                     this._applyValueVectorScheme(dupVec, fixedRaw, {
                                         setHiddenToBlack: false,
                                         cacheKeyData: fixedRaw,
