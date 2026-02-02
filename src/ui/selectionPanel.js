@@ -379,6 +379,16 @@ function isParameterSelection(label) {
     return false;
 }
 
+function isLayerNormSolidSelection(label) {
+    const lower = (label || '').toLowerCase();
+    if (!(lower.includes('layernorm') || lower.includes('layer norm'))) return false;
+    if (lower.includes('scale') || lower.includes('shift') || lower.includes('gamma') || lower.includes('beta')) return false;
+    if (lower.includes('normed') || lower.includes('normalized') || lower.includes('output')) return false;
+    if (lower.includes('residual') || lower.includes('vector')) return false;
+    if (lower.includes('param')) return false;
+    return true;
+}
+
 function isAttentionScoreSelection(label, selectionInfo) {
     const lower = (label || '').toLowerCase();
     if (lower.includes('attention score')) return true;
@@ -2878,17 +2888,23 @@ class SelectionPanel {
             this.subtitle.textContent = subtitleText;
         }
         if (this.params) this.params.textContent = metadata.params;
-        if (this.dims) this.dims.textContent = metadata.dims;
+        const hideLayerNormFields = isLayerNormSolidSelection(label);
+        const dimsRow = this.dims?.closest('.detail-row') || null;
+        if (this.dims) this.dims.textContent = hideLayerNormFields ? '' : metadata.dims;
+        if (dimsRow) dimsRow.style.display = hideLayerNormFields ? 'none' : '';
         if (this.description) {
             const desc = resolveDescription(label, selection.kind, selection);
             this.description.textContent = desc || '';
         }
         const isParam = isParameterSelection(label);
         if (this.dataSection) {
-            this.dataSection.style.display = isParam ? 'none' : '';
+            this.dataSection.style.display = (isParam || hideLayerNormFields) ? 'none' : '';
         }
-        if (this.dataEl && isParam) {
-            this.dataEl.textContent = '';
+        if (this.dataEl && (isParam || hideLayerNormFields)) this.dataEl.textContent = '';
+        if (this.metaSection) {
+            const rows = Array.from(this.metaSection.querySelectorAll('.detail-row'));
+            const hasVisibleRow = rows.some(row => row.style.display !== 'none');
+            this.metaSection.style.display = hasVisibleRow ? '' : 'none';
         }
         if (this.metaSection && this.attentionRoot && this.panel) {
             if (isQkvMatrixLabel(label)) {
@@ -2904,7 +2920,7 @@ class SelectionPanel {
                 || (selection.info && selection.info.activationData)
                 || (selection.hit && selection.hit.object && selection.hit.object.userData && selection.hit.object.userData.activationData)
                 || null;
-            if (!isParam) {
+            if (!isParam && !hideLayerNormFields) {
                 this.dataEl.textContent = formatActivationData(activationData);
             }
         }

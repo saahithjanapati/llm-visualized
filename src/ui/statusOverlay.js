@@ -43,6 +43,8 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     const WDownRaw = 'W_{\\text{down}}';
     const WUp = colorize(mlpUpColor, WUpRaw);
     const WDown = colorize(mlpDownColor, WDownRaw);
+    const U = '\\mathrm{u}';
+    const U_LN = `${U}_{\\text{ln}}`;
     const topEmbedBaseColor = new THREE.Color(0x000000);
     const topEmbedTargetColor = new THREE.Color(MHA_FINAL_Q_COLOR);
     const topEmbedWorkingColor = new THREE.Color();
@@ -86,8 +88,8 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         const geluT = normalizeHighlight(highlights.gelu);
         const downT = normalizeHighlight(highlights.down);
         const lhsExpr = colorize(eqColorFor(1), 'z');
-        const lhsMlp = colorize(eqColorFor(1), '\\mathrm{MLP}(u_{\\text{ln}})');
-        const upTerm = `u_{\\text{ln}} ${WUpRaw}`;
+        const lhsMlp = colorize(eqColorFor(1), `\\mathrm{MLP}(${U_LN})`);
+        const upTerm = `${U_LN} ${WUpRaw}`;
         const upExpr = colorize(eqColorFor(upT), upTerm);
         const geluExpr = geluT > 0
             ? colorize(eqColorFor(geluT), `\\mathrm{GELU}(${upTerm})`)
@@ -103,9 +105,9 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         qkv_packed: `${Q} = x_{\\text{ln}} ${WQ} \\, ${K} = x_{\\text{ln}} ${WK} \\, ${V} = x_{\\text{ln}} ${WV}`,
         attn: `H_i = \\mathrm{softmax}\\left(\\frac{${Q}_i ${K}_i^\\top}{\\sqrt{d_h}} + M\\right) ${V}_i,\\; i=1\\dots 12`,
         concat_proj: String.raw`\begin{aligned} H &= \mathrm{Concat}(H_1,\dots,H_{12}) \\ O &= H ${WO} \end{aligned}`,
-        resid1: String.raw`u = x + O`,
-        mlp: String.raw`\begin{aligned} z &= \mathrm{GELU}(u_{\text{ln}} ${WUp}) \\ \mathrm{MLP}(u_{\text{ln}}) &= z ${WDown} \end{aligned}`,
-        resid2: String.raw`x_{\text{out}} = u + \mathrm{MLP}(u_{\text{ln}})`
+        resid1: `${U} = x + O`,
+        mlp: String.raw`\begin{aligned} z &= \mathrm{GELU}(${U_LN} ${WUp}) \\ \mathrm{MLP}(${U_LN}) &= z ${WDown} \end{aligned}`,
+        resid2: String.raw`x_{\text{out}} = ${U} + \mathrm{MLP}(${U_LN})`
     };
 
     function renderEq(tex, title) {
@@ -266,7 +268,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
             const normT = quantizeHighlight(highlights.norm);
             const scaleT = quantizeHighlight(highlights.scale);
             const shiftT = quantizeHighlight(highlights.shift);
-            eqBody = buildLayerNormEquation('u', 'u_{\\text{ln}}', { norm: normT, scale: scaleT, shift: shiftT });
+            eqBody = buildLayerNormEquation(U, U_LN, { norm: normT, scale: scaleT, shift: shiftT });
             signature = `${key}|n${normT.toFixed(3)}|s${scaleT.toFixed(3)}|h${shiftT.toFixed(3)}`;
         } else if (key === 'mlp') {
             const highlights = getMlpHighlights(lanes);

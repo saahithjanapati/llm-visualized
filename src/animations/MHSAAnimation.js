@@ -60,17 +60,47 @@ const SOFTENED_MATRIX_UNIFORMS = {
     accentMix: 0.7
 };
 
-const softenMatrixSurface = (matrix) => {
+const BASE_MATRIX_SURFACE_TWEAKS = {
+    roughnessMin: 0.55,
+    metalnessMax: 0.55,
+    clearcoatMax: 0.25,
+    clearcoatRoughnessMin: 0.55,
+    iridescenceMax: 0.18,
+    envMapIntensityMax: 0.7
+};
+
+const QKV_SURFACE_TWEAKS = {
+    roughnessMin: 0.6,
+    metalnessMax: 0.5,
+    clearcoatMax: 0.2,
+    clearcoatRoughnessMin: 0.6,
+    iridescenceMax: 0.15,
+    envMapIntensityMax: 0.6
+};
+
+const softenMatrixSurface = (matrix, tweaks = BASE_MATRIX_SURFACE_TWEAKS) => {
     if (!matrix) return;
+    const {
+        roughnessMin,
+        metalnessMax,
+        clearcoatMax,
+        clearcoatRoughnessMin,
+        iridescenceMax,
+        envMapIntensityMax
+    } = tweaks || BASE_MATRIX_SURFACE_TWEAKS;
     const mats = [matrix.mesh?.material, matrix.frontCapMesh?.material, matrix.backCapMesh?.material];
     mats.forEach((mat) => {
         if (!mat) return;
-        if (typeof mat.roughness === 'number') mat.roughness = Math.max(mat.roughness, 0.55);
-        if (typeof mat.metalness === 'number') mat.metalness = Math.min(mat.metalness, 0.55);
-        if (typeof mat.clearcoat === 'number') mat.clearcoat = Math.min(mat.clearcoat, 0.25);
-        if (typeof mat.clearcoatRoughness === 'number') mat.clearcoatRoughness = Math.max(mat.clearcoatRoughness, 0.55);
-        if (typeof mat.iridescence === 'number') mat.iridescence = Math.min(mat.iridescence, 0.18);
-        if (typeof mat.envMapIntensity === 'number') mat.envMapIntensity = Math.min(mat.envMapIntensity, 0.7);
+        if (typeof mat.roughness === 'number') mat.roughness = Math.max(mat.roughness, roughnessMin);
+        if (typeof mat.metalness === 'number') mat.metalness = Math.min(mat.metalness, metalnessMax);
+        if (typeof mat.clearcoat === 'number') mat.clearcoat = Math.min(mat.clearcoat, clearcoatMax);
+        if (typeof mat.clearcoatRoughness === 'number') {
+            mat.clearcoatRoughness = Math.max(mat.clearcoatRoughness, clearcoatRoughnessMin);
+        }
+        if (typeof mat.iridescence === 'number') mat.iridescence = Math.min(mat.iridescence, iridescenceMax);
+        if (typeof mat.envMapIntensity === 'number') {
+            mat.envMapIntensity = Math.min(mat.envMapIntensity, envMapIntensityMax);
+        }
     });
     updateSciFiMaterialUniforms(matrix.mesh?.material, SOFTENED_MATRIX_UNIFORMS);
     updateSciFiMaterialUniforms(matrix.frontCapMesh?.material, SOFTENED_MATRIX_UNIFORMS);
@@ -552,7 +582,7 @@ export class MHSAAnimation {
             });
             this.parentGroup.add(queryMatrix.group);
             this.mhaVisualizations.push(queryMatrix);
-            softenMatrixSurface(queryMatrix);
+            softenMatrixSurface(queryMatrix, QKV_SURFACE_TWEAKS);
 
             const keyMatrix = new WeightMatrixVisualization(
                 null, new THREE.Vector3(x_k, matrixCenterY, 0),
@@ -577,7 +607,7 @@ export class MHSAAnimation {
             });
             this.parentGroup.add(keyMatrix.group);
             this.mhaVisualizations.push(keyMatrix);
-            softenMatrixSurface(keyMatrix);
+            softenMatrixSurface(keyMatrix, QKV_SURFACE_TWEAKS);
 
             const valueMatrix = new WeightMatrixVisualization(
                 null, new THREE.Vector3(x_v, matrixCenterY, 0),
@@ -602,7 +632,7 @@ export class MHSAAnimation {
             });
             this.parentGroup.add(valueMatrix.group);
             this.mhaVisualizations.push(valueMatrix);
-            softenMatrixSurface(valueMatrix);
+            softenMatrixSurface(valueMatrix, QKV_SURFACE_TWEAKS);
 
             this.headsCentersX.push(x_k);
             this.headCoords.push({ q: x_q, k: x_k, v: x_v });

@@ -74,6 +74,47 @@ const COLOR_INACTIVE_COMPONENT = new THREE.Color(INACTIVE_COMPONENT_COLOR);
 
 const TMP_LN_TRAIL_POS = new THREE.Vector3();
 
+const MLP_REFLECTIVITY_TWEAKS = {
+    roughnessMin: 0.4,
+    metalnessMax: 0.65,
+    clearcoatMax: 0.6,
+    clearcoatRoughnessMin: 0.45,
+    iridescenceMax: 0.25,
+    envMapIntensityMax: 1.1
+};
+
+const applyMatrixReflectivityTweak = (matrix, tweaks) => {
+    if (!matrix || !tweaks) return;
+    const applyToMaterial = (mat) => {
+        if (!mat) return;
+        const mats = Array.isArray(mat) ? mat : [mat];
+        mats.forEach(m => {
+            if (!m) return;
+            if (typeof tweaks.roughnessMin === 'number' && typeof m.roughness === 'number') {
+                m.roughness = Math.max(m.roughness, tweaks.roughnessMin);
+            }
+            if (typeof tweaks.metalnessMax === 'number' && typeof m.metalness === 'number') {
+                m.metalness = Math.min(m.metalness, tweaks.metalnessMax);
+            }
+            if (typeof tweaks.clearcoatMax === 'number' && typeof m.clearcoat === 'number') {
+                m.clearcoat = Math.min(m.clearcoat, tweaks.clearcoatMax);
+            }
+            if (typeof tweaks.clearcoatRoughnessMin === 'number' && typeof m.clearcoatRoughness === 'number') {
+                m.clearcoatRoughness = Math.max(m.clearcoatRoughness, tweaks.clearcoatRoughnessMin);
+            }
+            if (typeof tweaks.iridescenceMax === 'number' && typeof m.iridescence === 'number') {
+                m.iridescence = Math.min(m.iridescence, tweaks.iridescenceMax);
+            }
+            if (typeof tweaks.envMapIntensityMax === 'number' && typeof m.envMapIntensity === 'number') {
+                m.envMapIntensity = Math.min(m.envMapIntensity, tweaks.envMapIntensityMax);
+            }
+        });
+    };
+    applyToMaterial(matrix.mesh?.material);
+    applyToMaterial(matrix.frontCapMesh?.material);
+    applyToMaterial(matrix.backCapMesh?.material);
+};
+
 
 export default class Gpt2Layer extends BaseLayer {
     /**
@@ -263,6 +304,7 @@ export default class Gpt2Layer extends BaseLayer {
         );
         mlpUp.setColor(inactiveDark.clone());
         mlpUp.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.08 });
+        applyMatrixReflectivityTweak(mlpUp, MLP_REFLECTIVITY_TWEAKS);
         {
             const lbl = 'MLP Up Weight Matrix';
             mlpUp.group.userData.label = lbl;
@@ -291,6 +333,7 @@ export default class Gpt2Layer extends BaseLayer {
         );
         mlpDown.setColor(inactiveDark.clone());
         mlpDown.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.1 });
+        applyMatrixReflectivityTweak(mlpDown, MLP_REFLECTIVITY_TWEAKS);
         {
             const lbl = 'MLP Down Weight Matrix';
             mlpDown.group.userData.label = lbl;

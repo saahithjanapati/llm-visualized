@@ -34,7 +34,8 @@ import {
     TOP_LOGIT_BAR_Y_OFFSET,
     TOP_LOGIT_BAR_OPACITY,
     TOP_LOGIT_BAR_RISE_DURATION_MS,
-    TOP_LOGIT_BAR_RISE_STAGGER_MS
+    TOP_LOGIT_BAR_RISE_STAGGER_MS,
+    USE_INSTANCED_MATRIX_SLICES
 } from '../src/utils/constants.js';
 import { WeightMatrixVisualization } from '../src/components/WeightMatrixVisualization.js';
 import { LayerNormalizationVisualization } from '../src/components/LayerNormalizationVisualization.js';
@@ -494,7 +495,7 @@ function revealTopLogitBars(barGroup, { immediate = false } = {}) {
 
     const startTime = performance.now();
     const duration = TOP_LOGIT_BAR_RISE_DURATION_MS;
-    const stagger = TOP_LOGIT_BAR_RISE_STAGGER_MS;
+    const stagger = 0; // rise all top logit prisms at the same time
     const easeOutQuad = (t) => 1 - (1 - t) * (1 - t);
 
     const animate = (now) => {
@@ -591,7 +592,11 @@ function stageChipCamera(pipeline, startPos, startTarget, endPos, endTarget, hol
 
 // Optionally load pre-baked geometries to skip heavy procedural work.
 await loadPrecomputedGeometries('../precomputed_components_slice.glb');
-await loadPrecomputedGeometries('../precomputed_components_qkv.glb');
+// Skip full-depth QKV/output precompute when instanced slices are active,
+// otherwise those matrices will appear longer than the rest.
+if (!USE_INSTANCED_MATRIX_SLICES) {
+    await loadPrecomputedGeometries('../precomputed_components_qkv.glb');
+}
 
 // Activation data + lane count selection (defaults to static prompt if no capture).
 let activationSource = null;
@@ -1128,6 +1133,14 @@ const findTopControlButtonAt = (x, y) => {
     return null;
 };
 
+const resolveTopControlButton = (event) => {
+    if (!topControls || !event) return null;
+    const targetButton = event.target instanceof Element ? event.target.closest('button') : null;
+    if (targetButton && topControls.contains(targetButton)) return targetButton;
+    if (!Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return null;
+    return findTopControlButtonAt(event.clientX, event.clientY);
+};
+
 const showTopControls = () => {
     if (!topControls) return;
     topControls.removeAttribute('data-auto-hidden');
@@ -1173,17 +1186,68 @@ const isTouchPointerEvent = (event) => {
 };
 
 let pendingTopControlClick = null;
+let activeTopControlPointer = null;
+const TOP_CONTROL_TAP_SLOP_PX = 16;
+
+const registerPendingTopControlClick = (button) => {
+    pendingTopControlClick = { button, until: Date.now() + 500 };
+};
+
+const triggerTopControlClick = (button, event) => {
+    if (!button || button.disabled) return false;
+    clearActiveTextSelection();
+    registerPendingTopControlClick(button);
+    if (event?.cancelable) event.preventDefault();
+    if (event?.stopPropagation) event.stopPropagation();
+    if (typeof button.click === 'function') {
+        button.click();
+        return true;
+    }
+    return false;
+};
+
 const onTopControlsPointerDown = (event) => {
     if (!topControls) return;
     if (!isTouchPointerEvent(event)) return;
-    const target = event.target instanceof Element ? event.target.closest('button') : null;
-    if (!target || !topControls.contains(target) || target.disabled) return;
-    if (!clearActiveTextSelection()) return;
-    // Touch text selection can consume the first tap; clear selection and replay the click.
-    pendingTopControlClick = { button: target, until: Date.now() + 500 };
-    event.preventDefault();
-    event.stopPropagation();
-    target.click();
+    const target = resolveTopControlButton(event);
+    if (!target || target.disabled) return;
+    activeTopControlPointer = {
+        id: Number.isFinite(event.pointerId) ? event.pointerId : null,
+        button: target,
+        startX: Number.isFinite(event.clientX) ? event.clientX : 0,
+        startY: Number.isFinite(event.clientY) ? event.clientY : 0,
+        moved: false
+    };
+    if (clearActiveTextSelection() && event.cancelable) {
+        event.preventDefault();
+    }
+};
+
+const onTopControlsPointerMove = (event) => {
+    if (!activeTopControlPointer) return;
+    if (activeTopControlPointer.id !== null && event.pointerId !== activeTopControlPointer.id) return;
+    const dx = (Number.isFinite(event.clientX) ? event.clientX : 0) - activeTopControlPointer.startX;
+    const dy = (Number.isFinite(event.clientY) ? event.clientY : 0) - activeTopControlPointer.startY;
+    if (dx * dx + dy * dy > TOP_CONTROL_TAP_SLOP_PX * TOP_CONTROL_TAP_SLOP_PX) {
+        activeTopControlPointer.moved = true;
+    }
+};
+
+const onTopControlsPointerUp = (event) => {
+    if (!activeTopControlPointer) return;
+    if (activeTopControlPointer.id !== null && event.pointerId !== activeTopControlPointer.id) return;
+    const { button, moved } = activeTopControlPointer;
+    activeTopControlPointer = null;
+    if (moved) return;
+    const resolved = resolveTopControlButton(event) || button;
+    if (!resolved || resolved.disabled) return;
+    triggerTopControlClick(resolved, event);
+};
+
+const onTopControlsPointerCancel = (event) => {
+    if (!activeTopControlPointer) return;
+    if (activeTopControlPointer.id !== null && event.pointerId !== activeTopControlPointer.id) return;
+    activeTopControlPointer = null;
 };
 
 const onTopControlsClick = (event) => {
@@ -1202,6 +1266,9 @@ const onTopControlsClick = (event) => {
 
 if (topControls) {
     topControls.addEventListener('pointerdown', onTopControlsPointerDown, { capture: true });
+    topControls.addEventListener('pointermove', onTopControlsPointerMove, { capture: true });
+    topControls.addEventListener('pointerup', onTopControlsPointerUp, { capture: true });
+    topControls.addEventListener('pointercancel', onTopControlsPointerCancel, { capture: true });
     topControls.addEventListener('click', onTopControlsClick, { capture: true });
 }
 
@@ -1219,9 +1286,7 @@ document.addEventListener('pointerdown', (event) => {
     const button = findTopControlButtonAt(event.clientX, event.clientY);
     if (!button) return;
     showTopControls();
-    event.preventDefault();
-    event.stopPropagation();
-    button.click();
+    triggerTopControlClick(button, event);
 }, { capture: true });
 window.addEventListener('pointerdown', (event) => {
     if (!topControls) return;
@@ -1255,7 +1320,7 @@ window.addEventListener('pointerdown', (event) => {
                 } catch (_) { /* no-op */ }
             }
             if (button && typeof button.click === 'function') {
-                button.click();
+                triggerTopControlClick(button, event);
             }
         });
     }

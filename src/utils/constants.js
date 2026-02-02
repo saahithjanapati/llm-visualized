@@ -308,7 +308,7 @@ export const LN_NORM_START_FRACTION_FROM_BOTTOM = 0.25;
 // Lane slits inside weight matrices (shallow cuts keep top holes without side dashes).
 export const SHOW_LANE_SLITS = true;
 const LANE_SLIT_WIDTH = SHOW_LANE_SLITS ? 20 : 0;
-// Default shallow cut used by embedding blocks.
+// Base shallow cut for lane slits; embeddings can deepen this to clear token chips.
 const LANE_SLIT_DEPTH_FACTOR = SHOW_LANE_SLITS ? 0.3 : 0;
 // Q/K/V matrices should be clear-through so vector lanes have a visible path.
 const MHA_SLIT_DEPTH_FACTOR = SHOW_LANE_SLITS ? 1.0 : 0;
@@ -512,6 +512,8 @@ export const EMBEDDING_MATRIX_HEIGHT_VOCAB = Math.max(MLP_MATRIX_PARAMS_UP.heigh
 export const EMBEDDING_MATRIX_HEIGHT_POSITION = Math.max(MLP_MATRIX_PARAMS_UP.height + EMBEDDING_HEIGHT_EXTRA_POSITION, EMBEDDING_MIN_HEIGHT);
 
 const EMBEDDING_SLIT_WIDTH = MLP_MATRIX_PARAMS_UP.slitWidth * 2; // Wider than token chips.
+// Embedding chips sit inside these slits; deepen the cut so chips don't intersect the solid body.
+const EMBEDDING_SLIT_DEPTH_FACTOR = SHOW_LANE_SLITS ? 1.0 : 0;
 
 // Token/Vocab Embedding: bottom = 15× d_model, top = d_model
 export const EMBEDDING_MATRIX_PARAMS_VOCAB = {
@@ -522,7 +524,7 @@ export const EMBEDDING_MATRIX_PARAMS_VOCAB = {
     cornerRadius: MLP_MATRIX_PARAMS_UP.cornerRadius,
     numberOfSlits: NUM_VECTOR_LANES,
     slitWidth: EMBEDDING_SLIT_WIDTH,
-    slitDepthFactor: LANE_SLIT_DEPTH_FACTOR,
+    slitDepthFactor: EMBEDDING_SLIT_DEPTH_FACTOR,
     slitBottomWidthFactor: MLP_MATRIX_PARAMS_UP.slitBottomWidthFactor,
     slitTopWidthFactor: MLP_MATRIX_PARAMS_UP.slitTopWidthFactor
 };
@@ -536,7 +538,7 @@ export const EMBEDDING_MATRIX_PARAMS_POSITION = {
     cornerRadius: MLP_MATRIX_PARAMS_UP.cornerRadius,
     numberOfSlits: NUM_VECTOR_LANES,
     slitWidth: EMBEDDING_SLIT_WIDTH,
-    slitDepthFactor: LANE_SLIT_DEPTH_FACTOR,
+    slitDepthFactor: EMBEDDING_SLIT_DEPTH_FACTOR,
     slitBottomWidthFactor: MLP_MATRIX_PARAMS_UP.slitBottomWidthFactor,
     slitTopWidthFactor: MLP_MATRIX_PARAMS_UP.slitTopWidthFactor
 };

@@ -100,12 +100,12 @@ export function buildMHAVisuals(parentGroup, {
     };
 
     const QKV_SURFACE_TWEAKS = {
-        roughnessMin: 0.3,
-        metalnessMax: 0.72,
-        clearcoatMax: 0.58,
-        clearcoatRoughnessMin: 0.3,
-        iridescenceMax: 0.32,
-        envMapIntensityMax: 1.1
+        roughnessMin: 0.5,
+        metalnessMax: 0.6,
+        clearcoatMax: 0.45,
+        clearcoatRoughnessMin: 0.45,
+        iridescenceMax: 0.22,
+        envMapIntensityMax: 0.85
     };
 
     for (let i = 0; i < NUM_HEAD_SETS_LAYER; i++) {
