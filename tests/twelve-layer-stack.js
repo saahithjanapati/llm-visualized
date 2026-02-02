@@ -1153,6 +1153,58 @@ const handleViewportChange = () => {
 
 handleViewportChange();
 window.addEventListener('resize', handleViewportChange);
+
+const clearActiveTextSelection = () => {
+    if (typeof window === 'undefined' || typeof window.getSelection !== 'function') return false;
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed) return false;
+    try {
+        selection.removeAllRanges();
+        return true;
+    } catch (_) {
+        return false;
+    }
+};
+
+const isTouchPointerEvent = (event) => {
+    if (!event) return false;
+    if (event.pointerType) return event.pointerType === 'touch';
+    return isTouchUi();
+};
+
+let pendingTopControlClick = null;
+const onTopControlsPointerDown = (event) => {
+    if (!topControls) return;
+    if (!isTouchPointerEvent(event)) return;
+    const target = event.target instanceof Element ? event.target.closest('button') : null;
+    if (!target || !topControls.contains(target) || target.disabled) return;
+    if (!clearActiveTextSelection()) return;
+    // Touch text selection can consume the first tap; clear selection and replay the click.
+    pendingTopControlClick = { button: target, until: Date.now() + 500 };
+    event.preventDefault();
+    event.stopPropagation();
+    target.click();
+};
+
+const onTopControlsClick = (event) => {
+    if (!pendingTopControlClick) return;
+    if (!event.isTrusted) return;
+    if (Date.now() > pendingTopControlClick.until) {
+        pendingTopControlClick = null;
+        return;
+    }
+    const target = event.target instanceof Element ? event.target.closest('button') : null;
+    if (!target || target !== pendingTopControlClick.button) return;
+    pendingTopControlClick = null;
+    event.preventDefault();
+    event.stopPropagation();
+};
+
+if (topControls) {
+    topControls.addEventListener('pointerdown', onTopControlsPointerDown, { capture: true });
+    topControls.addEventListener('click', onTopControlsClick, { capture: true });
+}
+
 document.addEventListener('pointerdown', (event) => {
     if (!topControls) return;
     if (topControls.contains(event.target)) return;

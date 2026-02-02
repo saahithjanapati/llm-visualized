@@ -2614,8 +2614,8 @@ class SelectionPanel {
         this.attentionLegend.style.setProperty('--attention-legend-gradient', gradient);
         this.attentionLegend.style.setProperty('--attention-legend-mid-opacity', '1');
         this.attentionLegend.dataset.mid = '0';
-        this.attentionLegendLow.textContent = `<= -${ATTENTION_PRE_COLOR_CLAMP}`;
-        this.attentionLegendHigh.textContent = `>= +${ATTENTION_PRE_COLOR_CLAMP}`;
+        this.attentionLegendLow.textContent = `≤ -${ATTENTION_PRE_COLOR_CLAMP}`;
+        this.attentionLegendHigh.textContent = `≥ +${ATTENTION_PRE_COLOR_CLAMP}`;
     }
 
     _updateVectorLegend(selection) {
@@ -2635,9 +2635,9 @@ class SelectionPanel {
         if (this.vectorLegendBar) {
             this.vectorLegendBar.style.setProperty('--vector-legend-gradient', gradient);
         }
-        if (this.vectorLegendLow) this.vectorLegendLow.textContent = `<= -${RESIDUAL_COLOR_CLAMP}`;
+        if (this.vectorLegendLow) this.vectorLegendLow.textContent = `≤ -${RESIDUAL_COLOR_CLAMP}`;
         if (this.vectorLegendMid) this.vectorLegendMid.textContent = '0';
-        if (this.vectorLegendHigh) this.vectorLegendHigh.textContent = `>= +${RESIDUAL_COLOR_CLAMP}`;
+        if (this.vectorLegendHigh) this.vectorLegendHigh.textContent = `≥ +${RESIDUAL_COLOR_CLAMP}`;
         this.vectorLegend.classList.add('is-visible');
         this.vectorLegend.setAttribute('aria-hidden', 'false');
     }
