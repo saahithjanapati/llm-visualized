@@ -231,6 +231,9 @@ export function initTopControlsAutohide({ topControls, settingsOverlay }) {
     }
 
     document.addEventListener('pointerdown', (event) => {
+        if (isTouchPointerEvent(event)) {
+            clearActiveTextSelection();
+        }
         if (!topControls) return;
         if (topControls.contains(event.target)) return;
         if (settingsOverlay && settingsOverlay.getAttribute('aria-hidden') === 'false') return;

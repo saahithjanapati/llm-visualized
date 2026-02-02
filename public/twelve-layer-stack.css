@@ -2,6 +2,18 @@ body { margin: 0; overflow: hidden; background-color: #000; }
 canvas { display: block; }
 button { touch-action: manipulation; }
 
+@media (hover: none) and (pointer: coarse) {
+    body {
+        -webkit-user-select: none;
+        user-select: none;
+    }
+    body * {
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
+    }
+}
+
 /* Top-right controls */
 #topControls {
     position: fixed;
