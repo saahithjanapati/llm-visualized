@@ -745,6 +745,11 @@ export default class Gpt2Layer extends BaseLayer {
 
         this.lanes.forEach(lane => {
             const { originalVec, dupVec } = lane;
+
+            if (lane._pendingMultResult && lane._pendingMultResult.group) {
+                lane._pendingMultResult.group.visible = true;
+                lane._pendingMultResult = null;
+            }
             
             // The Gpt2Layer's direct update logic is now ONLY responsible for
             // handling the initial branching toward the first LayerNorm.
@@ -904,7 +909,12 @@ export default class Gpt2Layer extends BaseLayer {
                             dupVec.instanceCount
                         );
                         this.raycastRoot.add(multResult.group);
+                        multResult.group.visible = false;
+                        lane._pendingMultResult = multResult;
                         dupVec.group.visible = false;
+                        if (dupVec.group && dupVec.group.parent) {
+                            dupVec.group.parent.remove(dupVec.group);
+                        }
                         const ln1ScaledData = this._getLn1Data(lane, 'scale');
                         if (ln1ScaledData) {
                             applyVectorData(
@@ -1326,7 +1336,12 @@ export default class Gpt2Layer extends BaseLayer {
                             mv.instanceCount
                         );
                         this.raycastRoot.add(multResult.group);
+                        multResult.group.visible = false;
+                        lane._pendingMultResult = multResult;
                         mv.group.visible = false;
+                        if (mv.group && mv.group.parent) {
+                            mv.group.parent.remove(mv.group);
+                        }
 
                         if (scaleParam && scaleParam.group) {
                             scaleParam.group.visible = false;
@@ -1412,6 +1427,9 @@ export default class Gpt2Layer extends BaseLayer {
                         const ln2ShiftedData = this._getLn2Data(lane, 'shift');
                         lane.resultVecLN2 = addResult;
                         lane.ln2AddStarted = true;
+                        // Let the addition animation own trail updates (match LN1 behavior).
+                        lane.movingVecLN2 = null;
+                        lane.normAnimationLN2 = null;
                         startPrismAdditionAnimation(resVec, addResult, null, () => {
                             lane.ln2AddComplete = true;
                             if (ln2ShiftedData) {
@@ -1468,7 +1486,7 @@ export default class Gpt2Layer extends BaseLayer {
                                 addResult.userData.trailWorld = false;
                             }
                             startLn2Rise(addResult);
-                        }, { finalData: ln2ShiftedData, progressTarget: lane, progressKey: 'ln2ShiftProgress', suppressResidualTrailUpdates: true });
+                        }, { finalData: ln2ShiftedData, progressTarget: lane, progressKey: 'ln2ShiftProgress' });
                     }
 
 
