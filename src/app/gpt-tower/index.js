@@ -64,8 +64,8 @@ setAnimationLaneCount(laneCount);
 // Skip intro typing screen for direct animation entry.
 appState.skipIntro = true;
 
-// Set default playback speed to fast on load.
-try { setPlaybackSpeed('fast'); } catch (_) { /* no-op */ }
+// Set default playback speed to medium on load.
+try { setPlaybackSpeed('medium'); } catch (_) { /* no-op */ }
 
 // GPT-2 tower - initialize immediately.
 MHSAAnimation.ENABLE_SELF_ATTENTION = true;

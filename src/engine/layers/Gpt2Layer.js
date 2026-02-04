@@ -1430,7 +1430,7 @@ export default class Gpt2Layer extends BaseLayer {
                                 addResult.userData.trailWorld = false;
                             }
                             startLn2Rise(addResult);
-                        }, { finalData: ln2ShiftedData, progressTarget: lane, progressKey: 'ln2ShiftProgress' });
+                        }, { finalData: ln2ShiftedData, progressTarget: lane, progressKey: 'ln2ShiftProgress', suppressResidualTrailUpdates: true });
                     }
 
 
