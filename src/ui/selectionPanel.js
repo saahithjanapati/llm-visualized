@@ -2312,6 +2312,9 @@ class SelectionPanel {
             || event?.pointerType === 'pen'
             || (typeof event?.type === 'string' && event.type.startsWith('touch'));
         if (!isTouch) return;
+        if (this.engine && typeof this.engine.resetInteractionState === 'function') {
+            this.engine.resetInteractionState();
+        }
         if (typeof document !== 'undefined' && document.body) {
             document.body.classList.add('touch-ui');
         }
@@ -2912,10 +2915,15 @@ class SelectionPanel {
     }
 
     _onDocumentPointerDown(event) {
-        if (!this.isOpen || !this.closeBtn) return;
         if (!Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return;
-        if (event.target === this.closeBtn) return;
         const hit = document.elementFromPoint(event.clientX, event.clientY);
+        if (this.isOpen && hit && this.panel && this.panel.contains(hit)) {
+            if (this.engine && typeof this.engine.resetInteractionState === 'function') {
+                this.engine.resetInteractionState();
+            }
+        }
+        if (!this.isOpen || !this.closeBtn) return;
+        if (event.target === this.closeBtn) return;
         if (!hit || typeof hit.closest !== 'function') return;
         if (hit.closest('#detailClose') !== this.closeBtn) return;
         // Close even if the canvas captured the pointer event.

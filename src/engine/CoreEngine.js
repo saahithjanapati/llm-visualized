@@ -156,6 +156,7 @@ export class CoreEngine {
         this._touchTapData = null;
         this._touchTapMoveThresholdSq = 64; // ~8px movement allowance
         this._touchActiveCount = 0;
+        this._capturedPointerIds = new Set();
 
         // Bind pointer move handler and add listener
         this._onPointerMove = this._onPointerMove.bind(this);
@@ -357,6 +358,16 @@ export class CoreEngine {
         }
     }
 
+    /**
+     * Clear any active pointer/tap tracking and reset OrbitControls state.
+     * Useful when the user shifts focus to UI overlays.
+     */
+    resetInteractionState() {
+        this._touchTapData = null;
+        this._clickTapData = null;
+        this._resetControlsState();
+    }
+
     setDevMode(enabled) {
         this._devMode = !!enabled;
         if (this._stats && this._stats.dom) {
@@ -524,6 +535,27 @@ export class CoreEngine {
         this._resetControlsState();
     };
 
+    _releasePointerCapture = (pointerId = null) => {
+        const domElement = this.renderer?.domElement;
+        if (!domElement || typeof domElement.releasePointerCapture !== 'function') return;
+        if (Number.isFinite(pointerId)) {
+            try {
+                domElement.releasePointerCapture(pointerId);
+            } catch (_) { /* best-effort */ }
+            if (this._capturedPointerIds) {
+                this._capturedPointerIds.delete(pointerId);
+            }
+            return;
+        }
+        if (!this._capturedPointerIds || this._capturedPointerIds.size === 0) return;
+        for (const id of this._capturedPointerIds) {
+            try {
+                domElement.releasePointerCapture(id);
+            } catch (_) { /* best-effort */ }
+        }
+        this._capturedPointerIds.clear();
+    };
+
     _resetControlsState = () => {
         const controls = this.controls;
         if (!controls) return;
@@ -553,6 +585,9 @@ export class CoreEngine {
         if (typeof controls.dispatchEvent === 'function') {
             controls.dispatchEvent({ type: 'end' });
         }
+        this._releasePointerCapture();
+        this._touchTapData = null;
+        this._clickTapData = null;
         if (this._keyState) {
             this._keyState.clear();
         }
@@ -686,6 +721,9 @@ export class CoreEngine {
             if (domElement && typeof domElement.setPointerCapture === 'function') {
                 try {
                     domElement.setPointerCapture(event.pointerId);
+                    if (this._capturedPointerIds) {
+                        this._capturedPointerIds.add(event.pointerId);
+                    }
                 } catch (_) { /* best-effort */ }
             }
             // Only track the primary tap candidate to avoid conflicts with multi-touch gestures
@@ -724,6 +762,7 @@ export class CoreEngine {
         if (this._clickTapData && this._clickTapData.id === event.pointerId) {
             this._clickTapData = null;
         }
+        this._releasePointerCapture(event.pointerId);
     };
 
     _onTouchStateChange = (event) => {
@@ -737,6 +776,7 @@ export class CoreEngine {
     };
 
     _onPointerUp = (event) => {
+        this._releasePointerCapture(event.pointerId);
         if (event.pointerType === 'touch') {
             const tapData = this._touchTapData;
             const isSamePointer = tapData && tapData.id === event.pointerId;
