@@ -115,6 +115,8 @@ export const MLP_D_MODEL_VISUAL_DEPTH = 20;
 export const MHSA_MATRIX_INITIAL_RESTING_COLOR = 0x404040;
 /** Baseline emissive intensity for the top unembedding (vocab) matrix. */
 export const TOP_EMBED_BASE_EMISSIVE = 0.08;
+/** Extra emissive boost used when the top unembedding activates. */
+export const TOP_EMBED_MAX_EMISSIVE = 0.05;
 
 /** Bright / activated colours used inside the MHSA animation. */
 export const MHSA_BRIGHT_GREEN        = 0x33FF33;
@@ -130,6 +132,7 @@ export const MHSA_DARK_TINTED_RED     = 0x2B1100;
 /** Final Q, K, V head colours used once attention heads have merged. */
 export const MHA_FINAL_Q_COLOR = 0x276ebb;
 export const MHA_FINAL_K_COLOR = 0x1e9f57;
+export const POSITION_EMBED_COLOR = 0x2fe07a;
 // Base tint for V vectors (head visuals). Value-spectrum tint for the lightweight V outputs is separate.
 export const MHA_FINAL_V_COLOR = 0xaa3420;
 // Base tint for the value-spectrum applied to lightweight V vectors after head projection.

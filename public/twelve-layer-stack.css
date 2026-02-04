@@ -14,6 +14,13 @@ button { touch-action: manipulation; }
     }
 }
 
+body.touch-ui,
+body.touch-ui * {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+}
+
 /* Top-right controls */
 #topControls {
     position: fixed;
@@ -306,6 +313,7 @@ button { touch-action: manipulation; }
     color: #e7e9ee;
     cursor: pointer;
     user-select: none;
+    touch-action: manipulation;
     transition: background .15s ease, border-color .15s ease;
     text-align: center;
     font-size: 13px;
@@ -328,6 +336,7 @@ button { touch-action: manipulation; }
     color: #e7e9ee;
     user-select: none;
     cursor: pointer;
+    touch-action: manipulation;
 }
 .toggle-row .toggle-text {
     flex: 1;

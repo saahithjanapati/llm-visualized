@@ -9,7 +9,8 @@ import {
     MLP_UP_MATRIX_COLOR,
     MLP_DOWN_MATRIX_COLOR,
     MHSA_MATRIX_INITIAL_RESTING_COLOR,
-    TOP_EMBED_BASE_EMISSIVE
+    TOP_EMBED_BASE_EMISSIVE,
+    TOP_EMBED_MAX_EMISSIVE
 } from '../animations/LayerAnimationConstants.js';
 import { USE_PHYSICAL_MATERIALS } from '../utils/constants.js';
 
@@ -53,7 +54,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     const topEmbedBaseColor = new THREE.Color(MHSA_MATRIX_INITIAL_RESTING_COLOR);
     const topEmbedTargetColor = new THREE.Color(MHA_FINAL_Q_COLOR);
     const topEmbedWorkingColor = new THREE.Color();
-    const topEmbedMaxEmissive = 0.05;
+    const topEmbedMaxEmissive = TOP_EMBED_MAX_EMISSIVE;
 
     const LN_EQ_BASE_COLOR = '#6a6a6a';
     const LN_EQ_ACTIVE_COLOR = '#ffffff';

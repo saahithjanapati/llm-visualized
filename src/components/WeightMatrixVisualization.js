@@ -875,6 +875,10 @@ export class WeightMatrixVisualization {
                     mat.forEach(m => {
                         if (props.metalness !== undefined) m.metalness = props.metalness;
                         if (props.roughness !== undefined) m.roughness = props.roughness;
+                        if (props.clearcoat !== undefined) m.clearcoat = props.clearcoat;
+                        if (props.clearcoatRoughness !== undefined) m.clearcoatRoughness = props.clearcoatRoughness;
+                        if (props.iridescence !== undefined) m.iridescence = props.iridescence;
+                        if (props.envMapIntensity !== undefined) m.envMapIntensity = props.envMapIntensity;
                         if (props.emissive !== undefined) m.emissive.set(props.emissive);
                         if (props.emissiveIntensity !== undefined) m.emissiveIntensity = props.emissiveIntensity;
                         if (props.opacity !== undefined) m.opacity = props.opacity;
@@ -883,6 +887,10 @@ export class WeightMatrixVisualization {
                 } else {
                     if (props.metalness !== undefined) mat.metalness = props.metalness;
                     if (props.roughness !== undefined) mat.roughness = props.roughness;
+                    if (props.clearcoat !== undefined) mat.clearcoat = props.clearcoat;
+                    if (props.clearcoatRoughness !== undefined) mat.clearcoatRoughness = props.clearcoatRoughness;
+                    if (props.iridescence !== undefined) mat.iridescence = props.iridescence;
+                    if (props.envMapIntensity !== undefined) mat.envMapIntensity = props.envMapIntensity;
                     if (props.emissive !== undefined) mat.emissive.set(props.emissive);
                     if (props.emissiveIntensity !== undefined) mat.emissiveIntensity = props.emissiveIntensity;
                     if (props.opacity !== undefined) mat.opacity = props.opacity;

@@ -22,6 +22,7 @@ import {
     MHA_FINAL_V_COLOR,
     MHA_OUTPUT_PROJECTION_MATRIX_COLOR,
     MHA_OUTPUT_PROJECTION_MATRIX_PARAMS,
+    POSITION_EMBED_COLOR,
     LN_PARAMS
 } from '../animations/LayerAnimationConstants.js';
 
@@ -411,7 +412,7 @@ function resolveFinalPreviewColor(label) {
     if (lower.includes('vocab embedding')) {
         return lower.includes('top') ? FINAL_VOCAB_TOP_COLOR : MHA_FINAL_Q_COLOR;
     }
-    if (lower.includes('positional embedding')) return MHA_FINAL_K_COLOR;
+    if (lower.includes('positional embedding')) return POSITION_EMBED_COLOR;
     if (lower.includes('layernorm') || lower.includes('layer norm')) return LAYER_NORM_FINAL_COLOR;
     return null;
 }
@@ -1900,7 +1901,7 @@ function resolvePreviewObject(label, selectionInfo) {
         const clonePreview = buildSelectionClonePreview(selectionInfo, label)
             || buildDirectClonePreview(selectionInfo);
         if (clonePreview) return clonePreview;
-        return buildWeightMatrixPreview(EMBEDDING_MATRIX_PARAMS_POSITION, MHA_FINAL_K_COLOR);
+        return buildWeightMatrixPreview(EMBEDDING_MATRIX_PARAMS_POSITION, POSITION_EMBED_COLOR);
     }
     if (isWeightMatrixLabel(lower)) {
         const color = resolveFinalPreviewColor(label);
@@ -2091,6 +2092,7 @@ class SelectionPanel {
         this._onAttentionPointerMove = this._onAttentionPointerMove.bind(this);
         this._onAttentionPointerDown = this._onAttentionPointerDown.bind(this);
         this._clearAttentionHover = this._clearAttentionHover.bind(this);
+        this._onPanelPointerDown = this._onPanelPointerDown.bind(this);
         this._onPanelPointerEnter = this._onPanelPointerEnter.bind(this);
         this._onPanelPointerLeave = this._onPanelPointerLeave.bind(this);
         this._scheduleResize = this._scheduleResize.bind(this);
@@ -2141,6 +2143,7 @@ class SelectionPanel {
             this.attentionMatrix.addEventListener('pointerdown', this._onAttentionPointerDown);
             this.attentionMatrix.addEventListener('pointerleave', this._clearAttentionHover);
         }
+        this.panel.addEventListener('pointerdown', this._onPanelPointerDown, { capture: true });
         this.panel.addEventListener('pointerenter', this._onPanelPointerEnter);
         this.panel.addEventListener('pointerleave', this._onPanelPointerLeave);
         window.addEventListener('resize', this._onResize);
@@ -2302,6 +2305,22 @@ class SelectionPanel {
         } else {
             document.body.classList.remove('detail-mobile-focus');
         }
+    }
+
+    _onPanelPointerDown(event) {
+        const isTouch = event?.pointerType === 'touch'
+            || event?.pointerType === 'pen'
+            || (typeof event?.type === 'string' && event.type.startsWith('touch'));
+        if (!isTouch) return;
+        if (typeof document !== 'undefined' && document.body) {
+            document.body.classList.add('touch-ui');
+        }
+        if (typeof window === 'undefined' || typeof window.getSelection !== 'function') return;
+        const selection = window.getSelection();
+        if (!selection || selection.isCollapsed) return;
+        try {
+            selection.removeAllRanges();
+        } catch (_) { /* no-op */ }
     }
 
     _onPanelPointerEnter() {

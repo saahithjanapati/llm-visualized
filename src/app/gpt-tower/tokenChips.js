@@ -21,9 +21,10 @@ import {
 } from '../../utils/constants.js';
 import {
     MHA_FINAL_Q_COLOR,
-    MHA_FINAL_K_COLOR,
+    POSITION_EMBED_COLOR,
     MHSA_MATRIX_INITIAL_RESTING_COLOR,
-    TOP_EMBED_BASE_EMISSIVE
+    TOP_EMBED_BASE_EMISSIVE,
+    TOP_EMBED_MAX_EMISSIVE
 } from '../../animations/LayerAnimationConstants.js';
 import { appState } from '../../state/appState.js';
 import { TOKEN_CHIP_STYLE, POSITION_CHIP_STYLE } from './config.js';
@@ -243,7 +244,7 @@ export function addEmbeddingAndTokenChips({
 
     try {
         const headBlue = new THREE.Color(MHA_FINAL_Q_COLOR);
-        const headGreen = new THREE.Color(MHA_FINAL_K_COLOR);
+        const positionGreen = new THREE.Color(POSITION_EMBED_COLOR);
         const residualYBase = LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2 + EMBEDDING_BOTTOM_TOP_ALIGN_OFFSET_FROM_LN1_BOTTOM;
         const bottomVocabCenterY = residualYBase - EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2 + EMBEDDING_BOTTOM_Y_ADJUST;
         const vocabX = 0 + EMBEDDING_BOTTOM_VOCAB_X_OFFSET;
@@ -263,7 +264,11 @@ export function addEmbeddingAndTokenChips({
         );
         vocabBottom.group.userData.label = 'Vocab Embedding';
         vocabBottom.setColor(headBlue);
-        vocabBottom.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
+        vocabBottom.setMaterialProperties({
+            opacity: 1.0,
+            transparent: false,
+            emissiveIntensity: TOP_EMBED_BASE_EMISSIVE + TOP_EMBED_MAX_EMISSIVE
+        });
         pipeline.engine.scene.add(vocabBottom.group);
         if (pipeline.engine && typeof pipeline.engine.registerRaycastRoot === 'function') {
             pipeline.engine.registerRaycastRoot(vocabBottom.group);
@@ -292,8 +297,12 @@ export function addEmbeddingAndTokenChips({
             EMBEDDING_MATRIX_PARAMS_POSITION.slitTopWidthFactor
         );
         posBottom.group.userData.label = 'Positional Embedding';
-        posBottom.setColor(headGreen);
-        posBottom.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
+        posBottom.setColor(positionGreen);
+        posBottom.setMaterialProperties({
+            opacity: 1.0,
+            transparent: false,
+            emissiveIntensity: TOP_EMBED_BASE_EMISSIVE + TOP_EMBED_MAX_EMISSIVE
+        });
         pipeline.engine.scene.add(posBottom.group);
         if (pipeline.engine && typeof pipeline.engine.registerRaycastRoot === 'function') {
             pipeline.engine.registerRaycastRoot(posBottom.group);
@@ -488,7 +497,13 @@ export function addEmbeddingAndTokenChips({
             vocabTop.setMaterialProperties({
                 opacity: 1.0,
                 transparent: false,
-                emissiveIntensity: TOP_EMBED_BASE_EMISSIVE
+                emissiveIntensity: TOP_EMBED_BASE_EMISSIVE,
+                metalness: 0.4,
+                roughness: 0.35,
+                clearcoat: 0.45,
+                clearcoatRoughness: 0.4,
+                iridescence: 0.25,
+                envMapIntensity: 0.9
             });
             appState.vocabTopRef = vocabTop;
             pipeline.engine.scene.add(vocabTop.group);
