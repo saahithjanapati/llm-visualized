@@ -1314,9 +1314,20 @@ export default class Gpt2Layer extends BaseLayer {
                             }
                         }
 
-                        // Reuse the moving LN2 vector as the scaled output to
-                        // avoid a one-frame overlap/glitch from swapping meshes.
-                        const resVec = mv;
+                        const multSeed = multData.length
+                            ? multData
+                            : this.random.nextVector(this._getBaseVectorLength());
+                        const multResult = this._createPrismVector(
+                            multSeed,
+                            (scaleParam && scaleParam.group)
+                                ? scaleParam.group.position.clone()
+                                : mv.group.position.clone(),
+                            30,
+                            mv.instanceCount
+                        );
+                        this.raycastRoot.add(multResult.group);
+                        mv.group.visible = false;
+
                         if (scaleParam && scaleParam.group) {
                             scaleParam.group.visible = false;
                         }
@@ -1327,30 +1338,57 @@ export default class Gpt2Layer extends BaseLayer {
                             : multData;
                         if (scaledFallback && scaledFallback.length) {
                             applyVectorData(
-                                resVec,
+                                multResult,
                                 scaledFallback,
                                 lane.tokenLabel ? `LN2 Scaled - ${lane.tokenLabel}` : 'LN2 Scaled',
                                 this._getLaneMeta(lane, 'ln2.scale')
                             );
                         }
 
-                        const reusedTrailLn2 = resVec && resVec.userData && resVec.userData.trail;
-                        const reusedTrailLn2IsWorld = Boolean(resVec && resVec.userData && resVec.userData.trailWorld);
-                        if (this._skipToEndActive && reusedTrailLn2 && !reusedTrailLn2IsWorld && resVec && resVec.group) {
-                            const zPos = Number.isFinite(lane.zPos) ? lane.zPos : resVec.group.position.z;
-                            const clampedY = Math.min(topY_ln2_abs, Math.max(bottomY_ln2_abs, resVec.group.position.y));
+                        const reusedTrailLn2 = mv && mv.userData && mv.userData.trail;
+                        const reusedTrailLn2IsWorld = Boolean(mv && mv.userData && mv.userData.trailWorld);
+                        if (this._skipToEndActive && reusedTrailLn2 && !reusedTrailLn2IsWorld && mv && mv.group) {
+                            const zPos = Number.isFinite(lane.zPos) ? lane.zPos : mv.group.position.z;
+                            const clampedY = Math.min(topY_ln2_abs, Math.max(bottomY_ln2_abs, mv.group.position.y));
                             TMP_LN_TRAIL_POS.set(BRANCH_X, clampedY, zPos);
                             if (typeof reusedTrailLn2.update === 'function') {
                                 reusedTrailLn2.update(TMP_LN_TRAIL_POS);
                             }
                         }
-                        if (!reusedTrailLn2 && resVec && resVec.group) {
-                            const fallbackTrailLn2 = new StraightLineTrail(this.root, 0xffffff, 1, undefined, undefined, TRAIL_MIN_SEGMENT_DISTANCE);
-                            fallbackTrailLn2.start(resVec.group.position);
-                            resVec.userData = resVec.userData || {};
-                            resVec.userData.trail = fallbackTrailLn2;
-                            resVec.userData.trailWorld = false;
+                        let trailForLn2Result;
+                        if (reusedTrailLn2) {
+                            trailForLn2Result = reusedTrailLn2;
+                            if (reusedTrailLn2IsWorld) {
+                                multResult.group.getWorldPosition(TMP_WORLD_POS);
+                                if (typeof trailForLn2Result.snapLastPointTo === 'function') {
+                                    trailForLn2Result.snapLastPointTo(TMP_WORLD_POS);
+                                } else if (typeof trailForLn2Result.update === 'function') {
+                                    trailForLn2Result.update(TMP_WORLD_POS);
+                                }
+                            } else if (typeof trailForLn2Result.snapLastPointTo === 'function') {
+                                trailForLn2Result.snapLastPointTo(multResult.group.position);
+                            } else if (typeof trailForLn2Result.update === 'function') {
+                                trailForLn2Result.update(multResult.group.position);
+                            }
+                            if (mv.userData) {
+                                delete mv.userData.trail;
+                                delete mv.userData.trailWorld;
+                            }
+                        } else {
+                            trailForLn2Result = new StraightLineTrail(this.root, 0xffffff, 1, undefined, undefined, TRAIL_MIN_SEGMENT_DISTANCE);
+                            trailForLn2Result.start(multResult.group.position);
                         }
+                        multResult.userData = multResult.userData || {};
+                        multResult.userData.trail = trailForLn2Result;
+                        if (reusedTrailLn2IsWorld) {
+                            multResult.userData.trailWorld = true;
+                        } else if (multResult.userData.trailWorld) {
+                            delete multResult.userData.trailWorld;
+                        }
+
+                        lane.movingVecLN2 = multResult;
+                        lane.normAnimationLN2 = null;
+                        const resVec = multResult;
 
                         const shiftParamData = this._getLayerNormParamData('ln2', 'shift');
                         const shiftSeed = (shiftParamData && shiftParamData.length)

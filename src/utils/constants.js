@@ -16,16 +16,17 @@ export let SELF_ATTENTION_TIME_MULT = 0.35;
 export function setPlaybackSpeed(preset) {
     // Accept string keys or fallback to medium (current tuned settings).
     const cfg = {
-        slow:   { mult: 70,  addMult: 6,  selfAttenTimeMult: 0.5 },
-        medium: { mult: 100, addMult: 8,  selfAttenTimeMult: 0.35 },
-        fast:   { mult: 130, addMult: 10, selfAttenTimeMult: 0.25 },
-        normal: { mult: 100, addMult: 8,  selfAttenTimeMult: 0.35 } // legacy alias
+        slow:   { mult: 70,  addMult: 6,  selfAttenTimeMult: 0.5, engineSpeed: 0.7 },
+        medium: { mult: 100, addMult: 8,  selfAttenTimeMult: 0.35, engineSpeed: 1.0 },
+        fast:   { mult: 130, addMult: 10, selfAttenTimeMult: 0.25, engineSpeed: 1.3 },
+        normal: { mult: 100, addMult: 8,  selfAttenTimeMult: 0.35, engineSpeed: 1.0 } // legacy alias
     };
     const p = typeof preset === 'string' ? preset.toLowerCase() : 'medium';
     const sel = cfg[p] || cfg.medium;
     setGlobalAnimSpeedMult(sel.mult);
     PRISM_ADD_ANIM_SPEED_MULT = sel.addMult;
     SELF_ATTENTION_TIME_MULT = sel.selfAttenTimeMult;
+    return sel;
 }
 
 export function setPrismAddAnimSpeedMult(mult) {

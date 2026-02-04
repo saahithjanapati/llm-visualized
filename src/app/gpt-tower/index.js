@@ -65,7 +65,8 @@ setAnimationLaneCount(laneCount);
 appState.skipIntro = true;
 
 // Set default playback speed to medium on load.
-try { setPlaybackSpeed('medium'); } catch (_) { /* no-op */ }
+let defaultSpeedPreset = null;
+try { defaultSpeedPreset = setPlaybackSpeed('medium'); } catch (_) { /* no-op */ }
 
 // GPT-2 tower - initialize immediately.
 MHSAAnimation.ENABLE_SELF_ATTENTION = true;
@@ -110,6 +111,10 @@ const pipeline = new LayerPipeline(gptCanvas, NUM_LAYERS, {
     activationSource,
     laneCount
 });
+
+if (defaultSpeedPreset && typeof defaultSpeedPreset.engineSpeed === 'number') {
+    pipeline?.engine?.setSpeed?.(defaultSpeedPreset.engineSpeed);
+}
 
 // Show GPT canvas immediately.
 gptCanvas.style.display = 'block';

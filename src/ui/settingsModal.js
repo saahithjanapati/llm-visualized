@@ -136,7 +136,10 @@ export function initSettingsModal(pipeline) {
     };
 
     function applySpeed(value) {
-        setPlaybackSpeed(value);
+        const preset = setPlaybackSpeed(value);
+        if (preset && typeof preset.engineSpeed === 'number') {
+            pipeline?.engine?.setSpeed?.(preset.engineSpeed);
+        }
     }
 
     function openSettings() {

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { VECTOR_LENGTH_PRISM, PLN_UNIT_DELAY_MS, PLN_UNIT_CYCLE_DURATION_MS } from '../utils/constants.js';
+import { VECTOR_LENGTH_PRISM, PLN_UNIT_DELAY_MS, PLN_UNIT_CYCLE_DURATION_MS, GLOBAL_ANIM_SPEED_MULT } from '../utils/constants.js';
 import { mapValueToColor } from '../utils/colors.js'; // For color mapping if needed
 
 export class PrismLayerNormAnimation {
@@ -119,7 +119,11 @@ export class PrismLayerNormAnimation {
         const elapsedTimeSinceStart = currentTime - this.animationStartTime;
         let allUnitsStillAnimatingOrPending = false; // Track if any unit is active OR not yet completed
 
-        const activationSlot = Math.floor(elapsedTimeSinceStart / this.config.unitDelay);
+        const baseSpeedMult = 100;
+        const speedScale = baseSpeedMult / Math.max(1, GLOBAL_ANIM_SPEED_MULT);
+        const unitDelay = this.config.unitDelay * speedScale;
+        const unitDuration = this.config.unitDuration * speedScale;
+        const activationSlot = Math.floor(elapsedTimeSinceStart / unitDelay);
         for (let i = 0; i <= activationSlot; i++) {
             if (i < this.activationOrder.length) {
                 const unitIndex = this.activationOrder[i];
@@ -143,7 +147,7 @@ export class PrismLayerNormAnimation {
             if (state.isActive && !state.hasCompleted) {
                 allUnitsStillAnimatingOrPending = true; // Mark that work is still ongoing
                 const unitElapsedTime = currentTime - state.activationTime;
-                state.localProgress = Math.min(unitElapsedTime / this.config.unitDuration, 1.0);
+                state.localProgress = Math.min(unitElapsedTime / unitDuration, 1.0);
 
                 const yOffset = state.riseHeight * Math.sin(Math.PI * state.localProgress);
 
