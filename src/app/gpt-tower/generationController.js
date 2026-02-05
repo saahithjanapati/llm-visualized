@@ -4,6 +4,7 @@ import { applyPhysicalMaterialsToScene } from '../../utils/materialUtils.js';
 import { appState } from '../../state/appState.js';
 import { addEmbeddingAndTokenChips } from './tokenChips.js';
 import { formatTokenLabel } from './tokenLabels.js';
+import { initTouchClickFallback } from '../../ui/touchClickFallback.js';
 
 const DEFAULT_ADVANCE_SECONDS = 10;
 
@@ -123,6 +124,7 @@ export function initGenerationController({
     const canLoop = !!activationSource && maxLaneCount > initialLaneCount;
 
     const overlay = createAdvanceOverlay();
+    const overlayTouchCleanup = initTouchClickFallback(overlay.root, { selector: 'button' });
     const nextTokenBtn = createNextTokenButton();
     let currentLaneCount = Math.max(1, Math.floor(initialLaneCount || 1));
     let passComplete = false;
@@ -283,6 +285,7 @@ export function initGenerationController({
             dispose: () => {
                 if (chipCleanup?.dispose) chipCleanup.dispose();
                 if (rafId && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(rafId);
+                if (overlayTouchCleanup) overlayTouchCleanup();
             }
         };
     }
@@ -365,6 +368,7 @@ export function initGenerationController({
         dispose: () => {
             if (chipCleanup?.dispose) chipCleanup.dispose();
             if (rafId && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(rafId);
+            if (overlayTouchCleanup) overlayTouchCleanup();
         }
     };
 }

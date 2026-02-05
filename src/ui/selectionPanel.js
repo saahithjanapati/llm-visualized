@@ -6,6 +6,7 @@ import { LayerNormalizationVisualization } from '../components/LayerNormalizatio
 import { appState } from '../state/appState.js';
 import { createSciFiMaterial, updateSciFiMaterialColor } from '../utils/sciFiMaterial.js';
 import { mapValueToColor, mapValueToGrayscale } from '../utils/colors.js';
+import { initTouchClickFallback } from './touchClickFallback.js';
 import {
     MHA_MATRIX_PARAMS,
     MLP_MATRIX_PARAMS_UP,
@@ -2151,6 +2152,7 @@ class SelectionPanel {
         window.addEventListener('resize', this._onResize);
         document.addEventListener('keydown', this._onKeydown);
         document.addEventListener('pointerdown', this._onDocumentPointerDown, { capture: true });
+        this._touchClickCleanup = initTouchClickFallback(this.panel, { selector: '.toggle-row' });
         this._observeResize();
         this._onResize();
     }

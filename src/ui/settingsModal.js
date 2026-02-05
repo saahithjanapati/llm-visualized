@@ -2,6 +2,7 @@ import { setPlaybackSpeed } from '../utils/constants.js';
 import { getPreference, setPreference } from '../utils/preferences.js';
 import { appState } from '../state/appState.js';
 import { initPerfOverlay } from './perfOverlay.js';
+import { initTouchClickFallback } from './touchClickFallback.js';
 
 // Wires up the settings modal controls.
 export function initSettingsModal(pipeline) {
@@ -9,6 +10,9 @@ export function initSettingsModal(pipeline) {
     const settingsOverlay = document.getElementById('settingsOverlay');
     const settingsClose = document.getElementById('settingsClose');
     const equationsPanel = document.getElementById('equationsPanel');
+    const settingsModal = settingsOverlay?.querySelector('.settings-modal') || null;
+
+    initTouchClickFallback(settingsModal, { selector: 'button, .toggle-row, .speed-option' });
 
     appState.autoCameraFollow = getPreference('autoCameraFollow', true);
     appState.showCameraDebug = getPreference('showCameraDebug', false);
