@@ -19,9 +19,9 @@ import {
 import { formatTokenLabel } from './tokenLabels.js';
 
 const LOGIT_LABEL_FONT_URL = 'https://threejs.org/examples/fonts/helvetiker_regular.typeface.json';
-const LOGIT_LABEL_TEXT_SIZE_MIN = 60;
-const LOGIT_LABEL_TEXT_SIZE_MAX = 160;
-const LOGIT_LABEL_TEXT_SIZE_SCALE = 1.6;
+const LOGIT_LABEL_TEXT_SIZE_MIN = 72;
+const LOGIT_LABEL_TEXT_SIZE_MAX = 190;
+const LOGIT_LABEL_TEXT_SIZE_SCALE = 1.9;
 const LOGIT_LABEL_DEPTH_SCALE = 0.14;
 const LOGIT_LABEL_GAP_Y = 26;
 const LOGIT_LABEL_EXTRA_Y = 80;
@@ -191,7 +191,7 @@ function buildChosenLogitLabelGroup(barGroup, font) {
         textGroup.name = `Chosen token: ${labelText}`;
 
         const lineStartX = chosen.x;
-        const lineStartZ = chosen.z + barDepth / 2;
+        const lineStartZ = chosen.z;
         const lineStart = new THREE.Vector3(lineStartX, barTopY, lineStartZ);
         const labelCenter = new THREE.Vector3(labelX, labelY, labelZ);
         const lineDir = labelCenter.clone().sub(lineStart);
