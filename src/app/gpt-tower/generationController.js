@@ -158,10 +158,16 @@ export function initGenerationController({
             return;
         }
 
+        const atEnd = currentLaneCount >= maxLaneCount;
+        if (autoAdvancePaused && !atEnd) {
+            clearOverlay();
+            updateNextTokenButton();
+            return;
+        }
+
         overlay.root.dataset.visible = 'true';
         overlay.root.dataset.paused = autoAdvancePaused ? 'true' : 'false';
 
-        const atEnd = currentLaneCount >= maxLaneCount;
         const nextTokenIndex = currentLaneCount;
         const nextTokenNumber = nextTokenIndex + 1;
         const remainingSeconds = Math.max(0, Math.ceil(remainingMs / 1000));

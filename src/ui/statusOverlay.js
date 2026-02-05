@@ -52,6 +52,9 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     const WDown = colorize(mlpDownColor, WDownRaw);
     const U = 'u';
     const U_LN = `${U}_{\\text{ln}}`;
+    const X_OUT = 'x_{\\text{out}}';
+    const X_FINAL = 'x_{\\text{final}}';
+    const LOGITS = '\\ell';
     const topEmbedBaseColor = new THREE.Color(MHSA_MATRIX_INITIAL_RESTING_COLOR);
     const topEmbedTargetColor = new THREE.Color(MHA_FINAL_Q_COLOR);
     const topEmbedWorkingColor = new THREE.Color();
@@ -116,7 +119,8 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         concat_proj: String.raw`\begin{aligned} H &= \mathrm{Concat}(H_1,\dots,H_{12}) \\ O &= H ${WO} \end{aligned}`,
         resid1: `${U} = x + O`,
         mlp: String.raw`\begin{aligned} z &= \mathrm{GELU}(${U_LN} ${WUp}) \\ \mathrm{MLP}(${U_LN}) &= z ${WDown} \end{aligned}`,
-        resid2: String.raw`x_{\text{out}} = ${U} + \mathrm{MLP}(${U_LN})`
+        resid2: String.raw`x_{\text{out}} = ${U} + \mathrm{MLP}(${U_LN})`,
+        logits: String.raw`\begin{aligned} ${LOGITS} &= ${X_FINAL} W_U \\ p &= \mathrm{softmax}(${LOGITS}) \end{aligned}`
     };
 
     const EQUATION_FONT_MIN_PX = 10;
@@ -280,10 +284,98 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         return { up, gelu, down };
     };
 
-    function updateEquations(layer) {
+    const getTopLayerNormHighlights = (lanes) => {
+        const norm = lanes.some(l => l?.__topLnEntered || l?.__topLnMultStarted || l?.__topLnShiftStarted || l?.__topLnShiftComplete);
+        const scale = lanes.some(l => l?.__topLnMultStarted || l?.__topLnShiftStarted || l?.__topLnShiftComplete);
+        const shift = lanes.some(l => l?.__topLnShiftStarted || l?.__topLnShiftComplete);
+        return { norm, scale, shift };
+    };
+
+    const getTopEmbeddingStats = (lastLayer) => {
+        if (!lastLayer) return null;
+        const entryY = Number.isFinite(lastLayer.__topEmbedEntryYLocal)
+            ? lastLayer.__topEmbedEntryYLocal
+            : lastLayer.__topEmbedStopYLocal;
+        const exitY = Number.isFinite(lastLayer.__topEmbedExitYLocal)
+            ? lastLayer.__topEmbedExitYLocal
+            : entryY;
+        const lanes = Array.isArray(lastLayer.lanes) ? lastLayer.lanes : [];
+        const laneCount = lanes.length;
+        let anyY = false;
+        let highestY = -Infinity;
+        let allAtEntry = laneCount > 0 && Number.isFinite(entryY);
+        let allAtExit = laneCount > 0 && Number.isFinite(exitY);
+
+        for (const lane of lanes) {
+            const y = lane?.originalVec?.group?.position?.y;
+            if (!Number.isFinite(y)) {
+                allAtEntry = false;
+                allAtExit = false;
+                continue;
+            }
+            anyY = true;
+            highestY = Math.max(highestY, y);
+            if (Number.isFinite(entryY) && y < entryY - 0.5) {
+                allAtEntry = false;
+            }
+            if (Number.isFinite(exitY) && y < exitY - 0.5) {
+                allAtExit = false;
+            }
+        }
+
+        return { entryY, exitY, anyY, highestY, allAtEntry, allAtExit };
+    };
+
+    const resolveFinalStage = () => {
+        const lastLayer = pipeline?._layers?.[NUM_LAYERS - 1];
+        if (!lastLayer) return null;
+        const lanes = Array.isArray(lastLayer.lanes) ? lastLayer.lanes : [];
+        const topLnActive = lanes.some(l => l?.__topLnEntered || l?.__topLnMultStarted || l?.__topLnShiftStarted || l?.__topLnShiftComplete);
+        const stats = getTopEmbeddingStats(lastLayer);
+        const forwardComplete = typeof pipeline?.isForwardPassComplete === 'function'
+            ? pipeline.isForwardPassComplete()
+            : false;
+        const projectionActive = Boolean(
+            forwardComplete
+            || stats?.allAtExit
+            || stats?.allAtEntry
+            || (stats?.anyY && Number.isFinite(stats?.entryY) && stats.highestY >= stats.entryY - 0.5)
+        );
+
+        if (projectionActive) {
+            return { layer: lastLayer, eqKey: 'logits', eqTitle: 'Output Logits', status: 'Output Logits', active: true };
+        }
+        if (topLnActive) {
+            return { layer: lastLayer, eqKey: 'ln_top', eqTitle: 'Final LayerNorm', status: 'Final LayerNorm', active: true };
+        }
+        return { layer: lastLayer, eqKey: 'ln_top', eqTitle: 'Final LayerNorm', status: 'Final LayerNorm', active: false };
+    };
+
+    function updateEquations(layer, override = null) {
         if (!shouldShowEquations()) return;
-        if (!layer) return;
-        const lanes = Array.isArray(layer.lanes) ? layer.lanes : [];
+        const targetLayer = override?.layer ?? layer;
+        if (!targetLayer && !override?.eqKey) return;
+        const lanes = Array.isArray(targetLayer?.lanes) ? targetLayer.lanes : [];
+
+        if (override?.eqKey) {
+            let eqBody = EQ[override.eqKey] || '';
+            let signature = override.eqKey;
+            if (override.eqKey === 'ln_top') {
+                const highlights = getTopLayerNormHighlights(lanes);
+                const normT = quantizeHighlight(highlights.norm);
+                const scaleT = quantizeHighlight(highlights.scale);
+                const shiftT = quantizeHighlight(highlights.shift);
+                eqBody = buildLayerNormEquation(X_OUT, X_FINAL, { norm: normT, scale: scaleT, shift: shiftT });
+                signature = `${override.eqKey}|n${normT.toFixed(3)}|s${scaleT.toFixed(3)}|h${shiftT.toFixed(3)}`;
+            }
+            if (signature === appState.lastEqSignature) return;
+            appState.lastEqKey = override.eqKey;
+            appState.lastEqSignature = signature;
+            renderEq(eqBody, override.eqTitle);
+            return;
+        }
+
+        if (!targetLayer) return;
         if (!lanes.length) return;
 
         const resid2Active = lanes.some(l => l && l.stopRise && l.ln2Phase === 'done');
@@ -298,7 +390,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         const ln2Active = !resid2Active && !mlpActive && lanes.some(l => l.ln2Phase && l.ln2Phase !== 'notStarted');
         const ln1Active = !resid2Active && !mlpActive && !ln2Active && lanes.some(l => ['waiting','right','insideLN'].includes(l.horizPhase));
         const mhsaActive = !resid2Active && !mlpActive && !ln2Active && !ln1Active && (
-            (layer && layer._mhsaStart === true) ||
+            (targetLayer && targetLayer._mhsaStart === true) ||
             lanes.some(l => ['riseAboveLN','readyMHSA','travelMHSA','postMHSAAddition','waitingForLN2'].includes(l.horizPhase))
         );
 
@@ -318,7 +410,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
             key = 'ln2';
             title = 'LayerNorm 2';
         } else if (mhsaActive) {
-            const m = layer.mhsaAnimation;
+            const m = targetLayer.mhsaAnimation;
             const phase = m && m.mhaPassThroughPhase;
             const outPhase = m && m.outputProjMatrixAnimationPhase;
             const postAdd = lanes.some(l => ['postMHSAAddition','waitingForLN2'].includes(l.horizPhase));
@@ -352,7 +444,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
                 key = 'qkv_per_head';
                 title = 'Q/K/V Projections';
             }
-        } else if (ln1Active || layer.isActive) {
+        } else if (ln1Active || targetLayer.isActive) {
             key = 'ln1';
             title = 'LayerNorm 1';
         }
@@ -426,11 +518,16 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
 
     function updateStatus() {
         if (!statusDiv) return;
-        const idx = pipeline._currentLayerIdx;
+        const idx = Number.isFinite(pipeline._currentLayerIdx) ? pipeline._currentLayerIdx : 0;
         const total = NUM_LAYERS;
-        const layer = pipeline._layers[idx];
+        const stageOverride = resolveFinalStage();
+        const isFinalStage = idx >= total || stageOverride?.active;
+        const layer = (isFinalStage ? stageOverride?.layer : null) ?? pipeline._layers[idx];
         let displayStage = 'Loading...';
-        if (layer && Array.isArray(layer.lanes) && layer.lanes.length) {
+
+        if (isFinalStage) {
+            displayStage = stageOverride?.status || 'Output Logits';
+        } else if (layer && Array.isArray(layer.lanes) && layer.lanes.length) {
             const lanes = layer.lanes;
             const mlpActive = lanes.some(l => l.mlpUpStarted || l.ln2Phase === 'mlpReady' || l.ln2Phase === 'done');
             const ln2Active = !mlpActive && lanes.some(l => l.ln2Phase && l.ln2Phase !== 'notStarted');
@@ -452,12 +549,20 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
             }
         }
 
-        updateEquations(layer);
+        if (isFinalStage) {
+            updateEquations(layer, stageOverride || { layer, eqKey: 'logits', eqTitle: 'Output Logits', status: 'Output Logits', active: true });
+        } else {
+            updateEquations(layer);
+        }
 
         const includeStageLine = !equationsPanel || !shouldShowEquations();
-        const nextStatusText = includeStageLine
-            ? `Layer ${idx + 1} / ${total}\n${displayStage}`
-            : `Layer ${idx + 1} / ${total}`;
+        const equationsVisible = !!equationsPanel && equationsPanel.style.display !== 'none';
+        const showStageLine = includeStageLine && !(isFinalStage && equationsVisible);
+        const safeIdx = Math.max(0, Math.min(total - 1, idx));
+        const headerLine = isFinalStage ? 'Output Head' : `Layer ${safeIdx + 1} / ${total}`;
+        const nextStatusText = showStageLine
+            ? `${headerLine}\n${displayStage}`
+            : headerLine;
         if (nextStatusText === lastStatusText) {
             checkTopEmbeddingActivation();
             return;
@@ -495,8 +600,13 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
 
     const tickEquations = () => {
         if (shouldShowEquations() && pipeline?._layers?.length) {
-            const idx = pipeline._currentLayerIdx ?? 0;
-            updateEquations(pipeline._layers[idx]);
+            const idx = Number.isFinite(pipeline._currentLayerIdx) ? pipeline._currentLayerIdx : 0;
+            const stageOverride = resolveFinalStage();
+            if (idx >= NUM_LAYERS || stageOverride?.active) {
+                updateEquations(stageOverride?.layer, stageOverride || { layer: pipeline._layers[NUM_LAYERS - 1], eqKey: 'logits', eqTitle: 'Output Logits', status: 'Output Logits', active: true });
+            } else {
+                updateEquations(pipeline._layers[idx]);
+            }
         }
         scheduleFrame(tickEquations);
     };
