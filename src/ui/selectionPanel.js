@@ -73,6 +73,7 @@ const ATTENTION_PREVIEW_GAP = 4;
 const ATTENTION_PREVIEW_TRIANGLE = 'lower';
 const ATTENTION_PREVIEW_GRID_GAP = 8; // matches .detail-attention-grid column gap in CSS
 const ATTENTION_PRE_COLOR_CLAMP = 5;
+const ATTENTION_POP_OUT_MS = 120;
 const RESIDUAL_COLOR_CLAMP = 2;
 const SPACE_TOKEN_DISPLAY = '" "';
 
@@ -2401,7 +2402,25 @@ class SelectionPanel {
         const layer = layers[context.layerIndex];
         const animator = layer && layer.mhsaAnimation && layer.mhsaAnimation.selfAttentionAnimator;
         if (!animator || typeof animator.getAttentionProgress !== 'function') return null;
-        return animator.getAttentionProgress(context.headIndex);
+        if (animator.skipRequested) {
+            const count = Array.isArray(context.tokenIndices) ? context.tokenIndices.length : 0;
+            const filled = Math.max(0, count);
+            return { completedRows: filled, postCompletedRows: filled, activeRow: null, activeCol: null };
+        }
+        const direct = animator.getAttentionProgress(context.headIndex);
+        if (direct) return direct;
+        if (animator.phase !== 'running') return null;
+        const headIdx = context.headIndex;
+        const completedRows = (animator.attentionCompletedRows && Number.isFinite(animator.attentionCompletedRows[headIdx]))
+            ? animator.attentionCompletedRows[headIdx]
+            : 0;
+        const postCompletedRows = (animator.attentionPostCompletedRows && Number.isFinite(animator.attentionPostCompletedRows[headIdx]))
+            ? animator.attentionPostCompletedRows[headIdx]
+            : 0;
+        const progress = animator.attentionProgress ? animator.attentionProgress[headIdx] : null;
+        const activeRow = Number.isFinite(progress?.activeRow) ? progress.activeRow : null;
+        const activeCol = Number.isFinite(progress?.activeCol) ? progress.activeCol : null;
+        return { completedRows, postCompletedRows, activeRow, activeCol };
     }
 
     _updateDynamicAttentionProgress() {
@@ -2444,6 +2463,48 @@ class SelectionPanel {
         }
     }
 
+    _cancelAttentionPopOut(cell) {
+        if (!cell) return;
+        if (cell._attentionPopTimeout) {
+            clearTimeout(cell._attentionPopTimeout);
+            cell._attentionPopTimeout = null;
+        }
+        if (cell.dataset) {
+            delete cell.dataset.popOut;
+        }
+        cell.classList.remove('attention-pop-out');
+        if (cell._pendingEmpty) {
+            delete cell._pendingEmpty;
+        }
+    }
+
+    _startAttentionPopOut(cell, durationMs = null) {
+        if (!cell || !cell.dataset) return;
+        if (cell.dataset.popOut === 'true') return;
+        this._cancelAttentionPopOut(cell);
+        cell.dataset.popOut = 'true';
+        cell.classList.add('attention-pop-out');
+        cell._pendingEmpty = true;
+        const duration = Number.isFinite(durationMs) ? durationMs : ATTENTION_POP_OUT_MS;
+        if (Number.isFinite(duration)) {
+            cell.style.animationDuration = `${Math.max(60, Math.round(duration))}ms`;
+        }
+        cell._attentionPopTimeout = setTimeout(() => {
+            cell._attentionPopTimeout = null;
+            if (cell.dataset && cell.dataset.popOut === 'true') {
+                delete cell.dataset.popOut;
+            }
+            cell.classList.remove('attention-pop-out');
+            if (cell._pendingEmpty) {
+                delete cell._pendingEmpty;
+                cell.classList.add('is-empty');
+                cell.style.backgroundColor = '';
+                cell.removeAttribute('data-value');
+                cell.title = '';
+            }
+        }, Math.max(60, Math.round(duration)));
+    }
+
     _applyAttentionReveal(progress) {
         if (!this.attentionMatrix || !this._attentionCells || !this._attentionValues || !this._attentionContext) return;
         const mode = this.attentionMode === 'post' ? 'post' : 'pre';
@@ -2467,6 +2528,7 @@ class SelectionPanel {
                 if (!cell || cell.classList.contains('is-hidden')) continue;
                 const value = this._attentionValues[row]?.[col];
                 if (!Number.isFinite(value)) {
+                    this._cancelAttentionPopOut(cell);
                     cell.classList.add('is-empty');
                     cell.style.backgroundColor = '';
                     if (mode === 'pre') {
@@ -2478,6 +2540,7 @@ class SelectionPanel {
                 }
                 const reveal = shouldRevealAttentionCell(progress, row, col, mode);
                 if (reveal) {
+                    this._cancelAttentionPopOut(cell);
                     const wasEmpty = cell.classList.contains('is-empty');
                     const color = mode === 'post'
                         ? mapValueToGrayscale(value)
@@ -2511,10 +2574,14 @@ class SelectionPanel {
                         }
                     }
                 } else {
-                    cell.classList.add('is-empty');
-                    cell.style.backgroundColor = '';
-                    cell.removeAttribute('data-value');
-                    cell.title = '';
+                    const wasFilled = !cell.classList.contains('is-empty') || !!cell.dataset.value;
+                    if (wasFilled || cell.dataset.popOut === 'true' || !!cell._pendingEmpty) {
+                        this._cancelAttentionPopOut(cell);
+                        cell.classList.add('is-empty');
+                        cell.style.backgroundColor = '';
+                        cell.removeAttribute('data-value');
+                        cell.title = '';
+                    }
                     if (mode === 'post') {
                         cell.classList.remove('post-softmax-reveal');
                         cell.style.animationDelay = '';
@@ -3023,6 +3090,20 @@ class SelectionPanel {
         this._pendingRevealSize = null;
     }
 
+    updateData({ activationSource = null, laneTokenIndices = null, tokenLabels = null } = {}) {
+        this.activationSource = activationSource;
+        this.laneTokenIndices = Array.isArray(laneTokenIndices) ? laneTokenIndices.slice() : null;
+        this.tokenLabels = Array.isArray(tokenLabels) ? tokenLabels.slice() : null;
+        this._attentionContext = null;
+        this._attentionCells = null;
+        this._attentionValues = null;
+        this._attentionDynamic = false;
+        this._attentionDynamicKey = '';
+        this._attentionPostAnimQueue?.clear?.();
+        this._attentionPostAnimatedRows?.clear?.();
+        this._attentionLastPostCompleted = 0;
+    }
+
     showSelection(selection) {
         if (!this.isReady || !selection || !selection.label) return;
 
@@ -3144,6 +3225,7 @@ export function initSelectionPanel(options = {}) {
     }
     return {
         handleSelection: (selection) => panel.showSelection(selection),
-        close: () => panel.close()
+        close: () => panel.close(),
+        updateData: (data) => panel.updateData(data)
     };
 }

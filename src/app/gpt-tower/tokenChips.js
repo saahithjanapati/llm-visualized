@@ -17,7 +17,8 @@ import {
     TOP_EMBED_VOCAB_X_OFFSET,
     TOP_EMBED_Y_GAP_ABOVE_TOWER,
     TOP_EMBED_Y_ADJUST,
-    TOP_LN_TO_TOP_EMBED_GAP
+    TOP_LN_TO_TOP_EMBED_GAP,
+    USE_PHYSICAL_MATERIALS
 } from '../../utils/constants.js';
 import {
     MHA_FINAL_Q_COLOR,
@@ -27,6 +28,7 @@ import {
     TOP_EMBED_MAX_EMISSIVE
 } from '../../animations/LayerAnimationConstants.js';
 import { appState } from '../../state/appState.js';
+import { applyPhysicalMaterialsToScene } from '../../utils/materialUtils.js';
 import { TOKEN_CHIP_STYLE, POSITION_CHIP_STYLE } from './config.js';
 import { formatTokenLabel } from './tokenLabels.js';
 import { addTopLogitBars, revealTopLogitBars } from './topLogitBars.js';
@@ -240,7 +242,39 @@ export function addEmbeddingAndTokenChips({
     cameraReturnTarget,
     numLayers
 }) {
-    if (!pipeline) return;
+    if (!pipeline || !pipeline.engine || !pipeline.engine.scene) return null;
+
+    const engine = pipeline.engine;
+    const rootGroup = new THREE.Group();
+    rootGroup.name = 'EmbeddingAndTokenChips';
+    let disposed = false;
+    let progressHandler = null;
+
+    const disposeObject = (obj) => {
+        if (!obj) return;
+        if (obj.geometry) obj.geometry.dispose();
+        if (obj.material) {
+            const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+            materials.forEach((mat) => mat && mat.dispose && mat.dispose());
+        }
+        if (Array.isArray(obj.children)) {
+            obj.children.forEach((child) => disposeObject(child));
+        }
+    };
+
+    const addToRoot = (obj) => {
+        if (!obj) return;
+        if (disposed) {
+            disposeObject(obj);
+            return;
+        }
+        rootGroup.add(obj);
+    };
+
+    engine.scene.add(rootGroup);
+    if (typeof engine.registerRaycastRoot === 'function') {
+        engine.registerRaycastRoot(rootGroup);
+    }
 
     try {
         const headBlue = new THREE.Color(MHA_FINAL_Q_COLOR);
@@ -269,10 +303,7 @@ export function addEmbeddingAndTokenChips({
             transparent: false,
             emissiveIntensity: TOP_EMBED_BASE_EMISSIVE + TOP_EMBED_MAX_EMISSIVE
         });
-        pipeline.engine.scene.add(vocabBottom.group);
-        if (pipeline.engine && typeof pipeline.engine.registerRaycastRoot === 'function') {
-            pipeline.engine.registerRaycastRoot(vocabBottom.group);
-        }
+        addToRoot(vocabBottom.group);
 
         const gapX = EMBEDDING_BOTTOM_PAIR_GAP_X;
         const posX = (EMBEDDING_MATRIX_PARAMS_VOCAB.width / 2)
@@ -303,10 +334,7 @@ export function addEmbeddingAndTokenChips({
             transparent: false,
             emissiveIntensity: TOP_EMBED_BASE_EMISSIVE + TOP_EMBED_MAX_EMISSIVE
         });
-        pipeline.engine.scene.add(posBottom.group);
-        if (pipeline.engine && typeof pipeline.engine.registerRaycastRoot === 'function') {
-            pipeline.engine.registerRaycastRoot(posBottom.group);
-        }
+        addToRoot(posBottom.group);
 
         // Precompute Z positions for each lane so chips align with vector lanes.
         const laneSpacing = LN_PARAMS.depth / (laneCount + 1);
@@ -319,12 +347,9 @@ export function addEmbeddingAndTokenChips({
         const posMatrixBottomY = bottomPosCenterY - EMBEDDING_MATRIX_PARAMS_POSITION.height / 2;
         const chipStartZOffset = TOKEN_CHIP_STYLE.zOffset;
         const chipFontLoader = new FontLoader();
-        const registerChip = (chip) => {
-            if (pipeline.engine && typeof pipeline.engine.registerRaycastRoot === 'function') {
-                pipeline.engine.registerRaycastRoot(chip);
-            }
-        };
+        const registerChip = (chip) => addToRoot(chip);
         const spawnTokenChips = (font) => {
+            if (disposed) return;
             // Animate the token chips upward from a resting "stash" position.
             const vocabRiseDuration = TOKEN_CHIP_STYLE.riseDuration * (TOKEN_CHIP_STYLE.vocabSlowdown || 1);
             const posRiseDuration = TOKEN_CHIP_STYLE.riseDuration * (TOKEN_CHIP_STYLE.positionSlowdown || 1);
@@ -367,7 +392,6 @@ export function addEmbeddingAndTokenChips({
                 const startY = staticY;
 
                 chip.position.set(vocabX, startY, startZ);
-                pipeline.engine.scene.add(chip);
                 registerChip(chip);
 
                 // Keep a static chip below the stack for context once the animated one rises.
@@ -375,7 +399,6 @@ export function addEmbeddingAndTokenChips({
                 staticChip.userData.label = chipLabel;
                 staticChip.name = chipLabel;
                 staticChip.position.set(vocabX, staticY, staticZ);
-                pipeline.engine.scene.add(staticChip);
                 registerChip(staticChip);
 
                 if (typeof TWEEN !== 'undefined') {
@@ -391,6 +414,7 @@ export function addEmbeddingAndTokenChips({
             });
         };
         const spawnPositionChips = (font) => {
+            if (disposed) return;
             const posRiseDuration = TOKEN_CHIP_STYLE.riseDuration * (TOKEN_CHIP_STYLE.positionSlowdown || 1);
             const style = POSITION_CHIP_STYLE;
             const labels = positionLabels.slice(0, laneCount);
@@ -409,7 +433,6 @@ export function addEmbeddingAndTokenChips({
                 const startY = staticY;
 
                 chip.position.set(posX, startY, startZ);
-                pipeline.engine.scene.add(chip);
                 registerChip(chip);
 
                 // Static chip for the position stream, matching the token chips below.
@@ -417,7 +440,6 @@ export function addEmbeddingAndTokenChips({
                 staticChip.userData.label = chipLabel;
                 staticChip.name = chipLabel;
                 staticChip.position.set(posX, staticY, staticZ);
-                pipeline.engine.scene.add(staticChip);
                 registerChip(staticChip);
 
                 if (typeof TWEEN !== 'undefined') {
@@ -435,14 +457,18 @@ export function addEmbeddingAndTokenChips({
         chipFontLoader.load(
             'https://threejs.org/examples/fonts/helvetiker_regular.typeface.json',
             (font) => {
+                if (disposed) return;
                 spawnTokenChips(font);
                 spawnPositionChips(font);
+                applyPhysicalMaterialsToScene(engine.scene, USE_PHYSICAL_MATERIALS);
             },
             undefined,
             (err) => {
+                if (disposed) return;
                 console.warn('Token chip font failed to load, rendering without labels.', err);
                 spawnTokenChips(null);
                 spawnPositionChips(null);
+                applyPhysicalMaterialsToScene(engine.scene, USE_PHYSICAL_MATERIALS);
             }
         );
 
@@ -467,10 +493,7 @@ export function addEmbeddingAndTokenChips({
             lnTop.group.userData.label = 'LayerNorm (Top)';
             lnTop.setColor(new THREE.Color(INACTIVE_COMPONENT_COLOR));
             lnTop.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
-            pipeline.engine.scene.add(lnTop.group);
-            if (pipeline.engine && typeof pipeline.engine.registerRaycastRoot === 'function') {
-                pipeline.engine.registerRaycastRoot(lnTop.group);
-            }
+            addToRoot(lnTop.group);
 
             const topVocabCenterY = topLnCenterY
                 + (LN_PARAMS.height / 2)
@@ -506,10 +529,7 @@ export function addEmbeddingAndTokenChips({
                 envMapIntensity: 0.9
             });
             appState.vocabTopRef = vocabTop;
-            pipeline.engine.scene.add(vocabTop.group);
-            if (pipeline.engine && typeof pipeline.engine.registerRaycastRoot === 'function') {
-                pipeline.engine.registerRaycastRoot(vocabTop.group);
-            }
+            addToRoot(vocabTop.group);
             const vocabTopPos = new THREE.Vector3();
             vocabTop.group.getWorldPosition(vocabTopPos);
             const topLogitBars = addTopLogitBars({
@@ -517,8 +537,8 @@ export function addEmbeddingAndTokenChips({
                 laneTokenIndices,
                 laneZs,
                 vocabCenter: vocabTopPos,
-                scene: pipeline.engine.scene,
-                engine: pipeline.engine
+                scene: rootGroup,
+                engine: null
             });
             if (topLogitBars && pipeline && typeof pipeline.addEventListener === 'function') {
                 const isTopEmbeddingTraversalComplete = () => {
@@ -550,6 +570,7 @@ export function addEmbeddingAndTokenChips({
                         pipeline.removeEventListener('progress', onProgress);
                     }
                 };
+                progressHandler = onProgress;
                 pipeline.addEventListener('progress', onProgress);
                 onProgress();
             }
@@ -557,4 +578,24 @@ export function addEmbeddingAndTokenChips({
     } catch (_) {
         // Optional – embedding visuals are non-critical.
     }
+
+    const dispose = () => {
+        if (disposed) return;
+        disposed = true;
+        if (progressHandler && pipeline && typeof pipeline.removeEventListener === 'function') {
+            pipeline.removeEventListener('progress', progressHandler);
+        }
+        if (engine && typeof engine.removeRaycastRoot === 'function') {
+            engine.removeRaycastRoot(rootGroup);
+        }
+        if (rootGroup.parent) {
+            rootGroup.parent.remove(rootGroup);
+        }
+        disposeObject(rootGroup);
+        if (appState.vocabTopRef) {
+            appState.vocabTopRef = null;
+        }
+    };
+
+    return { root: rootGroup, dispose };
 }

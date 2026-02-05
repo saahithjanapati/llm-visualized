@@ -13,6 +13,7 @@ import {
     TOP_EMBED_MAX_EMISSIVE
 } from '../animations/LayerAnimationConstants.js';
 import { USE_PHYSICAL_MATERIALS } from '../utils/constants.js';
+import { applyPhysicalMaterialsToScene } from '../utils/materialUtils.js';
 
 // Initializes status overlay and equations panel updates.
 export function initStatusOverlay(pipeline, NUM_LAYERS) {
@@ -486,38 +487,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         scheduleStatusUpdate();
     };
 
-    function applyPhysicalMaterial(enabled) {
-        if (!pipeline?.engine?.scene) return;
-        const fromCtor = enabled ? THREE.MeshStandardMaterial : THREE.MeshPhysicalMaterial;
-        const toCtor = enabled ? THREE.MeshPhysicalMaterial : THREE.MeshStandardMaterial;
-        pipeline.engine.scene.traverse((obj) => {
-            if (!obj.isMesh) return;
-            const swapMat = (mat) => {
-                if (!(mat instanceof fromCtor)) return mat;
-                const params = {
-                    color: mat.color?.clone(),
-                    metalness: mat.metalness ?? 0,
-                    roughness: mat.roughness ?? 1,
-                    transparent: mat.transparent,
-                    opacity: mat.opacity,
-                    emissive: mat.emissive?.clone?.(),
-                    emissiveIntensity: mat.emissiveIntensity ?? 0,
-                    flatShading: mat.flatShading,
-                    side: mat.side,
-                };
-                const newMat = new toCtor(params);
-                mat.dispose();
-                return newMat;
-            };
-            if (Array.isArray(obj.material)) {
-                obj.material = obj.material.map(swapMat);
-            } else if (obj.material) {
-                obj.material = swapMat(obj.material);
-            }
-        });
-    }
-
-    applyPhysicalMaterial(USE_PHYSICAL_MATERIALS);
+    applyPhysicalMaterialsToScene(pipeline?.engine?.scene, USE_PHYSICAL_MATERIALS);
     if (pipeline && typeof pipeline.addEventListener === 'function') {
         pipeline.addEventListener('progress', onProgress);
     }

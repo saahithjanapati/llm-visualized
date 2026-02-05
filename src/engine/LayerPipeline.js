@@ -30,7 +30,7 @@ import {
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
 import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
 import { PrismLayerNormAnimation } from '../animations/PrismLayerNormAnimation.js';
-import { setGlobalTrailMaxStepDistance } from '../utils/trailUtils.js';
+import { setGlobalTrailMaxStepDistance, clearTrailsFromScene } from '../utils/trailUtils.js';
 
 function simplePrismMultiply(srcVec, tgtVec, onComplete) {
     const srcCount = srcVec && Number.isFinite(srcVec.instanceCount) ? srcVec.instanceCount : VECTOR_LENGTH_PRISM;
@@ -85,6 +85,9 @@ export class LayerPipeline extends EventTarget {
         this._skipLayerActive = false;
         this._skipLayerRestore = null;
         this._skipLayerLast = false;
+        this._postResetTrailPurgeRaf = null;
+        this._postResetTrailPurgeUntil = 0;
+        this._trailPassId = 1;
 
         // ------------------------------------------------------------------
         // Pre-create *all* layers so their static visuals are visible upfront.
@@ -103,6 +106,9 @@ export class LayerPipeline extends EventTarget {
             engineOpts.cameraFarMargin = approxTowerAllowance;
         }
         this._engine = new CoreEngine(canvas, [], engineOpts);
+        if (this._engine && this._engine.scene && this._engine.scene.userData) {
+            this._engine.scene.userData.trailPassId = this._trailPassId;
+        }
         this._autoCamera = new AutoCameraController({
             pipeline: this,
             engine: this._engine,
@@ -139,6 +145,9 @@ export class LayerPipeline extends EventTarget {
             layer.setProgressEmitter(this);
 
             layer.init(this._engine.scene);
+            if (layer.root && layer.root.userData) {
+                layer.root.userData.trailPassId = this._trailPassId;
+            }
             if (typeof this._engine.registerRaycastRoot === 'function') {
                 this._engine.registerRaycastRoot(layer.raycastRoot || layer.root);
             }
@@ -173,6 +182,22 @@ export class LayerPipeline extends EventTarget {
                 clearTimeout(this._skipToEndRaf);
             }
             this._skipToEndRaf = null;
+        }
+        if (this._postResetTrailPurgeRaf) {
+            if (typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
+                window.cancelAnimationFrame(this._postResetTrailPurgeRaf);
+            } else {
+                clearTimeout(this._postResetTrailPurgeRaf);
+            }
+            this._postResetTrailPurgeRaf = null;
+        }
+
+        if (typeof TWEEN !== 'undefined' && typeof TWEEN.removeAll === 'function') {
+            try { TWEEN.removeAll(); } catch (_) { /* no-op */ }
+        }
+
+        if (this._engine && this._engine.scene) {
+            clearTrailsFromScene(this._engine.scene, { includeAllLines: true });
         }
         this._stopCameraOverlayLoop();
         if (this._engine) {
@@ -213,6 +238,128 @@ export class LayerPipeline extends EventTarget {
 
     isForwardPassComplete() {
         return this._checkForwardPassComplete();
+    }
+
+    resetForNewPass({ activationSource = this._activationSource, laneCount = this._laneCount } = {}) {
+        const engine = this._engine;
+
+        if (this._skipToEndActive) {
+            this._finalizeSkipToEnd();
+        }
+        if (this._skipLayerActive) {
+            this._restoreSkipLayerSpeeds();
+        }
+        setGlobalTrailMaxStepDistance(0);
+
+        this._forwardPassComplete = false;
+        this._skipToEndActive = false;
+        this._skipLayerActive = false;
+        this._skipLayerLast = false;
+        this._skipLayerRestore = null;
+        this._skipToEndRestore = null;
+
+        if (this._skipToEndRaf) {
+            if (typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
+                window.cancelAnimationFrame(this._skipToEndRaf);
+            } else {
+                clearTimeout(this._skipToEndRaf);
+            }
+            this._skipToEndRaf = null;
+        }
+
+        if (this._postResetTrailPurgeRaf) {
+            if (typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
+                window.cancelAnimationFrame(this._postResetTrailPurgeRaf);
+            } else {
+                clearTimeout(this._postResetTrailPurgeRaf);
+            }
+            this._postResetTrailPurgeRaf = null;
+        }
+
+        if (typeof TWEEN !== 'undefined' && typeof TWEEN.removeAll === 'function') {
+            try { TWEEN.removeAll(); } catch (_) { /* no-op */ }
+        }
+
+        this._trailPassId = (Number.isFinite(this._trailPassId) ? this._trailPassId : 0) + 1;
+        if (engine && engine.scene && engine.scene.userData) {
+            engine.scene.userData.trailPassId = this._trailPassId;
+        }
+        if (engine && engine.scene) {
+            clearTrailsFromScene(engine.scene, { passId: this._trailPassId });
+        }
+
+        const oldLayers = Array.isArray(this._layers) ? this._layers : [];
+        this._layers = [];
+        this._currentLayerIdx = 0;
+
+        const autoDriver = this._autoCameraDriver;
+        if (engine && Array.isArray(engine._layers)) {
+            engine._layers = engine._layers.filter(layer => !oldLayers.includes(layer) && layer !== autoDriver);
+        }
+
+        oldLayers.forEach((layer) => {
+            if (!layer) return;
+            const root = layer.raycastRoot || layer.root;
+            if (root && engine && typeof engine.removeRaycastRoot === 'function') {
+                engine.removeRaycastRoot(root);
+            }
+            if (layer.root && layer.root.parent) {
+                layer.root.parent.remove(layer.root);
+            }
+            if (typeof layer.dispose === 'function') {
+                layer.dispose();
+            }
+        });
+
+        this._activationSource = activationSource || null;
+        this._laneCount = Math.max(1, Math.floor(laneCount || 1));
+
+        const layerStackSpacing = LAYER_STACK_SPACING_Y;
+        this._initLayers(layerStackSpacing);
+        if (engine && Array.isArray(engine._layers) && autoDriver && !engine._layers.includes(autoDriver)) {
+            engine._layers.push(autoDriver);
+        }
+        this._schedulePostResetTrailPurge(1500);
+        this.dispatchEvent(new Event('progress'));
+    }
+
+    _schedulePostResetTrailPurge(durationMs = 1500) {
+        const engine = this._engine;
+        if (!engine || !engine.scene) return;
+        const duration = Math.max(0, Number.isFinite(durationMs) ? durationMs : 0);
+        if (duration <= 0) return;
+
+        const schedule = (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function')
+            ? window.requestAnimationFrame.bind(window)
+            : (cb) => setTimeout(cb, 16);
+        const cancel = (typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function')
+            ? window.cancelAnimationFrame.bind(window)
+            : (id) => clearTimeout(id);
+
+        if (this._postResetTrailPurgeRaf) {
+            cancel(this._postResetTrailPurgeRaf);
+            this._postResetTrailPurgeRaf = null;
+        }
+
+        const start = (typeof performance !== 'undefined' && performance.now)
+            ? performance.now()
+            : Date.now();
+        this._postResetTrailPurgeUntil = start + duration;
+
+        const tick = () => {
+            if (!engine.scene) return;
+            clearTrailsFromScene(engine.scene, { passId: this._trailPassId });
+            const now = (typeof performance !== 'undefined' && performance.now)
+                ? performance.now()
+                : Date.now();
+            if (now >= this._postResetTrailPurgeUntil) {
+                this._postResetTrailPurgeRaf = null;
+                return;
+            }
+            this._postResetTrailPurgeRaf = schedule(tick);
+        };
+
+        this._postResetTrailPurgeRaf = schedule(tick);
     }
 
     skipCurrentLayer(opts = {}) {

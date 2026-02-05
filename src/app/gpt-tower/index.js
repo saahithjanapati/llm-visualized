@@ -21,8 +21,8 @@ import { initSkipLayerButton } from '../../ui/skipLayerButton.js';
 import { initSkipMenu } from '../../ui/skipMenu.js';
 import { initSelectionPanel } from '../../ui/selectionPanel.js';
 import { loadActivationState } from './activation.js';
-import { addEmbeddingAndTokenChips } from './tokenChips.js';
 import { initFollowModeControls, initTopControlsAutohide } from './topControls.js';
+import { buildPassState, initGenerationController } from './generationController.js';
 import {
     NUM_LAYERS,
     PROMPT_TOKENS,
@@ -44,10 +44,8 @@ if (!USE_INSTANCED_MATRIX_SLICES) {
 const statusDiv = document.getElementById('statusOverlay');
 const {
     activationSource,
-    laneTokenIndices,
     laneCount,
-    tokenLabels,
-    positionLabels
+    isFullTokenMode
 } = await loadActivationState({
     defaultLaneCount: NUM_VECTOR_LANES,
     defaultPromptLanes: DEFAULT_PROMPT_LANES,
@@ -57,9 +55,30 @@ const {
     statusElement: statusDiv
 });
 
+let initialLaneCount = laneCount;
+if (!isFullTokenMode && activationSource && typeof activationSource.getTokenCount === 'function') {
+    const tokenCount = activationSource.getTokenCount();
+    const metaPromptCount = Array.isArray(activationSource?.meta?.prompt_tokens)
+        ? activationSource.meta.prompt_tokens.length
+        : null;
+    const promptCount = Number.isFinite(metaPromptCount)
+        ? metaPromptCount
+        : DEFAULT_PROMPT_LANES;
+    if (Number.isFinite(tokenCount) && tokenCount > 0) {
+        initialLaneCount = Math.max(1, Math.min(tokenCount, promptCount || laneCount));
+    }
+}
+
+const initialPassState = buildPassState({
+    activationSource,
+    laneCount: initialLaneCount,
+    fallbackTokenLabels: PROMPT_TOKENS,
+    fallbackPositionLabels: POSITION_TOKENS
+});
+
 // Sync global lane counts so component spacing/animation widths align.
-setNumVectorLanes(laneCount);
-setAnimationLaneCount(laneCount);
+setNumVectorLanes(initialLaneCount);
+setAnimationLaneCount(initialLaneCount);
 
 // Skip intro typing screen for direct animation entry.
 appState.skipIntro = true;
@@ -109,7 +128,7 @@ const pipeline = new LayerPipeline(gptCanvas, NUM_LAYERS, {
     autoCameraOffsetLerpAlpha: CAMERA_CONFIG.autoCameraOffsetLerpAlpha,
     autoCameraViewBlendAlpha: CAMERA_CONFIG.autoCameraViewBlendAlpha,
     activationSource,
-    laneCount
+    laneCount: initialLaneCount
 });
 
 if (defaultSpeedPreset && typeof defaultSpeedPreset.engineSpeed === 'number') {
@@ -128,19 +147,6 @@ try {
     });
 } catch (_) { /* no-op */ }
 
-// Embedding matrices + token chips (static visuals at tower base).
-addEmbeddingAndTokenChips({
-    pipeline,
-    laneCount,
-    activationSource,
-    laneTokenIndices,
-    tokenLabels,
-    positionLabels,
-    cameraReturnPosition: camPos,
-    cameraReturnTarget: camTarget,
-    numLayers: NUM_LAYERS
-});
-
 // Initialize UI modules (status, settings, pause/skip, selection panel).
 initIntroAnimation(pipeline, gptCanvas);
 initStatusOverlay(pipeline, NUM_LAYERS);
@@ -149,7 +155,7 @@ initPauseButton(pipeline);
 initConveyorSkipButton(pipeline);
 initSkipToEndButton(pipeline);
 initSkipLayerButton(pipeline);
-initSkipMenu();
+initSkipMenu(pipeline);
 initSettingsModal(pipeline);
 
 const followModeBtn = document.getElementById('followModeBtn');
@@ -167,8 +173,8 @@ const { showTopControls } = initTopControlsAutohide({ topControls, settingsOverl
 
 const selectionPanel = initSelectionPanel({
     activationSource,
-    laneTokenIndices,
-    tokenLabels,
+    laneTokenIndices: initialPassState.laneTokenIndices,
+    tokenLabels: initialPassState.tokenLabels,
     engine: pipeline.engine
 });
 if (pipeline.engine && typeof pipeline.engine.setRaycastSelectionHandler === 'function') {
@@ -180,3 +186,16 @@ if (pipeline.engine && typeof pipeline.engine.setRaycastSelectionHandler === 'fu
         selectionPanel.handleSelection(selection);
     });
 }
+
+initGenerationController({
+    pipeline,
+    activationSource,
+    initialLaneCount,
+    initialPassState,
+    fallbackTokenLabels: PROMPT_TOKENS,
+    fallbackPositionLabels: POSITION_TOKENS,
+    numLayers: NUM_LAYERS,
+    cameraReturnPosition: camPos,
+    cameraReturnTarget: camTarget,
+    selectionPanel
+});

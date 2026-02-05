@@ -54,6 +54,17 @@ export function initSkipToEndButton(pipeline) {
         if (pipeline && typeof pipeline.skipToEndForwardPass === 'function') {
             pipeline.skipToEndForwardPass();
         }
+        button.disabled = true;
+        button.dataset.state = 'skipping';
+        button.textContent = 'Skipping';
+        button.setAttribute('aria-busy', 'true');
+        const skipToggle = document.getElementById('skipMenuToggle');
+        if (skipToggle) {
+            skipToggle.disabled = true;
+            skipToggle.dataset.state = 'skipping';
+            skipToggle.textContent = 'Skipping';
+            skipToggle.setAttribute('aria-busy', 'true');
+        }
     };
 
     button.addEventListener('click', onClick);
@@ -68,21 +79,22 @@ export function initSkipToEndButton(pipeline) {
     let rafId = null;
     const update = () => {
         const complete = typeof pipeline.isForwardPassComplete === 'function' && pipeline.isForwardPassComplete();
-        if (complete) {
-            setVisible(false);
-            return;
-        }
-
         const skipping = typeof pipeline.isSkipToEndActive === 'function' && pipeline.isSkipToEndActive();
+        const skippingLayer = typeof pipeline.isSkipLayerActive === 'function' && pipeline.isSkipLayerActive();
+        const isSkipping = skipping || skippingLayer;
         if (appState.equationsSuppressed !== skipping) {
             appState.equationsSuppressed = skipping;
             applyEquationsVisibility();
         }
-        setVisible(true);
-        button.disabled = !!skipping;
-        button.dataset.state = skipping ? 'skipping' : 'ready';
-        button.textContent = skipping ? 'Skipping...' : 'Skip to end';
-        button.setAttribute('aria-busy', skipping ? 'true' : 'false');
+        if (complete) {
+            setVisible(false);
+        } else {
+            setVisible(true);
+            button.disabled = !!isSkipping;
+            button.dataset.state = isSkipping ? 'skipping' : 'ready';
+            button.textContent = isSkipping ? 'Skipping' : 'Skip to end';
+            button.setAttribute('aria-busy', isSkipping ? 'true' : 'false');
+        }
         rafId = scheduleFrame(update);
     };
     update();

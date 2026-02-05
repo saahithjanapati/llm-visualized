@@ -41,6 +41,17 @@ export function initSkipLayerButton(pipeline) {
         if (pipeline && typeof pipeline.skipCurrentLayer === 'function') {
             pipeline.skipCurrentLayer();
         }
+        button.disabled = true;
+        button.dataset.state = 'skipping';
+        button.textContent = 'Skipping';
+        button.setAttribute('aria-busy', 'true');
+        const skipToggle = document.getElementById('skipMenuToggle');
+        if (skipToggle) {
+            skipToggle.disabled = true;
+            skipToggle.dataset.state = 'skipping';
+            skipToggle.textContent = 'Skipping';
+            skipToggle.setAttribute('aria-busy', 'true');
+        }
     };
 
     button.addEventListener('click', onClick);
@@ -57,15 +68,16 @@ export function initSkipLayerButton(pipeline) {
         const complete = typeof pipeline.isForwardPassComplete === 'function' && pipeline.isForwardPassComplete();
         if (complete) {
             setVisible(false);
-            return;
-        }
+        } else {
         const skippingLayer = typeof pipeline.isSkipLayerActive === 'function' && pipeline.isSkipLayerActive();
         const skippingAll = typeof pipeline.isSkipToEndActive === 'function' && pipeline.isSkipToEndActive();
+        const isSkipping = skippingLayer || skippingAll;
         setVisible(true);
-        button.disabled = skippingLayer || skippingAll;
-        button.dataset.state = skippingLayer ? 'skipping' : 'ready';
-        button.textContent = skippingLayer ? 'Skipping layer...' : 'Skip layer';
-        button.setAttribute('aria-busy', skippingLayer ? 'true' : 'false');
+        button.disabled = isSkipping;
+        button.dataset.state = isSkipping ? 'skipping' : 'ready';
+        button.textContent = isSkipping ? 'Skipping' : 'Skip layer';
+        button.setAttribute('aria-busy', isSkipping ? 'true' : 'false');
+        }
         rafId = scheduleFrame(update);
     };
     update();

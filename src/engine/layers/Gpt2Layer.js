@@ -2224,6 +2224,14 @@ export default class Gpt2Layer extends BaseLayer {
         }
     }
 
+    dispose() {
+        try {
+            this.mhsaAnimation?.dispose?.();
+        } catch (_) { /* best-effort */ }
+        this.mhsaAnimation = null;
+        super.dispose();
+    }
+
     refreshSkipVisibility() {
         if (this._skipToEndActive) {
             this._applySkipVectorVisibility();

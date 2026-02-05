@@ -1,4 +1,4 @@
-export function initSkipMenu() {
+export function initSkipMenu(pipeline) {
     const menu = document.getElementById('skipMenu');
     const toggle = document.getElementById('skipMenuToggle');
     const items = document.getElementById('skipMenuItems');
@@ -17,11 +17,25 @@ export function initSkipMenu() {
         toggle.setAttribute('aria-expanded', next);
     };
 
+    const defaultToggleLabel = toggle?.textContent || 'Skip';
+
     const updateVisibility = () => {
         const anyVisible = isVisible(skipLayerBtn) || isVisible(skipConveyorBtn) || isVisible(skipToEndBtn);
         menu.dataset.visible = anyVisible ? 'true' : 'false';
         menu.style.display = anyVisible ? '' : 'none';
         if (!anyVisible) setOpen(false);
+    };
+
+    const updateSkipState = () => {
+        if (!toggle) return;
+        const skippingLayer = typeof pipeline?.isSkipLayerActive === 'function' && pipeline.isSkipLayerActive();
+        const skippingAll = typeof pipeline?.isSkipToEndActive === 'function' && pipeline.isSkipToEndActive();
+        const isSkipping = skippingLayer || skippingAll;
+        toggle.disabled = !!isSkipping;
+        toggle.dataset.state = isSkipping ? 'skipping' : 'ready';
+        toggle.textContent = isSkipping ? 'Skipping' : defaultToggleLabel;
+        toggle.setAttribute('aria-busy', isSkipping ? 'true' : 'false');
+        if (isSkipping) setOpen(false);
     };
 
     const onToggleClick = (event) => {
@@ -57,6 +71,7 @@ export function initSkipMenu() {
     let rafId = null;
     const tick = () => {
         updateVisibility();
+        updateSkipState();
         rafId = scheduleFrame(tick);
     };
     tick();

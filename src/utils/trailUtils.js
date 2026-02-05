@@ -21,6 +21,16 @@ const _stepTarget = new THREE.Vector3();
 
 let GLOBAL_MAX_STEP_DISTANCE = 0;
 
+function resolveTrailPassId(root) {
+    let node = root;
+    while (node) {
+        const passId = node.userData && node.userData.trailPassId;
+        if (Number.isFinite(passId)) return passId;
+        node = node.parent || null;
+    }
+    return null;
+}
+
 export function setGlobalTrailMaxStepDistance(distance) {
     const next = Number(distance);
     GLOBAL_MAX_STEP_DISTANCE = Number.isFinite(next) && next > 0 ? next : 0;
@@ -64,6 +74,10 @@ export class StraightLineTrail {
         this._line.frustumCulled = false;
         // Tag for discovery and back-reference
         this._line.userData.isTrail = true;
+        const passId = resolveTrailPassId(scene);
+        if (Number.isFinite(passId)) {
+            this._line.userData.trailPassId = passId;
+        }
         this._line.userData.trailRef = this;
         // Trails are decorative; skip raycast intersection work.
         this._line.raycast = () => {};
@@ -384,6 +398,10 @@ export class SegmentTrailBatch {
         this._line.frustumCulled = false;
         this._line.userData.isTrail = true;
         this._line.userData.trailBatch = true;
+        const passId = resolveTrailPassId(scene);
+        if (Number.isFinite(passId)) {
+            this._line.userData.trailPassId = passId;
+        }
         this._line.raycast = () => {};
         if (scene) scene.add(this._line);
 
@@ -512,6 +530,13 @@ export function mergeTrailsIntoLineSegments(trails, scene, color = TRAIL_COLOR, 
         applyFadeIn(material, effOpacity, options.fadeInMs);
     }
     const merged = new THREE.LineSegments(geometry, material);
+    merged.userData.isTrail = true;
+    merged.userData.trailMerged = true;
+    const passId = resolveTrailPassId(scene);
+    if (Number.isFinite(passId)) {
+        merged.userData.trailPassId = passId;
+    }
+    merged.raycast = () => {};
     // Intentionally omit a hover label so merged trail lines remain non-interactive
     // in raycast tooltips (they are purely decorative).
     scene.add(merged);
@@ -547,8 +572,40 @@ export function buildMergedLineSegmentsFromSegments(segmentsList, scene, color =
         applyFadeIn(material, effOpacity2, options.fadeInMs);
     }
     const merged = new THREE.LineSegments(geometry, material);
+    merged.userData.isTrail = true;
+    merged.userData.trailMerged = true;
+    const passId = resolveTrailPassId(scene);
+    if (Number.isFinite(passId)) {
+        merged.userData.trailPassId = passId;
+    }
+    merged.raycast = () => {};
     // Intentionally omit a hover label so merged trail lines remain non-interactive
     // in raycast tooltips (they are purely decorative).
     scene.add(merged);
     return merged;
+}
+
+export function clearTrailsFromScene(scene, { includeAllLines = false, passId = null } = {}) {
+    if (!scene || typeof scene.traverse !== 'function') return;
+    const targetPass = Number.isFinite(passId) ? passId : null;
+    const targets = [];
+    scene.traverse((obj) => {
+        if (!obj) return;
+        const isTrail = !!(obj.userData && (obj.userData.isTrail || obj.userData.trailMerged || obj.userData.trailBatch));
+        const isLine = !!(obj.isLine || obj.isLineSegments);
+        if (!isTrail && !(includeAllLines && isLine)) return;
+        if (targetPass !== null) {
+            const objPass = obj.userData && obj.userData.trailPassId;
+            if (Number.isFinite(objPass) && objPass === targetPass) return;
+        }
+        targets.push(obj);
+    });
+    targets.forEach((obj) => {
+        if (obj.parent) obj.parent.remove(obj);
+        if (obj.geometry) obj.geometry.dispose();
+        if (obj.material) {
+            const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+            materials.forEach((mat) => mat && mat.dispose && mat.dispose());
+        }
+    });
 }
