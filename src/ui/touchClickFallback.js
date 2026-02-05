@@ -1,5 +1,5 @@
 const DEFAULT_TAP_SLOP_PX = 16;
-const DEFAULT_PENDING_MS = 500;
+const DEFAULT_PENDING_MS = 1200;
 
 const isTouchLikeEvent = (event) => {
     if (!event) return false;
@@ -31,10 +31,27 @@ export function initTouchClickFallback(container, { selector = 'button', tapSlop
     if (!container) return () => {};
 
     let active = null;
-    let pendingClick = null;
+    let pendingClicks = [];
+
+    const nowMs = () => {
+        if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+            return performance.now();
+        }
+        return Date.now();
+    };
+
+    const prunePendingClicks = () => {
+        const now = nowMs();
+        if (pendingClicks.length === 0) return;
+        pendingClicks = pendingClicks.filter((entry) => entry && entry.until > now);
+    };
 
     const registerPendingClick = (target) => {
-        pendingClick = { target, until: Date.now() + DEFAULT_PENDING_MS };
+        prunePendingClicks();
+        pendingClicks.push({ target, until: nowMs() + DEFAULT_PENDING_MS });
+        if (pendingClicks.length > 6) {
+            pendingClicks = pendingClicks.slice(-6);
+        }
     };
 
     const onPointerDown = (event) => {
@@ -83,14 +100,14 @@ export function initTouchClickFallback(container, { selector = 'button', tapSlop
     };
 
     const onClick = (event) => {
-        if (!pendingClick || !event.isTrusted) return;
-        if (Date.now() > pendingClick.until) {
-            pendingClick = null;
-            return;
-        }
+        if (!event.isTrusted) return;
+        prunePendingClicks();
+        if (pendingClicks.length === 0) return;
         const target = resolveClosestTarget(container, event, selector);
-        if (!target || target !== pendingClick.target) return;
-        pendingClick = null;
+        if (!target) return;
+        const index = pendingClicks.findIndex((entry) => entry.target === target);
+        if (index === -1) return;
+        pendingClicks.splice(index, 1);
         event.preventDefault();
         event.stopPropagation();
     };

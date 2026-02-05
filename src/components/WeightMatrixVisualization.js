@@ -15,6 +15,89 @@ const __geometryCache = new Map();
 const __capFrontCache = new Map();
 const __capBackCache  = new Map();
 const __materialCache = new Map();
+// Cache for instanced-slice geometry with front/back caps removed.
+const __sliceWallCache = new Map();
+
+function getAttrComponent(attr, index, component) {
+    if (attr.isInterleavedBufferAttribute) {
+        if (component === 0) return attr.getX(index);
+        if (component === 1) return attr.getY(index);
+        if (component === 2) return attr.getZ(index);
+        if (component === 3) return attr.getW(index);
+    }
+    return attr.array[index * attr.itemSize + component];
+}
+
+function stripSliceEndCaps(geometry, depth) {
+    if (!geometry || !geometry.attributes || !geometry.attributes.position) {
+        return geometry;
+    }
+
+    const src = geometry.index ? geometry.toNonIndexed() : geometry;
+    const shouldDisposeSrc = !!geometry.index;
+    const posAttr = src.attributes.position;
+    const attrNames = Object.keys(src.attributes);
+    const buffers = {};
+    const itemSizes = {};
+    const normalized = {};
+    const constructors = {};
+
+    for (const name of attrNames) {
+        const attr = src.attributes[name];
+        buffers[name] = [];
+        itemSizes[name] = attr.itemSize;
+        normalized[name] = attr.normalized;
+        constructors[name] = attr.array.constructor;
+    }
+
+    const zFront = depth / 2;
+    const zBack = -depth / 2;
+    const eps = Math.max(1e-3, depth * 0.001);
+
+    for (let i = 0; i < posAttr.count; i += 3) {
+        const z0 = posAttr.getZ(i);
+        const z1 = posAttr.getZ(i + 1);
+        const z2 = posAttr.getZ(i + 2);
+        const isFront = Math.abs(z0 - zFront) < eps
+            && Math.abs(z1 - zFront) < eps
+            && Math.abs(z2 - zFront) < eps;
+        const isBack = Math.abs(z0 - zBack) < eps
+            && Math.abs(z1 - zBack) < eps
+            && Math.abs(z2 - zBack) < eps;
+
+        if (isFront || isBack) {
+            continue;
+        }
+
+        for (const name of attrNames) {
+            const attr = src.attributes[name];
+            const itemSize = attr.itemSize;
+            for (let v = 0; v < 3; v++) {
+                const idx = i + v;
+                for (let c = 0; c < itemSize; c++) {
+                    buffers[name].push(getAttrComponent(attr, idx, c));
+                }
+            }
+        }
+    }
+
+    const out = new THREE.BufferGeometry();
+    for (const name of attrNames) {
+        const ctor = constructors[name] || Float32Array;
+        const array = new ctor(buffers[name]);
+        out.setAttribute(name, new THREE.BufferAttribute(array, itemSizes[name], normalized[name]));
+    }
+
+    out.computeBoundingBox();
+    out.computeBoundingSphere();
+
+    if (shouldDisposeSrc) {
+        src.dispose();
+    }
+
+    return out;
+}
+
 function getCacheKey(width, height, depth, topWidthFactor, cornerRadius, numberOfSlits, slitWidth, slitDepthFactor, slitBottomWidthFactor, slitTopWidthFactor) {
     return [width, height, depth, topWidthFactor, cornerRadius, numberOfSlits, slitWidth, slitDepthFactor, slitBottomWidthFactor, slitTopWidthFactor, QUALITY_PRESET].join('|');
 }
@@ -55,7 +138,6 @@ export class WeightMatrixVisualization {
         this.mesh = null; // Main trapezoid mesh (sides)
         this.frontCapMesh = null; // Front face mesh
         this.backCapMesh = null; // Back face mesh
-
         this._createMesh();
 
         if (data) {
@@ -93,6 +175,7 @@ export class WeightMatrixVisualization {
             // Material is shared
             this.backCapMesh = null;
         }
+
     }
 
     _createMesh() {
@@ -460,28 +543,41 @@ export class WeightMatrixVisualization {
         const normalAttr = creasedGeometry.attributes.normal;
         const creasedPos = creasedGeometry.attributes.position;
         if (normalAttr && creasedPos) {
-            const planeEps = Math.min(Math.max(0.05, this.height * 0.005), 0.6);
+            const planeEps = Math.min(Math.max(0.08, this.height * 0.01), 0.8);
+            const snapEpsTop = Math.min(Math.max(0.06, this.height * 0.008), 0.7);
+            const upThreshold = 0.92;
             const a = new THREE.Vector3();
             const b = new THREE.Vector3();
             const c = new THREE.Vector3();
+            const ab = new THREE.Vector3();
+            const ac = new THREE.Vector3();
+            const faceNormal = new THREE.Vector3();
             for (let i = 0; i < creasedPos.count; i += 3) {
                 a.fromBufferAttribute(creasedPos, i);
                 b.fromBufferAttribute(creasedPos, i + 1);
                 c.fromBufferAttribute(creasedPos, i + 2);
-                const isTop = Math.abs(a.y - hh) < planeEps
-                    && Math.abs(b.y - hh) < planeEps
-                    && Math.abs(c.y - hh) < planeEps;
-                const isBottom = Math.abs(a.y + hh) < planeEps
-                    && Math.abs(b.y + hh) < planeEps
-                    && Math.abs(c.y + hh) < planeEps;
+
+                ab.subVectors(b, a);
+                ac.subVectors(c, a);
+                faceNormal.crossVectors(ab, ac).normalize();
+
+                const avgY = (a.y + b.y + c.y) / 3;
+                const isTop = faceNormal.y > upThreshold && Math.abs(avgY - hh) < planeEps;
+                const isBottom = faceNormal.y < -upThreshold && Math.abs(avgY + hh) < planeEps;
                 if (isTop || isBottom) {
                     const sign = isTop ? 1 : -1;
                     normalAttr.setXYZ(i, 0, sign, 0);
                     normalAttr.setXYZ(i + 1, 0, sign, 0);
                     normalAttr.setXYZ(i + 2, 0, sign, 0);
+
+                    const targetY = sign * hh;
+                    if (Math.abs(a.y - targetY) < snapEpsTop) creasedPos.setY(i, targetY);
+                    if (Math.abs(b.y - targetY) < snapEpsTop) creasedPos.setY(i + 1, targetY);
+                    if (Math.abs(c.y - targetY) < snapEpsTop) creasedPos.setY(i + 2, targetY);
                 }
             }
             normalAttr.needsUpdate = true;
+            creasedPos.needsUpdate = true;
         }
         if (creasedGeometry !== this.mesh.geometry) {
             this.mesh.geometry.dispose();
@@ -535,6 +631,7 @@ export class WeightMatrixVisualization {
         updateSciFiDimensions(this.mesh.material, { width: this.width, height: this.height, depth: this.depth });
         updateSciFiDimensions(this.frontCapMesh.material, { width: this.width, height: this.height, depth: this.depth });
         updateSciFiDimensions(this.backCapMesh.material, { width: this.width, height: this.height, depth: this.depth });
+
     }
 
     // Hide or show caps to avoid visible seams when abutting multiple
@@ -606,6 +703,16 @@ export class WeightMatrixVisualization {
         // ----------------------------------------------------------
         // Material – clone defaults from standard path
         // ----------------------------------------------------------
+        // Remove per-slice end caps to avoid internal coplanar faces between
+        // adjacent instances (these can show up as dashed lines through slits).
+        let instancedSliceGeometry;
+        if (__sliceWallCache.has(sliceKey)) {
+            instancedSliceGeometry = __sliceWallCache.get(sliceKey);
+        } else {
+            instancedSliceGeometry = stripSliceEndCaps(sliceGeometry, sliceDepth);
+            __sliceWallCache.set(sliceKey, instancedSliceGeometry);
+        }
+
         const sciFiSliceDims = { width: this.width, height: this.height, depth: depthSpan };
         let mat;
         if (USE_GLB_MATERIALS && __materialCache.has(sliceKey)) {
@@ -668,7 +775,7 @@ export class WeightMatrixVisualization {
         // ----------------------------------------------------------
         // Build InstancedMesh for side walls across all lanes
         // ----------------------------------------------------------
-        const inst = new THREE.InstancedMesh(sliceGeometry, mat, laneCount);
+        const inst = new THREE.InstancedMesh(instancedSliceGeometry, mat, laneCount);
         const mtx = new THREE.Matrix4();
         for (let i = 0; i < laneCount; i++) {
             const z = (i - (laneCount - 1) / 2) * VECTOR_DEPTH_SPACING;
