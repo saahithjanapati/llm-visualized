@@ -80,6 +80,29 @@ function createAdvanceOverlay() {
     return { root, titlePrefix, countdownWrap, countdownEl, tokenEl, barFill, stayBtn, advanceBtn };
 }
 
+function createNextTokenButton() {
+    const existing = document.getElementById('nextTokenBtn');
+    if (existing) return existing;
+    const topControls = document.getElementById('topControls');
+    if (!topControls) return null;
+
+    const btn = document.createElement('button');
+    btn.id = 'nextTokenBtn';
+    btn.type = 'button';
+    btn.textContent = 'Next token';
+    btn.title = 'Advance to next token';
+    btn.setAttribute('aria-label', 'Advance to next token');
+    btn.dataset.visible = 'false';
+    btn.style.display = 'none';
+    const followBtn = document.getElementById('followModeBtn');
+    if (followBtn && followBtn.parentElement === topControls) {
+        topControls.insertBefore(btn, followBtn);
+    } else {
+        topControls.appendChild(btn);
+    }
+    return btn;
+}
+
 export function initGenerationController({
     pipeline,
     activationSource,
@@ -100,6 +123,7 @@ export function initGenerationController({
     const canLoop = !!activationSource && maxLaneCount > initialLaneCount;
 
     const overlay = createAdvanceOverlay();
+    const nextTokenBtn = createNextTokenButton();
     let currentLaneCount = Math.max(1, Math.floor(initialLaneCount || 1));
     let passComplete = false;
     let autoAdvancePaused = false;
@@ -115,9 +139,22 @@ export function initGenerationController({
         overlay.root.dataset.visible = 'false';
     };
 
+    const updateNextTokenButton = () => {
+        if (!nextTokenBtn) return;
+        const atEnd = currentLaneCount >= maxLaneCount;
+        const shouldShow = passComplete && autoAdvancePaused && !atEnd;
+        const next = shouldShow ? 'true' : 'false';
+        if (nextTokenBtn.dataset.visible !== next) {
+            nextTokenBtn.dataset.visible = next;
+            nextTokenBtn.style.display = shouldShow ? '' : 'none';
+        }
+        nextTokenBtn.disabled = !shouldShow;
+    };
+
     const updateOverlay = () => {
         if (!passComplete) {
             clearOverlay();
+            updateNextTokenButton();
             return;
         }
 
@@ -166,6 +203,8 @@ export function initGenerationController({
             overlay.advanceBtn.disabled = atEnd;
             overlay.advanceBtn.textContent = 'Advance';
         }
+
+        updateNextTokenButton();
     };
 
     const syncSelectionPanel = (passState) => {
@@ -227,6 +266,7 @@ export function initGenerationController({
         remainingMs = countdownMs;
         lastTick = null;
         clearOverlay();
+        updateNextTokenButton();
     };
 
     rebuildPass({ laneCount: currentLaneCount, passState: initialPassState, resetPipeline: false });
@@ -268,6 +308,14 @@ export function initGenerationController({
         overlay.advanceBtn.onclick = (event) => {
             event.preventDefault();
             if (!passComplete) return;
+            advanceToNextPass();
+        };
+    }
+
+    if (nextTokenBtn) {
+        nextTokenBtn.onclick = (event) => {
+            event.preventDefault();
+            if (!passComplete || currentLaneCount >= maxLaneCount) return;
             advanceToNextPass();
         };
     }

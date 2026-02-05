@@ -156,6 +156,9 @@ body.touch-ui * {
 #skipToEndBtn:not([data-visible="true"]) {
     display: none;
 }
+#nextTokenBtn:not([data-visible="true"]) {
+    display: none;
+}
 #skipLayerBtn[data-state="skipping"],
 #skipToEndBtn[data-state="skipping"] {
     background: rgba(255, 148, 76, 0.28);
