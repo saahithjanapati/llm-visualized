@@ -175,7 +175,8 @@ const selectionPanel = initSelectionPanel({
     activationSource,
     laneTokenIndices: initialPassState.laneTokenIndices,
     tokenLabels: initialPassState.tokenLabels,
-    engine: pipeline.engine
+    engine: pipeline.engine,
+    pipeline
 });
 if (pipeline.engine && typeof pipeline.engine.setRaycastSelectionHandler === 'function') {
     pipeline.engine.setRaycastSelectionHandler(selection => {

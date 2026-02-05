@@ -355,22 +355,33 @@ body.touch-ui * {
     display: none; /* toggled to flex when open */
     align-items: center;
     justify-content: center;
-    background: rgba(0,0,0,0.45);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
+    background:
+        radial-gradient(900px 500px at 50% -10%, rgba(255, 255, 255, 0.08), transparent 60%),
+        rgba(6, 8, 12, 0.72);
+    backdrop-filter: blur(12px) saturate(1.05);
+    -webkit-backdrop-filter: blur(12px) saturate(1.05);
     z-index: 10; /* above everything */
 }
 
 /* Modal panel */
 .settings-modal {
     width: min(92vw, 420px);
-    background: rgba(20,20,24,0.85);
-    border: 1px solid rgba(255,255,255,0.1);
+    --settings-accent: #e6edf7;
+    --settings-surface: rgba(14, 16, 20, 0.92);
+    --settings-border: rgba(255, 255, 255, 0.12);
+    --settings-muted: #9aa3af;
+    background:
+        linear-gradient(155deg, rgba(20, 22, 28, 0.96), rgba(10, 12, 16, 0.94));
+    border: 1px solid var(--settings-border);
     border-radius: 16px;
-    box-shadow: 0 10px 40px rgba(0,0,0,0.45);
-    color: #fff;
-    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+    box-shadow:
+        0 18px 50px rgba(2, 6, 14, 0.6),
+        0 0 0 1px rgba(255, 255, 255, 0.04);
+    color: #eef1f6;
+    font-family: "Rajdhani", "Space Grotesk", "Segoe UI", system-ui, -apple-system, sans-serif;
     overflow: hidden;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
 }
 
 .settings-header {
@@ -378,27 +389,49 @@ body.touch-ui * {
     align-items: center;
     justify-content: space-between;
     padding: 14px 16px;
-    border-bottom: 1px solid rgba(255,255,255,0.08);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    background:
+        linear-gradient(120deg, rgba(255, 255, 255, 0.06), rgba(10, 12, 18, 0.2) 60%),
+        rgba(12, 14, 18, 0.6);
 }
-.settings-title { font-size: 16px; font-weight: 600; }
+.settings-title {
+    font-size: 15px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.4px;
+}
 #settingsClose {
     appearance: none;
     -webkit-appearance: none;
     border: none;
-    background: transparent;
-    color: #bbb;
+    background: rgba(255, 255, 255, 0.06);
+    color: #cfd6e1;
     font-size: 20px;
     line-height: 1;
     cursor: pointer;
-    padding: 6px;
-    border-radius: 8px;
+    padding: 6px 7px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    transition: border-color .18s ease, background .18s ease, color .18s ease, box-shadow .18s ease;
 }
-#settingsClose:hover { background: rgba(255,255,255,0.07); color: #fff; }
+#settingsClose:hover {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.3);
+    color: #fff;
+    box-shadow: 0 0 12px rgba(255, 255, 255, 0.15);
+}
 
 .settings-content { padding: 14px 16px 18px; }
 .settings-section { margin-bottom: 14px; }
 .settings-section:last-child { margin-bottom: 0; }
-.section-label { display: block; margin-bottom: 8px; color: #cfd3dc; font-size: 13px; letter-spacing: .2px; }
+.section-label {
+    display: block;
+    margin-bottom: 8px;
+    color: var(--settings-muted);
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
 
 /* Speed radio group */
 .speed-group { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
@@ -409,20 +442,31 @@ body.touch-ui * {
     justify-content: center;
     gap: 8px;
     padding: 10px 12px;
-    border: 1px solid rgba(255,255,255,0.12);
+    border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 12px;
-    background: rgba(255,255,255,0.04);
-    color: #e7e9ee;
+    background: linear-gradient(160deg, rgba(18, 24, 34, 0.9), rgba(12, 14, 20, 0.8));
+    color: #dfe8f4;
     cursor: pointer;
     user-select: none;
     touch-action: manipulation;
-    transition: background .15s ease, border-color .15s ease;
+    transition: background .18s ease, border-color .18s ease, box-shadow .18s ease, transform .18s ease;
     text-align: center;
     font-size: 13px;
+    letter-spacing: 0.4px;
 }
-.speed-option:hover { background: rgba(255,255,255,0.08); }
+.speed-option:hover {
+    border-color: rgba(255, 255, 255, 0.28);
+    box-shadow: 0 0 12px rgba(255, 255, 255, 0.12);
+    transform: translateY(-1px);
+}
 .speed-option input { position: absolute; opacity: 0; pointer-events: none; }
-.speed-option[data-checked="true"] { border-color: rgba(122,202,255,0.8); background: rgba(56,132,255,0.18); }
+.speed-option[data-checked="true"] {
+    border-color: rgba(255, 255, 255, 0.6);
+    background:
+        linear-gradient(160deg, rgba(34, 40, 52, 0.8), rgba(12, 16, 24, 0.7));
+    box-shadow: 0 0 14px rgba(255, 255, 255, 0.12);
+    color: #f3fbff;
+}
 
 /* Simple toggle row */
 .toggle-row {
@@ -432,13 +476,19 @@ body.touch-ui * {
     justify-content: space-between;
     gap: 10px;
     padding: 10px 12px;
-    border: 1px solid rgba(255,255,255,0.12);
+    border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 12px;
-    background: rgba(255,255,255,0.04);
-    color: #e7e9ee;
+    background: linear-gradient(160deg, rgba(18, 24, 34, 0.9), rgba(12, 14, 20, 0.8));
+    color: #e2ebf7;
     user-select: none;
     cursor: pointer;
     touch-action: manipulation;
+    transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease;
+}
+.toggle-row:hover {
+    border-color: rgba(255, 255, 255, 0.28);
+    box-shadow: 0 0 16px rgba(255, 255, 255, 0.1);
+    transform: translateY(-1px);
 }
 .toggle-row .toggle-text {
     flex: 1;
@@ -454,39 +504,63 @@ body.touch-ui * {
 }
 .toggle-row .toggle-track {
     position: relative;
-    width: 44px;
-    height: 24px;
+    --toggle-width: 44px;
+    --toggle-height: 24px;
+    --toggle-padding: 2px;
+    --toggle-knob: 18px;
+    width: var(--toggle-width);
+    height: var(--toggle-height);
     border-radius: 999px;
-    background: rgba(255,255,255,0.08);
-    border: 1px solid rgba(255,255,255,0.2);
-    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.25);
+    background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.25));
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    box-shadow:
+        inset 0 0 0 1px rgba(0,0,0,0.35),
+        0 0 10px rgba(0, 0, 0, 0.25);
     transition: background .18s ease, border-color .18s ease, box-shadow .18s ease;
     margin-left: auto;
     flex-shrink: 0;
+    box-sizing: border-box;
+}
+.toggle-row .toggle-track::before {
+    content: '';
+    position: absolute;
+    inset: 1px;
+    border-radius: inherit;
+    background: linear-gradient(180deg, rgba(255,255,255,0.15), transparent 60%);
+    opacity: 0.7;
+    pointer-events: none;
 }
 .toggle-row .toggle-track::after {
     content: '';
     position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 18px;
-    height: 18px;
+    top: 50%;
+    left: var(--toggle-padding);
+    width: var(--toggle-knob);
+    height: var(--toggle-knob);
     border-radius: 50%;
-    background: #cfd3dc;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.35);
-    transition: transform .18s ease, background .18s ease;
+    background: radial-gradient(circle at 30% 30%, #ffffff, #d7dee8 62%, #aab6c7 100%);
+    box-shadow:
+        0 2px 8px rgba(0,0,0,0.35),
+        0 0 8px rgba(255, 255, 255, 0.12);
+    transform: translateY(-50%);
+    transition: left .18s ease, background .18s ease, transform .18s ease;
 }
 .toggle-row input:checked + .toggle-track {
-    background: rgba(122,202,255,0.4);
-    border-color: rgba(122,202,255,0.75);
-    box-shadow: inset 0 0 0 1px rgba(122,202,255,0.4);
+    background: linear-gradient(180deg, rgba(210, 220, 236, 0.45), rgba(60, 70, 90, 0.6));
+    border-color: rgba(255, 255, 255, 0.6);
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.25),
+        0 0 12px rgba(0, 0, 0, 0.35);
 }
 .toggle-row input:checked + .toggle-track::after {
-    transform: translateX(20px);
-    background: #fff;
+    left: calc(100% - var(--toggle-padding) - var(--toggle-knob));
+    background: radial-gradient(circle at 30% 30%, #ffffff, #e7edf4 70%, #c3cedd 100%);
+    box-shadow:
+        0 2px 10px rgba(0,0,0,0.35),
+        0 0 8px rgba(255, 255, 255, 0.2);
 }
 .toggle-row input:focus-visible + .toggle-track {
-    outline: 2px solid rgba(122,202,255,0.9);
+    outline: 2px solid rgba(255, 255, 255, 0.7);
     outline-offset: 2px;
 }
 .toggle-row input:disabled + .toggle-track {
@@ -1127,15 +1201,16 @@ body.touch-ui * {
         max-width: calc(100vw - 16px);
         gap: 0;
     }
-    #hudPanel { padding: 8px 10px; gap: 6px 10px; }
-    #statusOverlay { font-size: 12px; }
-    #parameterCounter .param-value { font-size: 16px; }
+    #hudPanel { padding: 6px 8px; gap: 4px 8px; }
+    #statusOverlay { font-size: 11px; line-height: 1.12; }
+    #parameterCounter .param-value { font-size: 15px; }
     #equationsPanel {
-        height: 72px;
-        min-height: 72px;
-        max-height: 72px;
+        height: 64px;
+        min-height: 64px;
+        max-height: 64px;
     }
-    #equationsPanel .eq-body { font-size: 13px; }
+    #equationsPanel .eq-title { font-size: 10px; margin-bottom: 3px; }
+    #equationsPanel .eq-body { font-size: 12px; line-height: 1.28; }
     .detail-preview { min-height: 180px; }
     .detail-attention { margin: 0 8px; padding: 10px; }
     .attention-token { font-size: 9px; }
@@ -1144,9 +1219,9 @@ body.touch-ui * {
 }
 @media (max-height: 560px) {
     #equationsPanel {
-        height: 72px;
-        min-height: 72px;
-        max-height: 72px;
+        height: 64px;
+        min-height: 64px;
+        max-height: 64px;
     }
 }
 @media (max-aspect-ratio: 1/1), (max-width: 880px) {
@@ -1165,17 +1240,17 @@ body.touch-ui * {
         max-width: calc(100vw - 16px);
         gap: 0;
     }
-    #hudPanel { padding: 8px 10px; gap: 6px 10px; }
-    #statusOverlay { font-size: 12px; }
+    #hudPanel { padding: 6px 8px; gap: 4px 8px; }
+    #statusOverlay { font-size: 11px; line-height: 1.12; }
     #parameterCounter .param-label { font-size: 10px; }
-    #parameterCounter .param-value { font-size: 16px; }
+    #parameterCounter .param-value { font-size: 15px; }
     #equationsPanel {
-        height: 72px;
-        min-height: 72px;
-        max-height: 72px;
+        height: 64px;
+        min-height: 64px;
+        max-height: 64px;
     }
-    #equationsPanel .eq-title { font-size: 11px; margin-bottom: 4px; }
-    #equationsPanel .eq-body { font-size: 13px; }
+    #equationsPanel .eq-title { font-size: 10px; margin-bottom: 3px; }
+    #equationsPanel .eq-body { font-size: 12px; line-height: 1.28; }
     #detailPanel {
         display: flex;
         position: fixed;

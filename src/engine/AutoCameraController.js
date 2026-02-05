@@ -36,12 +36,20 @@ export class AutoCameraController {
         if (this._cameraOffsetDiv) {
             this._cameraOffsetDiv.style.display = 'none';
         }
+        if (this._panelShiftTween && typeof this._panelShiftTween.stop === 'function') {
+            try { this._panelShiftTween.stop(); } catch (_) { /* no-op */ }
+        }
+        this._panelShiftTween = null;
     }
 
     update() {
-        if (!this._autoCameraFollow && !this._devMode) return;
+        const hasPanelShift = this._hasPanelShift();
+        if (!this._autoCameraFollow && !this._devMode && !hasPanelShift) return;
         if (this._autoCameraFollow) {
             this._updateAutoCameraFollow();
+        }
+        if (hasPanelShift) {
+            this._applyPanelShift();
         }
         this._updateCameraOffsetOverlay();
     }
@@ -83,6 +91,45 @@ export class AutoCameraController {
 
     isEnabled() {
         return !!this._autoCameraFollow;
+    }
+
+    setScreenShiftPixels(pixels, { immediate = false, durationMs = 520 } = {}) {
+        const next = Number.isFinite(pixels) ? pixels : 0;
+        const delta = Math.abs(next - this._panelShiftPxTarget);
+        const hasTween = this._panelShiftTween && typeof this._panelShiftTween.stop === 'function';
+
+        if (delta < 0.5 && !immediate && !hasTween) {
+            this._panelShiftPxTarget = next;
+            return;
+        }
+
+        if (hasTween) {
+            try { this._panelShiftTween.stop(); } catch (_) { /* no-op */ }
+            this._panelShiftTween = null;
+        }
+
+        this._panelShiftPxTarget = next;
+
+        const tweenAvailable = typeof TWEEN !== 'undefined' && TWEEN?.Tween;
+        if (immediate || !tweenAvailable) {
+            this._panelShiftPxCurrent = next;
+            return;
+        }
+
+        const duration = Math.max(200, Number.isFinite(durationMs) ? durationMs : 520);
+        const easing = TWEEN?.Easing?.Cubic?.InOut || TWEEN?.Easing?.Quadratic?.InOut;
+        const state = { value: this._panelShiftPxCurrent };
+        this._panelShiftTween = new TWEEN.Tween(state)
+            .to({ value: next }, duration)
+            .easing(typeof easing === 'function' ? easing : TWEEN.Easing.Quadratic.InOut)
+            .onUpdate(() => {
+                this._panelShiftPxCurrent = state.value;
+            })
+            .onComplete(() => {
+                this._panelShiftPxCurrent = next;
+                this._panelShiftTween = null;
+            })
+            .start();
     }
 
     focusOverview({ immediate = true, durationMs = 1400 } = {}) {
@@ -244,6 +291,13 @@ export class AutoCameraController {
         this._controlsChangeHandler = null;
         this._overviewCameraTween = null;
         this._overviewTargetTween = null;
+        this._panelShiftPxTarget = 0;
+        this._panelShiftPxCurrent = 0;
+        this._panelShiftTween = null;
+        this._panelShiftPxApplied = 0;
+        this._panelShiftViewWidth = 0;
+        this._panelShiftViewHeight = 0;
+        this._panelShiftViewActive = false;
     }
 
     _initOffsets(opts) {
@@ -316,6 +370,50 @@ export class AutoCameraController {
             };
             this._engine.controls.addEventListener('change', this._controlsChangeHandler);
         }
+    }
+
+    _hasPanelShift() {
+        if (this._panelShiftTween) return true;
+        if (Math.abs(this._panelShiftPxCurrent) > 0.5) return true;
+        return this._panelShiftViewActive;
+    }
+
+    _applyPanelShift() {
+        const engine = this._engine;
+        const camera = engine?.camera;
+        if (!engine || !camera) return;
+
+        const renderer = engine?.renderer;
+        const viewportWidth = renderer?.domElement?.clientWidth
+            || (typeof window !== 'undefined' ? window.innerWidth : 0);
+        const viewportHeight = renderer?.domElement?.clientHeight
+            || (typeof window !== 'undefined' ? window.innerHeight : 0);
+        if (!Number.isFinite(viewportWidth) || viewportWidth <= 0) return;
+        if (!Number.isFinite(viewportHeight) || viewportHeight <= 0) return;
+
+        const shiftPxRaw = Number.isFinite(this._panelShiftPxCurrent) ? this._panelShiftPxCurrent : 0;
+        const shiftPx = Math.abs(shiftPxRaw) < 0.5 ? 0 : shiftPxRaw;
+
+        const dimsChanged = viewportWidth !== this._panelShiftViewWidth
+            || viewportHeight !== this._panelShiftViewHeight;
+        const shiftChanged = Math.abs(shiftPx - this._panelShiftPxApplied) >= 0.25;
+        if (!dimsChanged && !shiftChanged) return;
+
+        this._panelShiftViewWidth = viewportWidth;
+        this._panelShiftViewHeight = viewportHeight;
+        this._panelShiftPxApplied = shiftPx;
+
+        if (shiftPx === 0) {
+            if (camera.view && camera.view.enabled && typeof camera.clearViewOffset === 'function') {
+                camera.clearViewOffset();
+            }
+            this._panelShiftViewActive = false;
+        } else if (typeof camera.setViewOffset === 'function') {
+            camera.setViewOffset(viewportWidth, viewportHeight, shiftPx, 0, viewportWidth, viewportHeight);
+            this._panelShiftViewActive = true;
+        }
+
+        engine?.notifyCameraUpdated?.();
     }
 
     _resolveActiveLanePosition(targetVec = null) {

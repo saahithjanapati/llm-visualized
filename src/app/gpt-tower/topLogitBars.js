@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import {
     EMBEDDING_MATRIX_PARAMS_VOCAB,
     TOP_LOGIT_BAR_MAX_COUNT,
@@ -16,6 +17,247 @@ import {
     TOP_LOGIT_BAR_RISE_DURATION_MS
 } from '../../utils/constants.js';
 import { formatTokenLabel } from './tokenLabels.js';
+
+const LOGIT_LABEL_FONT_URL = 'https://threejs.org/examples/fonts/helvetiker_regular.typeface.json';
+const LOGIT_LABEL_TEXT_SIZE_MIN = 60;
+const LOGIT_LABEL_TEXT_SIZE_MAX = 160;
+const LOGIT_LABEL_TEXT_SIZE_SCALE = 1.6;
+const LOGIT_LABEL_DEPTH_SCALE = 0.14;
+const LOGIT_LABEL_GAP_Y = 26;
+const LOGIT_LABEL_EXTRA_Y = 80;
+const LOGIT_LABEL_SIDE_GAP = 24;
+const LOGIT_LABEL_MAX_WIDTH_MULTIPLIER = 5.5;
+const LOGIT_LABEL_MIN_WIDTH = 180;
+const LOGIT_LABEL_LINE_OPACITY = 0.65;
+const LOGIT_LABEL_LINE_INSET = 6;
+
+let cachedLogitFont = null;
+let cachedLogitFontPromise = null;
+
+function loadLogitLabelFont() {
+    if (cachedLogitFont) return Promise.resolve(cachedLogitFont);
+    if (cachedLogitFontPromise) return cachedLogitFontPromise;
+    cachedLogitFontPromise = new Promise((resolve, reject) => {
+        const loader = new FontLoader();
+        loader.load(
+            LOGIT_LABEL_FONT_URL,
+            (font) => {
+                cachedLogitFont = font;
+                resolve(font);
+            },
+            undefined,
+            (err) => {
+                cachedLogitFontPromise = null;
+                reject(err);
+            }
+        );
+    });
+    return cachedLogitFontPromise;
+}
+
+function sanitizeLogitToken(token) {
+    if (token === null || token === undefined) return '';
+    const raw = String(token);
+    if (!raw.length) return '';
+    return raw.replace(/\n/g, '\\n').replace(/\t/g, '\\t');
+}
+
+function resolveLogitLabelText(entry) {
+    if (!entry || typeof entry !== 'object') return '';
+    if (typeof entry.token === 'string') {
+        return formatTokenLabel(sanitizeLogitToken(entry.token));
+    }
+    if (Number.isFinite(entry.token_id)) {
+        return `#${Math.floor(entry.token_id)}`;
+    }
+    return '';
+}
+
+function createExtrudedTextGroup(label, font, { size, depth, color }) {
+    if (!font || !label || !label.trim()) return null;
+    const shapes = font.generateShapes(label, size, 2);
+    if (!shapes || !shapes.length) return null;
+    const geometry = new THREE.ExtrudeGeometry(shapes, {
+        depth,
+        curveSegments: 4,
+        bevelEnabled: false
+    });
+    geometry.computeBoundingBox();
+    geometry.computeVertexNormals();
+    geometry.translate(0, 0, -depth / 2);
+    geometry.computeBoundingBox();
+
+    const bounds = geometry.boundingBox;
+    const width = bounds ? Math.max(0, bounds.max.x - bounds.min.x) : 0;
+    const height = bounds ? Math.max(0, bounds.max.y - bounds.min.y) : 0;
+    const centerX = bounds ? (bounds.min.x + bounds.max.x) / 2 : 0;
+    const centerY = bounds ? (bounds.min.y + bounds.max.y) / 2 : 0;
+    if (bounds) {
+        geometry.translate(-centerX, -centerY, 0);
+    }
+
+    const matColor = color instanceof THREE.Color ? color.clone() : new THREE.Color(color ?? 0xffffff);
+    const material = new THREE.MeshStandardMaterial({
+        color: matColor,
+        roughness: 0.32,
+        metalness: 0.12,
+        emissive: matColor.clone().multiplyScalar(0.15),
+        emissiveIntensity: 0.9,
+        side: THREE.DoubleSide
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    const group = new THREE.Group();
+    const textGroup = new THREE.Group();
+    textGroup.add(mesh);
+
+    const faceGeo = new THREE.ShapeGeometry(shapes);
+    faceGeo.computeVertexNormals();
+    if (bounds) {
+        faceGeo.translate(-centerX, -centerY, 0);
+    }
+    const faceOffset = 0.02;
+    const frontFace = new THREE.Mesh(faceGeo, material);
+    frontFace.position.z = depth / 2 + faceOffset;
+    const backFace = new THREE.Mesh(faceGeo, material);
+    backFace.position.z = -depth / 2 - faceOffset;
+    textGroup.add(frontFace, backFace);
+
+    group.add(textGroup);
+    group.userData.size = { width, height, depth };
+    return group;
+}
+
+function buildChosenLogitLabelGroup(barGroup, font) {
+    const chosenEntries = barGroup?.userData?.chosenEntries;
+    if (!Array.isArray(chosenEntries) || !chosenEntries.length) return null;
+    const barWidth = Number.isFinite(barGroup.userData.barWidth) ? barGroup.userData.barWidth : 1;
+    const barDepth = Number.isFinite(barGroup.userData.barDepth) ? barGroup.userData.barDepth : 0;
+    const baseX = Number.isFinite(barGroup.userData.baseX) ? barGroup.userData.baseX : null;
+    const barSpacing = Number.isFinite(barGroup.userData.barSpacing) ? barGroup.userData.barSpacing : null;
+    const barCount = Number.isFinite(barGroup.userData.barCount) ? barGroup.userData.barCount : null;
+    const leftEdge = baseX !== null ? baseX - barWidth / 2 : null;
+    const rightEdge = (baseX !== null && barSpacing !== null && barCount !== null)
+        ? baseX + Math.max(0, barCount - 1) * barSpacing + barWidth / 2
+        : null;
+    const midX = (leftEdge !== null && rightEdge !== null)
+        ? (leftEdge + rightEdge) / 2
+        : 0;
+    const textSize = Math.max(
+        LOGIT_LABEL_TEXT_SIZE_MIN,
+        Math.min(LOGIT_LABEL_TEXT_SIZE_MAX, barWidth * LOGIT_LABEL_TEXT_SIZE_SCALE)
+    );
+    const baseTextDepth = Math.max(8, textSize * LOGIT_LABEL_DEPTH_SCALE);
+    const maxLabelWidth = Math.max(LOGIT_LABEL_MIN_WIDTH, barWidth * LOGIT_LABEL_MAX_WIDTH_MULTIPLIER);
+    const labelGroup = new THREE.Group();
+    labelGroup.name = 'TopLogitChosenTokens';
+    labelGroup.visible = false;
+
+    const gapY = LOGIT_LABEL_GAP_Y;
+    const extraY = LOGIT_LABEL_EXTRA_Y;
+    const sideGap = LOGIT_LABEL_SIDE_GAP;
+
+    chosenEntries.forEach((chosen) => {
+        const labelText = resolveLogitLabelText(chosen.entry);
+        if (!labelText) return;
+        const textGroup = createExtrudedTextGroup(labelText, font, {
+            size: textSize,
+            depth: baseTextDepth,
+            color: chosen.color
+        });
+        if (!textGroup) return;
+
+        let { width, height } = textGroup.userData.size || { width: 0, height: 0 };
+        if (width > maxLabelWidth && width > 0) {
+            const scale = maxLabelWidth / width;
+            textGroup.scale.setScalar(scale);
+            width *= scale;
+            height *= scale;
+        }
+
+        const barTopY = chosen.baseY + chosen.targetHeight;
+        const labelY = barTopY + gapY + height / 2 + extraY;
+        const baseOffset = barWidth / 2 + sideGap + width / 2;
+        const sideDir = chosen.x >= midX ? 1 : -1;
+        let labelX = chosen.x + baseOffset * sideDir;
+        if (rightEdge !== null && labelX + width / 2 > rightEdge + sideGap) {
+            labelX = rightEdge + sideGap + width / 2;
+        }
+        if (leftEdge !== null && labelX - width / 2 < leftEdge - sideGap) {
+            labelX = leftEdge - sideGap - width / 2;
+        }
+        const labelZ = chosen.z;
+        textGroup.position.set(labelX, labelY, labelZ);
+        textGroup.userData.label = `Chosen token: ${labelText}`;
+        textGroup.name = `Chosen token: ${labelText}`;
+
+        const lineStartX = chosen.x;
+        const lineStartZ = chosen.z + barDepth / 2;
+        const lineStart = new THREE.Vector3(lineStartX, barTopY, lineStartZ);
+        const labelCenter = new THREE.Vector3(labelX, labelY, labelZ);
+        const lineDir = labelCenter.clone().sub(lineStart);
+        if (lineDir.lengthSq() < 1e-6) lineDir.set(1, 0, 0);
+        lineDir.normalize();
+        const halfW = (width * textGroup.scale.x) / 2;
+        const halfH = (height * textGroup.scale.y) / 2;
+        const textDepthWorld = (textGroup.userData.size?.depth ?? baseTextDepth) * textGroup.scale.z;
+        const halfD = textDepthWorld / 2;
+        const textBounds = new THREE.Box3(
+            new THREE.Vector3(labelX - halfW, labelY - halfH, labelZ - halfD),
+            new THREE.Vector3(labelX + halfW, labelY + halfH, labelZ + halfD)
+        );
+        const hit = new THREE.Vector3();
+        const hasHit = new THREE.Ray(lineStart.clone(), lineDir).intersectBox(textBounds, hit);
+        const maxInset = Math.max(0, Math.min(halfW, halfH, halfD) * 0.8);
+        const lineInset = Math.min(LOGIT_LABEL_LINE_INSET, maxInset);
+        const lineEnd = hasHit ? hit.addScaledVector(lineDir, lineInset) : labelCenter;
+        const lineGeometry = new THREE.BufferGeometry().setFromPoints([lineStart, lineEnd]);
+        const lineMaterial = new THREE.LineBasicMaterial({
+            color: chosen.color || 0xffffff,
+            transparent: true,
+            opacity: LOGIT_LABEL_LINE_OPACITY
+        });
+        const line = new THREE.Line(lineGeometry, lineMaterial);
+        line.userData.label = `Chosen token: ${labelText}`;
+
+        labelGroup.add(line);
+        labelGroup.add(textGroup);
+    });
+
+    if (!labelGroup.children.length) return null;
+    return labelGroup;
+}
+
+function ensureChosenLabelGroup(barGroup) {
+    if (!barGroup || barGroup.userData?.chosenLabelLoading) return;
+    if (!Array.isArray(barGroup.userData?.chosenEntries) || !barGroup.userData.chosenEntries.length) return;
+    if (barGroup.userData.chosenLabelGroup) return;
+
+    barGroup.userData.chosenLabelLoading = true;
+    loadLogitLabelFont()
+        .then((font) => {
+            if (!barGroup || !barGroup.parent) return;
+            const labelGroup = buildChosenLogitLabelGroup(barGroup, font);
+            if (!labelGroup) return;
+            barGroup.userData.chosenLabelGroup = labelGroup;
+            barGroup.add(labelGroup);
+            if (barGroup.userData.revealChosenLabels) {
+                labelGroup.visible = true;
+            }
+        })
+        .catch((err) => {
+            console.warn('Top logit label font failed to load; skipping chosen-token labels.', err);
+        })
+        .finally(() => {
+            if (barGroup?.userData) barGroup.userData.chosenLabelLoading = false;
+        });
+}
+
+function revealChosenLabelGroup(barGroup) {
+    if (!barGroup || !barGroup.userData) return;
+    barGroup.userData.revealChosenLabels = true;
+    const labelGroup = barGroup.userData.chosenLabelGroup;
+    if (labelGroup) labelGroup.visible = true;
+}
 
 function hashStringToSeed(value) {
     if (!value) return 0;
@@ -122,6 +364,7 @@ export function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vo
     const instances = [];
     const instanceLabels = [];
     const instanceEntries = [];
+    const chosenEntries = [];
 
     const tokenIndices = Array.isArray(laneTokenIndices)
         ? laneTokenIndices
@@ -129,22 +372,41 @@ export function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vo
 
     const laneRows = [];
     let globalMaxProb = 0;
+    const tokenCount = typeof activationSource.getTokenCount === 'function'
+        ? activationSource.getTokenCount()
+        : 0;
+    const lastLaneIdx = laneZs.length - 1;
 
     for (let laneIdx = 0; laneIdx < laneZs.length; laneIdx += 1) {
         const tokenIndex = tokenIndices[laneIdx] ?? laneIdx;
         const logitRow = activationSource.getLogitsForToken(tokenIndex, barCount);
         if (!Array.isArray(logitRow) || !logitRow.length) continue;
-        laneRows.push({ laneIdx, logitRow });
-        logitRow.forEach(entry => {
+        const limit = Math.min(barCount, logitRow.length);
+        let bestIdx = -1;
+        let bestProb = -Infinity;
+        let pickedIdx = -1;
+        const nextTokenRaw = (Number.isFinite(tokenCount) && tokenIndex + 1 < tokenCount)
+            ? activationSource.getTokenString(tokenIndex + 1)
+            : null;
+        for (let i = 0; i < limit; i += 1) {
+            const entry = logitRow[i];
             const prob = Number(entry?.prob);
-            if (Number.isFinite(prob) && prob > globalMaxProb) {
-                globalMaxProb = prob;
+            if (!Number.isFinite(prob)) continue;
+            if (prob > globalMaxProb) globalMaxProb = prob;
+            if (prob > bestProb) {
+                bestProb = prob;
+                bestIdx = i;
             }
-        });
+            if (pickedIdx === -1 && nextTokenRaw && typeof entry?.token === 'string' && entry.token === nextTokenRaw) {
+                pickedIdx = i;
+            }
+        }
+        const chosenIdx = pickedIdx !== -1 ? pickedIdx : bestIdx;
+        laneRows.push({ laneIdx, logitRow, bestIdx: chosenIdx });
     }
 
     for (let rowIdx = 0; rowIdx < laneRows.length; rowIdx += 1) {
-        const { laneIdx, logitRow } = laneRows[rowIdx];
+        const { laneIdx, logitRow, bestIdx } = laneRows[rowIdx];
         const laneZ = laneZs[laneIdx] ?? 0;
 
         for (let i = 0; i < Math.min(barCount, logitRow.length); i += 1) {
@@ -177,6 +439,17 @@ export function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vo
                     targetHeight: height,
                     color: barColor
                 });
+                if (i === bestIdx && laneIdx === lastLaneIdx) {
+                    chosenEntries.push({
+                        laneIdx,
+                        entry,
+                        x: xPos,
+                        z: laneZ,
+                        baseY,
+                        targetHeight: height,
+                        color: barColor
+                    });
+                }
             } else {
                 const instanceIndex = instances.length;
                 instanceLabels[instanceIndex] = 'Logit';
@@ -189,6 +462,17 @@ export function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vo
                     targetHeight: height,
                     color: barColor
                 });
+                if (i === bestIdx && laneIdx === lastLaneIdx) {
+                    chosenEntries.push({
+                        laneIdx,
+                        entry,
+                        x: xPos,
+                        z: laneZ,
+                        baseY,
+                        targetHeight: height,
+                        color: barColor
+                    });
+                }
             }
         }
     }
@@ -219,12 +503,17 @@ export function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vo
     barGroup.userData.instances = instances;
     barGroup.userData.barWidth = barWidth;
     barGroup.userData.barDepth = barDepth;
+    barGroup.userData.baseX = baseX;
+    barGroup.userData.barSpacing = barSpacing;
+    barGroup.userData.barCount = barCount;
+    barGroup.userData.chosenEntries = chosenEntries;
     barGroup.add(instanced);
 
     scene.add(barGroup);
     if (engine && typeof engine.registerRaycastRoot === 'function') {
         engine.registerRaycastRoot(barGroup);
     }
+    ensureChosenLabelGroup(barGroup);
     return barGroup;
 }
 
@@ -245,6 +534,7 @@ export function revealTopLogitBars(barGroup, { immediate = false } = {}) {
         if (typeof instanced.computeBoundingBox === 'function') instanced.computeBoundingBox();
         if (typeof instanced.computeBoundingSphere === 'function') instanced.computeBoundingSphere();
         instanced.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+        revealChosenLabelGroup(barGroup);
     };
     const applyHeight = (idx, height) => {
         const instance = instances[idx];

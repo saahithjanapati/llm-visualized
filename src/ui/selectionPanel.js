@@ -77,6 +77,7 @@ const ATTENTION_PRE_COLOR_CLAMP = 5;
 const ATTENTION_POP_OUT_MS = 120;
 const RESIDUAL_COLOR_CLAMP = 2;
 const SPACE_TOKEN_DISPLAY = '" "';
+const PANEL_SHIFT_DURATION_MS = 520;
 
 const TOKEN_CHIP_STYLE = {
     padding: 80,
@@ -2044,6 +2045,11 @@ class SelectionPanel {
         this.vectorLegendMid = document.getElementById('detailVectorLegendMid');
         this.vectorLegendHigh = document.getElementById('detailVectorLegendHigh');
         this.engine = options.engine || null;
+        this.pipeline = options.pipeline || null;
+        this._panelShiftPx = 0;
+        this._panelShiftDurationMs = Number.isFinite(options.panelShiftDurationMs)
+            ? Math.max(120, options.panelShiftDurationMs)
+            : PANEL_SHIFT_DURATION_MS;
 
         if (!this.panel || !this.canvas || !this.title) {
             this.isReady = false;
@@ -2207,6 +2213,7 @@ class SelectionPanel {
             }
         }
         this._updateMobileState();
+        this._syncSceneShift();
     }
 
     _finalizePendingReveal() {
@@ -2309,6 +2316,42 @@ class SelectionPanel {
         } else {
             document.body.classList.remove('detail-mobile-focus');
         }
+    }
+
+    _syncSceneShift({ immediate = false } = {}) {
+        if (!this.pipeline || typeof this.pipeline.setScreenShiftPixels !== 'function') return;
+        if (typeof window === 'undefined') return;
+
+        let nextShift = 0;
+        const shouldShift = this.isOpen && !this._isSmallScreen();
+        if (shouldShift) {
+            const anchor = this.hudStack || this.panel;
+            const rect = anchor?.getBoundingClientRect?.();
+            if (rect && Number.isFinite(rect.left)) {
+                const viewportWidth = window.innerWidth
+                    || document.documentElement?.clientWidth
+                    || rect.right
+                    || 0;
+                if (Number.isFinite(viewportWidth) && viewportWidth > 0) {
+                    nextShift = Math.max(0, (viewportWidth - rect.left) / 2);
+                }
+            }
+        }
+
+        if (!Number.isFinite(nextShift)) {
+            nextShift = 0;
+        }
+
+        const delta = Math.abs(nextShift - this._panelShiftPx);
+        if (delta < 0.5 && !immediate) {
+            return;
+        }
+
+        this._panelShiftPx = nextShift;
+        this.pipeline.setScreenShiftPixels(nextShift, {
+            immediate,
+            durationMs: this._panelShiftDurationMs
+        });
     }
 
     _onPanelPointerDown(event) {
@@ -3061,6 +3104,7 @@ class SelectionPanel {
         this.hudPanel?.classList.add('detail-open');
         this.panel.setAttribute('aria-hidden', 'false');
         this._updateMobileState();
+        this._syncSceneShift();
         if (this._pendingReveal) {
             this._pendingRevealSize = null;
         }
@@ -3076,6 +3120,7 @@ class SelectionPanel {
         this.panel.setAttribute('aria-hidden', 'true');
         this._setHoverLabelSuppression(false);
         this._updateMobileState();
+        this._syncSceneShift();
         if (this.description) setDescriptionContent(this.description, '');
         if (this._pendingResizeRaf) {
             cancelAnimationFrame(this._pendingResizeRaf);
