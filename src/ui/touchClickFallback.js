@@ -1,5 +1,6 @@
 const DEFAULT_TAP_SLOP_PX = 16;
-const DEFAULT_PENDING_MS = 500;
+const DEFAULT_PENDING_MS = 1200;
+const MAX_PENDING_CLICKS = 24;
 
 const isTouchLikeEvent = (event) => {
     if (!event) return false;
@@ -31,10 +32,33 @@ export function initTouchClickFallback(container, { selector = 'button', tapSlop
     if (!container) return () => {};
 
     let active = null;
-    let pendingClick = null;
+    const pendingClicks = [];
+
+    const getPointerId = (event) => (Number.isFinite(event?.pointerId) ? event.pointerId : null);
+
+    const matchesActivePointer = (event) => {
+        if (!active) return false;
+        if (active.id === null) return true;
+        const pointerId = getPointerId(event);
+        return pointerId === null || pointerId === active.id;
+    };
+
+    const prunePendingClicks = () => {
+        const now = Date.now();
+        for (let idx = pendingClicks.length - 1; idx >= 0; idx -= 1) {
+            const pending = pendingClicks[idx];
+            if (!pending || !pending.target?.isConnected || now > pending.until) {
+                pendingClicks.splice(idx, 1);
+            }
+        }
+    };
 
     const registerPendingClick = (target) => {
-        pendingClick = { target, until: Date.now() + DEFAULT_PENDING_MS };
+        prunePendingClicks();
+        pendingClicks.push({ target, until: Date.now() + DEFAULT_PENDING_MS });
+        if (pendingClicks.length > MAX_PENDING_CLICKS) {
+            pendingClicks.splice(0, pendingClicks.length - MAX_PENDING_CLICKS);
+        }
     };
 
     const onPointerDown = (event) => {
@@ -44,7 +68,7 @@ export function initTouchClickFallback(container, { selector = 'button', tapSlop
         const startX = Number.isFinite(event.clientX) ? event.clientX : 0;
         const startY = Number.isFinite(event.clientY) ? event.clientY : 0;
         active = {
-            id: Number.isFinite(event.pointerId) ? event.pointerId : null,
+            id: getPointerId(event),
             target,
             startX,
             startY,
@@ -54,8 +78,7 @@ export function initTouchClickFallback(container, { selector = 'button', tapSlop
     };
 
     const onPointerMove = (event) => {
-        if (!active) return;
-        if (active.id !== null && event.pointerId !== active.id) return;
+        if (!matchesActivePointer(event)) return;
         const dx = (Number.isFinite(event.clientX) ? event.clientX : 0) - active.startX;
         const dy = (Number.isFinite(event.clientY) ? event.clientY : 0) - active.startY;
         if (dx * dx + dy * dy > tapSlopPx * tapSlopPx) {
@@ -64,8 +87,7 @@ export function initTouchClickFallback(container, { selector = 'button', tapSlop
     };
 
     const onPointerUp = (event) => {
-        if (!active) return;
-        if (active.id !== null && event.pointerId !== active.id) return;
+        if (!matchesActivePointer(event)) return;
         const { target, moved } = active;
         active = null;
         if (moved || !target || isElementDisabled(target)) return;
@@ -77,20 +99,19 @@ export function initTouchClickFallback(container, { selector = 'button', tapSlop
     };
 
     const onPointerCancel = (event) => {
-        if (!active) return;
-        if (active.id !== null && event.pointerId !== active.id) return;
+        if (!matchesActivePointer(event)) return;
         active = null;
     };
 
     const onClick = (event) => {
-        if (!pendingClick || !event.isTrusted) return;
-        if (Date.now() > pendingClick.until) {
-            pendingClick = null;
-            return;
-        }
+        if (!event.isTrusted) return;
+        prunePendingClicks();
+        if (!pendingClicks.length) return;
         const target = resolveClosestTarget(container, event, selector);
-        if (!target || target !== pendingClick.target) return;
-        pendingClick = null;
+        if (!target) return;
+        const pendingIndex = pendingClicks.findIndex((pending) => pending.target === target);
+        if (pendingIndex < 0) return;
+        pendingClicks.splice(pendingIndex, 1);
         event.preventDefault();
         event.stopPropagation();
     };
