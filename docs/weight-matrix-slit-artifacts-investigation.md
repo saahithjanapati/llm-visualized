@@ -844,3 +844,153 @@ Follow-up if both retain artifacts:
 ### Status
 - Attempt 36 is marked unsuccessful from visual acceptance.
 - Keep this attempt in history for comparison, but do not treat it as a fix.
+
+---
+
+## 38. Through-slit extrude+taper rewrite (`wm-slit-through-v1`) with deterministic partial-slit fallback
+### Change
+- Replaced active `WeightMatrixVisualization` implementation with a fully CSG-free baseline and a new slit generation split:
+  - `buildThroughSlitExtrudedGeometry(...)` for full-depth slits (`slitDepthFactor >= 0.999`):
+    - constructs a single `THREE.Shape` in XZ with lane holes,
+    - extrudes vertically (no boolean subtraction),
+    - applies deterministic taper remap over height to preserve trapezoid profile and slit wall thickness.
+  - existing deterministic quad-emission path retained as fallback for partial slit depths (`slitDepthFactor < 0.999`).
+- Added shared `finalizeGeometry(...)` (creased edge split + normal recompute) for both solid and slit deterministic outputs.
+- Kept slit-enabled matrices non-instanced and retained lane-span depth normalization for canonical lane configs.
+- Preserved legacy precomputed cache-key compatibility while versioning geometry cache keys to `wm-slit-through-v1`.
+- Slit-enabled material path remains opaque/front-side/non-transmissive with slit shader stability uniforms forced to zero:
+  - `stripeStrength = 0`
+  - `depthAccentStrength = 0`
+  - `scanlineStrength = 0`
+  - `glintStrength = 0`
+  - `noiseStrength = 0`
+
+### Rationale
+- Prior deterministic slit paths still relied on manually rebuilt slit shells for all modes, and historical regressions repeatedly suggested a topology/minification interaction around slit mouth regions.
+- This path is materially different for the dominant production case (full-depth slits):
+  - no CSG,
+  - no slit-triangle stripping/rebuild,
+  - one hole-aware manifold extrusion before tapering.
+
+### Outcome
+- `npm run build` passes.
+- Node-side sanity checks pass for representative slit/non-slit presets:
+  - slit matrices: finite buffers, non-instanced, lane-span depth preserved,
+  - no-slit deep matrix: instanced path still active with caps.
+- Visual user verification pending.
+
+---
+
+## 39. Fixed transparent-looking slit matrices by restoring missing top/bottom slit caps
+### Regression observed
+- After attempt 38, user reported slit matrices looked transparent from some camera angles and top surfaces appeared transparent.
+
+### Root cause
+- In the current Three.js build (`r175`), `ExtrudeGeometry` with `bevelEnabled: false` emits side walls but no lid-face triangles for this shape path, so the through-slit body was missing top/bottom cap surfaces.
+
+### Change
+- Updated `buildThroughSlitExtrudedGeometry(...)`:
+  - kept extruded side-wall generation,
+  - explicitly generated top and bottom slit cap surfaces using `ShapeGeometry` from slit-aware cap shapes,
+  - merged side + top + bottom into one geometry and finalized normals.
+- Added helper utilities:
+  - `mergeNonIndexedPositionGeometries(...)`
+  - `createSlitCapShape(...)`
+  - `buildSlitCapGeometry(...)`
+- Hardened slit material culling for angle stability:
+  - slit side material now uses `THREE.DoubleSide` (still opaque, depth-write on, transmission off).
+
+### Outcome
+- `npm run build` passes.
+- Node checks confirm slit geometry now includes horizontal cap faces (up-facing triangles present) and remains finite/non-instanced with expected lane-span depth.
+- Visual verification pending user check.
+
+---
+
+## 40. Replaced triangulated slit lids with deterministic strip caps (seam-targeted cap topology pass)
+### Change
+- Updated `buildThroughSlitExtrudedGeometry(...)` in `src/components/WeightMatrixVisualization.js`:
+  - Removed slit top/bottom cap generation via `ShapeGeometry` hole triangulation.
+  - Replaced with explicit deterministic strip caps using slit depth bands (`buildDepthBands(...)` + `addTopStrip(...)` + `addBottomStrip(...)`).
+  - Merged side shell + strip caps into one geometry and finalized normals as before.
+
+### Rationale
+- User screenshots show streaking aligned with slit boundaries.
+- Hole triangulation can introduce long diagonal/T-junction patterns near narrow slit apertures; deterministic strips keep cap topology predictable and aligned with slit boundaries.
+
+### Outcome
+- `npm run build` passes.
+- Geometry sanity checks pass:
+  - slit mesh finite,
+  - top and bottom cap triangles present (not transparent),
+  - expected lane-span depth preserved.
+- Visual user verification pending.
+
+---
+
+## 41. Prevented stale precomputed GLB slit geometry from overriding current slit topology
+### Change
+- Updated `WeightMatrixVisualization.registerPrecomputedGeometry(...)`:
+  - parse incoming legacy WM cache keys,
+  - detect slit-enabled parameter sets (`numberOfSlits > 0`, `slitWidth > 0`, `slitDepthFactor > 0`),
+  - skip mapping those slit entries into current versioned cache keys.
+- Kept legacy-key registration in place for compatibility, but current-version cache population now excludes slit-enabled precomputed entries.
+
+### Rationale
+- `USE_PRECOMPUTED_GEOMETRIES` is enabled by default.
+- Legacy GLB assets can populate normalized runtime keys during startup, masking new slit-generation code and making visual fixes appear ineffective.
+
+### Outcome
+- `npm run build` passes.
+- Sanity check confirms behavior:
+  - slit key precompute registration does **not** override current slit generation path,
+  - non-slit key registration still populates normalized cache path.
+
+---
+
+## 42. Hollow-interior through-slit shell (removed internal lane-divider walls)
+### Change
+- Updated `buildThroughSlitExtrudedGeometry(...)` in `src/components/WeightMatrixVisualization.js`:
+  - through-slit side shell now extrudes only the outer rectangle (no hole paths in the extruded shell),
+  - slit openings remain authored on top/bottom via deterministic strip caps.
+- Result: full-through slit matrices are now hollow inside with no internal walls separating lanes.
+
+### Rationale
+- User hypothesis: remaining artifacts may be caused by interior slit wall surfaces.
+- This removes that entire surface class while preserving:
+  - same outer trapezoid profile,
+  - same top/bottom slit opening layout,
+  - same lane-span depth behavior.
+
+### Outcome
+- `npm run build` passes.
+- Geometry sanity check (canonical slit config) shows expected topology simplification:
+  - `triangles: 72` (down from prior 112),
+  - top/bottom cap faces still present,
+  - side faces now only outer shell (`side: 8`), no internal lane-divider walls.
+
+---
+
+## 43. Reintroduced lane-divider walls with explicit inset clearances (anti-z-fight retry)
+### Change
+- Updated `buildThroughSlitExtrudedGeometry(...)` in `src/components/WeightMatrixVisualization.js`:
+  - kept the hollow outer shell + deterministic strip caps from attempt 42,
+  - added optional inset interior lane walls via `buildInsetSlitLaneWallsGeometry(...)`,
+  - merged `outer shell + strip caps + inset lane walls` into one final geometry.
+- New lane-wall generation intentionally offsets walls away from slit mouths:
+  - Y inset from top/bottom cap planes (`yInset`),
+  - Z inset from slit boundary edges (`zInset`).
+- This avoids exact coplanar edge overlap at slit mouths while preserving the “separated lanes” look.
+
+### Rationale
+- User asked to try lane walls again after the hollow-only pass solved artifacts.
+- Hypothesis: prior walled variants were triggering depth fighting where wall edges met slit mouth surfaces.
+- Insets keep interior walls present but avoid edge-on overlap with cap strips.
+
+### Outcome
+- `npm run build` passes.
+- Node geometry sanity checks pass for representative slit presets:
+  - finite buffers,
+  - no duplicate triangle keys detected in sampled configs,
+  - canonical slit config triangle count returns to `112` with lane walls enabled.
+- Visual user verification pending.
