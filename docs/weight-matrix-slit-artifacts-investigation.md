@@ -797,3 +797,50 @@ Follow-up if both retain artifacts:
   - slit canonical lane config remains non-instanced and lane-span depth (`zSpan: 2500`),
   - normal buffers are finite after finalization.
 - Visual outcome pending user verification.
+
+---
+
+## 36. New slit-only topology path with explicit face normals (no slit CSG / no slit creased-normal post-pass)
+### Change
+- Updated `src/components/WeightMatrixVisualization.js`:
+  - Added a slit-only deterministic geometry builder (`TriangleBuilder` + `buildFirstPrinciplesSlitWeightMatrixGeometry(...)`) that emits all slit shell surfaces directly:
+    - continuous outer side shell quads,
+    - top/bottom surfaces with slit openings,
+    - front/back end caps,
+    - slit interior walls/mouth faces.
+  - Added slit range planning (`buildMergedSlitRanges(...)`) and lane-aware slit center placement.
+  - Added slit lane-span depth normalization (`_resolveGeometryDepth(...)`) so canonical lane configs keep historical visual span (`N * VECTOR_DEPTH_SPACING`).
+  - Added slit-only cache key version suffix `wm-slit-fp-v1`.
+  - Routed slit-enabled matrices to the new deterministic path early in `_createMesh()`:
+    - slit matrices now bypass instanced-slice rendering,
+    - slit matrices no longer use CSG subtraction.
+  - Removed slit-path normal post-processing dependency by returning builder-provided face normals directly (no slit `toCreasedNormals(...)` pass).
+  - Applied slit shader stability clamps (`updateSciFiMaterialUniforms(...)`) and forced slit side material to opaque/front-side/no-transmission settings.
+  - Slit path now uses a single authoritative mesh (no auxiliary slit cap overlay meshes).
+
+### Rationale
+- Prior retries repeatedly changed topology but still included slit-path normal recomputation/creasing and/or extra slit overlays.
+- This pass is intended to be materially different:
+  - no boolean slit carving,
+  - no slit instanced seams,
+  - no slit cap overlay layering,
+  - no slit creased-normal post-pass.
+
+### Outcome
+- `npm run build` passes.
+- Node-side sanity checks pass:
+  - slit canonical lane sample: non-instanced, finite buffers, `zSpan: 2500`,
+  - custom slit depth sample: finite buffers with expected depth span,
+  - no-slit deep sample still uses existing non-slit behavior.
+- Visual outcome pending user verification.
+
+---
+
+## 37. User verification on attempt 36 (unsuccessful)
+### User-reported result
+- User reported attempt 36 "didn't really work".
+- Slit artifact issue is still considered unresolved after this topology/normal-path change.
+
+### Status
+- Attempt 36 is marked unsuccessful from visual acceptance.
+- Keep this attempt in history for comparison, but do not treat it as a fix.
