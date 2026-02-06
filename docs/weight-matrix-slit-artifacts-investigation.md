@@ -563,3 +563,136 @@ Follow-up if both retain artifacts:
 - `npm run build` passes.
 - Node-side geometry sanity checks pass for representative slit presets (finite bounds, geometry creation succeeds).
 - Visual outcome pending user verification.
+
+---
+
+## Failure Report Update (February 6, 2026)
+### User-reported result
+- User confirmed slit artifacts are still visible after attempts 23-27.
+- Shared screenshots show:
+  - persistent dashed/striped speckling around slit openings on top surfaces,
+  - visible seam-like horizontal banding at distance,
+  - slit-associated artifacts remain despite prior no-CSG and material/uniform experiments.
+
+### Status
+- Issue remains unresolved as of February 6, 2026.
+
+---
+
+## 28. Legacy CSG path hardening for slit rendering (non-instanced + opaque slit materials + slit-only normal pass bypass)
+### Change
+- Updated `src/components/WeightMatrixVisualization.js` in the currently active CSG implementation:
+  - Slit-enabled matrices now bypass instanced-slice path (`_createInstancedSlices`) and render as non-instanced meshes.
+  - Added slit-only shader-uniform suppression via `updateSciFiMaterialUniforms(...)`:
+    - `stripeStrength = 0`
+    - `depthAccentStrength = 0`
+    - `scanlineStrength = 0`
+    - `glintStrength = 0`
+    - `noiseStrength = 0`
+  - Forced slit-enabled side/cap materials to opaque, depth-writing, non-transmissive settings:
+    - `transparent = false`
+    - `opacity = 1`
+    - `depthWrite = true`
+    - `depthTest = true`
+    - `side = FrontSide`
+    - `transmission = 0`, `thickness = 0`
+  - For slit-enabled meshes only, bypassed the post-CSG snap + `toCreasedNormals(...)` pass and used `computeVertexNormals()` directly.
+
+### Rationale
+- User screenshots still match seam/minification artifacts, especially around slit edges and lane boundaries.
+- This pass removes three high-risk contributors in the active CSG path:
+  - instanced lane seam boundaries,
+  - high-frequency slit shader overlays,
+  - aggressive post-CSG normal/plane mutation.
+
+### Outcome
+- `npm run build` passes after this patch.
+- Visual outcome pending user verification.
+
+---
+
+## 29. Fixed weight-matrix length regression in non-instanced slit path (lane-span depth + lane-centered slit placement)
+### Change
+- Updated `WeightMatrixVisualization._createMesh()` in the active CSG implementation:
+  - Detect lane-dependent slit configs (`depth ≈ (laneCount + 1) * VECTOR_DEPTH_SPACING`).
+  - Use `matrixDepth = laneCount * VECTOR_DEPTH_SPACING` for slit-enabled matrices in that mode (matching LayerNorm visual span).
+  - Keep caller-provided depth for non-lane/custom configs.
+- Replaced slit Z placement for lane-dependent mode:
+  - from evenly-divided depth spacing (`depth/(n+1)`) to true lane-centered positions:
+    - `z = (i - (n - 1)/2) * VECTOR_DEPTH_SPACING`.
+- Routed cache key, extrusion depth, cap offsets, and shader dimension uniforms through `matrixDepth`.
+
+### Rationale
+- User reported new regression: weight matrices appearing longer than LayerNorm after slit-instancing was disabled.
+- Cause was slit-enabled matrices using full lane-dependent depth (e.g., 3000) while LayerNorm effectively spans lane depth (e.g., 2500).
+- This patch restores consistent component lengths without reintroducing instanced slit seams.
+
+### Outcome
+- `npm run build` passes.
+- Node-side check confirms slit-enabled main matrices now report `geoZSpan = 2500` for `depthParam = 3000` lane configs:
+  - MHA: non-instanced, span 2500,
+  - MLP up: non-instanced, span 2500,
+  - MLP down: non-instanced, span 2500.
+- Slit artifact itself remains unresolved; this attempt addresses the length regression only.
+
+---
+
+## Failure Report Update (February 6, 2026, later)
+### User-reported result
+- User confirmed that after the length regression fix, slit line artifacts are still visible.
+- User also reported a separate regression in MHSA: attention score visuals can remain in scene instead of being fully removed.
+
+### Status
+- Slit artifact remains unresolved.
+- MHSA attention-score cleanup issue moved to active-fix status.
+
+---
+
+## 30. Slit CSG stabilization pass: remove slit cap overlays + explicit exterior normal stabilization
+### Change
+- Updated active CSG `WeightMatrixVisualization` slit path:
+  - Added `stabilizeSlitExteriorNormals(...)` to normalize top/bottom/outer-side/end-cap face normals on slit-enabled CSG output.
+  - Slit-enabled meshes still call `computeVertexNormals()`, then run the stabilization pass.
+  - For slit-enabled matrices only, skipped auxiliary front/back cap overlay meshes and treat CSG result as the authoritative shell.
+  - Guarded cap uniform updates when slit caps are omitted.
+
+### Rationale
+- Persistent line artifacts are consistent with CSG tessellation-normal seams and extra depth/sorting interactions from transparent cap overlays.
+- This pass targets both likely contributors while preserving current topology and lane-length behavior.
+
+### Outcome
+- Visual outcome pending user verification.
+- Build status recorded alongside attempt 31 below.
+
+---
+
+## 31. Fixed MHSA attention-score cleanup leak on normal completion path
+### Change
+- Updated `src/animations/mhsa/SelfAttentionAnimator.js`:
+  - Added `_disposeAttentionSphereMesh()` to remove + dispose the instanced attention-sphere mesh, not just hide instances.
+  - Updated `_cleanupAttentionScoreMeshes()` to call `_disposeAttentionSphereMesh()` (including traversal hits for `_attentionSphereInstanced` meshes).
+  - Updated `_checkGlobalCompletion()` (normal conveyor completion path) to call `_cleanupAttentionScoreMeshes()` and reset attention progress/caches.
+
+### Rationale
+- Previously, score cleanup was guaranteed on skip path (`forceComplete`) but not on normal completion.
+- That left score visuals (especially instanced spheres) able to persist in-scene.
+
+### Outcome
+- `npm run build` passes after patch.
+- Targeted runtime sanity script confirms `_checkGlobalCompletion()` now removes both:
+  - regular score meshes with `label`/`activationData.stage`,
+  - instanced attention score mesh (`_attentionSphereInstanced`).
+
+---
+
+## Failure Report Update (February 6, 2026, latest)
+### User-reported result
+- User reported attempts 30/31 introduced unacceptable regressions:
+  - slit-enabled matrices looked visually janky,
+  - expected cap appearance was broken/absent,
+  - MHSA animation issue remained (attention score visuals still not clearing properly in user-visible flow).
+- User requested reverting code changes and keeping documentation updates only.
+
+### Status
+- Attempts 30/31 are considered unsuccessful from user acceptance perspective.
+- Working direction reset to: keep investigation log updated, revert these code-path modifications, and continue from prior stable visuals in future attempts.
