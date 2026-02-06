@@ -1,41 +1,22 @@
 import * as THREE from 'three';
+import { CSG } from 'three-csg-ts'; // Import CSG
 import { toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import {
-    QUALITY_PRESET,
-    VECTOR_DEPTH_SPACING,
-    USE_GLB_MATERIALS,
-    USE_INSTANCED_MATRIX_SLICES
-} from '../utils/constants.js';
-import {
-    createSciFiMaterial,
-    updateSciFiDimensions,
-    updateSciFiMaterialColor,
-    updateSciFiMaterialUniforms
-} from '../utils/sciFiMaterial.js';
+import { QUALITY_PRESET, NUM_VECTOR_LANES, VECTOR_DEPTH_SPACING, USE_GLB_MATERIALS, USE_INSTANCED_MATRIX_SLICES } from '../utils/constants.js';
+import { createSciFiMaterial, updateSciFiDimensions, updateSciFiMaterialColor } from '../utils/sciFiMaterial.js';
 
-const WM_GEOMETRY_VERSION = 'wm-fp-v10';
-const EPSILON = 1e-5;
-
+// ------------------------------------------------------------------
+// Geometry cache (module-level) – keyed by a stringified set of the main
+// parameters that influence the vertex buffer.  Sharing geometries across
+// identical matrices avoids repeating expensive CSG operations and GPU
+// uploads.
+// ------------------------------------------------------------------
 const __geometryCache = new Map();
+// Separate caches for front & back cap geometries when using slice instancing
 const __capFrontCache = new Map();
-const __capBackCache = new Map();
+const __capBackCache  = new Map();
 const __materialCache = new Map();
+// Cache for instanced-slice geometry with front/back caps removed.
 const __sliceWallCache = new Map();
-const SLIT_SHADER_STABILITY_UNIFORMS = {
-    stripeStrength: 0,
-    depthAccentStrength: 0,
-    scanlineStrength: 0,
-    glintStrength: 0,
-    noiseStrength: 0
-};
-
-function clamp(value, min, max) {
-    return Math.max(min, Math.min(max, value));
-}
-
-function clamp01(value) {
-    return clamp(value, 0, 1);
-}
 
 function getAttrComponent(attr, index, component) {
     if (attr.isInterleavedBufferAttribute) {
@@ -117,681 +98,8 @@ function stripSliceEndCaps(geometry, depth) {
     return out;
 }
 
-function getCacheKey(
-    width,
-    height,
-    depth,
-    topWidthFactor,
-    cornerRadius,
-    numberOfSlits,
-    slitWidth,
-    slitDepthFactor,
-    slitBottomWidthFactor,
-    slitTopWidthFactor
-) {
-    return [
-        width,
-        height,
-        depth,
-        topWidthFactor,
-        cornerRadius,
-        numberOfSlits,
-        slitWidth,
-        slitDepthFactor,
-        slitBottomWidthFactor,
-        slitTopWidthFactor,
-        QUALITY_PRESET,
-        WM_GEOMETRY_VERSION
-    ].join('|');
-}
-
-function mapLegacyCacheKeyToCurrent(cacheKey) {
-    if (typeof cacheKey !== 'string' || cacheKey.length === 0) return cacheKey;
-    if (cacheKey.endsWith(`|${WM_GEOMETRY_VERSION}`)) return cacheKey;
-    return `${cacheKey}|${WM_GEOMETRY_VERSION}`;
-}
-
-function computeSafeCornerRadius(width, height, topWidthFactor, cornerRadius) {
-    const hw = width / 2;
-    const hTopW = (width * topWidthFactor) / 2;
-
-    const horizontalDiff = hw - hTopW;
-    const maxBottomRadius = horizontalDiff > 0 ? horizontalDiff : hw;
-    const maxTopRadius = hTopW;
-    const sideLen = Math.hypot(hw - hTopW, height);
-    const maxSideRadius = sideLen / 2;
-
-    return Math.max(0, Math.min(cornerRadius, maxBottomRadius, maxTopRadius, maxSideRadius));
-}
-
-function createTrapezoidShape(width, height, topWidthFactor, cornerRadius = 0) {
-    const shape = new THREE.Shape();
-
-    const hw = width / 2;
-    const hTopW = (width * topWidthFactor) / 2;
-    const hh = height / 2;
-    const cr = computeSafeCornerRadius(width, height, topWidthFactor, cornerRadius);
-
-    if (cr < EPSILON) {
-        shape.moveTo(-hw, -hh);
-        shape.lineTo(hw, -hh);
-        shape.lineTo(hTopW, hh);
-        shape.lineTo(-hTopW, hh);
-        shape.closePath();
-        return shape;
-    }
-
-    const blStart = new THREE.Vector2(-hw + cr, -hh);
-    const brStart = new THREE.Vector2(hw - cr, -hh);
-    const trEnd = new THREE.Vector2(hTopW - cr, hh);
-    const tlEnd = new THREE.Vector2(-hTopW + cr, hh);
-
-    const rightSideDir = new THREE.Vector2(hTopW - hw, 2 * hh).normalize();
-    const leftSideDir = new THREE.Vector2(-hTopW + hw, 2 * hh).normalize();
-
-    const brSidePt = new THREE.Vector2(hw, -hh).addScaledVector(rightSideDir, cr);
-    const trSidePt = new THREE.Vector2(hTopW, hh).addScaledVector(rightSideDir.clone().negate(), cr);
-    const tlSidePt = new THREE.Vector2(-hTopW, hh).addScaledVector(leftSideDir.clone().negate(), cr);
-    const blSidePt = new THREE.Vector2(-hw, -hh).addScaledVector(leftSideDir, cr);
-
-    shape.moveTo(blStart.x, blStart.y);
-    shape.lineTo(brStart.x, brStart.y);
-    shape.quadraticCurveTo(hw, -hh, brSidePt.x, brSidePt.y);
-    shape.lineTo(trSidePt.x, trSidePt.y);
-    shape.quadraticCurveTo(hTopW, hh, trEnd.x, trEnd.y);
-    shape.lineTo(tlEnd.x, tlEnd.y);
-    shape.quadraticCurveTo(-hTopW, hh, tlSidePt.x, tlSidePt.y);
-    shape.lineTo(blSidePt.x, blSidePt.y);
-    shape.quadraticCurveTo(-hw, -hh, blStart.x, blStart.y);
-    shape.closePath();
-
-    return shape;
-}
-
-function createCapGeometry(width, height, topWidthFactor, cornerRadius) {
-    const shape = createTrapezoidShape(width, height, topWidthFactor, cornerRadius);
-    const capGeometry = new THREE.ShapeGeometry(shape);
-    capGeometry.center();
-    capGeometry.computeBoundingBox();
-    capGeometry.computeBoundingSphere();
-    return capGeometry;
-}
-
-function buildMergedSlitRanges(depth, numberOfSlits, slitWidth) {
-    const slitCount = Math.max(0, Math.floor(numberOfSlits || 0));
-    if (slitCount < 1 || slitWidth <= EPSILON || depth <= EPSILON) {
-        return [];
-    }
-
-    const halfDepth = depth / 2;
-    const spacing = depth / (slitCount + 1);
-    const minGap = Math.max(1.0, spacing * 0.08);
-    const maxSlitWidth = Math.max(EPSILON * 2, spacing - minGap);
-    const halfSlit = Math.min(slitWidth, maxSlitWidth) / 2;
-
-    const ranges = [];
-    for (let i = 0; i < slitCount; i++) {
-        const center = -halfDepth + spacing * (i + 1);
-        const z0 = clamp(center - halfSlit, -halfDepth + EPSILON, halfDepth - EPSILON);
-        const z1 = clamp(center + halfSlit, -halfDepth + EPSILON, halfDepth - EPSILON);
-        if (z1 - z0 > EPSILON) {
-            ranges.push({ z0, z1 });
-        }
-    }
-
-    ranges.sort((a, b) => a.z0 - b.z0);
-    const merged = [];
-    for (const current of ranges) {
-        const prev = merged[merged.length - 1];
-        if (!prev || current.z0 > prev.z1 + EPSILON) {
-            merged.push({ ...current });
-            continue;
-        }
-        prev.z1 = Math.max(prev.z1, current.z1);
-    }
-
-    return merged;
-}
-
-function buildDepthBands(depth, slitRanges) {
-    const halfDepth = depth / 2;
-    const points = [-halfDepth, halfDepth];
-
-    for (const range of slitRanges) {
-        points.push(range.z0, range.z1);
-    }
-
-    points.sort((a, b) => a - b);
-
-    const unique = [];
-    for (const point of points) {
-        if (!unique.length || Math.abs(unique[unique.length - 1] - point) > EPSILON) {
-            unique.push(point);
-        }
-    }
-
-    const bands = [];
-    for (let i = 0; i < unique.length - 1; i++) {
-        const z0 = unique[i];
-        const z1 = unique[i + 1];
-        if (z1 - z0 <= EPSILON) continue;
-
-        const mid = (z0 + z1) / 2;
-        const insideSlit = slitRanges.some(range => mid > range.z0 + EPSILON && mid < range.z1 - EPSILON);
-        bands.push({ z0, z1, insideSlit });
-    }
-
-    return bands;
-}
-
-function widthAtY(y, width, height, topWidthFactor) {
-    const hh = height / 2;
-    if (hh <= EPSILON) return width;
-
-    const t = clamp01((y + hh) / (2 * hh));
-    const topWidth = width * topWidthFactor;
-    return THREE.MathUtils.lerp(width, topWidth, t);
-}
-
-function slitWidthFactorAtY(y, height, slitBottomWidthFactor, slitTopWidthFactor) {
-    const hh = height / 2;
-    if (hh <= EPSILON) return slitBottomWidthFactor;
-
-    const t = clamp01((y + hh) / (2 * hh));
-    return THREE.MathUtils.lerp(slitBottomWidthFactor, slitTopWidthFactor, t);
-}
-
-function resolveHoleHalfWidth(y, width, height, topWidthFactor, slitBottomWidthFactor, slitTopWidthFactor) {
-    const outerHalf = Math.max(0, widthAtY(y, width, height, topWidthFactor) / 2);
-    const factor = Math.max(0, slitWidthFactorAtY(y, height, slitBottomWidthFactor, slitTopWidthFactor));
-
-    const requestedHoleHalf = outerHalf * factor;
-    const requiredWallHalf = Math.max(1.5, outerHalf * 0.08);
-    const maxHoleHalf = Math.max(0, outerHalf - requiredWallHalf);
-
-    return Math.min(requestedHoleHalf, maxHoleHalf);
-}
-
-class TriangleBuilder {
-    constructor() {
-        this.positions = [];
-        this.normals = [];
-    }
-
-    static computeNormal(a, b, c) {
-        const abx = b[0] - a[0];
-        const aby = b[1] - a[1];
-        const abz = b[2] - a[2];
-
-        const acx = c[0] - a[0];
-        const acy = c[1] - a[1];
-        const acz = c[2] - a[2];
-
-        let nx = aby * acz - abz * acy;
-        let ny = abz * acx - abx * acz;
-        let nz = abx * acy - aby * acx;
-
-        const len = Math.hypot(nx, ny, nz);
-        if (len <= EPSILON) {
-            return [0, 0, 0];
-        }
-
-        nx /= len;
-        ny /= len;
-        nz /= len;
-
-        return [nx, ny, nz];
-    }
-
-    addTriangle(a, b, c, targetNormal = null) {
-        let v1 = b;
-        let v2 = c;
-
-        let normal = TriangleBuilder.computeNormal(a, v1, v2);
-        if (normal[0] === 0 && normal[1] === 0 && normal[2] === 0) return;
-
-        if (targetNormal) {
-            const dot = normal[0] * targetNormal[0] + normal[1] * targetNormal[1] + normal[2] * targetNormal[2];
-            if (dot < 0) {
-                v1 = c;
-                v2 = b;
-                normal = TriangleBuilder.computeNormal(a, v1, v2);
-                if (normal[0] === 0 && normal[1] === 0 && normal[2] === 0) return;
-            }
-        }
-
-        this.positions.push(
-            a[0], a[1], a[2],
-            v1[0], v1[1], v1[2],
-            v2[0], v2[1], v2[2]
-        );
-
-        this.normals.push(
-            normal[0], normal[1], normal[2],
-            normal[0], normal[1], normal[2],
-            normal[0], normal[1], normal[2]
-        );
-    }
-
-    addQuad(a, b, c, d, targetNormal = null) {
-        this.addTriangle(a, b, c, targetNormal);
-        this.addTriangle(a, c, d, targetNormal);
-    }
-
-    toGeometry() {
-        const geometry = new THREE.BufferGeometry();
-        geometry.setAttribute('position', new THREE.Float32BufferAttribute(this.positions, 3));
-        geometry.setAttribute('normal', new THREE.Float32BufferAttribute(this.normals, 3));
-        geometry.computeBoundingBox();
-        geometry.computeBoundingSphere();
-        return geometry;
-    }
-}
-
-function addTopStrip(builder, y, z0, z1, xMin, xMax) {
-    if (xMax - xMin <= EPSILON || z1 - z0 <= EPSILON) return;
-
-    builder.addQuad(
-        [xMin, y, z0],
-        [xMin, y, z1],
-        [xMax, y, z1],
-        [xMax, y, z0],
-        [0, 1, 0]
-    );
-}
-
-function addBottomStrip(builder, y, z0, z1, xMin, xMax) {
-    if (xMax - xMin <= EPSILON || z1 - z0 <= EPSILON) return;
-
-    builder.addQuad(
-        [xMin, y, z0],
-        [xMax, y, z0],
-        [xMax, y, z1],
-        [xMin, y, z1],
-        [0, -1, 0]
-    );
-}
-
-function buildSolidTrapezoidGeometry(width, height, depth, topWidthFactor, cornerRadius) {
-    const shape = createTrapezoidShape(width, height, topWidthFactor, cornerRadius);
-    const geometry = new THREE.ExtrudeGeometry(shape, {
-        steps: 1,
-        depth,
-        bevelEnabled: false
-    });
-
-    geometry.center();
-
-    const creased = toCreasedNormals(geometry, Math.PI / 3);
-    if (creased !== geometry) {
-        geometry.dispose();
-    }
-
-    creased.computeBoundingBox();
-    creased.computeBoundingSphere();
-
-    return creased;
-}
-
-function buildFirstPrinciplesSlitWeightMatrixGeometry({
-    width,
-    height,
-    depth,
-    topWidthFactor,
-    numberOfSlits,
-    slitWidth,
-    slitDepthFactor,
-    slitBottomWidthFactor,
-    slitTopWidthFactor
-}) {
-    const hh = height / 2;
-    const halfDepth = depth / 2;
-    const bottomHalfWidth = width / 2;
-    const topHalfWidth = (width * topWidthFactor) / 2;
-
-    const slitRanges = buildMergedSlitRanges(depth, numberOfSlits, slitWidth);
-    const cutDepth = clamp(height * clamp01(slitDepthFactor), 0, height);
-
-    if (!slitRanges.length || cutDepth <= EPSILON) {
-        return buildSolidTrapezoidGeometry(width, height, depth, topWidthFactor, 0);
-    }
-
-    const builder = new TriangleBuilder();
-
-    const frontBL = [-bottomHalfWidth, -hh, halfDepth];
-    const frontBR = [bottomHalfWidth, -hh, halfDepth];
-    const frontTR = [topHalfWidth, hh, halfDepth];
-    const frontTL = [-topHalfWidth, hh, halfDepth];
-    builder.addQuad(frontBL, frontBR, frontTR, frontTL, [0, 0, 1]);
-
-    const backBL = [-bottomHalfWidth, -hh, -halfDepth];
-    const backBR = [bottomHalfWidth, -hh, -halfDepth];
-    const backTR = [topHalfWidth, hh, -halfDepth];
-    const backTL = [-topHalfWidth, hh, -halfDepth];
-    builder.addQuad(backBR, backBL, backTL, backTR, [0, 0, -1]);
-
-    builder.addQuad(
-        [bottomHalfWidth, -hh, -halfDepth],
-        [topHalfWidth, hh, -halfDepth],
-        [topHalfWidth, hh, halfDepth],
-        [bottomHalfWidth, -hh, halfDepth],
-        [1, 0, 0]
-    );
-
-    builder.addQuad(
-        [-bottomHalfWidth, -hh, halfDepth],
-        [-topHalfWidth, hh, halfDepth],
-        [-topHalfWidth, hh, -halfDepth],
-        [-bottomHalfWidth, -hh, -halfDepth],
-        [-1, 0, 0]
-    );
-
-    let hasTopCut = cutDepth > EPSILON;
-    let hasBottomCut = hasTopCut && slitDepthFactor < 0.95;
-
-    const topCutHigh = hh;
-    let topCutLow = Math.max(-hh, hh - cutDepth);
-
-    const bottomCutLow = -hh;
-    const bottomCutHigh = Math.min(hh, -hh + cutDepth);
-
-    if (hasBottomCut && topCutLow <= bottomCutHigh + 1e-3) {
-        hasBottomCut = false;
-        topCutLow = -hh;
-    }
-
-    const topReachesBottom = hasTopCut && topCutLow <= -hh + 1e-3;
-
-    const topHoleHalfAtTop = resolveHoleHalfWidth(
-        hh,
-        width,
-        height,
-        topWidthFactor,
-        slitBottomWidthFactor,
-        slitTopWidthFactor
-    );
-
-    const bottomHoleHalfAtBottom = resolveHoleHalfWidth(
-        -hh,
-        width,
-        height,
-        topWidthFactor,
-        slitBottomWidthFactor,
-        slitTopWidthFactor
-    );
-
-    const bands = buildDepthBands(depth, slitRanges);
-
-    const shouldOpenTop = hasTopCut && topHoleHalfAtTop > EPSILON;
-    for (const band of bands) {
-        if (!band.insideSlit || !shouldOpenTop) {
-            addTopStrip(builder, hh, band.z0, band.z1, -topHalfWidth, topHalfWidth);
-            continue;
-        }
-
-        addTopStrip(builder, hh, band.z0, band.z1, -topHalfWidth, -topHoleHalfAtTop);
-        addTopStrip(builder, hh, band.z0, band.z1, topHoleHalfAtTop, topHalfWidth);
-    }
-
-    const shouldOpenBottom = (hasBottomCut || topReachesBottom) && bottomHoleHalfAtBottom > EPSILON;
-    for (const band of bands) {
-        if (!band.insideSlit || !shouldOpenBottom) {
-            addBottomStrip(builder, -hh, band.z0, band.z1, -bottomHalfWidth, bottomHalfWidth);
-            continue;
-        }
-
-        addBottomStrip(builder, -hh, band.z0, band.z1, -bottomHalfWidth, -bottomHoleHalfAtBottom);
-        addBottomStrip(builder, -hh, band.z0, band.z1, bottomHoleHalfAtBottom, bottomHalfWidth);
-    }
-
-    if (hasTopCut && topHoleHalfAtTop > EPSILON) {
-        const topHoleHalfAtLow = resolveHoleHalfWidth(
-            topCutLow,
-            width,
-            height,
-            topWidthFactor,
-            slitBottomWidthFactor,
-            slitTopWidthFactor
-        );
-
-        const addTopFloor = topCutLow > -hh + 1e-3 && (!hasBottomCut || topCutLow > bottomCutHigh + 1e-3);
-
-        for (const slit of slitRanges) {
-            const z0 = slit.z0;
-            const z1 = slit.z1;
-
-            builder.addQuad(
-                [topHoleHalfAtTop, topCutHigh, z0],
-                [topHoleHalfAtLow, topCutLow, z0],
-                [topHoleHalfAtLow, topCutLow, z1],
-                [topHoleHalfAtTop, topCutHigh, z1],
-                [-1, 0, 0]
-            );
-
-            builder.addQuad(
-                [-topHoleHalfAtTop, topCutHigh, z1],
-                [-topHoleHalfAtLow, topCutLow, z1],
-                [-topHoleHalfAtLow, topCutLow, z0],
-                [-topHoleHalfAtTop, topCutHigh, z0],
-                [1, 0, 0]
-            );
-
-            if (addTopFloor) {
-                builder.addQuad(
-                    [-topHoleHalfAtLow, topCutLow, z0],
-                    [-topHoleHalfAtLow, topCutLow, z1],
-                    [topHoleHalfAtLow, topCutLow, z1],
-                    [topHoleHalfAtLow, topCutLow, z0],
-                    [0, 1, 0]
-                );
-            }
-
-            builder.addQuad(
-                [-topHoleHalfAtTop, topCutHigh, z0],
-                [topHoleHalfAtTop, topCutHigh, z0],
-                [topHoleHalfAtLow, topCutLow, z0],
-                [-topHoleHalfAtLow, topCutLow, z0],
-                [0, 0, 1]
-            );
-
-            builder.addQuad(
-                [topHoleHalfAtTop, topCutHigh, z1],
-                [-topHoleHalfAtTop, topCutHigh, z1],
-                [-topHoleHalfAtLow, topCutLow, z1],
-                [topHoleHalfAtLow, topCutLow, z1],
-                [0, 0, -1]
-            );
-        }
-    }
-
-    if (hasBottomCut && bottomHoleHalfAtBottom > EPSILON) {
-        const bottomHoleHalfAtHigh = resolveHoleHalfWidth(
-            bottomCutHigh,
-            width,
-            height,
-            topWidthFactor,
-            slitBottomWidthFactor,
-            slitTopWidthFactor
-        );
-
-        const addBottomCeiling = bottomCutHigh < hh - 1e-3 && (!hasTopCut || bottomCutHigh < topCutLow - 1e-3);
-
-        for (const slit of slitRanges) {
-            const z0 = slit.z0;
-            const z1 = slit.z1;
-
-            builder.addQuad(
-                [bottomHoleHalfAtHigh, bottomCutHigh, z0],
-                [bottomHoleHalfAtBottom, bottomCutLow, z0],
-                [bottomHoleHalfAtBottom, bottomCutLow, z1],
-                [bottomHoleHalfAtHigh, bottomCutHigh, z1],
-                [-1, 0, 0]
-            );
-
-            builder.addQuad(
-                [-bottomHoleHalfAtHigh, bottomCutHigh, z1],
-                [-bottomHoleHalfAtBottom, bottomCutLow, z1],
-                [-bottomHoleHalfAtBottom, bottomCutLow, z0],
-                [-bottomHoleHalfAtHigh, bottomCutHigh, z0],
-                [1, 0, 0]
-            );
-
-            if (addBottomCeiling) {
-                builder.addQuad(
-                    [-bottomHoleHalfAtHigh, bottomCutHigh, z0],
-                    [bottomHoleHalfAtHigh, bottomCutHigh, z0],
-                    [bottomHoleHalfAtHigh, bottomCutHigh, z1],
-                    [-bottomHoleHalfAtHigh, bottomCutHigh, z1],
-                    [0, -1, 0]
-                );
-            }
-
-            builder.addQuad(
-                [-bottomHoleHalfAtHigh, bottomCutHigh, z0],
-                [bottomHoleHalfAtHigh, bottomCutHigh, z0],
-                [bottomHoleHalfAtBottom, bottomCutLow, z0],
-                [-bottomHoleHalfAtBottom, bottomCutLow, z0],
-                [0, 0, 1]
-            );
-
-            builder.addQuad(
-                [bottomHoleHalfAtHigh, bottomCutHigh, z1],
-                [-bottomHoleHalfAtHigh, bottomCutHigh, z1],
-                [-bottomHoleHalfAtBottom, bottomCutLow, z1],
-                [bottomHoleHalfAtBottom, bottomCutLow, z1],
-                [0, 0, -1]
-            );
-        }
-    }
-
-    return builder.toGeometry();
-}
-
-function createSideMaterial(cacheKey, width, height, depth, slitEnabled) {
-    if (USE_GLB_MATERIALS && __materialCache.has(cacheKey)) {
-        return __materialCache.get(cacheKey).clone();
-    }
-
-    const material = createSciFiMaterial({
-        side: THREE.FrontSide,
-        transparent: slitEnabled ? false : true,
-        opacity: slitEnabled ? 1.0 : 0.9,
-        accentColor: 0x6be7ff,
-        secondaryColor: 0x061733,
-        edgeColor: 0xcdf8ff,
-        emissiveColor: 0x54d7ff,
-        emissiveIntensity: slitEnabled ? 0.42 : 0.56,
-        metalness: slitEnabled ? 0.64 : 0.82,
-        roughness: slitEnabled ? 0.24 : 0.1,
-        clearcoat: slitEnabled ? 0.35 : 0.95,
-        clearcoatRoughness: slitEnabled ? 0.28 : 0.16,
-        transmission: slitEnabled ? 0 : 0.2,
-        thickness: slitEnabled ? 0 : 1.8,
-        iridescence: slitEnabled ? 0.3 : 0.62,
-        sheen: slitEnabled ? 0.38 : 0.62,
-        sheenColor: 0xd2ffff,
-        envMapIntensity: slitEnabled ? 1.25 : 1.95,
-        accentMix: 0.93,
-        glowFalloff: 2.2,
-        depthAccentStrength: slitEnabled ? 0.08 : 0.34,
-        scanlineFrequency: (Math.PI * 2) / Math.max(height / 5, 1),
-        scanlineStrength: slitEnabled ? 0.1 : 0.26,
-        stripeFrequency: (Math.PI * 2) / Math.max(depth / 10, 1),
-        stripeStrength: slitEnabled ? 0.12 : 0.6,
-        rimIntensity: 0.68,
-        gradientSharpness: 1.4,
-        gradientBias: 0.02,
-        fresnelBoost: 0.36,
-        glintStrength: slitEnabled ? 0.08 : 0.24,
-        noiseStrength: slitEnabled ? 0.015 : 0.05
-    });
-
-    material.depthWrite = true;
-    material.depthTest = true;
-    if (slitEnabled) {
-        updateSciFiMaterialUniforms(material, SLIT_SHADER_STABILITY_UNIFORMS);
-    }
-
-    return material;
-}
-
-function createCapMaterial(cacheKey, width, height, depth, slitEnabled) {
-    if (USE_GLB_MATERIALS && __materialCache.has(cacheKey)) {
-        return __materialCache.get(cacheKey).clone();
-    }
-
-    const material = createSciFiMaterial({
-        side: THREE.DoubleSide,
-        transparent: slitEnabled ? false : true,
-        opacity: slitEnabled ? 1.0 : 0.94,
-        accentColor: 0x74f0ff,
-        secondaryColor: 0x071c3d,
-        edgeColor: 0xe1fcff,
-        emissiveColor: 0x59dfff,
-        emissiveIntensity: slitEnabled ? 0.45 : 0.62,
-        metalness: slitEnabled ? 0.66 : 0.84,
-        roughness: slitEnabled ? 0.26 : 0.09,
-        clearcoat: slitEnabled ? 0.32 : 0.96,
-        clearcoatRoughness: slitEnabled ? 0.3 : 0.14,
-        transmission: slitEnabled ? 0 : 0.22,
-        thickness: slitEnabled ? 0 : 1.85,
-        iridescence: slitEnabled ? 0.32 : 0.65,
-        sheen: slitEnabled ? 0.4 : 0.65,
-        sheenColor: 0xe1ffff,
-        envMapIntensity: slitEnabled ? 1.3 : 2.05,
-        accentMix: 0.94,
-        glowFalloff: 2.4,
-        depthAccentStrength: slitEnabled ? 0.08 : 0.38,
-        scanlineFrequency: (Math.PI * 2) / Math.max(height / 4, 1),
-        scanlineStrength: slitEnabled ? 0.1 : 0.3,
-        dimensions: { width, height, depth: Math.max(depth * 0.25, 1) },
-        stripeFrequency: (Math.PI * 2) / Math.max(width / 6, 1),
-        stripeStrength: slitEnabled ? 0.1 : 0.42,
-        rimIntensity: 0.82,
-        gradientSharpness: 1.5,
-        gradientBias: 0.035,
-        fresnelBoost: 0.45,
-        glintStrength: slitEnabled ? 0.08 : 0.28,
-        noiseStrength: slitEnabled ? 0.015 : 0.06
-    });
-
-    material.depthWrite = true;
-    material.depthTest = true;
-    if (slitEnabled) {
-        updateSciFiMaterialUniforms(material, SLIT_SHADER_STABILITY_UNIFORMS);
-    }
-
-    return material;
-}
-
-function buildWeightMatrixGeometry({
-    width,
-    height,
-    depth,
-    topWidthFactor,
-    cornerRadius,
-    numberOfSlits,
-    slitWidth,
-    slitDepthFactor,
-    slitBottomWidthFactor,
-    slitTopWidthFactor
-}) {
-    const hasSlits = numberOfSlits > 0 && slitWidth > 0 && slitDepthFactor > 0;
-    if (!hasSlits) {
-        return buildSolidTrapezoidGeometry(width, height, depth, topWidthFactor, cornerRadius);
-    }
-
-    return buildFirstPrinciplesSlitWeightMatrixGeometry({
-        width,
-        height,
-        depth,
-        topWidthFactor,
-        numberOfSlits,
-        slitWidth,
-        slitDepthFactor,
-        slitBottomWidthFactor,
-        slitTopWidthFactor
-    });
+function getCacheKey(width, height, depth, topWidthFactor, cornerRadius, numberOfSlits, slitWidth, slitDepthFactor, slitBottomWidthFactor, slitTopWidthFactor) {
+    return [width, height, depth, topWidthFactor, cornerRadius, numberOfSlits, slitWidth, slitDepthFactor, slitBottomWidthFactor, slitTopWidthFactor, QUALITY_PRESET].join('|');
 }
 
 export class WeightMatrixVisualization {
@@ -806,30 +114,30 @@ export class WeightMatrixVisualization {
         numberOfSlits = 0,
         slitWidth = 0.2,
         slitDepthFactor = 1.0,
-        slitBottomWidthFactor = 0.9,
-        slitTopWidthFactor = null,
+        slitBottomWidthFactor = 0.9, // previously `slitWidthFactor`
+        slitTopWidthFactor = null,    // allow different top factor; defaults to bottom
         useInstancedSlices = true
     ) {
         this.group = new THREE.Group();
         this.group.position.copy(position);
+        // Label for raycasting hover info
         this.group.userData.label = 'Weight Matrix';
 
         this.width = width;
         this.height = height;
         this.depth = depth;
-        this.topWidthFactor = topWidthFactor;
+        this.topWidthFactor = topWidthFactor; // Width of the top relative to the bottom
         this.cornerRadius = cornerRadius;
         this.numberOfSlits = numberOfSlits;
         this.slitWidth = slitWidth;
-        this.slitDepthFactor = clamp01(slitDepthFactor);
-        this.slitBottomWidthFactor = slitBottomWidthFactor;
-        this.slitTopWidthFactor = slitTopWidthFactor !== null ? slitTopWidthFactor : slitBottomWidthFactor;
+        this.slitDepthFactor = Math.max(0, Math.min(1, slitDepthFactor)); // Clamp between 0 and 1
+        this.slitBottomWidthFactor = slitBottomWidthFactor; // bottom width factor
+        this.slitTopWidthFactor = slitTopWidthFactor !== null ? slitTopWidthFactor : slitBottomWidthFactor; // default to bottom factor
         this.useInstancedSlices = useInstancedSlices !== false;
 
-        this.mesh = null;
-        this.frontCapMesh = null;
-        this.backCapMesh = null;
-
+        this.mesh = null; // Main trapezoid mesh (sides)
+        this.frontCapMesh = null; // Front face mesh
+        this.backCapMesh = null; // Back face mesh
         this._createMesh();
 
         if (data) {
@@ -837,76 +145,46 @@ export class WeightMatrixVisualization {
         }
     }
 
-    _isSlitEnabled() {
-        return this.numberOfSlits > 0 && this.slitWidth > 0 && this.slitDepthFactor > 0;
-    }
-
-    _getEffectiveCornerRadius() {
-        return this._isSlitEnabled() ? 0 : this.cornerRadius;
-    }
-
-    _resolveGeometryDepth() {
-        const slitEnabled = this._isSlitEnabled();
-        if (!slitEnabled) return this.depth;
-
-        const laneCount = Math.max(1, Math.floor(this.numberOfSlits || 1));
-        if (laneCount < 2) return this.depth;
-
-        // When callers pass the canonical lane-dependent depth ((N+1)*spacing),
-        // match the historical instanced span (N*spacing) to preserve visual size.
-        const expectedDepth = (laneCount + 1) * VECTOR_DEPTH_SPACING;
-        const tolerance = Math.max(1, VECTOR_DEPTH_SPACING * 0.15);
-        if (Math.abs(this.depth - expectedDepth) <= tolerance) {
-            return laneCount * VECTOR_DEPTH_SPACING;
-        }
-
-        return this.depth;
-    }
-
     _clearMesh() {
-        const disposeMaterial = (mat) => {
-            if (!mat) return;
-            if (Array.isArray(mat)) {
-                for (const m of mat) {
-                    if (m && m.dispose) m.dispose();
-                }
-            } else if (mat.dispose) {
-                mat.dispose();
-            }
-        };
-
         if (this.mesh) {
             this.group.remove(this.mesh);
-            if (this.mesh.geometry) this.mesh.geometry.dispose();
-            disposeMaterial(this.mesh.material);
+            // Safely dispose geometry and material(s)
+            if (this.mesh.geometry) {
+                this.mesh.geometry.dispose();
+            }
+            if (this.mesh.material) {
+                if (Array.isArray(this.mesh.material)) {
+                    this.mesh.material.forEach(m => m.dispose());
+                } else {
+                    this.mesh.material.dispose();
+                }
+            }
             this.mesh = null;
         }
-
+        
+        // Clear caps
         if (this.frontCapMesh) {
             this.group.remove(this.frontCapMesh);
             if (this.frontCapMesh.geometry) this.frontCapMesh.geometry.dispose();
-            disposeMaterial(this.frontCapMesh.material);
+            // Material is shared, dispose only once with main mesh
             this.frontCapMesh = null;
         }
-
         if (this.backCapMesh) {
             this.group.remove(this.backCapMesh);
             if (this.backCapMesh.geometry) this.backCapMesh.geometry.dispose();
-            disposeMaterial(this.backCapMesh.material);
+            // Material is shared
             this.backCapMesh = null;
         }
+
     }
 
     _createMesh() {
         this._clearMesh();
 
-        const slitEnabled = this._isSlitEnabled();
-        const geometryDepth = this._resolveGeometryDepth();
-
         const cacheKey = getCacheKey(
             this.width,
             this.height,
-            geometryDepth,
+            this.depth,
             this.topWidthFactor,
             this.cornerRadius,
             this.numberOfSlits,
@@ -916,110 +194,469 @@ export class WeightMatrixVisualization {
             this.slitTopWidthFactor
         );
 
-        const wantsInstancedSlices = USE_INSTANCED_MATRIX_SLICES
-            && this.useInstancedSlices
-            && !slitEnabled
-            && this.depth > VECTOR_DEPTH_SPACING * 1.5;
-
+        // --------------------------------------------------------------
+        // Fast path – if the requested depth covers multiple lanes we
+        // create ONE thin slice (depth = VECTOR_DEPTH_SPACING) and
+        // replicate it across lanes via an InstancedMesh.  This avoids
+        // the extremely heavy CSG work required for deep geometries and
+        // completely sidesteps the need for a matching pre-baked asset.
+        // --------------------------------------------------------------
+        const wantsInstancedSlices = USE_INSTANCED_MATRIX_SLICES && this.useInstancedSlices && this.depth > VECTOR_DEPTH_SPACING * 1.5;
         if (wantsInstancedSlices && !__geometryCache.has(cacheKey)) {
             this._createInstancedSlices();
             return;
         }
 
-        const t0 = performance.now();
+        // --- Create Main Trapezoid Shape (used for extrusion AND caps) ---
+        const shape = new THREE.Shape();
 
-        let geometry;
+        const hw     = this.width  / 2;                         // half bottom width
+        const hTopW  = (this.width * this.topWidthFactor) / 2;  // half top width
+        const hh     = this.height / 2;                         // half height
+
+        // Desired corner radius, clamped so that arcs never overlap.
+        let cr = this.cornerRadius;
+        // --- Determine safe maximum radius for all four corners ---
+        // 1. Along the bottom edge we previously limited the radius by the
+        //    horizontal difference (hw − hTopW).  This works when the *top* is
+        //    *narrower* than the bottom, but collapses to 0 when the top is
+        //    wider (the up-projection case).  In that scenario we can safely
+        //    allow the radius to grow up to the half-width of the bottom
+        //    edge itself.
+        const horizontalDiff = hw - hTopW;            // positive ⇒ top narrower
+        // If the top width equals the bottom width (horizontalDiff == 0) the
+        // shape is a true rectangle and we should still allow rounded
+        // corners.  In that case fall back to the half-width of the bottom
+        // edge instead of clamping the radius to zero.
+        const maxBottomRadius = horizontalDiff > 0 ? horizontalDiff : hw;
+
+        // 2. The top edge imposes its own limit: the radius cannot exceed
+        //    half the top width, otherwise the two arcs would overlap.
+        const maxTopRadius = hTopW;
+
+        // 3. Finally, the slanted sides limit the radius – it must not exceed
+        //    half the length of the side edges, otherwise arcs would intersect
+        //    before reaching the mid-point of the edge.
+        const sideLen       = Math.hypot(hw - hTopW, this.height);
+        const maxSideRadius = sideLen / 2;
+
+        // Choose the smallest of the candidate limits so the arcs never
+        // overlap or cross any edge.
+        cr = Math.min(cr, maxBottomRadius, maxTopRadius, maxSideRadius);
+
+        // If radius is effectively zero, keep original sharp trapezoid
+        if (cr < 1e-4) {
+            shape.moveTo(-hw, -hh);
+            shape.lineTo(hw, -hh);
+            shape.lineTo(hTopW, hh);
+            shape.lineTo(-hTopW, hh);
+            shape.closePath();
+        } else {
+            // Pre‑compute some helper points for each corner where the arc starts/ends
+            // Bottom edge offsets
+            const blStart = new THREE.Vector2(-hw + cr, -hh); // bottom‑left start
+            const brStart = new THREE.Vector2(hw - cr,  -hh); // bottom‑right start
+            // Top edge offsets
+            const trEnd   = new THREE.Vector2(hTopW - cr,  hh); // top‑right end
+            const tlEnd   = new THREE.Vector2(-hTopW + cr, hh); // top‑left end
+
+            // Unit vectors along the two slanted sides
+            const rightSideDir = new THREE.Vector2(hTopW - hw, 2*hh).normalize();
+            // Vector that goes from the bottom‑left to the top‑left along the slanted edge
+            // (positive X, positive Y).  We do NOT negate; we'll use ± later as needed.
+            const leftSideDir  = new THREE.Vector2(-hTopW + hw, 2*hh).normalize();
+
+            const brSidePt = new THREE.Vector2(hw, -hh).addScaledVector(rightSideDir, cr);  // point after rounding bottom‑right
+            const trSidePt = new THREE.Vector2(hTopW, hh).addScaledVector(rightSideDir.clone().negate(), cr); // point before rounding top‑right
+
+            // For the top‑left we move *backwards* along the edge, so we use the negative direction.
+            const tlSidePt = new THREE.Vector2(-hTopW, hh).addScaledVector(leftSideDir.clone().negate(), cr); // point after rounding top‑left
+            // For the bottom‑left we move inward/upward along the edge (positive direction).
+            const blSidePt = new THREE.Vector2(-hw, -hh).addScaledVector(leftSideDir, cr);  // point before rounding bottom‑left
+
+            // Start drawing
+            shape.moveTo(blStart.x, blStart.y);
+            // Bottom edge
+            shape.lineTo(brStart.x, brStart.y);
+            // Bottom‑right corner arc (quadratic approximation)
+            shape.quadraticCurveTo(hw, -hh, brSidePt.x, brSidePt.y);
+            // Right side
+            shape.lineTo(trSidePt.x, trSidePt.y);
+            // Top‑right corner arc
+            shape.quadraticCurveTo(hTopW, hh, trEnd.x, trEnd.y);
+            // Top edge
+            shape.lineTo(tlEnd.x, tlEnd.y);
+            // Top‑left corner arc
+            shape.quadraticCurveTo(-hTopW, hh, tlSidePt.x, tlSidePt.y);
+            // Left side
+            shape.lineTo(blSidePt.x, blSidePt.y);
+            // Bottom‑left corner arc
+            shape.quadraticCurveTo(-hw, -hh, blStart.x, blStart.y);
+            shape.closePath();
+        }
+
+        // Extrusion settings with rounded/filleted corners controlled by `cornerRadius`
+        // Enabling bevel creates additional geometry around every edge of the
+        // extruded shape giving the appearance of smooth, rounded corners on
+        // the final 3‑D trapezoid.  The user‑provided `cornerRadius` controls
+        // both how far the bevel extends out from each edge (`bevelSize`) and
+        // how thick the bevel is (`bevelThickness`).  A few segments are added
+        // to approximate a smooth curve.  Increase `bevelSegments` for an even
+        // smoother fillet at the cost of additional geometry.
+        const extrudeSettings = {
+            steps: 1,
+            depth: this.depth,
+            bevelEnabled: false,
+            // Beveling is turned off because the 2‑D shape already contains
+            // true circular arcs for its corners. Disabling bevel avoids CSG
+            // artefacts that prevented the slit boxes from cutting all the
+            // way through the top and bottom faces.
+            bevelThickness: this.cornerRadius * 1.2,
+            bevelSize: this.cornerRadius * 1.2,
+            bevelOffset: 0,
+            // Make the smoothness scale with the radius: at least 6 segments
+            // with 3 extra per unit radius.
+            bevelSegments: Math.max(6, Math.round(this.cornerRadius * 3))
+        };
+
+        // --------------------------------------------------------------
+        //  1. Check the cache – if we have already built geometry for an
+        //     identical parameter set we can skip the heavy CSG work and
+        //     clone the cached BufferGeometry.
+        // --------------------------------------------------------------
+        const t0 = performance.now();
+        let baseMesh;
         let cacheHit = false;
         if (__geometryCache.has(cacheKey)) {
             cacheHit = true;
-            geometry = __geometryCache.get(cacheKey).clone();
+            const cachedGeo = __geometryCache.get(cacheKey);
+            baseMesh = new THREE.Mesh(cachedGeo);
         } else {
-            geometry = buildWeightMatrixGeometry({
-                width: this.width,
-                height: this.height,
-                depth: geometryDepth,
-                topWidthFactor: this.topWidthFactor,
-                cornerRadius: this._getEffectiveCornerRadius(),
-                numberOfSlits: this.numberOfSlits,
-                slitWidth: this.slitWidth,
-                slitDepthFactor: this.slitDepthFactor,
-                slitBottomWidthFactor: this.slitBottomWidthFactor,
-                slitTopWidthFactor: this.slitTopWidthFactor
-            });
-
-            __geometryCache.set(cacheKey, geometry.clone());
+            // Create initial geometry by extruding the shape
+            const baseGeometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+            baseGeometry.center();
+            baseMesh = new THREE.Mesh(baseGeometry);
+            // heavy CSG operations proceed below
         }
 
-        const sideMaterial = createSideMaterial(cacheKey, this.width, this.height, geometryDepth, slitEnabled);
+        // --- Create and Subtract Slits using CSG (for the side walls) ---
+        let finalMesh = baseMesh; // Start with the base mesh
 
-        this.mesh = new THREE.Mesh(geometry, sideMaterial);
-        this.mesh.renderOrder = 0;
-        this.group.add(this.mesh);
+        // Only run the heavy CSG slit generation when we *didn't* hit the cache.
+        if (!cacheHit && QUALITY_PRESET === 'high' && this.numberOfSlits > 0 && this.slitWidth > 0) {
+            const slitSpacing = this.depth / (this.numberOfSlits + 1);
 
-        if (!slitEnabled) {
-            const capGeometry = createCapGeometry(
-                this.width,
-                this.height,
-                this.topWidthFactor,
-                this._getEffectiveCornerRadius()
-            );
+            // Calculate the actual depth of the cut based on the factor
+            const cutDepth = this.height * this.slitDepthFactor;
+            // Robust CSG: push the cutting box a hair ABOVE the top face and
+            // extend it slightly so we avoid coplanar faces (which can lead to
+            // Boolean artefacts like split/duplicated holes).
+            const EPS_CSG = Math.max(0.02, this.height * 0.001);
+            const slitBoxHeight = cutDepth + EPS_CSG * 2; // extend both ends a touch
 
-            const capFrontMaterial = createCapMaterial(cacheKey, this.width, this.height, this.depth, false);
-            const capBackMaterial = createCapMaterial(cacheKey, this.width, this.height, this.depth, false);
-            capFrontMaterial.polygonOffset = true;
-            capFrontMaterial.polygonOffsetFactor = -1;
-            capFrontMaterial.polygonOffsetUnits = -4;
-            capBackMaterial.polygonOffset = true;
-            capBackMaterial.polygonOffsetFactor = -1;
-            capBackMaterial.polygonOffsetUnits = -4;
+            // Position so the top/bottom of the slit box sits just beyond the
+            // top/bottom faces, eliminating coplanar ambiguity.
+            const cutCenterYTop = (this.height / 2 + EPS_CSG) - (slitBoxHeight / 2);
+            const cutCenterYBottom = (-this.height / 2 - EPS_CSG) + (slitBoxHeight / 2);
 
-            const epsilon = 0.05;
-            this.frontCapMesh = new THREE.Mesh(capGeometry.clone(), capFrontMaterial);
-            this.frontCapMesh.position.z = geometryDepth / 2 + epsilon;
-            this.frontCapMesh.renderOrder = 1;
-            this.group.add(this.frontCapMesh);
+            // Helper: compute the trapezoid width at an arbitrary Y (clamped to the body)
+            const hh = this.height / 2;
+            const shapeBottomWidth = this.width;                       // width at y = -hh
+            const shapeTopWidth    = this.width * this.topWidthFactor; // width at y = +hh
+            const widthAtY = (y) => {
+                const yc = Math.max(-hh, Math.min(hh, y));
+                const t = (yc + hh) / (2 * hh); // 0 at bottom, 1 at top
+                return THREE.MathUtils.lerp(shapeBottomWidth, shapeTopWidth, t);
+            };
 
-            this.backCapMesh = new THREE.Mesh(capGeometry.clone(), capBackMaterial);
-            this.backCapMesh.position.z = -geometryDepth / 2 - epsilon;
-            this.backCapMesh.rotation.y = Math.PI;
-            this.backCapMesh.renderOrder = 2;
-            this.group.add(this.backCapMesh);
+            // Slight inward inset so we never breach the side walls due to numerical issues
+            const INSET_X = Math.max(0.1, this.width * 0.001);
 
-            capGeometry.dispose();
+            const CORNER_CLEARANCE_FACTOR = 0.25; // 1.0 = full 2*radius clearance
+            const makeSlitGeometry = (yTopOfSlit, yBottomOfSlit) => {
+                let dynamicBottomWidth = Math.max(0,
+                    widthAtY(yBottomOfSlit) * this.slitBottomWidthFactor - INSET_X * 2
+                );
+                let dynamicTopWidth = Math.max(0,
+                    widthAtY(yTopOfSlit) * this.slitTopWidthFactor - INSET_X * 2
+                );
+                const safeTopWidth = Math.max(0,
+                    widthAtY(yTopOfSlit) - this.cornerRadius * 2 * CORNER_CLEARANCE_FACTOR - INSET_X * 2
+                );
+                const safeBottomWidth = Math.max(0,
+                    widthAtY(yBottomOfSlit) - this.cornerRadius * 2 * CORNER_CLEARANCE_FACTOR - INSET_X * 2
+                );
+                if (safeTopWidth > 0) dynamicTopWidth = Math.min(dynamicTopWidth, safeTopWidth);
+                if (safeBottomWidth > 0) dynamicBottomWidth = Math.min(dynamicBottomWidth, safeBottomWidth);
+
+                if (Math.abs(dynamicBottomWidth - dynamicTopWidth) < 1e-4) {
+                    // Simple rectangular slit (top == bottom)
+                    return new THREE.BoxGeometry(dynamicBottomWidth, slitBoxHeight, this.slitWidth);
+                }
+                // Create tapered geometry (trapezoidal prism) by modifying a box geometry
+                const geom = new THREE.BoxGeometry(dynamicBottomWidth, slitBoxHeight, this.slitWidth, 1, 1, 1);
+                const posAttr = geom.attributes.position;
+                const halfH = slitBoxHeight / 2;
+                for (let v = 0; v < posAttr.count; v++) {
+                    const y = posAttr.getY(v);
+                    const t = (y + halfH) / slitBoxHeight; // 0 at bottom, 1 at top
+                    const targetWidth = THREE.MathUtils.lerp(dynamicBottomWidth, dynamicTopWidth, t);
+                    const scale = (dynamicBottomWidth > 0) ? (targetWidth / dynamicBottomWidth) : 1.0;
+                    posAttr.setX(v, posAttr.getX(v) * scale);
+                }
+                posAttr.needsUpdate = true;
+                geom.computeVertexNormals();
+                return geom;
+            };
+
+            const useDualCuts = this.slitDepthFactor < 0.95;
+
+            for (let i = 0; i < this.numberOfSlits; i++) {
+                const zPos = -this.depth / 2 + slitSpacing * (i + 1);
+                
+                const topY = cutCenterYTop;
+                const yTopOfSlitTop = topY + slitBoxHeight / 2;
+                const yBottomOfSlitTop = topY - slitBoxHeight / 2;
+                const slitGeometryTop = makeSlitGeometry(yTopOfSlitTop, yBottomOfSlitTop);
+
+                const slitMeshTop = new THREE.Mesh(slitGeometryTop);
+                slitMeshTop.position.set(0, topY, zPos);
+                slitMeshTop.updateMatrix();
+                finalMesh = CSG.subtract(finalMesh, slitMeshTop);
+
+                if (useDualCuts) {
+                    const bottomY = cutCenterYBottom;
+                    const yTopOfSlitBottom = bottomY + slitBoxHeight / 2;
+                    const yBottomOfSlitBottom = bottomY - slitBoxHeight / 2;
+                    const slitGeometryBottom = makeSlitGeometry(yTopOfSlitBottom, yBottomOfSlitBottom);
+                    const slitMeshBottom = new THREE.Mesh(slitGeometryBottom);
+                    slitMeshBottom.position.set(0, bottomY, zPos);
+                    slitMeshBottom.updateMatrix();
+                    finalMesh = CSG.subtract(finalMesh, slitMeshBottom);
+                }
+            }
         }
 
-        updateSciFiDimensions(this.mesh.material, {
-            width: this.width,
-            height: this.height,
-            depth: geometryDepth
-        });
+        // --- Finalize the Side Walls Mesh ---
+        // Use two distinct materials so we can apply a polygon offset to the
+        // *cap* faces only.  Offsetting the depth values of the caps nudges
+        // them ever-so-slightly closer to the camera, eliminating the
+        // z-fighting flicker that still appeared when zoomed far out.
 
-        if (this.frontCapMesh) {
-            updateSciFiDimensions(this.frontCapMesh.material, {
-                width: this.width,
-                height: this.height,
-                depth: geometryDepth
+        let sideMaterial;
+        if (USE_GLB_MATERIALS && __materialCache.has(cacheKey)) {
+            sideMaterial = __materialCache.get(cacheKey).clone();
+        } else {
+            sideMaterial = createSciFiMaterial({
+                side: THREE.FrontSide,
+                transparent: true,
+                opacity: 0.9,
+                accentColor: 0x6be7ff,
+                secondaryColor: 0x061733,
+                edgeColor: 0xcdf8ff,
+                emissiveColor: 0x54d7ff,
+                emissiveIntensity: 0.56,
+                metalness: 0.82,
+                roughness: 0.1,
+                clearcoat: 0.95,
+                clearcoatRoughness: 0.16,
+                transmission: 0.2,
+                thickness: 1.8,
+                iridescence: 0.62,
+                sheen: 0.62,
+                sheenColor: 0xd2ffff,
+                envMapIntensity: 1.95,
+                accentMix: 0.93,
+                glowFalloff: 2.2,
+                depthAccentStrength: 0.34,
+                scanlineFrequency: (Math.PI * 2) / Math.max(this.height / 5, 1),
+                scanlineStrength: 0.26,
+                stripeFrequency: (Math.PI * 2) / Math.max(this.depth / 10, 1),
+                stripeStrength: 0.6,
+                rimIntensity: 0.68,
+                gradientSharpness: 1.4,
+                gradientBias: 0.02,
+                fresnelBoost: 0.36,
+                glintStrength: 0.24,
+                noiseStrength: 0.05
             });
         }
 
-        if (this.backCapMesh) {
-            updateSciFiDimensions(this.backCapMesh.material, {
-                width: this.width,
-                height: this.height,
-                depth: geometryDepth
+        const capMaterial = (USE_GLB_MATERIALS && __materialCache.has(cacheKey))
+            ? sideMaterial.clone()
+            : createSciFiMaterial({
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.94,
+                accentColor: 0x74f0ff,
+                secondaryColor: 0x071c3d,
+                edgeColor: 0xe1fcff,
+                emissiveColor: 0x59dfff,
+                emissiveIntensity: 0.62,
+                metalness: 0.84,
+                roughness: 0.09,
+                clearcoat: 0.96,
+                clearcoatRoughness: 0.14,
+                transmission: 0.22,
+                thickness: 1.85,
+                iridescence: 0.65,
+                sheen: 0.65,
+                sheenColor: 0xe1ffff,
+                envMapIntensity: 2.05,
+                accentMix: 0.94,
+                glowFalloff: 2.4,
+                depthAccentStrength: 0.38,
+                scanlineFrequency: (Math.PI * 2) / Math.max(this.height / 4, 1),
+                scanlineStrength: 0.3,
+                dimensions: { width: this.width, height: this.height, depth: Math.max(this.depth * 0.25, 1) },
+                stripeFrequency: (Math.PI * 2) / Math.max(this.width / 6, 1),
+                stripeStrength: 0.42,
+                rimIntensity: 0.82,
+                gradientSharpness: 1.5,
+                gradientBias: 0.035,
+                fresnelBoost: 0.45,
+                glintStrength: 0.28,
+                noiseStrength: 0.06
             });
+
+        capMaterial.polygonOffset = true;
+        capMaterial.polygonOffsetFactor = -1; // pull slightly forward
+        capMaterial.polygonOffsetUnits  = -4;
+
+        // Assign the final CSG result geometry and the material to the main mesh (sides)
+        this.mesh = finalMesh;
+        this.mesh.material = sideMaterial;
+        const snapEps = Math.min(Math.max(0.02, this.height * 0.002), 0.5);
+        const posAttr = this.mesh.geometry.attributes.position;
+        if (posAttr) {
+            for (let i = 0; i < posAttr.count; i++) {
+                const y = posAttr.getY(i);
+                if (Math.abs(y - hh) < snapEps) {
+                    posAttr.setY(i, hh);
+                } else if (Math.abs(y + hh) < snapEps) {
+                    posAttr.setY(i, -hh);
+                }
+            }
+            posAttr.needsUpdate = true;
+        }
+        const creasedGeometry = toCreasedNormals(this.mesh.geometry, Math.PI / 3);
+        const normalAttr = creasedGeometry.attributes.normal;
+        const creasedPos = creasedGeometry.attributes.position;
+        if (normalAttr && creasedPos) {
+            const planeEps = Math.min(Math.max(0.08, this.height * 0.01), 0.8);
+            const snapEpsTop = Math.min(Math.max(0.06, this.height * 0.008), 0.7);
+            const upThreshold = 0.92;
+            const a = new THREE.Vector3();
+            const b = new THREE.Vector3();
+            const c = new THREE.Vector3();
+            const ab = new THREE.Vector3();
+            const ac = new THREE.Vector3();
+            const faceNormal = new THREE.Vector3();
+            for (let i = 0; i < creasedPos.count; i += 3) {
+                a.fromBufferAttribute(creasedPos, i);
+                b.fromBufferAttribute(creasedPos, i + 1);
+                c.fromBufferAttribute(creasedPos, i + 2);
+
+                ab.subVectors(b, a);
+                ac.subVectors(c, a);
+                faceNormal.crossVectors(ab, ac).normalize();
+
+                const avgY = (a.y + b.y + c.y) / 3;
+                const isTop = faceNormal.y > upThreshold && Math.abs(avgY - hh) < planeEps;
+                const isBottom = faceNormal.y < -upThreshold && Math.abs(avgY + hh) < planeEps;
+                if (isTop || isBottom) {
+                    const sign = isTop ? 1 : -1;
+                    normalAttr.setXYZ(i, 0, sign, 0);
+                    normalAttr.setXYZ(i + 1, 0, sign, 0);
+                    normalAttr.setXYZ(i + 2, 0, sign, 0);
+
+                    const targetY = sign * hh;
+                    if (Math.abs(a.y - targetY) < snapEpsTop) creasedPos.setY(i, targetY);
+                    if (Math.abs(b.y - targetY) < snapEpsTop) creasedPos.setY(i + 1, targetY);
+                    if (Math.abs(c.y - targetY) < snapEpsTop) creasedPos.setY(i + 2, targetY);
+                }
+            }
+            normalAttr.needsUpdate = true;
+            creasedPos.needsUpdate = true;
+        }
+        if (creasedGeometry !== this.mesh.geometry) {
+            this.mesh.geometry.dispose();
+            this.mesh.geometry = creasedGeometry;
         }
 
         const dt = (performance.now() - t0).toFixed(1);
         console.log(`[Perf] WeightMatrixVisualization (${cacheHit ? 'cache' : 'built'}) – ${dt} ms.`);
+
+        // Ensure transparent objects are rendered in a predictable order to
+        // avoid flickering caused by Three.js' painter-style sorting.  By
+        // explicitly rendering the side walls first, followed by the front
+        // cap and finally the back cap, we remove the ambiguity that appears
+        // when the camera is far away or at shallow angles.
+        this.mesh.renderOrder = 0;          // side walls first
+
+        // --------------------------------------------------------------
+        // Store completed geometry in cache for future instances
+        // (avoid re-computing CSG next time the same matrix appears).
+        // --------------------------------------------------------------
+        if (!__geometryCache.has(cacheKey)) {
+            __geometryCache.set(cacheKey, this.mesh.geometry.clone());
+        }
+
+        // Add the side walls mesh (with holes) to the group
+        this.group.add(this.mesh);
+
+        // --- Add Front / Back Caps to ensure end faces are solid ---
+        // After the CSG operations (slits) the original end faces may have
+        // been lost, so we recreate them using the original 2‑D profile and
+        // place them just outside the body (epsilon offset) to avoid z‑fighting.
+        const capGeometry = new THREE.ShapeGeometry(shape);
+        capGeometry.center();
+
+        // Increase the cap offset to further separate it from the main body and
+        // avoid depth-buffer precision issues that show up when the camera is
+        // far away.  A larger gap (≈ 5 cm in world-space) is visually
+        // imperceptible but removes the flicker caused by z-fighting.
+        const epsilon = 0.05;
+        this.frontCapMesh = new THREE.Mesh(capGeometry, capMaterial);
+        this.frontCapMesh.position.z = this.depth / 2 + epsilon;
+        this.frontCapMesh.renderOrder = 1;  // front cap after walls
+        this.group.add(this.frontCapMesh);
+
+        this.backCapMesh = new THREE.Mesh(capGeometry, capMaterial);
+        this.backCapMesh.position.z = -this.depth / 2 - epsilon;
+        this.backCapMesh.rotation.y = Math.PI; // flip so normals face outwards
+        this.backCapMesh.renderOrder = 2;   // back cap last
+        this.group.add(this.backCapMesh);
+
+        updateSciFiDimensions(this.mesh.material, { width: this.width, height: this.height, depth: this.depth });
+        updateSciFiDimensions(this.frontCapMesh.material, { width: this.width, height: this.height, depth: this.depth });
+        updateSciFiDimensions(this.backCapMesh.material, { width: this.width, height: this.height, depth: this.depth });
+
     }
 
+    // Hide or show caps to avoid visible seams when abutting multiple
+    // matrices along Z. For a chain of matrices: show back cap on the first,
+    // hide both on the middle ones, and show front cap on the last.
+    setCapVisibility(showFront = true, showBack = true) {
+        if (this.frontCapMesh) this.frontCapMesh.visible = !!showFront;
+        if (this.backCapMesh)  this.backCapMesh.visible  = !!showBack;
+    }
+
+    /**
+     * Build a single-lane slice (depth = VECTOR_DEPTH_SPACING) and then
+     * replicate it across NUM_VECTOR_LANES via InstancedMesh.  This greatly
+     * reduces CPU load compared to carving a deep geometry with many CSG
+     * operations.
+     */
     _createInstancedSlices() {
         const sliceDepth = VECTOR_DEPTH_SPACING;
         const laneCount = Math.max(1, Math.floor(this.numberOfSlits || 1));
         const depthSpan = (laneCount - 1) * VECTOR_DEPTH_SPACING + sliceDepth;
-        const sliceSlits = this._isSlitEnabled() ? 1 : 0;
+        const sliceSlits = 1; // one slit per slice – channels separated by instancing
 
+        // ----------------------------------------------------------
+        // Re-use / build geometry for the single slice
+        // ----------------------------------------------------------
         const sliceKey = getCacheKey(
             this.width,
             this.height,
@@ -1034,106 +671,266 @@ export class WeightMatrixVisualization {
         );
 
         let sliceGeometry;
+        let tmp = null; // temp builder (may remain null if cache hit)
+
+        // Attempt to pull slice + cap geometry from cache first
         if (__geometryCache.has(sliceKey)) {
             sliceGeometry = __geometryCache.get(sliceKey);
         } else {
-            sliceGeometry = buildWeightMatrixGeometry({
-                width: this.width,
-                height: this.height,
-                depth: sliceDepth,
-                topWidthFactor: this.topWidthFactor,
-                cornerRadius: this._isSlitEnabled() ? 0 : this.cornerRadius,
-                numberOfSlits: sliceSlits,
-                slitWidth: this.slitWidth,
-                slitDepthFactor: this.slitDepthFactor,
-                slitBottomWidthFactor: this.slitBottomWidthFactor,
-                slitTopWidthFactor: this.slitTopWidthFactor
-            });
-
-            __geometryCache.set(sliceKey, sliceGeometry.clone());
+            // Build a *temporary* WeightMatrixVisualization to generate the
+            // geometry for a single slice.  The recursive call will *not*
+            // enter the instanced-slice path because the depth is now small.
+            tmp = new WeightMatrixVisualization(
+                null,
+                new THREE.Vector3(),
+                this.width,
+                this.height,
+                sliceDepth,
+                this.topWidthFactor,
+                this.cornerRadius,
+                sliceSlits,
+                this.slitWidth,
+                this.slitDepthFactor,
+                this.slitBottomWidthFactor,
+                this.slitTopWidthFactor
+            );
+            sliceGeometry = tmp.mesh.geometry.clone();
+            // Cache for future re-use
+            __geometryCache.set(sliceKey, sliceGeometry);
+            // We'll cache cap geometries below once they're cloned
         }
 
-        let stripGeometry;
+        // ----------------------------------------------------------
+        // Material – clone defaults from standard path
+        // ----------------------------------------------------------
+        // Remove per-slice end caps to avoid internal coplanar faces between
+        // adjacent instances (these can show up as dashed lines through slits).
+        let instancedSliceGeometry;
         if (__sliceWallCache.has(sliceKey)) {
-            stripGeometry = __sliceWallCache.get(sliceKey);
+            instancedSliceGeometry = __sliceWallCache.get(sliceKey);
         } else {
-            stripGeometry = stripSliceEndCaps(sliceGeometry, sliceDepth);
-            __sliceWallCache.set(sliceKey, stripGeometry.clone());
+            instancedSliceGeometry = stripSliceEndCaps(sliceGeometry, sliceDepth);
+            __sliceWallCache.set(sliceKey, instancedSliceGeometry);
         }
 
-        const slitEnabled = this._isSlitEnabled();
-        const sideMaterial = createSideMaterial(sliceKey, this.width, this.height, depthSpan, slitEnabled);
+        const sciFiSliceDims = { width: this.width, height: this.height, depth: depthSpan };
+        let mat;
+        if (USE_GLB_MATERIALS && __materialCache.has(sliceKey)) {
+            mat = __materialCache.get(sliceKey).clone();
+        } else {
+            mat = createSciFiMaterial({
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.9,
+                accentColor: 0x6deaff,
+                secondaryColor: 0x071836,
+                edgeColor: 0xd4f9ff,
+                emissiveColor: 0x53d9ff,
+                emissiveIntensity: 0.54,
+                metalness: 0.8,
+                roughness: 0.11,
+                clearcoat: 0.94,
+                clearcoatRoughness: 0.16,
+                transmission: 0.18,
+                thickness: 1.7,
+                iridescence: 0.6,
+                sheen: 0.6,
+                sheenColor: 0xd4ffff,
+                envMapIntensity: 1.9,
+                accentMix: 0.92,
+                glowFalloff: 2.1,
+                depthAccentStrength: 0.32,
+                scanlineFrequency: (Math.PI * 2) / Math.max(this.height / 5, 1),
+                scanlineStrength: 0.24,
+                dimensions: sciFiSliceDims,
+                stripeFrequency: (Math.PI * 2) / Math.max(depthSpan / 6, 1),
+                stripeStrength: 0.55,
+                rimIntensity: 0.66,
+                gradientSharpness: 1.38,
+                gradientBias: 0.025,
+                fresnelBoost: 0.38,
+                glintStrength: 0.22,
+                noiseStrength: 0.05
+            });
+        }
+        // Soften depth stripes for instanced slices to avoid lane seams.
+        if (mat && mat.userData && mat.userData.sciFiUniforms) {
+            if (mat.userData.sciFiUniforms.uStripeStrength) {
+                mat.userData.sciFiUniforms.uStripeStrength.value = 0.0;
+            }
+            if (mat.userData.sciFiUniforms.uDepthAccentStrength) {
+                mat.userData.sciFiUniforms.uDepthAccentStrength.value = 0.0;
+            }
+            if (mat.userData.sciFiUniforms.uScanlineStrength) {
+                mat.userData.sciFiUniforms.uScanlineStrength.value = 0.0;
+            }
+            if (mat.userData.sciFiUniforms.uNoiseStrength) {
+                mat.userData.sciFiUniforms.uNoiseStrength.value = 0.0;
+            }
+            if (mat.userData.sciFiUniforms.uGlintStrength) {
+                mat.userData.sciFiUniforms.uGlintStrength.value = 0.0;
+            }
+        }
 
-        const instancedGeometry = stripGeometry.clone();
-        const inst = new THREE.InstancedMesh(instancedGeometry, sideMaterial, laneCount);
-
-        const matrix = new THREE.Matrix4();
+        // ----------------------------------------------------------
+        // Build InstancedMesh for side walls across all lanes
+        // ----------------------------------------------------------
+        const inst = new THREE.InstancedMesh(instancedSliceGeometry, mat, laneCount);
+        const mtx = new THREE.Matrix4();
         for (let i = 0; i < laneCount; i++) {
             const z = (i - (laneCount - 1) / 2) * VECTOR_DEPTH_SPACING;
-            matrix.makeTranslation(0, 0, z);
-            inst.setMatrixAt(i, matrix);
+            mtx.makeTranslation(0, 0, z);
+            inst.setMatrixAt(i, mtx);
         }
         inst.instanceMatrix.needsUpdate = true;
 
-        const capKey = `${sliceKey}|caps|${depthSpan}`;
-        let capGeoFront;
-        let capGeoBack;
-        if (__capFrontCache.has(capKey) && __capBackCache.has(capKey)) {
-            capGeoFront = __capFrontCache.get(capKey);
-            capGeoBack = __capBackCache.get(capKey);
+        // ----------------------------------------------------------
+        // Front & back caps – clone geometries from the temporary build
+        // ----------------------------------------------------------
+        let capGeoFront, capGeoBack;
+        if (__capFrontCache.has(sliceKey) && __capBackCache.has(sliceKey)) {
+            capGeoFront = __capFrontCache.get(sliceKey);
+            capGeoBack  = __capBackCache.get(sliceKey);
         } else {
-            const capGeometry = createCapGeometry(
-                this.width,
-                this.height,
-                this.topWidthFactor,
-                this._isSlitEnabled() ? 0 : this.cornerRadius
-            );
-            capGeoFront = capGeometry.clone();
-            capGeoBack = capGeometry.clone();
-            __capFrontCache.set(capKey, capGeoFront.clone());
-            __capBackCache.set(capKey, capGeoBack.clone());
-            capGeometry.dispose();
+            if (!tmp) {
+                // Build a throw-away WeightMatrixVisualization to obtain cap geometry only
+                tmp = new WeightMatrixVisualization(
+                    null,
+                    new THREE.Vector3(),
+                    this.width,
+                    this.height,
+                    sliceDepth,
+                    this.topWidthFactor,
+                    this.cornerRadius,
+                    sliceSlits,
+                    this.slitWidth,
+                    this.slitDepthFactor,
+                    this.slitBottomWidthFactor,
+                    this.slitTopWidthFactor
+                );
+            }
+            capGeoFront = tmp.frontCapMesh.geometry.clone();
+            capGeoBack  = tmp.backCapMesh.geometry.clone();
+
+            // Cache for next time
+            __capFrontCache.set(sliceKey, capGeoFront);
+            __capBackCache.set(sliceKey, capGeoBack);
         }
 
-        const capMatFront = createCapMaterial(sliceKey, this.width, this.height, depthSpan, slitEnabled);
-        const capMatBack = createCapMaterial(sliceKey, this.width, this.height, depthSpan, slitEnabled);
+        const capMatFront = createSciFiMaterial({
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.94,
+            accentColor: 0x74f0ff,
+            secondaryColor: 0x071c3d,
+            edgeColor: 0xe1fcff,
+            emissiveColor: 0x59dfff,
+            emissiveIntensity: 0.6,
+            metalness: 0.84,
+            roughness: 0.09,
+            clearcoat: 0.96,
+            clearcoatRoughness: 0.14,
+            transmission: 0.22,
+            thickness: 1.85,
+            iridescence: 0.65,
+            sheen: 0.65,
+            sheenColor: 0xe1ffff,
+            envMapIntensity: 2.05,
+            accentMix: 0.94,
+            glowFalloff: 2.4,
+            depthAccentStrength: 0.38,
+            scanlineFrequency: (Math.PI * 2) / Math.max(this.height / 4, 1),
+            scanlineStrength: 0.3,
+            dimensions: sciFiSliceDims,
+            stripeFrequency: (Math.PI * 2) / Math.max(this.width / 6, 1),
+            stripeStrength: 0.42,
+            rimIntensity: 0.82,
+            gradientSharpness: 1.5,
+            gradientBias: 0.035,
+            fresnelBoost: 0.45,
+            glintStrength: 0.28,
+            noiseStrength: 0.06
+        });
+        const capMatBack  = createSciFiMaterial({
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.94,
+            accentColor: 0x74f0ff,
+            secondaryColor: 0x071c3d,
+            edgeColor: 0xe1fcff,
+            emissiveColor: 0x59dfff,
+            emissiveIntensity: 0.6,
+            metalness: 0.84,
+            roughness: 0.09,
+            clearcoat: 0.96,
+            clearcoatRoughness: 0.14,
+            transmission: 0.22,
+            thickness: 1.85,
+            iridescence: 0.65,
+            sheen: 0.65,
+            sheenColor: 0xe1ffff,
+            envMapIntensity: 2.05,
+            accentMix: 0.94,
+            glowFalloff: 2.4,
+            depthAccentStrength: 0.38,
+            scanlineFrequency: (Math.PI * 2) / Math.max(this.height / 4, 1),
+            scanlineStrength: 0.3,
+            dimensions: sciFiSliceDims,
+            stripeFrequency: (Math.PI * 2) / Math.max(this.width / 6, 1),
+            stripeStrength: 0.42,
+            rimIntensity: 0.82,
+            gradientSharpness: 1.5,
+            gradientBias: 0.035,
+            fresnelBoost: 0.45,
+            glintStrength: 0.28,
+            noiseStrength: 0.06
+        });
 
-        const capEps = 0.05;
         const frontCaps = new THREE.Mesh(capGeoFront.clone(), capMatFront);
-        const backCaps = new THREE.Mesh(capGeoBack.clone(), capMatBack);
-
+        const backCaps  = new THREE.Mesh(capGeoBack.clone(),  capMatBack);
+        const capEps = 0.05;
         frontCaps.position.z = depthSpan / 2 + capEps;
         backCaps.position.z = -depthSpan / 2 - capEps;
         backCaps.rotation.y = Math.PI;
 
+        // ----------------------------------------------------------
+        // Store references and add to group
+        // ----------------------------------------------------------
         this.mesh = inst;
         this.frontCapMesh = frontCaps;
-        this.backCapMesh = backCaps;
+        this.backCapMesh  = backCaps;
 
         this.group.add(inst);
         this.group.add(frontCaps);
         this.group.add(backCaps);
 
+        updateSciFiDimensions(mat, sciFiSliceDims);
+        updateSciFiDimensions(capMatFront, sciFiSliceDims);
+        updateSciFiDimensions(capMatBack, sciFiSliceDims);
+
+        // Render ordering – caps slightly after side walls to minimise z-fighting
         this.mesh.renderOrder = 0;
         this.frontCapMesh.renderOrder = 1;
-        this.backCapMesh.renderOrder = 2;
+        this.backCapMesh.renderOrder  = 2;
 
-        const dims = { width: this.width, height: this.height, depth: depthSpan };
-        updateSciFiDimensions(this.mesh.material, dims);
-        updateSciFiDimensions(this.frontCapMesh.material, dims);
-        updateSciFiDimensions(this.backCapMesh.material, dims);
-    }
-
-    setCapVisibility(showFront = true, showBack = true) {
-        if (this.frontCapMesh) this.frontCapMesh.visible = !!showFront;
-        if (this.backCapMesh) this.backCapMesh.visible = !!showBack;
+        // Dispose of the temporary object to free GPU resources
+        if (tmp) {
+            tmp.dispose && tmp.dispose();
+        }
     }
 
     updateData(data) {
-        console.log('Updating weight matrix with data:', data);
+        // Placeholder for updating visualization based on data
+        console.log("Updating weight matrix with data:", data);
+        // Example: Change color based on data
+        // const averageValue = data.reduce((sum, val) => sum + val, 0) / data.length;
+        // const colorIntensity = Math.min(1, Math.max(0, averageValue)); // Normalize
+        // this.setColor(new THREE.Color().setHSL(0.6, 1.0, colorIntensity * 0.5 + 0.25));
     }
 
+    // Method to update geometry based on new parameters
     updateGeometry(params) {
+        // Update properties using nullish coalescing for defaults
         this.width = params.width ?? this.width;
         this.height = params.height ?? this.height;
         this.depth = params.depth ?? this.depth;
@@ -1141,20 +938,22 @@ export class WeightMatrixVisualization {
         this.cornerRadius = params.cornerRadius ?? this.cornerRadius;
         this.numberOfSlits = params.numberOfSlits ?? this.numberOfSlits;
         this.slitWidth = params.slitWidth ?? this.slitWidth;
-
-        this.slitDepthFactor = params.slitDepthFactor !== undefined
-            ? clamp01(params.slitDepthFactor)
+        
+        // Update new parameters (excluding slit color/opacity)
+        // this.slitHeight = params.slitHeight ?? this.slitHeight; // Removed
+        this.slitDepthFactor = params.slitDepthFactor !== undefined 
+            ? Math.max(0, Math.min(1, params.slitDepthFactor)) // Clamp between 0 and 1
             : this.slitDepthFactor;
-
         this.slitBottomWidthFactor = params.slitBottomWidthFactor ?? this.slitBottomWidthFactor;
         this.slitTopWidthFactor = params.slitTopWidthFactor ?? this.slitTopWidthFactor;
 
-        this._createMesh();
+        this._createMesh(); // Recreate the mesh with new parameters
     }
 
+    // Optional animation method
     animatePulse(time) {
         if (!this.mesh) return;
-        const scale = 1 + Math.sin(time * 5) * 0.05;
+        const scale = 1 + Math.sin(time * 5) * 0.05; // Gentle pulse
         this.mesh.scale.set(scale, scale, scale);
     }
 
@@ -1171,76 +970,69 @@ export class WeightMatrixVisualization {
                 updateSciFiMaterialColor(mat, color);
             }
         };
-
         applyColor(this.mesh?.material);
-        applyColor(this.frontCapMesh?.material);
-        applyColor(this.backCapMesh?.material);
+        applyColor(this.frontCapMesh?.material); // Apply to caps too
+        applyColor(this.backCapMesh?.material);  // Apply to caps too
     }
 
     setMaterialProperties(props) {
         const applyProps = (mat) => {
-            if (!mat) return;
-
-            if (props.metalness !== undefined) mat.metalness = props.metalness;
-            if (props.roughness !== undefined) mat.roughness = props.roughness;
-            if (props.clearcoat !== undefined) mat.clearcoat = props.clearcoat;
-            if (props.clearcoatRoughness !== undefined) mat.clearcoatRoughness = props.clearcoatRoughness;
-            if (props.iridescence !== undefined) mat.iridescence = props.iridescence;
-            if (props.envMapIntensity !== undefined) mat.envMapIntensity = props.envMapIntensity;
-            if (props.emissive !== undefined && mat.emissive) mat.emissive.set(props.emissive);
-            if (props.emissiveIntensity !== undefined) mat.emissiveIntensity = props.emissiveIntensity;
-            if (props.opacity !== undefined) mat.opacity = props.opacity;
-            if (props.transparent !== undefined) mat.transparent = props.transparent;
-            mat.needsUpdate = true;
-        };
-
-        const apply = (target) => {
-            if (!target) return;
-            if (Array.isArray(target)) {
-                target.forEach(applyProps);
-            } else {
-                applyProps(target);
+            if (mat) {
+                 if (Array.isArray(mat)) {
+                    mat.forEach(m => {
+                        if (props.metalness !== undefined) m.metalness = props.metalness;
+                        if (props.roughness !== undefined) m.roughness = props.roughness;
+                        if (props.clearcoat !== undefined) m.clearcoat = props.clearcoat;
+                        if (props.clearcoatRoughness !== undefined) m.clearcoatRoughness = props.clearcoatRoughness;
+                        if (props.iridescence !== undefined) m.iridescence = props.iridescence;
+                        if (props.envMapIntensity !== undefined) m.envMapIntensity = props.envMapIntensity;
+                        if (props.emissive !== undefined) m.emissive.set(props.emissive);
+                        if (props.emissiveIntensity !== undefined) m.emissiveIntensity = props.emissiveIntensity;
+                        if (props.opacity !== undefined) m.opacity = props.opacity;
+                        if (props.transparent !== undefined) m.transparent = props.transparent;
+                    });
+                } else {
+                    if (props.metalness !== undefined) mat.metalness = props.metalness;
+                    if (props.roughness !== undefined) mat.roughness = props.roughness;
+                    if (props.clearcoat !== undefined) mat.clearcoat = props.clearcoat;
+                    if (props.clearcoatRoughness !== undefined) mat.clearcoatRoughness = props.clearcoatRoughness;
+                    if (props.iridescence !== undefined) mat.iridescence = props.iridescence;
+                    if (props.envMapIntensity !== undefined) mat.envMapIntensity = props.envMapIntensity;
+                    if (props.emissive !== undefined) mat.emissive.set(props.emissive);
+                    if (props.emissiveIntensity !== undefined) mat.emissiveIntensity = props.emissiveIntensity;
+                    if (props.opacity !== undefined) mat.opacity = props.opacity;
+                    if (props.transparent !== undefined) mat.transparent = props.transparent;
+                }
             }
         };
-
-        apply(this.mesh?.material);
-        apply(this.frontCapMesh?.material);
-        apply(this.backCapMesh?.material);
+        applyProps(this.mesh?.material);
+        applyProps(this.frontCapMesh?.material); 
+        applyProps(this.backCapMesh?.material);  
     }
 
+    // Convenience method to set emissive color and intensity
     setEmissive(color, intensity) {
         this.setMaterialProperties({ emissive: color, emissiveIntensity: intensity });
     }
 
+    // Convenience method to set opacity (and ensure transparency is enabled)
     setOpacity(opacity) {
-        this.setMaterialProperties({ opacity, transparent: true });
+        this.setMaterialProperties({ opacity: opacity, transparent: true });
     }
 
-    dispose() {
-        this._clearMesh();
-    }
-
+    /**
+     * Register a pre-generated BufferGeometry so that future WeightMatrixVisualization
+     * instances can reuse it immediately without running the heavy CSG build.
+     * @param {string} cacheKey – The key returned by the internal getCacheKey(..) helper.
+     * @param {THREE.BufferGeometry} geometry – A **non-indexed** BufferGeometry to reuse.
+     */
     static registerPrecomputedGeometry(cacheKey, geometry, material = null) {
         if (!cacheKey || !geometry) return;
-        const normalizedKey = mapLegacyCacheKeyToCurrent(cacheKey);
-        const geometryClone = geometry.clone();
-
-        if (!__geometryCache.has(normalizedKey)) {
-            __geometryCache.set(normalizedKey, geometryClone.clone());
-        }
-
         if (!__geometryCache.has(cacheKey)) {
-            __geometryCache.set(cacheKey, geometryClone.clone());
+            __geometryCache.set(cacheKey, geometry);
         }
-
-        if (material) {
-            const materialClone = material.clone();
-            if (!__materialCache.has(normalizedKey)) {
-                __materialCache.set(normalizedKey, materialClone.clone());
-            }
-            if (!__materialCache.has(cacheKey)) {
-                __materialCache.set(cacheKey, materialClone.clone());
-            }
+        if (material && !__materialCache.has(cacheKey)) {
+            __materialCache.set(cacheKey, material);
         }
     }
 }
