@@ -248,7 +248,7 @@ export function addEmbeddingAndTokenChips({
     const rootGroup = new THREE.Group();
     rootGroup.name = 'EmbeddingAndTokenChips';
     let disposed = false;
-    const progressHandlers = new Set();
+    let progressHandler = null;
 
     const disposeObject = (obj) => {
         if (!obj) return;
@@ -269,16 +269,6 @@ export function addEmbeddingAndTokenChips({
             return;
         }
         rootGroup.add(obj);
-    };
-    const addProgressHandler = (handler) => {
-        if (!handler || !pipeline || typeof pipeline.addEventListener !== 'function') return;
-        progressHandlers.add(handler);
-        pipeline.addEventListener('progress', handler);
-    };
-    const removeProgressHandler = (handler) => {
-        if (!handler || !pipeline || typeof pipeline.removeEventListener !== 'function') return;
-        pipeline.removeEventListener('progress', handler);
-        progressHandlers.delete(handler);
     };
 
     engine.scene.add(rootGroup);
@@ -355,64 +345,6 @@ export function addEmbeddingAndTokenChips({
 
         const vocabMatrixBottomY = bottomVocabCenterY - EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2;
         const posMatrixBottomY = bottomPosCenterY - EMBEDDING_MATRIX_PARAMS_POSITION.height / 2;
-        const vocabMatrixTopY = bottomVocabCenterY + EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2;
-        const posMatrixTopY = bottomPosCenterY + EMBEDDING_MATRIX_PARAMS_POSITION.height / 2;
-        const embeddingExitEpsilon = 0.25;
-        const embeddedTokenChips = [];
-        const embeddedPositionChips = [];
-        let tokenChipsRemoved = false;
-        let positionChipsRemoved = false;
-        const removeEmbeddedChips = (chips) => {
-            while (chips.length > 0) {
-                const chip = chips.pop();
-                if (!chip) continue;
-                if (chip.parent) {
-                    chip.parent.remove(chip);
-                }
-                disposeObject(chip);
-            }
-        };
-        const didTokenVectorsExitBottomEmbedding = () => {
-            const firstLayer = pipeline?._layers?.[0];
-            const lanes = Array.isArray(firstLayer?.lanes) ? firstLayer.lanes : [];
-            if (!lanes.length) return false;
-            return lanes.every((lane) => {
-                const y = lane?.originalVec?.group?.position?.y;
-                return Number.isFinite(y) && y > vocabMatrixTopY + embeddingExitEpsilon;
-            });
-        };
-        const didPositionVectorsExitBottomEmbedding = () => {
-            const firstLayer = pipeline?._layers?.[0];
-            const lanes = Array.isArray(firstLayer?.lanes) ? firstLayer.lanes : [];
-            if (!lanes.length) return false;
-            return lanes.every((lane) => {
-                const y = lane?.posVec?.group?.position?.y;
-                if (Number.isFinite(y)) {
-                    return y > posMatrixTopY + embeddingExitEpsilon;
-                }
-                return !!lane?.posAddComplete;
-            });
-        };
-        const maybeCullEmbeddedChips = () => {
-            if (!tokenChipsRemoved && embeddedTokenChips.length > 0 && didTokenVectorsExitBottomEmbedding()) {
-                removeEmbeddedChips(embeddedTokenChips);
-                tokenChipsRemoved = true;
-            }
-            if (!positionChipsRemoved && embeddedPositionChips.length > 0 && didPositionVectorsExitBottomEmbedding()) {
-                removeEmbeddedChips(embeddedPositionChips);
-                positionChipsRemoved = true;
-            }
-            return tokenChipsRemoved && positionChipsRemoved;
-        };
-        if (pipeline && typeof pipeline.addEventListener === 'function') {
-            const onProgress = () => {
-                if (maybeCullEmbeddedChips()) {
-                    removeProgressHandler(onProgress);
-                }
-            };
-            addProgressHandler(onProgress);
-            onProgress();
-        }
         const chipStartZOffset = TOKEN_CHIP_STYLE.zOffset;
         const chipFontLoader = new FontLoader();
         const registerChip = (chip) => addToRoot(chip);
@@ -461,7 +393,6 @@ export function addEmbeddingAndTokenChips({
 
                 chip.position.set(vocabX, startY, startZ);
                 registerChip(chip);
-                embeddedTokenChips.push(chip);
 
                 // Keep a static chip below the stack for context once the animated one rises.
                 const staticChip = createTokenChip(label, font, TOKEN_CHIP_STYLE);
@@ -503,7 +434,6 @@ export function addEmbeddingAndTokenChips({
 
                 chip.position.set(posX, startY, startZ);
                 registerChip(chip);
-                embeddedPositionChips.push(chip);
 
                 // Static chip for the position stream, matching the token chips below.
                 const staticChip = createTokenChip(label, font, style);
@@ -530,7 +460,6 @@ export function addEmbeddingAndTokenChips({
                 if (disposed) return;
                 spawnTokenChips(font);
                 spawnPositionChips(font);
-                maybeCullEmbeddedChips();
                 applyPhysicalMaterialsToScene(engine.scene, USE_PHYSICAL_MATERIALS);
             },
             undefined,
@@ -539,7 +468,6 @@ export function addEmbeddingAndTokenChips({
                 console.warn('Token chip font failed to load, rendering without labels.', err);
                 spawnTokenChips(null);
                 spawnPositionChips(null);
-                maybeCullEmbeddedChips();
                 applyPhysicalMaterialsToScene(engine.scene, USE_PHYSICAL_MATERIALS);
             }
         );
@@ -639,10 +567,11 @@ export function addEmbeddingAndTokenChips({
                 };
                 const onProgress = () => {
                     if (maybeReveal()) {
-                        removeProgressHandler(onProgress);
+                        pipeline.removeEventListener('progress', onProgress);
                     }
                 };
-                addProgressHandler(onProgress);
+                progressHandler = onProgress;
+                pipeline.addEventListener('progress', onProgress);
                 onProgress();
             }
         }
@@ -653,11 +582,8 @@ export function addEmbeddingAndTokenChips({
     const dispose = () => {
         if (disposed) return;
         disposed = true;
-        if (pipeline && typeof pipeline.removeEventListener === 'function') {
-            progressHandlers.forEach((handler) => {
-                pipeline.removeEventListener('progress', handler);
-            });
-            progressHandlers.clear();
+        if (progressHandler && pipeline && typeof pipeline.removeEventListener === 'function') {
+            pipeline.removeEventListener('progress', progressHandler);
         }
         if (engine && typeof engine.removeRaycastRoot === 'function') {
             engine.removeRaycastRoot(rootGroup);

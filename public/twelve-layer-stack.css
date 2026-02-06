@@ -295,7 +295,7 @@ body.touch-ui * {
 #hudPanel {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 6px 12px;
+    gap: 8px 12px;
     padding: 10px 12px;
     color: #fff;
     background: rgba(12,12,12,0.9);
@@ -304,7 +304,6 @@ body.touch-ui * {
     box-shadow: 0 10px 28px rgba(0,0,0,0.32);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
-    position: relative;
 }
 #hudPanel.detail-open {
     border-bottom-left-radius: 0;
@@ -322,7 +321,6 @@ body.touch-ui * {
     background: transparent;
     white-space: pre-line;
     pointer-events: none;
-    padding-right: 140px;
 }
 
 #parameterCounter {
@@ -333,9 +331,6 @@ body.touch-ui * {
     text-align: right;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     pointer-events: none;
-    position: absolute;
-    top: 10px;
-    right: 12px;
 }
 #parameterCounter .param-label {
     font-size: 11px;
@@ -1207,9 +1202,8 @@ body.touch-ui * {
         max-width: calc(100vw - 16px);
         gap: 0;
     }
-    #hudPanel { padding: 6px 8px; gap: 2px 8px; position: relative; }
-    #statusOverlay { font-size: 11px; line-height: 1.12; padding-right: 110px; }
-    #parameterCounter { position: absolute; top: 6px; right: 8px; }
+    #hudPanel { padding: 6px 8px; gap: 4px 8px; }
+    #statusOverlay { font-size: 11px; line-height: 1.12; }
     #parameterCounter .param-value { font-size: 15px; }
     #equationsPanel {
         height: 64px;
@@ -1247,9 +1241,8 @@ body.touch-ui * {
         max-width: calc(100vw - 16px);
         gap: 0;
     }
-    #hudPanel { padding: 6px 8px; gap: 2px 8px; position: relative; }
-    #statusOverlay { font-size: 11px; line-height: 1.12; padding-right: 110px; }
-    #parameterCounter { position: absolute; top: 6px; right: 8px; }
+    #hudPanel { padding: 6px 8px; gap: 4px 8px; }
+    #statusOverlay { font-size: 11px; line-height: 1.12; }
     #parameterCounter .param-label { font-size: 10px; }
     #parameterCounter .param-value { font-size: 15px; }
     #equationsPanel {

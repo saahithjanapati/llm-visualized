@@ -98,8 +98,6 @@ export function createSciFiMaterial(options = {}) {
         emissive: toColor(emissiveColor, 0x2fffff),
         emissiveIntensity
     });
-    material.extensions = material.extensions || {};
-    material.extensions.derivatives = true;
 
     const dims = resolveDimensions(dimensions);
 
@@ -145,26 +143,6 @@ export function createSciFiMaterial(options = {}) {
                 '#include <common>\nvarying vec3 vLocalPos;\nvarying vec3 vWorldNormal;\nuniform vec3 uAccentColor;\nuniform vec3 uSecondaryColor;\nuniform vec3 uEdgeColor;\nuniform vec3 uDimensions;\nuniform float uStripeFrequency;\nuniform float uStripeStrength;\nuniform float uRimIntensity;\nuniform float uGradientSharpness;\nuniform float uGradientBias;\nuniform float uFresnelBoost;\nuniform float uAccentMix;\nuniform float uGlowFalloff;\nuniform float uDepthAccentStrength;\nuniform float uScanlineFrequency;\nuniform float uScanlineStrength;\nuniform float uGlintStrength;\nuniform float uNoiseStrength;\n'
             )
             .replace(
-                '#include <normal_fragment_begin>',
-                '#include <normal_fragment_begin>\nfloat topMask = smoothstep(0.6, 0.92, abs(normalize(vWorldNormal).y));\n'
-            )
-            .replace(
-                'float roughnessFactor = roughness;',
-                'float roughnessFactor = mix(roughness, max(roughness, 0.65), topMask);'
-            )
-            .replace(
-                'float clearcoat = clearcoat;',
-                'float clearcoat = mix(clearcoat, clearcoat * 0.35, topMask);'
-            )
-            .replace(
-                'float clearcoatRoughness = clearcoatRoughness;',
-                'float clearcoatRoughness = mix(clearcoatRoughness, max(clearcoatRoughness, 0.55), topMask);'
-            )
-            .replace(
-                'float iridescence = iridescence;',
-                'float iridescence = mix(iridescence, iridescence * 0.2, topMask);'
-            )
-            .replace(
                 '#include <color_fragment>',
                 `#include <color_fragment>
                 vec3 dims = max(uDimensions, vec3(0.0001));
@@ -172,25 +150,19 @@ export function createSciFiMaterial(options = {}) {
                 float gradMix = pow(yNorm, max(uGradientSharpness, 0.001));
                 vec3 gradColor = mix(uSecondaryColor, uAccentColor, gradMix);
 
-                float stripePhase = vLocalPos.z * uStripeFrequency;
-                float stripeDeriv = fwidth(stripePhase);
-                float stripeFade = 1.0 - clamp(stripeDeriv * 2.5, 0.0, 1.0);
-                float stripes = abs(sin(stripePhase));
+                float stripes = abs(sin(vLocalPos.z * uStripeFrequency));
                 stripes = pow(stripes, 4.0) * (1.0 - abs(vWorldNormal.y));
-                vec3 stripeColor = uEdgeColor * stripes * uStripeStrength * stripeFade;
+                vec3 stripeColor = uEdgeColor * stripes * uStripeStrength;
 
                 vec3 nrm = normalize(vWorldNormal);
-                float topSuppression = 1.0 - topMask;
                 float rim = pow(1.0 - abs(dot(nrm, vec3(0.0, 0.0, 1.0))), 3.0);
                 rim += pow(1.0 - abs(dot(nrm, vec3(0.0, 1.0, 0.0))), 4.0) * 0.5;
 
                 vec3 fresnelDir = normalize(vViewPosition);
                 float fresnel = pow(1.0 - max(dot(nrm, fresnelDir), 0.0), 3.0);
 
-                float scanPhase = (vLocalPos.y + dims.y * 0.5) * uScanlineFrequency;
-                float scanline = 0.5 + 0.5 * sin(scanPhase);
-                float scanFade = 1.0 - clamp(fwidth(scanPhase) * 2.0, 0.0, 1.0);
-                vec3 scanColor = uAccentColor * (pow(scanline, 6.0) * uScanlineStrength * topSuppression * scanFade);
+                float scanline = 0.5 + 0.5 * sin((vLocalPos.y + dims.y * 0.5) * uScanlineFrequency);
+                vec3 scanColor = uAccentColor * (pow(scanline, 6.0) * uScanlineStrength);
 
                 float depthNorm = clamp((vLocalPos.z / dims.z) * 0.5 + 0.5, 0.0, 1.0);
                 float glow = exp(-abs(vLocalPos.x) / max(dims.x, 0.0001) * uGlowFalloff);
@@ -199,14 +171,14 @@ export function createSciFiMaterial(options = {}) {
                 vec3 rimColor = uEdgeColor * (rim * uRimIntensity + fresnel * uFresnelBoost);
 
                 vec3 highlightDir = normalize(vec3(0.35, 0.85, 0.2));
-                float glint = pow(max(dot(nrm, highlightDir), 0.0), 16.0) * uGlintStrength * topSuppression;
+                float glint = pow(max(dot(nrm, highlightDir), 0.0), 16.0) * uGlintStrength;
                 vec3 glintColor = uEdgeColor * glint;
 
                 float holoNoise = fract(sin(dot(vLocalPos.xz, vec2(12.9898, 78.233))) * 43758.5453);
-                vec3 noiseColor = uEdgeColor * pow(holoNoise, 4.0) * uNoiseStrength * topSuppression;
+                vec3 noiseColor = uEdgeColor * pow(holoNoise, 4.0) * uNoiseStrength;
 
                 diffuseColor.rgb = mix(diffuseColor.rgb, gradColor, clamp(uAccentMix, 0.0, 1.0));
-                diffuseColor.rgb += stripeColor * topSuppression;
+                diffuseColor.rgb += stripeColor;
                 diffuseColor.rgb += rimColor;
                 diffuseColor.rgb += scanColor;
                 diffuseColor.rgb += depthAccent;

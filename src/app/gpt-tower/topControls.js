@@ -250,5 +250,43 @@ export function initTopControlsAutohide({ topControls, settingsOverlay }) {
         triggerTopControlClick(button, event);
     }, { capture: true });
 
+    window.addEventListener('pointerdown', (event) => {
+        if (!topControls) return;
+        const wasHidden = topControls.dataset.autoHidden === 'true';
+        const hasPoint = wasHidden && typeof event.clientX === 'number' && typeof event.clientY === 'number';
+        const tapPoint = hasPoint ? { x: event.clientX, y: event.clientY } : null;
+        let preButton = null;
+        let insideBefore = false;
+        if (tapPoint) {
+            try {
+                const rect = topControls.getBoundingClientRect();
+                insideBefore = tapPoint.x >= rect.left && tapPoint.x <= rect.right
+                    && tapPoint.y >= rect.top && tapPoint.y <= rect.bottom;
+                if (insideBefore) {
+                    preButton = findTopControlButtonAt(tapPoint.x, tapPoint.y);
+                }
+            } catch (_) { /* no-op */ }
+        }
+        showTopControls();
+        if (wasHidden && tapPoint) {
+            requestAnimationFrame(() => {
+                let button = preButton;
+                if (!button) {
+                    try {
+                        const rect = topControls.getBoundingClientRect();
+                        const insideAfter = tapPoint.x >= rect.left && tapPoint.x <= rect.right
+                            && tapPoint.y >= rect.top && tapPoint.y <= rect.bottom;
+                        if (insideAfter) {
+                            button = findTopControlButtonAt(tapPoint.x, tapPoint.y);
+                        }
+                    } catch (_) { /* no-op */ }
+                }
+                if (button && typeof button.click === 'function') {
+                    triggerTopControlClick(button, event);
+                }
+            });
+        }
+    }, { passive: true });
+
     return { showTopControls, isTopControlsVisible };
 }

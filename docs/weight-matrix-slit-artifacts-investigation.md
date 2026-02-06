@@ -696,3 +696,104 @@ Follow-up if both retain artifacts:
 ### Status
 - Attempts 30/31 are considered unsuccessful from user acceptance perspective.
 - Working direction reset to: keep investigation log updated, revert these code-path modifications, and continue from prior stable visuals in future attempts.
+
+---
+
+## 32. Slit-only deterministic topology retry (`wm-fp-v11`) with chamfered slit mouths, while preserving baseline MHSA runtime behavior
+### Change
+- Updated `src/components/WeightMatrixVisualization.js`:
+  - Reintroduced deterministic non-CSG slit geometry generation path (`buildFirstPrinciplesSlitWeightMatrixGeometry(...)`).
+  - Added slit-mouth chamfer transitions (small bevel from mouth edge into channel walls):
+    - `SLIT_MOUTH_CHAMFER_DEPTH_RATIO`
+    - `SLIT_MOUTH_CHAMFER_DEPTH_MAX`
+    - `SLIT_MOUTH_CHAMFER_INSET_RATIO`
+    - `resolveSlitMouthChamfer(...)`
+    - `addRectInsetTransition(...)`
+  - Restored cap meshes for slit-enabled matrices (front/back overlays remain present).
+  - Removed prior slit-depth normalization behavior that changed matrix depth span.
+  - Re-enabled baseline-style deep instancing eligibility for slit-enabled matrices (no slit-only instancing disable).
+  - Added a guard so instanced-slice mode requires multiple slit lanes (`numberOfSlits > 1`) to avoid accidental depth collapse for no-slit cases.
+  - Bumped weight-matrix geometry version to `wm-fp-v11`.
+  - Updated precomputed registration behavior so legacy slit geometries are **not** mapped into current-version (`v11`) cache keys, ensuring slit-enabled matrices use newly generated geometry.
+
+### Rationale
+- Prior deterministic rewrite attempts reduced CSG dependence but caused unacceptable runtime regressions in MHSA flow when combined with broader behavioral changes (instancing/depth/cap changes).
+- This pass narrows scope to geometry topology only:
+  - keep runtime/depth/instancing behavior close to accepted baseline,
+  - but replace CSG slit subtraction with deterministic slit surfaces and chamfer the mouth edges to reduce minification shimmer/striping around slit openings.
+
+### Outcome
+- `npm run build` passes.
+- Node-side sanity checks pass:
+  - slit-enabled matrices can build in both instanced and non-instanced modes,
+  - no-slit deep case no longer collapses to single-slice depth,
+  - generated position buffers are finite.
+- Visual outcome pending user verification.
+
+---
+
+## 33. Disabled instanced-slice path for slit-enabled matrices on `wm-fp-v11`
+### Change
+- Updated `_createMesh()` instancing gate in `src/components/WeightMatrixVisualization.js`:
+  - added `&& !slitEnabled` to `wantsInstancedSlices`.
+- This keeps:
+  - deterministic non-CSG slit geometry from attempt 32,
+  - cap overlays enabled,
+  - full caller-provided depth span,
+  - slit material path unchanged.
+- Only slit-enabled matrices are affected; non-slit matrices still follow existing instancing eligibility.
+
+### Rationale
+- Remaining artifacts are still consistent with slice-boundary seam/minification behavior in deep instanced slit rendering.
+- Prior broad changes caused unacceptable regressions; this is a narrow isolation step to remove only the instanced-seam factor for slit matrices.
+
+### Outcome
+- `npm run build` passes.
+- Node sanity check confirms slit-enabled deep matrix now builds as non-instanced full-depth mesh:
+  - `instanced: false`, `zSpan: 3000`, caps present.
+- Visual outcome pending user verification.
+
+---
+
+## 34. Restored slit lane-span depth normalization to fix length regression after attempt 33
+### Change
+- Reintroduced `_resolveGeometryDepth()` in `src/components/WeightMatrixVisualization.js`.
+- In `_createMesh()`, routed `geometryDepth` through `_resolveGeometryDepth()` instead of raw `this.depth`.
+- Behavior:
+  - For slit-enabled canonical lane configs (`depth ~= (N+1) * VECTOR_DEPTH_SPACING`), use lane span (`N * VECTOR_DEPTH_SPACING`).
+  - For custom/non-canonical depths, keep caller-provided depth.
+  - Non-slit matrices remain unchanged.
+
+### Rationale
+- Attempt 33 intentionally disabled instanced slit rendering, which restored full depth for slit matrices and made them appear longer than LayerNorm again.
+- This patch preserves attempt-33 seam isolation while restoring historical visual length parity with lane-based components.
+
+### Outcome
+- `npm run build` passes.
+- Node sanity checks:
+  - canonical slit lane config: `instanced: false`, `zSpan: 2500` for `depthParam: 3000`,
+  - custom slit depth remains exact (`zSpan: 2700` for `depthParam: 2700`),
+  - no-slit config remains unchanged.
+
+---
+
+## 35. Slit geometry normal finalization pass for diagonal seam suppression (`wm-fp-v12`)
+### Change
+- Updated `src/components/WeightMatrixVisualization.js`:
+  - Added `finalizeFirstPrinciplesGeometry(...)` for deterministic slit meshes:
+    - deletes raw face normals,
+    - recomputes vertex normals,
+    - runs `toCreasedNormals(..., Math.PI / 3)` before returning.
+  - Routed `buildFirstPrinciplesSlitWeightMatrixGeometry(...)` output through this finalization step.
+  - Bumped geometry version key from `wm-fp-v11` to `wm-fp-v12` to avoid stale cache reuse during verification.
+
+### Rationale
+- Persistent “weird diagonal lines” around slit surfaces are consistent with per-triangle normal discontinuities along internal quad diagonals.
+- This pass targets only slit-geometry shading finalization without changing slit topology, depth policy, or animation flow.
+
+### Outcome
+- `npm run build` passes.
+- Node sanity check confirms:
+  - slit canonical lane config remains non-instanced and lane-span depth (`zSpan: 2500`),
+  - normal buffers are finite after finalization.
+- Visual outcome pending user verification.
