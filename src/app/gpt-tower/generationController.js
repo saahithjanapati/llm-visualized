@@ -6,7 +6,7 @@ import { addEmbeddingAndTokenChips } from './tokenChips.js';
 import { formatTokenLabel } from './tokenLabels.js';
 import { initTouchClickFallback } from '../../ui/touchClickFallback.js';
 
-const DEFAULT_ADVANCE_SECONDS = 10;
+const DEFAULT_ADVANCE_SECONDS = 10; // Countdown before auto-advance.
 
 export function buildPassState({
     activationSource,
