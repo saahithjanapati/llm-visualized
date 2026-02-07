@@ -262,7 +262,9 @@ export function addEmbeddingAndTokenChips({
     const rootGroup = new THREE.Group();
     rootGroup.name = 'EmbeddingAndTokenChips';
     let disposed = false;
-    let progressHandler = null;
+    let topLogitProgressHandler = null;
+    let chipRemovalProgressHandler = null;
+    let chipEntryTimeoutId = null;
 
     const disposeObject = (obj) => {
         if (!obj) return;
@@ -359,16 +361,77 @@ export function addEmbeddingAndTokenChips({
 
         const vocabMatrixBottomY = bottomVocabCenterY - EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2;
         const posMatrixBottomY = bottomPosCenterY - EMBEDDING_MATRIX_PARAMS_POSITION.height / 2;
+        const bottomEmbeddingVectorStartY = bottomVocabCenterY + EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2;
+        const laneSpanMs = TOKEN_CHIP_STYLE.riseDelay * Math.max(0, laneCount - 1);
+        const vocabRiseDuration = TOKEN_CHIP_STYLE.riseDuration * (TOKEN_CHIP_STYLE.vocabSlowdown || 1);
+        const posRiseDuration = TOKEN_CHIP_STYLE.riseDuration * (TOKEN_CHIP_STYLE.positionSlowdown || 1);
+        const maxChipRiseDuration = Math.max(vocabRiseDuration, posRiseDuration) + laneSpanMs;
         const chipStartZOffset = TOKEN_CHIP_STYLE.zOffset;
         const chipFontLoader = new FontLoader();
+        const animatedEmbeddingChips = [];
+        let chipsEnteredEmbedding = false;
+        let chipsRemovedFromEmbedding = false;
+        const clearChipEntryTimeout = () => {
+            if (chipEntryTimeoutId) {
+                clearTimeout(chipEntryTimeoutId);
+                chipEntryTimeoutId = null;
+            }
+        };
+        const removeAnimatedEmbeddingChips = () => {
+            if (chipsRemovedFromEmbedding) return;
+            chipsRemovedFromEmbedding = true;
+            animatedEmbeddingChips.forEach((chip) => {
+                if (!chip) return;
+                if (chip.parent) {
+                    chip.parent.remove(chip);
+                }
+                disposeObject(chip);
+            });
+            animatedEmbeddingChips.length = 0;
+        };
+        const haveBottomVectorsRisenFromEmbedding = () => {
+            const firstLayer = pipeline?._layers?.[0];
+            const lanes = Array.isArray(firstLayer?.lanes) ? firstLayer.lanes : [];
+            if (!lanes.length) return false;
+            return lanes.some((lane) => {
+                const y = lane?.originalVec?.group?.position?.y;
+                return Number.isFinite(y) && y > bottomEmbeddingVectorStartY + 0.25;
+            });
+        };
+        const maybeRemoveEmbeddedChips = () => {
+            if (disposed || chipsRemovedFromEmbedding || !chipsEnteredEmbedding) return;
+            if (!haveBottomVectorsRisenFromEmbedding()) return;
+            removeAnimatedEmbeddingChips();
+            if (chipRemovalProgressHandler && pipeline && typeof pipeline.removeEventListener === 'function') {
+                pipeline.removeEventListener('progress', chipRemovalProgressHandler);
+                chipRemovalProgressHandler = null;
+            }
+        };
+        const armEmbeddedChipRemoval = () => {
+            clearChipEntryTimeout();
+            const entryDelayMs = (typeof TWEEN !== 'undefined') ? Math.max(0, maxChipRiseDuration + 60) : 0;
+            if (entryDelayMs <= 0) {
+                chipsEnteredEmbedding = true;
+                maybeRemoveEmbeddedChips();
+                return;
+            }
+            chipEntryTimeoutId = setTimeout(() => {
+                chipEntryTimeoutId = null;
+                if (disposed) return;
+                chipsEnteredEmbedding = true;
+                maybeRemoveEmbeddedChips();
+            }, entryDelayMs);
+        };
+        if (pipeline && typeof pipeline.addEventListener === 'function') {
+            chipRemovalProgressHandler = () => {
+                maybeRemoveEmbeddedChips();
+            };
+            pipeline.addEventListener('progress', chipRemovalProgressHandler);
+        }
         const registerChip = (chip) => addToRoot(chip);
         const spawnTokenChips = (font) => {
             if (disposed) return;
             // Animate the token chips upward from a resting "stash" position.
-            const vocabRiseDuration = TOKEN_CHIP_STYLE.riseDuration * (TOKEN_CHIP_STYLE.vocabSlowdown || 1);
-            const posRiseDuration = TOKEN_CHIP_STYLE.riseDuration * (TOKEN_CHIP_STYLE.positionSlowdown || 1);
-            const laneSpanMs = TOKEN_CHIP_STYLE.riseDelay * Math.max(0, laneCount - 1);
-            const maxRiseDuration = Math.max(vocabRiseDuration, posRiseDuration) + laneSpanMs;
             const cameraStartPos = new THREE.Vector3(
                 vocabX + EMBEDDING_MATRIX_PARAMS_VOCAB.width * 0.4,
                 bottomVocabCenterY - EMBEDDING_MATRIX_PARAMS_VOCAB.height * 0.8,
@@ -379,7 +442,7 @@ export function addEmbeddingAndTokenChips({
                 bottomVocabCenterY + EMBEDDING_MATRIX_PARAMS_VOCAB.height * 0.2,
                 0
             );
-            const adjustedHoldMs = maxRiseDuration + TOKEN_CHIP_STYLE.cameraHoldMs;
+            const adjustedHoldMs = maxChipRiseDuration + TOKEN_CHIP_STYLE.cameraHoldMs;
             stageChipCamera(
                 pipeline,
                 cameraStartPos,
@@ -407,6 +470,7 @@ export function addEmbeddingAndTokenChips({
 
                 chip.position.set(vocabX, startY, startZ);
                 registerChip(chip);
+                animatedEmbeddingChips.push(chip);
 
                 // Keep a static chip below the stack for context once the animated one rises.
                 const staticChip = createTokenChip(label, font, TOKEN_CHIP_STYLE);
@@ -448,6 +512,7 @@ export function addEmbeddingAndTokenChips({
 
                 chip.position.set(posX, startY, startZ);
                 registerChip(chip);
+                animatedEmbeddingChips.push(chip);
 
                 // Static chip for the position stream, matching the token chips below.
                 const staticChip = createTokenChip(label, font, style);
@@ -474,6 +539,7 @@ export function addEmbeddingAndTokenChips({
                 if (disposed) return;
                 spawnTokenChips(font);
                 spawnPositionChips(font);
+                armEmbeddedChipRemoval();
                 applyPhysicalMaterialsToScene(engine.scene, USE_PHYSICAL_MATERIALS);
             },
             undefined,
@@ -482,6 +548,7 @@ export function addEmbeddingAndTokenChips({
                 console.warn('Token chip font failed to load, rendering without labels.', err);
                 spawnTokenChips(null);
                 spawnPositionChips(null);
+                armEmbeddedChipRemoval();
                 applyPhysicalMaterialsToScene(engine.scene, USE_PHYSICAL_MATERIALS);
             }
         );
@@ -671,7 +738,7 @@ export function addEmbeddingAndTokenChips({
                         pipeline.removeEventListener('progress', onProgress);
                     }
                 };
-                progressHandler = onProgress;
+                topLogitProgressHandler = onProgress;
                 pipeline.addEventListener('progress', onProgress);
                 onProgress();
             }
@@ -683,8 +750,17 @@ export function addEmbeddingAndTokenChips({
     const dispose = () => {
         if (disposed) return;
         disposed = true;
-        if (progressHandler && pipeline && typeof pipeline.removeEventListener === 'function') {
-            pipeline.removeEventListener('progress', progressHandler);
+        if (chipEntryTimeoutId) {
+            clearTimeout(chipEntryTimeoutId);
+            chipEntryTimeoutId = null;
+        }
+        if (chipRemovalProgressHandler && pipeline && typeof pipeline.removeEventListener === 'function') {
+            pipeline.removeEventListener('progress', chipRemovalProgressHandler);
+            chipRemovalProgressHandler = null;
+        }
+        if (topLogitProgressHandler && pipeline && typeof pipeline.removeEventListener === 'function') {
+            pipeline.removeEventListener('progress', topLogitProgressHandler);
+            topLogitProgressHandler = null;
         }
         if (engine && typeof engine.removeRaycastRoot === 'function') {
             engine.removeRaycastRoot(rootGroup);

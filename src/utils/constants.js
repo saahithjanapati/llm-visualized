@@ -63,11 +63,9 @@ export const QUALITY_PRESET = 'high';
 export const RENDER_DPR_CAP = 2.0; // used by CoreEngine and intro renderer
 
 /**
- * Determine the effective renderer DPR cap taking overrides and extremely
- * dense displays into account. For very high DPI screens (DPR >= 2.5) we clamp
- * further to avoid rendering at an excessively high resolution which can look
- * harsh and cost extra GPU time. A runtime override can still lower the value
- * via `window.__RENDER_DPR_CAP` before the bundles execute.
+ * Determine the effective renderer DPR cap taking an optional runtime override
+ * into account. A runtime override can still lower the value via
+ * `window.__RENDER_DPR_CAP` before the bundles execute.
  *
  * @returns {number}
  */
@@ -83,14 +81,6 @@ export function resolveRenderDprCap() {
     const override = window.__RENDER_DPR_CAP;
     if (typeof override === 'number' && override > 0) {
         return Math.min(baseCap, override);
-    }
-
-    const deviceDpr = typeof window.devicePixelRatio === 'number'
-        ? window.devicePixelRatio
-        : 1;
-
-    if (deviceDpr >= 2.5) {
-        return Math.min(baseCap, 1.75);
     }
 
     return baseCap;
