@@ -36,8 +36,8 @@ const PREVIEW_TARGET_SIZE = 140;
 // Base framing for most objects; vector previews can request additional padding.
 const PREVIEW_FRAME_PADDING = 1.25;
 const PREVIEW_BASE_DISTANCE_MULT = 1.15;
-const PREVIEW_VECTOR_PADDING_MULT = 3.0;
-const PREVIEW_VECTOR_DISTANCE_MULT = 2.4;
+const PREVIEW_VECTOR_PADDING_MULT = 2.4;
+const PREVIEW_VECTOR_DISTANCE_MULT = 1.9;
 const PREVIEW_ROTATION_SPEED = 0.0035;
 const PREVIEW_BASE_TILT_X = -0.12;
 const PREVIEW_BASE_ROTATION_Y = 0.38;
@@ -47,7 +47,7 @@ const PREVIEW_FIT_LOCK_MS = 500;
 const PREVIEW_FIT_LOCK_PX = 120;
 const PREVIEW_FIT_LOCK_RATIO = 0.18;
 const FINAL_MLP_COLOR = 0xc07a12;
-const FINAL_VOCAB_TOP_COLOR = 0x000000;
+const FINAL_VOCAB_TOP_COLOR = MHA_FINAL_Q_COLOR;
 const PREVIEW_QKV_LANES = 3;
 const PREVIEW_QKV_LANE_SPACING = 360;
 const PREVIEW_VECTOR_LARGE_SCALE = 1.0;
@@ -412,7 +412,7 @@ function resolveFinalPreviewColor(label) {
     if (lower.includes('output projection matrix')) return MHA_OUTPUT_PROJECTION_MATRIX_COLOR;
     if (lower.includes('mlp up weight matrix')) return FINAL_MLP_COLOR;
     if (lower.includes('mlp down weight matrix')) return FINAL_MLP_COLOR;
-    if (lower.includes('vocab embedding')) {
+    if (lower.includes('vocab embedding') || lower.includes('unembedding')) {
         return lower.includes('top') ? FINAL_VOCAB_TOP_COLOR : MHA_FINAL_Q_COLOR;
     }
     if (lower.includes('positional embedding')) return POSITION_EMBED_COLOR;
@@ -1893,10 +1893,14 @@ function resolvePreviewObject(label, selectionInfo) {
     if (lower.includes('mlp down weight matrix')) {
         return buildWeightMatrixPreview(MLP_MATRIX_PARAMS_DOWN, FINAL_MLP_COLOR);
     }
-    if (lower.includes('vocab embedding')) {
+    if (lower.includes('vocab embedding') || lower.includes('unembedding')) {
         const clonePreview = buildSelectionClonePreview(selectionInfo, label)
             || buildDirectClonePreview(selectionInfo);
-        if (clonePreview) return clonePreview;
+        if (clonePreview) {
+            const color = lower.includes('top') ? FINAL_VOCAB_TOP_COLOR : MHA_FINAL_Q_COLOR;
+            applyFinalColorToObject(clonePreview.object, color);
+            return clonePreview;
+        }
         const color = lower.includes('top') ? FINAL_VOCAB_TOP_COLOR : MHA_FINAL_Q_COLOR;
         return buildWeightMatrixPreview(EMBEDDING_MATRIX_PARAMS_VOCAB, color);
     }
@@ -3046,17 +3050,33 @@ class SelectionPanel {
     }
 
     _syncEnvironment() {
-        const env = appState.environmentTexture;
+        const engineEnv = this.engine?.scene?.environment || null;
+        const env = engineEnv || appState.environmentTexture;
         if (env && this._environmentTexture !== env) {
             this.scene.environment = env;
             this._environmentTexture = env;
             if (this.ambientLight) this.ambientLight.intensity = 0.0;
-            this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-            this.renderer.toneMappingExposure = 1.0;
         } else if (!env && this._environmentTexture) {
             this.scene.environment = null;
             this._environmentTexture = null;
             if (this.ambientLight) this.ambientLight.intensity = this._ambientBaseIntensity;
+        }
+
+        const sourceRenderer = this.engine?.renderer || null;
+        if (sourceRenderer) {
+            this.renderer.toneMapping = sourceRenderer.toneMapping;
+            this.renderer.toneMappingExposure = Number.isFinite(sourceRenderer.toneMappingExposure)
+                ? sourceRenderer.toneMappingExposure
+                : 1.0;
+            if ('outputColorSpace' in this.renderer && 'outputColorSpace' in sourceRenderer) {
+                this.renderer.outputColorSpace = sourceRenderer.outputColorSpace;
+            } else if ('outputEncoding' in this.renderer && 'outputEncoding' in sourceRenderer) {
+                this.renderer.outputEncoding = sourceRenderer.outputEncoding;
+            }
+        } else if (env) {
+            this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            this.renderer.toneMappingExposure = 1.0;
+        } else {
             this.renderer.toneMapping = THREE.NoToneMapping;
             this.renderer.toneMappingExposure = 1.0;
         }
@@ -3171,9 +3191,10 @@ class SelectionPanel {
         }
         if (this.params) this.params.textContent = metadata.params;
         const hideLayerNormFields = isLayerNormSolidSelection(label);
+        const hideTensorDimsField = hideLayerNormFields || isAttentionScoreSelection(label, selection);
         const dimsRow = this.dims?.closest('.detail-row') || null;
-        if (this.dims) this.dims.textContent = hideLayerNormFields ? '' : metadata.dims;
-        if (dimsRow) dimsRow.style.display = hideLayerNormFields ? 'none' : '';
+        if (this.dims) this.dims.textContent = hideTensorDimsField ? '' : metadata.dims;
+        if (dimsRow) dimsRow.style.display = hideTensorDimsField ? 'none' : '';
         if (this.description) {
             const desc = resolveDescription(label, selection.kind, selection);
             setDescriptionContent(this.description, desc || '');

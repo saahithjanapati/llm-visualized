@@ -3,6 +3,7 @@ import { CoreEngine } from './CoreEngine.js';
 import { AutoCameraController } from './AutoCameraController.js';
 import Gpt2Layer from './layers/Gpt2Layer.js';
 import { createRandomSource } from '../data/RandomActivationSource.js';
+import { getLayerNormParamData } from '../data/layerNormParams.js';
 import {
     MLP_MATRIX_PARAMS_DOWN,
     EMBEDDING_MATRIX_PARAMS_VOCAB,
@@ -49,8 +50,66 @@ function simplePrismMultiply(srcVec, tgtVec, onComplete) {
 const COLOR_DARK_GRAY = new THREE.Color(0x333333);
 const COLOR_LIGHT_YELLOW = new THREE.Color(0xffffff);
 const COLOR_BRIGHT_YELLOW = new THREE.Color(0xffffff);
+const LN_PARAM_MONOCHROME = {
+    type: 'monochromatic',
+    baseHue: 0,
+    saturation: 0,
+    minLightness: 0.03,
+    maxLightness: 0.88,
+    useData: true,
+    valueMin: -1.8,
+    valueMax: 1.8
+};
+const FINAL_LN_INPUT_LIGHT_BLUE = {
+    type: 'hueRange',
+    baseHue: 0.56,
+    hueSpread: 0.12,
+    saturation: 0.92,
+    minLightness: 0.42,
+    maxLightness: 0.84,
+    valueMin: -2,
+    valueMax: 2,
+    valueClampMin: -2,
+    valueClampMax: 2
+};
 
 const TMP_WORLD_POS = new THREE.Vector3();
+
+function isArrayLike(values) {
+    return Array.isArray(values) || ArrayBuffer.isView(values);
+}
+
+function toMutableArray(values, targetLength, fallbackValue = 0) {
+    const length = Math.max(1, Math.floor(targetLength || 1));
+    if (!isArrayLike(values) || values.length === 0) {
+        return new Array(length).fill(fallbackValue);
+    }
+    const source = Array.isArray(values) ? values : Array.from(values);
+    if (source.length === length) return source.slice();
+    if (source.length > length) return source.slice(0, length);
+    const out = source.slice();
+    const padValue = Number.isFinite(source[source.length - 1]) ? source[source.length - 1] : fallbackValue;
+    while (out.length < length) out.push(padValue);
+    return out;
+}
+
+function recolorVectorFromData(vec, values, colorOptions = null) {
+    if (!vec || !isArrayLike(values) || values.length === 0) return;
+    vec.rawData = Array.isArray(values) ? values.slice() : Array.from(values);
+    const numKeyColors = Math.min(30, Math.max(1, vec.rawData.length || 1));
+    vec.updateKeyColorsFromData(vec.rawData, numKeyColors, colorOptions, values);
+}
+
+function buildElementwiseSum(lhs, rhs, targetLength) {
+    const length = Math.max(1, Math.floor(targetLength || 1));
+    const out = new Array(length);
+    for (let i = 0; i < length; i++) {
+        const left = isArrayLike(lhs) ? (lhs[i] || 0) : 0;
+        const right = isArrayLike(rhs) ? (rhs[i] || 0) : 0;
+        out[i] = left + right;
+    }
+    return out;
+}
 
 /**
  * LayerPipeline orchestrates a single bundle of vectors ("lanes") through an
@@ -88,6 +147,7 @@ export class LayerPipeline extends EventTarget {
         this._postResetTrailPurgeRaf = null;
         this._postResetTrailPurgeUntil = 0;
         this._trailPassId = 1;
+        this._topLnParamPlaceholders = null;
 
         // ------------------------------------------------------------------
         // Pre-create *all* layers so their static visuals are visible upfront.
@@ -286,6 +346,7 @@ export class LayerPipeline extends EventTarget {
         }
 
         this._trailPassId = (Number.isFinite(this._trailPassId) ? this._trailPassId : 0) + 1;
+        this._topLnParamPlaceholders = null;
         if (engine && engine.scene && engine.scene.userData) {
             engine.scene.userData.trailPassId = this._trailPassId;
         }
@@ -527,6 +588,13 @@ export class LayerPipeline extends EventTarget {
     _restoreSkipLayerSpeeds() {
         if (!this._skipLayerActive) return;
         const restore = this._skipLayerRestore;
+        if (Array.isArray(this._layers)) {
+            this._layers.forEach(layer => {
+                if (layer && typeof layer.setSkipToEndMode === 'function') {
+                    layer.setSkipToEndMode(false);
+                }
+            });
+        }
         if (restore) {
             if (this._engine && typeof this._engine.setSpeed === 'function') {
                 this._engine.setSpeed(restore.engineSpeed);
@@ -920,6 +988,38 @@ export class LayerPipeline extends EventTarget {
                 }
             };
 
+            const getFinalLnParamData = (param, targetLength) => {
+                const fallbackValue = param === 'scale' ? 1 : 0;
+                const fromParams = getLayerNormParamData(lastLayer.index, 'final', param, targetLength);
+                return toMutableArray(fromParams, targetLength, fallbackValue);
+            };
+
+            const getFinalLnStageData = (stage, lane, targetLength) => {
+                const tokenIndex = (lane && Number.isFinite(lane.tokenIndex))
+                    ? lane.tokenIndex
+                    : null;
+                if (!Number.isFinite(tokenIndex)) return null;
+                const source = this._activationSource;
+                if (!source || typeof source.getFinalLayerNorm !== 'function') return null;
+                try {
+                    return source.getFinalLayerNorm(stage, tokenIndex, targetLength);
+                } catch (_) {
+                    return null;
+                }
+            };
+
+            const topLnPlaceholders = (
+                this._topLnParamPlaceholders
+                && this._topLnParamPlaceholders.layerIndex === lastLayer.index
+            ) ? this._topLnParamPlaceholders : null;
+            const hideTopLnPlaceholder = (laneIdx, kind) => {
+                if (!topLnPlaceholders || !Number.isFinite(laneIdx)) return;
+                const list = kind === 'scale' ? topLnPlaceholders.scale : topLnPlaceholders.shift;
+                if (!Array.isArray(list)) return;
+                const vec = list[laneIdx];
+                if (vec && vec.group) vec.group.visible = false;
+            };
+
             lastLayer.lanes.forEach(lane => {
                 const vec = lane && lane.originalVec;
                 if (!vec || !vec.group) return;
@@ -940,33 +1040,71 @@ export class LayerPipeline extends EventTarget {
                 if (!Number.isFinite(startY)) return;
 
                 const zPos = lane.zPos || 0;
-                const multVec = new VectorVisualizationInstancedPrism(
-                    vec.rawData.slice(),
-                    new THREE.Vector3(0, lnCenterY, zPos),
-                    30,
-                    vec.instanceCount
-                );
-                lastLayer.root.add(multVec.group);
-                multVec.group.visible = false;
-                markSkipVisible(multVec);
+                const targetLength = Math.max(1, Math.floor(vec.instanceCount || VECTOR_LENGTH_PRISM));
+                const finalScaleParams = getFinalLnParamData('scale', targetLength);
+                const finalShiftParams = getFinalLnParamData('shift', targetLength);
+                const laneIdx = Number.isFinite(lane?.laneIndex) ? lane.laneIndex : -1;
+                const scalePlaceholder = (laneIdx >= 0 && topLnPlaceholders && Array.isArray(topLnPlaceholders.scale))
+                    ? topLnPlaceholders.scale[laneIdx]
+                    : null;
+                const shiftPlaceholder = (laneIdx >= 0 && topLnPlaceholders && Array.isArray(topLnPlaceholders.shift))
+                    ? topLnPlaceholders.shift[laneIdx]
+                    : null;
+                const usingScalePlaceholder = !!(scalePlaceholder && scalePlaceholder.group);
+                const usingShiftPlaceholder = !!(shiftPlaceholder && shiftPlaceholder.group);
 
-                const addVec = new VectorVisualizationInstancedPrism(
-                    vec.rawData.slice(),
-                    new THREE.Vector3(0, lnCenterY + LN_PARAMS.height / 4, zPos),
-                    30,
-                    vec.instanceCount
-                );
-                lastLayer.root.add(addVec.group);
-                addVec.group.visible = false;
+                let multVec = usingScalePlaceholder ? scalePlaceholder : null;
+                if (!multVec) {
+                    multVec = new VectorVisualizationInstancedPrism(
+                        finalScaleParams,
+                        new THREE.Vector3(0, lnCenterY, zPos),
+                        30,
+                        vec.instanceCount
+                    );
+                    lastLayer.root.add(multVec.group);
+                    multVec.group.visible = false;
+                }
+                markSkipVisible(multVec);
+                recolorVectorFromData(multVec, finalScaleParams, LN_PARAM_MONOCHROME);
+
+                let addVec = usingShiftPlaceholder ? shiftPlaceholder : null;
+                if (!addVec) {
+                    addVec = new VectorVisualizationInstancedPrism(
+                        finalShiftParams,
+                        new THREE.Vector3(0, lnCenterY + LN_PARAMS.height / 4, zPos),
+                        30,
+                        vec.instanceCount
+                    );
+                    lastLayer.root.add(addVec.group);
+                    addVec.group.visible = false;
+                }
                 markSkipVisible(addVec);
+                recolorVectorFromData(addVec, finalShiftParams, LN_PARAM_MONOCHROME);
+
+                const applyFinalLnInputColor = () => {
+                    if (lane.__topLnInputColored) return;
+                    recolorVectorFromData(vec, vec.rawData, FINAL_LN_INPUT_LIGHT_BLUE);
+                    lane.__topLnInputColored = true;
+                };
+                const activateFinalLnParamColors = () => {
+                    if (lane.__topLnParamsColored) return;
+                    recolorVectorFromData(multVec, multVec.rawData, null);
+                    recolorVectorFromData(addVec, addVec.rawData, null);
+                    lane.__topLnParamsColored = true;
+                };
+                const markTopLnEntered = () => {
+                    if (!lane.__topLnEntered) lane.__topLnEntered = true;
+                    if (multVec && multVec.group) multVec.group.visible = true;
+                    if (addVec && addVec.group) addVec.group.visible = true;
+                    applyFinalLnInputColor();
+                    activateFinalLnParamColors();
+                };
 
                 const normAnim = new PrismLayerNormAnimation(vec);
                 let normLoopActive = false;
 
                 if (startY >= lnBottomY) {
-                    multVec.group.visible = true;
-                    addVec.group.visible = true;
-                    lane.__topLnEntered = true;
+                    markTopLnEntered();
                 }
 
                 const startFinalRise = (resVec) => {
@@ -997,8 +1135,11 @@ export class LayerPipeline extends EventTarget {
                 const beginMultiply = () => {
                     if (lane.__topLnMultStarted) return;
                     lane.__topLnMultStarted = true;
+                    if (!usingScalePlaceholder) hideTopLnPlaceholder(lane && lane.laneIndex, 'scale');
+                    if (!usingShiftPlaceholder) hideTopLnPlaceholder(lane && lane.laneIndex, 'shift');
                     multVec.group.visible = true;
                     addVec.group.visible = true;
+                    activateFinalLnParamColors();
 
                     simplePrismMultiply(vec, multVec, () => {
                         updateTopLnColor(multVec.group.position.y);
@@ -1014,7 +1155,7 @@ export class LayerPipeline extends EventTarget {
                         lastLayer.root.add(resVec.group);
                         markSkipVisible(resVec);
 
-                        if (multVec.group && multVec.group.parent) {
+                        if (!usingScalePlaceholder && multVec.group && multVec.group.parent) {
                             multVec.group.parent.remove(multVec.group);
                         }
 
@@ -1027,6 +1168,11 @@ export class LayerPipeline extends EventTarget {
 
                         updateTopLnColor(resVec.group.position.y);
                         this.dispatchEvent(new Event('progress'));
+
+                        const finalLnShiftedData = getFinalLnStageData('shift', lane, resVec.instanceCount);
+                        const finalAdditionData = (isArrayLike(finalLnShiftedData) && finalLnShiftedData.length)
+                            ? finalLnShiftedData
+                            : buildElementwiseSum(resVec.rawData, addVec.rawData, resVec.instanceCount);
 
                         lane.__topLnShiftStarted = true;
                         startPrismAdditionAnimation(resVec, addVec, null, () => {
@@ -1070,7 +1216,10 @@ export class LayerPipeline extends EventTarget {
                             lane.originalVec = addVec;
                             markSkipVisible(addVec);
                             startFinalRise(addVec);
-                        }, { suppressResidualTrailUpdates: true });
+                        }, {
+                            suppressResidualTrailUpdates: true,
+                            finalData: finalAdditionData
+                        });
 
                         const additionDuration = additionDurationFor(resVec);
                         new TWEEN.Tween({ t: 0 })
@@ -1157,6 +1306,9 @@ export class LayerPipeline extends EventTarget {
                         vec.group.position.y = stageTarget;
                         updateTopLnColor(vec.group.position.y);
                         updateTrailPosition(vec);
+                        if (vec.group.position.y >= lnBottomY) {
+                            markTopLnEntered();
+                        }
                         this.dispatchEvent(new Event('progress'));
                         startNormalization();
                         return;
@@ -1171,9 +1323,7 @@ export class LayerPipeline extends EventTarget {
                             updateTopLnColor(vec.group.position.y);
                             updateTrailPosition(vec);
                             if (!lane.__topLnEntered && vec.group.position.y >= lnBottomY) {
-                                lane.__topLnEntered = true;
-                                multVec.group.visible = true;
-                                addVec.group.visible = true;
+                                markTopLnEntered();
                             }
                             this.dispatchEvent(new Event('progress'));
                         })

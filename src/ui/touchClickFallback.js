@@ -28,6 +28,18 @@ const isElementDisabled = (el) => {
     return false;
 };
 
+const resolveActivationTarget = (target) => {
+    if (!target) return null;
+    const tag = target.tagName?.toUpperCase?.() || '';
+    if (tag === 'LABEL') {
+        const control = target.control || target.querySelector?.('input, button, select, textarea');
+        if (control && typeof control.click === 'function' && !isElementDisabled(control)) {
+            return control;
+        }
+    }
+    return target;
+};
+
 export function initTouchClickFallback(container, { selector = 'button', tapSlopPx = DEFAULT_TAP_SLOP_PX } = {}) {
     if (!container) return () => {};
 
@@ -74,7 +86,6 @@ export function initTouchClickFallback(container, { selector = 'button', tapSlop
             startY,
             moved: false
         };
-        if (event.cancelable) event.preventDefault();
     };
 
     const onPointerMove = (event) => {
@@ -92,9 +103,9 @@ export function initTouchClickFallback(container, { selector = 'button', tapSlop
         active = null;
         if (moved || !target || isElementDisabled(target)) return;
         registerPendingClick(target);
-        if (event.cancelable) event.preventDefault();
-        if (typeof target.click === 'function') {
-            target.click();
+        const activationTarget = resolveActivationTarget(target);
+        if (activationTarget && typeof activationTarget.click === 'function') {
+            activationTarget.click();
         }
     };
 

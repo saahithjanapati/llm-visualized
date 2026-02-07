@@ -862,10 +862,21 @@ export class CoreEngine {
         this._scheduleRaycast();
     };
 
+    _isRaycastObjectVisible(object) {
+        let current = object;
+        while (current) {
+            if (current.visible === false) return false;
+            current = current.parent;
+        }
+        return true;
+    }
+
     _resolveRaycastLabel(intersects) {
         if (!intersects || !intersects.length) return null;
+        const visibleHits = intersects.filter((hit) => this._isRaycastObjectVisible(hit?.object));
+        if (!visibleHits.length) return null;
         // Pass 1: Prefer detailed labels from merged K/V instanced meshes anywhere in the hit list
-        for (const hit of intersects) {
+        for (const hit of visibleHits) {
             try {
                 const obj = hit.object;
                 if (obj && obj.isInstancedMesh) {
@@ -891,7 +902,7 @@ export class CoreEngine {
         }
 
         // Pass 1.25: Attention-sphere instanced mesh (per-instance activation data)
-        for (const hit of intersects) {
+        for (const hit of visibleHits) {
             const obj = hit.object;
             if (!obj || !obj.isInstancedMesh || typeof hit.instanceId !== 'number') continue;
             if (!obj.userData || !obj.userData._attentionSphereInstanced) continue;
@@ -910,7 +921,7 @@ export class CoreEngine {
         }
 
         // Pass 1.5: Instance-specific labels for other instanced meshes (e.g. top logit bars)
-        for (const hit of intersects) {
+        for (const hit of visibleHits) {
             const obj = hit.object;
             if (!obj || !obj.isInstancedMesh) continue;
             const labels = obj.userData?.instanceLabels;
@@ -931,7 +942,7 @@ export class CoreEngine {
         }
 
         // Pass 2: Fallback – show the first generic label found
-        for (const hit of intersects) {
+        for (const hit of visibleHits) {
             let obj = hit.object;
             while (obj) {
                 const lbl = obj.userData?.label || obj.name;

@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import { WeightMatrixVisualization } from '../../components/WeightMatrixVisualization.js';
 import { LayerNormalizationVisualization } from '../../components/LayerNormalizationVisualization.js';
+import { VectorVisualizationInstancedPrism } from '../../components/VectorVisualizationInstancedPrism.js';
+import { getLayerNormParamData } from '../../data/layerNormParams.js';
 import {
     EMBEDDING_MATRIX_PARAMS_VOCAB,
     EMBEDDING_MATRIX_PARAMS_POSITION,
@@ -18,7 +20,8 @@ import {
     TOP_EMBED_Y_GAP_ABOVE_TOWER,
     TOP_EMBED_Y_ADJUST,
     TOP_LN_TO_TOP_EMBED_GAP,
-    USE_PHYSICAL_MATERIALS
+    USE_PHYSICAL_MATERIALS,
+    VECTOR_LENGTH_PRISM
 } from '../../utils/constants.js';
 import {
     MHA_FINAL_Q_COLOR,
@@ -32,6 +35,17 @@ import { applyPhysicalMaterialsToScene } from '../../utils/materialUtils.js';
 import { TOKEN_CHIP_STYLE, POSITION_CHIP_STYLE } from './config.js';
 import { formatTokenLabel } from './tokenLabels.js';
 import { addTopLogitBars, revealTopLogitBars } from './topLogitBars.js';
+
+const LN_PARAM_MONOCHROME = {
+    type: 'monochromatic',
+    baseHue: 0,
+    saturation: 0,
+    minLightness: 0.03,
+    maxLightness: 0.88,
+    useData: true,
+    valueMin: -1.8,
+    valueMax: 1.8
+};
 
 // Build a rounded rectangle shape used for the token chip body.
 function buildRoundedRectShape(width, height, radius) {
@@ -475,6 +489,7 @@ export function addEmbeddingAndTokenChips({
         // Top-of-tower LayerNorm + vocab projection marker.
         const lastLayer = pipeline._layers[numLayers - 1];
         if (lastLayer && lastLayer.mlpDown && lastLayer.mlpDown.group) {
+            pipeline._topLnParamPlaceholders = null;
             const tmp = new THREE.Vector3();
             lastLayer.mlpDown.group.getWorldPosition(tmp);
             const towerTopY = tmp.y + MLP_MATRIX_PARAMS_DOWN.height / 2;
@@ -494,6 +509,92 @@ export function addEmbeddingAndTokenChips({
             lnTop.setColor(new THREE.Color(INACTIVE_COMPONENT_COLOR));
             lnTop.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
             addToRoot(lnTop.group);
+
+            // Final LayerNorm parameter placeholders (gamma/beta), visible in grayscale
+            // before activation, matching per-layer LayerNorm behavior.
+            try {
+                const instanceCount = Number.isFinite(lastLayer?._getBaseVectorLength?.())
+                    ? Math.max(1, Math.floor(lastLayer._getBaseVectorLength()))
+                    : Math.max(1, Math.floor(lastLayer?.lanes?.[0]?.originalVec?.instanceCount || VECTOR_LENGTH_PRISM));
+                const finalScaleDataRaw = getLayerNormParamData(lastLayer.index, 'final', 'scale', instanceCount);
+                const finalShiftDataRaw = getLayerNormParamData(lastLayer.index, 'final', 'shift', instanceCount);
+                const finalScaleData = (Array.isArray(finalScaleDataRaw) && finalScaleDataRaw.length)
+                    ? finalScaleDataRaw
+                    : new Array(instanceCount).fill(1);
+                const finalShiftData = (Array.isArray(finalShiftDataRaw) && finalShiftDataRaw.length)
+                    ? finalShiftDataRaw
+                    : new Array(instanceCount).fill(0);
+                const finalParamParent = lastLayer.raycastRoot || lastLayer.root;
+                const addYOffset = LN_PARAMS.height * 0.25;
+                const scalePlaceholders = new Array(laneCount);
+                const shiftPlaceholders = new Array(laneCount);
+
+                for (let laneIdx = 0; laneIdx < laneCount; laneIdx++) {
+                    const zPos = laneZs[laneIdx];
+                    const scaleWorldPos = new THREE.Vector3(
+                        TOP_EMBED_VOCAB_X_OFFSET,
+                        topLnCenterY + 3.3,
+                        zPos
+                    );
+                    const shiftWorldPos = new THREE.Vector3(
+                        TOP_EMBED_VOCAB_X_OFFSET,
+                        topLnCenterY + addYOffset,
+                        zPos
+                    );
+                    const scaleLocalPos = scaleWorldPos.clone();
+                    const shiftLocalPos = shiftWorldPos.clone();
+                    lastLayer.root.worldToLocal(scaleLocalPos);
+                    lastLayer.root.worldToLocal(shiftLocalPos);
+
+                    const scaleVec = new VectorVisualizationInstancedPrism(
+                        finalScaleData.slice(),
+                        scaleLocalPos,
+                        30,
+                        instanceCount
+                    );
+                    scaleVec.group.userData.label = 'Final LN Scale (gamma)';
+                    scaleVec.group.userData.skipVisible = true;
+                    if (scaleVec.mesh) {
+                        scaleVec.mesh.userData = scaleVec.mesh.userData || {};
+                        scaleVec.mesh.userData.skipVisible = true;
+                    }
+                    scaleVec.group.visible = true;
+                    {
+                        const n = Math.min(30, Math.max(1, scaleVec.rawData.length || 1));
+                        scaleVec.updateKeyColorsFromData(scaleVec.rawData, n, LN_PARAM_MONOCHROME, scaleVec.rawData);
+                    }
+                    finalParamParent.add(scaleVec.group);
+                    scalePlaceholders[laneIdx] = scaleVec;
+
+                    const shiftVec = new VectorVisualizationInstancedPrism(
+                        finalShiftData.slice(),
+                        shiftLocalPos,
+                        30,
+                        instanceCount
+                    );
+                    shiftVec.group.userData.label = 'Final LN Shift (beta)';
+                    shiftVec.group.userData.skipVisible = true;
+                    if (shiftVec.mesh) {
+                        shiftVec.mesh.userData = shiftVec.mesh.userData || {};
+                        shiftVec.mesh.userData.skipVisible = true;
+                    }
+                    shiftVec.group.visible = true;
+                    {
+                        const n = Math.min(30, Math.max(1, shiftVec.rawData.length || 1));
+                        shiftVec.updateKeyColorsFromData(shiftVec.rawData, n, LN_PARAM_MONOCHROME, shiftVec.rawData);
+                    }
+                    finalParamParent.add(shiftVec.group);
+                    shiftPlaceholders[laneIdx] = shiftVec;
+                }
+
+                pipeline._topLnParamPlaceholders = {
+                    layerIndex: lastLayer.index,
+                    scale: scalePlaceholders,
+                    shift: shiftPlaceholders
+                };
+            } catch (_) {
+                pipeline._topLnParamPlaceholders = null;
+            }
 
             const topVocabCenterY = topLnCenterY
                 + (LN_PARAMS.height / 2)
@@ -592,6 +693,23 @@ export function addEmbeddingAndTokenChips({
             rootGroup.parent.remove(rootGroup);
         }
         disposeObject(rootGroup);
+        const topLnPlaceholders = pipeline && pipeline._topLnParamPlaceholders;
+        if (topLnPlaceholders) {
+            const refs = [
+                ...(Array.isArray(topLnPlaceholders.scale) ? topLnPlaceholders.scale : []),
+                ...(Array.isArray(topLnPlaceholders.shift) ? topLnPlaceholders.shift : [])
+            ];
+            refs.forEach((vec) => {
+                if (!vec) return;
+                if (vec.group && vec.group.parent) {
+                    vec.group.parent.remove(vec.group);
+                }
+                if (typeof vec.dispose === 'function') {
+                    try { vec.dispose(); } catch (_) { /* best-effort cleanup */ }
+                }
+            });
+            pipeline._topLnParamPlaceholders = null;
+        }
         if (appState.vocabTopRef) {
             appState.vocabTopRef = null;
         }

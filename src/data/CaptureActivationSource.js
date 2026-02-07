@@ -91,6 +91,9 @@ export class CaptureActivationSource {
         this.activations = this.data.activations || {};
         this.embeddings = this.activations.embeddings || {};
         this.layers = Array.isArray(this.activations.layers) ? this.activations.layers : [];
+        this.finalLayerNorm = this.activations && this.activations.final_layernorm
+            ? this.activations.final_layernorm
+            : null;
         this.tokenStrings = Array.isArray(this.meta.token_strings) ? this.meta.token_strings : [];
         this.logits = Array.isArray(this.data.logits) ? this.data.logits : [];
         this._laneTokenCache = new Map();
@@ -233,6 +236,17 @@ export class CaptureActivationSource {
         if (!arr || !arr.length) return null;
         const idx = clampIndex(tokenIndex, arr.length - 1);
         const cacheKey = buildCacheKey(['ln2', stage, layerIndex, idx, targetLength]);
+        return this._getCached(this._vectorCache, cacheKey, () => (
+            normalizeVector(decodeVector(arr[idx]), targetLength, true)
+        ));
+    }
+
+    getFinalLayerNorm(stage, tokenIndex, targetLength = VECTOR_LENGTH_PRISM) {
+        const finalLn = this.finalLayerNorm;
+        const arr = finalLn && Array.isArray(finalLn[stage]) ? finalLn[stage] : null;
+        if (!arr || !arr.length) return null;
+        const idx = clampIndex(tokenIndex, arr.length - 1);
+        const cacheKey = buildCacheKey(['final_ln', stage, idx, targetLength]);
         return this._getCached(this._vectorCache, cacheKey, () => (
             normalizeVector(decodeVector(arr[idx]), targetLength, true)
         ));

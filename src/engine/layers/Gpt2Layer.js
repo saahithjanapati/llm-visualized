@@ -2209,9 +2209,12 @@ export default class Gpt2Layer extends BaseLayer {
     setOnFinished(cb) { this.onFinished = typeof cb === 'function' ? cb : null; }
 
     setSkipToEndMode(enabled = true) {
+        const wasActive = this._skipToEndActive;
         this._skipToEndActive = !!enabled;
         if (this._skipToEndActive) {
             this._applySkipVectorVisibility();
+        } else if (wasActive) {
+            this._restoreSkipHiddenVectorMaterials();
         }
         if (this.mhsaAnimation && typeof this.mhsaAnimation.setSkipToEndMode === 'function') {
             this.mhsaAnimation.setSkipToEndMode(this._skipToEndActive);
@@ -2265,6 +2268,31 @@ export default class Gpt2Layer extends BaseLayer {
                     hidden.delete(mat);
                 }
             });
+        });
+    }
+
+    _restoreSkipHiddenVectorMaterials() {
+        if (!this.root) return;
+        const hidden = this._skipHiddenMaterials;
+        this.root.traverse(obj => {
+            if (!obj || !obj.isMesh || !obj.material) return;
+            if (!this._isVectorVisual(obj)) return;
+            const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+            let restoredAny = false;
+            mats.forEach(mat => {
+                if (!mat) return;
+                const prev = hidden.get(mat);
+                if (!prev) return;
+                mat.opacity = prev.opacity;
+                mat.transparent = prev.transparent;
+                mat.depthWrite = prev.depthWrite;
+                mat.needsUpdate = true;
+                hidden.delete(mat);
+                restoredAny = true;
+            });
+            if (restoredAny) {
+                obj.visible = true;
+            }
         });
     }
 
