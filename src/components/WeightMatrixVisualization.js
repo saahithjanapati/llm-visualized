@@ -15,6 +15,34 @@ const __geometryCache = new Map();
 const __capFrontCache = new Map();
 const __capBackCache  = new Map();
 const __materialCache = new Map();
+
+function buildChamferedRectShape(width, height, chamfer) {
+    const hw = width / 2;
+    const hh = height / 2;
+    const c = Math.max(0, Math.min(chamfer, hw, hh));
+    const shape = new THREE.Shape();
+
+    if (c < 1e-4) {
+        shape.moveTo(-hw, -hh);
+        shape.lineTo(hw, -hh);
+        shape.lineTo(hw, hh);
+        shape.lineTo(-hw, hh);
+        shape.closePath();
+        return shape;
+    }
+
+    shape.moveTo(-hw + c, -hh);
+    shape.lineTo(hw - c, -hh);
+    shape.lineTo(hw, -hh + c);
+    shape.lineTo(hw, hh - c);
+    shape.lineTo(hw - c, hh);
+    shape.lineTo(-hw + c, hh);
+    shape.lineTo(-hw, hh - c);
+    shape.lineTo(-hw, -hh + c);
+    shape.closePath();
+    return shape;
+}
+
 function getCacheKey(width, height, depth, topWidthFactor, cornerRadius, numberOfSlits, slitWidth, slitDepthFactor, slitBottomWidthFactor, slitTopWidthFactor) {
     return [width, height, depth, topWidthFactor, cornerRadius, numberOfSlits, slitWidth, slitDepthFactor, slitBottomWidthFactor, slitTopWidthFactor, QUALITY_PRESET].join('|');
 }
@@ -306,19 +334,49 @@ export class WeightMatrixVisualization {
                 if (safeTopWidth > 0) dynamicTopWidth = Math.min(dynamicTopWidth, safeTopWidth);
                 if (safeBottomWidth > 0) dynamicBottomWidth = Math.min(dynamicBottomWidth, safeBottomWidth);
 
-                if (Math.abs(dynamicBottomWidth - dynamicTopWidth) < 1e-4) {
-                    // Simple rectangular slit (top == bottom)
-                    return new THREE.BoxGeometry(dynamicBottomWidth, slitBoxHeight, this.slitWidth);
+                // For strongly tapered Q/K/V bodies, use a rounded slit profile so
+                // the openings on the top face are less boxy around each lane.
+                const useRoundedSlitProfile = this.topWidthFactor <= 0.2;
+                if (!useRoundedSlitProfile) {
+                    if (Math.abs(dynamicBottomWidth - dynamicTopWidth) < 1e-4) {
+                        return new THREE.BoxGeometry(dynamicBottomWidth, slitBoxHeight, this.slitWidth);
+                    }
+                    const geom = new THREE.BoxGeometry(dynamicBottomWidth, slitBoxHeight, this.slitWidth, 1, 1, 1);
+                    const posAttr = geom.attributes.position;
+                    const halfH = slitBoxHeight / 2;
+                    for (let v = 0; v < posAttr.count; v++) {
+                        const y = posAttr.getY(v);
+                        const t = (y + halfH) / slitBoxHeight;
+                        const targetWidth = THREE.MathUtils.lerp(dynamicBottomWidth, dynamicTopWidth, t);
+                        const scale = (dynamicBottomWidth > 0) ? (targetWidth / dynamicBottomWidth) : 1.0;
+                        posAttr.setX(v, posAttr.getX(v) * scale);
+                    }
+                    posAttr.needsUpdate = true;
+                    geom.computeVertexNormals();
+                    return geom;
                 }
-                // Create tapered geometry (trapezoidal prism) by modifying a box geometry
-                const geom = new THREE.BoxGeometry(dynamicBottomWidth, slitBoxHeight, this.slitWidth, 1, 1, 1);
+
+                const baseWidth = Math.max(dynamicBottomWidth, 1e-3);
+                const minCrossWidth = Math.max(Math.min(dynamicBottomWidth, dynamicTopWidth, this.slitWidth), 1e-3);
+                const slitCornerChamfer = Math.max(0.25, minCrossWidth * 0.12);
+                const slitShape = buildChamferedRectShape(baseWidth, this.slitWidth, slitCornerChamfer);
+                const geom = new THREE.ExtrudeGeometry(slitShape, {
+                    depth: slitBoxHeight,
+                    steps: 1,
+                    bevelEnabled: false,
+                    curveSegments: 2
+                });
+                // Orient so: X = matrix width, Y = cut depth, Z = lane slit thickness.
+                geom.rotateX(Math.PI / 2);
+                geom.center();
+
                 const posAttr = geom.attributes.position;
                 const halfH = slitBoxHeight / 2;
                 for (let v = 0; v < posAttr.count; v++) {
                     const y = posAttr.getY(v);
-                    const t = (y + halfH) / slitBoxHeight; // 0 at bottom, 1 at top
+                    const t = THREE.MathUtils.clamp((y + halfH) / slitBoxHeight, 0, 1);
                     const targetWidth = THREE.MathUtils.lerp(dynamicBottomWidth, dynamicTopWidth, t);
-                    const scale = (dynamicBottomWidth > 0) ? (targetWidth / dynamicBottomWidth) : 1.0;
+                    const scale = baseWidth > 0 ? targetWidth / baseWidth : 1.0;
                     posAttr.setX(v, posAttr.getX(v) * scale);
                 }
                 posAttr.needsUpdate = true;
