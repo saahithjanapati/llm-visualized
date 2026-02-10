@@ -93,16 +93,13 @@ export class AutoCameraController {
         return !!this._autoCameraFollow;
     }
 
-    setScreenShiftPixels(pixels, { immediate = false, durationMs = 520, shiftYPx = 0 } = {}) {
-        const nextX = Number.isFinite(pixels) ? pixels : 0;
-        const nextY = Number.isFinite(shiftYPx) ? shiftYPx : 0;
-        const deltaX = Math.abs(nextX - this._panelShiftXPxTarget);
-        const deltaY = Math.abs(nextY - this._panelShiftYPxTarget);
+    setScreenShiftPixels(pixels, { immediate = false, durationMs = 520 } = {}) {
+        const next = Number.isFinite(pixels) ? pixels : 0;
+        const delta = Math.abs(next - this._panelShiftPxTarget);
         const hasTween = this._panelShiftTween && typeof this._panelShiftTween.stop === 'function';
 
-        if (deltaX < 0.5 && deltaY < 0.5 && !immediate && !hasTween) {
-            this._panelShiftXPxTarget = nextX;
-            this._panelShiftYPxTarget = nextY;
+        if (delta < 0.5 && !immediate && !hasTween) {
+            this._panelShiftPxTarget = next;
             return;
         }
 
@@ -111,32 +108,25 @@ export class AutoCameraController {
             this._panelShiftTween = null;
         }
 
-        this._panelShiftXPxTarget = nextX;
-        this._panelShiftYPxTarget = nextY;
+        this._panelShiftPxTarget = next;
 
         const tweenAvailable = typeof TWEEN !== 'undefined' && TWEEN?.Tween;
         if (immediate || !tweenAvailable) {
-            this._panelShiftXPxCurrent = nextX;
-            this._panelShiftYPxCurrent = nextY;
+            this._panelShiftPxCurrent = next;
             return;
         }
 
         const duration = Math.max(200, Number.isFinite(durationMs) ? durationMs : 520);
         const easing = TWEEN?.Easing?.Cubic?.InOut || TWEEN?.Easing?.Quadratic?.InOut;
-        const state = {
-            x: this._panelShiftXPxCurrent,
-            y: this._panelShiftYPxCurrent
-        };
+        const state = { value: this._panelShiftPxCurrent };
         this._panelShiftTween = new TWEEN.Tween(state)
-            .to({ x: nextX, y: nextY }, duration)
+            .to({ value: next }, duration)
             .easing(typeof easing === 'function' ? easing : TWEEN.Easing.Quadratic.InOut)
             .onUpdate(() => {
-                this._panelShiftXPxCurrent = state.x;
-                this._panelShiftYPxCurrent = state.y;
+                this._panelShiftPxCurrent = state.value;
             })
             .onComplete(() => {
-                this._panelShiftXPxCurrent = nextX;
-                this._panelShiftYPxCurrent = nextY;
+                this._panelShiftPxCurrent = next;
                 this._panelShiftTween = null;
             })
             .start();
@@ -301,13 +291,10 @@ export class AutoCameraController {
         this._controlsChangeHandler = null;
         this._overviewCameraTween = null;
         this._overviewTargetTween = null;
-        this._panelShiftXPxTarget = 0;
-        this._panelShiftXPxCurrent = 0;
-        this._panelShiftYPxTarget = 0;
-        this._panelShiftYPxCurrent = 0;
+        this._panelShiftPxTarget = 0;
+        this._panelShiftPxCurrent = 0;
         this._panelShiftTween = null;
-        this._panelShiftXPxApplied = 0;
-        this._panelShiftYPxApplied = 0;
+        this._panelShiftPxApplied = 0;
         this._panelShiftViewWidth = 0;
         this._panelShiftViewHeight = 0;
         this._panelShiftViewActive = false;
@@ -387,8 +374,7 @@ export class AutoCameraController {
 
     _hasPanelShift() {
         if (this._panelShiftTween) return true;
-        if (Math.abs(this._panelShiftXPxCurrent) > 0.5) return true;
-        if (Math.abs(this._panelShiftYPxCurrent) > 0.5) return true;
+        if (Math.abs(this._panelShiftPxCurrent) > 0.5) return true;
         return this._panelShiftViewActive;
     }
 
@@ -405,29 +391,25 @@ export class AutoCameraController {
         if (!Number.isFinite(viewportWidth) || viewportWidth <= 0) return;
         if (!Number.isFinite(viewportHeight) || viewportHeight <= 0) return;
 
-        const shiftXPxRaw = Number.isFinite(this._panelShiftXPxCurrent) ? this._panelShiftXPxCurrent : 0;
-        const shiftYPxRaw = Number.isFinite(this._panelShiftYPxCurrent) ? this._panelShiftYPxCurrent : 0;
-        const shiftXPx = Math.abs(shiftXPxRaw) < 0.5 ? 0 : shiftXPxRaw;
-        const shiftYPx = Math.abs(shiftYPxRaw) < 0.5 ? 0 : shiftYPxRaw;
+        const shiftPxRaw = Number.isFinite(this._panelShiftPxCurrent) ? this._panelShiftPxCurrent : 0;
+        const shiftPx = Math.abs(shiftPxRaw) < 0.5 ? 0 : shiftPxRaw;
 
         const dimsChanged = viewportWidth !== this._panelShiftViewWidth
             || viewportHeight !== this._panelShiftViewHeight;
-        const shiftChanged = Math.abs(shiftXPx - this._panelShiftXPxApplied) >= 0.25
-            || Math.abs(shiftYPx - this._panelShiftYPxApplied) >= 0.25;
+        const shiftChanged = Math.abs(shiftPx - this._panelShiftPxApplied) >= 0.25;
         if (!dimsChanged && !shiftChanged) return;
 
         this._panelShiftViewWidth = viewportWidth;
         this._panelShiftViewHeight = viewportHeight;
-        this._panelShiftXPxApplied = shiftXPx;
-        this._panelShiftYPxApplied = shiftYPx;
+        this._panelShiftPxApplied = shiftPx;
 
-        if (shiftXPx === 0 && shiftYPx === 0) {
+        if (shiftPx === 0) {
             if (camera.view && camera.view.enabled && typeof camera.clearViewOffset === 'function') {
                 camera.clearViewOffset();
             }
             this._panelShiftViewActive = false;
         } else if (typeof camera.setViewOffset === 'function') {
-            camera.setViewOffset(viewportWidth, viewportHeight, shiftXPx, shiftYPx, viewportWidth, viewportHeight);
+            camera.setViewOffset(viewportWidth, viewportHeight, shiftPx, 0, viewportWidth, viewportHeight);
             this._panelShiftViewActive = true;
         }
 

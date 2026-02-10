@@ -2167,8 +2167,6 @@ class SelectionPanel {
         this.panel = document.getElementById('detailPanel');
         this.hudStack = document.getElementById('hudStack');
         this.hudPanel = document.getElementById('hudPanel');
-        this.topControls = document.getElementById('topControls');
-        this.equationsPanel = document.getElementById('equationsPanel');
         this.title = document.getElementById('detailTitle');
         this.subtitle = document.getElementById('detailSubtitle');
         this.params = document.getElementById('detailParams');
@@ -2202,7 +2200,6 @@ class SelectionPanel {
         this.engine = options.engine || null;
         this.pipeline = options.pipeline || null;
         this._panelShiftPx = 0;
-        this._panelShiftYPx = 0;
         this._panelShiftDurationMs = Number.isFinite(options.panelShiftDurationMs)
             ? Math.max(120, options.panelShiftDurationMs)
             : PANEL_SHIFT_DURATION_MS;
@@ -2330,52 +2327,9 @@ class SelectionPanel {
     }
 
     _observeResize() {
-        if ('ResizeObserver' in window && this.canvas?.parentElement) {
-            this._resizeObserver = new ResizeObserver(() => this._onResize());
-            this._resizeObserver.observe(this.canvas.parentElement);
-        }
-        this._observeShiftSources();
-    }
-
-    _observeShiftSources() {
-        if (typeof window === 'undefined') return;
-
-        const onLayoutChanged = () => this._syncSceneShift();
-
-        if ('ResizeObserver' in window) {
-            const targets = [
-                this.hudStack,
-                this.hudPanel,
-                this.topControls,
-                this.equationsPanel
-            ].filter(Boolean);
-            if (targets.length > 0) {
-                this._shiftResizeObserver = new ResizeObserver(onLayoutChanged);
-                targets.forEach(target => this._shiftResizeObserver.observe(target));
-            }
-        }
-
-        if ('MutationObserver' in window) {
-            this._shiftMutationObserver = new MutationObserver(onLayoutChanged);
-            if (document.body) {
-                this._shiftMutationObserver.observe(document.body, {
-                    attributes: true,
-                    attributeFilter: ['class']
-                });
-            }
-            if (this.topControls) {
-                this._shiftMutationObserver.observe(this.topControls, {
-                    attributes: true,
-                    attributeFilter: ['class', 'style', 'data-auto-hidden']
-                });
-            }
-            if (this.equationsPanel) {
-                this._shiftMutationObserver.observe(this.equationsPanel, {
-                    attributes: true,
-                    attributeFilter: ['class', 'style']
-                });
-            }
-        }
+        if (!('ResizeObserver' in window) || !this.canvas?.parentElement) return;
+        this._resizeObserver = new ResizeObserver(() => this._onResize());
+        this._resizeObserver.observe(this.canvas.parentElement);
     }
 
     _onResize() {
@@ -2404,7 +2358,6 @@ class SelectionPanel {
                 }, 140);
             }
             this._updateMobileState();
-            this._syncSceneShift();
             return;
         }
         if (this.currentPreview) {
@@ -2536,12 +2489,9 @@ class SelectionPanel {
         if (!this.pipeline || typeof this.pipeline.setScreenShiftPixels !== 'function') return;
         if (typeof window === 'undefined') return;
 
-        const isSmallScreen = this._isSmallScreen();
-        let nextShiftX = 0;
-        let nextShiftY = 0;
-
-        const shouldDesktopShift = this.isOpen && !isSmallScreen;
-        if (shouldDesktopShift) {
+        let nextShift = 0;
+        const shouldShift = this.isOpen && !this._isSmallScreen();
+        if (shouldShift) {
             const anchor = this.hudStack || this.panel;
             const rect = anchor?.getBoundingClientRect?.();
             if (rect && Number.isFinite(rect.left)) {
@@ -2550,71 +2500,25 @@ class SelectionPanel {
                     || rect.right
                     || 0;
                 if (Number.isFinite(viewportWidth) && viewportWidth > 0) {
-                    nextShiftX = Math.max(0, (viewportWidth - rect.left) / 2);
+                    nextShift = Math.max(0, (viewportWidth - rect.left) / 2);
                 }
             }
         }
 
-        if (isSmallScreen) {
-            const viewportHeight = window.innerHeight
-                || document.documentElement?.clientHeight
-                || 0;
-            if (Number.isFinite(viewportHeight) && viewportHeight > 0) {
-                let occludedTop = 0;
-
-                const topControlsRect = this._isShiftAnchorVisible(this.topControls)
-                    ? this.topControls?.getBoundingClientRect?.()
-                    : null;
-                if (topControlsRect && Number.isFinite(topControlsRect.bottom)) {
-                    occludedTop = Math.max(occludedTop, Math.min(viewportHeight, Math.max(0, topControlsRect.bottom)));
-                }
-
-                const hudAnchor = this._isShiftAnchorVisible(this.hudPanel)
-                    ? this.hudPanel
-                    : (this._isShiftAnchorVisible(this.hudStack) ? this.hudStack : null);
-                const hudRect = hudAnchor?.getBoundingClientRect?.();
-                if (hudRect && Number.isFinite(hudRect.bottom)) {
-                    occludedTop = Math.max(occludedTop, Math.min(viewportHeight, Math.max(0, hudRect.bottom)));
-                }
-
-                if (occludedTop > 0.5) {
-                    nextShiftY = -(occludedTop / 2);
-                }
-            }
+        if (!Number.isFinite(nextShift)) {
+            nextShift = 0;
         }
 
-        if (!Number.isFinite(nextShiftX)) {
-            nextShiftX = 0;
-        }
-        if (!Number.isFinite(nextShiftY)) {
-            nextShiftY = 0;
-        }
-
-        const deltaX = Math.abs(nextShiftX - this._panelShiftPx);
-        const deltaY = Math.abs(nextShiftY - this._panelShiftYPx);
-        if (deltaX < 0.5 && deltaY < 0.5 && !immediate) {
+        const delta = Math.abs(nextShift - this._panelShiftPx);
+        if (delta < 0.5 && !immediate) {
             return;
         }
 
-        this._panelShiftPx = nextShiftX;
-        this._panelShiftYPx = nextShiftY;
-        this.pipeline.setScreenShiftPixels(nextShiftX, {
+        this._panelShiftPx = nextShift;
+        this.pipeline.setScreenShiftPixels(nextShift, {
             immediate,
-            durationMs: this._panelShiftDurationMs,
-            shiftYPx: nextShiftY
+            durationMs: this._panelShiftDurationMs
         });
-    }
-
-    _isShiftAnchorVisible(element) {
-        if (!element || typeof window === 'undefined') return false;
-        const rect = element.getBoundingClientRect?.();
-        if (!rect || rect.width <= 0 || rect.height <= 0) return false;
-        const style = window.getComputedStyle ? window.getComputedStyle(element) : null;
-        if (!style) return true;
-        if (style.display === 'none' || style.visibility === 'hidden') return false;
-        const opacity = Number.parseFloat(style.opacity);
-        if (Number.isFinite(opacity) && opacity < 0.05) return false;
-        return true;
     }
 
     _onPanelPointerDown(event) {
