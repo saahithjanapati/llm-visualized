@@ -1263,7 +1263,10 @@ function buildWeightMatrixPreview(params, colorHex, options = {}) {
 }
 
 function extractPreviewVectorData(selectionInfo) {
+    const vectorRef = selectionInfo?.info?.vectorRef;
     const candidates = [
+        vectorRef?.rawData,
+        vectorRef?.userData?.activationData?.values,
         selectionInfo?.info?.activationData?.values,
         selectionInfo?.object?.userData?.activationData?.values,
         selectionInfo?.hit?.object?.userData?.activationData?.values,
@@ -1271,7 +1274,7 @@ function extractPreviewVectorData(selectionInfo) {
         selectionInfo?.info?.values
     ];
     for (const arr of candidates) {
-        if (Array.isArray(arr) && arr.length > 0) {
+        if ((Array.isArray(arr) || ArrayBuffer.isView(arr)) && arr.length > 0) {
             return Array.from(arr).map((v) => Number.isFinite(v) ? v : 0);
         }
     }
@@ -1533,6 +1536,18 @@ function buildStackedBoxPreview(colorHex) {
     };
 }
 
+function isVectorMeshCandidate(obj) {
+    const geo = obj?.geometry;
+    if (!obj || !(obj.isMesh || obj.isInstancedMesh) || !geo || typeof geo.getAttribute !== 'function') return false;
+    if (obj.userData?.isVector) return true;
+    return !!(
+        geo.getAttribute('colorStart')
+        || geo.getAttribute('colorEnd')
+        || geo.getAttribute('instanceColor')
+        || obj.instanceColor
+    );
+}
+
 function findVectorLikeObject(selectionInfo) {
     const directRef = selectionInfo?.info?.vectorRef;
     if (directRef?.group?.isObject3D) return directRef.group;
@@ -1542,22 +1557,11 @@ function findVectorLikeObject(selectionInfo) {
     if (selectionInfo?.object) sources.push(selectionInfo.object);
     if (!sources.length) return null;
 
-    const hasVectorAttributes = (obj) => {
-        const geo = obj?.geometry;
-        if (!geo || typeof geo.getAttribute !== 'function') return false;
-        return !!(
-            geo.getAttribute('colorStart')
-            || geo.getAttribute('colorEnd')
-            || geo.getAttribute('instanceColor')
-            || obj.instanceColor
-        );
-    };
-
     const findInHierarchy = (root) => {
         let found = null;
         root.traverse((child) => {
             if (found) return;
-            if (hasVectorAttributes(child) && (child.isMesh || child.isInstancedMesh)) {
+            if (isVectorMeshCandidate(child)) {
                 found = child;
             }
         });
@@ -1582,6 +1586,60 @@ function findVectorLikeObject(selectionInfo) {
         walker = walker.parent;
     }
     return candidate;
+}
+
+function findVectorSourceMesh(selectionInfo) {
+    const vectorRef = selectionInfo?.info?.vectorRef;
+    if (vectorRef?.mesh && isVectorMeshCandidate(vectorRef.mesh)) return vectorRef.mesh;
+    const vectorObject = findVectorLikeObject(selectionInfo);
+    if (!vectorObject) return null;
+    if (isVectorMeshCandidate(vectorObject)) return vectorObject;
+    let mesh = null;
+    vectorObject.traverse((child) => {
+        if (mesh) return;
+        if (isVectorMeshCandidate(child)) mesh = child;
+    });
+    return mesh;
+}
+
+function resolveVectorPreviewColor(label, selectionInfo) {
+    const category = selectionInfo?.info?.category;
+    if (typeof category === 'string') {
+        const cat = category.toUpperCase();
+        if (cat === 'Q') return MHA_FINAL_Q_COLOR;
+        if (cat === 'K') return MHA_FINAL_K_COLOR;
+        if (cat === 'V') return MHA_FINAL_V_COLOR;
+    }
+    const type = inferQkvType(label || '', selectionInfo);
+    if (type === 'Q') return MHA_FINAL_Q_COLOR;
+    if (type === 'K') return MHA_FINAL_K_COLOR;
+    if (type === 'V') return MHA_FINAL_V_COLOR;
+    const snapshot = extractMaterialSnapshot(selectionInfo);
+    if (snapshot?.color) return snapshot.color;
+    return resolveFinalPreviewColor(label || '');
+}
+
+function resolveVectorPreviewInstanceCount(selectionInfo) {
+    const vectorRef = selectionInfo?.info?.vectorRef;
+    const candidates = [
+        vectorRef?.instanceCount,
+        vectorRef?._batch?.prismCount,
+        vectorRef?.mesh?.count,
+        vectorRef?.mesh?.instanceMatrix?.count
+    ];
+    for (const count of candidates) {
+        if (Number.isFinite(count) && count > 0) return Math.max(1, Math.floor(count));
+    }
+    const vectorMesh = findVectorSourceMesh(selectionInfo);
+    if (vectorMesh?.isInstancedMesh) {
+        const meshCount = Number.isFinite(vectorMesh.count)
+            ? vectorMesh.count
+            : vectorMesh.instanceMatrix?.count;
+        if (Number.isFinite(meshCount) && meshCount > 0) {
+            return Math.max(1, Math.floor(meshCount));
+        }
+    }
+    return PREVIEW_VECTOR_BODY_INSTANCES;
 }
 
 function extractMaterialSnapshot(selectionInfo) {
@@ -1651,86 +1709,34 @@ function applyMaterialSnapshot(object, snapshot) {
     });
 }
 
-function buildVectorClonePreview(selectionInfo) {
-    const batchedRef = selectionInfo?.info?.vectorRef;
-    if (batchedRef?.isBatchedVectorRef && batchedRef._batch?.mesh) {
-        const batch = batchedRef._batch;
-        const batchMesh = batch.mesh;
-        const prismCount = Math.max(1, Math.floor(batchedRef.instanceCount || batch.prismCount || 1));
-        const vectorIndex = Math.max(0, Math.floor(batchedRef._index || 0));
-        const geometry = batchMesh.geometry.clone();
-        const material = Array.isArray(batchMesh.material)
-            ? batchMesh.material.map((mat) => clonePreviewMaterial(mat))
-            : clonePreviewMaterial(batchMesh.material);
-        const instanced = new THREE.InstancedMesh(geometry, material, prismCount);
-        instanced.count = prismCount;
-        instanced.matrixAutoUpdate = true;
-        instanced.frustumCulled = false;
+function buildVectorClonePreview(selectionInfo, label = '') {
+    const vectorRef = selectionInfo?.info?.vectorRef || null;
+    const vectorMesh = findVectorSourceMesh(selectionInfo);
+    if (!vectorRef && !vectorMesh) return null;
 
-        const baseIndex = vectorIndex * prismCount;
-        for (let i = 0; i < prismCount; i++) {
-            batchMesh.getMatrixAt(baseIndex + i, TMP_MATRIX);
-            instanced.setMatrixAt(i, TMP_MATRIX);
-        }
-        instanced.instanceMatrix.needsUpdate = true;
+    const prismCount = resolveVectorPreviewInstanceCount(selectionInfo);
+    const data = extractPreviewVectorData(selectionInfo);
+    const vec = createPreviewVector({
+        colorHex: resolveVectorPreviewColor(label, selectionInfo),
+        data,
+        instanceCount: prismCount
+    });
 
-        const colorStartAttr = batchMesh.geometry?.getAttribute?.('colorStart');
-        if (colorStartAttr && colorStartAttr.array) {
-            const startArray = new Float32Array(prismCount * 3);
-            const offset = baseIndex * 3;
-            startArray.set(colorStartAttr.array.subarray(offset, offset + prismCount * 3));
-            instanced.geometry.setAttribute('colorStart', new THREE.InstancedBufferAttribute(startArray, 3));
+    if ((!Array.isArray(data) || data.length === 0) && Array.isArray(vectorRef?.currentKeyColors)) {
+        const keyColors = vectorRef.currentKeyColors
+            .map((color) => (color?.isColor ? color.clone() : new THREE.Color(color)))
+            .filter((color) => color?.isColor);
+        if (keyColors.length >= 2) {
+            vec.currentKeyColors = keyColors;
+            vec.numSubsections = keyColors.length - 1;
+            vec.updateInstanceGeometryAndColors();
         }
-        const colorEndAttr = batchMesh.geometry?.getAttribute?.('colorEnd');
-        if (colorEndAttr && colorEndAttr.array) {
-            const endArray = new Float32Array(prismCount * 3);
-            const offset = baseIndex * 3;
-            endArray.set(colorEndAttr.array.subarray(offset, offset + prismCount * 3));
-            instanced.geometry.setAttribute('colorEnd', new THREE.InstancedBufferAttribute(endArray, 3));
-        }
-
-        if (batchMesh.instanceColor?.array) {
-            const colors = new Float32Array(prismCount * 3);
-            const offset = baseIndex * 3;
-            colors.set(batchMesh.instanceColor.array.subarray(offset, offset + prismCount * 3));
-            instanced.instanceColor = new THREE.InstancedBufferAttribute(colors, 3);
-            instanced.instanceColor.needsUpdate = true;
-        }
-
-        const group = new THREE.Group();
-        group.add(instanced);
-        return {
-            object: group,
-            dispose: () => {
-                geometry.dispose();
-                if (Array.isArray(material)) {
-                    material.forEach((mat) => mat && mat.dispose && mat.dispose());
-                } else if (material) {
-                    material.dispose();
-                }
-            }
-        };
     }
 
-    const vectorObject = findVectorLikeObject(selectionInfo);
-    if (!vectorObject || typeof vectorObject.clone !== 'function' || !vectorObject.isObject3D) return null;
-    const clone = vectorObject.clone(true);
-    clone.traverse((child) => {
-        child.matrixAutoUpdate = true;
-        child.visible = true;
-        if (child.isInstancedMesh && child.instanceMatrix) {
-            // Ensure instanced meshes render at least one instance.
-            const instanceCount = child.instanceMatrix.count || child.count || 1;
-            child.count = Math.max(1, instanceCount);
-        }
-    });
-    const previewGeometries = cloneGeometriesForPreview(clone);
-    const previewMaterials = cloneMaterialsForPreview(clone);
     return {
-        object: clone,
+        object: vec.group,
         dispose: () => {
-            previewGeometries.forEach((geo) => geo && geo.dispose && geo.dispose());
-            previewMaterials.forEach((mat) => mat && mat.dispose && mat.dispose());
+            vec.dispose();
         }
     };
 }
@@ -1855,7 +1861,7 @@ function resolvePreviewObject(label, selectionInfo) {
     if (attentionSpherePreview) return attentionSpherePreview;
     const isVectorSelection = isLikelyVectorSelection(label, selectionInfo);
     if (isVectorSelection) {
-        const vectorClone = buildVectorClonePreview(selectionInfo);
+        const vectorClone = buildVectorClonePreview(selectionInfo, label);
         if (vectorClone) return vectorClone;
     }
     if (isQkvMatrixLabel(lower)) {
@@ -2044,6 +2050,7 @@ class SelectionPanel {
         this.dataSection = document.getElementById('detailDataSection');
         this.attentionRoot = document.getElementById('detailAttention');
         this.attentionToggle = document.getElementById('detailAttentionToggle');
+        this.attentionToggleLabel = document.getElementById('detailAttentionToggleLabel');
         this.attentionTokensTop = document.getElementById('detailAttentionTokensTop');
         this.attentionTokensLeft = document.getElementById('detailAttentionTokensLeft');
         this.attentionMatrix = document.getElementById('detailAttentionMatrix');
@@ -2138,6 +2145,7 @@ class SelectionPanel {
             ? Math.max(1, Math.floor(options.maxAttentionTokens))
             : ATTENTION_PREVIEW_MAX_TOKENS;
         this.attentionMode = this.attentionToggle?.checked ? 'post' : 'pre';
+        this._updateAttentionToggleLabel(this.attentionMode);
         this._attentionContext = null;
         this._attentionTokenElsTop = [];
         this._attentionTokenElsLeft = [];
@@ -2168,6 +2176,7 @@ class SelectionPanel {
         if (this.attentionToggle) {
             this.attentionToggle.addEventListener('change', () => {
                 this.attentionMode = this.attentionToggle.checked ? 'post' : 'pre';
+                this._updateAttentionToggleLabel(this.attentionMode);
                 this._renderAttentionPreview();
             });
         }
@@ -2705,17 +2714,31 @@ class SelectionPanel {
         const preferredMode = resolveAttentionModeFromSelection(selection);
         if (preferredMode && preferredMode !== this.attentionMode) {
             this.attentionMode = preferredMode;
-            if (this.attentionToggle) {
-                this.attentionToggle.checked = preferredMode === 'post';
-            }
         }
         this._renderAttentionPreview();
+    }
+
+    _updateAttentionToggleLabel(mode) {
+        const safeMode = mode === 'post' ? 'post' : 'pre';
+        if (this.attentionToggle) {
+            this.attentionToggle.checked = safeMode === 'post';
+            this.attentionToggle.setAttribute(
+                'aria-label',
+                safeMode === 'post' ? 'Post-softmax' : 'Pre-softmax'
+            );
+        }
+        if (this.attentionToggleLabel) {
+            this.attentionToggleLabel.textContent = safeMode === 'post'
+                ? 'Post-softmax'
+                : 'Pre-softmax';
+        }
     }
 
     _renderAttentionPreview() {
         if (!this.attentionRoot || !this.attentionMatrix || !this.attentionTokensTop || !this.attentionTokensLeft) return;
         const context = this._attentionContext;
         if (!context || !this.activationSource) {
+            this._updateAttentionToggleLabel(this.attentionMode);
             this._setAttentionVisibility(false);
             this._clearPinnedAttention();
             this._attentionDynamic = false;
@@ -2730,6 +2753,7 @@ class SelectionPanel {
 
         const { tokenIndices, tokenLabels, headIndex, layerIndex, trimmed, totalCount, hasSource } = context;
         const mode = this.attentionMode === 'post' ? 'post' : 'pre';
+        this._updateAttentionToggleLabel(mode);
         this._updateAttentionLegend(mode);
         const values = hasSource
             ? buildAttentionMatrixValues({
