@@ -343,12 +343,12 @@ body.touch-ui * {
     width: 0%;
     background: linear-gradient(
         90deg,
-        rgba(48, 239, 255, 0.98) 0%,
-        rgba(76, 135, 255, 0.98) 34%,
-        rgba(173, 83, 255, 0.98) 68%,
-        rgba(255, 116, 64, 0.98) 100%
+        rgba(44, 238, 255, 0.98) 0%,
+        rgba(79, 178, 255, 0.98) 32%,
+        rgba(112, 122, 255, 0.98) 66%,
+        rgba(34, 92, 255, 0.98) 100%
     );
-    box-shadow: 0 0 14px rgba(116, 153, 255, 0.58), 0 0 24px rgba(255, 124, 72, 0.32);
+    box-shadow: 0 0 14px rgba(94, 176, 255, 0.58), 0 0 24px rgba(66, 118, 255, 0.36);
     transition: width 0.2s ease;
 }
 #generationOverlay[data-paused="true"] .generation-bar-fill {
