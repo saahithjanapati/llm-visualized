@@ -2229,6 +2229,14 @@ export class MHSAAnimation {
                                     }
                                 })
                                 .onComplete(() => {
+                                    const riseTrail = vec && vec.userData && vec.userData.trail;
+                                    if (riseTrail) {
+                                        if (typeof riseTrail.snapLastPointTo === 'function') {
+                                            riseTrail.snapLastPointTo(vec.group.position);
+                                        } else if (typeof riseTrail.update === 'function') {
+                                            riseTrail.update(vec.group.position);
+                                        }
+                                    }
                                     // Horizontal move back to residual stream centre (x = 0),
                                     // then perform the addition with the lane's original vector
                                     const horizDistance = Math.abs(vec.group.position.x);
@@ -2237,18 +2245,37 @@ export class MHSAAnimation {
                                     new TWEEN.Tween(vec.group.position)
                                         .to({ x: 0 }, horizDur)
                                         .easing(TWEEN.Easing.Quadratic.InOut)
+                                        .onStart(() => {
+                                            vec.group.position.y = finalCombinedY;
+                                            const tr = vec && vec.userData && vec.userData.trail;
+                                            if (tr) {
+                                                if (typeof tr.snapLastPointTo === 'function') {
+                                                    tr.snapLastPointTo(vec.group.position);
+                                                } else if (typeof tr.update === 'function') {
+                                                    tr.update(vec.group.position);
+                                                }
+                                            }
+                                        })
                                         .onUpdate(() => {
+                                            vec.group.position.y = finalCombinedY;
                                             // Continue updating the same trail during horizontal travel
                                             const tr = vec && vec.userData && vec.userData.trail;
                                             if (tr) tr.update(vec.group.position);
                                         })
 
                                         .onComplete(() => {
+                                            vec.group.position.x = 0;
+                                            vec.group.position.y = finalCombinedY;
                                             // Freeze the trail into static segments so the horizontal
                                             // return path remains visible, then remove live trail ref
                                             try {
                                                 const tr = vec && vec.userData && vec.userData.trail;
                                                 if (tr) {
+                                                    if (typeof tr.snapLastPointTo === 'function') {
+                                                        tr.snapLastPointTo(vec.group.position);
+                                                    } else if (typeof tr.update === 'function') {
+                                                        tr.update(vec.group.position);
+                                                    }
                                                     mergeTrailsIntoLineSegments(
                                                         [tr],
                                                         this.parentGroup,
