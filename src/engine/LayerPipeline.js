@@ -73,6 +73,15 @@ const FINAL_LN_INPUT_LIGHT_BLUE = {
     valueClampMax: 2
 };
 
+const SKIP_SPEED_RAMP_IN_MS = 60;
+const SKIP_SPEED_RAMP_OUT_MS = 95;
+const DEFAULT_SKIP_SPEED_PROFILE = Object.freeze({
+    engineSpeed: 6.4,
+    globalSpeed: 900,
+    prismAddSpeed: 230,
+    selfAttentionSpeed: 0.03
+});
+
 const TMP_WORLD_POS = new THREE.Vector3();
 
 function isArrayLike(values) {
@@ -144,6 +153,7 @@ export class LayerPipeline extends EventTarget {
         this._skipLayerActive = false;
         this._skipLayerRestore = null;
         this._skipLayerLast = false;
+        this._skipSpeedRampRaf = null;
         this._postResetTrailPurgeRaf = null;
         this._postResetTrailPurgeUntil = 0;
         this._trailPassId = 1;
@@ -251,6 +261,7 @@ export class LayerPipeline extends EventTarget {
             }
             this._postResetTrailPurgeRaf = null;
         }
+        this._cancelSkipSpeedRamp();
 
         if (typeof TWEEN !== 'undefined' && typeof TWEEN.removeAll === 'function') {
             try { TWEEN.removeAll(); } catch (_) { /* no-op */ }
@@ -309,11 +320,12 @@ export class LayerPipeline extends EventTarget {
         const engine = this._engine;
 
         if (this._skipToEndActive) {
-            this._finalizeSkipToEnd();
+            this._finalizeSkipToEnd({ immediate: true });
         }
         if (this._skipLayerActive) {
-            this._restoreSkipLayerSpeeds();
+            this._restoreSkipLayerSpeeds({ immediate: true });
         }
+        this._cancelSkipSpeedRamp();
         setGlobalTrailMaxStepDistance(0);
 
         this._forwardPassComplete = false;
@@ -446,18 +458,17 @@ export class LayerPipeline extends EventTarget {
         };
 
         const {
-            engineSpeed = 6,
-            globalSpeed = 800,
-            prismAddSpeed = 200,
-            selfAttentionSpeed = 0.03
+            engineSpeed = DEFAULT_SKIP_SPEED_PROFILE.engineSpeed,
+            globalSpeed = DEFAULT_SKIP_SPEED_PROFILE.globalSpeed,
+            prismAddSpeed = DEFAULT_SKIP_SPEED_PROFILE.prismAddSpeed,
+            selfAttentionSpeed = DEFAULT_SKIP_SPEED_PROFILE.selfAttentionSpeed
         } = opts || {};
-
-        if (engine && typeof engine.setSpeed === 'function') {
-            engine.setSpeed(engineSpeed);
-        }
-        setGlobalAnimSpeedMult(globalSpeed);
-        setPrismAddAnimSpeedMult(prismAddSpeed);
-        setSelfAttentionTimeMult(selfAttentionSpeed);
+        this._rampSpeedProfile({
+            engineSpeed,
+            globalSpeed,
+            prismAddSpeed,
+            selfAttentionSpeed
+        }, { durationMs: SKIP_SPEED_RAMP_IN_MS });
         setGlobalTrailMaxStepDistance(SKIP_TRAIL_MAX_STEP_DISTANCE);
 
         if (layer && typeof layer.setSkipToEndMode === 'function') {
@@ -468,7 +479,7 @@ export class LayerPipeline extends EventTarget {
     skipToEndForwardPass(opts = {}) {
         if (this._skipToEndActive || this._checkForwardPassComplete()) return;
         if (this._skipLayerActive) {
-            this._restoreSkipLayerSpeeds();
+            this._restoreSkipLayerSpeeds({ immediate: true });
         }
         this._skipToEndActive = true;
 
@@ -485,18 +496,18 @@ export class LayerPipeline extends EventTarget {
         };
 
         const {
-            engineSpeed = 6,
-            globalSpeed = 800,
-            prismAddSpeed = 200,
-            selfAttentionSpeed = 0.03
+            engineSpeed = DEFAULT_SKIP_SPEED_PROFILE.engineSpeed,
+            globalSpeed = DEFAULT_SKIP_SPEED_PROFILE.globalSpeed,
+            prismAddSpeed = DEFAULT_SKIP_SPEED_PROFILE.prismAddSpeed,
+            selfAttentionSpeed = DEFAULT_SKIP_SPEED_PROFILE.selfAttentionSpeed
         } = opts || {};
-
-        if (engine && typeof engine.setSpeed === 'function') {
-            engine.setSpeed(engineSpeed);
-        }
-        setGlobalAnimSpeedMult(globalSpeed);
-        setPrismAddAnimSpeedMult(prismAddSpeed);
-        setSelfAttentionTimeMult(selfAttentionSpeed);
+        this._rampSpeedProfile({
+            engineSpeed,
+            globalSpeed,
+            prismAddSpeed,
+            selfAttentionSpeed
+        }, { durationMs: SKIP_SPEED_RAMP_IN_MS });
+        setGlobalTrailMaxStepDistance(SKIP_TRAIL_MAX_STEP_DISTANCE);
 
         this._layers.forEach(layer => {
             if (layer && typeof layer.setSkipToEndMode === 'function') {
@@ -510,6 +521,91 @@ export class LayerPipeline extends EventTarget {
     // ----------------------------------------------------------------------
     // Private helpers
     // ----------------------------------------------------------------------
+
+    _getSpeedProfileSnapshot() {
+        const engine = this._engine;
+        return {
+            engineSpeed: engine && typeof engine._speed === 'number' ? engine._speed : 1,
+            globalSpeed: GLOBAL_ANIM_SPEED_MULT,
+            prismAddSpeed: PRISM_ADD_ANIM_SPEED_MULT,
+            selfAttentionSpeed: SELF_ATTENTION_TIME_MULT
+        };
+    }
+
+    _applySpeedProfile(profile) {
+        if (!profile) return;
+        if (this._engine && typeof this._engine.setSpeed === 'function' && Number.isFinite(profile.engineSpeed) && profile.engineSpeed > 0) {
+            this._engine.setSpeed(profile.engineSpeed);
+        }
+        if (Number.isFinite(profile.globalSpeed) && profile.globalSpeed > 0) {
+            setGlobalAnimSpeedMult(profile.globalSpeed);
+        }
+        if (Number.isFinite(profile.prismAddSpeed) && profile.prismAddSpeed > 0) {
+            setPrismAddAnimSpeedMult(profile.prismAddSpeed);
+        }
+        if (Number.isFinite(profile.selfAttentionSpeed) && profile.selfAttentionSpeed > 0) {
+            setSelfAttentionTimeMult(profile.selfAttentionSpeed);
+        }
+    }
+
+    _cancelSkipSpeedRamp() {
+        if (!this._skipSpeedRampRaf) return;
+        if (typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
+            window.cancelAnimationFrame(this._skipSpeedRampRaf);
+        } else {
+            clearTimeout(this._skipSpeedRampRaf);
+        }
+        this._skipSpeedRampRaf = null;
+    }
+
+    _rampSpeedProfile(targetProfile, { durationMs = SKIP_SPEED_RAMP_IN_MS, immediate = false } = {}) {
+        if (!targetProfile) return;
+        const target = {
+            engineSpeed: Number.isFinite(targetProfile.engineSpeed) ? targetProfile.engineSpeed : 1,
+            globalSpeed: Number.isFinite(targetProfile.globalSpeed) ? targetProfile.globalSpeed : GLOBAL_ANIM_SPEED_MULT,
+            prismAddSpeed: Number.isFinite(targetProfile.prismAddSpeed) ? targetProfile.prismAddSpeed : PRISM_ADD_ANIM_SPEED_MULT,
+            selfAttentionSpeed: Number.isFinite(targetProfile.selfAttentionSpeed) ? targetProfile.selfAttentionSpeed : SELF_ATTENTION_TIME_MULT
+        };
+        const duration = Math.max(0, Number(durationMs) || 0);
+        this._cancelSkipSpeedRamp();
+        if (immediate || duration <= 0) {
+            this._applySpeedProfile(target);
+            return;
+        }
+
+        const start = this._getSpeedProfileSnapshot();
+        const nowFn = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+            ? performance.now.bind(performance)
+            : Date.now;
+        const startedAt = nowFn();
+        const schedule = (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function')
+            ? window.requestAnimationFrame.bind(window)
+            : (cb) => setTimeout(cb, 16);
+        const lerp = (a, b, t) => a + (b - a) * t;
+        const easeOutCubic = (t) => {
+            const inv = 1 - t;
+            return 1 - inv * inv * inv;
+        };
+
+        const tick = () => {
+            const elapsed = nowFn() - startedAt;
+            const t = Math.min(1, elapsed / duration);
+            const eased = easeOutCubic(t);
+            this._applySpeedProfile({
+                engineSpeed: lerp(start.engineSpeed, target.engineSpeed, eased),
+                globalSpeed: lerp(start.globalSpeed, target.globalSpeed, eased),
+                prismAddSpeed: lerp(start.prismAddSpeed, target.prismAddSpeed, eased),
+                selfAttentionSpeed: lerp(start.selfAttentionSpeed, target.selfAttentionSpeed, eased)
+            });
+            if (t < 1) {
+                this._skipSpeedRampRaf = schedule(tick);
+            } else {
+                this._skipSpeedRampRaf = null;
+            }
+        };
+
+        this._skipSpeedRampRaf = schedule(tick);
+    }
 
     _checkForwardPassComplete() {
         if (this._forwardPassComplete) return true;
@@ -561,7 +657,7 @@ export class LayerPipeline extends EventTarget {
         this._skipToEndRaf = schedule(tick);
     }
 
-    _finalizeSkipToEnd() {
+    _finalizeSkipToEnd({ immediate = false } = {}) {
         this._skipToEndActive = false;
         if (this._skipToEndRaf) {
             if (typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
@@ -574,18 +670,13 @@ export class LayerPipeline extends EventTarget {
 
         const restore = this._skipToEndRestore;
         if (restore) {
-            if (this._engine && typeof this._engine.setSpeed === 'function') {
-                this._engine.setSpeed(restore.engineSpeed);
-            }
-            setGlobalAnimSpeedMult(restore.globalSpeed);
-            setPrismAddAnimSpeedMult(restore.prismAddSpeed);
-            setSelfAttentionTimeMult(restore.selfAttentionSpeed);
+            this._rampSpeedProfile(restore, { durationMs: SKIP_SPEED_RAMP_OUT_MS, immediate });
             this._skipToEndRestore = null;
         }
         setGlobalTrailMaxStepDistance(0);
     }
 
-    _restoreSkipLayerSpeeds() {
+    _restoreSkipLayerSpeeds({ immediate = false } = {}) {
         if (!this._skipLayerActive) return;
         const restore = this._skipLayerRestore;
         if (Array.isArray(this._layers)) {
@@ -596,13 +687,9 @@ export class LayerPipeline extends EventTarget {
             });
         }
         if (restore) {
-            if (this._engine && typeof this._engine.setSpeed === 'function') {
-                this._engine.setSpeed(restore.engineSpeed);
-            }
-            setGlobalAnimSpeedMult(restore.globalSpeed);
-            setPrismAddAnimSpeedMult(restore.prismAddSpeed);
-            setSelfAttentionTimeMult(restore.selfAttentionSpeed);
+            this._rampSpeedProfile(restore, { durationMs: SKIP_SPEED_RAMP_OUT_MS, immediate });
         }
+        setGlobalTrailMaxStepDistance(0);
         this._skipLayerActive = false;
         this._skipLayerLast = false;
         this._skipLayerRestore = null;

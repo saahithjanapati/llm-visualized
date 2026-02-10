@@ -48,6 +48,12 @@ const _tmpWorld = new THREE.Vector3();
 const _tmpWorld2 = new THREE.Vector3();
 const _tmpMatrix = new THREE.Matrix4();
 const QKV_TRAIL_OPACITY = 0.08;
+const SKIP_DELAY_SCALE = 0.12;
+const SKIP_DURATION_SCALE = 0.16;
+const SKIP_DELAY_MIN_MS = 4;
+const SKIP_DELAY_MAX_MS = 20;
+const SKIP_DURATION_MIN_MS = 10;
+const SKIP_DURATION_MAX_MS = 70;
 
 const SOFTENED_MATRIX_UNIFORMS = {
     stripeStrength: 0.0,
@@ -2688,13 +2694,17 @@ export class MHSAAnimation {
     _resolveSkipDelay(delayMs) {
         const clamped = Math.max(0, Number(delayMs) || 0);
         if (!this._skipToEndActive) return clamped;
-        return Math.min(clamped, 1);
+        if (clamped <= 0) return 0;
+        const scaled = clamped * SKIP_DELAY_SCALE;
+        return Math.min(SKIP_DELAY_MAX_MS, Math.max(SKIP_DELAY_MIN_MS, scaled));
     }
 
     _resolveSkipDuration(durationMs) {
         const clamped = Math.max(0, Number(durationMs) || 0);
         if (!this._skipToEndActive) return clamped;
-        return Math.min(clamped, 1);
+        if (clamped <= 0) return 0;
+        const scaled = clamped * SKIP_DURATION_SCALE;
+        return Math.min(SKIP_DURATION_MAX_MS, Math.max(SKIP_DURATION_MIN_MS, scaled));
     }
 
     _scheduleAfterDelay(callback, delayMs) {

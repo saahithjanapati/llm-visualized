@@ -3,7 +3,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-import { QUALITY_PRESET, resolveRenderDprCap } from '../utils/constants.js';
+import { QUALITY_PRESET, resolveRenderPixelRatio } from '../utils/constants.js';
 import { perfStats } from '../utils/perfStats.js';
 import Gpt2Layer from './layers/Gpt2Layer.js';
 
@@ -98,10 +98,12 @@ export class CoreEngine {
             this.renderer = new THREE.WebGLRenderer({ antialias: antialiasEnabled, logarithmicDepthBuffer: true, powerPreference: 'high-performance' });
             container.appendChild(this.renderer.domElement);
         }
+        this._lastDevicePixelRatio = (typeof window !== 'undefined' && typeof window.devicePixelRatio === 'number' && window.devicePixelRatio > 0)
+            ? window.devicePixelRatio
+            : 1;
+        this._appliedRenderPixelRatio = null;
+        this._updateRendererPixelRatio({ force: true });
         this.renderer.setSize(window.innerWidth, window.innerHeight);
-        // Improve crispness on HiDPI displays with a higher cap; can be tuned via constants.
-        const dprCap = resolveRenderDprCap();
-        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, dprCap));
         // Avoid long-press text selection/context menus hijacking touch controls.
         this.renderer.domElement.style.touchAction = 'none';
         this.renderer.domElement.style.userSelect = 'none';
@@ -201,6 +203,7 @@ export class CoreEngine {
             );
             this.composer.addPass(bloomPass);
         }
+        this._updateRendererPixelRatio({ force: true });
 
         // ────────────────────────────────────────────────────────────────────
         // Controls & basic lighting
@@ -517,9 +520,27 @@ export class CoreEngine {
     _onResize = () => {
         this.camera.aspect = window.innerWidth / window.innerHeight;
         this.camera.updateProjectionMatrix();
+        this._updateRendererPixelRatio({ force: true });
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         if (this.composer) this.composer.setSize(window.innerWidth, window.innerHeight);
         this._canvasRect = this.renderer.domElement.getBoundingClientRect();
+    };
+
+    _updateRendererPixelRatio = ({ force = false } = {}) => {
+        if (!this.renderer) return;
+        const nextRatio = resolveRenderPixelRatio({
+            viewportWidth: window.innerWidth,
+            viewportHeight: window.innerHeight
+        });
+        if (!force && Number.isFinite(this._appliedRenderPixelRatio)
+            && Math.abs(this._appliedRenderPixelRatio - nextRatio) < 0.001) {
+            return;
+        }
+        this._appliedRenderPixelRatio = nextRatio;
+        this.renderer.setPixelRatio(nextRatio);
+        if (this.composer && typeof this.composer.setPixelRatio === 'function') {
+            this.composer.setPixelRatio(nextRatio);
+        }
     };
 
     _onVisibility = () => {
@@ -1232,6 +1253,13 @@ export class CoreEngine {
 
     _animate = () => {
         requestAnimationFrame(this._animate);
+        const liveDpr = (typeof window !== 'undefined' && typeof window.devicePixelRatio === 'number' && window.devicePixelRatio > 0)
+            ? window.devicePixelRatio
+            : 1;
+        if (!Number.isFinite(this._lastDevicePixelRatio) || Math.abs(liveDpr - this._lastDevicePixelRatio) > 0.001) {
+            this._lastDevicePixelRatio = liveDpr;
+            this._onResize();
+        }
 
         const now = (typeof performance !== 'undefined' && typeof performance.now === 'function')
             ? performance.now()

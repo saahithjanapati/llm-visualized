@@ -15,7 +15,8 @@ import {
     EMBEDDING_MATRIX_PARAMS_POSITION,
     LAYER_NORM_FINAL_COLOR,
     VECTOR_LENGTH_PRISM,
-    HIDE_INSTANCE_Y_OFFSET
+    HIDE_INSTANCE_Y_OFFSET,
+    resolveRenderPixelRatio
 } from '../utils/constants.js';
 import {
     MHA_FINAL_Q_COLOR,
@@ -2068,7 +2069,10 @@ class SelectionPanel {
         this.camera.position.set(0, 0, 220);
 
         this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: false });
-        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        this.renderer.setPixelRatio(resolveRenderPixelRatio({
+            viewportWidth: window.innerWidth,
+            viewportHeight: window.innerHeight
+        }));
         this.renderer.setClearColor(0x000000, 1);
 
         this._ambientBaseIntensity = 0.7;
@@ -2178,6 +2182,10 @@ class SelectionPanel {
         const rect = this.canvas.getBoundingClientRect();
         const width = Math.max(1, Math.floor(rect.width));
         const height = Math.max(1, Math.floor(rect.height));
+        this.renderer.setPixelRatio(resolveRenderPixelRatio({
+            viewportWidth: window.innerWidth,
+            viewportHeight: window.innerHeight
+        }));
         this.renderer.setSize(width, height, false);
         this.camera.aspect = width / height;
         this.camera.updateProjectionMatrix();

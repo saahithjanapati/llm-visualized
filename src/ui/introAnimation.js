@@ -4,7 +4,7 @@ import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
 import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
 import { appState } from '../state/appState.js';
-import { resolveRenderDprCap } from '../utils/constants.js';
+import { resolveRenderPixelRatio } from '../utils/constants.js';
 import hdrBackgroundUrl from '../../rogland_clear_night_64.exr?url';
 
 // Sets up the intro typing animation and HDRI transition.
@@ -13,9 +13,10 @@ export function initIntroAnimation(pipeline, gptCanvas) {
     const introCanvas = document.getElementById('introCanvas');
     const renderer = new THREE.WebGLRenderer({ canvas: introCanvas, antialias: true });
     renderer.shadowMap.enabled = false;
-    const cap = resolveRenderDprCap();
-    const dpr = typeof window.devicePixelRatio === 'number' ? window.devicePixelRatio : 1;
-    renderer.setPixelRatio(Math.min(dpr, cap));
+    renderer.setPixelRatio(resolveRenderPixelRatio({
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight
+    }));
     renderer.setSize(window.innerWidth, window.innerHeight);
 
     const scene = new THREE.Scene();
@@ -162,6 +163,10 @@ export function initIntroAnimation(pipeline, gptCanvas) {
         if (appState.introActive) {
             camera.aspect = innerWidth / innerHeight;
             camera.updateProjectionMatrix();
+            renderer.setPixelRatio(resolveRenderPixelRatio({
+                viewportWidth: innerWidth,
+                viewportHeight: innerHeight
+            }));
             renderer.setSize(innerWidth, innerHeight);
         }
     });

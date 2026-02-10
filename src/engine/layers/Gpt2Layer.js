@@ -73,6 +73,7 @@ const COLOR_BRIGHT_YELLOW = new THREE.Color(0xffffff);
 const COLOR_INACTIVE_COMPONENT = new THREE.Color(INACTIVE_COMPONENT_COLOR);
 
 const TMP_LN_TRAIL_POS = new THREE.Vector3();
+const SKIP_VISIBILITY_REFRESH_MS = 56;
 
 const MLP_REFLECTIVITY_TWEAKS = {
     roughnessMin: 0.4,
@@ -152,6 +153,8 @@ export default class Gpt2Layer extends BaseLayer {
         this._skipToEndActive = false;
         this._skipConcatTriggered = false;
         this._skipHiddenMaterials = new WeakMap();
+        this._skipVisibilityDirty = false;
+        this._skipVisibilityLastApplyMs = 0;
         this.raycastRoot = null;
 
         // Placeholder vectors shown inside inactive LayerNorms so the
@@ -545,13 +548,11 @@ export default class Gpt2Layer extends BaseLayer {
                             lane.originalVec.group.position.y + ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT * dt);
                     }
                 });
-                if (skipActive) this._applySkipVectorVisibility();
                 return; // keep waiting
             }
         }
 
         if (!this.isActive) {
-            if (skipActive) this._applySkipVectorVisibility();
             return; // Skip processing when inactive / placeholder
         }
 
@@ -1543,7 +1544,6 @@ export default class Gpt2Layer extends BaseLayer {
         // rise above it under any circumstance (e.g. stray tweens).
         // ------------------------------------------------------------------
         // Do not force residual vectors downward here; MHSAAnimation already clamps upward motion.
-        if (skipActive) this._applySkipVectorVisibility();
     }
 
     /**
@@ -2212,9 +2212,12 @@ export default class Gpt2Layer extends BaseLayer {
         const wasActive = this._skipToEndActive;
         this._skipToEndActive = !!enabled;
         if (this._skipToEndActive) {
-            this._applySkipVectorVisibility();
+            this._skipVisibilityDirty = true;
+            this._applySkipVectorVisibility({ force: true });
         } else if (wasActive) {
             this._restoreSkipHiddenVectorMaterials();
+            this._skipVisibilityDirty = false;
+            this._skipVisibilityLastApplyMs = 0;
         }
         if (this.mhsaAnimation && typeof this.mhsaAnimation.setSkipToEndMode === 'function') {
             this.mhsaAnimation.setSkipToEndMode(this._skipToEndActive);
@@ -2237,7 +2240,8 @@ export default class Gpt2Layer extends BaseLayer {
 
     refreshSkipVisibility() {
         if (this._skipToEndActive) {
-            this._applySkipVectorVisibility();
+            this._skipVisibilityDirty = true;
+            this._applySkipVectorVisibility({ force: true });
         }
     }
 
@@ -2308,8 +2312,19 @@ export default class Gpt2Layer extends BaseLayer {
         return false;
     }
 
-    _applySkipVectorVisibility() {
+    _applySkipVectorVisibility({ force = false } = {}) {
         if (!this._skipToEndActive || !this.root) return;
+        const now = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+            ? performance.now()
+            : Date.now();
+        if (!force) {
+            const elapsed = now - this._skipVisibilityLastApplyMs;
+            if (!this._skipVisibilityDirty && elapsed < SKIP_VISIBILITY_REFRESH_MS) {
+                return;
+            }
+        }
+        this._skipVisibilityDirty = false;
+        this._skipVisibilityLastApplyMs = now;
         const hidden = this._skipHiddenMaterials;
         this.root.traverse(obj => {
             if (!obj || !obj.isMesh || !obj.material) return;

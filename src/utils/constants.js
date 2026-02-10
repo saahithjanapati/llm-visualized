@@ -61,11 +61,20 @@ export const QUALITY_PRESET = 'high';
 // Recommended maximum device pixel ratio per quality preset.
 // Higher caps produce crisper visuals on Retina/HiDPI displays.
 export const RENDER_DPR_CAP = 2.0; // used by CoreEngine and intro renderer
+const LOW_DPR_SUPERSAMPLE_MAX_DPR = 1.25;
+const LARGE_VIEWPORT_SUPERSAMPLE_MIN_RATIO = 1.6;
+const LARGE_VIEWPORT_SUPERSAMPLE_MIN_WIDTH = 2200;
+const LARGE_VIEWPORT_SUPERSAMPLE_MIN_HEIGHT = 1300;
+const WIDE_VIEWPORT_SUPERSAMPLE_MIN_RATIO = 1.8;
+const WIDE_VIEWPORT_SUPERSAMPLE_MIN_WIDTH = 3000;
+const WIDE_VIEWPORT_SUPERSAMPLE_MIN_HEIGHT = 1600;
+const ULTRA_VIEWPORT_SUPERSAMPLE_MIN_RATIO = 2.0;
+const ULTRA_VIEWPORT_SUPERSAMPLE_MIN_WIDTH = 3800;
+const ULTRA_VIEWPORT_SUPERSAMPLE_MIN_HEIGHT = 2000;
 
 /**
  * Determine the effective renderer DPR cap taking an optional runtime override
- * into account. A runtime override can still lower the value via
- * `window.__RENDER_DPR_CAP` before the bundles execute.
+ * into account. Override with `window.__RENDER_DPR_CAP` before bundles execute.
  *
  * @returns {number}
  */
@@ -80,10 +89,58 @@ export function resolveRenderDprCap() {
 
     const override = window.__RENDER_DPR_CAP;
     if (typeof override === 'number' && override > 0) {
-        return Math.min(baseCap, override);
+        return Math.min(4, Math.max(0.5, override));
     }
 
     return baseCap;
+}
+
+/**
+ * Resolve the active renderer pixel ratio for the current viewport.
+ * On very large low-DPR screens, apply light supersampling so the scene
+ * does not appear soft.
+ *
+ * Optional runtime overrides:
+ * - `window.__RENDER_DPR_CAP` (number > 0): lower or raise the effective cap.
+ * - `window.__RENDER_PIXEL_RATIO` (number > 0): force a specific ratio.
+ */
+export function resolveRenderPixelRatio({ viewportWidth = null, viewportHeight = null } = {}) {
+    const cap = resolveRenderDprCap();
+    const dpr = (typeof window !== 'undefined' && typeof window.devicePixelRatio === 'number' && window.devicePixelRatio > 0)
+        ? window.devicePixelRatio
+        : 1;
+    const width = Number.isFinite(viewportWidth)
+        ? viewportWidth
+        : (typeof window !== 'undefined' ? window.innerWidth : 0);
+    const height = Number.isFinite(viewportHeight)
+        ? viewportHeight
+        : (typeof window !== 'undefined' ? window.innerHeight : 0);
+
+    let ratio = Math.min(cap, dpr);
+    if (dpr <= LOW_DPR_SUPERSAMPLE_MAX_DPR) {
+        const ultraViewport = width >= ULTRA_VIEWPORT_SUPERSAMPLE_MIN_WIDTH
+            || height >= ULTRA_VIEWPORT_SUPERSAMPLE_MIN_HEIGHT;
+        const wideViewport = width >= WIDE_VIEWPORT_SUPERSAMPLE_MIN_WIDTH
+            || height >= WIDE_VIEWPORT_SUPERSAMPLE_MIN_HEIGHT;
+        const largeViewport = width >= LARGE_VIEWPORT_SUPERSAMPLE_MIN_WIDTH
+            || height >= LARGE_VIEWPORT_SUPERSAMPLE_MIN_HEIGHT;
+        if (ultraViewport) {
+            ratio = Math.min(cap, Math.max(ratio, ULTRA_VIEWPORT_SUPERSAMPLE_MIN_RATIO));
+        } else if (wideViewport) {
+            ratio = Math.min(cap, Math.max(ratio, WIDE_VIEWPORT_SUPERSAMPLE_MIN_RATIO));
+        } else if (largeViewport) {
+            ratio = Math.min(cap, Math.max(ratio, LARGE_VIEWPORT_SUPERSAMPLE_MIN_RATIO));
+        }
+    }
+
+    if (typeof window !== 'undefined') {
+        const forcedRatio = window.__RENDER_PIXEL_RATIO;
+        if (typeof forcedRatio === 'number' && forcedRatio > 0) {
+            ratio = Math.min(cap, forcedRatio);
+        }
+    }
+
+    return ratio;
 }
 
 export const VECTOR_LENGTH = 100;
