@@ -41,6 +41,8 @@ const applyVectorCategoryLabel = (vectorRef, vectorCategory, ctx) => {
             ? 'Query Vector'
             : 'Value Vector';
     try {
+        vectorRef.userData = vectorRef.userData || {};
+        vectorRef.userData.vectorCategory = vectorCategory;
         vectorRef.group.userData = vectorRef.group.userData || {};
         vectorRef.group.userData.label = label;
         if (Number.isFinite(vectorRef.userData?.headIndex)) {
@@ -93,28 +95,27 @@ const applyQkvProcessedVisuals = (vectorRef, ctx, vectorCategory, outLength, fin
         vectorRef.userData.qkvProcessed = true;
         vectorRef.userData.qkvOutputLength = outLength;
         vectorRef.userData.qkvProcessedCategory = vectorCategory;
+        vectorRef.userData.vectorCategory = vectorCategory;
     }
     if (Number.isFinite(scalar) && typeof vectorRef.setUniformColor === 'function') {
         const rangeColor = mapValueToHueRange(scalar, rangeOptions);
         vectorRef.setUniformColor(rangeColor);
     }
-    if (Number.isFinite(scalar)) {
-        const label = vectorCategory === 'K'
-            ? 'Key Vector'
-            : vectorCategory === 'Q'
-                ? 'Query Vector'
-                : 'Value Vector';
-        const activationData = buildActivationData({
-            label,
-            values: data,
-            stage: `qkv.${kind}`,
-            layerIndex,
-            tokenIndex,
-            tokenLabel,
-            headIndex,
-        });
-        applyActivationDataToVector(vectorRef, activationData, label);
-    }
+    const label = vectorCategory === 'K'
+        ? 'Key Vector'
+        : vectorCategory === 'Q'
+            ? 'Query Vector'
+            : 'Value Vector';
+    const activationData = buildActivationData({
+        label,
+        values: data,
+        stage: `qkv.${kind}`,
+        layerIndex,
+        tokenIndex,
+        tokenLabel,
+        headIndex,
+    });
+    applyActivationDataToVector(vectorRef, activationData, label);
     return true;
 };
 

@@ -448,6 +448,11 @@ export class MHSAAnimation {
             vec.userData.qkvProcessed = false;
             vec.userData.qkvOutputLength = null;
             vec.userData.qkvProcessedCategory = null;
+            vec.userData.vectorCategory = kind;
+            delete vec.userData.activationData;
+            if (vec.group && vec.group.userData) {
+                delete vec.group.userData.activationData;
+            }
             return vec;
         }
         const { key, bucket } = this._getVectorPoolBucket(instanceCount);
@@ -488,6 +493,18 @@ export class MHSAAnimation {
         vec.userData.qkvProcessed = false;
         vec.userData.qkvOutputLength = null;
         vec.userData.qkvProcessedCategory = null;
+        if (typeof kind === 'string') {
+            vec.userData.vectorCategory = kind;
+        } else {
+            delete vec.userData.vectorCategory;
+        }
+        delete vec.userData.activationData;
+        if (vec.group && vec.group.userData) {
+            delete vec.group.userData.activationData;
+        }
+        if (vec.mesh && vec.mesh.userData) {
+            delete vec.mesh.userData.activationData;
+        }
         if (this.parentGroup && vec.group && vec.group.parent !== this.parentGroup) {
             this.parentGroup.add(vec.group);
         }
