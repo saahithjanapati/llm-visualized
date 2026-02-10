@@ -121,7 +121,8 @@ const applyQkvProcessedVisuals = (vectorRef, ctx, vectorCategory, outLength, fin
 /**
  * Animate a vector passing vertically through its corresponding weight matrix.
  * The heavy 768-dimensional vector is swapped for a lightweight 64-dimensional
- * version once it enters the matrix to save GPU resources.
+ * version slightly before matrix entry so oversized source vectors never poke
+ * through the tapered matrix body.
  *
  * NOTE: This helper is completely stateless – all references to scene objects
  *       and runtime flags are resolved from the provided `ctx` (the
@@ -187,7 +188,13 @@ export function animateVectorMatrixPassThrough(
     alignVectorToMatrixLane(vector, matrix);
 
     // ------------------------------------------------------------------
-    const matrixBottomY = ctx.mhsa_matrix_center_y - MHA_MATRIX_PARAMS.height / 2;
+    const matrixCenterY = Number.isFinite(matrix?.group?.position?.y)
+        ? matrix.group.position.y
+        : ctx.mhsa_matrix_center_y;
+    const matrixHeight = Number.isFinite(matrix?.height) ? matrix.height : MHA_MATRIX_PARAMS.height;
+    const matrixBottomY = matrixCenterY - matrixHeight / 2;
+    const preEntrySwapLead = THREE.MathUtils.clamp(matrixHeight * 0.22, 4, 14);
+    const dimensionSwapY = matrixBottomY - preEntrySwapLead;
 
     // ------------------------------------------------------------------
     //  Prepare tween state helpers
@@ -241,7 +248,7 @@ export function animateVectorMatrixPassThrough(
                 }
             } catch (_) { /* no-op */ }
 
-            if (!initialDimensionChangeApplied && y >= matrixBottomY) {
+            if (!initialDimensionChangeApplied && y >= dimensionSwapY) {
                 const batched = isBatchedVector(vectorRef);
                 if (!batched) {
                     const heavyVec = vectorRef;
@@ -440,9 +447,9 @@ export function animateVectorMatrixPassThrough(
         
 
             // --------------------------------------------------------------
-            //  Lightweight 64-dimensional swap as soon as we touch matrix
+            //  Lightweight 64-dimensional swap just before matrix entry
             // --------------------------------------------------------------
-            if (!initialDimensionChangeApplied && tweenState.y >= matrixBottomY) {
+            if (!initialDimensionChangeApplied && tweenState.y >= dimensionSwapY) {
                 const batched = isBatchedVector(vector);
                 if (!batched) {
                     const heavyVec = vector;

@@ -1843,10 +1843,15 @@ export default class Gpt2Layer extends BaseLayer {
         }
         lane.mlpDownStarted = true;
         lane.mlpDownComplete = false;
+        lane.collapsedInMatrix = false;
+        lane.finalVecAfterMlp = null;
         
         const orangeColor = new THREE.Color(0xc07a12);
         const downBottomY = this.mlpDown.group.position.y - MLP_MATRIX_PARAMS_DOWN.height / 2;
         const downTopY = this.mlpDown.group.position.y + MLP_MATRIX_PARAMS_DOWN.height / 2;
+        // Collapse before matrix entry so the 3072-dim visual never protrudes through the shell.
+        const preEntryCollapseLead = THREE.MathUtils.clamp(MLP_MATRIX_PARAMS_DOWN.height * 0.22, 8, 30);
+        const collapseTriggerY = downBottomY - preEntryCollapseLead;
         
         const startY = expandedGroup.position.y;
         const totalDist = downTopY - startY;
@@ -1919,9 +1924,9 @@ export default class Gpt2Layer extends BaseLayer {
                     }
                 }
 
-                // Check if we've reached the middle of the down-projection matrix
-                const midY = this.mlpDown.group.position.y;
-                if (!lane.collapsedInMatrix && expandedGroup.position.y >= midY) {
+                // Transition to the 768-dim collapsed vector early in the matrix so
+                // the wider source visual is gone before the top taper gets narrow.
+                if (!lane.collapsedInMatrix && expandedGroup.position.y >= collapseTriggerY) {
                     lane.collapsedInMatrix = true;
                     
                     // Create collapsed vector at current position
@@ -1955,8 +1960,10 @@ export default class Gpt2Layer extends BaseLayer {
                     }
                     
                     // Continue animating the collapsed vector for the rest of the journey
+                    const remainingDist = Math.max(0, downTopY - expandedGroup.position.y);
+                    const remainingDuration = (remainingDist / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
                     new TWEEN.Tween(collapseVec.group.position)
-                        .to({ y: downTopY }, durationDown / 2) // Half duration since we're halfway
+                        .to({ y: downTopY }, remainingDuration)
                         .easing(TWEEN.Easing.Linear.None)
                         .onUpdate(() => {
                         })

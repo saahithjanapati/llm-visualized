@@ -62,6 +62,10 @@ export const QUALITY_PRESET = 'high';
 // Higher caps produce crisper visuals on Retina/HiDPI displays.
 export const RENDER_DPR_CAP = 2.0; // used by CoreEngine and intro renderer
 const LOW_DPR_SUPERSAMPLE_MAX_DPR = 1.25;
+const LOW_DPR_SUPERSAMPLE_BASE_MIN_RATIO = 1.25;
+const MID_VIEWPORT_SUPERSAMPLE_MIN_RATIO = 1.4;
+const MID_VIEWPORT_SUPERSAMPLE_MIN_WIDTH = 1800;
+const MID_VIEWPORT_SUPERSAMPLE_MIN_HEIGHT = 1000;
 const LARGE_VIEWPORT_SUPERSAMPLE_MIN_RATIO = 1.6;
 const LARGE_VIEWPORT_SUPERSAMPLE_MIN_WIDTH = 2200;
 const LARGE_VIEWPORT_SUPERSAMPLE_MIN_HEIGHT = 1300;
@@ -97,8 +101,8 @@ export function resolveRenderDprCap() {
 
 /**
  * Resolve the active renderer pixel ratio for the current viewport.
- * On very large low-DPR screens, apply light supersampling so the scene
- * does not appear soft.
+ * On low-DPR screens, apply gentle supersampling to reduce softness in
+ * zoomed-out views, with stronger boosts on larger viewports.
  *
  * Optional runtime overrides:
  * - `window.__RENDER_DPR_CAP` (number > 0): lower or raise the effective cap.
@@ -118,6 +122,11 @@ export function resolveRenderPixelRatio({ viewportWidth = null, viewportHeight =
 
     let ratio = Math.min(cap, dpr);
     if (dpr <= LOW_DPR_SUPERSAMPLE_MAX_DPR) {
+        // On low-DPI displays, keep a baseline supersample so zoomed-out views
+        // do not become overly soft.
+        ratio = Math.min(cap, Math.max(ratio, LOW_DPR_SUPERSAMPLE_BASE_MIN_RATIO));
+        const midViewport = width >= MID_VIEWPORT_SUPERSAMPLE_MIN_WIDTH
+            || height >= MID_VIEWPORT_SUPERSAMPLE_MIN_HEIGHT;
         const ultraViewport = width >= ULTRA_VIEWPORT_SUPERSAMPLE_MIN_WIDTH
             || height >= ULTRA_VIEWPORT_SUPERSAMPLE_MIN_HEIGHT;
         const wideViewport = width >= WIDE_VIEWPORT_SUPERSAMPLE_MIN_WIDTH
@@ -130,6 +139,8 @@ export function resolveRenderPixelRatio({ viewportWidth = null, viewportHeight =
             ratio = Math.min(cap, Math.max(ratio, WIDE_VIEWPORT_SUPERSAMPLE_MIN_RATIO));
         } else if (largeViewport) {
             ratio = Math.min(cap, Math.max(ratio, LARGE_VIEWPORT_SUPERSAMPLE_MIN_RATIO));
+        } else if (midViewport) {
+            ratio = Math.min(cap, Math.max(ratio, MID_VIEWPORT_SUPERSAMPLE_MIN_RATIO));
         }
     }
 

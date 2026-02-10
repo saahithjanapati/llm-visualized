@@ -553,18 +553,22 @@ function applyLaneOverrideToInstancedMeshes(object, laneCount, laneSpacing) {
 
 function applyFinalColorToObject(object, color) {
     if (!object || color === null || color === undefined) return;
+    const targetColor = color?.isColor ? color : new THREE.Color(color);
     object.traverse((child) => {
         if (!child.material) return;
         const materials = Array.isArray(child.material) ? child.material : [child.material];
         materials.forEach((mat) => {
             if (!mat) return;
-            const prevIntensity = mat.userData?.sciFiUniforms && typeof mat.emissiveIntensity === 'number'
-                ? mat.emissiveIntensity
-                : null;
-            updateSciFiMaterialColor(mat, color);
-            if (prevIntensity !== null) {
-                mat.emissiveIntensity = prevIntensity;
+            if (mat.userData?.sciFiUniforms) {
+                updateSciFiMaterialColor(mat, targetColor);
+            } else {
+                if (mat.color?.copy) mat.color.copy(targetColor);
+                if (mat.emissive?.copy) mat.emissive.copy(targetColor);
+                if (typeof mat.emissiveIntensity === 'number') {
+                    mat.emissiveIntensity = Math.max(mat.emissiveIntensity, 0.32);
+                }
             }
+            mat.needsUpdate = true;
         });
     });
 }
@@ -1241,7 +1245,7 @@ function buildWeightMatrixPreview(params, colorHex, options = {}) {
     if (colorHex !== null && colorHex !== undefined) {
         matrix.setColor(new THREE.Color(colorHex));
     }
-    matrix.setMaterialProperties({ opacity: 0.98, transparent: false, emissiveIntensity: 0.18 });
+    matrix.setMaterialProperties({ opacity: 0.98, transparent: false, emissiveIntensity: 0.42 });
     return {
         object: matrix.group,
         dispose: () => {
@@ -1594,6 +1598,7 @@ function extractMaterialSnapshot(selectionInfo) {
     if (!material) return null;
     return {
         color: material.color ? material.color.clone() : null,
+        emissive: material.emissive && material.emissive.clone ? material.emissive.clone() : null,
         emissiveIntensity: material.emissiveIntensity,
         opacity: material.opacity,
         transparent: material.transparent,
@@ -1618,7 +1623,14 @@ function applyMaterialSnapshot(object, snapshot) {
         materials.forEach((mat) => {
             if (!mat) return;
             if (snapshot.color) {
-                updateSciFiMaterialColor(mat, snapshot.color);
+                if (mat.userData?.sciFiUniforms) {
+                    updateSciFiMaterialColor(mat, snapshot.color);
+                } else if (mat.color?.copy) {
+                    mat.color.copy(snapshot.color);
+                }
+            }
+            if (snapshot.emissive && mat.emissive?.copy) {
+                mat.emissive.copy(snapshot.emissive);
             }
             if (Number.isFinite(snapshot.emissiveIntensity)) mat.emissiveIntensity = snapshot.emissiveIntensity;
             if (Number.isFinite(snapshot.opacity)) mat.opacity = snapshot.opacity;
@@ -1836,7 +1848,6 @@ function isLayerNormLabel(label) {
     const lower = (label || '').toLowerCase();
     return lower.includes('layernorm') || lower.includes('layer norm');
 }
-
 
 function resolvePreviewObject(label, selectionInfo) {
     const lower = (label || '').toLowerCase();
@@ -2076,11 +2087,16 @@ class SelectionPanel {
         this.renderer.setClearColor(0x000000, 1);
 
         this._ambientBaseIntensity = 0.7;
+        this._keyLightBaseIntensity = 0.9;
+        this._keyLightBasePosition = new THREE.Vector3(25, 40, 40);
         this.ambientLight = new THREE.AmbientLight(0xffffff, this._ambientBaseIntensity);
-        this.keyLight = new THREE.DirectionalLight(0xffffff, 0.9);
-        this.keyLight.position.set(25, 40, 40);
+        this.keyLight = new THREE.DirectionalLight(0xffffff, this._keyLightBaseIntensity);
+        this.keyLight.position.copy(this._keyLightBasePosition);
         this.scene.add(this.ambientLight, this.keyLight);
         this._environmentTexture = null;
+        this._sourceLightScene = null;
+        this._sourceAmbientLight = null;
+        this._sourceDirectionalLight = null;
         this._syncEnvironment();
 
         this.currentPreview = null;
@@ -3057,18 +3073,66 @@ class SelectionPanel {
         this.close();
     }
 
+    _refreshSourceLightRefs() {
+        const sourceScene = this.engine?.scene || null;
+        if (sourceScene === this._sourceLightScene) return;
+        this._sourceLightScene = sourceScene;
+        this._sourceAmbientLight = null;
+        this._sourceDirectionalLight = null;
+        if (!sourceScene || typeof sourceScene.traverse !== 'function') return;
+        sourceScene.traverse((node) => {
+            if (!this._sourceAmbientLight && node?.isAmbientLight) {
+                this._sourceAmbientLight = node;
+            }
+            if (!this._sourceDirectionalLight && node?.isDirectionalLight) {
+                this._sourceDirectionalLight = node;
+            }
+        });
+    }
+
+    _syncPreviewLightsFromSource() {
+        this._refreshSourceLightRefs();
+        if (this.ambientLight) {
+            const sourceAmbient = this._sourceAmbientLight;
+            if (sourceAmbient?.color?.isColor) {
+                this.ambientLight.color.copy(sourceAmbient.color);
+            } else {
+                this.ambientLight.color.set(0xffffff);
+            }
+            this.ambientLight.intensity = Number.isFinite(sourceAmbient?.intensity)
+                ? sourceAmbient.intensity
+                : this._ambientBaseIntensity;
+        }
+
+        if (this.keyLight) {
+            const sourceDirectional = this._sourceDirectionalLight;
+            if (sourceDirectional?.color?.isColor) {
+                this.keyLight.color.copy(sourceDirectional.color);
+            } else {
+                this.keyLight.color.set(0xffffff);
+            }
+            this.keyLight.intensity = Number.isFinite(sourceDirectional?.intensity)
+                ? sourceDirectional.intensity
+                : this._keyLightBaseIntensity;
+            if (sourceDirectional?.position?.isVector3) {
+                this.keyLight.position.copy(sourceDirectional.position);
+            } else {
+                this.keyLight.position.copy(this._keyLightBasePosition);
+            }
+        }
+    }
+
     _syncEnvironment() {
         const engineEnv = this.engine?.scene?.environment || null;
         const env = engineEnv || appState.environmentTexture;
         if (env && this._environmentTexture !== env) {
             this.scene.environment = env;
             this._environmentTexture = env;
-            if (this.ambientLight) this.ambientLight.intensity = 0.0;
         } else if (!env && this._environmentTexture) {
             this.scene.environment = null;
             this._environmentTexture = null;
-            if (this.ambientLight) this.ambientLight.intensity = this._ambientBaseIntensity;
         }
+        this._syncPreviewLightsFromSource();
 
         const sourceRenderer = this.engine?.renderer || null;
         if (sourceRenderer) {
