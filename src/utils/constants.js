@@ -300,7 +300,7 @@ export const MERGE_EXTRA_BUFFER_MS = 200;                     // Extra buffer af
 
 // Output projection staged timings
 export const OUTPUT_PROJ_STAGE1_MS = 1000; // to matrix bottom
-export const OUTPUT_PROJ_STAGE2_MS = 1000; // through matrix
+export const OUTPUT_PROJ_STAGE2_MS = 1200; // through matrix (slightly slower)
 export const OUTPUT_PROJ_STAGE3_MS = 500;  // final rise after matrix
 
 // ------------------------------------------------------------
