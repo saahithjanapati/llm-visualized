@@ -15,6 +15,7 @@ import {
     EMBEDDING_MATRIX_PARAMS_POSITION,
     LAYER_NORM_FINAL_COLOR,
     VECTOR_LENGTH_PRISM,
+    NUM_HEAD_SETS_LAYER,
     HIDE_INSTANCE_Y_OFFSET,
     resolveRenderPixelRatio
 } from '../utils/constants.js';
@@ -118,6 +119,7 @@ function requestTokenChipFont() {
 }
 
 const D_MODEL = 768;
+const D_HEAD = Math.floor(D_MODEL / NUM_HEAD_SETS_LAYER);
 const VOCAB_SIZE = 50257;
 const CONTEXT_LEN = 1024;
 
@@ -753,13 +755,13 @@ function resolveMetadata(label, kind = null) {
         return buildMetadata();
     }
     if (lower.includes('query weight matrix')) {
-        return buildMetadata(formatNumber(D_MODEL * D_MODEL), D_MODEL, D_MODEL);
+        return buildMetadata(formatNumber(D_MODEL * D_HEAD), D_MODEL, D_HEAD);
     }
     if (lower.includes('key weight matrix')) {
-        return buildMetadata(formatNumber(D_MODEL * D_MODEL), D_MODEL, D_MODEL);
+        return buildMetadata(formatNumber(D_MODEL * D_HEAD), D_MODEL, D_HEAD);
     }
     if (lower.includes('value weight matrix')) {
-        return buildMetadata(formatNumber(D_MODEL * D_MODEL), D_MODEL, D_MODEL);
+        return buildMetadata(formatNumber(D_MODEL * D_HEAD), D_MODEL, D_HEAD);
     }
     if (lower.includes('output projection matrix')) {
         return buildMetadata(formatNumber(D_MODEL * D_MODEL), D_MODEL, D_MODEL);
@@ -1277,7 +1279,9 @@ function buildWeightMatrixPreview(params, colorHex, options = {}) {
 
 function extractPreviewVectorData(selectionInfo) {
     const vectorRef = selectionInfo?.info?.vectorRef;
-    const candidates = [
+    const activationStage = getActivationDataFromSelection(selectionInfo)?.stage;
+    const preferActivationValues = typeof activationStage === 'string' && activationStage.toLowerCase().startsWith('qkv.');
+    const baseCandidates = [
         vectorRef?.rawData,
         vectorRef?.userData?.activationData?.values,
         selectionInfo?.info?.activationData?.values,
@@ -1286,6 +1290,17 @@ function extractPreviewVectorData(selectionInfo) {
         selectionInfo?.info?.vectorData,
         selectionInfo?.info?.values
     ];
+    const candidates = preferActivationValues
+        ? [
+            vectorRef?.userData?.activationData?.values,
+            selectionInfo?.info?.activationData?.values,
+            selectionInfo?.object?.userData?.activationData?.values,
+            selectionInfo?.hit?.object?.userData?.activationData?.values,
+            vectorRef?.rawData,
+            selectionInfo?.info?.vectorData,
+            selectionInfo?.info?.values
+        ]
+        : baseCandidates;
     for (const arr of candidates) {
         if ((Array.isArray(arr) || ArrayBuffer.isView(arr)) && arr.length > 0) {
             return Array.from(arr).map((v) => Number.isFinite(v) ? v : 0);
@@ -1722,27 +1737,128 @@ function applyMaterialSnapshot(object, snapshot) {
     });
 }
 
+function copyInstancedVectorSliceToPreview(previewVec, sourceMesh, sourceOffset = 0, sourceCount = null) {
+    if (!previewVec?.mesh || !sourceMesh?.isInstancedMesh || typeof sourceMesh.getMatrixAt !== 'function') {
+        return false;
+    }
+    const dstMesh = previewVec.mesh;
+    const dstCount = Number.isFinite(previewVec.instanceCount)
+        ? Math.max(1, Math.floor(previewVec.instanceCount))
+        : 0;
+    const srcTotal = Number.isFinite(sourceMesh.count)
+        ? Math.max(0, Math.floor(sourceMesh.count))
+        : Math.max(0, Math.floor(sourceMesh.instanceMatrix?.count || 0));
+    const start = Math.max(0, Math.floor(sourceOffset || 0));
+    const available = Math.max(0, srcTotal - start);
+    const requested = Number.isFinite(sourceCount)
+        ? Math.max(0, Math.floor(sourceCount))
+        : dstCount;
+    const copyCount = Math.min(dstCount, available, requested);
+    if (copyCount <= 0) return false;
+
+    for (let i = 0; i < copyCount; i += 1) {
+        sourceMesh.getMatrixAt(start + i, TMP_MATRIX);
+        dstMesh.setMatrixAt(i, TMP_MATRIX);
+    }
+    for (let i = copyCount; i < dstCount; i += 1) {
+        TMP_MATRIX.makeScale(0.001, 0.001, 0.001);
+        TMP_MATRIX.setPosition(0, HIDE_INSTANCE_Y_OFFSET, 0);
+        dstMesh.setMatrixAt(i, TMP_MATRIX);
+    }
+    dstMesh.instanceMatrix.needsUpdate = true;
+
+    if (sourceMesh.instanceColor?.array && dstMesh.instanceColor?.array) {
+        const srcColors = sourceMesh.instanceColor.array;
+        const dstColors = dstMesh.instanceColor.array;
+        const srcStart = start * 3;
+        const maxCopy = Math.min(copyCount * 3, srcColors.length - srcStart, dstColors.length);
+        if (maxCopy > 0) {
+            dstColors.set(srcColors.subarray(srcStart, srcStart + maxCopy), 0);
+            dstMesh.instanceColor.needsUpdate = true;
+        }
+    }
+
+    const copyAttr = (name) => {
+        const srcAttr = sourceMesh.geometry?.getAttribute?.(name);
+        const dstAttr = dstMesh.geometry?.getAttribute?.(name);
+        if (!srcAttr?.array || !dstAttr?.array) return;
+        const srcStart = start * 3;
+        const maxCopy = Math.min(copyCount * 3, srcAttr.array.length - srcStart, dstAttr.array.length);
+        if (maxCopy <= 0) return;
+        dstAttr.array.set(srcAttr.array.subarray(srcStart, srcStart + maxCopy), 0);
+        dstAttr.needsUpdate = true;
+    };
+    copyAttr('colorStart');
+    copyAttr('colorEnd');
+    return true;
+}
+
+function tryCopyVectorAppearanceToPreview(vec, selectionInfo, vectorRef, vectorMesh) {
+    if (!vec || !vec.mesh) return false;
+    let copied = false;
+
+    if (!copied && vectorRef?.isBatchedVectorRef && vectorRef._batch?.mesh) {
+        const batch = vectorRef._batch;
+        const batchPrismCount = Number.isFinite(batch.prismCount)
+            ? Math.max(1, Math.floor(batch.prismCount))
+            : vec.instanceCount;
+        const index = Number.isFinite(vectorRef._index) ? Math.max(0, Math.floor(vectorRef._index)) : 0;
+        copied = copyInstancedVectorSliceToPreview(vec, batch.mesh, index * batchPrismCount, batchPrismCount);
+    }
+
+    if (!copied && vectorRef?.mesh?.isInstancedMesh) {
+        const srcCount = Number.isFinite(vectorRef.instanceCount)
+            ? Math.max(1, Math.floor(vectorRef.instanceCount))
+            : undefined;
+        copied = copyInstancedVectorSliceToPreview(vec, vectorRef.mesh, 0, srcCount);
+    }
+
+    if (!copied && vectorMesh?.isInstancedMesh) {
+        copied = copyInstancedVectorSliceToPreview(vec, vectorMesh, 0, vec.instanceCount);
+    }
+
+    if (!copied) return false;
+
+    if (Array.isArray(vectorRef?.currentKeyColors) && vectorRef.currentKeyColors.length >= 2) {
+        vec.currentKeyColors = vectorRef.currentKeyColors
+            .map((color) => (color?.isColor ? color.clone() : new THREE.Color(color)))
+            .filter((color) => color?.isColor);
+        vec.numSubsections = Math.max(1, vec.currentKeyColors.length - 1);
+    }
+
+    const snapshot = extractMaterialSnapshot(selectionInfo);
+    if (snapshot) {
+        applyMaterialSnapshot(vec.group, snapshot);
+    }
+    return true;
+}
+
 function buildVectorClonePreview(selectionInfo, label = '') {
     const vectorRef = selectionInfo?.info?.vectorRef || null;
     const vectorMesh = findVectorSourceMesh(selectionInfo);
     if (!vectorRef && !vectorMesh) return null;
 
     const prismCount = resolveVectorPreviewInstanceCount(selectionInfo);
-    const data = extractPreviewVectorData(selectionInfo);
     const vec = createPreviewVector({
         colorHex: resolveVectorPreviewColor(label, selectionInfo),
-        data,
+        data: null,
         instanceCount: prismCount
     });
 
-    if ((!Array.isArray(data) || data.length === 0) && Array.isArray(vectorRef?.currentKeyColors)) {
-        const keyColors = vectorRef.currentKeyColors
-            .map((color) => (color?.isColor ? color.clone() : new THREE.Color(color)))
-            .filter((color) => color?.isColor);
-        if (keyColors.length >= 2) {
-            vec.currentKeyColors = keyColors;
-            vec.numSubsections = keyColors.length - 1;
-            vec.updateInstanceGeometryAndColors();
+    const copiedAppearance = tryCopyVectorAppearanceToPreview(vec, selectionInfo, vectorRef, vectorMesh);
+    if (!copiedAppearance) {
+        const data = extractPreviewVectorData(selectionInfo);
+        if (Array.isArray(data) && data.length > 0) {
+            applyDataToPreviewVector(vec, data);
+        } else if (Array.isArray(vectorRef?.currentKeyColors)) {
+            const keyColors = vectorRef.currentKeyColors
+                .map((color) => (color?.isColor ? color.clone() : new THREE.Color(color)))
+                .filter((color) => color?.isColor);
+            if (keyColors.length >= 2) {
+                vec.currentKeyColors = keyColors;
+                vec.numSubsections = keyColors.length - 1;
+                vec.updateInstanceGeometryAndColors();
+            }
         }
     }
 
