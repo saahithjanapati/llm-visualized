@@ -892,9 +892,35 @@ export class CoreEngine {
         return true;
     }
 
+    _isRaycastObjectInteractable(object) {
+        let current = object;
+        while (current) {
+            const data = current.userData;
+            if (data) {
+                if (data.raycastDisabled === true) return false;
+                const gate = data.raycastEnabled;
+                if (typeof gate === 'boolean' && !gate) return false;
+                if (typeof gate === 'function') {
+                    let allowed = false;
+                    try {
+                        allowed = !!gate();
+                    } catch (_) {
+                        allowed = false;
+                    }
+                    if (!allowed) return false;
+                }
+            }
+            current = current.parent;
+        }
+        return true;
+    }
+
     _resolveRaycastLabel(intersects) {
         if (!intersects || !intersects.length) return null;
-        const visibleHits = intersects.filter((hit) => this._isRaycastObjectVisible(hit?.object));
+        const visibleHits = intersects.filter((hit) => {
+            const obj = hit?.object;
+            return this._isRaycastObjectVisible(obj) && this._isRaycastObjectInteractable(obj);
+        });
         if (!visibleHits.length) return null;
         // Pass 1: Prefer detailed labels from merged K/V instanced meshes anywhere in the hit list
         for (const hit of visibleHits) {

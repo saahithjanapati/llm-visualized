@@ -1140,8 +1140,11 @@ body.touch-ui * {
 }
 .attention-legend {
     display: grid;
-    grid-template-columns: auto 1fr auto;
-    align-items: center;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas:
+        "bar bar"
+        "low high";
+    align-items: end;
     gap: 8px;
     margin-top: 10px;
     color: #9aa3af;
@@ -1149,6 +1152,7 @@ body.touch-ui * {
     font-size: 10px;
 }
 .attention-legend-bar {
+    grid-area: bar;
     position: relative;
     height: 10px;
     border-radius: 999px;
@@ -1179,8 +1183,17 @@ body.touch-ui * {
     opacity: var(--attention-legend-mid-opacity, 1);
 }
 .attention-legend-label {
-    min-width: 18px;
-    text-align: center;
+    min-width: 0;
+}
+#detailAttentionLegendLow {
+    grid-area: low;
+    justify-self: start;
+    text-align: left;
+}
+#detailAttentionLegendHigh {
+    grid-area: high;
+    justify-self: end;
+    text-align: right;
 }
 .attention-cell {
     width: var(--cell-size, 18px);

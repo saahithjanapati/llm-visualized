@@ -708,6 +708,18 @@ export function addEmbeddingAndTokenChips({
                 scene: rootGroup,
                 engine: null
             });
+            if (topLogitBars && topLogitBars.userData) {
+                const isLogitRaycastEnabled = () => (
+                    typeof pipeline?.isForwardPassComplete === 'function'
+                        ? pipeline.isForwardPassComplete()
+                        : false
+                );
+                topLogitBars.userData.raycastEnabled = isLogitRaycastEnabled;
+                const instancedMesh = topLogitBars.userData.instancedMesh;
+                if (instancedMesh && instancedMesh.userData) {
+                    instancedMesh.userData.raycastEnabled = isLogitRaycastEnabled;
+                }
+            }
             if (topLogitBars && pipeline && typeof pipeline.addEventListener === 'function') {
                 const isTopEmbeddingTraversalComplete = () => {
                     const lastLayerRef = pipeline._layers?.[numLayers - 1];
