@@ -1347,6 +1347,27 @@ body.touch-ui * {
     font-size: 11px;
 }
 .detail-value { color: #fff; }
+.detail-row-dims {
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 0;
+    padding: 0;
+    overflow: hidden;
+}
+.detail-dim-half {
+    flex: 1 1 50%;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 10px 12px;
+}
+.detail-dim-half + .detail-dim-half {
+    border-left: 1px solid rgba(255,255,255,0.12);
+}
+.detail-row-dims .detail-value {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
 
 .detail-data {
     margin: 2px 16px 0;

@@ -293,9 +293,9 @@ export class LayerPipeline extends EventTarget {
         this._autoCamera?.focusOverview?.({ immediate, durationMs });
     }
 
-    /** Apply a horizontal screen-space shift (in pixels) to re-center the view. */
-    setScreenShiftPixels(shiftPx, { immediate = false, durationMs = 520 } = {}) {
-        this._autoCamera?.setScreenShiftPixels?.(shiftPx, { immediate, durationMs });
+    /** Apply a screen-space shift (in pixels) to re-center the view. */
+    setScreenShiftPixels(shiftPx, { immediate = false, durationMs = 520, shiftYPx = 0 } = {}) {
+        this._autoCamera?.setScreenShiftPixels?.(shiftPx, { immediate, durationMs, shiftYPx });
     }
 
     /** Get current follow reference position (residual stream center). */

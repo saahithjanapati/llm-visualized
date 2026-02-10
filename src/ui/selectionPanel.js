@@ -126,9 +126,19 @@ function formatNumber(value) {
     return Math.round(value).toLocaleString('en-US');
 }
 
-function formatDims(rows, cols) {
-    if (!Number.isFinite(rows) || !Number.isFinite(cols)) return 'TBD';
-    return `${rows} x ${cols}`;
+function formatDims(inputDim, outputDim) {
+    if (!Number.isFinite(inputDim) || !Number.isFinite(outputDim)) return 'TBD';
+    return `input dim: ${formatNumber(inputDim)} | output dim: ${formatNumber(outputDim)}`;
+}
+
+function buildMetadata(params = 'TBD', inputDim = null, outputDim = null) {
+    const hasDims = Number.isFinite(inputDim) && Number.isFinite(outputDim);
+    return {
+        params,
+        dims: hasDims ? formatDims(inputDim, outputDim) : 'TBD',
+        inputDim: hasDims ? formatNumber(inputDim) : 'TBD',
+        outputDim: hasDims ? formatNumber(outputDim) : 'TBD'
+    };
 }
 
 function formatValues(values, perLine = 8) {
@@ -740,39 +750,42 @@ function getLaneZoomMultiplier(object) {
 function resolveMetadata(label, kind = null) {
     const lower = (label || '').toLowerCase();
     if (lower.startsWith('token:') || lower.startsWith('position:')) {
-        return { params: 'TBD', dims: 'TBD' };
+        return buildMetadata();
     }
     if (lower.includes('query weight matrix')) {
-        return { params: formatNumber(D_MODEL * D_MODEL), dims: formatDims(D_MODEL, D_MODEL) };
+        return buildMetadata(formatNumber(D_MODEL * D_MODEL), D_MODEL, D_MODEL);
     }
     if (lower.includes('key weight matrix')) {
-        return { params: formatNumber(D_MODEL * D_MODEL), dims: formatDims(D_MODEL, D_MODEL) };
+        return buildMetadata(formatNumber(D_MODEL * D_MODEL), D_MODEL, D_MODEL);
     }
     if (lower.includes('value weight matrix')) {
-        return { params: formatNumber(D_MODEL * D_MODEL), dims: formatDims(D_MODEL, D_MODEL) };
+        return buildMetadata(formatNumber(D_MODEL * D_MODEL), D_MODEL, D_MODEL);
     }
     if (lower.includes('output projection matrix')) {
-        return { params: formatNumber(D_MODEL * D_MODEL), dims: formatDims(D_MODEL, D_MODEL) };
+        return buildMetadata(formatNumber(D_MODEL * D_MODEL), D_MODEL, D_MODEL);
     }
     if (lower.includes('mlp up weight matrix')) {
-        return { params: formatNumber(D_MODEL * D_MODEL * 4), dims: formatDims(D_MODEL, D_MODEL * 4) };
+        return buildMetadata(formatNumber(D_MODEL * D_MODEL * 4), D_MODEL, D_MODEL * 4);
     }
     if (lower.includes('mlp down weight matrix')) {
-        return { params: formatNumber(D_MODEL * D_MODEL * 4), dims: formatDims(D_MODEL * 4, D_MODEL) };
+        return buildMetadata(formatNumber(D_MODEL * D_MODEL * 4), D_MODEL * 4, D_MODEL);
+    }
+    if (lower.includes('vocab embedding (top)') || lower.includes('unembedding')) {
+        return buildMetadata(formatNumber(VOCAB_SIZE * D_MODEL), D_MODEL, VOCAB_SIZE);
     }
     if (lower.includes('vocab embedding')) {
-        return { params: formatNumber(VOCAB_SIZE * D_MODEL), dims: formatDims(VOCAB_SIZE, D_MODEL) };
+        return buildMetadata(formatNumber(VOCAB_SIZE * D_MODEL), VOCAB_SIZE, D_MODEL);
     }
     if (lower.includes('positional embedding')) {
-        return { params: formatNumber(CONTEXT_LEN * D_MODEL), dims: formatDims(CONTEXT_LEN, D_MODEL) };
+        return buildMetadata(formatNumber(CONTEXT_LEN * D_MODEL), CONTEXT_LEN, D_MODEL);
     }
     if (lower.includes('query vector') || lower.includes('key vector') || lower.includes('value vector')) {
-        return { params: 'TBD', dims: 'TBD' };
+        return buildMetadata();
     }
     if (lower.includes('attention') || (kind === 'mergedKV')) {
-        return { params: 'TBD', dims: 'TBD' };
+        return buildMetadata();
     }
-    return { params: 'TBD', dims: 'TBD' };
+    return buildMetadata();
 }
 
 function escapeHtml(value) {
@@ -2038,10 +2051,13 @@ class SelectionPanel {
         this.panel = document.getElementById('detailPanel');
         this.hudStack = document.getElementById('hudStack');
         this.hudPanel = document.getElementById('hudPanel');
+        this.topControls = document.getElementById('topControls');
+        this.equationsPanel = document.getElementById('equationsPanel');
         this.title = document.getElementById('detailTitle');
         this.subtitle = document.getElementById('detailSubtitle');
         this.params = document.getElementById('detailParams');
-        this.dims = document.getElementById('detailDims');
+        this.inputDim = document.getElementById('detailInputDim');
+        this.outputDim = document.getElementById('detailOutputDim');
         this.metaSection = document.getElementById('detailMeta');
         this.closeBtn = document.getElementById('detailClose');
         this.canvas = document.getElementById('detailCanvas');
@@ -2070,6 +2086,7 @@ class SelectionPanel {
         this.engine = options.engine || null;
         this.pipeline = options.pipeline || null;
         this._panelShiftPx = 0;
+        this._panelShiftYPx = 0;
         this._panelShiftDurationMs = Number.isFinite(options.panelShiftDurationMs)
             ? Math.max(120, options.panelShiftDurationMs)
             : PANEL_SHIFT_DURATION_MS;
@@ -2197,9 +2214,52 @@ class SelectionPanel {
     }
 
     _observeResize() {
-        if (!('ResizeObserver' in window) || !this.canvas?.parentElement) return;
-        this._resizeObserver = new ResizeObserver(() => this._onResize());
-        this._resizeObserver.observe(this.canvas.parentElement);
+        if ('ResizeObserver' in window && this.canvas?.parentElement) {
+            this._resizeObserver = new ResizeObserver(() => this._onResize());
+            this._resizeObserver.observe(this.canvas.parentElement);
+        }
+        this._observeShiftSources();
+    }
+
+    _observeShiftSources() {
+        if (typeof window === 'undefined') return;
+
+        const onLayoutChanged = () => this._syncSceneShift();
+
+        if ('ResizeObserver' in window) {
+            const targets = [
+                this.hudStack,
+                this.hudPanel,
+                this.topControls,
+                this.equationsPanel
+            ].filter(Boolean);
+            if (targets.length > 0) {
+                this._shiftResizeObserver = new ResizeObserver(onLayoutChanged);
+                targets.forEach(target => this._shiftResizeObserver.observe(target));
+            }
+        }
+
+        if ('MutationObserver' in window) {
+            this._shiftMutationObserver = new MutationObserver(onLayoutChanged);
+            if (document.body) {
+                this._shiftMutationObserver.observe(document.body, {
+                    attributes: true,
+                    attributeFilter: ['class']
+                });
+            }
+            if (this.topControls) {
+                this._shiftMutationObserver.observe(this.topControls, {
+                    attributes: true,
+                    attributeFilter: ['class', 'style', 'data-auto-hidden']
+                });
+            }
+            if (this.equationsPanel) {
+                this._shiftMutationObserver.observe(this.equationsPanel, {
+                    attributes: true,
+                    attributeFilter: ['class', 'style']
+                });
+            }
+        }
     }
 
     _onResize() {
@@ -2228,6 +2288,7 @@ class SelectionPanel {
                 }, 140);
             }
             this._updateMobileState();
+            this._syncSceneShift();
             return;
         }
         if (this.currentPreview) {
@@ -2359,9 +2420,12 @@ class SelectionPanel {
         if (!this.pipeline || typeof this.pipeline.setScreenShiftPixels !== 'function') return;
         if (typeof window === 'undefined') return;
 
-        let nextShift = 0;
-        const shouldShift = this.isOpen && !this._isSmallScreen();
-        if (shouldShift) {
+        const isSmallScreen = this._isSmallScreen();
+        let nextShiftX = 0;
+        let nextShiftY = 0;
+
+        const shouldDesktopShift = this.isOpen && !isSmallScreen;
+        if (shouldDesktopShift) {
             const anchor = this.hudStack || this.panel;
             const rect = anchor?.getBoundingClientRect?.();
             if (rect && Number.isFinite(rect.left)) {
@@ -2370,25 +2434,71 @@ class SelectionPanel {
                     || rect.right
                     || 0;
                 if (Number.isFinite(viewportWidth) && viewportWidth > 0) {
-                    nextShift = Math.max(0, (viewportWidth - rect.left) / 2);
+                    nextShiftX = Math.max(0, (viewportWidth - rect.left) / 2);
                 }
             }
         }
 
-        if (!Number.isFinite(nextShift)) {
-            nextShift = 0;
+        if (isSmallScreen) {
+            const viewportHeight = window.innerHeight
+                || document.documentElement?.clientHeight
+                || 0;
+            if (Number.isFinite(viewportHeight) && viewportHeight > 0) {
+                let occludedTop = 0;
+
+                const topControlsRect = this._isShiftAnchorVisible(this.topControls)
+                    ? this.topControls?.getBoundingClientRect?.()
+                    : null;
+                if (topControlsRect && Number.isFinite(topControlsRect.bottom)) {
+                    occludedTop = Math.max(occludedTop, Math.min(viewportHeight, Math.max(0, topControlsRect.bottom)));
+                }
+
+                const hudAnchor = this._isShiftAnchorVisible(this.hudPanel)
+                    ? this.hudPanel
+                    : (this._isShiftAnchorVisible(this.hudStack) ? this.hudStack : null);
+                const hudRect = hudAnchor?.getBoundingClientRect?.();
+                if (hudRect && Number.isFinite(hudRect.bottom)) {
+                    occludedTop = Math.max(occludedTop, Math.min(viewportHeight, Math.max(0, hudRect.bottom)));
+                }
+
+                if (occludedTop > 0.5) {
+                    nextShiftY = -(occludedTop / 2);
+                }
+            }
         }
 
-        const delta = Math.abs(nextShift - this._panelShiftPx);
-        if (delta < 0.5 && !immediate) {
+        if (!Number.isFinite(nextShiftX)) {
+            nextShiftX = 0;
+        }
+        if (!Number.isFinite(nextShiftY)) {
+            nextShiftY = 0;
+        }
+
+        const deltaX = Math.abs(nextShiftX - this._panelShiftPx);
+        const deltaY = Math.abs(nextShiftY - this._panelShiftYPx);
+        if (deltaX < 0.5 && deltaY < 0.5 && !immediate) {
             return;
         }
 
-        this._panelShiftPx = nextShift;
-        this.pipeline.setScreenShiftPixels(nextShift, {
+        this._panelShiftPx = nextShiftX;
+        this._panelShiftYPx = nextShiftY;
+        this.pipeline.setScreenShiftPixels(nextShiftX, {
             immediate,
-            durationMs: this._panelShiftDurationMs
+            durationMs: this._panelShiftDurationMs,
+            shiftYPx: nextShiftY
         });
+    }
+
+    _isShiftAnchorVisible(element) {
+        if (!element || typeof window === 'undefined') return false;
+        const rect = element.getBoundingClientRect?.();
+        if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+        const style = window.getComputedStyle ? window.getComputedStyle(element) : null;
+        if (!style) return true;
+        if (style.display === 'none' || style.visibility === 'hidden') return false;
+        const opacity = Number.parseFloat(style.opacity);
+        if (Number.isFinite(opacity) && opacity < 0.05) return false;
+        return true;
     }
 
     _onPanelPointerDown(event) {
@@ -3288,8 +3398,11 @@ class SelectionPanel {
         if (this.params) this.params.textContent = metadata.params;
         const hideLayerNormFields = isLayerNormSolidSelection(label);
         const hideTensorDimsField = hideLayerNormFields || isAttentionScoreSelection(label, selection);
-        const dimsRow = this.dims?.closest('.detail-row') || null;
-        if (this.dims) this.dims.textContent = hideTensorDimsField ? '' : metadata.dims;
+        const dimsRow = this.inputDim?.closest('.detail-row')
+            || this.outputDim?.closest('.detail-row')
+            || null;
+        if (this.inputDim) this.inputDim.textContent = hideTensorDimsField ? '' : metadata.inputDim;
+        if (this.outputDim) this.outputDim.textContent = hideTensorDimsField ? '' : metadata.outputDim;
         if (dimsRow) dimsRow.style.display = hideTensorDimsField ? 'none' : '';
         if (this.description) {
             const desc = resolveDescription(label, selection.kind, selection);
