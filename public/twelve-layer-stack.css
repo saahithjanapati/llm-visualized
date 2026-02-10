@@ -2,6 +2,68 @@ body { margin: 0; overflow: hidden; background-color: #000; }
 canvas { display: block; }
 button { touch-action: manipulation; }
 
+#loadingOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 4;
+    display: grid;
+    place-items: center;
+    pointer-events: none;
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 0.35s ease, visibility 0s linear 0.35s;
+    background: #000;
+}
+
+#loadingOverlay.is-hidden {
+    opacity: 0;
+    visibility: hidden;
+}
+
+.loader-text {
+    font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    text-transform: uppercase;
+    font-size: clamp(18px, 2.4vw, 28px);
+    display: inline-flex;
+    align-items: center;
+}
+
+.loader-word {
+    display: inline-flex;
+}
+
+.loader-letter {
+    display: inline-block;
+    text-shadow: 0 0 10px currentColor;
+}
+
+.loader-letter:nth-child(1) { color: #44f5ff; }
+.loader-letter:nth-child(2) { color: #ff64f3; }
+.loader-letter:nth-child(3) { color: #ffe34f; }
+.loader-letter:nth-child(4) { color: #5cff94; }
+.loader-letter:nth-child(5) { color: #ff9a3d; }
+.loader-letter:nth-child(6) { color: #75a6ff; }
+.loader-letter:nth-child(7) { color: #ff5f8e; }
+
+.loader-word,
+.loader-dots {
+    letter-spacing: 0.08em;
+}
+
+.loader-dots {
+    display: inline-block;
+    color: #fff;
+    width: 0;
+    overflow: hidden;
+    vertical-align: bottom;
+    animation: loaderDots 1.2s steps(4, end) infinite;
+}
+
+@keyframes loaderDots {
+    from { width: 0; }
+    to { width: 3ch; }
+}
+
 @media (hover: none) and (pointer: coarse) {
     body {
         -webkit-user-select: none;

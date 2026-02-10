@@ -27,6 +27,12 @@ export function initIntroAnimation(pipeline, gptCanvas) {
     appState.introSceneRef = scene;
     appState.applyEnvironmentBackground(pipeline, scene);
 
+    const hideLoadingOverlay = () => {
+        const overlay = document.getElementById('loadingOverlay');
+        if (!overlay) return;
+        overlay.classList.add('is-hidden');
+    };
+
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
@@ -148,14 +154,12 @@ export function initIntroAnimation(pipeline, gptCanvas) {
         }
         introCanvas.style.display = 'none';
         cleanupIntro();
-        const gif = document.getElementById('loadingGif');
-        if (gif) gif.style.display = 'none';
+        hideLoadingOverlay();
     }, undefined, (err) => {
         console.warn('HDRI failed to load:', err);
         introCanvas.style.display = 'none';
         cleanupIntro();
-        const gif = document.getElementById('loadingGif');
-        if (gif) gif.style.display = 'none';
+        hideLoadingOverlay();
     });
 
     window.addEventListener('resize', () => {
@@ -190,8 +194,7 @@ export function initIntroAnimation(pipeline, gptCanvas) {
             const ic = document.getElementById('introCanvas');
             if (ic) ic.style.display = 'none';
         }
-        const gif = document.getElementById('loadingGif');
-        if (gif) gif.style.display = 'none';
+        hideLoadingOverlay();
     }
 
     function transitionToGPT() {
