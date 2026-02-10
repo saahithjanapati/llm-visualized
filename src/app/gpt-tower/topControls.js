@@ -252,6 +252,9 @@ export function initTopControlsAutohide({ topControls, settingsOverlay }) {
 
     window.addEventListener('pointerdown', (event) => {
         if (!topControls) return;
+        // On touch devices, only reveal via the tap-selection path (void taps),
+        // not immediately on gesture start (pan/zoom/orbit).
+        if (isTouchPointerEvent(event)) return;
         const wasHidden = topControls.dataset.autoHidden === 'true';
         const hasPoint = wasHidden && typeof event.clientX === 'number' && typeof event.clientY === 'number';
         const tapPoint = hasPoint ? { x: event.clientX, y: event.clientY } : null;
