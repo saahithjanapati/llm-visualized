@@ -258,7 +258,8 @@ function isSelfAttentionSelection(label, selectionInfo) {
     const lower = (label || '').toLowerCase();
     if (isAttentionScoreSelection(label, selectionInfo)) return true;
     if (selectionInfo?.kind === 'mergedKV') return true;
-    if (lower.includes('post-layernorm residual') || lower.includes('post layernorm residual')) return true;
+    // Keep pre-QKV residual copies out of the attention score panel while they travel to Q/K/V.
+    if (lower.includes('post-layernorm residual') || lower.includes('post layernorm residual')) return false;
     if (lower.includes('query vector') || lower.includes('key vector') || lower.includes('value vector')) return true;
     if (lower.includes('query weight matrix') || lower.includes('key weight matrix') || lower.includes('value weight matrix')) return true;
     if (lower.includes('merged key vectors') || lower.includes('merged value vectors')) return true;
