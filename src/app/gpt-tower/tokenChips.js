@@ -254,7 +254,8 @@ export function addEmbeddingAndTokenChips({
     positionLabels,
     cameraReturnPosition,
     cameraReturnTarget,
-    numLayers
+    numLayers,
+    preserveCameraPose = false
 }) {
     if (!pipeline || !pipeline.engine || !pipeline.engine.scene) return null;
 
@@ -432,26 +433,28 @@ export function addEmbeddingAndTokenChips({
         const spawnTokenChips = (font) => {
             if (disposed) return;
             // Animate the token chips upward from a resting "stash" position.
-            const cameraStartPos = new THREE.Vector3(
-                vocabX + EMBEDDING_MATRIX_PARAMS_VOCAB.width * 0.4,
-                bottomVocabCenterY - EMBEDDING_MATRIX_PARAMS_VOCAB.height * 0.8,
-                EMBEDDING_MATRIX_PARAMS_VOCAB.depth * 1.8
-            );
-            const cameraStartTarget = new THREE.Vector3(
-                vocabX,
-                bottomVocabCenterY + EMBEDDING_MATRIX_PARAMS_VOCAB.height * 0.2,
-                0
-            );
-            const adjustedHoldMs = maxChipRiseDuration + TOKEN_CHIP_STYLE.cameraHoldMs;
-            stageChipCamera(
-                pipeline,
-                cameraStartPos,
-                cameraStartTarget,
-                cameraReturnPosition,
-                cameraReturnTarget,
-                adjustedHoldMs,
-                TOKEN_CHIP_STYLE.cameraReturnMs
-            );
+            if (!preserveCameraPose) {
+                const cameraStartPos = new THREE.Vector3(
+                    vocabX + EMBEDDING_MATRIX_PARAMS_VOCAB.width * 0.4,
+                    bottomVocabCenterY - EMBEDDING_MATRIX_PARAMS_VOCAB.height * 0.8,
+                    EMBEDDING_MATRIX_PARAMS_VOCAB.depth * 1.8
+                );
+                const cameraStartTarget = new THREE.Vector3(
+                    vocabX,
+                    bottomVocabCenterY + EMBEDDING_MATRIX_PARAMS_VOCAB.height * 0.2,
+                    0
+                );
+                const adjustedHoldMs = maxChipRiseDuration + TOKEN_CHIP_STYLE.cameraHoldMs;
+                stageChipCamera(
+                    pipeline,
+                    cameraStartPos,
+                    cameraStartTarget,
+                    cameraReturnPosition,
+                    cameraReturnTarget,
+                    adjustedHoldMs,
+                    TOKEN_CHIP_STYLE.cameraReturnMs
+                );
+            }
 
             const labels = tokenLabels.slice(0, laneCount).map(formatTokenLabel);
             labels.forEach((label, idx) => {

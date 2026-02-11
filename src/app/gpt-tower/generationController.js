@@ -234,14 +234,18 @@ export function initGenerationController({
             fallbackPositionLabels
         });
 
+        let preserveCameraPose = false;
         if (resetPipeline) {
             setNumVectorLanes(nextLaneCount);
             setAnimationLaneCount(nextLaneCount);
             pipeline.resetForNewPass({ activationSource, laneCount: nextLaneCount });
-            if (appState.autoCameraFollow) {
+            const followEnabled = (typeof pipeline.isAutoCameraFollowEnabled === 'function')
+                ? pipeline.isAutoCameraFollowEnabled()
+                : appState.autoCameraFollow;
+            if (followEnabled) {
                 pipeline.setAutoCameraFollow?.(true, { immediate: true, resetView: true });
             } else {
-                pipeline.focusOverview?.({ immediate: true });
+                preserveCameraPose = true;
             }
         }
 
@@ -261,7 +265,8 @@ export function initGenerationController({
             positionLabels: state.positionLabels,
             cameraReturnPosition,
             cameraReturnTarget,
-            numLayers
+            numLayers,
+            preserveCameraPose
         });
 
         applyPhysicalMaterialsToScene(pipeline?.engine?.scene, USE_PHYSICAL_MATERIALS);
