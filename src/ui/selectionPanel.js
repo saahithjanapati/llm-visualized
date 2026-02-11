@@ -1794,8 +1794,100 @@ function copyInstancedVectorSliceToPreview(previewVec, sourceMesh, sourceOffset 
     return true;
 }
 
+function isInstancedVectorSliceInMotion(sourceMesh, sourceOffset = 0, sourceCount = null) {
+    if (!sourceMesh?.isInstancedMesh || typeof sourceMesh.getMatrixAt !== 'function') {
+        return false;
+    }
+    const srcTotal = Number.isFinite(sourceMesh.count)
+        ? Math.max(0, Math.floor(sourceMesh.count))
+        : Math.max(0, Math.floor(sourceMesh.instanceMatrix?.count || 0));
+    const start = Math.max(0, Math.floor(sourceOffset || 0));
+    const available = Math.max(0, srcTotal - start);
+    const requested = Number.isFinite(sourceCount)
+        ? Math.max(0, Math.floor(sourceCount))
+        : available;
+    const inspectCount = Math.min(available, requested);
+    if (inspectCount <= 1) return false;
+
+    let baselineY = null;
+    let visibleCount = 0;
+    let hiddenCount = 0;
+    for (let i = 0; i < inspectCount; i += 1) {
+        sourceMesh.getMatrixAt(start + i, TMP_MATRIX);
+        TMP_MATRIX.decompose(TMP_POS, TMP_QUAT, TMP_SCALE);
+        const hidden = TMP_POS.y <= HIDE_INSTANCE_Y_OFFSET * 0.5
+            || TMP_SCALE.x < 0.01
+            || TMP_SCALE.y < 0.01
+            || TMP_SCALE.z < 0.01;
+        if (hidden) {
+            hiddenCount += 1;
+            continue;
+        }
+        if (!Number.isFinite(TMP_POS.y)) continue;
+
+        visibleCount += 1;
+        if (baselineY === null) {
+            baselineY = TMP_POS.y;
+            continue;
+        }
+
+        // In stable vectors, all visible prisms share the same local Y.
+        // Mid-addition vectors have per-prism Y offsets and should not be copied.
+        if (Math.abs(TMP_POS.y - baselineY) > 0.25) {
+            return true;
+        }
+    }
+
+    if (hiddenCount > 0 && visibleCount > 0) {
+        return true;
+    }
+    return false;
+}
+
+function shouldSkipLiveVectorTransformCopy(vectorRef, vectorMesh, fallbackCount = null) {
+    if (vectorRef?.userData?.qkvProcessed === true) return false;
+
+    if (vectorRef?.isBatchedVectorRef && vectorRef._batch?.mesh) {
+        const batch = vectorRef._batch;
+        const batchPrismCount = Number.isFinite(batch.prismCount)
+            ? Math.max(1, Math.floor(batch.prismCount))
+            : Number.isFinite(fallbackCount)
+                ? Math.max(1, Math.floor(fallbackCount))
+                : PREVIEW_VECTOR_BODY_INSTANCES;
+        const index = Number.isFinite(vectorRef._index) ? Math.max(0, Math.floor(vectorRef._index)) : 0;
+        if (isInstancedVectorSliceInMotion(batch.mesh, index * batchPrismCount, batchPrismCount)) {
+            return true;
+        }
+    }
+
+    if (vectorRef?.mesh?.isInstancedMesh) {
+        const srcCount = Number.isFinite(vectorRef.instanceCount)
+            ? Math.max(1, Math.floor(vectorRef.instanceCount))
+            : Number.isFinite(fallbackCount)
+                ? Math.max(1, Math.floor(fallbackCount))
+                : PREVIEW_VECTOR_BODY_INSTANCES;
+        if (isInstancedVectorSliceInMotion(vectorRef.mesh, 0, srcCount)) {
+            return true;
+        }
+    }
+
+    if (vectorMesh?.isInstancedMesh) {
+        const inspectCount = Number.isFinite(fallbackCount)
+            ? Math.max(1, Math.floor(fallbackCount))
+            : null;
+        if (isInstancedVectorSliceInMotion(vectorMesh, 0, inspectCount)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 function tryCopyVectorAppearanceToPreview(vec, selectionInfo, vectorRef, vectorMesh) {
     if (!vec || !vec.mesh) return false;
+    if (shouldSkipLiveVectorTransformCopy(vectorRef, vectorMesh, vec.instanceCount)) {
+        return false;
+    }
     let copied = false;
 
     if (!copied && vectorRef?.isBatchedVectorRef && vectorRef._batch?.mesh) {
