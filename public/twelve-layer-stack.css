@@ -729,6 +729,18 @@ body.touch-ui * {
 .toggle-row input:disabled + .toggle-track {
     opacity: 0.5;
 }
+.settings-hint {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-radius: 9px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: rgba(255, 255, 255, 0.06);
+    color: #d2dbe5;
+    font-size: 11.5px;
+    line-height: 1.35;
+    letter-spacing: 0.2px;
+}
+.settings-hint[hidden] { display: none !important; }
 /* Equations panel (inside HUD) */
 #equationsPanel {
     grid-column: 1 / -1;
@@ -924,6 +936,37 @@ body.touch-ui * {
 }
 .detail-description:empty {
     display: none;
+}
+
+.detail-equations {
+    margin: 0 12px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.04);
+    display: none;
+    flex-direction: column;
+    gap: 6px;
+}
+.detail-equations.is-visible { display: flex; }
+.detail-equations-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: #9aa3af;
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+}
+.detail-equations-body {
+    color: #e7e9ee;
+    font-size: 12px;
+    line-height: 1.4;
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+}
+.detail-equations-body:empty {
+    display: none;
+}
+.detail-equations-body .katex-display {
+    margin: 0.2em 0;
 }
 
 .vector-legend {
@@ -1370,6 +1413,15 @@ body.touch-ui * {
 }
 .detail-row-dims .detail-value {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+.detail-row-token .detail-value,
+.detail-row-position .detail-value {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+.detail-row-token .detail-value {
+    max-width: 70%;
+    text-align: right;
+    overflow-wrap: anywhere;
 }
 
 .detail-data {

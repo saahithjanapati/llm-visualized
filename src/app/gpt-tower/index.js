@@ -72,6 +72,8 @@ if (!isFullTokenMode && activationSource && typeof activationSource.getTokenCoun
 const initialPassState = buildPassState({
     activationSource,
     laneCount: initialLaneCount,
+    laneLayoutIndices: Array.from({ length: initialLaneCount }, (_, idx) => idx),
+    totalLaneCount: initialLaneCount,
     fallbackTokenLabels: PROMPT_TOKENS,
     fallbackPositionLabels: POSITION_TOKENS
 });

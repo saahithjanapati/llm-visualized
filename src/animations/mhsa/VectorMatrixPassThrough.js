@@ -173,7 +173,12 @@ export function animateVectorMatrixPassThrough(
             }
         }
         const spacing = depth / (count + 1);
-        let laneIndex = lane && Number.isFinite(lane.laneIndex) ? lane.laneIndex : null;
+        // In KV-cache decode we animate a single active lane, but it may belong
+        // to a later layout slot (laneLayoutIndex). Prefer layout slot over
+        // local lane index so Q/K/V align to the correct depth position.
+        let laneIndex = lane && Number.isFinite(lane.laneLayoutIndex)
+            ? lane.laneLayoutIndex
+            : (lane && Number.isFinite(lane.laneIndex) ? lane.laneIndex : null);
         if (!Number.isFinite(laneIndex)) {
             const refZ = lane && Number.isFinite(lane.zPos) ? lane.zPos : vec.group.position.z;
             laneIndex = Math.round((refZ - centerZ + depth / 2) / spacing - 1);

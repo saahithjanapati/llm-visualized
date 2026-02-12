@@ -127,7 +127,7 @@ export default class Gpt2Layer extends BaseLayer {
      * @param {Function} onFinished – Optional callback to invoke when all lanes finish.
      * @param {object} activationSource – Optional capture data source for real activations.
      */
-    constructor(index, random, yOffset = 0, externalLanes = null, onFinished = null, isActive = true, activationSource = null, laneCount = NUM_VECTOR_LANES, layerSpacing = DEFAULT_LAYER_STACK_SPACING) {
+    constructor(index, random, yOffset = 0, externalLanes = null, onFinished = null, isActive = true, activationSource = null, laneCount = NUM_VECTOR_LANES, layerSpacing = DEFAULT_LAYER_STACK_SPACING, passConfig = null) {
         super(index);
         this.random = random;
         this.yOffset = yOffset;
@@ -136,6 +136,27 @@ export default class Gpt2Layer extends BaseLayer {
         this.isActive = isActive;
         this.activationSource = activationSource || null;
         this._laneCount = Math.max(1, Math.floor(laneCount || NUM_VECTOR_LANES));
+        const cfg = passConfig || {};
+        this._laneLayoutCount = Math.max(this._laneCount, Math.floor(cfg.laneLayoutCount || this._laneCount));
+        const configuredActive = Array.isArray(cfg.activeLaneLayoutIndices)
+            ? cfg.activeLaneLayoutIndices.slice(0, this._laneCount)
+            : null;
+        this._activeLaneLayoutIndices = (configuredActive && configuredActive.length)
+            ? configuredActive.map((laneIdx) => {
+                const maxIdx = Math.max(0, this._laneLayoutCount - 1);
+                const idx = Number.isFinite(laneIdx) ? Math.floor(laneIdx) : 0;
+                return Math.max(0, Math.min(maxIdx, idx));
+            })
+            : Array.from({ length: this._laneCount }, (_, idx) => idx);
+        while (this._activeLaneLayoutIndices.length < this._laneCount) {
+            this._activeLaneLayoutIndices.push(this._activeLaneLayoutIndices.length);
+        }
+        this._passLaneTokenIndices = Array.isArray(cfg.laneTokenIndices)
+            ? cfg.laneTokenIndices.slice(0, this._laneCount)
+            : null;
+        this._kvCacheModeEnabled = !!cfg.kvCacheModeEnabled;
+        this._kvCacheDecodeActive = !!cfg.kvCacheDecodeActive;
+        this._cachedKvEntries = Array.isArray(cfg.cachedKvEntries) ? cfg.cachedKvEntries : [];
         this._layerStackSpacing = Number.isFinite(layerSpacing) ? layerSpacing : DEFAULT_LAYER_STACK_SPACING;
         this._baseVectorLength = (this.activationSource && typeof this.activationSource.getBaseVectorLength === 'function')
             ? this.activationSource.getBaseVectorLength()
@@ -254,7 +275,12 @@ export default class Gpt2Layer extends BaseLayer {
             layerIndex: this.index,
             vectorPrismCount: this._getBaseVectorLength(),
             laneCount: this._laneCount,
+            useBatchedVectorCopies: !this._kvCacheModeEnabled,
+            kvCacheDecodeActive: this._kvCacheDecodeActive,
         });
+        if (this.mhsaAnimation && typeof this.mhsaAnimation.setCachedKvEntries === 'function') {
+            this.mhsaAnimation.setCachedKvEntries(this._cachedKvEntries);
+        }
 
         // ────────────────────────────────────────────────────────────────
         // 2.5) Output-projection matrix
@@ -2404,6 +2430,20 @@ export default class Gpt2Layer extends BaseLayer {
         return Number.isFinite(this._baseVectorLength) ? this._baseVectorLength : VECTOR_LENGTH_PRISM;
     }
 
+    _getLaneLayoutCount() {
+        return Math.max(
+            this._laneCount,
+            Number.isFinite(this._laneLayoutCount) ? Math.floor(this._laneLayoutCount) : this._laneCount
+        );
+    }
+
+    _getActiveLaneLayoutIndices() {
+        if (Array.isArray(this._activeLaneLayoutIndices) && this._activeLaneLayoutIndices.length) {
+            return this._activeLaneLayoutIndices.slice(0, this._laneCount);
+        }
+        return Array.from({ length: this._laneCount }, (_, idx) => idx);
+    }
+
     _getInstanceCountFromData(values, fallback = null) {
         if (Array.isArray(values) || ArrayBuffer.isView(values)) {
             return Math.max(1, values.length || 1);
@@ -2446,9 +2486,15 @@ export default class Gpt2Layer extends BaseLayer {
         return applyVectorData(targetVec, data, label, meta, colorOptions);
     }
 
-    _getTokenIndexForLane(laneIdx) {
-        if (!this.activationSource) return laneIdx;
-        return this.activationSource.getLaneTokenIndex(laneIdx, this._laneCount);
+    _getTokenIndexForLane(laneIdx, laneLayoutIdx = null) {
+        if (Array.isArray(this._passLaneTokenIndices) && Number.isFinite(this._passLaneTokenIndices[laneIdx])) {
+            return this._passLaneTokenIndices[laneIdx];
+        }
+        const resolvedLaneIdx = Number.isFinite(laneLayoutIdx)
+            ? Math.floor(laneLayoutIdx)
+            : laneIdx;
+        if (!this.activationSource) return resolvedLaneIdx;
+        return this.activationSource.getLaneTokenIndex(resolvedLaneIdx, this._getLaneLayoutCount());
     }
 
     _getTokenLabel(tokenIndex) {
@@ -2524,8 +2570,19 @@ export default class Gpt2Layer extends BaseLayer {
         createLanesFromExternal(this, externalLanes, offsetX, ln1CenterY, ln2CenterY, ln1TopY);
     }
 
-    _buildSingleLane(oldLane, offsetX, ln1CenterY, ln2CenterY, startY_override, meetY, laneIdx, slitSpacing) {
-        buildSingleLane(this, oldLane, offsetX, ln1CenterY, ln2CenterY, startY_override, meetY, laneIdx, slitSpacing);
+    _buildSingleLane(oldLane, offsetX, ln1CenterY, ln2CenterY, startY_override, meetY, laneLayoutIdx, slitSpacing, laneLocalIdx = 0) {
+        buildSingleLane(
+            this,
+            oldLane,
+            offsetX,
+            ln1CenterY,
+            ln2CenterY,
+            startY_override,
+            meetY,
+            laneLayoutIdx,
+            slitSpacing,
+            laneLocalIdx
+        );
     }
 
     /**

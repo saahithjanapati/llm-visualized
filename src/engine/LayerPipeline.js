@@ -63,6 +63,7 @@ const LN_PARAM_MONOCHROME = {
 
 const SKIP_SPEED_RAMP_IN_MS = 60;
 const SKIP_SPEED_RAMP_OUT_MS = 95;
+const POST_RESET_TRAIL_PURGE_INTERVAL_MS = 120;
 const DEFAULT_SKIP_SPEED_PROFILE = Object.freeze({
     engineSpeed: 6.4,
     globalSpeed: 900,
@@ -71,6 +72,21 @@ const DEFAULT_SKIP_SPEED_PROFILE = Object.freeze({
 });
 
 const TMP_WORLD_POS = new THREE.Vector3();
+const TMP_KV_PROXY_CENTER = new THREE.Vector3();
+const TMP_KV_PROXY_SIZE = new THREE.Vector3();
+const TMP_KV_PROXY_LOCAL_CENTER = new THREE.Vector3();
+const KV_RAYCAST_PROXY_GEOMETRY = new THREE.BoxGeometry(1, 1, 1);
+const KV_RAYCAST_PROXY_MATERIAL = (() => {
+    const mat = new THREE.MeshBasicMaterial({
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        depthTest: false
+    });
+    // Keep this proxy non-rendering while still raycastable.
+    mat.visible = false;
+    return mat;
+})();
 
 function isArrayLike(values) {
     return Array.isArray(values) || ArrayBuffer.isView(values);
@@ -131,6 +147,14 @@ export class LayerPipeline extends EventTarget {
         this._randFactory = typeof opts.randomFactory === 'function' ? opts.randomFactory : createRandomSource;
         this._activationSource = opts.activationSource || null;
         this._laneCount = Math.max(1, Math.floor(opts.laneCount || NUM_VECTOR_LANES));
+        this._laneLayoutCount = this._laneCount;
+        this._activeLaneLayoutIndices = Array.from({ length: this._laneCount }, (_, idx) => idx);
+        this._passLaneTokenIndices = null;
+        this._kvCacheModeEnabled = false;
+        this._kvCacheDecodeActive = false;
+        this._reuseKvCacheForPass = false;
+        this._kvCacheEntriesByLayer = new Map();
+        this._kvCachePersistentRoot = null;
 
         this._layers = [];
         this._currentLayerIdx = 0;
@@ -142,6 +166,7 @@ export class LayerPipeline extends EventTarget {
         this._skipLayerRestore = null;
         this._skipLayerLast = false;
         this._skipSpeedRampRaf = null;
+        this._skipKvCaptureReadyLayers = new Set();
         this._postResetTrailPurgeRaf = null;
         this._postResetTrailPurgeUntil = 0;
         this._trailPassId = 1;
@@ -167,6 +192,15 @@ export class LayerPipeline extends EventTarget {
         if (this._engine && this._engine.scene && this._engine.scene.userData) {
             this._engine.scene.userData.trailPassId = this._trailPassId;
         }
+        if (this._engine && this._engine.scene) {
+            this._kvCachePersistentRoot = new THREE.Group();
+            this._kvCachePersistentRoot.name = 'KvCachePersistentRoot';
+            this._kvCachePersistentRoot.userData.skipVisible = true;
+            this._engine.scene.add(this._kvCachePersistentRoot);
+            if (typeof this._engine.registerRaycastRoot === 'function') {
+                this._engine.registerRaycastRoot(this._kvCachePersistentRoot);
+            }
+        }
         this._autoCamera = new AutoCameraController({
             pipeline: this,
             engine: this._engine,
@@ -186,6 +220,9 @@ export class LayerPipeline extends EventTarget {
         for (let i = 0; i < this._numLayers; i++) {
             const rand = this._randFactory();
             const isActive = i === 0; // only first layer active initially
+            const cachedKvEntries = this._reuseKvCacheForPass
+                ? this._getCachedKvEntriesForLayer(i)
+                : [];
             const layer = new Gpt2Layer(
                 i,
                 rand,
@@ -195,7 +232,15 @@ export class LayerPipeline extends EventTarget {
                 isActive,
                 this._activationSource,
                 this._laneCount,
-                layerStackSpacing
+                layerStackSpacing,
+                {
+                    laneLayoutCount: this._laneLayoutCount,
+                    activeLaneLayoutIndices: this._activeLaneLayoutIndices,
+                    laneTokenIndices: this._passLaneTokenIndices,
+                    kvCacheModeEnabled: this._kvCacheModeEnabled,
+                    kvCacheDecodeActive: this._kvCacheDecodeActive,
+                    cachedKvEntries
+                }
             );
 
             // Assign onFinished callback for chaining once layer becomes active
@@ -255,6 +300,15 @@ export class LayerPipeline extends EventTarget {
             try { TWEEN.removeAll(); } catch (_) { /* no-op */ }
         }
 
+        this._clearKvCacheVisuals();
+        if (this._kvCachePersistentRoot && this._kvCachePersistentRoot.parent) {
+            this._kvCachePersistentRoot.parent.remove(this._kvCachePersistentRoot);
+        }
+        if (this._engine && typeof this._engine.removeRaycastRoot === 'function' && this._kvCachePersistentRoot) {
+            this._engine.removeRaycastRoot(this._kvCachePersistentRoot);
+        }
+        this._kvCachePersistentRoot = null;
+
         if (this._engine && this._engine.scene) {
             clearTrailsFromScene(this._engine.scene, { includeAllLines: true });
         }
@@ -304,7 +358,393 @@ export class LayerPipeline extends EventTarget {
         return this._checkForwardPassComplete();
     }
 
-    resetForNewPass({ activationSource = this._activationSource, laneCount = this._laneCount } = {}) {
+    _normalizeActiveLaneLayoutIndices(indices, laneCount, layoutCount) {
+        const activeCount = Math.max(1, Math.floor(laneCount || 1));
+        const maxLaneIdx = Math.max(0, Math.floor(layoutCount || activeCount) - 1);
+        const out = [];
+        if (Array.isArray(indices) && indices.length) {
+            for (let i = 0; i < indices.length && out.length < activeCount; i++) {
+                const laneIdx = Number.isFinite(indices[i]) ? Math.floor(indices[i]) : 0;
+                out.push(Math.max(0, Math.min(maxLaneIdx, laneIdx)));
+            }
+        }
+        while (out.length < activeCount) {
+            out.push(Math.max(0, Math.min(maxLaneIdx, out.length)));
+        }
+        return out;
+    }
+
+    _getCachedKvEntriesForLayer(layerIndex) {
+        const entries = this._kvCacheEntriesByLayer.get(layerIndex);
+        if (!Array.isArray(entries) || !entries.length) return [];
+        return entries.map((entry) => ({
+            ...entry,
+            upwardCopies: Array.isArray(entry.upwardCopies) ? entry.upwardCopies.slice() : [],
+            sideCopies: Array.isArray(entry.sideCopies)
+                ? entry.sideCopies.map((side) => ({ ...side }))
+                : []
+        }));
+    }
+
+    _disposeKvCacheVector(vec) {
+        if (!vec) return;
+        if (vec.isBatchedVectorRef) {
+            try {
+                if (vec.group) vec.group.visible = false;
+                if (vec.mesh) vec.mesh.visible = false;
+            } catch (_) { /* ignore batched cleanup */ }
+            return;
+        }
+        try {
+            if (vec.userData && vec.userData.trail && typeof vec.userData.trail.dispose === 'function') {
+                vec.userData.trail.dispose();
+            }
+        } catch (_) { /* optional cleanup */ }
+        try {
+            if (vec.userData) {
+                delete vec.userData.trail;
+                delete vec.userData.trailWorld;
+            }
+        } catch (_) { /* optional cleanup */ }
+        try {
+            if (vec.group && vec.group.parent) {
+                vec.group.parent.remove(vec.group);
+            }
+        } catch (_) { /* optional cleanup */ }
+        try {
+            if (typeof vec.dispose === 'function') vec.dispose();
+        } catch (_) { /* optional cleanup */ }
+    }
+
+    _markKvCacheVectorPersistent(vec, laneEntry, { category = 'K', headIndex = null, layerIndex = null } = {}) {
+        if (vec && vec.isBatchedVectorRef) return null;
+        if (!vec || !vec.group || !this._kvCachePersistentRoot) return null;
+        try {
+            if (vec.group.parent !== this._kvCachePersistentRoot) {
+                vec.group.updateMatrixWorld?.(true);
+                this._kvCachePersistentRoot.attach(vec.group);
+            }
+        } catch (_) { /* fallback handled below */ }
+        if (vec.group.parent !== this._kvCachePersistentRoot) {
+            try { this._kvCachePersistentRoot.add(vec.group); } catch (_) { /* ignore */ }
+        }
+
+        try {
+            const trail = vec.userData && vec.userData.trail;
+            if (trail && typeof trail.dispose === 'function') {
+                trail.dispose();
+            }
+            if (vec.userData) {
+                delete vec.userData.trail;
+                delete vec.userData.trailWorld;
+            }
+        } catch (_) { /* optional cleanup */ }
+
+        vec.group.visible = true;
+        vec.group.userData = vec.group.userData || {};
+        vec.group.userData.skipVisible = true;
+        vec.group.userData.kvCachePersistent = true;
+        if (Number.isFinite(layerIndex)) {
+            vec.group.userData.layerIndex = layerIndex;
+        }
+
+        if (vec.mesh) {
+            vec.mesh.visible = true;
+            vec.mesh.userData = vec.mesh.userData || {};
+            vec.mesh.userData.skipVisible = true;
+            vec.mesh.userData.kvCachePersistent = true;
+            if (vec.mesh.instanceMatrix && typeof vec.mesh.instanceMatrix.setUsage === 'function') {
+                vec.mesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+            }
+            vec.mesh.matrixAutoUpdate = false;
+            vec.mesh.updateMatrix();
+            const mats = Array.isArray(vec.mesh.material) ? vec.mesh.material : [vec.mesh.material];
+            mats.forEach((mat) => {
+                if (!mat) return;
+                mat.opacity = 1;
+                mat.transparent = false;
+                mat.needsUpdate = true;
+            });
+        }
+
+        vec.userData = vec.userData || {};
+        vec.userData.parentLane = laneEntry;
+        vec.userData.kvCachePersistent = true;
+        vec.userData.vectorCategory = category;
+        if (Number.isFinite(headIndex)) {
+            vec.userData.headIndex = headIndex;
+            vec.group.userData.headIndex = headIndex;
+            if (vec.mesh) vec.mesh.userData.headIndex = headIndex;
+        }
+
+        const categoryLabel = category === 'V' ? 'Value Vector' : 'Key Vector';
+        const existingLabel = String(vec.group.userData.label || '');
+        if (!existingLabel || existingLabel.toLowerCase() === 'vector') {
+            vec.group.userData.label = categoryLabel;
+        }
+        if (Number.isFinite(layerIndex)) vec.group.userData.layerIndex = layerIndex;
+        if (Number.isFinite(laneEntry?.laneLayoutIndex)) vec.group.userData.laneLayoutIndex = laneEntry.laneLayoutIndex;
+        if (Number.isFinite(laneEntry?.tokenIndex)) vec.group.userData.tokenIndex = laneEntry.tokenIndex;
+
+        this._installKvRaycastProxy(vec, {
+            category,
+            headIndex,
+            layerIndex,
+            laneLayoutIndex: laneEntry?.laneLayoutIndex,
+            tokenIndex: laneEntry?.tokenIndex
+        });
+
+        return vec;
+    }
+
+    _installKvRaycastProxy(vec, {
+        category = 'K',
+        headIndex = null,
+        layerIndex = null,
+        laneLayoutIndex = null,
+        tokenIndex = null
+    } = {}) {
+        if (!vec || !vec.group || vec.isBatchedVectorRef) return;
+        const group = vec.group;
+        group.userData = group.userData || {};
+        if (group.userData.kvRaycastProxyInstalled) return;
+
+        // Disable expensive raycast checks on the full instanced prism mesh.
+        const disableRaycast = (obj) => {
+            if (!obj || typeof obj !== 'object') return;
+            obj.userData = obj.userData || {};
+            obj.userData.raycastDisabled = true;
+            obj.raycast = () => {};
+        };
+        if (vec.mesh) disableRaycast(vec.mesh);
+        group.traverse((child) => {
+            if (!child || child === group || child === vec.mesh) return;
+            if (child.isMesh || child.isLine || child.isPoints) {
+                disableRaycast(child);
+            }
+        });
+
+        // Add one lightweight proxy mesh for raycast interactivity.
+        const bounds = new THREE.Box3();
+        group.updateMatrixWorld(true);
+        bounds.setFromObject(group);
+        if (!bounds.isEmpty()) {
+            bounds.getCenter(TMP_KV_PROXY_CENTER);
+            bounds.getSize(TMP_KV_PROXY_SIZE);
+            TMP_KV_PROXY_LOCAL_CENTER.copy(TMP_KV_PROXY_CENTER);
+            group.worldToLocal(TMP_KV_PROXY_LOCAL_CENTER);
+        } else {
+            TMP_KV_PROXY_LOCAL_CENTER.set(0, 0, 0);
+            TMP_KV_PROXY_SIZE.set(12, 32, 12);
+        }
+
+        const proxy = new THREE.Mesh(KV_RAYCAST_PROXY_GEOMETRY, KV_RAYCAST_PROXY_MATERIAL);
+        proxy.name = 'KvCacheRaycastProxy';
+        proxy.position.copy(TMP_KV_PROXY_LOCAL_CENTER);
+        proxy.scale.set(
+            Math.max(0.5, TMP_KV_PROXY_SIZE.x),
+            Math.max(0.5, TMP_KV_PROXY_SIZE.y),
+            Math.max(0.5, TMP_KV_PROXY_SIZE.z)
+        );
+        proxy.matrixAutoUpdate = false;
+        proxy.updateMatrix();
+        proxy.userData = {
+            kvRaycastProxy: true,
+            headIndex: Number.isFinite(headIndex) ? headIndex : undefined,
+            layerIndex: Number.isFinite(layerIndex) ? layerIndex : undefined,
+            laneLayoutIndex: Number.isFinite(laneLayoutIndex) ? laneLayoutIndex : undefined,
+            tokenIndex: Number.isFinite(tokenIndex) ? tokenIndex : undefined,
+            vectorCategory: category
+        };
+        group.add(proxy);
+        group.userData.kvRaycastProxyInstalled = true;
+        group.userData.kvRaycastProxy = proxy;
+    }
+
+    _clearKvCacheVisuals() {
+        if (this._kvCacheEntriesByLayer && this._kvCacheEntriesByLayer.size) {
+            const disposed = new Set();
+            this._kvCacheEntriesByLayer.forEach((entries) => {
+                if (!Array.isArray(entries)) return;
+                entries.forEach((entry) => {
+                    if (!entry) return;
+                    const upward = Array.isArray(entry.upwardCopies) ? entry.upwardCopies : [];
+                    upward.forEach((vec) => {
+                        if (!vec || disposed.has(vec)) return;
+                        disposed.add(vec);
+                        this._disposeKvCacheVector(vec);
+                    });
+                    const sideCopies = Array.isArray(entry.sideCopies) ? entry.sideCopies : [];
+                    sideCopies.forEach((side) => {
+                        const vec = side && side.vec ? side.vec : null;
+                        if (!vec || disposed.has(vec)) return;
+                        disposed.add(vec);
+                        this._disposeKvCacheVector(vec);
+                    });
+                });
+            });
+        }
+        this._kvCacheEntriesByLayer = new Map();
+        if (this._kvCachePersistentRoot && Array.isArray(this._kvCachePersistentRoot.children)) {
+            const leftovers = [...this._kvCachePersistentRoot.children];
+            leftovers.forEach((child) => {
+                if (!child) return;
+                try {
+                    child.traverse?.((obj) => {
+                        if (!obj) return;
+                        if (obj.geometry && typeof obj.geometry.dispose === 'function') {
+                            obj.geometry.dispose();
+                        }
+                        if (obj.material) {
+                            const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+                            mats.forEach((mat) => {
+                                if (mat && typeof mat.dispose === 'function') mat.dispose();
+                            });
+                        }
+                    });
+                } catch (_) { /* optional cleanup */ }
+                try {
+                    if (child.parent) child.parent.remove(child);
+                } catch (_) { /* optional cleanup */ }
+            });
+        }
+    }
+
+    _captureKvCacheFromLayers(layers) {
+        if (!Array.isArray(layers) || !layers.length || !this._kvCachePersistentRoot) return;
+
+        layers.forEach((layer) => {
+            if (!layer || !Array.isArray(layer.lanes) || !layer.lanes.length) return;
+            const layerIndex = Number.isFinite(layer.index) ? layer.index : null;
+            if (!Number.isFinite(layerIndex)) return;
+            const existing = Array.isArray(this._kvCacheEntriesByLayer.get(layerIndex))
+                ? this._kvCacheEntriesByLayer.get(layerIndex).slice()
+                : [];
+
+            layer.lanes.forEach((lane) => {
+                if (!lane) return;
+                const tokenIndex = Number.isFinite(lane.tokenIndex) ? lane.tokenIndex : null;
+                const laneLayoutIndex = Number.isFinite(lane.laneLayoutIndex)
+                    ? lane.laneLayoutIndex
+                    : null;
+                const alreadyCaptured = existing.some((entry) => (
+                    Number.isFinite(tokenIndex) && Number.isFinite(entry?.tokenIndex)
+                        ? entry.tokenIndex === tokenIndex
+                        : (Number.isFinite(laneLayoutIndex) && Number.isFinite(entry?.laneLayoutIndex)
+                            ? entry.laneLayoutIndex === laneLayoutIndex
+                            : false)
+                ));
+                if (alreadyCaptured) return;
+
+                const zPos = Number.isFinite(lane.zPos)
+                    ? lane.zPos
+                    : (lane.originalVec?.group?.position?.z ?? 0);
+                const laneEntry = {
+                    layer: null,
+                    layerIndex,
+                    laneIndex: Number.isFinite(lane.laneIndex) ? lane.laneIndex : 0,
+                    laneLayoutIndex,
+                    tokenIndex,
+                    tokenLabel: lane.tokenLabel || null,
+                    zPos,
+                    upwardCopies: [],
+                    sideCopies: []
+                };
+
+                if (Array.isArray(lane.upwardCopies)) {
+                    lane.upwardCopies.forEach((kVec, headIndex) => {
+                        if (!kVec) return;
+                        const persisted = this._markKvCacheVectorPersistent(
+                            kVec,
+                            laneEntry,
+                            { category: 'K', headIndex, layerIndex }
+                        );
+                        laneEntry.upwardCopies[headIndex] = persisted;
+                    });
+                }
+
+                if (Array.isArray(lane.sideCopies)) {
+                    lane.sideCopies.forEach((sideCopy) => {
+                        if (!sideCopy || sideCopy.type !== 'V' || !sideCopy.vec) return;
+                        const headIndex = Number.isFinite(sideCopy.headIndex) ? sideCopy.headIndex : null;
+                        const persisted = this._markKvCacheVectorPersistent(
+                            sideCopy.vec,
+                            laneEntry,
+                            { category: 'V', headIndex, layerIndex }
+                        );
+                        if (!persisted) return;
+                        laneEntry.sideCopies.push({
+                            type: 'V',
+                            headIndex,
+                            vec: persisted,
+                            targetX: Number.isFinite(sideCopy.targetX)
+                                ? sideCopy.targetX
+                                : persisted.group.position.x,
+                            matrixRef: null
+                        });
+                    });
+                }
+
+                const hasK = laneEntry.upwardCopies.some((vec) => !!vec);
+                const hasV = laneEntry.sideCopies.length > 0;
+                if (!hasK && !hasV) return;
+                laneEntry.layer = { index: layerIndex };
+                existing.push(laneEntry);
+            });
+
+            existing.sort((a, b) => {
+                const aLayout = Number.isFinite(a?.laneLayoutIndex) ? a.laneLayoutIndex : Infinity;
+                const bLayout = Number.isFinite(b?.laneLayoutIndex) ? b.laneLayoutIndex : Infinity;
+                if (aLayout !== bLayout) return aLayout - bLayout;
+                const aToken = Number.isFinite(a?.tokenIndex) ? a.tokenIndex : Infinity;
+                const bToken = Number.isFinite(b?.tokenIndex) ? b.tokenIndex : Infinity;
+                if (aToken !== bToken) return aToken - bToken;
+                const aZ = Number.isFinite(a?.zPos) ? a.zPos : 0;
+                const bZ = Number.isFinite(b?.zPos) ? b.zPos : 0;
+                return aZ - bZ;
+            });
+
+            this._kvCacheEntriesByLayer.set(layerIndex, existing);
+        });
+    }
+
+    _reflowKvCacheLaneDepths(layoutCount = this._laneLayoutCount) {
+        const totalSlots = Math.max(1, Math.floor(layoutCount || 1));
+        const spacing = LN_PARAMS.depth / (totalSlots + 1);
+        this._kvCacheEntriesByLayer.forEach((entries) => {
+            if (!Array.isArray(entries) || !entries.length) return;
+            entries.forEach((entry) => {
+                if (!entry || !Number.isFinite(entry.laneLayoutIndex)) return;
+                const clampedLayoutIdx = Math.max(0, Math.min(totalSlots - 1, Math.floor(entry.laneLayoutIndex)));
+                const targetZ = -LN_PARAMS.depth / 2 + spacing * (clampedLayoutIdx + 1);
+                entry.zPos = targetZ;
+                const applyZ = (vec) => {
+                    if (!vec || !vec.group || !vec.group.position) return;
+                    vec.group.position.z = targetZ;
+                };
+                if (Array.isArray(entry.upwardCopies)) {
+                    entry.upwardCopies.forEach((vec) => applyZ(vec));
+                }
+                if (Array.isArray(entry.sideCopies)) {
+                    entry.sideCopies.forEach((side) => applyZ(side?.vec));
+                }
+            });
+        });
+    }
+
+    resetForNewPass({
+        activationSource = this._activationSource,
+        laneCount = this._laneCount,
+        laneLayoutCount = this._laneLayoutCount,
+        laneLayoutIndices = null,
+        laneTokenIndices = null,
+        kvCacheModeEnabled = false,
+        kvCacheDecodeActive = false,
+        preservePreviousTrails = false,
+        captureKvCache = false,
+        reuseKvCache = false,
+        clearKvCache = false
+    } = {}) {
         const engine = this._engine;
 
         if (this._skipToEndActive) {
@@ -320,6 +760,7 @@ export class LayerPipeline extends EventTarget {
         this._skipToEndActive = false;
         this._skipLayerActive = false;
         this._skipLayerLast = false;
+        this._skipKvCaptureReadyLayers.clear();
         this._skipLayerRestore = null;
         this._skipToEndRestore = null;
 
@@ -345,16 +786,30 @@ export class LayerPipeline extends EventTarget {
             try { TWEEN.removeAll(); } catch (_) { /* no-op */ }
         }
 
-        this._trailPassId = (Number.isFinite(this._trailPassId) ? this._trailPassId : 0) + 1;
+        const shouldPreserveTrails = !!preservePreviousTrails;
+        const shouldCaptureKv = !!captureKvCache;
+        const shouldReuseKv = !!reuseKvCache;
+        const shouldClearKv = !!clearKvCache;
+
+        const oldLayers = Array.isArray(this._layers) ? this._layers : [];
+        if (shouldClearKv) {
+            this._clearKvCacheVisuals();
+        }
+        if (shouldCaptureKv) {
+            this._captureKvCacheFromLayers(oldLayers);
+        }
+
+        if (!shouldPreserveTrails) {
+            this._trailPassId = (Number.isFinite(this._trailPassId) ? this._trailPassId : 0) + 1;
+        }
         this._topLnParamPlaceholders = null;
         if (engine && engine.scene && engine.scene.userData) {
             engine.scene.userData.trailPassId = this._trailPassId;
         }
-        if (engine && engine.scene) {
+        if (engine && engine.scene && !shouldPreserveTrails) {
             clearTrailsFromScene(engine.scene, { passId: this._trailPassId });
         }
 
-        const oldLayers = Array.isArray(this._layers) ? this._layers : [];
         this._layers = [];
         this._currentLayerIdx = 0;
 
@@ -379,13 +834,30 @@ export class LayerPipeline extends EventTarget {
 
         this._activationSource = activationSource || null;
         this._laneCount = Math.max(1, Math.floor(laneCount || 1));
+        this._laneLayoutCount = Math.max(this._laneCount, Math.floor(laneLayoutCount || this._laneCount));
+        this._activeLaneLayoutIndices = this._normalizeActiveLaneLayoutIndices(
+            laneLayoutIndices,
+            this._laneCount,
+            this._laneLayoutCount
+        );
+        this._passLaneTokenIndices = Array.isArray(laneTokenIndices)
+            ? laneTokenIndices.slice(0, this._laneCount)
+            : null;
+        this._kvCacheModeEnabled = !!kvCacheModeEnabled;
+        this._kvCacheDecodeActive = !!(this._kvCacheModeEnabled && kvCacheDecodeActive);
+        this._reuseKvCacheForPass = !!(this._kvCacheModeEnabled && shouldReuseKv);
+        if (this._kvCacheEntriesByLayer.size) {
+            this._reflowKvCacheLaneDepths(this._laneLayoutCount);
+        }
 
         const layerStackSpacing = LAYER_STACK_SPACING_Y;
         this._initLayers(layerStackSpacing);
         if (engine && Array.isArray(engine._layers) && autoDriver && !engine._layers.includes(autoDriver)) {
             engine._layers.push(autoDriver);
         }
-        this._schedulePostResetTrailPurge(1500);
+        if (!shouldPreserveTrails) {
+            this._schedulePostResetTrailPurge(1500);
+        }
         this.dispatchEvent(new Event('progress'));
     }
 
@@ -411,14 +883,29 @@ export class LayerPipeline extends EventTarget {
             ? performance.now()
             : Date.now();
         this._postResetTrailPurgeUntil = start + duration;
+        let nextSweepAt = start;
+        let zeroSweepCount = 0;
 
         const tick = () => {
             if (!engine.scene) return;
-            clearTrailsFromScene(engine.scene, { passId: this._trailPassId });
             const now = (typeof performance !== 'undefined' && performance.now)
                 ? performance.now()
                 : Date.now();
+            if (now >= nextSweepAt) {
+                const removedCount = clearTrailsFromScene(engine.scene, { passId: this._trailPassId });
+                if (removedCount > 0) {
+                    zeroSweepCount = 0;
+                } else {
+                    zeroSweepCount += 1;
+                }
+                nextSweepAt = now + POST_RESET_TRAIL_PURGE_INTERVAL_MS;
+            }
             if (now >= this._postResetTrailPurgeUntil) {
+                this._postResetTrailPurgeRaf = null;
+                return;
+            }
+            // Stop early once multiple sweeps find nothing left to purge.
+            if (zeroSweepCount >= 4) {
                 this._postResetTrailPurgeRaf = null;
                 return;
             }
@@ -634,6 +1121,7 @@ export class LayerPipeline extends EventTarget {
             : (cb) => setTimeout(cb, 50);
         const tick = () => {
             if (!this._skipToEndActive) return;
+            this._captureSkipReadyKvLayers();
             if (this._checkForwardPassComplete()) {
                 this._finalizeSkipToEnd();
                 return;
@@ -641,6 +1129,20 @@ export class LayerPipeline extends EventTarget {
             this._skipToEndRaf = schedule(tick);
         };
         this._skipToEndRaf = schedule(tick);
+    }
+
+    _captureSkipReadyKvLayers() {
+        if (!this._kvCacheModeEnabled || !Array.isArray(this._layers) || !this._layers.length) return;
+        this._layers.forEach((layer) => {
+            if (!layer) return;
+            const layerIndex = Number.isFinite(layer.index) ? Math.floor(layer.index) : null;
+            if (!Number.isFinite(layerIndex) || this._skipKvCaptureReadyLayers.has(layerIndex)) return;
+            const mhsa = layer.mhsaAnimation;
+            const passThroughComplete = !!(mhsa && mhsa.mhaPassThroughPhase === 'mha_pass_through_complete');
+            if (!passThroughComplete) return;
+            this._captureKvCacheFromLayers([layer]);
+            this._skipKvCaptureReadyLayers.add(layerIndex);
+        });
     }
 
     _finalizeSkipToEnd({ immediate = false } = {}) {
@@ -746,6 +1248,9 @@ export class LayerPipeline extends EventTarget {
 
         // Now that the original residual vectors have been transferred, we can safely
         // hide the remaining heavy geometry in the previous layer to save GPU work.
+        if (this._kvCacheModeEnabled && prevLayer) {
+            this._captureKvCacheFromLayers([prevLayer]);
+        }
         if (prevLayer && typeof prevLayer.hideDynamicGeometry === 'function') {
             prevLayer.hideDynamicGeometry();
         }

@@ -7,6 +7,30 @@ import { QUALITY_PRESET, resolveRenderPixelRatio } from '../utils/constants.js';
 import { perfStats } from '../utils/perfStats.js';
 import Gpt2Layer from './layers/Gpt2Layer.js';
 
+function normalizeRaycastLabel(label, info = null, object = null) {
+    const raw = String(label || '');
+    const lower = raw.toLowerCase();
+    const stage = info?.activationData?.stage
+        || object?.userData?.activationData?.stage
+        || '';
+    const stageLower = String(stage).toLowerCase();
+
+    const isEmbeddingSum = lower.includes('embedding sum') || stageLower.startsWith('embedding.sum');
+    const isResidualStage = lower.includes('incoming residual')
+        || lower.includes('post-attention residual')
+        || lower.includes('post attention residual')
+        || lower.includes('post-mlp residual')
+        || lower.includes('post mlp residual')
+        || lower.includes('post-layernorm residual')
+        || lower.includes('post layernorm residual')
+        || stageLower.startsWith('layer.incoming')
+        || stageLower.includes('residual');
+    if (isEmbeddingSum || isResidualStage) {
+        return 'Residual Stream Vector';
+    }
+    return raw;
+}
+
 /**
  * CoreEngine is responsible for creating the Three-JS renderer, camera, 
  * post-processing stack and the single requestAnimationFrame loop that drives
@@ -431,6 +455,11 @@ export class CoreEngine {
         if (idx !== -1) {
             this._raycastRoots.splice(idx, 1);
         }
+    }
+
+    // Backwards-compatible alias used by existing call sites.
+    removeRaycastRoot(root) {
+        this.unregisterRaycastRoot(root);
     }
 
     /** Return current raycasting state. */
@@ -936,7 +965,7 @@ export class CoreEngine {
                             if (info) {
                                 const catText  = info.category === 'V' ? 'Value Vector' : 'Key Vector';
                                 return {
-                                    label: catText,
+                                    label: normalizeRaycastLabel(catText, info),
                                     hit,
                                     info,
                                     kind: 'mergedKV'
@@ -959,7 +988,7 @@ export class CoreEngine {
             const info = Array.isArray(entries) ? entries[hit.instanceId] : null;
             if (label || info) {
                 return {
-                    label: label || 'Attention Score',
+                    label: normalizeRaycastLabel(label || 'Attention Score', info, obj),
                     hit,
                     info,
                     kind: 'attentionSphere'
@@ -981,10 +1010,36 @@ export class CoreEngine {
                 ? entry
                 : (entry !== undefined && entry !== null ? { logitEntry: entry } : null);
             return {
-                label,
+                label: normalizeRaycastLabel(label, info, obj),
                 hit,
                 info,
                 kind: obj.userData?.instanceKind || 'instanced'
+            };
+        }
+
+        // Pass 1.75: Lightweight KV-cache raycast proxies (one proxy per cached K/V object).
+        // Resolve to the parent vector group so selection previews still clone the actual
+        // vector object rather than the invisible proxy mesh.
+        for (const hit of visibleHits) {
+            const obj = hit?.object;
+            if (!obj || !obj.userData?.kvRaycastProxy) continue;
+            const proxyData = obj.userData || {};
+            const category = String(proxyData.vectorCategory || 'K').toUpperCase() === 'V' ? 'V' : 'K';
+            const info = {
+                category,
+                headIndex: Number.isFinite(proxyData.headIndex) ? proxyData.headIndex : null,
+                layerIndex: Number.isFinite(proxyData.layerIndex) ? proxyData.layerIndex : null,
+                laneLayoutIndex: Number.isFinite(proxyData.laneLayoutIndex) ? proxyData.laneLayoutIndex : null,
+                tokenIndex: Number.isFinite(proxyData.tokenIndex) ? proxyData.tokenIndex : null
+            };
+            const carrier = obj.parent || obj;
+            const catText = category === 'V' ? 'Value Vector' : 'Key Vector';
+            return {
+                label: normalizeRaycastLabel(catText, info, carrier),
+                hit,
+                info,
+                object: carrier,
+                kind: 'mergedKV'
             };
         }
 
@@ -992,9 +1047,18 @@ export class CoreEngine {
         for (const hit of visibleHits) {
             let obj = hit.object;
             while (obj) {
+                if (obj.userData?.kvRaycastProxy) {
+                    obj = obj.parent;
+                    continue;
+                }
                 const lbl = obj.userData?.label || obj.name;
                 if (lbl && lbl !== 'Weight Matrix') {
-                    return { label: lbl, hit, object: obj, kind: 'label' };
+                    return {
+                        label: normalizeRaycastLabel(lbl, null, obj),
+                        hit,
+                        object: obj,
+                        kind: 'label'
+                    };
                 }
                 obj = obj.parent;
             }

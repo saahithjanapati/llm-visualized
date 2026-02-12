@@ -84,6 +84,14 @@ function getVectorLengthFromEntry(entry) {
     return 0;
 }
 
+function normalizeTokenIdArray(values) {
+    if (!Array.isArray(values) || !values.length) return [];
+    return values.map((value) => {
+        const num = Number(value);
+        return Number.isFinite(num) ? Math.floor(num) : null;
+    });
+}
+
 export class CaptureActivationSource {
     constructor(data = {}) {
         this.data = data || {};
@@ -95,6 +103,13 @@ export class CaptureActivationSource {
             ? this.activations.final_layernorm
             : null;
         this.tokenStrings = Array.isArray(this.meta.token_strings) ? this.meta.token_strings : [];
+        const explicitTokenIds = normalizeTokenIdArray(this.meta.token_ids);
+        const promptTokenIds = normalizeTokenIdArray(this.meta.prompt_tokens);
+        const completionTokenIds = normalizeTokenIdArray(this.meta.completion_tokens);
+        const combinedTokenIds = (promptTokenIds.length || completionTokenIds.length)
+            ? [...promptTokenIds, ...completionTokenIds]
+            : [];
+        this.tokenIds = explicitTokenIds.length ? explicitTokenIds : combinedTokenIds;
         this.logits = Array.isArray(this.data.logits) ? this.data.logits : [];
         this._laneTokenCache = new Map();
         this._vectorCache = new Map();
@@ -130,6 +145,15 @@ export class CaptureActivationSource {
         if (!this.tokenStrings.length) return null;
         const idx = clampIndex(tokenIndex, this.tokenStrings.length - 1);
         return this.tokenStrings[idx] ?? null;
+    }
+
+    getTokenId(tokenIndex) {
+        if (!this.tokenIds.length) return null;
+        if (!Number.isFinite(tokenIndex)) return null;
+        const idx = Math.floor(tokenIndex);
+        if (idx < 0 || idx >= this.tokenIds.length) return null;
+        const tokenId = this.tokenIds[idx];
+        return Number.isFinite(tokenId) ? tokenId : null;
     }
 
     getLogitTopK() {

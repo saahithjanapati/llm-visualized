@@ -41,6 +41,9 @@ export class VectorRouter {
         this._acquireVector = typeof opts.acquireVector === 'function' ? opts.acquireVector : null;
         this._shareVectorData = !!opts.shareVectorData;
         this._trailFactory = typeof opts.trailFactory === 'function' ? opts.trailFactory : null;
+        this._copyTrailOpacity = Number.isFinite(opts.copyTrailOpacity)
+            ? Math.max(0, Math.min(1, opts.copyTrailOpacity))
+            : FAINT_TRAIL_OPACITY;
 
         this._readyEmitted = false;
         this._callbacks    = new Set();
@@ -368,7 +371,7 @@ export class VectorRouter {
         return vec;
     }
 
-    _createTrail({ kind = null, headIndex = null, parentLane = null, opacity = FAINT_TRAIL_OPACITY, minSegmentDistance = TRAIL_MIN_SEGMENT_DISTANCE } = {}) {
+    _createTrail({ kind = null, headIndex = null, parentLane = null, opacity = this._copyTrailOpacity, minSegmentDistance = TRAIL_MIN_SEGMENT_DISTANCE } = {}) {
         if (this._trailFactory) {
             try {
                 const trail = this._trailFactory({

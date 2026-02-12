@@ -17,6 +17,9 @@ export class AppState {
         this.showFollowViewInspector = false;
         this.devMode = false;
         this.showPerfOverlay = false;
+        this.kvCacheModeEnabled = false;
+        this.kvCachePrefillActive = false;
+        this.kvCachePassIndex = 0;
         this.environmentTexture = null;
         this.initialPipelineBackground = null;
         this.initialPipelineBackgroundCaptured = false;

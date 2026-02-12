@@ -37,12 +37,32 @@ export const LN_PARAM_MONOCHROME = {
 };
 
 export function createFreshLanes(layer, offsetX, ln1CenterY, ln2CenterY, ln1TopY) {
-    const slitSpacing = LN_PARAMS.depth / (layer._laneCount + 1);
+    const layoutCount = (typeof layer._getLaneLayoutCount === 'function')
+        ? layer._getLaneLayoutCount()
+        : layer._laneCount;
+    const activeLaneLayoutIndices = (typeof layer._getActiveLaneLayoutIndices === 'function')
+        ? layer._getActiveLaneLayoutIndices()
+        : Array.from({ length: layer._laneCount }, (_, idx) => idx);
+    const slitSpacing = LN_PARAMS.depth / (layoutCount + 1);
     // Start vectors at the TOP of the bottom embedding matrix.
     const startY = (LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2 + EMBEDDING_BOTTOM_TOP_ALIGN_OFFSET_FROM_LN1_BOTTOM) + EMBEDDING_BOTTOM_Y_ADJUST;
     const meetY = ln1TopY + 5;
-    for (let laneIdx = 0; laneIdx < layer._laneCount; laneIdx++) {
-        buildSingleLane(layer, null, offsetX, ln1CenterY, ln2CenterY, startY, meetY, laneIdx, slitSpacing);
+    for (let localLaneIdx = 0; localLaneIdx < layer._laneCount; localLaneIdx++) {
+        const laneLayoutIdx = Number.isFinite(activeLaneLayoutIndices[localLaneIdx])
+            ? activeLaneLayoutIndices[localLaneIdx]
+            : localLaneIdx;
+        buildSingleLane(
+            layer,
+            null,
+            offsetX,
+            ln1CenterY,
+            ln2CenterY,
+            startY,
+            meetY,
+            laneLayoutIdx,
+            slitSpacing,
+            localLaneIdx
+        );
     }
     if (layer._ln1AddPlaceholders && layer._ln1AddPlaceholders.every(p => !p)) {
         layer._ln1AddPlaceholders = [];
@@ -61,7 +81,13 @@ export function createFreshLanes(layer, offsetX, ln1CenterY, ln2CenterY, ln1TopY
 export function createAdditionPlaceholders(layer, offsetX, ln1CenterY, ln2CenterY) {
     try {
         const laneCount = Math.max(1, layer._laneCount || 1);
-        const slitSpacing = LN_PARAMS.depth / (laneCount + 1);
+        const layoutCount = (typeof layer._getLaneLayoutCount === 'function')
+            ? layer._getLaneLayoutCount()
+            : laneCount;
+        const activeLaneLayoutIndices = (typeof layer._getActiveLaneLayoutIndices === 'function')
+            ? layer._getActiveLaneLayoutIndices()
+            : Array.from({ length: laneCount }, (_, idx) => idx);
+        const slitSpacing = LN_PARAMS.depth / (layoutCount + 1);
         const addYOffset = LN_PARAMS.height * LN_ADD_VECTOR_OFFSET_FRACTION;
         const raycastRoot = layer.raycastRoot || layer.root;
         const prismCount = typeof layer._getBaseVectorLength === 'function'
@@ -86,25 +112,28 @@ export function createAdditionPlaceholders(layer, offsetX, ln1CenterY, ln2Center
         }
 
         const banks = layer._lnParamBanks;
-        for (let laneIdx = 0; laneIdx < laneCount; laneIdx++) {
-            const zPos = -LN_PARAMS.depth / 2 + slitSpacing * (laneIdx + 1);
+        for (let localLaneIdx = 0; localLaneIdx < laneCount; localLaneIdx++) {
+            const laneLayoutIdx = Number.isFinite(activeLaneLayoutIndices[localLaneIdx])
+                ? activeLaneLayoutIndices[localLaneIdx]
+                : localLaneIdx;
+            const zPos = -LN_PARAMS.depth / 2 + slitSpacing * (laneLayoutIdx + 1);
 
-            const ln1ScaleRef = banks.ln1Scale.getVectorRef(laneIdx);
+            const ln1ScaleRef = banks.ln1Scale.getVectorRef(localLaneIdx);
             ln1ScaleRef.group.position.set(offsetX, ln1CenterY + 3.3, zPos);
             ln1ScaleRef.group.visible = true;
             layer._applyLayerNormParamVector(ln1ScaleRef, 'ln1', 'scale', LN_PARAM_MONOCHROME);
 
-            const ln1ShiftRef = banks.ln1Shift.getVectorRef(laneIdx);
+            const ln1ShiftRef = banks.ln1Shift.getVectorRef(localLaneIdx);
             ln1ShiftRef.group.position.set(offsetX, ln1CenterY + addYOffset, zPos);
             ln1ShiftRef.group.visible = true;
             layer._applyLayerNormParamVector(ln1ShiftRef, 'ln1', 'shift', LN_PARAM_MONOCHROME);
 
-            const ln2ScaleRef = banks.ln2Scale.getVectorRef(laneIdx);
+            const ln2ScaleRef = banks.ln2Scale.getVectorRef(localLaneIdx);
             ln2ScaleRef.group.position.set(offsetX, ln2CenterY + 3.3, zPos);
             ln2ScaleRef.group.visible = true;
             layer._applyLayerNormParamVector(ln2ScaleRef, 'ln2', 'scale', LN_PARAM_MONOCHROME);
 
-            const ln2ShiftRef = banks.ln2Shift.getVectorRef(laneIdx);
+            const ln2ShiftRef = banks.ln2Shift.getVectorRef(localLaneIdx);
             ln2ShiftRef.group.position.set(offsetX, ln2CenterY + addYOffset, zPos);
             ln2ShiftRef.group.visible = true;
             layer._applyLayerNormParamVector(ln2ShiftRef, 'ln2', 'shift', LN_PARAM_MONOCHROME);
@@ -123,8 +152,27 @@ export function createLanesFromExternal(layer, externalLanes, offsetX, ln1Center
     const meetY = ln1TopY + 5; // where original vectors pause just above LN1
 
     // DON'T reset position - let vectors continue from where they are after layer 1.
-    externalLanes.forEach((oldLane, laneIdx) => {
-        buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY, null, meetY, laneIdx, null);
+    const activeLaneLayoutIndices = (typeof layer._getActiveLaneLayoutIndices === 'function')
+        ? layer._getActiveLaneLayoutIndices()
+        : [];
+    externalLanes.forEach((oldLane, localLaneIdx) => {
+        const laneLayoutIdx = Number.isFinite(oldLane?.laneLayoutIndex)
+            ? oldLane.laneLayoutIndex
+            : (Number.isFinite(activeLaneLayoutIndices[localLaneIdx])
+                ? activeLaneLayoutIndices[localLaneIdx]
+                : localLaneIdx);
+        buildSingleLane(
+            layer,
+            oldLane,
+            offsetX,
+            ln1CenterY,
+            ln2CenterY,
+            null,
+            meetY,
+            laneLayoutIdx,
+            null,
+            localLaneIdx
+        );
     });
     if (layer._ln1AddPlaceholders && layer._ln1AddPlaceholders.every(p => !p)) {
         layer._ln1AddPlaceholders = [];
@@ -140,13 +188,14 @@ export function createLanesFromExternal(layer, externalLanes, offsetX, ln1Center
     }
 }
 
-export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY, startY_override, meetY, laneIdx, slitSpacing) {
+export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY, startY_override, meetY, laneLayoutIdx, slitSpacing, laneLocalIdx = 0) {
     const raycastRoot = layer.raycastRoot || layer.root;
     // Reuse existing trail when lanes are passed from a lower layer.
     let trailFromPrev = oldLane && oldLane.originalTrail ? oldLane.originalTrail : null;
+    const resolvedLayoutLaneIdx = Number.isFinite(laneLayoutIdx) ? Math.floor(laneLayoutIdx) : laneLocalIdx;
     const laneTokenIndex = (oldLane && Number.isFinite(oldLane.tokenIndex))
         ? oldLane.tokenIndex
-        : layer._getTokenIndexForLane(laneIdx);
+        : layer._getTokenIndexForLane(laneLocalIdx, resolvedLayoutLaneIdx);
     const laneTokenLabel = (oldLane && oldLane.tokenLabel)
         ? oldLane.tokenLabel
         : layer._getTokenLabel(laneTokenIndex);
@@ -169,7 +218,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
             originalVec.userData.trailWorld = true;
         }
     } else {
-        zPos = -LN_PARAMS.depth / 2 + slitSpacing * (laneIdx + 1);
+        zPos = -LN_PARAMS.depth / 2 + slitSpacing * (resolvedLayoutLaneIdx + 1);
         let data = layer.random.nextVector(layer._getBaseVectorLength());
         if (layer.activationSource) {
             const tokenData = layer._getEmbeddingData({ tokenIndex: laneTokenIndex }, 'token');
@@ -246,10 +295,10 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
 
     const addYOffset = LN_PARAMS.height * LN_ADD_VECTOR_OFFSET_FRACTION;
     const paramBanks = layer._lnParamBanks || null;
-    const multTarget = paramBanks && paramBanks.ln1Scale ? paramBanks.ln1Scale.getVectorRef(laneIdx) : null;
-    const addTarget = paramBanks && paramBanks.ln1Shift ? paramBanks.ln1Shift.getVectorRef(laneIdx) : null;
-    const multTargetLN2 = paramBanks && paramBanks.ln2Scale ? paramBanks.ln2Scale.getVectorRef(laneIdx) : null;
-    const addTargetLN2 = paramBanks && paramBanks.ln2Shift ? paramBanks.ln2Shift.getVectorRef(laneIdx) : null;
+    const multTarget = paramBanks && paramBanks.ln1Scale ? paramBanks.ln1Scale.getVectorRef(laneLocalIdx) : null;
+    const addTarget = paramBanks && paramBanks.ln1Shift ? paramBanks.ln1Shift.getVectorRef(laneLocalIdx) : null;
+    const multTargetLN2 = paramBanks && paramBanks.ln2Scale ? paramBanks.ln2Scale.getVectorRef(laneLocalIdx) : null;
+    const addTargetLN2 = paramBanks && paramBanks.ln2Shift ? paramBanks.ln2Shift.getVectorRef(laneLocalIdx) : null;
 
     if (multTarget && multTarget.group) {
         multTarget.group.position.set(offsetX, ln1CenterY + 3.3, zPos);
@@ -281,7 +330,8 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
 
     layer.lanes.push({
         layer,
-        laneIndex: laneIdx,
+        laneIndex: laneLocalIdx,
+        laneLayoutIndex: resolvedLayoutLaneIdx,
         tokenIndex: laneTokenIndex,
         tokenLabel: laneTokenLabel,
         originalVec,

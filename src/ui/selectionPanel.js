@@ -79,6 +79,7 @@ const ATTENTION_PRE_COLOR_CLAMP = 5;
 const ATTENTION_POP_OUT_MS = 120;
 const RESIDUAL_COLOR_CLAMP = 2;
 const SPACE_TOKEN_DISPLAY = '" "';
+const RESIDUAL_STREAM_DESCRIPTION = 'This is the residual stream vector for a token at this point in the model. In the overlay, the residual stream is denoted by $x$ or $u$. Attention and MLP outputs are added back into it, which is why it is called a residual stream. It is the main highway of information.';
 const PANEL_SHIFT_DURATION_MS = 520;
 
 const TOKEN_CHIP_STYLE = {
@@ -130,7 +131,7 @@ function formatNumber(value) {
 
 function formatDims(inputDim, outputDim) {
     if (!Number.isFinite(inputDim) || !Number.isFinite(outputDim)) return 'TBD';
-    return `input dim: ${formatNumber(inputDim)} | output dim: ${formatNumber(outputDim)}`;
+    return `input dimension: ${formatNumber(inputDim)} | output dimension: ${formatNumber(outputDim)}`;
 }
 
 function buildMetadata(params = 'TBD', inputDim = null, outputDim = null, length = null) {
@@ -197,22 +198,55 @@ function formatValues(values, perLine = 8) {
     return result;
 }
 
+function formatTokenWithIndex(index, label, fallback = 'Token') {
+    const tokenText = formatTokenLabelForPreview(label);
+    if (Number.isFinite(index) && tokenText) return `${index + 1} (${tokenText})`;
+    if (Number.isFinite(index)) return String(index + 1);
+    return tokenText || fallback;
+}
+
+function formatTokenDisplayWithId(label, tokenId = null) {
+    const tokenText = formatTokenLabelForPreview(label);
+    if (Number.isFinite(tokenId) && tokenText) return `${tokenText} (id ${Math.floor(tokenId)})`;
+    if (Number.isFinite(tokenId)) return `id ${Math.floor(tokenId)}`;
+    return tokenText;
+}
+
 function formatActivationData(data) {
     if (!data || typeof data !== 'object') return 'No activation data.';
     const lines = [];
-    if (data.stage) lines.push(`Stage: ${data.stage}`);
+    const stage = data.stage ? String(data.stage) : '';
+    const stageLower = stage.toLowerCase();
+    const isAttentionScore = stageLower.startsWith('attention.');
+    if (stage) lines.push(`Stage: ${stage}`);
     if (Number.isFinite(data.layerIndex)) lines.push(`Layer: ${data.layerIndex + 1}`);
-    if (Number.isFinite(data.tokenIndex)) {
-        const tokenText = data.tokenLabel ? ` (${data.tokenLabel})` : '';
-        lines.push(`Token: ${data.tokenIndex + 1}${tokenText}`);
-    }
-    if (Number.isFinite(data.keyTokenIndex)) {
-        const keyText = data.keyTokenLabel ? ` (${data.keyTokenLabel})` : '';
-        lines.push(`Key: ${data.keyTokenIndex + 1}${keyText}`);
+    if (isAttentionScore) {
+        if (Number.isFinite(data.tokenIndex) || data.tokenLabel) {
+            lines.push(`Source token: ${formatTokenWithIndex(data.tokenIndex, data.tokenLabel, 'Source')}`);
+        }
+        if (Number.isFinite(data.keyTokenIndex) || data.keyTokenLabel) {
+            lines.push(`Target token: ${formatTokenWithIndex(data.keyTokenIndex, data.keyTokenLabel, 'Target')}`);
+        }
+    } else {
+        if (Number.isFinite(data.tokenIndex)) {
+            const tokenText = data.tokenLabel ? ` (${formatTokenLabelForPreview(data.tokenLabel)})` : '';
+            lines.push(`Token: ${data.tokenIndex + 1}${tokenText}`);
+        }
+        if (Number.isFinite(data.keyTokenIndex)) {
+            const keyText = data.keyTokenLabel ? ` (${formatTokenLabelForPreview(data.keyTokenLabel)})` : '';
+            lines.push(`Key: ${data.keyTokenIndex + 1}${keyText}`);
+        }
     }
     if (Number.isFinite(data.headIndex)) lines.push(`Head: ${data.headIndex + 1}`);
     if (Number.isFinite(data.segmentIndex)) lines.push(`Segment: ${data.segmentIndex + 1}`);
     if (Number.isFinite(data.preScore) || Number.isFinite(data.postScore)) {
+        if (isAttentionScore) {
+            const selectedMode = stageLower.includes('post') ? 'post' : 'pre';
+            const selectedScore = selectedMode === 'post' ? data.postScore : data.preScore;
+            if (Number.isFinite(selectedScore)) {
+                lines.push(`Attention score (${selectedMode}-softmax): ${selectedScore.toFixed(4)}`);
+            }
+        }
         if (Number.isFinite(data.preScore)) lines.push(`Pre-softmax: ${data.preScore.toFixed(4)}`);
         if (Number.isFinite(data.postScore)) lines.push(`Post-softmax: ${data.postScore.toFixed(4)}`);
     }
@@ -260,6 +294,63 @@ function getActivationDataFromSelection(selectionInfo) {
         || null;
 }
 
+function normalizeSelectionLabel(label, selectionInfo = null) {
+    const raw = String(label || '');
+    const lower = raw.toLowerCase();
+    const activation = getActivationDataFromSelection(selectionInfo);
+    const stageLower = String(activation?.stage || '').toLowerCase();
+
+    const isEmbeddingSum = lower.includes('embedding sum') || stageLower.startsWith('embedding.sum');
+    const isResidualStreamStage = lower.includes('incoming residual')
+        || lower.includes('post-attention residual')
+        || lower.includes('post attention residual')
+        || lower.includes('post-mlp residual')
+        || lower.includes('post mlp residual')
+        || lower.includes('post-layernorm residual')
+        || lower.includes('post layernorm residual')
+        || stageLower.startsWith('layer.incoming')
+        || stageLower.includes('residual');
+
+    if (isEmbeddingSum || isResidualStreamStage) {
+        return 'Residual Stream Vector';
+    }
+    return raw;
+}
+
+function resolveAttentionScoreSelectionSummary(selectionInfo, context = null) {
+    const activation = getActivationDataFromSelection(selectionInfo);
+    const stageLower = String(activation?.stage || '').toLowerCase();
+    if (!activation || !stageLower.startsWith('attention.')) return null;
+
+    const mode = stageLower.includes('post') ? 'post' : 'pre';
+    const score = mode === 'post' ? activation.postScore : activation.preScore;
+    const tokenIndices = Array.isArray(context?.tokenIndices) ? context.tokenIndices : [];
+    const tokenLabels = Array.isArray(context?.tokenLabels) ? context.tokenLabels : [];
+
+    const sourceTokenIndex = Number.isFinite(activation.tokenIndex) ? activation.tokenIndex : null;
+    const targetTokenIndex = Number.isFinite(activation.keyTokenIndex) ? activation.keyTokenIndex : null;
+    const row = Number.isFinite(sourceTokenIndex) ? tokenIndices.indexOf(sourceTokenIndex) : -1;
+    const col = Number.isFinite(targetTokenIndex) ? tokenIndices.indexOf(targetTokenIndex) : -1;
+
+    const sourceLabel = formatTokenLabelForPreview(
+        activation.tokenLabel || (row >= 0 ? tokenLabels[row] : null)
+    );
+    const targetLabel = formatTokenLabelForPreview(
+        activation.keyTokenLabel || (col >= 0 ? tokenLabels[col] : null)
+    );
+    const sourceText = formatTokenWithIndex(sourceTokenIndex, sourceLabel, 'Source');
+    const targetText = formatTokenWithIndex(targetTokenIndex, targetLabel, 'Target');
+    const modeLabel = mode === 'post' ? 'Post-softmax' : 'Pre-softmax';
+    const scoreText = Number.isFinite(score) ? score.toFixed(4) : 'n/a';
+
+    return {
+        mode,
+        row: row >= 0 ? row : null,
+        col: col >= 0 ? col : null,
+        defaultText: `Source: ${sourceText} • Target: ${targetText} • ${modeLabel}: ${scoreText}`
+    };
+}
+
 function findUserDataNumber(selectionInfo, key) {
     const direct = selectionInfo?.info?.[key];
     if (Number.isFinite(direct)) return direct;
@@ -272,6 +363,24 @@ function findUserDataNumber(selectionInfo, key) {
             const ud = current.userData;
             if (ud && Number.isFinite(ud[key])) return ud[key];
             if (ud?.activationData && Number.isFinite(ud.activationData[key])) return ud.activationData[key];
+            current = current.parent;
+        }
+    }
+    return null;
+}
+
+function findUserDataString(selectionInfo, key) {
+    const direct = selectionInfo?.info?.[key];
+    if (typeof direct === 'string') return direct;
+    const infoActivation = selectionInfo?.info?.activationData?.[key];
+    if (typeof infoActivation === 'string') return infoActivation;
+    const candidates = [selectionInfo?.object, selectionInfo?.hit?.object];
+    for (const obj of candidates) {
+        let current = obj;
+        while (current && !current.isScene) {
+            const ud = current.userData;
+            if (typeof ud?.[key] === 'string') return ud[key];
+            if (typeof ud?.activationData?.[key] === 'string') return ud.activationData[key];
             current = current.parent;
         }
     }
@@ -920,10 +1029,138 @@ function setDescriptionContent(element, text) {
     element.innerHTML = renderDescriptionHtml(text || '');
 }
 
+function formatEquationBlock(lines) {
+    if (!Array.isArray(lines) || lines.length === 0) return '';
+    const nonEmpty = lines.filter((line) => typeof line === 'string' && line.trim().length > 0);
+    if (!nonEmpty.length) return '';
+    return nonEmpty.map((line) => `$$${line}$$`).join('\n');
+}
+
+function resolveLayerNormEquationSymbols(lower) {
+    if (lower.includes('top')) {
+        return {
+            input: 'x_{\\text{out}}',
+            norm: '\\hat{x}_{\\text{out}}',
+            output: 'x_{\\text{final}}'
+        };
+    }
+    if (lower.includes('ln2')) {
+        return {
+            input: 'u',
+            norm: '\\hat{u}',
+            output: 'u_{\\text{ln}}'
+        };
+    }
+    return {
+        input: 'x',
+        norm: '\\hat{x}',
+        output: 'x_{\\text{ln}}'
+    };
+}
+
+function resolveSelectionEquations(label) {
+    const lower = String(label || '').toLowerCase();
+
+    if (lower.includes('query weight matrix')) {
+        return formatEquationBlock([
+            'Q = x_{\\text{ln}} W^Q',
+            'H_i = \\mathrm{softmax}\\left(\\frac{Q_i K_i^\\top}{\\sqrt{d_h}} + M\\right)V_i'
+        ]);
+    }
+    if (lower.includes('key weight matrix')) {
+        return formatEquationBlock([
+            'K = x_{\\text{ln}} W^K',
+            'H_i = \\mathrm{softmax}\\left(\\frac{Q_i K_i^\\top}{\\sqrt{d_h}} + M\\right)V_i'
+        ]);
+    }
+    if (lower.includes('value weight matrix')) {
+        return formatEquationBlock([
+            'V = x_{\\text{ln}} W^V',
+            'H_i = \\mathrm{softmax}\\left(\\frac{Q_i K_i^\\top}{\\sqrt{d_h}} + M\\right)V_i'
+        ]);
+    }
+    if (lower.includes('output projection matrix')) {
+        return formatEquationBlock([
+            'H = \\mathrm{Concat}(H_1,\\dots,H_h)',
+            'O = H W^O',
+            'u = x + O'
+        ]);
+    }
+    if (lower.includes('mlp up weight matrix')) {
+        return formatEquationBlock([
+            'a = u_{\\text{ln}} W_{\\text{up}}',
+            'z = \\mathrm{GELU}(a)'
+        ]);
+    }
+    if (lower.includes('mlp down weight matrix')) {
+        return formatEquationBlock([
+            '\\mathrm{MLP}(u_{\\text{ln}}) = z W_{\\text{down}}',
+            'x_{\\text{out}} = u + \\mathrm{MLP}(u_{\\text{ln}})'
+        ]);
+    }
+    if (lower.includes('vocab embedding (top)') || lower.includes('unembedding')) {
+        return formatEquationBlock([
+            '\\ell = x_{\\text{final}} W_U',
+            'p = \\mathrm{softmax}(\\ell)'
+        ]);
+    }
+    if (lower.includes('vocab embedding')) {
+        return formatEquationBlock([
+            'e_t = \\mathrm{onehot}(t) W_E',
+            'x_0 = e_t + p_t'
+        ]);
+    }
+    if (lower.includes('positional embedding')) {
+        return formatEquationBlock([
+            'p_t = \\mathrm{onehot}(t) W_P',
+            'x_0 = e_t + p_t'
+        ]);
+    }
+
+    const isLayerNormSelection = lower.includes('layernorm')
+        || lower.includes('layer norm')
+        || lower.includes('ln1')
+        || lower.includes('ln2');
+    if (isLayerNormSelection) {
+        const symbols = resolveLayerNormEquationSymbols(lower);
+        const normalizeEq = `${symbols.norm} = \\frac{${symbols.input} - \\mu}{\\sqrt{\\sigma^2 + \\epsilon}}`;
+        const affineEq = `${symbols.output} = \\gamma \\odot ${symbols.norm} + \\beta`;
+
+        if (lower.includes('normed') || lower.includes('normalized')) {
+            return formatEquationBlock([normalizeEq]);
+        }
+        return formatEquationBlock([normalizeEq, affineEq]);
+    }
+
+    if (lower.includes('weight matrix')) {
+        return formatEquationBlock(['y = xW']);
+    }
+
+    return '';
+}
+
 function resolveDescription(label, kind = null, selectionInfo = null) {
     const lower = (label || '').toLowerCase();
     const activation = getActivationDataFromSelection(selectionInfo);
     const stage = activation?.stage || '';
+    const stageLower = stage.toLowerCase();
+
+    if (
+        lower.includes('residual stream vector')
+        || lower.includes('embedding sum')
+        || lower.includes('incoming residual')
+        || lower.includes('post-attention residual')
+        || lower.includes('post attention residual')
+        || lower.includes('post-mlp residual')
+        || lower.includes('post mlp residual')
+        || lower.includes('post-layernorm residual')
+        || lower.includes('post layernorm residual')
+        || stageLower.startsWith('embedding.sum')
+        || stageLower.startsWith('layer.incoming')
+        || stageLower.includes('residual')
+    ) {
+        return RESIDUAL_STREAM_DESCRIPTION;
+    }
 
     if (lower.startsWith('token:')) {
         return 'This is one input token (a subword piece). The model looks up its embedding vector and adds a position vector. That sum enters the residual stream and is transformed by each layer. Through attention, this token can influence later positions.';
@@ -1041,11 +1278,11 @@ function resolveDescription(label, kind = null, selectionInfo = null) {
     if (lower.includes('value vector')) {
         return 'This is the value vector for one token in one head. It holds the information other tokens can read. The attention matrix shown below (after softmax) provides weights that mix these values. The head output is a weighted sum of values.';
     }
-    if (lower.includes('attention score') || stage.startsWith('attention.')) {
-        if (stage === 'attention.pre') {
+    if (lower.includes('attention score') || stageLower.startsWith('attention.')) {
+        if (stageLower === 'attention.pre') {
             return 'This is a raw attention score from a source token to a target token in one head. It is the scaled dot product $QK^\\top/\\sqrt{d_h}$, one entry in the attention matrix shown below. A causal mask $M$ is applied so tokens cannot look ahead. Softmax will normalize these scores.';
         }
-        if (stage === 'attention.post') {
+        if (stageLower === 'attention.post') {
             return 'This is a normalized attention weight after softmax. It is one entry in the attention matrix shown below for a head. Each row sums to 1 and shows how the source token distributes its attention. These weights are used to mix values.';
         }
         return 'This is an attention score between two tokens in one head. All scores together form the attention matrix shown below (queries by keys). That matrix controls how much information flows between tokens. After softmax, it becomes weights applied to values.';
@@ -1057,7 +1294,7 @@ function resolveDescription(label, kind = null, selectionInfo = null) {
         return 'These are the vocabulary logits before softmax. Each bar is one token in the vocab; higher means more likely next token. They are produced from the final residual stream $x_{\\text{out}}$. Softmax converts logits to probabilities, then sampling or argmax picks the next token.';
     }
     if (lower.includes('residual')) {
-        return 'This is the residual stream vector for a token at this point in the model. In the overlay, the residual stream is denoted by $x$ or $u$. Attention and MLP outputs are added back into it, which is why it is called a residual stream. It is the main highway of information.';
+        return RESIDUAL_STREAM_DESCRIPTION;
     }
     if (lower.includes('mlp')) {
         return 'The MLP is a token-wise feed-forward network. It expands the vector, applies a nonlinearity (like GELU), then compresses back to model width. This adds nonlinear feature mixing that attention alone cannot provide. It operates independently on each token.';
@@ -2338,9 +2575,15 @@ class SelectionPanel {
         this.outputDimLabel = document.getElementById('detailOutputDimLabel');
         this.outputDimHalf = document.getElementById('detailOutputDimHalf');
         this.metaSection = document.getElementById('detailMeta');
+        this.tokenRow = document.getElementById('detailTokenRow');
+        this.tokenValue = document.getElementById('detailTokenValue');
+        this.positionRow = document.getElementById('detailPositionRow');
+        this.positionValue = document.getElementById('detailPositionValue');
         this.closeBtn = document.getElementById('detailClose');
         this.canvas = document.getElementById('detailCanvas');
         this.description = document.getElementById('detailDescription');
+        this.equationsSection = document.getElementById('detailEquations');
+        this.equationsBody = document.getElementById('detailEquationsBody');
         this.dataEl = document.getElementById('detailData');
         this.dataSection = document.getElementById('detailDataSection');
         this.attentionRoot = document.getElementById('detailAttention');
@@ -2448,6 +2691,7 @@ class SelectionPanel {
         this._attentionHoverRow = null;
         this._attentionHoverCol = null;
         this._attentionValueDefault = '';
+        this._attentionSelectionSummary = null;
         this._attentionPinned = false;
         this._attentionPinnedRow = null;
         this._attentionPinnedCol = null;
@@ -2760,12 +3004,18 @@ class SelectionPanel {
             if (this.activationSource) return SPACE_TOKEN_DISPLAY;
             return `Token ${tokenIndex + 1}`;
         });
+        const tokenIds = tokenIndices.map((tokenIndex) => {
+            if (!this.activationSource || typeof this.activationSource.getTokenId !== 'function') return null;
+            const tokenId = this.activationSource.getTokenId(tokenIndex);
+            return Number.isFinite(tokenId) ? Math.floor(tokenId) : null;
+        });
 
         return {
             headIndex,
             layerIndex,
             tokenIndices,
             tokenLabels,
+            tokenIds,
             trimmed,
             totalCount,
             hasSource: !!this.activationSource
@@ -2886,6 +3136,10 @@ class SelectionPanel {
         if (!this.attentionMatrix || !this._attentionCells || !this._attentionValues || !this._attentionContext) return;
         const mode = this.attentionMode === 'post' ? 'post' : 'pre';
         const tokenLabels = this._attentionContext.tokenLabels || [];
+        const tokenIds = this._attentionContext.tokenIds || [];
+        const tokenDisplayLabels = tokenLabels.map((tokenLabel, idx) => (
+            formatTokenDisplayWithId(tokenLabel, tokenIds[idx])
+        ));
         const count = this._attentionCells.length;
         const rowAnimDuration = 180;
         const rowAnimStagger = mode === 'post' && count > 1
@@ -2923,8 +3177,8 @@ class SelectionPanel {
                         ? mapValueToGrayscale(value)
                         : mapValueToColor(value, { clampMax: ATTENTION_PRE_COLOR_CLAMP });
                     cell.style.backgroundColor = colorToCss(color);
-                    const rowLabel = tokenLabels[row] || '';
-                    const colLabel = tokenLabels[col] || '';
+                    const rowLabel = tokenDisplayLabels[row] || tokenLabels[row] || '';
+                    const colLabel = tokenDisplayLabels[col] || tokenLabels[col] || '';
                     cell.title = `${rowLabel} → ${colLabel} (${mode === 'post' ? 'post' : 'pre'}): ${value.toFixed(4)}`;
                     cell.dataset.value = String(value);
                     cell.classList.remove('is-empty');
@@ -3006,6 +3260,7 @@ class SelectionPanel {
         if (!this.attentionRoot) return;
         const context = this._resolveAttentionContext(selection);
         this._attentionContext = context;
+        this._attentionSelectionSummary = resolveAttentionScoreSelectionSummary(selection, context);
         const preferredMode = resolveAttentionModeFromSelection(selection);
         if (preferredMode && preferredMode !== this.attentionMode) {
             this.attentionMode = preferredMode;
@@ -3043,10 +3298,14 @@ class SelectionPanel {
             this._attentionPostAnimQueue.clear();
             this._attentionPostAnimatedRows.clear();
             this._attentionLastPostCompleted = 0;
+            this._attentionSelectionSummary = null;
             return;
         }
 
-        const { tokenIndices, tokenLabels, headIndex, layerIndex, trimmed, totalCount, hasSource } = context;
+        const { tokenIndices, tokenLabels, tokenIds, headIndex, layerIndex, trimmed, totalCount, hasSource } = context;
+        const tokenDisplayLabels = tokenLabels.map((tokenLabel, idx) => (
+            formatTokenDisplayWithId(tokenLabel, tokenIds?.[idx])
+        ));
         const mode = this.attentionMode === 'post' ? 'post' : 'pre';
         this._updateAttentionToggleLabel(mode);
         this._updateAttentionLegend(mode);
@@ -3083,7 +3342,7 @@ class SelectionPanel {
         }
         if (this.attentionValue) {
             this._attentionValueDefault = hasSource
-                ? 'Tap or hover a square to see its score.'
+                ? (this._attentionSelectionSummary?.defaultText || 'Tap or hover a square to see its score.')
                 : '';
             this.attentionValue.textContent = this._attentionValueDefault;
         }
@@ -3146,14 +3405,14 @@ class SelectionPanel {
             topLabel.className = 'attention-token-top-label';
             topLabel.textContent = tokenLabels[i];
             topToken.appendChild(topLabel);
-            topToken.title = tokenLabels[i];
+            topToken.title = tokenDisplayLabels[i] || tokenLabels[i];
             topFrag.appendChild(topToken);
             this._attentionTokenElsTop.push(topToken);
 
             const leftToken = document.createElement('div');
             leftToken.className = 'attention-token attention-token-left';
             leftToken.textContent = tokenLabels[i];
-            leftToken.title = tokenLabels[i];
+            leftToken.title = tokenDisplayLabels[i] || tokenLabels[i];
             leftFrag.appendChild(leftToken);
             this._attentionTokenElsLeft.push(leftToken);
         }
@@ -3180,14 +3439,16 @@ class SelectionPanel {
                             ? mapValueToGrayscale(value)
                             : mapValueToColor(value, { clampMax: ATTENTION_PRE_COLOR_CLAMP });
                         cell.style.backgroundColor = colorToCss(color);
-                        cell.title = `${tokenLabels[row]} → ${tokenLabels[col]} (${mode === 'post' ? 'post' : 'pre'}): ${value.toFixed(4)}`;
+                        const rowLabel = tokenDisplayLabels[row] || tokenLabels[row] || '';
+                        const colLabel = tokenDisplayLabels[col] || tokenLabels[col] || '';
+                        cell.title = `${rowLabel} → ${colLabel} (${mode === 'post' ? 'post' : 'pre'}): ${value.toFixed(4)}`;
                         cell.dataset.value = String(value);
                         hasAnyValue = true;
                     } else {
                         cell.classList.add('is-empty');
                     }
-                    cell.dataset.rowLabel = tokenLabels[row] || '';
-                    cell.dataset.colLabel = tokenLabels[col] || '';
+                    cell.dataset.rowLabel = tokenDisplayLabels[row] || tokenLabels[row] || '';
+                    cell.dataset.colLabel = tokenDisplayLabels[col] || tokenLabels[col] || '';
                 }
                 this._attentionCells[row][col] = cell;
                 matrixFrag.appendChild(cell);
@@ -3200,7 +3461,22 @@ class SelectionPanel {
         if (this.attentionEmpty) {
             this.attentionEmpty.style.display = (hasAnyValue || this._attentionDynamic) ? 'none' : 'block';
         }
-        if (!this._restorePinnedAttentionCell()) {
+        let didRestoreSelection = this._restorePinnedAttentionCell();
+        if (!didRestoreSelection && this._attentionSelectionSummary) {
+            const selectedRow = this._attentionSelectionSummary.row;
+            const selectedCol = this._attentionSelectionSummary.col;
+            const selectedCell = Number.isFinite(selectedRow) && Number.isFinite(selectedCol)
+                ? this._attentionCells?.[selectedRow]?.[selectedCol]
+                : null;
+            const isUsableCell = !!selectedCell
+                && !selectedCell.classList.contains('is-hidden')
+                && !selectedCell.classList.contains('is-empty');
+            if (isUsableCell) {
+                this._setAttentionHoverFromCell(selectedCell, { force: true });
+                didRestoreSelection = true;
+            }
+        }
+        if (!didRestoreSelection) {
             this._clearAttentionHover(true);
         }
     }
@@ -3533,6 +3809,11 @@ class SelectionPanel {
         this._updateMobileState();
         this._syncSceneShift();
         if (this.description) setDescriptionContent(this.description, '');
+        if (this.equationsBody) setDescriptionContent(this.equationsBody, '');
+        if (this.equationsSection) {
+            this.equationsSection.classList.remove('is-visible');
+            this.equationsSection.setAttribute('aria-hidden', 'true');
+        }
         if (this._pendingResizeRaf) {
             cancelAnimationFrame(this._pendingResizeRaf);
             this._pendingResizeRaf = null;
@@ -3560,12 +3841,130 @@ class SelectionPanel {
         this._attentionPostAnimQueue?.clear?.();
         this._attentionPostAnimatedRows?.clear?.();
         this._attentionLastPostCompleted = 0;
+        this._attentionSelectionSummary = null;
+    }
+
+    _resolveVectorTokenPosition(selection, label) {
+        const lower = (label || '').toLowerCase();
+        const isVectorSelection = isLikelyVectorSelection(label, selection);
+        const isTokenChipSelection = lower.startsWith('token:') || lower.startsWith('position:');
+        if (!isVectorSelection && !isTokenChipSelection) return null;
+
+        let laneIndex = findUserDataNumber(selection, 'laneIndex');
+        let tokenIndex = findUserDataNumber(selection, 'tokenIndex');
+        if (!Number.isFinite(tokenIndex) && Number.isFinite(laneIndex) && Array.isArray(this.laneTokenIndices)) {
+            const mappedTokenIndex = this.laneTokenIndices[laneIndex];
+            if (Number.isFinite(mappedTokenIndex)) tokenIndex = mappedTokenIndex;
+        }
+        if (!Number.isFinite(tokenIndex) && lower.startsWith('position:')) {
+            const parsedPosition = Number(extractTokenText(label));
+            if (Number.isFinite(parsedPosition) && parsedPosition > 0) {
+                tokenIndex = Math.floor(parsedPosition - 1);
+            }
+        }
+
+        let tokenLabel = findUserDataString(selection, 'tokenLabel');
+        if (tokenLabel == null && lower.startsWith('token:')) {
+            tokenLabel = extractTokenText(label);
+        }
+        if (tokenLabel == null && Number.isFinite(laneIndex) && Array.isArray(this.tokenLabels)) {
+            const laneTokenLabel = this.tokenLabels[laneIndex];
+            if (typeof laneTokenLabel === 'string') tokenLabel = laneTokenLabel;
+        }
+        if (tokenLabel != null && !Number.isFinite(laneIndex) && Array.isArray(this.tokenLabels)) {
+            const formattedNeedle = formatTokenLabelForPreview(tokenLabel);
+            const mappedLaneIndex = this.tokenLabels.findIndex((candidate) => (
+                formatTokenLabelForPreview(candidate) === formattedNeedle
+            ));
+            if (mappedLaneIndex >= 0) {
+                laneIndex = mappedLaneIndex;
+                if (!Number.isFinite(tokenIndex) && Array.isArray(this.laneTokenIndices)) {
+                    const mappedTokenIndex = this.laneTokenIndices[mappedLaneIndex];
+                    if (Number.isFinite(mappedTokenIndex)) tokenIndex = mappedTokenIndex;
+                }
+            }
+        }
+        if (tokenLabel == null && Number.isFinite(tokenIndex) && this.activationSource && typeof this.activationSource.getTokenString === 'function') {
+            const sourceToken = this.activationSource.getTokenString(tokenIndex);
+            if (typeof sourceToken === 'string') tokenLabel = sourceToken;
+        }
+        if (tokenLabel == null && Number.isFinite(tokenIndex) && Array.isArray(this.laneTokenIndices) && Array.isArray(this.tokenLabels)) {
+            const mappedLaneIndex = this.laneTokenIndices.findIndex((idx) => Number.isFinite(idx) && idx === tokenIndex);
+            if (mappedLaneIndex >= 0 && mappedLaneIndex < this.tokenLabels.length && typeof this.tokenLabels[mappedLaneIndex] === 'string') {
+                tokenLabel = this.tokenLabels[mappedLaneIndex];
+            }
+        }
+
+        let tokenId = findUserDataNumber(selection, 'tokenId');
+        if (!Number.isFinite(tokenId) && Number.isFinite(tokenIndex) && this.activationSource && typeof this.activationSource.getTokenId === 'function') {
+            tokenId = this.activationSource.getTokenId(tokenIndex);
+        }
+
+        const formattedToken = formatTokenLabelForPreview(tokenLabel);
+        let tokenText = formattedToken;
+        if (!tokenText && Number.isFinite(tokenIndex)) tokenText = `Token ${tokenIndex + 1}`;
+        if (Number.isFinite(tokenId)) {
+            const tokenIdText = `id ${Math.floor(tokenId)}`;
+            tokenText = tokenText ? `${tokenText} (${tokenIdText})` : tokenIdText;
+        }
+
+        let positionText = '';
+        if (Number.isFinite(tokenIndex)) {
+            positionText = String(tokenIndex + 1);
+        } else if (Number.isFinite(laneIndex)) {
+            positionText = String(laneIndex + 1);
+        }
+
+        if (!tokenText && !positionText) return null;
+        return {
+            tokenText,
+            positionText
+        };
+    }
+
+    _updateVectorTokenPositionRows(selection, label) {
+        const tokenRow = this.tokenRow;
+        const tokenValue = this.tokenValue;
+        const positionRow = this.positionRow;
+        const positionValue = this.positionValue;
+
+        const hideRows = () => {
+            if (tokenRow) tokenRow.style.display = 'none';
+            if (tokenValue) tokenValue.textContent = '';
+            if (positionRow) positionRow.style.display = 'none';
+            if (positionValue) positionValue.textContent = '';
+        };
+
+        const metadata = this._resolveVectorTokenPosition(selection, label);
+        if (!metadata) {
+            hideRows();
+            return;
+        }
+
+        if (tokenRow && tokenValue) {
+            if (metadata.tokenText) {
+                tokenRow.style.display = '';
+                tokenValue.textContent = metadata.tokenText;
+            } else {
+                tokenRow.style.display = 'none';
+                tokenValue.textContent = '';
+            }
+        }
+        if (positionRow && positionValue) {
+            if (metadata.positionText) {
+                positionRow.style.display = '';
+                positionValue.textContent = metadata.positionText;
+            } else {
+                positionRow.style.display = 'none';
+                positionValue.textContent = '';
+            }
+        }
     }
 
     showSelection(selection) {
         if (!this.isReady || !selection || !selection.label) return;
 
-        const label = selection.label;
+        const label = normalizeSelectionLabel(selection.label, selection);
         const metadata = resolveMetadata(label, selection.kind, selection);
         this.title.textContent = label;
         if (this.subtitle) {
@@ -3587,8 +3986,8 @@ class SelectionPanel {
         const dimsRow = this.inputDim?.closest('.detail-row')
             || this.outputDim?.closest('.detail-row')
             || null;
-        if (this.inputDimLabel) this.inputDimLabel.textContent = isVectorMetadata ? 'Length' : 'Input dim';
-        if (this.outputDimLabel) this.outputDimLabel.textContent = 'Output dim';
+        if (this.inputDimLabel) this.inputDimLabel.textContent = isVectorMetadata ? 'Length' : 'Input dimension';
+        if (this.outputDimLabel) this.outputDimLabel.textContent = 'Output dimension';
         if (this.inputDim) this.inputDim.textContent = hideTensorDimsField
             ? ''
             : (isVectorMetadata ? metadata.length : metadata.inputDim);
@@ -3596,9 +3995,17 @@ class SelectionPanel {
         if (this.outputDimHalf) this.outputDimHalf.style.display = (!hideTensorDimsField && isVectorMetadata) ? 'none' : '';
         if (this.inputDimHalf) this.inputDimHalf.style.flexBasis = isVectorMetadata ? '100%' : '';
         if (dimsRow) dimsRow.style.display = hideTensorDimsField ? 'none' : '';
+        this._updateVectorTokenPositionRows(selection, label);
         if (this.description) {
             const desc = resolveDescription(label, selection.kind, selection);
             setDescriptionContent(this.description, desc || '');
+        }
+        if (this.equationsSection && this.equationsBody) {
+            const equations = resolveSelectionEquations(label);
+            setDescriptionContent(this.equationsBody, equations || '');
+            const hasEquations = !!equations;
+            this.equationsSection.classList.toggle('is-visible', hasEquations);
+            this.equationsSection.setAttribute('aria-hidden', hasEquations ? 'false' : 'true');
         }
         const isParam = isParameterSelection(label);
         if (this.dataSection) {

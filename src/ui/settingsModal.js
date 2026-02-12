@@ -19,6 +19,7 @@ export function initSettingsModal(pipeline) {
     appState.showFollowViewInspector = false;
     appState.devMode = getPreference('devMode', false);
     appState.showPerfOverlay = getPreference('showPerfOverlay', false);
+    appState.kvCacheModeEnabled = getPreference('kvCacheModeEnabled', false);
     pipeline?.setAutoCameraFollow?.(appState.autoCameraFollow, { immediate: true });
     pipeline?.engine?.setCameraDebugEnabled?.(appState.showCameraDebug);
     pipeline?.setDevMode?.(appState.devMode);
@@ -139,6 +140,12 @@ export function initSettingsModal(pipeline) {
         }
     };
 
+    const updateKvCacheStatusHint = (enabled) => {
+        const hint = document.getElementById('kvCacheStatusHint');
+        if (!hint) return;
+        hint.hidden = !enabled;
+    };
+
     function applySpeed(value) {
         const preset = setPlaybackSpeed(value);
         if (preset && typeof preset.engineSpeed === 'number') {
@@ -180,6 +187,9 @@ export function initSettingsModal(pipeline) {
         if (followInspector) followInspector.checked = !!appState.showFollowViewInspector;
         const perfOverlay = document.getElementById('togglePerfOverlay');
         if (perfOverlay) perfOverlay.checked = !!appState.showPerfOverlay;
+        const kvCacheModeToggle = document.getElementById('toggleKvCacheMode');
+        if (kvCacheModeToggle) kvCacheModeToggle.checked = !!appState.kvCacheModeEnabled;
+        updateKvCacheStatusHint(appState.kvCacheModeEnabled);
     }
 
     function closeSettings() {
@@ -281,6 +291,17 @@ export function initSettingsModal(pipeline) {
         setFollowInspectorEnabled(!!followInspectorToggle.checked);
     });
 
+    const kvCacheModeToggle = document.getElementById('toggleKvCacheMode');
+    kvCacheModeToggle?.addEventListener('change', () => {
+        const nextEnabled = !!kvCacheModeToggle.checked;
+        appState.kvCacheModeEnabled = nextEnabled;
+        setPreference('kvCacheModeEnabled', nextEnabled);
+        updateKvCacheStatusHint(nextEnabled);
+        if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+            window.dispatchEvent(new CustomEvent('kvCacheModeChanged', { detail: { enabled: nextEnabled } }));
+        }
+    });
+
     if (appState.showPerfOverlay) {
         setPerfOverlayEnabled(true);
     }
@@ -288,4 +309,6 @@ export function initSettingsModal(pipeline) {
     if (appState.showFollowViewInspector) {
         setFollowInspectorEnabled(true);
     }
+
+    updateKvCacheStatusHint(appState.kvCacheModeEnabled);
 }

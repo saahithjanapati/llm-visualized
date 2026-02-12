@@ -43,6 +43,7 @@ import { buildMHAVisuals, VectorRouter, PassThroughAnimator, SelfAttentionAnimat
 import { updateSciFiMaterialUniforms } from '../utils/sciFiMaterial.js';
 import { getSideCopyEntry } from './mhsa/laneIndex.js';
 import { animateVectorMatrixPassThrough as animateVectorMatrixPassThroughExternal } from './mhsa/VectorMatrixPassThrough.js';
+import { appState } from '../state/appState.js';
 
 const _tmpWorld = new THREE.Vector3();
 const _tmpWorld2 = new THREE.Vector3();
@@ -144,6 +145,7 @@ export class MHSAAnimation {
         this._laneCount = Number.isFinite(opts.laneCount)
             ? Math.max(1, Math.floor(opts.laneCount))
             : NUM_VECTOR_LANES;
+        this._kvCacheDecodeActive = !!opts.kvCacheDecodeActive;
         this._useBatchedVectorCopies = opts.useBatchedVectorCopies !== false;
         // Batched trails collapse to single segments; keep legacy multi-segment
         // trails by default so paths show right-angle turns.
@@ -342,7 +344,9 @@ export class MHSAAnimation {
         this._attentionWeightedSums = new Map(); // key -> { vec, laneZ, headIdx, laneIndex }
         this._laneByZ = new Map();
         this._laneZsSorted = [];
+        this._attentionConveyorLanes = [];
         this._laneZKeyPrecision = 10; // 0.1 world-unit resolution
+        this._cachedKvEntries = [];
 
         // Pause-aware scheduling helpers ensure delayed callbacks respect manual pauses.
         this._scheduledDelayTweens = new Set();
@@ -350,6 +354,8 @@ export class MHSAAnimation {
         this._skipToEndActive = false;
         this._passThroughJobs = [];
         this._lastUpdateTimeNow = null;
+        this._kvCacheVectorsPreserved = false;
+        this.setCachedKvEntries(opts.cachedKvEntries);
 
         // --------------------------------------------------------------
         //  Vector router: handles horizontal travel + K/Q/V parking.
@@ -358,7 +364,8 @@ export class MHSAAnimation {
         this.vectorRouter = new VectorRouter(this.parentGroup, this.headsCentersX, this.headCoords, this.headStopY, this.mhaVisualizations, {
             acquireVector: this._acquireVectorCopy.bind(this),
             shareVectorData: this._shareVectorData,
-            trailFactory: this._trailFactory
+            trailFactory: this._trailFactory,
+            copyTrailOpacity: this._isKvCacheModeEnabled() ? 0.16 : undefined
         });
         this.vectorRouter.onReady(() => {
             this.mhaPassThroughPhase = 'ready_for_parallel_pass_through';
@@ -394,6 +401,58 @@ export class MHSAAnimation {
         } else if (onDone) {
             onDone();
         }
+    }
+
+    setCachedKvEntries(entries = null) {
+        if (!Array.isArray(entries) || !entries.length) {
+            this._cachedKvEntries = [];
+            return;
+        }
+        this._cachedKvEntries = entries
+            .filter((entry) => entry && Number.isFinite(entry.zPos))
+            .slice()
+            .sort((a, b) => {
+                const aLayout = Number.isFinite(a?.laneLayoutIndex) ? a.laneLayoutIndex : Infinity;
+                const bLayout = Number.isFinite(b?.laneLayoutIndex) ? b.laneLayoutIndex : Infinity;
+                if (aLayout !== bLayout) return aLayout - bLayout;
+                return a.zPos - b.zPos;
+            });
+    }
+
+    getAttentionConveyorLanes() {
+        if (Array.isArray(this._attentionConveyorLanes) && this._attentionConveyorLanes.length) {
+            return this._attentionConveyorLanes;
+        }
+        return Array.isArray(this.currentLanes) ? this.currentLanes : [];
+    }
+
+    _composeAttentionConveyorLanes(lanes) {
+        const liveLanes = Array.isArray(lanes) ? lanes : [];
+        const cached = Array.isArray(this._cachedKvEntries) ? this._cachedKvEntries : [];
+        if (!cached.length) return liveLanes;
+
+        const seen = new Set();
+        const composed = [];
+        const append = (lane) => {
+            if (!lane || !Number.isFinite(lane.zPos)) return;
+            const tokenKey = Number.isFinite(lane.tokenIndex) ? `t:${lane.tokenIndex}` : null;
+            const layoutKey = Number.isFinite(lane.laneLayoutIndex) ? `l:${lane.laneLayoutIndex}` : null;
+            const zKey = `z:${lane.zPos.toFixed(4)}`;
+            const key = tokenKey || layoutKey || zKey;
+            if (seen.has(key)) return;
+            seen.add(key);
+            composed.push(lane);
+        };
+
+        cached.forEach(append);
+        liveLanes.forEach(append);
+        composed.sort((a, b) => {
+            const aLayout = Number.isFinite(a?.laneLayoutIndex) ? a.laneLayoutIndex : Infinity;
+            const bLayout = Number.isFinite(b?.laneLayoutIndex) ? b.laneLayoutIndex : Infinity;
+            if (aLayout !== bLayout) return aLayout - bLayout;
+            return a.zPos - b.zPos;
+        });
+        return composed;
     }
 
     _laneKey(zPos) {
@@ -564,7 +623,9 @@ export class MHSAAnimation {
             }
         }
         // Fallback for any small drift beyond the map tolerance.
-        const lanes = Array.isArray(this.currentLanes) ? this.currentLanes : null;
+        const lanes = Array.isArray(this._attentionConveyorLanes) && this._attentionConveyorLanes.length
+            ? this._attentionConveyorLanes
+            : (Array.isArray(this.currentLanes) ? this.currentLanes : null);
         if (!lanes) return null;
         return lanes.find(l => Math.abs(l.zPos - zPos) < 0.1) || null;
     }
@@ -956,7 +1017,8 @@ export class MHSAAnimation {
         // Keep a reference to the latest lanes array so that other internal
         // methods (triggered asynchronously) can access the original vectors.
         this.currentLanes = lanes;
-        this._rebuildLaneIndex(lanes);
+        this._attentionConveyorLanes = this._composeAttentionConveyorLanes(lanes);
+        this._rebuildLaneIndex(this._attentionConveyorLanes);
 
         if (this._skipMatrixColorsLocked && this._skipMatrixColorsPending
             && this.mhaPassThroughPhase === 'mha_pass_through_complete') {
@@ -1172,6 +1234,7 @@ export class MHSAAnimation {
     //  Merge faint trails drawn by the parked K/Q/V copies (pre pass-through)
     // ------------------------------------------------------------------
     _mergeCopyTrailsBeforePassThrough() {
+        if (this._isKvCacheModeEnabled()) return;
         const lanes = this.currentLanes || [];
         if (!lanes.length) return;
 
@@ -1248,6 +1311,7 @@ export class MHSAAnimation {
     //  empty groups remain for positional queries used by the conveyor.
     // ------------------------------------------------------------------
     _mergeFixedVectorsForHead(headIdx) {
+        if (this._isKvCacheModeEnabled()) return;
         if (this._mergedHeads.has(headIdx)) return; // already merged
         if (!Array.isArray(this.currentLanes) || this.currentLanes.length === 0) return;
 
@@ -1522,6 +1586,7 @@ export class MHSAAnimation {
 
     // Merge ALL fixed K and V vectors across heads into two meshes
     _mergeAllFixedKVIfReady() {
+        if (this._isKvCacheModeEnabled()) return;
         if (this._allFixedMerged) return;
         if (!Array.isArray(this.currentLanes) || this.currentLanes.length === 0) return;
         if (this.mhaPassThroughPhase !== 'mha_pass_through_complete') return;
@@ -1613,6 +1678,12 @@ export class MHSAAnimation {
         const grayColor = new THREE.Color(0x606060);
         const fadeDuration = this._resolveSkipDuration(DECORATIVE_FADE_MS);
         const fadeDelay = this._resolveSkipDelay(DECORATIVE_FADE_DELAY_MS);
+        const preserveKvCache = this._shouldPreserveKVCacheVectors();
+        const shouldPreserveVecForKvCache = (vec) => {
+            if (!preserveKvCache || !vec) return false;
+            const category = vec?.userData?.vectorCategory || vec?.userData?.qkvProcessedCategory || null;
+            return category === 'K' || category === 'V';
+        };
         // Visible prism window for gray-out and gradient calculations
         const visiblePrismCountTemp = Math.min(this.vectorPrismCount, Math.ceil(this.outputVectorLength / PRISM_DIMENSIONS_PER_UNIT));
         const startVisibleIdx = Math.max(0, Math.floor((this.vectorPrismCount - visiblePrismCountTemp) / 2));
@@ -1620,6 +1691,10 @@ export class MHSAAnimation {
 
         this._tempAllOutputVectors.forEach(vec => {
             if (!vec || !vec.mesh) return;
+            if (shouldPreserveVecForKvCache(vec)) {
+                this._setVectorVisible(vec, { opacity: 1 });
+                return;
+            }
 
             // Gray-out only the visible 64-dim region so outer hidden prisms stay hidden
             for (let i = startVisibleIdx; i <= endVisibleIdx; i++) {
@@ -1666,6 +1741,10 @@ export class MHSAAnimation {
         if (typeof TWEEN !== 'undefined') {
             this._tempAllOutputVectors.forEach(vec => {
                 if (!vec || !vec.mesh || !vec.mesh.material) return;
+                if (shouldPreserveVecForKvCache(vec)) {
+                    this._setVectorVisible(vec, { opacity: 1 });
+                    return;
+                }
                 const mat = vec.mesh.material;
                 new TWEEN.Tween({ op: mat.opacity })
                     .to({ op: 0.05 }, fadeDuration)
@@ -2356,6 +2435,104 @@ export class MHSAAnimation {
         console.log("Starting animation of combined lane vectors through output projection matrix");
     }
 
+    _shouldPreserveKVCacheVectors() {
+        return !!appState.kvCacheModeEnabled;
+    }
+
+    _isKvCacheModeEnabled() {
+        return !!appState.kvCacheModeEnabled;
+    }
+
+    _markSkipVisible(target) {
+        if (!target) return;
+        target.userData = target.userData || {};
+        target.userData.skipVisible = true;
+    }
+
+    _setInstancedMeshVisible(mesh, { opacity = 1 } = {}) {
+        if (!mesh || !mesh.isMesh) return;
+        if (mesh.material) {
+            const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+            mats.forEach((mat) => {
+                if (!mat) return;
+                mat.transparent = opacity < 1;
+                mat.opacity = opacity;
+                mat.needsUpdate = true;
+            });
+        }
+        this._markSkipVisible(mesh);
+        if (mesh.parent) this._markSkipVisible(mesh.parent);
+        mesh.visible = true;
+        if (mesh.parent) mesh.parent.visible = true;
+    }
+
+    _setVectorVisible(vec, { opacity = 1 } = {}) {
+        if (!vec) return;
+        try {
+            if (vec.group) {
+                this._markSkipVisible(vec.group);
+                vec.group.visible = true;
+            }
+            if (vec.mesh) {
+                this._markSkipVisible(vec.mesh);
+                vec.mesh.visible = true;
+                const mats = Array.isArray(vec.mesh.material) ? vec.mesh.material : [vec.mesh.material];
+                mats.forEach((mat) => {
+                    if (!mat) return;
+                    mat.transparent = opacity < 1;
+                    mat.opacity = opacity;
+                    mat.needsUpdate = true;
+                });
+            }
+            if (vec.isBatchedVectorRef && vec._batch?.mesh) {
+                this._setInstancedMeshVisible(vec._batch.mesh, { opacity });
+            }
+            if (vec.isBatchedVectorRef && vec._batch?.syncAll) {
+                vec._batch.syncAll();
+            }
+        } catch (_) { /* best effort */ }
+    }
+
+    _preserveKVVectorsForCache() {
+        if (this._kvCacheVectorsPreserved) return;
+        this._kvCacheVectorsPreserved = true;
+
+        if (this._mergedGroupsByHead && typeof this._mergedGroupsByHead.forEach === 'function') {
+            this._mergedGroupsByHead.forEach((grp) => {
+                if (grp?.K?.children?.[0]) this._setInstancedMeshVisible(grp.K.children[0], { opacity: 1 });
+                if (grp?.V?.children?.[0]) this._setInstancedMeshVisible(grp.V.children[0], { opacity: 1 });
+            });
+        }
+        if (this.parentGroup && typeof this.parentGroup.getObjectByName === 'function') {
+            const allK = this.parentGroup.getObjectByName('MergedAllK');
+            const allV = this.parentGroup.getObjectByName('MergedAllV');
+            if (allK?.children?.[0]) this._setInstancedMeshVisible(allK.children[0], { opacity: 1 });
+            if (allV?.children?.[0]) this._setInstancedMeshVisible(allV.children[0], { opacity: 1 });
+        }
+
+        const lanes = Array.isArray(this.currentLanes) ? this.currentLanes : [];
+        lanes.forEach((lane) => {
+            if (Array.isArray(lane?.upwardCopies)) {
+                lane.upwardCopies.forEach((kVec) => this._setVectorVisible(kVec, { opacity: 1 }));
+            }
+            if (Array.isArray(lane?.sideCopies)) {
+                lane.sideCopies.forEach((sc) => {
+                    if (!sc || sc.type !== 'V') return;
+                    this._setVectorVisible(sc.vec, { opacity: 1 });
+                });
+            }
+        });
+    }
+
+    _finalizeKVVisualStateAfterConveyor() {
+        if (this._shouldPreserveKVCacheVectors()) {
+            this._preserveKVVectorsForCache();
+            return;
+        }
+        this._disposeMergedKVGroups();
+        this._disposeAllIndividualKandVVectorsImmediately();
+    }
+
     // Hide all merged K/V instanced groups (both per-head and global-all)
     _hideMergedKVGroups() {
         // Per-head merged groups
@@ -2421,14 +2598,14 @@ export class MHSAAnimation {
     }
 
     // Poll self-attention animator until all blue (Q) conveyors across heads
-    // have completed, then dispose merged K/V groups so they disappear exactly
-    // after the last blue finishes its path.
+    // have completed, then finalize K/V visuals exactly after the last blue
+    // finishes its path.
     _waitAndDisposeMergedKVWhenBlueConveyorComplete() {
         // Prefer a direct completion callback from SelfAttentionAnimator
         try {
             if (this.selfAttentionAnimator && typeof this.selfAttentionAnimator.start === 'function') {
                 this.selfAttentionAnimator.start(() => {
-                    try { this._disposeMergedKVGroups(); } catch (_) {}
+                    try { this._finalizeKVVisualStateAfterConveyor(); } catch (_) {}
                 });
                 return;
             }
@@ -2441,13 +2618,13 @@ export class MHSAAnimation {
         const tick = () => {
             try {
                 if (!this.selfAttentionAnimator || this.selfAttentionAnimator.phase === 'complete') {
-                    this._disposeMergedKVGroups();
+                    this._finalizeKVVisualStateAfterConveyor();
                     return;
                 }
             } catch (_) { /* ignore */ }
             waited += checkIntervalMs;
             if (waited >= maxWaitMs) {
-                try { this._disposeMergedKVGroups(); } catch (_) {}
+                try { this._finalizeKVVisualStateAfterConveyor(); } catch (_) {}
                 return;
             }
             this._scheduleAfterDelay(tick, checkIntervalMs);
@@ -2549,6 +2726,7 @@ export class MHSAAnimation {
             this._skipMatrixColorsPending = false;
         }
         const preserveTrails = !!this._skipToEndActive;
+        const preserveKVCache = this._shouldPreserveKVCacheVectors();
         try {
             if (this.selfAttentionAnimator?.forceComplete) {
                 this.selfAttentionAnimator.forceComplete({
@@ -2559,7 +2737,11 @@ export class MHSAAnimation {
             }
         } catch (_) {}
         try { this._hideAllQVectorsImmediately(); } catch (_) {}
-        try { this._hideAllKandVVectorsImmediately(); } catch (_) {}
+        if (preserveKVCache) {
+            try { this._preserveKVVectorsForCache(); } catch (_) {}
+        } else {
+            try { this._hideAllKandVVectorsImmediately(); } catch (_) {}
+        }
         const weightedDecoratives = this._getWeightedSumDecoratives();
         if (weightedDecoratives.length) {
             this._tempDecorativeVecs = weightedDecoratives;

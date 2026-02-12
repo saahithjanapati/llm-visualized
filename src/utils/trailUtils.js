@@ -586,7 +586,7 @@ export function buildMergedLineSegmentsFromSegments(segmentsList, scene, color =
 }
 
 export function clearTrailsFromScene(scene, { includeAllLines = false, passId = null } = {}) {
-    if (!scene || typeof scene.traverse !== 'function') return;
+    if (!scene || typeof scene.traverse !== 'function') return 0;
     const targetPass = Number.isFinite(passId) ? passId : null;
     const targets = [];
     scene.traverse((obj) => {
@@ -608,4 +608,5 @@ export function clearTrailsFromScene(scene, { includeAllLines = false, passId = 
             materials.forEach((mat) => mat && mat.dispose && mat.dispose());
         }
     });
+    return targets.length;
 }

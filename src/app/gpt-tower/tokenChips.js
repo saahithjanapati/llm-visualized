@@ -248,6 +248,8 @@ function stageChipCamera(pipeline, startPos, startTarget, endPos, endTarget, hol
 export function addEmbeddingAndTokenChips({
     pipeline,
     laneCount,
+    laneLayoutIndices = null,
+    laneLayoutCount = null,
     activationSource,
     laneTokenIndices,
     tokenLabels,
@@ -353,12 +355,28 @@ export function addEmbeddingAndTokenChips({
         });
         addToRoot(posBottom.group);
 
-        // Precompute Z positions for each lane so chips align with vector lanes.
-        const laneSpacing = LN_PARAMS.depth / (laneCount + 1);
-        const laneZs = [];
-        for (let i = 0; i < laneCount; i++) {
-            laneZs.push(-LN_PARAMS.depth / 2 + laneSpacing * (i + 1));
+        // Precompute Z positions so chips can align to selected lane slots.
+        const safeLaneCount = Math.max(1, Math.floor(laneCount || 1));
+        const slotIndices = Array.isArray(laneLayoutIndices) && laneLayoutIndices.length
+            ? laneLayoutIndices.slice(0, safeLaneCount)
+            : Array.from({ length: safeLaneCount }, (_, idx) => idx);
+        while (slotIndices.length < safeLaneCount) {
+            slotIndices.push(slotIndices.length);
         }
+        const computedLayoutCount = Number.isFinite(laneLayoutCount)
+            ? Math.max(safeLaneCount, Math.floor(laneLayoutCount))
+            : Math.max(
+                safeLaneCount,
+                slotIndices.reduce(
+                    (max, laneIdx) => Math.max(max, Number.isFinite(laneIdx) ? Math.floor(laneIdx) + 1 : 0),
+                    0
+                )
+            );
+        const laneSpacing = LN_PARAMS.depth / (computedLayoutCount + 1);
+        const laneZs = slotIndices.map((laneIdx) => {
+            const clampedLaneIdx = Math.max(0, Math.floor(Number.isFinite(laneIdx) ? laneIdx : 0));
+            return -LN_PARAMS.depth / 2 + laneSpacing * (clampedLaneIdx + 1);
+        });
 
         const vocabMatrixBottomY = bottomVocabCenterY - EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2;
         const posMatrixBottomY = bottomPosCenterY - EMBEDDING_MATRIX_PARAMS_POSITION.height / 2;
@@ -430,6 +448,33 @@ export function addEmbeddingAndTokenChips({
             pipeline.addEventListener('progress', chipRemovalProgressHandler);
         }
         const registerChip = (chip) => addToRoot(chip);
+        const resolveTokenIndexForLane = (laneIdx) => {
+            if (Array.isArray(laneTokenIndices) && Number.isFinite(laneTokenIndices[laneIdx])) {
+                return Math.max(0, Math.floor(laneTokenIndices[laneIdx]));
+            }
+            return Math.max(0, Math.floor(laneIdx));
+        };
+        const resolveTokenIdForIndex = (tokenIndex) => {
+            if (!activationSource || typeof activationSource.getTokenId !== 'function') return null;
+            return activationSource.getTokenId(tokenIndex);
+        };
+        const applyChipSelectionMetadata = (
+            chip,
+            { chipLabel, laneIndex, tokenIndex, tokenId, tokenLabel, positionIndex }
+        ) => {
+            chip.userData = chip.userData || {};
+            chip.userData.label = chipLabel;
+            chip.userData.laneIndex = laneIndex;
+            chip.userData.tokenIndex = tokenIndex;
+            chip.userData.positionIndex = positionIndex;
+            if (typeof tokenLabel === 'string') chip.userData.tokenLabel = tokenLabel;
+            if (Number.isFinite(tokenId)) {
+                chip.userData.tokenId = Math.floor(tokenId);
+            } else if ('tokenId' in chip.userData) {
+                delete chip.userData.tokenId;
+            }
+            chip.name = chipLabel;
+        };
         const spawnTokenChips = (font) => {
             if (disposed) return;
             // Animate the token chips upward from a resting "stash" position.
@@ -458,10 +503,19 @@ export function addEmbeddingAndTokenChips({
 
             const labels = tokenLabels.slice(0, laneCount).map(formatTokenLabel);
             labels.forEach((label, idx) => {
+                const tokenIndex = resolveTokenIndexForLane(idx);
+                const tokenId = resolveTokenIdForIndex(tokenIndex);
                 const chip = createTokenChip(label, font, TOKEN_CHIP_STYLE);
                 const chipLabel = `Token: ${label}`;
-                chip.userData.label = chipLabel;
-                chip.name = chipLabel;
+                const tokenLabel = tokenLabels[idx];
+                applyChipSelectionMetadata(chip, {
+                    chipLabel,
+                    laneIndex: idx,
+                    tokenIndex,
+                    tokenId,
+                    tokenLabel: typeof tokenLabel === 'string' ? tokenLabel : label,
+                    positionIndex: tokenIndex + 1
+                });
                 const chipHeight = chip.userData.size.height;
                 const targetY = vocabMatrixBottomY + chipHeight / 2 + TOKEN_CHIP_STYLE.inset;
                 const targetZ = laneZs[idx];
@@ -477,8 +531,14 @@ export function addEmbeddingAndTokenChips({
 
                 // Keep a static chip below the stack for context once the animated one rises.
                 const staticChip = createTokenChip(label, font, TOKEN_CHIP_STYLE);
-                staticChip.userData.label = chipLabel;
-                staticChip.name = chipLabel;
+                applyChipSelectionMetadata(staticChip, {
+                    chipLabel,
+                    laneIndex: idx,
+                    tokenIndex,
+                    tokenId,
+                    tokenLabel: typeof tokenLabel === 'string' ? tokenLabel : label,
+                    positionIndex: tokenIndex + 1
+                });
                 staticChip.position.set(vocabX, staticY, staticZ);
                 registerChip(staticChip);
 
@@ -500,10 +560,19 @@ export function addEmbeddingAndTokenChips({
             const style = POSITION_CHIP_STYLE;
             const labels = positionLabels.slice(0, laneCount);
             labels.forEach((label, idx) => {
+                const tokenIndex = resolveTokenIndexForLane(idx);
+                const tokenId = resolveTokenIdForIndex(tokenIndex);
                 const chip = createTokenChip(label, font, style);
                 const chipLabel = `Position: ${label}`;
-                chip.userData.label = chipLabel;
-                chip.name = chipLabel;
+                const tokenLabel = tokenLabels[idx];
+                applyChipSelectionMetadata(chip, {
+                    chipLabel,
+                    laneIndex: idx,
+                    tokenIndex,
+                    tokenId,
+                    tokenLabel: typeof tokenLabel === 'string' ? tokenLabel : null,
+                    positionIndex: tokenIndex + 1
+                });
                 const chipHeight = chip.userData.size.height;
                 const targetY = posMatrixBottomY + chipHeight / 2 + style.inset;
                 const targetZ = laneZs[idx];
@@ -519,8 +588,14 @@ export function addEmbeddingAndTokenChips({
 
                 // Static chip for the position stream, matching the token chips below.
                 const staticChip = createTokenChip(label, font, style);
-                staticChip.userData.label = chipLabel;
-                staticChip.name = chipLabel;
+                applyChipSelectionMetadata(staticChip, {
+                    chipLabel,
+                    laneIndex: idx,
+                    tokenIndex,
+                    tokenId,
+                    tokenLabel: typeof tokenLabel === 'string' ? tokenLabel : null,
+                    positionIndex: tokenIndex + 1
+                });
                 staticChip.position.set(posX, staticY, staticZ);
                 registerChip(staticChip);
 

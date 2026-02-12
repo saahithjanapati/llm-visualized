@@ -83,6 +83,10 @@
                 <canvas id="detailCanvas"></canvas>
             </div>
             <div id="detailDescription" class="detail-description"></div>
+            <div id="detailEquations" class="detail-equations" aria-hidden="true">
+                <div class="detail-equations-title">Equations</div>
+                <div id="detailEquationsBody" class="detail-equations-body"></div>
+            </div>
             <div id="detailVectorLegend" class="vector-legend" aria-hidden="true">
                 <div class="vector-legend-title">Residual value colors</div>
                 <div id="detailVectorLegendBar" class="vector-legend-bar"></div>
@@ -125,13 +129,21 @@
             <div id="detailMeta" class="detail-meta">
                 <div class="detail-row detail-row-dims">
                     <div id="detailInputDimHalf" class="detail-dim-half">
-                        <span id="detailInputDimLabel" class="detail-label">Input dim</span>
+                        <span id="detailInputDimLabel" class="detail-label">Input dimension</span>
                         <span id="detailInputDim" class="detail-value">—</span>
                     </div>
                     <div id="detailOutputDimHalf" class="detail-dim-half">
-                        <span id="detailOutputDimLabel" class="detail-label">Output dim</span>
+                        <span id="detailOutputDimLabel" class="detail-label">Output dimension</span>
                         <span id="detailOutputDim" class="detail-value">—</span>
                     </div>
+                </div>
+                <div id="detailTokenRow" class="detail-row detail-row-token" style="display:none;">
+                    <span class="detail-label">Token</span>
+                    <span id="detailTokenValue" class="detail-value">—</span>
+                </div>
+                <div id="detailPositionRow" class="detail-row detail-row-position" style="display:none;">
+                    <span class="detail-label">Position</span>
+                    <span id="detailPositionValue" class="detail-value">—</span>
                 </div>
             </div>
         </aside>
@@ -174,6 +186,12 @@
                         <input id="toggleAutoCamera" type="checkbox" checked>
                         <span class="toggle-track" aria-hidden="true"></span>
                     </label>
+                    <label class="toggle-row">
+                        <span class="toggle-text">Enable KV cache mode (prefill)</span>
+                        <input id="toggleKvCacheMode" type="checkbox">
+                        <span class="toggle-track" aria-hidden="true"></span>
+                    </label>
+                    <div id="kvCacheStatusHint" class="settings-hint" hidden>Pre-fill stage. KV cache enabled.</div>
                 </div>
                 <div class="settings-section">
                     <label class="section-label">Display</label>

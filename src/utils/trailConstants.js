@@ -12,6 +12,7 @@ export const TRAIL_LANE_OPACITY_EXPONENT = 0.25;
 export const TRAIL_LANE_OPACITY_MIN_SCALE = 0.6;
 // Minimum distance (world units) between recorded trail points to reduce churn.
 export const TRAIL_MIN_SEGMENT_DISTANCE = 0.4;
+let TRAIL_OPACITY_RUNTIME_MULTIPLIER = 1.0;
 
 // Reserved for future extensions – THREE.LineBasicMaterial has no emissive term but
 // we expose a placeholder in case the implementation switches materials later.
@@ -38,8 +39,22 @@ export function getEffectiveDevicePixelRatio() {
  */
 export function scaleOpacityForDisplay(baseOpacity) {
     const laneScale = getLaneOpacityScale();
-    const scaled = baseOpacity * laneScale;
+    const scaled = baseOpacity * laneScale * TRAIL_OPACITY_RUNTIME_MULTIPLIER;
     return Math.min(1, Math.max(0, scaled));
+}
+
+/**
+ * Runtime multiplier for trail opacity. Useful for mode-specific visual tuning
+ * without changing base constants.
+ */
+export function setTrailOpacityRuntimeMultiplier(multiplier = 1) {
+    const next = Number(multiplier);
+    if (!Number.isFinite(next) || next <= 0) {
+        TRAIL_OPACITY_RUNTIME_MULTIPLIER = 1.0;
+        return TRAIL_OPACITY_RUNTIME_MULTIPLIER;
+    }
+    TRAIL_OPACITY_RUNTIME_MULTIPLIER = Math.min(2.5, Math.max(0.25, next));
+    return TRAIL_OPACITY_RUNTIME_MULTIPLIER;
 }
 
 /**

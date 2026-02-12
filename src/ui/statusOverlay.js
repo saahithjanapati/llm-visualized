@@ -559,9 +559,12 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         const showStageLine = Boolean(displayStage);
         const safeIdx = Math.max(0, Math.min(total - 1, idx));
         const headerLine = isFinalStage ? 'Output Head' : `Layer ${safeIdx + 1} / ${total}`;
+        const kvCacheStatusNote = (appState.kvCacheModeEnabled && appState.kvCachePrefillActive)
+            ? '\nPre-fill stage\nKV cache enabled'
+            : '';
         const nextStatusText = showStageLine
-            ? `${headerLine}\n${displayStage}`
-            : headerLine;
+            ? `${headerLine}\n${displayStage}${kvCacheStatusNote}`
+            : `${headerLine}${kvCacheStatusNote}`;
         if (nextStatusText === lastStatusText) {
             checkTopEmbeddingActivation();
             return;

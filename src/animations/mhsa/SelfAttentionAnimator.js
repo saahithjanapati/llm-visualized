@@ -83,6 +83,8 @@ export class SelfAttentionAnimator {
         this._attentionRowCache = new Map();
         this._weightedSumCache = new Map();
         this._tmpMidpoint = new THREE.Vector3();
+        this._tmpCtxPosA = new THREE.Vector3();
+        this._tmpCtxPosB = new THREE.Vector3();
         this._valueHueRangeOptions = buildHueRangeOptions(MHA_VALUE_SPECTRUM_COLOR, {
             hueSpread: MHA_VALUE_HUE_SPREAD,
             minLightness: MHA_VALUE_LIGHTNESS_MIN,
@@ -374,6 +376,23 @@ export class SelfAttentionAnimator {
         return lanes.find(l => Math.abs(l.zPos - zPos) < 0.1) || null;
     }
 
+    _getVectorPositionInContextSpace(vec, out = null) {
+        if (!vec || !vec.group) return null;
+        const dst = out || this._tmpCtxPosA;
+        const ctxGroup = this.ctx && this.ctx.parentGroup ? this.ctx.parentGroup : null;
+        if (!ctxGroup || vec.group.parent === ctxGroup) {
+            dst.copy(vec.group.position);
+            return dst;
+        }
+        vec.group.getWorldPosition(dst);
+        try {
+            if (typeof ctxGroup.worldToLocal === 'function') {
+                ctxGroup.worldToLocal(dst);
+            }
+        } catch (_) { /* fallback to world position */ }
+        return dst;
+    }
+
     _getAttentionScoresRow(mode, layerIndex, headIdx, queryTokenIndex) {
         if (!Number.isFinite(layerIndex) || !Number.isFinite(headIdx) || !Number.isFinite(queryTokenIndex)) return null;
         const key = `${mode}|${layerIndex}|${headIdx}|${queryTokenIndex}`;
@@ -425,7 +444,12 @@ export class SelfAttentionAnimator {
 
     _markAttentionHeadComplete(headIdx) {
         if (!Number.isFinite(headIdx)) return;
-        const laneCount = Array.isArray(this.ctx?.currentLanes) ? this.ctx.currentLanes.length : 0;
+        const conveyorLanes = (this.ctx && typeof this.ctx.getAttentionConveyorLanes === 'function')
+            ? this.ctx.getAttentionConveyorLanes()
+            : null;
+        const laneCount = Array.isArray(conveyorLanes) && conveyorLanes.length
+            ? conveyorLanes.length
+            : (Array.isArray(this.ctx?.currentLanes) ? this.ctx.currentLanes.length : 0);
         if (laneCount > 0) {
             const completed = this.attentionCompletedRows[headIdx] || 0;
             this.attentionCompletedRows[headIdx] = Math.max(completed, laneCount);
@@ -535,9 +559,16 @@ export class SelfAttentionAnimator {
             }
         });
         this._spawnedTempVectors.clear();
-        // Dispose K/V visuals so they disappear alongside the skipped conveyor
-        try { this.ctx && this.ctx._disposeMergedKVGroups && this.ctx._disposeMergedKVGroups(); } catch (_) {}
-        try { this.ctx && this.ctx._disposeAllIndividualKandVVectorsImmediately && this.ctx._disposeAllIndividualKandVVectorsImmediately(); } catch (_) {}
+        // Finalize K/V visuals after skip completion.
+        try {
+            if (this.ctx && typeof this.ctx._shouldPreserveKVCacheVectors === 'function' && this.ctx._shouldPreserveKVCacheVectors()) {
+                this.ctx._preserveKVVectorsForCache?.();
+            } else {
+                this.ctx && this.ctx._disposeMergedKVGroups && this.ctx._disposeMergedKVGroups();
+                this.ctx && this.ctx._disposeAllIndividualKandVVectorsImmediately && this.ctx._disposeAllIndividualKandVVectorsImmediately();
+            }
+            this.ctx && this.ctx._hideAllQVectorsImmediately && this.ctx._hideAllQVectorsImmediately();
+        } catch (_) { /* optional */ }
         this._flushCallbacks();
     }
 
@@ -794,20 +825,28 @@ export class SelfAttentionAnimator {
         // i == 1-based index of this vector in processing order (1 for first vector, 2 for second, ...)
         const i = this.blueProcessedCount[headIdx] + 1; // shift to 1-based
         this.blueProcessedCount[headIdx] += 1;
-        const rowIndex = i - 1;
+        // Pre-compute sorted lane z positions (top → bottom)
+        const laneZs = Array.isArray(this.ctx?.sortedLaneZs) && this.ctx.sortedLaneZs.length
+            ? this.ctx.sortedLaneZs
+            : (this.ctx.currentLanes || []).map(l => l.zPos).sort((a, b) => a - b);
+        const kvCacheDecodeTraversal = !!(
+            this.ctx
+            && typeof this.ctx._isKvCacheModeEnabled === 'function'
+            && this.ctx._isKvCacheModeEnabled()
+            && Array.isArray(this.ctx.currentLanes)
+            && this.ctx.currentLanes.length === 1
+            && laneZs.length > 1
+        );
+        const hopCount = kvCacheDecodeTraversal ? laneZs.length : i;
+        const rowIndex = hopCount - 1;
         if (vector) {
             vector.userData = vector.userData || {};
             vector.userData.attnRowIndex = rowIndex;
         }
         this._setAttentionProgress(headIdx, rowIndex, -1);
 
-        // Pre-compute sorted lane z positions (top → bottom)
-        const laneZs = Array.isArray(this.ctx?.sortedLaneZs) && this.ctx.sortedLaneZs.length
-            ? this.ctx.sortedLaneZs
-            : (this.ctx.currentLanes || []).map(l => l.zPos).sort((a, b) => a - b);
-
         this._activeBlueVectors[headIdx] = vector;
-        this._animateBlueVector(vector, headIdx, i, laneZs, () => {
+        this._animateBlueVector(vector, headIdx, hopCount, laneZs, () => {
             delete this._activeBlueVectors[headIdx];
             // Recursive continuation
             this._processNextBlueVector(headIdx);
@@ -1097,8 +1136,14 @@ export class SelfAttentionAnimator {
 
     _createWeightedSumsImmediate(options = {}) {
         const ctx = this.ctx;
-        const lanes = Array.isArray(ctx?.currentLanes) ? ctx.currentLanes : [];
-        if (!lanes.length) return 0;
+        const queryLanes = Array.isArray(ctx?.currentLanes) ? ctx.currentLanes : [];
+        if (!queryLanes.length) return 0;
+        const conveyorLanes = (ctx && typeof ctx.getAttentionConveyorLanes === 'function')
+            ? ctx.getAttentionConveyorLanes()
+            : queryLanes;
+        const kvLanes = Array.isArray(conveyorLanes) && conveyorLanes.length
+            ? conveyorLanes
+            : queryLanes;
         const headCount = Array.isArray(ctx?.headCoords) ? ctx.headCoords.length : 0;
         if (!headCount) return 0;
         const outputLength = Number.isFinite(ctx?.outputVectorLength) ? ctx.outputVectorLength : 64;
@@ -1115,7 +1160,7 @@ export class SelfAttentionAnimator {
             ? ctx.mhaPassThroughTargetY + ctx.mhaResultRiseOffsetY - 30 + this.RED_EXTRA_RISE
             : (this.RED_EXTRA_RISE || 0);
 
-        lanes.forEach((lane) => {
+        queryLanes.forEach((lane) => {
             const laneZ = Number.isFinite(lane?.zPos) ? lane.zPos : null;
             for (let headIdx = 0; headIdx < headCount; headIdx++) {
                 const vObj = getSideCopyEntry(lane, headIdx, 'V');
@@ -1134,7 +1179,7 @@ export class SelfAttentionAnimator {
                     ? laneZ
                     : (Number.isFinite(vVec?.group?.position?.z) ? vVec.group.position.z : 0);
 
-                const data = this._buildWeightedSumData(headIdx, lane, lanes, outputLength);
+                const data = this._buildWeightedSumData(headIdx, lane, kvLanes, outputLength);
                 const spawnPos = new THREE.Vector3(targetX, targetY, zPos);
                 const wsVec = new VectorVisualizationInstancedPrism(
                     data.slice(),
@@ -1311,13 +1356,18 @@ export class SelfAttentionAnimator {
             return;
         }
         const fixedVec = fixedObj.vec;
+        const fixedPosInCtx = this._getVectorPositionInContextSpace(fixedVec, this._tmpCtxPosA);
         // Spawn travelling red vector OVER K column (horizontally offset) and ABOVE green vectors.
         const kX = (this.ctx.headCoords && this.ctx.headCoords[headIdx]) ? this.ctx.headCoords[headIdx].k : fixedVec.group.position.x;
         // Set vertical position to the **canonical** raised-V height so it always matches
         // fixed red vectors and highlight spheres, even if the fixed copy is still
         // mid-animation.
         const spawnY = this.ctx.mhaPassThroughTargetY + this.ctx.mhaResultRiseOffsetY - 30 + this.RED_EXTRA_RISE;
-        const spawnPos = new THREE.Vector3(kX, spawnY, fixedVec.group.position.z);
+        const spawnPos = new THREE.Vector3(
+            kX,
+            spawnY,
+            Number.isFinite(fixedPosInCtx?.z) ? fixedPosInCtx.z : fixedVec.group.position.z
+        );
         const travellingVec = new VectorVisualizationInstancedPrism(
             fixedVec.rawData.slice(),
             spawnPos,
@@ -1354,9 +1404,11 @@ export class SelfAttentionAnimator {
         const resolvedLaneZ = Number.isFinite(lane?.zPos) ? lane.zPos : (Number.isFinite(laneZ) ? laneZ : vector.group.position.z);
         const vObj = getSideCopyEntry(lane, headIdx, 'V');
         const vVec = vObj && vObj.vec ? vObj.vec : null;
-        const targetX = vVec && vVec.group ? vVec.group.position.x
+        const vPosInCtx = this._getVectorPositionInContextSpace(vVec, this._tmpCtxPosA);
+        const targetX = Number.isFinite(vPosInCtx?.x)
+            ? vPosInCtx.x
             : (this.ctx.headCoords && this.ctx.headCoords[headIdx] ? this.ctx.headCoords[headIdx].v : vector.group.position.x);
-        const baseY = vVec && vVec.group ? vVec.group.position.y : vector.group.position.y;
+        const baseY = Number.isFinite(vPosInCtx?.y) ? vPosInCtx.y : vector.group.position.y;
         const dockOffset = Number.isFinite(this.ctx?.weightedSumDockOffset) ? this.ctx.weightedSumDockOffset : 30;
         const targetY = baseY + dockOffset;
         vector.group.scale.set(1, 1, 1);
@@ -1441,7 +1493,20 @@ export class SelfAttentionAnimator {
                         if (lane && lane.upwardCopies && lane.upwardCopies[headIdx]) {
                             const greenVec = lane.upwardCopies[headIdx];
                             if (greenVec && greenVec.group) {
-                                const midPoint = this._tmpMidpoint.addVectors(vector.group.position, greenVec.group.position).multiplyScalar(0.5);
+                                const greenPos = this._getVectorPositionInContextSpace(greenVec, this._tmpCtxPosA);
+                                if (!greenPos) {
+                                    this._scheduleAfterDelay(() => {
+                                        if (this.skipRequested) {
+                                            doneCb && doneCb();
+                                            return;
+                                        }
+                                        this._traverseLanes(vector, laneZs, count, spheresArr, createSpheres, doneCb, stepIdx + 1);
+                                    }, this.BLUE_PAUSE_MS);
+                                    return;
+                                }
+                                const midPoint = this._tmpMidpoint
+                                    .addVectors(vector.group.position, greenPos)
+                                    .multiplyScalar(0.5);
                                 const queryLane = vector.userData ? vector.userData.parentLane : null;
                                 const queryTokenIndex = queryLane && Number.isFinite(queryLane.tokenIndex) ? queryLane.tokenIndex : null;
                                 const keyTokenIndex = lane && Number.isFinite(lane.tokenIndex) ? lane.tokenIndex : null;
@@ -1506,6 +1571,7 @@ export class SelfAttentionAnimator {
                             const fixedObj = getSideCopyEntry(lane, headIdx, 'V');
                             if (fixedObj && fixedObj.vec) {
                                 const fixedVec = fixedObj.vec;
+                                const fixedPosInCtx = this._getVectorPositionInContextSpace(fixedVec, this._tmpCtxPosB);
                                 // Ensure duplicates spawn at the **raised** red-vector height (match the highlight spheres).
                                 const raisedY = spPos ? spPos.y : vector.group.position.y;
                                 const activationData = spData ? spData.activationData : null;
@@ -1520,7 +1586,9 @@ export class SelfAttentionAnimator {
                                     ? THREE.MathUtils.lerp(0.65, 1.0, weight)
                                     : 1.0;
                                 const dupVec = this._acquireDuplicateVector(fixedVec);
-                                const startPos = fixedVec.group.position.clone();
+                                const startPos = fixedPosInCtx
+                                    ? fixedPosInCtx.clone()
+                                    : fixedVec.group.position.clone();
                                 dupVec.group.position.copy(startPos);
                                 // Start with the ORIGINAL value-vector look.
                                 this._copyVectorAppearance(dupVec, fixedVec);
@@ -1682,13 +1750,21 @@ export class SelfAttentionAnimator {
         if (this.phase === 'complete') return;
         if (this._isConveyorComplete()) {
             this.phase = 'complete';
-            // Notify parent to dispose merged K/V visuals immediately after
-            // the last blue vector finishes its conveyor belt.
+            this._cleanupAttentionScoreMeshes();
+            this.attentionProgress = {};
+            this.attentionCompletedRows = {};
+            this.attentionPostCompletedRows = {};
+            this._attentionRowCache.clear();
+            this._weightedSumCache.clear();
+            // Notify parent to finalize K/V visuals immediately after the
+            // last blue vector finishes its conveyor belt.
             try {
-                // Dispose merged instanced groups first, then strip any remaining
-                // individual K/V meshes to ensure nothing remains visible.
-                this.ctx && this.ctx._disposeMergedKVGroups && this.ctx._disposeMergedKVGroups();
-                this.ctx && this.ctx._disposeAllIndividualKandVVectorsImmediately && this.ctx._disposeAllIndividualKandVVectorsImmediately();
+                if (this.ctx && typeof this.ctx._shouldPreserveKVCacheVectors === 'function' && this.ctx._shouldPreserveKVCacheVectors()) {
+                    this.ctx._preserveKVVectorsForCache?.();
+                } else {
+                    this.ctx && this.ctx._disposeMergedKVGroups && this.ctx._disposeMergedKVGroups();
+                    this.ctx && this.ctx._disposeAllIndividualKandVVectorsImmediately && this.ctx._disposeAllIndividualKandVVectorsImmediately();
+                }
                 this.ctx && this.ctx._hideAllQVectorsImmediately && this.ctx._hideAllQVectorsImmediately();
             } catch (_) { /* optional */ }
             this._flushCallbacks();
