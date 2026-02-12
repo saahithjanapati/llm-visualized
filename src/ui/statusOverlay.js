@@ -555,8 +555,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
             updateEquations(layer);
         }
 
-        const equationsVisible = !!equationsPanel && equationsPanel.style.display !== 'none';
-        const showStageLine = !equationsVisible;
+        const showStageLine = Boolean(displayStage);
         const safeIdx = Math.max(0, Math.min(total - 1, idx));
         const headerLine = isFinalStage ? 'Output Head' : `Layer ${safeIdx + 1} / ${total}`;
         const nextStatusText = showStageLine
