@@ -992,6 +992,24 @@ export class SelfAttentionAnimator {
         this._applyValueVectorScheme(vector, sourceData, mergedOptions);
     }
 
+    _tagWeightedSumVector(vector, lane = null) {
+        if (!vector) return;
+        vector.userData = vector.userData || {};
+        vector.userData.isWeightedSum = true;
+        const tokenLabel = lane && lane.tokenLabel ? lane.tokenLabel : null;
+        const label = tokenLabel ? `Attention Weighted Sum - ${tokenLabel}` : 'Attention Weighted Sum';
+        if (vector.group) {
+            vector.group.userData = vector.group.userData || {};
+            vector.group.userData.label = label;
+            vector.group.userData.isWeightedSum = true;
+        }
+        if (vector.mesh) {
+            vector.mesh.userData = vector.mesh.userData || {};
+            vector.mesh.userData.label = label;
+            vector.mesh.userData.isWeightedSum = true;
+        }
+    }
+
     _buildWeightedSumData(headIdx, queryLane, lanes, outputLength) {
         const activationSource = this.ctx && this.ctx.activationSource ? this.ctx.activationSource : null;
         const layerIndex = Number.isFinite(this.ctx?.layerIndex) ? this.ctx.layerIndex : null;
@@ -1125,16 +1143,12 @@ export class SelfAttentionAnimator {
                     instanceCount
                 );
                 wsVec.userData = wsVec.userData || {};
-                wsVec.userData.isWeightedSum = true;
                 wsVec.userData.headIndex = headIdx;
                 wsVec.userData.parentLane = lane || null;
                 wsVec.userData.weightedSumLaneZ = zPos;
                 wsVec.userData.weightedSumReadyForConcat = true;
                 wsVec.userData.weightedSumDocked = true;
-                wsVec.group.userData = wsVec.group.userData || {};
-                wsVec.group.userData.label = (lane && lane.tokenLabel)
-                    ? `Attention Weighted Sum - ${lane.tokenLabel}`
-                    : 'Attention Weighted Sum';
+                this._tagWeightedSumVector(wsVec, lane);
                 if (ctx && ctx.parentGroup) {
                     ctx.parentGroup.add(wsVec.group);
                 }
@@ -1311,6 +1325,10 @@ export class SelfAttentionAnimator {
             fixedVec.instanceCount
         );
         travellingVec.userData = { headIndex: headIdx, parentLane: queryLane, attnRowIndex: hopCount - 1 };
+        this._tagWeightedSumVector(travellingVec, queryLane);
+        travellingVec.userData.weightedSumLaneZ = queryLaneZ;
+        travellingVec.userData.weightedSumReadyForConcat = false;
+        travellingVec.userData.weightedSumDocked = false;
         this._activeBlueVectors[headIdx] = travellingVec;
         this.ctx.parentGroup.add(travellingVec.group);
         this._spawnedTempVectors.add(travellingVec);
@@ -1344,15 +1362,12 @@ export class SelfAttentionAnimator {
         vector.group.scale.set(1, 1, 1);
 
         vector.userData = vector.userData || {};
-        vector.userData.isWeightedSum = true;
         vector.userData.headIndex = headIdx;
         vector.userData.parentLane = lane || vector.userData.parentLane || null;
         vector.userData.weightedSumLaneZ = resolvedLaneZ;
         vector.userData.weightedSumReadyForConcat = false;
         vector.userData.weightedSumDocked = false;
-        vector.group.userData.label = (lane && lane.tokenLabel)
-            ? `Attention Weighted Sum - ${lane.tokenLabel}`
-            : 'Attention Weighted Sum';
+        this._tagWeightedSumVector(vector, lane);
 
         this._applyWeightedSumScheme(vector);
 

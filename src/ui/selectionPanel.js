@@ -254,6 +254,21 @@ function isValueSelection(label, selectionInfo) {
     return false;
 }
 
+function isWeightedSumSelection(label, selectionInfo) {
+    const lower = (label || '').toLowerCase();
+    if (lower.includes('weighted sum')) return true;
+    if (selectionInfo?.info?.isWeightedSum === true) return true;
+    const candidates = [selectionInfo?.object, selectionInfo?.hit?.object];
+    for (const obj of candidates) {
+        let current = obj;
+        while (current && !current.isScene) {
+            if (current.userData?.isWeightedSum === true) return true;
+            current = current.parent;
+        }
+    }
+    return false;
+}
+
 function isSelfAttentionSelection(label, selectionInfo) {
     const lower = (label || '').toLowerCase();
     if (isAttentionScoreSelection(label, selectionInfo)) return true;
@@ -1844,7 +1859,8 @@ function isInstancedVectorSliceInMotion(sourceMesh, sourceOffset = 0, sourceCoun
     return false;
 }
 
-function shouldSkipLiveVectorTransformCopy(vectorRef, vectorMesh, fallbackCount = null) {
+function shouldSkipLiveVectorTransformCopy(vectorRef, vectorMesh, fallbackCount = null, options = {}) {
+    if (options?.forceLiveCopy === true) return false;
     if (vectorRef?.userData?.qkvProcessed === true) return false;
 
     if (vectorRef?.isBatchedVectorRef && vectorRef._batch?.mesh) {
@@ -1883,9 +1899,9 @@ function shouldSkipLiveVectorTransformCopy(vectorRef, vectorMesh, fallbackCount 
     return false;
 }
 
-function tryCopyVectorAppearanceToPreview(vec, selectionInfo, vectorRef, vectorMesh) {
+function tryCopyVectorAppearanceToPreview(vec, selectionInfo, vectorRef, vectorMesh, options = {}) {
     if (!vec || !vec.mesh) return false;
-    if (shouldSkipLiveVectorTransformCopy(vectorRef, vectorMesh, vec.instanceCount)) {
+    if (shouldSkipLiveVectorTransformCopy(vectorRef, vectorMesh, vec.instanceCount, options)) {
         return false;
     }
     let copied = false;
@@ -1927,6 +1943,14 @@ function tryCopyVectorAppearanceToPreview(vec, selectionInfo, vectorRef, vectorM
 }
 
 function buildVectorClonePreview(selectionInfo, label = '') {
+    const weightedSumSelection = isWeightedSumSelection(label, selectionInfo);
+    if (weightedSumSelection) {
+        // Use the exact runtime vector geometry for weighted-sum selections.
+        const directClone = buildDirectClonePreview(selectionInfo)
+            || buildSelectionClonePreview(selectionInfo, label);
+        if (directClone) return directClone;
+    }
+
     const vectorRef = selectionInfo?.info?.vectorRef || null;
     const vectorMesh = findVectorSourceMesh(selectionInfo);
     if (!vectorRef && !vectorMesh) return null;
@@ -1938,7 +1962,9 @@ function buildVectorClonePreview(selectionInfo, label = '') {
         instanceCount: prismCount
     });
 
-    const copiedAppearance = tryCopyVectorAppearanceToPreview(vec, selectionInfo, vectorRef, vectorMesh);
+    const copiedAppearance = tryCopyVectorAppearanceToPreview(vec, selectionInfo, vectorRef, vectorMesh, {
+        forceLiveCopy: weightedSumSelection
+    });
     if (!copiedAppearance) {
         const data = extractPreviewVectorData(selectionInfo);
         if (Array.isArray(data) && data.length > 0) {
