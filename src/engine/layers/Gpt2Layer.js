@@ -451,7 +451,8 @@ export default class Gpt2Layer extends BaseLayer {
                     // During residual addition, let MHSAAnimation drive world-space
                     // residual trail updates (it follows the centre prism). Skip here
                     // to avoid double-writing the same world trail in the same frame.
-                    if (lane.stopRise && v.userData.trailWorld) continue;
+                    const topLnTrailControlled = lane.stopRise && lane.__topLnStopRise;
+                    if (lane.stopRise && (v.userData.trailWorld || topLnTrailControlled)) continue;
 
                     if (!v.userData.trailWorld) {
                         const zPos = Number.isFinite(lane.zPos) ? lane.zPos : v.group.position.z;

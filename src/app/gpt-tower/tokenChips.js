@@ -32,6 +32,13 @@ import {
 } from '../../animations/LayerAnimationConstants.js';
 import { appState } from '../../state/appState.js';
 import { applyPhysicalMaterialsToScene } from '../../utils/materialUtils.js';
+import {
+    TRAIL_COLOR,
+    TRAIL_LINE_WIDTH,
+    TRAIL_OPACITY,
+    scaleLineWidthForDisplay,
+    scaleOpacityForDisplay
+} from '../../utils/trailConstants.js';
 import { TOKEN_CHIP_STYLE, POSITION_CHIP_STYLE } from './config.js';
 import { formatTokenLabel } from './tokenLabels.js';
 import { addTopLogitBars, revealTopLogitBars } from './topLogitBars.js';
@@ -181,6 +188,38 @@ function createTokenChip(label, font, style) {
     return group;
 }
 
+function createStaticConnectorLine({
+    x = 0,
+    z = 0,
+    startY = 0,
+    endY = 0,
+    color = TRAIL_COLOR,
+    opacity = TRAIL_OPACITY,
+    lineWidth = TRAIL_LINE_WIDTH
+} = {}) {
+    const start = new THREE.Vector3(x, startY, z);
+    const end = new THREE.Vector3(x, endY, z);
+    const geometry = new THREE.BufferGeometry().setFromPoints([start, end]);
+    const effectiveOpacity = scaleOpacityForDisplay(opacity);
+    const effectiveLineWidth = scaleLineWidthForDisplay(lineWidth);
+    const material = new THREE.LineBasicMaterial({
+        color,
+        linewidth: effectiveLineWidth,
+        transparent: effectiveOpacity < 1,
+        opacity: Math.max(0, Math.min(1, effectiveOpacity)),
+        depthWrite: false,
+        fog: false,
+        toneMapped: false
+    });
+    const line = new THREE.Line(geometry, material);
+    line.frustumCulled = false;
+    line.userData = line.userData || {};
+    line.userData.label = 'Embedding Connector Trail';
+    line.userData.skipVisible = true;
+    line.raycast = () => {};
+    return line;
+}
+
 // Temporarily stage the camera near the chips, then optionally return to tower view.
 function stageChipCamera(pipeline, startPos, startTarget, endPos, endTarget, holdMs, returnMs) {
     const engine = pipeline?.engine;
@@ -254,6 +293,13 @@ export function addEmbeddingAndTokenChips({
     laneTokenIndices,
     tokenLabels,
     positionLabels,
+    chipLaneCount = null,
+    chipLaneLayoutIndices = null,
+    chipLaneTokenIndices = null,
+    chipTokenLabels = null,
+    chipPositionLabels = null,
+    animateChipLaneIndices = null,
+    drawStaticChipConnectors = false,
     cameraReturnPosition,
     cameraReturnTarget,
     numLayers,
@@ -378,10 +424,86 @@ export function addEmbeddingAndTokenChips({
             return -LN_PARAMS.depth / 2 + laneSpacing * (clampedLaneIdx + 1);
         });
 
+        // Chip display can differ from active animation lanes (KV decode mode).
+        const safeChipLaneCount = Math.max(
+            1,
+            Math.floor(Number.isFinite(chipLaneCount) ? chipLaneCount : safeLaneCount)
+        );
+        const chipSlotIndices = Array.isArray(chipLaneLayoutIndices) && chipLaneLayoutIndices.length
+            ? chipLaneLayoutIndices.slice(0, safeChipLaneCount)
+            : Array.from({ length: safeChipLaneCount }, (_, idx) => idx);
+        while (chipSlotIndices.length < safeChipLaneCount) {
+            chipSlotIndices.push(chipSlotIndices.length);
+        }
+        const chipLanePositionByLayoutIndex = new Map();
+        chipSlotIndices.forEach((laneIdx, lanePos) => {
+            if (!Number.isFinite(laneIdx)) return;
+            const normalized = Math.max(0, Math.floor(laneIdx));
+            if (!chipLanePositionByLayoutIndex.has(normalized)) {
+                chipLanePositionByLayoutIndex.set(normalized, lanePos);
+            }
+        });
+        const chipLayoutCount = Number.isFinite(laneLayoutCount)
+            ? Math.max(safeChipLaneCount, Math.floor(laneLayoutCount))
+            : Math.max(
+                safeChipLaneCount,
+                chipSlotIndices.reduce(
+                    (max, laneIdx) => Math.max(max, Number.isFinite(laneIdx) ? Math.floor(laneIdx) + 1 : 0),
+                    0
+                )
+            );
+        const chipLaneSpacing = LN_PARAMS.depth / (chipLayoutCount + 1);
+        const chipLaneZs = chipSlotIndices.map((laneIdx) => {
+            const clampedLaneIdx = Math.max(0, Math.floor(Number.isFinite(laneIdx) ? laneIdx : 0));
+            return -LN_PARAMS.depth / 2 + chipLaneSpacing * (clampedLaneIdx + 1);
+        });
+        const chipTokenIndexList = Array.isArray(chipLaneTokenIndices) && chipLaneTokenIndices.length
+            ? chipLaneTokenIndices.slice(0, safeChipLaneCount)
+            : (Array.isArray(laneTokenIndices) ? laneTokenIndices.slice(0, safeChipLaneCount) : []);
+        while (chipTokenIndexList.length < safeChipLaneCount) {
+            chipTokenIndexList.push(chipTokenIndexList.length);
+        }
+        const chipTokenLabelList = Array.isArray(chipTokenLabels) && chipTokenLabels.length
+            ? chipTokenLabels.slice(0, safeChipLaneCount)
+            : (Array.isArray(tokenLabels) ? tokenLabels.slice(0, safeChipLaneCount) : []);
+        while (chipTokenLabelList.length < safeChipLaneCount) {
+            chipTokenLabelList.push('');
+        }
+        const chipPositionLabelList = Array.isArray(chipPositionLabels) && chipPositionLabels.length
+            ? chipPositionLabels.slice(0, safeChipLaneCount)
+            : (Array.isArray(positionLabels) ? positionLabels.slice(0, safeChipLaneCount) : []);
+        while (chipPositionLabelList.length < safeChipLaneCount) {
+            chipPositionLabelList.push(String(chipPositionLabelList.length + 1));
+        }
+        const animateLaneSet = new Set();
+        if (Array.isArray(animateChipLaneIndices) && animateChipLaneIndices.length) {
+            animateChipLaneIndices.forEach((laneIdx) => {
+                if (!Number.isFinite(laneIdx)) return;
+                const normalized = Math.max(0, Math.floor(laneIdx));
+                if (normalized < safeChipLaneCount) {
+                    animateLaneSet.add(normalized);
+                }
+                const mappedLanePos = chipLanePositionByLayoutIndex.get(normalized);
+                if (Number.isFinite(mappedLanePos)) {
+                    animateLaneSet.add(mappedLanePos);
+                }
+            });
+        }
+        if (!animateLaneSet.size) {
+            for (let idx = 0; idx < safeChipLaneCount; idx++) {
+                animateLaneSet.add(idx);
+            }
+        }
+        const animateLaneOrder = [...animateLaneSet].sort((a, b) => a - b);
+        const animateDelayRankByLane = new Map();
+        animateLaneOrder.forEach((laneIdx, rank) => {
+            animateDelayRankByLane.set(laneIdx, rank);
+        });
+        const laneSpanMs = TOKEN_CHIP_STYLE.riseDelay * Math.max(0, animateLaneOrder.length - 1);
+
         const vocabMatrixBottomY = bottomVocabCenterY - EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2;
         const posMatrixBottomY = bottomPosCenterY - EMBEDDING_MATRIX_PARAMS_POSITION.height / 2;
         const bottomEmbeddingVectorStartY = bottomVocabCenterY + EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2;
-        const laneSpanMs = TOKEN_CHIP_STYLE.riseDelay * Math.max(0, laneCount - 1);
         const vocabRiseDuration = TOKEN_CHIP_STYLE.riseDuration * (TOKEN_CHIP_STYLE.vocabSlowdown || 1);
         const posRiseDuration = TOKEN_CHIP_STYLE.riseDuration * (TOKEN_CHIP_STYLE.positionSlowdown || 1);
         const maxChipRiseDuration = Math.max(vocabRiseDuration, posRiseDuration) + laneSpanMs;
@@ -448,7 +570,10 @@ export function addEmbeddingAndTokenChips({
             pipeline.addEventListener('progress', chipRemovalProgressHandler);
         }
         const registerChip = (chip) => addToRoot(chip);
-        const resolveTokenIndexForLane = (laneIdx) => {
+        const resolveTokenIndexForLane = (laneIdx, tokenIndexList = null) => {
+            if (Array.isArray(tokenIndexList) && Number.isFinite(tokenIndexList[laneIdx])) {
+                return Math.max(0, Math.floor(tokenIndexList[laneIdx]));
+            }
             if (Array.isArray(laneTokenIndices) && Number.isFinite(laneTokenIndices[laneIdx])) {
                 return Math.max(0, Math.floor(laneTokenIndices[laneIdx]));
             }
@@ -478,7 +603,7 @@ export function addEmbeddingAndTokenChips({
         const spawnTokenChips = (font) => {
             if (disposed) return;
             // Animate the token chips upward from a resting "stash" position.
-            if (!preserveCameraPose) {
+            if (!preserveCameraPose && animateLaneOrder.length) {
                 const cameraStartPos = new THREE.Vector3(
                     vocabX + EMBEDDING_MATRIX_PARAMS_VOCAB.width * 0.4,
                     bottomVocabCenterY - EMBEDDING_MATRIX_PARAMS_VOCAB.height * 0.8,
@@ -501,36 +626,23 @@ export function addEmbeddingAndTokenChips({
                 );
             }
 
-            const labels = tokenLabels.slice(0, laneCount).map(formatTokenLabel);
+            const labels = chipTokenLabelList.slice(0, safeChipLaneCount).map(formatTokenLabel);
             labels.forEach((label, idx) => {
-                const tokenIndex = resolveTokenIndexForLane(idx);
+                const tokenIndex = resolveTokenIndexForLane(idx, chipTokenIndexList);
                 const tokenId = resolveTokenIdForIndex(tokenIndex);
-                const chip = createTokenChip(label, font, TOKEN_CHIP_STYLE);
                 const chipLabel = `Token: ${label}`;
-                const tokenLabel = tokenLabels[idx];
-                applyChipSelectionMetadata(chip, {
-                    chipLabel,
-                    laneIndex: idx,
-                    tokenIndex,
-                    tokenId,
-                    tokenLabel: typeof tokenLabel === 'string' ? tokenLabel : label,
-                    positionIndex: tokenIndex + 1
-                });
-                const chipHeight = chip.userData.size.height;
-                const targetY = vocabMatrixBottomY + chipHeight / 2 + TOKEN_CHIP_STYLE.inset;
-                const targetZ = laneZs[idx];
-                const startZ = targetZ + chipStartZOffset;
-
-                const staticY = vocabMatrixBottomY - chipHeight / 2 - TOKEN_CHIP_STYLE.staticGap;
-                const staticZ = targetZ + TOKEN_CHIP_STYLE.staticZOffset;
-                const startY = staticY;
-
-                chip.position.set(vocabX, startY, startZ);
-                registerChip(chip);
-                animatedEmbeddingChips.push(chip);
+                const tokenLabel = chipTokenLabelList[idx];
+                const hasAnimatedChip = animateLaneSet.has(idx);
 
                 // Keep a static chip below the stack for context once the animated one rises.
                 const staticChip = createTokenChip(label, font, TOKEN_CHIP_STYLE);
+                const chipHeight = staticChip.userData.size.height;
+                const targetY = vocabMatrixBottomY + chipHeight / 2 + TOKEN_CHIP_STYLE.inset;
+                const targetZ = chipLaneZs[idx];
+                const startZ = targetZ + chipStartZOffset;
+                const staticY = vocabMatrixBottomY - chipHeight / 2 - TOKEN_CHIP_STYLE.staticGap;
+                const staticZ = targetZ + TOKEN_CHIP_STYLE.staticZOffset;
+                const startY = staticY;
                 applyChipSelectionMetadata(staticChip, {
                     chipLabel,
                     laneIndex: idx,
@@ -542,10 +654,38 @@ export function addEmbeddingAndTokenChips({
                 staticChip.position.set(vocabX, staticY, staticZ);
                 registerChip(staticChip);
 
+                if (drawStaticChipConnectors && hasAnimatedChip) {
+                    const connector = createStaticConnectorLine({
+                        x: vocabX,
+                        z: staticZ,
+                        startY: staticY + chipHeight / 2,
+                        endY: targetY
+                    });
+                    registerChip(connector);
+                }
+
+                if (!hasAnimatedChip) {
+                    return;
+                }
+
+                const chip = createTokenChip(label, font, TOKEN_CHIP_STYLE);
+                applyChipSelectionMetadata(chip, {
+                    chipLabel,
+                    laneIndex: idx,
+                    tokenIndex,
+                    tokenId,
+                    tokenLabel: typeof tokenLabel === 'string' ? tokenLabel : label,
+                    positionIndex: tokenIndex + 1
+                });
+                chip.position.set(vocabX, startY, startZ);
+                registerChip(chip);
+                animatedEmbeddingChips.push(chip);
+
+                const laneDelayRank = animateDelayRankByLane.get(idx) || 0;
                 if (typeof TWEEN !== 'undefined') {
                     new TWEEN.Tween(chip.position)
                         .to({ y: targetY, z: targetZ }, vocabRiseDuration)
-                        .delay(idx * TOKEN_CHIP_STYLE.riseDelay)
+                        .delay(laneDelayRank * TOKEN_CHIP_STYLE.riseDelay)
                         .easing(TWEEN.Easing.Quadratic.Out)
                         .start();
                 } else {
@@ -558,36 +698,24 @@ export function addEmbeddingAndTokenChips({
             if (disposed) return;
             const posRiseDuration = TOKEN_CHIP_STYLE.riseDuration * (TOKEN_CHIP_STYLE.positionSlowdown || 1);
             const style = POSITION_CHIP_STYLE;
-            const labels = positionLabels.slice(0, laneCount);
+            const labels = chipPositionLabelList.slice(0, safeChipLaneCount).map((value) => String(value ?? ''));
             labels.forEach((label, idx) => {
-                const tokenIndex = resolveTokenIndexForLane(idx);
+                const tokenIndex = resolveTokenIndexForLane(idx, chipTokenIndexList);
                 const tokenId = resolveTokenIdForIndex(tokenIndex);
-                const chip = createTokenChip(label, font, style);
                 const chipLabel = `Position: ${label}`;
-                const tokenLabel = tokenLabels[idx];
-                applyChipSelectionMetadata(chip, {
-                    chipLabel,
-                    laneIndex: idx,
-                    tokenIndex,
-                    tokenId,
-                    tokenLabel: typeof tokenLabel === 'string' ? tokenLabel : null,
-                    positionIndex: tokenIndex + 1
-                });
-                const chipHeight = chip.userData.size.height;
+                const tokenLabel = chipTokenLabelList[idx];
+                const hasAnimatedChip = animateLaneSet.has(idx);
+                const staticChip = createTokenChip(label, font, style);
+                const chipHeight = staticChip.userData.size.height;
                 const targetY = posMatrixBottomY + chipHeight / 2 + style.inset;
-                const targetZ = laneZs[idx];
+                const targetZ = chipLaneZs[idx];
                 const startZ = targetZ + chipStartZOffset;
 
                 const staticY = posMatrixBottomY - chipHeight / 2 - style.staticGap;
                 const staticZ = targetZ + style.staticZOffset;
                 const startY = staticY;
 
-                chip.position.set(posX, startY, startZ);
-                registerChip(chip);
-                animatedEmbeddingChips.push(chip);
-
                 // Static chip for the position stream, matching the token chips below.
-                const staticChip = createTokenChip(label, font, style);
                 applyChipSelectionMetadata(staticChip, {
                     chipLabel,
                     laneIndex: idx,
@@ -599,10 +727,38 @@ export function addEmbeddingAndTokenChips({
                 staticChip.position.set(posX, staticY, staticZ);
                 registerChip(staticChip);
 
+                if (drawStaticChipConnectors && hasAnimatedChip) {
+                    const connector = createStaticConnectorLine({
+                        x: posX,
+                        z: staticZ,
+                        startY: staticY + chipHeight / 2,
+                        endY: targetY
+                    });
+                    registerChip(connector);
+                }
+
+                if (!hasAnimatedChip) {
+                    return;
+                }
+
+                const chip = createTokenChip(label, font, style);
+                applyChipSelectionMetadata(chip, {
+                    chipLabel,
+                    laneIndex: idx,
+                    tokenIndex,
+                    tokenId,
+                    tokenLabel: typeof tokenLabel === 'string' ? tokenLabel : null,
+                    positionIndex: tokenIndex + 1
+                });
+                chip.position.set(posX, startY, startZ);
+                registerChip(chip);
+                animatedEmbeddingChips.push(chip);
+
+                const laneDelayRank = animateDelayRankByLane.get(idx) || 0;
                 if (typeof TWEEN !== 'undefined') {
                     new TWEEN.Tween(chip.position)
                         .to({ y: targetY, z: targetZ }, posRiseDuration)
-                        .delay(idx * TOKEN_CHIP_STYLE.riseDelay)
+                        .delay(laneDelayRank * TOKEN_CHIP_STYLE.riseDelay)
                         .easing(TWEEN.Easing.Quadratic.Out)
                         .start();
                 } else {

@@ -1087,6 +1087,40 @@ export class CoreEngine {
             }
         }
 
+        // Pass 1.4: Compact batched-vector metadata (one entry per vector, decoded from instanceId).
+        for (const hit of visibleHits) {
+            const obj = hit.object;
+            if (!obj || !obj.isInstancedMesh || typeof hit.instanceId !== 'number') continue;
+            const data = obj.userData || null;
+            if (!data || data.instanceKind !== 'batchedVector') continue;
+            if (data.raycastMetadataMode !== 'perVector') continue;
+            const prismCount = Number.isFinite(data.prismCount) ? Math.max(1, Math.floor(data.prismCount)) : null;
+            if (!prismCount) continue;
+            const vectorEntries = Array.isArray(data.vectorEntries) ? data.vectorEntries : null;
+            const vectorLabels = Array.isArray(data.vectorLabels) ? data.vectorLabels : null;
+            if (!vectorEntries && !vectorLabels) continue;
+
+            const vectorIndex = Math.floor(hit.instanceId / prismCount);
+            if (!Number.isFinite(vectorIndex) || vectorIndex < 0) continue;
+            const prismIndex = hit.instanceId % prismCount;
+            const entry = vectorEntries && vectorIndex < vectorEntries.length ? vectorEntries[vectorIndex] : null;
+            const label = (vectorLabels && vectorIndex < vectorLabels.length ? vectorLabels[vectorIndex] : null)
+                || (entry && entry.label)
+                || data.label
+                || null;
+            if (!label && !entry) continue;
+            const info = entry && typeof entry === 'object'
+                ? { ...entry, vectorIndex, prismIndex }
+                : { vectorIndex, prismIndex };
+
+            return {
+                label: normalizeRaycastLabel(label || 'Vector', info, obj),
+                hit,
+                info,
+                kind: data.instanceKind || 'instanced'
+            };
+        }
+
         // Pass 1.5: Instance-specific labels for other instanced meshes (e.g. top logit bars)
         for (const hit of visibleHits) {
             const obj = hit.object;

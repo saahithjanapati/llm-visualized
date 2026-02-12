@@ -29,6 +29,7 @@ import {
     HIDE_INSTANCE_Y_OFFSET
 } from '../utils/constants.js';
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
+import { BatchedPrismVectorSet } from '../components/BatchedPrismVectorSet.js';
 import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
 import { PrismLayerNormAnimation } from '../animations/PrismLayerNormAnimation.js';
 import { setGlobalTrailMaxStepDistance, clearTrailsFromScene } from '../utils/trailUtils.js';
@@ -81,8 +82,12 @@ const TMP_KV_PROXY_INST_POS = new THREE.Vector3();
 const TMP_KV_PROXY_INST_QUAT = new THREE.Quaternion();
 const TMP_KV_PROXY_INST_SCALE = new THREE.Vector3();
 const TMP_KV_PROXY_CORNER = new THREE.Vector3();
+const TMP_KV_CAPTURE_WORLD = new THREE.Vector3();
+const TMP_KV_CAPTURE_LOCAL = new THREE.Vector3();
+const TMP_KV_CAPTURE_INV = new THREE.Matrix4();
 const KV_HIDDEN_SCALE_EPS = 0.01;
 const KV_COLLAPSED_SCALE = 0.001;
+const KV_CACHE_BATCH_CHUNK_SIZE = 24;
 const KV_RAYCAST_PROXY_GEOMETRY = new THREE.BoxGeometry(1, 1, 1);
 const KV_RAYCAST_PROXY_MATERIAL = (() => {
     const mat = new THREE.MeshBasicMaterial({
@@ -260,6 +265,7 @@ export class LayerPipeline extends EventTarget {
         this._kvCacheDecodeActive = false;
         this._reuseKvCacheForPass = false;
         this._kvCacheEntriesByLayer = new Map();
+        this._kvCacheBatchStores = new Map();
         this._kvCachePersistentRoot = null;
 
         this._layers = [];
@@ -492,6 +498,169 @@ export class LayerPipeline extends EventTarget {
         }));
     }
 
+    _getKvBatchStoreKey({ layerIndex = null, headIndex = null, category = 'K', prismCount = VECTOR_LENGTH_PRISM } = {}) {
+        const layerPart = Number.isFinite(layerIndex) ? Math.floor(layerIndex) : 'x';
+        const headPart = Number.isFinite(headIndex) ? Math.floor(headIndex) : 'x';
+        const catPart = String(category || 'K').toUpperCase() === 'V' ? 'V' : 'K';
+        const prismPart = Number.isFinite(prismCount) ? Math.max(1, Math.floor(prismCount)) : VECTOR_LENGTH_PRISM;
+        return `${layerPart}|${headPart}|${catPart}|${prismPart}`;
+    }
+
+    _getOrCreateKvBatchStore({ layerIndex = null, headIndex = null, category = 'K', prismCount = VECTOR_LENGTH_PRISM } = {}) {
+        if (!this._kvCachePersistentRoot) return null;
+        if (!this._kvCacheBatchStores) this._kvCacheBatchStores = new Map();
+        const resolvedCategory = String(category || 'K').toUpperCase() === 'V' ? 'V' : 'K';
+        const resolvedPrismCount = Number.isFinite(prismCount)
+            ? Math.max(1, Math.floor(prismCount))
+            : VECTOR_LENGTH_PRISM;
+        const key = this._getKvBatchStoreKey({
+            layerIndex,
+            headIndex,
+            category: resolvedCategory,
+            prismCount: resolvedPrismCount
+        });
+        const existing = this._kvCacheBatchStores.get(key);
+        if (existing) return existing;
+
+        const store = {
+            key,
+            layerIndex: Number.isFinite(layerIndex) ? Math.floor(layerIndex) : null,
+            headIndex: Number.isFinite(headIndex) ? Math.floor(headIndex) : null,
+            category: resolvedCategory,
+            prismCount: resolvedPrismCount,
+            chunks: []
+        };
+        this._kvCacheBatchStores.set(key, store);
+        return store;
+    }
+
+    _acquireKvBatchSlot(store) {
+        if (!store || !this._kvCachePersistentRoot) return null;
+        if (!Array.isArray(store.chunks)) store.chunks = [];
+
+        let chunk = store.chunks[store.chunks.length - 1] || null;
+        const needsNewChunk = !chunk || !chunk.batch || chunk.used >= chunk.capacity;
+        if (needsNewChunk) {
+            const capacity = Math.max(1, KV_CACHE_BATCH_CHUNK_SIZE);
+            const categoryLabel = store.category === 'V' ? 'Cached Value Vector' : 'Cached Key Vector';
+            const batch = new BatchedPrismVectorSet({
+                vectorCount: capacity,
+                prismCount: store.prismCount,
+                parentGroup: this._kvCachePersistentRoot,
+                label: categoryLabel,
+                raycastMetadataMode: 'perVector'
+            });
+            if (batch && batch.mesh) {
+                batch.mesh.visible = true;
+                batch.mesh.userData = batch.mesh.userData || {};
+                batch.mesh.userData.skipVisible = true;
+                batch.mesh.userData.cachedKv = true;
+                batch.mesh.userData.kvCachePersistent = true;
+                batch.mesh.userData.vectorCategory = store.category;
+                batch.mesh.userData.label = categoryLabel;
+                if (Number.isFinite(store.layerIndex)) batch.mesh.userData.layerIndex = store.layerIndex;
+                if (Number.isFinite(store.headIndex)) batch.mesh.userData.headIndex = store.headIndex;
+                batch.mesh.frustumCulled = false;
+                const mats = Array.isArray(batch.mesh.material) ? batch.mesh.material : [batch.mesh.material];
+                mats.forEach((mat) => {
+                    if (!mat) return;
+                    mat.opacity = 1;
+                    mat.transparent = false;
+                    if ('depthWrite' in mat) mat.depthWrite = true;
+                    if ('depthTest' in mat) mat.depthTest = true;
+                    if ('alphaTest' in mat) mat.alphaTest = 0;
+                    mat.side = THREE.DoubleSide;
+                    mat.needsUpdate = true;
+                });
+            }
+            chunk = {
+                batch,
+                used: 0,
+                capacity
+            };
+            store.chunks.push(chunk);
+        }
+
+        if (!chunk || !chunk.batch) return null;
+        const vectorIndex = chunk.used++;
+        const vec = chunk.batch.getVectorRef(vectorIndex);
+        vec.group.visible = true;
+        vec.group.userData = vec.group.userData || {};
+        vec.group.userData.skipVisible = true;
+        vec.group.userData.cachedKv = true;
+        vec.group.userData.kvCachePersistent = true;
+        vec.group.userData.vectorCategory = store.category;
+        vec.group.userData.label = store.category === 'V' ? 'Cached Value Vector' : 'Cached Key Vector';
+        vec.userData = vec.userData || {};
+        vec.userData.cachedKv = true;
+        vec.userData.kvCachePersistent = true;
+        vec.userData.vectorCategory = store.category;
+        return { vec, batch: chunk.batch, vectorIndex };
+    }
+
+    _getKvSourceWorldPosition(vec, out = TMP_KV_CAPTURE_WORLD) {
+        if (!vec || !out) return null;
+        if (vec.group && vec.group.parent && typeof vec.group.getWorldPosition === 'function') {
+            vec.group.parent.updateMatrixWorld?.(true);
+            vec.group.getWorldPosition(out);
+            return out;
+        }
+        if (vec.isBatchedVectorRef && vec._batch?.mesh?.parent && vec.group?.position) {
+            vec._batch.mesh.parent.updateMatrixWorld?.(true);
+            out.copy(vec.group.position);
+            vec._batch.mesh.parent.localToWorld(out);
+            return out;
+        }
+        if (vec.group?.position) {
+            out.copy(vec.group.position);
+            return out;
+        }
+        return null;
+    }
+
+    _markKvBatchVectorMetadata(vec, laneEntry, { category = 'K', headIndex = null, layerIndex = null, batch = null, vectorIndex = null } = {}) {
+        if (!vec) return;
+        const resolvedCategory = String(category || 'K').toUpperCase() === 'V' ? 'V' : 'K';
+        const categoryLabel = resolvedCategory === 'V' ? 'Cached Value Vector' : 'Cached Key Vector';
+        vec.userData = vec.userData || {};
+        vec.userData.parentLane = laneEntry || null;
+        vec.userData.cachedKv = true;
+        vec.userData.kvCachePersistent = true;
+        vec.userData.vectorCategory = resolvedCategory;
+        if (Number.isFinite(headIndex)) vec.userData.headIndex = Math.floor(headIndex);
+        if (Number.isFinite(layerIndex)) vec.userData.layerIndex = Math.floor(layerIndex);
+        if (Number.isFinite(laneEntry?.laneLayoutIndex)) vec.userData.laneLayoutIndex = laneEntry.laneLayoutIndex;
+        if (Number.isFinite(laneEntry?.tokenIndex)) vec.userData.tokenIndex = laneEntry.tokenIndex;
+
+        if (vec.group) {
+            vec.group.userData = vec.group.userData || {};
+            vec.group.userData.cachedKv = true;
+            vec.group.userData.kvCachePersistent = true;
+            vec.group.userData.vectorCategory = resolvedCategory;
+            vec.group.userData.label = categoryLabel;
+            vec.group.userData.skipVisible = true;
+            if (Number.isFinite(headIndex)) vec.group.userData.headIndex = Math.floor(headIndex);
+            if (Number.isFinite(layerIndex)) vec.group.userData.layerIndex = Math.floor(layerIndex);
+            if (Number.isFinite(laneEntry?.laneLayoutIndex)) vec.group.userData.laneLayoutIndex = laneEntry.laneLayoutIndex;
+            if (Number.isFinite(laneEntry?.tokenIndex)) vec.group.userData.tokenIndex = laneEntry.tokenIndex;
+        }
+
+        if (vec.mesh) {
+            vec.mesh.userData = vec.mesh.userData || {};
+            vec.mesh.userData.cachedKv = true;
+            vec.mesh.userData.kvCachePersistent = true;
+            vec.mesh.userData.vectorCategory = resolvedCategory;
+            vec.mesh.userData.label = categoryLabel;
+            vec.mesh.userData.skipVisible = true;
+            if (Number.isFinite(headIndex)) vec.mesh.userData.headIndex = Math.floor(headIndex);
+            if (Number.isFinite(layerIndex)) vec.mesh.userData.layerIndex = Math.floor(layerIndex);
+        }
+
+        if (batch && Number.isFinite(vectorIndex) && typeof batch.updateVectorRaycastInfo === 'function') {
+            batch.updateVectorRaycastInfo(vectorIndex, vec);
+        }
+    }
+
     _disposeKvCacheVector(vec) {
         if (!vec) return;
         if (vec.isBatchedVectorRef) {
@@ -523,8 +692,52 @@ export class LayerPipeline extends EventTarget {
     }
 
     _markKvCacheVectorPersistent(vec, laneEntry, { category = 'K', headIndex = null, layerIndex = null } = {}) {
+        if (!vec || !this._kvCachePersistentRoot) return null;
+        const resolvedCategory = String(category || 'K').toUpperCase() === 'V' ? 'V' : 'K';
+        const prismCount = Number.isFinite(vec.instanceCount)
+            ? Math.max(1, Math.floor(vec.instanceCount))
+            : VECTOR_LENGTH_PRISM;
+        const store = this._getOrCreateKvBatchStore({
+            layerIndex,
+            headIndex,
+            category: resolvedCategory,
+            prismCount
+        });
+        const slot = this._acquireKvBatchSlot(store);
+        if (slot && slot.batch && slot.vec) {
+            const worldPos = this._getKvSourceWorldPosition(vec, TMP_KV_CAPTURE_WORLD);
+            if (worldPos) {
+                TMP_KV_CAPTURE_LOCAL.copy(worldPos);
+            } else if (vec.group?.position) {
+                TMP_KV_CAPTURE_LOCAL.copy(vec.group.position);
+            } else {
+                TMP_KV_CAPTURE_LOCAL.set(0, 0, 0);
+            }
+            this._kvCachePersistentRoot.updateMatrixWorld(true);
+            this._kvCachePersistentRoot.worldToLocal(TMP_KV_CAPTURE_LOCAL);
+
+            const sourceMesh = vec.isBatchedVectorRef ? vec._batch?.mesh : vec.mesh;
+            if (sourceMesh?.updateMatrixWorld) sourceMesh.updateMatrixWorld(true);
+            TMP_KV_CAPTURE_INV.copy(this._kvCachePersistentRoot.matrixWorld).invert();
+
+            slot.batch.copyVectorStateFrom(slot.vectorIndex, vec, {
+                targetPosition: TMP_KV_CAPTURE_LOCAL,
+                sourceMatrixWorld: sourceMesh?.matrixWorld || null,
+                targetParentMatrixWorldInverse: TMP_KV_CAPTURE_INV,
+                copyData: true
+            });
+            this._markKvBatchVectorMetadata(slot.vec, laneEntry, {
+                category: resolvedCategory,
+                headIndex,
+                layerIndex,
+                batch: slot.batch,
+                vectorIndex: slot.vectorIndex
+            });
+            return slot.vec;
+        }
+
         if (vec && vec.isBatchedVectorRef) return null;
-        if (!vec || !vec.group || !this._kvCachePersistentRoot) return null;
+        if (!vec.group) return null;
         try {
             if (vec.group.parent !== this._kvCachePersistentRoot) {
                 vec.group.updateMatrixWorld?.(true);
@@ -689,6 +902,22 @@ export class LayerPipeline extends EventTarget {
     }
 
     _clearKvCacheVisuals() {
+        if (this._kvCacheBatchStores && this._kvCacheBatchStores.size) {
+            this._kvCacheBatchStores.forEach((store) => {
+                if (!store || !Array.isArray(store.chunks)) return;
+                store.chunks.forEach((chunk) => {
+                    const batch = chunk && chunk.batch ? chunk.batch : null;
+                    if (!batch) return;
+                    try {
+                        if (typeof batch.dispose === 'function') {
+                            batch.dispose({ removeFromParent: true });
+                        }
+                    } catch (_) { /* optional cleanup */ }
+                });
+            });
+        }
+        this._kvCacheBatchStores = new Map();
+
         if (this._kvCacheEntriesByLayer && this._kvCacheEntriesByLayer.size) {
             const disposed = new Set();
             this._kvCacheEntriesByLayer.forEach((entries) => {
@@ -699,6 +928,7 @@ export class LayerPipeline extends EventTarget {
                     upward.forEach((vec) => {
                         if (!vec || disposed.has(vec)) return;
                         disposed.add(vec);
+                        if (vec.isBatchedVectorRef) return;
                         this._disposeKvCacheVector(vec);
                     });
                     const sideCopies = Array.isArray(entry.sideCopies) ? entry.sideCopies : [];
@@ -706,6 +936,7 @@ export class LayerPipeline extends EventTarget {
                         const vec = side && side.vec ? side.vec : null;
                         if (!vec || disposed.has(vec)) return;
                         disposed.add(vec);
+                        if (vec.isBatchedVectorRef) return;
                         this._disposeKvCacheVector(vec);
                     });
                 });
@@ -838,6 +1069,7 @@ export class LayerPipeline extends EventTarget {
     _reflowKvCacheLaneDepths(layoutCount = this._laneLayoutCount) {
         const totalSlots = Math.max(1, Math.floor(layoutCount || 1));
         const spacing = LN_PARAMS.depth / (totalSlots + 1);
+        const touchedBatches = new Set();
         this._kvCacheEntriesByLayer.forEach((entries) => {
             if (!Array.isArray(entries) || !entries.length) return;
             entries.forEach((entry) => {
@@ -848,6 +1080,9 @@ export class LayerPipeline extends EventTarget {
                 const applyZ = (vec) => {
                     if (!vec || !vec.group || !vec.group.position) return;
                     vec.group.position.z = targetZ;
+                    if (vec.isBatchedVectorRef && vec._batch) {
+                        touchedBatches.add(vec._batch);
+                    }
                 };
                 if (Array.isArray(entry.upwardCopies)) {
                     entry.upwardCopies.forEach((vec) => applyZ(vec));
@@ -856,6 +1091,12 @@ export class LayerPipeline extends EventTarget {
                     entry.sideCopies.forEach((side) => applyZ(side?.vec));
                 }
             });
+        });
+        touchedBatches.forEach((batch) => {
+            if (!batch || typeof batch.syncAll !== 'function') return;
+            try {
+                batch.syncAll();
+            } catch (_) { /* optional cleanup */ }
         });
     }
 
@@ -1267,6 +1508,15 @@ export class LayerPipeline extends EventTarget {
             const mhsa = layer.mhsaAnimation;
             const passThroughComplete = !!(mhsa && mhsa.mhaPassThroughPhase === 'mha_pass_through_complete');
             if (!passThroughComplete) return;
+            // During skip-to-end we must wait until the layer has transitioned
+            // into skip-concat handling; otherwise K vectors can still be parked
+            // above the key matrix when we capture KV cache.
+            if (this._skipToEndActive && !layer._skipConcatTriggered) return;
+            try {
+                if (mhsa && typeof mhsa._preserveKVVectorsForCache === 'function') {
+                    mhsa._preserveKVVectorsForCache();
+                }
+            } catch (_) { /* optional pre-capture alignment */ }
             this._captureKvCacheFromLayers([layer]);
             this._skipKvCaptureReadyLayers.add(layerIndex);
         });
@@ -1717,10 +1967,14 @@ export class LayerPipeline extends EventTarget {
                 markSkipVisible(vec);
                 if (lane && lane.originalTrail) {
                     vec.userData = vec.userData || {};
-                    if (!vec.userData.trail) {
-                        vec.userData.trail = lane.originalTrail;
-                        vec.userData.trailWorld = true;
+                    // Top LayerNorm should continue only the canonical residual
+                    // world-space trail to avoid extending stale local trails.
+                    if (vec.userData.trail && vec.userData.trail !== lane.originalTrail) {
+                        delete vec.userData.trail;
+                        delete vec.userData.trailWorld;
                     }
+                    vec.userData.trail = lane.originalTrail;
+                    vec.userData.trailWorld = true;
                 }
                 if (lane && !lane.__topLnStopRise) {
                     lane.__topLnStopRise = true;

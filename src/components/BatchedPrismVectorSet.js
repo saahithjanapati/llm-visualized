@@ -16,6 +16,11 @@ _uniformCalculatedHeight = Math.max(0.01, _uniformCalculatedHeight);
 const _prismWidthScale = PRISM_INSTANCE_WIDTH_SCALE;
 const _prismDepthScale = 1.5;
 const __halfBaseWidth = (PRISM_BASE_WIDTH * _prismWidthScale) / 2;
+const TMP_SRC_LOCAL_MATRIX = new THREE.Matrix4();
+const TMP_WORLD_MATRIX = new THREE.Matrix4();
+const TMP_DST_MATRIX = new THREE.Matrix4();
+const TMP_BATCH_INV_PARENT_MATRIX = new THREE.Matrix4();
+const TMP_BATCH_HIDE_SCALE = new THREE.Vector3(0.001, 0.001, 0.001);
 
 function getKeyColorCount(values) {
     const length = Array.isArray(values) ? values.length : 0;
@@ -126,10 +131,12 @@ export class BatchedPrismVectorSet {
         prismCount = VECTOR_LENGTH_PRISM,
         parentGroup = null,
         label = 'Batched Vector Set',
+        raycastMetadataMode = 'perInstance',
     } = {}) {
         this.vectorCount = Math.max(1, Math.floor(vectorCount || 1));
         this.prismCount = Math.max(1, Math.floor(prismCount || VECTOR_LENGTH_PRISM));
         this.totalInstances = this.vectorCount * this.prismCount;
+        this._raycastMetadataMode = raycastMetadataMode === 'perVector' ? 'perVector' : 'perInstance';
         this._vectorRefs = new Array(this.vectorCount);
         this._dummy = new THREE.Object3D();
 
@@ -180,8 +187,16 @@ varying float vGradientT;`
         this.mesh.userData.isVector = true;
         this.mesh.userData.label = label;
         this.mesh.userData.instanceKind = 'batchedVector';
-        this.mesh.userData.instanceLabels = new Array(this.totalInstances).fill(label);
-        this.mesh.userData.instanceEntries = new Array(this.totalInstances);
+        this.mesh.userData.prismCount = this.prismCount;
+        this.mesh.userData.vectorCount = this.vectorCount;
+        this.mesh.userData.raycastMetadataMode = this._raycastMetadataMode;
+        if (this._raycastMetadataMode === 'perVector') {
+            this.mesh.userData.vectorEntries = new Array(this.vectorCount);
+            this.mesh.userData.vectorLabels = new Array(this.vectorCount).fill(label);
+        } else {
+            this.mesh.userData.instanceLabels = new Array(this.totalInstances).fill(label);
+            this.mesh.userData.instanceEntries = new Array(this.totalInstances);
+        }
         // Instances can span far from the origin; disable frustum culling to avoid popping.
         this.mesh.frustumCulled = false;
         this._boundsDirty = false;
@@ -345,12 +360,210 @@ varying float vGradientT;`
         if (ceAttr) ceAttr.needsUpdate = true;
     }
 
+    _resolveSourceSlice(source) {
+        if (!source) return null;
+        if (source.isBatchedVectorRef && source._batch?.mesh) {
+            const srcBatch = source._batch;
+            const srcPrismCount = Number.isFinite(srcBatch.prismCount)
+                ? Math.max(1, Math.floor(srcBatch.prismCount))
+                : this.prismCount;
+            const srcIndex = Number.isFinite(source._index) ? Math.max(0, Math.floor(source._index)) : 0;
+            const srcStart = srcIndex * srcPrismCount;
+            const requestedCount = Number.isFinite(source.instanceCount)
+                ? Math.max(1, Math.floor(source.instanceCount))
+                : srcPrismCount;
+            return {
+                mesh: srcBatch.mesh,
+                start: srcStart,
+                count: Math.min(this.prismCount, srcPrismCount, requestedCount)
+            };
+        }
+
+        if (source.mesh?.isInstancedMesh) {
+            const sourceCount = Number.isFinite(source.instanceCount)
+                ? Math.max(1, Math.floor(source.instanceCount))
+                : Number.isFinite(source.mesh.count)
+                    ? Math.max(1, Math.floor(source.mesh.count))
+                    : this.prismCount;
+            return {
+                mesh: source.mesh,
+                start: 0,
+                count: Math.min(this.prismCount, sourceCount)
+            };
+        }
+
+        return null;
+    }
+
+    copyVectorStateFrom(index, source, {
+        targetPosition = null,
+        sourceMatrixWorld = null,
+        targetParentMatrixWorldInverse = null,
+        copyData = true
+    } = {}) {
+        const ref = this.getVectorRef(index);
+        const wasVisible = !!ref._lastVisible;
+        ref.group.visible = true;
+        if (targetPosition instanceof THREE.Vector3) {
+            ref.group.position.copy(targetPosition);
+        }
+
+        if (copyData) {
+            ref.rawData = ensureArrayLike(source?.rawData) ? cloneArrayLike(source.rawData) : [];
+            ref.normalizedData = [];
+            ref.currentKeyColors = Array.isArray(source?.currentKeyColors)
+                ? source.currentKeyColors
+                    .map((color) => (color?.isColor ? color.clone() : new THREE.Color(color)))
+                    .filter((color) => color?.isColor)
+                : [];
+        }
+
+        const sourceSlice = this._resolveSourceSlice(source);
+        if (!sourceSlice || !sourceSlice.mesh) {
+            ref._customMatrices = false;
+            this._writeVectorMatrices(index, ref.group.position, ref.group.visible);
+            this.mesh.instanceMatrix.needsUpdate = true;
+            ref._lastPos.copy(ref.group.position);
+            ref._lastVisible = ref.group.visible;
+            ref._matricesInitialized = true;
+            this.updateVectorRaycastInfo(index, ref);
+            if (ref.group.visible && !wasVisible) {
+                this._invalidateBounds();
+            }
+            return ref;
+        }
+
+        const srcMesh = sourceSlice.mesh;
+        const srcStart = Math.max(0, Math.floor(sourceSlice.start || 0));
+        const srcCount = Math.max(0, Math.floor(sourceSlice.count || 0));
+        const copyCount = Math.min(this.prismCount, srcCount);
+        if (copyCount <= 0) {
+            ref._customMatrices = false;
+            this._writeVectorMatrices(index, ref.group.position, ref.group.visible);
+            this.mesh.instanceMatrix.needsUpdate = true;
+            ref._lastPos.copy(ref.group.position);
+            ref._lastVisible = ref.group.visible;
+            ref._matricesInitialized = true;
+            this.updateVectorRaycastInfo(index, ref);
+            if (ref.group.visible && !wasVisible) {
+                this._invalidateBounds();
+            }
+            return ref;
+        }
+
+        if (typeof srcMesh.updateMatrixWorld === 'function') srcMesh.updateMatrixWorld(true);
+        if (this.mesh?.parent?.updateMatrixWorld) this.mesh.parent.updateMatrixWorld(true);
+
+        const srcWorld = (sourceMatrixWorld && sourceMatrixWorld.isMatrix4)
+            ? sourceMatrixWorld
+            : srcMesh.matrixWorld;
+        let dstInv = null;
+        if (targetParentMatrixWorldInverse && targetParentMatrixWorldInverse.isMatrix4) {
+            dstInv = targetParentMatrixWorldInverse;
+        } else if (this.mesh?.parent?.matrixWorld) {
+            TMP_BATCH_INV_PARENT_MATRIX.copy(this.mesh.parent.matrixWorld).invert();
+            dstInv = TMP_BATCH_INV_PARENT_MATRIX;
+        }
+
+        const dstBase = index * this.prismCount;
+        const dstMatrixArray = this.mesh.instanceMatrix.array;
+        for (let i = 0; i < copyCount; i++) {
+            srcMesh.getMatrixAt(srcStart + i, TMP_SRC_LOCAL_MATRIX);
+            TMP_WORLD_MATRIX.multiplyMatrices(srcWorld, TMP_SRC_LOCAL_MATRIX);
+            if (dstInv) {
+                TMP_DST_MATRIX.multiplyMatrices(dstInv, TMP_WORLD_MATRIX);
+            } else {
+                TMP_DST_MATRIX.copy(TMP_WORLD_MATRIX);
+            }
+            TMP_DST_MATRIX.toArray(dstMatrixArray, (dstBase + i) * 16);
+        }
+
+        if (copyCount < this.prismCount) {
+            const basePos = ref.group.position;
+            for (let i = copyCount; i < this.prismCount; i++) {
+                this._dummy.position.set(
+                    this._instanceBaseX[i] + (basePos?.x || 0),
+                    HIDE_INSTANCE_Y_OFFSET,
+                    basePos?.z || 0
+                );
+                this._dummy.scale.copy(TMP_BATCH_HIDE_SCALE);
+                this._dummy.updateMatrix();
+                this._dummy.matrix.toArray(dstMatrixArray, (dstBase + i) * 16);
+            }
+        }
+        this.mesh.instanceMatrix.needsUpdate = true;
+
+        const dstColorOffset = dstBase * 3;
+        const srcColorOffset = srcStart * 3;
+        const colorValueCount = copyCount * 3;
+        const dstColorLimit = this.prismCount * 3;
+
+        const copyAttributeSlice = (attrName) => {
+            const dstAttr = this.mesh.geometry.getAttribute(attrName);
+            const srcAttr = srcMesh.geometry?.getAttribute?.(attrName);
+            if (!dstAttr?.array || !srcAttr?.array) return;
+            const srcAvailable = Math.max(0, srcAttr.array.length - srcColorOffset);
+            const toCopy = Math.min(colorValueCount, srcAvailable, dstColorLimit);
+            if (toCopy > 0) {
+                dstAttr.array.set(srcAttr.array.subarray(srcColorOffset, srcColorOffset + toCopy), dstColorOffset);
+            }
+            if (toCopy < dstColorLimit) {
+                const fillStart = dstColorOffset + toCopy;
+                const fallbackBase = dstColorOffset + Math.max(0, toCopy - 3);
+                const r = dstAttr.array[fallbackBase] ?? 0;
+                const g = dstAttr.array[fallbackBase + 1] ?? 0;
+                const b = dstAttr.array[fallbackBase + 2] ?? 0;
+                for (let i = fillStart; i < dstColorOffset + dstColorLimit; i += 3) {
+                    dstAttr.array[i] = r;
+                    dstAttr.array[i + 1] = g;
+                    dstAttr.array[i + 2] = b;
+                }
+            }
+            dstAttr.needsUpdate = true;
+        };
+
+        if (this.mesh.instanceColor && this.mesh.instanceColor.array) {
+            const srcInstColors = srcMesh.instanceColor?.array;
+            const dstInstColors = this.mesh.instanceColor.array;
+            if (srcInstColors) {
+                const srcAvailable = Math.max(0, srcInstColors.length - srcColorOffset);
+                const toCopy = Math.min(colorValueCount, srcAvailable, dstColorLimit);
+                if (toCopy > 0) {
+                    dstInstColors.set(srcInstColors.subarray(srcColorOffset, srcColorOffset + toCopy), dstColorOffset);
+                }
+                if (toCopy < dstColorLimit) {
+                    const fillStart = dstColorOffset + toCopy;
+                    const fallbackBase = dstColorOffset + Math.max(0, toCopy - 3);
+                    const r = dstInstColors[fallbackBase] ?? 0;
+                    const g = dstInstColors[fallbackBase + 1] ?? 0;
+                    const b = dstInstColors[fallbackBase + 2] ?? 0;
+                    for (let i = fillStart; i < dstColorOffset + dstColorLimit; i += 3) {
+                        dstInstColors[i] = r;
+                        dstInstColors[i + 1] = g;
+                        dstInstColors[i + 2] = b;
+                    }
+                }
+            }
+            this.mesh.instanceColor.needsUpdate = true;
+        }
+
+        copyAttributeSlice('colorStart');
+        copyAttributeSlice('colorEnd');
+
+        ref._customMatrices = true;
+        ref._lastPos.copy(ref.group.position);
+        ref._lastVisible = ref.group.visible;
+        ref._matricesInitialized = true;
+        this.updateVectorRaycastInfo(index, ref);
+        if (ref.group.visible && !wasVisible) {
+            this._invalidateBounds();
+        }
+        return ref;
+    }
+
     updateVectorRaycastInfo(index, vectorRef = null) {
         const ref = vectorRef || this.getVectorRef(index);
         if (!ref) return;
-        const labels = this.mesh.userData.instanceLabels || (this.mesh.userData.instanceLabels = new Array(this.totalInstances));
-        const entries = this.mesh.userData.instanceEntries || (this.mesh.userData.instanceEntries = new Array(this.totalInstances));
-        const offset = index * this.prismCount;
         const label = (ref.group && ref.group.userData && ref.group.userData.label)
             || (ref.userData && ref.userData.activationData && ref.userData.activationData.label)
             || this.mesh.userData.label
@@ -368,11 +581,57 @@ varying float vGradientT;`
             layerIndex: parentLane && parentLane.layer ? parentLane.layer.index : (ref.group?.userData?.layerIndex),
             category: ref.userData ? ref.userData.vectorCategory : undefined,
         };
+        if (this._raycastMetadataMode === 'perVector') {
+            const vectorEntries = this.mesh.userData.vectorEntries || (this.mesh.userData.vectorEntries = new Array(this.vectorCount));
+            const vectorLabels = this.mesh.userData.vectorLabels || (this.mesh.userData.vectorLabels = new Array(this.vectorCount));
+            const vecIdx = Math.max(0, Math.min(this.vectorCount - 1, Math.floor(index)));
+            vectorEntries[vecIdx] = entry;
+            vectorLabels[vecIdx] = label;
+            return;
+        }
+
+        const labels = this.mesh.userData.instanceLabels || (this.mesh.userData.instanceLabels = new Array(this.totalInstances));
+        const entries = this.mesh.userData.instanceEntries || (this.mesh.userData.instanceEntries = new Array(this.totalInstances));
+        const offset = index * this.prismCount;
         for (let i = 0; i < this.prismCount; i++) {
             const idx = offset + i;
             labels[idx] = label;
             entries[idx] = entry;
         }
+    }
+
+    dispose(options = {}) {
+        const removeFromParent = options.removeFromParent !== false;
+        try {
+            if (removeFromParent && this.mesh && this.mesh.parent) {
+                this.mesh.parent.remove(this.mesh);
+            }
+        } catch (_) { /* optional cleanup */ }
+        try {
+            if (this.mesh?.geometry && typeof this.mesh.geometry.dispose === 'function') {
+                this.mesh.geometry.dispose();
+            }
+        } catch (_) { /* optional cleanup */ }
+        try {
+            const mat = this.mesh?.material;
+            if (Array.isArray(mat)) {
+                mat.forEach((m) => {
+                    if (m && typeof m.dispose === 'function') m.dispose();
+                });
+            } else if (mat && typeof mat.dispose === 'function') {
+                mat.dispose();
+            }
+        } catch (_) { /* optional cleanup */ }
+        try {
+            if (this._scratch && typeof this._scratch.dispose === 'function') {
+                this._scratch.dispose();
+            }
+            if (this._scratch?.group?.parent) {
+                this._scratch.group.parent.remove(this._scratch.group);
+            }
+        } catch (_) { /* optional cleanup */ }
+
+        this._vectorRefs = [];
     }
 
     syncAll() {

@@ -347,6 +347,7 @@ export class MHSAAnimation {
         this._attentionConveyorLanes = [];
         this._laneZKeyPrecision = 10; // 0.1 world-unit resolution
         this._cachedKvEntries = [];
+        this._cachedKvBatchesToSync = new Set();
 
         // Pause-aware scheduling helpers ensure delayed callbacks respect manual pauses.
         this._scheduledDelayTweens = new Set();
@@ -406,6 +407,7 @@ export class MHSAAnimation {
     setCachedKvEntries(entries = null) {
         if (!Array.isArray(entries) || !entries.length) {
             this._cachedKvEntries = [];
+            this._cachedKvBatchesToSync.clear();
             return;
         }
         this._cachedKvEntries = entries
@@ -417,6 +419,33 @@ export class MHSAAnimation {
                 if (aLayout !== bLayout) return aLayout - bLayout;
                 return a.zPos - b.zPos;
             });
+        this._refreshCachedKvBatchesToSync(this._cachedKvEntries);
+        this._snapCachedKeyVectorsUnderValues(this._cachedKvEntries, { cachedOnly: true });
+    }
+
+    _refreshCachedKvBatchesToSync(entries = null) {
+        if (!this._cachedKvBatchesToSync) {
+            this._cachedKvBatchesToSync = new Set();
+        } else {
+            this._cachedKvBatchesToSync.clear();
+        }
+        if (!Array.isArray(entries) || !entries.length) return;
+
+        const addBatchFromVec = (vec) => {
+            const batch = vec && vec.isBatchedVectorRef ? vec._batch : null;
+            if (!batch || typeof batch.syncAll !== 'function') return;
+            this._cachedKvBatchesToSync.add(batch);
+        };
+
+        entries.forEach((entry) => {
+            if (!entry) return;
+            if (Array.isArray(entry.upwardCopies)) {
+                entry.upwardCopies.forEach((vec) => addBatchFromVec(vec));
+            }
+            if (Array.isArray(entry.sideCopies)) {
+                entry.sideCopies.forEach((side) => addBatchFromVec(side?.vec));
+            }
+        });
     }
 
     getAttentionConveyorLanes() {
@@ -1038,6 +1067,9 @@ export class MHSAAnimation {
         this.currentLanes = lanes;
         this._attentionConveyorLanes = this._composeAttentionConveyorLanes(lanes);
         this._rebuildLaneIndex(this._attentionConveyorLanes);
+        if ((this._skipToEndActive || this._kvCacheDecodeActive) && this._cachedKvEntries.length) {
+            this._snapCachedKeyVectorsUnderValues(this._cachedKvEntries, { cachedOnly: true });
+        }
 
         if (this._skipMatrixColorsLocked && this._skipMatrixColorsPending
             && this.mhaPassThroughPhase === 'mha_pass_through_complete') {
@@ -1183,12 +1215,30 @@ export class MHSAAnimation {
             });
         }
 
+        const batchesToSync = new Set();
         if (this._batchedVectorSets) {
             Object.values(this._batchedVectorSets).forEach((batch) => {
                 if (batch && typeof batch.syncAll === 'function') {
-                    batch.syncAll();
+                    batchesToSync.add(batch);
                 }
             });
+        }
+        if (this._cachedKvBatchesToSync && this._cachedKvBatchesToSync.size) {
+            this._cachedKvBatchesToSync.forEach((batch) => {
+                if (batch && typeof batch.syncAll === 'function') {
+                    batchesToSync.add(batch);
+                }
+            });
+        }
+        batchesToSync.forEach((batch) => {
+            try {
+                batch.syncAll();
+            } catch (_) { /* optional batch sync */ }
+        });
+        if (batchesToSync.size === 0 && this._cachedKvEntries.length) {
+            // Cached entries can be re-bound after construction (during decode);
+            // refresh lazily so newly attached batched refs also stay in sync.
+            this._refreshCachedKvBatchesToSync(this._cachedKvEntries);
         }
     }
 
@@ -2558,8 +2608,67 @@ export class MHSAAnimation {
         }
     }
 
+    _snapCachedKeyVectorsUnderValues(lanes = null, { cachedOnly = false } = {}) {
+        const laneList = Array.isArray(lanes) ? lanes : [];
+        if (!laneList.length) return;
+
+        const targetXByHead = new Map();
+        laneList.forEach((lane) => {
+            if (!Array.isArray(lane?.sideCopies)) return;
+            lane.sideCopies.forEach((sc) => {
+                if (!sc || sc.type !== 'V') return;
+                const headIndex = Number.isFinite(sc.headIndex)
+                    ? Math.floor(sc.headIndex)
+                    : (Number.isFinite(sc?.vec?.userData?.headIndex) ? Math.floor(sc.vec.userData.headIndex) : null);
+                if (!Number.isFinite(headIndex) || targetXByHead.has(headIndex)) return;
+                const targetX = Number.isFinite(sc.targetX)
+                    ? sc.targetX
+                    : (Number.isFinite(sc?.vec?.group?.position?.x) ? sc.vec.group.position.x : null);
+                if (Number.isFinite(targetX)) {
+                    targetXByHead.set(headIndex, targetX);
+                }
+            });
+        });
+        if (!targetXByHead.size) return;
+
+        const touchedBatches = new Set();
+        laneList.forEach((lane) => {
+            if (!Array.isArray(lane?.upwardCopies)) return;
+            lane.upwardCopies.forEach((kVec, headIndex) => {
+                if (!kVec || !kVec.group || !kVec.group.position) return;
+                if (cachedOnly) {
+                    const isCached = !!(
+                        kVec.userData?.cachedKv
+                        || kVec.userData?.kvCachePersistent
+                        || kVec.group?.userData?.cachedKv
+                        || kVec.group?.userData?.kvCachePersistent
+                    );
+                    if (!isCached) return;
+                }
+                const targetX = targetXByHead.get(headIndex);
+                if (!Number.isFinite(targetX)) return;
+                kVec.group.position.x = targetX;
+                if (kVec.isBatchedVectorRef && kVec._batch && typeof kVec._batch.syncAll === 'function') {
+                    touchedBatches.add(kVec._batch);
+                }
+            });
+        });
+
+        touchedBatches.forEach((batch) => {
+            try {
+                batch.syncAll();
+            } catch (_) { /* optional cache snap sync */ }
+        });
+    }
+
     _preserveKVVectorsForCache() {
-        if (this._kvCacheVectorsPreserved) return;
+        const lanes = Array.isArray(this.currentLanes) ? this.currentLanes : [];
+        const cachedLanes = Array.isArray(this._cachedKvEntries) ? this._cachedKvEntries : [];
+        if (this._kvCacheVectorsPreserved) {
+            this._snapCachedKeyVectorsUnderValues(lanes);
+            this._snapCachedKeyVectorsUnderValues(cachedLanes, { cachedOnly: true });
+            return;
+        }
         this._kvCacheVectorsPreserved = true;
 
         if (this._mergedGroupsByHead && typeof this._mergedGroupsByHead.forEach === 'function') {
@@ -2575,7 +2684,6 @@ export class MHSAAnimation {
             if (allV?.children?.[0]) this._setInstancedMeshVisible(allV.children[0], { opacity: 1 });
         }
 
-        const lanes = Array.isArray(this.currentLanes) ? this.currentLanes : [];
         lanes.forEach((lane) => {
             if (Array.isArray(lane?.upwardCopies)) {
                 lane.upwardCopies.forEach((kVec) => {
@@ -2591,6 +2699,8 @@ export class MHSAAnimation {
                 });
             }
         });
+        this._snapCachedKeyVectorsUnderValues(lanes);
+        this._snapCachedKeyVectorsUnderValues(cachedLanes, { cachedOnly: true });
     }
 
     _finalizeKVVisualStateAfterConveyor() {

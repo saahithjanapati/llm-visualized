@@ -382,6 +382,10 @@ export function initGenerationController({
         if (chipCleanup && typeof chipCleanup.dispose === 'function') {
             chipCleanup.dispose();
         }
+        const chipPassState = attentionState;
+        const chipAnimateLaneIndices = passPlan.kvCacheDecodeActive
+            ? [Math.max(0, passPlan.totalLaneCount - 1)]
+            : null;
         chipCleanup = addEmbeddingAndTokenChips({
             pipeline,
             laneCount: passPlan.activeLaneCount,
@@ -391,6 +395,13 @@ export function initGenerationController({
             laneTokenIndices: state.laneTokenIndices,
             tokenLabels: state.tokenLabels,
             positionLabels: state.positionLabels,
+            chipLaneCount: passPlan.totalLaneCount,
+            chipLaneLayoutIndices: chipPassState.laneLayoutIndices,
+            chipLaneTokenIndices: chipPassState.laneTokenIndices,
+            chipTokenLabels: chipPassState.tokenLabels,
+            chipPositionLabels: chipPassState.positionLabels,
+            animateChipLaneIndices: chipAnimateLaneIndices,
+            drawStaticChipConnectors: true,
             cameraReturnPosition,
             cameraReturnTarget,
             numLayers,

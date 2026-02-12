@@ -380,9 +380,39 @@ export class SelfAttentionAnimator {
         if (!vec || !vec.group) return null;
         const dst = out || this._tmpCtxPosA;
         const ctxGroup = this.ctx && this.ctx.parentGroup ? this.ctx.parentGroup : null;
-        // Batched vector refs store their pose in a detached helper Object3D:
-        // group.position is already in MHSA-context local space.
-        if (!ctxGroup || vec.group.parent === ctxGroup || vec.isBatchedVectorRef || !vec.group.parent) {
+        if (vec.isBatchedVectorRef) {
+            const isKvPersistent = !!(
+                vec.userData?.kvCachePersistent
+                || vec.userData?.cachedKv
+                || vec.group?.userData?.kvCachePersistent
+                || vec.group?.userData?.cachedKv
+            );
+            if (isKvPersistent && ctxGroup) {
+                if (vec.group.parent && vec.group.parent !== ctxGroup && typeof vec.group.getWorldPosition === 'function') {
+                    vec.group.getWorldPosition(dst);
+                    try {
+                        if (typeof ctxGroup.worldToLocal === 'function') {
+                            ctxGroup.worldToLocal(dst);
+                        }
+                    } catch (_) { /* fallback to world position */ }
+                    return dst;
+                }
+                if (!vec.group.parent && vec._batch?.mesh?.parent) {
+                    dst.copy(vec.group.position);
+                    try {
+                        vec._batch.mesh.parent.localToWorld(dst);
+                        if (typeof ctxGroup.worldToLocal === 'function') {
+                            ctxGroup.worldToLocal(dst);
+                        }
+                    } catch (_) { /* fallback to local copy below */ }
+                    return dst;
+                }
+            }
+            // Non-persistent batched vectors keep local pose in the helper group.
+            dst.copy(vec.group.position);
+            return dst;
+        }
+        if (!ctxGroup || vec.group.parent === ctxGroup || !vec.group.parent) {
             dst.copy(vec.group.position);
             return dst;
         }
@@ -700,7 +730,10 @@ export class SelfAttentionAnimator {
         const headIdx = (redVector.userData && typeof redVector.userData.headIndex === 'number')
             ? redVector.userData.headIndex : null;
 
-        if (headIdx === null || !this.ctx.currentLanes) {
+        const conveyorLanes = (this.ctx && typeof this.ctx.getAttentionConveyorLanes === 'function')
+            ? this.ctx.getAttentionConveyorLanes()
+            : this.ctx.currentLanes;
+        if (headIdx === null || !Array.isArray(conveyorLanes) || conveyorLanes.length === 0) {
             onDone && onDone();
             return;
         }
@@ -709,9 +742,14 @@ export class SelfAttentionAnimator {
         let alignmentsCompleted  = 0;
 
         const laneHit = this._getLaneForZ(redZ);
-        const lanesToAlign = laneHit ? [laneHit] : this.ctx.currentLanes;
+        // In decode/KV-cache passes, only one live red vector animates, but we still
+        // need cached K vectors to align under their V columns for conveyor visuals.
+        // Prefer full conveyor lanes (cached + live). Fall back to laneHit only if needed.
+        const lanesToAlign = Array.isArray(conveyorLanes) && conveyorLanes.length
+            ? conveyorLanes
+            : (laneHit ? [laneHit] : this.ctx.currentLanes);
         lanesToAlign.forEach(lane => {
-            if (Math.abs(lane.zPos - redZ) < 0.1 && lane.upwardCopies && lane.upwardCopies[headIdx]) {
+            if (lane.upwardCopies && lane.upwardCopies[headIdx]) {
                 const green = lane.upwardCopies[headIdx];
                 alignmentsInProgress++;
 
@@ -1275,70 +1313,84 @@ export class SelfAttentionAnimator {
         const horizontalToK = this.ctx.headCoords && this.ctx.headCoords[headIdx]
             ? this.ctx.headCoords[headIdx].k
             : vector.group.position.x;
+        const firstLaneZ = Array.isArray(laneZs) && laneZs.length
+            ? laneZs[0]
+            : vector.group.position.z;
 
 
         // Convenience alias for durations / easing
         const QEasing = TWEEN.Easing.Quadratic.InOut;
 
         // ------------------------------------------------------------------
-        // 1. Slide from Q column → K column
+        // 1. Move to the first lane while still centered on the Q column.
+        // 2. Then slide from Q column → K column.
         // ------------------------------------------------------------------
         new TWEEN.Tween(vector.group.position)
-            .to({ x: horizontalToK }, this.BLUE_HORIZ_DURATION)
+            .to({ z: firstLaneZ }, this.BLUE_VERT_DURATION)
             .easing(QEasing)
             .onComplete(() => {
                 if (this.skipRequested) {
                     this._finishBlueImmediately(vector, headIdx, allDoneCb);
                     return;
                 }
-                // 2. Traverse along K vectors i times
-                const spheres = [];
-                this._traverseLanes(vector, laneZs, i, spheres, true, () => {
-                    this._markAttentionRowComplete(headIdx, i - 1);
-                    // Lift spheres upward to align with red vectors
-                    this._riseSpheres(spheres, i - 1, headIdx);
-                    // 3. FADE OUT at the LAST green (K) vector, then TELEPORT & FADE IN as red over V column
-                    new TWEEN.Tween(vector.group.scale)
-                        .to({ x: 0.001, y: 0.001, z: 0.001 }, this.BLUE_HORIZ_DURATION / 2)
-                        .easing(QEasing)
-                        .onComplete(() => {
-                            // BEGIN NEW LOGIC – start red traversal using the first V copy and skip spawning a pre-visible red vector
-                                this._retireVector(vector);
-                                this._startRedTraversalFromFirstCopy(headIdx, i, laneZs, spheres, allDoneCb);
-                                return;
-                                // (legacy logic kept for reference below)
-                                const targetX = horizontalToK; // stay aligned with K for pop-up effect
-                            // Move (instantly) to the red-vector height on the top lane
-                            vector.group.position.set(
-                                targetX,
-                                vector.group.position.y + this.RED_EXTRA_RISE,
-                                laneZs[0]
-                            );
-                            // Re-colour the vector to RED before popping back in
-                            this._setVectorColor(vector, this.ctx.brightRed || new THREE.Color(0xff0000));
-
-                            // 4. FADE BACK IN (now red)
+                new TWEEN.Tween(vector.group.position)
+                    .to({ x: horizontalToK }, this.BLUE_HORIZ_DURATION)
+                    .easing(QEasing)
+                    .onComplete(() => {
+                        if (this.skipRequested) {
+                            this._finishBlueImmediately(vector, headIdx, allDoneCb);
+                            return;
+                        }
+                        // 3. Traverse along K vectors i times
+                        const spheres = [];
+                        this._traverseLanes(vector, laneZs, i, spheres, true, () => {
+                            this._markAttentionRowComplete(headIdx, i - 1);
+                            // Lift spheres upward to align with red vectors
+                            this._riseSpheres(spheres, i - 1, headIdx);
+                            // 4. FADE OUT at the LAST green (K) vector, then TELEPORT & FADE IN as red over V column
                             new TWEEN.Tween(vector.group.scale)
-                                .to({ x: 1, y: 1, z: 1 }, this.BLUE_HORIZ_DURATION / 2)
+                                .to({ x: 0.001, y: 0.001, z: 0.001 }, this.BLUE_HORIZ_DURATION / 2)
                                 .easing(QEasing)
                                 .onComplete(() => {
-                                    // 5. Traverse along lanes again i times (over red vectors)
-                                    this._traverseLanes(vector, laneZs, i, spheres, false, () => {
-                                        // 6. Fade / dispose after finishing red traversal
-            new TWEEN.Tween(vector.group.scale)
-                .to({ x: 0.001, y: 0.001, z: 0.001 }, this.DUPLICATE_POP_OUT_MS)
-                                            .onComplete(() => {
-                                                if (vector.group.parent) vector.group.parent.remove(vector.group);
-                                                if (typeof vector.dispose === 'function') vector.dispose();
-                                                allDoneCb && allDoneCb();
-                                            })
-                                            .start();
-                                    });
+                                    // BEGIN NEW LOGIC – start red traversal using the first V copy and skip spawning a pre-visible red vector
+                                        this._retireVector(vector);
+                                        this._startRedTraversalFromFirstCopy(headIdx, i, laneZs, spheres, allDoneCb);
+                                        return;
+                                        // (legacy logic kept for reference below)
+                                        const targetX = horizontalToK; // stay aligned with K for pop-up effect
+                                    // Move (instantly) to the red-vector height on the top lane
+                                    vector.group.position.set(
+                                        targetX,
+                                        vector.group.position.y + this.RED_EXTRA_RISE,
+                                        laneZs[0]
+                                    );
+                                    // Re-colour the vector to RED before popping back in
+                                    this._setVectorColor(vector, this.ctx.brightRed || new THREE.Color(0xff0000));
+
+                                    // 5. FADE BACK IN (now red)
+                                    new TWEEN.Tween(vector.group.scale)
+                                        .to({ x: 1, y: 1, z: 1 }, this.BLUE_HORIZ_DURATION / 2)
+                                        .easing(QEasing)
+                                        .onComplete(() => {
+                                            // 6. Traverse along lanes again i times (over red vectors)
+                                            this._traverseLanes(vector, laneZs, i, spheres, false, () => {
+                                                // 7. Fade / dispose after finishing red traversal
+                    new TWEEN.Tween(vector.group.scale)
+                        .to({ x: 0.001, y: 0.001, z: 0.001 }, this.DUPLICATE_POP_OUT_MS)
+                                                    .onComplete(() => {
+                                                        if (vector.group.parent) vector.group.parent.remove(vector.group);
+                                                        if (typeof vector.dispose === 'function') vector.dispose();
+                                                        allDoneCb && allDoneCb();
+                                                    })
+                                                    .start();
+                                            });
+                                        })
+                                        .start();
                                 })
                                 .start();
-                        })
-                        .start();
-                });
+                        });
+                    })
+                    .start();
             })
             .start();
     }
