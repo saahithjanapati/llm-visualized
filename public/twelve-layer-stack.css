@@ -734,7 +734,7 @@ body.touch-ui * {
     grid-column: 1 / -1;
     position: static;
     min-width: 0;
-    margin-top: -2px;
+    margin-top: -6px;
     height: 84px;
     min-height: 84px;
     max-height: 84px;
@@ -751,14 +751,14 @@ body.touch-ui * {
     font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
     font-size: 11px;
     color: #cfd3dc;
-    margin-bottom: 4px;
+    margin-bottom: 2px;
     letter-spacing: .2px;
 }
 #equationsPanel .eq-body {
     font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
     font-size: 14px;
     line-height: 1.3;
-    margin-top: -1px;
+    margin-top: -3px;
     max-width: 100%;
     overflow-x: auto;
 }
@@ -1418,7 +1418,7 @@ body.touch-ui * {
         min-height: 64px;
         max-height: 64px;
     }
-    #equationsPanel .eq-title { font-size: 10px; margin-bottom: 3px; }
+    #equationsPanel .eq-title { font-size: 10px; margin-bottom: 2px; }
     #equationsPanel .eq-body { font-size: 12px; line-height: 1.28; }
     .detail-preview { min-height: 180px; }
     .detail-attention { margin: 0 8px; padding: 10px; }
@@ -1458,7 +1458,7 @@ body.touch-ui * {
         min-height: 64px;
         max-height: 64px;
     }
-    #equationsPanel .eq-title { font-size: 10px; margin-bottom: 3px; }
+    #equationsPanel .eq-title { font-size: 10px; margin-bottom: 2px; }
     #equationsPanel .eq-body { font-size: 12px; line-height: 1.28; }
     #detailPanel {
         display: flex;

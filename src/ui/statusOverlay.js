@@ -555,15 +555,8 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
             updateEquations(layer);
         }
 
-        const includeStageLine = !equationsPanel || !shouldShowEquations();
         const equationsVisible = !!equationsPanel && equationsPanel.style.display !== 'none';
-        const stageLabel = String(displayStage || '').trim().toLowerCase();
-        const equationLabel = String(equationsTitle?.textContent || '').trim().toLowerCase();
-        const duplicateFinalLabel = isFinalStage
-            && equationsVisible
-            && !!stageLabel
-            && stageLabel === equationLabel;
-        const showStageLine = includeStageLine && !duplicateFinalLabel;
+        const showStageLine = !equationsVisible;
         const safeIdx = Math.max(0, Math.min(total - 1, idx));
         const headerLine = isFinalStage ? 'Output Head' : `Layer ${safeIdx + 1} / ${total}`;
         const nextStatusText = showStageLine
