@@ -748,6 +748,7 @@ body.touch-ui * {
     display: none; /* toggled on when enabled */
 }
 #equationsPanel .eq-title {
+    display: none;
     font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
     font-size: 11px;
     color: #cfd3dc;

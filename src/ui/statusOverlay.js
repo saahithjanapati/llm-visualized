@@ -148,9 +148,10 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         const panelRect = equationsPanel.getBoundingClientRect();
         if (!(panelRect.width > 0 && panelRect.height > 0)) return;
 
-        const titleRect = equationsTitle ? equationsTitle.getBoundingClientRect() : { height: 0 };
         const titleStyle = equationsTitle ? window.getComputedStyle(equationsTitle) : null;
-        const titleMarginBottom = titleStyle ? getPx(titleStyle.marginBottom) : 0;
+        const titleVisible = !!titleStyle && titleStyle.display !== 'none';
+        const titleRect = (equationsTitle && titleVisible) ? equationsTitle.getBoundingClientRect() : { height: 0 };
+        const titleMarginBottom = titleVisible ? getPx(titleStyle.marginBottom) : 0;
         const bodyStyle = window.getComputedStyle(equationsBody);
         const paddingX = getPx(bodyStyle.paddingLeft) + getPx(bodyStyle.paddingRight);
         const paddingY = getPx(bodyStyle.paddingTop) + getPx(bodyStyle.paddingBottom);
