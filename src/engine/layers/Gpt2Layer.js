@@ -2233,7 +2233,10 @@ export default class Gpt2Layer extends BaseLayer {
 
     postUpdate() {
         if (this._skipToEndActive) {
-            this._applySkipVectorVisibility();
+            // During fast-skip, vector visibility can be re-enabled by async
+            // callbacks between frames; force a sweep every frame to prevent
+            // transient "straggler" vectors from flashing onscreen.
+            this._applySkipVectorVisibility({ force: true });
         }
     }
 
@@ -2316,6 +2319,20 @@ export default class Gpt2Layer extends BaseLayer {
         const parent = obj.parent;
         if (parent && parent.userData && parent.userData.isVector) return true;
         if (parent && parent.userData && typeof parent.userData.label === 'string' && parent.userData.label.includes('Vector')) return true;
+        // Fallback for prism vectors that may have had their labels replaced:
+        // they all share this stable shader cache key.
+        if (obj.material) {
+            const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+            for (let i = 0; i < mats.length; i++) {
+                const mat = mats[i];
+                if (!mat || typeof mat.customProgramCacheKey !== 'function') continue;
+                try {
+                    if (mat.customProgramCacheKey() === 'InstancedPrismGradientV1') {
+                        return true;
+                    }
+                } catch (_) { /* ignore cache-key probe failures */ }
+            }
+        }
         return false;
     }
 
@@ -2417,14 +2434,14 @@ export default class Gpt2Layer extends BaseLayer {
         const data = this._getLayerNormParamData(kind, param);
         if (!data) return false;
         const lnLabel = kind === 'ln1' ? 'LN1' : kind === 'ln2' ? 'LN2' : String(kind).toUpperCase();
-        const paramLabel = param === 'scale' ? 'Scale (gamma)' : 'Shift (beta)';
+        const paramLabel = param === 'scale' ? 'Scale' : 'Shift';
         const label = `${lnLabel} ${paramLabel}`;
         const meta = {
             stage: `${kind}.param.${param}`,
             layerIndex: this.index,
             notes: param === 'scale'
-                ? 'LayerNorm scale (gamma) parameter'
-                : 'LayerNorm shift (beta) parameter'
+                ? 'LayerNorm scale parameter'
+                : 'LayerNorm shift parameter'
         };
         return applyVectorData(targetVec, data, label, meta, colorOptions);
     }

@@ -133,14 +133,56 @@ function formatDims(inputDim, outputDim) {
     return `input dim: ${formatNumber(inputDim)} | output dim: ${formatNumber(outputDim)}`;
 }
 
-function buildMetadata(params = 'TBD', inputDim = null, outputDim = null) {
+function buildMetadata(params = 'TBD', inputDim = null, outputDim = null, length = null) {
     const hasDims = Number.isFinite(inputDim) && Number.isFinite(outputDim);
+    const hasLength = Number.isFinite(length);
     return {
         params,
         dims: hasDims ? formatDims(inputDim, outputDim) : 'TBD',
         inputDim: hasDims ? formatNumber(inputDim) : 'TBD',
-        outputDim: hasDims ? formatNumber(outputDim) : 'TBD'
+        outputDim: hasDims ? formatNumber(outputDim) : 'TBD',
+        length: hasLength ? formatNumber(length) : 'TBD'
     };
+}
+
+function isAttentionHeadVectorSelection(label, selectionInfo) {
+    const lower = (label || '').toLowerCase();
+    const category = String(selectionInfo?.info?.category || '').toUpperCase();
+    const stage = String(getActivationDataFromSelection(selectionInfo)?.stage || '').toLowerCase();
+    if (category === 'Q' || category === 'K' || category === 'V') return true;
+    if (selectionInfo?.kind === 'mergedKV') return true;
+    if (lower.includes('query vector') || lower.includes('key vector') || lower.includes('value vector')) return true;
+    if (lower.includes('merged key vectors') || lower.includes('merged value vectors')) return true;
+    if (lower.includes('attention weighted sum')) return true;
+    if (stage.startsWith('qkv.')) return true;
+    return false;
+}
+
+function isMlpMiddleVectorSelection(label, selectionInfo) {
+    const lower = (label || '').toLowerCase();
+    const stage = String(getActivationDataFromSelection(selectionInfo)?.stage || '').toLowerCase();
+    if (lower.includes('mlp up projection') || lower.includes('mlp activation')) return true;
+    if (lower.includes('mlp expanded segments')) return true;
+    if (stage.startsWith('mlp.up') || stage.startsWith('mlp.activation')) return true;
+    return false;
+}
+
+function resolveVectorLength(label, selectionInfo) {
+    const lower = (label || '').toLowerCase();
+    const qkvOutputLength = selectionInfo?.info?.vectorRef?.userData?.qkvOutputLength;
+    if (Number.isFinite(qkvOutputLength) && qkvOutputLength > 0) {
+        return Math.max(1, Math.floor(qkvOutputLength));
+    }
+    if (lower.includes('post-layernorm residual') || lower.includes('post layernorm residual')) {
+        return D_MODEL;
+    }
+    if (isMlpMiddleVectorSelection(label, selectionInfo)) {
+        return D_MODEL * 4;
+    }
+    if (isAttentionHeadVectorSelection(label, selectionInfo)) {
+        return D_HEAD;
+    }
+    return D_MODEL;
 }
 
 function formatValues(values, perLine = 8) {
@@ -765,7 +807,7 @@ function getLaneZoomMultiplier(object) {
     return 1 + extra;
 }
 
-function resolveMetadata(label, kind = null) {
+function resolveMetadata(label, kind = null, selectionInfo = null) {
     const lower = (label || '').toLowerCase();
     if (lower.startsWith('token:') || lower.startsWith('position:')) {
         return buildMetadata();
@@ -797,8 +839,8 @@ function resolveMetadata(label, kind = null) {
     if (lower.includes('positional embedding')) {
         return buildMetadata(formatNumber(CONTEXT_LEN * D_MODEL), CONTEXT_LEN, D_MODEL);
     }
-    if (lower.includes('query vector') || lower.includes('key vector') || lower.includes('value vector')) {
-        return buildMetadata();
+    if (isLikelyVectorSelection(label, selectionInfo)) {
+        return buildMetadata('TBD', null, null, resolveVectorLength(label, selectionInfo));
     }
     if (lower.includes('attention') || (kind === 'mergedKV')) {
         return buildMetadata();
@@ -912,14 +954,14 @@ function resolveDescription(label, kind = null, selectionInfo = null) {
         const lnName = isLn1 ? 'LN1' : 'LN2';
         const outSymbol = isLn1 ? 'x_{\\text{ln}}' : 'u_{\\text{ln}}';
         const hatSymbol = isLn1 ? '\\hat{x}' : '\\hat{u}';
-        return `This is the ${lnName} scale (gamma) vector. After normalization, each feature is multiplied by a learned scale so the output becomes $${outSymbol} = \\gamma \\odot ${hatSymbol} + \\beta$. These parameters are shared across tokens but applied per feature.`;
+        return `This is the ${lnName} scale vector. After normalization, each feature is multiplied by a learned scale so the output becomes $${outSymbol} = \\gamma \\odot ${hatSymbol} + \\beta$. These parameters are shared across tokens but applied per feature.`;
     }
     if ((lower.includes('ln1') || lower.includes('ln2')) && (lower.includes('shift') || lower.includes('beta'))) {
         const isLn1 = lower.includes('ln1');
         const lnName = isLn1 ? 'LN1' : 'LN2';
         const outSymbol = isLn1 ? 'x_{\\text{ln}}' : 'u_{\\text{ln}}';
         const hatSymbol = isLn1 ? '\\hat{x}' : '\\hat{u}';
-        return `This is the ${lnName} shift (beta) vector, the additive term in $${outSymbol} = \\gamma \\odot ${hatSymbol} + \\beta$. It lets the model re-center features after normalization.`;
+        return `This is the ${lnName} shift vector, the additive term in $${outSymbol} = \\gamma \\odot ${hatSymbol} + \\beta$. It lets the model re-center features after normalization.`;
     }
     if (lower.includes('query weight matrix')) {
         return 'This matrix projects the layer-normed residual stream into a query vector for a head: $Q = x_{\\text{ln}} W^Q$. Queries represent what a token is seeking, and together with keys they form the attention matrix shown below. In overlay notation: $H_i = \\mathrm{softmax}((Q_i K_i^\\top)/\\sqrt{d_h} + M) V_i$.';
@@ -953,10 +995,10 @@ function resolveDescription(label, kind = null, selectionInfo = null) {
             return 'This is the final LayerNorm at the top of the model. It normalizes the residual stream before the unembedding step. The operation is $\\hat{x} = (x - \\mu)/\\sigma$ followed by $x_{\\text{ln}} = \\gamma \\odot \\hat{x} + \\beta$.';
         }
         if (lower.includes('scale') || lower.includes('gamma')) {
-            return 'This is the LayerNorm scale (gamma) vector. After normalization, each feature is multiplied by a learned scale: $x_{\\text{ln}} = \\gamma \\odot \\hat{x} + \\beta$. Values are learned per feature and shared across tokens.';
+            return 'This is the LayerNorm scale vector. After normalization, each feature is multiplied by a learned scale: $x_{\\text{ln}} = \\gamma \\odot \\hat{x} + \\beta$. Values are learned per feature and shared across tokens.';
         }
         if (lower.includes('shift') || lower.includes('beta')) {
-            return 'This is the LayerNorm shift (beta) vector, the additive term in $x_{\\text{ln}} = \\gamma \\odot \\hat{x} + \\beta$. It lets the model re-center activations and choose a useful baseline.';
+            return 'This is the LayerNorm shift vector, the additive term in $x_{\\text{ln}} = \\gamma \\odot \\hat{x} + \\beta$. It lets the model re-center activations and choose a useful baseline.';
         }
         if (lower.includes('normed') || lower.includes('normalized')) {
             return 'This is the normalized vector for one token. Before scale and shift, it has zero mean and unit variance across features: $\\hat{x} = (x - \\mu)/\\sigma$. This stabilized vector becomes the input to the next sublayer.';
@@ -2290,7 +2332,11 @@ class SelectionPanel {
         this.subtitle = document.getElementById('detailSubtitle');
         this.params = document.getElementById('detailParams');
         this.inputDim = document.getElementById('detailInputDim');
+        this.inputDimLabel = document.getElementById('detailInputDimLabel');
+        this.inputDimHalf = document.getElementById('detailInputDimHalf');
         this.outputDim = document.getElementById('detailOutputDim');
+        this.outputDimLabel = document.getElementById('detailOutputDimLabel');
+        this.outputDimHalf = document.getElementById('detailOutputDimHalf');
         this.metaSection = document.getElementById('detailMeta');
         this.closeBtn = document.getElementById('detailClose');
         this.canvas = document.getElementById('detailCanvas');
@@ -3520,7 +3566,7 @@ class SelectionPanel {
         if (!this.isReady || !selection || !selection.label) return;
 
         const label = selection.label;
-        const metadata = resolveMetadata(label, selection.kind);
+        const metadata = resolveMetadata(label, selection.kind, selection);
         this.title.textContent = label;
         if (this.subtitle) {
             const layerIndex = findUserDataNumber(selection, 'layerIndex');
@@ -3537,11 +3583,18 @@ class SelectionPanel {
         if (this.params) this.params.textContent = metadata.params;
         const hideLayerNormFields = isLayerNormSolidSelection(label);
         const hideTensorDimsField = hideLayerNormFields || isAttentionScoreSelection(label, selection);
+        const isVectorMetadata = isLikelyVectorSelection(label, selection);
         const dimsRow = this.inputDim?.closest('.detail-row')
             || this.outputDim?.closest('.detail-row')
             || null;
-        if (this.inputDim) this.inputDim.textContent = hideTensorDimsField ? '' : metadata.inputDim;
-        if (this.outputDim) this.outputDim.textContent = hideTensorDimsField ? '' : metadata.outputDim;
+        if (this.inputDimLabel) this.inputDimLabel.textContent = isVectorMetadata ? 'Length' : 'Input dim';
+        if (this.outputDimLabel) this.outputDimLabel.textContent = 'Output dim';
+        if (this.inputDim) this.inputDim.textContent = hideTensorDimsField
+            ? ''
+            : (isVectorMetadata ? metadata.length : metadata.inputDim);
+        if (this.outputDim) this.outputDim.textContent = hideTensorDimsField || isVectorMetadata ? '' : metadata.outputDim;
+        if (this.outputDimHalf) this.outputDimHalf.style.display = (!hideTensorDimsField && isVectorMetadata) ? 'none' : '';
+        if (this.inputDimHalf) this.inputDimHalf.style.flexBasis = isVectorMetadata ? '100%' : '';
         if (dimsRow) dimsRow.style.display = hideTensorDimsField ? 'none' : '';
         if (this.description) {
             const desc = resolveDescription(label, selection.kind, selection);

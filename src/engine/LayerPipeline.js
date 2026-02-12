@@ -31,6 +31,7 @@ import { VectorVisualizationInstancedPrism } from '../components/VectorVisualiza
 import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
 import { PrismLayerNormAnimation } from '../animations/PrismLayerNormAnimation.js';
 import { setGlobalTrailMaxStepDistance, clearTrailsFromScene } from '../utils/trailUtils.js';
+import { applyLayerNormMaterial } from './layers/gpt2LayerUtils.js';
 
 function simplePrismMultiply(srcVec, tgtVec, onComplete) {
     const srcCount = srcVec && Number.isFinite(srcVec.instanceCount) ? srcVec.instanceCount : VECTOR_LENGTH_PRISM;
@@ -58,18 +59,6 @@ const LN_PARAM_MONOCHROME = {
     useData: true,
     valueMin: -1.8,
     valueMax: 1.8
-};
-const FINAL_LN_INPUT_LIGHT_BLUE = {
-    type: 'hueRange',
-    baseHue: 0.56,
-    hueSpread: 0.12,
-    saturation: 0.92,
-    minLightness: 0.42,
-    maxLightness: 0.84,
-    valueMin: -2,
-    valueMax: 2,
-    valueClampMin: -2,
-    valueClampMax: 2
 };
 
 const SKIP_SPEED_RAMP_IN_MS = 60;
@@ -939,7 +928,7 @@ export class LayerPipeline extends EventTarget {
             const durMs = (dist / (ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT)) * 1000;
             new TWEEN.Tween(resVec.group.position)
                 .to({ y: exitYLocal }, Math.max(100, durMs))
-                .easing(TWEEN.Easing.Quadratic.InOut)
+                .easing(TWEEN.Easing.Linear.None)
                 .onUpdate(() => {
                     if (typeof updateTrailFn === 'function') updateTrailFn(resVec);
                     this.dispatchEvent(new Event('progress'));
@@ -956,12 +945,6 @@ export class LayerPipeline extends EventTarget {
                 lastLayer.mhsaAnimation.suppressResidualRise = true;
             }
             const { lnTopGroup, lnCenterY, lnBottomY } = lnInfo;
-            const lnMeshes = [];
-            lnTopGroup.traverse(obj => {
-                if (obj && obj.isMesh && obj.material) {
-                    lnMeshes.push(obj);
-                }
-            });
 
             const lnColorState = {
                 highestY: -Infinity,
@@ -970,23 +953,15 @@ export class LayerPipeline extends EventTarget {
                 currentColor: new THREE.Color(COLOR_DARK_GRAY),
                 currentOpacity: 1.0
             };
+            const lnMaterialState = {
+                color: new THREE.Color(COLOR_DARK_GRAY),
+                opacity: 1.0,
+                transparent: false,
+                initialized: false
+            };
             const tempColor = new THREE.Color();
             const applyTopLnColor = () => {
-                lnMeshes.forEach(mesh => {
-                    const applyMaterial = mat => {
-                        if (!mat) return;
-                        if (mat.color) mat.color.copy(lnColorState.currentColor);
-                        if (mat.emissive) mat.emissive.copy(lnColorState.currentColor);
-                        mat.transparent = lnColorState.currentOpacity < 1.0;
-                        mat.opacity = lnColorState.currentOpacity;
-                        mat.needsUpdate = true;
-                    };
-                    if (Array.isArray(mesh.material)) {
-                        mesh.material.forEach(applyMaterial);
-                    } else {
-                        applyMaterial(mesh.material);
-                    }
-                });
+                applyLayerNormMaterial(lnTopGroup, lnColorState.currentColor, lnColorState.currentOpacity, lnMaterialState);
             };
             applyTopLnColor();
 
@@ -1165,11 +1140,6 @@ export class LayerPipeline extends EventTarget {
                 markSkipVisible(addVec);
                 recolorVectorFromData(addVec, finalShiftParams, LN_PARAM_MONOCHROME);
 
-                const applyFinalLnInputColor = () => {
-                    if (lane.__topLnInputColored) return;
-                    recolorVectorFromData(vec, vec.rawData, FINAL_LN_INPUT_LIGHT_BLUE);
-                    lane.__topLnInputColored = true;
-                };
                 const activateFinalLnParamColors = () => {
                     if (lane.__topLnParamsColored) return;
                     recolorVectorFromData(multVec, multVec.rawData, null);
@@ -1180,7 +1150,6 @@ export class LayerPipeline extends EventTarget {
                     if (!lane.__topLnEntered) lane.__topLnEntered = true;
                     if (multVec && multVec.group) multVec.group.visible = true;
                     if (addVec && addVec.group) addVec.group.visible = true;
-                    applyFinalLnInputColor();
                     activateFinalLnParamColors();
                 };
 
@@ -1196,7 +1165,7 @@ export class LayerPipeline extends EventTarget {
                     const durMs = (riseDist / (ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT)) * 1000;
                     new TWEEN.Tween(resVec.group.position)
                         .to({ y: entryYLocal }, Math.max(100, durMs))
-                        .easing(TWEEN.Easing.Quadratic.InOut)
+                        .easing(TWEEN.Easing.Linear.None)
                         .onUpdate(() => {
                             updateTopLnColor(resVec.group.position.y);
                             updateTrailPosition(resVec);
@@ -1331,7 +1300,7 @@ export class LayerPipeline extends EventTarget {
                     const duration = (distance / (ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT)) * 1000;
                     new TWEEN.Tween(vec.group.position)
                         .to({ y: targetY }, Math.max(100, duration))
-                        .easing(TWEEN.Easing.Quadratic.InOut)
+                        .easing(TWEEN.Easing.Linear.None)
                         .onUpdate(() => {
                             updateTopLnColor(vec.group.position.y);
                             updateTrailPosition(vec);
@@ -1402,7 +1371,7 @@ export class LayerPipeline extends EventTarget {
                     const duration = (distance / (ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT)) * 1000;
                     new TWEEN.Tween(vec.group.position)
                         .to({ y: stageTarget }, Math.max(100, duration))
-                        .easing(TWEEN.Easing.Quadratic.InOut)
+                        .easing(TWEEN.Easing.Linear.None)
                         .onUpdate(() => {
                             updateTopLnColor(vec.group.position.y);
                             updateTrailPosition(vec);

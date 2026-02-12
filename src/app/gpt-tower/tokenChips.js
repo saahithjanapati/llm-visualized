@@ -622,7 +622,7 @@ export function addEmbeddingAndTokenChips({
                         30,
                         instanceCount
                     );
-                    scaleVec.group.userData.label = 'Final LN Scale (gamma)';
+                    scaleVec.group.userData.label = 'Final LN Scale';
                     scaleVec.group.userData.skipVisible = true;
                     if (scaleVec.mesh) {
                         scaleVec.mesh.userData = scaleVec.mesh.userData || {};
@@ -642,7 +642,7 @@ export function addEmbeddingAndTokenChips({
                         30,
                         instanceCount
                     );
-                    shiftVec.group.userData.label = 'Final LN Shift (beta)';
+                    shiftVec.group.userData.label = 'Final LN Shift';
                     shiftVec.group.userData.skipVisible = true;
                     if (shiftVec.mesh) {
                         shiftVec.mesh.userData = shiftVec.mesh.userData || {};
