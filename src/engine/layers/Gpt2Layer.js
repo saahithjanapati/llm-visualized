@@ -2304,6 +2304,7 @@ export default class Gpt2Layer extends BaseLayer {
                     mat.opacity = prev.opacity;
                     mat.transparent = prev.transparent;
                     mat.depthWrite = prev.depthWrite;
+                    if (typeof prev.depthTest === 'boolean') mat.depthTest = prev.depthTest;
                     mat.needsUpdate = true;
                     hidden.delete(mat);
                 }
@@ -2326,6 +2327,7 @@ export default class Gpt2Layer extends BaseLayer {
                 mat.opacity = prev.opacity;
                 mat.transparent = prev.transparent;
                 mat.depthWrite = prev.depthWrite;
+                if (typeof prev.depthTest === 'boolean') mat.depthTest = prev.depthTest;
                 mat.needsUpdate = true;
                 hidden.delete(mat);
                 restoredAny = true;
@@ -2391,6 +2393,7 @@ export default class Gpt2Layer extends BaseLayer {
                         mat.opacity = prev.opacity;
                         mat.transparent = prev.transparent;
                         mat.depthWrite = prev.depthWrite;
+                        if (typeof prev.depthTest === 'boolean') mat.depthTest = prev.depthTest;
                         mat.needsUpdate = true;
                         hidden.delete(mat);
                     }
@@ -2403,7 +2406,8 @@ export default class Gpt2Layer extends BaseLayer {
                     hidden.set(mat, {
                         opacity: mat.opacity,
                         transparent: mat.transparent,
-                        depthWrite: mat.depthWrite
+                        depthWrite: mat.depthWrite,
+                        depthTest: mat.depthTest
                     });
                 }
                 const needsUpdate = mat.opacity !== 0 || mat.transparent !== true || mat.depthWrite !== false;

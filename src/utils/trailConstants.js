@@ -13,6 +13,7 @@ export const TRAIL_LANE_OPACITY_MIN_SCALE = 0.6;
 // Minimum distance (world units) between recorded trail points to reduce churn.
 export const TRAIL_MIN_SEGMENT_DISTANCE = 0.4;
 let TRAIL_OPACITY_RUNTIME_MULTIPLIER = 1.0;
+let TRAIL_LINE_WIDTH_RUNTIME_MULTIPLIER = 1.0;
 
 // Reserved for future extensions – THREE.LineBasicMaterial has no emissive term but
 // we expose a placeholder in case the implementation switches materials later.
@@ -58,13 +59,27 @@ export function setTrailOpacityRuntimeMultiplier(multiplier = 1) {
 }
 
 /**
+ * Runtime multiplier for trail line width. This mainly helps on platforms
+ * where LineBasicMaterial.linewidth is honored.
+ */
+export function setTrailLineWidthRuntimeMultiplier(multiplier = 1) {
+    const next = Number(multiplier);
+    if (!Number.isFinite(next) || next <= 0) {
+        TRAIL_LINE_WIDTH_RUNTIME_MULTIPLIER = 1.0;
+        return TRAIL_LINE_WIDTH_RUNTIME_MULTIPLIER;
+    }
+    TRAIL_LINE_WIDTH_RUNTIME_MULTIPLIER = Math.min(3.0, Math.max(0.5, next));
+    return TRAIL_LINE_WIDTH_RUNTIME_MULTIPLIER;
+}
+
+/**
  * Scale a base trail linewidth for the current display. Many platforms ignore
  * LineBasicMaterial.linewidth, but on those that respect it this keeps the
  * perceived thickness similar across DPRs.
  */
 export function scaleLineWidthForDisplay(baseWidth) {
     const dpr = getEffectiveDevicePixelRatio();
-    const scaled = baseWidth * dpr;
+    const scaled = baseWidth * dpr * TRAIL_LINE_WIDTH_RUNTIME_MULTIPLIER;
     // Ensure at least 1 to avoid sub-pixel rounding artifacts
     return Math.max(1, scaled);
 }

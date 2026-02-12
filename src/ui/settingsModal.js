@@ -296,12 +296,18 @@ export function initSettingsModal(pipeline) {
 
     const kvCacheModeToggle = document.getElementById('toggleKvCacheMode');
     kvCacheModeToggle?.addEventListener('change', () => {
+        const prevEnabled = !!appState.kvCacheModeEnabled;
         const nextEnabled = !!kvCacheModeToggle.checked;
         appState.kvCacheModeEnabled = nextEnabled;
         setPreference('kvCacheModeEnabled', nextEnabled);
         updateKvCacheStatusHint(nextEnabled);
         if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
-            window.dispatchEvent(new CustomEvent('kvCacheModeChanged', { detail: { enabled: nextEnabled } }));
+            window.dispatchEvent(new CustomEvent('kvCacheModeChanged', {
+                detail: {
+                    enabled: nextEnabled,
+                    previousEnabled: prevEnabled
+                }
+            }));
         }
     });
 

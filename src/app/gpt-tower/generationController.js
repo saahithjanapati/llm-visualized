@@ -1,7 +1,7 @@
 import { setNumVectorLanes, USE_PHYSICAL_MATERIALS } from '../../utils/constants.js';
 import { setAnimationLaneCount } from '../../animations/LayerAnimationConstants.js';
 import { applyPhysicalMaterialsToScene } from '../../utils/materialUtils.js';
-import { setTrailOpacityRuntimeMultiplier } from '../../utils/trailConstants.js';
+import { setTrailOpacityRuntimeMultiplier, setTrailLineWidthRuntimeMultiplier } from '../../utils/trailConstants.js';
 import { appState } from '../../state/appState.js';
 import { addEmbeddingAndTokenChips } from './tokenChips.js';
 import { formatTokenLabel } from './tokenLabels.js';
@@ -168,29 +168,39 @@ export function initGenerationController({
     let lastTick = null;
     let rafId = null;
     let chipCleanup = null;
-    let kvSessionBaseLaneCount = appState.kvCacheModeEnabled
+    let kvModeEnabled = !!appState.kvCacheModeEnabled;
+    let kvSessionBaseLaneCount = kvModeEnabled
         ? currentLaneCount
         : null;
 
-    const syncKvCachePassState = (laneCountValue) => {
+    const resolveKvSessionBase = (laneCountValue) => {
         const initialBase = Math.max(1, Math.floor(initialLaneCount || 1));
-        const base = !!appState.kvCacheModeEnabled
-            ? Math.max(1, Math.floor(kvSessionBaseLaneCount || laneCountValue || initialBase))
-            : initialBase;
+        if (!kvModeEnabled) return initialBase;
+        if (Number.isFinite(kvSessionBaseLaneCount) && kvSessionBaseLaneCount > 0) {
+            return Math.max(1, Math.floor(kvSessionBaseLaneCount));
+        }
+        // Defensive fallback when toggle event ordering misses transition state.
+        const fallback = Math.max(
+            1,
+            Math.floor(currentLaneCount || laneCountValue || initialBase)
+        );
+        kvSessionBaseLaneCount = fallback;
+        return fallback;
+    };
+
+    const syncKvCachePassState = (laneCountValue) => {
+        const base = resolveKvSessionBase(laneCountValue);
         const next = Math.max(1, Math.floor(laneCountValue || 1));
         const passIndex = Math.max(0, next - base);
         appState.kvCachePassIndex = passIndex;
-        appState.kvCachePrefillActive = !!appState.kvCacheModeEnabled && passIndex === 0;
+        appState.kvCachePrefillActive = kvModeEnabled && passIndex === 0;
     };
 
     const resolvePassPlan = (laneCountValue) => {
         const totalLaneCount = Math.max(1, Math.floor(laneCountValue || 1));
-        const initialBase = Math.max(1, Math.floor(initialLaneCount || 1));
-        const base = !!appState.kvCacheModeEnabled
-            ? Math.max(1, Math.floor(kvSessionBaseLaneCount || totalLaneCount || initialBase))
-            : initialBase;
+        const base = resolveKvSessionBase(totalLaneCount);
         const passIndex = Math.max(0, totalLaneCount - base);
-        const kvCacheDecodeActive = !!appState.kvCacheModeEnabled && passIndex > 0;
+        const kvCacheDecodeActive = kvModeEnabled && passIndex > 0;
         const activeLaneCount = kvCacheDecodeActive ? 1 : totalLaneCount;
         const laneLayoutIndices = kvCacheDecodeActive
             ? [Math.max(0, totalLaneCount - 1)]
@@ -209,7 +219,8 @@ export function initGenerationController({
             activeLaneCount,
             kvCacheDecodeActive,
             laneLayoutIndices,
-            laneTokenIndices
+            laneTokenIndices,
+            fullLaneTokenIndices
         };
     };
 
@@ -291,12 +302,14 @@ export function initGenerationController({
         updateNextTokenButton();
     };
 
-    const syncSelectionPanel = (passState) => {
+    const syncSelectionPanel = (passState, attentionState = null) => {
         if (!selectionPanel) return;
         selectionPanel.updateData?.({
             activationSource,
             laneTokenIndices: passState.laneTokenIndices,
-            tokenLabels: passState.tokenLabels
+            tokenLabels: passState.tokenLabels,
+            attentionTokenIndices: attentionState?.laneTokenIndices || passState.laneTokenIndices,
+            attentionTokenLabels: attentionState?.tokenLabels || passState.tokenLabels
         });
         selectionPanel.close?.();
     };
@@ -313,6 +326,15 @@ export function initGenerationController({
             fallbackTokenLabels,
             fallbackPositionLabels
         });
+        const attentionState = buildPassState({
+            activationSource,
+            laneCount: passPlan.totalLaneCount,
+            laneTokenIndices: passPlan.fullLaneTokenIndices,
+            laneLayoutIndices: Array.from({ length: passPlan.totalLaneCount }, (_, idx) => idx),
+            totalLaneCount: passPlan.totalLaneCount,
+            fallbackTokenLabels,
+            fallbackPositionLabels
+        });
         const laneLayoutIndices = Array.isArray(state.laneLayoutIndices) && state.laneLayoutIndices.length
             ? state.laneLayoutIndices
             : passPlan.laneLayoutIndices;
@@ -321,8 +343,10 @@ export function initGenerationController({
             : passPlan.totalLaneCount;
         syncKvCachePassState(nextLaneCount);
         const decodeSingleLaneActive = !!(passPlan.kvCacheDecodeActive && passPlan.activeLaneCount === 1);
-        // Slightly brighten trails when only the latest decode lane is active.
-        setTrailOpacityRuntimeMultiplier(decodeSingleLaneActive ? 1.3 : 1.0);
+        // Make the single decode-lane trail read bolder (brighter + thicker where supported)
+        // so it remains as visible as the old multi-lane look.
+        setTrailOpacityRuntimeMultiplier(decodeSingleLaneActive ? 1.85 : 1.0);
+        setTrailLineWidthRuntimeMultiplier(decodeSingleLaneActive ? 2.0 : 1.0);
 
         let preserveCameraPose = false;
         if (resetPipeline) {
@@ -334,12 +358,12 @@ export function initGenerationController({
                     laneLayoutCount: passPlan.totalLaneCount,
                     laneLayoutIndices: passPlan.laneLayoutIndices,
                     laneTokenIndices: state.laneTokenIndices,
-                    kvCacheModeEnabled: !!appState.kvCacheModeEnabled,
+                    kvCacheModeEnabled: kvModeEnabled,
                     kvCacheDecodeActive: passPlan.kvCacheDecodeActive,
                     preservePreviousTrails: false,
-                    captureKvCache: !!(appState.kvCacheModeEnabled && fromCompletedPass),
+                    captureKvCache: !!(kvModeEnabled && fromCompletedPass),
                     reuseKvCache: !!passPlan.kvCacheDecodeActive,
-                    clearKvCache: !appState.kvCacheModeEnabled || passPlan.passIndex === 0
+                    clearKvCache: !kvModeEnabled || passPlan.passIndex === 0
                 });
             const followEnabled = (typeof pipeline.isAutoCameraFollowEnabled === 'function')
                 ? pipeline.isAutoCameraFollowEnabled()
@@ -374,7 +398,7 @@ export function initGenerationController({
         });
 
         applyPhysicalMaterialsToScene(pipeline?.engine?.scene, USE_PHYSICAL_MATERIALS);
-        syncSelectionPanel(state);
+        syncSelectionPanel(state, attentionState);
 
         currentLaneCount = nextLaneCount;
         passComplete = false;
@@ -387,8 +411,12 @@ export function initGenerationController({
     };
 
     const handleKvCacheModeChanged = (event) => {
-        const prevEnabled = !!appState.kvCacheModeEnabled;
-        const nextEnabled = !!(event && event.detail && event.detail.enabled);
+        const detail = event && event.detail ? event.detail : null;
+        const nextEnabled = !!(detail && detail.enabled);
+        const prevEnabled = (detail && typeof detail.previousEnabled === 'boolean')
+            ? detail.previousEnabled
+            : kvModeEnabled;
+        kvModeEnabled = nextEnabled;
         appState.kvCacheModeEnabled = nextEnabled;
         if (nextEnabled && !prevEnabled) {
             // Start a fresh KV session from the current token count so the
@@ -396,6 +424,9 @@ export function initGenerationController({
             kvSessionBaseLaneCount = Math.max(1, Math.floor(currentLaneCount || 1));
         } else if (!nextEnabled && prevEnabled) {
             kvSessionBaseLaneCount = null;
+        } else if (nextEnabled && !(Number.isFinite(kvSessionBaseLaneCount) && kvSessionBaseLaneCount > 0)) {
+            // Guard against event ordering that skips the transition branch.
+            kvSessionBaseLaneCount = Math.max(1, Math.floor(currentLaneCount || 1));
         }
         syncKvCachePassState(currentLaneCount);
         pipeline?.dispatchEvent?.(new Event('progress'));
@@ -417,7 +448,7 @@ export function initGenerationController({
     rebuildPass({
         laneCount: currentLaneCount,
         passState: initialPassState,
-        resetPipeline: !!appState.kvCacheModeEnabled
+        resetPipeline: kvModeEnabled
     });
 
     if (!canLoop) {

@@ -841,6 +841,14 @@ export class SelfAttentionAnimator {
         );
         const hopCount = kvCacheDecodeTraversal ? laneZs.length : i;
         const rowIndex = hopCount - 1;
+        if (kvCacheDecodeTraversal && rowIndex > 0) {
+            // KV-cache decode should preserve previously completed rows in the
+            // attention matrix and only "re-open" the newest row.
+            const completed = this.attentionCompletedRows[headIdx] || 0;
+            const postCompleted = this.attentionPostCompletedRows[headIdx] || 0;
+            this.attentionCompletedRows[headIdx] = Math.max(completed, rowIndex);
+            this.attentionPostCompletedRows[headIdx] = Math.max(postCompleted, rowIndex);
+        }
         if (vector) {
             vector.userData = vector.userData || {};
             vector.userData.attnRowIndex = rowIndex;

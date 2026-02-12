@@ -25,7 +25,8 @@ import {
     SKIP_COMPONENT_COLOR_LERP_ALPHA,
     VECTOR_LENGTH_PRISM,
     NUM_VECTOR_LANES,
-    LAYER_STACK_SPACING_Y
+    LAYER_STACK_SPACING_Y,
+    HIDE_INSTANCE_Y_OFFSET
 } from '../utils/constants.js';
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
 import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
@@ -75,6 +76,13 @@ const TMP_WORLD_POS = new THREE.Vector3();
 const TMP_KV_PROXY_CENTER = new THREE.Vector3();
 const TMP_KV_PROXY_SIZE = new THREE.Vector3();
 const TMP_KV_PROXY_LOCAL_CENTER = new THREE.Vector3();
+const TMP_KV_PROXY_INST_MATRIX = new THREE.Matrix4();
+const TMP_KV_PROXY_INST_POS = new THREE.Vector3();
+const TMP_KV_PROXY_INST_QUAT = new THREE.Quaternion();
+const TMP_KV_PROXY_INST_SCALE = new THREE.Vector3();
+const TMP_KV_PROXY_CORNER = new THREE.Vector3();
+const KV_HIDDEN_SCALE_EPS = 0.01;
+const KV_COLLAPSED_SCALE = 0.001;
 const KV_RAYCAST_PROXY_GEOMETRY = new THREE.BoxGeometry(1, 1, 1);
 const KV_RAYCAST_PROXY_MATERIAL = (() => {
     const mat = new THREE.MeshBasicMaterial({
@@ -122,6 +130,104 @@ function buildElementwiseSum(lhs, rhs, targetLength) {
         out[i] = left + right;
     }
     return out;
+}
+
+function computeVisibleInstancedBoundsLocal(vec, outBounds) {
+    if (!vec || !vec.mesh || !vec.mesh.isInstancedMesh || !outBounds) return false;
+    const mesh = vec.mesh;
+    const geom = mesh.geometry;
+    if (!geom) return false;
+    if (!geom.boundingBox && typeof geom.computeBoundingBox === 'function') {
+        geom.computeBoundingBox();
+    }
+    const bb = geom.boundingBox;
+    if (!bb) return false;
+
+    const countFromVec = Number.isFinite(vec.instanceCount) ? Math.max(1, Math.floor(vec.instanceCount)) : null;
+    const countFromMesh = Number.isFinite(mesh.count) ? Math.max(1, Math.floor(mesh.count)) : null;
+    const count = Math.min(
+        countFromVec ?? countFromMesh ?? 0,
+        countFromMesh ?? countFromVec ?? 0
+    );
+    if (!Number.isFinite(count) || count <= 0) return false;
+
+    const hiddenThreshold = HIDE_INSTANCE_Y_OFFSET * 0.5;
+    outBounds.makeEmpty();
+    let hasVisible = false;
+
+    const meshMatrix = mesh.matrix;
+    const minX = bb.min.x;
+    const maxX = bb.max.x;
+    const minY = bb.min.y;
+    const maxY = bb.max.y;
+    const minZ = bb.min.z;
+    const maxZ = bb.max.z;
+    for (let i = 0; i < count; i++) {
+        mesh.getMatrixAt(i, TMP_KV_PROXY_INST_MATRIX);
+        TMP_KV_PROXY_INST_MATRIX.decompose(TMP_KV_PROXY_INST_POS, TMP_KV_PROXY_INST_QUAT, TMP_KV_PROXY_INST_SCALE);
+        if (!Number.isFinite(TMP_KV_PROXY_INST_POS.y) || TMP_KV_PROXY_INST_POS.y <= hiddenThreshold) continue;
+        if (!Number.isFinite(TMP_KV_PROXY_INST_SCALE.y) || Math.abs(TMP_KV_PROXY_INST_SCALE.y) < KV_HIDDEN_SCALE_EPS) continue;
+
+        hasVisible = true;
+        for (let xi = 0; xi < 2; xi++) {
+            const x = xi === 0 ? minX : maxX;
+            for (let yi = 0; yi < 2; yi++) {
+                const y = yi === 0 ? minY : maxY;
+                for (let zi = 0; zi < 2; zi++) {
+                    const z = zi === 0 ? minZ : maxZ;
+                    TMP_KV_PROXY_CORNER.set(x, y, z);
+                    TMP_KV_PROXY_CORNER.applyMatrix4(TMP_KV_PROXY_INST_MATRIX);
+                    TMP_KV_PROXY_CORNER.applyMatrix4(meshMatrix);
+                    outBounds.expandByPoint(TMP_KV_PROXY_CORNER);
+                }
+            }
+        }
+    }
+
+    return hasVisible && !outBounds.isEmpty();
+}
+
+function normalizeHiddenInstancesForPersistentKv(vec) {
+    if (!vec || !vec.mesh || !vec.mesh.isInstancedMesh) return false;
+    const mesh = vec.mesh;
+    const countFromVec = Number.isFinite(vec.instanceCount) ? Math.max(1, Math.floor(vec.instanceCount)) : null;
+    const countFromMesh = Number.isFinite(mesh.count) ? Math.max(1, Math.floor(mesh.count)) : null;
+    const count = Math.min(
+        countFromVec ?? countFromMesh ?? 0,
+        countFromMesh ?? countFromVec ?? 0
+    );
+    if (!Number.isFinite(count) || count <= 0) return false;
+
+    const hiddenThreshold = HIDE_INSTANCE_Y_OFFSET * 0.5;
+    const baseY = Number.isFinite(vec._basePrismCenterY) ? vec._basePrismCenterY : 0;
+    let changed = false;
+
+    for (let i = 0; i < count; i++) {
+        mesh.getMatrixAt(i, TMP_KV_PROXY_INST_MATRIX);
+        TMP_KV_PROXY_INST_MATRIX.decompose(TMP_KV_PROXY_INST_POS, TMP_KV_PROXY_INST_QUAT, TMP_KV_PROXY_INST_SCALE);
+
+        const hiddenByY = !Number.isFinite(TMP_KV_PROXY_INST_POS.y) || TMP_KV_PROXY_INST_POS.y <= hiddenThreshold;
+        const hiddenByScale = !Number.isFinite(TMP_KV_PROXY_INST_SCALE.y) || Math.abs(TMP_KV_PROXY_INST_SCALE.y) < KV_HIDDEN_SCALE_EPS;
+        if (!hiddenByY && !hiddenByScale) continue;
+
+        const needsRelayout = hiddenByY
+            || Math.abs(TMP_KV_PROXY_INST_POS.y - baseY) > 1e-4
+            || Math.abs(TMP_KV_PROXY_INST_SCALE.x - KV_COLLAPSED_SCALE) > 1e-4
+            || Math.abs(TMP_KV_PROXY_INST_SCALE.y - KV_COLLAPSED_SCALE) > 1e-4
+            || Math.abs(TMP_KV_PROXY_INST_SCALE.z - KV_COLLAPSED_SCALE) > 1e-4;
+        if (!needsRelayout) continue;
+
+        TMP_KV_PROXY_INST_POS.y = baseY;
+        TMP_KV_PROXY_INST_SCALE.set(KV_COLLAPSED_SCALE, KV_COLLAPSED_SCALE, KV_COLLAPSED_SCALE);
+        TMP_KV_PROXY_INST_MATRIX.compose(TMP_KV_PROXY_INST_POS, TMP_KV_PROXY_INST_QUAT, TMP_KV_PROXY_INST_SCALE);
+        mesh.setMatrixAt(i, TMP_KV_PROXY_INST_MATRIX);
+        changed = true;
+    }
+
+    if (changed && mesh.instanceMatrix) {
+        mesh.instanceMatrix.needsUpdate = true;
+    }
+    return changed;
 }
 
 /**
@@ -453,9 +559,14 @@ export class LayerPipeline extends EventTarget {
             vec.mesh.userData = vec.mesh.userData || {};
             vec.mesh.userData.skipVisible = true;
             vec.mesh.userData.kvCachePersistent = true;
+            // Cached K/V vectors keep many hidden prism instances far below the
+            // tower; frustum bounds can become unstable and cause angle-based
+            // popping in decode passes. Keep them always renderable.
+            vec.mesh.frustumCulled = false;
             if (vec.mesh.instanceMatrix && typeof vec.mesh.instanceMatrix.setUsage === 'function') {
                 vec.mesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
             }
+            normalizeHiddenInstancesForPersistentKv(vec);
             vec.mesh.matrixAutoUpdate = false;
             vec.mesh.updateMatrix();
             const mats = Array.isArray(vec.mesh.material) ? vec.mesh.material : [vec.mesh.material];
@@ -463,6 +574,10 @@ export class LayerPipeline extends EventTarget {
                 if (!mat) return;
                 mat.opacity = 1;
                 mat.transparent = false;
+                if ('depthWrite' in mat) mat.depthWrite = true;
+                if ('depthTest' in mat) mat.depthTest = true;
+                if ('alphaTest' in mat) mat.alphaTest = 0;
+                mat.side = THREE.DoubleSide;
                 mat.needsUpdate = true;
             });
         }
@@ -470,6 +585,7 @@ export class LayerPipeline extends EventTarget {
         vec.userData = vec.userData || {};
         vec.userData.parentLane = laneEntry;
         vec.userData.kvCachePersistent = true;
+        vec.userData.cachedKv = true;
         vec.userData.vectorCategory = category;
         if (Number.isFinite(headIndex)) {
             vec.userData.headIndex = headIndex;
@@ -477,10 +593,12 @@ export class LayerPipeline extends EventTarget {
             if (vec.mesh) vec.mesh.userData.headIndex = headIndex;
         }
 
-        const categoryLabel = category === 'V' ? 'Value Vector' : 'Key Vector';
-        const existingLabel = String(vec.group.userData.label || '');
-        if (!existingLabel || existingLabel.toLowerCase() === 'vector') {
-            vec.group.userData.label = categoryLabel;
+        const categoryLabel = category === 'V' ? 'Cached Value Vector' : 'Cached Key Vector';
+        vec.group.userData.cachedKv = true;
+        vec.group.userData.label = categoryLabel;
+        if (vec.mesh) {
+            vec.mesh.userData.cachedKv = true;
+            vec.mesh.userData.label = categoryLabel;
         }
         if (Number.isFinite(layerIndex)) vec.group.userData.layerIndex = layerIndex;
         if (Number.isFinite(laneEntry?.laneLayoutIndex)) vec.group.userData.laneLayoutIndex = laneEntry.laneLayoutIndex;
@@ -525,17 +643,25 @@ export class LayerPipeline extends EventTarget {
         });
 
         // Add one lightweight proxy mesh for raycast interactivity.
+        // IMPORTANT: ignore hidden prisms parked at HIDE_INSTANCE_Y_OFFSET so
+        // proxies don't balloon and overlap adjacent K/V vectors.
         const bounds = new THREE.Box3();
         group.updateMatrixWorld(true);
-        bounds.setFromObject(group);
-        if (!bounds.isEmpty()) {
-            bounds.getCenter(TMP_KV_PROXY_CENTER);
-            bounds.getSize(TMP_KV_PROXY_SIZE);
-            TMP_KV_PROXY_LOCAL_CENTER.copy(TMP_KV_PROXY_CENTER);
-            group.worldToLocal(TMP_KV_PROXY_LOCAL_CENTER);
+        const hasVisibleInstanceBounds = computeVisibleInstancedBoundsLocal(vec, bounds);
+        if (!hasVisibleInstanceBounds) {
+            bounds.setFromObject(group);
+            if (!bounds.isEmpty()) {
+                bounds.getCenter(TMP_KV_PROXY_CENTER);
+                bounds.getSize(TMP_KV_PROXY_SIZE);
+                TMP_KV_PROXY_LOCAL_CENTER.copy(TMP_KV_PROXY_CENTER);
+                group.worldToLocal(TMP_KV_PROXY_LOCAL_CENTER);
+            } else {
+                TMP_KV_PROXY_LOCAL_CENTER.set(0, 0, 0);
+                TMP_KV_PROXY_SIZE.set(12, 32, 12);
+            }
         } else {
-            TMP_KV_PROXY_LOCAL_CENTER.set(0, 0, 0);
-            TMP_KV_PROXY_SIZE.set(12, 32, 12);
+            bounds.getCenter(TMP_KV_PROXY_LOCAL_CENTER);
+            bounds.getSize(TMP_KV_PROXY_SIZE);
         }
 
         const proxy = new THREE.Mesh(KV_RAYCAST_PROXY_GEOMETRY, KV_RAYCAST_PROXY_MATERIAL);
@@ -550,6 +676,7 @@ export class LayerPipeline extends EventTarget {
         proxy.updateMatrix();
         proxy.userData = {
             kvRaycastProxy: true,
+            cachedKv: true,
             headIndex: Number.isFinite(headIndex) ? headIndex : undefined,
             layerIndex: Number.isFinite(layerIndex) ? layerIndex : undefined,
             laneLayoutIndex: Number.isFinite(laneLayoutIndex) ? laneLayoutIndex : undefined,

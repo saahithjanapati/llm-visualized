@@ -132,8 +132,12 @@ export class VectorVisualizationInstancedPrism {
 
         // Create a material per vector so we can vary opacity independently,
         // but force program reuse by returning a stable cache key.
-        const material = new THREE.MeshBasicMaterial({ 
-            color: new THREE.Color(0xffffff)
+        const material = new THREE.MeshBasicMaterial({
+            color: new THREE.Color(0xffffff),
+            // Prism vectors are frequently reused and moved between phases.
+            // Double-sided rendering avoids angle-dependent dropouts when
+            // any upstream transform introduces mirrored orientation.
+            side: THREE.DoubleSide
         });
         material.customProgramCacheKey = () => 'InstancedPrismGradientV1';
         material.onBeforeCompile = (shader) => {
@@ -172,6 +176,9 @@ varying float vGradientT;`
         const instancedGeometry = basePrismGeometry.clone();
         this.mesh = new THREE.InstancedMesh(instancedGeometry, material, this.instanceCount);
         this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        // Hidden instances are parked far below the scene; disabling frustum
+        // culling prevents incorrect angle-based popping from stale bounds.
+        this.mesh.frustumCulled = false;
         this.mesh.userData.isVector = true;
         this.group.add(this.mesh);
         
@@ -832,6 +839,7 @@ varying float vGradientT;`
         }
         const startIndexVisible = Math.floor((this.instanceCount - groupedVisibleUnits) / 2);
         const endIndexVisible = startIndexVisible + groupedVisibleUnits - 1;
+        const hideByScaleOnly = !!(visualOptions && visualOptions.hideByScaleOnly === true);
 
         // 4. Set appearance for all physical prisms
         const dummy = this._scratchDummy;
@@ -889,7 +897,9 @@ varying float vGradientT;`
             } else {
                 // This is an OUTER prism, should be hidden
                 dummy.scale.set(0.001, 0.001, 0.001); // Effectively invisible scale
-                dummy.position.set(baseX, HIDE_INSTANCE_Y_OFFSET, 0); // Also move far away
+                // For some MHSA paths we hide by scale only to avoid placing many
+                // instances at extreme Y, which can trigger zoom/orbit artifacts.
+                dummy.position.set(baseX, hideByScaleOnly ? this._basePrismCenterY : HIDE_INSTANCE_Y_OFFSET, 0);
                 // Only set to black if the option is true (or default)
                 if (visualOptions.setHiddenToBlack !== false) {
                     this.mesh.setColorAt(i, new THREE.Color(0,0,0)); // Black for hidden

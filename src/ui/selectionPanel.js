@@ -314,6 +314,44 @@ function normalizeSelectionLabel(label, selectionInfo = null) {
     if (isEmbeddingSum || isResidualStreamStage) {
         return 'Residual Stream Vector';
     }
+
+    const cachedKv = isKvCacheVectorSelection(selectionInfo);
+    if (cachedKv) {
+        if (lower.includes('value vector')) return 'Cached Value Vector';
+        if (lower.includes('key vector')) return 'Cached Key Vector';
+        const category = String(selectionInfo?.info?.category || '').toUpperCase();
+        if (category === 'V') return 'Cached Value Vector';
+        if (category === 'K') return 'Cached Key Vector';
+    }
+    return raw;
+}
+
+function simplifyLayerNormParamDisplayLabel(label, selectionInfo = null) {
+    const raw = String(label || '');
+    const lower = raw.toLowerCase();
+    const stageLower = String(getActivationDataFromSelection(selectionInfo)?.stage || '').toLowerCase();
+
+    const isLayerNormContext = lower.includes('layernorm')
+        || lower.includes('layer norm')
+        || lower.includes('ln1')
+        || lower.includes('ln2')
+        || lower.includes('final ln')
+        || stageLower.includes('ln1.param.')
+        || stageLower.includes('ln2.param.');
+    if (!isLayerNormContext) return raw;
+
+    const isScale = lower.includes('scale')
+        || lower.includes('gamma')
+        || lower.includes('γ')
+        || stageLower.endsWith('.scale');
+    if (isScale) return 'LayerNorm Scale';
+
+    const isShift = lower.includes('shift')
+        || lower.includes('beta')
+        || lower.includes('β')
+        || stageLower.endsWith('.shift');
+    if (isShift) return 'LayerNorm Shift';
+
     return raw;
 }
 
@@ -414,6 +452,29 @@ function isWeightedSumSelection(label, selectionInfo) {
         let current = obj;
         while (current && !current.isScene) {
             if (current.userData?.isWeightedSum === true) return true;
+            current = current.parent;
+        }
+    }
+    return false;
+}
+
+function isKvCacheVectorSelection(selectionInfo) {
+    const vectorRef = selectionInfo?.info?.vectorRef;
+    if (vectorRef?.userData?.kvCachePersistent === true || vectorRef?.userData?.cachedKv === true) {
+        return true;
+    }
+    const candidates = [selectionInfo?.object, selectionInfo?.hit?.object];
+    for (const obj of candidates) {
+        let current = obj;
+        while (current && !current.isScene) {
+            const userData = current.userData || null;
+            if (
+                userData?.kvCachePersistent === true
+                || userData?.cachedKv === true
+                || userData?.kvRaycastProxy === true
+            ) {
+                return true;
+            }
             current = current.parent;
         }
     }
@@ -919,7 +980,8 @@ function getLaneZoomMultiplier(object) {
 function resolveMetadata(label, kind = null, selectionInfo = null) {
     const lower = (label || '').toLowerCase();
     if (lower.startsWith('token:') || lower.startsWith('position:')) {
-        return buildMetadata();
+        const oneHotLength = lower.startsWith('position:') ? CONTEXT_LEN : VOCAB_SIZE;
+        return buildMetadata('TBD', null, null, oneHotLength);
     }
     if (lower.includes('query weight matrix')) {
         return buildMetadata(formatNumber(D_MODEL * D_HEAD), D_MODEL, D_HEAD);
@@ -2223,6 +2285,7 @@ function tryCopyVectorAppearanceToPreview(vec, selectionInfo, vectorRef, vectorM
 
 function buildVectorClonePreview(selectionInfo, label = '') {
     const weightedSumSelection = isWeightedSumSelection(label, selectionInfo);
+    const kvCacheVectorSelection = isKvCacheVectorSelection(selectionInfo);
     if (weightedSumSelection) {
         // Use the exact runtime vector geometry for weighted-sum selections.
         const directClone = buildDirectClonePreview(selectionInfo)
@@ -2242,7 +2305,7 @@ function buildVectorClonePreview(selectionInfo, label = '') {
     });
 
     const copiedAppearance = tryCopyVectorAppearanceToPreview(vec, selectionInfo, vectorRef, vectorMesh, {
-        forceLiveCopy: weightedSumSelection
+        forceLiveCopy: weightedSumSelection || kvCacheVectorSelection
     });
     if (!copiedAppearance) {
         const data = extractPreviewVectorData(selectionInfo);
@@ -2679,6 +2742,12 @@ class SelectionPanel {
         this.activationSource = options.activationSource || null;
         this.laneTokenIndices = Array.isArray(options.laneTokenIndices) ? options.laneTokenIndices.slice() : null;
         this.tokenLabels = Array.isArray(options.tokenLabels) ? options.tokenLabels.slice() : null;
+        this.attentionTokenIndices = Array.isArray(options.attentionTokenIndices)
+            ? options.attentionTokenIndices.slice()
+            : (Array.isArray(this.laneTokenIndices) ? this.laneTokenIndices.slice() : null);
+        this.attentionTokenLabels = Array.isArray(options.attentionTokenLabels)
+            ? options.attentionTokenLabels.slice()
+            : (Array.isArray(this.tokenLabels) ? this.tokenLabels.slice() : null);
         this.maxAttentionTokens = Number.isFinite(options.maxAttentionTokens)
             ? Math.max(1, Math.floor(options.maxAttentionTokens))
             : ATTENTION_PREVIEW_MAX_TOKENS;
@@ -2975,12 +3044,12 @@ class SelectionPanel {
         const layerIndex = findUserDataNumber(selection, 'layerIndex');
         if (!Number.isFinite(headIndex) || !Number.isFinite(layerIndex)) return null;
 
-        let tokenIndices = Array.isArray(this.laneTokenIndices) ? this.laneTokenIndices.slice() : null;
+        let tokenIndices = Array.isArray(this.attentionTokenIndices) ? this.attentionTokenIndices.slice() : null;
         if (!tokenIndices || !tokenIndices.length) {
             const tokenCount = this.activationSource && typeof this.activationSource.getTokenCount === 'function'
                 ? this.activationSource.getTokenCount()
                 : 0;
-            const labelCount = Array.isArray(this.tokenLabels) ? this.tokenLabels.length : 0;
+            const labelCount = Array.isArray(this.attentionTokenLabels) ? this.attentionTokenLabels.length : 0;
             const fallbackCount = Math.max(
                 0,
                 Math.min(this.maxAttentionTokens, tokenCount || labelCount || this.maxAttentionTokens)
@@ -2994,7 +3063,7 @@ class SelectionPanel {
         const trimmed = totalCount > tokenIndices.length;
 
         const tokenLabels = tokenIndices.map((tokenIndex, idx) => {
-            let labelText = Array.isArray(this.tokenLabels) ? this.tokenLabels[idx] : null;
+            let labelText = Array.isArray(this.attentionTokenLabels) ? this.attentionTokenLabels[idx] : null;
             if (!labelText && this.activationSource && typeof this.activationSource.getTokenString === 'function') {
                 labelText = this.activationSource.getTokenString(tokenIndex);
             }
@@ -3829,10 +3898,22 @@ class SelectionPanel {
         this._pendingRevealSize = null;
     }
 
-    updateData({ activationSource = null, laneTokenIndices = null, tokenLabels = null } = {}) {
+    updateData({
+        activationSource = null,
+        laneTokenIndices = null,
+        tokenLabels = null,
+        attentionTokenIndices = null,
+        attentionTokenLabels = null
+    } = {}) {
         this.activationSource = activationSource;
         this.laneTokenIndices = Array.isArray(laneTokenIndices) ? laneTokenIndices.slice() : null;
         this.tokenLabels = Array.isArray(tokenLabels) ? tokenLabels.slice() : null;
+        this.attentionTokenIndices = Array.isArray(attentionTokenIndices)
+            ? attentionTokenIndices.slice()
+            : (Array.isArray(this.laneTokenIndices) ? this.laneTokenIndices.slice() : null);
+        this.attentionTokenLabels = Array.isArray(attentionTokenLabels)
+            ? attentionTokenLabels.slice()
+            : (Array.isArray(this.tokenLabels) ? this.tokenLabels.slice() : null);
         this._attentionContext = null;
         this._attentionCells = null;
         this._attentionValues = null;
@@ -3965,8 +4046,10 @@ class SelectionPanel {
         if (!this.isReady || !selection || !selection.label) return;
 
         const label = normalizeSelectionLabel(selection.label, selection);
+        const displayLabel = simplifyLayerNormParamDisplayLabel(label, selection);
+        const lower = label.toLowerCase();
         const metadata = resolveMetadata(label, selection.kind, selection);
-        this.title.textContent = label;
+        this.title.textContent = displayLabel;
         if (this.subtitle) {
             const layerIndex = findUserDataNumber(selection, 'layerIndex');
             const headIndex = findUserDataNumber(selection, 'headIndex');
@@ -3982,7 +4065,8 @@ class SelectionPanel {
         if (this.params) this.params.textContent = metadata.params;
         const hideLayerNormFields = isLayerNormSolidSelection(label);
         const hideTensorDimsField = hideLayerNormFields || isAttentionScoreSelection(label, selection);
-        const isVectorMetadata = isLikelyVectorSelection(label, selection);
+        const isTokenChipSelection = lower.startsWith('token:') || lower.startsWith('position:');
+        const isVectorMetadata = isLikelyVectorSelection(label, selection) || isTokenChipSelection;
         const dimsRow = this.inputDim?.closest('.detail-row')
             || this.outputDim?.closest('.detail-row')
             || null;

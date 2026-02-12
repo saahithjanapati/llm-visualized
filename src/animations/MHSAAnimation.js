@@ -542,11 +542,20 @@ export class MHSAAnimation {
             if (vec.mesh) {
                 vec.mesh.visible = true;
                 if (vec.mesh.material) {
-                    vec.mesh.material.transparent = false;
-                    vec.mesh.material.opacity = 1.0;
-                    vec.mesh.material.needsUpdate = true;
+                    const mats = Array.isArray(vec.mesh.material) ? vec.mesh.material : [vec.mesh.material];
+                    mats.forEach((mat) => this._normalizeVectorMaterialVisible(mat, 1));
                 }
             }
+        }
+        if (vec.mesh && vec.mesh.isMesh) {
+            // Instanced prism copies can be pooled and reused across passes.
+            // Keep culling disabled so stale instance bounds never cause
+            // angle-dependent popping in KV-cache decode runs.
+            vec.mesh.frustumCulled = false;
+            const mats = Array.isArray(vec.mesh.material) ? vec.mesh.material : [vec.mesh.material];
+            mats.forEach((mat) => {
+                this._normalizeVectorMaterialVisible(mat, 1);
+            });
         }
         vec.userData = vec.userData || {};
         vec.userData.qkvProcessed = false;
@@ -897,6 +906,13 @@ export class MHSAAnimation {
                     this._skipMatrixColorsPending = false;
                 }
 
+                // In KV-cache decode passes (non-first token), skip the full
+                // self-attention conveyor and jump directly into concat/output.
+                if (this._kvCacheDecodeActive) {
+                    this.skipSelfAttentionAndStartConcat();
+                    return;
+                }
+
                 // ---------------------------------------------------------------
                 //  TEMP MODE: post pass-through behaviour
                 // ---------------------------------------------------------------
@@ -940,6 +956,9 @@ export class MHSAAnimation {
              if (this._skipMatrixColorsLocked && this._skipMatrixColorsPending) {
                  this._applyFinalMatrixColorsImmediate();
                  this._skipMatrixColorsPending = false;
+             }
+             if (this._kvCacheDecodeActive) {
+                 this.skipSelfAttentionAndStartConcat();
              }
         }
     }
@@ -1387,7 +1406,10 @@ export class MHSAAnimation {
         const vectorLength = vecList[0]?.instanceCount || this.vectorPrismCount || VECTOR_LENGTH_PRISM;
         const totalInstances = vecList.length * vectorLength;
         const baseGeo = new THREE.BoxGeometry(baseWidth, 1, baseDepth);
-        const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
+        const material = new THREE.MeshBasicMaterial({
+            color: 0xffffff,
+            side: THREE.DoubleSide
+        });
         // Shader patch to support per-instance left→right gradient identical to VectorVisualizationInstancedPrism
         material.customProgramCacheKey = () => 'InstancedPrismGradientV1';
         material.onBeforeCompile = (shader) => {
@@ -1412,6 +1434,7 @@ export class MHSAAnimation {
 
         const instanced = new THREE.InstancedMesh(baseGeo, material, totalInstances);
         instanced.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        instanced.frustumCulled = false;
 
         // Gradient buffers (per instance)
         const colorStartArr = new Float32Array(totalInstances * 3);
@@ -1466,7 +1489,7 @@ export class MHSAAnimation {
                 const baseX = computeCenteredPrismX(i, vectorLength);
                 const worldX = vec.group.position.x + baseX;
                 const baseYForCategory = isRedCategory ? canonicalRaisedBaseY : (vec.group && vec.group.position ? vec.group.position.y : 0);
-                const worldY = baseYForCategory + (hidden ? hideY : uniformCalculatedHeight / 2);
+                const worldY = baseYForCategory + uniformCalculatedHeight / 2;
                 const worldZ = vec.group.position.z;
 
                 dummy.position.set(worldX, worldY, worldZ);
@@ -2449,15 +2472,28 @@ export class MHSAAnimation {
         target.userData.skipVisible = true;
     }
 
+    _normalizeVectorMaterialVisible(mat, opacity = 1) {
+        if (!mat) return;
+        const clampedOpacity = Number.isFinite(opacity)
+            ? THREE.MathUtils.clamp(opacity, 0, 1)
+            : 1;
+        const fullyOpaque = clampedOpacity >= 0.999;
+        mat.transparent = !fullyOpaque;
+        mat.opacity = clampedOpacity;
+        if ('depthWrite' in mat) mat.depthWrite = fullyOpaque;
+        if ('depthTest' in mat) mat.depthTest = true;
+        if ('alphaTest' in mat) mat.alphaTest = 0;
+        mat.side = THREE.DoubleSide;
+        mat.needsUpdate = true;
+    }
+
     _setInstancedMeshVisible(mesh, { opacity = 1 } = {}) {
         if (!mesh || !mesh.isMesh) return;
+        mesh.frustumCulled = false;
         if (mesh.material) {
             const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
             mats.forEach((mat) => {
-                if (!mat) return;
-                mat.transparent = opacity < 1;
-                mat.opacity = opacity;
-                mat.needsUpdate = true;
+                this._normalizeVectorMaterialVisible(mat, opacity);
             });
         }
         this._markSkipVisible(mesh);
@@ -2476,12 +2512,10 @@ export class MHSAAnimation {
             if (vec.mesh) {
                 this._markSkipVisible(vec.mesh);
                 vec.mesh.visible = true;
+                vec.mesh.frustumCulled = false;
                 const mats = Array.isArray(vec.mesh.material) ? vec.mesh.material : [vec.mesh.material];
                 mats.forEach((mat) => {
-                    if (!mat) return;
-                    mat.transparent = opacity < 1;
-                    mat.opacity = opacity;
-                    mat.needsUpdate = true;
+                    this._normalizeVectorMaterialVisible(mat, opacity);
                 });
             }
             if (vec.isBatchedVectorRef && vec._batch?.mesh) {
@@ -2491,6 +2525,37 @@ export class MHSAAnimation {
                 vec._batch.syncAll();
             }
         } catch (_) { /* best effort */ }
+    }
+
+    _markVectorAsCachedKv(vec, category = null) {
+        if (!vec) return;
+        const resolvedCategory = String(
+            category
+            || vec?.userData?.vectorCategory
+            || vec?.userData?.qkvProcessedCategory
+            || 'K'
+        ).toUpperCase() === 'V' ? 'V' : 'K';
+        const label = resolvedCategory === 'V' ? 'Cached Value Vector' : 'Cached Key Vector';
+
+        vec.userData = vec.userData || {};
+        vec.userData.cachedKv = true;
+        vec.userData.kvCachePersistent = true;
+        vec.userData.vectorCategory = resolvedCategory;
+
+        if (vec.group) {
+            vec.group.userData = vec.group.userData || {};
+            vec.group.userData.cachedKv = true;
+            vec.group.userData.kvCachePersistent = true;
+            vec.group.userData.vectorCategory = resolvedCategory;
+            vec.group.userData.label = label;
+        }
+        if (vec.mesh) {
+            vec.mesh.userData = vec.mesh.userData || {};
+            vec.mesh.userData.cachedKv = true;
+            vec.mesh.userData.kvCachePersistent = true;
+            vec.mesh.userData.vectorCategory = resolvedCategory;
+            vec.mesh.userData.label = label;
+        }
     }
 
     _preserveKVVectorsForCache() {
@@ -2513,12 +2578,16 @@ export class MHSAAnimation {
         const lanes = Array.isArray(this.currentLanes) ? this.currentLanes : [];
         lanes.forEach((lane) => {
             if (Array.isArray(lane?.upwardCopies)) {
-                lane.upwardCopies.forEach((kVec) => this._setVectorVisible(kVec, { opacity: 1 }));
+                lane.upwardCopies.forEach((kVec) => {
+                    this._setVectorVisible(kVec, { opacity: 1 });
+                    this._markVectorAsCachedKv(kVec, 'K');
+                });
             }
             if (Array.isArray(lane?.sideCopies)) {
                 lane.sideCopies.forEach((sc) => {
                     if (!sc || sc.type !== 'V') return;
                     this._setVectorVisible(sc.vec, { opacity: 1 });
+                    this._markVectorAsCachedKv(sc.vec, 'V');
                 });
             }
         });

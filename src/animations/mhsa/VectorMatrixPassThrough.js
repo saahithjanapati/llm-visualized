@@ -88,7 +88,12 @@ const applyQkvProcessedVisuals = (vectorRef, ctx, vectorCategory, outLength, fin
         data,
         outLength,
         { numKeyColors, generationOptions: rangeOptions },
-        { setHiddenToBlack: false },
+        {
+            setHiddenToBlack: false,
+            // Keep hidden prisms collapsed in-place during MHSA so they do
+            // not introduce huge far-depth coordinates while orbiting/zooming.
+            hideByScaleOnly: true
+        },
     );
     if (vectorRef) {
         vectorRef.userData = vectorRef.userData || {};
@@ -264,6 +269,15 @@ export function animateVectorMatrixPassThrough(
                         3,
                         heavyVec.instanceCount || ctx.vectorPrismCount,
                     );
+                    if (smallVec.mesh && smallVec.mesh.isMesh) {
+                        smallVec.mesh.frustumCulled = false;
+                        const mats = Array.isArray(smallVec.mesh.material) ? smallVec.mesh.material : [smallVec.mesh.material];
+                        mats.forEach((mat) => {
+                            if (!mat) return;
+                            mat.side = THREE.DoubleSide;
+                            mat.needsUpdate = true;
+                        });
+                    }
 
                     if (ctx && ctx.parentGroup) {
                         ctx.parentGroup.add(smallVec.group);
@@ -465,6 +479,15 @@ export function animateVectorMatrixPassThrough(
                         3,
                         heavyVec.instanceCount || ctx.vectorPrismCount,
                     );
+                    if (smallVec.mesh && smallVec.mesh.isMesh) {
+                        smallVec.mesh.frustumCulled = false;
+                        const mats = Array.isArray(smallVec.mesh.material) ? smallVec.mesh.material : [smallVec.mesh.material];
+                        mats.forEach((mat) => {
+                            if (!mat) return;
+                            mat.side = THREE.DoubleSide;
+                            mat.needsUpdate = true;
+                        });
+                    }
 
                     ctx.parentGroup.add(smallVec.group);
                     vector = smallVec; // continue animating this handle

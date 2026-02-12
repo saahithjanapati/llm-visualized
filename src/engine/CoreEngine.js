@@ -31,6 +31,60 @@ function normalizeRaycastLabel(label, info = null, object = null) {
     return raw;
 }
 
+function simplifyLayerNormParamHoverLabel(label, info = null, object = null) {
+    const raw = String(label || '');
+    const lower = raw.toLowerCase();
+    const stage = info?.activationData?.stage
+        || object?.userData?.activationData?.stage
+        || '';
+    const stageLower = String(stage).toLowerCase();
+
+    const isLayerNormContext = lower.includes('layernorm')
+        || lower.includes('layer norm')
+        || lower.includes('ln1')
+        || lower.includes('ln2')
+        || lower.includes('final ln')
+        || stageLower.includes('ln1.param.')
+        || stageLower.includes('ln2.param.');
+    if (!isLayerNormContext) return raw;
+
+    const isScale = lower.includes('scale')
+        || lower.includes('gamma')
+        || lower.includes('γ')
+        || stageLower.endsWith('.scale');
+    if (isScale) return 'LayerNorm Scale';
+
+    const isShift = lower.includes('shift')
+        || lower.includes('beta')
+        || lower.includes('β')
+        || stageLower.endsWith('.shift');
+    if (isShift) return 'LayerNorm Shift';
+
+    return raw;
+}
+
+function isCachedKvSelection(info = null, object = null) {
+    const vectorRef = info?.vectorRef || null;
+    if (vectorRef?.userData?.cachedKv === true || vectorRef?.userData?.kvCachePersistent === true) {
+        return true;
+    }
+    if (vectorRef?.group?.userData?.cachedKv === true || vectorRef?.group?.userData?.kvCachePersistent === true) {
+        return true;
+    }
+    if (vectorRef?.mesh?.userData?.cachedKv === true || vectorRef?.mesh?.userData?.kvCachePersistent === true) {
+        return true;
+    }
+    let current = object || null;
+    while (current) {
+        const userData = current.userData || null;
+        if (userData?.cachedKv === true || userData?.kvCachePersistent === true) {
+            return true;
+        }
+        current = current.parent;
+    }
+    return false;
+}
+
 /**
  * CoreEngine is responsible for creating the Three-JS renderer, camera, 
  * post-processing stack and the single requestAnimationFrame loop that drives
@@ -951,6 +1005,40 @@ export class CoreEngine {
             return this._isRaycastObjectVisible(obj) && this._isRaycastObjectInteractable(obj);
         });
         if (!visibleHits.length) return null;
+        const resolveKvProxyHit = (hit) => {
+            const obj = hit?.object;
+            if (!obj || !obj.userData?.kvRaycastProxy) return null;
+            const proxyData = obj.userData || {};
+            const category = String(proxyData.vectorCategory || 'K').toUpperCase() === 'V' ? 'V' : 'K';
+            const info = {
+                category,
+                headIndex: Number.isFinite(proxyData.headIndex) ? proxyData.headIndex : null,
+                layerIndex: Number.isFinite(proxyData.layerIndex) ? proxyData.layerIndex : null,
+                laneLayoutIndex: Number.isFinite(proxyData.laneLayoutIndex) ? proxyData.laneLayoutIndex : null,
+                tokenIndex: Number.isFinite(proxyData.tokenIndex) ? proxyData.tokenIndex : null
+            };
+            const carrier = obj.parent || obj;
+            const cached = proxyData.cachedKv === true || isCachedKvSelection(info, carrier);
+            const catText = category === 'V'
+                ? (cached ? 'Cached Value Vector' : 'Value Vector')
+                : (cached ? 'Cached Key Vector' : 'Key Vector');
+            return {
+                label: normalizeRaycastLabel(catText, info, carrier),
+                hit,
+                info,
+                object: carrier,
+                kind: 'mergedKV'
+            };
+        };
+
+        // Pass 0.9: Prefer explicit KV-cache proxy hits when available.
+        // These are one-per-vector and far more stable than overlaps with
+        // merged instanced K/V geometry.
+        for (const hit of visibleHits) {
+            const resolved = resolveKvProxyHit(hit);
+            if (resolved) return resolved;
+        }
+
         // Pass 1: Prefer detailed labels from merged K/V instanced meshes anywhere in the hit list
         for (const hit of visibleHits) {
             try {
@@ -963,7 +1051,10 @@ export class CoreEngine {
                         if (typeof mhsa.decodeMergedKVIntersection === 'function') {
                             const info = mhsa.decodeMergedKVIntersection(hit);
                             if (info) {
-                                const catText  = info.category === 'V' ? 'Value Vector' : 'Key Vector';
+                                const cached = isCachedKvSelection(info, hit.object);
+                                const catText  = info.category === 'V'
+                                    ? (cached ? 'Cached Value Vector' : 'Value Vector')
+                                    : (cached ? 'Cached Key Vector' : 'Key Vector');
                                 return {
                                     label: normalizeRaycastLabel(catText, info),
                                     hit,
@@ -1021,26 +1112,8 @@ export class CoreEngine {
         // Resolve to the parent vector group so selection previews still clone the actual
         // vector object rather than the invisible proxy mesh.
         for (const hit of visibleHits) {
-            const obj = hit?.object;
-            if (!obj || !obj.userData?.kvRaycastProxy) continue;
-            const proxyData = obj.userData || {};
-            const category = String(proxyData.vectorCategory || 'K').toUpperCase() === 'V' ? 'V' : 'K';
-            const info = {
-                category,
-                headIndex: Number.isFinite(proxyData.headIndex) ? proxyData.headIndex : null,
-                layerIndex: Number.isFinite(proxyData.layerIndex) ? proxyData.layerIndex : null,
-                laneLayoutIndex: Number.isFinite(proxyData.laneLayoutIndex) ? proxyData.laneLayoutIndex : null,
-                tokenIndex: Number.isFinite(proxyData.tokenIndex) ? proxyData.tokenIndex : null
-            };
-            const carrier = obj.parent || obj;
-            const catText = category === 'V' ? 'Value Vector' : 'Key Vector';
-            return {
-                label: normalizeRaycastLabel(catText, info, carrier),
-                hit,
-                info,
-                object: carrier,
-                kind: 'mergedKV'
-            };
+            const resolved = resolveKvProxyHit(hit);
+            if (resolved) return resolved;
         }
 
         // Pass 2: Fallback – show the first generic label found
@@ -1116,7 +1189,12 @@ export class CoreEngine {
         }
         const resolved = this._resolveRaycastLabel(intersects);
         if (resolved && resolved.label) {
-            this._hoverLabelDiv.textContent = resolved.label;
+            const hoverLabel = simplifyLayerNormParamHoverLabel(
+                resolved.label,
+                resolved.info,
+                resolved.object || resolved.hit?.object || null
+            );
+            this._hoverLabelDiv.textContent = hoverLabel;
             this._hoverLabelDiv.style.left = `${clientX + 12}px`;
             this._hoverLabelDiv.style.top  = `${clientY + 12}px`;
             this._hoverLabelDiv.style.display = 'block';
