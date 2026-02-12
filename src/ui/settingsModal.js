@@ -19,7 +19,10 @@ export function initSettingsModal(pipeline) {
     appState.showFollowViewInspector = false;
     appState.devMode = getPreference('devMode', false);
     appState.showPerfOverlay = getPreference('showPerfOverlay', false);
-    appState.kvCacheModeEnabled = getPreference('kvCacheModeEnabled', false);
+    // Always start with KV cache mode disabled. This avoids sticky persisted
+    // state unexpectedly enabling decode-mode behavior on page load.
+    appState.kvCacheModeEnabled = false;
+    setPreference('kvCacheModeEnabled', false);
     pipeline?.setAutoCameraFollow?.(appState.autoCameraFollow, { immediate: true });
     pipeline?.engine?.setCameraDebugEnabled?.(appState.showCameraDebug);
     pipeline?.setDevMode?.(appState.devMode);

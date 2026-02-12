@@ -380,7 +380,9 @@ export class SelfAttentionAnimator {
         if (!vec || !vec.group) return null;
         const dst = out || this._tmpCtxPosA;
         const ctxGroup = this.ctx && this.ctx.parentGroup ? this.ctx.parentGroup : null;
-        if (!ctxGroup || vec.group.parent === ctxGroup) {
+        // Batched vector refs store their pose in a detached helper Object3D:
+        // group.position is already in MHSA-context local space.
+        if (!ctxGroup || vec.group.parent === ctxGroup || vec.isBatchedVectorRef || !vec.group.parent) {
             dst.copy(vec.group.position);
             return dst;
         }
