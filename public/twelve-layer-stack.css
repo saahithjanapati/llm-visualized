@@ -452,7 +452,7 @@ body.touch-ui * {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 8px 12px;
-    padding: 10px 12px;
+    padding: 10px 12px 6px;
     color: #fff;
     background: rgba(12,12,12,0.9);
     border: 1px solid rgba(255,255,255,0.12);
@@ -1400,7 +1400,7 @@ body.touch-ui * {
 /* Responsive adjustments */
 @media (max-width: 900px) {
     #hudStack { width: min(480px, 92vw); gap: 0; }
-    #hudPanel { padding: 10px 12px; gap: 8px 12px; }
+    #hudPanel { padding: 10px 12px 6px; gap: 8px 12px; }
 }
 @media (max-width: 600px) {
     #hudStack {
@@ -1410,7 +1410,7 @@ body.touch-ui * {
         max-width: calc(100vw - 16px);
         gap: 0;
     }
-    #hudPanel { padding: 6px 8px; gap: 4px 8px; }
+    #hudPanel { padding: 6px 8px 3px; gap: 4px 8px; }
     #statusOverlay { font-size: 11px; line-height: 1.12; }
     #parameterCounter .param-value { font-size: 15px; }
     #equationsPanel {
@@ -1449,7 +1449,7 @@ body.touch-ui * {
         max-width: calc(100vw - 16px);
         gap: 0;
     }
-    #hudPanel { padding: 6px 8px; gap: 4px 8px; }
+    #hudPanel { padding: 6px 8px 3px; gap: 4px 8px; }
     #statusOverlay { font-size: 11px; line-height: 1.12; }
     #parameterCounter .param-label { font-size: 10px; }
     #parameterCounter .param-value { font-size: 15px; }
