@@ -15,6 +15,7 @@ import {
     EMBEDDING_MATRIX_PARAMS_POSITION,
     LAYER_NORM_FINAL_COLOR,
     VECTOR_LENGTH_PRISM,
+    PRISM_DIMENSIONS_PER_UNIT,
     NUM_HEAD_SETS_LAYER,
     HIDE_INSTANCE_Y_OFFSET,
     resolveRenderPixelRatio
@@ -156,6 +157,14 @@ function isAttentionHeadVectorSelection(label, selectionInfo) {
     if (lower.includes('merged key vectors') || lower.includes('merged value vectors')) return true;
     if (lower.includes('attention weighted sum')) return true;
     if (stage.startsWith('qkv.')) return true;
+    return false;
+}
+
+function isQkvHeadVectorSelection(label, selectionInfo) {
+    const lower = (label || '').toLowerCase();
+    const stage = String(getActivationDataFromSelection(selectionInfo)?.stage || '').toLowerCase();
+    if (stage.startsWith('qkv.')) return true;
+    if (lower.includes('query vector') || lower.includes('key vector') || lower.includes('value vector')) return true;
     return false;
 }
 
@@ -643,6 +652,18 @@ function isAttentionScoreSelection(label, selectionInfo) {
     if (typeof stage === 'string' && stage.startsWith('attention.')) return true;
     const obj = selectionInfo?.object || selectionInfo?.hit?.object;
     return !!(obj && obj.isMesh && obj.geometry && obj.geometry.type === 'SphereGeometry');
+}
+
+function isLogitBarSelection(label, selectionInfo) {
+    const lower = (label || '').toLowerCase();
+    if (lower === 'logit' || lower.startsWith('logit ') || lower.includes('top logit bars')) {
+        return true;
+    }
+    const kindLower = String(selectionInfo?.kind || '').toLowerCase();
+    if (kindLower === 'logitbar') return true;
+    const source = selectionInfo?.object || selectionInfo?.hit?.object;
+    const instanceKindLower = String(source?.userData?.instanceKind || '').toLowerCase();
+    return instanceKindLower === 'logitbar';
 }
 
 function resolveFinalPreviewColor(label) {
@@ -2004,8 +2025,15 @@ function resolveVectorPreviewColor(label, selectionInfo) {
     return resolveFinalPreviewColor(label || '');
 }
 
-function resolveVectorPreviewInstanceCount(selectionInfo) {
+function resolveVectorPreviewInstanceCount(selectionInfo, label = '') {
     const vectorRef = selectionInfo?.info?.vectorRef;
+    // In KV-cache decode we can receive Q/K/V selections without a vectorRef.
+    // In that case, avoid using the whole source mesh count (often full-width)
+    // and match the non-KV behavior: preview only the per-head vector width.
+    if (!vectorRef && isAttentionHeadVectorSelection(label, selectionInfo)) {
+        const headLength = Math.max(1, Math.floor(resolveVectorLength(label, selectionInfo) || D_HEAD));
+        return Math.max(1, Math.ceil(headLength / PRISM_DIMENSIONS_PER_UNIT));
+    }
     const candidates = [
         vectorRef?.instanceCount,
         vectorRef?._batch?.prismCount,
@@ -2148,6 +2176,52 @@ function copyInstancedVectorSliceToPreview(previewVec, sourceMesh, sourceOffset 
     copyAttr('colorStart');
     copyAttr('colorEnd');
     return true;
+}
+
+function copyInstancedVectorColorsToPreview(previewVec, sourceMesh, sourceOffset = 0, sourceCount = null) {
+    if (!previewVec?.mesh || !sourceMesh?.isInstancedMesh) return false;
+    const dstMesh = previewVec.mesh;
+    const dstCount = Number.isFinite(previewVec.instanceCount)
+        ? Math.max(1, Math.floor(previewVec.instanceCount))
+        : 0;
+    const srcTotal = Number.isFinite(sourceMesh.count)
+        ? Math.max(0, Math.floor(sourceMesh.count))
+        : Math.max(0, Math.floor(sourceMesh.instanceMatrix?.count || 0));
+    const start = Math.max(0, Math.floor(sourceOffset || 0));
+    const available = Math.max(0, srcTotal - start);
+    const requested = Number.isFinite(sourceCount)
+        ? Math.max(0, Math.floor(sourceCount))
+        : dstCount;
+    const copyCount = Math.min(dstCount, available, requested);
+    if (copyCount <= 0) return false;
+
+    let copied = false;
+    if (sourceMesh.instanceColor?.array && dstMesh.instanceColor?.array) {
+        const srcColors = sourceMesh.instanceColor.array;
+        const dstColors = dstMesh.instanceColor.array;
+        const srcStart = start * 3;
+        const maxCopy = Math.min(copyCount * 3, srcColors.length - srcStart, dstColors.length);
+        if (maxCopy > 0) {
+            dstColors.set(srcColors.subarray(srcStart, srcStart + maxCopy), 0);
+            dstMesh.instanceColor.needsUpdate = true;
+            copied = true;
+        }
+    }
+
+    const copyAttr = (name) => {
+        const srcAttr = sourceMesh.geometry?.getAttribute?.(name);
+        const dstAttr = dstMesh.geometry?.getAttribute?.(name);
+        if (!srcAttr?.array || !dstAttr?.array) return;
+        const srcStart = start * 3;
+        const maxCopy = Math.min(copyCount * 3, srcAttr.array.length - srcStart, dstAttr.array.length);
+        if (maxCopy <= 0) return;
+        dstAttr.array.set(srcAttr.array.subarray(srcStart, srcStart + maxCopy), 0);
+        dstAttr.needsUpdate = true;
+        copied = true;
+    };
+    copyAttr('colorStart');
+    copyAttr('colorEnd');
+    return copied;
 }
 
 function isInstancedVectorSliceInMotion(sourceMesh, sourceOffset = 0, sourceCount = null) {
@@ -2297,19 +2371,49 @@ function buildVectorClonePreview(selectionInfo, label = '') {
     const vectorMesh = findVectorSourceMesh(selectionInfo);
     if (!vectorRef && !vectorMesh) return null;
 
-    const prismCount = resolveVectorPreviewInstanceCount(selectionInfo);
+    const prismCount = resolveVectorPreviewInstanceCount(selectionInfo, label);
     const vec = createPreviewVector({
         colorHex: resolveVectorPreviewColor(label, selectionInfo),
         data: null,
         instanceCount: prismCount
     });
 
-    const copiedAppearance = tryCopyVectorAppearanceToPreview(vec, selectionInfo, vectorRef, vectorMesh, {
-        forceLiveCopy: weightedSumSelection || kvCacheVectorSelection
-    });
+    const forceHeadDataFallback = !vectorRef && isAttentionHeadVectorSelection(label, selectionInfo);
+    const copiedAppearance = forceHeadDataFallback
+        ? false
+        : tryCopyVectorAppearanceToPreview(vec, selectionInfo, vectorRef, vectorMesh, {
+            forceLiveCopy: weightedSumSelection || kvCacheVectorSelection
+        });
     if (!copiedAppearance) {
         const data = extractPreviewVectorData(selectionInfo);
-        if (Array.isArray(data) && data.length > 0) {
+        if (isQkvHeadVectorSelection(label, selectionInfo)) {
+            const outputLength = Math.max(1, Math.floor(resolveVectorLength(label, selectionInfo) || D_HEAD));
+            const processedData = (Array.isArray(data) && data.length > 0)
+                ? data.slice(0, outputLength)
+                : [0];
+            const numKeyColors = Math.min(30, Math.max(2, processedData.length));
+            vec.applyProcessedVisuals(
+                processedData,
+                outputLength,
+                { numKeyColors, generationOptions: null },
+                { setHiddenToBlack: false, hideByScaleOnly: true },
+                processedData
+            );
+            const colorSourceMesh = (vectorRef?.mesh?.isInstancedMesh ? vectorRef.mesh : null)
+                || (vectorMesh?.isInstancedMesh ? vectorMesh : null);
+            if (colorSourceMesh) {
+                const sourceOffset = (!vectorRef
+                    && Number.isFinite(selectionInfo?.hit?.instanceId)
+                    && Number.isFinite(colorSourceMesh.count)
+                    && colorSourceMesh.count > vec.instanceCount)
+                    ? Math.max(
+                        0,
+                        Math.floor(selectionInfo.hit.instanceId / Math.max(1, vec.instanceCount)) * Math.max(1, vec.instanceCount)
+                    )
+                    : 0;
+                copyInstancedVectorColorsToPreview(vec, colorSourceMesh, sourceOffset, vec.instanceCount);
+            }
+        } else if (Array.isArray(data) && data.length > 0) {
             applyDataToPreviewVector(vec, data);
         } else if (Array.isArray(vectorRef?.currentKeyColors)) {
             const keyColors = vectorRef.currentKeyColors
@@ -2447,6 +2551,7 @@ function isLayerNormLabel(label) {
 
 function resolvePreviewObject(label, selectionInfo) {
     const lower = (label || '').toLowerCase();
+    if (isLogitBarSelection(label, selectionInfo)) return null;
     const attentionSpherePreview = buildAttentionSpherePreview(selectionInfo);
     if (attentionSpherePreview) return attentionSpherePreview;
     const isVectorSelection = isLikelyVectorSelection(label, selectionInfo);
@@ -3871,6 +3976,7 @@ class SelectionPanel {
         if (!this.isReady) return;
         this.isOpen = false;
         this.panel.classList.remove('is-open');
+        this.panel.classList.remove('is-preview-hidden');
         this.hudStack?.classList.remove('detail-open');
         this.hudPanel?.classList.remove('detail-open');
         this.panel.setAttribute('aria-hidden', 'true');
@@ -4048,7 +4154,9 @@ class SelectionPanel {
         const label = normalizeSelectionLabel(selection.label, selection);
         const displayLabel = simplifyLayerNormParamDisplayLabel(label, selection);
         const lower = label.toLowerCase();
+        const hidePreviewForSelection = isLogitBarSelection(label, selection);
         const metadata = resolveMetadata(label, selection.kind, selection);
+        this.panel.classList.toggle('is-preview-hidden', hidePreviewForSelection);
         this.title.textContent = displayLabel;
         if (this.subtitle) {
             const layerIndex = findUserDataNumber(selection, 'layerIndex');
@@ -4131,46 +4239,55 @@ class SelectionPanel {
             this.currentAnimator = null;
         }
 
-        const preview = resolvePreviewObject(label, selection);
-        const previewRoot = new THREE.Group();
+        const preview = hidePreviewForSelection ? null : resolvePreviewObject(label, selection);
         if (preview?.object) {
+            const previewRoot = new THREE.Group();
             previewRoot.add(preview.object);
             centerPreviewPivot(preview.object);
-        }
-        this.currentPreview = previewRoot;
-        this.currentDispose = preview.dispose;
-        this.currentAnimator = preview.animate || null;
-        const desiredRotation = new THREE.Euler(PREVIEW_BASE_TILT_X, PREVIEW_BASE_ROTATION_Y, 0);
-        if (this.currentPreview?.rotation) {
-            this.currentPreview.rotation.set(0, 0, 0);
-        }
-        this._lastFrameTime = performance.now();
-        const isVectorPreview = isLikelyVectorSelection(label, selection);
-        const isOutputProjPreview = label.toLowerCase().includes('output projection matrix');
-        const paddingMultiplier = isVectorPreview
-            ? PREVIEW_VECTOR_PADDING_MULT
-            : (isQkvMatrixLabel(label) ? 0.75 : (isOutputProjPreview ? 0.85 : 1));
-        const distanceMultiplier = isVectorPreview
-            ? PREVIEW_VECTOR_DISTANCE_MULT
-            : (isQkvMatrixLabel(label) ? 0.85 : (isOutputProjPreview ? 0.8 : 1));
-        const laneZoom = getLaneZoomMultiplier(this.currentPreview);
-        const finalPadding = paddingMultiplier * laneZoom;
-        const finalDistance = distanceMultiplier * laneZoom;
-        this._rotationSpeedMult = 1;
-        this._lastFitOptions = { paddingMultiplier: finalPadding, distanceMultiplier: finalDistance };
-        if (!this.isOpen) {
-            this._pendingReveal = true;
-            if (this.canvas) this.canvas.style.opacity = '0';
+            this.currentPreview = previewRoot;
+            this.currentDispose = (typeof preview.dispose === 'function') ? preview.dispose : null;
+            this.currentAnimator = (typeof preview.animate === 'function') ? preview.animate : null;
+            const desiredRotation = new THREE.Euler(PREVIEW_BASE_TILT_X, PREVIEW_BASE_ROTATION_Y, 0);
+            if (this.currentPreview?.rotation) {
+                this.currentPreview.rotation.set(0, 0, 0);
+            }
+            this._lastFrameTime = performance.now();
+            const isVectorPreview = isLikelyVectorSelection(label, selection);
+            const isOutputProjPreview = label.toLowerCase().includes('output projection matrix');
+            const paddingMultiplier = isVectorPreview
+                ? PREVIEW_VECTOR_PADDING_MULT
+                : (isQkvMatrixLabel(label) ? 0.75 : (isOutputProjPreview ? 0.85 : 1));
+            const distanceMultiplier = isVectorPreview
+                ? PREVIEW_VECTOR_DISTANCE_MULT
+                : (isQkvMatrixLabel(label) ? 0.85 : (isOutputProjPreview ? 0.8 : 1));
+            const laneZoom = getLaneZoomMultiplier(this.currentPreview);
+            const finalPadding = paddingMultiplier * laneZoom;
+            const finalDistance = distanceMultiplier * laneZoom;
+            this._rotationSpeedMult = 1;
+            this._lastFitOptions = { paddingMultiplier: finalPadding, distanceMultiplier: finalDistance };
+            if (!this.isOpen) {
+                this._pendingReveal = true;
+                if (this.canvas) this.canvas.style.opacity = '0';
+            } else {
+                this._pendingReveal = false;
+                if (this.canvas) this.canvas.style.opacity = '1';
+                fitObjectToView(this.currentPreview, this.camera, { paddingMultiplier: finalPadding, distanceMultiplier: finalDistance });
+                this._noteFit();
+            }
+            if (this.currentPreview?.rotation) {
+                this.currentPreview.rotation.copy(desiredRotation);
+            }
+            this.scene.add(this.currentPreview);
         } else {
+            this.currentPreview = null;
+            this.currentDispose = (typeof preview?.dispose === 'function') ? preview.dispose : null;
+            this.currentAnimator = (typeof preview?.animate === 'function') ? preview.animate : null;
+            this._rotationSpeedMult = 1;
+            this._lastFitOptions = null;
             this._pendingReveal = false;
+            this._pendingRevealSize = null;
             if (this.canvas) this.canvas.style.opacity = '1';
-            fitObjectToView(this.currentPreview, this.camera, { paddingMultiplier: finalPadding, distanceMultiplier: finalDistance });
-            this._noteFit();
         }
-        if (this.currentPreview?.rotation) {
-            this.currentPreview.rotation.copy(desiredRotation);
-        }
-        this.scene.add(this.currentPreview);
 
         this._updateAttentionPreview(selection);
         this.open();
