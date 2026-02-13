@@ -265,8 +265,25 @@ export function initParameterCounter(pipeline, numLayers) {
         startNext();
     };
 
-    renderValue(currentValue);
-    seedTokenEmbedding();
+    const resetCounterForNewPass = () => {
+        currentValue = 0;
+        lastIndex = -1;
+        activeAnim = null;
+        pauseStamp = null;
+        queue.length = 0;
+        counter.dataset.animating = 'false';
+        if (stageEl) stageEl.textContent = '';
+        renderValue(currentValue);
+        seedTokenEmbedding();
+    };
+
+    resetCounterForNewPass();
+
+    if (pipeline && typeof pipeline.addEventListener === 'function') {
+        pipeline.addEventListener('passreset', () => {
+            resetCounterForNewPass();
+        });
+    }
 
     const tick = (now) => {
         const skipping = typeof pipeline?.isSkipToEndActive === 'function' && pipeline.isSkipToEndActive();

@@ -309,14 +309,20 @@ function normalizeSelectionLabel(label, selectionInfo = null) {
     const activation = getActivationDataFromSelection(selectionInfo);
     const stageLower = String(activation?.stage || '').toLowerCase();
 
+    const isPostLayerNormResidual = lower.includes('post-layernorm residual')
+        || lower.includes('post layernorm residual')
+        || stageLower === 'ln1.shift'
+        || stageLower === 'ln2.shift';
+    if (isPostLayerNormResidual) {
+        return 'Post LayerNorm Residual Vector';
+    }
+
     const isEmbeddingSum = lower.includes('embedding sum') || stageLower.startsWith('embedding.sum');
     const isResidualStreamStage = lower.includes('incoming residual')
         || lower.includes('post-attention residual')
         || lower.includes('post attention residual')
         || lower.includes('post-mlp residual')
         || lower.includes('post mlp residual')
-        || lower.includes('post-layernorm residual')
-        || lower.includes('post layernorm residual')
         || stageLower.startsWith('layer.incoming')
         || stageLower.includes('residual');
 

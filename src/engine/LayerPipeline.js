@@ -1226,6 +1226,7 @@ export class LayerPipeline extends EventTarget {
         if (!shouldPreserveTrails) {
             this._schedulePostResetTrailPurge(1500);
         }
+        this.dispatchEvent(new Event('passreset'));
         this.dispatchEvent(new Event('progress'));
     }
 

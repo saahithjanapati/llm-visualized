@@ -15,14 +15,20 @@ function normalizeRaycastLabel(label, info = null, object = null) {
         || '';
     const stageLower = String(stage).toLowerCase();
 
+    const isPostLayerNormResidual = lower.includes('post-layernorm residual')
+        || lower.includes('post layernorm residual')
+        || stageLower === 'ln1.shift'
+        || stageLower === 'ln2.shift';
+    if (isPostLayerNormResidual) {
+        return 'Post LayerNorm Residual Vector';
+    }
+
     const isEmbeddingSum = lower.includes('embedding sum') || stageLower.startsWith('embedding.sum');
     const isResidualStage = lower.includes('incoming residual')
         || lower.includes('post-attention residual')
         || lower.includes('post attention residual')
         || lower.includes('post-mlp residual')
         || lower.includes('post mlp residual')
-        || lower.includes('post-layernorm residual')
-        || lower.includes('post layernorm residual')
         || stageLower.startsWith('layer.incoming')
         || stageLower.includes('residual');
     if (isEmbeddingSum || isResidualStage) {
