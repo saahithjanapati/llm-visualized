@@ -674,7 +674,7 @@ export const TOP_LOGIT_BAR_DEPTH_SCALE = 1.1;
 export const TOP_LOGIT_BAR_INSET_X = 0;
 export const TOP_LOGIT_BAR_Y_OFFSET = 4;
 export const TOP_LOGIT_BAR_COLOR = 0xf2d96b;
-export const TOP_LOGIT_BAR_OPACITY = 0.9;
+export const TOP_LOGIT_BAR_OPACITY = 1;
 export const TOP_LOGIT_BAR_RISE_DURATION_MS = 450;
 export const TOP_LOGIT_BAR_RISE_STAGGER_MS = 12;
 

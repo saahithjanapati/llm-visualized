@@ -82,6 +82,7 @@ const RESIDUAL_COLOR_CLAMP = 2;
 const SPACE_TOKEN_DISPLAY = '" "';
 const RESIDUAL_STREAM_DESCRIPTION = 'This is the residual stream vector for a token at this point in the model. In the overlay, the residual stream is denoted by $x$ or $u$. Attention and MLP outputs are added back into it, which is why it is called a residual stream. It is the main highway of information.';
 const PANEL_SHIFT_DURATION_MS = 520;
+const DETAIL_EQUATION_FONT_MIN_PX = 9;
 
 const TOKEN_CHIP_STYLE = {
     padding: 80,
@@ -1188,19 +1189,19 @@ function resolveSelectionEquations(label, selectionInfo = null) {
     if (lower.includes('output projection matrix')) {
         return formatEquationBlock([
             'H = \\mathrm{Concat}(H_1,\\dots,H_h)',
-            'O = H W^O',
+            'O = H W^O + b^O',
             'u = x + O'
         ]);
     }
     if (lower.includes('mlp up weight matrix')) {
         return formatEquationBlock([
-            'a = u_{\\text{ln}} W_{\\text{up}}',
+            'a = u_{\\text{ln}} W_{\\text{up}} + b_{\\text{up}}',
             'z = \\mathrm{GELU}(a)'
         ]);
     }
     if (lower.includes('mlp down weight matrix')) {
         return formatEquationBlock([
-            '\\mathrm{MLP}(u_{\\text{ln}}) = z W_{\\text{down}}',
+            '\\mathrm{MLP}(u_{\\text{ln}}) = z W_{\\text{down}} + b_{\\text{down}}',
             'x_{\\text{out}} = u + \\mathrm{MLP}(u_{\\text{ln}})'
         ]);
     }
@@ -1316,19 +1317,19 @@ function resolveDescription(label, kind = null, selectionInfo = null) {
         return 'This matrix projects the layer-normed residual stream into a value vector for a head: $V = x_{\\text{ln}} W^V + b^V$. Values are the content that gets mixed. The attention matrix shown below provides weights that mix these values into head outputs $H_i$.';
     }
     if (lower.includes('output projection matrix')) {
-        return 'After each head uses attention to produce $H_i$, the head outputs are concatenated into $H$. This matrix projects the concatenation back to model width: $O = H W^O$. It does not build the attention matrix, but it combines the results of attention before the residual add.';
+        return 'After each head uses attention to produce $H_i$, the head outputs are concatenated into $H$. This matrix projects the concatenation back to model width: $O = H W^O + b^O$. It does not build the attention matrix, but it combines the results of attention before the residual add.';
     }
     if (lower.includes('mlp up weight matrix')) {
-        return 'This matrix expands the model width to a larger MLP size (often 4×). It is typically the first step in the feed-forward block: $z = \\mathrm{GELU}(u_{\\text{ln}} W_{\\text{up}})$. This is applied independently to each token and increases nonlinear capacity.';
+        return 'This matrix expands the model width to a larger MLP size (often 4×). It is typically the first step in the feed-forward block: $a = u_{\\text{ln}} W_{\\text{up}} + b_{\\text{up}}$, then $z = \\mathrm{GELU}(a)$. This is applied independently to each token and increases nonlinear capacity.';
     }
     if (lower.includes('mlp down weight matrix')) {
-        return 'This matrix compresses the expanded MLP activations back to model width: $\\mathrm{MLP}(u_{\\text{ln}}) = z W_{\\text{down}}$. It brings nonlinear features back into the residual stream.';
+        return 'This matrix compresses the expanded MLP activations back to model width: $\\mathrm{MLP}(u_{\\text{ln}}) = z W_{\\text{down}} + b_{\\text{down}}$. It brings nonlinear features back into the residual stream.';
     }
     if (lower.includes('mlp up projection')) {
-        return 'This is the vector after the MLP up-projection $u_{\\text{ln}} W_{\\text{up}}$, in the larger hidden dimension. It is the input to the nonlinearity (GELU) before being projected back down.';
+        return 'This is the vector after the MLP up-projection $u_{\\text{ln}} W_{\\text{up}} + b_{\\text{up}}$, in the larger hidden dimension. It is the input to the nonlinearity (GELU) before being projected back down.';
     }
     if (lower.includes('mlp down projection')) {
-        return 'This is the vector after the MLP down-projection $z W_{\\text{down}}$, back at model width. It will be added to the residual stream.';
+        return 'This is the vector after the MLP down-projection $z W_{\\text{down}} + b_{\\text{down}}$, back at model width. It will be added to the residual stream.';
     }
     if (lower.includes('mlp expanded segments')) {
         return 'This is the expanded MLP vector split into multiple segments to show the 4× width. It is one high-dimensional vector, just partitioned for visualization.';
@@ -1394,7 +1395,7 @@ function resolveDescription(label, kind = null, selectionInfo = null) {
         return 'This is an attention score between two tokens in one head. All scores together form the attention matrix shown below (queries by keys). That matrix controls how much information flows between tokens. After softmax, it becomes weights applied to values.';
     }
     if (lower.includes('attention')) {
-        return 'Self-attention lets each token read information from other tokens in the sequence. Each head uses the attention matrix shown below, with equation: $H_i = \\mathrm{softmax}((Q_i K_i^\\top)/\\sqrt{d_h} + M) V_i$. The head outputs are concatenated into $H$, projected to $O = H W^O$, and then added back to the residual stream.';
+        return 'Self-attention lets each token read information from other tokens in the sequence. Each head uses the attention matrix shown below, with equation: $H_i = \\mathrm{softmax}((Q_i K_i^\\top)/\\sqrt{d_h} + M) V_i$. The head outputs are concatenated into $H$, projected to $O = H W^O + b^O$, and then added back to the residual stream.';
     }
     if (lower.includes('top logit bars')) {
         return 'These are the vocabulary logits before softmax. Each bar is one token in the vocab; higher means more likely next token. They are produced from the final residual stream $x_{\\text{out}}$. Softmax converts logits to probabilities, then sampling or argmax picks the next token.';
@@ -1427,6 +1428,122 @@ function extractTokenText(label) {
     const extracted = match[2] || '';
     const trimmed = extracted.trim();
     return trimmed.length ? trimmed : SPACE_TOKEN_DISPLAY;
+}
+
+function sanitizeLogitTokenForPreview(token) {
+    if (token === null || token === undefined) return '';
+    const raw = String(token);
+    if (!raw.length) return '';
+    return raw.replace(/\n/g, '\\n').replace(/\t/g, '\\t');
+}
+
+function resolveLogitSelectionEntry(selectionInfo) {
+    const directInfo = selectionInfo?.info;
+    if (directInfo && typeof directInfo === 'object') {
+        if (
+            typeof directInfo.token === 'string'
+            || Number.isFinite(directInfo.token_id)
+            || Number.isFinite(directInfo.prob)
+            || Number.isFinite(directInfo.logit)
+        ) {
+            return directInfo;
+        }
+        if (directInfo.logitEntry && typeof directInfo.logitEntry === 'object') {
+            return directInfo.logitEntry;
+        }
+    }
+    const source = selectionInfo?.object || selectionInfo?.hit?.object;
+    const instanceId = selectionInfo?.hit?.instanceId;
+    const entries = source?.userData?.instanceEntries;
+    if (Array.isArray(entries) && Number.isFinite(instanceId) && instanceId >= 0 && instanceId < entries.length) {
+        const entry = entries[instanceId];
+        return entry && typeof entry === 'object' ? entry : null;
+    }
+    return null;
+}
+
+function resolveLogitPreviewTokenText(label, selectionInfo) {
+    const entry = resolveLogitSelectionEntry(selectionInfo);
+    if (typeof entry?.token === 'string') {
+        const formatted = formatTokenLabelForPreview(sanitizeLogitTokenForPreview(entry.token));
+        if (formatted) return formatted;
+    }
+    if (Number.isFinite(entry?.token_id)) return `#${Math.floor(entry.token_id)}`;
+    const labelTokenMatch = String(label || '').match(/token\s+"([^"]+)"/i);
+    if (labelTokenMatch && labelTokenMatch[1]) {
+        const formatted = formatTokenLabelForPreview(labelTokenMatch[1]);
+        if (formatted) return formatted;
+    }
+    const labelIdMatch = String(label || '').match(/\bid\s+(-?\d+)/i);
+    if (labelIdMatch) {
+        const parsed = Number(labelIdMatch[1]);
+        if (Number.isFinite(parsed)) return `#${Math.floor(parsed)}`;
+    }
+    return 'Logit token';
+}
+
+function buildLogitBarPreview(label, selectionInfo) {
+    const previewGroup = new THREE.Group();
+    const source = selectionInfo?.object || selectionInfo?.hit?.object;
+    const instanceId = selectionInfo?.hit?.instanceId;
+    const tokenText = resolveLogitPreviewTokenText(label, selectionInfo);
+
+    let barGeometry = null;
+    let barMaterial = null;
+    let barHeight = 70;
+
+    if (
+        source
+        && source.isInstancedMesh
+        && source.geometry
+        && typeof source.getMatrixAt === 'function'
+        && Number.isFinite(instanceId)
+        && instanceId >= 0
+    ) {
+        try {
+            source.getMatrixAt(instanceId, TMP_MATRIX);
+            TMP_MATRIX.decompose(TMP_POS, TMP_QUAT, TMP_SCALE);
+            const scaleX = Number.isFinite(TMP_SCALE.x) ? Math.max(0.001, Math.abs(TMP_SCALE.x)) : 1;
+            const scaleY = Number.isFinite(TMP_SCALE.y) ? Math.max(0.001, Math.abs(TMP_SCALE.y)) : 1;
+            const scaleZ = Number.isFinite(TMP_SCALE.z) ? Math.max(0.001, Math.abs(TMP_SCALE.z)) : 1;
+            barHeight = scaleY;
+
+            const color = TMP_COLOR.copy(source.material?.color || 0xffffff);
+            if (typeof source.getColorAt === 'function') {
+                try { source.getColorAt(instanceId, color); } catch (_) { /* fallback to material color */ }
+            }
+            const sourceOpacity = Number.isFinite(source.material?.opacity) ? source.material.opacity : 1;
+            const sourceTransparent = source.material?.transparent === true || sourceOpacity < 1;
+            barGeometry = source.geometry.clone();
+            barMaterial = new THREE.MeshStandardMaterial({
+                color: color.clone(),
+                roughness: 0.32,
+                metalness: 0.18,
+                emissive: color.clone().multiplyScalar(0.16),
+                emissiveIntensity: 0.7,
+                transparent: sourceTransparent,
+                opacity: sourceOpacity
+            });
+            const barMesh = new THREE.Mesh(barGeometry, barMaterial);
+            barMesh.scale.set(scaleX, scaleY, scaleZ);
+            previewGroup.add(barMesh);
+        } catch (_) { /* fall back to token chip only */ }
+    }
+
+    const chip = createTokenChipShared(tokenText);
+    chip.group.scale.setScalar(0.44);
+    const chipLift = Math.max(84, barHeight * 0.68);
+    chip.group.position.set(0, chipLift, 0);
+    previewGroup.add(chip.group);
+
+    return {
+        object: previewGroup,
+        dispose: () => {
+            if (barGeometry) barGeometry.dispose();
+            if (barMaterial) barMaterial.dispose();
+            chip.dispose();
+        }
+    };
 }
 
 function buildRoundedRectShape(width, height, radius) {
@@ -2584,7 +2701,9 @@ function isLayerNormLabel(label) {
 
 function resolvePreviewObject(label, selectionInfo) {
     const lower = (label || '').toLowerCase();
-    if (isLogitBarSelection(label, selectionInfo)) return null;
+    if (isLogitBarSelection(label, selectionInfo)) {
+        return buildLogitBarPreview(label, selectionInfo);
+    }
     const attentionSpherePreview = buildAttentionSpherePreview(selectionInfo);
     if (attentionSpherePreview) return attentionSpherePreview;
     const isVectorSelection = isLikelyVectorSelection(label, selectionInfo);
@@ -2861,6 +2980,12 @@ class SelectionPanel {
         this._pendingRevealTimer = null;
         this._fitLockUntil = 0;
         this._lastFitSize = null;
+        this._equationFitState = {
+            baseFontPx: null,
+            lastFontPx: null,
+            scheduled: false,
+            pending: false
+        };
 
         this._animate = this._animate.bind(this);
         this._onResize = this._onResize.bind(this);
@@ -2875,6 +3000,8 @@ class SelectionPanel {
         this._onPanelPointerEnter = this._onPanelPointerEnter.bind(this);
         this._onPanelPointerLeave = this._onPanelPointerLeave.bind(this);
         this._scheduleResize = this._scheduleResize.bind(this);
+        this._scheduleSelectionEquationFit = this._scheduleSelectionEquationFit.bind(this);
+        this._applySelectionEquationFit = this._applySelectionEquationFit.bind(this);
         this._startLoop();
 
         this.activationSource = options.activationSource || null;
@@ -2940,12 +3067,116 @@ class SelectionPanel {
         this._touchClickCleanup = initTouchClickFallback(this.panel, { selector: '.toggle-row' });
         this._observeResize();
         this._onResize();
+        if (typeof document !== 'undefined' && document.fonts?.ready) {
+            document.fonts.ready.then(() => this._scheduleSelectionEquationFit());
+        }
     }
 
     _observeResize() {
         if (!('ResizeObserver' in window) || !this.canvas?.parentElement) return;
         this._resizeObserver = new ResizeObserver(() => this._onResize());
         this._resizeObserver.observe(this.canvas.parentElement);
+        if (this.equationsSection) {
+            this._equationsResizeObserver = new ResizeObserver(() => this._scheduleSelectionEquationFit());
+            this._equationsResizeObserver.observe(this.equationsSection);
+        }
+    }
+
+    _readSelectionEquationBaseFontPx() {
+        if (!this.equationsBody || typeof window === 'undefined') return 12;
+        const previous = this.equationsBody.style.fontSize;
+        this.equationsBody.style.fontSize = '';
+        const parsed = Number.parseFloat(window.getComputedStyle(this.equationsBody).fontSize);
+        this.equationsBody.style.fontSize = previous;
+        return Number.isFinite(parsed) ? parsed : 12;
+    }
+
+    _readSelectionEquationContentSize() {
+        if (!this.equationsBody) return { width: 0, height: 0 };
+        let width = this.equationsBody.scrollWidth;
+        let height = this.equationsBody.scrollHeight;
+        const katexDisplay = this.equationsBody.querySelector('.katex-display');
+        const katexRoot = this.equationsBody.querySelector('.katex-display > .katex');
+        const candidates = [katexDisplay, katexRoot];
+        for (const element of candidates) {
+            if (!element) continue;
+            const rect = element.getBoundingClientRect();
+            width = Math.max(width, element.scrollWidth, rect.width || 0);
+            height = Math.max(height, element.scrollHeight, rect.height || 0);
+        }
+        return { width, height };
+    }
+
+    _applySelectionEquationFit() {
+        if (!this.isReady || !this.isOpen || !this.equationsSection || !this.equationsBody) return;
+        if (!this.equationsSection.classList.contains('is-visible')) return;
+
+        const bodyRect = this.equationsBody.getBoundingClientRect();
+        const availableWidth = Math.max(0, bodyRect.width);
+        if (!(availableWidth > 0)) return;
+
+        const sectionRect = this.equationsSection.getBoundingClientRect();
+        const panelRect = this.panel.getBoundingClientRect();
+        const availableHeight = Math.max(0, Math.min(sectionRect.height, panelRect.height * 0.42));
+
+        const baseFontPx = this._readSelectionEquationBaseFontPx();
+        if (this._equationFitState.baseFontPx === null || Math.abs(baseFontPx - this._equationFitState.baseFontPx) > 0.5) {
+            this._equationFitState.baseFontPx = baseFontPx;
+            this._equationFitState.lastFontPx = null;
+        }
+        this.equationsBody.style.fontSize = `${this._equationFitState.baseFontPx}px`;
+
+        const { width: contentWidth, height: contentHeight } = this._readSelectionEquationContentSize();
+        if (!(contentWidth > 0)) return;
+
+        const widthScale = availableWidth / contentWidth;
+        const heightScale = (availableHeight > 0 && contentHeight > 0)
+            ? availableHeight / contentHeight
+            : 1;
+        const scale = Math.min(1, widthScale, heightScale);
+        if (!Number.isFinite(scale) || scale <= 0) return;
+
+        const maxFontPx = this._equationFitState.baseFontPx;
+        let targetFontPx = Math.max(
+            DETAIL_EQUATION_FONT_MIN_PX,
+            Math.min(maxFontPx, this._equationFitState.baseFontPx * scale)
+        );
+        if (this._equationFitState.lastFontPx !== null && Math.abs(targetFontPx - this._equationFitState.lastFontPx) < 0.1) {
+            return;
+        }
+
+        this.equationsBody.style.fontSize = `${targetFontPx.toFixed(2)}px`;
+        const fitted = this._readSelectionEquationContentSize();
+        const widthOverflow = fitted.width - availableWidth;
+        if (widthOverflow > 0.5 && targetFontPx > DETAIL_EQUATION_FONT_MIN_PX) {
+            const correctiveScale = availableWidth / Math.max(1, fitted.width);
+            if (Number.isFinite(correctiveScale) && correctiveScale > 0 && correctiveScale < 1) {
+                targetFontPx = Math.max(DETAIL_EQUATION_FONT_MIN_PX, targetFontPx * correctiveScale);
+                this.equationsBody.style.fontSize = `${targetFontPx.toFixed(2)}px`;
+            }
+        }
+        this._equationFitState.lastFontPx = targetFontPx;
+    }
+
+    _scheduleSelectionEquationFit() {
+        if (this._equationFitState.scheduled) {
+            this._equationFitState.pending = true;
+            return;
+        }
+        this._equationFitState.scheduled = true;
+        this._equationFitState.pending = false;
+        const schedule = (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function')
+            ? window.requestAnimationFrame.bind(window)
+            : (cb) => setTimeout(cb, 16);
+        schedule(() => {
+            this._equationFitState.scheduled = false;
+            if (this._equationFitState.pending) {
+                this._equationFitState.pending = false;
+                this._scheduleSelectionEquationFit();
+                return;
+            }
+            this._applySelectionEquationFit();
+        });
     }
 
     _onResize() {
@@ -2997,6 +3228,7 @@ class SelectionPanel {
         }
         this._updateMobileState();
         this._syncSceneShift();
+        this._scheduleSelectionEquationFit();
     }
 
     _finalizePendingReveal() {
@@ -4003,6 +4235,7 @@ class SelectionPanel {
             this._pendingRevealSize = null;
         }
         this._scheduleResize();
+        this._scheduleSelectionEquationFit();
     }
 
     close() {
@@ -4018,10 +4251,15 @@ class SelectionPanel {
         this._syncSceneShift();
         if (this.description) setDescriptionContent(this.description, '');
         if (this.equationsBody) setDescriptionContent(this.equationsBody, '');
+        if (this.equationsBody) this.equationsBody.style.fontSize = '';
         if (this.equationsSection) {
             this.equationsSection.classList.remove('is-visible');
             this.equationsSection.setAttribute('aria-hidden', 'true');
         }
+        this._equationFitState.baseFontPx = null;
+        this._equationFitState.lastFontPx = null;
+        this._equationFitState.scheduled = false;
+        this._equationFitState.pending = false;
         if (this._pendingResizeRaf) {
             cancelAnimationFrame(this._pendingResizeRaf);
             this._pendingResizeRaf = null;
@@ -4187,7 +4425,7 @@ class SelectionPanel {
         const label = normalizeSelectionLabel(selection.label, selection);
         const displayLabel = simplifyLayerNormParamDisplayLabel(label, selection);
         const lower = label.toLowerCase();
-        const hidePreviewForSelection = isLogitBarSelection(label, selection);
+        const hidePreviewForSelection = false;
         const metadata = resolveMetadata(label, selection.kind, selection);
         this.panel.classList.toggle('is-preview-hidden', hidePreviewForSelection);
         this.title.textContent = displayLabel;
@@ -4231,6 +4469,11 @@ class SelectionPanel {
             const hasEquations = !!equations;
             this.equationsSection.classList.toggle('is-visible', hasEquations);
             this.equationsSection.setAttribute('aria-hidden', hasEquations ? 'false' : 'true');
+            if (!hasEquations) {
+                this.equationsBody.style.fontSize = '';
+            } else {
+                this._scheduleSelectionEquationFit();
+            }
         }
         const isParam = isParameterSelection(label);
         if (this.dataSection) {
@@ -4324,6 +4567,7 @@ class SelectionPanel {
 
         this._updateAttentionPreview(selection);
         this.open();
+        this._scheduleSelectionEquationFit();
     }
 }
 

@@ -45,11 +45,19 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     const WQ = colorize(qColor, 'W^Q');
     const WK = colorize(kColor, 'W^K');
     const WV = colorize(vColor, 'W^V');
+    const BQ = colorize(qColor, 'b^Q');
+    const BK = colorize(kColor, 'b^K');
+    const BV = colorize(vColor, 'b^V');
     const WO = colorize(woColor, 'W^O');
+    const BO = colorize(woColor, 'b^O');
     const WUpRaw = 'W_{\\text{up}}';
     const WDownRaw = 'W_{\\text{down}}';
+    const BUpRaw = 'b_{\\text{up}}';
+    const BDownRaw = 'b_{\\text{down}}';
     const WUp = colorize(mlpUpColor, WUpRaw);
     const WDown = colorize(mlpDownColor, WDownRaw);
+    const BUp = colorize(mlpUpColor, BUpRaw);
+    const BDown = colorize(mlpDownColor, BDownRaw);
     const U = 'u';
     const U_LN = `${U}_{\\text{ln}}`;
     const X_OUT = 'x_{\\text{out}}';
@@ -98,32 +106,33 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         const upT = normalizeHighlight(highlights.up);
         const geluT = normalizeHighlight(highlights.gelu);
         const downT = normalizeHighlight(highlights.down);
+        const lhsPre = colorize(eqColorFor(1), 'a');
         const lhsExpr = colorize(eqColorFor(1), 'z');
         const lhsMlp = colorize(eqColorFor(1), `\\mathrm{MLP}(${U_LN})`);
         const eqExpr = colorize(eqColorFor(1), '=');
-        const upTerm = `${U_LN} ${WUpRaw}`;
+        const upTerm = `${U_LN} ${WUpRaw} + ${BUpRaw}`;
         const upExpr = colorize(eqColorFor(upT), upTerm);
         const geluExpr = geluT > 0
             ? colorize(eqColorFor(geluT), `\\mathrm{GELU}(${upTerm})`)
             : `\\mathrm{GELU}(${upExpr})`;
-        const downTerm = `z ${WDownRaw}`;
+        const downTerm = `z ${WDownRaw} + ${BDownRaw}`;
         const downExpr = colorize(eqColorFor(downT), downTerm);
-        const body = String.raw`\begin{aligned} ${lhsExpr} &${eqExpr} ${geluExpr} \\ ${lhsMlp} &${eqExpr} ${downExpr} \end{aligned}`;
+        const body = String.raw`\begin{aligned} ${lhsPre} &${eqExpr} ${upExpr} \\ ${lhsExpr} &${eqExpr} ${geluExpr} \\ ${lhsMlp} &${eqExpr} ${downExpr} \end{aligned}`;
         return colorize(LN_EQ_BASE_COLOR, body);
     };
 
     const EQ = {
-        qkv_per_head: `${Q} = x_{\\text{ln}} ${WQ} \\, ${K} = x_{\\text{ln}} ${WK} \\, ${V} = x_{\\text{ln}} ${WV}`,
-        qkv_packed: `${Q} = x_{\\text{ln}} ${WQ} \\, ${K} = x_{\\text{ln}} ${WK} \\, ${V} = x_{\\text{ln}} ${WV}`,
+        qkv_per_head: `${Q} = x_{\\text{ln}} ${WQ} + ${BQ} \\, ${K} = x_{\\text{ln}} ${WK} + ${BK} \\, ${V} = x_{\\text{ln}} ${WV} + ${BV}`,
+        qkv_packed: `${Q} = x_{\\text{ln}} ${WQ} + ${BQ} \\, ${K} = x_{\\text{ln}} ${WK} + ${BK} \\, ${V} = x_{\\text{ln}} ${WV} + ${BV}`,
         attn: `H_i = \\mathrm{softmax}\\left(\\frac{${Q}_i ${K}_i^\\top}{\\sqrt{d_h}} + M\\right)${V}_i,\\; i=1\\dots 12`,
-        concat_proj: String.raw`\begin{aligned} H &= \mathrm{Concat}(H_1,\dots,H_{12}) \\ O &= H ${WO} \end{aligned}`,
+        concat_proj: String.raw`\begin{aligned} H &= \mathrm{Concat}(H_1,\dots,H_{12}) \\ O &= H ${WO} + ${BO} \end{aligned}`,
         resid1: `${U} = x + O`,
-        mlp: String.raw`\begin{aligned} z &= \mathrm{GELU}(${U_LN} ${WUp}) \\ \mathrm{MLP}(${U_LN}) &= z ${WDown} \end{aligned}`,
+        mlp: String.raw`\begin{aligned} a &= ${U_LN} ${WUp} + ${BUp} \\ z &= \mathrm{GELU}(a) \\ \mathrm{MLP}(${U_LN}) &= z ${WDown} + ${BDown} \end{aligned}`,
         resid2: String.raw`x_{\text{out}} = ${U} + \mathrm{MLP}(${U_LN})`,
         logits: String.raw`\begin{aligned} ${LOGITS} &= ${X_FINAL} W_U \\ p &= \mathrm{softmax}(${LOGITS}) \end{aligned}`
     };
 
-    const EQUATION_FONT_MIN_PX = 10;
+    const EQUATION_FONT_MIN_PX = 8;
     const eqFitState = {
         baseFontPx: null,
         lastFontPx: null,
@@ -171,8 +180,8 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         const paddingX = getPx(bodyStyle.paddingLeft) + getPx(bodyStyle.paddingRight);
         const paddingY = getPx(bodyStyle.paddingTop) + getPx(bodyStyle.paddingBottom);
 
-        const availableWidth = Math.max(0, panelRect.width - paddingX);
-        const availableHeight = Math.max(0, panelRect.height - titleRect.height - titleMarginBottom - paddingY);
+        const availableWidth = Math.max(0, panelRect.width - paddingX - 3);
+        const availableHeight = Math.max(0, panelRect.height - titleRect.height - titleMarginBottom - paddingY - 6);
         if (!(availableWidth > 0 && availableHeight > 0)) return;
 
         const baseFontPx = readBaseFontPx();
@@ -192,22 +201,22 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
 
         const maxFontPx = Math.max(EQUATION_FONT_MIN_PX, availableHeight);
         const clampFontPx = (value) => Math.min(maxFontPx, Math.max(EQUATION_FONT_MIN_PX, value));
-        let targetFontPx = clampFontPx(eqFitState.baseFontPx * scale);
-        if (eqFitState.lastFontPx !== null && Math.abs(targetFontPx - eqFitState.lastFontPx) < 0.1) return;
+        let targetFontPx = clampFontPx(eqFitState.baseFontPx * scale * 0.97);
 
         equationsBody.style.fontSize = `${targetFontPx.toFixed(2)}px`;
-        const fittedSize = readEquationContentSize();
-        const widthOverflow = fittedSize.width - availableWidth;
-        const heightOverflow = fittedSize.height - availableHeight;
-        if ((widthOverflow > 0.5 || heightOverflow > 0.5) && targetFontPx > EQUATION_FONT_MIN_PX) {
+        for (let pass = 0; pass < 5; pass += 1) {
+            const fittedSize = readEquationContentSize();
+            const widthOverflow = fittedSize.width - availableWidth;
+            const heightOverflow = fittedSize.height - availableHeight;
+            if (widthOverflow <= 0.5 && heightOverflow <= 0.5) break;
+            if (targetFontPx <= EQUATION_FONT_MIN_PX + 0.01) break;
             const correctiveScale = Math.min(
                 availableWidth / Math.max(1, fittedSize.width),
                 availableHeight / Math.max(1, fittedSize.height)
             );
-            if (Number.isFinite(correctiveScale) && correctiveScale > 0 && correctiveScale < 1) {
-                targetFontPx = clampFontPx(targetFontPx * correctiveScale);
-                equationsBody.style.fontSize = `${targetFontPx.toFixed(2)}px`;
-            }
+            if (!Number.isFinite(correctiveScale) || correctiveScale <= 0 || correctiveScale >= 1) break;
+            targetFontPx = clampFontPx(targetFontPx * correctiveScale * 0.98);
+            equationsBody.style.fontSize = `${targetFontPx.toFixed(2)}px`;
         }
         eqFitState.lastFontPx = targetFontPx;
     };
