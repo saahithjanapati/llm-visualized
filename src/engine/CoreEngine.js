@@ -354,7 +354,9 @@ export class CoreEngine {
         window.addEventListener('resize', this._onResize);
         document.addEventListener('visibilitychange', this._onVisibility);
         window.addEventListener('blur', this._onWindowBlur);
+        window.addEventListener('focus', this._onWindowFocus);
         window.addEventListener('pagehide', this._onWindowBlur);
+        window.addEventListener('pageshow', this._onWindowFocus);
         window.addEventListener('keydown', this._onKeyDown);
         window.addEventListener('keyup', this._onKeyUp);
 
@@ -363,6 +365,7 @@ export class CoreEngine {
         this._paused = false;
         this._pauseReasons = new Set();
         this._minFrameIntervalMs = 1000 / 60; // Cap render/update loop to 60 FPS
+        this._maxUpdateDeltaSec = 0.1; // Clamp large rAF gaps (tab/window switch) to keep animations stable.
         this._lastFrameTime = null;
         this._now = (typeof performance !== 'undefined' && typeof performance.now === 'function')
             ? performance.now.bind(performance)
@@ -553,7 +556,9 @@ export class CoreEngine {
         window.removeEventListener('resize', this._onResize);
         document.removeEventListener('visibilitychange', this._onVisibility);
         window.removeEventListener('blur', this._onWindowBlur);
+        window.removeEventListener('focus', this._onWindowFocus);
         window.removeEventListener('pagehide', this._onWindowBlur);
+        window.removeEventListener('pageshow', this._onWindowFocus);
         window.removeEventListener('keydown', this._onKeyDown);
         window.removeEventListener('keyup', this._onKeyUp);
         if (this.controls) {
@@ -640,6 +645,13 @@ export class CoreEngine {
 
     _onWindowBlur = () => {
         this._resetControlsState();
+    };
+
+    _onWindowFocus = () => {
+        // Some environments occasionally miss visibilitychange on return.
+        // Explicitly clear visibility pause when focus is back.
+        if (typeof document !== 'undefined' && document.hidden) return;
+        this.resume('visibility');
     };
 
     _releasePointerCapture = (pointerId = null) => {
@@ -1490,7 +1502,8 @@ export class CoreEngine {
         if (!this._paused) {
             const layers = this._layers;
             const updateStart = perfEnabled ? this._now() : 0;
-            const dt = this._clock.getDelta() * this._speed;
+            const rawDt = this._clock.getDelta() * this._speed;
+            const dt = Math.min(rawDt, this._maxUpdateDeltaSec);
             for (let i = 0; i < layers.length; i++) {
                 const layer = layers[i];
                 if (!layer) continue;

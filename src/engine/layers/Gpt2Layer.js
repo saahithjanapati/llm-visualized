@@ -89,6 +89,7 @@ const MULTIPLY_FLASH_DURATION_MS = 180;
 const MULTIPLY_SOURCE_SHRINK = 0.82;
 const MULTIPLY_RESULT_START_SCALE = 0.9;
 const MULTIPLY_FLASH_GEOMETRY = new THREE.SphereGeometry(1, 18, 18);
+const POS_ADD_STALL_TIMEOUT_MS = 12000;
 
 const applyMatrixReflectivityTweak = (matrix, tweaks) => {
     if (!matrix || !tweaks) return;
@@ -537,7 +538,30 @@ export default class Gpt2Layer extends BaseLayer {
                 }
                 if (this.index === 0 && posAddDone) {
                     if (lane.posVec && !lane.posAddComplete) {
-                        posAddDone = false;
+                        const nowMs = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+                            ? performance.now()
+                            : Date.now();
+                        if (!Number.isFinite(lane.__posAddWatchStart)) {
+                            lane.__posAddWatchStart = nowMs;
+                        }
+                        const elapsedMs = nowMs - lane.__posAddWatchStart;
+                        if (elapsedMs >= POS_ADD_STALL_TIMEOUT_MS) {
+                            const sumData = this._getEmbeddingData(lane, 'sum');
+                            if (sumData && lane.originalVec) {
+                                applyVectorData(
+                                    lane.originalVec,
+                                    sumData,
+                                    lane.tokenLabel ? `Embedding Sum - ${lane.tokenLabel}` : 'Embedding Sum',
+                                    this._getLaneMeta(lane, 'embedding.sum')
+                                );
+                            }
+                            lane.posAddComplete = true;
+                            console.warn(`Layer ${this.index}: positional addition watchdog forced completion for lane ${lane.laneIndex ?? '?'}`);
+                        } else {
+                            posAddDone = false;
+                        }
+                    } else if (lane.posAddComplete && Number.isFinite(lane.__posAddWatchStart)) {
+                        delete lane.__posAddWatchStart;
                     }
                 }
                 if (allLn1Ready) {
