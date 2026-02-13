@@ -1147,25 +1147,42 @@ function resolveLayerNormEquationSymbols(lower) {
     };
 }
 
-function resolveSelectionEquations(label) {
+function resolveAttentionHeadSubscript(selectionInfo) {
+    const rawHeadIndex = findUserDataNumber(selectionInfo, 'headIndex');
+    if (!Number.isFinite(rawHeadIndex)) return 'i';
+    const headIndex = Math.max(0, Math.floor(rawHeadIndex));
+    return String(headIndex + 1);
+}
+
+function buildHeadSpecificAttentionEquation(selectionInfo) {
+    const headSubscript = resolveAttentionHeadSubscript(selectionInfo);
+    const Qh = `Q_{${headSubscript}}`;
+    const Kh = `K_{${headSubscript}}`;
+    const Vh = `V_{${headSubscript}}`;
+    const Hh = `H_{${headSubscript}}`;
+    return `${Hh} = \\mathrm{softmax}\\left(\\frac{${Qh} ${Kh}^\\top}{\\sqrt{d_h}} + M\\right)${Vh}`;
+}
+
+function resolveSelectionEquations(label, selectionInfo = null) {
     const lower = String(label || '').toLowerCase();
+    const attentionEquation = buildHeadSpecificAttentionEquation(selectionInfo);
 
     if (lower.includes('query weight matrix')) {
         return formatEquationBlock([
             'Q = x_{\\text{ln}} W^Q + b^Q',
-            'H_i = \\mathrm{softmax}\\left(\\frac{Q_i K_i^\\top}{\\sqrt{d_h}} + M\\right)V_i'
+            attentionEquation
         ]);
     }
     if (lower.includes('key weight matrix')) {
         return formatEquationBlock([
             'K = x_{\\text{ln}} W^K + b^K',
-            'H_i = \\mathrm{softmax}\\left(\\frac{Q_i K_i^\\top}{\\sqrt{d_h}} + M\\right)V_i'
+            attentionEquation
         ]);
     }
     if (lower.includes('value weight matrix')) {
         return formatEquationBlock([
             'V = x_{\\text{ln}} W^V + b^V',
-            'H_i = \\mathrm{softmax}\\left(\\frac{Q_i K_i^\\top}{\\sqrt{d_h}} + M\\right)V_i'
+            attentionEquation
         ]);
     }
     if (lower.includes('output projection matrix')) {
@@ -4199,7 +4216,7 @@ class SelectionPanel {
             setDescriptionContent(this.description, desc || '');
         }
         if (this.equationsSection && this.equationsBody) {
-            const equations = resolveSelectionEquations(label);
+            const equations = resolveSelectionEquations(label, selection);
             setDescriptionContent(this.equationsBody, equations || '');
             const hasEquations = !!equations;
             this.equationsSection.classList.toggle('is-visible', hasEquations);

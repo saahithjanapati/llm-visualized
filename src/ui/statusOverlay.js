@@ -115,7 +115,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     const EQ = {
         qkv_per_head: `${Q} = x_{\\text{ln}} ${WQ} \\, ${K} = x_{\\text{ln}} ${WK} \\, ${V} = x_{\\text{ln}} ${WV}`,
         qkv_packed: `${Q} = x_{\\text{ln}} ${WQ} \\, ${K} = x_{\\text{ln}} ${WK} \\, ${V} = x_{\\text{ln}} ${WV}`,
-        attn: `H_i = \\mathrm{softmax}\\left(\\frac{${Q}_i ${K}_i^\\top}{\\sqrt{d_h}} + M\\right) ${V}_i,\\; i=1\\dots 12`,
+        attn: `H_i = \\mathrm{softmax}\\left(\\frac{${Q}_i ${K}_i^\\top}{\\sqrt{d_h}} + M\\right)${V}_i,\\; i=1\\dots 12`,
         concat_proj: String.raw`\begin{aligned} H &= \mathrm{Concat}(H_1,\dots,H_{12}) \\ O &= H ${WO} \end{aligned}`,
         resid1: `${U} = x + O`,
         mlp: String.raw`\begin{aligned} z &= \mathrm{GELU}(${U_LN} ${WUp}) \\ \mathrm{MLP}(${U_LN}) &= z ${WDown} \end{aligned}`,
@@ -142,6 +142,21 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         equationsBody.style.fontSize = previous;
         return base;
     };
+    const readEquationContentSize = () => {
+        if (!equationsBody) return { width: 0, height: 0 };
+        let width = equationsBody.scrollWidth;
+        let height = equationsBody.scrollHeight;
+        const katexDisplay = equationsBody.querySelector('.katex-display');
+        const katexRoot = equationsBody.querySelector('.katex-display > .katex');
+        const candidates = [katexDisplay, katexRoot];
+        for (const element of candidates) {
+            if (!element) continue;
+            const rect = element.getBoundingClientRect();
+            width = Math.max(width, element.scrollWidth, rect.width || 0);
+            height = Math.max(height, element.scrollHeight, rect.height || 0);
+        }
+        return { width, height };
+    };
     const applyEquationFit = () => {
         if (!equationsPanel || !equationsBody) return;
         if (!shouldShowEquations()) return;
@@ -167,8 +182,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         }
         equationsBody.style.fontSize = `${eqFitState.baseFontPx}px`;
 
-        const contentWidth = equationsBody.scrollWidth;
-        const contentHeight = equationsBody.scrollHeight;
+        const { width: contentWidth, height: contentHeight } = readEquationContentSize();
         if (!(contentWidth > 0 && contentHeight > 0)) return;
 
         const widthScale = availableWidth / contentWidth;
@@ -177,13 +191,24 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         if (!Number.isFinite(scale) || scale <= 0) return;
 
         const maxFontPx = Math.max(EQUATION_FONT_MIN_PX, availableHeight);
-        const targetFontPx = Math.min(
-            maxFontPx,
-            Math.max(EQUATION_FONT_MIN_PX, eqFitState.baseFontPx * scale)
-        );
+        const clampFontPx = (value) => Math.min(maxFontPx, Math.max(EQUATION_FONT_MIN_PX, value));
+        let targetFontPx = clampFontPx(eqFitState.baseFontPx * scale);
         if (eqFitState.lastFontPx !== null && Math.abs(targetFontPx - eqFitState.lastFontPx) < 0.1) return;
 
         equationsBody.style.fontSize = `${targetFontPx.toFixed(2)}px`;
+        const fittedSize = readEquationContentSize();
+        const widthOverflow = fittedSize.width - availableWidth;
+        const heightOverflow = fittedSize.height - availableHeight;
+        if ((widthOverflow > 0.5 || heightOverflow > 0.5) && targetFontPx > EQUATION_FONT_MIN_PX) {
+            const correctiveScale = Math.min(
+                availableWidth / Math.max(1, fittedSize.width),
+                availableHeight / Math.max(1, fittedSize.height)
+            );
+            if (Number.isFinite(correctiveScale) && correctiveScale > 0 && correctiveScale < 1) {
+                targetFontPx = clampFontPx(targetFontPx * correctiveScale);
+                equationsBody.style.fontSize = `${targetFontPx.toFixed(2)}px`;
+            }
+        }
         eqFitState.lastFontPx = targetFontPx;
     };
     const scheduleEquationFit = () => {
