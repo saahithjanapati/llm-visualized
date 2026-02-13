@@ -373,7 +373,18 @@ export class SelfAttentionAnimator {
         }
         const lanes = this.ctx && Array.isArray(this.ctx.currentLanes) ? this.ctx.currentLanes : null;
         if (!lanes || !Number.isFinite(zPos)) return null;
-        return lanes.find(l => Math.abs(l.zPos - zPos) < 0.1) || null;
+        let bestLane = null;
+        let bestDist = Infinity;
+        for (let i = 0; i < lanes.length; i++) {
+            const lane = lanes[i];
+            if (!lane || !Number.isFinite(lane.zPos)) continue;
+            const dist = Math.abs(lane.zPos - zPos);
+            if (dist < bestDist) {
+                bestDist = dist;
+                bestLane = lane;
+            }
+        }
+        return bestDist <= 0.25 ? bestLane : null;
     }
 
     _getVectorPositionInContextSpace(vec, out = null) {

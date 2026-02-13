@@ -673,7 +673,18 @@ export class MHSAAnimation {
             ? this._attentionConveyorLanes
             : (Array.isArray(this.currentLanes) ? this.currentLanes : null);
         if (!lanes) return null;
-        return lanes.find(l => Math.abs(l.zPos - zPos) < 0.1) || null;
+        let bestLane = null;
+        let bestDist = Infinity;
+        for (let i = 0; i < lanes.length; i++) {
+            const lane = lanes[i];
+            if (!lane || !Number.isFinite(lane.zPos)) continue;
+            const dist = Math.abs(lane.zPos - zPos);
+            if (dist < bestDist) {
+                bestDist = dist;
+                bestLane = lane;
+            }
+        }
+        return bestDist <= 0.25 ? bestLane : null;
     }
 
     _setupMHSAVisualizations() {
@@ -1988,8 +1999,14 @@ export class MHSAAnimation {
 
             this.parentGroup.add(decoVec.group);
 
-            // Keep reference for merge phase
-            nextDecoratives.push({ vec: decoVec, laneZ: kVec.group.position.z });
+            // Keep reference for merge phase. Carry lane identity so later
+            // output-projection return can map back to lanes robustly.
+            const laneZ = kVec.group.position.z;
+            nextDecoratives.push({
+                vec: decoVec,
+                laneZ,
+                laneIndex: this._resolveLaneIndexFromZ(laneZ)
+            });
 
             // Start invisible: set material opacity to 0
             if (decoVec.mesh && decoVec.mesh.material) {
@@ -2068,8 +2085,24 @@ export class MHSAAnimation {
         });
         return entries.map(entry => ({
             vec: entry.vec,
-            laneZ: Number.isFinite(entry.laneZ) ? entry.laneZ : entry.vec.group.position.z
+            laneZ: Number.isFinite(entry.laneZ) ? entry.laneZ : entry.vec.group.position.z,
+            laneIndex: Number.isFinite(entry.laneIndex) ? entry.laneIndex : this._resolveLaneIndexFromZ(entry.laneZ)
         }));
+    }
+
+    _resolveLaneByIdentity(laneIndex, laneZ) {
+        if (!Array.isArray(this.currentLanes) || this.currentLanes.length === 0) return null;
+        if (Number.isFinite(laneIndex)) {
+            const idx = Math.floor(laneIndex);
+            if (idx >= 0 && idx < this.currentLanes.length) {
+                return this.currentLanes[idx] || null;
+            }
+        }
+        const resolvedIndex = this._resolveLaneIndexFromZ(laneZ);
+        if (Number.isFinite(resolvedIndex) && resolvedIndex >= 0 && resolvedIndex < this.currentLanes.length) {
+            return this.currentLanes[resolvedIndex] || null;
+        }
+        return null;
     }
 
     _adjustOutputProjectionMatrixForRow(rowY) {
@@ -2164,19 +2197,33 @@ export class MHSAAnimation {
         // toward the output projection alignment row.
         this.rowMergePhase = 'merging';
 
-        // Build map laneZ -> array of decorative vectors
+        // Build map lane -> decorative vectors. Prefer lane index identity
+        // (stable across animation) and fall back to lane Z.
         const laneVectors = new Map();
         this._tempDecorativeVecs.forEach(obj => {
-            const laneZ = obj.laneZ;
-            if (!laneVectors.has(laneZ)) laneVectors.set(laneZ, []);
-            laneVectors.get(laneZ).push(obj.vec);
+            if (!obj || !obj.vec || !obj.vec.group) return;
+            const laneZ = Number.isFinite(obj.laneZ) ? obj.laneZ : obj.vec.group.position.z;
+            const laneIndex = Number.isFinite(obj.laneIndex)
+                ? Math.floor(obj.laneIndex)
+                : this._resolveLaneIndexFromZ(laneZ);
+            const key = Number.isFinite(laneIndex)
+                ? `idx:${laneIndex}`
+                : `z:${Number.isFinite(laneZ) ? laneZ.toFixed(3) : 'unknown'}`;
+            if (!laneVectors.has(key)) {
+                laneVectors.set(key, { laneZ, laneIndex, vectors: [] });
+            }
+            const laneEntry = laneVectors.get(key);
+            if (!Number.isFinite(laneEntry.laneZ) && Number.isFinite(laneZ)) laneEntry.laneZ = laneZ;
+            if (!Number.isFinite(laneEntry.laneIndex) && Number.isFinite(laneIndex)) laneEntry.laneIndex = laneIndex;
+            laneEntry.vectors.push(obj.vec);
         });
 
         const firstHeadCenterX = this.headsCentersX.length ? this.headsCentersX[0] : 0; 
         const targetX = firstHeadCenterX; // Existing merge target for centralised row
         let maxDurationMs = 0;
 
-        laneVectors.forEach((vecList, laneZ) => {
+        laneVectors.forEach((laneEntry) => {
+            const vecList = laneEntry && Array.isArray(laneEntry.vectors) ? laneEntry.vectors : [];
             // Ensure vecList ordered so we can grab a representative Y coordinate
             vecList.sort((a, b) => a.group.position.x - b.group.position.x);
             const yPos = vecList.length ? vecList[0].group.position.y : 0;
@@ -2240,8 +2287,17 @@ export class MHSAAnimation {
         const startVisibleIdx = Math.max(0, Math.floor((this.vectorPrismCount - visiblePrismCount) / 2));
         const endVisibleIdx = startVisibleIdx + visiblePrismCount - 1;
 
-        laneVectors.forEach((vecList, laneZ) => {
+        laneVectors.forEach((laneEntry, laneKey) => {
+            const vecList = Array.isArray(laneEntry)
+                ? laneEntry
+                : (laneEntry && Array.isArray(laneEntry.vectors) ? laneEntry.vectors : null);
             if (!vecList || vecList.length === 0) return;
+            const laneZ = Array.isArray(laneEntry)
+                ? (Number.isFinite(laneKey) ? laneKey : vecList[0].group.position.z)
+                : (Number.isFinite(laneEntry.laneZ) ? laneEntry.laneZ : vecList[0].group.position.z);
+            const laneIndex = Array.isArray(laneEntry)
+                ? this._resolveLaneIndexFromZ(laneZ)
+                : (Number.isFinite(laneEntry.laneIndex) ? laneEntry.laneIndex : this._resolveLaneIndexFromZ(laneZ));
 
             // Ensure vecList is sorted by X position
             vecList.sort((a, b) => a.group.position.x - b.group.position.x);
@@ -2310,7 +2366,7 @@ export class MHSAAnimation {
             // Do NOT attach a trail yet. We only want a horizontal trail
             // when returning to the residual stream (no vertical segments).
 
-            combinedVectors.push({ vec: combinedVec, laneZ });
+            combinedVectors.push({ vec: combinedVec, laneZ, laneIndex });
 
             // Hide original decorative vectors
             vecList.forEach(v => { v.group.visible = false; });
@@ -2346,6 +2402,17 @@ export class MHSAAnimation {
         combinedVectors.forEach((vecObj, idx) => {
             const vec = vecObj.vec;
             const laneZ = vecObj.laneZ;
+            const laneIndex = Number.isFinite(vecObj.laneIndex)
+                ? Math.floor(vecObj.laneIndex)
+                : this._resolveLaneIndexFromZ(laneZ);
+            const resolveLaneForVector = () => {
+                const mappedLane = this._resolveLaneByIdentity(laneIndex, laneZ);
+                if (mappedLane) return mappedLane;
+                if (Array.isArray(this.currentLanes) && idx >= 0 && idx < this.currentLanes.length) {
+                    return this.currentLanes[idx] || null;
+                }
+                return null;
+            };
 
             new TWEEN.Tween(vec.group.position)
                 .to({ y: matrixBottomY }, duration1)
@@ -2364,9 +2431,7 @@ export class MHSAAnimation {
                         .to({ y: matrixTopY }, duration2)
                         .onStart(() => {
                             // Apply transformation INSIDE the projection matrix
-                            const lane = this.currentLanes
-                                ? this.currentLanes.find(l => Math.abs(l.zPos - laneZ) < 0.1)
-                                : null;
+                            const lane = resolveLaneForVector();
                             const outputData = (this.activationSource && lane && Number.isFinite(this.layerIndex))
                                 ? this.activationSource.getAttentionOutputProjection(this.layerIndex, lane.tokenIndex, this.vectorPrismCount)
                                 : null;
@@ -2484,7 +2549,7 @@ export class MHSAAnimation {
                                                 }
                                             } catch (_) { /* optional visual */ }
                                             if (this.currentLanes) {
-                                                const matchingLane = this.currentLanes.find(l => Math.abs(l.zPos - laneZ) < 0.1);
+                                                const matchingLane = resolveLaneForVector();
                                                 if (matchingLane && matchingLane.originalVec) {
                                                     const postData = (this.activationSource && Number.isFinite(this.layerIndex))
                                                         ? this.activationSource.getPostAttentionResidual(this.layerIndex, matchingLane.tokenIndex, this.vectorPrismCount)
@@ -2516,6 +2581,8 @@ export class MHSAAnimation {
                                                             applyActivationDataToVector(matchingLane.originalVec, activationData, label);
                                                         }
                                                     });
+                                                } else {
+                                                    console.warn(`[MHSAAnimation] Failed to map output vector back to lane (layer=${this.layerIndex}, laneIndex=${laneIndex}, laneZ=${laneZ}).`);
                                                 }
                                             }
                                             this._outputProjReturnCount += 1;

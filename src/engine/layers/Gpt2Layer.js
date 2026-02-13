@@ -90,6 +90,7 @@ const MULTIPLY_SOURCE_SHRINK = 0.82;
 const MULTIPLY_RESULT_START_SCALE = 0.9;
 const MULTIPLY_FLASH_GEOMETRY = new THREE.SphereGeometry(1, 18, 18);
 const POS_ADD_STALL_TIMEOUT_MS = 12000;
+const LANE_PHASE_STALL_TIMEOUT_MS = 12000;
 
 const applyMatrixReflectivityTweak = (matrix, tweaks) => {
     if (!matrix || !tweaks) return;
@@ -403,6 +404,7 @@ export default class Gpt2Layer extends BaseLayer {
 
     update(dt) {
         const skipActive = this._skipToEndActive;
+        const nowMs = this._getNowMs();
         const bottomY_ln1_abs = LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2;
         const midY_ln1_abs    = LAYER_NORM_1_Y_POS;
         const topY_ln1_abs    = LAYER_NORM_1_Y_POS + LN_PARAMS.height / 2;
@@ -538,9 +540,6 @@ export default class Gpt2Layer extends BaseLayer {
                 }
                 if (this.index === 0 && posAddDone) {
                     if (lane.posVec && !lane.posAddComplete) {
-                        const nowMs = (typeof performance !== 'undefined' && typeof performance.now === 'function')
-                            ? performance.now()
-                            : Date.now();
                         if (!Number.isFinite(lane.__posAddWatchStart)) {
                             lane.__posAddWatchStart = nowMs;
                         }
@@ -1660,6 +1659,10 @@ export default class Gpt2Layer extends BaseLayer {
             this.mhsaAnimation.update(dt, performance.now(), this.lanes);
         }
 
+        // Global safety net: if any lane's phase signature is unchanged for too long,
+        // force a conservative forward step to avoid whole-layer deadlocks.
+        this._applyLaneStallWatchdog(lanes, nowMs, { ln2SyncY });
+
         // ----------------------------------------------------------
         // Notify LayerPipeline once **all** lanes have finished AND all additions complete
         // ----------------------------------------------------------
@@ -2526,6 +2529,185 @@ export default class Gpt2Layer extends BaseLayer {
             });
             obj.visible = false;
         });
+    }
+
+    _getNowMs() {
+        return (typeof performance !== 'undefined' && typeof performance.now === 'function')
+            ? performance.now()
+            : Date.now();
+    }
+
+    _formatLaneCoord(value) {
+        return Number.isFinite(value) ? value.toFixed(2) : 'na';
+    }
+
+    _laneVecSignature(vec) {
+        if (!vec || !vec.group || !vec.group.position) return 'na';
+        const p = vec.group.position;
+        return `${this._formatLaneCoord(p.x)},${this._formatLaneCoord(p.y)},${this._formatLaneCoord(p.z)}`;
+    }
+
+    _getLaneProgressSignature(lane) {
+        if (!lane) return 'missing';
+        return [
+            lane.horizPhase || 'na',
+            lane.ln2Phase || 'na',
+            lane.stopRise ? '1' : '0',
+            lane.ln1AddStarted ? '1' : '0',
+            lane.ln1AddComplete ? '1' : '0',
+            lane.ln2AddStarted ? '1' : '0',
+            lane.ln2AddComplete ? '1' : '0',
+            lane.mlpUpStarted ? '1' : '0',
+            lane.mlpDownStarted ? '1' : '0',
+            lane.mlpDownComplete ? '1' : '0',
+            this._formatLaneCoord(lane.ln1ShiftProgress),
+            this._formatLaneCoord(lane.mhsaResidualAddProgress),
+            this._formatLaneCoord(lane.ln2ShiftProgress),
+            this._laneVecSignature(lane.originalVec),
+            this._laneVecSignature(lane.postAdditionVec),
+            this._laneVecSignature(lane.movingVecLN2),
+            this._laneVecSignature(lane.resultVecLN2),
+        ].join('|');
+    }
+
+    _ensureLanePostAdditionVector(lane) {
+        if (!lane) return null;
+        if (lane.postAdditionVec && lane.postAdditionVec.group) return lane.postAdditionVec;
+        if (lane.originalVec && lane.originalVec.group) {
+            lane.postAdditionVec = lane.originalVec;
+            return lane.postAdditionVec;
+        }
+        return null;
+    }
+
+    _forceAdvanceStalledLane(lane, { ln2SyncY } = {}) {
+        if (!lane || lane.ln2Phase === 'done') return false;
+        const laneId = lane.laneIndex ?? '?';
+
+        if (lane.horizPhase === 'waiting' && !this._ln1Start && lane.originalVec && lane.originalVec.group && Number.isFinite(lane.branchStartY)) {
+            lane.originalVec.group.position.y = Math.max(lane.originalVec.group.position.y, lane.branchStartY);
+            if (lane.dupVec && lane.dupVec.group) {
+                copyVectorAppearance(lane.dupVec, lane.originalVec);
+                lane.dupVec.group.visible = true;
+                lane.dupVec.group.position.y = lane.branchStartY;
+            }
+            lane.horizPhase = 'right';
+            this._ln1Start = true;
+            console.warn(`Layer ${this.index}: lane ${laneId} stalled in LN1 barrier; forcing branch start.`);
+            return true;
+        }
+
+        if (lane.horizPhase === 'readyMHSA' && !this._mhsaStart) {
+            lane.horizPhase = 'travelMHSA';
+            lane.__mhsaTrailCornerPending = true;
+            this._mhsaStart = true;
+            console.warn(`Layer ${this.index}: lane ${laneId} stalled before MHSA travel; forcing barrier release.`);
+            return true;
+        }
+
+        if (
+            lane.horizPhase === 'postMHSAAddition'
+            || lane.horizPhase === 'waitingForLN2'
+            || lane.ln2Phase === 'notStarted'
+            || lane.ln2Phase === 'preRise'
+        ) {
+            const v = this._ensureLanePostAdditionVector(lane);
+            if (!v || !v.group) return false;
+            if (Number.isFinite(ln2SyncY)) {
+                v.group.position.y = Math.max(v.group.position.y, ln2SyncY);
+            }
+            lane.horizPhase = 'waitingForLN2';
+            lane.ln2Phase = 'preRise';
+            if (lane.stopRise) {
+                delete lane.stopRise;
+                delete lane.stopRiseTarget;
+            }
+            console.warn(`Layer ${this.index}: lane ${laneId} stalled entering LN2; forcing preRise sync.`);
+            return true;
+        }
+
+        if (lane.ln2Phase === 'insideLN') {
+            const fallback = lane.resultVecLN2 || lane.movingVecLN2 || lane.postAdditionVec || lane.originalVec;
+            if (!fallback) return false;
+            lane.resultVecLN2 = lane.resultVecLN2 || fallback;
+            lane.movingVecLN2 = null;
+            lane.normAnimationLN2 = null;
+            lane.normStartedLN2 = true;
+            lane.normAppliedLN2 = true;
+            lane.multDoneLN2 = true;
+            lane.ln2AddStarted = true;
+            lane.ln2AddComplete = true;
+            lane.ln2Phase = 'mlpReady';
+            if (lane.stopRise) {
+                delete lane.stopRise;
+                delete lane.stopRiseTarget;
+            }
+            console.warn(`Layer ${this.index}: lane ${laneId} stalled inside LN2; forcing MLP readiness.`);
+            return true;
+        }
+
+        if (lane.ln2Phase === 'mlpReady' && !this._mlpStart) {
+            this._mlpStart = true;
+            console.warn(`Layer ${this.index}: lane ${laneId} stalled at MLP barrier; forcing MLP start.`);
+            return true;
+        }
+
+        return false;
+    }
+
+    _applyLaneStallWatchdog(lanes, nowMs, context = {}) {
+        if (!Array.isArray(lanes) || !lanes.length || !Number.isFinite(nowMs)) return;
+        let mutated = false;
+        for (let i = 0; i < lanes.length; i++) {
+            const lane = lanes[i];
+            if (!lane || lane.ln2Phase === 'done') continue;
+            const signature = this._getLaneProgressSignature(lane);
+            if (lane.__phaseWatchSignature !== signature) {
+                lane.__phaseWatchSignature = signature;
+                lane.__phaseWatchStartMs = nowMs;
+                continue;
+            }
+            if (!Number.isFinite(lane.__phaseWatchStartMs)) {
+                lane.__phaseWatchStartMs = nowMs;
+                continue;
+            }
+            const stalledForMs = nowMs - lane.__phaseWatchStartMs;
+            if (stalledForMs < LANE_PHASE_STALL_TIMEOUT_MS) continue;
+            if (this._forceAdvanceStalledLane(lane, context)) {
+                mutated = true;
+            }
+            lane.__phaseWatchStartMs = nowMs;
+            lane.__phaseWatchSignature = this._getLaneProgressSignature(lane);
+        }
+
+        if (!mutated) return;
+
+        const ln2SyncY = Number.isFinite(context.ln2SyncY) ? context.ln2SyncY : null;
+        if (!this._ln2Ready && ln2SyncY !== null) {
+            const allLn2Synced = lanes.every((lane) => (
+                lane
+                && lane.ln2Phase === 'preRise'
+                && lane.postAdditionVec
+                && lane.postAdditionVec.group
+                && lane.postAdditionVec.group.position.y >= ln2SyncY - 0.01
+            ));
+            if (allLn2Synced) {
+                this._ln2Ready = true;
+                console.warn(`Layer ${this.index}: stall watchdog forced LN2 barrier release.`);
+            }
+        }
+
+        if (!this._mlpStart) {
+            const allMlpReady = lanes.every((lane) => (
+                lane && (lane.ln2Phase === 'mlpReady' || lane.ln2Phase === 'done')
+            ));
+            if (allMlpReady) {
+                this._mlpStart = true;
+                console.warn(`Layer ${this.index}: stall watchdog forced MLP barrier release.`);
+            }
+        }
+
+        this._emitProgress();
     }
 
     _getSynchronizedRiseSpeed(currentY, targetY, baseSpeed, phaseMaxRemainingDistance) {
