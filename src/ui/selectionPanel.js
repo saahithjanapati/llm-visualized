@@ -1146,19 +1146,19 @@ function resolveSelectionEquations(label) {
 
     if (lower.includes('query weight matrix')) {
         return formatEquationBlock([
-            'Q = x_{\\text{ln}} W^Q',
+            'Q = x_{\\text{ln}} W^Q + b^Q',
             'H_i = \\mathrm{softmax}\\left(\\frac{Q_i K_i^\\top}{\\sqrt{d_h}} + M\\right)V_i'
         ]);
     }
     if (lower.includes('key weight matrix')) {
         return formatEquationBlock([
-            'K = x_{\\text{ln}} W^K',
+            'K = x_{\\text{ln}} W^K + b^K',
             'H_i = \\mathrm{softmax}\\left(\\frac{Q_i K_i^\\top}{\\sqrt{d_h}} + M\\right)V_i'
         ]);
     }
     if (lower.includes('value weight matrix')) {
         return formatEquationBlock([
-            'V = x_{\\text{ln}} W^V',
+            'V = x_{\\text{ln}} W^V + b^V',
             'H_i = \\mathrm{softmax}\\left(\\frac{Q_i K_i^\\top}{\\sqrt{d_h}} + M\\right)V_i'
         ]);
     }
@@ -1284,13 +1284,13 @@ function resolveDescription(label, kind = null, selectionInfo = null) {
         return `This is the ${lnName} shift vector, the additive term in $${outSymbol} = \\gamma \\odot ${hatSymbol} + \\beta$. It lets the model re-center features after normalization.`;
     }
     if (lower.includes('query weight matrix')) {
-        return 'This matrix projects the layer-normed residual stream into a query vector for a head: $Q = x_{\\text{ln}} W^Q$. Queries represent what a token is seeking, and together with keys they form the attention matrix shown below. In overlay notation: $H_i = \\mathrm{softmax}((Q_i K_i^\\top)/\\sqrt{d_h} + M) V_i$.';
+        return 'This matrix projects the layer-normed residual stream into a query vector for a head: $Q = x_{\\text{ln}} W^Q + b^Q$. Queries represent what a token is seeking, and together with keys they form the attention matrix shown below. In overlay notation: $H_i = \\mathrm{softmax}((Q_i K_i^\\top)/\\sqrt{d_h} + M) V_i$.';
     }
     if (lower.includes('key weight matrix')) {
-        return 'This matrix projects the layer-normed residual stream into a key vector for a head: $K = x_{\\text{ln}} W^K$. A key represents what a token offers to be attended to. Queries score against keys to form the attention matrix shown below (one column per target token).';
+        return 'This matrix projects the layer-normed residual stream into a key vector for a head: $K = x_{\\text{ln}} W^K + b^K$. A key represents what a token offers to be attended to. Queries score against keys to form the attention matrix shown below (one column per target token).';
     }
     if (lower.includes('value weight matrix')) {
-        return 'This matrix projects the layer-normed residual stream into a value vector for a head: $V = x_{\\text{ln}} W^V$. Values are the content that gets mixed. The attention matrix shown below provides weights that mix these values into head outputs $H_i$.';
+        return 'This matrix projects the layer-normed residual stream into a value vector for a head: $V = x_{\\text{ln}} W^V + b^V$. Values are the content that gets mixed. The attention matrix shown below provides weights that mix these values into head outputs $H_i$.';
     }
     if (lower.includes('output projection matrix')) {
         return 'After each head uses attention to produce $H_i$, the head outputs are concatenated into $H$. This matrix projects the concatenation back to model width: $O = H W^O$. It does not build the attention matrix, but it combines the results of attention before the residual add.';
