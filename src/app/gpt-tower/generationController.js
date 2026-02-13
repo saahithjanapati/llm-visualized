@@ -342,11 +342,19 @@ export function initGenerationController({
             ? Math.max(1, Math.floor(state.totalLaneCount))
             : passPlan.totalLaneCount;
         syncKvCachePassState(nextLaneCount);
-        const decodeSingleLaneActive = !!(passPlan.kvCacheDecodeActive && passPlan.activeLaneCount === 1);
-        // Make the single decode-lane trail read bolder (brighter + thicker where supported)
-        // so it remains as visible as the old multi-lane look.
-        setTrailOpacityRuntimeMultiplier(decodeSingleLaneActive ? 1.85 : 1.0);
-        setTrailLineWidthRuntimeMultiplier(decodeSingleLaneActive ? 2.0 : 1.0);
+        const singleLaneActive = Number.isFinite(passPlan.activeLaneCount) && passPlan.activeLaneCount === 1;
+        const mobileLikeViewport = typeof window !== 'undefined'
+            && typeof window.matchMedia === 'function'
+            && (
+                window.matchMedia('(hover: none) and (pointer: coarse)').matches
+                || window.matchMedia('(max-width: 960px)').matches
+            );
+        // Single-lane passes need stronger trails to match multi-lane readability,
+        // and mobile/coarse-pointer displays need an extra bump.
+        const trailOpacityBoost = singleLaneActive ? (mobileLikeViewport ? 2.3 : 1.85) : 1.0;
+        const trailWidthBoost = singleLaneActive ? (mobileLikeViewport ? 2.7 : 2.0) : 1.0;
+        setTrailOpacityRuntimeMultiplier(trailOpacityBoost);
+        setTrailLineWidthRuntimeMultiplier(trailWidthBoost);
 
         let preserveCameraPose = false;
         if (resetPipeline) {
