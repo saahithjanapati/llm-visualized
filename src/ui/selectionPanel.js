@@ -83,6 +83,9 @@ const SPACE_TOKEN_DISPLAY = '" "';
 const RESIDUAL_STREAM_DESCRIPTION = 'This is the residual stream vector for a token at this point in the model. In the overlay, the residual stream is denoted by $x$ or $u$. Attention and MLP outputs are added back into it, which is why it is called a residual stream. It is the main highway of information.';
 const PANEL_SHIFT_DURATION_MS = 520;
 const DETAIL_EQUATION_FONT_MIN_PX = 9;
+const DETAIL_EQUATION_FONT_MAX_PX = 20;
+const DETAIL_EQUATION_FONT_MAX_SCALE = 1.5;
+const DETAIL_EQUATION_FIT_BUFFER_PX = 1.25;
 
 const TOKEN_CHIP_STYLE = {
     padding: 80,
@@ -3093,18 +3096,55 @@ class SelectionPanel {
 
     _readSelectionEquationContentSize() {
         if (!this.equationsBody) return { width: 0, height: 0 };
-        let width = this.equationsBody.scrollWidth;
-        let height = this.equationsBody.scrollHeight;
         const katexDisplay = this.equationsBody.querySelector('.katex-display');
         const katexRoot = this.equationsBody.querySelector('.katex-display > .katex');
-        const candidates = [katexDisplay, katexRoot];
-        for (const element of candidates) {
-            if (!element) continue;
-            const rect = element.getBoundingClientRect();
-            width = Math.max(width, element.scrollWidth, rect.width || 0);
-            height = Math.max(height, element.scrollHeight, rect.height || 0);
+        const measureKatexBaseBounds = () => {
+            if (!katexRoot) return null;
+            const bases = katexRoot.querySelectorAll('.katex-html .base');
+            if (!bases || !bases.length) return null;
+            let left = Infinity;
+            let right = -Infinity;
+            let top = Infinity;
+            let bottom = -Infinity;
+            bases.forEach((base) => {
+                const rect = base.getBoundingClientRect();
+                if (!(rect.width > 0 && rect.height > 0)) return;
+                left = Math.min(left, rect.left);
+                right = Math.max(right, rect.right);
+                top = Math.min(top, rect.top);
+                bottom = Math.max(bottom, rect.bottom);
+            });
+            if (!Number.isFinite(left) || !Number.isFinite(right) || !Number.isFinite(top) || !Number.isFinite(bottom)) {
+                return null;
+            }
+            return { width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
+        };
+        const baseBounds = measureKatexBaseBounds();
+        if (baseBounds && katexRoot) {
+            const rootRect = katexRoot.getBoundingClientRect();
+            return {
+                width: Math.max(0, baseBounds.width + 1),
+                height: Math.max(0, baseBounds.height, katexRoot.scrollHeight, rootRect.height || 0)
+            };
         }
-        return { width, height };
+        if (katexRoot) {
+            const rect = katexRoot.getBoundingClientRect();
+            return {
+                width: Math.max(0, katexRoot.scrollWidth, rect.width || 0),
+                height: Math.max(0, katexRoot.scrollHeight, rect.height || 0)
+            };
+        }
+        if (katexDisplay) {
+            const rect = katexDisplay.getBoundingClientRect();
+            return {
+                width: Math.max(0, katexDisplay.scrollWidth, rect.width || 0),
+                height: Math.max(0, katexDisplay.scrollHeight, rect.height || 0)
+            };
+        }
+        return {
+            width: this.equationsBody.scrollWidth,
+            height: this.equationsBody.scrollHeight
+        };
     }
 
     _applySelectionEquationFit() {
@@ -3117,44 +3157,91 @@ class SelectionPanel {
 
         const sectionRect = this.equationsSection.getBoundingClientRect();
         const panelRect = this.panel.getBoundingClientRect();
-        const availableHeight = Math.max(0, Math.min(sectionRect.height, panelRect.height * 0.42));
+        const getPx = (value) => {
+            const parsed = Number.parseFloat(value);
+            return Number.isFinite(parsed) ? parsed : 0;
+        };
+        const panelStyle = (typeof window !== 'undefined')
+            ? window.getComputedStyle(this.panel)
+            : null;
+        const sectionStyle = (typeof window !== 'undefined')
+            ? window.getComputedStyle(this.equationsSection)
+            : null;
+        const panelPaddingBottom = panelStyle ? getPx(panelStyle.paddingBottom) : 0;
+        const sectionPaddingBottom = sectionStyle ? getPx(sectionStyle.paddingBottom) : 0;
+        const lowerGuard = Math.max(4, panelPaddingBottom + sectionPaddingBottom + 2);
+        const sectionTopInset = Math.max(0, bodyRect.top - sectionRect.top);
+        const availableHeight = Math.max(
+            0,
+            Math.min(
+                panelRect.bottom - bodyRect.top - lowerGuard,
+                panelRect.height - sectionTopInset - lowerGuard
+            )
+        );
+        if (!(availableHeight > 0)) return;
+        const fitWidth = Math.max(0, availableWidth - DETAIL_EQUATION_FIT_BUFFER_PX);
+        const fitHeight = Math.max(0, availableHeight - DETAIL_EQUATION_FIT_BUFFER_PX);
+        if (!(fitWidth > 0 && fitHeight > 0)) return;
 
         const baseFontPx = this._readSelectionEquationBaseFontPx();
         if (this._equationFitState.baseFontPx === null || Math.abs(baseFontPx - this._equationFitState.baseFontPx) > 0.5) {
             this._equationFitState.baseFontPx = baseFontPx;
             this._equationFitState.lastFontPx = null;
         }
-        this.equationsBody.style.fontSize = `${this._equationFitState.baseFontPx}px`;
 
-        const { width: contentWidth, height: contentHeight } = this._readSelectionEquationContentSize();
-        if (!(contentWidth > 0)) return;
+        const applyFontPx = (fontPx) => {
+            this.equationsBody.style.fontSize = `${fontPx.toFixed(2)}px`;
+        };
+        const fitsAt = (fontPx) => {
+            applyFontPx(fontPx);
+            const fitted = this._readSelectionEquationContentSize();
+            return {
+                fits: fitted.width <= fitWidth + 0.5
+                    && fitted.height <= fitHeight + 0.5,
+                size: fitted
+            };
+        };
 
-        const widthScale = availableWidth / contentWidth;
-        const heightScale = (availableHeight > 0 && contentHeight > 0)
-            ? availableHeight / contentHeight
-            : 1;
-        const scale = Math.min(1, widthScale, heightScale);
-        if (!Number.isFinite(scale) || scale <= 0) return;
-
-        const maxFontPx = this._equationFitState.baseFontPx;
-        let targetFontPx = Math.max(
+        const maxFontPx = Math.max(
             DETAIL_EQUATION_FONT_MIN_PX,
-            Math.min(maxFontPx, this._equationFitState.baseFontPx * scale)
+            Math.min(
+                availableHeight,
+                DETAIL_EQUATION_FONT_MAX_PX,
+                this._equationFitState.baseFontPx * DETAIL_EQUATION_FONT_MAX_SCALE
+            )
         );
-        if (this._equationFitState.lastFontPx !== null && Math.abs(targetFontPx - this._equationFitState.lastFontPx) < 0.1) {
+        let low = DETAIL_EQUATION_FONT_MIN_PX;
+        const lowProbe = fitsAt(low);
+        if (!lowProbe.fits) {
+            if (this._equationFitState.lastFontPx === null || Math.abs(this._equationFitState.lastFontPx - low) >= 0.1) {
+                applyFontPx(low);
+                this._equationFitState.lastFontPx = low;
+            }
             return;
         }
 
-        this.equationsBody.style.fontSize = `${targetFontPx.toFixed(2)}px`;
-        const fitted = this._readSelectionEquationContentSize();
-        const widthOverflow = fitted.width - availableWidth;
-        if (widthOverflow > 0.5 && targetFontPx > DETAIL_EQUATION_FONT_MIN_PX) {
-            const correctiveScale = availableWidth / Math.max(1, fitted.width);
-            if (Number.isFinite(correctiveScale) && correctiveScale > 0 && correctiveScale < 1) {
-                targetFontPx = Math.max(DETAIL_EQUATION_FONT_MIN_PX, targetFontPx * correctiveScale);
-                this.equationsBody.style.fontSize = `${targetFontPx.toFixed(2)}px`;
+        let high = maxFontPx;
+        const highProbe = fitsAt(high);
+        if (!highProbe.fits) {
+            for (let pass = 0; pass < 9; pass += 1) {
+                const mid = (low + high) * 0.5;
+                const probe = fitsAt(mid);
+                if (probe.fits) {
+                    low = mid;
+                } else {
+                    high = mid;
+                }
             }
+        } else {
+            low = high;
         }
+
+        const targetFontPx = Math.max(DETAIL_EQUATION_FONT_MIN_PX, Math.min(maxFontPx, low));
+        if (this._equationFitState.lastFontPx !== null && Math.abs(targetFontPx - this._equationFitState.lastFontPx) < 0.1) {
+            applyFontPx(this._equationFitState.lastFontPx);
+            return;
+        }
+        applyFontPx(targetFontPx);
         this._equationFitState.lastFontPx = targetFontPx;
     }
 

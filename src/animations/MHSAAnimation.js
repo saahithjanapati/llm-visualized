@@ -3205,7 +3205,11 @@ export class MHSAAnimation {
                     onComplete();
                 } catch (_) { /* no-op */ }
             }
-        }, { finalData });
+        }, {
+            finalData,
+            progressTarget: lane,
+            progressKey: 'mhsaResidualAddProgress'
+        });
         // Don't force absolute positions here – vectors should keep their
         // natural flow handled by the tween callbacks inside the helper.
     }

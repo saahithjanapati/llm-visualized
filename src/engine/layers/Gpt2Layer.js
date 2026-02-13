@@ -84,6 +84,12 @@ const MLP_REFLECTIVITY_TWEAKS = {
     envMapIntensityMax: 1.1
 };
 
+const MULTIPLY_BLEND_DURATION_MS = 260;
+const MULTIPLY_FLASH_DURATION_MS = 180;
+const MULTIPLY_SOURCE_SHRINK = 0.82;
+const MULTIPLY_RESULT_START_SCALE = 0.9;
+const MULTIPLY_FLASH_GEOMETRY = new THREE.SphereGeometry(1, 18, 18);
+
 const applyMatrixReflectivityTweak = (matrix, tweaks) => {
     if (!matrix || !tweaks) return;
     const applyToMaterial = (mat) => {
@@ -723,6 +729,57 @@ export default class Gpt2Layer extends BaseLayer {
         }
 
         const speedMult = GLOBAL_ANIM_SPEED_MULT;
+        const basePrismAddDurationMs = (() => {
+            const vectorLength = Math.max(1, this._getBaseVectorLength());
+            const durationMs = PRISM_ADD_ANIM_BASE_DURATION / PRISM_ADD_ANIM_SPEED_MULT;
+            const flashDurationMs = PRISM_ADD_ANIM_BASE_FLASH_DURATION / PRISM_ADD_ANIM_SPEED_MULT;
+            const delayBetweenMs = PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS / PRISM_ADD_ANIM_SPEED_MULT;
+            return durationMs + flashDurationMs + vectorLength * delayBetweenMs;
+        })();
+        const ln1RiseBaseSpeed = ANIM_RISE_SPEED_INSIDE_LN * speedMult;
+        const ln2RiseBaseSpeed = ANIM_RISE_SPEED_POST_SPLIT_LN2 * speedMult;
+        let ln1BarrierMaxRemaining = 0;
+        let mhsaBarrierMaxRemaining = 0;
+        let ln2BarrierMaxRemaining = 0;
+        if (laneCount) {
+            const ln1TravelTargetY = this.ln1TopY + 5;
+            for (let laneIdx = 0; laneIdx < laneCount; laneIdx++) {
+                const lane = lanes[laneIdx];
+                if (!lane) continue;
+                if (!this._ln1Start && lane.horizPhase === 'waiting' && lane.originalVec && lane.originalVec.group && Number.isFinite(lane.branchStartY)) {
+                    const remaining = Math.max(0, lane.branchStartY - lane.originalVec.group.position.y);
+                    if (remaining > ln1BarrierMaxRemaining) ln1BarrierMaxRemaining = remaining;
+                }
+                if (!this._mhsaStart && lane.horizPhase === 'riseAboveLN' && lane.resultVec && lane.resultVec.group) {
+                    const remaining = Math.max(0, ln1TravelTargetY - lane.resultVec.group.position.y);
+                    if (remaining > mhsaBarrierMaxRemaining) mhsaBarrierMaxRemaining = remaining;
+                }
+                if (!this._mhsaStart && lane.ln1AddStarted && !lane.ln1AddComplete) {
+                    const addProgress = THREE.MathUtils.clamp(
+                        Number.isFinite(lane.ln1ShiftProgress) ? lane.ln1ShiftProgress : 0,
+                        0,
+                        1
+                    );
+                    const remainingSeconds = (basePrismAddDurationMs * (1 - addProgress)) / 1000;
+                    const virtualRemaining = ln1RiseBaseSpeed * remainingSeconds;
+                    if (virtualRemaining > mhsaBarrierMaxRemaining) mhsaBarrierMaxRemaining = virtualRemaining;
+                }
+                if (!this._ln2Ready && lane.ln2Phase === 'preRise' && lane.postAdditionVec && lane.postAdditionVec.group) {
+                    const remaining = Math.max(0, ln2SyncY - lane.postAdditionVec.group.position.y);
+                    if (remaining > ln2BarrierMaxRemaining) ln2BarrierMaxRemaining = remaining;
+                }
+                if (!this._ln2Ready && lane.ln2Phase !== 'preRise' && lane.stopRise) {
+                    const addProgress = THREE.MathUtils.clamp(
+                        Number.isFinite(lane.mhsaResidualAddProgress) ? lane.mhsaResidualAddProgress : 0,
+                        0,
+                        1
+                    );
+                    const remainingSeconds = (basePrismAddDurationMs * (1 - addProgress)) / 1000;
+                    const virtualRemaining = ln2RiseBaseSpeed * remainingSeconds;
+                    if (virtualRemaining > ln2BarrierMaxRemaining) ln2BarrierMaxRemaining = virtualRemaining;
+                }
+            }
+        }
 
         // ────────────────────────────────────────────────────────────────
         //  NEW: LayerNorm-1 synchronisation barrier – wait until EVERY
@@ -778,11 +835,6 @@ export default class Gpt2Layer extends BaseLayer {
         this.lanes.forEach(lane => {
             const { originalVec, dupVec } = lane;
 
-            if (lane._pendingMultResult && lane._pendingMultResult.group) {
-                lane._pendingMultResult.group.visible = true;
-                lane._pendingMultResult = null;
-            }
-            
             // The Gpt2Layer's direct update logic is now ONLY responsible for
             // handling the initial branching toward the first LayerNorm.
             // ALL subsequent movement, including the continuous rise of the
@@ -799,8 +851,18 @@ export default class Gpt2Layer extends BaseLayer {
                         // Clamp position so early-arriving lanes don’t drift.
                         originalVec.group.position.y = lane.branchStartY;
                     } else {
+                        const baseRiseSpeed = ANIM_RISE_SPEED_ORIGINAL * speedMult;
+                        const syncedRiseSpeed = this._getSynchronizedRiseSpeed(
+                            originalVec.group.position.y,
+                            lane.branchStartY,
+                            baseRiseSpeed,
+                            ln1BarrierMaxRemaining
+                        );
                         // Continue rising towards the branching height.
-                        originalVec.group.position.y = Math.min(lane.branchStartY, originalVec.group.position.y + ANIM_RISE_SPEED_ORIGINAL * speedMult * dt);
+                        originalVec.group.position.y = Math.min(
+                            lane.branchStartY,
+                            originalVec.group.position.y + syncedRiseSpeed * dt
+                        );
                     }
                     break;
                 case 'right':
@@ -941,12 +1003,7 @@ export default class Gpt2Layer extends BaseLayer {
                             dupVec.instanceCount
                         );
                         this.raycastRoot.add(multResult.group);
-                        multResult.group.visible = false;
-                        lane._pendingMultResult = multResult;
-                        dupVec.group.visible = false;
-                        if (dupVec.group && dupVec.group.parent) {
-                            dupVec.group.parent.remove(dupVec.group);
-                        }
+                        multResult.group.visible = true;
                         const ln1ScaledData = this._getLn1Data(lane, 'scale');
                         if (ln1ScaledData) {
                             applyVectorData(
@@ -955,9 +1012,6 @@ export default class Gpt2Layer extends BaseLayer {
                                 lane.tokenLabel ? `LN1 Scaled - ${lane.tokenLabel}` : 'LN1 Scaled',
                                 this._getLaneMeta(lane, 'ln1.scale')
                             );
-                        }
-                        if (scaleParam && scaleParam.group) {
-                            scaleParam.group.visible = false;
                         }
 
                         const reusedTrail = dupVec && dupVec.userData && dupVec.userData.trail;
@@ -1001,84 +1055,93 @@ export default class Gpt2Layer extends BaseLayer {
                             delete multResult.userData.trailWorld;
                         }
 
-                        const shiftParamData = this._getLayerNormParamData('ln1', 'shift');
-                        const shiftSeed = (shiftParamData && shiftParamData.length)
-                            ? shiftParamData
-                            : (sourceRaw.length ? sourceRaw.slice() : this.random.nextVector(this._getBaseVectorLength()));
-                        const addResult = this._createPrismVector(
-                            shiftSeed,
-                            (shiftParam && shiftParam.group)
-                                ? shiftParam.group.position.clone()
-                                : multResult.group.position.clone(),
-                            30,
-                            multResult.instanceCount
-                        );
-                        this.raycastRoot.add(addResult.group);
-                        // Keep shift/addition parameter in active (blue-ish) colors during the add animation.
-                        this._applyLayerNormParamVector(addResult, 'ln1', 'shift', null);
-                        if (shiftParam && shiftParam.group) {
-                            shiftParam.group.visible = false;
-                        }
+                        const startLn1Addition = () => {
+                            const shiftParamData = this._getLayerNormParamData('ln1', 'shift');
+                            const shiftSeed = (shiftParamData && shiftParamData.length)
+                                ? shiftParamData
+                                : (sourceRaw.length ? sourceRaw.slice() : this.random.nextVector(this._getBaseVectorLength()));
+                            const addResult = this._createPrismVector(
+                                shiftSeed,
+                                (shiftParam && shiftParam.group)
+                                    ? shiftParam.group.position.clone()
+                                    : multResult.group.position.clone(),
+                                30,
+                                multResult.instanceCount
+                            );
+                            this.raycastRoot.add(addResult.group);
+                            // Keep shift/addition parameter in active (blue-ish) colors during the add animation.
+                            this._applyLayerNormParamVector(addResult, 'ln1', 'shift', null);
+                            if (shiftParam && shiftParam.group) {
+                                shiftParam.group.visible = false;
+                            }
 
-                        const ln1ShiftedData = this._getLn1Data(lane, 'shift');
-                        lane.resultVec = addResult;
-                        lane.ln1AddStarted = true;
-                        startPrismAdditionAnimation(multResult, addResult, null, () => {
-                            lane.ln1AddComplete = true;
-                            if (ln1ShiftedData) {
-                                applyVectorData(
-                                    addResult,
-                                    ln1ShiftedData,
-                                    lane.tokenLabel ? `LN1 Shifted - ${lane.tokenLabel}` : 'LN1 Shifted',
-                                    this._getLaneMeta(lane, 'ln1.shift')
-                                );
-                            }
-                            const additionTrail = multResult.userData && multResult.userData.trail;
-                            if (additionTrail) {
-                                addResult.userData = addResult.userData || {};
-                                const additionTrailIsWorld = Boolean(multResult.userData && multResult.userData.trailWorld);
-                                const prevTrail = addResult.userData.trail;
-                                if (prevTrail && prevTrail !== additionTrail) {
-                                    try {
-                                        if (typeof prevTrail.dispose === 'function') {
-                                            prevTrail.dispose();
-                                        } else if (prevTrail._line && prevTrail._line.parent) {
-                                            prevTrail._line.parent.remove(prevTrail._line);
+                            const ln1ShiftedData = this._getLn1Data(lane, 'shift');
+                            lane.resultVec = addResult;
+                            lane.ln1AddStarted = true;
+                            startPrismAdditionAnimation(multResult, addResult, null, () => {
+                                lane.ln1AddComplete = true;
+                                if (ln1ShiftedData) {
+                                    applyVectorData(
+                                        addResult,
+                                        ln1ShiftedData,
+                                        lane.tokenLabel ? `LN1 Shifted - ${lane.tokenLabel}` : 'LN1 Shifted',
+                                        this._getLaneMeta(lane, 'ln1.shift')
+                                    );
+                                }
+                                const additionTrail = multResult.userData && multResult.userData.trail;
+                                if (additionTrail) {
+                                    addResult.userData = addResult.userData || {};
+                                    const additionTrailIsWorld = Boolean(multResult.userData && multResult.userData.trailWorld);
+                                    const prevTrail = addResult.userData.trail;
+                                    if (prevTrail && prevTrail !== additionTrail) {
+                                        try {
+                                            if (typeof prevTrail.dispose === 'function') {
+                                                prevTrail.dispose();
+                                            } else if (prevTrail._line && prevTrail._line.parent) {
+                                                prevTrail._line.parent.remove(prevTrail._line);
+                                            }
+                                        } catch (_) { /* non-fatal cleanup */ }
+                                    }
+                                    addResult.userData.trail = additionTrail;
+                                    addResult.userData.trailWorld = additionTrailIsWorld;
+                                    if (additionTrailIsWorld) {
+                                        addResult.group.getWorldPosition(TMP_WORLD_POS);
+                                        if (typeof additionTrail.snapLastPointTo === 'function') {
+                                            additionTrail.snapLastPointTo(TMP_WORLD_POS);
+                                        } else {
+                                            additionTrail.update(TMP_WORLD_POS);
                                         }
-                                    } catch (_) { /* non-fatal cleanup */ }
-                                }
-                                addResult.userData.trail = additionTrail;
-                                addResult.userData.trailWorld = additionTrailIsWorld;
-                                if (additionTrailIsWorld) {
-                                    addResult.group.getWorldPosition(TMP_WORLD_POS);
-                                    if (typeof additionTrail.snapLastPointTo === 'function') {
-                                        additionTrail.snapLastPointTo(TMP_WORLD_POS);
                                     } else {
-                                        additionTrail.update(TMP_WORLD_POS);
+                                        if (typeof additionTrail.snapLastPointTo === 'function') {
+                                            additionTrail.snapLastPointTo(addResult.group.position);
+                                        } else {
+                                            additionTrail.update(addResult.group.position);
+                                        }
                                     }
-                                } else {
-                                    if (typeof additionTrail.snapLastPointTo === 'function') {
-                                        additionTrail.snapLastPointTo(addResult.group.position);
-                                    } else {
-                                        additionTrail.update(addResult.group.position);
-                                    }
+                                    delete multResult.userData.trail;
+                                    delete multResult.userData.trailWorld;
                                 }
-                                delete multResult.userData.trail;
-                                delete multResult.userData.trailWorld;
-                            }
-                            if (multResult.group && multResult.group.parent) {
-                                multResult.group.parent.remove(multResult.group);
-                            }
-                            addResult.userData = addResult.userData || {};
-                            if (!addResult.userData.trail) {
-                                const fallbackTrail = new StraightLineTrail(this.root, 0xffffff, 1, undefined, undefined, TRAIL_MIN_SEGMENT_DISTANCE);
-                                fallbackTrail.start(addResult.group.position);
-                                addResult.userData.trail = fallbackTrail;
-                                addResult.userData.trailWorld = false;
-                            }
-                            lane.horizPhase = 'riseAboveLN';
-                            this._emitProgress();
-                        }, { finalData: ln1ShiftedData, progressTarget: lane, progressKey: 'ln1ShiftProgress' });
+                                if (multResult.group && multResult.group.parent) {
+                                    multResult.group.parent.remove(multResult.group);
+                                }
+                                addResult.userData = addResult.userData || {};
+                                if (!addResult.userData.trail) {
+                                    const fallbackTrail = new StraightLineTrail(this.root, 0xffffff, 1, undefined, undefined, TRAIL_MIN_SEGMENT_DISTANCE);
+                                    fallbackTrail.start(addResult.group.position);
+                                    addResult.userData.trail = fallbackTrail;
+                                    addResult.userData.trailWorld = false;
+                                }
+                                lane.horizPhase = 'riseAboveLN';
+                                this._emitProgress();
+                            }, { finalData: ln1ShiftedData, progressTarget: lane, progressKey: 'ln1ShiftProgress' });
+                        };
+
+                        this._animateMultiplyTransition({
+                            sourceVec: dupVec,
+                            multResult,
+                            scaleParam,
+                            onComplete: startLn1Addition
+                        });
                     }
                     break;
                 case 'riseAboveLN':
@@ -1087,7 +1150,14 @@ export default class Gpt2Layer extends BaseLayer {
                     if (rv) {
                         const targetY = this.ln1TopY + 5; // Same as meetY in original
                         if (rv.group.position.y < targetY) {
-                            rv.group.position.y = Math.min(targetY, rv.group.position.y + ANIM_RISE_SPEED_INSIDE_LN * speedMult * dt);
+                            const baseRiseSpeed = ANIM_RISE_SPEED_INSIDE_LN * speedMult;
+                            const syncedRiseSpeed = this._getSynchronizedRiseSpeed(
+                                rv.group.position.y,
+                                targetY,
+                                baseRiseSpeed,
+                                mhsaBarrierMaxRemaining
+                            );
+                            rv.group.position.y = Math.min(targetY, rv.group.position.y + syncedRiseSpeed * dt);
                         } else {
                             // Now that we're above LN1, mark lane ready for MHSA travel.
                             lane.travellingVec = rv;
@@ -1137,7 +1207,14 @@ export default class Gpt2Layer extends BaseLayer {
                     // normalisation begins at a consistent height across both LayerNorms.
                     const targetY = bottomY_ln2_abs + 5; // align with LN1 offset
                     if (v.group.position.y < targetY) {
-                        v.group.position.y = Math.min(targetY, v.group.position.y + ANIM_RISE_SPEED_POST_SPLIT_LN2 * speedMult * dt);
+                        const baseRiseSpeed = ANIM_RISE_SPEED_POST_SPLIT_LN2 * speedMult;
+                        const syncedRiseSpeed = this._getSynchronizedRiseSpeed(
+                            v.group.position.y,
+                            targetY,
+                            baseRiseSpeed,
+                            ln2BarrierMaxRemaining
+                        );
+                        v.group.position.y = Math.min(targetY, v.group.position.y + syncedRiseSpeed * dt);
                     } else {
                         if (!this._ln2Ready) {
                             // Wait here until every lane reaches the staging height.
@@ -1368,16 +1445,7 @@ export default class Gpt2Layer extends BaseLayer {
                             mv.instanceCount
                         );
                         this.raycastRoot.add(multResult.group);
-                        multResult.group.visible = false;
-                        lane._pendingMultResult = multResult;
-                        mv.group.visible = false;
-                        if (mv.group && mv.group.parent) {
-                            mv.group.parent.remove(mv.group);
-                        }
-
-                        if (scaleParam && scaleParam.group) {
-                            scaleParam.group.visible = false;
-                        }
+                        multResult.group.visible = true;
 
                         const ln2ScaledData = this._getLn2Data(lane, 'scale');
                         const scaledFallback = (ln2ScaledData && ln2ScaledData.length)
@@ -1433,92 +1501,101 @@ export default class Gpt2Layer extends BaseLayer {
                             delete multResult.userData.trailWorld;
                         }
 
-                        lane.movingVecLN2 = multResult;
-                        lane.normAnimationLN2 = null;
-                        const resVec = multResult;
+                        const startLn2Addition = () => {
+                            lane.movingVecLN2 = multResult;
+                            lane.normAnimationLN2 = null;
+                            const resVec = multResult;
 
-                        const shiftParamData = this._getLayerNormParamData('ln2', 'shift');
-                        const shiftSeed = (shiftParamData && shiftParamData.length)
-                            ? shiftParamData
-                            : (sourceRaw.length ? sourceRaw.slice() : this.random.nextVector(this._getBaseVectorLength()));
-                        const addResult = this._createPrismVector(
-                            shiftSeed,
-                            (shiftParam && shiftParam.group)
-                                ? shiftParam.group.position.clone()
-                                : resVec.group.position.clone(),
-                            30,
-                            resVec.instanceCount
-                        );
-                        this.raycastRoot.add(addResult.group);
-                        // Keep shift/addition parameter in active (blue-ish) colors during the add animation.
-                        this._applyLayerNormParamVector(addResult, 'ln2', 'shift', null);
-                        if (shiftParam && shiftParam.group) {
-                            shiftParam.group.visible = false;
-                        }
+                            const shiftParamData = this._getLayerNormParamData('ln2', 'shift');
+                            const shiftSeed = (shiftParamData && shiftParamData.length)
+                                ? shiftParamData
+                                : (sourceRaw.length ? sourceRaw.slice() : this.random.nextVector(this._getBaseVectorLength()));
+                            const addResult = this._createPrismVector(
+                                shiftSeed,
+                                (shiftParam && shiftParam.group)
+                                    ? shiftParam.group.position.clone()
+                                    : resVec.group.position.clone(),
+                                30,
+                                resVec.instanceCount
+                            );
+                            this.raycastRoot.add(addResult.group);
+                            // Keep shift/addition parameter in active (blue-ish) colors during the add animation.
+                            this._applyLayerNormParamVector(addResult, 'ln2', 'shift', null);
+                            if (shiftParam && shiftParam.group) {
+                                shiftParam.group.visible = false;
+                            }
 
-                        const ln2ShiftedData = this._getLn2Data(lane, 'shift');
-                        lane.resultVecLN2 = addResult;
-                        lane.ln2AddStarted = true;
-                        // Let the addition animation own trail updates (match LN1 behavior).
-                        lane.movingVecLN2 = null;
-                        lane.normAnimationLN2 = null;
-                        startPrismAdditionAnimation(resVec, addResult, null, () => {
-                            lane.ln2AddComplete = true;
-                            if (ln2ShiftedData) {
-                                applyVectorData(
-                                    addResult,
-                                    ln2ShiftedData,
-                                    lane.tokenLabel ? `LN2 Shifted - ${lane.tokenLabel}` : 'LN2 Shifted',
-                                    this._getLaneMeta(lane, 'ln2.shift')
-                                );
-                            }
-                            const ln2Trail = resVec.userData && resVec.userData.trail;
-                            if (ln2Trail) {
-                                addResult.userData = addResult.userData || {};
-                                const ln2TrailIsWorld = Boolean(resVec.userData && resVec.userData.trailWorld);
-                                const prevTrailLN2 = addResult.userData.trail;
-                                if (prevTrailLN2 && prevTrailLN2 !== ln2Trail) {
-                                    try {
-                                        if (typeof prevTrailLN2.dispose === 'function') {
-                                            prevTrailLN2.dispose();
-                                        } else if (prevTrailLN2._line && prevTrailLN2._line.parent) {
-                                            prevTrailLN2._line.parent.remove(prevTrailLN2._line);
-                                        }
-                                    } catch (_) { /* cleanup best-effort */ }
-                                }
-                                addResult.userData.trail = ln2Trail;
-                                addResult.userData.trailWorld = ln2TrailIsWorld;
-                                if (ln2TrailIsWorld) {
-                                    addResult.group.getWorldPosition(TMP_WORLD_POS);
-                                    if (typeof ln2Trail.snapLastPointTo === 'function') {
-                                        ln2Trail.snapLastPointTo(TMP_WORLD_POS);
-                                    } else {
-                                        ln2Trail.update(TMP_WORLD_POS);
-                                    }
-                                } else {
-                                    if (typeof ln2Trail.snapLastPointTo === 'function') {
-                                        ln2Trail.snapLastPointTo(addResult.group.position);
-                                    } else {
-                                        ln2Trail.update(addResult.group.position);
-                                    }
-                                }
-                                delete resVec.userData.trail;
-                                delete resVec.userData.trailWorld;
-                            }
-                            if (resVec.group && resVec.group.parent) {
-                                resVec.group.parent.remove(resVec.group);
-                            }
+                            const ln2ShiftedData = this._getLn2Data(lane, 'shift');
+                            lane.resultVecLN2 = addResult;
+                            lane.ln2AddStarted = true;
+                            // Let the addition animation own trail updates (match LN1 behavior).
                             lane.movingVecLN2 = null;
                             lane.normAnimationLN2 = null;
-                            addResult.userData = addResult.userData || {};
-                            if (!addResult.userData.trail) {
-                                const fallbackTrailLn2 = new StraightLineTrail(this.root, 0xffffff, 1, undefined, undefined, TRAIL_MIN_SEGMENT_DISTANCE);
-                                fallbackTrailLn2.start(addResult.group.position);
-                                addResult.userData.trail = fallbackTrailLn2;
-                                addResult.userData.trailWorld = false;
-                            }
-                            startLn2Rise(addResult);
-                        }, { finalData: ln2ShiftedData, progressTarget: lane, progressKey: 'ln2ShiftProgress' });
+                            startPrismAdditionAnimation(resVec, addResult, null, () => {
+                                lane.ln2AddComplete = true;
+                                if (ln2ShiftedData) {
+                                    applyVectorData(
+                                        addResult,
+                                        ln2ShiftedData,
+                                        lane.tokenLabel ? `LN2 Shifted - ${lane.tokenLabel}` : 'LN2 Shifted',
+                                        this._getLaneMeta(lane, 'ln2.shift')
+                                    );
+                                }
+                                const ln2Trail = resVec.userData && resVec.userData.trail;
+                                if (ln2Trail) {
+                                    addResult.userData = addResult.userData || {};
+                                    const ln2TrailIsWorld = Boolean(resVec.userData && resVec.userData.trailWorld);
+                                    const prevTrailLN2 = addResult.userData.trail;
+                                    if (prevTrailLN2 && prevTrailLN2 !== ln2Trail) {
+                                        try {
+                                            if (typeof prevTrailLN2.dispose === 'function') {
+                                                prevTrailLN2.dispose();
+                                            } else if (prevTrailLN2._line && prevTrailLN2._line.parent) {
+                                                prevTrailLN2._line.parent.remove(prevTrailLN2._line);
+                                            }
+                                        } catch (_) { /* cleanup best-effort */ }
+                                    }
+                                    addResult.userData.trail = ln2Trail;
+                                    addResult.userData.trailWorld = ln2TrailIsWorld;
+                                    if (ln2TrailIsWorld) {
+                                        addResult.group.getWorldPosition(TMP_WORLD_POS);
+                                        if (typeof ln2Trail.snapLastPointTo === 'function') {
+                                            ln2Trail.snapLastPointTo(TMP_WORLD_POS);
+                                        } else {
+                                            ln2Trail.update(TMP_WORLD_POS);
+                                        }
+                                    } else {
+                                        if (typeof ln2Trail.snapLastPointTo === 'function') {
+                                            ln2Trail.snapLastPointTo(addResult.group.position);
+                                        } else {
+                                            ln2Trail.update(addResult.group.position);
+                                        }
+                                    }
+                                    delete resVec.userData.trail;
+                                    delete resVec.userData.trailWorld;
+                                }
+                                if (resVec.group && resVec.group.parent) {
+                                    resVec.group.parent.remove(resVec.group);
+                                }
+                                lane.movingVecLN2 = null;
+                                lane.normAnimationLN2 = null;
+                                addResult.userData = addResult.userData || {};
+                                if (!addResult.userData.trail) {
+                                    const fallbackTrailLn2 = new StraightLineTrail(this.root, 0xffffff, 1, undefined, undefined, TRAIL_MIN_SEGMENT_DISTANCE);
+                                    fallbackTrailLn2.start(addResult.group.position);
+                                    addResult.userData.trail = fallbackTrailLn2;
+                                    addResult.userData.trailWorld = false;
+                                }
+                                startLn2Rise(addResult);
+                            }, { finalData: ln2ShiftedData, progressTarget: lane, progressKey: 'ln2ShiftProgress' });
+                        };
+
+                        this._animateMultiplyTransition({
+                            sourceVec: mv,
+                            multResult,
+                            scaleParam,
+                            onComplete: startLn2Addition
+                        });
                     }
 
 
@@ -2425,6 +2502,157 @@ export default class Gpt2Layer extends BaseLayer {
             });
             obj.visible = false;
         });
+    }
+
+    _getSynchronizedRiseSpeed(currentY, targetY, baseSpeed, phaseMaxRemainingDistance) {
+        const speed = Number.isFinite(baseSpeed) ? Math.max(0, baseSpeed) : 0;
+        if (!Number.isFinite(currentY) || !Number.isFinite(targetY) || speed <= 0) return speed;
+        const remaining = Math.max(0, targetY - currentY);
+        if (remaining <= 1e-5) return 0;
+        const maxRemaining = Number.isFinite(phaseMaxRemainingDistance)
+            ? Math.max(0, phaseMaxRemainingDistance)
+            : remaining;
+        if (maxRemaining <= 1e-5 || maxRemaining <= remaining + 1e-5) {
+            return speed;
+        }
+        const etaSeconds = maxRemaining / speed;
+        if (etaSeconds <= 1e-5) return speed;
+        return remaining / etaSeconds;
+    }
+
+    _setVectorOpacity(vec, opacity) {
+        if (!vec || !vec.mesh || !vec.mesh.material) return;
+        const clampedOpacity = THREE.MathUtils.clamp(opacity, 0, 1);
+        const mats = Array.isArray(vec.mesh.material) ? vec.mesh.material : [vec.mesh.material];
+        mats.forEach(mat => {
+            if (!mat) return;
+            const shouldBeTransparent = clampedOpacity < 0.999;
+            if (mat.transparent !== shouldBeTransparent) {
+                mat.transparent = shouldBeTransparent;
+                mat.needsUpdate = true;
+            }
+            if (mat.opacity !== clampedOpacity) {
+                mat.opacity = clampedOpacity;
+            }
+            if (mat.depthWrite === shouldBeTransparent) {
+                mat.depthWrite = !shouldBeTransparent;
+                mat.needsUpdate = true;
+            }
+            if (!shouldBeTransparent && mat.depthWrite !== true) {
+                mat.depthWrite = true;
+                mat.needsUpdate = true;
+            }
+        });
+    }
+
+    _spawnMultiplyFlash(localPosition, parent = null) {
+        if (!localPosition) return;
+        const flashParent = parent || this.raycastRoot || this.root;
+        if (!flashParent) return;
+
+        const flashMaterial = new THREE.MeshBasicMaterial({
+            color: COLOR_WHITE,
+            transparent: true,
+            opacity: 0.8,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending
+        });
+        const flashMesh = new THREE.Mesh(MULTIPLY_FLASH_GEOMETRY, flashMaterial);
+        flashMesh.position.copy(localPosition);
+        flashMesh.scale.setScalar(0.18);
+        flashMesh.renderOrder = 40;
+        flashParent.add(flashMesh);
+
+        const cleanupFlash = () => {
+            if (flashMesh.parent) {
+                flashMesh.parent.remove(flashMesh);
+            }
+            flashMaterial.dispose();
+        };
+
+        if (typeof TWEEN === 'undefined') {
+            cleanupFlash();
+            return;
+        }
+
+        const pulseState = { scale: 0.18, opacity: 0.8 };
+        new TWEEN.Tween(pulseState)
+            .to({ scale: 1.75, opacity: 0 }, MULTIPLY_FLASH_DURATION_MS)
+            .easing(TWEEN.Easing.Quadratic.Out)
+            .onUpdate(() => {
+                flashMesh.scale.setScalar(pulseState.scale);
+                flashMaterial.opacity = pulseState.opacity;
+            })
+            .onComplete(cleanupFlash)
+            .start();
+    }
+
+    _animateMultiplyTransition({ sourceVec, multResult, scaleParam = null, onComplete = null }) {
+        const finish = () => {
+            if (scaleParam && scaleParam.group) {
+                scaleParam.group.visible = false;
+            }
+            if (multResult && multResult.group) {
+                multResult.group.visible = true;
+                multResult.group.scale.set(1, 1, 1);
+                this._setVectorOpacity(multResult, 1);
+            }
+            if (sourceVec && sourceVec.group) {
+                sourceVec.group.visible = false;
+                if (sourceVec.group.parent) {
+                    sourceVec.group.parent.remove(sourceVec.group);
+                }
+            }
+            if (typeof onComplete === 'function') {
+                onComplete();
+            }
+        };
+
+        if (!multResult || !multResult.group) {
+            finish();
+            return;
+        }
+
+        if (!sourceVec || !sourceVec.group || this._skipToEndActive || typeof TWEEN === 'undefined') {
+            this._spawnMultiplyFlash(multResult.group.position, multResult.group.parent || this.raycastRoot);
+            finish();
+            return;
+        }
+
+        const sourceStartScale = sourceVec.group.scale.clone();
+        const sourceEndScale = sourceStartScale.clone().multiplyScalar(MULTIPLY_SOURCE_SHRINK);
+        const resultEndScale = multResult.group.scale.clone();
+        const resultStartScale = resultEndScale.clone().multiplyScalar(MULTIPLY_RESULT_START_SCALE);
+        multResult.group.visible = true;
+        multResult.group.scale.copy(resultStartScale);
+        this._setVectorOpacity(sourceVec, 1);
+        this._setVectorOpacity(multResult, 0);
+
+        let finished = false;
+        const completeOnce = () => {
+            if (finished) return;
+            finished = true;
+            finish();
+        };
+
+        let flashFired = false;
+        const tweenState = { t: 0 };
+        new TWEEN.Tween(tweenState)
+            .to({ t: 1 }, MULTIPLY_BLEND_DURATION_MS)
+            .easing(TWEEN.Easing.Cubic.Out)
+            .onUpdate(() => {
+                const t = THREE.MathUtils.clamp(tweenState.t, 0, 1);
+                sourceVec.group.scale.lerpVectors(sourceStartScale, sourceEndScale, t);
+                multResult.group.scale.lerpVectors(resultStartScale, resultEndScale, t);
+                this._setVectorOpacity(sourceVec, 1 - t);
+                this._setVectorOpacity(multResult, Math.min(1, t * 1.2));
+                if (!flashFired && t >= 0.42) {
+                    flashFired = true;
+                    this._spawnMultiplyFlash(multResult.group.position, multResult.group.parent || this.raycastRoot);
+                }
+            })
+            .onComplete(completeOnce)
+            .start();
     }
 
     _getLaneMeta(lane, stage, extra = {}) {

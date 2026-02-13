@@ -133,6 +133,22 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     };
 
     const EQUATION_FONT_MIN_PX = 8;
+    const EQUATION_FONT_MAX_PX = 19;
+    const EQUATION_FONT_MAX_SCALE = 1.45;
+    const EQUATION_VERTICAL_GUARD_PX = 4;
+    const EQUATION_FIT_BUFFER_PX = 1.25;
+    const EQUATION_SIZE_CAPS = {
+        default: { maxPx: EQUATION_FONT_MAX_PX, maxScale: EQUATION_FONT_MAX_SCALE },
+        ln1: { maxPx: 17.2, maxScale: 1.32 },
+        ln2: { maxPx: 17.2, maxScale: 1.32 },
+        ln_top: { maxPx: 17.2, maxScale: 1.32 },
+        concat_proj: { maxPx: 17.0, maxScale: 1.28 },
+        resid1: { maxPx: 16.8, maxScale: 1.24 }
+    };
+    const resolveEquationSizeCap = (eqKey) => {
+        const key = typeof eqKey === 'string' ? eqKey : '';
+        return EQUATION_SIZE_CAPS[key] || EQUATION_SIZE_CAPS.default;
+    };
     const eqFitState = {
         baseFontPx: null,
         lastFontPx: null,
@@ -153,18 +169,55 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     };
     const readEquationContentSize = () => {
         if (!equationsBody) return { width: 0, height: 0 };
-        let width = equationsBody.scrollWidth;
-        let height = equationsBody.scrollHeight;
         const katexDisplay = equationsBody.querySelector('.katex-display');
         const katexRoot = equationsBody.querySelector('.katex-display > .katex');
-        const candidates = [katexDisplay, katexRoot];
-        for (const element of candidates) {
-            if (!element) continue;
-            const rect = element.getBoundingClientRect();
-            width = Math.max(width, element.scrollWidth, rect.width || 0);
-            height = Math.max(height, element.scrollHeight, rect.height || 0);
+        const measureKatexBaseBounds = () => {
+            if (!katexRoot) return null;
+            const bases = katexRoot.querySelectorAll('.katex-html .base');
+            if (!bases || !bases.length) return null;
+            let left = Infinity;
+            let right = -Infinity;
+            let top = Infinity;
+            let bottom = -Infinity;
+            bases.forEach((base) => {
+                const rect = base.getBoundingClientRect();
+                if (!(rect.width > 0 && rect.height > 0)) return;
+                left = Math.min(left, rect.left);
+                right = Math.max(right, rect.right);
+                top = Math.min(top, rect.top);
+                bottom = Math.max(bottom, rect.bottom);
+            });
+            if (!Number.isFinite(left) || !Number.isFinite(right) || !Number.isFinite(top) || !Number.isFinite(bottom)) {
+                return null;
+            }
+            return { width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
+        };
+        const baseBounds = measureKatexBaseBounds();
+        if (baseBounds && katexRoot) {
+            const rootRect = katexRoot.getBoundingClientRect();
+            return {
+                width: Math.max(0, baseBounds.width + 1),
+                height: Math.max(0, baseBounds.height, katexRoot.scrollHeight, rootRect.height || 0)
+            };
         }
-        return { width, height };
+        if (katexRoot) {
+            const rect = katexRoot.getBoundingClientRect();
+            return {
+                width: Math.max(0, katexRoot.scrollWidth, rect.width || 0),
+                height: Math.max(0, katexRoot.scrollHeight, rect.height || 0)
+            };
+        }
+        if (katexDisplay) {
+            const rect = katexDisplay.getBoundingClientRect();
+            return {
+                width: Math.max(0, katexDisplay.scrollWidth, rect.width || 0),
+                height: Math.max(0, katexDisplay.scrollHeight, rect.height || 0)
+            };
+        }
+        return {
+            width: equationsBody.scrollWidth,
+            height: equationsBody.scrollHeight
+        };
     };
     const applyEquationFit = () => {
         if (!equationsPanel || !equationsBody) return;
@@ -180,44 +233,82 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         const paddingX = getPx(bodyStyle.paddingLeft) + getPx(bodyStyle.paddingRight);
         const paddingY = getPx(bodyStyle.paddingTop) + getPx(bodyStyle.paddingBottom);
 
-        const availableWidth = Math.max(0, panelRect.width - paddingX - 3);
-        const availableHeight = Math.max(0, panelRect.height - titleRect.height - titleMarginBottom - paddingY - 6);
+        const availableWidth = Math.max(0, panelRect.width - paddingX - 1);
+        const availableHeight = Math.max(
+            0,
+            panelRect.height - titleRect.height - titleMarginBottom - paddingY - EQUATION_VERTICAL_GUARD_PX
+        );
         if (!(availableWidth > 0 && availableHeight > 0)) return;
+        const fitWidth = Math.max(0, availableWidth - EQUATION_FIT_BUFFER_PX);
+        const fitHeight = Math.max(0, availableHeight - EQUATION_FIT_BUFFER_PX);
+        if (!(fitWidth > 0 && fitHeight > 0)) return;
 
         const baseFontPx = readBaseFontPx();
         if (eqFitState.baseFontPx === null || Math.abs(baseFontPx - eqFitState.baseFontPx) > 0.5) {
             eqFitState.baseFontPx = baseFontPx;
             eqFitState.lastFontPx = null;
         }
-        equationsBody.style.fontSize = `${eqFitState.baseFontPx}px`;
-
-        const { width: contentWidth, height: contentHeight } = readEquationContentSize();
-        if (!(contentWidth > 0 && contentHeight > 0)) return;
-
-        const widthScale = availableWidth / contentWidth;
-        const heightScale = availableHeight / contentHeight;
-        const scale = Math.min(widthScale, heightScale);
-        if (!Number.isFinite(scale) || scale <= 0) return;
-
-        const maxFontPx = Math.max(EQUATION_FONT_MIN_PX, availableHeight);
-        const clampFontPx = (value) => Math.min(maxFontPx, Math.max(EQUATION_FONT_MIN_PX, value));
-        let targetFontPx = clampFontPx(eqFitState.baseFontPx * scale * 0.97);
-
-        equationsBody.style.fontSize = `${targetFontPx.toFixed(2)}px`;
-        for (let pass = 0; pass < 5; pass += 1) {
+        const clampFontPx = (value, ceiling) => {
+            const maxPx = Math.max(EQUATION_FONT_MIN_PX, ceiling);
+            return Math.min(maxPx, Math.max(EQUATION_FONT_MIN_PX, value));
+        };
+        const applyFontPx = (fontPx) => {
+            equationsBody.style.fontSize = `${fontPx.toFixed(2)}px`;
+        };
+        const fitsAt = (fontPx) => {
+            applyFontPx(fontPx);
             const fittedSize = readEquationContentSize();
-            const widthOverflow = fittedSize.width - availableWidth;
-            const heightOverflow = fittedSize.height - availableHeight;
-            if (widthOverflow <= 0.5 && heightOverflow <= 0.5) break;
-            if (targetFontPx <= EQUATION_FONT_MIN_PX + 0.01) break;
-            const correctiveScale = Math.min(
-                availableWidth / Math.max(1, fittedSize.width),
-                availableHeight / Math.max(1, fittedSize.height)
-            );
-            if (!Number.isFinite(correctiveScale) || correctiveScale <= 0 || correctiveScale >= 1) break;
-            targetFontPx = clampFontPx(targetFontPx * correctiveScale * 0.98);
-            equationsBody.style.fontSize = `${targetFontPx.toFixed(2)}px`;
+            return {
+                fits: fittedSize.width <= fitWidth + 0.5
+                    && fittedSize.height <= fitHeight + 0.5,
+                size: fittedSize
+            };
+        };
+
+        const activeEqKey = typeof appState.lastEqKey === 'string' ? appState.lastEqKey : '';
+        const cap = resolveEquationSizeCap(activeEqKey);
+        const capPx = Number.isFinite(cap.maxPx) ? cap.maxPx : EQUATION_FONT_MAX_PX;
+        const capScale = Number.isFinite(cap.maxScale) ? cap.maxScale : EQUATION_FONT_MAX_SCALE;
+        const maxFontPx = Math.max(
+            EQUATION_FONT_MIN_PX,
+            Math.min(
+                availableHeight,
+                capPx,
+                eqFitState.baseFontPx * capScale
+            )
+        );
+        let low = clampFontPx(EQUATION_FONT_MIN_PX, maxFontPx);
+        const minFit = fitsAt(low);
+        if (!minFit.fits) {
+            if (eqFitState.lastFontPx === null || Math.abs(eqFitState.lastFontPx - low) >= 0.1) {
+                applyFontPx(low);
+                eqFitState.lastFontPx = low;
+            }
+            return;
         }
+
+        let high = clampFontPx(maxFontPx, maxFontPx);
+        const highFit = fitsAt(high);
+        if (!highFit.fits) {
+            for (let pass = 0; pass < 9; pass += 1) {
+                const mid = (low + high) * 0.5;
+                const probe = fitsAt(mid);
+                if (probe.fits) {
+                    low = mid;
+                } else {
+                    high = mid;
+                }
+            }
+        } else {
+            low = high;
+        }
+
+        const targetFontPx = clampFontPx(low, maxFontPx);
+        if (eqFitState.lastFontPx !== null && Math.abs(targetFontPx - eqFitState.lastFontPx) < 0.1) {
+            applyFontPx(eqFitState.lastFontPx);
+            return;
+        }
+        applyFontPx(targetFontPx);
         eqFitState.lastFontPx = targetFontPx;
     };
     const scheduleEquationFit = () => {

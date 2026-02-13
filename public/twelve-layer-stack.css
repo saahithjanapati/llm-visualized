@@ -526,6 +526,7 @@ body.touch-ui * {
 }
 
 #hudPanel {
+    --hud-mono-font: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 8px 12px;
@@ -547,13 +548,15 @@ body.touch-ui * {
 #statusOverlay {
     position: static;
     padding: 0;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-family: var(--hud-mono-font);
     font-size: 12px;
     line-height: 1.15;
+    font-weight: 400;
     color: #fff;
     background: transparent;
     white-space: pre-line;
     pointer-events: none;
+    font-variant-numeric: tabular-nums;
 }
 
 #parameterCounter {
@@ -562,8 +565,9 @@ body.touch-ui * {
     min-width: 0;
     background: transparent;
     text-align: right;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-family: var(--hud-mono-font);
     pointer-events: none;
+    font-variant-numeric: tabular-nums;
 }
 #parameterCounter .param-label {
     font-size: 11px;
