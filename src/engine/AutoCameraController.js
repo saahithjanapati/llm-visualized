@@ -229,6 +229,12 @@ export class AutoCameraController {
         this._autoCameraShiftMaxTravelX = travelShiftX;
         const mhsaShiftX = typeof opts.autoCameraMhsaMobileShiftX === 'number' ? opts.autoCameraMhsaMobileShiftX : 0;
         this._autoCameraShiftMaxMhsaX = mhsaShiftX;
+        this._autoCameraMhsaMobileOverrideCameraOffset = null;
+        this._autoCameraMhsaMobileOverrideTargetOffset = null;
+        this._autoCameraMhsaMobileOverrideEnabled = false;
+        this._autoCameraConcatMobileOverrideCameraOffset = null;
+        this._autoCameraConcatMobileOverrideTargetOffset = null;
+        this._autoCameraConcatMobileOverrideEnabled = false;
         this._autoCameraTravelMobileOverrideCameraOffset = null;
         this._autoCameraTravelMobileOverrideTargetOffset = null;
         this._autoCameraTravelMobileOverrideEnabled = false;
@@ -239,6 +245,7 @@ export class AutoCameraController {
             ? Math.max(this._autoCameraScaleMinWidth + 10, opts.autoCameraScaleMaxWidth)
             : 880;
         this._autoCameraScaleLast = 1.0;
+        this._autoCameraMobileFactorLast = 0;
         this._autoCameraShiftLastX = 0;
         this._autoCameraCenter = new THREE.Vector3();
         this._autoCameraOffsetScratch = new THREE.Vector3();
@@ -326,6 +333,13 @@ export class AutoCameraController {
             this._autoCameraMhsaTargetOffsetBase.copy(mhsaTargetOffset);
             this._autoCameraMhsaOffsetsEnabled = true;
         }
+        const mhsaMobileCamOffset = coerceVector3(opts.autoCameraMhsaMobileCameraOffset, null);
+        const mhsaMobileTargetOffset = coerceVector3(opts.autoCameraMhsaMobileTargetOffset, null);
+        if (mhsaMobileCamOffset && mhsaMobileTargetOffset) {
+            this._autoCameraMhsaMobileOverrideCameraOffset = mhsaMobileCamOffset;
+            this._autoCameraMhsaMobileOverrideTargetOffset = mhsaMobileTargetOffset;
+            this._autoCameraMhsaMobileOverrideEnabled = true;
+        }
 
         const concatCamOffset = coerceVector3(opts.autoCameraConcatCameraOffset, null);
         const concatTargetOffset = coerceVector3(opts.autoCameraConcatTargetOffset, null);
@@ -333,6 +347,13 @@ export class AutoCameraController {
             this._autoCameraConcatCameraOffsetBase.copy(concatCamOffset);
             this._autoCameraConcatTargetOffsetBase.copy(concatTargetOffset);
             this._autoCameraConcatOffsetsEnabled = true;
+        }
+        const concatMobileCamOffset = coerceVector3(opts.autoCameraConcatMobileCameraOffset, null);
+        const concatMobileTargetOffset = coerceVector3(opts.autoCameraConcatMobileTargetOffset, null);
+        if (concatMobileCamOffset && concatMobileTargetOffset) {
+            this._autoCameraConcatMobileOverrideCameraOffset = concatMobileCamOffset;
+            this._autoCameraConcatMobileOverrideTargetOffset = concatMobileTargetOffset;
+            this._autoCameraConcatMobileOverrideEnabled = true;
         }
 
         const lnCamOffset = coerceVector3(opts.autoCameraLnCameraOffset, null);
@@ -808,8 +829,23 @@ export class AutoCameraController {
         return 1.0 + t * (this._autoCameraScaleMax - 1.0);
     }
 
+    _computeAutoCameraMobileFactor() {
+        if (typeof window === 'undefined') return 0;
+        if (typeof window.matchMedia === 'function') {
+            const coarse = window.matchMedia('(pointer: coarse)').matches
+                || window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+            if (coarse) return 1;
+        }
+        const touchPoints = Number.isFinite(window?.navigator?.maxTouchPoints)
+            ? window.navigator.maxTouchPoints
+            : 0;
+        if (touchPoints > 0) return 1;
+        return 0;
+    }
+
     _updateAutoCameraScaledOffsets(force = false) {
         const scale = this._computeAutoCameraScale();
+        const mobileFactor = this._computeAutoCameraMobileFactor();
         const shiftFactor = (this._autoCameraScaleMax > 1.0)
             ? (scale - 1.0) / Math.max(0.0001, this._autoCameraScaleMax - 1.0)
             : 0;
@@ -824,11 +860,13 @@ export class AutoCameraController {
             : 0;
         if (!force
             && Math.abs(scale - this._autoCameraScaleLast) < 0.001
-            && Math.abs(shiftX - this._autoCameraShiftLastX) < 0.5) {
+            && Math.abs(shiftX - this._autoCameraShiftLastX) < 0.5
+            && Math.abs(mobileFactor - this._autoCameraMobileFactorLast) < 0.001) {
             return;
         }
         this._autoCameraScaleLast = scale;
         this._autoCameraShiftLastX = shiftX;
+        this._autoCameraMobileFactorLast = mobileFactor;
 
         const applyScaleShift = (dest, base, extraShiftX = 0) => {
             dest.copy(base).multiplyScalar(scale);
@@ -841,10 +879,30 @@ export class AutoCameraController {
         if (this._autoCameraMhsaOffsetsEnabled) {
             applyScaleShift(this._autoCameraMhsaCameraOffset, this._autoCameraMhsaCameraOffsetBase, shiftMhsaX);
             applyScaleShift(this._autoCameraMhsaTargetOffset, this._autoCameraMhsaTargetOffsetBase, shiftMhsaX);
+            if (this._autoCameraMhsaMobileOverrideEnabled && mobileFactor > 0.0001) {
+                this._autoCameraMhsaCameraOffset.lerp(
+                    this._autoCameraMhsaMobileOverrideCameraOffset,
+                    mobileFactor
+                );
+                this._autoCameraMhsaTargetOffset.lerp(
+                    this._autoCameraMhsaMobileOverrideTargetOffset,
+                    mobileFactor
+                );
+            }
         }
         if (this._autoCameraConcatOffsetsEnabled) {
             applyScaleShift(this._autoCameraConcatCameraOffset, this._autoCameraConcatCameraOffsetBase);
             applyScaleShift(this._autoCameraConcatTargetOffset, this._autoCameraConcatTargetOffsetBase);
+            if (this._autoCameraConcatMobileOverrideEnabled && mobileFactor > 0.0001) {
+                this._autoCameraConcatCameraOffset.lerp(
+                    this._autoCameraConcatMobileOverrideCameraOffset,
+                    mobileFactor
+                );
+                this._autoCameraConcatTargetOffset.lerp(
+                    this._autoCameraConcatMobileOverrideTargetOffset,
+                    mobileFactor
+                );
+            }
         }
         if (this._autoCameraLnOffsetsEnabled) {
             applyScaleShift(this._autoCameraLnCameraOffset, this._autoCameraLnCameraOffsetBase);
@@ -853,14 +911,14 @@ export class AutoCameraController {
         if (this._autoCameraTravelOffsetsEnabled) {
             applyScaleShift(this._autoCameraTravelCameraOffset, this._autoCameraTravelCameraOffsetBase, shiftTravelX);
             applyScaleShift(this._autoCameraTravelTargetOffset, this._autoCameraTravelTargetOffsetBase, shiftTravelX);
-            if (this._autoCameraTravelMobileOverrideEnabled && shiftFactor > 0.0001) {
+            if (this._autoCameraTravelMobileOverrideEnabled && mobileFactor > 0.0001) {
                 this._autoCameraTravelCameraOffset.lerp(
                     this._autoCameraTravelMobileOverrideCameraOffset,
-                    shiftFactor
+                    mobileFactor
                 );
                 this._autoCameraTravelTargetOffset.lerp(
                     this._autoCameraTravelMobileOverrideTargetOffset,
-                    shiftFactor
+                    mobileFactor
                 );
             }
         }
