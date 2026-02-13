@@ -356,6 +356,12 @@ export class MHSAAnimation {
         this._passThroughJobs = [];
         this._lastUpdateTimeNow = null;
         this._kvCacheVectorsPreserved = false;
+        this._batchSyncScratch = new Set();
+        this._laneComposeCachedInput = null;
+        this._laneComposeCachedLen = -1;
+        this._laneComposeCachedKvVersion = -1;
+        this._cachedKvEntriesVersion = 0;
+        this._outputProjColorScratch = new THREE.Color();
         this.setCachedKvEntries(opts.cachedKvEntries);
 
         // --------------------------------------------------------------
@@ -408,6 +414,7 @@ export class MHSAAnimation {
         if (!Array.isArray(entries) || !entries.length) {
             this._cachedKvEntries = [];
             this._cachedKvBatchesToSync.clear();
+            this._cachedKvEntriesVersion += 1;
             return;
         }
         this._cachedKvEntries = entries
@@ -421,6 +428,7 @@ export class MHSAAnimation {
             });
         this._refreshCachedKvBatchesToSync(this._cachedKvEntries);
         this._snapCachedKeyVectorsUnderValues(this._cachedKvEntries, { cachedOnly: true });
+        this._cachedKvEntriesVersion += 1;
     }
 
     _refreshCachedKvBatchesToSync(entries = null) {
@@ -1003,23 +1011,23 @@ export class MHSAAnimation {
         this._mhaPulseActive = true;
         this._headColorsFinalized = !this.enableSelfAttentionAnimation;
 
-        const restingColor = this.matrixInitialRestingColor.clone();
+        const restingColor = this.matrixInitialRestingColor;
         const restIntensity = this.matrixRestingEmissiveIntensity;
 
         const makePulse = (matrix, brightCol, finalCol) => {
             if (!matrix || !matrix.mesh || !matrix.mesh.material) return null;
             const state = { p: 0 };
+            const currentColor = new THREE.Color();
             return new TWEEN.Tween(state)
                 .to({ p: 1 }, totalDurationMs)
                 .easing(TWEEN.Easing.Quadratic.InOut)
                 .onUpdate(() => {
                     const t = THREE.MathUtils.smoothstep(state.p, 0, 1);
                     const pulse = Math.sin(Math.PI * t);
-                    let currentColor;
                     if (t < 0.5) {
-                        currentColor = restingColor.clone().lerp(brightCol, t / 0.5);
+                        currentColor.copy(restingColor).lerp(brightCol, t / 0.5);
                     } else {
-                        currentColor = brightCol.clone().lerp(finalCol, (t - 0.5) / 0.5);
+                        currentColor.copy(brightCol).lerp(finalCol, (t - 0.5) / 0.5);
                     }
                     const currentEmissive = THREE.MathUtils.lerp(restIntensity, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY, pulse);
                     matrix.setColor(currentColor);
@@ -1065,8 +1073,17 @@ export class MHSAAnimation {
         // Keep a reference to the latest lanes array so that other internal
         // methods (triggered asynchronously) can access the original vectors.
         this.currentLanes = lanes;
-        this._attentionConveyorLanes = this._composeAttentionConveyorLanes(lanes);
-        this._rebuildLaneIndex(this._attentionConveyorLanes);
+        const laneCount = Array.isArray(lanes) ? lanes.length : 0;
+        const composeNeedsRefresh = lanes !== this._laneComposeCachedInput
+            || laneCount !== this._laneComposeCachedLen
+            || this._laneComposeCachedKvVersion !== this._cachedKvEntriesVersion;
+        if (composeNeedsRefresh) {
+            this._attentionConveyorLanes = this._composeAttentionConveyorLanes(lanes);
+            this._rebuildLaneIndex(this._attentionConveyorLanes);
+            this._laneComposeCachedInput = lanes;
+            this._laneComposeCachedLen = laneCount;
+            this._laneComposeCachedKvVersion = this._cachedKvEntriesVersion;
+        }
         if ((this._skipToEndActive || this._kvCacheDecodeActive) && this._cachedKvEntries.length) {
             this._snapCachedKeyVectorsUnderValues(this._cachedKvEntries, { cachedOnly: true });
         }
@@ -1088,11 +1105,13 @@ export class MHSAAnimation {
 
         // ---- Update trails for combined vectors through Output Projection ----
         if (this.outputProjMatrixVectors && this.outputProjMatrixVectors.length) {
-            this.outputProjMatrixVectors.forEach(v => {
+            const outputVectors = this.outputProjMatrixVectors;
+            for (let i = 0; i < outputVectors.length; i++) {
+                const v = outputVectors[i];
                 if (v && v.userData && v.userData.trail) {
                     v.userData.trail.update(v.group.position);
                 }
-            });
+            }
         }
 
         // ---------------- End VectorRouter section -------------------
@@ -1104,9 +1123,10 @@ export class MHSAAnimation {
         // ------------------------------------------------------------------
         if (this.finalOriginalY !== undefined && !this.suppressResidualRise) {
             const riseStep = this.postSplitRiseSpeed * GLOBAL_ANIM_SPEED_MULT * deltaTime;
-            lanes.forEach(lane => {
-                if (!lane || !lane.originalVec || !lane.originalVec.group) return;
-                if (lane.horizPhase === 'waiting') return;
+            for (let laneIndex = 0; laneIndex < lanes.length; laneIndex++) {
+                const lane = lanes[laneIndex];
+                if (!lane || !lane.originalVec || !lane.originalVec.group) continue;
+                if (lane.horizPhase === 'waiting') continue;
 
                 const curY = lane.originalVec.group.position.y;
                 let targetY = this.finalOriginalY;
@@ -1157,8 +1177,7 @@ export class MHSAAnimation {
                         }
                     } catch (_) { /* defensive */ }
                 }
-
-            });
+            }
         }
 
 
@@ -1166,11 +1185,12 @@ export class MHSAAnimation {
         // Skip when a higher-level animation (e.g. top LayerNorm) has taken over
         // residual control to avoid double-updating the same trail.
         if (!this.suppressResidualRise) {
-            lanes.forEach(lane => {
-                if (!lane || !lane.originalVec) return;
+            for (let laneIndex = 0; laneIndex < lanes.length; laneIndex++) {
+                const lane = lanes[laneIndex];
+                if (!lane || !lane.originalVec) continue;
 
                 // Only follow while the addition animation is active (stopRise flag present)
-                if (!lane.stopRise) return;
+                if (!lane.stopRise) continue;
 
                 try {
                     // Compute world position of the centre prism for the ORIGINAL (source) vector
@@ -1187,7 +1207,7 @@ export class MHSAAnimation {
                     // Skip bogus updates when the centre prism is hidden far below the scene
                     // during/addition (it is moved to HIDE_INSTANCE_Y_OFFSET to disappear).
                     const hideThreshold = HIDE_INSTANCE_Y_OFFSET / 10; // e.g. -5000 for -50000 offset
-                    if (wPos.y < hideThreshold) return;
+                    if (wPos.y < hideThreshold) continue;
 
                     // Update trail all the way to the top vector so there is no visible gap.
                     // Prefer the dedicated world-space residual trail reference carried by the lane.
@@ -1212,29 +1232,34 @@ export class MHSAAnimation {
                         }
                     }
                 } catch (_) { /* defensive */ }
-            });
+            }
         }
 
-        const batchesToSync = new Set();
+        const batchesToSync = this._batchSyncScratch;
+        batchesToSync.clear();
         if (this._batchedVectorSets) {
-            Object.values(this._batchedVectorSets).forEach((batch) => {
-                if (batch && typeof batch.syncAll === 'function') {
-                    batchesToSync.add(batch);
-                }
-            });
+            if (this._batchedVectorSets.K && typeof this._batchedVectorSets.K.syncAll === 'function') {
+                batchesToSync.add(this._batchedVectorSets.K);
+            }
+            if (this._batchedVectorSets.Q && typeof this._batchedVectorSets.Q.syncAll === 'function') {
+                batchesToSync.add(this._batchedVectorSets.Q);
+            }
+            if (this._batchedVectorSets.V && typeof this._batchedVectorSets.V.syncAll === 'function') {
+                batchesToSync.add(this._batchedVectorSets.V);
+            }
         }
         if (this._cachedKvBatchesToSync && this._cachedKvBatchesToSync.size) {
-            this._cachedKvBatchesToSync.forEach((batch) => {
+            for (const batch of this._cachedKvBatchesToSync) {
                 if (batch && typeof batch.syncAll === 'function') {
                     batchesToSync.add(batch);
                 }
-            });
+            }
         }
-        batchesToSync.forEach((batch) => {
+        for (const batch of batchesToSync) {
             try {
                 batch.syncAll();
             } catch (_) { /* optional batch sync */ }
-        });
+        }
         if (batchesToSync.size === 0 && this._cachedKvEntries.length) {
             // Cached entries can be re-bound after construction (during decode);
             // refresh lazily so newly attached batched refs also stay in sync.
@@ -1282,20 +1307,22 @@ export class MHSAAnimation {
     }
 
     _applyFinalMatrixColorsImmediate() {
+        const qColor = this.finalHeadColors.Q;
+        const kColor = this.finalHeadColors.K;
+        const vColor = this.finalHeadColors.V;
         for (let i = 0; i < NUM_HEAD_SETS_LAYER; i++) {
             const qMatrix = this.mhaVisualizations[i * 3];
             const kMatrix = this.mhaVisualizations[i * 3 + 1];
             const vMatrix = this.mhaVisualizations[i * 3 + 2];
-            const apply = (matrix, colorHex) => {
+            const apply = (matrix, color) => {
                 if (!matrix) return;
-                const col = new THREE.Color(colorHex);
-                matrix.setColor(col);
-                matrix.setEmissive(col, 0.30);
+                matrix.setColor(color);
+                matrix.setEmissive(color, 0.30);
                 matrix.setMaterialProperties({ opacity: 1.0, transparent: false });
             };
-            apply(qMatrix, MHA_FINAL_Q_COLOR);
-            apply(kMatrix, MHA_FINAL_K_COLOR);
-            apply(vMatrix, MHA_FINAL_V_COLOR);
+            apply(qMatrix, qColor);
+            apply(kMatrix, kColor);
+            apply(vMatrix, vColor);
         }
     }
 
@@ -2966,6 +2993,7 @@ export class MHSAAnimation {
             b: startColor.b,
             emissiveIntensity: startEmissiveIntensity
         };
+        const currentColor = this._outputProjColorScratch;
         
         new TWEEN.Tween(state)
             .to({ 
@@ -2976,7 +3004,7 @@ export class MHSAAnimation {
             }, effectiveDuration * 0.6) // 60% of the total duration
             .easing(TWEEN.Easing.Quadratic.InOut)
             .onUpdate(() => {
-                const currentColor = new THREE.Color(state.r, state.g, state.b);
+                currentColor.setRGB(state.r, state.g, state.b);
                 this.outputProjectionMatrix.setColor(currentColor);
                 this.outputProjectionMatrix.setEmissive(currentColor, state.emissiveIntensity);
             })
@@ -3009,15 +3037,18 @@ export class MHSAAnimation {
                 const kMatrix = this.mhaVisualizations[i * 3 + 1];
                 const vMatrix = this.mhaVisualizations[i * 3 + 2];
 
-                if (qMatrix) qMatrix.setColor(new THREE.Color(MHA_FINAL_Q_COLOR));
-                if (kMatrix) kMatrix.setColor(new THREE.Color(MHA_FINAL_K_COLOR));
-                if (vMatrix) vMatrix.setColor(new THREE.Color(MHA_FINAL_V_COLOR));
+                if (qMatrix) qMatrix.setColor(this.finalHeadColors.Q);
+                if (kMatrix) kMatrix.setColor(this.finalHeadColors.K);
+                if (vMatrix) vMatrix.setColor(this.finalHeadColors.V);
             }
             this._headColorsFinalized = true;
             return;
         }
 
         this._headColorsFinalized = true;
+        const finalQColor = this.finalHeadColors.Q;
+        const finalKColor = this.finalHeadColors.K;
+        const finalVColor = this.finalHeadColors.V;
         for (let i = 0; i < NUM_HEAD_SETS_LAYER; i++) {
             const qMatrix = this.mhaVisualizations[i * 3];
             const kMatrix = this.mhaVisualizations[i * 3 + 1];
@@ -3027,10 +3058,6 @@ export class MHSAAnimation {
             [qMatrix, kMatrix, vMatrix].forEach(m => {
                 if (m) m.setMaterialProperties({ opacity: 1.0, transparent: false });
             });
-
-            const finalQColor = new THREE.Color(MHA_FINAL_Q_COLOR);
-            const finalKColor = new THREE.Color(MHA_FINAL_K_COLOR);
-            const finalVColor = new THREE.Color(MHA_FINAL_V_COLOR);
 
             if (qMatrix && qMatrix.mesh && qMatrix.mesh.material) {
                 const initialQColor = qMatrix.mesh.material.color.clone();

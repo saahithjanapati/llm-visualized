@@ -197,6 +197,10 @@ export default class Gpt2Layer extends BaseLayer {
         this._ln2ColorLocked = false;
         this._ln1MaterialState = { color: new THREE.Color(), opacity: 1.0, transparent: false, initialized: false };
         this._ln2MaterialState = { color: new THREE.Color(), opacity: 1.0, transparent: false, initialized: false };
+        this._mlpMatrixInactiveColor = new THREE.Color(INACTIVE_COMPONENT_COLOR);
+        this._mlpMatrixActiveColor = new THREE.Color(0xc07a12);
+        this._mlpUpTweenColor = new THREE.Color();
+        this._mlpDownTweenColor = new THREE.Color();
         this._trailUpdateFrameId = 0;
         this._vecsToCheckScratch = new Array(9);
     }
@@ -1588,8 +1592,9 @@ export default class Gpt2Layer extends BaseLayer {
             ? Math.max(duration, SKIP_MLP_COLOR_MIN_MS)
             : duration;
         
-        const matrixStartColor = new THREE.Color(INACTIVE_COMPONENT_COLOR);
-        const matrixEndColor = new THREE.Color(0xc07a12); // orange
+        const matrixStartColor = this._mlpMatrixInactiveColor;
+        const matrixEndColor = this._mlpMatrixActiveColor;
+        const tweenColor = this._mlpUpTweenColor;
         const startIntensity = 0.1;
         const peakIntensity = 0.24;
         const finalIntensity = 0.30;
@@ -1600,7 +1605,7 @@ export default class Gpt2Layer extends BaseLayer {
             .to({ t: 1, emissive: peakIntensity }, colorDuration * 0.6)
             .easing(TWEEN.Easing.Quadratic.InOut)
             .onUpdate(() => {
-                const col = matrixStartColor.clone().lerp(matrixEndColor, state.t);
+                const col = tweenColor.copy(matrixStartColor).lerp(matrixEndColor, state.t);
                 this.mlpUp.setColor(col);
                 this.mlpUp.setEmissive(col, state.emissive);
             })
@@ -1873,7 +1878,8 @@ export default class Gpt2Layer extends BaseLayer {
         lane.collapsedInMatrix = false;
         lane.finalVecAfterMlp = null;
         
-        const orangeColor = new THREE.Color(0xc07a12);
+        const orangeColor = this._mlpMatrixActiveColor;
+        const downTweenColor = this._mlpDownTweenColor;
         const downBottomY = this.mlpDown.group.position.y - MLP_MATRIX_PARAMS_DOWN.height / 2;
         const downTopY = this.mlpDown.group.position.y + MLP_MATRIX_PARAMS_DOWN.height / 2;
         // Collapse before matrix entry so the 3072-dim visual never protrudes through the shell.
@@ -1921,7 +1927,7 @@ export default class Gpt2Layer extends BaseLayer {
             .to({ t: 1, emissive: peakIntensity }, colorDurationDown * 0.6)
             .easing(TWEEN.Easing.Quadratic.InOut)
             .onUpdate(() => {
-                const col = new THREE.Color(INACTIVE_COMPONENT_COLOR).lerp(orangeColor, downState.t);
+                const col = downTweenColor.copy(this._mlpMatrixInactiveColor).lerp(orangeColor, downState.t);
                 this.mlpDown.setColor(col);
                 this.mlpDown.setEmissive(col, downState.emissive);
             })

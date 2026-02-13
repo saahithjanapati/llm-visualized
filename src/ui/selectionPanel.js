@@ -1818,6 +1818,8 @@ function buildQkvFlowPreview(highlightType, selectionInfo = null) {
             instanceCount: PREVIEW_VECTOR_HEAD_INSTANCES
         });
         const trail = createTrailLine(PREVIEW_TRAIL_COLOR);
+        const trailStart = new THREE.Vector3(x, PREVIEW_QKV_START_Y, z);
+        const trailEnd = new THREE.Vector3(x, PREVIEW_QKV_START_Y, z);
 
         incoming.group.position.set(x, PREVIEW_QKV_START_Y, z);
         outgoing.group.position.set(x, PREVIEW_QKV_START_Y, z);
@@ -1825,7 +1827,7 @@ function buildQkvFlowPreview(highlightType, selectionInfo = null) {
         outgoing.group.scale.setScalar(PREVIEW_VECTOR_SMALL_SCALE * highlightScale(highlightKey || 'K'));
 
         group.add(incoming.group, outgoing.group, trail.line);
-        lanes.push({ incoming, outgoing, trail, x, z });
+        lanes.push({ incoming, outgoing, trail, trailStart, trailEnd, x, z });
         incoming.group.visible = false;
         outgoing.group.visible = false;
         trail.line.visible = false;
@@ -1844,7 +1846,7 @@ function buildQkvFlowPreview(highlightType, selectionInfo = null) {
     };
 
     const updateLane = (lane, localTime) => {
-        const { incoming, outgoing, trail, x, z } = lane;
+        const { incoming, outgoing, trail, trailStart, trailEnd, x, z } = lane;
         const endRise = PREVIEW_QKV_RISE_DURATION;
         const endConvert = endRise + PREVIEW_QKV_CONVERT_DURATION;
         const endHold = endConvert + PREVIEW_QKV_HOLD_DURATION;
@@ -1866,7 +1868,9 @@ function buildQkvFlowPreview(highlightType, selectionInfo = null) {
             trail.line.visible = true;
             const y = THREE.MathUtils.lerp(PREVIEW_QKV_START_Y, PREVIEW_QKV_MATRIX_Y, t);
             incoming.group.position.set(x, y, z);
-            trail.update(new THREE.Vector3(x, PREVIEW_QKV_START_Y, z), new THREE.Vector3(x, y, z), 0.85);
+            trailStart.set(x, PREVIEW_QKV_START_Y, z);
+            trailEnd.set(x, y, z);
+            trail.update(trailStart, trailEnd, 0.85);
             return;
         }
 
@@ -1882,7 +1886,9 @@ function buildQkvFlowPreview(highlightType, selectionInfo = null) {
 
             const y = THREE.MathUtils.lerp(PREVIEW_QKV_MATRIX_Y, PREVIEW_QKV_OUTPUT_Y, t);
             outgoing.group.position.set(x, y, z);
-            trail.update(new THREE.Vector3(x, PREVIEW_QKV_START_Y, z), new THREE.Vector3(x, y, z), 1.0 - t * 0.4);
+            trailStart.set(x, PREVIEW_QKV_START_Y, z);
+            trailEnd.set(x, y, z);
+            trail.update(trailStart, trailEnd, 1.0 - t * 0.4);
             return;
         }
 
@@ -1891,7 +1897,9 @@ function buildQkvFlowPreview(highlightType, selectionInfo = null) {
             outgoing.group.visible = true;
             trail.line.visible = true;
             outgoing.group.position.set(x, PREVIEW_QKV_OUTPUT_Y, z);
-            trail.update(new THREE.Vector3(x, PREVIEW_QKV_START_Y, z), new THREE.Vector3(x, PREVIEW_QKV_OUTPUT_Y, z), 0.55);
+            trailStart.set(x, PREVIEW_QKV_START_Y, z);
+            trailEnd.set(x, PREVIEW_QKV_OUTPUT_Y, z);
+            trail.update(trailStart, trailEnd, 0.55);
             return;
         }
 
@@ -1902,7 +1910,9 @@ function buildQkvFlowPreview(highlightType, selectionInfo = null) {
             outgoing.group.position.set(x, y, z);
             const visible = t < 0.96;
             outgoing.group.visible = visible;
-            trail.update(new THREE.Vector3(x, PREVIEW_QKV_START_Y, z), new THREE.Vector3(x, y, z), visible ? 0.35 : 0.0);
+            trailStart.set(x, PREVIEW_QKV_START_Y, z);
+            trailEnd.set(x, y, z);
+            trail.update(trailStart, trailEnd, visible ? 0.35 : 0.0);
             return;
         }
 

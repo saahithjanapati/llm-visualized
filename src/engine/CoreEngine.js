@@ -364,9 +364,12 @@ export class CoreEngine {
         this._pauseReasons = new Set();
         this._minFrameIntervalMs = 1000 / 60; // Cap render/update loop to 60 FPS
         this._lastFrameTime = null;
+        this._now = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+            ? performance.now.bind(performance)
+            : Date.now;
         const initialTweenNow = (typeof TWEEN !== 'undefined' && typeof TWEEN.now === 'function')
             ? TWEEN.now()
-            : (typeof performance !== 'undefined' ? performance.now() : Date.now());
+            : this._now();
         this._tweenTimelineMs = Number.isFinite(initialTweenNow) ? initialTweenNow : 0;
         this._tweenStartRestore = null;
         if (typeof TWEEN !== 'undefined' && TWEEN?.Tween?.prototype?.start) {
@@ -398,14 +401,6 @@ export class CoreEngine {
             this._stats.dom.style.display = this._devMode ? 'block' : 'none';
             document.body.appendChild(this._stats.dom);
         }
-
-        // Bind methods so we can add/remove listeners cleanly.
-        this._animate   = this._animate.bind(this);
-        this._onResize  = this._onResize.bind(this);
-        this._onVisibility = this._onVisibility.bind(this);
-        this._onWindowBlur = this._onWindowBlur.bind(this);
-        this._onKeyDown = this._onKeyDown.bind(this);
-        this._onKeyUp = this._onKeyUp.bind(this);
 
         // Kick off RAF loop
         requestAnimationFrame(this._animate);
@@ -576,7 +571,9 @@ export class CoreEngine {
             }
         });
 
-        this.composer.passes.forEach(p => p.dispose && p.dispose());
+        if (this.composer && Array.isArray(this.composer.passes)) {
+            this.composer.passes.forEach(p => p.dispose && p.dispose());
+        }
         this.renderer.dispose();
         this.renderer.domElement.removeEventListener('pointermove', this._onPointerMove);
         this.renderer.domElement.removeEventListener('pointerdown', this._onPointerDown);
@@ -1461,6 +1458,8 @@ export class CoreEngine {
 
     _animate = () => {
         requestAnimationFrame(this._animate);
+        const now = this._now();
+
         const liveDpr = (typeof window !== 'undefined' && typeof window.devicePixelRatio === 'number' && window.devicePixelRatio > 0)
             ? window.devicePixelRatio
             : 1;
@@ -1469,9 +1468,6 @@ export class CoreEngine {
             this._onResize();
         }
 
-        const now = (typeof performance !== 'undefined' && typeof performance.now === 'function')
-            ? performance.now()
-            : Date.now();
         const lastFrameTime = this._lastFrameTime;
         if (lastFrameTime !== null && (now - lastFrameTime) < this._minFrameIntervalMs) {
             return;
@@ -1484,78 +1480,64 @@ export class CoreEngine {
         const visibilityPauseOnly = this._paused && this._pauseReasons.size === 1 && this._pauseReasons.has('visibility');
         if (visibilityPauseOnly) return;
 
-        if (perfStats.enabled) {
+        const perfEnabled = perfStats.enabled;
+        if (perfEnabled) {
             perfStats.beginFrame(now);
         }
 
         if (this._devMode && this._stats) this._stats.begin();
 
         if (!this._paused) {
-            const updateStart = perfStats.enabled
-                ? ((typeof performance !== 'undefined' && typeof performance.now === 'function') ? performance.now() : Date.now())
-                : 0;
+            const layers = this._layers;
+            const updateStart = perfEnabled ? this._now() : 0;
             const dt = this._clock.getDelta() * this._speed;
-            this._layers.forEach(layer => {
-                if (!layer) return;
+            for (let i = 0; i < layers.length; i++) {
+                const layer = layers[i];
+                if (!layer) continue;
                 if (layer.isActive || layer._transitionPhase === 'positioning') {
                     layer.update(dt);
                 }
-            });
-            if (perfStats.enabled) {
-                const updateEnd = (typeof performance !== 'undefined' && typeof performance.now === 'function')
-                    ? performance.now()
-                    : Date.now();
-                perfStats.addTime('update', updateEnd - updateStart);
+            }
+            if (perfEnabled) {
+                perfStats.addTime('update', this._now() - updateStart);
             }
 
             if (typeof TWEEN !== 'undefined' && typeof TWEEN.update === 'function') {
-                const tweenStart = perfStats.enabled
-                    ? ((typeof performance !== 'undefined' && typeof performance.now === 'function') ? performance.now() : Date.now())
-                    : 0;
+                const tweenStart = perfEnabled ? this._now() : 0;
                 this._tweenTimelineMs += dt * 1000;
                 TWEEN.update(this._tweenTimelineMs);
-                if (perfStats.enabled) {
-                    const tweenEnd = (typeof performance !== 'undefined' && typeof performance.now === 'function')
-                        ? performance.now()
-                        : Date.now();
-                    perfStats.addTime('tween', tweenEnd - tweenStart);
+                if (perfEnabled) {
+                    perfStats.addTime('tween', this._now() - tweenStart);
                     if (typeof TWEEN.getAll === 'function') {
                         perfStats.setGauge('tweens', TWEEN.getAll().length);
                     }
                 }
             }
 
-            this._layers.forEach(layer => {
+            for (let i = 0; i < layers.length; i++) {
+                const layer = layers[i];
                 if (layer && typeof layer.postUpdate === 'function') {
                     layer.postUpdate(dt);
                 }
-            });
+            }
         }
 
         this._applyKeyboardNavigation(frameDelta);
         this.controls.update();
         this._updateCameraDebug();
-        const renderStart = perfStats.enabled
-            ? ((typeof performance !== 'undefined' && typeof performance.now === 'function') ? performance.now() : Date.now())
-            : 0;
+        const renderStart = perfEnabled ? this._now() : 0;
         if (this.composer) {
             this.composer.render();
         } else {
             this.renderer.render(this.scene, this.camera);
         }
-        if (perfStats.enabled) {
-            const renderEnd = (typeof performance !== 'undefined' && typeof performance.now === 'function')
-                ? performance.now()
-                : Date.now();
-            perfStats.addTime('render', renderEnd - renderStart);
+        if (perfEnabled) {
+            perfStats.addTime('render', this._now() - renderStart);
         }
 
         if (this._devMode && this._stats) this._stats.end();
-        if (perfStats.enabled) {
-            const endNow = (typeof performance !== 'undefined' && typeof performance.now === 'function')
-                ? performance.now()
-                : Date.now();
-            perfStats.endFrame(endNow);
+        if (perfEnabled) {
+            perfStats.endFrame(this._now());
         }
     };
 }

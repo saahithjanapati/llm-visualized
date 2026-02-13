@@ -425,6 +425,7 @@ export function animateVectorMatrixPassThrough(
     tweenState.colorR = initialVecColor.r;
     tweenState.colorG = initialVecColor.g;
     tweenState.colorB = initialVecColor.b;
+    const matrixColorScratch = new THREE.Color();
 
     new TWEEN.Tween(tweenState)
         .to(
@@ -551,12 +552,12 @@ export function animateVectorMatrixPassThrough(
             //  material updates per frame.
             // --------------------------------------------------------------
             if (!ctx._mhaPulseActive && !ctx._skipMatrixColorsLocked) {
-                let currentMatrixTargetColor;
+                let currentMatrixTargetColor = matrixColorScratch;
                 let currentEmissiveIntensity;
                 const p = tweenState.progress;
                 if (p < MHSA_PASS_THROUGH_BRIGHTEN_RATIO) {
                     const t = THREE.MathUtils.smoothstep(p / MHSA_PASS_THROUGH_BRIGHTEN_RATIO, 0, 1);
-                    currentMatrixTargetColor = ctx.matrixInitialRestingColor.clone().lerp(brightMatrixColor, t);
+                    currentMatrixTargetColor.copy(ctx.matrixInitialRestingColor).lerp(brightMatrixColor, t);
                     currentEmissiveIntensity = THREE.MathUtils.lerp(
                         ctx.matrixRestingEmissiveIntensity,
                         MHSA_MATRIX_MAX_EMISSIVE_INTENSITY,
@@ -568,14 +569,14 @@ export function animateVectorMatrixPassThrough(
                         0,
                         1,
                     );
-                    currentMatrixTargetColor = brightMatrixColor.clone().lerp(darkTintedMatrixColor, t);
+                    currentMatrixTargetColor.copy(brightMatrixColor).lerp(darkTintedMatrixColor, t);
                     currentEmissiveIntensity = THREE.MathUtils.lerp(
                         MHSA_MATRIX_MAX_EMISSIVE_INTENSITY,
                         ctx.matrixRestingEmissiveIntensity,
                         t,
                     );
                 } else {
-                    currentMatrixTargetColor = darkTintedMatrixColor.clone();
+                    currentMatrixTargetColor.copy(darkTintedMatrixColor);
                     currentEmissiveIntensity = ctx.matrixRestingEmissiveIntensity;
                 }
                 matrix.setColor(currentMatrixTargetColor);

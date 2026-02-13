@@ -29,6 +29,9 @@ const TMP_WORLD_AVG = new THREE.Vector3();
 const TMP_WORLD_ANCHOR = new THREE.Vector3();
 const TMP_WORLD_SNAP = new THREE.Vector3();
 const TMP_LOCAL_SNAP = new THREE.Vector3();
+const TMP_ADD_TARGET_MATRIX = new THREE.Matrix4();
+const TMP_ADD_TARGET_WORLD = new THREE.Vector3();
+const TMP_ADD_TARGET_LOCAL = new THREE.Vector3();
 const COLOR_WHITE = new THREE.Color(0xffffff);
 const TMP_COLOR_A = new THREE.Color();
 const TMP_COLOR_B = new THREE.Color();
@@ -193,6 +196,40 @@ function applySingleColorAtIndex(targetVec, index, color) {
     }
 }
 
+function applySingleColorAtIndexRGB(targetVec, index, r, g, b) {
+    if (!targetVec || !targetVec.mesh) return;
+    const i3 = index * 3;
+    const colorStartAttr = targetVec.mesh.geometry?.getAttribute?.('colorStart');
+    const colorEndAttr = targetVec.mesh.geometry?.getAttribute?.('colorEnd');
+
+    if (colorStartAttr) {
+        colorStartAttr.array[i3] = r;
+        colorStartAttr.array[i3 + 1] = g;
+        colorStartAttr.array[i3 + 2] = b;
+        colorStartAttr.needsUpdate = true;
+    }
+    if (colorEndAttr) {
+        colorEndAttr.array[i3] = r;
+        colorEndAttr.array[i3 + 1] = g;
+        colorEndAttr.array[i3 + 2] = b;
+        colorEndAttr.needsUpdate = true;
+    }
+
+    if (!targetVec.mesh.instanceColor) {
+        targetVec.mesh.instanceColor = new THREE.InstancedBufferAttribute(
+            new Float32Array(targetVec.instanceCount * 3),
+            3
+        );
+    }
+    if (targetVec.mesh.instanceColor) {
+        const instanceColors = targetVec.mesh.instanceColor.array;
+        instanceColors[i3] = r;
+        instanceColors[i3 + 1] = g;
+        instanceColors[i3 + 2] = b;
+        targetVec.mesh.instanceColor.needsUpdate = true;
+    }
+}
+
 function computeMidlineWorldPosition(vec, length = VECTOR_LENGTH_PRISM, out = new THREE.Vector3()) {
     if (!vec || !vec.mesh || typeof vec.mesh.getMatrixAt !== 'function' || !vec.group) {
         return out.set(0, 0, 0);
@@ -339,26 +376,23 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
 
     for (let i = 0; i < vectorLength; i++) {
         // Grab starting local Y offset of each instance
-        const srcLocalMatrix = new THREE.Matrix4();
-        const srcLocalPos = new THREE.Vector3();
-        sourceVec.mesh.getMatrixAt(i, srcLocalMatrix);
-        srcLocalPos.setFromMatrixPosition(srcLocalMatrix);
-        const srcLocalY = srcLocalPos.y;
+        sourceVec.mesh.getMatrixAt(i, TMP_MATRIX_A);
+        TMP_WORLD_A.setFromMatrixPosition(TMP_MATRIX_A);
+        const srcLocalY = TMP_WORLD_A.y;
 
         // Capture target gradient colour so we can flash & restore
-        const gradCol = new THREE.Color();
-        targetVec.mesh.getColorAt(i, gradCol);
+        targetVec.mesh.getColorAt(i, TMP_COLOR_A);
+        const gradR = TMP_COLOR_A.r;
+        const gradG = TMP_COLOR_A.g;
+        const gradB = TMP_COLOR_A.b;
 
         // Optionally match travelling prism colour to destination gradient.
         if (!preserveSourceColors) {
-            const initialOffsetY = srcLocalPos.y - basePrismCenterY;
-            sourceVec.setInstanceAppearance(i, initialOffsetY, gradCol);
+            const initialOffsetY = srcLocalY - basePrismCenterY;
+            TMP_COLOR_B.setRGB(gradR, gradG, gradB);
+            sourceVec.setInstanceAppearance(i, initialOffsetY, TMP_COLOR_B);
         }
 
-        // Per-instance scratch objects to avoid per-frame allocations.
-        const trgLocalMatrixDyn = new THREE.Matrix4();
-        const trgWorld = new THREE.Vector3();
-        const trgLocal = new THREE.Vector3();
         const tweenState = { t: 0 };
 
         new TWEEN.Tween(tweenState)
@@ -367,13 +401,14 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
             .easing(TWEEN.Easing.Quadratic.InOut)
             .onUpdate(obj => {
                 // Re-compute dynamic target position each frame (target may move)
-                targetVec.mesh.getMatrixAt(i, trgLocalMatrixDyn);
-                trgWorld.setFromMatrixPosition(trgLocalMatrixDyn).applyMatrix4(targetVec.group.matrixWorld);
-                trgLocal.copy(trgWorld);
-                sourceVec.group.worldToLocal(trgLocal);
+                targetVec.mesh.getMatrixAt(i, TMP_ADD_TARGET_MATRIX);
+                TMP_ADD_TARGET_WORLD.setFromMatrixPosition(TMP_ADD_TARGET_MATRIX).applyMatrix4(targetVec.group.matrixWorld);
+                TMP_ADD_TARGET_LOCAL.copy(TMP_ADD_TARGET_WORLD);
+                sourceVec.group.worldToLocal(TMP_ADD_TARGET_LOCAL);
 
-                let interpY = THREE.MathUtils.lerp(srcLocalY, trgLocal.y, obj.t);
-                interpY = trgLocal.y >= srcLocalY ? Math.min(interpY, trgLocal.y) : Math.max(interpY, trgLocal.y);
+                const targetLocalY = TMP_ADD_TARGET_LOCAL.y;
+                let interpY = THREE.MathUtils.lerp(srcLocalY, targetLocalY, obj.t);
+                interpY = targetLocalY >= srcLocalY ? Math.min(interpY, targetLocalY) : Math.max(interpY, targetLocalY);
                 const offsetY = interpY - basePrismCenterY;
 
                 sourceVec.setInstanceAppearance(i, offsetY, null);
@@ -412,7 +447,9 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
                                                     || residualTrail._scene
                                                     || null;
                                                 if (parentObject && typeof parentObject.worldToLocal === 'function') {
-                                                    localPos = parentObject.worldToLocal(wPos.clone());
+                                                    TMP_LOCAL_SNAP.copy(wPos);
+                                                    parentObject.worldToLocal(TMP_LOCAL_SNAP);
+                                                    localPos = TMP_LOCAL_SNAP;
                                                 }
                                             } catch (conversionErr) {
                                                 console.warn('Residual trail coordinate conversion failed:', conversionErr);
@@ -448,7 +485,7 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
                         if (finalBuffers) {
                             applyFinalColorAtIndex(targetVec, i, finalBuffers);
                         } else {
-                            applySingleColorAtIndex(targetVec, i, gradCol);
+                            applySingleColorAtIndexRGB(targetVec, i, gradR, gradG, gradB);
                         }
                         sourceVec.setInstanceAppearance(i, HIDE_INSTANCE_Y_OFFSET, null);
                     })

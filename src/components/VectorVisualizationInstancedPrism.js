@@ -36,6 +36,7 @@ const _prismWidthScale = PRISM_INSTANCE_WIDTH_SCALE;
 const _prismDepthScale = 1.5;
 // Precompute half base width used in shader patch
 const __halfBaseWidth = (PRISM_BASE_WIDTH * _prismWidthScale) / 2;
+const COLOR_BLACK = new THREE.Color(0, 0, 0);
 
 const COLOR_CACHE = new WeakMap();
 
@@ -129,6 +130,9 @@ export class VectorVisualizationInstancedPrism {
         this._scratchQuaternion = new THREE.Quaternion();
         this._scratchScale = new THREE.Vector3();
         this._scratchDummy = new THREE.Object3D();
+        this._scratchColorMid = new THREE.Color();
+        this._scratchColorLeft = new THREE.Color();
+        this._scratchColorRight = new THREE.Color();
 
         // Create a material per vector so we can vary opacity independently,
         // but force program reuse by returning a stable cache key.
@@ -279,12 +283,12 @@ varying float vGradientT;`
             this.mesh.setMatrixAt(i, dummy.matrix);
 
             // Set colour using the stored key colours and getDefaultColorForIndex logic
-            const midColor = this.getDefaultColorForIndex(i);
+            const midColor = this.getDefaultColorForIndex(i, this._scratchColorMid);
             this.mesh.setColorAt(i, midColor);
 
             // Determine gradient edge colours
-            const leftColor  = this.getDefaultColorForIndex(Math.max(0, i - 1));
-            const rightColor = this.getDefaultColorForIndex(Math.min(this.instanceCount - 1, i + 1));
+            const leftColor = this.getDefaultColorForIndex(Math.max(0, i - 1), this._scratchColorLeft);
+            const rightColor = this.getDefaultColorForIndex(Math.min(this.instanceCount - 1, i + 1), this._scratchColorRight);
 
             // Store into instanced buffer attributes
             colorStartAttr.setXYZ(i, leftColor.r, leftColor.g, leftColor.b);
@@ -570,10 +574,13 @@ varying float vGradientT;`
         const colorStart = new Float32Array(count * 3);
         const colorEnd = new Float32Array(count * 3);
         const instanceColors = new Float32Array(count * 3);
+        const midColor = this._scratchColorMid;
+        const leftColor = this._scratchColorLeft;
+        const rightColor = this._scratchColorRight;
         for (let i = 0; i < count; i++) {
-            const midColor = this.getDefaultColorForIndex(i);
-            const leftColor = this.getDefaultColorForIndex(Math.max(0, i - 1));
-            const rightColor = this.getDefaultColorForIndex(Math.min(count - 1, i + 1));
+            this.getDefaultColorForIndex(i, midColor);
+            this.getDefaultColorForIndex(Math.max(0, i - 1), leftColor);
+            this.getDefaultColorForIndex(Math.min(count - 1, i + 1), rightColor);
             const i3 = i * 3;
             instanceColors[i3] = midColor.r;
             instanceColors[i3 + 1] = midColor.g;
@@ -742,8 +749,8 @@ varying float vGradientT;`
         }
     }
 
-    getDefaultColorForIndex(index) {
-        const tempColor = new THREE.Color();
+    getDefaultColorForIndex(index, targetColor = null) {
+        const tempColor = (targetColor && targetColor.isColor) ? targetColor : new THREE.Color();
         if (index < 0 || index >= this.instanceCount || this.currentKeyColors.length === 0) {
              return tempColor.setRGB(0.5, 0.5, 0.5); 
         }
@@ -902,7 +909,7 @@ varying float vGradientT;`
                 dummy.position.set(baseX, hideByScaleOnly ? this._basePrismCenterY : HIDE_INSTANCE_Y_OFFSET, 0);
                 // Only set to black if the option is true (or default)
                 if (visualOptions.setHiddenToBlack !== false) {
-                    this.mesh.setColorAt(i, new THREE.Color(0,0,0)); // Black for hidden
+                    this.mesh.setColorAt(i, COLOR_BLACK); // Black for hidden
                 }
                 // If setHiddenToBlack is explicitly false, their color is not changed by this call,
                 // allowing them to retain their current instance color while shrinking/moving.
