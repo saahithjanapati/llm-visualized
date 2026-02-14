@@ -828,10 +828,10 @@ body.touch-ui * {
     position: static;
     min-width: 0;
     margin-top: -6px;
-    height: 76px;
-    min-height: 76px;
-    max-height: 76px;
-    overflow: auto;
+    height: 92px;
+    min-height: 92px;
+    max-height: 92px;
+    overflow: hidden;
     -webkit-overflow-scrolling: touch;
     padding: 0;
     color: #fff;
@@ -852,9 +852,22 @@ body.touch-ui * {
     font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
     font-size: 14px;
     line-height: 1.3;
-    margin-top: -3px;
+    margin-top: 0;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
     max-width: 100%;
     overflow: auto;
+}
+#equationsPanel .eq-body > .katex-display {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+}
+#equationsPanel .eq-body > .katex-display > .katex {
+    margin: 0 auto;
 }
 /* KaTeX tweaks for dark bg */
 .katex { color: #fff; }
@@ -1569,9 +1582,9 @@ body.touch-ui * {
     #statusOverlay { font-size: 12px; line-height: 1.15; }
     #parameterCounter .param-value { font-size: 15px; }
     #equationsPanel {
-        height: 76px;
-        min-height: 76px;
-        max-height: 76px;
+        height: 92px;
+        min-height: 92px;
+        max-height: 92px;
     }
     #equationsPanel .eq-title { font-size: 10px; margin-bottom: 2px; }
     #equationsPanel .eq-body { font-size: 12px; line-height: 1.28; }
@@ -1583,9 +1596,9 @@ body.touch-ui * {
 }
 @media (max-height: 560px) {
     #equationsPanel {
-        height: 76px;
-        min-height: 76px;
-        max-height: 76px;
+        height: 92px;
+        min-height: 92px;
+        max-height: 92px;
     }
 }
 @media (max-aspect-ratio: 1/1), (max-width: 880px) {
@@ -1609,9 +1622,9 @@ body.touch-ui * {
     #parameterCounter .param-label { font-size: 10px; }
     #parameterCounter .param-value { font-size: 15px; }
     #equationsPanel {
-        height: 76px;
-        min-height: 76px;
-        max-height: 76px;
+        height: 92px;
+        min-height: 92px;
+        max-height: 92px;
     }
     #equationsPanel .eq-title { font-size: 10px; margin-bottom: 2px; }
     #equationsPanel .eq-body { font-size: 12px; line-height: 1.28; }

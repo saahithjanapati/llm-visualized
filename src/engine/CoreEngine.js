@@ -1504,11 +1504,23 @@ export class CoreEngine {
             const updateStart = perfEnabled ? this._now() : 0;
             const rawDt = this._clock.getDelta() * this._speed;
             const dt = Math.min(rawDt, this._maxUpdateDeltaSec);
+            const layerErrorLogThrottleMs = 1000;
             for (let i = 0; i < layers.length; i++) {
                 const layer = layers[i];
                 if (!layer) continue;
                 if (layer.isActive || layer._transitionPhase === 'positioning') {
-                    layer.update(dt);
+                    try {
+                        layer.update(dt);
+                    } catch (err) {
+                        const logNow = this._now();
+                        const lastLogAt = Number.isFinite(layer.__lastUpdateErrorLogAt)
+                            ? layer.__lastUpdateErrorLogAt
+                            : -Infinity;
+                        if ((logNow - lastLogAt) >= layerErrorLogThrottleMs) {
+                            console.error(`CoreEngine: layer ${i} update() failed`, err);
+                            layer.__lastUpdateErrorLogAt = logNow;
+                        }
+                    }
                 }
             }
             if (perfEnabled) {
@@ -1530,7 +1542,18 @@ export class CoreEngine {
             for (let i = 0; i < layers.length; i++) {
                 const layer = layers[i];
                 if (layer && typeof layer.postUpdate === 'function') {
-                    layer.postUpdate(dt);
+                    try {
+                        layer.postUpdate(dt);
+                    } catch (err) {
+                        const logNow = this._now();
+                        const lastLogAt = Number.isFinite(layer.__lastPostUpdateErrorLogAt)
+                            ? layer.__lastPostUpdateErrorLogAt
+                            : -Infinity;
+                        if ((logNow - lastLogAt) >= layerErrorLogThrottleMs) {
+                            console.error(`CoreEngine: layer ${i} postUpdate() failed`, err);
+                            layer.__lastPostUpdateErrorLogAt = logNow;
+                        }
+                    }
                 }
             }
         }

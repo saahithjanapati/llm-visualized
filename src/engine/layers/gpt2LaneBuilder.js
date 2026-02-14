@@ -494,8 +494,8 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
                 }
             };
 
-            // Defer the positional pass-through start until Gpt2Layer confirms the vocab
-            // vectors have risen out of the embedding matrix and completed their hold.
+            // Defer positional pass-through start until Gpt2Layer releases the
+            // per-lane position-chip gate for this token.
             lane.startPositionalPassThrough = ({ immediate = false } = {}) => {
                 if (lane.__posPassStarted || lane.posAddComplete) return;
                 lane.__posPassStarted = true;

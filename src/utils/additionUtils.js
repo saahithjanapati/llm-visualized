@@ -276,19 +276,22 @@ function getVectorInstanceCount(vec, fallback = VECTOR_LENGTH_PRISM) {
  *                                     already manages the trail).
  */
 export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComplete, options = null) {
-    if (!sourceVec || !targetVec || !sourceVec.mesh || !targetVec.mesh) return;
+    const hasRenderableSource = !!(sourceVec && sourceVec.mesh && sourceVec.group);
+    const hasRenderableTarget = !!(targetVec && targetVec.mesh && targetVec.group);
 
     const suppressResidualTrailUpdates = options && options.suppressResidualTrailUpdates === true;
 
     // Ensure a metadata container exists so we can store residual trail state
     // even when no lane object is available (e.g. LayerNorm additions create
     // temporary vectors without full lane context).
-    sourceVec.userData = sourceVec.userData || {};
+    if (sourceVec) {
+        sourceVec.userData = sourceVec.userData || {};
+    }
 
     const sourceCount = getVectorInstanceCount(sourceVec, VECTOR_LENGTH_PRISM);
     const targetCount = getVectorInstanceCount(targetVec, VECTOR_LENGTH_PRISM);
-    const sourceLen = Array.isArray(sourceVec.rawData) ? sourceVec.rawData.length : sourceCount;
-    const targetLen = Array.isArray(targetVec.rawData) ? targetVec.rawData.length : targetCount;
+    const sourceLen = Array.isArray(sourceVec && sourceVec.rawData) ? sourceVec.rawData.length : sourceCount;
+    const targetLen = Array.isArray(targetVec && targetVec.rawData) ? targetVec.rawData.length : targetCount;
     const vectorLength = Math.min(sourceCount, targetCount, sourceLen, targetLen);
     const centreIndices = getCentralPrismIndices(vectorLength);
     const finalDataCandidate = (options && isArrayLike(options.finalData))
@@ -307,10 +310,58 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
         const next = Math.max(0, Math.min(1, Number(value) || 0));
         progressTarget[progressKey] = next;
     };
-
-    if (typeof TWEEN === 'undefined') {
-        console.warn('TWEEN not available – addition animation skipped');
+    const invokeOnComplete = () => {
+        if (typeof onComplete === 'function') {
+            try {
+                onComplete();
+            } catch (err) {
+                console.warn('Addition completion callback failed:', err);
+            }
+        }
+    };
+    const finalizeLaneState = () => {
+        if (lane) {
+            delete lane.stopRise;
+            delete lane.stopRiseTarget;
+            delete lane.__residualTrailAnchor;
+            const nowMs = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+                ? performance.now()
+                : Date.now();
+            lane.__cameraHoldAfterAddUntil = nowMs + CAMERA_HOLD_AFTER_ADDITION_MS;
+            const fallbackTarget = targetVec || lane.postAdditionVec || lane.originalVec || sourceVec || null;
+            if (fallbackTarget) {
+                lane.originalVec = fallbackTarget;
+                lane.postAdditionVec = fallbackTarget;
+            }
+            if (lane.ln2Phase !== 'done') {
+                lane.ln2Phase = 'preRise';
+                if (lane.layer && typeof lane.layer._emitProgress === 'function') lane.layer._emitProgress();
+                if (lane.horizPhase === 'travelMHSA' || lane.horizPhase === 'finishedHeads') {
+                    lane.horizPhase = 'postMHSAAddition';
+                    if (lane.layer && typeof lane.layer._emitProgress === 'function') lane.layer._emitProgress();
+                }
+            }
+        } else if (sourceVec && sourceVec.group && sourceVec.group.userData) {
+            delete sourceVec.group.userData.stopRise;
+            delete sourceVec.group.userData.stopRiseTarget;
+        }
+        if (sourceVec && sourceVec.userData) {
+            delete sourceVec.userData.__residualTrailAnchor;
+        }
+    };
+    const failForward = (reason) => {
+        console.warn(`Addition animation fallback: ${reason}`);
         setProgress(1);
+        finalizeLaneState();
+        invokeOnComplete();
+    };
+
+    if (!hasRenderableSource || !hasRenderableTarget) {
+        failForward('missing source/target vector references');
+        return;
+    }
+    if (typeof TWEEN === 'undefined') {
+        failForward('TWEEN unavailable');
         return;
     }
 
@@ -592,15 +643,8 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
                     if (lane.layer && typeof lane.layer._emitProgress === 'function') lane.layer._emitProgress();
                 }
             }
-            const topY = targetVec.group.position.y;
         }
-        if (typeof onComplete === 'function') {
-            try {
-                onComplete();
-            } catch (err) {
-                console.warn('Addition completion callback failed:', err);
-            }
-        }
+        invokeOnComplete();
     };
 
     setProgress(0);

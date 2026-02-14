@@ -91,8 +91,8 @@ const MULTIPLY_SOURCE_SHRINK = 0.82;
 const MULTIPLY_RESULT_START_SCALE = 0.9;
 const MULTIPLY_FLASH_GEOMETRY = new THREE.SphereGeometry(1, 18, 18);
 const POS_ADD_STALL_TIMEOUT_MS = 12000;
-const POS_PASS_START_PAUSE_MS = 450;
-const LANE_PHASE_STALL_TIMEOUT_MS = 12000;
+const POS_PASS_START_PAUSE_MS = 0;
+const LANE_PHASE_STALL_TIMEOUT_MS_SKIP = 12000;
 
 const applyMatrixReflectivityTweak = (matrix, tweaks) => {
     if (!matrix || !tweaks) return;
@@ -572,18 +572,22 @@ export default class Gpt2Layer extends BaseLayer {
                 if (this.index === 0) {
                     const hasPositionalPass = !!(lane.posVec && typeof lane.startPositionalPassThrough === 'function');
                     if (hasPositionalPass && !lane.posAddComplete) {
-                        const ov = lane.originalVec;
-                        const targetY = lane.branchStartY;
-                        const vocabRiseComplete = !!(
-                            ov
-                            && ov.group
-                            && Number.isFinite(targetY)
-                            && ov.group.position.y >= targetY - 0.01
-                        );
                         if (!lane.__posPassStarted) {
                             hasPendingPosPass = true;
-                            if (!vocabRiseComplete) {
-                                allPosPassReady = false;
+                            if (!skipActive) {
+                                const ov = lane.originalVec;
+                                const exitY = Number.isFinite(lane.vocabEmbeddingExitY)
+                                    ? lane.vocabEmbeddingExitY
+                                    : NaN;
+                                const vocabExited = !!(
+                                    ov
+                                    && ov.group
+                                    && Number.isFinite(exitY)
+                                    && ov.group.position.y >= exitY - 0.01
+                                );
+                                if (!vocabExited) {
+                                    allPosPassReady = false;
+                                }
                             }
                         }
                         if (lane.__posPassStarted) {
@@ -654,16 +658,25 @@ export default class Gpt2Layer extends BaseLayer {
                 && Number.isFinite(this._posPassStartAtMs)
                 && nowMs >= this._posPassStartAtMs
             ) {
-                lanes.forEach((lane) => {
-                    if (!lane || lane.posAddComplete || lane.__posPassStarted) return;
-                    if (typeof lane.startPositionalPassThrough !== 'function') return;
-                    if (this._isWaitingForInputPositionChipGate(lane, nowMs, skipActive)) return;
-                    try {
-                        lane.startPositionalPassThrough({ immediate: skipActive });
-                    } catch (_) {
-                        lane.posAddComplete = true;
-                    }
-                });
+                const pendingPosPassLanes = lanes.filter((lane) => (
+                    lane
+                    && !lane.posAddComplete
+                    && !lane.__posPassStarted
+                    && lane.posVec
+                    && typeof lane.startPositionalPassThrough === 'function'
+                ));
+                const allPositionChipGatesReleased = pendingPosPassLanes.every((lane) => (
+                    !this._isWaitingForInputPositionChipGate(lane, nowMs, skipActive)
+                ));
+                if (allPositionChipGatesReleased) {
+                    pendingPosPassLanes.forEach((lane) => {
+                        try {
+                            lane.startPositionalPassThrough({ immediate: skipActive });
+                        } catch (_) {
+                            lane.posAddComplete = true;
+                        }
+                    });
+                }
                 const stillPending = lanes.some((lane) => {
                     if (!lane || lane.posAddComplete) return false;
                     return !!(lane.posVec && !lane.__posPassStarted);
@@ -819,12 +832,14 @@ export default class Gpt2Layer extends BaseLayer {
             applyLayerNormMaterial(this.ln2 && this.ln2.group, ln2TargetColor, ln2TargetOpacity, this._ln2MaterialState);
         }
 
+        const mhsaOutputComplete = this._isMhsaOutputStageComplete();
+
         // ────────────────────────────────────────────────────────────
         // LN-2 synchronisation check – only once all lanes have reached
-        // the staging height (ln2Phase === 'preRise' and held position)
+        // the staging height and MHSA output projection has returned
         // do we allow any of them to continue into the branch.
         // ────────────────────────────────────────────────────────────
-        if (!this._ln2Ready && allLn2Ready) {
+        if (!this._ln2Ready && allLn2Ready && mhsaOutputComplete) {
             this._ln2Ready = true;
             this._emitProgress();
             console.log(`Layer ${this.index}: All lanes ready – starting LN2 simultaneously`);
@@ -1342,7 +1357,7 @@ export default class Gpt2Layer extends BaseLayer {
                 case 'postMHSAAddition':
                     // After MHSA addition completes, start LN2 phase
                     // This state is set by MHSAAnimation._startAdditionAnimation
-                    if (lane.ln2Phase === 'preRise' && lane.postAdditionVec) {
+                    if (mhsaOutputComplete && lane.ln2Phase === 'preRise' && lane.postAdditionVec) {
                         lane.horizPhase = 'waitingForLN2'; // Move to next state
                         this._emitProgress();
                     }
@@ -1360,6 +1375,7 @@ export default class Gpt2Layer extends BaseLayer {
             switch (lane.ln2Phase) {
                 case 'preRise': {
                     // Rise the post-addition vector before branching to LN2
+                    if (!mhsaOutputComplete) break;
                     const v = lane.postAdditionVec;
                     if (!v) break;
                     
@@ -1485,26 +1501,31 @@ export default class Gpt2Layer extends BaseLayer {
                     })();
 
                     const startLn2Rise = (vec) => {
-                        if (!vec) return;
+                        if (!vec || !vec.group) return;
                         const destY = this.mlpUp.group.position.y - MLP_MATRIX_PARAMS_UP.height / 2 - 10;
                         const dist = destY - vec.group.position.y;
-                        const durationMs = (dist / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
+                        const riseSpeed = ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT;
+                        const rawDurationMs = (Number.isFinite(dist) && riseSpeed > 0)
+                            ? (dist / riseSpeed) * 1000
+                            : 0;
+                        const durationMs = Number.isFinite(rawDurationMs) ? rawDurationMs : 0;
 
-                        if (typeof TWEEN !== 'undefined') {
-                            new TWEEN.Tween(vec.group.position)
-                                .to({ y: destY }, durationMs)
-                                .easing(TWEEN.Easing.Linear.None)
-                                .onUpdate(() => {})
-                                .onComplete(() => {
-                                    lane.ln2Phase = 'mlpReady';
-                                    this._emitProgress();
-                                })
-                                .start();
-                        } else {
-                            vec.group.position.y = destY;
+                        if (typeof TWEEN === 'undefined' || durationMs <= 0) {
+                            vec.group.position.y = Math.max(vec.group.position.y, destY);
                             lane.ln2Phase = 'mlpReady';
                             this._emitProgress();
+                            return;
                         }
+
+                        new TWEEN.Tween(vec.group.position)
+                            .to({ y: destY }, durationMs)
+                            .easing(TWEEN.Easing.Linear.None)
+                            .onUpdate(() => {})
+                            .onComplete(() => {
+                                lane.ln2Phase = 'mlpReady';
+                                this._emitProgress();
+                            })
+                            .start();
                     };
 
                     // Use the same fraction as LayerNorm-1 so the
@@ -1822,10 +1843,9 @@ export default class Gpt2Layer extends BaseLayer {
 
         // Global safety net for skip flows: if any lane's phase signature is
         // unchanged for too long, force a conservative forward step to avoid
-        // whole-layer deadlocks. Keep normal playback untouched to avoid
-        // phase jumps that can desync residual/output-projection visuals.
+        // whole-layer deadlocks. Keep normal playback strictly stage-gated.
         if (skipActive || this._skipLayerActive) {
-            this._applyLaneStallWatchdog(lanes, nowMs, { ln2SyncY });
+            this._applyLaneStallWatchdog(lanes, nowMs, { ln2SyncY, timeoutMs: LANE_PHASE_STALL_TIMEOUT_MS_SKIP });
         } else {
             this._resetLaneStallWatchdog(lanes);
         }
@@ -1852,23 +1872,48 @@ export default class Gpt2Layer extends BaseLayer {
      * Animate vector through MLP up-projection (768 → 3072 dimensions)
      */
     _animateMlpUpProjection(lane) {
-        const vec = lane.resultVecLN2;
-        if (!vec || typeof TWEEN === 'undefined') return;
+        const vec = lane && lane.resultVecLN2;
+        if (!lane || !vec || !vec.group) {
+            if (lane) {
+                lane.mlpUpStarted = true;
+                lane.mlpDownStarted = true;
+                lane.mlpDownComplete = true;
+                lane.ln2Phase = 'done';
+                this._emitProgress();
+            }
+            return;
+        }
+        if (typeof TWEEN === 'undefined') {
+            lane.mlpDownStarted = true;
+            lane.mlpDownComplete = true;
+            lane.ln2Phase = 'done';
+            this._emitProgress();
+            return;
+        }
 
         const bottomY = this.mlpUp.group.position.y - MLP_MATRIX_PARAMS_UP.height / 2;
         const topY = this.mlpUp.group.position.y + MLP_MATRIX_PARAMS_UP.height / 2;
-        const distance = topY - vec.group.position.y;
-        const duration = (distance / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
-        const colorDuration = this._skipToEndActive
-            ? Math.max(duration, SKIP_MLP_COLOR_MIN_MS)
-            : duration;
-        
         const matrixStartColor = this._mlpMatrixInactiveColor;
         const matrixEndColor = this._mlpMatrixActiveColor;
         const tweenColor = this._mlpUpTweenColor;
         const startIntensity = 0.1;
         const peakIntensity = 0.24;
         const finalIntensity = 0.30;
+        const distance = topY - vec.group.position.y;
+        const rawDuration = (distance / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
+        const duration = Number.isFinite(rawDuration) ? Math.max(0, rawDuration) : 0;
+        if (duration <= 0) {
+            vec.group.position.y = Math.max(vec.group.position.y, topY);
+            vec.group.scale.setScalar(0.6);
+            this.mlpUp.setColor(matrixEndColor);
+            this.mlpUp.setEmissive(matrixEndColor, finalIntensity);
+            const mlpUpData = this._getMlpUpData(lane);
+            this._expandTo4x(lane, vec, mlpUpData);
+            return;
+        }
+        const colorDuration = this._skipToEndActive
+            ? Math.max(duration, SKIP_MLP_COLOR_MIN_MS)
+            : duration;
 
         // Animate matrix colour and emissive intensity for a glow effect
         const state = { t: 0, emissive: startIntensity };
@@ -2786,11 +2831,21 @@ export default class Gpt2Layer extends BaseLayer {
     _ensureLanePostAdditionVector(lane) {
         if (!lane) return null;
         if (lane.postAdditionVec && lane.postAdditionVec.group) return lane.postAdditionVec;
-        if (lane.originalVec && lane.originalVec.group) {
-            lane.postAdditionVec = lane.originalVec;
-            return lane.postAdditionVec;
-        }
         return null;
+    }
+
+    _isMhsaOutputStageComplete() {
+        const mhsa = this.mhsaAnimation;
+        if (!mhsa) return true;
+        if (mhsa.outputProjMatrixReturnComplete === true) return true;
+
+        const returnTarget = Number.isFinite(mhsa._outputProjReturnTargetCount)
+            ? Math.max(0, Math.floor(mhsa._outputProjReturnTargetCount))
+            : 0;
+        const returnCount = Number.isFinite(mhsa._outputProjReturnCount)
+            ? Math.max(0, Math.floor(mhsa._outputProjReturnCount))
+            : 0;
+        return returnTarget > 0 && returnCount >= returnTarget;
     }
 
     _forceAdvanceStalledLane(lane, { ln2SyncY } = {}) {
@@ -2821,8 +2876,7 @@ export default class Gpt2Layer extends BaseLayer {
         if (
             lane.horizPhase === 'postMHSAAddition'
             || lane.horizPhase === 'waitingForLN2'
-            || lane.ln2Phase === 'notStarted'
-            || lane.ln2Phase === 'preRise'
+            || (this._isMhsaOutputStageComplete() && (lane.ln2Phase === 'notStarted' || lane.ln2Phase === 'preRise'))
         ) {
             const v = this._ensureLanePostAdditionVector(lane);
             if (!v || !v.group) return false;
@@ -2865,6 +2919,22 @@ export default class Gpt2Layer extends BaseLayer {
             return true;
         }
 
+        if (lane.ln2Phase === 'mlpReady' && this._mlpStart) {
+            const fallback = lane.finalVecAfterMlp || lane.resultVecLN2 || lane.postAdditionVec || lane.originalVec;
+            if (!fallback) return false;
+            lane.finalVecAfterMlp = lane.finalVecAfterMlp || fallback;
+            lane.mlpUpStarted = true;
+            lane.mlpDownStarted = true;
+            lane.mlpDownComplete = true;
+            lane.ln2Phase = 'done';
+            if (lane.stopRise) {
+                delete lane.stopRise;
+                delete lane.stopRiseTarget;
+            }
+            console.warn(`Layer ${this.index}: lane ${laneId} stalled during MLP; forcing lane completion.`);
+            return true;
+        }
+
         return false;
     }
 
@@ -2880,6 +2950,9 @@ export default class Gpt2Layer extends BaseLayer {
 
     _applyLaneStallWatchdog(lanes, nowMs, context = {}) {
         if (!Array.isArray(lanes) || !lanes.length || !Number.isFinite(nowMs)) return;
+        const timeoutMs = Number.isFinite(context.timeoutMs)
+            ? Math.max(1000, context.timeoutMs)
+            : LANE_PHASE_STALL_TIMEOUT_MS_SKIP;
         let mutated = false;
         for (let i = 0; i < lanes.length; i++) {
             const lane = lanes[i];
@@ -2895,7 +2968,7 @@ export default class Gpt2Layer extends BaseLayer {
                 continue;
             }
             const stalledForMs = nowMs - lane.__phaseWatchStartMs;
-            if (stalledForMs < LANE_PHASE_STALL_TIMEOUT_MS) continue;
+            if (stalledForMs < timeoutMs) continue;
             if (this._forceAdvanceStalledLane(lane, context)) {
                 mutated = true;
             }
