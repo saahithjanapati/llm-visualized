@@ -78,6 +78,7 @@ const ATTENTION_PREVIEW_TRIANGLE = 'lower';
 const ATTENTION_PREVIEW_GRID_GAP = 8; // matches .detail-attention-grid column gap in CSS
 const ATTENTION_PRE_COLOR_CLAMP = 5;
 const ATTENTION_POP_OUT_MS = 120;
+const ATTENTION_SCORE_DECIMALS = 4;
 const RESIDUAL_COLOR_CLAMP = 2;
 const SPACE_TOKEN_DISPLAY = '" "';
 const RESIDUAL_STREAM_DESCRIPTION = 'This is the residual stream vector for a token at this point in the model. In the overlay, the residual stream is denoted by $x$ or $u$. Attention and MLP outputs are added back into it, which is why it is called a residual stream. It is the main highway of information.';
@@ -257,11 +258,11 @@ function formatActivationData(data) {
             const selectedMode = stageLower.includes('post') ? 'post' : 'pre';
             const selectedScore = selectedMode === 'post' ? data.postScore : data.preScore;
             if (Number.isFinite(selectedScore)) {
-                lines.push(`Attention score (${selectedMode}-softmax): ${selectedScore.toFixed(4)}`);
+                lines.push(`Attention score (${selectedMode}-softmax): ${selectedScore.toFixed(ATTENTION_SCORE_DECIMALS)}`);
             }
         }
-        if (Number.isFinite(data.preScore)) lines.push(`Pre-softmax: ${data.preScore.toFixed(4)}`);
-        if (Number.isFinite(data.postScore)) lines.push(`Post-softmax: ${data.postScore.toFixed(4)}`);
+        if (Number.isFinite(data.preScore)) lines.push(`Pre-softmax: ${data.preScore.toFixed(ATTENTION_SCORE_DECIMALS)}`);
+        if (Number.isFinite(data.postScore)) lines.push(`Post-softmax: ${data.postScore.toFixed(ATTENTION_SCORE_DECIMALS)}`);
     }
     if (data.values && typeof data.values.length === 'number') {
         lines.push(`Values (${data.values.length}):`);
@@ -398,7 +399,7 @@ function resolveAttentionScoreSelectionSummary(selectionInfo, context = null) {
     const sourceText = formatTokenWithIndex(sourceTokenIndex, sourceLabel, 'Source');
     const targetText = formatTokenWithIndex(targetTokenIndex, targetLabel, 'Target');
     const modeLabel = mode === 'post' ? 'Post-softmax' : 'Pre-softmax';
-    const scoreText = Number.isFinite(score) ? score.toFixed(4) : 'n/a';
+    const scoreText = Number.isFinite(score) ? score.toFixed(ATTENTION_SCORE_DECIMALS) : 'n/a';
 
     return {
         mode,
@@ -3705,7 +3706,7 @@ class SelectionPanel {
                     cell.style.backgroundColor = colorToCss(color);
                     const rowLabel = tokenDisplayLabels[row] || tokenLabels[row] || '';
                     const colLabel = tokenDisplayLabels[col] || tokenLabels[col] || '';
-                    cell.title = `${rowLabel} → ${colLabel} (${mode === 'post' ? 'post' : 'pre'}): ${value.toFixed(4)}`;
+                    cell.title = `${rowLabel} → ${colLabel} (${mode === 'post' ? 'post' : 'pre'}): ${value.toFixed(ATTENTION_SCORE_DECIMALS)}`;
                     cell.dataset.value = String(value);
                     cell.classList.remove('is-empty');
                     hasAnyValue = true;
@@ -3868,7 +3869,7 @@ class SelectionPanel {
         }
         if (this.attentionValue) {
             this._attentionValueDefault = hasSource
-                ? (this._attentionSelectionSummary?.defaultText || 'Tap or hover a square to see its score.')
+                ? (this._attentionSelectionSummary?.defaultText || 'Click a square to see its score.')
                 : '';
             this.attentionValue.textContent = this._attentionValueDefault;
         }
@@ -3967,7 +3968,7 @@ class SelectionPanel {
                         cell.style.backgroundColor = colorToCss(color);
                         const rowLabel = tokenDisplayLabels[row] || tokenLabels[row] || '';
                         const colLabel = tokenDisplayLabels[col] || tokenLabels[col] || '';
-                        cell.title = `${rowLabel} → ${colLabel} (${mode === 'post' ? 'post' : 'pre'}): ${value.toFixed(4)}`;
+                        cell.title = `${rowLabel} → ${colLabel} (${mode === 'post' ? 'post' : 'pre'}): ${value.toFixed(ATTENTION_SCORE_DECIMALS)}`;
                         cell.dataset.value = String(value);
                         hasAnyValue = true;
                     } else {
@@ -4086,7 +4087,7 @@ class SelectionPanel {
             const label = rowLabel || colLabel
                 ? `${rowLabel || 'Token'} → ${colLabel || 'Token'}`
                 : 'Score';
-            const scoreText = Number.isFinite(valueNum) ? valueNum.toFixed(4) : String(rawValue || '');
+            const scoreText = Number.isFinite(valueNum) ? valueNum.toFixed(ATTENTION_SCORE_DECIMALS) : String(rawValue || '');
             this.attentionValue.textContent = `${label}: ${scoreText}`;
         }
     }

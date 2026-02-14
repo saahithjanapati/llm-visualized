@@ -355,6 +355,41 @@ def parameter_accounting(model: GPT2LMHeadModel) -> List[StageParameters]:
 # ---------------------------------------------------------------------------
 
 
+def normalize_decoded_token_text(text: str) -> str:
+    """Normalize decoded token text for stable JSON output."""
+
+    # GPT-2 byte-level decoding can emit non-breaking spaces for byte artifacts.
+    return text.replace("\u00A0", " ")
+
+
+def visible_token_text(text: str) -> str:
+    """Return a display-safe token string.
+
+    Keep literal token text when it includes non-whitespace characters
+    (e.g. " machines"), and only add quotes for whitespace-only tokens.
+    """
+
+    escaped = text.replace("\n", "\\n").replace("\t", "\\t")
+    if not text:
+        return '""'
+    if text.strip():
+        return escaped
+    return f'"{escaped}"'
+
+
+def decode_token_text(tokenizer: GPT2TokenizerFast, token_id: int) -> str:
+    """Decode a single token id into normalized display text."""
+
+    decoded = tokenizer.decode([int(token_id)], clean_up_tokenization_spaces=False)
+    return normalize_decoded_token_text(decoded)
+
+
+def decode_token_texts(tokenizer: GPT2TokenizerFast, token_ids: Sequence[int]) -> List[str]:
+    """Decode token ids into normalized per-token strings."""
+
+    return [decode_token_text(tokenizer, int(token_id)) for token_id in token_ids]
+
+
 def extract_top_logits(
     logits: torch.Tensor,
     tokenizer: GPT2TokenizerFast,
@@ -383,7 +418,7 @@ def extract_top_logits(
         top_probs = prob_row.index_select(0, top_indices)
 
         token_ids = [int(idx) for idx in top_indices.tolist()]
-        tokens = tokenizer.convert_ids_to_tokens(token_ids)
+        tokens = decode_token_texts(tokenizer, token_ids)
 
         token_entries: List[Dict[str, object]] = []
         for token_id, token, logit_value, prob_value in zip(
@@ -402,6 +437,7 @@ def extract_top_logits(
                 {
                     "token_id": token_id,
                     "token": token,
+                    "token_display": visible_token_text(token),
                     "logit": logit,
                     "prob": prob,
                 }
@@ -483,7 +519,7 @@ def check_completion_feasibility(
         logit_row = logits[prompt_len - 1 + idx]
         allowed, reason = token_allowed_by_sampler(logit_row, token_id, top_k, top_p, temperature)
         if not allowed:
-            token_str = tokenizer.convert_ids_to_tokens([token_id])[0]
+            token_str = decode_token_text(tokenizer, token_id)
             return (
                 False,
                 f"Token {idx + 1} ('{token_str}', id {token_id}) is {reason}.",
@@ -519,7 +555,7 @@ def print_next_token_topk(
 
     print(f"\nTop-{k} next-token candidates (temperature={temperature}):\n")
     for rank, (prob, token_id) in enumerate(zip(values.tolist(), indices.tolist()), start=1):
-        token = tokenizer.convert_ids_to_tokens([int(token_id)])[0]
+        token = decode_token_text(tokenizer, int(token_id))
         token_display = token.replace("\n", "\\n").replace("\t", "\\t")
         print(f"{rank:>2}. id={token_id:<5} p={prob:.4f} token={token_display}")
 # ---------------------------------------------------------------------------
@@ -534,6 +570,7 @@ class CaptureConfig:
     mlp_stride: int = 32
     quantisation: str = "float16"
     round_decimals: Optional[int] = None
+    attention_score_round_decimals: Optional[int] = 4
 
 
 def layer_norm_states(x: torch.Tensor, ln: torch.nn.LayerNorm) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -559,6 +596,12 @@ def run_instrumented_pass(
     device = next(model.parameters()).device
     quantiser = build_quantiser(config.quantisation, config.round_decimals)
     attention_quantiser = quantiser
+    attention_score_quantiser = build_quantiser(
+        config.quantisation,
+        config.attention_score_round_decimals
+        if config.attention_score_round_decimals is not None
+        else config.round_decimals,
+    )
     mlp_quantiser = quantiser
 
     model.eval()
@@ -625,8 +668,8 @@ def run_instrumented_pass(
             attn_probs = F.softmax(attn_weights, dim=-1)
 
             layer_entry["attention_scores"] = {
-                "pre": encode_triangular(attn_weights, quantiser),
-                "post": encode_triangular(attn_probs, quantiser),
+                "pre": encode_triangular(attn_weights, attention_score_quantiser),
+                "post": encode_triangular(attn_probs, attention_score_quantiser),
             }
 
             context = torch.matmul(attn_probs, v_heads)
@@ -771,8 +814,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--mlp-stride", type=int, default=64, help="Stride for 3072-d MLP activations.")
     parser.add_argument("--quantisation", type=str, default="float16", choices=["float16", "float32", "int8"], help="Quantisation mode for stored activations.")
     parser.add_argument("--round-decimals", type=int, default=2, help="Round stored floats to this many decimal places.")
-    parser.add_argument("--logit-round-decimals", type=int, default=None, help="Round stored logits to this many decimal places (defaults to --round-decimals).")
-    parser.add_argument("--prob-round-decimals", type=int, default=6, help="Round stored probabilities to this many decimal places.")
+    parser.add_argument("--attention-score-round-decimals", type=int, default=4, help="Round stored attention scores to this many decimal places.")
+    parser.add_argument("--logit-round-decimals", type=int, default=4, help="Round stored logits to this many decimal places (defaults to 4).")
+    parser.add_argument("--prob-round-decimals", type=int, default=4, help="Round stored probabilities to this many decimal places.")
     parser.add_argument("--inspect-next-top-k", type=int, default=None, help="Print top-k next-token candidates for the prompt.")
 
     args = parser.parse_args(argv)
@@ -900,6 +944,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         mlp_stride=args.mlp_stride,
         quantisation=args.quantisation,
         round_decimals=args.round_decimals,
+        attention_score_round_decimals=args.attention_score_round_decimals,
     )
 
     capture = run_instrumented_pass(model, all_token_ids.to(args.device), capture_config)
@@ -913,6 +958,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         logit_round_decimals,
         prob_round_decimals,
     )
+    all_token_strings = decode_token_texts(tokenizer, prompt_id_list + completion_id_list)
 
     payload = {
         "meta": {
@@ -920,7 +966,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "completion": completion_text,
             "prompt_tokens": prompt_id_list,
             "completion_tokens": completion_id_list,
-            "token_strings": tokenizer.convert_ids_to_tokens(prompt_id_list + completion_id_list),
+            "token_strings": all_token_strings,
+            "token_display_strings": [visible_token_text(token) for token in all_token_strings],
             "logit_top_k": args.logit_top_k,
             "logit_round_decimals": logit_round_decimals,
             "prob_round_decimals": prob_round_decimals,

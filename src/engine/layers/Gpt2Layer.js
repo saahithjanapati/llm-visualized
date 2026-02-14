@@ -70,6 +70,7 @@ const TMP_WORLD_POS = new THREE.Vector3();
 const COLOR_DARK_GRAY = new THREE.Color(0x333333);
 const COLOR_LIGHT_YELLOW = new THREE.Color(0xffffff);
 const COLOR_BRIGHT_YELLOW = new THREE.Color(0xffffff);
+const COLOR_WHITE = new THREE.Color(0xffffff);
 const COLOR_INACTIVE_COMPONENT = new THREE.Color(INACTIVE_COMPONENT_COLOR);
 
 const TMP_LN_TRAIL_POS = new THREE.Vector3();
@@ -987,10 +988,11 @@ export default class Gpt2Layer extends BaseLayer {
                             dupVec.group.position.y + riseStep
                         );
                     }
+                    const ln1NormAnimationActive = !!(lane.normAnim && lane.normAnim.isAnimating);
                     if (
                         !lane.multStarted &&
                         lane.normStarted &&
-                        !lane.normAnim.isAnimating &&
+                        !ln1NormAnimationActive &&
                         dupVec.group.position.y >= ln1RiseTargetY - 0.01
                     ) {
                         lane.multStarted = true;
@@ -1429,10 +1431,11 @@ export default class Gpt2Layer extends BaseLayer {
                     }
                     
                     // Trigger multiplication at center of LN2
+                    const ln2NormAnimationActive = !!(lane.normAnimationLN2 && lane.normAnimationLN2.isAnimating);
                     if (
                         !lane.multDoneLN2 &&
                         lane.normStartedLN2 &&
-                        !lane.normAnimationLN2.isAnimating &&
+                        !ln2NormAnimationActive &&
                         mv.group.position.y >= ln2RiseTargetY - 0.01
                     ) {
                         lane.multDoneLN2 = true;
