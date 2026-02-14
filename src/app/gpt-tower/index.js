@@ -128,6 +128,8 @@ const pipeline = new LayerPipeline(gptCanvas, NUM_LAYERS, {
     autoCameraFinalTargetOffset: vec3(CAMERA_CONFIG.followFinalTargetOffset),
     autoCameraFinalMobileCameraOffset: vec3(CAMERA_CONFIG.followFinalMobileCameraOffset),
     autoCameraFinalMobileTargetOffset: vec3(CAMERA_CONFIG.followFinalMobileTargetOffset),
+    autoCameraLayerEndDesktopCameraOffset: vec3(CAMERA_CONFIG.followLayerEndDesktopCameraOffset),
+    autoCameraLayerEndDesktopTargetOffset: vec3(CAMERA_CONFIG.followLayerEndDesktopTargetOffset),
     autoCameraMobileScale: CAMERA_CONFIG.autoCameraMobileScale,
     autoCameraMobileShiftX: CAMERA_CONFIG.autoCameraMobileShiftX,
     autoCameraMhsaMobileShiftX: CAMERA_CONFIG.autoCameraMhsaMobileShiftX,

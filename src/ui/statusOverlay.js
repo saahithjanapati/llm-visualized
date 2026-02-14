@@ -63,6 +63,9 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     const X_OUT = 'x_{\\text{out}}';
     const X_FINAL = 'x_{\\text{final}}';
     const LOGITS = '\\ell';
+    const X_TOK = 'x_t^{\\text{tok}}';
+    const X_POS = 'x_t^{\\text{pos}}';
+    const TOK_ID = '\\mathrm{token}_t';
     const topEmbedBaseColor = new THREE.Color(MHSA_MATRIX_INITIAL_RESTING_COLOR);
     const topEmbedTargetColor = new THREE.Color(MHA_FINAL_Q_COLOR);
     const topEmbedWorkingColor = new THREE.Color();
@@ -129,6 +132,9 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         resid1: `${U} = x + O`,
         mlp: String.raw`\begin{aligned} a &= ${U_LN} ${WUp} + ${BUp} \\ z &= \mathrm{GELU}(a) \\ \mathrm{MLP}(${U_LN}) &= z ${WDown} + ${BDown} \end{aligned}`,
         resid2: String.raw`x_{\text{out}} = ${U} + \mathrm{MLP}(${U_LN})`,
+        embed_token: `${X_TOK} = E[${TOK_ID}]`,
+        embed_pos: `${X_POS} = P[t]`,
+        embed_sum: `x_t = ${X_TOK} + ${X_POS}`,
         logits: String.raw`\begin{aligned} ${LOGITS} &= ${X_FINAL} W_U \\ p &= \mathrm{softmax}(${LOGITS}) \end{aligned}`
     };
 
@@ -417,6 +423,46 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         return { norm, scale, shift };
     };
 
+    const resolveInputEmbeddingStage = (layer, lanes) => {
+        if (!layer || layer.index !== 0 || !Array.isArray(lanes) || !lanes.length) return null;
+        let hasEmbeddingLanes = false;
+        let anyTokenPassActive = false;
+        let anyPosPassActive = false;
+        let anySumActive = false;
+        let anyPendingPosPass = false;
+
+        for (const lane of lanes) {
+            if (!lane || !lane.posVec) continue;
+            hasEmbeddingLanes = true;
+            if (lane.posAddComplete) continue;
+
+            const branchY = lane.branchStartY;
+            const vocabY = lane?.originalVec?.group?.position?.y;
+            if (Number.isFinite(branchY) && Number.isFinite(vocabY) && vocabY < branchY - 0.25) {
+                anyTokenPassActive = true;
+            }
+
+            if (!lane.__posPassStarted) {
+                anyPendingPosPass = true;
+                continue;
+            }
+
+            if (lane.posAddStarted) {
+                anySumActive = true;
+            } else {
+                anyPosPassActive = true;
+            }
+        }
+
+        if (!hasEmbeddingLanes) return null;
+        if (anySumActive) return { eqKey: 'embed_sum', eqTitle: 'Input Embedding Sum' };
+        if (anyPosPassActive) return { eqKey: 'embed_pos', eqTitle: 'Positional Embedding' };
+        if (anyTokenPassActive || (anyPendingPosPass && layer._ln1Start !== true)) {
+            return { eqKey: 'embed_token', eqTitle: 'Token Embedding Lookup' };
+        }
+        return null;
+    };
+
     const getTopEmbeddingStats = (lastLayer) => {
         if (!lastLayer) return null;
         const entryY = Number.isFinite(lastLayer.__topEmbedEntryYLocal)
@@ -503,6 +549,17 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
 
         if (!targetLayer) return;
         if (!lanes.length) return;
+
+        const inputEmbeddingStage = resolveInputEmbeddingStage(targetLayer, lanes);
+        if (inputEmbeddingStage?.eqKey) {
+            const key = inputEmbeddingStage.eqKey;
+            const signature = key;
+            if (signature === appState.lastEqSignature) return;
+            appState.lastEqKey = key;
+            appState.lastEqSignature = signature;
+            renderEq(EQ[key] || '', inputEmbeddingStage.eqTitle);
+            return;
+        }
 
         const resid2Active = lanes.some(l => l && l.stopRise && l.ln2Phase === 'done');
         const resid1Active = !resid2Active && lanes.some(l => {

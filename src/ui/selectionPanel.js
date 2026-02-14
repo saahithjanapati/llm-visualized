@@ -20,6 +20,7 @@ import {
     HIDE_INSTANCE_Y_OFFSET,
     resolveRenderPixelRatio
 } from '../utils/constants.js';
+import { getIncompleteUtf8TokenNote } from '../utils/tokenEncodingNotes.js';
 import {
     MHA_FINAL_Q_COLOR,
     MHA_FINAL_K_COLOR,
@@ -98,6 +99,16 @@ const TOKEN_CHIP_STYLE = {
     textDepth: 16,
     textSize: 52,
     textOffset: 1.2
+};
+
+const LOGIT_PREVIEW_TEXT_STYLE = {
+    size: 360,
+    depth: 44,
+    fitWidth: 960,
+    fitHeight: 300,
+    minScale: 0.28,
+    maxScale: 1.6,
+    faceOffset: 0.03
 };
 
 const TOKEN_CHIP_FONT_URL = 'https://threejs.org/examples/fonts/helvetiker_regular.typeface.json';
@@ -1486,68 +1497,162 @@ function resolveLogitPreviewTokenText(label, selectionInfo) {
     return 'Logit token';
 }
 
-function buildLogitBarPreview(label, selectionInfo) {
-    const previewGroup = new THREE.Group();
+function resolveLogitPreviewColor(selectionInfo) {
     const source = selectionInfo?.object || selectionInfo?.hit?.object;
     const instanceId = selectionInfo?.hit?.instanceId;
-    const tokenText = resolveLogitPreviewTokenText(label, selectionInfo);
-
-    let barGeometry = null;
-    let barMaterial = null;
-    let barHeight = 70;
-
+    const baseColor = source?.material?.color;
+    const color = (baseColor && baseColor.isColor)
+        ? TMP_COLOR.copy(baseColor)
+        : TMP_COLOR.set(baseColor ?? 0xffffff);
     if (
         source
         && source.isInstancedMesh
-        && source.geometry
-        && typeof source.getMatrixAt === 'function'
+        && typeof source.getColorAt === 'function'
         && Number.isFinite(instanceId)
         && instanceId >= 0
     ) {
-        try {
-            source.getMatrixAt(instanceId, TMP_MATRIX);
-            TMP_MATRIX.decompose(TMP_POS, TMP_QUAT, TMP_SCALE);
-            const scaleX = Number.isFinite(TMP_SCALE.x) ? Math.max(0.001, Math.abs(TMP_SCALE.x)) : 1;
-            const scaleY = Number.isFinite(TMP_SCALE.y) ? Math.max(0.001, Math.abs(TMP_SCALE.y)) : 1;
-            const scaleZ = Number.isFinite(TMP_SCALE.z) ? Math.max(0.001, Math.abs(TMP_SCALE.z)) : 1;
-            barHeight = scaleY;
+        try { source.getColorAt(instanceId, color); } catch (_) { /* fallback to material color */ }
+    }
+    return color.clone();
+}
 
-            const color = TMP_COLOR.copy(source.material?.color || 0xffffff);
-            if (typeof source.getColorAt === 'function') {
-                try { source.getColorAt(instanceId, color); } catch (_) { /* fallback to material color */ }
+function createLogitTextPreviewShared(labelText, options = {}) {
+    const rawText = (typeof labelText === 'string') ? labelText : '';
+    const text = rawText.trim().length ? rawText : 'Logit token';
+    const color = options.color instanceof THREE.Color
+        ? options.color.clone()
+        : new THREE.Color(options.color ?? 0xffffff);
+    const opacity = Number.isFinite(options.opacity) ? THREE.MathUtils.clamp(options.opacity, 0.1, 1) : 1;
+    const font = tokenChipFont;
+
+    const group = new THREE.Group();
+    let textGeo = null;
+    let textFaceGeo = null;
+    let textPlaneGeo = null;
+    let textMat = null;
+    let textTexture = null;
+    let usedGeometry = false;
+
+    if (font && text.trim().length) {
+        const shapes = font.generateShapes(text, LOGIT_PREVIEW_TEXT_STYLE.size, 2);
+        if (Array.isArray(shapes) && shapes.length) {
+            textGeo = new THREE.ExtrudeGeometry(shapes, {
+                depth: LOGIT_PREVIEW_TEXT_STYLE.depth,
+                curveSegments: 4,
+                bevelEnabled: false
+            });
+            textGeo.computeBoundingBox();
+            textGeo.computeVertexNormals();
+            textGeo.translate(0, 0, -LOGIT_PREVIEW_TEXT_STYLE.depth / 2);
+            textGeo.computeBoundingBox();
+
+            const bounds = textGeo.boundingBox;
+            const width = bounds ? Math.max(1, bounds.max.x - bounds.min.x) : 1;
+            const height = bounds ? Math.max(1, bounds.max.y - bounds.min.y) : 1;
+            const centerX = bounds ? (bounds.min.x + bounds.max.x) / 2 : 0;
+            const centerY = bounds ? (bounds.min.y + bounds.max.y) / 2 : 0;
+            if (bounds) {
+                textGeo.translate(-centerX, -centerY, 0);
             }
-            const sourceOpacity = Number.isFinite(source.material?.opacity) ? source.material.opacity : 1;
-            const sourceTransparent = source.material?.transparent === true || sourceOpacity < 1;
-            barGeometry = source.geometry.clone();
-            barMaterial = new THREE.MeshStandardMaterial({
+
+            textMat = new THREE.MeshStandardMaterial({
                 color: color.clone(),
                 roughness: 0.32,
-                metalness: 0.18,
-                emissive: color.clone().multiplyScalar(0.16),
-                emissiveIntensity: 0.7,
-                transparent: sourceTransparent,
-                opacity: sourceOpacity
+                metalness: 0.12,
+                emissive: color.clone().multiplyScalar(0.15),
+                emissiveIntensity: 0.9,
+                transparent: opacity < 1,
+                opacity,
+                side: THREE.DoubleSide
             });
-            const barMesh = new THREE.Mesh(barGeometry, barMaterial);
-            barMesh.scale.set(scaleX, scaleY, scaleZ);
-            previewGroup.add(barMesh);
-        } catch (_) { /* fall back to token chip only */ }
+            const textMesh = new THREE.Mesh(textGeo, textMat);
+            group.add(textMesh);
+
+            textFaceGeo = new THREE.ShapeGeometry(shapes);
+            textFaceGeo.computeVertexNormals();
+            if (bounds) {
+                textFaceGeo.translate(-centerX, -centerY, 0);
+            }
+            const frontFace = new THREE.Mesh(textFaceGeo, textMat);
+            frontFace.position.z = LOGIT_PREVIEW_TEXT_STYLE.depth / 2 + LOGIT_PREVIEW_TEXT_STYLE.faceOffset;
+            const backFace = new THREE.Mesh(textFaceGeo, textMat);
+            backFace.position.z = -LOGIT_PREVIEW_TEXT_STYLE.depth / 2 - LOGIT_PREVIEW_TEXT_STYLE.faceOffset;
+            group.add(frontFace, backFace);
+
+            const fitScaleRaw = Math.min(
+                LOGIT_PREVIEW_TEXT_STYLE.fitWidth / width,
+                LOGIT_PREVIEW_TEXT_STYLE.fitHeight / height
+            );
+            const fitScale = THREE.MathUtils.clamp(
+                Number.isFinite(fitScaleRaw) ? fitScaleRaw : 1,
+                LOGIT_PREVIEW_TEXT_STYLE.minScale,
+                LOGIT_PREVIEW_TEXT_STYLE.maxScale
+            );
+            group.scale.setScalar(fitScale);
+            usedGeometry = true;
+        }
     }
 
-    const chip = createTokenChipShared(tokenText);
-    chip.group.scale.setScalar(0.44);
-    const chipLift = Math.max(84, barHeight * 0.68);
-    chip.group.position.set(0, chipLift, 0);
-    previewGroup.add(chip.group);
+    if (!usedGeometry) {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const fontSize = 160;
+        ctx.font = `700 ${fontSize}px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial`;
+        const measuredWidth = Math.ceil(ctx.measureText(text).width);
+        const measuredHeight = Math.ceil(fontSize * 1.15);
+        canvas.width = Math.max(512, measuredWidth + 160);
+        canvas.height = Math.max(256, measuredHeight + 120);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#ffffff';
+        ctx.font = `700 ${fontSize}px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial`;
+        ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+
+        textTexture = new THREE.CanvasTexture(canvas);
+        textTexture.minFilter = THREE.LinearFilter;
+        textTexture.magFilter = THREE.LinearFilter;
+        textTexture.needsUpdate = true;
+
+        const aspect = canvas.width / canvas.height;
+        let planeHeight = LOGIT_PREVIEW_TEXT_STYLE.fitHeight * 0.7;
+        let planeWidth = planeHeight * aspect;
+        const maxWidth = LOGIT_PREVIEW_TEXT_STYLE.fitWidth * 0.85;
+        if (planeWidth > maxWidth) {
+            planeWidth = maxWidth;
+            planeHeight = planeWidth / aspect;
+        }
+        textPlaneGeo = new THREE.PlaneGeometry(planeWidth, planeHeight);
+        textMat = new THREE.MeshBasicMaterial({
+            map: textTexture,
+            color,
+            transparent: true,
+            opacity,
+            side: THREE.DoubleSide
+        });
+        group.add(new THREE.Mesh(textPlaneGeo, textMat));
+    }
 
     return {
-        object: previewGroup,
+        group,
         dispose: () => {
-            if (barGeometry) barGeometry.dispose();
-            if (barMaterial) barMaterial.dispose();
-            chip.dispose();
+            if (textGeo) textGeo.dispose();
+            if (textFaceGeo) textFaceGeo.dispose();
+            if (textPlaneGeo) textPlaneGeo.dispose();
+            if (textMat) textMat.dispose();
+            if (textTexture) textTexture.dispose();
         }
     };
+}
+
+function buildLogitBarPreview(label, selectionInfo) {
+    const source = selectionInfo?.object || selectionInfo?.hit?.object;
+    const tokenText = resolveLogitPreviewTokenText(label, selectionInfo);
+    const textPreview = createLogitTextPreviewShared(tokenText, {
+        color: resolveLogitPreviewColor(selectionInfo),
+        opacity: Number.isFinite(source?.material?.opacity) ? source.material.opacity : 1
+    });
+    return { object: textPreview.group, dispose: textPreview.dispose };
 }
 
 function buildRoundedRectShape(width, height, radius) {
@@ -2903,6 +3008,8 @@ class SelectionPanel {
         this.tokenValue = document.getElementById('detailTokenValue');
         this.positionRow = document.getElementById('detailPositionRow');
         this.positionValue = document.getElementById('detailPositionValue');
+        this.tokenEncodingRow = document.getElementById('detailTokenEncodingRow');
+        this.tokenEncodingValue = document.getElementById('detailTokenEncodingValue');
         this.closeBtn = document.getElementById('detailClose');
         this.canvas = document.getElementById('detailCanvas');
         this.description = document.getElementById('detailDescription');
@@ -4445,6 +4552,7 @@ class SelectionPanel {
         if (!Number.isFinite(tokenId) && Number.isFinite(tokenIndex) && this.activationSource && typeof this.activationSource.getTokenId === 'function') {
             tokenId = this.activationSource.getTokenId(tokenIndex);
         }
+        const tokenEncodingNote = getIncompleteUtf8TokenNote(tokenId);
 
         const formattedToken = formatTokenLabelForPreview(tokenLabel);
         let tokenText = formattedToken;
@@ -4464,7 +4572,8 @@ class SelectionPanel {
         if (!tokenText && !positionText) return null;
         return {
             tokenText,
-            positionText
+            positionText,
+            tokenEncodingNote
         };
     }
 
@@ -4484,7 +4593,7 @@ class SelectionPanel {
         const metadata = this._resolveVectorTokenPosition(selection, label);
         if (!metadata) {
             hideRows();
-            return;
+            return null;
         }
 
         if (tokenRow && tokenValue) {
@@ -4505,6 +4614,37 @@ class SelectionPanel {
                 positionValue.textContent = '';
             }
         }
+        return metadata;
+    }
+
+    _setTokenEncodingNote(note) {
+        if (!this.tokenEncodingRow || !this.tokenEncodingValue) return;
+        const text = (typeof note === 'string') ? note.trim() : '';
+        if (text) {
+            this.tokenEncodingRow.style.display = '';
+            this.tokenEncodingValue.textContent = text;
+        } else {
+            this.tokenEncodingRow.style.display = 'none';
+            this.tokenEncodingValue.textContent = '';
+        }
+    }
+
+    _resolveSelectionTokenEncodingNote(selection, label, vectorMetadata = null) {
+        if (vectorMetadata && typeof vectorMetadata.tokenEncodingNote === 'string' && vectorMetadata.tokenEncodingNote.trim().length) {
+            return vectorMetadata.tokenEncodingNote;
+        }
+
+        const entry = resolveLogitSelectionEntry(selection);
+        if (Number.isFinite(entry?.token_id)) {
+            return getIncompleteUtf8TokenNote(entry.token_id);
+        }
+
+        const lower = (label || '').toLowerCase();
+        if (!lower.includes('logit')) return '';
+        const labelIdMatch = String(label || '').match(/\bid\s+(-?\d+)/i);
+        if (!labelIdMatch) return '';
+        const parsedTokenId = Number(labelIdMatch[1]);
+        return getIncompleteUtf8TokenNote(parsedTokenId);
     }
 
     showSelection(selection) {
@@ -4546,7 +4686,8 @@ class SelectionPanel {
         if (this.outputDimHalf) this.outputDimHalf.style.display = (!hideTensorDimsField && isVectorMetadata) ? 'none' : '';
         if (this.inputDimHalf) this.inputDimHalf.style.flexBasis = isVectorMetadata ? '100%' : '';
         if (dimsRow) dimsRow.style.display = hideTensorDimsField ? 'none' : '';
-        this._updateVectorTokenPositionRows(selection, label);
+        const vectorTokenMetadata = this._updateVectorTokenPositionRows(selection, label);
+        this._setTokenEncodingNote(this._resolveSelectionTokenEncodingNote(selection, label, vectorTokenMetadata));
         if (this.description) {
             const desc = resolveDescription(label, selection.kind, selection);
             setDescriptionContent(this.description, desc || '');

@@ -19,6 +19,8 @@ export const TOKEN_CHIP_STYLE = {
     riseDuration: 1200,
     vocabSlowdown: 1.6,
     positionSlowdown: 1.0,
+    // Start positional chip rise after the vocab chip wave completes.
+    positionStartDelayAfterVocabMs: 450,
     inset: 0,
     zOffset: 0,
     scale: 2.6,
@@ -70,6 +72,8 @@ export const CAMERA_CONFIG = {
     followFinalTargetOffset: [1675.46, 227.33, -469.85],
     followFinalMobileCameraOffset: [-2577.88, 2405.44, 5217.17],
     followFinalMobileTargetOffset: [873.36, 176.29, -957.97],
+    followLayerEndDesktopCameraOffset: [-354.19, 2251.39, 7180.46],
+    followLayerEndDesktopTargetOffset: [669.20, 630.48, -557.20],
     autoCameraMobileScale: 1.0,
     autoCameraMobileShiftX: 0,
     autoCameraMhsaMobileShiftX: 0,

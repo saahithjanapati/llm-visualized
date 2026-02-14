@@ -1516,6 +1516,15 @@ body.touch-ui * {
     text-align: right;
     overflow-wrap: anywhere;
 }
+.detail-row-token-note {
+    align-items: flex-start;
+}
+.detail-row-token-note .detail-value {
+    max-width: 70%;
+    text-align: right;
+    overflow-wrap: anywhere;
+    line-height: 1.35;
+}
 
 .detail-data {
     margin: 2px 16px 0;

@@ -192,13 +192,12 @@ function createStaticConnectorLine({
     x = 0,
     z = 0,
     startY = 0,
-    endY = 0,
     color = TRAIL_COLOR,
     opacity = TRAIL_OPACITY,
     lineWidth = TRAIL_LINE_WIDTH
 } = {}) {
     const start = new THREE.Vector3(x, startY, z);
-    const end = new THREE.Vector3(x, endY, z);
+    const end = new THREE.Vector3(x, startY, z);
     const geometry = new THREE.BufferGeometry().setFromPoints([start, end]);
     const effectiveOpacity = scaleOpacityForDisplay(opacity);
     const effectiveLineWidth = scaleLineWidthForDisplay(lineWidth);
@@ -216,8 +215,21 @@ function createStaticConnectorLine({
     line.userData = line.userData || {};
     line.userData.label = 'Embedding Connector Trail';
     line.userData.skipVisible = true;
+    line.userData.connectorStartY = startY;
     line.raycast = () => {};
     return line;
+}
+
+function updateConnectorEndY(connector, endY) {
+    if (!connector || !connector.geometry) return;
+    const points = connector.geometry.attributes?.position;
+    if (!points || !points.array || points.array.length < 6) return;
+    const startY = Number.isFinite(connector.userData?.connectorStartY)
+        ? connector.userData.connectorStartY
+        : points.array[1];
+    const clampedEndY = Math.max(startY, Number.isFinite(endY) ? endY : startY);
+    points.array[4] = clampedEndY;
+    points.needsUpdate = true;
 }
 
 // Temporarily stage the camera near the chips, then optionally return to tower view.
@@ -506,7 +518,15 @@ export function addEmbeddingAndTokenChips({
         const bottomEmbeddingVectorStartY = bottomVocabCenterY + EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2;
         const vocabRiseDuration = TOKEN_CHIP_STYLE.riseDuration * (TOKEN_CHIP_STYLE.vocabSlowdown || 1);
         const posRiseDuration = TOKEN_CHIP_STYLE.riseDuration * (TOKEN_CHIP_STYLE.positionSlowdown || 1);
-        const maxChipRiseDuration = Math.max(vocabRiseDuration, posRiseDuration) + laneSpanMs;
+        const vocabChipWaveMs = vocabRiseDuration + laneSpanMs;
+        const positionStartDelayMs = vocabChipWaveMs + Math.max(
+            0,
+            Number.isFinite(TOKEN_CHIP_STYLE.positionStartDelayAfterVocabMs)
+                ? TOKEN_CHIP_STYLE.positionStartDelayAfterVocabMs
+                : 0
+        );
+        const positionChipWaveMs = positionStartDelayMs + posRiseDuration + laneSpanMs;
+        const maxChipRiseDuration = Math.max(vocabChipWaveMs, positionChipWaveMs);
         const chipStartZOffset = TOKEN_CHIP_STYLE.zOffset;
         const chipFontLoader = new FontLoader();
         const animatedEmbeddingChips = [];
@@ -660,8 +680,7 @@ export function addEmbeddingAndTokenChips({
                     connector = createStaticConnectorLine({
                         x: vocabX,
                         z: staticZ,
-                        startY: staticY + chipHeight / 2,
-                        endY: targetY
+                        startY: staticY + chipHeight / 2
                     });
                     connector.visible = false;
                     registerChip(connector);
@@ -692,19 +711,28 @@ export function addEmbeddingAndTokenChips({
                     if (connector) {
                         riseTween.onStart(() => {
                             connector.visible = true;
+                            updateConnectorEndY(connector, chip.position.y);
+                        });
+                        riseTween.onUpdate(() => {
+                            updateConnectorEndY(connector, chip.position.y);
+                        });
+                        riseTween.onComplete(() => {
+                            updateConnectorEndY(connector, targetY);
                         });
                     }
                     riseTween.start();
                 } else {
                     chip.position.y = targetY;
                     chip.position.z = targetZ;
-                    if (connector) connector.visible = true;
+                    if (connector) {
+                        updateConnectorEndY(connector, targetY);
+                        connector.visible = true;
+                    }
                 }
             });
         };
         const spawnPositionChips = (font) => {
             if (disposed) return;
-            const posRiseDuration = TOKEN_CHIP_STYLE.riseDuration * (TOKEN_CHIP_STYLE.positionSlowdown || 1);
             const style = POSITION_CHIP_STYLE;
             const labels = chipPositionLabelList.slice(0, safeChipLaneCount).map((value) => String(value ?? ''));
             labels.forEach((label, idx) => {
@@ -741,8 +769,7 @@ export function addEmbeddingAndTokenChips({
                     connector = createStaticConnectorLine({
                         x: posX,
                         z: staticZ,
-                        startY: staticY + chipHeight / 2,
-                        endY: targetY
+                        startY: staticY + chipHeight / 2
                     });
                     connector.visible = false;
                     registerChip(connector);
@@ -768,18 +795,28 @@ export function addEmbeddingAndTokenChips({
                 if (typeof TWEEN !== 'undefined') {
                     const riseTween = new TWEEN.Tween(chip.position)
                         .to({ y: targetY, z: targetZ }, posRiseDuration)
-                        .delay(laneDelayRank * TOKEN_CHIP_STYLE.riseDelay)
+                        .delay(positionStartDelayMs + laneDelayRank * TOKEN_CHIP_STYLE.riseDelay)
                         .easing(TWEEN.Easing.Quadratic.Out);
                     if (connector) {
                         riseTween.onStart(() => {
                             connector.visible = true;
+                            updateConnectorEndY(connector, chip.position.y);
+                        });
+                        riseTween.onUpdate(() => {
+                            updateConnectorEndY(connector, chip.position.y);
+                        });
+                        riseTween.onComplete(() => {
+                            updateConnectorEndY(connector, targetY);
                         });
                     }
                     riseTween.start();
                 } else {
                     chip.position.y = targetY;
                     chip.position.z = targetZ;
-                    if (connector) connector.visible = true;
+                    if (connector) {
+                        updateConnectorEndY(connector, targetY);
+                        connector.visible = true;
+                    }
                 }
             });
         };

@@ -398,6 +398,8 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
 
         try {
             lane.posAddComplete = false;
+            lane.posAddStarted = false;
+            lane.__posPassStarted = false;
             // Start at the TOP of the bottom positional embedding, horizontally to the right.
             const residualTopY = (LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2 + EMBEDDING_BOTTOM_TOP_ALIGN_OFFSET_FROM_LN1_BOTTOM) + EMBEDDING_BOTTOM_Y_ADJUST;
             // The positional embedding matrix is shorter than the vocab matrix. Drop the
@@ -423,6 +425,8 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
                 layer._getInstanceCountFromData(posData)
             );
             raycastRoot.add(posVec.group);
+            // Keep positional vectors hidden until the deferred positional pass-through starts.
+            posVec.group.visible = false;
             applyVectorData(
                 posVec,
                 posData,
@@ -445,59 +449,80 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
             lane.posVec = posVec;
             lane.posTrail = posTrail;
 
-            // Two-phase motion: vertical rise, then perfectly horizontal slide.
-            const targetYAbove = (startY_override != null ? startY_override : originalVec.group.position.y) + POS_VEC_Y_OFFSET_ABOVE_VOCAB;
             const fasterRise = ANIM_RISE_SPEED_ORIGINAL * POS_VEC_VERTICAL_SPEED_MULT;
-            const riseDist = Math.max(0, targetYAbove - posStartY);
-            const riseMs = (riseDist / (fasterRise * GLOBAL_ANIM_SPEED_MULT)) * 1000;
-
-            const horizDist = Math.abs(posStartX - 0);
             const horizSpeed = ANIM_HORIZ_SPEED * POS_VEC_HORIZONTAL_SPEED_MULT * GLOBAL_ANIM_SPEED_MULT;
-            const horizMs = (horizDist / horizSpeed) * 1000;
-            if (typeof TWEEN !== 'undefined') {
-                new TWEEN.Tween(posVec.group.position)
-                    .to({ y: targetYAbove }, Math.max(100, riseMs))
-                    .easing(TWEEN.Easing.Quadratic.InOut)
-                    .onComplete(() => {
-                        new TWEEN.Tween(posVec.group.position)
-                            .to({ x: 0, y: targetYAbove }, Math.max(100, horizMs))
-                            .easing(TWEEN.Easing.Quadratic.InOut)
-                            .onStart(() => {
-                                // Hard-lock Y during horizontal travel to ensure a perfectly straight path.
-                                posVec.group.position.y = targetYAbove;
-                            })
-                            .onUpdate(() => {
-                                // Maintain Y lock during horizontal interpolation.
-                                posVec.group.position.y = targetYAbove;
-                            })
-                            .onComplete(() => {
-                                if (posTrail && !posTrailDisposed) {
-                                    posTrail.snapLastPointTo(posVec.group.position);
-                                }
-                                // Stop extending trail once we arrive at residual stream.
-                                retirePosTrail();
-                                // Trigger addition: positional (above) travels DOWN into vocab (rising).
-                                try {
-                                    const sumData = layer._getEmbeddingData(lane, 'sum');
-                                    startPrismAdditionAnimation(posVec, originalVec, null, () => {
-                                        if (sumData) {
-                                            applyVectorData(
-                                                originalVec,
-                                                sumData,
-                                                lane.tokenLabel ? `Embedding Sum - ${lane.tokenLabel}` : 'Embedding Sum',
-                                                layer._getLaneMeta(lane, 'embedding.sum')
-                                            );
-                                        }
-                                        lane.posAddComplete = true;
-                                    }, { finalData: sumData });
-                                } catch (_) {
-                                    lane.posAddComplete = true;
-                                }
-                            })
-                            .start();
-                    })
-                    .start();
-            }
+            // Preserve the original rise target baseline (top-of-vocab stage),
+            // even though positional motion now starts later.
+            const vocabRiseReferenceY = (startY_override != null ? startY_override : originalVec.group.position.y);
+            const triggerPositionalAddition = () => {
+                if (posTrail && !posTrailDisposed) {
+                    posTrail.snapLastPointTo(posVec.group.position);
+                }
+                // Stop extending trail once we arrive at residual stream.
+                retirePosTrail();
+                // Trigger addition: positional (above) travels DOWN into vocab (rising).
+                try {
+                    const sumData = layer._getEmbeddingData(lane, 'sum');
+                    lane.posAddStarted = true;
+                    startPrismAdditionAnimation(posVec, originalVec, null, () => {
+                        if (sumData) {
+                            applyVectorData(
+                                originalVec,
+                                sumData,
+                                lane.tokenLabel ? `Embedding Sum - ${lane.tokenLabel}` : 'Embedding Sum',
+                                layer._getLaneMeta(lane, 'embedding.sum')
+                            );
+                        }
+                        lane.posAddComplete = true;
+                    }, { finalData: sumData });
+                } catch (_) {
+                    lane.posAddComplete = true;
+                }
+            };
+
+            // Defer the positional pass-through start until Gpt2Layer confirms the vocab
+            // vectors have risen out of the embedding matrix and completed their hold.
+            lane.startPositionalPassThrough = ({ immediate = false } = {}) => {
+                if (lane.__posPassStarted || lane.posAddComplete) return;
+                lane.__posPassStarted = true;
+                if (posVec && posVec.group) {
+                    posVec.group.visible = true;
+                }
+                const targetYAbove = vocabRiseReferenceY + POS_VEC_Y_OFFSET_ABOVE_VOCAB;
+                const riseDist = Math.max(0, targetYAbove - posVec.group.position.y);
+                const riseMs = (riseDist / (fasterRise * GLOBAL_ANIM_SPEED_MULT)) * 1000;
+
+                const horizDist = Math.abs(posVec.group.position.x - 0);
+                const horizMs = (horizDist / horizSpeed) * 1000;
+
+                if (typeof TWEEN !== 'undefined' && !immediate) {
+                    new TWEEN.Tween(posVec.group.position)
+                        .to({ y: targetYAbove }, Math.max(100, riseMs))
+                        .easing(TWEEN.Easing.Quadratic.InOut)
+                        .onComplete(() => {
+                            new TWEEN.Tween(posVec.group.position)
+                                .to({ x: 0, y: targetYAbove }, Math.max(100, horizMs))
+                                .easing(TWEEN.Easing.Quadratic.InOut)
+                                .onStart(() => {
+                                    // Hard-lock Y during horizontal travel to ensure a perfectly straight path.
+                                    posVec.group.position.y = targetYAbove;
+                                })
+                                .onUpdate(() => {
+                                    // Maintain Y lock during horizontal interpolation.
+                                    posVec.group.position.y = targetYAbove;
+                                })
+                                .onComplete(() => {
+                                    triggerPositionalAddition();
+                                })
+                                .start();
+                        })
+                        .start();
+                    return;
+                }
+
+                posVec.group.position.set(0, targetYAbove, zPos);
+                triggerPositionalAddition();
+            };
         } catch (_) {
             // Non-fatal - positional addition is a visual enhancement only.
         }

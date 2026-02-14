@@ -281,9 +281,12 @@ export class AutoCameraController {
         this._autoCameraTravelTargetOffset = new THREE.Vector3();
         this._autoCameraFinalCameraOffset = new THREE.Vector3();
         this._autoCameraFinalTargetOffset = new THREE.Vector3();
+        this._autoCameraLayerEndDesktopCameraOffset = new THREE.Vector3();
+        this._autoCameraLayerEndDesktopTargetOffset = new THREE.Vector3();
         this._autoCameraLnOffsetsEnabled = false;
         this._autoCameraTravelOffsetsEnabled = false;
         this._autoCameraFinalOffsetsEnabled = false;
+        this._autoCameraLayerEndDesktopOffsetsEnabled = false;
         this._autoCameraDefaultCameraOffsetBase = new THREE.Vector3();
         this._autoCameraDefaultTargetOffsetBase = new THREE.Vector3();
         this._autoCameraMhsaCameraOffsetBase = new THREE.Vector3();
@@ -296,6 +299,8 @@ export class AutoCameraController {
         this._autoCameraTravelTargetOffsetBase = new THREE.Vector3();
         this._autoCameraFinalCameraOffsetBase = new THREE.Vector3();
         this._autoCameraFinalTargetOffsetBase = new THREE.Vector3();
+        this._autoCameraLayerEndDesktopCameraOffsetBase = new THREE.Vector3();
+        this._autoCameraLayerEndDesktopTargetOffsetBase = new THREE.Vector3();
         this._autoCameraInspectorRef = new THREE.Vector3();
         this._hasAutoCameraOffsets = false;
         this._suppressControlsChange = false;
@@ -400,6 +405,14 @@ export class AutoCameraController {
             this._autoCameraFinalMobileOverrideCameraOffset = finalMobileCamOffset;
             this._autoCameraFinalMobileOverrideTargetOffset = finalMobileTargetOffset;
             this._autoCameraFinalMobileOverrideEnabled = true;
+        }
+
+        const layerEndDesktopCamOffset = coerceVector3(opts.autoCameraLayerEndDesktopCameraOffset, null);
+        const layerEndDesktopTargetOffset = coerceVector3(opts.autoCameraLayerEndDesktopTargetOffset, null);
+        if (layerEndDesktopCamOffset && layerEndDesktopTargetOffset) {
+            this._autoCameraLayerEndDesktopCameraOffsetBase.copy(layerEndDesktopCamOffset);
+            this._autoCameraLayerEndDesktopTargetOffsetBase.copy(layerEndDesktopTargetOffset);
+            this._autoCameraLayerEndDesktopOffsetsEnabled = true;
         }
 
         this._updateAutoCameraScaledOffsets(true);
@@ -834,11 +847,23 @@ export class AutoCameraController {
         const lane = laneIndex >= 0 ? lanes[laneIndex] : null;
         const inLaneLn = !!(lane && (lane.horizPhase === 'insideLN' || lane.ln2Phase === 'insideLN'));
         const inTopLn = this._isTopLayerNormCameraPhase(layer, lanes);
+        const inLayerHandoff = !!(layerIndex > 0
+            && lane
+            && lane.horizPhase === 'waiting'
+            && lane.ln2Phase === 'notStarted');
         const inLn = inLaneLn || inTopLn;
         const forwardComplete = (typeof this._pipeline?.isForwardPassComplete === 'function')
             ? this._pipeline.isForwardPassComplete()
             : false;
-        this._autoCameraViewContext = { lane, laneIndex, laneCount, inLn, inTopLn, forwardComplete };
+        this._autoCameraViewContext = {
+            lane,
+            laneIndex,
+            laneCount,
+            inLn,
+            inTopLn,
+            inLayerHandoff,
+            forwardComplete
+        };
         if (forwardComplete) {
             return 'final';
         }
@@ -849,11 +874,21 @@ export class AutoCameraController {
             && (passPhase === 'positioning_mha_vectors' || passPhase === 'ready_for_parallel_pass_through'));
         if (!mhsa) {
             if (inLn) return 'ln';
+            if (inLayerHandoff
+                && this._autoCameraLayerEndDesktopOffsetsEnabled
+                && this._isLargeDesktopViewport()) {
+                return 'layer-end-desktop';
+            }
             return 'default';
         }
 
         if (inLn) {
             return 'ln';
+        }
+        if (inLayerHandoff
+            && this._autoCameraLayerEndDesktopOffsetsEnabled
+            && this._isLargeDesktopViewport()) {
+            return 'layer-end-desktop';
         }
         if (inTravel || inCopyStage) {
             return 'travel';
@@ -886,7 +921,10 @@ export class AutoCameraController {
         let camOffset = this._autoCameraDefaultCameraOffset;
         let targetOffset = this._autoCameraDefaultTargetOffset;
 
-        if (key === 'ln' && this._autoCameraLnOffsetsEnabled) {
+        if (key === 'layer-end-desktop' && this._autoCameraLayerEndDesktopOffsetsEnabled) {
+            camOffset = this._autoCameraLayerEndDesktopCameraOffset;
+            targetOffset = this._autoCameraLayerEndDesktopTargetOffset;
+        } else if (key === 'ln' && this._autoCameraLnOffsetsEnabled) {
             camOffset = this._autoCameraLnCameraOffset;
             targetOffset = this._autoCameraLnTargetOffset;
         } else if (key === 'travel' && this._autoCameraTravelOffsetsEnabled) {
@@ -965,6 +1003,14 @@ export class AutoCameraController {
             : 0;
         if (touchPoints > 0) return 1;
         return 0;
+    }
+
+    _isLargeDesktopViewport() {
+        if (typeof window === 'undefined') return false;
+        if (this._computeAutoCameraMobileFactor() > 0.0001) return false;
+        const width = window.innerWidth || 0;
+        if (!Number.isFinite(width) || width <= 0) return false;
+        return width >= this._autoCameraScaleMaxWidth;
     }
 
     _updateAutoCameraScaledOffsets(force = false) {
@@ -1059,6 +1105,10 @@ export class AutoCameraController {
                     mobileFactor
                 );
             }
+        }
+        if (this._autoCameraLayerEndDesktopOffsetsEnabled) {
+            applyScaleShift(this._autoCameraLayerEndDesktopCameraOffset, this._autoCameraLayerEndDesktopCameraOffsetBase);
+            applyScaleShift(this._autoCameraLayerEndDesktopTargetOffset, this._autoCameraLayerEndDesktopTargetOffsetBase);
         }
     }
 

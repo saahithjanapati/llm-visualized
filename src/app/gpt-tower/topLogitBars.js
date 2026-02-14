@@ -16,6 +16,7 @@ import {
     TOP_LOGIT_BAR_OPACITY,
     TOP_LOGIT_BAR_RISE_DURATION_MS
 } from '../../utils/constants.js';
+import { isIncompleteUtf8TokenId } from '../../utils/tokenEncodingNotes.js';
 import { formatTokenLabel } from './tokenLabels.js';
 
 const LOGIT_LABEL_FONT_URL = 'https://threejs.org/examples/fonts/helvetiker_regular.typeface.json';
@@ -426,6 +427,9 @@ export function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vo
                 const labelParts = [];
                 if (tokenText) labelParts.push(`token \"${tokenText}\"`);
                 if (tokenId !== null) labelParts.push(`id ${tokenId}`);
+                if (tokenId !== null && isIncompleteUtf8TokenId(tokenId)) {
+                    labelParts.push('incomplete UTF-8 byte fragment');
+                }
                 if (Number.isFinite(prob)) labelParts.push(`p ${prob.toFixed(3)}`);
                 const label = labelParts.length ? `Logit ${labelParts.join(' | ')}` : 'Logit';
                 const instanceIndex = instances.length;

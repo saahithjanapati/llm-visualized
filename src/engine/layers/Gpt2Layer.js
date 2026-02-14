@@ -91,6 +91,7 @@ const MULTIPLY_SOURCE_SHRINK = 0.82;
 const MULTIPLY_RESULT_START_SCALE = 0.9;
 const MULTIPLY_FLASH_GEOMETRY = new THREE.SphereGeometry(1, 18, 18);
 const POS_ADD_STALL_TIMEOUT_MS = 12000;
+const POS_PASS_START_PAUSE_MS = 450;
 const LANE_PHASE_STALL_TIMEOUT_MS = 12000;
 
 const applyMatrixReflectivityTweak = (matrix, tweaks) => {
@@ -210,6 +211,8 @@ export default class Gpt2Layer extends BaseLayer {
         this._mlpMatrixActiveColor = new THREE.Color(0xc07a12);
         this._mlpUpTweenColor = new THREE.Color();
         this._mlpDownTweenColor = new THREE.Color();
+        this._posPassBarrierArmed = false;
+        this._posPassStartAtMs = NaN;
         this._trailUpdateFrameId = 0;
         this._vecsToCheckScratch = new Array(9);
     }
@@ -425,6 +428,8 @@ export default class Gpt2Layer extends BaseLayer {
         const needsPositioningCheck = this._transitionPhase === 'positioning';
         let allVectorsInPosition = needsPositioningCheck && laneCount > 0;
         let posAddDone = true;
+        let allPosPassReady = this.index === 0 && laneCount > 0;
+        let hasPendingPosPass = false;
         let allLn1Ready = !this._ln1Start && laneCount > 0;
         let allMhsaReady = !this._mhsaStart && laneCount > 0;
         let allLn2Ready = !this._ln2Ready && laneCount > 0;
@@ -539,24 +544,43 @@ export default class Gpt2Layer extends BaseLayer {
                         allVectorsInPosition = false;
                     }
                 }
-                if (this.index === 0 && posAddDone) {
-                    if (lane.posVec && !lane.posAddComplete) {
-                        if (!Number.isFinite(lane.__posAddWatchStart)) {
-                            lane.__posAddWatchStart = nowMs;
-                        }
-                        const elapsedMs = nowMs - lane.__posAddWatchStart;
-                        if (elapsedMs >= POS_ADD_STALL_TIMEOUT_MS) {
-                            const sumData = this._getEmbeddingData(lane, 'sum');
-                            if (sumData && lane.originalVec) {
-                                applyVectorData(
-                                    lane.originalVec,
-                                    sumData,
-                                    lane.tokenLabel ? `Embedding Sum - ${lane.tokenLabel}` : 'Embedding Sum',
-                                    this._getLaneMeta(lane, 'embedding.sum')
-                                );
+                if (this.index === 0) {
+                    const hasPositionalPass = !!(lane.posVec && typeof lane.startPositionalPassThrough === 'function');
+                    if (hasPositionalPass && !lane.posAddComplete) {
+                        const ov = lane.originalVec;
+                        const targetY = lane.branchStartY;
+                        const vocabRiseComplete = !!(
+                            ov
+                            && ov.group
+                            && Number.isFinite(targetY)
+                            && ov.group.position.y >= targetY - 0.01
+                        );
+                        if (!lane.__posPassStarted) {
+                            hasPendingPosPass = true;
+                            if (!vocabRiseComplete) {
+                                allPosPassReady = false;
                             }
-                            lane.posAddComplete = true;
-                            console.warn(`Layer ${this.index}: positional addition watchdog forced completion for lane ${lane.laneIndex ?? '?'}`);
+                        }
+                        if (lane.__posPassStarted) {
+                            if (!Number.isFinite(lane.__posAddWatchStart)) {
+                                lane.__posAddWatchStart = nowMs;
+                            }
+                            const elapsedMs = nowMs - lane.__posAddWatchStart;
+                            if (elapsedMs >= POS_ADD_STALL_TIMEOUT_MS) {
+                                const sumData = this._getEmbeddingData(lane, 'sum');
+                                if (sumData && lane.originalVec) {
+                                    applyVectorData(
+                                        lane.originalVec,
+                                        sumData,
+                                        lane.tokenLabel ? `Embedding Sum - ${lane.tokenLabel}` : 'Embedding Sum',
+                                        this._getLaneMeta(lane, 'embedding.sum')
+                                    );
+                                }
+                                lane.posAddComplete = true;
+                                console.warn(`Layer ${this.index}: positional addition watchdog forced completion for lane ${lane.laneIndex ?? '?'}`);
+                            } else {
+                                posAddDone = false;
+                            }
                         } else {
                             posAddDone = false;
                         }
@@ -593,6 +617,34 @@ export default class Gpt2Layer extends BaseLayer {
                 // Trails for K/Q/V copies are updated inside VectorRouter.
                 // Avoid double-updating here to reduce CPU work.
             });
+        }
+        if (this.index === 0) {
+            if (hasPendingPosPass && allPosPassReady && !this._posPassBarrierArmed) {
+                const pauseMs = skipActive ? 0 : POS_PASS_START_PAUSE_MS;
+                this._posPassBarrierArmed = true;
+                this._posPassStartAtMs = nowMs + pauseMs;
+            }
+            if (
+                this._posPassBarrierArmed
+                && Number.isFinite(this._posPassStartAtMs)
+                && nowMs >= this._posPassStartAtMs
+            ) {
+                lanes.forEach((lane) => {
+                    if (!lane || lane.posAddComplete || lane.__posPassStarted) return;
+                    if (typeof lane.startPositionalPassThrough !== 'function') return;
+                    try {
+                        lane.startPositionalPassThrough({ immediate: skipActive });
+                    } catch (_) {
+                        lane.posAddComplete = true;
+                    }
+                });
+                this._posPassBarrierArmed = false;
+                this._posPassStartAtMs = NaN;
+            }
+            if (!hasPendingPosPass) {
+                this._posPassBarrierArmed = false;
+                this._posPassStartAtMs = NaN;
+            }
         }
         // Handle transition phase - wait for vectors to reach position
         if (this._transitionPhase === 'positioning') {
