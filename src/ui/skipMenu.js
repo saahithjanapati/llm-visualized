@@ -5,6 +5,8 @@ export function initSkipMenu(pipeline) {
     const skipLayerBtn = document.getElementById('skipLayerBtn');
     const skipConveyorBtn = document.getElementById('skipConveyorBtn');
     const skipToEndBtn = document.getElementById('skipToEndBtn');
+    const skipNextPassBtn = document.getElementById('skipNextPassBtn');
+    const skipLastPassBtn = document.getElementById('skipLastPassBtn');
 
     if (!menu || !toggle || !items) return () => {};
 
@@ -20,7 +22,11 @@ export function initSkipMenu(pipeline) {
     const defaultToggleLabel = toggle?.textContent || 'Skip';
 
     const updateVisibility = () => {
-        const anyVisible = isVisible(skipLayerBtn) || isVisible(skipConveyorBtn) || isVisible(skipToEndBtn);
+        const anyVisible = isVisible(skipLayerBtn)
+            || isVisible(skipConveyorBtn)
+            || isVisible(skipToEndBtn)
+            || isVisible(skipNextPassBtn)
+            || isVisible(skipLastPassBtn);
         menu.dataset.visible = anyVisible ? 'true' : 'false';
         menu.style.display = anyVisible ? '' : 'none';
         if (!anyVisible) setOpen(false);
@@ -60,6 +66,8 @@ export function initSkipMenu(pipeline) {
     skipLayerBtn?.addEventListener('click', onItemClick);
     skipConveyorBtn?.addEventListener('click', onItemClick);
     skipToEndBtn?.addEventListener('click', onItemClick);
+    skipNextPassBtn?.addEventListener('click', onItemClick);
+    skipLastPassBtn?.addEventListener('click', onItemClick);
 
     const scheduleFrame = (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function')
         ? window.requestAnimationFrame.bind(window)
@@ -82,6 +90,8 @@ export function initSkipMenu(pipeline) {
         skipLayerBtn?.removeEventListener('click', onItemClick);
         skipConveyorBtn?.removeEventListener('click', onItemClick);
         skipToEndBtn?.removeEventListener('click', onItemClick);
+        skipNextPassBtn?.removeEventListener('click', onItemClick);
+        skipLastPassBtn?.removeEventListener('click', onItemClick);
         if (rafId !== null) cancelFrame(rafId);
     };
 }

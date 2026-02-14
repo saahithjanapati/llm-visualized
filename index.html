@@ -45,6 +45,8 @@
                 <button id="skipLayerBtn" type="button" role="menuitem" aria-label="Skip current layer" title="Skip current layer" data-visible="true">Skip layer</button>
                 <button id="skipConveyorBtn" type="button" role="menuitem" aria-label="Skip attention conveyor" title="Skip attention conveyor" data-visible="false">Skip attention</button>
                 <button id="skipToEndBtn" type="button" role="menuitem" aria-label="Skip to end of forward pass" title="Skip to end of forward pass" data-visible="true">Skip to end</button>
+                <button id="skipNextPassBtn" type="button" role="menuitem" aria-label="Skip to next forward pass" title="Skip to next forward pass" data-visible="false">Next pass</button>
+                <button id="skipLastPassBtn" type="button" role="menuitem" aria-label="Skip to final forward pass" title="Skip to final forward pass" data-visible="false">Last pass</button>
             </div>
         </div>
         <button id="followModeBtn" type="button" aria-pressed="true" aria-label="Follow mode enabled" title="Follow mode enabled">Follow mode on</button>
@@ -136,6 +138,10 @@
                         <span id="detailOutputDimLabel" class="detail-label">Output dimension</span>
                         <span id="detailOutputDim" class="detail-value">—</span>
                     </div>
+                </div>
+                <div id="detailBiasDimRow" class="detail-row detail-row-bias" style="display:none;">
+                    <span class="detail-label">Associated bias dimension</span>
+                    <span id="detailBiasDim" class="detail-value">—</span>
                 </div>
                 <div id="detailTokenRow" class="detail-row detail-row-token" style="display:none;">
                     <span class="detail-label">Token</span>

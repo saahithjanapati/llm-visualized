@@ -49,12 +49,12 @@ const _tmpWorld = new THREE.Vector3();
 const _tmpWorld2 = new THREE.Vector3();
 const _tmpMatrix = new THREE.Matrix4();
 const QKV_TRAIL_OPACITY = 0.08;
-const SKIP_DELAY_SCALE = 0.12;
-const SKIP_DURATION_SCALE = 0.16;
-const SKIP_DELAY_MIN_MS = 4;
-const SKIP_DELAY_MAX_MS = 20;
-const SKIP_DURATION_MIN_MS = 10;
-const SKIP_DURATION_MAX_MS = 70;
+const SKIP_DELAY_SCALE = 0.03;
+const SKIP_DURATION_SCALE = 0.05;
+const SKIP_DELAY_MIN_MS = 1;
+const SKIP_DELAY_MAX_MS = 5;
+const SKIP_DURATION_MIN_MS = 2;
+const SKIP_DURATION_MAX_MS = 14;
 
 const SOFTENED_MATRIX_UNIFORMS = {
     stripeStrength: 0.0,
@@ -2105,6 +2105,127 @@ export class MHSAAnimation {
         return null;
     }
 
+    _ensureLaneReadyForLn2Fallback(lane) {
+        if (!lane || lane.ln2Phase === 'done') return false;
+        const fallbackVec = (lane.postAdditionVec && lane.postAdditionVec.group)
+            ? lane.postAdditionVec
+            : (lane.originalVec && lane.originalVec.group)
+                ? lane.originalVec
+                : (lane.resultVec && lane.resultVec.group)
+                    ? lane.resultVec
+                    : (lane.travellingVec && lane.travellingVec.group)
+                        ? lane.travellingVec
+                        : null;
+        if (!fallbackVec || !fallbackVec.group) return false;
+
+        let mutated = false;
+        if (!lane.originalVec) {
+            lane.originalVec = fallbackVec;
+            mutated = true;
+        }
+        if (lane.postAdditionVec !== fallbackVec) {
+            lane.postAdditionVec = fallbackVec;
+            mutated = true;
+        }
+
+        const ln2Primed = (
+            lane.ln2Phase === 'preRise'
+            || lane.ln2Phase === 'right'
+            || lane.ln2Phase === 'insideLN'
+            || lane.ln2Phase === 'mlpReady'
+            || lane.ln2Phase === 'done'
+        );
+        if (!ln2Primed) {
+            lane.ln2Phase = 'preRise';
+            mutated = true;
+        }
+
+        const needsHorizAdvance = (
+            lane.horizPhase === 'readyMHSA'
+            || lane.horizPhase === 'travelMHSA'
+            || lane.horizPhase === 'finishedHeads'
+            || lane.horizPhase === 'postMHSAAddition'
+        );
+        if (needsHorizAdvance) {
+            lane.horizPhase = 'waitingForLN2';
+            mutated = true;
+        }
+
+        if (lane.stopRise || lane.stopRiseTarget) {
+            delete lane.stopRise;
+            delete lane.stopRiseTarget;
+            mutated = true;
+        }
+        if (lane.additionTargetData) {
+            delete lane.additionTargetData;
+            mutated = true;
+        }
+        return mutated;
+    }
+
+    _forcePostAttentionFallback(reason = 'unknown reason', options = {}) {
+        const lanes = Array.isArray(this.currentLanes) ? this.currentLanes : [];
+        if (!lanes.length) return 0;
+        const onlyIncomplete = !!options.onlyIncomplete;
+        let forcedCount = 0;
+        for (let i = 0; i < lanes.length; i++) {
+            const lane = lanes[i];
+            if (!lane || lane.ln2Phase === 'done') continue;
+            if (onlyIncomplete) {
+                const hasPostVec = !!(lane.postAdditionVec && lane.postAdditionVec.group);
+                const ln2Primed = (
+                    lane.ln2Phase === 'preRise'
+                    || lane.ln2Phase === 'right'
+                    || lane.ln2Phase === 'insideLN'
+                    || lane.ln2Phase === 'mlpReady'
+                    || lane.ln2Phase === 'done'
+                );
+                if (hasPostVec && ln2Primed) continue;
+            }
+            if (this._ensureLaneReadyForLn2Fallback(lane)) {
+                forcedCount += 1;
+            }
+        }
+        if (forcedCount > 0) {
+            const layer = lanes[0] && lanes[0].layer;
+            if (layer && typeof layer._emitProgress === 'function') {
+                layer._emitProgress();
+            }
+            console.warn(
+                `MHSAAnimation: forced post-attention lane fallback for ${forcedCount} lane(s)`
+                + ` (layer=${this.layerIndex ?? '?'}, reason=${reason}).`
+            );
+        }
+        return forcedCount;
+    }
+
+    _completeOutputProjectionFallback(reason, options = {}) {
+        const fallbackLanes = options.fallbackLanes !== false;
+        const onlyIncompleteLanes = !!options.onlyIncompleteLanes;
+        const logReason = options.logReason !== false;
+        const targetCount = Number.isFinite(this._outputProjReturnTargetCount)
+            ? Math.max(0, Math.floor(this._outputProjReturnTargetCount))
+            : 0;
+        this._outputProjReturnTargetCount = targetCount;
+        this._outputProjReturnCount = targetCount;
+        this.outputProjMatrixAnimationPhase = 'completed';
+        this.outputProjMatrixReturnComplete = true;
+        if (this.rowMergePhase === 'not_started') {
+            this.rowMergePhase = 'merged';
+        }
+        if (fallbackLanes) {
+            this._forcePostAttentionFallback(reason || 'output projection fallback', {
+                onlyIncomplete: onlyIncompleteLanes
+            });
+        }
+        if (logReason && reason) {
+            console.warn(
+                `MHSAAnimation: forcing output projection completion `
+                + `(layer=${this.layerIndex ?? '?'}, reason=${reason}).`
+            );
+        }
+    }
+
     _adjustOutputProjectionMatrixForRow(rowY) {
         if (!Number.isFinite(rowY)) return;
         if (!this.outputProjectionMatrix || !this.outputProjectionMatrix.group) return;
@@ -2260,6 +2381,7 @@ export class MHSAAnimation {
             }, maxDurationMs + MERGE_EXTRA_BUFFER_MS);
         } else {
             this._transitionHeadColorsToFinal(0);
+            this._startVectorsThroughOutputProjection(laneVectors);
         }
     }
     
@@ -2271,6 +2393,13 @@ export class MHSAAnimation {
         this.outputProjMatrixAnimationPhase = 'vectors_entering';
         this.outputProjMatrixReturnComplete = false;
         this._outputProjReturnCount = 0;
+        const markOutputProjectionReturn = () => {
+            this._outputProjReturnCount += 1;
+            if (this._outputProjReturnCount >= this._outputProjReturnTargetCount) {
+                this.outputProjMatrixReturnComplete = true;
+                this.outputProjMatrixAnimationPhase = 'completed';
+            }
+        };
 
         // Keep K/V visuals present during concatenation; they will be disposed
         // once the very last blue (Q) vector finishes its conveyor belt.
@@ -2376,6 +2505,12 @@ export class MHSAAnimation {
 
         if (combinedVectors.length === 0) {
             console.warn("No combined vectors created for output projection animation");
+            this._outputProjReturnTargetCount = 0;
+            this._completeOutputProjectionFallback('no combined vectors for output projection', {
+                fallbackLanes: true,
+                onlyIncompleteLanes: false,
+                logReason: false
+            });
             return;
         }
 
@@ -2396,11 +2531,39 @@ export class MHSAAnimation {
 
         if (typeof TWEEN === 'undefined') {
             console.warn("TWEEN not available for output projection matrix animation");
+            this._completeOutputProjectionFallback('TWEEN unavailable for output projection', {
+                fallbackLanes: true,
+                onlyIncompleteLanes: false,
+                logReason: false
+            });
             return;
+        }
+
+        if (this._skipToEndActive && this._outputProjReturnTargetCount > 0) {
+            const fallbackMs = this._resolveSkipDelay(400);
+            this._scheduleAfterDelay(() => {
+                if (this.outputProjMatrixReturnComplete) return;
+                if (this._outputProjReturnCount >= this._outputProjReturnTargetCount) return;
+                console.warn(
+                    `MHSAAnimation: forcing output projection completion for layer ${this.layerIndex ?? '?'} `
+                    + `(${this._outputProjReturnCount}/${this._outputProjReturnTargetCount}).`
+                );
+                this._completeOutputProjectionFallback('skip output projection return watchdog', {
+                    fallbackLanes: true,
+                    onlyIncompleteLanes: false,
+                    logReason: false
+                });
+            }, fallbackMs);
         }
 
         combinedVectors.forEach((vecObj, idx) => {
             const vec = vecObj.vec;
+            let returnMarkedForVector = false;
+            const markReturnForVector = () => {
+                if (returnMarkedForVector) return;
+                returnMarkedForVector = true;
+                markOutputProjectionReturn();
+            };
             const laneZ = vecObj.laneZ;
             const laneIndex = Number.isFinite(vecObj.laneIndex)
                 ? Math.floor(vecObj.laneIndex)
@@ -2410,6 +2573,31 @@ export class MHSAAnimation {
                 if (mappedLane) return mappedLane;
                 if (Array.isArray(this.currentLanes) && idx >= 0 && idx < this.currentLanes.length) {
                     return this.currentLanes[idx] || null;
+                }
+                if (Array.isArray(this.currentLanes) && Number.isFinite(laneZ)) {
+                    let nearestLane = null;
+                    let nearestDist = Infinity;
+                    for (let laneIdx = 0; laneIdx < this.currentLanes.length; laneIdx++) {
+                        const lane = this.currentLanes[laneIdx];
+                        if (!lane) continue;
+                        const zPos = Number.isFinite(lane.zPos)
+                            ? lane.zPos
+                            : (lane.originalVec && lane.originalVec.group ? lane.originalVec.group.position.z : NaN);
+                        if (!Number.isFinite(zPos)) continue;
+                        const dist = Math.abs(zPos - laneZ);
+                        if (dist < nearestDist) {
+                            nearestDist = dist;
+                            nearestLane = lane;
+                        }
+                    }
+                    if (nearestLane) return nearestLane;
+                }
+                if (Array.isArray(this.currentLanes)) {
+                    for (let laneIdx = 0; laneIdx < this.currentLanes.length; laneIdx++) {
+                        const lane = this.currentLanes[laneIdx];
+                        if (!lane || lane.ln2Phase === 'done') continue;
+                        if (lane.originalVec && lane.originalVec.group) return lane;
+                    }
                 }
                 return null;
             };
@@ -2501,7 +2689,8 @@ export class MHSAAnimation {
                                     // Horizontal move back to residual stream centre (x = 0),
                                     // then perform the addition with the lane's original vector
                                     const horizDistance = Math.abs(vec.group.position.x);
-                                    const horizDur = (horizDistance / (ANIM_HORIZ_SPEED * GLOBAL_ANIM_SPEED_MULT)) * 1000;
+                                    const horizDurRaw = (horizDistance / (ANIM_HORIZ_SPEED * GLOBAL_ANIM_SPEED_MULT)) * 1000;
+                                    const horizDur = Number.isFinite(horizDurRaw) ? Math.max(0, horizDurRaw) : 0;
 
                                     new TWEEN.Tween(vec.group.position)
                                         .to({ x: 0 }, horizDur)
@@ -2525,69 +2714,75 @@ export class MHSAAnimation {
                                         })
 
                                         .onComplete(() => {
-                                            vec.group.position.x = 0;
-                                            vec.group.position.y = finalCombinedY;
-                                            // Freeze the trail into static segments so the horizontal
-                                            // return path remains visible, then remove live trail ref
                                             try {
-                                                const tr = vec && vec.userData && vec.userData.trail;
-                                                if (tr) {
-                                                    if (typeof tr.snapLastPointTo === 'function') {
-                                                        tr.snapLastPointTo(vec.group.position);
-                                                    } else if (typeof tr.update === 'function') {
-                                                        tr.update(vec.group.position);
-                                                    }
-                                                    mergeTrailsIntoLineSegments(
-                                                        [tr],
-                                                        this.parentGroup,
-                                                        undefined,
-                                                        undefined,
-                                                        undefined,
-                                                        null
-                                                    );
-                                                    if (vec && vec.userData) delete vec.userData.trail;
-                                                }
-                                            } catch (_) { /* optional visual */ }
-                                            if (this.currentLanes) {
-                                                const matchingLane = resolveLaneForVector();
-                                                if (matchingLane && matchingLane.originalVec) {
-                                                    const postData = (this.activationSource && Number.isFinite(this.layerIndex))
-                                                        ? this.activationSource.getPostAttentionResidual(this.layerIndex, matchingLane.tokenIndex, this.vectorPrismCount)
-                                                        : null;
-                                                    if (postData) {
-                                                        matchingLane.additionTargetData = postData;
-                                                    }
-                                                    this._startAdditionAnimation(matchingLane.originalVec, vec, matchingLane, () => {
-                                                        if (postData) {
-                                                            const label = matchingLane.tokenLabel
-                                                                ? `Post-Attention Residual - ${matchingLane.tokenLabel}`
-                                                                : 'Post-Attention Residual';
-                                                            matchingLane.originalVec.rawData = postData.slice();
-                                                            const numKeyColors = Math.min(30, Math.max(1, postData.length || 1));
-                                                            matchingLane.originalVec.updateKeyColorsFromData(
-                                                                matchingLane.originalVec.rawData,
-                                                                numKeyColors,
-                                                                null,
-                                                                postData
-                                                            );
-                                                            const activationData = buildActivationData({
-                                                                label,
-                                                                stage: 'residual.post_attention',
-                                                                layerIndex: this.layerIndex,
-                                                                tokenIndex: matchingLane.tokenIndex,
-                                                                tokenLabel: matchingLane.tokenLabel,
-                                                                values: postData,
-                                                            });
-                                                            applyActivationDataToVector(matchingLane.originalVec, activationData, label);
+                                                vec.group.position.x = 0;
+                                                vec.group.position.y = finalCombinedY;
+                                                // Freeze the trail into static segments so the horizontal
+                                                // return path remains visible, then remove live trail ref
+                                                try {
+                                                    const tr = vec && vec.userData && vec.userData.trail;
+                                                    if (tr) {
+                                                        if (typeof tr.snapLastPointTo === 'function') {
+                                                            tr.snapLastPointTo(vec.group.position);
+                                                        } else if (typeof tr.update === 'function') {
+                                                            tr.update(vec.group.position);
                                                         }
-                                                    });
-                                                } else {
-                                                    console.warn(`[MHSAAnimation] Failed to map output vector back to lane (layer=${this.layerIndex}, laneIndex=${laneIndex}, laneZ=${laneZ}).`);
+                                                        mergeTrailsIntoLineSegments(
+                                                            [tr],
+                                                            this.parentGroup,
+                                                            undefined,
+                                                            undefined,
+                                                            undefined,
+                                                            null
+                                                        );
+                                                        if (vec && vec.userData) delete vec.userData.trail;
+                                                    }
+                                                } catch (_) { /* optional visual */ }
+                                                if (this.currentLanes) {
+                                                    const matchingLane = resolveLaneForVector();
+                                                    if (matchingLane && matchingLane.originalVec) {
+                                                        const postData = (this.activationSource && Number.isFinite(this.layerIndex))
+                                                            ? this.activationSource.getPostAttentionResidual(this.layerIndex, matchingLane.tokenIndex, this.vectorPrismCount)
+                                                            : null;
+                                                        if (postData) {
+                                                            matchingLane.additionTargetData = postData;
+                                                        }
+                                                        this._startAdditionAnimation(matchingLane.originalVec, vec, matchingLane, () => {
+                                                            if (postData) {
+                                                                const label = matchingLane.tokenLabel
+                                                                    ? `Post-Attention Residual - ${matchingLane.tokenLabel}`
+                                                                    : 'Post-Attention Residual';
+                                                                matchingLane.originalVec.rawData = postData.slice();
+                                                                const numKeyColors = Math.min(30, Math.max(1, postData.length || 1));
+                                                                matchingLane.originalVec.updateKeyColorsFromData(
+                                                                    matchingLane.originalVec.rawData,
+                                                                    numKeyColors,
+                                                                    null,
+                                                                    postData
+                                                                );
+                                                                const activationData = buildActivationData({
+                                                                    label,
+                                                                    stage: 'residual.post_attention',
+                                                                    layerIndex: this.layerIndex,
+                                                                    tokenIndex: matchingLane.tokenIndex,
+                                                                    tokenLabel: matchingLane.tokenLabel,
+                                                                    values: postData,
+                                                                });
+                                                                applyActivationDataToVector(matchingLane.originalVec, activationData, label);
+                                                            }
+                                                        });
+                                                    } else {
+                                                        console.warn(`[MHSAAnimation] Failed to map output vector back to lane (layer=${this.layerIndex}, laneIndex=${laneIndex}, laneZ=${laneZ}).`);
+                                                    }
                                                 }
-                                            }
-                                            this._outputProjReturnCount += 1;
-                                            if (this._outputProjReturnCount >= this._outputProjReturnTargetCount) {
-                                                this.outputProjMatrixReturnComplete = true;
+                                            } catch (err) {
+                                                console.error(
+                                                    `[MHSAAnimation] Output projection return failed `
+                                                    + `(layer=${this.layerIndex ?? '?'}, laneIndex=${laneIndex}, laneZ=${laneZ})`,
+                                                    err
+                                                );
+                                            } finally {
+                                                markReturnForVector();
                                             }
                                         })
                                         .start();
@@ -3031,8 +3226,19 @@ export class MHSAAnimation {
         if (!this._tempModeCompleted) {
             try { this._applyTempModeBehaviour(); this._tempModeCompleted = true; } catch (_) {}
         }
-        if (this.rowMergePhase === 'not_started' && this._tempDecorativeVecs && this._tempDecorativeVecs.length) {
-            this._startMergeToRowVectors();
+        if (this.rowMergePhase === 'not_started') {
+            if (this._tempDecorativeVecs && this._tempDecorativeVecs.length) {
+                this._startMergeToRowVectors();
+            } else {
+                // Skip fallback: if no decorative vectors exist, synthesize
+                // post-attention residual handoff lanes so LN2 can continue.
+                this._outputProjReturnTargetCount = 0;
+                this._completeOutputProjectionFallback('skip concat had no decorative vectors', {
+                    fallbackLanes: true,
+                    onlyIncompleteLanes: false,
+                    logReason: false
+                });
+            }
         }
     }
     

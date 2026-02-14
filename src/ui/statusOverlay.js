@@ -128,8 +128,8 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     const EQ = {
         qkv_per_head: QKV_PROJECTION_EQ,
         qkv_packed: QKV_PROJECTION_EQ,
-        attn: `I_i = \\mathrm{softmax}\\left(\\frac{${Q}_i ${K}_i^\\top}{\\sqrt{d_h}} + M\\right)${V}_i,\\; i=1\\dots 12`,
-        concat_proj: String.raw`\begin{aligned} H &= \mathrm{Concat}(I_1,\dots,I_{12}) \\ O &= H ${WO} + ${BO} \end{aligned}`,
+        attn: `H_i = \\mathrm{softmax}\\left(\\frac{${Q}_i ${K}_i^\\top}{\\sqrt{d_h}} + M\\right)${V}_i,\\; i=1\\dots 12`,
+        concat_proj: String.raw`\begin{aligned} H &= \mathrm{Concat}(H_i)_{i=1}^{12} \\ O &= H ${WO} + ${BO} \end{aligned}`,
         resid1: `${U} = x + O`,
         mlp: String.raw`\begin{aligned} a &= ${U_LN} ${WUp} + ${BUp} \\ z &= \mathrm{GELU}(a) \\ \mathrm{MLP}(${U_LN}) &= z ${WDown} + ${BDown} \end{aligned}`,
         resid2: String.raw`x_{\text{out}} = ${U} + \mathrm{MLP}(${U_LN})`,
@@ -149,6 +149,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         ln1: { maxPx: 17.2, maxScale: 1.32 },
         ln2: { maxPx: 17.2, maxScale: 1.32 },
         ln_top: { maxPx: 17.2, maxScale: 1.32 },
+        attn: { maxPx: 16.2, maxScale: 1.2 },
         concat_proj: { maxPx: 17.0, maxScale: 1.28 },
         resid1: { maxPx: 16.8, maxScale: 1.24 }
     };

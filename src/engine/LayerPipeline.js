@@ -33,6 +33,7 @@ import { VectorVisualizationInstancedPrism } from '../components/VectorVisualiza
 import { BatchedPrismVectorSet } from '../components/BatchedPrismVectorSet.js';
 import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
 import { PrismLayerNormAnimation } from '../animations/PrismLayerNormAnimation.js';
+import { MHSA_BRIGHT_GREEN, MHSA_BRIGHT_RED } from '../animations/LayerAnimationConstants.js';
 import { setGlobalTrailMaxStepDistance, clearTrailsFromScene } from '../utils/trailUtils.js';
 import { applyLayerNormMaterial } from './layers/gpt2LayerUtils.js';
 
@@ -64,14 +65,14 @@ const LN_PARAM_MONOCHROME = {
     valueMax: 1.8
 };
 
-const SKIP_SPEED_RAMP_IN_MS = 60;
-const SKIP_SPEED_RAMP_OUT_MS = 95;
+const SKIP_SPEED_RAMP_IN_MS = 40;
+const SKIP_SPEED_RAMP_OUT_MS = 70;
 const POST_RESET_TRAIL_PURGE_INTERVAL_MS = 120;
 const DEFAULT_SKIP_SPEED_PROFILE = Object.freeze({
-    engineSpeed: 6.4,
-    globalSpeed: 900,
-    prismAddSpeed: 230,
-    selfAttentionSpeed: 0.03
+    engineSpeed: 13.5,
+    globalSpeed: 2600,
+    prismAddSpeed: 780,
+    selfAttentionSpeed: 0.0075
 });
 
 const TMP_WORLD_POS = new THREE.Vector3();
@@ -86,6 +87,8 @@ const TMP_KV_PROXY_CORNER = new THREE.Vector3();
 const TMP_KV_CAPTURE_WORLD = new THREE.Vector3();
 const TMP_KV_CAPTURE_LOCAL = new THREE.Vector3();
 const TMP_KV_CAPTURE_INV = new THREE.Matrix4();
+const TMP_KV_BOOTSTRAP_LOCAL = new THREE.Vector3();
+const TMP_KV_BOOTSTRAP_WORLD = new THREE.Vector3();
 const KV_HIDDEN_SCALE_EPS = 0.01;
 const KV_COLLAPSED_SCALE = 0.001;
 const KV_CACHE_BATCH_CHUNK_SIZE = 24;
@@ -1112,7 +1115,8 @@ export class LayerPipeline extends EventTarget {
         preservePreviousTrails = false,
         captureKvCache = false,
         reuseKvCache = false,
-        clearKvCache = false
+        clearKvCache = false,
+        bootstrapKvCacheFromActivation = false
     } = {}) {
         const engine = this._engine;
 
@@ -1215,12 +1219,16 @@ export class LayerPipeline extends EventTarget {
         this._kvCacheModeEnabled = !!kvCacheModeEnabled;
         this._kvCacheDecodeActive = !!(this._kvCacheModeEnabled && kvCacheDecodeActive);
         this._reuseKvCacheForPass = !!(this._kvCacheModeEnabled && shouldReuseKv);
+        const shouldBootstrapKv = !!(this._kvCacheModeEnabled && this._kvCacheDecodeActive && bootstrapKvCacheFromActivation);
         if (this._kvCacheEntriesByLayer.size) {
             this._reflowKvCacheLaneDepths(this._laneLayoutCount);
         }
 
         const layerStackSpacing = LAYER_STACK_SPACING_Y;
         this._initLayers(layerStackSpacing);
+        if (shouldBootstrapKv) {
+            this._bootstrapKvCacheEntriesFromActivation();
+        }
         if (engine && Array.isArray(engine._layers) && autoDriver && !engine._layers.includes(autoDriver)) {
             engine._layers.push(autoDriver);
         }
@@ -1229,6 +1237,245 @@ export class LayerPipeline extends EventTarget {
         }
         this.dispatchEvent(new Event('passreset'));
         this.dispatchEvent(new Event('progress'));
+    }
+
+    _bootstrapKvCacheEntriesFromActivation() {
+        if (!this._activationSource || !this._reuseKvCacheForPass) return false;
+        if (!this._kvCacheModeEnabled || !this._kvCacheDecodeActive) return false;
+        if (!this._kvCachePersistentRoot) return false;
+        if (!Array.isArray(this._layers) || !this._layers.length) return false;
+
+        const totalLaneCount = Math.max(1, Math.floor(this._laneLayoutCount || this._laneCount || 1));
+        const cacheLaneCount = Math.max(0, totalLaneCount - 1);
+        if (cacheLaneCount <= 0) return false;
+
+        const source = this._activationSource;
+        const laneTokenIndices = (source && typeof source.getLaneTokenIndices === 'function')
+            ? source.getLaneTokenIndices(totalLaneCount)
+            : Array.from({ length: totalLaneCount }, (_, idx) => idx);
+        const spacing = LN_PARAMS.depth / (totalLaneCount + 1);
+        const touchedBatches = new Set();
+        let seededAny = false;
+        const finalKColor = new THREE.Color(MHSA_BRIGHT_GREEN);
+        const finalVColor = new THREE.Color(MHSA_BRIGHT_RED);
+
+        const getScalarData = (layerIndex, kind, headIndex, tokenIndex, length) => {
+            const scalar = (source && typeof source.getLayerQKVScalar === 'function')
+                ? source.getLayerQKVScalar(layerIndex, kind, headIndex, tokenIndex)
+                : null;
+            const fill = Number.isFinite(scalar) ? scalar : 0;
+            const outLength = Math.max(1, Math.floor(length || VECTOR_LENGTH_PRISM));
+            return new Array(outLength).fill(fill);
+        };
+
+        const hasCachedEntryForLane = (entries, laneLayoutIndex, tokenIndex) => {
+            if (!Array.isArray(entries) || !entries.length) return false;
+            return entries.some((entry) => {
+                if (!entry) return false;
+                const entryLayout = Number.isFinite(entry.laneLayoutIndex)
+                    ? Math.floor(entry.laneLayoutIndex)
+                    : null;
+                if (Number.isFinite(entryLayout) && entryLayout === laneLayoutIndex) return true;
+                const entryToken = Number.isFinite(entry.tokenIndex)
+                    ? Math.floor(entry.tokenIndex)
+                    : null;
+                if (Number.isFinite(entryToken) && entryToken === tokenIndex) return true;
+                return false;
+            });
+        };
+
+        const resolveBootstrapPosition = (layer, mhsa, x, y, z) => {
+            TMP_KV_BOOTSTRAP_LOCAL.set(x, y, z);
+            TMP_KV_BOOTSTRAP_WORLD.copy(TMP_KV_BOOTSTRAP_LOCAL);
+
+            const localParent = mhsa?.parentGroup || layer?.raycastRoot || layer?.root || null;
+            if (localParent && typeof localParent.localToWorld === 'function') {
+                localParent.updateMatrixWorld?.(true);
+                localParent.localToWorld(TMP_KV_BOOTSTRAP_WORLD);
+            }
+
+            if (this._kvCachePersistentRoot && typeof this._kvCachePersistentRoot.worldToLocal === 'function') {
+                this._kvCachePersistentRoot.updateMatrixWorld?.(true);
+                this._kvCachePersistentRoot.worldToLocal(TMP_KV_BOOTSTRAP_WORLD);
+            }
+
+            return TMP_KV_BOOTSTRAP_WORLD;
+        };
+
+        const seedVector = ({
+            layerIndex,
+            headIndex,
+            category,
+            laneEntry,
+            position,
+            data,
+            visibleOutputUnits = 64,
+            uniformColor = null
+        }) => {
+            const prismCount = Math.max(1, Math.floor(data?.length || VECTOR_LENGTH_PRISM));
+            const store = this._getOrCreateKvBatchStore({
+                layerIndex,
+                headIndex,
+                category,
+                prismCount
+            });
+            const slot = this._acquireKvBatchSlot(store);
+            if (!slot || !slot.vec) return null;
+
+            const safeVisibleUnits = Math.max(1, Math.min(prismCount, Math.floor(visibleOutputUnits || 64)));
+            if (typeof slot.vec.applyProcessedVisuals === 'function') {
+                slot.vec.applyProcessedVisuals(
+                    data,
+                    safeVisibleUnits,
+                    { numKeyColors: 1, generationOptions: null },
+                    { setHiddenToBlack: false, hideByScaleOnly: true },
+                    data
+                );
+            } else {
+                slot.vec.updateDataInternal(data, { copyData: true });
+            }
+            if (uniformColor && typeof slot.vec.setUniformColor === 'function') {
+                slot.vec.setUniformColor(uniformColor);
+            }
+            slot.vec.group.position.copy(position);
+            slot.vec.group.visible = true;
+
+            this._markKvBatchVectorMetadata(slot.vec, laneEntry, {
+                category,
+                headIndex,
+                layerIndex,
+                batch: slot.batch,
+                vectorIndex: slot.vectorIndex
+            });
+
+            if (slot.batch && typeof slot.batch.syncAll === 'function') {
+                touchedBatches.add(slot.batch);
+            }
+            return slot.vec;
+        };
+
+        this._layers.forEach((layer) => {
+            if (!layer) return;
+            const layerIndex = Number.isFinite(layer.index) ? Math.floor(layer.index) : null;
+            if (!Number.isFinite(layerIndex)) return;
+            const mhsa = layer.mhsaAnimation;
+            const headCoords = Array.isArray(mhsa?.headCoords) ? mhsa.headCoords : [];
+            if (!headCoords.length) return;
+            const existingEntries = Array.isArray(this._kvCacheEntriesByLayer.get(layerIndex))
+                ? this._kvCacheEntriesByLayer.get(layerIndex).slice()
+                : [];
+
+            const prismCount = Number.isFinite(mhsa?.vectorPrismCount)
+                ? Math.max(1, Math.floor(mhsa.vectorPrismCount))
+                : VECTOR_LENGTH_PRISM;
+            const outputUnits = Number.isFinite(mhsa?.outputVectorLength)
+                ? Math.max(1, Math.floor(mhsa.outputVectorLength))
+                : 64;
+            const postPassY = (Number.isFinite(mhsa?.mhaPassThroughTargetY) && Number.isFinite(mhsa?.mhaResultRiseOffsetY))
+                ? (mhsa.mhaPassThroughTargetY + mhsa.mhaResultRiseOffsetY - 30)
+                : (Number.isFinite(mhsa?.headStopY) ? mhsa.headStopY : 0);
+
+            for (let laneLayoutIndex = 0; laneLayoutIndex < cacheLaneCount; laneLayoutIndex++) {
+                const tokenIndex = Number.isFinite(laneTokenIndices?.[laneLayoutIndex])
+                    ? Math.max(0, Math.floor(laneTokenIndices[laneLayoutIndex]))
+                    : laneLayoutIndex;
+                if (hasCachedEntryForLane(existingEntries, laneLayoutIndex, tokenIndex)) continue;
+                const tokenLabel = (source && typeof source.getTokenString === 'function')
+                    ? source.getTokenString(tokenIndex)
+                    : null;
+                const zPos = -LN_PARAMS.depth / 2 + spacing * (laneLayoutIndex + 1);
+
+                const laneEntry = {
+                    layer: { index: layerIndex },
+                    layerIndex,
+                    laneIndex: laneLayoutIndex,
+                    laneLayoutIndex,
+                    tokenIndex,
+                    tokenLabel,
+                    zPos,
+                    upwardCopies: [],
+                    sideCopies: []
+                };
+
+                for (let headIndex = 0; headIndex < headCoords.length; headIndex++) {
+                    const head = headCoords[headIndex] || {};
+                    const targetX = Number.isFinite(head.v) ? head.v : (Number.isFinite(head.k) ? head.k : 0);
+                    const bootstrapPosition = resolveBootstrapPosition(layer, mhsa, targetX, postPassY, zPos);
+
+                    const kData = getScalarData(layerIndex, 'k', headIndex, tokenIndex, prismCount);
+                    const kVec = seedVector({
+                        layerIndex,
+                        headIndex,
+                        category: 'K',
+                        laneEntry,
+                        position: bootstrapPosition,
+                        data: kData,
+                        visibleOutputUnits: outputUnits,
+                        uniformColor: finalKColor
+                    });
+                    if (kVec) laneEntry.upwardCopies[headIndex] = kVec;
+
+                    const vData = getScalarData(layerIndex, 'v', headIndex, tokenIndex, prismCount);
+                    const vVec = seedVector({
+                        layerIndex,
+                        headIndex,
+                        category: 'V',
+                        laneEntry,
+                        position: bootstrapPosition,
+                        data: vData,
+                        visibleOutputUnits: outputUnits,
+                        uniformColor: finalVColor
+                    });
+                    if (vVec) {
+                        laneEntry.sideCopies.push({
+                            type: 'V',
+                            headIndex,
+                            vec: vVec,
+                            targetX,
+                            matrixRef: null
+                        });
+                    }
+                }
+
+                const hasK = laneEntry.upwardCopies.some((vec) => !!vec);
+                const hasV = laneEntry.sideCopies.length > 0;
+                if (hasK || hasV) {
+                    seededAny = true;
+                    existingEntries.push(laneEntry);
+                }
+            }
+
+            if (!existingEntries.length) return;
+            existingEntries.sort((a, b) => {
+                const aLayout = Number.isFinite(a?.laneLayoutIndex) ? a.laneLayoutIndex : Infinity;
+                const bLayout = Number.isFinite(b?.laneLayoutIndex) ? b.laneLayoutIndex : Infinity;
+                if (aLayout !== bLayout) return aLayout - bLayout;
+                const aToken = Number.isFinite(a?.tokenIndex) ? a.tokenIndex : Infinity;
+                const bToken = Number.isFinite(b?.tokenIndex) ? b.tokenIndex : Infinity;
+                if (aToken !== bToken) return aToken - bToken;
+                const aZ = Number.isFinite(a?.zPos) ? a.zPos : 0;
+                const bZ = Number.isFinite(b?.zPos) ? b.zPos : 0;
+                return aZ - bZ;
+            });
+            this._kvCacheEntriesByLayer.set(layerIndex, existingEntries);
+        });
+
+        touchedBatches.forEach((batch) => {
+            try { batch.syncAll(); } catch (_) { /* optional bootstrap sync */ }
+        });
+
+        if (!this._kvCacheEntriesByLayer.size) return false;
+
+        this._layers.forEach((layer) => {
+            const idx = Number.isFinite(layer?.index) ? Math.floor(layer.index) : null;
+            if (!Number.isFinite(idx)) return;
+            const entries = this._getCachedKvEntriesForLayer(idx);
+            if (layer?.mhsaAnimation && typeof layer.mhsaAnimation.setCachedKvEntries === 'function') {
+                layer.mhsaAnimation.setCachedKvEntries(entries);
+            }
+        });
+
+        return seededAny;
     }
 
     _schedulePostResetTrailPurge(durationMs = 1500) {

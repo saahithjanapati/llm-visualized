@@ -391,6 +391,9 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
         expandedVecTrail: null,
         mlpDownStarted: false,
         mlpDownComplete: false,
+        // Top Y of the bottom vocab embedding matrix; used to detect when the
+        // residual vector has exited the embedding block.
+        vocabEmbeddingExitY: Number.isFinite(startY_override) ? startY_override : startY,
         zPos,
         __residualMaxY: (function(){ originalVec.group.getWorldPosition(TMP_WORLD_POS); return TMP_WORLD_POS.y; })()
     });

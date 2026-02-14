@@ -18,6 +18,8 @@ import { initPauseButton } from '../../ui/pauseButton.js';
 import { initConveyorSkipButton } from '../../ui/conveyorSkipButton.js';
 import { initSkipToEndButton } from '../../ui/skipToEndButton.js';
 import { initSkipLayerButton } from '../../ui/skipLayerButton.js';
+import { initSkipNextPassButton } from '../../ui/skipNextPassButton.js';
+import { initSkipLastPassButton } from '../../ui/skipLastPassButton.js';
 import { initSkipMenu } from '../../ui/skipMenu.js';
 import { initSelectionPanel } from '../../ui/selectionPanel.js';
 import { loadActivationState } from './activation.js';
@@ -200,7 +202,7 @@ if (pipeline.engine && typeof pipeline.engine.setRaycastSelectionHandler === 'fu
     });
 }
 
-initGenerationController({
+const generationController = initGenerationController({
     pipeline,
     activationSource,
     initialLaneCount,
@@ -212,3 +214,6 @@ initGenerationController({
     cameraReturnTarget: camTarget,
     selectionPanel
 });
+
+initSkipNextPassButton({ pipeline, generationController });
+initSkipLastPassButton({ pipeline, generationController });

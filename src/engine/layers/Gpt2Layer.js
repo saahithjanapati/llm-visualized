@@ -92,7 +92,7 @@ const MULTIPLY_RESULT_START_SCALE = 0.9;
 const MULTIPLY_FLASH_GEOMETRY = new THREE.SphereGeometry(1, 18, 18);
 const POS_ADD_STALL_TIMEOUT_MS = 12000;
 const POS_PASS_START_PAUSE_MS = 0;
-const LANE_PHASE_STALL_TIMEOUT_MS_SKIP = 12000;
+const LANE_PHASE_STALL_TIMEOUT_MS_SKIP = 3000;
 
 const applyMatrixReflectivityTweak = (matrix, tweaks) => {
     if (!matrix || !tweaks) return;
@@ -682,7 +682,8 @@ export default class Gpt2Layer extends BaseLayer {
                     return !!(lane.posVec && !lane.__posPassStarted);
                 });
                 if (stillPending) {
-                    // Continue polling until per-lane position-chip gates release.
+                    // Continue polling until all pending lanes have their
+                    // position-chip gates released, then launch in lock-step.
                     this._posPassBarrierArmed = true;
                     this._posPassStartAtMs = nowMs;
                 } else {
@@ -1845,7 +1846,11 @@ export default class Gpt2Layer extends BaseLayer {
         // unchanged for too long, force a conservative forward step to avoid
         // whole-layer deadlocks. Keep normal playback strictly stage-gated.
         if (skipActive || this._skipLayerActive) {
-            this._applyLaneStallWatchdog(lanes, nowMs, { ln2SyncY, timeoutMs: LANE_PHASE_STALL_TIMEOUT_MS_SKIP });
+            this._applyLaneStallWatchdog(lanes, nowMs, {
+                ln2SyncY,
+                timeoutMs: LANE_PHASE_STALL_TIMEOUT_MS_SKIP,
+                allowOriginalFallback: true
+            });
         } else {
             this._resetLaneStallWatchdog(lanes);
         }
@@ -2828,9 +2833,13 @@ export default class Gpt2Layer extends BaseLayer {
         return Number.isFinite(releaseAt) && nowMs < releaseAt;
     }
 
-    _ensureLanePostAdditionVector(lane) {
+    _ensureLanePostAdditionVector(lane, options = {}) {
         if (!lane) return null;
         if (lane.postAdditionVec && lane.postAdditionVec.group) return lane.postAdditionVec;
+        if (options.allowOriginalFallback && lane.originalVec && lane.originalVec.group) {
+            lane.postAdditionVec = lane.originalVec;
+            return lane.postAdditionVec;
+        }
         return null;
     }
 
@@ -2838,6 +2847,7 @@ export default class Gpt2Layer extends BaseLayer {
         const mhsa = this.mhsaAnimation;
         if (!mhsa) return true;
         if (mhsa.outputProjMatrixReturnComplete === true) return true;
+        if (mhsa.outputProjMatrixAnimationPhase === 'completed') return true;
 
         const returnTarget = Number.isFinite(mhsa._outputProjReturnTargetCount)
             ? Math.max(0, Math.floor(mhsa._outputProjReturnTargetCount))
@@ -2848,7 +2858,7 @@ export default class Gpt2Layer extends BaseLayer {
         return returnTarget > 0 && returnCount >= returnTarget;
     }
 
-    _forceAdvanceStalledLane(lane, { ln2SyncY } = {}) {
+    _forceAdvanceStalledLane(lane, { ln2SyncY, allowOriginalFallback = false } = {}) {
         if (!lane || lane.ln2Phase === 'done') return false;
         const laneId = lane.laneIndex ?? '?';
 
@@ -2878,7 +2888,7 @@ export default class Gpt2Layer extends BaseLayer {
             || lane.horizPhase === 'waitingForLN2'
             || (this._isMhsaOutputStageComplete() && (lane.ln2Phase === 'notStarted' || lane.ln2Phase === 'preRise'))
         ) {
-            const v = this._ensureLanePostAdditionVector(lane);
+            const v = this._ensureLanePostAdditionVector(lane, { allowOriginalFallback });
             if (!v || !v.group) return false;
             if (Number.isFinite(ln2SyncY)) {
                 v.group.position.y = Math.max(v.group.position.y, ln2SyncY);

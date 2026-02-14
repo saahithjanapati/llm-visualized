@@ -163,7 +163,9 @@ body.touch-ui * {
 }
 #skipMenuToggle:disabled,
 #skipLayerBtn:disabled,
-#skipToEndBtn:disabled {
+#skipToEndBtn:disabled,
+#skipNextPassBtn:disabled,
+#skipLastPassBtn:disabled {
     background: rgba(255, 148, 76, 0.28);
     border-color: rgba(255, 176, 96, 0.85);
     color: #ffd7b3;
@@ -218,11 +220,27 @@ body.touch-ui * {
 #skipToEndBtn:not([data-visible="true"]) {
     display: none;
 }
+#skipNextPassBtn {
+    font-size: 14px;
+    min-width: 130px;
+}
+#skipNextPassBtn:not([data-visible="true"]) {
+    display: none;
+}
+#skipLastPassBtn {
+    font-size: 14px;
+    min-width: 130px;
+}
+#skipLastPassBtn:not([data-visible="true"]) {
+    display: none;
+}
 #nextTokenBtn:not([data-visible="true"]) {
     display: none;
 }
 #skipLayerBtn[data-state="skipping"],
-#skipToEndBtn[data-state="skipping"] {
+#skipToEndBtn[data-state="skipping"],
+#skipNextPassBtn[data-state="skipping"],
+#skipLastPassBtn[data-state="skipping"] {
     background: rgba(255, 148, 76, 0.28);
     border-color: rgba(255, 176, 96, 0.85);
     color: #ffd7b3;
@@ -1537,6 +1555,9 @@ body.touch-ui * {
     text-align: right;
     overflow-wrap: anywhere;
     line-height: 1.35;
+}
+.detail-row-bias .detail-value {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 .detail-data {

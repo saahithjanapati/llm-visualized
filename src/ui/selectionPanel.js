@@ -151,15 +151,18 @@ function formatDims(inputDim, outputDim) {
     return `input dimension: ${formatNumber(inputDim)} | output dimension: ${formatNumber(outputDim)}`;
 }
 
-function buildMetadata(params = 'TBD', inputDim = null, outputDim = null, length = null) {
+function buildMetadata(params = 'TBD', inputDim = null, outputDim = null, length = null, biasDim = null) {
     const hasDims = Number.isFinite(inputDim) && Number.isFinite(outputDim);
     const hasLength = Number.isFinite(length);
+    const hasBiasDim = Number.isFinite(biasDim);
     return {
         params,
         dims: hasDims ? formatDims(inputDim, outputDim) : 'TBD',
         inputDim: hasDims ? formatNumber(inputDim) : 'TBD',
         outputDim: hasDims ? formatNumber(outputDim) : 'TBD',
-        length: hasLength ? formatNumber(length) : 'TBD'
+        length: hasLength ? formatNumber(length) : 'TBD',
+        biasDim: hasBiasDim ? formatNumber(biasDim) : '',
+        hasBiasDim
     };
 }
 
@@ -1027,22 +1030,22 @@ function resolveMetadata(label, kind = null, selectionInfo = null) {
         return buildMetadata('TBD', null, null, oneHotLength);
     }
     if (lower.includes('query weight matrix')) {
-        return buildMetadata(formatNumber(D_MODEL * D_HEAD), D_MODEL, D_HEAD);
+        return buildMetadata(formatNumber(D_MODEL * D_HEAD), D_MODEL, D_HEAD, null, D_HEAD);
     }
     if (lower.includes('key weight matrix')) {
-        return buildMetadata(formatNumber(D_MODEL * D_HEAD), D_MODEL, D_HEAD);
+        return buildMetadata(formatNumber(D_MODEL * D_HEAD), D_MODEL, D_HEAD, null, D_HEAD);
     }
     if (lower.includes('value weight matrix')) {
-        return buildMetadata(formatNumber(D_MODEL * D_HEAD), D_MODEL, D_HEAD);
+        return buildMetadata(formatNumber(D_MODEL * D_HEAD), D_MODEL, D_HEAD, null, D_HEAD);
     }
     if (lower.includes('output projection matrix')) {
-        return buildMetadata(formatNumber(D_MODEL * D_MODEL), D_MODEL, D_MODEL);
+        return buildMetadata(formatNumber(D_MODEL * D_MODEL), D_MODEL, D_MODEL, null, D_MODEL);
     }
     if (lower.includes('mlp up weight matrix')) {
-        return buildMetadata(formatNumber(D_MODEL * D_MODEL * 4), D_MODEL, D_MODEL * 4);
+        return buildMetadata(formatNumber(D_MODEL * D_MODEL * 4), D_MODEL, D_MODEL * 4, null, D_MODEL * 4);
     }
     if (lower.includes('mlp down weight matrix')) {
-        return buildMetadata(formatNumber(D_MODEL * D_MODEL * 4), D_MODEL * 4, D_MODEL);
+        return buildMetadata(formatNumber(D_MODEL * D_MODEL * 4), D_MODEL * 4, D_MODEL, null, D_MODEL);
     }
     if (lower.includes('vocab embedding (top)') || lower.includes('unembedding')) {
         return buildMetadata(formatNumber(VOCAB_SIZE * D_MODEL), D_MODEL, VOCAB_SIZE);
@@ -1164,10 +1167,8 @@ function resolveLayerNormEquationSymbols(lower) {
 }
 
 function resolveAttentionHeadSubscript(selectionInfo) {
-    const rawHeadIndex = findUserDataNumber(selectionInfo, 'headIndex');
-    if (!Number.isFinite(rawHeadIndex)) return 'i';
-    const headIndex = Math.max(0, Math.floor(rawHeadIndex));
-    return String(headIndex + 1);
+    void selectionInfo;
+    return 'i';
 }
 
 function buildHeadSpecificAttentionEquation(selectionInfo) {
@@ -1175,8 +1176,8 @@ function buildHeadSpecificAttentionEquation(selectionInfo) {
     const Qh = `Q_{${headSubscript}}`;
     const Kh = `K_{${headSubscript}}`;
     const Vh = `V_{${headSubscript}}`;
-    const Ih = `I_{${headSubscript}}`;
-    return `${Ih} = \\mathrm{softmax}\\left(\\frac{${Qh} ${Kh}^\\top}{\\sqrt{d_h}} + M\\right)${Vh}`;
+    const Hh = `H_{${headSubscript}}`;
+    return `${Hh} = \\mathrm{softmax}\\left(\\frac{${Qh} ${Kh}^\\top}{\\sqrt{d_h}} + M\\right)${Vh}`;
 }
 
 function resolveSelectionEquations(label, selectionInfo = null) {
@@ -1203,7 +1204,7 @@ function resolveSelectionEquations(label, selectionInfo = null) {
     }
     if (lower.includes('output projection matrix')) {
         return formatEquationBlock([
-            'H = \\mathrm{Concat}(I_1,\\dots,I_h)',
+            'H = \\mathrm{Concat}(H_i)_{i=1}^{h}',
             'O = H W^O + b^O',
             'u = x + O'
         ]);
@@ -2994,6 +2995,8 @@ class SelectionPanel {
         this.outputDim = document.getElementById('detailOutputDim');
         this.outputDimLabel = document.getElementById('detailOutputDimLabel');
         this.outputDimHalf = document.getElementById('detailOutputDimHalf');
+        this.biasDimRow = document.getElementById('detailBiasDimRow');
+        this.biasDim = document.getElementById('detailBiasDim');
         this.metaSection = document.getElementById('detailMeta');
         this.tokenRow = document.getElementById('detailTokenRow');
         this.tokenValue = document.getElementById('detailTokenValue');
@@ -4210,17 +4213,17 @@ class SelectionPanel {
             ? target.closest('.attention-cell')
             : null;
         if (!cell || !this.attentionMatrix || !this.attentionMatrix.contains(cell)) {
-            this._clearAttentionHover();
+            this._clearPinnedAttention({ clearSelectionSummary: true });
             return;
         }
         if (cell.classList.contains('is-empty') || cell.classList.contains('is-hidden')) {
-            this._clearAttentionHover();
+            this._clearPinnedAttention({ clearSelectionSummary: true });
             return;
         }
         const row = Number(cell.dataset.row);
         const col = Number(cell.dataset.col);
         if (!Number.isFinite(row) || !Number.isFinite(col)) {
-            this._clearAttentionHover();
+            this._clearPinnedAttention({ clearSelectionSummary: true });
             return;
         }
         this._attentionPinned = true;
@@ -4286,7 +4289,18 @@ class SelectionPanel {
             && typeof hit.closest === 'function'
             && hit.closest('#detailAttentionMatrix') === this.attentionMatrix
         );
-        if (this.isOpen && this._attentionPinned && !insideAttentionMatrix) {
+        const matrixCell = insideAttentionMatrix && typeof hit?.closest === 'function'
+            ? hit.closest('.attention-cell')
+            : null;
+        const validMatrixCell = !!(
+            matrixCell
+            && !matrixCell.classList.contains('is-empty')
+            && !matrixCell.classList.contains('is-hidden')
+        );
+        const shouldClearPinnedAttention = this.isOpen
+            && this._attentionPinned
+            && (!insideAttentionMatrix || !validMatrixCell);
+        if (shouldClearPinnedAttention) {
             this._clearPinnedAttention({ clearSelectionSummary: true });
         }
         if (this.isOpen && hit && this.panel && this.panel.contains(hit)) {
@@ -4688,6 +4702,9 @@ class SelectionPanel {
         if (this.outputDimHalf) this.outputDimHalf.style.display = (!hideTensorDimsField && isVectorMetadata) ? 'none' : '';
         if (this.inputDimHalf) this.inputDimHalf.style.flexBasis = isVectorMetadata ? '100%' : '';
         if (dimsRow) dimsRow.style.display = hideTensorDimsField ? 'none' : '';
+        const showBiasDim = !hideTensorDimsField && !isVectorMetadata && metadata.hasBiasDim;
+        if (this.biasDimRow) this.biasDimRow.style.display = showBiasDim ? '' : 'none';
+        if (this.biasDim) this.biasDim.textContent = showBiasDim ? metadata.biasDim : '';
         const vectorTokenMetadata = this._updateVectorTokenPositionRows(selection, label);
         this._setTokenEncodingNote(this._resolveSelectionTokenEncodingNote(selection, label, vectorTokenMetadata));
         if (this.description) {
