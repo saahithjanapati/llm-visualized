@@ -27,7 +27,8 @@ import {
     VECTOR_LENGTH_PRISM,
     NUM_VECTOR_LANES,
     LAYER_STACK_SPACING_Y,
-    HIDE_INSTANCE_Y_OFFSET
+    HIDE_INSTANCE_Y_OFFSET,
+    SA_RED_EXTRA_RISE
 } from '../utils/constants.js';
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
 import { BatchedPrismVectorSet } from '../components/BatchedPrismVectorSet.js';
@@ -989,29 +990,19 @@ export class LayerPipeline extends EventTarget {
                 const laneLayoutIndex = Number.isFinite(lane.laneLayoutIndex)
                     ? lane.laneLayoutIndex
                     : null;
-                const alreadyCaptured = existing.some((entry) => (
-                    Number.isFinite(tokenIndex) && Number.isFinite(entry?.tokenIndex)
-                        ? entry.tokenIndex === tokenIndex
-                        : (Number.isFinite(laneLayoutIndex) && Number.isFinite(entry?.laneLayoutIndex)
-                            ? entry.laneLayoutIndex === laneLayoutIndex
-                            : false)
-                ));
-                if (alreadyCaptured) return;
+                if (this._hasMatchingKvLaneEntry(existing, { laneLayoutIndex, tokenIndex })) return;
 
                 const zPos = Number.isFinite(lane.zPos)
                     ? lane.zPos
                     : (lane.originalVec?.group?.position?.z ?? 0);
-                const laneEntry = {
-                    layer: null,
+                const laneEntry = this._createKvLaneEntry({
                     layerIndex,
                     laneIndex: Number.isFinite(lane.laneIndex) ? lane.laneIndex : 0,
                     laneLayoutIndex,
                     tokenIndex,
                     tokenLabel: lane.tokenLabel || null,
-                    zPos,
-                    upwardCopies: [],
-                    sideCopies: []
-                };
+                    zPos
+                });
 
                 if (Array.isArray(lane.upwardCopies)) {
                     lane.upwardCopies.forEach((kVec, headIndex) => {
@@ -1050,23 +1041,10 @@ export class LayerPipeline extends EventTarget {
                 const hasK = laneEntry.upwardCopies.some((vec) => !!vec);
                 const hasV = laneEntry.sideCopies.length > 0;
                 if (!hasK && !hasV) return;
-                laneEntry.layer = { index: layerIndex };
                 existing.push(laneEntry);
             });
 
-            existing.sort((a, b) => {
-                const aLayout = Number.isFinite(a?.laneLayoutIndex) ? a.laneLayoutIndex : Infinity;
-                const bLayout = Number.isFinite(b?.laneLayoutIndex) ? b.laneLayoutIndex : Infinity;
-                if (aLayout !== bLayout) return aLayout - bLayout;
-                const aToken = Number.isFinite(a?.tokenIndex) ? a.tokenIndex : Infinity;
-                const bToken = Number.isFinite(b?.tokenIndex) ? b.tokenIndex : Infinity;
-                if (aToken !== bToken) return aToken - bToken;
-                const aZ = Number.isFinite(a?.zPos) ? a.zPos : 0;
-                const bZ = Number.isFinite(b?.zPos) ? b.zPos : 0;
-                return aZ - bZ;
-            });
-
-            this._kvCacheEntriesByLayer.set(layerIndex, existing);
+            this._kvCacheEntriesByLayer.set(layerIndex, this._sortKvEntries(existing));
         });
     }
 
@@ -1102,6 +1080,142 @@ export class LayerPipeline extends EventTarget {
                 batch.syncAll();
             } catch (_) { /* optional cleanup */ }
         });
+    }
+
+    _hasMatchingKvLaneEntry(entries, { laneLayoutIndex = null, tokenIndex = null } = {}) {
+        if (!Array.isArray(entries) || !entries.length) return false;
+        const hasLayout = Number.isFinite(laneLayoutIndex);
+        const hasToken = Number.isFinite(tokenIndex);
+        return entries.some((entry) => {
+            if (!entry) return false;
+            const entryLayout = Number.isFinite(entry.laneLayoutIndex)
+                ? Math.floor(entry.laneLayoutIndex)
+                : null;
+            const entryToken = Number.isFinite(entry.tokenIndex)
+                ? Math.floor(entry.tokenIndex)
+                : null;
+            if (hasLayout && Number.isFinite(entryLayout) && entryLayout === Math.floor(laneLayoutIndex)) return true;
+            if (hasToken && Number.isFinite(entryToken) && entryToken === Math.floor(tokenIndex)) return true;
+            return false;
+        });
+    }
+
+    _sortKvEntries(entries) {
+        if (!Array.isArray(entries)) return [];
+        entries.sort((a, b) => {
+            const aLayout = Number.isFinite(a?.laneLayoutIndex) ? a.laneLayoutIndex : Infinity;
+            const bLayout = Number.isFinite(b?.laneLayoutIndex) ? b.laneLayoutIndex : Infinity;
+            if (aLayout !== bLayout) return aLayout - bLayout;
+            const aToken = Number.isFinite(a?.tokenIndex) ? a.tokenIndex : Infinity;
+            const bToken = Number.isFinite(b?.tokenIndex) ? b.tokenIndex : Infinity;
+            if (aToken !== bToken) return aToken - bToken;
+            const aZ = Number.isFinite(a?.zPos) ? a.zPos : 0;
+            const bZ = Number.isFinite(b?.zPos) ? b.zPos : 0;
+            return aZ - bZ;
+        });
+        return entries;
+    }
+
+    _computeKvLaneDepthZ(laneLayoutIndex, layoutCount = this._laneLayoutCount) {
+        const totalSlots = Math.max(1, Math.floor(layoutCount || 1));
+        const clampedLayoutIdx = Math.max(0, Math.min(totalSlots - 1, Math.floor(laneLayoutIndex || 0)));
+        const spacing = LN_PARAMS.depth / (totalSlots + 1);
+        return -LN_PARAMS.depth / 2 + spacing * (clampedLayoutIdx + 1);
+    }
+
+    _createKvLaneEntry({
+        layerIndex,
+        laneIndex = 0,
+        laneLayoutIndex = null,
+        tokenIndex = null,
+        tokenLabel = null,
+        zPos = 0,
+        bootstrapFromActivation = false
+    } = {}) {
+        const entry = {
+            layer: Number.isFinite(layerIndex) ? { index: layerIndex } : null,
+            layerIndex: Number.isFinite(layerIndex) ? Math.floor(layerIndex) : null,
+            laneIndex: Number.isFinite(laneIndex) ? Math.floor(laneIndex) : 0,
+            laneLayoutIndex: Number.isFinite(laneLayoutIndex) ? Math.floor(laneLayoutIndex) : null,
+            tokenIndex: Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : null,
+            tokenLabel: tokenLabel || null,
+            zPos: Number.isFinite(zPos) ? zPos : 0,
+            upwardCopies: [],
+            sideCopies: []
+        };
+        if (bootstrapFromActivation) {
+            entry.bootstrapFromActivation = true;
+        }
+        return entry;
+    }
+
+    _toKvPersistentLocalPosition({ layer, mhsa, x = 0, y = 0, z = 0 } = {}) {
+        TMP_KV_BOOTSTRAP_LOCAL.set(x, y, z);
+        TMP_KV_BOOTSTRAP_WORLD.copy(TMP_KV_BOOTSTRAP_LOCAL);
+
+        const localParent = mhsa?.parentGroup || layer?.raycastRoot || layer?.root || null;
+        if (localParent && typeof localParent.localToWorld === 'function') {
+            localParent.updateMatrixWorld?.(true);
+            localParent.localToWorld(TMP_KV_BOOTSTRAP_WORLD);
+        }
+
+        if (this._kvCachePersistentRoot && typeof this._kvCachePersistentRoot.worldToLocal === 'function') {
+            this._kvCachePersistentRoot.updateMatrixWorld?.(true);
+            this._kvCachePersistentRoot.worldToLocal(TMP_KV_BOOTSTRAP_WORLD);
+        }
+
+        // Return an owned vector so callers can safely keep both K and V
+        // positions in the same scope without temp-vector aliasing.
+        return TMP_KV_BOOTSTRAP_WORLD.clone();
+    }
+
+    _resolveKvBootstrapAnchor(mhsa) {
+        const prismCount = Number.isFinite(mhsa?.vectorPrismCount)
+            ? Math.max(1, Math.floor(mhsa.vectorPrismCount))
+            : VECTOR_LENGTH_PRISM;
+        const outputUnits = Number.isFinite(mhsa?.outputVectorLength)
+            ? Math.max(1, Math.floor(mhsa.outputVectorLength))
+            : 64;
+        // Match the settled post-pass-through height so bootstrap vectors start
+        // where persistent cached vectors normally reside.
+        const postPassY = (Number.isFinite(mhsa?.mhaPassThroughTargetY) && Number.isFinite(mhsa?.mhaResultRiseOffsetY))
+            ? (mhsa.mhaPassThroughTargetY + mhsa.mhaResultRiseOffsetY - 30)
+            : (Number.isFinite(mhsa?.headStopY) ? mhsa.headStopY : 0);
+        const selfAttentionEnabled = !!mhsa?.enableSelfAttentionAnimation;
+        const valueRise = selfAttentionEnabled && Number.isFinite(SA_RED_EXTRA_RISE)
+            ? SA_RED_EXTRA_RISE
+            : 0;
+        // Decode cache visuals mirror preserved KV pose:
+        // K snapped under V column; V optionally raised in self-attention mode.
+        return {
+            prismCount,
+            outputUnits,
+            keyY: postPassY,
+            valueY: postPassY + valueRise
+        };
+    }
+
+    _resolveKvBootstrapHeadPose({ layer, mhsa, head, zPos, anchor }) {
+        const targetValueX = Number.isFinite(head?.v) ? head.v : (Number.isFinite(head?.k) ? head.k : 0);
+        // Decode rendering snaps cached keys under value columns.
+        const targetKeyX = targetValueX;
+        return {
+            targetValueX,
+            keyPosition: this._toKvPersistentLocalPosition({
+                layer,
+                mhsa,
+                x: targetKeyX,
+                y: anchor?.keyY,
+                z: zPos
+            }),
+            valuePosition: this._toKvPersistentLocalPosition({
+                layer,
+                mhsa,
+                x: targetValueX,
+                y: anchor?.valueY,
+                z: zPos
+            })
+        };
     }
 
     resetForNewPass({
@@ -1246,14 +1360,15 @@ export class LayerPipeline extends EventTarget {
         if (!Array.isArray(this._layers) || !this._layers.length) return false;
 
         const totalLaneCount = Math.max(1, Math.floor(this._laneLayoutCount || this._laneCount || 1));
-        const cacheLaneCount = Math.max(0, totalLaneCount - 1);
-        if (cacheLaneCount <= 0) return false;
+        // Decode mode renders only the active token lane; all previous lanes are
+        // synthetic cached history that we seed from activation data.
+        const cachedHistoryLaneCount = Math.max(0, totalLaneCount - 1);
+        if (cachedHistoryLaneCount <= 0) return false;
 
         const source = this._activationSource;
         const laneTokenIndices = (source && typeof source.getLaneTokenIndices === 'function')
             ? source.getLaneTokenIndices(totalLaneCount)
             : Array.from({ length: totalLaneCount }, (_, idx) => idx);
-        const spacing = LN_PARAMS.depth / (totalLaneCount + 1);
         const touchedBatches = new Set();
         let seededAny = false;
         const finalKColor = new THREE.Color(MHSA_BRIGHT_GREEN);
@@ -1266,40 +1381,6 @@ export class LayerPipeline extends EventTarget {
             const fill = Number.isFinite(scalar) ? scalar : 0;
             const outLength = Math.max(1, Math.floor(length || VECTOR_LENGTH_PRISM));
             return new Array(outLength).fill(fill);
-        };
-
-        const hasCachedEntryForLane = (entries, laneLayoutIndex, tokenIndex) => {
-            if (!Array.isArray(entries) || !entries.length) return false;
-            return entries.some((entry) => {
-                if (!entry) return false;
-                const entryLayout = Number.isFinite(entry.laneLayoutIndex)
-                    ? Math.floor(entry.laneLayoutIndex)
-                    : null;
-                if (Number.isFinite(entryLayout) && entryLayout === laneLayoutIndex) return true;
-                const entryToken = Number.isFinite(entry.tokenIndex)
-                    ? Math.floor(entry.tokenIndex)
-                    : null;
-                if (Number.isFinite(entryToken) && entryToken === tokenIndex) return true;
-                return false;
-            });
-        };
-
-        const resolveBootstrapPosition = (layer, mhsa, x, y, z) => {
-            TMP_KV_BOOTSTRAP_LOCAL.set(x, y, z);
-            TMP_KV_BOOTSTRAP_WORLD.copy(TMP_KV_BOOTSTRAP_LOCAL);
-
-            const localParent = mhsa?.parentGroup || layer?.raycastRoot || layer?.root || null;
-            if (localParent && typeof localParent.localToWorld === 'function') {
-                localParent.updateMatrixWorld?.(true);
-                localParent.localToWorld(TMP_KV_BOOTSTRAP_WORLD);
-            }
-
-            if (this._kvCachePersistentRoot && typeof this._kvCachePersistentRoot.worldToLocal === 'function') {
-                this._kvCachePersistentRoot.updateMatrixWorld?.(true);
-                this._kvCachePersistentRoot.worldToLocal(TMP_KV_BOOTSTRAP_WORLD);
-            }
-
-            return TMP_KV_BOOTSTRAP_WORLD;
         };
 
         const seedVector = ({
@@ -1364,66 +1445,60 @@ export class LayerPipeline extends EventTarget {
             const existingEntries = Array.isArray(this._kvCacheEntriesByLayer.get(layerIndex))
                 ? this._kvCacheEntriesByLayer.get(layerIndex).slice()
                 : [];
+            const bootstrapAnchor = this._resolveKvBootstrapAnchor(mhsa);
 
-            const prismCount = Number.isFinite(mhsa?.vectorPrismCount)
-                ? Math.max(1, Math.floor(mhsa.vectorPrismCount))
-                : VECTOR_LENGTH_PRISM;
-            const outputUnits = Number.isFinite(mhsa?.outputVectorLength)
-                ? Math.max(1, Math.floor(mhsa.outputVectorLength))
-                : 64;
-            const postPassY = (Number.isFinite(mhsa?.mhaPassThroughTargetY) && Number.isFinite(mhsa?.mhaResultRiseOffsetY))
-                ? (mhsa.mhaPassThroughTargetY + mhsa.mhaResultRiseOffsetY - 30)
-                : (Number.isFinite(mhsa?.headStopY) ? mhsa.headStopY : 0);
-
-            for (let laneLayoutIndex = 0; laneLayoutIndex < cacheLaneCount; laneLayoutIndex++) {
+            for (let laneLayoutIndex = 0; laneLayoutIndex < cachedHistoryLaneCount; laneLayoutIndex++) {
                 const tokenIndex = Number.isFinite(laneTokenIndices?.[laneLayoutIndex])
                     ? Math.max(0, Math.floor(laneTokenIndices[laneLayoutIndex]))
                     : laneLayoutIndex;
-                if (hasCachedEntryForLane(existingEntries, laneLayoutIndex, tokenIndex)) continue;
+                if (this._hasMatchingKvLaneEntry(existingEntries, { laneLayoutIndex, tokenIndex })) continue;
                 const tokenLabel = (source && typeof source.getTokenString === 'function')
                     ? source.getTokenString(tokenIndex)
                     : null;
-                const zPos = -LN_PARAMS.depth / 2 + spacing * (laneLayoutIndex + 1);
+                const zPos = this._computeKvLaneDepthZ(laneLayoutIndex, totalLaneCount);
 
-                const laneEntry = {
-                    layer: { index: layerIndex },
+                const laneEntry = this._createKvLaneEntry({
                     layerIndex,
                     laneIndex: laneLayoutIndex,
                     laneLayoutIndex,
                     tokenIndex,
                     tokenLabel,
                     zPos,
-                    upwardCopies: [],
-                    sideCopies: []
-                };
+                    bootstrapFromActivation: true
+                });
 
                 for (let headIndex = 0; headIndex < headCoords.length; headIndex++) {
                     const head = headCoords[headIndex] || {};
-                    const targetX = Number.isFinite(head.v) ? head.v : (Number.isFinite(head.k) ? head.k : 0);
-                    const bootstrapPosition = resolveBootstrapPosition(layer, mhsa, targetX, postPassY, zPos);
+                    const pose = this._resolveKvBootstrapHeadPose({
+                        layer,
+                        mhsa,
+                        head,
+                        zPos,
+                        anchor: bootstrapAnchor
+                    });
 
-                    const kData = getScalarData(layerIndex, 'k', headIndex, tokenIndex, prismCount);
+                    const kData = getScalarData(layerIndex, 'k', headIndex, tokenIndex, bootstrapAnchor.prismCount);
                     const kVec = seedVector({
                         layerIndex,
                         headIndex,
                         category: 'K',
                         laneEntry,
-                        position: bootstrapPosition,
+                        position: pose.keyPosition,
                         data: kData,
-                        visibleOutputUnits: outputUnits,
+                        visibleOutputUnits: bootstrapAnchor.outputUnits,
                         uniformColor: finalKColor
                     });
                     if (kVec) laneEntry.upwardCopies[headIndex] = kVec;
 
-                    const vData = getScalarData(layerIndex, 'v', headIndex, tokenIndex, prismCount);
+                    const vData = getScalarData(layerIndex, 'v', headIndex, tokenIndex, bootstrapAnchor.prismCount);
                     const vVec = seedVector({
                         layerIndex,
                         headIndex,
                         category: 'V',
                         laneEntry,
-                        position: bootstrapPosition,
+                        position: pose.valuePosition,
                         data: vData,
-                        visibleOutputUnits: outputUnits,
+                        visibleOutputUnits: bootstrapAnchor.outputUnits,
                         uniformColor: finalVColor
                     });
                     if (vVec) {
@@ -1431,7 +1506,7 @@ export class LayerPipeline extends EventTarget {
                             type: 'V',
                             headIndex,
                             vec: vVec,
-                            targetX,
+                            targetX: pose.targetValueX,
                             matrixRef: null
                         });
                     }
@@ -1446,18 +1521,7 @@ export class LayerPipeline extends EventTarget {
             }
 
             if (!existingEntries.length) return;
-            existingEntries.sort((a, b) => {
-                const aLayout = Number.isFinite(a?.laneLayoutIndex) ? a.laneLayoutIndex : Infinity;
-                const bLayout = Number.isFinite(b?.laneLayoutIndex) ? b.laneLayoutIndex : Infinity;
-                if (aLayout !== bLayout) return aLayout - bLayout;
-                const aToken = Number.isFinite(a?.tokenIndex) ? a.tokenIndex : Infinity;
-                const bToken = Number.isFinite(b?.tokenIndex) ? b.tokenIndex : Infinity;
-                if (aToken !== bToken) return aToken - bToken;
-                const aZ = Number.isFinite(a?.zPos) ? a.zPos : 0;
-                const bZ = Number.isFinite(b?.zPos) ? b.zPos : 0;
-                return aZ - bZ;
-            });
-            this._kvCacheEntriesByLayer.set(layerIndex, existingEntries);
+            this._kvCacheEntriesByLayer.set(layerIndex, this._sortKvEntries(existingEntries));
         });
 
         touchedBatches.forEach((batch) => {

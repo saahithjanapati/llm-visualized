@@ -647,55 +647,13 @@ export default class Gpt2Layer extends BaseLayer {
                 // Avoid double-updating here to reduce CPU work.
             });
         }
-        if (this.index === 0) {
-            if (hasPendingPosPass && allPosPassReady && !this._posPassBarrierArmed) {
-                const pauseMs = skipActive ? 0 : POS_PASS_START_PAUSE_MS;
-                this._posPassBarrierArmed = true;
-                this._posPassStartAtMs = nowMs + pauseMs;
-            }
-            if (
-                this._posPassBarrierArmed
-                && Number.isFinite(this._posPassStartAtMs)
-                && nowMs >= this._posPassStartAtMs
-            ) {
-                const pendingPosPassLanes = lanes.filter((lane) => (
-                    lane
-                    && !lane.posAddComplete
-                    && !lane.__posPassStarted
-                    && lane.posVec
-                    && typeof lane.startPositionalPassThrough === 'function'
-                ));
-                const allPositionChipGatesReleased = pendingPosPassLanes.every((lane) => (
-                    !this._isWaitingForInputPositionChipGate(lane, nowMs, skipActive)
-                ));
-                if (allPositionChipGatesReleased) {
-                    pendingPosPassLanes.forEach((lane) => {
-                        try {
-                            lane.startPositionalPassThrough({ immediate: skipActive });
-                        } catch (_) {
-                            lane.posAddComplete = true;
-                        }
-                    });
-                }
-                const stillPending = lanes.some((lane) => {
-                    if (!lane || lane.posAddComplete) return false;
-                    return !!(lane.posVec && !lane.__posPassStarted);
-                });
-                if (stillPending) {
-                    // Continue polling until all pending lanes have their
-                    // position-chip gates released, then launch in lock-step.
-                    this._posPassBarrierArmed = true;
-                    this._posPassStartAtMs = nowMs;
-                } else {
-                    this._posPassBarrierArmed = false;
-                    this._posPassStartAtMs = NaN;
-                }
-            }
-            if (!hasPendingPosPass) {
-                this._posPassBarrierArmed = false;
-                this._posPassStartAtMs = NaN;
-            }
-        }
+        this._updatePositionalPassBarrier({
+            lanes,
+            nowMs,
+            skipActive,
+            hasPendingPosPass,
+            allPosPassReady
+        });
         // Handle transition phase - wait for vectors to reach position
         if (this._transitionPhase === 'positioning') {
             if (allVectorsInPosition) {
@@ -835,26 +793,11 @@ export default class Gpt2Layer extends BaseLayer {
 
         const mhsaOutputComplete = this._isMhsaOutputStageComplete();
 
-        // ────────────────────────────────────────────────────────────
-        // LN-2 synchronisation check – only once all lanes have reached
-        // the staging height and MHSA output projection has returned
-        // do we allow any of them to continue into the branch.
-        // ────────────────────────────────────────────────────────────
-        if (!this._ln2Ready && allLn2Ready && mhsaOutputComplete) {
-            this._ln2Ready = true;
-            this._emitProgress();
-            console.log(`Layer ${this.index}: All lanes ready – starting LN2 simultaneously`);
-        }
-
-        // ----------------------------------------------------------------
-        // MLP synchronisation: wait until every lane has completed LN-2 and
-        // is marked as 'mlpReady' before triggering the up-projection.
-        // ----------------------------------------------------------------
-        if (!this._mlpStart && allMlpReady) {
-            this._mlpStart = true;
-            this._emitProgress();
-            console.log(`Layer ${this.index}: All lanes ready – starting MLP up-projection simultaneously`);
-        }
+        this._updateLn2AndMlpStartGates({
+            allLn2Ready,
+            mhsaOutputComplete,
+            allMlpReady
+        });
 
         const speedMult = GLOBAL_ANIM_SPEED_MULT;
         const basePrismAddDurationMs = (() => {
@@ -909,56 +852,11 @@ export default class Gpt2Layer extends BaseLayer {
             }
         }
 
-        // ────────────────────────────────────────────────────────────────
-        //  NEW: LayerNorm-1 synchronisation barrier – wait until EVERY
-        //  lane's original residual-stream vector has reached the branching
-        //  height before triggering the horizontal duplicate move.  This
-        //  guarantees that all lanes enter LN-1 in perfect lock-step.
-        // ────────────────────────────────────────────────────────────────
-        if (!this._ln1Start) {
-            const readyToStartLn1 = allLn1Ready && posAddDone;
-            if (readyToStartLn1) {
-                this._ln1Start = true;
-                this._emitProgress();
-                console.log(`Layer ${this.index}: All lanes ready – starting LN-1 branch simultaneously`);
-
-                // Kick every lane out of the waiting state together.
-                this.lanes.forEach(l => {
-                    if (l.horizPhase === 'waiting') {
-                        l.horizPhase = 'right';
-                        this._emitProgress();
-                        // Ensure the branch duplicate matches the latest residual data
-                        // (e.g., after positional embedding addition).
-                        copyVectorAppearance(l.dupVec, l.originalVec);
-                        l.dupVec.group.visible = true;
-                        // Snap duplicate to the LN-1 branch staging height to avoid
-                        // any vertical drift while moving horizontally into the ring.
-                        if (typeof l.branchStartY === 'number') {
-                            l.dupVec.group.position.y = l.branchStartY;
-                        } else {
-                            l.dupVec.group.position.y = l.originalVec.group.position.y;
-                        }
-                    }
-                });
-            }
-        }
-
-        //  NEW: MHSA travel synchronisation barrier – wait until every lane
-        //  has its duplicate result vector staged above LN-1 before letting
-        //  them begin horizontal travel to the attention heads.
-        // ────────────────────────────────────────────────────────────────
-        if (!this._mhsaStart && allMhsaReady) {
-            this._mhsaStart = true;
-            this._emitProgress();
-            console.log(`Layer ${this.index}: All lanes ready – starting travel to MHSA heads simultaneously`);
-            this.lanes.forEach(l => {
-                if (l.horizPhase === 'readyMHSA') {
-                    l.horizPhase = 'travelMHSA';
-                    l.__mhsaTrailCornerPending = true;
-                    this._emitProgress();
-                }
-            });
-        }
+        this._updateLn1AndMhsaStartGates({
+            allLn1Ready,
+            posAddDone,
+            allMhsaReady
+        });
 
         this.lanes.forEach(lane => {
             const { originalVec, dupVec } = lane;
@@ -2787,9 +2685,141 @@ export default class Gpt2Layer extends BaseLayer {
         ].join('|');
     }
 
-    _isWaitingForInputVocabChipGate(lane, nowMs, skipActive = false) {
+    _updatePositionalPassBarrier({
+        lanes,
+        nowMs,
+        skipActive = false,
+        hasPendingPosPass = false,
+        allPosPassReady = false
+    } = {}) {
+        if (this.index !== 0) return;
+        const laneList = Array.isArray(lanes) ? lanes : [];
+
+        if (hasPendingPosPass && allPosPassReady && !this._posPassBarrierArmed) {
+            const pauseMs = skipActive ? 0 : POS_PASS_START_PAUSE_MS;
+            this._posPassBarrierArmed = true;
+            this._posPassStartAtMs = nowMs + pauseMs;
+        }
+        if (
+            this._posPassBarrierArmed
+            && Number.isFinite(this._posPassStartAtMs)
+            && nowMs >= this._posPassStartAtMs
+        ) {
+            const pendingPosPassLanes = laneList.filter((lane) => (
+                lane
+                && !lane.posAddComplete
+                && !lane.__posPassStarted
+                && lane.posVec
+                && typeof lane.startPositionalPassThrough === 'function'
+            ));
+            const allPositionChipGatesReleased = pendingPosPassLanes.every((lane) => (
+                !this._isWaitingForInputPositionChipGate(lane, nowMs, skipActive)
+            ));
+            if (allPositionChipGatesReleased) {
+                pendingPosPassLanes.forEach((lane) => {
+                    try {
+                        lane.startPositionalPassThrough({ immediate: skipActive });
+                    } catch (_) {
+                        lane.posAddComplete = true;
+                    }
+                });
+            }
+            const stillPending = laneList.some((lane) => {
+                if (!lane || lane.posAddComplete) return false;
+                return !!(lane.posVec && !lane.__posPassStarted);
+            });
+            if (stillPending) {
+                // Continue polling until all pending lanes have their
+                // position-chip gates released, then launch in lock-step.
+                this._posPassBarrierArmed = true;
+                this._posPassStartAtMs = nowMs;
+            } else {
+                this._posPassBarrierArmed = false;
+                this._posPassStartAtMs = NaN;
+            }
+        }
+        if (!hasPendingPosPass) {
+            this._posPassBarrierArmed = false;
+            this._posPassStartAtMs = NaN;
+        }
+    }
+
+    _updateLn2AndMlpStartGates({
+        allLn2Ready = false,
+        mhsaOutputComplete = false,
+        allMlpReady = false
+    } = {}) {
+        // LN-2 synchronisation check – only once all lanes have reached
+        // the staging height and MHSA output projection has returned
+        // do we allow any of them to continue into the branch.
+        if (!this._ln2Ready && allLn2Ready && mhsaOutputComplete) {
+            this._ln2Ready = true;
+            this._emitProgress();
+            console.log(`Layer ${this.index}: All lanes ready – starting LN2 simultaneously`);
+        }
+
+        // MLP synchronisation: wait until every lane has completed LN-2 and
+        // is marked as 'mlpReady' before triggering the up-projection.
+        if (!this._mlpStart && allMlpReady) {
+            this._mlpStart = true;
+            this._emitProgress();
+            console.log(`Layer ${this.index}: All lanes ready – starting MLP up-projection simultaneously`);
+        }
+
+    }
+
+    _updateLn1AndMhsaStartGates({
+        allLn1Ready = false,
+        posAddDone = false,
+        allMhsaReady = false
+    } = {}) {
+        // LayerNorm-1 synchronisation barrier – wait until every lane's
+        // residual vector has reached branch height before releasing LN-1.
+        if (!this._ln1Start) {
+            const readyToStartLn1 = allLn1Ready && posAddDone;
+            if (readyToStartLn1) {
+                this._ln1Start = true;
+                this._emitProgress();
+                console.log(`Layer ${this.index}: All lanes ready – starting LN-1 branch simultaneously`);
+
+                const laneList = Array.isArray(this.lanes) ? this.lanes : [];
+                laneList.forEach((lane) => {
+                    if (lane.horizPhase !== 'waiting') return;
+                    lane.horizPhase = 'right';
+                    this._emitProgress();
+                    // Ensure the branch duplicate matches the latest residual data
+                    // (e.g., after positional embedding addition).
+                    copyVectorAppearance(lane.dupVec, lane.originalVec);
+                    lane.dupVec.group.visible = true;
+                    // Snap duplicate to the LN-1 branch staging height to avoid
+                    // vertical drift while moving horizontally into the ring.
+                    if (typeof lane.branchStartY === 'number') {
+                        lane.dupVec.group.position.y = lane.branchStartY;
+                    } else {
+                        lane.dupVec.group.position.y = lane.originalVec.group.position.y;
+                    }
+                });
+            }
+        }
+
+        // MHSA travel synchronisation barrier – wait until every lane has its
+        // duplicate result vector staged above LN-1 before head travel starts.
+        if (!this._mhsaStart && allMhsaReady) {
+            this._mhsaStart = true;
+            this._emitProgress();
+            console.log(`Layer ${this.index}: All lanes ready – starting travel to MHSA heads simultaneously`);
+            const laneList = Array.isArray(this.lanes) ? this.lanes : [];
+            laneList.forEach((lane) => {
+                if (lane.horizPhase !== 'readyMHSA') return;
+                lane.horizPhase = 'travelMHSA';
+                lane.__mhsaTrailCornerPending = true;
+                this._emitProgress();
+            });
+        }
+    }
+
+    _isWaitingForInputChipGate(gate, lane, nowMs, skipActive = false) {
         if (skipActive || this.index !== 0 || !lane) return false;
-        const gate = this._progressEmitter && this._progressEmitter.__inputVocabChipGate;
         if (!gate || gate.enabled === false) return false;
 
         if (gate.pending) {
@@ -2810,27 +2840,14 @@ export default class Gpt2Layer extends BaseLayer {
         return Number.isFinite(releaseAt) && nowMs < releaseAt;
     }
 
+    _isWaitingForInputVocabChipGate(lane, nowMs, skipActive = false) {
+        const gate = this._progressEmitter && this._progressEmitter.__inputVocabChipGate;
+        return this._isWaitingForInputChipGate(gate, lane, nowMs, skipActive);
+    }
+
     _isWaitingForInputPositionChipGate(lane, nowMs, skipActive = false) {
-        if (skipActive || this.index !== 0 || !lane) return false;
         const gate = this._progressEmitter && this._progressEmitter.__inputPositionChipGate;
-        if (!gate || gate.enabled === false) return false;
-
-        if (gate.pending) {
-            const fallbackAt = Number.isFinite(gate.pendingFallbackAt) ? gate.pendingFallbackAt : NaN;
-            return !Number.isFinite(fallbackAt) || nowMs < fallbackAt;
-        }
-
-        const tokenIndex = Number.isFinite(lane.tokenIndex) ? Math.max(0, Math.floor(lane.tokenIndex)) : null;
-        const byToken = gate.releaseByToken;
-        let releaseAt = NaN;
-        if (tokenIndex !== null && byToken) {
-            const value = byToken[String(tokenIndex)];
-            if (Number.isFinite(value)) releaseAt = value;
-        }
-        if (!Number.isFinite(releaseAt) && Number.isFinite(gate.defaultReleaseAt)) {
-            releaseAt = gate.defaultReleaseAt;
-        }
-        return Number.isFinite(releaseAt) && nowMs < releaseAt;
+        return this._isWaitingForInputChipGate(gate, lane, nowMs, skipActive);
     }
 
     _ensureLanePostAdditionVector(lane, options = {}) {

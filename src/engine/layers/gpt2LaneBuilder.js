@@ -444,8 +444,9 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
             // Trail (local to this layer) - enabled only until it reaches residual stream.
             const posTrail = new StraightLineTrail(layer.root, 0xffffff, 1, undefined, undefined, TRAIL_MIN_SEGMENT_DISTANCE);
             // Skip mode globally clamps trail advance per update; disable that
-            // for positional pass-through so explicit corner waypoints (up, then left)
-            // are preserved instead of collapsing into diagonals.
+            // for positional pass-through so explicit corner waypoints
+            // (into gap, then up, then left) are preserved instead of
+            // collapsing into diagonals.
             if (typeof posTrail.setMaxStepDistance === 'function') {
                 posTrail.setMaxStepDistance(1e9);
             }
@@ -525,58 +526,72 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
                 if (posVec && posVec.group) {
                     posVec.group.visible = true;
                 }
-                const passStartX = posVec && posVec.group ? posVec.group.position.x : 0;
+                const passStartX = posVec && posVec.group ? posVec.group.position.x : posStartX;
+                const passStartY = posVec && posVec.group ? posVec.group.position.y : posStartY;
                 const targetYAbove = vocabRiseReferenceY + POS_VEC_Y_OFFSET_ABOVE_VOCAB;
                 const riseDist = Math.max(0, targetYAbove - posVec.group.position.y);
                 const riseMs = (riseDist / (fasterRise * GLOBAL_ANIM_SPEED_MULT)) * 1000;
-
-                const horizDist = Math.abs(posVec.group.position.x - 0);
-                const horizMs = (horizDist / horizSpeed) * 1000;
+                const mergeDist = Math.abs(passStartX - 0);
+                const mergeMs = (mergeDist / horizSpeed) * 1000;
 
                 if (typeof TWEEN !== 'undefined' && !immediate) {
-                    new TWEEN.Tween(posVec.group.position)
-                        .to({ y: targetYAbove }, Math.max(100, riseMs))
-                        .easing(TWEEN.Easing.Quadratic.InOut)
-                        .onUpdate(() => {
-                            // Hard-lock X during the vertical stage.
-                            posVec.group.position.x = passStartX;
-                            syncPosTrailToCurrent({ append: true });
-                        })
-                        .onComplete(() => {
-                            // Force a corner sample so fast skip transitions don't
-                            // collapse the vertical+horizontal path into one diagonal.
-                            posVec.group.position.x = passStartX;
+                    const startMergeToResidual = () => {
+                        const finishMergeToResidual = () => {
                             posVec.group.position.y = targetYAbove;
                             syncPosTrailToCurrent({ append: true });
-                            new TWEEN.Tween(posVec.group.position)
-                                .to({ x: 0, y: targetYAbove }, Math.max(100, horizMs))
-                                .easing(TWEEN.Easing.Quadratic.InOut)
-                                .onStart(() => {
-                                    // Hard-lock Y during horizontal travel to ensure a perfectly straight path.
-                                    posVec.group.position.y = targetYAbove;
-                                    syncPosTrailToCurrent({ append: true });
-                                })
-                                .onUpdate(() => {
-                                    // Maintain Y lock during horizontal interpolation.
-                                    posVec.group.position.y = targetYAbove;
-                                    syncPosTrailToCurrent({ append: true });
-                                })
-                                .onComplete(() => {
-                                    // Ensure the horizontal segment is committed before addition starts.
-                                    posVec.group.position.y = targetYAbove;
-                                    syncPosTrailToCurrent({ append: true });
-                                    triggerPositionalAddition();
-                                })
-                                .start();
-                        })
-                        .start();
+                            triggerPositionalAddition();
+                        };
+                        if (mergeDist <= 1e-4) {
+                            posVec.group.position.x = 0;
+                            finishMergeToResidual();
+                            return;
+                        }
+                        new TWEEN.Tween(posVec.group.position)
+                            .to({ x: 0, y: targetYAbove }, Math.max(100, mergeMs))
+                            .easing(TWEEN.Easing.Quadratic.InOut)
+                            .onStart(() => {
+                                // Hard-lock Y during horizontal travel to ensure a perfectly straight path.
+                                posVec.group.position.y = targetYAbove;
+                                syncPosTrailToCurrent({ append: true });
+                            })
+                            .onUpdate(() => {
+                                // Maintain Y lock during horizontal interpolation.
+                                posVec.group.position.y = targetYAbove;
+                                syncPosTrailToCurrent({ append: true });
+                            })
+                            .onComplete(finishMergeToResidual)
+                            .start();
+                    };
+                    const finishVerticalRise = () => {
+                        // Force a corner sample so fast transitions preserve
+                        // the right-angle path (up first, then left).
+                        posVec.group.position.x = passStartX;
+                        posVec.group.position.y = targetYAbove;
+                        syncPosTrailToCurrent({ append: true });
+                        startMergeToResidual();
+                    };
+                    if (riseDist <= 1e-4) {
+                        finishVerticalRise();
+                    } else {
+                        new TWEEN.Tween(posVec.group.position)
+                            .to({ y: targetYAbove }, Math.max(100, riseMs))
+                            .easing(TWEEN.Easing.Quadratic.InOut)
+                            .onUpdate(() => {
+                                // Hard-lock X during the vertical stage.
+                                posVec.group.position.x = passStartX;
+                                syncPosTrailToCurrent({ append: true });
+                            })
+                            .onComplete(finishVerticalRise)
+                            .start();
+                    }
                     return;
                 }
 
                 // Preserve the same right-angle trail geometry during skip:
-                // finish vertical rise first, then horizontal slide to x=0.
+                // rise first, then merge to x=0.
                 if (posVec && posVec.group) {
                     if (Math.abs(posVec.group.position.y - targetYAbove) > 1e-4) {
+                        posVec.group.position.x = passStartX;
                         posVec.group.position.y = targetYAbove;
                         syncPosTrailToCurrent({ append: true });
                     }

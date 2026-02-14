@@ -2922,6 +2922,7 @@ export class MHSAAnimation {
 
         const touchedBatches = new Set();
         laneList.forEach((lane) => {
+            if (cachedOnly && lane?.bootstrapFromActivation === true) return;
             if (!Array.isArray(lane?.upwardCopies)) return;
             lane.upwardCopies.forEach((kVec, headIndex) => {
                 if (!kVec || !kVec.group || !kVec.group.position) return;

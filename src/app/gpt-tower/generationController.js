@@ -169,8 +169,8 @@ export function initGenerationController({
     let lastTick = null;
     let rafId = null;
     let chipCleanup = null;
-    let pendingAdvanceAfterSkip = false;
-    let pendingLastPassAfterSkip = false;
+    const PASS_JUMP_NEXT = 'next';
+    let pendingPassJump = null;
     let kvModeEnabled = !!appState.kvCacheModeEnabled;
     let kvSessionBaseLaneCount = kvModeEnabled
         ? kvPrefillBaseLaneCount
@@ -226,13 +226,21 @@ export function initGenerationController({
         };
     };
 
+    const shouldClearKvCacheForPass = ({ passPlan, fromCompletedPass = false } = {}) => {
+        if (!kvModeEnabled) return true;
+        if (!passPlan || !passPlan.kvCacheDecodeActive) return passPlan?.passIndex === 0;
+        if (passPlan.passIndex === 0) return true;
+        // Enabling KV mid-sequence should not reuse stale visuals captured
+        // under non-KV semantics. We clear once and then bootstrap decode cache.
+        return !fromCompletedPass;
+    };
+
     const clearOverlay = () => {
         overlay.root.dataset.visible = 'false';
     };
 
     const clearPendingPassJump = () => {
-        pendingAdvanceAfterSkip = false;
-        pendingLastPassAfterSkip = false;
+        pendingPassJump = null;
     };
 
     const updateNextTokenButton = () => {
@@ -361,20 +369,25 @@ export function initGenerationController({
         if (resetPipeline) {
             setNumVectorLanes(passPlan.totalLaneCount);
             setAnimationLaneCount(passPlan.totalLaneCount);
-                pipeline.resetForNewPass({
-                    activationSource,
-                    laneCount: passPlan.activeLaneCount,
-                    laneLayoutCount: passPlan.totalLaneCount,
-                    laneLayoutIndices: passPlan.laneLayoutIndices,
-                    laneTokenIndices: state.laneTokenIndices,
-                    kvCacheModeEnabled: kvModeEnabled,
-                    kvCacheDecodeActive: passPlan.kvCacheDecodeActive,
-                    preservePreviousTrails: false,
-                    captureKvCache: !!(kvModeEnabled && fromCompletedPass),
-                    reuseKvCache: !!passPlan.kvCacheDecodeActive,
-                    clearKvCache: !kvModeEnabled || passPlan.passIndex === 0,
-                    bootstrapKvCacheFromActivation: !!(kvModeEnabled && passPlan.kvCacheDecodeActive)
-                });
+            // KV flags are split out so pass-rebuild intent stays readable.
+            const clearKvForPass = shouldClearKvCacheForPass({ passPlan, fromCompletedPass });
+            const shouldCaptureKvForCompletedPass = !!(kvModeEnabled && fromCompletedPass);
+            const shouldReuseKvCache = !!passPlan.kvCacheDecodeActive;
+            const shouldBootstrapKvFromActivation = !!(kvModeEnabled && passPlan.kvCacheDecodeActive);
+            pipeline.resetForNewPass({
+                activationSource,
+                laneCount: passPlan.activeLaneCount,
+                laneLayoutCount: passPlan.totalLaneCount,
+                laneLayoutIndices: passPlan.laneLayoutIndices,
+                laneTokenIndices: state.laneTokenIndices,
+                kvCacheModeEnabled: kvModeEnabled,
+                kvCacheDecodeActive: passPlan.kvCacheDecodeActive,
+                preservePreviousTrails: false,
+                captureKvCache: shouldCaptureKvForCompletedPass,
+                reuseKvCache: shouldReuseKvCache,
+                clearKvCache: clearKvForPass,
+                bootstrapKvCacheFromActivation: shouldBootstrapKvFromActivation
+            });
             const followEnabled = (typeof pipeline.isAutoCameraFollowEnabled === 'function')
                 ? pipeline.isAutoCameraFollowEnabled()
                 : appState.autoCameraFollow;
@@ -438,14 +451,16 @@ export function initGenerationController({
         const prevEnabled = (detail && typeof detail.previousEnabled === 'boolean')
             ? detail.previousEnabled
             : kvModeEnabled;
+        const isEnablingKv = nextEnabled && !prevEnabled;
+        const isDisablingKv = !nextEnabled && prevEnabled;
         kvModeEnabled = nextEnabled;
         appState.kvCacheModeEnabled = nextEnabled;
-        if (nextEnabled && !prevEnabled) {
+        if (isEnablingKv) {
             // In KV mode, only the initial pass is treated as prefill. If KV is
             // enabled later, restart directly into decode semantics for the
             // current token count.
             kvSessionBaseLaneCount = kvPrefillBaseLaneCount;
-        } else if (!nextEnabled && prevEnabled) {
+        } else if (isDisablingKv) {
             kvSessionBaseLaneCount = null;
         } else if (nextEnabled && !(Number.isFinite(kvSessionBaseLaneCount) && kvSessionBaseLaneCount > 0)) {
             // Guard against event ordering that skips the transition branch.
@@ -453,7 +468,7 @@ export function initGenerationController({
         }
         syncKvCachePassState(currentLaneCount);
         pipeline?.dispatchEvent?.(new Event('progress'));
-        if (nextEnabled && !prevEnabled) {
+        if (isEnablingKv) {
             // Always restart immediately when enabling so the active pass is
             // rebuilt using KV semantics for the current token count.
             rebuildPass({ laneCount: currentLaneCount, resetPipeline: true });
@@ -476,6 +491,18 @@ export function initGenerationController({
 
     const hasNextForwardPass = () => currentLaneCount < maxLaneCount;
     const hasLastForwardPass = hasNextForwardPass;
+    const markNoFurtherPasses = () => {
+        passComplete = true;
+        countdownActive = false;
+        autoAdvancePaused = true;
+        updateOverlay();
+    };
+    const prepareUiForImmediatePassJump = () => {
+        autoAdvancePaused = false;
+        countdownActive = false;
+        clearOverlay();
+        updateNextTokenButton();
+    };
 
     if (!canLoop) {
         clearOverlay();
@@ -501,10 +528,7 @@ export function initGenerationController({
     const advanceToNextPass = () => {
         clearPendingPassJump();
         if (!hasNextForwardPass()) {
-            passComplete = true;
-            countdownActive = false;
-            autoAdvancePaused = true;
-            updateOverlay();
+            markNoFurtherPasses();
             return false;
         }
         const nextLane = Math.min(maxLaneCount, currentLaneCount + 1);
@@ -515,10 +539,7 @@ export function initGenerationController({
     const advanceToLastPass = ({ fromCompletedPass = true } = {}) => {
         clearPendingPassJump();
         if (!hasLastForwardPass()) {
-            passComplete = true;
-            countdownActive = false;
-            autoAdvancePaused = true;
-            updateOverlay();
+            markNoFurtherPasses();
             return false;
         }
         rebuildPass({
@@ -540,19 +561,17 @@ export function initGenerationController({
             return advanceToNextPass();
         }
 
-        pendingAdvanceAfterSkip = true;
-        pendingLastPassAfterSkip = false;
-        autoAdvancePaused = false;
-        countdownActive = false;
-        clearOverlay();
-        updateNextTokenButton();
+        // In KV decode mode, jumping mid-pass first fast-forwards to the end of
+        // the current pass so cache capture semantics stay consistent.
+        pendingPassJump = PASS_JUMP_NEXT;
+        prepareUiForImmediatePassJump();
 
         if (typeof pipeline.skipToEndForwardPass === 'function') {
             pipeline.skipToEndForwardPass();
             return true;
         }
 
-        pendingAdvanceAfterSkip = false;
+        clearPendingPassJump();
         return advanceToNextPass();
     };
 
@@ -561,10 +580,7 @@ export function initGenerationController({
             return false;
         }
         clearPendingPassJump();
-        autoAdvancePaused = false;
-        countdownActive = false;
-        clearOverlay();
-        updateNextTokenButton();
+        prepareUiForImmediatePassJump();
         const currentPassComplete = passComplete || (
             typeof pipeline?.isForwardPassComplete === 'function' && pipeline.isForwardPassComplete()
         );
@@ -609,9 +625,7 @@ export function initGenerationController({
                 remainingMs = countdownMs;
                 countdownActive = !autoAdvancePaused;
                 lastTick = now;
-                if (pendingLastPassAfterSkip) {
-                    advanceToLastPass();
-                } else if (pendingAdvanceAfterSkip) {
+                if (pendingPassJump === PASS_JUMP_NEXT) {
                     advanceToNextPass();
                 } else {
                     updateOverlay();
@@ -644,8 +658,8 @@ export function initGenerationController({
         requestLastForwardPass,
         hasNextForwardPass,
         hasLastForwardPass,
-        isForwardPassJumpPending: () => (pendingAdvanceAfterSkip || pendingLastPassAfterSkip),
-        isNextForwardPassPending: () => (pendingAdvanceAfterSkip || pendingLastPassAfterSkip),
+        isForwardPassJumpPending: () => pendingPassJump !== null,
+        isNextForwardPassPending: () => pendingPassJump !== null,
         dispose: () => {
             if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
                 window.removeEventListener('kvCacheModeChanged', handleKvCacheModeChanged);
