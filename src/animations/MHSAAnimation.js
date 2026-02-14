@@ -3247,6 +3247,11 @@ export class MHSAAnimation {
      */
     skipSelfAttentionAndStartConcat() {
         if (this.mhaPassThroughPhase !== 'mha_pass_through_complete') return;
+        const rowMergePhase = this.rowMergePhase || 'not_started';
+        const outputProjPhase = this.outputProjMatrixAnimationPhase || 'waiting';
+        if (rowMergePhase !== 'not_started' || outputProjPhase !== 'waiting') {
+            return;
+        }
         if (this._skipMatrixColorsLocked && this._skipMatrixColorsPending) {
             this._applyFinalMatrixColorsImmediate();
             this._skipMatrixColorsPending = false;

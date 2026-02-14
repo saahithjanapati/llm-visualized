@@ -678,9 +678,14 @@ export default class Gpt2Layer extends BaseLayer {
         }
 
         if (skipActive && this.mhsaAnimation && !this._skipConcatTriggered) {
-            if (this.mhsaAnimation.mhaPassThroughPhase === 'mha_pass_through_complete'
-                && typeof this.mhsaAnimation.skipSelfAttentionAndStartConcat === 'function') {
-                this.mhsaAnimation.skipSelfAttentionAndStartConcat();
+            const mhsa = this.mhsaAnimation;
+            const rowMergePhase = mhsa.rowMergePhase || 'not_started';
+            const outputProjPhase = mhsa.outputProjMatrixAnimationPhase || 'waiting';
+            const concatNotStarted = rowMergePhase === 'not_started' && outputProjPhase === 'waiting';
+            if (concatNotStarted
+                && mhsa.mhaPassThroughPhase === 'mha_pass_through_complete'
+                && typeof mhsa.skipSelfAttentionAndStartConcat === 'function') {
+                mhsa.skipSelfAttentionAndStartConcat();
                 this._skipConcatTriggered = true;
             }
         }

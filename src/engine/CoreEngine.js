@@ -134,9 +134,19 @@ export class CoreEngine {
         this.scene.background = new THREE.Color(0x000000);
 
         this._cameraFarMargin = typeof opts.cameraFarMargin === 'number' ? opts.cameraFarMargin : 0;
-        this._cameraMaxDistance = (typeof opts.cameraMaxDistance === 'number' && opts.cameraMaxDistance > 0)
+        this._cameraBaseMaxDistance = (typeof opts.cameraMaxDistance === 'number' && opts.cameraMaxDistance > 0)
             ? opts.cameraMaxDistance
             : null;
+        this._cameraMaxDistance = this._cameraBaseMaxDistance;
+        this._desktopZoomOutMultiplier = (typeof opts.desktopZoomOutMultiplier === 'number' && opts.desktopZoomOutMultiplier > 1)
+            ? opts.desktopZoomOutMultiplier
+            : 1.45;
+        this._desktopZoomOutMinWidth = (typeof opts.desktopZoomOutMinWidth === 'number' && opts.desktopZoomOutMinWidth > 0)
+            ? opts.desktopZoomOutMinWidth
+            : 1280;
+        this._desktopZoomOutMinHeight = (typeof opts.desktopZoomOutMinHeight === 'number' && opts.desktopZoomOutMinHeight > 0)
+            ? opts.desktopZoomOutMinHeight
+            : 760;
 
         this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 5, 10000);
         this.camera.position.set(0, 150, 800);
@@ -615,6 +625,8 @@ export class CoreEngine {
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         if (this.composer) this.composer.setSize(window.innerWidth, window.innerHeight);
         this._canvasRect = this.renderer.domElement.getBoundingClientRect();
+        this._applyCameraZoomLimit();
+        this._updateCameraFarFromControls();
     };
 
     _updateRendererPixelRatio = ({ force = false } = {}) => {
@@ -1328,7 +1340,7 @@ export class CoreEngine {
     _applyCameraZoomLimit() {
         if (!this.camera || !this.controls) return;
         const margin = Math.max(0, this._cameraFarMargin || 0);
-        let maxDistance = this._cameraMaxDistance;
+        let baseMaxDistance = this._cameraBaseMaxDistance;
 
         const targetClone = this.controls.target ? this.controls.target.clone() : null;
         let distToTarget = 0;
@@ -1346,20 +1358,61 @@ export class CoreEngine {
             }
         }
 
-        if (!(typeof maxDistance === 'number' && maxDistance > 0)) {
+        if (!(typeof baseMaxDistance === 'number' && baseMaxDistance > 0)) {
             const baseDistance = distToTarget > 0 ? distToTarget : 1000;
             if (margin > 0) {
-                maxDistance = baseDistance + margin * 0.85;
+                baseMaxDistance = baseDistance + margin * 0.85;
             } else {
-                maxDistance = Math.max(baseDistance * 4, baseDistance + 2000);
+                baseMaxDistance = Math.max(baseDistance * 4, baseDistance + 2000);
             }
-            maxDistance = Math.max(maxDistance, baseDistance + 1);
+            baseMaxDistance = Math.max(baseMaxDistance, baseDistance + 1);
+            this._cameraBaseMaxDistance = baseMaxDistance;
+        }
+
+        let maxDistance = baseMaxDistance;
+        if (this._isLargeDesktopViewport()) {
+            maxDistance = baseMaxDistance * this._desktopZoomOutMultiplier;
         }
 
         if (typeof maxDistance === 'number' && Number.isFinite(maxDistance) && maxDistance > 0) {
             this._cameraMaxDistance = maxDistance;
             this.controls.maxDistance = maxDistance;
+            this._clampCameraDistanceToLimit(maxDistance);
         }
+    }
+
+    _isTouchPrimaryDevice() {
+        if (typeof window === 'undefined') return false;
+        if (typeof window.matchMedia === 'function') {
+            const coarse = window.matchMedia('(pointer: coarse)').matches
+                || window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+            if (coarse) return true;
+        }
+        const touchPoints = Number.isFinite(window?.navigator?.maxTouchPoints)
+            ? window.navigator.maxTouchPoints
+            : 0;
+        return touchPoints > 0;
+    }
+
+    _isLargeDesktopViewport() {
+        if (typeof window === 'undefined') return false;
+        if (this._isTouchPrimaryDevice()) return false;
+        const width = window.innerWidth || 0;
+        const height = window.innerHeight || 0;
+        if (!Number.isFinite(width) || !Number.isFinite(height)) return false;
+        return width >= this._desktopZoomOutMinWidth && height >= this._desktopZoomOutMinHeight;
+    }
+
+    _clampCameraDistanceToLimit(limit) {
+        if (!this.camera || !this.controls || !this.controls.target) return;
+        if (!(typeof limit === 'number' && Number.isFinite(limit) && limit > 0)) return;
+
+        const offset = new THREE.Vector3().copy(this.camera.position).sub(this.controls.target);
+        const distance = offset.length();
+        if (!(distance > limit) || distance <= 0) return;
+
+        offset.multiplyScalar(limit / distance);
+        this.camera.position.copy(this.controls.target).add(offset);
     }
 
     _initCameraDebugHelpers() {
