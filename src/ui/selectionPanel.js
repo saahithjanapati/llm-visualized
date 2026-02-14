@@ -1646,13 +1646,8 @@ function createLogitTextPreviewShared(labelText, options = {}) {
 }
 
 function buildLogitBarPreview(label, selectionInfo) {
-    const source = selectionInfo?.object || selectionInfo?.hit?.object;
     const tokenText = resolveLogitPreviewTokenText(label, selectionInfo);
-    const textPreview = createLogitTextPreviewShared(tokenText, {
-        color: resolveLogitPreviewColor(selectionInfo),
-        opacity: Number.isFinite(source?.material?.opacity) ? source.material.opacity : 1
-    });
-    return { object: textPreview.group, dispose: textPreview.dispose };
+    return buildTokenChipPreview(tokenText);
 }
 
 function buildRoundedRectShape(width, height, radius) {
