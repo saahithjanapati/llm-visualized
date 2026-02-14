@@ -1659,9 +1659,15 @@ export default class Gpt2Layer extends BaseLayer {
             this.mhsaAnimation.update(dt, performance.now(), this.lanes);
         }
 
-        // Global safety net: if any lane's phase signature is unchanged for too long,
-        // force a conservative forward step to avoid whole-layer deadlocks.
-        this._applyLaneStallWatchdog(lanes, nowMs, { ln2SyncY });
+        // Global safety net for skip flows: if any lane's phase signature is
+        // unchanged for too long, force a conservative forward step to avoid
+        // whole-layer deadlocks. Keep normal playback untouched to avoid
+        // phase jumps that can desync residual/output-projection visuals.
+        if (skipActive || this._skipLayerActive) {
+            this._applyLaneStallWatchdog(lanes, nowMs, { ln2SyncY });
+        } else {
+            this._resetLaneStallWatchdog(lanes);
+        }
 
         // ----------------------------------------------------------
         // Notify LayerPipeline once **all** lanes have finished AND all additions complete
@@ -2653,6 +2659,16 @@ export default class Gpt2Layer extends BaseLayer {
         }
 
         return false;
+    }
+
+    _resetLaneStallWatchdog(lanes) {
+        if (!Array.isArray(lanes) || !lanes.length) return;
+        for (let i = 0; i < lanes.length; i++) {
+            const lane = lanes[i];
+            if (!lane) continue;
+            if (lane.__phaseWatchSignature !== undefined) delete lane.__phaseWatchSignature;
+            if (lane.__phaseWatchStartMs !== undefined) delete lane.__phaseWatchStartMs;
+        }
     }
 
     _applyLaneStallWatchdog(lanes, nowMs, context = {}) {

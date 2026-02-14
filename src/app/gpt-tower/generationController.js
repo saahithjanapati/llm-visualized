@@ -342,17 +342,11 @@ export function initGenerationController({
             ? Math.max(1, Math.floor(state.totalLaneCount))
             : passPlan.totalLaneCount;
         syncKvCachePassState(nextLaneCount);
-        const singleLaneActive = Number.isFinite(passPlan.activeLaneCount) && passPlan.activeLaneCount === 1;
-        const mobileLikeViewport = typeof window !== 'undefined'
-            && typeof window.matchMedia === 'function'
-            && (
-                window.matchMedia('(hover: none) and (pointer: coarse)').matches
-                || window.matchMedia('(max-width: 960px)').matches
-            );
-        // Single-lane passes need stronger trails to match multi-lane readability,
-        // and mobile/coarse-pointer displays need an extra bump.
-        const trailOpacityBoost = singleLaneActive ? (mobileLikeViewport ? 2.3 : 1.85) : 1.0;
-        const trailWidthBoost = singleLaneActive ? (mobileLikeViewport ? 2.7 : 2.0) : 1.0;
+        const decodeSingleLaneActive = !!(passPlan.kvCacheDecodeActive && passPlan.activeLaneCount === 1);
+        // Decode-only single-lane trails get a modest opacity bump so they remain
+        // legible without looking overdrawn where paths overlap.
+        const trailOpacityBoost = decodeSingleLaneActive ? 1.3 : 1.0;
+        const trailWidthBoost = 1.0;
         setTrailOpacityRuntimeMultiplier(trailOpacityBoost);
         setTrailLineWidthRuntimeMultiplier(trailWidthBoost);
 
