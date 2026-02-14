@@ -55,6 +55,8 @@ const SKIP_DELAY_MIN_MS = 1;
 const SKIP_DELAY_MAX_MS = 5;
 const SKIP_DURATION_MIN_MS = 2;
 const SKIP_DURATION_MAX_MS = 14;
+const OUTPUT_PROJ_RETURN_WATCHDOG_MIN_MS = 5000;
+const OUTPUT_PROJ_RETURN_WATCHDOG_GRACE_MS = 2000;
 
 const SOFTENED_MATRIX_UNIFORMS = {
     stripeStrength: 0.0,
@@ -352,6 +354,7 @@ export class MHSAAnimation {
         // Pause-aware scheduling helpers ensure delayed callbacks respect manual pauses.
         this._scheduledDelayTweens = new Set();
         this._scheduledTimeoutIds = new Set();
+        this._cancelOutputProjectionWatchdog = null;
         this._skipToEndActive = false;
         this._passThroughJobs = [];
         this._lastUpdateTimeNow = null;
@@ -1408,6 +1411,7 @@ export class MHSAAnimation {
 
     dispose() {
         // Standard THREE.js objects added to scene are usually handled by scene traversal on global cleanup.
+        this._cancelOutputProjectionReturnWatchdog();
         this._clearScheduledDelays();
     }
 
@@ -2199,10 +2203,50 @@ export class MHSAAnimation {
         return forcedCount;
     }
 
+    _cancelOutputProjectionReturnWatchdog() {
+        if (typeof this._cancelOutputProjectionWatchdog === 'function') {
+            try {
+                this._cancelOutputProjectionWatchdog();
+            } catch (_) { /* best effort */ }
+        }
+        this._cancelOutputProjectionWatchdog = null;
+    }
+
+    _scheduleOutputProjectionReturnWatchdog(delayMs, reason = 'output projection return watchdog') {
+        this._cancelOutputProjectionReturnWatchdog();
+        const safeDelayMs = Number.isFinite(delayMs) ? Math.max(0, delayMs) : 0;
+        if (safeDelayMs <= 0) return;
+        this._cancelOutputProjectionWatchdog = this._scheduleAfterDelay(() => {
+            this._cancelOutputProjectionWatchdog = null;
+            if (this.outputProjMatrixReturnComplete) return;
+            const targetCount = Number.isFinite(this._outputProjReturnTargetCount)
+                ? Math.max(0, Math.floor(this._outputProjReturnTargetCount))
+                : 0;
+            const returnCount = Number.isFinite(this._outputProjReturnCount)
+                ? Math.max(0, Math.floor(this._outputProjReturnCount))
+                : 0;
+            if (targetCount > 0 && returnCount >= targetCount) {
+                this.outputProjMatrixReturnComplete = true;
+                this.outputProjMatrixAnimationPhase = 'completed';
+                return;
+            }
+            console.warn(
+                `MHSAAnimation: output projection watchdog fired for layer ${this.layerIndex ?? '?'} `
+                + `(${returnCount}/${targetCount}).`
+            );
+            this._completeOutputProjectionFallback(reason, {
+                fallbackLanes: true,
+                onlyIncompleteLanes: false,
+                logReason: false
+            });
+        }, safeDelayMs);
+    }
+
     _completeOutputProjectionFallback(reason, options = {}) {
         const fallbackLanes = options.fallbackLanes !== false;
         const onlyIncompleteLanes = !!options.onlyIncompleteLanes;
         const logReason = options.logReason !== false;
+        this._cancelOutputProjectionReturnWatchdog();
         const targetCount = Number.isFinite(this._outputProjReturnTargetCount)
             ? Math.max(0, Math.floor(this._outputProjReturnTargetCount))
             : 0;
@@ -2389,6 +2433,7 @@ export class MHSAAnimation {
     _startVectorsThroughOutputProjection(laneVectors) {
         // Combine decorative vectors in each lane into a single vector, then animate those combined vectors
         // Mark merge as complete prior to entering the output projection stage
+        this._cancelOutputProjectionReturnWatchdog();
         this.rowMergePhase = 'merged';
         this.outputProjMatrixAnimationPhase = 'vectors_entering';
         this.outputProjMatrixReturnComplete = false;
@@ -2396,6 +2441,7 @@ export class MHSAAnimation {
         const markOutputProjectionReturn = () => {
             this._outputProjReturnCount += 1;
             if (this._outputProjReturnCount >= this._outputProjReturnTargetCount) {
+                this._cancelOutputProjectionReturnWatchdog();
                 this.outputProjMatrixReturnComplete = true;
                 this.outputProjMatrixAnimationPhase = 'completed';
             }
@@ -2538,6 +2584,17 @@ export class MHSAAnimation {
             });
             return;
         }
+
+        const horizDurRaw = (Math.abs(centerX) / (ANIM_HORIZ_SPEED * GLOBAL_ANIM_SPEED_MULT)) * 1000;
+        const horizDurEstimate = Number.isFinite(horizDurRaw)
+            ? this._resolveSkipDuration(horizDurRaw)
+            : 0;
+        const expectedReturnMs = Math.max(0, duration1 + duration2 + duration3 + horizDurEstimate);
+        const watchdogDelayMs = Math.max(
+            OUTPUT_PROJ_RETURN_WATCHDOG_MIN_MS,
+            expectedReturnMs * 2 + OUTPUT_PROJ_RETURN_WATCHDOG_GRACE_MS
+        );
+        this._scheduleOutputProjectionReturnWatchdog(watchdogDelayMs);
 
         if (this._skipToEndActive && this._outputProjReturnTargetCount > 0) {
             const fallbackMs = this._resolveSkipDelay(400);

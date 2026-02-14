@@ -80,6 +80,7 @@ const ATTENTION_PREVIEW_GRID_GAP = 8; // matches .detail-attention-grid column g
 const ATTENTION_PRE_COLOR_CLAMP = 5;
 const ATTENTION_POP_OUT_MS = 120;
 const ATTENTION_SCORE_DECIMALS = 4;
+const ATTENTION_VALUE_PLACEHOLDER = '--';
 const RESIDUAL_COLOR_CLAMP = 2;
 const SPACE_TOKEN_DISPLAY = '" "';
 const RESIDUAL_STREAM_DESCRIPTION = 'This is the residual stream vector for a token at this point in the model. It is the main path that carries information through the network. Attention and MLP updates are added back into this stream at each layer, so prior context is preserved while new information is incorporated.';
@@ -233,11 +234,9 @@ function formatTokenWithIndex(index, label, fallback = 'Token') {
     return tokenText || fallback;
 }
 
-function formatTokenDisplayWithId(label, tokenId = null) {
-    const tokenText = formatTokenLabelForPreview(label);
-    if (Number.isFinite(tokenId) && tokenText) return `${tokenText} (id ${Math.floor(tokenId)})`;
-    if (Number.isFinite(tokenId)) return `id ${Math.floor(tokenId)}`;
-    return tokenText;
+function normalizeAttentionValuePart(value, fallback = ATTENTION_VALUE_PLACEHOLDER) {
+    const text = typeof value === 'string' ? value.trim() : '';
+    return text || fallback;
 }
 
 function formatActivationData(data) {
@@ -410,16 +409,20 @@ function resolveAttentionScoreSelectionSummary(selectionInfo, context = null) {
     const targetLabel = formatTokenLabelForPreview(
         activation.keyTokenLabel || (col >= 0 ? tokenLabels[col] : null)
     );
-    const sourceText = formatTokenWithIndex(sourceTokenIndex, sourceLabel, 'Source');
-    const targetText = formatTokenWithIndex(targetTokenIndex, targetLabel, 'Target');
-    const modeLabel = mode === 'post' ? 'Post-softmax' : 'Pre-softmax';
+    const sourceText = normalizeAttentionValuePart(sourceLabel, 'Source');
+    const targetText = normalizeAttentionValuePart(targetLabel, 'Target');
     const scoreText = Number.isFinite(score) ? score.toFixed(ATTENTION_SCORE_DECIMALS) : 'n/a';
 
     return {
         mode,
         row: row >= 0 ? row : null,
         col: col >= 0 ? col : null,
-        defaultText: `Source: ${sourceText} • Target: ${targetText} • ${modeLabel}: ${scoreText}`
+        defaultValue: {
+            source: sourceText,
+            target: targetText,
+            score: scoreText,
+            empty: false
+        }
     };
 }
 
@@ -3022,6 +3025,9 @@ class SelectionPanel {
         this.attentionEmpty = document.getElementById('detailAttentionEmpty');
         this.attentionNote = document.getElementById('detailAttentionNote');
         this.attentionValue = document.getElementById('detailAttentionValue');
+        this.attentionValueSource = document.getElementById('detailAttentionValueSource');
+        this.attentionValueTarget = document.getElementById('detailAttentionValueTarget');
+        this.attentionValueScore = document.getElementById('detailAttentionValueScore');
         this.attentionLegend = document.getElementById('detailAttentionLegend');
         this.attentionLegendLow = document.getElementById('detailAttentionLegendLow');
         this.attentionLegendHigh = document.getElementById('detailAttentionLegendHigh');
@@ -3078,6 +3084,7 @@ class SelectionPanel {
         this._lastFitOptions = null;
         this._mobilePauseActive = false;
         this._mobileFocusActive = false;
+        this._pauseMainFlowOnMobileFocus = options.pauseMainFlowOnMobileFocus === true;
         this._pendingResizeRaf = null;
         this._pendingResizeTimeout = null;
         this._pendingReveal = false;
@@ -3129,7 +3136,12 @@ class SelectionPanel {
         this._attentionHoverCell = null;
         this._attentionHoverRow = null;
         this._attentionHoverCol = null;
-        this._attentionValueDefault = '';
+        this._attentionValueDefault = {
+            source: ATTENTION_VALUE_PLACEHOLDER,
+            target: ATTENTION_VALUE_PLACEHOLDER,
+            score: ATTENTION_VALUE_PLACEHOLDER,
+            empty: true
+        };
         this._attentionSelectionSummary = null;
         this._attentionPinned = false;
         this._attentionPinnedRow = null;
@@ -3163,6 +3175,7 @@ class SelectionPanel {
             this.attentionMatrix.addEventListener('pointerdown', this._onAttentionPointerDown);
             this.attentionMatrix.addEventListener('pointerleave', this._clearAttentionHover);
         }
+        this._setAttentionValue(this._attentionValueDefault);
         this.panel.addEventListener('pointerdown', this._onPanelPointerDown, { capture: true });
         this.panel.addEventListener('pointerenter', this._onPanelPointerEnter);
         this.panel.addEventListener('pointerleave', this._onPanelPointerLeave);
@@ -3502,10 +3515,11 @@ class SelectionPanel {
 
     _updateMobileState() {
         const shouldFocus = this.isOpen && this._isSmallScreen();
-        if (shouldFocus !== this._mobilePauseActive) {
-            this._mobilePauseActive = shouldFocus;
+        const shouldPauseMainFlow = shouldFocus && this._pauseMainFlowOnMobileFocus;
+        if (shouldPauseMainFlow !== this._mobilePauseActive) {
+            this._mobilePauseActive = shouldPauseMainFlow;
             if (this.engine) {
-                if (shouldFocus) {
+                if (shouldPauseMainFlow) {
                     this.engine.pause?.('detail-mobile');
                 } else {
                     this.engine.resume?.('detail-mobile');
@@ -3596,6 +3610,28 @@ class SelectionPanel {
         }
     }
 
+    _setAttentionValue(value = null) {
+        if (!this.attentionValue) return;
+        const safeValue = value && typeof value === 'object' ? value : null;
+        const source = normalizeAttentionValuePart(safeValue?.source);
+        const target = normalizeAttentionValuePart(safeValue?.target);
+        const score = normalizeAttentionValuePart(safeValue?.score);
+        const isEmpty = safeValue ? safeValue.empty === true : true;
+        if (this.attentionValueSource) {
+            this.attentionValueSource.textContent = source;
+            this.attentionValueSource.title = source === ATTENTION_VALUE_PLACEHOLDER ? '' : source;
+        }
+        if (this.attentionValueTarget) {
+            this.attentionValueTarget.textContent = target;
+            this.attentionValueTarget.title = target === ATTENTION_VALUE_PLACEHOLDER ? '' : target;
+        }
+        if (this.attentionValueScore) {
+            this.attentionValueScore.textContent = score;
+            this.attentionValueScore.title = score === ATTENTION_VALUE_PLACEHOLDER ? '' : score;
+        }
+        this.attentionValue.dataset.empty = isEmpty ? 'true' : 'false';
+    }
+
     _resolveAttentionContext(selection) {
         const label = selection?.label || '';
         if (!isSelfAttentionSelection(label, selection)) return null;
@@ -3632,18 +3668,12 @@ class SelectionPanel {
             if (this.activationSource) return SPACE_TOKEN_DISPLAY;
             return `Token ${tokenIndex + 1}`;
         });
-        const tokenIds = tokenIndices.map((tokenIndex) => {
-            if (!this.activationSource || typeof this.activationSource.getTokenId !== 'function') return null;
-            const tokenId = this.activationSource.getTokenId(tokenIndex);
-            return Number.isFinite(tokenId) ? Math.floor(tokenId) : null;
-        });
 
         return {
             headIndex,
             layerIndex,
             tokenIndices,
             tokenLabels,
-            tokenIds,
             trimmed,
             totalCount,
             hasSource: !!this.activationSource
@@ -3764,10 +3794,6 @@ class SelectionPanel {
         if (!this.attentionMatrix || !this._attentionCells || !this._attentionValues || !this._attentionContext) return;
         const mode = this.attentionMode === 'post' ? 'post' : 'pre';
         const tokenLabels = this._attentionContext.tokenLabels || [];
-        const tokenIds = this._attentionContext.tokenIds || [];
-        const tokenDisplayLabels = tokenLabels.map((tokenLabel, idx) => (
-            formatTokenDisplayWithId(tokenLabel, tokenIds[idx])
-        ));
         const count = this._attentionCells.length;
         const rowAnimDuration = 180;
         const rowAnimStagger = mode === 'post' && count > 1
@@ -3805,8 +3831,8 @@ class SelectionPanel {
                         ? mapValueToGrayscale(value)
                         : mapValueToColor(value, { clampMax: ATTENTION_PRE_COLOR_CLAMP });
                     cell.style.backgroundColor = colorToCss(color);
-                    const rowLabel = tokenDisplayLabels[row] || tokenLabels[row] || '';
-                    const colLabel = tokenDisplayLabels[col] || tokenLabels[col] || '';
+                    const rowLabel = tokenLabels[row] || '';
+                    const colLabel = tokenLabels[col] || '';
                     cell.title = `${rowLabel} → ${colLabel} (${mode === 'post' ? 'post' : 'pre'}): ${value.toFixed(ATTENTION_SCORE_DECIMALS)}`;
                     cell.dataset.value = String(value);
                     cell.classList.remove('is-empty');
@@ -3930,10 +3956,7 @@ class SelectionPanel {
             return;
         }
 
-        const { tokenIndices, tokenLabels, tokenIds, headIndex, layerIndex, trimmed, totalCount, hasSource } = context;
-        const tokenDisplayLabels = tokenLabels.map((tokenLabel, idx) => (
-            formatTokenDisplayWithId(tokenLabel, tokenIds?.[idx])
-        ));
+        const { tokenIndices, tokenLabels, headIndex, layerIndex, trimmed, totalCount, hasSource } = context;
         const mode = this.attentionMode === 'post' ? 'post' : 'pre';
         this._updateAttentionToggleLabel(mode);
         this._updateAttentionLegend(mode);
@@ -3968,12 +3991,20 @@ class SelectionPanel {
                     : '';
             }
         }
-        if (this.attentionValue) {
-            this._attentionValueDefault = hasSource
-                ? (this._attentionSelectionSummary?.defaultText || 'Click a square to see its score.')
-                : '';
-            this.attentionValue.textContent = this._attentionValueDefault;
-        }
+        this._attentionValueDefault = hasSource
+            ? (this._attentionSelectionSummary?.defaultValue || {
+                source: ATTENTION_VALUE_PLACEHOLDER,
+                target: ATTENTION_VALUE_PLACEHOLDER,
+                score: ATTENTION_VALUE_PLACEHOLDER,
+                empty: true
+            })
+            : {
+                source: ATTENTION_VALUE_PLACEHOLDER,
+                target: ATTENTION_VALUE_PLACEHOLDER,
+                score: ATTENTION_VALUE_PLACEHOLDER,
+                empty: true
+            };
+        this._setAttentionValue(this._attentionValueDefault);
 
         const count = tokenIndices.length;
         this._attentionCells = Array.from({ length: count }, () => Array(count).fill(null));
@@ -4033,14 +4064,14 @@ class SelectionPanel {
             topLabel.className = 'attention-token-top-label';
             topLabel.textContent = tokenLabels[i];
             topToken.appendChild(topLabel);
-            topToken.title = tokenDisplayLabels[i] || tokenLabels[i];
+            topToken.title = tokenLabels[i];
             topFrag.appendChild(topToken);
             this._attentionTokenElsTop.push(topToken);
 
             const leftToken = document.createElement('div');
             leftToken.className = 'attention-token attention-token-left';
             leftToken.textContent = tokenLabels[i];
-            leftToken.title = tokenDisplayLabels[i] || tokenLabels[i];
+            leftToken.title = tokenLabels[i];
             leftFrag.appendChild(leftToken);
             this._attentionTokenElsLeft.push(leftToken);
         }
@@ -4067,16 +4098,16 @@ class SelectionPanel {
                             ? mapValueToGrayscale(value)
                             : mapValueToColor(value, { clampMax: ATTENTION_PRE_COLOR_CLAMP });
                         cell.style.backgroundColor = colorToCss(color);
-                        const rowLabel = tokenDisplayLabels[row] || tokenLabels[row] || '';
-                        const colLabel = tokenDisplayLabels[col] || tokenLabels[col] || '';
+                        const rowLabel = tokenLabels[row] || '';
+                        const colLabel = tokenLabels[col] || '';
                         cell.title = `${rowLabel} → ${colLabel} (${mode === 'post' ? 'post' : 'pre'}): ${value.toFixed(ATTENTION_SCORE_DECIMALS)}`;
                         cell.dataset.value = String(value);
                         hasAnyValue = true;
                     } else {
                         cell.classList.add('is-empty');
                     }
-                    cell.dataset.rowLabel = tokenDisplayLabels[row] || tokenLabels[row] || '';
-                    cell.dataset.colLabel = tokenDisplayLabels[col] || tokenLabels[col] || '';
+                    cell.dataset.rowLabel = tokenLabels[row] || '';
+                    cell.dataset.colLabel = tokenLabels[col] || '';
                 }
                 this._attentionCells[row][col] = cell;
                 matrixFrag.appendChild(cell);
@@ -4180,17 +4211,21 @@ class SelectionPanel {
         const topToken = this._attentionTokenElsTop[col];
         if (leftToken) leftToken.classList.add('is-highlighted');
         if (topToken) topToken.classList.add('is-highlighted');
-        if (this.attentionValue) {
-            const rawValue = cell.dataset.value;
-            const valueNum = Number(rawValue);
-            const rowLabel = cell.dataset.rowLabel || '';
-            const colLabel = cell.dataset.colLabel || '';
-            const label = rowLabel || colLabel
-                ? `${rowLabel || 'Token'} → ${colLabel || 'Token'}`
-                : 'Score';
-            const scoreText = Number.isFinite(valueNum) ? valueNum.toFixed(ATTENTION_SCORE_DECIMALS) : String(rawValue || '');
-            this.attentionValue.textContent = `${label}: ${scoreText}`;
-        }
+        const rawValue = cell.dataset.value;
+        const valueNum = Number(rawValue);
+        const rowLabel = cell.dataset.rowLabel || '';
+        const colLabel = cell.dataset.colLabel || '';
+        const sourceText = normalizeAttentionValuePart(rowLabel, 'Source');
+        const targetText = normalizeAttentionValuePart(colLabel, 'Target');
+        const scoreText = Number.isFinite(valueNum)
+            ? valueNum.toFixed(ATTENTION_SCORE_DECIMALS)
+            : ATTENTION_VALUE_PLACEHOLDER;
+        this._setAttentionValue({
+            source: sourceText,
+            target: targetText,
+            score: scoreText,
+            empty: false
+        });
     }
 
     _onAttentionPointerMove(event) {
@@ -4249,9 +4284,7 @@ class SelectionPanel {
         this._attentionHoverCell = null;
         this._attentionHoverRow = null;
         this._attentionHoverCol = null;
-        if (this.attentionValue) {
-            this.attentionValue.textContent = this._attentionValueDefault || '';
-        }
+        this._setAttentionValue(this._attentionValueDefault);
     }
 
     _clearPinnedAttention({ clearSelectionSummary = false } = {}) {
@@ -4260,9 +4293,12 @@ class SelectionPanel {
         this._attentionPinnedCol = null;
         if (clearSelectionSummary) {
             this._attentionSelectionSummary = null;
-            this._attentionValueDefault = this._attentionContext?.hasSource
-                ? 'Click a square to see its score.'
-                : '';
+            this._attentionValueDefault = {
+                source: ATTENTION_VALUE_PLACEHOLDER,
+                target: ATTENTION_VALUE_PLACEHOLDER,
+                score: ATTENTION_VALUE_PLACEHOLDER,
+                empty: true
+            };
         }
         this._clearAttentionHover(true);
     }
@@ -4511,6 +4547,13 @@ class SelectionPanel {
         this._attentionPostAnimatedRows?.clear?.();
         this._attentionLastPostCompleted = 0;
         this._attentionSelectionSummary = null;
+        this._attentionValueDefault = {
+            source: ATTENTION_VALUE_PLACEHOLDER,
+            target: ATTENTION_VALUE_PLACEHOLDER,
+            score: ATTENTION_VALUE_PLACEHOLDER,
+            empty: true
+        };
+        this._setAttentionValue(this._attentionValueDefault);
     }
 
     _resolveVectorTokenPosition(selection, label) {

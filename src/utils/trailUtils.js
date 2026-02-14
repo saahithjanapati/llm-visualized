@@ -49,6 +49,7 @@ export class StraightLineTrail {
         this._scene = scene;
         this._color = color;
         this._opacity = opacity;
+        this._lineWidth = Number.isFinite(lineWidth) ? lineWidth : TRAIL_LINE_WIDTH;
         const clampedMin = Math.max(0, minSegmentDistance);
         this._minSegmentDistanceSq = clampedMin * clampedMin;
         this._maxStepDistance = 0;
@@ -65,7 +66,7 @@ export class StraightLineTrail {
         this._geometry.setDrawRange(0, 0); // nothing yet
 
         const effectiveOpacity = scaleOpacityForDisplay(this._opacity);
-        const effectiveWidth = scaleLineWidthForDisplay(lineWidth);
+        const effectiveWidth = scaleLineWidthForDisplay(this._lineWidth);
         // Keep depthWrite disabled for transparent lines to avoid occluding scene content
         this._material = new THREE.LineBasicMaterial({ color: this._color, linewidth: effectiveWidth, transparent: effectiveOpacity < 1.0, opacity: effectiveOpacity, depthWrite: false, fog: false, toneMapped: false });
         // Ensure trails stay visible during camera fly-throughs by bypassing frustum
@@ -74,6 +75,8 @@ export class StraightLineTrail {
         this._line.frustumCulled = false;
         // Tag for discovery and back-reference
         this._line.userData.isTrail = true;
+        this._line.userData.trailBaseOpacity = this._opacity;
+        this._line.userData.trailBaseLineWidth = this._lineWidth;
         const passId = resolveTrailPassId(scene);
         if (Number.isFinite(passId)) {
             this._line.userData.trailPassId = passId;
@@ -240,10 +243,32 @@ export class StraightLineTrail {
     setBaseOpacity(newBaseOpacity) {
         if (typeof newBaseOpacity !== 'number' || !isFinite(newBaseOpacity)) return;
         this._opacity = Math.max(0, Math.min(1, newBaseOpacity));
-        const eff = scaleOpacityForDisplay(this._opacity);
+        if (this._line && this._line.userData) {
+            this._line.userData.trailBaseOpacity = this._opacity;
+        }
+        this.refreshDisplayScale();
+    }
+
+    /** Adjust base line width at runtime and update underlying material accordingly. */
+    setBaseLineWidth(newBaseLineWidth) {
+        if (typeof newBaseLineWidth !== 'number' || !isFinite(newBaseLineWidth)) return;
+        this._lineWidth = Math.max(0.1, newBaseLineWidth);
+        if (this._line && this._line.userData) {
+            this._line.userData.trailBaseLineWidth = this._lineWidth;
+        }
+        this.refreshDisplayScale();
+    }
+
+    /** Re-apply runtime/DPR scaling to opacity + line width. */
+    refreshDisplayScale() {
+        const effOpacity = scaleOpacityForDisplay(this._opacity);
+        const effWidth = scaleLineWidthForDisplay(this._lineWidth);
         if (this._material) {
-            this._material.opacity = eff;
-            this._material.transparent = eff < 1.0;
+            this._material.opacity = effOpacity;
+            this._material.transparent = effOpacity < 1.0;
+            if (Number.isFinite(effWidth)) {
+                this._material.linewidth = effWidth;
+            }
             this._material.needsUpdate = true;
         }
     }
@@ -251,6 +276,11 @@ export class StraightLineTrail {
     /** Return current base opacity prior to DPR scaling. */
     getBaseOpacity() {
         return this._opacity;
+    }
+
+    /** Return current base line width prior to DPR scaling. */
+    getBaseLineWidth() {
+        return this._lineWidth;
     }
 
     /** Clamp how far the trail can advance per update (0 disables). */
@@ -376,14 +406,16 @@ export class SegmentTrailBatch {
     constructor(scene, capacity = 1, color = TRAIL_COLOR, lineWidth = TRAIL_LINE_WIDTH, opacity = TRAIL_OPACITY) {
         this._scene = scene;
         this._capacity = Math.max(1, Math.floor(capacity || 1));
+        this._lineWidth = Number.isFinite(lineWidth) ? lineWidth : TRAIL_LINE_WIDTH;
+        this._opacity = Number.isFinite(opacity) ? opacity : TRAIL_OPACITY;
         this._positions = new Float32Array(this._capacity * 2 * 3);
         this._attr = new THREE.BufferAttribute(this._positions, 3).setUsage(THREE.DynamicDrawUsage);
         this._geometry = new THREE.BufferGeometry();
         this._geometry.setAttribute('position', this._attr);
         this._geometry.setDrawRange(0, this._capacity * 2);
 
-        const effectiveOpacity = scaleOpacityForDisplay(opacity);
-        const effectiveWidth = scaleLineWidthForDisplay(lineWidth);
+        const effectiveOpacity = scaleOpacityForDisplay(this._opacity);
+        const effectiveWidth = scaleLineWidthForDisplay(this._lineWidth);
         this._material = new THREE.LineBasicMaterial({
             color,
             linewidth: effectiveWidth,
@@ -398,6 +430,9 @@ export class SegmentTrailBatch {
         this._line.frustumCulled = false;
         this._line.userData.isTrail = true;
         this._line.userData.trailBatch = true;
+        this._line.userData.trailBatchRef = this;
+        this._line.userData.trailBaseOpacity = this._opacity;
+        this._line.userData.trailBaseLineWidth = this._lineWidth;
         const passId = resolveTrailPassId(scene);
         if (Number.isFinite(passId)) {
             this._line.userData.trailPassId = passId;
@@ -406,6 +441,18 @@ export class SegmentTrailBatch {
         if (scene) scene.add(this._line);
 
         this._nextIndex = 0;
+    }
+
+    refreshDisplayScale() {
+        if (!this._material) return;
+        const effOpacity = scaleOpacityForDisplay(this._opacity);
+        const effWidth = scaleLineWidthForDisplay(this._lineWidth);
+        this._material.opacity = effOpacity;
+        this._material.transparent = effOpacity < 1.0;
+        if (Number.isFinite(effWidth)) {
+            this._material.linewidth = effWidth;
+        }
+        this._material.needsUpdate = true;
     }
 
     acquireTrail() {
@@ -532,6 +579,8 @@ export function mergeTrailsIntoLineSegments(trails, scene, color = TRAIL_COLOR, 
     const merged = new THREE.LineSegments(geometry, material);
     merged.userData.isTrail = true;
     merged.userData.trailMerged = true;
+    merged.userData.trailBaseOpacity = opacity;
+    merged.userData.trailBaseLineWidth = lineWidth;
     const passId = resolveTrailPassId(scene);
     if (Number.isFinite(passId)) {
         merged.userData.trailPassId = passId;
@@ -574,6 +623,8 @@ export function buildMergedLineSegmentsFromSegments(segmentsList, scene, color =
     const merged = new THREE.LineSegments(geometry, material);
     merged.userData.isTrail = true;
     merged.userData.trailMerged = true;
+    merged.userData.trailBaseOpacity = opacity;
+    merged.userData.trailBaseLineWidth = lineWidth;
     const passId = resolveTrailPassId(scene);
     if (Number.isFinite(passId)) {
         merged.userData.trailPassId = passId;
@@ -583,6 +634,58 @@ export function buildMergedLineSegmentsFromSegments(segmentsList, scene, color =
     // in raycast tooltips (they are purely decorative).
     scene.add(merged);
     return merged;
+}
+
+/**
+ * Re-apply runtime/DPR trail scaling to already-created trail materials.
+ * Useful when runtime multipliers change mid-pass (e.g. while skipping).
+ */
+export function refreshTrailDisplayScales(root) {
+    if (!root || typeof root.traverse !== 'function') return 0;
+    let refreshed = 0;
+    root.traverse((obj) => {
+        if (!obj || !obj.userData) return;
+        const isTrail = !!(obj.userData.isTrail || obj.userData.trailMerged || obj.userData.trailBatch);
+        if (!isTrail) return;
+
+        const trailRef = obj.userData.trailRef;
+        if (trailRef && typeof trailRef.refreshDisplayScale === 'function') {
+            trailRef.refreshDisplayScale();
+            refreshed += 1;
+            return;
+        }
+        const trailBatchRef = obj.userData.trailBatchRef;
+        if (trailBatchRef && typeof trailBatchRef.refreshDisplayScale === 'function') {
+            trailBatchRef.refreshDisplayScale();
+            refreshed += 1;
+            return;
+        }
+
+        const material = obj.material;
+        if (!material) return;
+        const materials = Array.isArray(material) ? material : [material];
+        const baseOpacity = Number.isFinite(obj.userData.trailBaseOpacity)
+            ? obj.userData.trailBaseOpacity
+            : TRAIL_OPACITY;
+        const baseLineWidth = Number.isFinite(obj.userData.trailBaseLineWidth)
+            ? obj.userData.trailBaseLineWidth
+            : TRAIL_LINE_WIDTH;
+        const effOpacity = scaleOpacityForDisplay(baseOpacity);
+        const effWidth = scaleLineWidthForDisplay(baseLineWidth);
+        materials.forEach((mat) => {
+            if (!mat) return;
+            if (Number.isFinite(effOpacity)) {
+                mat.opacity = effOpacity;
+                mat.transparent = effOpacity < 1.0;
+            }
+            if (Number.isFinite(effWidth)) {
+                mat.linewidth = effWidth;
+            }
+            mat.needsUpdate = true;
+        });
+        refreshed += 1;
+    });
+    return refreshed;
 }
 
 export function clearTrailsFromScene(scene, { includeAllLines = false, passId = null } = {}) {

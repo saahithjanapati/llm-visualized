@@ -35,7 +35,7 @@ import { BatchedPrismVectorSet } from '../components/BatchedPrismVectorSet.js';
 import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
 import { PrismLayerNormAnimation } from '../animations/PrismLayerNormAnimation.js';
 import { MHSA_BRIGHT_GREEN, MHSA_BRIGHT_RED } from '../animations/LayerAnimationConstants.js';
-import { setGlobalTrailMaxStepDistance, clearTrailsFromScene } from '../utils/trailUtils.js';
+import { setGlobalTrailMaxStepDistance, clearTrailsFromScene, refreshTrailDisplayScales } from '../utils/trailUtils.js';
 import { applyLayerNormMaterial } from './layers/gpt2LayerUtils.js';
 
 function simplePrismMultiply(srcVec, tgtVec, onComplete) {
@@ -1626,6 +1626,7 @@ export class LayerPipeline extends EventTarget {
             selfAttentionSpeed
         }, { durationMs: SKIP_SPEED_RAMP_IN_MS });
         setGlobalTrailMaxStepDistance(SKIP_TRAIL_MAX_STEP_DISTANCE);
+        refreshTrailDisplayScales(this._engine?.scene);
 
         if (layer && typeof layer.setSkipToEndMode === 'function') {
             layer.setSkipToEndMode(true);
@@ -1664,6 +1665,7 @@ export class LayerPipeline extends EventTarget {
             selfAttentionSpeed
         }, { durationMs: SKIP_SPEED_RAMP_IN_MS });
         setGlobalTrailMaxStepDistance(SKIP_TRAIL_MAX_STEP_DISTANCE);
+        refreshTrailDisplayScales(this._engine?.scene);
 
         this._layers.forEach(layer => {
             if (layer && typeof layer.setSkipToEndMode === 'function') {

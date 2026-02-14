@@ -121,7 +121,18 @@
                 </div>
                 <div id="detailAttentionEmpty" class="attention-empty">No attention scores available.</div>
                 <div id="detailAttentionNote" class="attention-note"></div>
-                <div id="detailAttentionValue" class="attention-value"></div>
+                <div id="detailAttentionValue" class="attention-value" data-empty="true">
+                    <div class="attention-value-head" aria-hidden="true">
+                        <span>Source token</span>
+                        <span>Target token</span>
+                        <span>Score</span>
+                    </div>
+                    <div class="attention-value-bar">
+                        <span id="detailAttentionValueSource" class="attention-value-item attention-value-item--source">--</span>
+                        <span id="detailAttentionValueTarget" class="attention-value-item attention-value-item--target">--</span>
+                        <span id="detailAttentionValueScore" class="attention-value-item attention-value-item--score">--</span>
+                    </div>
+                </div>
                 <div class="attention-legend" aria-hidden="true">
                     <span id="detailAttentionLegendLow" class="attention-legend-label">&lt;= -5</span>
                     <div id="detailAttentionLegend" class="attention-legend-bar" data-mid="0"></div>
