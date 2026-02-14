@@ -461,49 +461,77 @@ export class AutoCameraController {
 
         if (targetVec) {
             if (lane?.stopRise && lane?.stopRiseTarget) {
-                const sourceCenter = TMP_CENTER_A;
-                const targetCenter = TMP_CENTER_B;
-                const sourceOk = this._getVectorWorldCenter(vec, sourceCenter);
-                const targetVecRef = this._findVectorByGroup(lane, lane.stopRiseTarget);
-                const targetOk = targetVecRef
-                    ? this._getVectorWorldCenter(targetVecRef, targetCenter)
-                    : this._getGroupWorldPosition(lane.stopRiseTarget, targetCenter);
-
-                if (sourceOk && targetOk) {
-                    const hiddenThreshold = HIDE_INSTANCE_Y_OFFSET * 0.2;
-                    if (sourceCenter.y < hiddenThreshold) {
-                        const lastSource = lane.__followLastSourceVec || (lane.__followLastSourceVec = new THREE.Vector3());
-                        if (!lane.__followLastSourceValid) {
-                            lastSource.copy(targetCenter);
-                            lane.__followLastSourceValid = true;
-                        }
-                        const progress = Math.min(1, (lane.__followHiddenProgress || 0) + 0.12);
-                        lane.__followHiddenProgress = progress;
-                        targetVec.lerpVectors(lastSource, targetCenter, progress);
-                    } else {
-                        lane.__followHiddenProgress = 0;
-                        const lastSource = lane.__followLastSourceVec || (lane.__followLastSourceVec = new THREE.Vector3());
-                        lastSource.copy(sourceCenter);
-                        lane.__followLastSourceValid = true;
-                        targetVec.copy(sourceCenter);
-                    }
-                } else if (sourceOk) {
-                    lane.__followHiddenProgress = 0;
-                    targetVec.copy(sourceCenter);
-                } else if (targetOk) {
-                    targetVec.copy(targetCenter);
-                } else {
+                if (!this._resolveStopRiseFollowReference(lane, vec, targetVec)) {
                     vecGroup.getWorldPosition(targetVec);
                 }
             } else if (!this._getVectorWorldCenter(vec, targetVec)) {
-                if (lane) {
-                    lane.__followHiddenProgress = 0;
-                }
+                this._clearStopRiseFollowState(lane);
                 vecGroup.getWorldPosition(targetVec);
+            } else {
+                this._clearStopRiseFollowState(lane);
             }
         }
 
         return { laneIndex, laneCount };
+    }
+
+    _clearStopRiseFollowState(lane) {
+        if (!lane) return;
+        delete lane.__followStopRiseTarget;
+        delete lane.__followStopRiseLastY;
+        delete lane.__followStopRiseRef;
+    }
+
+    _resolveStopRiseFollowReference(lane, sourceVec, out) {
+        if (!lane || !out || !lane.stopRiseTarget) return false;
+
+        const sourceCenter = TMP_CENTER_A;
+        const targetCenter = TMP_CENTER_B;
+        const sourceOk = this._getGroupWorldPosition(sourceVec?.group, sourceCenter);
+        const targetVecRef = this._findVectorByGroup(lane, lane.stopRiseTarget);
+        const targetOk = this._getGroupWorldPosition(
+            targetVecRef?.group || lane.stopRiseTarget,
+            targetCenter
+        );
+
+        if (!sourceOk && !targetOk) return false;
+        if (!targetOk) {
+            this._clearStopRiseFollowState(lane);
+            out.copy(sourceCenter);
+            return true;
+        }
+        if (!sourceOk) {
+            this._clearStopRiseFollowState(lane);
+            out.copy(targetCenter);
+            return true;
+        }
+
+        if (lane.__followStopRiseTarget !== lane.stopRiseTarget || !lane.__followStopRiseRef) {
+            lane.__followStopRiseTarget = lane.stopRiseTarget;
+            lane.__followStopRiseLastY = sourceCenter.y;
+            lane.__followStopRiseRef = new THREE.Vector3().copy(sourceCenter);
+        }
+
+        const rawProgress = Number.isFinite(lane.mhsaResidualAddProgress)
+            ? lane.mhsaResidualAddProgress
+            : 0;
+        const clampedProgress = Math.min(1, Math.max(0, rawProgress));
+        const easedProgress = clampedProgress * clampedProgress * (3 - 2 * clampedProgress);
+
+        const desired = this._autoCameraOffsetScratch;
+        desired.lerpVectors(sourceCenter, targetCenter, easedProgress);
+
+        const ref = lane.__followStopRiseRef;
+        const smoothAlpha = 0.18 + 0.42 * easedProgress;
+        ref.lerp(desired, smoothAlpha);
+
+        const isUpwardHandoff = targetCenter.y >= sourceCenter.y - 0.5;
+        if (isUpwardHandoff && Number.isFinite(lane.__followStopRiseLastY) && ref.y < lane.__followStopRiseLastY) {
+            ref.y = lane.__followStopRiseLastY;
+        }
+        lane.__followStopRiseLastY = ref.y;
+        out.copy(ref);
+        return true;
     }
 
     _getGroupWorldPosition(group, out) {
@@ -710,6 +738,28 @@ export class AutoCameraController {
         overlay.textContent = `Offset vs Residual Lane ${laneLabel}\nΔx: ${format(offset.x)}\nΔy: ${format(offset.y)}\nΔz: ${format(offset.z)}`;
     }
 
+    _isTopLayerNormCameraPhase(layer, lanes) {
+        if (!layer || !Array.isArray(lanes) || !lanes.length) return false;
+
+        const topLnActive = lanes.some((lane) => lane
+            && (lane.__topLnEntered || lane.__topLnMultStarted || lane.__topLnShiftStarted || lane.__topLnShiftComplete));
+        if (!topLnActive) return false;
+
+        const forwardComplete = (typeof this._pipeline?.isForwardPassComplete === 'function')
+            ? this._pipeline.isForwardPassComplete()
+            : false;
+        if (forwardComplete) return false;
+
+        const entryY = Number.isFinite(layer.__topEmbedEntryYLocal) ? layer.__topEmbedEntryYLocal : null;
+        if (!Number.isFinite(entryY)) return true;
+
+        const reachedProjectionZone = lanes.some((lane) => {
+            const y = lane?.originalVec?.group?.position?.y;
+            return Number.isFinite(y) && y >= entryY - 0.5;
+        });
+        return !reachedProjectionZone;
+    }
+
     _resolveAutoCameraViewKey() {
         const layers = this._pipeline?._layers;
         if (!Array.isArray(layers) || !layers.length) return 'default';
@@ -720,8 +770,10 @@ export class AutoCameraController {
         const laneCount = lanes.length;
         const laneIndex = laneCount ? Math.min(laneCount - 1, Math.floor(laneCount / 2)) : -1;
         const lane = laneIndex >= 0 ? lanes[laneIndex] : null;
-        const inLn = !!(lane && (lane.horizPhase === 'insideLN' || lane.ln2Phase === 'insideLN'));
-        this._autoCameraViewContext = { lane, laneIndex, laneCount, inLn };
+        const inLaneLn = !!(lane && (lane.horizPhase === 'insideLN' || lane.ln2Phase === 'insideLN'));
+        const inTopLn = this._isTopLayerNormCameraPhase(layer, lanes);
+        const inLn = inLaneLn || inTopLn;
+        this._autoCameraViewContext = { lane, laneIndex, laneCount, inLn, inTopLn };
         const passPhase = mhsa?.mhaPassThroughPhase || 'positioning_mha_vectors';
         const inTravel = !!(lane && lane.horizPhase === 'travelMHSA'
             && passPhase === 'positioning_mha_vectors');
@@ -785,6 +837,7 @@ export class AutoCameraController {
             const isMlpTransition = priorKey === 'ln'
                 && key === 'default'
                 && viewContext
+                && !viewContext.inTopLn
                 && viewContext.lane
                 && viewContext.lane.ln2Phase
                 && viewContext.lane.ln2Phase !== 'insideLN';
