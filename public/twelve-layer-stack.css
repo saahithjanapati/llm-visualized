@@ -1557,7 +1557,7 @@ body.touch-ui * {
         gap: 0;
     }
     #hudPanel { padding: 6px 8px 3px; gap: 4px 8px; }
-    #statusOverlay { font-size: 11px; line-height: 1.12; }
+    #statusOverlay { font-size: 12px; line-height: 1.15; }
     #parameterCounter .param-value { font-size: 15px; }
     #equationsPanel {
         height: 76px;
@@ -1596,7 +1596,7 @@ body.touch-ui * {
         gap: 0;
     }
     #hudPanel { padding: 6px 8px 3px; gap: 4px 8px; }
-    #statusOverlay { font-size: 11px; line-height: 1.12; }
+    #statusOverlay { font-size: 12px; line-height: 1.15; }
     #parameterCounter .param-label { font-size: 10px; }
     #parameterCounter .param-value { font-size: 15px; }
     #equationsPanel {

@@ -238,6 +238,9 @@ export class AutoCameraController {
         this._autoCameraTravelMobileOverrideCameraOffset = null;
         this._autoCameraTravelMobileOverrideTargetOffset = null;
         this._autoCameraTravelMobileOverrideEnabled = false;
+        this._autoCameraFinalMobileOverrideCameraOffset = null;
+        this._autoCameraFinalMobileOverrideTargetOffset = null;
+        this._autoCameraFinalMobileOverrideEnabled = false;
         this._autoCameraScaleMinWidth = Number.isFinite(opts.autoCameraScaleMinWidth)
             ? Math.max(200, opts.autoCameraScaleMinWidth)
             : 360;
@@ -276,8 +279,11 @@ export class AutoCameraController {
         this._autoCameraLnTargetOffset = new THREE.Vector3();
         this._autoCameraTravelCameraOffset = new THREE.Vector3();
         this._autoCameraTravelTargetOffset = new THREE.Vector3();
+        this._autoCameraFinalCameraOffset = new THREE.Vector3();
+        this._autoCameraFinalTargetOffset = new THREE.Vector3();
         this._autoCameraLnOffsetsEnabled = false;
         this._autoCameraTravelOffsetsEnabled = false;
+        this._autoCameraFinalOffsetsEnabled = false;
         this._autoCameraDefaultCameraOffsetBase = new THREE.Vector3();
         this._autoCameraDefaultTargetOffsetBase = new THREE.Vector3();
         this._autoCameraMhsaCameraOffsetBase = new THREE.Vector3();
@@ -288,6 +294,8 @@ export class AutoCameraController {
         this._autoCameraLnTargetOffsetBase = new THREE.Vector3();
         this._autoCameraTravelCameraOffsetBase = new THREE.Vector3();
         this._autoCameraTravelTargetOffsetBase = new THREE.Vector3();
+        this._autoCameraFinalCameraOffsetBase = new THREE.Vector3();
+        this._autoCameraFinalTargetOffsetBase = new THREE.Vector3();
         this._autoCameraInspectorRef = new THREE.Vector3();
         this._hasAutoCameraOffsets = false;
         this._suppressControlsChange = false;
@@ -379,6 +387,21 @@ export class AutoCameraController {
             this._autoCameraTravelMobileOverrideEnabled = true;
         }
 
+        const finalCamOffset = coerceVector3(opts.autoCameraFinalCameraOffset, null);
+        const finalTargetOffset = coerceVector3(opts.autoCameraFinalTargetOffset, null);
+        if (finalCamOffset && finalTargetOffset) {
+            this._autoCameraFinalCameraOffsetBase.copy(finalCamOffset);
+            this._autoCameraFinalTargetOffsetBase.copy(finalTargetOffset);
+            this._autoCameraFinalOffsetsEnabled = true;
+        }
+        const finalMobileCamOffset = coerceVector3(opts.autoCameraFinalMobileCameraOffset, null);
+        const finalMobileTargetOffset = coerceVector3(opts.autoCameraFinalMobileTargetOffset, null);
+        if (finalMobileCamOffset && finalMobileTargetOffset) {
+            this._autoCameraFinalMobileOverrideCameraOffset = finalMobileCamOffset;
+            this._autoCameraFinalMobileOverrideTargetOffset = finalMobileTargetOffset;
+            this._autoCameraFinalMobileOverrideEnabled = true;
+        }
+
         this._updateAutoCameraScaledOffsets(true);
 
         if (this._engine?.controls) {
@@ -464,6 +487,9 @@ export class AutoCameraController {
                 if (!this._resolveStopRiseFollowReference(lane, vec, targetVec)) {
                     vecGroup.getWorldPosition(targetVec);
                 }
+            } else if (this._resolveStopRiseReleaseReference(lane, vec, targetVec)) {
+                // Keep blending to the settled residual vector for a short
+                // release window after stopRise clears to avoid a final jerk.
             } else if (!this._getVectorWorldCenter(vec, targetVec)) {
                 this._clearStopRiseFollowState(lane);
                 vecGroup.getWorldPosition(targetVec);
@@ -480,6 +506,8 @@ export class AutoCameraController {
         delete lane.__followStopRiseTarget;
         delete lane.__followStopRiseLastY;
         delete lane.__followStopRiseRef;
+        delete lane.__followStopRiseReleaseFrom;
+        delete lane.__followStopRiseReleaseProgress;
     }
 
     _resolveStopRiseFollowReference(lane, sourceVec, out) {
@@ -511,6 +539,8 @@ export class AutoCameraController {
             lane.__followStopRiseLastY = sourceCenter.y;
             lane.__followStopRiseRef = new THREE.Vector3().copy(sourceCenter);
         }
+        delete lane.__followStopRiseReleaseFrom;
+        delete lane.__followStopRiseReleaseProgress;
 
         const rawProgress = Number.isFinite(lane.mhsaResidualAddProgress)
             ? lane.mhsaResidualAddProgress
@@ -531,6 +561,38 @@ export class AutoCameraController {
         }
         lane.__followStopRiseLastY = ref.y;
         out.copy(ref);
+        return true;
+    }
+
+    _resolveStopRiseReleaseReference(lane, sourceVec, out) {
+        if (!lane || !out || !lane.__followStopRiseRef) return false;
+
+        const settledCenter = TMP_CENTER_A;
+        const settledOk = this._getVectorWorldCenter(sourceVec, settledCenter)
+            || this._getGroupWorldPosition(sourceVec?.group, settledCenter);
+        if (!settledOk) {
+            this._clearStopRiseFollowState(lane);
+            return false;
+        }
+
+        if (!lane.__followStopRiseReleaseFrom) {
+            lane.__followStopRiseReleaseFrom = lane.__followStopRiseRef.clone();
+            lane.__followStopRiseReleaseProgress = 0;
+        }
+
+        const baseProgress = Number.isFinite(lane.__followStopRiseReleaseProgress)
+            ? lane.__followStopRiseReleaseProgress
+            : 0;
+        const nextProgress = Math.min(1, baseProgress + 0.18);
+        lane.__followStopRiseReleaseProgress = nextProgress;
+
+        const eased = nextProgress * nextProgress * (3 - 2 * nextProgress);
+        out.lerpVectors(lane.__followStopRiseReleaseFrom, settledCenter, eased);
+
+        if (nextProgress >= 1 || out.distanceToSquared(settledCenter) <= 0.25) {
+            out.copy(settledCenter);
+            this._clearStopRiseFollowState(lane);
+        }
         return true;
     }
 
@@ -773,7 +835,13 @@ export class AutoCameraController {
         const inLaneLn = !!(lane && (lane.horizPhase === 'insideLN' || lane.ln2Phase === 'insideLN'));
         const inTopLn = this._isTopLayerNormCameraPhase(layer, lanes);
         const inLn = inLaneLn || inTopLn;
-        this._autoCameraViewContext = { lane, laneIndex, laneCount, inLn, inTopLn };
+        const forwardComplete = (typeof this._pipeline?.isForwardPassComplete === 'function')
+            ? this._pipeline.isForwardPassComplete()
+            : false;
+        this._autoCameraViewContext = { lane, laneIndex, laneCount, inLn, inTopLn, forwardComplete };
+        if (forwardComplete) {
+            return 'final';
+        }
         const passPhase = mhsa?.mhaPassThroughPhase || 'positioning_mha_vectors';
         const inTravel = !!(lane && lane.horizPhase === 'travelMHSA'
             && passPhase === 'positioning_mha_vectors');
@@ -830,6 +898,9 @@ export class AutoCameraController {
         } else if (key === 'concat' && this._autoCameraConcatOffsetsEnabled) {
             camOffset = this._autoCameraConcatCameraOffset;
             targetOffset = this._autoCameraConcatTargetOffset;
+        } else if (key === 'final' && this._autoCameraFinalOffsetsEnabled) {
+            camOffset = this._autoCameraFinalCameraOffset;
+            targetOffset = this._autoCameraFinalTargetOffset;
         }
 
         if (key !== this._autoCameraViewKey) {
@@ -971,6 +1042,20 @@ export class AutoCameraController {
                 );
                 this._autoCameraTravelTargetOffset.lerp(
                     this._autoCameraTravelMobileOverrideTargetOffset,
+                    mobileFactor
+                );
+            }
+        }
+        if (this._autoCameraFinalOffsetsEnabled) {
+            applyScaleShift(this._autoCameraFinalCameraOffset, this._autoCameraFinalCameraOffsetBase);
+            applyScaleShift(this._autoCameraFinalTargetOffset, this._autoCameraFinalTargetOffsetBase);
+            if (this._autoCameraFinalMobileOverrideEnabled && mobileFactor > 0.0001) {
+                this._autoCameraFinalCameraOffset.lerp(
+                    this._autoCameraFinalMobileOverrideCameraOffset,
+                    mobileFactor
+                );
+                this._autoCameraFinalTargetOffset.lerp(
+                    this._autoCameraFinalMobileOverrideTargetOffset,
                     mobileFactor
                 );
             }
