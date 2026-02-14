@@ -3,6 +3,7 @@ import * as THREE from 'three';
 // Visual dependencies
 import { WeightMatrixVisualization } from '../../components/WeightMatrixVisualization.js';
 import { updateSciFiMaterialUniforms } from '../../utils/sciFiMaterial.js';
+import { scaleGlobalEmissiveIntensity } from '../../utils/materialUtils.js';
 
 // Animation constants
 import {
@@ -216,7 +217,7 @@ export function buildMHAVisuals(parentGroup, {
             child.material.opacity          = 1.0;
             child.material.transparent      = false;
             child.material.emissive         = initDarkColor;
-            child.material.emissiveIntensity = 0.16;
+            child.material.emissiveIntensity = scaleGlobalEmissiveIntensity(0.16);
         }
     });
     softenMatrixSurface(outputProjectionMatrix);

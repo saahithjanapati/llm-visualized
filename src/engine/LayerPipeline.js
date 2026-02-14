@@ -37,6 +37,7 @@ import { PrismLayerNormAnimation } from '../animations/PrismLayerNormAnimation.j
 import { MHSA_BRIGHT_GREEN, MHSA_BRIGHT_RED } from '../animations/LayerAnimationConstants.js';
 import { setGlobalTrailMaxStepDistance, clearTrailsFromScene, refreshTrailDisplayScales } from '../utils/trailUtils.js';
 import { applyLayerNormMaterial } from './layers/gpt2LayerUtils.js';
+import { scaleGlobalEmissiveIntensity } from '../utils/materialUtils.js';
 
 function simplePrismMultiply(srcVec, tgtVec, onComplete) {
     const srcCount = srcVec && Number.isFinite(srcVec.instanceCount) ? srcVec.instanceCount : VECTOR_LENGTH_PRISM;
@@ -2083,7 +2084,7 @@ export class LayerPipeline extends EventTarget {
         const white = new THREE.Color(0xffffff);
         lnTopGroup.traverse(obj => {
             if (obj.isMesh && obj.material) {
-                const apply = mat => { mat.color.copy(white); mat.emissive.copy(white); mat.emissiveIntensity = 0.5; mat.transparent = false; mat.opacity = 1.0; };
+                const apply = mat => { mat.color.copy(white); mat.emissive.copy(white); mat.emissiveIntensity = scaleGlobalEmissiveIntensity(0.5); mat.transparent = false; mat.opacity = 1.0; };
                 if (Array.isArray(obj.material)) obj.material.forEach(apply); else apply(obj.material);
             }
         });

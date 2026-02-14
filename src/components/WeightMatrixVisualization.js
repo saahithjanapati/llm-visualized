@@ -3,6 +3,7 @@ import { CSG } from 'three-csg-ts'; // Import CSG
 import { toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { QUALITY_PRESET, NUM_VECTOR_LANES, VECTOR_DEPTH_SPACING, USE_GLB_MATERIALS, USE_INSTANCED_MATRIX_SLICES } from '../utils/constants.js';
 import { createSciFiMaterial, updateSciFiDimensions, updateSciFiMaterialColor } from '../utils/sciFiMaterial.js';
+import { scaleGlobalEmissiveIntensity } from '../utils/materialUtils.js';
 
 // ------------------------------------------------------------------
 // Geometry cache (module-level) – keyed by a stringified set of the main
@@ -927,6 +928,9 @@ export class WeightMatrixVisualization {
     }
 
     setMaterialProperties(props) {
+        const emissiveIntensity = (props.emissiveIntensity !== undefined)
+            ? scaleGlobalEmissiveIntensity(props.emissiveIntensity)
+            : undefined;
         const applyProps = (mat) => {
             if (mat) {
                  if (Array.isArray(mat)) {
@@ -938,7 +942,7 @@ export class WeightMatrixVisualization {
                         if (props.iridescence !== undefined) m.iridescence = props.iridescence;
                         if (props.envMapIntensity !== undefined) m.envMapIntensity = props.envMapIntensity;
                         if (props.emissive !== undefined) m.emissive.set(props.emissive);
-                        if (props.emissiveIntensity !== undefined) m.emissiveIntensity = props.emissiveIntensity;
+                        if (emissiveIntensity !== undefined) m.emissiveIntensity = emissiveIntensity;
                         if (props.opacity !== undefined) m.opacity = props.opacity;
                         if (props.transparent !== undefined) m.transparent = props.transparent;
                     });
@@ -950,7 +954,7 @@ export class WeightMatrixVisualization {
                     if (props.iridescence !== undefined) mat.iridescence = props.iridescence;
                     if (props.envMapIntensity !== undefined) mat.envMapIntensity = props.envMapIntensity;
                     if (props.emissive !== undefined) mat.emissive.set(props.emissive);
-                    if (props.emissiveIntensity !== undefined) mat.emissiveIntensity = props.emissiveIntensity;
+                    if (emissiveIntensity !== undefined) mat.emissiveIntensity = emissiveIntensity;
                     if (props.opacity !== undefined) mat.opacity = props.opacity;
                     if (props.transparent !== undefined) mat.transparent = props.transparent;
                 }

@@ -41,6 +41,7 @@ import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
 import { computeCenteredPrismX, getPrismSpacing, PRISM_INSTANCE_WIDTH_SCALE } from '../utils/prismLayout.js';
 import { buildMHAVisuals, VectorRouter, PassThroughAnimator, SelfAttentionAnimator } from './mhsa/index.js';
 import { updateSciFiMaterialUniforms } from '../utils/sciFiMaterial.js';
+import { scaleGlobalEmissiveIntensity } from '../utils/materialUtils.js';
 import { getSideCopyEntry } from './mhsa/laneIndex.js';
 import { animateVectorMatrixPassThrough as animateVectorMatrixPassThroughExternal } from './mhsa/VectorMatrixPassThrough.js';
 import { appState } from '../state/appState.js';
@@ -830,7 +831,7 @@ export class MHSAAnimation {
                 child.material.transparent = false;
                 child.material.opacity = 1.0;
                 child.material.emissive = initDarkColor;
-                child.material.emissiveIntensity = 0.1; // Low initial emissive intensity
+                child.material.emissiveIntensity = scaleGlobalEmissiveIntensity(0.1); // Low initial emissive intensity
             }
         });
         this.parentGroup.add(this.outputProjectionMatrix.group);
@@ -1818,7 +1819,7 @@ export class MHSAAnimation {
 
             // Lower emissive intensity on the shared material (if present)
             if (vec.mesh.material && typeof vec.mesh.material.emissiveIntensity === 'number') {
-                vec.mesh.material.emissiveIntensity = 0.05;
+                vec.mesh.material.emissiveIntensity = scaleGlobalEmissiveIntensity(0.05);
             }
 
             // Ensure material supports transparency

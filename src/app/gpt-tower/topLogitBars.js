@@ -16,6 +16,7 @@ import {
     TOP_LOGIT_BAR_OPACITY,
     TOP_LOGIT_BAR_RISE_DURATION_MS
 } from '../../utils/constants.js';
+import { scaleGlobalEmissiveIntensity } from '../../utils/materialUtils.js';
 import { isIncompleteUtf8TokenId } from '../../utils/tokenEncodingNotes.js';
 import { formatTokenLabel } from './tokenLabels.js';
 
@@ -103,7 +104,7 @@ function createExtrudedTextGroup(label, font, { size, depth, color }) {
         roughness: 0.32,
         metalness: 0.12,
         emissive: matColor.clone().multiplyScalar(0.15),
-        emissiveIntensity: 0.9,
+        emissiveIntensity: scaleGlobalEmissiveIntensity(0.9),
         side: THREE.DoubleSide
     });
     const mesh = new THREE.Mesh(geometry, material);
@@ -350,7 +351,7 @@ export function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vo
         roughness: 0.35,
         metalness: 0.1,
         emissive: new THREE.Color(0x111111),
-        emissiveIntensity: 0.2,
+        emissiveIntensity: scaleGlobalEmissiveIntensity(0.2),
         transparent: TOP_LOGIT_BAR_OPACITY < 1,
         opacity: TOP_LOGIT_BAR_OPACITY,
         vertexColors: true

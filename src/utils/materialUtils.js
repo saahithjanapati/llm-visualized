@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 
+export const GLOBAL_EMISSIVE_INTENSITY_SCALE = 0.82;
+
 const GLOBAL_REFLECTIVITY_PROFILE = Object.freeze({
     envMapIntensityScale: 0.82,
     metalnessScale: 0.9,
@@ -7,13 +9,20 @@ const GLOBAL_REFLECTIVITY_PROFILE = Object.freeze({
     clearcoatScale: 0.88,
     clearcoatRoughnessOffset: 0.07,
     iridescenceScale: 0.88,
-    reflectivityScale: 0.9
+    reflectivityScale: 0.9,
+    emissiveIntensityScale: GLOBAL_EMISSIVE_INTENSITY_SCALE
 });
 
 const REFLECTIVITY_BASELINE_KEY = '__reflectivityBaselineV1';
 
 function clampUnit(value) {
     return THREE.MathUtils.clamp(value, 0, 1);
+}
+
+export function scaleGlobalEmissiveIntensity(value) {
+    const intensity = Number(value);
+    if (!Number.isFinite(intensity)) return value;
+    return Math.max(0, intensity * GLOBAL_EMISSIVE_INTENSITY_SCALE);
 }
 
 function captureBaseline(mat) {
@@ -33,6 +42,7 @@ function captureBaseline(mat) {
     maybeCapture('clearcoatRoughness');
     maybeCapture('iridescence');
     maybeCapture('reflectivity');
+    maybeCapture('emissiveIntensity');
 
     mat.userData[REFLECTIVITY_BASELINE_KEY] = baseline;
     return baseline;
@@ -63,6 +73,9 @@ function applyGlobalReflectivityProfile(mat, profile = GLOBAL_REFLECTIVITY_PROFI
     }
     if (typeof baseline.reflectivity === 'number' && typeof mat.reflectivity === 'number') {
         mat.reflectivity = clampUnit(baseline.reflectivity * profile.reflectivityScale);
+    }
+    if (typeof baseline.emissiveIntensity === 'number' && typeof mat.emissiveIntensity === 'number') {
+        mat.emissiveIntensity = scaleGlobalEmissiveIntensity(baseline.emissiveIntensity);
     }
 }
 
