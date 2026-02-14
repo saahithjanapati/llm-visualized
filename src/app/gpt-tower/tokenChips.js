@@ -511,6 +511,7 @@ export function addEmbeddingAndTokenChips({
         animateLaneOrder.forEach((laneIdx, rank) => {
             animateDelayRankByLane.set(laneIdx, rank);
         });
+        const vocabLaneStaggerMs = 0;
         const laneSpanMs = TOKEN_CHIP_STYLE.riseDelay * Math.max(0, animateLaneOrder.length - 1);
 
         const vocabMatrixBottomY = bottomVocabCenterY - EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2;
@@ -518,7 +519,7 @@ export function addEmbeddingAndTokenChips({
         const bottomEmbeddingVectorStartY = bottomVocabCenterY + EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2;
         const vocabRiseDuration = TOKEN_CHIP_STYLE.riseDuration * (TOKEN_CHIP_STYLE.vocabSlowdown || 1);
         const posRiseDuration = TOKEN_CHIP_STYLE.riseDuration * (TOKEN_CHIP_STYLE.positionSlowdown || 1);
-        const vocabChipWaveMs = vocabRiseDuration + laneSpanMs;
+        const vocabChipWaveMs = vocabRiseDuration + vocabLaneStaggerMs;
         const positionStartDelayMs = vocabChipWaveMs + Math.max(
             0,
             Number.isFinite(TOKEN_CHIP_STYLE.positionStartDelayAfterVocabMs)
@@ -527,6 +528,27 @@ export function addEmbeddingAndTokenChips({
         );
         const positionChipWaveMs = positionStartDelayMs + posRiseDuration + laneSpanMs;
         const maxChipRiseDuration = Math.max(vocabChipWaveMs, positionChipWaveMs);
+        const nowMs = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+            ? performance.now()
+            : Date.now();
+        // Gate first-layer residual rise until vocab chips enter the bottom embedding.
+        if (pipeline) {
+            pipeline.__inputVocabChipGate = {
+                enabled: true,
+                pending: true,
+                pendingFallbackAt: nowMs + Math.max(3000, vocabChipWaveMs + 2000),
+                releaseByToken: Object.create(null),
+                defaultReleaseAt: nowMs + Math.max(0, vocabRiseDuration)
+            };
+            // Gate deferred positional-vector launch until position chips enter.
+            pipeline.__inputPositionChipGate = {
+                enabled: true,
+                pending: true,
+                pendingFallbackAt: nowMs + Math.max(3000, positionChipWaveMs + 2000),
+                releaseByToken: Object.create(null),
+                defaultReleaseAt: nowMs + Math.max(0, positionStartDelayMs + posRiseDuration)
+            };
+        }
         const chipStartZOffset = TOKEN_CHIP_STYLE.zOffset;
         const chipFontLoader = new FontLoader();
         const animatedEmbeddingChips = [];
@@ -622,6 +644,12 @@ export function addEmbeddingAndTokenChips({
         };
         const spawnTokenChips = (font) => {
             if (disposed) return;
+            const usesTween = typeof TWEEN !== 'undefined';
+            const tokenWaveStartMs = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+                ? performance.now()
+                : Date.now();
+            const releaseByToken = Object.create(null);
+            const tokenReleaseDefaultMs = tokenWaveStartMs + (usesTween ? Math.max(0, vocabRiseDuration) : 0);
             // Animate the token chips upward from a resting "stash" position.
             if (!preserveCameraPose && animateLaneOrder.length) {
                 const cameraStartPos = new THREE.Vector3(
@@ -653,8 +681,18 @@ export function addEmbeddingAndTokenChips({
                 const chipLabel = `Token: ${label}`;
                 const tokenLabel = chipTokenLabelList[idx];
                 const hasAnimatedChip = animateLaneSet.has(idx);
-                const laneDelayRank = animateDelayRankByLane.get(idx) || 0;
                 let connector = null;
+                if (hasAnimatedChip && Number.isFinite(tokenIndex)) {
+                    const tokenReleaseAt = tokenWaveStartMs + (usesTween
+                        ? vocabRiseDuration
+                        : 0);
+                    const tokenKey = String(Math.max(0, Math.floor(tokenIndex)));
+                    if (!Number.isFinite(releaseByToken[tokenKey])) {
+                        releaseByToken[tokenKey] = tokenReleaseAt;
+                    } else {
+                        releaseByToken[tokenKey] = Math.min(releaseByToken[tokenKey], tokenReleaseAt);
+                    }
+                }
 
                 // Keep a static chip below the stack for context once the animated one rises.
                 const staticChip = createTokenChip(label, font, TOKEN_CHIP_STYLE);
@@ -706,7 +744,7 @@ export function addEmbeddingAndTokenChips({
                 if (typeof TWEEN !== 'undefined') {
                     const riseTween = new TWEEN.Tween(chip.position)
                         .to({ y: targetY, z: targetZ }, vocabRiseDuration)
-                        .delay(laneDelayRank * TOKEN_CHIP_STYLE.riseDelay)
+                        .delay(0)
                         .easing(TWEEN.Easing.Quadratic.Out);
                     if (connector) {
                         riseTween.onStart(() => {
@@ -730,10 +768,27 @@ export function addEmbeddingAndTokenChips({
                     }
                 }
             });
+            if (pipeline) {
+                pipeline.__inputVocabChipGate = {
+                    enabled: true,
+                    pending: false,
+                    pendingFallbackAt: tokenWaveStartMs,
+                    releaseByToken,
+                    defaultReleaseAt: tokenReleaseDefaultMs
+                };
+            }
         };
         const spawnPositionChips = (font) => {
             if (disposed) return;
             const style = POSITION_CHIP_STYLE;
+            const usesTween = typeof TWEEN !== 'undefined';
+            const positionWaveStartMs = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+                ? performance.now()
+                : Date.now();
+            const releaseByToken = Object.create(null);
+            const positionReleaseDefaultMs = positionWaveStartMs + (usesTween
+                ? Math.max(0, positionStartDelayMs + posRiseDuration)
+                : 0);
             const labels = chipPositionLabelList.slice(0, safeChipLaneCount).map((value) => String(value ?? ''));
             labels.forEach((label, idx) => {
                 const tokenIndex = resolveTokenIndexForLane(idx, chipTokenIndexList);
@@ -743,6 +798,17 @@ export function addEmbeddingAndTokenChips({
                 const hasAnimatedChip = animateLaneSet.has(idx);
                 const laneDelayRank = animateDelayRankByLane.get(idx) || 0;
                 let connector = null;
+                if (hasAnimatedChip && Number.isFinite(tokenIndex)) {
+                    const tokenReleaseAt = positionWaveStartMs + (usesTween
+                        ? positionStartDelayMs + (laneDelayRank * TOKEN_CHIP_STYLE.riseDelay) + posRiseDuration
+                        : 0);
+                    const tokenKey = String(Math.max(0, Math.floor(tokenIndex)));
+                    if (!Number.isFinite(releaseByToken[tokenKey])) {
+                        releaseByToken[tokenKey] = tokenReleaseAt;
+                    } else {
+                        releaseByToken[tokenKey] = Math.min(releaseByToken[tokenKey], tokenReleaseAt);
+                    }
+                }
                 const staticChip = createTokenChip(label, font, style);
                 const chipHeight = staticChip.userData.size.height;
                 const targetY = posMatrixBottomY + chipHeight / 2 + style.inset;
@@ -792,7 +858,7 @@ export function addEmbeddingAndTokenChips({
                 registerChip(chip);
                 animatedEmbeddingChips.push(chip);
 
-                if (typeof TWEEN !== 'undefined') {
+                if (usesTween) {
                     const riseTween = new TWEEN.Tween(chip.position)
                         .to({ y: targetY, z: targetZ }, posRiseDuration)
                         .delay(positionStartDelayMs + laneDelayRank * TOKEN_CHIP_STYLE.riseDelay)
@@ -819,6 +885,15 @@ export function addEmbeddingAndTokenChips({
                     }
                 }
             });
+            if (pipeline) {
+                pipeline.__inputPositionChipGate = {
+                    enabled: true,
+                    pending: false,
+                    pendingFallbackAt: positionWaveStartMs,
+                    releaseByToken,
+                    defaultReleaseAt: positionReleaseDefaultMs
+                };
+            }
         };
         chipFontLoader.load(
             'https://threejs.org/examples/fonts/helvetiker_regular.typeface.json',
@@ -1049,6 +1124,12 @@ export function addEmbeddingAndTokenChips({
     const dispose = () => {
         if (disposed) return;
         disposed = true;
+        if (pipeline && pipeline.__inputVocabChipGate) {
+            pipeline.__inputVocabChipGate = null;
+        }
+        if (pipeline && pipeline.__inputPositionChipGate) {
+            pipeline.__inputPositionChipGate = null;
+        }
         if (chipEntryTimeoutId) {
             clearTimeout(chipEntryTimeoutId);
             chipEntryTimeoutId = null;

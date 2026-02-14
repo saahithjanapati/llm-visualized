@@ -281,6 +281,11 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
     raycastRoot.add(dupVec.group);
     // Trail for duplicate vector inside LN1.
     const dupTrail = new StraightLineTrail(layer.root, 0xffffff, 1, undefined, undefined, LN_INTERNAL_TRAIL_MIN_SEGMENT);
+    // Preserve exact right-angle LN entry geometry during skip: internal LN trails
+    // should not be throttled by global trail-step clamping.
+    if (typeof dupTrail.setMaxStepDistance === 'function') {
+        dupTrail.setMaxStepDistance(1e9);
+    }
     dupTrail.start(dupVec.group.position);
     dupVec.userData = dupVec.userData || {};
     dupVec.userData.trail = dupTrail;
@@ -435,6 +440,12 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
             );
             // Trail (local to this layer) - enabled only until it reaches residual stream.
             const posTrail = new StraightLineTrail(layer.root, 0xffffff, 1, undefined, undefined, TRAIL_MIN_SEGMENT_DISTANCE);
+            // Skip mode globally clamps trail advance per update; disable that
+            // for positional pass-through so explicit corner waypoints (up, then left)
+            // are preserved instead of collapsing into diagonals.
+            if (typeof posTrail.setMaxStepDistance === 'function') {
+                posTrail.setMaxStepDistance(1e9);
+            }
             posTrail.start(posVec.group.position);
             posVec.userData = posVec.userData || {};
             posVec.userData.trail = posTrail;
@@ -448,6 +459,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
 
             lane.posVec = posVec;
             lane.posTrail = posTrail;
+            lane.__manualPosTrail = false;
 
             const fasterRise = ANIM_RISE_SPEED_ORIGINAL * POS_VEC_VERTICAL_SPEED_MULT;
             const horizSpeed = ANIM_HORIZ_SPEED * POS_VEC_HORIZONTAL_SPEED_MULT * GLOBAL_ANIM_SPEED_MULT;
@@ -458,6 +470,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
                 if (posTrail && !posTrailDisposed) {
                     posTrail.snapLastPointTo(posVec.group.position);
                 }
+                lane.__manualPosTrail = false;
                 // Stop extending trail once we arrive at residual stream.
                 retirePosTrail();
                 // Trigger addition: positional (above) travels DOWN into vocab (rising).
@@ -476,6 +489,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
                         lane.posAddComplete = true;
                     }, { finalData: sumData });
                 } catch (_) {
+                    lane.__manualPosTrail = false;
                     lane.posAddComplete = true;
                 }
             };
@@ -485,9 +499,30 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
             lane.startPositionalPassThrough = ({ immediate = false } = {}) => {
                 if (lane.__posPassStarted || lane.posAddComplete) return;
                 lane.__posPassStarted = true;
+                lane.__manualPosTrail = true;
+                const syncPosTrailToCurrent = ({ append = false } = {}) => {
+                    if (!posTrail || posTrailDisposed || !posVec || !posVec.group) return;
+                    if (append && typeof posTrail.update === 'function') {
+                        posTrail.update(posVec.group.position);
+                    } else if (typeof posTrail.snapLastPointTo === 'function') {
+                        posTrail.snapLastPointTo(posVec.group.position);
+                    } else if (typeof posTrail.update === 'function') {
+                        posTrail.update(posVec.group.position);
+                    }
+                };
+                if (!lane.__posPassAdjustedStartY && posVec && posVec.group) {
+                    const halfPrismHeight = Number.isFinite(posVec._basePrismCenterY)
+                        ? posVec._basePrismCenterY
+                        : 0;
+                    const prismHeight = halfPrismHeight > 0 ? halfPrismHeight * 2 : 10.5;
+                    posVec.group.position.y -= prismHeight;
+                    lane.__posPassAdjustedStartY = true;
+                    syncPosTrailToCurrent({ append: true });
+                }
                 if (posVec && posVec.group) {
                     posVec.group.visible = true;
                 }
+                const passStartX = posVec && posVec.group ? posVec.group.position.x : 0;
                 const targetYAbove = vocabRiseReferenceY + POS_VEC_Y_OFFSET_ABOVE_VOCAB;
                 const riseDist = Math.max(0, targetYAbove - posVec.group.position.y);
                 const riseMs = (riseDist / (fasterRise * GLOBAL_ANIM_SPEED_MULT)) * 1000;
@@ -499,19 +534,34 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
                     new TWEEN.Tween(posVec.group.position)
                         .to({ y: targetYAbove }, Math.max(100, riseMs))
                         .easing(TWEEN.Easing.Quadratic.InOut)
+                        .onUpdate(() => {
+                            // Hard-lock X during the vertical stage.
+                            posVec.group.position.x = passStartX;
+                            syncPosTrailToCurrent({ append: true });
+                        })
                         .onComplete(() => {
+                            // Force a corner sample so fast skip transitions don't
+                            // collapse the vertical+horizontal path into one diagonal.
+                            posVec.group.position.x = passStartX;
+                            posVec.group.position.y = targetYAbove;
+                            syncPosTrailToCurrent({ append: true });
                             new TWEEN.Tween(posVec.group.position)
                                 .to({ x: 0, y: targetYAbove }, Math.max(100, horizMs))
                                 .easing(TWEEN.Easing.Quadratic.InOut)
                                 .onStart(() => {
                                     // Hard-lock Y during horizontal travel to ensure a perfectly straight path.
                                     posVec.group.position.y = targetYAbove;
+                                    syncPosTrailToCurrent({ append: true });
                                 })
                                 .onUpdate(() => {
                                     // Maintain Y lock during horizontal interpolation.
                                     posVec.group.position.y = targetYAbove;
+                                    syncPosTrailToCurrent({ append: true });
                                 })
                                 .onComplete(() => {
+                                    // Ensure the horizontal segment is committed before addition starts.
+                                    posVec.group.position.y = targetYAbove;
+                                    syncPosTrailToCurrent({ append: true });
                                     triggerPositionalAddition();
                                 })
                                 .start();
@@ -520,7 +570,21 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
                     return;
                 }
 
-                posVec.group.position.set(0, targetYAbove, zPos);
+                // Preserve the same right-angle trail geometry during skip:
+                // finish vertical rise first, then horizontal slide to x=0.
+                if (posVec && posVec.group) {
+                    if (Math.abs(posVec.group.position.y - targetYAbove) > 1e-4) {
+                        posVec.group.position.y = targetYAbove;
+                        syncPosTrailToCurrent({ append: true });
+                    }
+                    if (Math.abs(posVec.group.position.x) > 1e-4) {
+                        posVec.group.position.x = 0;
+                        posVec.group.position.y = targetYAbove;
+                        syncPosTrailToCurrent({ append: true });
+                    }
+                    posVec.group.position.y = targetYAbove;
+                    posVec.group.position.z = zPos;
+                }
                 triggerPositionalAddition();
             };
         } catch (_) {

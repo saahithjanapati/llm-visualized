@@ -36,6 +36,7 @@ const COLOR_WHITE = new THREE.Color(0xffffff);
 const TMP_COLOR_A = new THREE.Color();
 const TMP_COLOR_B = new THREE.Color();
 const TMP_COLOR_C = new THREE.Color();
+const CAMERA_HOLD_AFTER_ADDITION_MS = 240;
 
 function isArrayLike(value) {
     return Array.isArray(value) || ArrayBuffer.isView(value);
@@ -315,6 +316,7 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
 
     // Freeze upward movement of the source so its group position remains static.
     if (lane) {
+        delete lane.__cameraHoldAfterAddUntil;
         lane.stopRise = true;
         lane.stopRiseTarget = targetVec.group;
         if (lane.layer && typeof lane.layer._emitProgress === 'function') {
@@ -529,6 +531,10 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
             delete lane.stopRise;
             delete lane.stopRiseTarget;
             delete lane.__residualTrailAnchor;
+            const nowMs = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+                ? performance.now()
+                : Date.now();
+            lane.__cameraHoldAfterAddUntil = nowMs + CAMERA_HOLD_AFTER_ADDITION_MS;
         } else if (sourceVec && sourceVec.group && sourceVec.group.userData) {
             delete sourceVec.group.userData.stopRise;
             delete sourceVec.group.userData.stopRiseTarget;

@@ -23,6 +23,7 @@ import {
     setPrismAddAnimSpeedMult,
     setSelfAttentionTimeMult,
     SKIP_COMPONENT_COLOR_LERP_ALPHA,
+    SKIP_TRAIL_MAX_STEP_DISTANCE,
     VECTOR_LENGTH_PRISM,
     NUM_VECTOR_LANES,
     LAYER_STACK_SPACING_Y,
@@ -1313,6 +1314,7 @@ export class LayerPipeline extends EventTarget {
             prismAddSpeed,
             selfAttentionSpeed
         }, { durationMs: SKIP_SPEED_RAMP_IN_MS });
+        setGlobalTrailMaxStepDistance(SKIP_TRAIL_MAX_STEP_DISTANCE);
 
         if (layer && typeof layer.setSkipToEndMode === 'function') {
             layer.setSkipToEndMode(true);
@@ -1350,6 +1352,7 @@ export class LayerPipeline extends EventTarget {
             prismAddSpeed,
             selfAttentionSpeed
         }, { durationMs: SKIP_SPEED_RAMP_IN_MS });
+        setGlobalTrailMaxStepDistance(SKIP_TRAIL_MAX_STEP_DISTANCE);
 
         this._layers.forEach(layer => {
             if (layer && typeof layer.setSkipToEndMode === 'function') {
@@ -1568,8 +1571,8 @@ export class LayerPipeline extends EventTarget {
      */
     _advanceToNextLayer() {
         this._currentLayerIdx += 1;
-        this.dispatchEvent(new Event('progress'));
         if (this._currentLayerIdx >= this._numLayers) {
+            this.dispatchEvent(new Event('progress'));
             // All layers processed – trigger final rise into top embedding
             try { this._animateRiseIntoTopEmbedding(); } catch (_) { /* optional */ }
             return;
@@ -1619,6 +1622,7 @@ export class LayerPipeline extends EventTarget {
         nextLayer.activateWithLanes(externalLanes);
 
         this._autoCamera?.maybeFocus?.({ immediate: true });
+        this.dispatchEvent(new Event('progress'));
 
         if (this._skipLayerActive && !this._skipLayerLast) {
             this._restoreSkipLayerSpeeds();

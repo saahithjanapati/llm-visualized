@@ -5,6 +5,9 @@ const TMP_CENTER_A = new THREE.Vector3();
 const TMP_CENTER_B = new THREE.Vector3();
 const TMP_CENTER_MAT_A = new THREE.Matrix4();
 const TMP_CENTER_MAT_B = new THREE.Matrix4();
+const STOP_RISE_RELEASE_DURATION_MS = 420;
+const STOP_RISE_RELEASE_FALLBACK_STEP = 0.05;
+const AUTO_CAMERA_VIEW_SWITCH_HOLD_MS_DEFAULT = 90;
 
 const coerceVector3 = (value, fallback = null) => {
     if (value instanceof THREE.Vector3) return value.clone();
@@ -70,6 +73,10 @@ export class AutoCameraController {
         this._autoCameraFollow = nextValue;
         if (this._autoCameraFollow) {
             this._autoCameraSmoothValid = false;
+            this._autoCameraViewPendingKey = this._autoCameraViewKey;
+            this._autoCameraViewPendingSinceMs = 0;
+            this._autoCameraPostAddLockActive = false;
+            this._autoCameraPostAddLockUntilMs = 0;
             if (resetView) {
                 const canSmoothReset = smoothReset && this._captureAutoCameraOffsets();
                 this._setAutoCameraOffsets(
@@ -84,6 +91,8 @@ export class AutoCameraController {
                 this._updateAutoCameraFollow();
             }
         } else {
+            this._autoCameraPostAddLockActive = false;
+            this._autoCameraPostAddLockUntilMs = 0;
             this._clearAutoCameraOffsets();
         }
         this._updateCameraOffsetOverlay();
@@ -216,10 +225,18 @@ export class AutoCameraController {
         this._autoCameraOffsetLerpAlpha = Math.min(1, Math.max(0, offsetAlpha));
         const viewBlendAlpha = typeof opts.autoCameraViewBlendAlpha === 'number' ? opts.autoCameraViewBlendAlpha : 0.12;
         this._autoCameraViewBlendAlpha = Math.min(1, Math.max(0, viewBlendAlpha));
+        const viewSwitchHoldMs = Number.isFinite(opts.autoCameraViewSwitchHoldMs)
+            ? opts.autoCameraViewSwitchHoldMs
+            : AUTO_CAMERA_VIEW_SWITCH_HOLD_MS_DEFAULT;
+        this._autoCameraViewSwitchHoldMs = Math.max(0, Math.min(600, viewSwitchHoldMs));
         const mlpBlendAlpha = typeof opts.autoCameraViewBlendAlphaMlpReturn === 'number'
             ? opts.autoCameraViewBlendAlphaMlpReturn
             : (this._autoCameraViewBlendAlpha * 0.35);
         this._autoCameraViewBlendAlphaMlpReturn = Math.min(1, Math.max(0, mlpBlendAlpha));
+        const transitionBlendAlpha = typeof opts.autoCameraViewBlendAlphaTransition === 'number'
+            ? opts.autoCameraViewBlendAlphaTransition
+            : this._autoCameraViewBlendAlphaMlpReturn;
+        this._autoCameraViewBlendAlphaTransition = Math.min(1, Math.max(0, transitionBlendAlpha));
         this._autoCameraViewBlendAlphaActive = this._autoCameraViewBlendAlpha;
         const mobileScale = typeof opts.autoCameraMobileScale === 'number' ? opts.autoCameraMobileScale : 1.0;
         this._autoCameraScaleMax = Math.max(1.0, mobileScale);
@@ -258,7 +275,12 @@ export class AutoCameraController {
         this._autoCameraCurrentTargetOffset = new THREE.Vector3();
         this._autoCameraSmoothedRef = new THREE.Vector3();
         this._autoCameraSmoothValid = false;
+        this._autoCameraPostAddLockRef = new THREE.Vector3();
+        this._autoCameraPostAddLockUntilMs = 0;
+        this._autoCameraPostAddLockActive = false;
         this._autoCameraViewKey = 'default';
+        this._autoCameraViewPendingKey = 'default';
+        this._autoCameraViewPendingSinceMs = 0;
         this._autoCameraViewBlendT = 1;
         this._autoCameraViewFromCameraOffset = new THREE.Vector3();
         this._autoCameraViewFromTargetOffset = new THREE.Vector3();
@@ -479,8 +501,18 @@ export class AutoCameraController {
             return { laneIndex: -1, laneCount: 0 };
         }
 
-        const layerIndex = Math.min(this._pipeline._currentLayerIdx, layers.length - 1);
-        const layer = layers[layerIndex];
+        let layerIndex = Math.min(this._pipeline._currentLayerIdx, layers.length - 1);
+        let layer = layers[layerIndex];
+        const layerIsDormant = !!(layer
+            && layer.isActive === false
+            && layer._transitionPhase !== 'positioning');
+        // During layer handoff there is a brief window where _currentLayerIdx
+        // points at the next dormant layer before residual lanes are attached.
+        // Keep following the previously active layer to avoid camera snaps.
+        if (layerIsDormant && layerIndex > 0) {
+            layerIndex -= 1;
+            layer = layers[layerIndex];
+        }
         const lanes = Array.isArray(layer?.lanes) ? layer.lanes : [];
         const laneCount = lanes.length;
         if (!laneCount) {
@@ -509,9 +541,32 @@ export class AutoCameraController {
             } else {
                 this._clearStopRiseFollowState(lane);
             }
+            this._applyKvDecodeVirtualCenterZ(targetVec, lane, layerIndex, laneCount);
         }
 
         return { laneIndex, laneCount };
+    }
+
+    _shouldUseKvDecodeVirtualCenter(layerIndex, laneCount) {
+        if (!Number.isFinite(layerIndex) || layerIndex <= 0) return false;
+        if (laneCount !== 1) return false;
+        const pipeline = this._pipeline;
+        if (!pipeline || !pipeline._kvCacheDecodeActive) return false;
+        const layoutCount = Number.isFinite(pipeline._laneLayoutCount)
+            ? Math.max(1, Math.floor(pipeline._laneLayoutCount))
+            : laneCount;
+        return layoutCount > laneCount;
+    }
+
+    _applyKvDecodeVirtualCenterZ(targetVec, lane, layerIndex, laneCount) {
+        if (!targetVec || !Number.isFinite(targetVec.z)) return;
+        if (!this._shouldUseKvDecodeVirtualCenter(layerIndex, laneCount)) return;
+        if (!Number.isFinite(lane?.zPos)) return;
+
+        // In decode passes above layer 0 we animate one active lane, but camera
+        // offsets should still be applied relative to the virtual middle lane of
+        // the full layout. Lane local z=0 is that imaginary middle position.
+        targetVec.z -= lane.zPos;
     }
 
     _clearStopRiseFollowState(lane) {
@@ -521,6 +576,7 @@ export class AutoCameraController {
         delete lane.__followStopRiseRef;
         delete lane.__followStopRiseReleaseFrom;
         delete lane.__followStopRiseReleaseProgress;
+        delete lane.__followStopRiseReleaseStartedAt;
     }
 
     _resolveStopRiseFollowReference(lane, sourceVec, out) {
@@ -554,6 +610,7 @@ export class AutoCameraController {
         }
         delete lane.__followStopRiseReleaseFrom;
         delete lane.__followStopRiseReleaseProgress;
+        delete lane.__followStopRiseReleaseStartedAt;
 
         const rawProgress = Number.isFinite(lane.mhsaResidualAddProgress)
             ? lane.mhsaResidualAddProgress
@@ -591,15 +648,31 @@ export class AutoCameraController {
         if (!lane.__followStopRiseReleaseFrom) {
             lane.__followStopRiseReleaseFrom = lane.__followStopRiseRef.clone();
             lane.__followStopRiseReleaseProgress = 0;
+            lane.__followStopRiseReleaseStartedAt = (typeof performance !== 'undefined'
+                && typeof performance.now === 'function')
+                ? performance.now()
+                : Date.now();
         }
 
         const baseProgress = Number.isFinite(lane.__followStopRiseReleaseProgress)
             ? lane.__followStopRiseReleaseProgress
             : 0;
-        const nextProgress = Math.min(1, baseProgress + 0.18);
+        const nowMs = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+            ? performance.now()
+            : Date.now();
+        const startedAt = Number.isFinite(lane.__followStopRiseReleaseStartedAt)
+            ? lane.__followStopRiseReleaseStartedAt
+            : nowMs;
+        const elapsedMs = Math.max(0, nowMs - startedAt);
+        const timedProgress = STOP_RISE_RELEASE_DURATION_MS > 0
+            ? Math.min(1, elapsedMs / STOP_RISE_RELEASE_DURATION_MS)
+            : 1;
+        const fallbackProgress = Math.min(1, baseProgress + STOP_RISE_RELEASE_FALLBACK_STEP);
+        const nextProgress = Math.max(baseProgress, Math.max(timedProgress, fallbackProgress));
         lane.__followStopRiseReleaseProgress = nextProgress;
 
-        const eased = nextProgress * nextProgress * (3 - 2 * nextProgress);
+        const eased = nextProgress * nextProgress * nextProgress
+            * (nextProgress * (nextProgress * 6 - 15) + 10);
         out.lerpVectors(lane.__followStopRiseReleaseFrom, settledCenter, eased);
 
         if (nextProgress >= 1 || out.distanceToSquared(settledCenter) <= 0.25) {
@@ -816,14 +889,24 @@ export class AutoCameraController {
     _isTopLayerNormCameraPhase(layer, lanes) {
         if (!layer || !Array.isArray(lanes) || !lanes.length) return false;
 
+        const topLnStopRiseActive = lanes.some((lane) => lane && lane.__topLnStopRise);
         const topLnActive = lanes.some((lane) => lane
-            && (lane.__topLnEntered || lane.__topLnMultStarted || lane.__topLnShiftStarted || lane.__topLnShiftComplete));
+            && (lane.__topLnStopRise
+                || lane.__topLnEntered
+                || lane.__topLnMultStarted
+                || lane.__topLnShiftStarted
+                || lane.__topLnShiftComplete));
         if (!topLnActive) return false;
 
         const forwardComplete = (typeof this._pipeline?.isForwardPassComplete === 'function')
             ? this._pipeline.isForwardPassComplete()
             : false;
         if (forwardComplete) return false;
+
+        // Top-LN flow explicitly parks residual rise with __topLnStopRise while
+        // vectors are in the final LayerNorm phase. Keep LN framing during this
+        // control window regardless of top-embedding entry thresholds.
+        if (topLnStopRiseActive) return true;
 
         const entryY = Number.isFinite(layer.__topEmbedEntryYLocal) ? layer.__topEmbedEntryYLocal : null;
         if (!Number.isFinite(entryY)) return true;
@@ -845,6 +928,7 @@ export class AutoCameraController {
         const laneCount = lanes.length;
         const laneIndex = laneCount ? Math.min(laneCount - 1, Math.floor(laneCount / 2)) : -1;
         const lane = laneIndex >= 0 ? lanes[laneIndex] : null;
+        const nowMs = this._getNowMs();
         const inLaneLn = !!(lane && (lane.horizPhase === 'insideLN' || lane.ln2Phase === 'insideLN'));
         const inTopLn = this._isTopLayerNormCameraPhase(layer, lanes);
         const inLayerHandoff = !!(layerIndex > 0
@@ -852,6 +936,35 @@ export class AutoCameraController {
             && lane.horizPhase === 'waiting'
             && lane.ln2Phase === 'notStarted');
         const inLn = inLaneLn || inTopLn;
+        const priorViewKey = this._autoCameraViewKey || 'default';
+        const holdViewBeforeLn2 = lanes.some((candidate) => candidate
+            && (candidate.horizPhase === 'postMHSAAddition'
+                || candidate.horizPhase === 'waitingForLN2'
+                || candidate.ln2Phase === 'preRise'
+                || candidate.ln2Phase === 'right'));
+        const anyResidualAddActive = lanes.some((candidate) => candidate
+            && candidate.stopRise
+            && candidate.stopRiseTarget);
+        const anyResidualAddReleaseHold = lanes.some((candidate) => candidate
+            && Number.isFinite(candidate.__cameraHoldAfterAddUntil)
+            && candidate.__cameraHoldAfterAddUntil > nowMs);
+        const residualAddHoldUntilMs = lanes.reduce((max, candidate) => {
+            const untilMs = Number.isFinite(candidate?.__cameraHoldAfterAddUntil)
+                ? candidate.__cameraHoldAfterAddUntil
+                : 0;
+            return untilMs > max ? untilMs : max;
+        }, 0);
+        const inResidualAdd = anyResidualAddActive || anyResidualAddReleaseHold;
+        const holdViewDuringResidualAdd = !!(inResidualAdd
+            && priorViewKey !== 'final'
+            && priorViewKey !== 'layer-end-desktop');
+        const holdViewUntilLn2Inside = !!(holdViewBeforeLn2
+            && priorViewKey !== 'ln'
+            && priorViewKey !== 'final'
+            && priorViewKey !== 'layer-end-desktop');
+        const holdViewThroughLayerHandoff = !!(inLayerHandoff
+            && priorViewKey !== 'layer-end-desktop'
+            && priorViewKey !== 'final');
         const forwardComplete = (typeof this._pipeline?.isForwardPassComplete === 'function')
             ? this._pipeline.isForwardPassComplete()
             : false;
@@ -862,6 +975,15 @@ export class AutoCameraController {
             inLn,
             inTopLn,
             inLayerHandoff,
+            inResidualAdd,
+            anyResidualAddActive,
+            anyResidualAddReleaseHold,
+            residualAddHoldUntilMs,
+            holdViewBeforeLn2,
+            holdViewUntilLn2Inside,
+            holdViewDuringResidualAdd,
+            holdViewThroughLayerHandoff,
+            priorViewKey,
             forwardComplete
         };
         if (forwardComplete) {
@@ -874,6 +996,9 @@ export class AutoCameraController {
             && (passPhase === 'positioning_mha_vectors' || passPhase === 'ready_for_parallel_pass_through'));
         if (!mhsa) {
             if (inLn) return 'ln';
+            if (holdViewThroughLayerHandoff) {
+                return priorViewKey;
+            }
             if (inLayerHandoff
                 && this._autoCameraLayerEndDesktopOffsetsEnabled
                 && this._isLargeDesktopViewport()) {
@@ -884,6 +1009,15 @@ export class AutoCameraController {
 
         if (inLn) {
             return 'ln';
+        }
+        if (holdViewUntilLn2Inside) {
+            return priorViewKey;
+        }
+        if (holdViewDuringResidualAdd) {
+            return priorViewKey;
+        }
+        if (holdViewThroughLayerHandoff) {
+            return priorViewKey;
         }
         if (inLayerHandoff
             && this._autoCameraLayerEndDesktopOffsetsEnabled
@@ -914,10 +1048,75 @@ export class AutoCameraController {
         return 'default';
     }
 
+    _getNowMs() {
+        return (typeof performance !== 'undefined' && typeof performance.now === 'function')
+            ? performance.now()
+            : Date.now();
+    }
+
+    _getAutoCameraViewSwitchHoldMs(fromKey, toKey, viewContext = null) {
+        if (toKey === fromKey) return 0;
+        let holdMs = this._autoCameraViewSwitchHoldMs;
+        if (viewContext && viewContext.holdViewUntilLn2Inside) {
+            holdMs = Math.max(holdMs, 200);
+        }
+        if (viewContext && viewContext.holdViewDuringResidualAdd) {
+            holdMs = Math.max(holdMs, 220);
+        }
+        if (viewContext && viewContext.inLayerHandoff) {
+            holdMs = Math.max(holdMs, 120);
+        }
+        if (viewContext && viewContext.lane
+            && (viewContext.lane.stopRise || viewContext.lane.__followStopRiseReleaseFrom)) {
+            holdMs = Math.max(holdMs, 110);
+        }
+        if (toKey === 'ln') {
+            holdMs = Math.min(holdMs, 48);
+        } else if (toKey === 'final') {
+            holdMs = Math.min(holdMs, 20);
+        }
+        if (fromKey === 'ln' && toKey === 'default') {
+            holdMs = Math.max(holdMs, 72);
+        }
+        if (toKey === 'layer-end-desktop' || fromKey === 'layer-end-desktop') {
+            holdMs = Math.max(holdMs, 130);
+        }
+        return Math.max(0, holdMs);
+    }
+
+    _resolveStableAutoCameraViewKey(rawKey, viewContext = null) {
+        const currentKey = this._autoCameraViewKey || 'default';
+        if (rawKey === currentKey) {
+            this._autoCameraViewPendingKey = rawKey;
+            this._autoCameraViewPendingSinceMs = 0;
+            return rawKey;
+        }
+
+        const nowMs = this._getNowMs();
+        if (this._autoCameraViewPendingKey !== rawKey) {
+            this._autoCameraViewPendingKey = rawKey;
+            this._autoCameraViewPendingSinceMs = nowMs;
+            return currentKey;
+        }
+
+        const pendingSince = Number.isFinite(this._autoCameraViewPendingSinceMs)
+            ? this._autoCameraViewPendingSinceMs
+            : nowMs;
+        const elapsedMs = Math.max(0, nowMs - pendingSince);
+        const holdMs = this._getAutoCameraViewSwitchHoldMs(currentKey, rawKey, viewContext);
+        if (elapsedMs < holdMs) {
+            return currentKey;
+        }
+
+        this._autoCameraViewPendingSinceMs = 0;
+        return rawKey;
+    }
+
     _applyAutoCameraViewOffsets() {
         this._updateAutoCameraScaledOffsets();
-        const key = this._resolveAutoCameraViewKey();
+        const rawKey = this._resolveAutoCameraViewKey();
         const viewContext = this._autoCameraViewContext;
+        const key = this._resolveStableAutoCameraViewKey(rawKey, viewContext);
         let camOffset = this._autoCameraDefaultCameraOffset;
         let targetOffset = this._autoCameraDefaultTargetOffset;
 
@@ -942,17 +1141,7 @@ export class AutoCameraController {
         }
 
         if (key !== this._autoCameraViewKey) {
-            const priorKey = this._autoCameraViewKey;
-            const isMlpTransition = priorKey === 'ln'
-                && key === 'default'
-                && viewContext
-                && !viewContext.inTopLn
-                && viewContext.lane
-                && viewContext.lane.ln2Phase
-                && viewContext.lane.ln2Phase !== 'insideLN';
-            this._autoCameraViewBlendAlphaActive = isMlpTransition
-                ? this._autoCameraViewBlendAlphaMlpReturn
-                : this._autoCameraViewBlendAlpha;
+            this._autoCameraViewBlendAlphaActive = this._autoCameraViewBlendAlphaTransition;
             this._autoCameraViewKey = key;
             if (!this._autoCameraSmoothValid) {
                 this._autoCameraViewBlendT = 1;
@@ -1127,15 +1316,60 @@ export class AutoCameraController {
             return false;
         }
 
+        const viewContext = this._autoCameraViewContext;
+        const laneInView = viewContext?.lane || null;
+        const nowMs = this._getNowMs();
+        const residualHoldUntilMs = Number.isFinite(viewContext?.residualAddHoldUntilMs)
+            ? viewContext.residualAddHoldUntilMs
+            : 0;
+        if (residualHoldUntilMs > nowMs) {
+            if (!this._autoCameraPostAddLockActive || residualHoldUntilMs > this._autoCameraPostAddLockUntilMs) {
+                const lockSource = this._autoCameraSmoothValid ? this._autoCameraSmoothedRef : reference;
+                this._autoCameraPostAddLockRef.copy(lockSource);
+                this._autoCameraPostAddLockUntilMs = residualHoldUntilMs;
+                this._autoCameraPostAddLockActive = true;
+            }
+        } else if (this._autoCameraPostAddLockActive && nowMs >= this._autoCameraPostAddLockUntilMs) {
+            this._autoCameraPostAddLockActive = false;
+            this._autoCameraPostAddLockUntilMs = 0;
+        }
+        const inStopRiseTransition = !!(laneInView
+            && (laneInView.stopRise || laneInView.__followStopRiseReleaseFrom));
+        const inResidualAddTransition = !!(viewContext
+            && (viewContext.anyResidualAddActive || viewContext.anyResidualAddReleaseHold));
+        const inLn2PreStartTransition = !!(viewContext && viewContext.holdViewUntilLn2Inside);
+        const inViewModeTransition = this._autoCameraViewBlendT < 1
+            || (this._autoCameraViewPendingKey && this._autoCameraViewPendingKey !== this._autoCameraViewKey);
+        let refSmoothAlpha = this._autoCameraSmoothAlpha;
+        if (inViewModeTransition) {
+            refSmoothAlpha = Math.min(refSmoothAlpha, 0.02);
+        }
+        if (viewContext && viewContext.inLayerHandoff) {
+            refSmoothAlpha = Math.min(refSmoothAlpha, 0.02);
+        }
+        if (inStopRiseTransition) {
+            refSmoothAlpha = Math.min(refSmoothAlpha, 0.018);
+        }
+        if (inResidualAddTransition) {
+            refSmoothAlpha = Math.min(refSmoothAlpha, 0.014);
+        }
+        if (inLn2PreStartTransition) {
+            refSmoothAlpha = Math.min(refSmoothAlpha, 0.014);
+        }
         let followRef = reference;
-        if (this._autoCameraSmoothAlpha > 0) {
+        if (refSmoothAlpha > 0) {
             if (!this._autoCameraSmoothValid) {
                 this._autoCameraSmoothedRef.copy(reference);
                 this._autoCameraSmoothValid = true;
             } else {
-                this._autoCameraSmoothedRef.lerp(reference, this._autoCameraSmoothAlpha);
+                this._autoCameraSmoothedRef.lerp(reference, refSmoothAlpha);
             }
             followRef = this._autoCameraSmoothedRef;
+        }
+        if (this._autoCameraPostAddLockActive && nowMs < this._autoCameraPostAddLockUntilMs) {
+            this._autoCameraSmoothedRef.copy(this._autoCameraPostAddLockRef);
+            this._autoCameraSmoothValid = true;
+            followRef = this._autoCameraPostAddLockRef;
         }
 
         if (!this._hasAutoCameraOffsets) {

@@ -459,6 +459,9 @@ export default class Gpt2Layer extends BaseLayer {
                 for (let i = 0; i < vecsToCheck.length; i++) {
                     const v = vecsToCheck[i];
                     if (!v || !v.userData || !v.userData.trail) continue;
+                    // Positional pass-through trail is manually sampled in its tween
+                    // so skip the generic updater to avoid skip-time diagonal merges.
+                    if (v === lane.posVec && lane.__manualPosTrail) continue;
                     // Let MHSA routing own the travel trail updates to preserve sharp corners.
                     if (v === lane.travellingVec && (lane.horizPhase === 'readyMHSA' || lane.horizPhase === 'travelMHSA')) {
                         continue;
@@ -475,6 +478,28 @@ export default class Gpt2Layer extends BaseLayer {
 
                     if (!v.userData.trailWorld) {
                         const zPos = Number.isFinite(lane.zPos) ? lane.zPos : v.group.position.z;
+                        if (
+                            lane.horizPhase === 'right'
+                            && v === lane.dupVec
+                        ) {
+                            const rightY = Number.isFinite(lane.branchStartY)
+                                ? lane.branchStartY
+                                : v.group.position.y;
+                            TMP_LN_TRAIL_POS.set(v.group.position.x, rightY, zPos);
+                            trailRef.update(TMP_LN_TRAIL_POS);
+                            continue;
+                        }
+                        if (
+                            lane.ln2Phase === 'right'
+                            && v === lane.movingVecLN2
+                        ) {
+                            const rightY = Number.isFinite(lane.__ln2RightY)
+                                ? lane.__ln2RightY
+                                : v.group.position.y;
+                            TMP_LN_TRAIL_POS.set(v.group.position.x, rightY, zPos);
+                            trailRef.update(TMP_LN_TRAIL_POS);
+                            continue;
+                        }
                         if (
                             lane.horizPhase === 'insideLN'
                             && (v === lane.dupVec || v === lane.resultVec)
@@ -632,14 +657,25 @@ export default class Gpt2Layer extends BaseLayer {
                 lanes.forEach((lane) => {
                     if (!lane || lane.posAddComplete || lane.__posPassStarted) return;
                     if (typeof lane.startPositionalPassThrough !== 'function') return;
+                    if (this._isWaitingForInputPositionChipGate(lane, nowMs, skipActive)) return;
                     try {
                         lane.startPositionalPassThrough({ immediate: skipActive });
                     } catch (_) {
                         lane.posAddComplete = true;
                     }
                 });
-                this._posPassBarrierArmed = false;
-                this._posPassStartAtMs = NaN;
+                const stillPending = lanes.some((lane) => {
+                    if (!lane || lane.posAddComplete) return false;
+                    return !!(lane.posVec && !lane.__posPassStarted);
+                });
+                if (stillPending) {
+                    // Continue polling until per-lane position-chip gates release.
+                    this._posPassBarrierArmed = true;
+                    this._posPassStartAtMs = nowMs;
+                } else {
+                    this._posPassBarrierArmed = false;
+                    this._posPassStartAtMs = NaN;
+                }
             }
             if (!hasPendingPosPass) {
                 this._posPassBarrierArmed = false;
@@ -923,6 +959,40 @@ export default class Gpt2Layer extends BaseLayer {
                 case 'waiting':
                     // Hold at the branching height until the global LN-1
                     // barrier is released.
+                    if (this._isWaitingForInputVocabChipGate(lane, nowMs, skipActive)) {
+                        if (originalVec && originalVec.group) {
+                            originalVec.group.visible = false;
+                            // Keep first-layer residual vectors fully inside the bottom
+                            // embedding until the matching token chip has entered.
+                            if (!lane.__inputVocabGateAdjustedStartY) {
+                                const halfPrismHeight = Number.isFinite(originalVec._basePrismCenterY)
+                                    ? originalVec._basePrismCenterY
+                                    : 0;
+                                const prismHeight = halfPrismHeight > 0 ? halfPrismHeight * 2 : 10.5;
+                                originalVec.group.position.y -= prismHeight;
+                                lane.__inputVocabGateAdjustedStartY = true;
+                                const trail = originalVec.userData && originalVec.userData.trail;
+                                if (trail) {
+                                    if (originalVec.userData && originalVec.userData.trailWorld) {
+                                        originalVec.group.getWorldPosition(TMP_WORLD_POS);
+                                        if (typeof trail.snapLastPointTo === 'function') {
+                                            trail.snapLastPointTo(TMP_WORLD_POS);
+                                        } else if (typeof trail.update === 'function') {
+                                            trail.update(TMP_WORLD_POS);
+                                        }
+                                    } else if (typeof trail.snapLastPointTo === 'function') {
+                                        trail.snapLastPointTo(originalVec.group.position);
+                                    } else if (typeof trail.update === 'function') {
+                                        trail.update(originalVec.group.position);
+                                    }
+                                }
+                            }
+                        }
+                        break;
+                    }
+                    if (originalVec && originalVec.group && !originalVec.group.visible) {
+                        originalVec.group.visible = true;
+                    }
                     if (originalVec.group.position.y >= lane.branchStartY) {
                         // Clamp position so early-arriving lanes don’t drift.
                         originalVec.group.position.y = lane.branchStartY;
@@ -950,6 +1020,20 @@ export default class Gpt2Layer extends BaseLayer {
                     if (dupVec.group.position.x >= BRANCH_X - 0.01) {
                         // Ensure alignment with LN-1 centre
                         dupVec.group.position.x = BRANCH_X;
+                        if (typeof lane.branchStartY === 'number') {
+                            dupVec.group.position.y = lane.branchStartY;
+                        }
+                        try {
+                            const ln1Trail = dupVec.userData && dupVec.userData.trail;
+                            if (ln1Trail) {
+                                TMP_LN_TRAIL_POS.set(dupVec.group.position.x, dupVec.group.position.y, dupVec.group.position.z);
+                                if (typeof ln1Trail.snapLastPointTo === 'function') {
+                                    ln1Trail.snapLastPointTo(TMP_LN_TRAIL_POS);
+                                } else if (typeof ln1Trail.update === 'function') {
+                                    ln1Trail.update(TMP_LN_TRAIL_POS);
+                                }
+                            }
+                        } catch (_) { /* non-fatal trail alignment */ }
                         // Show the multiplication target inside LN-1 (parity with LN-2 behaviour)
                         if (lane.multTarget && lane.multTarget.group) {
                             lane.multTarget.group.visible = true;
@@ -1323,9 +1407,15 @@ export default class Gpt2Layer extends BaseLayer {
                         this.raycastRoot.add(mv.group);
                         // ---- Trail for LN2 moving vector ----
                         const mvTrail = new StraightLineTrail(this.root, 0xffffff, 1, undefined, undefined, LN_INTERNAL_TRAIL_MIN_SEGMENT);
+                        // Preserve exact right-angle LN entry geometry during skip: internal LN trails
+                        // should not be throttled by global trail-step clamping.
+                        if (typeof mvTrail.setMaxStepDistance === 'function') {
+                            mvTrail.setMaxStepDistance(1e9);
+                        }
                         mvTrail.start(mv.group.position);
                         mv.userData = mv.userData || {};
                         mv.userData.trail = mvTrail;
+                        lane.__ln2RightY = mv.group.position.y;
                         lane.movingVecLN2 = mv;
                         lane.normAnimationLN2 = new PrismLayerNormAnimation(mv);
 
@@ -1341,11 +1431,27 @@ export default class Gpt2Layer extends BaseLayer {
                     if (!mv) break;
                     
                     mv.group.visible = true;
+                    const rightY = Number.isFinite(lane.__ln2RightY)
+                        ? lane.__ln2RightY
+                        : mv.group.position.y;
+                    mv.group.position.y = rightY;
                     const dx = ANIM_HORIZ_SPEED * speedMult * dt;
                     mv.group.position.x = Math.min(BRANCH_X, mv.group.position.x + dx);
                     
                     if (mv.group.position.x >= BRANCH_X - 0.01) {
                         mv.group.position.x = BRANCH_X;
+                        mv.group.position.y = rightY;
+                        try {
+                            const ln2Trail = mv.userData && mv.userData.trail;
+                            if (ln2Trail) {
+                                TMP_LN_TRAIL_POS.set(mv.group.position.x, mv.group.position.y, mv.group.position.z);
+                                if (typeof ln2Trail.snapLastPointTo === 'function') {
+                                    ln2Trail.snapLastPointTo(TMP_LN_TRAIL_POS);
+                                } else if (typeof ln2Trail.update === 'function') {
+                                    ln2Trail.update(TMP_LN_TRAIL_POS);
+                                }
+                            }
+                        } catch (_) { /* non-fatal trail alignment */ }
                         if (lane.multTargetLN2 && lane.multTargetLN2.group) {
                             lane.multTargetLN2.group.visible = true;
                         }
@@ -2629,6 +2735,52 @@ export default class Gpt2Layer extends BaseLayer {
             this._laneVecSignature(lane.movingVecLN2),
             this._laneVecSignature(lane.resultVecLN2),
         ].join('|');
+    }
+
+    _isWaitingForInputVocabChipGate(lane, nowMs, skipActive = false) {
+        if (skipActive || this.index !== 0 || !lane) return false;
+        const gate = this._progressEmitter && this._progressEmitter.__inputVocabChipGate;
+        if (!gate || gate.enabled === false) return false;
+
+        if (gate.pending) {
+            const fallbackAt = Number.isFinite(gate.pendingFallbackAt) ? gate.pendingFallbackAt : NaN;
+            return !Number.isFinite(fallbackAt) || nowMs < fallbackAt;
+        }
+
+        const tokenIndex = Number.isFinite(lane.tokenIndex) ? Math.max(0, Math.floor(lane.tokenIndex)) : null;
+        const byToken = gate.releaseByToken;
+        let releaseAt = NaN;
+        if (tokenIndex !== null && byToken) {
+            const value = byToken[String(tokenIndex)];
+            if (Number.isFinite(value)) releaseAt = value;
+        }
+        if (!Number.isFinite(releaseAt) && Number.isFinite(gate.defaultReleaseAt)) {
+            releaseAt = gate.defaultReleaseAt;
+        }
+        return Number.isFinite(releaseAt) && nowMs < releaseAt;
+    }
+
+    _isWaitingForInputPositionChipGate(lane, nowMs, skipActive = false) {
+        if (skipActive || this.index !== 0 || !lane) return false;
+        const gate = this._progressEmitter && this._progressEmitter.__inputPositionChipGate;
+        if (!gate || gate.enabled === false) return false;
+
+        if (gate.pending) {
+            const fallbackAt = Number.isFinite(gate.pendingFallbackAt) ? gate.pendingFallbackAt : NaN;
+            return !Number.isFinite(fallbackAt) || nowMs < fallbackAt;
+        }
+
+        const tokenIndex = Number.isFinite(lane.tokenIndex) ? Math.max(0, Math.floor(lane.tokenIndex)) : null;
+        const byToken = gate.releaseByToken;
+        let releaseAt = NaN;
+        if (tokenIndex !== null && byToken) {
+            const value = byToken[String(tokenIndex)];
+            if (Number.isFinite(value)) releaseAt = value;
+        }
+        if (!Number.isFinite(releaseAt) && Number.isFinite(gate.defaultReleaseAt)) {
+            releaseAt = gate.defaultReleaseAt;
+        }
+        return Number.isFinite(releaseAt) && nowMs < releaseAt;
     }
 
     _ensureLanePostAdditionVector(lane) {
