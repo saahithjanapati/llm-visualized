@@ -724,6 +724,63 @@ body.touch-ui * {
     color: #f3fbff;
 }
 
+.slider-row {
+    padding: 10px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 11px;
+    background: linear-gradient(160deg, rgba(18, 18, 18, 0.86), rgba(8, 8, 8, 0.9));
+    margin-bottom: 8px;
+}
+.slider-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+.slider-value {
+    font-size: 12px;
+    color: #dce6f5;
+    letter-spacing: 0.2px;
+}
+.settings-range {
+    width: 100%;
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+    accent-color: #f0f4ff;
+}
+.settings-range::-webkit-slider-runnable-track {
+    height: 6px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.36), rgba(255, 255, 255, 0.14));
+}
+.settings-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 1px solid rgba(0, 0, 0, 0.35);
+    background: radial-gradient(circle at 34% 30%, #ffffff, #ececec 68%, #d4d4d4 100%);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+    margin-top: -5px;
+}
+.settings-range::-moz-range-track {
+    height: 6px;
+    border: none;
+    border-radius: 999px;
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.36), rgba(255, 255, 255, 0.14));
+}
+.settings-range::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 1px solid rgba(0, 0, 0, 0.35);
+    background: radial-gradient(circle at 34% 30%, #ffffff, #ececec 68%, #d4d4d4 100%);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+
 /* Simple toggle row */
 .toggle-row {
     position: relative;

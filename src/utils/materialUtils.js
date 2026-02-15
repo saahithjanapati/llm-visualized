@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-export const GLOBAL_EMISSIVE_INTENSITY_SCALE = 0.82;
+export const GLOBAL_EMISSIVE_INTENSITY_SCALE = 0.9;
 
 const GLOBAL_REFLECTIVITY_PROFILE = Object.freeze({
     envMapIntensityScale: 0.82,

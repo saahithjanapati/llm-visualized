@@ -50,6 +50,7 @@ const _tmpWorld = new THREE.Vector3();
 const _tmpWorld2 = new THREE.Vector3();
 const _tmpMatrix = new THREE.Matrix4();
 const QKV_TRAIL_OPACITY = 0.08;
+const QKV_FINAL_MATRIX_EMISSIVE_INTENSITY = 0.13;
 const SKIP_DELAY_SCALE = 0.03;
 const SKIP_DURATION_SCALE = 0.05;
 const SKIP_DELAY_MIN_MS = 1;
@@ -1332,7 +1333,7 @@ export class MHSAAnimation {
             const apply = (matrix, color) => {
                 if (!matrix) return;
                 matrix.setColor(color);
-                matrix.setEmissive(color, 0.30);
+                matrix.setEmissive(color, QKV_FINAL_MATRIX_EMISSIVE_INTENSITY);
                 matrix.setMaterialProperties({ opacity: 1.0, transparent: false });
             };
             apply(qMatrix, qColor);
@@ -3403,7 +3404,7 @@ export class MHSAAnimation {
                     .easing(TWEEN.Easing.Quadratic.InOut)
                     .onUpdate(() => {
                         qMatrix.setColor(initialQColor);
-                        qMatrix.setEmissive(initialQColor, 0.30); // Subtle emissiveness
+                        qMatrix.setEmissive(initialQColor, QKV_FINAL_MATRIX_EMISSIVE_INTENSITY); // Subtle emissiveness
                     })
                     .start();
             }
@@ -3415,7 +3416,7 @@ export class MHSAAnimation {
                     .easing(TWEEN.Easing.Quadratic.InOut)
                     .onUpdate(() => {
                         kMatrix.setColor(initialKColor);
-                        kMatrix.setEmissive(initialKColor, 0.30); // Subtle emissiveness
+                        kMatrix.setEmissive(initialKColor, QKV_FINAL_MATRIX_EMISSIVE_INTENSITY); // Subtle emissiveness
                     })
                     .start();
             }
@@ -3427,7 +3428,7 @@ export class MHSAAnimation {
                     .easing(TWEEN.Easing.Quadratic.InOut)
                     .onUpdate(() => {
                         vMatrix.setColor(initialVColor);
-                        vMatrix.setEmissive(initialVColor, 0.30); // Subtle emissiveness
+                        vMatrix.setEmissive(initialVColor, QKV_FINAL_MATRIX_EMISSIVE_INTENSITY); // Subtle emissiveness
                     })
                     .start();
             }

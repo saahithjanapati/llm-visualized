@@ -4,6 +4,21 @@ import { appState } from '../state/appState.js';
 import { initPerfOverlay } from './perfOverlay.js';
 import { initTouchClickFallback } from './touchClickFallback.js';
 
+const BRIGHTNESS_PREF_KEY = 'displayBrightnessScale';
+const BRIGHTNESS_MIN = 0.5;
+const BRIGHTNESS_MAX = 1.8;
+const BRIGHTNESS_DEFAULT = 1.2;
+
+function clampBrightness(value) {
+    const next = Number(value);
+    if (!Number.isFinite(next)) return BRIGHTNESS_DEFAULT;
+    return Math.max(BRIGHTNESS_MIN, Math.min(BRIGHTNESS_MAX, next));
+}
+
+function formatBrightness(value) {
+    return `${Number(value).toFixed(2)}x`;
+}
+
 // Wires up the settings modal controls.
 export function initSettingsModal(pipeline) {
     const settingsBtn = document.getElementById('settingsBtn');
@@ -11,6 +26,8 @@ export function initSettingsModal(pipeline) {
     const settingsClose = document.getElementById('settingsClose');
     const equationsPanel = document.getElementById('equationsPanel');
     const settingsModal = settingsOverlay?.querySelector('.settings-modal') || null;
+    const brightnessSlider = document.getElementById('brightnessSlider');
+    const brightnessValue = document.getElementById('brightnessValue');
 
     initTouchClickFallback(settingsModal, { selector: 'button, .toggle-row, .speed-option' });
 
@@ -147,6 +164,29 @@ export function initSettingsModal(pipeline) {
         const hint = document.getElementById('kvCacheStatusHint');
         if (!hint) return;
         hint.hidden = !enabled;
+    };
+
+    const applyBrightness = (value, { persist = true } = {}) => {
+        const next = clampBrightness(value);
+        const brightnessCss = `brightness(${next.toFixed(2)})`;
+
+        if (brightnessSlider) brightnessSlider.value = next.toFixed(2);
+        if (brightnessValue) brightnessValue.textContent = formatBrightness(next);
+
+        const gptCanvas = document.getElementById('gptCanvas');
+        const introCanvas = document.getElementById('introCanvas');
+        const engineCanvas = pipeline?.engine?.renderer?.domElement || null;
+        const targets = [gptCanvas, introCanvas, engineCanvas];
+        const seen = new Set();
+        targets.forEach((canvas) => {
+            if (!canvas || seen.has(canvas)) return;
+            seen.add(canvas);
+            canvas.style.filter = brightnessCss;
+        });
+
+        if (persist) {
+            setPreference(BRIGHTNESS_PREF_KEY, next);
+        }
     };
 
     function applySpeed(value) {
@@ -309,6 +349,17 @@ export function initSettingsModal(pipeline) {
                 }
             }));
         }
+    });
+
+    const initialBrightness = getPreference(BRIGHTNESS_PREF_KEY, BRIGHTNESS_DEFAULT);
+    applyBrightness(initialBrightness, { persist: false });
+
+    brightnessSlider?.addEventListener('input', () => {
+        applyBrightness(brightnessSlider.value, { persist: false });
+    });
+
+    brightnessSlider?.addEventListener('change', () => {
+        applyBrightness(brightnessSlider.value, { persist: true });
     });
 
     if (appState.showPerfOverlay) {
