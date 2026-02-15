@@ -836,7 +836,8 @@ export class MHSAAnimation {
             }
         });
         this.parentGroup.add(this.outputProjectionMatrix.group);
-        softenMatrixSurface(this.outputProjectionMatrix);
+        // Keep output projection reflectivity aligned with QKV matrices.
+        softenMatrixSurface(this.outputProjectionMatrix, QKV_SURFACE_TWEAKS);
         
         // Store the matrix's Y position for later animations
         this.outputProjMatrixCenterY = outputProjMatrixCenterY;

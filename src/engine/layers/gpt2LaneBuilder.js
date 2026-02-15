@@ -36,6 +36,13 @@ export const LN_PARAM_MONOCHROME = {
     valueMax: 1.8
 };
 
+function getPrismVectorHeight(vec) {
+    const halfPrismHeight = Number.isFinite(vec?._basePrismCenterY)
+        ? vec._basePrismCenterY
+        : 0;
+    return halfPrismHeight > 0 ? halfPrismHeight * 2 : 10.5;
+}
+
 export function createFreshLanes(layer, offsetX, ln1CenterY, ln2CenterY, ln1TopY) {
     const layoutCount = (typeof layer._getLaneLayoutCount === 'function')
         ? layer._getLaneLayoutCount()
@@ -200,6 +207,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
         ? oldLane.tokenLabel
         : layer._getTokenLabel(laneTokenIndex);
     let originalVec, zPos, startY, trail;
+    let inputVocabSpawnLowered = false;
 
     if (oldLane && oldLane.originalVec) {
         originalVec = oldLane.originalVec;
@@ -231,6 +239,13 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
             30,
             layer._getInstanceCountFromData(data)
         );
+        if (layer.index === 0) {
+            // Spawn first-layer vocab vectors slightly inside the embedding so
+            // they visually emerge through the top slit instead of popping in.
+            originalVec.group.position.y -= getPrismVectorHeight(originalVec);
+            originalVec.group.visible = false;
+            inputVocabSpawnLowered = true;
+        }
         raycastRoot.add(originalVec.group);
         applyVectorData(
             originalVec,
@@ -394,6 +409,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
         // Top Y of the bottom vocab embedding matrix; used to detect when the
         // residual vector has exited the embedding block.
         vocabEmbeddingExitY: Number.isFinite(startY_override) ? startY_override : startY,
+        __inputVocabGateAdjustedStartY: inputVocabSpawnLowered,
         zPos,
         __residualMaxY: (function(){ originalVec.group.getWorldPosition(TMP_WORLD_POS); return TMP_WORLD_POS.y; })()
     });
@@ -432,6 +448,9 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
                 30,
                 layer._getInstanceCountFromData(posData)
             );
+            // Match vocab behaviour: begin slightly inside the positional
+            // embedding so the first visible motion is an upward emerge.
+            posVec.group.position.y -= getPrismVectorHeight(posVec);
             raycastRoot.add(posVec.group);
             // Keep positional vectors hidden until the deferred positional pass-through starts.
             posVec.group.visible = false;
@@ -464,6 +483,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
             lane.posVec = posVec;
             lane.posTrail = posTrail;
             lane.__manualPosTrail = false;
+            lane.__posPassAdjustedStartY = true;
 
             const fasterRise = ANIM_RISE_SPEED_ORIGINAL * POS_VEC_VERTICAL_SPEED_MULT;
             const horizSpeed = ANIM_HORIZ_SPEED * POS_VEC_HORIZONTAL_SPEED_MULT * GLOBAL_ANIM_SPEED_MULT;

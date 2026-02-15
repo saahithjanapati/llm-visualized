@@ -42,14 +42,14 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     const Q = colorize(qColor, 'Q');
     const K = colorize(kColor, 'K');
     const V = colorize(vColor, 'V');
-    const WQ = colorize(qColor, 'W^Q');
-    const WK = colorize(kColor, 'W^K');
-    const WV = colorize(vColor, 'W^V');
-    const BQ = colorize(qColor, 'b^Q');
-    const BK = colorize(kColor, 'b^K');
-    const BV = colorize(vColor, 'b^V');
-    const WO = colorize(woColor, 'W^O');
-    const BO = colorize(woColor, 'b^O');
+    const WQ = colorize(qColor, 'W_Q');
+    const WK = colorize(kColor, 'W_K');
+    const WV = colorize(vColor, 'W_V');
+    const BQ = colorize(qColor, 'b_Q');
+    const BK = colorize(kColor, 'b_K');
+    const BV = colorize(vColor, 'b_V');
+    const WO = colorize(woColor, 'W_O');
+    const BO = colorize(woColor, 'b_O');
     const WUpRaw = 'W_{\\text{up}}';
     const WDownRaw = 'W_{\\text{down}}';
     const BUpRaw = 'b_{\\text{up}}';
@@ -621,7 +621,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
                 title = 'Scaled Dot-Product Attention';
             } else if (concatActive) {
                 key = 'concat_proj';
-                title = 'Concat Heads + W^O';
+                title = 'Concat Heads + W_O';
             } else if (phase === 'parallel_pass_through_active' || phase === 'mha_pass_through_complete') {
                 key = 'attn';
                 title = 'Scaled Dot-Product Attention';

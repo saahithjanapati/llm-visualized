@@ -26,6 +26,8 @@ import {
     MHA_FINAL_K_COLOR,
     MHA_FINAL_V_COLOR,
     MHA_OUTPUT_PROJECTION_MATRIX_COLOR,
+    MLP_UP_MATRIX_COLOR,
+    MLP_DOWN_MATRIX_COLOR,
     MHA_OUTPUT_PROJECTION_MATRIX_PARAMS,
     POSITION_EMBED_COLOR,
     LN_PARAMS
@@ -141,6 +143,33 @@ const D_MODEL = 768;
 const D_HEAD = Math.floor(D_MODEL / NUM_HEAD_SETS_LAYER);
 const VOCAB_SIZE = 50257;
 const CONTEXT_LEN = 1024;
+const toKatexColorHex = (hex) => `#${Number(hex).toString(16).padStart(6, '0')}`;
+const colorizeEquationToken = (hex, token) => `\\textcolor{${hex}}{${token}}`;
+const SELECTION_EQUATION_COLORS = {
+    q: toKatexColorHex(MHA_FINAL_Q_COLOR),
+    k: toKatexColorHex(MHA_FINAL_K_COLOR),
+    v: toKatexColorHex(MHA_FINAL_V_COLOR),
+    output: toKatexColorHex(MHA_OUTPUT_PROJECTION_MATRIX_COLOR),
+    mlpUp: toKatexColorHex(MLP_UP_MATRIX_COLOR),
+    mlpDown: toKatexColorHex(MLP_DOWN_MATRIX_COLOR)
+};
+const SELECTION_EQUATION_SYMBOLS = {
+    Q: colorizeEquationToken(SELECTION_EQUATION_COLORS.q, 'Q'),
+    K: colorizeEquationToken(SELECTION_EQUATION_COLORS.k, 'K'),
+    V: colorizeEquationToken(SELECTION_EQUATION_COLORS.v, 'V'),
+    WQ: colorizeEquationToken(SELECTION_EQUATION_COLORS.q, 'W_Q'),
+    WK: colorizeEquationToken(SELECTION_EQUATION_COLORS.k, 'W_K'),
+    WV: colorizeEquationToken(SELECTION_EQUATION_COLORS.v, 'W_V'),
+    BQ: colorizeEquationToken(SELECTION_EQUATION_COLORS.q, 'b_Q'),
+    BK: colorizeEquationToken(SELECTION_EQUATION_COLORS.k, 'b_K'),
+    BV: colorizeEquationToken(SELECTION_EQUATION_COLORS.v, 'b_V'),
+    WO: colorizeEquationToken(SELECTION_EQUATION_COLORS.output, 'W_O'),
+    BO: colorizeEquationToken(SELECTION_EQUATION_COLORS.output, 'b_O'),
+    WUp: colorizeEquationToken(SELECTION_EQUATION_COLORS.mlpUp, 'W_{\\text{up}}'),
+    BUp: colorizeEquationToken(SELECTION_EQUATION_COLORS.mlpUp, 'b_{\\text{up}}'),
+    WDown: colorizeEquationToken(SELECTION_EQUATION_COLORS.mlpDown, 'W_{\\text{down}}'),
+    BDown: colorizeEquationToken(SELECTION_EQUATION_COLORS.mlpDown, 'b_{\\text{down}}')
+};
 
 function formatNumber(value) {
     if (!Number.isFinite(value)) return 'TBD';
@@ -1176,9 +1205,9 @@ function resolveAttentionHeadSubscript(selectionInfo) {
 
 function buildHeadSpecificAttentionEquation(selectionInfo) {
     const headSubscript = resolveAttentionHeadSubscript(selectionInfo);
-    const Qh = `Q_{${headSubscript}}`;
-    const Kh = `K_{${headSubscript}}`;
-    const Vh = `V_{${headSubscript}}`;
+    const Qh = `${SELECTION_EQUATION_SYMBOLS.Q}_{${headSubscript}}`;
+    const Kh = `${SELECTION_EQUATION_SYMBOLS.K}_{${headSubscript}}`;
+    const Vh = `${SELECTION_EQUATION_SYMBOLS.V}_{${headSubscript}}`;
     const Hh = `H_{${headSubscript}}`;
     return `${Hh} = \\mathrm{softmax}\\left(\\frac{${Qh} ${Kh}^\\top}{\\sqrt{d_h}} + M\\right)${Vh}`;
 }
@@ -1189,38 +1218,38 @@ function resolveSelectionEquations(label, selectionInfo = null) {
 
     if (lower.includes('query weight matrix')) {
         return formatEquationBlock([
-            'Q = x_{\\text{ln}} W^Q + b^Q',
+            `${SELECTION_EQUATION_SYMBOLS.Q} = x_{\\text{ln}} ${SELECTION_EQUATION_SYMBOLS.WQ} + ${SELECTION_EQUATION_SYMBOLS.BQ}`,
             attentionEquation
         ]);
     }
     if (lower.includes('key weight matrix')) {
         return formatEquationBlock([
-            'K = x_{\\text{ln}} W^K + b^K',
+            `${SELECTION_EQUATION_SYMBOLS.K} = x_{\\text{ln}} ${SELECTION_EQUATION_SYMBOLS.WK} + ${SELECTION_EQUATION_SYMBOLS.BK}`,
             attentionEquation
         ]);
     }
     if (lower.includes('value weight matrix')) {
         return formatEquationBlock([
-            'V = x_{\\text{ln}} W^V + b^V',
+            `${SELECTION_EQUATION_SYMBOLS.V} = x_{\\text{ln}} ${SELECTION_EQUATION_SYMBOLS.WV} + ${SELECTION_EQUATION_SYMBOLS.BV}`,
             attentionEquation
         ]);
     }
     if (lower.includes('output projection matrix')) {
         return formatEquationBlock([
             'H = \\mathrm{Concat}(H_i)_{i=1}^{h}',
-            'O = H W^O + b^O',
+            `O = H ${SELECTION_EQUATION_SYMBOLS.WO} + ${SELECTION_EQUATION_SYMBOLS.BO}`,
             'u = x + O'
         ]);
     }
     if (lower.includes('mlp up weight matrix')) {
         return formatEquationBlock([
-            'a = u_{\\text{ln}} W_{\\text{up}} + b_{\\text{up}}',
+            `a = u_{\\text{ln}} ${SELECTION_EQUATION_SYMBOLS.WUp} + ${SELECTION_EQUATION_SYMBOLS.BUp}`,
             'z = \\mathrm{GELU}(a)'
         ]);
     }
     if (lower.includes('mlp down weight matrix')) {
         return formatEquationBlock([
-            '\\mathrm{MLP}(u_{\\text{ln}}) = z W_{\\text{down}} + b_{\\text{down}}',
+            `\\mathrm{MLP}(u_{\\text{ln}}) = z ${SELECTION_EQUATION_SYMBOLS.WDown} + ${SELECTION_EQUATION_SYMBOLS.BDown}`,
             'x_{\\text{out}} = u + \\mathrm{MLP}(u_{\\text{ln}})'
         ]);
     }
@@ -4200,13 +4229,25 @@ class SelectionPanel {
         }
         const row = Number(cell.dataset.row);
         const col = Number(cell.dataset.col);
-        if (row === this._attentionHoverRow && col === this._attentionHoverCol) return;
+        const isPinnedSelection = this._attentionPinned
+            && row === this._attentionPinnedRow
+            && col === this._attentionPinnedCol;
+        const isSameCell = row === this._attentionHoverRow
+            && col === this._attentionHoverCol
+            && cell === this._attentionHoverCell;
+        if (isSameCell) {
+            cell.classList.toggle('is-pinned', isPinnedSelection);
+            if (this.attentionMatrix) this.attentionMatrix.classList.add('has-focus-cell');
+            return;
+        }
 
         this._clearAttentionHover(force);
         this._attentionHoverCell = cell;
         this._attentionHoverRow = row;
         this._attentionHoverCol = col;
+        if (this.attentionMatrix) this.attentionMatrix.classList.add('has-focus-cell');
         cell.classList.add('is-hovered');
+        cell.classList.toggle('is-pinned', isPinnedSelection);
         const leftToken = this._attentionTokenElsLeft[row];
         const topToken = this._attentionTokenElsTop[col];
         if (leftToken) leftToken.classList.add('is-highlighted');
@@ -4270,8 +4311,9 @@ class SelectionPanel {
     _clearAttentionHover(force = false) {
         const forceFlag = force === true;
         if (this._attentionPinned && !forceFlag) return;
+        if (this.attentionMatrix) this.attentionMatrix.classList.remove('has-focus-cell');
         if (this._attentionHoverCell) {
-            this._attentionHoverCell.classList.remove('is-hovered');
+            this._attentionHoverCell.classList.remove('is-hovered', 'is-pinned');
         }
         if (Number.isFinite(this._attentionHoverRow)) {
             const leftToken = this._attentionTokenElsLeft[this._attentionHoverRow];
