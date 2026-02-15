@@ -3,6 +3,7 @@ import { setGlobalEmissiveIntensityScale } from '../utils/materialUtils.js';
 
 const BRIGHTNESS_PREF_KEY = 'displayBrightnessScale';
 const FIXED_EMISSIVE_SCALE = 0.75;
+const BRIGHTNESS_DEFAULT = 1.25;
 
 const BRIGHTNESS_MIN = 0.5;
 const BRIGHTNESS_MAX = 1.8;
@@ -22,7 +23,7 @@ export function initLiveVisualControls(pipeline) {
     if (!root || !brightnessInput || !brightnessValue) return;
 
     const applyBrightness = (value, { persist = true } = {}) => {
-        const next = clamp(value, BRIGHTNESS_MIN, BRIGHTNESS_MAX, 1.0);
+        const next = clamp(value, BRIGHTNESS_MIN, BRIGHTNESS_MAX, BRIGHTNESS_DEFAULT);
         brightnessInput.value = next.toFixed(2);
         brightnessValue.textContent = fmt(next);
         const css = `brightness(${next.toFixed(2)})`;
@@ -37,7 +38,7 @@ export function initLiveVisualControls(pipeline) {
 
     setGlobalEmissiveIntensityScale(FIXED_EMISSIVE_SCALE, pipeline?.engine?.scene || null);
 
-    const initialBrightness = getPreference(BRIGHTNESS_PREF_KEY, 1.0);
+    const initialBrightness = getPreference(BRIGHTNESS_PREF_KEY, BRIGHTNESS_DEFAULT);
     applyBrightness(initialBrightness, { persist: false });
 
     brightnessInput.addEventListener('input', () => applyBrightness(brightnessInput.value, { persist: false }));

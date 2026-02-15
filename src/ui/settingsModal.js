@@ -7,7 +7,7 @@ import { initTouchClickFallback } from './touchClickFallback.js';
 const BRIGHTNESS_PREF_KEY = 'displayBrightnessScale';
 const BRIGHTNESS_MIN = 0.5;
 const BRIGHTNESS_MAX = 1.8;
-const BRIGHTNESS_DEFAULT = 1.2;
+const BRIGHTNESS_DEFAULT = 1.25;
 
 function clampBrightness(value) {
     const next = Number(value);

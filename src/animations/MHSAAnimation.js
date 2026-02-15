@@ -45,12 +45,19 @@ import { scaleGlobalEmissiveIntensity } from '../utils/materialUtils.js';
 import { getSideCopyEntry } from './mhsa/laneIndex.js';
 import { animateVectorMatrixPassThrough as animateVectorMatrixPassThroughExternal } from './mhsa/VectorMatrixPassThrough.js';
 import { appState } from '../state/appState.js';
+import {
+    HORIZ_PHASE,
+    LN2_PHASE,
+    isLn2PrimedPhase,
+    primeLaneForLn2Fallback
+} from '../engine/layers/gpt2LanePhases.js';
+import { GPT2_LAYER_VISUAL_TUNING } from '../utils/visualTuningProfiles.js';
 
 const _tmpWorld = new THREE.Vector3();
 const _tmpWorld2 = new THREE.Vector3();
 const _tmpMatrix = new THREE.Matrix4();
 const QKV_TRAIL_OPACITY = 0.08;
-const QKV_FINAL_MATRIX_EMISSIVE_INTENSITY = 0.13;
+const QKV_FINAL_MATRIX_EMISSIVE_INTENSITY = GPT2_LAYER_VISUAL_TUNING.mhsa.qkvFinalMatrixEmissiveIntensity;
 const SKIP_DELAY_SCALE = 0.03;
 const SKIP_DURATION_SCALE = 0.05;
 const SKIP_DELAY_MIN_MS = 1;
@@ -1143,7 +1150,7 @@ export class MHSAAnimation {
             for (let laneIndex = 0; laneIndex < lanes.length; laneIndex++) {
                 const lane = lanes[laneIndex];
                 if (!lane || !lane.originalVec || !lane.originalVec.group) continue;
-                if (lane.horizPhase === 'waiting') continue;
+                if (lane.horizPhase === HORIZ_PHASE.WAITING) continue;
 
                 const curY = lane.originalVec.group.position.y;
                 let targetY = this.finalOriginalY;
@@ -2113,61 +2120,7 @@ export class MHSAAnimation {
     }
 
     _ensureLaneReadyForLn2Fallback(lane) {
-        if (!lane || lane.ln2Phase === 'done') return false;
-        const fallbackVec = (lane.postAdditionVec && lane.postAdditionVec.group)
-            ? lane.postAdditionVec
-            : (lane.originalVec && lane.originalVec.group)
-                ? lane.originalVec
-                : (lane.resultVec && lane.resultVec.group)
-                    ? lane.resultVec
-                    : (lane.travellingVec && lane.travellingVec.group)
-                        ? lane.travellingVec
-                        : null;
-        if (!fallbackVec || !fallbackVec.group) return false;
-
-        let mutated = false;
-        if (!lane.originalVec) {
-            lane.originalVec = fallbackVec;
-            mutated = true;
-        }
-        if (lane.postAdditionVec !== fallbackVec) {
-            lane.postAdditionVec = fallbackVec;
-            mutated = true;
-        }
-
-        const ln2Primed = (
-            lane.ln2Phase === 'preRise'
-            || lane.ln2Phase === 'right'
-            || lane.ln2Phase === 'insideLN'
-            || lane.ln2Phase === 'mlpReady'
-            || lane.ln2Phase === 'done'
-        );
-        if (!ln2Primed) {
-            lane.ln2Phase = 'preRise';
-            mutated = true;
-        }
-
-        const needsHorizAdvance = (
-            lane.horizPhase === 'readyMHSA'
-            || lane.horizPhase === 'travelMHSA'
-            || lane.horizPhase === 'finishedHeads'
-            || lane.horizPhase === 'postMHSAAddition'
-        );
-        if (needsHorizAdvance) {
-            lane.horizPhase = 'waitingForLN2';
-            mutated = true;
-        }
-
-        if (lane.stopRise || lane.stopRiseTarget) {
-            delete lane.stopRise;
-            delete lane.stopRiseTarget;
-            mutated = true;
-        }
-        if (lane.additionTargetData) {
-            delete lane.additionTargetData;
-            mutated = true;
-        }
-        return mutated;
+        return primeLaneForLn2Fallback(lane);
     }
 
     _forcePostAttentionFallback(reason = 'unknown reason', options = {}) {
@@ -2177,16 +2130,10 @@ export class MHSAAnimation {
         let forcedCount = 0;
         for (let i = 0; i < lanes.length; i++) {
             const lane = lanes[i];
-            if (!lane || lane.ln2Phase === 'done') continue;
+            if (!lane || lane.ln2Phase === LN2_PHASE.DONE) continue;
             if (onlyIncomplete) {
                 const hasPostVec = !!(lane.postAdditionVec && lane.postAdditionVec.group);
-                const ln2Primed = (
-                    lane.ln2Phase === 'preRise'
-                    || lane.ln2Phase === 'right'
-                    || lane.ln2Phase === 'insideLN'
-                    || lane.ln2Phase === 'mlpReady'
-                    || lane.ln2Phase === 'done'
-                );
+                const ln2Primed = isLn2PrimedPhase(lane.ln2Phase);
                 if (hasPostVec && ln2Primed) continue;
             }
             if (this._ensureLaneReadyForLn2Fallback(lane)) {
@@ -2655,7 +2602,7 @@ export class MHSAAnimation {
                 if (Array.isArray(this.currentLanes)) {
                     for (let laneIdx = 0; laneIdx < this.currentLanes.length; laneIdx++) {
                         const lane = this.currentLanes[laneIdx];
-                        if (!lane || lane.ln2Phase === 'done') continue;
+                        if (!lane || lane.ln2Phase === LN2_PHASE.DONE) continue;
                         if (lane.originalVec && lane.originalVec.group) return lane;
                     }
                 }
@@ -3317,9 +3264,10 @@ export class MHSAAnimation {
         // Animation parameters
         const startColor = this.outputProjMatrixDefaultColor.clone();
         const brightColor = this.outputProjMatrixActiveColor.clone();
-        const startEmissiveIntensity = 0.12;
-        const peakEmissiveIntensity = 0.3;
-        const endEmissiveIntensity = 0.30;
+        const outputProjectionTuning = GPT2_LAYER_VISUAL_TUNING.mhsa.outputProjection;
+        const startEmissiveIntensity = outputProjectionTuning.startEmissiveIntensity;
+        const peakEmissiveIntensity = outputProjectionTuning.peakEmissiveIntensity;
+        const endEmissiveIntensity = outputProjectionTuning.endEmissiveIntensity;
 
         // Ensure matrix begins in its dark resting state
         this.outputProjectionMatrix.setColor(startColor);

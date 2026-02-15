@@ -41,7 +41,6 @@ import { MHSAAnimation } from '../../animations/MHSAAnimation.js';
 import { startPrismAdditionAnimation } from '../../utils/additionUtils.js';
 import { getLayerNormParamData } from '../../data/layerNormParams.js';
 import {
-    applyLayerNormMaterial,
     applyVectorData,
     copyVectorAppearance,
     freezeStaticTransforms,
@@ -49,6 +48,7 @@ import {
     geluApprox,
     LN_INTERNAL_TRAIL_MIN_SEGMENT
 } from './gpt2LayerUtils.js';
+import { updateLayerNormVisualState } from './gpt2LayerNormVisuals.js';
 import {
     buildSingleLane,
     createAdditionPlaceholders,
@@ -56,6 +56,12 @@ import {
     createLanesFromExternal,
     LN_PARAM_MONOCHROME
 } from './gpt2LaneBuilder.js';
+import {
+    HORIZ_PHASE,
+    LN2_PHASE,
+    isAllowedLanePhaseTransition
+} from './gpt2LanePhases.js';
+import { GPT2_LAYER_VISUAL_TUNING } from '../../utils/visualTuningProfiles.js';
 
 
 // Slightly reduced spacing between stacked layers for a tighter layout.
@@ -67,9 +73,9 @@ const TMP_WORLD_POS = new THREE.Vector3();
 
 // Shared colour constants reused across the layer to avoid per-frame
 // allocations inside the animation loop.
-const COLOR_DARK_GRAY = new THREE.Color(0x333333);
-const COLOR_LIGHT_YELLOW = new THREE.Color(0xffffff);
-const COLOR_BRIGHT_YELLOW = new THREE.Color(0xffffff);
+const COLOR_DARK_GRAY = new THREE.Color(GPT2_LAYER_VISUAL_TUNING.layerNorm.inactiveColor);
+const COLOR_LIGHT_YELLOW = new THREE.Color(GPT2_LAYER_VISUAL_TUNING.layerNorm.activeColor);
+const COLOR_BRIGHT_YELLOW = new THREE.Color(GPT2_LAYER_VISUAL_TUNING.layerNorm.finalColor);
 const COLOR_WHITE = new THREE.Color(0xffffff);
 const COLOR_INACTIVE_COMPONENT = new THREE.Color(INACTIVE_COMPONENT_COLOR);
 
@@ -94,7 +100,7 @@ const POS_ADD_STALL_TIMEOUT_MS = 12000;
 const POS_PASS_START_PAUSE_MS = 0;
 const LANE_PHASE_STALL_TIMEOUT_MS_SKIP = 3000;
 const LN2_HANDOFF_STALL_TIMEOUT_MS_NORMAL = 12000;
-const MLP_POST_PASS_THROUGH_FINAL_EMISSIVE = 0.24;
+const MLP_POST_PASS_THROUGH_FINAL_EMISSIVE = GPT2_LAYER_VISUAL_TUNING.mlp.postPassFinalEmissiveIntensity;
 const MLP_TRANSITION_PROFILE_DEFAULT = Object.freeze({
     expandRiseUnits: 30,
     expandRiseMs: 500,
@@ -142,24 +148,6 @@ const MLP_TRANSITION_PROFILE_SKIP_TOUCH = Object.freeze({
     maxUpDurationMs: 220,
     maxDownDurationMs: 240,
     colorMinDurationMs: 180
-});
-const HORIZ_PHASE = Object.freeze({
-    WAITING: 'waiting',
-    RIGHT: 'right',
-    INSIDE_LN: 'insideLN',
-    RISE_ABOVE_LN: 'riseAboveLN',
-    READY_MHSA: 'readyMHSA',
-    TRAVEL_MHSA: 'travelMHSA',
-    POST_MHSA_ADDITION: 'postMHSAAddition',
-    WAITING_FOR_LN2: 'waitingForLN2'
-});
-const LN2_PHASE = Object.freeze({
-    NOT_STARTED: 'notStarted',
-    PRE_RISE: 'preRise',
-    RIGHT: 'right',
-    INSIDE_LN: 'insideLN',
-    MLP_READY: 'mlpReady',
-    DONE: 'done'
 });
 
 const applyMatrixReflectivityTweak = (matrix, tweaks) => {
@@ -317,6 +305,15 @@ export default class Gpt2Layer extends BaseLayer {
         if (!lane || !key) return false;
         const prevValue = lane[key];
         if (prevValue === nextValue) return false;
+        const allowed = isAllowedLanePhaseTransition(key, prevValue, nextValue);
+        if (!allowed && this._isLanePhaseDebugEnabled()) {
+            const laneId = Number.isFinite(lane?.laneIndex) ? lane.laneIndex : '?';
+            console.warn(
+                `[LanePhase][L${this.index} lane ${laneId}] unexpected ${key} transition: `
+                + `${prevValue || 'na'} -> ${nextValue || 'na'}`
+                + (reason ? ` (${reason})` : '')
+            );
+        }
         lane[key] = nextValue;
         this._debugLanePhaseTransition(lane, key, prevValue, nextValue, reason);
         return true;
@@ -364,6 +361,103 @@ export default class Gpt2Layer extends BaseLayer {
             return Math.max(safeBase, SKIP_MLP_COLOR_MIN_MS);
         }
         return safeBase;
+    }
+
+    _getBasePrismAdditionDurationMs() {
+        const vectorLength = Math.max(1, this._getBaseVectorLength());
+        const durationMs = PRISM_ADD_ANIM_BASE_DURATION / PRISM_ADD_ANIM_SPEED_MULT;
+        const flashDurationMs = PRISM_ADD_ANIM_BASE_FLASH_DURATION / PRISM_ADD_ANIM_SPEED_MULT;
+        const delayBetweenMs = PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS / PRISM_ADD_ANIM_SPEED_MULT;
+        return durationMs + flashDurationMs + vectorLength * delayBetweenMs;
+    }
+
+    _computeGateBarrierRemainders(lanes, { ln2SyncY } = {}) {
+        const list = Array.isArray(lanes) ? lanes : [];
+        const laneCount = list.length;
+        const speedMult = GLOBAL_ANIM_SPEED_MULT;
+        const basePrismAddDurationMs = this._getBasePrismAdditionDurationMs();
+        const ln1RiseBaseSpeed = ANIM_RISE_SPEED_INSIDE_LN * speedMult;
+        const ln2RiseBaseSpeed = ANIM_RISE_SPEED_POST_SPLIT_LN2 * speedMult;
+        let ln1BarrierMaxRemaining = 0;
+        let mhsaBarrierMaxRemaining = 0;
+        let ln2BarrierMaxRemaining = 0;
+
+        if (laneCount) {
+            const ln1TravelTargetY = this.ln1TopY + 5;
+            for (let laneIdx = 0; laneIdx < laneCount; laneIdx++) {
+                const lane = list[laneIdx];
+                if (!lane) continue;
+
+                if (!this._ln1Start
+                    && lane.horizPhase === HORIZ_PHASE.WAITING
+                    && lane.originalVec
+                    && lane.originalVec.group
+                    && Number.isFinite(lane.branchStartY)) {
+                    const remaining = Math.max(0, lane.branchStartY - lane.originalVec.group.position.y);
+                    if (remaining > ln1BarrierMaxRemaining) ln1BarrierMaxRemaining = remaining;
+                }
+
+                if (!this._mhsaStart
+                    && lane.horizPhase === HORIZ_PHASE.RISE_ABOVE_LN
+                    && lane.resultVec
+                    && lane.resultVec.group) {
+                    const remaining = Math.max(0, ln1TravelTargetY - lane.resultVec.group.position.y);
+                    if (remaining > mhsaBarrierMaxRemaining) mhsaBarrierMaxRemaining = remaining;
+                }
+
+                if (!this._mhsaStart && lane.ln1AddStarted && !lane.ln1AddComplete) {
+                    const addProgress = THREE.MathUtils.clamp(
+                        Number.isFinite(lane.ln1ShiftProgress) ? lane.ln1ShiftProgress : 0,
+                        0,
+                        1
+                    );
+                    const remainingSeconds = (basePrismAddDurationMs * (1 - addProgress)) / 1000;
+                    const virtualRemaining = ln1RiseBaseSpeed * remainingSeconds;
+                    if (virtualRemaining > mhsaBarrierMaxRemaining) mhsaBarrierMaxRemaining = virtualRemaining;
+                }
+
+                if (!this._ln2Ready
+                    && lane.ln2Phase === LN2_PHASE.PRE_RISE
+                    && lane.postAdditionVec
+                    && lane.postAdditionVec.group
+                    && Number.isFinite(ln2SyncY)) {
+                    const remaining = Math.max(0, ln2SyncY - lane.postAdditionVec.group.position.y);
+                    if (remaining > ln2BarrierMaxRemaining) ln2BarrierMaxRemaining = remaining;
+                }
+
+                if (!this._ln2Ready && lane.ln2Phase !== LN2_PHASE.PRE_RISE && lane.stopRise) {
+                    const addProgress = THREE.MathUtils.clamp(
+                        Number.isFinite(lane.mhsaResidualAddProgress) ? lane.mhsaResidualAddProgress : 0,
+                        0,
+                        1
+                    );
+                    const remainingSeconds = (basePrismAddDurationMs * (1 - addProgress)) / 1000;
+                    const virtualRemaining = ln2RiseBaseSpeed * remainingSeconds;
+                    if (virtualRemaining > ln2BarrierMaxRemaining) ln2BarrierMaxRemaining = virtualRemaining;
+                }
+            }
+        }
+
+        return {
+            speedMult,
+            ln1BarrierMaxRemaining,
+            mhsaBarrierMaxRemaining,
+            ln2BarrierMaxRemaining,
+        };
+    }
+
+    _maybeStartSkipConcat(skipActive) {
+        if (!skipActive || !this.mhsaAnimation || this._skipConcatTriggered) return;
+        const mhsa = this.mhsaAnimation;
+        const rowMergePhase = mhsa.rowMergePhase || 'not_started';
+        const outputProjPhase = mhsa.outputProjMatrixAnimationPhase || 'waiting';
+        const concatNotStarted = rowMergePhase === 'not_started' && outputProjPhase === 'waiting';
+        if (concatNotStarted
+            && mhsa.mhaPassThroughPhase === 'mha_pass_through_complete'
+            && typeof mhsa.skipSelfAttentionAndStartConcat === 'function') {
+            mhsa.skipSelfAttentionAndStartConcat();
+            this._skipConcatTriggered = true;
+        }
     }
 
     _applyLn2HandoffWatchdog(lanes, nowMs, mhsaOutputComplete) {
@@ -651,7 +745,7 @@ export default class Gpt2Layer extends BaseLayer {
         const topY_ln2_abs    = ln2CenterY + LN_PARAMS.height / 2;
         const lanes = Array.isArray(this.lanes) ? this.lanes : [];
         const laneCount = lanes.length;
-        const exitTransitionRange = 5; // world–unit distance for final fade
+        const exitTransitionRange = GPT2_LAYER_VISUAL_TUNING.layerNorm.exitTransitionRange; // world–unit distance for final fade
         const needsPositioningCheck = this._transitionPhase === 'positioning';
         let allVectorsInPosition = needsPositioningCheck && laneCount > 0;
         let posAddDone = true;
@@ -904,124 +998,51 @@ export default class Gpt2Layer extends BaseLayer {
             return; // Skip processing when inactive / placeholder
         }
 
-        if (skipActive && this.mhsaAnimation && !this._skipConcatTriggered) {
-            const mhsa = this.mhsaAnimation;
-            const rowMergePhase = mhsa.rowMergePhase || 'not_started';
-            const outputProjPhase = mhsa.outputProjMatrixAnimationPhase || 'waiting';
-            const concatNotStarted = rowMergePhase === 'not_started' && outputProjPhase === 'waiting';
-            if (concatNotStarted
-                && mhsa.mhaPassThroughPhase === 'mha_pass_through_complete'
-                && typeof mhsa.skipSelfAttentionAndStartConcat === 'function') {
-                mhsa.skipSelfAttentionAndStartConcat();
-                this._skipConcatTriggered = true;
-            }
-        }
-        // ────────────────────────────────────────────────────────────
-        // Dynamic colour / opacity transition for the FIRST LayerNorm
-        // ────────────────────────────────────────────────────────────
-        const opaqueOpacity = 1.0;
-        const semiTransparentOpacity = 0.6;
+        this._maybeStartSkipConcat(skipActive);
+        const layerNormTuning = GPT2_LAYER_VISUAL_TUNING.layerNorm;
+        this._ln1ColorLocked = updateLayerNormVisualState({
+            layerNorm: this.ln1,
+            targetColor: this._ln1TargetColor,
+            lockedColor: this._ln1LockedColor,
+            isColorLocked: this._ln1ColorLocked,
+            materialState: this._ln1MaterialState,
+            highestVecY: highestLN1VecY,
+            anyVectorInNorm: anyVectorInLN1,
+            bottomY: bottomY_ln1_abs,
+            midY: midY_ln1_abs,
+            topY: topY_ln1_abs,
+            exitTransitionRange,
+            inactiveColor: COLOR_DARK_GRAY,
+            activeColor: COLOR_LIGHT_YELLOW,
+            finalColor: COLOR_BRIGHT_YELLOW,
+            opaqueOpacity: layerNormTuning.opaqueOpacity,
+            activeOpacity: layerNormTuning.activeOpacity,
+            skipActive,
+            skipColorLerpAlpha: SKIP_COMPONENT_COLOR_LERP_ALPHA,
+            applyWhenInactive: true,
+        }).colorLocked;
 
-        const ln1TargetColor = this._ln1TargetColor;
-        ln1TargetColor.copy(COLOR_DARK_GRAY);
-        let targetOpacity = opaqueOpacity;
-
-        if (anyVectorInLN1 && highestLN1VecY > -Infinity) {
-            if (highestLN1VecY >= bottomY_ln1_abs && highestLN1VecY < midY_ln1_abs) {
-                // Entering LN-1
-                const t = (highestLN1VecY - bottomY_ln1_abs) / (midY_ln1_abs - bottomY_ln1_abs);
-                ln1TargetColor.lerpColors(COLOR_DARK_GRAY, COLOR_LIGHT_YELLOW, t);
-                targetOpacity = THREE.MathUtils.lerp(opaqueOpacity, semiTransparentOpacity, t);
-            } else if (highestLN1VecY >= midY_ln1_abs && highestLN1VecY < topY_ln1_abs) {
-                // Inside LN-1
-                ln1TargetColor.copy(COLOR_LIGHT_YELLOW);
-                targetOpacity = semiTransparentOpacity;
-            } else if (highestLN1VecY >= topY_ln1_abs) {
-                // Exiting LN-1
-                const tRaw = (highestLN1VecY - topY_ln1_abs) / exitTransitionRange;
-                const t = Math.min(1, Math.max(0, tRaw));
-                ln1TargetColor.lerpColors(COLOR_LIGHT_YELLOW, COLOR_BRIGHT_YELLOW, t);
-                targetOpacity = THREE.MathUtils.lerp(semiTransparentOpacity, opaqueOpacity, t);
-            }
-        }
-
-        // -------------------------------------------------------------
-        // Once a vector has risen sufficiently above LN-1 we want to
-        // "bake" the bright colour so the ring doesn't revert to the
-        // inactive palette when no vectors are nearby (e.g. while the
-        // MHSA animation runs).  We do this by latching a flag the first
-        // frame the exit transition completes.
-        if (!this._ln1ColorLocked && highestLN1VecY >= topY_ln1_abs + exitTransitionRange) {
-            this._ln1ColorLocked = true;
-            this._ln1LockedColor.copy(COLOR_BRIGHT_YELLOW);
-        }
-
-        if (this._ln1ColorLocked) {
-            ln1TargetColor.copy(this._ln1LockedColor);
-            targetOpacity = opaqueOpacity;
-        }
-
-        if (skipActive && this._ln1MaterialState.initialized) {
-            const smoothAlpha = SKIP_COMPONENT_COLOR_LERP_ALPHA;
-            if (smoothAlpha > 0 && smoothAlpha < 1) {
-                ln1TargetColor.lerpColors(this._ln1MaterialState.color, ln1TargetColor, smoothAlpha);
-                targetOpacity = THREE.MathUtils.lerp(this._ln1MaterialState.opacity, targetOpacity, smoothAlpha);
-            }
-        }
-
-        // Apply to mesh material(s)
-        applyLayerNormMaterial(this.ln1 && this.ln1.group, ln1TargetColor, targetOpacity, this._ln1MaterialState);
-
-        // ────────────────────────────────────────────────────────────
-        // Dynamic colour / opacity transition for the SECOND LayerNorm
-        // ────────────────────────────────────────────────────────────
-        // Find the highest Y position of any vector moving through LN2
-
-        const ln2TargetColor = this._ln2TargetColor;
-        ln2TargetColor.copy(COLOR_DARK_GRAY);
-        let ln2TargetOpacity = opaqueOpacity;
-
-        if (anyVectorInLN2 && highestLN2VecY > -Infinity) {
-            if (highestLN2VecY >= bottomY_ln2_abs && highestLN2VecY < midY_ln2_abs) {
-                // Entering LN2
-                const t = (highestLN2VecY - bottomY_ln2_abs) / (midY_ln2_abs - bottomY_ln2_abs);
-                ln2TargetColor.lerpColors(COLOR_DARK_GRAY, COLOR_LIGHT_YELLOW, t);
-                ln2TargetOpacity = THREE.MathUtils.lerp(opaqueOpacity, semiTransparentOpacity, t);
-            } else if (highestLN2VecY >= midY_ln2_abs && highestLN2VecY < topY_ln2_abs) {
-                // Inside LN2
-                ln2TargetColor.copy(COLOR_LIGHT_YELLOW);
-                ln2TargetOpacity = semiTransparentOpacity;
-            } else if (highestLN2VecY >= topY_ln2_abs) {
-                // Exiting LN2
-                const tRaw = (highestLN2VecY - topY_ln2_abs) / exitTransitionRange;
-                const t = Math.min(1, Math.max(0, tRaw));
-                ln2TargetColor.lerpColors(COLOR_LIGHT_YELLOW, COLOR_BRIGHT_YELLOW, t);
-                ln2TargetOpacity = THREE.MathUtils.lerp(semiTransparentOpacity, opaqueOpacity, t);
-            }
-        }
-
-        if (!this._ln2ColorLocked && highestLN2VecY >= topY_ln2_abs + exitTransitionRange) {
-            this._ln2ColorLocked = true;
-            this._ln2LockedColor.copy(COLOR_BRIGHT_YELLOW);
-        }
-
-        if (this._ln2ColorLocked) {
-            ln2TargetColor.copy(this._ln2LockedColor);
-            ln2TargetOpacity = opaqueOpacity;
-        }
-
-        if ((anyVectorInLN2 && highestLN2VecY > -Infinity) || this._ln2ColorLocked) {
-            if (skipActive && this._ln2MaterialState.initialized) {
-                const smoothAlpha = SKIP_COMPONENT_COLOR_LERP_ALPHA;
-                if (smoothAlpha > 0 && smoothAlpha < 1) {
-                    ln2TargetColor.lerpColors(this._ln2MaterialState.color, ln2TargetColor, smoothAlpha);
-                    ln2TargetOpacity = THREE.MathUtils.lerp(this._ln2MaterialState.opacity, ln2TargetOpacity, smoothAlpha);
-                }
-            }
-
-            // Apply to LN2
-            applyLayerNormMaterial(this.ln2 && this.ln2.group, ln2TargetColor, ln2TargetOpacity, this._ln2MaterialState);
-        }
+        this._ln2ColorLocked = updateLayerNormVisualState({
+            layerNorm: this.ln2,
+            targetColor: this._ln2TargetColor,
+            lockedColor: this._ln2LockedColor,
+            isColorLocked: this._ln2ColorLocked,
+            materialState: this._ln2MaterialState,
+            highestVecY: highestLN2VecY,
+            anyVectorInNorm: anyVectorInLN2,
+            bottomY: bottomY_ln2_abs,
+            midY: midY_ln2_abs,
+            topY: topY_ln2_abs,
+            exitTransitionRange,
+            inactiveColor: COLOR_DARK_GRAY,
+            activeColor: COLOR_LIGHT_YELLOW,
+            finalColor: COLOR_BRIGHT_YELLOW,
+            opaqueOpacity: layerNormTuning.opaqueOpacity,
+            activeOpacity: layerNormTuning.activeOpacity,
+            skipActive,
+            skipColorLerpAlpha: SKIP_COMPONENT_COLOR_LERP_ALPHA,
+            applyWhenInactive: false,
+        }).colorLocked;
 
         let mhsaOutputComplete = this._isMhsaOutputStageComplete();
         if (!skipActive && !this._skipLayerActive) {
@@ -1038,58 +1059,12 @@ export default class Gpt2Layer extends BaseLayer {
             allMlpReady
         });
 
-        const speedMult = GLOBAL_ANIM_SPEED_MULT;
-        const basePrismAddDurationMs = (() => {
-            const vectorLength = Math.max(1, this._getBaseVectorLength());
-            const durationMs = PRISM_ADD_ANIM_BASE_DURATION / PRISM_ADD_ANIM_SPEED_MULT;
-            const flashDurationMs = PRISM_ADD_ANIM_BASE_FLASH_DURATION / PRISM_ADD_ANIM_SPEED_MULT;
-            const delayBetweenMs = PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS / PRISM_ADD_ANIM_SPEED_MULT;
-            return durationMs + flashDurationMs + vectorLength * delayBetweenMs;
-        })();
-        const ln1RiseBaseSpeed = ANIM_RISE_SPEED_INSIDE_LN * speedMult;
-        const ln2RiseBaseSpeed = ANIM_RISE_SPEED_POST_SPLIT_LN2 * speedMult;
-        let ln1BarrierMaxRemaining = 0;
-        let mhsaBarrierMaxRemaining = 0;
-        let ln2BarrierMaxRemaining = 0;
-        if (laneCount) {
-            const ln1TravelTargetY = this.ln1TopY + 5;
-            for (let laneIdx = 0; laneIdx < laneCount; laneIdx++) {
-                const lane = lanes[laneIdx];
-                if (!lane) continue;
-                if (!this._ln1Start && lane.horizPhase === HORIZ_PHASE.WAITING && lane.originalVec && lane.originalVec.group && Number.isFinite(lane.branchStartY)) {
-                    const remaining = Math.max(0, lane.branchStartY - lane.originalVec.group.position.y);
-                    if (remaining > ln1BarrierMaxRemaining) ln1BarrierMaxRemaining = remaining;
-                }
-                if (!this._mhsaStart && lane.horizPhase === HORIZ_PHASE.RISE_ABOVE_LN && lane.resultVec && lane.resultVec.group) {
-                    const remaining = Math.max(0, ln1TravelTargetY - lane.resultVec.group.position.y);
-                    if (remaining > mhsaBarrierMaxRemaining) mhsaBarrierMaxRemaining = remaining;
-                }
-                if (!this._mhsaStart && lane.ln1AddStarted && !lane.ln1AddComplete) {
-                    const addProgress = THREE.MathUtils.clamp(
-                        Number.isFinite(lane.ln1ShiftProgress) ? lane.ln1ShiftProgress : 0,
-                        0,
-                        1
-                    );
-                    const remainingSeconds = (basePrismAddDurationMs * (1 - addProgress)) / 1000;
-                    const virtualRemaining = ln1RiseBaseSpeed * remainingSeconds;
-                    if (virtualRemaining > mhsaBarrierMaxRemaining) mhsaBarrierMaxRemaining = virtualRemaining;
-                }
-                if (!this._ln2Ready && lane.ln2Phase === LN2_PHASE.PRE_RISE && lane.postAdditionVec && lane.postAdditionVec.group) {
-                    const remaining = Math.max(0, ln2SyncY - lane.postAdditionVec.group.position.y);
-                    if (remaining > ln2BarrierMaxRemaining) ln2BarrierMaxRemaining = remaining;
-                }
-                if (!this._ln2Ready && lane.ln2Phase !== LN2_PHASE.PRE_RISE && lane.stopRise) {
-                    const addProgress = THREE.MathUtils.clamp(
-                        Number.isFinite(lane.mhsaResidualAddProgress) ? lane.mhsaResidualAddProgress : 0,
-                        0,
-                        1
-                    );
-                    const remainingSeconds = (basePrismAddDurationMs * (1 - addProgress)) / 1000;
-                    const virtualRemaining = ln2RiseBaseSpeed * remainingSeconds;
-                    if (virtualRemaining > ln2BarrierMaxRemaining) ln2BarrierMaxRemaining = virtualRemaining;
-                }
-            }
-        }
+        const {
+            speedMult,
+            ln1BarrierMaxRemaining,
+            mhsaBarrierMaxRemaining,
+            ln2BarrierMaxRemaining
+        } = this._computeGateBarrierRemainders(lanes, { ln2SyncY });
 
         this._updateLn1AndMhsaStartGates({
             allLn1Ready,

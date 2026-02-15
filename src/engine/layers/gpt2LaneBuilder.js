@@ -22,6 +22,7 @@ import {
     GLOBAL_ANIM_SPEED_MULT,
     ANIM_HORIZ_SPEED
 } from '../../utils/constants.js';
+import { HORIZ_PHASE, LN2_PHASE } from './gpt2LanePhases.js';
 
 const TMP_WORLD_POS = new THREE.Vector3();
 const LN_ADD_VECTOR_OFFSET_FRACTION = 0.25; // fraction of LN height above centre for bias addition
@@ -362,7 +363,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
         addTarget,
         addTargetLN2,
         normAnim,
-        horizPhase: 'waiting',
+        horizPhase: HORIZ_PHASE.WAITING,
         branchStartY: ln1CenterY - LN_PARAMS.height / 2 + 5,
         ln1MidY: ln1CenterY,
         normStarted: false,
@@ -382,7 +383,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
         sideCopies: [],
         headIndex: 0,
         finalAscend: false,
-        ln2Phase: 'notStarted',
+        ln2Phase: LN2_PHASE.NOT_STARTED,
         postAdditionVec: null,
         movingVecLN2: null,
         normAnimationLN2: null,
