@@ -70,7 +70,8 @@ export class CoreEngine {
             ? opts.desktopZoomOutMinHeight
             : 760;
 
-        this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 5, 10000);
+        const initialViewport = this._getViewportDimensions();
+        this.camera = new THREE.PerspectiveCamera(60, initialViewport.width / initialViewport.height, 5, 10000);
         this.camera.position.set(0, 150, 800);
 
         // ────────────────────────────────────────────────────────────────────
@@ -118,8 +119,12 @@ export class CoreEngine {
             ? window.devicePixelRatio
             : 1;
         this._appliedRenderPixelRatio = null;
-        this._updateRendererPixelRatio({ force: true });
-        this.renderer.setSize(window.innerWidth, window.innerHeight);
+        this._updateRendererPixelRatio({
+            force: true,
+            viewportWidth: initialViewport.width,
+            viewportHeight: initialViewport.height
+        });
+        this.renderer.setSize(initialViewport.width, initialViewport.height);
         // Avoid long-press text selection/context menus hijacking touch controls.
         this.renderer.domElement.style.touchAction = 'none';
         this.renderer.domElement.style.userSelect = 'none';
@@ -284,6 +289,11 @@ export class CoreEngine {
         // Event listeners
         // ────────────────────────────────────────────────────────────────────
         window.addEventListener('resize', this._onResize);
+        this._visualViewport = window.visualViewport || null;
+        if (this._visualViewport) {
+            this._visualViewport.addEventListener('resize', this._onResize);
+            this._visualViewport.addEventListener('scroll', this._onResize);
+        }
         document.addEventListener('visibilitychange', this._onVisibility);
         window.addEventListener('blur', this._onWindowBlur);
         window.addEventListener('focus', this._onWindowFocus);
@@ -486,6 +496,11 @@ export class CoreEngine {
 
     dispose() {
         window.removeEventListener('resize', this._onResize);
+        if (this._visualViewport) {
+            this._visualViewport.removeEventListener('resize', this._onResize);
+            this._visualViewport.removeEventListener('scroll', this._onResize);
+            this._visualViewport = null;
+        }
         document.removeEventListener('visibilitychange', this._onVisibility);
         window.removeEventListener('blur', this._onWindowBlur);
         window.removeEventListener('focus', this._onWindowFocus);
@@ -540,22 +555,48 @@ export class CoreEngine {
     // ────────────────────────────────────────────────────────────────────────
     // Private helpers
     // ────────────────────────────────────────────────────────────────────────
+    _getViewportDimensions = () => {
+        const fallbackWidth = (typeof window !== 'undefined' && Number.isFinite(window.innerWidth))
+            ? window.innerWidth
+            : 1;
+        const fallbackHeight = (typeof window !== 'undefined' && Number.isFinite(window.innerHeight))
+            ? window.innerHeight
+            : 1;
+
+        const visualViewport = (typeof window !== 'undefined') ? window.visualViewport : null;
+        if (!visualViewport) {
+            return {
+                width: Math.max(1, Math.round(fallbackWidth)),
+                height: Math.max(1, Math.round(fallbackHeight))
+            };
+        }
+
+        const vvWidth = Number.isFinite(visualViewport.width) ? visualViewport.width : fallbackWidth;
+        const vvHeight = Number.isFinite(visualViewport.height) ? visualViewport.height : fallbackHeight;
+
+        return {
+            width: Math.max(1, Math.round(vvWidth)),
+            height: Math.max(1, Math.round(vvHeight))
+        };
+    };
+
     _onResize = () => {
-        this.camera.aspect = window.innerWidth / window.innerHeight;
+        const { width, height } = this._getViewportDimensions();
+        this.camera.aspect = width / height;
         this.camera.updateProjectionMatrix();
-        this._updateRendererPixelRatio({ force: true });
-        this.renderer.setSize(window.innerWidth, window.innerHeight);
-        if (this.composer) this.composer.setSize(window.innerWidth, window.innerHeight);
+        this._updateRendererPixelRatio({ force: true, viewportWidth: width, viewportHeight: height });
+        this.renderer.setSize(width, height);
+        if (this.composer) this.composer.setSize(width, height);
         this._canvasRect = this.renderer.domElement.getBoundingClientRect();
         this._applyCameraZoomLimit();
         this._updateCameraFarFromControls();
     };
 
-    _updateRendererPixelRatio = ({ force = false } = {}) => {
+    _updateRendererPixelRatio = ({ force = false, viewportWidth = null, viewportHeight = null } = {}) => {
         if (!this.renderer) return;
         const nextRatio = resolveRenderPixelRatio({
-            viewportWidth: window.innerWidth,
-            viewportHeight: window.innerHeight
+            viewportWidth,
+            viewportHeight
         });
         if (!force && Number.isFinite(this._appliedRenderPixelRatio)
             && Math.abs(this._appliedRenderPixelRatio - nextRatio) < 0.001) {
