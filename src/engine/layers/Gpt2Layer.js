@@ -95,6 +95,54 @@ const POS_PASS_START_PAUSE_MS = 0;
 const LANE_PHASE_STALL_TIMEOUT_MS_SKIP = 3000;
 const LN2_HANDOFF_STALL_TIMEOUT_MS_NORMAL = 12000;
 const MLP_POST_PASS_THROUGH_FINAL_EMISSIVE = 0.24;
+const MLP_TRANSITION_PROFILE_DEFAULT = Object.freeze({
+    expandRiseUnits: 30,
+    expandRiseMs: 500,
+    geluDurationMs: 500,
+    geluRiseExtra: 24,
+    geluCurveHeight: 36,
+    geluActivationSwitchT: 0.35,
+    geluLiteMode: false,
+    maxUpDurationMs: null,
+    maxDownDurationMs: null,
+    colorMinDurationMs: null
+});
+const MLP_TRANSITION_PROFILE_TOUCH = Object.freeze({
+    expandRiseUnits: 24,
+    expandRiseMs: 360,
+    geluDurationMs: 280,
+    geluRiseExtra: 18,
+    geluCurveHeight: 24,
+    geluActivationSwitchT: 0.3,
+    geluLiteMode: true,
+    maxUpDurationMs: null,
+    maxDownDurationMs: null,
+    colorMinDurationMs: null
+});
+const MLP_TRANSITION_PROFILE_SKIP = Object.freeze({
+    expandRiseUnits: 16,
+    expandRiseMs: 180,
+    geluDurationMs: 150,
+    geluRiseExtra: 12,
+    geluCurveHeight: 16,
+    geluActivationSwitchT: 0.22,
+    geluLiteMode: true,
+    maxUpDurationMs: 260,
+    maxDownDurationMs: 320,
+    colorMinDurationMs: 220
+});
+const MLP_TRANSITION_PROFILE_SKIP_TOUCH = Object.freeze({
+    expandRiseUnits: 12,
+    expandRiseMs: 140,
+    geluDurationMs: 110,
+    geluRiseExtra: 8,
+    geluCurveHeight: 10,
+    geluActivationSwitchT: 0.2,
+    geluLiteMode: true,
+    maxUpDurationMs: 220,
+    maxDownDurationMs: 240,
+    colorMinDurationMs: 180
+});
 const HORIZ_PHASE = Object.freeze({
     WAITING: 'waiting',
     RIGHT: 'right',
@@ -280,6 +328,42 @@ export default class Gpt2Layer extends BaseLayer {
 
     _setLaneLn2Phase(lane, nextValue, reason = '') {
         return this._setLanePhase(lane, 'ln2Phase', nextValue, reason);
+    }
+
+    _isTouchPrimaryDevice() {
+        if (typeof window === 'undefined') return false;
+        try {
+            if (typeof window.matchMedia === 'function') {
+                const coarse = window.matchMedia('(pointer: coarse)').matches
+                    || window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+                if (coarse) return true;
+            }
+        } catch (_) { /* non-browser/test env */ }
+        const touchPoints = Number.isFinite(window?.navigator?.maxTouchPoints)
+            ? window.navigator.maxTouchPoints
+            : 0;
+        return touchPoints > 0;
+    }
+
+    _resolveMlpTransitionProfile() {
+        const skipFastPath = !!(this._skipToEndActive || this._skipLayerActive);
+        const touchPrimary = this._isTouchPrimaryDevice();
+        if (skipFastPath && touchPrimary) return MLP_TRANSITION_PROFILE_SKIP_TOUCH;
+        if (skipFastPath) return MLP_TRANSITION_PROFILE_SKIP;
+        if (touchPrimary) return MLP_TRANSITION_PROFILE_TOUCH;
+        return MLP_TRANSITION_PROFILE_DEFAULT;
+    }
+
+    _resolveMlpColorDuration(baseDurationMs, profile = null) {
+        const safeBase = Number.isFinite(baseDurationMs) ? Math.max(0, baseDurationMs) : 0;
+        const resolved = profile || this._resolveMlpTransitionProfile();
+        if (resolved && Number.isFinite(resolved.colorMinDurationMs)) {
+            return Math.max(safeBase, resolved.colorMinDurationMs);
+        }
+        if (this._skipToEndActive) {
+            return Math.max(safeBase, SKIP_MLP_COLOR_MIN_MS);
+        }
+        return safeBase;
     }
 
     _applyLn2HandoffWatchdog(lanes, nowMs, mhsaOutputComplete) {
@@ -1965,7 +2049,11 @@ export default class Gpt2Layer extends BaseLayer {
         const finalIntensity = MLP_POST_PASS_THROUGH_FINAL_EMISSIVE;
         const distance = topY - vec.group.position.y;
         const rawDuration = (distance / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
-        const duration = Number.isFinite(rawDuration) ? Math.max(0, rawDuration) : 0;
+        const mlpProfile = this._resolveMlpTransitionProfile();
+        let duration = Number.isFinite(rawDuration) ? Math.max(0, rawDuration) : 0;
+        if (Number.isFinite(mlpProfile.maxUpDurationMs)) {
+            duration = Math.min(duration, mlpProfile.maxUpDurationMs);
+        }
         if (duration <= 0) {
             vec.group.position.y = Math.max(vec.group.position.y, topY);
             vec.group.scale.setScalar(0.6);
@@ -1975,9 +2063,7 @@ export default class Gpt2Layer extends BaseLayer {
             this._expandTo4x(lane, vec, mlpUpData);
             return;
         }
-        const colorDuration = this._skipToEndActive
-            ? Math.max(duration, SKIP_MLP_COLOR_MIN_MS)
-            : duration;
+        const colorDuration = this._resolveMlpColorDuration(duration, mlpProfile);
 
         // Animate matrix colour and emissive intensity for a glow effect
         const state = { t: 0, emissive: startIntensity };
@@ -2030,6 +2116,7 @@ export default class Gpt2Layer extends BaseLayer {
         const segments = 4;
         const segmentLength = Number.isFinite(vec?.instanceCount) ? vec.instanceCount : this._getBaseVectorLength();
         const segWidth = vec.getBaseWidthConstant() * vec.getWidthScale() * segmentLength;
+        const mlpProfile = this._resolveMlpTransitionProfile();
         const expandedGroup = new THREE.Group();
         const segmentVecs = [];
         const segmentBatch = new BatchedPrismVectorSet({
@@ -2114,11 +2201,11 @@ export default class Gpt2Layer extends BaseLayer {
         lane.expandedVecSegments = segmentVecs;
         
         // Rise before down-projection
-        const extraRise = 30;
+        const extraRise = mlpProfile.expandRiseUnits;
         const pauseMs = 0;
 
         new TWEEN.Tween(expandedGroup.position)
-            .to({ y: expandedGroup.position.y + extraRise }, 500)
+            .to({ y: expandedGroup.position.y + extraRise }, mlpProfile.expandRiseMs)
             .easing(TWEEN.Easing.Quadratic.InOut)
             .onUpdate(() => {
                 const trail = lane && lane.expandedVecTrail;
@@ -2153,7 +2240,13 @@ export default class Gpt2Layer extends BaseLayer {
                     }
                 };
                 const runGeluTransition = () => {
-                    this._animateMlpActivationGelu(lane, applyActivation, startDown);
+                    this._animateMlpActivationGelu(lane, applyActivation, startDown, {
+                        durationMs: mlpProfile.geluDurationMs,
+                        riseExtra: mlpProfile.geluRiseExtra,
+                        curveHeight: mlpProfile.geluCurveHeight,
+                        activationSwitchT: mlpProfile.geluActivationSwitchT,
+                        liteMode: !!mlpProfile.geluLiteMode
+                    });
                 };
 
                 if (typeof TWEEN !== 'undefined' && pauseMs > 0) {
@@ -2181,6 +2274,7 @@ export default class Gpt2Layer extends BaseLayer {
             0,
             0.9
         );
+        const liteMode = options.liteMode === true;
         const safeCurveDomain = curveDomain > 0 ? curveDomain : 1;
 
         if (lane) {
@@ -2206,6 +2300,50 @@ export default class Gpt2Layer extends BaseLayer {
             return;
         }
 
+        const baseY = expandedGroup.position.y;
+        let activationApplied = false;
+        const applyActivationOnce = () => {
+            if (activationApplied) return;
+            activationApplied = true;
+            if (typeof applyActivation === 'function') applyActivation();
+        };
+        const updateExpandedTrail = () => {
+            const expandedTrail = lane && lane.expandedVecTrail;
+            if (!expandedTrail || typeof expandedTrail.update !== 'function') return;
+            if (lane.expandedVecTrailWorld) {
+                expandedGroup.getWorldPosition(TMP_WORLD_POS);
+                expandedTrail.update(TMP_WORLD_POS);
+            } else {
+                expandedTrail.update(expandedGroup.position);
+            }
+        };
+
+        if (liteMode) {
+            const state = { t: 0 };
+            new TWEEN.Tween(state)
+                .to({ t: 1 }, durationMs)
+                .easing(TWEEN.Easing.Quadratic.InOut)
+                .onUpdate(() => {
+                    if (state.t >= activationSwitchT) {
+                        applyActivationOnce();
+                    }
+                    const liftProgress = state.t >= activationSwitchT
+                        ? (state.t - activationSwitchT) / Math.max(1e-6, 1 - activationSwitchT)
+                        : 0;
+                    const liftT = TWEEN.Easing.Quadratic.Out(THREE.MathUtils.clamp(liftProgress, 0, 1));
+                    expandedGroup.position.y = baseY + riseExtra * liftT;
+                    updateExpandedTrail();
+                })
+                .onComplete(() => {
+                    applyActivationOnce();
+                    expandedGroup.position.y = baseY + riseExtra;
+                    finishGelu();
+                    if (typeof onComplete === 'function') onComplete();
+                })
+                .start();
+            return;
+        }
+
         const segmentCounts = segmentVecs.map(seg => Math.max(1, Math.floor(seg.instanceCount || 1)));
         const totalCount = segmentCounts.reduce((sum, count) => sum + count, 0);
         const offsets = segmentVecs.map((_, idx) => new Float32Array(segmentCounts[idx]));
@@ -2222,15 +2360,7 @@ export default class Gpt2Layer extends BaseLayer {
             }
         }
 
-        const baseY = expandedGroup.position.y;
-        let activationApplied = false;
         const state = { t: 0 };
-
-        const applyActivationOnce = () => {
-            if (activationApplied) return;
-            activationApplied = true;
-            if (typeof applyActivation === 'function') applyActivation();
-        };
 
         // Bend into a GELU curve, switch colors mid-flight, then return to the flat vector.
         new TWEEN.Tween(state)
@@ -2246,15 +2376,7 @@ export default class Gpt2Layer extends BaseLayer {
                     : 0;
                 const liftT = TWEEN.Easing.Quadratic.Out(THREE.MathUtils.clamp(liftProgress, 0, 1));
                 expandedGroup.position.y = baseY + riseExtra * liftT;
-                const expandedTrail = lane && lane.expandedVecTrail;
-                if (expandedTrail && typeof expandedTrail.update === 'function') {
-                    if (lane.expandedVecTrailWorld) {
-                        expandedGroup.getWorldPosition(TMP_WORLD_POS);
-                        expandedTrail.update(TMP_WORLD_POS);
-                    } else {
-                        expandedTrail.update(expandedGroup.position);
-                    }
-                }
+                updateExpandedTrail();
 
                 for (let s = 0; s < segmentVecs.length; s++) {
                     const segVec = segmentVecs[s];
@@ -2315,10 +2437,12 @@ export default class Gpt2Layer extends BaseLayer {
         
         const startY = expandedGroup.position.y;
         const totalDist = downTopY - startY;
-        const durationDown = (Math.abs(totalDist) / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
-        const colorDurationDown = this._skipToEndActive
-            ? Math.max(durationDown, SKIP_MLP_COLOR_MIN_MS)
-            : durationDown;
+        const mlpProfile = this._resolveMlpTransitionProfile();
+        let durationDown = (Math.abs(totalDist) / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
+        if (Number.isFinite(mlpProfile.maxDownDurationMs)) {
+            durationDown = Math.min(durationDown, mlpProfile.maxDownDurationMs);
+        }
+        const colorDurationDown = this._resolveMlpColorDuration(durationDown, mlpProfile);
 
         const matrixBottomWidth = MLP_MATRIX_PARAMS_DOWN.width;
         const matrixTopWidth = MLP_MATRIX_PARAMS_DOWN.width * MLP_MATRIX_PARAMS_DOWN.topWidthFactor;
