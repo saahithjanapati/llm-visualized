@@ -1,15 +1,17 @@
 # AGENT.md
 
 ## Scope
-Shared constants, materials, and helpers.
+Cross-cutting constants and utility helpers.
 
-## Key files
-- `constants.js`: layout, timings, colors, global toggles.
-- `precomputedGeometryLoader.js`: GLB loader for cached geometry.
-- `trailUtils.js` / `trailConstants.js`: residual stream trails.
-- `sciFiMaterial.js`: shared materials.
-- `activationPrecompute.js`: cache prep for capture data.
+## Key Files
+- `constants.js`: shared layout, timings, and feature toggles.
+- `visualTuningProfiles.js`: rendering/animation profile tuning constants.
+- `trailUtils.js` and `trailConstants.js`: trail implementations and limits.
+- `sciFiMaterial.js` and `materialUtils.js`: material shader/uniform helpers.
+- `activationMetadata.js` and `activationPrecompute.js`: activation coloring/metadata prep.
+- `precomputedGeometryLoader.js`: cached geometry loading.
+- `additionUtils.js`, `prismLayout.js`, `colors.js`: animation/layout/color helpers.
 
 ## Notes
-- Many values are global; changing constants affects all demos.
-- Keep utility functions side-effect free where possible.
+- Utility changes can affect multiple subsystems; audit call sites before modifying shared constants.
+- Keep helpers side-effect-light unless a function is explicitly mutating visuals/materials.

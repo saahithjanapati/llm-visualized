@@ -1,35 +1,36 @@
 # AGENTS.md
 
-## Repo summary
-This repo is a Three.js-based 3D visualization of GPT-2 internals. The primary demo is a 12-layer GPT-2 stack with layered animations (LN, MHSA, MLP), backed by a custom engine, animation system, and precomputed geometry assets. Vite is used for local dev/build.
+## Repo Summary
+This repo is a Three.js visualization of GPT-2 internals, centered on a 12-layer transformer stack demo.
 
-## Key entry points
-- `index.html` - Main HTML entry for the GPT-2 tower.
-- `src/app/gpt-tower/index.js` - Bootstraps the 12-layer pipeline and connects UI, timing, and scene setup.
-- `src/app/gpt-tower/` - Demo-specific modules (activation loading, token chips, top logit bars, controls).
+## Primary Runtime Path
+- `index.html` loads the tower demo.
+- `src/app/gpt-tower/index.js` wires engine, pipeline, UI, and activation data.
+- `src/engine/LayerPipeline.js` creates and sequences layers.
+- `src/engine/layers/Gpt2Layer.js` drives LN -> MHSA -> MLP per-layer flow.
+- `src/animations/MHSAAnimation.js` orchestrates attention routing/pass-through.
+- `src/animations/mhsa/VisualSetup.js` builds static MHSA matrices and output projection visuals.
 
-## Core engine and visuals
-- `src/engine/CoreEngine.js` - Three.js scene setup, renderer, camera, render loop, and controls.
-- `src/engine/LayerPipeline.js` - Orchestrates N layers and lane handoff.
-- `src/engine/layers/Gpt2Layer.js` - Single transformer layer visuals and sequencing.
-- `src/animations/` - MHSA and other animation controllers (routing, pass-through, attention).
-- `src/components/` - Visual primitives (vectors, weight matrices, layer norms).
-- `src/utils/` - Constants, colors, trail helpers, precomputed geometry loader.
-- `src/ui/` - UI overlays (intro, pause, settings, status).
-- `src/state/appState.js` - Shared runtime state.
+## Key Areas
+- `src/engine/`: renderer, camera, layer orchestration, raycast helpers.
+- `src/engine/layers/`: lane construction, phase logic, data-access helpers.
+- `src/animations/` and `src/animations/mhsa/`: animation controllers and MHSA internals.
+- `src/components/`: visual primitives (instanced vectors, matrices, layer norm geometry).
+- `src/ui/`: DOM controls and overlays.
+- `src/utils/`: constants, trails, materials, activation metadata/precompute helpers.
+- `src/data/`: random/captured activation sources + parameter datasets.
+- `scripts/`: dataset extraction and geometry-generation scripts.
+- `public/`: static assets and CSS.
 
-## Assets and precomputed geometry
-- `precomputed_components_slice.glb` / `precomputed_components_qkv.glb` - Cached geometry to speed startup (slice + full-depth QKV).
-- `metal_grate_rusty_1k.gltf` / `rogland_clear_night_64.exr` - Environment assets.
-- `cool-fun.gif` - Loading overlay asset.
-- `public/` - Static assets and CSS (including `public/twelve-layer-stack.css`).
+## Current Complexity Hotspots
+- `src/ui/selectionPanel.js` (large UI + preview composition module).
+- `src/engine/layers/Gpt2Layer.js` (large phase/state machine).
+- `src/animations/MHSAAnimation.js` (broad lifecycle + fallback paths).
 
-## GPT-2 data extraction utilities
-- `scripts/extract_gpt2_data.py` - CLI for sampling GPT-2 activations for visualization.
-- `scripts/generate_precomputed_components.mjs` - Generates cached geometry.
+## Dev Commands
+- `npm run dev`
+- `npm run test`
+- `npm run build`
 
-## Build and dev
-- `package.json` - Vite scripts.
-- `vite.config.js` - Vite config for the main entry.
-
-If you need to change behavior, start with `src/app/gpt-tower/index.js` (demo wiring) or `src/engine/` + `src/animations/` (core visuals).
+## Change Guidance
+Prefer adding helpers in focused modules (`src/engine/layers/*`, `src/animations/mhsa/*`) instead of expanding already-large controllers.

@@ -200,6 +200,14 @@ const applyMatrixReflectivityTweak = (matrix, tweaks) => {
     applyToMaterial(matrix.backCapMesh?.material);
 };
 
+const assignMatrixLabel = (matrix, label) => {
+    if (!matrix || typeof label !== 'string') return;
+    if (matrix.group) matrix.group.userData.label = label;
+    if (matrix.mesh) matrix.mesh.userData.label = label;
+    if (matrix.frontCapMesh) matrix.frontCapMesh.userData.label = label;
+    if (matrix.backCapMesh) matrix.backCapMesh.userData.label = label;
+};
+
 
 export default class Gpt2Layer extends BaseLayer {
     /**
@@ -672,61 +680,25 @@ export default class Gpt2Layer extends BaseLayer {
         // 4) MLP Up-projection matrix (orange)
         // ────────────────────────────────────────────────────────────────
         const mlpUpCenterY = ln2TopY + LN2_TO_MLP_GAP + MLP_MATRIX_PARAMS_UP.height / 2;
-        const mlpUp = new WeightMatrixVisualization(
-            null,
-            new THREE.Vector3(offsetX, mlpUpCenterY, 0),
-            MLP_MATRIX_PARAMS_UP.width,
-            MLP_MATRIX_PARAMS_UP.height,
-            MLP_MATRIX_PARAMS_UP.depth,
-            MLP_MATRIX_PARAMS_UP.topWidthFactor,
-            MLP_MATRIX_PARAMS_UP.cornerRadius,
-            MLP_MATRIX_PARAMS_UP.numberOfSlits,
-            MLP_MATRIX_PARAMS_UP.slitWidth,
-            MLP_MATRIX_PARAMS_UP.slitDepthFactor,
-            MLP_MATRIX_PARAMS_UP.slitBottomWidthFactor,
-            MLP_MATRIX_PARAMS_UP.slitTopWidthFactor
-        );
-        mlpUp.setColor(inactiveDark.clone());
-        mlpUp.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.08 });
-        applyMatrixReflectivityTweak(mlpUp, MLP_REFLECTIVITY_TWEAKS);
-        {
-            const lbl = 'MLP Up Weight Matrix';
-            mlpUp.group.userData.label = lbl;
-            if (mlpUp.mesh) mlpUp.mesh.userData.label = lbl;
-            if (mlpUp.frontCapMesh) mlpUp.frontCapMesh.userData.label = lbl;
-            if (mlpUp.backCapMesh)  mlpUp.backCapMesh.userData.label  = lbl;
-        }
-        this.raycastRoot.add(mlpUp.group);
-        freezeStaticTransforms(mlpUp.group, true);
+        const mlpUp = this._createMlpMatrix({
+            offsetX,
+            centerY: mlpUpCenterY,
+            params: MLP_MATRIX_PARAMS_UP,
+            label: 'MLP Up Weight Matrix',
+            color: inactiveDark,
+            emissiveIntensity: 0.08
+        });
 
         // 5) MLP Down-projection matrix (same orange)
         const mlpDownCenterY = mlpUpCenterY + MLP_MATRIX_PARAMS_UP.height / 2 + MLP_INTER_MATRIX_GAP + MLP_MATRIX_PARAMS_DOWN.height / 2;
-        const mlpDown = new WeightMatrixVisualization(
-            null,
-            new THREE.Vector3(offsetX, mlpDownCenterY, 0),
-            MLP_MATRIX_PARAMS_DOWN.width,
-            MLP_MATRIX_PARAMS_DOWN.height,
-            MLP_MATRIX_PARAMS_DOWN.depth,
-            MLP_MATRIX_PARAMS_DOWN.topWidthFactor,
-            MLP_MATRIX_PARAMS_DOWN.cornerRadius,
-            MLP_MATRIX_PARAMS_DOWN.numberOfSlits,
-            MLP_MATRIX_PARAMS_DOWN.slitWidth,
-            MLP_MATRIX_PARAMS_DOWN.slitDepthFactor,
-            MLP_MATRIX_PARAMS_DOWN.slitBottomWidthFactor,
-            MLP_MATRIX_PARAMS_DOWN.slitTopWidthFactor
-        );
-        mlpDown.setColor(inactiveDark.clone());
-        mlpDown.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.1 });
-        applyMatrixReflectivityTweak(mlpDown, MLP_REFLECTIVITY_TWEAKS);
-        {
-            const lbl = 'MLP Down Weight Matrix';
-            mlpDown.group.userData.label = lbl;
-            if (mlpDown.mesh) mlpDown.mesh.userData.label = lbl;
-            if (mlpDown.frontCapMesh) mlpDown.frontCapMesh.userData.label = lbl;
-            if (mlpDown.backCapMesh)  mlpDown.backCapMesh.userData.label  = lbl;
-        }
-        this.raycastRoot.add(mlpDown.group);
-        freezeStaticTransforms(mlpDown.group, true);
+        const mlpDown = this._createMlpMatrix({
+            offsetX,
+            centerY: mlpDownCenterY,
+            params: MLP_MATRIX_PARAMS_DOWN,
+            label: 'MLP Down Weight Matrix',
+            color: inactiveDark,
+            emissiveIntensity: 0.1
+        });
 
         // ---------- Residual vectors (original stream) ----------
         this.lanes = [];
@@ -743,6 +715,31 @@ export default class Gpt2Layer extends BaseLayer {
         this.ln2 = ln2;
         this.mlpUp = mlpUp;
         this.mlpDown = mlpDown;
+    }
+
+    _createMlpMatrix({ offsetX, centerY, params, label, color, emissiveIntensity }) {
+        const matrix = new WeightMatrixVisualization(
+            null,
+            new THREE.Vector3(offsetX, centerY, 0),
+            params.width,
+            params.height,
+            params.depth,
+            params.topWidthFactor,
+            params.cornerRadius,
+            params.numberOfSlits,
+            params.slitWidth,
+            params.slitDepthFactor,
+            params.slitBottomWidthFactor,
+            params.slitTopWidthFactor
+        );
+        const matrixColor = color && typeof color.clone === 'function' ? color.clone() : color;
+        matrix.setColor(matrixColor);
+        matrix.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity });
+        applyMatrixReflectivityTweak(matrix, MLP_REFLECTIVITY_TWEAKS);
+        assignMatrixLabel(matrix, label);
+        this.raycastRoot.add(matrix.group);
+        freezeStaticTransforms(matrix.group, true);
+        return matrix;
     }
 
     update(dt) {

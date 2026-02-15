@@ -1,13 +1,16 @@
 # AGENT.md
 
 ## Scope
-Single transformer-layer visuals and lane construction.
+Per-transformer-layer visuals, state machine phases, and lane construction helpers.
 
-## Key files
-- `Gpt2Layer.js`: builds LN/MHSA/MLP geometry and sequencing.
-- `gpt2LaneBuilder.js`: creates lane groups and placeholders.
-- `gpt2LayerUtils.js`: helpers for materials, data application, math.
+## Key Files
+- `Gpt2Layer.js`: LN/MHSA/MLP sequencing and lane lifecycle.
+- `gpt2LaneBuilder.js`: lane object construction and placeholder setup.
+- `gpt2LanePhases.js`: lane phase enums + transition guards.
+- `gpt2LayerDataAccess.js`: activation/parameter data lookup helpers.
+- `gpt2LayerNormVisuals.js`: layer norm visual state updates.
+- `gpt2LayerUtils.js`: vector/trail/material utility operations.
 
 ## Notes
-- If changing per-layer layout, update constants in `src/utils/constants.js`.
-- For performance, reuse cached materials/colors and avoid per-frame allocations.
+- `Gpt2Layer.js` is intentionally central but large; prefer extracting helpers into sibling modules.
+- Preserve lane phase transition validity when changing sequencing behavior.

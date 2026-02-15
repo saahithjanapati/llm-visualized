@@ -1,13 +1,14 @@
 # AGENT.md
 
 ## Scope
-Activation sources and parameter data.
+Activation sources and parameter datasets.
 
-## Key files
-- `RandomActivationSource.js`: synthetic activations.
-- `CaptureActivationSource.js`: loads captured GPT-2 activations.
-- `layerNormParams.js` / `gpt2_layernorm_params.json`: LN parameter data.
-- `parameterCheckpoints.js`: parameter counts for overlays.
+## Key Files
+- `RandomActivationSource.js`: synthetic fallback activations.
+- `CaptureActivationSource.js`: reads captured activations for deterministic playback.
+- `layerNormParams.js` and `gpt2_layernorm_params.json`: layer norm parameter data.
+- `parameterCheckpoints.js`: parameter-count milestones for overlays.
 
 ## Notes
-- Capture files typically live under `public/` (for example capture.json).
+- Capture artifacts are served from `public/`.
+- Keep source interfaces stable so `gpt-tower` wiring can switch sources cleanly.

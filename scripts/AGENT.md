@@ -1,14 +1,15 @@
 # AGENT.md
 
 ## Scope
-Data extraction and precomputed geometry generation.
+Offline data extraction and precompute tooling.
 
-## Key files
-- `extract_gpt2_data.py`: capture activations for visualization.
-- `extract_gpt2_layernorm_params.py`: LN params.
-- `generate_precomputed_components.mjs`: build cached GLB geometry.
-- `generate_qkv_components.mjs`: QKV geometry variants.
+## Key Files
+- `extract_gpt2_data.py`: activation capture extraction.
+- `extract_gpt2_layernorm_params.py`: layer norm parameter extraction.
+- `generate_precomputed_components.mjs`: main precompute generator.
+- `generate_qkv_components.mjs`: QKV-focused geometry generation.
+- `generate_single_lane_components.mjs`: single-lane geometry generation.
 
 ## Notes
-- Generated assets are large; check output paths before running.
-- Main app entry point lives in `index.html` and loads `src/app/gpt-tower/index.js`.
+- Generated outputs are large and intended for `public/assets/`.
+- Validate output paths before running generators.

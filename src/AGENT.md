@@ -1,19 +1,21 @@
 # AGENT.md
 
 ## Scope
-Source code for the visualization. This folder hosts the rendering engine, animations, UI overlays, and data adapters used by the main demo.
+Main source tree for rendering, animation, UI, and data plumbing.
 
-## Map
-- engine/: Three.js core (renderer, camera, layer stack).
-- engine/layers/: single transformer layer visuals.
-- animations/: animation controllers (MHSA, LN, vector ops).
-- components/: reusable geometry/visual primitives.
-- utils/: constants, materials, trails, loaders.
-- ui/: DOM overlays and controls.
-- data/: activation sources and parameter data.
-- state/: shared runtime state.
-- app/gpt-tower/: main demo entry and helper modules.
+## Layout
+- `app/gpt-tower/`: demo bootstrap, controls, token UI, activation wiring.
+- `engine/`: scene runtime, camera/raycast systems, layer pipeline.
+- `engine/layers/`: per-layer state machine + lane/data helpers.
+- `animations/`: top-level animation controllers.
+- `animations/mhsa/`: MHSA routing, pass-through, visual setup, timing helpers.
+- `components/`: reusable visual primitives.
+- `ui/`: overlays and interactive controls.
+- `utils/`: constants, material/trail helpers, activation utilities.
+- `data/`: activation sources and model parameter datasets.
+- `state/`: shared runtime state container.
 
-## Where to start
-- For the main tower: `src/app/gpt-tower/index.js` wires the pipeline.
-- For per-layer visuals: `engine/layers/Gpt2Layer.js`.
+## Start Points
+- Demo wiring: `src/app/gpt-tower/index.js`
+- Layer behavior: `src/engine/layers/Gpt2Layer.js`
+- MHSA orchestration: `src/animations/MHSAAnimation.js`

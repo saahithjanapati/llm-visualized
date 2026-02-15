@@ -1,13 +1,14 @@
 # AGENT.md
 
 ## Scope
-Reusable visual primitives (vectors, matrices, layer norm rings).
+Reusable visual primitives.
 
-## Key files
-- `VectorVisualizationInstancedPrism.js`: instanced prism vectors (main tower).
-- `WeightMatrixVisualization.js`: weight matrix blocks.
-- `LayerNormalizationVisualization.js`: LN ring geometry.
+## Key Files
+- `VectorVisualizationInstancedPrism.js`: instanced prism vector implementation.
+- `BatchedPrismVectorSet.js`: batched vector copies used to reduce draw calls.
+- `WeightMatrixVisualization.js`: weight-matrix geometry/material wrapper.
+- `LayerNormalizationVisualization.js`: layer norm ring geometry.
 
 ## Notes
-- Instanced versions are preferred for performance.
-- Components should be pure visuals; animation logic lives in `src/animations/`.
+- Components should stay focused on visuals/state containers.
+- Higher-level animation sequencing belongs in `src/animations/` and `src/engine/layers/`.

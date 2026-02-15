@@ -1,14 +1,16 @@
 # AGENT.md
 
 ## Scope
-DOM overlays and interactive controls for demos.
+DOM overlays, controls, and inspection panels.
 
-## Key files
-- `settingsModal.js`, `pauseButton.js`, `skipMenu.js`: top-right controls.
-- `statusOverlay.js`, `parameterCounter.js`: HUD widgets.
-- `selectionPanel.js`: click and hover details panel.
-- `introAnimation.js`: title intro overlay.
+## Key Files
+- `selectionPanel.js`: primary selection details panel and preview composition.
+- `selectionPanelSelectionUtils.js`: selection filtering/normalization helpers.
+- `selectionPanelNarrativeUtils.js`: narrative text generation helpers.
+- `statusOverlay.js`, `parameterCounter.js`, `perfOverlay.js`: HUD widgets.
+- `settingsModal.js`, `pauseButton.js`, `skipMenu.js`, `skip*Button.js`, `conveyorSkipButton.js`: runtime controls.
+- `introAnimation.js`, `liveVisualControls.js`, `touchClickFallback.js`: UX glue.
 
 ## Notes
-- UI modules expect specific DOM ids defined in `index.html` or demo HTML.
-- Styling lives in `twelve-layer-stack.css`.
+- `selectionPanel.js` is a current complexity hotspot; prefer extracting narrow helpers rather than growing it.
+- Keep UI modules aligned with DOM ids/classes defined by `index.html` and `public/twelve-layer-stack.css`.

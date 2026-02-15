@@ -25,6 +25,74 @@ import {
 
 import { INACTIVE_COMPONENT_COLOR } from '../../utils/constants.js';
 
+const OUTPUT_PROJECTION_LABEL = 'Output Projection Matrix';
+const QKV_LABELS = Object.freeze({
+    q: 'Query Weight Matrix',
+    k: 'Key Weight Matrix',
+    v: 'Value Weight Matrix',
+});
+
+function withMaterialArray(material, callback) {
+    if (!material || typeof callback !== 'function') return;
+    const mats = Array.isArray(material) ? material : [material];
+    mats.forEach((mat) => {
+        if (!mat) return;
+        callback(mat);
+    });
+}
+
+function forEachMatrixMaterial(matrix, callback) {
+    if (!matrix || typeof callback !== 'function') return;
+    withMaterialArray(matrix.mesh?.material, callback);
+    withMaterialArray(matrix.frontCapMesh?.material, callback);
+    withMaterialArray(matrix.backCapMesh?.material, callback);
+}
+
+function forEachGroupChildMaterial(group, callback) {
+    if (!group || !Array.isArray(group.children) || typeof callback !== 'function') return;
+    group.children.forEach((child) => {
+        withMaterialArray(child?.material, callback);
+    });
+}
+
+function applyMatrixUserData(matrix, data) {
+    if (!matrix || !data) return;
+    const targets = [matrix.group, matrix.mesh, matrix.frontCapMesh, matrix.backCapMesh];
+    targets.forEach((target) => {
+        if (!target) return;
+        target.userData = target.userData || {};
+        Object.assign(target.userData, data);
+    });
+}
+
+function createWeightMatrixAt(position, {
+    width,
+    height,
+    depth,
+    topWidthFactor,
+    cornerRadius,
+    numberOfSlits,
+    slitWidth,
+    slitDepthFactor,
+    slitBottomWidthFactor,
+    slitTopWidthFactor
+}) {
+    return new WeightMatrixVisualization(
+        null,
+        position,
+        width,
+        height,
+        depth,
+        topWidthFactor,
+        cornerRadius,
+        numberOfSlits,
+        slitWidth,
+        slitDepthFactor,
+        slitBottomWidthFactor,
+        slitTopWidthFactor
+    );
+}
+
 /**
  * Build all static visual elements required for a Multi-Head Self-Attention (MHSA) layer.
  * Returns an object with references that the rest of the animation pipeline will need.
@@ -79,8 +147,7 @@ export function buildMHAVisuals(parentGroup, {
         envMapIntensityMax = 1.3
     } = {}) => {
         if (!matrix) return;
-        const mats = [matrix.mesh?.material, matrix.frontCapMesh?.material, matrix.backCapMesh?.material];
-        mats.forEach((mat) => {
+        forEachMatrixMaterial(matrix, (mat) => {
             if (!mat) return;
             if (typeof mat.roughness === 'number') mat.roughness = Math.max(mat.roughness, roughnessMin);
             if (typeof metalnessMax === 'number' && typeof mat.metalness === 'number') {
@@ -109,6 +176,35 @@ export function buildMHAVisuals(parentGroup, {
         envMapIntensityMax: 0.85
     };
 
+    const buildHeadMatrix = (xPos, label, headIndex) => {
+        const matrix = createWeightMatrixAt(
+            new THREE.Vector3(xPos, matrixCenterY, 0),
+            MHA_MATRIX_PARAMS
+        );
+
+        matrix.setColor(inactiveMatrixColor);
+        applyMatrixUserData(matrix, {
+            label,
+            headIndex
+        });
+        if (Number.isFinite(layerIndex)) {
+            applyMatrixUserData(matrix, { layerIndex });
+        }
+
+        const wantsTransparency = matrixRestingOpacity < 1.0;
+        matrix.setMaterialProperties({
+            opacity: matrixRestingOpacity,
+            transparent: wantsTransparency,
+            emissiveIntensity: 0.08,
+        });
+
+        parentGroup.add(matrix.group);
+        mhaVisualizations.push(matrix);
+        tuneInactiveMatrix(matrix);
+        softenMatrixSurface(matrix, QKV_SURFACE_TWEAKS);
+        return matrix;
+    };
+
     for (let i = 0; i < NUM_HEAD_SETS_LAYER; i++) {
         const headSetWidth       = MHA_INTERNAL_MATRIX_SPACING * 2 + MHA_MATRIX_PARAMS.width;
         const currentHeadSetX    = branchX - MHA_INTERNAL_MATRIX_SPACING + i * (headSetWidth + HEAD_SET_GAP_LAYER);
@@ -117,64 +213,9 @@ export function buildMHAVisuals(parentGroup, {
         const x_k = currentHeadSetX + MHA_INTERNAL_MATRIX_SPACING;
         const x_v = currentHeadSetX + MHA_INTERNAL_MATRIX_SPACING * 2;
 
-        const buildMatrix = (xPos, label, headIndex) => {
-            const mat = new WeightMatrixVisualization(
-                null,
-                new THREE.Vector3(xPos, matrixCenterY, 0),
-                MHA_MATRIX_PARAMS.width,
-                MHA_MATRIX_PARAMS.height,
-                MHA_MATRIX_PARAMS.depth,
-                MHA_MATRIX_PARAMS.topWidthFactor,
-                MHA_MATRIX_PARAMS.cornerRadius,
-                MHA_MATRIX_PARAMS.numberOfSlits,
-                MHA_MATRIX_PARAMS.slitWidth,
-                MHA_MATRIX_PARAMS.slitDepthFactor,
-                MHA_MATRIX_PARAMS.slitBottomWidthFactor,
-                MHA_MATRIX_PARAMS.slitTopWidthFactor
-            );
-            mat.setColor(inactiveMatrixColor);
-            mat.group.userData.label = label;
-            mat.group.userData.headIndex = headIndex;
-            if (Number.isFinite(layerIndex)) mat.group.userData.layerIndex = layerIndex;
-            if (mat.mesh)         mat.mesh.userData.label        = label;
-            if (mat.mesh) {
-                mat.mesh.userData.headIndex = headIndex;
-                if (Number.isFinite(layerIndex)) mat.mesh.userData.layerIndex = layerIndex;
-            }
-            if (mat.frontCapMesh) {
-                mat.frontCapMesh.userData.label = label;
-                mat.frontCapMesh.userData.headIndex = headIndex;
-                if (Number.isFinite(layerIndex)) mat.frontCapMesh.userData.layerIndex = layerIndex;
-            }
-            if (mat.backCapMesh)  {
-                mat.backCapMesh.userData.label  = label;
-                mat.backCapMesh.userData.headIndex = headIndex;
-                if (Number.isFinite(layerIndex)) mat.backCapMesh.userData.layerIndex = layerIndex;
-            }
-
-            // Make heavy matrix materials opaque by default when fully opaque to avoid sorting
-            const wantsTransparency = matrixRestingOpacity < 1.0;
-            mat.setMaterialProperties({
-                opacity: matrixRestingOpacity,
-                transparent: wantsTransparency,
-                emissiveIntensity: 0.08,
-            });
-
-            parentGroup.add(mat.group);
-            mhaVisualizations.push(mat);
-            return mat;
-        };
-
-        const qMatrix = buildMatrix(x_q, 'Query Weight Matrix', i);
-        const kMatrix = buildMatrix(x_k, 'Key Weight Matrix', i);
-        const vMatrix = buildMatrix(x_v, 'Value Weight Matrix', i);
-
-        tuneInactiveMatrix(qMatrix);
-        tuneInactiveMatrix(kMatrix);
-        tuneInactiveMatrix(vMatrix);
-        softenMatrixSurface(qMatrix, QKV_SURFACE_TWEAKS);
-        softenMatrixSurface(kMatrix, QKV_SURFACE_TWEAKS);
-        softenMatrixSurface(vMatrix, QKV_SURFACE_TWEAKS);
+        buildHeadMatrix(x_q, QKV_LABELS.q, i);
+        buildHeadMatrix(x_k, QKV_LABELS.k, i);
+        buildHeadMatrix(x_v, QKV_LABELS.v, i);
 
         headsCentersX.push(x_k);
         headCoords.push({ q: x_q, k: x_k, v: x_v });
@@ -190,35 +231,25 @@ export function buildMHAVisuals(parentGroup, {
     const matrixHeight         = MHA_MATRIX_PARAMS.height * MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.heightFactor;
     const outputProjMatrixCenterY = decorativeVectorsY + MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW + matrixHeight / 2;
 
-    const outputProjectionMatrix = new WeightMatrixVisualization(
-        null,
+    const outputProjectionMatrix = createWeightMatrixAt(
         new THREE.Vector3(firstHeadKMatrixX, outputProjMatrixCenterY, 0),
-        MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.width,
-        matrixHeight,
-        MHA_MATRIX_PARAMS.depth,
-        MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.topWidthFactor,
-        MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.cornerRadius,
-        NUM_VECTOR_LANES,
-        MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitWidth,
-        MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitDepthFactor,
-        MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitBottomWidthFactor,
-        MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.slitTopWidthFactor
+        {
+            ...MHA_OUTPUT_PROJECTION_MATRIX_PARAMS,
+            height: matrixHeight,
+            depth: MHA_MATRIX_PARAMS.depth,
+            numberOfSlits: NUM_VECTOR_LANES,
+        }
     );
 
     const initDarkColor = new THREE.Color(MHSA_MATRIX_INITIAL_RESTING_COLOR);
     outputProjectionMatrix.setColor(initDarkColor);
-    outputProjectionMatrix.group.userData.label = 'Output Projection Matrix';
-    if (outputProjectionMatrix.mesh)         outputProjectionMatrix.mesh.userData.label        = 'Output Projection Matrix';
-    if (outputProjectionMatrix.frontCapMesh) outputProjectionMatrix.frontCapMesh.userData.label = 'Output Projection Matrix';
-    if (outputProjectionMatrix.backCapMesh)  outputProjectionMatrix.backCapMesh.userData.label  = 'Output Projection Matrix';
+    applyMatrixUserData(outputProjectionMatrix, { label: OUTPUT_PROJECTION_LABEL });
 
-    outputProjectionMatrix.group.children.forEach(child => {
-        if (child.material) {
-            child.material.opacity          = 1.0;
-            child.material.transparent      = false;
-            child.material.emissive         = initDarkColor;
-            child.material.emissiveIntensity = scaleGlobalEmissiveIntensity(0.16);
-        }
+    forEachGroupChildMaterial(outputProjectionMatrix.group, (material) => {
+        material.opacity = 1.0;
+        material.transparent = false;
+        material.emissive = initDarkColor;
+        material.emissiveIntensity = scaleGlobalEmissiveIntensity(0.16);
     });
     softenMatrixSurface(outputProjectionMatrix);
 

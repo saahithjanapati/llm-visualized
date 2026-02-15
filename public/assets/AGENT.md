@@ -1,8 +1,11 @@
 # AGENT.md
 
 ## Scope
-Binary assets and shared media used by the demos.
+Static binary/media assets and generated geometry bundles.
+
+## Contents
+- `geometries/`: precomputed matrix/layernorm geometry JSON artifacts.
 
 ## Notes
-- Files are mostly generated or third-party.
-- Avoid manual edits; regenerate via scripts when needed.
+- Most files are generated or cached artifacts.
+- Prefer regeneration through scripts over manual edits.

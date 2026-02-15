@@ -1,13 +1,14 @@
 # AGENT.md
 
 ## Scope
-Static assets and CSS served by Vite.
+Static assets served directly by Vite.
 
-## Key files
-- `twelve-layer-stack.css`: main demo styling.
-- `capture.json` / `capture_2.json`: activation capture datasets.
-- `flops_per_step.csv` / `flops_per_step.svg`: stats assets.
+## Key Files
+- `twelve-layer-stack.css`: core tower styling.
+- `capture.json` and `capture_2.json`: captured activation datasets.
+- `flops_per_step.csv` and `flops_per_step.svg`: stats/visualization assets.
+- `position_embeddings_grid*.png`: embedding reference images.
 
 ## Notes
-- JS should not live here; keep it in `src/`.
-- Main app entry point lives in `index.html` and loads `src/app/gpt-tower/index.js`.
+- Keep executable app code in `src/`.
+- `index.html` loads the app entry from `src/app/gpt-tower/index.js`.

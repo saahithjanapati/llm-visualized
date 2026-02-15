@@ -1,14 +1,14 @@
 # AGENT.md
 
 ## Scope
-Animation controllers and sequencing helpers.
+Animation controllers and sequencing logic.
 
-## Key files
-- `MHSAAnimation.js`: attention routing block used by the main tower.
-- `PrismLayerNormAnimation.js`: LN animation and prism flows.
-- `LayerAnimationConstants.js`: shared colors and lane settings.
-- `mhsa/`: detailed attention routing helpers.
+## Key Files
+- `MHSAAnimation.js`: top-level MHSA controller (routing, pass-through, merge/projection phases, fallbacks).
+- `PrismLayerNormAnimation.js`: layer-norm vector animation behavior.
+- `LayerAnimationConstants.js`: shared MHSA/LN colors and tuning constants.
+- `mhsa/`: split-out MHSA internals (`VisualSetup`, router, pass-through, timing, lane index helpers).
 
 ## Notes
-- Most animations are constructed by `Gpt2Layer.js`.
-- Prefer updating or adding a controller rather than embedding timing logic in components.
+- Static MHSA matrix/output-projection creation lives in `mhsa/VisualSetup.js`.
+- Keep per-frame update paths allocation-light; place setup/config transforms outside hot loops.

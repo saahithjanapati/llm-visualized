@@ -1,15 +1,18 @@
 # AGENT.md
 
 ## Scope
-Multi-head self-attention routing internals.
+Internal modules used by `MHSAAnimation`.
 
-## Key files
-- `SelfAttentionAnimator.js`: per-head attention flow.
-- `VectorRouter.js`: lane routing and split/merge logic.
-- `PassThroughAnimator.js`: skip/pass-through paths.
-- `VisualSetup.js`: builds MHSA visuals for the animation.
-- `index.js`: public exports for MHSA helpers.
+## Key Files
+- `VisualSetup.js`: builds Q/K/V matrix sets + output projection matrix and returns layout metadata.
+- `VectorRouter.js`: splits/routs lane vectors to head parking positions.
+- `PassThroughAnimator.js`: manages pass-through stage sequencing.
+- `VectorMatrixPassThrough.js`: per-vector matrix traversal helper.
+- `SelfAttentionAnimator.js`: optional self-attention conveyor/weighted-sum stage.
+- `laneIndex.js`: lane/head indexing helpers.
+- `mhsaTimingUtils.js`: pause-aware delay/timing helpers.
+- `index.js`: exports MHSA submodules.
 
 ## Notes
-- Lane ordering must stay consistent with `LayerPipeline` and `MHSAAnimation`.
-- Update `laneIndex.js` if you change lane conventions.
+- `buildMHAVisuals(...)` in `VisualSetup.js` is the active matrix construction path.
+- Keep lane identity/index conventions aligned with `LayerPipeline` and `Gpt2Layer`.

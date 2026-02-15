@@ -1,10 +1,11 @@
 # AGENT.md
 
 ## Scope
-Shared runtime state for UI and engine.
+Shared runtime state.
 
-## Key files
-- `appState.js`: global flags (playback, dev mode, selection, etc).
+## Key Files
+- `appState.js`: global flags for playback, selection, debug toggles, and UI integration.
 
 ## Notes
-- Keep state updates centralized; avoid ad-hoc globals.
+- Treat `appState` as shared contract between engine, animation, and UI layers.
+- Prefer explicit field additions over ad-hoc globals.
