@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import BaseLayer from '../BaseLayer.js';
 import { LayerNormalizationVisualization } from '../../components/LayerNormalizationVisualization.js';
 import { WeightMatrixVisualization } from '../../components/WeightMatrixVisualization.js';
-import { VectorVisualizationInstancedPrism } from '../../components/VectorVisualizationInstancedPrism.js';
 import { BatchedPrismVectorSet } from '../../components/BatchedPrismVectorSet.js';
 import { StraightLineTrail, buildMergedLineSegmentsFromSegments, collectTrailsUnder, mergeTrailsIntoLineSegments } from '../../utils/trailUtils.js';
 import { TRAIL_MIN_SEGMENT_DISTANCE } from '../../utils/trailConstants.js';
@@ -39,12 +38,10 @@ import {
 import { PrismLayerNormAnimation } from '../../animations/PrismLayerNormAnimation.js';
 import { MHSAAnimation } from '../../animations/MHSAAnimation.js';
 import { startPrismAdditionAnimation } from '../../utils/additionUtils.js';
-import { getLayerNormParamData } from '../../data/layerNormParams.js';
 import {
     applyVectorData,
     copyVectorAppearance,
     freezeStaticTransforms,
-    formatTokenLabel,
     geluApprox,
     LN_INTERNAL_TRAIL_MIN_SEGMENT
 } from './gpt2LayerUtils.js';
@@ -62,6 +59,27 @@ import {
     isAllowedLanePhaseTransition
 } from './gpt2LanePhases.js';
 import { GPT2_LAYER_VISUAL_TUNING } from '../../utils/visualTuningProfiles.js';
+import {
+    applyLayerNormParamVectorForLayer,
+    createPrismVectorForLayer,
+    getAttentionOutputProjectionDataForLane,
+    getEmbeddingDataForLane,
+    getLayerIncomingDataForLane,
+    getLn1DataForLane,
+    getLn2DataForLane,
+    getMlpActivationDataForLane,
+    getMlpDownDataForLane,
+    getMlpUpDataForLane,
+    getPostAttentionResidualDataForLane,
+    getPostMlpResidualDataForLane,
+    resolveActiveLaneLayoutIndices,
+    resolveBaseVectorLength,
+    resolveInstanceCountFromData,
+    resolveLaneLayoutCount,
+    resolveLayerNormParamDataForLayer,
+    resolveTokenIndexForLane,
+    resolveTokenLabelForLayer
+} from './gpt2LayerDataAccess.js';
 
 
 // Slightly reduced spacing between stacked layers for a tighter layout.
@@ -3629,131 +3647,93 @@ export default class Gpt2Layer extends BaseLayer {
     }
 
     _getBaseVectorLength() {
-        return Number.isFinite(this._baseVectorLength) ? this._baseVectorLength : VECTOR_LENGTH_PRISM;
+        return resolveBaseVectorLength(this, VECTOR_LENGTH_PRISM);
     }
 
     _getLaneLayoutCount() {
-        return Math.max(
-            this._laneCount,
-            Number.isFinite(this._laneLayoutCount) ? Math.floor(this._laneLayoutCount) : this._laneCount
-        );
+        return resolveLaneLayoutCount(this);
     }
 
     _getActiveLaneLayoutIndices() {
-        if (Array.isArray(this._activeLaneLayoutIndices) && this._activeLaneLayoutIndices.length) {
-            return this._activeLaneLayoutIndices.slice(0, this._laneCount);
-        }
-        return Array.from({ length: this._laneCount }, (_, idx) => idx);
+        return resolveActiveLaneLayoutIndices(this);
     }
 
     _getInstanceCountFromData(values, fallback = null) {
-        if (Array.isArray(values) || ArrayBuffer.isView(values)) {
-            return Math.max(1, values.length || 1);
-        }
-        const base = Number.isFinite(fallback) ? fallback : this._getBaseVectorLength();
-        return Math.max(1, base);
+        return resolveInstanceCountFromData(this, values, fallback, this._getBaseVectorLength());
     }
 
     _createPrismVector(values, position, numSubsections = 30, instanceCount = null) {
-        const count = Number.isFinite(instanceCount)
-            ? Math.max(1, Math.floor(instanceCount))
-            : this._getInstanceCountFromData(values);
-        const data = Array.isArray(values)
-            ? values
-            : ArrayBuffer.isView(values)
-                ? Array.from(values)
-                : null;
-        return new VectorVisualizationInstancedPrism(data, position, numSubsections, count);
+        return createPrismVectorForLayer(
+            this,
+            values,
+            position,
+            numSubsections,
+            instanceCount,
+            this._getBaseVectorLength()
+        );
     }
 
     _getLayerNormParamData(kind, param) {
-        const baseLength = this._getBaseVectorLength();
-        return getLayerNormParamData(this.index, kind, param, baseLength);
+        return resolveLayerNormParamDataForLayer(this, kind, param, this._getBaseVectorLength());
     }
 
     _applyLayerNormParamVector(targetVec, kind, param, colorOptions = null) {
-        if (!targetVec) return false;
-        const data = this._getLayerNormParamData(kind, param);
-        if (!data) return false;
-        const lnLabel = kind === 'ln1' ? 'LN1' : kind === 'ln2' ? 'LN2' : String(kind).toUpperCase();
-        const paramLabel = param === 'scale' ? 'Scale' : 'Shift';
-        const label = `${lnLabel} ${paramLabel}`;
-        const meta = {
-            stage: `${kind}.param.${param}`,
-            layerIndex: this.index,
-            notes: param === 'scale'
-                ? 'LayerNorm scale parameter'
-                : 'LayerNorm shift parameter'
-        };
-        return applyVectorData(targetVec, data, label, meta, colorOptions);
+        return applyLayerNormParamVectorForLayer(
+            this,
+            targetVec,
+            kind,
+            param,
+            colorOptions,
+            this._getBaseVectorLength()
+        );
     }
 
     _getTokenIndexForLane(laneIdx, laneLayoutIdx = null) {
-        if (Array.isArray(this._passLaneTokenIndices) && Number.isFinite(this._passLaneTokenIndices[laneIdx])) {
-            return this._passLaneTokenIndices[laneIdx];
-        }
-        const resolvedLaneIdx = Number.isFinite(laneLayoutIdx)
-            ? Math.floor(laneLayoutIdx)
-            : laneIdx;
-        if (!this.activationSource) return resolvedLaneIdx;
-        return this.activationSource.getLaneTokenIndex(resolvedLaneIdx, this._getLaneLayoutCount());
+        return resolveTokenIndexForLane(this, laneIdx, laneLayoutIdx);
     }
 
     _getTokenLabel(tokenIndex) {
-        if (!this.activationSource) return null;
-        return formatTokenLabel(this.activationSource.getTokenString(tokenIndex));
+        return resolveTokenLabelForLayer(this, tokenIndex);
     }
 
     _getEmbeddingData(lane, kind) {
-        if (!this.activationSource || !lane) return null;
-        return this.activationSource.getEmbedding(kind, lane.tokenIndex, this._getBaseVectorLength());
+        return getEmbeddingDataForLane(this, lane, kind, this._getBaseVectorLength());
     }
 
     _getLayerIncomingData(lane) {
-        if (!this.activationSource || !lane) return null;
-        return this.activationSource.getLayerIncoming(this.index, lane.tokenIndex, this._getBaseVectorLength());
+        return getLayerIncomingDataForLane(this, lane, this._getBaseVectorLength());
     }
 
     _getLn1Data(lane, stage) {
-        if (!this.activationSource || !lane) return null;
-        return this.activationSource.getLayerLn1(this.index, stage, lane.tokenIndex, this._getBaseVectorLength());
+        return getLn1DataForLane(this, lane, stage, this._getBaseVectorLength());
     }
 
     _getLn2Data(lane, stage) {
-        if (!this.activationSource || !lane) return null;
-        return this.activationSource.getLayerLn2(this.index, stage, lane.tokenIndex, this._getBaseVectorLength());
+        return getLn2DataForLane(this, lane, stage, this._getBaseVectorLength());
     }
 
     _getAttentionOutputProjectionData(lane) {
-        if (!this.activationSource || !lane) return null;
-        return this.activationSource.getAttentionOutputProjection(this.index, lane.tokenIndex, this._getBaseVectorLength());
+        return getAttentionOutputProjectionDataForLane(this, lane, this._getBaseVectorLength());
     }
 
     _getPostAttentionResidualData(lane) {
-        if (!this.activationSource || !lane) return null;
-        return this.activationSource.getPostAttentionResidual(this.index, lane.tokenIndex, this._getBaseVectorLength());
+        return getPostAttentionResidualDataForLane(this, lane, this._getBaseVectorLength());
     }
 
     _getMlpUpData(lane) {
-        if (!this.activationSource || !lane) return null;
-        const targetLength = this._getBaseVectorLength() * 4;
-        return this.activationSource.getMlpUp(this.index, lane.tokenIndex, targetLength);
+        return getMlpUpDataForLane(this, lane, this._getBaseVectorLength());
     }
 
     _getMlpActivationData(lane) {
-        if (!this.activationSource || !lane) return null;
-        const targetLength = this._getBaseVectorLength() * 4;
-        return this.activationSource.getMlpActivation(this.index, lane.tokenIndex, targetLength);
+        return getMlpActivationDataForLane(this, lane, this._getBaseVectorLength());
     }
 
     _getMlpDownData(lane) {
-        if (!this.activationSource || !lane) return null;
-        return this.activationSource.getMlpDown(this.index, lane.tokenIndex, this._getBaseVectorLength());
+        return getMlpDownDataForLane(this, lane, this._getBaseVectorLength());
     }
 
     _getPostMlpResidualData(lane) {
-        if (!this.activationSource || !lane) return null;
-        return this.activationSource.getPostMlpResidual(this.index, lane.tokenIndex, this._getBaseVectorLength());
+        return getPostMlpResidualDataForLane(this, lane, this._getBaseVectorLength());
     }
 
     // ------------------------------------------------------------

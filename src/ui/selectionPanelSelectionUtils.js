@@ -1,0 +1,274 @@
+export function getActivationDataFromSelection(selectionInfo) {
+    return selectionInfo?.info?.activationData
+        || selectionInfo?.object?.userData?.activationData
+        || selectionInfo?.hit?.object?.userData?.activationData
+        || null;
+}
+
+export function isKvCacheVectorSelection(selectionInfo) {
+    const vectorRef = selectionInfo?.info?.vectorRef;
+    if (vectorRef?.userData?.kvCachePersistent === true || vectorRef?.userData?.cachedKv === true) {
+        return true;
+    }
+    const candidates = [selectionInfo?.object, selectionInfo?.hit?.object];
+    for (const obj of candidates) {
+        let current = obj;
+        while (current && !current.isScene) {
+            const userData = current.userData || null;
+            if (
+                userData?.kvCachePersistent === true
+                || userData?.cachedKv === true
+                || userData?.kvRaycastProxy === true
+            ) {
+                return true;
+            }
+            current = current.parent;
+        }
+    }
+    return false;
+}
+
+export function normalizeSelectionLabel(label, selectionInfo = null) {
+    const raw = String(label || '');
+    const lower = raw.toLowerCase();
+    const activation = getActivationDataFromSelection(selectionInfo);
+    const stageLower = String(activation?.stage || '').toLowerCase();
+
+    const isPostLayerNormResidual = lower.includes('post-layernorm residual')
+        || lower.includes('post layernorm residual')
+        || stageLower === 'ln1.shift'
+        || stageLower === 'ln2.shift';
+    if (isPostLayerNormResidual) {
+        return 'Post LayerNorm Residual Vector';
+    }
+
+    const isEmbeddingSum = lower.includes('embedding sum') || stageLower.startsWith('embedding.sum');
+    const isResidualStreamStage = lower.includes('incoming residual')
+        || lower.includes('post-attention residual')
+        || lower.includes('post attention residual')
+        || lower.includes('post-mlp residual')
+        || lower.includes('post mlp residual')
+        || stageLower.startsWith('layer.incoming')
+        || stageLower.includes('residual');
+
+    if (isEmbeddingSum || isResidualStreamStage) {
+        return 'Residual Stream Vector';
+    }
+
+    const cachedKv = isKvCacheVectorSelection(selectionInfo);
+    if (cachedKv) {
+        if (lower.includes('value vector')) return 'Cached Value Vector';
+        if (lower.includes('key vector')) return 'Cached Key Vector';
+        const category = String(selectionInfo?.info?.category || '').toUpperCase();
+        if (category === 'V') return 'Cached Value Vector';
+        if (category === 'K') return 'Cached Key Vector';
+    }
+    return raw;
+}
+
+export function simplifyLayerNormParamDisplayLabel(label, selectionInfo = null) {
+    const raw = String(label || '');
+    const lower = raw.toLowerCase();
+    const stageLower = String(getActivationDataFromSelection(selectionInfo)?.stage || '').toLowerCase();
+
+    const isLayerNormContext = lower.includes('layernorm')
+        || lower.includes('layer norm')
+        || lower.includes('ln1')
+        || lower.includes('ln2')
+        || lower.includes('final ln')
+        || stageLower.includes('ln1.param.')
+        || stageLower.includes('ln2.param.');
+    if (!isLayerNormContext) return raw;
+
+    const isScale = lower.includes('scale')
+        || lower.includes('gamma')
+        || lower.includes('γ')
+        || stageLower.endsWith('.scale');
+    if (isScale) return 'LayerNorm Scale';
+
+    const isShift = lower.includes('shift')
+        || lower.includes('beta')
+        || lower.includes('β')
+        || stageLower.endsWith('.shift');
+    if (isShift) return 'LayerNorm Shift';
+
+    return raw;
+}
+
+export function findUserDataNumber(selectionInfo, key) {
+    const direct = selectionInfo?.info?.[key];
+    if (Number.isFinite(direct)) return direct;
+    const infoActivation = selectionInfo?.info?.activationData?.[key];
+    if (Number.isFinite(infoActivation)) return infoActivation;
+    const candidates = [selectionInfo?.object, selectionInfo?.hit?.object];
+    for (const obj of candidates) {
+        let current = obj;
+        while (current && !current.isScene) {
+            const ud = current.userData;
+            if (ud && Number.isFinite(ud[key])) return ud[key];
+            if (ud?.activationData && Number.isFinite(ud.activationData[key])) return ud.activationData[key];
+            current = current.parent;
+        }
+    }
+    return null;
+}
+
+export function findUserDataString(selectionInfo, key) {
+    const direct = selectionInfo?.info?.[key];
+    if (typeof direct === 'string') return direct;
+    const infoActivation = selectionInfo?.info?.activationData?.[key];
+    if (typeof infoActivation === 'string') return infoActivation;
+    const candidates = [selectionInfo?.object, selectionInfo?.hit?.object];
+    for (const obj of candidates) {
+        let current = obj;
+        while (current && !current.isScene) {
+            const ud = current.userData;
+            if (typeof ud?.[key] === 'string') return ud[key];
+            if (typeof ud?.activationData?.[key] === 'string') return ud.activationData[key];
+            current = current.parent;
+        }
+    }
+    return null;
+}
+
+export function resolveAttentionModeFromSelection(selectionInfo) {
+    const stage = getActivationDataFromSelection(selectionInfo)?.stage;
+    if (stage === 'attention.post') return 'post';
+    if (stage === 'attention.pre') return 'pre';
+    return null;
+}
+
+export function isValueSelection(label, selectionInfo) {
+    const lower = (label || '').toLowerCase();
+    if (selectionInfo?.info?.category === 'V') return true;
+    const stage = getActivationDataFromSelection(selectionInfo)?.stage;
+    if (typeof stage === 'string' && stage.toLowerCase().startsWith('qkv.v')) return true;
+    if (lower.includes('value vector')) return true;
+    if (lower.includes('value weight matrix')) return true;
+    if (lower.includes('merged value vectors')) return true;
+    return false;
+}
+
+export function isWeightedSumSelection(label, selectionInfo) {
+    const lower = (label || '').toLowerCase();
+    if (lower.includes('weighted sum')) return true;
+    if (selectionInfo?.info?.isWeightedSum === true) return true;
+    const candidates = [selectionInfo?.object, selectionInfo?.hit?.object];
+    for (const obj of candidates) {
+        let current = obj;
+        while (current && !current.isScene) {
+            if (current.userData?.isWeightedSum === true) return true;
+            current = current.parent;
+        }
+    }
+    return false;
+}
+
+export function isAttentionScoreSelection(label, selectionInfo) {
+    const lower = (label || '').toLowerCase();
+    if (lower.includes('attention score')) return true;
+    const stage = selectionInfo?.info?.activationData?.stage
+        || selectionInfo?.object?.userData?.activationData?.stage
+        || selectionInfo?.hit?.object?.userData?.activationData?.stage;
+    if (typeof stage === 'string' && stage.startsWith('attention.')) return true;
+    const obj = selectionInfo?.object || selectionInfo?.hit?.object;
+    return !!(obj && obj.isMesh && obj.geometry && obj.geometry.type === 'SphereGeometry');
+}
+
+export function isSelfAttentionSelection(label, selectionInfo) {
+    const lower = (label || '').toLowerCase();
+    if (isAttentionScoreSelection(label, selectionInfo)) return true;
+    if (selectionInfo?.kind === 'mergedKV') return true;
+    // Keep pre-QKV residual copies out of the attention score panel while they travel to Q/K/V.
+    if (lower.includes('post-layernorm residual') || lower.includes('post layernorm residual')) return false;
+    if (lower.includes('query vector') || lower.includes('key vector') || lower.includes('value vector')) return true;
+    if (lower.includes('query weight matrix') || lower.includes('key weight matrix') || lower.includes('value weight matrix')) return true;
+    if (lower.includes('merged key vectors') || lower.includes('merged value vectors')) return true;
+    const stage = getActivationDataFromSelection(selectionInfo)?.stage;
+    if (stage && (stage.startsWith('attention.') || stage.startsWith('qkv.'))) return true;
+    return false;
+}
+
+export function isLogitBarSelection(label, selectionInfo) {
+    const lower = (label || '').toLowerCase();
+    if (lower === 'logit' || lower.startsWith('logit ') || lower.includes('top logit bars')) {
+        return true;
+    }
+    const kindLower = String(selectionInfo?.kind || '').toLowerCase();
+    if (kindLower === 'logitbar') return true;
+    const source = selectionInfo?.object || selectionInfo?.hit?.object;
+    const instanceKindLower = String(source?.userData?.instanceKind || '').toLowerCase();
+    return instanceKindLower === 'logitbar';
+}
+
+export function inferQkvType(label, selectionInfo) {
+    const lower = (label || '').toLowerCase();
+    if (selectionInfo?.info?.category === 'V') return 'V';
+    if (selectionInfo?.info?.category === 'Q') return 'Q';
+    if (selectionInfo?.info?.category === 'K') return 'K';
+    if (lower.includes('value')) return 'V';
+    if (lower.includes('query')) return 'Q';
+    if (lower.includes('key')) return 'K';
+    if (selectionInfo?.kind === 'mergedKV') return 'K';
+    return 'K';
+}
+
+export function isWeightMatrixLabel(label) {
+    const lower = (label || '').toLowerCase();
+    return lower.includes('weight matrix')
+        || lower.includes('embedding')
+        || lower.includes('output projection matrix');
+}
+
+export function isQkvMatrixLabel(label) {
+    const lower = (label || '').toLowerCase();
+    return lower.includes('query weight matrix')
+        || lower.includes('key weight matrix')
+        || lower.includes('value weight matrix');
+}
+
+export function isParameterSelection(label) {
+    const lower = (label || '').toLowerCase();
+    if (isWeightMatrixLabel(lower)) return true;
+    if (lower.includes('layernorm') || lower.includes('layer norm')) {
+        if (lower.includes('scale') || lower.includes('shift') || lower.includes('gamma') || lower.includes('beta')) {
+            return true;
+        }
+    }
+    return false;
+}
+
+export function isLayerNormSolidSelection(label) {
+    const lower = (label || '').toLowerCase();
+    if (!(lower.includes('layernorm') || lower.includes('layer norm'))) return false;
+    if (lower.includes('scale') || lower.includes('shift') || lower.includes('gamma') || lower.includes('beta')) return false;
+    if (lower.includes('normed') || lower.includes('normalized') || lower.includes('output')) return false;
+    if (lower.includes('residual') || lower.includes('vector')) return false;
+    if (lower.includes('param')) return false;
+    return true;
+}
+
+export function isResidualVectorSelection(label, selectionInfo) {
+    const lower = (label || '').toLowerCase();
+    if (lower.includes('residual')) return true;
+    const activation = getActivationDataFromSelection(selectionInfo);
+    const activationLabel = activation?.label;
+    if (typeof activationLabel === 'string' && activationLabel.toLowerCase().includes('residual')) return true;
+    const stage = activation?.stage;
+    if (typeof stage === 'string') {
+        const stageLower = stage.toLowerCase();
+        if (stageLower.includes('residual')) return true;
+        if (stageLower.startsWith('layer.incoming')) return true;
+        if (stageLower.startsWith('embedding.')) return true;
+    }
+    const cat = selectionInfo?.info?.category;
+    if (cat && String(cat).toLowerCase().includes('residual')) return true;
+    const kind = selectionInfo?.kind;
+    if (kind && String(kind).toLowerCase().includes('residual')) return true;
+    return false;
+}
+
+export function isLayerNormLabel(label) {
+    const lower = (label || '').toLowerCase();
+    return lower.includes('layernorm') || lower.includes('layer norm');
+}

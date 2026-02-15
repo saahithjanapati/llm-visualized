@@ -1,5 +1,10 @@
 import * as THREE from 'three';
 import { HIDE_INSTANCE_Y_OFFSET } from '../utils/constants.js';
+import {
+    getAutoCameraViewSwitchHoldMs,
+    resolveAutoCameraViewState,
+    resolveStableAutoCameraViewKey
+} from './autoCameraViewLogic.js';
 
 const TMP_CENTER_A = new THREE.Vector3();
 const TMP_CENTER_B = new THREE.Vector3();
@@ -920,132 +925,17 @@ export class AutoCameraController {
 
     _resolveAutoCameraViewKey() {
         const layers = this._pipeline?._layers;
-        if (!Array.isArray(layers) || !layers.length) return 'default';
-        const layerIndex = Math.min(this._pipeline._currentLayerIdx, layers.length - 1);
-        const layer = layers[layerIndex];
-        const mhsa = layer?.mhsaAnimation;
-        const lanes = Array.isArray(layer?.lanes) ? layer.lanes : [];
-        const laneCount = lanes.length;
-        const laneIndex = laneCount ? Math.min(laneCount - 1, Math.floor(laneCount / 2)) : -1;
-        const lane = laneIndex >= 0 ? lanes[laneIndex] : null;
-        const nowMs = this._getNowMs();
-        const inLaneLn = !!(lane && (lane.horizPhase === 'insideLN' || lane.ln2Phase === 'insideLN'));
-        const inTopLn = this._isTopLayerNormCameraPhase(layer, lanes);
-        const inLayerHandoff = !!(layerIndex > 0
-            && lane
-            && lane.horizPhase === 'waiting'
-            && lane.ln2Phase === 'notStarted');
-        const inLn = inLaneLn || inTopLn;
-        const priorViewKey = this._autoCameraViewKey || 'default';
-        const holdViewBeforeLn2 = lanes.some((candidate) => candidate
-            && (candidate.horizPhase === 'postMHSAAddition'
-                || candidate.horizPhase === 'waitingForLN2'
-                || candidate.ln2Phase === 'preRise'
-                || candidate.ln2Phase === 'right'));
-        const anyResidualAddActive = lanes.some((candidate) => candidate
-            && candidate.stopRise
-            && candidate.stopRiseTarget);
-        const anyResidualAddReleaseHold = lanes.some((candidate) => candidate
-            && Number.isFinite(candidate.__cameraHoldAfterAddUntil)
-            && candidate.__cameraHoldAfterAddUntil > nowMs);
-        const residualAddHoldUntilMs = lanes.reduce((max, candidate) => {
-            const untilMs = Number.isFinite(candidate?.__cameraHoldAfterAddUntil)
-                ? candidate.__cameraHoldAfterAddUntil
-                : 0;
-            return untilMs > max ? untilMs : max;
-        }, 0);
-        const inResidualAdd = anyResidualAddActive || anyResidualAddReleaseHold;
-        const holdViewDuringResidualAdd = !!(inResidualAdd
-            && priorViewKey !== 'final'
-            && priorViewKey !== 'layer-end-desktop');
-        const holdViewUntilLn2Inside = !!(holdViewBeforeLn2
-            && priorViewKey !== 'ln'
-            && priorViewKey !== 'final'
-            && priorViewKey !== 'layer-end-desktop');
-        const holdViewThroughLayerHandoff = !!(inLayerHandoff
-            && priorViewKey !== 'layer-end-desktop'
-            && priorViewKey !== 'final');
-        const forwardComplete = (typeof this._pipeline?.isForwardPassComplete === 'function')
-            ? this._pipeline.isForwardPassComplete()
-            : false;
-        this._autoCameraViewContext = {
-            lane,
-            laneIndex,
-            laneCount,
-            inLn,
-            inTopLn,
-            inLayerHandoff,
-            inResidualAdd,
-            anyResidualAddActive,
-            anyResidualAddReleaseHold,
-            residualAddHoldUntilMs,
-            holdViewBeforeLn2,
-            holdViewUntilLn2Inside,
-            holdViewDuringResidualAdd,
-            holdViewThroughLayerHandoff,
-            priorViewKey,
-            forwardComplete
-        };
-        if (forwardComplete) {
-            return 'final';
-        }
-        const passPhase = mhsa?.mhaPassThroughPhase || 'positioning_mha_vectors';
-        const inTravel = !!(lane && lane.horizPhase === 'travelMHSA'
-            && passPhase === 'positioning_mha_vectors');
-        const inCopyStage = !!(lane && lane.horizPhase === 'finishedHeads'
-            && (passPhase === 'positioning_mha_vectors' || passPhase === 'ready_for_parallel_pass_through'));
-        if (!mhsa) {
-            if (inLn) return 'ln';
-            if (holdViewThroughLayerHandoff) {
-                return priorViewKey;
-            }
-            if (inLayerHandoff
-                && this._autoCameraLayerEndDesktopOffsetsEnabled
-                && this._isLargeDesktopViewport()) {
-                return 'layer-end-desktop';
-            }
-            return 'default';
-        }
-
-        if (inLn) {
-            return 'ln';
-        }
-        if (holdViewUntilLn2Inside) {
-            return priorViewKey;
-        }
-        if (holdViewDuringResidualAdd) {
-            return priorViewKey;
-        }
-        if (holdViewThroughLayerHandoff) {
-            return priorViewKey;
-        }
-        if (inLayerHandoff
-            && this._autoCameraLayerEndDesktopOffsetsEnabled
-            && this._isLargeDesktopViewport()) {
-            return 'layer-end-desktop';
-        }
-        if (inTravel || inCopyStage) {
-            return 'travel';
-        }
-
-        const outputPhase = mhsa.outputProjMatrixAnimationPhase || 'waiting';
-        const rowPhase = mhsa.rowMergePhase || 'not_started';
-        const outputReturnComplete = mhsa.outputProjMatrixReturnComplete === true;
-        const concatActive = (rowPhase === 'merging' || rowPhase === 'merged')
-            && outputPhase === 'waiting'
-            && !outputReturnComplete;
-        if (concatActive) {
-            return 'concat';
-        }
-
-        const mhsaGate = rowPhase === 'not_started' && outputPhase === 'waiting';
-        const mhsaActive = mhsaGate && (passPhase === 'parallel_pass_through_active'
-            || passPhase === 'mha_pass_through_complete'
-            || (passPhase === 'ready_for_parallel_pass_through' && !inCopyStage));
-        if (mhsaActive) {
-            return 'mhsa';
-        }
-        return 'default';
+        const result = resolveAutoCameraViewState({
+            pipeline: this._pipeline,
+            layers,
+            currentLayerIdx: this._pipeline?._currentLayerIdx ?? 0,
+            priorViewKey: this._autoCameraViewKey || 'default',
+            nowMs: this._getNowMs(),
+            isLargeDesktopViewport: this._autoCameraLayerEndDesktopOffsetsEnabled && this._isLargeDesktopViewport(),
+            isTopLayerNormCameraPhase: (layer, lanes) => this._isTopLayerNormCameraPhase(layer, lanes),
+        });
+        this._autoCameraViewContext = result.viewContext;
+        return result.rawKey || 'default';
     }
 
     _getNowMs() {
@@ -1055,61 +945,27 @@ export class AutoCameraController {
     }
 
     _getAutoCameraViewSwitchHoldMs(fromKey, toKey, viewContext = null) {
-        if (toKey === fromKey) return 0;
-        let holdMs = this._autoCameraViewSwitchHoldMs;
-        if (viewContext && viewContext.holdViewUntilLn2Inside) {
-            holdMs = Math.max(holdMs, 200);
-        }
-        if (viewContext && viewContext.holdViewDuringResidualAdd) {
-            holdMs = Math.max(holdMs, 220);
-        }
-        if (viewContext && viewContext.inLayerHandoff) {
-            holdMs = Math.max(holdMs, 120);
-        }
-        if (viewContext && viewContext.lane
-            && (viewContext.lane.stopRise || viewContext.lane.__followStopRiseReleaseFrom)) {
-            holdMs = Math.max(holdMs, 110);
-        }
-        if (toKey === 'ln') {
-            holdMs = Math.min(holdMs, 48);
-        } else if (toKey === 'final') {
-            holdMs = Math.min(holdMs, 20);
-        }
-        if (fromKey === 'ln' && toKey === 'default') {
-            holdMs = Math.max(holdMs, 72);
-        }
-        if (toKey === 'layer-end-desktop' || fromKey === 'layer-end-desktop') {
-            holdMs = Math.max(holdMs, 130);
-        }
-        return Math.max(0, holdMs);
+        return getAutoCameraViewSwitchHoldMs({
+            fromKey,
+            toKey,
+            viewContext,
+            baseHoldMs: this._autoCameraViewSwitchHoldMs
+        });
     }
 
     _resolveStableAutoCameraViewKey(rawKey, viewContext = null) {
-        const currentKey = this._autoCameraViewKey || 'default';
-        if (rawKey === currentKey) {
-            this._autoCameraViewPendingKey = rawKey;
-            this._autoCameraViewPendingSinceMs = 0;
-            return rawKey;
-        }
-
-        const nowMs = this._getNowMs();
-        if (this._autoCameraViewPendingKey !== rawKey) {
-            this._autoCameraViewPendingKey = rawKey;
-            this._autoCameraViewPendingSinceMs = nowMs;
-            return currentKey;
-        }
-
-        const pendingSince = Number.isFinite(this._autoCameraViewPendingSinceMs)
-            ? this._autoCameraViewPendingSinceMs
-            : nowMs;
-        const elapsedMs = Math.max(0, nowMs - pendingSince);
-        const holdMs = this._getAutoCameraViewSwitchHoldMs(currentKey, rawKey, viewContext);
-        if (elapsedMs < holdMs) {
-            return currentKey;
-        }
-
-        this._autoCameraViewPendingSinceMs = 0;
-        return rawKey;
+        const result = resolveStableAutoCameraViewKey({
+            rawKey,
+            currentKey: this._autoCameraViewKey || 'default',
+            pendingKey: this._autoCameraViewPendingKey,
+            pendingSinceMs: this._autoCameraViewPendingSinceMs,
+            nowMs: this._getNowMs(),
+            baseHoldMs: this._autoCameraViewSwitchHoldMs,
+            viewContext
+        });
+        this._autoCameraViewPendingKey = result.pendingKey;
+        this._autoCameraViewPendingSinceMs = result.pendingSinceMs;
+        return result.key;
     }
 
     _applyAutoCameraViewOffsets() {

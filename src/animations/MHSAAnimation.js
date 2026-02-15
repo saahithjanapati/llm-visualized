@@ -44,6 +44,7 @@ import { updateSciFiMaterialUniforms } from '../utils/sciFiMaterial.js';
 import { scaleGlobalEmissiveIntensity } from '../utils/materialUtils.js';
 import { getSideCopyEntry } from './mhsa/laneIndex.js';
 import { animateVectorMatrixPassThrough as animateVectorMatrixPassThroughExternal } from './mhsa/VectorMatrixPassThrough.js';
+import { clearScheduledDelays, resolveSkipDelay, resolveSkipDuration, scheduleAfterDelay } from './mhsa/mhsaTimingUtils.js';
 import { appState } from '../state/appState.js';
 import {
     HORIZ_PHASE,
@@ -58,12 +59,6 @@ const _tmpWorld2 = new THREE.Vector3();
 const _tmpMatrix = new THREE.Matrix4();
 const QKV_TRAIL_OPACITY = 0.08;
 const QKV_FINAL_MATRIX_EMISSIVE_INTENSITY = GPT2_LAYER_VISUAL_TUNING.mhsa.qkvFinalMatrixEmissiveIntensity;
-const SKIP_DELAY_SCALE = 0.03;
-const SKIP_DURATION_SCALE = 0.05;
-const SKIP_DELAY_MIN_MS = 1;
-const SKIP_DELAY_MAX_MS = 5;
-const SKIP_DURATION_MIN_MS = 2;
-const SKIP_DURATION_MAX_MS = 14;
 const OUTPUT_PROJ_RETURN_WATCHDOG_MIN_MS = 5000;
 const OUTPUT_PROJ_RETURN_WATCHDOG_GRACE_MS = 2000;
 
@@ -3411,67 +3406,27 @@ export class MHSAAnimation {
     }
 
     _resolveSkipDelay(delayMs) {
-        const clamped = Math.max(0, Number(delayMs) || 0);
-        if (!this._skipToEndActive) return clamped;
-        if (clamped <= 0) return 0;
-        const scaled = clamped * SKIP_DELAY_SCALE;
-        return Math.min(SKIP_DELAY_MAX_MS, Math.max(SKIP_DELAY_MIN_MS, scaled));
+        return resolveSkipDelay(this._skipToEndActive, delayMs);
     }
 
     _resolveSkipDuration(durationMs) {
-        const clamped = Math.max(0, Number(durationMs) || 0);
-        if (!this._skipToEndActive) return clamped;
-        if (clamped <= 0) return 0;
-        const scaled = clamped * SKIP_DURATION_SCALE;
-        return Math.min(SKIP_DURATION_MAX_MS, Math.max(SKIP_DURATION_MIN_MS, scaled));
+        return resolveSkipDuration(this._skipToEndActive, durationMs);
     }
 
     _scheduleAfterDelay(callback, delayMs) {
-        if (typeof callback !== 'function') return () => {};
-        const clampedDelay = this._resolveSkipDelay(delayMs);
-
-        if (typeof TWEEN !== 'undefined' && typeof TWEEN.Tween === 'function') {
-            const state = { t: 0 };
-            const tween = new TWEEN.Tween(state)
-                .to({ t: 1 }, clampedDelay)
-                .onComplete(() => {
-                    this._scheduledDelayTweens.delete(tween);
-                    try {
-                        callback();
-                    } catch (err) {
-                        console.error(err);
-                    }
-                })
-                .onStop(() => {
-                    this._scheduledDelayTweens.delete(tween);
-                })
-                .start();
-            this._scheduledDelayTweens.add(tween);
-            return () => {
-                try {
-                    tween.stop();
-                } catch (_) { /* ignore */ }
-            };
-        }
-
-        const timeoutId = setTimeout(() => {
-            this._scheduledTimeoutIds.delete(timeoutId);
-            callback();
-        }, clampedDelay);
-        this._scheduledTimeoutIds.add(timeoutId);
-        return () => {
-            clearTimeout(timeoutId);
-            this._scheduledTimeoutIds.delete(timeoutId);
-        };
+        return scheduleAfterDelay({
+            callback,
+            delayMs,
+            skipToEndActive: this._skipToEndActive,
+            scheduledDelayTweens: this._scheduledDelayTweens,
+            scheduledTimeoutIds: this._scheduledTimeoutIds,
+            tweenLib: typeof TWEEN !== 'undefined' ? TWEEN : null,
+            onError: (err) => console.error(err)
+        });
     }
 
     _clearScheduledDelays() {
-        this._scheduledDelayTweens.forEach((tween) => {
-            try { tween.stop(); } catch (_) { /* ignore */ }
-        });
-        this._scheduledDelayTweens.clear();
-        this._scheduledTimeoutIds.forEach((id) => clearTimeout(id));
-        this._scheduledTimeoutIds.clear();
+        clearScheduledDelays(this._scheduledDelayTweens, this._scheduledTimeoutIds);
     }
 
     // ----------------------------------------------------------------------

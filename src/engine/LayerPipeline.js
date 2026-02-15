@@ -45,6 +45,11 @@ import {
     simplePrismMultiply,
     toMutableArray
 } from './layerPipelineMath.js';
+import {
+    activateLayerNormColor as activateTopLayerNormColor,
+    calculateTopEmbeddingTargets,
+    findTopLayerNormInfo
+} from './layerPipelineTopEmbedding.js';
 
 const COLOR_DARK_GRAY = new THREE.Color(0x333333);
 const COLOR_LIGHT_YELLOW = new THREE.Color(0xffffff);
@@ -1938,56 +1943,20 @@ export class LayerPipeline extends EventTarget {
      * @returns {number} Local-space Y coordinate where vectors should stop.
      */
     _calculateTopEmbeddingTargetY(lastLayer) {
-        let targetYLocal = null;
-        let exitYLocal = null;
         const embedHeight = EMBEDDING_MATRIX_PARAMS_VOCAB.height;
         const embedInset = 5;
-        try {
-            const scene = this._engine && this._engine.scene;
-            let topEmbedObj = null;
-            if (scene && typeof scene.traverse === 'function') {
-                scene.traverse((obj) => {
-                    if (topEmbedObj) return;
-                    if (obj && obj.userData && obj.userData.label === 'Vocab Embedding (Top)') {
-                        topEmbedObj = obj;
-                    }
-                });
-            }
-            if (topEmbedObj) {
-                const centerWorld = new THREE.Vector3();
-                topEmbedObj.getWorldPosition(centerWorld);
-                const entryWorldY = centerWorld.y - embedHeight / 2 + embedInset;
-                const exitWorldY = centerWorld.y + embedHeight / 2 - embedInset;
-                const entryLocalVec = new THREE.Vector3(0, entryWorldY, 0);
-                lastLayer.root.worldToLocal(entryLocalVec);
-                targetYLocal = entryLocalVec.y;
-                const exitLocalVec = new THREE.Vector3(0, exitWorldY, 0);
-                lastLayer.root.worldToLocal(exitLocalVec);
-                exitYLocal = exitLocalVec.y;
-            }
-        } catch (_) { /* fallback to formula below */ }
-
-        if (targetYLocal == null) {
-            const towerTopYLocal = lastLayer.mlpDown.group.position.y + MLP_MATRIX_PARAMS_DOWN.height / 2;
-            const topVocabCenterYLocal = towerTopYLocal + TOP_EMBED_Y_GAP_ABOVE_TOWER + embedHeight / 2 + TOP_EMBED_Y_ADJUST;
-            targetYLocal = topVocabCenterYLocal - embedHeight / 2 + embedInset;
-            exitYLocal = topVocabCenterYLocal + embedHeight / 2 - embedInset;
-        }
-
-        // Cap how far vectors rise within the top vocab embedding so they
-        // don't reach the logit bars above.
-        const riseFracRaw = Number.isFinite(TOP_EMBED_MAX_RISE_FRACTION) ? TOP_EMBED_MAX_RISE_FRACTION : 1;
-        const riseFrac = Math.max(0, Math.min(1, riseFracRaw));
-        if (Number.isFinite(targetYLocal) && Number.isFinite(exitYLocal) && riseFrac < 1) {
-            const maxRise = embedHeight * riseFrac;
-            const cappedExit = targetYLocal + maxRise;
-            if (exitYLocal > cappedExit) exitYLocal = cappedExit;
-        }
+        const { targetYLocal, exitYLocal } = calculateTopEmbeddingTargets({
+            engineScene: this._engine && this._engine.scene,
+            lastLayer,
+            mlpDownHeight: MLP_MATRIX_PARAMS_DOWN.height,
+            embedHeight,
+            embedInset,
+            topEmbedGap: TOP_EMBED_Y_GAP_ABOVE_TOWER,
+            topEmbedAdjust: TOP_EMBED_Y_ADJUST,
+            maxRiseFraction: TOP_EMBED_MAX_RISE_FRACTION
+        });
 
         try {
-            if (Number.isFinite(exitYLocal) && Number.isFinite(targetYLocal) && exitYLocal < targetYLocal) {
-                exitYLocal = targetYLocal;
-            }
             const finalStopY = Number.isFinite(exitYLocal) ? exitYLocal : targetYLocal;
             if (lastLayer.mhsaAnimation) {
                 lastLayer.mhsaAnimation.finalOriginalY = finalStopY;
@@ -2010,28 +1979,11 @@ export class LayerPipeline extends EventTarget {
      *          LayerNorm group and position info if found.
      */
     _findTopLayerNorm(lastLayer) {
-        let lnTopGroup = null;
-        try {
-            const scene = this._engine && this._engine.scene;
-            if (scene && typeof scene.traverse === 'function') {
-                scene.traverse(obj => {
-                    if (!lnTopGroup && obj && obj.userData && obj.userData.label === 'LayerNorm (Top)') {
-                        lnTopGroup = obj;
-                    }
-                });
-            }
-        } catch (_) { /* optional */ }
-
-        if (!lnTopGroup) return null;
-
-        const lnCenterWorld = new THREE.Vector3();
-        lnTopGroup.getWorldPosition(lnCenterWorld);
-        const lnCenterLocal = lnCenterWorld.clone();
-        lastLayer.root.worldToLocal(lnCenterLocal);
-        const lnCenterY = lnCenterLocal.y;
-        const lnBottomY = lnCenterY - LN_PARAMS.height / 2;
-
-        return { lnTopGroup, lnCenterY, lnBottomY };
+        return findTopLayerNormInfo({
+            engineScene: this._engine && this._engine.scene,
+            lastLayer,
+            lnHeight: LN_PARAMS.height
+        });
     }
 
     /**
@@ -2039,12 +1991,9 @@ export class LayerPipeline extends EventTarget {
      * @param {THREE.Object3D} lnTopGroup
      */
     _activateLayerNormColor(lnTopGroup) {
-        const white = new THREE.Color(0xffffff);
-        lnTopGroup.traverse(obj => {
-            if (obj.isMesh && obj.material) {
-                const apply = mat => { mat.color.copy(white); mat.emissive.copy(white); mat.emissiveIntensity = scaleGlobalEmissiveIntensity(0.5); mat.transparent = false; mat.opacity = 1.0; };
-                if (Array.isArray(obj.material)) obj.material.forEach(apply); else apply(obj.material);
-            }
+        activateTopLayerNormColor(lnTopGroup, {
+            emissiveIntensity: 0.5,
+            scaleEmissiveIntensity: scaleGlobalEmissiveIntensity
         });
     }
 
