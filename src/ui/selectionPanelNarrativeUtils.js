@@ -86,6 +86,14 @@ function formatEquationBlock(lines) {
     return nonEmpty.map((line) => `$$${line}$$`).join('\n');
 }
 
+function buildNlpEmbeddingEquationBlock() {
+    return formatEquationBlock([
+        'x_t^{\\text{tok}} = E[\\mathrm{token}_t]',
+        'x_t^{\\text{pos}} = P[t]',
+        'x_t = x_t^{\\text{tok}} + x_t^{\\text{pos}}'
+    ]);
+}
+
 function resolveLayerNormEquationSymbols(lower) {
     if (lower.includes('top')) {
         return {
@@ -125,6 +133,12 @@ function buildHeadSpecificAttentionEquation(selectionInfo) {
 export function resolveSelectionEquations(label, selectionInfo = null) {
     const lower = String(label || '').toLowerCase();
     const attentionEquation = buildHeadSpecificAttentionEquation(selectionInfo);
+    const isNlpEmbeddingSelection = lower.startsWith('token:')
+        || lower.startsWith('position:')
+        || lower.includes('token embedding')
+        || lower.includes('vocab embedding')
+        || lower.includes('positional embedding')
+        || lower.includes('embedding sum');
 
     if (lower.includes('query weight matrix')) {
         return formatEquationBlock([
@@ -146,7 +160,7 @@ export function resolveSelectionEquations(label, selectionInfo = null) {
     }
     if (lower.includes('output projection matrix')) {
         return formatEquationBlock([
-            'H = \\mathrm{Concat}(H_i)_{i=1}^{h}',
+            'H = \\mathrm{Concat}(H_i)_{i=1}^{12}',
             `O = H ${SELECTION_EQUATION_SYMBOLS.WO} + ${SELECTION_EQUATION_SYMBOLS.BO}`,
             'u = x + O'
         ]);
@@ -169,17 +183,8 @@ export function resolveSelectionEquations(label, selectionInfo = null) {
             'p = \\mathrm{softmax}(\\ell)'
         ]);
     }
-    if (lower.includes('vocab embedding')) {
-        return formatEquationBlock([
-            'e_t = \\mathrm{onehot}(t) W_E',
-            'x_0 = e_t + p_t'
-        ]);
-    }
-    if (lower.includes('positional embedding')) {
-        return formatEquationBlock([
-            'p_t = \\mathrm{onehot}(t) W_P',
-            'x_0 = e_t + p_t'
-        ]);
+    if (isNlpEmbeddingSelection) {
+        return buildNlpEmbeddingEquationBlock();
     }
 
     const isLayerNormSelection = lower.includes('layernorm')
@@ -426,13 +431,13 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
         return 'This is the weighted-sum output of one attention head for a token. It is produced by multiplying post-softmax attention weights with value vectors and summing across source tokens.';
     }
     if (lower.includes('top logit bars')) {
-        return 'These are the vocabulary logits before softmax. Each bar is one token in the vocabulary, and higher means a more likely next token. They are produced from the final residual stream. Softmax converts logits to probabilities, then sampling or argmax picks the next token.';
+        return 'These bars come from vocabulary logits before softmax. Each bar is one candidate token, and taller means higher post-softmax probability for this next-token step. The model computes logits from the final residual stream, then softmax converts logits to probabilities for sampling or argmax.';
     }
     if (lower.startsWith('chosen token:')) {
         return 'This marks the token selected from the current logit distribution for this pass. That selected token is what gets appended for the next decode step.';
     }
     if (lower === 'logit' || lower.startsWith('logit ')) {
-        return 'This is a single vocabulary logit entry before softmax. It represents one candidate next token score for the current position.';
+        return 'This is one vocabulary logit entry before softmax for a candidate next token. In this view, the shown probability is that token\'s post-softmax value.';
     }
     if (lower.includes('residual')) {
         return RESIDUAL_STREAM_DESCRIPTION;

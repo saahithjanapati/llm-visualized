@@ -8,10 +8,36 @@ describe('selectionPanelNarrativeUtils', () => {
         expect(eq).toContain('softmax');
     });
 
+    it('uses fixed 12-head concat indexing for output projection equations', () => {
+        const eq = resolveSelectionEquations('Output Projection Matrix', null);
+        expect(eq).toContain('H = \\mathrm{Concat}(H_i)_{i=1}^{12}');
+        expect(eq).not.toContain('_{i=1}^{h}');
+    });
+
     it('returns layernorm equation block for normalized vectors', () => {
         const eq = resolveSelectionEquations('LayerNorm Normed Output', null);
         expect(eq).toContain('\\frac');
         expect(eq).not.toContain('\\gamma');
+    });
+
+    it('shows the full NLP embedding equation set for vocab/positional selections', () => {
+        const vocabEq = resolveSelectionEquations('Vocab Embedding', null);
+        const posEq = resolveSelectionEquations('Positional Embedding', null);
+        const tokenEq = resolveSelectionEquations('Token: hello', null);
+        const positionEq = resolveSelectionEquations('Position: 3', null);
+
+        expect(vocabEq).toContain('x_t^{\\text{tok}} = E[\\mathrm{token}_t]');
+        expect(vocabEq).toContain('x_t^{\\text{pos}} = P[t]');
+        expect(vocabEq).toContain('x_t = x_t^{\\text{tok}} + x_t^{\\text{pos}}');
+        expect(posEq).toBe(vocabEq);
+        expect(tokenEq).toBe(vocabEq);
+        expect(positionEq).toBe(vocabEq);
+    });
+
+    it('keeps top vocab embedding focused on logits equations', () => {
+        const eq = resolveSelectionEquations('Vocab Embedding (Top)', null);
+        expect(eq).toContain('softmax');
+        expect(eq).not.toContain('x_t^{\\text{tok}}');
     });
 
     it('resolves residual descriptions from activation stage context', () => {

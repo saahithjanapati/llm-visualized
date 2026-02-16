@@ -174,7 +174,7 @@ initSettingsModal(pipeline);
 
 const followModeBtn = document.getElementById('followModeBtn');
 const followSettingsToggle = document.getElementById('toggleAutoCamera');
-initFollowModeControls({
+const followModeControls = initFollowModeControls({
     pipeline,
     appState,
     followModeBtn,
@@ -195,9 +195,11 @@ const selectionPanel = initSelectionPanel({
 if (pipeline.engine && typeof pipeline.engine.setRaycastSelectionHandler === 'function') {
     pipeline.engine.setRaycastSelectionHandler(selection => {
         if (!selection || !selection.label) {
+            followModeControls?.setFollowMode?.(false);
             showTopControls();
             return;
         }
+        followModeControls?.suppressPendingFollowDisable?.();
         selectionPanel.handleSelection(selection);
     });
 }

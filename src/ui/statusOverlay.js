@@ -70,6 +70,8 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     const topEmbedTargetColor = new THREE.Color(MHA_FINAL_Q_COLOR);
     const topEmbedWorkingColor = new THREE.Color();
     const topEmbedMaxEmissive = TOP_EMBED_MAX_EMISSIVE;
+    const TOP_EMBED_ACTIVATION_INSET_FRACTION = 0.08;
+    const TOP_EMBED_ACTIVATION_INSET_MIN = 1.0;
 
     const LN_EQ_BASE_COLOR = '#6a6a6a';
     const LN_EQ_ACTIVE_COLOR = '#ffffff';
@@ -343,6 +345,9 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     }
     if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
         window.addEventListener('resize', scheduleEquationFit);
+        if (window.visualViewport && typeof window.visualViewport.addEventListener === 'function') {
+            window.visualViewport.addEventListener('resize', scheduleEquationFit);
+        }
         if (typeof document !== 'undefined' && document.fonts?.ready) {
             document.fonts.ready.then(() => scheduleEquationFit());
         }
@@ -370,6 +375,8 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
 
     appState.lastEqKey = '';
     appState.lastEqSignature = '';
+    let eqLastLayerIndex = null;
+    let eqResidualLockLayerIndex = null;
 
     const SHIFT_DELAY_FRACTION = 0.2;
     const applyShiftDelay = (progress) => {
@@ -529,6 +536,13 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         if (!shouldShowEquations()) return;
         const targetLayer = override?.layer ?? layer;
         if (!targetLayer && !override?.eqKey) return;
+        const layerIndex = Number.isFinite(targetLayer?.index) ? Math.floor(targetLayer.index) : null;
+        if (Number.isFinite(layerIndex) && Number.isFinite(eqLastLayerIndex) && layerIndex !== eqLastLayerIndex) {
+            eqResidualLockLayerIndex = null;
+        }
+        if (Number.isFinite(layerIndex)) {
+            eqLastLayerIndex = layerIndex;
+        }
         const lanes = Array.isArray(targetLayer?.lanes) ? targetLayer.lanes : [];
 
         if (override?.eqKey) {
@@ -552,6 +566,20 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         if (!targetLayer) return;
         if (!lanes.length) return;
 
+        // Once Residual Add 2 has been reached for a layer, keep it latched
+        // until the pipeline advances to the next layer. This removes
+        // transient handoff flicker where the HUD can briefly jump back to
+        // another equation between the final residual add and the next layer's LN1.
+        if (Number.isFinite(layerIndex) && eqResidualLockLayerIndex === layerIndex) {
+            const key = 'resid2';
+            const signature = key;
+            if (signature === appState.lastEqSignature) return;
+            appState.lastEqKey = key;
+            appState.lastEqSignature = signature;
+            renderEq(EQ[key] || '', 'Residual Add 2');
+            return;
+        }
+
         const inputEmbeddingStage = resolveInputEmbeddingStage(targetLayer, lanes);
         if (inputEmbeddingStage?.eqKey) {
             const key = inputEmbeddingStage.eqKey;
@@ -563,7 +591,11 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
             return;
         }
 
-        const resid2Active = lanes.some(l => l && l.stopRise && l.ln2Phase === 'done');
+        // Prevent end-of-layer equation flicker:
+        // once every lane has reached LN2 done, keep showing Residual Add 2
+        // until the pipeline advances to the next layer.
+        const allLn2Done = lanes.length > 0 && lanes.every(l => l && l.ln2Phase === 'done');
+        const resid2Active = allLn2Done || lanes.some(l => l && l.stopRise && l.ln2Phase === 'done');
         const resid1Active = !resid2Active && lanes.some(l => {
             if (!l) return false;
             if (l.stopRise && ['travelMHSA','finishedHeads','postMHSAAddition'].includes(l.horizPhase)) {
@@ -634,6 +666,9 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
             title = 'LayerNorm 1';
         }
         if (!key) return;
+        if (key === 'resid2' && Number.isFinite(layerIndex)) {
+            eqResidualLockLayerIndex = layerIndex;
+        }
         let eqBody = EQ[key];
         let signature = key;
         if (key === 'ln1') {
@@ -681,10 +716,16 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
             if (Number.isFinite(y) && y > highestY) highestY = y;
         }
         if (!Number.isFinite(highestY)) return;
+        const span = Number.isFinite(exitY) ? Math.max(0, exitY - entryY) : 0;
+        const activationInset = Math.min(
+            Math.max(TOP_EMBED_ACTIVATION_INSET_MIN, span * TOP_EMBED_ACTIVATION_INSET_FRACTION),
+            Math.max(0, span - 1e-6)
+        );
+        const activationStartY = entryY + activationInset;
         let t = 0;
-        if (highestY >= entryY) {
-            const denom = Math.max(1e-6, exitY - entryY);
-            t = denom > 0 ? Math.min(1, (highestY - entryY) / denom) : 1;
+        if (highestY >= activationStartY) {
+            const denom = Math.max(1e-6, exitY - activationStartY);
+            t = denom > 0 ? Math.min(1, (highestY - activationStartY) / denom) : 1;
         }
         const eased = t * t * (3 - 2 * t);
         if (!appState.topEmbedActivated || eased >= 1) {

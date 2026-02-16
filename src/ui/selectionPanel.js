@@ -7,6 +7,7 @@ import { appState } from '../state/appState.js';
 import { createSciFiMaterial, updateSciFiMaterialColor } from '../utils/sciFiMaterial.js';
 import { mapValueToColor, mapValueToGrayscale } from '../utils/colors.js';
 import { initTouchClickFallback } from './touchClickFallback.js';
+import { fitSelectionDimensionLabels } from './selectionPanelDimensionFitUtils.js';
 import {
     findUserDataNumber,
     findUserDataString,
@@ -992,6 +993,59 @@ function resolveLogitPreviewColor(selectionInfo) {
         try { source.getColorAt(instanceId, color); } catch (_) { /* fallback to material color */ }
     }
     return color.clone();
+}
+
+function resolveLogitSelectionTokenId(label, entry) {
+    if (Number.isFinite(entry?.token_id)) return Math.floor(entry.token_id);
+    const labelIdMatch = String(label || '').match(/\bid\s+(-?\d+)/i);
+    if (!labelIdMatch) return null;
+    const parsed = Number(labelIdMatch[1]);
+    return Number.isFinite(parsed) ? Math.floor(parsed) : null;
+}
+
+function resolveLogitSelectionProbability(label, entry) {
+    if (Number.isFinite(entry?.prob)) return Number(entry.prob);
+    const labelProbMatch = String(label || '').match(/\bp\s+(-?\d*\.?\d+(?:e[-+]?\d+)?)\b/i);
+    if (!labelProbMatch) return null;
+    const parsed = Number(labelProbMatch[1]);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatLogitProbability(value) {
+    if (!Number.isFinite(value)) return '';
+    const abs = Math.abs(value);
+    if (abs > 0 && abs < 0.001) return value.toExponential(2);
+    return value.toFixed(4).replace(/\.?0+$/, '');
+}
+
+function resolveLogitSelectionHeader(label, selectionInfo) {
+    if (!isLogitBarSelection(label, selectionInfo)) return null;
+    const lower = String(label || '').toLowerCase();
+    const entry = resolveLogitSelectionEntry(selectionInfo);
+    const hasEntryData = !!(
+        entry
+        && typeof entry === 'object'
+        && (
+            typeof entry.token === 'string'
+            || Number.isFinite(entry.token_id)
+            || Number.isFinite(entry.prob)
+            || Number.isFinite(entry.logit)
+        )
+    );
+    const isSingleLogitLabel = lower === 'logit' || lower.startsWith('logit ');
+    if (!hasEntryData && !isSingleLogitLabel) return null;
+
+    const tokenText = resolveLogitPreviewTokenText(label, selectionInfo);
+    const tokenId = resolveLogitSelectionTokenId(label, entry);
+    const probability = resolveLogitSelectionProbability(label, entry);
+    const subtitleParts = [];
+    if (Number.isFinite(tokenId)) subtitleParts.push(`ID ${tokenId}`);
+    if (Number.isFinite(probability)) subtitleParts.push(`Probability ${formatLogitProbability(probability)}`);
+
+    return {
+        title: tokenText ? `Logit Token: ${tokenText}` : 'Logit Token',
+        subtitle: subtitleParts.join(' • ')
+    };
 }
 
 function createLogitTextPreviewShared(labelText, options = {}) {
@@ -2454,10 +2508,10 @@ class SelectionPanel {
         this.biasDimRow = document.getElementById('detailBiasDimRow');
         this.biasDim = document.getElementById('detailBiasDim');
         this.metaSection = document.getElementById('detailMeta');
-        this.tokenRow = document.getElementById('detailTokenRow');
-        this.tokenValue = document.getElementById('detailTokenValue');
-        this.positionRow = document.getElementById('detailPositionRow');
-        this.positionValue = document.getElementById('detailPositionValue');
+        this.tokenInfoRow = document.getElementById('detailTokenInfoRow');
+        this.tokenInfoText = document.getElementById('detailTokenInfoText');
+        this.tokenInfoId = document.getElementById('detailTokenInfoId');
+        this.tokenInfoPosition = document.getElementById('detailTokenInfoPosition');
         this.tokenEncodingRow = document.getElementById('detailTokenEncodingRow');
         this.tokenEncodingValue = document.getElementById('detailTokenEncodingValue');
         this.closeBtn = document.getElementById('detailClose');
@@ -2540,6 +2594,7 @@ class SelectionPanel {
         this._pauseMainFlowOnMobileFocus = options.pauseMainFlowOnMobileFocus === true;
         this._pendingResizeRaf = null;
         this._pendingResizeTimeout = null;
+        this._panelResizeObserver = null;
         this._pendingReveal = false;
         this._pendingRevealSize = null;
         this._pendingRevealTimer = null;
@@ -2548,6 +2603,10 @@ class SelectionPanel {
         this._equationFitState = {
             baseFontPx: null,
             lastFontPx: null,
+            scheduled: false,
+            pending: false
+        };
+        this._dimLabelFitState = {
             scheduled: false,
             pending: false
         };
@@ -2567,6 +2626,8 @@ class SelectionPanel {
         this._scheduleResize = this._scheduleResize.bind(this);
         this._scheduleSelectionEquationFit = this._scheduleSelectionEquationFit.bind(this);
         this._applySelectionEquationFit = this._applySelectionEquationFit.bind(this);
+        this._scheduleDimensionLabelFit = this._scheduleDimensionLabelFit.bind(this);
+        this._applyDimensionLabelFit = this._applyDimensionLabelFit.bind(this);
         this._startLoop();
 
         this.activationSource = options.activationSource || null;
@@ -2633,13 +2694,19 @@ class SelectionPanel {
         this.panel.addEventListener('pointerenter', this._onPanelPointerEnter);
         this.panel.addEventListener('pointerleave', this._onPanelPointerLeave);
         window.addEventListener('resize', this._onResize);
+        if (window.visualViewport && typeof window.visualViewport.addEventListener === 'function') {
+            window.visualViewport.addEventListener('resize', this._onResize);
+        }
         document.addEventListener('keydown', this._onKeydown);
         document.addEventListener('pointerdown', this._onDocumentPointerDown, { capture: true });
         this._touchClickCleanup = initTouchClickFallback(this.panel, { selector: '.toggle-row' });
         this._observeResize();
         this._onResize();
         if (typeof document !== 'undefined' && document.fonts?.ready) {
-            document.fonts.ready.then(() => this._scheduleSelectionEquationFit());
+            document.fonts.ready.then(() => {
+                this._scheduleSelectionEquationFit();
+                this._scheduleDimensionLabelFit();
+            });
         }
     }
 
@@ -2647,10 +2714,45 @@ class SelectionPanel {
         if (!('ResizeObserver' in window) || !this.canvas?.parentElement) return;
         this._resizeObserver = new ResizeObserver(() => this._onResize());
         this._resizeObserver.observe(this.canvas.parentElement);
+        if (this.panel) {
+            this._panelResizeObserver = new ResizeObserver(() => {
+                this._scheduleSelectionEquationFit();
+                this._scheduleDimensionLabelFit();
+            });
+            this._panelResizeObserver.observe(this.panel);
+        }
         if (this.equationsSection) {
             this._equationsResizeObserver = new ResizeObserver(() => this._scheduleSelectionEquationFit());
             this._equationsResizeObserver.observe(this.equationsSection);
         }
+    }
+
+    _applyDimensionLabelFit() {
+        fitSelectionDimensionLabels({
+            inputDimLabel: this.inputDimLabel,
+            outputDimLabel: this.outputDimLabel
+        });
+    }
+
+    _scheduleDimensionLabelFit() {
+        if (this._dimLabelFitState.scheduled) {
+            this._dimLabelFitState.pending = true;
+            return;
+        }
+        this._dimLabelFitState.scheduled = true;
+        this._dimLabelFitState.pending = false;
+        const schedule = (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function')
+            ? window.requestAnimationFrame.bind(window)
+            : (cb) => setTimeout(cb, 16);
+        schedule(() => {
+            this._dimLabelFitState.scheduled = false;
+            if (this._dimLabelFitState.pending) {
+                this._dimLabelFitState.pending = false;
+                this._scheduleDimensionLabelFit();
+                return;
+            }
+            this._applyDimensionLabelFit();
+        });
     }
 
     _readSelectionEquationBaseFontPx() {
@@ -2884,6 +2986,7 @@ class SelectionPanel {
         this._updateMobileState();
         this._syncSceneShift();
         this._scheduleSelectionEquationFit();
+        this._scheduleDimensionLabelFit();
     }
 
     _finalizePendingReveal() {
@@ -3659,9 +3762,14 @@ class SelectionPanel {
         const isSameCell = row === this._attentionHoverRow
             && col === this._attentionHoverCol
             && cell === this._attentionHoverCell;
+        const emphasizeTokenLabels = this.attentionMode === 'post';
+        const leftToken = this._attentionTokenElsLeft[row];
+        const topToken = this._attentionTokenElsTop[col];
         if (isSameCell) {
             cell.classList.toggle('is-pinned', isPinnedSelection);
             if (this.attentionMatrix) this.attentionMatrix.classList.add('has-focus-cell');
+            if (leftToken) leftToken.classList.toggle('is-highlighted', emphasizeTokenLabels);
+            if (topToken) topToken.classList.toggle('is-highlighted', emphasizeTokenLabels);
             return;
         }
 
@@ -3672,10 +3780,8 @@ class SelectionPanel {
         if (this.attentionMatrix) this.attentionMatrix.classList.add('has-focus-cell');
         cell.classList.add('is-hovered');
         cell.classList.toggle('is-pinned', isPinnedSelection);
-        const leftToken = this._attentionTokenElsLeft[row];
-        const topToken = this._attentionTokenElsTop[col];
-        if (leftToken) leftToken.classList.add('is-highlighted');
-        if (topToken) topToken.classList.add('is-highlighted');
+        if (leftToken) leftToken.classList.toggle('is-highlighted', emphasizeTokenLabels);
+        if (topToken) topToken.classList.toggle('is-highlighted', emphasizeTokenLabels);
         const rawValue = cell.dataset.value;
         const valueNum = Number(rawValue);
         const rowLabel = cell.dataset.rowLabel || '';
@@ -3949,6 +4055,7 @@ class SelectionPanel {
         }
         this._scheduleResize();
         this._scheduleSelectionEquationFit();
+        this._scheduleDimensionLabelFit();
     }
 
     close() {
@@ -3973,6 +4080,16 @@ class SelectionPanel {
         this._equationFitState.lastFontPx = null;
         this._equationFitState.scheduled = false;
         this._equationFitState.pending = false;
+        this._dimLabelFitState.scheduled = false;
+        this._dimLabelFitState.pending = false;
+        if (this.inputDimLabel) {
+            this.inputDimLabel.style.fontSize = '';
+            this.inputDimLabel.style.letterSpacing = '';
+        }
+        if (this.outputDimLabel) {
+            this.outputDimLabel.style.fontSize = '';
+            this.outputDimLabel.style.letterSpacing = '';
+        }
         if (this._pendingResizeRaf) {
             cancelAnimationFrame(this._pendingResizeRaf);
             this._pendingResizeRaf = null;
@@ -4079,13 +4196,14 @@ class SelectionPanel {
         }
         const tokenEncodingNote = getIncompleteUtf8TokenNote(tokenId);
 
-        const formattedToken = formatTokenLabelForPreview(tokenLabel);
-        let tokenText = formattedToken;
-        if (!tokenText && Number.isFinite(tokenIndex)) tokenText = `Token ${tokenIndex + 1}`;
-        if (Number.isFinite(tokenId)) {
-            const tokenIdText = `id ${Math.floor(tokenId)}`;
-            tokenText = tokenText ? `${tokenText} (${tokenIdText})` : tokenIdText;
+        if (Number.isFinite(tokenIndex) && this.activationSource && typeof this.activationSource.getTokenString === 'function') {
+            const sourceToken = this.activationSource.getTokenString(tokenIndex);
+            if (typeof sourceToken === 'string') tokenLabel = sourceToken;
         }
+
+        let tokenText = (typeof tokenLabel === 'string') ? tokenLabel : '';
+        if (!tokenText && Number.isFinite(tokenIndex)) tokenText = `Token ${tokenIndex + 1}`;
+        const tokenIdText = Number.isFinite(tokenId) ? String(Math.floor(tokenId)) : '';
 
         let positionText = '';
         if (Number.isFinite(tokenIndex)) {
@@ -4094,25 +4212,38 @@ class SelectionPanel {
             positionText = String(laneIndex + 1);
         }
 
-        if (!tokenText && !positionText) return null;
+        if (!tokenText && !tokenIdText && !positionText) return null;
         return {
             tokenText,
+            tokenIdText,
             positionText,
             tokenEncodingNote
         };
     }
 
     _updateVectorTokenPositionRows(selection, label) {
-        const tokenRow = this.tokenRow;
-        const tokenValue = this.tokenValue;
-        const positionRow = this.positionRow;
-        const positionValue = this.positionValue;
+        const tokenInfoRow = this.tokenInfoRow;
+        const tokenInfoText = this.tokenInfoText;
+        const tokenInfoId = this.tokenInfoId;
+        const tokenInfoPosition = this.tokenInfoPosition;
 
         const hideRows = () => {
-            if (tokenRow) tokenRow.style.display = 'none';
-            if (tokenValue) tokenValue.textContent = '';
-            if (positionRow) positionRow.style.display = 'none';
-            if (positionValue) positionValue.textContent = '';
+            if (tokenInfoRow) {
+                tokenInfoRow.style.display = 'none';
+                tokenInfoRow.dataset.empty = 'true';
+            }
+            if (tokenInfoText) {
+                tokenInfoText.textContent = ATTENTION_VALUE_PLACEHOLDER;
+                tokenInfoText.title = '';
+            }
+            if (tokenInfoId) {
+                tokenInfoId.textContent = ATTENTION_VALUE_PLACEHOLDER;
+                tokenInfoId.title = '';
+            }
+            if (tokenInfoPosition) {
+                tokenInfoPosition.textContent = ATTENTION_VALUE_PLACEHOLDER;
+                tokenInfoPosition.title = '';
+            }
         };
 
         const metadata = this._resolveVectorTokenPosition(selection, label);
@@ -4121,23 +4252,28 @@ class SelectionPanel {
             return null;
         }
 
-        if (tokenRow && tokenValue) {
-            if (metadata.tokenText) {
-                tokenRow.style.display = '';
-                tokenValue.textContent = metadata.tokenText;
-            } else {
-                tokenRow.style.display = 'none';
-                tokenValue.textContent = '';
-            }
+        const tokenText = metadata.tokenText || ATTENTION_VALUE_PLACEHOLDER;
+        const tokenIdText = metadata.tokenIdText || ATTENTION_VALUE_PLACEHOLDER;
+        const positionText = metadata.positionText || ATTENTION_VALUE_PLACEHOLDER;
+
+        if (tokenInfoText) {
+            tokenInfoText.textContent = tokenText;
+            tokenInfoText.title = tokenText === ATTENTION_VALUE_PLACEHOLDER ? '' : tokenText;
         }
-        if (positionRow && positionValue) {
-            if (metadata.positionText) {
-                positionRow.style.display = '';
-                positionValue.textContent = metadata.positionText;
-            } else {
-                positionRow.style.display = 'none';
-                positionValue.textContent = '';
-            }
+        if (tokenInfoId) {
+            tokenInfoId.textContent = tokenIdText;
+            tokenInfoId.title = tokenIdText === ATTENTION_VALUE_PLACEHOLDER ? '' : tokenIdText;
+        }
+        if (tokenInfoPosition) {
+            tokenInfoPosition.textContent = positionText;
+            tokenInfoPosition.title = positionText === ATTENTION_VALUE_PLACEHOLDER ? '' : positionText;
+        }
+        if (tokenInfoRow) {
+            tokenInfoRow.style.display = '';
+            const isEmpty = tokenText === ATTENTION_VALUE_PLACEHOLDER
+                && tokenIdText === ATTENTION_VALUE_PLACEHOLDER
+                && positionText === ATTENTION_VALUE_PLACEHOLDER;
+            tokenInfoRow.dataset.empty = isEmpty ? 'true' : 'false';
         }
         return metadata;
     }
@@ -4180,19 +4316,24 @@ class SelectionPanel {
         const lower = label.toLowerCase();
         const hidePreviewForSelection = false;
         const metadata = resolveMetadata(label, selection.kind, selection);
+        const logitHeader = resolveLogitSelectionHeader(label, selection);
         this.panel.classList.toggle('is-preview-hidden', hidePreviewForSelection);
-        this.title.textContent = displayLabel;
+        this.title.textContent = logitHeader?.title || displayLabel;
         if (this.subtitle) {
-            const layerIndex = findUserDataNumber(selection, 'layerIndex');
-            const headIndex = findUserDataNumber(selection, 'headIndex');
-            const showHead = isQkvMatrixLabel(label) || isAttentionScoreSelection(label, selection);
-            let subtitleText = Number.isFinite(layerIndex) ? `Layer ${layerIndex + 1}` : '';
-            if (showHead && Number.isFinite(headIndex)) {
-                subtitleText = subtitleText
-                    ? `${subtitleText} • Head ${headIndex + 1}`
-                    : `Head ${headIndex + 1}`;
+            if (logitHeader) {
+                this.subtitle.textContent = logitHeader.subtitle;
+            } else {
+                const layerIndex = findUserDataNumber(selection, 'layerIndex');
+                const headIndex = findUserDataNumber(selection, 'headIndex');
+                const showHead = isQkvMatrixLabel(label) || isAttentionScoreSelection(label, selection);
+                let subtitleText = Number.isFinite(layerIndex) ? `Layer ${layerIndex + 1}` : '';
+                if (showHead && Number.isFinite(headIndex)) {
+                    subtitleText = subtitleText
+                        ? `${subtitleText} • Head ${headIndex + 1}`
+                        : `Head ${headIndex + 1}`;
+                }
+                this.subtitle.textContent = subtitleText;
             }
-            this.subtitle.textContent = subtitleText;
         }
         if (this.params) this.params.textContent = metadata.params;
         const hideLayerNormFields = isLayerNormSolidSelection(label);
@@ -4238,7 +4379,7 @@ class SelectionPanel {
         }
         if (this.dataEl && (isParam || hideLayerNormFields)) this.dataEl.textContent = '';
         if (this.metaSection) {
-            const rows = Array.from(this.metaSection.querySelectorAll('.detail-row'));
+            const rows = Array.from(this.metaSection.querySelectorAll('.detail-row, .detail-token-info'));
             const hasVisibleRow = rows.some(row => row.style.display !== 'none');
             this.metaSection.style.display = hasVisibleRow ? '' : 'none';
         }
@@ -4325,6 +4466,7 @@ class SelectionPanel {
         this._updateAttentionPreview(selection);
         this.open();
         this._scheduleSelectionEquationFit();
+        this._scheduleDimensionLabelFit();
     }
 }
 

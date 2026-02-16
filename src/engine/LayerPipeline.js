@@ -28,7 +28,8 @@ import {
     NUM_VECTOR_LANES,
     LAYER_STACK_SPACING_Y,
     HIDE_INSTANCE_Y_OFFSET,
-    SA_RED_EXTRA_RISE
+    SA_RED_EXTRA_RISE,
+    INACTIVE_COMPONENT_COLOR
 } from '../utils/constants.js';
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
 import { BatchedPrismVectorSet } from '../components/BatchedPrismVectorSet.js';
@@ -61,7 +62,7 @@ import {
     findTopLayerNormInfo
 } from './layerPipelineTopEmbedding.js';
 
-const COLOR_DARK_GRAY = new THREE.Color(0x333333);
+const COLOR_DARK_GRAY = new THREE.Color(INACTIVE_COMPONENT_COLOR);
 const COLOR_LIGHT_YELLOW = new THREE.Color(0xffffff);
 const COLOR_BRIGHT_YELLOW = new THREE.Color(0xffffff);
 const LN_PARAM_MONOCHROME = {

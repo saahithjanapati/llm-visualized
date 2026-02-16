@@ -23,6 +23,31 @@ export function initFollowModeControls({ pipeline, appState, followModeBtn, foll
         if (followSettingsToggle) followSettingsToggle.checked = next;
     };
 
+    let pendingFollowDisableRequest = null;
+    const suppressPendingFollowDisable = () => {
+        if (pendingFollowDisableRequest) {
+            pendingFollowDisableRequest.canceled = true;
+        }
+    };
+
+    const queueFollowDisableFromInteraction = () => {
+        const request = { canceled: false };
+        pendingFollowDisableRequest = request;
+        const run = () => {
+            if (pendingFollowDisableRequest !== request) return;
+            pendingFollowDisableRequest = null;
+            if (request.canceled) return;
+            if (pipeline?.isAutoCameraFollowEnabled?.()) {
+                setFollowMode(false);
+            }
+        };
+        if (typeof requestAnimationFrame === 'function') {
+            requestAnimationFrame(run);
+        } else {
+            setTimeout(run, 0);
+        }
+    };
+
     if (followModeBtn) {
         followModeBtn.addEventListener('click', (event) => {
             event.preventDefault();
@@ -76,9 +101,7 @@ export function initFollowModeControls({ pipeline, appState, followModeBtn, foll
             const interaction = activeControlInteraction;
             activeControlInteraction = null;
             if (!interaction?.moved) return;
-            if (pipeline?.isAutoCameraFollowEnabled?.()) {
-                setFollowMode(false);
-            }
+            queueFollowDisableFromInteraction();
         });
     }
 
@@ -93,7 +116,7 @@ export function initFollowModeControls({ pipeline, appState, followModeBtn, foll
 
     updateFollowButton(pipeline?.isAutoCameraFollowEnabled?.());
 
-    return { setFollowMode, updateFollowButton };
+    return { setFollowMode, updateFollowButton, suppressPendingFollowDisable };
 }
 
 export function initTopControlsAutohide({ topControls, settingsOverlay }) {

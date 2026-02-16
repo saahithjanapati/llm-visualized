@@ -537,8 +537,9 @@ body.touch-ui * {
     display: flex;
     flex-direction: column;
     gap: 0;
-    width: clamp(320px, 32vw, 420px);
-    max-width: min(420px, 92vw);
+    width: clamp(320px, 27vw, 560px);
+    max-width: min(560px, 92vw);
+    --hud-equations-panel-height: clamp(80px, calc(7.5vh + 22px), 132px);
     pointer-events: auto;
     transition: top 0.25s ease;
 }
@@ -903,9 +904,9 @@ body.touch-ui * {
     position: static;
     min-width: 0;
     margin-top: -6px;
-    height: 92px;
-    min-height: 92px;
-    max-height: 92px;
+    height: var(--hud-equations-panel-height);
+    min-height: var(--hud-equations-panel-height);
+    max-height: var(--hud-equations-panel-height);
     overflow: hidden;
     -webkit-overflow-scrolling: touch;
     padding: 0;
@@ -1345,7 +1346,7 @@ body.touch-ui * {
     text-orientation: mixed;
     white-space: nowrap;
 }
-.attention-token.is-highlighted {
+.detail-attention[data-attn-mode="post"] .attention-token.is-highlighted {
     color: #8fd2ff;
     text-shadow: 0 0 8px rgba(143,210,255,0.6);
     transform: scale(1.16);
@@ -1488,6 +1489,15 @@ body.touch-ui * {
     z-index: 5;
     box-shadow: 0 16px 26px rgba(0,0,0,0.62), 0 0 0 1px rgba(143,210,255,0.6);
     filter: brightness(1.34) saturate(1.18);
+}
+.detail-attention[data-attn-mode="pre"] .attention-cell.is-hovered:not(.is-empty) {
+    box-shadow: 0 10px 18px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.22);
+}
+.detail-attention[data-attn-mode="pre"] .attention-cell.is-pinned:not(.is-empty) {
+    box-shadow: 0 14px 24px rgba(0,0,0,0.58), 0 0 0 1px rgba(255,255,255,0.3);
+}
+.detail-attention[data-attn-mode="pre"] .attention-cell:active:not(.is-empty):not(.is-hidden) {
+    box-shadow: 0 16px 26px rgba(0,0,0,0.62), 0 0 0 1px rgba(255,255,255,0.34);
 }
 .detail-attention[data-attn-mode="post"] .attention-cell.is-hovered:not(.is-empty) {
     box-shadow:
@@ -1662,6 +1672,7 @@ body.touch-ui * {
     gap: 0;
     padding: 0;
     overflow: hidden;
+    container-type: inline-size;
 }
 .detail-dim-half {
     flex: 1 1 50%;
@@ -1674,17 +1685,41 @@ body.touch-ui * {
 .detail-dim-half + .detail-dim-half {
     border-left: 1px solid rgba(255,255,255,0.12);
 }
+.detail-row-dims .detail-label {
+    display: block;
+    line-height: 1.1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: clamp(8.5px, 1.2vw, 11px);
+    letter-spacing: clamp(0.2px, 0.06vw, 0.5px);
+}
+@supports (width: 1cqw) {
+    .detail-row-dims .detail-label {
+        font-size: clamp(8.5px, 4cqw, 11px);
+        letter-spacing: clamp(0.2px, 0.15cqw, 0.5px);
+    }
+}
 .detail-row-dims .detail-value {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
-.detail-row-token .detail-value,
-.detail-row-position .detail-value {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+.detail-token-info {
+    gap: 6px;
 }
-.detail-row-token .detail-value {
-    max-width: 70%;
-    text-align: right;
-    overflow-wrap: anywhere;
+.detail-token-info-head,
+.detail-token-info-bar {
+    grid-template-columns: minmax(0, 1.45fr) minmax(84px, 0.85fr) minmax(84px, 0.85fr);
+}
+.detail-token-info-item {
+    min-height: 30px;
+}
+.detail-token-info-item--text {
+    justify-content: center;
+    text-align: center;
+}
+.detail-token-info-item--id,
+.detail-token-info-item--position {
+    font-variant-numeric: tabular-nums;
 }
 .detail-row-token-note {
     align-items: flex-start;
@@ -1736,16 +1771,12 @@ body.touch-ui * {
         right: 8px;
         width: auto;
         max-width: calc(100vw - 16px);
+        --hud-equations-panel-height: clamp(74px, 11vh, 88px);
         gap: 0;
     }
     #hudPanel { padding: 6px 8px 3px; gap: 4px 8px; }
     #statusOverlay { font-size: 12px; line-height: 1.15; }
     #parameterCounter .param-value { font-size: 15px; }
-    #equationsPanel {
-        height: 92px;
-        min-height: 92px;
-        max-height: 92px;
-    }
     #equationsPanel .eq-title { font-size: 10px; margin-bottom: 2px; }
     #equationsPanel .eq-body { font-size: 12px; line-height: 1.28; }
     .detail-preview { min-height: 180px; }
@@ -1756,11 +1787,7 @@ body.touch-ui * {
     .attention-value-item { min-height: 26px; font-size: 11px; }
 }
 @media (max-height: 560px) {
-    #equationsPanel {
-        height: 92px;
-        min-height: 92px;
-        max-height: 92px;
-    }
+    #hudStack { --hud-equations-panel-height: clamp(68px, 16vh, 84px); }
 }
 @media (max-aspect-ratio: 1/1), (max-width: 880px) {
     body.detail-mobile-focus #topControls {
@@ -1776,17 +1803,13 @@ body.touch-ui * {
         right: 8px;
         width: auto;
         max-width: calc(100vw - 16px);
+        --hud-equations-panel-height: clamp(74px, 11vh, 90px);
         gap: 0;
     }
     #hudPanel { padding: 6px 8px 3px; gap: 4px 8px; }
     #statusOverlay { font-size: 12px; line-height: 1.15; }
     #parameterCounter .param-label { font-size: 10px; }
     #parameterCounter .param-value { font-size: 15px; }
-    #equationsPanel {
-        height: 92px;
-        min-height: 92px;
-        max-height: 92px;
-    }
     #equationsPanel .eq-title { font-size: 10px; margin-bottom: 2px; }
     #equationsPanel .eq-body { font-size: 12px; line-height: 1.28; }
     #detailPanel {
@@ -1852,9 +1875,5 @@ body.touch-ui * {
 }
 
 @media (max-width: 880px) and (orientation: portrait) {
-    #equationsPanel {
-        height: clamp(74px, 11vh, 84px);
-        min-height: clamp(74px, 11vh, 84px);
-        max-height: clamp(74px, 11vh, 84px);
-    }
+    #hudStack { --hud-equations-panel-height: clamp(72px, 11vh, 84px); }
 }

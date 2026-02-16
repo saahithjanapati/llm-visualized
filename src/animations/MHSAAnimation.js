@@ -338,6 +338,13 @@ export class MHSAAnimation {
             }
         } catch (_) { /* optional */ }
 
+        // Cap residual-stream rise to the baseline target computed during MHSA setup.
+        // Later stage code may raise `finalOriginalY` while branches run; this ceiling
+        // preserves the historical max-rise behavior for the original stream vectors.
+        this.maxResidualRiseY = Number.isFinite(this.finalOriginalY)
+            ? this.finalOriginalY
+            : null;
+
         // Temp-mode bookkeeping
         this._tempModeCompleted = false;
         this._tempAllOutputVectors = []; // K,Q,V combined
@@ -1153,6 +1160,9 @@ export class MHSAAnimation {
                 // never allow the residual vectors to rise past that entrance.
                 if (typeof this.topEmbeddingStopY === 'number') {
                     targetY = Math.min(targetY, this.topEmbeddingStopY);
+                }
+                if (Number.isFinite(this.maxResidualRiseY)) {
+                    targetY = Math.min(targetY, this.maxResidualRiseY);
                 }
                 let shouldMove = true;
 
