@@ -2509,6 +2509,9 @@ class SelectionPanel {
         this.biasDim = document.getElementById('detailBiasDim');
         this.metaSection = document.getElementById('detailMeta');
         this.tokenInfoRow = document.getElementById('detailTokenInfoRow');
+        this.tokenInfoHeadPrimary = document.getElementById('detailTokenInfoHeadPrimary');
+        this.tokenInfoHeadSecondary = document.getElementById('detailTokenInfoHeadSecondary');
+        this.tokenInfoHeadTertiary = document.getElementById('detailTokenInfoHeadTertiary');
         this.tokenInfoText = document.getElementById('detailTokenInfoText');
         this.tokenInfoId = document.getElementById('detailTokenInfoId');
         this.tokenInfoPosition = document.getElementById('detailTokenInfoPosition');
@@ -4196,13 +4199,31 @@ class SelectionPanel {
         }
         const tokenEncodingNote = getIncompleteUtf8TokenNote(tokenId);
 
-        if (Number.isFinite(tokenIndex) && this.activationSource && typeof this.activationSource.getTokenString === 'function') {
-            const sourceToken = this.activationSource.getTokenString(tokenIndex);
-            if (typeof sourceToken === 'string') tokenLabel = sourceToken;
+        if (Number.isFinite(tokenIndex) && this.activationSource) {
+            if (typeof this.activationSource.getTokenRawString === 'function') {
+                const sourceRawToken = this.activationSource.getTokenRawString(tokenIndex);
+                if (typeof sourceRawToken === 'string') tokenLabel = sourceRawToken;
+            }
+            if ((!tokenLabel || typeof tokenLabel !== 'string') && typeof this.activationSource.getTokenString === 'function') {
+                const sourceToken = this.activationSource.getTokenString(tokenIndex);
+                if (typeof sourceToken === 'string') tokenLabel = sourceToken;
+            }
         }
 
         let tokenText = (typeof tokenLabel === 'string') ? tokenLabel : '';
         if (!tokenText && Number.isFinite(tokenIndex)) tokenText = `Token ${tokenIndex + 1}`;
+
+        let tokenDisplayText = '';
+        if (Number.isFinite(tokenIndex) && this.activationSource && typeof this.activationSource.getTokenString === 'function') {
+            const sourceDisplayToken = this.activationSource.getTokenString(tokenIndex);
+            if (typeof sourceDisplayToken === 'string') {
+                tokenDisplayText = formatTokenLabelForPreview(sourceDisplayToken);
+            }
+        }
+        if (!tokenDisplayText && tokenText) {
+            tokenDisplayText = formatTokenLabelForPreview(tokenText);
+        }
+        if (!tokenDisplayText && tokenText) tokenDisplayText = tokenText;
         const tokenIdText = Number.isFinite(tokenId) ? String(Math.floor(tokenId)) : '';
 
         let positionText = '';
@@ -4215,6 +4236,7 @@ class SelectionPanel {
         if (!tokenText && !tokenIdText && !positionText) return null;
         return {
             tokenText,
+            tokenDisplayText,
             tokenIdText,
             positionText,
             tokenEncodingNote
@@ -4223,15 +4245,28 @@ class SelectionPanel {
 
     _updateVectorTokenPositionRows(selection, label) {
         const tokenInfoRow = this.tokenInfoRow;
+        const tokenInfoHeadPrimary = this.tokenInfoHeadPrimary;
+        const tokenInfoHeadSecondary = this.tokenInfoHeadSecondary;
+        const tokenInfoHeadTertiary = this.tokenInfoHeadTertiary;
         const tokenInfoText = this.tokenInfoText;
         const tokenInfoId = this.tokenInfoId;
         const tokenInfoPosition = this.tokenInfoPosition;
+        const lower = String(label || '').toLowerCase();
+        const activationStage = String(getActivationDataFromSelection(selection)?.stage || '').toLowerCase();
+        const isPositionEmbeddingSelection = lower.startsWith('position:')
+            || lower.includes('position embedding')
+            || lower.includes('positional embedding')
+            || activationStage.startsWith('embedding.position');
 
         const hideRows = () => {
             if (tokenInfoRow) {
                 tokenInfoRow.style.display = 'none';
                 tokenInfoRow.dataset.empty = 'true';
+                tokenInfoRow.dataset.layout = 'token';
             }
+            if (tokenInfoHeadPrimary) tokenInfoHeadPrimary.textContent = 'Raw token';
+            if (tokenInfoHeadSecondary) tokenInfoHeadSecondary.textContent = 'Token ID';
+            if (tokenInfoHeadTertiary) tokenInfoHeadTertiary.textContent = 'Position';
             if (tokenInfoText) {
                 tokenInfoText.textContent = ATTENTION_VALUE_PLACEHOLDER;
                 tokenInfoText.title = '';
@@ -4253,26 +4288,34 @@ class SelectionPanel {
         }
 
         const tokenText = metadata.tokenText || ATTENTION_VALUE_PLACEHOLDER;
+        const tokenDisplayText = metadata.tokenDisplayText || tokenText;
         const tokenIdText = metadata.tokenIdText || ATTENTION_VALUE_PLACEHOLDER;
         const positionText = metadata.positionText || ATTENTION_VALUE_PLACEHOLDER;
+        const primaryText = isPositionEmbeddingSelection ? positionText : tokenText;
+        const secondaryText = isPositionEmbeddingSelection ? tokenDisplayText : tokenIdText;
+        const tertiaryText = isPositionEmbeddingSelection ? ATTENTION_VALUE_PLACEHOLDER : positionText;
 
+        if (tokenInfoHeadPrimary) tokenInfoHeadPrimary.textContent = isPositionEmbeddingSelection ? 'Position' : 'Raw token';
+        if (tokenInfoHeadSecondary) tokenInfoHeadSecondary.textContent = isPositionEmbeddingSelection ? 'Associated token' : 'Token ID';
+        if (tokenInfoHeadTertiary) tokenInfoHeadTertiary.textContent = 'Position';
         if (tokenInfoText) {
-            tokenInfoText.textContent = tokenText;
-            tokenInfoText.title = tokenText === ATTENTION_VALUE_PLACEHOLDER ? '' : tokenText;
+            tokenInfoText.textContent = primaryText;
+            tokenInfoText.title = primaryText === ATTENTION_VALUE_PLACEHOLDER ? '' : primaryText;
         }
         if (tokenInfoId) {
-            tokenInfoId.textContent = tokenIdText;
-            tokenInfoId.title = tokenIdText === ATTENTION_VALUE_PLACEHOLDER ? '' : tokenIdText;
+            tokenInfoId.textContent = secondaryText;
+            tokenInfoId.title = secondaryText === ATTENTION_VALUE_PLACEHOLDER ? '' : secondaryText;
         }
         if (tokenInfoPosition) {
-            tokenInfoPosition.textContent = positionText;
-            tokenInfoPosition.title = positionText === ATTENTION_VALUE_PLACEHOLDER ? '' : positionText;
+            tokenInfoPosition.textContent = tertiaryText;
+            tokenInfoPosition.title = tertiaryText === ATTENTION_VALUE_PLACEHOLDER ? '' : tertiaryText;
         }
         if (tokenInfoRow) {
             tokenInfoRow.style.display = '';
-            const isEmpty = tokenText === ATTENTION_VALUE_PLACEHOLDER
-                && tokenIdText === ATTENTION_VALUE_PLACEHOLDER
-                && positionText === ATTENTION_VALUE_PLACEHOLDER;
+            tokenInfoRow.dataset.layout = isPositionEmbeddingSelection ? 'position' : 'token';
+            const isEmpty = primaryText === ATTENTION_VALUE_PLACEHOLDER
+                && secondaryText === ATTENTION_VALUE_PLACEHOLDER
+                && tertiaryText === ATTENTION_VALUE_PLACEHOLDER;
             tokenInfoRow.dataset.empty = isEmpty ? 'true' : 'false';
         }
         return metadata;
@@ -4343,7 +4386,11 @@ class SelectionPanel {
         const dimsRow = this.inputDim?.closest('.detail-row')
             || this.outputDim?.closest('.detail-row')
             || null;
-        if (this.inputDimLabel) this.inputDimLabel.textContent = isVectorMetadata ? 'Length' : 'Input dimension';
+        if (this.inputDimLabel) {
+            this.inputDimLabel.textContent = isTokenChipSelection
+                ? 'Length (one-hot encoded)'
+                : (isVectorMetadata ? 'Length' : 'Input dimension');
+        }
         if (this.outputDimLabel) this.outputDimLabel.textContent = 'Output dimension';
         if (this.inputDim) this.inputDim.textContent = hideTensorDimsField
             ? ''

@@ -1533,13 +1533,7 @@ export default class Gpt2Layer extends BaseLayer {
 
                         // Allow residual stream to keep rising while the
                         // duplicate goes through LN-2/MLP.
-                        if (this.mhsaAnimation && typeof this.mhsaAnimation.finalOriginalY === 'number') {
-                            const newTarget = this.mlpUp.group.position.y + MLP_MATRIX_PARAMS_UP.height / 2 - ORIGINAL_TO_PROCESSED_GAP;
-                            if (newTarget > this.mhsaAnimation.finalOriginalY) {
-                                this.mhsaAnimation.finalOriginalY = newTarget;
-                            }
-                            this.mhsaAnimation.postSplitRiseSpeed = ANIM_RISE_SPEED_POST_SPLIT_LN2;
-                        }
+                        this._updateResidualRiseForMlp();
 
                         // Spawn duplicate vector that will travel into LN-2
                         const mv = this._createPrismVector(
@@ -1938,6 +1932,7 @@ export default class Gpt2Layer extends BaseLayer {
                 
                 case LN2_PHASE.MLP_READY:
                     // Ready for MLP animation.
+                    this._updateResidualRiseForMlp();
                     if (!lane.mlpUpStarted && lane.resultVecLN2) {
                         lane.mlpUpStarted = true;
                         this._emitProgress();
@@ -2687,6 +2682,25 @@ export default class Gpt2Layer extends BaseLayer {
         
         this._riseAfterMlp(lane);
     }
+
+    _updateResidualRiseForMlp(targetY = null) {
+        const mhsa = this.mhsaAnimation;
+        if (!mhsa) return;
+
+        let resolvedTarget = targetY;
+        if (!Number.isFinite(resolvedTarget) && this.mlpUp && this.mlpUp.group) {
+            resolvedTarget = this.mlpUp.group.position.y + MLP_MATRIX_PARAMS_UP.height / 2 - ORIGINAL_TO_PROCESSED_GAP;
+        }
+        if (!Number.isFinite(resolvedTarget)) return;
+
+        if (!Number.isFinite(mhsa.finalOriginalY) || resolvedTarget > mhsa.finalOriginalY) {
+            mhsa.finalOriginalY = resolvedTarget;
+        }
+        if (!Number.isFinite(mhsa.maxResidualRiseY) || resolvedTarget > mhsa.maxResidualRiseY) {
+            mhsa.maxResidualRiseY = resolvedTarget;
+        }
+        mhsa.postSplitRiseSpeed = ANIM_RISE_SPEED_POST_SPLIT_LN2;
+    }
     
     /**
      * Rise above matrix after MLP processing
@@ -2765,9 +2779,7 @@ export default class Gpt2Layer extends BaseLayer {
             })
             .onComplete(() => {
                 // Update residual stream target height
-                if (this.mhsaAnimation) {
-                    this.mhsaAnimation.finalOriginalY = vec.group.position.y - ORIGINAL_TO_PROCESSED_GAP;
-                }
+                this._updateResidualRiseForMlp(vec.group.position.y - ORIGINAL_TO_PROCESSED_GAP);
                 
                 // Move back to residual stream
                 this._returnToResidualStream(lane, vec);

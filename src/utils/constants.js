@@ -503,6 +503,13 @@ export const ROW_SEGMENT_SPACING = PRISM_BASE_WIDTH * 1.5; // matches InstancedP
  */
 export const ORIGINAL_TO_PROCESSED_GAP = 200;
 
+/**
+ * Extra MHSA-only vertical spacing (in world units) before the first residual
+ * addition. Positive values keep the residual stream lower so the add phase
+ * plays out over a longer vertical distance.
+ */
+export const MHSA_RESIDUAL_ADDITION_EXTRA_GAP = 120;
+
 // Vertical gap from LayerNorm2 top to first MLP matrix
 export const LN2_TO_MLP_GAP = 150;
 

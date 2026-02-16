@@ -14,6 +14,7 @@ import {
     NUM_VECTOR_LANES,
     PRISM_DIMENSIONS_PER_UNIT,
     ORIGINAL_TO_PROCESSED_GAP,
+    MHSA_RESIDUAL_ADDITION_EXTRA_GAP,
 } from '../../utils/constants.js';
 
 import {
@@ -258,7 +259,7 @@ export function buildMHAVisuals(parentGroup, {
 
     const matrixTopY     = outputProjMatrixCenterY + matrixHeight / 2;
     const finalCombinedY = matrixTopY + 60; // matches legacy comment
-    const finalOriginalY = finalCombinedY - ORIGINAL_TO_PROCESSED_GAP;
+    const finalOriginalY = finalCombinedY - ORIGINAL_TO_PROCESSED_GAP - MHSA_RESIDUAL_ADDITION_EXTRA_GAP;
 
     return {
         // raw visual arrays & helpers

@@ -1218,6 +1218,7 @@ body.touch-ui * {
     border: 1px solid rgba(255,255,255,0.12);
     background: rgba(255,255,255,0.03);
     font-size: 12px;
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
     min-width: 140px;
 }
 .detail-attention-toggle .toggle-text { font-size: 12px; }
@@ -1709,6 +1710,14 @@ body.touch-ui * {
 .detail-token-info-head,
 .detail-token-info-bar {
     grid-template-columns: minmax(0, 1.45fr) minmax(84px, 0.85fr) minmax(84px, 0.85fr);
+}
+.detail-token-info[data-layout="position"] .detail-token-info-head,
+.detail-token-info[data-layout="position"] .detail-token-info-bar {
+    grid-template-columns: minmax(84px, 0.85fr) minmax(0, 1.45fr);
+}
+.detail-token-info[data-layout="position"] #detailTokenInfoHeadTertiary,
+.detail-token-info[data-layout="position"] .detail-token-info-item--position {
+    display: none;
 }
 .detail-token-info-item {
     min-height: 30px;

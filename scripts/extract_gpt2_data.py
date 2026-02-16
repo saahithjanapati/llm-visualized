@@ -390,6 +390,16 @@ def decode_token_texts(tokenizer: GPT2TokenizerFast, token_ids: Sequence[int]) -
     return [decode_token_text(tokenizer, int(token_id)) for token_id in token_ids]
 
 
+def encode_token_texts_hf(tokenizer: GPT2TokenizerFast, token_ids: Sequence[int]) -> List[str]:
+    """Return Hugging Face raw token strings (e.g. byte-level markers like 'Ġ')."""
+
+    encoded = tokenizer.convert_ids_to_tokens([int(token_id) for token_id in token_ids])
+    result: List[str] = []
+    for token in encoded:
+        result.append(token if isinstance(token, str) else "")
+    return result
+
+
 def extract_top_logits(
     logits: torch.Tensor,
     tokenizer: GPT2TokenizerFast,
@@ -958,7 +968,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         logit_round_decimals,
         prob_round_decimals,
     )
-    all_token_strings = decode_token_texts(tokenizer, prompt_id_list + completion_id_list)
+    all_token_ids = prompt_id_list + completion_id_list
+    all_token_strings = decode_token_texts(tokenizer, all_token_ids)
+    all_token_hf_strings = encode_token_texts_hf(tokenizer, all_token_ids)
 
     payload = {
         "meta": {
@@ -967,6 +979,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "prompt_tokens": prompt_id_list,
             "completion_tokens": completion_id_list,
             "token_strings": all_token_strings,
+            "token_hf_strings": all_token_hf_strings,
             "token_display_strings": [visible_token_text(token) for token in all_token_strings],
             "logit_top_k": args.logit_top_k,
             "logit_round_decimals": logit_round_decimals,

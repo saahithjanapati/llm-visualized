@@ -34,6 +34,7 @@ import {
     ANIM_RISE_SPEED_POST_SPLIT_LN1,
     ANIM_RISE_SPEED_POST_SPLIT_LN2,
     ORIGINAL_TO_PROCESSED_GAP,
+    MHSA_RESIDUAL_ADDITION_EXTRA_GAP,
     PRISM_DIMENSIONS_PER_UNIT,
     BRANCH_X
 } from '../utils/constants.js';
@@ -332,7 +333,7 @@ export class MHSAAnimation {
                     }
                     const matrixTopY = desiredCenterY + this.outputProjMatrixHeight / 2;
                     this.finalCombinedY = matrixTopY + 60;
-                    this.finalOriginalY = this.finalCombinedY - ORIGINAL_TO_PROCESSED_GAP;
+                    this.finalOriginalY = this.finalCombinedY - ORIGINAL_TO_PROCESSED_GAP - MHSA_RESIDUAL_ADDITION_EXTRA_GAP;
                 }
             }
             }
@@ -875,7 +876,7 @@ export class MHSAAnimation {
         // The processed vectors rise to:  matrixTopY + 60.
         const matrixTopY = outputProjMatrixCenterY + matrixHeight / 2;
         this.finalCombinedY = matrixTopY + 60; // 30 (rise to matrix) + 30 (extraRise)
-        this.finalOriginalY = this.finalCombinedY - ORIGINAL_TO_PROCESSED_GAP;
+        this.finalOriginalY = this.finalCombinedY - ORIGINAL_TO_PROCESSED_GAP - MHSA_RESIDUAL_ADDITION_EXTRA_GAP;
     }
 
     areAllMHAVectorsInPosition(lanes) {
@@ -2245,7 +2246,7 @@ export class MHSAAnimation {
 
         const matrixTopY = newCenterY + this.outputProjMatrixHeight / 2;
         this.finalCombinedY = matrixTopY + 60;
-        this.finalOriginalY = this.finalCombinedY - ORIGINAL_TO_PROCESSED_GAP;
+        this.finalOriginalY = this.finalCombinedY - ORIGINAL_TO_PROCESSED_GAP - MHSA_RESIDUAL_ADDITION_EXTRA_GAP;
     }
 
     _restoreWeightedSumColors(fadeDuration = 0, fadeDelay = 0) {

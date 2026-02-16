@@ -103,6 +103,7 @@ export class CaptureActivationSource {
             ? this.activations.final_layernorm
             : null;
         this.tokenStrings = Array.isArray(this.meta.token_strings) ? this.meta.token_strings : [];
+        this.tokenHfStrings = Array.isArray(this.meta.token_hf_strings) ? this.meta.token_hf_strings : [];
         const explicitTokenIds = normalizeTokenIdArray(this.meta.token_ids);
         const promptTokenIds = normalizeTokenIdArray(this.meta.prompt_tokens);
         const completionTokenIds = normalizeTokenIdArray(this.meta.completion_tokens);
@@ -135,6 +136,7 @@ export class CaptureActivationSource {
     }
 
     getTokenCount() {
+        if (this.tokenHfStrings.length) return this.tokenHfStrings.length;
         if (this.tokenStrings.length) return this.tokenStrings.length;
         const embedTokens = Array.isArray(this.embeddings.token) ? this.embeddings.token.length : 0;
         if (embedTokens) return embedTokens;
@@ -145,6 +147,12 @@ export class CaptureActivationSource {
         if (!this.tokenStrings.length) return null;
         const idx = clampIndex(tokenIndex, this.tokenStrings.length - 1);
         return this.tokenStrings[idx] ?? null;
+    }
+
+    getTokenRawString(tokenIndex) {
+        if (!this.tokenHfStrings.length) return null;
+        const idx = clampIndex(tokenIndex, this.tokenHfStrings.length - 1);
+        return this.tokenHfStrings[idx] ?? null;
     }
 
     getTokenId(tokenIndex) {
