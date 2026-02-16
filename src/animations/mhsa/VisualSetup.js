@@ -251,7 +251,8 @@ export function buildMHAVisuals(parentGroup, {
         material.emissive = initDarkColor;
         material.emissiveIntensity = scaleGlobalEmissiveIntensity(0.16);
     });
-    softenMatrixSurface(outputProjectionMatrix);
+    // Keep output-projection reflectivity consistent with Q/K/V (and MLP) matrices.
+    softenMatrixSurface(outputProjectionMatrix, QKV_SURFACE_TWEAKS);
 
     parentGroup.add(outputProjectionMatrix.group);
 

@@ -1,7 +1,11 @@
 import { setNumVectorLanes, USE_PHYSICAL_MATERIALS } from '../../utils/constants.js';
 import { setAnimationLaneCount } from '../../animations/LayerAnimationConstants.js';
 import { applyPhysicalMaterialsToScene } from '../../utils/materialUtils.js';
-import { setTrailOpacityRuntimeMultiplier, setTrailLineWidthRuntimeMultiplier } from '../../utils/trailConstants.js';
+import {
+    getLaneOpacityScale,
+    setTrailOpacityRuntimeMultiplier,
+    setTrailLineWidthRuntimeMultiplier
+} from '../../utils/trailConstants.js';
 import { refreshTrailDisplayScales } from '../../utils/trailUtils.js';
 import { appState } from '../../state/appState.js';
 import { addEmbeddingAndTokenChips } from './tokenChips.js';
@@ -238,10 +242,28 @@ export function initGenerationController({
 
     const resolveTrailRuntimeStyleForPass = (passPlan) => {
         const decodeSingleLaneActive = !!(passPlan?.kvCacheDecodeActive && passPlan?.activeLaneCount === 1);
+        if (!decodeSingleLaneActive) {
+            return {
+                opacityMultiplier: 1.0,
+                lineWidthMultiplier: 1.0
+            };
+        }
+
+        const totalLaneCount = Math.max(1, Math.floor(passPlan?.totalLaneCount || passPlan?.activeLaneCount || 1));
+        const activeLaneCount = Math.max(1, Math.floor(passPlan?.activeLaneCount || 1));
+        const activeLaneScale = getLaneOpacityScale(activeLaneCount);
+        const totalLaneScale = getLaneOpacityScale(totalLaneCount);
+        // Decode renders one active lane. Compensate for total-lane dimming so
+        // "skip to last pass -> enable KV cache" keeps the same single-lane
+        // trail brightness as other KV decode entries.
+        const laneScaleCompensation = totalLaneScale > 0
+            ? (activeLaneScale / totalLaneScale)
+            : 1.0;
+
         // Decode-only single-lane trails get a modest opacity bump so they remain
         // legible without looking overdrawn where paths overlap.
         return {
-            opacityMultiplier: decodeSingleLaneActive ? 1.3 : 1.0,
+            opacityMultiplier: 1.3 * laneScaleCompensation,
             lineWidthMultiplier: 1.0
         };
     };

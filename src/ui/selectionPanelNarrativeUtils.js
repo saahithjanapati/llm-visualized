@@ -10,6 +10,47 @@ import { getActivationDataFromSelection } from './selectionPanelSelectionUtils.j
 
 const RESIDUAL_STREAM_DESCRIPTION = 'This is the residual stream vector for a token at this point in the model. It is the main path that carries information through the network. Attention and MLP updates are added back into this stream at each layer, so prior context is preserved while new information is incorporated.';
 
+function normalizeSelectionKind(kind) {
+    const raw = String(kind || '').trim().toLowerCase();
+    if (!raw) return '';
+    if (raw === 'mergedkv') return 'merged key/value vector';
+    if (raw === 'attentionsphere') return 'attention-matrix entry';
+    if (raw === 'batchedvector') return 'batched vector';
+    if (raw === 'instanced') return 'instanced scene element';
+    if (raw === 'label') return 'scene component';
+    return `${raw} component`;
+}
+
+function buildContextualFallbackDescription(label, kind, stage = '') {
+    const cleanLabel = String(label || '').trim();
+    const cleanStage = String(stage || '').trim();
+    const kindLabel = normalizeSelectionKind(kind);
+
+    if (cleanStage) {
+        if (cleanLabel && kindLabel) {
+            return `"${cleanLabel}" is an interactive ${kindLabel} mapped to activation stage "${cleanStage}". This stage indicates where it participates in the current forward-pass pipeline.`;
+        }
+        if (cleanLabel) {
+            return `"${cleanLabel}" is mapped to activation stage "${cleanStage}". This stage indicates where it participates in the current forward-pass pipeline.`;
+        }
+        if (kindLabel) {
+            return `This ${kindLabel} is mapped to activation stage "${cleanStage}". This stage indicates where it participates in the current forward-pass pipeline.`;
+        }
+        return `This selection is mapped to activation stage "${cleanStage}". This stage indicates where it participates in the current forward-pass pipeline.`;
+    }
+
+    if (cleanLabel && kindLabel) {
+        return `"${cleanLabel}" is an interactive ${kindLabel} in the scene. It contributes to the residual, attention, or MLP computation at this point in the layer flow.`;
+    }
+    if (cleanLabel) {
+        return `"${cleanLabel}" is an interactive scene component. It contributes to the residual, attention, or MLP computation at this point in the layer flow.`;
+    }
+    if (kindLabel) {
+        return `This ${kindLabel} contributes to the residual, attention, or MLP computation at this point in the layer flow.`;
+    }
+    return 'This interactive scene component contributes to the model forward pass at this point in the layer flow.';
+}
+
 const toKatexColorHex = (hex) => `#${Number(hex).toString(16).padStart(6, '0')}`;
 const colorizeEquationToken = (hex, token) => `\\textcolor{${hex}}{${token}}`;
 const SELECTION_EQUATION_COLORS = {
@@ -169,18 +210,71 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
     const stage = activation?.stage || '';
     const stageLower = stage.toLowerCase();
 
+    if (stageLower) {
+        if (stageLower.startsWith('embedding.token')) {
+            return 'This is the embedding vector for a specific token: a row of the embedding matrix. It contributes to the initial residual stream after being added to the position embedding. This vector is the starting point for the residual stream.';
+        }
+        if (stageLower.startsWith('embedding.position')) {
+            return 'This is the position embedding vector for this token\'s index. It is added to the token embedding to form the initial residual stream, so order is encoded before any attention or MLP layers run.';
+        }
+        if (stageLower.startsWith('embedding.sum')) {
+            return 'This is the summed input vector after combining token and position information. It is the initial residual stream that enters Layer 1.';
+        }
+        if (stageLower.startsWith('layer.incoming')) {
+            return 'This is the residual stream as it enters a layer, before the first LayerNorm. It carries the accumulated information from earlier layers and will feed into attention and the MLP.';
+        }
+        if (stageLower === 'ln1.norm' || stageLower === 'ln2.norm') {
+            return 'This is the normalized vector for one token inside LayerNorm, before learned scale and shift are applied. It has zero mean and unit variance across features at this step.';
+        }
+        if (stageLower === 'ln1.scale' || stageLower === 'ln2.scale') {
+            return 'This is the LayerNorm-scaled vector after multiplying normalized features by learned per-feature scale parameters.';
+        }
+        if (stageLower === 'ln1.shift') {
+            return 'This is the layer-normed residual stream right before query, key, and value projection. It is copied for each head to make queries, keys, and values, which then determine attention weights.';
+        }
+        if (stageLower === 'ln2.shift') {
+            return 'This is the LayerNorm-2 output vector after scale and shift, right before the MLP block for this token.';
+        }
+        if (stageLower === 'qkv.q') {
+            return 'This is the query vector for one token in one head. It encodes what the token wants to read and is compared with keys to form attention scores.';
+        }
+        if (stageLower === 'qkv.k') {
+            return 'This is the key vector for one token in one head. It encodes what this token offers to other queries in the same head.';
+        }
+        if (stageLower === 'qkv.v') {
+            return 'This is the value vector for one token in one head. Attention weights are used to mix these values into the head output.';
+        }
+        if (stageLower === 'attention.output_projection') {
+            return 'This is the attention output vector after concatenating head outputs and applying the output projection. It is the branch result that gets added back into the residual stream.';
+        }
+        if (stageLower === 'residual.post_attention') {
+            return 'This is the residual stream after attention has been added. It represents the model state before the MLP block in this layer.';
+        }
+        if (stageLower === 'mlp.up') {
+            return 'This is the vector after the MLP up-projection, in the larger hidden dimension. It is the input to the nonlinearity before being projected back down.';
+        }
+        if (stageLower === 'mlp.activation') {
+            return 'This is the post-activation MLP vector (after GELU), still in the expanded hidden dimension before down-projection.';
+        }
+        if (stageLower === 'mlp.down') {
+            return 'This is the vector after the MLP down-projection, back at model width. It is the MLP branch output that will be added to the residual stream.';
+        }
+        if (stageLower === 'residual.post_mlp') {
+            return 'This is the residual stream after the MLP output has been added. It is the final output of this layer and the input to the next layer.';
+        }
+        if (stageLower === 'final_ln.norm') {
+            return 'This is the normalized vector in the final LayerNorm at the top of the model, before final scale and shift are applied.';
+        }
+        if (stageLower === 'final_ln.scale') {
+            return 'This is the final LayerNorm scale vector applied to normalized top-of-model features before unembedding.';
+        }
+        if (stageLower === 'final_ln.shift') {
+            return 'This is the final LayerNorm shift vector applied after final scaling, immediately before the unembedding matrix maps to logits.';
+        }
+    }
+
     if (
         lower.includes('residual stream vector')
-        || lower.includes('embedding sum')
-        || lower.includes('incoming residual')
-        || lower.includes('post-attention residual')
-        || lower.includes('post attention residual')
-        || lower.includes('post-mlp residual')
-        || lower.includes('post mlp residual')
-        || lower.includes('post-layernorm residual')
-        || lower.includes('post layernorm residual')
-        || stageLower.startsWith('embedding.sum')
-        || stageLower.startsWith('layer.incoming')
         || stageLower.includes('residual')
     ) {
         return RESIDUAL_STREAM_DESCRIPTION;
@@ -201,6 +295,9 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
     if (lower.includes('embedding sum')) {
         return 'This is the summed input vector after combining token and position information. It is the initial residual stream that enters Layer 1.';
     }
+    if (lower.includes('embedding connector trail')) {
+        return 'This connector marks the visual handoff path from the token and position chips into the embedding/residual input flow for the current pass.';
+    }
     if (lower.includes('vocab embedding (top)')) {
         return 'This is the output (unembedding) matrix at the top of the model. It maps the final residual stream vector to vocabulary logits. Softmax converts logits to probabilities and the model samples or selects the next token. In GPT-2, these weights are tied to the input embedding.';
     }
@@ -215,10 +312,19 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
         const lnName = isLn1 ? 'LN1' : 'LN2';
         return `This is the ${lnName} scale vector. After normalization, each feature is multiplied by a learned scale before the shifted output is produced. These parameters are shared across tokens but applied per feature.`;
     }
+    if ((lower.includes('ln1') || lower.includes('ln2')) && (lower.includes('normed') || lower.includes('normalized'))) {
+        return 'This is the normalized vector for one token inside LayerNorm, before learned scale and shift are applied. It has zero mean and unit variance across features at this step.';
+    }
     if ((lower.includes('ln1') || lower.includes('ln2')) && (lower.includes('shift') || lower.includes('beta'))) {
         const isLn1 = lower.includes('ln1');
         const lnName = isLn1 ? 'LN1' : 'LN2';
         return `This is the ${lnName} shift vector, the additive term applied after scaling normalized features. It lets the model re-center features after normalization.`;
+    }
+    if (lower.includes('final ln scale')) {
+        return 'This is the final LayerNorm scale vector at the top of the model. It rescales normalized features immediately before unembedding.';
+    }
+    if (lower.includes('final ln shift')) {
+        return 'This is the final LayerNorm shift vector at the top of the model. It is added after final scaling right before logits are computed.';
     }
     if (lower.includes('query weight matrix')) {
         return 'This matrix projects the layer-normed residual stream into query vectors for each head. Queries represent what a token is seeking, and together with keys they determine attention weights.';
@@ -292,8 +398,14 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
     if (lower.includes('query vector')) {
         return 'This is the query vector for one token in one head. It encodes what the token wants to read. It is compared with all key vectors to form one row of the attention matrix shown below. Each entry in that row is a score for another token.';
     }
+    if (lower.includes('cached key vector')) {
+        return 'This is a key vector persisted in the KV cache from an earlier decoding step. New queries attend to it so the model can reuse prior context without recomputing past keys.';
+    }
     if (lower.includes('key vector')) {
         return 'This is the key vector for one token in one head. It encodes what this token offers. Queries compare against it to compute attention scores, contributing to one column of the attention matrix shown below. Higher dot products mean this token is more attendable.';
+    }
+    if (lower.includes('cached value vector')) {
+        return 'This is a value vector persisted in the KV cache from an earlier decoding step. Attention weights select from these cached values so prior-token information can flow into the current token update.';
     }
     if (lower.includes('value vector')) {
         return 'This is the value vector for one token in one head. It holds the information other tokens can read. The attention matrix shown below (after softmax) provides weights that mix these values. The head output is a weighted sum of values.';
@@ -310,8 +422,17 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
     if (lower.includes('attention')) {
         return 'Self-attention lets each token read information from other tokens in the sequence. Each head computes attention weights over tokens and uses them to mix value vectors. Head outputs are then concatenated, projected, and added back to the residual stream.';
     }
+    if (lower.includes('attention weighted sum')) {
+        return 'This is the weighted-sum output of one attention head for a token. It is produced by multiplying post-softmax attention weights with value vectors and summing across source tokens.';
+    }
     if (lower.includes('top logit bars')) {
         return 'These are the vocabulary logits before softmax. Each bar is one token in the vocabulary, and higher means a more likely next token. They are produced from the final residual stream. Softmax converts logits to probabilities, then sampling or argmax picks the next token.';
+    }
+    if (lower.startsWith('chosen token:')) {
+        return 'This marks the token selected from the current logit distribution for this pass. That selected token is what gets appended for the next decode step.';
+    }
+    if (lower === 'logit' || lower.startsWith('logit ')) {
+        return 'This is a single vocabulary logit entry before softmax. It represents one candidate next token score for the current position.';
     }
     if (lower.includes('residual')) {
         return RESIDUAL_STREAM_DESCRIPTION;
@@ -325,8 +446,5 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
     if (lower.includes('weight matrix')) {
         return 'This is a learned linear transformation matrix. Multiplying by this matrix changes the feature mix or coordinate system. Different matrices serve different roles, such as creating Q/K/V vectors or MLP features. These are core trainable parameters.';
     }
-    if (kind) {
-        return 'This is a GPT-2 component that transforms token representations. It participates in the residual stream, attention, or MLP pipeline. If it is part of attention, it connects to the attention matrix for a specific head. Its role depends on the stage of the forward pass.';
-    }
-    return 'This selection is part of the GPT-2 visualization. It represents a structure used to transform, normalize, or route token information. Nearby labels show where it fits in the layer. Follow the arrows and labels to see how information flows.';
+    return buildContextualFallbackDescription(label, kind, stage);
 }

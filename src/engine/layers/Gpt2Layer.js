@@ -117,7 +117,8 @@ const MULTIPLY_FLASH_GEOMETRY = new THREE.SphereGeometry(1, 18, 18);
 const POS_ADD_STALL_TIMEOUT_MS = 12000;
 const POS_PASS_START_PAUSE_MS = 0;
 const LANE_PHASE_STALL_TIMEOUT_MS_SKIP = 3000;
-const LN2_HANDOFF_STALL_TIMEOUT_MS_NORMAL = 12000;
+const LANE_PHASE_STALL_TIMEOUT_MS_NORMAL = 4500;
+const LN2_HANDOFF_STALL_TIMEOUT_MS_NORMAL = 4500;
 const MLP_POST_PASS_THROUGH_FINAL_EMISSIVE = GPT2_LAYER_VISUAL_TUNING.mlp.postPassFinalEmissiveIntensity;
 const MLP_TRANSITION_PROFILE_DEFAULT = Object.freeze({
     expandRiseUnits: 30,
@@ -394,16 +395,15 @@ export default class Gpt2Layer extends BaseLayer {
         const durationMs = PRISM_ADD_ANIM_BASE_DURATION / PRISM_ADD_ANIM_SPEED_MULT;
         const flashDurationMs = PRISM_ADD_ANIM_BASE_FLASH_DURATION / PRISM_ADD_ANIM_SPEED_MULT;
         const delayBetweenMs = PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS / PRISM_ADD_ANIM_SPEED_MULT;
-        return durationMs + flashDurationMs + vectorLength * delayBetweenMs;
+        return durationMs + flashDurationMs + Math.max(0, (vectorLength - 1) * delayBetweenMs);
     }
 
-    _computeGateBarrierRemainders(lanes, { ln2SyncY } = {}) {
+    _computeGateBarrierRemainders(lanes) {
         const list = Array.isArray(lanes) ? lanes : [];
         const laneCount = list.length;
         const speedMult = GLOBAL_ANIM_SPEED_MULT;
         const basePrismAddDurationMs = this._getBasePrismAdditionDurationMs();
         const ln1RiseBaseSpeed = ANIM_RISE_SPEED_INSIDE_LN * speedMult;
-        const ln2RiseBaseSpeed = ANIM_RISE_SPEED_POST_SPLIT_LN2 * speedMult;
         let ln1BarrierMaxRemaining = 0;
         let mhsaBarrierMaxRemaining = 0;
         let ln2BarrierMaxRemaining = 0;
@@ -442,25 +442,8 @@ export default class Gpt2Layer extends BaseLayer {
                     if (virtualRemaining > mhsaBarrierMaxRemaining) mhsaBarrierMaxRemaining = virtualRemaining;
                 }
 
-                if (!this._ln2Ready
-                    && lane.ln2Phase === LN2_PHASE.PRE_RISE
-                    && lane.postAdditionVec
-                    && lane.postAdditionVec.group
-                    && Number.isFinite(ln2SyncY)) {
-                    const remaining = Math.max(0, ln2SyncY - lane.postAdditionVec.group.position.y);
-                    if (remaining > ln2BarrierMaxRemaining) ln2BarrierMaxRemaining = remaining;
-                }
-
-                if (!this._ln2Ready && lane.ln2Phase !== LN2_PHASE.PRE_RISE && lane.stopRise) {
-                    const addProgress = THREE.MathUtils.clamp(
-                        Number.isFinite(lane.mhsaResidualAddProgress) ? lane.mhsaResidualAddProgress : 0,
-                        0,
-                        1
-                    );
-                    const remainingSeconds = (basePrismAddDurationMs * (1 - addProgress)) / 1000;
-                    const virtualRemaining = ln2RiseBaseSpeed * remainingSeconds;
-                    if (virtualRemaining > ln2BarrierMaxRemaining) ln2BarrierMaxRemaining = virtualRemaining;
-                }
+                // Keep LN2 handoff lane-local: do not slow already-ready lanes
+                // to synchronize with lanes still finishing post-attention add.
             }
         }
 
@@ -506,7 +489,15 @@ export default class Gpt2Layer extends BaseLayer {
             }
             return false;
         });
-        if (!pendingLanes.length) {
+        const blockedByOutputCompletion = !mhsaOutputComplete
+            && lanes.some((lane) => (
+                lane
+                && lane.ln2Phase === LN2_PHASE.PRE_RISE
+                && lane.postAdditionVec
+                && lane.postAdditionVec.group
+            ));
+
+        if (!pendingLanes.length && !blockedByOutputCompletion) {
             this._ln2HandoffStallSinceMs = NaN;
             return false;
         }
@@ -802,6 +793,17 @@ export default class Gpt2Layer extends BaseLayer {
                     if (v === lane.travellingVec && (lane.horizPhase === HORIZ_PHASE.READY_MHSA || lane.horizPhase === HORIZ_PHASE.TRAVEL_MHSA)) {
                         continue;
                     }
+                    // Residual-stream world trails are owned by MHSAAnimation after
+                    // the initial WAITING phase. Skipping here avoids duplicate
+                    // writes that can make LN2 approach segments look brighter.
+                    if (
+                        this.mhsaAnimation
+                        && v.userData.trailWorld
+                        && lane.horizPhase !== HORIZ_PHASE.WAITING
+                        && (v === lane.originalVec || v === lane.postAdditionVec)
+                    ) {
+                        continue;
+                    }
                     const trailRef = v.userData.trail;
                     if (trailRef.__lastUpdateFrameId === trailFrameId) continue;
                     trailRef.__lastUpdateFrameId = trailFrameId;
@@ -1070,7 +1072,6 @@ export default class Gpt2Layer extends BaseLayer {
         }
         this._updateLn2AndMlpStartGates({
             allLn2Ready,
-            mhsaOutputComplete,
             allMlpReady
         });
 
@@ -1079,7 +1080,7 @@ export default class Gpt2Layer extends BaseLayer {
             ln1BarrierMaxRemaining,
             mhsaBarrierMaxRemaining,
             ln2BarrierMaxRemaining
-        } = this._computeGateBarrierRemainders(lanes, { ln2SyncY });
+        } = this._computeGateBarrierRemainders(lanes);
 
         this._updateLn1AndMhsaStartGates({
             allLn1Ready,
@@ -1485,7 +1486,7 @@ export default class Gpt2Layer extends BaseLayer {
                 case HORIZ_PHASE.POST_MHSA_ADDITION:
                     // After MHSA addition completes, start LN2 phase
                     // This state is set by MHSAAnimation._startAdditionAnimation
-                    if (mhsaOutputComplete && lane.ln2Phase === LN2_PHASE.PRE_RISE && lane.postAdditionVec) {
+                    if (lane.ln2Phase === LN2_PHASE.PRE_RISE && lane.postAdditionVec) {
                         this._setLaneHorizPhase(lane, HORIZ_PHASE.WAITING_FOR_LN2, 'mhsa addition complete');
                         this._emitProgress();
                     }
@@ -1503,7 +1504,6 @@ export default class Gpt2Layer extends BaseLayer {
             switch (lane.ln2Phase) {
                 case LN2_PHASE.PRE_RISE: {
                     // Rise the post-addition vector before branching to LN2
-                    if (!mhsaOutputComplete) break;
                     const v = lane.postAdditionVec;
                     if (!v) break;
                     
@@ -1521,11 +1521,6 @@ export default class Gpt2Layer extends BaseLayer {
                         );
                         v.group.position.y = Math.min(targetY, v.group.position.y + syncedRiseSpeed * dt);
                     } else {
-                        if (!this._ln2Ready) {
-                            // Wait here until every lane reaches the staging height.
-                            break;
-                        }
-
                         // Always stage LN2 entry at the ring-bottom offset (same as LN1).
                         // Under skip acceleration, post-MHSA vectors may already be above
                         // LN2; without this clamp, the horizontal entry trail can appear
@@ -1942,12 +1937,7 @@ export default class Gpt2Layer extends BaseLayer {
                 }
                 
                 case LN2_PHASE.MLP_READY:
-                    // Ready for MLP animation – begin only once every lane
-                    // has reached this state to maintain synchronisation.
-                    if (!this._mlpStart) {
-                        break; // hold until global start flag set
-                    }
-
+                    // Ready for MLP animation.
                     if (!lane.mlpUpStarted && lane.resultVecLN2) {
                         lane.mlpUpStarted = true;
                         this._emitProgress();
@@ -1978,11 +1968,30 @@ export default class Gpt2Layer extends BaseLayer {
         // Global safety net for skip flows: if any lane's phase signature is
         // unchanged for too long, force a conservative forward step to avoid
         // whole-layer deadlocks. Keep normal playback strictly stage-gated.
+        const postAttentionWatchLanes = lanes.filter((lane) => (
+            lane
+            && (
+                lane.horizPhase === HORIZ_PHASE.POST_MHSA_ADDITION
+                || lane.horizPhase === HORIZ_PHASE.WAITING_FOR_LN2
+                || lane.ln2Phase !== LN2_PHASE.NOT_STARTED
+            )
+        ));
+
         if (skipActive || this._skipLayerActive) {
             this._applyLaneStallWatchdog(lanes, nowMs, {
                 ln2SyncY,
                 timeoutMs: LANE_PHASE_STALL_TIMEOUT_MS_SKIP,
-                allowOriginalFallback: true
+                allowOriginalFallback: true,
+                postAttentionOnly: false
+            });
+        } else if (postAttentionWatchLanes.length > 0) {
+            // Keep normal playback strict for LN1/MHSA, but recover from post-attention
+            // deadlocks that can surface after focus/visibility interruptions.
+            this._applyLaneStallWatchdog(postAttentionWatchLanes, nowMs, {
+                ln2SyncY,
+                timeoutMs: LANE_PHASE_STALL_TIMEOUT_MS_NORMAL,
+                allowOriginalFallback: false,
+                postAttentionOnly: true
             });
         } else {
             this._resetLaneStallWatchdog(lanes);
@@ -2718,6 +2727,24 @@ export default class Gpt2Layer extends BaseLayer {
                         delete vec.userData.trail;
                         delete vec.userData.trailWorld;
                     } else if (!vec.userData.mlpTrail) {
+                        // Freeze the incoming MLP traversal trail at handoff so only the
+                        // dedicated post-MLP trail is updated during rise/return.
+                        if (vec.userData.trail) {
+                            if (vec.userData.trailWorld) {
+                                vec.group.getWorldPosition(TMP_WORLD_POS);
+                                if (typeof vec.userData.trail.snapLastPointTo === 'function') {
+                                    vec.userData.trail.snapLastPointTo(TMP_WORLD_POS);
+                                } else if (typeof vec.userData.trail.update === 'function') {
+                                    vec.userData.trail.update(TMP_WORLD_POS);
+                                }
+                            } else if (typeof vec.userData.trail.snapLastPointTo === 'function') {
+                                vec.userData.trail.snapLastPointTo(vec.group.position);
+                            } else if (typeof vec.userData.trail.update === 'function') {
+                                vec.userData.trail.update(vec.group.position);
+                            }
+                            delete vec.userData.trail;
+                            delete vec.userData.trailWorld;
+                        }
                         const pathTrail = new StraightLineTrail(this.root, 0xffffff, 1, undefined, undefined, TRAIL_MIN_SEGMENT_DISTANCE);
                         pathTrail.start(vec.group.position.clone());
                         vec.userData.mlpTrail = pathTrail;
@@ -3175,13 +3202,11 @@ export default class Gpt2Layer extends BaseLayer {
 
     _updateLn2AndMlpStartGates({
         allLn2Ready = false,
-        mhsaOutputComplete = false,
         allMlpReady = false
     } = {}) {
-        // LN-2 synchronisation check – only once all lanes have reached
-        // the staging height and MHSA output projection has returned
-        // do we allow any of them to continue into the branch.
-        if (!this._ln2Ready && allLn2Ready && mhsaOutputComplete) {
+        // LN-2 synchronisation check – advance as soon as every lane has
+        // completed post-attention addition and reached LN-2 staging height.
+        if (!this._ln2Ready && allLn2Ready) {
             this._ln2Ready = true;
             this._emitProgress();
             console.log(`Layer ${this.index}: All lanes ready – starting LN2 simultaneously`);
@@ -3321,11 +3346,18 @@ export default class Gpt2Layer extends BaseLayer {
         return returnTarget > 0 || returnCount > 0;
     }
 
-    _forceAdvanceStalledLane(lane, { ln2SyncY, allowOriginalFallback = false } = {}) {
+    _forceAdvanceStalledLane(lane, { ln2SyncY, allowOriginalFallback = false, postAttentionOnly = false } = {}) {
         if (!lane || lane.ln2Phase === LN2_PHASE.DONE) return false;
         const laneId = lane.laneIndex ?? '?';
 
-        if (lane.horizPhase === HORIZ_PHASE.WAITING && !this._ln1Start && lane.originalVec && lane.originalVec.group && Number.isFinite(lane.branchStartY)) {
+        if (
+            !postAttentionOnly
+            && lane.horizPhase === HORIZ_PHASE.WAITING
+            && !this._ln1Start
+            && lane.originalVec
+            && lane.originalVec.group
+            && Number.isFinite(lane.branchStartY)
+        ) {
             lane.originalVec.group.position.y = Math.max(lane.originalVec.group.position.y, lane.branchStartY);
             if (lane.dupVec && lane.dupVec.group) {
                 copyVectorAppearance(lane.dupVec, lane.originalVec);
@@ -3338,7 +3370,7 @@ export default class Gpt2Layer extends BaseLayer {
             return true;
         }
 
-        if (lane.horizPhase === HORIZ_PHASE.READY_MHSA && !this._mhsaStart) {
+        if (!postAttentionOnly && lane.horizPhase === HORIZ_PHASE.READY_MHSA && !this._mhsaStart) {
             this._setLaneHorizPhase(lane, HORIZ_PHASE.TRAVEL_MHSA, 'stall watchdog: mhsa barrier');
             lane.__mhsaTrailCornerPending = true;
             this._mhsaStart = true;

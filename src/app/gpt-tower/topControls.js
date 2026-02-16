@@ -37,7 +37,45 @@ export function initFollowModeControls({ pipeline, appState, followModeBtn, foll
     }
 
     if (pipeline?.engine?.controls?.addEventListener) {
-        pipeline.engine.controls.addEventListener('start', () => {
+        const controls = pipeline.engine.controls;
+        const camera = pipeline.engine.camera || null;
+        const FOLLOW_DISABLE_MOVE_EPSILON_SQ = 1e-4;
+        let activeControlInteraction = null;
+
+        controls.addEventListener('start', () => {
+            if (!pipeline?.isAutoCameraFollowEnabled?.()) {
+                activeControlInteraction = null;
+                return;
+            }
+            if (!camera || !controls?.target) {
+                activeControlInteraction = { moved: true };
+                return;
+            }
+            activeControlInteraction = {
+                moved: false,
+                cameraStart: camera.position.clone(),
+                targetStart: controls.target.clone()
+            };
+        });
+
+        controls.addEventListener('change', () => {
+            if (!activeControlInteraction || activeControlInteraction.moved) return;
+            if (!camera || !controls?.target) {
+                activeControlInteraction.moved = true;
+                return;
+            }
+            const cameraMoveSq = camera.position.distanceToSquared(activeControlInteraction.cameraStart);
+            const targetMoveSq = controls.target.distanceToSquared(activeControlInteraction.targetStart);
+            if (cameraMoveSq > FOLLOW_DISABLE_MOVE_EPSILON_SQ
+                || targetMoveSq > FOLLOW_DISABLE_MOVE_EPSILON_SQ) {
+                activeControlInteraction.moved = true;
+            }
+        });
+
+        controls.addEventListener('end', () => {
+            const interaction = activeControlInteraction;
+            activeControlInteraction = null;
+            if (!interaction?.moved) return;
             if (pipeline?.isAutoCameraFollowEnabled?.()) {
                 setFollowMode(false);
             }

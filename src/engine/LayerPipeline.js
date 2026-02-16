@@ -34,7 +34,17 @@ import { VectorVisualizationInstancedPrism } from '../components/VectorVisualiza
 import { BatchedPrismVectorSet } from '../components/BatchedPrismVectorSet.js';
 import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
 import { PrismLayerNormAnimation } from '../animations/PrismLayerNormAnimation.js';
-import { MHSA_BRIGHT_GREEN, MHSA_BRIGHT_RED } from '../animations/LayerAnimationConstants.js';
+import {
+    MHA_FINAL_K_COLOR,
+    MHA_VALUE_SPECTRUM_COLOR,
+    MHA_VALUE_HUE_SPREAD,
+    MHA_VALUE_LIGHTNESS_MIN,
+    MHA_VALUE_LIGHTNESS_MAX,
+    MHA_VALUE_RANGE_MIN,
+    MHA_VALUE_RANGE_MAX,
+    MHA_VALUE_CLAMP_MAX
+} from '../animations/LayerAnimationConstants.js';
+import { buildHueRangeOptions, mapValueToHueRange } from '../utils/colors.js';
 import { setGlobalTrailMaxStepDistance, clearTrailsFromScene, refreshTrailDisplayScales } from '../utils/trailUtils.js';
 import { applyLayerNormMaterial } from './layers/gpt2LayerUtils.js';
 import { scaleGlobalEmissiveIntensity } from '../utils/materialUtils.js';
@@ -1335,16 +1345,32 @@ export class LayerPipeline extends EventTarget {
             : Array.from({ length: totalLaneCount }, (_, idx) => idx);
         const touchedBatches = new Set();
         let seededAny = false;
-        const finalKColor = new THREE.Color(MHSA_BRIGHT_GREEN);
-        const finalVColor = new THREE.Color(MHSA_BRIGHT_RED);
+        const keyRangeOptions = buildHueRangeOptions(MHA_FINAL_K_COLOR, {
+            hueSpread: MHA_VALUE_HUE_SPREAD,
+            minLightness: MHA_VALUE_LIGHTNESS_MIN,
+            maxLightness: MHA_VALUE_LIGHTNESS_MAX,
+            valueMin: MHA_VALUE_RANGE_MIN,
+            valueMax: MHA_VALUE_RANGE_MAX,
+            valueClampMax: MHA_VALUE_CLAMP_MAX
+        });
+        const valueRangeOptions = buildHueRangeOptions(MHA_VALUE_SPECTRUM_COLOR, {
+            hueSpread: MHA_VALUE_HUE_SPREAD,
+            minLightness: MHA_VALUE_LIGHTNESS_MIN,
+            maxLightness: MHA_VALUE_LIGHTNESS_MAX,
+            valueMin: MHA_VALUE_RANGE_MIN,
+            valueMax: MHA_VALUE_RANGE_MAX,
+            valueClampMax: MHA_VALUE_CLAMP_MAX
+        });
 
-        const getScalarData = (layerIndex, kind, headIndex, tokenIndex, length) => {
+        const getScalarBootstrapData = (layerIndex, kind, headIndex, tokenIndex, length) => {
             const scalar = (source && typeof source.getLayerQKVScalar === 'function')
                 ? source.getLayerQKVScalar(layerIndex, kind, headIndex, tokenIndex)
                 : null;
-            const fill = Number.isFinite(scalar) ? scalar : 0;
             const outLength = Math.max(1, Math.floor(length || VECTOR_LENGTH_PRISM));
-            return new Array(outLength).fill(fill);
+            if (Number.isFinite(scalar)) {
+                return { scalar, data: [scalar] };
+            }
+            return { scalar: null, data: new Array(outLength).fill(0) };
         };
 
         const seedVector = ({
@@ -1354,33 +1380,41 @@ export class LayerPipeline extends EventTarget {
             laneEntry,
             position,
             data,
+            prismCount = null,
+            scalarValue = null,
             visibleOutputUnits = 64,
-            uniformColor = null
+            colorGenerationOptions = null
         }) => {
-            const prismCount = Math.max(1, Math.floor(data?.length || VECTOR_LENGTH_PRISM));
+            const resolvedPrismCount = Number.isFinite(prismCount)
+                ? Math.max(1, Math.floor(prismCount))
+                : Math.max(1, Math.floor(data?.length || VECTOR_LENGTH_PRISM));
             const store = this._getOrCreateKvBatchStore({
                 layerIndex,
                 headIndex,
                 category,
-                prismCount
+                prismCount: resolvedPrismCount
             });
             const slot = this._acquireKvBatchSlot(store);
             if (!slot || !slot.vec) return null;
 
-            const safeVisibleUnits = Math.max(1, Math.min(prismCount, Math.floor(visibleOutputUnits || 64)));
+            const safeVisibleUnits = Math.max(1, Math.min(resolvedPrismCount, Math.floor(visibleOutputUnits || 64)));
             if (typeof slot.vec.applyProcessedVisuals === 'function') {
+                const hasScalar = Number.isFinite(scalarValue);
+                const numKeyColors = hasScalar ? 1 : Math.min(30, Math.max(1, data?.length || 1));
                 slot.vec.applyProcessedVisuals(
                     data,
                     safeVisibleUnits,
-                    { numKeyColors: 1, generationOptions: null },
+                    { numKeyColors, generationOptions: colorGenerationOptions },
                     { setHiddenToBlack: false, hideByScaleOnly: true },
                     data
                 );
             } else {
                 slot.vec.updateDataInternal(data, { copyData: true });
             }
-            if (uniformColor && typeof slot.vec.setUniformColor === 'function') {
-                slot.vec.setUniformColor(uniformColor);
+            if (Number.isFinite(scalarValue)
+                && colorGenerationOptions
+                && typeof slot.vec.setUniformColor === 'function') {
+                slot.vec.setUniformColor(mapValueToHueRange(scalarValue, colorGenerationOptions));
             }
             slot.vec.group.position.copy(position);
             slot.vec.group.visible = true;
@@ -1441,29 +1475,45 @@ export class LayerPipeline extends EventTarget {
                         anchor: bootstrapAnchor
                     });
 
-                    const kData = getScalarData(layerIndex, 'k', headIndex, tokenIndex, bootstrapAnchor.prismCount);
+                    const kBootstrap = getScalarBootstrapData(
+                        layerIndex,
+                        'k',
+                        headIndex,
+                        tokenIndex,
+                        bootstrapAnchor.prismCount
+                    );
                     const kVec = seedVector({
                         layerIndex,
                         headIndex,
                         category: 'K',
                         laneEntry,
                         position: pose.keyPosition,
-                        data: kData,
+                        data: kBootstrap.data,
+                        prismCount: bootstrapAnchor.prismCount,
+                        scalarValue: kBootstrap.scalar,
                         visibleOutputUnits: bootstrapAnchor.outputUnits,
-                        uniformColor: finalKColor
+                        colorGenerationOptions: keyRangeOptions
                     });
                     if (kVec) laneEntry.upwardCopies[headIndex] = kVec;
 
-                    const vData = getScalarData(layerIndex, 'v', headIndex, tokenIndex, bootstrapAnchor.prismCount);
+                    const vBootstrap = getScalarBootstrapData(
+                        layerIndex,
+                        'v',
+                        headIndex,
+                        tokenIndex,
+                        bootstrapAnchor.prismCount
+                    );
                     const vVec = seedVector({
                         layerIndex,
                         headIndex,
                         category: 'V',
                         laneEntry,
                         position: pose.valuePosition,
-                        data: vData,
+                        data: vBootstrap.data,
+                        prismCount: bootstrapAnchor.prismCount,
+                        scalarValue: vBootstrap.scalar,
                         visibleOutputUnits: bootstrapAnchor.outputUnits,
-                        uniformColor: finalVColor
+                        colorGenerationOptions: valueRangeOptions
                     });
                     if (vVec) {
                         laneEntry.sideCopies.push({

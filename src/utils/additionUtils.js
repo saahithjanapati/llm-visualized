@@ -36,7 +36,7 @@ const COLOR_WHITE = new THREE.Color(0xffffff);
 const TMP_COLOR_A = new THREE.Color();
 const TMP_COLOR_B = new THREE.Color();
 const TMP_COLOR_C = new THREE.Color();
-const CAMERA_HOLD_AFTER_ADDITION_MS = 240;
+const CAMERA_HOLD_AFTER_ADDITION_MS = 0;
 
 function isArrayLike(value) {
     return Array.isArray(value) || ArrayBuffer.isView(value);
@@ -426,6 +426,8 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
     const delayBetween  = PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS/ PRISM_ADD_ANIM_SPEED_MULT;
 
     const basePrismCenterY = sourceVec.getUniformHeight() / 2;
+    let completedPrisms = 0;
+    let finishOnce = null;
 
     for (let i = 0; i < vectorLength; i++) {
         // Grab starting local Y offset of each instance
@@ -541,13 +543,17 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
                             applySingleColorAtIndexRGB(targetVec, i, gradR, gradG, gradB);
                         }
                         sourceVec.setInstanceAppearance(i, HIDE_INSTANCE_Y_OFFSET, null);
+                        completedPrisms += 1;
+                        if (completedPrisms >= vectorLength && typeof finishOnce === 'function') {
+                            finishOnce();
+                        }
                     })
                     .start();
             })
             .start();
     }
 
-    const totalAnimTime = duration + flashDuration + vectorLength * delayBetween;
+    const totalAnimTime = duration + flashDuration + Math.max(0, (vectorLength - 1) * delayBetween);
     const snapResidualTrailEndpoint = (trail, expectsWorldSpace, ownerVec) => {
         if (!trail || !ownerVec || !ownerVec.group) return;
         try {
@@ -647,17 +653,30 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
         invokeOnComplete();
     };
 
+    let additionFinalized = false;
+    finishOnce = () => {
+        if (additionFinalized) return;
+        additionFinalized = true;
+        finishAddition();
+    };
+
+    if (vectorLength <= 0) {
+        finishOnce();
+        return;
+    }
+
     setProgress(0);
     if (typeof TWEEN !== 'undefined') {
         new TWEEN.Tween({ progress: 0 })
-            .to({ progress: 1 }, totalAnimTime + 100)
+            .to({ progress: 1 }, totalAnimTime)
             .onUpdate(obj => {
+                if (additionFinalized) return;
                 setProgress(obj.progress);
             })
-            .onComplete(finishAddition)
+            .onComplete(finishOnce)
             .start();
     } else {
         setProgress(1);
-        setTimeout(finishAddition, totalAnimTime + 100);
+        setTimeout(finishOnce, totalAnimTime);
     }
 }
