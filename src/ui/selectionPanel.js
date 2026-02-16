@@ -4253,6 +4253,7 @@ class SelectionPanel {
         const tokenInfoPosition = this.tokenInfoPosition;
         const lower = String(label || '').toLowerCase();
         const activationStage = String(getActivationDataFromSelection(selection)?.stage || '').toLowerCase();
+        const isLogitSelection = !!resolveLogitSelectionHeader(label, selection);
         const isPositionEmbeddingSelection = lower.startsWith('position:')
             || lower.includes('position embedding')
             || lower.includes('positional embedding')
@@ -4280,6 +4281,48 @@ class SelectionPanel {
                 tokenInfoPosition.title = '';
             }
         };
+
+        if (isLogitSelection) {
+            const entry = resolveLogitSelectionEntry(selection);
+            const tokenText = resolveLogitPreviewTokenText(label, selection) || ATTENTION_VALUE_PLACEHOLDER;
+            const tokenId = resolveLogitSelectionTokenId(label, entry);
+            const probability = resolveLogitSelectionProbability(label, entry);
+            const tokenIdText = Number.isFinite(tokenId) ? String(Math.floor(tokenId)) : ATTENTION_VALUE_PLACEHOLDER;
+            const probabilityText = Number.isFinite(probability)
+                ? `${(probability * 100).toFixed(2).replace(/\.?0+$/, '')}%`
+                : ATTENTION_VALUE_PLACEHOLDER;
+
+            if (tokenInfoHeadPrimary) tokenInfoHeadPrimary.textContent = 'Token text';
+            if (tokenInfoHeadSecondary) tokenInfoHeadSecondary.textContent = 'Token ID';
+            if (tokenInfoHeadTertiary) tokenInfoHeadTertiary.textContent = 'Selected probability';
+            if (tokenInfoText) {
+                tokenInfoText.textContent = tokenText;
+                tokenInfoText.title = tokenText === ATTENTION_VALUE_PLACEHOLDER ? '' : tokenText;
+            }
+            if (tokenInfoId) {
+                tokenInfoId.textContent = tokenIdText;
+                tokenInfoId.title = tokenIdText === ATTENTION_VALUE_PLACEHOLDER ? '' : tokenIdText;
+            }
+            if (tokenInfoPosition) {
+                tokenInfoPosition.textContent = probabilityText;
+                tokenInfoPosition.title = probabilityText === ATTENTION_VALUE_PLACEHOLDER ? '' : probabilityText;
+            }
+            if (tokenInfoRow) {
+                tokenInfoRow.style.display = '';
+                tokenInfoRow.dataset.layout = 'token';
+                const isEmpty = tokenText === ATTENTION_VALUE_PLACEHOLDER
+                    && tokenIdText === ATTENTION_VALUE_PLACEHOLDER
+                    && probabilityText === ATTENTION_VALUE_PLACEHOLDER;
+                tokenInfoRow.dataset.empty = isEmpty ? 'true' : 'false';
+            }
+            return {
+                tokenText,
+                tokenDisplayText: tokenText,
+                tokenIdText: Number.isFinite(tokenId) ? tokenIdText : '',
+                positionText: '',
+                tokenEncodingNote: getIncompleteUtf8TokenNote(tokenId)
+            };
+        }
 
         const metadata = this._resolveVectorTokenPosition(selection, label);
         if (!metadata) {
@@ -4380,7 +4423,10 @@ class SelectionPanel {
         }
         if (this.params) this.params.textContent = metadata.params;
         const hideLayerNormFields = isLayerNormSolidSelection(label);
-        const hideTensorDimsField = hideLayerNormFields || isAttentionScoreSelection(label, selection);
+        const isLogitTokenSelection = !!logitHeader;
+        const hideTensorDimsField = hideLayerNormFields
+            || isAttentionScoreSelection(label, selection)
+            || isLogitTokenSelection;
         const isTokenChipSelection = lower.startsWith('token:') || lower.startsWith('position:');
         const isVectorMetadata = isLikelyVectorSelection(label, selection) || isTokenChipSelection;
         const dimsRow = this.inputDim?.closest('.detail-row')
