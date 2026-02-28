@@ -119,6 +119,10 @@ const POS_PASS_START_PAUSE_MS = 0;
 const LANE_PHASE_STALL_TIMEOUT_MS_SKIP = 3000;
 const LANE_PHASE_STALL_TIMEOUT_MS_NORMAL = 4500;
 const LN2_HANDOFF_STALL_TIMEOUT_MS_NORMAL = 4500;
+// Long hidden-tab / focus gaps advance performance.now() while updates are paused.
+// Reset watchdog baselines after such gaps to avoid false "stalled" recoveries
+// that can spawn fallback vectors/trails on top of active ones.
+const WATCHDOG_FRAME_GAP_RESET_MS = 900;
 const MLP_POST_PASS_THROUGH_FINAL_EMISSIVE = GPT2_LAYER_VISUAL_TUNING.mlp.postPassFinalEmissiveIntensity;
 const MLP_TRANSITION_PROFILE_DEFAULT = Object.freeze({
     expandRiseUnits: 30,
@@ -300,6 +304,7 @@ export default class Gpt2Layer extends BaseLayer {
         this._vecsToCheckScratch = new Array(9);
         this._lanePhaseDebugOverride = undefined;
         this._ln2HandoffStallSinceMs = NaN;
+        this._lastUpdateNowMs = NaN;
     }
 
     setProgressEmitter(emitter) { this._progressEmitter = emitter; }
@@ -751,6 +756,12 @@ export default class Gpt2Layer extends BaseLayer {
         const topY_ln2_abs    = ln2CenterY + LN_PARAMS.height / 2;
         const lanes = Array.isArray(this.lanes) ? this.lanes : [];
         const laneCount = lanes.length;
+        const lastUpdateNowMs = this._lastUpdateNowMs;
+        this._lastUpdateNowMs = nowMs;
+        if (Number.isFinite(lastUpdateNowMs) && Number.isFinite(nowMs) && (nowMs - lastUpdateNowMs) > WATCHDOG_FRAME_GAP_RESET_MS) {
+            this._ln2HandoffStallSinceMs = NaN;
+            this._resetLaneStallWatchdog(lanes);
+        }
         const exitTransitionRange = GPT2_LAYER_VISUAL_TUNING.layerNorm.exitTransitionRange; // world–unit distance for final fade
         const needsPositioningCheck = this._transitionPhase === 'positioning';
         let allVectorsInPosition = needsPositioningCheck && laneCount > 0;
