@@ -114,11 +114,15 @@ export class StraightLineTrail {
 
     start(pos) {
         if (this._vertexCount) return; // already started
-        // Duplicate first vertex so we have at least 2 for Line rendering
+        // Record the first vertex but delay exposing the segment until we have
+        // a second, distinct position.  Rendering the initial zero-length
+        // segment causes a small bright dot due to overlapping fragments, which
+        // made the first portion of newly spawned trails appear whiter than the
+        // rest.  By only drawing once real movement occurs, the brightness
+        // stays consistent across the whole trail.
         this._writeVertex(0, pos);
-        this._writeVertex(1, pos);
-        this._vertexCount = 2;
-        this._geometry.setDrawRange(0, this._vertexCount);
+        this._vertexCount = 1;
+        this._geometry.setDrawRange(0, 0);
         this._attr.needsUpdate = true;
         this._prevPos.copy(pos);
         this._currentDir = null;
@@ -173,7 +177,15 @@ export class StraightLineTrail {
         dir.multiplyScalar(1 / Math.sqrt(lenSq)); // normalise
 
         const DOT_THRESHOLD = 0.999; // ~2.5° angle tolerance
-        if (!this._currentDir) {
+        if (this._vertexCount === 1) {
+            // First movement after start – append the second vertex so the
+            // segment becomes visible without leaving a zero-length fragment at
+            // the origin.
+            this._writeVertex(1, pos);
+            this._vertexCount = 2;
+            this._geometry.setDrawRange(0, this._vertexCount);
+            this._currentDir = dir.clone();
+        } else if (!this._currentDir) {
             // first real move – simply update last vertex
             this._currentDir = new THREE.Vector3();
             this._currentDir.copy(dir);
