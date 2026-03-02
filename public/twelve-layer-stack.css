@@ -1957,18 +1957,18 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
 }
 @media (max-aspect-ratio: 1/1), (max-width: 880px) {
     body.detail-mobile-focus #topControls {
-        opacity: 1;
-        pointer-events: auto;
-        transform: none;
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(-14px);
     }
     body.detail-mobile-focus #hudStack {
-        top: 56px;
+        top: max(10px, env(safe-area-inset-top));
     }
     #hudStack {
-        left: auto;
-        right: var(--hud-stack-desktop-right);
-        width: min(480px, 92vw);
-        max-width: min(560px, 92vw);
+        left: 8px;
+        right: 8px;
+        width: auto;
+        max-width: calc(100vw - 16px);
         --hud-equations-panel-height: clamp(74px, 11vh, 90px);
         gap: 0;
     }
@@ -1980,38 +1980,41 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     #equationsPanel .eq-body { font-size: 12px; line-height: 1.28; }
     #detailPanel {
         display: flex;
-        position: relative;
-        top: auto;
-        bottom: auto;
-        left: auto;
-        right: auto;
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        right: 0;
         width: 100%;
-        height: auto;
-        max-height: 0;
-        padding-bottom: 0;
-        padding-left: 0;
-        padding-right: 0;
-        background: rgba(10,10,12,0.94);
-        border: 0 solid transparent;
-        border-radius: 16px;
+        height: 100dvh;
+        max-height: 100dvh;
+        padding-bottom: max(12px, env(safe-area-inset-bottom));
+        padding-left: env(safe-area-inset-left);
+        padding-right: env(safe-area-inset-right);
+        background: rgba(12,12,12,0.9);
+        border: 1px solid rgba(255,255,255,0.12);
+        border-left: none;
+        border-right: none;
+        border-bottom: none;
+        border-radius: 0;
         margin-top: 0;
         padding-top: 0;
-        box-shadow: none;
-        transform: translateY(-8px);
+        box-shadow: 0 10px 28px rgba(0,0,0,0.32);
+        transform: translateY(100%);
     }
     #detailPanel.is-open {
         transform: translateY(0);
-        height: auto;
-        max-height: 62vh;
+        height: 100dvh;
+        max-height: 100dvh;
         margin-top: 0;
         padding-top: 0;
-        padding-bottom: 12px;
+        padding-bottom: max(12px, env(safe-area-inset-bottom));
         border-top-left-radius: 0;
         border-top-right-radius: 0;
-        border-left: 1px solid rgba(255,255,255,0.12);
-        border-right: 1px solid rgba(255,255,255,0.12);
-        border-bottom: 1px solid rgba(255,255,255,0.12);
-        border-top: 0;
+        border-left: none;
+        border-right: none;
+        border-bottom: none;
+        border-top: 1px solid rgba(255,255,255,0.12);
     }
     #hudPanel.detail-open {
         border-bottom-left-radius: 16px;
