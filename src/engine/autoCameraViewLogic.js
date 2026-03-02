@@ -48,11 +48,16 @@ export function resolveAutoCameraViewState({
     const inResidualAdd = anyResidualAddActive || anyResidualAddReleaseHold;
     const holdViewDuringResidualAdd = !!(inResidualAdd
         && priorViewKey !== 'final'
-        && priorViewKey !== 'layer-end-desktop');
+        && priorViewKey !== 'layer-end-desktop'
+        // Once concat hands off to output projection/residual-add, allow
+        // follow mode to move to the default (MLP-style) framing.
+        && priorViewKey !== 'concat');
     const holdViewUntilLn2Inside = !!(holdViewBeforeLn2
         && priorViewKey !== 'ln'
         && priorViewKey !== 'final'
-        && priorViewKey !== 'layer-end-desktop');
+        && priorViewKey !== 'layer-end-desktop'
+        // Do not keep concat framing pinned while entering LN2/MLP.
+        && priorViewKey !== 'concat');
     const holdViewThroughLayerHandoff = !!(inLayerHandoff
         && priorViewKey !== 'layer-end-desktop'
         && priorViewKey !== 'final');
@@ -146,6 +151,9 @@ export function getAutoCameraViewSwitchHoldMs({
     if (fromKey === 'ln' && toKey === 'default') {
         holdMs = Math.max(holdMs, 72);
     }
+    if (fromKey === 'concat' && toKey === 'default') {
+        holdMs = Math.min(holdMs, 36);
+    }
     if (toKey === 'layer-end-desktop' || fromKey === 'layer-end-desktop') {
         holdMs = Math.max(holdMs, 130);
     }
@@ -199,4 +207,3 @@ export function resolveStableAutoCameraViewKey({
         pendingSinceMs: 0
     };
 }
-

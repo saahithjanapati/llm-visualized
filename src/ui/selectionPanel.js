@@ -2558,6 +2558,9 @@ class SelectionPanel {
         this.attentionLegendHigh = document.getElementById('detailAttentionLegendHigh');
         this.vectorLegend = document.getElementById('detailVectorLegend');
         this.vectorLegendBar = document.getElementById('detailVectorLegendBar');
+        this.vectorLegendTicks = this.vectorLegendBar
+            ? Array.from(this.vectorLegendBar.querySelectorAll('.vector-legend-tick'))
+            : [];
         this.vectorLegendLow = document.getElementById('detailVectorLegendLow');
         this.vectorLegendMid = document.getElementById('detailVectorLegendMid');
         this.vectorLegendHigh = document.getElementById('detailVectorLegendHigh');
@@ -3781,6 +3784,30 @@ class SelectionPanel {
         this._updateAttentionLegendTickLabels('pre');
     }
 
+    _updateVectorLegendTickLabels() {
+        if (!Array.isArray(this.vectorLegendTicks) || this.vectorLegendTicks.length === 0) return;
+        const edgeEpsilon = 1e-6;
+        for (let i = 0; i < this.vectorLegendTicks.length; i += 1) {
+            const tick = this.vectorLegendTicks[i];
+            if (!tick) continue;
+            const ratio = Number(tick.dataset.ratio);
+            if (!Number.isFinite(ratio)) {
+                tick.dataset.label = '';
+                continue;
+            }
+            if (ratio <= edgeEpsilon) {
+                tick.dataset.label = `≤ -${RESIDUAL_COLOR_CLAMP}`;
+                continue;
+            }
+            if (ratio >= (1 - edgeEpsilon)) {
+                tick.dataset.label = `≥ +${RESIDUAL_COLOR_CLAMP}`;
+                continue;
+            }
+            const value = THREE.MathUtils.lerp(-RESIDUAL_COLOR_CLAMP, RESIDUAL_COLOR_CLAMP, ratio);
+            tick.dataset.label = this._formatAttentionLegendTickLabel(value, { signed: true });
+        }
+    }
+
     _updateVectorLegend(selection) {
         if (!this.vectorLegend) return;
         const show = isResidualVectorSelection(selection?.label, selection)
@@ -3798,9 +3825,10 @@ class SelectionPanel {
         if (this.vectorLegendBar) {
             this.vectorLegendBar.style.setProperty('--vector-legend-gradient', gradient);
         }
-        if (this.vectorLegendLow) this.vectorLegendLow.textContent = `≤ -${RESIDUAL_COLOR_CLAMP}`;
-        if (this.vectorLegendMid) this.vectorLegendMid.textContent = '0';
-        if (this.vectorLegendHigh) this.vectorLegendHigh.textContent = `≥ +${RESIDUAL_COLOR_CLAMP}`;
+        this._updateVectorLegendTickLabels();
+        if (this.vectorLegendLow) this.vectorLegendLow.textContent = '';
+        if (this.vectorLegendMid) this.vectorLegendMid.textContent = '';
+        if (this.vectorLegendHigh) this.vectorLegendHigh.textContent = '';
         this.vectorLegend.classList.add('is-visible');
         this.vectorLegend.setAttribute('aria-hidden', 'false');
     }

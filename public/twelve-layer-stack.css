@@ -1314,6 +1314,7 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
 }
 .vector-legend-bar {
+    position: relative;
     height: 10px;
     border-radius: 999px;
     border: 1px solid rgba(255,255,255,0.18);
@@ -1322,8 +1323,41 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     background-origin: padding-box;
     box-shadow: inset 0 0 0 1px rgba(0,0,0,0.25);
 }
+.vector-legend-ticks {
+    position: absolute;
+    inset: -2px 0;
+    pointer-events: none;
+}
+.vector-legend-tick {
+    position: absolute;
+    left: var(--tick-pos, 50%);
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    transform: translateX(-0.5px);
+    background: rgba(255,255,255,0.28);
+}
+.vector-legend-tick--major {
+    width: 1.5px;
+    transform: translateX(-0.75px);
+    background: rgba(255,255,255,0.52);
+}
+.vector-legend-tick::after {
+    content: attr(data-label);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translate(-50%, -4px);
+    color: rgba(154,163,175,0.9);
+    font-size: 9px;
+    line-height: 1;
+    white-space: nowrap;
+}
+.vector-legend-tick--major::after {
+    color: rgba(196,203,214,0.96);
+}
 .vector-legend-labels {
-    display: flex;
+    display: none;
     align-items: center;
     justify-content: space-between;
     gap: 8px;

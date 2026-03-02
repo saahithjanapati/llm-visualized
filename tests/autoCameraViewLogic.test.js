@@ -79,6 +79,32 @@ describe('autoCameraViewLogic.resolveAutoCameraViewState', () => {
         });
         expect(result.rawKey).toBe('concat');
     });
+
+    it('uses default framing during output projection/residual add after concat', () => {
+        const pipeline = { isForwardPassComplete: () => false };
+        const result = resolveAutoCameraViewState({
+            pipeline,
+            priorViewKey: 'concat',
+            layers: [{
+                mhsaAnimation: {
+                    mhaPassThroughPhase: 'mha_pass_through_complete',
+                    rowMergePhase: 'merged',
+                    outputProjMatrixAnimationPhase: 'vectors_inside',
+                    outputProjMatrixReturnComplete: false
+                },
+                lanes: [{
+                    horizPhase: HORIZ_PHASE.POST_MHSA_ADDITION,
+                    ln2Phase: LN2_PHASE.PRE_RISE,
+                    stopRise: true,
+                    stopRiseTarget: {}
+                }]
+            }],
+            currentLayerIdx: 0
+        });
+        expect(result.rawKey).toBe('default');
+        expect(result.viewContext?.holdViewDuringResidualAdd).toBe(false);
+        expect(result.viewContext?.holdViewUntilLn2Inside).toBe(false);
+    });
 });
 
 describe('autoCameraViewLogic hold and stable key', () => {
@@ -118,5 +144,14 @@ describe('autoCameraViewLogic hold and stable key', () => {
         });
         expect(second.key).toBe('mhsa');
         expect(second.pendingSinceMs).toBe(0);
+    });
+
+    it('shortens hold when switching from concat to default', () => {
+        const hold = getAutoCameraViewSwitchHoldMs({
+            fromKey: 'concat',
+            toKey: 'default',
+            baseHoldMs: 90
+        });
+        expect(hold).toBe(36);
     });
 });

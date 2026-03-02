@@ -181,7 +181,13 @@ export class SelfAttentionAnimator {
     _ensureAttentionSphereMesh() {
         if (this._sphereMesh || !this.ctx || !this.ctx.parentGroup) return;
         const capacity = 512;
-        const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
+        const material = new THREE.MeshPhysicalMaterial({
+            color: 0xffffff,
+            roughness: 0.22,
+            metalness: 0.0,
+            clearcoat: 1.0,
+            clearcoatRoughness: 0.08,
+        });
         const mesh = new THREE.InstancedMesh(SHARED_SPHERE_GEOMETRY, material, capacity);
         mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
         mesh.userData._attentionSphereInstanced = true;

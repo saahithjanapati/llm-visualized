@@ -91,7 +91,15 @@
             </div>
             <div id="detailVectorLegend" class="vector-legend" aria-hidden="true">
                 <div class="vector-legend-title">Residual value colors</div>
-                <div id="detailVectorLegendBar" class="vector-legend-bar"></div>
+                <div id="detailVectorLegendBar" class="vector-legend-bar">
+                    <div class="vector-legend-ticks" aria-hidden="true">
+                        <span class="vector-legend-tick" data-ratio="0" style="--tick-pos:0%;"></span>
+                        <span class="vector-legend-tick" data-ratio="0.25" style="--tick-pos:25%;"></span>
+                        <span class="vector-legend-tick vector-legend-tick--major" data-ratio="0.5" style="--tick-pos:50%;"></span>
+                        <span class="vector-legend-tick" data-ratio="0.75" style="--tick-pos:75%;"></span>
+                        <span class="vector-legend-tick" data-ratio="1" style="--tick-pos:100%;"></span>
+                    </div>
+                </div>
                 <div class="vector-legend-labels">
                     <span id="detailVectorLegendLow">&lt;= -2</span>
                     <span id="detailVectorLegendMid">0</span>
