@@ -137,13 +137,15 @@ const MLP_TRANSITION_PROFILE_DEFAULT = Object.freeze({
     colorMinDurationMs: null
 });
 const MLP_TRANSITION_PROFILE_TOUCH = Object.freeze({
-    expandRiseUnits: 24,
-    expandRiseMs: 360,
-    geluDurationMs: 280,
-    geluRiseExtra: 18,
-    geluCurveHeight: 24,
-    geluActivationSwitchT: 0.3,
-    geluLiteMode: true,
+    // Keep touch/mobile behavior aligned with desktop so GELU curve bending
+    // remains visible instead of falling back to the lite vertical-lift path.
+    expandRiseUnits: 30,
+    expandRiseMs: 500,
+    geluDurationMs: 500,
+    geluRiseExtra: 24,
+    geluCurveHeight: 36,
+    geluActivationSwitchT: 0.35,
+    geluLiteMode: false,
     maxUpDurationMs: null,
     maxDownDurationMs: null,
     colorMinDurationMs: null

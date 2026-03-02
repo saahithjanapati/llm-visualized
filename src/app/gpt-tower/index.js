@@ -192,7 +192,8 @@ const selectionPanel = initSelectionPanel({
     laneTokenIndices: initialPassState.laneTokenIndices,
     tokenLabels: initialPassState.tokenLabels,
     engine: pipeline.engine,
-    pipeline
+    pipeline,
+    pauseMainFlowOnMobileFocus: true
 });
 const promptTokenStrip = initPromptTokenStrip({
     onTokenClick: (tokenEntry) => {
