@@ -5,9 +5,16 @@ import { initPerfOverlay } from './perfOverlay.js';
 import { initTouchClickFallback } from './touchClickFallback.js';
 
 const BRIGHTNESS_PREF_KEY = 'displayBrightnessScale';
+const PROMPT_TOKEN_STRIP_PREF_KEY = 'showPromptTokenStrip';
 const BRIGHTNESS_MIN = 0.5;
 const BRIGHTNESS_MAX = 1.8;
 const BRIGHTNESS_DEFAULT = 1.25;
+const SKINNY_MOBILE_MEDIA_QUERY = '(max-width: 520px)';
+
+function isSkinnyMobileScreen() {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
+    return window.matchMedia(SKINNY_MOBILE_MEDIA_QUERY).matches;
+}
 
 function clampBrightness(value) {
     const next = Number(value);
@@ -36,6 +43,7 @@ export function initSettingsModal(pipeline) {
     appState.showFollowViewInspector = false;
     appState.devMode = getPreference('devMode', false);
     appState.showPerfOverlay = getPreference('showPerfOverlay', false);
+    appState.showPromptTokenStrip = getPreference(PROMPT_TOKEN_STRIP_PREF_KEY, !isSkinnyMobileScreen());
     // Always start with KV cache mode disabled. This avoids sticky persisted
     // state unexpectedly enabling decode-mode behavior on page load.
     appState.kvCacheModeEnabled = false;
@@ -213,6 +221,8 @@ export function initSettingsModal(pipeline) {
         }
         const eq = document.getElementById('toggleEquations');
         if (eq) eq.checked = !!appState.showEquations;
+        const promptTokenStrip = document.getElementById('togglePromptTokenStrip');
+        if (promptTokenStrip) promptTokenStrip.checked = !!appState.showPromptTokenStrip;
         const bg = document.getElementById('toggleHdrBackground');
         if (bg) bg.checked = !!appState.showHdrBackground;
         const autoCam = document.getElementById('toggleAutoCamera');
@@ -289,6 +299,17 @@ export function initSettingsModal(pipeline) {
                 : 'none';
         }
         appState.lastEqKey = '';
+    });
+
+    const promptTokenStripToggle = document.getElementById('togglePromptTokenStrip');
+    promptTokenStripToggle?.addEventListener('change', () => {
+        appState.showPromptTokenStrip = !!promptTokenStripToggle.checked;
+        setPreference(PROMPT_TOKEN_STRIP_PREF_KEY, appState.showPromptTokenStrip);
+        if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+            window.dispatchEvent(new CustomEvent('promptTokenStripVisibilityChanged', {
+                detail: { enabled: appState.showPromptTokenStrip }
+            }));
+        }
     });
 
     const bgToggle = document.getElementById('toggleHdrBackground');

@@ -152,6 +152,7 @@ export function initGenerationController({
     cameraReturnPosition,
     cameraReturnTarget,
     selectionPanel,
+    promptTokenStrip,
     autoAdvanceSeconds = DEFAULT_ADVANCE_SECONDS
 } = {}) {
     if (!pipeline) return null;
@@ -369,6 +370,27 @@ export function initGenerationController({
         selectionPanel.close?.();
     };
 
+    const syncPromptTokenStrip = (passState, attentionState = null) => {
+        if (!promptTokenStrip || typeof promptTokenStrip.update !== 'function') return;
+        const sourceState = attentionState || passState;
+        const labels = Array.isArray(sourceState?.tokenLabels)
+            ? sourceState.tokenLabels.map((token) => formatTokenLabel(token))
+            : [];
+        const tokenIndices = Array.isArray(sourceState?.laneTokenIndices)
+            ? sourceState.laneTokenIndices.slice(0, labels.length)
+            : null;
+        const tokenIds = Array.isArray(tokenIndices) && activationSource && typeof activationSource.getTokenId === 'function'
+            ? tokenIndices.map((tokenIndex) => (
+                Number.isFinite(tokenIndex) ? activationSource.getTokenId(tokenIndex) : null
+            ))
+            : null;
+        promptTokenStrip.update({
+            tokenLabels: labels,
+            tokenIndices,
+            tokenIds
+        });
+    };
+
     const rebuildPass = ({ laneCount, passState, resetPipeline = false, fromCompletedPass = false } = {}) => {
         const nextLaneCount = Math.max(1, Math.floor(laneCount || 1));
         const passPlan = resolvePassPlan(nextLaneCount);
@@ -467,6 +489,7 @@ export function initGenerationController({
 
         applyPhysicalMaterialsToScene(pipeline?.engine?.scene, USE_PHYSICAL_MATERIALS);
         syncSelectionPanel(state, attentionState);
+        syncPromptTokenStrip(state, attentionState);
 
         currentLaneCount = nextLaneCount;
         passComplete = false;
@@ -555,6 +578,7 @@ export function initGenerationController({
                 if (chipCleanup?.dispose) chipCleanup.dispose();
                 if (rafId && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(rafId);
                 if (overlayTouchCleanup) overlayTouchCleanup();
+                promptTokenStrip?.dispose?.();
             }
         };
     }
@@ -705,6 +729,7 @@ export function initGenerationController({
             if (chipCleanup?.dispose) chipCleanup.dispose();
             if (rafId && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(rafId);
             if (overlayTouchCleanup) overlayTouchCleanup();
+            promptTokenStrip?.dispose?.();
         }
     };
 }

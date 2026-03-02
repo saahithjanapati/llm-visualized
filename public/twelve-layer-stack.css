@@ -416,6 +416,94 @@ body.touch-ui * {
     transform: none;
 }
 
+#promptTokenStrip {
+    position: fixed;
+    left: 50%;
+    bottom: max(10px, env(safe-area-inset-bottom));
+    transform: translateX(-50%);
+    z-index: 7;
+    width: min(1100px, 94vw);
+    padding: 8px 10px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.2);
+    background: rgba(0,0,0,0.92);
+    box-shadow: 0 10px 24px rgba(0,0,0,0.44);
+    pointer-events: auto;
+    color: #fff;
+}
+#promptTokenStrip[data-visible="false"] {
+    display: none;
+}
+#promptTokenStrip .prompt-token-strip__header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 6px;
+}
+#promptTokenStrip .prompt-token-strip__title {
+    font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.76);
+}
+#promptTokenStrip .prompt-token-strip__count {
+    font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 11px;
+    color: rgba(255,255,255,0.6);
+    white-space: nowrap;
+}
+#promptTokenStrip .prompt-token-strip__tokens {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    max-height: 100px;
+    overflow-y: auto;
+    padding-top: 2px;
+    padding-bottom: 1px;
+    padding-right: 2px;
+}
+#promptTokenStrip .prompt-token-strip__token {
+    --token-color-border: rgba(255,255,255,0.92);
+    --token-color-fill: rgba(255,255,255,0.2);
+    --token-color-fill-hover: rgba(255,255,255,0.28);
+    appearance: none;
+    -webkit-appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 22px;
+    padding: 2px 9px;
+    border-radius: 6px;
+    border: 1px solid var(--token-color-border);
+    background: var(--token-color-fill);
+    color: #fff;
+    font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 12px;
+    line-height: 1.1;
+    white-space: pre;
+    cursor: pointer;
+    user-select: none;
+    transition: transform 0.12s ease, filter 0.12s ease, background 0.12s ease;
+}
+#promptTokenStrip .prompt-token-strip__token:hover {
+    background: var(--token-color-fill-hover);
+    transform: translateY(-1px);
+}
+#promptTokenStrip .prompt-token-strip__token:active {
+    transform: translateY(0);
+    filter: brightness(0.95);
+}
+#promptTokenStrip .prompt-token-strip__token:focus-visible {
+    outline: 2px solid rgba(255,255,255,0.9);
+    outline-offset: 1px;
+}
+
+body[data-prompt-token-strip-visible="true"] #generationOverlay {
+    bottom: calc(max(18px, env(safe-area-inset-bottom)) + 116px);
+}
+
 @keyframes generationOverlayIn {
     from {
         opacity: 0;
@@ -493,6 +581,33 @@ body.touch-ui * {
         font-size: 13px;
         border-radius: 11px;
     }
+    #promptTokenStrip {
+        left: max(8px, env(safe-area-inset-left));
+        right: max(8px, env(safe-area-inset-right));
+        width: auto;
+        transform: none;
+        bottom: max(8px, calc(env(safe-area-inset-bottom) + 8px));
+        padding: 8px 8px;
+    }
+    #promptTokenStrip .prompt-token-strip__header {
+        margin-bottom: 5px;
+    }
+    #promptTokenStrip .prompt-token-strip__title,
+    #promptTokenStrip .prompt-token-strip__count {
+        font-size: 10px;
+    }
+    #promptTokenStrip .prompt-token-strip__tokens {
+        gap: 5px;
+        max-height: 86px;
+    }
+    #promptTokenStrip .prompt-token-strip__token {
+        min-height: 21px;
+        padding: 2px 7px;
+        font-size: 11px;
+    }
+    body[data-prompt-token-strip-visible="true"] #generationOverlay {
+        bottom: calc(max(8px, calc(env(safe-area-inset-bottom) + 8px)) + 104px);
+    }
 }
 
 @media (max-width: 420px) {
@@ -514,6 +629,22 @@ body.touch-ui * {
         min-height: 40px;
         padding: 9px 8px;
         font-size: 12px;
+    }
+    #promptTokenStrip {
+        left: max(6px, env(safe-area-inset-left));
+        right: max(6px, env(safe-area-inset-right));
+        bottom: max(6px, calc(env(safe-area-inset-bottom) + 6px));
+        padding: 7px 7px;
+    }
+    #promptTokenStrip .prompt-token-strip__tokens {
+        max-height: 78px;
+    }
+    #promptTokenStrip .prompt-token-strip__token {
+        min-height: 19px;
+        font-size: 10px;
+    }
+    body[data-prompt-token-strip-visible="true"] #generationOverlay {
+        bottom: calc(max(6px, calc(env(safe-area-inset-bottom) + 6px)) + 96px);
     }
 }
 

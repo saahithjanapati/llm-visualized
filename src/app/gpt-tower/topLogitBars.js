@@ -19,6 +19,7 @@ import {
 import { scaleGlobalEmissiveIntensity } from '../../utils/materialUtils.js';
 import { isIncompleteUtf8TokenId } from '../../utils/tokenEncodingNotes.js';
 import { formatTokenLabel } from './tokenLabels.js';
+import { getLogitTokenColorUnit, resolveLogitTokenSeed } from './logitColor.js';
 
 const LOGIT_LABEL_FONT_URL = 'https://threejs.org/examples/fonts/helvetiker_regular.typeface.json';
 const LOGIT_LABEL_TEXT_SIZE_MIN = 320;
@@ -261,41 +262,10 @@ function revealChosenLabelGroup(barGroup) {
     if (labelGroup) labelGroup.visible = true;
 }
 
-function hashStringToSeed(value) {
-    if (!value) return 0;
-    let hash = 0;
-    for (let i = 0; i < value.length; i += 1) {
-        hash = ((hash << 5) - hash + value.charCodeAt(i)) | 0;
-    }
-    return hash >>> 0;
-}
-
-function hashToUnit(seed) {
-    let x = seed >>> 0;
-    x ^= x >>> 16;
-    x = Math.imul(x, 0x7feb352d);
-    x ^= x >>> 15;
-    x = Math.imul(x, 0x846ca68b);
-    x ^= x >>> 16;
-    return (x >>> 0) / 4294967295;
-}
-
-function resolveTokenSeed(entry, fallbackIndex) {
-    if (entry && Number.isFinite(entry.token_id)) {
-        return Math.floor(entry.token_id) >>> 0;
-    }
-    if (entry && typeof entry.token === 'string') {
-        return hashStringToSeed(entry.token);
-    }
-    return (fallbackIndex ?? 0) >>> 0;
-}
-
 function getBrightTokenColor(seed, cache) {
     if (cache.has(seed)) return cache.get(seed);
-    const hue = hashToUnit(seed);
-    const saturation = 0.78 + 0.18 * hashToUnit(seed ^ 0x9e3779b9);
-    const lightness = 0.5 + 0.18 * hashToUnit(seed ^ 0x85ebca6b);
-    const color = new THREE.Color().setHSL(hue, saturation, lightness);
+    const { h, s, l } = getLogitTokenColorUnit(seed);
+    const color = new THREE.Color().setHSL(h, s, l);
     cache.set(seed, color);
     return color;
 }
@@ -416,7 +386,7 @@ export function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vo
             const prob = Number(entry?.prob);
             if (!Number.isFinite(prob)) continue;
             const height = computeLogitBarHeight(prob, globalMaxProb);
-            const seed = resolveTokenSeed(entry, i);
+            const seed = resolveLogitTokenSeed(entry, i);
             const barColor = getBrightTokenColor(seed, colorCache);
             const startHeight = Math.max(0.1, TOP_LOGIT_BAR_MIN_HEIGHT * 0.15);
             const xPos = baseX + i * barSpacing;

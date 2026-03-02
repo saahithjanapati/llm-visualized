@@ -12,6 +12,7 @@ export class AppState {
         this.equationsSuppressed = false;
         this.lastEqKey = '';
         this.showHdrBackground = false;
+        this.showPromptTokenStrip = true;
         this.autoCameraFollow = true;
         this.showCameraDebug = false;
         this.showFollowViewInspector = false;

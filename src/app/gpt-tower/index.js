@@ -22,9 +22,11 @@ import { initSkipNextPassButton } from '../../ui/skipNextPassButton.js';
 import { initSkipLastPassButton } from '../../ui/skipLastPassButton.js';
 import { initSkipMenu } from '../../ui/skipMenu.js';
 import { initSelectionPanel } from '../../ui/selectionPanel.js';
+import { initPromptTokenStrip } from '../../ui/promptTokenStrip.js';
 import { loadActivationState } from './activation.js';
 import { initFollowModeControls, initTopControlsAutohide } from './topControls.js';
 import { buildPassState, initGenerationController } from './generationController.js';
+import { formatTokenLabel } from './tokenLabels.js';
 import {
     NUM_LAYERS,
     PROMPT_TOKENS,
@@ -192,6 +194,24 @@ const selectionPanel = initSelectionPanel({
     engine: pipeline.engine,
     pipeline
 });
+const promptTokenStrip = initPromptTokenStrip({
+    onTokenClick: (tokenEntry) => {
+        const tokenLabel = typeof tokenEntry?.tokenLabel === 'string' ? tokenEntry.tokenLabel : '';
+        const displayToken = formatTokenLabel(tokenLabel);
+        const info = {
+            tokenLabel
+        };
+        if (Number.isFinite(tokenEntry?.laneIndex)) info.laneIndex = Math.floor(tokenEntry.laneIndex);
+        if (Number.isFinite(tokenEntry?.tokenIndex)) info.tokenIndex = Math.floor(tokenEntry.tokenIndex);
+        if (Number.isFinite(tokenEntry?.tokenId)) info.tokenId = Math.floor(tokenEntry.tokenId);
+        followModeControls?.suppressPendingFollowDisable?.();
+        selectionPanel.handleSelection({
+            label: `Token: ${displayToken}`,
+            info,
+            kind: 'label'
+        });
+    }
+});
 if (pipeline.engine && typeof pipeline.engine.setRaycastSelectionHandler === 'function') {
     pipeline.engine.setRaycastSelectionHandler(selection => {
         if (!selection || !selection.label) {
@@ -214,7 +234,8 @@ const generationController = initGenerationController({
     numLayers: NUM_LAYERS,
     cameraReturnPosition: camPos,
     cameraReturnTarget: camTarget,
-    selectionPanel
+    selectionPanel,
+    promptTokenStrip
 });
 
 initSkipNextPassButton({ pipeline, generationController });
