@@ -940,10 +940,16 @@ export default class Gpt2Layer extends BaseLayer {
                             }
                         }
                         if (lane.__posPassStarted) {
-                            if (!Number.isFinite(lane.__posAddWatchStart)) {
-                                lane.__posAddWatchStart = nowMs;
-                            }
-                            const elapsedMs = nowMs - lane.__posAddWatchStart;
+                            // Count only active update time so hidden-tab gaps
+                            // don't falsely trip the positional-add watchdog.
+                            const prevElapsedMs = Number.isFinite(lane.__posAddWatchElapsedMs)
+                                ? lane.__posAddWatchElapsedMs
+                                : 0;
+                            const stepMs = Number.isFinite(dt)
+                                ? Math.max(0, dt * 1000)
+                                : 0;
+                            const elapsedMs = prevElapsedMs + stepMs;
+                            lane.__posAddWatchElapsedMs = elapsedMs;
                             if (elapsedMs >= POS_ADD_STALL_TIMEOUT_MS) {
                                 const sumData = this._getEmbeddingData(lane, 'sum');
                                 if (sumData && lane.originalVec) {
@@ -960,10 +966,13 @@ export default class Gpt2Layer extends BaseLayer {
                                 posAddDone = false;
                             }
                         } else {
+                            if (Number.isFinite(lane.__posAddWatchElapsedMs)) {
+                                delete lane.__posAddWatchElapsedMs;
+                            }
                             posAddDone = false;
                         }
-                    } else if (lane.posAddComplete && Number.isFinite(lane.__posAddWatchStart)) {
-                        delete lane.__posAddWatchStart;
+                    } else if (lane.posAddComplete && Number.isFinite(lane.__posAddWatchElapsedMs)) {
+                        delete lane.__posAddWatchElapsedMs;
                     }
                 }
                 if (allLn1Ready) {
