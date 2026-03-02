@@ -27,6 +27,43 @@ import { scaleGlobalEmissiveIntensity } from '../utils/materialUtils.js';
 const __geometryCache = new Map();
 const __materialCache = new Map();
 const STRIP_END_CAPS = true;
+const LAYER_NORM_REFLECTIVITY_TWEAKS = Object.freeze({
+    envMapIntensityScale: 0.9,
+    metalnessScale: 0.88,
+    roughnessOffset: 0.05,
+    clearcoatScale: 0.9,
+    clearcoatRoughnessOffset: 0.05
+});
+
+function applyLayerNormReflectivityTweaks(material) {
+    const apply = (mat) => {
+        if (!mat) return;
+        if (typeof mat.envMapIntensity === 'number') {
+            mat.envMapIntensity = Math.max(0, mat.envMapIntensity * LAYER_NORM_REFLECTIVITY_TWEAKS.envMapIntensityScale);
+        }
+        if (typeof mat.metalness === 'number') {
+            mat.metalness = THREE.MathUtils.clamp(mat.metalness * LAYER_NORM_REFLECTIVITY_TWEAKS.metalnessScale, 0, 1);
+        }
+        if (typeof mat.roughness === 'number') {
+            mat.roughness = THREE.MathUtils.clamp(mat.roughness + LAYER_NORM_REFLECTIVITY_TWEAKS.roughnessOffset, 0, 1);
+        }
+        if (typeof mat.clearcoat === 'number') {
+            mat.clearcoat = THREE.MathUtils.clamp(mat.clearcoat * LAYER_NORM_REFLECTIVITY_TWEAKS.clearcoatScale, 0, 1);
+        }
+        if (typeof mat.clearcoatRoughness === 'number') {
+            mat.clearcoatRoughness = THREE.MathUtils.clamp(
+                mat.clearcoatRoughness + LAYER_NORM_REFLECTIVITY_TWEAKS.clearcoatRoughnessOffset,
+                0,
+                1
+            );
+        }
+    };
+    if (Array.isArray(material)) {
+        material.forEach(apply);
+    } else {
+        apply(material);
+    }
+}
 
 function getCacheKey(width, height, depth, wallThickness, numberOfHoles, holeWidth, holeWidthFactor, segments) {
     return [width, height, depth, wallThickness, numberOfHoles, holeWidth, holeWidthFactor, segments].join('|');
@@ -415,6 +452,7 @@ export class LayerNormalizationVisualization {
                 glintStrength: 0.0,
                 noiseStrength: 0.0
             });
+        applyLayerNormReflectivityTweaks(material);
 
         // After all geometry operations *and* potential caching we assign
         // material and add the mesh to the parent group.  When the geometry
@@ -518,6 +556,7 @@ export class LayerNormalizationVisualization {
                 glintStrength: 0.0,
                 noiseStrength: 0.0
             });
+        applyLayerNormReflectivityTweaks(mat);
 
         const sideWallGeometry = STRIP_END_CAPS ? sliceGeometry : stripCapsGeometry(sliceGeometry);
         const inst = new THREE.InstancedMesh(sideWallGeometry, mat, laneCount);

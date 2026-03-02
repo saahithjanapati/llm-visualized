@@ -707,7 +707,7 @@ export const CAPTION_TEXT_Y_POS = -2500;
 // ------------------------------------------------------------
 // Self-Attention above-matrix timings (centralised)
 // ------------------------------------------------------------
-export const SA_RED_EXTRA_RISE = 75;                 // Additional V-vector rise (world units)
+export const SA_RED_EXTRA_RISE = 50;                 // Additional V-vector rise above K vectors (world units)
 export const SA_V_RISE_DURATION_MS = 600;            // Duration for V extra rise
 export const SA_K_ALIGN_DURATION_MS = 1000;          // Duration to align K to V
 export const SA_BLUE_HORIZ_DURATION_MS = 400;        // Horizontal slide duration for Q

@@ -417,12 +417,15 @@ body.touch-ui * {
 }
 
 #promptTokenStrip {
+    --prompt-token-strip-max-width: min(1100px, 94vw);
     position: fixed;
     left: env(safe-area-inset-left);
+    right: auto;
     bottom: env(safe-area-inset-bottom);
     transform: none;
     z-index: 7;
-    width: min(1100px, 94vw);
+    width: fit-content;
+    max-width: var(--prompt-token-strip-max-width);
     padding: 8px 10px;
     border-radius: 12px;
     border: 1px solid rgba(255,255,255,0.2);
@@ -433,10 +436,14 @@ body.touch-ui * {
 }
 @media (min-width: 881px) and (min-aspect-ratio: 1/1) {
     #promptTokenStrip {
-        left: env(safe-area-inset-left);
-        right: calc(var(--hud-stack-desktop-right, env(safe-area-inset-right)) + var(--hud-stack-desktop-width, clamp(320px, 27vw, 560px)));
-        width: auto;
-        transform: none;
+        --prompt-token-strip-max-width: min(
+            1100px,
+            calc(
+                100vw
+                - env(safe-area-inset-left)
+                - (var(--hud-stack-desktop-right, env(safe-area-inset-right)) + var(--hud-stack-desktop-width, clamp(320px, 27vw, 560px)))
+            )
+        );
     }
 }
 #promptTokenStrip[data-visible="false"] {
@@ -466,6 +473,7 @@ body.touch-ui * {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
+    max-width: 100%;
     max-height: 100px;
     overflow-y: auto;
     padding-top: 2px;
@@ -591,9 +599,12 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     }
     #promptTokenStrip {
         left: max(8px, env(safe-area-inset-left));
-        right: max(8px, env(safe-area-inset-right));
-        width: auto;
-        transform: none;
+        right: auto;
+        --prompt-token-strip-max-width: calc(
+            100vw - max(8px, env(safe-area-inset-left)) - max(8px, env(safe-area-inset-right))
+        );
+        width: fit-content;
+        max-width: var(--prompt-token-strip-max-width);
         bottom: max(8px, calc(env(safe-area-inset-bottom) + 8px));
         padding: 8px 8px;
     }
@@ -640,7 +651,11 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     }
     #promptTokenStrip {
         left: max(6px, env(safe-area-inset-left));
-        right: max(6px, env(safe-area-inset-right));
+        right: auto;
+        --prompt-token-strip-max-width: calc(
+            100vw - max(6px, env(safe-area-inset-left)) - max(6px, env(safe-area-inset-right))
+        );
+        max-width: var(--prompt-token-strip-max-width);
         bottom: max(6px, calc(env(safe-area-inset-bottom) + 6px));
         padding: 7px 7px;
     }
@@ -1297,7 +1312,7 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
 
 .vector-legend {
     margin: 0 12px;
-    padding: 10px 12px;
+    padding: 10px 12px 18px;
     border-radius: 12px;
     border: 1px solid rgba(255,255,255,0.12);
     background: rgba(255,255,255,0.03);
@@ -1345,9 +1360,9 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
 .vector-legend-tick::after {
     content: attr(data-label);
     position: absolute;
-    bottom: 100%;
+    top: 100%;
     left: 50%;
-    transform: translate(-50%, -4px);
+    transform: translate(-50%, 4px);
     color: rgba(154,163,175,0.9);
     font-size: 9px;
     line-height: 1;

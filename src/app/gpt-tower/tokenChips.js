@@ -54,6 +54,59 @@ const LN_PARAM_MONOCHROME = {
     valueMax: 1.8
 };
 
+const EMBEDDING_REFLECTIVITY_TWEAKS = {
+    metalnessScale: 0.85,
+    roughnessOffset: 0.1,
+    clearcoatScale: 0.84,
+    clearcoatRoughnessOffset: 0.1,
+    iridescenceScale: 0.86,
+    envMapIntensityScale: 0.78
+};
+
+function applyEmbeddingReflectivityTweaks(matrix) {
+    if (!matrix) return;
+    const applyToMaterial = (mat) => {
+        if (!mat) return;
+        if (typeof mat.metalness === 'number') {
+            mat.metalness = THREE.MathUtils.clamp(mat.metalness * EMBEDDING_REFLECTIVITY_TWEAKS.metalnessScale, 0, 1);
+        }
+        if (typeof mat.roughness === 'number') {
+            mat.roughness = THREE.MathUtils.clamp(mat.roughness + EMBEDDING_REFLECTIVITY_TWEAKS.roughnessOffset, 0, 1);
+        }
+        if (typeof mat.clearcoat === 'number') {
+            mat.clearcoat = THREE.MathUtils.clamp(mat.clearcoat * EMBEDDING_REFLECTIVITY_TWEAKS.clearcoatScale, 0, 1);
+        }
+        if (typeof mat.clearcoatRoughness === 'number') {
+            mat.clearcoatRoughness = THREE.MathUtils.clamp(
+                mat.clearcoatRoughness + EMBEDDING_REFLECTIVITY_TWEAKS.clearcoatRoughnessOffset,
+                0,
+                1
+            );
+        }
+        if (typeof mat.iridescence === 'number') {
+            mat.iridescence = THREE.MathUtils.clamp(
+                mat.iridescence * EMBEDDING_REFLECTIVITY_TWEAKS.iridescenceScale,
+                0,
+                1
+            );
+        }
+        if (typeof mat.envMapIntensity === 'number') {
+            mat.envMapIntensity = Math.max(0, mat.envMapIntensity * EMBEDDING_REFLECTIVITY_TWEAKS.envMapIntensityScale);
+        }
+        mat.needsUpdate = true;
+    };
+    const apply = (material) => {
+        if (Array.isArray(material)) {
+            material.forEach((mat) => applyToMaterial(mat));
+            return;
+        }
+        applyToMaterial(material);
+    };
+    apply(matrix.mesh?.material);
+    apply(matrix.frontCapMesh?.material);
+    apply(matrix.backCapMesh?.material);
+}
+
 // Build a rounded rectangle shape used for the token chip body.
 function buildRoundedRectShape(width, height, radius) {
     const clampedRadius = Math.max(0, Math.min(radius, Math.min(width, height) / 2 - 1));
@@ -118,8 +171,8 @@ function createTokenChip(label, font, style) {
 
     const chipMat = new THREE.MeshStandardMaterial({
         color: 0xf2e8d5,
-        roughness: 0.62,
-        metalness: 0.04,
+        roughness: 0.68,
+        metalness: 0.03,
         side: THREE.DoubleSide
     });
     const chipMesh = new THREE.Mesh(chipGeo, chipMat);
@@ -380,6 +433,7 @@ export function addEmbeddingAndTokenChips({
             transparent: false,
             emissiveIntensity: TOP_EMBED_BASE_EMISSIVE + TOP_EMBED_MAX_EMISSIVE
         });
+        applyEmbeddingReflectivityTweaks(vocabBottom);
         addToRoot(vocabBottom.group);
 
         const gapX = EMBEDDING_BOTTOM_PAIR_GAP_X;
@@ -411,6 +465,7 @@ export function addEmbeddingAndTokenChips({
             transparent: false,
             emissiveIntensity: TOP_EMBED_BASE_EMISSIVE + TOP_EMBED_MAX_EMISSIVE
         });
+        applyEmbeddingReflectivityTweaks(posBottom);
         addToRoot(posBottom.group);
 
         // Precompute Z positions so chips can align to selected lane slots.
@@ -1058,6 +1113,7 @@ export function addEmbeddingAndTokenChips({
                 iridescence: 0.25,
                 envMapIntensity: 0.9
             });
+            applyEmbeddingReflectivityTweaks(vocabTop);
             appState.vocabTopRef = vocabTop;
             addToRoot(vocabTop.group);
             const vocabTopPos = new THREE.Vector3();

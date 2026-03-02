@@ -8,7 +8,7 @@ const BRIGHTNESS_PREF_KEY = 'displayBrightnessScale';
 const PROMPT_TOKEN_STRIP_PREF_KEY = 'showPromptTokenStrip';
 const BRIGHTNESS_MIN = 0.5;
 const BRIGHTNESS_MAX = 1.8;
-const BRIGHTNESS_DEFAULT = 1.25;
+const BRIGHTNESS_DEFAULT = 1.0;
 const SKINNY_MOBILE_MEDIA_QUERY = '(max-width: 520px)';
 
 function isSkinnyMobileScreen() {

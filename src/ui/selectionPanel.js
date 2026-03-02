@@ -1282,8 +1282,8 @@ function createTokenChipShared(labelText) {
 
     const chipMat = new THREE.MeshStandardMaterial({
         color: 0xf2e8d5,
-        roughness: 0.62,
-        metalness: 0.04,
+        roughness: 0.68,
+        metalness: 0.03,
         side: THREE.DoubleSide
     });
     const chipMesh = new THREE.Mesh(chipGeo, chipMat);
