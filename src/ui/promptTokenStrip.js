@@ -45,6 +45,15 @@ function setBodyVisibilityFlag(visible) {
     }
 }
 
+function isDetailPanelSuppressingStripOnMobile() {
+    if (typeof window === 'undefined' || typeof document === 'undefined' || !document.body) return false;
+    if (!document.body.classList.contains('detail-mobile-focus')) return false;
+    if (typeof window.matchMedia === 'function') {
+        return window.matchMedia('(max-aspect-ratio: 1/1), (max-width: 880px)').matches;
+    }
+    return window.innerWidth <= 880 || window.innerHeight <= window.innerWidth;
+}
+
 export function initPromptTokenStrip({ onTokenClick = null } = {}) {
     if (typeof document === 'undefined') {
         return {
@@ -57,9 +66,12 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
     let lastSignature = '';
     let tokenEntries = [];
     let stripEnabled = appState.showPromptTokenStrip !== false;
+    let bodyClassObserver = null;
 
     const updateVisibility = () => {
-        const shouldShow = stripEnabled && tokenEntries.length > 0;
+        const shouldShow = stripEnabled
+            && tokenEntries.length > 0
+            && !isDetailPanelSuppressingStripOnMobile();
         dom.root.dataset.visible = shouldShow ? 'true' : 'false';
         setBodyVisibilityFlag(shouldShow);
     };
@@ -93,6 +105,20 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
     dom.tokensEl.addEventListener('click', handleTokenClick);
     if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
         window.addEventListener('promptTokenStripVisibilityChanged', handleVisibilityChanged);
+    }
+    if (typeof MutationObserver !== 'undefined' && document.body) {
+        bodyClassObserver = new MutationObserver((mutationList) => {
+            const classChanged = mutationList.some((mutation) => (
+                mutation?.type === 'attributes' && mutation.attributeName === 'class'
+            ));
+            if (classChanged) {
+                updateVisibility();
+            }
+        });
+        bodyClassObserver.observe(document.body, {
+            attributes: true,
+            attributeFilter: ['class']
+        });
     }
 
     const render = ({ tokenLabels = [], tokenIndices = null, tokenIds = null } = {}) => {
@@ -170,6 +196,10 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
             dom.tokensEl.removeEventListener('click', handleTokenClick);
             if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
                 window.removeEventListener('promptTokenStripVisibilityChanged', handleVisibilityChanged);
+            }
+            if (bodyClassObserver) {
+                bodyClassObserver.disconnect();
+                bodyClassObserver = null;
             }
             if (dom.root && dom.root.parentElement) {
                 dom.root.parentElement.removeChild(dom.root);

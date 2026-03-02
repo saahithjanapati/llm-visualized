@@ -431,6 +431,14 @@ body.touch-ui * {
     pointer-events: auto;
     color: #fff;
 }
+@media (min-width: 881px) and (min-aspect-ratio: 1/1) {
+    #promptTokenStrip {
+        left: 10px;
+        right: calc(var(--hud-stack-desktop-right, 10px) + var(--hud-stack-desktop-width, clamp(320px, 27vw, 560px)));
+        width: auto;
+        transform: none;
+    }
+}
 #promptTokenStrip[data-visible="false"] {
     display: none;
 }
@@ -660,15 +668,20 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
 }
 
 /* Consolidated HUD stack */
+:root {
+    --hud-stack-desktop-right: 10px;
+    --hud-stack-desktop-width: clamp(320px, 27vw, 560px);
+}
+
 #hudStack {
     position: fixed;
     top: 56px;
-    right: 10px;
+    right: var(--hud-stack-desktop-right);
     z-index: 6;
     display: flex;
     flex-direction: column;
     gap: 0;
-    width: clamp(320px, 27vw, 560px);
+    width: var(--hud-stack-desktop-width);
     max-width: min(560px, 92vw);
     --hud-equations-panel-height: clamp(80px, calc(7.5vh + 22px), 132px);
     pointer-events: auto;
@@ -1500,12 +1513,10 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
 }
 .attention-legend {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    grid-template-areas:
-        "bar bar"
-        "low high";
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "bar";
     align-items: end;
-    gap: 8px;
+    gap: 0;
     margin-top: 10px;
     color: #9aa3af;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
@@ -1522,28 +1533,41 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     background-origin: padding-box;
     box-shadow: inset 0 0 0 1px rgba(0,0,0,0.25);
 }
-.attention-legend-bar::before {
-    content: '';
+.attention-legend-ticks {
     position: absolute;
-    left: 50%;
-    top: -2px;
-    bottom: -2px;
-    width: 1px;
-    background: rgba(255,255,255,0.45);
-    opacity: var(--attention-legend-mid-opacity, 1);
+    inset: -2px 0;
+    pointer-events: none;
 }
-.attention-legend-bar::after {
-    content: attr(data-mid);
+.attention-legend-tick {
     position: absolute;
-    top: 100%;
+    left: var(--tick-pos, 50%);
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    transform: translateX(-0.5px);
+    background: rgba(255,255,255,0.28);
+}
+.attention-legend-tick--major {
+    width: 1.5px;
+    transform: translateX(-0.75px);
+    background: rgba(255,255,255,0.52);
+}
+.attention-legend-tick::after {
+    content: attr(data-label);
+    position: absolute;
+    bottom: 100%;
     left: 50%;
-    transform: translate(-50%, 4px);
+    transform: translate(-50%, -4px);
     color: rgba(154,163,175,0.9);
     font-size: 9px;
-    opacity: var(--attention-legend-mid-opacity, 1);
+    line-height: 1;
+    white-space: nowrap;
+}
+.attention-legend-tick--major::after {
+    color: rgba(196,203,214,0.96);
 }
 .attention-legend-label {
-    min-width: 0;
+    display: none;
 }
 #detailAttentionLegendLow {
     grid-area: low;
@@ -1870,10 +1894,9 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     overflow-wrap: anywhere;
     line-height: 1.35;
 }
-.detail-row-bias .detail-value {
+.detail-row-params .detail-value {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
-
 .detail-data {
     margin: 2px 16px 0;
     padding: 12px;
@@ -1902,7 +1925,10 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
 
 /* Responsive adjustments */
 @media (max-width: 900px) {
-    #hudStack { width: min(480px, 92vw); gap: 0; }
+    :root {
+        --hud-stack-desktop-width: min(480px, 92vw);
+    }
+    #hudStack { width: var(--hud-stack-desktop-width); gap: 0; }
     #hudPanel { padding: 10px 12px 6px; gap: 8px 12px; }
 }
 @media (max-width: 600px) {

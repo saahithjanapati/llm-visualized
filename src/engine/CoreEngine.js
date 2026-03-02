@@ -60,6 +60,9 @@ export class CoreEngine {
             ? opts.cameraMaxDistance
             : null;
         this._cameraMaxDistance = this._cameraBaseMaxDistance;
+        this._mobileZoomOutMultiplier = (typeof opts.mobileZoomOutMultiplier === 'number' && opts.mobileZoomOutMultiplier > 1)
+            ? opts.mobileZoomOutMultiplier
+            : 1.0;
         this._desktopZoomOutMultiplier = (typeof opts.desktopZoomOutMultiplier === 'number' && opts.desktopZoomOutMultiplier > 1)
             ? opts.desktopZoomOutMultiplier
             : 1.45;
@@ -1168,7 +1171,9 @@ export class CoreEngine {
         }
 
         let maxDistance = baseMaxDistance;
-        if (this._isLargeDesktopViewport()) {
+        if (this._isTouchPrimaryDevice()) {
+            maxDistance = baseMaxDistance * this._mobileZoomOutMultiplier;
+        } else if (this._isLargeDesktopViewport()) {
             maxDistance = baseMaxDistance * this._desktopZoomOutMultiplier;
         }
 

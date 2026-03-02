@@ -63,8 +63,11 @@ const PREVIEW_TARGET_SIZE = 140;
 // Base framing for most objects; vector previews can request additional padding.
 const PREVIEW_FRAME_PADDING = 1.25;
 const PREVIEW_BASE_DISTANCE_MULT = 1.15;
+const PREVIEW_ROTATION_ENVELOPE_MARGIN = 1.06;
 const PREVIEW_VECTOR_PADDING_MULT = 2.4;
 const PREVIEW_VECTOR_DISTANCE_MULT = 1.9;
+const PREVIEW_MOBILE_MATRIX_PADDING_MULT = 1.2;
+const PREVIEW_MOBILE_MATRIX_DISTANCE_MULT = 1.22;
 const PREVIEW_ROTATION_SPEED = 0.0035;
 const PREVIEW_BASE_TILT_X = -0.12;
 const PREVIEW_BASE_ROTATION_Y = 0.38;
@@ -178,14 +181,16 @@ function buildMetadata(params = 'TBD', inputDim = null, outputDim = null, length
     const hasDims = Number.isFinite(inputDim) && Number.isFinite(outputDim);
     const hasLength = Number.isFinite(length);
     const hasBiasDim = Number.isFinite(biasDim);
+    const paramCount = hasDims ? formatNumber(inputDim * outputDim) : params;
     return {
-        params,
+        params: paramCount,
         dims: hasDims ? formatDims(inputDim, outputDim) : 'TBD',
         inputDim: hasDims ? formatNumber(inputDim) : 'TBD',
         outputDim: hasDims ? formatNumber(outputDim) : 'TBD',
         length: hasLength ? formatNumber(length) : 'TBD',
         biasDim: hasBiasDim ? formatNumber(biasDim) : '',
-        hasBiasDim
+        hasBiasDim,
+        hasDims
     };
 }
 
@@ -2478,11 +2483,17 @@ function fitObjectToView(object, camera, options = {}) {
     const halfY = scaledSize.y * 0.5;
     const halfZ = scaledSize.z * 0.5;
     const tilt = Math.abs(PREVIEW_BASE_TILT_X);
-    const verticalHalf = Math.abs(halfY * Math.cos(tilt)) + Math.abs(halfZ * Math.sin(tilt));
-    const horizontalHalf = Math.hypot(halfX, halfZ);
+    // Preview objects spin around Y, so use the radial XZ envelope to keep the
+    // full rotating silhouette inside frame on narrow preview canvases.
+    const radialHalf = Math.hypot(halfX, halfZ);
+    const verticalHalf = Math.abs(halfY * Math.cos(tilt)) + Math.abs(radialHalf * Math.sin(tilt));
+    const horizontalHalf = radialHalf;
     const distY = verticalHalf / Math.tan(vFov / 2);
     const distX = horizontalHalf / Math.tan(hFov / 2);
-    const distance = Math.max(distX, distY) * PREVIEW_BASE_DISTANCE_MULT * distanceMult;
+    const distance = Math.max(distX, distY)
+        * PREVIEW_ROTATION_ENVELOPE_MARGIN
+        * PREVIEW_BASE_DISTANCE_MULT
+        * distanceMult;
 
     camera.near = Math.max(0.1, distance / 50);
     camera.far = Math.max(distance * 20, distance + scaledMax * 4);
@@ -2499,6 +2510,7 @@ class SelectionPanel {
         this.title = document.getElementById('detailTitle');
         this.subtitle = document.getElementById('detailSubtitle');
         this.params = document.getElementById('detailParams');
+        this.paramsRow = document.getElementById('detailParamsRow');
         this.inputDim = document.getElementById('detailInputDim');
         this.inputDimLabel = document.getElementById('detailInputDimLabel');
         this.inputDimHalf = document.getElementById('detailInputDimHalf');
@@ -2539,6 +2551,9 @@ class SelectionPanel {
         this.attentionValueTarget = document.getElementById('detailAttentionValueTarget');
         this.attentionValueScore = document.getElementById('detailAttentionValueScore');
         this.attentionLegend = document.getElementById('detailAttentionLegend');
+        this.attentionLegendTicks = this.attentionLegend
+            ? Array.from(this.attentionLegend.querySelectorAll('.attention-legend-tick'))
+            : [];
         this.attentionLegendLow = document.getElementById('detailAttentionLegendLow');
         this.attentionLegendHigh = document.getElementById('detailAttentionLegendHigh');
         this.vectorLegend = document.getElementById('detailVectorLegend');
@@ -3699,6 +3714,44 @@ class SelectionPanel {
         }
     }
 
+    _formatAttentionLegendTickLabel(value, { signed = false } = {}) {
+        if (!Number.isFinite(value)) return '';
+        const safeValue = Math.abs(value) < 1e-6 ? 0 : value;
+        const isInteger = Math.abs(safeValue - Math.round(safeValue)) < 1e-6;
+        let text = isInteger
+            ? String(Math.round(safeValue))
+            : safeValue.toFixed(2).replace(/\.?0+$/, '');
+        if (signed && safeValue > 0) text = `+${text}`;
+        return text;
+    }
+
+    _updateAttentionLegendTickLabels(mode) {
+        if (!Array.isArray(this.attentionLegendTicks) || this.attentionLegendTicks.length === 0) return;
+        const safeMode = mode === 'post' ? 'post' : 'pre';
+        const edgeEpsilon = 1e-6;
+        for (let i = 0; i < this.attentionLegendTicks.length; i += 1) {
+            const tick = this.attentionLegendTicks[i];
+            if (!tick) continue;
+            const ratio = Number(tick.dataset.ratio);
+            if (!Number.isFinite(ratio)) {
+                tick.dataset.label = '';
+                continue;
+            }
+            if (safeMode === 'pre' && ratio <= edgeEpsilon) {
+                tick.dataset.label = `≤ -${ATTENTION_PRE_COLOR_CLAMP}`;
+                continue;
+            }
+            if (safeMode === 'pre' && ratio >= (1 - edgeEpsilon)) {
+                tick.dataset.label = `≥ +${ATTENTION_PRE_COLOR_CLAMP}`;
+                continue;
+            }
+            const value = safeMode === 'post'
+                ? ratio
+                : THREE.MathUtils.lerp(-ATTENTION_PRE_COLOR_CLAMP, ATTENTION_PRE_COLOR_CLAMP, ratio);
+            tick.dataset.label = this._formatAttentionLegendTickLabel(value, { signed: safeMode === 'pre' });
+        }
+    }
+
     _updateAttentionLegend(mode) {
         if (!this.attentionLegend || !this.attentionLegendLow || !this.attentionLegendHigh) return;
         const safeMode = mode === 'post' ? 'post' : 'pre';
@@ -3710,10 +3763,10 @@ class SelectionPanel {
             const low = colorToCss(mapValueToGrayscale(0));
             const high = colorToCss(mapValueToGrayscale(1));
             this.attentionLegend.style.setProperty('--attention-legend-gradient', `linear-gradient(90deg, ${low}, ${high})`);
-            this.attentionLegend.style.setProperty('--attention-legend-mid-opacity', '0');
             this.attentionLegend.dataset.mid = '';
-            this.attentionLegendLow.textContent = '0';
-            this.attentionLegendHigh.textContent = '1';
+            this.attentionLegendLow.textContent = '';
+            this.attentionLegendHigh.textContent = '';
+            this._updateAttentionLegendTickLabels('post');
             return;
         }
 
@@ -3722,10 +3775,10 @@ class SelectionPanel {
             steps: 15
         });
         this.attentionLegend.style.setProperty('--attention-legend-gradient', gradient);
-        this.attentionLegend.style.setProperty('--attention-legend-mid-opacity', '1');
-        this.attentionLegend.dataset.mid = '0';
-        this.attentionLegendLow.textContent = `≤ -${ATTENTION_PRE_COLOR_CLAMP}`;
-        this.attentionLegendHigh.textContent = `≥ +${ATTENTION_PRE_COLOR_CLAMP}`;
+        this.attentionLegend.dataset.mid = '';
+        this.attentionLegendLow.textContent = '';
+        this.attentionLegendHigh.textContent = '';
+        this._updateAttentionLegendTickLabels('pre');
     }
 
     _updateVectorLegend(selection) {
@@ -4421,7 +4474,6 @@ class SelectionPanel {
                 this.subtitle.textContent = subtitleText;
             }
         }
-        if (this.params) this.params.textContent = metadata.params;
         const hideLayerNormFields = isLayerNormSolidSelection(label);
         const isLogitTokenSelection = !!logitHeader;
         const hideTensorDimsField = hideLayerNormFields
@@ -4445,6 +4497,9 @@ class SelectionPanel {
         if (this.outputDimHalf) this.outputDimHalf.style.display = (!hideTensorDimsField && isVectorMetadata) ? 'none' : '';
         if (this.inputDimHalf) this.inputDimHalf.style.flexBasis = isVectorMetadata ? '100%' : '';
         if (dimsRow) dimsRow.style.display = hideTensorDimsField ? 'none' : '';
+        const showParamCount = !hideTensorDimsField && !isVectorMetadata && metadata.hasDims;
+        if (this.paramsRow) this.paramsRow.style.display = showParamCount ? '' : 'none';
+        if (this.params) this.params.textContent = showParamCount ? metadata.params : '';
         const showBiasDim = !hideTensorDimsField && !isVectorMetadata && metadata.hasBiasDim;
         if (this.biasDimRow) this.biasDimRow.style.display = showBiasDim ? '' : 'none';
         if (this.biasDim) this.biasDim.textContent = showBiasDim ? metadata.biasDim : '';
@@ -4520,16 +4575,21 @@ class SelectionPanel {
             }
             this._lastFrameTime = performance.now();
             const isVectorPreview = isLikelyVectorSelection(label, selection);
+            const isQkvMatrixPreview = isQkvMatrixLabel(label);
             const isOutputProjPreview = label.toLowerCase().includes('output projection matrix');
             const paddingMultiplier = isVectorPreview
                 ? PREVIEW_VECTOR_PADDING_MULT
-                : (isQkvMatrixLabel(label) ? 0.75 : (isOutputProjPreview ? 0.85 : 1));
+                : (isQkvMatrixPreview ? 0.75 : (isOutputProjPreview ? 0.85 : 1));
             const distanceMultiplier = isVectorPreview
                 ? PREVIEW_VECTOR_DISTANCE_MULT
-                : (isQkvMatrixLabel(label) ? 0.85 : (isOutputProjPreview ? 0.8 : 1));
+                : (isQkvMatrixPreview ? 0.85 : (isOutputProjPreview ? 0.8 : 1));
             const laneZoom = getLaneZoomMultiplier(this.currentPreview);
-            const finalPadding = paddingMultiplier * laneZoom;
-            const finalDistance = distanceMultiplier * laneZoom;
+            const isSmallScreen = this._isSmallScreen();
+            const isMatrixPreview = isWeightMatrixLabel(label) || isOutputProjPreview;
+            const matrixPaddingBoost = (isSmallScreen && isMatrixPreview) ? PREVIEW_MOBILE_MATRIX_PADDING_MULT : 1;
+            const matrixDistanceBoost = (isSmallScreen && isMatrixPreview) ? PREVIEW_MOBILE_MATRIX_DISTANCE_MULT : 1;
+            const finalPadding = paddingMultiplier * laneZoom * matrixPaddingBoost;
+            const finalDistance = distanceMultiplier * laneZoom * matrixDistanceBoost;
             this._rotationSpeedMult = 1;
             this._lastFitOptions = { paddingMultiplier: finalPadding, distanceMultiplier: finalDistance };
             if (!this.isOpen) {

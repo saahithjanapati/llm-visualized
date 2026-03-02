@@ -135,7 +135,15 @@
                 </div>
                 <div class="attention-legend" aria-hidden="true">
                     <span id="detailAttentionLegendLow" class="attention-legend-label">&lt;= -5</span>
-                    <div id="detailAttentionLegend" class="attention-legend-bar" data-mid="0"></div>
+                    <div id="detailAttentionLegend" class="attention-legend-bar" data-mid="0">
+                        <div class="attention-legend-ticks" aria-hidden="true">
+                            <span class="attention-legend-tick" data-ratio="0" style="--tick-pos:0%;"></span>
+                            <span class="attention-legend-tick" data-ratio="0.25" style="--tick-pos:25%;"></span>
+                            <span class="attention-legend-tick attention-legend-tick--major" data-ratio="0.5" style="--tick-pos:50%;"></span>
+                            <span class="attention-legend-tick" data-ratio="0.75" style="--tick-pos:75%;"></span>
+                            <span class="attention-legend-tick" data-ratio="1" style="--tick-pos:100%;"></span>
+                        </div>
+                    </div>
                     <span id="detailAttentionLegendHigh" class="attention-legend-label">&gt;= +5</span>
                 </div>
             </div>
@@ -149,10 +157,14 @@
                         <span id="detailOutputDimLabel" class="detail-label">Output dimension</span>
                         <span id="detailOutputDim" class="detail-value">—</span>
                     </div>
+                    <div id="detailBiasDimRow" class="detail-dim-half" style="display:none;">
+                        <span class="detail-label">Bias dimension</span>
+                        <span id="detailBiasDim" class="detail-value">—</span>
+                    </div>
                 </div>
-                <div id="detailBiasDimRow" class="detail-row detail-row-bias" style="display:none;">
-                    <span class="detail-label">Associated bias dimension</span>
-                    <span id="detailBiasDim" class="detail-value">—</span>
+                <div id="detailParamsRow" class="detail-row detail-row-params" style="display:none;">
+                    <span class="detail-label">Number of parameters</span>
+                    <span id="detailParams" class="detail-value">—</span>
                 </div>
                 <div id="detailTokenInfoRow" class="detail-token-info attention-value" style="display:none;" data-empty="true">
                     <div class="attention-value-head detail-token-info-head" aria-hidden="true">
@@ -216,6 +228,16 @@
                         <input id="toggleKvCacheMode" type="checkbox">
                         <span class="toggle-track" aria-hidden="true"></span>
                     </label>
+                    <label class="toggle-row">
+                        <span class="toggle-text">Show equations overlay</span>
+                        <input id="toggleEquations" type="checkbox" checked>
+                        <span class="toggle-track" aria-hidden="true"></span>
+                    </label>
+                    <label class="toggle-row">
+                        <span class="toggle-text">Show tokenized prompt strip</span>
+                        <input id="togglePromptTokenStrip" type="checkbox" checked>
+                        <span class="toggle-track" aria-hidden="true"></span>
+                    </label>
                     <div id="kvCacheStatusHint" class="settings-hint" hidden>Pre-fill stage. KV cache enabled.</div>
                 </div>
                 <div class="settings-section">
@@ -236,16 +258,6 @@
                             aria-label="Global brightness"
                         >
                     </div>
-                    <label class="toggle-row">
-                        <span class="toggle-text">Show equations overlay</span>
-                        <input id="toggleEquations" type="checkbox" checked>
-                        <span class="toggle-track" aria-hidden="true"></span>
-                    </label>
-                    <label class="toggle-row">
-                        <span class="toggle-text">Show tokenized prompt strip</span>
-                        <input id="togglePromptTokenStrip" type="checkbox" checked>
-                        <span class="toggle-track" aria-hidden="true"></span>
-                    </label>
                     <label class="toggle-row">
                         <span class="toggle-text">Show follow view inspector</span>
                         <input id="toggleFollowViewInspector" type="checkbox">
