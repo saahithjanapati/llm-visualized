@@ -15,6 +15,7 @@ export const TRAIL_MIN_SEGMENT_DISTANCE = 0.4;
 let TRAIL_OPACITY_RUNTIME_MULTIPLIER = 1.0;
 let TRAIL_LINE_WIDTH_RUNTIME_MULTIPLIER = 1.0;
 const TRAIL_LINE_WIDTH_DPR_EXPONENT = 0.65;
+const TRAIL_MIN_SCREEN_WIDTH_PX = 1.25;
 const TRAIL_OPACITY_DPR_DARKEN_START = 1.4;
 const TRAIL_OPACITY_DPR_DARKEN_EXPONENT = 0.5;
 const TRAIL_OPACITY_DPR_DARKEN_MIN = 0.72;
@@ -123,8 +124,8 @@ export function scaleLineWidthForDisplay(baseWidth) {
     // bright while still widening enough on lower-DPR displays to reduce shimmer.
     const dprWidthFactor = Math.pow(dpr, TRAIL_LINE_WIDTH_DPR_EXPONENT);
     const scaled = baseWidth * dprWidthFactor * TRAIL_LINE_WIDTH_RUNTIME_MULTIPLIER;
-    // Ensure at least 1 to avoid sub-pixel rounding artifacts
-    return Math.max(1, scaled);
+    // Keep trails above 1px for more stable line rasterization while orbiting.
+    return Math.max(TRAIL_MIN_SCREEN_WIDTH_PX, scaled);
 }
 
 /** Dims trails when there are more lanes than the baseline configuration. */

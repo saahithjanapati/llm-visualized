@@ -59,6 +59,7 @@ const _tmpWorld = new THREE.Vector3();
 const _tmpWorld2 = new THREE.Vector3();
 const _tmpMatrix = new THREE.Matrix4();
 const QKV_TRAIL_OPACITY = 0.08;
+const OUTPUT_PROJ_RETURN_TRAIL_OPACITY = 0.11;
 const QKV_FINAL_MATRIX_EMISSIVE_INTENSITY = GPT2_LAYER_VISUAL_TUNING.mhsa.qkvFinalMatrixEmissiveIntensity;
 const OUTPUT_PROJ_RETURN_WATCHDOG_MIN_MS = 5000;
 const OUTPUT_PROJ_RETURN_WATCHDOG_GRACE_MS = 2000;
@@ -1130,16 +1131,8 @@ export class MHSAAnimation {
             this._updatePassThroughJobs(timeNow);
         }
 
-        // ---- Update trails for combined vectors through Output Projection ----
-        if (this.outputProjMatrixVectors && this.outputProjMatrixVectors.length) {
-            const outputVectors = this.outputProjMatrixVectors;
-            for (let i = 0; i < outputVectors.length; i++) {
-                const v = outputVectors[i];
-                if (v && v.userData && v.userData.trail) {
-                    v.userData.trail.update(v.group.position);
-                }
-            }
-        }
+        // Output-projection trails are updated by their tween callbacks; avoid
+        // duplicate per-frame writes here to reduce shimmer/brightness artifacts.
 
         // ---------------- End VectorRouter section -------------------
         /* Legacy inline routing logic has been moved to VectorRouter.js
@@ -2682,9 +2675,20 @@ export class MHSAAnimation {
                                     try {
                                         vec.userData = vec.userData || {};
                                         if (!vec.userData.trail) {
-                                            const tr = new StraightLineTrail(this.parentGroup, undefined, undefined, undefined, undefined, TRAIL_MIN_SEGMENT_DISTANCE);
+                                            const tr = new StraightLineTrail(
+                                                this.parentGroup,
+                                                undefined,
+                                                undefined,
+                                                undefined,
+                                                OUTPUT_PROJ_RETURN_TRAIL_OPACITY,
+                                                TRAIL_MIN_SEGMENT_DISTANCE
+                                            );
                                             tr.start(vec.group.position.clone());
                                             vec.userData.trail = tr;
+                                        }
+                                        const outputTrail = vec.userData && vec.userData.trail;
+                                        if (outputTrail && typeof outputTrail.setBaseOpacity === 'function') {
+                                            outputTrail.setBaseOpacity(OUTPUT_PROJ_RETURN_TRAIL_OPACITY);
                                         }
                                     } catch (_) { /* optional visual */ }
                                 })
@@ -2748,8 +2752,8 @@ export class MHSAAnimation {
                                                             this.parentGroup,
                                                             undefined,
                                                             (typeof tr._lineWidth === 'number') ? tr._lineWidth : undefined,
-                                                            undefined,
-                                                            null
+                                                            (typeof tr._opacity === 'number') ? tr._opacity : undefined,
+                                                            { useWideLine: false }
                                                         );
                                                         if (vec && vec.userData) delete vec.userData.trail;
                                                     }

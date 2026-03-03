@@ -725,6 +725,8 @@ export class CoreEngine {
         if (this.composer && typeof this.composer.setPixelRatio === 'function') {
             this.composer.setPixelRatio(nextRatio);
         }
+        // Keep LineMaterial-based trails in sync with the active render size/DPR.
+        refreshTrailDisplayScales(this.scene);
     };
 
     _onVisibility = () => {

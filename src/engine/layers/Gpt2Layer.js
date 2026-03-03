@@ -124,6 +124,7 @@ const LN2_HANDOFF_STALL_TIMEOUT_MS_NORMAL = 4500;
 // that can spawn fallback vectors/trails on top of active ones.
 const WATCHDOG_FRAME_GAP_RESET_MS = 900;
 const MLP_POST_PASS_THROUGH_FINAL_EMISSIVE = GPT2_LAYER_VISUAL_TUNING.mlp.postPassFinalEmissiveIntensity;
+const POST_MLP_RETURN_TRAIL_OPACITY = 0.11;
 const MLP_TRANSITION_PROFILE_DEFAULT = Object.freeze({
     expandRiseUnits: 30,
     expandRiseMs: 500,
@@ -799,13 +800,13 @@ export default class Gpt2Layer extends BaseLayer {
                 for (let i = 0; i < vecsToCheck.length; i++) {
                     const v = vecsToCheck[i];
                     if (!v || !v.userData || !v.userData.trail) continue;
-                    // Positional pass-through trail is manually sampled in its tween
-                    // so skip the generic updater to avoid skip-time diagonal merges.
-                    if (v === lane.posVec && lane.__manualPosTrail) continue;
-                    // Let MHSA routing own the travel trail updates to preserve sharp corners.
-                    if (v === lane.travellingVec && (lane.horizPhase === HORIZ_PHASE.READY_MHSA || lane.horizPhase === HORIZ_PHASE.TRAVEL_MHSA)) {
-                        continue;
-                    }
+                    // Positional + MHSA travel paths have dedicated updaters, but we
+                    // still keep this generic fallback active so trails never stall
+                    // if those owners are delayed or skip quickly across frames.
+                    // MLP return vectors are always trail-driven by dedicated
+                    // tweens (down-projection/rise/return); skipping here avoids
+                    // double-writing the same trail in one frame.
+                    if (v === lane.finalVecAfterMlp && lane.mlpDownStarted) continue;
                     // Residual-stream world trails are owned by MHSAAnimation after
                     // the initial WAITING phase. Skipping here avoids duplicate
                     // writes that can make LN2 approach segments look brighter.
@@ -2781,10 +2782,21 @@ export default class Gpt2Layer extends BaseLayer {
                             delete vec.userData.trail;
                             delete vec.userData.trailWorld;
                         }
-                        const pathTrail = new StraightLineTrail(this.root, 0xffffff, 1, undefined, undefined, TRAIL_MIN_SEGMENT_DISTANCE);
+                        const pathTrail = new StraightLineTrail(
+                            this.root,
+                            0xffffff,
+                            1,
+                            undefined,
+                            POST_MLP_RETURN_TRAIL_OPACITY,
+                            TRAIL_MIN_SEGMENT_DISTANCE
+                        );
                         pathTrail.start(vec.group.position.clone());
                         vec.userData.mlpTrail = pathTrail;
                         delete vec.userData.mlpTrailWorld;
+                    }
+                    const mlpTrail = vec.userData && vec.userData.mlpTrail;
+                    if (mlpTrail && typeof mlpTrail.setBaseOpacity === 'function') {
+                        mlpTrail.setBaseOpacity(POST_MLP_RETURN_TRAIL_OPACITY);
                     }
                 } catch (_) { /* optional visual */ }
             })
@@ -2866,7 +2878,7 @@ export default class Gpt2Layer extends BaseLayer {
                             colorHex,
                             frozenLineWidth,
                             frozenOpacity,
-                            null
+                            { useWideLine: false }
                         );
                         if (typeof t.dispose === 'function') t.dispose();
                         if (vec && vec.userData) {
@@ -2895,7 +2907,7 @@ export default class Gpt2Layer extends BaseLayer {
                             colorHex,
                             frozenLineWidth,
                             frozenOpacity,
-                            null
+                            { useWideLine: false }
                         );
                         if (vec.userData) delete vec.userData.trail;
                     }
@@ -3948,7 +3960,7 @@ export default class Gpt2Layer extends BaseLayer {
                         group.color || undefined,
                         group.lineWidth != null ? group.lineWidth : undefined,
                         group.opacity != null ? group.opacity : undefined,
-                        null
+                        { useWideLine: false }
                     );
                 });
 
@@ -3979,7 +3991,7 @@ export default class Gpt2Layer extends BaseLayer {
                             group.color || undefined,
                             group.lineWidth != null ? group.lineWidth : undefined,
                             group.opacity != null ? group.opacity : undefined,
-                            null
+                            { useWideLine: false }
                         );
                     });
                 }

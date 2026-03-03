@@ -63,6 +63,17 @@ const EMBEDDING_REFLECTIVITY_TWEAKS = {
     envMapIntensityScale: 0.78
 };
 
+// Keep the early token/position embedding surfaces a bit less glowy than the rest of the run.
+const INITIAL_EMBEDDING_EMISSIVE_SCALE = 0.5;
+const INITIAL_EMBEDDING_REFLECTIVITY_PROPS = {
+    metalness: 0.18,
+    roughness: 0.64,
+    clearcoat: 0.2,
+    clearcoatRoughness: 0.68,
+    iridescence: 0.08,
+    envMapIntensity: 0.44
+};
+
 function applyEmbeddingReflectivityTweaks(matrix) {
     if (!matrix) return;
     const applyToMaterial = (mat) => {
@@ -433,7 +444,8 @@ export function addEmbeddingAndTokenChips({
         vocabBottom.setMaterialProperties({
             opacity: 1.0,
             transparent: false,
-            emissiveIntensity: TOP_EMBED_BASE_EMISSIVE + TOP_EMBED_MAX_EMISSIVE
+            emissiveIntensity: (TOP_EMBED_BASE_EMISSIVE + TOP_EMBED_MAX_EMISSIVE) * INITIAL_EMBEDDING_EMISSIVE_SCALE,
+            ...INITIAL_EMBEDDING_REFLECTIVITY_PROPS
         });
         applyEmbeddingReflectivityTweaks(vocabBottom);
         addToRoot(vocabBottom.group);
@@ -465,7 +477,8 @@ export function addEmbeddingAndTokenChips({
         posBottom.setMaterialProperties({
             opacity: 1.0,
             transparent: false,
-            emissiveIntensity: TOP_EMBED_BASE_EMISSIVE + TOP_EMBED_MAX_EMISSIVE
+            emissiveIntensity: (TOP_EMBED_BASE_EMISSIVE + TOP_EMBED_MAX_EMISSIVE) * INITIAL_EMBEDDING_EMISSIVE_SCALE,
+            ...INITIAL_EMBEDDING_REFLECTIVITY_PROPS
         });
         applyEmbeddingReflectivityTweaks(posBottom);
         addToRoot(posBottom.group);
