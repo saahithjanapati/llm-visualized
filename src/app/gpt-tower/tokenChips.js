@@ -74,6 +74,7 @@ const TOKEN_CHIP_ONLY_MATERIAL_TWEAKS = Object.freeze({
     emissive: 0x000000,
     emissiveIntensity: 0
 });
+const CHIP_INSIDE_RELEASE_BUFFER_MS = 80;
 
 function applyEmbeddingReflectivityTweaks(matrix) {
     if (!matrix) return;
@@ -433,6 +434,7 @@ export function addEmbeddingAndTokenChips({
     let topLogitProgressHandler = null;
     let chipRemovalProgressHandler = null;
     let chipEntryTimeoutId = null;
+    let positionChipStartIntervalId = null;
 
     const disposeObject = (obj) => {
         if (!obj) return;
@@ -625,21 +627,23 @@ export function addEmbeddingAndTokenChips({
 
         const vocabMatrixBottomY = bottomVocabCenterY - EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2;
         const posMatrixBottomY = bottomPosCenterY - EMBEDDING_MATRIX_PARAMS_POSITION.height / 2;
-        const bottomEmbeddingVectorStartY = bottomVocabCenterY + EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2;
         const vocabRiseDuration = TOKEN_CHIP_STYLE.riseDuration * (TOKEN_CHIP_STYLE.vocabSlowdown || 1);
         const posRiseDuration = TOKEN_CHIP_STYLE.riseDuration * (TOKEN_CHIP_STYLE.positionSlowdown || 1);
-        const vocabChipWaveMs = vocabRiseDuration + vocabLaneStaggerMs;
-        const positionStartDelayMs = vocabChipWaveMs + Math.max(
+        const positionStartDelayAfterVocabMs = Math.max(
             0,
             Number.isFinite(TOKEN_CHIP_STYLE.positionStartDelayAfterVocabMs)
                 ? TOKEN_CHIP_STYLE.positionStartDelayAfterVocabMs
                 : 0
         );
-        const positionChipWaveMs = positionStartDelayMs + posRiseDuration + laneSpanMs;
-        const maxChipRiseDuration = Math.max(vocabChipWaveMs, positionChipWaveMs);
+        const vocabChipWaveMs = vocabRiseDuration + vocabLaneStaggerMs;
+        const positionChipWaveEstimateMs = positionStartDelayAfterVocabMs + posRiseDuration + laneSpanMs;
+        const maxChipRiseDuration = Math.max(vocabChipWaveMs, vocabChipWaveMs + positionChipWaveEstimateMs);
+        const positionGatePendingFallbackMs = Math.max(12000, vocabChipWaveMs + positionChipWaveEstimateMs + 6000);
         const nowMs = (typeof performance !== 'undefined' && typeof performance.now === 'function')
             ? performance.now()
             : Date.now();
+        const vocabInsideByToken = Object.create(null);
+        const positionInsideByToken = Object.create(null);
         // Gate first-layer residual rise until vocab chips enter the bottom embedding.
         if (pipeline) {
             pipeline.__inputVocabChipGate = {
@@ -647,26 +651,44 @@ export function addEmbeddingAndTokenChips({
                 pending: true,
                 pendingFallbackAt: nowMs + Math.max(3000, vocabChipWaveMs + 2000),
                 releaseByToken: Object.create(null),
-                defaultReleaseAt: nowMs + Math.max(0, vocabRiseDuration)
+                startByToken: Object.create(null),
+                defaultStartAt: nowMs,
+                defaultReleaseAt: nowMs + Math.max(0, vocabRiseDuration + CHIP_INSIDE_RELEASE_BUFFER_MS),
+                insideByToken: vocabInsideByToken
             };
             // Gate deferred positional-vector launch until position chips enter.
             pipeline.__inputPositionChipGate = {
                 enabled: true,
                 pending: true,
-                pendingFallbackAt: nowMs + Math.max(3000, positionChipWaveMs + 2000),
+                pendingFallbackAt: nowMs + positionGatePendingFallbackMs,
                 releaseByToken: Object.create(null),
-                defaultReleaseAt: nowMs + Math.max(0, positionStartDelayMs + posRiseDuration)
+                startByToken: Object.create(null),
+                defaultStartAt: NaN,
+                defaultReleaseAt: NaN,
+                insideByToken: positionInsideByToken
             };
         }
         const chipStartZOffset = TOKEN_CHIP_STYLE.zOffset;
         const chipFontLoader = new FontLoader();
         const animatedEmbeddingChips = [];
+        const pendingPositionChipAnimations = [];
         let chipsEnteredEmbedding = false;
         let chipsRemovedFromEmbedding = false;
+        let positionChipWaveStarted = false;
+        let positionChipWaveCompleted = false;
+        let positionChipEntriesReady = false;
+        let positionChipWaveArmedAtMs = NaN;
+        let positionChipViewPrimed = false;
         const clearChipEntryTimeout = () => {
             if (chipEntryTimeoutId) {
                 clearTimeout(chipEntryTimeoutId);
                 chipEntryTimeoutId = null;
+            }
+        };
+        const clearPositionChipStartPoll = () => {
+            if (positionChipStartIntervalId) {
+                clearInterval(positionChipStartIntervalId);
+                positionChipStartIntervalId = null;
             }
         };
         const removeAnimatedEmbeddingChips = () => {
@@ -681,23 +703,194 @@ export function addEmbeddingAndTokenChips({
             });
             animatedEmbeddingChips.length = 0;
         };
-        const haveBottomVectorsRisenFromEmbedding = () => {
+        const haveBottomVectorsExitedVocabEmbedding = () => {
             const firstLayer = pipeline?._layers?.[0];
             const lanes = Array.isArray(firstLayer?.lanes) ? firstLayer.lanes : [];
             if (!lanes.length) return false;
-            return lanes.some((lane) => {
-                const y = lane?.originalVec?.group?.position?.y;
-                return Number.isFinite(y) && y > bottomEmbeddingVectorStartY + 0.25;
+            const trackedLanes = lanes.filter((lane) => (
+                lane
+                && lane.originalVec
+                && lane.originalVec.group
+                && Number.isFinite(lane.vocabEmbeddingExitY)
+            ));
+            if (!trackedLanes.length) return false;
+            return trackedLanes.every((lane) => {
+                const y = lane.originalVec.group.position.y;
+                return Number.isFinite(y) && y >= lane.vocabEmbeddingExitY - 0.01;
             });
         };
         const maybeRemoveEmbeddedChips = () => {
             if (disposed || chipsRemovedFromEmbedding || !chipsEnteredEmbedding) return;
-            if (!haveBottomVectorsRisenFromEmbedding()) return;
+            if (!positionChipWaveCompleted) return;
+            if (!haveBottomVectorsExitedVocabEmbedding()) return;
             removeAnimatedEmbeddingChips();
             if (chipRemovalProgressHandler && pipeline && typeof pipeline.removeEventListener === 'function') {
                 pipeline.removeEventListener('progress', chipRemovalProgressHandler);
                 chipRemovalProgressHandler = null;
             }
+        };
+        const primePositionChipView = (primeAtMs) => {
+            if (positionChipViewPrimed) return;
+            positionChipViewPrimed = true;
+            if (!pipeline) return;
+            const readyMs = Number.isFinite(primeAtMs)
+                ? primeAtMs
+                : ((typeof performance !== 'undefined' && typeof performance.now === 'function')
+                    ? performance.now()
+                    : Date.now());
+            const defaultReleaseAt = readyMs
+                + positionStartDelayAfterVocabMs
+                + posRiseDuration
+                + laneSpanMs
+                + CHIP_INSIDE_RELEASE_BUFFER_MS;
+            pipeline.__inputPositionChipGate = {
+                enabled: true,
+                pending: false,
+                pendingFallbackAt: readyMs,
+                releaseByToken: Object.create(null),
+                startByToken: Object.create(null),
+                defaultStartAt: readyMs,
+                defaultReleaseAt,
+                insideByToken: positionInsideByToken
+            };
+        };
+        const maybeStartPositionChipWave = ({ force = false } = {}) => {
+            if (disposed || positionChipWaveStarted) return;
+            if (!force && !positionChipEntriesReady) return;
+            const nowMsLocal = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+                ? performance.now()
+                : Date.now();
+            if (!force) {
+                if (!haveBottomVectorsExitedVocabEmbedding()) {
+                    positionChipWaveArmedAtMs = NaN;
+                    return;
+                }
+                if (!Number.isFinite(positionChipWaveArmedAtMs)) {
+                    positionChipWaveArmedAtMs = nowMsLocal;
+                    primePositionChipView(nowMsLocal);
+                }
+                const elapsedSinceArmMs = Math.max(0, nowMsLocal - positionChipWaveArmedAtMs);
+                if (elapsedSinceArmMs < positionStartDelayAfterVocabMs) return;
+                const followEnabled = (typeof pipeline?.isAutoCameraFollowEnabled === 'function')
+                    ? pipeline.isAutoCameraFollowEnabled()
+                    : false;
+                if (followEnabled && typeof pipeline?.getAutoCameraViewKey === 'function') {
+                    const activeViewKey = pipeline.getAutoCameraViewKey();
+                    if (activeViewKey !== 'embed-position') return;
+                }
+            } else {
+                primePositionChipView(nowMsLocal);
+            }
+
+            positionChipWaveStarted = true;
+            clearPositionChipStartPoll();
+            const usesTween = typeof TWEEN !== 'undefined';
+            const positionWaveStartMs = nowMsLocal;
+            const releaseByToken = Object.create(null);
+            const startByToken = Object.create(null);
+            let maxReleaseAt = positionWaveStartMs;
+            let remainingAnimated = pendingPositionChipAnimations.length;
+            if (remainingAnimated <= 0) {
+                positionChipWaveCompleted = true;
+            }
+
+            const markAnimatedComplete = () => {
+                if (remainingAnimated <= 0) return;
+                remainingAnimated -= 1;
+                if (remainingAnimated <= 0) {
+                    positionChipWaveCompleted = true;
+                    maybeRemoveEmbeddedChips();
+                }
+            };
+
+            pendingPositionChipAnimations.forEach((entry) => {
+                if (!entry || !entry.chip) return;
+                const laneDelayMs = usesTween
+                    ? Math.max(0, (entry.laneDelayRank || 0) * TOKEN_CHIP_STYLE.riseDelay)
+                    : 0;
+                const tokenKey = entry.tokenKey;
+                if (tokenKey !== null) {
+                    const tokenStartAt = positionWaveStartMs + laneDelayMs;
+                    const tokenReleaseAt = tokenStartAt + (usesTween
+                        ? posRiseDuration + CHIP_INSIDE_RELEASE_BUFFER_MS
+                        : 0);
+                    if (!Number.isFinite(startByToken[tokenKey])) {
+                        startByToken[tokenKey] = tokenStartAt;
+                    } else {
+                        startByToken[tokenKey] = Math.min(startByToken[tokenKey], tokenStartAt);
+                    }
+                    if (!Number.isFinite(releaseByToken[tokenKey])) {
+                        releaseByToken[tokenKey] = tokenReleaseAt;
+                    } else {
+                        releaseByToken[tokenKey] = Math.min(releaseByToken[tokenKey], tokenReleaseAt);
+                    }
+                    maxReleaseAt = Math.max(maxReleaseAt, tokenReleaseAt);
+                }
+
+                if (usesTween) {
+                    const riseTween = new TWEEN.Tween(entry.chip.position)
+                        .to({ y: entry.targetY, z: entry.targetZ }, posRiseDuration)
+                        .delay(laneDelayMs)
+                        .easing(TWEEN.Easing.Quadratic.Out);
+                    riseTween.onStart(() => {
+                        entry.chip.visible = true;
+                        if (entry.connector) {
+                            entry.connector.visible = true;
+                            updateConnectorEndY(entry.connector, entry.chip.position.y);
+                        }
+                    });
+                    riseTween.onUpdate(() => {
+                        if (entry.connector) {
+                            updateConnectorEndY(entry.connector, entry.chip.position.y);
+                        }
+                    });
+                    riseTween.onComplete(() => {
+                        if (entry.connector) {
+                            updateConnectorEndY(entry.connector, entry.targetY);
+                        }
+                        if (tokenKey !== null) positionInsideByToken[tokenKey] = true;
+                        markAnimatedComplete();
+                    });
+                    riseTween.start();
+                } else {
+                    entry.chip.visible = true;
+                    entry.chip.position.y = entry.targetY;
+                    entry.chip.position.z = entry.targetZ;
+                    if (entry.connector) {
+                        updateConnectorEndY(entry.connector, entry.targetY);
+                        entry.connector.visible = true;
+                    }
+                    if (tokenKey !== null) positionInsideByToken[tokenKey] = true;
+                    markAnimatedComplete();
+                }
+            });
+
+            if (pipeline) {
+                pipeline.__inputPositionChipGate = {
+                    enabled: true,
+                    pending: false,
+                    pendingFallbackAt: positionWaveStartMs,
+                    releaseByToken,
+                    startByToken,
+                    defaultStartAt: positionWaveStartMs,
+                    defaultReleaseAt: maxReleaseAt,
+                    insideByToken: positionInsideByToken
+                };
+            }
+            maybeRemoveEmbeddedChips();
+        };
+        const armPositionChipStartPoll = () => {
+            if (disposed || positionChipWaveStarted || positionChipStartIntervalId) return;
+            positionChipStartIntervalId = setInterval(() => {
+                if (disposed || positionChipWaveStarted) {
+                    clearPositionChipStartPoll();
+                    return;
+                }
+                maybeStartPositionChipWave();
+                if (positionChipWaveStarted) {
+                    clearPositionChipStartPoll();
+                }
+            }, 16);
         };
         const armEmbeddedChipRemoval = () => {
             clearChipEntryTimeout();
@@ -716,6 +909,7 @@ export function addEmbeddingAndTokenChips({
         };
         if (pipeline && typeof pipeline.addEventListener === 'function') {
             chipRemovalProgressHandler = () => {
+                maybeStartPositionChipWave();
                 maybeRemoveEmbeddedChips();
             };
             pipeline.addEventListener('progress', chipRemovalProgressHandler);
@@ -758,9 +952,13 @@ export function addEmbeddingAndTokenChips({
                 ? performance.now()
                 : Date.now();
             const releaseByToken = Object.create(null);
+            const startByToken = Object.create(null);
             const tokenReleaseDefaultMs = tokenWaveStartMs + (usesTween ? Math.max(0, vocabRiseDuration) : 0);
             // Animate the token chips upward from a resting "stash" position.
-            if (!preserveCameraPose && animateLaneOrder.length) {
+            const followEnabled = (typeof pipeline?.isAutoCameraFollowEnabled === 'function')
+                ? pipeline.isAutoCameraFollowEnabled()
+                : false;
+            if (!preserveCameraPose && !followEnabled && animateLaneOrder.length) {
                 const cameraStartPos = new THREE.Vector3(
                     vocabX + EMBEDDING_MATRIX_PARAMS_VOCAB.width * 0.4,
                     bottomVocabCenterY - EMBEDDING_MATRIX_PARAMS_VOCAB.height * 0.8,
@@ -792,10 +990,19 @@ export function addEmbeddingAndTokenChips({
                 const hasAnimatedChip = animateLaneSet.has(idx);
                 let connector = null;
                 if (hasAnimatedChip && Number.isFinite(tokenIndex)) {
+                    const tokenStartAt = tokenWaveStartMs;
                     const tokenReleaseAt = tokenWaveStartMs + (usesTween
-                        ? vocabRiseDuration
+                        ? vocabRiseDuration + CHIP_INSIDE_RELEASE_BUFFER_MS
                         : 0);
                     const tokenKey = String(Math.max(0, Math.floor(tokenIndex)));
+                    if (!Object.prototype.hasOwnProperty.call(vocabInsideByToken, tokenKey)) {
+                        vocabInsideByToken[tokenKey] = false;
+                    }
+                    if (!Number.isFinite(startByToken[tokenKey])) {
+                        startByToken[tokenKey] = tokenStartAt;
+                    } else {
+                        startByToken[tokenKey] = Math.min(startByToken[tokenKey], tokenStartAt);
+                    }
                     if (!Number.isFinite(releaseByToken[tokenKey])) {
                         releaseByToken[tokenKey] = tokenReleaseAt;
                     } else {
@@ -812,7 +1019,15 @@ export function addEmbeddingAndTokenChips({
                 const startZ = targetZ + chipStartZOffset;
                 const staticY = vocabMatrixBottomY - chipHeight / 2 - TOKEN_CHIP_STYLE.staticGap;
                 const staticZ = targetZ + TOKEN_CHIP_STYLE.staticZOffset;
-                const startY = staticY;
+                const startY = staticY - Math.max(
+                    0,
+                    Number.isFinite(TOKEN_CHIP_STYLE.entryStartYOffset)
+                        ? TOKEN_CHIP_STYLE.entryStartYOffset
+                        : 0
+                );
+                const tokenKey = Number.isFinite(tokenIndex)
+                    ? String(Math.max(0, Math.floor(tokenIndex)))
+                    : null;
                 applyChipSelectionMetadata(staticChip, {
                     chipLabel,
                     laneIndex: idx,
@@ -867,12 +1082,18 @@ export function addEmbeddingAndTokenChips({
                         });
                         riseTween.onComplete(() => {
                             updateConnectorEndY(connector, targetY);
+                            if (tokenKey !== null) vocabInsideByToken[tokenKey] = true;
+                        });
+                    } else {
+                        riseTween.onComplete(() => {
+                            if (tokenKey !== null) vocabInsideByToken[tokenKey] = true;
                         });
                     }
                     riseTween.start();
                 } else {
                     chip.position.y = targetY;
                     chip.position.z = targetZ;
+                    if (tokenKey !== null) vocabInsideByToken[tokenKey] = true;
                     if (connector) {
                         updateConnectorEndY(connector, targetY);
                         connector.visible = true;
@@ -885,21 +1106,16 @@ export function addEmbeddingAndTokenChips({
                     pending: false,
                     pendingFallbackAt: tokenWaveStartMs,
                     releaseByToken,
-                    defaultReleaseAt: tokenReleaseDefaultMs
+                    startByToken,
+                    defaultStartAt: tokenWaveStartMs,
+                    defaultReleaseAt: tokenReleaseDefaultMs + CHIP_INSIDE_RELEASE_BUFFER_MS,
+                    insideByToken: vocabInsideByToken
                 };
             }
         };
         const spawnPositionChips = (font) => {
             if (disposed) return;
             const style = POSITION_CHIP_STYLE;
-            const usesTween = typeof TWEEN !== 'undefined';
-            const positionWaveStartMs = (typeof performance !== 'undefined' && typeof performance.now === 'function')
-                ? performance.now()
-                : Date.now();
-            const releaseByToken = Object.create(null);
-            const positionReleaseDefaultMs = positionWaveStartMs + (usesTween
-                ? Math.max(0, positionStartDelayMs + posRiseDuration)
-                : 0);
             const labels = chipPositionLabelList.slice(0, safeChipLaneCount).map((value) => String(value ?? ''));
             labels.forEach((label, idx) => {
                 const tokenIndex = resolveTokenIndexForLane(idx, chipTokenIndexList);
@@ -909,17 +1125,6 @@ export function addEmbeddingAndTokenChips({
                 const hasAnimatedChip = animateLaneSet.has(idx);
                 const laneDelayRank = animateDelayRankByLane.get(idx) || 0;
                 let connector = null;
-                if (hasAnimatedChip && Number.isFinite(tokenIndex)) {
-                    const tokenReleaseAt = positionWaveStartMs + (usesTween
-                        ? positionStartDelayMs + (laneDelayRank * TOKEN_CHIP_STYLE.riseDelay) + posRiseDuration
-                        : 0);
-                    const tokenKey = String(Math.max(0, Math.floor(tokenIndex)));
-                    if (!Number.isFinite(releaseByToken[tokenKey])) {
-                        releaseByToken[tokenKey] = tokenReleaseAt;
-                    } else {
-                        releaseByToken[tokenKey] = Math.min(releaseByToken[tokenKey], tokenReleaseAt);
-                    }
-                }
                 const staticChip = createTokenChip(label, font, style);
                 const chipHeight = staticChip.userData.size.height;
                 const targetY = posMatrixBottomY + chipHeight / 2 + style.inset;
@@ -928,7 +1133,15 @@ export function addEmbeddingAndTokenChips({
 
                 const staticY = posMatrixBottomY - chipHeight / 2 - style.staticGap;
                 const staticZ = targetZ + style.staticZOffset;
-                const startY = staticY;
+                const startY = staticY - Math.max(
+                    0,
+                    Number.isFinite(style.entryStartYOffset)
+                        ? style.entryStartYOffset
+                        : 0
+                );
+                const tokenKey = Number.isFinite(tokenIndex)
+                    ? String(Math.max(0, Math.floor(tokenIndex)))
+                    : null;
 
                 // Static chip for the position stream, matching the token chips below.
                 applyChipSelectionMetadata(staticChip, {
@@ -956,6 +1169,10 @@ export function addEmbeddingAndTokenChips({
                     return;
                 }
 
+                if (tokenKey !== null && !Object.prototype.hasOwnProperty.call(positionInsideByToken, tokenKey)) {
+                    positionInsideByToken[tokenKey] = false;
+                }
+
                 const chip = createTokenChip(label, font, style);
                 applyChipSelectionMetadata(chip, {
                     chipLabel,
@@ -966,45 +1183,21 @@ export function addEmbeddingAndTokenChips({
                     positionIndex: tokenIndex + 1
                 });
                 chip.position.set(posX, startY, startZ);
+                chip.visible = false;
                 registerChip(chip);
                 animatedEmbeddingChips.push(chip);
-
-                if (usesTween) {
-                    const riseTween = new TWEEN.Tween(chip.position)
-                        .to({ y: targetY, z: targetZ }, posRiseDuration)
-                        .delay(positionStartDelayMs + laneDelayRank * TOKEN_CHIP_STYLE.riseDelay)
-                        .easing(TWEEN.Easing.Quadratic.Out);
-                    if (connector) {
-                        riseTween.onStart(() => {
-                            connector.visible = true;
-                            updateConnectorEndY(connector, chip.position.y);
-                        });
-                        riseTween.onUpdate(() => {
-                            updateConnectorEndY(connector, chip.position.y);
-                        });
-                        riseTween.onComplete(() => {
-                            updateConnectorEndY(connector, targetY);
-                        });
-                    }
-                    riseTween.start();
-                } else {
-                    chip.position.y = targetY;
-                    chip.position.z = targetZ;
-                    if (connector) {
-                        updateConnectorEndY(connector, targetY);
-                        connector.visible = true;
-                    }
-                }
+                pendingPositionChipAnimations.push({
+                    chip,
+                    connector,
+                    targetY,
+                    targetZ,
+                    laneDelayRank,
+                    tokenKey
+                });
             });
-            if (pipeline) {
-                pipeline.__inputPositionChipGate = {
-                    enabled: true,
-                    pending: false,
-                    pendingFallbackAt: positionWaveStartMs,
-                    releaseByToken,
-                    defaultReleaseAt: positionReleaseDefaultMs
-                };
-            }
+            positionChipEntriesReady = true;
+            maybeStartPositionChipWave({ force: pendingPositionChipAnimations.length <= 0 });
+            armPositionChipStartPoll();
         };
         chipFontLoader.load(
             'https://threejs.org/examples/fonts/helvetiker_regular.typeface.json',
@@ -1247,6 +1440,10 @@ export function addEmbeddingAndTokenChips({
         if (chipEntryTimeoutId) {
             clearTimeout(chipEntryTimeoutId);
             chipEntryTimeoutId = null;
+        }
+        if (positionChipStartIntervalId) {
+            clearInterval(positionChipStartIntervalId);
+            positionChipStartIntervalId = null;
         }
         if (chipRemovalProgressHandler && pipeline && typeof pipeline.removeEventListener === 'function') {
             pipeline.removeEventListener('progress', chipRemovalProgressHandler);

@@ -3300,24 +3300,26 @@ export default class Gpt2Layer extends BaseLayer {
                 && lane.posVec
                 && typeof lane.startPositionalPassThrough === 'function'
             ));
-            // Start each lane as soon as its own position-chip gate is released.
-            // This avoids globally stalling positional trails when a single lane
-            // is delayed by UI timing.
-            pendingPosPassLanes.forEach((lane) => {
-                if (this._isWaitingForInputPositionChipGate(lane, nowMs, skipActive)) return;
-                try {
-                    lane.startPositionalPassThrough({ immediate: skipActive });
-                } catch (_) {
-                    lane.posAddComplete = true;
-                }
-            });
+            // Keep positional pass-through synchronized: launch only when every
+            // pending lane has its position-chip gate released.
+            const allPositionChipGatesReleased = pendingPosPassLanes.every((lane) => (
+                !this._isWaitingForInputPositionChipGate(lane, nowMs, skipActive)
+            ));
+            if (allPositionChipGatesReleased) {
+                pendingPosPassLanes.forEach((lane) => {
+                    try {
+                        lane.startPositionalPassThrough({ immediate: skipActive });
+                    } catch (_) {
+                        lane.posAddComplete = true;
+                    }
+                });
+            }
             const stillPending = laneList.some((lane) => {
                 if (!lane || lane.posAddComplete) return false;
                 return !!(lane.posVec && !lane.__posPassStarted);
             });
             if (stillPending) {
-                // Continue polling so remaining lanes can start as their
-                // individual position-chip gates release.
+                // Continue polling until all pending lanes can launch together.
                 this._posPassBarrierArmed = true;
                 this._posPassStartAtMs = nowMs;
             } else {
@@ -3408,21 +3410,19 @@ export default class Gpt2Layer extends BaseLayer {
         if (!gate || gate.enabled === false) return false;
 
         if (gate.pending) {
-            const fallbackAt = Number.isFinite(gate.pendingFallbackAt) ? gate.pendingFallbackAt : NaN;
-            return !Number.isFinite(fallbackAt) || nowMs < fallbackAt;
+            return true;
         }
 
         const tokenIndex = Number.isFinite(lane.tokenIndex) ? Math.max(0, Math.floor(lane.tokenIndex)) : null;
-        const byToken = gate.releaseByToken;
-        let releaseAt = NaN;
-        if (tokenIndex !== null && byToken) {
-            const value = byToken[String(tokenIndex)];
-            if (Number.isFinite(value)) releaseAt = value;
+        const tokenKey = tokenIndex !== null ? String(tokenIndex) : null;
+        // Release only when the matching chip has actually finished entering
+        // the embedding matrix.
+        const insideByToken = gate.insideByToken;
+        if (tokenKey !== null && insideByToken && Object.prototype.hasOwnProperty.call(insideByToken, tokenKey)) {
+            if (insideByToken[tokenKey] === true) return false;
+            return true;
         }
-        if (!Number.isFinite(releaseAt) && Number.isFinite(gate.defaultReleaseAt)) {
-            releaseAt = gate.defaultReleaseAt;
-        }
-        return Number.isFinite(releaseAt) && nowMs < releaseAt;
+        return false;
     }
 
     _isWaitingForInputVocabChipGate(lane, nowMs, skipActive = false) {

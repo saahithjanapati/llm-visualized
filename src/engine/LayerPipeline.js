@@ -438,6 +438,11 @@ export class LayerPipeline extends EventTarget {
         return this._autoCamera?.getReference?.() ?? null;
     }
 
+    /** Get current auto-camera semantic view key (e.g., embed-vocab/embed-position). */
+    getAutoCameraViewKey() {
+        return this._autoCamera?.getViewKey?.() ?? 'default';
+    }
+
     isSkipToEndActive() {
         return !!this._skipToEndActive;
     }

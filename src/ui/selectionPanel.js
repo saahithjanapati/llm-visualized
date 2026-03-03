@@ -400,9 +400,17 @@ function formatTokenLabelForPreview(label) {
 function resolveAttentionScoreSelectionSummary(selectionInfo, context = null) {
     const activation = getActivationDataFromSelection(selectionInfo);
     const stageLower = String(activation?.stage || '').toLowerCase();
-    if (!activation || !stageLower.startsWith('attention.')) return null;
+    if (!activation) return null;
 
-    const mode = stageLower.includes('post') ? 'post' : 'pre';
+    const normalizedLabel = normalizeSelectionLabel(selectionInfo?.label, selectionInfo);
+    const hasAttentionScoreData = Number.isFinite(activation.preScore) || Number.isFinite(activation.postScore);
+    const isAttentionScore = isAttentionScoreSelection(normalizedLabel, selectionInfo)
+        || stageLower.startsWith('attention.')
+        || hasAttentionScoreData;
+    if (!isAttentionScore) return null;
+
+    const mode = resolveAttentionModeFromSelection(selectionInfo)
+        || (stageLower.includes('post') ? 'post' : 'pre');
     const score = mode === 'post' ? activation.postScore : activation.preScore;
     const tokenIndices = Array.isArray(context?.tokenIndices) ? context.tokenIndices : [];
     const tokenLabels = Array.isArray(context?.tokenLabels) ? context.tokenLabels : [];
@@ -3623,6 +3631,17 @@ class SelectionPanel {
         return `${progressPart}|decode:${decodePart}`;
     }
 
+    _hasExplicitAttentionScoreSelection() {
+        if (
+            this._attentionPinned
+            && Number.isFinite(this._attentionPinnedRow)
+            && Number.isFinite(this._attentionPinnedCol)
+        ) {
+            return true;
+        }
+        return !!this._attentionSelectionSummary;
+    }
+
     _applyAttentionDecodeStyling() {
         const profile = this._attentionDecodeProfile;
         const hasDecodeProfile = !!(profile && profile.enabled && Number.isFinite(profile.highlightRow));
@@ -3631,6 +3650,7 @@ class SelectionPanel {
             ? profile.dimRowsThrough
             : -1;
         const separateRow = !!(hasDecodeProfile && profile.separateRow);
+        const suppressActiveDecodeRowHighlight = this._hasExplicitAttentionScoreSelection();
 
         if (this.attentionRoot) {
             this.attentionRoot.dataset.decodeKv = hasDecodeProfile ? 'true' : 'false';
@@ -3645,7 +3665,9 @@ class SelectionPanel {
         for (let row = 0; row < this._attentionCells.length; row += 1) {
             const rowCells = this._attentionCells[row];
             if (!Array.isArray(rowCells)) continue;
-            const rowIsActive = hasDecodeProfile && row === highlightRow;
+            const rowIsActive = hasDecodeProfile
+                && !suppressActiveDecodeRowHighlight
+                && row === highlightRow;
             const rowIsDimmed = hasDecodeProfile && row <= dimRowsThrough;
             const rowIsSeparated = rowIsActive && separateRow;
 
@@ -3752,6 +3774,7 @@ class SelectionPanel {
         const mode = this.attentionMode === 'post' ? 'post' : 'pre';
         const tokenLabels = this._attentionContext.tokenLabels || [];
         const count = this._attentionCells.length;
+        const suppressRevealPulse = this._hasExplicitAttentionScoreSelection();
         const rowAnimDuration = 180;
         const rowAnimStagger = mode === 'post' && count > 1
             ? Math.max(6, Math.round(180 / (count - 1)))
@@ -3794,7 +3817,11 @@ class SelectionPanel {
                     cell.dataset.value = String(value);
                     cell.classList.remove('is-empty');
                     hasAnyValue = true;
-                    if (mode === 'post') {
+                    if (suppressRevealPulse) {
+                        cell.classList.remove('post-softmax-reveal', 'pre-softmax-reveal');
+                        cell.style.animationDelay = '';
+                        cell.style.animationDuration = '';
+                    } else if (mode === 'post') {
                         if (shouldAnimateRow && !this._attentionPostAnimatedRows.has(row)) {
                             cell.classList.add('post-softmax-reveal');
                             cell.style.animationDelay = `${Math.round(col * rowAnimStagger)}ms`;

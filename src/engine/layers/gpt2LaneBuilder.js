@@ -425,6 +425,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
             lane.posAddComplete = false;
             lane.posAddStarted = false;
             lane.__posPassStarted = false;
+            lane.__posPreAddApproach = false;
             // Start at the TOP of the bottom positional embedding, horizontally to the right.
             const residualTopY = (LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2 + EMBEDDING_BOTTOM_TOP_ALIGN_OFFSET_FROM_LN1_BOTTOM) + EMBEDDING_BOTTOM_Y_ADJUST;
             // The positional embedding matrix is shorter than the vocab matrix. Drop the
@@ -492,6 +493,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
             // even though positional motion now starts later.
             const vocabRiseReferenceY = (startY_override != null ? startY_override : originalVec.group.position.y);
             const triggerPositionalAddition = () => {
+                lane.__posPreAddApproach = false;
                 if (posTrail && !posTrailDisposed) {
                     posTrail.snapLastPointTo(posVec.group.position);
                 }
@@ -524,6 +526,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
             lane.startPositionalPassThrough = ({ immediate = false } = {}) => {
                 if (lane.__posPassStarted || lane.posAddComplete) return;
                 lane.__posPassStarted = true;
+                lane.__posPreAddApproach = false;
                 lane.__manualPosTrail = true;
                 const syncPosTrailToCurrent = ({ append = false } = {}) => {
                     if (!posTrail || posTrailDisposed || !posVec || !posVec.group) return;
@@ -557,6 +560,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
 
                 if (typeof TWEEN !== 'undefined' && !immediate) {
                     const startMergeToResidual = () => {
+                        lane.__posPreAddApproach = true;
                         const finishMergeToResidual = () => {
                             posVec.group.position.y = targetYAbove;
                             syncPosTrailToCurrent({ append: true });
@@ -611,6 +615,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
                 // Preserve the same right-angle trail geometry during skip:
                 // rise first, then merge to x=0.
                 if (posVec && posVec.group) {
+                    lane.__posPreAddApproach = true;
                     if (Math.abs(posVec.group.position.y - targetYAbove) > 1e-4) {
                         posVec.group.position.x = passStartX;
                         posVec.group.position.y = targetYAbove;

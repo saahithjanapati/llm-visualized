@@ -14,6 +14,12 @@ const STOP_RISE_RELEASE_DURATION_MS = 420;
 const STOP_RISE_RELEASE_FALLBACK_STEP = 0.05;
 const AUTO_CAMERA_VIEW_SWITCH_HOLD_MS_DEFAULT = 90;
 
+const isEmbedBottomViewKey = (key) => (
+    key === 'embed-vocab'
+    || key === 'embed-position'
+    || key === 'embed-add'
+);
+
 const coerceVector3 = (value, fallback = null) => {
     if (value instanceof THREE.Vector3) return value.clone();
     if (value && typeof value === 'object' && 'x' in value && 'y' in value && 'z' in value) {
@@ -66,6 +72,9 @@ export class AutoCameraController {
         const nextValue = !!enabled;
         if (nextValue === this._autoCameraFollow) {
             if (nextValue) {
+                if (resetView) {
+                    this._applyFollowReset({ smoothReset });
+                }
                 if (immediate) {
                     this._updateAutoCameraFollow();
                     this._updateCameraOffsetOverlay();
@@ -83,12 +92,7 @@ export class AutoCameraController {
             this._autoCameraPostAddLockActive = false;
             this._autoCameraPostAddLockUntilMs = 0;
             if (resetView) {
-                const canSmoothReset = smoothReset && this._captureAutoCameraOffsets();
-                this._setAutoCameraOffsets(
-                    this._autoCameraDefaultCameraOffset,
-                    this._autoCameraDefaultTargetOffset,
-                    { snap: !canSmoothReset }
-                );
+                this._applyFollowReset({ smoothReset });
             }
         }
         if (this._autoCameraFollow) {
@@ -98,6 +102,7 @@ export class AutoCameraController {
         } else {
             this._autoCameraPostAddLockActive = false;
             this._autoCameraPostAddLockUntilMs = 0;
+            this._autoCameraForceEmbedVocabStartLock = false;
             this._clearAutoCameraOffsets();
         }
         this._updateCameraOffsetOverlay();
@@ -105,6 +110,38 @@ export class AutoCameraController {
 
     isEnabled() {
         return !!this._autoCameraFollow;
+    }
+
+    getViewKey() {
+        return this._autoCameraViewKey || 'default';
+    }
+
+    _applyFollowReset({ smoothReset = false } = {}) {
+        void smoothReset;
+        this._updateAutoCameraScaledOffsets();
+        this._autoCameraSmoothValid = false;
+        const useEmbedVocabStart = this._autoCameraEmbedVocabOffsetsEnabled;
+        const resetViewKey = useEmbedVocabStart ? 'embed-vocab' : 'default';
+        const resetCameraOffset = useEmbedVocabStart
+            ? this._autoCameraEmbedVocabCameraOffset
+            : this._autoCameraDefaultCameraOffset;
+        const resetTargetOffset = useEmbedVocabStart
+            ? this._autoCameraEmbedVocabTargetOffset
+            : this._autoCameraDefaultTargetOffset;
+        this._autoCameraViewKey = resetViewKey;
+        this._autoCameraViewPendingKey = resetViewKey;
+        this._autoCameraViewPendingSinceMs = 0;
+        this._autoCameraViewBlendT = 1;
+        this._autoCameraViewFromCameraOffset.copy(resetCameraOffset);
+        this._autoCameraViewFromTargetOffset.copy(resetTargetOffset);
+        this._autoCameraViewToCameraOffset.copy(resetCameraOffset);
+        this._autoCameraViewToTargetOffset.copy(resetTargetOffset);
+        this._autoCameraForceEmbedVocabStartLock = useEmbedVocabStart;
+        this._setAutoCameraOffsets(
+            resetCameraOffset,
+            resetTargetOffset,
+            { snap: true }
+        );
     }
 
     setScreenShiftPixels(pixels, { immediate = false, durationMs = 520 } = {}) {
@@ -294,12 +331,22 @@ export class AutoCameraController {
         this._autoCameraViewBlendCameraOffset = new THREE.Vector3();
         this._autoCameraViewBlendTargetOffset = new THREE.Vector3();
         this._autoCameraViewContext = null;
+        this._autoCameraForceEmbedVocabStartLock = false;
         this._autoCameraDefaultCameraOffset = new THREE.Vector3();
         this._autoCameraDefaultTargetOffset = new THREE.Vector3();
+        this._autoCameraEmbedVocabCameraOffset = new THREE.Vector3();
+        this._autoCameraEmbedVocabTargetOffset = new THREE.Vector3();
+        this._autoCameraEmbedPositionCameraOffset = new THREE.Vector3();
+        this._autoCameraEmbedPositionTargetOffset = new THREE.Vector3();
+        this._autoCameraEmbedAddCameraOffset = new THREE.Vector3();
+        this._autoCameraEmbedAddTargetOffset = new THREE.Vector3();
         this._autoCameraMhsaCameraOffset = new THREE.Vector3();
         this._autoCameraMhsaTargetOffset = new THREE.Vector3();
         this._autoCameraConcatCameraOffset = new THREE.Vector3();
         this._autoCameraConcatTargetOffset = new THREE.Vector3();
+        this._autoCameraEmbedVocabOffsetsEnabled = false;
+        this._autoCameraEmbedPositionOffsetsEnabled = false;
+        this._autoCameraEmbedAddOffsetsEnabled = false;
         this._autoCameraMhsaOffsetsEnabled = false;
         this._autoCameraConcatOffsetsEnabled = false;
         this._autoCameraLnCameraOffset = new THREE.Vector3();
@@ -316,6 +363,12 @@ export class AutoCameraController {
         this._autoCameraLayerEndDesktopOffsetsEnabled = false;
         this._autoCameraDefaultCameraOffsetBase = new THREE.Vector3();
         this._autoCameraDefaultTargetOffsetBase = new THREE.Vector3();
+        this._autoCameraEmbedVocabCameraOffsetBase = new THREE.Vector3();
+        this._autoCameraEmbedVocabTargetOffsetBase = new THREE.Vector3();
+        this._autoCameraEmbedPositionCameraOffsetBase = new THREE.Vector3();
+        this._autoCameraEmbedPositionTargetOffsetBase = new THREE.Vector3();
+        this._autoCameraEmbedAddCameraOffsetBase = new THREE.Vector3();
+        this._autoCameraEmbedAddTargetOffsetBase = new THREE.Vector3();
         this._autoCameraMhsaCameraOffsetBase = new THREE.Vector3();
         this._autoCameraMhsaTargetOffsetBase = new THREE.Vector3();
         this._autoCameraConcatCameraOffsetBase = new THREE.Vector3();
@@ -365,6 +418,30 @@ export class AutoCameraController {
         );
         if (defaultTargetOffset) this._autoCameraDefaultTargetOffsetBase.copy(defaultTargetOffset);
         if (defaultCameraOffset) this._autoCameraDefaultCameraOffsetBase.copy(defaultCameraOffset);
+
+        const embedVocabCamOffset = coerceVector3(opts.autoCameraEmbedVocabCameraOffset, null);
+        const embedVocabTargetOffset = coerceVector3(opts.autoCameraEmbedVocabTargetOffset, null);
+        if (embedVocabCamOffset && embedVocabTargetOffset) {
+            this._autoCameraEmbedVocabCameraOffsetBase.copy(embedVocabCamOffset);
+            this._autoCameraEmbedVocabTargetOffsetBase.copy(embedVocabTargetOffset);
+            this._autoCameraEmbedVocabOffsetsEnabled = true;
+        }
+
+        const embedPositionCamOffset = coerceVector3(opts.autoCameraEmbedPositionCameraOffset, null);
+        const embedPositionTargetOffset = coerceVector3(opts.autoCameraEmbedPositionTargetOffset, null);
+        if (embedPositionCamOffset && embedPositionTargetOffset) {
+            this._autoCameraEmbedPositionCameraOffsetBase.copy(embedPositionCamOffset);
+            this._autoCameraEmbedPositionTargetOffsetBase.copy(embedPositionTargetOffset);
+            this._autoCameraEmbedPositionOffsetsEnabled = true;
+        }
+
+        const embedAddCamOffset = coerceVector3(opts.autoCameraEmbedAddCameraOffset, null);
+        const embedAddTargetOffset = coerceVector3(opts.autoCameraEmbedAddTargetOffset, null);
+        if (embedAddCamOffset && embedAddTargetOffset) {
+            this._autoCameraEmbedAddCameraOffsetBase.copy(embedAddCamOffset);
+            this._autoCameraEmbedAddTargetOffsetBase.copy(embedAddTargetOffset);
+            this._autoCameraEmbedAddOffsetsEnabled = true;
+        }
 
         const mhsaCamOffset = coerceVector3(opts.autoCameraMhsaCameraOffset, null);
         const mhsaTargetOffset = coerceVector3(opts.autoCameraMhsaTargetOffset, null);
@@ -443,6 +520,22 @@ export class AutoCameraController {
         }
 
         this._updateAutoCameraScaledOffsets(true);
+        if (this._autoCameraFollow && this._autoCameraEmbedVocabOffsetsEnabled) {
+            this._autoCameraViewKey = 'embed-vocab';
+            this._autoCameraViewPendingKey = 'embed-vocab';
+            this._autoCameraViewPendingSinceMs = 0;
+            this._autoCameraViewBlendT = 1;
+            this._autoCameraViewFromCameraOffset.copy(this._autoCameraEmbedVocabCameraOffset);
+            this._autoCameraViewFromTargetOffset.copy(this._autoCameraEmbedVocabTargetOffset);
+            this._autoCameraViewToCameraOffset.copy(this._autoCameraEmbedVocabCameraOffset);
+            this._autoCameraViewToTargetOffset.copy(this._autoCameraEmbedVocabTargetOffset);
+            this._autoCameraForceEmbedVocabStartLock = true;
+            this._setAutoCameraOffsets(
+                this._autoCameraEmbedVocabCameraOffset,
+                this._autoCameraEmbedVocabTargetOffset,
+                { snap: true }
+            );
+        }
 
         if (this._engine?.controls) {
             this._controlsChangeHandler = () => {
@@ -925,17 +1018,29 @@ export class AutoCameraController {
 
     _resolveAutoCameraViewKey() {
         const layers = this._pipeline?._layers;
+        const nowMs = this._getNowMs();
         const result = resolveAutoCameraViewState({
             pipeline: this._pipeline,
             layers,
             currentLayerIdx: this._pipeline?._currentLayerIdx ?? 0,
             priorViewKey: this._autoCameraViewKey || 'default',
-            nowMs: this._getNowMs(),
+            nowMs,
             isLargeDesktopViewport: this._autoCameraLayerEndDesktopOffsetsEnabled && this._isLargeDesktopViewport(),
             isTopLayerNormCameraPhase: (layer, lanes) => this._isTopLayerNormCameraPhase(layer, lanes),
         });
         this._autoCameraViewContext = result.viewContext;
-        return result.rawKey || 'default';
+        const rawKey = result.rawKey || 'default';
+        if (this._autoCameraForceEmbedVocabStartLock && this._autoCameraEmbedVocabOffsetsEnabled) {
+            const positionGate = this._pipeline?.__inputPositionChipGate;
+            const positionGatePrimed = !!(positionGate
+                && positionGate.enabled !== false
+                && positionGate.pending === false);
+            if (!positionGatePrimed) {
+                return 'embed-vocab';
+            }
+            this._autoCameraForceEmbedVocabStartLock = false;
+        }
+        return rawKey;
     }
 
     _getNowMs() {
@@ -979,6 +1084,15 @@ export class AutoCameraController {
         if (key === 'layer-end-desktop' && this._autoCameraLayerEndDesktopOffsetsEnabled) {
             camOffset = this._autoCameraLayerEndDesktopCameraOffset;
             targetOffset = this._autoCameraLayerEndDesktopTargetOffset;
+        } else if (key === 'embed-vocab' && this._autoCameraEmbedVocabOffsetsEnabled) {
+            camOffset = this._autoCameraEmbedVocabCameraOffset;
+            targetOffset = this._autoCameraEmbedVocabTargetOffset;
+        } else if (key === 'embed-position' && this._autoCameraEmbedPositionOffsetsEnabled) {
+            camOffset = this._autoCameraEmbedPositionCameraOffset;
+            targetOffset = this._autoCameraEmbedPositionTargetOffset;
+        } else if (key === 'embed-add' && this._autoCameraEmbedAddOffsetsEnabled) {
+            camOffset = this._autoCameraEmbedAddCameraOffset;
+            targetOffset = this._autoCameraEmbedAddTargetOffset;
         } else if (key === 'ln' && this._autoCameraLnOffsetsEnabled) {
             camOffset = this._autoCameraLnCameraOffset;
             targetOffset = this._autoCameraLnTargetOffset;
@@ -997,9 +1111,15 @@ export class AutoCameraController {
         }
 
         if (key !== this._autoCameraViewKey) {
+            const prevKey = this._autoCameraViewKey;
             this._autoCameraViewBlendAlphaActive = this._autoCameraViewBlendAlphaTransition;
             this._autoCameraViewKey = key;
-            if (!this._autoCameraSmoothValid) {
+            if (prevKey === 'embed-vocab' && key === 'embed-position') {
+                // Make the vocab->position handoff perceptibly immediate.
+                this._autoCameraViewBlendT = 1;
+                this._autoCameraViewFromCameraOffset.copy(camOffset);
+                this._autoCameraViewFromTargetOffset.copy(targetOffset);
+            } else if (!this._autoCameraSmoothValid) {
                 this._autoCameraViewBlendT = 1;
                 this._autoCameraViewFromCameraOffset.copy(camOffset);
                 this._autoCameraViewFromTargetOffset.copy(targetOffset);
@@ -1007,6 +1127,9 @@ export class AutoCameraController {
                 this._autoCameraViewBlendT = 0;
                 this._autoCameraViewFromCameraOffset.copy(this._autoCameraCurrentCameraOffset);
                 this._autoCameraViewFromTargetOffset.copy(this._autoCameraCurrentTargetOffset);
+                if (isEmbedBottomViewKey(prevKey) || isEmbedBottomViewKey(key)) {
+                    this._autoCameraViewBlendAlphaActive = Math.max(this._autoCameraViewBlendAlphaActive, 0.16);
+                }
             }
         }
 
@@ -1090,6 +1213,18 @@ export class AutoCameraController {
 
         applyScaleShift(this._autoCameraDefaultCameraOffset, this._autoCameraDefaultCameraOffsetBase);
         applyScaleShift(this._autoCameraDefaultTargetOffset, this._autoCameraDefaultTargetOffsetBase);
+        if (this._autoCameraEmbedVocabOffsetsEnabled) {
+            applyScaleShift(this._autoCameraEmbedVocabCameraOffset, this._autoCameraEmbedVocabCameraOffsetBase);
+            applyScaleShift(this._autoCameraEmbedVocabTargetOffset, this._autoCameraEmbedVocabTargetOffsetBase);
+        }
+        if (this._autoCameraEmbedPositionOffsetsEnabled) {
+            applyScaleShift(this._autoCameraEmbedPositionCameraOffset, this._autoCameraEmbedPositionCameraOffsetBase);
+            applyScaleShift(this._autoCameraEmbedPositionTargetOffset, this._autoCameraEmbedPositionTargetOffsetBase);
+        }
+        if (this._autoCameraEmbedAddOffsetsEnabled) {
+            applyScaleShift(this._autoCameraEmbedAddCameraOffset, this._autoCameraEmbedAddCameraOffsetBase);
+            applyScaleShift(this._autoCameraEmbedAddTargetOffset, this._autoCameraEmbedAddTargetOffsetBase);
+        }
 
         if (this._autoCameraMhsaOffsetsEnabled) {
             applyScaleShift(this._autoCameraMhsaCameraOffset, this._autoCameraMhsaCameraOffsetBase, shiftMhsaX);

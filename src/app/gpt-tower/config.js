@@ -23,6 +23,8 @@ export const TOKEN_CHIP_STYLE = {
     positionStartDelayAfterVocabMs: 450,
     inset: 0,
     zOffset: 0,
+    // Additional downward spawn offset for animated chips before they rise.
+    entryStartYOffset: 50,
     scale: 2.6,
     staticGap: 200,
     staticZOffset: 0,
@@ -55,6 +57,16 @@ export const CAMERA_CONFIG = {
     autoCameraHeadBias: 0.0,
     followDefaultCameraOffset: [-1215.87, 465.86, 3350.33],
     followDefaultTargetOffset: [1675.46, 227.33, -469.85],
+    // Bottom embedding follow offsets (layer 0 pre-LN stages).
+    // 1) Vocab chips entering + vocab vectors still exiting matrix.
+    followEmbedVocabCameraOffset: [-7273.76, -963.09, 5094.87],
+    followEmbedVocabTargetOffset: [1282.21, -241.52, -362.54],
+    // 2) Position chips rising.
+    followEmbedPositionCameraOffset: [5569.26, -833.79, 3563.21],
+    followEmbedPositionTargetOffset: [2263.53, -1000.23, 129.12],
+    // 3) Residual addition between position and vocab vectors.
+    followEmbedAddCameraOffset: [-280.43, 153.21, 2876.68],
+    followEmbedAddTargetOffset: [247.05, 308.88, -766.95],
     followMhsaCameraOffset: [2569.43, 571.86, -1726.66],
     followMhsaTargetOffset: [3283.23, -356.38, 50.97],
     followMhsaMobileCameraOffset: [2520.98, 790.42, -2775.52],

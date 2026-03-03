@@ -1,5 +1,90 @@
 import { HORIZ_PHASE, LEGACY_HORIZ_PHASE, LN2_PHASE } from './layers/gpt2LanePhases.js';
 
+const EMBED_VIEW_KEY_VOCAB = 'embed-vocab';
+const EMBED_VIEW_KEY_POSITION = 'embed-position';
+const EMBED_VIEW_KEY_ADD = 'embed-add';
+
+const isEmbedBottomViewKey = (key) => (
+    key === EMBED_VIEW_KEY_VOCAB
+    || key === EMBED_VIEW_KEY_POSITION
+    || key === EMBED_VIEW_KEY_ADD
+);
+
+function gateHasStarted(gate, nowMs) {
+    if (!gate || gate.enabled === false) return false;
+    if (gate.pending) return false;
+    const startByToken = gate.startByToken;
+    if (startByToken && typeof startByToken === 'object') {
+        const starts = Object.values(startByToken).filter((value) => Number.isFinite(value));
+        if (starts.length) {
+            return nowMs >= Math.min(...starts);
+        }
+    }
+    if (Number.isFinite(gate.defaultStartAt)) {
+        return nowMs >= gate.defaultStartAt;
+    }
+    return false;
+}
+
+function gateHasPendingEntries(gate, nowMs) {
+    if (!gate || gate.enabled === false) return false;
+    if (gate.pending) return true;
+    const insideByToken = gate.insideByToken;
+    if (insideByToken && typeof insideByToken === 'object') {
+        const states = Object.values(insideByToken).filter((value) => typeof value === 'boolean');
+        if (states.length) return states.some((value) => value === false);
+    }
+    return Number.isFinite(gate.defaultReleaseAt) && nowMs < gate.defaultReleaseAt;
+}
+
+function resolveBottomEmbeddingViewKey({ pipeline = null, layer = null, lanes = [], nowMs = 0 } = {}) {
+    if (!pipeline || !layer || layer.index !== 0 || !Array.isArray(lanes) || !lanes.length) return null;
+    const anyPosWorkRemaining = lanes.some((candidate) => candidate && !candidate.posAddComplete);
+    if (!anyPosWorkRemaining) return null;
+
+    const anyVectorsInsideVocab = lanes.some((candidate) => {
+        const y = candidate?.originalVec?.group?.position?.y;
+        const exitY = Number.isFinite(candidate?.vocabEmbeddingExitY) ? candidate.vocabEmbeddingExitY : NaN;
+        return Number.isFinite(y) && Number.isFinite(exitY) && y < (exitY - 0.01);
+    });
+    const anyAwaitingPosPass = lanes.some((candidate) => (
+        candidate?.posVec
+        && !candidate.__posPassStarted
+        && !candidate.posAddStarted
+        && !candidate.posAddComplete
+    ));
+
+    const anyResidualAddPreview = lanes.some((candidate) => candidate
+        && candidate.__posPreAddApproach
+        && !candidate.posAddStarted
+        && !candidate.posAddComplete);
+    const anyResidualAddActive = lanes.some((candidate) => candidate?.posAddStarted && !candidate.posAddComplete);
+    if (anyResidualAddPreview) return EMBED_VIEW_KEY_ADD;
+    if (anyResidualAddActive) return EMBED_VIEW_KEY_ADD;
+
+    const positionGate = pipeline.__inputPositionChipGate;
+    const anyPositionPassActive = lanes.some((candidate) => (
+        candidate
+        && !candidate.posAddComplete
+        && (
+            candidate.__posPassStarted
+            || candidate.posAddStarted
+        )
+    ));
+    if (anyPositionPassActive || gateHasStarted(positionGate, nowMs)) return EMBED_VIEW_KEY_POSITION;
+
+    const vocabGate = pipeline.__inputVocabChipGate;
+    if (
+        anyVectorsInsideVocab
+        || gateHasPendingEntries(vocabGate, nowMs)
+        || anyAwaitingPosPass
+        || anyPosWorkRemaining
+    ) {
+        return EMBED_VIEW_KEY_VOCAB;
+    }
+    return null;
+}
+
 export function resolveAutoCameraViewState({
     pipeline = null,
     layers = [],
@@ -61,6 +146,12 @@ export function resolveAutoCameraViewState({
     const holdViewThroughLayerHandoff = !!(inLayerHandoff
         && priorViewKey !== 'layer-end-desktop'
         && priorViewKey !== 'final');
+    const bottomEmbeddingViewKey = resolveBottomEmbeddingViewKey({
+        pipeline,
+        layer,
+        lanes,
+        nowMs
+    });
     const forwardComplete = (typeof pipeline?.isForwardPassComplete === 'function')
         ? pipeline.isForwardPassComplete()
         : false;
@@ -79,11 +170,30 @@ export function resolveAutoCameraViewState({
         holdViewUntilLn2Inside,
         holdViewDuringResidualAdd,
         holdViewThroughLayerHandoff,
+        bottomEmbeddingViewKey,
         priorViewKey,
         forwardComplete
     };
     if (forwardComplete) {
         return { rawKey: 'final', viewContext };
+    }
+    if (bottomEmbeddingViewKey) {
+        return { rawKey: bottomEmbeddingViewKey, viewContext };
+    }
+
+    const firstLayerEmbeddingToLnHandoff = !!(
+        layer.index === 0
+        && lanes.some((candidate) => !!candidate?.posVec)
+        && lanes.every((candidate) => !candidate?.posVec || candidate.posAddComplete === true)
+        && lanes.some((candidate) => candidate
+            && (
+                candidate.horizPhase === HORIZ_PHASE.WAITING
+                || candidate.horizPhase === HORIZ_PHASE.RIGHT
+                || candidate.horizPhase === HORIZ_PHASE.RISE_ABOVE_LN
+            ))
+    );
+    if (firstLayerEmbeddingToLnHandoff) {
+        return { rawKey: 'ln', viewContext };
     }
 
     const passPhase = mhsa?.mhaPassThroughPhase || 'positioning_mha_vectors';
@@ -153,6 +263,12 @@ export function getAutoCameraViewSwitchHoldMs({
     }
     if (fromKey === 'concat' && toKey === 'default') {
         holdMs = Math.min(holdMs, 36);
+    }
+    if (fromKey === EMBED_VIEW_KEY_VOCAB && toKey === EMBED_VIEW_KEY_POSITION) {
+        holdMs = 0;
+    }
+    if (isEmbedBottomViewKey(fromKey) || isEmbedBottomViewKey(toKey)) {
+        holdMs = Math.min(holdMs, 24);
     }
     if (toKey === 'layer-end-desktop' || fromKey === 'layer-end-desktop') {
         holdMs = Math.max(holdMs, 130);

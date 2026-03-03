@@ -143,7 +143,10 @@ function detectStage(pipeline, numLayers) {
     const lanes = layer.lanes || [];
 
     if (layer.index === 0) {
-        const posLane = pickLane(lanes, (l) => l.posVec && !l.posAddComplete);
+        const posLane = pickLane(
+            lanes,
+            (l) => l.posVec && !l.posAddComplete && (l.__posPassStarted || l.posAddStarted)
+        );
         if (posLane) {
             return { stage: 'position_embedding', layer: null, lane: posLane };
         }
