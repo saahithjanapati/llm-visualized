@@ -435,7 +435,17 @@ function computeAttentionCellSize(count) {
     return Math.max(ATTENTION_PREVIEW_MIN_CELL, Math.min(ATTENTION_PREVIEW_MAX_CELL, size));
 }
 
-function shouldRevealAttentionCell(progress, row, col, mode = 'pre') {
+function shouldRevealAttentionCell(progress, row, col, mode = 'pre', decodeProfile = null) {
+    const decodeHighlightRow = Number.isFinite(decodeProfile?.highlightRow)
+        ? Math.max(0, Math.floor(decodeProfile.highlightRow))
+        : null;
+    const decodeAnimating = !!(decodeProfile?.enabled && decodeProfile?.animating && decodeHighlightRow !== null);
+    if (decodeAnimating) {
+        // During KV-cache decode animation, preserve previously computed rows
+        // and only allow the currently computed row to animate/reveal.
+        if (row < decodeHighlightRow) return true;
+        if (!progress) return false;
+    }
     if (!progress) return true;
     if (mode === 'post') {
         const postCompletedRows = Number.isFinite(progress.postCompletedRows) ? progress.postCompletedRows : 0;
@@ -3381,8 +3391,11 @@ class SelectionPanel {
         return {
             enabled: true,
             highlightRow,
-            dimRowsThrough: Math.max(-1, highlightRow - 1),
-            separateRow: false
+            // Keep historical rows fully visible during decode; only use
+            // decode profile for row tracking/highlight behavior.
+            dimRowsThrough: -1,
+            separateRow: false,
+            animating: runtime?.animator?.phase === 'running'
         };
     }
 
@@ -3391,7 +3404,7 @@ class SelectionPanel {
             ? `${progress.completedRows || 0}|${progress.postCompletedRows || 0}|${progress.activeRow ?? 'n'}|${progress.activeCol ?? 'n'}`
             : 'none';
         const decodePart = decodeProfile
-            ? `${decodeProfile.highlightRow ?? 'n'}|${decodeProfile.separateRow ? 1 : 0}`
+            ? `${decodeProfile.highlightRow ?? 'n'}|${decodeProfile.separateRow ? 1 : 0}|${decodeProfile.animating ? 1 : 0}`
             : 'off';
         return `${progressPart}|decode:${decodePart}`;
     }
@@ -3553,7 +3566,7 @@ class SelectionPanel {
                     }
                     continue;
                 }
-                const reveal = shouldRevealAttentionCell(progress, row, col, mode);
+                const reveal = shouldRevealAttentionCell(progress, row, col, mode, this._attentionDecodeProfile);
                 if (reveal) {
                     this._cancelAttentionPopOut(cell);
                     const wasEmpty = cell.classList.contains('is-empty');
@@ -3830,7 +3843,7 @@ class SelectionPanel {
                 } else if (!Number.isFinite(value)) {
                     cell.classList.add('is-empty');
                 } else {
-                    const reveal = shouldRevealAttentionCell(progress, row, col, mode);
+                    const reveal = shouldRevealAttentionCell(progress, row, col, mode, decodeProfile);
                     if (reveal) {
                         const color = mode === 'post'
                             ? mapValueToGrayscale(value)
