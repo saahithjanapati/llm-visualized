@@ -124,11 +124,19 @@ def sample_tensor(tensor: torch.Tensor, stride: int) -> torch.Tensor:
     return tensor.index_select(-1, indices)
 
 
+def compact_encoded_vector_entry(entry: Dict[str, object]) -> object:
+    """Unwrap v-only payloads to raw arrays to reduce JSON wrapper overhead."""
+
+    if isinstance(entry, dict) and "v" in entry and len(entry) == 1 and isinstance(entry.get("v"), list):
+        return entry["v"]
+    return entry
+
+
 def encode_vector_states(
     tensor: torch.Tensor,
     stride: int,
     quantiser: BaseQuantiser,
-) -> List[Dict[str, object]]:
+) -> List[object]:
     """Return quantised samples for each token in a sequence tensor."""
 
     if tensor.dim() != 3:
@@ -136,11 +144,11 @@ def encode_vector_states(
     batch, seq_len, _ = tensor.shape
     if batch != 1:
         raise ValueError("Only batch size 1 is supported for capture")
-    samples: List[Dict[str, object]] = []
+    samples: List[object] = []
     for t in range(seq_len):
         vec = tensor[0, t]
         sampled = sample_tensor(vec, stride)
-        samples.append(quantiser.encode(sampled))
+        samples.append(compact_encoded_vector_entry(quantiser.encode(sampled)))
     return samples
 
 
@@ -148,7 +156,7 @@ def encode_head_vector_states(
     tensor: torch.Tensor,
     stride: int,
     quantiser: BaseQuantiser,
-) -> List[List[Dict[str, object]]]:
+) -> List[List[object]]:
     """Return quantised samples per head/per token for attention tensors."""
 
     if tensor.dim() != 4:
@@ -156,13 +164,13 @@ def encode_head_vector_states(
     batch, num_heads, seq_len, _ = tensor.shape
     if batch != 1:
         raise ValueError("Only batch size 1 is supported for capture")
-    head_samples: List[List[Dict[str, object]]] = []
+    head_samples: List[List[object]] = []
     for h in range(num_heads):
-        token_samples: List[Dict[str, object]] = []
+        token_samples: List[object] = []
         for t in range(seq_len):
             vec = tensor[0, h, t]
             sampled = sample_tensor(vec, stride)
-            token_samples.append(quantiser.encode(sampled))
+            token_samples.append(compact_encoded_vector_entry(quantiser.encode(sampled)))
         head_samples.append(token_samples)
     return head_samples
 
@@ -170,20 +178,55 @@ def encode_head_vector_states(
 def encode_triangular(
     tensor: torch.Tensor,
     quantiser: BaseQuantiser,
-) -> List[List[Dict[str, object]]]:
-    """Encode lower-triangular attention matrices per head/per token."""
+    format: str = "rows",
+) -> List[object]:
+    """Encode lower-triangular attention matrices.
+
+    Supported formats:
+    - rows: legacy nested [head][query] entries.
+    - packed: one flattened triangular payload per head (smaller JSON).
+    """
 
     if tensor.dim() != 4:
         raise ValueError("Expected tensor with shape (batch, heads, query, key)")
     batch, num_heads, seq_len, _ = tensor.shape
     if batch != 1:
         raise ValueError("Only batch size 1 is supported for capture")
-    results: List[List[Dict[str, object]]] = []
+    if format not in {"rows", "packed"}:
+        raise ValueError(f"Unsupported triangular encoding format: {format}")
+
+    if format == "packed":
+        packed_results: List[Dict[str, object]] = []
+        for h in range(num_heads):
+            flat_values: List[object] = []
+            row_scales: List[float] = []
+            has_row_scales = False
+            for q in range(seq_len):
+                allowed = tensor[0, h, q, : q + 1]
+                encoded = quantiser.encode(allowed)
+                values = encoded.get("v")
+                if not isinstance(values, list):
+                    raise ValueError("Quantiser.encode must return list value under 'v'")
+                flat_values.extend(values)
+                scale = encoded.get("s")
+                if isinstance(scale, (int, float)):
+                    has_row_scales = True
+                    row_scales.append(float(scale))
+            head_entry: Dict[str, object] = {
+                "n": seq_len,
+                "v": flat_values,
+            }
+            if has_row_scales:
+                head_entry["rs"] = row_scales
+            packed_results.append(head_entry)
+        return packed_results
+
+    results: List[List[object]] = []
     for h in range(num_heads):
-        head_entries: List[Dict[str, object]] = []
+        head_entries: List[object] = []
         for q in range(seq_len):
             allowed = tensor[0, h, q, : q + 1]
-            head_entries.append(quantiser.encode(allowed))
+            head_entries.append(compact_encoded_vector_entry(quantiser.encode(allowed)))
         results.append(head_entries)
     return results
 
@@ -581,6 +624,9 @@ class CaptureConfig:
     quantisation: str = "float16"
     round_decimals: Optional[int] = None
     attention_score_round_decimals: Optional[int] = 4
+    attention_scores_format: str = "packed"
+    store_embedding_sum: bool = False
+    store_residual_sums: bool = False
 
 
 def layer_norm_states(x: torch.Tensor, ln: torch.nn.LayerNorm) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -629,12 +675,15 @@ def run_instrumented_pass(
         hidden_states = token_embeddings + position_embeddings
         hidden_states = transformer.drop(hidden_states)
 
+        embeddings_entry: Dict[str, object] = {
+            "token": encode_vector_states(token_embeddings, config.residual_stride, quantiser),
+            "position": encode_vector_states(position_embeddings, config.residual_stride, quantiser),
+        }
+        if config.store_embedding_sum:
+            embeddings_entry["sum"] = encode_vector_states(hidden_states, config.residual_stride, quantiser)
+
         data: Dict[str, object] = {
-            "embeddings": {
-                "token": encode_vector_states(token_embeddings, config.residual_stride, quantiser),
-                "position": encode_vector_states(position_embeddings, config.residual_stride, quantiser),
-                "sum": encode_vector_states(hidden_states, config.residual_stride, quantiser),
-            },
+            "embeddings": embeddings_entry,
             "layers": [],
         }
 
@@ -678,8 +727,16 @@ def run_instrumented_pass(
             attn_probs = F.softmax(attn_weights, dim=-1)
 
             layer_entry["attention_scores"] = {
-                "pre": encode_triangular(attn_weights, attention_score_quantiser),
-                "post": encode_triangular(attn_probs, attention_score_quantiser),
+                "pre": encode_triangular(
+                    attn_weights,
+                    attention_score_quantiser,
+                    config.attention_scores_format,
+                ),
+                "post": encode_triangular(
+                    attn_probs,
+                    attention_score_quantiser,
+                    config.attention_scores_format,
+                ),
             }
 
             context = torch.matmul(attn_probs, v_heads)
@@ -691,7 +748,8 @@ def run_instrumented_pass(
             layer_entry["attn_output_proj"] = encode_vector_states(attn_output, config.residual_stride, quantiser)
 
             residual = residual + attn_output
-            layer_entry["post_attn_residual"] = encode_vector_states(residual, config.residual_stride, quantiser)
+            if config.store_residual_sums:
+                layer_entry["post_attn_residual"] = encode_vector_states(residual, config.residual_stride, quantiser)
 
             ln2_norm, ln2_scaled, ln2_shifted = layer_norm_states(residual, block.ln_2)
             layer_entry["ln2"] = {
@@ -712,7 +770,8 @@ def run_instrumented_pass(
             layer_entry["mlp_down"] = encode_vector_states(mlp_down, config.residual_stride, quantiser)
 
             residual = residual + mlp_down
-            layer_entry["post_mlp_residual"] = encode_vector_states(residual, config.residual_stride, quantiser)
+            if config.store_residual_sums:
+                layer_entry["post_mlp_residual"] = encode_vector_states(residual, config.residual_stride, quantiser)
 
             data["layers"].append(layer_entry)
 
@@ -825,6 +884,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--quantisation", type=str, default="float16", choices=["float16", "float32", "int8"], help="Quantisation mode for stored activations.")
     parser.add_argument("--round-decimals", type=int, default=2, help="Round stored floats to this many decimal places.")
     parser.add_argument("--attention-score-round-decimals", type=int, default=4, help="Round stored attention scores to this many decimal places.")
+    parser.add_argument(
+        "--attention-scores-format",
+        type=str,
+        default="packed",
+        choices=["rows", "packed"],
+        help="Storage format for attention scores (packed reduces JSON overhead).",
+    )
+    parser.add_argument(
+        "--store-embedding-sum",
+        action="store_true",
+        help="Store embeddings.sum explicitly (otherwise computed in visualization).",
+    )
+    parser.add_argument(
+        "--store-residual-sums",
+        action="store_true",
+        help="Store post-attention and post-MLP residual sums explicitly (otherwise computed in visualization).",
+    )
     parser.add_argument("--logit-round-decimals", type=int, default=4, help="Round stored logits to this many decimal places (defaults to 4).")
     parser.add_argument("--prob-round-decimals", type=int, default=4, help="Round stored probabilities to this many decimal places.")
     parser.add_argument("--inspect-next-top-k", type=int, default=None, help="Print top-k next-token candidates for the prompt.")
@@ -955,6 +1031,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         quantisation=args.quantisation,
         round_decimals=args.round_decimals,
         attention_score_round_decimals=args.attention_score_round_decimals,
+        attention_scores_format=args.attention_scores_format,
+        store_embedding_sum=args.store_embedding_sum,
+        store_residual_sums=args.store_residual_sums,
     )
 
     capture = run_instrumented_pass(model, all_token_ids.to(args.device), capture_config)

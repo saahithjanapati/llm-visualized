@@ -11,7 +11,8 @@ import {
     MHA_VALUE_RANGE_MIN,
     MHA_VALUE_RANGE_MAX,
     MHA_VALUE_CLAMP_MAX,
-    MHA_VALUE_KEY_COLOR_COUNT
+    MHA_VALUE_KEY_COLOR_COUNT,
+    MHA_WEIGHTED_SUM_DOCK_OFFSET
 } from '../LayerAnimationConstants.js';
 import { getSideCopyEntry } from './laneIndex.js';
 
@@ -1214,7 +1215,7 @@ export class SelfAttentionAnimator {
         }
 
         let created = 0;
-        const dockOffset = Number.isFinite(ctx?.weightedSumDockOffset) ? ctx.weightedSumDockOffset : 30;
+        const dockOffset = Number.isFinite(ctx?.weightedSumDockOffset) ? ctx.weightedSumDockOffset : MHA_WEIGHTED_SUM_DOCK_OFFSET;
         const fallbackBaseY = Number.isFinite(ctx?.mhaPassThroughTargetY) && Number.isFinite(ctx?.mhaResultRiseOffsetY)
             ? ctx.mhaPassThroughTargetY + ctx.mhaResultRiseOffsetY - 30 + this.RED_EXTRA_RISE
             : (this.RED_EXTRA_RISE || 0);
@@ -1473,7 +1474,7 @@ export class SelfAttentionAnimator {
             ? vPosInCtx.x
             : (this.ctx.headCoords && this.ctx.headCoords[headIdx] ? this.ctx.headCoords[headIdx].v : vector.group.position.x);
         const baseY = Number.isFinite(vPosInCtx?.y) ? vPosInCtx.y : vector.group.position.y;
-        const dockOffset = Number.isFinite(this.ctx?.weightedSumDockOffset) ? this.ctx.weightedSumDockOffset : 30;
+        const dockOffset = Number.isFinite(this.ctx?.weightedSumDockOffset) ? this.ctx.weightedSumDockOffset : MHA_WEIGHTED_SUM_DOCK_OFFSET;
         const targetY = baseY + dockOffset;
         vector.group.scale.set(1, 1, 1);
 

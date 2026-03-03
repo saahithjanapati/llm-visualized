@@ -460,7 +460,7 @@ body.touch-ui * {
     font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     font-size: 11px;
     letter-spacing: 0.08em;
-    text-transform: uppercase;
+    text-transform: none;
     color: rgba(255,255,255,0.76);
 }
 #promptTokenStrip .prompt-token-strip__count {
@@ -1368,6 +1368,14 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     line-height: 1;
     white-space: nowrap;
 }
+.vector-legend-tick[data-ratio="0"]::after {
+    left: 0;
+    transform: translate(6px, 4px);
+}
+.vector-legend-tick[data-ratio="1"]::after {
+    left: 100%;
+    transform: translate(calc(-100% - 6px), 4px);
+}
 .vector-legend-tick--major::after {
     color: rgba(196,203,214,0.96);
 }
@@ -1611,6 +1619,14 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     font-size: 9px;
     line-height: 1;
     white-space: nowrap;
+}
+.attention-legend-tick[data-ratio="0"]::after {
+    left: 0;
+    transform: translate(6px, -4px);
+}
+.attention-legend-tick[data-ratio="1"]::after {
+    left: 100%;
+    transform: translate(calc(-100% - 6px), -4px);
 }
 .attention-legend-tick--major::after {
     color: rgba(196,203,214,0.96);

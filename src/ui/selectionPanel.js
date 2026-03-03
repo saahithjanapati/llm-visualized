@@ -194,6 +194,53 @@ function buildMetadata(params = 'TBD', inputDim = null, outputDim = null, length
     };
 }
 
+function normalizePreviewKeyValue(value) {
+    if (typeof value === 'number') {
+        return Number.isFinite(value) ? String(value) : '';
+    }
+    if (typeof value === 'boolean') {
+        return value ? '1' : '0';
+    }
+    return (typeof value === 'string') ? value : '';
+}
+
+function buildSelectionPreviewKey(label, selection) {
+    const info = (selection && typeof selection.info === 'object') ? selection.info : null;
+    const hit = (selection && typeof selection.hit === 'object') ? selection.hit : null;
+    const object = selection?.object || hit?.object || null;
+    const objectUuid = (object && typeof object.uuid === 'string') ? object.uuid : '';
+    const logitEntry = (info && typeof info.logitEntry === 'object') ? info.logitEntry : null;
+
+    const parts = [
+        label || '',
+        selection?.kind || '',
+        objectUuid,
+        normalizePreviewKeyValue(hit?.instanceId),
+        normalizePreviewKeyValue(findUserDataNumber(selection, 'layerIndex')),
+        normalizePreviewKeyValue(findUserDataNumber(selection, 'headIndex')),
+        normalizePreviewKeyValue(findUserDataNumber(selection, 'laneIndex')),
+        normalizePreviewKeyValue(findUserDataNumber(selection, 'laneLayoutIndex')),
+        normalizePreviewKeyValue(findUserDataNumber(selection, 'tokenIndex')),
+        normalizePreviewKeyValue(findUserDataNumber(selection, 'tokenId')),
+        normalizePreviewKeyValue(findUserDataNumber(selection, 'vectorIndex')),
+        normalizePreviewKeyValue(findUserDataNumber(selection, 'prismIndex')),
+        normalizePreviewKeyValue(findUserDataNumber(selection, 'row')),
+        normalizePreviewKeyValue(findUserDataNumber(selection, 'col')),
+        normalizePreviewKeyValue(findUserDataString(selection, 'category')),
+        normalizePreviewKeyValue(findUserDataString(selection, 'stage')),
+        normalizePreviewKeyValue(info?.mode),
+        normalizePreviewKeyValue(info?.label),
+        normalizePreviewKeyValue(info?.token_id),
+        normalizePreviewKeyValue(info?.tokenId),
+        normalizePreviewKeyValue(info?.logitIndex),
+        normalizePreviewKeyValue(info?.barIndex),
+        normalizePreviewKeyValue(logitEntry?.token_id),
+        normalizePreviewKeyValue(logitEntry?.tokenId),
+        normalizePreviewKeyValue(logitEntry?.index)
+    ];
+    return parts.join('|');
+}
+
 function isAttentionHeadVectorSelection(label, selectionInfo) {
     const lower = (label || '').toLowerCase();
     const category = String(selectionInfo?.info?.category || '').toUpperCase();
@@ -2609,6 +2656,7 @@ class SelectionPanel {
         this.isOpen = false;
         this._lastFrameTime = performance.now();
         this._rotationSpeedMult = 1;
+        this._currentPreviewSelectionKey = null;
         this._lastFitOptions = null;
         this._mobilePauseActive = false;
         this._mobileFocusActive = false;
@@ -4127,6 +4175,7 @@ class SelectionPanel {
 
     open() {
         if (!this.isReady) return;
+        const wasOpen = this.isOpen;
         this.isOpen = true;
         this.panel.classList.add('is-open');
         this.hudStack?.classList.add('detail-open');
@@ -4134,10 +4183,12 @@ class SelectionPanel {
         this.panel.setAttribute('aria-hidden', 'false');
         this._updateMobileState();
         this._syncSceneShift();
-        if (this._pendingReveal) {
-            this._pendingRevealSize = null;
+        if (!wasOpen) {
+            if (this._pendingReveal) {
+                this._pendingRevealSize = null;
+            }
+            this._scheduleResize();
         }
-        this._scheduleResize();
         this._scheduleSelectionEquationFit();
         this._scheduleDimensionLabelFit();
     }
@@ -4482,6 +4533,7 @@ class SelectionPanel {
         const displayLabel = simplifyLayerNormParamDisplayLabel(label, selection);
         const lower = label.toLowerCase();
         const hidePreviewForSelection = false;
+        const previewSelectionKey = hidePreviewForSelection ? null : buildSelectionPreviewKey(label, selection);
         const metadata = resolveMetadata(label, selection.kind, selection);
         const logitHeader = resolveLogitSelectionHeader(label, selection);
         this.panel.classList.toggle('is-preview-hidden', hidePreviewForSelection);
@@ -4579,7 +4631,11 @@ class SelectionPanel {
         }
         this._updateVectorLegend(selection);
 
-        if (this.currentPreview) {
+        const shouldReusePreview = !!previewSelectionKey
+            && !!this.currentPreview
+            && this._currentPreviewSelectionKey === previewSelectionKey;
+
+        if (!shouldReusePreview && this.currentPreview) {
             this.scene.remove(this.currentPreview);
             if (this.currentDispose) {
                 try { this.currentDispose(); } catch (_) { /* no-op */ }
@@ -4587,16 +4643,20 @@ class SelectionPanel {
             this.currentPreview = null;
             this.currentDispose = null;
             this.currentAnimator = null;
+            this._currentPreviewSelectionKey = null;
         }
 
-        const preview = hidePreviewForSelection ? null : resolvePreviewObject(label, selection);
-        if (preview?.object) {
+        const preview = shouldReusePreview
+            ? null
+            : (hidePreviewForSelection ? null : resolvePreviewObject(label, selection));
+        if (!shouldReusePreview && preview?.object) {
             const previewRoot = new THREE.Group();
             previewRoot.add(preview.object);
             centerPreviewPivot(preview.object);
             this.currentPreview = previewRoot;
             this.currentDispose = (typeof preview.dispose === 'function') ? preview.dispose : null;
             this.currentAnimator = (typeof preview.animate === 'function') ? preview.animate : null;
+            this._currentPreviewSelectionKey = previewSelectionKey;
             const desiredRotation = new THREE.Euler(PREVIEW_BASE_TILT_X, PREVIEW_BASE_ROTATION_Y, 0);
             if (this.currentPreview?.rotation) {
                 this.currentPreview.rotation.set(0, 0, 0);
@@ -4633,10 +4693,11 @@ class SelectionPanel {
                 this.currentPreview.rotation.copy(desiredRotation);
             }
             this.scene.add(this.currentPreview);
-        } else {
+        } else if (!shouldReusePreview) {
             this.currentPreview = null;
             this.currentDispose = (typeof preview?.dispose === 'function') ? preview.dispose : null;
             this.currentAnimator = (typeof preview?.animate === 'function') ? preview.animate : null;
+            this._currentPreviewSelectionKey = null;
             this._rotationSpeedMult = 1;
             this._lastFitOptions = null;
             this._pendingReveal = false;

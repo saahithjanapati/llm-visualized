@@ -9,7 +9,7 @@ import { TRAIL_COLOR, TRAIL_MIN_SEGMENT_DISTANCE } from '../utils/trailConstants
 
 import { buildActivationData, applyActivationDataToVector } from '../utils/activationMetadata.js';
 import { buildHueRangeOptions, mapValueToHueRange } from '../utils/colors.js';
-import { MHSA_MATRIX_INITIAL_RESTING_COLOR, MHSA_BRIGHT_GREEN, MHSA_DARK_TINTED_GREEN, MHSA_BRIGHT_BLUE, MHSA_DARK_TINTED_BLUE, MHSA_BRIGHT_RED, MHSA_DARK_TINTED_RED, MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR, MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW, MHA_OUTPUT_PROJECTION_MATRIX_PARAMS, MHA_OUTPUT_PROJECTION_MATRIX_COLOR, MHA_VALUE_SPECTRUM_COLOR, MHA_VALUE_HUE_SPREAD, MHA_VALUE_LIGHTNESS_MIN, MHA_VALUE_LIGHTNESS_MAX, MHA_VALUE_RANGE_MIN, MHA_VALUE_RANGE_MAX, MHA_VALUE_CLAMP_MAX, MHA_VALUE_KEY_COLOR_COUNT } from './LayerAnimationConstants.js';
+import { MHSA_MATRIX_INITIAL_RESTING_COLOR, MHSA_BRIGHT_GREEN, MHSA_DARK_TINTED_GREEN, MHSA_BRIGHT_BLUE, MHSA_DARK_TINTED_BLUE, MHSA_BRIGHT_RED, MHSA_DARK_TINTED_RED, MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR, MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW, MHA_OUTPUT_PROJECTION_MATRIX_PARAMS, MHA_OUTPUT_PROJECTION_MATRIX_COLOR, MHA_VALUE_SPECTRUM_COLOR, MHA_VALUE_HUE_SPREAD, MHA_VALUE_LIGHTNESS_MIN, MHA_VALUE_LIGHTNESS_MAX, MHA_VALUE_RANGE_MIN, MHA_VALUE_RANGE_MAX, MHA_VALUE_CLAMP_MAX, MHA_VALUE_KEY_COLOR_COUNT, MHA_WEIGHTED_SUM_DOCK_OFFSET } from './LayerAnimationConstants.js';
 import { INACTIVE_COMPONENT_COLOR, MHSA_DUPLICATE_VECTOR_RISE_SPEED, MHSA_PASS_THROUGH_TOTAL_DURATION_MS, MHSA_RESULT_RISE_OFFSET_Y, MHSA_HEAD_VECTOR_STOP_BELOW, MHA_RESULT_RISE_DURATION_BASE_MS, DECORATIVE_FADE_MS, DECORATIVE_FADE_DELAY_MS, MERGE_TO_ROW_DELAY_AFTER_FADE_MS, HEAD_COLOR_TRANSITION_MS, MERGE_POST_COLOR_TRANSITION_DELAY_MS, MERGE_EXTRA_BUFFER_MS, OUTPUT_PROJ_STAGE1_MS, OUTPUT_PROJ_STAGE2_MS, OUTPUT_PROJ_STAGE3_MS, GLOBAL_ANIM_SPEED_MULT, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY, SKIP_TRAIL_FADE_IN_MS, SA_RED_EXTRA_RISE } from '../utils/constants.js';
 import {
     // Constants needed for setup & animation
@@ -301,7 +301,7 @@ export class MHSAAnimation {
         // Self-attention helper (placeholder)
         this.selfAttentionAnimator = new SelfAttentionAnimator(this);
         // Dock offset used when weighted sums park above V vectors.
-        this.weightedSumDockOffset = 30;
+        this.weightedSumDockOffset = MHA_WEIGHTED_SUM_DOCK_OFFSET;
 
         // Raise the output projection matrix to the weighted-sum row height immediately
         // so it does not jump later during concatenation.
@@ -1903,18 +1903,19 @@ export class MHSAAnimation {
         //   Begin merge-to-row-vector phase after fade-in delay
         // ------------------------------------------------------
         if (typeof TWEEN !== 'undefined') {
+            const mergeDelayMs = MERGE_TO_ROW_DELAY_AFTER_FADE_MS / GLOBAL_ANIM_SPEED_MULT;
             if (this.enableSelfAttentionAnimation && this.selfAttentionAnimator) {
                 // Wait for the conveyor to finish so all weighted sums exist
                 this.selfAttentionAnimator.start(() => {
                     this._scheduleAfterDelay(() => {
                         this._startMergeToRowVectors();
-                    }, MERGE_TO_ROW_DELAY_AFTER_FADE_MS / GLOBAL_ANIM_SPEED_MULT);
+                    }, mergeDelayMs);
                 });
             } else {
                 // Start after decorative fade-in completes
                 this._scheduleAfterDelay(() => {
                     this._startMergeToRowVectors();
-                }, MERGE_TO_ROW_DELAY_AFTER_FADE_MS / GLOBAL_ANIM_SPEED_MULT);
+                }, mergeDelayMs);
             }
         } else if (this._tempDecorativeVecs && this._tempDecorativeVecs.length) {
             this._startMergeToRowVectors();

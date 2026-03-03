@@ -22,7 +22,7 @@ function buildDom() {
         root.dataset.visible = 'false';
         root.innerHTML = `
             <div class="prompt-token-strip__header">
-                <span class="prompt-token-strip__title">Tokenized prompt</span>
+                <span class="prompt-token-strip__title">Tokenized Prompt</span>
                 <span class="prompt-token-strip__count" data-role="count"></span>
             </div>
             <div class="prompt-token-strip__tokens" data-role="tokens"></div>

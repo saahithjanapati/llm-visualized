@@ -49,7 +49,7 @@ export const LN_PARAMS = {
 export const NUM_HEAD_SETS_LAYER = 12;
 
 /** Horizontal gap between adjacent attention head sets. */
-export const HEAD_SET_GAP_LAYER = 10;
+export const HEAD_SET_GAP_LAYER = 12;
 
 /** Horizontal center-to-center spacing for Q, K, V matrices within a single attention head. */
 export const MHA_INTERNAL_MATRIX_SPACING = 37.5;
@@ -145,6 +145,8 @@ export const MHA_VALUE_RANGE_MIN = -2;
 export const MHA_VALUE_RANGE_MAX = 2;
 export const MHA_VALUE_CLAMP_MAX = 0.5;
 export const MHA_VALUE_KEY_COLOR_COUNT = 5;
+// Vertical gap between V vectors and their attention-weighted sum vectors.
+export const MHA_WEIGHTED_SUM_DOCK_OFFSET = 40;
 
 /** Active colour of the output-projection matrix that follows MHSA. */
 export const MHA_OUTPUT_PROJECTION_MATRIX_COLOR = 0x9C27B0;

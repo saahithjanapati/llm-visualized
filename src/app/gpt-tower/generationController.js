@@ -175,8 +175,6 @@ export function initGenerationController({
     let lastTick = null;
     let rafId = null;
     let chipCleanup = null;
-    const PASS_JUMP_NEXT = 'next';
-    let pendingPassJump = null;
     let kvModeEnabled = !!appState.kvCacheModeEnabled;
     let kvSessionBaseLaneCount = kvModeEnabled
         ? kvPrefillBaseLaneCount
@@ -278,10 +276,6 @@ export function initGenerationController({
 
     const clearOverlay = () => {
         overlay.root.dataset.visible = 'false';
-    };
-
-    const clearPendingPassJump = () => {
-        pendingPassJump = null;
     };
 
     const updateNextTokenButton = () => {
@@ -495,7 +489,6 @@ export function initGenerationController({
         passComplete = false;
         autoAdvancePaused = false;
         countdownActive = false;
-        clearPendingPassJump();
         remainingMs = countdownMs;
         lastTick = null;
         clearOverlay();
@@ -583,19 +576,21 @@ export function initGenerationController({
         };
     }
 
-    const advanceToNextPass = () => {
-        clearPendingPassJump();
+    const advanceToNextPass = ({ fromCompletedPass = true } = {}) => {
         if (!hasNextForwardPass()) {
             markNoFurtherPasses();
             return false;
         }
         const nextLane = Math.min(maxLaneCount, currentLaneCount + 1);
-        rebuildPass({ laneCount: nextLane, resetPipeline: true, fromCompletedPass: true });
+        rebuildPass({
+            laneCount: nextLane,
+            resetPipeline: true,
+            fromCompletedPass: !!fromCompletedPass
+        });
         return true;
     };
 
     const advanceToLastPass = ({ fromCompletedPass = true } = {}) => {
-        clearPendingPassJump();
         if (!hasLastForwardPass()) {
             markNoFurtherPasses();
             return false;
@@ -612,36 +607,20 @@ export function initGenerationController({
         if (!hasNextForwardPass()) {
             return false;
         }
-        if (!kvModeEnabled) {
-            return advanceToNextPass();
-        }
-        if (passComplete) {
-            return advanceToNextPass();
-        }
-
-        const nextLane = Math.min(maxLaneCount, currentLaneCount + 1);
-        const nextPassPlan = resolvePassPlan(nextLane);
-        applyTrailRuntimeStyleForPass(nextPassPlan);
-
-        // In KV decode mode, jumping mid-pass first fast-forwards to the end of
-        // the current pass so cache capture semantics stay consistent.
-        pendingPassJump = PASS_JUMP_NEXT;
+        // "Next pass" is an immediate jump. If the current pass is already
+        // complete we preserve/cache from visuals; otherwise we rebuild the
+        // next pass and hydrate decode cache from activation data.
+        const currentPassComplete = passComplete || (
+            typeof pipeline?.isForwardPassComplete === 'function' && pipeline.isForwardPassComplete()
+        );
         prepareUiForImmediatePassJump();
-
-        if (typeof pipeline.skipToEndForwardPass === 'function') {
-            pipeline.skipToEndForwardPass();
-            return true;
-        }
-
-        clearPendingPassJump();
-        return advanceToNextPass();
+        return advanceToNextPass({ fromCompletedPass: currentPassComplete });
     };
 
     const requestLastForwardPass = () => {
         if (!hasLastForwardPass()) {
             return false;
         }
-        clearPendingPassJump();
         prepareUiForImmediatePassJump();
         const currentPassComplete = passComplete || (
             typeof pipeline?.isForwardPassComplete === 'function' && pipeline.isForwardPassComplete()
@@ -687,11 +666,7 @@ export function initGenerationController({
                 remainingMs = countdownMs;
                 countdownActive = !autoAdvancePaused;
                 lastTick = now;
-                if (pendingPassJump === PASS_JUMP_NEXT) {
-                    advanceToNextPass();
-                } else {
-                    updateOverlay();
-                }
+                updateOverlay();
             }
         } else if (countdownActive) {
             const paused = appState.userPaused || appState.modalPaused;
@@ -720,8 +695,8 @@ export function initGenerationController({
         requestLastForwardPass,
         hasNextForwardPass,
         hasLastForwardPass,
-        isForwardPassJumpPending: () => pendingPassJump !== null,
-        isNextForwardPassPending: () => pendingPassJump !== null,
+        isForwardPassJumpPending: () => false,
+        isNextForwardPassPending: () => false,
         dispose: () => {
             if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
                 window.removeEventListener('kvCacheModeChanged', handleKvCacheModeChanged);

@@ -92,6 +92,29 @@ function normalizeTokenIdArray(values) {
     });
 }
 
+function inferTriangularTokenCount(flatLength) {
+    const length = Number(flatLength);
+    if (!Number.isFinite(length) || length <= 0) return 0;
+    const n = Math.floor((Math.sqrt((8 * length) + 1) - 1) / 2);
+    return (n * (n + 1)) / 2 === length ? n : 0;
+}
+
+function addVectors(a, b) {
+    const left = Array.isArray(a) ? a : null;
+    const right = Array.isArray(b) ? b : null;
+    if (!left && !right) return null;
+    if (!left) return right.slice();
+    if (!right) return left.slice();
+    const length = Math.max(left.length, right.length);
+    const out = new Array(length).fill(0);
+    for (let i = 0; i < length; i += 1) {
+        const lhs = Number.isFinite(left[i]) ? left[i] : 0;
+        const rhs = Number.isFinite(right[i]) ? right[i] : 0;
+        out[i] = lhs + rhs;
+    }
+    return out;
+}
+
 export class CaptureActivationSource {
     constructor(data = {}) {
         this.data = data || {};
@@ -115,6 +138,7 @@ export class CaptureActivationSource {
         this._laneTokenCache = new Map();
         this._vectorCache = new Map();
         this._attentionRowCache = new Map();
+        this._attentionHeadCache = new Map();
         this._qkvScalarCache = new Map();
         this._baseVectorLength = null;
     }
@@ -228,6 +252,16 @@ export class CaptureActivationSource {
     }
 
     getEmbedding(kind, tokenIndex, targetLength = VECTOR_LENGTH_PRISM) {
+        const safeTokenIndex = Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : 0;
+        if (kind === 'sum') {
+            const cacheKey = buildCacheKey(['embedding', kind, safeTokenIndex, targetLength]);
+            return this._getCached(this._vectorCache, cacheKey, () => {
+                const token = this.getEmbedding('token', tokenIndex, targetLength);
+                const position = this.getEmbedding('position', tokenIndex, targetLength);
+                const combined = addVectors(token, position);
+                return combined ? normalizeVector(combined, targetLength, true) : null;
+            });
+        }
         const list = this.embeddings?.[kind];
         if (!Array.isArray(list) || !list.length) return null;
         const idx = clampIndex(tokenIndex, list.length - 1);
@@ -306,11 +340,51 @@ export class CaptureActivationSource {
         const heads = scores && Array.isArray(scores[mode]) ? scores[mode] : null;
         if (!heads || !heads.length) return null;
         const hIdx = clampIndex(headIndex, heads.length - 1);
-        const tokens = Array.isArray(heads[hIdx]) ? heads[hIdx] : null;
-        if (!tokens || !tokens.length) return null;
-        const tIdx = clampIndex(tokenIndex, tokens.length - 1);
+        const headEntry = heads[hIdx];
+        const tIdx = clampIndex(tokenIndex, Number.MAX_SAFE_INTEGER);
         const cacheKey = buildCacheKey(['attn', mode, layerIndex, hIdx, tIdx]);
-        return this._getCached(this._attentionRowCache, cacheKey, () => decodeVector(tokens[tIdx]));
+        return this._getCached(this._attentionRowCache, cacheKey, () => {
+            if (Array.isArray(headEntry)) {
+                if (!headEntry.length) return null;
+                const rowIdx = clampIndex(tIdx, headEntry.length - 1);
+                return decodeVector(headEntry[rowIdx]);
+            }
+            if (!headEntry || typeof headEntry !== 'object' || !Array.isArray(headEntry.v)) return null;
+            const packedCacheKey = buildCacheKey(['attn_packed', mode, layerIndex, hIdx]);
+            const packedHead = this._getCached(this._attentionHeadCache, packedCacheKey, () => {
+                const values = cleanArray(headEntry.v);
+                const explicitCount = Number(headEntry.n);
+                const tokenCount = Number.isFinite(explicitCount) && explicitCount > 0
+                    ? Math.floor(explicitCount)
+                    : inferTriangularTokenCount(values.length);
+                if (!tokenCount) return null;
+                const globalScale = Number(headEntry.s);
+                const scaledValues = Number.isFinite(globalScale) && globalScale !== 1
+                    ? values.map((value) => value * globalScale)
+                    : values;
+                const rowScales = Array.isArray(headEntry.rs) ? cleanArray(headEntry.rs) : null;
+                return {
+                    values: scaledValues,
+                    tokenCount,
+                    rowScales,
+                };
+            });
+            if (!packedHead || !packedHead.values.length) return null;
+            const rowIdx = clampIndex(tIdx, packedHead.tokenCount - 1);
+            const start = (rowIdx * (rowIdx + 1)) / 2;
+            const end = start + rowIdx + 1;
+            if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+            if (start < 0 || end > packedHead.values.length) return null;
+            const row = packedHead.values.slice(start, end);
+            if (packedHead.rowScales && packedHead.rowScales.length) {
+                const scaleIdx = clampIndex(rowIdx, packedHead.rowScales.length - 1);
+                const rowScale = packedHead.rowScales[scaleIdx];
+                if (Number.isFinite(rowScale) && rowScale !== 1) {
+                    for (let i = 0; i < row.length; i += 1) row[i] *= rowScale;
+                }
+            }
+            return row;
+        });
     }
 
     getAttentionScore(layerIndex, mode, headIndex, queryTokenIndex, keyTokenIndex) {
@@ -334,12 +408,17 @@ export class CaptureActivationSource {
     getPostAttentionResidual(layerIndex, tokenIndex, targetLength = VECTOR_LENGTH_PRISM) {
         const layer = this.layers[layerIndex];
         const arr = layer && Array.isArray(layer.post_attn_residual) ? layer.post_attn_residual : null;
-        if (!arr || !arr.length) return null;
-        const idx = clampIndex(tokenIndex, arr.length - 1);
+        const idx = arr && arr.length ? clampIndex(tokenIndex, arr.length - 1) : clampIndex(tokenIndex, Number.MAX_SAFE_INTEGER);
         const cacheKey = buildCacheKey(['post_attn_residual', layerIndex, idx, targetLength]);
-        return this._getCached(this._vectorCache, cacheKey, () => (
-            normalizeVector(decodeVector(arr[idx]), targetLength, true)
-        ));
+        return this._getCached(this._vectorCache, cacheKey, () => {
+            if (arr && arr.length) {
+                return normalizeVector(decodeVector(arr[idx]), targetLength, true);
+            }
+            const incoming = this.getLayerIncoming(layerIndex, tokenIndex, targetLength);
+            const attnOutput = this.getAttentionOutputProjection(layerIndex, tokenIndex, targetLength);
+            const combined = addVectors(incoming, attnOutput);
+            return combined ? normalizeVector(combined, targetLength, true) : null;
+        });
     }
 
     getMlpUp(layerIndex, tokenIndex, targetLength) {
@@ -378,12 +457,17 @@ export class CaptureActivationSource {
     getPostMlpResidual(layerIndex, tokenIndex, targetLength = VECTOR_LENGTH_PRISM) {
         const layer = this.layers[layerIndex];
         const arr = layer && Array.isArray(layer.post_mlp_residual) ? layer.post_mlp_residual : null;
-        if (!arr || !arr.length) return null;
-        const idx = clampIndex(tokenIndex, arr.length - 1);
+        const idx = arr && arr.length ? clampIndex(tokenIndex, arr.length - 1) : clampIndex(tokenIndex, Number.MAX_SAFE_INTEGER);
         const cacheKey = buildCacheKey(['post_mlp_residual', layerIndex, idx, targetLength]);
-        return this._getCached(this._vectorCache, cacheKey, () => (
-            normalizeVector(decodeVector(arr[idx]), targetLength)
-        ));
+        return this._getCached(this._vectorCache, cacheKey, () => {
+            if (arr && arr.length) {
+                return normalizeVector(decodeVector(arr[idx]), targetLength);
+            }
+            const postAttention = this.getPostAttentionResidual(layerIndex, tokenIndex, targetLength);
+            const mlpDown = this.getMlpDown(layerIndex, tokenIndex, targetLength);
+            const combined = addVectors(postAttention, mlpDown);
+            return combined ? normalizeVector(combined, targetLength, true) : null;
+        });
     }
 }
 
