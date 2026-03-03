@@ -1,4 +1,9 @@
 import * as THREE from 'three';
+import { Line2 } from 'three/examples/jsm/lines/Line2.js';
+import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
+import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
 import { TRAIL_COLOR, TRAIL_LINE_WIDTH, TRAIL_OPACITY, TRAIL_MAX_SEGMENTS, scaleOpacityForDisplay, scaleLineWidthForDisplay } from './trailConstants.js';
 import { HIDE_INSTANCE_Y_OFFSET } from './constants.js';
 import { perfStats } from './perfStats.js';
@@ -18,8 +23,65 @@ const _snapPrev = new THREE.Vector3();
 const _snapDir = new THREE.Vector3();
 const _trimLast = new THREE.Vector3();
 const _stepTarget = new THREE.Vector3();
+const WIDE_LINE_HIDDEN_POSITIONS = new Float32Array([
+    0, HIDE_INSTANCE_Y_OFFSET, 0,
+    0, HIDE_INSTANCE_Y_OFFSET, 0
+]);
 
 let GLOBAL_MAX_STEP_DISTANCE = 0;
+const USE_WIDE_TRAIL_LINES = false;
+
+function getWideLineResolution() {
+    const width = (typeof window !== 'undefined' && Number.isFinite(window.innerWidth) && window.innerWidth > 0)
+        ? window.innerWidth
+        : 1920;
+    const height = (typeof window !== 'undefined' && Number.isFinite(window.innerHeight) && window.innerHeight > 0)
+        ? window.innerHeight
+        : 1080;
+    return { width, height };
+}
+
+function updateWideLineMaterialResolution(material) {
+    if (!material || !material.resolution || typeof material.resolution.set !== 'function') return;
+    const { width, height } = getWideLineResolution();
+    material.resolution.set(width, height);
+}
+
+function createTrailMaterial(color, effectiveWidth, effectiveOpacity) {
+    if (!USE_WIDE_TRAIL_LINES) {
+        return new THREE.LineBasicMaterial({
+            color,
+            linewidth: effectiveWidth,
+            transparent: effectiveOpacity < 1.0,
+            opacity: effectiveOpacity,
+            depthWrite: false,
+            fog: false,
+            toneMapped: false
+        });
+    }
+    const material = new LineMaterial({
+        color,
+        linewidth: effectiveWidth,
+        transparent: effectiveOpacity < 1.0,
+        opacity: effectiveOpacity,
+        depthWrite: false,
+        fog: false,
+        toneMapped: false
+    });
+    updateWideLineMaterialResolution(material);
+    return material;
+}
+
+function applyTrailMaterialScale(material, effectiveOpacity, effectiveWidth) {
+    if (!material) return;
+    material.opacity = effectiveOpacity;
+    material.transparent = effectiveOpacity < 1.0;
+    if (Number.isFinite(effectiveWidth) && typeof material.linewidth === 'number') {
+        material.linewidth = effectiveWidth;
+    }
+    updateWideLineMaterialResolution(material);
+    material.needsUpdate = true;
+}
 
 function resolveTrailPassId(root) {
     let node = root;
@@ -50,6 +112,10 @@ export class StraightLineTrail {
         this._color = color;
         this._opacity = opacity;
         this._lineWidth = Number.isFinite(lineWidth) ? lineWidth : TRAIL_LINE_WIDTH;
+        this._useWideLine = USE_WIDE_TRAIL_LINES;
+        const maxSegmentsSafe = Number.isFinite(maxSegments)
+            ? Math.max(1, Math.floor(maxSegments))
+            : TRAIL_MAX_SEGMENTS;
         const clampedMin = Math.max(0, minSegmentDistance);
         this._minSegmentDistanceSq = clampedMin * clampedMin;
         this._maxStepDistance = 0;
@@ -57,21 +123,27 @@ export class StraightLineTrail {
         // Preallocate vertex buffer (N segments ⇒ N+1 vertices; we duplicate the
         // first vertex to create a zero-length segment so drawRange ≥2).  Each
         // vertex is 3 floats.
-        const maxVertices = maxSegments + 1;
+        const maxVertices = maxSegmentsSafe + 1;
         this._positions = new Float32Array(maxVertices * 3);
-        this._attr = new THREE.BufferAttribute(this._positions, 3).setUsage(THREE.DynamicDrawUsage);
-
-        this._geometry = new THREE.BufferGeometry();
-        this._geometry.setAttribute('position', this._attr);
-        this._geometry.setDrawRange(0, 0); // nothing yet
+        this._attr = null;
+        if (this._useWideLine) {
+            this._geometry = new LineGeometry();
+            this._geometry.setPositions(WIDE_LINE_HIDDEN_POSITIONS);
+        } else {
+            this._attr = new THREE.BufferAttribute(this._positions, 3).setUsage(THREE.DynamicDrawUsage);
+            this._geometry = new THREE.BufferGeometry();
+            this._geometry.setAttribute('position', this._attr);
+            this._geometry.setDrawRange(0, 0); // nothing yet
+        }
 
         const effectiveOpacity = scaleOpacityForDisplay(this._opacity);
         const effectiveWidth = scaleLineWidthForDisplay(this._lineWidth);
-        // Keep depthWrite disabled for transparent lines to avoid occluding scene content
-        this._material = new THREE.LineBasicMaterial({ color: this._color, linewidth: effectiveWidth, transparent: effectiveOpacity < 1.0, opacity: effectiveOpacity, depthWrite: false, fog: false, toneMapped: false });
+        this._material = createTrailMaterial(this._color, effectiveWidth, effectiveOpacity);
         // Ensure trails stay visible during camera fly-throughs by bypassing frustum
         // culling; depth testing remains enabled so solids continue to occlude trails.
-        this._line = new THREE.Line(this._geometry, this._material);
+        this._line = this._useWideLine
+            ? new Line2(this._geometry, this._material)
+            : new THREE.Line(this._geometry, this._material);
         this._line.frustumCulled = false;
         // Tag for discovery and back-reference
         this._line.userData.isTrail = true;
@@ -118,8 +190,7 @@ export class StraightLineTrail {
         this._writeVertex(0, pos);
         this._writeVertex(1, pos);
         this._vertexCount = 2;
-        this._geometry.setDrawRange(0, this._vertexCount);
-        this._attr.needsUpdate = true;
+        this._syncGeometryFromPositions();
         this._prevPos.copy(pos);
         this._currentDir = null;
     }
@@ -137,8 +208,7 @@ export class StraightLineTrail {
         this._writeVertex(0, pos);
         this._writeVertex(1, pos);
         this._vertexCount = 2;
-        this._geometry.setDrawRange(0, this._vertexCount);
-        this._attr.needsUpdate = true;
+        this._syncGeometryFromPositions();
     }
 
     update(pos) {
@@ -185,13 +255,12 @@ export class StraightLineTrail {
             // direction changed – append new vertex
             this._currentDir.copy(dir);
             // Ensure capacity; if we exceed, silently skip to avoid crashes.
-            if (this._vertexCount >= this._attr.count) return;
+            if (!this._useWideLine && this._vertexCount >= this._attr.count) return;
             this._writeVertex(this._vertexCount, targetPos);
             this._vertexCount += 1;
-            this._geometry.setDrawRange(0, this._vertexCount);
         }
 
-        this._attr.needsUpdate = true;
+        this._syncGeometryFromPositions();
         if (perfStats.enabled) {
             perfStats.inc('trailUpdates');
         }
@@ -230,7 +299,7 @@ export class StraightLineTrail {
             }
         }
         this._prevPos.copy(pos);
-        this._attr.needsUpdate = true;
+        this._syncGeometryFromPositions();
     }
 
     dispose() {
@@ -263,14 +332,7 @@ export class StraightLineTrail {
     refreshDisplayScale() {
         const effOpacity = scaleOpacityForDisplay(this._opacity);
         const effWidth = scaleLineWidthForDisplay(this._lineWidth);
-        if (this._material) {
-            this._material.opacity = effOpacity;
-            this._material.transparent = effOpacity < 1.0;
-            if (Number.isFinite(effWidth)) {
-                this._material.linewidth = effWidth;
-            }
-            this._material.needsUpdate = true;
-        }
+        applyTrailMaterialScale(this._material, effOpacity, effWidth);
     }
 
     /** Return current base opacity prior to DPR scaling. */
@@ -373,8 +435,7 @@ export class StraightLineTrail {
             this._positions[dstIdx + 2] = this._positions[srcIdx + 2];
         }
         this._vertexCount = verticesToKeep;
-        this._geometry.setDrawRange(0, this._vertexCount);
-        this._attr.needsUpdate = true;
+        this._syncGeometryFromPositions();
         const lastIdx = (this._vertexCount - 1) * 3;
         this._prevPos.set(
             this._positions[lastIdx + 0],
@@ -389,6 +450,21 @@ export class StraightLineTrail {
     // ------------------------------------------------------------------
     // Internal helpers
     // ------------------------------------------------------------------
+
+    _syncGeometryFromPositions() {
+        if (!this._geometry) return;
+        if (this._useWideLine) {
+            updateWideLineMaterialResolution(this._material);
+            if (typeof this._geometry.setPositions === 'function') {
+                this._geometry.setPositions(this._positions.subarray(0, this._vertexCount * 3));
+            }
+            return;
+        }
+        this._geometry.setDrawRange(0, this._vertexCount);
+        if (this._attr) {
+            this._attr.needsUpdate = true;
+        }
+    }
 
     _writeVertex(index, vec3) {
         const i3 = index * 3;
@@ -565,18 +641,30 @@ export function mergeTrailsIntoLineSegments(trails, scene, color = TRAIL_COLOR, 
         offset += c.length;
     }
 
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setDrawRange(0, positions.length / 3);
-
     const effOpacity = scaleOpacityForDisplay(opacity);
     const effWidth = scaleLineWidthForDisplay(lineWidth);
-    // Keep depthWrite disabled for static segments as well to prevent occlusion artifacts
-    const material = new THREE.LineBasicMaterial({ color, linewidth: effWidth, transparent: effOpacity < 1.0, opacity: effOpacity, depthWrite: false, fog: false, toneMapped: false });
-    if (options && Number.isFinite(options.fadeInMs) && options.fadeInMs > 0) {
-        applyFadeIn(material, effOpacity, options.fadeInMs);
+    let geometry;
+    let merged;
+    if (USE_WIDE_TRAIL_LINES) {
+        geometry = new LineSegmentsGeometry();
+        geometry.setPositions(positions);
+        const material = createTrailMaterial(color, effWidth, effOpacity);
+        if (options && Number.isFinite(options.fadeInMs) && options.fadeInMs > 0) {
+            applyFadeIn(material, effOpacity, options.fadeInMs);
+        }
+        merged = new LineSegments2(geometry, material);
+    } else {
+        geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setDrawRange(0, positions.length / 3);
+        // Keep depthWrite disabled for static segments as well to prevent occlusion artifacts
+        const material = createTrailMaterial(color, effWidth, effOpacity);
+        if (options && Number.isFinite(options.fadeInMs) && options.fadeInMs > 0) {
+            applyFadeIn(material, effOpacity, options.fadeInMs);
+        }
+        merged = new THREE.LineSegments(geometry, material);
     }
-    const merged = new THREE.LineSegments(geometry, material);
+    merged.frustumCulled = false;
     merged.userData.isTrail = true;
     merged.userData.trailMerged = true;
     merged.userData.trailBaseOpacity = opacity;
@@ -611,16 +699,29 @@ export function buildMergedLineSegmentsFromSegments(segmentsList, scene, color =
         positions.set(seg, offset);
         offset += seg.length;
     }
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setDrawRange(0, positions.length / 3);
     const effOpacity2 = scaleOpacityForDisplay(opacity);
     const effWidth2 = scaleLineWidthForDisplay(lineWidth);
-    const material = new THREE.LineBasicMaterial({ color, linewidth: effWidth2, transparent: effOpacity2 < 1.0, opacity: effOpacity2, depthWrite: false, fog: false, toneMapped: false });
-    if (options && Number.isFinite(options.fadeInMs) && options.fadeInMs > 0) {
-        applyFadeIn(material, effOpacity2, options.fadeInMs);
+    let geometry;
+    let merged;
+    if (USE_WIDE_TRAIL_LINES) {
+        geometry = new LineSegmentsGeometry();
+        geometry.setPositions(positions);
+        const material = createTrailMaterial(color, effWidth2, effOpacity2);
+        if (options && Number.isFinite(options.fadeInMs) && options.fadeInMs > 0) {
+            applyFadeIn(material, effOpacity2, options.fadeInMs);
+        }
+        merged = new LineSegments2(geometry, material);
+    } else {
+        geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setDrawRange(0, positions.length / 3);
+        const material = createTrailMaterial(color, effWidth2, effOpacity2);
+        if (options && Number.isFinite(options.fadeInMs) && options.fadeInMs > 0) {
+            applyFadeIn(material, effOpacity2, options.fadeInMs);
+        }
+        merged = new THREE.LineSegments(geometry, material);
     }
-    const merged = new THREE.LineSegments(geometry, material);
+    merged.frustumCulled = false;
     merged.userData.isTrail = true;
     merged.userData.trailMerged = true;
     merged.userData.trailBaseOpacity = opacity;
@@ -673,15 +774,7 @@ export function refreshTrailDisplayScales(root) {
         const effOpacity = scaleOpacityForDisplay(baseOpacity);
         const effWidth = scaleLineWidthForDisplay(baseLineWidth);
         materials.forEach((mat) => {
-            if (!mat) return;
-            if (Number.isFinite(effOpacity)) {
-                mat.opacity = effOpacity;
-                mat.transparent = effOpacity < 1.0;
-            }
-            if (Number.isFinite(effWidth)) {
-                mat.linewidth = effWidth;
-            }
-            mat.needsUpdate = true;
+            applyTrailMaterialScale(mat, effOpacity, effWidth);
         });
         refreshed += 1;
     });

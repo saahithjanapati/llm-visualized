@@ -68,7 +68,7 @@ export function setTrailLineWidthRuntimeMultiplier(multiplier = 1) {
         TRAIL_LINE_WIDTH_RUNTIME_MULTIPLIER = 1.0;
         return TRAIL_LINE_WIDTH_RUNTIME_MULTIPLIER;
     }
-    TRAIL_LINE_WIDTH_RUNTIME_MULTIPLIER = Math.min(3.0, Math.max(0.5, next));
+    TRAIL_LINE_WIDTH_RUNTIME_MULTIPLIER = Math.min(6.0, Math.max(0.5, next));
     return TRAIL_LINE_WIDTH_RUNTIME_MULTIPLIER;
 }
 

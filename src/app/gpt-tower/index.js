@@ -176,12 +176,10 @@ initSkipMenu(pipeline);
 initSettingsModal(pipeline);
 
 const followModeBtn = document.getElementById('followModeBtn');
-const followSettingsToggle = document.getElementById('toggleAutoCamera');
 const followModeControls = initFollowModeControls({
     pipeline,
     appState,
-    followModeBtn,
-    followSettingsToggle
+    followModeBtn
 });
 
 const topControls = document.getElementById('topControls');

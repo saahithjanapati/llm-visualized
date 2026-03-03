@@ -1,4 +1,4 @@
-export function initFollowModeControls({ pipeline, appState, followModeBtn, followSettingsToggle }) {
+export function initFollowModeControls({ pipeline, appState, followModeBtn }) {
     const updateFollowButton = (enabled) => {
         if (!followModeBtn) return;
         const isOn = !!enabled;
@@ -14,13 +14,11 @@ export function initFollowModeControls({ pipeline, appState, followModeBtn, foll
         const next = !!enabled;
         if (appState.autoCameraFollow === next && pipeline?.isAutoCameraFollowEnabled?.() === next) {
             updateFollowButton(next);
-            if (followSettingsToggle) followSettingsToggle.checked = next;
             return;
         }
         appState.autoCameraFollow = next;
         pipeline?.setAutoCameraFollow?.(next, { immediate: next, resetView: next && resetView, smoothReset: next && resetView });
         updateFollowButton(next);
-        if (followSettingsToggle) followSettingsToggle.checked = next;
     };
 
     let pendingFollowDisableRequest = null;
@@ -52,12 +50,6 @@ export function initFollowModeControls({ pipeline, appState, followModeBtn, foll
         followModeBtn.addEventListener('click', (event) => {
             event.preventDefault();
             setFollowMode(true, { resetView: true });
-        });
-    }
-
-    if (followSettingsToggle) {
-        followSettingsToggle.addEventListener('change', () => {
-            updateFollowButton(!!followSettingsToggle.checked);
         });
     }
 

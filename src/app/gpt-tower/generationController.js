@@ -13,6 +13,8 @@ import { formatTokenLabel } from './tokenLabels.js';
 import { initTouchClickFallback } from '../../ui/touchClickFallback.js';
 
 const DEFAULT_ADVANCE_SECONDS = 10;
+const KV_DECODE_SINGLE_LANE_TRAIL_WIDTH_MULTIPLIER = 4.0;
+const KV_DECODE_SINGLE_LANE_TRAIL_OPACITY_BOOST = 2.2;
 
 export function buildPassState({
     activationSource,
@@ -258,12 +260,15 @@ export function initGenerationController({
         const laneScaleCompensation = totalLaneScale > 0
             ? (activeLaneScale / totalLaneScale)
             : 1.0;
+        // Keep single-lane KV decode trail thickness fixed so it does not vary
+        // with total token/layout count for the pass.
+        const lineWidthCompensation = KV_DECODE_SINGLE_LANE_TRAIL_WIDTH_MULTIPLIER;
 
         // Decode-only single-lane trails get a modest opacity bump so they remain
         // legible without looking overdrawn where paths overlap.
         return {
-            opacityMultiplier: 1.3 * laneScaleCompensation,
-            lineWidthMultiplier: 1.0
+            opacityMultiplier: KV_DECODE_SINGLE_LANE_TRAIL_OPACITY_BOOST * laneScaleCompensation,
+            lineWidthMultiplier: lineWidthCompensation
         };
     };
 

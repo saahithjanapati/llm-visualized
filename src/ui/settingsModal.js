@@ -225,13 +225,6 @@ export function initSettingsModal(pipeline) {
         if (promptTokenStrip) promptTokenStrip.checked = !!appState.showPromptTokenStrip;
         const bg = document.getElementById('toggleHdrBackground');
         if (bg) bg.checked = !!appState.showHdrBackground;
-        const autoCam = document.getElementById('toggleAutoCamera');
-        if (autoCam) {
-            const enabled = typeof pipeline?.isAutoCameraFollowEnabled === 'function'
-                ? pipeline.isAutoCameraFollowEnabled()
-                : appState.autoCameraFollow;
-            autoCam.checked = !!enabled;
-        }
         const devMode = document.getElementById('toggleDevMode');
         if (devMode) devMode.checked = !!appState.devMode;
         const camDebug = document.getElementById('toggleCameraDebug');
@@ -317,17 +310,6 @@ export function initSettingsModal(pipeline) {
         appState.showHdrBackground = !!bgToggle.checked;
         setPreference('showHdrBackground', appState.showHdrBackground);
         appState.applyEnvironmentBackground(pipeline);
-    });
-
-    const autoCamToggle = document.getElementById('toggleAutoCamera');
-    autoCamToggle?.addEventListener('change', () => {
-        appState.autoCameraFollow = !!autoCamToggle.checked;
-        setPreference('autoCameraFollow', appState.autoCameraFollow);
-        pipeline?.setAutoCameraFollow?.(appState.autoCameraFollow, {
-            immediate: appState.autoCameraFollow,
-            resetView: appState.autoCameraFollow,
-            smoothReset: appState.autoCameraFollow
-        });
     });
 
     const devToggle = document.getElementById('toggleDevMode');
