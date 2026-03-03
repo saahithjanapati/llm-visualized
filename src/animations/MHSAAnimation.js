@@ -64,6 +64,15 @@ const QKV_FINAL_MATRIX_EMISSIVE_INTENSITY = GPT2_LAYER_VISUAL_TUNING.mhsa.qkvFin
 const OUTPUT_PROJ_RETURN_WATCHDOG_MIN_MS = 5000;
 const OUTPUT_PROJ_RETURN_WATCHDOG_GRACE_MS = 2000;
 
+function isMhsaDebugEnabled() {
+    return typeof window !== 'undefined' && window.__MHSA_DEBUG === true;
+}
+
+function logMhsaDebug(...args) {
+    if (!isMhsaDebugEnabled()) return;
+    console.log(...args);
+}
+
 const SOFTENED_MATRIX_UNIFORMS = {
     stripeStrength: 0.0,
     scanlineStrength: 0.0,
@@ -392,7 +401,7 @@ export class MHSAAnimation {
         });
         this.vectorRouter.onReady(() => {
             this.mhaPassThroughPhase = 'ready_for_parallel_pass_through';
-            console.log("MHSAAnimation: All MHSA vectors are in position. Ready for PARALLEL pass-through.");
+            logMhsaDebug('MHSAAnimation: All MHSA vectors are in position. Ready for PARALLEL pass-through.');
             this.passThroughAnimator = new PassThroughAnimator(this);
             this.passThroughAnimator.start(this.currentLanes);
         });
@@ -864,7 +873,7 @@ export class MHSAAnimation {
         this.outputProjMatrixVectors = [];
         
         // Log the matrix dimensions to confirm they match desired specifications
-        console.log(`MHSAAnimation: Output Projection Matrix added - Width: ${MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.width}, Height: ${matrixHeight}, Depth: ${inputDepth}`);
+        logMhsaDebug(`MHSAAnimation: Output Projection Matrix added - Width: ${MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.width}, Height: ${matrixHeight}, Depth: ${inputDepth}`);
 
         // ------------------------------------------------------------------
         //  Pre-compute the Y coordinate where the processed vectors will finish
@@ -939,7 +948,7 @@ export class MHSAAnimation {
     // Launch pass-through tweens for every head's K/Q/V copy in parallel.
     initiateParallelHeadPassThroughAnimations(allLanes) {
         if (this.mhaPassThroughPhase !== 'ready_for_parallel_pass_through') return;
-        console.log("MHSAAnimation: Initiating Parallel MHSA Head Pass-Through Animations...");
+        logMhsaDebug('MHSAAnimation: Initiating Parallel MHSA Head Pass-Through Animations...');
         this.mhaPassThroughPhase = 'parallel_pass_through_active';
 
         if (this.enableSelfAttentionAnimation && this.selfAttentionAnimator && !this._headFinalColorCallbackRegistered) {
@@ -963,7 +972,7 @@ export class MHSAAnimation {
         const singleAnimationDone = () => {
             animationsCompleted++;
             if (animationsCompleted >= totalAnimationsToComplete) {
-                console.log("MHSAAnimation: All MHSA parallel pass-through animations complete.");
+                logMhsaDebug('MHSAAnimation: All MHSA parallel pass-through animations complete.');
                 this.mhaPassThroughPhase = 'mha_pass_through_complete';
 
                 if (this._skipMatrixColorsLocked && this._skipMatrixColorsPending) {
@@ -1016,7 +1025,7 @@ export class MHSAAnimation {
             }
         });
         if (totalAnimationsToComplete === 0 && allLanes.length > 0) {
-             console.log("MHSAAnimation: No valid K,Q,V vectors found to animate for parallel pass-through.");
+             logMhsaDebug('MHSAAnimation: No valid K,Q,V vectors found to animate for parallel pass-through.');
              this.mhaPassThroughPhase = 'mha_pass_through_complete';
              if (this._skipMatrixColorsLocked && this._skipMatrixColorsPending) {
                  this._applyFinalMatrixColorsImmediate();
@@ -1765,9 +1774,9 @@ export class MHSAAnimation {
         }
         this._allFixedMerged = true;
         if (keepRedMeshesVisible) {
-            console.log('MHSAAnimation: Merged all fixed K vectors into one instanced mesh (kept V vectors visible).');
+            logMhsaDebug('MHSAAnimation: Merged all fixed K vectors into one instanced mesh (kept V vectors visible).');
         } else {
-            console.log('MHSAAnimation: Merged all fixed K and V vectors into two instanced meshes.');
+            logMhsaDebug('MHSAAnimation: Merged all fixed K and V vectors into two instanced meshes.');
         }
     }
 
@@ -2814,7 +2823,7 @@ export class MHSAAnimation {
                 .start();
         });
 
-        console.log("Starting animation of combined lane vectors through output projection matrix");
+        logMhsaDebug('Starting animation of combined lane vectors through output projection matrix');
     }
 
     _shouldPreserveKVCacheVectors() {
@@ -3395,7 +3404,7 @@ export class MHSAAnimation {
                     .start();
             }
         }
-        console.log("MHSAAnimation: Initiated final head color transitions.");
+        logMhsaDebug('MHSAAnimation: Initiated final head color transitions.');
     }
 
     // ----------------------------------------------------------------------

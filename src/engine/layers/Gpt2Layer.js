@@ -99,6 +99,7 @@ const COLOR_INACTIVE_COMPONENT = new THREE.Color(INACTIVE_COMPONENT_COLOR);
 
 const TMP_LN_TRAIL_POS = new THREE.Vector3();
 const SKIP_VISIBILITY_REFRESH_MS = 56;
+const SKIP_VISIBILITY_MESH_INDEX_REFRESH_MS = 220;
 
 const MLP_REFLECTIVITY_TWEAKS = {
     // Match the same reflectivity profile used for QKV matrices.
@@ -274,6 +275,9 @@ export default class Gpt2Layer extends BaseLayer {
         this._skipToEndActive = false;
         this._skipConcatTriggered = false;
         this._skipHiddenMaterials = new WeakMap();
+        this._skipVectorMeshes = new Set();
+        this._skipVectorMeshIndexDirty = true;
+        this._skipVectorMeshIndexLastBuildMs = 0;
         this._skipVisibilityDirty = false;
         this._skipVisibilityLastApplyMs = 0;
         this.raycastRoot = null;
@@ -305,6 +309,7 @@ export default class Gpt2Layer extends BaseLayer {
         this._posPassStartAtMs = NaN;
         this._trailUpdateFrameId = 0;
         this._vecsToCheckScratch = new Array(9);
+        this._postAttentionWatchLanes = [];
         this._lanePhaseDebugOverride = undefined;
         this._ln2HandoffStallSinceMs = NaN;
         this._lastUpdateNowMs = NaN;
@@ -327,6 +332,16 @@ export default class Gpt2Layer extends BaseLayer {
         // Runtime toggle for ad-hoc diagnostics in DevTools:
         // window.__GPT2_LAYER_PHASE_DEBUG = true
         return !!window.__GPT2_LAYER_PHASE_DEBUG;
+    }
+
+    _isLayerLifecycleDebugEnabled() {
+        if (typeof window === 'undefined') return false;
+        return window.__GPT2_LAYER_DEBUG === true || this._isLanePhaseDebugEnabled();
+    }
+
+    _debugLayerLifecycleLog(message) {
+        if (!this._isLayerLifecycleDebugEnabled()) return;
+        console.log(message);
     }
 
     _debugLanePhaseTransition(lane, key, from, to, reason = '') {
@@ -1020,7 +1035,7 @@ export default class Gpt2Layer extends BaseLayer {
             if (allVectorsInPosition) {
                 this._transitionPhase = 'complete';
                 this.isActive = true; // now start the actual animation
-                console.log(`Layer ${this.index}: All vectors in position, starting animation`);
+                this._debugLayerLifecycleLog(`Layer ${this.index}: All vectors in position, starting animation`);
             } else {
                 // Keep vectors rising toward the target
                 lanes.forEach(lane => {
@@ -1986,14 +2001,21 @@ export default class Gpt2Layer extends BaseLayer {
         // Global safety net for skip flows: if any lane's phase signature is
         // unchanged for too long, force a conservative forward step to avoid
         // whole-layer deadlocks. Keep normal playback strictly stage-gated.
-        const postAttentionWatchLanes = lanes.filter((lane) => (
-            lane
-            && (
-                lane.horizPhase === HORIZ_PHASE.POST_MHSA_ADDITION
-                || lane.horizPhase === HORIZ_PHASE.WAITING_FOR_LN2
-                || lane.ln2Phase !== LN2_PHASE.NOT_STARTED
-            )
-        ));
+        const postAttentionWatchLanes = this._postAttentionWatchLanes;
+        postAttentionWatchLanes.length = 0;
+        for (let i = 0; i < lanes.length; i++) {
+            const lane = lanes[i];
+            if (
+                lane
+                && (
+                    lane.horizPhase === HORIZ_PHASE.POST_MHSA_ADDITION
+                    || lane.horizPhase === HORIZ_PHASE.WAITING_FOR_LN2
+                    || lane.ln2Phase !== LN2_PHASE.NOT_STARTED
+                )
+            ) {
+                postAttentionWatchLanes.push(lane);
+            }
+        }
 
         if (skipActive || this._skipLayerActive) {
             this._applyLaneStallWatchdog(lanes, nowMs, {
@@ -2975,12 +2997,14 @@ export default class Gpt2Layer extends BaseLayer {
         const wasActive = this._skipToEndActive;
         this._skipToEndActive = !!enabled;
         if (this._skipToEndActive) {
+            this._skipVectorMeshIndexDirty = true;
             this._skipVisibilityDirty = true;
             this._applySkipVectorVisibility({ force: true });
         } else if (wasActive) {
             this._restoreSkipHiddenVectorMaterials();
             this._skipVisibilityDirty = false;
             this._skipVisibilityLastApplyMs = 0;
+            this._skipVectorMeshIndexDirty = true;
         }
         if (this.mhsaAnimation && typeof this.mhsaAnimation.setSkipToEndMode === 'function') {
             this.mhsaAnimation.setSkipToEndMode(this._skipToEndActive);
@@ -3006,6 +3030,7 @@ export default class Gpt2Layer extends BaseLayer {
 
     refreshSkipVisibility() {
         if (this._skipToEndActive) {
+            this._skipVectorMeshIndexDirty = true;
             this._skipVisibilityDirty = true;
             this._applySkipVectorVisibility({ force: true });
         }
@@ -3045,9 +3070,12 @@ export default class Gpt2Layer extends BaseLayer {
     _restoreSkipHiddenVectorMaterials() {
         if (!this.root) return;
         const hidden = this._skipHiddenMaterials;
-        this.root.traverse(obj => {
-            if (!obj || !obj.isMesh || !obj.material) return;
-            if (!this._isVectorVisual(obj)) return;
+        const vectorMeshes = this._getSkipVectorMeshes(this._getNowMs(), { force: true });
+        for (const obj of vectorMeshes) {
+            if (!obj || !obj.isMesh || !obj.material || !obj.parent) {
+                vectorMeshes.delete(obj);
+                continue;
+            }
             const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
             let restoredAny = false;
             mats.forEach(mat => {
@@ -3065,7 +3093,8 @@ export default class Gpt2Layer extends BaseLayer {
             if (restoredAny) {
                 obj.visible = true;
             }
-        });
+        }
+        this._skipVectorMeshIndexDirty = true;
     }
 
     _isVectorVisual(obj) {
@@ -3094,11 +3123,38 @@ export default class Gpt2Layer extends BaseLayer {
         return false;
     }
 
+    _rebuildSkipVectorMeshIndex(nowMs = this._getNowMs()) {
+        const index = this._skipVectorMeshes;
+        index.clear();
+        if (!this.root) {
+            this._skipVectorMeshIndexDirty = false;
+            this._skipVectorMeshIndexLastBuildMs = nowMs;
+            return;
+        }
+        this.root.traverse((obj) => {
+            if (!obj || !obj.isMesh || !obj.material) return;
+            if (!this._isVectorVisual(obj)) return;
+            index.add(obj);
+        });
+        this._skipVectorMeshIndexDirty = false;
+        this._skipVectorMeshIndexLastBuildMs = nowMs;
+    }
+
+    _getSkipVectorMeshes(nowMs = this._getNowMs(), { force = false } = {}) {
+        const index = this._skipVectorMeshes;
+        const shouldRebuild = this._skipVectorMeshIndexDirty
+            || index.size === 0
+            || force
+            || (nowMs - this._skipVectorMeshIndexLastBuildMs) >= SKIP_VISIBILITY_MESH_INDEX_REFRESH_MS;
+        if (shouldRebuild) {
+            this._rebuildSkipVectorMeshIndex(nowMs);
+        }
+        return index;
+    }
+
     _applySkipVectorVisibility({ force = false } = {}) {
         if (!this._skipToEndActive || !this.root) return;
-        const now = (typeof performance !== 'undefined' && typeof performance.now === 'function')
-            ? performance.now()
-            : Date.now();
+        const now = this._getNowMs();
         if (!force) {
             const elapsed = now - this._skipVisibilityLastApplyMs;
             if (!this._skipVisibilityDirty && elapsed < SKIP_VISIBILITY_REFRESH_MS) {
@@ -3108,9 +3164,12 @@ export default class Gpt2Layer extends BaseLayer {
         this._skipVisibilityDirty = false;
         this._skipVisibilityLastApplyMs = now;
         const hidden = this._skipHiddenMaterials;
-        this.root.traverse(obj => {
-            if (!obj || !obj.isMesh || !obj.material) return;
-            if (!this._isVectorVisual(obj)) return;
+        const vectorMeshes = this._getSkipVectorMeshes(now, { force });
+        for (const obj of vectorMeshes) {
+            if (!obj || !obj.isMesh || !obj.material || !obj.parent) {
+                vectorMeshes.delete(obj);
+                continue;
+            }
             const allowVisible = (obj.userData && obj.userData.skipVisible)
                 || (obj.parent && obj.parent.userData && obj.parent.userData.skipVisible);
             const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
@@ -3128,7 +3187,7 @@ export default class Gpt2Layer extends BaseLayer {
                         hidden.delete(mat);
                     }
                 });
-                return;
+                continue;
             }
             mats.forEach(mat => {
                 if (!mat) return;
@@ -3147,7 +3206,7 @@ export default class Gpt2Layer extends BaseLayer {
                 if (needsUpdate) mat.needsUpdate = true;
             });
             obj.visible = false;
-        });
+        }
     }
 
     _getNowMs() {
@@ -3156,37 +3215,57 @@ export default class Gpt2Layer extends BaseLayer {
             : Date.now();
     }
 
-    _formatLaneCoord(value) {
-        return Number.isFinite(value) ? value.toFixed(2) : 'na';
+    _quantizeLaneCoord(value, scale = 100) {
+        if (!Number.isFinite(value)) return 0x7fffffff;
+        return Math.round(value * scale) | 0;
     }
 
-    _laneVecSignature(vec) {
-        if (!vec || !vec.group || !vec.group.position) return 'na';
+    _mixLaneHash(hash, value) {
+        const normalized = Number.isFinite(value) ? (value | 0) : 0;
+        return Math.imul((hash ^ (normalized >>> 0)) >>> 0, 16777619) >>> 0;
+    }
+
+    _mixLanePhase(hash, phase) {
+        const phaseText = (typeof phase === 'string') ? phase : '';
+        let nextHash = hash;
+        for (let i = 0; i < phaseText.length; i++) {
+            nextHash = this._mixLaneHash(nextHash, phaseText.charCodeAt(i));
+        }
+        return this._mixLaneHash(nextHash, 255);
+    }
+
+    _mixLaneVector(hash, vec) {
+        if (!vec || !vec.group || !vec.group.position) {
+            return this._mixLaneHash(hash, 0x9e3779b9);
+        }
         const p = vec.group.position;
-        return `${this._formatLaneCoord(p.x)},${this._formatLaneCoord(p.y)},${this._formatLaneCoord(p.z)}`;
+        let nextHash = this._mixLaneHash(hash, this._quantizeLaneCoord(p.x));
+        nextHash = this._mixLaneHash(nextHash, this._quantizeLaneCoord(p.y));
+        nextHash = this._mixLaneHash(nextHash, this._quantizeLaneCoord(p.z));
+        return nextHash;
     }
 
     _getLaneProgressSignature(lane) {
-        if (!lane) return 'missing';
-        return [
-            lane.horizPhase || 'na',
-            lane.ln2Phase || 'na',
-            lane.stopRise ? '1' : '0',
-            lane.ln1AddStarted ? '1' : '0',
-            lane.ln1AddComplete ? '1' : '0',
-            lane.ln2AddStarted ? '1' : '0',
-            lane.ln2AddComplete ? '1' : '0',
-            lane.mlpUpStarted ? '1' : '0',
-            lane.mlpDownStarted ? '1' : '0',
-            lane.mlpDownComplete ? '1' : '0',
-            this._formatLaneCoord(lane.ln1ShiftProgress),
-            this._formatLaneCoord(lane.mhsaResidualAddProgress),
-            this._formatLaneCoord(lane.ln2ShiftProgress),
-            this._laneVecSignature(lane.originalVec),
-            this._laneVecSignature(lane.postAdditionVec),
-            this._laneVecSignature(lane.movingVecLN2),
-            this._laneVecSignature(lane.resultVecLN2),
-        ].join('|');
+        if (!lane) return 0;
+        let hash = 2166136261 >>> 0;
+        hash = this._mixLanePhase(hash, lane.horizPhase);
+        hash = this._mixLanePhase(hash, lane.ln2Phase);
+        hash = this._mixLaneHash(hash, lane.stopRise ? 1 : 0);
+        hash = this._mixLaneHash(hash, lane.ln1AddStarted ? 1 : 0);
+        hash = this._mixLaneHash(hash, lane.ln1AddComplete ? 1 : 0);
+        hash = this._mixLaneHash(hash, lane.ln2AddStarted ? 1 : 0);
+        hash = this._mixLaneHash(hash, lane.ln2AddComplete ? 1 : 0);
+        hash = this._mixLaneHash(hash, lane.mlpUpStarted ? 1 : 0);
+        hash = this._mixLaneHash(hash, lane.mlpDownStarted ? 1 : 0);
+        hash = this._mixLaneHash(hash, lane.mlpDownComplete ? 1 : 0);
+        hash = this._mixLaneHash(hash, this._quantizeLaneCoord(lane.ln1ShiftProgress));
+        hash = this._mixLaneHash(hash, this._quantizeLaneCoord(lane.mhsaResidualAddProgress));
+        hash = this._mixLaneHash(hash, this._quantizeLaneCoord(lane.ln2ShiftProgress));
+        hash = this._mixLaneVector(hash, lane.originalVec);
+        hash = this._mixLaneVector(hash, lane.postAdditionVec);
+        hash = this._mixLaneVector(hash, lane.movingVecLN2);
+        hash = this._mixLaneVector(hash, lane.resultVecLN2);
+        return hash;
     }
 
     _updatePositionalPassBarrier({
@@ -3257,7 +3336,7 @@ export default class Gpt2Layer extends BaseLayer {
         if (!this._ln2Ready && allLn2Ready) {
             this._ln2Ready = true;
             this._emitProgress();
-            console.log(`Layer ${this.index}: All lanes ready – starting LN2 simultaneously`);
+            this._debugLayerLifecycleLog(`Layer ${this.index}: All lanes ready – starting LN2 simultaneously`);
         }
 
         // MLP synchronisation: wait until every lane has completed LN-2 and
@@ -3265,7 +3344,7 @@ export default class Gpt2Layer extends BaseLayer {
         if (!this._mlpStart && allMlpReady) {
             this._mlpStart = true;
             this._emitProgress();
-            console.log(`Layer ${this.index}: All lanes ready – starting MLP up-projection simultaneously`);
+            this._debugLayerLifecycleLog(`Layer ${this.index}: All lanes ready – starting MLP up-projection simultaneously`);
         }
 
     }
@@ -3282,7 +3361,7 @@ export default class Gpt2Layer extends BaseLayer {
             if (readyToStartLn1) {
                 this._ln1Start = true;
                 this._emitProgress();
-                console.log(`Layer ${this.index}: All lanes ready – starting LN-1 branch simultaneously`);
+                this._debugLayerLifecycleLog(`Layer ${this.index}: All lanes ready – starting LN-1 branch simultaneously`);
 
                 const laneList = Array.isArray(this.lanes) ? this.lanes : [];
                 laneList.forEach((lane) => {
@@ -3309,7 +3388,7 @@ export default class Gpt2Layer extends BaseLayer {
         if (!this._mhsaStart && allMhsaReady) {
             this._mhsaStart = true;
             this._emitProgress();
-            console.log(`Layer ${this.index}: All lanes ready – starting travel to MHSA heads simultaneously`);
+            this._debugLayerLifecycleLog(`Layer ${this.index}: All lanes ready – starting travel to MHSA heads simultaneously`);
             const laneList = Array.isArray(this.lanes) ? this.lanes : [];
             laneList.forEach((lane) => {
                 if (lane.horizPhase !== HORIZ_PHASE.READY_MHSA) return;

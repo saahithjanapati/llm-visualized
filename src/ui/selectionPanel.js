@@ -2768,6 +2768,7 @@ class SelectionPanel {
         this._mobileFocusActive = false;
         this._pauseMainFlowOnMobileFocus = options.pauseMainFlowOnMobileFocus === true;
         this._pendingResizeRaf = null;
+        this._previewRafId = null;
         this._pendingResizeTimeout = null;
         this._panelResizeObserver = null;
         this._pendingReveal = false;
@@ -2812,7 +2813,6 @@ class SelectionPanel {
         this._applySelectionEquationFit = this._applySelectionEquationFit.bind(this);
         this._scheduleDimensionLabelFit = this._scheduleDimensionLabelFit.bind(this);
         this._applyDimensionLabelFit = this._applyDimensionLabelFit.bind(this);
-        this._startLoop();
 
         this.activationSource = options.activationSource || null;
         this.laneTokenIndices = Array.isArray(options.laneTokenIndices) ? options.laneTokenIndices.slice() : null;
@@ -4480,19 +4480,30 @@ class SelectionPanel {
         }
     }
 
+    _isPreviewLoopActive() {
+        return !!(this.isReady && this.isOpen && this.currentPreview);
+    }
+
     _startLoop() {
-        if (this._loopStarted) return;
-        this._loopStarted = true;
-        requestAnimationFrame(this._animate);
+        if (!this._isPreviewLoopActive()) return;
+        if (this._previewRafId !== null) return;
+        this._lastFrameTime = performance.now();
+        this._previewRafId = requestAnimationFrame(this._animate);
+    }
+
+    _stopLoop() {
+        if (this._previewRafId === null) return;
+        cancelAnimationFrame(this._previewRafId);
+        this._previewRafId = null;
     }
 
     _animate(time) {
-        requestAnimationFrame(this._animate);
+        this._previewRafId = null;
+        if (!this._isPreviewLoopActive()) return;
         const now = (typeof time === 'number') ? time : performance.now();
         const deltaMs = this._lastFrameTime ? (now - this._lastFrameTime) : 16.6667;
         this._lastFrameTime = now;
 
-        if (!this.isReady || !this.isOpen || !this.currentPreview) return;
         this._syncEnvironment();
 
         if (typeof this.currentAnimator === 'function') {
@@ -4512,6 +4523,9 @@ class SelectionPanel {
         this.currentPreview.rotation.z = 0;
         this._updateDynamicAttentionProgress();
         this.renderer.render(this.scene, this.camera);
+        if (this._isPreviewLoopActive() && this._previewRafId === null) {
+            this._previewRafId = requestAnimationFrame(this._animate);
+        }
     }
 
     open() {
@@ -4530,6 +4544,7 @@ class SelectionPanel {
             }
             this._scheduleResize();
         }
+        this._startLoop();
         this._scheduleSelectionEquationFit();
         this._scheduleDimensionLabelFit();
     }
@@ -4537,6 +4552,7 @@ class SelectionPanel {
     close() {
         if (!this.isReady) return;
         this.isOpen = false;
+        this._stopLoop();
         this._currentSelectionDescription = '';
         this._currentSelectionEquations = '';
         this._resetCopyContextFeedback();
@@ -5055,6 +5071,7 @@ class SelectionPanel {
             this._lastFitOptions = null;
             this._pendingReveal = false;
             this._pendingRevealSize = null;
+            this._stopLoop();
             if (this.canvas) this.canvas.style.opacity = '1';
         }
 

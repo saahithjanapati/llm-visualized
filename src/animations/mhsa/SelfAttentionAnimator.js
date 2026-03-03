@@ -16,6 +16,11 @@ import {
 } from '../LayerAnimationConstants.js';
 import { getSideCopyEntry } from './laneIndex.js';
 
+function logMhsaDebug(...args) {
+    if (typeof window === 'undefined' || window.__MHSA_DEBUG !== true) return;
+    console.log(...args);
+}
+
 // Shared lightweight geometry for self-attention highlight spheres
 const SHARED_SPHERE_GEOMETRY = new THREE.SphereGeometry(10, 12, 12);
 
@@ -658,11 +663,11 @@ export class SelfAttentionAnimator {
         }
 
         this.phase = 'running';
-        console.log('SelfAttentionAnimator: placeholder phase started');
+        logMhsaDebug('SelfAttentionAnimator: placeholder phase started');
 
         this._scheduleAfterDelay(() => {
             this.phase = 'complete';
-            console.log('SelfAttentionAnimator: placeholder phase complete');
+            logMhsaDebug('SelfAttentionAnimator: placeholder phase complete');
             this._flushCallbacks();
         }, 3000);
     }

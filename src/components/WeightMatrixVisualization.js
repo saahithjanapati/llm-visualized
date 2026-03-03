@@ -17,6 +17,19 @@ const __capFrontCache = new Map();
 const __capBackCache  = new Map();
 const __materialCache = new Map();
 
+function isGeometryPerfDebugEnabled() {
+    return typeof window !== 'undefined' && window.__VIS_GEOMETRY_PERF_DEBUG === true;
+}
+
+function cloneMaterialTemplate(material) {
+    if (!material) return material;
+    if (Array.isArray(material)) {
+        const first = material.find((mat) => mat && typeof mat.clone === 'function');
+        return first ? first.clone() : null;
+    }
+    return (typeof material.clone === 'function') ? material.clone() : null;
+}
+
 function buildChamferedRectShape(width, height, chamfer) {
     const hw = width / 2;
     const hh = height / 2;
@@ -276,7 +289,7 @@ export class WeightMatrixVisualization {
         if (__geometryCache.has(cacheKey)) {
             cacheHit = true;
             const cachedGeo = __geometryCache.get(cacheKey);
-            baseMesh = new THREE.Mesh(cachedGeo);
+            baseMesh = new THREE.Mesh(cachedGeo.clone());
         } else {
             // Create initial geometry by extruding the shape
             const baseGeometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
@@ -419,10 +432,11 @@ export class WeightMatrixVisualization {
         // them ever-so-slightly closer to the camera, eliminating the
         // z-fighting flicker that still appeared when zoomed far out.
 
-        let sideMaterial;
+        let sideMaterial = null;
         if (USE_GLB_MATERIALS && __materialCache.has(cacheKey)) {
-            sideMaterial = __materialCache.get(cacheKey).clone();
-        } else {
+            sideMaterial = cloneMaterialTemplate(__materialCache.get(cacheKey));
+        }
+        if (!sideMaterial) {
             sideMaterial = createSciFiMaterial({
                 side: THREE.FrontSide,
                 transparent: true,
@@ -458,9 +472,12 @@ export class WeightMatrixVisualization {
             });
         }
 
-        const capMaterial = (USE_GLB_MATERIALS && __materialCache.has(cacheKey))
-            ? sideMaterial.clone()
-            : createSciFiMaterial({
+        let capMaterial = null;
+        if (USE_GLB_MATERIALS && __materialCache.has(cacheKey)) {
+            capMaterial = cloneMaterialTemplate(sideMaterial);
+        }
+        if (!capMaterial) {
+            capMaterial = createSciFiMaterial({
                 side: THREE.DoubleSide,
                 transparent: true,
                 opacity: 0.94,
@@ -494,6 +511,7 @@ export class WeightMatrixVisualization {
                 glintStrength: 0.28,
                 noiseStrength: 0.06
             });
+        }
 
         capMaterial.polygonOffset = true;
         capMaterial.polygonOffsetFactor = -1; // pull slightly forward
@@ -502,53 +520,57 @@ export class WeightMatrixVisualization {
         // Assign the final CSG result geometry and the material to the main mesh (sides)
         this.mesh = finalMesh;
         this.mesh.material = sideMaterial;
-        const snapEps = Math.min(Math.max(0.02, this.height * 0.002), 0.5);
-        const posAttr = this.mesh.geometry.attributes.position;
-        if (posAttr) {
-            for (let i = 0; i < posAttr.count; i++) {
-                const y = posAttr.getY(i);
-                if (Math.abs(y - hh) < snapEps) {
-                    posAttr.setY(i, hh);
-                } else if (Math.abs(y + hh) < snapEps) {
-                    posAttr.setY(i, -hh);
+        if (!cacheHit) {
+            const snapEps = Math.min(Math.max(0.02, this.height * 0.002), 0.5);
+            const posAttr = this.mesh.geometry.attributes.position;
+            if (posAttr) {
+                for (let i = 0; i < posAttr.count; i++) {
+                    const y = posAttr.getY(i);
+                    if (Math.abs(y - hh) < snapEps) {
+                        posAttr.setY(i, hh);
+                    } else if (Math.abs(y + hh) < snapEps) {
+                        posAttr.setY(i, -hh);
+                    }
                 }
+                posAttr.needsUpdate = true;
             }
-            posAttr.needsUpdate = true;
-        }
-        const creasedGeometry = toCreasedNormals(this.mesh.geometry, Math.PI / 3);
-        const normalAttr = creasedGeometry.attributes.normal;
-        const creasedPos = creasedGeometry.attributes.position;
-        if (normalAttr && creasedPos) {
-            const planeEps = Math.min(Math.max(0.05, this.height * 0.005), 0.6);
-            const a = new THREE.Vector3();
-            const b = new THREE.Vector3();
-            const c = new THREE.Vector3();
-            for (let i = 0; i < creasedPos.count; i += 3) {
-                a.fromBufferAttribute(creasedPos, i);
-                b.fromBufferAttribute(creasedPos, i + 1);
-                c.fromBufferAttribute(creasedPos, i + 2);
-                const isTop = Math.abs(a.y - hh) < planeEps
-                    && Math.abs(b.y - hh) < planeEps
-                    && Math.abs(c.y - hh) < planeEps;
-                const isBottom = Math.abs(a.y + hh) < planeEps
-                    && Math.abs(b.y + hh) < planeEps
-                    && Math.abs(c.y + hh) < planeEps;
-                if (isTop || isBottom) {
-                    const sign = isTop ? 1 : -1;
-                    normalAttr.setXYZ(i, 0, sign, 0);
-                    normalAttr.setXYZ(i + 1, 0, sign, 0);
-                    normalAttr.setXYZ(i + 2, 0, sign, 0);
+            const creasedGeometry = toCreasedNormals(this.mesh.geometry, Math.PI / 3);
+            const normalAttr = creasedGeometry.attributes.normal;
+            const creasedPos = creasedGeometry.attributes.position;
+            if (normalAttr && creasedPos) {
+                const planeEps = Math.min(Math.max(0.05, this.height * 0.005), 0.6);
+                const a = new THREE.Vector3();
+                const b = new THREE.Vector3();
+                const c = new THREE.Vector3();
+                for (let i = 0; i < creasedPos.count; i += 3) {
+                    a.fromBufferAttribute(creasedPos, i);
+                    b.fromBufferAttribute(creasedPos, i + 1);
+                    c.fromBufferAttribute(creasedPos, i + 2);
+                    const isTop = Math.abs(a.y - hh) < planeEps
+                        && Math.abs(b.y - hh) < planeEps
+                        && Math.abs(c.y - hh) < planeEps;
+                    const isBottom = Math.abs(a.y + hh) < planeEps
+                        && Math.abs(b.y + hh) < planeEps
+                        && Math.abs(c.y + hh) < planeEps;
+                    if (isTop || isBottom) {
+                        const sign = isTop ? 1 : -1;
+                        normalAttr.setXYZ(i, 0, sign, 0);
+                        normalAttr.setXYZ(i + 1, 0, sign, 0);
+                        normalAttr.setXYZ(i + 2, 0, sign, 0);
+                    }
                 }
+                normalAttr.needsUpdate = true;
             }
-            normalAttr.needsUpdate = true;
-        }
-        if (creasedGeometry !== this.mesh.geometry) {
-            this.mesh.geometry.dispose();
-            this.mesh.geometry = creasedGeometry;
+            if (creasedGeometry !== this.mesh.geometry) {
+                this.mesh.geometry.dispose();
+                this.mesh.geometry = creasedGeometry;
+            }
         }
 
-        const dt = (performance.now() - t0).toFixed(1);
-        console.log(`[Perf] WeightMatrixVisualization (${cacheHit ? 'cache' : 'built'}) – ${dt} ms.`);
+        if (isGeometryPerfDebugEnabled()) {
+            const dt = (performance.now() - t0).toFixed(1);
+            console.log(`[Perf] WeightMatrixVisualization (${cacheHit ? 'cache' : 'built'}) – ${dt} ms.`);
+        }
 
         // Ensure transparent objects are rendered in a predictable order to
         // avoid flickering caused by Three.js' painter-style sorting.  By
@@ -632,12 +654,12 @@ export class WeightMatrixVisualization {
             this.slitTopWidthFactor
         );
 
-        let sliceGeometry;
+        let sliceGeometryTemplate;
         let tmp = null; // temp builder (may remain null if cache hit)
 
         // Attempt to pull slice + cap geometry from cache first
         if (__geometryCache.has(sliceKey)) {
-            sliceGeometry = __geometryCache.get(sliceKey);
+            sliceGeometryTemplate = __geometryCache.get(sliceKey);
         } else {
             // Build a *temporary* WeightMatrixVisualization to generate the
             // geometry for a single slice.  The recursive call will *not*
@@ -656,20 +678,22 @@ export class WeightMatrixVisualization {
                 this.slitBottomWidthFactor,
                 this.slitTopWidthFactor
             );
-            sliceGeometry = tmp.mesh.geometry.clone();
+            sliceGeometryTemplate = tmp.mesh.geometry.clone();
             // Cache for future re-use
-            __geometryCache.set(sliceKey, sliceGeometry);
+            __geometryCache.set(sliceKey, sliceGeometryTemplate);
             // We'll cache cap geometries below once they're cloned
         }
+        const sliceGeometry = sliceGeometryTemplate.clone();
 
         // ----------------------------------------------------------
         // Material – clone defaults from standard path
         // ----------------------------------------------------------
         const sciFiSliceDims = { width: this.width, height: this.height, depth: depthSpan };
-        let mat;
+        let mat = null;
         if (USE_GLB_MATERIALS && __materialCache.has(sliceKey)) {
-            mat = __materialCache.get(sliceKey).clone();
-        } else {
+            mat = cloneMaterialTemplate(__materialCache.get(sliceKey));
+        }
+        if (!mat) {
             mat = createSciFiMaterial({
                 side: THREE.DoubleSide,
                 transparent: true,
@@ -873,7 +897,9 @@ export class WeightMatrixVisualization {
 
     updateData(data) {
         // Placeholder for updating visualization based on data
-        console.log("Updating weight matrix with data:", data);
+        if (isGeometryPerfDebugEnabled()) {
+            console.log('Updating weight matrix with data:', data);
+        }
         // Example: Change color based on data
         // const averageValue = data.reduce((sum, val) => sum + val, 0) / data.length;
         // const colorIntensity = Math.min(1, Math.max(0, averageValue)); // Normalize
@@ -975,6 +1001,10 @@ export class WeightMatrixVisualization {
         this.setMaterialProperties({ opacity: opacity, transparent: true });
     }
 
+    dispose() {
+        this._clearMesh();
+    }
+
     /**
      * Register a pre-generated BufferGeometry so that future WeightMatrixVisualization
      * instances can reuse it immediately without running the heavy CSG build.
@@ -984,10 +1014,13 @@ export class WeightMatrixVisualization {
     static registerPrecomputedGeometry(cacheKey, geometry, material = null) {
         if (!cacheKey || !geometry) return;
         if (!__geometryCache.has(cacheKey)) {
-            __geometryCache.set(cacheKey, geometry);
+            __geometryCache.set(cacheKey, geometry.clone());
         }
         if (material && !__materialCache.has(cacheKey)) {
-            __materialCache.set(cacheKey, material);
+            const clonedMaterial = cloneMaterialTemplate(material);
+            if (clonedMaterial) {
+                __materialCache.set(cacheKey, clonedMaterial);
+            }
         }
     }
 }

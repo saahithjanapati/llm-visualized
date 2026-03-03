@@ -35,6 +35,19 @@ const LAYER_NORM_REFLECTIVITY_TWEAKS = Object.freeze({
     clearcoatRoughnessOffset: 0.05
 });
 
+function isGeometryPerfDebugEnabled() {
+    return typeof window !== 'undefined' && window.__VIS_GEOMETRY_PERF_DEBUG === true;
+}
+
+function cloneMaterialTemplate(material) {
+    if (!material) return null;
+    if (Array.isArray(material)) {
+        const first = material.find((mat) => mat && typeof mat.clone === 'function');
+        return first ? first.clone() : null;
+    }
+    return (typeof material.clone === 'function') ? material.clone() : null;
+}
+
 function applyLayerNormReflectivityTweaks(material) {
     const apply = (mat) => {
         if (!mat) return;
@@ -271,7 +284,7 @@ export class LayerNormalizationVisualization {
         if (__geometryCache.has(cacheKey)) {
             cacheHit = true;
             const sharedGeo = __geometryCache.get(cacheKey);
-            finalMesh = new THREE.Mesh(sharedGeo);
+            finalMesh = new THREE.Mesh(sharedGeo.clone());
         } else {
             // ==== STEP 2 — extrude the 2-D ring into a 3-D "tube" ====
             const extrudeSettings = {
@@ -416,9 +429,12 @@ export class LayerNormalizationVisualization {
         }
 
         // ==== STEP 5 — assign material & add to the outer group ====
-        const material = (USE_GLB_MATERIALS && __materialCache.has(cacheKey))
-            ? __materialCache.get(cacheKey).clone()
-            : createSciFiMaterial({
+        let material = null;
+        if (USE_GLB_MATERIALS && __materialCache.has(cacheKey)) {
+            material = cloneMaterialTemplate(__materialCache.get(cacheKey));
+        }
+        if (!material) {
+            material = createSciFiMaterial({
                 side: THREE.DoubleSide,
                 transparent: true,
                 opacity: 0.86,
@@ -452,6 +468,7 @@ export class LayerNormalizationVisualization {
                 glintStrength: 0.0,
                 noiseStrength: 0.0
             });
+        }
         applyLayerNormReflectivityTweaks(material);
 
         // After all geometry operations *and* potential caching we assign
@@ -464,17 +481,17 @@ export class LayerNormalizationVisualization {
         updateSciFiDimensions(this.mesh.material, { width: this.width, height: this.height, depth: this.depth });
 
         if (!__geometryCache.has(cacheKey) || strippedCaps) {
-            // Clone before caching?  No – we store the *exact* BufferGeometry
-            // instance so that all consumers share it.  This saves memory and
-            // makes renderer uploads even faster.
-            __geometryCache.set(cacheKey, this.mesh.geometry);
+            // Cache a clone so each instance can safely dispose its own geometry.
+            __geometryCache.set(cacheKey, this.mesh.geometry.clone());
         }
 
         // Add to parent group so it appears in the scene
         this.group.add(this.mesh);
 
-        const dt = (performance.now() - t0).toFixed(1);
-        console.log(`[Perf] LayerNormalizationVisualization (${cacheHit ? 'cache' : 'built'}) – ${dt} ms.`);
+        if (isGeometryPerfDebugEnabled()) {
+            const dt = (performance.now() - t0).toFixed(1);
+            console.log(`[Perf] LayerNormalizationVisualization (${cacheHit ? 'cache' : 'built'}) – ${dt} ms.`);
+        }
     }
 
     _createInstancedSlices() {
@@ -494,9 +511,9 @@ export class LayerNormalizationVisualization {
             this.segments
         );
 
-        let sliceGeometry;
+        let sliceGeometryTemplate;
         if (__geometryCache.has(sliceKey)) {
-            sliceGeometry = __geometryCache.get(sliceKey);
+            sliceGeometryTemplate = __geometryCache.get(sliceKey);
         } else {
             const tmp = new LayerNormalizationVisualization(
                 new THREE.Vector3(),
@@ -509,20 +526,24 @@ export class LayerNormalizationVisualization {
                 this.holeWidthFactor,
                 this.segments
             );
-            sliceGeometry = tmp.mesh.geometry.clone();
-            __geometryCache.set(sliceKey, sliceGeometry);
+            sliceGeometryTemplate = tmp.mesh.geometry.clone();
+            __geometryCache.set(sliceKey, sliceGeometryTemplate);
             tmp.mesh.geometry.dispose();
             if (tmp.mesh.material) {
                 if (Array.isArray(tmp.mesh.material)) tmp.mesh.material.forEach(m => m.dispose());
                 else tmp.mesh.material.dispose();
             }
         }
+        const sliceGeometry = sliceGeometryTemplate.clone();
 
         const sciFiSliceDims = { width: this.width, height: this.height, depth: sliceDepth };
         const sciFiStackDims = { width: this.width, height: this.height, depth: sliceDepth * laneCount };
-        const mat = (USE_GLB_MATERIALS && __materialCache.has(sliceKey))
-            ? __materialCache.get(sliceKey).clone()
-            : createSciFiMaterial({
+        let mat = null;
+        if (USE_GLB_MATERIALS && __materialCache.has(sliceKey)) {
+            mat = cloneMaterialTemplate(__materialCache.get(sliceKey));
+        }
+        if (!mat) {
+            mat = createSciFiMaterial({
                 side: THREE.DoubleSide,
                 transparent: true,
                 opacity: 0.88,
@@ -556,6 +577,7 @@ export class LayerNormalizationVisualization {
                 glintStrength: 0.0,
                 noiseStrength: 0.0
             });
+        }
         applyLayerNormReflectivityTweaks(mat);
 
         const sideWallGeometry = STRIP_END_CAPS ? sliceGeometry : stripCapsGeometry(sliceGeometry);
@@ -655,10 +677,13 @@ export class LayerNormalizationVisualization {
     static registerPrecomputedGeometry(cacheKey, geometry, material = null) {
         if (!cacheKey || !geometry) return;
         if (!__geometryCache.has(cacheKey)) {
-            __geometryCache.set(cacheKey, geometry);
+            __geometryCache.set(cacheKey, geometry.clone());
         }
         if (material && !__materialCache.has(cacheKey)) {
-            __materialCache.set(cacheKey, material);
+            const clonedMaterial = cloneMaterialTemplate(material);
+            if (clonedMaterial) {
+                __materialCache.set(cacheKey, clonedMaterial);
+            }
         }
     }
 }

@@ -1,6 +1,11 @@
 import { NUM_HEAD_SETS_LAYER } from '../../utils/constants.js';
 import { getSideCopyEntry } from './laneIndex.js';
 
+function logMhsaDebug(...args) {
+    if (typeof window === 'undefined' || window.__MHSA_DEBUG !== true) return;
+    console.log(...args);
+}
+
 export class PassThroughAnimator {
     constructor(ctx) {
         this.ctx = ctx; // parent MHSAAnimation instance
@@ -9,7 +14,7 @@ export class PassThroughAnimator {
     start(allLanes) {
         const ctx = this.ctx;
         if (ctx.mhaPassThroughPhase !== 'ready_for_parallel_pass_through') return;
-        console.log('PassThroughAnimator: starting parallel pass-through');
+        logMhsaDebug('PassThroughAnimator: starting parallel pass-through');
         ctx.mhaPassThroughPhase = 'parallel_pass_through_active';
 
         // Kick off a single shared pulse per matrix to avoid per-vector
@@ -24,7 +29,7 @@ export class PassThroughAnimator {
         const singleAnimationDone = () => {
             animationsCompleted++;
             if (animationsCompleted >= totalAnimationsToComplete) {
-                console.log('PassThroughAnimator: all pass-through tweens complete');
+                logMhsaDebug('PassThroughAnimator: all pass-through tweens complete');
                 ctx.mhaPassThroughPhase = 'mha_pass_through_complete';
                 if (ctx._skipMatrixColorsLocked && ctx._skipMatrixColorsPending && typeof ctx._applyFinalMatrixColorsImmediate === 'function') {
                     ctx._applyFinalMatrixColorsImmediate();
@@ -114,7 +119,7 @@ export class PassThroughAnimator {
         });
 
         if (totalAnimationsToComplete === 0 && allLanes.length > 0) {
-            console.log('PassThroughAnimator: no valid vectors found to animate');
+            logMhsaDebug('PassThroughAnimator: no valid vectors found to animate');
             ctx.mhaPassThroughPhase = 'mha_pass_through_complete';
             if (ctx._skipMatrixColorsLocked && ctx._skipMatrixColorsPending && typeof ctx._applyFinalMatrixColorsImmediate === 'function') {
                 ctx._applyFinalMatrixColorsImmediate();

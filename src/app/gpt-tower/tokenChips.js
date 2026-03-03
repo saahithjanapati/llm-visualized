@@ -63,16 +63,17 @@ const EMBEDDING_REFLECTIVITY_TWEAKS = {
     envMapIntensityScale: 0.78
 };
 
-// Keep the early token/position embedding surfaces a bit less glowy than the rest of the run.
-const INITIAL_EMBEDDING_EMISSIVE_SCALE = 0.5;
-const INITIAL_EMBEDDING_REFLECTIVITY_PROPS = {
-    metalness: 0.18,
-    roughness: 0.64,
-    clearcoat: 0.2,
-    clearcoatRoughness: 0.68,
-    iridescence: 0.08,
-    envMapIntensity: 0.44
-};
+const TOKEN_CHIP_ONLY_MATERIAL_TWEAKS = Object.freeze({
+    color: 0xeadfc9,
+    metalness: 0.0,
+    roughness: 0.95,
+    clearcoat: 0.0,
+    clearcoatRoughness: 1.0,
+    iridescence: 0.0,
+    envMapIntensity: 0.38,
+    emissive: 0x000000,
+    emissiveIntensity: 0
+});
 
 function applyEmbeddingReflectivityTweaks(matrix) {
     if (!matrix) return;
@@ -116,6 +117,46 @@ function applyEmbeddingReflectivityTweaks(matrix) {
     apply(matrix.mesh?.material);
     apply(matrix.frontCapMesh?.material);
     apply(matrix.backCapMesh?.material);
+}
+
+function applyTokenChipMaterialTweaks(chipGroup) {
+    if (!chipGroup || typeof chipGroup.traverse !== 'function') return;
+    const applyToMaterial = (mat) => {
+        if (!mat) return;
+        if (mat.color?.set) mat.color.set(TOKEN_CHIP_ONLY_MATERIAL_TWEAKS.color);
+        if (typeof mat.metalness === 'number') mat.metalness = TOKEN_CHIP_ONLY_MATERIAL_TWEAKS.metalness;
+        if (typeof mat.roughness === 'number') mat.roughness = TOKEN_CHIP_ONLY_MATERIAL_TWEAKS.roughness;
+        if (typeof mat.clearcoat === 'number') mat.clearcoat = TOKEN_CHIP_ONLY_MATERIAL_TWEAKS.clearcoat;
+        if (typeof mat.clearcoatRoughness === 'number') {
+            mat.clearcoatRoughness = TOKEN_CHIP_ONLY_MATERIAL_TWEAKS.clearcoatRoughness;
+        }
+        if (typeof mat.iridescence === 'number') mat.iridescence = TOKEN_CHIP_ONLY_MATERIAL_TWEAKS.iridescence;
+        if (typeof mat.envMapIntensity === 'number') {
+            mat.envMapIntensity = TOKEN_CHIP_ONLY_MATERIAL_TWEAKS.envMapIntensity;
+        }
+        if (mat.emissive?.set) mat.emissive.set(TOKEN_CHIP_ONLY_MATERIAL_TWEAKS.emissive);
+        if (typeof mat.emissiveIntensity === 'number') {
+            mat.emissiveIntensity = TOKEN_CHIP_ONLY_MATERIAL_TWEAKS.emissiveIntensity;
+        }
+        mat.needsUpdate = true;
+    };
+
+    chipGroup.traverse((obj) => {
+        if (!obj || !obj.isMesh || !obj.material) return;
+        const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+        materials.forEach((mat) => applyToMaterial(mat));
+    });
+}
+
+function retuneTokenChipMaterials(root) {
+    if (!root || typeof root.traverse !== 'function') return;
+    root.traverse((obj) => {
+        if (!obj || !obj.isGroup) return;
+        const label = obj.userData?.label;
+        if (typeof label === 'string' && label.startsWith('Token:')) {
+            applyTokenChipMaterialTweaks(obj);
+        }
+    });
 }
 
 // Build a rounded rectangle shape used for the token chip body.
@@ -444,8 +485,7 @@ export function addEmbeddingAndTokenChips({
         vocabBottom.setMaterialProperties({
             opacity: 1.0,
             transparent: false,
-            emissiveIntensity: (TOP_EMBED_BASE_EMISSIVE + TOP_EMBED_MAX_EMISSIVE) * INITIAL_EMBEDDING_EMISSIVE_SCALE,
-            ...INITIAL_EMBEDDING_REFLECTIVITY_PROPS
+            emissiveIntensity: TOP_EMBED_BASE_EMISSIVE + TOP_EMBED_MAX_EMISSIVE
         });
         applyEmbeddingReflectivityTweaks(vocabBottom);
         addToRoot(vocabBottom.group);
@@ -477,8 +517,7 @@ export function addEmbeddingAndTokenChips({
         posBottom.setMaterialProperties({
             opacity: 1.0,
             transparent: false,
-            emissiveIntensity: (TOP_EMBED_BASE_EMISSIVE + TOP_EMBED_MAX_EMISSIVE) * INITIAL_EMBEDDING_EMISSIVE_SCALE,
-            ...INITIAL_EMBEDDING_REFLECTIVITY_PROPS
+            emissiveIntensity: TOP_EMBED_BASE_EMISSIVE + TOP_EMBED_MAX_EMISSIVE
         });
         applyEmbeddingReflectivityTweaks(posBottom);
         addToRoot(posBottom.group);
@@ -766,6 +805,7 @@ export function addEmbeddingAndTokenChips({
 
                 // Keep a static chip below the stack for context once the animated one rises.
                 const staticChip = createTokenChip(label, font, TOKEN_CHIP_STYLE);
+                applyTokenChipMaterialTweaks(staticChip);
                 const chipHeight = staticChip.userData.size.height;
                 const targetY = vocabMatrixBottomY + chipHeight / 2 + TOKEN_CHIP_STYLE.inset;
                 const targetZ = chipLaneZs[idx];
@@ -799,6 +839,7 @@ export function addEmbeddingAndTokenChips({
                 }
 
                 const chip = createTokenChip(label, font, TOKEN_CHIP_STYLE);
+                applyTokenChipMaterialTweaks(chip);
                 applyChipSelectionMetadata(chip, {
                     chipLabel,
                     laneIndex: idx,
@@ -973,6 +1014,7 @@ export function addEmbeddingAndTokenChips({
                 spawnPositionChips(font);
                 armEmbeddedChipRemoval();
                 applyPhysicalMaterialsToScene(engine.scene, USE_PHYSICAL_MATERIALS);
+                retuneTokenChipMaterials(rootGroup);
             },
             undefined,
             (err) => {
@@ -982,6 +1024,7 @@ export function addEmbeddingAndTokenChips({
                 spawnPositionChips(null);
                 armEmbeddedChipRemoval();
                 applyPhysicalMaterialsToScene(engine.scene, USE_PHYSICAL_MATERIALS);
+                retuneTokenChipMaterials(rootGroup);
             }
         );
 

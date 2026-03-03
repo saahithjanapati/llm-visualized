@@ -10,6 +10,10 @@ const SPECTRUM_HUE_MAX = 2 / 3; // blue at max
 const SPECTRUM_CENTER_RANGE = 0.75; // Portion of value range treated as "center" (0-1, normalized)
 const SPECTRUM_CENTER_SPAN = 0.97; // Portion of hue span reserved for center values (0-1)
 
+function isColorDebugEnabled() {
+    return typeof window !== 'undefined' && window.__COLOR_DEBUG === true;
+}
+
 function applySpectrumStretch(normalized) {
     const safeRange = Number.isFinite(SPECTRUM_CENTER_RANGE)
         ? Math.max(0, Math.min(1, SPECTRUM_CENTER_RANGE))
@@ -203,11 +207,16 @@ export function mapValueToGrayscale(value) {
 // Modify mapValueToColor to accept an optional index for logging context
 let mapValueToColorCallCount = 0;
 export function mapValueToColor_LOG(value, index) {
-    mapValueToColorCallCount++;
+    const debugEnabled = isColorDebugEnabled();
+    if (debugEnabled) {
+        mapValueToColorCallCount++;
+    }
     // Log for first 5, last 5, and a few in the middle to avoid excessive logging for VECTOR_LENGTH=100
-    const shouldLog = index < 5 || 
-                      index >= VECTOR_LENGTH - 5 || 
-                      (index >= Math.floor(VECTOR_LENGTH/2) - 2 && index <= Math.floor(VECTOR_LENGTH/2) + 2);
+    const shouldLog = debugEnabled && (
+        index < 5
+        || index >= VECTOR_LENGTH - 5
+        || (index >= Math.floor(VECTOR_LENGTH / 2) - 2 && index <= Math.floor(VECTOR_LENGTH / 2) + 2)
+    );
 
     if (shouldLog) {
         console.log(`mapValueToColor_LOG (idx ${index}, call #${mapValueToColorCallCount}): input=${value !== undefined && value !== null ? value.toFixed(3) : value}`);
@@ -272,7 +281,9 @@ export function mapNormalizedValueToBrightColor(value, targetColorInstance) {
     } else {
         // console.warn(`mapNormalizedValueToBrightColor received non-finite value: ${value}. Defaulting color.`);
         // Using a less intrusive log, or remove if too noisy during normal operation with fixed layerNormalize
-        if (typeof value !== 'number') console.log(`Bad color value: ${value}`); 
+        if (typeof value !== 'number' && isColorDebugEnabled()) {
+            console.warn(`Bad color value: ${value}`);
+        }
     }
 
     if (targetColorInstance) {

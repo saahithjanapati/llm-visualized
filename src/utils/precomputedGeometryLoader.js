@@ -4,6 +4,10 @@ import { WeightMatrixVisualization } from '../components/WeightMatrixVisualizati
 import { LayerNormalizationVisualization } from '../components/LayerNormalizationVisualization.js';
 import { USE_PRECOMPUTED_GEOMETRIES, USE_GLB_MATERIALS } from './constants.js';
 
+function isPrecomputedGeometryDebugEnabled() {
+    return typeof window !== 'undefined' && window.__PRECOMPUTED_GEOMETRY_DEBUG === true;
+}
+
 /**
  * Load a GLB containing pre-exported component geometries and inject them
  * into the runtime caches so that subsequent instantiations reuse the
@@ -20,6 +24,7 @@ import { USE_PRECOMPUTED_GEOMETRIES, USE_GLB_MATERIALS } from './constants.js';
  * @returns {Promise<void>} Resolves once the asset is fully loaded and caches are primed.
  */
 export function loadPrecomputedGeometries(url = '../precomputed_components.glb') {
+    const debugEnabled = isPrecomputedGeometryDebugEnabled();
     const globalToggle = (typeof window !== 'undefined' && typeof window.__USE_PRECOMPUTED_GEOMETRIES === 'boolean')
         ? window.__USE_PRECOMPUTED_GEOMETRIES
         : USE_PRECOMPUTED_GEOMETRIES;
@@ -29,13 +34,20 @@ export function loadPrecomputedGeometries(url = '../precomputed_components.glb')
     const queryDisables = searchParams ? searchParams.has('fresh') : false;
 
     if (!globalToggle || queryDisables) {
-        console.log('[PrecomputedGeometryLoader] Skipping pre-baked geometry load (flag disabled)');
+        if (debugEnabled) {
+            console.log('[PrecomputedGeometryLoader] Skipping pre-baked geometry load (flag disabled)');
+        }
         return Promise.resolve();
     }
 
     return new Promise((resolve, reject) => {
-        console.time('[PrecomputedGeometryLoader] Total load');
-        console.log(`[PrecomputedGeometryLoader] Fetching pre-baked geometries from ${url} …`);
+        const timerLabel = '[PrecomputedGeometryLoader] Total load';
+        let timed = false;
+        if (debugEnabled) {
+            console.time(timerLabel);
+            timed = true;
+            console.log(`[PrecomputedGeometryLoader] Fetching pre-baked geometries from ${url} …`);
+        }
 
         const loader = new GLTFLoader();
         loader.load(
@@ -58,14 +70,18 @@ export function loadPrecomputedGeometries(url = '../precomputed_components.glb')
                     }
                 });
 
-                console.timeEnd('[PrecomputedGeometryLoader] Total load');
-                console.log(`[PrecomputedGeometryLoader] Registered ${wmCount} WeightMatrix and ${lnCount} LayerNorm geometries.`);
+                if (timed) {
+                    console.timeEnd(timerLabel);
+                    console.log(`[PrecomputedGeometryLoader] Registered ${wmCount} WeightMatrix and ${lnCount} LayerNorm geometries.`);
+                }
                 resolve();
             },
             undefined,
             (err) => {
                 console.warn('[PrecomputedGeometryLoader] Failed to load:', err);
-                console.timeEnd('[PrecomputedGeometryLoader] Total load');
+                if (timed) {
+                    console.timeEnd(timerLabel);
+                }
                 // Continue without cache so app still works.
                 resolve();
             }

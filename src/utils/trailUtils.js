@@ -28,6 +28,7 @@ const WIDE_LINE_HIDDEN_POSITIONS = new Float32Array([
     0, HIDE_INSTANCE_Y_OFFSET, 0,
     0, HIDE_INSTANCE_Y_OFFSET, 0
 ]);
+const BATCHED_TRAIL_HIDDEN_POINT = new THREE.Vector3(0, HIDE_INSTANCE_Y_OFFSET, 0);
 
 let GLOBAL_MAX_STEP_DISTANCE = 0;
 // Keep live trails on BufferGeometry (legacy path) because frequent point
@@ -506,6 +507,10 @@ export class SegmentTrailBatch {
         this._attr = null;
         this._geometry = new LineSegmentsGeometry();
         this._geometry.setPositions(this._positions);
+        this._positionBuffer = this._geometry.attributes?.instanceStart?.data || null;
+        if (this._positionBuffer && typeof this._positionBuffer.setUsage === 'function') {
+            this._positionBuffer.setUsage(THREE.DynamicDrawUsage);
+        }
 
         const effectiveOpacity = scaleOpacityForDisplay(this._opacity);
         const effectiveWidth = scaleLineWidthForDisplay(this._lineWidth);
@@ -543,13 +548,33 @@ export class SegmentTrailBatch {
     _setSegment(index, start, end) {
         if (index < 0 || index >= this._capacity) return;
         const i = index * 2 * 3;
-        this._positions[i] = start.x;
-        this._positions[i + 1] = start.y;
-        this._positions[i + 2] = start.z;
-        this._positions[i + 3] = end.x;
-        this._positions[i + 4] = end.y;
-        this._positions[i + 5] = end.z;
-        this._geometry.setPositions(this._positions);
+        const positions = this._positions;
+        if (
+            positions[i] === start.x
+            && positions[i + 1] === start.y
+            && positions[i + 2] === start.z
+            && positions[i + 3] === end.x
+            && positions[i + 4] === end.y
+            && positions[i + 5] === end.z
+        ) {
+            return;
+        }
+        positions[i] = start.x;
+        positions[i + 1] = start.y;
+        positions[i + 2] = start.z;
+        positions[i + 3] = end.x;
+        positions[i + 4] = end.y;
+        positions[i + 5] = end.z;
+        if (!this._positionBuffer) {
+            this._positionBuffer = this._geometry.attributes?.instanceStart?.data || null;
+        }
+        if (this._positionBuffer) {
+            this._positionBuffer.needsUpdate = true;
+        } else {
+            // Fallback for unexpected geometry state.
+            this._geometry.setPositions(this._positions);
+            this._positionBuffer = this._geometry.attributes?.instanceStart?.data || null;
+        }
     }
 }
 
@@ -577,8 +602,7 @@ export class BatchedSegmentTrail {
     }
 
     dispose() {
-        const hide = new THREE.Vector3(0, HIDE_INSTANCE_Y_OFFSET, 0);
-        this._batch._setSegment(this._index, hide, hide);
+        this._batch._setSegment(this._index, BATCHED_TRAIL_HIDDEN_POINT, BATCHED_TRAIL_HIDDEN_POINT);
     }
 }
 

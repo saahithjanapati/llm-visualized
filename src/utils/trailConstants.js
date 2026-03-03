@@ -19,6 +19,9 @@ const TRAIL_MIN_SCREEN_WIDTH_PX = 1.25;
 const TRAIL_OPACITY_DPR_DARKEN_START = 1.4;
 const TRAIL_OPACITY_DPR_DARKEN_EXPONENT = 0.5;
 const TRAIL_OPACITY_DPR_DARKEN_MIN = 0.72;
+const TRAIL_LOW_DPR_THRESHOLD = 1.25;
+const TRAIL_LOW_DPR_OPACITY_BOOST = 1.15;
+const TRAIL_LOW_DPR_WIDTH_BOOST = 1.2;
 let TRAIL_PIXEL_RATIO_CACHE = {
     width: -1,
     height: -1,
@@ -64,6 +67,12 @@ export function getEffectiveDevicePixelRatio() {
     return ratio;
 }
 
+function getRawDevicePixelRatio() {
+    if (typeof window === 'undefined') return 1;
+    const dpr = Number(window.devicePixelRatio);
+    return Number.isFinite(dpr) && dpr > 0 ? dpr : 1;
+}
+
 /**
  * Scale a base trail opacity for the current display. DPR scaling is intentionally
  * disabled so trails keep a consistent brightness across devices; only the
@@ -72,6 +81,7 @@ export function getEffectiveDevicePixelRatio() {
 export function scaleOpacityForDisplay(baseOpacity) {
     const laneScale = getLaneOpacityScale();
     const dpr = getEffectiveDevicePixelRatio();
+    const rawDpr = getRawDevicePixelRatio();
     // Retina/HiDPI displays can make thin translucent trails read brighter;
     // apply a gentle high-DPR darkening so brightness better matches large
     // low/medium-DPR external monitors.
@@ -81,7 +91,12 @@ export function scaleOpacityForDisplay(baseOpacity) {
             Math.pow(TRAIL_OPACITY_DPR_DARKEN_START / dpr, TRAIL_OPACITY_DPR_DARKEN_EXPONENT)
         )
         : 1;
-    const scaled = baseOpacity * laneScale * TRAIL_OPACITY_RUNTIME_MULTIPLIER * dprOpacityCompensation;
+    // Slightly boost trail readability on low-DPR displays (external monitors),
+    // while leaving Retina/high-DPR displays unchanged.
+    const lowDprBoost = rawDpr <= TRAIL_LOW_DPR_THRESHOLD
+        ? TRAIL_LOW_DPR_OPACITY_BOOST
+        : 1;
+    const scaled = baseOpacity * laneScale * TRAIL_OPACITY_RUNTIME_MULTIPLIER * dprOpacityCompensation * lowDprBoost;
     return Math.min(1, Math.max(0, scaled));
 }
 
@@ -120,10 +135,14 @@ export function setTrailLineWidthRuntimeMultiplier(multiplier = 1) {
  */
 export function scaleLineWidthForDisplay(baseWidth) {
     const dpr = getEffectiveDevicePixelRatio();
+    const rawDpr = getRawDevicePixelRatio();
     // Sublinear scaling keeps high-DPR displays from looking excessively thick/
     // bright while still widening enough on lower-DPR displays to reduce shimmer.
     const dprWidthFactor = Math.pow(dpr, TRAIL_LINE_WIDTH_DPR_EXPONENT);
-    const scaled = baseWidth * dprWidthFactor * TRAIL_LINE_WIDTH_RUNTIME_MULTIPLIER;
+    const lowDprBoost = rawDpr <= TRAIL_LOW_DPR_THRESHOLD
+        ? TRAIL_LOW_DPR_WIDTH_BOOST
+        : 1;
+    const scaled = baseWidth * dprWidthFactor * TRAIL_LINE_WIDTH_RUNTIME_MULTIPLIER * lowDprBoost;
     // Keep trails above 1px for more stable line rasterization while orbiting.
     return Math.max(TRAIL_MIN_SCREEN_WIDTH_PX, scaled);
 }
