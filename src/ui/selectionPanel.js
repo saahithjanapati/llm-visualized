@@ -107,6 +107,9 @@ const ATTENTION_PRE_COLOR_CLAMP = 5;
 const ATTENTION_POP_OUT_MS = 120;
 const ATTENTION_SCORE_DECIMALS = 4;
 const ATTENTION_VALUE_PLACEHOLDER = '--';
+const ATTENTION_DECODE_ROW_OFFSET_MULT = 0.68;
+const ATTENTION_DECODE_ROW_OFFSET_MIN_PX = 8;
+const ATTENTION_DECODE_ROW_OFFSET_MAX_PX = 20;
 const RESIDUAL_COLOR_CLAMP = 2;
 const SPACE_TOKEN_DISPLAY = '" "';
 const PANEL_SHIFT_DURATION_MS = 520;
@@ -2733,6 +2736,8 @@ class SelectionPanel {
         this._attentionValues = null;
         this._attentionDynamic = false;
         this._attentionDynamicKey = '';
+        this._attentionDecodeProfile = null;
+        this._attentionRowSeparationPx = ATTENTION_DECODE_ROW_OFFSET_MIN_PX;
         this._attentionPostAnimQueue = new Set();
         this._attentionPostAnimatedRows = new Set();
         this._attentionLastPostCompleted = 0;
@@ -3305,12 +3310,19 @@ class SelectionPanel {
         };
     }
 
-    _resolveAttentionProgress(context) {
+    _resolveAttentionRuntime(context) {
         if (!context || !this.engine) return null;
         const layers = Array.isArray(this.engine._layers) ? this.engine._layers : null;
         if (!layers || !Number.isFinite(context.layerIndex)) return null;
-        const layer = layers[context.layerIndex];
-        const animator = layer && layer.mhsaAnimation && layer.mhsaAnimation.selfAttentionAnimator;
+        const layer = layers[context.layerIndex] || null;
+        const mhsa = layer?.mhsaAnimation || null;
+        const animator = mhsa?.selfAttentionAnimator || null;
+        return { layer, mhsa, animator };
+    }
+
+    _resolveAttentionProgress(context) {
+        const runtime = this._resolveAttentionRuntime(context);
+        const animator = runtime?.animator;
         if (!animator || typeof animator.getAttentionProgress !== 'function') return null;
         if (animator.skipRequested) {
             const count = Array.isArray(context.tokenIndices) ? context.tokenIndices.length : 0;
@@ -3333,6 +3345,100 @@ class SelectionPanel {
         return { completedRows, postCompletedRows, activeRow, activeCol };
     }
 
+    _resolveAttentionDecodeProfile(context, progress = null) {
+        const runtime = this._resolveAttentionRuntime(context);
+        const layer = runtime?.layer;
+        const mhsa = runtime?.mhsa;
+        if (!layer || !mhsa || !context) return null;
+
+        const liveLanes = Array.isArray(mhsa.currentLanes) ? mhsa.currentLanes : [];
+        const conveyorLanes = (typeof mhsa.getAttentionConveyorLanes === 'function')
+            ? mhsa.getAttentionConveyorLanes()
+            : null;
+        const liveLaneCount = liveLanes.length;
+        const conveyorLaneCount = Array.isArray(conveyorLanes) ? conveyorLanes.length : 0;
+        const inferredDecode = liveLaneCount === 1 && conveyorLaneCount > 1;
+        const kvModeEnabled = !!(
+            layer?._kvCacheModeEnabled
+            || (typeof mhsa._isKvCacheModeEnabled === 'function' && mhsa._isKvCacheModeEnabled())
+            || inferredDecode
+        );
+        const kvDecodeActive = !!(layer?._kvCacheDecodeActive || mhsa?._kvCacheDecodeActive || inferredDecode);
+        const tokenIndices = Array.isArray(context.tokenIndices) ? context.tokenIndices : [];
+        if (!kvModeEnabled || !kvDecodeActive || tokenIndices.length <= 1) return null;
+
+        let highlightRow = -1;
+        const liveLane = liveLanes.find((lane) => lane && Number.isFinite(lane.tokenIndex)) || null;
+        const queryTokenIndex = Number.isFinite(liveLane?.tokenIndex) ? liveLane.tokenIndex : null;
+        if (Number.isFinite(queryTokenIndex)) {
+            highlightRow = tokenIndices.indexOf(queryTokenIndex);
+        }
+        if (!Number.isFinite(highlightRow) || highlightRow < 0) {
+            highlightRow = tokenIndices.length - 1;
+        }
+        highlightRow = Math.max(0, Math.min(tokenIndices.length - 1, highlightRow));
+
+        return {
+            enabled: true,
+            highlightRow,
+            dimRowsThrough: Math.max(-1, highlightRow - 1),
+            separateRow: false
+        };
+    }
+
+    _buildAttentionProgressKey(progress, decodeProfile = null) {
+        const progressPart = progress
+            ? `${progress.completedRows || 0}|${progress.postCompletedRows || 0}|${progress.activeRow ?? 'n'}|${progress.activeCol ?? 'n'}`
+            : 'none';
+        const decodePart = decodeProfile
+            ? `${decodeProfile.highlightRow ?? 'n'}|${decodeProfile.separateRow ? 1 : 0}`
+            : 'off';
+        return `${progressPart}|decode:${decodePart}`;
+    }
+
+    _applyAttentionDecodeStyling() {
+        const profile = this._attentionDecodeProfile;
+        const hasDecodeProfile = !!(profile && profile.enabled && Number.isFinite(profile.highlightRow));
+        const highlightRow = hasDecodeProfile ? profile.highlightRow : -1;
+        const dimRowsThrough = hasDecodeProfile && Number.isFinite(profile.dimRowsThrough)
+            ? profile.dimRowsThrough
+            : -1;
+        const separateRow = !!(hasDecodeProfile && profile.separateRow);
+
+        if (this.attentionRoot) {
+            this.attentionRoot.dataset.decodeKv = hasDecodeProfile ? 'true' : 'false';
+            if (hasDecodeProfile && Number.isFinite(this._attentionRowSeparationPx)) {
+                this.attentionRoot.style.setProperty('--attention-decode-row-offset', `${Math.round(this._attentionRowSeparationPx)}px`);
+            } else {
+                this.attentionRoot.style.removeProperty('--attention-decode-row-offset');
+            }
+        }
+
+        if (!Array.isArray(this._attentionCells) || !this._attentionCells.length) return;
+        for (let row = 0; row < this._attentionCells.length; row += 1) {
+            const rowCells = this._attentionCells[row];
+            if (!Array.isArray(rowCells)) continue;
+            const rowIsActive = hasDecodeProfile && row === highlightRow;
+            const rowIsDimmed = hasDecodeProfile && row <= dimRowsThrough;
+            const rowIsSeparated = rowIsActive && separateRow;
+
+            const leftToken = this._attentionTokenElsLeft?.[row];
+            if (leftToken) {
+                leftToken.classList.toggle('is-decode-dimmed', rowIsDimmed);
+                leftToken.classList.toggle('is-decode-active', rowIsActive);
+                leftToken.classList.toggle('is-decode-separated-row', rowIsSeparated);
+            }
+
+            for (let col = 0; col < rowCells.length; col += 1) {
+                const cell = rowCells[col];
+                if (!cell || cell.classList.contains('is-hidden')) continue;
+                cell.classList.toggle('is-decode-dimmed', rowIsDimmed);
+                cell.classList.toggle('is-decode-active-row', rowIsActive);
+                cell.classList.toggle('is-decode-separated-row', rowIsSeparated);
+            }
+        }
+    }
+
     _updateDynamicAttentionProgress() {
         if (!this._attentionContext) return;
         if (this._isSmallScreen && this._isSmallScreen()) {
@@ -3347,6 +3453,7 @@ class SelectionPanel {
             return;
         }
         const progress = this._resolveAttentionProgress(this._attentionContext);
+        const decodeProfile = this._resolveAttentionDecodeProfile(this._attentionContext, progress);
         if (progress) {
             const nextPost = progress.postCompletedRows || 0;
             if (Number.isFinite(nextPost) && nextPost > this._attentionLastPostCompleted) {
@@ -3355,21 +3462,19 @@ class SelectionPanel {
                 }
                 this._attentionLastPostCompleted = nextPost;
             }
-            const nextKey = `${progress.completedRows || 0}|${progress.postCompletedRows || 0}|${progress.activeRow ?? 'n'}|${progress.activeCol ?? 'n'}`;
-            if (!this._attentionDynamic || nextKey !== this._attentionDynamicKey) {
-                this._attentionDynamic = true;
-                this._attentionDynamicKey = nextKey;
-                this._applyAttentionReveal(progress);
-            }
-            return;
-        }
-        if (this._attentionDynamic) {
-            this._attentionDynamic = false;
-            this._attentionDynamicKey = '';
+        } else {
             this._attentionPostAnimQueue.clear();
             this._attentionPostAnimatedRows.clear();
             this._attentionLastPostCompleted = 0;
-            this._applyAttentionReveal(null);
+        }
+
+        const nextDynamic = !!progress;
+        const nextKey = this._buildAttentionProgressKey(progress, decodeProfile);
+        if (this._attentionDynamic !== nextDynamic || this._attentionDynamicKey !== nextKey) {
+            this._attentionDynamic = nextDynamic;
+            this._attentionDynamicKey = nextKey;
+            this._attentionDecodeProfile = decodeProfile;
+            this._applyAttentionReveal(progress);
         }
     }
 
@@ -3516,6 +3621,7 @@ class SelectionPanel {
                 this.attentionEmpty.style.display = (hasAnyValue || this._attentionDynamic) ? 'none' : 'block';
             }
         }
+        this._applyAttentionDecodeStyling();
         if (this._attentionPinned) {
             if (!this._restorePinnedAttentionCell()) {
                 this._clearPinnedAttention();
@@ -3577,7 +3683,9 @@ class SelectionPanel {
             this._attentionPostAnimQueue.clear();
             this._attentionPostAnimatedRows.clear();
             this._attentionLastPostCompleted = 0;
+            this._attentionDecodeProfile = null;
             this._attentionSelectionSummary = null;
+            this._applyAttentionDecodeStyling();
             return;
         }
 
@@ -3596,10 +3704,10 @@ class SelectionPanel {
             : null;
         const allowDynamic = !(this._isSmallScreen && this._isSmallScreen());
         const progress = allowDynamic ? this._resolveAttentionProgress(context) : null;
+        const decodeProfile = this._resolveAttentionDecodeProfile(context, progress);
         this._attentionDynamic = !!progress;
-        this._attentionDynamicKey = progress
-            ? `${progress.completedRows || 0}|${progress.postCompletedRows || 0}|${progress.activeRow ?? 'n'}|${progress.activeCol ?? 'n'}`
-            : '';
+        this._attentionDynamicKey = this._buildAttentionProgressKey(progress, decodeProfile);
+        this._attentionDecodeProfile = decodeProfile;
         this._attentionPostAnimQueue.clear();
         this._attentionPostAnimatedRows.clear();
         this._attentionLastPostCompleted = progress?.postCompletedRows || 0;
@@ -3656,6 +3764,11 @@ class SelectionPanel {
             }
         }
         cellSize = Math.max(ATTENTION_PREVIEW_MIN_CELL, Math.min(ATTENTION_PREVIEW_MAX_CELL, Math.floor(cellSize)));
+        this._attentionRowSeparationPx = THREE.MathUtils.clamp(
+            Math.round(cellSize * ATTENTION_DECODE_ROW_OFFSET_MULT),
+            ATTENTION_DECODE_ROW_OFFSET_MIN_PX,
+            ATTENTION_DECODE_ROW_OFFSET_MAX_PX
+        );
         this.attentionRoot.style.setProperty('--cell-size', `${cellSize}px`);
         this.attentionRoot.style.setProperty('--cell-gap', `${gap}px`);
         this.attentionRoot.style.setProperty('--attention-grid-gap', `${gridGap}px`);
@@ -3742,6 +3855,7 @@ class SelectionPanel {
         this.attentionTokensTop.appendChild(topFrag);
         this.attentionTokensLeft.appendChild(leftFrag);
         this.attentionMatrix.appendChild(matrixFrag);
+        this._applyAttentionDecodeStyling();
         if (this.attentionEmpty) {
             this.attentionEmpty.style.display = (hasAnyValue || this._attentionDynamic) ? 'none' : 'block';
         }
@@ -4261,6 +4375,7 @@ class SelectionPanel {
         this._attentionValues = null;
         this._attentionDynamic = false;
         this._attentionDynamicKey = '';
+        this._attentionDecodeProfile = null;
         this._attentionPostAnimQueue?.clear?.();
         this._attentionPostAnimatedRows?.clear?.();
         this._attentionLastPostCompleted = 0;
@@ -4272,6 +4387,7 @@ class SelectionPanel {
             empty: true
         };
         this._setAttentionValue(this._attentionValueDefault);
+        this._applyAttentionDecodeStyling();
     }
 
     _resolveVectorTokenPosition(selection, label) {
