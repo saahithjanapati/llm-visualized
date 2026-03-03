@@ -141,6 +141,19 @@
                     <div id="detailAttentionTokensLeft" class="attention-tokens attention-tokens-left"></div>
                     <div id="detailAttentionMatrix" class="attention-matrix"></div>
                 </div>
+                <div class="attention-legend" aria-hidden="true">
+                    <span id="detailAttentionLegendLow" class="attention-legend-label">&lt;= -5</span>
+                    <div id="detailAttentionLegend" class="attention-legend-bar" data-mid="0">
+                        <div class="attention-legend-ticks" aria-hidden="true">
+                            <span class="attention-legend-tick" data-ratio="0" style="--tick-pos:0%;"></span>
+                            <span class="attention-legend-tick" data-ratio="0.25" style="--tick-pos:25%;"></span>
+                            <span class="attention-legend-tick attention-legend-tick--major" data-ratio="0.5" style="--tick-pos:50%;"></span>
+                            <span class="attention-legend-tick" data-ratio="0.75" style="--tick-pos:75%;"></span>
+                            <span class="attention-legend-tick" data-ratio="1" style="--tick-pos:100%;"></span>
+                        </div>
+                    </div>
+                    <span id="detailAttentionLegendHigh" class="attention-legend-label">&gt;= +5</span>
+                </div>
                 <div id="detailAttentionEmpty" class="attention-empty">No attention scores available.</div>
                 <div id="detailAttentionNote" class="attention-note"></div>
                 <div id="detailAttentionValue" class="attention-value" data-empty="true">
@@ -154,19 +167,6 @@
                         <span id="detailAttentionValueTarget" class="attention-value-item attention-value-item--target">--</span>
                         <span id="detailAttentionValueScore" class="attention-value-item attention-value-item--score">--</span>
                     </div>
-                </div>
-                <div class="attention-legend" aria-hidden="true">
-                    <span id="detailAttentionLegendLow" class="attention-legend-label">&lt;= -5</span>
-                    <div id="detailAttentionLegend" class="attention-legend-bar" data-mid="0">
-                        <div class="attention-legend-ticks" aria-hidden="true">
-                            <span class="attention-legend-tick" data-ratio="0" style="--tick-pos:0%;"></span>
-                            <span class="attention-legend-tick" data-ratio="0.25" style="--tick-pos:25%;"></span>
-                            <span class="attention-legend-tick attention-legend-tick--major" data-ratio="0.5" style="--tick-pos:50%;"></span>
-                            <span class="attention-legend-tick" data-ratio="0.75" style="--tick-pos:75%;"></span>
-                            <span class="attention-legend-tick" data-ratio="1" style="--tick-pos:100%;"></span>
-                        </div>
-                    </div>
-                    <span id="detailAttentionLegendHigh" class="attention-legend-label">&gt;= +5</span>
                 </div>
             </div>
             <div id="detailMeta" class="detail-meta">

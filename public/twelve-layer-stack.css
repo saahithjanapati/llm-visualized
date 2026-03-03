@@ -1674,7 +1674,7 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     grid-template-areas: "bar";
     align-items: end;
     gap: 0;
-    margin-top: 10px;
+    margin-top: 0;
     color: #9aa3af;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     font-size: 10px;

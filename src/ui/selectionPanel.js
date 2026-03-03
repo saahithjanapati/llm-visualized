@@ -3642,6 +3642,15 @@ class SelectionPanel {
         return !!this._attentionSelectionSummary;
     }
 
+    _hasAttentionFocusCell() {
+        if (this._attentionPinned || !!this._attentionHoverCell) return true;
+        return !!(this.attentionMatrix && this.attentionMatrix.classList.contains('has-focus-cell'));
+    }
+
+    _shouldSuppressAttentionEntryHighlight() {
+        return this._hasExplicitAttentionScoreSelection() || this._hasAttentionFocusCell();
+    }
+
     _applyAttentionDecodeStyling() {
         const profile = this._attentionDecodeProfile;
         const hasDecodeProfile = !!(profile && profile.enabled && Number.isFinite(profile.highlightRow));
@@ -3650,7 +3659,7 @@ class SelectionPanel {
             ? profile.dimRowsThrough
             : -1;
         const separateRow = !!(hasDecodeProfile && profile.separateRow);
-        const suppressActiveDecodeRowHighlight = this._hasExplicitAttentionScoreSelection();
+        const suppressActiveDecodeRowHighlight = this._shouldSuppressAttentionEntryHighlight();
 
         if (this.attentionRoot) {
             this.attentionRoot.dataset.decodeKv = hasDecodeProfile ? 'true' : 'false';
@@ -3774,7 +3783,7 @@ class SelectionPanel {
         const mode = this.attentionMode === 'post' ? 'post' : 'pre';
         const tokenLabels = this._attentionContext.tokenLabels || [];
         const count = this._attentionCells.length;
-        const suppressRevealPulse = this._hasExplicitAttentionScoreSelection();
+        const suppressRevealPulse = this._shouldSuppressAttentionEntryHighlight();
         const rowAnimDuration = 180;
         const rowAnimStagger = mode === 'post' && count > 1
             ? Math.max(6, Math.round(180 / (count - 1)))
