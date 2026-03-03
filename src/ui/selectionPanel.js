@@ -117,6 +117,12 @@ const DETAIL_EQUATION_FONT_MIN_PX = 9;
 const DETAIL_EQUATION_FONT_MAX_PX = 20;
 const DETAIL_EQUATION_FONT_MAX_SCALE = 1.5;
 const DETAIL_EQUATION_FIT_BUFFER_PX = 1.25;
+const COPY_CONTEXT_BUTTON_DEFAULT_LABEL = 'Have a question? Copy context';
+const COPY_CONTEXT_SUCCESS_LABEL = 'Context copied to clipboard.';
+const COPY_CONTEXT_ERROR_LABEL = 'Unable to copy context.';
+const COPY_CONTEXT_EMPTY_LABEL = 'Nothing visible to copy yet.';
+const COPY_CONTEXT_FEEDBACK_MS = 1000;
+const COPY_CONTEXT_FADE_MS = 220;
 
 const TOKEN_CHIP_STYLE = {
     padding: 80,
@@ -975,6 +981,89 @@ function renderDescriptionHtml(text) {
 function setDescriptionContent(element, text) {
     if (!element) return;
     element.innerHTML = renderDescriptionHtml(text || '');
+}
+
+function isVisibleForContextCopy(element) {
+    if (!element || element.hidden) return false;
+    if (typeof window !== 'undefined' && typeof window.getComputedStyle === 'function') {
+        const style = window.getComputedStyle(element);
+        if (style.display === 'none' || style.visibility === 'hidden') return false;
+    }
+    return true;
+}
+
+function collectVisibleContextText(root, { excludeSelectors = '' } = {}) {
+    if (!root || typeof document === 'undefined' || typeof NodeFilter === 'undefined') return [];
+    const lines = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+    while (node) {
+        const parent = node.parentElement;
+        if (!parent) {
+            node = walker.nextNode();
+            continue;
+        }
+        if (excludeSelectors && parent.closest(excludeSelectors)) {
+            node = walker.nextNode();
+            continue;
+        }
+        if (!isVisibleForContextCopy(parent)) {
+            node = walker.nextNode();
+            continue;
+        }
+        const line = String(node.textContent || '').replace(/\s+/g, ' ').trim();
+        if (line && lines[lines.length - 1] !== line) {
+            lines.push(line);
+        }
+        node = walker.nextNode();
+    }
+    return lines;
+}
+
+function fallbackCopyText(text) {
+    if (typeof document === 'undefined' || !document.body) return false;
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.top = '-10000px';
+    area.style.left = '-10000px';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    try {
+        area.focus({ preventScroll: true });
+    } catch (_) {
+        area.focus();
+    }
+    area.select();
+    area.setSelectionRange(0, area.value.length);
+    let copied = false;
+    try {
+        copied = !!document.execCommand('copy');
+    } catch (_) {
+        copied = false;
+    }
+    document.body.removeChild(area);
+    return copied;
+}
+
+async function copyTextToClipboard(text) {
+    const value = String(text || '');
+    if (!value.trim().length) return false;
+    if (
+        typeof navigator !== 'undefined'
+        && navigator.clipboard
+        && typeof navigator.clipboard.writeText === 'function'
+        && (typeof window === 'undefined' || window.isSecureContext)
+    ) {
+        try {
+            await navigator.clipboard.writeText(value);
+            return true;
+        } catch (_) {
+            // Fall back to execCommand copy path below.
+        }
+    }
+    return fallbackCopyText(value);
 }
 
 function extractTokenText(label) {
@@ -2589,6 +2678,8 @@ class SelectionPanel {
         this.tokenInfoPosition = document.getElementById('detailTokenInfoPosition');
         this.tokenEncodingRow = document.getElementById('detailTokenEncodingRow');
         this.tokenEncodingValue = document.getElementById('detailTokenEncodingValue');
+        this.copyContextBtn = document.getElementById('detailCopyContextBtn');
+        this.copyContextBtnLabel = document.getElementById('detailCopyContextBtnLabel');
         this.closeBtn = document.getElementById('detailClose');
         this.canvas = document.getElementById('detailCanvas');
         this.description = document.getElementById('detailDescription');
@@ -2692,10 +2783,19 @@ class SelectionPanel {
             scheduled: false,
             pending: false
         };
+        this._currentSelectionDescription = '';
+        this._currentSelectionEquations = '';
+        this._copyContextFeedbackTimer = null;
+        this._copyContextFadeTimer = null;
+        this._copyContextDefaultLabel = this.copyContextBtnLabel?.textContent?.trim()
+            || this.copyContextBtn?.textContent?.trim()
+            || COPY_CONTEXT_BUTTON_DEFAULT_LABEL;
+        this._setCopyContextButtonLabel(this._copyContextDefaultLabel);
 
         this._animate = this._animate.bind(this);
         this._onResize = this._onResize.bind(this);
         this._onKeydown = this._onKeydown.bind(this);
+        this._onCopyContextClick = this._onCopyContextClick.bind(this);
         this._onClosePointerDown = this._onClosePointerDown.bind(this);
         this._onDocumentPointerDown = this._onDocumentPointerDown.bind(this);
         this._blockPreviewGesture = this._blockPreviewGesture.bind(this);
@@ -2753,6 +2853,7 @@ class SelectionPanel {
         this._attentionLastPostCompleted = 0;
 
         this.closeBtn?.addEventListener('click', () => this.close());
+        this.copyContextBtn?.addEventListener('click', this._onCopyContextClick);
         this.closeBtn?.addEventListener('pointerdown', this._onClosePointerDown);
         this.canvas.addEventListener('pointerdown', this._blockPreviewGesture, { passive: false });
         this.canvas.addEventListener('pointermove', this._blockPreviewGesture, { passive: false });
@@ -2837,6 +2938,117 @@ class SelectionPanel {
             }
             this._applyDimensionLabelFit();
         });
+    }
+
+    _setCopyContextButtonLabel(text) {
+        const label = String(text || '').trim() || COPY_CONTEXT_BUTTON_DEFAULT_LABEL;
+        if (this.copyContextBtnLabel) {
+            this.copyContextBtnLabel.textContent = label;
+            return;
+        }
+        if (this.copyContextBtn) {
+            this.copyContextBtn.textContent = label;
+        }
+    }
+
+    _resetCopyContextFeedback({ clearTimers = true } = {}) {
+        if (clearTimers) {
+            if (this._copyContextFeedbackTimer) {
+                clearTimeout(this._copyContextFeedbackTimer);
+                this._copyContextFeedbackTimer = null;
+            }
+            if (this._copyContextFadeTimer) {
+                clearTimeout(this._copyContextFadeTimer);
+                this._copyContextFadeTimer = null;
+            }
+        }
+        if (!this.copyContextBtn) return;
+        this._setCopyContextButtonLabel(this._copyContextDefaultLabel || COPY_CONTEXT_BUTTON_DEFAULT_LABEL);
+        this.copyContextBtn.classList.remove('is-feedback-success', 'is-feedback-error', 'is-feedback-fade');
+    }
+
+    _showCopyContextFeedback(message, { error = false } = {}) {
+        if (!this.copyContextBtn) return;
+        this._resetCopyContextFeedback({ clearTimers: true });
+        this._setCopyContextButtonLabel(message);
+        this.copyContextBtn.classList.toggle('is-feedback-success', !error);
+        this.copyContextBtn.classList.toggle('is-feedback-error', error);
+        this._copyContextFeedbackTimer = setTimeout(() => {
+            this._copyContextFeedbackTimer = null;
+            if (!this.copyContextBtn) return;
+            this.copyContextBtn.classList.add('is-feedback-fade');
+            this._copyContextFadeTimer = setTimeout(() => {
+                this._copyContextFadeTimer = null;
+                if (!this.copyContextBtn) return;
+                this._setCopyContextButtonLabel(this._copyContextDefaultLabel || COPY_CONTEXT_BUTTON_DEFAULT_LABEL);
+                this.copyContextBtn.classList.remove('is-feedback-success', 'is-feedback-error', 'is-feedback-fade');
+            }, COPY_CONTEXT_FADE_MS);
+        }, COPY_CONTEXT_FEEDBACK_MS);
+    }
+
+    _buildSelectionContextPayload() {
+        const sections = [];
+        const title = (this.title?.textContent || '').trim();
+        const subtitle = (this.subtitle?.textContent || '').trim();
+        if (title) sections.push(`Selection: ${title}`);
+        if (subtitle) sections.push(`Context: ${subtitle}`);
+
+        const descriptionText = String(this._currentSelectionDescription || '').trim();
+        if (descriptionText) {
+            sections.push(`Description:\n${descriptionText}`);
+        }
+
+        const equationText = String(this._currentSelectionEquations || '').trim();
+        if (equationText) {
+            sections.push(`Equations:\n${equationText}`);
+        }
+
+        const metaLines = collectVisibleContextText(this.metaSection, {
+            excludeSelectors: '#detailCopyContextBtn, #detailClose'
+        });
+        if (metaLines.length) {
+            sections.push(`Details:\n${metaLines.join('\n')}`);
+        }
+
+        if (this.vectorLegend?.classList.contains('is-visible')) {
+            const legendLines = collectVisibleContextText(this.vectorLegend);
+            if (legendLines.length) {
+                sections.push(`Legend:\n${legendLines.join('\n')}`);
+            }
+        }
+
+        if (this.attentionRoot?.classList.contains('is-visible')) {
+            const attentionLines = collectVisibleContextText(this.attentionRoot);
+            if (attentionLines.length) {
+                sections.push(`Attention:\n${attentionLines.join('\n')}`);
+            }
+        }
+
+        if (this.dataSection && this.dataSection.style.display !== 'none') {
+            const dataLines = collectVisibleContextText(this.dataSection);
+            if (dataLines.length) {
+                sections.push(`Data:\n${dataLines.join('\n')}`);
+            }
+        }
+
+        return sections.join('\n\n').replace(/\n{3,}/g, '\n\n').trim();
+    }
+
+    async _onCopyContextClick(event) {
+        if (event) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+        const payload = this._buildSelectionContextPayload();
+        if (!payload) {
+            this._showCopyContextFeedback(COPY_CONTEXT_EMPTY_LABEL, { error: true });
+            return;
+        }
+        const copied = await copyTextToClipboard(payload);
+        this._showCopyContextFeedback(
+            copied ? COPY_CONTEXT_SUCCESS_LABEL : COPY_CONTEXT_ERROR_LABEL,
+            { error: !copied }
+        );
     }
 
     _readSelectionEquationBaseFontPx() {
@@ -4323,6 +4535,9 @@ class SelectionPanel {
     close() {
         if (!this.isReady) return;
         this.isOpen = false;
+        this._currentSelectionDescription = '';
+        this._currentSelectionEquations = '';
+        this._resetCopyContextFeedback();
         this.panel.classList.remove('is-open');
         this.panel.classList.remove('is-preview-hidden');
         this.hudStack?.classList.remove('detail-open');
@@ -4658,6 +4873,7 @@ class SelectionPanel {
     showSelection(selection) {
         if (!this.isReady || !selection || !selection.label) return;
 
+        this._resetCopyContextFeedback();
         const label = normalizeSelectionLabel(selection.label, selection);
         const displayLabel = simplifyLayerNormParamDisplayLabel(label, selection);
         const lower = label.toLowerCase();
@@ -4716,10 +4932,14 @@ class SelectionPanel {
         this._setTokenEncodingNote(this._resolveSelectionTokenEncodingNote(selection, label, vectorTokenMetadata));
         if (this.description) {
             const desc = resolveDescription(label, selection.kind, selection);
+            this._currentSelectionDescription = desc || '';
             setDescriptionContent(this.description, desc || '');
+        } else {
+            this._currentSelectionDescription = '';
         }
         if (this.equationsSection && this.equationsBody) {
             const equations = resolveSelectionEquations(label, selection);
+            this._currentSelectionEquations = equations || '';
             setDescriptionContent(this.equationsBody, equations || '');
             const hasEquations = !!equations;
             this.equationsSection.classList.toggle('is-visible', hasEquations);
@@ -4729,6 +4949,8 @@ class SelectionPanel {
             } else {
                 this._scheduleSelectionEquationFit();
             }
+        } else {
+            this._currentSelectionEquations = '';
         }
         const isParam = isParameterSelection(label);
         if (this.dataSection) {

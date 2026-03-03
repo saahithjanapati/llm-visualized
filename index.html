@@ -85,6 +85,20 @@
                 <canvas id="detailCanvas"></canvas>
             </div>
             <div id="detailDescription" class="detail-description"></div>
+            <div class="detail-copy-context">
+                <button id="detailCopyContextBtn" class="detail-copy-context-btn" type="button">
+                    <span class="detail-copy-context-icon" aria-hidden="true">
+                        <svg class="detail-copy-context-icon-clipboard" viewBox="0 0 24 24" focusable="false">
+                            <path fill="currentColor" d="M9 3a3 3 0 0 0-3 3v8a3 3 0 0 0 3 3h7a3 3 0 0 0 3-3V6a3 3 0 0 0-3-3H9zm0 2h7a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"></path>
+                            <path fill="currentColor" d="M5 7a3 3 0 0 0-3 3v8a3 3 0 0 0 3 3h7a3 3 0 0 0 3-3v-1h-2v1a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1h1V7H5z"></path>
+                        </svg>
+                        <svg class="detail-copy-context-icon-check" viewBox="0 0 24 24" focusable="false">
+                            <path fill="currentColor" d="m9.55 16.2-3.9-3.9 1.4-1.4 2.5 2.5 7.4-7.4 1.4 1.4z"></path>
+                        </svg>
+                    </span>
+                    <span id="detailCopyContextBtnLabel">Have a question? Copy context</span>
+                </button>
+            </div>
             <div id="detailEquations" class="detail-equations" aria-hidden="true">
                 <div class="detail-equations-title">Equations</div>
                 <div id="detailEquationsBody" class="detail-equations-body"></div>
