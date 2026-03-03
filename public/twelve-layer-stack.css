@@ -1446,7 +1446,7 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     left: 50%;
     transform: translate(-50%, 4px);
     color: rgba(154,163,175,0.9);
-    font-size: 9px;
+    font-size: 10px;
     line-height: 1;
     white-space: nowrap;
 }
@@ -1713,7 +1713,7 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     left: 50%;
     transform: translate(-50%, -4px);
     color: rgba(154,163,175,0.9);
-    font-size: 9px;
+    font-size: 10px;
     line-height: 1;
     white-space: nowrap;
 }
