@@ -31,11 +31,10 @@ const WIDE_LINE_HIDDEN_POSITIONS = new Float32Array([
 const BATCHED_TRAIL_HIDDEN_POINT = new THREE.Vector3(0, HIDE_INSTANCE_Y_OFFSET, 0);
 
 let GLOBAL_MAX_STEP_DISTANCE = 0;
-// Keep live trails on BufferGeometry (legacy path) because frequent point
-// rewrites are more reliable here; retain wide-line rendering for frozen
-// merged trails to reduce shimmer on large/low-DPR displays.
+// Keep both live and merged trails on the same renderer path so appearance is
+// consistent throughout a layer lifecycle across devices.
 const USE_WIDE_TRAIL_LINES_DYNAMIC = false;
-const USE_WIDE_TRAIL_LINES_MERGED = true;
+const USE_WIDE_TRAIL_LINES_MERGED = false;
 
 function getWideLineResolution() {
     const width = (typeof window !== 'undefined' && Number.isFinite(window.innerWidth) && window.innerWidth > 0)
@@ -575,6 +574,7 @@ export class SegmentTrailBatch {
             this._geometry.setPositions(this._positions);
             this._positionBuffer = this._geometry.attributes?.instanceStart?.data || null;
         }
+        updateWideLineMaterialResolution(this._material);
     }
 }
 

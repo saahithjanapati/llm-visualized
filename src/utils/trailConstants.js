@@ -20,8 +20,12 @@ const TRAIL_OPACITY_DPR_DARKEN_START = 1.4;
 const TRAIL_OPACITY_DPR_DARKEN_EXPONENT = 0.5;
 const TRAIL_OPACITY_DPR_DARKEN_MIN = 0.72;
 const TRAIL_LOW_DPR_THRESHOLD = 1.25;
-const TRAIL_LOW_DPR_OPACITY_BOOST = 1.15;
+const TRAIL_LOW_DPR_OPACITY_BOOST = 1.18;
 const TRAIL_LOW_DPR_WIDTH_BOOST = 1.2;
+const TRAIL_LARGE_LOW_DPR_VIEWPORT_WIDTH = 2400;
+const TRAIL_LARGE_LOW_DPR_SCREEN_WIDTH = 3000;
+const TRAIL_LARGE_LOW_DPR_EXTRA_OPACITY_BOOST = 1.08;
+const TRAIL_LARGE_LOW_DPR_EXTRA_WIDTH_BOOST = 1.08;
 let TRAIL_PIXEL_RATIO_CACHE = {
     width: -1,
     height: -1,
@@ -73,6 +77,17 @@ function getRawDevicePixelRatio() {
     return Number.isFinite(dpr) && dpr > 0 ? dpr : 1;
 }
 
+function isLargeLowDprDisplay(rawDpr) {
+    if (typeof window === 'undefined') return false;
+    if (!(Number.isFinite(rawDpr) && rawDpr <= TRAIL_LOW_DPR_THRESHOLD)) return false;
+    const viewportWidth = Number(window.innerWidth);
+    const screenWidth = Number(window.screen && window.screen.width);
+    return (
+        (Number.isFinite(viewportWidth) && viewportWidth >= TRAIL_LARGE_LOW_DPR_VIEWPORT_WIDTH)
+        || (Number.isFinite(screenWidth) && screenWidth >= TRAIL_LARGE_LOW_DPR_SCREEN_WIDTH)
+    );
+}
+
 /**
  * Scale a base trail opacity for the current display. DPR scaling is intentionally
  * disabled so trails keep a consistent brightness across devices; only the
@@ -96,7 +111,10 @@ export function scaleOpacityForDisplay(baseOpacity) {
     const lowDprBoost = rawDpr <= TRAIL_LOW_DPR_THRESHOLD
         ? TRAIL_LOW_DPR_OPACITY_BOOST
         : 1;
-    const scaled = baseOpacity * laneScale * TRAIL_OPACITY_RUNTIME_MULTIPLIER * dprOpacityCompensation * lowDprBoost;
+    const largeDisplayBoost = isLargeLowDprDisplay(rawDpr)
+        ? TRAIL_LARGE_LOW_DPR_EXTRA_OPACITY_BOOST
+        : 1;
+    const scaled = baseOpacity * laneScale * TRAIL_OPACITY_RUNTIME_MULTIPLIER * dprOpacityCompensation * lowDprBoost * largeDisplayBoost;
     return Math.min(1, Math.max(0, scaled));
 }
 
@@ -142,7 +160,10 @@ export function scaleLineWidthForDisplay(baseWidth) {
     const lowDprBoost = rawDpr <= TRAIL_LOW_DPR_THRESHOLD
         ? TRAIL_LOW_DPR_WIDTH_BOOST
         : 1;
-    const scaled = baseWidth * dprWidthFactor * TRAIL_LINE_WIDTH_RUNTIME_MULTIPLIER * lowDprBoost;
+    const largeDisplayBoost = isLargeLowDprDisplay(rawDpr)
+        ? TRAIL_LARGE_LOW_DPR_EXTRA_WIDTH_BOOST
+        : 1;
+    const scaled = baseWidth * dprWidthFactor * TRAIL_LINE_WIDTH_RUNTIME_MULTIPLIER * lowDprBoost * largeDisplayBoost;
     // Keep trails above 1px for more stable line rasterization while orbiting.
     return Math.max(TRAIL_MIN_SCREEN_WIDTH_PX, scaled);
 }
