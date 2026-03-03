@@ -356,6 +356,7 @@ export class LayerPipeline extends EventTarget {
         // secondary requestAnimationFrame loop.
         this._autoCameraDriver = {
             isActive: true,
+            updateWhenPaused: true,
             update: () => {
                 this._autoCamera?.update?.();
             },

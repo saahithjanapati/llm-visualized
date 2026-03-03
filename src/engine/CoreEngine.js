@@ -1354,13 +1354,13 @@ export class CoreEngine {
         }
 
         if (this._devMode && this._stats) this._stats.begin();
+        const layerErrorLogThrottleMs = 1000;
 
         if (!this._paused) {
             const layers = this._layers;
             const updateStart = perfEnabled ? this._now() : 0;
             const rawDt = this._clock.getDelta() * this._speed;
             const dt = Math.min(rawDt, this._maxUpdateDeltaSec);
-            const layerErrorLogThrottleMs = 1000;
             for (let i = 0; i < layers.length; i++) {
                 const layer = layers[i];
                 if (!layer) continue;
@@ -1409,6 +1409,28 @@ export class CoreEngine {
                             console.error(`CoreEngine: layer ${i} postUpdate() failed`, err);
                             layer.__lastPostUpdateErrorLogAt = logNow;
                         }
+                    }
+                }
+            }
+        } else {
+            // Keep opt-in systems responsive while the main scene is paused
+            // (for example: auto-camera transitions after enabling follow mode).
+            const layers = this._layers;
+            for (let i = 0; i < layers.length; i++) {
+                const layer = layers[i];
+                if (!layer || layer.updateWhenPaused !== true || typeof layer.update !== 'function') {
+                    continue;
+                }
+                try {
+                    layer.update(0);
+                } catch (err) {
+                    const logNow = this._now();
+                    const lastLogAt = Number.isFinite(layer.__lastUpdateErrorLogAt)
+                        ? layer.__lastUpdateErrorLogAt
+                        : -Infinity;
+                    if ((logNow - lastLogAt) >= layerErrorLogThrottleMs) {
+                        console.error(`CoreEngine: layer ${i} paused update() failed`, err);
+                        layer.__lastUpdateErrorLogAt = logNow;
                     }
                 }
             }
