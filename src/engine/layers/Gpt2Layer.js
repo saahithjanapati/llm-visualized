@@ -125,7 +125,7 @@ const LN2_HANDOFF_STALL_TIMEOUT_MS_NORMAL = 4500;
 // that can spawn fallback vectors/trails on top of active ones.
 const WATCHDOG_FRAME_GAP_RESET_MS = 900;
 const MLP_POST_PASS_THROUGH_FINAL_EMISSIVE = GPT2_LAYER_VISUAL_TUNING.mlp.postPassFinalEmissiveIntensity;
-const POST_MLP_RETURN_TRAIL_OPACITY = 0.11;
+const POST_MLP_RETURN_TRAIL_OPACITY = 0.1;
 const MLP_TRANSITION_PROFILE_DEFAULT = Object.freeze({
     expandRiseUnits: 30,
     expandRiseMs: 500,
@@ -815,9 +815,14 @@ export default class Gpt2Layer extends BaseLayer {
                 for (let i = 0; i < vecsToCheck.length; i++) {
                     const v = vecsToCheck[i];
                     if (!v || !v.userData || !v.userData.trail) continue;
-                    // Positional + MHSA travel paths have dedicated updaters, but we
-                    // still keep this generic fallback active so trails never stall
-                    // if those owners are delayed or skip quickly across frames.
+                    // Positional pass-through trail is manually sampled in its tween
+                    // so skip the generic updater to avoid duplicate corner writes.
+                    if (v === lane.posVec && lane.__manualPosTrail) continue;
+                    // Let MHSA routing own the travel trail updates to preserve sharp corners.
+                    if (v === lane.travellingVec && (lane.horizPhase === HORIZ_PHASE.READY_MHSA || lane.horizPhase === HORIZ_PHASE.TRAVEL_MHSA)) {
+                        continue;
+                    }
+
                     // MLP return vectors are always trail-driven by dedicated
                     // tweens (down-projection/rise/return); skipping here avoids
                     // double-writing the same trail in one frame.
@@ -2900,7 +2905,7 @@ export default class Gpt2Layer extends BaseLayer {
                             colorHex,
                             frozenLineWidth,
                             frozenOpacity,
-                            { useWideLine: false }
+                            null
                         );
                         if (typeof t.dispose === 'function') t.dispose();
                         if (vec && vec.userData) {
@@ -2929,7 +2934,7 @@ export default class Gpt2Layer extends BaseLayer {
                             colorHex,
                             frozenLineWidth,
                             frozenOpacity,
-                            { useWideLine: false }
+                            null
                         );
                         if (vec.userData) delete vec.userData.trail;
                     }
@@ -3295,25 +3300,24 @@ export default class Gpt2Layer extends BaseLayer {
                 && lane.posVec
                 && typeof lane.startPositionalPassThrough === 'function'
             ));
-            const allPositionChipGatesReleased = pendingPosPassLanes.every((lane) => (
-                !this._isWaitingForInputPositionChipGate(lane, nowMs, skipActive)
-            ));
-            if (allPositionChipGatesReleased) {
-                pendingPosPassLanes.forEach((lane) => {
-                    try {
-                        lane.startPositionalPassThrough({ immediate: skipActive });
-                    } catch (_) {
-                        lane.posAddComplete = true;
-                    }
-                });
-            }
+            // Start each lane as soon as its own position-chip gate is released.
+            // This avoids globally stalling positional trails when a single lane
+            // is delayed by UI timing.
+            pendingPosPassLanes.forEach((lane) => {
+                if (this._isWaitingForInputPositionChipGate(lane, nowMs, skipActive)) return;
+                try {
+                    lane.startPositionalPassThrough({ immediate: skipActive });
+                } catch (_) {
+                    lane.posAddComplete = true;
+                }
+            });
             const stillPending = laneList.some((lane) => {
                 if (!lane || lane.posAddComplete) return false;
                 return !!(lane.posVec && !lane.__posPassStarted);
             });
             if (stillPending) {
-                // Continue polling until all pending lanes have their
-                // position-chip gates released, then launch in lock-step.
+                // Continue polling so remaining lanes can start as their
+                // individual position-chip gates release.
                 this._posPassBarrierArmed = true;
                 this._posPassStartAtMs = nowMs;
             } else {
@@ -4039,7 +4043,7 @@ export default class Gpt2Layer extends BaseLayer {
                         group.color || undefined,
                         group.lineWidth != null ? group.lineWidth : undefined,
                         group.opacity != null ? group.opacity : undefined,
-                        { useWideLine: false }
+                        null
                     );
                 });
 
@@ -4070,7 +4074,7 @@ export default class Gpt2Layer extends BaseLayer {
                             group.color || undefined,
                             group.lineWidth != null ? group.lineWidth : undefined,
                             group.opacity != null ? group.opacity : undefined,
-                            { useWideLine: false }
+                            null
                         );
                     });
                 }

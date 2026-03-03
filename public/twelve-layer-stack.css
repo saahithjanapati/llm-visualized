@@ -418,6 +418,11 @@ body.touch-ui * {
 
 #promptTokenStrip {
     --prompt-token-strip-max-width: min(1100px, 94vw);
+    --prompt-token-chip-gap: clamp(6px, 0.22vw + 5px, 9px);
+    --prompt-token-chip-font-size: clamp(12px, 0.28vw + 10px, 14px);
+    --prompt-token-chip-min-height: clamp(22px, 0.45vw + 18px, 26px);
+    --prompt-token-chip-pad-y: clamp(2px, 0.12vw + 1px, 4px);
+    --prompt-token-chip-pad-x: clamp(9px, 0.25vw + 7px, 12px);
     position: fixed;
     left: env(safe-area-inset-left);
     right: auto;
@@ -472,7 +477,7 @@ body.touch-ui * {
 #promptTokenStrip .prompt-token-strip__tokens {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: var(--prompt-token-chip-gap);
     max-width: 100%;
     max-height: 100px;
     overflow-y: auto;
@@ -489,14 +494,14 @@ body.touch-ui * {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-height: 22px;
-    padding: 2px 9px;
+    min-height: var(--prompt-token-chip-min-height);
+    padding: var(--prompt-token-chip-pad-y) var(--prompt-token-chip-pad-x);
     border-radius: 6px;
     border: 1px solid var(--token-color-border);
     background: var(--token-color-fill);
     color: #fff;
     font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    font-size: 12px;
+    font-size: var(--prompt-token-chip-font-size);
     line-height: 1.1;
     white-space: pre;
     cursor: pointer;
@@ -603,6 +608,11 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
         --prompt-token-strip-max-width: calc(
             100vw - max(8px, env(safe-area-inset-left)) - max(8px, env(safe-area-inset-right))
         );
+        --prompt-token-chip-gap: 5px;
+        --prompt-token-chip-font-size: 11px;
+        --prompt-token-chip-min-height: 21px;
+        --prompt-token-chip-pad-y: 2px;
+        --prompt-token-chip-pad-x: 7px;
         width: fit-content;
         max-width: var(--prompt-token-strip-max-width);
         bottom: max(8px, calc(env(safe-area-inset-bottom) + 8px));
@@ -616,13 +626,7 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
         font-size: 10px;
     }
     #promptTokenStrip .prompt-token-strip__tokens {
-        gap: 5px;
         max-height: 86px;
-    }
-    #promptTokenStrip .prompt-token-strip__token {
-        min-height: 21px;
-        padding: 2px 7px;
-        font-size: 11px;
     }
     body[data-prompt-token-strip-visible="true"] #generationOverlay {
         bottom: calc(max(8px, calc(env(safe-area-inset-bottom) + 8px)) + 104px);
@@ -655,16 +659,15 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
         --prompt-token-strip-max-width: calc(
             100vw - max(6px, env(safe-area-inset-left)) - max(6px, env(safe-area-inset-right))
         );
+        --prompt-token-chip-font-size: 10px;
+        --prompt-token-chip-min-height: 19px;
+        --prompt-token-chip-pad-x: 6px;
         max-width: var(--prompt-token-strip-max-width);
         bottom: max(6px, calc(env(safe-area-inset-bottom) + 6px));
         padding: 7px 7px;
     }
     #promptTokenStrip .prompt-token-strip__tokens {
         max-height: 78px;
-    }
-    #promptTokenStrip .prompt-token-strip__token {
-        min-height: 19px;
-        font-size: 10px;
     }
     body[data-prompt-token-strip-visible="true"] #generationOverlay {
         bottom: calc(max(6px, calc(env(safe-area-inset-bottom) + 6px)) + 96px);

@@ -31,8 +31,8 @@ const WIDE_LINE_HIDDEN_POSITIONS = new Float32Array([
 const BATCHED_TRAIL_HIDDEN_POINT = new THREE.Vector3(0, HIDE_INSTANCE_Y_OFFSET, 0);
 
 let GLOBAL_MAX_STEP_DISTANCE = 0;
-// Keep both live and merged trails on the same renderer path so appearance is
-// consistent throughout a layer lifecycle across devices.
+// Keep both live and merged trails on the same legacy renderer path for
+// deterministic live updates and consistent brightness.
 const USE_WIDE_TRAIL_LINES_DYNAMIC = false;
 const USE_WIDE_TRAIL_LINES_MERGED = false;
 

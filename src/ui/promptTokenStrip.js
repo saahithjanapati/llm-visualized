@@ -20,19 +20,22 @@ function buildDom() {
         root = document.createElement('div');
         root.id = STRIP_ID;
         root.dataset.visible = 'false';
-        root.innerHTML = `
-            <div class="prompt-token-strip__header">
-                <span class="prompt-token-strip__title">Tokenized Prompt</span>
-                <span class="prompt-token-strip__count" data-role="count"></span>
-            </div>
-            <div class="prompt-token-strip__tokens" data-role="tokens"></div>
-        `;
         document.body.appendChild(root);
+    }
+    const legacyHeader = root.querySelector('.prompt-token-strip__header');
+    if (legacyHeader && legacyHeader.parentElement === root) {
+        root.removeChild(legacyHeader);
+    }
+    let tokensEl = root.querySelector('[data-role="tokens"]');
+    if (!tokensEl) {
+        tokensEl = document.createElement('div');
+        tokensEl.className = 'prompt-token-strip__tokens';
+        tokensEl.dataset.role = 'tokens';
+        root.appendChild(tokensEl);
     }
     return {
         root,
-        countEl: root.querySelector('[data-role="count"]'),
-        tokensEl: root.querySelector('[data-role="tokens"]')
+        tokensEl
     };
 }
 
@@ -144,7 +147,6 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
 
         if (!entries.length) {
             dom.tokensEl.innerHTML = '';
-            if (dom.countEl) dom.countEl.textContent = '';
             tokenEntries = [];
             lastSignature = '';
             updateVisibility();
@@ -179,9 +181,6 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
         });
 
         dom.tokensEl.replaceChildren(fragment);
-        if (dom.countEl) {
-            dom.countEl.textContent = `${entries.length} token${entries.length === 1 ? '' : 's'}`;
-        }
         updateVisibility();
     };
 

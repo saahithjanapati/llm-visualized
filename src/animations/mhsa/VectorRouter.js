@@ -2,7 +2,7 @@ import * as THREE from 'three';
 
 import { VectorVisualizationInstancedPrism } from '../../components/VectorVisualizationInstancedPrism.js';
 import { StraightLineTrail } from '../../utils/trailUtils.js';
-import { TRAIL_COLOR, TRAIL_MIN_SEGMENT_DISTANCE } from '../../utils/trailConstants.js';
+import { TRAIL_COLOR, TRAIL_MIN_SEGMENT_DISTANCE, TRAIL_OPACITY } from '../../utils/trailConstants.js';
 import {
     ANIM_HORIZ_SPEED,
     GLOBAL_ANIM_SPEED_MULT,
@@ -19,8 +19,7 @@ const _scratchWorld2 = new THREE.Vector3();
 const _scratchSpawn = new THREE.Vector3();
 const MIN_SIDE_COPY_DELAY_SPEED = 1e-3;
 
-// Add configurable opacity for trails specific to vector copies under Q/K/V to reduce visual prominence
-const FAINT_TRAIL_OPACITY = 0.08;
+const COPY_TRAIL_DEFAULT_OPACITY = TRAIL_OPACITY;
 const PRE_QKV_RESIDUAL_LABEL = 'Post-layernorm residual';
 
 
@@ -44,7 +43,7 @@ export class VectorRouter {
         this._trailFactory = typeof opts.trailFactory === 'function' ? opts.trailFactory : null;
         this._copyTrailOpacity = Number.isFinite(opts.copyTrailOpacity)
             ? Math.max(0, Math.min(1, opts.copyTrailOpacity))
-            : FAINT_TRAIL_OPACITY;
+            : COPY_TRAIL_DEFAULT_OPACITY;
 
         this._readyEmitted = false;
         this._callbacks    = new Set();
@@ -126,7 +125,9 @@ export class VectorRouter {
                                 tVec.group.visible = false;
                                 lane.horizPhase = 'finishedHeads';
                             }
-                            if (tVec.userData && tVec.userData.trail) tVec.userData.trail.update(tVec.group.position);
+                            if (tVec.userData && tVec.userData.trail) {
+                                tVec.userData.trail.update(tVec.group.position);
+                            }
                             continue;
                         }
 
@@ -148,7 +149,9 @@ export class VectorRouter {
                         }
 
                         // Update trail for travelling vector after movement (even if arrived)
-                        if (tVec.userData && tVec.userData.trail) tVec.userData.trail.update(tVec.group.position);
+                        if (tVec.userData && tVec.userData.trail) {
+                            tVec.userData.trail.update(tVec.group.position);
+                        }
 
                         if (!arrived) break; // Still en route this frame
                     }
@@ -210,7 +213,7 @@ export class VectorRouter {
                                 kind: 'Q',
                                 headIndex: hIdx,
                                 parentLane: lane,
-                                opacity: FAINT_TRAIL_OPACITY,
+                                opacity: this._copyTrailOpacity,
                                 minSegmentDistance: TRAIL_MIN_SEGMENT_DISTANCE,
                             });
                             if (qTrail && typeof qTrail.start === 'function') {
@@ -240,7 +243,7 @@ export class VectorRouter {
                                 kind: 'V',
                                 headIndex: hIdx,
                                 parentLane: lane,
-                                opacity: FAINT_TRAIL_OPACITY,
+                                opacity: this._copyTrailOpacity,
                                 minSegmentDistance: TRAIL_MIN_SEGMENT_DISTANCE,
                             });
                             if (vTrail && typeof vTrail.start === 'function') {
@@ -326,6 +329,9 @@ export class VectorRouter {
             const targetX = this.headsCentersX[targetHeadIdx];
             if (!Number.isFinite(targetX)) break;
             tVec.group.position.x = targetX;
+            if (tVec.userData && tVec.userData.trail && typeof tVec.userData.trail.update === 'function') {
+                tVec.userData.trail.update(tVec.group.position);
+            }
             this._spawnUpwardCopyForHead(lane, targetHeadIdx, tVec);
             targetHeadIdx += 1;
         }
@@ -353,7 +359,7 @@ export class VectorRouter {
             kind: 'K',
             headIndex: targetHeadIdx,
             parentLane: lane,
-            opacity: FAINT_TRAIL_OPACITY,
+            opacity: this._copyTrailOpacity,
             minSegmentDistance: TRAIL_MIN_SEGMENT_DISTANCE,
         });
         if (upTrail && typeof upTrail.start === 'function') {

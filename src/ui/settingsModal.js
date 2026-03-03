@@ -9,12 +9,6 @@ const PROMPT_TOKEN_STRIP_PREF_KEY = 'showPromptTokenStrip';
 const BRIGHTNESS_MIN = 0.5;
 const BRIGHTNESS_MAX = 1.8;
 const BRIGHTNESS_DEFAULT = 1.0;
-const SKINNY_MOBILE_MEDIA_QUERY = '(max-width: 520px)';
-
-function isSkinnyMobileScreen() {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
-    return window.matchMedia(SKINNY_MOBILE_MEDIA_QUERY).matches;
-}
 
 function clampBrightness(value) {
     const next = Number(value);
@@ -43,7 +37,7 @@ export function initSettingsModal(pipeline) {
     appState.showFollowViewInspector = false;
     appState.devMode = getPreference('devMode', false);
     appState.showPerfOverlay = getPreference('showPerfOverlay', false);
-    appState.showPromptTokenStrip = getPreference(PROMPT_TOKEN_STRIP_PREF_KEY, !isSkinnyMobileScreen());
+    appState.showPromptTokenStrip = getPreference(PROMPT_TOKEN_STRIP_PREF_KEY, true);
     // Always start with KV cache mode disabled. This avoids sticky persisted
     // state unexpectedly enabling decode-mode behavior on page load.
     appState.kvCacheModeEnabled = false;

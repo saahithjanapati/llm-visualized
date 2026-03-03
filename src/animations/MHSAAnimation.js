@@ -3,7 +3,7 @@ import { WeightMatrixVisualization } from '../components/WeightMatrixVisualizati
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
 import { BatchedPrismVectorSet } from '../components/BatchedPrismVectorSet.js';
 import { SegmentTrailBatch, StraightLineTrail, mergeTrailsIntoLineSegments } from '../utils/trailUtils.js';
-import { TRAIL_COLOR, TRAIL_MIN_SEGMENT_DISTANCE } from '../utils/trailConstants.js';
+import { TRAIL_COLOR, TRAIL_MIN_SEGMENT_DISTANCE, TRAIL_OPACITY } from '../utils/trailConstants.js';
 
 
 
@@ -58,8 +58,8 @@ import { GPT2_LAYER_VISUAL_TUNING } from '../utils/visualTuningProfiles.js';
 const _tmpWorld = new THREE.Vector3();
 const _tmpWorld2 = new THREE.Vector3();
 const _tmpMatrix = new THREE.Matrix4();
-const QKV_TRAIL_OPACITY = 0.08;
-const OUTPUT_PROJ_RETURN_TRAIL_OPACITY = 0.11;
+const QKV_TRAIL_OPACITY = TRAIL_OPACITY;
+const OUTPUT_PROJ_RETURN_TRAIL_OPACITY = 0.1;
 const QKV_FINAL_MATRIX_EMISSIVE_INTENSITY = GPT2_LAYER_VISUAL_TUNING.mhsa.qkvFinalMatrixEmissiveIntensity;
 const OUTPUT_PROJ_RETURN_WATCHDOG_MIN_MS = 5000;
 const OUTPUT_PROJ_RETURN_WATCHDOG_GRACE_MS = 2000;
@@ -2762,7 +2762,7 @@ export class MHSAAnimation {
                                                             undefined,
                                                             (typeof tr._lineWidth === 'number') ? tr._lineWidth : undefined,
                                                             (typeof tr._opacity === 'number') ? tr._opacity : undefined,
-                                                            { useWideLine: false }
+                                                            null
                                                         );
                                                         if (vec && vec.userData) delete vec.userData.trail;
                                                     }
