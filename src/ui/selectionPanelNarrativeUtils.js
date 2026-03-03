@@ -158,6 +158,12 @@ export function resolveSelectionEquations(label, selectionInfo = null) {
             attentionEquation
         ]);
     }
+    if (lower.includes('weighted value vector')) {
+        return formatEquationBlock([
+            '\\tilde{V}_{t,j} = \\alpha_{t,j} V_j',
+            'H_t = \\sum_j \\tilde{V}_{t,j}'
+        ]);
+    }
     if (lower.includes('output projection matrix')) {
         return formatEquationBlock([
             'H = \\mathrm{Concat}(H_i)_{i=1}^{12}',
@@ -248,6 +254,9 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
         }
         if (stageLower === 'qkv.v') {
             return 'This is the value vector for one token in one head. Attention weights are used to mix these values into the head output.';
+        }
+        if (stageLower === 'attention.weighted_value') {
+            return 'This is a value vector after being scaled by one post-softmax attention weight. It represents a single weighted contribution before all weighted values are added into the head output.';
         }
         if (stageLower === 'attention.output_projection') {
             return 'This is the attention output vector after concatenating head outputs and applying the output projection. It is the branch result that gets added back into the residual stream.';
@@ -411,6 +420,9 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
     }
     if (lower.includes('cached value vector')) {
         return 'This is a value vector persisted in the KV cache from an earlier decoding step. Attention weights select from these cached values so prior-token information can flow into the current token update.';
+    }
+    if (lower.includes('weighted value vector')) {
+        return 'This is one value vector multiplied by a specific post-softmax attention weight. It is a per-edge contribution that later gets accumulated into the attention weighted sum for the query token.';
     }
     if (lower.includes('value vector')) {
         return 'This is the value vector for one token in one head. It holds the information other tokens can read. The attention matrix shown below (after softmax) provides weights that mix these values. The head output is a weighted sum of values.';

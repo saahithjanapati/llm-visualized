@@ -40,6 +40,21 @@ describe('selectionPanelNarrativeUtils', () => {
         expect(eq).not.toContain('x_t^{\\text{tok}}');
     });
 
+    it('describes and equations weighted value vectors explicitly', () => {
+        const eq = resolveSelectionEquations('Weighted Value Vector', null);
+        expect(eq).toContain('\\tilde{V}_{t,j}');
+        expect(eq).toContain('\\alpha_{t,j}');
+
+        const desc = resolveDescription('Weighted Value Vector', null, {
+            info: {
+                activationData: {
+                    stage: 'attention.weighted_value'
+                }
+            }
+        });
+        expect(desc).toContain('scaled by one post-softmax attention weight');
+    });
+
     it('resolves residual descriptions from activation stage context', () => {
         const desc = resolveDescription('anything', null, {
             info: {

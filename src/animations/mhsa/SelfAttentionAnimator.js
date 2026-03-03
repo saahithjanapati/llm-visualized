@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { VECTOR_LENGTH_PRISM, SA_RED_EXTRA_RISE, SA_V_RISE_DURATION_MS, SA_K_ALIGN_DURATION_MS, SA_BLUE_HORIZ_DURATION_MS, SA_BLUE_VERT_DURATION_MS, SA_BLUE_PAUSE_MS, SA_BLUE_QUEUE_SHIFT_DURATION_MS, SA_DUPLICATE_POP_IN_MS, SA_DUPLICATE_TRAVEL_MERGE_MS, SA_DUPLICATE_POP_OUT_MS, GLOBAL_ANIM_SPEED_MULT, SELF_ATTENTION_TIME_MULT } from '../../utils/constants.js';
 import { VectorVisualizationInstancedPrism } from '../../components/VectorVisualizationInstancedPrism.js';
 import { mapValueToColor, mapValueToGrayscale, buildHueRangeOptions, mapValueToHueRange } from '../../utils/colors.js';
-import { buildActivationData } from '../../utils/activationMetadata.js';
+import { buildActivationData, applyActivationDataToVector } from '../../utils/activationMetadata.js';
 import {
     MHA_VALUE_SPECTRUM_COLOR,
     MHA_VALUE_HUE_SPREAD,
@@ -1109,6 +1109,70 @@ export class SelfAttentionAnimator {
         }
     }
 
+    _resolveOutputVectorLength() {
+        const length = Number.isFinite(this.ctx?.outputVectorLength)
+            ? this.ctx.outputVectorLength
+            : 64;
+        return Math.max(1, Math.floor(length));
+    }
+
+    _sliceVectorData(sourceData, outputLength = null) {
+        const isArrayLike = Array.isArray(sourceData) || ArrayBuffer.isView(sourceData);
+        if (!isArrayLike) return null;
+        const arr = Array.from(sourceData).map((value) => (Number.isFinite(value) ? value : 0));
+        if (!Number.isFinite(outputLength)) return arr;
+        return arr.slice(0, Math.max(1, Math.floor(outputLength)));
+    }
+
+    _buildWeightedValueData(sourceData, weight, outputLength = null) {
+        const base = this._sliceVectorData(sourceData, outputLength);
+        if (!Array.isArray(base)) return null;
+        const scalar = Number.isFinite(weight) ? weight : 1;
+        return base.map((value) => value * scalar);
+    }
+
+    _tagConveyorValueVector(vector, {
+        lane = null,
+        queryLane = null,
+        headIdx = null,
+        weighted = false,
+        sourceData = null,
+        valuesOverride = null,
+        postScore = null,
+    } = {}) {
+        if (!vector) return;
+        const outputLength = this._resolveOutputVectorLength();
+        const valueTokenIndex = Number.isFinite(lane?.tokenIndex) ? lane.tokenIndex : null;
+        const valueTokenLabel = (lane && typeof lane.tokenLabel === 'string') ? lane.tokenLabel : null;
+        const queryTokenIndex = Number.isFinite(queryLane?.tokenIndex) ? queryLane.tokenIndex : null;
+        const queryTokenLabel = (queryLane && typeof queryLane.tokenLabel === 'string') ? queryLane.tokenLabel : null;
+        const layerIndex = Number.isFinite(this.ctx?.layerIndex) ? this.ctx.layerIndex : null;
+        const labelBase = weighted ? 'Weighted Value Vector' : 'Value Vector';
+        const label = valueTokenLabel ? `${labelBase} - ${valueTokenLabel}` : labelBase;
+        const stage = weighted ? 'attention.weighted_value' : 'qkv.v';
+        const values = Array.isArray(valuesOverride)
+            ? valuesOverride.slice()
+            : this._sliceVectorData(sourceData || vector.rawData, outputLength);
+        const activationData = buildActivationData({
+            label,
+            stage,
+            layerIndex,
+            tokenIndex: valueTokenIndex,
+            tokenLabel: valueTokenLabel,
+            headIndex: Number.isFinite(headIdx) ? headIdx : undefined,
+            keyTokenIndex: valueTokenIndex,
+            keyTokenLabel: valueTokenLabel,
+            postScore,
+            values,
+            copyValues: false,
+        });
+        if (activationData) {
+            if (Number.isFinite(queryTokenIndex)) activationData.queryTokenIndex = queryTokenIndex;
+            if (queryTokenLabel) activationData.queryTokenLabel = queryTokenLabel;
+        }
+        applyActivationDataToVector(vector, activationData, label);
+    }
+
     _buildWeightedSumData(headIdx, queryLane, lanes, outputLength) {
         const activationSource = this.ctx && this.ctx.activationSource ? this.ctx.activationSource : null;
         const layerIndex = Number.isFinite(this.ctx?.layerIndex) ? this.ctx.layerIndex : null;
@@ -1636,6 +1700,7 @@ export class SelfAttentionAnimator {
                             const fixedObj = getSideCopyEntry(lane, headIdx, 'V');
                             if (fixedObj && fixedObj.vec) {
                                 const fixedVec = fixedObj.vec;
+                                const queryLane = vector.userData ? vector.userData.parentLane : null;
                                 const fixedPosInCtx = this._getVectorPositionInContextSpace(fixedVec, this._tmpCtxPosB);
                                 // Ensure duplicates spawn at the **raised** red-vector height (match the highlight spheres).
                                 const raisedY = spPos ? spPos.y : vector.group.position.y;
@@ -1663,6 +1728,7 @@ export class SelfAttentionAnimator {
                                     ? this.ctx.outputVectorLength
                                     : 64;
                                 const fixedRaw = fixedVec.rawData;
+                                const weightedData = this._buildWeightedValueData(fixedRaw, weight, outputLength);
                                 const fixedProcessed = !!(fixedVec.userData && fixedVec.userData.qkvProcessed);
                                 const hasMesh = !!(fixedVec.mesh && fixedVec.mesh.isMesh);
                                 if (!fixedProcessed || !hasMesh || (fixedRaw && fixedRaw.length > outputLength)) {
@@ -1671,6 +1737,13 @@ export class SelfAttentionAnimator {
                                         cacheKeyData: fixedRaw,
                                     });
                                 }
+                                this._tagConveyorValueVector(dupVec, {
+                                    lane,
+                                    queryLane,
+                                    headIdx,
+                                    weighted: false,
+                                    sourceData: fixedRaw
+                                });
                                 this.ctx.parentGroup.add(dupVec.group);
                                 this._spawnedTempVectors.add(dupVec);
                                 dupVec.group.scale.set(0.001, 0.001, 0.001);
@@ -1695,6 +1768,15 @@ export class SelfAttentionAnimator {
                                 const sumDuration = spData ? this.DUPLICATE_TRAVEL_MERGE_MS * 0.55 : this.DUPLICATE_TRAVEL_MERGE_MS;
                                 const applyWeightedLook = () => {
                                     this._applyWeightedSumScheme(dupVec, fixedVec.rawData, { setHiddenToBlack: true });
+                                    this._tagConveyorValueVector(dupVec, {
+                                        lane,
+                                        queryLane,
+                                        headIdx,
+                                        weighted: true,
+                                        sourceData: fixedRaw,
+                                        valuesOverride: weightedData,
+                                        postScore
+                                    });
                                     if (dupVec.mesh && dupVec.mesh.material) {
                                         dupVec.mesh.material.transparent = true;
                                         dupVec.mesh.material.opacity = weightOpacity;
