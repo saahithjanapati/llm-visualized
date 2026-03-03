@@ -2858,12 +2858,13 @@ export default class Gpt2Layer extends BaseLayer {
                         }
                         const colorHex = (t._material && t._material.color)
                             ? t._material.color.getHex() : undefined;
+                        const frozenLineWidth = (typeof t._lineWidth === 'number') ? t._lineWidth : undefined;
                         const frozenOpacity = (typeof t._opacity === 'number') ? t._opacity : undefined;
                         mergeTrailsIntoLineSegments(
                             [t],
                             this.root,
                             colorHex,
-                            undefined,
+                            frozenLineWidth,
                             frozenOpacity,
                             null
                         );
@@ -2886,12 +2887,13 @@ export default class Gpt2Layer extends BaseLayer {
                         }
                         const colorHex = (localTrail._material && localTrail._material.color)
                             ? localTrail._material.color.getHex() : undefined;
+                        const frozenLineWidth = (typeof localTrail._lineWidth === 'number') ? localTrail._lineWidth : undefined;
                         const frozenOpacity = (typeof localTrail._opacity === 'number') ? localTrail._opacity : undefined;
                         mergeTrailsIntoLineSegments(
                             [localTrail],
                             this.root,
                             colorHex,
-                            undefined,
+                            frozenLineWidth,
                             frozenOpacity,
                             null
                         );
@@ -3904,12 +3906,14 @@ export default class Gpt2Layer extends BaseLayer {
                     } else if (trail && typeof trail._color !== 'undefined') {
                         color = new THREE.Color(trail._color);
                     }
+                    const lineWidth = (trail && typeof trail._lineWidth === 'number') ? trail._lineWidth : null;
                     const opacity = (trail && typeof trail._opacity === 'number') ? trail._opacity : null;
                     const colorKey = color
                         ? `${color.r.toFixed(4)},${color.g.toFixed(4)},${color.b.toFixed(4)}`
                         : 'default';
+                    const lineWidthKey = lineWidth != null ? lineWidth.toFixed(4) : 'default';
                     const opacityKey = opacity != null ? opacity.toFixed(4) : 'default';
-                    return { color, opacity, key: `${colorKey}|${opacityKey}` };
+                    return { color, lineWidth, opacity, key: `${colorKey}|${lineWidthKey}|${opacityKey}` };
                 };
                 this.lanes.forEach(l => {
                     // Prefer the dedicated world-space residual trail reference if available
@@ -3924,7 +3928,12 @@ export default class Gpt2Layer extends BaseLayer {
                             const style = getTrailStyle(t);
                             let group = residualGroups.get(style.key);
                             if (!group) {
-                                group = { segments: [], color: style.color, opacity: style.opacity };
+                                group = {
+                                    segments: [],
+                                    color: style.color,
+                                    lineWidth: style.lineWidth,
+                                    opacity: style.opacity
+                                };
                                 residualGroups.set(style.key, group);
                             }
                             group.segments.push(seg);
@@ -3937,7 +3946,7 @@ export default class Gpt2Layer extends BaseLayer {
                         group.segments,
                         this._globalScene || this.root,
                         group.color || undefined,
-                        undefined,
+                        group.lineWidth != null ? group.lineWidth : undefined,
                         group.opacity != null ? group.opacity : undefined,
                         null
                     );
@@ -3952,7 +3961,12 @@ export default class Gpt2Layer extends BaseLayer {
                         const style = getTrailStyle(trail);
                         let group = groups.get(style.key);
                         if (!group) {
-                            group = { trails: [], color: style.color, opacity: style.opacity };
+                            group = {
+                                trails: [],
+                                color: style.color,
+                                lineWidth: style.lineWidth,
+                                opacity: style.opacity
+                            };
                             groups.set(style.key, group);
                         }
                         group.trails.push(trail);
@@ -3963,7 +3977,7 @@ export default class Gpt2Layer extends BaseLayer {
                             group.trails,
                             this.root,
                             group.color || undefined,
-                            undefined,
+                            group.lineWidth != null ? group.lineWidth : undefined,
                             group.opacity != null ? group.opacity : undefined,
                             null
                         );

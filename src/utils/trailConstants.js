@@ -1,7 +1,7 @@
 // Centralised visual parameters for StraightLineTrail lines
 // Modify these values to tweak trail appearance globally
 
-import { DEFAULT_NUM_VECTOR_LANES, NUM_VECTOR_LANES } from './constants.js';
+import { DEFAULT_NUM_VECTOR_LANES, NUM_VECTOR_LANES, resolveRenderPixelRatio } from './constants.js';
 
 export const TRAIL_COLOR = 0xffffff;          // Default hex colour (match other trails)
 export const TRAIL_LINE_WIDTH = 1;            // Pixel width (hardware-dependent)
@@ -14,6 +14,16 @@ export const TRAIL_LANE_OPACITY_MIN_SCALE = 0.6;
 export const TRAIL_MIN_SEGMENT_DISTANCE = 0.4;
 let TRAIL_OPACITY_RUNTIME_MULTIPLIER = 1.0;
 let TRAIL_LINE_WIDTH_RUNTIME_MULTIPLIER = 1.0;
+const TRAIL_LINE_WIDTH_DPR_EXPONENT = 0.65;
+const TRAIL_OPACITY_DPR_DARKEN_START = 1.4;
+const TRAIL_OPACITY_DPR_DARKEN_EXPONENT = 0.5;
+const TRAIL_OPACITY_DPR_DARKEN_MIN = 0.72;
+let TRAIL_PIXEL_RATIO_CACHE = {
+    width: -1,
+    height: -1,
+    dpr: -1,
+    ratio: 1
+};
 
 // Reserved for future extensions – THREE.LineBasicMaterial has no emissive term but
 // we expose a placeholder in case the implementation switches materials later.
@@ -24,13 +34,33 @@ export const TRAIL_EMISSIVE_INTENSITY = 0.0;
 // ---------------------------------------------------------------------------
 
 /**
- * Returns the effective device pixel ratio used for rendering, capped to 2 to
- * align with renderer pixel ratio capping elsewhere in the app.
+ * Returns the effective renderer pixel ratio used for rendering trails.
+ * This tracks the same supersampling logic as CoreEngine so trail widths stay
+ * consistent across built-in and external displays.
  */
 export function getEffectiveDevicePixelRatio() {
-    if (typeof window === 'undefined' || typeof window.devicePixelRatio !== 'number') return 1;
-    // Cap at 2 because some renderers clamp to 2 for performance/quality balance
-    return Math.min(window.devicePixelRatio, 2);
+    if (typeof window === 'undefined') return 1;
+
+    const width = Number.isFinite(window.innerWidth) ? Math.round(window.innerWidth) : 0;
+    const height = Number.isFinite(window.innerHeight) ? Math.round(window.innerHeight) : 0;
+    const dpr = (typeof window.devicePixelRatio === 'number' && window.devicePixelRatio > 0)
+        ? window.devicePixelRatio
+        : 1;
+
+    const cacheValid = TRAIL_PIXEL_RATIO_CACHE
+        && TRAIL_PIXEL_RATIO_CACHE.width === width
+        && TRAIL_PIXEL_RATIO_CACHE.height === height
+        && Math.abs(TRAIL_PIXEL_RATIO_CACHE.dpr - dpr) < 0.001
+        && Number.isFinite(TRAIL_PIXEL_RATIO_CACHE.ratio)
+        && TRAIL_PIXEL_RATIO_CACHE.ratio > 0;
+    if (cacheValid) {
+        return TRAIL_PIXEL_RATIO_CACHE.ratio;
+    }
+
+    const resolved = resolveRenderPixelRatio({ viewportWidth: width, viewportHeight: height });
+    const ratio = (Number.isFinite(resolved) && resolved > 0) ? resolved : dpr;
+    TRAIL_PIXEL_RATIO_CACHE = { width, height, dpr, ratio };
+    return ratio;
 }
 
 /**
@@ -40,7 +70,17 @@ export function getEffectiveDevicePixelRatio() {
  */
 export function scaleOpacityForDisplay(baseOpacity) {
     const laneScale = getLaneOpacityScale();
-    const scaled = baseOpacity * laneScale * TRAIL_OPACITY_RUNTIME_MULTIPLIER;
+    const dpr = getEffectiveDevicePixelRatio();
+    // Retina/HiDPI displays can make thin translucent trails read brighter;
+    // apply a gentle high-DPR darkening so brightness better matches large
+    // low/medium-DPR external monitors.
+    const dprOpacityCompensation = (dpr > TRAIL_OPACITY_DPR_DARKEN_START)
+        ? Math.max(
+            TRAIL_OPACITY_DPR_DARKEN_MIN,
+            Math.pow(TRAIL_OPACITY_DPR_DARKEN_START / dpr, TRAIL_OPACITY_DPR_DARKEN_EXPONENT)
+        )
+        : 1;
+    const scaled = baseOpacity * laneScale * TRAIL_OPACITY_RUNTIME_MULTIPLIER * dprOpacityCompensation;
     return Math.min(1, Math.max(0, scaled));
 }
 
@@ -79,7 +119,10 @@ export function setTrailLineWidthRuntimeMultiplier(multiplier = 1) {
  */
 export function scaleLineWidthForDisplay(baseWidth) {
     const dpr = getEffectiveDevicePixelRatio();
-    const scaled = baseWidth * dpr * TRAIL_LINE_WIDTH_RUNTIME_MULTIPLIER;
+    // Sublinear scaling keeps high-DPR displays from looking excessively thick/
+    // bright while still widening enough on lower-DPR displays to reduce shimmer.
+    const dprWidthFactor = Math.pow(dpr, TRAIL_LINE_WIDTH_DPR_EXPONENT);
+    const scaled = baseWidth * dprWidthFactor * TRAIL_LINE_WIDTH_RUNTIME_MULTIPLIER;
     // Ensure at least 1 to avoid sub-pixel rounding artifacts
     return Math.max(1, scaled);
 }

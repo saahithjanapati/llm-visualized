@@ -1403,11 +1403,13 @@ export class MHSAAnimation {
 
         // Preserve appearance based on first trail
         let colorHex = undefined;
+        let baseLineWidth = undefined;
         let baseOpacity = undefined;
         const first = trailsToMerge[0];
         if (first) {
             if (first._material && first._material.color) colorHex = first._material.color.getHex();
             else if (typeof first._color !== 'undefined') colorHex = first._color;
+            if (typeof first._lineWidth === 'number') baseLineWidth = first._lineWidth;
             if (typeof first._opacity === 'number') baseOpacity = first._opacity;
         }
 
@@ -1416,7 +1418,7 @@ export class MHSAAnimation {
             trailsToMerge,
             this.parentGroup,
             colorHex,
-            undefined,
+            baseLineWidth,
             baseOpacity,
             null
         );
@@ -2745,7 +2747,7 @@ export class MHSAAnimation {
                                                             [tr],
                                                             this.parentGroup,
                                                             undefined,
-                                                            undefined,
+                                                            (typeof tr._lineWidth === 'number') ? tr._lineWidth : undefined,
                                                             undefined,
                                                             null
                                                         );

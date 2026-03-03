@@ -5,6 +5,8 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { QUALITY_PRESET, resolveRenderPixelRatio } from '../utils/constants.js';
 import { perfStats } from '../utils/perfStats.js';
+import { refreshTrailDisplayScales } from '../utils/trailUtils.js';
+import { TRAIL_LINE_WIDTH, TRAIL_OPACITY, scaleLineWidthForDisplay, scaleOpacityForDisplay } from '../utils/trailConstants.js';
 import Gpt2Layer from './layers/Gpt2Layer.js';
 import { resolveRaycastLabel as resolveRaycastLabelFromIntersections } from './coreRaycastResolver.js';
 import {
@@ -138,6 +140,7 @@ export class CoreEngine {
         // Cache canvas bounds so pointer events can reuse them without forcing
         // a layout read on every move event. Updated via the resize listener.
         this._canvasRect = this.renderer.domElement.getBoundingClientRect();
+        this._logTrailDebugMetrics('init', initialViewport.width, initialViewport.height);
 
         // ────────────────────────────────────────────────────────────────────
         // Raycasting setup for hover labels
@@ -590,9 +593,121 @@ export class CoreEngine {
         this._updateRendererPixelRatio({ force: true, viewportWidth: width, viewportHeight: height });
         this.renderer.setSize(width, height);
         if (this.composer) this.composer.setSize(width, height);
+        refreshTrailDisplayScales(this.scene);
+        this._logTrailDebugMetrics('resize', width, height);
         this._canvasRect = this.renderer.domElement.getBoundingClientRect();
         this._applyCameraZoomLimit();
         this._updateCameraFarFromControls();
+    };
+
+    _logTrailDebugMetrics = (reason, viewportWidth = null, viewportHeight = null) => {
+        if (typeof window === 'undefined' || window.__TRAIL_DEBUG !== true) return;
+        const renderer = this.renderer;
+        const canvas = renderer?.domElement || null;
+        const screen = window.screen || null;
+        const visualViewport = window.visualViewport || null;
+        const gl = (renderer && typeof renderer.getContext === 'function') ? renderer.getContext() : null;
+        const dpr = (typeof window.devicePixelRatio === 'number' && window.devicePixelRatio > 0)
+            ? window.devicePixelRatio
+            : 1;
+        const renderRatio = (renderer && typeof renderer.getPixelRatio === 'function')
+            ? renderer.getPixelRatio()
+            : null;
+        const width = Number.isFinite(viewportWidth) ? viewportWidth : (Number.isFinite(window.innerWidth) ? window.innerWidth : null);
+        const height = Number.isFinite(viewportHeight) ? viewportHeight : (Number.isFinite(window.innerHeight) ? window.innerHeight : null);
+        let glAliasedLineWidthRange = null;
+        let glSamples = null;
+        let glSampleBuffers = null;
+        let glAntialias = null;
+        let glVersion = null;
+        let glShadingLanguageVersion = null;
+        if (gl) {
+            try {
+                const range = gl.getParameter(gl.ALIASED_LINE_WIDTH_RANGE);
+                if (range && typeof range.length === 'number') {
+                    glAliasedLineWidthRange = [Number(range[0]), Number(range[1])];
+                }
+                glSamples = Number(gl.getParameter(gl.SAMPLES));
+                glSampleBuffers = Number(gl.getParameter(gl.SAMPLE_BUFFERS));
+                const attrs = (typeof gl.getContextAttributes === 'function') ? gl.getContextAttributes() : null;
+                glAntialias = attrs ? !!attrs.antialias : null;
+                glVersion = String(gl.getParameter(gl.VERSION) || '');
+                glShadingLanguageVersion = String(gl.getParameter(gl.SHADING_LANGUAGE_VERSION) || '');
+            } catch (_) {
+                // Best-effort debug logging only.
+            }
+        }
+        let trailCount = 0;
+        let visibleTrailCount = 0;
+        if (this.scene && typeof this.scene.traverse === 'function') {
+            this.scene.traverse((obj) => {
+                if (!obj || !obj.userData) return;
+                const isTrail = !!(obj.userData.isTrail || obj.userData.trailMerged || obj.userData.trailBatch);
+                if (!isTrail) return;
+                trailCount += 1;
+                if (obj.visible !== false) {
+                    visibleTrailCount += 1;
+                }
+            });
+        }
+        console.info('[trail-debug]', {
+            reason,
+            dpr,
+            rendererPixelRatio: renderRatio,
+            resolvedPixelRatio: resolveRenderPixelRatio({ viewportWidth: width, viewportHeight: height }),
+            viewport: {
+                width,
+                height,
+                innerWidth: Number.isFinite(window.innerWidth) ? window.innerWidth : null,
+                innerHeight: Number.isFinite(window.innerHeight) ? window.innerHeight : null,
+                outerWidth: Number.isFinite(window.outerWidth) ? window.outerWidth : null,
+                outerHeight: Number.isFinite(window.outerHeight) ? window.outerHeight : null,
+                visualViewport: visualViewport ? {
+                    width: Number.isFinite(visualViewport.width) ? visualViewport.width : null,
+                    height: Number.isFinite(visualViewport.height) ? visualViewport.height : null,
+                    scale: Number.isFinite(visualViewport.scale) ? visualViewport.scale : null,
+                    offsetLeft: Number.isFinite(visualViewport.offsetLeft) ? visualViewport.offsetLeft : null,
+                    offsetTop: Number.isFinite(visualViewport.offsetTop) ? visualViewport.offsetTop : null
+                } : null
+            },
+            display: {
+                screenWidth: screen ? screen.width : null,
+                screenHeight: screen ? screen.height : null,
+                availWidth: screen ? screen.availWidth : null,
+                availHeight: screen ? screen.availHeight : null,
+                colorDepth: screen ? screen.colorDepth : null,
+                pixelDepth: screen ? screen.pixelDepth : null
+            },
+            canvas: {
+                clientWidth: canvas?.clientWidth ?? null,
+                clientHeight: canvas?.clientHeight ?? null,
+                width: canvas?.width ?? null,
+                height: canvas?.height ?? null
+            },
+            webgl: {
+                aliasedLineWidthRange: glAliasedLineWidthRange,
+                antialias: glAntialias,
+                samples: Number.isFinite(glSamples) ? glSamples : null,
+                sampleBuffers: Number.isFinite(glSampleBuffers) ? glSampleBuffers : null,
+                version: glVersion,
+                shadingLanguageVersion: glShadingLanguageVersion,
+                precision: renderer?.capabilities?.precision ?? null,
+                maxSamples: Number.isFinite(renderer?.capabilities?.maxSamples) ? renderer.capabilities.maxSamples : null,
+                isWebGL2: !!renderer?.capabilities?.isWebGL2
+            },
+            trailStyle: {
+                baseLineWidth: TRAIL_LINE_WIDTH,
+                scaledLineWidth: scaleLineWidthForDisplay(TRAIL_LINE_WIDTH),
+                lineWidthScaleFactor: scaleLineWidthForDisplay(TRAIL_LINE_WIDTH) / Math.max(0.0001, TRAIL_LINE_WIDTH),
+                baseOpacity: TRAIL_OPACITY,
+                scaledOpacity: scaleOpacityForDisplay(TRAIL_OPACITY),
+                opacityScaleFactor: scaleOpacityForDisplay(TRAIL_OPACITY) / Math.max(0.0001, TRAIL_OPACITY)
+            },
+            trailObjects: {
+                total: trailCount,
+                visible: visibleTrailCount
+            }
+        });
     };
 
     _updateRendererPixelRatio = ({ force = false, viewportWidth = null, viewportHeight = null } = {}) => {

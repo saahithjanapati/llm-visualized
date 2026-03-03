@@ -23,7 +23,6 @@ import {
     setPrismAddAnimSpeedMult,
     setSelfAttentionTimeMult,
     SKIP_COMPONENT_COLOR_LERP_ALPHA,
-    SKIP_TRAIL_MAX_STEP_DISTANCE,
     VECTOR_LENGTH_PRISM,
     NUM_VECTOR_LANES,
     LAYER_STACK_SPACING_Y,
@@ -1641,7 +1640,8 @@ export class LayerPipeline extends EventTarget {
             prismAddSpeed,
             selfAttentionSpeed
         }, { durationMs: SKIP_SPEED_RAMP_IN_MS });
-        setGlobalTrailMaxStepDistance(SKIP_TRAIL_MAX_STEP_DISTANCE);
+        // Keep trail geometry behavior consistent with non-skip playback.
+        setGlobalTrailMaxStepDistance(0);
         refreshTrailDisplayScales(this._engine?.scene);
 
         if (layer && typeof layer.setSkipToEndMode === 'function') {
@@ -1680,7 +1680,8 @@ export class LayerPipeline extends EventTarget {
             prismAddSpeed,
             selfAttentionSpeed
         }, { durationMs: SKIP_SPEED_RAMP_IN_MS });
-        setGlobalTrailMaxStepDistance(SKIP_TRAIL_MAX_STEP_DISTANCE);
+        // Keep trail geometry behavior consistent with non-skip playback.
+        setGlobalTrailMaxStepDistance(0);
         refreshTrailDisplayScales(this._engine?.scene);
 
         this._layers.forEach(layer => {
