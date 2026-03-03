@@ -728,16 +728,25 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
             t = denom > 0 ? Math.min(1, (highestY - activationStartY) / denom) : 1;
         }
         const eased = t * t * (3 - 2 * t);
-        if (!appState.topEmbedActivated || eased >= 1) {
-            topEmbedWorkingColor.copy(topEmbedBaseColor).lerp(topEmbedTargetColor, eased);
-            appState.vocabTopRef.setColor(topEmbedWorkingColor);
-            appState.vocabTopRef.setMaterialProperties({
-                emissiveIntensity: TOP_EMBED_BASE_EMISSIVE + topEmbedMaxEmissive * eased
-            });
+        // Avoid re-applying the base gray style before activation starts.
+        if (eased <= 0 && !appState.topEmbedActivated) {
+            return;
         }
         if (eased >= 1) {
+            if (appState.topEmbedActivated) return;
+            topEmbedWorkingColor.copy(topEmbedTargetColor);
+            appState.vocabTopRef.setColor(topEmbedWorkingColor);
+            appState.vocabTopRef.setMaterialProperties({
+                emissiveIntensity: TOP_EMBED_BASE_EMISSIVE + topEmbedMaxEmissive
+            });
             appState.topEmbedActivated = true;
+            return;
         }
+        topEmbedWorkingColor.copy(topEmbedBaseColor).lerp(topEmbedTargetColor, eased);
+        appState.vocabTopRef.setColor(topEmbedWorkingColor);
+        appState.vocabTopRef.setMaterialProperties({
+            emissiveIntensity: TOP_EMBED_BASE_EMISSIVE + topEmbedMaxEmissive * eased
+        });
     }
 
     let lastStatusText = '';

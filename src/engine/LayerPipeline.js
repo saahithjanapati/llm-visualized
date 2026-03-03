@@ -2123,7 +2123,6 @@ export class LayerPipeline extends EventTarget {
             const applyTopLnColor = () => {
                 applyLayerNormMaterial(lnTopGroup, lnColorState.currentColor, lnColorState.currentOpacity, lnMaterialState);
             };
-            applyTopLnColor();
 
             const lnHeight = LN_PARAMS.height || 0;
             const lnTopY = lnCenterY + lnHeight / 2;
@@ -2139,6 +2138,9 @@ export class LayerPipeline extends EventTarget {
                 }
 
                 const highest = lnColorState.highestY;
+                // Keep the original LN appearance untouched until vectors
+                // actually enter the top-LN volume.
+                if (!lnColorState.locked && highest < lnBottomY) return;
                 let desiredOpacity = 1.0;
                 if (lnColorState.locked) {
                     tempColor.copy(lnColorState.lockedColor);

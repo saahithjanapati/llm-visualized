@@ -113,7 +113,15 @@ export function applyLayerNormMaterial(group, targetColor, targetOpacity, state)
         if (Array.isArray(child.material)) {
             child.material.forEach(mat => {
                 if (colorChanged) {
+                    const prevEmissiveIntensity = (typeof mat.emissiveIntensity === 'number')
+                        ? mat.emissiveIntensity
+                        : null;
                     updateSciFiMaterialColor(mat, targetColor);
+                    // Preserve LN emissive level; LN color transitions should not
+                    // implicitly boost bloom intensity.
+                    if (prevEmissiveIntensity !== null) {
+                        mat.emissiveIntensity = prevEmissiveIntensity;
+                    }
                 }
                 if (opacityChanged) {
                     mat.opacity = targetOpacity;
@@ -126,7 +134,15 @@ export function applyLayerNormMaterial(group, targetColor, targetOpacity, state)
         } else {
             const mat = child.material;
             if (colorChanged) {
+                const prevEmissiveIntensity = (typeof mat.emissiveIntensity === 'number')
+                    ? mat.emissiveIntensity
+                    : null;
                 updateSciFiMaterialColor(mat, targetColor);
+                // Preserve LN emissive level; LN color transitions should not
+                // implicitly boost bloom intensity.
+                if (prevEmissiveIntensity !== null) {
+                    mat.emissiveIntensity = prevEmissiveIntensity;
+                }
             }
             if (opacityChanged) {
                 mat.opacity = targetOpacity;
