@@ -105,6 +105,7 @@ const ATTENTION_PREVIEW_GAP = 4;
 const ATTENTION_PREVIEW_TRIANGLE = 'lower';
 const ATTENTION_PREVIEW_GRID_GAP = 8; // matches .detail-attention-grid column gap in CSS
 const ATTENTION_PRE_COLOR_CLAMP = 5;
+const ATTENTION_PREVIEW_COLOR_DARKEN_FACTOR = 0.84;
 const ATTENTION_POP_OUT_MS = 120;
 const ATTENTION_SCORE_DECIMALS = 4;
 const ATTENTION_VALUE_PLACEHOLDER = '--';
@@ -375,14 +376,32 @@ function colorToCss(color) {
     return `#${target.getHexString()}`;
 }
 
-function buildSpectrumLegendGradient({ clampMax, steps = 13 } = {}) {
+function darkenColor(color, factor = 1) {
+    const target = color?.isColor ? color.clone() : new THREE.Color(color);
+    const safeFactor = Number.isFinite(factor) ? THREE.MathUtils.clamp(factor, 0, 1) : 1;
+    return target.multiplyScalar(safeFactor);
+}
+
+function resolveAttentionPreviewCellColor(value, mode) {
+    const safeMode = mode === 'post' ? 'post' : 'pre';
+    if (safeMode === 'post') {
+        return mapValueToGrayscale(value, { minValue: ATTENTION_POST_SOFTMAX_GRAYSCALE_MIN });
+    }
+    const baseColor = mapValueToColor(value, { clampMax: ATTENTION_PRE_COLOR_CLAMP });
+    return darkenColor(baseColor, ATTENTION_PREVIEW_COLOR_DARKEN_FACTOR);
+}
+
+function buildSpectrumLegendGradient({ clampMax, steps = 13, darkenFactor = 1 } = {}) {
     const safeClamp = Number.isFinite(clampMax) ? Math.max(1e-6, Math.abs(clampMax)) : 1;
     const safeSteps = Math.max(3, Math.min(41, Math.floor(steps)));
     const stops = [];
     for (let i = 0; i < safeSteps; i += 1) {
         const t = safeSteps === 1 ? 0 : i / (safeSteps - 1);
         const value = THREE.MathUtils.lerp(-safeClamp, safeClamp, t);
-        const color = colorToCss(mapValueToColor(value, { clampMax: safeClamp }));
+        const color = colorToCss(darkenColor(
+            mapValueToColor(value, { clampMax: safeClamp }),
+            darkenFactor
+        ));
         const pct = (t * 100).toFixed(1);
         stops.push(`${color} ${pct}%`);
     }
@@ -3820,9 +3839,7 @@ class SelectionPanel {
                 if (reveal) {
                     this._cancelAttentionPopOut(cell);
                     const wasEmpty = cell.classList.contains('is-empty');
-                    const color = mode === 'post'
-                        ? mapValueToGrayscale(value, { minValue: ATTENTION_POST_SOFTMAX_GRAYSCALE_MIN })
-                        : mapValueToColor(value, { clampMax: ATTENTION_PRE_COLOR_CLAMP });
+                    const color = resolveAttentionPreviewCellColor(value, mode);
                     cell.style.backgroundColor = colorToCss(color);
                     const rowLabel = tokenLabels[row] || '';
                     const colLabel = tokenLabels[col] || '';
@@ -4099,9 +4116,7 @@ class SelectionPanel {
                 } else {
                     const reveal = shouldRevealAttentionCell(progress, row, col, mode, decodeProfile);
                     if (reveal) {
-                        const color = mode === 'post'
-                            ? mapValueToGrayscale(value, { minValue: ATTENTION_POST_SOFTMAX_GRAYSCALE_MIN })
-                            : mapValueToColor(value, { clampMax: ATTENTION_PRE_COLOR_CLAMP });
+                        const color = resolveAttentionPreviewCellColor(value, mode);
                         cell.style.backgroundColor = colorToCss(color);
                         const rowLabel = tokenLabels[row] || '';
                         const colLabel = tokenLabels[col] || '';
@@ -4192,8 +4207,8 @@ class SelectionPanel {
         }
 
         if (safeMode === 'post') {
-            const low = colorToCss(mapValueToGrayscale(0, { minValue: ATTENTION_POST_SOFTMAX_GRAYSCALE_MIN }));
-            const high = colorToCss(mapValueToGrayscale(1, { minValue: ATTENTION_POST_SOFTMAX_GRAYSCALE_MIN }));
+            const low = colorToCss(resolveAttentionPreviewCellColor(0, 'post'));
+            const high = colorToCss(resolveAttentionPreviewCellColor(1, 'post'));
             this.attentionLegend.style.setProperty('--attention-legend-gradient', `linear-gradient(90deg, ${low}, ${high})`);
             this.attentionLegend.dataset.mid = '';
             this.attentionLegendLow.textContent = '';
@@ -4204,7 +4219,8 @@ class SelectionPanel {
 
         const gradient = buildSpectrumLegendGradient({
             clampMax: ATTENTION_PRE_COLOR_CLAMP,
-            steps: 15
+            steps: 15,
+            darkenFactor: ATTENTION_PREVIEW_COLOR_DARKEN_FACTOR
         });
         this.attentionLegend.style.setProperty('--attention-legend-gradient', gradient);
         this.attentionLegend.dataset.mid = '';
