@@ -1,9 +1,10 @@
 import { appState } from '../state/appState.js';
+import { initTouchClickFallback } from './touchClickFallback.js';
 
 const PAUSE_REASON = 'skip-options-modal';
 const SKIP_OPTION_ORDER = Object.freeze([
-    'skipLayerBtn',
     'skipConveyorBtn',
+    'skipLayerBtn',
     'skipToEndBtn',
     'skipNextPassBtn',
     'skipLastPassBtn'
@@ -46,6 +47,7 @@ export function initSkipMenu(pipeline) {
     const emptyMessage = document.getElementById('skipOptionsEmpty');
 
     if (!menu || !toggle || !items) return () => {};
+    const modalTouchCleanup = initTouchClickFallback(modal, { selector: 'button' });
 
     let rafId = null;
     let modalOpen = false;
@@ -320,6 +322,7 @@ export function initSkipMenu(pipeline) {
         optionList?.removeEventListener('click', onOptionClick);
         window.removeEventListener('keydown', onWindowKeyDown);
         if (rafId !== null) cancelFrame(rafId);
+        modalTouchCleanup?.();
         closeModal({ restoreFocus: false });
         unlockBackgroundInteraction();
     };

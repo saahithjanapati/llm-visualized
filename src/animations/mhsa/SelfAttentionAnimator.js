@@ -80,6 +80,7 @@ export class SelfAttentionAnimator {
         this._sphereEntries     = [];
         this._sphereDummy       = new THREE.Object3D();
         this._sphereColorTmp    = new THREE.Color();
+        this._collisionHaloColorTmp = new THREE.Color(SA_DUPLICATE_SCORE_COLLISION_HALO_COLOR);
         this._activeSphereHalos = new Set();
         this._dupVecPool        = [];
         this._dupVecPoolLimit   = 32;
@@ -312,7 +313,7 @@ export class SelfAttentionAnimator {
         this._activeSphereHalos.clear();
     }
 
-    _spawnAttentionSphereHalo(instanceId, durationMs = 120) {
+    _spawnAttentionSphereHalo(instanceId, durationMs = 120, colorOverride = null) {
         const sphereData = this._getAttentionSphereData(instanceId);
         if (!sphereData || !this.ctx || !this.ctx.parentGroup) return;
         const baseScale = Number.isFinite(sphereData.scale) ? Math.max(0.001, sphereData.scale) : 0.8;
@@ -320,9 +321,12 @@ export class SelfAttentionAnimator {
         const endScale = baseScale * SA_DUPLICATE_SCORE_COLLISION_HALO_END_SCALE;
         const startOpacity = THREE.MathUtils.clamp(SA_DUPLICATE_SCORE_COLLISION_HALO_OPACITY, 0, 1);
         if (startOpacity <= 0) return;
+        const haloColor = colorOverride && colorOverride.isColor
+            ? colorOverride
+            : SA_DUPLICATE_SCORE_COLLISION_HALO_COLOR;
 
         const haloMaterial = new THREE.MeshBasicMaterial({
-            color: SA_DUPLICATE_SCORE_COLLISION_HALO_COLOR,
+            color: haloColor,
             transparent: true,
             opacity: startOpacity,
             depthTest: false,
@@ -1120,6 +1124,65 @@ export class SelfAttentionAnimator {
             csAttr.needsUpdate = true;
             ceAttr.needsUpdate = true;
         }
+    }
+
+    _sampleVectorFlashColor(vector, out = this._collisionHaloColorTmp) {
+        const target = out || new THREE.Color();
+        target.set(SA_DUPLICATE_SCORE_COLLISION_HALO_COLOR);
+
+        const mesh = vector && vector.mesh;
+        if (!mesh) return target;
+
+        const sampleColorBuffer = (arr) => {
+            if (!arr || !arr.length) return false;
+            const available = Math.floor(arr.length / 3);
+            const requestedCount = Number.isFinite(vector?.instanceCount) ? vector.instanceCount : available;
+            const count = Math.min(available, requestedCount);
+            if (count <= 0) return false;
+
+            let sumR = 0;
+            let sumG = 0;
+            let sumB = 0;
+            let used = 0;
+            for (let i = 0; i < count; i += 1) {
+                const i3 = i * 3;
+                const r = arr[i3];
+                const g = arr[i3 + 1];
+                const b = arr[i3 + 2];
+                if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) continue;
+                // Skip hidden/black prisms so the flash follows visible value-vector color.
+                if (Math.max(r, g, b) < 0.03) continue;
+                sumR += r;
+                sumG += g;
+                sumB += b;
+                used += 1;
+            }
+            if (used > 0) {
+                target.setRGB(sumR / used, sumG / used, sumB / used);
+                return true;
+            }
+            const mid = Math.max(0, Math.min(count - 1, Math.floor(count * 0.5)));
+            const i3 = mid * 3;
+            const r = arr[i3];
+            const g = arr[i3 + 1];
+            const b = arr[i3 + 2];
+            if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) return false;
+            target.setRGB(r, g, b);
+            return true;
+        };
+
+        if (sampleColorBuffer(mesh.instanceColor?.array)) return target;
+        if (sampleColorBuffer(mesh.geometry?.getAttribute?.('colorStart')?.array)) return target;
+        if (sampleColorBuffer(mesh.geometry?.getAttribute?.('colorEnd')?.array)) return target;
+        if (mesh.material?.color?.isColor) {
+            target.copy(mesh.material.color);
+            return target;
+        }
+        if (mesh.material?.emissive?.isColor) {
+            target.copy(mesh.material.emissive);
+            return target;
+        }
+        return target;
     }
 
     _applyValueVectorScheme(vector, sourceData = null, options = {}) {
@@ -1959,9 +2022,11 @@ export class SelfAttentionAnimator {
                                                 })
                                                 .start();
                                             if (Number.isFinite(sphereId)) {
+                                                const haloColor = this._sampleVectorFlashColor(dupVec, this._collisionHaloColorTmp);
                                                 this._spawnAttentionSphereHalo(
                                                     sphereId,
-                                                    collisionPulseDuration * SA_DUPLICATE_SCORE_COLLISION_HALO_DURATION_MULT
+                                                    collisionPulseDuration * SA_DUPLICATE_SCORE_COLLISION_HALO_DURATION_MULT,
+                                                    haloColor
                                                 );
                                             }
                                             // Brief linger at the post-softmax score before merging into the running sum

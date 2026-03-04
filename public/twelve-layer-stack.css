@@ -1545,7 +1545,7 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
 
 .vector-legend {
     margin: 0 12px;
-    padding: 10px 12px 18px;
+    padding: 10px 12px 26px;
     border-radius: 12px;
     border: 1px solid rgba(255,255,255,0.12);
     background: rgba(255,255,255,0.03);
@@ -1562,6 +1562,9 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     font-family: var(--viz-sci-fi-font);
 }
 .vector-legend-bar {
+    --legend-tick-gap: 2px;
+    --legend-tick-height: 6px;
+    --legend-tick-label-offset: 5px;
     position: relative;
     height: 10px;
     border-radius: 999px;
@@ -1573,14 +1576,17 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
 }
 .vector-legend-ticks {
     position: absolute;
-    inset: -2px 0;
+    left: 0;
+    right: 0;
+    top: calc(100% + var(--legend-tick-gap, 2px));
+    height: var(--legend-tick-height, 6px);
     pointer-events: none;
 }
 .vector-legend-tick {
     position: absolute;
     left: var(--tick-pos, 50%);
     top: 0;
-    bottom: 0;
+    height: 100%;
     width: 1px;
     transform: translateX(-0.5px);
     background: rgba(255,255,255,0.28);
@@ -1595,7 +1601,7 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     position: absolute;
     top: 100%;
     left: 50%;
-    transform: translate(-50%, 4px);
+    transform: translate(-50%, var(--legend-tick-label-offset, 5px));
     color: rgba(154,163,175,0.9);
     font-size: 10px;
     font-family: var(--viz-sci-fi-font);
@@ -1604,11 +1610,11 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
 }
 .vector-legend-tick[data-ratio="0"]::after {
     left: 0;
-    transform: translate(6px, 4px);
+    transform: translate(6px, var(--legend-tick-label-offset, 5px));
 }
 .vector-legend-tick[data-ratio="1"]::after {
     left: 100%;
-    transform: translate(calc(-100% - 6px), 4px);
+    transform: translate(calc(-100% - 6px), var(--legend-tick-label-offset, 5px));
 }
 .vector-legend-tick--major::after {
     color: rgba(196,203,214,0.96);
@@ -1824,12 +1830,15 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     align-items: end;
     gap: 0;
     margin-top: 14px;
-    margin-bottom: 14px;
+    margin-bottom: 24px;
     color: #9aa3af;
     font-family: var(--viz-sci-fi-font);
     font-size: 10px;
 }
 .attention-legend-bar {
+    --legend-tick-gap: 2px;
+    --legend-tick-height: 6px;
+    --legend-tick-label-offset: 5px;
     grid-area: bar;
     position: relative;
     height: 10px;
@@ -1842,14 +1851,17 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
 }
 .attention-legend-ticks {
     position: absolute;
-    inset: -2px 0;
+    left: 0;
+    right: 0;
+    top: calc(100% + var(--legend-tick-gap, 2px));
+    height: var(--legend-tick-height, 6px);
     pointer-events: none;
 }
 .attention-legend-tick {
     position: absolute;
     left: var(--tick-pos, 50%);
     top: 0;
-    bottom: 0;
+    height: 100%;
     width: 1px;
     transform: translateX(-0.5px);
     background: rgba(255,255,255,0.28);
@@ -1864,7 +1876,7 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     position: absolute;
     top: 100%;
     left: 50%;
-    transform: translate(-50%, 4px);
+    transform: translate(-50%, var(--legend-tick-label-offset, 5px));
     color: rgba(154,163,175,0.9);
     font-size: 10px;
     font-family: var(--viz-sci-fi-font);
@@ -1873,11 +1885,11 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
 }
 .attention-legend-tick[data-ratio="0"]::after {
     left: 0;
-    transform: translate(6px, 4px);
+    transform: translate(6px, var(--legend-tick-label-offset, 5px));
 }
 .attention-legend-tick[data-ratio="1"]::after {
     left: 100%;
-    transform: translate(calc(-100% - 6px), 4px);
+    transform: translate(calc(-100% - 6px), var(--legend-tick-label-offset, 5px));
 }
 .attention-legend-tick--major::after {
     color: rgba(196,203,214,0.96);
