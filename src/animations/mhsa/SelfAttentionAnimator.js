@@ -329,7 +329,8 @@ export class SelfAttentionAnimator {
             color: haloColor,
             transparent: true,
             opacity: startOpacity,
-            depthTest: false,
+            // Keep halo flashes occluded by foreground geometry.
+            depthTest: true,
             depthWrite: false,
             blending: THREE.AdditiveBlending
         });

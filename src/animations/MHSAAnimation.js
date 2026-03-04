@@ -1224,6 +1224,9 @@ export class MHSAAnimation {
 
                 // Only follow while the addition animation is active (stopRise flag present)
                 if (!lane.stopRise) continue;
+                // Some additions drive residual trail samples directly from
+                // prism motion; skip this fallback sampler to avoid double writes.
+                if (lane.__additionOwnsResidualTrail) continue;
 
                 try {
                     // Compute world position of the centre prism for the ORIGINAL (source) vector

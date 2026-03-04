@@ -66,6 +66,33 @@ function getRenderIndex(vec, localIndex) {
     return vec._index * prismCount + localIndex;
 }
 
+function enforceVectorDepthTest(vec) {
+    const mesh = getRenderMesh(vec);
+    const mat = mesh && mesh.material ? mesh.material : null;
+    if (!mat) return;
+    const mats = Array.isArray(mat) ? mat : [mat];
+    for (let i = 0; i < mats.length; i++) {
+        const m = mats[i];
+        if (!m) continue;
+        let changed = false;
+        if ('depthTest' in m && m.depthTest !== true) {
+            m.depthTest = true;
+            changed = true;
+        }
+        if ('opacity' in m && Number.isFinite(m.opacity) && m.opacity >= 0.999) {
+            if ('transparent' in m && m.transparent !== false) {
+                m.transparent = false;
+                changed = true;
+            }
+            if ('depthWrite' in m && m.depthWrite !== true) {
+                m.depthWrite = true;
+                changed = true;
+            }
+        }
+        if (changed) m.needsUpdate = true;
+    }
+}
+
 function readMatrixAt(vec, localIndex, outMatrix) {
     const mesh = getRenderMesh(vec);
     if (!mesh || typeof mesh.getMatrixAt !== 'function') return false;
@@ -362,6 +389,7 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
     const inheritSourceColors = options ? options.inheritSourceColors === true : false;
     const progressTarget = options && options.progressTarget ? options.progressTarget : null;
     const progressKey = options && typeof options.progressKey === 'string' ? options.progressKey : null;
+    const driveResidualTrailInAddition = !suppressResidualTrailUpdates;
     const setProgress = (value) => {
         if (!progressTarget || !progressKey) return;
         const next = Math.max(0, Math.min(1, Number(value) || 0));
@@ -381,6 +409,7 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
             delete lane.stopRise;
             delete lane.stopRiseTarget;
             delete lane.__residualTrailAnchor;
+            delete lane.__additionOwnsResidualTrail;
             const nowMs = (typeof performance !== 'undefined' && typeof performance.now === 'function')
                 ? performance.now()
                 : Date.now();
@@ -425,12 +454,19 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
     if (inheritSourceColors && targetVec && typeof targetVec.copyColorsFrom === 'function') {
         targetVec.copyColorsFrom(sourceVec);
     }
+    enforceVectorDepthTest(sourceVec);
+    enforceVectorDepthTest(targetVec);
 
     // Freeze upward movement of the source so its group position remains static.
     if (lane) {
         delete lane.__cameraHoldAfterAddUntil;
         lane.stopRise = true;
         lane.stopRiseTarget = targetVec.group;
+        if (driveResidualTrailInAddition) {
+            lane.__additionOwnsResidualTrail = true;
+        } else {
+            delete lane.__additionOwnsResidualTrail;
+        }
         if (lane.layer && typeof lane.layer._emitProgress === 'function') {
             lane.layer._emitProgress();
         }
@@ -490,6 +526,60 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
     const basePrismCenterY = sourceVec.getUniformHeight() / 2;
     let completedPrisms = 0;
     let finishOnce = null;
+    const updateResidualTrailFromMidline = () => {
+        try {
+            const wPos = computeMidlineWorldPosition(sourceVec, vectorLength, TMP_WORLD_AVG);
+            const hideThreshold = HIDE_INSTANCE_Y_OFFSET / 10;
+            if (wPos.y < hideThreshold) return;
+
+            const sourceOwner = (sourceVec && sourceVec.userData) || null;
+            const residualOwner = lane || sourceOwner;
+            if (!residualOwner) return;
+
+            const residualTrail = lane
+                ? ((sourceOwner && sourceOwner.trail) || lane.originalTrail || null)
+                : ((sourceOwner && sourceOwner.trail) || null);
+            if (!residualTrail || typeof residualTrail.update !== 'function') return;
+
+            if (!Number.isFinite(residualOwner.__residualMaxY)) {
+                residualOwner.__residualMaxY = wPos.y - 0.001;
+            }
+            if (wPos.y < residualOwner.__residualMaxY) return;
+
+            const anchor = residualOwner.__residualTrailAnchor;
+            if (anchor) {
+                if (Number.isFinite(anchor.x)) wPos.x = anchor.x;
+                if (Number.isFinite(anchor.z)) wPos.z = anchor.z;
+            }
+
+            let localPos = wPos;
+            const expectsWorldSpace = Boolean(
+                (sourceOwner && sourceOwner.trailWorld)
+                || residualOwner.trailWorld
+                || (residualTrail._scene && residualTrail._scene.isScene)
+            );
+            if (!expectsWorldSpace) {
+                try {
+                    const parentObject = (residualTrail._line && residualTrail._line.parent)
+                        || residualTrail._scene
+                        || null;
+                    if (parentObject && typeof parentObject.worldToLocal === 'function') {
+                        TMP_LOCAL_SNAP.copy(wPos);
+                        parentObject.worldToLocal(TMP_LOCAL_SNAP);
+                        localPos = TMP_LOCAL_SNAP;
+                    }
+                } catch (conversionErr) {
+                    console.warn('Residual trail coordinate conversion failed:', conversionErr);
+                    localPos = wPos;
+                }
+            }
+
+            residualTrail.update(localPos);
+            residualOwner.__residualMaxY = wPos.y;
+        } catch (err) {
+            console.warn('Residual trail update failed:', err);
+        }
+    };
 
     for (let i = 0; i < vectorLength; i++) {
         // Grab starting local Y offset of each instance
@@ -540,56 +630,8 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
                 sourceVec.setInstanceAppearance(i, offsetY, null);
 
                 if (centreIndices.includes(i)) {
-                    // When running inside a lane (MHSA/MLP pipelines) the owning animation loop
-                    // already updates the residual trail to avoid redundant sample points. Only
-                    // handle standalone additions here.
-                    if (!lane && !suppressResidualTrailUpdates) {
-                        try {
-                            const wPos = computeMidlineWorldPosition(sourceVec, vectorLength, TMP_WORLD_AVG);
-
-                            const hideThreshold = HIDE_INSTANCE_Y_OFFSET / 10;
-                            if (wPos.y >= hideThreshold) {
-                                const residualTrail = (sourceVec && sourceVec.userData && sourceVec.userData.trail)
-                                    || null;
-                                const residualOwner = (sourceVec && sourceVec.userData) || null;
-                                if (residualTrail && residualOwner && typeof residualTrail.update === 'function') {
-                                    if (!Number.isFinite(residualOwner.__residualMaxY)) {
-                                        residualOwner.__residualMaxY = wPos.y - 0.001;
-                                    }
-                                    if (wPos.y >= residualOwner.__residualMaxY) {
-                                        const anchor = residualOwner.__residualTrailAnchor;
-                                        if (anchor) {
-                                            if (Number.isFinite(anchor.x)) wPos.x = anchor.x;
-                                            if (Number.isFinite(anchor.z)) wPos.z = anchor.z;
-                                        }
-                                        let localPos = wPos;
-                                        const expectsWorldSpace = Boolean(
-                                            (sourceVec && sourceVec.userData && sourceVec.userData.trailWorld)
-                                            || (residualOwner && residualOwner.trailWorld)
-                                        );
-                                        if (!expectsWorldSpace) {
-                                            try {
-                                                const parentObject = (residualTrail._line && residualTrail._line.parent)
-                                                    || residualTrail._scene
-                                                    || null;
-                                                if (parentObject && typeof parentObject.worldToLocal === 'function') {
-                                                    TMP_LOCAL_SNAP.copy(wPos);
-                                                    parentObject.worldToLocal(TMP_LOCAL_SNAP);
-                                                    localPos = TMP_LOCAL_SNAP;
-                                                }
-                                            } catch (conversionErr) {
-                                                console.warn('Residual trail coordinate conversion failed:', conversionErr);
-                                                localPos = wPos;
-                                            }
-                                        }
-                                        residualTrail.update(localPos);
-                                        residualOwner.__residualMaxY = wPos.y;
-                                    }
-                                }
-                            }
-                        } catch (err) {
-                            console.warn('Residual trail update failed:', err);
-                        }
+                    if (driveResidualTrailInAddition) {
+                        updateResidualTrailFromMidline();
                     }
                 }
             })
@@ -666,6 +708,7 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
             delete lane.stopRise;
             delete lane.stopRiseTarget;
             delete lane.__residualTrailAnchor;
+            delete lane.__additionOwnsResidualTrail;
             const nowMs = (typeof performance !== 'undefined' && typeof performance.now === 'function')
                 ? performance.now()
                 : Date.now();
