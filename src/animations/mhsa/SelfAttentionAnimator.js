@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { VECTOR_LENGTH_PRISM, SA_RED_EXTRA_RISE, SA_V_RISE_DURATION_MS, SA_K_ALIGN_DURATION_MS, SA_BLUE_HORIZ_DURATION_MS, SA_BLUE_VERT_DURATION_MS, SA_BLUE_PAUSE_MS, SA_BLUE_QUEUE_SHIFT_DURATION_MS, SA_DUPLICATE_POP_IN_MS, SA_DUPLICATE_TRAVEL_MERGE_MS, SA_DUPLICATE_POP_OUT_MS, SA_DUPLICATE_SCORE_COLLISION_PULSE_MS, SA_DUPLICATE_SCORE_COLLISION_PULSE_MIN, SA_DUPLICATE_SCORE_COLLISION_PULSE_MAX, ATTENTION_POST_SOFTMAX_GRAYSCALE_MIN, GLOBAL_ANIM_SPEED_MULT, SELF_ATTENTION_TIME_MULT } from '../../utils/constants.js';
+import { VECTOR_LENGTH_PRISM, SA_RED_EXTRA_RISE, SA_V_RISE_DURATION_MS, SA_K_ALIGN_DURATION_MS, SA_BLUE_HORIZ_DURATION_MS, SA_BLUE_VERT_DURATION_MS, SA_BLUE_PAUSE_MS, SA_BLUE_QUEUE_SHIFT_DURATION_MS, SA_BLUE_PREPASS_SLOW_MULT, SA_DUPLICATE_POP_IN_MS, SA_DUPLICATE_TRAVEL_MERGE_MS, SA_DUPLICATE_POP_OUT_MS, SA_DUPLICATE_TO_SCORE_TRAVEL_FRACTION, SA_DUPLICATE_TO_SUM_TRAVEL_FRACTION, SA_DUPLICATE_SCORE_COLLISION_PULSE_MS, SA_DUPLICATE_SCORE_COLLISION_PULSE_MIN, SA_DUPLICATE_SCORE_COLLISION_PULSE_MAX, SA_DUPLICATE_SCORE_COLLISION_HALO_OPACITY, SA_DUPLICATE_SCORE_COLLISION_HALO_START_SCALE, SA_DUPLICATE_SCORE_COLLISION_HALO_END_SCALE, SA_DUPLICATE_SCORE_COLLISION_HALO_COLOR, SA_DUPLICATE_SCORE_COLLISION_HALO_DURATION_MULT, ATTENTION_POST_SOFTMAX_GRAYSCALE_MIN, GLOBAL_ANIM_SPEED_MULT, SELF_ATTENTION_TIME_MULT } from '../../utils/constants.js';
 import { VectorVisualizationInstancedPrism } from '../../components/VectorVisualizationInstancedPrism.js';
 import { mapValueToColor, mapValueToGrayscale, buildHueRangeOptions, mapValueToHueRange } from '../../utils/colors.js';
 import { buildActivationData, applyActivationDataToVector } from '../../utils/activationMetadata.js';
@@ -79,6 +79,7 @@ export class SelfAttentionAnimator {
         this._sphereEntries     = [];
         this._sphereDummy       = new THREE.Object3D();
         this._sphereColorTmp    = new THREE.Color();
+        this._activeSphereHalos = new Set();
         this._dupVecPool        = [];
         this._dupVecPoolLimit   = 32;
         this._spawnedTempVectors = new Set();
@@ -158,6 +159,7 @@ export class SelfAttentionAnimator {
     _cleanupAttentionScoreMeshes() {
         // Clear instanced attention spheres regardless of scene labels.
         this._clearAttentionSphereInstances();
+        this._clearAttentionSphereHalos();
         const root = this.ctx && this.ctx.parentGroup;
         if (!root || typeof root.traverse !== 'function') return;
         const toRemove = [];
@@ -292,6 +294,68 @@ export class SelfAttentionAnimator {
     _getAttentionSphereData(instanceId) {
         if (!Number.isFinite(instanceId)) return null;
         return this._sphereInstances.get(instanceId) || null;
+    }
+
+    _disposeAttentionSphereHalo(mesh) {
+        if (!mesh) return;
+        this._activeSphereHalos.delete(mesh);
+        try { if (mesh.parent) mesh.parent.remove(mesh); } catch (_) { /* optional cleanup */ }
+        try { if (mesh.material && typeof mesh.material.dispose === 'function') mesh.material.dispose(); } catch (_) { /* optional cleanup */ }
+    }
+
+    _clearAttentionSphereHalos() {
+        if (!this._activeSphereHalos || this._activeSphereHalos.size === 0) return;
+        this._activeSphereHalos.forEach((mesh) => {
+            this._disposeAttentionSphereHalo(mesh);
+        });
+        this._activeSphereHalos.clear();
+    }
+
+    _spawnAttentionSphereHalo(instanceId, durationMs = 120) {
+        const sphereData = this._getAttentionSphereData(instanceId);
+        if (!sphereData || !this.ctx || !this.ctx.parentGroup) return;
+        const baseScale = Number.isFinite(sphereData.scale) ? Math.max(0.001, sphereData.scale) : 0.8;
+        const startScale = baseScale * SA_DUPLICATE_SCORE_COLLISION_HALO_START_SCALE;
+        const endScale = baseScale * SA_DUPLICATE_SCORE_COLLISION_HALO_END_SCALE;
+        const startOpacity = THREE.MathUtils.clamp(SA_DUPLICATE_SCORE_COLLISION_HALO_OPACITY, 0, 1);
+        if (startOpacity <= 0) return;
+
+        const haloMaterial = new THREE.MeshBasicMaterial({
+            color: SA_DUPLICATE_SCORE_COLLISION_HALO_COLOR,
+            transparent: true,
+            opacity: startOpacity,
+            depthTest: false,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending
+        });
+        const halo = new THREE.Mesh(SHARED_SPHERE_GEOMETRY, haloMaterial);
+        halo.position.copy(sphereData.position);
+        halo.scale.setScalar(startScale);
+        halo.userData = halo.userData || {};
+        halo.userData.label = 'Attention Score Halo';
+        halo.userData.activationData = sphereData.activationData || null;
+        this.ctx.parentGroup.add(halo);
+        this._activeSphereHalos.add(halo);
+
+        const duration = Number.isFinite(durationMs) ? Math.max(1, durationMs) : 120;
+        const state = { s: startScale, o: startOpacity };
+        new TWEEN.Tween(state)
+            .to({ s: endScale, o: 0 }, duration)
+            .easing(TWEEN.Easing.Cubic.Out)
+            .onUpdate(() => {
+                if (!this._activeSphereHalos.has(halo)) return;
+                const liveSphere = this._getAttentionSphereData(instanceId);
+                if (liveSphere) halo.position.copy(liveSphere.position);
+                halo.scale.setScalar(state.s);
+                if (halo.material) {
+                    halo.material.opacity = state.o;
+                    halo.material.needsUpdate = true;
+                }
+            })
+            .onComplete(() => {
+                this._disposeAttentionSphereHalo(halo);
+            })
+            .start();
     }
 
     _tweenSphereScale(instanceId, targetScale, duration, options = {}) {
@@ -1606,8 +1670,11 @@ export class SelfAttentionAnimator {
         }
 
         const targetZ = laneZs[stepIdx < laneZs.length ? stepIdx : laneZs.length - 1];
+        const prepassSlowMult = createSpheres ? SA_BLUE_PREPASS_SLOW_MULT : 1;
+        const laneHopDuration = this.BLUE_VERT_DURATION * prepassSlowMult;
+        const lanePauseDuration = this.BLUE_PAUSE_MS * prepassSlowMult;
         new TWEEN.Tween(vector.group.position)
-            .to({ z: targetZ }, this.BLUE_VERT_DURATION)
+            .to({ z: targetZ }, laneHopDuration)
             .easing(TWEEN.Easing.Quadratic.InOut)
             .onComplete(() => {
                 if (this.skipRequested) return;
@@ -1636,7 +1703,7 @@ export class SelfAttentionAnimator {
                                             return;
                                         }
                                         this._traverseLanes(vector, laneZs, count, spheresArr, createSpheres, doneCb, stepIdx + 1);
-                                    }, this.BLUE_PAUSE_MS);
+                                    }, lanePauseDuration);
                                     return;
                                 }
                                 const midPoint = this._tmpMidpoint
@@ -1771,7 +1838,9 @@ export class SelfAttentionAnimator {
                                     });
                                 }
                                 const sumTarget = { x: vector.group.position.x, y: raisedY, z: vector.group.position.z };
-                                const sumDuration = spData ? this.DUPLICATE_TRAVEL_MERGE_MS * 0.55 : this.DUPLICATE_TRAVEL_MERGE_MS;
+                                const sumDuration = spData
+                                    ? this.DUPLICATE_TRAVEL_MERGE_MS * SA_DUPLICATE_TO_SUM_TRAVEL_FRACTION
+                                    : this.DUPLICATE_TRAVEL_MERGE_MS;
                                 const applyWeightedLook = () => {
                                     this._applyWeightedSumScheme(dupVec, fixedVec.rawData, { setHiddenToBlack: true });
                                     this._tagConveyorValueVector(dupVec, {
@@ -1844,7 +1913,7 @@ export class SelfAttentionAnimator {
                                 if (spData && spPos) {
                                     const scoreTarget = { x: spPos.x, y: spPos.y, z: spPos.z };
                                     new TWEEN.Tween(dupVec.group.position)
-                                        .to(scoreTarget, this.DUPLICATE_TRAVEL_MERGE_MS * 0.45)
+                                        .to(scoreTarget, this.DUPLICATE_TRAVEL_MERGE_MS * SA_DUPLICATE_TO_SCORE_TRAVEL_FRACTION)
                                         .easing(TWEEN.Easing.Quadratic.Out)
                                         .onComplete(() => {
                                             const baseDupScale = Math.max(0.001, Number.isFinite(dupVec.group.scale.x) ? dupVec.group.scale.x : 1);
@@ -1866,6 +1935,12 @@ export class SelfAttentionAnimator {
                                                     dupVec.group.scale.set(pulseScaleState.s, pulseScaleState.s, pulseScaleState.s);
                                                 })
                                                 .start();
+                                            if (Number.isFinite(sphereId)) {
+                                                this._spawnAttentionSphereHalo(
+                                                    sphereId,
+                                                    collisionPulseDuration * SA_DUPLICATE_SCORE_COLLISION_HALO_DURATION_MULT
+                                                );
+                                            }
                                             // Brief linger at the post-softmax score before merging into the running sum
                                             this._scheduleAfterDelay(() => {
                                                 if (this.skipRequested) return;
@@ -1904,7 +1979,7 @@ export class SelfAttentionAnimator {
                         return;
                     }
                     this._traverseLanes(vector, laneZs, count, spheresArr, createSpheres, doneCb, stepIdx + 1);
-                }, this.BLUE_PAUSE_MS);
+                }, lanePauseDuration);
             })
             .start();
     }

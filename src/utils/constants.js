@@ -714,14 +714,22 @@ export const SA_BLUE_HORIZ_DURATION_MS = 400;        // Horizontal slide duratio
 export const SA_BLUE_VERT_DURATION_MS = 400;         // Per-lane hop duration for Q/V traversal
 export const SA_BLUE_PAUSE_MS = 100;                 // Pause at each lane during traversal
 export const SA_BLUE_QUEUE_SHIFT_DURATION_MS = 400;  // Duration to shift remaining blue vectors
+export const SA_BLUE_PREPASS_SLOW_MULT = 1.15;       // Extra slowdown only for first (blue/pre-softmax) lane pass
 
 // Self-attention duplicate vector micro-timings
 export const SA_DUPLICATE_POP_IN_MS = 120;
 export const SA_DUPLICATE_TRAVEL_MERGE_MS = 400;
 export const SA_DUPLICATE_POP_OUT_MS = 150;
+export const SA_DUPLICATE_TO_SCORE_TRAVEL_FRACTION = 0.88;
+export const SA_DUPLICATE_TO_SUM_TRAVEL_FRACTION = 1.0;
 export const SA_DUPLICATE_SCORE_COLLISION_PULSE_MS = 90;
 export const SA_DUPLICATE_SCORE_COLLISION_PULSE_MIN = 1.8;
 export const SA_DUPLICATE_SCORE_COLLISION_PULSE_MAX = 1.8;
+export const SA_DUPLICATE_SCORE_COLLISION_HALO_OPACITY = 0.88;
+export const SA_DUPLICATE_SCORE_COLLISION_HALO_START_SCALE = 1.15;
+export const SA_DUPLICATE_SCORE_COLLISION_HALO_END_SCALE = 2.55;
+export const SA_DUPLICATE_SCORE_COLLISION_HALO_COLOR = 0xff0000;
+export const SA_DUPLICATE_SCORE_COLLISION_HALO_DURATION_MULT = 1.05;
 // Lift the post-softmax grayscale floor so near-zero attention weights are
 // slightly visible instead of pure black.
 export const ATTENTION_POST_SOFTMAX_GRAYSCALE_MIN = 0;
