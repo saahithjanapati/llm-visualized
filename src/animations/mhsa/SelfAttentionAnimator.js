@@ -3,6 +3,7 @@ import { VECTOR_LENGTH_PRISM, SA_RED_EXTRA_RISE, SA_V_RISE_DURATION_MS, SA_K_ALI
 import { VectorVisualizationInstancedPrism } from '../../components/VectorVisualizationInstancedPrism.js';
 import { mapValueToColor, mapValueToGrayscale, buildHueRangeOptions, mapValueToHueRange } from '../../utils/colors.js';
 import { buildActivationData, applyActivationDataToVector } from '../../utils/activationMetadata.js';
+import { logRandomColorDebug } from '../../utils/randomColorDebug.js';
 import {
     MHA_VALUE_SPECTRUM_COLOR,
     MHA_VALUE_HUE_SPREAD,
@@ -1043,9 +1044,20 @@ export class SelfAttentionAnimator {
                     ? postRow[Math.max(0, Math.min(postRow.length - 1, keyTokenIndex))]
                     : this.ctx.activationSource.getAttentionScore(layerIndex, 'post', headIdx, queryTokenIndex, keyTokenIndex);
             }
-            const targetColor = Number.isFinite(postScore)
-                ? mapValueToGrayscale(postScore, { minValue: ATTENTION_POST_SOFTMAX_GRAYSCALE_MIN })
-                : this._sphereColorTmp.setHSL(0, 0, THREE.MathUtils.lerp(0.2, 0.9, Math.random()));
+            let targetColor;
+            if (Number.isFinite(postScore)) {
+                targetColor = mapValueToGrayscale(postScore, { minValue: ATTENTION_POST_SOFTMAX_GRAYSCALE_MIN });
+            } else {
+                const fallbackLightness = THREE.MathUtils.lerp(0.2, 0.9, Math.random());
+                logRandomColorDebug('SelfAttentionAnimator.postScore.randomFallbackColor', {
+                    layerIndex,
+                    headIndex: headIdx,
+                    queryTokenIndex,
+                    keyTokenIndex,
+                    fallbackLightness
+                });
+                targetColor = this._sphereColorTmp.setHSL(0, 0, fallbackLightness);
+            }
 
             // Capture current color from the instance buffer if present.
             let curR = 1, curG = 1, curB = 1;
@@ -1721,13 +1733,24 @@ export class SelfAttentionAnimator {
                                     : ((this.ctx && this.ctx.activationSource && Number.isFinite(layerIndex) && Number.isFinite(headIdx))
                                         ? this.ctx.activationSource.getAttentionScore(layerIndex, 'pre', headIdx, queryTokenIndex, keyTokenIndex)
                                         : null);
-                                const baseColor = Number.isFinite(preScore)
-                                    ? mapValueToColor(preScore, { clampMax: 5 }, this._sphereColorTmp)
-                                    : this._sphereColorTmp.setHSL(
-                                        Math.random(),
-                                        THREE.MathUtils.lerp(0.85, 1.0, Math.random()),
-                                        THREE.MathUtils.lerp(0.45, 0.6, Math.random())
-                                    );
+                                let baseColor;
+                                if (Number.isFinite(preScore)) {
+                                    baseColor = mapValueToColor(preScore, { clampMax: 5 }, this._sphereColorTmp);
+                                } else {
+                                    const hue = Math.random();
+                                    const saturation = THREE.MathUtils.lerp(0.85, 1.0, Math.random());
+                                    const lightness = THREE.MathUtils.lerp(0.45, 0.6, Math.random());
+                                    logRandomColorDebug('SelfAttentionAnimator.preScore.randomFallbackColor', {
+                                        layerIndex,
+                                        headIndex: headIdx,
+                                        queryTokenIndex,
+                                        keyTokenIndex,
+                                        hue,
+                                        saturation,
+                                        lightness
+                                    });
+                                    baseColor = this._sphereColorTmp.setHSL(hue, saturation, lightness);
+                                }
                                 const activationData = buildActivationData({
                                     label: 'Pre-Softmax Attention Score',
                                     stage: 'attention.pre',

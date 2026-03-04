@@ -1638,7 +1638,10 @@ function applyDataToPreviewVector(vec, data) {
 
 function createPreviewVector(options = {}) {
     const { colorHex, data = null, instanceCount = PREVIEW_VECTOR_BODY_INSTANCES } = options;
-    const vec = new VectorVisualizationInstancedPrism(null, new THREE.Vector3(0, 0, 0), 1, instanceCount);
+    const seedData = (Array.isArray(data) && data.length > 0)
+        ? data
+        : new Array(Math.max(1, Math.floor(instanceCount || PREVIEW_VECTOR_BODY_INSTANCES))).fill(0);
+    const vec = new VectorVisualizationInstancedPrism(seedData, new THREE.Vector3(0, 0, 0), 1, instanceCount);
     vec.numSubsections = 1;
     if (Array.isArray(data) && data.length > 0) {
         applyDataToPreviewVector(vec, data);

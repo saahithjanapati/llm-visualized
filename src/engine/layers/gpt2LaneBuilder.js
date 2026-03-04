@@ -5,6 +5,7 @@ import { PrismLayerNormAnimation } from '../../animations/PrismLayerNormAnimatio
 import { startPrismAdditionAnimation } from '../../utils/additionUtils.js';
 import { applyVectorData, copyVectorAppearance, LN_INTERNAL_TRAIL_MIN_SEGMENT } from './gpt2LayerUtils.js';
 import { BatchedPrismVectorSet } from '../../components/BatchedPrismVectorSet.js';
+import { logRandomColorDebug } from '../../utils/randomColorDebug.js';
 import {
     LN_PARAMS,
     LAYER_NORM_1_Y_POS,
@@ -229,9 +230,18 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
     } else {
         zPos = -LN_PARAMS.depth / 2 + slitSpacing * (resolvedLayoutLaneIdx + 1);
         let data = layer.random.nextVector(layer._getBaseVectorLength());
+        let tokenData = null;
         if (layer.activationSource) {
-            const tokenData = layer._getEmbeddingData({ tokenIndex: laneTokenIndex }, 'token');
+            tokenData = layer._getEmbeddingData({ tokenIndex: laneTokenIndex }, 'token');
             if (tokenData) data = tokenData;
+        }
+        if (!tokenData) {
+            logRandomColorDebug('LaneBuilder.tokenEmbedding.randomVectorUsed', {
+                layerIndex: layer.index,
+                laneIndex: laneLocalIdx,
+                tokenIndex: laneTokenIndex,
+                length: layer._getBaseVectorLength()
+            });
         }
         startY = startY_override;
         originalVec = layer._createPrismVector(
@@ -440,9 +450,18 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
 
             // Give positional a distinct random pattern.
             let posData = layer.random.nextVector(layer._getBaseVectorLength());
+            let posEmbedding = null;
             if (layer.activationSource) {
-                const posEmbedding = layer._getEmbeddingData(lane, 'position');
+                posEmbedding = layer._getEmbeddingData(lane, 'position');
                 if (posEmbedding) posData = posEmbedding;
+            }
+            if (!posEmbedding) {
+                logRandomColorDebug('LaneBuilder.positionEmbedding.randomVectorUsed', {
+                    layerIndex: layer.index,
+                    laneIndex: laneLocalIdx,
+                    tokenIndex: laneTokenIndex,
+                    length: layer._getBaseVectorLength()
+                });
             }
             const posVec = layer._createPrismVector(
                 posData,

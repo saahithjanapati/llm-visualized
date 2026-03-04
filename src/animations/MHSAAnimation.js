@@ -4,6 +4,7 @@ import { VectorVisualizationInstancedPrism } from '../components/VectorVisualiza
 import { BatchedPrismVectorSet } from '../components/BatchedPrismVectorSet.js';
 import { SegmentTrailBatch, StraightLineTrail, mergeTrailsIntoLineSegments } from '../utils/trailUtils.js';
 import { TRAIL_COLOR, TRAIL_MIN_SEGMENT_DISTANCE, TRAIL_OPACITY } from '../utils/trailConstants.js';
+import { logRandomColorDebug } from '../utils/randomColorDebug.js';
 
 
 
@@ -1978,6 +1979,11 @@ export class MHSAAnimation {
             // Build raw 768-dim data with 30 random switch points for varied gradient
             const rawData = [];
             const desiredSwitches = Math.min(30, this.vectorPrismCount);
+            logRandomColorDebug('MHSAAnimation.decorativeVector.randomRawData', {
+                layerIndex: this.layerIndex,
+                vectorPrismCount: this.vectorPrismCount,
+                desiredSwitches
+            });
             const switchPoints = new Set();
             while (switchPoints.size < desiredSwitches) {
                 const idx = Math.floor(Math.random() * this.vectorPrismCount);
@@ -2012,8 +2018,15 @@ export class MHSAAnimation {
 
             // Colour the visible prism(s) with a smooth two-colour gradient so
             // each 64-D decorative vector has its own distinctive colour.
-            const startColor = new THREE.Color().setHSL(Math.random(), 0.9, 0.6);
-            const endColor   = new THREE.Color().setHSL(Math.random(), 0.9, 0.6);
+            const startHue = Math.random();
+            const endHue = Math.random();
+            logRandomColorDebug('MHSAAnimation.decorativeVector.randomGradientHues', {
+                layerIndex: this.layerIndex,
+                startHue,
+                endHue
+            });
+            const startColor = new THREE.Color().setHSL(startHue, 0.9, 0.6);
+            const endColor   = new THREE.Color().setHSL(endHue, 0.9, 0.6);
             const visibleCount = visiblePrismCountTemp;
             for (let vi = 0; vi < visibleCount; vi++) {
                 const idx = startVisibleIdx + vi;
@@ -3414,6 +3427,11 @@ export class MHSAAnimation {
         const raw = [];
         // Clamp switch point count to available prisms to avoid infinite loop.
         numSwitchPoints = Math.min(numSwitchPoints, this.vectorPrismCount);
+        logRandomColorDebug('MHSAAnimation.generateRawDataWithSwitchPoints', {
+            layerIndex: this.layerIndex,
+            vectorPrismCount: this.vectorPrismCount,
+            numSwitchPoints
+        });
         const switchPoints = new Set();
         while (switchPoints.size < numSwitchPoints) {
             const idx = Math.floor(Math.random() * this.vectorPrismCount);

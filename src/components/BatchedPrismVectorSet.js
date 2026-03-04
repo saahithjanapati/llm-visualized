@@ -214,8 +214,11 @@ varying float vGradientT;`
             parentGroup.add(this.mesh);
         }
 
-        // Scratch vector to reuse exact color logic from VectorVisualizationInstancedPrism
-        this._scratch = new VectorVisualizationInstancedPrism(null, new THREE.Vector3(), 30, this.prismCount);
+        // Scratch vector to reuse exact color logic from VectorVisualizationInstancedPrism.
+        // Seed with deterministic zero data so constructor setup never goes through
+        // random/no-data fallback paths.
+        const scratchSeed = new Array(this.prismCount).fill(0);
+        this._scratch = new VectorVisualizationInstancedPrism(scratchSeed, new THREE.Vector3(), 30, this.prismCount);
         if (this._scratch.group) {
             this._scratch.group.visible = false;
         }

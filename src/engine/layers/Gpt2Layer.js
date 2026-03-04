@@ -115,11 +115,15 @@ const POS_ADD_STALL_TIMEOUT_MS = 12000;
 const POS_PASS_START_PAUSE_MS = 0;
 const LANE_PHASE_STALL_TIMEOUT_MS_SKIP = 3000;
 const LANE_PHASE_STALL_TIMEOUT_MS_NORMAL = 4500;
-const LN2_HANDOFF_STALL_TIMEOUT_MS_NORMAL = 4500;
+// Allow extra headroom during debug-heavy sessions so watchdog fallback does not
+// fire purely because console instrumentation slowed animation frames.
+const LN2_HANDOFF_STALL_TIMEOUT_MS_NORMAL = 7000;
 // Long hidden-tab / focus gaps advance performance.now() while updates are paused.
 // Reset watchdog baselines after such gaps to avoid false "stalled" recoveries
 // that can spawn fallback vectors/trails on top of active ones.
 const WATCHDOG_FRAME_GAP_RESET_MS = 900;
+const MULTIPLY_TRANSITION_DURATION_MS = 160;
+const MULTIPLY_SOURCE_SHRINK = 0.94;
 const MLP_POST_PASS_THROUGH_FINAL_EMISSIVE = GPT2_LAYER_VISUAL_TUNING.mlp.postPassFinalEmissiveIntensity;
 const POST_MLP_RETURN_TRAIL_OPACITY = 0.1;
 const MLP_TRANSITION_PROFILE_DEFAULT = Object.freeze({
@@ -1326,9 +1330,11 @@ export default class Gpt2Layer extends BaseLayer {
                         }
 
                         const scaleParamData = this._getLayerNormParamData('ln1', 'scale');
-                        const sourceRaw = Array.isArray(dupVec.rawData) ? dupVec.rawData : [];
+                        const sourceRaw = (Array.isArray(dupVec.rawData) || ArrayBuffer.isView(dupVec.rawData))
+                            ? dupVec.rawData
+                            : [];
                         const multData = sourceRaw.slice();
-                        if (scaleParamData && Array.isArray(scaleParamData)) {
+                        if (scaleParamData && (Array.isArray(scaleParamData) || ArrayBuffer.isView(scaleParamData))) {
                             const len = Math.min(multData.length, scaleParamData.length);
                             for (let i = 0; i < len; i++) {
                                 multData[i] = (sourceRaw[i] || 0) * (scaleParamData[i] || 0);
@@ -1337,7 +1343,9 @@ export default class Gpt2Layer extends BaseLayer {
 
                         const multSeed = multData.length
                             ? multData
-                            : this.random.nextVector(this._getBaseVectorLength());
+                            : (sourceRaw.length
+                                ? sourceRaw.slice()
+                                : new Array(Math.max(1, Math.floor(dupVec.instanceCount || this._getBaseVectorLength()))).fill(0));
                         const multResult = this._createPrismVector(
                             multSeed,
                             (scaleParam && scaleParam.group)
@@ -1347,12 +1355,17 @@ export default class Gpt2Layer extends BaseLayer {
                             dupVec.instanceCount
                         );
                         this.raycastRoot.add(multResult.group);
-                        multResult.group.visible = true;
+                        // Keep hidden until colors are fully applied and the multiply
+                        // handoff executes, to avoid one-frame constructor defaults.
+                        multResult.group.visible = false;
                         const ln1ScaledData = this._getLn1Data(lane, 'scale');
-                        if (ln1ScaledData) {
+                        const scaledFallback = (ln1ScaledData && ln1ScaledData.length)
+                            ? ln1ScaledData
+                            : multData;
+                        if (scaledFallback && scaledFallback.length) {
                             applyVectorData(
                                 multResult,
-                                ln1ScaledData,
+                                scaledFallback,
                                 lane.tokenLabel ? `LN1 Scaled - ${lane.tokenLabel}` : 'LN1 Scaled',
                                 this._getLaneMeta(lane, 'ln1.scale')
                             );
@@ -1403,31 +1416,55 @@ export default class Gpt2Layer extends BaseLayer {
                             const shiftParamData = this._getLayerNormParamData('ln1', 'shift');
                             const shiftSeed = (shiftParamData && shiftParamData.length)
                                 ? shiftParamData
-                                : (sourceRaw.length ? sourceRaw.slice() : this.random.nextVector(this._getBaseVectorLength()));
-                            const addResult = this._createPrismVector(
-                                shiftSeed,
-                                (shiftParam && shiftParam.group)
-                                    ? shiftParam.group.position.clone()
-                                    : multResult.group.position.clone(),
-                                30,
-                                multResult.instanceCount
-                            );
-                            this.raycastRoot.add(addResult.group);
-                            // Keep shift/addition parameter in active (blue-ish) colors during the add animation.
-                            this._applyLayerNormParamVector(addResult, 'ln1', 'shift', null);
-                            if (shiftParam && shiftParam.group) {
-                                shiftParam.group.visible = false;
+                                : (sourceRaw.length
+                                    ? sourceRaw.slice()
+                                    : new Array(Math.max(1, Math.floor(multResult.instanceCount || this._getBaseVectorLength()))).fill(0));
+                            const usingShiftTarget = !!(shiftParam && shiftParam.group);
+                            const addResult = usingShiftTarget
+                                ? shiftParam
+                                : this._createPrismVector(
+                                    shiftSeed,
+                                    multResult.group.position.clone(),
+                                    30,
+                                    multResult.instanceCount
+                                );
+                            if (!usingShiftTarget) {
+                                this.raycastRoot.add(addResult.group);
+                                addResult.group.visible = false;
+                                // Fallback path when param bank target is unavailable.
+                                this._applyLayerNormParamVector(addResult, 'ln1', 'shift', null);
+                            } else {
+                                // Ensure the true shift parameter vector is visible as the
+                                // top addend while addition begins.
+                                addResult.group.visible = true;
                             }
+                            addResult.group.visible = true;
 
                             const ln1ShiftedData = this._getLn1Data(lane, 'shift');
+                            const finalLn1ShiftData = (ln1ShiftedData && ln1ShiftedData.length)
+                                ? ln1ShiftedData
+                                : (() => {
+                                    const count = Math.max(1, Math.floor(multResult.instanceCount || addResult.instanceCount || 1));
+                                    const scaledRaw = (Array.isArray(multResult.rawData) || ArrayBuffer.isView(multResult.rawData))
+                                        ? multResult.rawData
+                                        : [];
+                                    const shiftRaw = (Array.isArray(addResult.rawData) || ArrayBuffer.isView(addResult.rawData))
+                                        ? addResult.rawData
+                                        : [];
+                                    const sum = new Array(count);
+                                    for (let i = 0; i < count; i++) {
+                                        sum[i] = (scaledRaw[i] || 0) + (shiftRaw[i] || 0);
+                                    }
+                                    return sum;
+                                })();
                             lane.resultVec = addResult;
                             lane.ln1AddStarted = true;
                             startPrismAdditionAnimation(multResult, addResult, null, () => {
                                 lane.ln1AddComplete = true;
-                                if (ln1ShiftedData) {
+                                if (finalLn1ShiftData && finalLn1ShiftData.length) {
                                     applyVectorData(
                                         addResult,
-                                        ln1ShiftedData,
+                                        finalLn1ShiftData,
                                         lane.tokenLabel ? `LN1 Shifted - ${lane.tokenLabel}` : 'LN1 Shifted',
                                         this._getLaneMeta(lane, 'ln1.shift')
                                     );
@@ -1477,7 +1514,7 @@ export default class Gpt2Layer extends BaseLayer {
                                 }
                                 this._setLaneHorizPhase(lane, HORIZ_PHASE.RISE_ABOVE_LN, 'ln1 add complete');
                                 this._emitProgress();
-                            }, { finalData: ln1ShiftedData, progressTarget: lane, progressKey: 'ln1ShiftProgress' });
+                            }, { progressTarget: lane, progressKey: 'ln1ShiftProgress' });
                         };
 
                         this._animateMultiplyTransition({
@@ -1791,9 +1828,11 @@ export default class Gpt2Layer extends BaseLayer {
                         }
 
                         const scaleParamData = this._getLayerNormParamData('ln2', 'scale');
-                        const sourceRaw = Array.isArray(mv.rawData) ? mv.rawData : [];
+                        const sourceRaw = (Array.isArray(mv.rawData) || ArrayBuffer.isView(mv.rawData))
+                            ? mv.rawData
+                            : [];
                         const multData = sourceRaw.slice();
-                        if (scaleParamData && Array.isArray(scaleParamData)) {
+                        if (scaleParamData && (Array.isArray(scaleParamData) || ArrayBuffer.isView(scaleParamData))) {
                             const len = Math.min(multData.length, scaleParamData.length);
                             for (let i = 0; i < len; i++) {
                                 multData[i] = (sourceRaw[i] || 0) * (scaleParamData[i] || 0);
@@ -1802,7 +1841,9 @@ export default class Gpt2Layer extends BaseLayer {
 
                         const multSeed = multData.length
                             ? multData
-                            : this.random.nextVector(this._getBaseVectorLength());
+                            : (sourceRaw.length
+                                ? sourceRaw.slice()
+                                : new Array(Math.max(1, Math.floor(mv.instanceCount || this._getBaseVectorLength()))).fill(0));
                         const multResult = this._createPrismVector(
                             multSeed,
                             (scaleParam && scaleParam.group)
@@ -1812,7 +1853,9 @@ export default class Gpt2Layer extends BaseLayer {
                             mv.instanceCount
                         );
                         this.raycastRoot.add(multResult.group);
-                        multResult.group.visible = true;
+                        // Keep hidden until colors are fully applied and the multiply
+                        // handoff executes, to avoid one-frame constructor defaults.
+                        multResult.group.visible = false;
 
                         const ln2ScaledData = this._getLn2Data(lane, 'scale');
                         const scaledFallback = (ln2ScaledData && ln2ScaledData.length)
@@ -1876,23 +1919,47 @@ export default class Gpt2Layer extends BaseLayer {
                             const shiftParamData = this._getLayerNormParamData('ln2', 'shift');
                             const shiftSeed = (shiftParamData && shiftParamData.length)
                                 ? shiftParamData
-                                : (sourceRaw.length ? sourceRaw.slice() : this.random.nextVector(this._getBaseVectorLength()));
-                            const addResult = this._createPrismVector(
-                                shiftSeed,
-                                (shiftParam && shiftParam.group)
-                                    ? shiftParam.group.position.clone()
-                                    : resVec.group.position.clone(),
-                                30,
-                                resVec.instanceCount
-                            );
-                            this.raycastRoot.add(addResult.group);
-                            // Keep shift/addition parameter in active (blue-ish) colors during the add animation.
-                            this._applyLayerNormParamVector(addResult, 'ln2', 'shift', null);
-                            if (shiftParam && shiftParam.group) {
-                                shiftParam.group.visible = false;
+                                : (sourceRaw.length
+                                    ? sourceRaw.slice()
+                                    : new Array(Math.max(1, Math.floor(resVec.instanceCount || this._getBaseVectorLength()))).fill(0));
+                            const usingShiftTarget = !!(shiftParam && shiftParam.group);
+                            const addResult = usingShiftTarget
+                                ? shiftParam
+                                : this._createPrismVector(
+                                    shiftSeed,
+                                    resVec.group.position.clone(),
+                                    30,
+                                    resVec.instanceCount
+                                );
+                            if (!usingShiftTarget) {
+                                this.raycastRoot.add(addResult.group);
+                                addResult.group.visible = false;
+                                // Fallback path when param bank target is unavailable.
+                                this._applyLayerNormParamVector(addResult, 'ln2', 'shift', null);
+                            } else {
+                                // Ensure the true shift parameter vector is visible as the
+                                // top addend while addition begins.
+                                addResult.group.visible = true;
                             }
+                            addResult.group.visible = true;
 
                             const ln2ShiftedData = this._getLn2Data(lane, 'shift');
+                            const finalLn2ShiftData = (ln2ShiftedData && ln2ShiftedData.length)
+                                ? ln2ShiftedData
+                                : (() => {
+                                    const count = Math.max(1, Math.floor(resVec.instanceCount || addResult.instanceCount || 1));
+                                    const scaledRaw = (Array.isArray(resVec.rawData) || ArrayBuffer.isView(resVec.rawData))
+                                        ? resVec.rawData
+                                        : [];
+                                    const shiftRaw = (Array.isArray(addResult.rawData) || ArrayBuffer.isView(addResult.rawData))
+                                        ? addResult.rawData
+                                        : [];
+                                    const sum = new Array(count);
+                                    for (let i = 0; i < count; i++) {
+                                        sum[i] = (scaledRaw[i] || 0) + (shiftRaw[i] || 0);
+                                    }
+                                    return sum;
+                                })();
                             lane.resultVecLN2 = addResult;
                             lane.ln2AddStarted = true;
                             // Let the addition animation own trail updates (match LN1 behavior).
@@ -1900,10 +1967,10 @@ export default class Gpt2Layer extends BaseLayer {
                             lane.normAnimationLN2 = null;
                             startPrismAdditionAnimation(resVec, addResult, null, () => {
                                 lane.ln2AddComplete = true;
-                                if (ln2ShiftedData) {
+                                if (finalLn2ShiftData && finalLn2ShiftData.length) {
                                     applyVectorData(
                                         addResult,
-                                        ln2ShiftedData,
+                                        finalLn2ShiftData,
                                         lane.tokenLabel ? `LN2 Shifted - ${lane.tokenLabel}` : 'LN2 Shifted',
                                         this._getLaneMeta(lane, 'ln2.shift')
                                     );
@@ -1954,7 +2021,7 @@ export default class Gpt2Layer extends BaseLayer {
                                     addResult.userData.trailWorld = false;
                                 }
                                 startLn2Rise(addResult);
-                            }, { finalData: ln2ShiftedData, progressTarget: lane, progressKey: 'ln2ShiftProgress' });
+                            }, { progressTarget: lane, progressKey: 'ln2ShiftProgress' });
                         };
 
                         this._animateMultiplyTransition({
@@ -2165,7 +2232,9 @@ export default class Gpt2Layer extends BaseLayer {
             parentGroup: expandedGroup,
             label: 'MLP Expanded Segments',
         });
-        const paddedData = Array.isArray(mlpUpData) ? mlpUpData.slice() : null;
+        const paddedData = (Array.isArray(mlpUpData) || ArrayBuffer.isView(mlpUpData))
+            ? Array.from(mlpUpData)
+            : null;
         if (paddedData && paddedData.length < segments * segmentLength) {
             while (paddedData.length < segments * segmentLength) paddedData.push(0);
         }
@@ -2174,7 +2243,9 @@ export default class Gpt2Layer extends BaseLayer {
         for (let s = 0; s < segments; s++) {
             const segVec = segmentBatch.getVectorRef(s);
             segVec.group.visible = true;
-            segVec.rawData = Array.isArray(vec.rawData) ? vec.rawData.slice() : [];
+            segVec.rawData = (Array.isArray(vec.rawData) || ArrayBuffer.isView(vec.rawData))
+                ? Array.from(vec.rawData)
+                : [];
 
             if (paddedData) {
                 const start = s * segmentLength;
@@ -3727,12 +3798,35 @@ export default class Gpt2Layer extends BaseLayer {
             return;
         }
 
+        if (this._skipToEndActive || typeof TWEEN === 'undefined') {
+            finish();
+            return;
+        }
+
+        const sourceStartScale = sourceVec.group.scale.clone();
+        const sourceEndScale = sourceStartScale.clone().multiplyScalar(MULTIPLY_SOURCE_SHRINK);
+
         multResult.group.visible = false;
         multResult.group.scale.set(1, 1, 1);
         this._setVectorOpacity(sourceVec, 1);
         this._setVectorOpacity(multResult, 1);
+        if (scaleParam && scaleParam.group) {
+            // Hide parameter vector during the handoff tween to avoid blended
+            // overlap colors that can read as random/glitchy.
+            scaleParam.group.visible = false;
+        }
 
-        finish();
+        const tweenState = { t: 0 };
+        new TWEEN.Tween(tweenState)
+            .to({ t: 1 }, MULTIPLY_TRANSITION_DURATION_MS)
+            .easing(TWEEN.Easing.Quadratic.Out)
+            .onUpdate(() => {
+                const t = THREE.MathUtils.clamp(tweenState.t, 0, 1);
+                sourceVec.group.scale.lerpVectors(sourceStartScale, sourceEndScale, t);
+                this._emitProgress();
+            })
+            .onComplete(finish)
+            .start();
     }
 
     _getLaneMeta(lane, stage, extra = {}) {

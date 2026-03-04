@@ -11,6 +11,7 @@ import {
 import { computeCenteredPrismX, PRISM_INSTANCE_WIDTH_SCALE } from '../utils/prismLayout.js';
 import { mapValueToColor, mapValueToHueRange } from '../utils/colors.js';
 import { perfStats } from '../utils/perfStats.js';
+import { logRandomColorDebug } from '../utils/randomColorDebug.js';
 
 // Helper for monochromatic colors
 function mapValueToMonochromaticColor(value, baseHue, saturation, minLightness, maxLightness, valueMin = 0, valueMax = 1) {
@@ -109,7 +110,8 @@ export class VectorVisualizationInstancedPrism {
         this.group.userData.isVector = true;
 
         this.instanceCount = Math.max(1, Math.floor(instanceCount));
-        this.rawData = initialData || this.generateTestData();
+        const hasInitialData = isArrayLike(initialData) && initialData.length > 0;
+        this.rawData = hasInitialData ? initialData : this.generateTestData('constructor: missing initialData');
         this.normalizedData = []; // Will be populated by updateDataInternal
         this.numSubsections = numSubsections;
         this.currentKeyColors = []; // To store the current random key colors for subsections
@@ -203,15 +205,29 @@ varying float vGradientT;`
 
         const copyData = options && options.copyData !== false;
         this.updateDataInternal(this.rawData, { copyData }); // Process initial data
-        this._generateKeyColors(); // Generate initial key colors
+        if (hasInitialData) {
+            // For vectors created from real data (including LN multiply/add
+            // intermediates), seed colors from that data immediately to avoid
+            // one-frame random constructor palettes.
+            const numKeyColors = Math.min(30, Math.max(1, this.rawData.length || 1));
+            this.updateKeyColorsFromData(this.rawData, numKeyColors, null, this.rawData);
+        } else {
+            // Keep random initialization only for synthetic/no-data vectors.
+            this._generateKeyColors('constructor initial palette');
+        }
         this.updateInstanceGeometryAndColors();      // Set initial visual state (fixed dimensions, subsection colors)
     }
 
-    generateTestData() {
-        const data = [];
-        for (let i = 0; i < this.instanceCount; i++) {
-            data.push(Math.random() * 2 - 1); // Values between -1 and 1 for more dynamic range
-        }
+    generateTestData(reason = 'unspecified') {
+        logRandomColorDebug('VectorVisualizationInstancedPrism.generateTestData', {
+            reason,
+            label: this.group?.userData?.label || 'Vector',
+            instanceCount: this.instanceCount
+        });
+        // Keep fallback data deterministic so placeholder vectors never flash
+        // random colors during constructor/setup frames.
+        const data = new Array(this.instanceCount);
+        for (let i = 0; i < this.instanceCount; i++) data[i] = 0;
         return data;
     }
 
@@ -272,7 +288,7 @@ varying float vGradientT;`
         const colorEndAttr   = this.mesh.geometry.getAttribute('colorEnd');
 
         // Use the stored key colors
-        if (this.currentKeyColors.length === 0) this._generateKeyColors();
+        if (this.currentKeyColors.length === 0) this._generateKeyColors('updateInstanceGeometryAndColors: missing key colors');
 
         for (let i = 0; i < this.instanceCount; i++) {
             // Apply fixed, uniform dimensions
@@ -493,7 +509,7 @@ varying float vGradientT;`
         // points are supplied than prisms, colours/heights default gracefully.
         const copyData = options && options.copyData !== false;
         if (!newData || !isArrayLike(newData) || newData.length === 0) {
-            this.rawData = this.generateTestData();
+            this.rawData = this.generateTestData('updateDataInternal: invalid/empty newData');
         } else {
             if (copyData) {
                 this.rawData = typeof newData.slice === 'function'
@@ -511,7 +527,7 @@ varying float vGradientT;`
     // and then manage visual updates via updateInstanceGeometryAndColors(interpolatedHeights).
     updateDataAndSnapVisuals(newData) {
         this.updateDataInternal(newData);
-        this._generateKeyColors(); // Regenerate key colors for the snap
+        this._generateKeyColors('updateDataAndSnapVisuals'); // Regenerate key colors for the snap
         this.updateInstanceGeometryAndColors(); // This applies geometry and default colors
     }
     
@@ -529,13 +545,38 @@ varying float vGradientT;`
         this.instanceUserData = [];
     }
 
-    _generateKeyColors() {
-        this.currentKeyColors = [];
+    _generateKeyColors(reason = 'unspecified') {
         const currentNumSubsections = Math.max(1, this.numSubsections);
         const numKeyColors = currentNumSubsections + 1;
+        const sourceData = isArrayLike(this.rawData) && this.rawData.length > 0
+            ? this.rawData
+            : null;
+        logRandomColorDebug('VectorVisualizationInstancedPrism.generateFallbackKeyColors', {
+            reason,
+            label: this.group?.userData?.label || 'Vector',
+            numSubsections: this.numSubsections,
+            instanceCount: this.instanceCount,
+            strategy: sourceData ? 'data-derived' : 'neutral-zero'
+        });
+        this.currentKeyColors = [];
+        if (!sourceData) {
+            const neutral = mapValueToColor(0);
+            for (let k = 0; k < numKeyColors; k++) {
+                this.currentKeyColors.push(neutral.clone());
+            }
+            return;
+        }
+        const sourceLen = sourceData.length;
+        const step = sourceLen > 1 && numKeyColors > 1
+            ? (sourceLen - 1) / (numKeyColors - 1)
+            : 0;
         for (let k = 0; k < numKeyColors; k++) {
-            const randomHue = Math.random();
-            this.currentKeyColors.push(new THREE.Color().setHSL(randomHue, 1.0, 0.5));
+            const sampleIndex = sourceLen > 1
+                ? Math.min(Math.round(k * step), sourceLen - 1)
+                : 0;
+            const raw = sourceData[sampleIndex];
+            const value = Number.isFinite(raw) ? raw : 0;
+            this.currentKeyColors.push(mapValueToColor(value));
         }
     }
 
@@ -548,7 +589,7 @@ varying float vGradientT;`
             // Fallback: Ensure some key colors exist if none were generated
             // This might happen if updateKeyColorsFromData is called before _generateKeyColors
             // or if _generateKeyColors itself had an issue.
-            this._generateKeyColors(); 
+            this._generateKeyColors('_updateInstanceColors fallback');
         }
         // Ensure there are at least two colors for interpolation if numSubsections > 0
         // or at least one if numSubsections is 0 (or 1 key color implies 0 subsections effectively)
@@ -622,8 +663,13 @@ varying float vGradientT;`
     updateKeyColorsFromData(data, numKeyColorsToSample = 30, colorGenerationOptions = null, cacheKeyData = null) {
         if (!data || data.length === 0) {
             console.warn("No data provided to updateKeyColorsFromData. Using random colors.");
+            logRandomColorDebug('VectorVisualizationInstancedPrism.updateKeyColorsFromData.fallbackRandomColors', {
+                label: this.group?.userData?.label || 'Vector',
+                requestedKeyColors: numKeyColorsToSample,
+                instanceCount: this.instanceCount
+            });
             this.numSubsections = Math.max(1, numKeyColorsToSample -1);
-            this._generateKeyColors(); // Generate random colors as a fallback
+            this._generateKeyColors('updateKeyColorsFromData: no data fallback'); // Generate random colors as a fallback
             this._updateInstanceColors();
             return;
         }

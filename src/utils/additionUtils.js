@@ -42,6 +42,48 @@ function isArrayLike(value) {
     return Array.isArray(value) || ArrayBuffer.isView(value);
 }
 
+function isBatchedVectorRef(vec) {
+    return !!(
+        vec
+        && vec.isBatchedVectorRef
+        && vec._batch
+        && vec._batch.mesh
+        && Number.isFinite(vec._index)
+    );
+}
+
+function getRenderMesh(vec) {
+    if (!vec) return null;
+    if (isBatchedVectorRef(vec)) return vec._batch.mesh;
+    return vec.mesh || null;
+}
+
+function getRenderIndex(vec, localIndex) {
+    if (!isBatchedVectorRef(vec)) return localIndex;
+    const prismCount = Number.isFinite(vec._batch?.prismCount)
+        ? Math.max(1, Math.floor(vec._batch.prismCount))
+        : Math.max(1, Math.floor(vec.instanceCount || 1));
+    return vec._index * prismCount + localIndex;
+}
+
+function readMatrixAt(vec, localIndex, outMatrix) {
+    const mesh = getRenderMesh(vec);
+    if (!mesh || typeof mesh.getMatrixAt !== 'function') return false;
+    const idx = getRenderIndex(vec, localIndex);
+    if (!Number.isFinite(idx) || idx < 0 || idx >= mesh.count) return false;
+    mesh.getMatrixAt(idx, outMatrix);
+    return true;
+}
+
+function readColorAt(vec, localIndex, outColor) {
+    const mesh = getRenderMesh(vec);
+    if (!mesh || typeof mesh.getColorAt !== 'function') return false;
+    const idx = getRenderIndex(vec, localIndex);
+    if (!Number.isFinite(idx) || idx < 0 || idx >= mesh.count) return false;
+    mesh.getColorAt(idx, outColor);
+    return true;
+}
+
 function buildKeyColorsFromData(data, numKeyColors) {
     const keyColors = [];
     const dataLength = data.length || 0;
@@ -130,44 +172,49 @@ function getMappedDataValue(data, index, instanceCount) {
 }
 
 function applyFinalColorAtIndex(targetVec, index, finalBuffers) {
-    if (!targetVec || !targetVec.mesh || !finalBuffers) return;
-    const i3 = index * 3;
-    const colorStartAttr = targetVec.mesh.geometry?.getAttribute?.('colorStart');
-    const colorEndAttr = targetVec.mesh.geometry?.getAttribute?.('colorEnd');
+    const mesh = getRenderMesh(targetVec);
+    if (!targetVec || !mesh || !finalBuffers) return;
+    const localI3 = index * 3;
+    const linearIndex = getRenderIndex(targetVec, index);
+    const i3 = linearIndex * 3;
+    const colorStartAttr = mesh.geometry?.getAttribute?.('colorStart');
+    const colorEndAttr = mesh.geometry?.getAttribute?.('colorEnd');
 
     if (colorStartAttr && finalBuffers.colorStart) {
-        colorStartAttr.array[i3] = finalBuffers.colorStart[i3];
-        colorStartAttr.array[i3 + 1] = finalBuffers.colorStart[i3 + 1];
-        colorStartAttr.array[i3 + 2] = finalBuffers.colorStart[i3 + 2];
+        colorStartAttr.array[i3] = finalBuffers.colorStart[localI3];
+        colorStartAttr.array[i3 + 1] = finalBuffers.colorStart[localI3 + 1];
+        colorStartAttr.array[i3 + 2] = finalBuffers.colorStart[localI3 + 2];
         colorStartAttr.needsUpdate = true;
     }
     if (colorEndAttr && finalBuffers.colorEnd) {
-        colorEndAttr.array[i3] = finalBuffers.colorEnd[i3];
-        colorEndAttr.array[i3 + 1] = finalBuffers.colorEnd[i3 + 1];
-        colorEndAttr.array[i3 + 2] = finalBuffers.colorEnd[i3 + 2];
+        colorEndAttr.array[i3] = finalBuffers.colorEnd[localI3];
+        colorEndAttr.array[i3 + 1] = finalBuffers.colorEnd[localI3 + 1];
+        colorEndAttr.array[i3 + 2] = finalBuffers.colorEnd[localI3 + 2];
         colorEndAttr.needsUpdate = true;
     }
 
-    if (!targetVec.mesh.instanceColor) {
-        targetVec.mesh.instanceColor = new THREE.InstancedBufferAttribute(
-            new Float32Array(targetVec.instanceCount * 3),
+    if (!mesh.instanceColor) {
+        mesh.instanceColor = new THREE.InstancedBufferAttribute(
+            new Float32Array((mesh.count || targetVec.instanceCount || 1) * 3),
             3
         );
     }
-    if (finalBuffers.instanceColors && targetVec.mesh.instanceColor) {
-        const instanceColors = targetVec.mesh.instanceColor.array;
-        instanceColors[i3] = finalBuffers.instanceColors[i3];
-        instanceColors[i3 + 1] = finalBuffers.instanceColors[i3 + 1];
-        instanceColors[i3 + 2] = finalBuffers.instanceColors[i3 + 2];
-        targetVec.mesh.instanceColor.needsUpdate = true;
+    if (finalBuffers.instanceColors && mesh.instanceColor) {
+        const instanceColors = mesh.instanceColor.array;
+        instanceColors[i3] = finalBuffers.instanceColors[localI3];
+        instanceColors[i3 + 1] = finalBuffers.instanceColors[localI3 + 1];
+        instanceColors[i3 + 2] = finalBuffers.instanceColors[localI3 + 2];
+        mesh.instanceColor.needsUpdate = true;
     }
 }
 
 function applySingleColorAtIndex(targetVec, index, color) {
-    if (!targetVec || !targetVec.mesh || !(color instanceof THREE.Color)) return;
-    const i3 = index * 3;
-    const colorStartAttr = targetVec.mesh.geometry?.getAttribute?.('colorStart');
-    const colorEndAttr = targetVec.mesh.geometry?.getAttribute?.('colorEnd');
+    const mesh = getRenderMesh(targetVec);
+    if (!targetVec || !mesh || !(color instanceof THREE.Color)) return;
+    const linearIndex = getRenderIndex(targetVec, index);
+    const i3 = linearIndex * 3;
+    const colorStartAttr = mesh.geometry?.getAttribute?.('colorStart');
+    const colorEndAttr = mesh.geometry?.getAttribute?.('colorEnd');
 
     if (colorStartAttr) {
         colorStartAttr.array[i3] = color.r;
@@ -182,26 +229,28 @@ function applySingleColorAtIndex(targetVec, index, color) {
         colorEndAttr.needsUpdate = true;
     }
 
-    if (!targetVec.mesh.instanceColor) {
-        targetVec.mesh.instanceColor = new THREE.InstancedBufferAttribute(
-            new Float32Array(targetVec.instanceCount * 3),
+    if (!mesh.instanceColor) {
+        mesh.instanceColor = new THREE.InstancedBufferAttribute(
+            new Float32Array((mesh.count || targetVec.instanceCount || 1) * 3),
             3
         );
     }
-    if (targetVec.mesh.instanceColor) {
-        const instanceColors = targetVec.mesh.instanceColor.array;
+    if (mesh.instanceColor) {
+        const instanceColors = mesh.instanceColor.array;
         instanceColors[i3] = color.r;
         instanceColors[i3 + 1] = color.g;
         instanceColors[i3 + 2] = color.b;
-        targetVec.mesh.instanceColor.needsUpdate = true;
+        mesh.instanceColor.needsUpdate = true;
     }
 }
 
 function applySingleColorAtIndexRGB(targetVec, index, r, g, b) {
-    if (!targetVec || !targetVec.mesh) return;
-    const i3 = index * 3;
-    const colorStartAttr = targetVec.mesh.geometry?.getAttribute?.('colorStart');
-    const colorEndAttr = targetVec.mesh.geometry?.getAttribute?.('colorEnd');
+    const mesh = getRenderMesh(targetVec);
+    if (!targetVec || !mesh) return;
+    const linearIndex = getRenderIndex(targetVec, index);
+    const i3 = linearIndex * 3;
+    const colorStartAttr = mesh.geometry?.getAttribute?.('colorStart');
+    const colorEndAttr = mesh.geometry?.getAttribute?.('colorEnd');
 
     if (colorStartAttr) {
         colorStartAttr.array[i3] = r;
@@ -216,23 +265,23 @@ function applySingleColorAtIndexRGB(targetVec, index, r, g, b) {
         colorEndAttr.needsUpdate = true;
     }
 
-    if (!targetVec.mesh.instanceColor) {
-        targetVec.mesh.instanceColor = new THREE.InstancedBufferAttribute(
-            new Float32Array(targetVec.instanceCount * 3),
+    if (!mesh.instanceColor) {
+        mesh.instanceColor = new THREE.InstancedBufferAttribute(
+            new Float32Array((mesh.count || targetVec.instanceCount || 1) * 3),
             3
         );
     }
-    if (targetVec.mesh.instanceColor) {
-        const instanceColors = targetVec.mesh.instanceColor.array;
+    if (mesh.instanceColor) {
+        const instanceColors = mesh.instanceColor.array;
         instanceColors[i3] = r;
         instanceColors[i3 + 1] = g;
         instanceColors[i3 + 2] = b;
-        targetVec.mesh.instanceColor.needsUpdate = true;
+        mesh.instanceColor.needsUpdate = true;
     }
 }
 
 function computeMidlineWorldPosition(vec, length = VECTOR_LENGTH_PRISM, out = new THREE.Vector3()) {
-    if (!vec || !vec.mesh || typeof vec.mesh.getMatrixAt !== 'function' || !vec.group) {
+    if (!vec || !getRenderMesh(vec) || !vec.group) {
         return out.set(0, 0, 0);
     }
 
@@ -241,14 +290,18 @@ function computeMidlineWorldPosition(vec, length = VECTOR_LENGTH_PRISM, out = ne
         return out.set(0, 0, 0);
     }
 
-    vec.mesh.getMatrixAt(centreIndices[0], TMP_MATRIX_A);
+    if (!readMatrixAt(vec, centreIndices[0], TMP_MATRIX_A)) {
+        return out.set(0, 0, 0);
+    }
     TMP_WORLD_A.setFromMatrixPosition(TMP_MATRIX_A).applyMatrix4(vec.group.matrixWorld);
 
     if (centreIndices.length === 1) {
         return out.copy(TMP_WORLD_A);
     }
 
-    vec.mesh.getMatrixAt(centreIndices[1], TMP_MATRIX_B);
+    if (!readMatrixAt(vec, centreIndices[1], TMP_MATRIX_B)) {
+        return out.copy(TMP_WORLD_A);
+    }
     TMP_WORLD_B.setFromMatrixPosition(TMP_MATRIX_B).applyMatrix4(vec.group.matrixWorld);
 
     return out.copy(TMP_WORLD_A).add(TMP_WORLD_B).multiplyScalar(0.5);
@@ -276,8 +329,8 @@ function getVectorInstanceCount(vec, fallback = VECTOR_LENGTH_PRISM) {
  *                                     already manages the trail).
  */
 export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComplete, options = null) {
-    const hasRenderableSource = !!(sourceVec && sourceVec.mesh && sourceVec.group);
-    const hasRenderableTarget = !!(targetVec && targetVec.mesh && targetVec.group);
+    const hasRenderableSource = !!(sourceVec && getRenderMesh(sourceVec) && sourceVec.group);
+    const hasRenderableTarget = !!(targetVec && getRenderMesh(targetVec) && targetVec.group);
 
     const suppressResidualTrailUpdates = options && options.suppressResidualTrailUpdates === true;
 
@@ -303,6 +356,7 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
         ? buildFinalColorBuffers(finalDataCandidate, vectorLength)
         : null;
     const preserveSourceColors = options ? options.preserveSourceColors !== false : true;
+    const inheritSourceColors = options ? options.inheritSourceColors === true : false;
     const progressTarget = options && options.progressTarget ? options.progressTarget : null;
     const progressKey = options && typeof options.progressKey === 'string' ? options.progressKey : null;
     const setProgress = (value) => {
@@ -363,6 +417,10 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
     if (typeof TWEEN === 'undefined') {
         failForward('TWEEN unavailable');
         return;
+    }
+
+    if (inheritSourceColors && targetVec && typeof targetVec.copyColorsFrom === 'function') {
+        targetVec.copyColorsFrom(sourceVec);
     }
 
     // Freeze upward movement of the source so its group position remains static.
@@ -431,12 +489,16 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
 
     for (let i = 0; i < vectorLength; i++) {
         // Grab starting local Y offset of each instance
-        sourceVec.mesh.getMatrixAt(i, TMP_MATRIX_A);
+        if (!readMatrixAt(sourceVec, i, TMP_MATRIX_A)) {
+            continue;
+        }
         TMP_WORLD_A.setFromMatrixPosition(TMP_MATRIX_A);
         const srcLocalY = TMP_WORLD_A.y;
 
         // Capture target gradient colour so we can flash & restore
-        targetVec.mesh.getColorAt(i, TMP_COLOR_A);
+        if (!readColorAt(targetVec, i, TMP_COLOR_A)) {
+            TMP_COLOR_A.setRGB(1, 1, 1);
+        }
         const gradR = TMP_COLOR_A.r;
         const gradG = TMP_COLOR_A.g;
         const gradB = TMP_COLOR_A.b;
@@ -456,7 +518,9 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
             .easing(TWEEN.Easing.Quadratic.InOut)
             .onUpdate(obj => {
                 // Re-compute dynamic target position each frame (target may move)
-                targetVec.mesh.getMatrixAt(i, TMP_ADD_TARGET_MATRIX);
+                if (!readMatrixAt(targetVec, i, TMP_ADD_TARGET_MATRIX)) {
+                    return;
+                }
                 TMP_ADD_TARGET_WORLD.setFromMatrixPosition(TMP_ADD_TARGET_MATRIX).applyMatrix4(targetVec.group.matrixWorld);
                 TMP_ADD_TARGET_LOCAL.copy(TMP_ADD_TARGET_WORLD);
                 sourceVec.group.worldToLocal(TMP_ADD_TARGET_LOCAL);
