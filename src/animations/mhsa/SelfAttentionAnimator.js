@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { VECTOR_LENGTH_PRISM, SA_RED_EXTRA_RISE, SA_V_RISE_DURATION_MS, SA_K_ALIGN_DURATION_MS, SA_BLUE_HORIZ_DURATION_MS, SA_BLUE_VERT_DURATION_MS, SA_BLUE_PAUSE_MS, SA_BLUE_QUEUE_SHIFT_DURATION_MS, SA_DUPLICATE_POP_IN_MS, SA_DUPLICATE_TRAVEL_MERGE_MS, SA_DUPLICATE_POP_OUT_MS, GLOBAL_ANIM_SPEED_MULT, SELF_ATTENTION_TIME_MULT } from '../../utils/constants.js';
+import { VECTOR_LENGTH_PRISM, SA_RED_EXTRA_RISE, SA_V_RISE_DURATION_MS, SA_K_ALIGN_DURATION_MS, SA_BLUE_HORIZ_DURATION_MS, SA_BLUE_VERT_DURATION_MS, SA_BLUE_PAUSE_MS, SA_BLUE_QUEUE_SHIFT_DURATION_MS, SA_DUPLICATE_POP_IN_MS, SA_DUPLICATE_TRAVEL_MERGE_MS, SA_DUPLICATE_POP_OUT_MS, SA_DUPLICATE_SCORE_COLLISION_PULSE_MS, SA_DUPLICATE_SCORE_COLLISION_PULSE_MIN, SA_DUPLICATE_SCORE_COLLISION_PULSE_MAX, ATTENTION_POST_SOFTMAX_GRAYSCALE_MIN, GLOBAL_ANIM_SPEED_MULT, SELF_ATTENTION_TIME_MULT } from '../../utils/constants.js';
 import { VectorVisualizationInstancedPrism } from '../../components/VectorVisualizationInstancedPrism.js';
 import { mapValueToColor, mapValueToGrayscale, buildHueRangeOptions, mapValueToHueRange } from '../../utils/colors.js';
 import { buildActivationData, applyActivationDataToVector } from '../../utils/activationMetadata.js';
@@ -111,6 +111,7 @@ export class SelfAttentionAnimator {
     get DUPLICATE_POP_IN_MS() { return SA_DUPLICATE_POP_IN_MS * SELF_ATTENTION_TIME_MULT; }
     get DUPLICATE_TRAVEL_MERGE_MS() { return SA_DUPLICATE_TRAVEL_MERGE_MS * SELF_ATTENTION_TIME_MULT; }
     get DUPLICATE_POP_OUT_MS() { return SA_DUPLICATE_POP_OUT_MS * SELF_ATTENTION_TIME_MULT; }
+    get DUPLICATE_SCORE_COLLISION_PULSE_MS() { return SA_DUPLICATE_SCORE_COLLISION_PULSE_MS * SELF_ATTENTION_TIME_MULT; }
 
     // ------------------------------------------------------------------
     // Skip / cleanup helpers
@@ -979,7 +980,7 @@ export class SelfAttentionAnimator {
                     : this.ctx.activationSource.getAttentionScore(layerIndex, 'post', headIdx, queryTokenIndex, keyTokenIndex);
             }
             const targetColor = Number.isFinite(postScore)
-                ? mapValueToGrayscale(postScore)
+                ? mapValueToGrayscale(postScore, { minValue: ATTENTION_POST_SOFTMAX_GRAYSCALE_MIN })
                 : this._sphereColorTmp.setHSL(0, 0, THREE.MathUtils.lerp(0.2, 0.9, Math.random()));
 
             // Capture current color from the instance buffer if present.
@@ -1846,12 +1847,31 @@ export class SelfAttentionAnimator {
                                         .to(scoreTarget, this.DUPLICATE_TRAVEL_MERGE_MS * 0.45)
                                         .easing(TWEEN.Easing.Quadratic.Out)
                                         .onComplete(() => {
+                                            const baseDupScale = Math.max(0.001, Number.isFinite(dupVec.group.scale.x) ? dupVec.group.scale.x : 1);
+                                            const collisionPulseFactor = Number.isFinite(weight)
+                                                ? THREE.MathUtils.lerp(
+                                                    SA_DUPLICATE_SCORE_COLLISION_PULSE_MIN,
+                                                    SA_DUPLICATE_SCORE_COLLISION_PULSE_MAX,
+                                                    weight
+                                                )
+                                                : (SA_DUPLICATE_SCORE_COLLISION_PULSE_MIN + SA_DUPLICATE_SCORE_COLLISION_PULSE_MAX) * 0.5;
+                                            const collisionPulseDuration = this.DUPLICATE_SCORE_COLLISION_PULSE_MS;
+                                            const pulseScaleState = { s: baseDupScale };
+                                            new TWEEN.Tween(pulseScaleState)
+                                                .to({ s: baseDupScale * collisionPulseFactor }, collisionPulseDuration)
+                                                .easing(TWEEN.Easing.Quadratic.Out)
+                                                .yoyo(true)
+                                                .repeat(1)
+                                                .onUpdate(() => {
+                                                    dupVec.group.scale.set(pulseScaleState.s, pulseScaleState.s, pulseScaleState.s);
+                                                })
+                                                .start();
                                             // Brief linger at the post-softmax score before merging into the running sum
                                             this._scheduleAfterDelay(() => {
                                                 if (this.skipRequested) return;
                                                 applyWeightedLook();
                                                 flyToSum();
-                                            }, 80);
+                                            }, Math.max(80, collisionPulseDuration * 2));
                                         })
                                         .start();
                                 } else {

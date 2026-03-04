@@ -111,10 +111,6 @@ const MLP_REFLECTIVITY_TWEAKS = {
     envMapIntensityMax: 0.6
 };
 
-const MULTIPLY_BLEND_DURATION_MS = 260;
-const MULTIPLY_FLASH_DURATION_MS = 180;
-const MULTIPLY_SOURCE_SHRINK = 0.82;
-const MULTIPLY_FLASH_GEOMETRY = new THREE.SphereGeometry(1, 18, 18);
 const POS_ADD_STALL_TIMEOUT_MS = 12000;
 const POS_PASS_START_PAUSE_MS = 0;
 const LANE_PHASE_STALL_TIMEOUT_MS_SKIP = 3000;
@@ -3702,48 +3698,6 @@ export default class Gpt2Layer extends BaseLayer {
         });
     }
 
-    _spawnMultiplyFlash(localPosition, parent = null) {
-        if (!localPosition) return;
-        const flashParent = parent || this.raycastRoot || this.root;
-        if (!flashParent) return;
-
-        const flashMaterial = new THREE.MeshBasicMaterial({
-            color: COLOR_WHITE,
-            transparent: true,
-            opacity: 0.8,
-            depthWrite: false,
-            blending: THREE.AdditiveBlending
-        });
-        const flashMesh = new THREE.Mesh(MULTIPLY_FLASH_GEOMETRY, flashMaterial);
-        flashMesh.position.copy(localPosition);
-        flashMesh.scale.setScalar(0.18);
-        flashMesh.renderOrder = 40;
-        flashParent.add(flashMesh);
-
-        const cleanupFlash = () => {
-            if (flashMesh.parent) {
-                flashMesh.parent.remove(flashMesh);
-            }
-            flashMaterial.dispose();
-        };
-
-        if (typeof TWEEN === 'undefined') {
-            cleanupFlash();
-            return;
-        }
-
-        const pulseState = { scale: 0.18, opacity: 0.8 };
-        new TWEEN.Tween(pulseState)
-            .to({ scale: 1.75, opacity: 0 }, MULTIPLY_FLASH_DURATION_MS)
-            .easing(TWEEN.Easing.Quadratic.Out)
-            .onUpdate(() => {
-                flashMesh.scale.setScalar(pulseState.scale);
-                flashMaterial.opacity = pulseState.opacity;
-            })
-            .onComplete(cleanupFlash)
-            .start();
-    }
-
     _animateMultiplyTransition({ sourceVec, multResult, scaleParam = null, onComplete = null }) {
         const finish = () => {
             if (scaleParam && scaleParam.group) {
@@ -3760,9 +3714,7 @@ export default class Gpt2Layer extends BaseLayer {
                 multResult.group.scale.set(1, 1, 1);
                 this._setVectorOpacity(multResult, 1);
             }
-            if (typeof onComplete === 'function') {
-                onComplete();
-            }
+            if (typeof onComplete === 'function') onComplete();
         };
 
         if (!multResult || !multResult.group) {
@@ -3770,30 +3722,17 @@ export default class Gpt2Layer extends BaseLayer {
             return;
         }
 
-        if (!sourceVec || !sourceVec.group || this._skipToEndActive || typeof TWEEN === 'undefined') {
+        if (!sourceVec || !sourceVec.group) {
             finish();
             return;
         }
 
-        const sourceStartScale = sourceVec.group.scale.clone();
-        const sourceEndScale = sourceStartScale.clone().multiplyScalar(MULTIPLY_SOURCE_SHRINK);
-
         multResult.group.visible = false;
         multResult.group.scale.set(1, 1, 1);
         this._setVectorOpacity(sourceVec, 1);
-        this._setVectorOpacity(multResult, 0);
+        this._setVectorOpacity(multResult, 1);
 
-        const tweenState = { t: 0 };
-        new TWEEN.Tween(tweenState)
-            .to({ t: 1 }, MULTIPLY_BLEND_DURATION_MS)
-            .easing(TWEEN.Easing.Cubic.Out)
-            .onUpdate(() => {
-                const t = THREE.MathUtils.clamp(tweenState.t, 0, 1);
-                sourceVec.group.scale.lerpVectors(sourceStartScale, sourceEndScale, t);
-                this._setVectorOpacity(sourceVec, 1);
-            })
-            .onComplete(finish)
-            .start();
+        finish();
     }
 
     _getLaneMeta(lane, stage, extra = {}) {

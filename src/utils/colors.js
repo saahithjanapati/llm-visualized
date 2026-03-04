@@ -185,9 +185,14 @@ export function mapValueToHueRange(value, options = {}) {
     return new THREE.Color().setHSL(hue, saturation, lightness);
 }
 
-export function mapValueToGrayscale(value) {
+export function mapValueToGrayscale(value, options = null) {
     const t = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
-    return new THREE.Color(t, t, t);
+    const minValue = Number.isFinite(options?.minValue)
+        ? options.minValue
+        : 0;
+    const minClamped = Math.max(0, Math.min(1, minValue));
+    const remapped = THREE.MathUtils.lerp(minClamped, 1, t);
+    return new THREE.Color(remapped, remapped, remapped);
 }
 
 // Add a counter to limit logging if needed, e.g., for mapValueToColor

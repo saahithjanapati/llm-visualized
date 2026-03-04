@@ -40,8 +40,12 @@
     <div id="topControls">
         <button id="pauseBtn" type="button" aria-pressed="false" aria-label="Pause animation" title="Pause animation">⏸︎</button>
         <div id="skipMenu" data-open="false" data-visible="true">
-            <button id="skipMenuToggle" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Skip options" title="Skip options">Skip</button>
-            <div id="skipMenuItems" role="menu" aria-label="Skip options">
+            <button id="skipMenuToggle" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="Skip options" title="Skip options">
+                <svg class="skip-toggle-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M3.8 5.2L10.9 12L3.8 18.8V5.2ZM12.1 5.2L19.2 12L12.1 18.8V5.2Z" fill="currentColor"></path>
+                </svg>
+            </button>
+            <div id="skipMenuItems" aria-hidden="true" hidden>
                 <button id="skipLayerBtn" type="button" role="menuitem" aria-label="Skip current layer" title="Skip current layer" data-visible="true">Skip layer</button>
                 <button id="skipConveyorBtn" type="button" role="menuitem" aria-label="Skip attention conveyor" title="Skip attention conveyor" data-visible="false">Skip attention</button>
                 <button id="skipToEndBtn" type="button" role="menuitem" aria-label="Skip to end of forward pass" title="Skip to end of forward pass" data-visible="true">Skip to end</button>
@@ -285,6 +289,18 @@
                     </label>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <div id="skipOptionsOverlay" aria-hidden="true">
+        <div id="skipOptionsModal" class="skip-options-modal" role="dialog" aria-modal="true" aria-labelledby="skipOptionsTitle">
+            <div class="skip-options-header">
+                <div id="skipOptionsTitle" class="skip-options-title">Skip options</div>
+                <button id="skipOptionsClose" type="button" aria-label="Close skip options">×</button>
+            </div>
+            <p class="skip-options-subtitle">Choose how far to fast-forward from this point in the animation.</p>
+            <div id="skipOptionsList" class="skip-options-list" role="list"></div>
+            <p id="skipOptionsEmpty" class="skip-options-empty" hidden>No skip actions are available right now.</p>
         </div>
     </div>
 

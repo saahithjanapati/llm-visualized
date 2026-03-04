@@ -49,7 +49,6 @@ export function initSkipLayerButton(pipeline) {
         if (skipToggle) {
             skipToggle.disabled = true;
             skipToggle.dataset.state = 'skipping';
-            skipToggle.textContent = 'Skipping';
             skipToggle.setAttribute('aria-busy', 'true');
         }
     };

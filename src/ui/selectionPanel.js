@@ -41,6 +41,7 @@ import {
     PRISM_DIMENSIONS_PER_UNIT,
     NUM_HEAD_SETS_LAYER,
     HIDE_INSTANCE_Y_OFFSET,
+    ATTENTION_POST_SOFTMAX_GRAYSCALE_MIN,
     resolveRenderPixelRatio
 } from '../utils/constants.js';
 import { getIncompleteUtf8TokenNote } from '../utils/tokenEncodingNotes.js';
@@ -3817,7 +3818,7 @@ class SelectionPanel {
                     this._cancelAttentionPopOut(cell);
                     const wasEmpty = cell.classList.contains('is-empty');
                     const color = mode === 'post'
-                        ? mapValueToGrayscale(value)
+                        ? mapValueToGrayscale(value, { minValue: ATTENTION_POST_SOFTMAX_GRAYSCALE_MIN })
                         : mapValueToColor(value, { clampMax: ATTENTION_PRE_COLOR_CLAMP });
                     cell.style.backgroundColor = colorToCss(color);
                     const rowLabel = tokenLabels[row] || '';
@@ -4096,7 +4097,7 @@ class SelectionPanel {
                     const reveal = shouldRevealAttentionCell(progress, row, col, mode, decodeProfile);
                     if (reveal) {
                         const color = mode === 'post'
-                            ? mapValueToGrayscale(value)
+                            ? mapValueToGrayscale(value, { minValue: ATTENTION_POST_SOFTMAX_GRAYSCALE_MIN })
                             : mapValueToColor(value, { clampMax: ATTENTION_PRE_COLOR_CLAMP });
                         cell.style.backgroundColor = colorToCss(color);
                         const rowLabel = tokenLabels[row] || '';
@@ -4188,8 +4189,8 @@ class SelectionPanel {
         }
 
         if (safeMode === 'post') {
-            const low = colorToCss(mapValueToGrayscale(0));
-            const high = colorToCss(mapValueToGrayscale(1));
+            const low = colorToCss(mapValueToGrayscale(0, { minValue: ATTENTION_POST_SOFTMAX_GRAYSCALE_MIN }));
+            const high = colorToCss(mapValueToGrayscale(1, { minValue: ATTENTION_POST_SOFTMAX_GRAYSCALE_MIN }));
             this.attentionLegend.style.setProperty('--attention-legend-gradient', `linear-gradient(90deg, ${low}, ${high})`);
             this.attentionLegend.dataset.mid = '';
             this.attentionLegendLow.textContent = '';

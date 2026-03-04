@@ -719,6 +719,12 @@ export const SA_BLUE_QUEUE_SHIFT_DURATION_MS = 400;  // Duration to shift remain
 export const SA_DUPLICATE_POP_IN_MS = 120;
 export const SA_DUPLICATE_TRAVEL_MERGE_MS = 400;
 export const SA_DUPLICATE_POP_OUT_MS = 150;
+export const SA_DUPLICATE_SCORE_COLLISION_PULSE_MS = 90;
+export const SA_DUPLICATE_SCORE_COLLISION_PULSE_MIN = 1.8;
+export const SA_DUPLICATE_SCORE_COLLISION_PULSE_MAX = 1.8;
+// Lift the post-softmax grayscale floor so near-zero attention weights are
+// slightly visible instead of pure black.
+export const ATTENTION_POST_SOFTMAX_GRAYSCALE_MIN = 0;
 
 // ------------------------------------------------------------
 // Positional embedding → residual merge controls
