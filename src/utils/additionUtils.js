@@ -331,6 +331,8 @@ function getVectorInstanceCount(vec, fallback = VECTOR_LENGTH_PRISM) {
 export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComplete, options = null) {
     const hasRenderableSource = !!(sourceVec && getRenderMesh(sourceVec) && sourceVec.group);
     const hasRenderableTarget = !!(targetVec && getRenderMesh(targetVec) && targetVec.group);
+    const sourceRenderMesh = hasRenderableSource ? getRenderMesh(sourceVec) : null;
+    const targetRenderMesh = hasRenderableTarget ? getRenderMesh(targetVec) : null;
 
     const suppressResidualTrailUpdates = options && options.suppressResidualTrailUpdates === true;
 
@@ -352,6 +354,7 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
         : (lane && isArrayLike(lane.additionTargetData))
             ? lane.additionTargetData
             : null;
+    const flashOnTargetImpact = options ? options.flashOnTargetImpact !== false : true;
     const finalBuffers = finalDataCandidate
         ? buildFinalColorBuffers(finalDataCandidate, vectorLength)
         : null;
@@ -481,6 +484,7 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
     // Timing params (scale by dedicated multiplier so we can tune independently).
     const duration      = PRISM_ADD_ANIM_BASE_DURATION            / PRISM_ADD_ANIM_SPEED_MULT;
     const flashDuration = PRISM_ADD_ANIM_BASE_FLASH_DURATION      / PRISM_ADD_ANIM_SPEED_MULT;
+    const effectiveFlashDuration = flashOnTargetImpact ? flashDuration : 0;
     const delayBetween  = PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS/ PRISM_ADD_ANIM_SPEED_MULT;
 
     const basePrismCenterY = sourceVec.getUniformHeight() / 2;
@@ -521,9 +525,12 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
                 if (!readMatrixAt(targetVec, i, TMP_ADD_TARGET_MATRIX)) {
                     return;
                 }
-                TMP_ADD_TARGET_WORLD.setFromMatrixPosition(TMP_ADD_TARGET_MATRIX).applyMatrix4(targetVec.group.matrixWorld);
+                if (!sourceRenderMesh || !targetRenderMesh) {
+                    return;
+                }
+                TMP_ADD_TARGET_WORLD.setFromMatrixPosition(TMP_ADD_TARGET_MATRIX).applyMatrix4(targetRenderMesh.matrixWorld);
                 TMP_ADD_TARGET_LOCAL.copy(TMP_ADD_TARGET_WORLD);
-                sourceVec.group.worldToLocal(TMP_ADD_TARGET_LOCAL);
+                sourceRenderMesh.worldToLocal(TMP_ADD_TARGET_LOCAL);
 
                 const targetLocalY = TMP_ADD_TARGET_LOCAL.y;
                 let interpY = THREE.MathUtils.lerp(srcLocalY, targetLocalY, obj.t);
@@ -587,37 +594,44 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
                 }
             })
             .onComplete(() => {
-                targetVec.setInstanceAppearance(i, 0, COLOR_WHITE);
-                new TWEEN.Tween({})
-                    .to({}, flashDuration)
-                    .onComplete(() => {
-                        const sum = (sourceVec.rawData[i] ?? 0) + (targetVec.rawData[i] ?? 0);
-                        const finalValue = finalDataCandidate
-                            ? getMappedDataValue(finalDataCandidate, i, vectorLength)
-                            : sum;
-                        if (Number.isFinite(finalValue)) {
-                            targetVec.rawData[i] = finalValue;
-                        } else {
-                            targetVec.rawData[i] = sum;
-                        }
+                const finalizePrism = () => {
+                    const sum = (sourceVec.rawData[i] ?? 0) + (targetVec.rawData[i] ?? 0);
+                    const finalValue = finalDataCandidate
+                        ? getMappedDataValue(finalDataCandidate, i, vectorLength)
+                        : sum;
+                    if (Number.isFinite(finalValue)) {
+                        targetVec.rawData[i] = finalValue;
+                    } else {
+                        targetVec.rawData[i] = sum;
+                    }
 
-                        if (finalBuffers) {
-                            applyFinalColorAtIndex(targetVec, i, finalBuffers);
-                        } else {
-                            applySingleColorAtIndexRGB(targetVec, i, gradR, gradG, gradB);
-                        }
-                        sourceVec.setInstanceAppearance(i, HIDE_INSTANCE_Y_OFFSET, null);
-                        completedPrisms += 1;
-                        if (completedPrisms >= vectorLength && typeof finishOnce === 'function') {
-                            finishOnce();
-                        }
-                    })
-                    .start();
+                    if (finalBuffers) {
+                        applyFinalColorAtIndex(targetVec, i, finalBuffers);
+                    } else {
+                        applySingleColorAtIndexRGB(targetVec, i, gradR, gradG, gradB);
+                    }
+                    sourceVec.setInstanceAppearance(i, HIDE_INSTANCE_Y_OFFSET, null);
+                    completedPrisms += 1;
+                    if (completedPrisms >= vectorLength && typeof finishOnce === 'function') {
+                        finishOnce();
+                    }
+                };
+
+                if (flashOnTargetImpact && effectiveFlashDuration > 0) {
+                    targetVec.setInstanceAppearance(i, 0, COLOR_WHITE);
+                    new TWEEN.Tween({})
+                        .to({}, effectiveFlashDuration)
+                        .onComplete(finalizePrism)
+                        .start();
+                    return;
+                }
+
+                finalizePrism();
             })
             .start();
     }
 
-    const totalAnimTime = duration + flashDuration + Math.max(0, (vectorLength - 1) * delayBetween);
+    const totalAnimTime = duration + effectiveFlashDuration + Math.max(0, (vectorLength - 1) * delayBetween);
     const snapResidualTrailEndpoint = (trail, expectsWorldSpace, ownerVec) => {
         if (!trail || !ownerVec || !ownerVec.group) return;
         try {

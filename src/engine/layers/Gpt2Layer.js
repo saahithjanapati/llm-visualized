@@ -1252,6 +1252,12 @@ export default class Gpt2Layer extends BaseLayer {
                         }
                         return lane.ln1MidY;
                     })();
+                    const ln1VectorHeight = (dupVec && typeof dupVec.getUniformHeight === 'function')
+                        ? dupVec.getUniformHeight()
+                        : NaN;
+                    const ln1TouchTriggerY = (Number.isFinite(ln1VectorHeight) && ln1VectorHeight > 0)
+                        ? (ln1RiseTargetY - ln1VectorHeight)
+                        : ln1RiseTargetY;
                     const startLn1Norm = () => {
                         const ln1NormData = this._getLn1Data(lane, 'norm');
                         const normInput = ln1NormData ? ln1NormData.slice() : dupVec.rawData.slice();
@@ -1260,7 +1266,10 @@ export default class Gpt2Layer extends BaseLayer {
                         lane.pendingNormMeta = this._getLaneMeta(lane, 'ln1.norm');
                         lane.normApplied = false;
                         if (!skipActive && lane.normAnim) {
-                            lane.normAnim.start(normInput, { deferDataUpdate: true });
+                            lane.normAnim.start(normInput, {
+                                deferDataUpdate: true,
+                                sourceAlreadyNormalized: !!(ln1NormData && ln1NormData.length)
+                            });
                         }
                         lane.normStarted = true;
                         if (skipActive) {
@@ -1306,8 +1315,9 @@ export default class Gpt2Layer extends BaseLayer {
                         lane.normApplied = true;
                     }
                     if (lane.normStarted && !normAnimating) {
+                        const ln1PreMultiplyTargetY = Math.max(dupVec.group.position.y, ln1TouchTriggerY);
                         dupVec.group.position.y = Math.min(
-                            ln1RiseTargetY,
+                            ln1PreMultiplyTargetY,
                             dupVec.group.position.y + riseStep
                         );
                     }
@@ -1316,7 +1326,7 @@ export default class Gpt2Layer extends BaseLayer {
                         !lane.multStarted &&
                         lane.normStarted &&
                         !ln1NormAnimationActive &&
-                        dupVec.group.position.y >= ln1RiseTargetY - 0.01
+                        dupVec.group.position.y >= ln1TouchTriggerY - 0.01
                     ) {
                         lane.multStarted = true;
                         const scaleParam = lane.multTarget;
@@ -1457,6 +1467,19 @@ export default class Gpt2Layer extends BaseLayer {
                                     }
                                     return sum;
                                 })();
+                            this._logLayerNormVectorDump('ln1', lane, {
+                                normalizedSaved: this._getLn1Data(lane, 'norm'),
+                                normalizedRuntime: sourceRaw,
+                                scaleParamSaved: scaleParamData,
+                                productComputed: multData,
+                                productSaved: ln1ScaledData,
+                                productUsedForColor: scaledFallback,
+                                shiftParamSaved: shiftParamData,
+                                shiftRuntime: addResult.rawData,
+                                productPlusShiftComputed: this._buildDebugVectorSum(multData, shiftParamData, multResult.instanceCount),
+                                productPlusShiftSaved: ln1ShiftedData,
+                                productPlusShiftUsedForColor: finalLn1ShiftData
+                            });
                             lane.resultVec = addResult;
                             lane.ln1AddStarted = true;
                             startPrismAdditionAnimation(multResult, addResult, null, () => {
@@ -1514,13 +1537,19 @@ export default class Gpt2Layer extends BaseLayer {
                                 }
                                 this._setLaneHorizPhase(lane, HORIZ_PHASE.RISE_ABOVE_LN, 'ln1 add complete');
                                 this._emitProgress();
-                            }, { progressTarget: lane, progressKey: 'ln1ShiftProgress' });
+                            }, {
+                                finalData: finalLn1ShiftData,
+                                flashOnTargetImpact: false,
+                                progressTarget: lane,
+                                progressKey: 'ln1ShiftProgress'
+                            });
                         };
 
                         this._animateMultiplyTransition({
                             sourceVec: dupVec,
                             multResult,
                             scaleParam,
+                            instant: true,
                             onComplete: startLn1Addition
                         });
                     }
@@ -1698,6 +1727,12 @@ export default class Gpt2Layer extends BaseLayer {
                         }
                         return midY_ln2_abs;
                     })();
+                    const ln2VectorHeight = (mv && typeof mv.getUniformHeight === 'function')
+                        ? mv.getUniformHeight()
+                        : NaN;
+                    const ln2TouchTriggerY = (Number.isFinite(ln2VectorHeight) && ln2VectorHeight > 0)
+                        ? (ln2RiseTargetY - ln2VectorHeight)
+                        : ln2RiseTargetY;
 
                     const startLn2Rise = (vec) => {
                         if (!vec || !vec.group) return;
@@ -1754,7 +1789,10 @@ export default class Gpt2Layer extends BaseLayer {
                         lane.pendingNormMetaLN2 = this._getLaneMeta(lane, 'ln2.norm');
                         lane.normAppliedLN2 = false;
                         if (!skipActive && lane.normAnimationLN2) {
-                            lane.normAnimationLN2.start(normInput, { deferDataUpdate: true });
+                            lane.normAnimationLN2.start(normInput, {
+                                deferDataUpdate: true,
+                                sourceAlreadyNormalized: !!(ln2NormData && ln2NormData.length)
+                            });
                         }
                         lane.normStartedLN2 = true;
                         if (skipActive) {
@@ -1802,8 +1840,9 @@ export default class Gpt2Layer extends BaseLayer {
                         lane.normAppliedLN2 = true;
                     }
                     if (!lane.multDoneLN2 && lane.normStartedLN2 && !normAnimating2) {
+                        const ln2PreMultiplyTargetY = Math.max(mv.group.position.y, ln2TouchTriggerY);
                         mv.group.position.y = Math.min(
-                            ln2RiseTargetY,
+                            ln2PreMultiplyTargetY,
                             mv.group.position.y + riseStep
                         );
                     }
@@ -1814,7 +1853,7 @@ export default class Gpt2Layer extends BaseLayer {
                         !lane.multDoneLN2 &&
                         lane.normStartedLN2 &&
                         !ln2NormAnimationActive &&
-                        mv.group.position.y >= ln2RiseTargetY - 0.01
+                        mv.group.position.y >= ln2TouchTriggerY - 0.01
                     ) {
                         lane.multDoneLN2 = true;
                         const scaleParam = lane.multTargetLN2;
@@ -1960,6 +1999,19 @@ export default class Gpt2Layer extends BaseLayer {
                                     }
                                     return sum;
                                 })();
+                            this._logLayerNormVectorDump('ln2', lane, {
+                                normalizedSaved: this._getLn2Data(lane, 'norm'),
+                                normalizedRuntime: sourceRaw,
+                                scaleParamSaved: scaleParamData,
+                                productComputed: multData,
+                                productSaved: ln2ScaledData,
+                                productUsedForColor: scaledFallback,
+                                shiftParamSaved: shiftParamData,
+                                shiftRuntime: addResult.rawData,
+                                productPlusShiftComputed: this._buildDebugVectorSum(multData, shiftParamData, resVec.instanceCount),
+                                productPlusShiftSaved: ln2ShiftedData,
+                                productPlusShiftUsedForColor: finalLn2ShiftData
+                            });
                             lane.resultVecLN2 = addResult;
                             lane.ln2AddStarted = true;
                             // Let the addition animation own trail updates (match LN1 behavior).
@@ -2021,13 +2073,19 @@ export default class Gpt2Layer extends BaseLayer {
                                     addResult.userData.trailWorld = false;
                                 }
                                 startLn2Rise(addResult);
-                            }, { progressTarget: lane, progressKey: 'ln2ShiftProgress' });
+                            }, {
+                                finalData: finalLn2ShiftData,
+                                flashOnTargetImpact: false,
+                                progressTarget: lane,
+                                progressKey: 'ln2ShiftProgress'
+                            });
                         };
 
                         this._animateMultiplyTransition({
                             sourceVec: mv,
                             multResult,
                             scaleParam,
+                            instant: true,
                             onComplete: startLn2Addition
                         });
                     }
@@ -3744,6 +3802,86 @@ export default class Gpt2Layer extends BaseLayer {
         return remaining / etaSeconds;
     }
 
+    _toDebugArray(values) {
+        if (Array.isArray(values)) return values.slice();
+        if (ArrayBuffer.isView(values)) return Array.from(values);
+        return null;
+    }
+
+    _buildDebugVectorSum(lhs, rhs, fallbackLength = 0) {
+        const left = this._toDebugArray(lhs);
+        const right = this._toDebugArray(rhs);
+        const fallback = Number.isFinite(fallbackLength) ? Math.max(0, Math.floor(fallbackLength)) : 0;
+        const length = Math.max(
+            fallback,
+            left ? left.length : 0,
+            right ? right.length : 0
+        );
+        if (length <= 0) return null;
+        const sum = new Array(length);
+        for (let i = 0; i < length; i++) {
+            const l = left && Number.isFinite(left[i]) ? left[i] : 0;
+            const r = right && Number.isFinite(right[i]) ? right[i] : 0;
+            sum[i] = l + r;
+        }
+        return sum;
+    }
+
+    _logLayerNormVectorDump(kind, lane, vectors = {}) {
+        const root = (typeof window !== 'undefined') ? window : globalThis;
+        const hasExplicitToggle = !!(root && Object.prototype.hasOwnProperty.call(root, '__LN_VECTOR_DEBUG'));
+        const enabled = hasExplicitToggle ? root.__LN_VECTOR_DEBUG !== false : true;
+        if (!enabled || !lane) return;
+        lane.__lnVectorDebugLogged = lane.__lnVectorDebugLogged || {};
+        const key = String(kind || 'ln').toLowerCase();
+        if (lane.__lnVectorDebugLogged[key]) return;
+        lane.__lnVectorDebugLogged[key] = true;
+
+        const tokenLabel = lane.tokenLabel || '(unknown)';
+        const headline = `[LN Value Dump] layer=${this.index} lane=${lane.laneIndex ?? 'n/a'} token=${lane.tokenIndex ?? 'n/a'} ${tokenLabel} ${key.toUpperCase()}`;
+        if (typeof console.groupCollapsed === 'function') {
+            console.groupCollapsed(headline);
+        } else {
+            console.log(headline);
+        }
+
+        console.log('meta', {
+            layerIndex: this.index,
+            laneIndex: lane.laneIndex,
+            tokenIndex: lane.tokenIndex,
+            tokenLabel: lane.tokenLabel,
+            layerNorm: key,
+        });
+
+        const orderedLabels = [
+            'normalizedSaved',
+            'normalizedRuntime',
+            'scaleParamSaved',
+            'productComputed',
+            'productSaved',
+            'productUsedForColor',
+            'shiftParamSaved',
+            'shiftRuntime',
+            'productPlusShiftComputed',
+            'productPlusShiftSaved',
+            'productPlusShiftUsedForColor',
+        ];
+
+        for (let i = 0; i < orderedLabels.length; i++) {
+            const label = orderedLabels[i];
+            const values = this._toDebugArray(vectors[label]);
+            if (values) {
+                console.log(`${label} (len=${values.length})`, values);
+            } else {
+                console.log(`${label}`, null);
+            }
+        }
+
+        if (typeof console.groupEnd === 'function') {
+            console.groupEnd();
+        }
+    }
+
     _setVectorOpacity(vec, opacity) {
         if (!vec || !vec.mesh || !vec.mesh.material) return;
         const clampedOpacity = THREE.MathUtils.clamp(opacity, 0, 1);
@@ -3769,7 +3907,7 @@ export default class Gpt2Layer extends BaseLayer {
         });
     }
 
-    _animateMultiplyTransition({ sourceVec, multResult, scaleParam = null, onComplete = null }) {
+    _animateMultiplyTransition({ sourceVec, multResult, scaleParam = null, instant = false, onComplete = null }) {
         const finish = () => {
             if (scaleParam && scaleParam.group) {
                 scaleParam.group.visible = false;
@@ -3787,6 +3925,11 @@ export default class Gpt2Layer extends BaseLayer {
             }
             if (typeof onComplete === 'function') onComplete();
         };
+
+        if (instant) {
+            finish();
+            return;
+        }
 
         if (!multResult || !multResult.group) {
             finish();

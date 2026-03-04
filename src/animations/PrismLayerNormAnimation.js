@@ -63,6 +63,10 @@ export class PrismLayerNormAnimation {
         if (!this.prismVis) return;
 
         const deferDataUpdate = options && options.deferDataUpdate === true;
+        const sourceAlreadyNormalized = options && options.sourceAlreadyNormalized === true;
+        const perUnitNormalizedReveal = options && Object.prototype.hasOwnProperty.call(options, 'perUnitNormalizedReveal')
+            ? options.perUnitNormalizedReveal !== false
+            : deferDataUpdate;
         const dataArray = Array.isArray(newData)
             ? newData
             : ArrayBuffer.isView(newData)
@@ -70,7 +74,9 @@ export class PrismLayerNormAnimation {
                 : [];
         let normalizedData = null;
         if (deferDataUpdate) {
-            normalizedData = this.prismVis.layerNormalize(dataArray);
+            normalizedData = sourceAlreadyNormalized
+                ? dataArray.slice()
+                : this.prismVis.layerNormalize(dataArray);
         } else {
             this.prismVis.updateDataInternal(dataArray); // Update underlying data for target colors
             normalizedData = this.prismVis.normalizedData;
@@ -90,6 +96,12 @@ export class PrismLayerNormAnimation {
             const normalizedDistance = this._instanceCount > 1 ? distanceFromCenter / (this._instanceCount / 2) : 0;
             const falloff = Math.pow(1 - normalizedDistance, this.config.falloffPower);
             const riseHeight = this.config.minRiseHeight + (this.config.maxRiseHeight - this.config.minRiseHeight) * falloff;
+            const startColor = new THREE.Color();
+            if (this.prismVis.mesh && typeof this.prismVis.mesh.getColorAt === 'function') {
+                this.prismVis.mesh.getColorAt(index, startColor);
+            } else {
+                startColor.copy(this.prismVis.getDefaultColorForIndex(index));
+            }
             
             return {
                 isActive: false,
@@ -97,16 +109,23 @@ export class PrismLayerNormAnimation {
                 localProgress: 0,  
                 hasCompleted: false,
                 riseHeight: riseHeight,
+                startColor,
                 originalColor: new THREE.Color(), // Will store before flash
                 flashTargetColor: mapValueToColor((normalizedData && normalizedData[index]) || 0), // Color based on norm data
-                finalRestingColor: this.prismVis.getDefaultColorForIndex(index) // Default subsection gradient color
+                finalRestingColor: deferDataUpdate
+                    ? mapValueToColor((normalizedData && normalizedData[index]) || 0)
+                    : this.prismVis.getDefaultColorForIndex(index) // Default subsection gradient color
             };
         });
         
         // Reset all instances to default before starting new animation sequence
         for (let i = 0; i < this._instanceCount; i++) {
             this.prismVis.resetInstanceAppearance(i);
-            this.prismVis.mesh.setColorAt(i, this.unitAnimationStates[i].finalRestingColor); // Set initial color explicitly
+            const state = this.unitAnimationStates[i];
+            const initialColor = perUnitNormalizedReveal
+                ? state.startColor
+                : state.finalRestingColor;
+            this.prismVis.mesh.setColorAt(i, initialColor); // Keep existing color until this unit animates.
         }
         this.prismVis.mesh.instanceMatrix.needsUpdate = true;
         this.prismVis.mesh.instanceColor.needsUpdate = true;
@@ -131,8 +150,8 @@ export class PrismLayerNormAnimation {
                     const state = this.unitAnimationStates[unitIndex];
                     state.isActive = true;
                     state.activationTime = currentTime;
-                    // Store original color (which should be the finalRestingColor we set in start)
-                    state.originalColor.copy(state.finalRestingColor); 
+                    // Start flash from the unit's pre-animation color.
+                    state.originalColor.copy(state.startColor);
                 }
             }
         }
