@@ -15,6 +15,13 @@ import {
     simplifyLayerNormParamHoverLabel
 } from './coreRaycastLabels.js';
 
+const ZOOM_OUT_SUPERSAMPLE_MIN_DISTANCE_RATIO = 0.72;
+const ZOOM_OUT_SUPERSAMPLE_MAX_DISTANCE_RATIO = 0.98;
+const ZOOM_OUT_SUPERSAMPLE_MAX_MULTIPLIER = 1.22;
+const ZOOM_OUT_SUPERSAMPLE_MAX_DPR = 2.6;
+const ZOOM_OUT_SUPERSAMPLE_RATIO_STEP = 0.05;
+const ZOOM_OUT_SUPERSAMPLE_DEBOUNCE_MS = 140;
+
 /**
  * CoreEngine is responsible for creating the Three-JS renderer, camera, 
  * post-processing stack and the single requestAnimationFrame loop that drives
@@ -74,6 +81,23 @@ export class CoreEngine {
         this._desktopZoomOutMinHeight = (typeof opts.desktopZoomOutMinHeight === 'number' && opts.desktopZoomOutMinHeight > 0)
             ? opts.desktopZoomOutMinHeight
             : 760;
+        this._zoomOutSupersampleEnabled = opts.zoomOutSupersample !== false;
+        this._zoomOutSupersampleMaxMultiplier = (typeof opts.zoomOutSupersampleMaxMultiplier === 'number'
+            && Number.isFinite(opts.zoomOutSupersampleMaxMultiplier)
+            && opts.zoomOutSupersampleMaxMultiplier >= 1)
+            ? opts.zoomOutSupersampleMaxMultiplier
+            : ZOOM_OUT_SUPERSAMPLE_MAX_MULTIPLIER;
+        this._zoomOutSupersampleMaxDpr = (typeof opts.zoomOutSupersampleMaxDpr === 'number'
+            && Number.isFinite(opts.zoomOutSupersampleMaxDpr)
+            && opts.zoomOutSupersampleMaxDpr > 0)
+            ? opts.zoomOutSupersampleMaxDpr
+            : ZOOM_OUT_SUPERSAMPLE_MAX_DPR;
+        this._zoomOutSupersampleDebounceMs = (typeof opts.zoomOutSupersampleDebounceMs === 'number'
+            && Number.isFinite(opts.zoomOutSupersampleDebounceMs)
+            && opts.zoomOutSupersampleDebounceMs >= 0)
+            ? opts.zoomOutSupersampleDebounceMs
+            : ZOOM_OUT_SUPERSAMPLE_DEBOUNCE_MS;
+        this._pixelRatioRefreshTimer = null;
 
         const initialViewport = this._getViewportDimensions();
         this.camera = new THREE.PerspectiveCamera(60, initialViewport.width / initialViewport.height, 5, 10000);
@@ -259,7 +283,9 @@ export class CoreEngine {
         this.controls.addEventListener('start', () => { this._isUserNavigating = true; });
         this.controls.addEventListener('end',   () => { this._isUserNavigating = false; });
         this._updateCameraFarFromControls = this._updateCameraFarFromControls.bind(this);
+        this._onControlsChangePixelRatio = this._onControlsChangePixelRatio.bind(this);
         this.controls.addEventListener('change', this._updateCameraFarFromControls);
+        this.controls.addEventListener('change', this._onControlsChangePixelRatio);
         if (customTarget) {
             this.controls.target.copy(customTarget);
         } else {
@@ -482,6 +508,7 @@ export class CoreEngine {
     notifyCameraUpdated() {
         if (!this.controls) return;
         this._updateCameraFarFromControls();
+        this._updateRendererPixelRatio();
     }
 
     pause(reason = 'generic') {
@@ -501,6 +528,7 @@ export class CoreEngine {
     }
 
     dispose() {
+        this._cancelPendingPixelRatioRefresh();
         window.removeEventListener('resize', this._onResize);
         if (this._visualViewport) {
             this._visualViewport.removeEventListener('resize', this._onResize);
@@ -516,6 +544,7 @@ export class CoreEngine {
         window.removeEventListener('keyup', this._onKeyUp);
         if (this.controls) {
             this.controls.removeEventListener('change', this._updateCameraFarFromControls);
+            this.controls.removeEventListener('change', this._onControlsChangePixelRatio);
             this.controls.dispose();
         }
         this._layers.forEach(l => l.dispose());
@@ -712,10 +741,11 @@ export class CoreEngine {
 
     _updateRendererPixelRatio = ({ force = false, viewportWidth = null, viewportHeight = null } = {}) => {
         if (!this.renderer) return;
-        const nextRatio = resolveRenderPixelRatio({
+        let nextRatio = resolveRenderPixelRatio({
             viewportWidth,
             viewportHeight
         });
+        nextRatio = this._applyZoomOutSupersample(nextRatio);
         if (!force && Number.isFinite(this._appliedRenderPixelRatio)
             && Math.abs(this._appliedRenderPixelRatio - nextRatio) < 0.001) {
             return;
@@ -728,6 +758,60 @@ export class CoreEngine {
         // Keep LineMaterial-based trails in sync with the active render size/DPR.
         refreshTrailDisplayScales(this.scene);
     };
+
+    _onControlsChangePixelRatio() {
+        this._schedulePixelRatioRefresh();
+    }
+
+    _schedulePixelRatioRefresh() {
+        const debounceMs = this._zoomOutSupersampleEnabled
+            ? Math.max(0, Math.round(this._zoomOutSupersampleDebounceMs))
+            : 0;
+        if (debounceMs <= 0 || typeof setTimeout !== 'function') {
+            this._updateRendererPixelRatio();
+            return;
+        }
+        this._cancelPendingPixelRatioRefresh();
+        this._pixelRatioRefreshTimer = setTimeout(() => {
+            this._pixelRatioRefreshTimer = null;
+            this._updateRendererPixelRatio();
+        }, debounceMs);
+    }
+
+    _cancelPendingPixelRatioRefresh() {
+        if (this._pixelRatioRefreshTimer === null) return;
+        if (typeof clearTimeout === 'function') {
+            clearTimeout(this._pixelRatioRefreshTimer);
+        }
+        this._pixelRatioRefreshTimer = null;
+    }
+
+    _applyZoomOutSupersample(baseRatio) {
+        if (!this._zoomOutSupersampleEnabled) return baseRatio;
+        if (!(Number.isFinite(baseRatio) && baseRatio > 0)) return baseRatio;
+        if (!this.camera || !this.controls || !this.controls.target) return baseRatio;
+        if (this._isTouchPrimaryDevice()) return baseRatio;
+
+        const maxDistance = (typeof this.controls.maxDistance === 'number' && Number.isFinite(this.controls.maxDistance) && this.controls.maxDistance > 0)
+            ? this.controls.maxDistance
+            : null;
+        if (!maxDistance) return baseRatio;
+
+        const distance = this.camera.position.distanceTo(this.controls.target);
+        if (!(Number.isFinite(distance) && distance > 0)) return baseRatio;
+
+        const distanceRatio = distance / maxDistance;
+        const denom = Math.max(0.0001, ZOOM_OUT_SUPERSAMPLE_MAX_DISTANCE_RATIO - ZOOM_OUT_SUPERSAMPLE_MIN_DISTANCE_RATIO);
+        const t = THREE.MathUtils.clamp((distanceRatio - ZOOM_OUT_SUPERSAMPLE_MIN_DISTANCE_RATIO) / denom, 0, 1);
+        if (t <= 0) return baseRatio;
+
+        const maxMultiplier = Math.max(1, this._zoomOutSupersampleMaxMultiplier);
+        const multiplier = 1 + (maxMultiplier - 1) * t;
+        const maxDpr = Math.max(baseRatio, this._zoomOutSupersampleMaxDpr);
+        const boosted = Math.min(maxDpr, baseRatio * multiplier);
+        const quantized = Math.round(boosted / ZOOM_OUT_SUPERSAMPLE_RATIO_STEP) * ZOOM_OUT_SUPERSAMPLE_RATIO_STEP;
+        return Math.max(baseRatio, quantized);
+    }
 
     _onVisibility = () => {
         if (document.hidden) {
