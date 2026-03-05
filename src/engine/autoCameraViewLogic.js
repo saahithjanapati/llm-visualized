@@ -107,8 +107,10 @@ export function resolveAutoCameraViewState({
     const lane = laneIndex >= 0 ? lanes[laneIndex] : null;
     const inLaneLn = !!(lane
         && (
-            lane.horizPhase === HORIZ_PHASE.INSIDE_LN
+            lane.horizPhase === HORIZ_PHASE.RIGHT
+            || lane.horizPhase === HORIZ_PHASE.INSIDE_LN
             || lane.horizPhase === HORIZ_PHASE.RISE_ABOVE_LN
+            || lane.ln2Phase === LN2_PHASE.RIGHT
             || lane.ln2Phase === LN2_PHASE.INSIDE_LN
         ));
     const inTopLn = !!isTopLayerNormCameraPhase(layer, lanes);

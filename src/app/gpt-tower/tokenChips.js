@@ -66,15 +66,16 @@ const EMBEDDING_REFLECTIVITY_TWEAKS = {
 const TOKEN_CHIP_ONLY_MATERIAL_TWEAKS = Object.freeze({
     color: 0xddcdb2,
     metalness: 0.0,
-    roughness: 0.95,
+    roughness: 0.97,
     clearcoat: 0.0,
     clearcoatRoughness: 1.0,
     iridescence: 0.0,
-    envMapIntensity: 0.38,
+    envMapIntensity: 0.3,
     emissive: 0x000000,
     emissiveIntensity: 0
 });
 const CHIP_INSIDE_RELEASE_BUFFER_MS = 80;
+const BOTTOM_EMBED_CHIP_ENTRY_EMISSIVE_SCALE = 0.82;
 
 function applyEmbeddingReflectivityTweaks(matrix) {
     if (!matrix) return;
@@ -496,7 +497,7 @@ export function addEmbeddingAndTokenChips({
         vocabBottom.setMaterialProperties({
             opacity: 1.0,
             transparent: false,
-            emissiveIntensity: TOP_EMBED_BASE_EMISSIVE + TOP_EMBED_MAX_EMISSIVE
+            emissiveIntensity: (TOP_EMBED_BASE_EMISSIVE + TOP_EMBED_MAX_EMISSIVE) * BOTTOM_EMBED_CHIP_ENTRY_EMISSIVE_SCALE
         });
         applyEmbeddingReflectivityTweaks(vocabBottom);
         addToRoot(vocabBottom.group);
@@ -528,7 +529,7 @@ export function addEmbeddingAndTokenChips({
         posBottom.setMaterialProperties({
             opacity: 1.0,
             transparent: false,
-            emissiveIntensity: TOP_EMBED_BASE_EMISSIVE + TOP_EMBED_MAX_EMISSIVE
+            emissiveIntensity: (TOP_EMBED_BASE_EMISSIVE + TOP_EMBED_MAX_EMISSIVE) * BOTTOM_EMBED_CHIP_ENTRY_EMISSIVE_SCALE
         });
         applyEmbeddingReflectivityTweaks(posBottom);
         addToRoot(posBottom.group);

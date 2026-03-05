@@ -33,6 +33,37 @@ describe('autoCameraViewLogic.resolveAutoCameraViewState', () => {
         expect(result.rawKey).toBe('ln');
     });
 
+    it('returns ln when active lane is moving right toward first layer norm', () => {
+        const pipeline = { isForwardPassComplete: () => false };
+        const result = resolveAutoCameraViewState({
+            pipeline,
+            layers: [{ lanes: [{ horizPhase: HORIZ_PHASE.RIGHT, ln2Phase: LN2_PHASE.NOT_STARTED }] }],
+            currentLayerIdx: 0
+        });
+        expect(result.rawKey).toBe('ln');
+    });
+
+    it('returns ln when active lane is moving right toward second layer norm', () => {
+        const pipeline = { isForwardPassComplete: () => false };
+        const result = resolveAutoCameraViewState({
+            pipeline,
+            layers: [{
+                mhsaAnimation: {
+                    mhaPassThroughPhase: 'mha_pass_through_complete',
+                    rowMergePhase: 'merged',
+                    outputProjMatrixAnimationPhase: 'vectors_inside',
+                    outputProjMatrixReturnComplete: false
+                },
+                lanes: [{
+                    horizPhase: HORIZ_PHASE.WAITING_FOR_LN2,
+                    ln2Phase: LN2_PHASE.RIGHT
+                }]
+            }],
+            currentLayerIdx: 0
+        });
+        expect(result.rawKey).toBe('ln');
+    });
+
     it('keeps ln view while vectors rise out of layer norm', () => {
         const pipeline = { isForwardPassComplete: () => false };
         const result = resolveAutoCameraViewState({

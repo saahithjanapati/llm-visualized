@@ -5756,7 +5756,8 @@ class SelectionPanel {
         const isLogitTokenSelection = !!logitHeader;
         const hideTensorDimsField = hideLayerNormFields
             || isAttentionScore
-            || isLogitTokenSelection;
+            || isLogitTokenSelection
+            || isTokenOrPositionChipSelection;
         const isVectorMetadata = isLikelyVectorSelection(label, selection) || isTokenOrPositionChipSelection;
         const dimsRow = this.inputDim?.closest('.detail-row')
             || this.outputDim?.closest('.detail-row')

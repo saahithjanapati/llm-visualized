@@ -2107,8 +2107,8 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     white-space: nowrap;
 }
 .attention-legend-tick[data-ratio="0"]::after {
-    left: 0;
-    transform: translate(6px, var(--legend-tick-label-offset, 5px));
+    left: 50%;
+    transform: translate(-50%, var(--legend-tick-label-offset, 5px));
 }
 .attention-legend-tick[data-ratio="1"]::after {
     left: 100%;

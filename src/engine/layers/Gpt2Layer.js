@@ -103,12 +103,12 @@ const SKIP_VISIBILITY_MESH_INDEX_REFRESH_MS = 220;
 
 const MLP_REFLECTIVITY_TWEAKS = {
     // Match the same reflectivity profile used for QKV matrices.
-    roughnessMin: 0.6,
-    metalnessMax: 0.5,
-    clearcoatMax: 0.2,
-    clearcoatRoughnessMin: 0.6,
-    iridescenceMax: 0.15,
-    envMapIntensityMax: 0.6
+    roughnessMin: 0.45,
+    metalnessMax: 0.62,
+    clearcoatMax: 0.35,
+    clearcoatRoughnessMin: 0.45,
+    iridescenceMax: 0.2,
+    envMapIntensityMax: 0.9
 };
 
 const POS_ADD_STALL_TIMEOUT_MS = 12000;
@@ -131,9 +131,15 @@ const MLP_POST_PASS_THROUGH_FINAL_EMISSIVE = GPT2_LAYER_VISUAL_TUNING.mlp.postPa
 const MLP_MATRIX_FLASH_START_EMISSIVE = Number.isFinite(GPT2_LAYER_VISUAL_TUNING.mlp.flashStartEmissiveIntensity)
     ? GPT2_LAYER_VISUAL_TUNING.mlp.flashStartEmissiveIntensity
     : 0.04;
-const MLP_MATRIX_FLASH_PEAK_EMISSIVE = Number.isFinite(GPT2_LAYER_VISUAL_TUNING.mlp.flashPeakEmissiveIntensity)
+const MLP_MATRIX_FLASH_PEAK_EMISSIVE_BASE = Number.isFinite(GPT2_LAYER_VISUAL_TUNING.mlp.flashPeakEmissiveIntensity)
     ? GPT2_LAYER_VISUAL_TUNING.mlp.flashPeakEmissiveIntensity
     : 0.4;
+const MLP_MATRIX_FLASH_PEAK_EMISSIVE_UP = Number.isFinite(GPT2_LAYER_VISUAL_TUNING.mlp.flashPeakEmissiveIntensityUp)
+    ? GPT2_LAYER_VISUAL_TUNING.mlp.flashPeakEmissiveIntensityUp
+    : MLP_MATRIX_FLASH_PEAK_EMISSIVE_BASE;
+const MLP_MATRIX_FLASH_PEAK_EMISSIVE_DOWN = Number.isFinite(GPT2_LAYER_VISUAL_TUNING.mlp.flashPeakEmissiveIntensityDown)
+    ? GPT2_LAYER_VISUAL_TUNING.mlp.flashPeakEmissiveIntensityDown
+    : MLP_MATRIX_FLASH_PEAK_EMISSIVE_BASE;
 const MLP_MATRIX_FLASH_MIN_DURATION_MS = Number.isFinite(GPT2_LAYER_VISUAL_TUNING.mlp.flashMinDurationMs)
     ? GPT2_LAYER_VISUAL_TUNING.mlp.flashMinDurationMs
     : 340;
@@ -2238,7 +2244,7 @@ export default class Gpt2Layer extends BaseLayer {
         const matrixEndColor = this._mlpMatrixActiveColor;
         const tweenColor = this._mlpUpTweenColor;
         const startIntensity = MLP_MATRIX_FLASH_START_EMISSIVE;
-        const peakIntensity = MLP_MATRIX_FLASH_PEAK_EMISSIVE;
+        const peakIntensity = MLP_MATRIX_FLASH_PEAK_EMISSIVE_UP;
         const finalIntensity = MLP_POST_PASS_THROUGH_FINAL_EMISSIVE;
         const distance = topY - vec.group.position.y;
         const rawDuration = (distance / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
@@ -2700,7 +2706,7 @@ export default class Gpt2Layer extends BaseLayer {
         
         // Matrix colour + emissive animation for glow
         const startIntensity = MLP_MATRIX_FLASH_START_EMISSIVE;
-        const peakIntensity = MLP_MATRIX_FLASH_PEAK_EMISSIVE;
+        const peakIntensity = MLP_MATRIX_FLASH_PEAK_EMISSIVE_DOWN;
         const finalIntensity = MLP_POST_PASS_THROUGH_FINAL_EMISSIVE;
         const downState = { t: 0, emissive: startIntensity };
 
@@ -3104,16 +3110,22 @@ export default class Gpt2Layer extends BaseLayer {
                     if (postMlpData) {
                         lane.additionTargetData = postMlpData;
                     }
-                    this.mhsaAnimation._startAdditionAnimation(lane.originalVec, vec, lane, () => {
-                        if (postMlpData) {
-                            applyVectorData(
-                                lane.originalVec,
-                                postMlpData,
-                                lane.tokenLabel ? `Post-MLP Residual - ${lane.tokenLabel}` : 'Post-MLP Residual',
-                                this._getLaneMeta(lane, 'residual.post_mlp')
-                            );
-                        }
-                    });
+                    this.mhsaAnimation._startAdditionAnimation(
+                        lane.originalVec,
+                        vec,
+                        lane,
+                        () => {
+                            if (postMlpData) {
+                                applyVectorData(
+                                    lane.originalVec,
+                                    postMlpData,
+                                    lane.tokenLabel ? `Post-MLP Residual - ${lane.tokenLabel}` : 'Post-MLP Residual',
+                                    this._getLaneMeta(lane, 'residual.post_mlp')
+                                );
+                            }
+                        },
+                        { cameraHoldAfterAdditionMs: 220 }
+                    );
                     
                     // Set up completion callback for when addition finishes
                     this._scheduleAdditionCompletion(lane);

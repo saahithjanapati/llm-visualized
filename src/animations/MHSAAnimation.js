@@ -3508,12 +3508,15 @@ export class MHSAAnimation {
     // ----------------------------------------------------------------------
     // Helper: Addition animation between two InstancedPrism vectors
     // ----------------------------------------------------------------------
-    _startAdditionAnimation(sourceVec, targetVec, lane, onComplete = null) {
+    _startAdditionAnimation(sourceVec, targetVec, lane, onComplete = null, options = null) {
         // Initiate prism-by-prism addition animation where prisms from sourceVec
         // move into their corresponding positions in targetVec.
         // The lane object is forwarded so the helper can update lane state
         // (stopRise flags, phase transitions, etc.).
         const finalData = lane && lane.additionTargetData ? lane.additionTargetData : null;
+        const cameraHoldAfterAdditionMs = Number.isFinite(options?.cameraHoldAfterAdditionMs)
+            ? Math.max(0, options.cameraHoldAfterAdditionMs)
+            : 140;
         if (lane && lane.additionTargetData) {
             delete lane.additionTargetData;
         }
@@ -3525,7 +3528,7 @@ export class MHSAAnimation {
             }
         }, {
             finalData,
-            cameraHoldAfterAdditionMs: 140,
+            cameraHoldAfterAdditionMs,
             progressTarget: lane,
             progressKey: 'mhsaResidualAddProgress'
         });
