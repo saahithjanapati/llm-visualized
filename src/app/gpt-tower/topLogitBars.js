@@ -262,6 +262,29 @@ function revealChosenLabelGroup(barGroup) {
     if (labelGroup) labelGroup.visible = true;
 }
 
+function queueRevealCompleteCallback(barGroup, callback) {
+    if (!barGroup || !barGroup.userData || typeof callback !== 'function') return;
+    if (barGroup.userData.revealComplete) {
+        try { callback(); } catch (_) { /* callback errors are non-fatal */ }
+        return;
+    }
+    if (!Array.isArray(barGroup.userData.revealCompleteCallbacks)) {
+        barGroup.userData.revealCompleteCallbacks = [];
+    }
+    barGroup.userData.revealCompleteCallbacks.push(callback);
+}
+
+function markRevealComplete(barGroup) {
+    if (!barGroup || !barGroup.userData || barGroup.userData.revealComplete) return;
+    barGroup.userData.revealComplete = true;
+    const callbacks = Array.isArray(barGroup.userData.revealCompleteCallbacks)
+        ? barGroup.userData.revealCompleteCallbacks.splice(0)
+        : [];
+    callbacks.forEach((callback) => {
+        try { callback(); } catch (_) { /* callback errors are non-fatal */ }
+    });
+}
+
 function getBrightTokenColor(seed, cache) {
     if (cache.has(seed)) return cache.get(seed);
     const { h, s, l } = getLogitTokenColorUnit(seed);
@@ -331,6 +354,8 @@ export function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vo
     barGroup.name = 'TopLogitBars';
     barGroup.visible = false;
     barGroup.userData.revealed = false;
+    barGroup.userData.revealComplete = false;
+    barGroup.userData.revealCompleteCallbacks = [];
 
     const colorCache = new Map();
     const instances = [];
@@ -492,14 +517,19 @@ export function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vo
     return barGroup;
 }
 
-export function revealTopLogitBars(barGroup, { immediate = false } = {}) {
-    if (!barGroup || barGroup.userData.revealed) return;
+export function revealTopLogitBars(barGroup, { immediate = false, onComplete = null } = {}) {
+    if (!barGroup || !barGroup.userData) return;
+    queueRevealCompleteCallback(barGroup, onComplete);
+    if (barGroup.userData.revealed) return;
     barGroup.userData.revealed = true;
     barGroup.visible = true;
 
     const instanced = barGroup.userData.instancedMesh;
     const instances = barGroup.userData.instances;
-    if (!instanced || !Array.isArray(instances) || !instances.length) return;
+    if (!instanced || !Array.isArray(instances) || !instances.length) {
+        markRevealComplete(barGroup);
+        return;
+    }
 
     const barWidth = Number.isFinite(barGroup.userData.barWidth) ? barGroup.userData.barWidth : 1;
     const barDepth = Number.isFinite(barGroup.userData.barDepth) ? barGroup.userData.barDepth : 1;
@@ -510,6 +540,7 @@ export function revealTopLogitBars(barGroup, { immediate = false } = {}) {
         if (typeof instanced.computeBoundingSphere === 'function') instanced.computeBoundingSphere();
         instanced.instanceMatrix.setUsage(THREE.StaticDrawUsage);
         revealChosenLabelGroup(barGroup);
+        markRevealComplete(barGroup);
     };
     const applyHeight = (idx, height) => {
         const instance = instances[idx];

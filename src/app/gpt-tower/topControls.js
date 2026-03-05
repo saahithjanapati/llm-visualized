@@ -57,7 +57,90 @@ export function initFollowModeControls({ pipeline, appState, followModeBtn }) {
         const controls = pipeline.engine.controls;
         const camera = pipeline.engine.camera || null;
         const FOLLOW_DISABLE_MOVE_EPSILON_SQ = 1e-4;
+        const FOLLOW_DISABLE_POINTER_SLOP_PX_SQ = 9;
         let activeControlInteraction = null;
+        let activePointerIntent = null;
+
+        const disableFollowFromInteraction = () => {
+            if (!pipeline?.isAutoCameraFollowEnabled?.()) return false;
+            setFollowMode(false);
+            return true;
+        };
+
+        const markInteractionMoved = () => {
+            if (!activeControlInteraction || activeControlInteraction.moved) return;
+            activeControlInteraction.moved = true;
+            activeControlInteraction.disabledImmediately = disableFollowFromInteraction();
+        };
+
+        const controlsDomElement = controls?.domElement || null;
+        if (controlsDomElement?.addEventListener) {
+            controlsDomElement.addEventListener('pointerdown', (event) => {
+                if (!pipeline?.isAutoCameraFollowEnabled?.()) {
+                    activePointerIntent = null;
+                    return;
+                }
+                if (!Number.isFinite(event?.clientX) || !Number.isFinite(event?.clientY)) {
+                    activePointerIntent = null;
+                    return;
+                }
+                if (event.pointerType !== 'touch' && event.button !== 0) {
+                    activePointerIntent = null;
+                    return;
+                }
+                activePointerIntent = {
+                    id: Number.isFinite(event.pointerId) ? event.pointerId : null,
+                    startX: event.clientX,
+                    startY: event.clientY,
+                    moved: false
+                };
+            }, { capture: true });
+
+            controlsDomElement.addEventListener('pointermove', (event) => {
+                if (!activePointerIntent || activePointerIntent.moved) return;
+                if (activePointerIntent.id !== null && event.pointerId !== activePointerIntent.id) {
+                    // A second touch pointer usually means a pinch gesture.
+                    if (event.pointerType === 'touch') {
+                        activePointerIntent.moved = true;
+                        markInteractionMoved();
+                    }
+                    return;
+                }
+                if (!Number.isFinite(event?.clientX) || !Number.isFinite(event?.clientY)) return;
+                const dx = event.clientX - activePointerIntent.startX;
+                const dy = event.clientY - activePointerIntent.startY;
+                if ((dx * dx + dy * dy) <= FOLLOW_DISABLE_POINTER_SLOP_PX_SQ) return;
+                activePointerIntent.moved = true;
+                markInteractionMoved();
+            }, { capture: true });
+
+            const clearPointerIntent = (event) => {
+                if (!activePointerIntent) return;
+                if (activePointerIntent.id !== null
+                    && Number.isFinite(event?.pointerId)
+                    && event.pointerId !== activePointerIntent.id) {
+                    return;
+                }
+                activePointerIntent = null;
+            };
+
+            controlsDomElement.addEventListener('pointerup', clearPointerIntent, { capture: true });
+            controlsDomElement.addEventListener('pointercancel', clearPointerIntent, { capture: true });
+
+            controlsDomElement.addEventListener('wheel', (event) => {
+                if (!pipeline?.isAutoCameraFollowEnabled?.()) return;
+                if (!Number.isFinite(event?.deltaX)
+                    && !Number.isFinite(event?.deltaY)
+                    && !Number.isFinite(event?.deltaZ)) {
+                    return;
+                }
+                const deltaX = Number.isFinite(event?.deltaX) ? Math.abs(event.deltaX) : 0;
+                const deltaY = Number.isFinite(event?.deltaY) ? Math.abs(event.deltaY) : 0;
+                const deltaZ = Number.isFinite(event?.deltaZ) ? Math.abs(event.deltaZ) : 0;
+                if (deltaX <= 0 && deltaY <= 0 && deltaZ <= 0) return;
+                markInteractionMoved();
+            }, { capture: true, passive: true });
+        }
 
         controls.addEventListener('start', () => {
             if (!pipeline?.isAutoCameraFollowEnabled?.()) {
@@ -77,15 +160,24 @@ export function initFollowModeControls({ pipeline, appState, followModeBtn }) {
 
         controls.addEventListener('change', () => {
             if (!activeControlInteraction || activeControlInteraction.moved) return;
+            if (activePointerIntent?.moved) {
+                markInteractionMoved();
+                return;
+            }
             if (!camera || !controls?.target) {
-                activeControlInteraction.moved = true;
+                markInteractionMoved();
+                return;
+            }
+            if (activePointerIntent && !activePointerIntent.moved) {
+                // While a click/tap is still within slop, ignore camera deltas
+                // caused by active follow updates.
                 return;
             }
             const cameraMoveSq = camera.position.distanceToSquared(activeControlInteraction.cameraStart);
             const targetMoveSq = controls.target.distanceToSquared(activeControlInteraction.targetStart);
             if (cameraMoveSq > FOLLOW_DISABLE_MOVE_EPSILON_SQ
                 || targetMoveSq > FOLLOW_DISABLE_MOVE_EPSILON_SQ) {
-                activeControlInteraction.moved = true;
+                markInteractionMoved();
             }
         });
 
@@ -93,6 +185,7 @@ export function initFollowModeControls({ pipeline, appState, followModeBtn }) {
             const interaction = activeControlInteraction;
             activeControlInteraction = null;
             if (!interaction?.moved) return;
+            if (interaction.disabledImmediately) return;
             queueFollowDisableFromInteraction();
         });
     }

@@ -70,8 +70,8 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     const X_OUT = 'x_{\\text{out}}';
     const X_FINAL = 'x_{\\text{final}}';
     const LOGITS = '\\ell';
-    const X_TOK = colorize(embeddingVocabColor, 'x_t^{\\text{tok}}');
-    const X_POS = colorize(embeddingPosColor, 'x_t^{\\text{pos}}');
+    const X_TOK = 'x_t^{\\text{tok}}';
+    const X_POS = 'x_t^{\\text{pos}}';
     const TOK_ID = '\\mathrm{token}_t';
     const topEmbedBaseColor = new THREE.Color(MHSA_MATRIX_INITIAL_RESTING_COLOR);
     const topEmbedTargetColor = new THREE.Color(MHA_FINAL_Q_COLOR);
@@ -439,18 +439,46 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         return { norm, scale, shift };
     };
 
-    const resolveInputEmbeddingStage = (layer, lanes) => {
+    const getNowMs = () => (
+        (typeof performance !== 'undefined' && typeof performance.now === 'function')
+            ? performance.now()
+            : Date.now()
+    );
+
+    const hasGateTokenRiseStarted = (gate, nowMs) => {
+        if (!gate || gate.enabled === false || gate.pending) return false;
+        const startByToken = gate.startByToken;
+        if (startByToken && typeof startByToken === 'object') {
+            const starts = Object.values(startByToken).filter((value) => Number.isFinite(value));
+            if (starts.length) {
+                const earliestStart = Math.min(...starts);
+                if (!Number.isFinite(earliestStart)) return false;
+                return Number.isFinite(nowMs) ? nowMs >= earliestStart : true;
+            }
+        }
+        const insideByToken = gate.insideByToken;
+        if (insideByToken && typeof insideByToken === 'object') {
+            const states = Object.values(insideByToken).filter((value) => typeof value === 'boolean');
+            if (states.some((value) => value === true)) return true;
+        }
+        return false;
+    };
+
+    const resolveInputEmbeddingStage = (layer, lanes, nowMs = NaN) => {
         if (!layer || layer.index !== 0 || !Array.isArray(lanes) || !lanes.length) return null;
         let hasEmbeddingLanes = false;
+        let anyPosWorkRemaining = false;
         let anyTokenPassActive = false;
         let anyPosPassActive = false;
         let anySumActive = false;
         let anyPendingPosPass = false;
+        const positionChipRiseStarted = hasGateTokenRiseStarted(pipeline?.__inputPositionChipGate, nowMs);
 
         for (const lane of lanes) {
             if (!lane || !lane.posVec) continue;
             hasEmbeddingLanes = true;
             if (lane.posAddComplete) continue;
+            anyPosWorkRemaining = true;
 
             const branchY = lane.branchStartY;
             const vocabY = lane?.originalVec?.group?.position?.y;
@@ -470,10 +498,10 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
             }
         }
 
-        if (!hasEmbeddingLanes) return null;
+        if (!hasEmbeddingLanes || !anyPosWorkRemaining) return null;
         if (anySumActive) return { eqKey: 'embed_sum', eqTitle: 'Input Embedding Sum' };
-        if (anyPosPassActive) return { eqKey: 'embed_pos', eqTitle: 'Positional Embedding' };
-        if (anyTokenPassActive || (anyPendingPosPass && layer._ln1Start !== true)) {
+        if (anyPosPassActive || positionChipRiseStarted) return { eqKey: 'embed_pos', eqTitle: 'Position Embedding' };
+        if (anyTokenPassActive || anyPendingPosPass) {
             return { eqKey: 'embed_token', eqTitle: 'Token Embedding Lookup' };
         }
         return null;
@@ -572,6 +600,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
 
         if (!targetLayer) return;
         if (!lanes.length) return;
+        const nowMs = getNowMs();
 
         // Once Residual Add 2 has been reached for a layer, keep it latched
         // until the pipeline advances to the next layer. This removes
@@ -587,7 +616,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
             return;
         }
 
-        const inputEmbeddingStage = resolveInputEmbeddingStage(targetLayer, lanes);
+        const inputEmbeddingStage = resolveInputEmbeddingStage(targetLayer, lanes, nowMs);
         if (inputEmbeddingStage?.eqKey) {
             const key = inputEmbeddingStage.eqKey;
             const signature = key;
@@ -760,6 +789,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
 
     function updateStatus() {
         if (!statusDiv) return;
+        const nowMs = getNowMs();
         const idx = Number.isFinite(pipeline._currentLayerIdx) ? pipeline._currentLayerIdx : 0;
         const total = NUM_LAYERS;
         const stageOverride = resolveFinalStage();
@@ -771,23 +801,28 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
             displayStage = stageOverride?.status || 'Output Logits';
         } else if (layer && Array.isArray(layer.lanes) && layer.lanes.length) {
             const lanes = layer.lanes;
-            const mlpActive = lanes.some(l => l.mlpUpStarted || l.ln2Phase === 'mlpReady' || l.ln2Phase === 'done');
-            const ln2Active = !mlpActive && lanes.some(l => l.ln2Phase && l.ln2Phase !== 'notStarted');
-            const ln1Active = !mlpActive && !ln2Active && lanes.some(l => ['waiting', 'right', 'insideLN'].includes(l.horizPhase));
-            const mhsaActive = !mlpActive && !ln2Active && !ln1Active && (
-                (layer && layer._mhsaStart === true) ||
-                lanes.some(l => ['riseAboveLN', 'readyMHSA', 'travelMHSA', 'postMHSAAddition', 'waitingForLN2'].includes(l.horizPhase))
-            );
-            if (mlpActive) {
-                displayStage = 'Multi-Layer Perceptron Block';
-            } else if (ln2Active) {
-                displayStage = 'LayerNorm 2';
-            } else if (ln1Active) {
-                displayStage = 'LayerNorm 1';
-            } else if (mhsaActive) {
-                displayStage = 'Multi Head Attention';
-            } else if (layer.isActive) {
-                displayStage = 'LayerNorm 1';
+            const inputEmbeddingStage = resolveInputEmbeddingStage(layer, lanes, nowMs);
+            if (inputEmbeddingStage?.eqKey) {
+                displayStage = 'Embedding Layer';
+            } else {
+                const mlpActive = lanes.some(l => l.mlpUpStarted || l.ln2Phase === 'mlpReady' || l.ln2Phase === 'done');
+                const ln2Active = !mlpActive && lanes.some(l => l.ln2Phase && l.ln2Phase !== 'notStarted');
+                const ln1Active = !mlpActive && !ln2Active && lanes.some(l => ['waiting', 'right', 'insideLN'].includes(l.horizPhase));
+                const mhsaActive = !mlpActive && !ln2Active && !ln1Active && (
+                    (layer && layer._mhsaStart === true) ||
+                    lanes.some(l => ['riseAboveLN', 'readyMHSA', 'travelMHSA', 'postMHSAAddition', 'waitingForLN2'].includes(l.horizPhase))
+                );
+                if (mlpActive) {
+                    displayStage = 'Multi-Layer Perceptron Block';
+                } else if (ln2Active) {
+                    displayStage = 'LayerNorm 2';
+                } else if (ln1Active) {
+                    displayStage = 'LayerNorm 1';
+                } else if (mhsaActive) {
+                    displayStage = 'Multi Head Attention';
+                } else if (layer.isActive) {
+                    displayStage = 'LayerNorm 1';
+                }
             }
         }
 

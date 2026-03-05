@@ -1935,8 +1935,9 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
 }
 .attention-cell.post-softmax-reveal {
     animation-name: attentionPostSoftmaxReveal;
-    animation-timing-function: ease-out;
+    animation-timing-function: cubic-bezier(0.22, 0.95, 0.28, 1.08);
     animation-fill-mode: both;
+    transform-origin: center left;
 }
 .attention-cell.pre-softmax-reveal {
     animation-name: attentionPreSoftmaxReveal;
@@ -2032,11 +2033,15 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
 @keyframes attentionPostSoftmaxReveal {
     0% {
         opacity: 0;
-        transform: translateY(var(--attention-cell-row-offset, 0px)) scale(0.72);
+        transform: translate(-8px, var(--attention-cell-row-offset, 0px)) scale(0.58);
+    }
+    58% {
+        opacity: 1;
+        transform: translate(1px, var(--attention-cell-row-offset, 0px)) scale(1.08);
     }
     100% {
         opacity: 1;
-        transform: translateY(var(--attention-cell-row-offset, 0px)) scale(1);
+        transform: translate(0, var(--attention-cell-row-offset, 0px)) scale(1);
     }
 }
 @keyframes attentionPreSoftmaxReveal {

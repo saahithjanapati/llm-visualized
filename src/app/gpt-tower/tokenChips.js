@@ -1377,7 +1377,16 @@ export function addEmbeddingAndTokenChips({
                 scene: rootGroup,
                 engine: null
             });
+            let topLogitRevealGateId = null;
+            const markTopLogitRevealComplete = () => {
+                if (typeof pipeline?.setTopLogitRevealComplete === 'function') {
+                    pipeline.setTopLogitRevealComplete(topLogitRevealGateId);
+                }
+            };
             if (topLogitBars && topLogitBars.userData) {
+                if (typeof pipeline?.setTopLogitRevealPending === 'function') {
+                    topLogitRevealGateId = pipeline.setTopLogitRevealPending(true);
+                }
                 const isLogitRaycastEnabled = () => (
                     typeof pipeline?.isForwardPassComplete === 'function'
                         ? pipeline.isForwardPassComplete()
@@ -1411,7 +1420,7 @@ export function addEmbeddingAndTokenChips({
                     const immediate = typeof pipeline.isSkipToEndActive === 'function'
                         ? pipeline.isSkipToEndActive()
                         : false;
-                    revealTopLogitBars(topLogitBars, { immediate });
+                    revealTopLogitBars(topLogitBars, { immediate, onComplete: markTopLogitRevealComplete });
                     return true;
                 };
                 const onProgress = () => {
@@ -1422,9 +1431,14 @@ export function addEmbeddingAndTokenChips({
                 topLogitProgressHandler = onProgress;
                 pipeline.addEventListener('progress', onProgress);
                 onProgress();
+            } else if (topLogitBars) {
+                revealTopLogitBars(topLogitBars, { immediate: true, onComplete: markTopLogitRevealComplete });
             }
         }
     } catch (_) {
+        if (typeof pipeline?.setTopLogitRevealPending === 'function') {
+            pipeline.setTopLogitRevealPending(false);
+        }
         // Optional – embedding visuals are non-critical.
     }
 

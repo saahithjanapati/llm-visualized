@@ -262,6 +262,9 @@ export class LayerPipeline extends EventTarget {
         this._postResetTrailPurgeUntil = 0;
         this._trailPassId = 1;
         this._topLnParamPlaceholders = null;
+        this._awaitingTopLogitReveal = false;
+        this._topLogitRevealComplete = true;
+        this._topLogitRevealGateId = 0;
 
         // ------------------------------------------------------------------
         // Pre-create *all* layers so their static visuals are visible upfront.
@@ -453,6 +456,29 @@ export class LayerPipeline extends EventTarget {
 
     isForwardPassComplete() {
         return this._checkForwardPassComplete();
+    }
+
+    setTopLogitRevealPending(pending = true) {
+        const shouldWait = !!pending;
+        if (!Number.isFinite(this._topLogitRevealGateId)) {
+            this._topLogitRevealGateId = 0;
+        }
+        if (shouldWait) {
+            this._topLogitRevealGateId += 1;
+        }
+        this._awaitingTopLogitReveal = shouldWait;
+        this._topLogitRevealComplete = !shouldWait;
+        if (shouldWait) {
+            this._forwardPassComplete = false;
+        }
+        return shouldWait ? this._topLogitRevealGateId : null;
+    }
+
+    setTopLogitRevealComplete(gateId = null) {
+        if (!this._awaitingTopLogitReveal) return;
+        if (Number.isFinite(gateId) && gateId !== this._topLogitRevealGateId) return;
+        this._topLogitRevealComplete = true;
+        this.dispatchEvent(new Event('progress'));
     }
 
     _normalizeActiveLaneLayoutIndices(indices, laneCount, layoutCount) {
@@ -1227,6 +1253,11 @@ export class LayerPipeline extends EventTarget {
         this._skipToEndActive = false;
         this._skipLayerActive = false;
         this._skipLayerLast = false;
+        this._awaitingTopLogitReveal = false;
+        this._topLogitRevealComplete = true;
+        this._topLogitRevealGateId = Number.isFinite(this._topLogitRevealGateId)
+            ? this._topLogitRevealGateId + 1
+            : 1;
         this._skipKvCaptureReadyLayers.clear();
         this._skipLayerRestore = null;
         this._skipToEndRestore = null;
@@ -1808,6 +1839,8 @@ export class LayerPipeline extends EventTarget {
             });
             if (!allAtTop) return false;
         }
+
+        if (this._awaitingTopLogitReveal && !this._topLogitRevealComplete) return false;
 
         this._forwardPassComplete = true;
         return true;

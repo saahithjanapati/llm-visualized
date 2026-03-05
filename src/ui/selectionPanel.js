@@ -107,6 +107,14 @@ const ATTENTION_PREVIEW_GRID_GAP = 8; // matches .detail-attention-grid column g
 const ATTENTION_PRE_COLOR_CLAMP = 5;
 const ATTENTION_PREVIEW_COLOR_DARKEN_FACTOR = 0.84;
 const ATTENTION_POP_OUT_MS = 120;
+const ATTENTION_POST_REVEAL_DURATION_MS = 260;
+const ATTENTION_POST_REVEAL_SWEEP_MS = 380;
+const ATTENTION_POST_REVEAL_STAGGER_MIN_MS = 18;
+const ATTENTION_POST_REVEAL_STAGGER_MAX_MS = 52;
+const ATTENTION_PRE_REVEAL_DURATION_MS = 210;
+const ATTENTION_PRE_REVEAL_SWEEP_MS = 120;
+const ATTENTION_PRE_REVEAL_STAGGER_MIN_MS = 4;
+const ATTENTION_PRE_REVEAL_STAGGER_MAX_MS = 26;
 const ATTENTION_SCORE_DECIMALS = 4;
 const ATTENTION_VALUE_PLACEHOLDER = '--';
 const ATTENTION_DECODE_ROW_OFFSET_MULT = 0.68;
@@ -324,6 +332,14 @@ function normalizeAttentionValuePart(value, fallback = ATTENTION_VALUE_PLACEHOLD
     return text || fallback;
 }
 
+function formatAttentionSubtitleTokenPart(label, tokenIndex, roleLabel) {
+    const tokenText = normalizeAttentionValuePart(formatTokenLabelForPreview(label));
+    const positionText = Number.isFinite(tokenIndex)
+        ? `Position ${Math.floor(tokenIndex) + 1}`
+        : 'Position n/a';
+    return `${roleLabel} ${tokenText} (${positionText})`;
+}
+
 function formatActivationData(data) {
     if (!data || typeof data !== 'object') return 'No activation data.';
     const lines = [];
@@ -449,11 +465,17 @@ function resolveAttentionScoreSelectionSummary(selectionInfo, context = null) {
     const sourceText = normalizeAttentionValuePart(sourceLabel, 'Source');
     const targetText = normalizeAttentionValuePart(targetLabel, 'Target');
     const scoreText = Number.isFinite(score) ? score.toFixed(ATTENTION_SCORE_DECIMALS) : 'n/a';
+    const hasSourceContext = Number.isFinite(sourceTokenIndex) || sourceLabel.length > 0;
+    const hasTargetContext = Number.isFinite(targetTokenIndex) || targetLabel.length > 0;
+    const tokenContextLine = (hasSourceContext || hasTargetContext)
+        ? `${formatAttentionSubtitleTokenPart(sourceLabel, sourceTokenIndex, 'Source')} • ${formatAttentionSubtitleTokenPart(targetLabel, targetTokenIndex, 'Target')}`
+        : '';
 
     return {
         mode,
         row: row >= 0 ? row : null,
         col: col >= 0 ? col : null,
+        tokenContextLine,
         defaultValue: {
             source: sourceText,
             target: targetText,
@@ -493,6 +515,25 @@ function shouldRevealAttentionCell(progress, row, col, mode = 'pre', decodeProfi
         return col <= activeCol;
     }
     return false;
+}
+
+function countVisibleAttentionCellsInRow(row, count) {
+    const safeCount = Math.max(1, Math.floor(count || 1));
+    const safeRow = THREE.MathUtils.clamp(Math.floor(row || 0), 0, safeCount - 1);
+    if (ATTENTION_PREVIEW_TRIANGLE === 'upper') {
+        return Math.max(1, safeCount - safeRow);
+    }
+    return Math.max(1, safeRow + 1);
+}
+
+function getAttentionRevealOrder(row, col, count) {
+    const safeCount = Math.max(1, Math.floor(count || 1));
+    const safeRow = THREE.MathUtils.clamp(Math.floor(row || 0), 0, safeCount - 1);
+    const safeCol = THREE.MathUtils.clamp(Math.floor(col || 0), 0, safeCount - 1);
+    if (ATTENTION_PREVIEW_TRIANGLE === 'upper') {
+        return Math.max(0, safeCol - safeRow);
+    }
+    return safeCol;
 }
 
 function getContentWidth(el) {
@@ -2691,6 +2732,7 @@ class SelectionPanel {
         this.hudPanel = document.getElementById('hudPanel');
         this.title = document.getElementById('detailTitle');
         this.subtitle = document.getElementById('detailSubtitle');
+        this.subtitleSecondary = document.getElementById('detailSubtitleSecondary');
         this.params = document.getElementById('detailParams');
         this.paramsRow = document.getElementById('detailParamsRow');
         this.inputDim = document.getElementById('detailInputDim');
@@ -3023,8 +3065,15 @@ class SelectionPanel {
         const sections = [];
         const title = (this.title?.textContent || '').trim();
         const subtitle = (this.subtitle?.textContent || '').trim();
+        const subtitleSecondary = (this.subtitleSecondary?.textContent || '').trim();
         if (title) sections.push(`Selection: ${title}`);
-        if (subtitle) sections.push(`Context: ${subtitle}`);
+        if (subtitle && subtitleSecondary) {
+            sections.push(`Context: ${subtitle}\n${subtitleSecondary}`);
+        } else if (subtitle) {
+            sections.push(`Context: ${subtitle}`);
+        } else if (subtitleSecondary) {
+            sections.push(`Context: ${subtitleSecondary}`);
+        }
 
         const descriptionText = String(this._currentSelectionDescription || '').trim();
         if (descriptionText) {
@@ -3774,6 +3823,21 @@ class SelectionPanel {
         }
     }
 
+    _applyAttentionCellRevealAnimation(cell, className, delayMs, durationMs) {
+        if (!cell) return;
+        const hadClass = cell.classList.contains(className);
+        cell.classList.remove('post-softmax-reveal', 'pre-softmax-reveal');
+        if (hadClass) {
+            // Force a reflow when replaying the same keyframe class.
+            void cell.offsetWidth;
+        }
+        const safeDelay = Number.isFinite(delayMs) ? Math.max(0, Math.round(delayMs)) : 0;
+        const safeDuration = Number.isFinite(durationMs) ? Math.max(80, Math.round(durationMs)) : ATTENTION_POST_REVEAL_DURATION_MS;
+        cell.style.animationDelay = `${safeDelay}ms`;
+        cell.style.animationDuration = `${safeDuration}ms`;
+        cell.classList.add(className);
+    }
+
     _startAttentionPopOut(cell, durationMs = null) {
         if (!cell || !cell.dataset) return;
         if (cell.dataset.popOut === 'true') return;
@@ -3807,19 +3871,28 @@ class SelectionPanel {
         const tokenLabels = this._attentionContext.tokenLabels || [];
         const count = this._attentionCells.length;
         const suppressRevealPulse = this._shouldSuppressAttentionEntryHighlight();
-        const rowAnimDuration = 180;
-        const rowAnimStagger = mode === 'post' && count > 1
-            ? Math.max(6, Math.round(180 / (count - 1)))
-            : 0;
-        const preAnimDuration = 210;
-        const preAnimStagger = mode === 'pre' && count > 1
-            ? Math.max(4, Math.round(120 / (count - 1)))
-            : 0;
+        const postAnimDuration = ATTENTION_POST_REVEAL_DURATION_MS;
+        const preAnimDuration = ATTENTION_PRE_REVEAL_DURATION_MS;
         let hasAnyValue = false;
         for (let row = 0; row < count; row += 1) {
             const rowCells = this._attentionCells[row];
             if (!rowCells) continue;
             const shouldAnimateRow = mode === 'post' && this._attentionPostAnimQueue.has(row);
+            const visibleCellsInRow = countVisibleAttentionCellsInRow(row, count);
+            const postAnimStagger = mode === 'post' && visibleCellsInRow > 1
+                ? THREE.MathUtils.clamp(
+                    Math.round(ATTENTION_POST_REVEAL_SWEEP_MS / (visibleCellsInRow - 1)),
+                    ATTENTION_POST_REVEAL_STAGGER_MIN_MS,
+                    ATTENTION_POST_REVEAL_STAGGER_MAX_MS
+                )
+                : 0;
+            const preAnimStagger = mode === 'pre' && visibleCellsInRow > 1
+                ? THREE.MathUtils.clamp(
+                    Math.round(ATTENTION_PRE_REVEAL_SWEEP_MS / (visibleCellsInRow - 1)),
+                    ATTENTION_PRE_REVEAL_STAGGER_MIN_MS,
+                    ATTENTION_PRE_REVEAL_STAGGER_MAX_MS
+                )
+                : 0;
             for (let col = 0; col < count; col += 1) {
                 const cell = rowCells[col];
                 if (!cell || cell.classList.contains('is-hidden')) continue;
@@ -3828,11 +3901,9 @@ class SelectionPanel {
                     this._cancelAttentionPopOut(cell);
                     cell.classList.add('is-empty');
                     cell.style.backgroundColor = '';
-                    if (mode === 'pre') {
-                        cell.classList.remove('pre-softmax-reveal');
-                        cell.style.animationDelay = '';
-                        cell.style.animationDuration = '';
-                    }
+                    cell.classList.remove('post-softmax-reveal', 'pre-softmax-reveal');
+                    cell.style.animationDelay = '';
+                    cell.style.animationDuration = '';
                     continue;
                 }
                 const reveal = shouldRevealAttentionCell(progress, row, col, mode, this._attentionDecodeProfile);
@@ -3853,19 +3924,27 @@ class SelectionPanel {
                         cell.style.animationDuration = '';
                     } else if (mode === 'post') {
                         if (shouldAnimateRow && !this._attentionPostAnimatedRows.has(row)) {
-                            cell.classList.add('post-softmax-reveal');
-                            cell.style.animationDelay = `${Math.round(col * rowAnimStagger)}ms`;
-                            cell.style.animationDuration = `${rowAnimDuration}ms`;
-                        } else if (!this._attentionPostAnimatedRows.has(row)) {
+                            const revealOrder = getAttentionRevealOrder(row, col, count);
+                            this._applyAttentionCellRevealAnimation(
+                                cell,
+                                'post-softmax-reveal',
+                                revealOrder * postAnimStagger,
+                                postAnimDuration
+                            );
+                        } else {
                             cell.classList.remove('post-softmax-reveal');
                             cell.style.animationDelay = '';
                             cell.style.animationDuration = '';
                         }
                     } else if (mode === 'pre') {
                         if (wasEmpty) {
-                            cell.classList.add('pre-softmax-reveal');
-                            cell.style.animationDelay = `${Math.round(col * preAnimStagger)}ms`;
-                            cell.style.animationDuration = `${preAnimDuration}ms`;
+                            const revealOrder = getAttentionRevealOrder(row, col, count);
+                            this._applyAttentionCellRevealAnimation(
+                                cell,
+                                'pre-softmax-reveal',
+                                revealOrder * preAnimStagger,
+                                preAnimDuration
+                            );
                         } else {
                             cell.classList.remove('pre-softmax-reveal');
                             cell.style.animationDelay = '';
@@ -4956,6 +5035,12 @@ class SelectionPanel {
         const metadata = resolveMetadata(label, selection.kind, selection);
         const logitHeader = resolveLogitSelectionHeader(label, selection);
         const vectorSubtitleMetadata = this._resolveVectorTokenPosition(selection, label);
+        const isAttentionScore = isAttentionScoreSelection(label, selection);
+        const attentionContextForSubtitle = isAttentionScore ? this._resolveAttentionContext(selection) : null;
+        const attentionScoreSummary = isAttentionScore
+            ? resolveAttentionScoreSelectionSummary(selection, attentionContextForSubtitle)
+            : null;
+        const attentionSubtitleLine = attentionScoreSummary?.tokenContextLine || '';
         this.panel.classList.toggle('is-preview-hidden', hidePreviewForSelection);
         this.title.textContent = logitHeader?.title || displayLabel;
         if (this.subtitle) {
@@ -4967,7 +5052,7 @@ class SelectionPanel {
                 const isQkvOrCachedVectorSelection = isLikelyVectorSelection(label, selection)
                     && (isQkvHeadVectorSelection(label, selection) || isKvCacheVectorSelection(selection));
                 const showHead = isQkvMatrixLabel(label)
-                    || isAttentionScoreSelection(label, selection)
+                    || isAttentionScore
                     || isQkvOrCachedVectorSelection;
                 const subtitleParts = [];
                 if (Number.isFinite(layerIndex)) {
@@ -4994,10 +5079,13 @@ class SelectionPanel {
                 this.subtitle.textContent = subtitleParts.join(' • ');
             }
         }
+        if (this.subtitleSecondary) {
+            this.subtitleSecondary.textContent = logitHeader ? '' : attentionSubtitleLine;
+        }
         const hideLayerNormFields = isLayerNormSolidSelection(label);
         const isLogitTokenSelection = !!logitHeader;
         const hideTensorDimsField = hideLayerNormFields
-            || isAttentionScoreSelection(label, selection)
+            || isAttentionScore
             || isLogitTokenSelection;
         const isTokenChipSelection = lower.startsWith('token:') || lower.startsWith('position:');
         const isVectorMetadata = isLikelyVectorSelection(label, selection) || isTokenChipSelection;
