@@ -31,6 +31,12 @@ import {
 } from './selectionPanelSelectionUtils.js';
 import { resolveDescription, resolveSelectionEquations } from './selectionPanelNarrativeUtils.js';
 import {
+    GELU_PANEL_ACTION_OPEN,
+    createGeluDetailView,
+    isMlpMatrixSelectionLabel,
+    setDescriptionGeluAction
+} from './selectionPanelGeluPreview.js';
+import {
     MHA_MATRIX_PARAMS,
     MLP_MATRIX_PARAMS_UP,
     MLP_MATRIX_PARAMS_DOWN,
@@ -141,6 +147,8 @@ const COPY_CONTEXT_EMPTY_LABEL = 'Nothing visible to copy yet.';
 const COPY_CONTEXT_FEEDBACK_MS = 1000;
 const COPY_CONTEXT_FADE_MS = 220;
 const SELECTION_PANEL_TOKEN_HOVER_SOURCE = 'selection-panel';
+const PANEL_ACTION_HISTORY_BACK = 'history-back';
+const PANEL_ACTION_HISTORY_FORWARD = 'history-forward';
 
 const TOKEN_CHIP_STYLE = {
     padding: 80,
@@ -646,7 +654,10 @@ function hasVocabEmbeddingLabel(lower) {
 }
 
 function hasTopVocabEmbeddingLabel(lower) {
-    return lower.includes('vocab embedding (top)') || lower.includes('vocabulary embedding (top)');
+    return lower.includes('vocab embedding (top)')
+        || lower.includes('vocabulary embedding (top)')
+        || lower.includes('vocab unembedding')
+        || lower.includes('vocabulary unembedding');
 }
 
 function resolveFinalPreviewColor(label) {
@@ -658,7 +669,9 @@ function resolveFinalPreviewColor(label) {
     if (lower.includes('mlp up weight matrix')) return FINAL_MLP_COLOR;
     if (lower.includes('mlp down weight matrix')) return FINAL_MLP_COLOR;
     if (hasVocabEmbeddingLabel(lower) || lower.includes('unembedding')) {
-        return lower.includes('top') ? FINAL_VOCAB_TOP_COLOR : MHA_FINAL_Q_COLOR;
+        return hasTopVocabEmbeddingLabel(lower) || lower.includes('unembedding')
+            ? FINAL_VOCAB_TOP_COLOR
+            : MHA_FINAL_Q_COLOR;
     }
     if (lower.includes('positional embedding')) return POSITION_EMBED_COLOR;
     if (lower.includes('layernorm') || lower.includes('layer norm')) return LAYER_NORM_FINAL_COLOR;
@@ -1310,7 +1323,9 @@ function resolveLogitSelectionHeader(label, selectionInfo) {
 
     return {
         title: tokenText ? `Logit Token: ${tokenText}` : 'Logit Token',
-        subtitle: subtitleParts.join(' • ')
+        subtitle: subtitleParts.join(' • '),
+        tokenText,
+        tokenId
     };
 }
 
@@ -2644,11 +2659,15 @@ function resolvePreviewObject(label, selectionInfo) {
         const clonePreview = buildSelectionClonePreview(selectionInfo, label)
             || buildDirectClonePreview(selectionInfo);
         if (clonePreview) {
-            const color = lower.includes('top') ? FINAL_VOCAB_TOP_COLOR : MHA_FINAL_Q_COLOR;
+            const color = hasTopVocabEmbeddingLabel(lower) || lower.includes('unembedding')
+                ? FINAL_VOCAB_TOP_COLOR
+                : MHA_FINAL_Q_COLOR;
             applyFinalColorToObject(clonePreview.object, color);
             return clonePreview;
         }
-        const color = lower.includes('top') ? FINAL_VOCAB_TOP_COLOR : MHA_FINAL_Q_COLOR;
+        const color = hasTopVocabEmbeddingLabel(lower) || lower.includes('unembedding')
+            ? FINAL_VOCAB_TOP_COLOR
+            : MHA_FINAL_Q_COLOR;
         return buildWeightMatrixPreview(EMBEDDING_MATRIX_PARAMS_VOCAB, color);
     }
     if (lower.includes('positional embedding')) {
@@ -2913,6 +2932,16 @@ class SelectionPanel {
             || this.copyContextBtn?.textContent?.trim()
             || COPY_CONTEXT_BUTTON_DEFAULT_LABEL;
         this._setCopyContextButtonLabel(this._copyContextDefaultLabel);
+        this._geluDetailView = createGeluDetailView(this.panel);
+        this._geluDetailOpen = false;
+        this._geluSourceSelection = null;
+        this._lastSelection = null;
+        this._lastSelectionLabel = '';
+        this._historyEntries = [];
+        this._historyIndex = -1;
+        this._historyBackBtn = null;
+        this._historyForwardBtn = null;
+        this._createHistoryNavigationControls();
 
         this._animate = this._animate.bind(this);
         this._onResize = this._onResize.bind(this);
@@ -3021,7 +3050,9 @@ class SelectionPanel {
         }
         document.addEventListener('keydown', this._onKeydown);
         document.addEventListener('pointerdown', this._onDocumentPointerDown, { capture: true });
-        this._touchClickCleanup = initTouchClickFallback(this.panel, { selector: '.toggle-row' });
+        this._touchClickCleanup = initTouchClickFallback(this.panel, {
+            selector: '.toggle-row, .detail-token-nav-chip[data-token-nav="true"], .detail-history-btn, .detail-description-action-link'
+        });
         this._observeResize();
         this._onResize();
         if (typeof document !== 'undefined' && document.fonts?.ready) {
@@ -3402,6 +3433,9 @@ class SelectionPanel {
                 }, 140);
             }
             this._updateMobileState();
+            if (this._geluDetailOpen) {
+                this._geluDetailView?.resizeAndRender();
+            }
             return;
         }
         if (this.currentPreview) {
@@ -3427,6 +3461,9 @@ class SelectionPanel {
         this._syncSceneShift();
         this._scheduleSelectionEquationFit();
         this._scheduleDimensionLabelFit();
+        if (this._geluDetailOpen) {
+            this._geluDetailView?.resizeAndRender();
+        }
     }
 
     _finalizePendingReveal() {
@@ -3596,6 +3633,118 @@ class SelectionPanel {
         this._setPanelTokenHoverEntry(null, { emit: true });
     }
 
+    _createHistoryNavigationControls() {
+        if (!this.panel || typeof document === 'undefined') return;
+        const header = this.panel.querySelector('.detail-header');
+        const titleGroup = header?.querySelector('.detail-title-group');
+        if (!header || !titleGroup) return;
+
+        const nav = document.createElement('div');
+        nav.className = 'detail-history-nav';
+        nav.setAttribute('aria-label', 'Detail navigation history');
+
+        const backBtn = document.createElement('button');
+        backBtn.type = 'button';
+        backBtn.className = 'detail-history-btn detail-history-btn--back';
+        backBtn.dataset.detailAction = PANEL_ACTION_HISTORY_BACK;
+        backBtn.textContent = '\u2039';
+        backBtn.setAttribute('aria-label', 'Previous detail page');
+
+        const forwardBtn = document.createElement('button');
+        forwardBtn.type = 'button';
+        forwardBtn.className = 'detail-history-btn detail-history-btn--forward';
+        forwardBtn.dataset.detailAction = PANEL_ACTION_HISTORY_FORWARD;
+        forwardBtn.textContent = '\u203a';
+        forwardBtn.setAttribute('aria-label', 'Next detail page');
+
+        nav.append(backBtn, forwardBtn);
+        header.insertBefore(nav, titleGroup);
+        this._historyBackBtn = backBtn;
+        this._historyForwardBtn = forwardBtn;
+        this._updateHistoryNavigationControls();
+    }
+
+    _buildHistoryEntry(type, selection = null) {
+        if (!selection || !selection.label) return null;
+        const label = normalizeSelectionLabel(selection.label, selection);
+        const keyBase = buildSelectionPreviewKey(label, selection);
+        return {
+            type,
+            selection,
+            label,
+            key: `${type}:${keyBase}`
+        };
+    }
+
+    _historyEntriesEqual(a, b) {
+        return !!a && !!b && a.type === b.type && a.key === b.key;
+    }
+
+    _pushHistoryEntry(entry) {
+        if (!entry) return;
+        const current = this._historyEntries[this._historyIndex] || null;
+        if (this._historyEntriesEqual(current, entry)) {
+            this._updateHistoryNavigationControls();
+            return;
+        }
+        if (this._historyIndex < this._historyEntries.length - 1) {
+            this._historyEntries = this._historyEntries.slice(0, this._historyIndex + 1);
+        }
+        this._historyEntries.push(entry);
+        this._historyIndex = this._historyEntries.length - 1;
+        this._updateHistoryNavigationControls();
+    }
+
+    _resetHistoryNavigation() {
+        this._historyEntries = [];
+        this._historyIndex = -1;
+        this._updateHistoryNavigationControls();
+    }
+
+    _updateHistoryNavigationControls() {
+        const hasBack = this._historyIndex > 0;
+        const hasForward = this._historyIndex >= 0 && this._historyIndex < this._historyEntries.length - 1;
+        if (this._historyBackBtn) {
+            this._historyBackBtn.disabled = !hasBack;
+            this._historyBackBtn.dataset.disabled = hasBack ? 'false' : 'true';
+        }
+        if (this._historyForwardBtn) {
+            this._historyForwardBtn.disabled = !hasForward;
+            this._historyForwardBtn.dataset.disabled = hasForward ? 'false' : 'true';
+        }
+    }
+
+    _applyHistoryEntry(entry) {
+        if (!entry || !entry.selection) return false;
+        if (entry.type === 'gelu') {
+            this.showSelection(entry.selection, { fromHistory: true });
+            this._openGeluDetailPreview({
+                fromHistory: true,
+                sourceSelection: entry.selection
+            });
+            return true;
+        }
+        if (entry.type === 'selection') {
+            this.showSelection(entry.selection, { fromHistory: true });
+            return true;
+        }
+        return false;
+    }
+
+    _navigateHistoryBack() {
+        if (this._historyIndex <= 0) return false;
+        this._historyIndex -= 1;
+        this._updateHistoryNavigationControls();
+        return this._applyHistoryEntry(this._historyEntries[this._historyIndex]);
+    }
+
+    _navigateHistoryForward() {
+        if (this._historyIndex < 0 || this._historyIndex >= this._historyEntries.length - 1) return false;
+        this._historyIndex += 1;
+        this._updateHistoryNavigationControls();
+        return this._applyHistoryEntry(this._historyEntries[this._historyIndex]);
+    }
+
     _setTitleText(titleText = '') {
         if (!this.title) return;
         this.title.classList.remove('detail-title--token-context');
@@ -3605,13 +3754,14 @@ class SelectionPanel {
     _configureTokenNavChip(chip, {
         tokenText = ATTENTION_VALUE_PLACEHOLDER,
         tokenIndex = null,
-        tokenId = null
+        tokenId = null,
+        allowNavigation = true
     } = {}) {
         if (!chip) return;
         const safeTokenText = normalizeAttentionValuePart(tokenText);
         const safeTokenIndex = Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : null;
         const safeTokenId = Number.isFinite(tokenId) ? Math.floor(tokenId) : null;
-        const canNavigate = safeTokenText !== ATTENTION_VALUE_PLACEHOLDER;
+        const canNavigate = !!allowNavigation && safeTokenText !== ATTENTION_VALUE_PLACEHOLDER;
 
         chip.classList.add('detail-token-nav-chip');
         chip.dataset.tokenText = safeTokenText;
@@ -3640,12 +3790,17 @@ class SelectionPanel {
     _setTokenChipTitleContext({
         tokenText = ATTENTION_VALUE_PLACEHOLDER,
         tokenIndex = null,
-        tokenId = null
+        tokenId = null,
+        prefixText = 'Token:',
+        allowNavigation = true
     } = {}) {
         if (!this.title) return;
         const safeTokenText = normalizeAttentionValuePart(tokenText);
         const safeTokenIndex = Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : null;
         let safeTokenId = Number.isFinite(tokenId) ? Math.floor(tokenId) : null;
+        const safePrefixText = (typeof prefixText === 'string' && prefixText.trim().length)
+            ? prefixText.trim()
+            : 'Token:';
         if (!Number.isFinite(safeTokenId)
             && Number.isFinite(safeTokenIndex)
             && this.activationSource
@@ -3663,7 +3818,7 @@ class SelectionPanel {
 
         const prefix = document.createElement('span');
         prefix.className = 'detail-title-text-part';
-        prefix.textContent = 'Token:';
+        prefix.textContent = safePrefixText;
 
         const chip = document.createElement('span');
         chip.className = 'detail-subtitle-token-chip detail-title-token-chip';
@@ -3675,7 +3830,8 @@ class SelectionPanel {
         this._configureTokenNavChip(chip, {
             tokenText: safeTokenText,
             tokenIndex: safeTokenIndex,
-            tokenId: safeTokenId
+            tokenId: safeTokenId,
+            allowNavigation
         });
 
         fragment.append(prefix, chip);
@@ -3718,6 +3874,7 @@ class SelectionPanel {
     }
 
     _onPanelTokenChipClick(event) {
+        if (this._handlePanelActionTrigger(event)) return;
         const target = event?.target;
         const chip = target && typeof target.closest === 'function'
             ? target.closest('.detail-token-nav-chip')
@@ -3950,6 +4107,82 @@ class SelectionPanel {
             : null;
         if (!chip || !this.subtitleSecondary || !this.subtitleSecondary.contains(chip)) return;
         this._openSelectionForTokenChip(chip, event);
+    }
+
+    _handlePanelActionTrigger(event) {
+        const target = event?.target;
+        if (!target || typeof target.closest !== 'function' || !this.panel) return false;
+        const actionEl = target.closest('[data-detail-action]');
+        if (!actionEl || !this.panel.contains(actionEl)) return false;
+        const action = String(actionEl.dataset.detailAction || '').trim();
+        if (!action) return false;
+
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        if (typeof event.stopPropagation === 'function') event.stopPropagation();
+
+        if (action === PANEL_ACTION_HISTORY_BACK) {
+            this._navigateHistoryBack();
+            return true;
+        }
+        if (action === PANEL_ACTION_HISTORY_FORWARD) {
+            this._navigateHistoryForward();
+            return true;
+        }
+        if (action === GELU_PANEL_ACTION_OPEN) {
+            this._openGeluDetailPreview();
+            return true;
+        }
+        return false;
+    }
+
+    _openGeluDetailPreview({ fromHistory = false, sourceSelection = null } = {}) {
+        const resolvedSelection = sourceSelection || this._lastSelection;
+        const sourceLabel = this._lastSelectionLabel;
+        const resolvedLabel = resolvedSelection?.label
+            ? normalizeSelectionLabel(resolvedSelection.label, resolvedSelection)
+            : sourceLabel;
+        if (!resolvedSelection || !isMlpMatrixSelectionLabel(resolvedLabel)) return;
+        this._geluSourceSelection = resolvedSelection;
+        this._geluDetailOpen = true;
+        this.panel.classList.add('is-gelu-view-open');
+        this._setTitleText('GELU Activation');
+        if (this.subtitle) {
+            this.subtitle.classList.remove('detail-subtitle--qkv-token-context');
+            this.subtitle.textContent = 'Gaussian Error Linear Unit used in GPT-2 MLP blocks';
+        }
+        if (this.subtitleSecondary) {
+            this.subtitleSecondary.classList.remove('detail-subtitle--attention-context');
+            this.subtitleSecondary.textContent = '';
+        }
+        this._geluDetailView?.setVisible(true);
+        this._geluDetailView?.resizeAndRender();
+        this._stopLoop();
+        this._setAttentionVisibility(false);
+        this._setPanelTokenHoverEntry(null, { emit: true });
+        if (!fromHistory) {
+            const entry = this._buildHistoryEntry('gelu', resolvedSelection);
+            this._pushHistoryEntry(entry);
+        } else {
+            this._updateHistoryNavigationControls();
+        }
+    }
+
+    _closeGeluDetailPreview({ restoreSelection = false, restartLoop = true } = {}) {
+        if (!this._geluDetailOpen) return false;
+        this._geluDetailOpen = false;
+        this.panel.classList.remove('is-gelu-view-open');
+        this._geluDetailView?.setVisible(false);
+        const sourceSelection = this._geluSourceSelection;
+        this._geluSourceSelection = null;
+        if (restoreSelection && sourceSelection) {
+            this.showSelection(sourceSelection);
+            return true;
+        }
+        if (restartLoop && this.isOpen) {
+            this._startLoop();
+            this._scheduleResize();
+        }
+        return true;
     }
 
     _setAttentionVisibility(visible) {
@@ -5074,15 +5307,30 @@ class SelectionPanel {
 
     _onDocumentPointerDown(event) {
         if (!Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return;
+        const eventTarget = event.target instanceof Element ? event.target : null;
         const hit = document.elementFromPoint(event.clientX, event.clientY);
+        const resolveClosest = (selector) => {
+            const fromTarget = eventTarget && typeof eventTarget.closest === 'function'
+                ? eventTarget.closest(selector)
+                : null;
+            if (fromTarget) return fromTarget;
+            return hit && typeof hit.closest === 'function'
+                ? hit.closest(selector)
+                : null;
+        };
+        const tokenNavChip = resolveClosest('.detail-token-nav-chip[data-token-nav="true"]');
+        const hitPanelTokenNavChip = !!(
+            tokenNavChip
+            && this.panel
+            && this.panel.contains(tokenNavChip)
+        );
+        const attentionMatrixRoot = resolveClosest('#detailAttentionMatrix');
         const insideAttentionMatrix = !!(
             this.attentionMatrix
-            && hit
-            && typeof hit.closest === 'function'
-            && hit.closest('#detailAttentionMatrix') === this.attentionMatrix
+            && attentionMatrixRoot === this.attentionMatrix
         );
-        const matrixCell = insideAttentionMatrix && typeof hit?.closest === 'function'
-            ? hit.closest('.attention-cell')
+        const matrixCell = insideAttentionMatrix
+            ? resolveClosest('.attention-cell')
             : null;
         const validMatrixCell = !!(
             matrixCell
@@ -5091,19 +5339,23 @@ class SelectionPanel {
         );
         const shouldClearPinnedAttention = this.isOpen
             && this._attentionPinned
+            && !hitPanelTokenNavChip
             && (!insideAttentionMatrix || !validMatrixCell);
         if (shouldClearPinnedAttention) {
             this._clearPinnedAttention({ clearSelectionSummary: true });
         }
-        if (this.isOpen && hit && this.panel && this.panel.contains(hit)) {
+        const panelHit = (hit && this.panel && this.panel.contains(hit))
+            ? hit
+            : (eventTarget && this.panel && this.panel.contains(eventTarget) ? eventTarget : null);
+        if (this.isOpen && panelHit) {
             if (this.engine && typeof this.engine.resetInteractionState === 'function') {
                 this.engine.resetInteractionState();
             }
         }
         if (!this.isOpen || !this.closeBtn) return;
         if (event.target === this.closeBtn) return;
-        if (!hit || typeof hit.closest !== 'function') return;
-        if (hit.closest('#detailClose') !== this.closeBtn) return;
+        const closeHit = resolveClosest('#detailClose');
+        if (!closeHit || closeHit !== this.closeBtn) return;
         // Close even if the canvas captured the pointer event.
         event.preventDefault();
         event.stopPropagation();
@@ -5192,7 +5444,7 @@ class SelectionPanel {
     }
 
     _isPreviewLoopActive() {
-        return !!(this.isReady && this.isOpen && this.currentPreview);
+        return !!(this.isReady && this.isOpen && this.currentPreview && !this._geluDetailOpen);
     }
 
     _startLoop() {
@@ -5264,14 +5516,19 @@ class SelectionPanel {
         if (!this.isReady) return;
         this.isOpen = false;
         this._stopLoop();
+        this._closeGeluDetailPreview({ restoreSelection: false, restartLoop: false });
         this._currentSelectionDescription = '';
         this._currentSelectionEquations = '';
+        this._lastSelection = null;
+        this._lastSelectionLabel = '';
+        this._resetHistoryNavigation();
         this._setPanelTokenHoverEntry(null, { emit: true });
         this._mirroredTokenHoverEntry = null;
         this._applyTokenChipHoverState();
         this._resetCopyContextFeedback();
         this.panel.classList.remove('is-open');
         this.panel.classList.remove('is-preview-hidden');
+        this.panel.classList.remove('is-gelu-view-open');
         this.hudStack?.classList.remove('detail-open');
         this.hudPanel?.classList.remove('detail-open');
         this.panel.setAttribute('aria-hidden', 'true');
@@ -5613,11 +5870,15 @@ class SelectionPanel {
         return getIncompleteUtf8TokenNote(parsedTokenId);
     }
 
-    showSelection(selection) {
+    showSelection(selection, options = {}) {
         if (!this.isReady || !selection || !selection.label) return;
+        const fromHistory = options?.fromHistory === true;
 
+        this._closeGeluDetailPreview({ restoreSelection: false, restartLoop: false });
         this._resetCopyContextFeedback();
         const label = normalizeSelectionLabel(selection.label, selection);
+        this._lastSelection = selection;
+        this._lastSelectionLabel = label;
         const displayLabel = simplifyLayerNormParamDisplayLabel(label, selection);
         const lower = label.toLowerCase();
         const hidePreviewForSelection = false;
@@ -5636,7 +5897,12 @@ class SelectionPanel {
         const isTokenOrPositionChipSelection = isTokenChipSelection || lower.startsWith('position:');
         this.panel.classList.toggle('is-preview-hidden', hidePreviewForSelection);
         if (logitHeader) {
-            this._setTitleText(logitHeader.title);
+            this._setTokenChipTitleContext({
+                tokenText: logitHeader.tokenText || ATTENTION_VALUE_PLACEHOLDER,
+                tokenId: Number.isFinite(logitHeader.tokenId) ? Math.floor(logitHeader.tokenId) : null,
+                prefixText: 'Logit token:',
+                allowNavigation: false
+            });
         } else if (isTokenChipSelection) {
             const tokenText = (typeof vectorSubtitleMetadata?.tokenDisplayText === 'string')
                 ? vectorSubtitleMetadata.tokenDisplayText.trim()
@@ -5787,6 +6053,7 @@ class SelectionPanel {
             const desc = resolveDescription(label, selection.kind, selection);
             this._currentSelectionDescription = desc || '';
             setDescriptionContent(this.description, desc || '');
+            setDescriptionGeluAction(this.description, isMlpMatrixSelectionLabel(label));
         } else {
             this._currentSelectionDescription = '';
         }
@@ -5915,6 +6182,12 @@ class SelectionPanel {
         this.open();
         this._scheduleSelectionEquationFit();
         this._scheduleDimensionLabelFit();
+        if (!fromHistory) {
+            const entry = this._buildHistoryEntry('selection', selection);
+            this._pushHistoryEntry(entry);
+        } else {
+            this._updateHistoryNavigationControls();
+        }
     }
 }
 

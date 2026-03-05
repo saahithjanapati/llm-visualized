@@ -20,7 +20,12 @@ export function calculateTopEmbeddingTargets({
             engineScene.traverse((obj) => {
                 if (topEmbedObj) return;
                 const label = obj && obj.userData ? obj.userData.label : '';
-                if (label === 'Vocab Embedding (Top)' || label === 'Vocabulary Embedding (Top)') {
+                if (
+                    label === 'Vocab Embedding (Top)'
+                    || label === 'Vocabulary Embedding (Top)'
+                    || label === 'Vocab Unembedding'
+                    || label === 'Vocabulary Unembedding'
+                ) {
                     topEmbedObj = obj;
                 }
             });

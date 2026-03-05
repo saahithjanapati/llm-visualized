@@ -1363,7 +1363,7 @@ export function addEmbeddingAndTokenChips({
                 EMBEDDING_MATRIX_PARAMS_VOCAB.slitTopWidthFactor
             );
             vocabTop.group.rotation.z = Math.PI;
-            vocabTop.group.userData.label = 'Vocabulary Embedding (Top)';
+            vocabTop.group.userData.label = 'Vocabulary Unembedding';
             vocabTop.setColor(new THREE.Color(MHSA_MATRIX_INITIAL_RESTING_COLOR));
             vocabTop.setMaterialProperties({
                 opacity: 1.0,

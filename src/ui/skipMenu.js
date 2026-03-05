@@ -47,7 +47,10 @@ export function initSkipMenu(pipeline) {
     const emptyMessage = document.getElementById('skipOptionsEmpty');
 
     if (!menu || !toggle || !items) return () => {};
-    const modalTouchCleanup = initTouchClickFallback(modal, { selector: 'button' });
+    const modalTouchCleanup = initTouchClickFallback(modal, {
+        selector: '.skip-option, #skipOptionsClose',
+        tapSlopPx: 20
+    });
 
     let rafId = null;
     let modalOpen = false;

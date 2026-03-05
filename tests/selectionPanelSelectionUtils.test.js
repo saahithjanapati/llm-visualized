@@ -4,7 +4,8 @@ import {
     isKvCacheVectorSelection,
     isLogitBarSelection,
     isSelfAttentionSelection,
-    normalizeSelectionLabel
+    normalizeSelectionLabel,
+    simplifyLayerNormParamDisplayLabel
 } from '../src/ui/selectionPanelSelectionUtils.js';
 
 describe('selectionPanelSelectionUtils', () => {
@@ -21,6 +22,11 @@ describe('selectionPanelSelectionUtils', () => {
     it('normalizes residual-related labels consistently', () => {
         expect(normalizeSelectionLabel('Post-layernorm residual')).toBe('Post LayerNorm Residual Vector');
         expect(normalizeSelectionLabel('Incoming residual stream')).toBe('Residual Stream Vector');
+    });
+
+    it('simplifies mlp projection labels to omit inline token text', () => {
+        expect(simplifyLayerNormParamDisplayLabel('MLP Up Projection - hello')).toBe('MLP Up Projection');
+        expect(simplifyLayerNormParamDisplayLabel('MLP Down Projection - world')).toBe('MLP Down Projection');
     });
 
     it('detects KV cache vectors from vectorRef metadata', () => {
@@ -51,4 +57,3 @@ describe('selectionPanelSelectionUtils', () => {
         expect(isLogitBarSelection('unrelated label', { object: { userData: { instanceKind: 'other' } } })).toBe(false);
     });
 });
-

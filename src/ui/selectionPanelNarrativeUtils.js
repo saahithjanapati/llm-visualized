@@ -108,7 +108,10 @@ function hasVocabEmbeddingLabel(lower) {
 }
 
 function hasTopVocabEmbeddingLabel(lower) {
-    return lower.includes('vocab embedding (top)') || lower.includes('vocabulary embedding (top)');
+    return lower.includes('vocab embedding (top)')
+        || lower.includes('vocabulary embedding (top)')
+        || lower.includes('vocab unembedding')
+        || lower.includes('vocabulary unembedding');
 }
 
 function resolveLayerNormEquationSymbols(lower) {

@@ -6,6 +6,7 @@ import {
     normalizeTokenChipEntry,
     tokenChipEntriesMatch
 } from './tokenChipHoverSync.js';
+import { initTouchClickFallback } from './touchClickFallback.js';
 
 const STRIP_ID = 'promptTokenStrip';
 const PROMPT_TOKEN_STRIP_HOVER_SOURCE = 'prompt-token-strip';
@@ -86,6 +87,7 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
     let clickableEntries = [];
     let stripEnabled = appState.showPromptTokenStrip !== false;
     let bodyClassObserver = null;
+    let touchClickCleanup = null;
     let hoveredEntry = null;
     let mirroredEntry = null;
 
@@ -197,6 +199,9 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
     dom.tokensEl.addEventListener('pointerout', handleTokenPointerOut);
     dom.tokensEl.addEventListener('focusin', handleTokenFocusIn);
     dom.tokensEl.addEventListener('focusout', handleTokenFocusOut);
+    touchClickCleanup = initTouchClickFallback(dom.tokensEl, {
+        selector: '.prompt-token-strip__token'
+    });
     if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
         window.addEventListener('promptTokenStripVisibilityChanged', handleVisibilityChanged);
         window.addEventListener(TOKEN_CHIP_HOVER_SYNC_EVENT, handleTokenChipHoverSync);
@@ -342,6 +347,8 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
             dom.tokensEl.removeEventListener('pointerout', handleTokenPointerOut);
             dom.tokensEl.removeEventListener('focusin', handleTokenFocusIn);
             dom.tokensEl.removeEventListener('focusout', handleTokenFocusOut);
+            touchClickCleanup?.();
+            touchClickCleanup = null;
             if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
                 window.removeEventListener('promptTokenStripVisibilityChanged', handleVisibilityChanged);
                 window.removeEventListener(TOKEN_CHIP_HOVER_SYNC_EVENT, handleTokenChipHoverSync);

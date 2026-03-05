@@ -286,6 +286,8 @@ export default class Gpt2Layer extends BaseLayer {
         this._ln2Ready = false;
         // Flag to indicate that all lanes have reached MLP readiness.
         this._mlpStart = false;
+        // Barrier flag for synchronized post-MLP return motion.
+        this._mlpReturnStart = false;
         // NEW: Barrier flags
         this._ln1Start = false;        // start LN-1 branch
         this._ln1StartBarrierArmed = false;
@@ -2144,6 +2146,9 @@ export default class Gpt2Layer extends BaseLayer {
             }
         });
 
+        // Keep post-MLP return motion synchronized across lanes.
+        this._tryStartSynchronizedMlpReturn();
+
         // Ensure LayerNorm parameter banks reflect any visibility/position toggles.
         if (this._lnParamBanks) {
             const banks = this._lnParamBanks;
@@ -2622,7 +2627,14 @@ export default class Gpt2Layer extends BaseLayer {
     _animateMlpDownProjection(lane) {
         const expandedGroup = lane.expandedVecGroup;
         if (!expandedGroup || typeof TWEEN === 'undefined') {
-            if (lane) lane.mlpDownComplete = true;
+            if (lane) {
+                lane.mlpDownStarted = true;
+                lane.mlpDownComplete = true;
+                if (!lane.finalVecAfterMlp && lane.resultVecLN2 && lane.resultVecLN2.group) {
+                    lane.finalVecAfterMlp = lane.resultVecLN2;
+                }
+                this._tryStartSynchronizedMlpReturn();
+            }
             return;
         }
         lane.mlpDownStarted = true;
@@ -2823,9 +2835,8 @@ export default class Gpt2Layer extends BaseLayer {
                             this._getLaneMeta(lane, 'mlp.down')
                         );
                     }
-                    // Continue with the rise animation
-                    this._riseAfterMlp(lane);
                 }
+                this._tryStartSynchronizedMlpReturn();
             })
             .start();
     }
@@ -2888,8 +2899,6 @@ export default class Gpt2Layer extends BaseLayer {
                 this._getLaneMeta(lane, 'mlp.down')
             );
         }
-        
-        this._riseAfterMlp(lane);
     }
 
     _updateResidualRiseForMlp(targetY = null) {
@@ -2915,8 +2924,10 @@ export default class Gpt2Layer extends BaseLayer {
      * Rise above matrix after MLP processing
      */
     _riseAfterMlp(lane) {
+        if (!lane || lane.mlpReturnStarted) return;
         const vec = lane.finalVecAfterMlp;
         if (!vec) return;
+        lane.mlpReturnStarted = true;
         
         // Rise above matrix
         const riseAbove = 40;
@@ -3518,6 +3529,40 @@ export default class Gpt2Layer extends BaseLayer {
             this._debugLayerLifecycleLog(`Layer ${this.index}: All lanes ready – starting MLP up-projection simultaneously`);
         }
 
+    }
+
+    _tryStartSynchronizedMlpReturn() {
+        if (this._mlpReturnStart) return;
+        const lanes = Array.isArray(this.lanes) ? this.lanes : [];
+        if (!lanes.length) return;
+
+        const pendingReturnLanes = lanes.filter((lane) => (
+            lane
+            && lane.ln2Phase === LN2_PHASE.MLP_READY
+            && !lane.mlpReturnStarted
+        ));
+        if (!pendingReturnLanes.length) return;
+
+        const allReadyForReturn = lanes.every((lane) => {
+            if (!lane) return true;
+            if (lane.ln2Phase === LN2_PHASE.DONE) return true;
+            if (lane.ln2Phase !== LN2_PHASE.MLP_READY) return false;
+            return !!(
+                lane.mlpDownComplete
+                && lane.finalVecAfterMlp
+                && lane.finalVecAfterMlp.group
+            );
+        });
+        if (!allReadyForReturn) return;
+
+        this._mlpReturnStart = true;
+        this._debugLayerLifecycleLog(
+            `Layer ${this.index}: All lanes cleared MLP down-projection – starting post-MLP return simultaneously`
+        );
+        pendingReturnLanes.forEach((lane) => {
+            this._riseAfterMlp(lane);
+        });
+        this._emitProgress();
     }
 
     _updateLn1AndMhsaStartGates({

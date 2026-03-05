@@ -71,6 +71,9 @@ export function simplifyLayerNormParamDisplayLabel(label, selectionInfo = null) 
     const lower = raw.toLowerCase();
     const stageLower = String(getActivationDataFromSelection(selectionInfo)?.stage || '').toLowerCase();
 
+    if (lower.startsWith('mlp up projection')) return 'MLP Up Projection';
+    if (lower.startsWith('mlp down projection')) return 'MLP Down Projection';
+
     const isLayerNormContext = lower.includes('layernorm')
         || lower.includes('layer norm')
         || lower.includes('ln1')
