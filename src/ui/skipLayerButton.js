@@ -38,9 +38,10 @@ export function initSkipLayerButton(pipeline) {
 
     const onClick = (event) => {
         event.preventDefault();
-        if (pipeline && typeof pipeline.skipCurrentLayer === 'function') {
-            pipeline.skipCurrentLayer();
-        }
+        const started = pipeline && typeof pipeline.skipCurrentLayer === 'function'
+            ? pipeline.skipCurrentLayer()
+            : false;
+        if (!started) return;
         button.disabled = true;
         button.dataset.state = 'skipping';
         button.textContent = 'Skipping';

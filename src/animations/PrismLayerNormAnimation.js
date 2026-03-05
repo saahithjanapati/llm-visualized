@@ -7,6 +7,8 @@ export class PrismLayerNormAnimation {
         this.prismVis = prismVisualization;
         this.isAnimating = false;
         this.animationProgress = 0; // Overall animation progress (not currently used, but can be)
+        this._elapsedMs = 0;
+        this._lastWallClockMs = null;
         
         this.config = {
             // Scale delays and durations so total effect length is preserved
@@ -22,6 +24,12 @@ export class PrismLayerNormAnimation {
         this.unitAnimationStates = []; // To store per-unit animation details
         this._tempDisplayColor = new THREE.Color();
         this._whiteColor = new THREE.Color(1, 1, 1);
+    }
+
+    _nowMs() {
+        return (typeof performance !== 'undefined' && typeof performance.now === 'function')
+            ? performance.now()
+            : Date.now();
     }
 
     _calculateActivationOrder(length) {
@@ -82,7 +90,8 @@ export class PrismLayerNormAnimation {
             normalizedData = this.prismVis.normalizedData;
         }
         this.isAnimating = true;
-        this.animationStartTime = performance.now();
+        this._elapsedMs = 0;
+        this._lastWallClockMs = this._nowMs();
         this._instanceCount = this.prismVis?.instanceCount || VECTOR_LENGTH_PRISM;
         this.activationOrder = this._calculateActivationOrder(this._instanceCount);
 
@@ -134,8 +143,17 @@ export class PrismLayerNormAnimation {
     update(deltaTime) {
         if (!this.isAnimating || !this.prismVis) return;
 
-        const currentTime = performance.now();
-        const elapsedTimeSinceStart = currentTime - this.animationStartTime;
+        const nowMs = this._nowMs();
+        let deltaMs = 0;
+        if (Number.isFinite(deltaTime)) {
+            deltaMs = Math.max(0, deltaTime * 1000);
+        } else if (Number.isFinite(this._lastWallClockMs)) {
+            deltaMs = Math.max(0, nowMs - this._lastWallClockMs);
+        }
+        this._lastWallClockMs = nowMs;
+        this._elapsedMs += deltaMs;
+
+        const elapsedTimeSinceStart = this._elapsedMs;
         let allUnitsStillAnimatingOrPending = false; // Track if any unit is active OR not yet completed
 
         const baseSpeedMult = 100;
@@ -149,7 +167,7 @@ export class PrismLayerNormAnimation {
                 if (unitIndex !== undefined && this.unitAnimationStates[unitIndex] && !this.unitAnimationStates[unitIndex].isActive && !this.unitAnimationStates[unitIndex].hasCompleted) {
                     const state = this.unitAnimationStates[unitIndex];
                     state.isActive = true;
-                    state.activationTime = currentTime;
+                    state.activationTime = elapsedTimeSinceStart;
                     // Start flash from the unit's pre-animation color.
                     state.originalColor.copy(state.startColor);
                 }
@@ -165,7 +183,7 @@ export class PrismLayerNormAnimation {
 
             if (state.isActive && !state.hasCompleted) {
                 allUnitsStillAnimatingOrPending = true; // Mark that work is still ongoing
-                const unitElapsedTime = currentTime - state.activationTime;
+                const unitElapsedTime = elapsedTimeSinceStart - state.activationTime;
                 state.localProgress = Math.min(unitElapsedTime / unitDuration, 1.0);
 
                 const yOffset = state.riseHeight * Math.sin(Math.PI * state.localProgress);

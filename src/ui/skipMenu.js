@@ -246,7 +246,10 @@ export function initSkipMenu(pipeline) {
         const targetId = actionButton.dataset.targetId;
         if (!targetId) return;
         const sourceButton = document.getElementById(targetId);
-        if (!sourceButton || sourceButton.disabled) return;
+        if (!sourceButton || sourceButton.disabled) {
+            closeModal();
+            return;
+        }
 
         closeModal({ restoreFocus: false });
         window.requestAnimationFrame(() => {

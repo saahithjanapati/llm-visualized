@@ -1648,13 +1648,16 @@ export class LayerPipeline extends EventTarget {
     }
 
     skipCurrentLayer(opts = {}) {
-        if (this._skipLayerActive || this._skipToEndActive) return;
-        if (this._checkForwardPassComplete()) return;
+        if (this._skipLayerActive || this._skipToEndActive) return false;
+        if (this._checkForwardPassComplete()) return false;
 
         const layer = this._layers[this._currentLayerIdx];
-        if (!layer || layer._completed) return;
+        if (!layer || layer._completed) return false;
 
         const engine = this._engine;
+        if (engine && typeof engine.resume === 'function') {
+            engine.resume('manual');
+        }
         this._skipLayerActive = true;
         this._skipLayerLast = this._currentLayerIdx >= this._numLayers - 1;
         this._skipLayerRestore = {
@@ -1683,6 +1686,8 @@ export class LayerPipeline extends EventTarget {
         if (layer && typeof layer.setSkipToEndMode === 'function') {
             layer.setSkipToEndMode(true);
         }
+
+        return true;
     }
 
     skipToEndForwardPass(opts = {}) {
@@ -2565,14 +2570,31 @@ export class LayerPipeline extends EventTarget {
                         return;
                     }
 
-                    const runLoop = () => {
+                    let lastTickMs = null;
+                    const runLoop = (frameNow) => {
                         if (this._skipToEndActive) {
                             normAnim.isAnimating = false;
                             normLoopActive = false;
                             riseToCenter();
                             return;
                         }
-                        normAnim.update(0);
+                        const nowMs = Number.isFinite(frameNow)
+                            ? frameNow
+                            : ((typeof performance !== 'undefined' && typeof performance.now === 'function')
+                                ? performance.now()
+                                : Date.now());
+                        if (this._engine && this._engine._paused) {
+                            // Keep RAF alive while paused, but pin the last tick so
+                            // wall-clock pause time does not advance LN animation.
+                            lastTickMs = nowMs;
+                            requestAnimationFrame(runLoop);
+                            return;
+                        }
+                        const dt = Number.isFinite(lastTickMs)
+                            ? Math.max(0, Math.min((nowMs - lastTickMs) / 1000, 0.1))
+                            : 0;
+                        lastTickMs = nowMs;
+                        normAnim.update(dt);
                         updateTopLnColor(vec.group.position.y);
                         this.dispatchEvent(new Event('progress'));
                         if (normAnim.isAnimating) {
@@ -2583,7 +2605,7 @@ export class LayerPipeline extends EventTarget {
                             riseToCenter();
                         }
                     };
-                    runLoop();
+                    requestAnimationFrame(runLoop);
                 };
 
                 const moveToNormStart = () => {
