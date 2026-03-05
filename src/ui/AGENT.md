@@ -7,10 +7,13 @@ DOM overlays, controls, and inspection panels.
 
 ## Key Files
 - `selectionPanel.js`: primary selection details panel and preview composition.
+- `selectionPanelConstants.js`: central configuration/constants for panel preview rendering and UX copy.
 - `selectionPanelSelectionUtils.js`: selection filtering/normalization helpers.
 - `selectionPanelNarrativeUtils.js`: narrative text generation helpers.
 - `selectionPanelAttentionRevealUtils.js`: attention-grid reveal ordering and timing math.
 - `selectionPanelCopyUtils.js`: description HTML rendering + context-copy helpers.
+- `selectionPanelFormatUtils.js`: activation/token text formatting helpers.
+- `selectionPanelVectorCloneUtils.js`: vector-preview material/instance copy helpers.
 - `statusOverlay.js`, `parameterCounter.js`, `perfOverlay.js`: HUD widgets.
 - `settingsModal.js`, `pauseButton.js`, `skipMenu.js`, `skip*Button.js`, `conveyorSkipButton.js`: runtime controls.
 - `introAnimation.js`, `liveVisualControls.js`, `touchClickFallback.js`: UX glue.

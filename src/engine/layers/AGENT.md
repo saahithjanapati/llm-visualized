@@ -10,6 +10,7 @@ Per-transformer-layer visuals, state machine phases, and lane construction helpe
 - `gpt2LaneBuilder.js`: lane object construction and placeholder setup.
 - `gpt2LanePhases.js`: lane phase enums + transition guards.
 - `gpt2LaneWatchdogUtils.js`: lane-progress signatures and LN debug vector helpers.
+- `gpt2LayerDebugUtils.js`: debug logging helpers for per-lane LN vector dumps.
 - `gpt2LayerDataAccess.js`: activation/parameter data lookup helpers.
 - `gpt2LayerNormVisuals.js`: layer norm visual state updates.
 - `gpt2LayerUtils.js`: vector/trail/material utility operations.

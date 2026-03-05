@@ -48,15 +48,116 @@ import {
     setDescriptionContent
 } from './selectionPanelCopyUtils.js';
 import {
+    formatActivationData,
+    formatAttentionSubtitleTokenPart,
+    formatTokenLabelForPreview,
+    formatTokenWithIndex,
+    formatValues,
+    normalizeAttentionValuePart
+} from './selectionPanelFormatUtils.js';
+import {
+    applyMaterialSnapshot,
+    copyInstancedVectorColorsToPreview,
+    extractMaterialSnapshot,
+    tryCopyVectorAppearanceToPreview
+} from './selectionPanelVectorCloneUtils.js';
+import {
+    ATTENTION_DECODE_ROW_OFFSET_MAX_PX,
+    ATTENTION_DECODE_ROW_OFFSET_MIN_PX,
+    ATTENTION_DECODE_ROW_OFFSET_MULT,
+    ATTENTION_POP_OUT_MS,
+    ATTENTION_POST_REVEAL_DURATION_MS,
+    ATTENTION_POST_REVEAL_STAGGER_MAX_MS,
+    ATTENTION_POST_REVEAL_STAGGER_MIN_MS,
+    ATTENTION_POST_REVEAL_SWEEP_MS,
+    ATTENTION_PRE_COLOR_CLAMP,
+    ATTENTION_PRE_REVEAL_DURATION_MS,
+    ATTENTION_PRE_REVEAL_STAGGER_MAX_MS,
+    ATTENTION_PRE_REVEAL_STAGGER_MIN_MS,
+    ATTENTION_PRE_REVEAL_SWEEP_MS,
+    ATTENTION_PREVIEW_COLOR_DARKEN_FACTOR,
+    ATTENTION_PREVIEW_GAP,
+    ATTENTION_PREVIEW_GRID_GAP,
+    ATTENTION_PREVIEW_MAX_TOKENS,
+    ATTENTION_PREVIEW_MAX_CELL,
+    ATTENTION_PREVIEW_MIN_CELL,
+    ATTENTION_PREVIEW_SIZE_OPTIONS,
+    ATTENTION_PREVIEW_TRIANGLE,
+    ATTENTION_SCORE_DECIMALS,
+    ATTENTION_VALUE_PLACEHOLDER,
+    CONTEXT_LEN,
+    COPY_CONTEXT_BUTTON_DEFAULT_LABEL,
+    COPY_CONTEXT_EMPTY_LABEL,
+    COPY_CONTEXT_ERROR_LABEL,
+    COPY_CONTEXT_FADE_MS,
+    COPY_CONTEXT_FEEDBACK_MS,
+    COPY_CONTEXT_SUCCESS_LABEL,
+    DETAIL_EQUATION_FIT_BUFFER_PX,
+    DETAIL_EQUATION_FONT_MAX_PX,
+    DETAIL_EQUATION_FONT_MAX_SCALE,
+    DETAIL_EQUATION_FONT_MIN_PX,
+    D_HEAD,
+    D_MODEL,
+    FINAL_MLP_COLOR,
+    FINAL_VOCAB_TOP_COLOR,
+    LOGIT_PREVIEW_TEXT_STYLE,
+    PANEL_ACTION_HISTORY_BACK,
+    PANEL_ACTION_HISTORY_FORWARD,
+    PANEL_SHIFT_DURATION_MS,
+    PREVIEW_BASE_DISTANCE_MULT,
+    PREVIEW_BASE_ROTATION_Y,
+    PREVIEW_BASE_TILT_X,
+    PREVIEW_FIT_LOCK_MS,
+    PREVIEW_FIT_LOCK_PX,
+    PREVIEW_FIT_LOCK_RATIO,
+    PREVIEW_FRAME_PADDING,
+    PREVIEW_LANES,
+    PREVIEW_LANE_SPACING,
+    PREVIEW_MATRIX_DEPTH,
+    PREVIEW_MOBILE_MATRIX_DISTANCE_MULT,
+    PREVIEW_MOBILE_MATRIX_PADDING_MULT,
+    PREVIEW_QKV_CONVERT_DURATION,
+    PREVIEW_QKV_EXIT_DURATION,
+    PREVIEW_QKV_EXIT_Y,
+    PREVIEW_QKV_HOLD_DURATION,
+    PREVIEW_QKV_IDLE_DURATION,
+    PREVIEW_QKV_LANES,
+    PREVIEW_QKV_LANE_SPACING,
+    PREVIEW_QKV_LANE_STAGGER,
+    PREVIEW_QKV_MATRIX_Y,
+    PREVIEW_QKV_OUTPUT_Y,
+    PREVIEW_QKV_RISE_DURATION,
+    PREVIEW_QKV_START_Y,
+    PREVIEW_QKV_X_SPREAD,
+    PREVIEW_ROTATION_ENVELOPE_MARGIN,
+    PREVIEW_ROTATION_SPEED,
+    PREVIEW_SOLID_LANES,
+    PREVIEW_TARGET_SIZE,
+    PREVIEW_TILT_AMPLITUDE,
+    PREVIEW_TILT_OSC_SPEED,
+    PREVIEW_TOKEN_LANES,
+    PREVIEW_TRAIL_COLOR,
+    PREVIEW_VECTOR_BODY_INSTANCES,
+    PREVIEW_VECTOR_DISTANCE_MULT,
+    PREVIEW_VECTOR_HEAD_INSTANCES,
+    PREVIEW_VECTOR_LARGE_SCALE,
+    PREVIEW_VECTOR_PADDING_MULT,
+    PREVIEW_VECTOR_SMALL_SCALE,
+    RESIDUAL_COLOR_CLAMP,
+    SELECTION_PANEL_TOKEN_HOVER_SOURCE,
+    SPACE_TOKEN_DISPLAY,
+    TOKEN_CHIP_FONT_URL,
+    TOKEN_CHIP_STYLE,
+    VOCAB_SIZE
+} from './selectionPanelConstants.js';
+import {
     MHA_MATRIX_PARAMS,
     MLP_MATRIX_PARAMS_UP,
     MLP_MATRIX_PARAMS_DOWN,
     EMBEDDING_MATRIX_PARAMS_VOCAB,
     EMBEDDING_MATRIX_PARAMS_POSITION,
     LAYER_NORM_FINAL_COLOR,
-    VECTOR_LENGTH_PRISM,
     PRISM_DIMENSIONS_PER_UNIT,
-    NUM_HEAD_SETS_LAYER,
     HIDE_INSTANCE_Y_OFFSET,
     ATTENTION_POST_SOFTMAX_GRAYSCALE_MIN,
     resolveRenderPixelRatio
@@ -78,117 +179,6 @@ import {
     POSITION_EMBED_COLOR,
     LN_PARAMS
 } from '../animations/LayerAnimationConstants.js';
-
-const PREVIEW_LANES = 3;
-const PREVIEW_SOLID_LANES = 5;
-const PREVIEW_TOKEN_LANES = 1;
-const PREVIEW_MATRIX_DEPTH = 320;
-const PREVIEW_LANE_SPACING = 80;
-const PREVIEW_TARGET_SIZE = 140;
-// Base framing for most objects; vector previews can request additional padding.
-const PREVIEW_FRAME_PADDING = 1.25;
-const PREVIEW_BASE_DISTANCE_MULT = 1.15;
-const PREVIEW_ROTATION_ENVELOPE_MARGIN = 1.06;
-const PREVIEW_VECTOR_PADDING_MULT = 2.4;
-const PREVIEW_VECTOR_DISTANCE_MULT = 1.9;
-const PREVIEW_MOBILE_MATRIX_PADDING_MULT = 1.2;
-const PREVIEW_MOBILE_MATRIX_DISTANCE_MULT = 1.22;
-const PREVIEW_ROTATION_SPEED = 0.0035;
-const PREVIEW_BASE_TILT_X = -0.12;
-const PREVIEW_BASE_ROTATION_Y = 0.38;
-const PREVIEW_TILT_AMPLITUDE = 0.02;
-const PREVIEW_TILT_OSC_SPEED = 0.32;
-const PREVIEW_FIT_LOCK_MS = 500;
-const PREVIEW_FIT_LOCK_PX = 120;
-const PREVIEW_FIT_LOCK_RATIO = 0.18;
-const FINAL_MLP_COLOR = 0xc07a12;
-const FINAL_VOCAB_TOP_COLOR = MHA_FINAL_Q_COLOR;
-const PREVIEW_QKV_LANES = 3;
-const PREVIEW_QKV_LANE_SPACING = 360;
-const PREVIEW_VECTOR_LARGE_SCALE = 1.0;
-const PREVIEW_VECTOR_SMALL_SCALE = 0.38;
-const PREVIEW_TRAIL_COLOR = 0x6ea0ff;
-const PREVIEW_QKV_X_SPREAD = 72;
-const PREVIEW_QKV_START_Y = -150;
-const PREVIEW_QKV_MATRIX_Y = -15;
-const PREVIEW_QKV_OUTPUT_Y = 95;
-const PREVIEW_QKV_EXIT_Y = PREVIEW_QKV_OUTPUT_Y + 60;
-const PREVIEW_QKV_RISE_DURATION = 900;
-const PREVIEW_QKV_CONVERT_DURATION = 420;
-const PREVIEW_QKV_HOLD_DURATION = 520;
-const PREVIEW_QKV_EXIT_DURATION = 420;
-const PREVIEW_QKV_IDLE_DURATION = 260;
-const PREVIEW_QKV_LANE_STAGGER = 0;
-const PREVIEW_VECTOR_HEAD_INSTANCES = 1;
-const PREVIEW_VECTOR_BODY_INSTANCES = VECTOR_LENGTH_PRISM;
-const ATTENTION_PREVIEW_MAX_TOKENS = 16;
-const ATTENTION_PREVIEW_TARGET_PX = 320;
-const ATTENTION_PREVIEW_MIN_CELL = 4;
-const ATTENTION_PREVIEW_MAX_CELL = 24;
-const ATTENTION_PREVIEW_GAP = 4;
-const ATTENTION_PREVIEW_TRIANGLE = 'lower';
-const ATTENTION_PREVIEW_GRID_GAP = 8; // matches .detail-attention-grid column gap in CSS
-const ATTENTION_PRE_COLOR_CLAMP = 5;
-const ATTENTION_PREVIEW_COLOR_DARKEN_FACTOR = 0.84;
-const ATTENTION_POP_OUT_MS = 120;
-const ATTENTION_POST_REVEAL_DURATION_MS = 260;
-const ATTENTION_POST_REVEAL_SWEEP_MS = 380;
-const ATTENTION_POST_REVEAL_STAGGER_MIN_MS = 18;
-const ATTENTION_POST_REVEAL_STAGGER_MAX_MS = 52;
-const ATTENTION_PRE_REVEAL_DURATION_MS = 210;
-const ATTENTION_PRE_REVEAL_SWEEP_MS = 120;
-const ATTENTION_PRE_REVEAL_STAGGER_MIN_MS = 4;
-const ATTENTION_PRE_REVEAL_STAGGER_MAX_MS = 26;
-const ATTENTION_SCORE_DECIMALS = 4;
-const ATTENTION_VALUE_PLACEHOLDER = '--';
-const ATTENTION_DECODE_ROW_OFFSET_MULT = 0.68;
-const ATTENTION_DECODE_ROW_OFFSET_MIN_PX = 8;
-const ATTENTION_DECODE_ROW_OFFSET_MAX_PX = 20;
-const RESIDUAL_COLOR_CLAMP = 2;
-const SPACE_TOKEN_DISPLAY = '" "';
-const PANEL_SHIFT_DURATION_MS = 520;
-const DETAIL_EQUATION_FONT_MIN_PX = 9;
-const DETAIL_EQUATION_FONT_MAX_PX = 20;
-const DETAIL_EQUATION_FONT_MAX_SCALE = 1.5;
-const DETAIL_EQUATION_FIT_BUFFER_PX = 1.25;
-const COPY_CONTEXT_BUTTON_DEFAULT_LABEL = 'Have a question? Copy context';
-const COPY_CONTEXT_SUCCESS_LABEL = 'Context copied to clipboard.';
-const COPY_CONTEXT_ERROR_LABEL = 'Unable to copy context.';
-const COPY_CONTEXT_EMPTY_LABEL = 'Nothing visible to copy yet.';
-const COPY_CONTEXT_FEEDBACK_MS = 1000;
-const COPY_CONTEXT_FADE_MS = 220;
-const SELECTION_PANEL_TOKEN_HOVER_SOURCE = 'selection-panel';
-const PANEL_ACTION_HISTORY_BACK = 'history-back';
-const PANEL_ACTION_HISTORY_FORWARD = 'history-forward';
-const ATTENTION_PREVIEW_SIZE_OPTIONS = Object.freeze({
-    targetPx: ATTENTION_PREVIEW_TARGET_PX,
-    minCell: ATTENTION_PREVIEW_MIN_CELL,
-    maxCell: ATTENTION_PREVIEW_MAX_CELL
-});
-
-const TOKEN_CHIP_STYLE = {
-    padding: 80,
-    minWidth: 220,
-    minHeight: 100,
-    height: 120,
-    cornerRadius: 18,
-    depth: 12,
-    textDepth: 16,
-    textSize: 52,
-    textOffset: 1.2
-};
-
-const LOGIT_PREVIEW_TEXT_STYLE = {
-    size: 360,
-    depth: 44,
-    fitWidth: 960,
-    fitHeight: 300,
-    minScale: 0.28,
-    maxScale: 1.6,
-    faceOffset: 0.03
-};
-
-const TOKEN_CHIP_FONT_URL = 'https://threejs.org/examples/fonts/helvetiker_regular.typeface.json';
 let tokenChipFont = null;
 let tokenChipFontPromise = null;
 
@@ -212,11 +202,6 @@ function requestTokenChipFont() {
     });
     return tokenChipFontPromise;
 }
-
-const D_MODEL = 768;
-const D_HEAD = Math.floor(D_MODEL / NUM_HEAD_SETS_LAYER);
-const VOCAB_SIZE = 50257;
-const CONTEXT_LEN = 1024;
 
 function formatNumber(value) {
     if (!Number.isFinite(value)) return 'TBD';
@@ -340,84 +325,6 @@ function resolveVectorLength(label, selectionInfo) {
     return D_MODEL;
 }
 
-function formatValues(values, perLine = 8) {
-    if (!values || typeof values.length !== 'number' || values.length === 0) return '(empty)';
-    let result = '';
-    for (let idx = 0; idx < values.length; idx += 1) {
-        const num = Number(values[idx]);
-        const formatted = Number.isFinite(num) ? num.toFixed(4) : '0.0000';
-        const sep = idx === 0 ? '' : idx % perLine === 0 ? '\n' : ', ';
-        result += sep + formatted;
-    }
-    return result;
-}
-
-function formatTokenWithIndex(index, label, fallback = 'Token') {
-    const tokenText = formatTokenLabelForPreview(label);
-    if (Number.isFinite(index) && tokenText) return `${index + 1} (${tokenText})`;
-    if (Number.isFinite(index)) return String(index + 1);
-    return tokenText || fallback;
-}
-
-function normalizeAttentionValuePart(value, fallback = ATTENTION_VALUE_PLACEHOLDER) {
-    const text = typeof value === 'string' ? value.trim() : '';
-    return text || fallback;
-}
-
-function formatAttentionSubtitleTokenPart(label, tokenIndex, roleLabel) {
-    const tokenText = normalizeAttentionValuePart(formatTokenLabelForPreview(label));
-    const positionText = Number.isFinite(tokenIndex)
-        ? `Position ${Math.floor(tokenIndex) + 1}`
-        : 'Position n/a';
-    return `${roleLabel} ${tokenText} (${positionText})`;
-}
-
-function formatActivationData(data) {
-    if (!data || typeof data !== 'object') return 'No activation data.';
-    const lines = [];
-    const stage = data.stage ? String(data.stage) : '';
-    const stageLower = stage.toLowerCase();
-    const isAttentionScore = stageLower.startsWith('attention.');
-    if (stage) lines.push(`Stage: ${stage}`);
-    if (Number.isFinite(data.layerIndex)) lines.push(`Layer: ${data.layerIndex + 1}`);
-    if (isAttentionScore) {
-        if (Number.isFinite(data.tokenIndex) || data.tokenLabel) {
-            lines.push(`Source token: ${formatTokenWithIndex(data.tokenIndex, data.tokenLabel, 'Source')}`);
-        }
-        if (Number.isFinite(data.keyTokenIndex) || data.keyTokenLabel) {
-            lines.push(`Target token: ${formatTokenWithIndex(data.keyTokenIndex, data.keyTokenLabel, 'Target')}`);
-        }
-    } else {
-        if (Number.isFinite(data.tokenIndex)) {
-            const tokenText = data.tokenLabel ? ` (${formatTokenLabelForPreview(data.tokenLabel)})` : '';
-            lines.push(`Token: ${data.tokenIndex + 1}${tokenText}`);
-        }
-        if (Number.isFinite(data.keyTokenIndex)) {
-            const keyText = data.keyTokenLabel ? ` (${formatTokenLabelForPreview(data.keyTokenLabel)})` : '';
-            lines.push(`Key: ${data.keyTokenIndex + 1}${keyText}`);
-        }
-    }
-    if (Number.isFinite(data.headIndex)) lines.push(`Head: ${data.headIndex + 1}`);
-    if (Number.isFinite(data.segmentIndex)) lines.push(`Segment: ${data.segmentIndex + 1}`);
-    if (Number.isFinite(data.preScore) || Number.isFinite(data.postScore)) {
-        if (isAttentionScore) {
-            const selectedMode = stageLower.includes('post') ? 'post' : 'pre';
-            const selectedScore = selectedMode === 'post' ? data.postScore : data.preScore;
-            if (Number.isFinite(selectedScore)) {
-                lines.push(`Attention score (${selectedMode}-softmax): ${selectedScore.toFixed(ATTENTION_SCORE_DECIMALS)}`);
-            }
-        }
-        if (Number.isFinite(data.preScore)) lines.push(`Pre-softmax: ${data.preScore.toFixed(ATTENTION_SCORE_DECIMALS)}`);
-        if (Number.isFinite(data.postScore)) lines.push(`Post-softmax: ${data.postScore.toFixed(ATTENTION_SCORE_DECIMALS)}`);
-    }
-    if (data.values && typeof data.values.length === 'number') {
-        lines.push(`Values (${data.values.length}):`);
-        lines.push(formatValues(data.values));
-    }
-    if (data.notes) lines.push(String(data.notes));
-    return lines.join('\n');
-}
-
 function colorToCss(color) {
     if (!color) return 'transparent';
     const target = color.isColor ? color : new THREE.Color(color);
@@ -454,15 +361,6 @@ function buildSpectrumLegendGradient({ clampMax, steps = 13, darkenFactor = 1 } 
         stops.push(`${color} ${pct}%`);
     }
     return `linear-gradient(90deg, ${stops.join(', ')})`;
-}
-
-function formatTokenLabelForPreview(label) {
-    if (typeof label !== 'string') return '';
-    const normalized = label.replace(/^\u0120+/, (match) => ' '.repeat(match.length));
-    if (!normalized.length) return SPACE_TOKEN_DISPLAY;
-    const collapsed = normalized.replace(/\s+/g, ' ');
-    const trimmed = collapsed.trim();
-    return trimmed.length ? trimmed : SPACE_TOKEN_DISPLAY;
 }
 
 function resolveAttentionScoreSelectionSummary(selectionInfo, context = null) {
@@ -1937,308 +1835,6 @@ function resolveVectorPreviewInstanceCount(selectionInfo, label = '') {
     return PREVIEW_VECTOR_BODY_INSTANCES;
 }
 
-function extractMaterialSnapshot(selectionInfo) {
-    const root = selectionInfo?.object || selectionInfo?.hit?.object;
-    if (!root) return null;
-    let material = null;
-    let current = root;
-    while (current && !material) {
-        if (current.material) {
-            material = Array.isArray(current.material) ? current.material.find(Boolean) : current.material;
-        }
-        current = current.parent;
-    }
-    if (!material) return null;
-    return {
-        color: material.color ? material.color.clone() : null,
-        emissive: material.emissive && material.emissive.clone ? material.emissive.clone() : null,
-        emissiveIntensity: material.emissiveIntensity,
-        opacity: material.opacity,
-        transparent: material.transparent,
-        metalness: material.metalness,
-        roughness: material.roughness,
-        clearcoat: material.clearcoat,
-        clearcoatRoughness: material.clearcoatRoughness,
-        transmission: material.transmission,
-        thickness: material.thickness,
-        iridescence: material.iridescence,
-        sheen: material.sheen,
-        sheenColor: material.sheenColor && material.sheenColor.clone ? material.sheenColor.clone() : material.sheenColor,
-        envMapIntensity: material.envMapIntensity
-    };
-}
-
-function applyMaterialSnapshot(object, snapshot) {
-    if (!object || !snapshot) return;
-    object.traverse((child) => {
-        if (!child.material) return;
-        const materials = Array.isArray(child.material) ? child.material : [child.material];
-        materials.forEach((mat) => {
-            if (!mat) return;
-            if (snapshot.color) {
-                if (mat.userData?.sciFiUniforms) {
-                    updateSciFiMaterialColor(mat, snapshot.color);
-                } else if (mat.color?.copy) {
-                    mat.color.copy(snapshot.color);
-                }
-            }
-            if (snapshot.emissive && mat.emissive?.copy) {
-                mat.emissive.copy(snapshot.emissive);
-            }
-            if (Number.isFinite(snapshot.emissiveIntensity)) mat.emissiveIntensity = snapshot.emissiveIntensity;
-            if (Number.isFinite(snapshot.opacity)) mat.opacity = snapshot.opacity;
-            if (typeof snapshot.transparent === 'boolean') mat.transparent = snapshot.transparent;
-            if (Number.isFinite(snapshot.metalness)) mat.metalness = snapshot.metalness;
-            if (Number.isFinite(snapshot.roughness)) mat.roughness = snapshot.roughness;
-            if (Number.isFinite(snapshot.clearcoat)) mat.clearcoat = snapshot.clearcoat;
-            if (Number.isFinite(snapshot.clearcoatRoughness)) mat.clearcoatRoughness = snapshot.clearcoatRoughness;
-            if (Number.isFinite(snapshot.transmission)) mat.transmission = snapshot.transmission;
-            if (Number.isFinite(snapshot.thickness)) mat.thickness = snapshot.thickness;
-            if (Number.isFinite(snapshot.iridescence)) mat.iridescence = snapshot.iridescence;
-            if (Number.isFinite(snapshot.sheen)) mat.sheen = snapshot.sheen;
-            if (snapshot.sheenColor && mat.sheenColor && mat.sheenColor.copy) {
-                mat.sheenColor.copy(snapshot.sheenColor);
-            }
-            if (Number.isFinite(snapshot.envMapIntensity)) mat.envMapIntensity = snapshot.envMapIntensity;
-        });
-    });
-}
-
-function copyInstancedVectorSliceToPreview(previewVec, sourceMesh, sourceOffset = 0, sourceCount = null) {
-    if (!previewVec?.mesh || !sourceMesh?.isInstancedMesh || typeof sourceMesh.getMatrixAt !== 'function') {
-        return false;
-    }
-    const dstMesh = previewVec.mesh;
-    const dstCount = Number.isFinite(previewVec.instanceCount)
-        ? Math.max(1, Math.floor(previewVec.instanceCount))
-        : 0;
-    const srcTotal = Number.isFinite(sourceMesh.count)
-        ? Math.max(0, Math.floor(sourceMesh.count))
-        : Math.max(0, Math.floor(sourceMesh.instanceMatrix?.count || 0));
-    const start = Math.max(0, Math.floor(sourceOffset || 0));
-    const available = Math.max(0, srcTotal - start);
-    const requested = Number.isFinite(sourceCount)
-        ? Math.max(0, Math.floor(sourceCount))
-        : dstCount;
-    const copyCount = Math.min(dstCount, available, requested);
-    if (copyCount <= 0) return false;
-
-    for (let i = 0; i < copyCount; i += 1) {
-        sourceMesh.getMatrixAt(start + i, TMP_MATRIX);
-        dstMesh.setMatrixAt(i, TMP_MATRIX);
-    }
-    for (let i = copyCount; i < dstCount; i += 1) {
-        TMP_MATRIX.makeScale(0.001, 0.001, 0.001);
-        TMP_MATRIX.setPosition(0, HIDE_INSTANCE_Y_OFFSET, 0);
-        dstMesh.setMatrixAt(i, TMP_MATRIX);
-    }
-    dstMesh.instanceMatrix.needsUpdate = true;
-
-    if (sourceMesh.instanceColor?.array && dstMesh.instanceColor?.array) {
-        const srcColors = sourceMesh.instanceColor.array;
-        const dstColors = dstMesh.instanceColor.array;
-        const srcStart = start * 3;
-        const maxCopy = Math.min(copyCount * 3, srcColors.length - srcStart, dstColors.length);
-        if (maxCopy > 0) {
-            dstColors.set(srcColors.subarray(srcStart, srcStart + maxCopy), 0);
-            dstMesh.instanceColor.needsUpdate = true;
-        }
-    }
-
-    const copyAttr = (name) => {
-        const srcAttr = sourceMesh.geometry?.getAttribute?.(name);
-        const dstAttr = dstMesh.geometry?.getAttribute?.(name);
-        if (!srcAttr?.array || !dstAttr?.array) return;
-        const srcStart = start * 3;
-        const maxCopy = Math.min(copyCount * 3, srcAttr.array.length - srcStart, dstAttr.array.length);
-        if (maxCopy <= 0) return;
-        dstAttr.array.set(srcAttr.array.subarray(srcStart, srcStart + maxCopy), 0);
-        dstAttr.needsUpdate = true;
-    };
-    copyAttr('colorStart');
-    copyAttr('colorEnd');
-    return true;
-}
-
-function copyInstancedVectorColorsToPreview(previewVec, sourceMesh, sourceOffset = 0, sourceCount = null) {
-    if (!previewVec?.mesh || !sourceMesh?.isInstancedMesh) return false;
-    const dstMesh = previewVec.mesh;
-    const dstCount = Number.isFinite(previewVec.instanceCount)
-        ? Math.max(1, Math.floor(previewVec.instanceCount))
-        : 0;
-    const srcTotal = Number.isFinite(sourceMesh.count)
-        ? Math.max(0, Math.floor(sourceMesh.count))
-        : Math.max(0, Math.floor(sourceMesh.instanceMatrix?.count || 0));
-    const start = Math.max(0, Math.floor(sourceOffset || 0));
-    const available = Math.max(0, srcTotal - start);
-    const requested = Number.isFinite(sourceCount)
-        ? Math.max(0, Math.floor(sourceCount))
-        : dstCount;
-    const copyCount = Math.min(dstCount, available, requested);
-    if (copyCount <= 0) return false;
-
-    let copied = false;
-    if (sourceMesh.instanceColor?.array && dstMesh.instanceColor?.array) {
-        const srcColors = sourceMesh.instanceColor.array;
-        const dstColors = dstMesh.instanceColor.array;
-        const srcStart = start * 3;
-        const maxCopy = Math.min(copyCount * 3, srcColors.length - srcStart, dstColors.length);
-        if (maxCopy > 0) {
-            dstColors.set(srcColors.subarray(srcStart, srcStart + maxCopy), 0);
-            dstMesh.instanceColor.needsUpdate = true;
-            copied = true;
-        }
-    }
-
-    const copyAttr = (name) => {
-        const srcAttr = sourceMesh.geometry?.getAttribute?.(name);
-        const dstAttr = dstMesh.geometry?.getAttribute?.(name);
-        if (!srcAttr?.array || !dstAttr?.array) return;
-        const srcStart = start * 3;
-        const maxCopy = Math.min(copyCount * 3, srcAttr.array.length - srcStart, dstAttr.array.length);
-        if (maxCopy <= 0) return;
-        dstAttr.array.set(srcAttr.array.subarray(srcStart, srcStart + maxCopy), 0);
-        dstAttr.needsUpdate = true;
-        copied = true;
-    };
-    copyAttr('colorStart');
-    copyAttr('colorEnd');
-    return copied;
-}
-
-function isInstancedVectorSliceInMotion(sourceMesh, sourceOffset = 0, sourceCount = null) {
-    if (!sourceMesh?.isInstancedMesh || typeof sourceMesh.getMatrixAt !== 'function') {
-        return false;
-    }
-    const srcTotal = Number.isFinite(sourceMesh.count)
-        ? Math.max(0, Math.floor(sourceMesh.count))
-        : Math.max(0, Math.floor(sourceMesh.instanceMatrix?.count || 0));
-    const start = Math.max(0, Math.floor(sourceOffset || 0));
-    const available = Math.max(0, srcTotal - start);
-    const requested = Number.isFinite(sourceCount)
-        ? Math.max(0, Math.floor(sourceCount))
-        : available;
-    const inspectCount = Math.min(available, requested);
-    if (inspectCount <= 1) return false;
-
-    let baselineY = null;
-    let visibleCount = 0;
-    let hiddenCount = 0;
-    for (let i = 0; i < inspectCount; i += 1) {
-        sourceMesh.getMatrixAt(start + i, TMP_MATRIX);
-        TMP_MATRIX.decompose(TMP_POS, TMP_QUAT, TMP_SCALE);
-        const hidden = TMP_POS.y <= HIDE_INSTANCE_Y_OFFSET * 0.5
-            || TMP_SCALE.x < 0.01
-            || TMP_SCALE.y < 0.01
-            || TMP_SCALE.z < 0.01;
-        if (hidden) {
-            hiddenCount += 1;
-            continue;
-        }
-        if (!Number.isFinite(TMP_POS.y)) continue;
-
-        visibleCount += 1;
-        if (baselineY === null) {
-            baselineY = TMP_POS.y;
-            continue;
-        }
-
-        // In stable vectors, all visible prisms share the same local Y.
-        // Mid-addition vectors have per-prism Y offsets and should not be copied.
-        if (Math.abs(TMP_POS.y - baselineY) > 0.25) {
-            return true;
-        }
-    }
-
-    if (hiddenCount > 0 && visibleCount > 0) {
-        return true;
-    }
-    return false;
-}
-
-function shouldSkipLiveVectorTransformCopy(vectorRef, vectorMesh, fallbackCount = null, options = {}) {
-    if (options?.forceLiveCopy === true) return false;
-    if (vectorRef?.userData?.qkvProcessed === true) return false;
-
-    if (vectorRef?.isBatchedVectorRef && vectorRef._batch?.mesh) {
-        const batch = vectorRef._batch;
-        const batchPrismCount = Number.isFinite(batch.prismCount)
-            ? Math.max(1, Math.floor(batch.prismCount))
-            : Number.isFinite(fallbackCount)
-                ? Math.max(1, Math.floor(fallbackCount))
-                : PREVIEW_VECTOR_BODY_INSTANCES;
-        const index = Number.isFinite(vectorRef._index) ? Math.max(0, Math.floor(vectorRef._index)) : 0;
-        if (isInstancedVectorSliceInMotion(batch.mesh, index * batchPrismCount, batchPrismCount)) {
-            return true;
-        }
-    }
-
-    if (vectorRef?.mesh?.isInstancedMesh) {
-        const srcCount = Number.isFinite(vectorRef.instanceCount)
-            ? Math.max(1, Math.floor(vectorRef.instanceCount))
-            : Number.isFinite(fallbackCount)
-                ? Math.max(1, Math.floor(fallbackCount))
-                : PREVIEW_VECTOR_BODY_INSTANCES;
-        if (isInstancedVectorSliceInMotion(vectorRef.mesh, 0, srcCount)) {
-            return true;
-        }
-    }
-
-    if (vectorMesh?.isInstancedMesh) {
-        const inspectCount = Number.isFinite(fallbackCount)
-            ? Math.max(1, Math.floor(fallbackCount))
-            : null;
-        if (isInstancedVectorSliceInMotion(vectorMesh, 0, inspectCount)) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-function tryCopyVectorAppearanceToPreview(vec, selectionInfo, vectorRef, vectorMesh, options = {}) {
-    if (!vec || !vec.mesh) return false;
-    if (shouldSkipLiveVectorTransformCopy(vectorRef, vectorMesh, vec.instanceCount, options)) {
-        return false;
-    }
-    let copied = false;
-
-    if (!copied && vectorRef?.isBatchedVectorRef && vectorRef._batch?.mesh) {
-        const batch = vectorRef._batch;
-        const batchPrismCount = Number.isFinite(batch.prismCount)
-            ? Math.max(1, Math.floor(batch.prismCount))
-            : vec.instanceCount;
-        const index = Number.isFinite(vectorRef._index) ? Math.max(0, Math.floor(vectorRef._index)) : 0;
-        copied = copyInstancedVectorSliceToPreview(vec, batch.mesh, index * batchPrismCount, batchPrismCount);
-    }
-
-    if (!copied && vectorRef?.mesh?.isInstancedMesh) {
-        const srcCount = Number.isFinite(vectorRef.instanceCount)
-            ? Math.max(1, Math.floor(vectorRef.instanceCount))
-            : undefined;
-        copied = copyInstancedVectorSliceToPreview(vec, vectorRef.mesh, 0, srcCount);
-    }
-
-    if (!copied && vectorMesh?.isInstancedMesh) {
-        copied = copyInstancedVectorSliceToPreview(vec, vectorMesh, 0, vec.instanceCount);
-    }
-
-    if (!copied) return false;
-
-    if (Array.isArray(vectorRef?.currentKeyColors) && vectorRef.currentKeyColors.length >= 2) {
-        vec.currentKeyColors = vectorRef.currentKeyColors
-            .map((color) => (color?.isColor ? color.clone() : new THREE.Color(color)))
-            .filter((color) => color?.isColor);
-        vec.numSubsections = Math.max(1, vec.currentKeyColors.length - 1);
-    }
-
-    const snapshot = extractMaterialSnapshot(selectionInfo);
-    if (snapshot) {
-        applyMaterialSnapshot(vec.group, snapshot);
-    }
-    return true;
-}
-
 function buildVectorClonePreview(selectionInfo, label = '') {
     const weightedSumSelection = isWeightedSumSelection(label, selectionInfo);
     const kvCacheVectorSelection = isKvCacheVectorSelection(selectionInfo);
@@ -2820,7 +2416,7 @@ class SelectionPanel {
         this._attentionPostAnimatedRows = new Set();
         this._attentionLastPostCompleted = 0;
 
-        this.closeBtn?.addEventListener('click', () => this.close());
+        this.closeBtn?.addEventListener('click', () => this.close({ clearHistory: false }));
         this.copyContextBtn?.addEventListener('click', this._onCopyContextClick);
         this.closeBtn?.addEventListener('pointerdown', this._onClosePointerDown);
         this.canvas.addEventListener('pointerdown', this._blockPreviewGesture, { passive: false });
@@ -2861,7 +2457,7 @@ class SelectionPanel {
         document.addEventListener('keydown', this._onKeydown);
         document.addEventListener('pointerdown', this._onDocumentPointerDown, { capture: true });
         this._touchClickCleanup = initTouchClickFallback(this.panel, {
-            selector: '.toggle-row, .detail-token-nav-chip[data-token-nav="true"], .detail-history-btn, .detail-description-action-link'
+            selector: '.toggle-row, .detail-token-nav-chip[data-token-nav="true"], .detail-history-btn, .detail-description-action-link, .detail-copy-context-btn'
         });
         this._observeResize();
         this._onResize();
@@ -3324,7 +2920,7 @@ class SelectionPanel {
 
     _onKeydown(event) {
         if (event.key === 'Escape' && this.isOpen) {
-            this.close();
+            this.close({ clearHistory: false });
         }
     }
 
@@ -3332,7 +2928,7 @@ class SelectionPanel {
         if (!this.isOpen) return;
         event.preventDefault();
         event.stopPropagation();
-        this.close();
+        this.close({ clearHistory: false });
     }
 
     _blockPreviewGesture(event) {
@@ -5169,7 +4765,7 @@ class SelectionPanel {
         // Close even if the canvas captured the pointer event.
         event.preventDefault();
         event.stopPropagation();
-        this.close();
+        this.close({ clearHistory: false });
     }
 
     _refreshSourceLightRefs() {
@@ -5322,7 +4918,7 @@ class SelectionPanel {
         this._scheduleDimensionLabelFit();
     }
 
-    close() {
+    close({ clearHistory = true } = {}) {
         if (!this.isReady) return;
         this.isOpen = false;
         this._stopLoop();
@@ -5331,7 +4927,11 @@ class SelectionPanel {
         this._currentSelectionEquations = '';
         this._lastSelection = null;
         this._lastSelectionLabel = '';
-        this._resetHistoryNavigation();
+        if (clearHistory) {
+            this._resetHistoryNavigation();
+        } else {
+            this._updateHistoryNavigationControls();
+        }
         this._setPanelTokenHoverEntry(null, { emit: true });
         this._mirroredTokenHoverEntry = null;
         this._applyTokenChipHoverState();
@@ -5397,6 +4997,7 @@ class SelectionPanel {
         this.attentionTokenLabels = Array.isArray(attentionTokenLabels)
             ? attentionTokenLabels.slice()
             : (Array.isArray(this.tokenLabels) ? this.tokenLabels.slice() : null);
+        this._resetHistoryNavigation();
         this._attentionContext = null;
         this._attentionCells = null;
         this._attentionValues = null;

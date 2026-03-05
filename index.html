@@ -232,8 +232,8 @@
                     </label>
                     <label class="toggle-row">
                         <span class="toggle-copy">
-                            <span class="toggle-text">Enable KV cache mode (prefill)</span>
-                            <span class="toggle-description">Simulates prefill behavior by caching attention keys and values for reuse.</span>
+                            <span class="toggle-text">Enable KV cache mode</span>
+                            <span class="toggle-description">Caches attention keys and values for reuse across prefill and decode passes.</span>
                         </span>
                         <input id="toggleKvCacheMode" type="checkbox">
                         <span class="toggle-track" aria-hidden="true"></span>
@@ -254,23 +254,23 @@
                         <input id="togglePromptTokenStrip" type="checkbox" checked>
                         <span class="toggle-track" aria-hidden="true"></span>
                     </label>
-                    <div id="kvCacheStatusHint" class="settings-hint" hidden>Pre-fill stage. KV cache enabled.</div>
+                    <div id="kvCacheStatusHint" class="settings-hint" hidden>KV cache enabled for prefill and decode.</div>
                 </div>
                 <div class="settings-section">
                     <label class="section-label">Display</label>
                     <div class="slider-row">
                         <div class="slider-header">
                             <span class="toggle-text">Global brightness</span>
-                            <span id="brightnessValue" class="slider-value">1.00x</span>
+                            <span id="brightnessValue" class="slider-value">100%</span>
                         </div>
                         <input
                             id="brightnessSlider"
                             class="settings-range"
                             type="range"
-                            min="0.50"
-                            max="1.80"
-                            step="0.01"
-                            value="1.00"
+                            min="42"
+                            max="150"
+                            step="1"
+                            value="100"
                             aria-label="Global brightness"
                         >
                     </div>

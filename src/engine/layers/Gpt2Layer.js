@@ -61,9 +61,9 @@ import {
 } from './gpt2LanePhases.js';
 import {
     buildDebugVectorSum,
-    getLaneProgressSignature,
-    toDebugArray
+    getLaneProgressSignature
 } from './gpt2LaneWatchdogUtils.js';
+import { logLayerNormVectorDump } from './gpt2LayerDebugUtils.js';
 import { GPT2_LAYER_VISUAL_TUNING } from '../../utils/visualTuningProfiles.js';
 import {
     applyLayerNormParamVectorForLayer,
@@ -1465,7 +1465,10 @@ export default class Gpt2Layer extends BaseLayer {
                                     }
                                     return sum;
                                 })();
-                            this._logLayerNormVectorDump('ln1', lane, {
+                            logLayerNormVectorDump({
+                                layerIndex: this.index,
+                                kind: 'ln1',
+                                lane,
                                 normalizedSaved: this._getLn1Data(lane, 'norm'),
                                 normalizedRuntime: sourceRaw,
                                 scaleParamSaved: scaleParamData,
@@ -2000,7 +2003,10 @@ export default class Gpt2Layer extends BaseLayer {
                                     }
                                     return sum;
                                 })();
-                            this._logLayerNormVectorDump('ln2', lane, {
+                            logLayerNormVectorDump({
+                                layerIndex: this.index,
+                                kind: 'ln2',
+                                lane,
                                 normalizedSaved: this._getLn2Data(lane, 'norm'),
                                 normalizedRuntime: sourceRaw,
                                 scaleParamSaved: scaleParamData,
@@ -3820,61 +3826,6 @@ export default class Gpt2Layer extends BaseLayer {
         const etaSeconds = maxRemaining / speed;
         if (etaSeconds <= 1e-5) return speed;
         return remaining / etaSeconds;
-    }
-
-    _logLayerNormVectorDump(kind, lane, vectors = {}) {
-        const root = (typeof window !== 'undefined') ? window : globalThis;
-        const hasExplicitToggle = !!(root && Object.prototype.hasOwnProperty.call(root, '__LN_VECTOR_DEBUG'));
-        const enabled = hasExplicitToggle ? root.__LN_VECTOR_DEBUG !== false : true;
-        if (!enabled || !lane) return;
-        lane.__lnVectorDebugLogged = lane.__lnVectorDebugLogged || {};
-        const key = String(kind || 'ln').toLowerCase();
-        if (lane.__lnVectorDebugLogged[key]) return;
-        lane.__lnVectorDebugLogged[key] = true;
-
-        const tokenLabel = lane.tokenLabel || '(unknown)';
-        const headline = `[LN Value Dump] layer=${this.index} lane=${lane.laneIndex ?? 'n/a'} token=${lane.tokenIndex ?? 'n/a'} ${tokenLabel} ${key.toUpperCase()}`;
-        if (typeof console.groupCollapsed === 'function') {
-            console.groupCollapsed(headline);
-        } else {
-            console.log(headline);
-        }
-
-        console.log('meta', {
-            layerIndex: this.index,
-            laneIndex: lane.laneIndex,
-            tokenIndex: lane.tokenIndex,
-            tokenLabel: lane.tokenLabel,
-            layerNorm: key,
-        });
-
-        const orderedLabels = [
-            'normalizedSaved',
-            'normalizedRuntime',
-            'scaleParamSaved',
-            'productComputed',
-            'productSaved',
-            'productUsedForColor',
-            'shiftParamSaved',
-            'shiftRuntime',
-            'productPlusShiftComputed',
-            'productPlusShiftSaved',
-            'productPlusShiftUsedForColor',
-        ];
-
-        for (let i = 0; i < orderedLabels.length; i++) {
-            const label = orderedLabels[i];
-            const values = toDebugArray(vectors[label]);
-            if (values) {
-                console.log(`${label} (len=${values.length})`, values);
-            } else {
-                console.log(`${label}`, null);
-            }
-        }
-
-        if (typeof console.groupEnd === 'function') {
-            console.groupEnd();
-        }
     }
 
     _setVectorOpacity(vec, opacity) {

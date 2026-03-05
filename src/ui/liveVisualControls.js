@@ -3,7 +3,7 @@ import { setGlobalEmissiveIntensityScale } from '../utils/materialUtils.js';
 
 const BRIGHTNESS_PREF_KEY = 'displayBrightnessScale';
 const FIXED_EMISSIVE_SCALE = 0.75;
-const BRIGHTNESS_DEFAULT = 1.0;
+const BRIGHTNESS_DEFAULT = 1.2;
 
 const BRIGHTNESS_MIN = 0.5;
 const BRIGHTNESS_MAX = 1.8;

@@ -8,7 +8,12 @@ const BRIGHTNESS_PREF_KEY = 'displayBrightnessScale';
 const PROMPT_TOKEN_STRIP_PREF_KEY = 'showPromptTokenStrip';
 const BRIGHTNESS_MIN = 0.5;
 const BRIGHTNESS_MAX = 1.8;
-const BRIGHTNESS_DEFAULT = 1.0;
+const BRIGHTNESS_DEFAULT = 1.2;
+const BRIGHTNESS_UI_BASELINE = 1.2;
+const BRIGHTNESS_UI_SCALE = 100;
+const BRIGHTNESS_UI_MIN = Math.round((BRIGHTNESS_MIN / BRIGHTNESS_UI_BASELINE) * BRIGHTNESS_UI_SCALE);
+const BRIGHTNESS_UI_MAX = Math.round((BRIGHTNESS_MAX / BRIGHTNESS_UI_BASELINE) * BRIGHTNESS_UI_SCALE);
+const BRIGHTNESS_UI_DEFAULT = Math.round((BRIGHTNESS_DEFAULT / BRIGHTNESS_UI_BASELINE) * BRIGHTNESS_UI_SCALE);
 
 function clampBrightness(value) {
     const next = Number(value);
@@ -16,8 +21,22 @@ function clampBrightness(value) {
     return Math.max(BRIGHTNESS_MIN, Math.min(BRIGHTNESS_MAX, next));
 }
 
+function clampBrightnessUi(value) {
+    const next = Number(value);
+    if (!Number.isFinite(next)) return BRIGHTNESS_UI_DEFAULT;
+    return Math.max(BRIGHTNESS_UI_MIN, Math.min(BRIGHTNESS_UI_MAX, next));
+}
+
+function brightnessInternalToUi(value) {
+    return Math.round((clampBrightness(value) / BRIGHTNESS_UI_BASELINE) * BRIGHTNESS_UI_SCALE);
+}
+
+function brightnessUiToInternal(value) {
+    return clampBrightness((clampBrightnessUi(value) / BRIGHTNESS_UI_SCALE) * BRIGHTNESS_UI_BASELINE);
+}
+
 function formatBrightness(value) {
-    return `${Number(value).toFixed(2)}x`;
+    return `${brightnessInternalToUi(value)}%`;
 }
 
 // Wires up the settings modal controls.
@@ -29,6 +48,11 @@ export function initSettingsModal(pipeline) {
     const settingsModal = settingsOverlay?.querySelector('.settings-modal') || null;
     const brightnessSlider = document.getElementById('brightnessSlider');
     const brightnessValue = document.getElementById('brightnessValue');
+    if (brightnessSlider) {
+        brightnessSlider.min = String(BRIGHTNESS_UI_MIN);
+        brightnessSlider.max = String(BRIGHTNESS_UI_MAX);
+        brightnessSlider.step = '1';
+    }
 
     initTouchClickFallback(settingsModal, { selector: 'button, .toggle-row, .speed-option' });
 
@@ -168,11 +192,11 @@ export function initSettingsModal(pipeline) {
         hint.hidden = !enabled;
     };
 
-    const applyBrightness = (value, { persist = true } = {}) => {
-        const next = clampBrightness(value);
+    const applyBrightness = (value, { persist = true, valueIsUi = false } = {}) => {
+        const next = valueIsUi ? brightnessUiToInternal(value) : clampBrightness(value);
         const brightnessCss = `brightness(${next.toFixed(2)})`;
 
-        if (brightnessSlider) brightnessSlider.value = next.toFixed(2);
+        if (brightnessSlider) brightnessSlider.value = String(brightnessInternalToUi(next));
         if (brightnessValue) brightnessValue.textContent = formatBrightness(next);
 
         const gptCanvas = document.getElementById('gptCanvas');
@@ -352,11 +376,11 @@ export function initSettingsModal(pipeline) {
     applyBrightness(initialBrightness, { persist: false });
 
     brightnessSlider?.addEventListener('input', () => {
-        applyBrightness(brightnessSlider.value, { persist: false });
+        applyBrightness(brightnessSlider.value, { persist: false, valueIsUi: true });
     });
 
     brightnessSlider?.addEventListener('change', () => {
-        applyBrightness(brightnessSlider.value, { persist: true });
+        applyBrightness(brightnessSlider.value, { persist: true, valueIsUi: true });
     });
 
     if (appState.showPerfOverlay) {
