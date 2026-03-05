@@ -686,13 +686,13 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
                 title = 'Residual Add 1';
             } else if (selfAttentionActive) {
                 key = 'attn';
-                title = 'Multi Head Self Attention';
+                title = 'Multi-Head Self-Attention';
             } else if (concatActive) {
                 key = 'concat_proj';
                 title = 'Concat Heads + W_O';
             } else if (phase === 'parallel_pass_through_active' || phase === 'mha_pass_through_complete') {
                 key = 'attn';
-                title = 'Multi Head Self Attention';
+                title = 'Multi-Head Self-Attention';
             } else {
                 key = 'qkv_per_head';
                 title = 'Q/K/V Projections';
@@ -821,7 +821,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
                 } else if (ln1Active) {
                     displayStage = 'LayerNorm 1';
                 } else if (mhsaActive) {
-                    displayStage = 'Multi Head Self Attention';
+                    displayStage = 'Multi-Head Self-Attention';
                 } else if (layer.isActive) {
                     displayStage = 'LayerNorm 1';
                 }

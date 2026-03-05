@@ -306,8 +306,8 @@ export const DECORATIVE_FADE_MS = 800;
 export const DECORATIVE_FADE_DELAY_MS = 800;
 export const MERGE_TO_ROW_DELAY_AFTER_FADE_MS = 900;          // Begin merge after decorative fade completes
 export const HEAD_COLOR_TRANSITION_MS = 1000;                 // Duration for head colour transition
-export const MERGE_POST_COLOR_TRANSITION_DELAY_MS = 1000;     // Delay before starting output projection after colours
-export const MERGE_EXTRA_BUFFER_MS = 200;                     // Extra buffer after merge duration
+export const MERGE_POST_COLOR_TRANSITION_DELAY_MS = 250;      // Brief overlap before starting output projection
+export const MERGE_EXTRA_BUFFER_MS = 80;                      // Small settle buffer after merge duration
 
 // Output projection staged timings
 export const OUTPUT_PROJ_STAGE1_MS = 1000; // to matrix bottom

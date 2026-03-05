@@ -2884,6 +2884,22 @@ class SelectionPanel {
         }
     }
 
+    _refreshReusedPreview() {
+        if (!this.currentPreview) return;
+        this._pendingReveal = false;
+        this._pendingRevealSize = null;
+        if (this._pendingRevealTimer) {
+            clearTimeout(this._pendingRevealTimer);
+            this._pendingRevealTimer = null;
+        }
+        if (this.canvas) {
+            this.canvas.style.opacity = '1';
+        }
+        if (this.isOpen) {
+            this._scheduleResize();
+        }
+    }
+
     _noteFit(width, height) {
         let nextWidth = width;
         let nextHeight = height;
@@ -3095,6 +3111,13 @@ class SelectionPanel {
         }
         if (this._historyIndex < this._historyEntries.length - 1) {
             this._historyEntries = this._historyEntries.slice(0, this._historyIndex + 1);
+        }
+        const existingIndex = this._historyEntries.findIndex((candidate) => this._historyEntriesEqual(candidate, entry));
+        if (existingIndex >= 0) {
+            this._historyEntries.splice(existingIndex, 1);
+            if (existingIndex <= this._historyIndex) {
+                this._historyIndex = Math.max(-1, this._historyIndex - 1);
+            }
         }
         this._historyEntries.push(entry);
         this._historyIndex = this._historyEntries.length - 1;
@@ -5586,6 +5609,9 @@ class SelectionPanel {
             this._pendingRevealSize = null;
             this._stopLoop();
             if (this.canvas) this.canvas.style.opacity = '1';
+        }
+        if (shouldReusePreview && this.currentPreview) {
+            this._refreshReusedPreview();
         }
 
         this._updateAttentionPreview(selection);

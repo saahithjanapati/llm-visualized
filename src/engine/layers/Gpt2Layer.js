@@ -120,7 +120,6 @@ const MLP_REFLECTIVITY_TWEAKS = {
 const POS_ADD_STALL_TIMEOUT_MS = 12000;
 const POS_PASS_START_PAUSE_MS = 140;
 const FIRST_LAYER_LN1_START_PAUSE_MS = 180;
-const FIRST_LAYER_LN1_HORIZ_SPEED_MULT = 0.52;
 const FIRST_LAYER_LN1_RISE_SPEED_MULT = 0.48;
 const LANE_PHASE_STALL_TIMEOUT_MS_SKIP = 3000;
 const LANE_PHASE_STALL_TIMEOUT_MS_NORMAL = 4500;
@@ -131,6 +130,7 @@ const LN2_HANDOFF_STALL_TIMEOUT_MS_NORMAL = 7000;
 // Reset watchdog baselines after such gaps to avoid false "stalled" recoveries
 // that can spawn fallback vectors/trails on top of active ones.
 const WATCHDOG_FRAME_GAP_RESET_MS = 900;
+const POST_ATTENTION_LN2_PRE_RISE_SPEED_MULT = 1.25;
 const MULTIPLY_TRANSITION_DURATION_MS = 160;
 const MULTIPLY_SOURCE_SHRINK = 0.94;
 const MLP_POST_PASS_THROUGH_FINAL_EMISSIVE = GPT2_LAYER_VISUAL_TUNING.mlp.postPassFinalEmissiveIntensity;
@@ -1192,12 +1192,9 @@ export default class Gpt2Layer extends BaseLayer {
                     if (typeof lane.branchStartY === 'number') {
                         dupVec.group.position.y = lane.branchStartY;
                     }
-                    const ln1HorizSpeedMult = (!skipActive && this.index === 0)
-                        ? FIRST_LAYER_LN1_HORIZ_SPEED_MULT
-                        : 1;
                     dupVec.group.position.x = Math.min(
                         BRANCH_X,
-                        dupVec.group.position.x + ANIM_HORIZ_SPEED * speedMult * ln1HorizSpeedMult * dt
+                        dupVec.group.position.x + ANIM_HORIZ_SPEED * speedMult * dt
                     );
                     if (dupVec.group.position.x >= BRANCH_X - 0.01) {
                         // Ensure alignment with LN-1 centre
@@ -1621,7 +1618,10 @@ export default class Gpt2Layer extends BaseLayer {
                     // normalisation begins at a consistent height across both LayerNorms.
                     const targetY = bottomY_ln2_abs + 5; // align with LN1 offset
                     if (v.group.position.y < targetY) {
-                        const baseRiseSpeed = ANIM_RISE_SPEED_POST_SPLIT_LN2 * speedMult;
+                        const baseRiseSpeed =
+                            ANIM_RISE_SPEED_POST_SPLIT_LN2
+                            * POST_ATTENTION_LN2_PRE_RISE_SPEED_MULT
+                            * speedMult;
                         const syncedRiseSpeed = this._getSynchronizedRiseSpeed(
                             v.group.position.y,
                             targetY,

@@ -2301,6 +2301,11 @@ export class MHSAAnimation {
         const firstHeadCenterX = this.headsCentersX.length ? this.headsCentersX[0] : 0; 
         const targetX = firstHeadCenterX; // Existing merge target for centralised row
         let maxDurationMs = 0;
+        const playbackSpeed = Number.isFinite(GLOBAL_ANIM_SPEED_MULT) && GLOBAL_ANIM_SPEED_MULT > 0
+            ? GLOBAL_ANIM_SPEED_MULT
+            : 1;
+        const mergeCompletionBufferMs = MERGE_EXTRA_BUFFER_MS / playbackSpeed;
+        const projectionHandoffDelayMs = MERGE_POST_COLOR_TRANSITION_DELAY_MS / playbackSpeed;
 
         laneVectors.forEach((laneEntry) => {
             const vecList = laneEntry && Array.isArray(laneEntry.vectors) ? laneEntry.vectors : [];
@@ -2336,8 +2341,8 @@ export class MHSAAnimation {
                 this._transitionHeadColorsToFinal(HEAD_COLOR_TRANSITION_MS);
                 this._scheduleAfterDelay(() => {
                     this._startVectorsThroughOutputProjection(laneVectors);
-                }, MERGE_POST_COLOR_TRANSITION_DELAY_MS);
-            }, maxDurationMs + MERGE_EXTRA_BUFFER_MS);
+                }, projectionHandoffDelayMs);
+            }, maxDurationMs + mergeCompletionBufferMs);
         } else {
             this._transitionHeadColorsToFinal(0);
             this._startVectorsThroughOutputProjection(laneVectors);
