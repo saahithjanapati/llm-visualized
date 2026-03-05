@@ -748,13 +748,13 @@ export const POS_VEC_Y_OFFSET_ABOVE_VOCAB = 300;
  * Multiplier for the vertical rise speed of positional-embedding vectors
  * relative to the base residual rise speed.
  */
-export const POS_VEC_VERTICAL_SPEED_MULT = 1.9;
+export const POS_VEC_VERTICAL_SPEED_MULT = 2.6;
 
 /**
  * Multiplier for the horizontal slide speed of positional-embedding vectors
  * when moving into the residual stream at x = 0.
  */
-export const POS_VEC_HORIZONTAL_SPEED_MULT = 1.45;
+export const POS_VEC_HORIZONTAL_SPEED_MULT = 2.1;
 
 // ------------------------------------------------------------
 // Prism LayerNorm animation timings (centralised)

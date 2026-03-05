@@ -1241,17 +1241,30 @@ export class SelfAttentionAnimator {
         if (!vector) return;
         vector.userData = vector.userData || {};
         vector.userData.isWeightedSum = true;
-        const tokenLabel = lane && lane.tokenLabel ? lane.tokenLabel : null;
-        const label = tokenLabel ? `Attention Weighted Sum - ${tokenLabel}` : 'Attention Weighted Sum';
+        const tokenIndex = Number.isFinite(lane?.tokenIndex) ? Math.floor(lane.tokenIndex) : null;
+        const tokenLabel = (lane && typeof lane.tokenLabel === 'string') ? lane.tokenLabel : null;
+        if (Number.isFinite(tokenIndex)) vector.userData.tokenIndex = tokenIndex;
+        else delete vector.userData.tokenIndex;
+        if (tokenLabel) vector.userData.tokenLabel = tokenLabel;
+        else delete vector.userData.tokenLabel;
+        const label = 'Attention Weighted Sum';
         if (vector.group) {
             vector.group.userData = vector.group.userData || {};
             vector.group.userData.label = label;
             vector.group.userData.isWeightedSum = true;
+            if (Number.isFinite(tokenIndex)) vector.group.userData.tokenIndex = tokenIndex;
+            else delete vector.group.userData.tokenIndex;
+            if (tokenLabel) vector.group.userData.tokenLabel = tokenLabel;
+            else delete vector.group.userData.tokenLabel;
         }
         if (vector.mesh) {
             vector.mesh.userData = vector.mesh.userData || {};
             vector.mesh.userData.label = label;
             vector.mesh.userData.isWeightedSum = true;
+            if (Number.isFinite(tokenIndex)) vector.mesh.userData.tokenIndex = tokenIndex;
+            else delete vector.mesh.userData.tokenIndex;
+            if (tokenLabel) vector.mesh.userData.tokenLabel = tokenLabel;
+            else delete vector.mesh.userData.tokenLabel;
         }
     }
 
@@ -1929,7 +1942,8 @@ export class SelfAttentionAnimator {
                                     ? this.DUPLICATE_TRAVEL_MERGE_MS * SA_DUPLICATE_TO_SUM_TRAVEL_FRACTION
                                     : this.DUPLICATE_TRAVEL_MERGE_MS;
                                 const applyWeightedLook = () => {
-                                    this._applyWeightedSumScheme(dupVec, fixedVec.rawData, { setHiddenToBlack: true });
+                                    const weightedVisualData = Array.isArray(weightedData) ? weightedData : fixedRaw;
+                                    this._applyWeightedSumScheme(dupVec, weightedVisualData, { setHiddenToBlack: true });
                                     this._tagConveyorValueVector(dupVec, {
                                         lane,
                                         queryLane,
@@ -2030,10 +2044,11 @@ export class SelfAttentionAnimator {
                                                     haloColor
                                                 );
                                             }
+                                            // Recolor at collision to reflect value * post-softmax weight.
+                                            applyWeightedLook();
                                             // Brief linger at the post-softmax score before merging into the running sum
                                             this._scheduleAfterDelay(() => {
                                                 if (this.skipRequested) return;
-                                                applyWeightedLook();
                                                 flyToSum();
                                             }, Math.max(80, collisionPulseDuration * 2));
                                         })

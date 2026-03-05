@@ -19,7 +19,8 @@ export function calculateTopEmbeddingTargets({
         if (engineScene && typeof engineScene.traverse === 'function') {
             engineScene.traverse((obj) => {
                 if (topEmbedObj) return;
-                if (obj && obj.userData && obj.userData.label === 'Vocab Embedding (Top)') {
+                const label = obj && obj.userData ? obj.userData.label : '';
+                if (label === 'Vocab Embedding (Top)' || label === 'Vocabulary Embedding (Top)') {
                     topEmbedObj = obj;
                 }
             });
@@ -107,4 +108,3 @@ export function activateLayerNormColor(lnTopGroup, {
         }
     });
 }
-

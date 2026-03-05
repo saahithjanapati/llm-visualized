@@ -106,7 +106,11 @@ export function resolveAutoCameraViewState({
     const laneIndex = laneCount ? Math.min(laneCount - 1, Math.floor(laneCount / 2)) : -1;
     const lane = laneIndex >= 0 ? lanes[laneIndex] : null;
     const inLaneLn = !!(lane
-        && (lane.horizPhase === HORIZ_PHASE.INSIDE_LN || lane.ln2Phase === LN2_PHASE.INSIDE_LN));
+        && (
+            lane.horizPhase === HORIZ_PHASE.INSIDE_LN
+            || lane.horizPhase === HORIZ_PHASE.RISE_ABOVE_LN
+            || lane.ln2Phase === LN2_PHASE.INSIDE_LN
+        ));
     const inTopLn = !!isTopLayerNormCameraPhase(layer, lanes);
     const inLayerHandoff = !!(layerIndex > 0
         && lane
@@ -133,10 +137,7 @@ export function resolveAutoCameraViewState({
     const inResidualAdd = anyResidualAddActive || anyResidualAddReleaseHold;
     const holdViewDuringResidualAdd = !!(inResidualAdd
         && priorViewKey !== 'final'
-        && priorViewKey !== 'layer-end-desktop'
-        // Once concat hands off to output projection/residual-add, allow
-        // follow mode to move to the default (MLP-style) framing.
-        && priorViewKey !== 'concat');
+        && priorViewKey !== 'layer-end-desktop');
     const holdViewUntilLn2Inside = !!(holdViewBeforeLn2
         && priorViewKey !== 'ln'
         && priorViewKey !== 'final'
@@ -199,6 +200,8 @@ export function resolveAutoCameraViewState({
     const passPhase = mhsa?.mhaPassThroughPhase || 'positioning_mha_vectors';
     const inTravel = !!(lane && lane.horizPhase === HORIZ_PHASE.TRAVEL_MHSA
         && passPhase === 'positioning_mha_vectors');
+    const inPreTravelStaging = !!(lane
+        && lane.horizPhase === HORIZ_PHASE.READY_MHSA);
     const inCopyStage = !!(lane
         && lane.horizPhase === LEGACY_HORIZ_PHASE.FINISHED_HEADS
         && (passPhase === 'positioning_mha_vectors' || passPhase === 'ready_for_parallel_pass_through'));
@@ -214,7 +217,7 @@ export function resolveAutoCameraViewState({
     if (holdViewDuringResidualAdd) return { rawKey: priorViewKey, viewContext };
     if (holdViewThroughLayerHandoff) return { rawKey: priorViewKey, viewContext };
     if (inLayerHandoff && isLargeDesktopViewport) return { rawKey: 'layer-end-desktop', viewContext };
-    if (inTravel || inCopyStage) return { rawKey: 'travel', viewContext };
+    if (inPreTravelStaging || inTravel || inCopyStage) return { rawKey: 'travel', viewContext };
 
     const outputPhase = mhsa.outputProjMatrixAnimationPhase || 'waiting';
     const rowPhase = mhsa.rowMergePhase || 'not_started';
@@ -253,25 +256,34 @@ export function getAutoCameraViewSwitchHoldMs({
         && (viewContext.lane.stopRise || viewContext.lane.__followStopRiseReleaseFrom)) {
         holdMs = Math.max(holdMs, 110);
     }
-    if (toKey === 'ln') {
-        holdMs = Math.min(holdMs, 48);
-    } else if (toKey === 'final') {
-        holdMs = Math.min(holdMs, 20);
-    }
     if (fromKey === 'ln' && toKey === 'default') {
         holdMs = Math.max(holdMs, 72);
     }
-    if (fromKey === 'concat' && toKey === 'default') {
-        holdMs = Math.min(holdMs, 36);
+    if (fromKey === 'ln' && toKey === 'travel') {
+        holdMs = Math.min(holdMs, 28);
     }
-    if (fromKey === EMBED_VIEW_KEY_VOCAB && toKey === EMBED_VIEW_KEY_POSITION) {
-        holdMs = 0;
+    if (fromKey === 'concat' && toKey === 'default') {
+        holdMs = Math.max(holdMs, 110);
     }
     if (isEmbedBottomViewKey(fromKey) || isEmbedBottomViewKey(toKey)) {
-        holdMs = Math.min(holdMs, 24);
+        holdMs = Math.max(holdMs, 80);
+    }
+    if (fromKey === EMBED_VIEW_KEY_VOCAB && toKey === EMBED_VIEW_KEY_POSITION) {
+        holdMs = Math.max(holdMs, 140);
+    }
+    if (fromKey === EMBED_VIEW_KEY_POSITION && toKey === EMBED_VIEW_KEY_ADD) {
+        holdMs = Math.max(holdMs, 110);
+    }
+    if (fromKey === EMBED_VIEW_KEY_ADD && toKey === 'ln') {
+        holdMs = Math.max(holdMs, 150);
     }
     if (toKey === 'layer-end-desktop' || fromKey === 'layer-end-desktop') {
         holdMs = Math.max(holdMs, 130);
+    }
+    if (toKey === 'ln') {
+        holdMs = Math.max(holdMs, 72);
+    } else if (toKey === 'final') {
+        holdMs = Math.min(holdMs, 20);
     }
     return Math.max(0, holdMs);
 }

@@ -200,22 +200,56 @@ const selectionPanel = initSelectionPanel({
     pipeline,
     pauseMainFlowOnMobileFocus: true
 });
+
+const findSelectionObjectByLabel = (label) => {
+    if (!label || typeof label !== 'string') return null;
+    const scene = pipeline?.engine?.scene;
+    if (!scene || typeof scene.traverse !== 'function') return null;
+    let fallback = null;
+    let preferred = null;
+    scene.traverse((node) => {
+        if (!node || !node.userData || node.userData.label !== label) return;
+        if (!fallback) fallback = node;
+        if (node.visible === false) return;
+        if (node.isLine || node.isLineSegments) return;
+        if (!preferred) preferred = node;
+    });
+    return preferred || fallback;
+};
+
 const promptTokenStrip = initPromptTokenStrip({
     onTokenClick: (tokenEntry) => {
         const tokenLabel = typeof tokenEntry?.tokenLabel === 'string' ? tokenEntry.tokenLabel : '';
         const displayToken = formatTokenLabel(tokenLabel);
+        const isGeneratedToken = tokenEntry?.entryType === 'generated';
         const info = {
             tokenLabel
         };
         if (Number.isFinite(tokenEntry?.laneIndex)) info.laneIndex = Math.floor(tokenEntry.laneIndex);
         if (Number.isFinite(tokenEntry?.tokenIndex)) info.tokenIndex = Math.floor(tokenEntry.tokenIndex);
         if (Number.isFinite(tokenEntry?.tokenId)) info.tokenId = Math.floor(tokenEntry.tokenId);
+        if (tokenEntry?.logitEntry && typeof tokenEntry.logitEntry === 'object') {
+            info.logitEntry = tokenEntry.logitEntry;
+        }
+
+        let label = `Token: ${displayToken}`;
+        let selectionObject = null;
+        if (isGeneratedToken) {
+            const chosenLabel = (typeof tokenEntry?.selectionLabel === 'string' && tokenEntry.selectionLabel.length)
+                ? tokenEntry.selectionLabel
+                : `Chosen token: ${displayToken}`;
+            label = chosenLabel;
+            selectionObject = findSelectionObjectByLabel(chosenLabel);
+        }
+
         followModeControls?.suppressPendingFollowDisable?.();
-        selectionPanel.handleSelection({
-            label: `Token: ${displayToken}`,
+        const selection = {
+            label,
             info,
             kind: 'label'
-        });
+        };
+        if (selectionObject) selection.object = selectionObject;
+        selectionPanel.handleSelection(selection);
     }
 });
 if (pipeline.engine && typeof pipeline.engine.setRaycastSelectionHandler === 'function') {

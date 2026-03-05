@@ -14,12 +14,6 @@ const STOP_RISE_RELEASE_DURATION_MS = 420;
 const STOP_RISE_RELEASE_FALLBACK_STEP = 0.05;
 const AUTO_CAMERA_VIEW_SWITCH_HOLD_MS_DEFAULT = 90;
 
-const isEmbedBottomViewKey = (key) => (
-    key === 'embed-vocab'
-    || key === 'embed-position'
-    || key === 'embed-add'
-);
-
 const coerceVector3 = (value, fallback = null) => {
     if (value instanceof THREE.Vector3) return value.clone();
     if (value && typeof value === 'object' && 'x' in value && 'y' in value && 'z' in value) {
@@ -1167,16 +1161,15 @@ export class AutoCameraController {
         let camOffset = resolvedOffsets.cameraOffset;
         let targetOffset = resolvedOffsets.targetOffset;
 
-        if (key !== this._autoCameraViewKey) {
-            const prevKey = this._autoCameraViewKey;
-            this._autoCameraViewBlendAlphaActive = this._autoCameraViewBlendAlphaTransition;
+        const previousKey = this._autoCameraViewKey;
+        if (key !== previousKey) {
+            let blendAlpha = this._autoCameraViewBlendAlphaTransition;
+            if (previousKey === 'concat' && key === 'default') {
+                blendAlpha = Math.min(blendAlpha, 0.026);
+            }
+            this._autoCameraViewBlendAlphaActive = blendAlpha;
             this._autoCameraViewKey = key;
-            if (prevKey === 'embed-vocab' && key === 'embed-position') {
-                // Make the vocab->position handoff perceptibly immediate.
-                this._autoCameraViewBlendT = 1;
-                this._autoCameraViewFromCameraOffset.copy(camOffset);
-                this._autoCameraViewFromTargetOffset.copy(targetOffset);
-            } else if (!this._autoCameraSmoothValid) {
+            if (!this._autoCameraSmoothValid) {
                 this._autoCameraViewBlendT = 1;
                 this._autoCameraViewFromCameraOffset.copy(camOffset);
                 this._autoCameraViewFromTargetOffset.copy(targetOffset);
@@ -1184,9 +1177,6 @@ export class AutoCameraController {
                 this._autoCameraViewBlendT = 0;
                 this._autoCameraViewFromCameraOffset.copy(this._autoCameraCurrentCameraOffset);
                 this._autoCameraViewFromTargetOffset.copy(this._autoCameraCurrentTargetOffset);
-                if (isEmbedBottomViewKey(prevKey) || isEmbedBottomViewKey(key)) {
-                    this._autoCameraViewBlendAlphaActive = Math.max(this._autoCameraViewBlendAlphaActive, 0.16);
-                }
             }
         }
 
@@ -1195,7 +1185,8 @@ export class AutoCameraController {
 
         if (this._autoCameraViewBlendT < 1) {
             this._autoCameraViewBlendT = Math.min(1, this._autoCameraViewBlendT + this._autoCameraViewBlendAlphaActive);
-            const t = this._autoCameraViewBlendT;
+            const linearT = this._autoCameraViewBlendT;
+            const t = linearT * linearT * (3 - 2 * linearT);
             this._autoCameraViewBlendCameraOffset.copy(this._autoCameraViewFromCameraOffset).lerp(this._autoCameraViewToCameraOffset, t);
             this._autoCameraViewBlendTargetOffset.copy(this._autoCameraViewFromTargetOffset).lerp(this._autoCameraViewToTargetOffset, t);
             camOffset = this._autoCameraViewBlendCameraOffset;

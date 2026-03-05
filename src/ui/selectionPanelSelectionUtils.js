@@ -170,7 +170,10 @@ export function isAttentionScoreSelection(label, selectionInfo) {
     const stage = selectionInfo?.info?.activationData?.stage
         || selectionInfo?.object?.userData?.activationData?.stage
         || selectionInfo?.hit?.object?.userData?.activationData?.stage;
-    if (typeof stage === 'string' && stage.startsWith('attention.')) return true;
+    const stageLower = typeof stage === 'string' ? stage.toLowerCase() : '';
+    if (stageLower === 'attention.pre' || stageLower === 'attention.post') return true;
+    const kindLower = String(selectionInfo?.kind || '').toLowerCase();
+    if (kindLower === 'attentionsphere') return true;
     const obj = selectionInfo?.object || selectionInfo?.hit?.object;
     return !!(obj && obj.isMesh && obj.geometry && obj.geometry.type === 'SphereGeometry');
 }

@@ -8,15 +8,24 @@ export const GPT2_LAYER_VISUAL_TUNING = Object.freeze({
         exitTransitionRange: 5,
     }),
     mlp: Object.freeze({
-        postPassFinalEmissiveIntensity: 0.22,
+        // Keep MLP pass-through flashes visible at high playback speeds.
+        postPassFinalEmissiveIntensity: 0.2,
+        flashStartEmissiveIntensity: 0.04,
+        flashPeakEmissiveIntensity: 0.4,
+        flashMinDurationMs: 340,
     }),
     mhsa: Object.freeze({
         qkvFinalMatrixEmissiveIntensity: 0.13,
         outputProjection: Object.freeze({
-            startEmissiveIntensity: 0.12,
-            peakEmissiveIntensity: 0.30,
-            endEmissiveIntensity: 0.30,
+            // Output projection uses very short travel durations by default,
+            // so enforce a minimum pulse window and stronger contrast.
+            startEmissiveIntensity: 0.05,
+            peakEmissiveIntensity: 0.38,
+            endEmissiveIntensity: 0.14,
+            minStageEnterDurationMs: 140,
+            minStageThroughDurationMs: 260,
+            minStageExitDurationMs: 140,
+            minFlashDurationMs: 260,
         }),
     }),
 });
-

@@ -103,6 +103,14 @@ function buildNlpEmbeddingEquationBlock() {
     ]);
 }
 
+function hasVocabEmbeddingLabel(lower) {
+    return lower.includes('vocab embedding') || lower.includes('vocabulary embedding');
+}
+
+function hasTopVocabEmbeddingLabel(lower) {
+    return lower.includes('vocab embedding (top)') || lower.includes('vocabulary embedding (top)');
+}
+
 function resolveLayerNormEquationSymbols(lower) {
     if (lower.includes('top')) {
         return {
@@ -145,7 +153,7 @@ export function resolveSelectionEquations(label, selectionInfo = null) {
     const isNlpEmbeddingSelection = lower.startsWith('token:')
         || lower.startsWith('position:')
         || lower.includes('token embedding')
-        || lower.includes('vocab embedding')
+        || hasVocabEmbeddingLabel(lower)
         || lower.includes('positional embedding')
         || lower.includes('embedding sum');
 
@@ -192,7 +200,7 @@ export function resolveSelectionEquations(label, selectionInfo = null) {
             `x_{\\text{out}} = u + ${SELECTION_EQUATION_SYMBOLS.MLPDown}`
         ]);
     }
-    if (lower.includes('vocab embedding (top)') || lower.includes('unembedding')) {
+    if (hasTopVocabEmbeddingLabel(lower) || lower.includes('unembedding')) {
         return formatEquationBlock([
             `\\ell = x_{\\text{final}} ${SELECTION_EQUATION_SYMBOLS.WU}`,
             'p = \\mathrm{softmax}(\\ell)'
@@ -321,10 +329,10 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
     if (lower.includes('embedding connector trail')) {
         return 'This connector marks the visual handoff path from the token and position chips into the embedding/residual input flow for the current pass.';
     }
-    if (lower.includes('vocab embedding (top)')) {
+    if (hasTopVocabEmbeddingLabel(lower)) {
         return 'This is the output (unembedding) matrix at the top of the model. It maps the final residual stream vector to vocabulary logits. Softmax converts logits to probabilities and the model samples or selects the next token. In GPT-2, these weights are tied to the input embedding.';
     }
-    if (lower.includes('vocab embedding')) {
+    if (hasVocabEmbeddingLabel(lower)) {
         return 'This matrix converts token IDs into vectors. It is the learned lookup table that produces the initial residual stream input after adding position information. These vectors carry semantic and syntactic information into the model. Everything else in the network builds on these representations.';
     }
     if (lower.includes('positional embedding')) {

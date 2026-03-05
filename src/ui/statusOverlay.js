@@ -499,10 +499,10 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         }
 
         if (!hasEmbeddingLanes || !anyPosWorkRemaining) return null;
-        if (anySumActive) return { eqKey: 'embed_sum', eqTitle: 'Input Embedding Sum' };
-        if (anyPosPassActive || positionChipRiseStarted) return { eqKey: 'embed_pos', eqTitle: 'Position Embedding' };
+        if (anySumActive) return { eqKey: 'embed_sum', eqTitle: 'Embeddings Computation' };
+        if (anyPosPassActive || positionChipRiseStarted) return { eqKey: 'embed_pos', eqTitle: 'Embeddings Computation' };
         if (anyTokenPassActive || anyPendingPosPass) {
-            return { eqKey: 'embed_token', eqTitle: 'Token Embedding Lookup' };
+            return { eqKey: 'embed_token', eqTitle: 'Embeddings Computation' };
         }
         return null;
     };
@@ -686,13 +686,13 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
                 title = 'Residual Add 1';
             } else if (selfAttentionActive) {
                 key = 'attn';
-                title = 'Scaled Dot-Product Attention';
+                title = 'Multi Head Self Attention';
             } else if (concatActive) {
                 key = 'concat_proj';
                 title = 'Concat Heads + W_O';
             } else if (phase === 'parallel_pass_through_active' || phase === 'mha_pass_through_complete') {
                 key = 'attn';
-                title = 'Scaled Dot-Product Attention';
+                title = 'Multi Head Self Attention';
             } else {
                 key = 'qkv_per_head';
                 title = 'Q/K/V Projections';
@@ -796,6 +796,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         const isFinalStage = idx >= total || stageOverride?.active;
         const layer = (isFinalStage ? stageOverride?.layer : null) ?? pipeline._layers[idx];
         let displayStage = 'Loading...';
+        let hideLayerHeader = false;
 
         if (isFinalStage) {
             displayStage = stageOverride?.status || 'Output Logits';
@@ -803,7 +804,8 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
             const lanes = layer.lanes;
             const inputEmbeddingStage = resolveInputEmbeddingStage(layer, lanes, nowMs);
             if (inputEmbeddingStage?.eqKey) {
-                displayStage = 'Embedding Layer';
+                displayStage = 'Embeddings Computation';
+                hideLayerHeader = true;
             } else {
                 const mlpActive = lanes.some(l => l.mlpUpStarted || l.ln2Phase === 'mlpReady' || l.ln2Phase === 'done');
                 const ln2Active = !mlpActive && lanes.some(l => l.ln2Phase && l.ln2Phase !== 'notStarted');
@@ -819,7 +821,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
                 } else if (ln1Active) {
                     displayStage = 'LayerNorm 1';
                 } else if (mhsaActive) {
-                    displayStage = 'Multi Head Attention';
+                    displayStage = 'Multi Head Self Attention';
                 } else if (layer.isActive) {
                     displayStage = 'LayerNorm 1';
                 }
@@ -834,13 +836,19 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
 
         const showStageLine = Boolean(displayStage);
         const safeIdx = Math.max(0, Math.min(total - 1, idx));
-        const headerLine = isFinalStage ? 'Output Head' : `Layer ${safeIdx + 1} / ${total}`;
+        const headerLine = isFinalStage
+            ? 'Output Head'
+            : (hideLayerHeader ? '' : `Layer ${safeIdx + 1}`);
         const kvCacheStatusNote = (appState.kvCacheModeEnabled && appState.kvCachePrefillActive)
             ? '\nPre-fill stage\nKV cache enabled'
             : '';
         const nextStatusText = showStageLine
-            ? `${headerLine}\n${displayStage}${kvCacheStatusNote}`
-            : `${headerLine}${kvCacheStatusNote}`;
+            ? (headerLine
+                ? `${headerLine}\n${displayStage}${kvCacheStatusNote}`
+                : `${displayStage}${kvCacheStatusNote}`)
+            : (headerLine
+                ? `${headerLine}${kvCacheStatusNote}`
+                : `${kvCacheStatusNote}`.replace(/^\n/, ''));
         if (nextStatusText === lastStatusText) {
             checkTopEmbeddingActivation();
             return;

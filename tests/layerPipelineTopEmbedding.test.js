@@ -35,9 +35,9 @@ describe('layerPipelineTopEmbedding.calculateTopEmbeddingTargets', () => {
         expect(result.exitYLocal).toBeLessThanOrEqual(result.targetYLocal + 150);
     });
 
-    it('uses scene object path when top vocab embedding is present', () => {
+    it('uses scene object path when top vocabulary embedding is present', () => {
         const topEmbedObj = {
-            userData: { label: 'Vocab Embedding (Top)' },
+            userData: { label: 'Vocabulary Embedding (Top)' },
             getWorldPosition(out) {
                 out.set(0, 1000, 0);
             }
@@ -118,4 +118,3 @@ describe('layerPipelineTopEmbedding.activateLayerNormColor', () => {
         expect(material.opacity).toBe(1.0);
     });
 });
-

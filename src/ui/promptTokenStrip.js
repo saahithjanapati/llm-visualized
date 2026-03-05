@@ -1,7 +1,23 @@
 import { appState } from '../state/appState.js';
 import { getLogitTokenColorCss, resolveLogitTokenSeed } from '../app/gpt-tower/logitColor.js';
+import {
+    TOKEN_CHIP_HOVER_SYNC_EVENT,
+    dispatchTokenChipHoverSync,
+    normalizeTokenChipEntry,
+    tokenChipEntriesMatch
+} from './tokenChipHoverSync.js';
 
 const STRIP_ID = 'promptTokenStrip';
+const PROMPT_TOKEN_STRIP_HOVER_SOURCE = 'prompt-token-strip';
+
+function resolveTokenEntrySeed(entry, fallbackIndex = 0) {
+    if (!entry || typeof entry !== 'object') return resolveLogitTokenSeed(null, fallbackIndex);
+    if (Number.isFinite(entry.seed)) return Math.floor(entry.seed) >>> 0;
+    return resolveLogitTokenSeed({
+        token_id: entry.tokenId,
+        token: entry.tokenLabel
+    }, fallbackIndex);
+}
 
 function normalizeTokenText(token) {
     if (token === null || token === undefined) return '';
@@ -67,13 +83,15 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
 
     const dom = buildDom();
     let lastSignature = '';
-    let tokenEntries = [];
+    let clickableEntries = [];
     let stripEnabled = appState.showPromptTokenStrip !== false;
     let bodyClassObserver = null;
+    let hoveredEntry = null;
+    let mirroredEntry = null;
 
     const updateVisibility = () => {
         const shouldShow = stripEnabled
-            && tokenEntries.length > 0
+            && clickableEntries.length > 0
             && !isDetailPanelSuppressingStripOnMobile();
         dom.root.dataset.visible = shouldShow ? 'true' : 'false';
         setBodyVisibilityFlag(shouldShow);
@@ -85,16 +103,78 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
         updateVisibility();
     };
 
+    const entriesEquivalent = (a, b) => {
+        if (!a && !b) return true;
+        if (!a || !b) return false;
+        return tokenChipEntriesMatch(a, b);
+    };
+
+    const resolveEntryFromTarget = (target) => {
+        const chip = target?.closest?.('[data-token-entry-index]');
+        if (!chip || !dom.tokensEl.contains(chip)) return null;
+        const rawIndex = Number(chip.dataset.tokenEntryIndex);
+        if (!Number.isFinite(rawIndex)) return null;
+        return clickableEntries[Math.floor(rawIndex)] || null;
+    };
+
+    const applyActiveTokenState = () => {
+        const chips = dom.tokensEl.querySelectorAll('[data-token-entry-index]');
+        chips.forEach((chip) => {
+            const rawIndex = Number(chip.dataset.tokenEntryIndex);
+            const entry = Number.isFinite(rawIndex) ? clickableEntries[Math.floor(rawIndex)] : null;
+            const isActive = !!entry && (
+                tokenChipEntriesMatch(entry, hoveredEntry)
+                || tokenChipEntriesMatch(entry, mirroredEntry)
+            );
+            chip.classList.toggle('is-token-chip-active', isActive);
+            chip.dataset.tokenActive = isActive ? 'true' : 'false';
+        });
+    };
+
+    const setHoveredEntry = (entry, { emit = true } = {}) => {
+        const normalizedEntry = normalizeTokenChipEntry(entry);
+        if (entriesEquivalent(hoveredEntry, normalizedEntry)) {
+            applyActiveTokenState();
+            return;
+        }
+        hoveredEntry = normalizedEntry;
+        applyActiveTokenState();
+        if (emit) {
+            dispatchTokenChipHoverSync(normalizedEntry, {
+                active: !!normalizedEntry,
+                source: PROMPT_TOKEN_STRIP_HOVER_SOURCE
+            });
+        }
+    };
+
     const handleTokenClick = (event) => {
-        const target = event?.target?.closest?.('[data-token-entry-index]');
-        if (!target || !dom.tokensEl.contains(target)) return;
-        const rawIndex = Number(target.dataset.tokenEntryIndex);
-        if (!Number.isFinite(rawIndex)) return;
-        const entry = tokenEntries[Math.floor(rawIndex)];
+        const entry = resolveEntryFromTarget(event?.target);
         if (!entry) return;
         if (typeof onTokenClick === 'function') {
             onTokenClick({ ...entry });
         }
+    };
+
+    const handleTokenPointerOver = (event) => {
+        setHoveredEntry(resolveEntryFromTarget(event?.target), { emit: true });
+    };
+
+    const handleTokenPointerOut = (event) => {
+        const fromEntry = resolveEntryFromTarget(event?.target);
+        if (!fromEntry) return;
+        const toEntry = resolveEntryFromTarget(event?.relatedTarget);
+        setHoveredEntry(toEntry, { emit: true });
+    };
+
+    const handleTokenFocusIn = (event) => {
+        setHoveredEntry(resolveEntryFromTarget(event?.target), { emit: true });
+    };
+
+    const handleTokenFocusOut = (event) => {
+        const fromEntry = resolveEntryFromTarget(event?.target);
+        if (!fromEntry) return;
+        const toEntry = resolveEntryFromTarget(event?.relatedTarget);
+        setHoveredEntry(toEntry, { emit: true });
     };
 
     const handleVisibilityChanged = (event) => {
@@ -105,9 +185,21 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
         setEnabled(enabled);
     };
 
+    const handleTokenChipHoverSync = (event) => {
+        const detail = event?.detail || null;
+        if (!detail || detail.source === PROMPT_TOKEN_STRIP_HOVER_SOURCE) return;
+        mirroredEntry = detail.active ? normalizeTokenChipEntry(detail) : null;
+        applyActiveTokenState();
+    };
+
     dom.tokensEl.addEventListener('click', handleTokenClick);
+    dom.tokensEl.addEventListener('pointerover', handleTokenPointerOver);
+    dom.tokensEl.addEventListener('pointerout', handleTokenPointerOut);
+    dom.tokensEl.addEventListener('focusin', handleTokenFocusIn);
+    dom.tokensEl.addEventListener('focusout', handleTokenFocusOut);
     if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
         window.addEventListener('promptTokenStripVisibilityChanged', handleVisibilityChanged);
+        window.addEventListener(TOKEN_CHIP_HOVER_SYNC_EVENT, handleTokenChipHoverSync);
     }
     if (typeof MutationObserver !== 'undefined' && document.body) {
         bodyClassObserver = new MutationObserver((mutationList) => {
@@ -124,11 +216,16 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
         });
     }
 
-    const render = ({ tokenLabels = [], tokenIndices = null, tokenIds = null } = {}) => {
+    const render = ({
+        tokenLabels = [],
+        tokenIndices = null,
+        tokenIds = null,
+        generatedToken = null
+    } = {}) => {
         const labels = Array.isArray(tokenLabels) ? tokenLabels : [];
         const indices = Array.isArray(tokenIndices) ? tokenIndices : [];
         const ids = Array.isArray(tokenIds) ? tokenIds : [];
-        const entries = labels
+        const promptEntries = labels
             .map((tokenLabel, laneIndex) => {
                 const label = (tokenLabel === null || tokenLabel === undefined)
                     ? ''
@@ -137,6 +234,7 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
                 const tokenIndex = Number.isFinite(indices[laneIndex]) ? Math.floor(indices[laneIndex]) : null;
                 const tokenId = Number.isFinite(ids[laneIndex]) ? Math.floor(ids[laneIndex]) : null;
                 return {
+                    entryType: 'prompt',
                     laneIndex,
                     tokenIndex,
                     tokenId,
@@ -144,20 +242,59 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
                 };
             })
             .filter(Boolean);
+        const generatedLabel = (generatedToken && typeof generatedToken.tokenLabel === 'string')
+            ? generatedToken.tokenLabel
+            : '';
+        const generatedEntry = generatedLabel
+            ? {
+                entryType: 'generated',
+                laneIndex: Number.isFinite(generatedToken?.laneIndex) ? Math.floor(generatedToken.laneIndex) : null,
+                tokenIndex: Number.isFinite(generatedToken?.tokenIndex) ? Math.floor(generatedToken.tokenIndex) : null,
+                tokenId: Number.isFinite(generatedToken?.tokenId) ? Math.floor(generatedToken.tokenId) : null,
+                tokenLabel: generatedLabel,
+                selectionLabel: (typeof generatedToken?.selectionLabel === 'string' && generatedToken.selectionLabel.length)
+                    ? generatedToken.selectionLabel
+                    : null,
+                logitEntry: (generatedToken?.logitEntry && typeof generatedToken.logitEntry === 'object')
+                    ? generatedToken.logitEntry
+                    : null,
+                seed: Number.isFinite(generatedToken?.seed) ? Math.floor(generatedToken.seed) : null
+            }
+            : null;
+        const generatedAlreadyPresent = generatedEntry
+            ? promptEntries.some((entry) => tokenChipEntriesMatch(entry, generatedEntry))
+            : false;
+        const entries = (generatedEntry && !generatedAlreadyPresent)
+            ? [...promptEntries, generatedEntry]
+            : promptEntries;
 
         if (!entries.length) {
             dom.tokensEl.innerHTML = '';
-            tokenEntries = [];
+            clickableEntries = [];
             lastSignature = '';
+            if (hoveredEntry) {
+                setHoveredEntry(null, { emit: true });
+            } else {
+                applyActiveTokenState();
+            }
             updateVisibility();
             return;
         }
 
         const signature = entries
-            .map((entry) => `${entry.laneIndex}|${entry.tokenIndex}|${entry.tokenId}|${entry.tokenLabel}`)
+            .map((entry) => [
+                entry.entryType || '',
+                entry.laneIndex,
+                entry.tokenIndex,
+                entry.tokenId,
+                entry.tokenLabel,
+                entry.selectionLabel || '',
+                entry.seed
+            ].join('|'))
             .join('\u241f');
-        tokenEntries = entries;
+        clickableEntries = entries;
         if (signature === lastSignature) {
+            applyActiveTokenState();
             updateVisibility();
             return;
         }
@@ -165,13 +302,13 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
 
         const fragment = document.createDocumentFragment();
         entries.forEach((entry, index) => {
-            const seed = resolveLogitTokenSeed({
-                token_id: entry.tokenId,
-                token: entry.tokenLabel
-            }, index);
+            const seed = resolveTokenEntrySeed(entry, index);
             const tokenEl = document.createElement('button');
             tokenEl.type = 'button';
             tokenEl.className = 'prompt-token-strip__token';
+            if (entry.entryType === 'generated') {
+                tokenEl.classList.add('prompt-token-strip__token--generated');
+            }
             tokenEl.style.setProperty('--token-color-border', getLogitTokenColorCss(seed, 0.92));
             tokenEl.style.setProperty('--token-color-fill', getLogitTokenColorCss(seed, 0.2));
             tokenEl.style.setProperty('--token-color-fill-hover', getLogitTokenColorCss(seed, 0.28));
@@ -181,20 +318,33 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
         });
 
         dom.tokensEl.replaceChildren(fragment);
+        applyActiveTokenState();
         updateVisibility();
     };
 
     return {
-        update: ({ tokenLabels = [], tokenIndices = null, tokenIds = null } = {}) => {
-            render({ tokenLabels, tokenIndices, tokenIds });
+        update: ({
+            tokenLabels = [],
+            tokenIndices = null,
+            tokenIds = null,
+            generatedToken = null
+        } = {}) => {
+            render({ tokenLabels, tokenIndices, tokenIds, generatedToken });
         },
         setEnabled,
         dispose: () => {
             setBodyVisibilityFlag(false);
-            tokenEntries = [];
+            clickableEntries = [];
+            setHoveredEntry(null, { emit: true });
+            mirroredEntry = null;
             dom.tokensEl.removeEventListener('click', handleTokenClick);
+            dom.tokensEl.removeEventListener('pointerover', handleTokenPointerOver);
+            dom.tokensEl.removeEventListener('pointerout', handleTokenPointerOut);
+            dom.tokensEl.removeEventListener('focusin', handleTokenFocusIn);
+            dom.tokensEl.removeEventListener('focusout', handleTokenFocusOut);
             if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
                 window.removeEventListener('promptTokenStripVisibilityChanged', handleVisibilityChanged);
+                window.removeEventListener(TOKEN_CHIP_HOVER_SYNC_EVENT, handleTokenChipHoverSync);
             }
             if (bodyClassObserver) {
                 bodyClassObserver.disconnect();

@@ -389,6 +389,9 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
     const inheritSourceColors = options ? options.inheritSourceColors === true : false;
     const progressTarget = options && options.progressTarget ? options.progressTarget : null;
     const progressKey = options && typeof options.progressKey === 'string' ? options.progressKey : null;
+    const cameraHoldAfterAdditionMs = (options && Number.isFinite(options.cameraHoldAfterAdditionMs))
+        ? Math.max(0, options.cameraHoldAfterAdditionMs)
+        : CAMERA_HOLD_AFTER_ADDITION_MS;
     const driveResidualTrailInAddition = !suppressResidualTrailUpdates;
     const setProgress = (value) => {
         if (!progressTarget || !progressKey) return;
@@ -413,7 +416,7 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
             const nowMs = (typeof performance !== 'undefined' && typeof performance.now === 'function')
                 ? performance.now()
                 : Date.now();
-            lane.__cameraHoldAfterAddUntil = nowMs + CAMERA_HOLD_AFTER_ADDITION_MS;
+            lane.__cameraHoldAfterAddUntil = nowMs + cameraHoldAfterAdditionMs;
             const fallbackTarget = targetVec || lane.postAdditionVec || lane.originalVec || sourceVec || null;
             if (fallbackTarget) {
                 lane.originalVec = fallbackTarget;
@@ -712,7 +715,7 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
             const nowMs = (typeof performance !== 'undefined' && typeof performance.now === 'function')
                 ? performance.now()
                 : Date.now();
-            lane.__cameraHoldAfterAddUntil = nowMs + CAMERA_HOLD_AFTER_ADDITION_MS;
+            lane.__cameraHoldAfterAddUntil = nowMs + cameraHoldAfterAdditionMs;
         } else if (sourceVec && sourceVec.group && sourceVec.group.userData) {
             delete sourceVec.group.userData.stopRise;
             delete sourceVec.group.userData.stopRiseTarget;

@@ -2548,9 +2548,28 @@ export class MHSAAnimation {
         const targetYAboveMatrix = matrixTopY + 30;
 
         // Durations
-        const duration1 = this._resolveSkipDuration(OUTPUT_PROJ_STAGE1_MS / GLOBAL_ANIM_SPEED_MULT);
-        const duration2 = this._resolveSkipDuration(OUTPUT_PROJ_STAGE2_MS / GLOBAL_ANIM_SPEED_MULT);
-        const duration3 = this._resolveSkipDuration(OUTPUT_PROJ_STAGE3_MS / GLOBAL_ANIM_SPEED_MULT);
+        const outputProjectionTuning = GPT2_LAYER_VISUAL_TUNING.mhsa.outputProjection;
+        const minStageEnterDurationMs = (!this._skipToEndActive && Number.isFinite(outputProjectionTuning.minStageEnterDurationMs))
+            ? outputProjectionTuning.minStageEnterDurationMs
+            : 0;
+        const minStageThroughDurationMs = (!this._skipToEndActive && Number.isFinite(outputProjectionTuning.minStageThroughDurationMs))
+            ? outputProjectionTuning.minStageThroughDurationMs
+            : 0;
+        const minStageExitDurationMs = (!this._skipToEndActive && Number.isFinite(outputProjectionTuning.minStageExitDurationMs))
+            ? outputProjectionTuning.minStageExitDurationMs
+            : 0;
+        const duration1 = Math.max(
+            this._resolveSkipDuration(OUTPUT_PROJ_STAGE1_MS / GLOBAL_ANIM_SPEED_MULT),
+            minStageEnterDurationMs
+        );
+        const duration2 = Math.max(
+            this._resolveSkipDuration(OUTPUT_PROJ_STAGE2_MS / GLOBAL_ANIM_SPEED_MULT),
+            minStageThroughDurationMs
+        );
+        const duration3 = Math.max(
+            this._resolveSkipDuration(OUTPUT_PROJ_STAGE3_MS / GLOBAL_ANIM_SPEED_MULT),
+            minStageExitDurationMs
+        );
 
         if (typeof TWEEN === 'undefined') {
             console.warn("TWEEN not available for output projection matrix animation");
@@ -3295,17 +3314,26 @@ export class MHSAAnimation {
     
     _animateOutputMatrixBrightening(duration) {
         if (typeof TWEEN === 'undefined') return;
-        const effectiveDuration = this._resolveSkipDuration(duration);
+        const outputProjectionTuning = GPT2_LAYER_VISUAL_TUNING.mhsa.outputProjection;
+        const minFlashDurationMs = (!this._skipToEndActive && Number.isFinite(outputProjectionTuning.minFlashDurationMs))
+            ? outputProjectionTuning.minFlashDurationMs
+            : 0;
+        const effectiveDuration = Math.max(this._resolveSkipDuration(duration), minFlashDurationMs);
         
         this.outputProjMatrixAnimationPhase = 'vectors_inside';
         
         // Animation parameters
         const startColor = this.outputProjMatrixDefaultColor.clone();
         const brightColor = this.outputProjMatrixActiveColor.clone();
-        const outputProjectionTuning = GPT2_LAYER_VISUAL_TUNING.mhsa.outputProjection;
-        const startEmissiveIntensity = outputProjectionTuning.startEmissiveIntensity;
-        const peakEmissiveIntensity = outputProjectionTuning.peakEmissiveIntensity;
-        const endEmissiveIntensity = outputProjectionTuning.endEmissiveIntensity;
+        const startEmissiveIntensity = Number.isFinite(outputProjectionTuning.startEmissiveIntensity)
+            ? outputProjectionTuning.startEmissiveIntensity
+            : 0.05;
+        const peakEmissiveIntensity = Number.isFinite(outputProjectionTuning.peakEmissiveIntensity)
+            ? outputProjectionTuning.peakEmissiveIntensity
+            : 0.38;
+        const endEmissiveIntensity = Number.isFinite(outputProjectionTuning.endEmissiveIntensity)
+            ? outputProjectionTuning.endEmissiveIntensity
+            : 0.14;
 
         // Ensure matrix begins in its dark resting state
         this.outputProjectionMatrix.setColor(startColor);
@@ -3497,6 +3525,7 @@ export class MHSAAnimation {
             }
         }, {
             finalData,
+            cameraHoldAfterAdditionMs: 140,
             progressTarget: lane,
             progressKey: 'mhsaResidualAddProgress'
         });

@@ -64,7 +64,7 @@ const EMBEDDING_REFLECTIVITY_TWEAKS = {
 };
 
 const TOKEN_CHIP_ONLY_MATERIAL_TWEAKS = Object.freeze({
-    color: 0xeadfc9,
+    color: 0xddcdb2,
     metalness: 0.0,
     roughness: 0.95,
     clearcoat: 0.0,
@@ -124,6 +124,12 @@ function applyTokenChipMaterialTweaks(chipGroup) {
     if (!chipGroup || typeof chipGroup.traverse !== 'function') return;
     const applyToMaterial = (mat) => {
         if (!mat) return;
+        if (mat.isMeshBasicMaterial) {
+            // Keep token glyphs white while retuning only the chip body materials.
+            if (mat.color?.set) mat.color.set(0xffffff);
+            mat.needsUpdate = true;
+            return;
+        }
         if (mat.color?.set) mat.color.set(TOKEN_CHIP_ONLY_MATERIAL_TWEAKS.color);
         if (typeof mat.metalness === 'number') mat.metalness = TOKEN_CHIP_ONLY_MATERIAL_TWEAKS.metalness;
         if (typeof mat.roughness === 'number') mat.roughness = TOKEN_CHIP_ONLY_MATERIAL_TWEAKS.roughness;
@@ -154,7 +160,10 @@ function retuneTokenChipMaterials(root) {
     root.traverse((obj) => {
         if (!obj || !obj.isGroup) return;
         const label = obj.userData?.label;
-        if (typeof label === 'string' && label.startsWith('Token:')) {
+        if (
+            typeof label === 'string'
+            && (label.startsWith('Token:') || label.startsWith('Position:'))
+        ) {
             applyTokenChipMaterialTweaks(obj);
         }
     });
@@ -482,7 +491,7 @@ export function addEmbeddingAndTokenChips({
             EMBEDDING_MATRIX_PARAMS_VOCAB.slitBottomWidthFactor,
             EMBEDDING_MATRIX_PARAMS_VOCAB.slitTopWidthFactor
         );
-        vocabBottom.group.userData.label = 'Vocab Embedding';
+        vocabBottom.group.userData.label = 'Vocabulary Embedding';
         vocabBottom.setColor(headBlue);
         vocabBottom.setMaterialProperties({
             opacity: 1.0,
@@ -1126,6 +1135,7 @@ export function addEmbeddingAndTokenChips({
                 const laneDelayRank = animateDelayRankByLane.get(idx) || 0;
                 let connector = null;
                 const staticChip = createTokenChip(label, font, style);
+                applyTokenChipMaterialTweaks(staticChip);
                 const chipHeight = staticChip.userData.size.height;
                 const targetY = posMatrixBottomY + chipHeight / 2 + style.inset;
                 const targetZ = chipLaneZs[idx];
@@ -1174,6 +1184,7 @@ export function addEmbeddingAndTokenChips({
                 }
 
                 const chip = createTokenChip(label, font, style);
+                applyTokenChipMaterialTweaks(chip);
                 applyChipSelectionMetadata(chip, {
                     chipLabel,
                     laneIndex: idx,
@@ -1351,7 +1362,7 @@ export function addEmbeddingAndTokenChips({
                 EMBEDDING_MATRIX_PARAMS_VOCAB.slitTopWidthFactor
             );
             vocabTop.group.rotation.z = Math.PI;
-            vocabTop.group.userData.label = 'Vocab Embedding (Top)';
+            vocabTop.group.userData.label = 'Vocabulary Embedding (Top)';
             vocabTop.setColor(new THREE.Color(MHSA_MATRIX_INITIAL_RESTING_COLOR));
             vocabTop.setMaterialProperties({
                 opacity: 1.0,
@@ -1402,15 +1413,21 @@ export function addEmbeddingAndTokenChips({
                 const isTopEmbeddingTraversalComplete = () => {
                     const lastLayerRef = pipeline._layers?.[numLayers - 1];
                     if (!lastLayerRef) return false;
-                    const exitY = Number.isFinite(lastLayerRef.__topEmbedExitYLocal)
-                        ? lastLayerRef.__topEmbedExitYLocal
-                        : lastLayerRef.__topEmbedStopYLocal;
-                    if (!Number.isFinite(exitY)) return false;
+                    const entryY = Number.isFinite(lastLayerRef.__topEmbedEntryYLocal)
+                        ? lastLayerRef.__topEmbedEntryYLocal
+                        : (Number.isFinite(lastLayerRef.__topEmbedExitYLocal)
+                            ? lastLayerRef.__topEmbedExitYLocal
+                            : lastLayerRef.__topEmbedStopYLocal);
+                    if (!Number.isFinite(entryY)) return false;
+                    // Trigger logits slightly before vectors fully cross the bottom
+                    // face of the top unembedding matrix to reduce perceived lag.
+                    const earlyRevealOffset = Math.max(8, EMBEDDING_MATRIX_PARAMS_VOCAB.height * 0.015);
+                    const revealTriggerY = entryY - earlyRevealOffset;
                     const lanes = Array.isArray(lastLayerRef.lanes) ? lastLayerRef.lanes : [];
                     if (!lanes.length) return false;
                     return lanes.every((lane) => {
                         const y = lane?.originalVec?.group?.position?.y;
-                        return Number.isFinite(y) && y >= exitY - 0.5;
+                        return Number.isFinite(y) && y >= revealTriggerY;
                     });
                 };
                 const maybeReveal = () => {

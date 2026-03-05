@@ -2316,6 +2316,10 @@ export class LayerPipeline extends EventTarget {
                     : null;
                 const usingScalePlaceholder = !!(scalePlaceholder && scalePlaceholder.group);
                 const usingShiftPlaceholder = !!(shiftPlaceholder && shiftPlaceholder.group);
+                const finalNormStageDataRaw = getFinalLnStageData('norm', lane, targetLength);
+                const finalNormStageData = (isArrayLike(finalNormStageDataRaw) && finalNormStageDataRaw.length)
+                    ? finalNormStageDataRaw
+                    : null;
 
                 let multVec = usingScalePlaceholder ? scalePlaceholder : null;
                 if (!multVec) {
@@ -2365,6 +2369,19 @@ export class LayerPipeline extends EventTarget {
                     markTopLnEntered();
                 }
 
+                const applyFinalNormData = () => {
+                    if (finalNormStageData) {
+                        recolorVectorFromData(vec, finalNormStageData, null);
+                        return;
+                    }
+                    const runtimeNorm = (vec && isArrayLike(vec.normalizedData) && vec.normalizedData.length)
+                        ? vec.normalizedData
+                        : null;
+                    if (runtimeNorm) {
+                        recolorVectorFromData(vec, runtimeNorm, null);
+                    }
+                };
+
                 const startFinalRise = (resVec) => {
                     const riseDist = Math.max(0, entryYLocal - resVec.group.position.y);
                     const durMs = (riseDist / (ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT)) * 1000;
@@ -2403,9 +2420,16 @@ export class LayerPipeline extends EventTarget {
                         updateTopLnColor(multVec.group.position.y);
                         vec.group.visible = false;
                         multVec.group.visible = false;
+                        const finalLnScaledDataRaw = getFinalLnStageData('scale', lane, multVec.instanceCount);
+                        const finalLnScaledData = (isArrayLike(finalLnScaledDataRaw) && finalLnScaledDataRaw.length)
+                            ? finalLnScaledDataRaw
+                            : null;
+                        const productData = finalLnScaledData
+                            ? finalLnScaledData
+                            : multVec.rawData.slice();
 
                         const resVec = new VectorVisualizationInstancedPrism(
-                            multVec.rawData.slice(),
+                            productData,
                             multVec.group.position.clone(),
                             30,
                             multVec.instanceCount
@@ -2524,12 +2548,17 @@ export class LayerPipeline extends EventTarget {
                     if (normLoopActive) return;
                     if (this._skipToEndActive) {
                         normLoopActive = true;
+                        applyFinalNormData();
                         riseToCenter();
                         return;
                     }
                     normLoopActive = true;
                     try {
-                        normAnim.start(vec.rawData.slice());
+                        const normInput = finalNormStageData ? finalNormStageData.slice() : vec.rawData.slice();
+                        normAnim.start(normInput, {
+                            deferDataUpdate: true,
+                            sourceAlreadyNormalized: !!finalNormStageData
+                        });
                     } catch (_) {
                         normLoopActive = false;
                         riseToCenter();
@@ -2549,6 +2578,7 @@ export class LayerPipeline extends EventTarget {
                         if (normAnim.isAnimating) {
                             requestAnimationFrame(runLoop);
                         } else {
+                            applyFinalNormData();
                             normLoopActive = false;
                             riseToCenter();
                         }

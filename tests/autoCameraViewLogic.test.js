@@ -33,6 +33,34 @@ describe('autoCameraViewLogic.resolveAutoCameraViewState', () => {
         expect(result.rawKey).toBe('ln');
     });
 
+    it('keeps ln view while vectors rise out of layer norm', () => {
+        const pipeline = { isForwardPassComplete: () => false };
+        const result = resolveAutoCameraViewState({
+            pipeline,
+            layers: [{ lanes: [{ horizPhase: HORIZ_PHASE.RISE_ABOVE_LN, ln2Phase: LN2_PHASE.NOT_STARTED }] }],
+            currentLayerIdx: 0
+        });
+        expect(result.rawKey).toBe('ln');
+    });
+
+    it('switches directly to travel when MHSA staging starts', () => {
+        const pipeline = { isForwardPassComplete: () => false };
+        const result = resolveAutoCameraViewState({
+            pipeline,
+            layers: [{
+                mhsaAnimation: {
+                    mhaPassThroughPhase: 'positioning_mha_vectors',
+                    rowMergePhase: 'not_started',
+                    outputProjMatrixAnimationPhase: 'waiting',
+                    outputProjMatrixReturnComplete: false
+                },
+                lanes: [{ horizPhase: HORIZ_PHASE.READY_MHSA, ln2Phase: LN2_PHASE.NOT_STARTED }]
+            }],
+            currentLayerIdx: 0
+        });
+        expect(result.rawKey).toBe('travel');
+    });
+
     it('holds prior view during handoff when transition hold is active', () => {
         const pipeline = { isForwardPassComplete: () => false };
         const result = resolveAutoCameraViewState({
@@ -80,7 +108,7 @@ describe('autoCameraViewLogic.resolveAutoCameraViewState', () => {
         expect(result.rawKey).toBe('concat');
     });
 
-    it('uses default framing during output projection/residual add after concat', () => {
+    it('holds concat framing during output projection/residual add after concat', () => {
         const pipeline = { isForwardPassComplete: () => false };
         const result = resolveAutoCameraViewState({
             pipeline,
@@ -101,8 +129,8 @@ describe('autoCameraViewLogic.resolveAutoCameraViewState', () => {
             }],
             currentLayerIdx: 0
         });
-        expect(result.rawKey).toBe('default');
-        expect(result.viewContext?.holdViewDuringResidualAdd).toBe(false);
+        expect(result.rawKey).toBe('concat');
+        expect(result.viewContext?.holdViewDuringResidualAdd).toBe(true);
         expect(result.viewContext?.holdViewUntilLn2Inside).toBe(false);
     });
 });
@@ -146,12 +174,21 @@ describe('autoCameraViewLogic hold and stable key', () => {
         expect(second.pendingSinceMs).toBe(0);
     });
 
-    it('shortens hold when switching from concat to default', () => {
+    it('extends hold when switching from concat to default', () => {
         const hold = getAutoCameraViewSwitchHoldMs({
             fromKey: 'concat',
             toKey: 'default',
             baseHoldMs: 90
         });
-        expect(hold).toBe(36);
+        expect(hold).toBe(110);
+    });
+
+    it('shortens hold when switching from ln to travel', () => {
+        const hold = getAutoCameraViewSwitchHoldMs({
+            fromKey: 'ln',
+            toKey: 'travel',
+            baseHoldMs: 90
+        });
+        expect(hold).toBe(28);
     });
 });

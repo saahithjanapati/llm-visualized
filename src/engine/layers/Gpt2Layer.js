@@ -112,7 +112,10 @@ const MLP_REFLECTIVITY_TWEAKS = {
 };
 
 const POS_ADD_STALL_TIMEOUT_MS = 12000;
-const POS_PASS_START_PAUSE_MS = 0;
+const POS_PASS_START_PAUSE_MS = 140;
+const FIRST_LAYER_LN1_START_PAUSE_MS = 180;
+const FIRST_LAYER_LN1_HORIZ_SPEED_MULT = 0.52;
+const FIRST_LAYER_LN1_RISE_SPEED_MULT = 0.48;
 const LANE_PHASE_STALL_TIMEOUT_MS_SKIP = 3000;
 const LANE_PHASE_STALL_TIMEOUT_MS_NORMAL = 4500;
 // Allow extra headroom during debug-heavy sessions so watchdog fallback does not
@@ -125,6 +128,15 @@ const WATCHDOG_FRAME_GAP_RESET_MS = 900;
 const MULTIPLY_TRANSITION_DURATION_MS = 160;
 const MULTIPLY_SOURCE_SHRINK = 0.94;
 const MLP_POST_PASS_THROUGH_FINAL_EMISSIVE = GPT2_LAYER_VISUAL_TUNING.mlp.postPassFinalEmissiveIntensity;
+const MLP_MATRIX_FLASH_START_EMISSIVE = Number.isFinite(GPT2_LAYER_VISUAL_TUNING.mlp.flashStartEmissiveIntensity)
+    ? GPT2_LAYER_VISUAL_TUNING.mlp.flashStartEmissiveIntensity
+    : 0.04;
+const MLP_MATRIX_FLASH_PEAK_EMISSIVE = Number.isFinite(GPT2_LAYER_VISUAL_TUNING.mlp.flashPeakEmissiveIntensity)
+    ? GPT2_LAYER_VISUAL_TUNING.mlp.flashPeakEmissiveIntensity
+    : 0.4;
+const MLP_MATRIX_FLASH_MIN_DURATION_MS = Number.isFinite(GPT2_LAYER_VISUAL_TUNING.mlp.flashMinDurationMs)
+    ? GPT2_LAYER_VISUAL_TUNING.mlp.flashMinDurationMs
+    : 340;
 const POST_MLP_RETURN_TRAIL_OPACITY = 0.1;
 const MLP_TRANSITION_PROFILE_DEFAULT = Object.freeze({
     expandRiseUnits: 30,
@@ -136,7 +148,7 @@ const MLP_TRANSITION_PROFILE_DEFAULT = Object.freeze({
     geluLiteMode: false,
     maxUpDurationMs: null,
     maxDownDurationMs: null,
-    colorMinDurationMs: null
+    colorMinDurationMs: MLP_MATRIX_FLASH_MIN_DURATION_MS
 });
 const MLP_TRANSITION_PROFILE_TOUCH = Object.freeze({
     // Keep touch/mobile behavior aligned with desktop so GELU curve bending
@@ -150,7 +162,7 @@ const MLP_TRANSITION_PROFILE_TOUCH = Object.freeze({
     geluLiteMode: false,
     maxUpDurationMs: null,
     maxDownDurationMs: null,
-    colorMinDurationMs: null
+    colorMinDurationMs: MLP_MATRIX_FLASH_MIN_DURATION_MS
 });
 const MLP_TRANSITION_PROFILE_SKIP = Object.freeze({
     expandRiseUnits: 16,
@@ -270,6 +282,8 @@ export default class Gpt2Layer extends BaseLayer {
         this._mlpStart = false;
         // NEW: Barrier flags
         this._ln1Start = false;        // start LN-1 branch
+        this._ln1StartBarrierArmed = false;
+        this._ln1StartAtMs = NaN;
         this._mhsaStart = false;       // start horizontal travel to heads
         this._progressEmitter = null;  // external emitter for progress events
         this._skipToEndActive = false;
@@ -1128,7 +1142,9 @@ export default class Gpt2Layer extends BaseLayer {
         this._updateLn1AndMhsaStartGates({
             allLn1Ready,
             posAddDone,
-            allMhsaReady
+            allMhsaReady,
+            nowMs,
+            skipActive
         });
 
         this.lanes.forEach(lane => {
@@ -1203,7 +1219,13 @@ export default class Gpt2Layer extends BaseLayer {
                     if (typeof lane.branchStartY === 'number') {
                         dupVec.group.position.y = lane.branchStartY;
                     }
-                    dupVec.group.position.x = Math.min(BRANCH_X, dupVec.group.position.x + ANIM_HORIZ_SPEED * speedMult * dt);
+                    const ln1HorizSpeedMult = (!skipActive && this.index === 0)
+                        ? FIRST_LAYER_LN1_HORIZ_SPEED_MULT
+                        : 1;
+                    dupVec.group.position.x = Math.min(
+                        BRANCH_X,
+                        dupVec.group.position.x + ANIM_HORIZ_SPEED * speedMult * ln1HorizSpeedMult * dt
+                    );
                     if (dupVec.group.position.x >= BRANCH_X - 0.01) {
                         // Ensure alignment with LN-1 centre
                         dupVec.group.position.x = BRANCH_X;
@@ -1244,7 +1266,10 @@ export default class Gpt2Layer extends BaseLayer {
                         if (lane.addTarget) this._applyLayerNormParamVector(lane.addTarget, 'ln1', 'shift', null);
                         lane.ln1ParamColored = true;
                     }
-                    const riseStep = ANIM_RISE_SPEED_INSIDE_LN * speedMult * dt;
+                    const ln1RiseSpeedMult = (!skipActive && this.index === 0)
+                        ? FIRST_LAYER_LN1_RISE_SPEED_MULT
+                        : 1;
+                    const riseStep = ANIM_RISE_SPEED_INSIDE_LN * speedMult * ln1RiseSpeedMult * dt;
                     const ln1RiseTargetY = (() => {
                         const multTargetGroup = lane.multTarget && lane.multTarget.group;
                         if (multTargetGroup && Number.isFinite(multTargetGroup.position.y)) {
@@ -1560,7 +1585,10 @@ export default class Gpt2Layer extends BaseLayer {
                     if (rv) {
                         const targetY = this.ln1TopY + 5; // Same as meetY in original
                         if (rv.group.position.y < targetY) {
-                            const baseRiseSpeed = ANIM_RISE_SPEED_INSIDE_LN * speedMult;
+                            const ln1RiseSpeedMult = (!skipActive && this.index === 0)
+                                ? FIRST_LAYER_LN1_RISE_SPEED_MULT
+                                : 1;
+                            const baseRiseSpeed = ANIM_RISE_SPEED_INSIDE_LN * speedMult * ln1RiseSpeedMult;
                             const syncedRiseSpeed = this._getSynchronizedRiseSpeed(
                                 rv.group.position.y,
                                 targetY,
@@ -2209,8 +2237,8 @@ export default class Gpt2Layer extends BaseLayer {
         const matrixStartColor = this._mlpMatrixInactiveColor;
         const matrixEndColor = this._mlpMatrixActiveColor;
         const tweenColor = this._mlpUpTweenColor;
-        const startIntensity = 0.1;
-        const peakIntensity = 0.24;
+        const startIntensity = MLP_MATRIX_FLASH_START_EMISSIVE;
+        const peakIntensity = MLP_MATRIX_FLASH_PEAK_EMISSIVE;
         const finalIntensity = MLP_POST_PASS_THROUGH_FINAL_EMISSIVE;
         const distance = topY - vec.group.position.y;
         const rawDuration = (distance / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
@@ -2671,8 +2699,8 @@ export default class Gpt2Layer extends BaseLayer {
         };
         
         // Matrix colour + emissive animation for glow
-        const startIntensity = 0.1;
-        const peakIntensity = 0.24;
+        const startIntensity = MLP_MATRIX_FLASH_START_EMISSIVE;
+        const peakIntensity = MLP_MATRIX_FLASH_PEAK_EMISSIVE;
         const finalIntensity = MLP_POST_PASS_THROUGH_FINAL_EMISSIVE;
         const downState = { t: 0, emissive: startIntensity };
 
@@ -3483,14 +3511,32 @@ export default class Gpt2Layer extends BaseLayer {
     _updateLn1AndMhsaStartGates({
         allLn1Ready = false,
         posAddDone = false,
-        allMhsaReady = false
+        allMhsaReady = false,
+        nowMs = NaN,
+        skipActive = false
     } = {}) {
         // LayerNorm-1 synchronisation barrier – wait until every lane's
         // residual vector has reached branch height before releasing LN-1.
         if (!this._ln1Start) {
             const readyToStartLn1 = allLn1Ready && posAddDone;
-            if (readyToStartLn1) {
+            if (readyToStartLn1 && !this._ln1StartBarrierArmed) {
+                const pauseMs = (!skipActive && this.index === 0)
+                    ? FIRST_LAYER_LN1_START_PAUSE_MS
+                    : 0;
+                this._ln1StartBarrierArmed = true;
+                this._ln1StartAtMs = nowMs + pauseMs;
+            }
+
+            const canStartLn1 = readyToStartLn1
+                && (
+                    !this._ln1StartBarrierArmed
+                    || !Number.isFinite(this._ln1StartAtMs)
+                    || nowMs >= this._ln1StartAtMs
+                );
+            if (canStartLn1) {
                 this._ln1Start = true;
+                this._ln1StartBarrierArmed = false;
+                this._ln1StartAtMs = NaN;
                 this._emitProgress();
                 this._debugLayerLifecycleLog(`Layer ${this.index}: All lanes ready – starting LN-1 branch simultaneously`);
 
@@ -3511,6 +3557,9 @@ export default class Gpt2Layer extends BaseLayer {
                         lane.dupVec.group.position.y = lane.originalVec.group.position.y;
                     }
                 });
+            } else if (!readyToStartLn1) {
+                this._ln1StartBarrierArmed = false;
+                this._ln1StartAtMs = NaN;
             }
         }
 
@@ -3622,6 +3671,8 @@ export default class Gpt2Layer extends BaseLayer {
             }
             this._setLaneHorizPhase(lane, HORIZ_PHASE.RIGHT, 'stall watchdog: ln1 barrier');
             this._ln1Start = true;
+            this._ln1StartBarrierArmed = false;
+            this._ln1StartAtMs = NaN;
             console.warn(`Layer ${this.index}: lane ${laneId} stalled in LN1 barrier; forcing branch start.`);
             return true;
         }

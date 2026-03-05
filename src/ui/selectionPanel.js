@@ -45,6 +45,13 @@ import {
     resolveRenderPixelRatio
 } from '../utils/constants.js';
 import { getIncompleteUtf8TokenNote } from '../utils/tokenEncodingNotes.js';
+import { getLogitTokenColorCss, resolveLogitTokenSeed } from '../app/gpt-tower/logitColor.js';
+import {
+    TOKEN_CHIP_HOVER_SYNC_EVENT,
+    dispatchTokenChipHoverSync,
+    normalizeTokenChipEntry,
+    tokenChipEntriesMatch
+} from './tokenChipHoverSync.js';
 import {
     MHA_FINAL_Q_COLOR,
     MHA_FINAL_K_COLOR,
@@ -133,6 +140,7 @@ const COPY_CONTEXT_ERROR_LABEL = 'Unable to copy context.';
 const COPY_CONTEXT_EMPTY_LABEL = 'Nothing visible to copy yet.';
 const COPY_CONTEXT_FEEDBACK_MS = 1000;
 const COPY_CONTEXT_FADE_MS = 220;
+const SELECTION_PANEL_TOKEN_HOVER_SOURCE = 'selection-panel';
 
 const TOKEN_CHIP_STYLE = {
     padding: 80,
@@ -439,10 +447,9 @@ function resolveAttentionScoreSelectionSummary(selectionInfo, context = null) {
     if (!activation) return null;
 
     const normalizedLabel = normalizeSelectionLabel(selectionInfo?.label, selectionInfo);
-    const hasAttentionScoreData = Number.isFinite(activation.preScore) || Number.isFinite(activation.postScore);
+    const isScoreStage = stageLower === 'attention.pre' || stageLower === 'attention.post';
     const isAttentionScore = isAttentionScoreSelection(normalizedLabel, selectionInfo)
-        || stageLower.startsWith('attention.')
-        || hasAttentionScoreData;
+        || isScoreStage;
     if (!isAttentionScore) return null;
 
     const mode = resolveAttentionModeFromSelection(selectionInfo)
@@ -462,11 +469,36 @@ function resolveAttentionScoreSelectionSummary(selectionInfo, context = null) {
     const targetLabel = formatTokenLabelForPreview(
         activation.keyTokenLabel || (col >= 0 ? tokenLabels[col] : null)
     );
-    const sourceText = normalizeAttentionValuePart(sourceLabel, 'Source');
-    const targetText = normalizeAttentionValuePart(targetLabel, 'Target');
+    const sourceTokenText = normalizeAttentionValuePart(sourceLabel);
+    const targetTokenText = normalizeAttentionValuePart(targetLabel);
+    const sourceText = sourceTokenText === ATTENTION_VALUE_PLACEHOLDER ? 'Source' : sourceTokenText;
+    const targetText = targetTokenText === ATTENTION_VALUE_PLACEHOLDER ? 'Target' : targetTokenText;
     const scoreText = Number.isFinite(score) ? score.toFixed(ATTENTION_SCORE_DECIMALS) : 'n/a';
     const hasSourceContext = Number.isFinite(sourceTokenIndex) || sourceLabel.length > 0;
     const hasTargetContext = Number.isFinite(targetTokenIndex) || targetLabel.length > 0;
+    const tokenContext = (hasSourceContext || hasTargetContext)
+        ? {
+            source: {
+                role: 'Source',
+                tokenText: sourceTokenText,
+                tokenIndex: sourceTokenIndex,
+                positionText: Number.isFinite(sourceTokenIndex)
+                    ? `Position ${Math.floor(sourceTokenIndex) + 1}`
+                    : 'Position n/a'
+            },
+            target: {
+                role: 'Target',
+                tokenText: targetTokenText,
+                tokenIndex: targetTokenIndex,
+                positionText: Number.isFinite(targetTokenIndex)
+                    ? `Position ${Math.floor(targetTokenIndex) + 1}`
+                    : 'Position n/a'
+            },
+            score: {
+                value: scoreText
+            }
+        }
+        : null;
     const tokenContextLine = (hasSourceContext || hasTargetContext)
         ? `${formatAttentionSubtitleTokenPart(sourceLabel, sourceTokenIndex, 'Source')} • ${formatAttentionSubtitleTokenPart(targetLabel, targetTokenIndex, 'Target')}`
         : '';
@@ -476,10 +508,13 @@ function resolveAttentionScoreSelectionSummary(selectionInfo, context = null) {
         row: row >= 0 ? row : null,
         col: col >= 0 ? col : null,
         tokenContextLine,
+        tokenContext,
         defaultValue: {
             source: sourceText,
             target: targetText,
             score: scoreText,
+            sourceTokenIndex: Number.isFinite(sourceTokenIndex) ? Math.floor(sourceTokenIndex) : null,
+            targetTokenIndex: Number.isFinite(targetTokenIndex) ? Math.floor(targetTokenIndex) : null,
             empty: false
         }
     };
@@ -606,6 +641,14 @@ const TMP_SCALE = new THREE.Vector3();
 const TMP_CENTER = new THREE.Vector3();
 const TMP_COLOR = new THREE.Color();
 
+function hasVocabEmbeddingLabel(lower) {
+    return lower.includes('vocab embedding') || lower.includes('vocabulary embedding');
+}
+
+function hasTopVocabEmbeddingLabel(lower) {
+    return lower.includes('vocab embedding (top)') || lower.includes('vocabulary embedding (top)');
+}
+
 function resolveFinalPreviewColor(label) {
     const lower = (label || '').toLowerCase();
     if (lower.includes('query weight matrix')) return MHA_FINAL_Q_COLOR;
@@ -614,7 +657,7 @@ function resolveFinalPreviewColor(label) {
     if (lower.includes('output projection matrix')) return MHA_OUTPUT_PROJECTION_MATRIX_COLOR;
     if (lower.includes('mlp up weight matrix')) return FINAL_MLP_COLOR;
     if (lower.includes('mlp down weight matrix')) return FINAL_MLP_COLOR;
-    if (lower.includes('vocab embedding') || lower.includes('unembedding')) {
+    if (hasVocabEmbeddingLabel(lower) || lower.includes('unembedding')) {
         return lower.includes('top') ? FINAL_VOCAB_TOP_COLOR : MHA_FINAL_Q_COLOR;
     }
     if (lower.includes('positional embedding')) return POSITION_EMBED_COLOR;
@@ -962,10 +1005,10 @@ function resolveMetadata(label, kind = null, selectionInfo = null) {
     if (lower.includes('mlp down weight matrix')) {
         return buildMetadata(formatNumber(D_MODEL * D_MODEL * 4), D_MODEL * 4, D_MODEL, null, D_MODEL);
     }
-    if (lower.includes('vocab embedding (top)') || lower.includes('unembedding')) {
+    if (hasTopVocabEmbeddingLabel(lower) || lower.includes('unembedding')) {
         return buildMetadata(formatNumber(VOCAB_SIZE * D_MODEL), D_MODEL, VOCAB_SIZE);
     }
-    if (lower.includes('vocab embedding')) {
+    if (hasVocabEmbeddingLabel(lower)) {
         return buildMetadata(formatNumber(VOCAB_SIZE * D_MODEL), VOCAB_SIZE, D_MODEL);
     }
     if (lower.includes('positional embedding')) {
@@ -2597,7 +2640,7 @@ function resolvePreviewObject(label, selectionInfo) {
     if (lower.includes('mlp down weight matrix')) {
         return buildWeightMatrixPreview(MLP_MATRIX_PARAMS_DOWN, FINAL_MLP_COLOR);
     }
-    if (lower.includes('vocab embedding') || lower.includes('unembedding')) {
+    if (hasVocabEmbeddingLabel(lower) || lower.includes('unembedding')) {
         const clonePreview = buildSelectionClonePreview(selectionInfo, label)
             || buildDirectClonePreview(selectionInfo);
         if (clonePreview) {
@@ -2861,6 +2904,9 @@ class SelectionPanel {
         };
         this._currentSelectionDescription = '';
         this._currentSelectionEquations = '';
+        this._panelTokenHoverEntry = null;
+        this._mirroredTokenHoverEntry = null;
+        this._tokenHoverSyncSource = SELECTION_PANEL_TOKEN_HOVER_SOURCE;
         this._copyContextFeedbackTimer = null;
         this._copyContextFadeTimer = null;
         this._copyContextDefaultLabel = this.copyContextBtnLabel?.textContent?.trim()
@@ -2881,6 +2927,14 @@ class SelectionPanel {
         this._onPanelPointerDown = this._onPanelPointerDown.bind(this);
         this._onPanelPointerEnter = this._onPanelPointerEnter.bind(this);
         this._onPanelPointerLeave = this._onPanelPointerLeave.bind(this);
+        this._onSubtitleSecondaryClick = this._onSubtitleSecondaryClick.bind(this);
+        this._onPanelTokenChipClick = this._onPanelTokenChipClick.bind(this);
+        this._onPanelTokenChipKeydown = this._onPanelTokenChipKeydown.bind(this);
+        this._onPanelTokenChipPointerOver = this._onPanelTokenChipPointerOver.bind(this);
+        this._onPanelTokenChipPointerOut = this._onPanelTokenChipPointerOut.bind(this);
+        this._onPanelTokenChipFocusIn = this._onPanelTokenChipFocusIn.bind(this);
+        this._onPanelTokenChipFocusOut = this._onPanelTokenChipFocusOut.bind(this);
+        this._onTokenChipHoverSync = this._onTokenChipHoverSync.bind(this);
         this._scheduleResize = this._scheduleResize.bind(this);
         this._scheduleSelectionEquationFit = this._scheduleSelectionEquationFit.bind(this);
         this._applySelectionEquationFit = this._applySelectionEquationFit.bind(this);
@@ -2953,7 +3007,15 @@ class SelectionPanel {
         this.panel.addEventListener('pointerdown', this._onPanelPointerDown, { capture: true });
         this.panel.addEventListener('pointerenter', this._onPanelPointerEnter);
         this.panel.addEventListener('pointerleave', this._onPanelPointerLeave);
+        this.subtitleSecondary?.addEventListener('click', this._onSubtitleSecondaryClick);
+        this.panel.addEventListener('click', this._onPanelTokenChipClick);
+        this.panel.addEventListener('keydown', this._onPanelTokenChipKeydown);
+        this.panel.addEventListener('pointerover', this._onPanelTokenChipPointerOver);
+        this.panel.addEventListener('pointerout', this._onPanelTokenChipPointerOut);
+        this.panel.addEventListener('focusin', this._onPanelTokenChipFocusIn);
+        this.panel.addEventListener('focusout', this._onPanelTokenChipFocusOut);
         window.addEventListener('resize', this._onResize);
+        window.addEventListener(TOKEN_CHIP_HOVER_SYNC_EVENT, this._onTokenChipHoverSync);
         if (window.visualViewport && typeof window.visualViewport.addEventListener === 'function') {
             window.visualViewport.addEventListener('resize', this._onResize);
         }
@@ -3531,6 +3593,363 @@ class SelectionPanel {
 
     _onPanelPointerLeave() {
         this._setHoverLabelSuppression(false);
+        this._setPanelTokenHoverEntry(null, { emit: true });
+    }
+
+    _setTitleText(titleText = '') {
+        if (!this.title) return;
+        this.title.classList.remove('detail-title--token-context');
+        this.title.textContent = String(titleText || '');
+    }
+
+    _configureTokenNavChip(chip, {
+        tokenText = ATTENTION_VALUE_PLACEHOLDER,
+        tokenIndex = null,
+        tokenId = null
+    } = {}) {
+        if (!chip) return;
+        const safeTokenText = normalizeAttentionValuePart(tokenText);
+        const safeTokenIndex = Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : null;
+        const safeTokenId = Number.isFinite(tokenId) ? Math.floor(tokenId) : null;
+        const canNavigate = safeTokenText !== ATTENTION_VALUE_PLACEHOLDER;
+
+        chip.classList.add('detail-token-nav-chip');
+        chip.dataset.tokenText = safeTokenText;
+        if (Number.isFinite(safeTokenIndex)) {
+            chip.dataset.tokenIndex = String(safeTokenIndex);
+        } else {
+            delete chip.dataset.tokenIndex;
+        }
+        if (Number.isFinite(safeTokenId)) {
+            chip.dataset.tokenId = String(safeTokenId);
+        } else {
+            delete chip.dataset.tokenId;
+        }
+        chip.dataset.tokenNav = canNavigate ? 'true' : 'false';
+        if (canNavigate) {
+            chip.tabIndex = 0;
+            chip.setAttribute('role', 'button');
+            chip.setAttribute('aria-label', `Open token details for ${safeTokenText}`);
+        } else {
+            chip.removeAttribute('tabindex');
+            chip.removeAttribute('role');
+            chip.removeAttribute('aria-label');
+        }
+    }
+
+    _setTokenChipTitleContext({
+        tokenText = ATTENTION_VALUE_PLACEHOLDER,
+        tokenIndex = null,
+        tokenId = null
+    } = {}) {
+        if (!this.title) return;
+        const safeTokenText = normalizeAttentionValuePart(tokenText);
+        const safeTokenIndex = Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : null;
+        let safeTokenId = Number.isFinite(tokenId) ? Math.floor(tokenId) : null;
+        if (!Number.isFinite(safeTokenId)
+            && Number.isFinite(safeTokenIndex)
+            && this.activationSource
+            && typeof this.activationSource.getTokenId === 'function') {
+            safeTokenId = this.activationSource.getTokenId(safeTokenIndex);
+            safeTokenId = Number.isFinite(safeTokenId) ? Math.floor(safeTokenId) : null;
+        }
+        const seed = resolveLogitTokenSeed(
+            { token_id: safeTokenId, token: safeTokenText },
+            Number.isFinite(safeTokenIndex) ? safeTokenIndex : 0
+        );
+
+        this.title.classList.add('detail-title--token-context');
+        const fragment = document.createDocumentFragment();
+
+        const prefix = document.createElement('span');
+        prefix.className = 'detail-title-text-part';
+        prefix.textContent = 'Token:';
+
+        const chip = document.createElement('span');
+        chip.className = 'detail-subtitle-token-chip detail-title-token-chip';
+        chip.style.setProperty('--token-color-border', getLogitTokenColorCss(seed, 0.92));
+        chip.style.setProperty('--token-color-fill', getLogitTokenColorCss(seed, 0.2));
+        chip.style.setProperty('--token-color-fill-hover', getLogitTokenColorCss(seed, 0.28));
+        chip.textContent = safeTokenText;
+        chip.title = safeTokenText === ATTENTION_VALUE_PLACEHOLDER ? '' : safeTokenText;
+        this._configureTokenNavChip(chip, {
+            tokenText: safeTokenText,
+            tokenIndex: safeTokenIndex,
+            tokenId: safeTokenId
+        });
+
+        fragment.append(prefix, chip);
+        this.title.replaceChildren(fragment);
+    }
+
+    _openSelectionForTokenChip(chip, event = null) {
+        if (!chip || chip.dataset.tokenNav !== 'true') return false;
+        const tokenText = normalizeAttentionValuePart(chip.dataset.tokenText || chip.textContent);
+        if (!tokenText || tokenText === ATTENTION_VALUE_PLACEHOLDER) return false;
+
+        const rawTokenIndex = Number(chip.dataset.tokenIndex);
+        const tokenIndex = Number.isFinite(rawTokenIndex) ? Math.floor(rawTokenIndex) : null;
+        const rawTokenId = Number(chip.dataset.tokenId);
+        const tokenId = Number.isFinite(rawTokenId) ? Math.floor(rawTokenId) : null;
+        const tokenObj = this._findTokenChipSceneObject({ tokenIndex, tokenId, tokenText });
+
+        const info = {
+            tokenLabel: tokenText
+        };
+        if (Number.isFinite(tokenIndex)) info.tokenIndex = tokenIndex;
+        if (Number.isFinite(tokenId)) info.tokenId = tokenId;
+
+        const objectLabel = typeof tokenObj?.userData?.label === 'string' ? tokenObj.userData.label : '';
+        const label = objectLabel.toLowerCase().startsWith('token:')
+            ? objectLabel
+            : `Token: ${tokenText}`;
+
+        if (event && typeof event.preventDefault === 'function') event.preventDefault();
+        if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+
+        const selection = {
+            label,
+            info,
+            kind: 'label'
+        };
+        if (tokenObj) selection.object = tokenObj;
+        this.showSelection(selection);
+        return true;
+    }
+
+    _onPanelTokenChipClick(event) {
+        const target = event?.target;
+        const chip = target && typeof target.closest === 'function'
+            ? target.closest('.detail-token-nav-chip')
+            : null;
+        if (!chip || !this.panel || !this.panel.contains(chip)) return;
+        this._openSelectionForTokenChip(chip, event);
+    }
+
+    _onPanelTokenChipKeydown(event) {
+        const key = event?.key;
+        if (key !== 'Enter' && key !== ' ' && key !== 'Spacebar') return;
+        const target = event?.target;
+        const chip = target && typeof target.closest === 'function'
+            ? target.closest('.detail-token-nav-chip')
+            : null;
+        if (!chip || !this.panel || !this.panel.contains(chip)) return;
+        this._openSelectionForTokenChip(chip, event);
+    }
+
+    _resolvePanelTokenChipTarget(target) {
+        if (!this.panel || !target || typeof target.closest !== 'function') return null;
+        const chip = target.closest('.detail-token-nav-chip[data-token-nav="true"]');
+        if (!chip || !this.panel.contains(chip)) return null;
+        return chip;
+    }
+
+    _extractPanelTokenChipEntry(chip) {
+        if (!chip) return null;
+        return normalizeTokenChipEntry({
+            tokenLabel: normalizeAttentionValuePart(chip.dataset.tokenText || chip.textContent),
+            tokenIndex: chip.dataset.tokenIndex,
+            tokenId: chip.dataset.tokenId
+        });
+    }
+
+    _setPanelTokenHoverEntry(entry = null, { emit = true } = {}) {
+        const normalizedEntry = normalizeTokenChipEntry(entry);
+        const wasEmpty = !this._panelTokenHoverEntry;
+        const nextEmpty = !normalizedEntry;
+        const unchanged = (wasEmpty && nextEmpty)
+            || (!wasEmpty && !nextEmpty && tokenChipEntriesMatch(this._panelTokenHoverEntry, normalizedEntry));
+        if (!unchanged) {
+            this._panelTokenHoverEntry = normalizedEntry;
+            if (emit) {
+                dispatchTokenChipHoverSync(normalizedEntry, {
+                    active: !!normalizedEntry,
+                    source: this._tokenHoverSyncSource
+                });
+            }
+        }
+        this._applyTokenChipHoverState();
+    }
+
+    _applyTokenChipHoverState() {
+        if (!this.panel) return;
+        const chips = this.panel.querySelectorAll('.detail-token-nav-chip');
+        chips.forEach((chip) => {
+            const canNavigate = chip.dataset.tokenNav === 'true';
+            const chipEntry = canNavigate ? this._extractPanelTokenChipEntry(chip) : null;
+            const isActive = !!chipEntry && (
+                tokenChipEntriesMatch(chipEntry, this._panelTokenHoverEntry)
+                || tokenChipEntriesMatch(chipEntry, this._mirroredTokenHoverEntry)
+            );
+            chip.classList.toggle('is-token-chip-active', isActive);
+            chip.dataset.tokenActive = isActive ? 'true' : 'false';
+        });
+    }
+
+    _onPanelTokenChipPointerOver(event) {
+        const chip = this._resolvePanelTokenChipTarget(event?.target);
+        if (!chip) return;
+        this._setPanelTokenHoverEntry(this._extractPanelTokenChipEntry(chip), { emit: true });
+    }
+
+    _onPanelTokenChipPointerOut(event) {
+        const fromChip = this._resolvePanelTokenChipTarget(event?.target);
+        if (!fromChip) return;
+        const toChip = this._resolvePanelTokenChipTarget(event?.relatedTarget);
+        this._setPanelTokenHoverEntry(
+            toChip ? this._extractPanelTokenChipEntry(toChip) : null,
+            { emit: true }
+        );
+    }
+
+    _onPanelTokenChipFocusIn(event) {
+        const chip = this._resolvePanelTokenChipTarget(event?.target);
+        if (!chip) return;
+        this._setPanelTokenHoverEntry(this._extractPanelTokenChipEntry(chip), { emit: true });
+    }
+
+    _onPanelTokenChipFocusOut(event) {
+        const fromChip = this._resolvePanelTokenChipTarget(event?.target);
+        if (!fromChip) return;
+        const toChip = this._resolvePanelTokenChipTarget(event?.relatedTarget);
+        this._setPanelTokenHoverEntry(
+            toChip ? this._extractPanelTokenChipEntry(toChip) : null,
+            { emit: true }
+        );
+    }
+
+    _onTokenChipHoverSync(event) {
+        const detail = event?.detail || null;
+        if (!detail || detail.source === this._tokenHoverSyncSource) return;
+        this._mirroredTokenHoverEntry = detail.active ? normalizeTokenChipEntry(detail) : null;
+        this._applyTokenChipHoverState();
+    }
+
+    _setSubtitlePrimaryQkvTokenContext({
+        prefixParts = [],
+        tokenText = ATTENTION_VALUE_PLACEHOLDER,
+        positionText = ATTENTION_VALUE_PLACEHOLDER,
+        tokenIndex = null,
+        tokenId = null,
+        tokenFirst = false
+    } = {}) {
+        if (!this.subtitle) return;
+        const safePrefixParts = Array.isArray(prefixParts)
+            ? prefixParts.filter((part) => typeof part === 'string' && part.trim().length > 0)
+            : [];
+        const safeTokenText = normalizeAttentionValuePart(tokenText);
+        const safePositionText = normalizeAttentionValuePart(positionText).toLowerCase();
+        const safeTokenFirst = tokenFirst === true;
+
+        this.subtitle.classList.add('detail-subtitle--qkv-token-context');
+        const fragment = document.createDocumentFragment();
+        const appendSeparator = () => {
+            const separator = document.createElement('span');
+            separator.className = 'detail-subtitle-separator';
+            separator.textContent = ' • ';
+            fragment.appendChild(separator);
+        };
+
+        const appendTokenContext = () => {
+            if (fragment.childNodes.length > 0) appendSeparator();
+            const tokenPart = document.createElement('span');
+            tokenPart.className = 'detail-subtitle-qkv-token-part';
+
+            const chip = document.createElement('span');
+            chip.className = 'detail-subtitle-token-chip';
+            const seed = resolveLogitTokenSeed(
+                {
+                    token_id: Number.isFinite(tokenId) ? Math.floor(tokenId) : null,
+                    token: safeTokenText
+                },
+                Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : 0
+            );
+            chip.style.setProperty('--token-color-border', getLogitTokenColorCss(seed, 0.92));
+            chip.style.setProperty('--token-color-fill', getLogitTokenColorCss(seed, 0.2));
+            chip.style.setProperty('--token-color-fill-hover', getLogitTokenColorCss(seed, 0.28));
+            chip.textContent = safeTokenText;
+            chip.title = safeTokenText === ATTENTION_VALUE_PLACEHOLDER ? '' : safeTokenText;
+            this._configureTokenNavChip(chip, {
+                tokenText: safeTokenText,
+                tokenIndex,
+                tokenId
+            });
+
+            const position = document.createElement('span');
+            position.className = 'detail-subtitle-qkv-position';
+            position.textContent = `(position ${safePositionText})`;
+
+            tokenPart.append(chip, position);
+            fragment.appendChild(tokenPart);
+        };
+
+        if (safeTokenFirst) appendTokenContext();
+
+        safePrefixParts.forEach((part) => {
+            if (fragment.childNodes.length > 0) appendSeparator();
+            const textPart = document.createElement('span');
+            textPart.className = 'detail-subtitle-text-part';
+            textPart.textContent = part;
+            fragment.appendChild(textPart);
+        });
+
+        if (!safeTokenFirst) appendTokenContext();
+        this.subtitle.replaceChildren(fragment);
+    }
+
+    _findTokenChipSceneObject({
+        tokenIndex = null,
+        tokenId = null,
+        tokenText = ''
+    } = {}) {
+        const scene = this.engine?.scene;
+        if (!scene || typeof scene.traverse !== 'function') return null;
+
+        const normalizedTokenText = formatTokenLabelForPreview(tokenText);
+        let fallbackMatch = null;
+        let visibleMatch = null;
+
+        scene.traverse((node) => {
+            if (!node || !node.userData || node.isScene) return;
+            const label = typeof node.userData.label === 'string'
+                ? node.userData.label
+                : '';
+            if (!label.toLowerCase().startsWith('token:')) return;
+
+            const nodeTokenIndex = Number.isFinite(node.userData.tokenIndex)
+                ? Math.floor(node.userData.tokenIndex)
+                : null;
+            const nodeTokenId = Number.isFinite(node.userData.tokenId)
+                ? Math.floor(node.userData.tokenId)
+                : null;
+            const nodeTokenText = formatTokenLabelForPreview(node.userData.tokenLabel);
+
+            if (Number.isFinite(tokenIndex) && Number.isFinite(nodeTokenIndex) && nodeTokenIndex !== tokenIndex) return;
+            if (Number.isFinite(tokenId) && Number.isFinite(nodeTokenId) && nodeTokenId !== tokenId) return;
+            if (
+                normalizedTokenText
+                && normalizedTokenText !== ATTENTION_VALUE_PLACEHOLDER
+                && nodeTokenText
+                && nodeTokenText !== ATTENTION_VALUE_PLACEHOLDER
+                && nodeTokenText !== normalizedTokenText
+            ) {
+                return;
+            }
+
+            if (!fallbackMatch) fallbackMatch = node;
+            if (!visibleMatch && node.visible !== false) visibleMatch = node;
+        });
+
+        return visibleMatch || fallbackMatch;
+    }
+
+    _onSubtitleSecondaryClick(event) {
+        const target = event?.target;
+        const chip = target && typeof target.closest === 'function'
+            ? target.closest('.detail-attention-context-chip')
+            : null;
+        if (!chip || !this.subtitleSecondary || !this.subtitleSecondary.contains(chip)) return;
+        this._openSelectionForTokenChip(chip, event);
     }
 
     _setAttentionVisibility(visible) {
@@ -3544,26 +3963,159 @@ class SelectionPanel {
         }
     }
 
+    _setAttentionValueTokenChip(cell, tokenText, {
+        tokenIndex = null,
+        tokenId = null,
+        fallbackSeed = 0
+    } = {}) {
+        if (!cell) return;
+        const safeText = normalizeAttentionValuePart(tokenText);
+        cell.textContent = '';
+        if (safeText === ATTENTION_VALUE_PLACEHOLDER) {
+            cell.textContent = ATTENTION_VALUE_PLACEHOLDER;
+            cell.title = '';
+            return;
+        }
+
+        let resolvedTokenId = Number.isFinite(tokenId) ? Math.floor(tokenId) : null;
+        const resolvedTokenIndex = Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : null;
+        if (!Number.isFinite(resolvedTokenId)
+            && Number.isFinite(resolvedTokenIndex)
+            && this.activationSource
+            && typeof this.activationSource.getTokenId === 'function') {
+            resolvedTokenId = this.activationSource.getTokenId(resolvedTokenIndex);
+        }
+        const seed = resolveLogitTokenSeed(
+            { token_id: resolvedTokenId, token: safeText },
+            Number.isFinite(resolvedTokenIndex) ? resolvedTokenIndex : fallbackSeed
+        );
+
+        const chip = document.createElement('span');
+        chip.className = 'attention-value-token-chip';
+        chip.style.setProperty('--token-color-border', getLogitTokenColorCss(seed, 0.92));
+        chip.style.setProperty('--token-color-fill', getLogitTokenColorCss(seed, 0.2));
+        chip.style.setProperty('--token-color-fill-hover', getLogitTokenColorCss(seed, 0.28));
+        chip.textContent = safeText;
+        chip.title = safeText;
+        this._configureTokenNavChip(chip, {
+            tokenText: safeText,
+            tokenIndex: resolvedTokenIndex,
+            tokenId: resolvedTokenId
+        });
+        cell.appendChild(chip);
+        cell.title = safeText;
+    }
+
     _setAttentionValue(value = null) {
         if (!this.attentionValue) return;
         const safeValue = value && typeof value === 'object' ? value : null;
         const source = normalizeAttentionValuePart(safeValue?.source);
         const target = normalizeAttentionValuePart(safeValue?.target);
         const score = normalizeAttentionValuePart(safeValue?.score);
+        const sourceTokenIndex = Number.isFinite(safeValue?.sourceTokenIndex) ? Math.floor(safeValue.sourceTokenIndex) : null;
+        const targetTokenIndex = Number.isFinite(safeValue?.targetTokenIndex) ? Math.floor(safeValue.targetTokenIndex) : null;
+        const sourceTokenId = Number.isFinite(safeValue?.sourceTokenId) ? Math.floor(safeValue.sourceTokenId) : null;
+        const targetTokenId = Number.isFinite(safeValue?.targetTokenId) ? Math.floor(safeValue.targetTokenId) : null;
         const isEmpty = safeValue ? safeValue.empty === true : true;
         if (this.attentionValueSource) {
-            this.attentionValueSource.textContent = source;
-            this.attentionValueSource.title = source === ATTENTION_VALUE_PLACEHOLDER ? '' : source;
+            this._setAttentionValueTokenChip(this.attentionValueSource, source, {
+                tokenIndex: sourceTokenIndex,
+                tokenId: sourceTokenId,
+                fallbackSeed: 0
+            });
         }
         if (this.attentionValueTarget) {
-            this.attentionValueTarget.textContent = target;
-            this.attentionValueTarget.title = target === ATTENTION_VALUE_PLACEHOLDER ? '' : target;
+            this._setAttentionValueTokenChip(this.attentionValueTarget, target, {
+                tokenIndex: targetTokenIndex,
+                tokenId: targetTokenId,
+                fallbackSeed: 1
+            });
         }
         if (this.attentionValueScore) {
             this.attentionValueScore.textContent = score;
             this.attentionValueScore.title = score === ATTENTION_VALUE_PLACEHOLDER ? '' : score;
         }
         this.attentionValue.dataset.empty = isEmpty ? 'true' : 'false';
+        this._applyTokenChipHoverState();
+    }
+
+    _setSubtitleSecondaryAttentionContext(context = null) {
+        if (!this.subtitleSecondary) return;
+        this.subtitleSecondary.classList.remove('detail-subtitle--attention-context');
+        this.subtitleSecondary.textContent = '';
+        if (!context || !context.source || !context.target) return;
+
+        const resolveTokenId = (part) => {
+            const directTokenId = Number.isFinite(part?.tokenId) ? Math.floor(part.tokenId) : null;
+            if (Number.isFinite(directTokenId)) return directTokenId;
+            const tokenIndex = Number.isFinite(part?.tokenIndex) ? Math.floor(part.tokenIndex) : null;
+            if (!Number.isFinite(tokenIndex)) return null;
+            if (!this.activationSource || typeof this.activationSource.getTokenId !== 'function') return null;
+            return this.activationSource.getTokenId(tokenIndex);
+        };
+
+        const buildContextPart = (part, fallbackRole, fallbackIndex = 0) => {
+            const roleRaw = normalizeAttentionValuePart(part?.role, fallbackRole);
+            const roleText = roleRaw
+                ? `${roleRaw.charAt(0).toUpperCase()}${roleRaw.slice(1).toLowerCase()}`
+                : fallbackRole;
+            const tokenText = normalizeAttentionValuePart(part?.tokenText);
+            const positionRaw = normalizeAttentionValuePart(part?.positionText, 'position n/a');
+            const positionText = positionRaw
+                ? `${positionRaw.charAt(0).toLowerCase()}${positionRaw.slice(1)}`
+                : 'position n/a';
+            const tokenIndex = Number.isFinite(part?.tokenIndex) ? Math.floor(part.tokenIndex) : null;
+            const tokenId = resolveTokenId(part);
+            const seed = resolveLogitTokenSeed(
+                { token_id: tokenId, token: tokenText },
+                Number.isFinite(tokenIndex) ? tokenIndex : fallbackIndex
+            );
+
+            const partEl = document.createElement('span');
+            partEl.className = 'detail-attention-context-part';
+
+            const roleEl = document.createElement('span');
+            roleEl.className = 'detail-attention-context-role';
+            roleEl.textContent = `${roleText}:`;
+
+            const chipEl = document.createElement('span');
+            chipEl.className = 'detail-attention-context-chip';
+            chipEl.style.setProperty('--token-color-border', getLogitTokenColorCss(seed, 0.92));
+            chipEl.style.setProperty('--token-color-fill', getLogitTokenColorCss(seed, 0.2));
+            chipEl.style.setProperty('--token-color-fill-hover', getLogitTokenColorCss(seed, 0.28));
+            chipEl.textContent = tokenText;
+            chipEl.title = tokenText === ATTENTION_VALUE_PLACEHOLDER ? '' : tokenText;
+            this._configureTokenNavChip(chipEl, {
+                tokenText,
+                tokenIndex,
+                tokenId
+            });
+
+            const positionEl = document.createElement('span');
+            positionEl.className = 'detail-attention-context-position';
+            positionEl.textContent = `(${positionText})`;
+
+            partEl.append(roleEl, chipEl, positionEl);
+            return partEl;
+        };
+
+        this.subtitleSecondary.classList.add('detail-subtitle--attention-context');
+        const sourcePart = buildContextPart(context.source, 'Source', 0);
+        const targetPart = buildContextPart(context.target, 'Target', 1);
+        const mainContext = document.createElement('span');
+        mainContext.className = 'detail-attention-context-main';
+        mainContext.append(sourcePart, targetPart);
+
+        const scoreValue = normalizeAttentionValuePart(context?.score?.value, ATTENTION_VALUE_PLACEHOLDER);
+        const scoreWrap = document.createElement('span');
+        scoreWrap.className = 'detail-attention-context-score';
+        const scoreValueEl = document.createElement('span');
+        scoreValueEl.className = 'detail-attention-context-score-value';
+        scoreValueEl.textContent = scoreValue;
+        scoreValueEl.title = scoreValue === ATTENTION_VALUE_PLACEHOLDER ? '' : scoreValue;
+        scoreWrap.append(scoreValueEl);
+
+        this.subtitleSecondary.replaceChildren(mainContext, scoreWrap);
     }
 
     _resolveAttentionContext(selection) {
@@ -3826,7 +4378,7 @@ class SelectionPanel {
     _applyAttentionCellRevealAnimation(cell, className, delayMs, durationMs) {
         if (!cell) return;
         const hadClass = cell.classList.contains(className);
-        cell.classList.remove('post-softmax-reveal', 'pre-softmax-reveal');
+        cell.classList.remove('post-softmax-reveal', 'post-softmax-reveal-focus', 'pre-softmax-reveal');
         if (hadClass) {
             // Force a reflow when replaying the same keyframe class.
             void cell.offsetWidth;
@@ -3870,7 +4422,8 @@ class SelectionPanel {
         const mode = this.attentionMode === 'post' ? 'post' : 'pre';
         const tokenLabels = this._attentionContext.tokenLabels || [];
         const count = this._attentionCells.length;
-        const suppressRevealPulse = this._shouldSuppressAttentionEntryHighlight();
+        const suppressRevealPulse = mode === 'pre' && this._shouldSuppressAttentionEntryHighlight();
+        const useFocusedPostReveal = mode === 'post' && this._hasAttentionFocusCell();
         const postAnimDuration = ATTENTION_POST_REVEAL_DURATION_MS;
         const preAnimDuration = ATTENTION_PRE_REVEAL_DURATION_MS;
         let hasAnyValue = false;
@@ -3901,7 +4454,7 @@ class SelectionPanel {
                     this._cancelAttentionPopOut(cell);
                     cell.classList.add('is-empty');
                     cell.style.backgroundColor = '';
-                    cell.classList.remove('post-softmax-reveal', 'pre-softmax-reveal');
+                    cell.classList.remove('post-softmax-reveal', 'post-softmax-reveal-focus', 'pre-softmax-reveal');
                     cell.style.animationDelay = '';
                     cell.style.animationDuration = '';
                     continue;
@@ -3919,20 +4472,25 @@ class SelectionPanel {
                     cell.classList.remove('is-empty');
                     hasAnyValue = true;
                     if (suppressRevealPulse) {
-                        cell.classList.remove('post-softmax-reveal', 'pre-softmax-reveal');
+                        cell.classList.remove('post-softmax-reveal', 'post-softmax-reveal-focus', 'pre-softmax-reveal');
                         cell.style.animationDelay = '';
                         cell.style.animationDuration = '';
                     } else if (mode === 'post') {
                         if (shouldAnimateRow && !this._attentionPostAnimatedRows.has(row)) {
                             const revealOrder = getAttentionRevealOrder(row, col, count);
+                            const revealClass = useFocusedPostReveal
+                                && !cell.classList.contains('is-hovered')
+                                && !cell.classList.contains('is-pinned')
+                                ? 'post-softmax-reveal-focus'
+                                : 'post-softmax-reveal';
                             this._applyAttentionCellRevealAnimation(
                                 cell,
-                                'post-softmax-reveal',
+                                revealClass,
                                 revealOrder * postAnimStagger,
                                 postAnimDuration
                             );
                         } else {
-                            cell.classList.remove('post-softmax-reveal');
+                            cell.classList.remove('post-softmax-reveal', 'post-softmax-reveal-focus');
                             cell.style.animationDelay = '';
                             cell.style.animationDuration = '';
                         }
@@ -3961,7 +4519,7 @@ class SelectionPanel {
                         cell.title = '';
                     }
                     if (mode === 'post') {
-                        cell.classList.remove('post-softmax-reveal');
+                        cell.classList.remove('post-softmax-reveal', 'post-softmax-reveal-focus');
                         cell.style.animationDelay = '';
                         cell.style.animationDuration = '';
                     } else if (mode === 'pre') {
@@ -4207,6 +4765,18 @@ class SelectionPanel {
                     }
                     cell.dataset.rowLabel = tokenLabels[row] || '';
                     cell.dataset.colLabel = tokenLabels[col] || '';
+                    const rowTokenIndex = tokenIndices[row];
+                    const colTokenIndex = tokenIndices[col];
+                    if (Number.isFinite(rowTokenIndex)) {
+                        cell.dataset.rowTokenIndex = String(Math.floor(rowTokenIndex));
+                    } else {
+                        delete cell.dataset.rowTokenIndex;
+                    }
+                    if (Number.isFinite(colTokenIndex)) {
+                        cell.dataset.colTokenIndex = String(Math.floor(colTokenIndex));
+                    } else {
+                        delete cell.dataset.colTokenIndex;
+                    }
                 }
                 this._attentionCells[row][col] = cell;
                 matrixFrag.appendChild(cell);
@@ -4320,11 +4890,11 @@ class SelectionPanel {
                 continue;
             }
             if (ratio <= edgeEpsilon) {
-                tick.dataset.label = `≤ -${RESIDUAL_COLOR_CLAMP}`;
+                tick.dataset.label = `≤-${RESIDUAL_COLOR_CLAMP}`;
                 continue;
             }
             if (ratio >= (1 - edgeEpsilon)) {
-                tick.dataset.label = `≥ +${RESIDUAL_COLOR_CLAMP}`;
+                tick.dataset.label = `≥+${RESIDUAL_COLOR_CLAMP}`;
                 continue;
             }
             const value = THREE.MathUtils.lerp(-RESIDUAL_COLOR_CLAMP, RESIDUAL_COLOR_CLAMP, ratio);
@@ -4394,6 +4964,10 @@ class SelectionPanel {
         const valueNum = Number(rawValue);
         const rowLabel = cell.dataset.rowLabel || '';
         const colLabel = cell.dataset.colLabel || '';
+        const rawRowTokenIndex = Number(cell.dataset.rowTokenIndex);
+        const rawColTokenIndex = Number(cell.dataset.colTokenIndex);
+        const sourceTokenIndex = Number.isFinite(rawRowTokenIndex) ? Math.floor(rawRowTokenIndex) : null;
+        const targetTokenIndex = Number.isFinite(rawColTokenIndex) ? Math.floor(rawColTokenIndex) : null;
         const sourceText = normalizeAttentionValuePart(rowLabel, 'Source');
         const targetText = normalizeAttentionValuePart(colLabel, 'Target');
         const scoreText = Number.isFinite(valueNum)
@@ -4403,6 +4977,8 @@ class SelectionPanel {
             source: sourceText,
             target: targetText,
             score: scoreText,
+            sourceTokenIndex,
+            targetTokenIndex,
             empty: false
         });
     }
@@ -4690,6 +5266,9 @@ class SelectionPanel {
         this._stopLoop();
         this._currentSelectionDescription = '';
         this._currentSelectionEquations = '';
+        this._setPanelTokenHoverEntry(null, { emit: true });
+        this._mirroredTokenHoverEntry = null;
+        this._applyTokenChipHoverState();
         this._resetCopyContextFeedback();
         this.panel.classList.remove('is-open');
         this.panel.classList.remove('is-preview-hidden');
@@ -4868,6 +5447,8 @@ class SelectionPanel {
             tokenDisplayText,
             tokenIdText,
             positionText,
+            tokenIndex: Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : null,
+            tokenId: Number.isFinite(tokenId) ? Math.floor(tokenId) : null,
             tokenEncodingNote
         };
     }
@@ -4951,6 +5532,15 @@ class SelectionPanel {
                 positionText: '',
                 tokenEncodingNote: getIncompleteUtf8TokenNote(tokenId)
             };
+        }
+
+        if (
+            isAttentionScoreSelection(label, selection)
+            || isWeightedSumSelection(label, selection)
+            || isQkvHeadVectorSelection(label, selection)
+        ) {
+            hideRows();
+            return null;
         }
 
         const metadata = this._resolveVectorTokenPosition(selection, label);
@@ -5041,27 +5631,58 @@ class SelectionPanel {
             ? resolveAttentionScoreSelectionSummary(selection, attentionContextForSubtitle)
             : null;
         const attentionSubtitleLine = attentionScoreSummary?.tokenContextLine || '';
+        let subtitleSecondaryOverride = null;
+        const isTokenChipSelection = lower.startsWith('token:');
+        const isTokenOrPositionChipSelection = isTokenChipSelection || lower.startsWith('position:');
         this.panel.classList.toggle('is-preview-hidden', hidePreviewForSelection);
-        this.title.textContent = logitHeader?.title || displayLabel;
+        if (logitHeader) {
+            this._setTitleText(logitHeader.title);
+        } else if (isTokenChipSelection) {
+            const tokenText = (typeof vectorSubtitleMetadata?.tokenDisplayText === 'string')
+                ? vectorSubtitleMetadata.tokenDisplayText.trim()
+                : formatTokenLabelForPreview(extractTokenText(label));
+            this._setTokenChipTitleContext({
+                tokenText: tokenText || ATTENTION_VALUE_PLACEHOLDER,
+                tokenIndex: Number.isFinite(vectorSubtitleMetadata?.tokenIndex)
+                    ? Math.floor(vectorSubtitleMetadata.tokenIndex)
+                    : null,
+                tokenId: Number.isFinite(vectorSubtitleMetadata?.tokenId)
+                    ? Math.floor(vectorSubtitleMetadata.tokenId)
+                    : null
+            });
+        } else {
+            this._setTitleText(displayLabel);
+        }
         if (this.subtitle) {
             if (logitHeader) {
+                this.subtitle.classList.remove('detail-subtitle--qkv-token-context');
                 this.subtitle.textContent = logitHeader.subtitle;
+            } else if (isTokenChipSelection) {
+                const positionText = (typeof vectorSubtitleMetadata?.positionText === 'string')
+                    ? vectorSubtitleMetadata.positionText.trim()
+                    : '';
+                this.subtitle.classList.remove('detail-subtitle--qkv-token-context');
+                this.subtitle.textContent = positionText ? `Position ${positionText}` : '';
             } else {
                 const layerIndex = findUserDataNumber(selection, 'layerIndex');
                 const headIndex = findUserDataNumber(selection, 'headIndex');
-                const isQkvOrCachedVectorSelection = isLikelyVectorSelection(label, selection)
+                const isVectorSelection = isLikelyVectorSelection(label, selection);
+                const isAttentionWeightedSumSelection = lower.includes('attention weighted sum');
+                const isQkvOrCachedVectorSelection = isVectorSelection
                     && (isQkvHeadVectorSelection(label, selection) || isKvCacheVectorSelection(selection));
                 const showHead = isQkvMatrixLabel(label)
                     || isAttentionScore
+                    || isAttentionWeightedSumSelection
                     || isQkvOrCachedVectorSelection;
                 const subtitleParts = [];
+                let qkvTokenContext = null;
                 if (Number.isFinite(layerIndex)) {
                     subtitleParts.push(`Layer ${layerIndex + 1}`);
                 }
                 if (showHead && Number.isFinite(headIndex)) {
                     subtitleParts.push(`Head ${headIndex + 1}`);
                 }
-                if (isQkvOrCachedVectorSelection) {
+                if (isVectorSelection) {
                     let positionText = '';
                     if (vectorSubtitleMetadata && typeof vectorSubtitleMetadata.positionText === 'string') {
                         positionText = vectorSubtitleMetadata.positionText.trim();
@@ -5072,28 +5693,76 @@ class SelectionPanel {
                             positionText = String(Math.floor(tokenIndex) + 1);
                         }
                     }
-                    if (positionText) {
+                    const tokenText = (typeof vectorSubtitleMetadata?.tokenDisplayText === 'string')
+                        ? vectorSubtitleMetadata.tokenDisplayText.trim()
+                        : '';
+                    if (positionText && tokenText && !isAttentionWeightedSumSelection && !isAttentionScore) {
+                        qkvTokenContext = {
+                            tokenText,
+                            positionText,
+                            tokenIndex: Number.isFinite(vectorSubtitleMetadata?.tokenIndex)
+                                ? Math.floor(vectorSubtitleMetadata.tokenIndex)
+                                : null,
+                            tokenId: Number.isFinite(vectorSubtitleMetadata?.tokenId)
+                                ? Math.floor(vectorSubtitleMetadata.tokenId)
+                                : null
+                        };
+                    } else if (positionText && !isAttentionScore) {
                         subtitleParts.push(`Position ${positionText}`);
                     }
                 }
-                this.subtitle.textContent = subtitleParts.join(' • ');
+                if (qkvTokenContext) {
+                    if (isQkvOrCachedVectorSelection) {
+                        this._setSubtitlePrimaryQkvTokenContext({
+                            prefixParts: [],
+                            tokenText: qkvTokenContext.tokenText,
+                            positionText: qkvTokenContext.positionText,
+                            tokenIndex: qkvTokenContext.tokenIndex,
+                            tokenId: qkvTokenContext.tokenId,
+                            tokenFirst: true
+                        });
+                        subtitleSecondaryOverride = subtitleParts.join(' • ');
+                    } else {
+                        this._setSubtitlePrimaryQkvTokenContext({
+                            prefixParts: subtitleParts,
+                            tokenText: qkvTokenContext.tokenText,
+                            positionText: qkvTokenContext.positionText,
+                            tokenIndex: qkvTokenContext.tokenIndex,
+                            tokenId: qkvTokenContext.tokenId,
+                            tokenFirst: true
+                        });
+                    }
+                } else {
+                    this.subtitle.classList.remove('detail-subtitle--qkv-token-context');
+                    this.subtitle.textContent = subtitleParts.join(' • ');
+                }
             }
         }
         if (this.subtitleSecondary) {
-            this.subtitleSecondary.textContent = logitHeader ? '' : attentionSubtitleLine;
+            if (subtitleSecondaryOverride !== null) {
+                this.subtitleSecondary.classList.remove('detail-subtitle--attention-context');
+                this.subtitleSecondary.textContent = subtitleSecondaryOverride;
+            } else if (logitHeader) {
+                this.subtitleSecondary.classList.remove('detail-subtitle--attention-context');
+                this.subtitleSecondary.textContent = '';
+            } else if (attentionScoreSummary?.tokenContext) {
+                this._setSubtitleSecondaryAttentionContext(attentionScoreSummary.tokenContext);
+            } else {
+                this.subtitleSecondary.classList.remove('detail-subtitle--attention-context');
+                this.subtitleSecondary.textContent = attentionSubtitleLine;
+            }
         }
         const hideLayerNormFields = isLayerNormSolidSelection(label);
         const isLogitTokenSelection = !!logitHeader;
         const hideTensorDimsField = hideLayerNormFields
             || isAttentionScore
             || isLogitTokenSelection;
-        const isTokenChipSelection = lower.startsWith('token:') || lower.startsWith('position:');
-        const isVectorMetadata = isLikelyVectorSelection(label, selection) || isTokenChipSelection;
+        const isVectorMetadata = isLikelyVectorSelection(label, selection) || isTokenOrPositionChipSelection;
         const dimsRow = this.inputDim?.closest('.detail-row')
             || this.outputDim?.closest('.detail-row')
             || null;
         if (this.inputDimLabel) {
-            this.inputDimLabel.textContent = isTokenChipSelection
+            this.inputDimLabel.textContent = isTokenOrPositionChipSelection
                 ? 'Length (one-hot encoded)'
                 : (isVectorMetadata ? 'Length' : 'Input dimension');
         }
@@ -5241,6 +5910,7 @@ class SelectionPanel {
         }
 
         this._updateAttentionPreview(selection);
+        this._applyTokenChipHoverState();
         this.open();
         this._scheduleSelectionEquationFit();
         this._scheduleDimensionLabelFit();

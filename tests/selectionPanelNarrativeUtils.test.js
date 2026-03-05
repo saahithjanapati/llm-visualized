@@ -20,8 +20,8 @@ describe('selectionPanelNarrativeUtils', () => {
         expect(eq).not.toContain('\\gamma');
     });
 
-    it('shows the full NLP embedding equation set for vocab/positional selections', () => {
-        const vocabEq = resolveSelectionEquations('Vocab Embedding', null);
+    it('shows the full NLP embedding equation set for vocabulary/positional selections', () => {
+        const vocabEq = resolveSelectionEquations('Vocabulary Embedding', null);
         const posEq = resolveSelectionEquations('Positional Embedding', null);
         const tokenEq = resolveSelectionEquations('Token: hello', null);
         const positionEq = resolveSelectionEquations('Position: 3', null);
@@ -37,8 +37,8 @@ describe('selectionPanelNarrativeUtils', () => {
         expect(positionEq).toBe(vocabEq);
     });
 
-    it('keeps top vocab embedding focused on logits equations', () => {
-        const eq = resolveSelectionEquations('Vocab Embedding (Top)', null);
+    it('keeps top vocabulary embedding focused on logits equations', () => {
+        const eq = resolveSelectionEquations('Vocabulary Embedding (Top)', null);
         expect(eq).toContain('softmax');
         expect(eq).not.toContain('x_t^{\\text{tok}}');
     });

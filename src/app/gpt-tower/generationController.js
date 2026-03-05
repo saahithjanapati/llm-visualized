@@ -10,6 +10,7 @@ import { refreshTrailDisplayScales } from '../../utils/trailUtils.js';
 import { appState } from '../../state/appState.js';
 import { addEmbeddingAndTokenChips } from './tokenChips.js';
 import { formatTokenLabel } from './tokenLabels.js';
+import { resolveLogitTokenSeed } from './logitColor.js';
 import { initTouchClickFallback } from '../../ui/touchClickFallback.js';
 
 const DEFAULT_ADVANCE_SECONDS = 10;
@@ -81,6 +82,79 @@ function resolveTokenCount(activationSource, fallbackCount) {
         ? activationSource.getTokenCount()
         : fallbackCount;
     return Number.isFinite(count) && count > 0 ? Math.floor(count) : fallbackCount;
+}
+
+function sanitizeLogitToken(token) {
+    if (token === null || token === undefined) return '';
+    const raw = String(token);
+    if (!raw.length) return '';
+    return raw.replace(/\n/g, '\\n').replace(/\t/g, '\\t');
+}
+
+function resolveGeneratedLogitToken(activationSource, laneTokenIndices = []) {
+    if (!activationSource || typeof activationSource.getLogitsForToken !== 'function') return null;
+    if (!Array.isArray(laneTokenIndices) || !laneTokenIndices.length) return null;
+    const lastTokenIndexRaw = laneTokenIndices[laneTokenIndices.length - 1];
+    if (!Number.isFinite(lastTokenIndexRaw)) return null;
+    const lastTokenIndex = Math.floor(lastTokenIndexRaw);
+
+    const logitTopK = typeof activationSource.getLogitTopK === 'function'
+        ? activationSource.getLogitTopK()
+        : null;
+    const safeTopK = Number.isFinite(logitTopK) && logitTopK > 0 ? Math.floor(logitTopK) : null;
+    const logitRow = activationSource.getLogitsForToken(lastTokenIndex, safeTopK);
+    if (!Array.isArray(logitRow) || !logitRow.length) return null;
+
+    const tokenCount = typeof activationSource.getTokenCount === 'function'
+        ? activationSource.getTokenCount()
+        : 0;
+    const hasNextToken = Number.isFinite(tokenCount) && (lastTokenIndex + 1) < tokenCount;
+    const nextTokenRaw = hasNextToken && typeof activationSource.getTokenString === 'function'
+        ? activationSource.getTokenString(lastTokenIndex + 1)
+        : null;
+
+    let bestIdx = -1;
+    let bestProb = -Infinity;
+    let pickedIdx = -1;
+    for (let i = 0; i < logitRow.length; i += 1) {
+        const entry = logitRow[i];
+        const prob = Number(entry?.prob);
+        if (Number.isFinite(prob) && prob > bestProb) {
+            bestProb = prob;
+            bestIdx = i;
+        }
+        if (
+            pickedIdx === -1
+            && typeof nextTokenRaw === 'string'
+            && typeof entry?.token === 'string'
+            && entry.token === nextTokenRaw
+        ) {
+            pickedIdx = i;
+        }
+    }
+
+    const chosenIdx = pickedIdx !== -1
+        ? pickedIdx
+        : (bestIdx !== -1 ? bestIdx : 0);
+    const chosenEntry = logitRow[chosenIdx];
+    if (!chosenEntry || typeof chosenEntry !== 'object') return null;
+
+    const tokenId = Number.isFinite(chosenEntry.token_id) ? Math.floor(chosenEntry.token_id) : null;
+    const tokenText = typeof chosenEntry.token === 'string'
+        ? formatTokenLabel(sanitizeLogitToken(chosenEntry.token))
+        : '';
+    const fallbackText = Number.isFinite(tokenId) ? `#${tokenId}` : '';
+    const tokenLabel = tokenText || fallbackText;
+    if (!tokenLabel) return null;
+
+    return {
+        tokenLabel,
+        tokenId,
+        tokenIndex: hasNextToken ? Math.floor(lastTokenIndex + 1) : null,
+        seed: resolveLogitTokenSeed(chosenEntry, chosenIdx),
+        selectionLabel: `Chosen token: ${tokenLabel}`,
+        logitEntry: chosenEntry
+    };
 }
 
 function createAdvanceOverlay() {
@@ -369,7 +443,11 @@ export function initGenerationController({
         selectionPanel.close?.();
     };
 
-    const syncPromptTokenStrip = (passState, attentionState = null) => {
+    const syncPromptTokenStrip = (
+        passState,
+        attentionState = null,
+        { showGeneratedLogitChip = false } = {}
+    ) => {
         if (!promptTokenStrip || typeof promptTokenStrip.update !== 'function') return;
         const sourceState = attentionState || passState;
         const labels = Array.isArray(sourceState?.tokenLabels)
@@ -383,12 +461,19 @@ export function initGenerationController({
                 Number.isFinite(tokenIndex) ? activationSource.getTokenId(tokenIndex) : null
             ))
             : null;
+        const generatedToken = showGeneratedLogitChip
+            ? resolveGeneratedLogitToken(activationSource, tokenIndices || [])
+            : null;
         promptTokenStrip.update({
             tokenLabels: labels,
             tokenIndices,
-            tokenIds
+            tokenIds,
+            generatedToken
         });
     };
+
+    let latestPassState = null;
+    let latestAttentionState = null;
 
     const rebuildPass = ({ laneCount, passState, resetPipeline = false, fromCompletedPass = false } = {}) => {
         const nextLaneCount = Math.max(1, Math.floor(laneCount || 1));
@@ -488,7 +573,9 @@ export function initGenerationController({
 
         applyPhysicalMaterialsToScene(pipeline?.engine?.scene, USE_PHYSICAL_MATERIALS);
         syncSelectionPanel(state, attentionState);
-        syncPromptTokenStrip(state, attentionState);
+        latestPassState = state;
+        latestAttentionState = attentionState;
+        syncPromptTokenStrip(state, attentionState, { showGeneratedLogitChip: false });
 
         currentLaneCount = nextLaneCount;
         passComplete = false;
@@ -671,6 +758,7 @@ export function initGenerationController({
                 remainingMs = countdownMs;
                 countdownActive = !autoAdvancePaused;
                 lastTick = now;
+                syncPromptTokenStrip(latestPassState, latestAttentionState, { showGeneratedLogitChip: true });
                 updateOverlay();
             }
         } else if (countdownActive) {
