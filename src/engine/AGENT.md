@@ -1,5 +1,7 @@
 # AGENT.md
 
+_Last reviewed: 2026-03-05._
+
 ## Scope
 Three.js runtime, pipeline orchestration, and camera/raycast systems.
 

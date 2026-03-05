@@ -1,5 +1,7 @@
 # AGENT.md
 
+_Last reviewed: 2026-03-05._
+
 ## Scope
 Internal modules used by `MHSAAnimation`.
 
@@ -15,4 +17,5 @@ Internal modules used by `MHSAAnimation`.
 
 ## Notes
 - `buildMHAVisuals(...)` in `VisualSetup.js` is the active matrix construction path.
+- Matrix label/surface tweaks are shared through `src/utils/matrixVisualUtils.js`.
 - Keep lane identity/index conventions aligned with `LayerPipeline` and `Gpt2Layer`.

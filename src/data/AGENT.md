@@ -1,5 +1,7 @@
 # AGENT.md
 
+_Last reviewed: 2026-03-05._
+
 ## Scope
 Activation sources and parameter datasets.
 

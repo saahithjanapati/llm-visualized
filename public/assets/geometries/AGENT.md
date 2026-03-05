@@ -1,5 +1,7 @@
 # AGENT.md
 
+_Last reviewed: 2026-03-05._
+
 ## Scope
 Precomputed geometry JSON assets used by matrix and layer-norm visualizations.
 

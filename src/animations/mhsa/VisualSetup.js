@@ -4,6 +4,11 @@ import * as THREE from 'three';
 import { WeightMatrixVisualization } from '../../components/WeightMatrixVisualization.js';
 import { updateSciFiMaterialUniforms } from '../../utils/sciFiMaterial.js';
 import { scaleGlobalEmissiveIntensity } from '../../utils/materialUtils.js';
+import {
+    applyMatrixMaterialTweaks,
+    applyMatrixUserData,
+    withMaterialArray
+} from '../../utils/matrixVisualUtils.js';
 
 // Animation constants
 import {
@@ -33,36 +38,10 @@ const QKV_LABELS = Object.freeze({
     v: 'Value Weight Matrix',
 });
 
-function withMaterialArray(material, callback) {
-    if (!material || typeof callback !== 'function') return;
-    const mats = Array.isArray(material) ? material : [material];
-    mats.forEach((mat) => {
-        if (!mat) return;
-        callback(mat);
-    });
-}
-
-function forEachMatrixMaterial(matrix, callback) {
-    if (!matrix || typeof callback !== 'function') return;
-    withMaterialArray(matrix.mesh?.material, callback);
-    withMaterialArray(matrix.frontCapMesh?.material, callback);
-    withMaterialArray(matrix.backCapMesh?.material, callback);
-}
-
 function forEachGroupChildMaterial(group, callback) {
     if (!group || !Array.isArray(group.children) || typeof callback !== 'function') return;
     group.children.forEach((child) => {
         withMaterialArray(child?.material, callback);
-    });
-}
-
-function applyMatrixUserData(matrix, data) {
-    if (!matrix || !data) return;
-    const targets = [matrix.group, matrix.mesh, matrix.frontCapMesh, matrix.backCapMesh];
-    targets.forEach((target) => {
-        if (!target) return;
-        target.userData = target.userData || {};
-        Object.assign(target.userData, data);
     });
 }
 
@@ -139,35 +118,6 @@ export function buildMHAVisuals(parentGroup, {
         depthAccentStrength: 0.12
     };
 
-    const softenMatrixSurface = (matrix, {
-        roughnessMin = 0.24,
-        metalnessMax = null,
-        clearcoatMax = 0.65,
-        clearcoatRoughnessMin = 0.22,
-        iridescenceMax = 0.4,
-        envMapIntensityMax = 1.3
-    } = {}) => {
-        if (!matrix) return;
-        forEachMatrixMaterial(matrix, (mat) => {
-            if (!mat) return;
-            if (typeof mat.roughness === 'number') mat.roughness = Math.max(mat.roughness, roughnessMin);
-            if (typeof metalnessMax === 'number' && typeof mat.metalness === 'number') {
-                mat.metalness = Math.min(mat.metalness, metalnessMax);
-            }
-            if (typeof mat.clearcoat === 'number') mat.clearcoat = Math.min(mat.clearcoat, clearcoatMax);
-            if (typeof mat.clearcoatRoughness === 'number') {
-                mat.clearcoatRoughness = Math.max(mat.clearcoatRoughness, clearcoatRoughnessMin);
-            }
-            if (typeof mat.iridescence === 'number') mat.iridescence = Math.min(mat.iridescence, iridescenceMax);
-            if (typeof mat.envMapIntensity === 'number') {
-                mat.envMapIntensity = Math.min(mat.envMapIntensity, envMapIntensityMax);
-            }
-        });
-        updateSciFiMaterialUniforms(matrix.mesh?.material, softenedMatrixUniforms);
-        updateSciFiMaterialUniforms(matrix.frontCapMesh?.material, softenedMatrixUniforms);
-        updateSciFiMaterialUniforms(matrix.backCapMesh?.material, softenedMatrixUniforms);
-    };
-
     const QKV_SURFACE_TWEAKS = {
         roughnessMin: 0.5,
         metalnessMax: 0.6,
@@ -202,7 +152,7 @@ export function buildMHAVisuals(parentGroup, {
         parentGroup.add(matrix.group);
         mhaVisualizations.push(matrix);
         tuneInactiveMatrix(matrix);
-        softenMatrixSurface(matrix, QKV_SURFACE_TWEAKS);
+        applyMatrixMaterialTweaks(matrix, QKV_SURFACE_TWEAKS, { uniforms: softenedMatrixUniforms });
         return matrix;
     };
 
@@ -253,7 +203,7 @@ export function buildMHAVisuals(parentGroup, {
         material.emissiveIntensity = scaleGlobalEmissiveIntensity(0.16);
     });
     // Keep output-projection reflectivity consistent with Q/K/V (and MLP) matrices.
-    softenMatrixSurface(outputProjectionMatrix, QKV_SURFACE_TWEAKS);
+    applyMatrixMaterialTweaks(outputProjectionMatrix, QKV_SURFACE_TWEAKS, { uniforms: softenedMatrixUniforms });
 
     parentGroup.add(outputProjectionMatrix.group);
 

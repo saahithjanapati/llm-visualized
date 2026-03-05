@@ -1,5 +1,7 @@
 # AGENT.md
 
+_Last reviewed: 2026-03-05._
+
 ## Scope
 Cross-cutting constants and utility helpers.
 
@@ -8,6 +10,7 @@ Cross-cutting constants and utility helpers.
 - `visualTuningProfiles.js`: rendering/animation profile tuning constants.
 - `trailUtils.js` and `trailConstants.js`: trail implementations and limits.
 - `sciFiMaterial.js` and `materialUtils.js`: material shader/uniform helpers.
+- `matrixVisualUtils.js`: shared matrix labeling/userData/material tweak helpers.
 - `activationMetadata.js` and `activationPrecompute.js`: activation coloring/metadata prep.
 - `precomputedGeometryLoader.js`: cached geometry loading.
 - `additionUtils.js`, `prismLayout.js`, `colors.js`: animation/layout/color helpers.

@@ -42,12 +42,12 @@ import {
 import { startPrismAdditionAnimation } from '../utils/additionUtils.js';
 import { computeCenteredPrismX, getPrismSpacing, PRISM_INSTANCE_WIDTH_SCALE } from '../utils/prismLayout.js';
 import { buildMHAVisuals, VectorRouter, PassThroughAnimator, SelfAttentionAnimator } from './mhsa/index.js';
-import { updateSciFiMaterialUniforms } from '../utils/sciFiMaterial.js';
 import { scaleGlobalEmissiveIntensity } from '../utils/materialUtils.js';
 import { getSideCopyEntry } from './mhsa/laneIndex.js';
 import { animateVectorMatrixPassThrough as animateVectorMatrixPassThroughExternal } from './mhsa/VectorMatrixPassThrough.js';
 import { clearScheduledDelays, resolveSkipDelay, resolveSkipDuration, scheduleAfterDelay } from './mhsa/mhsaTimingUtils.js';
 import { appState } from '../state/appState.js';
+import { applyMatrixLabel, applyMatrixMaterialTweaks } from '../utils/matrixVisualUtils.js';
 import {
     HORIZ_PHASE,
     LN2_PHASE,
@@ -85,15 +85,6 @@ const SOFTENED_MATRIX_UNIFORMS = {
     accentMix: 0.7
 };
 
-const BASE_MATRIX_SURFACE_TWEAKS = {
-    roughnessMin: 0.55,
-    metalnessMax: 0.55,
-    clearcoatMax: 0.25,
-    clearcoatRoughnessMin: 0.55,
-    iridescenceMax: 0.18,
-    envMapIntensityMax: 0.7
-};
-
 const QKV_SURFACE_TWEAKS = {
     roughnessMin: 0.6,
     metalnessMax: 0.5,
@@ -101,35 +92,6 @@ const QKV_SURFACE_TWEAKS = {
     clearcoatRoughnessMin: 0.6,
     iridescenceMax: 0.15,
     envMapIntensityMax: 0.6
-};
-
-const softenMatrixSurface = (matrix, tweaks = BASE_MATRIX_SURFACE_TWEAKS) => {
-    if (!matrix) return;
-    const {
-        roughnessMin,
-        metalnessMax,
-        clearcoatMax,
-        clearcoatRoughnessMin,
-        iridescenceMax,
-        envMapIntensityMax
-    } = tweaks || BASE_MATRIX_SURFACE_TWEAKS;
-    const mats = [matrix.mesh?.material, matrix.frontCapMesh?.material, matrix.backCapMesh?.material];
-    mats.forEach((mat) => {
-        if (!mat) return;
-        if (typeof mat.roughness === 'number') mat.roughness = Math.max(mat.roughness, roughnessMin);
-        if (typeof mat.metalness === 'number') mat.metalness = Math.min(mat.metalness, metalnessMax);
-        if (typeof mat.clearcoat === 'number') mat.clearcoat = Math.min(mat.clearcoat, clearcoatMax);
-        if (typeof mat.clearcoatRoughness === 'number') {
-            mat.clearcoatRoughness = Math.max(mat.clearcoatRoughness, clearcoatRoughnessMin);
-        }
-        if (typeof mat.iridescence === 'number') mat.iridescence = Math.min(mat.iridescence, iridescenceMax);
-        if (typeof mat.envMapIntensity === 'number') {
-            mat.envMapIntensity = Math.min(mat.envMapIntensity, envMapIntensityMax);
-        }
-    });
-    updateSciFiMaterialUniforms(matrix.mesh?.material, SOFTENED_MATRIX_UNIFORMS);
-    updateSciFiMaterialUniforms(matrix.frontCapMesh?.material, SOFTENED_MATRIX_UNIFORMS);
-    updateSciFiMaterialUniforms(matrix.backCapMesh?.material, SOFTENED_MATRIX_UNIFORMS);
 };
 
 // Use live binding of GLOBAL_ANIM_SPEED_MULT at each use; do not cache
@@ -734,13 +696,7 @@ export class MHSAAnimation {
                 MHA_MATRIX_PARAMS.slitBottomWidthFactor, MHA_MATRIX_PARAMS.slitTopWidthFactor
             );
             queryMatrix.setColor(darkGrayColor);
-            {
-                const lbl = 'Query Weight Matrix';
-                queryMatrix.group.userData.label = lbl;
-                if (queryMatrix.mesh) queryMatrix.mesh.userData.label = lbl;
-                if (queryMatrix.frontCapMesh) queryMatrix.frontCapMesh.userData.label = lbl;
-                if (queryMatrix.backCapMesh)  queryMatrix.backCapMesh.userData.label  = lbl;
-            }
+            applyMatrixLabel(queryMatrix, 'Query Weight Matrix');
             queryMatrix.group.children.forEach(child => {
                 if (child.material) {
                     child.material.transparent = matrixOpacity < 1.0;
@@ -749,7 +705,7 @@ export class MHSAAnimation {
             });
             this.parentGroup.add(queryMatrix.group);
             this.mhaVisualizations.push(queryMatrix);
-            softenMatrixSurface(queryMatrix, QKV_SURFACE_TWEAKS);
+            applyMatrixMaterialTweaks(queryMatrix, QKV_SURFACE_TWEAKS, { uniforms: SOFTENED_MATRIX_UNIFORMS });
 
             const keyMatrix = new WeightMatrixVisualization(
                 null, new THREE.Vector3(x_k, matrixCenterY, 0),
@@ -759,13 +715,7 @@ export class MHSAAnimation {
                 MHA_MATRIX_PARAMS.slitBottomWidthFactor, MHA_MATRIX_PARAMS.slitTopWidthFactor
             );
             keyMatrix.setColor(darkGrayColor);
-            {
-                const lbl = 'Key Weight Matrix';
-                keyMatrix.group.userData.label = lbl;
-                if (keyMatrix.mesh) keyMatrix.mesh.userData.label = lbl;
-                if (keyMatrix.frontCapMesh) keyMatrix.frontCapMesh.userData.label = lbl;
-                if (keyMatrix.backCapMesh)  keyMatrix.backCapMesh.userData.label  = lbl;
-            }
+            applyMatrixLabel(keyMatrix, 'Key Weight Matrix');
             keyMatrix.group.children.forEach(child => {
                 if (child.material) {
                     child.material.transparent = matrixOpacity < 1.0;
@@ -774,7 +724,7 @@ export class MHSAAnimation {
             });
             this.parentGroup.add(keyMatrix.group);
             this.mhaVisualizations.push(keyMatrix);
-            softenMatrixSurface(keyMatrix, QKV_SURFACE_TWEAKS);
+            applyMatrixMaterialTweaks(keyMatrix, QKV_SURFACE_TWEAKS, { uniforms: SOFTENED_MATRIX_UNIFORMS });
 
             const valueMatrix = new WeightMatrixVisualization(
                 null, new THREE.Vector3(x_v, matrixCenterY, 0),
@@ -784,13 +734,7 @@ export class MHSAAnimation {
                 MHA_MATRIX_PARAMS.slitBottomWidthFactor, MHA_MATRIX_PARAMS.slitTopWidthFactor
             );
             valueMatrix.setColor(darkGrayColor);
-            {
-                const lbl = 'Value Weight Matrix';
-                valueMatrix.group.userData.label = lbl;
-                if (valueMatrix.mesh) valueMatrix.mesh.userData.label = lbl;
-                if (valueMatrix.frontCapMesh) valueMatrix.frontCapMesh.userData.label = lbl;
-                if (valueMatrix.backCapMesh)  valueMatrix.backCapMesh.userData.label  = lbl;
-            }
+            applyMatrixLabel(valueMatrix, 'Value Weight Matrix');
             valueMatrix.group.children.forEach(child => {
                 if (child.material) {
                     child.material.transparent = matrixOpacity < 1.0;
@@ -799,7 +743,7 @@ export class MHSAAnimation {
             });
             this.parentGroup.add(valueMatrix.group);
             this.mhaVisualizations.push(valueMatrix);
-            softenMatrixSurface(valueMatrix, QKV_SURFACE_TWEAKS);
+            applyMatrixMaterialTweaks(valueMatrix, QKV_SURFACE_TWEAKS, { uniforms: SOFTENED_MATRIX_UNIFORMS });
 
             this.headsCentersX.push(x_k);
             this.headCoords.push({ q: x_q, k: x_k, v: x_v });
@@ -840,13 +784,7 @@ export class MHSAAnimation {
         // Initialise pitch-black; will brighten once vectors pass through
         const initDarkColor = new THREE.Color(MHSA_MATRIX_INITIAL_RESTING_COLOR);
         this.outputProjectionMatrix.setColor(initDarkColor);
-        {
-            const lbl = 'Output Projection Matrix';
-            this.outputProjectionMatrix.group.userData.label = lbl;
-            if (this.outputProjectionMatrix.mesh) this.outputProjectionMatrix.mesh.userData.label = lbl;
-            if (this.outputProjectionMatrix.frontCapMesh) this.outputProjectionMatrix.frontCapMesh.userData.label = lbl;
-            if (this.outputProjectionMatrix.backCapMesh)  this.outputProjectionMatrix.backCapMesh.userData.label  = lbl;
-        }
+        applyMatrixLabel(this.outputProjectionMatrix, 'Output Projection Matrix');
         this.outputProjectionMatrix.group.children.forEach(child => {
             if (child.material) {
                 // Ensure the output projection matrix starts fully opaque
@@ -858,7 +796,7 @@ export class MHSAAnimation {
         });
         this.parentGroup.add(this.outputProjectionMatrix.group);
         // Keep output projection reflectivity aligned with QKV matrices.
-        softenMatrixSurface(this.outputProjectionMatrix, QKV_SURFACE_TWEAKS);
+        applyMatrixMaterialTweaks(this.outputProjectionMatrix, QKV_SURFACE_TWEAKS, { uniforms: SOFTENED_MATRIX_UNIFORMS });
         
         // Store the matrix's Y position for later animations
         this.outputProjMatrixCenterY = outputProjMatrixCenterY;

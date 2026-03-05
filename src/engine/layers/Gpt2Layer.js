@@ -38,6 +38,7 @@ import {
 import { PrismLayerNormAnimation } from '../../animations/PrismLayerNormAnimation.js';
 import { MHSAAnimation } from '../../animations/MHSAAnimation.js';
 import { startPrismAdditionAnimation } from '../../utils/additionUtils.js';
+import { applyMatrixLabel, applyMatrixMaterialTweaks } from '../../utils/matrixVisualUtils.js';
 import {
     applyVectorData,
     copyVectorAppearance,
@@ -58,6 +59,11 @@ import {
     LN2_PHASE,
     isAllowedLanePhaseTransition
 } from './gpt2LanePhases.js';
+import {
+    buildDebugVectorSum,
+    getLaneProgressSignature,
+    toDebugArray
+} from './gpt2LaneWatchdogUtils.js';
 import { GPT2_LAYER_VISUAL_TUNING } from '../../utils/visualTuningProfiles.js';
 import {
     applyLayerNormParamVectorForLayer,
@@ -194,47 +200,6 @@ const MLP_TRANSITION_PROFILE_SKIP_TOUCH = Object.freeze({
     maxDownDurationMs: 240,
     colorMinDurationMs: 180
 });
-
-const applyMatrixReflectivityTweak = (matrix, tweaks) => {
-    if (!matrix || !tweaks) return;
-    const applyToMaterial = (mat) => {
-        if (!mat) return;
-        const mats = Array.isArray(mat) ? mat : [mat];
-        mats.forEach(m => {
-            if (!m) return;
-            if (typeof tweaks.roughnessMin === 'number' && typeof m.roughness === 'number') {
-                m.roughness = Math.max(m.roughness, tweaks.roughnessMin);
-            }
-            if (typeof tweaks.metalnessMax === 'number' && typeof m.metalness === 'number') {
-                m.metalness = Math.min(m.metalness, tweaks.metalnessMax);
-            }
-            if (typeof tweaks.clearcoatMax === 'number' && typeof m.clearcoat === 'number') {
-                m.clearcoat = Math.min(m.clearcoat, tweaks.clearcoatMax);
-            }
-            if (typeof tweaks.clearcoatRoughnessMin === 'number' && typeof m.clearcoatRoughness === 'number') {
-                m.clearcoatRoughness = Math.max(m.clearcoatRoughness, tweaks.clearcoatRoughnessMin);
-            }
-            if (typeof tweaks.iridescenceMax === 'number' && typeof m.iridescence === 'number') {
-                m.iridescence = Math.min(m.iridescence, tweaks.iridescenceMax);
-            }
-            if (typeof tweaks.envMapIntensityMax === 'number' && typeof m.envMapIntensity === 'number') {
-                m.envMapIntensity = Math.min(m.envMapIntensity, tweaks.envMapIntensityMax);
-            }
-        });
-    };
-    applyToMaterial(matrix.mesh?.material);
-    applyToMaterial(matrix.frontCapMesh?.material);
-    applyToMaterial(matrix.backCapMesh?.material);
-};
-
-const assignMatrixLabel = (matrix, label) => {
-    if (!matrix || typeof label !== 'string') return;
-    if (matrix.group) matrix.group.userData.label = label;
-    if (matrix.mesh) matrix.mesh.userData.label = label;
-    if (matrix.frontCapMesh) matrix.frontCapMesh.userData.label = label;
-    if (matrix.backCapMesh) matrix.backCapMesh.userData.label = label;
-};
-
 
 export default class Gpt2Layer extends BaseLayer {
     /**
@@ -771,8 +736,8 @@ export default class Gpt2Layer extends BaseLayer {
         const matrixColor = color && typeof color.clone === 'function' ? color.clone() : color;
         matrix.setColor(matrixColor);
         matrix.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity });
-        applyMatrixReflectivityTweak(matrix, MLP_REFLECTIVITY_TWEAKS);
-        assignMatrixLabel(matrix, label);
+        applyMatrixMaterialTweaks(matrix, MLP_REFLECTIVITY_TWEAKS);
+        applyMatrixLabel(matrix, label);
         this.raycastRoot.add(matrix.group);
         freezeStaticTransforms(matrix.group, true);
         return matrix;
@@ -1509,7 +1474,7 @@ export default class Gpt2Layer extends BaseLayer {
                                 productUsedForColor: scaledFallback,
                                 shiftParamSaved: shiftParamData,
                                 shiftRuntime: addResult.rawData,
-                                productPlusShiftComputed: this._buildDebugVectorSum(multData, shiftParamData, multResult.instanceCount),
+                                productPlusShiftComputed: buildDebugVectorSum(multData, shiftParamData, multResult.instanceCount),
                                 productPlusShiftSaved: ln1ShiftedData,
                                 productPlusShiftUsedForColor: finalLn1ShiftData
                             });
@@ -2044,7 +2009,7 @@ export default class Gpt2Layer extends BaseLayer {
                                 productUsedForColor: scaledFallback,
                                 shiftParamSaved: shiftParamData,
                                 shiftRuntime: addResult.rawData,
-                                productPlusShiftComputed: this._buildDebugVectorSum(multData, shiftParamData, resVec.instanceCount),
+                                productPlusShiftComputed: buildDebugVectorSum(multData, shiftParamData, resVec.instanceCount),
                                 productPlusShiftSaved: ln2ShiftedData,
                                 productPlusShiftUsedForColor: finalLn2ShiftData
                             });
@@ -3396,59 +3361,6 @@ export default class Gpt2Layer extends BaseLayer {
             : Date.now();
     }
 
-    _quantizeLaneCoord(value, scale = 100) {
-        if (!Number.isFinite(value)) return 0x7fffffff;
-        return Math.round(value * scale) | 0;
-    }
-
-    _mixLaneHash(hash, value) {
-        const normalized = Number.isFinite(value) ? (value | 0) : 0;
-        return Math.imul((hash ^ (normalized >>> 0)) >>> 0, 16777619) >>> 0;
-    }
-
-    _mixLanePhase(hash, phase) {
-        const phaseText = (typeof phase === 'string') ? phase : '';
-        let nextHash = hash;
-        for (let i = 0; i < phaseText.length; i++) {
-            nextHash = this._mixLaneHash(nextHash, phaseText.charCodeAt(i));
-        }
-        return this._mixLaneHash(nextHash, 255);
-    }
-
-    _mixLaneVector(hash, vec) {
-        if (!vec || !vec.group || !vec.group.position) {
-            return this._mixLaneHash(hash, 0x9e3779b9);
-        }
-        const p = vec.group.position;
-        let nextHash = this._mixLaneHash(hash, this._quantizeLaneCoord(p.x));
-        nextHash = this._mixLaneHash(nextHash, this._quantizeLaneCoord(p.y));
-        nextHash = this._mixLaneHash(nextHash, this._quantizeLaneCoord(p.z));
-        return nextHash;
-    }
-
-    _getLaneProgressSignature(lane) {
-        if (!lane) return 0;
-        let hash = 2166136261 >>> 0;
-        hash = this._mixLanePhase(hash, lane.horizPhase);
-        hash = this._mixLanePhase(hash, lane.ln2Phase);
-        hash = this._mixLaneHash(hash, lane.stopRise ? 1 : 0);
-        hash = this._mixLaneHash(hash, lane.ln1AddStarted ? 1 : 0);
-        hash = this._mixLaneHash(hash, lane.ln1AddComplete ? 1 : 0);
-        hash = this._mixLaneHash(hash, lane.ln2AddStarted ? 1 : 0);
-        hash = this._mixLaneHash(hash, lane.ln2AddComplete ? 1 : 0);
-        hash = this._mixLaneHash(hash, lane.mlpUpStarted ? 1 : 0);
-        hash = this._mixLaneHash(hash, lane.mlpDownStarted ? 1 : 0);
-        hash = this._mixLaneHash(hash, lane.mlpDownComplete ? 1 : 0);
-        hash = this._mixLaneHash(hash, this._quantizeLaneCoord(lane.ln1ShiftProgress));
-        hash = this._mixLaneHash(hash, this._quantizeLaneCoord(lane.mhsaResidualAddProgress));
-        hash = this._mixLaneHash(hash, this._quantizeLaneCoord(lane.ln2ShiftProgress));
-        hash = this._mixLaneVector(hash, lane.originalVec);
-        hash = this._mixLaneVector(hash, lane.postAdditionVec);
-        hash = this._mixLaneVector(hash, lane.movingVecLN2);
-        hash = this._mixLaneVector(hash, lane.resultVecLN2);
-        return hash;
-    }
-
     _updatePositionalPassBarrier({
         lanes,
         nowMs,
@@ -3845,7 +3757,7 @@ export default class Gpt2Layer extends BaseLayer {
         for (let i = 0; i < lanes.length; i++) {
             const lane = lanes[i];
             if (!lane || lane.ln2Phase === LN2_PHASE.DONE) continue;
-            const signature = this._getLaneProgressSignature(lane);
+            const signature = getLaneProgressSignature(lane);
             if (lane.__phaseWatchSignature !== signature) {
                 lane.__phaseWatchSignature = signature;
                 lane.__phaseWatchStartMs = nowMs;
@@ -3861,7 +3773,7 @@ export default class Gpt2Layer extends BaseLayer {
                 mutated = true;
             }
             lane.__phaseWatchStartMs = nowMs;
-            lane.__phaseWatchSignature = this._getLaneProgressSignature(lane);
+            lane.__phaseWatchSignature = getLaneProgressSignature(lane);
         }
 
         if (!mutated) return;
@@ -3910,31 +3822,6 @@ export default class Gpt2Layer extends BaseLayer {
         return remaining / etaSeconds;
     }
 
-    _toDebugArray(values) {
-        if (Array.isArray(values)) return values.slice();
-        if (ArrayBuffer.isView(values)) return Array.from(values);
-        return null;
-    }
-
-    _buildDebugVectorSum(lhs, rhs, fallbackLength = 0) {
-        const left = this._toDebugArray(lhs);
-        const right = this._toDebugArray(rhs);
-        const fallback = Number.isFinite(fallbackLength) ? Math.max(0, Math.floor(fallbackLength)) : 0;
-        const length = Math.max(
-            fallback,
-            left ? left.length : 0,
-            right ? right.length : 0
-        );
-        if (length <= 0) return null;
-        const sum = new Array(length);
-        for (let i = 0; i < length; i++) {
-            const l = left && Number.isFinite(left[i]) ? left[i] : 0;
-            const r = right && Number.isFinite(right[i]) ? right[i] : 0;
-            sum[i] = l + r;
-        }
-        return sum;
-    }
-
     _logLayerNormVectorDump(kind, lane, vectors = {}) {
         const root = (typeof window !== 'undefined') ? window : globalThis;
         const hasExplicitToggle = !!(root && Object.prototype.hasOwnProperty.call(root, '__LN_VECTOR_DEBUG'));
@@ -3977,7 +3864,7 @@ export default class Gpt2Layer extends BaseLayer {
 
         for (let i = 0; i < orderedLabels.length; i++) {
             const label = orderedLabels[i];
-            const values = this._toDebugArray(vectors[label]);
+            const values = toDebugArray(vectors[label]);
             if (values) {
                 console.log(`${label} (len=${values.length})`, values);
             } else {
