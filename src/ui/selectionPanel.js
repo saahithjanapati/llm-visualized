@@ -55,6 +55,7 @@ import {
     formatValues,
     normalizeAttentionValuePart
 } from './selectionPanelFormatUtils.js';
+import { buildSelectionPromptContext } from './selectionPanelPromptContextUtils.js';
 import {
     applyMaterialSnapshot,
     copyInstancedVectorColorsToPreview,
@@ -2221,6 +2222,8 @@ class SelectionPanel {
         this.tokenInfoPosition = document.getElementById('detailTokenInfoPosition');
         this.tokenEncodingRow = document.getElementById('detailTokenEncodingRow');
         this.tokenEncodingValue = document.getElementById('detailTokenEncodingValue');
+        this.promptContextRow = document.getElementById('detailPromptContextRow');
+        this.promptContextTokens = document.getElementById('detailPromptContextTokens');
         this.copyContextBtn = document.getElementById('detailCopyContextBtn');
         this.copyContextBtnLabel = document.getElementById('detailCopyContextBtnLabel');
         this.closeBtn = document.getElementById('detailClose');
@@ -5286,6 +5289,74 @@ class SelectionPanel {
         }
     }
 
+    _updatePromptContextRow(tokenMetadata = null, { visible = false } = {}) {
+        if (!this.promptContextRow || !this.promptContextTokens) return;
+        if (!visible) {
+            this.promptContextRow.style.display = 'none';
+            this.promptContextTokens.replaceChildren();
+            return;
+        }
+
+        const tokenIndex = Number.isFinite(tokenMetadata?.tokenIndex) ? Math.floor(tokenMetadata.tokenIndex) : null;
+        const tokenId = Number.isFinite(tokenMetadata?.tokenId) ? Math.floor(tokenMetadata.tokenId) : null;
+        const tokenText = typeof tokenMetadata?.tokenText === 'string'
+            ? tokenMetadata.tokenText
+            : '';
+        const promptTokenIndices = Array.isArray(this.attentionTokenIndices) && this.attentionTokenIndices.length
+            ? this.attentionTokenIndices
+            : this.laneTokenIndices;
+        const promptTokenLabels = Array.isArray(this.attentionTokenLabels) && this.attentionTokenLabels.length
+            ? this.attentionTokenLabels
+            : this.tokenLabels;
+        const { entries, activeIndex } = buildSelectionPromptContext({
+            activationSource: this.activationSource,
+            laneTokenIndices: promptTokenIndices,
+            tokenLabels: promptTokenLabels,
+            selectedTokenIndex: tokenIndex,
+            selectedTokenId: tokenId,
+            selectedTokenText: tokenText
+        });
+
+        if (!entries.length || activeIndex < 0) {
+            this.promptContextRow.style.display = 'none';
+            this.promptContextTokens.replaceChildren();
+            return;
+        }
+
+        const fragment = document.createDocumentFragment();
+        const mutedBorder = 'rgba(105, 114, 126, 0.6)';
+        const mutedFill = 'rgba(73, 80, 90, 0.1)';
+        const mutedFillHover = 'rgba(108, 117, 131, 0.18)';
+
+        entries.forEach((entry, index) => {
+            const chip = document.createElement('span');
+            const isSelected = index === activeIndex;
+            chip.className = 'detail-subtitle-token-chip detail-token-nav-chip detail-prompt-context-token';
+            if (isSelected) {
+                chip.classList.add('detail-prompt-context-token--selected');
+                chip.style.setProperty('--token-color-border', getLogitTokenColorCss(entry.seed, 0.92));
+                chip.style.setProperty('--token-color-fill', getLogitTokenColorCss(entry.seed, 0.2));
+                chip.style.setProperty('--token-color-fill-hover', getLogitTokenColorCss(entry.seed, 0.28));
+            } else {
+                chip.style.setProperty('--token-color-border', mutedBorder);
+                chip.style.setProperty('--token-color-fill', mutedFill);
+                chip.style.setProperty('--token-color-fill-hover', mutedFillHover);
+            }
+            chip.textContent = entry.displayText;
+            chip.title = entry.titleText || '';
+            this._configureTokenNavChip(chip, {
+                tokenText: entry.tokenLabel,
+                tokenIndex: entry.tokenIndex,
+                tokenId: entry.tokenId
+            });
+            fragment.appendChild(chip);
+        });
+
+        this.promptContextTokens.replaceChildren(fragment);
+        this.promptContextRow.style.display = '';
+        this._applyTokenChipHoverState();
+    }
+
     _resolveSelectionTokenEncodingNote(selection, label, vectorMetadata = null) {
         if (vectorMetadata && typeof vectorMetadata.tokenEncodingNote === 'string' && vectorMetadata.tokenEncodingNote.trim().length) {
             return vectorMetadata.tokenEncodingNote;
@@ -5483,6 +5554,7 @@ class SelectionPanel {
         if (this.biasDim) this.biasDim.textContent = showBiasDim ? metadata.biasDim : '';
         const vectorTokenMetadata = this._updateVectorTokenPositionRows(selection, label);
         this._setTokenEncodingNote(this._resolveSelectionTokenEncodingNote(selection, label, vectorTokenMetadata));
+        this._updatePromptContextRow(vectorTokenMetadata, { visible: isTokenChipSelection });
         if (this.description) {
             const desc = resolveDescription(label, selection.kind, selection);
             this._currentSelectionDescription = desc || '';

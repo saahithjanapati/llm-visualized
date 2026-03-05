@@ -579,15 +579,25 @@ body.touch-ui * {
     bottom: env(safe-area-inset-bottom);
     transform: none;
     z-index: 7;
+    isolation: isolate;
     width: fit-content;
     max-width: var(--prompt-token-strip-max-width);
-    padding: 8px 10px;
+    padding: 14px 10px 10px;
     border-radius: 12px;
+    overflow: visible;
+    pointer-events: auto;
+    color: #fff;
+}
+#promptTokenStrip::before {
+    content: '';
+    position: absolute;
+    inset: -8px 0 0;
+    border-radius: 20px;
     border: 1px solid rgba(255,255,255,0.2);
     background: rgba(0,0,0,0.92);
     box-shadow: 0 10px 24px rgba(0,0,0,0.44);
-    pointer-events: auto;
-    color: #fff;
+    pointer-events: none;
+    z-index: -1;
 }
 @media (min-width: 881px) and (min-aspect-ratio: 1/1) {
     #promptTokenStrip {
@@ -629,10 +639,10 @@ body.touch-ui * {
     flex-wrap: wrap;
     gap: var(--prompt-token-chip-gap);
     max-width: 100%;
-    max-height: 100px;
-    overflow-y: auto;
-    padding-top: 2px;
-    padding-bottom: 1px;
+    max-height: none;
+    overflow: visible;
+    padding-top: 6px;
+    padding-bottom: 5px;
     padding-right: 2px;
 }
 #promptTokenStrip .prompt-token-strip__token {
@@ -657,6 +667,7 @@ body.touch-ui * {
     cursor: pointer;
     user-select: none;
     touch-action: manipulation;
+    transform-origin: center top;
     transition:
         transform 0.12s ease,
         filter 0.12s ease,
@@ -675,7 +686,7 @@ body.touch-ui * {
     box-shadow:
         0 0 0 1px var(--token-color-fill-hover),
         0 0 14px var(--token-color-fill-hover);
-    transform: translateY(-1px) scale(1.04);
+    transform: scale(1.04);
     filter: saturate(1.2) brightness(1.08);
 }
 #promptTokenStrip .prompt-token-strip__token:active {
@@ -688,7 +699,7 @@ body.touch-ui * {
 }
 
 body[data-prompt-token-strip-visible="true"] #generationOverlay {
-    bottom: calc(max(18px, env(safe-area-inset-bottom)) + 116px);
+    bottom: calc(max(18px, env(safe-area-inset-bottom)) + var(--prompt-token-strip-height, 0px) + 12px);
 }
 
 @keyframes generationOverlayIn {
@@ -782,7 +793,7 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
         width: fit-content;
         max-width: var(--prompt-token-strip-max-width);
         bottom: max(8px, calc(env(safe-area-inset-bottom) + 8px));
-        padding: 8px 8px;
+        padding: 12px 8px 8px;
     }
     #promptTokenStrip .prompt-token-strip__header {
         margin-bottom: 5px;
@@ -792,10 +803,11 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
         font-size: 10px;
     }
     #promptTokenStrip .prompt-token-strip__tokens {
-        max-height: 86px;
+        max-height: 94px;
+        overflow-y: auto;
     }
     body[data-prompt-token-strip-visible="true"] #generationOverlay {
-        bottom: calc(max(8px, calc(env(safe-area-inset-bottom) + 8px)) + 104px);
+        bottom: calc(max(8px, calc(env(safe-area-inset-bottom) + 8px)) + var(--prompt-token-strip-height, 0px) + 10px);
     }
 }
 
@@ -830,13 +842,14 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
         --prompt-token-chip-pad-x: 6px;
         max-width: var(--prompt-token-strip-max-width);
         bottom: max(6px, calc(env(safe-area-inset-bottom) + 6px));
-        padding: 7px 7px;
+        padding: 11px 7px 7px;
     }
     #promptTokenStrip .prompt-token-strip__tokens {
-        max-height: 78px;
+        max-height: 84px;
+        overflow-y: auto;
     }
     body[data-prompt-token-strip-visible="true"] #generationOverlay {
-        bottom: calc(max(6px, calc(env(safe-area-inset-bottom) + 6px)) + 96px);
+        bottom: calc(max(6px, calc(env(safe-area-inset-bottom) + 6px)) + var(--prompt-token-strip-height, 0px) + 8px);
     }
 }
 
@@ -1599,7 +1612,7 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     justify-content: center;
     align-self: center;
     min-width: 0;
-    margin-left: 0;
+    margin-left: 10px;
     margin-top: 0;
 }
 .detail-attention-context-score-value {
@@ -2721,6 +2734,48 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     text-align: right;
     overflow-wrap: anywhere;
     line-height: 1.35;
+}
+.detail-prompt-context {
+    margin: 8px 16px 0;
+    padding: 10px 12px;
+    border-radius: 16px;
+    border: 1px solid rgba(255,255,255,0.14);
+    background:
+        radial-gradient(circle at top left, rgba(255,255,255,0.08), transparent 55%),
+        rgba(0,0,0,0.78);
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.04),
+        0 12px 26px rgba(0,0,0,0.26);
+    box-sizing: border-box;
+}
+.detail-prompt-context-tokens {
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 6px;
+    max-width: 100%;
+    overflow: visible;
+    padding-right: 2px;
+}
+.detail-prompt-context-token {
+    --token-color-border: rgba(105, 114, 126, 0.6);
+    --token-color-fill: rgba(73, 80, 90, 0.1);
+    --token-color-fill-hover: rgba(108, 117, 131, 0.18);
+    max-width: min(180px, 100%);
+    color: #aab3bf;
+}
+.detail-prompt-context-token--selected {
+    color: #fff;
+    background: var(--token-color-fill-hover);
+    border-color: var(--token-color-border);
+    box-shadow:
+        0 0 0 1px var(--token-color-fill-hover),
+        0 0 12px var(--token-color-fill-hover);
+    filter: saturate(1.12) brightness(1.04);
+}
+#detailPanel.is-preview-hidden .detail-prompt-context {
+    display: none !important;
 }
 .detail-row-params .detail-value {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;

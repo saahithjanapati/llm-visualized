@@ -1,5 +1,5 @@
 import { appState } from '../state/appState.js';
-import { getLogitTokenColorCss, resolveLogitTokenSeed } from '../app/gpt-tower/logitColor.js';
+import { getLogitTokenColorCss, resolveAdjacentLogitTokenSeeds } from '../app/gpt-tower/logitColor.js';
 import {
     TOKEN_CHIP_HOVER_SYNC_EVENT,
     dispatchTokenChipHoverSync,
@@ -10,15 +10,6 @@ import { initTouchClickFallback } from './touchClickFallback.js';
 
 const STRIP_ID = 'promptTokenStrip';
 const PROMPT_TOKEN_STRIP_HOVER_SOURCE = 'prompt-token-strip';
-
-function resolveTokenEntrySeed(entry, fallbackIndex = 0) {
-    if (!entry || typeof entry !== 'object') return resolveLogitTokenSeed(null, fallbackIndex);
-    if (Number.isFinite(entry.seed)) return Math.floor(entry.seed) >>> 0;
-    return resolveLogitTokenSeed({
-        token_id: entry.tokenId,
-        token: entry.tokenLabel
-    }, fallbackIndex);
-}
 
 function normalizeTokenText(token) {
     if (token === null || token === undefined) return '';
@@ -65,6 +56,12 @@ function setBodyVisibilityFlag(visible) {
     }
 }
 
+function setPromptTokenStripHeightVar(heightPx = 0) {
+    if (typeof document === 'undefined' || !document.body) return;
+    const safeHeight = Number.isFinite(heightPx) ? Math.max(0, Math.ceil(heightPx)) : 0;
+    document.body.style.setProperty('--prompt-token-strip-height', `${safeHeight}px`);
+}
+
 function isDetailPanelSuppressingStripOnMobile() {
     if (typeof window === 'undefined' || typeof document === 'undefined' || !document.body) return false;
     if (!document.body.classList.contains('detail-mobile-focus')) return false;
@@ -87,9 +84,16 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
     let clickableEntries = [];
     let stripEnabled = appState.showPromptTokenStrip !== false;
     let bodyClassObserver = null;
+    let stripSizeObserver = null;
     let touchClickCleanup = null;
     let hoveredEntry = null;
     let mirroredEntry = null;
+
+    const syncMeasuredHeight = () => {
+        const visible = dom.root.dataset.visible === 'true';
+        const measuredHeight = visible ? dom.root.getBoundingClientRect().height : 0;
+        setPromptTokenStripHeightVar(measuredHeight);
+    };
 
     const updateVisibility = () => {
         const shouldShow = stripEnabled
@@ -97,6 +101,7 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
             && !isDetailPanelSuppressingStripOnMobile();
         dom.root.dataset.visible = shouldShow ? 'true' : 'false';
         setBodyVisibilityFlag(shouldShow);
+        syncMeasuredHeight();
     };
 
     const setEnabled = (enabled) => {
@@ -220,6 +225,12 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
             attributeFilter: ['class']
         });
     }
+    if (typeof ResizeObserver !== 'undefined') {
+        stripSizeObserver = new ResizeObserver(() => {
+            syncMeasuredHeight();
+        });
+        stripSizeObserver.observe(dom.root);
+    }
 
     const render = ({
         tokenLabels = [],
@@ -306,8 +317,9 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
         lastSignature = signature;
 
         const fragment = document.createDocumentFragment();
+        const displaySeeds = resolveAdjacentLogitTokenSeeds(entries);
         entries.forEach((entry, index) => {
-            const seed = resolveTokenEntrySeed(entry, index);
+            const seed = Number.isFinite(displaySeeds[index]) ? Math.floor(displaySeeds[index]) : 0;
             const tokenEl = document.createElement('button');
             tokenEl.type = 'button';
             tokenEl.className = 'prompt-token-strip__token';
@@ -325,6 +337,7 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
         dom.tokensEl.replaceChildren(fragment);
         applyActiveTokenState();
         updateVisibility();
+        syncMeasuredHeight();
     };
 
     return {
@@ -339,6 +352,7 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
         setEnabled,
         dispose: () => {
             setBodyVisibilityFlag(false);
+            setPromptTokenStripHeightVar(0);
             clickableEntries = [];
             setHoveredEntry(null, { emit: true });
             mirroredEntry = null;
@@ -356,6 +370,10 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
             if (bodyClassObserver) {
                 bodyClassObserver.disconnect();
                 bodyClassObserver = null;
+            }
+            if (stripSizeObserver) {
+                stripSizeObserver.disconnect();
+                stripSizeObserver = null;
             }
             if (dom.root && dom.root.parentElement) {
                 dom.root.parentElement.removeChild(dom.root);
