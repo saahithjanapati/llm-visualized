@@ -3,6 +3,7 @@ import {
     MHA_FINAL_K_COLOR,
     MHA_FINAL_V_COLOR,
     MHA_OUTPUT_PROJECTION_MATRIX_COLOR,
+    POSITION_EMBED_COLOR,
     MLP_UP_MATRIX_COLOR,
     MLP_DOWN_MATRIX_COLOR
 } from '../animations/LayerAnimationConstants.js';
@@ -58,6 +59,8 @@ const SELECTION_EQUATION_COLORS = {
     k: toKatexColorHex(MHA_FINAL_K_COLOR),
     v: toKatexColorHex(MHA_FINAL_V_COLOR),
     output: toKatexColorHex(MHA_OUTPUT_PROJECTION_MATRIX_COLOR),
+    embeddingVocab: toKatexColorHex(MHA_FINAL_Q_COLOR),
+    embeddingPos: toKatexColorHex(POSITION_EMBED_COLOR),
     mlpUp: toKatexColorHex(MLP_UP_MATRIX_COLOR),
     mlpDown: toKatexColorHex(MLP_DOWN_MATRIX_COLOR)
 };
@@ -73,10 +76,16 @@ const SELECTION_EQUATION_SYMBOLS = {
     BV: colorizeEquationToken(SELECTION_EQUATION_COLORS.v, 'b_V'),
     WO: colorizeEquationToken(SELECTION_EQUATION_COLORS.output, 'W_O'),
     BO: colorizeEquationToken(SELECTION_EQUATION_COLORS.output, 'b_O'),
+    XTok: colorizeEquationToken(SELECTION_EQUATION_COLORS.embeddingVocab, 'x_t^{\\text{tok}}'),
+    XPos: colorizeEquationToken(SELECTION_EQUATION_COLORS.embeddingPos, 'x_t^{\\text{pos}}'),
+    E: colorizeEquationToken(SELECTION_EQUATION_COLORS.embeddingVocab, 'E'),
+    P: colorizeEquationToken(SELECTION_EQUATION_COLORS.embeddingPos, 'P'),
+    WU: colorizeEquationToken(SELECTION_EQUATION_COLORS.embeddingVocab, 'W_U'),
     WUp: colorizeEquationToken(SELECTION_EQUATION_COLORS.mlpUp, 'W_{\\text{up}}'),
     BUp: colorizeEquationToken(SELECTION_EQUATION_COLORS.mlpUp, 'b_{\\text{up}}'),
     WDown: colorizeEquationToken(SELECTION_EQUATION_COLORS.mlpDown, 'W_{\\text{down}}'),
-    BDown: colorizeEquationToken(SELECTION_EQUATION_COLORS.mlpDown, 'b_{\\text{down}}')
+    BDown: colorizeEquationToken(SELECTION_EQUATION_COLORS.mlpDown, 'b_{\\text{down}}'),
+    MLPDown: colorizeEquationToken(SELECTION_EQUATION_COLORS.mlpDown, '\\mathrm{MLP}(u_{\\text{ln}})')
 };
 
 function formatEquationBlock(lines) {
@@ -88,9 +97,9 @@ function formatEquationBlock(lines) {
 
 function buildNlpEmbeddingEquationBlock() {
     return formatEquationBlock([
-        'x_t^{\\text{tok}} = E[\\mathrm{token}_t]',
-        'x_t^{\\text{pos}} = P[t]',
-        'x_t = x_t^{\\text{tok}} + x_t^{\\text{pos}}'
+        `${SELECTION_EQUATION_SYMBOLS.XTok} = ${SELECTION_EQUATION_SYMBOLS.E}[\\mathrm{token}_t]`,
+        `${SELECTION_EQUATION_SYMBOLS.XPos} = ${SELECTION_EQUATION_SYMBOLS.P}[t]`,
+        `x_t = ${SELECTION_EQUATION_SYMBOLS.XTok} + ${SELECTION_EQUATION_SYMBOLS.XPos}`
     ]);
 }
 
@@ -180,12 +189,12 @@ export function resolveSelectionEquations(label, selectionInfo = null) {
     if (lower.includes('mlp down weight matrix')) {
         return formatEquationBlock([
             `\\mathrm{MLP}(u_{\\text{ln}}) = z ${SELECTION_EQUATION_SYMBOLS.WDown} + ${SELECTION_EQUATION_SYMBOLS.BDown}`,
-            'x_{\\text{out}} = u + \\mathrm{MLP}(u_{\\text{ln}})'
+            `x_{\\text{out}} = u + ${SELECTION_EQUATION_SYMBOLS.MLPDown}`
         ]);
     }
     if (lower.includes('vocab embedding (top)') || lower.includes('unembedding')) {
         return formatEquationBlock([
-            '\\ell = x_{\\text{final}} W_U',
+            `\\ell = x_{\\text{final}} ${SELECTION_EQUATION_SYMBOLS.WU}`,
             'p = \\mathrm{softmax}(\\ell)'
         ]);
     }

@@ -4955,6 +4955,7 @@ class SelectionPanel {
         const previewSelectionKey = hidePreviewForSelection ? null : buildSelectionPreviewKey(label, selection);
         const metadata = resolveMetadata(label, selection.kind, selection);
         const logitHeader = resolveLogitSelectionHeader(label, selection);
+        const vectorSubtitleMetadata = this._resolveVectorTokenPosition(selection, label);
         this.panel.classList.toggle('is-preview-hidden', hidePreviewForSelection);
         this.title.textContent = logitHeader?.title || displayLabel;
         if (this.subtitle) {
@@ -4963,14 +4964,34 @@ class SelectionPanel {
             } else {
                 const layerIndex = findUserDataNumber(selection, 'layerIndex');
                 const headIndex = findUserDataNumber(selection, 'headIndex');
-                const showHead = isQkvMatrixLabel(label) || isAttentionScoreSelection(label, selection);
-                let subtitleText = Number.isFinite(layerIndex) ? `Layer ${layerIndex + 1}` : '';
-                if (showHead && Number.isFinite(headIndex)) {
-                    subtitleText = subtitleText
-                        ? `${subtitleText} • Head ${headIndex + 1}`
-                        : `Head ${headIndex + 1}`;
+                const isQkvOrCachedVectorSelection = isLikelyVectorSelection(label, selection)
+                    && (isQkvHeadVectorSelection(label, selection) || isKvCacheVectorSelection(selection));
+                const showHead = isQkvMatrixLabel(label)
+                    || isAttentionScoreSelection(label, selection)
+                    || isQkvOrCachedVectorSelection;
+                const subtitleParts = [];
+                if (Number.isFinite(layerIndex)) {
+                    subtitleParts.push(`Layer ${layerIndex + 1}`);
                 }
-                this.subtitle.textContent = subtitleText;
+                if (showHead && Number.isFinite(headIndex)) {
+                    subtitleParts.push(`Head ${headIndex + 1}`);
+                }
+                if (isQkvOrCachedVectorSelection) {
+                    let positionText = '';
+                    if (vectorSubtitleMetadata && typeof vectorSubtitleMetadata.positionText === 'string') {
+                        positionText = vectorSubtitleMetadata.positionText.trim();
+                    }
+                    if (!positionText) {
+                        const tokenIndex = findUserDataNumber(selection, 'tokenIndex');
+                        if (Number.isFinite(tokenIndex)) {
+                            positionText = String(Math.floor(tokenIndex) + 1);
+                        }
+                    }
+                    if (positionText) {
+                        subtitleParts.push(`Position ${positionText}`);
+                    }
+                }
+                this.subtitle.textContent = subtitleParts.join(' • ');
             }
         }
         const hideLayerNormFields = isLayerNormSolidSelection(label);

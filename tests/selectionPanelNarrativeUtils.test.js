@@ -26,9 +26,12 @@ describe('selectionPanelNarrativeUtils', () => {
         const tokenEq = resolveSelectionEquations('Token: hello', null);
         const positionEq = resolveSelectionEquations('Position: 3', null);
 
-        expect(vocabEq).toContain('x_t^{\\text{tok}} = E[\\mathrm{token}_t]');
-        expect(vocabEq).toContain('x_t^{\\text{pos}} = P[t]');
-        expect(vocabEq).toContain('x_t = x_t^{\\text{tok}} + x_t^{\\text{pos}}');
+        expect(vocabEq).toContain('\\textcolor');
+        expect(vocabEq).toContain('x_t^{\\text{tok}}');
+        expect(vocabEq).toContain('E}[\\mathrm{token}_t]');
+        expect(vocabEq).toContain('x_t^{\\text{pos}}');
+        expect(vocabEq).toContain('P}[t]');
+        expect(vocabEq).toContain('x_t =');
         expect(posEq).toBe(vocabEq);
         expect(tokenEq).toBe(vocabEq);
         expect(positionEq).toBe(vocabEq);

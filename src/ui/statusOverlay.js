@@ -8,6 +8,7 @@ import {
     MHA_OUTPUT_PROJECTION_MATRIX_COLOR,
     MLP_UP_MATRIX_COLOR,
     MLP_DOWN_MATRIX_COLOR,
+    POSITION_EMBED_COLOR,
     MHSA_MATRIX_INITIAL_RESTING_COLOR,
     TOP_EMBED_BASE_EMISSIVE,
     TOP_EMBED_MAX_EMISSIVE
@@ -39,6 +40,8 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     const woColor = colorHex(MHA_OUTPUT_PROJECTION_MATRIX_COLOR);
     const mlpUpColor = colorHex(MLP_UP_MATRIX_COLOR);
     const mlpDownColor = colorHex(MLP_DOWN_MATRIX_COLOR);
+    const embeddingVocabColor = qColor;
+    const embeddingPosColor = colorHex(POSITION_EMBED_COLOR);
     const Q = colorize(qColor, 'Q');
     const K = colorize(kColor, 'K');
     const V = colorize(vColor, 'V');
@@ -58,13 +61,17 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     const WDown = colorize(mlpDownColor, WDownRaw);
     const BUp = colorize(mlpUpColor, BUpRaw);
     const BDown = colorize(mlpDownColor, BDownRaw);
+    const E = colorize(embeddingVocabColor, 'E');
+    const P = colorize(embeddingPosColor, 'P');
+    const WU = colorize(embeddingVocabColor, 'W_U');
     const U = 'u';
     const U_LN = `${U}_{\\text{ln}}`;
+    const MLPResidual = colorize(mlpDownColor, `\\mathrm{MLP}(${U_LN})`);
     const X_OUT = 'x_{\\text{out}}';
     const X_FINAL = 'x_{\\text{final}}';
     const LOGITS = '\\ell';
-    const X_TOK = 'x_t^{\\text{tok}}';
-    const X_POS = 'x_t^{\\text{pos}}';
+    const X_TOK = colorize(embeddingVocabColor, 'x_t^{\\text{tok}}');
+    const X_POS = colorize(embeddingPosColor, 'x_t^{\\text{pos}}');
     const TOK_ID = '\\mathrm{token}_t';
     const topEmbedBaseColor = new THREE.Color(MHSA_MATRIX_INITIAL_RESTING_COLOR);
     const topEmbedTargetColor = new THREE.Color(MHA_FINAL_Q_COLOR);
@@ -115,12 +122,12 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         const lhsExpr = colorize(eqColorFor(1), 'z');
         const lhsMlp = colorize(eqColorFor(1), `\\mathrm{MLP}(${U_LN})`);
         const eqExpr = colorize(eqColorFor(1), '=');
-        const upTerm = `${U_LN} ${WUpRaw} + ${BUpRaw}`;
+        const upTerm = `${U_LN} ${WUp} + ${BUp}`;
         const upExpr = colorize(eqColorFor(upT), upTerm);
         const geluExpr = geluT > 0
             ? colorize(eqColorFor(geluT), `\\mathrm{GELU}(${upTerm})`)
             : `\\mathrm{GELU}(${upExpr})`;
-        const downTerm = `z ${WDownRaw} + ${BDownRaw}`;
+        const downTerm = `z ${WDown} + ${BDown}`;
         const downExpr = colorize(eqColorFor(downT), downTerm);
         const body = String.raw`\begin{aligned} ${lhsPre} &${eqExpr} ${upExpr} \\ ${lhsExpr} &${eqExpr} ${geluExpr} \\ ${lhsMlp} &${eqExpr} ${downExpr} \end{aligned}`;
         return colorize(LN_EQ_BASE_COLOR, body);
@@ -134,11 +141,11 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         concat_proj: String.raw`\begin{aligned} H &= \mathrm{Concat}(H_i)_{i=1}^{12} \\ O &= H ${WO} + ${BO} \end{aligned}`,
         resid1: `${U} = x + O`,
         mlp: String.raw`\begin{aligned} a &= ${U_LN} ${WUp} + ${BUp} \\ z &= \mathrm{GELU}(a) \\ \mathrm{MLP}(${U_LN}) &= z ${WDown} + ${BDown} \end{aligned}`,
-        resid2: String.raw`x_{\text{out}} = ${U} + \mathrm{MLP}(${U_LN})`,
-        embed_token: `${X_TOK} = E[${TOK_ID}]`,
-        embed_pos: `${X_POS} = P[t]`,
+        resid2: String.raw`x_{\text{out}} = ${U} + ${MLPResidual}`,
+        embed_token: `${X_TOK} = ${E}[${TOK_ID}]`,
+        embed_pos: `${X_POS} = ${P}[t]`,
         embed_sum: `x_t = ${X_TOK} + ${X_POS}`,
-        logits: String.raw`\begin{aligned} ${LOGITS} &= ${X_FINAL} W_U \\ p &= \mathrm{softmax}(${LOGITS}) \end{aligned}`
+        logits: String.raw`\begin{aligned} ${LOGITS} &= ${X_FINAL} ${WU} \\ p &= \mathrm{softmax}(${LOGITS}) \end{aligned}`
     };
 
     const EQUATION_FONT_MIN_PX = 8;
