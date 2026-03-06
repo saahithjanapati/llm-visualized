@@ -172,7 +172,9 @@
                     <div class="attention-value-bar">
                         <span id="detailAttentionValueSource" class="attention-value-item attention-value-item--source">--</span>
                         <span id="detailAttentionValueTarget" class="attention-value-item attention-value-item--target">--</span>
-                        <span id="detailAttentionValueScore" class="attention-value-item attention-value-item--score">--</span>
+                        <span id="detailAttentionValueScore" class="attention-value-item attention-value-item--score">
+                            <span class="detail-attention-score-pill">--</span>
+                        </span>
                     </div>
                 </div>
             </div>
@@ -260,11 +262,73 @@
                     <div id="kvCacheStatusHint" class="settings-hint" hidden>KV cache enabled for prefill and decode.</div>
                 </div>
                 <div class="settings-section">
+                    <label class="section-label">Playback</label>
+                    <div class="slider-row">
+                        <div class="slider-header">
+                            <span class="toggle-text">Global animation speed</span>
+                            <div class="slider-value-editor">
+                                <button
+                                    id="playbackSpeedValue"
+                                    class="slider-value-button"
+                                    type="button"
+                                    aria-label="Edit global animation speed percentage"
+                                    title="Click to type a percentage"
+                                >100%</button>
+                                <label class="slider-value-input-shell" hidden>
+                                    <input
+                                        id="playbackSpeedInput"
+                                        class="slider-value-input"
+                                        type="number"
+                                        min="50"
+                                        max="200"
+                                        step="1"
+                                        inputmode="numeric"
+                                        aria-label="Global animation speed percentage"
+                                    >
+                                    <span class="slider-value-unit" aria-hidden="true">%</span>
+                                </label>
+                            </div>
+                        </div>
+                        <input
+                            id="playbackSpeedSlider"
+                            class="settings-range"
+                            type="range"
+                            min="50"
+                            max="200"
+                            step="1"
+                            value="100"
+                            aria-label="Global animation speed"
+                        >
+                        <div class="settings-field-hint">Adjusts the overall speed multiplier for scene playback.</div>
+                    </div>
+                </div>
+                <div class="settings-section">
                     <label class="section-label">Display</label>
                     <div class="slider-row">
                         <div class="slider-header">
                             <span class="toggle-text">Global brightness</span>
-                            <span id="brightnessValue" class="slider-value">100%</span>
+                            <div class="slider-value-editor">
+                                <button
+                                    id="brightnessValue"
+                                    class="slider-value-button"
+                                    type="button"
+                                    aria-label="Edit global brightness percentage"
+                                    title="Click to type a percentage"
+                                >100%</button>
+                                <label class="slider-value-input-shell" hidden>
+                                    <input
+                                        id="brightnessInput"
+                                        class="slider-value-input"
+                                        type="number"
+                                        min="42"
+                                        max="150"
+                                        step="1"
+                                        inputmode="numeric"
+                                        aria-label="Global brightness percentage"
+                                    >
+                                    <span class="slider-value-unit" aria-hidden="true">%</span>
+                                </label>
+                            </div>
                         </div>
                         <input
                             id="brightnessSlider"

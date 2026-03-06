@@ -1,4 +1,4 @@
-import { resolveAdjacentLogitTokenSeeds, resolveLogitTokenSeed } from '../app/gpt-tower/logitColor.js';
+import { resolveLogitTokenSeed } from '../app/gpt-tower/logitColor.js';
 import { formatTokenLabel } from '../app/gpt-tower/tokenLabels.js';
 import { normalizeTokenChipEntry, tokenChipEntriesMatch } from './tokenChipHoverSync.js';
 
@@ -59,10 +59,6 @@ export function buildSelectionPromptContext({
         tokenIndex: selectedTokenIndex,
         tokenId: selectedTokenId,
         tokenLabel: formatTokenLabel(selectedTokenText)
-    });
-    const displaySeeds = resolveAdjacentLogitTokenSeeds(entries);
-    entries.forEach((entry, index) => {
-        entry.seed = Number.isFinite(displaySeeds[index]) ? Math.floor(displaySeeds[index]) : entry.seed;
     });
     const activeIndex = selectedEntry
         ? entries.findIndex((entry) => tokenChipEntriesMatch(entry, selectedEntry))

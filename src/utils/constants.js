@@ -1,32 +1,75 @@
+const BASE_GLOBAL_ANIM_SPEED_MULT = 100;
+const BASE_PRISM_ADD_ANIM_SPEED_MULT = 8;
+const BASE_SELF_ATTENTION_TIME_MULT = 0.35;
+const BASE_ENGINE_SPEED_MULT = 1;
+
+export const PLAYBACK_SPEED_PERCENT_MIN = 50;
+export const PLAYBACK_SPEED_PERCENT_MAX = 200;
+export const DEFAULT_PLAYBACK_SPEED_PERCENT = 100;
+
+const PLAYBACK_SPEED_PRESETS = Object.freeze({
+    slow: 70,
+    medium: DEFAULT_PLAYBACK_SPEED_PERCENT,
+    fast: 130,
+    normal: DEFAULT_PLAYBACK_SPEED_PERCENT
+});
+
 // ------------------------------------------------------------
-// Global animation speed multiplier (1 = normal speed). Increase to speed up everything.
+// Global animation speed multiplier (100 = default speed). Increase to speed up everything.
 // Use setter to update at runtime; modules should always read the live binding.
 // ------------------------------------------------------------
-export let GLOBAL_ANIM_SPEED_MULT = 100;
+export let GLOBAL_ANIM_SPEED_MULT = BASE_GLOBAL_ANIM_SPEED_MULT;
 export function setGlobalAnimSpeedMult(mult) {
     const m = Number(mult);
     if (!Number.isFinite(m) || m <= 0) return;
     GLOBAL_ANIM_SPEED_MULT = m;
 }
 
-// High-level presets for playback speed used by the settings UI.
-// This adjusts the global speed and certain animation multipliers together.
-export let PRISM_ADD_ANIM_SPEED_MULT = 8;
-export let SELF_ATTENTION_TIME_MULT = 0.35;
-export function setPlaybackSpeed(preset) {
-    // Accept string keys or fallback to medium (current tuned settings).
-    const cfg = {
-        slow:   { mult: 70,  addMult: 6,  selfAttenTimeMult: 0.5, engineSpeed: 0.7 },
-        medium: { mult: 100, addMult: 8,  selfAttenTimeMult: 0.35, engineSpeed: 1.0 },
-        fast:   { mult: 130, addMult: 10, selfAttenTimeMult: 0.25, engineSpeed: 1.3 },
-        normal: { mult: 100, addMult: 8,  selfAttenTimeMult: 0.35, engineSpeed: 1.0 } // legacy alias
+// High-level playback speed percentage used by the settings UI.
+// This adjusts the global speed and related animation multipliers together.
+export let PRISM_ADD_ANIM_SPEED_MULT = BASE_PRISM_ADD_ANIM_SPEED_MULT;
+export let SELF_ATTENTION_TIME_MULT = BASE_SELF_ATTENTION_TIME_MULT;
+
+export function clampPlaybackSpeedPercent(value) {
+    const next = Number(value);
+    if (!Number.isFinite(next)) return DEFAULT_PLAYBACK_SPEED_PERCENT;
+    return Math.max(
+        PLAYBACK_SPEED_PERCENT_MIN,
+        Math.min(PLAYBACK_SPEED_PERCENT_MAX, Math.round(next))
+    );
+}
+
+function resolvePlaybackSpeedPercent(value) {
+    if (typeof value === 'string') {
+        const preset = PLAYBACK_SPEED_PRESETS[value.toLowerCase()];
+        return Number.isFinite(preset) ? preset : DEFAULT_PLAYBACK_SPEED_PERCENT;
+    }
+    return clampPlaybackSpeedPercent(value);
+}
+
+export function setPlaybackSpeed(value) {
+    const percent = resolvePlaybackSpeedPercent(value);
+    const normalized = percent / DEFAULT_PLAYBACK_SPEED_PERCENT;
+    const globalSpeed = BASE_GLOBAL_ANIM_SPEED_MULT * normalized;
+    const prismAddSpeed = BASE_PRISM_ADD_ANIM_SPEED_MULT * normalized;
+    const selfAttentionSpeed = BASE_SELF_ATTENTION_TIME_MULT / Math.max(normalized, 1e-4);
+    const engineSpeed = BASE_ENGINE_SPEED_MULT * normalized;
+    const profile = {
+        percent,
+        globalSpeed,
+        prismAddSpeed,
+        selfAttentionSpeed,
+        engineSpeed,
+        // Legacy aliases retained for existing callers and internal tooling.
+        mult: globalSpeed,
+        addMult: prismAddSpeed,
+        selfAttenTimeMult: selfAttentionSpeed
     };
-    const p = typeof preset === 'string' ? preset.toLowerCase() : 'medium';
-    const sel = cfg[p] || cfg.medium;
-    setGlobalAnimSpeedMult(sel.mult);
-    PRISM_ADD_ANIM_SPEED_MULT = sel.addMult;
-    SELF_ATTENTION_TIME_MULT = sel.selfAttenTimeMult;
-    return sel;
+
+    setGlobalAnimSpeedMult(profile.globalSpeed);
+    PRISM_ADD_ANIM_SPEED_MULT = profile.prismAddSpeed;
+    SELF_ATTENTION_TIME_MULT = profile.selfAttentionSpeed;
+    return profile;
 }
 
 export function setPrismAddAnimSpeedMult(mult) {

@@ -425,12 +425,19 @@ export class SelfAttentionAnimator {
                 dupVec.mesh.material.needsUpdate = true;
             }
         }
-        dupVec.userData = { isPooledDuplicate: true };
+        dupVec.userData = {
+            ...(dupVec.userData || {}),
+            isPooledDuplicate: true,
+            __releasedToPool: false,
+        };
         return dupVec;
     }
 
     _releaseDuplicateVector(vec) {
         if (!vec) return;
+        vec.userData = vec.userData || {};
+        if (vec.userData.__releasedToPool) return;
+        vec.userData.__releasedToPool = true;
         try { if (vec.group?.parent) vec.group.parent.remove(vec.group); } catch (_) { /* ignore */ }
         try {
             vec.group.visible = false;
@@ -1229,6 +1236,66 @@ export class SelfAttentionAnimator {
         };
     }
 
+    _applyQueryVectorScheme(vector, sourceData = null) {
+        if (!vector || typeof vector.applyProcessedVisuals !== 'function') return;
+        const outputLength = (this.ctx && this.ctx.outputVectorLength) ? this.ctx.outputVectorLength : 64;
+        const rawSource = (Array.isArray(sourceData) || ArrayBuffer.isView(sourceData))
+            ? sourceData
+            : ((Array.isArray(vector.rawData) || ArrayBuffer.isView(vector.rawData)) ? vector.rawData : []);
+        const raw = typeof rawSource.slice === 'function'
+            ? rawSource.slice(0, outputLength)
+            : Array.from(rawSource).slice(0, outputLength);
+        const baseColor = this.ctx?.finalHeadColors?.Q
+            || this.ctx?.brightBlue
+            || new THREE.Color(0x4b9bff);
+        const rangeOptions = this._queryHueRangeOptions || buildHueRangeOptions(baseColor, {
+            hueSpread: MHA_VALUE_HUE_SPREAD,
+            minLightness: MHA_VALUE_LIGHTNESS_MIN,
+            maxLightness: MHA_VALUE_LIGHTNESS_MAX,
+            valueMin: MHA_VALUE_RANGE_MIN,
+            valueMax: MHA_VALUE_RANGE_MAX,
+            valueClampMax: MHA_VALUE_CLAMP_MAX,
+        });
+        const numKeyColors = raw.length <= 1
+            ? 1
+            : Math.min(MHA_VALUE_KEY_COLOR_COUNT, raw.length);
+        vector.applyProcessedVisuals(
+            raw,
+            outputLength,
+            { numKeyColors, generationOptions: rangeOptions },
+            {
+                setHiddenToBlack: false,
+                hideByScaleOnly: true
+            },
+            raw
+        );
+        if (raw.length === 1 && typeof vector.setUniformColor === 'function') {
+            const rangeColor = mapValueToHueRange(raw[0], rangeOptions);
+            vector.setUniformColor(rangeColor);
+        }
+        vector.userData = vector.userData || {};
+        vector.userData.qkvProcessed = true;
+        vector.userData.qkvOutputLength = outputLength;
+        vector.userData.qkvProcessedCategory = 'Q';
+        vector.userData.vectorCategory = 'Q';
+        if (vector.group) {
+            vector.group.userData = vector.group.userData || {};
+            vector.group.userData.label = 'Query Vector';
+            if (Number.isFinite(vector.userData?.headIndex)) {
+                vector.group.userData.headIndex = vector.userData.headIndex;
+            }
+            if (Number.isFinite(this.ctx?.layerIndex)) {
+                vector.group.userData.layerIndex = this.ctx.layerIndex;
+            }
+        }
+        if (vector.mesh) {
+            vector.mesh.userData = {
+                ...(vector.mesh.userData || {}),
+                label: 'Query Vector'
+            };
+        }
+    }
+
     _applyWeightedSumScheme(vector, sourceData = null, options = {}) {
         const mergedOptions = {
             ...options,
@@ -1539,6 +1606,92 @@ export class SelfAttentionAnimator {
         }
     }
 
+    _createQueryShrinkStandIn(source) {
+        if (!source || !source.group) return null;
+        const standIn = this._acquireDuplicateVector(source);
+        if (!standIn || !standIn.group) return null;
+        standIn.group.visible = true;
+        standIn.group.scale.set(1, 1, 1);
+        standIn.group.position.copy(source.group.position);
+        standIn.userData = {
+            ...(source.userData || {}),
+            isPooledDuplicate: true,
+        };
+        standIn.group.userData = {
+            ...(standIn.group.userData || {}),
+            ...(source.group?.userData || {}),
+            label: 'Query Vector'
+        };
+        if (source.mesh) {
+            this._copyVectorAppearance(standIn, source);
+        } else {
+            this._applyQueryVectorScheme(standIn, source.rawData);
+        }
+        if (this.ctx?.parentGroup && standIn.group.parent !== this.ctx.parentGroup) {
+            this.ctx.parentGroup.add(standIn.group);
+        }
+        this._spawnedTempVectors.add(standIn);
+        return standIn;
+    }
+
+    _animateQueryVectorShrinkOut(vector, onComplete) {
+        if (!vector) {
+            onComplete && onComplete();
+            return;
+        }
+        if (typeof TWEEN === 'undefined') {
+            this._retireVector(vector);
+            onComplete && onComplete();
+            return;
+        }
+        const duration = Math.max(120, Math.floor(this.BLUE_HORIZ_DURATION * 0.45));
+        const liftY = 10;
+        const easing = TWEEN.Easing.Cubic.In;
+        const runShrinkTween = (targetVector, finish) => {
+            if (!targetVector || !targetVector.group) {
+                finish && finish();
+                return;
+            }
+            const startY = targetVector.group.position.y;
+            const state = {
+                s: Number.isFinite(targetVector.group.scale?.x) ? Math.max(0.001, targetVector.group.scale.x) : 1,
+                y: startY
+            };
+            new TWEEN.Tween(state)
+                .to({ s: 0.001, y: startY + liftY }, duration)
+                .easing(easing)
+                .onUpdate(() => {
+                    if (!targetVector.group) return;
+                    targetVector.group.scale.set(state.s, state.s, state.s);
+                    targetVector.group.position.y = state.y;
+                })
+                .onComplete(() => {
+                    finish && finish();
+                })
+                .start();
+        };
+
+        if (vector.isBatchedVectorRef) {
+            const standIn = this._createQueryShrinkStandIn(vector);
+            this._retireVector(vector);
+            if (!standIn) {
+                onComplete && onComplete();
+                return;
+            }
+            runShrinkTween(standIn, () => {
+                this._spawnedTempVectors.delete(standIn);
+                this._releaseDuplicateVector(standIn);
+                onComplete && onComplete();
+            });
+            return;
+        }
+
+        runShrinkTween(vector, () => {
+            this._retireVector(vector);
+            onComplete && onComplete();
+        });
+    }
+
     _animateBlueVector(vector, headIdx, i, laneZs, allDoneCb) {
         if (this.skipRequested) {
             this._finishBlueImmediately(vector, headIdx, allDoneCb);
@@ -1575,47 +1728,11 @@ export class SelfAttentionAnimator {
                     this._markAttentionRowComplete(headIdx, i - 1);
                     // Lift spheres upward to align with red vectors
                     this._riseSpheres(spheres, i - 1, headIdx);
-                    // 4. FADE OUT at the LAST green (K) vector, then TELEPORT & FADE IN as red over V column
-                    new TWEEN.Tween(vector.group.scale)
-                        .to({ x: 0.001, y: 0.001, z: 0.001 }, this.BLUE_HORIZ_DURATION / 2)
-                        .easing(QEasing)
-                        .onComplete(() => {
-                            // BEGIN NEW LOGIC – start red traversal using the first V copy and skip spawning a pre-visible red vector
-                                this._retireVector(vector);
-                                this._startRedTraversalFromFirstCopy(headIdx, i, laneZs, spheres, allDoneCb);
-                                return;
-                                // (legacy logic kept for reference below)
-                                const targetX = horizontalToK; // stay aligned with K for pop-up effect
-                            // Move (instantly) to the red-vector height on the top lane
-                            vector.group.position.set(
-                                targetX,
-                                vector.group.position.y + this.RED_EXTRA_RISE,
-                                laneZs[0]
-                            );
-                            // Re-colour the vector to RED before popping back in
-                            this._setVectorColor(vector, this.ctx.brightRed || new THREE.Color(0xff0000));
-
-                            // 5. FADE BACK IN (now red)
-                            new TWEEN.Tween(vector.group.scale)
-                                .to({ x: 1, y: 1, z: 1 }, this.BLUE_HORIZ_DURATION / 2)
-                                .easing(QEasing)
-                                .onComplete(() => {
-                                    // 6. Traverse along lanes again i times (over red vectors)
-                                    this._traverseLanes(vector, laneZs, i, spheres, false, () => {
-                                        // 7. Fade / dispose after finishing red traversal
-            new TWEEN.Tween(vector.group.scale)
-                .to({ x: 0.001, y: 0.001, z: 0.001 }, this.DUPLICATE_POP_OUT_MS)
-                                            .onComplete(() => {
-                                                if (vector.group.parent) vector.group.parent.remove(vector.group);
-                                                if (typeof vector.dispose === 'function') vector.dispose();
-                                                allDoneCb && allDoneCb();
-                                            })
-                                            .start();
-                                    });
-                                })
-                                .start();
-                        })
-                        .start();
+                    // 4. Shrink the query vector away at the last K stop, then
+                    // continue the weighted-sum traversal over the V column.
+                    this._animateQueryVectorShrinkOut(vector, () => {
+                        this._startRedTraversalFromFirstCopy(headIdx, i, laneZs, spheres, allDoneCb);
+                    });
                 });
             })
             .start();

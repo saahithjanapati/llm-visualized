@@ -1,5 +1,5 @@
 import { appState } from '../state/appState.js';
-import { getLogitTokenColorCss, resolveAdjacentLogitTokenSeeds } from '../app/gpt-tower/logitColor.js';
+import { getLogitTokenColorCss, resolveLogitTokenEntrySeed } from '../app/gpt-tower/logitColor.js';
 import {
     TOKEN_CHIP_HOVER_SYNC_EVENT,
     dispatchTokenChipHoverSync,
@@ -317,9 +317,9 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
         lastSignature = signature;
 
         const fragment = document.createDocumentFragment();
-        const displaySeeds = resolveAdjacentLogitTokenSeeds(entries);
         entries.forEach((entry, index) => {
-            const seed = Number.isFinite(displaySeeds[index]) ? Math.floor(displaySeeds[index]) : 0;
+            // Keep prompt-strip chips aligned with the selection-panel token color for the same token.
+            const seed = resolveLogitTokenEntrySeed(entry, index);
             const tokenEl = document.createElement('button');
             tokenEl.type = 'button';
             tokenEl.className = 'prompt-token-strip__token';

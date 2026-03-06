@@ -3,6 +3,7 @@ import { MHSAAnimation } from '../../animations/MHSAAnimation.js';
 import { loadPrecomputedGeometries } from '../../utils/precomputedGeometryLoader.js';
 import { LayerPipeline } from '../../engine/LayerPipeline.js';
 import {
+    DEFAULT_PLAYBACK_SPEED_PERCENT,
     setPlaybackSpeed,
     setNumVectorLanes,
     NUM_VECTOR_LANES,
@@ -89,9 +90,9 @@ setAnimationLaneCount(initialLaneCount);
 // Skip intro typing screen for direct animation entry.
 appState.skipIntro = true;
 
-// Set default playback speed to medium on load.
-let defaultSpeedPreset = null;
-try { defaultSpeedPreset = setPlaybackSpeed('medium'); } catch (_) { /* no-op */ }
+// Set default playback speed to 100% on load.
+let defaultSpeedProfile = null;
+try { defaultSpeedProfile = setPlaybackSpeed(DEFAULT_PLAYBACK_SPEED_PERCENT); } catch (_) { /* no-op */ }
 
 // GPT-2 tower - initialize immediately.
 MHSAAnimation.ENABLE_SELF_ATTENTION = true;
@@ -154,8 +155,8 @@ const pipeline = new LayerPipeline(gptCanvas, NUM_LAYERS, {
     laneCount: initialLaneCount
 });
 
-if (defaultSpeedPreset && typeof defaultSpeedPreset.engineSpeed === 'number') {
-    pipeline?.engine?.setSpeed?.(defaultSpeedPreset.engineSpeed);
+if (defaultSpeedProfile && typeof defaultSpeedProfile.engineSpeed === 'number') {
+    pipeline?.engine?.setSpeed?.(defaultSpeedProfile.engineSpeed);
 }
 
 // Show GPT canvas immediately.

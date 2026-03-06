@@ -9,6 +9,7 @@ import { mapValueToColor, mapValueToGrayscale } from '../utils/colors.js';
 import { initTouchClickFallback } from './touchClickFallback.js';
 import { fitSelectionDimensionLabels } from './selectionPanelDimensionFitUtils.js';
 import {
+    buildAttentionScoreLabel,
     findUserDataNumber,
     findUserDataString,
     getActivationDataFromSelection,
@@ -25,6 +26,7 @@ import {
     isValueSelection,
     isWeightMatrixLabel,
     isWeightedSumSelection,
+    matchesAttentionScoreSelection,
     normalizeSelectionLabel,
     resolveAttentionModeFromSelection,
     simplifyLayerNormParamDisplayLabel
@@ -164,6 +166,7 @@ import {
     resolveRenderPixelRatio
 } from '../utils/constants.js';
 import { getIncompleteUtf8TokenNote } from '../utils/tokenEncodingNotes.js';
+import { createTokenChipMesh } from '../utils/tokenChipMeshFactory.js';
 import { getLogitTokenColorCss, resolveLogitTokenSeed } from '../app/gpt-tower/logitColor.js';
 import {
     TOKEN_CHIP_HOVER_SYNC_EVENT,
@@ -347,21 +350,70 @@ function resolveAttentionPreviewCellColor(value, mode) {
     return darkenColor(baseColor, ATTENTION_PREVIEW_COLOR_DARKEN_FACTOR);
 }
 
-function buildSpectrumLegendGradient({ clampMax, steps = 13, darkenFactor = 1 } = {}) {
-    const safeClamp = Number.isFinite(clampMax) ? Math.max(1e-6, Math.abs(clampMax)) : 1;
+function resolveLegendSampleT(ratio, edgeClampRatio = 0) {
+    const safeRatio = clamp01(ratio);
+    const safeEdgeClampRatio = Number.isFinite(edgeClampRatio)
+        ? THREE.MathUtils.clamp(edgeClampRatio, 0, 0.49)
+        : 0;
+    if (safeEdgeClampRatio <= 1e-6) return safeRatio;
+    if (safeRatio <= safeEdgeClampRatio) return 0;
+    if (safeRatio >= (1 - safeEdgeClampRatio)) return 1;
+    return (safeRatio - safeEdgeClampRatio) / (1 - (safeEdgeClampRatio * 2));
+}
+
+function buildLegendGradient({
+    minValue = 0,
+    maxValue = 1,
+    steps = 13,
+    edgeClampRatio = 0,
+    resolveColor = null
+} = {}) {
     const safeSteps = Math.max(3, Math.min(41, Math.floor(steps)));
+    const safeMin = Number.isFinite(minValue) ? minValue : 0;
+    const safeMax = Number.isFinite(maxValue) ? maxValue : 1;
+    const safeEdgeClampRatio = Number.isFinite(edgeClampRatio)
+        ? THREE.MathUtils.clamp(edgeClampRatio, 0, 0.49)
+        : 0;
+    const colorResolver = typeof resolveColor === 'function'
+        ? resolveColor
+        : ((value) => value);
+    const startPct = safeEdgeClampRatio * 100;
+    const endPct = (1 - safeEdgeClampRatio) * 100;
     const stops = [];
+    const startColor = colorToCss(colorResolver(safeMin));
+    const endColor = colorToCss(colorResolver(safeMax));
+
+    if (safeEdgeClampRatio > 0) {
+        stops.push(`${startColor} 0%`, `${startColor} ${startPct.toFixed(2)}%`);
+    }
+
     for (let i = 0; i < safeSteps; i += 1) {
         const t = safeSteps === 1 ? 0 : i / (safeSteps - 1);
-        const value = THREE.MathUtils.lerp(-safeClamp, safeClamp, t);
-        const color = colorToCss(darkenColor(
-            mapValueToColor(value, { clampMax: safeClamp }),
-            darkenFactor
-        ));
-        const pct = (t * 100).toFixed(1);
+        const value = THREE.MathUtils.lerp(safeMin, safeMax, t);
+        const color = colorToCss(colorResolver(value));
+        const pct = THREE.MathUtils.lerp(startPct, endPct, t).toFixed(2);
         stops.push(`${color} ${pct}%`);
     }
+
+    if (safeEdgeClampRatio > 0) {
+        stops.push(`${endColor} ${endPct.toFixed(2)}%`, `${endColor} 100%`);
+    }
+
     return `linear-gradient(90deg, ${stops.join(', ')})`;
+}
+
+function buildSpectrumLegendGradient({ clampMax, steps = 13, darkenFactor = 1, edgeClampRatio = 0 } = {}) {
+    const safeClamp = Number.isFinite(clampMax) ? Math.max(1e-6, Math.abs(clampMax)) : 1;
+    return buildLegendGradient({
+        minValue: -safeClamp,
+        maxValue: safeClamp,
+        steps,
+        edgeClampRatio,
+        resolveColor: (value) => darkenColor(
+            mapValueToColor(value, { clampMax: safeClamp }),
+            darkenFactor
+        )
+    });
 }
 
 function resolveAttentionScoreSelectionSummary(selectionInfo, context = null) {
@@ -912,6 +964,27 @@ function extractTokenText(label) {
     return trimmed.length ? trimmed : SPACE_TOKEN_DISPLAY;
 }
 
+function resolvePreviewTokenId(label, selectionInfo) {
+    const source = selectionInfo?.object || selectionInfo?.hit?.object;
+    const directInfo = selectionInfo?.info;
+    const candidates = [
+        findUserDataNumber(source, 'tokenId'),
+        directInfo?.tokenId,
+        directInfo?.token_id,
+        directInfo?.logitEntry?.tokenId,
+        directInfo?.logitEntry?.token_id,
+        selectionInfo?.logitEntry?.tokenId,
+        selectionInfo?.logitEntry?.token_id
+    ];
+    for (const candidate of candidates) {
+        if (Number.isFinite(candidate)) return Math.floor(candidate);
+    }
+    const labelIdMatch = String(label || '').match(/\bid\s+(-?\d+)/i);
+    if (!labelIdMatch) return null;
+    const parsed = Number(labelIdMatch[1]);
+    return Number.isFinite(parsed) ? Math.floor(parsed) : null;
+}
+
 function sanitizeLogitTokenForPreview(token) {
     if (token === null || token === undefined) return '';
     const raw = String(token);
@@ -1169,209 +1242,23 @@ function createLogitTextPreviewShared(labelText, options = {}) {
 
 function buildLogitBarPreview(label, selectionInfo) {
     const tokenText = resolveLogitPreviewTokenText(label, selectionInfo);
-    return buildTokenChipPreview(tokenText);
+    const tokenId = resolveLogitSelectionTokenId(label, resolveLogitSelectionEntry(selectionInfo));
+    return buildTokenChipPreview(tokenText, { tokenId });
 }
 
-function buildRoundedRectShape(width, height, radius) {
-    const clampedRadius = Math.max(0, Math.min(radius, Math.min(width, height) / 2 - 1));
-    const halfW = width / 2;
-    const halfH = height / 2;
-    const shape = new THREE.Shape();
-    shape.moveTo(-halfW + clampedRadius, -halfH);
-    shape.lineTo(halfW - clampedRadius, -halfH);
-    shape.quadraticCurveTo(halfW, -halfH, halfW, -halfH + clampedRadius);
-    shape.lineTo(halfW, halfH - clampedRadius);
-    shape.quadraticCurveTo(halfW, halfH, halfW - clampedRadius, halfH);
-    shape.lineTo(-halfW + clampedRadius, halfH);
-    shape.quadraticCurveTo(-halfW, halfH, -halfW, halfH - clampedRadius);
-    shape.lineTo(-halfW, -halfH + clampedRadius);
-    shape.quadraticCurveTo(-halfW, -halfH, -halfW + clampedRadius, -halfH);
-    shape.closePath();
-    return shape;
-}
-
-function createTokenChipShared(labelText) {
+function createTokenChipShared(labelText, tokenId = null) {
     const rawText = (typeof labelText === 'string') ? labelText : '';
     const text = rawText.trim().length ? rawText : SPACE_TOKEN_DISPLAY;
-    const font = tokenChipFont;
-    let textGeo = null;
-    let textMat = null;
-    let textCullMat = null;
-    let textMesh = null;
-    let textGroup = null;
-    let textTexture = null;
-    let textPlaneAspect = 1;
-    let textShapes = null;
-    let textDepth = 0;
-    let textFaceGeo = null;
-    let bounds = null;
-    let textWidth = 0;
-    let textHeight = 0;
-    let useGeometryText = false;
-    const capOffset = 0.05;
-
-    if (font && text.trim().length) {
-        const desiredDepth = Number.isFinite(TOKEN_CHIP_STYLE.textDepth) ? TOKEN_CHIP_STYLE.textDepth : 0;
-        const chipDepth = Number.isFinite(TOKEN_CHIP_STYLE.depth) ? TOKEN_CHIP_STYLE.depth : desiredDepth;
-        textDepth = Number.isFinite(chipDepth) ? chipDepth + capOffset * 2 : desiredDepth;
-        textShapes = font.generateShapes(text, TOKEN_CHIP_STYLE.textSize, 2);
-        textGeo = new THREE.ExtrudeGeometry(textShapes, {
-            depth: textDepth,
-            curveSegments: 4,
-            bevelEnabled: false
-        });
-        textGeo.computeBoundingBox();
-        textGeo.computeVertexNormals();
-        const textBounds = textGeo.boundingBox;
-        if (textBounds && Number.isFinite(textBounds.max.x) && Number.isFinite(textBounds.min.x)) {
-            textWidth = Math.max(0, textBounds.max.x - textBounds.min.x);
-            textHeight = Math.max(0, textBounds.max.y - textBounds.min.y);
-        }
-        textGeo.translate(0, 0, -textDepth / 2);
-        textGeo.computeBoundingBox();
-        bounds = textGeo.boundingBox;
-        useGeometryText = true;
-    } else {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        const fontSize = TOKEN_CHIP_STYLE.textSize;
-        ctx.font = `600 ${fontSize}px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial`;
-        const textMetrics = ctx.measureText(text);
-        textWidth = Math.ceil(textMetrics.width);
-        textHeight = Math.ceil(fontSize * 1.15);
-        canvas.width = Math.max(256, textWidth + 80);
-        canvas.height = Math.max(128, textHeight + 60);
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#ffffff';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.font = `600 ${fontSize}px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial`;
-        ctx.fillText(text, canvas.width / 2, canvas.height / 2);
-
-        textTexture = new THREE.CanvasTexture(canvas);
-        textTexture.minFilter = THREE.LinearFilter;
-        textTexture.magFilter = THREE.LinearFilter;
-        textTexture.needsUpdate = true;
-        textPlaneAspect = canvas.width / canvas.height;
-    }
-
-    const chipWidth = Math.max(TOKEN_CHIP_STYLE.minWidth, textWidth + TOKEN_CHIP_STYLE.padding);
-    const chipHeight = typeof TOKEN_CHIP_STYLE.height === 'number'
-        ? TOKEN_CHIP_STYLE.height
-        : Math.max(TOKEN_CHIP_STYLE.minHeight, textHeight + TOKEN_CHIP_STYLE.padding);
-    const chipRadius = Math.min(TOKEN_CHIP_STYLE.cornerRadius, Math.min(chipWidth, chipHeight) / 2 - 1);
-    const chipShape = buildRoundedRectShape(chipWidth, chipHeight, chipRadius);
-    const chipGeo = new THREE.ExtrudeGeometry(chipShape, { depth: TOKEN_CHIP_STYLE.depth, bevelEnabled: false });
-    chipGeo.translate(0, 0, -TOKEN_CHIP_STYLE.depth / 2);
-    chipGeo.computeVertexNormals();
-
-    const chipMat = new THREE.MeshStandardMaterial({
-        color: 0xf2e8d5,
-        roughness: 0.84,
-        metalness: 0.01,
-        emissive: 0x000000,
-        emissiveIntensity: 0,
-        side: THREE.DoubleSide
+    return createTokenChipMesh({
+        labelText: text,
+        secondaryText: Number.isFinite(tokenId) ? String(Math.floor(tokenId)) : '',
+        style: TOKEN_CHIP_STYLE,
+        font: tokenChipFont
     });
-    const chipMesh = new THREE.Mesh(chipGeo, chipMat);
-
-    const capMat = chipMat.clone();
-    capMat.polygonOffset = false;
-    capMat.polygonOffsetFactor = 0;
-    capMat.polygonOffsetUnits = 0;
-    const capGeo = new THREE.ShapeGeometry(chipShape);
-    capGeo.computeVertexNormals();
-    const frontCap = new THREE.Mesh(capGeo, capMat);
-    frontCap.position.z = TOKEN_CHIP_STYLE.depth / 2 + capOffset;
-    const backCap = new THREE.Mesh(capGeo, capMat);
-    backCap.position.z = -TOKEN_CHIP_STYLE.depth / 2 - capOffset;
-    backCap.rotation.y = Math.PI;
-
-    if (useGeometryText) {
-        if (textGeo && textWidth > 0 && textHeight > 0) {
-            textMat = new THREE.MeshBasicMaterial({
-                color: 0xffffff,
-                side: THREE.DoubleSide,
-                depthWrite: true,
-                depthTest: true,
-                polygonOffset: true,
-                polygonOffsetFactor: -0.5,
-                polygonOffsetUnits: -0.5
-            });
-            textCullMat = textMat.clone();
-            textCullMat.colorWrite = false;
-            textCullMat.depthWrite = false;
-            textCullMat.transparent = true;
-            textCullMat.opacity = 0;
-            textGroup = new THREE.Group();
-            textMesh = new THREE.Mesh(textGeo, [textCullMat, textMat]);
-            textGroup.add(textMesh);
-            if (textShapes) {
-                const faceGeo = new THREE.ShapeGeometry(textShapes);
-                faceGeo.computeVertexNormals();
-                textFaceGeo = faceGeo;
-                const faceOffset = 0.02;
-                const frontFace = new THREE.Mesh(faceGeo, textMat);
-                frontFace.position.z = textDepth / 2 + faceOffset;
-                const backFace = new THREE.Mesh(faceGeo, textMat);
-                backFace.position.z = -textDepth / 2 - faceOffset;
-                textGroup.add(frontFace, backFace);
-            }
-            if (bounds) {
-                const centerX = (bounds.min.x + bounds.max.x) / 2;
-                const centerY = (bounds.min.y + bounds.max.y) / 2;
-                textGroup.position.set(-centerX, -centerY, 0);
-            }
-        }
-    } else if (textTexture) {
-        let textPlaneHeight = chipHeight * 0.38;
-        let textPlaneWidth = textPlaneHeight * textPlaneAspect;
-        const maxTextWidth = chipWidth * 0.8;
-        if (textPlaneWidth > maxTextWidth) {
-            textPlaneWidth = maxTextWidth;
-            textPlaneHeight = textPlaneWidth / textPlaneAspect;
-        }
-        textGeo = new THREE.PlaneGeometry(textPlaneWidth, textPlaneHeight);
-        textMat = new THREE.MeshBasicMaterial({
-            map: textTexture,
-            transparent: true,
-            depthWrite: true,
-            depthTest: true,
-            polygonOffset: true,
-            polygonOffsetFactor: -0.5,
-            polygonOffsetUnits: -0.5,
-            side: THREE.DoubleSide
-        });
-        textMesh = new THREE.Mesh(textGeo, textMat);
-        textMesh.position.z = TOKEN_CHIP_STYLE.depth / 2 + TOKEN_CHIP_STYLE.textOffset;
-    }
-
-    const group = new THREE.Group();
-    group.add(chipMesh, frontCap, backCap);
-    if (textGroup) {
-        group.add(textGroup);
-    } else if (textMesh) {
-        group.add(textMesh);
-    }
-
-    return {
-        group,
-        dispose: () => {
-            chipGeo.dispose();
-            chipMat.dispose();
-            capGeo.dispose();
-            capMat.dispose();
-            if (textGeo) textGeo.dispose();
-            if (textFaceGeo) textFaceGeo.dispose();
-            if (textMat) textMat.dispose();
-            if (textCullMat) textCullMat.dispose();
-            if (textTexture) textTexture.dispose();
-        }
-    };
 }
 
-function buildTokenChipPreview(labelText) {
-    const shared = createTokenChipShared(labelText);
+function buildTokenChipPreview(labelText, { tokenId = null } = {}) {
+    const shared = createTokenChipShared(labelText, tokenId);
     const group = new THREE.Group();
     const laneCount = Math.max(1, Math.floor(PREVIEW_TOKEN_LANES));
     for (let i = 0; i < laneCount; i++) {
@@ -1917,38 +1804,57 @@ function buildVectorClonePreview(selectionInfo, label = '') {
 function buildAttentionSpherePreview(selectionInfo) {
     const hit = selectionInfo?.hit || null;
     const source = selectionInfo?.object || hit?.object || null;
-    if (!source || !source.isInstancedMesh) return null;
-    if (!source.userData?._attentionSphereInstanced && selectionInfo?.kind !== 'attentionSphere') return null;
-    const instanceId = hit && typeof hit.instanceId === 'number' ? hit.instanceId : null;
-    if (!Number.isFinite(instanceId)) return null;
-    if (!source.geometry || typeof source.geometry.clone !== 'function') return null;
+    const activation = getActivationDataFromSelection(selectionInfo);
+    const stageLower = String(activation?.stage || '').toLowerCase();
+    const isAttentionScore = isAttentionScoreSelection(selectionInfo?.label, selectionInfo)
+        || selectionInfo?.kind === 'attentionSphere'
+        || stageLower === 'attention.pre'
+        || stageLower === 'attention.post';
+    if (!isAttentionScore) return null;
 
-    const geometry = source.geometry.clone();
-    const color = TMP_COLOR.copy(source.material?.color || 0xffffff);
-    if (typeof source.getColorAt === 'function') {
-        try { source.getColorAt(instanceId, color); } catch (_) { /* fallback to material color */ }
-    }
-    let instanceScale = 1;
-    if (typeof source.getMatrixAt === 'function') {
-        try {
-            source.getMatrixAt(instanceId, TMP_MATRIX);
-            TMP_MATRIX.decompose(TMP_POS, TMP_QUAT, TMP_SCALE);
-            if (Number.isFinite(TMP_SCALE.x)) {
-                instanceScale = Math.max(TMP_SCALE.x, TMP_SCALE.y, TMP_SCALE.z);
+    const mode = resolveAttentionModeFromSelection(selectionInfo)
+        || (stageLower.includes('post') ? 'post' : 'pre');
+    const score = mode === 'post' ? activation?.postScore : activation?.preScore;
+    const color = TMP_COLOR;
+    let usedLiveColor = false;
+    if (source?.isInstancedMesh) {
+        if (!source.userData?._attentionSphereInstanced && selectionInfo?.kind !== 'attentionSphere') return null;
+        const instanceId = hit && typeof hit.instanceId === 'number' ? hit.instanceId : null;
+        if (Number.isFinite(instanceId)) {
+            color.copy(source.material?.color || 0xffffff);
+            if (typeof source.getColorAt === 'function') {
+                try {
+                    source.getColorAt(instanceId, color);
+                    usedLiveColor = true;
+                } catch (_) {
+                    usedLiveColor = false;
+                }
             }
-        } catch (_) { /* ignore */ }
+        }
     }
-    if (!Number.isFinite(instanceScale) || instanceScale < 0.1) instanceScale = 0.6;
-
+    if (!usedLiveColor) {
+        if (mode === 'post') {
+            color.copy(mapValueToGrayscale(
+                Number.isFinite(score) ? score : 0.5,
+                { minValue: ATTENTION_POST_SOFTMAX_GRAYSCALE_MIN }
+            ));
+        } else {
+            color.copy(mapValueToColor(
+                Number.isFinite(score) ? score : 0,
+                { clampMax: ATTENTION_PRE_COLOR_CLAMP }
+            ));
+        }
+    }
+    const geometry = new THREE.SphereGeometry(10, 12, 12);
     const material = new THREE.MeshStandardMaterial({
         color: color.clone(),
-        roughness: 0.35,
+        roughness: 0.28,
         metalness: 0.1,
-        emissive: color.clone().multiplyScalar(0.35),
-        emissiveIntensity: 0.35
+        emissive: color.clone().multiplyScalar(mode === 'post' ? 0.22 : 0.32),
+        emissiveIntensity: mode === 'post' ? 0.28 : 0.36
     });
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.scale.setScalar(instanceScale);
+    mesh.scale.setScalar(0.8);
     return {
         object: mesh,
         dispose: () => {
@@ -2039,7 +1945,9 @@ function resolvePreviewObject(label, selectionInfo) {
     if (lower.startsWith('token:') || lower.startsWith('position:')) {
         const clonePreview = buildSelectionClonePreview(selectionInfo, label);
         if (clonePreview) return clonePreview;
-        return buildTokenChipPreview(extractTokenText(label));
+        return buildTokenChipPreview(extractTokenText(label), {
+            tokenId: lower.startsWith('token:') ? resolvePreviewTokenId(label, selectionInfo) : null
+        });
     }
     if (lower.includes('output projection matrix')) {
         const height = MHA_MATRIX_PARAMS.height * MHA_OUTPUT_PROJECTION_MATRIX_PARAMS.heightFactor;
@@ -2247,6 +2155,7 @@ class SelectionPanel {
         this.attentionValueSource = document.getElementById('detailAttentionValueSource');
         this.attentionValueTarget = document.getElementById('detailAttentionValueTarget');
         this.attentionValueScore = document.getElementById('detailAttentionValueScore');
+        this.attentionValueScoreInner = this.attentionValueScore?.querySelector('.detail-attention-score-pill') || null;
         this.attentionLegend = document.getElementById('detailAttentionLegend');
         this.attentionLegendTicks = this.attentionLegend
             ? Array.from(this.attentionLegend.querySelectorAll('.attention-legend-tick'))
@@ -2366,6 +2275,8 @@ class SelectionPanel {
         this._onPanelPointerEnter = this._onPanelPointerEnter.bind(this);
         this._onPanelPointerLeave = this._onPanelPointerLeave.bind(this);
         this._onSubtitleSecondaryClick = this._onSubtitleSecondaryClick.bind(this);
+        this._onAttentionScoreValueClick = this._onAttentionScoreValueClick.bind(this);
+        this._onAttentionScoreValueKeydown = this._onAttentionScoreValueKeydown.bind(this);
         this._onPanelTokenChipClick = this._onPanelTokenChipClick.bind(this);
         this._onPanelTokenChipKeydown = this._onPanelTokenChipKeydown.bind(this);
         this._onPanelTokenChipPointerOver = this._onPanelTokenChipPointerOver.bind(this);
@@ -2373,6 +2284,8 @@ class SelectionPanel {
         this._onPanelTokenChipFocusIn = this._onPanelTokenChipFocusIn.bind(this);
         this._onPanelTokenChipFocusOut = this._onPanelTokenChipFocusOut.bind(this);
         this._onTokenChipHoverSync = this._onTokenChipHoverSync.bind(this);
+        this._onLegendPointerMove = this._onLegendPointerMove.bind(this);
+        this._onLegendPointerLeave = this._onLegendPointerLeave.bind(this);
         this._scheduleResize = this._scheduleResize.bind(this);
         this._scheduleSelectionEquationFit = this._scheduleSelectionEquationFit.bind(this);
         this._applySelectionEquationFit = this._applySelectionEquationFit.bind(this);
@@ -2418,6 +2331,19 @@ class SelectionPanel {
         this._attentionPostAnimQueue = new Set();
         this._attentionPostAnimatedRows = new Set();
         this._attentionLastPostCompleted = 0;
+        this._attentionScoreLink = null;
+        this._legendHoverState = {
+            kind: null,
+            ratio: null
+        };
+        this._legendEdgeClampRatios = {
+            vector: 0,
+            attention: 0
+        };
+        this._legendHoverUi = {
+            vector: this._createLegendHoverUi(this.vectorLegendBar, 'vector'),
+            attention: this._createLegendHoverUi(this.attentionLegend, 'attention')
+        };
 
         this.closeBtn?.addEventListener('click', () => this.close({ clearHistory: false }));
         this.copyContextBtn?.addEventListener('click', this._onCopyContextClick);
@@ -2441,6 +2367,14 @@ class SelectionPanel {
             this.attentionMatrix.addEventListener('pointerdown', this._onAttentionPointerDown);
             this.attentionMatrix.addEventListener('pointerleave', this._clearAttentionHover);
         }
+        [this.vectorLegendBar, this.attentionLegend].filter(Boolean).forEach((bar) => {
+            bar.addEventListener('pointerenter', this._onLegendPointerMove);
+            bar.addEventListener('pointermove', this._onLegendPointerMove);
+            bar.addEventListener('pointerleave', this._onLegendPointerLeave);
+            bar.addEventListener('pointercancel', this._onLegendPointerLeave);
+        });
+        this.attentionValueScore?.addEventListener('click', this._onAttentionScoreValueClick);
+        this.attentionValueScore?.addEventListener('keydown', this._onAttentionScoreValueKeydown);
         this._setAttentionValue(this._attentionValueDefault);
         this.panel.addEventListener('pointerdown', this._onPanelPointerDown, { capture: true });
         this.panel.addEventListener('pointerenter', this._onPanelPointerEnter);
@@ -2460,7 +2394,7 @@ class SelectionPanel {
         document.addEventListener('keydown', this._onKeydown);
         document.addEventListener('pointerdown', this._onDocumentPointerDown, { capture: true });
         this._touchClickCleanup = initTouchClickFallback(this.panel, {
-            selector: '.toggle-row, .detail-token-nav-chip[data-token-nav="true"], .detail-history-btn, .detail-description-action-link, .detail-copy-context-btn'
+            selector: '.toggle-row, .detail-token-nav-chip[data-token-nav="true"], .detail-history-btn, .detail-description-action-link, .detail-copy-context-btn, .detail-attention-score-link[data-attention-score-link="true"]'
         });
         this._observeResize();
         this._onResize();
@@ -2526,6 +2460,245 @@ class SelectionPanel {
         if (this.copyContextBtn) {
             this.copyContextBtn.textContent = label;
         }
+    }
+
+    _createLegendHoverUi(bar, kind) {
+        if (!bar || typeof document === 'undefined') return null;
+        bar.dataset.legendKind = kind;
+
+        const marker = document.createElement('div');
+        marker.className = 'legend-hover-marker';
+        marker.setAttribute('aria-hidden', 'true');
+
+        const tooltip = document.createElement('div');
+        tooltip.className = 'legend-hover-tooltip';
+        tooltip.setAttribute('aria-hidden', 'true');
+
+        const swatch = document.createElement('span');
+        swatch.className = 'legend-hover-swatch';
+
+        const value = document.createElement('span');
+        value.className = 'legend-hover-value';
+
+        tooltip.append(swatch, value);
+        bar.append(marker, tooltip);
+
+        return {
+            bar,
+            marker,
+            tooltip,
+            swatch,
+            value
+        };
+    }
+
+    _formatLegendHoverValue(value, { signed = false, decimals = 2 } = {}) {
+        if (!Number.isFinite(value)) return ATTENTION_VALUE_PLACEHOLDER;
+        const safeDecimals = Number.isFinite(decimals)
+            ? THREE.MathUtils.clamp(Math.floor(decimals), 0, 6)
+            : 2;
+        const safeValue = Math.abs(value) < 1e-8 ? 0 : value;
+        let text = safeValue.toFixed(safeDecimals).replace(/\.?0+$/, '');
+        if (signed && safeValue > 0) text = `+${text}`;
+        return text;
+    }
+
+    _resolveLegendBar(kind) {
+        if (kind === 'vector') return this.vectorLegendBar;
+        if (kind === 'attention') return this.attentionLegend;
+        return null;
+    }
+
+    _resolveLegendEdgeClampRatio(kind) {
+        const bar = this._resolveLegendBar(kind);
+        if (!bar || typeof window === 'undefined' || typeof window.getComputedStyle !== 'function') {
+            return this._legendEdgeClampRatios?.[kind] || 0;
+        }
+        const styles = window.getComputedStyle(bar);
+        const edgeInsetPx = Number.parseFloat(styles.getPropertyValue('--legend-edge-tick-inset'));
+        const width = bar.getBoundingClientRect().width
+            || Number.parseFloat(styles.width)
+            || bar.clientWidth
+            || 0;
+        if (Number.isFinite(edgeInsetPx) && edgeInsetPx >= 0 && width > 0) {
+            const ratio = THREE.MathUtils.clamp(edgeInsetPx / width, 0, 0.49);
+            this._legendEdgeClampRatios[kind] = ratio;
+            return ratio;
+        }
+        return this._legendEdgeClampRatios?.[kind] || 0;
+    }
+
+    _buildAttentionLegendGradient(mode) {
+        const safeMode = mode === 'post' ? 'post' : 'pre';
+        const edgeClampRatio = this._resolveLegendEdgeClampRatio('attention');
+        if (safeMode === 'post') {
+            return buildLegendGradient({
+                minValue: 0,
+                maxValue: 1,
+                steps: 13,
+                edgeClampRatio,
+                resolveColor: (value) => resolveAttentionPreviewCellColor(value, 'post')
+            });
+        }
+        return buildSpectrumLegendGradient({
+            clampMax: ATTENTION_PRE_COLOR_CLAMP,
+            steps: 15,
+            darkenFactor: ATTENTION_PREVIEW_COLOR_DARKEN_FACTOR,
+            edgeClampRatio
+        });
+    }
+
+    _buildVectorLegendGradient() {
+        return buildSpectrumLegendGradient({
+            clampMax: RESIDUAL_COLOR_CLAMP,
+            steps: 15,
+            edgeClampRatio: this._resolveLegendEdgeClampRatio('vector')
+        });
+    }
+
+    _refreshVisibleLegendGradients() {
+        if (this.vectorLegend?.classList.contains('is-visible') && this.vectorLegendBar) {
+            this.vectorLegendBar.style.setProperty('--vector-legend-gradient', this._buildVectorLegendGradient());
+        }
+        if (this.attentionRoot?.classList.contains('is-visible') && this.attentionLegend) {
+            this.attentionLegend.style.setProperty(
+                '--attention-legend-gradient',
+                this._buildAttentionLegendGradient(this.attentionMode)
+            );
+        }
+    }
+
+    _resolveLegendHoverSample(kind, ratio) {
+        const safeRatio = clamp01(ratio);
+        const sampleT = resolveLegendSampleT(safeRatio, this._resolveLegendEdgeClampRatio(kind));
+        if (kind === 'vector') {
+            const value = THREE.MathUtils.lerp(-RESIDUAL_COLOR_CLAMP, RESIDUAL_COLOR_CLAMP, sampleT);
+            return {
+                ratio: safeRatio,
+                value,
+                valueLabel: this._formatLegendHoverValue(value, { signed: true, decimals: 2 }),
+                colorCss: colorToCss(mapValueToColor(value, { clampMax: RESIDUAL_COLOR_CLAMP }))
+            };
+        }
+        if (kind !== 'attention') return null;
+
+        const mode = this.attentionMode === 'post' ? 'post' : 'pre';
+        const value = mode === 'post'
+            ? sampleT
+            : THREE.MathUtils.lerp(-ATTENTION_PRE_COLOR_CLAMP, ATTENTION_PRE_COLOR_CLAMP, sampleT);
+        return {
+            ratio: safeRatio,
+            value,
+            valueLabel: this._formatLegendHoverValue(value, {
+                signed: mode === 'pre',
+                decimals: mode === 'post' ? ATTENTION_SCORE_DECIMALS : 2
+            }),
+            colorCss: colorToCss(resolveAttentionPreviewCellColor(value, mode))
+        };
+    }
+
+    _resolveLegendKindFromBar(bar) {
+        const kind = bar?.dataset?.legendKind;
+        return kind === 'attention' || kind === 'vector' ? kind : null;
+    }
+
+    _isLegendKindVisible(kind) {
+        if (kind === 'vector') {
+            return !!(this.vectorLegendBar && this.vectorLegend?.classList.contains('is-visible'));
+        }
+        if (kind === 'attention') {
+            return !!(this.attentionLegend && this.attentionRoot?.classList.contains('is-visible'));
+        }
+        return false;
+    }
+
+    _hideLegendHover(kind = null) {
+        const kinds = kind ? [kind] : ['vector', 'attention'];
+        for (let i = 0; i < kinds.length; i += 1) {
+            const ui = this._legendHoverUi?.[kinds[i]];
+            if (!ui) continue;
+            ui.marker.classList.remove('is-visible');
+            ui.tooltip.classList.remove('is-visible');
+        }
+        if (!kind || this._legendHoverState.kind === kind) {
+            this._legendHoverState.kind = null;
+            this._legendHoverState.ratio = null;
+        }
+    }
+
+    _renderLegendHover(kind, ratio) {
+        if (!kind) return;
+        const ui = this._legendHoverUi?.[kind];
+        if (!ui || !this._isLegendKindVisible(kind)) {
+            this._hideLegendHover(kind);
+            return;
+        }
+
+        const sample = this._resolveLegendHoverSample(kind, ratio);
+        const rect = ui.bar.getBoundingClientRect();
+        if (!sample || !(rect.width > 0)) {
+            this._hideLegendHover(kind);
+            return;
+        }
+
+        this._hideLegendHover(kind === 'vector' ? 'attention' : 'vector');
+
+        ui.swatch.style.backgroundColor = sample.colorCss;
+        ui.value.textContent = sample.valueLabel;
+
+        const markerX = sample.ratio * rect.width;
+        ui.marker.style.left = `${markerX}px`;
+
+        const tooltipWidth = ui.tooltip.offsetWidth || 0;
+        const tooltipX = (tooltipWidth + 8 >= rect.width)
+            ? rect.width / 2
+            : THREE.MathUtils.clamp(
+                markerX,
+                tooltipWidth / 2 + 4,
+                rect.width - tooltipWidth / 2 - 4
+            );
+        ui.tooltip.style.left = `${tooltipX}px`;
+
+        ui.marker.classList.add('is-visible');
+        ui.tooltip.classList.add('is-visible');
+        this._legendHoverState.kind = kind;
+        this._legendHoverState.ratio = sample.ratio;
+    }
+
+    _refreshLegendHover(kind = null) {
+        const targetKind = kind || this._legendHoverState.kind;
+        if (!targetKind || this._legendHoverState.kind !== targetKind) return;
+        if (!Number.isFinite(this._legendHoverState.ratio)) {
+            this._hideLegendHover(targetKind);
+            return;
+        }
+        this._renderLegendHover(targetKind, this._legendHoverState.ratio);
+    }
+
+    _onLegendPointerMove(event) {
+        if (event?.pointerType === 'touch') {
+            this._hideLegendHover();
+            return;
+        }
+        const bar = event?.currentTarget instanceof Element ? event.currentTarget : null;
+        const kind = this._resolveLegendKindFromBar(bar);
+        if (!bar || !kind || !Number.isFinite(event?.clientX)) {
+            this._hideLegendHover(kind);
+            return;
+        }
+        const rect = bar.getBoundingClientRect();
+        if (!(rect.width > 0)) {
+            this._hideLegendHover(kind);
+            return;
+        }
+        const ratio = clamp01((event.clientX - rect.left) / rect.width);
+        this._renderLegendHover(kind, ratio);
+    }
+
+    _onLegendPointerLeave(event) {
+        const bar = event?.currentTarget instanceof Element ? event.currentTarget : null;
+        const kind = this._resolveLegendKindFromBar(bar);
+        this._hideLegendHover(kind);
     }
 
     _resetCopyContextFeedback({ clearTimers = true } = {}) {
@@ -2595,14 +2768,18 @@ class SelectionPanel {
         }
 
         if (this.vectorLegend?.classList.contains('is-visible')) {
-            const legendLines = collectVisibleContextText(this.vectorLegend);
+            const legendLines = collectVisibleContextText(this.vectorLegend, {
+                excludeSelectors: '.legend-hover-tooltip, .legend-hover-marker'
+            });
             if (legendLines.length) {
                 sections.push(`Legend:\n${legendLines.join('\n')}`);
             }
         }
 
         if (this.attentionRoot?.classList.contains('is-visible')) {
-            const attentionLines = collectVisibleContextText(this.attentionRoot);
+            const attentionLines = collectVisibleContextText(this.attentionRoot, {
+                excludeSelectors: '.legend-hover-tooltip, .legend-hover-marker'
+            });
             if (attentionLines.length) {
                 sections.push(`Attention:\n${attentionLines.join('\n')}`);
             }
@@ -2870,6 +3047,8 @@ class SelectionPanel {
         this._syncSceneShift();
         this._scheduleSelectionEquationFit();
         this._scheduleDimensionLabelFit();
+        this._refreshVisibleLegendGradients();
+        this._refreshLegendHover();
         if (this._geluDetailOpen) {
             this._geluDetailView?.resizeAndRender();
         }
@@ -3062,6 +3241,7 @@ class SelectionPanel {
     _onPanelPointerLeave() {
         this._setHoverLabelSuppression(false);
         this._setPanelTokenHoverEntry(null, { emit: true });
+        this._hideLegendHover();
     }
 
     _createHistoryNavigationControls() {
@@ -3274,6 +3454,74 @@ class SelectionPanel {
 
         fragment.append(prefix, chip);
         this.title.replaceChildren(fragment);
+    }
+
+    _setSubtitleSecondaryText(text = '') {
+        if (!this.subtitleSecondary) return;
+        this.subtitleSecondary.classList.remove(
+            'detail-subtitle--attention-context',
+            'detail-subtitle--token-context'
+        );
+        this.subtitleSecondary.textContent = String(text || '');
+    }
+
+    _setSubtitleSecondaryTokenContext({
+        tokenText = '',
+        tokenIndex = null,
+        tokenId = null,
+        prefixText = 'Token:',
+        allowNavigation = true
+    } = {}) {
+        if (!this.subtitleSecondary) return;
+
+        const safeTokenIndex = Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : null;
+        let safeTokenId = Number.isFinite(tokenId) ? Math.floor(tokenId) : null;
+        let safeTokenText = normalizeAttentionValuePart(tokenText, '');
+        if (!safeTokenText && Number.isFinite(safeTokenIndex)) {
+            safeTokenText = `Token ${safeTokenIndex + 1}`;
+        }
+        if (!safeTokenText) {
+            this._setSubtitleSecondaryText('');
+            return;
+        }
+        if (!Number.isFinite(safeTokenId)
+            && Number.isFinite(safeTokenIndex)
+            && this.activationSource
+            && typeof this.activationSource.getTokenId === 'function') {
+            safeTokenId = this.activationSource.getTokenId(safeTokenIndex);
+            safeTokenId = Number.isFinite(safeTokenId) ? Math.floor(safeTokenId) : null;
+        }
+
+        const seed = resolveLogitTokenSeed(
+            { token_id: safeTokenId, token: safeTokenText },
+            Number.isFinite(safeTokenIndex) ? safeTokenIndex : 0
+        );
+
+        this._setSubtitleSecondaryText('');
+        this.subtitleSecondary.classList.add('detail-subtitle--token-context');
+
+        const fragment = document.createDocumentFragment();
+        const prefix = document.createElement('span');
+        prefix.className = 'detail-subtitle-context-label';
+        prefix.textContent = `${prefixText} `;
+
+        const chip = document.createElement('span');
+        chip.className = 'detail-subtitle-token-chip detail-subtitle-secondary-token-chip';
+        chip.style.setProperty('--token-color-border', getLogitTokenColorCss(seed, 0.92));
+        chip.style.setProperty('--token-color-fill', getLogitTokenColorCss(seed, 0.2));
+        chip.style.setProperty('--token-color-fill-hover', getLogitTokenColorCss(seed, 0.28));
+        chip.textContent = safeTokenText;
+        chip.title = safeTokenText;
+        this._configureTokenNavChip(chip, {
+            tokenText: safeTokenText,
+            tokenIndex: safeTokenIndex,
+            tokenId: safeTokenId,
+            allowNavigation
+        });
+
+        fragment.append(prefix, chip);
+        this.subtitleSecondary.replaceChildren(fragment);
+        this._applyTokenChipHoverState();
     }
 
     _openSelectionForTokenChip(chip, event = null) {
@@ -3588,10 +3836,7 @@ class SelectionPanel {
             this.subtitle.classList.remove('detail-subtitle--qkv-token-context');
             this.subtitle.textContent = 'Gaussian Error Linear Unit used in GPT-2 MLP blocks';
         }
-        if (this.subtitleSecondary) {
-            this.subtitleSecondary.classList.remove('detail-subtitle--attention-context');
-            this.subtitleSecondary.textContent = '';
-        }
+        this._setSubtitleSecondaryText('');
         this._geluDetailView?.setVisible(true);
         this._geluDetailView?.resizeAndRender();
         this._stopLoop();
@@ -3631,6 +3876,7 @@ class SelectionPanel {
         } else {
             this.attentionRoot.classList.remove('is-visible');
             this.attentionRoot.setAttribute('aria-hidden', 'true');
+            this._hideLegendHover('attention');
         }
     }
 
@@ -3683,6 +3929,7 @@ class SelectionPanel {
         const source = normalizeAttentionValuePart(safeValue?.source);
         const target = normalizeAttentionValuePart(safeValue?.target);
         const score = normalizeAttentionValuePart(safeValue?.score);
+        const attentionScoreLink = safeValue?.attentionScoreLink || null;
         const sourceTokenIndex = Number.isFinite(safeValue?.sourceTokenIndex) ? Math.floor(safeValue.sourceTokenIndex) : null;
         const targetTokenIndex = Number.isFinite(safeValue?.targetTokenIndex) ? Math.floor(safeValue.targetTokenIndex) : null;
         const sourceTokenId = Number.isFinite(safeValue?.sourceTokenId) ? Math.floor(safeValue.sourceTokenId) : null;
@@ -3703,17 +3950,234 @@ class SelectionPanel {
             });
         }
         if (this.attentionValueScore) {
-            this.attentionValueScore.textContent = score;
+            const scoreEl = this.attentionValueScoreInner || this.attentionValueScore;
+            scoreEl.textContent = score;
+            scoreEl.title = score === ATTENTION_VALUE_PLACEHOLDER ? '' : score;
             this.attentionValueScore.title = score === ATTENTION_VALUE_PLACEHOLDER ? '' : score;
         }
         this.attentionValue.dataset.empty = isEmpty ? 'true' : 'false';
+        this._setAttentionScoreValueLink(
+            !isEmpty ? attentionScoreLink : null,
+            { sourceText: source, targetText: target, scoreText: score }
+        );
         this._applyTokenChipHoverState();
+    }
+
+    _buildAttentionScoreValueLink({
+        mode = this.attentionMode,
+        row = null,
+        col = null,
+        sourceTokenIndex = null,
+        targetTokenIndex = null
+    } = {}) {
+        const context = this._attentionContext;
+        if (!context) return null;
+
+        const safeMode = mode === 'post' ? 'post' : 'pre';
+        const layerIndex = Number.isFinite(context.layerIndex) ? Math.floor(context.layerIndex) : null;
+        const headIndex = Number.isFinite(context.headIndex) ? Math.floor(context.headIndex) : null;
+        const tokenIndices = Array.isArray(context.tokenIndices) ? context.tokenIndices : [];
+        const resolvedRow = Number.isFinite(row) ? Math.floor(row) : null;
+        const resolvedCol = Number.isFinite(col) ? Math.floor(col) : null;
+        const resolvedSourceTokenIndex = Number.isFinite(sourceTokenIndex)
+            ? Math.floor(sourceTokenIndex)
+            : (Number.isFinite(resolvedRow) && Number.isFinite(tokenIndices[resolvedRow])
+                ? Math.floor(tokenIndices[resolvedRow])
+                : null);
+        const resolvedTargetTokenIndex = Number.isFinite(targetTokenIndex)
+            ? Math.floor(targetTokenIndex)
+            : (Number.isFinite(resolvedCol) && Number.isFinite(tokenIndices[resolvedCol])
+                ? Math.floor(tokenIndices[resolvedCol])
+                : null);
+
+        if (
+            !Number.isFinite(layerIndex)
+            || !Number.isFinite(headIndex)
+            || !Number.isFinite(resolvedSourceTokenIndex)
+            || !Number.isFinite(resolvedTargetTokenIndex)
+        ) {
+            return null;
+        }
+
+        return {
+            mode: safeMode,
+            layerIndex,
+            headIndex,
+            row: resolvedRow,
+            col: resolvedCol,
+            sourceTokenIndex: resolvedSourceTokenIndex,
+            targetTokenIndex: resolvedTargetTokenIndex
+        };
+    }
+
+    _setAttentionScoreValueLink(link = null, {
+        sourceText = '',
+        targetText = '',
+        scoreText = ''
+    } = {}) {
+        if (!this.attentionValueScore) return;
+        const hasScore = normalizeAttentionValuePart(scoreText) !== ATTENTION_VALUE_PLACEHOLDER;
+        const nextLink = link && typeof link === 'object'
+            ? this._buildAttentionScoreValueLink(link)
+            : null;
+
+        this._attentionScoreLink = nextLink;
+        this.attentionValueScore.classList.toggle('detail-attention-score-link', hasScore);
+        this.attentionValueScore.dataset.attentionScoreLink = nextLink ? 'true' : 'false';
+
+        if (!nextLink) {
+            this.attentionValueScore.removeAttribute('tabindex');
+            this.attentionValueScore.removeAttribute('role');
+            this.attentionValueScore.removeAttribute('aria-label');
+            delete this.attentionValueScore.dataset.attentionScoreMode;
+            return;
+        }
+
+        const modeText = nextLink.mode === 'post' ? 'post-softmax' : 'pre-softmax';
+        const safeSourceText = normalizeAttentionValuePart(sourceText, 'source token');
+        const safeTargetText = normalizeAttentionValuePart(targetText, 'target token');
+        this.attentionValueScore.dataset.attentionScoreMode = nextLink.mode;
+        this.attentionValueScore.tabIndex = 0;
+        this.attentionValueScore.setAttribute('role', 'button');
+        this.attentionValueScore.setAttribute(
+            'aria-label',
+            `Open ${modeText} attention score for ${safeSourceText} to ${safeTargetText}`
+        );
+    }
+
+    _findAttentionScoreSceneSelection(link) {
+        const scene = this.engine?.scene || null;
+        if (!scene || typeof scene.traverse !== 'function') return null;
+
+        let match = null;
+        scene.traverse((node) => {
+            if (match || !node?.isInstancedMesh || !node.userData?._attentionSphereInstanced) return;
+            const entries = Array.isArray(node.userData.instanceEntries) ? node.userData.instanceEntries : null;
+            const labels = Array.isArray(node.userData.instanceLabels) ? node.userData.instanceLabels : null;
+            if (!entries || entries.length === 0) return;
+
+            for (let instanceId = 0; instanceId < entries.length; instanceId += 1) {
+                const entry = entries[instanceId];
+                if (!entry) continue;
+                const label = typeof labels?.[instanceId] === 'string'
+                    ? labels[instanceId]
+                    : buildAttentionScoreLabel(link.mode);
+                const selection = {
+                    label,
+                    kind: 'attentionSphere',
+                    info: entry,
+                    object: node,
+                    hit: {
+                        object: node,
+                        instanceId
+                    }
+                };
+                if (!matchesAttentionScoreSelection(selection, {
+                    mode: link.mode,
+                    layerIndex: link.layerIndex,
+                    headIndex: link.headIndex,
+                    tokenIndex: link.sourceTokenIndex,
+                    keyTokenIndex: link.targetTokenIndex
+                })) {
+                    continue;
+                }
+                match = selection;
+                break;
+            }
+        });
+
+        return match;
+    }
+
+    _buildFallbackAttentionScoreSelection(link) {
+        const label = buildAttentionScoreLabel(link.mode);
+        const activationData = {
+            label,
+            stage: `attention.${link.mode}`,
+            layerIndex: link.layerIndex,
+            headIndex: link.headIndex,
+            tokenIndex: link.sourceTokenIndex,
+            keyTokenIndex: link.targetTokenIndex
+        };
+
+        if (this.activationSource && typeof this.activationSource.getTokenString === 'function') {
+            const sourceTokenLabel = this.activationSource.getTokenString(link.sourceTokenIndex);
+            const targetTokenLabel = this.activationSource.getTokenString(link.targetTokenIndex);
+            if (typeof sourceTokenLabel === 'string') activationData.tokenLabel = sourceTokenLabel;
+            if (typeof targetTokenLabel === 'string') activationData.keyTokenLabel = targetTokenLabel;
+        }
+
+        if (this.activationSource && typeof this.activationSource.getAttentionScore === 'function') {
+            const score = this.activationSource.getAttentionScore(
+                link.layerIndex,
+                link.mode,
+                link.headIndex,
+                link.sourceTokenIndex,
+                link.targetTokenIndex
+            );
+            if (Number.isFinite(score)) {
+                if (link.mode === 'post') activationData.postScore = score;
+                else activationData.preScore = score;
+            }
+        }
+
+        return {
+            label,
+            kind: 'attentionSphere',
+            info: { activationData }
+        };
+    }
+
+    _resolveLinkedAttentionScoreSelection(link = null) {
+        if (!link) return null;
+        if (matchesAttentionScoreSelection(this._lastSelection, {
+            mode: link.mode,
+            layerIndex: link.layerIndex,
+            headIndex: link.headIndex,
+            tokenIndex: link.sourceTokenIndex,
+            keyTokenIndex: link.targetTokenIndex
+        })) {
+            return this._lastSelection;
+        }
+
+        return this._findAttentionScoreSceneSelection(link)
+            || this._buildFallbackAttentionScoreSelection(link);
+    }
+
+    _openLinkedAttentionScoreSelection(event = null) {
+        const selection = this._resolveLinkedAttentionScoreSelection(this._attentionScoreLink);
+        if (!selection?.label) return false;
+
+        if (typeof event?.preventDefault === 'function') event.preventDefault();
+        if (typeof event?.stopPropagation === 'function') event.stopPropagation();
+
+        const normalizedLabel = normalizeSelectionLabel(selection.label, selection);
+        const previewSelectionKey = buildSelectionPreviewKey(normalizedLabel, selection);
+        if (
+            previewSelectionKey
+            && this.currentPreview
+            && this._currentPreviewSelectionKey === previewSelectionKey
+        ) {
+            return true;
+        }
+
+        this.showSelection(selection, { scrollPanelToTop: true });
+        return true;
+    }
+
+    _onAttentionScoreValueClick(event) {
+        this._openLinkedAttentionScoreSelection(event);
+    }
+
+    _onAttentionScoreValueKeydown(event) {
+        const key = event?.key;
+        if (key !== 'Enter' && key !== ' ' && key !== 'Spacebar') return;
+        this._openLinkedAttentionScoreSelection(event);
     }
 
     _setSubtitleSecondaryAttentionContext(context = null) {
         if (!this.subtitleSecondary) return;
-        this.subtitleSecondary.classList.remove('detail-subtitle--attention-context');
-        this.subtitleSecondary.textContent = '';
+        this._setSubtitleSecondaryText('');
         if (!context || !context.source || !context.target) return;
 
         const resolveTokenId = (part) => {
@@ -4049,7 +4513,12 @@ class SelectionPanel {
     _applyAttentionCellRevealAnimation(cell, className, delayMs, durationMs) {
         if (!cell) return;
         const hadClass = cell.classList.contains(className);
-        cell.classList.remove('post-softmax-reveal', 'post-softmax-reveal-focus', 'pre-softmax-reveal');
+        cell.classList.remove(
+            'post-softmax-reveal',
+            'post-softmax-reveal-focus',
+            'pre-softmax-reveal',
+            'pre-softmax-reveal-focus'
+        );
         if (hadClass) {
             // Force a reflow when replaying the same keyframe class.
             void cell.offsetWidth;
@@ -4093,8 +4562,8 @@ class SelectionPanel {
         const mode = this.attentionMode === 'post' ? 'post' : 'pre';
         const tokenLabels = this._attentionContext.tokenLabels || [];
         const count = this._attentionCells.length;
-        const suppressRevealPulse = mode === 'pre' && this._shouldSuppressAttentionEntryHighlight();
         const useFocusedPostReveal = mode === 'post' && this._hasAttentionFocusCell();
+        const useFocusedPreReveal = mode === 'pre' && this._shouldSuppressAttentionEntryHighlight();
         const postAnimDuration = ATTENTION_POST_REVEAL_DURATION_MS;
         const preAnimDuration = ATTENTION_PRE_REVEAL_DURATION_MS;
         let hasAnyValue = false;
@@ -4125,7 +4594,12 @@ class SelectionPanel {
                     this._cancelAttentionPopOut(cell);
                     cell.classList.add('is-empty');
                     cell.style.backgroundColor = '';
-                    cell.classList.remove('post-softmax-reveal', 'post-softmax-reveal-focus', 'pre-softmax-reveal');
+                    cell.classList.remove(
+                        'post-softmax-reveal',
+                        'post-softmax-reveal-focus',
+                        'pre-softmax-reveal',
+                        'pre-softmax-reveal-focus'
+                    );
                     cell.style.animationDelay = '';
                     cell.style.animationDuration = '';
                     continue;
@@ -4142,11 +4616,7 @@ class SelectionPanel {
                     cell.dataset.value = String(value);
                     cell.classList.remove('is-empty');
                     hasAnyValue = true;
-                    if (suppressRevealPulse) {
-                        cell.classList.remove('post-softmax-reveal', 'post-softmax-reveal-focus', 'pre-softmax-reveal');
-                        cell.style.animationDelay = '';
-                        cell.style.animationDuration = '';
-                    } else if (mode === 'post') {
+                    if (mode === 'post') {
                         if (shouldAnimateRow && !this._attentionPostAnimatedRows.has(row)) {
                             const revealOrder = getAttentionRevealOrder(row, col, count, ATTENTION_PREVIEW_TRIANGLE);
                             const revealClass = useFocusedPostReveal
@@ -4170,12 +4640,12 @@ class SelectionPanel {
                             const revealOrder = getAttentionRevealOrder(row, col, count, ATTENTION_PREVIEW_TRIANGLE);
                             this._applyAttentionCellRevealAnimation(
                                 cell,
-                                'pre-softmax-reveal',
+                                useFocusedPreReveal ? 'pre-softmax-reveal-focus' : 'pre-softmax-reveal',
                                 revealOrder * preAnimStagger,
                                 preAnimDuration
                             );
                         } else {
-                            cell.classList.remove('pre-softmax-reveal');
+                            cell.classList.remove('pre-softmax-reveal', 'pre-softmax-reveal-focus');
                             cell.style.animationDelay = '';
                             cell.style.animationDuration = '';
                         }
@@ -4194,7 +4664,7 @@ class SelectionPanel {
                         cell.style.animationDelay = '';
                         cell.style.animationDuration = '';
                     } else if (mode === 'pre') {
-                        cell.classList.remove('pre-softmax-reveal');
+                        cell.classList.remove('pre-softmax-reveal', 'pre-softmax-reveal-focus');
                         cell.style.animationDelay = '';
                         cell.style.animationDuration = '';
                     }
@@ -4317,12 +4787,27 @@ class SelectionPanel {
             }
         }
         this._attentionValueDefault = hasSource
-            ? (this._attentionSelectionSummary?.defaultValue || {
-                source: ATTENTION_VALUE_PLACEHOLDER,
-                target: ATTENTION_VALUE_PLACEHOLDER,
-                score: ATTENTION_VALUE_PLACEHOLDER,
-                empty: true
-            })
+            ? (() => {
+                const defaultValue = this._attentionSelectionSummary?.defaultValue;
+                if (!defaultValue) {
+                    return {
+                        source: ATTENTION_VALUE_PLACEHOLDER,
+                        target: ATTENTION_VALUE_PLACEHOLDER,
+                        score: ATTENTION_VALUE_PLACEHOLDER,
+                        empty: true
+                    };
+                }
+                return {
+                    ...defaultValue,
+                    attentionScoreLink: this._buildAttentionScoreValueLink({
+                        mode,
+                        row: this._attentionSelectionSummary?.row,
+                        col: this._attentionSelectionSummary?.col,
+                        sourceTokenIndex: defaultValue.sourceTokenIndex,
+                        targetTokenIndex: defaultValue.targetTokenIndex
+                    })
+                };
+            })()
             : {
                 source: ATTENTION_VALUE_PLACEHOLDER,
                 target: ATTENTION_VALUE_PLACEHOLDER,
@@ -4527,26 +5012,22 @@ class SelectionPanel {
         }
 
         if (safeMode === 'post') {
-            const low = colorToCss(resolveAttentionPreviewCellColor(0, 'post'));
-            const high = colorToCss(resolveAttentionPreviewCellColor(1, 'post'));
-            this.attentionLegend.style.setProperty('--attention-legend-gradient', `linear-gradient(90deg, ${low}, ${high})`);
+            this.attentionLegend.style.setProperty('--attention-legend-gradient', this._buildAttentionLegendGradient('post'));
             this.attentionLegend.dataset.mid = '';
             this.attentionLegendLow.textContent = '';
             this.attentionLegendHigh.textContent = '';
             this._updateAttentionLegendTickLabels('post');
+            this._refreshLegendHover('attention');
             return;
         }
 
-        const gradient = buildSpectrumLegendGradient({
-            clampMax: ATTENTION_PRE_COLOR_CLAMP,
-            steps: 15,
-            darkenFactor: ATTENTION_PREVIEW_COLOR_DARKEN_FACTOR
-        });
+        const gradient = this._buildAttentionLegendGradient('pre');
         this.attentionLegend.style.setProperty('--attention-legend-gradient', gradient);
         this.attentionLegend.dataset.mid = '';
         this.attentionLegendLow.textContent = '';
         this.attentionLegendHigh.textContent = '';
         this._updateAttentionLegendTickLabels('pre');
+        this._refreshLegendHover('attention');
     }
 
     _updateVectorLegendTickLabels() {
@@ -4580,13 +5061,11 @@ class SelectionPanel {
         if (!show) {
             this.vectorLegend.classList.remove('is-visible');
             this.vectorLegend.setAttribute('aria-hidden', 'true');
+            this._hideLegendHover('vector');
             return;
         }
 
-        const gradient = buildSpectrumLegendGradient({
-            clampMax: RESIDUAL_COLOR_CLAMP,
-            steps: 15
-        });
+        const gradient = this._buildVectorLegendGradient();
         if (this.vectorLegendBar) {
             this.vectorLegendBar.style.setProperty('--vector-legend-gradient', gradient);
         }
@@ -4596,6 +5075,7 @@ class SelectionPanel {
         if (this.vectorLegendHigh) this.vectorLegendHigh.textContent = '';
         this.vectorLegend.classList.add('is-visible');
         this.vectorLegend.setAttribute('aria-hidden', 'false');
+        this._refreshLegendHover('vector');
     }
 
     _setAttentionHoverFromCell(cell, { force = false } = {}) {
@@ -4650,6 +5130,13 @@ class SelectionPanel {
             score: scoreText,
             sourceTokenIndex,
             targetTokenIndex,
+            attentionScoreLink: this._buildAttentionScoreValueLink({
+                mode: this.attentionMode,
+                row,
+                col,
+                sourceTokenIndex,
+                targetTokenIndex
+            }),
             empty: false
         });
     }
@@ -4757,10 +5244,16 @@ class SelectionPanel {
                 : null;
         };
         const tokenNavChip = resolveClosest('.detail-token-nav-chip[data-token-nav="true"]');
+        const attentionScoreLink = resolveClosest('.detail-attention-score-link[data-attention-score-link="true"]');
         const hitPanelTokenNavChip = !!(
             tokenNavChip
             && this.panel
             && this.panel.contains(tokenNavChip)
+        );
+        const hitPanelAttentionScoreLink = !!(
+            attentionScoreLink
+            && this.panel
+            && this.panel.contains(attentionScoreLink)
         );
         const attentionMatrixRoot = resolveClosest('#detailAttentionMatrix');
         const insideAttentionMatrix = !!(
@@ -4778,6 +5271,7 @@ class SelectionPanel {
         const shouldClearPinnedAttention = this.isOpen
             && this._attentionPinned
             && !hitPanelTokenNavChip
+            && !hitPanelAttentionScoreLink
             && (!insideAttentionMatrix || !validMatrixCell);
         if (shouldClearPinnedAttention) {
             this._clearPinnedAttention({ clearSelectionSummary: true });
@@ -4929,6 +5423,16 @@ class SelectionPanel {
         }
     }
 
+    _scrollPanelToTop() {
+        if (!this.panel) return;
+        if (typeof this.panel.scrollTo === 'function') {
+            this.panel.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+            return;
+        }
+        this.panel.scrollTop = 0;
+        this.panel.scrollLeft = 0;
+    }
+
     open() {
         if (!this.isReady) return;
         const wasOpen = this.isOpen;
@@ -4974,6 +5478,7 @@ class SelectionPanel {
         this._setPanelTokenHoverEntry(null, { emit: true });
         this._mirroredTokenHoverEntry = null;
         this._applyTokenChipHoverState();
+        this._hideLegendHover();
         this._resetCopyContextFeedback();
         this.panel.classList.remove('is-open');
         this.panel.classList.remove('is-preview-hidden');
@@ -5391,6 +5896,7 @@ class SelectionPanel {
     showSelection(selection, options = {}) {
         if (!this.isReady || !selection || !selection.label) return;
         const fromHistory = options?.fromHistory === true;
+        const scrollPanelToTop = options?.scrollPanelToTop === true;
 
         this._closeGeluDetailPreview({ restoreSelection: false, restartLoop: false });
         this._resetCopyContextFeedback();
@@ -5404,6 +5910,7 @@ class SelectionPanel {
         const metadata = resolveMetadata(label, selection.kind, selection);
         const logitHeader = resolveLogitSelectionHeader(label, selection);
         const vectorSubtitleMetadata = this._resolveVectorTokenPosition(selection, label);
+        const activationStage = String(getActivationDataFromSelection(selection)?.stage || '').toLowerCase();
         const isAttentionScore = isAttentionScoreSelection(label, selection);
         const attentionContextForSubtitle = isAttentionScore ? this._resolveAttentionContext(selection) : null;
         const attentionScoreSummary = isAttentionScore
@@ -5414,6 +5921,10 @@ class SelectionPanel {
         const isTokenChipSelection = lower.startsWith('token:');
         const isTokenOrPositionChipSelection = isTokenChipSelection || lower.startsWith('position:');
         const isChosenTokenSelection = lower.startsWith('chosen token:');
+        const isPositionEmbeddingSelection = lower.startsWith('position:')
+            || lower.includes('position embedding')
+            || lower.includes('positional embedding')
+            || activationStage.startsWith('embedding.position');
         this.panel.classList.toggle('is-preview-hidden', hidePreviewForSelection);
         if (logitHeader) {
             this._setTokenChipTitleContext({
@@ -5525,16 +6036,27 @@ class SelectionPanel {
         }
         if (this.subtitleSecondary) {
             if (subtitleSecondaryOverride !== null) {
-                this.subtitleSecondary.classList.remove('detail-subtitle--attention-context');
-                this.subtitleSecondary.textContent = subtitleSecondaryOverride;
+                this._setSubtitleSecondaryText(subtitleSecondaryOverride);
             } else if (logitHeader) {
-                this.subtitleSecondary.classList.remove('detail-subtitle--attention-context');
-                this.subtitleSecondary.textContent = '';
+                this._setSubtitleSecondaryText('');
+            } else if (isPositionEmbeddingSelection) {
+                this._setSubtitleSecondaryTokenContext({
+                    tokenText: normalizeAttentionValuePart(
+                        vectorSubtitleMetadata?.tokenDisplayText || vectorSubtitleMetadata?.tokenText,
+                        ''
+                    ),
+                    tokenIndex: Number.isFinite(vectorSubtitleMetadata?.tokenIndex)
+                        ? Math.floor(vectorSubtitleMetadata.tokenIndex)
+                        : null,
+                    tokenId: Number.isFinite(vectorSubtitleMetadata?.tokenId)
+                        ? Math.floor(vectorSubtitleMetadata.tokenId)
+                        : null,
+                    prefixText: 'Token:'
+                });
             } else if (attentionScoreSummary?.tokenContext) {
                 this._setSubtitleSecondaryAttentionContext(attentionScoreSummary.tokenContext);
             } else {
-                this.subtitleSecondary.classList.remove('detail-subtitle--attention-context');
-                this.subtitleSecondary.textContent = attentionSubtitleLine;
+                this._setSubtitleSecondaryText(attentionSubtitleLine);
             }
         }
         const hideLayerNormFields = isLayerNormSolidSelection(label);
@@ -5704,6 +6226,9 @@ class SelectionPanel {
         this._updateAttentionPreview(selection);
         this._applyTokenChipHoverState();
         this.open();
+        if (scrollPanelToTop) {
+            this._scrollPanelToTop();
+        }
         this._scheduleSelectionEquationFit();
         this._scheduleDimensionLabelFit();
         if (!fromHistory) {

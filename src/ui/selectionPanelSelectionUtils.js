@@ -141,6 +141,39 @@ export function resolveAttentionModeFromSelection(selectionInfo) {
     return null;
 }
 
+export function buildAttentionScoreLabel(mode = 'pre') {
+    return mode === 'post'
+        ? 'Post-Softmax Attention Score'
+        : 'Pre-Softmax Attention Score';
+}
+
+export function matchesAttentionScoreSelection(selectionInfo, {
+    mode = null,
+    layerIndex = null,
+    headIndex = null,
+    tokenIndex = null,
+    keyTokenIndex = null
+} = {}) {
+    if (!isAttentionScoreSelection(selectionInfo?.label, selectionInfo)) return false;
+
+    const safeMode = mode === 'post' ? 'post' : (mode === 'pre' ? 'pre' : null);
+    const stageLower = String(getActivationDataFromSelection(selectionInfo)?.stage || '').toLowerCase();
+    if (safeMode && stageLower !== `attention.${safeMode}`) return false;
+
+    const matchNumber = (key, expected) => {
+        if (!Number.isFinite(expected)) return true;
+        const actual = findUserDataNumber(selectionInfo, key);
+        return Number.isFinite(actual) && Math.floor(actual) === Math.floor(expected);
+    };
+
+    if (!matchNumber('layerIndex', layerIndex)) return false;
+    if (!matchNumber('headIndex', headIndex)) return false;
+    if (!matchNumber('tokenIndex', tokenIndex)) return false;
+    if (!matchNumber('keyTokenIndex', keyTokenIndex)) return false;
+
+    return true;
+}
+
 export function isValueSelection(label, selectionInfo) {
     const lower = (label || '').toLowerCase();
     if (selectionInfo?.info?.category === 'V') return true;

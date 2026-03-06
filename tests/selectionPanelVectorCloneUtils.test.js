@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import {
     copyInstancedVectorSliceToPreview,
+    shouldSkipLiveVectorTransformCopy,
     isInstancedVectorSliceInMotion,
-    shouldSkipLiveVectorTransformCopy
 } from '../src/ui/selectionPanelVectorCloneUtils.js';
+import { HIDE_INSTANCE_Y_OFFSET } from '../src/utils/constants.js';
 
 function makeAttrArray(length) {
     return {
@@ -88,6 +89,40 @@ describe('selectionPanelVectorCloneUtils', () => {
         const moving = makeSourceMesh({ count: 3, yByIndex: [10, 11, 10] });
         expect(isInstancedVectorSliceInMotion(stable, 0, 3)).toBe(false);
         expect(isInstancedVectorSliceInMotion(moving, 0, 3)).toBe(true);
+    });
+
+    it('treats fully hidden vector slices as invalid live preview sources', () => {
+        const hidden = makeSourceMesh({
+            count: 3,
+            yByIndex: [
+                HIDE_INSTANCE_Y_OFFSET,
+                HIDE_INSTANCE_Y_OFFSET,
+                HIDE_INSTANCE_Y_OFFSET
+            ]
+        });
+        const vectorRef = { mesh: hidden, instanceCount: 3 };
+
+        expect(isInstancedVectorSliceInMotion(hidden, 0, 3)).toBe(true);
+        expect(shouldSkipLiveVectorTransformCopy(vectorRef, null, 3)).toBe(true);
+        expect(shouldSkipLiveVectorTransformCopy(vectorRef, null, 3, { forceLiveCopy: true })).toBe(true);
+    });
+
+    it('still skips fully hidden qkv-processed vectors', () => {
+        const hidden = makeSourceMesh({
+            count: 3,
+            yByIndex: [
+                HIDE_INSTANCE_Y_OFFSET,
+                HIDE_INSTANCE_Y_OFFSET,
+                HIDE_INSTANCE_Y_OFFSET
+            ]
+        });
+        const vectorRef = {
+            mesh: hidden,
+            instanceCount: 3,
+            userData: { qkvProcessed: true }
+        };
+
+        expect(shouldSkipLiveVectorTransformCopy(vectorRef, null, 3)).toBe(true);
     });
 
     it('skips live transform copy when vector slices are in motion', () => {

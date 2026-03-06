@@ -1,4 +1,10 @@
-import { setPlaybackSpeed } from '../utils/constants.js';
+import {
+    clampPlaybackSpeedPercent,
+    DEFAULT_PLAYBACK_SPEED_PERCENT,
+    PLAYBACK_SPEED_PERCENT_MAX,
+    PLAYBACK_SPEED_PERCENT_MIN,
+    setPlaybackSpeed
+} from '../utils/constants.js';
 import { getPreference, setPreference } from '../utils/preferences.js';
 import { appState } from '../state/appState.js';
 import { ENVIRONMENT_MAP_OPTIONS } from '../utils/environmentMaps.js';
@@ -6,6 +12,7 @@ import { initPerfOverlay } from './perfOverlay.js';
 import { initTouchClickFallback } from './touchClickFallback.js';
 
 const BRIGHTNESS_PREF_KEY = 'displayBrightnessScale';
+const PLAYBACK_SPEED_PREF_KEY = 'playbackSpeedPercent';
 const PROMPT_TOKEN_STRIP_PREF_KEY = 'showPromptTokenStrip';
 const BRIGHTNESS_MIN = 0.5;
 const BRIGHTNESS_MAX = 1.8;
@@ -40,6 +47,10 @@ function formatBrightness(value) {
     return `${brightnessInternalToUi(value)}%`;
 }
 
+function formatPlaybackSpeed(value) {
+    return `${clampPlaybackSpeedPercent(value)}%`;
+}
+
 // Wires up the settings modal controls.
 export function initSettingsModal(pipeline) {
     const settingsBtn = document.getElementById('settingsBtn');
@@ -49,11 +60,30 @@ export function initSettingsModal(pipeline) {
     const settingsModal = settingsOverlay?.querySelector('.settings-modal') || null;
     const brightnessSlider = document.getElementById('brightnessSlider');
     const brightnessValue = document.getElementById('brightnessValue');
+    const brightnessInput = document.getElementById('brightnessInput');
+    const playbackSpeedSlider = document.getElementById('playbackSpeedSlider');
+    const playbackSpeedValue = document.getElementById('playbackSpeedValue');
+    const playbackSpeedInput = document.getElementById('playbackSpeedInput');
     const environmentMapSelect = document.getElementById('environmentMapSelect');
+    if (playbackSpeedSlider) {
+        playbackSpeedSlider.min = String(PLAYBACK_SPEED_PERCENT_MIN);
+        playbackSpeedSlider.max = String(PLAYBACK_SPEED_PERCENT_MAX);
+        playbackSpeedSlider.step = '1';
+    }
+    if (playbackSpeedInput) {
+        playbackSpeedInput.min = String(PLAYBACK_SPEED_PERCENT_MIN);
+        playbackSpeedInput.max = String(PLAYBACK_SPEED_PERCENT_MAX);
+        playbackSpeedInput.step = '1';
+    }
     if (brightnessSlider) {
         brightnessSlider.min = String(BRIGHTNESS_UI_MIN);
         brightnessSlider.max = String(BRIGHTNESS_UI_MAX);
         brightnessSlider.step = '1';
+    }
+    if (brightnessInput) {
+        brightnessInput.min = String(BRIGHTNESS_UI_MIN);
+        brightnessInput.max = String(BRIGHTNESS_UI_MAX);
+        brightnessInput.step = '1';
     }
 
     if (environmentMapSelect && environmentMapSelect.options.length === 0) {
@@ -65,7 +95,7 @@ export function initSettingsModal(pipeline) {
         });
     }
 
-    initTouchClickFallback(settingsModal, { selector: 'button, .toggle-row, .speed-option' });
+    initTouchClickFallback(settingsModal, { selector: 'button, .toggle-row' });
 
     appState.autoCameraFollow = getPreference('autoCameraFollow', true);
     appState.showCameraDebug = getPreference('showCameraDebug', false);
@@ -203,12 +233,78 @@ export function initSettingsModal(pipeline) {
         hint.hidden = !enabled;
     };
 
+    const initInlinePercentEditor = ({
+        buttonEl,
+        inputEl,
+        readValue,
+        commitValue
+    }) => {
+        const shell = inputEl?.closest('.slider-value-input-shell') || null;
+        if (!buttonEl || !inputEl || !shell) return;
+
+        let editing = false;
+
+        const closeEditor = ({ commit = false, restoreFocus = false } = {}) => {
+            if (!editing) return;
+            editing = false;
+
+            if (commit) {
+                const raw = inputEl.value;
+                if (raw !== '') {
+                    commitValue(raw);
+                }
+            } else {
+                inputEl.value = String(readValue());
+            }
+
+            shell.hidden = true;
+            buttonEl.hidden = false;
+            if (restoreFocus) {
+                requestAnimationFrame(() => {
+                    if (document.body.contains(buttonEl)) {
+                        buttonEl.focus();
+                    }
+                });
+            }
+        };
+
+        buttonEl.addEventListener('click', () => {
+            if (editing) return;
+            editing = true;
+            inputEl.value = String(readValue());
+            buttonEl.hidden = true;
+            shell.hidden = false;
+            requestAnimationFrame(() => {
+                inputEl.focus();
+                inputEl.select();
+            });
+        });
+
+        inputEl.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                closeEditor({ commit: true, restoreFocus: true });
+            } else if (event.key === 'Escape') {
+                event.preventDefault();
+                closeEditor({ commit: false, restoreFocus: true });
+            }
+        });
+
+        inputEl.addEventListener('blur', () => {
+            closeEditor({ commit: true });
+        });
+    };
+
     const applyBrightness = (value, { persist = true, valueIsUi = false } = {}) => {
         const next = valueIsUi ? brightnessUiToInternal(value) : clampBrightness(value);
         const brightnessCss = `brightness(${next.toFixed(2)})`;
+        const uiValue = brightnessInternalToUi(next);
 
-        if (brightnessSlider) brightnessSlider.value = String(brightnessInternalToUi(next));
+        if (brightnessSlider) brightnessSlider.value = String(uiValue);
         if (brightnessValue) brightnessValue.textContent = formatBrightness(next);
+        if (brightnessInput && document.activeElement !== brightnessInput) {
+            brightnessInput.value = String(uiValue);
+        }
 
         const gptCanvas = document.getElementById('gptCanvas');
         const introCanvas = document.getElementById('introCanvas');
@@ -226,12 +322,23 @@ export function initSettingsModal(pipeline) {
         }
     };
 
-    function applySpeed(value) {
-        const preset = setPlaybackSpeed(value);
-        if (preset && typeof preset.engineSpeed === 'number') {
-            pipeline?.engine?.setSpeed?.(preset.engineSpeed);
+    const applyPlaybackSpeed = (value, { persist = true } = {}) => {
+        const next = clampPlaybackSpeedPercent(value);
+        const profile = setPlaybackSpeed(next);
+
+        if (playbackSpeedSlider) playbackSpeedSlider.value = String(next);
+        if (playbackSpeedValue) playbackSpeedValue.textContent = formatPlaybackSpeed(next);
+        if (playbackSpeedInput && document.activeElement !== playbackSpeedInput) {
+            playbackSpeedInput.value = String(next);
         }
-    }
+        if (profile && typeof profile.engineSpeed === 'number') {
+            pipeline?.engine?.setSpeed?.(profile.engineSpeed);
+        }
+
+        if (persist) {
+            setPreference(PLAYBACK_SPEED_PREF_KEY, next);
+        }
+    };
 
     function openSettings() {
         settingsOverlay.style.display = 'flex';
@@ -239,11 +346,6 @@ export function initSettingsModal(pipeline) {
         document.body.style.overflow = 'hidden';
         pipeline?.engine?.pause?.('modal');
         appState.modalPaused = true;
-        const checked = settingsOverlay.querySelector('input[name="playbackSpeed"]:checked');
-        if (checked) {
-            const selectedLabel = checked.closest('.speed-option');
-            updateSpeedChecked(selectedLabel?.dataset.value || 'medium');
-        }
         const rc = document.getElementById('toggleRaycast');
         if (rc && pipeline?.engine?.isRaycastingEnabled) {
             rc.checked = !!pipeline.engine.isRaycastingEnabled();
@@ -278,16 +380,6 @@ export function initSettingsModal(pipeline) {
         appState.modalPaused = false;
     }
 
-    function updateSpeedChecked(value) {
-        const labels = settingsOverlay.querySelectorAll('.speed-option');
-        labels.forEach((label) => {
-            const v = label.getAttribute('data-value');
-            label.setAttribute('data-checked', String(v === value));
-            const input = label.querySelector('input');
-            if (input) input.checked = v === value;
-        });
-    }
-
     settingsBtn?.addEventListener('click', openSettings);
     settingsClose?.addEventListener('click', closeSettings);
     settingsOverlay?.addEventListener('click', (e) => {
@@ -297,16 +389,6 @@ export function initSettingsModal(pipeline) {
         if (e.key === 'Escape' && settingsOverlay?.getAttribute('aria-hidden') === 'false') {
             closeSettings();
         }
-    });
-
-    settingsOverlay?.querySelectorAll('.speed-option').forEach((label) => {
-        label.addEventListener('click', (e) => {
-            e.preventDefault();
-            const value = label.getAttribute('data-value');
-            if (!value) return;
-            updateSpeedChecked(value);
-            applySpeed(value);
-        });
     });
 
     const rayToggle = document.getElementById('toggleRaycast');
@@ -403,12 +485,37 @@ export function initSettingsModal(pipeline) {
     const initialBrightness = getPreference(BRIGHTNESS_PREF_KEY, BRIGHTNESS_DEFAULT);
     applyBrightness(initialBrightness, { persist: false });
 
+    const initialPlaybackSpeed = getPreference(PLAYBACK_SPEED_PREF_KEY, DEFAULT_PLAYBACK_SPEED_PERCENT);
+    applyPlaybackSpeed(initialPlaybackSpeed, { persist: false });
+
+    initInlinePercentEditor({
+        buttonEl: brightnessValue,
+        inputEl: brightnessInput,
+        readValue: () => clampBrightnessUi(brightnessSlider?.value),
+        commitValue: (value) => applyBrightness(value, { persist: true, valueIsUi: true })
+    });
+
+    initInlinePercentEditor({
+        buttonEl: playbackSpeedValue,
+        inputEl: playbackSpeedInput,
+        readValue: () => clampPlaybackSpeedPercent(playbackSpeedSlider?.value),
+        commitValue: (value) => applyPlaybackSpeed(value, { persist: true })
+    });
+
     brightnessSlider?.addEventListener('input', () => {
         applyBrightness(brightnessSlider.value, { persist: false, valueIsUi: true });
     });
 
     brightnessSlider?.addEventListener('change', () => {
         applyBrightness(brightnessSlider.value, { persist: true, valueIsUi: true });
+    });
+
+    playbackSpeedSlider?.addEventListener('input', () => {
+        applyPlaybackSpeed(playbackSpeedSlider.value, { persist: false });
+    });
+
+    playbackSpeedSlider?.addEventListener('change', () => {
+        applyPlaybackSpeed(playbackSpeedSlider.value, { persist: true });
     });
 
     if (appState.showPerfOverlay) {

@@ -177,9 +177,9 @@ export function copyInstancedVectorColorsToPreview(previewVec, sourceMesh, sourc
     return copied;
 }
 
-export function isInstancedVectorSliceInMotion(sourceMesh, sourceOffset = 0, sourceCount = null) {
+function inspectInstancedVectorSlice(sourceMesh, sourceOffset = 0, sourceCount = null) {
     if (!sourceMesh?.isInstancedMesh || typeof sourceMesh.getMatrixAt !== 'function') {
-        return false;
+        return null;
     }
     const srcTotal = Number.isFinite(sourceMesh.count)
         ? Math.max(0, Math.floor(sourceMesh.count))
@@ -190,11 +190,12 @@ export function isInstancedVectorSliceInMotion(sourceMesh, sourceOffset = 0, sou
         ? Math.max(0, Math.floor(sourceCount))
         : available;
     const inspectCount = Math.min(available, requested);
-    if (inspectCount <= 1) return false;
+    if (inspectCount <= 0) return null;
 
     let baselineY = null;
     let visibleCount = 0;
     let hiddenCount = 0;
+    let shiftedVisibleHeights = false;
     for (let i = 0; i < inspectCount; i += 1) {
         sourceMesh.getMatrixAt(start + i, TMP_MATRIX);
         TMP_MATRIX.decompose(TMP_POS, TMP_QUAT, TMP_SCALE);
@@ -217,19 +218,35 @@ export function isInstancedVectorSliceInMotion(sourceMesh, sourceOffset = 0, sou
         // In stable vectors, all visible prisms share the same local Y.
         // Mid-addition vectors have per-prism Y offsets and should not be copied.
         if (Math.abs(TMP_POS.y - baselineY) > 0.25) {
-            return true;
+            shiftedVisibleHeights = true;
+            break;
         }
     }
 
-    if (hiddenCount > 0 && visibleCount > 0) {
-        return true;
-    }
-    return false;
+    return {
+        shiftedVisibleHeights,
+        mixedVisibility: hiddenCount > 0 && visibleCount > 0,
+        // History navigation can revisit a selection after the live scene has
+        // already hidden that vector. In that case, copying transforms would
+        // build a valid preview object whose instances are all parked offscreen,
+        // leaving the preview canvas blank.
+        fullyHidden: hiddenCount > 0 && visibleCount === 0
+    };
+}
+
+export function isInstancedVectorSliceInMotion(sourceMesh, sourceOffset = 0, sourceCount = null) {
+    const state = inspectInstancedVectorSlice(sourceMesh, sourceOffset, sourceCount);
+    if (!state) return false;
+    return state.shiftedVisibleHeights || state.mixedVisibility || state.fullyHidden;
 }
 
 export function shouldSkipLiveVectorTransformCopy(vectorRef, vectorMesh, fallbackCount = null, options = {}) {
-    if (options?.forceLiveCopy === true) return false;
-    if (vectorRef?.userData?.qkvProcessed === true) return false;
+    const allowDynamicVisibleCopy = options?.forceLiveCopy === true || vectorRef?.userData?.qkvProcessed === true;
+    const shouldSkipFromState = (state) => {
+        if (!state) return false;
+        if (state.fullyHidden) return true;
+        return !allowDynamicVisibleCopy && (state.shiftedVisibleHeights || state.mixedVisibility);
+    };
 
     if (vectorRef?.isBatchedVectorRef && vectorRef._batch?.mesh) {
         const batch = vectorRef._batch;
@@ -239,7 +256,7 @@ export function shouldSkipLiveVectorTransformCopy(vectorRef, vectorMesh, fallbac
                 ? Math.max(1, Math.floor(fallbackCount))
                 : PREVIEW_VECTOR_BODY_INSTANCES;
         const index = Number.isFinite(vectorRef._index) ? Math.max(0, Math.floor(vectorRef._index)) : 0;
-        if (isInstancedVectorSliceInMotion(batch.mesh, index * batchPrismCount, batchPrismCount)) {
+        if (shouldSkipFromState(inspectInstancedVectorSlice(batch.mesh, index * batchPrismCount, batchPrismCount))) {
             return true;
         }
     }
@@ -250,7 +267,7 @@ export function shouldSkipLiveVectorTransformCopy(vectorRef, vectorMesh, fallbac
             : Number.isFinite(fallbackCount)
                 ? Math.max(1, Math.floor(fallbackCount))
                 : PREVIEW_VECTOR_BODY_INSTANCES;
-        if (isInstancedVectorSliceInMotion(vectorRef.mesh, 0, srcCount)) {
+        if (shouldSkipFromState(inspectInstancedVectorSlice(vectorRef.mesh, 0, srcCount))) {
             return true;
         }
     }
@@ -259,7 +276,7 @@ export function shouldSkipLiveVectorTransformCopy(vectorRef, vectorMesh, fallbac
         const inspectCount = Number.isFinite(fallbackCount)
             ? Math.max(1, Math.floor(fallbackCount))
             : null;
-        if (isInstancedVectorSliceInMotion(vectorMesh, 0, inspectCount)) {
+        if (shouldSkipFromState(inspectInstancedVectorSlice(vectorMesh, 0, inspectCount))) {
             return true;
         }
     }

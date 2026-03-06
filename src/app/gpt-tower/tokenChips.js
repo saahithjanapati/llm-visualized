@@ -39,6 +39,7 @@ import {
     scaleLineWidthForDisplay,
     scaleOpacityForDisplay
 } from '../../utils/trailConstants.js';
+import { createTokenChipMesh } from '../../utils/tokenChipMeshFactory.js';
 import { TOKEN_CHIP_STYLE, POSITION_CHIP_STYLE } from './config.js';
 import { formatTokenLabel } from './tokenLabels.js';
 import { addTopLogitBars, revealTopLogitBars } from './topLogitBars.js';
@@ -355,139 +356,14 @@ function retuneTokenChipMaterials(root) {
 }
 
 // Build a rounded rectangle shape used for the token chip body.
-function buildRoundedRectShape(width, height, radius) {
-    const clampedRadius = Math.max(0, Math.min(radius, Math.min(width, height) / 2 - 1));
-    const halfW = width / 2;
-    const halfH = height / 2;
-    const shape = new THREE.Shape();
-    shape.moveTo(-halfW + clampedRadius, -halfH);
-    shape.lineTo(halfW - clampedRadius, -halfH);
-    shape.quadraticCurveTo(halfW, -halfH, halfW, -halfH + clampedRadius);
-    shape.lineTo(halfW, halfH - clampedRadius);
-    shape.quadraticCurveTo(halfW, halfH, halfW - clampedRadius, halfH);
-    shape.lineTo(-halfW + clampedRadius, halfH);
-    shape.quadraticCurveTo(-halfW, halfH, -halfW, halfH - clampedRadius);
-    shape.lineTo(-halfW, -halfH + clampedRadius);
-    shape.quadraticCurveTo(-halfW, -halfH, -halfW + clampedRadius, -halfH);
-    shape.closePath();
-    return shape;
-}
-
-// Create a 3D chip group with optional text mesh, plus a cached size in userData.
-function createTokenChip(label, font, style) {
-    let textGeo = null;
-    let textShapes = null;
-    let textDepth = 0;
-    let bounds = null;
-    const capOffset = 0.05;
-    if (font && label.trim().length) {
-        const desiredDepth = Number.isFinite(style.textDepth) ? style.textDepth : 0;
-        const chipDepth = Number.isFinite(style.depth) ? style.depth : desiredDepth;
-        textDepth = Number.isFinite(chipDepth) ? chipDepth + capOffset * 2 : desiredDepth;
-        textShapes = font.generateShapes(label, style.textSize, 2);
-        textGeo = new THREE.ExtrudeGeometry(textShapes, {
-            depth: textDepth,
-            curveSegments: 4,
-            bevelEnabled: false
-        });
-        textGeo.computeBoundingBox();
-        textGeo.computeVertexNormals();
-        textGeo.translate(0, 0, -textDepth / 2);
-        textGeo.computeBoundingBox();
-        bounds = textGeo.boundingBox;
-    }
-    let textWidth = 0;
-    let textHeight = 0;
-    if (bounds && Number.isFinite(bounds.max.x) && Number.isFinite(bounds.min.x)) {
-        textWidth = Math.max(0, bounds.max.x - bounds.min.x);
-        textHeight = Math.max(0, bounds.max.y - bounds.min.y);
-    }
-
-    const chipWidth = Math.max(style.minWidth, textWidth + style.padding);
-    const chipHeight = typeof style.height === 'number' && Number.isFinite(style.height)
-        ? style.height
-        : Math.max(style.minHeight, textHeight + style.padding);
-    const chipRadius = Math.min(style.cornerRadius, Math.min(chipWidth, chipHeight) / 2 - 1);
-    const chipShape = buildRoundedRectShape(chipWidth, chipHeight, chipRadius);
-    const chipGeo = new THREE.ExtrudeGeometry(chipShape, {
-        depth: style.depth,
-        bevelEnabled: false
-    });
-    chipGeo.translate(0, 0, -style.depth / 2);
-    chipGeo.computeVertexNormals();
-
-    const chipMat = new THREE.MeshStandardMaterial({
-        color: 0xf2e8d5,
-        roughness: 0.84,
-        metalness: 0.01,
-        emissive: 0x000000,
-        emissiveIntensity: 0,
-        side: THREE.DoubleSide
-    });
-    const chipMesh = new THREE.Mesh(chipGeo, chipMat);
-
-    const group = new THREE.Group();
-    group.add(chipMesh);
-
-    // Add thin caps to avoid transparent edges when viewed from the sides.
-    const capMat = chipMat.clone();
-    capMat.polygonOffset = false;
-    capMat.polygonOffsetFactor = 0;
-    capMat.polygonOffsetUnits = 0;
-    const capGeo = new THREE.ShapeGeometry(chipShape);
-    capGeo.computeVertexNormals();
-    const frontCap = new THREE.Mesh(capGeo, capMat);
-    frontCap.position.z = style.depth / 2 + capOffset;
-    const backCap = new THREE.Mesh(capGeo, capMat);
-    backCap.position.z = -style.depth / 2 - capOffset;
-    backCap.rotation.y = Math.PI;
-    group.add(frontCap, backCap);
-
-    // Optional 3D text mesh, centered to span the chip depth.
-    if (textGeo && textWidth > 0 && textHeight > 0) {
-        const textBaseMat = new THREE.MeshBasicMaterial({
-            color: 0xffffff,
-            side: THREE.DoubleSide,
-            depthWrite: true,
-            depthTest: true,
-            polygonOffset: true,
-            polygonOffsetFactor: -0.5,
-            polygonOffsetUnits: -0.5
-        });
-        const textCullMat = textBaseMat.clone();
-        textCullMat.colorWrite = false;
-        textCullMat.depthWrite = false;
-        textCullMat.transparent = true;
-        textCullMat.opacity = 0;
-        const textGroup = new THREE.Group();
-        const textMesh = new THREE.Mesh(textGeo, [textCullMat, textBaseMat]);
-        textGroup.add(textMesh);
-        if (textShapes) {
-            const faceGeo = new THREE.ShapeGeometry(textShapes);
-            faceGeo.computeVertexNormals();
-            const faceOffset = 0.02;
-            const frontFace = new THREE.Mesh(faceGeo, textBaseMat);
-            frontFace.position.z = textDepth / 2 + faceOffset;
-            const backFace = new THREE.Mesh(faceGeo, textBaseMat);
-            backFace.position.z = -textDepth / 2 - faceOffset;
-            textGroup.add(frontFace, backFace);
-        }
-        const centerX = (bounds.min.x + bounds.max.x) / 2;
-        const centerY = (bounds.min.y + bounds.max.y) / 2;
-        textGroup.position.set(-centerX, -centerY, 0);
-        group.add(textGroup);
-    } else if (textGeo) {
-        textGeo.dispose();
-    }
-
-    if (typeof style.scale === 'number' && Number.isFinite(style.scale) && style.scale > 0) {
-        group.scale.setScalar(style.scale);
-    }
-    const scaleFactor = (typeof style.scale === 'number' && Number.isFinite(style.scale) && style.scale > 0)
-        ? style.scale
-        : 1;
-    group.userData.size = { width: chipWidth * scaleFactor, height: chipHeight * scaleFactor };
-    return group;
+// Create a 3D chip group with a cached size in userData.
+function createTokenChip(label, tokenId, font, style) {
+    return createTokenChipMesh({
+        labelText: label,
+        secondaryText: Number.isFinite(tokenId) ? String(Math.floor(tokenId)) : '',
+        style,
+        font
+    }).group;
 }
 
 function createStaticConnectorLine({
@@ -1251,7 +1127,7 @@ export function addEmbeddingAndTokenChips({
                 }
 
                 // Keep a static chip below the stack for context once the animated one rises.
-                const staticChip = createTokenChip(label, font, TOKEN_CHIP_STYLE);
+                const staticChip = createTokenChip(label, tokenId, font, TOKEN_CHIP_STYLE);
                 applyTokenChipMaterialTweaks(staticChip);
                 const chipHeight = staticChip.userData.size.height;
                 const targetY = vocabMatrixBottomY + chipHeight / 2 + TOKEN_CHIP_STYLE.inset;
@@ -1293,7 +1169,7 @@ export function addEmbeddingAndTokenChips({
                     return;
                 }
 
-                const chip = createTokenChip(label, font, TOKEN_CHIP_STYLE);
+                const chip = createTokenChip(label, tokenId, font, TOKEN_CHIP_STYLE);
                 applyTokenChipMaterialTweaks(chip);
                 applyChipSelectionMetadata(chip, {
                     chipLabel,
@@ -1371,7 +1247,7 @@ export function addEmbeddingAndTokenChips({
                 const hasAnimatedChip = animateLaneSet.has(idx);
                 const laneDelayRank = animateDelayRankByLane.get(idx) || 0;
                 let connector = null;
-                const staticChip = createTokenChip(label, font, style);
+                const staticChip = createTokenChip(label, null, font, style);
                 applyTokenChipMaterialTweaks(staticChip);
                 const chipHeight = staticChip.userData.size.height;
                 const targetY = posMatrixBottomY + chipHeight / 2 + style.inset;
@@ -1420,7 +1296,7 @@ export function addEmbeddingAndTokenChips({
                     positionInsideByToken[tokenKey] = false;
                 }
 
-                const chip = createTokenChip(label, font, style);
+                const chip = createTokenChip(label, null, font, style);
                 applyTokenChipMaterialTweaks(chip);
                 applyChipSelectionMetadata(chip, {
                     chipLabel,
