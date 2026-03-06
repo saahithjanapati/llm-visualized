@@ -1,3 +1,5 @@
+import { LN2_PHASE } from './gpt2LanePhases.js';
+
 function quantizeLaneCoord(value, scale = 100) {
     if (!Number.isFinite(value)) return 0x7fffffff;
     return Math.round(value * scale) | 0;
@@ -28,6 +30,41 @@ function mixLaneVector(hash, vec) {
     return nextHash;
 }
 
+function mixLaneActiveBranchVectors(hash, lane) {
+    if (!lane) return hash;
+
+    switch (lane.ln2Phase) {
+        case LN2_PHASE.PRE_RISE:
+            return mixLaneVector(hash, lane.postAdditionVec || lane.originalVec);
+        case LN2_PHASE.RIGHT: {
+            let nextHash = mixLaneVector(hash, lane.movingVecLN2);
+            nextHash = mixLaneVector(nextHash, lane.resultVecLN2);
+            return nextHash;
+        }
+        case LN2_PHASE.INSIDE_LN: {
+            let nextHash = mixLaneVector(hash, lane.movingVecLN2);
+            nextHash = mixLaneVector(nextHash, lane.resultVecLN2);
+            return nextHash;
+        }
+        case LN2_PHASE.MLP_READY: {
+            let nextHash = mixLaneVector(hash, lane.resultVecLN2);
+            nextHash = mixLaneVector(nextHash, lane.finalVecAfterMlp);
+            return nextHash;
+        }
+        case LN2_PHASE.DONE:
+            return mixLaneVector(hash, lane.finalVecAfterMlp);
+        case LN2_PHASE.NOT_STARTED:
+        default: {
+            let nextHash = mixLaneVector(hash, lane.originalVec);
+            nextHash = mixLaneVector(nextHash, lane.postAdditionVec);
+            nextHash = mixLaneVector(nextHash, lane.movingVecLN2);
+            nextHash = mixLaneVector(nextHash, lane.resultVecLN2);
+            nextHash = mixLaneVector(nextHash, lane.finalVecAfterMlp);
+            return nextHash;
+        }
+    }
+}
+
 export function getLaneProgressSignature(lane) {
     if (!lane) return 0;
     let hash = 2166136261 >>> 0;
@@ -44,10 +81,7 @@ export function getLaneProgressSignature(lane) {
     hash = mixLaneHash(hash, quantizeLaneCoord(lane.ln1ShiftProgress));
     hash = mixLaneHash(hash, quantizeLaneCoord(lane.mhsaResidualAddProgress));
     hash = mixLaneHash(hash, quantizeLaneCoord(lane.ln2ShiftProgress));
-    hash = mixLaneVector(hash, lane.originalVec);
-    hash = mixLaneVector(hash, lane.postAdditionVec);
-    hash = mixLaneVector(hash, lane.movingVecLN2);
-    hash = mixLaneVector(hash, lane.resultVecLN2);
+    hash = mixLaneActiveBranchVectors(hash, lane);
     return hash;
 }
 

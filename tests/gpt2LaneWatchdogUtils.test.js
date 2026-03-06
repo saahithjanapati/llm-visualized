@@ -4,6 +4,7 @@ import {
     getLaneProgressSignature,
     toDebugArray
 } from '../src/engine/layers/gpt2LaneWatchdogUtils.js';
+import { LN2_PHASE } from '../src/engine/layers/gpt2LanePhases.js';
 
 function makeVec(x, y, z) {
     return {
@@ -46,6 +47,31 @@ describe('gpt2LaneWatchdogUtils', () => {
         const lane = makeLane();
         const before = getLaneProgressSignature(lane);
         lane.originalVec.group.position.x += 1;
+        const after = getLaneProgressSignature(lane);
+        expect(after).not.toBe(before);
+    });
+
+    it('ignores residual-stream motion once the LN2 branch is active', () => {
+        const lane = makeLane();
+        lane.ln2Phase = LN2_PHASE.RIGHT;
+
+        const before = getLaneProgressSignature(lane);
+        lane.originalVec.group.position.y += 25;
+        lane.postAdditionVec.group.position.y += 25;
+        const afterResidualRise = getLaneProgressSignature(lane);
+        expect(afterResidualRise).toBe(before);
+
+        lane.movingVecLN2.group.position.x += 1;
+        const afterBranchMove = getLaneProgressSignature(lane);
+        expect(afterBranchMove).not.toBe(before);
+    });
+
+    it('still tracks residual motion during LN2 pre-rise staging', () => {
+        const lane = makeLane();
+        lane.ln2Phase = LN2_PHASE.PRE_RISE;
+
+        const before = getLaneProgressSignature(lane);
+        lane.postAdditionVec.group.position.y += 1;
         const after = getLaneProgressSignature(lane);
         expect(after).not.toBe(before);
     });

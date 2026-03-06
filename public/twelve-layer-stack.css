@@ -2903,6 +2903,7 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     #equationsPanel .eq-title { font-size: 10px; margin-bottom: 2px; }
     #equationsPanel .eq-body { font-size: 12px; line-height: 1.28; }
     #detailPanel {
+        --detail-mobile-preview-safe-bleed: env(safe-area-inset-top);
         display: flex;
         position: fixed;
         top: 0;
@@ -2946,10 +2947,33 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
         border-bottom: 1px solid rgba(255,255,255,0.12);
     }
     .detail-header {
+        position: relative;
+        z-index: 1;
         align-items: center;
         padding-top: max(10px, calc(env(safe-area-inset-top) + 4px));
         padding-right: 12px;
         padding-left: 12px;
+        background:
+            linear-gradient(
+                180deg,
+                rgba(12,12,12,0.9) 0%,
+                rgba(12,12,12,0.74) 68%,
+                rgba(12,12,12,0.08) 100%
+            );
+    }
+    .detail-preview {
+        padding: 0;
+        margin-top: calc(-1 * var(--detail-mobile-preview-safe-bleed));
+        aspect-ratio: auto;
+        min-height: clamp(220px, calc(26dvh + var(--detail-mobile-preview-safe-bleed)), 320px);
+        height: clamp(220px, calc(26dvh + var(--detail-mobile-preview-safe-bleed)), 320px);
+        max-height: none;
+    }
+    .detail-preview canvas {
+        border-top: none;
+        border-left: none;
+        border-right: none;
+        border-radius: 0 0 18px 18px;
     }
     .detail-history-btn {
         width: 34px;
