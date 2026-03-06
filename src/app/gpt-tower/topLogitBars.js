@@ -311,6 +311,16 @@ function computeLogitBarHeight(prob, maxProb) {
     return minHeight + t * (maxHeight - minHeight);
 }
 
+function formatHoverProbabilityPercentage(prob) {
+    if (!Number.isFinite(prob)) return '';
+    const percentage = prob * 100;
+    const abs = Math.abs(percentage);
+    if (abs === 0) return '0%';
+    if (abs < 0.0001) return `${percentage.toExponential(2)}%`;
+    if (abs < 0.01) return `${percentage.toFixed(4).replace(/\.?0+$/, '')}%`;
+    return `${percentage.toFixed(2).replace(/\.?0+$/, '')}%`;
+}
+
 export function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vocabCenter, scene, engine }) {
     if (!activationSource || !Array.isArray(laneZs) || !laneZs.length) return;
     if (typeof activationSource.getLogitsForToken !== 'function') return;
@@ -420,14 +430,14 @@ export function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vo
                     ? formatTokenLabel(entry.token.replace(/\n/g, '\\n').replace(/\t/g, '\\t'))
                     : '';
                 const tokenId = Number.isFinite(entry.token_id) ? entry.token_id : null;
-                const labelParts = [];
-                if (tokenText) labelParts.push(`token \"${tokenText}\"`);
-                if (tokenId !== null) labelParts.push(`id ${tokenId}`);
+                const labelLines = ['Logit'];
+                if (tokenText) labelLines.push(`Token "${tokenText}"`);
+                if (tokenId !== null) labelLines.push(`ID ${tokenId}`);
                 if (tokenId !== null && isIncompleteUtf8TokenId(tokenId)) {
-                    labelParts.push('incomplete UTF-8 byte fragment');
+                    labelLines.push('Incomplete UTF-8 byte fragment');
                 }
-                if (Number.isFinite(prob)) labelParts.push(`p ${prob.toFixed(3)}`);
-                const label = labelParts.length ? `Logit ${labelParts.join(' | ')}` : 'Logit';
+                if (Number.isFinite(prob)) labelLines.push(formatHoverProbabilityPercentage(prob));
+                const label = labelLines.join('\n');
                 const instanceIndex = instances.length;
                 instanceLabels[instanceIndex] = label;
                 instanceEntries[instanceIndex] = entry;

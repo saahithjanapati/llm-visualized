@@ -2104,7 +2104,7 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     --legend-tick-label-offset: 5px;
     --legend-side-inset: 6px;
     --legend-edge-tick-inset: 7px;
-    --legend-hover-tooltip-offset: 10px;
+    --legend-hover-tooltip-offset: 12px;
     position: relative;
     width: calc(100% - (var(--legend-side-inset, 6px) * 2));
     max-width: 100%;
@@ -2390,7 +2390,7 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     --legend-tick-label-offset: 5px;
     --legend-side-inset: 10px;
     --legend-edge-tick-inset: 9px;
-    --legend-hover-tooltip-offset: 10px;
+    --legend-hover-tooltip-offset: 12px;
     grid-area: bar;
     position: relative;
     width: calc(100% - (var(--legend-side-inset, 10px) * 2));
@@ -2493,18 +2493,21 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     top: calc(
         100%
         + var(--legend-tick-gap, 0px)
-        + (var(--legend-tick-height, 6px) * 0.5)
+        + 2px
         + var(--legend-hover-tooltip-offset, 0px)
     );
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 7px;
+    min-width: 92px;
     padding: 6px 9px;
+    box-sizing: border-box;
     border-radius: 11px;
     border: 1px solid rgba(255,255,255,0.14);
     background: rgba(10,12,16,0.96);
     box-shadow: 0 12px 24px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.06);
-    transform: translate(-50%, -50%) translateY(-2px);
+    transform: translate(-50%, 0) translateY(4px);
     opacity: 0;
     visibility: hidden;
     pointer-events: none;
@@ -2516,7 +2519,7 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
 .legend-hover-tooltip.is-visible {
     opacity: 1;
     visibility: visible;
-    transform: translate(-50%, -50%);
+    transform: translate(-50%, 0);
 }
 
 .legend-hover-swatch {
@@ -2529,10 +2532,14 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
 }
 
 .legend-hover-value {
+    display: inline-block;
+    width: 7ch;
     color: #f4f8ff;
     font-size: 10px;
     line-height: 1;
     font-family: var(--viz-sci-fi-font);
+    text-align: center;
+    font-variant-numeric: tabular-nums;
     letter-spacing: 0.04em;
 }
 

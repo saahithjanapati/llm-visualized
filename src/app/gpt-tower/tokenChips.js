@@ -76,6 +76,7 @@ const TOKEN_CHIP_ONLY_MATERIAL_TWEAKS = Object.freeze({
     emissiveIntensity: 0
 });
 const CHIP_INSIDE_RELEASE_BUFFER_MS = 80;
+const TOP_LOGIT_REVEAL_DELAY_MS = 140;
 const BOTTOM_EMBED_FINAL_EMISSIVE = TOP_EMBED_BASE_EMISSIVE;
 const BOTTOM_EMBED_START_EMISSIVE = 0.0;
 const BOTTOM_EMBED_PEAK_EMISSIVE = 0.21;
@@ -518,6 +519,7 @@ export function addEmbeddingAndTokenChips({
     let bottomEmbeddingMatrixTimeoutId = null;
     let chipEntryTimeoutId = null;
     let positionChipStartIntervalId = null;
+    let topLogitRevealTimeoutId = null;
 
     const disposeObject = (obj) => {
         if (!obj) return;
@@ -1523,10 +1525,28 @@ export function addEmbeddingAndTokenChips({
                 engine: null
             });
             let topLogitRevealGateId = null;
+            let topLogitRevealStarted = false;
+            const clearTopLogitRevealTimeout = () => {
+                if (topLogitRevealTimeoutId) {
+                    clearTimeout(topLogitRevealTimeoutId);
+                    topLogitRevealTimeoutId = null;
+                }
+            };
             const markTopLogitRevealComplete = () => {
                 if (typeof pipeline?.setTopLogitRevealComplete === 'function') {
                     pipeline.setTopLogitRevealComplete(topLogitRevealGateId);
                 }
+            };
+            const startTopLogitReveal = ({ immediate = false } = {}) => {
+                if (topLogitRevealStarted || !topLogitBars) return false;
+                topLogitRevealStarted = true;
+                clearTopLogitRevealTimeout();
+                if (topLogitProgressHandler && pipeline && typeof pipeline.removeEventListener === 'function') {
+                    pipeline.removeEventListener('progress', topLogitProgressHandler);
+                    topLogitProgressHandler = null;
+                }
+                revealTopLogitBars(topLogitBars, { immediate, onComplete: markTopLogitRevealComplete });
+                return true;
             };
             if (topLogitBars && topLogitBars.userData) {
                 if (typeof pipeline?.setTopLogitRevealPending === 'function') {
@@ -1571,12 +1591,28 @@ export function addEmbeddingAndTokenChips({
                     const immediate = typeof pipeline.isSkipToEndActive === 'function'
                         ? pipeline.isSkipToEndActive()
                         : false;
-                    revealTopLogitBars(topLogitBars, { immediate, onComplete: markTopLogitRevealComplete });
-                    return true;
+                    if (immediate) {
+                        return startTopLogitReveal({ immediate: true });
+                    }
+                    if (topLogitRevealStarted || topLogitRevealTimeoutId) {
+                        return topLogitRevealStarted;
+                    }
+                    topLogitRevealTimeoutId = setTimeout(() => {
+                        topLogitRevealTimeoutId = null;
+                        if (disposed) return;
+                        const revealImmediate = typeof pipeline?.isSkipToEndActive === 'function'
+                            ? pipeline.isSkipToEndActive()
+                            : false;
+                        startTopLogitReveal({ immediate: revealImmediate });
+                    }, TOP_LOGIT_REVEAL_DELAY_MS);
+                    return false;
                 };
                 const onProgress = () => {
-                    if (maybeReveal()) {
+                    if (topLogitRevealStarted || maybeReveal()) {
                         pipeline.removeEventListener('progress', onProgress);
+                        if (topLogitProgressHandler === onProgress) {
+                            topLogitProgressHandler = null;
+                        }
                     }
                 };
                 topLogitProgressHandler = onProgress;
@@ -1606,6 +1642,10 @@ export function addEmbeddingAndTokenChips({
             clearTimeout(chipEntryTimeoutId);
             chipEntryTimeoutId = null;
         }
+        if (topLogitRevealTimeoutId) {
+            clearTimeout(topLogitRevealTimeoutId);
+            topLogitRevealTimeoutId = null;
+        }
         if (positionChipStartIntervalId) {
             clearInterval(positionChipStartIntervalId);
             positionChipStartIntervalId = null;
@@ -1618,6 +1658,9 @@ export function addEmbeddingAndTokenChips({
         if (topLogitProgressHandler && pipeline && typeof pipeline.removeEventListener === 'function') {
             pipeline.removeEventListener('progress', topLogitProgressHandler);
             topLogitProgressHandler = null;
+        }
+        if (typeof pipeline?.setTopLogitRevealPending === 'function' && typeof pipeline?.setTopLogitRevealComplete === 'function') {
+            pipeline.setTopLogitRevealPending(false);
         }
         if (engine && typeof engine.removeRaycastRoot === 'function') {
             engine.removeRaycastRoot(rootGroup);

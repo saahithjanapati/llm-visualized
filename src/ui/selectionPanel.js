@@ -1084,9 +1084,12 @@ function resolveLogitSelectionProbability(label, entry) {
 
 function formatLogitProbability(value) {
     if (!Number.isFinite(value)) return '';
-    const abs = Math.abs(value);
-    if (abs > 0 && abs < 0.001) return value.toExponential(2);
-    return value.toFixed(4).replace(/\.?0+$/, '');
+    const percentage = value * 100;
+    const abs = Math.abs(percentage);
+    if (abs === 0) return '0%';
+    if (abs < 0.0001) return `${percentage.toExponential(2)}%`;
+    if (abs < 0.01) return `${percentage.toFixed(4).replace(/\.?0+$/, '')}%`;
+    return `${percentage.toFixed(2).replace(/\.?0+$/, '')}%`;
 }
 
 function resolveLogitSelectionHeader(label, selectionInfo) {
@@ -1114,7 +1117,7 @@ function resolveLogitSelectionHeader(label, selectionInfo) {
     if (Number.isFinite(probability)) subtitleParts.push(`Probability ${formatLogitProbability(probability)}`);
 
     return {
-        title: tokenText ? `Logit Token: ${tokenText}` : 'Logit Token',
+        title: tokenText || 'Logit Token',
         subtitle: subtitleParts.join(' • '),
         tokenText,
         tokenId
@@ -5817,7 +5820,7 @@ class SelectionPanel {
             const probability = resolveLogitSelectionProbability(label, entry);
             const tokenIdText = Number.isFinite(tokenId) ? String(Math.floor(tokenId)) : ATTENTION_VALUE_PLACEHOLDER;
             const probabilityText = Number.isFinite(probability)
-                ? `${(probability * 100).toFixed(2).replace(/\.?0+$/, '')}%`
+                ? formatLogitProbability(probability)
                 : ATTENTION_VALUE_PLACEHOLDER;
 
             if (tokenInfoHeadPrimary) tokenInfoHeadPrimary.textContent = 'Token text';
@@ -6033,12 +6036,7 @@ class SelectionPanel {
             || activationStage.startsWith('embedding.position');
         this.panel.classList.toggle('is-preview-hidden', hidePreviewForSelection);
         if (logitHeader) {
-            this._setTokenChipTitleContext({
-                tokenText: logitHeader.tokenText || ATTENTION_VALUE_PLACEHOLDER,
-                tokenId: Number.isFinite(logitHeader.tokenId) ? Math.floor(logitHeader.tokenId) : null,
-                prefixText: 'Logit token:',
-                allowNavigation: false
-            });
+            this._setTitleText(logitHeader.title);
         } else if (isTokenChipSelection) {
             const tokenText = (typeof vectorSubtitleMetadata?.tokenDisplayText === 'string')
                 ? vectorSubtitleMetadata.tokenDisplayText.trim()
