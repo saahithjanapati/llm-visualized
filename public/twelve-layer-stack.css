@@ -667,9 +667,7 @@ body.touch-ui * {
     cursor: pointer;
     user-select: none;
     touch-action: manipulation;
-    transform-origin: center top;
     transition:
-        transform 0.12s ease,
         filter 0.12s ease,
         background 0.12s ease,
         border-color 0.12s ease,
@@ -686,11 +684,9 @@ body.touch-ui * {
     box-shadow:
         0 0 0 1px var(--token-color-fill-hover),
         0 0 14px var(--token-color-fill-hover);
-    transform: scale(1.04);
     filter: saturate(1.2) brightness(1.08);
 }
 #promptTokenStrip .prompt-token-strip__token:active {
-    transform: translateY(0);
     filter: brightness(0.95);
 }
 #promptTokenStrip .prompt-token-strip__token:focus-visible {
@@ -1543,7 +1539,6 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     user-select: none;
     touch-action: manipulation;
     transition:
-        transform 0.12s ease,
         filter 0.12s ease,
         background 0.12s ease,
         border-color 0.12s ease,
@@ -1557,11 +1552,9 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     box-shadow:
         0 0 0 1px var(--token-color-fill-hover, rgba(255,255,255,0.28)),
         0 0 12px var(--token-color-fill-hover, rgba(255,255,255,0.28));
-    transform: translateY(-1px) scale(1.04);
     filter: saturate(1.18) brightness(1.08);
 }
 .detail-token-nav-chip[data-token-nav="true"]:active {
-    transform: translateY(0);
     filter: brightness(0.95);
 }
 .detail-token-nav-chip[data-token-nav="true"]:focus-visible {

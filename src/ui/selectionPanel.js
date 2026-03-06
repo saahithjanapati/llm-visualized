@@ -2963,6 +2963,12 @@ class SelectionPanel {
         }
     }
 
+    _syncHoverLabelSuppressionFromHoverState() {
+        if (!this.panel || typeof this.panel.matches !== 'function') return;
+        const shouldSuppress = this.isOpen && this.panel.matches(':hover');
+        this._setHoverLabelSuppression(shouldSuppress);
+    }
+
     _isSmallScreen() {
         if (typeof window === 'undefined') return false;
         if (typeof window.matchMedia === 'function') {
@@ -4938,7 +4944,14 @@ class SelectionPanel {
                 this._pendingRevealSize = null;
             }
             this._scheduleResize();
+            if (typeof requestAnimationFrame === 'function') {
+                requestAnimationFrame(() => {
+                    if (!this.isOpen) return;
+                    this._syncHoverLabelSuppressionFromHoverState();
+                });
+            }
         }
+        this._syncHoverLabelSuppressionFromHoverState();
         this._startLoop();
         this._scheduleSelectionEquationFit();
         this._scheduleDimensionLabelFit();
