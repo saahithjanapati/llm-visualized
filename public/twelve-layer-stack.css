@@ -1454,19 +1454,19 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     grid-area: history;
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     flex: 0 0 auto;
 }
 .detail-history-btn {
     appearance: none;
     -webkit-appearance: none;
-    width: 34px;
-    height: 34px;
-    border-radius: 11px;
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
     border: 1px solid rgba(255,255,255,0.08);
     background: rgba(2,2,2,0.72);
     color: #c9d1dc;
-    font-size: 19px;
+    font-size: 21px;
     line-height: 1;
     display: inline-flex;
     align-items: center;
@@ -1743,8 +1743,8 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     grid-area: close;
     justify-self: end;
     position: static;
-    width: 34px;
-    height: 34px;
+    width: 40px;
+    height: 40px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1753,11 +1753,12 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     border: 1px solid rgba(255,255,255,0.14);
     background: rgba(2,2,2,0.86);
     color: #d3dae4;
-    font-size: 21px;
+    font-size: 23px;
     line-height: 1;
     cursor: pointer;
+    touch-action: manipulation;
     padding: 0;
-    border-radius: 11px;
+    border-radius: 12px;
     box-shadow: inset 0 0 0 1px rgba(255,255,255,0.03);
     transition: transform 0.16s ease, background 0.16s ease, color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
 }
@@ -2103,6 +2104,7 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     --legend-tick-label-offset: 5px;
     --legend-side-inset: 6px;
     --legend-edge-tick-inset: 7px;
+    --legend-hover-tooltip-offset: 10px;
     position: relative;
     width: calc(100% - (var(--legend-side-inset, 6px) * 2));
     max-width: 100%;
@@ -2388,6 +2390,7 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     --legend-tick-label-offset: 5px;
     --legend-side-inset: 10px;
     --legend-edge-tick-inset: 9px;
+    --legend-hover-tooltip-offset: 10px;
     grid-area: bar;
     position: relative;
     width: calc(100% - (var(--legend-side-inset, 10px) * 2));
@@ -2487,7 +2490,12 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
 
 .legend-hover-tooltip {
     position: absolute;
-    top: calc(100% + var(--legend-tick-gap, 0px) + (var(--legend-tick-height, 6px) * 0.5));
+    top: calc(
+        100%
+        + var(--legend-tick-gap, 0px)
+        + (var(--legend-tick-height, 6px) * 0.5)
+        + var(--legend-hover-tooltip-offset, 0px)
+    );
     display: flex;
     align-items: center;
     gap: 7px;
@@ -2817,9 +2825,15 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     font-weight: 400;
 }
 .detail-attention-score-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    align-self: stretch;
+    box-sizing: border-box;
+    min-width: 100%;
     width: 100%;
     min-height: 100%;
-    padding: 0 6px;
+    padding: 2px 8px;
 }
 .detail-attention-score-pill {
     display: inline-flex;
@@ -2841,10 +2855,14 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     overflow: hidden;
     text-overflow: ellipsis;
 }
+.detail-attention-score-link > .detail-attention-score-pill {
+    pointer-events: none;
+}
 .detail-attention-score-link[data-attention-score-link="true"] {
     cursor: pointer;
     user-select: none;
     touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
     transition:
         filter 0.12s ease,
         background 0.12s ease,
@@ -3091,6 +3109,12 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     #hudStack { --hud-equations-panel-height: clamp(68px, 16vh, 84px); }
 }
 @media (max-aspect-ratio: 1/1), (max-width: 880px) {
+    #topControls {
+        gap: 10px;
+    }
+    #skipMenu {
+        margin-inline: 1px;
+    }
     body.detail-mobile-focus #topControls {
         opacity: 0;
         pointer-events: none;
@@ -3187,9 +3211,10 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
         border-radius: 0 0 18px 18px;
     }
     .detail-history-btn {
-        width: 34px;
-        height: 34px;
-        font-size: 19px;
+        width: 42px;
+        height: 42px;
+        border-radius: 13px;
+        font-size: 21px;
     }
     .detail-subtitle--attention-context {
         --detail-attention-context-score-shift-x: 0px;
@@ -3211,12 +3236,50 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
         transform: none;
         align-self: center;
         margin: 0;
-        width: 34px;
-        height: 34px;
-        border-radius: 11px;
+        width: 42px;
+        height: 42px;
+        border-radius: 13px;
     }
 }
 
 @media (max-width: 880px) and (orientation: portrait) {
     #hudStack { --hud-equations-panel-height: clamp(72px, 11vh, 84px); }
+}
+
+@media (max-width: 480px) and (orientation: portrait) {
+    .detail-subtitle--attention-context {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        column-gap: 8px;
+        row-gap: 6px;
+    }
+    .detail-attention-context-main {
+        gap: 5px;
+    }
+    .detail-attention-context-part {
+        gap: 4px;
+    }
+    .detail-attention-context-role,
+    .detail-attention-context-position {
+        font-size: 9px;
+    }
+    .detail-attention-context-chip {
+        max-width: clamp(56px, 28vw, 94px);
+        padding: 1px 6px;
+        font-size: 9px;
+    }
+    .detail-attention-context-score {
+        width: auto;
+        max-width: 100%;
+        min-width: 0;
+        align-self: center;
+        justify-content: flex-end;
+    }
+    .detail-attention-context-score-value {
+        min-width: clamp(72px, 18vw, 84px);
+        min-height: 26px;
+        padding: 4px 10px;
+        font-size: 10px;
+    }
 }

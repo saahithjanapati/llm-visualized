@@ -5,7 +5,7 @@ const DEFAULT_SECONDARY_TEXT_SCALE = 0.16;
 const DEFAULT_TEXT_LINE_GAP_SCALE = 0.06;
 const DEFAULT_PRIMARY_TEXT_Y_OFFSET_RATIO = 0.05;
 const DEFAULT_SECONDARY_TEXT_BOTTOM_INSET_RATIO = 0.07;
-const DEFAULT_SECONDARY_TEXT_COLOR = 0x38342f;
+const DEFAULT_SECONDARY_TEXT_COLOR = 0xd7d1c8;
 const CAP_OFFSET = 0.05;
 const FACE_OFFSET = 0.02;
 
@@ -241,7 +241,15 @@ export function createTokenChipMesh({
             polygonOffsetFactor: -0.5,
             polygonOffsetUnits: -0.5
         });
+        primaryTextMat.userData = {
+            ...(primaryTextMat.userData || {}),
+            tokenChipTextRole: 'primary'
+        };
         textCullMat = primaryTextMat.clone();
+        textCullMat.userData = {
+            ...(textCullMat.userData || {}),
+            tokenChipTextRole: 'cull'
+        };
         textCullMat.colorWrite = false;
         textCullMat.depthWrite = false;
         textCullMat.transparent = true;
@@ -251,6 +259,11 @@ export function createTokenChipMesh({
             : null;
         if (secondaryTextMat) {
             secondaryTextMat.color.copy(secondaryTextColor);
+            secondaryTextMat.userData = {
+                ...(secondaryTextMat.userData || {}),
+                tokenChipTextRole: 'secondary',
+                tokenChipTextColor: secondaryTextColor.getHex()
+            };
         }
 
         const textGroup = new THREE.Group();

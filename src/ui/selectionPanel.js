@@ -550,6 +550,16 @@ function clamp01(value) {
     return Math.min(1, Math.max(0, value));
 }
 
+function isTouchLikePointerEvent(event) {
+    return event?.pointerType === 'touch'
+        || event?.pointerType === 'pen'
+        || (typeof event?.type === 'string' && event.type.startsWith('touch'));
+}
+
+function resolvePointerId(event) {
+    return Number.isFinite(event?.pointerId) ? event.pointerId : null;
+}
+
 function easeInOutCubic(t) {
     const clamped = clamp01(t);
     return clamped < 0.5
@@ -1899,6 +1909,7 @@ function buildLayerNormPreview(label, selectionInfo) {
 }
 
 function isLikelyVectorSelection(label, selectionInfo) {
+    if (isAttentionScoreSelection(label, selectionInfo)) return false;
     const lower = (label || '').toLowerCase();
     if (lower.includes('vector') || lower.includes('residual')) return true;
     const cat = selectionInfo?.info?.category;
@@ -2276,6 +2287,7 @@ class SelectionPanel {
         this._onPanelPointerLeave = this._onPanelPointerLeave.bind(this);
         this._onSubtitleSecondaryClick = this._onSubtitleSecondaryClick.bind(this);
         this._onAttentionScoreValueClick = this._onAttentionScoreValueClick.bind(this);
+        this._onAttentionScoreValuePointerUp = this._onAttentionScoreValuePointerUp.bind(this);
         this._onAttentionScoreValueKeydown = this._onAttentionScoreValueKeydown.bind(this);
         this._onPanelTokenChipClick = this._onPanelTokenChipClick.bind(this);
         this._onPanelTokenChipKeydown = this._onPanelTokenChipKeydown.bind(this);
@@ -2284,8 +2296,11 @@ class SelectionPanel {
         this._onPanelTokenChipFocusIn = this._onPanelTokenChipFocusIn.bind(this);
         this._onPanelTokenChipFocusOut = this._onPanelTokenChipFocusOut.bind(this);
         this._onTokenChipHoverSync = this._onTokenChipHoverSync.bind(this);
+        this._onLegendPointerDown = this._onLegendPointerDown.bind(this);
         this._onLegendPointerMove = this._onLegendPointerMove.bind(this);
         this._onLegendPointerLeave = this._onLegendPointerLeave.bind(this);
+        this._onLegendPointerUp = this._onLegendPointerUp.bind(this);
+        this._onLegendPointerCancel = this._onLegendPointerCancel.bind(this);
         this._scheduleResize = this._scheduleResize.bind(this);
         this._scheduleSelectionEquationFit = this._scheduleSelectionEquationFit.bind(this);
         this._applySelectionEquationFit = this._applySelectionEquationFit.bind(this);
@@ -2336,6 +2351,10 @@ class SelectionPanel {
             kind: null,
             ratio: null
         };
+        this._legendTouchState = {
+            kind: null,
+            pointerId: null
+        };
         this._legendEdgeClampRatios = {
             vector: 0,
             attention: 0
@@ -2368,12 +2387,15 @@ class SelectionPanel {
             this.attentionMatrix.addEventListener('pointerleave', this._clearAttentionHover);
         }
         [this.vectorLegendBar, this.attentionLegend].filter(Boolean).forEach((bar) => {
+            bar.addEventListener('pointerdown', this._onLegendPointerDown);
             bar.addEventListener('pointerenter', this._onLegendPointerMove);
             bar.addEventListener('pointermove', this._onLegendPointerMove);
             bar.addEventListener('pointerleave', this._onLegendPointerLeave);
-            bar.addEventListener('pointercancel', this._onLegendPointerLeave);
+            bar.addEventListener('pointerup', this._onLegendPointerUp);
+            bar.addEventListener('pointercancel', this._onLegendPointerCancel);
         });
         this.attentionValueScore?.addEventListener('click', this._onAttentionScoreValueClick);
+        this.attentionValueScore?.addEventListener('pointerup', this._onAttentionScoreValuePointerUp);
         this.attentionValueScore?.addEventListener('keydown', this._onAttentionScoreValueKeydown);
         this._setAttentionValue(this._attentionValueDefault);
         this.panel.addEventListener('pointerdown', this._onPanelPointerDown, { capture: true });
@@ -2620,6 +2642,9 @@ class SelectionPanel {
             ui.marker.classList.remove('is-visible');
             ui.tooltip.classList.remove('is-visible');
         }
+        if (!kind || this._legendTouchState.kind === kind) {
+            this._clearLegendTouchState(kind);
+        }
         if (!kind || this._legendHoverState.kind === kind) {
             this._legendHoverState.kind = null;
             this._legendHoverState.ratio = null;
@@ -2675,29 +2700,96 @@ class SelectionPanel {
         this._renderLegendHover(targetKind, this._legendHoverState.ratio);
     }
 
-    _onLegendPointerMove(event) {
-        if (event?.pointerType === 'touch') {
-            this._hideLegendHover();
-            return;
-        }
+    _resolveLegendPointerRatio(bar, event) {
+        if (!(bar instanceof Element) || !Number.isFinite(event?.clientX)) return null;
+        const rect = bar.getBoundingClientRect();
+        if (!(rect.width > 0)) return null;
+        return clamp01((event.clientX - rect.left) / rect.width);
+    }
+
+    _clearLegendTouchState(kind = null) {
+        if (kind && this._legendTouchState.kind !== kind) return;
+        this._legendTouchState.kind = null;
+        this._legendTouchState.pointerId = null;
+    }
+
+    _hasActiveLegendTouchPointer(event, kind) {
+        if (!isTouchLikePointerEvent(event)) return false;
+        if (!this._legendTouchState.kind || this._legendTouchState.kind !== kind) return false;
+        const pointerId = resolvePointerId(event);
+        return this._legendTouchState.pointerId === null
+            || pointerId === null
+            || this._legendTouchState.pointerId === pointerId;
+    }
+
+    _onLegendPointerDown(event) {
         const bar = event?.currentTarget instanceof Element ? event.currentTarget : null;
         const kind = this._resolveLegendKindFromBar(bar);
-        if (!bar || !kind || !Number.isFinite(event?.clientX)) {
+        const ratio = this._resolveLegendPointerRatio(bar, event);
+        if (!kind || !Number.isFinite(ratio)) {
             this._hideLegendHover(kind);
             return;
         }
-        const rect = bar.getBoundingClientRect();
-        if (!(rect.width > 0)) {
+
+        if (isTouchLikePointerEvent(event)) {
+            this._legendTouchState.kind = kind;
+            this._legendTouchState.pointerId = resolvePointerId(event);
+            if (Number.isFinite(event?.pointerId) && typeof bar?.setPointerCapture === 'function') {
+                try {
+                    bar.setPointerCapture(event.pointerId);
+                } catch (_) { /* no-op */ }
+            }
+        }
+
+        this._renderLegendHover(kind, ratio);
+    }
+
+    _onLegendPointerMove(event) {
+        const bar = event?.currentTarget instanceof Element ? event.currentTarget : null;
+        const kind = this._resolveLegendKindFromBar(bar);
+        const ratio = this._resolveLegendPointerRatio(bar, event);
+        if (!bar || !kind || !Number.isFinite(ratio)) {
             this._hideLegendHover(kind);
             return;
         }
-        const ratio = clamp01((event.clientX - rect.left) / rect.width);
+
+        if (isTouchLikePointerEvent(event) && !this._hasActiveLegendTouchPointer(event, kind)) {
+            return;
+        }
         this._renderLegendHover(kind, ratio);
     }
 
     _onLegendPointerLeave(event) {
+        if (isTouchLikePointerEvent(event)) {
+            return;
+        }
         const bar = event?.currentTarget instanceof Element ? event.currentTarget : null;
         const kind = this._resolveLegendKindFromBar(bar);
+        this._hideLegendHover(kind);
+    }
+
+    _onLegendPointerUp(event) {
+        const bar = event?.currentTarget instanceof Element ? event.currentTarget : null;
+        const kind = this._resolveLegendKindFromBar(bar);
+        if (!this._hasActiveLegendTouchPointer(event, kind)) return;
+        if (Number.isFinite(event?.pointerId) && typeof bar?.releasePointerCapture === 'function') {
+            try {
+                bar.releasePointerCapture(event.pointerId);
+            } catch (_) { /* no-op */ }
+        }
+        this._clearLegendTouchState(kind);
+    }
+
+    _onLegendPointerCancel(event) {
+        const bar = event?.currentTarget instanceof Element ? event.currentTarget : null;
+        const kind = this._resolveLegendKindFromBar(bar);
+        if (!this._hasActiveLegendTouchPointer(event, kind)) return;
+        if (Number.isFinite(event?.pointerId) && typeof bar?.releasePointerCapture === 'function') {
+            try {
+                bar.releasePointerCapture(event.pointerId);
+            } catch (_) { /* no-op */ }
+        }
+        this._clearLegendTouchState(kind);
         this._hideLegendHover(kind);
     }
 
@@ -3130,7 +3222,7 @@ class SelectionPanel {
     }
 
     _blockPreviewGesture(event) {
-        const isTouch = event.pointerType === 'touch' || event.type.startsWith('touch');
+        const isTouch = isTouchLikePointerEvent(event);
         if (!isTouch) return;
         if (event.cancelable) event.preventDefault();
         event.stopPropagation();
@@ -3216,15 +3308,19 @@ class SelectionPanel {
     }
 
     _onPanelPointerDown(event) {
-        const isTouch = event?.pointerType === 'touch'
-            || event?.pointerType === 'pen'
-            || (typeof event?.type === 'string' && event.type.startsWith('touch'));
+        const isTouch = isTouchLikePointerEvent(event);
         if (!isTouch) return;
         if (this.engine && typeof this.engine.resetInteractionState === 'function') {
             this.engine.resetInteractionState();
         }
         if (typeof document !== 'undefined' && document.body) {
             document.body.classList.add('touch-ui');
+        }
+        const legendBar = event?.target instanceof Element
+            ? event.target.closest('.vector-legend-bar, .attention-legend-bar')
+            : null;
+        if (!legendBar || !this.panel?.contains(legendBar)) {
+            this._hideLegendHover();
         }
         if (typeof window === 'undefined' || typeof window.getSelection !== 'function') return;
         const selection = window.getSelection();
@@ -4166,6 +4262,12 @@ class SelectionPanel {
     }
 
     _onAttentionScoreValueClick(event) {
+        this._openLinkedAttentionScoreSelection(event);
+    }
+
+    _onAttentionScoreValuePointerUp(event) {
+        const pointerType = String(event?.pointerType || '').toLowerCase();
+        if (pointerType !== 'touch' && pointerType !== 'pen') return;
         this._openLinkedAttentionScoreSelection(event);
     }
 
@@ -5243,6 +5345,10 @@ class SelectionPanel {
                 ? hit.closest(selector)
                 : null;
         };
+        const legendBarHit = resolveClosest('.vector-legend-bar, .attention-legend-bar');
+        if (isTouchLikePointerEvent(event) && !legendBarHit) {
+            this._hideLegendHover();
+        }
         const tokenNavChip = resolveClosest('.detail-token-nav-chip[data-token-nav="true"]');
         const attentionScoreLink = resolveClosest('.detail-attention-score-link[data-attention-score-link="true"]');
         const hitPanelTokenNavChip = !!(
@@ -5954,11 +6060,21 @@ class SelectionPanel {
                 this.subtitle.classList.remove('detail-subtitle--qkv-token-context');
                 this.subtitle.textContent = logitHeader.subtitle;
             } else if (isTokenChipSelection) {
+                const subtitleParts = [];
+                const tokenId = Number.isFinite(vectorSubtitleMetadata?.tokenId)
+                    ? Math.floor(vectorSubtitleMetadata.tokenId)
+                    : null;
                 const positionText = (typeof vectorSubtitleMetadata?.positionText === 'string')
                     ? vectorSubtitleMetadata.positionText.trim()
                     : '';
                 this.subtitle.classList.remove('detail-subtitle--qkv-token-context');
-                this.subtitle.textContent = positionText ? `Position ${positionText}` : '';
+                if (Number.isFinite(tokenId)) {
+                    subtitleParts.push(`ID ${tokenId}`);
+                }
+                if (positionText) {
+                    subtitleParts.push(`Position ${positionText}`);
+                }
+                this.subtitle.textContent = subtitleParts.join(' • ');
             } else {
                 const layerIndex = findUserDataNumber(selection, 'layerIndex');
                 const headIndex = findUserDataNumber(selection, 'headIndex');

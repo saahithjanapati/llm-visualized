@@ -311,8 +311,19 @@ function applyTokenChipMaterialTweaks(chipGroup) {
     const applyToMaterial = (mat) => {
         if (!mat) return;
         if (mat.isMeshBasicMaterial) {
-            // Keep token glyphs white while retuning only the chip body materials.
-            if (mat.color?.set) mat.color.set(0xffffff);
+            const textRole = mat.userData?.tokenChipTextRole;
+            if (textRole === 'secondary') {
+                const secondaryColor = mat.userData?.tokenChipTextColor;
+                if (mat.color?.set) {
+                    mat.color.set(
+                        Number.isFinite(secondaryColor)
+                            ? secondaryColor
+                            : 0xd7d1c8
+                    );
+                }
+            } else if (textRole === 'primary') {
+                if (mat.color?.set) mat.color.set(0xffffff);
+            }
             mat.needsUpdate = true;
             return;
         }
