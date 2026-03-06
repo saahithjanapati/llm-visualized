@@ -1,6 +1,7 @@
 import { setPlaybackSpeed } from '../utils/constants.js';
 import { getPreference, setPreference } from '../utils/preferences.js';
 import { appState } from '../state/appState.js';
+import { ENVIRONMENT_MAP_OPTIONS } from '../utils/environmentMaps.js';
 import { initPerfOverlay } from './perfOverlay.js';
 import { initTouchClickFallback } from './touchClickFallback.js';
 
@@ -48,10 +49,20 @@ export function initSettingsModal(pipeline) {
     const settingsModal = settingsOverlay?.querySelector('.settings-modal') || null;
     const brightnessSlider = document.getElementById('brightnessSlider');
     const brightnessValue = document.getElementById('brightnessValue');
+    const environmentMapSelect = document.getElementById('environmentMapSelect');
     if (brightnessSlider) {
         brightnessSlider.min = String(BRIGHTNESS_UI_MIN);
         brightnessSlider.max = String(BRIGHTNESS_UI_MAX);
         brightnessSlider.step = '1';
+    }
+
+    if (environmentMapSelect && environmentMapSelect.options.length === 0) {
+        ENVIRONMENT_MAP_OPTIONS.forEach((option) => {
+            const el = document.createElement('option');
+            el.value = option.key;
+            el.textContent = option.label;
+            environmentMapSelect.appendChild(el);
+        });
     }
 
     initTouchClickFallback(settingsModal, { selector: 'button, .toggle-row, .speed-option' });
@@ -243,6 +254,9 @@ export function initSettingsModal(pipeline) {
         if (promptTokenStrip) promptTokenStrip.checked = !!appState.showPromptTokenStrip;
         const bg = document.getElementById('toggleHdrBackground');
         if (bg) bg.checked = !!appState.showHdrBackground;
+        if (environmentMapSelect) {
+            environmentMapSelect.value = appState.selectedEnvironmentKey;
+        }
         const devMode = document.getElementById('toggleDevMode');
         if (devMode) devMode.checked = !!appState.devMode;
         const camDebug = document.getElementById('toggleCameraDebug');
@@ -328,6 +342,20 @@ export function initSettingsModal(pipeline) {
         appState.showHdrBackground = !!bgToggle.checked;
         setPreference('showHdrBackground', appState.showHdrBackground);
         appState.applyEnvironmentBackground(pipeline);
+    });
+
+    environmentMapSelect?.addEventListener('change', async () => {
+        const previousValue = appState.selectedEnvironmentKey;
+        const nextValue = environmentMapSelect.value;
+        environmentMapSelect.disabled = true;
+        try {
+            await appState.setEnvironmentKey(nextValue, pipeline);
+        } catch (err) {
+            console.warn('Failed to switch environment map:', err);
+            environmentMapSelect.value = previousValue;
+        } finally {
+            environmentMapSelect.disabled = false;
+        }
     });
 
     const devToggle = document.getElementById('toggleDevMode');

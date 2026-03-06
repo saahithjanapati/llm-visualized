@@ -75,7 +75,13 @@ const TOKEN_CHIP_ONLY_MATERIAL_TWEAKS = Object.freeze({
     emissiveIntensity: 0
 });
 const CHIP_INSIDE_RELEASE_BUFFER_MS = 80;
-const BOTTOM_EMBED_CHIP_ENTRY_EMISSIVE_SCALE = 0.82;
+const BOTTOM_EMBED_FINAL_EMISSIVE = TOP_EMBED_BASE_EMISSIVE;
+const BOTTOM_EMBED_START_EMISSIVE = 0.0;
+const BOTTOM_EMBED_PEAK_EMISSIVE = 0.21;
+const BOTTOM_EMBED_PEAK_COLOR_MIX = 0.18;
+const BOTTOM_EMBED_PROGRESS_EPSILON = 1e-4;
+const BOTTOM_EMBED_SETTLE_EASE_POWER = 2.2;
+const BOTTOM_EMBED_SETTLE_MIN_DURATION_MS = 480;
 
 function applyEmbeddingReflectivityTweaks(matrix) {
     if (!matrix) return;
@@ -119,6 +125,184 @@ function applyEmbeddingReflectivityTweaks(matrix) {
     apply(matrix.mesh?.material);
     apply(matrix.frontCapMesh?.material);
     apply(matrix.backCapMesh?.material);
+}
+
+function getPrismVectorHeight(vec) {
+    const halfPrismHeight = Number.isFinite(vec?._basePrismCenterY)
+        ? vec._basePrismCenterY
+        : 0;
+    return halfPrismHeight > 0 ? halfPrismHeight * 2 : 10.5;
+}
+
+function setBottomEmbeddingMatrixVisual(matrix, color, emissiveIntensity) {
+    if (!matrix || !color) return;
+    matrix.setColor(color);
+    matrix.setEmissive(color, emissiveIntensity);
+    matrix.setMaterialProperties({ opacity: 1.0, transparent: false });
+}
+
+function createBottomEmbeddingMatrixController({
+    matrix = null,
+    finalColor = null,
+    getEntryProgress = null,
+    getExitProgress = null,
+    finalEmissiveIntensity = BOTTOM_EMBED_FINAL_EMISSIVE,
+    startEmissiveIntensity = BOTTOM_EMBED_START_EMISSIVE,
+    peakEmissiveIntensity = BOTTOM_EMBED_PEAK_EMISSIVE,
+    settleMinDurationMs = BOTTOM_EMBED_SETTLE_MIN_DURATION_MS
+} = {}) {
+    const restColor = new THREE.Color(MHSA_MATRIX_INITIAL_RESTING_COLOR);
+    const resolvedFinalColor = finalColor && typeof finalColor.clone === 'function'
+        ? finalColor.clone()
+        : new THREE.Color(finalColor ?? MHSA_MATRIX_INITIAL_RESTING_COLOR);
+    const peakColor = resolvedFinalColor.clone().lerp(new THREE.Color(0xffffff), BOTTOM_EMBED_PEAK_COLOR_MIX);
+    const colorScratch = new THREE.Color();
+    let complete = false;
+    let settleStartedAtMs = NaN;
+
+    const applyEntryProgress = (rawEntryProgress) => {
+        const entryProgress = THREE.MathUtils.clamp(Number.isFinite(rawEntryProgress) ? rawEntryProgress : 0, 0, 1);
+        if (entryProgress <= BOTTOM_EMBED_PROGRESS_EPSILON) {
+            setBottomEmbeddingMatrixVisual(matrix, restColor, startEmissiveIntensity);
+            return;
+        }
+        const t = THREE.MathUtils.smoothstep(entryProgress, 0, 1);
+        colorScratch.copy(restColor).lerp(peakColor, t);
+        setBottomEmbeddingMatrixVisual(
+            matrix,
+            colorScratch,
+            THREE.MathUtils.lerp(startEmissiveIntensity, peakEmissiveIntensity, t)
+        );
+    };
+
+    const applyExitProgress = (rawExitProgress) => {
+        const exitProgress = THREE.MathUtils.clamp(Number.isFinite(rawExitProgress) ? rawExitProgress : 0, 0, 1);
+        if (exitProgress <= BOTTOM_EMBED_PROGRESS_EPSILON) {
+            setBottomEmbeddingMatrixVisual(matrix, peakColor, peakEmissiveIntensity);
+            return;
+        }
+        const nowMs = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+            ? performance.now()
+            : Date.now();
+        if (!Number.isFinite(settleStartedAtMs)) {
+            settleStartedAtMs = nowMs;
+        }
+        if (exitProgress >= 1 - BOTTOM_EMBED_PROGRESS_EPSILON) {
+            const elapsedMs = Math.max(0, nowMs - settleStartedAtMs);
+            if (elapsedMs < settleMinDurationMs) {
+                const forcedBaseT = THREE.MathUtils.clamp(elapsedMs / Math.max(1, settleMinDurationMs), 0, 1);
+                const forcedSettleT = Math.pow(forcedBaseT, BOTTOM_EMBED_SETTLE_EASE_POWER);
+                colorScratch.copy(peakColor).lerp(resolvedFinalColor, forcedSettleT);
+                setBottomEmbeddingMatrixVisual(
+                    matrix,
+                    colorScratch,
+                    THREE.MathUtils.lerp(peakEmissiveIntensity, finalEmissiveIntensity, forcedSettleT)
+                );
+                return;
+            }
+            setBottomEmbeddingMatrixVisual(matrix, resolvedFinalColor, finalEmissiveIntensity);
+            complete = true;
+            return;
+        }
+        const settleBaseTRaw = THREE.MathUtils.smoothstep(exitProgress, 0, 1);
+        const elapsedMs = Math.max(0, nowMs - settleStartedAtMs);
+        const settleBaseTMin = THREE.MathUtils.clamp(elapsedMs / Math.max(1, settleMinDurationMs), 0, 1);
+        const settleBaseT = Math.min(settleBaseTRaw, settleBaseTMin);
+        const settleT = Math.pow(settleBaseT, BOTTOM_EMBED_SETTLE_EASE_POWER);
+        colorScratch.copy(peakColor).lerp(resolvedFinalColor, settleT);
+        setBottomEmbeddingMatrixVisual(
+            matrix,
+            colorScratch,
+            THREE.MathUtils.lerp(peakEmissiveIntensity, finalEmissiveIntensity, settleT)
+        );
+    };
+
+    applyEntryProgress(0);
+
+    return {
+        update() {
+            if (complete) return complete;
+            const entryProgress = typeof getEntryProgress === 'function' ? getEntryProgress() : 1;
+            if (entryProgress < 1 - BOTTOM_EMBED_PROGRESS_EPSILON) {
+                applyEntryProgress(entryProgress);
+                return false;
+            }
+            const exitProgress = typeof getExitProgress === 'function' ? getExitProgress() : 1;
+            applyExitProgress(exitProgress);
+            return complete;
+        },
+        isComplete() {
+            return complete;
+        },
+        reset() {
+            complete = false;
+            settleStartedAtMs = NaN;
+            applyEntryProgress(0);
+        }
+    };
+}
+
+function getAverageChipEntryProgress(entries = []) {
+    if (!Array.isArray(entries) || !entries.length) return 0;
+    let sum = 0;
+    let count = 0;
+    entries.forEach((entry) => {
+        const chipY = entry?.chip?.position?.y;
+        const startY = Number.isFinite(entry?.entryStartY) ? entry.entryStartY : entry?.startY;
+        const targetY = entry?.targetY;
+        if (!Number.isFinite(chipY) || !Number.isFinite(startY) || !Number.isFinite(targetY)) return;
+        const span = Math.max(1e-6, targetY - startY);
+        sum += THREE.MathUtils.clamp((chipY - startY) / span, 0, 1);
+        count += 1;
+    });
+    return count > 0 ? sum / count : 0;
+}
+
+function getAverageBottomVocabExitProgress(lanes = []) {
+    const trackedLanes = Array.isArray(lanes)
+        ? lanes.filter((lane) => (
+            lane
+            && lane.originalVec
+            && lane.originalVec.group
+            && Number.isFinite(lane.vocabEmbeddingExitY)
+        ))
+        : [];
+    if (!trackedLanes.length) return 0;
+
+    let sum = 0;
+    trackedLanes.forEach((lane) => {
+        const vec = lane.originalVec;
+        const y = vec?.group?.position?.y;
+        const exitY = lane.vocabEmbeddingExitY;
+        const startY = exitY - getPrismVectorHeight(vec);
+        const span = Math.max(1e-6, exitY - startY);
+        if (!Number.isFinite(y)) return;
+        sum += THREE.MathUtils.clamp((y - startY) / span, 0, 1);
+    });
+    return sum / trackedLanes.length;
+}
+
+function getAverageBottomPositionExitProgress(lanes = [], posMatrixTopY = NaN) {
+    if (!Number.isFinite(posMatrixTopY)) return 0;
+    const trackedLanes = Array.isArray(lanes)
+        ? lanes.filter((lane) => lane && lane.posVec && lane.posVec.group)
+        : [];
+    if (!trackedLanes.length) return 0;
+
+    let sum = 0;
+    trackedLanes.forEach((lane) => {
+        if (lane.posAddStarted || lane.posAddComplete) {
+            sum += 1;
+            return;
+        }
+        const vec = lane.posVec;
+        const y = vec?.group?.position?.y;
+        const startY = posMatrixTopY - getPrismVectorHeight(vec);
+        const span = Math.max(1e-6, posMatrixTopY - startY);
+        if (!Number.isFinite(y)) return;
+        sum += THREE.MathUtils.clamp((y - startY) / span, 0, 1);
+    });
+    return sum / trackedLanes.length;
 }
 
 function applyTokenChipMaterialTweaks(chipGroup) {
@@ -443,6 +627,8 @@ export function addEmbeddingAndTokenChips({
     let disposed = false;
     let topLogitProgressHandler = null;
     let chipRemovalProgressHandler = null;
+    let bottomEmbeddingMatrixRafId = 0;
+    let bottomEmbeddingMatrixTimeoutId = null;
     let chipEntryTimeoutId = null;
     let positionChipStartIntervalId = null;
 
@@ -467,6 +653,17 @@ export function addEmbeddingAndTokenChips({
         rootGroup.add(obj);
     };
 
+    const cancelBottomEmbeddingMatrixLoop = () => {
+        if (bottomEmbeddingMatrixRafId && typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
+            window.cancelAnimationFrame(bottomEmbeddingMatrixRafId);
+        }
+        bottomEmbeddingMatrixRafId = 0;
+        if (bottomEmbeddingMatrixTimeoutId) {
+            clearTimeout(bottomEmbeddingMatrixTimeoutId);
+            bottomEmbeddingMatrixTimeoutId = null;
+        }
+    };
+
     engine.scene.add(rootGroup);
     if (typeof engine.registerRaycastRoot === 'function') {
         engine.registerRaycastRoot(rootGroup);
@@ -475,6 +672,7 @@ export function addEmbeddingAndTokenChips({
     try {
         const headBlue = new THREE.Color(MHA_FINAL_Q_COLOR);
         const positionGreen = new THREE.Color(POSITION_EMBED_COLOR);
+        const matrixRestColor = new THREE.Color(MHSA_MATRIX_INITIAL_RESTING_COLOR);
         const residualYBase = LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2 + EMBEDDING_BOTTOM_TOP_ALIGN_OFFSET_FROM_LN1_BOTTOM;
         const bottomVocabCenterY = residualYBase - EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2 + EMBEDDING_BOTTOM_Y_ADJUST;
         const vocabX = 0 + EMBEDDING_BOTTOM_VOCAB_X_OFFSET;
@@ -493,13 +691,8 @@ export function addEmbeddingAndTokenChips({
             EMBEDDING_MATRIX_PARAMS_VOCAB.slitTopWidthFactor
         );
         vocabBottom.group.userData.label = 'Vocabulary Embedding';
-        vocabBottom.setColor(headBlue);
-        vocabBottom.setMaterialProperties({
-            opacity: 1.0,
-            transparent: false,
-            emissiveIntensity: (TOP_EMBED_BASE_EMISSIVE + TOP_EMBED_MAX_EMISSIVE) * BOTTOM_EMBED_CHIP_ENTRY_EMISSIVE_SCALE
-        });
         applyEmbeddingReflectivityTweaks(vocabBottom);
+        setBottomEmbeddingMatrixVisual(vocabBottom, matrixRestColor, BOTTOM_EMBED_START_EMISSIVE);
         addToRoot(vocabBottom.group);
 
         const gapX = EMBEDDING_BOTTOM_PAIR_GAP_X;
@@ -525,13 +718,8 @@ export function addEmbeddingAndTokenChips({
             EMBEDDING_MATRIX_PARAMS_POSITION.slitTopWidthFactor
         );
         posBottom.group.userData.label = 'Positional Embedding';
-        posBottom.setColor(positionGreen);
-        posBottom.setMaterialProperties({
-            opacity: 1.0,
-            transparent: false,
-            emissiveIntensity: (TOP_EMBED_BASE_EMISSIVE + TOP_EMBED_MAX_EMISSIVE) * BOTTOM_EMBED_CHIP_ENTRY_EMISSIVE_SCALE
-        });
         applyEmbeddingReflectivityTweaks(posBottom);
+        setBottomEmbeddingMatrixVisual(posBottom, matrixRestColor, BOTTOM_EMBED_START_EMISSIVE);
         addToRoot(posBottom.group);
 
         // Precompute Z positions so chips can align to selected lane slots.
@@ -637,6 +825,7 @@ export function addEmbeddingAndTokenChips({
 
         const vocabMatrixBottomY = bottomVocabCenterY - EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2;
         const posMatrixBottomY = bottomPosCenterY - EMBEDDING_MATRIX_PARAMS_POSITION.height / 2;
+        const posMatrixTopY = bottomPosCenterY + EMBEDDING_MATRIX_PARAMS_POSITION.height / 2;
         const vocabRiseDuration = TOKEN_CHIP_STYLE.riseDuration * (TOKEN_CHIP_STYLE.vocabSlowdown || 1);
         const posRiseDuration = TOKEN_CHIP_STYLE.riseDuration * (TOKEN_CHIP_STYLE.positionSlowdown || 1);
         const positionStartDelayAfterVocabMs = Math.max(
@@ -681,7 +870,48 @@ export function addEmbeddingAndTokenChips({
         const chipStartZOffset = TOKEN_CHIP_STYLE.zOffset;
         const chipFontLoader = new FontLoader();
         const animatedEmbeddingChips = [];
+        const vocabMatrixChipEntries = [];
+        const positionMatrixChipEntries = [];
         const pendingPositionChipAnimations = [];
+        const getFirstLayerLanes = () => {
+            const firstLayer = pipeline?._layers?.[0];
+            return Array.isArray(firstLayer?.lanes) ? firstLayer.lanes : [];
+        };
+        const vocabBottomMatrixController = createBottomEmbeddingMatrixController({
+            matrix: vocabBottom,
+            finalColor: headBlue,
+            finalEmissiveIntensity: BOTTOM_EMBED_FINAL_EMISSIVE,
+            getEntryProgress: () => getAverageChipEntryProgress(vocabMatrixChipEntries),
+            getExitProgress: () => getAverageBottomVocabExitProgress(getFirstLayerLanes())
+        });
+        const posBottomMatrixController = createBottomEmbeddingMatrixController({
+            matrix: posBottom,
+            finalColor: positionGreen,
+            finalEmissiveIntensity: BOTTOM_EMBED_FINAL_EMISSIVE,
+            getEntryProgress: () => getAverageChipEntryProgress(positionMatrixChipEntries),
+            getExitProgress: () => getAverageBottomPositionExitProgress(getFirstLayerLanes(), posMatrixTopY)
+        });
+        const updateBottomEmbeddingMatrices = () => {
+            const vocabDone = vocabBottomMatrixController.update();
+            const posDone = posBottomMatrixController.update();
+            return vocabDone && posDone;
+        };
+        const scheduleBottomEmbeddingMatrixUpdate = () => {
+            if (disposed) return;
+            const tick = () => {
+                bottomEmbeddingMatrixRafId = 0;
+                bottomEmbeddingMatrixTimeoutId = null;
+                if (disposed) return;
+                const done = updateBottomEmbeddingMatrices();
+                if (done) return;
+                scheduleBottomEmbeddingMatrixUpdate();
+            };
+            if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+                bottomEmbeddingMatrixRafId = window.requestAnimationFrame(tick);
+                return;
+            }
+            bottomEmbeddingMatrixTimeoutId = setTimeout(tick, 16);
+        };
         let chipsEnteredEmbedding = false;
         let chipsRemovedFromEmbedding = false;
         let positionChipWaveStarted = false;
@@ -1076,6 +1306,12 @@ export function addEmbeddingAndTokenChips({
                 chip.position.set(vocabX, startY, startZ);
                 registerChip(chip);
                 animatedEmbeddingChips.push(chip);
+                vocabMatrixChipEntries.push({
+                    chip,
+                    startY,
+                    targetY,
+                    entryStartY: vocabMatrixBottomY - chip.userData.size.height / 2
+                });
 
                 if (typeof TWEEN !== 'undefined') {
                     const riseTween = new TWEEN.Tween(chip.position)
@@ -1198,6 +1434,12 @@ export function addEmbeddingAndTokenChips({
                 chip.visible = false;
                 registerChip(chip);
                 animatedEmbeddingChips.push(chip);
+                positionMatrixChipEntries.push({
+                    chip,
+                    startY,
+                    targetY,
+                    entryStartY: posMatrixBottomY - chip.userData.size.height / 2
+                });
                 pendingPositionChipAnimations.push({
                     chip,
                     connector,
@@ -1220,6 +1462,8 @@ export function addEmbeddingAndTokenChips({
                 armEmbeddedChipRemoval();
                 applyPhysicalMaterialsToScene(engine.scene, USE_PHYSICAL_MATERIALS);
                 retuneTokenChipMaterials(rootGroup);
+                updateBottomEmbeddingMatrices();
+                scheduleBottomEmbeddingMatrixUpdate();
             },
             undefined,
             (err) => {
@@ -1230,6 +1474,8 @@ export function addEmbeddingAndTokenChips({
                 armEmbeddedChipRemoval();
                 applyPhysicalMaterialsToScene(engine.scene, USE_PHYSICAL_MATERIALS);
                 retuneTokenChipMaterials(rootGroup);
+                updateBottomEmbeddingMatrices();
+                scheduleBottomEmbeddingMatrixUpdate();
             }
         );
 
@@ -1481,6 +1727,7 @@ export function addEmbeddingAndTokenChips({
             pipeline.removeEventListener('progress', chipRemovalProgressHandler);
             chipRemovalProgressHandler = null;
         }
+        cancelBottomEmbeddingMatrixLoop();
         if (topLogitProgressHandler && pipeline && typeof pipeline.removeEventListener === 'function') {
             pipeline.removeEventListener('progress', topLogitProgressHandler);
             topLogitProgressHandler = null;

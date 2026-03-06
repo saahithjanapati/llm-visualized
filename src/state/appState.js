@@ -1,3 +1,8 @@
+import { getPreference, setPreference } from '../utils/preferences.js';
+import { DEFAULT_ENVIRONMENT_KEY, getEnvironmentMapOption, loadEnvironmentMapTexture } from '../utils/environmentMaps.js';
+
+const ENVIRONMENT_MAP_PREF_KEY = 'environmentMapKey';
+
 export class AppState {
     constructor() {
         this.skipIntro = true;
@@ -21,12 +26,33 @@ export class AppState {
         this.kvCacheModeEnabled = false;
         this.kvCachePrefillActive = false;
         this.kvCachePassIndex = 0;
+        this.selectedEnvironmentKey = getEnvironmentMapOption(
+            getPreference(ENVIRONMENT_MAP_PREF_KEY, DEFAULT_ENVIRONMENT_KEY)
+        ).key;
         this.environmentTexture = null;
+        this.environmentTextureKey = null;
+        this.environmentLoadNonce = 0;
         this.initialPipelineBackground = null;
         this.initialPipelineBackgroundCaptured = false;
         this.initialIntroBackground = null;
         this.initialIntroBackgroundCaptured = false;
         this.introSceneRef = null;
+    }
+
+    applyEnvironmentTexture(pipeline, introScene = null) {
+        if (introScene) {
+            this.introSceneRef = introScene;
+        }
+
+        const desiredTexture = this.environmentTexture ?? null;
+        const introTarget = introScene || this.introSceneRef;
+        if (introTarget) {
+            introTarget.environment = desiredTexture;
+        }
+
+        if (pipeline?.engine?.scene) {
+            pipeline.engine.scene.environment = desiredTexture;
+        }
     }
 
     applyEnvironmentBackground(pipeline, introScene = null) {
@@ -61,6 +87,28 @@ export class AppState {
             }
             pipelineScene.background = desiredTexture ?? this.initialPipelineBackground ?? null;
         }
+    }
+
+    async setEnvironmentKey(key, pipeline, introScene = null, { persist = true } = {}) {
+        const option = getEnvironmentMapOption(key);
+        const nextKey = option.key;
+        const loadNonce = ++this.environmentLoadNonce;
+
+        this.selectedEnvironmentKey = nextKey;
+        if (persist) {
+            setPreference(ENVIRONMENT_MAP_PREF_KEY, nextKey);
+        }
+
+        const texture = await loadEnvironmentMapTexture(nextKey);
+        if (loadNonce !== this.environmentLoadNonce) {
+            return this.environmentTexture;
+        }
+
+        this.environmentTexture = texture;
+        this.environmentTextureKey = nextKey;
+        this.applyEnvironmentTexture(pipeline, introScene);
+        this.applyEnvironmentBackground(pipeline, introScene);
+        return texture;
     }
 }
 export const appState = new AppState();

@@ -1074,6 +1074,50 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     background: linear-gradient(160deg, rgba(18, 18, 18, 0.86), rgba(8, 8, 8, 0.9));
     margin-bottom: 8px;
 }
+.settings-field {
+    padding: 10px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 11px;
+    background: linear-gradient(160deg, rgba(18, 18, 18, 0.86), rgba(8, 8, 8, 0.9));
+    margin-bottom: 8px;
+}
+.settings-field-label {
+    display: block;
+    margin-bottom: 8px;
+    font-size: 13px;
+    letter-spacing: 0.35px;
+    color: #e6edf7;
+}
+.settings-field-hint {
+    margin-top: 8px;
+    font-size: 11px;
+    line-height: 1.4;
+    color: #9aa3af;
+}
+.settings-select {
+    width: 100%;
+    appearance: none;
+    -webkit-appearance: none;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 10px;
+    background:
+        linear-gradient(160deg, rgba(24, 28, 36, 0.96), rgba(10, 12, 18, 0.94));
+    color: #eef1f6;
+    font: inherit;
+    padding: 10px 12px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+.settings-select:focus {
+    outline: none;
+    border-color: rgba(255, 255, 255, 0.34);
+    box-shadow:
+        0 0 0 2px rgba(255, 255, 255, 0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+.settings-select:disabled {
+    opacity: 0.65;
+    cursor: wait;
+}
 .slider-header {
     display: flex;
     align-items: center;

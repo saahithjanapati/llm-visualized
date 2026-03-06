@@ -2,10 +2,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
-import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
 import { appState } from '../state/appState.js';
 import { resolveRenderPixelRatio } from '../utils/constants.js';
-import hdrBackgroundUrl from '../../rogland_clear_night_64.exr?url';
 
 // Sets up the intro typing animation and HDRI transition.
 // Returns a cleanup function for the intro resources.
@@ -130,18 +128,7 @@ export function initIntroAnimation(pipeline, gptCanvas) {
         setTimeout(() => revealChar(0), 500);
     });
 
-    const exrLoader = new EXRLoader().setDataType(THREE.HalfFloatType);
-    exrLoader.load(hdrBackgroundUrl, (texture) => {
-        texture.mapping = THREE.EquirectangularReflectionMapping;
-        texture.center.set(0.5, 0.5);
-        texture.rotation = Math.PI;
-        texture.needsUpdate = true;
-        appState.environmentTexture = texture;
-        scene.environment = texture;
-        if (pipeline?.engine?.scene) {
-            pipeline.engine.scene.environment = texture;
-        }
-        appState.applyEnvironmentBackground(pipeline, scene);
+    appState.setEnvironmentKey(appState.selectedEnvironmentKey, pipeline, scene, { persist: false }).then(() => {
         scene.traverse((obj) => { if (obj.isAmbientLight) scene.remove(obj); });
         if (pipeline?.engine?.scene && typeof pipeline.engine.scene.traverse === 'function') {
             pipeline.engine.scene.traverse((obj) => { if (obj.isAmbientLight) pipeline.engine.scene.remove(obj); });
@@ -155,7 +142,7 @@ export function initIntroAnimation(pipeline, gptCanvas) {
         introCanvas.style.display = 'none';
         cleanupIntro();
         hideLoadingOverlay();
-    }, undefined, (err) => {
+    }).catch((err) => {
         console.warn('HDRI failed to load:', err);
         introCanvas.style.display = 'none';
         cleanupIntro();

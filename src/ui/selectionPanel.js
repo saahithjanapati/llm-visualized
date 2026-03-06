@@ -5400,6 +5400,7 @@ class SelectionPanel {
         let subtitleSecondaryOverride = null;
         const isTokenChipSelection = lower.startsWith('token:');
         const isTokenOrPositionChipSelection = isTokenChipSelection || lower.startsWith('position:');
+        const isChosenTokenSelection = lower.startsWith('chosen token:');
         this.panel.classList.toggle('is-preview-hidden', hidePreviewForSelection);
         if (logitHeader) {
             this._setTokenChipTitleContext({
@@ -5528,7 +5529,8 @@ class SelectionPanel {
         const hideTensorDimsField = hideLayerNormFields
             || isAttentionScore
             || isLogitTokenSelection
-            || isTokenOrPositionChipSelection;
+            || isTokenOrPositionChipSelection
+            || isChosenTokenSelection;
         const isVectorMetadata = isLikelyVectorSelection(label, selection) || isTokenOrPositionChipSelection;
         const dimsRow = this.inputDim?.closest('.detail-row')
             || this.outputDim?.closest('.detail-row')
