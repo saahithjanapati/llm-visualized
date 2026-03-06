@@ -56,11 +56,11 @@ const LN_PARAM_MONOCHROME = {
 
 const EMBEDDING_REFLECTIVITY_TWEAKS = {
     metalnessScale: 0.85,
-    roughnessOffset: 0.1,
+    roughnessOffset: 0.12,
     clearcoatScale: 0.84,
     clearcoatRoughnessOffset: 0.1,
     iridescenceScale: 0.86,
-    envMapIntensityScale: 0.78
+    envMapIntensityScale: 0.74
 };
 
 const TOKEN_CHIP_ONLY_MATERIAL_TWEAKS = Object.freeze({
