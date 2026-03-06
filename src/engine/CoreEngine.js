@@ -279,9 +279,13 @@ export class CoreEngine {
         this._keyboardActive = false;
         // Flag to detect when the user is actively orbiting/panning the scene
         this._isUserNavigating = false;
-        // OrbitControls dispatches "start"/"end" events when interaction begins/ends
-        this.controls.addEventListener('start', () => { this._isUserNavigating = true; });
-        this.controls.addEventListener('end',   () => { this._isUserNavigating = false; });
+        // OrbitControls dispatches "start"/"end" events when interaction begins/ends.
+        // Drop zoom-out supersampling immediately while navigating so large
+        // zoomed-out scenes stay responsive, then restore it after idle.
+        this._onControlsStartInteraction = this._onControlsStartInteraction.bind(this);
+        this._onControlsEndInteraction = this._onControlsEndInteraction.bind(this);
+        this.controls.addEventListener('start', this._onControlsStartInteraction);
+        this.controls.addEventListener('end', this._onControlsEndInteraction);
         this._updateCameraFarFromControls = this._updateCameraFarFromControls.bind(this);
         this._onControlsChangePixelRatio = this._onControlsChangePixelRatio.bind(this);
         this.controls.addEventListener('change', this._updateCameraFarFromControls);
@@ -543,6 +547,8 @@ export class CoreEngine {
         window.removeEventListener('keydown', this._onKeyDown);
         window.removeEventListener('keyup', this._onKeyUp);
         if (this.controls) {
+            this.controls.removeEventListener('start', this._onControlsStartInteraction);
+            this.controls.removeEventListener('end', this._onControlsEndInteraction);
             this.controls.removeEventListener('change', this._updateCameraFarFromControls);
             this.controls.removeEventListener('change', this._onControlsChangePixelRatio);
             this.controls.dispose();
@@ -790,6 +796,7 @@ export class CoreEngine {
         if (!this._zoomOutSupersampleEnabled) return baseRatio;
         if (!(Number.isFinite(baseRatio) && baseRatio > 0)) return baseRatio;
         if (!this.camera || !this.controls || !this.controls.target) return baseRatio;
+        if (this._isUserNavigating) return baseRatio;
         if (this._isTouchPrimaryDevice()) return baseRatio;
 
         const maxDistance = (typeof this.controls.maxDistance === 'number' && Number.isFinite(this.controls.maxDistance) && this.controls.maxDistance > 0)
@@ -811,6 +818,17 @@ export class CoreEngine {
         const boosted = Math.min(maxDpr, baseRatio * multiplier);
         const quantized = Math.round(boosted / ZOOM_OUT_SUPERSAMPLE_RATIO_STEP) * ZOOM_OUT_SUPERSAMPLE_RATIO_STEP;
         return Math.max(baseRatio, quantized);
+    }
+
+    _onControlsStartInteraction() {
+        this._isUserNavigating = true;
+        this._cancelPendingPixelRatioRefresh();
+        this._updateRendererPixelRatio({ force: true });
+    }
+
+    _onControlsEndInteraction() {
+        this._isUserNavigating = false;
+        this._schedulePixelRatioRefresh();
     }
 
     _onVisibility = () => {

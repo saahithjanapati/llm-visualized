@@ -7,9 +7,12 @@ import {
     MLP_UP_MATRIX_COLOR,
     MLP_DOWN_MATRIX_COLOR
 } from '../animations/LayerAnimationConstants.js';
+import { D_MODEL, VOCAB_SIZE } from './selectionPanelConstants.js';
 import { getActivationDataFromSelection } from './selectionPanelSelectionUtils.js';
 
 const RESIDUAL_STREAM_DESCRIPTION = 'This is the residual stream vector for a token at this point in the model. It is the main path that carries information through the network. Attention and MLP updates are added back into this stream at each layer, so prior context is preserved while new information is incorporated.';
+const GPT2_VOCAB_SIZE_TEXT = VOCAB_SIZE.toLocaleString('en-US');
+const GPT2_D_MODEL_TEXT = D_MODEL.toLocaleString('en-US');
 
 function normalizeSelectionKind(kind) {
     const raw = String(kind || '').trim().toLowerCase();
@@ -336,7 +339,7 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
         return 'This is the output (unembedding) matrix at the top of the model. It maps the final residual stream vector to vocabulary logits. Softmax converts logits to probabilities and the model samples or selects the next token. In GPT-2, these weights are tied to the input embedding.';
     }
     if (hasVocabEmbeddingLabel(lower)) {
-        return 'This matrix converts token IDs into vectors. It is the learned lookup table that produces the initial residual stream input after adding position information. These vectors carry semantic and syntactic information into the model. Everything else in the network builds on these representations.';
+        return `This matrix converts token IDs into vectors. In GPT-2 small, it has ${GPT2_VOCAB_SIZE_TEXT} learned rows, one for each token in the vocabulary, and each row is a ${GPT2_D_MODEL_TEXT}-dimensional vector. Looking up a token ID selects one row from this ${GPT2_VOCAB_SIZE_TEXT} x ${GPT2_D_MODEL_TEXT} table. After adding position information, that vector becomes the initial residual stream input.`;
     }
     if (lower.includes('positional embedding')) {
         return 'This is the learned matrix of position vectors. Each position has its own vector that is summed with the token embedding at the bottom of the model. This gives the model a sense of order and distance. It lets attention distinguish first versus last occurrences.';

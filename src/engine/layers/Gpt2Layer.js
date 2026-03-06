@@ -292,6 +292,7 @@ export default class Gpt2Layer extends BaseLayer {
         this._mlpMatrixActiveColor = new THREE.Color(0xc07a12);
         this._mlpUpTweenColor = new THREE.Color();
         this._mlpDownTweenColor = new THREE.Color();
+        this._dirtyLnParamBanks = new Set();
         this._posPassBarrierArmed = false;
         this._posPassStartAtMs = NaN;
         this._trailUpdateFrameId = 0;
@@ -639,7 +640,9 @@ export default class Gpt2Layer extends BaseLayer {
             layerIndex: this.index,
             vectorPrismCount: this._getBaseVectorLength(),
             laneCount: this._laneCount,
-            useBatchedVectorCopies: !this._kvCacheModeEnabled,
+            // KV-cache persistence can already capture batched vector refs, so
+            // keep MHSA copy batching enabled in KV mode to reduce per-lane cost.
+            useBatchedVectorCopies: true,
             kvCacheDecodeActive: this._kvCacheDecodeActive,
         });
         if (this.mhsaAnimation && typeof this.mhsaAnimation.setCachedKvEntries === 'function') {
@@ -1214,12 +1217,8 @@ export default class Gpt2Layer extends BaseLayer {
                             }
                         } catch (_) { /* non-fatal trail alignment */ }
                         // Show the multiplication target inside LN-1 (parity with LN-2 behaviour)
-                        if (lane.multTarget && lane.multTarget.group) {
-                            lane.multTarget.group.visible = true;
-                        }
-                        if (lane.addTarget && lane.addTarget.group) {
-                            lane.addTarget.group.visible = true;
-                        }
+                        this._setLayerNormParamRefLayout(lane.multTarget, { visible: true });
+                        this._setLayerNormParamRefLayout(lane.addTarget, { visible: true });
                         this._setLaneHorizPhase(lane, HORIZ_PHASE.INSIDE_LN, 'ln1 branch reached ring');
                         this._emitProgress();
                     }
@@ -1326,13 +1325,8 @@ export default class Gpt2Layer extends BaseLayer {
                         lane.multStarted = true;
                         const scaleParam = lane.multTarget;
                         const shiftParam = lane.addTarget;
-                        if (shiftParam && shiftParam.group) {
-                            shiftParam.group.visible = true;
-                        }
-                        if (scaleParam && scaleParam.group) {
-                            scaleParam.group.position.y = ln1RiseTargetY;
-                            scaleParam.group.visible = true;
-                        }
+                        this._setLayerNormParamRefLayout(shiftParam, { visible: true });
+                        this._setLayerNormParamRefLayout(scaleParam, { y: ln1RiseTargetY, visible: true });
 
                         const scaleParamData = this._getLayerNormParamData('ln1', 'scale');
                         const sourceRaw = (Array.isArray(dupVec.rawData) || ArrayBuffer.isView(dupVec.rawData))
@@ -1435,15 +1429,13 @@ export default class Gpt2Layer extends BaseLayer {
                                 );
                             if (!usingShiftTarget) {
                                 this.raycastRoot.add(addResult.group);
-                                addResult.group.visible = false;
+                                this._setLayerNormParamRefLayout(addResult, { visible: false });
                                 // Fallback path when param bank target is unavailable.
                                 this._applyLayerNormParamVector(addResult, 'ln1', 'shift', null);
-                            } else {
-                                // Ensure the true shift parameter vector is visible as the
-                                // top addend while addition begins.
-                                addResult.group.visible = true;
                             }
-                            addResult.group.visible = true;
+                            // Ensure the visible addend is live on the GPU before the
+                            // addition tween starts, even when it comes from a batched LN bank.
+                            this._setLayerNormParamRefLayout(addResult, { visible: true });
 
                             const ln1ShiftedData = this._getLn1Data(lane, 'shift');
                             const finalLn1ShiftData = (ln1ShiftedData && ln1ShiftedData.length)
@@ -1526,12 +1518,18 @@ export default class Gpt2Layer extends BaseLayer {
                                 if (multResult.group && multResult.group.parent) {
                                     multResult.group.parent.remove(multResult.group);
                                 }
-                                addResult.userData = addResult.userData || {};
-                                if (!addResult.userData.trail) {
+                                const finalResultVec = this._materializeLayerNormResultVector(
+                                    addResult,
+                                    lane.tokenLabel ? `LN1 Shifted - ${lane.tokenLabel}` : 'LN1 Shifted',
+                                    this._getLaneMeta(lane, 'ln1.shift')
+                                );
+                                lane.resultVec = finalResultVec;
+                                finalResultVec.userData = finalResultVec.userData || {};
+                                if (!finalResultVec.userData.trail) {
                                     const fallbackTrail = new StraightLineTrail(this.root, 0xffffff, 1, undefined, undefined, TRAIL_MIN_SEGMENT_DISTANCE);
-                                    fallbackTrail.start(addResult.group.position);
-                                    addResult.userData.trail = fallbackTrail;
-                                    addResult.userData.trailWorld = false;
+                                    fallbackTrail.start(finalResultVec.group.position);
+                                    finalResultVec.userData.trail = fallbackTrail;
+                                    finalResultVec.userData.trailWorld = false;
                                 }
                                 this._setLaneHorizPhase(lane, HORIZ_PHASE.RISE_ABOVE_LN, 'ln1 add complete');
                                 this._emitProgress();
@@ -1554,7 +1552,15 @@ export default class Gpt2Layer extends BaseLayer {
                     break;
                 case HORIZ_PHASE.RISE_ABOVE_LN:
                     // Rise to just above LN1 before starting horizontal travel
-                    const rv = lane.resultVec;
+                    let rv = lane.resultVec;
+                    if (rv && rv.isBatchedVectorRef) {
+                        rv = this._materializeLayerNormResultVector(
+                            rv,
+                            lane.tokenLabel ? `LN1 Shifted - ${lane.tokenLabel}` : 'LN1 Shifted',
+                            this._getLaneMeta(lane, 'ln1.shift')
+                        );
+                        lane.resultVec = rv;
+                    }
                     if (rv) {
                         const targetY = this.ln1TopY + 5; // Same as meetY in original
                         if (rv.group.position.y < targetY) {
@@ -1700,12 +1706,8 @@ export default class Gpt2Layer extends BaseLayer {
                                 }
                             }
                         } catch (_) { /* non-fatal trail alignment */ }
-                        if (lane.multTargetLN2 && lane.multTargetLN2.group) {
-                            lane.multTargetLN2.group.visible = true;
-                        }
-                        if (lane.addTargetLN2 && lane.addTargetLN2.group) {
-                            lane.addTargetLN2.group.visible = true;
-                        }
+                        this._setLayerNormParamRefLayout(lane.multTargetLN2, { visible: true });
+                        this._setLayerNormParamRefLayout(lane.addTargetLN2, { visible: true });
                         this._setLaneLn2Phase(lane, LN2_PHASE.INSIDE_LN, 'ln2 entry reached');
                         this._emitProgress();
                     }
@@ -1862,13 +1864,8 @@ export default class Gpt2Layer extends BaseLayer {
                         lane.multDoneLN2 = true;
                         const scaleParam = lane.multTargetLN2;
                         const shiftParam = lane.addTargetLN2;
-                        if (shiftParam && shiftParam.group) {
-                            shiftParam.group.visible = true;
-                        }
-                        if (scaleParam && scaleParam.group) {
-                            scaleParam.group.position.y = ln2RiseTargetY;
-                            scaleParam.group.visible = true;
-                        }
+                        this._setLayerNormParamRefLayout(shiftParam, { visible: true });
+                        this._setLayerNormParamRefLayout(scaleParam, { y: ln2RiseTargetY, visible: true });
 
                         const scaleParamData = this._getLayerNormParamData('ln2', 'scale');
                         const sourceRaw = (Array.isArray(mv.rawData) || ArrayBuffer.isView(mv.rawData))
@@ -1976,15 +1973,13 @@ export default class Gpt2Layer extends BaseLayer {
                                 );
                             if (!usingShiftTarget) {
                                 this.raycastRoot.add(addResult.group);
-                                addResult.group.visible = false;
+                                this._setLayerNormParamRefLayout(addResult, { visible: false });
                                 // Fallback path when param bank target is unavailable.
                                 this._applyLayerNormParamVector(addResult, 'ln2', 'shift', null);
-                            } else {
-                                // Ensure the true shift parameter vector is visible as the
-                                // top addend while addition begins.
-                                addResult.group.visible = true;
                             }
-                            addResult.group.visible = true;
+                            // Ensure the visible addend is live on the GPU before the
+                            // addition tween starts, even when it comes from a batched LN bank.
+                            this._setLayerNormParamRefLayout(addResult, { visible: true });
 
                             const ln2ShiftedData = this._getLn2Data(lane, 'shift');
                             const finalLn2ShiftData = (ln2ShiftedData && ln2ShiftedData.length)
@@ -2072,14 +2067,20 @@ export default class Gpt2Layer extends BaseLayer {
                                 }
                                 lane.movingVecLN2 = null;
                                 lane.normAnimationLN2 = null;
-                                addResult.userData = addResult.userData || {};
-                                if (!addResult.userData.trail) {
+                                const finalLn2ResultVec = this._materializeLayerNormResultVector(
+                                    addResult,
+                                    lane.tokenLabel ? `LN2 Shifted - ${lane.tokenLabel}` : 'LN2 Shifted',
+                                    this._getLaneMeta(lane, 'ln2.shift')
+                                );
+                                lane.resultVecLN2 = finalLn2ResultVec;
+                                finalLn2ResultVec.userData = finalLn2ResultVec.userData || {};
+                                if (!finalLn2ResultVec.userData.trail) {
                                     const fallbackTrailLn2 = new StraightLineTrail(this.root, 0xffffff, 1, undefined, undefined, TRAIL_MIN_SEGMENT_DISTANCE);
-                                    fallbackTrailLn2.start(addResult.group.position);
-                                    addResult.userData.trail = fallbackTrailLn2;
-                                    addResult.userData.trailWorld = false;
+                                    fallbackTrailLn2.start(finalLn2ResultVec.group.position);
+                                    finalLn2ResultVec.userData.trail = fallbackTrailLn2;
+                                    finalLn2ResultVec.userData.trailWorld = false;
                                 }
-                                startLn2Rise(addResult);
+                                startLn2Rise(finalLn2ResultVec);
                             }, {
                                 finalData: finalLn2ShiftData,
                                 flashOnTargetImpact: false,
@@ -2120,14 +2121,8 @@ export default class Gpt2Layer extends BaseLayer {
         // Keep post-MLP return motion synchronized across lanes.
         this._tryStartSynchronizedMlpReturn();
 
-        // Ensure LayerNorm parameter banks reflect any visibility/position toggles.
-        if (this._lnParamBanks) {
-            const banks = this._lnParamBanks;
-            if (banks.ln1Scale && typeof banks.ln1Scale.syncAll === 'function') banks.ln1Scale.syncAll();
-            if (banks.ln1Shift && typeof banks.ln1Shift.syncAll === 'function') banks.ln1Shift.syncAll();
-            if (banks.ln2Scale && typeof banks.ln2Scale.syncAll === 'function') banks.ln2Scale.syncAll();
-            if (banks.ln2Shift && typeof banks.ln2Shift.syncAll === 'function') banks.ln2Shift.syncAll();
-        }
+        // Flush only the LayerNorm placeholder banks that actually changed.
+        this._flushDirtyLayerNormParamBanks();
 
         // Update the MHSA controller so vectors travel to attention heads
         if (this.mhsaAnimation) {
@@ -2195,7 +2190,15 @@ export default class Gpt2Layer extends BaseLayer {
      * Animate vector through MLP up-projection (768 → 3072 dimensions)
      */
     _animateMlpUpProjection(lane) {
-        const vec = lane && lane.resultVecLN2;
+        let vec = lane && lane.resultVecLN2;
+        if (lane && vec && vec.isBatchedVectorRef) {
+            vec = this._materializeLayerNormResultVector(
+                vec,
+                lane.tokenLabel ? `LN2 Shifted - ${lane.tokenLabel}` : 'LN2 Shifted',
+                this._getLaneMeta(lane, 'ln2.shift')
+            );
+            lane.resultVecLN2 = vec;
+        }
         if (!lane || !vec || !vec.group) {
             if (lane) {
                 lane.mlpUpStarted = true;
@@ -3853,11 +3856,149 @@ export default class Gpt2Layer extends BaseLayer {
         });
     }
 
+    _registerLayerNormParamBankRef(targetVec, bankKey) {
+        if (!targetVec || typeof bankKey !== 'string' || !bankKey.length) return targetVec;
+        targetVec.userData = targetVec.userData || {};
+        targetVec.userData.lnParamBankKey = bankKey;
+        if (targetVec.userData.lnDetachedCarrier) {
+            delete targetVec.userData.lnDetachedCarrier;
+        }
+        if (targetVec.group) {
+            targetVec.group.userData = targetVec.group.userData || {};
+            targetVec.group.userData.lnParamBankKey = bankKey;
+        }
+        return targetVec;
+    }
+
+    _getLayerNormParamBankKey(targetVec) {
+        const key = targetVec?.userData?.lnParamBankKey || targetVec?.group?.userData?.lnParamBankKey || null;
+        return (typeof key === 'string' && key.length) ? key : null;
+    }
+
+    _markLayerNormParamBankDirty(targetVecOrKey) {
+        if (!this._dirtyLnParamBanks || !this._lnParamBanks) return false;
+        const key = typeof targetVecOrKey === 'string'
+            ? targetVecOrKey
+            : this._getLayerNormParamBankKey(targetVecOrKey);
+        if (!key || !this._lnParamBanks[key] || typeof this._lnParamBanks[key].syncAll !== 'function') {
+            return false;
+        }
+        this._dirtyLnParamBanks.add(key);
+        return true;
+    }
+
+    _setLayerNormParamRefLayout(targetVec, { x = null, y = null, z = null, visible = null } = {}) {
+        const group = targetVec?.group;
+        if (!group) return false;
+        let changed = false;
+        if (Number.isFinite(x) && group.position.x !== x) {
+            group.position.x = x;
+            changed = true;
+        }
+        if (Number.isFinite(y) && group.position.y !== y) {
+            group.position.y = y;
+            changed = true;
+        }
+        if (Number.isFinite(z) && group.position.z !== z) {
+            group.position.z = z;
+            changed = true;
+        }
+        if (visible !== null) {
+            const nextVisible = !!visible;
+            if (group.visible !== nextVisible) {
+                group.visible = nextVisible;
+                changed = true;
+            }
+        }
+        if (changed) {
+            this._markLayerNormParamBankDirty(targetVec);
+        }
+        return changed;
+    }
+
+    _clearDirtyLayerNormParamBanks() {
+        this._dirtyLnParamBanks?.clear();
+    }
+
+    _flushDirtyLayerNormParamBanks() {
+        if (!this._dirtyLnParamBanks || !this._dirtyLnParamBanks.size || !this._lnParamBanks) return;
+        for (const key of this._dirtyLnParamBanks) {
+            const bank = this._lnParamBanks[key];
+            if (!bank || typeof bank.syncAll !== 'function') continue;
+            try {
+                bank.syncAll();
+            } catch (_) { /* LayerNorm placeholders are non-critical visuals. */ }
+        }
+        this._dirtyLnParamBanks.clear();
+    }
+
+    _materializeLayerNormResultVector(targetVec, fallbackLabel = null, fallbackMeta = null) {
+        if (!targetVec || !targetVec.group || !targetVec.isBatchedVectorRef) return targetVec;
+        const bankKey = this._getLayerNormParamBankKey(targetVec);
+        if (!bankKey) return targetVec;
+
+        targetVec.userData = targetVec.userData || {};
+        const existingCarrier = targetVec.userData.lnDetachedCarrier;
+        if (existingCarrier && existingCarrier.group && existingCarrier.group.parent) {
+            return existingCarrier;
+        }
+        if (existingCarrier) {
+            delete targetVec.userData.lnDetachedCarrier;
+        }
+
+        const instanceCount = Number.isFinite(targetVec.instanceCount)
+            ? Math.max(1, Math.floor(targetVec.instanceCount))
+            : this._getBaseVectorLength();
+        const seedData = (Array.isArray(targetVec.rawData) || ArrayBuffer.isView(targetVec.rawData))
+            ? Array.from(targetVec.rawData)
+            : new Array(instanceCount).fill(0);
+        const carrierVec = this._createPrismVector(
+            seedData,
+            targetVec.group.position.clone(),
+            30,
+            instanceCount
+        );
+        this.raycastRoot.add(carrierVec.group);
+        carrierVec.group.visible = false;
+        carrierVec.group.quaternion.copy(targetVec.group.quaternion);
+        carrierVec.group.scale.copy(targetVec.group.scale);
+        copyVectorAppearance(carrierVec, targetVec, fallbackLabel, fallbackMeta);
+        carrierVec.group.visible = targetVec.group.visible;
+
+        const carriedTrail = targetVec.userData.trail;
+        if (carriedTrail) {
+            carrierVec.userData = carrierVec.userData || {};
+            carrierVec.userData.trail = carriedTrail;
+            if (targetVec.userData.trailWorld) {
+                carrierVec.userData.trailWorld = true;
+                carrierVec.group.getWorldPosition(TMP_WORLD_POS);
+                if (typeof carriedTrail.snapLastPointTo === 'function') {
+                    carriedTrail.snapLastPointTo(TMP_WORLD_POS);
+                } else if (typeof carriedTrail.update === 'function') {
+                    carriedTrail.update(TMP_WORLD_POS);
+                }
+            } else {
+                delete carrierVec.userData.trailWorld;
+                if (typeof carriedTrail.snapLastPointTo === 'function') {
+                    carriedTrail.snapLastPointTo(carrierVec.group.position);
+                } else if (typeof carriedTrail.update === 'function') {
+                    carriedTrail.update(carrierVec.group.position);
+                }
+            }
+            delete targetVec.userData.trail;
+            delete targetVec.userData.trailWorld;
+        }
+
+        targetVec.userData.lnDetachedCarrier = carrierVec;
+        carrierVec.userData = carrierVec.userData || {};
+        carrierVec.userData.lnParamSource = targetVec;
+        this._setLayerNormParamRefLayout(targetVec, { visible: false });
+        return carrierVec;
+    }
+
     _animateMultiplyTransition({ sourceVec, multResult, scaleParam = null, instant = false, onComplete = null }) {
         const finish = () => {
-            if (scaleParam && scaleParam.group) {
-                scaleParam.group.visible = false;
-            }
+            this._setLayerNormParamRefLayout(scaleParam, { visible: false });
             if (sourceVec && sourceVec.group) {
                 sourceVec.group.visible = false;
                 if (sourceVec.group.parent) {
@@ -3899,11 +4040,9 @@ export default class Gpt2Layer extends BaseLayer {
         multResult.group.scale.set(1, 1, 1);
         this._setVectorOpacity(sourceVec, 1);
         this._setVectorOpacity(multResult, 1);
-        if (scaleParam && scaleParam.group) {
-            // Hide parameter vector during the handoff tween to avoid blended
-            // overlap colors that can read as random/glitchy.
-            scaleParam.group.visible = false;
-        }
+        // Hide parameter vector during the handoff tween to avoid blended
+        // overlap colors that can read as random/glitchy.
+        this._setLayerNormParamRefLayout(scaleParam, { visible: false });
 
         const tweenState = { t: 0 };
         new TWEEN.Tween(tweenState)
@@ -3960,7 +4099,7 @@ export default class Gpt2Layer extends BaseLayer {
     }
 
     _applyLayerNormParamVector(targetVec, kind, param, colorOptions = null) {
-        return applyLayerNormParamVectorForLayer(
+        const applied = applyLayerNormParamVectorForLayer(
             this,
             targetVec,
             kind,
@@ -3968,6 +4107,10 @@ export default class Gpt2Layer extends BaseLayer {
             colorOptions,
             this._getBaseVectorLength()
         );
+        if (applied) {
+            this._markLayerNormParamBankDirty(targetVec);
+        }
+        return applied;
     }
 
     _getTokenIndexForLane(laneIdx, laneLayoutIdx = null) {

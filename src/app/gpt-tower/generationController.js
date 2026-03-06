@@ -14,7 +14,7 @@ import { resolveLogitTokenSeed } from './logitColor.js';
 import { initTouchClickFallback } from '../../ui/touchClickFallback.js';
 
 const DEFAULT_ADVANCE_SECONDS = 10;
-const KV_DECODE_SINGLE_LANE_TRAIL_WIDTH_MULTIPLIER = 6.0;
+const KV_DECODE_SINGLE_LANE_TRAIL_WIDTH_MULTIPLIER = 8.0;
 const KV_DECODE_SINGLE_LANE_TRAIL_OPACITY_BOOST = 2.2;
 
 export function buildPassState({

@@ -29,7 +29,8 @@ export const TOKEN_CHIP_STYLE = {
     staticGap: 200,
     staticZOffset: 0,
     cameraHoldMs: 800,
-    cameraReturnMs: 0
+    cameraReturnMs: 0,
+    secondaryTextColor: 0xebe7df
 };
 
 export const POSITION_CHIP_STYLE = {

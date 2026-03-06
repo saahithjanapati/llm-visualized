@@ -150,6 +150,10 @@ export function animateVectorMatrixPassThrough(
     vectorCategory = 'K',
 ) {
     const useBatched = !!(ctx && ctx.useBatchedPassThrough && typeof ctx._registerPassThroughJob === 'function');
+    const markVectorLayoutDirty = (vec) => {
+        if (!ctx || typeof ctx._markBatchedVectorLayoutDirty !== 'function') return false;
+        return ctx._markBatchedVectorLayoutDirty(vec) === true;
+    };
 
     if (!vector || !matrix) {
         console.warn('Missing vector or matrix for pass-through animation in MHSA.');
@@ -194,6 +198,7 @@ export function animateVectorMatrixPassThrough(
         if (mat.group && Number.isFinite(mat.group.position.x)) {
             vec.group.position.x = mat.group.position.x;
         }
+        markVectorLayoutDirty(vec);
     };
 
     alignVectorToMatrixLane(vector, matrix);
@@ -238,6 +243,7 @@ export function animateVectorMatrixPassThrough(
 
             if (vectorRef && vectorRef.group) {
                 vectorRef.group.position.y = y;
+                markVectorLayoutDirty(vectorRef);
             }
 
             // Update trails only while BELOW the matrix; no trails above matrices
@@ -445,6 +451,7 @@ export function animateVectorMatrixPassThrough(
             //  Vector motion       
             // --------------------------------------------------------------
             vector.group.position.y = tweenState.y;
+            markVectorLayoutDirty(vector);
             // Update trails only while BELOW the matrix; no trails above matrices
             try {
                 const ud = vector.userData || {};

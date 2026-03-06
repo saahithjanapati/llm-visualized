@@ -123,6 +123,10 @@ class BatchedVectorRef {
     markInstanceMatrixDirty() {
         this._batch.markInstanceMatrixDirty();
     }
+
+    markLayoutDirty() {
+        this._batch.markVectorLayoutDirty(this._index);
+    }
 }
 
 export class BatchedPrismVectorSet {
@@ -200,6 +204,7 @@ varying float vGradientT;`
         // Instances can span far from the origin; disable frustum culling to avoid popping.
         this.mesh.frustumCulled = false;
         this._boundsDirty = false;
+        this._dirtyVectorIndices = new Set();
 
         const colorStartArr = new Float32Array(this.totalInstances * 3);
         const colorEndArr = new Float32Array(this.totalInstances * 3);
@@ -237,6 +242,17 @@ varying float vGradientT;`
         this.mesh.instanceMatrix.needsUpdate = true;
     }
 
+    markVectorLayoutDirty(indexOrRef) {
+        const idx = typeof indexOrRef === 'number'
+            ? Math.floor(indexOrRef)
+            : Number.isFinite(indexOrRef?._index)
+                ? Math.floor(indexOrRef._index)
+                : null;
+        if (!Number.isFinite(idx) || idx < 0 || idx >= this.vectorCount) return false;
+        this._dirtyVectorIndices.add(idx);
+        return true;
+    }
+
     getVectorRef(index) {
         const idx = Math.max(0, Math.min(this.vectorCount - 1, Math.floor(index)));
         let ref = this._vectorRefs[idx];
@@ -262,9 +278,14 @@ varying float vGradientT;`
         }
         ref._customMatrices = false;
         this._writeVectorMatrices(index, ref.group.position, ref.group.visible);
+        // Spawns/reuses can reposition the vector before the next batch-wide
+        // sync pass; flag the instance buffer immediately so the visible copy
+        // stays at the live trail frontier instead of one frame behind.
+        this.mesh.instanceMatrix.needsUpdate = true;
         ref._lastPos.copy(ref.group.position);
         ref._lastVisible = ref.group.visible;
         ref._matricesInitialized = true;
+        this._dirtyVectorIndices.delete(index);
         this.updateVectorRaycastInfo(index, ref);
         if (ref.group.visible && !wasVisible) {
             this._invalidateBounds();
@@ -429,6 +450,7 @@ varying float vGradientT;`
             ref._lastPos.copy(ref.group.position);
             ref._lastVisible = ref.group.visible;
             ref._matricesInitialized = true;
+            this._dirtyVectorIndices.delete(index);
             this.updateVectorRaycastInfo(index, ref);
             if (ref.group.visible && !wasVisible) {
                 this._invalidateBounds();
@@ -447,6 +469,7 @@ varying float vGradientT;`
             ref._lastPos.copy(ref.group.position);
             ref._lastVisible = ref.group.visible;
             ref._matricesInitialized = true;
+            this._dirtyVectorIndices.delete(index);
             this.updateVectorRaycastInfo(index, ref);
             if (ref.group.visible && !wasVisible) {
                 this._invalidateBounds();
@@ -557,6 +580,7 @@ varying float vGradientT;`
         ref._lastPos.copy(ref.group.position);
         ref._lastVisible = ref.group.visible;
         ref._matricesInitialized = true;
+        this._dirtyVectorIndices.delete(index);
         this.updateVectorRaycastInfo(index, ref);
         if (ref.group.visible && !wasVisible) {
             this._invalidateBounds();
@@ -663,6 +687,14 @@ varying float vGradientT;`
                 didMatrixUpdate = true;
                 continue;
             }
+            if (!ref._lastVisible) {
+                this._writeVectorMatrices(i, ref.group.position, true);
+                ref._lastPos.copy(ref.group.position);
+                ref._lastVisible = true;
+                boundsDirty = true;
+                didMatrixUpdate = true;
+                continue;
+            }
             const dx = ref.group.position.x - ref._lastPos.x;
             const dy = ref.group.position.y - ref._lastPos.y;
             const dz = ref.group.position.z - ref._lastPos.z;
@@ -681,6 +713,65 @@ varying float vGradientT;`
             this.mesh.boundingBox = null;
             this._boundsDirty = false;
         }
+        if (this._dirtyVectorIndices.size) {
+            this._dirtyVectorIndices.clear();
+        }
+    }
+
+    syncDirty() {
+        if (!this._dirtyVectorIndices || this._dirtyVectorIndices.size === 0) return;
+        let boundsDirty = this._boundsDirty;
+        let didMatrixUpdate = false;
+        for (const i of this._dirtyVectorIndices) {
+            const ref = this._vectorRefs[i];
+            if (!ref) continue;
+            if (!ref.group.visible) {
+                if (ref._lastVisible) {
+                    this._writeVectorMatrices(i, ref.group.position, false);
+                    ref._customMatrices = false;
+                    ref._lastVisible = false;
+                    ref._matricesInitialized = true;
+                    boundsDirty = true;
+                    didMatrixUpdate = true;
+                }
+                continue;
+            }
+            if (!ref._matricesInitialized) {
+                this._writeVectorMatrices(i, ref.group.position, true);
+                ref._lastPos.copy(ref.group.position);
+                ref._lastVisible = true;
+                ref._matricesInitialized = true;
+                boundsDirty = true;
+                didMatrixUpdate = true;
+                continue;
+            }
+            if (!ref._lastVisible) {
+                this._writeVectorMatrices(i, ref.group.position, true);
+                ref._lastPos.copy(ref.group.position);
+                ref._lastVisible = true;
+                boundsDirty = true;
+                didMatrixUpdate = true;
+                continue;
+            }
+            const dx = ref.group.position.x - ref._lastPos.x;
+            const dy = ref.group.position.y - ref._lastPos.y;
+            const dz = ref.group.position.z - ref._lastPos.z;
+            if (dx || dy || dz) {
+                this._offsetVectorMatrices(i, dx, dy, dz);
+                ref._lastPos.copy(ref.group.position);
+                didMatrixUpdate = true;
+            }
+            ref._lastVisible = true;
+        }
+        if (didMatrixUpdate) {
+            this.mesh.instanceMatrix.needsUpdate = true;
+        }
+        if (boundsDirty) {
+            this.mesh.boundingSphere = null;
+            this.mesh.boundingBox = null;
+            this._boundsDirty = false;
+        }
+        this._dirtyVectorIndices.clear();
     }
 
     _invalidateBounds() {

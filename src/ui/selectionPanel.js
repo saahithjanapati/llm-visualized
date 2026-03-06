@@ -2056,64 +2056,76 @@ function resolvePreviewObject(label, selectionInfo) {
 
 function fitObjectToView(object, camera, options = {}) {
     if (!object) return;
-    const { baseScale, basePosition } = (() => {
-        if (!object.userData) object.userData = {};
-        if (object.userData.__previewBaseScale instanceof THREE.Vector3) {
-            return {
-                baseScale: object.userData.__previewBaseScale.clone(),
-                basePosition: object.userData.__previewBasePosition instanceof THREE.Vector3
-                    ? object.userData.__previewBasePosition.clone()
-                    : new THREE.Vector3(object.position.x, object.position.y, object.position.z)
-            };
+    const previousRotation = object.rotation?.isEuler ? object.rotation.clone() : null;
+    if (previousRotation) {
+        // Fit against a stable neutral pose so repeated refits do not drift as
+        // the preview spins.
+        object.rotation.set(0, 0, 0);
+    }
+    try {
+        const { baseScale, basePosition } = (() => {
+            if (!object.userData) object.userData = {};
+            if (object.userData.__previewBaseScale instanceof THREE.Vector3) {
+                return {
+                    baseScale: object.userData.__previewBaseScale.clone(),
+                    basePosition: object.userData.__previewBasePosition instanceof THREE.Vector3
+                        ? object.userData.__previewBasePosition.clone()
+                        : new THREE.Vector3(object.position.x, object.position.y, object.position.z)
+                };
+            }
+            const stored = new THREE.Vector3(object.scale.x, object.scale.y, object.scale.z);
+            object.userData.__previewBaseScale = stored.clone();
+            const storedPos = new THREE.Vector3(object.position.x, object.position.y, object.position.z);
+            object.userData.__previewBasePosition = storedPos.clone();
+            return { baseScale: stored, basePosition: storedPos };
+        })();
+        object.scale.copy(baseScale);
+        object.position.copy(basePosition);
+        const box = getObjectBounds(object);
+        if (box.isEmpty()) return;
+        const size = new THREE.Vector3();
+        const center = new THREE.Vector3();
+        box.getSize(size);
+        box.getCenter(center);
+        object.position.sub(center);
+        const paddingMult = Number.isFinite(options.paddingMultiplier) ? options.paddingMultiplier : 1;
+        const distanceMult = Number.isFinite(options.distanceMultiplier) ? options.distanceMultiplier : 1;
+        const maxDim = Math.max(size.x, size.y, size.z);
+        const scale = maxDim > 0 ? PREVIEW_TARGET_SIZE / (maxDim * PREVIEW_FRAME_PADDING * paddingMult) : 1;
+        object.scale.set(baseScale.x * scale, baseScale.y * scale, baseScale.z * scale);
+
+        const scaledBox = getObjectBounds(object);
+        const scaledSize = new THREE.Vector3();
+        scaledBox.getSize(scaledSize);
+        const scaledMax = Math.max(scaledSize.x, scaledSize.y, scaledSize.z);
+        const vFov = THREE.MathUtils.degToRad(camera.fov);
+        const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
+        const halfX = scaledSize.x * 0.5;
+        const halfY = scaledSize.y * 0.5;
+        const halfZ = scaledSize.z * 0.5;
+        const tilt = Math.abs(PREVIEW_BASE_TILT_X);
+        // Preview objects spin around Y, so use the radial XZ envelope to keep the
+        // full rotating silhouette inside frame on narrow preview canvases.
+        const radialHalf = Math.hypot(halfX, halfZ);
+        const verticalHalf = Math.abs(halfY * Math.cos(tilt)) + Math.abs(radialHalf * Math.sin(tilt));
+        const horizontalHalf = radialHalf;
+        const distY = verticalHalf / Math.tan(vFov / 2);
+        const distX = horizontalHalf / Math.tan(hFov / 2);
+        const distance = Math.max(distX, distY)
+            * PREVIEW_ROTATION_ENVELOPE_MARGIN
+            * PREVIEW_BASE_DISTANCE_MULT
+            * distanceMult;
+
+        camera.near = Math.max(0.1, distance / 50);
+        camera.far = Math.max(distance * 20, distance + scaledMax * 4);
+        camera.position.set(0, 0, distance * 1.1);
+        camera.lookAt(0, 0, 0);
+        camera.updateProjectionMatrix();
+    } finally {
+        if (previousRotation) {
+            object.rotation.copy(previousRotation);
         }
-        const stored = new THREE.Vector3(object.scale.x, object.scale.y, object.scale.z);
-        object.userData.__previewBaseScale = stored.clone();
-        const storedPos = new THREE.Vector3(object.position.x, object.position.y, object.position.z);
-        object.userData.__previewBasePosition = storedPos.clone();
-        return { baseScale: stored, basePosition: storedPos };
-    })();
-    object.scale.copy(baseScale);
-    object.position.copy(basePosition);
-    const box = getObjectBounds(object);
-    if (box.isEmpty()) return;
-    const size = new THREE.Vector3();
-    const center = new THREE.Vector3();
-    box.getSize(size);
-    box.getCenter(center);
-    object.position.sub(center);
-    const paddingMult = Number.isFinite(options.paddingMultiplier) ? options.paddingMultiplier : 1;
-    const distanceMult = Number.isFinite(options.distanceMultiplier) ? options.distanceMultiplier : 1;
-    const maxDim = Math.max(size.x, size.y, size.z);
-    const scale = maxDim > 0 ? PREVIEW_TARGET_SIZE / (maxDim * PREVIEW_FRAME_PADDING * paddingMult) : 1;
-    object.scale.set(baseScale.x * scale, baseScale.y * scale, baseScale.z * scale);
-
-    const scaledBox = getObjectBounds(object);
-    const scaledSize = new THREE.Vector3();
-    scaledBox.getSize(scaledSize);
-    const scaledMax = Math.max(scaledSize.x, scaledSize.y, scaledSize.z);
-    const vFov = THREE.MathUtils.degToRad(camera.fov);
-    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
-    const halfX = scaledSize.x * 0.5;
-    const halfY = scaledSize.y * 0.5;
-    const halfZ = scaledSize.z * 0.5;
-    const tilt = Math.abs(PREVIEW_BASE_TILT_X);
-    // Preview objects spin around Y, so use the radial XZ envelope to keep the
-    // full rotating silhouette inside frame on narrow preview canvases.
-    const radialHalf = Math.hypot(halfX, halfZ);
-    const verticalHalf = Math.abs(halfY * Math.cos(tilt)) + Math.abs(radialHalf * Math.sin(tilt));
-    const horizontalHalf = radialHalf;
-    const distY = verticalHalf / Math.tan(vFov / 2);
-    const distX = horizontalHalf / Math.tan(hFov / 2);
-    const distance = Math.max(distX, distY)
-        * PREVIEW_ROTATION_ENVELOPE_MARGIN
-        * PREVIEW_BASE_DISTANCE_MULT
-        * distanceMult;
-
-    camera.near = Math.max(0.1, distance / 50);
-    camera.far = Math.max(distance * 20, distance + scaledMax * 4);
-    camera.position.set(0, 0, distance * 1.1);
-    camera.lookAt(0, 0, 0);
-    camera.updateProjectionMatrix();
+    }
 }
 
 class SelectionPanel {

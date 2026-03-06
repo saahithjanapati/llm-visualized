@@ -73,6 +73,7 @@ export function createFreshLanes(layer, offsetX, ln1CenterY, ln2CenterY, ln1TopY
             localLaneIdx
         );
     }
+    layer._flushDirtyLayerNormParamBanks?.();
     if (layer._ln1AddPlaceholders && layer._ln1AddPlaceholders.every(p => !p)) {
         layer._ln1AddPlaceholders = [];
     }
@@ -127,24 +128,52 @@ export function createAdditionPlaceholders(layer, offsetX, ln1CenterY, ln2Center
                 : localLaneIdx;
             const zPos = -LN_PARAMS.depth / 2 + slitSpacing * (laneLayoutIdx + 1);
 
-            const ln1ScaleRef = banks.ln1Scale.getVectorRef(localLaneIdx);
-            ln1ScaleRef.group.position.set(offsetX, ln1CenterY + 3.3, zPos);
-            ln1ScaleRef.group.visible = true;
+            const ln1ScaleRef = layer._registerLayerNormParamBankRef(
+                banks.ln1Scale.getVectorRef(localLaneIdx),
+                'ln1Scale'
+            );
+            layer._setLayerNormParamRefLayout(ln1ScaleRef, {
+                x: offsetX,
+                y: ln1CenterY + 3.3,
+                z: zPos,
+                visible: true
+            });
             layer._applyLayerNormParamVector(ln1ScaleRef, 'ln1', 'scale', LN_PARAM_MONOCHROME);
 
-            const ln1ShiftRef = banks.ln1Shift.getVectorRef(localLaneIdx);
-            ln1ShiftRef.group.position.set(offsetX, ln1CenterY + addYOffset, zPos);
-            ln1ShiftRef.group.visible = true;
+            const ln1ShiftRef = layer._registerLayerNormParamBankRef(
+                banks.ln1Shift.getVectorRef(localLaneIdx),
+                'ln1Shift'
+            );
+            layer._setLayerNormParamRefLayout(ln1ShiftRef, {
+                x: offsetX,
+                y: ln1CenterY + addYOffset,
+                z: zPos,
+                visible: true
+            });
             layer._applyLayerNormParamVector(ln1ShiftRef, 'ln1', 'shift', LN_PARAM_MONOCHROME);
 
-            const ln2ScaleRef = banks.ln2Scale.getVectorRef(localLaneIdx);
-            ln2ScaleRef.group.position.set(offsetX, ln2CenterY + 3.3, zPos);
-            ln2ScaleRef.group.visible = true;
+            const ln2ScaleRef = layer._registerLayerNormParamBankRef(
+                banks.ln2Scale.getVectorRef(localLaneIdx),
+                'ln2Scale'
+            );
+            layer._setLayerNormParamRefLayout(ln2ScaleRef, {
+                x: offsetX,
+                y: ln2CenterY + 3.3,
+                z: zPos,
+                visible: true
+            });
             layer._applyLayerNormParamVector(ln2ScaleRef, 'ln2', 'scale', LN_PARAM_MONOCHROME);
 
-            const ln2ShiftRef = banks.ln2Shift.getVectorRef(localLaneIdx);
-            ln2ShiftRef.group.position.set(offsetX, ln2CenterY + addYOffset, zPos);
-            ln2ShiftRef.group.visible = true;
+            const ln2ShiftRef = layer._registerLayerNormParamBankRef(
+                banks.ln2Shift.getVectorRef(localLaneIdx),
+                'ln2Shift'
+            );
+            layer._setLayerNormParamRefLayout(ln2ShiftRef, {
+                x: offsetX,
+                y: ln2CenterY + addYOffset,
+                z: zPos,
+                visible: true
+            });
             layer._applyLayerNormParamVector(ln2ShiftRef, 'ln2', 'shift', LN_PARAM_MONOCHROME);
         }
 
@@ -152,6 +181,7 @@ export function createAdditionPlaceholders(layer, offsetX, ln1CenterY, ln2Center
         banks.ln1Shift.syncAll();
         banks.ln2Scale.syncAll();
         banks.ln2Shift.syncAll();
+        layer._clearDirtyLayerNormParamBanks?.();
     } catch (_) {
         // Placeholders are a visual aid only - failures shouldn't stop the demo.
     }
@@ -183,6 +213,7 @@ export function createLanesFromExternal(layer, externalLanes, offsetX, ln1Center
             localLaneIdx
         );
     });
+    layer._flushDirtyLayerNormParamBanks?.();
     if (layer._ln1AddPlaceholders && layer._ln1AddPlaceholders.every(p => !p)) {
         layer._ln1AddPlaceholders = [];
     }
@@ -326,27 +357,43 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
 
     const addYOffset = LN_PARAMS.height * LN_ADD_VECTOR_OFFSET_FRACTION;
     const paramBanks = layer._lnParamBanks || null;
-    const multTarget = paramBanks && paramBanks.ln1Scale ? paramBanks.ln1Scale.getVectorRef(laneLocalIdx) : null;
-    const addTarget = paramBanks && paramBanks.ln1Shift ? paramBanks.ln1Shift.getVectorRef(laneLocalIdx) : null;
-    const multTargetLN2 = paramBanks && paramBanks.ln2Scale ? paramBanks.ln2Scale.getVectorRef(laneLocalIdx) : null;
-    const addTargetLN2 = paramBanks && paramBanks.ln2Shift ? paramBanks.ln2Shift.getVectorRef(laneLocalIdx) : null;
+    const multTarget = paramBanks && paramBanks.ln1Scale
+        ? layer._registerLayerNormParamBankRef(paramBanks.ln1Scale.getVectorRef(laneLocalIdx), 'ln1Scale')
+        : null;
+    const addTarget = paramBanks && paramBanks.ln1Shift
+        ? layer._registerLayerNormParamBankRef(paramBanks.ln1Shift.getVectorRef(laneLocalIdx), 'ln1Shift')
+        : null;
+    const multTargetLN2 = paramBanks && paramBanks.ln2Scale
+        ? layer._registerLayerNormParamBankRef(paramBanks.ln2Scale.getVectorRef(laneLocalIdx), 'ln2Scale')
+        : null;
+    const addTargetLN2 = paramBanks && paramBanks.ln2Shift
+        ? layer._registerLayerNormParamBankRef(paramBanks.ln2Shift.getVectorRef(laneLocalIdx), 'ln2Shift')
+        : null;
 
-    if (multTarget && multTarget.group) {
-        multTarget.group.position.set(offsetX, ln1CenterY + 3.3, zPos);
-        multTarget.group.visible = true;
-    }
-    if (addTarget && addTarget.group) {
-        addTarget.group.position.set(offsetX, ln1CenterY + addYOffset, zPos);
-        addTarget.group.visible = true;
-    }
-    if (multTargetLN2 && multTargetLN2.group) {
-        multTargetLN2.group.position.set(offsetX, ln2CenterY + 3.3, zPos);
-        multTargetLN2.group.visible = true;
-    }
-    if (addTargetLN2 && addTargetLN2.group) {
-        addTargetLN2.group.position.set(offsetX, ln2CenterY + addYOffset, zPos);
-        addTargetLN2.group.visible = true;
-    }
+    layer._setLayerNormParamRefLayout(multTarget, {
+        x: offsetX,
+        y: ln1CenterY + 3.3,
+        z: zPos,
+        visible: true
+    });
+    layer._setLayerNormParamRefLayout(addTarget, {
+        x: offsetX,
+        y: ln1CenterY + addYOffset,
+        z: zPos,
+        visible: true
+    });
+    layer._setLayerNormParamRefLayout(multTargetLN2, {
+        x: offsetX,
+        y: ln2CenterY + 3.3,
+        z: zPos,
+        visible: true
+    });
+    layer._setLayerNormParamRefLayout(addTargetLN2, {
+        x: offsetX,
+        y: ln2CenterY + addYOffset,
+        z: zPos,
+        visible: true
+    });
 
     // Fallback to previous trail if a new one wasn't created in this constructor.
     if (!trail && trailFromPrev) trail = trailFromPrev;

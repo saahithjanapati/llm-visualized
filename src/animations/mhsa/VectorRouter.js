@@ -39,6 +39,7 @@ export class VectorRouter {
         this.headStopY     = headStopY;
         this.mhaVisualizations = mhaVisualizations;
         this._acquireVector = typeof opts.acquireVector === 'function' ? opts.acquireVector : null;
+        this._markVectorLayoutDirty = typeof opts.markVectorLayoutDirty === 'function' ? opts.markVectorLayoutDirty : null;
         this._shareVectorData = !!opts.shareVectorData;
         this._trailFactory = typeof opts.trailFactory === 'function' ? opts.trailFactory : null;
         this._copyTrailOpacity = Number.isFinite(opts.copyTrailOpacity)
@@ -56,6 +57,43 @@ export class VectorRouter {
 
     setSkipToEndMode(enabled = false) {
         this._skipToEndActive = !!enabled;
+    }
+
+    _markLayoutDirty(vec) {
+        if (!vec || typeof this._markVectorLayoutDirty !== 'function') return false;
+        return this._markVectorLayoutDirty(vec) === true;
+    }
+
+    _setVectorVisible(vec, visible) {
+        const group = vec?.group;
+        if (!group) return false;
+        const nextVisible = !!visible;
+        if (group.visible === nextVisible) return false;
+        group.visible = nextVisible;
+        this._markLayoutDirty(vec);
+        return true;
+    }
+
+    _setVectorPosition(vec, { x = null, y = null, z = null } = {}) {
+        const group = vec?.group;
+        if (!group) return false;
+        let changed = false;
+        if (Number.isFinite(x) && group.position.x !== x) {
+            group.position.x = x;
+            changed = true;
+        }
+        if (Number.isFinite(y) && group.position.y !== y) {
+            group.position.y = y;
+            changed = true;
+        }
+        if (Number.isFinite(z) && group.position.z !== z) {
+            group.position.z = z;
+            changed = true;
+        }
+        if (changed) {
+            this._markLayoutDirty(vec);
+        }
+        return changed;
     }
 
     /**
@@ -107,7 +145,7 @@ export class VectorRouter {
 
                         const targetHeadIdx = lane.headIndex || 0;
                         if (targetHeadIdx >= this.headsCentersX.length) {
-                            tVec.group.visible = false;
+                            this._setVectorVisible(tVec, false);
                             lane.horizPhase = 'finishedHeads';
                             break;
                         }
@@ -136,14 +174,14 @@ export class VectorRouter {
                         const newX    = currentX + dir * step;
                         const arrived = Math.abs(targetX - newX) <= 0.0005;
 
-                        tVec.group.position.x = newX;
+                        this._setVectorPosition(tVec, { x: newX });
                         remaining -= step;
 
                         if (arrived) {
                             this._spawnUpwardCopyForHead(lane, targetHeadIdx, tVec);
                             lane.headIndex = targetHeadIdx + 1;
                             if (lane.headIndex >= NUM_HEAD_SETS_LAYER) {
-                                tVec.group.visible = false;
+                                this._setVectorVisible(tVec, false);
                                 lane.horizPhase = 'finishedHeads';
                             }
                         }
@@ -164,12 +202,14 @@ export class VectorRouter {
             if (lane.upwardCopies && lane.upwardCopies.length) {
                 lane.upwardCopies.forEach((upVec) => {
                     if (this._skipToEndActive) {
-                        upVec.group.position.y = this.headStopY;
+                        this._setVectorPosition(upVec, { y: this.headStopY });
                     } else if (upVec.group.position.y < this.headStopY) {
-                        upVec.group.position.y = Math.min(
-                            this.headStopY,
-                            upVec.group.position.y + MHSA_DUPLICATE_VECTOR_RISE_SPEED * GLOBAL_ANIM_SPEED_MULT * deltaTime
-                        );
+                        this._setVectorPosition(upVec, {
+                            y: Math.min(
+                                this.headStopY,
+                                upVec.group.position.y + MHSA_DUPLICATE_VECTOR_RISE_SPEED * GLOBAL_ANIM_SPEED_MULT * deltaTime
+                            )
+                        });
                     }
                     if (upVec.userData && upVec.userData.trail) {
                         const ud = upVec.userData;
@@ -286,16 +326,18 @@ export class VectorRouter {
                 lane.sideCopies.forEach((obj) => {
                     const v  = obj.vec;
                     if (this._skipToEndActive) {
-                        v.group.position.x = obj.targetX;
+                        this._setVectorPosition(v, { x: obj.targetX });
                     } else {
                         const dx = SIDE_COPY_HORIZ_SPEED * GLOBAL_ANIM_SPEED_MULT * deltaTime;
                         const deltaToTarget = obj.targetX - v.group.position.x;
                         if (Math.abs(deltaToTarget) > 0.01) {
                             const step = Math.min(Math.abs(deltaToTarget), dx);
-                            v.group.position.x += Math.sign(deltaToTarget || 1) * step;
+                            this._setVectorPosition(v, {
+                                x: v.group.position.x + Math.sign(deltaToTarget || 1) * step
+                            });
                         }
                     }
-                    v.group.position.y = this.headStopY;
+                    this._setVectorPosition(v, { y: this.headStopY });
                     if (v.userData && v.userData.trail) {
                         // Only update trail while below matrix level (consistent with other vectors)
                         const matrixBottomY = this.headStopY; // Q/V vectors stop at headStopY which is just below matrices
@@ -328,7 +370,7 @@ export class VectorRouter {
         while (targetHeadIdx < maxHeads) {
             const targetX = this.headsCentersX[targetHeadIdx];
             if (!Number.isFinite(targetX)) break;
-            tVec.group.position.x = targetX;
+            this._setVectorPosition(tVec, { x: targetX });
             if (tVec.userData && tVec.userData.trail && typeof tVec.userData.trail.update === 'function') {
                 tVec.userData.trail.update(tVec.group.position);
             }
@@ -337,7 +379,7 @@ export class VectorRouter {
         }
         lane.headIndex = targetHeadIdx;
         if (targetHeadIdx >= maxHeads) {
-            tVec.group.visible = false;
+            this._setVectorVisible(tVec, false);
             lane.horizPhase = 'finishedHeads';
         }
         if (tVec.userData && tVec.userData.trail && typeof tVec.userData.trail.update === 'function') {

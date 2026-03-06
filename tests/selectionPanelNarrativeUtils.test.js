@@ -43,6 +43,13 @@ describe('selectionPanelNarrativeUtils', () => {
         expect(eq).not.toContain('x_t^{\\text{tok}}');
     });
 
+    it('describes vocabulary embedding with GPT-2 vocabulary and model width', () => {
+        const desc = resolveDescription('Vocabulary Embedding', null, null);
+        expect(desc).toContain('50,257');
+        expect(desc).toContain('768-dimensional vector');
+        expect(desc).toContain('50,257 x 768');
+    });
+
     it('describes and equations weighted value vectors explicitly', () => {
         const eq = resolveSelectionEquations('Weighted Value Vector', null);
         expect(eq).toContain('\\tilde{V}_{t,j}');

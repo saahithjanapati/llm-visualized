@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { VECTOR_LENGTH_PRISM, SA_RED_EXTRA_RISE, SA_V_RISE_DURATION_MS, SA_K_ALIGN_DURATION_MS, SA_BLUE_HORIZ_DURATION_MS, SA_BLUE_VERT_DURATION_MS, SA_BLUE_PAUSE_MS, SA_BLUE_QUEUE_SHIFT_DURATION_MS, SA_BLUE_PREPASS_SLOW_MULT, SA_DUPLICATE_POP_IN_MS, SA_DUPLICATE_TRAVEL_MERGE_MS, SA_DUPLICATE_POP_OUT_MS, SA_DUPLICATE_TO_SCORE_TRAVEL_FRACTION, SA_DUPLICATE_TO_SUM_TRAVEL_FRACTION, SA_DUPLICATE_SCORE_COLLISION_PULSE_MS, SA_DUPLICATE_SCORE_COLLISION_PULSE_MIN, SA_DUPLICATE_SCORE_COLLISION_PULSE_MAX, SA_DUPLICATE_SCORE_COLLISION_HALO_OPACITY, SA_DUPLICATE_SCORE_COLLISION_HALO_START_SCALE, SA_DUPLICATE_SCORE_COLLISION_HALO_END_SCALE, SA_DUPLICATE_SCORE_COLLISION_HALO_COLOR, SA_DUPLICATE_SCORE_COLLISION_HALO_DURATION_MULT, ATTENTION_POST_SOFTMAX_GRAYSCALE_MIN, GLOBAL_ANIM_SPEED_MULT, SELF_ATTENTION_TIME_MULT } from '../../utils/constants.js';
+import { VECTOR_LENGTH_PRISM, SA_RED_EXTRA_RISE, SA_V_RISE_DURATION_MS, SA_K_ALIGN_DURATION_MS, SA_BLUE_HORIZ_DURATION_MS, SA_BLUE_VERT_DURATION_MS, SA_BLUE_PAUSE_MS, SA_BLUE_PREPASS_SLOW_MULT, SA_DUPLICATE_POP_IN_MS, SA_DUPLICATE_TRAVEL_MERGE_MS, SA_DUPLICATE_POP_OUT_MS, SA_DUPLICATE_TO_SCORE_TRAVEL_FRACTION, SA_DUPLICATE_TO_SUM_TRAVEL_FRACTION, SA_DUPLICATE_SCORE_COLLISION_PULSE_MS, SA_DUPLICATE_SCORE_COLLISION_PULSE_MIN, SA_DUPLICATE_SCORE_COLLISION_PULSE_MAX, SA_DUPLICATE_SCORE_COLLISION_HALO_OPACITY, SA_DUPLICATE_SCORE_COLLISION_HALO_START_SCALE, SA_DUPLICATE_SCORE_COLLISION_HALO_END_SCALE, SA_DUPLICATE_SCORE_COLLISION_HALO_COLOR, SA_DUPLICATE_SCORE_COLLISION_HALO_DURATION_MULT, ATTENTION_POST_SOFTMAX_GRAYSCALE_MIN, GLOBAL_ANIM_SPEED_MULT, SELF_ATTENTION_TIME_MULT } from '../../utils/constants.js';
 import { VectorVisualizationInstancedPrism } from '../../components/VectorVisualizationInstancedPrism.js';
 import { mapValueToColor, mapValueToGrayscale, buildHueRangeOptions, mapValueToHueRange } from '../../utils/colors.js';
 import { buildActivationData, applyActivationDataToVector } from '../../utils/activationMetadata.js';
@@ -24,6 +24,7 @@ function logMhsaDebug(...args) {
 
 // Shared lightweight geometry for self-attention highlight spheres
 const SHARED_SPHERE_GEOMETRY = new THREE.SphereGeometry(10, 12, 12);
+const BLUE_ENTRY_DURATION_MULT = 1.75;
 
 /**
  * Self-attention specific, above-matrix animations.
@@ -44,8 +45,9 @@ const SHARED_SPHERE_GEOMETRY = new THREE.SphereGeometry(10, 12, 12);
  *        c) Slide horizontally so it sits over the red matrix (x = V)
  *        d) Travel i positions visiting the red vectors, pausing at each.
  *        e) Fade the vector out (dispose + remove from scene).
- *    • When a blue vector leaves the queue we shift the remaining blue vectors
- *      up by one position so they visually fill the gap (like a conveyor belt).
+ *    • Blue vectors stay parked at their original slit positions until called.
+ *      When it is a vector's turn, that vector alone moves into the front slot
+ *      before starting the lane traversal.
  *    • The same logic runs in parallel for every attention head.
  */
 export class SelfAttentionAnimator {
@@ -110,7 +112,6 @@ export class SelfAttentionAnimator {
     get BLUE_HORIZ_DURATION() { return SA_BLUE_HORIZ_DURATION_MS * SELF_ATTENTION_TIME_MULT; }
     get BLUE_VERT_DURATION() { return SA_BLUE_VERT_DURATION_MS * SELF_ATTENTION_TIME_MULT; }
     get BLUE_PAUSE_MS() { return SA_BLUE_PAUSE_MS * SELF_ATTENTION_TIME_MULT; }
-    get BLUE_QUEUE_SHIFT_DURATION() { return SA_BLUE_QUEUE_SHIFT_DURATION_MS * SELF_ATTENTION_TIME_MULT; }
     get DUPLICATE_POP_IN_MS() { return SA_DUPLICATE_POP_IN_MS * SELF_ATTENTION_TIME_MULT; }
     get DUPLICATE_TRAVEL_MERGE_MS() { return SA_DUPLICATE_TRAVEL_MERGE_MS * SELF_ATTENTION_TIME_MULT; }
     get DUPLICATE_POP_OUT_MS() { return SA_DUPLICATE_POP_OUT_MS * SELF_ATTENTION_TIME_MULT; }
@@ -156,6 +157,11 @@ export class SelfAttentionAnimator {
         }
         this._registerTimeout(cancelFn);
         return cancelFn;
+    }
+
+    _markVectorLayoutDirty(vec) {
+        if (!this.ctx || typeof this.ctx._markBatchedVectorLayoutDirty !== 'function') return false;
+        return this.ctx._markBatchedVectorLayoutDirty(vec) === true;
     }
 
     _cleanupAttentionScoreMeshes() {
@@ -808,7 +814,10 @@ export class SelfAttentionAnimator {
         new TWEEN.Tween({ y: vector.group.position.y })
             .to({ y: vector.group.position.y + this.RED_EXTRA_RISE }, this.V_RISE_DURATION)
             .easing(TWEEN.Easing.Quadratic.Out)
-            .onUpdate(obj => { vector.group.position.y = obj.y; })
+            .onUpdate(obj => {
+                vector.group.position.y = obj.y;
+                this._markVectorLayoutDirty(vector);
+            })
             .onComplete(() => {
                 this._alignKVectorsUnderV(vector, onDone);
             })
@@ -851,6 +860,9 @@ export class SelfAttentionAnimator {
                 new TWEEN.Tween(green.group.position)
                     .to({ x: redX }, this.K_ALIGN_DURATION)
                     .easing(TWEEN.Easing.Quadratic.Out)
+                    .onUpdate(() => {
+                        this._markVectorLayoutDirty(green);
+                    })
                     .onComplete(() => {
                         alignmentsCompleted++;
                         if (alignmentsCompleted >= alignmentsInProgress) {
@@ -902,17 +914,6 @@ export class SelfAttentionAnimator {
             return az - bz;
         });
 
-        // If the conveyor belt is already running for this head, newly
-        // enqueued vectors may arrive slightly later than the initial batch.
-        // Without an immediate shift they would remain at their original
-        // positions until the next dequeued vector triggers a queue update,
-        // causing a visible "lagging" query at the tail.  To keep all blue
-        // vectors synchronized from the very start, realign the queue right
-        // away whenever processing is active.
-        if (this.blueProcessing[headIdx]) {
-            this._shiftRemainingBlueVectors(queue, headIdx);
-        }
-
         // If greens are already in position we can start processing immediately.
         if (this.greensAligned[headIdx]) {
             this._kickoffBlueConveyor(headIdx);
@@ -954,9 +955,6 @@ export class SelfAttentionAnimator {
         // Pop the first (top-most) blue vector
         const vector = queue.shift();
 
-        // Shift remaining blues up to fill the gap (simple visual feedback)
-        this._shiftRemainingBlueVectors(queue, headIdx);
-
         // i == 1-based index of this vector in processing order (1 for first vector, 2 for second, ...)
         const i = this.blueProcessedCount[headIdx] + 1; // shift to 1-based
         this.blueProcessedCount[headIdx] += 1;
@@ -993,23 +991,6 @@ export class SelfAttentionAnimator {
             delete this._activeBlueVectors[headIdx];
             // Recursive continuation
             this._processNextBlueVector(headIdx);
-        });
-    }
-
-    _shiftRemainingBlueVectors(queue, headIdx) {
-        if (this.skipRequested) return;
-        // Existing logic (unchanged)
-
-        const laneZs = Array.isArray(this.ctx?.sortedLaneZs) && this.ctx.sortedLaneZs.length
-            ? this.ctx.sortedLaneZs
-            : (this.ctx.currentLanes || []).map(l => l.zPos).sort((a, b) => a - b);
-        if (!laneZs.length) return;
-        queue.forEach((vec, idx) => {
-            const targetZ = laneZs[idx < laneZs.length ? idx : laneZs.length - 1];
-            new TWEEN.Tween(vec.group.position)
-                .to({ z: targetZ }, this.BLUE_QUEUE_SHIFT_DURATION)
-                .easing(TWEEN.Easing.Quadratic.InOut)
-                .start();
         });
     }
 
@@ -1709,31 +1690,80 @@ export class SelfAttentionAnimator {
         // Convenience alias for durations / easing
         const QEasing = TWEEN.Easing.Quadratic.InOut;
 
+        const startLaneTraversal = () => {
+            if (this.skipRequested) {
+                this._finishBlueImmediately(vector, headIdx, allDoneCb);
+                return;
+            }
+            // 3. Traverse along K vectors i times
+            const spheres = [];
+            this._traverseLanes(vector, laneZs, i, spheres, true, () => {
+                this._markAttentionRowComplete(headIdx, i - 1);
+                // Lift spheres upward to align with red vectors
+                this._riseSpheres(spheres, i - 1, headIdx);
+                // 4. Shrink the query vector away at the last K stop, then
+                // continue the weighted-sum traversal over the V column.
+                this._animateQueryVectorShrinkOut(vector, () => {
+                    this._startRedTraversalFromFirstCopy(headIdx, i, laneZs, spheres, allDoneCb);
+                });
+            });
+        };
+
         // ------------------------------------------------------------------
-        // 1. Move into the K-entry position in one synced motion (x + z).
-        //    This keeps the active blue vector in lockstep with queue shifts.
+        // 1. Move into the first lane depth, then slide across to the K column.
+        //    Drive the full L path with one tween so the corner does not pause.
         // ------------------------------------------------------------------
-        const entryDuration = Math.max(this.BLUE_VERT_DURATION, this.BLUE_HORIZ_DURATION);
-        new TWEEN.Tween(vector.group.position)
-            .to({ x: horizontalToK, z: firstLaneZ }, entryDuration)
+        const startX = vector.group.position.x;
+        const startZ = vector.group.position.z;
+        const needsVerticalEntry = Math.abs(startZ - firstLaneZ) > 0.0005;
+        const needsHorizontalEntry = Math.abs(startX - horizontalToK) > 0.0005;
+        if (!needsVerticalEntry && !needsHorizontalEntry) {
+            startLaneTraversal();
+            return;
+        }
+
+        const verticalDuration = needsVerticalEntry ? this.BLUE_VERT_DURATION * BLUE_ENTRY_DURATION_MULT : 0;
+        const horizontalDuration = needsHorizontalEntry ? this.BLUE_HORIZ_DURATION * BLUE_ENTRY_DURATION_MULT : 0;
+        const totalEntryDuration = Math.max(1, verticalDuration + horizontalDuration);
+        const cornerProgress = totalEntryDuration > 0 ? (verticalDuration / totalEntryDuration) : 0;
+        const entryState = { progress: 0 };
+
+        new TWEEN.Tween(entryState)
+            .to({ progress: 1 }, totalEntryDuration)
             .easing(QEasing)
+            .onUpdate(() => {
+                const progress = THREE.MathUtils.clamp(entryState.progress, 0, 1);
+                if (!needsVerticalEntry) {
+                    vector.group.position.z = firstLaneZ;
+                } else if (progress <= cornerProgress) {
+                    const verticalT = cornerProgress > 0 ? (progress / cornerProgress) : 1;
+                    vector.group.position.z = THREE.MathUtils.lerp(startZ, firstLaneZ, verticalT);
+                } else {
+                    vector.group.position.z = firstLaneZ;
+                }
+
+                if (!needsHorizontalEntry) {
+                    vector.group.position.x = horizontalToK;
+                } else if (!needsVerticalEntry) {
+                    vector.group.position.x = THREE.MathUtils.lerp(startX, horizontalToK, progress);
+                } else if (progress > cornerProgress) {
+                    const horizontalSpan = Math.max(1e-6, 1 - cornerProgress);
+                    const horizontalT = (progress - cornerProgress) / horizontalSpan;
+                    vector.group.position.x = THREE.MathUtils.lerp(startX, horizontalToK, horizontalT);
+                } else {
+                    vector.group.position.x = startX;
+                }
+                this._markVectorLayoutDirty(vector);
+            })
             .onComplete(() => {
+                vector.group.position.z = firstLaneZ;
+                vector.group.position.x = horizontalToK;
+                this._markVectorLayoutDirty(vector);
                 if (this.skipRequested) {
                     this._finishBlueImmediately(vector, headIdx, allDoneCb);
                     return;
                 }
-                // 3. Traverse along K vectors i times
-                const spheres = [];
-                this._traverseLanes(vector, laneZs, i, spheres, true, () => {
-                    this._markAttentionRowComplete(headIdx, i - 1);
-                    // Lift spheres upward to align with red vectors
-                    this._riseSpheres(spheres, i - 1, headIdx);
-                    // 4. Shrink the query vector away at the last K stop, then
-                    // continue the weighted-sum traversal over the V column.
-                    this._animateQueryVectorShrinkOut(vector, () => {
-                        this._startRedTraversalFromFirstCopy(headIdx, i, laneZs, spheres, allDoneCb);
-                    });
-                });
+                startLaneTraversal();
             })
             .start();
     }
@@ -1882,6 +1912,9 @@ export class SelfAttentionAnimator {
         new TWEEN.Tween(vector.group.position)
             .to({ z: targetZ }, laneHopDuration)
             .easing(TWEEN.Easing.Quadratic.InOut)
+            .onUpdate(() => {
+                this._markVectorLayoutDirty(vector);
+            })
             .onComplete(() => {
                 if (this.skipRequested) return;
                 const headIdx = (vector.userData && typeof vector.userData.headIndex === 'number') ? vector.userData.headIndex : null;
