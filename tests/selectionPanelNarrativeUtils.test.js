@@ -19,6 +19,26 @@ describe('selectionPanelNarrativeUtils', () => {
         expect(eq).not.toContain('_{i=1}^{h}');
     });
 
+    it('keeps attention symbols generic and binds the selected head on the right', () => {
+        const eq = resolveSelectionEquations('Attention Score', {
+            info: {
+                headIndex: 4,
+                activationData: {
+                    stage: 'attention.pre'
+                }
+            }
+        });
+        expect(eq).toContain('H_i =');
+        expect(eq).toContain('{Q}_i');
+        expect(eq).toContain('{K}_i');
+        expect(eq).toContain('{V}_i');
+        expect(eq).toContain('i=5');
+        expect(eq).not.toContain('H_{5}');
+        expect(eq).not.toContain('Q_{5}');
+        expect(eq).not.toContain('K_{5}');
+        expect(eq).not.toContain('V_{5}');
+    });
+
     it('returns layernorm equation context for normalized vectors', () => {
         const eq = resolveSelectionEquations('LayerNorm Normed Output', null);
         expect(eq).toContain('\\frac');
@@ -58,6 +78,35 @@ describe('selectionPanelNarrativeUtils', () => {
         const eq = resolveSelectionEquations('Vocabulary Embedding (Top)', null);
         expect(eq).toContain('softmax');
         expect(eq).not.toContain('x_t^{\\text{tok}}');
+    });
+
+    it('describes output shortlist probabilities and chosen-token appending explicitly', () => {
+        const topLogitsDesc = resolveDescription('Top Logit Bars', null, {
+            object: {
+                userData: { barCount: 40 },
+                parent: null
+            }
+        });
+        expect(topLogitsDesc).toContain('top 40 candidates');
+        expect(topLogitsDesc).toContain('softmax probability');
+        expect(topLogitsDesc).toContain('less than 100%');
+        expect(topLogitsDesc).toContain('top-k sampling');
+
+        const chosenDesc = resolveDescription('Chosen token: .', null, {
+            info: {
+                tokenIndex: 11,
+                logitEntry: {
+                    token: '.',
+                    token_id: 13,
+                    prob: 0.6882,
+                    logit: -51.8731
+                }
+            }
+        });
+        expect(chosenDesc).toContain('68.82%');
+        expect(chosenDesc).toContain('position 12');
+        expect(chosenDesc).toContain('top-k sampling');
+        expect(chosenDesc).toContain('winner of that selection step');
     });
 
     it('describes vocabulary embedding with GPT-2 vocabulary and model width', () => {
@@ -104,8 +153,8 @@ describe('selectionPanelNarrativeUtils', () => {
                 }
             }
         });
-        expect(desc).toContain('LayerNorm%201%20in%20layer%206');
-        expect(desc).not.toContain('block in layer 6');
+        expect(desc).toContain('LayerNorm%201%20in%20Layer%206');
+        expect(desc).not.toContain('block in Layer 6');
     });
 
     it('resolves attention-score-specific copy from stage', () => {

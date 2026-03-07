@@ -30,6 +30,15 @@ function mixLaneVector(hash, vec) {
     return nextHash;
 }
 
+function mixLaneAnimation(hash, anim) {
+    let nextHash = mixLaneHash(hash, anim && anim.isAnimating ? 1 : 0);
+    const elapsedMs = anim && Number.isFinite(anim._elapsedMs)
+        ? quantizeLaneCoord(anim._elapsedMs, 0.1)
+        : 0x7fffffff;
+    nextHash = mixLaneHash(nextHash, elapsedMs);
+    return nextHash;
+}
+
 function mixLaneActiveBranchVectors(hash, lane) {
     if (!lane) return hash;
 
@@ -56,6 +65,9 @@ function mixLaneActiveBranchVectors(hash, lane) {
         case LN2_PHASE.NOT_STARTED:
         default: {
             let nextHash = mixLaneVector(hash, lane.originalVec);
+            nextHash = mixLaneVector(nextHash, lane.dupVec);
+            nextHash = mixLaneVector(nextHash, lane.resultVec);
+            nextHash = mixLaneVector(nextHash, lane.travellingVec);
             nextHash = mixLaneVector(nextHash, lane.postAdditionVec);
             nextHash = mixLaneVector(nextHash, lane.movingVecLN2);
             nextHash = mixLaneVector(nextHash, lane.resultVecLN2);
@@ -71,16 +83,25 @@ export function getLaneProgressSignature(lane) {
     hash = mixLanePhase(hash, lane.horizPhase);
     hash = mixLanePhase(hash, lane.ln2Phase);
     hash = mixLaneHash(hash, lane.stopRise ? 1 : 0);
+    hash = mixLaneHash(hash, lane.normStarted ? 1 : 0);
+    hash = mixLaneHash(hash, lane.normApplied ? 1 : 0);
+    hash = mixLaneHash(hash, lane.multStarted ? 1 : 0);
     hash = mixLaneHash(hash, lane.ln1AddStarted ? 1 : 0);
     hash = mixLaneHash(hash, lane.ln1AddComplete ? 1 : 0);
+    hash = mixLaneHash(hash, lane.normStartedLN2 ? 1 : 0);
+    hash = mixLaneHash(hash, lane.normAppliedLN2 ? 1 : 0);
+    hash = mixLaneHash(hash, lane.multDoneLN2 ? 1 : 0);
     hash = mixLaneHash(hash, lane.ln2AddStarted ? 1 : 0);
     hash = mixLaneHash(hash, lane.ln2AddComplete ? 1 : 0);
     hash = mixLaneHash(hash, lane.mlpUpStarted ? 1 : 0);
     hash = mixLaneHash(hash, lane.mlpDownStarted ? 1 : 0);
     hash = mixLaneHash(hash, lane.mlpDownComplete ? 1 : 0);
+    hash = mixLaneHash(hash, lane.mlpReturnStarted ? 1 : 0);
     hash = mixLaneHash(hash, quantizeLaneCoord(lane.ln1ShiftProgress));
     hash = mixLaneHash(hash, quantizeLaneCoord(lane.mhsaResidualAddProgress));
     hash = mixLaneHash(hash, quantizeLaneCoord(lane.ln2ShiftProgress));
+    hash = mixLaneAnimation(hash, lane.normAnim);
+    hash = mixLaneAnimation(hash, lane.normAnimationLN2);
     hash = mixLaneActiveBranchVectors(hash, lane);
     return hash;
 }

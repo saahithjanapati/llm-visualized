@@ -192,6 +192,13 @@ function buildChosenLogitLabelGroup(barGroup, font) {
         textGroup.position.set(labelX, labelY, labelZ);
         textGroup.userData.label = `Chosen token: ${labelText}`;
         textGroup.name = `Chosen token: ${labelText}`;
+        textGroup.userData.logitEntry = chosen.entry;
+        if (Number.isFinite(chosen.tokenIndex)) {
+            textGroup.userData.tokenIndex = Math.floor(chosen.tokenIndex);
+        }
+        if (Number.isFinite(chosen.entry?.token_id)) {
+            textGroup.userData.tokenId = Math.floor(chosen.entry.token_id);
+        }
 
         const lineStartX = chosen.x;
         const lineStartZ = chosen.z;
@@ -221,6 +228,13 @@ function buildChosenLogitLabelGroup(barGroup, font) {
         });
         const line = new THREE.Line(lineGeometry, lineMaterial);
         line.userData.label = `Chosen token: ${labelText}`;
+        line.userData.logitEntry = chosen.entry;
+        if (Number.isFinite(chosen.tokenIndex)) {
+            line.userData.tokenIndex = Math.floor(chosen.tokenIndex);
+        }
+        if (Number.isFinite(chosen.entry?.token_id)) {
+            line.userData.tokenId = Math.floor(chosen.entry.token_id);
+        }
 
         labelGroup.add(line);
         labelGroup.add(textGroup);
@@ -453,6 +467,9 @@ export function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vo
                     chosenEntries.push({
                         laneIdx,
                         entry,
+                        tokenIndex: Number.isFinite(tokenIndices[laneIdx])
+                            ? Math.floor(tokenIndices[laneIdx]) + 1
+                            : null,
                         x: xPos,
                         z: laneZ,
                         baseY,
@@ -476,6 +493,9 @@ export function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vo
                     chosenEntries.push({
                         laneIdx,
                         entry,
+                        tokenIndex: Number.isFinite(tokenIndices[laneIdx])
+                            ? Math.floor(tokenIndices[laneIdx]) + 1
+                            : null,
                         x: xPos,
                         z: laneZ,
                         baseY,

@@ -7,14 +7,18 @@ function hashStringToSeed(value) {
     return hash >>> 0;
 }
 
-function hashToUnit(seed) {
+function mixSeed(seed) {
     let x = seed >>> 0;
     x ^= x >>> 16;
     x = Math.imul(x, 0x7feb352d);
     x ^= x >>> 15;
     x = Math.imul(x, 0x846ca68b);
     x ^= x >>> 16;
-    return (x >>> 0) / 4294967295;
+    return x >>> 0;
+}
+
+function hashToUnit(seed) {
+    return mixSeed(seed) / 4294967295;
 }
 
 const ADJACENT_TOKEN_MIN_HUE_DISTANCE = 0.11;
@@ -26,6 +30,21 @@ const ADJACENT_TOKEN_COLOR_VARIANTS = Object.freeze([
     0x27d4eb2f,
     0x165667b1,
     0xd1b54a35
+]);
+// Fixed neon palette for prompt chips so token colors stay stable across devices.
+const LOGIT_TOKEN_CHIP_PALETTE = Object.freeze([
+    Object.freeze([255, 88, 171]),
+    Object.freeze([255, 130, 64]),
+    Object.freeze([255, 214, 74]),
+    Object.freeze([193, 255, 71]),
+    Object.freeze([81, 255, 140]),
+    Object.freeze([46, 244, 255]),
+    Object.freeze([60, 171, 255]),
+    Object.freeze([124, 119, 255]),
+    Object.freeze([201, 101, 255]),
+    Object.freeze([255, 95, 126]),
+    Object.freeze([255, 111, 214]),
+    Object.freeze([102, 255, 221])
 ]);
 
 export function resolveLogitTokenSeed(entry, fallbackIndex = 0) {
@@ -84,6 +103,52 @@ function canAdjacentEntriesShareColor(leftEntry, rightEntry) {
         && left.tokenLabel === right.tokenLabel;
 }
 
+export function resolveLogitTokenChipColorKey(entry, fallbackIndex = 0) {
+    const paletteSize = LOGIT_TOKEN_CHIP_PALETTE.length;
+    if (!paletteSize) return 0;
+    const seed = resolveLogitTokenEntrySeed(entry, fallbackIndex);
+    return mixSeed(seed) % paletteSize;
+}
+
+function resolveAlternateChipColorKey(baseColorKey, entrySeed, entryIndex, paletteSize) {
+    if (paletteSize <= 1) return baseColorKey;
+    const rotationSeed = mixSeed(
+        (entrySeed ^ Math.imul(((entryIndex ?? 0) + 1) >>> 0, 0x9e3779b9)) >>> 0
+    );
+    const rotationStart = rotationSeed % (paletteSize - 1);
+    return (baseColorKey + 1 + rotationStart) % paletteSize;
+}
+
+export function resolveAdjacentLogitTokenChipColorKeys(entries = []) {
+    const safeEntries = Array.isArray(entries) ? entries : [];
+    const paletteSize = LOGIT_TOKEN_CHIP_PALETTE.length;
+    if (!paletteSize) {
+        return safeEntries.map(() => 0);
+    }
+
+    const resolvedColorKeys = [];
+    let previousEntry = null;
+    let previousColorKey = null;
+
+    safeEntries.forEach((entry, index) => {
+        const baseColorKey = resolveLogitTokenChipColorKey(entry, index);
+        const entrySeed = resolveLogitTokenEntrySeed(entry, index);
+        const chosenColorKey = (
+            previousColorKey === null
+            || canAdjacentEntriesShareColor(previousEntry, entry)
+            || baseColorKey !== previousColorKey
+        )
+            ? baseColorKey
+            : resolveAlternateChipColorKey(baseColorKey, entrySeed, index, paletteSize);
+
+        resolvedColorKeys.push(chosenColorKey);
+        previousEntry = entry;
+        previousColorKey = chosenColorKey;
+    });
+
+    return resolvedColorKeys;
+}
+
 export function resolveAdjacentLogitTokenSeeds(entries = []) {
     const safeEntries = Array.isArray(entries) ? entries : [];
     const resolvedSeeds = [];
@@ -132,4 +197,14 @@ export function getLogitTokenColorCss(seed, alpha = 1) {
     const light = (l * 100).toFixed(2);
     const opacity = Number.isFinite(alpha) ? Math.max(0, Math.min(1, alpha)) : 1;
     return `hsl(${hue} ${sat}% ${light}% / ${opacity.toFixed(3)})`;
+}
+
+export function getLogitTokenChipColorCss(colorKey, alpha = 1) {
+    const paletteSize = LOGIT_TOKEN_CHIP_PALETTE.length;
+    const safeKey = paletteSize > 0
+        ? ((Number.isFinite(colorKey) ? Math.floor(colorKey) : 0) % paletteSize + paletteSize) % paletteSize
+        : 0;
+    const [red, green, blue] = LOGIT_TOKEN_CHIP_PALETTE[safeKey] || [255, 255, 255];
+    const opacity = Number.isFinite(alpha) ? Math.max(0, Math.min(1, alpha)) : 1;
+    return `rgb(${red} ${green} ${blue} / ${opacity.toFixed(3)})`;
 }

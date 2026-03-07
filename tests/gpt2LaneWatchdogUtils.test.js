@@ -19,17 +19,27 @@ function makeLane() {
         horizPhase: 'to_ln1',
         ln2Phase: 'waiting',
         stopRise: false,
+        normStarted: false,
+        normApplied: false,
+        multStarted: false,
         ln1AddStarted: true,
         ln1AddComplete: false,
+        normStartedLN2: false,
+        normAppliedLN2: false,
+        multDoneLN2: false,
         ln2AddStarted: false,
         ln2AddComplete: false,
         mlpUpStarted: false,
         mlpDownStarted: false,
         mlpDownComplete: false,
+        mlpReturnStarted: false,
         ln1ShiftProgress: 0.2,
         mhsaResidualAddProgress: 0.4,
         ln2ShiftProgress: 0.0,
         originalVec: makeVec(1, 2, 3),
+        dupVec: makeVec(2, 3, 4),
+        resultVec: makeVec(3, 4, 5),
+        travellingVec: makeVec(4, 5, 6),
         postAdditionVec: makeVec(4, 5, 6),
         movingVecLN2: makeVec(7, 8, 9),
         resultVecLN2: makeVec(10, 11, 12),
@@ -49,6 +59,21 @@ describe('gpt2LaneWatchdogUtils', () => {
         lane.originalVec.group.position.x += 1;
         const after = getLaneProgressSignature(lane);
         expect(after).not.toBe(before);
+    });
+
+    it('tracks pre-attention branch vectors before LN2 starts', () => {
+        const lane = makeLane();
+        lane.ln2Phase = LN2_PHASE.NOT_STARTED;
+
+        const before = getLaneProgressSignature(lane);
+        lane.dupVec.group.position.x += 1;
+        const afterDupMove = getLaneProgressSignature(lane);
+        expect(afterDupMove).not.toBe(before);
+
+        lane.dupVec.group.position.x -= 1;
+        lane.travellingVec.group.position.y += 1;
+        const afterTravelMove = getLaneProgressSignature(lane);
+        expect(afterTravelMove).not.toBe(before);
     });
 
     it('ignores residual-stream motion once the LN2 branch is active', () => {

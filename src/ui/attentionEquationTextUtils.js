@@ -1,11 +1,7 @@
 function formatHeadScopedSymbol(symbol, headSubscript = null) {
     const safeSymbol = typeof symbol === 'string' ? symbol : '';
     if (!safeSymbol) return '';
-    const safeHeadSubscript = typeof headSubscript === 'string' && headSubscript.trim().length
-        ? headSubscript.trim()
-        : null;
-    if (!safeHeadSubscript) return `${safeSymbol}_i`;
-    return `${safeSymbol}_{${safeHeadSubscript}}`;
+    return `${safeSymbol}_i`;
 }
 
 export function buildAttentionEquationSet(symbols = {}, options = {}) {
@@ -29,7 +25,10 @@ export function buildAttentionEquationSet(symbols = {}, options = {}) {
     const Kh = formatHeadScopedSymbol(K, safeHeadSubscript);
     const Vh = formatHeadScopedSymbol(V, safeHeadSubscript);
     const Hh = formatHeadScopedSymbol('H', safeHeadSubscript);
-    const attention = `${Hh} = \\mathrm{softmax}\\left(\\frac{${Qh} ${Kh}^\\top}{\\sqrt{d_h}} + M\\right)${Vh}${safeHeadSubscript ? '' : ',\\; i=1\\dots 12'}`;
+    const headQualifier = safeHeadSubscript
+        ? `,\\; i=${safeHeadSubscript}`
+        : ',\\; i=1\\dots 12';
+    const attention = `${Hh} = \\mathrm{softmax}\\left(\\frac{${Qh} ${Kh}^\\top}{\\sqrt{d_h}} + M\\right)${Vh}${headQualifier}`;
     const concat = 'H = \\mathrm{Concat}(H_i)_{i=1}^{12}';
     const outputProjection = `O = H ${WO} + ${BO}`;
     const concatProjection = String.raw`\begin{aligned} ${concat} \\ ${outputProjection} \end{aligned}`;

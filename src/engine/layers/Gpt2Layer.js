@@ -2133,7 +2133,7 @@ export default class Gpt2Layer extends BaseLayer {
 
         // Update the MHSA controller so vectors travel to attention heads
         if (this.mhsaAnimation) {
-            this.mhsaAnimation.update(dt, performance.now(), this.lanes);
+            this.mhsaAnimation.update(dt, nowMs, this.lanes);
         }
 
         // Global safety net for skip flows: if any lane's phase signature is
@@ -2160,7 +2160,9 @@ export default class Gpt2Layer extends BaseLayer {
                 ln2SyncY,
                 timeoutMs: LANE_PHASE_STALL_TIMEOUT_MS_SKIP,
                 allowOriginalFallback: true,
-                postAttentionOnly: false
+                postAttentionOnly: false,
+                nowMs,
+                skipActive
             });
         } else if (postAttentionWatchLanes.length > 0) {
             // Keep normal playback strict for LN1/MHSA, but recover from post-attention
@@ -2169,7 +2171,9 @@ export default class Gpt2Layer extends BaseLayer {
                 ln2SyncY,
                 timeoutMs: LANE_PHASE_STALL_TIMEOUT_MS_NORMAL,
                 allowOriginalFallback: false,
-                postAttentionOnly: true
+                postAttentionOnly: true,
+                nowMs,
+                skipActive
             });
         } else {
             this._resetLaneStallWatchdog(lanes);
@@ -3464,6 +3468,54 @@ export default class Gpt2Layer extends BaseLayer {
 
     }
 
+    _canReleaseLn1BarrierLane(lane, { nowMs = NaN, skipActive = false } = {}) {
+        if (!lane || lane.horizPhase !== HORIZ_PHASE.WAITING) return false;
+        const originalVec = lane.originalVec;
+        if (!originalVec || !originalVec.group || !Number.isFinite(lane.branchStartY)) return false;
+        if (originalVec.group.position.y < lane.branchStartY - 0.01) return false;
+        if (this._isWaitingForInputVocabChipGate(lane, nowMs, skipActive)) return false;
+        if (this.index === 0 && lane.posVec && !lane.posAddComplete) return false;
+        return true;
+    }
+
+    _releaseLn1BarrierLanes({ nowMs = NaN, skipActive = false, reason = 'ln1 barrier released' } = {}) {
+        const laneList = Array.isArray(this.lanes) ? this.lanes : [];
+        let releasedCount = 0;
+        laneList.forEach((lane) => {
+            if (!this._canReleaseLn1BarrierLane(lane, { nowMs, skipActive })) return;
+            this._setLaneHorizPhase(lane, HORIZ_PHASE.RIGHT, reason);
+            const originalVec = lane.originalVec;
+            const dupVec = lane.dupVec;
+            if (dupVec && dupVec.group && originalVec) {
+                copyVectorAppearance(dupVec, originalVec);
+                dupVec.group.visible = true;
+                dupVec.group.position.y = Number.isFinite(lane.branchStartY)
+                    ? lane.branchStartY
+                    : originalVec.group.position.y;
+            }
+            releasedCount += 1;
+        });
+        if (releasedCount > 0) {
+            this._emitProgress();
+        }
+        return releasedCount;
+    }
+
+    _releaseMhsaBarrierLanes(reason = 'mhsa barrier released') {
+        const laneList = Array.isArray(this.lanes) ? this.lanes : [];
+        let releasedCount = 0;
+        laneList.forEach((lane) => {
+            if (!lane || lane.horizPhase !== HORIZ_PHASE.READY_MHSA) return;
+            this._setLaneHorizPhase(lane, HORIZ_PHASE.TRAVEL_MHSA, reason);
+            lane.__mhsaTrailCornerPending = true;
+            releasedCount += 1;
+        });
+        if (releasedCount > 0) {
+            this._emitProgress();
+        }
+        return releasedCount;
+    }
+
     _tryStartSynchronizedMlpReturn() {
         if (this._mlpReturnStart) return;
         const lanes = Array.isArray(this.lanes) ? this.lanes : [];
@@ -3529,28 +3581,23 @@ export default class Gpt2Layer extends BaseLayer {
                 this._ln1StartAtMs = NaN;
                 this._emitProgress();
                 this._debugLayerLifecycleLog(`Layer ${this.index}: All lanes ready – starting LN-1 branch simultaneously`);
-
-                const laneList = Array.isArray(this.lanes) ? this.lanes : [];
-                laneList.forEach((lane) => {
-                    if (lane.horizPhase !== HORIZ_PHASE.WAITING) return;
-                    this._setLaneHorizPhase(lane, HORIZ_PHASE.RIGHT, 'ln1 barrier released');
-                    this._emitProgress();
-                    // Ensure the branch duplicate matches the latest residual data
-                    // (e.g., after positional embedding addition).
-                    copyVectorAppearance(lane.dupVec, lane.originalVec);
-                    lane.dupVec.group.visible = true;
-                    // Snap duplicate to the LN-1 branch staging height to avoid
-                    // vertical drift while moving horizontally into the ring.
-                    if (typeof lane.branchStartY === 'number') {
-                        lane.dupVec.group.position.y = lane.branchStartY;
-                    } else {
-                        lane.dupVec.group.position.y = lane.originalVec.group.position.y;
-                    }
+                this._releaseLn1BarrierLanes({
+                    nowMs,
+                    skipActive,
+                    reason: 'ln1 barrier released'
                 });
             } else if (!readyToStartLn1) {
                 this._ln1StartBarrierArmed = false;
                 this._ln1StartAtMs = NaN;
             }
+        } else {
+            // Re-apply the LN1 release after focus/visibility interruptions so
+            // any lane that missed the original barrier-open frame can catch up.
+            this._releaseLn1BarrierLanes({
+                nowMs,
+                skipActive,
+                reason: 'ln1 barrier catch-up release'
+            });
         }
 
         // MHSA travel synchronisation barrier – wait until every lane has its
@@ -3559,13 +3606,9 @@ export default class Gpt2Layer extends BaseLayer {
             this._mhsaStart = true;
             this._emitProgress();
             this._debugLayerLifecycleLog(`Layer ${this.index}: All lanes ready – starting travel to MHSA heads simultaneously`);
-            const laneList = Array.isArray(this.lanes) ? this.lanes : [];
-            laneList.forEach((lane) => {
-                if (lane.horizPhase !== HORIZ_PHASE.READY_MHSA) return;
-                this._setLaneHorizPhase(lane, HORIZ_PHASE.TRAVEL_MHSA, 'mhsa barrier released');
-                lane.__mhsaTrailCornerPending = true;
-                this._emitProgress();
-            });
+            this._releaseMhsaBarrierLanes('mhsa barrier released');
+        } else if (this._mhsaStart) {
+            this._releaseMhsaBarrierLanes('mhsa barrier catch-up release');
         }
     }
 
@@ -3641,36 +3684,36 @@ export default class Gpt2Layer extends BaseLayer {
         return returnTarget > 0 || returnCount > 0;
     }
 
-    _forceAdvanceStalledLane(lane, { ln2SyncY, allowOriginalFallback = false, postAttentionOnly = false } = {}) {
+    _forceAdvanceStalledLane(lane, {
+        ln2SyncY,
+        allowOriginalFallback = false,
+        postAttentionOnly = false,
+        nowMs = NaN,
+        skipActive = false
+    } = {}) {
         if (!lane || lane.ln2Phase === LN2_PHASE.DONE) return false;
         const laneId = lane.laneIndex ?? '?';
 
         if (
             !postAttentionOnly
-            && lane.horizPhase === HORIZ_PHASE.WAITING
-            && !this._ln1Start
-            && lane.originalVec
-            && lane.originalVec.group
-            && Number.isFinite(lane.branchStartY)
+            && this._canReleaseLn1BarrierLane(lane, { nowMs, skipActive })
         ) {
             lane.originalVec.group.position.y = Math.max(lane.originalVec.group.position.y, lane.branchStartY);
-            if (lane.dupVec && lane.dupVec.group) {
-                copyVectorAppearance(lane.dupVec, lane.originalVec);
-                lane.dupVec.group.visible = true;
-                lane.dupVec.group.position.y = lane.branchStartY;
-            }
-            this._setLaneHorizPhase(lane, HORIZ_PHASE.RIGHT, 'stall watchdog: ln1 barrier');
             this._ln1Start = true;
             this._ln1StartBarrierArmed = false;
             this._ln1StartAtMs = NaN;
+            this._releaseLn1BarrierLanes({
+                nowMs,
+                skipActive,
+                reason: 'stall watchdog: ln1 barrier'
+            });
             console.warn(`Layer ${this.index}: lane ${laneId} stalled in LN1 barrier; forcing branch start.`);
             return true;
         }
 
-        if (!postAttentionOnly && lane.horizPhase === HORIZ_PHASE.READY_MHSA && !this._mhsaStart) {
-            this._setLaneHorizPhase(lane, HORIZ_PHASE.TRAVEL_MHSA, 'stall watchdog: mhsa barrier');
-            lane.__mhsaTrailCornerPending = true;
+        if (!postAttentionOnly && lane.horizPhase === HORIZ_PHASE.READY_MHSA) {
             this._mhsaStart = true;
+            this._releaseMhsaBarrierLanes('stall watchdog: mhsa barrier');
             console.warn(`Layer ${this.index}: lane ${laneId} stalled before MHSA travel; forcing barrier release.`);
             return true;
         }

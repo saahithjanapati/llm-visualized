@@ -197,7 +197,7 @@ function buildSpecificSelectionLines({
     if (Number.isFinite(layerIndex)) lines.push(`Layer: ${layerIndex + 1}`);
     if (Number.isFinite(headIndex)) {
         const isAttentionHeadContext = stageLower.startsWith('attention.') || stageLower.startsWith('qkv.');
-        lines.push(`${isAttentionHeadContext ? 'Attention head' : 'Head'}: ${headIndex + 1}`);
+        lines.push(`${isAttentionHeadContext ? 'Attention Head' : 'Head'}: ${headIndex + 1}`);
     }
     if (stage) lines.push(`Activation stage: ${stage}`);
 

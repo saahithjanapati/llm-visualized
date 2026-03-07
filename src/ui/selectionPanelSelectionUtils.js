@@ -187,6 +187,55 @@ export function findUserDataString(selectionInfo, key) {
     return null;
 }
 
+function isLogitEntryLike(entry) {
+    return !!(
+        entry
+        && typeof entry === 'object'
+        && (
+            typeof entry.token === 'string'
+            || Number.isFinite(entry.token_id)
+            || Number.isFinite(entry.tokenId)
+            || Number.isFinite(entry.prob)
+            || Number.isFinite(entry.probability)
+            || Number.isFinite(entry.logit)
+        )
+    );
+}
+
+export function resolveSelectionLogitEntry(selectionInfo) {
+    const directInfo = selectionInfo?.info;
+    if (isLogitEntryLike(directInfo)) {
+        return directInfo;
+    }
+    if (isLogitEntryLike(directInfo?.logitEntry)) {
+        return directInfo.logitEntry;
+    }
+    if (isLogitEntryLike(selectionInfo?.logitEntry)) {
+        return selectionInfo.logitEntry;
+    }
+
+    const source = selectionInfo?.object || selectionInfo?.hit?.object;
+    const instanceId = selectionInfo?.hit?.instanceId;
+    const entries = source?.userData?.instanceEntries;
+    if (Array.isArray(entries) && Number.isFinite(instanceId) && instanceId >= 0 && instanceId < entries.length) {
+        const entry = entries[instanceId];
+        if (isLogitEntryLike(entry)) return entry;
+    }
+
+    const candidates = [selectionInfo?.object, selectionInfo?.hit?.object];
+    for (const obj of candidates) {
+        let current = obj;
+        while (current && !current.isScene) {
+            if (isLogitEntryLike(current.userData?.logitEntry)) {
+                return current.userData.logitEntry;
+            }
+            current = current.parent;
+        }
+    }
+
+    return null;
+}
+
 export function resolveAttentionModeFromSelection(selectionInfo) {
     const stage = getActivationDataFromSelection(selectionInfo)?.stage;
     if (stage === 'attention.post') return 'post';

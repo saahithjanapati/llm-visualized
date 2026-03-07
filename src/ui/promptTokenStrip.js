@@ -1,5 +1,8 @@
 import { appState } from '../state/appState.js';
-import { getLogitTokenColorCss, resolveLogitTokenEntrySeed } from '../app/gpt-tower/logitColor.js';
+import {
+    getLogitTokenChipColorCss,
+    resolveAdjacentLogitTokenChipColorKeys
+} from '../app/gpt-tower/logitColor.js';
 import {
     TOKEN_CHIP_HOVER_SYNC_EVENT,
     dispatchTokenChipHoverSync,
@@ -317,18 +320,18 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
         lastSignature = signature;
 
         const fragment = document.createDocumentFragment();
+        const chipColorKeys = resolveAdjacentLogitTokenChipColorKeys(entries);
         entries.forEach((entry, index) => {
-            // Keep prompt-strip chips aligned with the selection-panel token color for the same token.
-            const seed = resolveLogitTokenEntrySeed(entry, index);
+            const colorKey = chipColorKeys[index] ?? 0;
             const tokenEl = document.createElement('button');
             tokenEl.type = 'button';
             tokenEl.className = 'prompt-token-strip__token';
             if (entry.entryType === 'generated') {
                 tokenEl.classList.add('prompt-token-strip__token--generated');
             }
-            tokenEl.style.setProperty('--token-color-border', getLogitTokenColorCss(seed, 0.92));
-            tokenEl.style.setProperty('--token-color-fill', getLogitTokenColorCss(seed, 0.2));
-            tokenEl.style.setProperty('--token-color-fill-hover', getLogitTokenColorCss(seed, 0.28));
+            tokenEl.style.setProperty('--token-color-border', getLogitTokenChipColorCss(colorKey, 0.92));
+            tokenEl.style.setProperty('--token-color-fill', getLogitTokenChipColorCss(colorKey, 0.2));
+            tokenEl.style.setProperty('--token-color-fill-hover', getLogitTokenChipColorCss(colorKey, 0.28));
             tokenEl.textContent = normalizeTokenText(entry.tokenLabel);
             tokenEl.dataset.tokenEntryIndex = String(index);
             fragment.appendChild(tokenEl);

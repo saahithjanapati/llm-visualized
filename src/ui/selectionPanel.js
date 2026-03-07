@@ -34,6 +34,7 @@ import {
     matchesAttentionScoreSelection,
     normalizeSelectionLabel,
     resolveAttentionModeFromSelection,
+    resolveSelectionLogitEntry as resolveSelectionLogitEntryMetadata,
     simplifyLayerNormParamDisplayLabel
 } from './selectionPanelSelectionUtils.js';
 import {
@@ -1129,28 +1130,7 @@ function sanitizeLogitTokenForPreview(token) {
 }
 
 function resolveLogitSelectionEntry(selectionInfo) {
-    const directInfo = selectionInfo?.info;
-    if (directInfo && typeof directInfo === 'object') {
-        if (
-            typeof directInfo.token === 'string'
-            || Number.isFinite(directInfo.token_id)
-            || Number.isFinite(directInfo.prob)
-            || Number.isFinite(directInfo.logit)
-        ) {
-            return directInfo;
-        }
-        if (directInfo.logitEntry && typeof directInfo.logitEntry === 'object') {
-            return directInfo.logitEntry;
-        }
-    }
-    const source = selectionInfo?.object || selectionInfo?.hit?.object;
-    const instanceId = selectionInfo?.hit?.instanceId;
-    const entries = source?.userData?.instanceEntries;
-    if (Array.isArray(entries) && Number.isFinite(instanceId) && instanceId >= 0 && instanceId < entries.length) {
-        const entry = entries[instanceId];
-        return entry && typeof entry === 'object' ? entry : null;
-    }
-    return null;
+    return resolveSelectionLogitEntryMetadata(selectionInfo);
 }
 
 function resolveLogitPreviewTokenText(label, selectionInfo) {
@@ -1163,6 +1143,11 @@ function resolveLogitPreviewTokenText(label, selectionInfo) {
     const labelTokenMatch = String(label || '').match(/token\s+"([^"]+)"/i);
     if (labelTokenMatch && labelTokenMatch[1]) {
         const formatted = formatTokenLabelForPreview(labelTokenMatch[1]);
+        if (formatted) return formatted;
+    }
+    const chosenTokenMatch = String(label || '').match(/^chosen token:\s*(.+)$/i);
+    if (chosenTokenMatch && chosenTokenMatch[1]) {
+        const formatted = formatTokenLabelForPreview(chosenTokenMatch[1]);
         if (formatted) return formatted;
     }
     const labelIdMatch = String(label || '').match(/\bid\s+(-?\d+)/i);
@@ -1219,8 +1204,11 @@ function formatLogitProbability(value) {
 }
 
 function resolveLogitSelectionHeader(label, selectionInfo) {
-    if (!isLogitBarSelection(label, selectionInfo)) return null;
     const lower = String(label || '').toLowerCase();
+    const isChosenTokenLabel = lower.startsWith('chosen token:');
+    const isSingleLogitLabel = lower === 'logit' || lower.startsWith('logit ');
+    const isLogitBar = isLogitBarSelection(label, selectionInfo);
+    if (!isLogitBar && !isChosenTokenLabel && !isSingleLogitLabel) return null;
     const entry = resolveLogitSelectionEntry(selectionInfo);
     const hasEntryData = !!(
         entry
@@ -1232,18 +1220,20 @@ function resolveLogitSelectionHeader(label, selectionInfo) {
             || Number.isFinite(entry.logit)
         )
     );
-    const isSingleLogitLabel = lower === 'logit' || lower.startsWith('logit ');
-    if (!hasEntryData && !isSingleLogitLabel) return null;
+    const isAggregateLogitBars = lower.includes('top logit bars');
+    if (isAggregateLogitBars && !hasEntryData) return null;
+    if (!hasEntryData && !isSingleLogitLabel && !isChosenTokenLabel) return null;
 
     const tokenText = resolveLogitPreviewTokenText(label, selectionInfo);
     const tokenId = resolveLogitSelectionTokenId(label, entry);
     const probability = resolveLogitSelectionProbability(label, entry);
     const subtitleParts = [];
+    if (isChosenTokenLabel) subtitleParts.push('Chosen token');
     if (Number.isFinite(tokenId)) subtitleParts.push(`ID ${tokenId}`);
     if (Number.isFinite(probability)) subtitleParts.push(`Probability ${formatLogitProbability(probability)}`);
 
     return {
-        title: tokenText || 'Logit Token',
+        title: tokenText || (isChosenTokenLabel ? 'Chosen token' : 'Logit Token'),
         subtitle: subtitleParts.join(' • '),
         tokenText,
         tokenId
@@ -2056,6 +2046,14 @@ function isLikelyVectorSelection(label, selectionInfo) {
     return false;
 }
 
+function shouldShowVectorLegendForSelection(selectionInfo = null) {
+    const label = selectionInfo?.label || '';
+    if (isResidualVectorSelection(label, selectionInfo) && isLikelyVectorSelection(label, selectionInfo)) {
+        return true;
+    }
+    return !!resolveLayerNormParamPreviewSpec(label, selectionInfo);
+}
+
 function buildLayerNormParamVectorPreview(label, selectionInfo) {
     const spec = resolveLayerNormParamPreviewSpec(label, selectionInfo);
     if (!spec) return null;
@@ -2085,7 +2083,7 @@ function buildLayerNormParamVectorPreview(label, selectionInfo) {
 
 function resolvePreviewObject(label, selectionInfo) {
     const lower = (label || '').toLowerCase();
-    if (isLogitBarSelection(label, selectionInfo)) {
+    if (isLogitBarSelection(label, selectionInfo) || lower.startsWith('chosen token:')) {
         return buildLogitBarPreview(label, selectionInfo);
     }
     const attentionSpherePreview = buildAttentionSpherePreview(selectionInfo);
@@ -2419,6 +2417,7 @@ class SelectionPanel {
         this._pauseMainFlowOnMobileFocus = options.pauseMainFlowOnMobileFocus === true;
         this._pendingResizeRaf = null;
         this._previewRafId = null;
+        this._previewPausedForPanelResize = false;
         this._pendingResizeTimeout = null;
         this._panelResizeObserver = null;
         this._pendingReveal = false;
@@ -3388,7 +3387,7 @@ class SelectionPanel {
             }
             return;
         }
-        if (this.currentPreview) {
+        if (this.currentPreview && !this._previewPausedForPanelResize) {
             let allowFit = true;
             const now = performance.now();
             if (this._lastFitSize && now < this._fitLockUntil) {
@@ -3462,18 +3461,24 @@ class SelectionPanel {
         this._fitLockUntil = performance.now() + PREVIEW_FIT_LOCK_MS;
     }
 
-    _scheduleResize() {
-        if (!this.isReady) return;
+    _cancelScheduledResize() {
         if (this._pendingResizeRaf) {
             cancelAnimationFrame(this._pendingResizeRaf);
+            this._pendingResizeRaf = null;
         }
+        if (this._pendingResizeTimeout) {
+            clearTimeout(this._pendingResizeTimeout);
+            this._pendingResizeTimeout = null;
+        }
+    }
+
+    _scheduleResize() {
+        if (!this.isReady) return;
+        this._cancelScheduledResize();
         this._pendingResizeRaf = requestAnimationFrame(() => {
             this._pendingResizeRaf = null;
             this._onResize();
         });
-        if (this._pendingResizeTimeout) {
-            clearTimeout(this._pendingResizeTimeout);
-        }
         this._pendingResizeTimeout = setTimeout(() => {
             this._pendingResizeTimeout = null;
             this._onResize();
@@ -3555,7 +3560,7 @@ class SelectionPanel {
         const canResize = !!(this.resizeHandle && this.isOpen && this._canResizeDesktopPanel());
         this.hudStack?.classList.toggle('is-resizable', canResize);
         if (!canResize && this._panelResizeDrag.active) {
-            this._cancelPanelResizeDrag();
+            this._cancelPanelResizeDrag({ finalizePreview: this.isOpen });
         }
         if (!this.resizeHandle) return;
 
@@ -3608,7 +3613,7 @@ class SelectionPanel {
         });
     }
 
-    _cancelPanelResizeDrag() {
+    _cancelPanelResizeDrag({ finalizePreview = false } = {}) {
         const pointerId = this._panelResizeDrag.pointerId;
         if (Number.isFinite(pointerId) && typeof this.resizeHandle?.releasePointerCapture === 'function') {
             try {
@@ -3626,6 +3631,22 @@ class SelectionPanel {
             window.removeEventListener('pointerup', this._onResizeHandlePointerUp);
             window.removeEventListener('pointercancel', this._onResizeHandlePointerUp);
         }
+        this._previewPausedForPanelResize = false;
+        if (!finalizePreview) return;
+
+        this._cancelScheduledResize();
+        if (this._pendingRevealTimer) {
+            clearTimeout(this._pendingRevealTimer);
+            this._pendingRevealTimer = null;
+        }
+        this._onResize();
+        if (this._pendingReveal) {
+            this._finalizePendingReveal();
+        }
+        const now = performance.now();
+        this._lastFrameTime = now;
+        this._renderPreviewFrame(now);
+        this._startLoop();
     }
 
     _onResizeHandlePointerDown(event) {
@@ -3659,6 +3680,8 @@ class SelectionPanel {
             window.addEventListener('pointercancel', this._onResizeHandlePointerUp);
         }
         this._setHoverLabelSuppression(true);
+        this._previewPausedForPanelResize = true;
+        this._stopLoop();
     }
 
     _onResizeHandlePointerMove(event) {
@@ -3682,10 +3705,9 @@ class SelectionPanel {
         if (Number.isFinite(this._panelResizeDrag.pointerId) && event?.pointerId !== this._panelResizeDrag.pointerId) {
             return;
         }
-        this._cancelPanelResizeDrag();
+        this._cancelPanelResizeDrag({ finalizePreview: true });
         this._syncHoverLabelSuppressionFromHoverState();
         this._syncSceneShift({ immediate: true });
-        this._scheduleResize();
     }
 
     _onResizeHandleKeydown(event) {
@@ -5768,7 +5790,7 @@ class SelectionPanel {
                 Number.isFinite(tokenIndex) ? tokenIndex : fallbackIndex
             );
 
-            const partEl = document.createElement('span');
+            const partEl = document.createElement('div');
             partEl.className = 'detail-attention-context-part';
 
             const roleEl = document.createElement('span');
@@ -5799,14 +5821,14 @@ class SelectionPanel {
         this.subtitleSecondary.classList.add('detail-subtitle--attention-context');
         const sourcePart = buildContextPart(context.source, 'Source', 0);
         const targetPart = buildContextPart(context.target, 'Target', 1);
-        const mainContext = document.createElement('span');
+        const mainContext = document.createElement('div');
         mainContext.className = 'detail-attention-context-main';
         mainContext.append(sourcePart, targetPart);
 
         const scoreValue = normalizeAttentionValuePart(context?.score?.value, ATTENTION_VALUE_PLACEHOLDER);
-        const scoreWrap = document.createElement('span');
+        const scoreWrap = document.createElement('div');
         scoreWrap.className = 'detail-attention-context-score';
-        const scoreValueEl = document.createElement('span');
+        const scoreValueEl = document.createElement('div');
         scoreValueEl.className = 'detail-attention-context-score-value';
         scoreValueEl.textContent = scoreValue;
         scoreValueEl.title = scoreValue === ATTENTION_VALUE_PLACEHOLDER ? '' : scoreValue;
@@ -6618,8 +6640,7 @@ class SelectionPanel {
 
     _updateVectorLegend(selection) {
         if (!this.vectorLegend) return;
-        const show = isResidualVectorSelection(selection?.label, selection)
-            && isLikelyVectorSelection(selection?.label, selection);
+        const show = shouldShowVectorLegendForSelection(selection);
         if (!show) {
             this.vectorLegend.classList.remove('is-visible');
             this.vectorLegend.setAttribute('aria-hidden', 'true');
@@ -6942,7 +6963,13 @@ class SelectionPanel {
     }
 
     _isPreviewLoopActive() {
-        return !!(this.isReady && this.isOpen && this.currentPreview && !this._geluDetailOpen);
+        return !!(
+            this.isReady
+            && this.isOpen
+            && this.currentPreview
+            && !this._geluDetailOpen
+            && !this._previewPausedForPanelResize
+        );
     }
 
     _startLoop() {
@@ -6958,9 +6985,10 @@ class SelectionPanel {
         this._previewRafId = null;
     }
 
-    _animate(time) {
-        this._previewRafId = null;
-        if (!this._isPreviewLoopActive()) return;
+    _renderPreviewFrame(time) {
+        if (!this.isReady || !this.isOpen || !this.currentPreview || this._geluDetailOpen || this._previewPausedForPanelResize) {
+            return false;
+        }
         const now = (typeof time === 'number') ? time : performance.now();
         const deltaMs = this._lastFrameTime ? (now - this._lastFrameTime) : 16.6667;
         this._lastFrameTime = now;
@@ -6984,6 +7012,13 @@ class SelectionPanel {
         this.currentPreview.rotation.z = 0;
         this._updateDynamicAttentionProgress();
         this.renderer.render(this.scene, this.camera);
+        return true;
+    }
+
+    _animate(time) {
+        this._previewRafId = null;
+        if (!this._isPreviewLoopActive()) return;
+        this._renderPreviewFrame(time);
         if (this._isPreviewLoopActive() && this._previewRafId === null) {
             this._previewRafId = requestAnimationFrame(this._animate);
         }
@@ -7080,14 +7115,7 @@ class SelectionPanel {
             this.outputDimLabel.style.fontSize = '';
             this.outputDimLabel.style.letterSpacing = '';
         }
-        if (this._pendingResizeRaf) {
-            cancelAnimationFrame(this._pendingResizeRaf);
-            this._pendingResizeRaf = null;
-        }
-        if (this._pendingResizeTimeout) {
-            clearTimeout(this._pendingResizeTimeout);
-            this._pendingResizeTimeout = null;
-        }
+        this._cancelScheduledResize();
         if (this._pendingRevealTimer) {
             clearTimeout(this._pendingRevealTimer);
             this._pendingRevealTimer = null;
@@ -7696,7 +7724,7 @@ class SelectionPanel {
                     subtitleParts.push(`Layer ${layerIndex + 1}`);
                 }
                 if (showHead && Number.isFinite(headIndex)) {
-                    subtitleParts.push(`Attention head ${headIndex + 1}`);
+                    subtitleParts.push(`Attention Head ${headIndex + 1}`);
                 }
                 if (isVectorSelection) {
                     let positionText = '';

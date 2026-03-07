@@ -63,7 +63,7 @@ export function formatActivationData(data) {
         }
     }
     if (Number.isFinite(data.headIndex)) {
-        lines.push(`${isAttentionHeadContext ? 'Attention head' : 'Head'}: ${data.headIndex + 1}`);
+        lines.push(`${isAttentionHeadContext ? 'Attention Head' : 'Head'}: ${data.headIndex + 1}`);
     }
     if (Number.isFinite(data.segmentIndex)) lines.push(`Segment: ${data.segmentIndex + 1}`);
     if (Number.isFinite(data.preScore) || Number.isFinite(data.postScore)) {

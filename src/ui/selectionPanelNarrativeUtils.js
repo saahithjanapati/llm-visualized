@@ -10,10 +10,12 @@ import {
 import { buildAttentionEquationSet } from './attentionEquationTextUtils.js';
 import { formatLayerNormLabel } from '../utils/layerNormLabels.js';
 import { D_MODEL, D_HEAD, VOCAB_SIZE, CONTEXT_LEN } from './selectionPanelConstants.js';
+import { formatTokenLabelForPreview } from './selectionPanelFormatUtils.js';
 import {
     findUserDataNumber,
     findUserDataString,
-    getActivationDataFromSelection
+    getActivationDataFromSelection,
+    resolveSelectionLogitEntry
 } from './selectionPanelSelectionUtils.js';
 
 const GPT2_VOCAB_SIZE_TEXT = VOCAB_SIZE.toLocaleString('en-US');
@@ -27,30 +29,6 @@ const LAYERNORM_DETAIL_ACTION = 'open-layernorm';
 const LAYERNORM_PARAM_DETAIL_ACTION = 'open-layernorm-param';
 const QKV_SOURCE_VECTOR_DETAIL_ACTION = 'open-qkv-source-vector';
 const QKV_WEIGHT_MATRIX_DETAIL_ACTION = 'open-qkv-weight-matrix';
-const SMALL_NUMBER_WORDS = [
-    'zero',
-    'one',
-    'two',
-    'three',
-    'four',
-    'five',
-    'six',
-    'seven',
-    'eight',
-    'nine',
-    'ten',
-    'eleven',
-    'twelve',
-    'thirteen',
-    'fourteen',
-    'fifteen',
-    'sixteen',
-    'seventeen',
-    'eighteen',
-    'nineteen',
-    'twenty'
-];
-
 function joinParagraphs(...parts) {
     return parts
         .filter((part) => typeof part === 'string' && part.trim().length > 0)
@@ -199,22 +177,114 @@ function resolveSelectionLayerIndex(selectionInfo = null) {
     return Number.isFinite(layerIndexRaw) ? Math.floor(layerIndexRaw) : null;
 }
 
-function buildSelectionLayerReference(selectionInfo = null, { fallback = 'this layer', capitalize = false } = {}) {
+function buildSelectionLayerReference(selectionInfo = null, { fallback = 'this layer', capitalize = true } = {}) {
     const layerIndex = resolveSelectionLayerIndex(selectionInfo);
     if (!Number.isFinite(layerIndex)) return fallback;
     return `${capitalize ? 'Layer' : 'layer'} ${layerIndex + 1}`;
 }
 
-function formatSmallLayerNumber(value) {
-    if (!Number.isFinite(value)) return '';
-    const integer = Math.max(0, Math.floor(value));
-    return SMALL_NUMBER_WORDS[integer] || String(integer);
-}
-
 function buildSelectionLayerJobReference(selectionInfo = null) {
     const layerIndex = resolveSelectionLayerIndex(selectionInfo);
     if (!Number.isFinite(layerIndex)) return 'this layer';
-    return `layer ${formatSmallLayerNumber(layerIndex + 1)}`;
+    return `Layer ${layerIndex + 1}`;
+}
+
+function sanitizeOutputTokenText(token) {
+    if (token === null || token === undefined) return '';
+    return String(token).replace(/\n/g, '\\n').replace(/\t/g, '\\t');
+}
+
+function formatOutputTokenLabel(token) {
+    const formatted = formatTokenLabelForPreview(sanitizeOutputTokenText(token));
+    return formatted || '';
+}
+
+function resolveOutputTokenDescriptor(selectionInfo = null, fallback = 'this candidate token') {
+    const entry = resolveSelectionLogitEntry(selectionInfo);
+    const tokenText = formatOutputTokenLabel(entry?.token);
+    const tokenId = Number.isFinite(entry?.token_id)
+        ? Math.floor(entry.token_id)
+        : (Number.isFinite(entry?.tokenId) ? Math.floor(entry.tokenId) : null);
+    if (tokenText && Number.isFinite(tokenId)) {
+        return `the token ${JSON.stringify(tokenText)} (ID ${tokenId})`;
+    }
+    if (tokenText) {
+        return `the token ${JSON.stringify(tokenText)}`;
+    }
+    if (Number.isFinite(tokenId)) {
+        return `token ID ${tokenId}`;
+    }
+
+    const chosenTokenMatch = String(selectionInfo?.label || '').match(/^chosen token:\s*(.+)$/i);
+    if (chosenTokenMatch && chosenTokenMatch[1]) {
+        const chosenTokenText = formatOutputTokenLabel(chosenTokenMatch[1]);
+        if (chosenTokenText) return `the token ${JSON.stringify(chosenTokenText)}`;
+    }
+
+    return fallback;
+}
+
+function resolveOutputTokenProbability(selectionInfo = null) {
+    const entry = resolveSelectionLogitEntry(selectionInfo);
+    if (Number.isFinite(entry?.probability)) return Number(entry.probability);
+    if (Number.isFinite(entry?.prob)) return Number(entry.prob);
+    return null;
+}
+
+function formatProbabilityPercentage(probability) {
+    if (!Number.isFinite(probability)) return '';
+    const percentage = probability * 100;
+    const abs = Math.abs(percentage);
+    if (abs === 0) return '0%';
+    if (abs < 0.0001) return `${percentage.toExponential(2)}%`;
+    if (abs < 0.01) return `${percentage.toFixed(4).replace(/\.?0+$/, '')}%`;
+    return `${percentage.toFixed(2).replace(/\.?0+$/, '')}%`;
+}
+
+function resolveTopKShortlistText(selectionInfo = null) {
+    const barCount = findUserDataNumber(selectionInfo, 'barCount');
+    if (!Number.isFinite(barCount) || barCount <= 0) return 'the highest-scoring candidates';
+    return `the top ${Math.floor(barCount).toLocaleString('en-US')} candidates`;
+}
+
+function buildTopLogitBarsDescription(selectionInfo = null) {
+    const shortlistText = resolveTopKShortlistText(selectionInfo);
+    return joinParagraphs(
+        `These bars are ${shortlistText} for the next token after the final hidden state has been projected through the unembedding matrix into vocabulary logits and then normalized with softmax.`,
+        `Each visible bar shows one token's softmax probability, ${inlineMath('p_i = \\frac{e^{\\ell_i}}{\\sum_j e^{\\ell_j}}')}. The denominator sums over the entire vocabulary, not just the bars shown here, so the visible shortlist usually adds up to less than 100%.`,
+        `If you explain decoding with top-k sampling, this is the shortlist that step operates on: keep only these highest-scoring candidates, renormalize within that reduced set, and sample from it.`
+    );
+}
+
+function buildChosenTokenDescription(selectionInfo = null) {
+    const tokenDescriptor = resolveOutputTokenDescriptor(selectionInfo, 'the token selected for this decoding step');
+    const probability = resolveOutputTokenProbability(selectionInfo);
+    const probabilityText = formatProbabilityPercentage(probability);
+    const shortlistText = resolveTopKShortlistText(selectionInfo);
+    const tokenIndex = findUserDataNumber(selectionInfo, 'tokenIndex');
+    const appendSentence = Number.isFinite(tokenIndex)
+        ? `Once chosen, it is appended at position ${Math.floor(tokenIndex) + 1} in the running sequence. On the next forward pass, the model looks up that token's embedding, adds the position embedding for the new slot, and uses the extended context to predict the token after it.`
+        : 'Once chosen, it is appended to the right end of the running sequence. On the next forward pass, the model looks up that token\'s embedding, adds the next position embedding, and uses the extended context to predict the token after it.';
+    return joinParagraphs(
+        `This marks ${tokenDescriptor}, the token that the decoding step actually selected from the output distribution.`,
+        probabilityText
+            ? `The displayed probability here is ${probabilityText}, which is the token's full-distribution softmax probability before any truncation. If you describe decoding with top-k sampling, the sampler first keeps ${shortlistText}, renormalizes inside that subset, and then draws one token; this label shows the winner of that selection step.`
+            : `This token is chosen from the softmax distribution over vocabulary logits. If you describe decoding with top-k sampling, the sampler first keeps ${shortlistText}, renormalizes inside that subset, and then draws one token; this label shows the winner of that selection step.`,
+        appendSentence
+    );
+}
+
+function buildLogitDescription(selectionInfo = null) {
+    const tokenDescriptor = resolveOutputTokenDescriptor(selectionInfo, 'this candidate token');
+    const probability = resolveOutputTokenProbability(selectionInfo);
+    const probabilityText = formatProbabilityPercentage(probability);
+    return joinParagraphs(
+        `This is the vocabulary score for ${tokenDescriptor}. The raw logit ${inlineMath('\\ell_i')} is an unnormalized compatibility score between the final hidden state and that vocabulary item, so the number itself is not yet a probability.`,
+        probabilityText
+            ? `Its displayed probability is ${probabilityText}, computed by softmax over all logits in the vocabulary: ${inlineMath('p_i = \\frac{e^{\\ell_i}}{\\sum_j e^{\\ell_j}}')}. What matters is how this score compares with every other token, not the absolute logit on its own.`
+            : `Its probability is computed by softmax over all logits in the vocabulary: ${inlineMath('p_i = \\frac{e^{\\ell_i}}{\\sum_j e^{\\ell_j}}')}. What matters is how this score compares with every other token, not the absolute logit on its own.`,
+        'If you later apply top-k sampling, this candidate remains eligible only if it survives into the highest-scoring shortlist, after which the sampler renormalizes over the surviving tokens before drawing the next token.'
+    );
 }
 
 function buildLayerNormDetailActionMarkup(selectionInfo = null, {
@@ -259,12 +329,12 @@ function buildSelectionLayerNormReference(selectionInfo = null, {
 function buildIncomingResidualSourceSentence(selectionInfo = null) {
     const layerIndex = resolveSelectionLayerIndex(selectionInfo);
     if (!Number.isFinite(layerIndex)) {
-        return 'It is the complete token state handed over from the embeddings or from the previous layer. Attention and the MLP do not start from scratch; they both read from this running state and then write updates back into it through residual addition.';
+        return 'It is the complete token state handed over from the embeddings or from the previous layer. Multi-head self-attention reads from this running state, lets this token attend to earlier positions in the sequence, and writes the resulting update back into the residual stream through residual addition.';
     }
     if (layerIndex === 0) {
-        return 'It is the complete token state handed over from the embedding sum into layer 1. Attention and the MLP do not start from scratch; they both read from this running state and then write updates back into it through residual addition.';
+        return 'It is the complete token state handed over from the embedding sum into Layer 1. Multi-head self-attention reads from this running state, lets this token attend to earlier positions in the sequence, and writes the resulting update back into the residual stream through residual addition.';
     }
-    return `It is the complete token state handed over from the output of layer ${layerIndex} into layer ${layerIndex + 1}. Attention and the MLP do not start from scratch; they both read from this running state and then write updates back into it through residual addition.`;
+    return `It is the complete token state handed over from the output of Layer ${layerIndex} into Layer ${layerIndex + 1}. Multi-head self-attention reads from this running state, lets this token attend to earlier positions in the sequence, and writes the resulting update back into the residual stream through residual addition.`;
 }
 
 function buildAttentionVectorActionMarkup(selectionInfo = null, {
@@ -373,7 +443,7 @@ function buildIncomingResidualDescription(selectionInfo = null) {
     return joinParagraphs(
         `This is the residual-stream vector representation for ${tokenRef} as it enters ${layerRef}, before ${ln1Ref} runs.`,
         buildIncomingResidualSourceSentence(selectionInfo),
-        `So this vector already contains everything the model has accumulated so far about this position, and ${layerJobRef}'s job is to refine it further for the eventual prediction of the next token after this one.`
+        `This vector already contains everything the model has accumulated so far for this position as it enters ${layerJobRef}, and ${layerJobRef} refines that state further for the eventual prediction of the next token after this one.`
     );
 }
 
@@ -381,10 +451,11 @@ function buildPostAttentionResidualDescription(selectionInfo = null) {
     const tokenRef = buildSelectionTokenReference(selectionInfo, 'this token');
     const layerRef = buildSelectionLayerReference(selectionInfo);
     const ln2Ref = buildSelectionLayerNormReference(selectionInfo, { layerNormKind: 'ln2', linked: true });
+    const layerJobRef = buildSelectionLayerJobReference(selectionInfo);
     return joinParagraphs(
         `This is the residual-stream vector representation for ${tokenRef} after the attention update from ${layerRef} has been added in.`,
-        `The token state now reflects both its previous representation and whatever information the attention heads gathered from earlier tokens. This updated residual is what ${ln2Ref} reads next before the MLP branch in ${layerRef} starts.`,
-        'That means this vector now contains more contextual information the model is assembling at this position. Later computations will keep refining it until it is used to predict the next token after this one.'
+        `This updated residual is what ${ln2Ref} reads next before the MLP branch in ${layerRef}. The MLP takes this attention-shaped running state, recombines features within this token position, and writes its update back into the residual stream through residual addition.`,
+        `This vector already contains everything the model has accumulated so far for this position in ${layerJobRef}, including the attention update from earlier tokens, and the MLP in ${layerJobRef} refines those features before the state moves on toward the next-token prediction.`
     );
 }
 
@@ -839,21 +910,6 @@ function buildAttentionPostScoreDescription(selectionInfo = null) {
     );
 }
 
-const TOP_LOGIT_BARS_DESCRIPTION = joinParagraphs(
-    'These bars summarize the model\'s highest-scoring next-token candidates at the output layer. Each bar corresponds to one vocabulary token after the final hidden state has been projected into logits and converted to probabilities.',
-    'The full distribution spans the whole vocabulary, but the UI only shows the top candidates so the result remains readable. Taller bars mean the model currently assigns higher probability to those tokens.'
-);
-
-const CHOSEN_TOKEN_DESCRIPTION = joinParagraphs(
-    'This marks the token that was actually selected from the model\'s output distribution for this decoding step.',
-    'Once selected, that token is appended to the sequence and becomes the next input token for the following pass, which is how autoregressive generation advances one token at a time.'
-);
-
-const LOGIT_DESCRIPTION = joinParagraphs(
-    'This is one vocabulary logit for one candidate next token. A logit is an unnormalized score: larger logits make a token more likely after softmax, but the value is not itself a probability.',
-    'What matters is the token\'s value relative to the other logits in the same distribution. Softmax turns the whole logit vector into probabilities that the sampler can use.'
-);
-
 const GENERIC_VECTOR_DESCRIPTION = joinParagraphs(
     'This vector is a learned feature representation used somewhere along the model\'s forward pass. A vector in a transformer should be thought of as a bundle of coordinates that the network has learned to make useful.',
     'Different parts of the model reinterpret and recombine these coordinates for different purposes: residual state, queries, keys, values, MLP activations, and logits all come from vectors passed through different learned transformations.'
@@ -966,7 +1022,7 @@ const SELECTION_EQUATION_SYMBOLS = {
     BUp: colorizeEquationToken(SELECTION_EQUATION_COLORS.mlpUp, 'b_{\\text{up}}'),
     WDown: colorizeEquationToken(SELECTION_EQUATION_COLORS.mlpDown, 'W_{\\text{down}}'),
     BDown: colorizeEquationToken(SELECTION_EQUATION_COLORS.mlpDown, 'b_{\\text{down}}'),
-    MLPDown: colorizeEquationToken(SELECTION_EQUATION_COLORS.mlpDown, '\\mathrm{MLP}(u_{\\text{ln}})')
+    MLPDown: `${colorizeEquationToken(SELECTION_EQUATION_COLORS.mlpDown, '\\mathrm{MLP}')}\\left(u_{\\text{ln}}\\right)`
 };
 
 function buildEquationEntries(lines, activeIndexes = []) {
@@ -1207,7 +1263,7 @@ function buildSelectionEquationEntries(label, selectionInfo = null) {
     if (lower.includes('post-mlp residual')) {
         return buildEquationEntries([mlpDownEq, postMlpResidualEq], [1]);
     }
-    if (lower.includes('top logit bars') || lower === 'logit' || lower.startsWith('logit ')) {
+    if (lower.includes('top logit bars') || lower === 'logit' || lower.startsWith('logit')) {
         return buildEquationEntries([logitsEq, probsEq], [0]);
     }
     if (lower.startsWith('chosen token:')) {
@@ -1489,13 +1545,13 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
         return ATTENTION_GENERIC_DESCRIPTION;
     }
     if (lower.includes('top logit bars')) {
-        return TOP_LOGIT_BARS_DESCRIPTION;
+        return buildTopLogitBarsDescription(selectionInfo);
     }
     if (lower.startsWith('chosen token:')) {
-        return CHOSEN_TOKEN_DESCRIPTION;
+        return buildChosenTokenDescription(selectionInfo);
     }
-    if (lower === 'logit' || lower.startsWith('logit ')) {
-        return LOGIT_DESCRIPTION;
+    if (lower === 'logit' || lower.startsWith('logit')) {
+        return buildLogitDescription(selectionInfo);
     }
     if (lower.includes('residual')) {
         return buildResidualStreamDescription(selectionInfo);

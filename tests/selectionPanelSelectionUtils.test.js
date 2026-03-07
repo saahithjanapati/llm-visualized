@@ -5,6 +5,7 @@ import {
     isLogitBarSelection,
     isSelfAttentionSelection,
     normalizeSelectionLabel,
+    resolveSelectionLogitEntry,
     simplifyLayerNormParamDisplayLabel
 } from '../src/ui/selectionPanelSelectionUtils.js';
 
@@ -67,5 +68,22 @@ describe('selectionPanelSelectionUtils', () => {
         };
         expect(isLogitBarSelection('Top logits', selection)).toBe(true);
         expect(isLogitBarSelection('unrelated label', { object: { userData: { instanceKind: 'other' } } })).toBe(false);
+    });
+
+    it('resolves chosen-token logit metadata from labeled scene objects', () => {
+        const logitEntry = { token: '.', token_id: 13, prob: 0.6882, logit: -51.8731 };
+        const selection = {
+            object: {
+                userData: {},
+                parent: {
+                    userData: {
+                        label: 'Chosen token: .',
+                        logitEntry
+                    },
+                    parent: null
+                }
+            }
+        };
+        expect(resolveSelectionLogitEntry(selection)).toEqual(logitEntry);
     });
 });

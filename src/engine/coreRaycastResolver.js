@@ -183,9 +183,20 @@ export function resolveRaycastLabel(intersects, {
             }
             const lbl = obj.userData?.label || obj.name;
             if (lbl && lbl !== 'Weight Matrix') {
+                const info = {};
+                if (obj.userData?.logitEntry && typeof obj.userData.logitEntry === 'object') {
+                    info.logitEntry = obj.userData.logitEntry;
+                }
+                if (Number.isFinite(obj.userData?.tokenIndex)) {
+                    info.tokenIndex = Math.floor(obj.userData.tokenIndex);
+                }
+                if (Number.isFinite(obj.userData?.tokenId)) {
+                    info.tokenId = Math.floor(obj.userData.tokenId);
+                }
                 return {
-                    label: normalizeFn(lbl, null, obj),
+                    label: normalizeFn(lbl, Object.keys(info).length ? info : null, obj),
                     hit,
+                    info: Object.keys(info).length ? info : null,
                     object: obj,
                     kind: 'label'
                 };
