@@ -234,6 +234,20 @@ function inspectInstancedVectorSlice(sourceMesh, sourceOffset = 0, sourceCount =
     };
 }
 
+function resolveInstancedSelectionSourceOffset(selectionInfo, vectorMesh, fallbackCount = null) {
+    if (!vectorMesh?.isInstancedMesh) return 0;
+    const rawInstanceId = Number(selectionInfo?.hit?.instanceId);
+    if (!Number.isFinite(rawInstanceId) || rawInstanceId < 0) return 0;
+    const previewCount = Number.isFinite(fallbackCount)
+        ? Math.max(1, Math.floor(fallbackCount))
+        : PREVIEW_VECTOR_BODY_INSTANCES;
+    const meshCount = Number.isFinite(vectorMesh.count)
+        ? Math.max(0, Math.floor(vectorMesh.count))
+        : Math.max(0, Math.floor(vectorMesh.instanceMatrix?.count || 0));
+    if (!Number.isFinite(meshCount) || meshCount <= previewCount) return 0;
+    return Math.max(0, Math.floor(rawInstanceId / previewCount) * previewCount);
+}
+
 export function isInstancedVectorSliceInMotion(sourceMesh, sourceOffset = 0, sourceCount = null) {
     const state = inspectInstancedVectorSlice(sourceMesh, sourceOffset, sourceCount);
     if (!state) return false;
@@ -308,7 +322,8 @@ export function tryCopyVectorAppearanceToPreview(vec, selectionInfo, vectorRef, 
     }
 
     if (!copied && vectorMesh?.isInstancedMesh) {
-        copied = copyInstancedVectorSliceToPreview(vec, vectorMesh, 0, vec.instanceCount);
+        const sourceOffset = resolveInstancedSelectionSourceOffset(selectionInfo, vectorMesh, vec.instanceCount);
+        copied = copyInstancedVectorSliceToPreview(vec, vectorMesh, sourceOffset, vec.instanceCount);
     }
 
     if (!copied) return false;

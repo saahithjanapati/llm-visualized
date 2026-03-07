@@ -640,6 +640,7 @@ export default class Gpt2Layer extends BaseLayer {
             layerIndex: this.index,
             vectorPrismCount: this._getBaseVectorLength(),
             laneCount: this._laneCount,
+            deferRuntimeResources: !this.isActive,
             // KV-cache persistence can already capture batched vector refs, so
             // keep MHSA copy batching enabled in KV mode to reduce per-lane cost.
             useBatchedVectorCopies: true,
@@ -3125,9 +3126,14 @@ export default class Gpt2Layer extends BaseLayer {
     // Public helpers
     // ------------------------------------------------------------
 
+    ensureMhsaRuntimeResources() {
+        this.mhsaAnimation?.ensureRuntimeResources?.();
+    }
+
     /** Inject external lanes from the previous layer and activate animation */
     activateWithLanes(externalLanes) {
         if (this.isActive) return; // already active
+        this.ensureMhsaRuntimeResources();
         
         // Set up lanes but don't start animation yet - wait for positioning
         this.isActive = false; // keep inactive during transition

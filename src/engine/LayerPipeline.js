@@ -265,6 +265,7 @@ export class LayerPipeline extends EventTarget {
         this._awaitingTopLogitReveal = false;
         this._topLogitRevealComplete = true;
         this._topLogitRevealGateId = 0;
+        this._mhsaRuntimePrewarmHandles = new Map();
 
         // ------------------------------------------------------------------
         // Pre-create *all* layers so their static visuals are visible upfront.
@@ -351,6 +352,45 @@ export class LayerPipeline extends EventTarget {
             this._layers.push(layer);
             this._engine._layers.push(layer); // add to engine update list
         }
+        this._scheduleMhsaRuntimePrewarm(1);
+    }
+
+    _scheduleMhsaRuntimePrewarm(layerIndex) {
+        const idx = Number.isFinite(layerIndex) ? Math.floor(layerIndex) : -1;
+        if (idx < 0 || idx >= this._layers.length) return;
+        if (this._mhsaRuntimePrewarmHandles.has(idx)) return;
+        const layer = this._layers[idx];
+        if (!layer || layer.isActive) return;
+
+        const run = () => {
+            this._mhsaRuntimePrewarmHandles.delete(idx);
+            try {
+                layer.ensureMhsaRuntimeResources?.();
+            } catch (_) { /* best-effort prewarm */ }
+        };
+
+        if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+            const handle = window.requestIdleCallback(run, { timeout: 1200 });
+            this._mhsaRuntimePrewarmHandles.set(idx, { type: 'idle', handle });
+            return;
+        }
+
+        const handle = setTimeout(run, 120);
+        this._mhsaRuntimePrewarmHandles.set(idx, { type: 'timeout', handle });
+    }
+
+    _clearMhsaRuntimePrewarmHandles() {
+        this._mhsaRuntimePrewarmHandles.forEach((entry) => {
+            try {
+                if (!entry) return;
+                if (entry.type === 'idle' && typeof window !== 'undefined' && typeof window.cancelIdleCallback === 'function') {
+                    window.cancelIdleCallback(entry.handle);
+                    return;
+                }
+                clearTimeout(entry.handle);
+            } catch (_) { /* best-effort cleanup */ }
+        });
+        this._mhsaRuntimePrewarmHandles.clear();
     }
 
     _initAutoCameraDriver() {
@@ -369,6 +409,7 @@ export class LayerPipeline extends EventTarget {
 
     /** Dispose and tear down Three resources */
     dispose() {
+        this._clearMhsaRuntimePrewarmHandles();
         if (this._autoCamera) {
             this._autoCamera.dispose?.();
             this._autoCamera = null;
@@ -1993,6 +2034,7 @@ export class LayerPipeline extends EventTarget {
         if (!nextLayer) return;
 
         nextLayer.activateWithLanes(externalLanes);
+        this._scheduleMhsaRuntimePrewarm(this._currentLayerIdx + 1);
 
         this._autoCamera?.maybeFocus?.({ immediate: true });
         this.dispatchEvent(new Event('progress'));

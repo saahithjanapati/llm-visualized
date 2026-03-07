@@ -47,6 +47,7 @@ import {
 import {
     collectVisibleContextText,
     copyTextToClipboard,
+    getDescriptionPlainText,
     setDescriptionContent
 } from './selectionPanelCopyUtils.js';
 import {
@@ -58,6 +59,7 @@ import {
     normalizeAttentionValuePart
 } from './selectionPanelFormatUtils.js';
 import { buildSelectionPromptContext } from './selectionPanelPromptContextUtils.js';
+import { buildSelectionChatPrompt } from './selectionPanelChatPromptUtils.js';
 import {
     applyMaterialSnapshot,
     copyInstancedVectorColorsToPreview,
@@ -183,6 +185,24 @@ import {
     POSITION_EMBED_COLOR,
     LN_PARAMS
 } from '../animations/LayerAnimationConstants.js';
+import { getLayerNormParamData } from '../data/layerNormParams.js';
+
+const ATTENTION_VECTOR_PANEL_ACTION_OPEN = 'open-attention-vector';
+const LAYERNORM_PANEL_ACTION_OPEN = 'open-layernorm';
+const LAYERNORM_PARAM_PANEL_ACTION_OPEN = 'open-layernorm-param';
+const QKV_SOURCE_VECTOR_PANEL_ACTION_OPEN = 'open-qkv-source-vector';
+const QKV_WEIGHT_MATRIX_PANEL_ACTION_OPEN = 'open-qkv-weight-matrix';
+const LAYER_NORM_PARAM_PREVIEW_MONOCHROME = {
+    type: 'monochromatic',
+    baseHue: 0,
+    saturation: 0,
+    minLightness: 0.03,
+    maxLightness: 0.88,
+    useData: true,
+    valueMin: -1.8,
+    valueMax: 1.8
+};
+
 let tokenChipFont = null;
 let tokenChipFontPromise = null;
 
@@ -234,6 +254,94 @@ function buildMetadata(params = 'TBD', inputDim = null, outputDim = null, length
     };
 }
 
+function readSceneSelectionNumber(node, key) {
+    const direct = node?.userData?.[key];
+    if (Number.isFinite(direct)) return Math.floor(direct);
+    const activationValue = node?.userData?.activationData?.[key];
+    if (Number.isFinite(activationValue)) return Math.floor(activationValue);
+    return null;
+}
+
+function readSceneSelectionString(node, key) {
+    const direct = node?.userData?.[key];
+    if (typeof direct === 'string' && direct.trim().length) return direct;
+    const activationValue = node?.userData?.activationData?.[key];
+    if (typeof activationValue === 'string' && activationValue.trim().length) return activationValue;
+    return '';
+}
+
+function normalizeQkvActionKind(kind = 'Q') {
+    const upper = String(kind || '').toUpperCase();
+    if (upper === 'K') return 'K';
+    if (upper === 'V') return 'V';
+    return 'Q';
+}
+
+function hasExplicitQkvVectorLabelText(value = '') {
+    const lower = String(value || '').toLowerCase();
+    return lower.includes('query vector')
+        || lower.includes('key vector')
+        || lower.includes('value vector');
+}
+
+function isRelabeledQkvVectorCandidate({
+    label = '',
+    category = null
+} = {}) {
+    if (hasExplicitQkvVectorLabelText(label)) return true;
+    const upperCategory = String(category || '').toUpperCase();
+    return upperCategory === 'Q' || upperCategory === 'K' || upperCategory === 'V';
+}
+
+function resolveLayerNormParamPreviewSpec(label = '', selectionInfo = null) {
+    const lower = String(label || '').toLowerCase();
+    const activationStage = String(getActivationDataFromSelection(selectionInfo)?.stage || '').toLowerCase();
+    const layerNormKind = activationStage.startsWith('ln1.')
+        ? 'ln1'
+        : activationStage.startsWith('ln2.')
+            ? 'ln2'
+            : activationStage.startsWith('final_ln.')
+                ? 'final'
+                : (lower.includes('final ln')
+                    ? 'final'
+                    : (lower.includes('ln2') ? 'ln2' : (lower.includes('ln1') ? 'ln1' : null)));
+    const isScale = activationStage.endsWith('.param.scale')
+        || lower.includes('layernorm scale')
+        || lower.includes('layer norm scale')
+        || lower.includes('final ln scale')
+        || lower.includes('ln1 scale')
+        || lower.includes('ln2 scale');
+    const isShift = activationStage.endsWith('.param.shift')
+        || lower.includes('layernorm shift')
+        || lower.includes('layer norm shift')
+        || lower.includes('final ln shift')
+        || lower.includes('ln1 shift')
+        || lower.includes('ln2 shift');
+    const param = isScale ? 'scale' : (isShift ? 'shift' : null);
+    if (!param || !layerNormKind) return null;
+    const layerIndex = findUserDataNumber(selectionInfo, 'layerIndex');
+    return {
+        layerNormKind,
+        param,
+        layerIndex: Number.isFinite(layerIndex) ? Math.floor(layerIndex) : null
+    };
+}
+
+function getQkvWeightMatrixLabel(kind = 'Q') {
+    const safeKind = normalizeQkvActionKind(kind);
+    if (safeKind === 'K') return 'Key Weight Matrix';
+    if (safeKind === 'V') return 'Value Weight Matrix';
+    return 'Query Weight Matrix';
+}
+
+function getLayerNormParamLabel(layerNormKind = null, param = 'scale') {
+    const safeParam = param === 'shift' ? 'shift' : 'scale';
+    if (layerNormKind === 'final') {
+        return safeParam === 'scale' ? 'Final LN Scale' : 'Final LN Shift';
+    }
+    return safeParam === 'scale' ? 'LayerNorm Scale' : 'LayerNorm Shift';
+}
+
 function normalizePreviewKeyValue(value) {
     if (typeof value === 'number') {
         return Number.isFinite(value) ? String(value) : '';
@@ -267,6 +375,7 @@ function buildSelectionPreviewKey(label, selection) {
         normalizePreviewKeyValue(findUserDataNumber(selection, 'row')),
         normalizePreviewKeyValue(findUserDataNumber(selection, 'col')),
         normalizePreviewKeyValue(findUserDataString(selection, 'category')),
+        normalizePreviewKeyValue(findUserDataString(selection, 'layerNormKind')),
         normalizePreviewKeyValue(findUserDataString(selection, 'stage')),
         normalizePreviewKeyValue(info?.mode),
         normalizePreviewKeyValue(info?.label),
@@ -1355,12 +1464,19 @@ function extractPreviewVectorData(selectionInfo) {
     return null;
 }
 
-function applyDataToPreviewVector(vec, data) {
+function applyDataToPreviewVector(vec, data, { colorOptions = null, minimumKeyColors = 2 } = {}) {
     if (!vec || !Array.isArray(data) || data.length === 0) return;
     const raw = data.slice();
-    vec.updateDataAndSnapVisuals(raw);
-    const numKeyColors = Math.min(30, Math.max(2, raw.length));
-    vec.updateKeyColorsFromData(raw, numKeyColors, null, raw);
+    if (typeof vec.updateDataInternal === 'function') {
+        vec.updateDataInternal(raw);
+    } else {
+        vec.updateDataAndSnapVisuals(raw);
+    }
+    const numKeyColors = Math.min(30, Math.max(minimumKeyColors, raw.length));
+    vec.updateKeyColorsFromData(raw, numKeyColors, colorOptions, raw);
+    if (typeof vec.updateInstanceGeometryAndColors === 'function') {
+        vec.updateInstanceGeometryAndColors();
+    }
 }
 
 function createPreviewVector(options = {}) {
@@ -1923,6 +2039,36 @@ function isLikelyVectorSelection(label, selectionInfo) {
     return false;
 }
 
+function buildLayerNormParamVectorPreview(label, selectionInfo) {
+    const spec = resolveLayerNormParamPreviewSpec(label, selectionInfo);
+    if (!spec) return null;
+
+    const previewLength = Math.max(1, Math.floor(resolveVectorLength(label, selectionInfo) || D_MODEL));
+    const previewData = getLayerNormParamData(spec.layerIndex, spec.layerNormKind, spec.param, previewLength)
+        || extractPreviewVectorData(selectionInfo);
+    if (!Array.isArray(previewData) || previewData.length === 0) return null;
+
+    const vec = createPreviewVector({
+        colorHex: 0xffffff,
+        data: null,
+        instanceCount: previewData.length
+    });
+    vec.group.userData = vec.group.userData || {};
+    vec.group.userData.label = getLayerNormParamLabel(spec.layerNormKind, spec.param);
+    applyDataToPreviewVector(vec, previewData, {
+        colorOptions: spec.param === 'shift'
+            ? null
+            : LAYER_NORM_PARAM_PREVIEW_MONOCHROME
+    });
+
+    return {
+        object: vec.group,
+        dispose: () => {
+            vec.dispose();
+        }
+    };
+}
+
 function resolvePreviewObject(label, selectionInfo) {
     const lower = (label || '').toLowerCase();
     if (isLogitBarSelection(label, selectionInfo)) {
@@ -1930,6 +2076,8 @@ function resolvePreviewObject(label, selectionInfo) {
     }
     const attentionSpherePreview = buildAttentionSpherePreview(selectionInfo);
     if (attentionSpherePreview) return attentionSpherePreview;
+    const layerNormParamPreview = buildLayerNormParamVectorPreview(label, selectionInfo);
+    if (layerNormParamPreview) return layerNormParamPreview;
     const isVectorSelection = isLikelyVectorSelection(label, selectionInfo);
     if (isVectorSelection) {
         const vectorClone = buildVectorClonePreview(selectionInfo, label);
@@ -2843,63 +2991,136 @@ class SelectionPanel {
         }, COPY_CONTEXT_FEEDBACK_MS);
     }
 
+    _buildSelectionPromptContextSummary(selection = null, vectorTokenMetadata = null) {
+        const promptTokenIndices = Array.isArray(this.attentionTokenIndices) && this.attentionTokenIndices.length
+            ? this.attentionTokenIndices
+            : this.laneTokenIndices;
+        const promptTokenLabels = Array.isArray(this.attentionTokenLabels) && this.attentionTokenLabels.length
+            ? this.attentionTokenLabels
+            : this.tokenLabels;
+        if (!Array.isArray(promptTokenIndices) || !promptTokenIndices.length) return '';
+        if (!Array.isArray(promptTokenLabels) || !promptTokenLabels.length) return '';
+
+        const tokenIndex = Number.isFinite(vectorTokenMetadata?.tokenIndex)
+            ? Math.floor(vectorTokenMetadata.tokenIndex)
+            : findUserDataNumber(selection, 'tokenIndex');
+        const tokenId = Number.isFinite(vectorTokenMetadata?.tokenId)
+            ? Math.floor(vectorTokenMetadata.tokenId)
+            : findUserDataNumber(selection, 'tokenId');
+        let tokenText = typeof vectorTokenMetadata?.tokenText === 'string'
+            ? vectorTokenMetadata.tokenText
+            : findUserDataString(selection, 'tokenLabel');
+        if ((!tokenText || !tokenText.trim().length)
+            && Number.isFinite(tokenIndex)
+            && this.activationSource
+            && typeof this.activationSource.getTokenString === 'function') {
+            const resolvedTokenText = this.activationSource.getTokenString(tokenIndex);
+            if (typeof resolvedTokenText === 'string' && resolvedTokenText.trim().length) {
+                tokenText = resolvedTokenText;
+            }
+        }
+
+        const { entries, activeIndex } = buildSelectionPromptContext({
+            activationSource: this.activationSource,
+            laneTokenIndices: promptTokenIndices,
+            tokenLabels: promptTokenLabels,
+            selectedTokenIndex: Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : null,
+            selectedTokenId: Number.isFinite(tokenId) ? Math.floor(tokenId) : null,
+            selectedTokenText: typeof tokenText === 'string' ? tokenText : ''
+        });
+        if (!entries.length || activeIndex < 0) return '';
+
+        return entries
+            .map((entry, index) => {
+                const label = entry.titleText || entry.tokenLabel || entry.displayText || `Token ${index + 1}`;
+                return index === activeIndex ? `[[${label}]]` : label;
+            })
+            .join(' | ');
+    }
+
+    _resolveCopyContextKvState(selection = null) {
+        const layerIndex = findUserDataNumber(selection, 'layerIndex');
+        const layers = Array.isArray(this.engine?._layers) ? this.engine._layers : [];
+        const layer = Number.isFinite(layerIndex) && layerIndex >= 0 && layerIndex < layers.length
+            ? layers[Math.floor(layerIndex)]
+            : null;
+        const mhsa = layer?.mhsaAnimation || null;
+        const kvCacheModeEnabled = !!(
+            appState.kvCacheModeEnabled
+            || layer?._kvCacheModeEnabled
+            || (typeof mhsa?._isKvCacheModeEnabled === 'function' && mhsa._isKvCacheModeEnabled())
+        );
+
+        return {
+            kvCacheModeEnabled,
+            kvCachePrefillActive: !!appState.kvCachePrefillActive,
+            kvCachePassIndex: Number.isFinite(appState.kvCachePassIndex)
+                ? Math.floor(appState.kvCachePassIndex)
+                : null,
+            kvCacheDecodeActive: !!(layer?._kvCacheDecodeActive || mhsa?._kvCacheDecodeActive),
+            selectionIsCachedKv: isKvCacheVectorSelection(selection)
+        };
+    }
+
     _buildSelectionContextPayload() {
-        const sections = [];
+        const selection = this._lastSelection;
+        const normalizedLabel = this._lastSelectionLabel
+            || normalizeSelectionLabel(selection?.label || '', selection);
         const title = (this.title?.textContent || '').trim();
         const subtitle = (this.subtitle?.textContent || '').trim();
         const subtitleSecondary = (this.subtitleSecondary?.textContent || '').trim();
-        if (title) sections.push(`Selection: ${title}`);
-        if (subtitle && subtitleSecondary) {
-            sections.push(`Context: ${subtitle}\n${subtitleSecondary}`);
-        } else if (subtitle) {
-            sections.push(`Context: ${subtitle}`);
-        } else if (subtitleSecondary) {
-            sections.push(`Context: ${subtitleSecondary}`);
-        }
-
         const descriptionText = String(this._currentSelectionDescription || '').trim();
-        if (descriptionText) {
-            sections.push(`Description:\n${descriptionText}`);
-        }
-
         const equationText = String(this._currentSelectionEquations || '').trim();
-        if (equationText) {
-            sections.push(`Equations:\n${equationText}`);
-        }
+        const vectorTokenMetadata = selection
+            ? this._resolveVectorTokenPosition(selection, normalizedLabel)
+            : null;
+        const attentionContext = selection ? this._resolveAttentionContext(selection) : null;
+        const attentionScoreSummary = selection
+            ? resolveAttentionScoreSelectionSummary(selection, attentionContext)
+            : null;
+        const promptContextSummary = this._buildSelectionPromptContextSummary(selection, vectorTokenMetadata);
 
         const metaLines = collectVisibleContextText(this.metaSection, {
             excludeSelectors: '#detailCopyContextBtn, #detailClose'
         });
-        if (metaLines.length) {
-            sections.push(`Details:\n${metaLines.join('\n')}`);
-        }
 
+        let legendLines = [];
         if (this.vectorLegend?.classList.contains('is-visible')) {
-            const legendLines = collectVisibleContextText(this.vectorLegend, {
+            legendLines = collectVisibleContextText(this.vectorLegend, {
                 excludeSelectors: '.legend-hover-tooltip, .legend-hover-marker'
             });
-            if (legendLines.length) {
-                sections.push(`Legend:\n${legendLines.join('\n')}`);
-            }
         }
 
+        let attentionLines = [];
         if (this.attentionRoot?.classList.contains('is-visible')) {
-            const attentionLines = collectVisibleContextText(this.attentionRoot, {
+            attentionLines = collectVisibleContextText(this.attentionRoot, {
                 excludeSelectors: '.legend-hover-tooltip, .legend-hover-marker'
             });
-            if (attentionLines.length) {
-                sections.push(`Attention:\n${attentionLines.join('\n')}`);
-            }
         }
 
+        let dataLines = [];
         if (this.dataSection && this.dataSection.style.display !== 'none') {
-            const dataLines = collectVisibleContextText(this.dataSection);
-            if (dataLines.length) {
-                sections.push(`Data:\n${dataLines.join('\n')}`);
-            }
+            dataLines = collectVisibleContextText(this.dataSection);
         }
 
-        return sections.join('\n\n').replace(/\n{3,}/g, '\n\n').trim();
+        return buildSelectionChatPrompt({
+            selection,
+            normalizedLabel,
+            title,
+            subtitle,
+            subtitleSecondary,
+            descriptionText,
+            equationText,
+            metaLines,
+            legendLines,
+            attentionLines,
+            dataLines,
+            promptContextSummary,
+            attentionScoreSummary,
+            vectorTokenMetadata,
+            activationSource: this.activationSource,
+            kvState: this._resolveCopyContextKvState(selection)
+        });
     }
 
     async _onCopyContextClick(event) {
@@ -3906,6 +4127,979 @@ class SelectionPanel {
         this._openSelectionForTokenChip(chip, event);
     }
 
+    _parseDetailActionPayload(actionEl) {
+        const rawPayload = actionEl?.dataset?.detailPayload;
+        if (typeof rawPayload !== 'string' || !rawPayload.length) return {};
+        try {
+            const parsed = JSON.parse(decodeURIComponent(rawPayload));
+            return parsed && typeof parsed === 'object' ? parsed : {};
+        } catch (_) {
+            return {};
+        }
+    }
+
+    _readVectorEntryNumber(entry, key) {
+        if (!entry || typeof entry !== 'object') return null;
+        const direct = entry[key];
+        if (Number.isFinite(direct)) return Math.floor(direct);
+        const activationValue = entry.activationData?.[key];
+        if (Number.isFinite(activationValue)) return Math.floor(activationValue);
+        return null;
+    }
+
+    _readVectorEntryString(entry, key) {
+        if (!entry || typeof entry !== 'object') return '';
+        const direct = entry[key];
+        if (typeof direct === 'string' && direct.trim().length) return direct;
+        const activationValue = entry.activationData?.[key];
+        if (typeof activationValue === 'string' && activationValue.trim().length) return activationValue;
+        return '';
+    }
+
+    _collectSceneVectorEntryCandidates(node) {
+        if (!node?.isInstancedMesh || !node.userData) return [];
+        const prismCount = Number.isFinite(node.userData.prismCount)
+            ? Math.max(1, Math.floor(node.userData.prismCount))
+            : 1;
+        const candidates = [];
+        const pushCandidate = (entry, vectorIndex) => {
+            if (!entry || typeof entry !== 'object') return;
+            const safeVectorIndex = Number.isFinite(vectorIndex) ? Math.max(0, Math.floor(vectorIndex)) : 0;
+            candidates.push({
+                entry,
+                instanceId: safeVectorIndex * prismCount
+            });
+        };
+
+        const vectorEntries = Array.isArray(node.userData.vectorEntries) ? node.userData.vectorEntries : null;
+        if (vectorEntries?.length) {
+            vectorEntries.forEach((entry, vectorIndex) => pushCandidate(entry, vectorIndex));
+            return candidates;
+        }
+
+        const instanceEntries = Array.isArray(node.userData.instanceEntries) ? node.userData.instanceEntries : null;
+        if (!instanceEntries?.length) return candidates;
+        for (let instanceId = 0; instanceId < instanceEntries.length; instanceId += prismCount) {
+            pushCandidate(instanceEntries[instanceId], Math.floor(instanceId / prismCount));
+        }
+        return candidates;
+    }
+
+    _findSceneVectorEntrySelection({
+        stageMatcher = null,
+        layerIndex = null,
+        headIndex = null,
+        tokenIndex = null,
+        tokenId = null,
+        tokenLabel = '',
+        defaultLabel = 'Vector'
+    } = {}) {
+        const scene = this.engine?.scene || null;
+        if (!scene || typeof scene.traverse !== 'function' || typeof stageMatcher !== 'function') return null;
+
+        const normalizedTokenText = formatTokenLabelForPreview(tokenLabel);
+        let bestSelection = null;
+        let bestScore = -Infinity;
+
+        scene.traverse((node) => {
+            if (!node || node.isScene) return;
+            const candidates = this._collectSceneVectorEntryCandidates(node);
+            if (!candidates.length) return;
+
+            for (const candidate of candidates) {
+                const entry = candidate.entry;
+                const activationData = entry.activationData && typeof entry.activationData === 'object'
+                    ? entry.activationData
+                    : null;
+                const stageLower = String(activationData?.stage || '').toLowerCase();
+                if (!stageMatcher(stageLower, entry, node)) continue;
+
+                const entryLayerIndex = this._readVectorEntryNumber(entry, 'layerIndex');
+                const entryHeadIndex = this._readVectorEntryNumber(entry, 'headIndex');
+                const entryTokenIndex = this._readVectorEntryNumber(entry, 'tokenIndex');
+                const entryTokenId = this._readVectorEntryNumber(entry, 'tokenId')
+                    ?? this._readVectorEntryNumber(entry, 'token_id');
+                const entryTokenText = formatTokenLabelForPreview(this._readVectorEntryString(entry, 'tokenLabel'));
+
+                if (Number.isFinite(layerIndex) && entryLayerIndex !== Math.floor(layerIndex)) continue;
+                if (Number.isFinite(headIndex) && entryHeadIndex !== Math.floor(headIndex)) continue;
+                if (Number.isFinite(tokenIndex) && entryTokenIndex !== Math.floor(tokenIndex)) continue;
+                if (Number.isFinite(tokenId) && Number.isFinite(entryTokenId) && entryTokenId !== Math.floor(tokenId)) continue;
+                if (
+                    normalizedTokenText
+                    && normalizedTokenText !== ATTENTION_VALUE_PLACEHOLDER
+                    && entryTokenText
+                    && entryTokenText !== ATTENTION_VALUE_PLACEHOLDER
+                    && entryTokenText !== normalizedTokenText
+                ) {
+                    continue;
+                }
+
+                let score = 120;
+                if (node.visible !== false) score += 12;
+                if (entry.vectorRef) score += 16;
+                if (Number.isFinite(entryLayerIndex) && Number.isFinite(layerIndex) && entryLayerIndex === Math.floor(layerIndex)) score += 14;
+                if (Number.isFinite(entryHeadIndex) && Number.isFinite(headIndex) && entryHeadIndex === Math.floor(headIndex)) score += 16;
+                if (Number.isFinite(entryTokenIndex) && Number.isFinite(tokenIndex) && entryTokenIndex === Math.floor(tokenIndex)) score += 18;
+                if (Number.isFinite(entryTokenId) && Number.isFinite(tokenId) && entryTokenId === Math.floor(tokenId)) score += 10;
+                if (normalizedTokenText && entryTokenText && entryTokenText === normalizedTokenText) score += 8;
+
+                if (score <= bestScore) continue;
+
+                const label = (typeof entry.label === 'string' && entry.label.trim().length)
+                    ? entry.label
+                    : defaultLabel;
+                const info = {
+                    ...(entry && typeof entry === 'object' ? entry : {})
+                };
+                if (activationData) info.activationData = activationData;
+                if (Number.isFinite(entryLayerIndex)) info.layerIndex = entryLayerIndex;
+                if (Number.isFinite(entryHeadIndex)) info.headIndex = entryHeadIndex;
+                if (Number.isFinite(entryTokenIndex)) info.tokenIndex = entryTokenIndex;
+                if (Number.isFinite(entryTokenId)) info.tokenId = entryTokenId;
+                if (entryTokenText) info.tokenLabel = entryTokenText;
+
+                bestSelection = {
+                    label,
+                    kind: node.userData?.instanceKind || 'instanced',
+                    info,
+                    object: node,
+                    hit: {
+                        object: node,
+                        instanceId: candidate.instanceId
+                    }
+                };
+                bestScore = score;
+            }
+        });
+
+        return bestSelection;
+    }
+
+    _findAttentionVectorSceneSelection({
+        vectorKind = 'Q',
+        tokenIndex = null,
+        tokenId = null,
+        tokenLabel = '',
+        headIndex = null
+    } = {}) {
+        const scene = this.engine?.scene || null;
+        if (!scene || typeof scene.traverse !== 'function') return null;
+
+        const safeKind = normalizeQkvActionKind(vectorKind);
+        const desiredStage = safeKind === 'Q'
+            ? 'qkv.q'
+            : (safeKind === 'V' ? 'qkv.v' : 'qkv.k');
+        const instancedSelection = this._findSceneVectorEntrySelection({
+            stageMatcher: (stageLower, entry) => {
+                const cachedKv = entry?.vectorRef?.userData?.cachedKv === true
+                    || entry?.vectorRef?.userData?.kvCachePersistent === true;
+                const entryCategory = String(entry?.category || entry?.vectorRef?.userData?.vectorCategory || '').toUpperCase();
+                const isLiveMatch = stageLower === desiredStage;
+                const isCachedVectorMatch = cachedKv && entryCategory === safeKind && (safeKind === 'K' || safeKind === 'V');
+                return isLiveMatch || isCachedVectorMatch;
+            },
+            headIndex,
+            tokenIndex,
+            tokenId,
+            tokenLabel,
+            defaultLabel: safeKind === 'Q'
+                ? 'Query Vector'
+                : (safeKind === 'V' ? 'Value Vector' : 'Key Vector')
+        });
+        if (instancedSelection) return instancedSelection;
+
+        const normalizedTokenText = formatTokenLabelForPreview(tokenLabel);
+        let bestSelection = null;
+        let bestScore = -Infinity;
+
+        const readNumber = (node, key) => {
+            const direct = node?.userData?.[key];
+            if (Number.isFinite(direct)) return Math.floor(direct);
+            const activationValue = node?.userData?.activationData?.[key];
+            if (Number.isFinite(activationValue)) return Math.floor(activationValue);
+            return null;
+        };
+        const readString = (node, key) => {
+            const direct = node?.userData?.[key];
+            if (typeof direct === 'string' && direct.trim().length) return direct;
+            const activationValue = node?.userData?.activationData?.[key];
+            if (typeof activationValue === 'string' && activationValue.trim().length) return activationValue;
+            return '';
+        };
+
+        scene.traverse((node) => {
+            if (!node || node.isScene || !node.userData) return;
+            const stageLower = String(node.userData.activationData?.stage || '').toLowerCase();
+            const cachedKv = node.userData.cachedKv === true || node.userData.kvCachePersistent === true;
+            const vectorCategory = String(node.userData.vectorCategory || '').toUpperCase();
+            const isLiveMatch = stageLower === desiredStage;
+            const isCachedVectorMatch = cachedKv && vectorCategory === safeKind && (safeKind === 'K' || safeKind === 'V');
+            if (!isLiveMatch && !isCachedVectorMatch) return;
+
+            const nodeHeadIndex = readNumber(node, 'headIndex');
+            const nodeTokenIndex = readNumber(node, 'tokenIndex');
+            const nodeTokenId = readNumber(node, 'tokenId');
+            const nodeTokenText = formatTokenLabelForPreview(readString(node, 'tokenLabel'));
+
+            if (Number.isFinite(headIndex) && Number.isFinite(nodeHeadIndex) && nodeHeadIndex !== Math.floor(headIndex)) return;
+            if (Number.isFinite(tokenIndex) && Number.isFinite(nodeTokenIndex) && nodeTokenIndex !== Math.floor(tokenIndex)) return;
+            if (Number.isFinite(tokenId) && Number.isFinite(nodeTokenId) && nodeTokenId !== Math.floor(tokenId)) return;
+            if (
+                normalizedTokenText
+                && normalizedTokenText !== ATTENTION_VALUE_PLACEHOLDER
+                && nodeTokenText
+                && nodeTokenText !== ATTENTION_VALUE_PLACEHOLDER
+                && nodeTokenText !== normalizedTokenText
+            ) {
+                return;
+            }
+
+            let score = isLiveMatch ? 100 : 60;
+            if (node.visible !== false) score += 12;
+            if (node.type === 'Group') score += 4;
+            if (Number.isFinite(nodeHeadIndex) && Number.isFinite(headIndex) && nodeHeadIndex === Math.floor(headIndex)) score += 16;
+            if (Number.isFinite(nodeTokenIndex) && Number.isFinite(tokenIndex) && nodeTokenIndex === Math.floor(tokenIndex)) score += 20;
+            if (Number.isFinite(nodeTokenId) && Number.isFinite(tokenId) && nodeTokenId === Math.floor(tokenId)) score += 10;
+            if (normalizedTokenText && nodeTokenText && nodeTokenText === normalizedTokenText) score += 8;
+
+            if (score <= bestScore) return;
+
+            const label = typeof node.userData.label === 'string' && node.userData.label.trim().length
+                ? node.userData.label
+                : (
+                    safeKind === 'Q'
+                        ? 'Query Vector'
+                        : (safeKind === 'V'
+                            ? (isCachedVectorMatch ? 'Cached Value Vector' : 'Value Vector')
+                            : (isCachedVectorMatch ? 'Cached Key Vector' : 'Key Vector'))
+                );
+            const info = {};
+            const activationData = node.userData.activationData;
+            if (activationData && typeof activationData === 'object') info.activationData = activationData;
+            if (Number.isFinite(nodeHeadIndex)) info.headIndex = nodeHeadIndex;
+            if (Number.isFinite(nodeTokenIndex)) info.tokenIndex = nodeTokenIndex;
+            if (Number.isFinite(nodeTokenId)) info.tokenId = nodeTokenId;
+            if (nodeTokenText) info.tokenLabel = nodeTokenText;
+
+            bestSelection = {
+                label,
+                kind: 'vector',
+                info,
+                object: node
+            };
+            bestScore = score;
+        });
+
+        return bestSelection;
+    }
+
+    _findQkvSourceVectorSceneSelection({
+        layerIndex = null,
+        tokenIndex = null,
+        tokenId = null,
+        tokenLabel = ''
+    } = {}) {
+        const scene = this.engine?.scene || null;
+        if (!scene || typeof scene.traverse !== 'function') return null;
+
+        const instancedSelection = this._findSceneVectorEntrySelection({
+            stageMatcher: (stageLower, entry, node) => {
+                if (stageLower !== 'ln1.shift') return false;
+                const entryCategory = entry?.category || entry?.vectorRef?.userData?.vectorCategory;
+                const entryActivationLabel = entry?.activationData?.label || '';
+                const vectorRefGroupLabel = entry?.vectorRef?.group?.userData?.label || '';
+                const vectorRefMeshLabel = entry?.vectorRef?.mesh?.userData?.label || '';
+                const nodeLabel = node?.userData?.label || '';
+                const nodeActivationLabel = node?.userData?.activationData?.label || '';
+                if (isRelabeledQkvVectorCandidate({ label: entry?.label, category: entryCategory })) return false;
+                if (isRelabeledQkvVectorCandidate({ label: entryActivationLabel, category: entryCategory })) return false;
+                if (isRelabeledQkvVectorCandidate({ label: vectorRefGroupLabel, category: entryCategory })) return false;
+                if (isRelabeledQkvVectorCandidate({ label: vectorRefMeshLabel, category: entryCategory })) return false;
+                if (isRelabeledQkvVectorCandidate({ label: nodeLabel, category: node?.userData?.vectorCategory })) return false;
+                if (isRelabeledQkvVectorCandidate({ label: nodeActivationLabel, category: node?.userData?.vectorCategory })) return false;
+                return true;
+            },
+            layerIndex,
+            tokenIndex,
+            tokenId,
+            tokenLabel,
+            defaultLabel: 'Post LayerNorm Residual Vector'
+        });
+        if (instancedSelection) return instancedSelection;
+
+        const normalizedTokenText = formatTokenLabelForPreview(tokenLabel);
+        let bestSelection = null;
+        let bestScore = -Infinity;
+
+        scene.traverse((node) => {
+            if (!node || node.isScene || !node.userData) return;
+            const stageLower = String(node.userData.activationData?.stage || '').toLowerCase();
+            if (stageLower !== 'ln1.shift') return;
+            if (isRelabeledQkvVectorCandidate({
+                label: node.userData.label || node.userData.activationData?.label || '',
+                category: node.userData.vectorCategory
+            })) {
+                return;
+            }
+
+            const nodeLayerIndex = readSceneSelectionNumber(node, 'layerIndex');
+            const nodeTokenIndex = readSceneSelectionNumber(node, 'tokenIndex');
+            const nodeTokenId = readSceneSelectionNumber(node, 'tokenId');
+            const nodeTokenText = formatTokenLabelForPreview(readSceneSelectionString(node, 'tokenLabel'));
+
+            if (Number.isFinite(layerIndex) && nodeLayerIndex !== Math.floor(layerIndex)) return;
+            if (Number.isFinite(tokenIndex) && nodeTokenIndex !== Math.floor(tokenIndex)) return;
+            if (Number.isFinite(tokenId) && Number.isFinite(nodeTokenId) && nodeTokenId !== Math.floor(tokenId)) return;
+            if (
+                normalizedTokenText
+                && normalizedTokenText !== ATTENTION_VALUE_PLACEHOLDER
+                && nodeTokenText
+                && nodeTokenText !== ATTENTION_VALUE_PLACEHOLDER
+                && nodeTokenText !== normalizedTokenText
+            ) {
+                return;
+            }
+
+            let score = 100;
+            if (node.visible !== false) score += 12;
+            if (node.type === 'Group') score += 6;
+            if (Number.isFinite(nodeLayerIndex) && Number.isFinite(layerIndex) && nodeLayerIndex === Math.floor(layerIndex)) score += 20;
+            if (Number.isFinite(nodeTokenIndex) && Number.isFinite(tokenIndex) && nodeTokenIndex === Math.floor(tokenIndex)) score += 20;
+            if (Number.isFinite(nodeTokenId) && Number.isFinite(tokenId) && nodeTokenId === Math.floor(tokenId)) score += 10;
+            if (normalizedTokenText && nodeTokenText && nodeTokenText === normalizedTokenText) score += 8;
+
+            if (score <= bestScore) return;
+
+            const label = typeof node.userData.label === 'string' && node.userData.label.trim().length
+                ? node.userData.label
+                : 'Post LayerNorm Residual Vector';
+            const info = {};
+            if (node.userData.activationData && typeof node.userData.activationData === 'object') {
+                info.activationData = node.userData.activationData;
+            }
+            if (Number.isFinite(nodeLayerIndex)) info.layerIndex = nodeLayerIndex;
+            if (Number.isFinite(nodeTokenIndex)) info.tokenIndex = nodeTokenIndex;
+            if (Number.isFinite(nodeTokenId)) info.tokenId = nodeTokenId;
+            if (nodeTokenText) info.tokenLabel = nodeTokenText;
+
+            bestSelection = {
+                label,
+                kind: 'vector',
+                info,
+                object: node
+            };
+            bestScore = score;
+        });
+
+        return bestSelection;
+    }
+
+    _findQkvWeightMatrixSceneSelection({
+        matrixKind = 'Q',
+        headIndex = null,
+        layerIndex = null
+    } = {}) {
+        const scene = this.engine?.scene || null;
+        if (!scene || typeof scene.traverse !== 'function') return null;
+
+        const desiredLabel = getQkvWeightMatrixLabel(matrixKind);
+        const desiredLabelLower = desiredLabel.toLowerCase();
+        let bestSelection = null;
+        let bestScore = -Infinity;
+
+        scene.traverse((node) => {
+            if (!node || node.isScene || !node.userData) return;
+            const labelLower = String(node.userData.label || '').trim().toLowerCase();
+            if (labelLower !== desiredLabelLower) return;
+
+            const nodeHeadIndex = readSceneSelectionNumber(node, 'headIndex');
+            const nodeLayerIndex = readSceneSelectionNumber(node, 'layerIndex');
+
+            if (Number.isFinite(headIndex) && nodeHeadIndex !== Math.floor(headIndex)) return;
+            if (Number.isFinite(layerIndex) && nodeLayerIndex !== Math.floor(layerIndex)) return;
+
+            let score = 100;
+            if (node.visible !== false) score += 12;
+            if (node.type === 'Group') score += 6;
+            if (Number.isFinite(nodeHeadIndex) && Number.isFinite(headIndex) && nodeHeadIndex === Math.floor(headIndex)) score += 20;
+            if (Number.isFinite(nodeLayerIndex) && Number.isFinite(layerIndex) && nodeLayerIndex === Math.floor(layerIndex)) score += 20;
+
+            if (score <= bestScore) return;
+
+            const info = {};
+            if (Number.isFinite(nodeHeadIndex)) info.headIndex = nodeHeadIndex;
+            if (Number.isFinite(nodeLayerIndex)) info.layerIndex = nodeLayerIndex;
+
+            bestSelection = {
+                label: desiredLabel,
+                kind: 'matrix',
+                info,
+                object: node
+            };
+            bestScore = score;
+        });
+
+        return bestSelection;
+    }
+
+    _findSelectionLayerNormCarrier(selection = null) {
+        const candidates = [selection?.object, selection?.hit?.object];
+        for (const candidate of candidates) {
+            let current = candidate;
+            while (current && !current.isScene) {
+                const label = String(current.userData?.label || '').toLowerCase();
+                if (label === 'layernorm' || label === 'layernorm (top)') {
+                    return current;
+                }
+                current = current.parent;
+            }
+        }
+        return null;
+    }
+
+    _inferLayerNormKindFromSelection(selection = null) {
+        const explicitKind = findUserDataString(selection, 'layerNormKind');
+        const rawLabelLower = String(selection?.label || '').toLowerCase();
+        const normalizedLabelLower = normalizeSelectionLabel(selection?.label || '', selection).toLowerCase();
+        const combinedLabelLower = `${rawLabelLower} ${normalizedLabelLower}`;
+        const stageLower = String(getActivationDataFromSelection(selection)?.stage || '').toLowerCase();
+
+        if (explicitKind === 'ln1' || explicitKind === 'ln2' || explicitKind === 'final') return explicitKind;
+        if (stageLower.startsWith('ln1.')) return 'ln1';
+        if (stageLower.startsWith('ln2.')) return 'ln2';
+        if (stageLower.startsWith('final_ln')) return 'final';
+        if (
+            combinedLabelLower.includes('layernorm (top)')
+            || combinedLabelLower.includes('final ln')
+            || combinedLabelLower.includes('top layernorm')
+        ) {
+            return 'final';
+        }
+        if (combinedLabelLower.includes('ln1')) return 'ln1';
+        if (combinedLabelLower.includes('ln2')) return 'ln2';
+
+        const layerIndex = findUserDataNumber(selection, 'layerIndex');
+        const layerNormCarrier = this._findSelectionLayerNormCarrier(selection);
+        const layers = Array.isArray(this.engine?._layers) ? this.engine._layers : [];
+        if (!layerNormCarrier || !Number.isFinite(layerIndex) || layerIndex < 0 || layerIndex >= layers.length) {
+            return null;
+        }
+
+        const layer = layers[Math.floor(layerIndex)];
+        const searchRoot = layer?.raycastRoot || layer?.root || null;
+        if (!searchRoot || typeof searchRoot.traverse !== 'function') return null;
+
+        const layerNormGroups = [];
+        searchRoot.traverse((node) => {
+            if (!node || node === searchRoot) return;
+            const label = String(node.userData?.label || '').toLowerCase();
+            if (label !== 'layernorm') return;
+            layerNormGroups.push(node);
+        });
+        if (!layerNormGroups.length) return null;
+        layerNormGroups.sort((a, b) => {
+            const ay = Number.isFinite(a.position?.y) ? a.position.y : 0;
+            const by = Number.isFinite(b.position?.y) ? b.position.y : 0;
+            return ay - by;
+        });
+
+        const matchedIndex = layerNormGroups.findIndex((candidate) => candidate === layerNormCarrier);
+        if (matchedIndex === 0) return 'ln1';
+        if (matchedIndex === 1) return 'ln2';
+        return null;
+    }
+
+    _findLayerNormSceneSelection({
+        layerNormKind = null,
+        layerIndex = null
+    } = {}) {
+        const safeKind = (layerNormKind === 'ln1' || layerNormKind === 'ln2' || layerNormKind === 'final')
+            ? layerNormKind
+            : null;
+        const buildSelection = (object, fallbackLabel) => {
+            if (!object) return null;
+            return {
+                label: (typeof object.userData?.label === 'string' && object.userData.label.trim().length)
+                    ? object.userData.label
+                    : fallbackLabel,
+                kind: 'label',
+                info: {
+                    ...(Number.isFinite(layerIndex) ? { layerIndex: Math.floor(layerIndex) } : {}),
+                    ...(safeKind ? { layerNormKind: safeKind } : {})
+                },
+                object
+            };
+        };
+
+        const layers = Array.isArray(this.engine?._layers) ? this.engine._layers : [];
+        if ((safeKind === 'ln1' || safeKind === 'ln2') && Number.isFinite(layerIndex) && layerIndex >= 0 && layerIndex < layers.length) {
+            const layer = layers[Math.floor(layerIndex)];
+            const object = safeKind === 'ln1' ? layer?.ln1?.group : layer?.ln2?.group;
+            const selection = buildSelection(object, 'LayerNorm');
+            if (selection) return selection;
+        }
+
+        const scene = this.engine?.scene || null;
+        if (!scene || typeof scene.traverse !== 'function') return null;
+
+        let bestSelection = null;
+        let bestScore = -Infinity;
+        scene.traverse((node) => {
+            if (!node || node.isScene || !node.userData) return;
+            const labelLower = String(node.userData.label || '').toLowerCase();
+            const isTopLayerNorm = labelLower === 'layernorm (top)';
+            const isLayerNorm = labelLower === 'layernorm' || isTopLayerNorm;
+            if (!isLayerNorm) return;
+            if (safeKind === 'final' && !isTopLayerNorm) return;
+            if ((safeKind === 'ln1' || safeKind === 'ln2') && isTopLayerNorm) return;
+
+            let score = 100;
+            if (node.visible !== false) score += 12;
+            if (safeKind === 'final' && isTopLayerNorm) score += 20;
+            if (score <= bestScore) return;
+
+            bestSelection = buildSelection(node, isTopLayerNorm ? 'LayerNorm (Top)' : 'LayerNorm');
+            bestScore = score;
+        });
+
+        return bestSelection;
+    }
+
+    _buildFallbackLayerNormSelection({
+        layerNormKind = null,
+        layerIndex = null
+    } = {}) {
+        const safeKind = layerNormKind === 'final'
+            ? 'final'
+            : (layerNormKind === 'ln2' ? 'ln2' : 'ln1');
+        const label = safeKind === 'final' ? 'LayerNorm (Top)' : 'LayerNorm';
+        return {
+            label,
+            kind: 'label',
+            info: {
+                ...(Number.isFinite(layerIndex) ? { layerIndex: Math.floor(layerIndex) } : {}),
+                layerNormKind: safeKind
+            }
+        };
+    }
+
+    _findLayerNormParamSceneSelection({
+        layerNormKind = null,
+        param = 'scale',
+        layerIndex = null
+    } = {}) {
+        const safeParam = param === 'shift' ? 'shift' : 'scale';
+        const safeKind = (layerNormKind === 'ln1' || layerNormKind === 'ln2' || layerNormKind === 'final')
+            ? layerNormKind
+            : null;
+
+        const resolvePreferredLaneIndex = (layer = null) => {
+            const explicitLaneIndex = findUserDataNumber(this._lastSelection, 'laneIndex');
+            if (Number.isFinite(explicitLaneIndex)) return Math.max(0, Math.floor(explicitLaneIndex));
+
+            const explicitTokenIndex = findUserDataNumber(this._lastSelection, 'tokenIndex');
+            if (!layer || !Array.isArray(layer.lanes) || !Number.isFinite(explicitTokenIndex)) {
+                return null;
+            }
+            const matchIndex = layer.lanes.findIndex((lane) => (
+                lane
+                && Number.isFinite(lane.tokenIndex)
+                && Math.floor(lane.tokenIndex) === Math.floor(explicitTokenIndex)
+            ));
+            return matchIndex >= 0 ? matchIndex : null;
+        };
+
+        const buildVectorRefSelection = ({
+            label,
+            kind = 'vector',
+            vectorRef = null,
+            object = null,
+            hit = null,
+            layerIndex: resolvedLayerIndex = null
+        } = {}) => {
+            if (!vectorRef) return null;
+            const activationData = vectorRef.userData?.activationData || null;
+            const info = {
+                vectorRef
+            };
+            if (activationData && typeof activationData === 'object') {
+                info.activationData = activationData;
+            }
+            const tokenIndex = findUserDataNumber({ info }, 'tokenIndex');
+            const tokenLabel = findUserDataString({ info }, 'tokenLabel');
+            if (Number.isFinite(resolvedLayerIndex)) info.layerIndex = Math.floor(resolvedLayerIndex);
+            if (Number.isFinite(tokenIndex)) info.tokenIndex = Math.floor(tokenIndex);
+            if (typeof tokenLabel === 'string' && tokenLabel.trim().length) info.tokenLabel = tokenLabel;
+            return {
+                label,
+                kind,
+                info,
+                ...(object ? { object } : {}),
+                ...(hit ? { hit } : {})
+            };
+        };
+
+        if (safeKind === 'final') {
+            const placeholders = this.pipeline?._topLnParamPlaceholders || null;
+            const refs = safeParam === 'scale' ? placeholders?.scale : placeholders?.shift;
+            if (Array.isArray(refs) && refs.length) {
+                const preferredIndex = resolvePreferredLaneIndex(null);
+                const candidateRef = Number.isFinite(preferredIndex) && refs[preferredIndex]?.group
+                    ? refs[preferredIndex]
+                    : refs.find((candidate) => candidate?.group);
+                if (candidateRef?.group) {
+                    return buildVectorRefSelection({
+                        label: getLayerNormParamLabel('final', safeParam),
+                        kind: 'vector',
+                        vectorRef: candidateRef,
+                        object: candidateRef.group,
+                        layerIndex: Number.isFinite(placeholders?.layerIndex) ? Math.floor(placeholders.layerIndex) : null
+                    });
+                }
+            }
+        }
+
+        const layers = Array.isArray(this.engine?._layers) ? this.engine._layers : [];
+        const targetLayer = Number.isFinite(layerIndex) && layerIndex >= 0 && layerIndex < layers.length
+            ? layers[Math.floor(layerIndex)]
+            : null;
+        const bankKey = safeKind === 'ln2'
+            ? (safeParam === 'scale' ? 'ln2Scale' : 'ln2Shift')
+            : (safeKind === 'ln1'
+                ? (safeParam === 'scale' ? 'ln1Scale' : 'ln1Shift')
+                : null);
+        const bank = bankKey && targetLayer?._lnParamBanks
+            ? targetLayer._lnParamBanks[bankKey]
+            : null;
+        if (bank && typeof bank.getVectorRef === 'function' && bank.mesh) {
+            const preferredIndex = resolvePreferredLaneIndex(targetLayer);
+            const fallbackIndex = Number.isFinite(preferredIndex)
+                ? preferredIndex
+                : 0;
+            const clampedIndex = Math.max(0, Math.min(
+                Math.max(0, (Number.isFinite(bank.vectorCount) ? bank.vectorCount : 1) - 1),
+                Math.floor(fallbackIndex)
+            ));
+            const vectorRef = bank.getVectorRef(clampedIndex);
+            if (vectorRef) {
+                if (typeof bank.updateVectorRaycastInfo === 'function') {
+                    bank.updateVectorRaycastInfo(clampedIndex, vectorRef);
+                }
+                const prismCount = Number.isFinite(bank.prismCount) ? Math.max(1, Math.floor(bank.prismCount)) : 1;
+                const instanceId = clampedIndex * prismCount;
+                const entry = Array.isArray(bank.mesh.userData?.instanceEntries)
+                    ? bank.mesh.userData.instanceEntries[instanceId]
+                    : null;
+                const selection = buildVectorRefSelection({
+                    label: getLayerNormParamLabel(safeKind, safeParam),
+                    kind: bank.mesh.userData?.instanceKind || 'instanced',
+                    vectorRef,
+                    object: bank.mesh,
+                    hit: {
+                        object: bank.mesh,
+                        instanceId
+                    },
+                    layerIndex: Number.isFinite(layerIndex) ? Math.floor(layerIndex) : null
+                });
+                if (selection) {
+                    selection.info = {
+                        ...(entry && typeof entry === 'object' ? entry : {}),
+                        ...(selection.info || {})
+                    };
+                    return selection;
+                }
+            }
+        }
+
+        const scene = this.engine?.scene || null;
+        if (!scene || typeof scene.traverse !== 'function' || !safeKind) return null;
+
+        const desiredStage = `${safeKind}.param.${safeParam}`;
+        let bestSelection = null;
+        let bestScore = -Infinity;
+
+        scene.traverse((node) => {
+            if (!node || node.isScene || !node.userData) return;
+            const activationStage = String(node.userData.activationData?.stage || '').toLowerCase();
+            if (activationStage !== desiredStage) return;
+
+            const nodeLayerIndex = Number.isFinite(node.userData.activationData?.layerIndex)
+                ? Math.floor(node.userData.activationData.layerIndex)
+                : (Number.isFinite(node.userData.layerIndex) ? Math.floor(node.userData.layerIndex) : null);
+            if (Number.isFinite(layerIndex) && Number.isFinite(nodeLayerIndex) && nodeLayerIndex !== Math.floor(layerIndex)) {
+                return;
+            }
+
+            let score = 100;
+            if (node.visible !== false) score += 12;
+            if (node.type === 'Group') score += 6;
+            if (Number.isFinite(nodeLayerIndex) && Number.isFinite(layerIndex) && nodeLayerIndex === Math.floor(layerIndex)) {
+                score += 18;
+            }
+            if (score <= bestScore) return;
+
+            const label = typeof node.userData.label === 'string' && node.userData.label.trim().length
+                ? node.userData.label
+                : `${safeKind.toUpperCase()} ${safeParam === 'scale' ? 'Scale' : 'Shift'}`;
+            const info = {};
+            if (node.userData.activationData && typeof node.userData.activationData === 'object') {
+                info.activationData = node.userData.activationData;
+            }
+            if (Number.isFinite(nodeLayerIndex)) info.layerIndex = nodeLayerIndex;
+
+            bestSelection = {
+                label,
+                kind: 'vector',
+                info,
+                object: node
+            };
+            bestScore = score;
+        });
+
+        return bestSelection;
+    }
+
+    _buildFallbackLayerNormParamSelection({
+        layerNormKind = null,
+        param = 'scale',
+        layerIndex = null
+    } = {}) {
+        const safeParam = param === 'shift' ? 'shift' : 'scale';
+        const safeKind = layerNormKind === 'final'
+            ? 'final'
+            : (layerNormKind === 'ln2' ? 'ln2' : 'ln1');
+        const label = safeKind === 'final'
+            ? (safeParam === 'scale' ? 'Final LN Scale' : 'Final LN Shift')
+            : `${safeKind.toUpperCase()} ${safeParam === 'scale' ? 'Scale' : 'Shift'}`;
+        const stage = safeKind === 'final'
+            ? `final_ln.param.${safeParam}`
+            : `${safeKind}.param.${safeParam}`;
+        const info = {
+            activationData: {
+                label,
+                stage,
+                ...(Number.isFinite(layerIndex) ? { layerIndex: Math.floor(layerIndex) } : {}),
+                notes: safeParam === 'scale'
+                    ? 'LayerNorm scale parameter'
+                    : 'LayerNorm shift parameter'
+            }
+        };
+        if (Number.isFinite(layerIndex)) info.layerIndex = Math.floor(layerIndex);
+        return {
+            label,
+            kind: 'vector',
+            info
+        };
+    }
+
+    _buildFallbackAttentionVectorSelection({
+        vectorKind = 'Q',
+        tokenIndex = null,
+        tokenId = null,
+        tokenLabel = '',
+        headIndex = null
+    } = {}) {
+        const safeKind = normalizeQkvActionKind(vectorKind);
+        const label = safeKind === 'Q'
+            ? 'Query Vector'
+            : (safeKind === 'V' ? 'Value Vector' : 'Key Vector');
+        const info = {};
+        if (Number.isFinite(tokenIndex)) info.tokenIndex = Math.floor(tokenIndex);
+        if (Number.isFinite(tokenId)) info.tokenId = Math.floor(tokenId);
+        if (typeof tokenLabel === 'string' && tokenLabel.trim().length) {
+            info.tokenLabel = formatTokenLabelForPreview(tokenLabel);
+        }
+        if (Number.isFinite(headIndex)) info.headIndex = Math.floor(headIndex);
+        const stage = safeKind === 'Q' ? 'qkv.q' : (safeKind === 'V' ? 'qkv.v' : 'qkv.k');
+        info.activationData = {
+            label,
+            stage,
+            ...(Number.isFinite(headIndex) ? { headIndex: Math.floor(headIndex) } : {}),
+            ...(Number.isFinite(tokenIndex) ? { tokenIndex: Math.floor(tokenIndex) } : {}),
+            ...(typeof tokenLabel === 'string' && tokenLabel.trim().length ? { tokenLabel: formatTokenLabelForPreview(tokenLabel) } : {})
+        };
+        return {
+            label,
+            kind: 'vector',
+            info
+        };
+    }
+
+    _buildFallbackQkvSourceVectorSelection({
+        layerIndex = null,
+        tokenIndex = null,
+        tokenId = null,
+        tokenLabel = ''
+    } = {}) {
+        const label = 'Post LayerNorm Residual Vector';
+        const info = {};
+        if (Number.isFinite(layerIndex)) info.layerIndex = Math.floor(layerIndex);
+        if (Number.isFinite(tokenIndex)) info.tokenIndex = Math.floor(tokenIndex);
+        if (Number.isFinite(tokenId)) info.tokenId = Math.floor(tokenId);
+        if (typeof tokenLabel === 'string' && tokenLabel.trim().length) {
+            info.tokenLabel = formatTokenLabelForPreview(tokenLabel);
+        }
+        info.activationData = {
+            label,
+            stage: 'ln1.shift',
+            ...(Number.isFinite(layerIndex) ? { layerIndex: Math.floor(layerIndex) } : {}),
+            ...(Number.isFinite(tokenIndex) ? { tokenIndex: Math.floor(tokenIndex) } : {}),
+            ...(typeof tokenLabel === 'string' && tokenLabel.trim().length ? { tokenLabel: formatTokenLabelForPreview(tokenLabel) } : {})
+        };
+        return {
+            label,
+            kind: 'vector',
+            info
+        };
+    }
+
+    _buildFallbackQkvWeightMatrixSelection({
+        matrixKind = 'Q',
+        headIndex = null,
+        layerIndex = null
+    } = {}) {
+        const label = getQkvWeightMatrixLabel(matrixKind);
+        const info = {};
+        if (Number.isFinite(headIndex)) info.headIndex = Math.floor(headIndex);
+        if (Number.isFinite(layerIndex)) info.layerIndex = Math.floor(layerIndex);
+        return {
+            label,
+            kind: 'matrix',
+            info
+        };
+    }
+
+    _openLayerNormFromAction(actionEl) {
+        const payload = this._parseDetailActionPayload(actionEl);
+        const payloadKind = typeof payload?.layerNormKind === 'string' ? payload.layerNormKind : null;
+        const layerNormKind = (payloadKind === 'ln1' || payloadKind === 'ln2' || payloadKind === 'final')
+            ? payloadKind
+            : this._inferLayerNormKindFromSelection(this._lastSelection);
+        const payloadLayerIndex = Number(payload?.layerIndex);
+        const selectionLayerIndex = findUserDataNumber(this._lastSelection, 'layerIndex');
+        const resolvedLayerIndex = Number.isFinite(payloadLayerIndex)
+            ? Math.floor(payloadLayerIndex)
+            : (Number.isFinite(selectionLayerIndex) ? Math.floor(selectionLayerIndex) : null);
+
+        const selection = this._findLayerNormSceneSelection({
+            layerNormKind,
+            layerIndex: resolvedLayerIndex
+        }) || this._buildFallbackLayerNormSelection({
+            layerNormKind,
+            layerIndex: resolvedLayerIndex
+        });
+
+        if (!selection) return false;
+        this.showSelection(selection, { scrollPanelToTop: true });
+        return true;
+    }
+
+    _openAttentionVectorFromAction(actionEl) {
+        const payload = this._parseDetailActionPayload(actionEl);
+        const vectorKind = normalizeQkvActionKind(payload?.vectorKind);
+        const headIndex = Number(payload?.headIndex);
+        const tokenIndex = Number(payload?.tokenIndex);
+        const tokenId = Number(payload?.tokenId);
+        const tokenLabel = typeof payload?.tokenLabel === 'string' ? payload.tokenLabel : '';
+
+        const selection = this._findAttentionVectorSceneSelection({
+            vectorKind,
+            headIndex: Number.isFinite(headIndex) ? Math.floor(headIndex) : null,
+            tokenIndex: Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : null,
+            tokenId: Number.isFinite(tokenId) ? Math.floor(tokenId) : null,
+            tokenLabel
+        }) || this._buildFallbackAttentionVectorSelection({
+            vectorKind,
+            headIndex: Number.isFinite(headIndex) ? Math.floor(headIndex) : null,
+            tokenIndex: Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : null,
+            tokenId: Number.isFinite(tokenId) ? Math.floor(tokenId) : null,
+            tokenLabel
+        });
+
+        if (!selection) return false;
+        this.showSelection(selection, { scrollPanelToTop: true });
+        return true;
+    }
+
+    _openQkvSourceVectorFromAction(actionEl) {
+        const payload = this._parseDetailActionPayload(actionEl);
+        const layerIndex = Number(payload?.layerIndex);
+        const tokenIndex = Number(payload?.tokenIndex);
+        const tokenId = Number(payload?.tokenId);
+        const tokenLabel = typeof payload?.tokenLabel === 'string' ? payload.tokenLabel : '';
+
+        const selection = this._findQkvSourceVectorSceneSelection({
+            layerIndex: Number.isFinite(layerIndex) ? Math.floor(layerIndex) : null,
+            tokenIndex: Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : null,
+            tokenId: Number.isFinite(tokenId) ? Math.floor(tokenId) : null,
+            tokenLabel
+        }) || this._buildFallbackQkvSourceVectorSelection({
+            layerIndex: Number.isFinite(layerIndex) ? Math.floor(layerIndex) : null,
+            tokenIndex: Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : null,
+            tokenId: Number.isFinite(tokenId) ? Math.floor(tokenId) : null,
+            tokenLabel
+        });
+
+        if (!selection) return false;
+        this.showSelection(selection, { scrollPanelToTop: true });
+        return true;
+    }
+
+    _openQkvWeightMatrixFromAction(actionEl) {
+        const payload = this._parseDetailActionPayload(actionEl);
+        const matrixKind = normalizeQkvActionKind(payload?.matrixKind);
+        const headIndex = Number(payload?.headIndex);
+        const layerIndex = Number(payload?.layerIndex);
+
+        const selection = this._findQkvWeightMatrixSceneSelection({
+            matrixKind,
+            headIndex: Number.isFinite(headIndex) ? Math.floor(headIndex) : null,
+            layerIndex: Number.isFinite(layerIndex) ? Math.floor(layerIndex) : null
+        }) || this._buildFallbackQkvWeightMatrixSelection({
+            matrixKind,
+            headIndex: Number.isFinite(headIndex) ? Math.floor(headIndex) : null,
+            layerIndex: Number.isFinite(layerIndex) ? Math.floor(layerIndex) : null
+        });
+
+        if (!selection) return false;
+        this.showSelection(selection, { scrollPanelToTop: true });
+        return true;
+    }
+
+    _openLayerNormParamFromAction(actionEl) {
+        const payload = this._parseDetailActionPayload(actionEl);
+        const param = String(payload?.param || '').toLowerCase() === 'shift' ? 'shift' : 'scale';
+        const payloadKind = typeof payload?.layerNormKind === 'string' ? payload.layerNormKind : null;
+        const layerNormKind = (payloadKind === 'ln1' || payloadKind === 'ln2' || payloadKind === 'final')
+            ? payloadKind
+            : this._inferLayerNormKindFromSelection(this._lastSelection);
+        const payloadLayerIndex = Number(payload?.layerIndex);
+        const selectionLayerIndex = findUserDataNumber(this._lastSelection, 'layerIndex');
+        const resolvedLayerIndex = Number.isFinite(payloadLayerIndex)
+            ? Math.floor(payloadLayerIndex)
+            : (Number.isFinite(selectionLayerIndex) ? Math.floor(selectionLayerIndex) : null);
+        const finalLayerIndex = layerNormKind === 'final' && !Number.isFinite(resolvedLayerIndex)
+            ? (Array.isArray(this.engine?._layers) && this.engine._layers.length
+                ? this.engine._layers.length - 1
+                : null)
+            : resolvedLayerIndex;
+
+        const selection = this._findLayerNormParamSceneSelection({
+            layerNormKind,
+            param,
+            layerIndex: finalLayerIndex
+        }) || this._buildFallbackLayerNormParamSelection({
+            layerNormKind,
+            param,
+            layerIndex: finalLayerIndex
+        });
+
+        if (!selection) return false;
+        this.showSelection(selection, { scrollPanelToTop: true });
+        return true;
+    }
+
     _handlePanelActionTrigger(event) {
         const target = event?.target;
         if (!target || typeof target.closest !== 'function' || !this.panel) return false;
@@ -3928,6 +5122,21 @@ class SelectionPanel {
         if (action === GELU_PANEL_ACTION_OPEN) {
             this._openGeluDetailPreview();
             return true;
+        }
+        if (action === ATTENTION_VECTOR_PANEL_ACTION_OPEN) {
+            return this._openAttentionVectorFromAction(actionEl);
+        }
+        if (action === LAYERNORM_PANEL_ACTION_OPEN) {
+            return this._openLayerNormFromAction(actionEl);
+        }
+        if (action === LAYERNORM_PARAM_PANEL_ACTION_OPEN) {
+            return this._openLayerNormParamFromAction(actionEl);
+        }
+        if (action === QKV_SOURCE_VECTOR_PANEL_ACTION_OPEN) {
+            return this._openQkvSourceVectorFromAction(actionEl);
+        }
+        if (action === QKV_WEIGHT_MATRIX_PANEL_ACTION_OPEN) {
+            return this._openQkvWeightMatrixFromAction(actionEl);
         }
         return false;
     }
@@ -5690,6 +6899,10 @@ class SelectionPanel {
         if (!isVectorSelection && !isTokenChipSelection) return null;
 
         let laneIndex = findUserDataNumber(selection, 'laneIndex');
+        if (!Number.isFinite(laneIndex)) {
+            const laneLayoutIndex = findUserDataNumber(selection, 'laneLayoutIndex');
+            if (Number.isFinite(laneLayoutIndex)) laneIndex = laneLayoutIndex;
+        }
         let tokenIndex = findUserDataNumber(selection, 'tokenIndex');
         if (!Number.isFinite(tokenIndex) && Number.isFinite(laneIndex) && Array.isArray(this.laneTokenIndices)) {
             const mappedTokenIndex = this.laneTokenIndices[laneIndex];
@@ -5882,6 +7095,19 @@ class SelectionPanel {
             return null;
         }
 
+        const isResidualStreamSelection = lower.includes('residual stream vector')
+            || lower.includes('post layernorm residual vector')
+            || activationStage.startsWith('embedding.sum')
+            || activationStage.startsWith('layer.incoming')
+            || activationStage === 'residual.post_attention'
+            || activationStage === 'residual.post_mlp'
+            || activationStage === 'ln1.shift'
+            || activationStage === 'ln2.shift';
+        if (isResidualStreamSelection) {
+            hideRows();
+            return metadata;
+        }
+
         const tokenText = metadata.tokenText || ATTENTION_VALUE_PLACEHOLDER;
         const tokenDisplayText = metadata.tokenDisplayText || tokenText;
         const tokenIdText = metadata.tokenIdText || ATTENTION_VALUE_PLACEHOLDER;
@@ -6014,6 +7240,134 @@ class SelectionPanel {
         return getIncompleteUtf8TokenNote(parsedTokenId);
     }
 
+    _resolveDescriptionTokenContext(selection, {
+        indexKey = 'tokenIndex',
+        labelKey = 'tokenLabel',
+        idKey = 'tokenId',
+        fallbackIndex = null,
+        fallbackLabel = '',
+        fallbackId = null
+    } = {}) {
+        let tokenIndex = findUserDataNumber(selection, indexKey);
+        if (!Number.isFinite(tokenIndex) && Number.isFinite(fallbackIndex)) {
+            tokenIndex = Math.floor(fallbackIndex);
+        }
+
+        let tokenLabel = findUserDataString(selection, labelKey);
+        if ((typeof tokenLabel !== 'string' || !tokenLabel.trim().length) && typeof fallbackLabel === 'string' && fallbackLabel.trim().length) {
+            tokenLabel = fallbackLabel;
+        }
+        if ((!tokenLabel || !tokenLabel.trim().length)
+            && Number.isFinite(tokenIndex)
+            && this.activationSource
+            && typeof this.activationSource.getTokenString === 'function') {
+            const resolvedLabel = this.activationSource.getTokenString(tokenIndex);
+            if (typeof resolvedLabel === 'string' && resolvedLabel.trim().length) {
+                tokenLabel = resolvedLabel;
+            }
+        }
+        const formattedTokenLabel = (typeof tokenLabel === 'string' && tokenLabel.trim().length)
+            ? formatTokenLabelForPreview(tokenLabel)
+            : '';
+
+        let tokenId = findUserDataNumber(selection, idKey);
+        if (!Number.isFinite(tokenId) && Number.isFinite(fallbackId)) {
+            tokenId = Math.floor(fallbackId);
+        }
+        if (!Number.isFinite(tokenId)
+            && Number.isFinite(tokenIndex)
+            && this.activationSource
+            && typeof this.activationSource.getTokenId === 'function') {
+            tokenId = this.activationSource.getTokenId(tokenIndex);
+        }
+
+        return {
+            tokenIndex: Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : null,
+            tokenLabel: formattedTokenLabel,
+            tokenId: Number.isFinite(tokenId) ? Math.floor(tokenId) : null
+        };
+    }
+
+    _buildDescriptionSelectionContext(selection, {
+        vectorTokenMetadata = null,
+        attentionScoreSummary = null
+    } = {}) {
+        if (!selection || typeof selection !== 'object') return selection;
+
+        const baseInfo = (selection.info && typeof selection.info === 'object') ? selection.info : {};
+        const info = { ...baseInfo };
+        const baseActivation = (baseInfo.activationData && typeof baseInfo.activationData === 'object')
+            ? baseInfo.activationData
+            : null;
+        const activationData = baseActivation ? { ...baseActivation } : null;
+
+        const applyTokenContext = ({
+            indexKey,
+            labelKey,
+            idKey,
+            fallbackIndex = null,
+            fallbackLabel = '',
+            fallbackId = null
+        }) => {
+            const tokenContext = this._resolveDescriptionTokenContext(selection, {
+                indexKey,
+                labelKey,
+                idKey,
+                fallbackIndex,
+                fallbackLabel,
+                fallbackId
+            });
+            if (Number.isFinite(tokenContext.tokenIndex)) {
+                info[indexKey] = tokenContext.tokenIndex;
+                if (activationData) activationData[indexKey] = tokenContext.tokenIndex;
+            }
+            if (tokenContext.tokenLabel) {
+                info[labelKey] = tokenContext.tokenLabel;
+                if (activationData) activationData[labelKey] = tokenContext.tokenLabel;
+            }
+            if (Number.isFinite(tokenContext.tokenId)) {
+                info[idKey] = tokenContext.tokenId;
+                if (activationData) activationData[idKey] = tokenContext.tokenId;
+            }
+        };
+
+        applyTokenContext({
+            indexKey: 'tokenIndex',
+            labelKey: 'tokenLabel',
+            idKey: 'tokenId',
+            fallbackIndex: vectorTokenMetadata?.tokenIndex,
+            fallbackLabel: vectorTokenMetadata?.tokenDisplayText || vectorTokenMetadata?.tokenText || '',
+            fallbackId: vectorTokenMetadata?.tokenId
+        });
+
+        applyTokenContext({
+            indexKey: 'keyTokenIndex',
+            labelKey: 'keyTokenLabel',
+            idKey: 'keyTokenId',
+            fallbackIndex: attentionScoreSummary?.defaultValue?.targetTokenIndex,
+            fallbackLabel: attentionScoreSummary?.defaultValue?.target || '',
+            fallbackId: null
+        });
+
+        applyTokenContext({
+            indexKey: 'queryTokenIndex',
+            labelKey: 'queryTokenLabel',
+            idKey: 'queryTokenId',
+            fallbackIndex: null,
+            fallbackLabel: '',
+            fallbackId: null
+        });
+
+        if (activationData) {
+            info.activationData = activationData;
+        }
+
+        return {
+            ...selection,
+            info
+        };
+    }
+
     showSelection(selection, options = {}) {
         if (!this.isReady || !selection || !selection.label) return;
         const fromHistory = options?.fromHistory === true;
@@ -6102,7 +7456,7 @@ class SelectionPanel {
                     subtitleParts.push(`Layer ${layerIndex + 1}`);
                 }
                 if (showHead && Number.isFinite(headIndex)) {
-                    subtitleParts.push(`Head ${headIndex + 1}`);
+                    subtitleParts.push(`Attention head ${headIndex + 1}`);
                 }
                 if (isVectorSelection) {
                     let positionText = '';
@@ -6216,18 +7570,22 @@ class SelectionPanel {
         if (this.biasDimRow) this.biasDimRow.style.display = showBiasDim ? '' : 'none';
         if (this.biasDim) this.biasDim.textContent = showBiasDim ? metadata.biasDim : '';
         const vectorTokenMetadata = this._updateVectorTokenPositionRows(selection, label);
+        const descriptionSelection = this._buildDescriptionSelectionContext(selection, {
+            vectorTokenMetadata,
+            attentionScoreSummary
+        });
         this._setTokenEncodingNote(this._resolveSelectionTokenEncodingNote(selection, label, vectorTokenMetadata));
         this._updatePromptContextRow(vectorTokenMetadata, { visible: isTokenChipSelection });
         if (this.description) {
-            const desc = resolveDescription(label, selection.kind, selection);
-            this._currentSelectionDescription = desc || '';
+            const desc = resolveDescription(label, selection.kind, descriptionSelection);
+            this._currentSelectionDescription = getDescriptionPlainText(desc || '');
             setDescriptionContent(this.description, desc || '');
             setDescriptionGeluAction(this.description, isMlpMatrixSelectionLabel(label));
         } else {
             this._currentSelectionDescription = '';
         }
         if (this.equationsSection && this.equationsBody) {
-            const equations = resolveSelectionEquations(label, selection);
+            const equations = resolveSelectionEquations(label, descriptionSelection);
             this._currentSelectionEquations = equations || '';
             setDescriptionContent(this.equationsBody, equations || '');
             const hasEquations = !!equations;

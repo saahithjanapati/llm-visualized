@@ -5,6 +5,12 @@ export function getActivationDataFromSelection(selectionInfo) {
         || null;
 }
 
+function hasExplicitQkvVectorLabel(lower = '') {
+    return lower.includes('query vector')
+        || lower.includes('key vector')
+        || lower.includes('value vector');
+}
+
 export function isKvCacheVectorSelection(selectionInfo) {
     const vectorRef = selectionInfo?.info?.vectorRef;
     if (vectorRef?.userData?.kvCachePersistent === true || vectorRef?.userData?.cachedKv === true) {
@@ -33,11 +39,14 @@ export function normalizeSelectionLabel(label, selectionInfo = null) {
     const lower = raw.toLowerCase();
     const activation = getActivationDataFromSelection(selectionInfo);
     const stageLower = String(activation?.stage || '').toLowerCase();
+    const explicitQkvLabel = hasExplicitQkvVectorLabel(lower);
 
-    const isPostLayerNormResidual = lower.includes('post-layernorm residual')
+    const isPostLayerNormResidual = !explicitQkvLabel && (
+        lower.includes('post-layernorm residual')
         || lower.includes('post layernorm residual')
         || stageLower === 'ln1.shift'
-        || stageLower === 'ln2.shift';
+        || stageLower === 'ln2.shift'
+    );
     if (isPostLayerNormResidual) {
         return 'Post LayerNorm Residual Vector';
     }
@@ -103,6 +112,21 @@ export function findUserDataNumber(selectionInfo, key) {
     if (Number.isFinite(direct)) return direct;
     const infoActivation = selectionInfo?.info?.activationData?.[key];
     if (Number.isFinite(infoActivation)) return infoActivation;
+    const vectorRef = selectionInfo?.info?.vectorRef || null;
+    const vectorRefCandidates = [
+        vectorRef?.userData,
+        vectorRef?.userData?.parentLane,
+        vectorRef?.userData?.activationData,
+        vectorRef?.group?.userData,
+        vectorRef?.group?.userData?.parentLane,
+        vectorRef?.group?.userData?.activationData,
+        vectorRef?.mesh?.userData,
+        vectorRef?.mesh?.userData?.parentLane,
+        vectorRef?.mesh?.userData?.activationData
+    ];
+    for (const candidate of vectorRefCandidates) {
+        if (candidate && Number.isFinite(candidate[key])) return candidate[key];
+    }
     const candidates = [selectionInfo?.object, selectionInfo?.hit?.object];
     for (const obj of candidates) {
         let current = obj;
@@ -110,6 +134,7 @@ export function findUserDataNumber(selectionInfo, key) {
             const ud = current.userData;
             if (ud && Number.isFinite(ud[key])) return ud[key];
             if (ud?.activationData && Number.isFinite(ud.activationData[key])) return ud.activationData[key];
+            if (ud?.parentLane && Number.isFinite(ud.parentLane[key])) return ud.parentLane[key];
             current = current.parent;
         }
     }
@@ -121,6 +146,21 @@ export function findUserDataString(selectionInfo, key) {
     if (typeof direct === 'string') return direct;
     const infoActivation = selectionInfo?.info?.activationData?.[key];
     if (typeof infoActivation === 'string') return infoActivation;
+    const vectorRef = selectionInfo?.info?.vectorRef || null;
+    const vectorRefCandidates = [
+        vectorRef?.userData,
+        vectorRef?.userData?.parentLane,
+        vectorRef?.userData?.activationData,
+        vectorRef?.group?.userData,
+        vectorRef?.group?.userData?.parentLane,
+        vectorRef?.group?.userData?.activationData,
+        vectorRef?.mesh?.userData,
+        vectorRef?.mesh?.userData?.parentLane,
+        vectorRef?.mesh?.userData?.activationData
+    ];
+    for (const candidate of vectorRefCandidates) {
+        if (typeof candidate?.[key] === 'string') return candidate[key];
+    }
     const candidates = [selectionInfo?.object, selectionInfo?.hit?.object];
     for (const obj of candidates) {
         let current = obj;
@@ -128,6 +168,7 @@ export function findUserDataString(selectionInfo, key) {
             const ud = current.userData;
             if (typeof ud?.[key] === 'string') return ud[key];
             if (typeof ud?.activationData?.[key] === 'string') return ud.activationData[key];
+            if (typeof ud?.parentLane?.[key] === 'string') return ud.parentLane[key];
             current = current.parent;
         }
     }

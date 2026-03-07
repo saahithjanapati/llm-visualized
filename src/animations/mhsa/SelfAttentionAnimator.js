@@ -1603,6 +1603,51 @@ export class SelfAttentionAnimator {
             ...(source.group?.userData || {}),
             label: 'Query Vector'
         };
+        const outputLength = this._resolveOutputVectorLength();
+        const sourceTokenIndex = Number.isFinite(source.userData?.parentLane?.tokenIndex)
+            ? Math.floor(source.userData.parentLane.tokenIndex)
+            : (Number.isFinite(source.userData?.tokenIndex) ? Math.floor(source.userData.tokenIndex) : null);
+        const sourceTokenLabel = (typeof source.userData?.parentLane?.tokenLabel === 'string' && source.userData.parentLane.tokenLabel.trim().length)
+            ? source.userData.parentLane.tokenLabel
+            : ((typeof source.userData?.tokenLabel === 'string' && source.userData.tokenLabel.trim().length)
+                ? source.userData.tokenLabel
+                : null);
+        const sourceHeadIndex = Number.isFinite(source.userData?.headIndex)
+            ? Math.floor(source.userData.headIndex)
+            : null;
+        const queryActivationData = buildActivationData({
+            label: 'Query Vector',
+            stage: 'qkv.q',
+            layerIndex: Number.isFinite(this.ctx?.layerIndex) ? Math.floor(this.ctx.layerIndex) : undefined,
+            tokenIndex: Number.isFinite(sourceTokenIndex) ? sourceTokenIndex : undefined,
+            tokenLabel: sourceTokenLabel || undefined,
+            headIndex: Number.isFinite(sourceHeadIndex) ? sourceHeadIndex : undefined,
+            values: this._sliceVectorData(source.rawData, outputLength) || undefined
+        });
+        standIn.userData = {
+            ...(standIn.userData || {}),
+            qkvProcessed: true,
+            qkvProcessedCategory: 'Q',
+            qkvOutputLength: outputLength,
+            vectorCategory: 'Q',
+            ...(Number.isFinite(sourceHeadIndex) ? { headIndex: sourceHeadIndex } : {}),
+            ...(queryActivationData ? { activationData: queryActivationData } : {})
+        };
+        standIn.group.userData = {
+            ...(standIn.group.userData || {}),
+            ...(Number.isFinite(sourceHeadIndex) ? { headIndex: sourceHeadIndex } : {}),
+            ...(Number.isFinite(this.ctx?.layerIndex) ? { layerIndex: Math.floor(this.ctx.layerIndex) } : {}),
+            vectorCategory: 'Q',
+            ...(queryActivationData ? { activationData: queryActivationData } : {})
+        };
+        if (standIn.mesh) {
+            standIn.mesh.userData = {
+                ...(standIn.mesh.userData || {}),
+                label: 'Query Vector',
+                vectorCategory: 'Q',
+                ...(queryActivationData ? { activationData: queryActivationData } : {})
+            };
+        }
         if (source.mesh) {
             this._copyVectorAppearance(standIn, source);
         } else {

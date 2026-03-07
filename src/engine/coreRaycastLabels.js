@@ -1,3 +1,9 @@
+function hasExplicitQkvVectorLabel(lower = '') {
+    return lower.includes('query vector')
+        || lower.includes('key vector')
+        || lower.includes('value vector');
+}
+
 export function normalizeRaycastLabel(label, info = null, object = null) {
     const raw = String(label || '');
     const lower = raw.toLowerCase();
@@ -5,11 +11,14 @@ export function normalizeRaycastLabel(label, info = null, object = null) {
         || object?.userData?.activationData?.stage
         || '';
     const stageLower = String(stage).toLowerCase();
+    const explicitQkvLabel = hasExplicitQkvVectorLabel(lower);
 
-    const isPostLayerNormResidual = lower.includes('post-layernorm residual')
+    const isPostLayerNormResidual = !explicitQkvLabel && (
+        lower.includes('post-layernorm residual')
         || lower.includes('post layernorm residual')
         || stageLower === 'ln1.shift'
-        || stageLower === 'ln2.shift';
+        || stageLower === 'ln2.shift'
+    );
     if (isPostLayerNormResidual) {
         return 'Post LayerNorm Residual Vector';
     }
@@ -81,4 +90,3 @@ export function isCachedKvSelection(info = null, object = null) {
     }
     return false;
 }
-

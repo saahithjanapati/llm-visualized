@@ -203,6 +203,7 @@ varying float vGradientT;`
         }
         // Instances can span far from the origin; disable frustum culling to avoid popping.
         this.mesh.frustumCulled = false;
+        this.mesh.visible = false;
         this._boundsDirty = false;
         this._dirtyVectorIndices = new Set();
 
@@ -253,6 +254,16 @@ varying float vGradientT;`
         return true;
     }
 
+    _showMeshIfNeeded() {
+        if (!this.mesh.visible) {
+            this.mesh.visible = true;
+        }
+    }
+
+    _syncMeshVisibility() {
+        this.mesh.visible = this._vectorRefs.some((ref) => !!ref?.group?.visible);
+    }
+
     getVectorRef(index) {
         const idx = Math.max(0, Math.min(this.vectorCount - 1, Math.floor(index)));
         let ref = this._vectorRefs[idx];
@@ -288,6 +299,7 @@ varying float vGradientT;`
         this._dirtyVectorIndices.delete(index);
         this.updateVectorRaycastInfo(index, ref);
         if (ref.group.visible && !wasVisible) {
+            this._showMeshIfNeeded();
             this._invalidateBounds();
         }
     }
@@ -315,6 +327,7 @@ varying float vGradientT;`
         ref._matricesInitialized = true;
         this.updateVectorRaycastInfo(index, ref);
         if (ref.group.visible && !wasVisible) {
+            this._showMeshIfNeeded();
             this._invalidateBounds();
         }
     }
@@ -453,6 +466,7 @@ varying float vGradientT;`
             this._dirtyVectorIndices.delete(index);
             this.updateVectorRaycastInfo(index, ref);
             if (ref.group.visible && !wasVisible) {
+                this._showMeshIfNeeded();
                 this._invalidateBounds();
             }
             return ref;
@@ -472,6 +486,7 @@ varying float vGradientT;`
             this._dirtyVectorIndices.delete(index);
             this.updateVectorRaycastInfo(index, ref);
             if (ref.group.visible && !wasVisible) {
+                this._showMeshIfNeeded();
                 this._invalidateBounds();
             }
             return ref;
@@ -583,6 +598,7 @@ varying float vGradientT;`
         this._dirtyVectorIndices.delete(index);
         this.updateVectorRaycastInfo(index, ref);
         if (ref.group.visible && !wasVisible) {
+            this._showMeshIfNeeded();
             this._invalidateBounds();
         }
         return ref;
@@ -708,6 +724,7 @@ varying float vGradientT;`
         if (didMatrixUpdate) {
             this.mesh.instanceMatrix.needsUpdate = true;
         }
+        this._syncMeshVisibility();
         if (boundsDirty) {
             this.mesh.boundingSphere = null;
             this.mesh.boundingBox = null;
@@ -766,6 +783,7 @@ varying float vGradientT;`
         if (didMatrixUpdate) {
             this.mesh.instanceMatrix.needsUpdate = true;
         }
+        this._syncMeshVisibility();
         if (boundsDirty) {
             this.mesh.boundingSphere = null;
             this.mesh.boundingBox = null;

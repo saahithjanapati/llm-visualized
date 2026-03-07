@@ -587,7 +587,7 @@ body.touch-ui * {
     width: fit-content;
     max-width: var(--prompt-token-strip-max-width);
     padding: 8px 10px calc(7px + env(safe-area-inset-bottom)) calc(10px + env(safe-area-inset-left));
-    border-radius: 0 20px 0 0;
+    border-radius: 0 8px 0 0;
     overflow: visible;
     pointer-events: auto;
     color: #fff;
@@ -596,7 +596,7 @@ body.touch-ui * {
     content: '';
     position: absolute;
     inset: -4px 0 0;
-    border-radius: 0 24px 0 0;
+    border-radius: 0 12px 0 0;
     border: 1px solid rgba(255,255,255,0.2);
     background: rgba(0,0,0,0.92);
     box-shadow: 0 10px 24px rgba(0,0,0,0.44);
@@ -1820,7 +1820,7 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     border: none;
     background: transparent;
     padding: 0;
-    color: #e7b873;
+    color: #8fd3ff;
     font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     font-size: 11px;
     line-height: 1.35;
@@ -1830,15 +1830,19 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     transition: color 0.16s ease, opacity 0.16s ease;
 }
 .detail-description-action-link:hover {
-    color: #ffd9a8;
+    color: #d6f0ff;
 }
 .detail-description-action-link:active {
     opacity: 0.86;
 }
 .detail-description-action-link:focus-visible {
-    outline: 2px solid rgba(231, 184, 115, 0.82);
+    outline: 2px solid rgba(143, 211, 255, 0.82);
     outline-offset: 2px;
     border-radius: 3px;
+}
+.detail-description-inline-action-link {
+    display: inline;
+    vertical-align: baseline;
 }
 .detail-copy-context {
     padding: 0 16px 8px;

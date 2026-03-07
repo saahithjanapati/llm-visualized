@@ -128,6 +128,8 @@ export class MHSAAnimation {
             : NUM_VECTOR_LANES;
         this._kvCacheDecodeActive = !!opts.kvCacheDecodeActive;
         this._useBatchedVectorCopies = opts.useBatchedVectorCopies !== false;
+        this._deferRuntimeResources = opts.deferRuntimeResources === true;
+        this._runtimeResourcesReady = false;
         // Batched trails collapse to single segments; keep legacy multi-segment
         // trails by default so paths show right-angle turns.
         this._useBatchedTrails = opts.useBatchedTrails !== undefined
@@ -143,42 +145,8 @@ export class MHSAAnimation {
         this._vectorPoolSize = 0;
         this._vectorPoolLimit = Number.isFinite(opts.vectorPoolLimit) ? Math.max(0, Math.floor(opts.vectorPoolLimit)) : 512;
         this._batchedVectorSets = null;
-        if (this._useBatchedVectorCopies) {
-            const totalCopies = this._laneCount * NUM_HEAD_SETS_LAYER;
-            this._batchedVectorSets = {
-                K: new BatchedPrismVectorSet({
-                    vectorCount: totalCopies,
-                    prismCount: this.vectorPrismCount,
-                    parentGroup: this.parentGroup,
-                    label: 'MHSA K Copies',
-                }),
-                Q: new BatchedPrismVectorSet({
-                    vectorCount: totalCopies,
-                    prismCount: this.vectorPrismCount,
-                    parentGroup: this.parentGroup,
-                    label: 'MHSA Q Copies',
-                }),
-                V: new BatchedPrismVectorSet({
-                    vectorCount: totalCopies,
-                    prismCount: this.vectorPrismCount,
-                    parentGroup: this.parentGroup,
-                    label: 'MHSA V Copies',
-                }),
-            };
-        }
         this._qkvTrailBatch = null;
         this._trailFactory = null;
-        if (this._useBatchedTrails) {
-            const capacity = this._laneCount * NUM_HEAD_SETS_LAYER * 3;
-            this._qkvTrailBatch = new SegmentTrailBatch(
-                this.parentGroup,
-                capacity,
-                TRAIL_COLOR,
-                1,
-                QKV_TRAIL_OPACITY
-            );
-            this._trailFactory = () => (this._qkvTrailBatch ? this._qkvTrailBatch.acquireTrail() : null);
-        }
 
         // Speed at which residual-stream vectors rise while branched
         // during MHSA/MLP processing. Starts with the LN1 value.
@@ -273,7 +241,7 @@ export class MHSAAnimation {
             opts.enableSelfAttention ?? MHSAAnimation.ENABLE_SELF_ATTENTION;
 
         // Self-attention helper (placeholder)
-        this.selfAttentionAnimator = new SelfAttentionAnimator(this);
+        this.selfAttentionAnimator = null;
         // Dock offset used when weighted sums park above V vectors.
         this.weightedSumDockOffset = MHA_WEIGHTED_SUM_DOCK_OFFSET;
 
@@ -287,7 +255,7 @@ export class MHSAAnimation {
             const weightedRowY = this.mhaPassThroughTargetY
                 + this.mhaResultRiseOffsetY
                 + BASE_RISE_ADJUST
-                + (this.selfAttentionAnimator ? this.selfAttentionAnimator.RED_EXTRA_RISE : 0)
+                + (this.enableSelfAttentionAnimation ? SA_RED_EXTRA_RISE : 0)
                 + this.weightedSumDockOffset;
             const desiredBottomY = weightedRowY + MHA_OUTPUT_PROJECTION_MATRIX_Y_OFFSET_ABOVE_ROW;
             const desiredCenterY = desiredBottomY + this.outputProjMatrixHeight / 2;
@@ -360,19 +328,8 @@ export class MHSAAnimation {
         //  Vector router: handles horizontal travel + K/Q/V parking.
         //  Once all copies are parked it triggers the parallel pass-through.
         // --------------------------------------------------------------
-        this.vectorRouter = new VectorRouter(this.parentGroup, this.headsCentersX, this.headCoords, this.headStopY, this.mhaVisualizations, {
-            acquireVector: this._acquireVectorCopy.bind(this),
-            markVectorLayoutDirty: this._markBatchedVectorLayoutDirty.bind(this),
-            shareVectorData: this._shareVectorData,
-            trailFactory: this._trailFactory,
-            copyTrailOpacity: this._isKvCacheModeEnabled() ? 0.16 : undefined
-        });
-        this.vectorRouter.onReady(() => {
-            this.mhaPassThroughPhase = 'ready_for_parallel_pass_through';
-            logMhsaDebug('MHSAAnimation: All MHSA vectors are in position. Ready for PARALLEL pass-through.');
-            this.passThroughAnimator = new PassThroughAnimator(this);
-            this.passThroughAnimator.start(this.currentLanes);
-        });
+        this.vectorRouter = null;
+        this.passThroughAnimator = null;
 
         // ----------------------------------------------
         //  Stage pipeline scaffolding (legacy)
@@ -382,6 +339,73 @@ export class MHSAAnimation {
         // them compiles, but we skip execution to avoid duplicate visuals.
         // this._setupMHSAVisualizations();
         // this._setupOutputProjectionMatrix();
+        if (!this._deferRuntimeResources) {
+            this.ensureRuntimeResources();
+        }
+    }
+
+    ensureRuntimeResources() {
+        if (this._runtimeResourcesReady) return;
+
+        if (this._useBatchedVectorCopies && !this._batchedVectorSets) {
+            const totalCopies = this._laneCount * NUM_HEAD_SETS_LAYER;
+            this._batchedVectorSets = {
+                K: new BatchedPrismVectorSet({
+                    vectorCount: totalCopies,
+                    prismCount: this.vectorPrismCount,
+                    parentGroup: this.parentGroup,
+                    label: 'MHSA K Copies',
+                }),
+                Q: new BatchedPrismVectorSet({
+                    vectorCount: totalCopies,
+                    prismCount: this.vectorPrismCount,
+                    parentGroup: this.parentGroup,
+                    label: 'MHSA Q Copies',
+                }),
+                V: new BatchedPrismVectorSet({
+                    vectorCount: totalCopies,
+                    prismCount: this.vectorPrismCount,
+                    parentGroup: this.parentGroup,
+                    label: 'MHSA V Copies',
+                }),
+            };
+        }
+
+        if (this._useBatchedTrails && !this._qkvTrailBatch) {
+            const capacity = this._laneCount * NUM_HEAD_SETS_LAYER * 3;
+            this._qkvTrailBatch = new SegmentTrailBatch(
+                this.parentGroup,
+                capacity,
+                TRAIL_COLOR,
+                1,
+                QKV_TRAIL_OPACITY
+            );
+            this._trailFactory = () => (this._qkvTrailBatch ? this._qkvTrailBatch.acquireTrail() : null);
+        }
+
+        if (this.enableSelfAttentionAnimation && !this.selfAttentionAnimator) {
+            this.selfAttentionAnimator = new SelfAttentionAnimator(this);
+        }
+
+        if (!this.vectorRouter) {
+            this.vectorRouter = new VectorRouter(this.parentGroup, this.headsCentersX, this.headCoords, this.headStopY, this.mhaVisualizations, {
+                acquireVector: this._acquireVectorCopy.bind(this),
+                markVectorLayoutDirty: this._markBatchedVectorLayoutDirty.bind(this),
+                shareVectorData: this._shareVectorData,
+                trailFactory: this._trailFactory,
+                copyTrailOpacity: this._isKvCacheModeEnabled() ? 0.16 : undefined
+            });
+            this.vectorRouter.setSkipToEndMode(this._skipToEndActive);
+            this.vectorRouter.onReady(() => {
+                this.mhaPassThroughPhase = 'ready_for_parallel_pass_through';
+                logMhsaDebug('MHSAAnimation: All MHSA vectors are in position. Ready for PARALLEL pass-through.');
+                this.passThroughAnimator = new PassThroughAnimator(this);
+                this.passThroughAnimator.start(this.currentLanes);
+            });
+        }
+
+        this._runtimeResourcesReady = true;
+        this._deferRuntimeResources = false;
     }
 
     // Dynamic durations that adapt to GLOBAL_ANIM_SPEED_MULT at access time
@@ -396,6 +420,7 @@ export class MHSAAnimation {
     //  Placeholder self-attention phase – waits 3 s before continuing
     // ------------------------------------------------------------------
     _runSelfAttentionPhase(onDone) {
+        this.ensureRuntimeResources();
         if (this.selfAttentionAnimator) {
             this.selfAttentionAnimator.start(onDone);
         } else if (onDone) {
@@ -494,6 +519,9 @@ export class MHSAAnimation {
     }
 
     _acquireVectorCopy({ rawData, position, instanceCount, numSubsections = 30, shareData = false, kind = null, headIndex = null, lane = null } = {}) {
+        if (this._useBatchedVectorCopies && !this._runtimeResourcesReady) {
+            this.ensureRuntimeResources();
+        }
         if (this._batchedVectorSets && kind && this._batchedVectorSets[kind]) {
             const laneIndex = (lane && Number.isFinite(lane.laneIndex))
                 ? lane.laneIndex
@@ -879,6 +907,7 @@ export class MHSAAnimation {
 
     // Launch pass-through tweens for every head's K/Q/V copy in parallel.
     initiateParallelHeadPassThroughAnimations(allLanes) {
+        this.ensureRuntimeResources();
         if (this.mhaPassThroughPhase !== 'ready_for_parallel_pass_through') return;
         logMhsaDebug('MHSAAnimation: Initiating Parallel MHSA Head Pass-Through Animations...');
         this.mhaPassThroughPhase = 'parallel_pass_through_active';
@@ -1042,6 +1071,9 @@ export class MHSAAnimation {
         // Keep a reference to the latest lanes array so that other internal
         // methods (triggered asynchronously) can access the original vectors.
         this.currentLanes = lanes;
+        if (Array.isArray(lanes) && lanes.length) {
+            this.ensureRuntimeResources();
+        }
         const laneCount = Array.isArray(lanes) ? lanes.length : 0;
         const composeNeedsRefresh = lanes !== this._laneComposeCachedInput
             || laneCount !== this._laneComposeCachedLen
@@ -1257,6 +1289,9 @@ export class MHSAAnimation {
 
     setSkipToEndMode(enabled = false) {
         this._skipToEndActive = !!enabled;
+        if (this._skipToEndActive && Array.isArray(this.currentLanes) && this.currentLanes.length) {
+            this.ensureRuntimeResources();
+        }
         if (this.vectorRouter && typeof this.vectorRouter.setSkipToEndMode === 'function') {
             this.vectorRouter.setSkipToEndMode(this._skipToEndActive);
         }

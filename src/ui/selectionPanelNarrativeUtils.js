@@ -7,12 +7,862 @@ import {
     MLP_UP_MATRIX_COLOR,
     MLP_DOWN_MATRIX_COLOR
 } from '../animations/LayerAnimationConstants.js';
-import { D_MODEL, VOCAB_SIZE } from './selectionPanelConstants.js';
-import { getActivationDataFromSelection } from './selectionPanelSelectionUtils.js';
+import { D_MODEL, D_HEAD, VOCAB_SIZE, CONTEXT_LEN } from './selectionPanelConstants.js';
+import {
+    findUserDataNumber,
+    findUserDataString,
+    getActivationDataFromSelection
+} from './selectionPanelSelectionUtils.js';
 
-const RESIDUAL_STREAM_DESCRIPTION = 'This is the residual stream vector for a token at this point in the model. It is the main path that carries information through the network. Attention and MLP updates are added back into this stream at each layer, so prior context is preserved while new information is incorporated.';
 const GPT2_VOCAB_SIZE_TEXT = VOCAB_SIZE.toLocaleString('en-US');
 const GPT2_D_MODEL_TEXT = D_MODEL.toLocaleString('en-US');
+const GPT2_D_HEAD_TEXT = D_HEAD.toLocaleString('en-US');
+const GPT2_CONTEXT_LEN_TEXT = CONTEXT_LEN.toLocaleString('en-US');
+const GPT2_NUM_HEADS_TEXT = Math.round(D_MODEL / D_HEAD).toLocaleString('en-US');
+const GPT2_MLP_HIDDEN_TEXT = (D_MODEL * 4).toLocaleString('en-US');
+const ATTENTION_VECTOR_DETAIL_ACTION = 'open-attention-vector';
+const LAYERNORM_DETAIL_ACTION = 'open-layernorm';
+const LAYERNORM_PARAM_DETAIL_ACTION = 'open-layernorm-param';
+const QKV_SOURCE_VECTOR_DETAIL_ACTION = 'open-qkv-source-vector';
+const QKV_WEIGHT_MATRIX_DETAIL_ACTION = 'open-qkv-weight-matrix';
+const SMALL_NUMBER_WORDS = [
+    'zero',
+    'one',
+    'two',
+    'three',
+    'four',
+    'five',
+    'six',
+    'seven',
+    'eight',
+    'nine',
+    'ten',
+    'eleven',
+    'twelve',
+    'thirteen',
+    'fourteen',
+    'fifteen',
+    'sixteen',
+    'seventeen',
+    'eighteen',
+    'nineteen',
+    'twenty'
+];
+
+function joinParagraphs(...parts) {
+    return parts
+        .filter((part) => typeof part === 'string' && part.trim().length > 0)
+        .join('\n\n');
+}
+
+function inlineMath(tex) {
+    const safeTex = typeof tex === 'string' ? tex.trim() : '';
+    if (!safeTex) return '';
+    return `$${safeTex}$`;
+}
+
+function buildLinearMapDimensionSentence({
+    inputDimText = GPT2_D_MODEL_TEXT,
+    outputDimText = GPT2_D_MODEL_TEXT,
+    matrixShapeText = `${inputDimText} x ${outputDimText}`,
+    inputName = 'input vector',
+    outputName = 'output vector'
+} = {}) {
+    return `In the notation used in this visualization, its shape is ${matrixShapeText}: it takes a ${inputDimText}-dimensional ${inputName} and produces a ${outputDimText}-dimensional ${outputName}. That means the matrix reads ${inputDimText} input features together and recombines them into ${outputDimText} output features.`;
+}
+
+function buildLookupTableDimensionSentence({
+    rowCountText = GPT2_VOCAB_SIZE_TEXT,
+    outputDimText = GPT2_D_MODEL_TEXT,
+    indexName = 'token ID'
+} = {}) {
+    return `This table has ${rowCountText} rows, and each row is a ${outputDimText}-dimensional vector. The input is a discrete ${indexName}, and the output is the row stored at that index.`;
+}
+
+function resolveTokenReference(selectionInfo = null, {
+    indexKey = 'tokenIndex',
+    idKey = 'tokenId',
+    labelKey = 'tokenLabel'
+} = {}) {
+    const tokenIndexRaw = findUserDataNumber(selectionInfo, indexKey);
+    const tokenIdRaw = idKey ? findUserDataNumber(selectionInfo, idKey) : null;
+    const tokenIndex = Number.isFinite(tokenIndexRaw) ? Math.floor(tokenIndexRaw) : null;
+    const tokenId = Number.isFinite(tokenIdRaw) ? Math.floor(tokenIdRaw) : null;
+    const tokenLabelRaw = findUserDataString(selectionInfo, labelKey);
+    const tokenLabel = typeof tokenLabelRaw === 'string' && tokenLabelRaw.trim().length
+        ? tokenLabelRaw.trim()
+        : '';
+    const tokenText = tokenLabel || (Number.isFinite(tokenIndex) ? `Token ${tokenIndex + 1}` : '');
+    if (!tokenText) return null;
+    return { tokenText, tokenIndex, tokenId };
+}
+
+function buildInlineTokenNavMarkup(tokenText, tokenIndex = null, tokenId = null) {
+    const safeText = typeof tokenText === 'string' ? tokenText.trim() : '';
+    if (!safeText) return '';
+    const safeTokenIndex = Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : '';
+    const safeTokenId = Number.isFinite(tokenId) ? Math.floor(tokenId) : '';
+    return `[[token-nav|${encodeURIComponent(safeText)}|${safeTokenIndex}|${safeTokenId}]]`;
+}
+
+function buildInlineDetailActionMarkup(linkText, action, payload = null) {
+    const safeText = typeof linkText === 'string' ? linkText.trim() : '';
+    const safeAction = typeof action === 'string' ? action.trim() : '';
+    if (!safeText || !safeAction) return safeText;
+    const encodedPayload = encodeURIComponent(JSON.stringify(payload && typeof payload === 'object' ? payload : {}));
+    return `[[detail-action|${encodeURIComponent(safeText)}|${safeAction}|${encodedPayload}]]`;
+}
+
+function normalizeQkvKind(kind = 'Q') {
+    const upper = String(kind || '').toUpperCase();
+    if (upper === 'K') return 'K';
+    if (upper === 'V') return 'V';
+    return 'Q';
+}
+
+function resolveSelectionLayerNormKind(selectionInfo = null) {
+    const explicitKind = findUserDataString(selectionInfo, 'layerNormKind');
+    const stageLower = String(getActivationDataFromSelection(selectionInfo)?.stage || '').toLowerCase();
+    const labelLower = String(selectionInfo?.label || '').toLowerCase();
+    if (explicitKind === 'ln1' || explicitKind === 'ln2' || explicitKind === 'final') {
+        return explicitKind;
+    }
+    if (stageLower.startsWith('ln1.')) return 'ln1';
+    if (stageLower.startsWith('ln2.')) return 'ln2';
+    if (stageLower.startsWith('final_ln')) return 'final';
+    if (labelLower.includes('layernorm (top)') || labelLower.includes('final ln') || labelLower.includes('top layernorm')) {
+        return 'final';
+    }
+    if (labelLower.includes('ln1')) return 'ln1';
+    if (labelLower.includes('ln2')) return 'ln2';
+    return null;
+}
+
+function resolveSelectionTokenRef(selectionInfo = null) {
+    return resolveTokenReference(selectionInfo);
+}
+
+function resolveSelectionKeyTokenRef(selectionInfo = null) {
+    return resolveTokenReference(selectionInfo, {
+        indexKey: 'keyTokenIndex',
+        idKey: 'keyTokenId',
+        labelKey: 'keyTokenLabel'
+    });
+}
+
+function resolveSelectionQueryTokenRef(selectionInfo = null) {
+    return resolveTokenReference(selectionInfo, {
+        indexKey: 'queryTokenIndex',
+        idKey: 'queryTokenId',
+        labelKey: 'queryTokenLabel'
+    });
+}
+
+function buildTokenReference(tokenRef = null, fallback = 'this token') {
+    if (!tokenRef) return fallback;
+    const chip = buildInlineTokenNavMarkup(tokenRef.tokenText, tokenRef.tokenIndex, tokenRef.tokenId);
+    if (!chip) return fallback;
+    const genericTokenLabel = /^token\s+\d+$/i.test(tokenRef.tokenText);
+    if (Number.isFinite(tokenRef.tokenIndex) && !genericTokenLabel) {
+        return `${chip} at position ${tokenRef.tokenIndex + 1}`;
+    }
+    return chip;
+}
+
+function buildSelectionTokenReference(selectionInfo = null, fallback = 'this token') {
+    return buildTokenReference(resolveSelectionTokenRef(selectionInfo), fallback);
+}
+
+function buildSelectionKeyTokenReference(selectionInfo = null, fallback = 'the source token') {
+    return buildTokenReference(resolveSelectionKeyTokenRef(selectionInfo), fallback);
+}
+
+function buildSelectionQueryTokenReference(selectionInfo = null, fallback = 'the query token') {
+    return buildTokenReference(resolveSelectionQueryTokenRef(selectionInfo), fallback);
+}
+
+function resolveSelectionHeadIndex(selectionInfo = null) {
+    const headIndexRaw = findUserDataNumber(selectionInfo, 'headIndex');
+    return Number.isFinite(headIndexRaw) ? Math.floor(headIndexRaw) : null;
+}
+
+function buildSelectionHeadReference(selectionInfo = null, { fallback = 'this attention head', capitalize = false } = {}) {
+    const headIndex = resolveSelectionHeadIndex(selectionInfo);
+    if (!Number.isFinite(headIndex)) return fallback;
+    return `${capitalize ? 'Attention head' : 'attention head'} ${headIndex + 1}`;
+}
+
+function resolveSelectionLayerIndex(selectionInfo = null) {
+    const layerIndexRaw = findUserDataNumber(selectionInfo, 'layerIndex');
+    return Number.isFinite(layerIndexRaw) ? Math.floor(layerIndexRaw) : null;
+}
+
+function buildSelectionLayerReference(selectionInfo = null, { fallback = 'this layer', capitalize = false } = {}) {
+    const layerIndex = resolveSelectionLayerIndex(selectionInfo);
+    if (!Number.isFinite(layerIndex)) return fallback;
+    return `${capitalize ? 'Layer' : 'layer'} ${layerIndex + 1}`;
+}
+
+function formatSmallLayerNumber(value) {
+    if (!Number.isFinite(value)) return '';
+    const integer = Math.max(0, Math.floor(value));
+    return SMALL_NUMBER_WORDS[integer] || String(integer);
+}
+
+function buildSelectionLayerJobReference(selectionInfo = null) {
+    const layerIndex = resolveSelectionLayerIndex(selectionInfo);
+    if (!Number.isFinite(layerIndex)) return 'this layer';
+    return `layer ${formatSmallLayerNumber(layerIndex + 1)}`;
+}
+
+function buildLayerNormDetailActionMarkup(selectionInfo = null, {
+    layerNormKind = null,
+    linkText = 'LayerNorm'
+} = {}) {
+    const safeKind = (layerNormKind === 'ln1' || layerNormKind === 'ln2' || layerNormKind === 'final')
+        ? layerNormKind
+        : resolveSelectionLayerNormKind(selectionInfo);
+    const layerIndex = resolveSelectionLayerIndex(selectionInfo);
+    return buildInlineDetailActionMarkup(linkText, LAYERNORM_DETAIL_ACTION, {
+        layerNormKind: safeKind,
+        layerIndex: Number.isFinite(layerIndex) ? layerIndex : null
+    });
+}
+
+function buildSelectionLayerNormReference(selectionInfo = null, {
+    layerNormKind = null,
+    linked = false
+} = {}) {
+    const safeKind = (layerNormKind === 'ln1' || layerNormKind === 'ln2' || layerNormKind === 'final')
+        ? layerNormKind
+        : resolveSelectionLayerNormKind(selectionInfo);
+    const layerRef = buildSelectionLayerReference(selectionInfo);
+    let text = 'this LayerNorm';
+    if (safeKind === 'ln1') {
+        text = layerRef !== 'this layer'
+            ? `the first LayerNorm in ${layerRef}`
+            : 'the first LayerNorm in this layer';
+    } else if (safeKind === 'ln2') {
+        text = layerRef !== 'this layer'
+            ? `the second LayerNorm in ${layerRef}`
+            : 'the second LayerNorm in this layer';
+    } else if (safeKind === 'final') {
+        text = 'the final LayerNorm at the top of the model';
+    }
+    return linked
+        ? buildLayerNormDetailActionMarkup(selectionInfo, { layerNormKind: safeKind, linkText: text })
+        : text;
+}
+
+function buildIncomingResidualSourceSentence(selectionInfo = null) {
+    const layerIndex = resolveSelectionLayerIndex(selectionInfo);
+    if (!Number.isFinite(layerIndex)) {
+        return 'It is the complete token state handed over from the embeddings or from the previous layer. Attention and the MLP do not start from scratch; they both read from this running state and then write updates back into it through residual addition.';
+    }
+    if (layerIndex === 0) {
+        return 'It is the complete token state handed over from the embedding sum into layer 1. Attention and the MLP do not start from scratch; they both read from this running state and then write updates back into it through residual addition.';
+    }
+    return `It is the complete token state handed over from the output of layer ${layerIndex} into layer ${layerIndex + 1}. Attention and the MLP do not start from scratch; they both read from this running state and then write updates back into it through residual addition.`;
+}
+
+function buildAttentionVectorActionMarkup(selectionInfo = null, {
+    vectorKind = 'Q',
+    linkText = 'vector',
+    tokenRef = null
+} = {}) {
+    const headIndex = resolveSelectionHeadIndex(selectionInfo);
+    if (!Number.isFinite(headIndex) || !tokenRef) return linkText;
+    const safeVectorKind = normalizeQkvKind(vectorKind);
+    return buildInlineDetailActionMarkup(linkText, ATTENTION_VECTOR_DETAIL_ACTION, {
+        vectorKind: safeVectorKind,
+        headIndex,
+        tokenIndex: Number.isFinite(tokenRef.tokenIndex) ? tokenRef.tokenIndex : null,
+        tokenId: Number.isFinite(tokenRef.tokenId) ? tokenRef.tokenId : null,
+        tokenLabel: tokenRef.tokenText || ''
+    });
+}
+
+function buildQkvSourceVectorActionMarkup(selectionInfo = null, {
+    linkText = 'x_t',
+    tokenRef = null
+} = {}) {
+    const layerIndex = resolveSelectionLayerIndex(selectionInfo);
+    if (!tokenRef || !Number.isFinite(layerIndex) || !Number.isFinite(tokenRef.tokenIndex)) return linkText;
+    return buildInlineDetailActionMarkup(linkText, QKV_SOURCE_VECTOR_DETAIL_ACTION, {
+        layerIndex,
+        tokenIndex: tokenRef.tokenIndex,
+        tokenId: Number.isFinite(tokenRef.tokenId) ? tokenRef.tokenId : null,
+        tokenLabel: tokenRef.tokenText || ''
+    });
+}
+
+function buildQkvWeightMatrixActionMarkup(selectionInfo = null, {
+    matrixKind = 'Q',
+    linkText = 'W_Q'
+} = {}) {
+    const headIndex = resolveSelectionHeadIndex(selectionInfo);
+    const layerIndex = resolveSelectionLayerIndex(selectionInfo);
+    if (!Number.isFinite(headIndex) || !Number.isFinite(layerIndex)) return linkText;
+    return buildInlineDetailActionMarkup(linkText, QKV_WEIGHT_MATRIX_DETAIL_ACTION, {
+        matrixKind: normalizeQkvKind(matrixKind),
+        headIndex,
+        layerIndex
+    });
+}
+
+function buildLayerNormParamActionMarkup(selectionInfo = null, {
+    param = 'scale',
+    linkText = 'parameter'
+} = {}) {
+    const safeParam = param === 'shift' ? 'shift' : 'scale';
+    const layerNormKind = resolveSelectionLayerNormKind(selectionInfo);
+    const layerIndex = findUserDataNumber(selectionInfo, 'layerIndex');
+    return buildInlineDetailActionMarkup(linkText, LAYERNORM_PARAM_DETAIL_ACTION, {
+        param: safeParam,
+        layerNormKind,
+        layerIndex: Number.isFinite(layerIndex) ? Math.floor(layerIndex) : null
+    });
+}
+
+function buildAttentionScoreLinkedVectorReferences(selectionInfo = null) {
+    const queryTokenMeta = resolveSelectionTokenRef(selectionInfo);
+    const keyTokenMeta = resolveSelectionKeyTokenRef(selectionInfo);
+    const queryTokenRef = buildTokenReference(queryTokenMeta, 'the query token');
+    const sourceTokenRef = buildTokenReference(keyTokenMeta, 'the source token');
+    const queryVectorLink = buildAttentionVectorActionMarkup(selectionInfo, {
+        vectorKind: 'Q',
+        linkText: 'query vector',
+        tokenRef: queryTokenMeta
+    });
+    const keyVectorLink = buildAttentionVectorActionMarkup(selectionInfo, {
+        vectorKind: 'K',
+        linkText: 'key vector',
+        tokenRef: keyTokenMeta
+    });
+    const valueVectorLink = buildAttentionVectorActionMarkup(selectionInfo, {
+        vectorKind: 'V',
+        linkText: 'value vector',
+        tokenRef: keyTokenMeta
+    });
+    return {
+        queryVectorRef: `${queryVectorLink} for ${queryTokenRef}`,
+        keyVectorRef: `${keyVectorLink} for ${sourceTokenRef}`,
+        valueVectorRef: `${valueVectorLink} for ${sourceTokenRef}`
+    };
+}
+
+function buildResidualStreamDescription(selectionInfo = null) {
+    const tokenRef = buildSelectionTokenReference(selectionInfo, 'this token');
+    const layerRef = buildSelectionLayerReference(selectionInfo);
+    return joinParagraphs(
+        `This is the residual-stream vector representation for ${tokenRef}${layerRef !== 'this layer' ? ` in ${layerRef}` : ''}. The full residual stream is the collection of one such vector per token position, all evolving through the model together.`,
+        'At this point in the network, this vector is the token\'s running state: each sublayer reads from it, computes an update, and adds that update back instead of replacing it.',
+        'As this vector moves upward through the transformer, it keeps accumulating information from the earlier context. Each attention sublayer can pull in relevant information from other token positions, and each MLP can rewrite that information into more useful local features.',
+        'Those refinements build on one another across layers, so the top-layer residual vector at this position is the model\'s final internal summary of what it has inferred here. That final state is what the model turns into logits to predict the next token after this one.',
+        'That design is what lets the model preserve earlier information while still refining it with attention and MLP computations. If you want to know what the model currently knows about a specific token, this vector is usually the best place to look.'
+    );
+}
+
+function buildIncomingResidualDescription(selectionInfo = null) {
+    const tokenRef = buildSelectionTokenReference(selectionInfo, 'this token');
+    const layerRef = buildSelectionLayerReference(selectionInfo, { fallback: 'a transformer block' });
+    const ln1Ref = buildSelectionLayerNormReference(selectionInfo, { layerNormKind: 'ln1', linked: true });
+    const layerJobRef = buildSelectionLayerJobReference(selectionInfo);
+    return joinParagraphs(
+        `This is the residual-stream vector representation for ${tokenRef} as it enters ${layerRef}, before ${ln1Ref} runs.`,
+        buildIncomingResidualSourceSentence(selectionInfo),
+        `So this vector already contains everything the model has accumulated so far about this position, and ${layerJobRef}'s job is to refine it further for the eventual prediction of the next token after this one.`
+    );
+}
+
+function buildPostAttentionResidualDescription(selectionInfo = null) {
+    const tokenRef = buildSelectionTokenReference(selectionInfo, 'this token');
+    const layerRef = buildSelectionLayerReference(selectionInfo);
+    const ln2Ref = buildSelectionLayerNormReference(selectionInfo, { layerNormKind: 'ln2', linked: true });
+    return joinParagraphs(
+        `This is the residual-stream vector representation for ${tokenRef} after the attention update from ${layerRef} has been added in.`,
+        `The token state now reflects both its previous representation and whatever information the attention heads gathered from earlier tokens. This updated residual is what ${ln2Ref} reads next before the MLP branch in ${layerRef} starts.`,
+        'That means this vector now contains more contextual information the model is assembling at this position. Later computations will keep refining it until it is used to predict the next token after this one.'
+    );
+}
+
+function buildPostMlpResidualDescription(selectionInfo = null) {
+    const tokenRef = buildSelectionTokenReference(selectionInfo, 'this token');
+    const layerRef = buildSelectionLayerReference(selectionInfo);
+    return joinParagraphs(
+        `This is the residual-stream vector representation for ${tokenRef} after the MLP update from ${layerRef} has been added in.`,
+        `At this point, ${layerRef} is complete for this token. The vector now contains the previous state, the attention update, and the MLP update all combined through residual addition, and this final block output is what gets passed to the next layer.`,
+        'The next layer will keep refining this same running state rather than starting over. By the top of the stack, the accumulated version of this vector is what the model ultimately turns into logits for the next token after this one.'
+    );
+}
+
+function buildLayerNormNormalizedVectorDescription(selectionInfo = null) {
+    const tokenRef = buildSelectionTokenReference(selectionInfo, 'this token');
+    const layerRef = buildSelectionLayerReference(selectionInfo);
+    return joinParagraphs(
+        `This is the LayerNorm-normalized token-state vector for ${tokenRef}${layerRef !== 'this layer' ? ` in ${layerRef}` : ''}, before the learned scale and shift are applied.`,
+        'At this moment, the vector has been re-centered and rescaled using statistics from this token\'s own features.',
+        'Its job is to present the same token state in a numerically steadier form so the next learned operations see a more stable input.'
+    );
+}
+
+function buildFinalLayerNormNormalizedVectorDescription(selectionInfo = null) {
+    const tokenRef = buildSelectionTokenReference(selectionInfo, 'this token');
+    return joinParagraphs(
+        `This is the top-of-model LayerNorm-normalized token-state vector for ${tokenRef}, before the learned scale and shift are applied.`,
+        'It is the last normalized version of this token\'s state before the model converts hidden features into vocabulary logits.'
+    );
+}
+
+function buildLayerNormScaledVectorDescription(selectionInfo = null) {
+    const tokenRef = buildSelectionTokenReference(selectionInfo, 'this token');
+    const layerRef = buildSelectionLayerReference(selectionInfo);
+    return joinParagraphs(
+        `This is the LayerNorm token-state vector for ${tokenRef}${layerRef !== 'this layer' ? ` in ${layerRef}` : ''} after normalization and after elementwise multiplication by the learned scale vector ${inlineMath('\\gamma')}, but before the learned shift ${inlineMath('\\beta')} is added.`,
+        'The scale parameters let the model decide which normalized features should be amplified, damped, or even sign-flipped before the token moves on to the next sublayer.'
+    );
+}
+
+function buildLn1OutputDescription(selectionInfo = null) {
+    const tokenRef = buildSelectionTokenReference(selectionInfo, 'this token');
+    const layerRef = buildSelectionLayerReference(selectionInfo);
+    const layerNormRef = buildSelectionLayerNormReference(selectionInfo, { layerNormKind: 'ln1', linked: true });
+    return joinParagraphs(
+        `This is the post-LayerNorm residual vector for ${tokenRef} after ${layerNormRef}. It is the version of that token's state that the self-attention sublayer in ${layerRef} will actually read.`,
+        'From here, the layer sends branched copies of this vector into the query, key, and value projections, so this is the shared attention input for every head in the block.'
+    );
+}
+
+function buildLn2OutputDescription(selectionInfo = null) {
+    const tokenRef = buildSelectionTokenReference(selectionInfo, 'this token');
+    const layerRef = buildSelectionLayerReference(selectionInfo);
+    const layerNormRef = buildSelectionLayerNormReference(selectionInfo, { layerNormKind: 'ln2', linked: true });
+    return joinParagraphs(
+        `This is the post-LayerNorm residual vector for ${tokenRef} after ${layerNormRef}. It is the version of that token's state that the MLP sublayer in ${layerRef} will read next.`,
+        'From here, the vector goes into the MLP up-projection, GELU, and down-projection, so this normalized residual state is the starting point for the feed-forward update in this layer.'
+    );
+}
+
+const TOKEN_CHIP_DESCRIPTION = joinParagraphs(
+    'This is one discrete input token ID. The model uses this ID to select the corresponding row from the vocabulary embedding table so the token can enter the network as a learned feature vector.',
+    'That lookup gives the model a dense starting representation for the token, carrying usage patterns and associations learned during training.'
+);
+
+const POSITION_CHIP_DESCRIPTION = joinParagraphs(
+    'This is the position index for a token in the sequence. The model uses it to select a learned position vector that tells the network where this token sits in the prompt.',
+    'Adding that position vector to the token embedding gives the token an order-aware starting state before any attention layers run.'
+);
+
+const TOKEN_EMBEDDING_VECTOR_DESCRIPTION = joinParagraphs(
+    `This is the learned embedding vector for one token: one row selected from a ${GPT2_VOCAB_SIZE_TEXT} x ${GPT2_D_MODEL_TEXT} embedding table. A word or subword token becomes usable to the model only after this lookup converts it into continuous features.`,
+    'At this stage, the vector still has no context about the rest of the sequence. It only reflects what the model has learned about this specific token type in general, because attention has not yet compared it with any other token positions.',
+    'The embedding is learned jointly with the rest of the model to make next-token prediction easier. From a research perspective, embedding spaces often organize tokens by distributional behavior: tokens that appear in similar contexts, play similar syntactic roles, share morphology, or refer to related concepts often end up in nearby or systematically related parts of the space.',
+    'That does not mean each coordinate has a simple human-readable meaning. Instead, this vector gives the later layers a starting bundle of learned features about how this token tends to behave before any context-specific attention or MLP computation refines it.'
+);
+
+const POSITION_EMBEDDING_VECTOR_DESCRIPTION = joinParagraphs(
+    'This is the learned position vector for one sequence index. It tells the model where this token sits in the prompt so that order and distance can affect later computations.',
+    `GPT-2 learns a separate vector for each position up to its context window, so the same token can start from a different state when it appears earlier or later. That gives later attention layers a way to factor sequence order into their decisions.`,
+    'Once this position information is added into the token state, it becomes part of the running representation that the transformer keeps refining layer by layer until the final hidden state is used to predict the next token.'
+);
+
+const EMBEDDING_SUM_DESCRIPTION = joinParagraphs(
+    'This vector is the sum of token meaning and token position. It is the first full model-state vector for this token and the starting point for everything the transformer does afterward.',
+    'From this point on, the model repeatedly rewrites this state through residual updates. Attention adds information gathered from other tokens, and the MLP adds token-local nonlinear feature transformations.'
+);
+
+const EMBEDDING_CONNECTOR_TRAIL_DESCRIPTION = joinParagraphs(
+    'This connector marks the path from the symbolic inputs into the vector computation. It is not itself a learned parameter or activation; it is a guide showing where token and position information enter the network.',
+    'Its purpose is to make the handoff legible: discrete token IDs and position indices become continuous vectors, and those vectors then become the initial residual stream.'
+);
+
+const VOCAB_EMBEDDING_MATRIX_DESCRIPTION = joinParagraphs(
+    `This is the token embedding table. In GPT-2 small it has ${GPT2_VOCAB_SIZE_TEXT} rows and ${GPT2_D_MODEL_TEXT} columns.`,
+    buildLookupTableDimensionSentence({
+        rowCountText: GPT2_VOCAB_SIZE_TEXT,
+        outputDimText: GPT2_D_MODEL_TEXT,
+        indexName: 'token ID'
+    }),
+    'When the model receives a token ID, it uses that ID to select the corresponding row from this table. That row becomes the token\'s learned starting representation before position is added, giving the rest of the network a continuous feature vector it can compare, transform, and refine.'
+);
+
+const POSITIONAL_EMBEDDING_MATRIX_DESCRIPTION = joinParagraphs(
+    `This is the table of learned position vectors. It has ${GPT2_CONTEXT_LEN_TEXT} rows and ${GPT2_D_MODEL_TEXT} columns, with one learned row for each sequence position in GPT-2\'s context window.`,
+    buildLookupTableDimensionSentence({
+        rowCountText: GPT2_CONTEXT_LEN_TEXT,
+        outputDimText: GPT2_D_MODEL_TEXT,
+        indexName: 'position index'
+    }),
+    'For each token position, the model selects one row from this table and adds it elementwise to the token embedding. That lets later attention layers treat "the same token in a different place" as a meaningfully different starting state.'
+);
+
+const UNEMBEDDING_MATRIX_DESCRIPTION = joinParagraphs(
+    'This is the output projection, often called the unembedding matrix. It maps the final model-state vector back into vocabulary space, producing one logit for each token in the vocabulary.',
+    buildLinearMapDimensionSentence({
+        inputDimText: GPT2_D_MODEL_TEXT,
+        outputDimText: GPT2_VOCAB_SIZE_TEXT,
+        matrixShapeText: `${GPT2_D_MODEL_TEXT} x ${GPT2_VOCAB_SIZE_TEXT}`,
+        inputName: 'final hidden-state vector',
+        outputName: 'logit vector over the vocabulary'
+    }),
+    'Those logits say how compatible the current hidden state is with each possible next token. After softmax, they become probabilities that the sampling step can use. In GPT-2, these weights are tied to the input token embeddings.'
+);
+
+function buildLayerNormDescription(selectionInfo = null) {
+    const scaleLink = buildLayerNormParamActionMarkup(selectionInfo, {
+        param: 'scale',
+        linkText: 'scale parameter'
+    });
+    const shiftLink = buildLayerNormParamActionMarkup(selectionInfo, {
+        param: 'shift',
+        linkText: 'shift parameter'
+    });
+    const layerNormRef = buildSelectionLayerNormReference(selectionInfo);
+    return joinParagraphs(
+        `${layerNormRef.charAt(0).toUpperCase()}${layerNormRef.slice(1)} normalizes one token's feature vector by subtracting its mean and dividing by its standard deviation across features, then applying learned ${scaleLink} and ${shiftLink}. This keeps feature magnitudes under control and gives later computations a more stable input.`,
+        'In GPT-2, LayerNorm runs before attention and before the MLP. That means the model normalizes the residual stream first and then feeds that conditioned state into each sublayer.'
+    );
+}
+
+function buildTopLayerNormDescription(selectionInfo = null) {
+    const scaleLink = buildLayerNormParamActionMarkup(selectionInfo, {
+        param: 'scale',
+        linkText: 'scale parameter'
+    });
+    const shiftLink = buildLayerNormParamActionMarkup(selectionInfo, {
+        param: 'shift',
+        linkText: 'shift parameter'
+    });
+    return joinParagraphs(
+        `This is the final LayerNorm at the top of the model. It performs the same normalize-then-affine operation as other LayerNorm blocks, but here the learned ${scaleLink} and ${shiftLink} prepare the representation directly for the output vocabulary projection.`,
+        'By the time the model reaches this point, all 12 transformer layers have already contributed their updates. This LayerNorm is the last conditioning step before logits are computed.'
+    );
+}
+
+const LN_SCALE_PARAMETER_DESCRIPTION = joinParagraphs(
+    `This is a learned LayerNorm scale parameter vector, usually written as ${inlineMath('\\gamma')}. It is not produced by the current prompt; it is a fixed trained parameter shared across all tokens in this layer.`,
+    'After normalization, each feature is multiplied by its corresponding scale value. That gives the model a way to keep some features large, suppress others, and generally choose a useful post-normalization coordinate system.'
+);
+
+const LN_SHIFT_PARAMETER_DESCRIPTION = joinParagraphs(
+    `This is a learned LayerNorm shift parameter vector, usually written as ${inlineMath('\\beta')}. Like ${inlineMath('\\gamma')}, it is a trained parameter shared across tokens rather than a prompt-dependent activation.`,
+    `After the normalized vector is scaled, ${inlineMath('\\beta')} is added featurewise. That lets the model choose a learned baseline or offset for each feature instead of forcing every normalized feature to stay centered at zero.`
+);
+
+const FINAL_LN_SCALE_DESCRIPTION = joinParagraphs(
+    'This is the learned scale vector for the final LayerNorm at the top of the model. It plays the same mathematical role as other LayerNorm scale vectors, but here it prepares the representation immediately before logits are computed.',
+    'Its job is to make the final hidden state land in a feature space that the unembedding matrix can read effectively.'
+);
+
+const FINAL_LN_SHIFT_DESCRIPTION = joinParagraphs(
+    'This is the learned shift vector for the final LayerNorm at the top of the model. It is added after final scaling and before the unembedding step.',
+    'Because the logits are read directly from the post-final-LayerNorm state, this shift influences the final baseline from which vocabulary scores are computed.'
+);
+
+function buildQueryWeightMatrixDescription(selectionInfo = null) {
+    const headRef = buildSelectionHeadReference(selectionInfo);
+    const layerRef = buildSelectionLayerReference(selectionInfo);
+    return joinParagraphs(
+        `This is the learned query projection matrix for ${headRef} in ${layerRef}. For each token state entering attention, the model multiplies that token's LayerNorm output by this matrix to compute a ${GPT2_D_HEAD_TEXT}-dimensional query vector.`,
+        buildLinearMapDimensionSentence({
+            inputDimText: GPT2_D_MODEL_TEXT,
+            outputDimText: GPT2_D_HEAD_TEXT,
+            matrixShapeText: `${GPT2_D_MODEL_TEXT} x ${GPT2_D_HEAD_TEXT}`,
+            inputName: 'LayerNorm output vector',
+            outputName: 'query vector'
+        }),
+        `In symbols, this is the ${inlineMath('q_t = x_t W_Q')} step for this attention head. The matrix multiplication recombines the full token state into the query space that determines what this attention head will search for.`,
+        `The same matrix is applied at every token position, so ${headRef} produces one query vector per token. Those query vectors are then dotted with the key vectors from the same attention head to form raw attention scores.`
+    );
+}
+
+function buildKeyWeightMatrixDescription(selectionInfo = null) {
+    const headRef = buildSelectionHeadReference(selectionInfo);
+    const layerRef = buildSelectionLayerReference(selectionInfo);
+    return joinParagraphs(
+        `This is the learned key projection matrix for ${headRef} in ${layerRef}. For each token state entering attention, the model multiplies that token's LayerNorm output by this matrix to compute a ${GPT2_D_HEAD_TEXT}-dimensional key vector.`,
+        buildLinearMapDimensionSentence({
+            inputDimText: GPT2_D_MODEL_TEXT,
+            outputDimText: GPT2_D_HEAD_TEXT,
+            matrixShapeText: `${GPT2_D_MODEL_TEXT} x ${GPT2_D_HEAD_TEXT}`,
+            inputName: 'LayerNorm output vector',
+            outputName: 'key vector'
+        }),
+        `In symbols, this is the ${inlineMath('k_t = x_t W_K')} step for this attention head. The matrix multiplication places each token into the key space that queries will be compared against.`,
+        `The same matrix is applied independently at every token position, so ${headRef} produces a separate key vector for every token in the sequence. Those key vectors are what the head's queries use in their scaled dot products.`
+    );
+}
+
+function buildValueWeightMatrixDescription(selectionInfo = null) {
+    const headRef = buildSelectionHeadReference(selectionInfo);
+    const layerRef = buildSelectionLayerReference(selectionInfo);
+    return joinParagraphs(
+        `This is the learned value projection matrix for ${headRef} in ${layerRef}. For each token state entering attention, the model multiplies that token's LayerNorm output by this matrix to compute a ${GPT2_D_HEAD_TEXT}-dimensional value vector.`,
+        buildLinearMapDimensionSentence({
+            inputDimText: GPT2_D_MODEL_TEXT,
+            outputDimText: GPT2_D_HEAD_TEXT,
+            matrixShapeText: `${GPT2_D_MODEL_TEXT} x ${GPT2_D_HEAD_TEXT}`,
+            inputName: 'LayerNorm output vector',
+            outputName: 'value vector'
+        }),
+        `In symbols, this is the ${inlineMath('v_t = x_t W_V')} step for this attention head. The matrix multiplication places each token into the value space that the attention head will actually mix after softmax has chosen the weights.`,
+        `The same matrix is applied independently at every token position, so ${headRef} produces one value vector per token. Later, each of those value vectors is multiplied by a scalar attention weight and added into the head's weighted sum.`
+    );
+}
+
+const OUTPUT_PROJECTION_MATRIX_DESCRIPTION = joinParagraphs(
+    'This is the learned output projection for the attention block. After all heads produce their own outputs, those outputs are concatenated and this matrix maps the combined vector back to model width.',
+    buildLinearMapDimensionSentence({
+        inputDimText: GPT2_D_MODEL_TEXT,
+        outputDimText: GPT2_D_MODEL_TEXT,
+        matrixShapeText: `${GPT2_D_MODEL_TEXT} x ${GPT2_D_MODEL_TEXT}`,
+        inputName: `concatenated head-output vector (${GPT2_NUM_HEADS_TEXT} heads x ${GPT2_D_HEAD_TEXT} dimensions each)`,
+        outputName: 'model-width attention output vector'
+    }),
+    'Again, this is applied token by token: each token position has its own concatenated attention-head output, and this same matrix maps each of those concatenated vectors back to residual width.',
+    'Its job is to let the model mix information across heads and express the final attention update in the same coordinate system as the residual stream.'
+);
+
+const MLP_UP_WEIGHT_MATRIX_DESCRIPTION = joinParagraphs(
+    'This is the first learned matrix in the feed-forward network. It expands the token state from model width into a larger hidden space so the model has more room to build nonlinear features.',
+    buildLinearMapDimensionSentence({
+        inputDimText: GPT2_D_MODEL_TEXT,
+        outputDimText: GPT2_MLP_HIDDEN_TEXT,
+        matrixShapeText: `${GPT2_D_MODEL_TEXT} x ${GPT2_MLP_HIDDEN_TEXT}`,
+        inputName: 'token-state vector',
+        outputName: 'expanded MLP hidden vector'
+    }),
+    'This computation is token-local: every token goes through the same MLP weights independently at its own position. That means the layer produces one expanded hidden vector per token position, all using the same learned matrix.'
+);
+
+const MLP_DOWN_WEIGHT_MATRIX_DESCRIPTION = joinParagraphs(
+    'This is the second learned matrix in the feed-forward network. It takes the expanded, nonlinearly transformed MLP state and compresses it back down to model width.',
+    buildLinearMapDimensionSentence({
+        inputDimText: GPT2_MLP_HIDDEN_TEXT,
+        outputDimText: GPT2_D_MODEL_TEXT,
+        matrixShapeText: `${GPT2_MLP_HIDDEN_TEXT} x ${GPT2_D_MODEL_TEXT}`,
+        inputName: 'expanded MLP hidden vector',
+        outputName: 'residual-width MLP output vector'
+    }),
+    'This is again applied independently at every token position, so it produces one residual-width MLP output vector per token.',
+    'That down-projection turns the MLP\'s private hidden features into a residual-sized update that can be added back into the main stream.'
+);
+
+const MLP_GENERIC_DESCRIPTION = joinParagraphs(
+    'The MLP is the token-wise feed-forward network inside each transformer block. It processes each token independently using the same learned weights at every position.',
+    'Its role is to create nonlinear feature combinations within each token state. The usual pattern is expand, apply GELU, compress, then add the result back into the residual stream.'
+);
+
+const MLP_UP_VECTOR_DESCRIPTION = joinParagraphs(
+    'This is the token state after the MLP up-projection and before the GELU nonlinearity. The model has moved into a larger hidden space where it can build richer intermediate features.',
+    'At this point the representation is still purely linear in the input token state. The nonlinearity that follows is what makes the MLP more expressive than just another matrix multiply.'
+);
+
+const MLP_ACTIVATION_DESCRIPTION = joinParagraphs(
+    'This is the MLP state after the GELU nonlinearity. GELU selectively bends and gates features instead of passing everything through linearly.',
+    'That nonlinearity is what makes the MLP expressive. It lets the model create feature detectors and interactions that depend on the current activation values before the state is projected back down.'
+);
+
+const MLP_DOWN_VECTOR_DESCRIPTION = joinParagraphs(
+    'This is the token state after the MLP down-projection, back at model width. It is the MLP branch\'s proposed update to the residual stream.',
+    'The next step is residual addition, where this branch output is added to the running token state instead of replacing it.'
+);
+
+const MLP_EXPANDED_SEGMENTS_DESCRIPTION = joinParagraphs(
+    'This is one expanded MLP activation shown as multiple visible segments. Mathematically it is still one vector; the segmentation is only a display choice to make the 4x larger hidden width easier to see.',
+    'The important model fact is that the MLP temporarily moves into a larger feature space, applies a nonlinearity there, and then compresses back down.'
+);
+
+const POST_ATTENTION_OUTPUT_DESCRIPTION = joinParagraphs(
+    'This is the attention branch output after head concatenation and the output projection. It is the full attention update that this layer wants to write back into the token\'s residual state.',
+    'It is no longer a per-head object. By this point, all head-specific weighted sums have already been combined into one model-width vector.'
+);
+
+const Q_COPIES_DESCRIPTION = joinParagraphs(
+    'These are branched copies of the LayerNorm output that are about to be turned into query vectors. Each attention head gets its own learned projection, so the model duplicates the token state before sending it through head-specific Q matrices.',
+    'The important idea is that all heads start from the same token state but then ask different questions about the context.'
+);
+
+const K_COPIES_DESCRIPTION = joinParagraphs(
+    'These are branched copies of the LayerNorm output that are about to be turned into key vectors. Each attention head uses its own key projection so that different attention heads can organize context in different ways.',
+    'The keys derived from these copies are what queries will compare against to decide how much each source token matters.'
+);
+
+const V_COPIES_DESCRIPTION = joinParagraphs(
+    'These are branched copies of the LayerNorm output that are about to be turned into value vectors. Each attention head learns its own value space because different attention heads may want to pass different kinds of information forward.',
+    'Once attention weights are computed, those weights are applied to the resulting value vectors and summed into the attention-head output.'
+);
+
+function buildQueryVectorDescription(selectionInfo = null) {
+    const tokenMeta = resolveSelectionTokenRef(selectionInfo);
+    const tokenRef = buildTokenReference(tokenMeta, 'this token');
+    const headRef = buildSelectionHeadReference(selectionInfo);
+    const sourceVectorLink = buildQkvSourceVectorActionMarkup(selectionInfo, {
+        linkText: inlineMath('x_t'),
+        tokenRef: tokenMeta
+    });
+    const weightMatrixLink = buildQkvWeightMatrixActionMarkup(selectionInfo, {
+        matrixKind: 'Q',
+        linkText: inlineMath('W_Q')
+    });
+    return joinParagraphs(
+        `This is the ${GPT2_D_HEAD_TEXT}-dimensional query vector for ${tokenRef} in ${headRef}. It is produced by multiplying the post-LayerNorm residual vector ${sourceVectorLink} for this token by the head-specific query matrix ${weightMatrixLink}, which is the ${inlineMath('q_t = x_t W_Q')} computation for this attention head.`,
+        `The model takes dot products between this query vector and every key vector in ${headRef}, producing one raw attention score per source token before scaling by ${inlineMath('\\frac{1}{\\sqrt{d_h}}')}, causal masking, and softmax.`,
+        `Those scores determine how strongly ${tokenRef} will read from each source token when ${headRef} forms its weighted sum of value vectors.`
+    );
+}
+
+function buildKeyVectorDescription(selectionInfo = null) {
+    const tokenMeta = resolveSelectionTokenRef(selectionInfo);
+    const tokenRef = buildTokenReference(tokenMeta, 'this token');
+    const headRef = buildSelectionHeadReference(selectionInfo);
+    const sourceVectorLink = buildQkvSourceVectorActionMarkup(selectionInfo, {
+        linkText: inlineMath('x_j'),
+        tokenRef: tokenMeta
+    });
+    const weightMatrixLink = buildQkvWeightMatrixActionMarkup(selectionInfo, {
+        matrixKind: 'K',
+        linkText: inlineMath('W_K')
+    });
+    return joinParagraphs(
+        `This is the ${GPT2_D_HEAD_TEXT}-dimensional key vector for ${tokenRef} in ${headRef}. It is produced by multiplying the post-LayerNorm residual vector ${sourceVectorLink} for this token by the head-specific key matrix ${weightMatrixLink}, which is the ${inlineMath('k_j = x_j W_K')} computation for this attention head.`,
+        `When a query token computes ${inlineMath('q_t \\cdot k_j')} in ${headRef}, this vector supplies the ${inlineMath('k_j')} term for ${tokenRef}. After scaling by ${inlineMath('\\frac{1}{\\sqrt{d_h}}')}, and after masking removes disallowed future positions, that interaction contributes one raw attention score in the query token's row.`,
+        `Its job is to determine how strongly other tokens can attend to ${tokenRef} in ${headRef}.`
+    );
+}
+
+function buildValueVectorDescription(selectionInfo = null) {
+    const tokenMeta = resolveSelectionTokenRef(selectionInfo);
+    const tokenRef = buildTokenReference(tokenMeta, 'this token');
+    const headRef = buildSelectionHeadReference(selectionInfo);
+    const sourceVectorLink = buildQkvSourceVectorActionMarkup(selectionInfo, {
+        linkText: inlineMath('x_j'),
+        tokenRef: tokenMeta
+    });
+    const weightMatrixLink = buildQkvWeightMatrixActionMarkup(selectionInfo, {
+        matrixKind: 'V',
+        linkText: inlineMath('W_V')
+    });
+    return joinParagraphs(
+        `This is the ${GPT2_D_HEAD_TEXT}-dimensional value vector for ${tokenRef} in ${headRef}. It is produced by multiplying the post-LayerNorm residual vector ${sourceVectorLink} for this token by the head-specific value matrix ${weightMatrixLink}, which is the ${inlineMath('v_j = x_j W_V')} computation for this attention head.`,
+        `Once a query token's raw scores have been turned into weights ${inlineMath('\\alpha_{t,j}')} by softmax, this vector is multiplied by its scalar weight and added into the weighted sum.`,
+        `That is how information from ${tokenRef} can flow into other tokens through ${headRef}.`
+    );
+}
+
+function buildCachedKeyVectorDescription(selectionInfo = null) {
+    const tokenRef = buildSelectionTokenReference(selectionInfo, 'this cached token');
+    const headRef = buildSelectionHeadReference(selectionInfo);
+    return joinParagraphs(
+        `This is the cached key vector for ${tokenRef} in ${headRef}. It was computed on an earlier decoding step and stored so later queries can still take dot products against it.`,
+        'Reusing cached keys is what makes autoregressive decoding efficient: when a new token arrives, the model computes the new query and compares it against the stored past keys instead of rebuilding those old keys every time.'
+    );
+}
+
+function buildCachedValueVectorDescription(selectionInfo = null) {
+    const tokenRef = buildSelectionTokenReference(selectionInfo, 'this cached token');
+    const headRef = buildSelectionHeadReference(selectionInfo);
+    return joinParagraphs(
+        `This is the cached value vector for ${tokenRef} in ${headRef}. It stores the value content from an earlier decoding step so future queries can still read from that token.`,
+        `After the new token's attention row is computed in ${headRef}, the model multiplies the relevant post-softmax weights by these cached values and adds them into the weighted sum, without recomputing old value vectors from scratch.`
+    );
+}
+
+const MERGED_KEY_VECTORS_DESCRIPTION = joinParagraphs(
+    'These are the key vectors from multiple attention heads shown together in one combined view. Mathematically they still belong to separate attention heads; they are only grouped here so you can inspect more of the attention state at once.',
+    'Each attention head builds its own attention matrix from its own queries and keys, so these vectors can be viewed as parallel key sets rather than one shared pool.'
+);
+
+const MERGED_VALUE_VECTORS_DESCRIPTION = joinParagraphs(
+    'These are the value vectors from multiple attention heads shown together in one combined view. Each attention head still uses only its own values when forming its weighted sum.',
+    'Seeing them together is useful because it makes the multi-head structure visible: different attention heads can carry different kinds of payload even for the same token position.'
+);
+
+function buildWeightedValueVectorDescription(selectionInfo = null) {
+    const sourceTokenRef = buildSelectionTokenReference(selectionInfo, 'the source token');
+    const queryTokenRef = buildSelectionQueryTokenReference(selectionInfo, 'the query token');
+    const headRef = buildSelectionHeadReference(selectionInfo);
+    return joinParagraphs(
+        `This is the weighted value contribution from ${sourceTokenRef} to ${queryTokenRef} in ${headRef}. In equations, this contribution can be written as ${inlineMath('\\tilde{V}_{t,j} = \\alpha_{t,j} V_j')}.`,
+        `The scalar ${inlineMath('\\alpha_{t,j}')} comes from the scaled dot product between the query for ${queryTokenRef} and the key for ${sourceTokenRef}, after masking and softmax. Multiplying that scalar by the value vector from ${sourceTokenRef} produces one contribution to the attention-head output.`,
+        `The full output of ${headRef} for ${queryTokenRef} is the sum of these weighted contributions over all source tokens, ${inlineMath('H_t = \\sum_j \\tilde{V}_{t,j}')}.`
+    );
+}
+
+function buildAttentionWeightedSumDescription(selectionInfo = null) {
+    const queryTokenRef = buildSelectionTokenReference(selectionInfo, 'the query token');
+    const headRef = buildSelectionHeadReference(selectionInfo);
+    return joinParagraphs(
+        `This is the weighted-sum output for ${queryTokenRef} in ${headRef}. It is computed as ${inlineMath('H_t = \\sum_j \\alpha_{t,j} V_j')}: each source token contributes its value vector scaled by the post-softmax weight assigned to it by ${queryTokenRef}.`,
+        `This is the actual vector that ${headRef} contributes forward for that token. After every attention head produces one, the model concatenates the attention-head outputs and applies the output projection.`
+    );
+}
+
+const ATTENTION_GENERIC_DESCRIPTION = joinParagraphs(
+    'Self-attention is the mechanism that lets each token build a query vector, take dot products with key vectors in each attention head, scale and mask those scores, apply softmax across each row, and then use the resulting weights to form weighted sums of value vectors.',
+    'The Q, K, and V matrix multiplications determine what each attention head measures and what content it can pass forward, so different attention heads can learn different lookup patterns and different kinds of token-to-token interactions.'
+);
+
+function buildAttentionScoreGenericDescription(selectionInfo = null) {
+    const queryTokenRef = buildSelectionTokenReference(selectionInfo, 'the query token');
+    const sourceTokenRef = buildSelectionKeyTokenReference(selectionInfo, 'the source token');
+    const headRef = buildSelectionHeadReference(selectionInfo);
+    const linkedVectors = buildAttentionScoreLinkedVectorReferences(selectionInfo);
+    return joinParagraphs(
+        `This is one entry in the attention matrix from ${queryTokenRef} to ${sourceTokenRef} in ${headRef}. It represents one query-token/source-token interaction inside that attention head.`,
+        `At different moments in the pipeline, this entry is either the raw scaled dot-product score between the ${linkedVectors.queryVectorRef} and the ${linkedVectors.keyVectorRef} or the post-softmax weight derived from that score.`,
+        `Across the full row for ${queryTokenRef}, these entries determine how much of each source token's ${linkedVectors.valueVectorRef} will be mixed into the output of ${headRef}.`
+    );
+}
+
+function buildAttentionPreScoreDescription(selectionInfo = null) {
+    const queryTokenRef = buildSelectionTokenReference(selectionInfo, 'the query token');
+    const sourceTokenRef = buildSelectionKeyTokenReference(selectionInfo, 'the source token');
+    const headRef = buildSelectionHeadReference(selectionInfo);
+    const linkedVectors = buildAttentionScoreLinkedVectorReferences(selectionInfo);
+    return joinParagraphs(
+        `This is the pre-softmax attention score from ${queryTokenRef} to ${sourceTokenRef} in ${headRef}. It is the scaled dot product ${inlineMath('\\frac{q_t \\cdot k_j}{\\sqrt{d_h}}')} computed between the ${linkedVectors.queryVectorRef} and the ${linkedVectors.keyVectorRef}, with causal masking applied before the row is normalized.`,
+        `At this stage the number is still a raw score. Softmax will convert the full row of raw scores for ${queryTokenRef} in ${headRef} into a normalized distribution over source tokens, and those normalized weights will later scale each source token's ${linkedVectors.valueVectorRef}.`
+    );
+}
+
+function buildAttentionPostScoreDescription(selectionInfo = null) {
+    const queryTokenRef = buildSelectionTokenReference(selectionInfo, 'the query token');
+    const sourceTokenRef = buildSelectionKeyTokenReference(selectionInfo, 'the source token');
+    const headRef = buildSelectionHeadReference(selectionInfo);
+    const linkedVectors = buildAttentionScoreLinkedVectorReferences(selectionInfo);
+    return joinParagraphs(
+        `This is the post-softmax attention weight from ${queryTokenRef} to ${sourceTokenRef} in ${headRef}. It comes from applying softmax to the row of scaled dot products that includes the interaction between the ${linkedVectors.queryVectorRef} and the ${linkedVectors.keyVectorRef}.`,
+        `This scalar is then multiplied into the ${linkedVectors.valueVectorRef}, so it directly sets how much information from that source token enters the output of ${headRef} for ${queryTokenRef}.`
+    );
+}
+
+const TOP_LOGIT_BARS_DESCRIPTION = joinParagraphs(
+    'These bars summarize the model\'s highest-scoring next-token candidates at the output layer. Each bar corresponds to one vocabulary token after the final hidden state has been projected into logits and converted to probabilities.',
+    'The full distribution spans the whole vocabulary, but the UI only shows the top candidates so the result remains readable. Taller bars mean the model currently assigns higher probability to those tokens.'
+);
+
+const CHOSEN_TOKEN_DESCRIPTION = joinParagraphs(
+    'This marks the token that was actually selected from the model\'s output distribution for this decoding step.',
+    'Once selected, that token is appended to the sequence and becomes the next input token for the following pass, which is how autoregressive generation advances one token at a time.'
+);
+
+const LOGIT_DESCRIPTION = joinParagraphs(
+    'This is one vocabulary logit for one candidate next token. A logit is an unnormalized score: larger logits make a token more likely after softmax, but the value is not itself a probability.',
+    'What matters is the token\'s value relative to the other logits in the same distribution. Softmax turns the whole logit vector into probabilities that the sampler can use.'
+);
+
+const GENERIC_VECTOR_DESCRIPTION = joinParagraphs(
+    'This vector is a learned feature representation used somewhere along the model\'s forward pass. A vector in a transformer should be thought of as a bundle of coordinates that the network has learned to make useful.',
+    'Different parts of the model reinterpret and recombine these coordinates for different purposes: residual state, queries, keys, values, MLP activations, and logits all come from vectors passed through different learned transformations.'
+);
+
+const GENERIC_WEIGHT_MATRIX_DESCRIPTION = joinParagraphs(
+    'This is a learned linear transformation matrix. From first principles, multiplying a vector by a matrix means recombining its coordinates into a new set of coordinates.',
+    'In the notation used in this visualization, a matrix with shape input_dim x output_dim takes an input vector of length input_dim and produces an output vector of length output_dim. So the input dimension tells you how many features the matrix reads, and the output dimension tells you how many new features it writes.',
+    'Different matrices in the model learn different jobs: some build queries, keys, and values; some mix attention-head outputs; some expand or compress MLP features.',
+    'In a transformer, the important pattern is usually that the same learned matrix is reused across token positions. So these objects typically produce a separate output vector for each token position in the sequence.'
+);
 
 function normalizeSelectionKind(kind) {
     const raw = String(kind || '').trim().toLowerCase();
@@ -30,29 +880,55 @@ function buildContextualFallbackDescription(label, kind, stage = '') {
     const cleanStage = String(stage || '').trim();
     const kindLabel = normalizeSelectionKind(kind);
 
-    if (cleanStage) {
-        if (cleanLabel && kindLabel) {
-            return `"${cleanLabel}" is an interactive ${kindLabel} mapped to activation stage "${cleanStage}". This stage indicates where it participates in the current forward-pass pipeline.`;
-        }
+        if (cleanStage) {
+            if (cleanLabel && kindLabel) {
+                return joinParagraphs(
+                    `"${cleanLabel}" is an interactive ${kindLabel} mapped to activation stage "${cleanStage}". That stage tells you where this object sits in the forward-pass pipeline.`,
+                    'The important question is still the same: what role does this component play in updating the token state, and what other components read from it next?',
+                    'Use the stage name, the equation panel, and the surrounding scene context together to place it within the residual, attention, or MLP flow.'
+                );
+            }
         if (cleanLabel) {
-            return `"${cleanLabel}" is mapped to activation stage "${cleanStage}". This stage indicates where it participates in the current forward-pass pipeline.`;
+            return joinParagraphs(
+                `"${cleanLabel}" is mapped to activation stage "${cleanStage}". That stage tells you where this object participates in the current forward-pass pipeline.`,
+                'The best way to interpret it is to ask what vector or parameter it represents and which later operation consumes it.'
+            );
         }
         if (kindLabel) {
-            return `This ${kindLabel} is mapped to activation stage "${cleanStage}". This stage indicates where it participates in the current forward-pass pipeline.`;
+            return joinParagraphs(
+                `This ${kindLabel} is mapped to activation stage "${cleanStage}". That stage marks where it participates in the current forward-pass pipeline.`,
+                'From there, you can read it as one piece of the transformer\'s sequence of embedding, normalization, attention, MLP, or output computations.'
+            );
         }
-        return `This selection is mapped to activation stage "${cleanStage}". This stage indicates where it participates in the current forward-pass pipeline.`;
+        return joinParagraphs(
+            `This selection is mapped to activation stage "${cleanStage}". That stage marks where it participates in the current forward-pass pipeline.`,
+            'It should be interpreted through the same first-principles question: what information is it carrying or what transformation is it applying at this moment?'
+        );
     }
 
     if (cleanLabel && kindLabel) {
-        return `"${cleanLabel}" is an interactive ${kindLabel} in the scene. It contributes to the residual, attention, or MLP computation at this point in the layer flow.`;
+        return joinParagraphs(
+            `"${cleanLabel}" is an interactive ${kindLabel} in the scene.`,
+            'It contributes somewhere in the residual, attention, MLP, or output flow, and its surrounding stage tells you which part of the transformer is using it.',
+            'The surrounding stage, equation, and neighboring components tell you whether it is acting as a token state, a learned parameter, or a transformation.'
+        );
     }
     if (cleanLabel) {
-        return `"${cleanLabel}" is an interactive scene component. It contributes to the residual, attention, or MLP computation at this point in the layer flow.`;
+        return joinParagraphs(
+            `"${cleanLabel}" is an interactive scene component in the current forward pass.`,
+            'It contributes somewhere in the residual, attention, MLP, or output pipeline, and should be interpreted by looking at what stage of the layer flow is active around it.'
+        );
     }
     if (kindLabel) {
-        return `This ${kindLabel} contributes to the residual, attention, or MLP computation at this point in the layer flow.`;
+        return joinParagraphs(
+            `This ${kindLabel} contributes to the current transformer computation.`,
+            'The key question is whether it is storing a token state, storing a learned parameter, or applying a transformation to another object nearby.'
+        );
     }
-    return 'This interactive scene component contributes to the model forward pass at this point in the layer flow.';
+    return joinParagraphs(
+        'This interactive scene component participates in the model\'s forward pass at this point in the layer flow.',
+        'To interpret it, locate whether it belongs to embeddings, LayerNorm, attention, the MLP, or the output head, then read it as a state, parameter, or transformation within that stage.'
+    );
 }
 
 const toKatexColorHex = (hex) => `#${Number(hex).toString(16).padStart(6, '0')}`;
@@ -140,8 +1016,8 @@ function resolveLayerNormEquationSymbols(lower) {
 }
 
 function resolveAttentionHeadSubscript(selectionInfo) {
-    void selectionInfo;
-    return 'i';
+    const headIndex = resolveSelectionHeadIndex(selectionInfo);
+    return Number.isFinite(headIndex) ? String(headIndex + 1) : 'i';
 }
 
 function buildHeadSpecificAttentionEquation(selectionInfo) {
@@ -246,67 +1122,67 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
 
     if (stageLower) {
         if (stageLower.startsWith('embedding.token')) {
-            return 'This is the embedding vector for a specific token: a row of the embedding matrix. It contributes to the initial residual stream after being added to the position embedding. This vector is the starting point for the residual stream.';
+            return TOKEN_EMBEDDING_VECTOR_DESCRIPTION;
         }
         if (stageLower.startsWith('embedding.position')) {
-            return 'This is the position embedding vector for this token\'s index. It is added to the token embedding to form the initial residual stream, so order is encoded before any attention or MLP layers run.';
+            return POSITION_EMBEDDING_VECTOR_DESCRIPTION;
         }
         if (stageLower.startsWith('embedding.sum')) {
-            return 'This is the summed input vector after combining token and position information. It is the initial residual stream that enters Layer 1.';
+            return EMBEDDING_SUM_DESCRIPTION;
         }
         if (stageLower.startsWith('layer.incoming')) {
-            return 'This is the residual stream as it enters a layer, before the first LayerNorm. It carries the accumulated information from earlier layers and will feed into attention and the MLP.';
+            return buildIncomingResidualDescription(selectionInfo);
         }
         if (stageLower === 'ln1.norm' || stageLower === 'ln2.norm') {
-            return 'This is the normalized vector for one token inside LayerNorm, before learned scale and shift are applied. It has zero mean and unit variance across features at this step.';
+            return buildLayerNormNormalizedVectorDescription(selectionInfo);
         }
         if (stageLower === 'ln1.scale' || stageLower === 'ln2.scale') {
-            return 'This is the LayerNorm-scaled vector after multiplying normalized features by learned per-feature scale parameters.';
+            return buildLayerNormScaledVectorDescription(selectionInfo);
         }
         if (stageLower === 'ln1.shift') {
-            return 'This is the layer-normed residual stream right before query, key, and value projection. It is copied for each head to make queries, keys, and values, which then determine attention weights.';
+            return buildLn1OutputDescription(selectionInfo);
         }
         if (stageLower === 'ln2.shift') {
-            return 'This is the LayerNorm-2 output vector after scale and shift, right before the MLP block for this token.';
+            return buildLn2OutputDescription(selectionInfo);
         }
         if (stageLower === 'qkv.q') {
-            return 'This is the query vector for one token in one head. It encodes what the token wants to read and is compared with keys to form attention scores.';
+            return buildQueryVectorDescription(selectionInfo);
         }
         if (stageLower === 'qkv.k') {
-            return 'This is the key vector for one token in one head. It encodes what this token offers to other queries in the same head.';
+            return buildKeyVectorDescription(selectionInfo);
         }
         if (stageLower === 'qkv.v') {
-            return 'This is the value vector for one token in one head. Attention weights are used to mix these values into the head output.';
+            return buildValueVectorDescription(selectionInfo);
         }
         if (stageLower === 'attention.weighted_value') {
-            return 'This is a value vector after being scaled by one post-softmax attention weight. It represents a single weighted contribution before all weighted values are added into the head output.';
+            return buildWeightedValueVectorDescription(selectionInfo);
         }
         if (stageLower === 'attention.output_projection') {
-            return 'This is the attention output vector after concatenating head outputs and applying the output projection. It is the branch result that gets added back into the residual stream.';
+            return POST_ATTENTION_OUTPUT_DESCRIPTION;
         }
         if (stageLower === 'residual.post_attention') {
-            return 'This is the residual stream after attention has been added. It represents the model state before the MLP block in this layer.';
+            return buildPostAttentionResidualDescription(selectionInfo);
         }
         if (stageLower === 'mlp.up') {
-            return 'This is the vector after the MLP up-projection, in the larger hidden dimension. It is the input to the nonlinearity before being projected back down.';
+            return MLP_UP_VECTOR_DESCRIPTION;
         }
         if (stageLower === 'mlp.activation') {
-            return 'This is the post-activation MLP vector (after GELU), still in the expanded hidden dimension before down-projection.';
+            return MLP_ACTIVATION_DESCRIPTION;
         }
         if (stageLower === 'mlp.down') {
-            return 'This is the vector after the MLP down-projection, back at model width. It is the MLP branch output that will be added to the residual stream.';
+            return MLP_DOWN_VECTOR_DESCRIPTION;
         }
         if (stageLower === 'residual.post_mlp') {
-            return 'This is the residual stream after the MLP output has been added. It is the final output of this layer and the input to the next layer.';
+            return buildPostMlpResidualDescription(selectionInfo);
         }
         if (stageLower === 'final_ln.norm') {
-            return 'This is the normalized vector in the final LayerNorm at the top of the model, before final scale and shift are applied.';
+            return buildFinalLayerNormNormalizedVectorDescription(selectionInfo);
         }
         if (stageLower === 'final_ln.scale') {
-            return 'This is the final LayerNorm scale vector applied to normalized top-of-model features before unembedding.';
+            return FINAL_LN_SCALE_DESCRIPTION;
         }
         if (stageLower === 'final_ln.shift') {
-            return 'This is the final LayerNorm shift vector applied after final scaling, immediately before the unembedding matrix maps to logits.';
+            return FINAL_LN_SHIFT_DESCRIPTION;
         }
     }
 
@@ -314,177 +1190,176 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
         lower.includes('residual stream vector')
         || stageLower.includes('residual')
     ) {
-        return RESIDUAL_STREAM_DESCRIPTION;
+        return buildResidualStreamDescription(selectionInfo);
     }
 
     if (lower.startsWith('token:')) {
-        return 'This is one input token (a subword piece). The model looks up its embedding vector and adds a position vector. That sum enters the residual stream and is transformed by each layer. Through attention, this token can influence later positions.';
+        return TOKEN_CHIP_DESCRIPTION;
     }
     if (lower.startsWith('position:')) {
-        return 'This is the position embedding for a specific index in the sequence. It is added elementwise to the token embedding so the model knows order and distance. Without it, the model would treat the sequence as a bag of tokens. The same word at different positions gets different combined vectors.';
+        return POSITION_CHIP_DESCRIPTION;
     }
     if (lower.includes('token embedding')) {
-        return 'This is the embedding vector for a specific token: a row of the embedding matrix. It contributes to the initial residual stream after being added to the position embedding. This vector is the starting point for the residual stream.';
+        return TOKEN_EMBEDDING_VECTOR_DESCRIPTION;
     }
     if (lower.includes('position embedding')) {
-        return 'This is the position embedding vector for this token\'s index. It is added to the token embedding to form the initial residual stream, so order is encoded before any attention or MLP layers run.';
+        return POSITION_EMBEDDING_VECTOR_DESCRIPTION;
     }
     if (lower.includes('embedding sum')) {
-        return 'This is the summed input vector after combining token and position information. It is the initial residual stream that enters Layer 1.';
+        return EMBEDDING_SUM_DESCRIPTION;
     }
     if (lower.includes('embedding connector trail')) {
-        return 'This connector marks the visual handoff path from the token and position chips into the embedding/residual input flow for the current pass.';
+        return EMBEDDING_CONNECTOR_TRAIL_DESCRIPTION;
     }
     if (hasTopVocabEmbeddingLabel(lower)) {
-        return 'This is the output (unembedding) matrix at the top of the model. It maps the final residual stream vector to vocabulary logits. Softmax converts logits to probabilities and the model samples or selects the next token. In GPT-2, these weights are tied to the input embedding.';
+        return UNEMBEDDING_MATRIX_DESCRIPTION;
     }
     if (hasVocabEmbeddingLabel(lower)) {
-        return `This matrix converts token IDs into vectors. In GPT-2 small, it has ${GPT2_VOCAB_SIZE_TEXT} learned rows, one for each token in the vocabulary, and each row is a ${GPT2_D_MODEL_TEXT}-dimensional vector. Looking up a token ID selects one row from this ${GPT2_VOCAB_SIZE_TEXT} x ${GPT2_D_MODEL_TEXT} table. After adding position information, that vector becomes the initial residual stream input.`;
+        return VOCAB_EMBEDDING_MATRIX_DESCRIPTION;
     }
     if (lower.includes('positional embedding')) {
-        return 'This is the learned matrix of position vectors. Each position has its own vector that is summed with the token embedding at the bottom of the model. This gives the model a sense of order and distance. It lets attention distinguish first versus last occurrences.';
+        return POSITIONAL_EMBEDDING_MATRIX_DESCRIPTION;
     }
     if ((lower.includes('ln1') || lower.includes('ln2')) && (lower.includes('scale') || lower.includes('gamma'))) {
-        const isLn1 = lower.includes('ln1');
-        const lnName = isLn1 ? 'LN1' : 'LN2';
-        return `This is the ${lnName} scale vector. After normalization, each feature is multiplied by a learned scale before the shifted output is produced. These parameters are shared across tokens but applied per feature.`;
+        return LN_SCALE_PARAMETER_DESCRIPTION;
     }
     if ((lower.includes('ln1') || lower.includes('ln2')) && (lower.includes('normed') || lower.includes('normalized'))) {
-        return 'This is the normalized vector for one token inside LayerNorm, before learned scale and shift are applied. It has zero mean and unit variance across features at this step.';
+        return buildLayerNormNormalizedVectorDescription(selectionInfo);
     }
     if ((lower.includes('ln1') || lower.includes('ln2')) && (lower.includes('shift') || lower.includes('beta'))) {
-        const isLn1 = lower.includes('ln1');
-        const lnName = isLn1 ? 'LN1' : 'LN2';
-        return `This is the ${lnName} shift vector, the additive term applied after scaling normalized features. It lets the model re-center features after normalization.`;
+        return LN_SHIFT_PARAMETER_DESCRIPTION;
     }
     if (lower.includes('final ln scale')) {
-        return 'This is the final LayerNorm scale vector at the top of the model. It rescales normalized features immediately before unembedding.';
+        return FINAL_LN_SCALE_DESCRIPTION;
     }
     if (lower.includes('final ln shift')) {
-        return 'This is the final LayerNorm shift vector at the top of the model. It is added after final scaling right before logits are computed.';
+        return FINAL_LN_SHIFT_DESCRIPTION;
     }
     if (lower.includes('query weight matrix')) {
-        return 'This matrix projects the layer-normed residual stream into query vectors for each head. Queries represent what a token is seeking, and together with keys they determine attention weights.';
+        return buildQueryWeightMatrixDescription(selectionInfo);
     }
     if (lower.includes('key weight matrix')) {
-        return 'This matrix projects the layer-normed residual stream into key vectors for each head. A key represents what a token offers to be attended to. Queries score against keys to form attention weights.';
+        return buildKeyWeightMatrixDescription(selectionInfo);
     }
     if (lower.includes('value weight matrix')) {
-        return 'This matrix projects the layer-normed residual stream into value vectors for each head. Values hold the content that gets mixed. Attention weights combine these values into head outputs.';
+        return buildValueWeightMatrixDescription(selectionInfo);
     }
     if (lower.includes('output projection matrix')) {
-        return 'After each head produces an output, the head outputs are concatenated. This matrix projects that concatenation back to model width. It combines attention results before they are added back into the residual stream.';
+        return OUTPUT_PROJECTION_MATRIX_DESCRIPTION;
     }
     if (lower.includes('mlp up weight matrix')) {
-        return 'This matrix expands the model width to a larger MLP size (often 4x). It is the first linear step in the feed-forward block before the nonlinearity. This is applied independently to each token and increases nonlinear capacity.';
+        return MLP_UP_WEIGHT_MATRIX_DESCRIPTION;
     }
     if (lower.includes('mlp down weight matrix')) {
-        return 'This matrix compresses the expanded MLP activations back to model width. It brings nonlinear features back into the residual stream.';
+        return MLP_DOWN_WEIGHT_MATRIX_DESCRIPTION;
     }
     if (lower.includes('mlp up projection')) {
-        return 'This is the vector after the MLP up-projection, in the larger hidden dimension. It is the input to the nonlinearity before being projected back down.';
+        return MLP_UP_VECTOR_DESCRIPTION;
     }
     if (lower.includes('mlp down projection')) {
-        return 'This is the vector after the MLP down-projection, back at model width. It will be added to the residual stream.';
+        return MLP_DOWN_VECTOR_DESCRIPTION;
     }
     if (lower.includes('mlp expanded segments')) {
-        return 'This is the expanded MLP vector split into multiple segments to show the 4× width. It is one high-dimensional vector, just partitioned for visualization.';
+        return MLP_EXPANDED_SEGMENTS_DESCRIPTION;
     }
     if (lower.includes('layernorm') || lower.includes('layer norm')) {
         if (lower.includes('top')) {
-            return 'This is the final LayerNorm at the top of the model. It normalizes the residual stream before the unembedding step, then applies learned scale and shift.';
+            return buildTopLayerNormDescription(selectionInfo);
         }
         if (lower.includes('scale') || lower.includes('gamma')) {
-            return 'This is the LayerNorm scale vector. After normalization, each feature is multiplied by a learned scale. Values are learned per feature and shared across tokens.';
+            return LN_SCALE_PARAMETER_DESCRIPTION;
         }
         if (lower.includes('shift') || lower.includes('beta')) {
-            return 'This is the LayerNorm shift vector, the additive term applied after scaling normalized features. It lets the model re-center activations and choose a useful baseline.';
+            return LN_SHIFT_PARAMETER_DESCRIPTION;
         }
         if (lower.includes('normed') || lower.includes('normalized')) {
-            return 'This is the normalized vector for one token. Before scale and shift, it has zero mean and unit variance across features. This stabilized vector becomes the input to the next sublayer.';
+            return buildLayerNormNormalizedVectorDescription(selectionInfo);
         }
-        return 'LayerNorm normalizes each token\'s features and then applies learned scale and shift. It keeps activations stable and improves training. GPT-2 uses pre-LayerNorm, so this happens before attention and before the MLP in each layer.';
+        return buildLayerNormDescription(selectionInfo);
     }
     if (lower.includes('merged key vectors')) {
-        return 'These are the key vectors from all heads stacked together. Each head uses its own keys to build its own attention matrix. This view lets you see all heads\' keys at once. Queries from the matching head compare against these keys to form the attention matrix shown below.';
+        return MERGED_KEY_VECTORS_DESCRIPTION;
     }
     if (lower.includes('merged value vectors')) {
-        return 'These are the value vectors from all heads stacked together. For each head, the attention matrix shown below weights that head\'s values. This view shows all head values at once. The weighted sums become the per-head outputs.';
+        return MERGED_VALUE_VECTORS_DESCRIPTION;
     }
     if (lower.includes('post-layernorm residual') || lower.includes('post layernorm residual')) {
-        return 'This is the layer-normed residual stream right before query, key, and value projection. It is copied for each head to make queries, keys, and values, which then determine attention weights.';
+        if (resolveSelectionLayerNormKind(selectionInfo) === 'ln2') {
+            return buildLn2OutputDescription(selectionInfo);
+        }
+        return buildLn1OutputDescription(selectionInfo);
     }
     if (lower.includes('incoming residual')) {
-        return 'This is the residual stream as it enters a layer, before the first LayerNorm. It carries the accumulated information from earlier layers and will feed into attention and the MLP.';
+        return buildIncomingResidualDescription(selectionInfo);
     }
     if (lower.includes('post-attention residual')) {
-        return 'This is the residual stream after attention has been added. It represents the model state before the MLP block in this layer.';
+        return buildPostAttentionResidualDescription(selectionInfo);
     }
     if (lower.includes('post-mlp residual')) {
-        return 'This is the residual stream after the MLP output has been added. It is the final output of this layer and the input to the next layer.';
+        return buildPostMlpResidualDescription(selectionInfo);
     }
     if (lower.includes('mhsa q copies')) {
-        return 'These are per-head copies of the layer-normed residual stream that will be projected into queries. Each copy is paired with keys to determine attention weights.';
+        return Q_COPIES_DESCRIPTION;
     }
     if (lower.includes('mhsa k copies')) {
-        return 'These are per-head copies of the layer-normed residual stream that will be projected into keys. Each copy is compared with queries to determine attention weights.';
+        return K_COPIES_DESCRIPTION;
     }
     if (lower.includes('mhsa v copies')) {
-        return 'These are per-head copies of the layer-normed residual stream that will be projected into values. Attention weights then mix these values into each head output.';
+        return V_COPIES_DESCRIPTION;
     }
     if (lower.includes('query vector')) {
-        return 'This is the query vector for one token in one head. It encodes what the token wants to read. It is compared with all key vectors to form one row of the attention matrix shown below. Each entry in that row is a score for another token.';
+        return buildQueryVectorDescription(selectionInfo);
     }
     if (lower.includes('cached key vector')) {
-        return 'This is a key vector persisted in the KV cache from an earlier decoding step. New queries attend to it so the model can reuse prior context without recomputing past keys.';
+        return buildCachedKeyVectorDescription(selectionInfo);
     }
     if (lower.includes('key vector')) {
-        return 'This is the key vector for one token in one head. It encodes what this token offers. Queries compare against it to compute attention scores, contributing to one column of the attention matrix shown below. Higher dot products mean this token is more attendable.';
+        return buildKeyVectorDescription(selectionInfo);
     }
     if (lower.includes('cached value vector')) {
-        return 'This is a value vector persisted in the KV cache from an earlier decoding step. Attention weights select from these cached values so prior-token information can flow into the current token update.';
+        return buildCachedValueVectorDescription(selectionInfo);
     }
     if (lower.includes('weighted value vector')) {
-        return 'This is one value vector multiplied by a specific post-softmax attention weight. It is a per-edge contribution that later gets accumulated into the attention weighted sum for the query token.';
+        return buildWeightedValueVectorDescription(selectionInfo);
     }
     if (lower.includes('value vector')) {
-        return 'This is the value vector for one token in one head. It holds the information other tokens can read. The attention matrix shown below (after softmax) provides weights that mix these values. The head output is a weighted sum of values.';
+        return buildValueVectorDescription(selectionInfo);
     }
     if (lower.includes('attention score') || stageLower.startsWith('attention.')) {
         if (stageLower === 'attention.pre') {
-            return 'This is a raw attention score from a source token to a target token in one head. It is the scaled similarity between a query and key, before normalization. A causal mask is applied so tokens cannot look ahead. Softmax later converts these scores into attention weights.';
+            return buildAttentionPreScoreDescription(selectionInfo);
         }
         if (stageLower === 'attention.post') {
-            return 'This is a normalized attention weight after softmax. It is one entry in the attention matrix shown below for a head. Each row sums to 1 and shows how the source token distributes its attention. These weights are used to mix values.';
+            return buildAttentionPostScoreDescription(selectionInfo);
         }
-        return 'This is an attention score between two tokens in one head. All scores together form the attention matrix shown below (queries by keys). That matrix controls how much information flows between tokens. After softmax, it becomes weights applied to values.';
-    }
-    if (lower.includes('attention')) {
-        return 'Self-attention lets each token read information from other tokens in the sequence. Each head computes attention weights over tokens and uses them to mix value vectors. Head outputs are then concatenated, projected, and added back to the residual stream.';
+        return buildAttentionScoreGenericDescription(selectionInfo);
     }
     if (lower.includes('attention weighted sum')) {
-        return 'This is the weighted-sum output of one attention head for a token. It is produced by multiplying post-softmax attention weights with value vectors and summing across source tokens.';
+        return buildAttentionWeightedSumDescription(selectionInfo);
+    }
+    if (lower.includes('attention')) {
+        return ATTENTION_GENERIC_DESCRIPTION;
     }
     if (lower.includes('top logit bars')) {
-        return 'These bars come from vocabulary logits before softmax. Each bar is one candidate token, and taller means higher post-softmax probability for this next-token step. The model computes logits from the final residual stream, then softmax converts logits to probabilities for sampling or argmax.';
+        return TOP_LOGIT_BARS_DESCRIPTION;
     }
     if (lower.startsWith('chosen token:')) {
-        return 'This marks the token selected from the current logit distribution for this pass. That selected token is what gets appended for the next decode step.';
+        return CHOSEN_TOKEN_DESCRIPTION;
     }
     if (lower === 'logit' || lower.startsWith('logit ')) {
-        return 'This is one vocabulary logit entry before softmax for a candidate next token. In this view, the shown probability is that token\'s post-softmax value.';
+        return LOGIT_DESCRIPTION;
     }
     if (lower.includes('residual')) {
-        return RESIDUAL_STREAM_DESCRIPTION;
+        return buildResidualStreamDescription(selectionInfo);
     }
     if (lower.includes('mlp')) {
-        return 'The MLP is a token-wise feed-forward network. It expands the vector, applies a nonlinearity (like GELU), then compresses back to model width. This adds nonlinear feature mixing that attention alone cannot provide. It operates independently on each token.';
+        return MLP_GENERIC_DESCRIPTION;
     }
     if (lower.includes('vector')) {
-        return 'This vector represents a token\'s state at a particular stage. It may be part of the residual stream or a derived Q/K/V vector. Its coordinates are learned features. Later layers will transform or mix it.';
+        return GENERIC_VECTOR_DESCRIPTION;
     }
     if (lower.includes('weight matrix')) {
-        return 'This is a learned linear transformation matrix. Multiplying by this matrix changes the feature mix or coordinate system. Different matrices serve different roles, such as creating Q/K/V vectors or MLP features. These are core trainable parameters.';
+        return GENERIC_WEIGHT_MATRIX_DESCRIPTION;
     }
     return buildContextualFallbackDescription(label, kind, stage);
 }

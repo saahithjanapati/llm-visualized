@@ -7,11 +7,11 @@ This visualization depicts a forward pass through **GPT-2 Small**. The scene is 
 
 At the very bottom of the scene are thin **gray token chips**, one per prompt token, aligned along the Z-axis. Each chip represents an input token and includes its actual **GPT-2 token ID** as a small detail at the base.
 
-These token chips rise into a large **blue tapered prism** representing the **vocabulary embedding matrix**. Its wide base corresponds to the GPT-2 vocabulary size (**50,257**), and its narrow top corresponds to the residual/embedding dimension (**768**). Visually, it is a large-bottom / small-top prism to convey the mapping from a token index to a 768-dimensional embedding vector.
+These token chips rise into a large **blue tapered prism** representing the **vocabulary embedding table**. Its wide base corresponds to the GPT-2 vocabulary size (**50,257**), and its narrow top corresponds to the residual/embedding dimension (**768**). Visually, it is a large-bottom / small-top prism to convey the mapping from a token index to a 768-dimensional embedding vector.
 
-To the right of that is a smaller **green tapered prism** representing the **position embedding matrix**. It works similarly, but the inputs are **position indices** rather than token IDs. Position chips also rise into this matrix, and a 768-dimensional **position embedding vector** emerges from the top.
+To the right of that is a smaller **green tapered prism** representing the **position embedding table**. It works similarly, but the inputs are **position indices** rather than token IDs. Position chips also rise into this table, and a 768-dimensional **position embedding vector** emerges from the top.
 
-After both embedding lookups complete, there are two sets of vectors: token embeddings above the vocabulary embedding matrix and position embeddings above the position embedding matrix. The position vectors then move left so they align underneath the token embedding vectors. The two are combined with a **residual-style addition animation**: each vector is represented as a thin rectangular prism broken into sampled color blocks, and the lower vector’s blocks peel upward and collide with the corresponding blocks of the upper vector. This visually represents elementwise addition.
+After both embedding lookups complete, there are two sets of vectors: token embeddings above the vocabulary embedding table and position embeddings above the position embedding table. The position vectors then move left so they align underneath the token embedding vectors. The two are combined with a **residual-style addition animation**: each vector is represented as a thin rectangular prism broken into sampled color blocks, and the lower vector’s blocks peel upward and collide with the corresponding blocks of the upper vector. This visually represents elementwise addition.
 
 The result is the initial **residual stream**.
 
@@ -45,7 +45,7 @@ The model shown is **GPT-2 Small**, so the scene contains:
 * head dimension **64**
 * MLP expansion from **768 → 3072 → 768**
 
-At the very top, after all 12 layers, there is a final layer norm and then an **unembedding** stage, visualized as an inverted version of the vocabulary embedding matrix.
+At the very top, after all 12 layers, there is a final layer norm and then an **unembedding** stage, visualized as an inverted version of the vocabulary embedding table.
 
 ### 4. Structure of each transformer layer
 
@@ -62,6 +62,94 @@ Each transformer layer is visualized as the following sequence:
 9. **Residual addition**
 
 Each layer is placed slightly above the previous one so the outputs from one layer feed directly into the next.
+
+---
+
+## Equation overlay reference
+
+These are the equations shown in the top-right equation overlay. Each transformer layer reuses the same stage equations; only the layer's own activations and parameters change.
+
+The overlay includes the model's learned **bias terms** for Q/K/V, the attention output projection, and the MLP projections, even though the animation itself does not show separate bias-add motions.
+
+The notation below matches the overlay's displayed symbols directly.
+
+### Embedding stage
+
+```text
+x_t^tok = E[token_t]
+x_t^pos = P[t]
+x_t = x_t^tok + x_t^pos
+```
+
+### Per transformer layer
+
+**LayerNorm 1**
+
+```text
+x_ln = ((x - μ) / sqrt(σ^2 + ε)) ⊙ γ + β
+```
+
+**Q / K / V projections**
+
+```text
+Q = x_ln W_Q + b_Q
+K = x_ln W_K + b_K
+V = x_ln W_V + b_V
+```
+
+**Self-attention (per head)**
+
+```text
+H_i = softmax((Q_i K_i^T / sqrt(d_h)) + M) V_i,  i = 1...12
+```
+
+**Head concatenation and output projection**
+
+```text
+H = Concat(H_i) for i = 1...12
+O = H W_O + b_O
+```
+
+**Residual Add 1**
+
+```text
+u = x + O
+```
+
+**LayerNorm 2**
+
+```text
+u_ln = ((x - μ) / sqrt(σ^2 + ε)) ⊙ γ + β
+```
+
+**MLP / feed-forward block**
+
+```text
+a = u_ln W_up + b_up
+z = GELU(a)
+MLP(u_ln) = z W_down + b_down
+```
+
+**Residual Add 2**
+
+```text
+x_out = u + MLP(u_ln)
+```
+
+### Final output head
+
+**Final LayerNorm**
+
+```text
+x_final = ((x_out - μ) / sqrt(σ^2 + ε)) ⊙ γ + β
+```
+
+**Logits and probabilities**
+
+```text
+ℓ = x_final W_U
+p = softmax(ℓ)
+```
 
 ---
 
@@ -106,6 +194,8 @@ Each matrix is a tapered prism mapping **768 → 64**, so the base is visually m
 After LayerNorm 1, the post-LN residual vectors are copied and sent to **every head**. As each set reaches a head, it is copied again into separate inputs for the Q, K, and V matrices. So for each token position and each head, separate Q, K, and V inputs are created.
 
 The vectors rise into the Q/K/V matrices, and 64-dimensional query, key, and value vectors emerge. These are smaller than the residual vectors and are colored from sampled activation data within their head-specific color scheme.
+
+In the actual GPT-2 block, these Q/K/V projections also include learned **bias terms**. The animation does not show a separate bias vector or a separate bias-add step here; it only visualizes the main linear projection.
 
 ### 2. Attention animation
 
@@ -176,6 +266,8 @@ Between the two MLP matrices is a **GELU nonlinearity** animation. The vector be
 
 The second MLP matrix is the reverse taper, mapping **3072 → 768**. After its pass-through it also turns orange-toned.
 
+Like the attention projections, the real MLP up- and down-projection layers also have learned **bias terms**. Those bias additions are omitted from the animation for clarity, so the scene only shows the main matrix transformations and the residual adds.
+
 The resulting 768-dimensional vector then moves left and is added back into the residual stream, completing the MLP half of the transformer block.
 
 This full transformer-block process repeats **12 times**.
@@ -186,7 +278,7 @@ This full transformer-block process repeats **12 times**.
 
 After layer 12, there is a **final layer norm**. Unlike the earlier layer norms, this one is aligned directly with the residual stream rather than sitting off to the right, because there is no subsequent residual branch to merge back into.
 
-After this final normalization, the vectors enter the **unembedding matrix**, shown as an inverted version of the original vocabulary embedding matrix. It starts gray and turns blue once activated.
+After this final normalization, the vectors enter the **unembedding matrix**, shown as an inverted version of the original vocabulary embedding table. It starts gray and turns blue once activated.
 
 At the output, each lane produces a set of **top-k candidates** using **top-k sampling with (k = 40)**. These are shown as rectangular prisms rising at the top of the unembedding stage:
 

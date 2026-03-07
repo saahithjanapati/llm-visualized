@@ -42,6 +42,7 @@ export function formatActivationData(data) {
     const stage = data.stage ? String(data.stage) : '';
     const stageLower = stage.toLowerCase();
     const isAttentionScore = stageLower.startsWith('attention.');
+    const isAttentionHeadContext = stageLower.startsWith('attention.') || stageLower.startsWith('qkv.');
     if (stage) lines.push(`Stage: ${stage}`);
     if (Number.isFinite(data.layerIndex)) lines.push(`Layer: ${data.layerIndex + 1}`);
     if (isAttentionScore) {
@@ -61,7 +62,9 @@ export function formatActivationData(data) {
             lines.push(`Key: ${data.keyTokenIndex + 1}${keyText}`);
         }
     }
-    if (Number.isFinite(data.headIndex)) lines.push(`Head: ${data.headIndex + 1}`);
+    if (Number.isFinite(data.headIndex)) {
+        lines.push(`${isAttentionHeadContext ? 'Attention head' : 'Head'}: ${data.headIndex + 1}`);
+    }
     if (Number.isFinite(data.segmentIndex)) lines.push(`Segment: ${data.segmentIndex + 1}`);
     if (Number.isFinite(data.preScore) || Number.isFinite(data.postScore)) {
         if (isAttentionScore) {
