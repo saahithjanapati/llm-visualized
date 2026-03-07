@@ -22,6 +22,7 @@ const AUTO_CAMERA_REF_MOTION_RAMP_DOWN_SEC_DEFAULT = 0.16;
 const AUTO_CAMERA_REF_MOTION_START_SPEED_DEFAULT = 26;
 const AUTO_CAMERA_REF_MOTION_STOP_SPEED_DEFAULT = 10;
 const AUTO_CAMERA_REF_MOTION_MIN_SCALE_DEFAULT = 0.36;
+const AUTO_CAMERA_CONTROLS_CAPTURE_EPSILON_SQ = 1;
 
 const coerceVector3 = (value, fallback = null) => {
     if (value instanceof THREE.Vector3) return value.clone();
@@ -366,6 +367,8 @@ export class AutoCameraController {
         this._autoCameraDesiredTargetOffset = new THREE.Vector3();
         this._autoCameraCurrentCameraOffset = new THREE.Vector3();
         this._autoCameraCurrentTargetOffset = new THREE.Vector3();
+        this._autoCameraLastAppliedCameraPosition = new THREE.Vector3();
+        this._autoCameraLastAppliedTarget = new THREE.Vector3();
         this._autoCameraSmoothedRef = new THREE.Vector3();
         this._autoCameraPrevReference = new THREE.Vector3();
         this._autoCameraPrevReferenceValid = false;
@@ -456,6 +459,7 @@ export class AutoCameraController {
         this._autoCameraLayerEndDesktopTargetOffsetBase = new THREE.Vector3();
         this._autoCameraInspectorRef = new THREE.Vector3();
         this._hasAutoCameraOffsets = false;
+        this._hasAutoCameraAppliedPose = false;
         this._suppressControlsChange = false;
         this._devMode = !!opts.devMode;
         this._cameraOffsetDiv = (typeof document !== 'undefined')
@@ -615,6 +619,10 @@ export class AutoCameraController {
         if (this._engine?.controls) {
             this._controlsChangeHandler = () => {
                 if (!this._autoCameraFollow || this._suppressControlsChange) {
+                    return;
+                }
+                if (!this._shouldCaptureOffsetsFromControlsChange()) {
+                    this._updateCameraOffsetOverlay();
                     return;
                 }
                 this._captureAutoCameraOffsets();
@@ -919,12 +927,39 @@ export class AutoCameraController {
 
     _clearAutoCameraOffsets() {
         this._hasAutoCameraOffsets = false;
+        this._hasAutoCameraAppliedPose = false;
         this._autoCameraDesiredCameraOffset.set(0, 0, 0);
         this._autoCameraDesiredTargetOffset.set(0, 0, 0);
         this._autoCameraCurrentCameraOffset.set(0, 0, 0);
         this._autoCameraCurrentTargetOffset.set(0, 0, 0);
         this._autoCameraSmoothValid = false;
         this._resetAutoCameraReferenceMotion();
+    }
+
+    _shouldCaptureOffsetsFromControlsChange() {
+        const engine = this._engine;
+        const camera = engine?.camera;
+        const target = engine?.controls?.target;
+        if (!camera || !target) return false;
+        if (!this._hasAutoCameraAppliedPose) return true;
+
+        const cameraDriftSq = camera.position.distanceToSquared(this._autoCameraLastAppliedCameraPosition);
+        const targetDriftSq = target.distanceToSquared(this._autoCameraLastAppliedTarget);
+        return cameraDriftSq > AUTO_CAMERA_CONTROLS_CAPTURE_EPSILON_SQ
+            || targetDriftSq > AUTO_CAMERA_CONTROLS_CAPTURE_EPSILON_SQ;
+    }
+
+    _recordAutoCameraAppliedPose() {
+        const engine = this._engine;
+        const camera = engine?.camera;
+        const target = engine?.controls?.target;
+        if (!camera || !target) {
+            this._hasAutoCameraAppliedPose = false;
+            return;
+        }
+        this._autoCameraLastAppliedCameraPosition.copy(camera.position);
+        this._autoCameraLastAppliedTarget.copy(target);
+        this._hasAutoCameraAppliedPose = true;
     }
 
     _setAutoCameraOffsets(cameraOffset, targetOffset, { snap = false } = {}) {
@@ -1021,6 +1056,7 @@ export class AutoCameraController {
             if (typeof engine.notifyCameraUpdated === 'function') {
                 engine.notifyCameraUpdated();
             }
+            this._recordAutoCameraAppliedPose();
         } finally {
             this._suppressControlsChange = false;
         }

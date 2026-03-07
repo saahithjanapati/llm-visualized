@@ -31,13 +31,18 @@ import {
     resolveAttentionModeFromSelection,
     simplifyLayerNormParamDisplayLabel
 } from './selectionPanelSelectionUtils.js';
-import { resolveDescription, resolveSelectionEquations } from './selectionPanelNarrativeUtils.js';
+import {
+    resolveDescription,
+    resolveSelectionEquations,
+    resolveSelectionPreviewEquations
+} from './selectionPanelNarrativeUtils.js';
 import {
     GELU_PANEL_ACTION_OPEN,
     createGeluDetailView,
     isMlpMatrixSelectionLabel,
     setDescriptionGeluAction
 } from './selectionPanelGeluPreview.js';
+import { renderSelectionPreviewEquations } from './selectionPanelEquationPreviewUtils.js';
 import {
     computeAttentionCellSize,
     countVisibleAttentionCellsInRow,
@@ -3205,6 +3210,11 @@ class SelectionPanel {
     _applySelectionEquationFit() {
         if (!this.isReady || !this.isOpen || !this.equationsSection || !this.equationsBody) return;
         if (!this.equationsSection.classList.contains('is-visible')) return;
+        if (this.equationsBody.querySelector('.detail-preview-equation')) {
+            this.equationsBody.style.fontSize = '';
+            this._equationFitState.lastFontPx = null;
+            return;
+        }
 
         const bodyRect = this.equationsBody.getBoundingClientRect();
         const availableWidth = Math.max(0, bodyRect.width);
@@ -6798,6 +6808,7 @@ class SelectionPanel {
         this._closeGeluDetailPreview({ restoreSelection: false, restartLoop: false });
         this._currentSelectionDescription = '';
         this._currentSelectionEquations = '';
+        renderSelectionPreviewEquations(this.equationsBody, []);
         this._lastSelection = null;
         this._lastSelectionLabel = '';
         if (clearHistory) {
@@ -7584,20 +7595,17 @@ class SelectionPanel {
         } else {
             this._currentSelectionDescription = '';
         }
+        const previewEquations = resolveSelectionPreviewEquations(label, descriptionSelection);
         if (this.equationsSection && this.equationsBody) {
             const equations = resolveSelectionEquations(label, descriptionSelection);
             this._currentSelectionEquations = equations || '';
-            setDescriptionContent(this.equationsBody, equations || '');
-            const hasEquations = !!equations;
+            renderSelectionPreviewEquations(this.equationsBody, previewEquations);
+            const hasEquations = previewEquations.length > 0;
             this.equationsSection.classList.toggle('is-visible', hasEquations);
             this.equationsSection.setAttribute('aria-hidden', hasEquations ? 'false' : 'true');
-            if (!hasEquations) {
-                this.equationsBody.style.fontSize = '';
-            } else {
-                this._scheduleSelectionEquationFit();
-            }
+            this.equationsBody.style.fontSize = '';
         } else {
-            this._currentSelectionEquations = '';
+            this._currentSelectionEquations = resolveSelectionEquations(label, descriptionSelection) || '';
         }
         const isParam = isParameterSelection(label);
         if (this.dataSection) {

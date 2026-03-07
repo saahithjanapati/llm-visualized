@@ -60,6 +60,7 @@ export function initFollowModeControls({ pipeline, appState, followModeBtn }) {
         const FOLLOW_DISABLE_POINTER_SLOP_PX_SQ = 9;
         let activeControlInteraction = null;
         let activePointerIntent = null;
+        const hasClickLikePointerIntent = () => !!(activePointerIntent && !activePointerIntent.moved);
 
         const disableFollowFromInteraction = () => {
             if (!pipeline?.isAutoCameraFollowEnabled?.()) return false;
@@ -121,6 +122,13 @@ export function initFollowModeControls({ pipeline, appState, followModeBtn }) {
                     && event.pointerId !== activePointerIntent.id) {
                     return;
                 }
+                // Keep a no-drag click/tap intent alive until OrbitControls ends
+                // so auto-follow camera motion during the same interaction does
+                // not get mistaken for a manual drag.
+                const isPointerCancel = event?.type === 'pointercancel';
+                if (!isPointerCancel && activeControlInteraction && !activePointerIntent.moved) {
+                    return;
+                }
                 activePointerIntent = null;
             };
 
@@ -168,9 +176,10 @@ export function initFollowModeControls({ pipeline, appState, followModeBtn }) {
                 markInteractionMoved();
                 return;
             }
-            if (activePointerIntent && !activePointerIntent.moved) {
+            if (hasClickLikePointerIntent()) {
                 // While a click/tap is still within slop, ignore camera deltas
-                // caused by active follow updates.
+                // caused by active follow updates, including the brief gap
+                // between pointerup and OrbitControls' end event.
                 return;
             }
             const cameraMoveSq = camera.position.distanceToSquared(activeControlInteraction.cameraStart);
@@ -184,6 +193,7 @@ export function initFollowModeControls({ pipeline, appState, followModeBtn }) {
         controls.addEventListener('end', () => {
             const interaction = activeControlInteraction;
             activeControlInteraction = null;
+            activePointerIntent = null;
             if (!interaction?.moved) return;
             if (interaction.disabledImmediately) return;
             queueFollowDisableFromInteraction();

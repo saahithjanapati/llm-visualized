@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { resolveDescription, resolveSelectionEquations } from '../src/ui/selectionPanelNarrativeUtils.js';
+import {
+    resolveDescription,
+    resolveSelectionEquations,
+    resolveSelectionPreviewEquations
+} from '../src/ui/selectionPanelNarrativeUtils.js';
 
 describe('selectionPanelNarrativeUtils', () => {
-    it('builds equations for known matrix labels', () => {
+    it('builds selection-focused equations for known matrix labels', () => {
         const eq = resolveSelectionEquations('Query Weight Matrix', null);
         expect(eq).toContain('W_Q');
-        expect(eq).toContain('softmax');
+        expect(eq).toContain('s_{t,j}');
     });
 
     it('uses fixed 12-head concat indexing for output projection equations', () => {
@@ -14,27 +18,32 @@ describe('selectionPanelNarrativeUtils', () => {
         expect(eq).not.toContain('_{i=1}^{h}');
     });
 
-    it('returns layernorm equation block for normalized vectors', () => {
+    it('returns layernorm equation context for normalized vectors', () => {
         const eq = resolveSelectionEquations('LayerNorm Normed Output', null);
         expect(eq).toContain('\\frac');
-        expect(eq).not.toContain('\\gamma');
+        expect(eq).toContain('\\gamma');
     });
 
-    it('shows the full NLP embedding equation set for vocabulary/positional selections', () => {
+    it('shows selection-specific embedding equations instead of the full embedding bundle everywhere', () => {
         const vocabEq = resolveSelectionEquations('Vocabulary Embedding', null);
         const posEq = resolveSelectionEquations('Positional Embedding', null);
         const tokenEq = resolveSelectionEquations('Token: hello', null);
         const positionEq = resolveSelectionEquations('Position: 3', null);
+        const embeddingSumEq = resolveSelectionEquations('Embedding Sum', null);
 
         expect(vocabEq).toContain('\\textcolor');
         expect(vocabEq).toContain('x_t^{\\text{tok}}');
         expect(vocabEq).toContain('E}[\\mathrm{token}_t]');
-        expect(vocabEq).toContain('x_t^{\\text{pos}}');
-        expect(vocabEq).toContain('P}[t]');
-        expect(vocabEq).toContain('x_t =');
-        expect(posEq).toBe(vocabEq);
-        expect(tokenEq).toBe(vocabEq);
-        expect(positionEq).toBe(vocabEq);
+        expect(vocabEq).not.toContain('x_t^{\\text{pos}}');
+        expect(posEq).toContain('x_t^{\\text{pos}}');
+        expect(posEq).toContain('P}[t]');
+        expect(tokenEq).toContain('x_t =');
+        expect(tokenEq).not.toContain('P}[t]');
+        expect(positionEq).toContain('x_t =');
+        expect(positionEq).not.toContain('E}[\\mathrm{token}_t]');
+        expect(embeddingSumEq).toContain('x_t^{\\text{tok}}');
+        expect(embeddingSumEq).toContain('x_t^{\\text{pos}}');
+        expect(embeddingSumEq).toContain('x_t =');
     });
 
     it('keeps top vocabulary embedding focused on logits equations', () => {
@@ -47,7 +56,7 @@ describe('selectionPanelNarrativeUtils', () => {
         const desc = resolveDescription('Vocabulary Embedding', null, null);
         expect(desc).toContain('50,257');
         expect(desc).toContain('768-dimensional vector');
-        expect(desc).toContain('50,257 x 768');
+        expect(desc).toContain('50,257 rows and 768 columns');
     });
 
     it('describes and equations weighted value vectors explicitly', () => {
@@ -62,7 +71,7 @@ describe('selectionPanelNarrativeUtils', () => {
                 }
             }
         });
-        expect(desc).toContain('scaled by one post-softmax attention weight');
+        expect(desc).toContain('Multiplying that scalar by the value vector');
     });
 
     it('resolves residual descriptions from activation stage context', () => {
@@ -73,7 +82,7 @@ describe('selectionPanelNarrativeUtils', () => {
                 }
             }
         });
-        expect(desc).toContain('residual stream');
+        expect(desc).toContain('residual-stream');
     });
 
     it('resolves attention-score-specific copy from stage', () => {
@@ -84,7 +93,7 @@ describe('selectionPanelNarrativeUtils', () => {
                 }
             }
         });
-        expect(desc).toContain('normalized attention weight');
+        expect(desc).toContain('post-softmax attention weight');
     });
 
     it('uses contextual fallback copy for unknown labeled components', () => {
@@ -108,15 +117,30 @@ describe('selectionPanelNarrativeUtils', () => {
 
     it('provides explicit copy for connector and cached KV labels', () => {
         const trailDesc = resolveDescription('Embedding Connector Trail', null, null);
-        expect(trailDesc).toContain('handoff path');
+        expect(trailDesc).toContain('handoff legible');
         expect(trailDesc).not.toContain('interactive scene component');
 
         const cachedKeyDesc = resolveDescription('Cached Key Vector', null, null);
-        expect(cachedKeyDesc).toContain('KV cache');
+        expect(cachedKeyDesc).toContain('computed on an earlier decoding step and stored');
         expect(cachedKeyDesc).not.toContain('interactive scene component');
 
         const cachedValueDesc = resolveDescription('Cached Value Vector', null, null);
-        expect(cachedValueDesc).toContain('KV cache');
+        expect(cachedValueDesc).toContain('future queries can still read from that token');
         expect(cachedValueDesc).not.toContain('interactive scene component');
+    });
+
+    it('marks the preview overlay equations that should be emphasized for a selection', () => {
+        const queryPreview = resolveSelectionPreviewEquations('Query Weight Matrix', null);
+        expect(queryPreview).toHaveLength(2);
+        expect(queryPreview[0]).toMatchObject({ active: true });
+        expect(queryPreview[1]).toMatchObject({ active: false });
+
+        const weightedValuePreview = resolveSelectionPreviewEquations('Weighted Value Vector', null);
+        expect(weightedValuePreview.map((entry) => entry.active)).toEqual([false, true, false]);
+
+        const embeddingPreview = resolveSelectionPreviewEquations('Token: hello', null);
+        expect(embeddingPreview.map((entry) => entry.tex)).toHaveLength(2);
+        expect(embeddingPreview[0]).toMatchObject({ active: true });
+        expect(embeddingPreview[1]).toMatchObject({ active: false });
     });
 });

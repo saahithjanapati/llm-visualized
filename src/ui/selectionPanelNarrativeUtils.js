@@ -967,6 +967,24 @@ const SELECTION_EQUATION_SYMBOLS = {
     MLPDown: colorizeEquationToken(SELECTION_EQUATION_COLORS.mlpDown, '\\mathrm{MLP}(u_{\\text{ln}})')
 };
 
+function buildEquationEntries(lines, activeIndexes = []) {
+    const nonEmpty = Array.isArray(lines)
+        ? lines.filter((line) => typeof line === 'string' && line.trim().length > 0)
+        : [];
+    if (!nonEmpty.length) return [];
+    const rawIndexes = Array.isArray(activeIndexes) ? activeIndexes : [activeIndexes];
+    const activeSet = new Set();
+    rawIndexes.forEach((value) => {
+        if (!Number.isFinite(value)) return;
+        activeSet.add(Math.max(0, Math.floor(value)));
+    });
+    const highlightAll = activeSet.size === 0;
+    return nonEmpty.map((tex, index) => ({
+        tex,
+        active: highlightAll ? true : activeSet.has(index)
+    }));
+}
+
 function formatEquationBlock(lines) {
     if (!Array.isArray(lines) || lines.length === 0) return '';
     const nonEmpty = lines.filter((line) => typeof line === 'string' && line.trim().length > 0);
@@ -974,12 +992,12 @@ function formatEquationBlock(lines) {
     return nonEmpty.map((line) => `$$${line}$$`).join('\n');
 }
 
-function buildNlpEmbeddingEquationBlock() {
-    return formatEquationBlock([
+function buildNlpEmbeddingEquationEntries(activeIndexes = [0, 1, 2]) {
+    return buildEquationEntries([
         `${SELECTION_EQUATION_SYMBOLS.XTok} = ${SELECTION_EQUATION_SYMBOLS.E}[\\mathrm{token}_t]`,
         `${SELECTION_EQUATION_SYMBOLS.XPos} = ${SELECTION_EQUATION_SYMBOLS.P}[t]`,
         `x_t = ${SELECTION_EQUATION_SYMBOLS.XTok} + ${SELECTION_EQUATION_SYMBOLS.XPos}`
-    ]);
+    ], activeIndexes);
 }
 
 function hasVocabEmbeddingLabel(lower) {
@@ -1029,89 +1047,216 @@ function buildHeadSpecificAttentionEquation(selectionInfo) {
     return `${Hh} = \\mathrm{softmax}\\left(\\frac{${Qh} ${Kh}^\\top}{\\sqrt{d_h}} + M\\right)${Vh}`;
 }
 
-export function resolveSelectionEquations(label, selectionInfo = null) {
+function buildSelectionEquationEntries(label, selectionInfo = null) {
     const lower = String(label || '').toLowerCase();
+    const stageLower = String(getActivationDataFromSelection(selectionInfo)?.stage || '').toLowerCase();
     const attentionEquation = buildHeadSpecificAttentionEquation(selectionInfo);
-    const isNlpEmbeddingSelection = lower.startsWith('token:')
-        || lower.startsWith('position:')
-        || lower.includes('token embedding')
-        || hasVocabEmbeddingLabel(lower)
-        || lower.includes('positional embedding')
-        || lower.includes('embedding sum');
+    const tokenEmbedEq = `${SELECTION_EQUATION_SYMBOLS.XTok} = ${SELECTION_EQUATION_SYMBOLS.E}[\\mathrm{token}_t]`;
+    const posEmbedEq = `${SELECTION_EQUATION_SYMBOLS.XPos} = ${SELECTION_EQUATION_SYMBOLS.P}[t]`;
+    const embedSumEq = `x_t = ${SELECTION_EQUATION_SYMBOLS.XTok} + ${SELECTION_EQUATION_SYMBOLS.XPos}`;
+    const queryProjectionEq = `${SELECTION_EQUATION_SYMBOLS.Q} = x_{\\text{ln}} ${SELECTION_EQUATION_SYMBOLS.WQ} + ${SELECTION_EQUATION_SYMBOLS.BQ}`;
+    const keyProjectionEq = `${SELECTION_EQUATION_SYMBOLS.K} = x_{\\text{ln}} ${SELECTION_EQUATION_SYMBOLS.WK} + ${SELECTION_EQUATION_SYMBOLS.BK}`;
+    const valueProjectionEq = `${SELECTION_EQUATION_SYMBOLS.V} = x_{\\text{ln}} ${SELECTION_EQUATION_SYMBOLS.WV} + ${SELECTION_EQUATION_SYMBOLS.BV}`;
+    const attentionScoreEq = 's_{t,j} = \\frac{q_t k_j^\\top}{\\sqrt{d_h}} + M_{t,j}';
+    const attentionWeightEq = '\\alpha_{t,j} = \\mathrm{softmax}_j(s_{t,j})';
+    const weightedValueEq = '\\tilde{V}_{t,j} = \\alpha_{t,j} V_j';
+    const weightedSumEq = 'H_t = \\sum_j \\tilde{V}_{t,j}';
+    const concatEq = 'H = \\mathrm{Concat}(H_i)_{i=1}^{12}';
+    const outputProjectionEq = `O = H ${SELECTION_EQUATION_SYMBOLS.WO} + ${SELECTION_EQUATION_SYMBOLS.BO}`;
+    const postAttentionResidualEq = 'u = x + O';
+    const mlpUpEq = `a = u_{\\text{ln}} ${SELECTION_EQUATION_SYMBOLS.WUp} + ${SELECTION_EQUATION_SYMBOLS.BUp}`;
+    const mlpGeluEq = 'z = \\mathrm{GELU}(a)';
+    const mlpDownEq = `\\mathrm{MLP}(u_{\\text{ln}}) = z ${SELECTION_EQUATION_SYMBOLS.WDown} + ${SELECTION_EQUATION_SYMBOLS.BDown}`;
+    const postMlpResidualEq = `x_{\\text{out}} = u + ${SELECTION_EQUATION_SYMBOLS.MLPDown}`;
+    const logitsEq = `\\ell = x_{\\text{final}} ${SELECTION_EQUATION_SYMBOLS.WU}`;
+    const probsEq = 'p = \\mathrm{softmax}(\\ell)';
+    const buildLayerNormEntries = (kind = 'ln1', activeIndexes = [0, 1]) => {
+        const layerNormKey = kind === 'ln2'
+            ? 'ln2'
+            : (kind === 'top' ? 'top' : 'ln1');
+        const symbols = resolveLayerNormEquationSymbols(layerNormKey);
+        const normalizeEq = `${symbols.norm} = \\frac{${symbols.input} - \\mu}{\\sqrt{\\sigma^2 + \\epsilon}}`;
+        const affineEq = `${symbols.output} = \\gamma \\odot ${symbols.norm} + \\beta`;
+        return buildEquationEntries([normalizeEq, affineEq], activeIndexes);
+    };
 
-    if (lower.includes('query weight matrix')) {
-        return formatEquationBlock([
-            `${SELECTION_EQUATION_SYMBOLS.Q} = x_{\\text{ln}} ${SELECTION_EQUATION_SYMBOLS.WQ} + ${SELECTION_EQUATION_SYMBOLS.BQ}`,
-            attentionEquation
-        ]);
+    if (stageLower.startsWith('embedding.token')) {
+        return buildEquationEntries([tokenEmbedEq, embedSumEq], [0]);
     }
-    if (lower.includes('key weight matrix')) {
-        return formatEquationBlock([
-            `${SELECTION_EQUATION_SYMBOLS.K} = x_{\\text{ln}} ${SELECTION_EQUATION_SYMBOLS.WK} + ${SELECTION_EQUATION_SYMBOLS.BK}`,
-            attentionEquation
-        ]);
+    if (stageLower.startsWith('embedding.position')) {
+        return buildEquationEntries([posEmbedEq, embedSumEq], [0]);
     }
-    if (lower.includes('value weight matrix')) {
-        return formatEquationBlock([
-            `${SELECTION_EQUATION_SYMBOLS.V} = x_{\\text{ln}} ${SELECTION_EQUATION_SYMBOLS.WV} + ${SELECTION_EQUATION_SYMBOLS.BV}`,
-            attentionEquation
-        ]);
+    if (stageLower.startsWith('embedding.sum')) {
+        return buildNlpEmbeddingEquationEntries([2]);
     }
-    if (lower.includes('weighted value vector')) {
-        return formatEquationBlock([
-            '\\tilde{V}_{t,j} = \\alpha_{t,j} V_j',
-            'H_t = \\sum_j \\tilde{V}_{t,j}'
-        ]);
+    if (stageLower.startsWith('layer.incoming')) {
+        return buildLayerNormEntries('ln1', [0]);
     }
-    if (lower.includes('output projection matrix')) {
-        return formatEquationBlock([
-            'H = \\mathrm{Concat}(H_i)_{i=1}^{12}',
-            `O = H ${SELECTION_EQUATION_SYMBOLS.WO} + ${SELECTION_EQUATION_SYMBOLS.BO}`,
-            'u = x + O'
-        ]);
+    if (stageLower === 'ln1.norm') {
+        return buildLayerNormEntries('ln1', [0]);
     }
-    if (lower.includes('mlp up weight matrix')) {
-        return formatEquationBlock([
-            `a = u_{\\text{ln}} ${SELECTION_EQUATION_SYMBOLS.WUp} + ${SELECTION_EQUATION_SYMBOLS.BUp}`,
-            'z = \\mathrm{GELU}(a)'
-        ]);
+    if (stageLower === 'ln1.scale' || stageLower === 'ln1.shift') {
+        return buildLayerNormEntries('ln1', [1]);
     }
-    if (lower.includes('mlp down weight matrix')) {
-        return formatEquationBlock([
-            `\\mathrm{MLP}(u_{\\text{ln}}) = z ${SELECTION_EQUATION_SYMBOLS.WDown} + ${SELECTION_EQUATION_SYMBOLS.BDown}`,
-            `x_{\\text{out}} = u + ${SELECTION_EQUATION_SYMBOLS.MLPDown}`
-        ]);
+    if (stageLower === 'ln2.norm') {
+        return buildLayerNormEntries('ln2', [0]);
+    }
+    if (stageLower === 'ln2.scale' || stageLower === 'ln2.shift') {
+        return buildLayerNormEntries('ln2', [1]);
+    }
+    if (stageLower === 'final_ln.norm') {
+        return buildLayerNormEntries('top', [0]);
+    }
+    if (stageLower === 'final_ln.scale' || stageLower === 'final_ln.shift') {
+        return buildLayerNormEntries('top', [1]);
+    }
+    if (stageLower === 'qkv.q') {
+        return buildEquationEntries([queryProjectionEq, attentionScoreEq], [0]);
+    }
+    if (stageLower === 'qkv.k') {
+        return buildEquationEntries([keyProjectionEq, attentionScoreEq], [0]);
+    }
+    if (stageLower === 'qkv.v') {
+        return buildEquationEntries([valueProjectionEq, weightedValueEq, weightedSumEq], [0]);
+    }
+    if (stageLower === 'attention.pre') {
+        return buildEquationEntries([attentionScoreEq, attentionWeightEq], [0]);
+    }
+    if (stageLower === 'attention.post') {
+        return buildEquationEntries([attentionScoreEq, attentionWeightEq, weightedValueEq], [1]);
+    }
+    if (stageLower === 'attention.weighted_value') {
+        return buildEquationEntries([attentionWeightEq, weightedValueEq, weightedSumEq], [1]);
+    }
+    if (stageLower === 'attention.output_projection') {
+        return buildEquationEntries([concatEq, outputProjectionEq, postAttentionResidualEq], [1]);
+    }
+    if (stageLower === 'residual.post_attention') {
+        return buildEquationEntries([outputProjectionEq, postAttentionResidualEq], [1]);
+    }
+    if (stageLower === 'mlp.up') {
+        return buildEquationEntries([mlpUpEq, mlpGeluEq, mlpDownEq], [0]);
+    }
+    if (stageLower === 'mlp.activation') {
+        return buildEquationEntries([mlpUpEq, mlpGeluEq, mlpDownEq], [1]);
+    }
+    if (stageLower === 'mlp.down') {
+        return buildEquationEntries([mlpGeluEq, mlpDownEq, postMlpResidualEq], [1]);
+    }
+    if (stageLower === 'residual.post_mlp') {
+        return buildEquationEntries([mlpDownEq, postMlpResidualEq], [1]);
+    }
+
+    if (lower.startsWith('token:')) {
+        return buildEquationEntries([tokenEmbedEq, embedSumEq], [0]);
+    }
+    if (lower.startsWith('position:')) {
+        return buildEquationEntries([posEmbedEq, embedSumEq], [0]);
+    }
+    if (lower.includes('embedding sum')) {
+        return buildNlpEmbeddingEquationEntries([2]);
+    }
+    if (lower.includes('token embedding')) {
+        return buildEquationEntries([tokenEmbedEq, embedSumEq], [0]);
     }
     if (hasTopVocabEmbeddingLabel(lower) || lower.includes('unembedding')) {
-        return formatEquationBlock([
-            `\\ell = x_{\\text{final}} ${SELECTION_EQUATION_SYMBOLS.WU}`,
-            'p = \\mathrm{softmax}(\\ell)'
-        ]);
+        return buildEquationEntries([logitsEq, probsEq], [0]);
     }
-    if (isNlpEmbeddingSelection) {
-        return buildNlpEmbeddingEquationBlock();
+    if (hasVocabEmbeddingLabel(lower)) {
+        return buildEquationEntries([tokenEmbedEq], [0]);
+    }
+    if (lower.includes('position embedding') || lower.includes('positional embedding')) {
+        return buildEquationEntries([posEmbedEq, embedSumEq], [0]);
+    }
+    if (lower.includes('query weight matrix') || lower.includes('query vector')) {
+        return buildEquationEntries([queryProjectionEq, attentionScoreEq], [0]);
+    }
+    if (lower.includes('key weight matrix') || lower.includes('cached key vector') || lower.includes('key vector')) {
+        return buildEquationEntries([keyProjectionEq, attentionScoreEq], [0]);
+    }
+    if (lower.includes('weighted value vector')) {
+        return buildEquationEntries([attentionWeightEq, weightedValueEq, weightedSumEq], [1]);
+    }
+    if (lower.includes('value weight matrix') || lower.includes('cached value vector') || lower.includes('value vector')) {
+        return buildEquationEntries([valueProjectionEq, weightedValueEq, weightedSumEq], [0]);
+    }
+    if (lower.includes('attention score')) {
+        return buildEquationEntries([attentionScoreEq, attentionWeightEq, weightedValueEq], [0]);
+    }
+    if (lower.includes('attention weighted sum')) {
+        return buildEquationEntries([weightedValueEq, weightedSumEq, outputProjectionEq], [1]);
+    }
+    if (lower.includes('output projection matrix')) {
+        return buildEquationEntries([concatEq, outputProjectionEq, postAttentionResidualEq], [1]);
+    }
+    if (lower.includes('post-attention residual')) {
+        return buildEquationEntries([outputProjectionEq, postAttentionResidualEq], [1]);
+    }
+    if (lower.includes('mlp up weight matrix') || lower.includes('mlp up projection')) {
+        return buildEquationEntries([mlpUpEq, mlpGeluEq, mlpDownEq], [0]);
+    }
+    if (lower.includes('mlp expanded segments')) {
+        return buildEquationEntries([mlpUpEq, mlpGeluEq, mlpDownEq], [1]);
+    }
+    if (lower.includes('mlp down weight matrix') || lower.includes('mlp down projection')) {
+        return buildEquationEntries([mlpGeluEq, mlpDownEq, postMlpResidualEq], [1]);
+    }
+    if (lower.includes('post-mlp residual')) {
+        return buildEquationEntries([mlpDownEq, postMlpResidualEq], [1]);
+    }
+    if (lower.includes('top logit bars') || lower === 'logit' || lower.startsWith('logit ')) {
+        return buildEquationEntries([logitsEq, probsEq], [0]);
+    }
+    if (lower.startsWith('chosen token:')) {
+        return buildEquationEntries([logitsEq, probsEq], [1]);
     }
 
     const isLayerNormSelection = lower.includes('layernorm')
         || lower.includes('layer norm')
         || lower.includes('ln1')
-        || lower.includes('ln2');
+        || lower.includes('ln2')
+        || lower.includes('final ln')
+        || lower.includes('post-layernorm residual')
+        || lower.includes('post layernorm residual');
     if (isLayerNormSelection) {
-        const symbols = resolveLayerNormEquationSymbols(lower);
-        const normalizeEq = `${symbols.norm} = \\frac{${symbols.input} - \\mu}{\\sqrt{\\sigma^2 + \\epsilon}}`;
-        const affineEq = `${symbols.output} = \\gamma \\odot ${symbols.norm} + \\beta`;
-
-        if (lower.includes('normed') || lower.includes('normalized')) {
-            return formatEquationBlock([normalizeEq]);
+        const layerNormKind = lower.includes('top') || lower.includes('final ln')
+            ? 'top'
+            : (resolveSelectionLayerNormKind(selectionInfo) === 'ln2' || lower.includes('ln2') ? 'ln2' : 'ln1');
+        if (lower.includes('normed') || lower.includes('normalized') || lower.includes('incoming residual')) {
+            return buildLayerNormEntries(layerNormKind, [0]);
         }
-        return formatEquationBlock([normalizeEq, affineEq]);
+        if (
+            lower.includes('scale')
+            || lower.includes('gamma')
+            || lower.includes('shift')
+            || lower.includes('beta')
+            || lower.includes('post-layernorm residual')
+            || lower.includes('post layernorm residual')
+        ) {
+            return buildLayerNormEntries(layerNormKind, [1]);
+        }
+        return buildLayerNormEntries(layerNormKind, [0, 1]);
     }
 
+    if (lower.includes('attention')) {
+        return buildEquationEntries([attentionEquation, concatEq, outputProjectionEq], [0]);
+    }
+    if (lower.includes('mlp')) {
+        return buildEquationEntries([mlpUpEq, mlpGeluEq, mlpDownEq], [0, 1, 2]);
+    }
     if (lower.includes('weight matrix')) {
-        return formatEquationBlock(['y = xW']);
+        return buildEquationEntries(['y = xW'], [0]);
     }
 
-    return '';
+    return [];
+}
+
+export function resolveSelectionPreviewEquations(label, selectionInfo = null) {
+    return buildSelectionEquationEntries(label, selectionInfo);
+}
+
+export function resolveSelectionEquations(label, selectionInfo = null) {
+    return formatEquationBlock(buildSelectionEquationEntries(label, selectionInfo).map((entry) => entry.tex));
 }
 
 export function resolveDescription(label, kind = null, selectionInfo = null) {
