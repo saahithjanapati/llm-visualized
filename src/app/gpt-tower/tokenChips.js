@@ -1388,6 +1388,8 @@ export function addEmbeddingAndTokenChips({
                 LN_PARAMS.holeWidthFactor
             );
             lnTop.group.userData.label = 'LayerNorm (Top)';
+            lnTop.group.userData.layerNormKind = 'final';
+            lnTop.group.userData.layerIndex = lastLayer.index;
             lnTop.setColor(new THREE.Color(INACTIVE_COMPONENT_COLOR));
             lnTop.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
             addToRoot(lnTop.group);

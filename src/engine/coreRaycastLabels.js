@@ -1,7 +1,25 @@
+import {
+    expandLayerNormLabel,
+    formatLayerNormParamLabel,
+    resolveLayerNormKind
+} from '../utils/layerNormLabels.js';
+
 function hasExplicitQkvVectorLabel(lower = '') {
     return lower.includes('query vector')
         || lower.includes('key vector')
         || lower.includes('value vector');
+}
+
+function findObjectUserDataValue(object = null, key = '') {
+    let current = object;
+    while (current && !current.isScene) {
+        const direct = current.userData?.[key];
+        if (typeof direct === 'string' && direct.trim().length) return direct;
+        const activationValue = current.userData?.activationData?.[key];
+        if (typeof activationValue === 'string' && activationValue.trim().length) return activationValue;
+        current = current.parent;
+    }
+    return '';
 }
 
 export function normalizeRaycastLabel(label, info = null, object = null) {
@@ -44,6 +62,13 @@ export function simplifyLayerNormParamHoverLabel(label, info = null, object = nu
         || object?.userData?.activationData?.stage
         || '';
     const stageLower = String(stage).toLowerCase();
+    const layerNormKind = resolveLayerNormKind({
+        label: raw,
+        stage,
+        explicitKind: info?.layerNormKind
+            || info?.activationData?.layerNormKind
+            || findObjectUserDataValue(object, 'layerNormKind')
+    });
 
     const isLayerNormContext = lower.includes('layernorm')
         || lower.includes('layer norm')
@@ -58,15 +83,15 @@ export function simplifyLayerNormParamHoverLabel(label, info = null, object = nu
         || lower.includes('gamma')
         || lower.includes('γ')
         || stageLower.endsWith('.scale');
-    if (isScale) return 'LayerNorm Scale';
+    if (isScale) return formatLayerNormParamLabel(layerNormKind, 'scale');
 
     const isShift = lower.includes('shift')
         || lower.includes('beta')
         || lower.includes('β')
         || stageLower.endsWith('.shift');
-    if (isShift) return 'LayerNorm Shift';
+    if (isShift) return formatLayerNormParamLabel(layerNormKind, 'shift');
 
-    return raw;
+    return expandLayerNormLabel(raw, layerNormKind);
 }
 
 export function isCachedKvSelection(info = null, object = null) {

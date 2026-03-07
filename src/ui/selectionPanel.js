@@ -6,8 +6,13 @@ import { LayerNormalizationVisualization } from '../components/LayerNormalizatio
 import { appState } from '../state/appState.js';
 import { createSciFiMaterial, updateSciFiMaterialColor } from '../utils/sciFiMaterial.js';
 import { mapValueToColor, mapValueToGrayscale } from '../utils/colors.js';
+import {
+    formatLayerNormLabel,
+    formatLayerNormParamLabel
+} from '../utils/layerNormLabels.js';
 import { initTouchClickFallback } from './touchClickFallback.js';
 import { fitSelectionDimensionLabels } from './selectionPanelDimensionFitUtils.js';
+import { clampDesktopSelectionPanelWidth, resolveDesktopSelectionPanelWidthBounds } from './selectionPanelLayoutUtils.js';
 import {
     buildAttentionScoreLabel,
     findUserDataNumber,
@@ -197,17 +202,6 @@ const LAYERNORM_PANEL_ACTION_OPEN = 'open-layernorm';
 const LAYERNORM_PARAM_PANEL_ACTION_OPEN = 'open-layernorm-param';
 const QKV_SOURCE_VECTOR_PANEL_ACTION_OPEN = 'open-qkv-source-vector';
 const QKV_WEIGHT_MATRIX_PANEL_ACTION_OPEN = 'open-qkv-weight-matrix';
-const LAYER_NORM_PARAM_PREVIEW_MONOCHROME = {
-    type: 'monochromatic',
-    baseHue: 0,
-    saturation: 0,
-    minLightness: 0.03,
-    maxLightness: 0.88,
-    useData: true,
-    valueMin: -1.8,
-    valueMax: 1.8
-};
-
 let tokenChipFont = null;
 let tokenChipFontPromise = null;
 
@@ -313,12 +307,20 @@ function resolveLayerNormParamPreviewSpec(label = '', selectionInfo = null) {
     const isScale = activationStage.endsWith('.param.scale')
         || lower.includes('layernorm scale')
         || lower.includes('layer norm scale')
+        || lower.includes('layernorm 1 scale')
+        || lower.includes('layer norm 1 scale')
+        || lower.includes('layernorm 2 scale')
+        || lower.includes('layer norm 2 scale')
         || lower.includes('final ln scale')
         || lower.includes('ln1 scale')
         || lower.includes('ln2 scale');
     const isShift = activationStage.endsWith('.param.shift')
         || lower.includes('layernorm shift')
         || lower.includes('layer norm shift')
+        || lower.includes('layernorm 1 shift')
+        || lower.includes('layer norm 1 shift')
+        || lower.includes('layernorm 2 shift')
+        || lower.includes('layer norm 2 shift')
         || lower.includes('final ln shift')
         || lower.includes('ln1 shift')
         || lower.includes('ln2 shift');
@@ -332,6 +334,20 @@ function resolveLayerNormParamPreviewSpec(label = '', selectionInfo = null) {
     };
 }
 
+export function resolveLayerNormParamPreviewInstanceCount(selectionInfo = null, previewData = []) {
+    const vectorRefCount = selectionInfo?.info?.vectorRef?.instanceCount;
+    if (Number.isFinite(vectorRefCount) && vectorRefCount > 0) {
+        return Math.max(1, Math.floor(vectorRefCount));
+    }
+    const dataLength = Array.isArray(previewData) || ArrayBuffer.isView(previewData)
+        ? previewData.length
+        : 0;
+    if (dataLength > 0) {
+        return Math.max(1, Math.ceil(dataLength / PRISM_DIMENSIONS_PER_UNIT));
+    }
+    return PREVIEW_VECTOR_BODY_INSTANCES;
+}
+
 function getQkvWeightMatrixLabel(kind = 'Q') {
     const safeKind = normalizeQkvActionKind(kind);
     if (safeKind === 'K') return 'Key Weight Matrix';
@@ -340,11 +356,7 @@ function getQkvWeightMatrixLabel(kind = 'Q') {
 }
 
 function getLayerNormParamLabel(layerNormKind = null, param = 'scale') {
-    const safeParam = param === 'shift' ? 'shift' : 'scale';
-    if (layerNormKind === 'final') {
-        return safeParam === 'scale' ? 'Final LN Scale' : 'Final LN Shift';
-    }
-    return safeParam === 'scale' ? 'LayerNorm Scale' : 'LayerNorm Shift';
+    return formatLayerNormParamLabel(layerNormKind, param);
 }
 
 function normalizePreviewKeyValue(value) {
@@ -1988,7 +2000,7 @@ function buildAttentionSpherePreview(selectionInfo) {
         emissiveIntensity: mode === 'post' ? 0.28 : 0.36
     });
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.scale.setScalar(0.8);
+    mesh.scale.setScalar(0.64);
     return {
         object: mesh,
         dispose: () => {
@@ -2052,19 +2064,16 @@ function buildLayerNormParamVectorPreview(label, selectionInfo) {
     const previewData = getLayerNormParamData(spec.layerIndex, spec.layerNormKind, spec.param, previewLength)
         || extractPreviewVectorData(selectionInfo);
     if (!Array.isArray(previewData) || previewData.length === 0) return null;
+    const previewInstanceCount = resolveLayerNormParamPreviewInstanceCount(selectionInfo, previewData);
 
     const vec = createPreviewVector({
         colorHex: 0xffffff,
         data: null,
-        instanceCount: previewData.length
+        instanceCount: previewInstanceCount
     });
     vec.group.userData = vec.group.userData || {};
     vec.group.userData.label = getLayerNormParamLabel(spec.layerNormKind, spec.param);
-    applyDataToPreviewVector(vec, previewData, {
-        colorOptions: spec.param === 'shift'
-            ? null
-            : LAYER_NORM_PARAM_PREVIEW_MONOCHROME
-    });
+    applyDataToPreviewVector(vec, previewData);
 
     return {
         object: vec.group,
@@ -2286,6 +2295,8 @@ class SelectionPanel {
         this.panel = document.getElementById('detailPanel');
         this.hudStack = document.getElementById('hudStack');
         this.hudPanel = document.getElementById('hudPanel');
+        this.resizeHandle = document.getElementById('detailPanelResizeHandle');
+        this._rootStyleTarget = document.documentElement || null;
         this.title = document.getElementById('detailTitle');
         this.subtitle = document.getElementById('detailSubtitle');
         this.subtitleSecondary = document.getElementById('detailSubtitleSecondary');
@@ -2355,6 +2366,13 @@ class SelectionPanel {
         this._panelShiftDurationMs = Number.isFinite(options.panelShiftDurationMs)
             ? Math.max(120, options.panelShiftDurationMs)
             : PANEL_SHIFT_DURATION_MS;
+        this._desktopPanelWidthPx = null;
+        this._panelResizeDrag = {
+            active: false,
+            pointerId: null,
+            startX: 0,
+            startWidthPx: 0
+        };
 
         if (!this.panel || !this.canvas || !this.title) {
             this.isReady = false;
@@ -2447,6 +2465,10 @@ class SelectionPanel {
         this._onClosePointerDown = this._onClosePointerDown.bind(this);
         this._onDocumentPointerDown = this._onDocumentPointerDown.bind(this);
         this._blockPreviewGesture = this._blockPreviewGesture.bind(this);
+        this._onResizeHandlePointerDown = this._onResizeHandlePointerDown.bind(this);
+        this._onResizeHandlePointerMove = this._onResizeHandlePointerMove.bind(this);
+        this._onResizeHandlePointerUp = this._onResizeHandlePointerUp.bind(this);
+        this._onResizeHandleKeydown = this._onResizeHandleKeydown.bind(this);
         this._onAttentionPointerMove = this._onAttentionPointerMove.bind(this);
         this._onAttentionPointerDown = this._onAttentionPointerDown.bind(this);
         this._clearAttentionHover = this._clearAttentionHover.bind(this);
@@ -2535,6 +2557,8 @@ class SelectionPanel {
         this.closeBtn?.addEventListener('click', () => this.close({ clearHistory: false }));
         this.copyContextBtn?.addEventListener('click', this._onCopyContextClick);
         this.closeBtn?.addEventListener('pointerdown', this._onClosePointerDown);
+        this.resizeHandle?.addEventListener('pointerdown', this._onResizeHandlePointerDown);
+        this.resizeHandle?.addEventListener('keydown', this._onResizeHandleKeydown);
         this.canvas.addEventListener('pointerdown', this._blockPreviewGesture, { passive: false });
         this.canvas.addEventListener('pointermove', this._blockPreviewGesture, { passive: false });
         this.canvas.addEventListener('pointerup', this._blockPreviewGesture, { passive: false });
@@ -2588,6 +2612,7 @@ class SelectionPanel {
         });
         this._observeResize();
         this._onResize();
+        this._updateResizeHandleState();
         if (typeof document !== 'undefined' && document.fonts?.ready) {
             document.fonts.ready.then(() => {
                 this._scheduleSelectionEquationFit();
@@ -3333,6 +3358,7 @@ class SelectionPanel {
 
     _onResize() {
         if (!this.isReady) return;
+        this._syncDesktopPanelWidthToViewport();
         const rect = this.canvas.getBoundingClientRect();
         const width = Math.max(1, Math.floor(rect.width));
         const height = Math.max(1, Math.floor(rect.height));
@@ -3492,6 +3518,190 @@ class SelectionPanel {
             return window.matchMedia('(max-aspect-ratio: 1/1), (max-width: 880px)').matches;
         }
         return window.innerWidth <= 880 || window.innerHeight <= window.innerWidth;
+    }
+
+    _resolveDesktopPanelWidthBounds() {
+        if (typeof window === 'undefined') {
+            return resolveDesktopSelectionPanelWidthBounds();
+        }
+        const viewportWidth = window.innerWidth
+            || document.documentElement?.clientWidth
+            || this.hudStack?.getBoundingClientRect?.().width
+            || 0;
+        return resolveDesktopSelectionPanelWidthBounds({ viewportWidth });
+    }
+
+    _getCurrentDesktopPanelWidthPx() {
+        const rectWidth = this.hudStack?.getBoundingClientRect?.().width;
+        if (Number.isFinite(rectWidth) && rectWidth > 0) {
+            return rectWidth;
+        }
+        return this._desktopPanelWidthPx;
+    }
+
+    _updateResizeHandleState() {
+        const canResize = !!(this.resizeHandle && this.isOpen && !this._isSmallScreen());
+        this.hudStack?.classList.toggle('is-resizable', canResize);
+        if (!canResize && this._panelResizeDrag.active) {
+            this._cancelPanelResizeDrag();
+        }
+        if (!this.resizeHandle) return;
+
+        const currentWidth = clampDesktopSelectionPanelWidth(
+            this._getCurrentDesktopPanelWidthPx(),
+            this._resolveDesktopPanelWidthBounds()
+        );
+        const { minWidthPx, maxWidthPx } = this._resolveDesktopPanelWidthBounds();
+        this.resizeHandle.setAttribute('aria-hidden', canResize ? 'false' : 'true');
+        this.resizeHandle.setAttribute('aria-valuemin', String(Math.round(minWidthPx)));
+        this.resizeHandle.setAttribute('aria-valuemax', String(Math.round(maxWidthPx)));
+        this.resizeHandle.setAttribute('aria-valuenow', String(Math.round(currentWidth)));
+        this.resizeHandle.tabIndex = canResize ? 0 : -1;
+    }
+
+    _setDesktopPanelWidth(widthPx, {
+        syncSceneShift = false,
+        immediateSceneShift = false,
+        scheduleResize = true
+    } = {}) {
+        if (!this._rootStyleTarget || this._isSmallScreen()) {
+            this._updateResizeHandleState();
+            return 0;
+        }
+
+        const nextWidth = clampDesktopSelectionPanelWidth(
+            widthPx,
+            this._resolveDesktopPanelWidthBounds()
+        );
+        this._desktopPanelWidthPx = nextWidth;
+        this._rootStyleTarget.style.setProperty('--hud-stack-desktop-width', `${nextWidth}px`);
+        this._updateResizeHandleState();
+        if (syncSceneShift) {
+            this._syncSceneShift({ immediate: immediateSceneShift });
+        }
+        if (scheduleResize) {
+            this._scheduleResize();
+        }
+        return nextWidth;
+    }
+
+    _syncDesktopPanelWidthToViewport() {
+        if (this._desktopPanelWidthPx === null || this._isSmallScreen()) {
+            this._updateResizeHandleState();
+            return;
+        }
+        this._setDesktopPanelWidth(this._desktopPanelWidthPx, {
+            syncSceneShift: false,
+            scheduleResize: false
+        });
+    }
+
+    _cancelPanelResizeDrag() {
+        const pointerId = this._panelResizeDrag.pointerId;
+        if (Number.isFinite(pointerId) && typeof this.resizeHandle?.releasePointerCapture === 'function') {
+            try {
+                this.resizeHandle.releasePointerCapture(pointerId);
+            } catch (_) { /* no-op */ }
+        }
+        this._panelResizeDrag.active = false;
+        this._panelResizeDrag.pointerId = null;
+        this.hudStack?.classList.remove('is-resizing');
+        if (typeof document !== 'undefined' && document.body) {
+            document.body.classList.remove('detail-panel-resizing');
+        }
+        if (typeof window !== 'undefined') {
+            window.removeEventListener('pointermove', this._onResizeHandlePointerMove);
+            window.removeEventListener('pointerup', this._onResizeHandlePointerUp);
+            window.removeEventListener('pointercancel', this._onResizeHandlePointerUp);
+        }
+    }
+
+    _onResizeHandlePointerDown(event) {
+        if (!this.isOpen || this._isSmallScreen()) return;
+        if (!Number.isFinite(event?.clientX)) return;
+        if (event.pointerType === 'touch') return;
+        if (Number.isFinite(event?.button) && event.button !== 0) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        const startWidthPx = this._getCurrentDesktopPanelWidthPx();
+        if (!(Number.isFinite(startWidthPx) && startWidthPx > 0)) return;
+
+        this._panelResizeDrag.active = true;
+        this._panelResizeDrag.pointerId = Number.isFinite(event.pointerId) ? event.pointerId : null;
+        this._panelResizeDrag.startX = event.clientX;
+        this._panelResizeDrag.startWidthPx = startWidthPx;
+        this.hudStack?.classList.add('is-resizing');
+        if (typeof document !== 'undefined' && document.body) {
+            document.body.classList.add('detail-panel-resizing');
+        }
+        if (Number.isFinite(event.pointerId) && typeof this.resizeHandle?.setPointerCapture === 'function') {
+            try {
+                this.resizeHandle.setPointerCapture(event.pointerId);
+            } catch (_) { /* no-op */ }
+        }
+        if (typeof window !== 'undefined') {
+            window.addEventListener('pointermove', this._onResizeHandlePointerMove);
+            window.addEventListener('pointerup', this._onResizeHandlePointerUp);
+            window.addEventListener('pointercancel', this._onResizeHandlePointerUp);
+        }
+        this._setHoverLabelSuppression(true);
+    }
+
+    _onResizeHandlePointerMove(event) {
+        if (!this._panelResizeDrag.active) return;
+        if (Number.isFinite(this._panelResizeDrag.pointerId) && event?.pointerId !== this._panelResizeDrag.pointerId) {
+            return;
+        }
+        if (!Number.isFinite(event?.clientX)) return;
+
+        event.preventDefault();
+        const deltaX = this._panelResizeDrag.startX - event.clientX;
+        const nextWidth = this._panelResizeDrag.startWidthPx + deltaX;
+        this._setDesktopPanelWidth(nextWidth, {
+            syncSceneShift: true,
+            immediateSceneShift: true
+        });
+    }
+
+    _onResizeHandlePointerUp(event) {
+        if (!this._panelResizeDrag.active) return;
+        if (Number.isFinite(this._panelResizeDrag.pointerId) && event?.pointerId !== this._panelResizeDrag.pointerId) {
+            return;
+        }
+        this._cancelPanelResizeDrag();
+        this._syncHoverLabelSuppressionFromHoverState();
+        this._syncSceneShift({ immediate: true });
+        this._scheduleResize();
+    }
+
+    _onResizeHandleKeydown(event) {
+        if (!this.isOpen || this._isSmallScreen()) return;
+        const { minWidthPx, maxWidthPx } = this._resolveDesktopPanelWidthBounds();
+        const currentWidth = clampDesktopSelectionPanelWidth(
+            this._getCurrentDesktopPanelWidthPx(),
+            this._resolveDesktopPanelWidthBounds()
+        );
+        const step = event?.shiftKey ? 48 : 24;
+        let nextWidth = null;
+        if (event.key === 'ArrowLeft') {
+            nextWidth = currentWidth + step;
+        } else if (event.key === 'ArrowRight') {
+            nextWidth = currentWidth - step;
+        } else if (event.key === 'Home') {
+            nextWidth = minWidthPx;
+        } else if (event.key === 'End') {
+            nextWidth = maxWidthPx;
+        }
+        if (!Number.isFinite(nextWidth)) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+        this._setDesktopPanelWidth(nextWidth, {
+            syncSceneShift: true,
+            immediateSceneShift: true
+        });
     }
 
     _updateMobileState() {
@@ -4629,10 +4839,13 @@ class SelectionPanel {
             : null;
         const buildSelection = (object, fallbackLabel) => {
             if (!object) return null;
+            const objectLabel = typeof object.userData?.label === 'string'
+                ? object.userData.label.trim()
+                : '';
+            const useFallback = !objectLabel.length
+                || (safeKind && objectLabel.toLowerCase() === 'layernorm');
             return {
-                label: (typeof object.userData?.label === 'string' && object.userData.label.trim().length)
-                    ? object.userData.label
-                    : fallbackLabel,
+                label: useFallback ? fallbackLabel : objectLabel,
                 kind: 'label',
                 info: {
                     ...(Number.isFinite(layerIndex) ? { layerIndex: Math.floor(layerIndex) } : {}),
@@ -4646,7 +4859,7 @@ class SelectionPanel {
         if ((safeKind === 'ln1' || safeKind === 'ln2') && Number.isFinite(layerIndex) && layerIndex >= 0 && layerIndex < layers.length) {
             const layer = layers[Math.floor(layerIndex)];
             const object = safeKind === 'ln1' ? layer?.ln1?.group : layer?.ln2?.group;
-            const selection = buildSelection(object, 'LayerNorm');
+            const selection = buildSelection(object, formatLayerNormLabel(safeKind));
             if (selection) return selection;
         }
 
@@ -4669,7 +4882,10 @@ class SelectionPanel {
             if (safeKind === 'final' && isTopLayerNorm) score += 20;
             if (score <= bestScore) return;
 
-            bestSelection = buildSelection(node, isTopLayerNorm ? 'LayerNorm (Top)' : 'LayerNorm');
+            bestSelection = buildSelection(
+                node,
+                isTopLayerNorm ? formatLayerNormLabel('final') : formatLayerNormLabel(safeKind)
+            );
             bestScore = score;
         });
 
@@ -4683,7 +4899,7 @@ class SelectionPanel {
         const safeKind = layerNormKind === 'final'
             ? 'final'
             : (layerNormKind === 'ln2' ? 'ln2' : 'ln1');
-        const label = safeKind === 'final' ? 'LayerNorm (Top)' : 'LayerNorm';
+        const label = formatLayerNormLabel(safeKind);
         return {
             label,
             kind: 'label',
@@ -4879,9 +5095,7 @@ class SelectionPanel {
         const safeKind = layerNormKind === 'final'
             ? 'final'
             : (layerNormKind === 'ln2' ? 'ln2' : 'ln1');
-        const label = safeKind === 'final'
-            ? (safeParam === 'scale' ? 'Final LN Scale' : 'Final LN Shift')
-            : `${safeKind.toUpperCase()} ${safeParam === 'scale' ? 'Scale' : 'Shift'}`;
+        const label = getLayerNormParamLabel(safeKind, safeParam);
         const stage = safeKind === 'final'
             ? `final_ln.param.${safeParam}`
             : `${safeKind}.param.${safeParam}`;
@@ -6782,6 +6996,7 @@ class SelectionPanel {
         this.hudPanel?.classList.add('detail-open');
         this.panel.setAttribute('aria-hidden', 'false');
         this._updateMobileState();
+        this._updateResizeHandleState();
         this._syncSceneShift();
         if (!wasOpen) {
             if (this._pendingReveal) {
@@ -6821,6 +7036,7 @@ class SelectionPanel {
         this._applyTokenChipHoverState();
         this._hideLegendHover();
         this._resetCopyContextFeedback();
+        this._cancelPanelResizeDrag();
         this.panel.classList.remove('is-open');
         this.panel.classList.remove('is-preview-hidden');
         this.panel.classList.remove('is-gelu-view-open');
@@ -6829,6 +7045,7 @@ class SelectionPanel {
         this.panel.setAttribute('aria-hidden', 'true');
         this._setHoverLabelSuppression(false);
         this._updateMobileState();
+        this._updateResizeHandleState();
         this._syncSceneShift();
         if (this.description) setDescriptionContent(this.description, '');
         if (this.equationsBody) setDescriptionContent(this.equationsBody, '');

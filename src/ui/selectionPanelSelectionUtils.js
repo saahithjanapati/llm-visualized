@@ -1,3 +1,9 @@
+import {
+    expandLayerNormLabel,
+    formatLayerNormParamLabel,
+    resolveLayerNormKind
+} from '../utils/layerNormLabels.js';
+
 export function getActivationDataFromSelection(selectionInfo) {
     return selectionInfo?.info?.activationData
         || selectionInfo?.object?.userData?.activationData
@@ -79,6 +85,12 @@ export function simplifyLayerNormParamDisplayLabel(label, selectionInfo = null) 
     const raw = String(label || '');
     const lower = raw.toLowerCase();
     const stageLower = String(getActivationDataFromSelection(selectionInfo)?.stage || '').toLowerCase();
+    const explicitKind = findUserDataString(selectionInfo, 'layerNormKind');
+    const layerNormKind = resolveLayerNormKind({
+        label: raw,
+        stage: stageLower,
+        explicitKind
+    });
 
     if (lower.startsWith('mlp up projection')) return 'MLP Up Projection';
     if (lower.startsWith('mlp down projection')) return 'MLP Down Projection';
@@ -96,15 +108,15 @@ export function simplifyLayerNormParamDisplayLabel(label, selectionInfo = null) 
         || lower.includes('gamma')
         || lower.includes('γ')
         || stageLower.endsWith('.scale');
-    if (isScale) return 'LayerNorm Scale';
+    if (isScale) return formatLayerNormParamLabel(layerNormKind, 'scale');
 
     const isShift = lower.includes('shift')
         || lower.includes('beta')
         || lower.includes('β')
         || stageLower.endsWith('.shift');
-    if (isShift) return 'LayerNorm Shift';
+    if (isShift) return formatLayerNormParamLabel(layerNormKind, 'shift');
 
-    return raw;
+    return expandLayerNormLabel(raw, layerNormKind);
 }
 
 export function findUserDataNumber(selectionInfo, key) {

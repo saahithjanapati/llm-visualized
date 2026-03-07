@@ -1,4 +1,5 @@
 import visualizationDescriptionMarkdown from '../../vizualization_description.md?raw';
+import { formatLayerNormLabel } from '../utils/layerNormLabels.js';
 import {
     ATTENTION_SCORE_DECIMALS,
     ATTENTION_VALUE_PLACEHOLDER
@@ -122,7 +123,7 @@ function describeSceneStage(stage = '', normalizedLabel = '') {
         return 'The scene is showing the initial residual state formed by adding token and position information together.';
     }
     if (lower === 'layer.incoming') {
-        return 'The selected residual vector is entering a transformer block before the first LayerNorm runs.';
+        return `The selected residual vector is entering a transformer block before ${formatLayerNormLabel('ln1')} runs.`;
     }
     if (lower === 'residual.post_attention') {
         return 'The attention branch has already written its update back into the residual stream, and the token is on its way to LayerNorm 2 and the MLP.';
@@ -146,10 +147,10 @@ function describeSceneStage(stage = '', normalizedLabel = '') {
         return 'The selected vector has already been projected into value space for one attention head.';
     }
     if (lower.startsWith('ln1.')) {
-        return 'The selected object is in the first LayerNorm path, immediately before self-attention reads the token state.';
+        return `The selected object is in the ${formatLayerNormLabel('ln1')} path, immediately before self-attention reads the token state.`;
     }
     if (lower.startsWith('ln2.')) {
-        return 'The selected object is in the second LayerNorm path, immediately before the MLP reads the token state.';
+        return `The selected object is in the ${formatLayerNormLabel('ln2')} path, immediately before the MLP reads the token state.`;
     }
     if (lower.startsWith('mlp.up')) {
         return 'The scene is showing the MLP expansion step where model-width features are projected into the wider hidden space.';

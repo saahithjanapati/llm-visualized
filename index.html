@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#000000" />
     <!-- Google tag (gtag.js) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-E0WWTHCQQF"></script>
     <script>
@@ -64,6 +65,15 @@
 
     <!-- Consolidated HUD + selection stack -->
     <div id="hudStack">
+        <div
+            id="detailPanelResizeHandle"
+            class="detail-panel-resize-handle"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize selection panel"
+            aria-hidden="true"
+            tabindex="-1"
+        ></div>
         <div id="hudPanel" aria-live="polite">
             <div id="statusOverlay">Layer 1 / 12</div>
             <div id="parameterCounter">

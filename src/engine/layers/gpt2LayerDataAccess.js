@@ -1,6 +1,7 @@
 import { VectorVisualizationInstancedPrism } from '../../components/VectorVisualizationInstancedPrism.js';
 import { getLayerNormParamData } from '../../data/layerNormParams.js';
 import { applyVectorData, formatTokenLabel } from './gpt2LayerUtils.js';
+import { formatLayerNormParamLabel } from '../../utils/layerNormLabels.js';
 
 export function resolveBaseVectorLength(layer, fallbackLength = 1) {
     const fallback = Number.isFinite(fallbackLength) ? Math.max(1, Math.floor(fallbackLength)) : 1;
@@ -61,9 +62,7 @@ export function applyLayerNormParamVectorForLayer(layer, targetVec, kind, param,
     if (!targetVec) return false;
     const data = resolveLayerNormParamDataForLayer(layer, kind, param, fallbackLength);
     if (!data) return false;
-    const lnLabel = kind === 'ln1' ? 'LN1' : kind === 'ln2' ? 'LN2' : String(kind).toUpperCase();
-    const paramLabel = param === 'scale' ? 'Scale' : 'Shift';
-    const label = `${lnLabel} ${paramLabel}`;
+    const label = formatLayerNormParamLabel(kind, param);
     const meta = {
         stage: `${kind}.param.${param}`,
         layerIndex: layer?.index,

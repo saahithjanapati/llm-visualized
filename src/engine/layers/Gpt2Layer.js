@@ -612,6 +612,9 @@ export default class Gpt2Layer extends BaseLayer {
         ln1.setColor(inactiveDark);
         // Start fully opaque to avoid early depth-sorting costs.
         ln1.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
+        ln1.group.userData = ln1.group.userData || {};
+        ln1.group.userData.layerNormKind = 'ln1';
+        ln1.group.userData.layerIndex = this.index;
         this.raycastRoot.add(ln1.group);
         freezeStaticTransforms(ln1.group, true);
 
@@ -672,6 +675,9 @@ export default class Gpt2Layer extends BaseLayer {
         );
         ln2.setColor(inactiveDark);
         ln2.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity: 0.05 });
+        ln2.group.userData = ln2.group.userData || {};
+        ln2.group.userData.layerNormKind = 'ln2';
+        ln2.group.userData.layerIndex = this.index;
         this.raycastRoot.add(ln2.group);
         freezeStaticTransforms(ln2.group, true);
 

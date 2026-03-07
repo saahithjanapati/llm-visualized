@@ -9,7 +9,8 @@ describe('selectionPanelNarrativeUtils', () => {
     it('builds selection-focused equations for known matrix labels', () => {
         const eq = resolveSelectionEquations('Query Weight Matrix', null);
         expect(eq).toContain('W_Q');
-        expect(eq).toContain('s_{t,j}');
+        expect(eq).toContain('H_i =');
+        expect(eq).not.toContain('s_{t,j}');
     });
 
     it('uses fixed 12-head concat indexing for output projection equations', () => {
@@ -22,6 +23,13 @@ describe('selectionPanelNarrativeUtils', () => {
         const eq = resolveSelectionEquations('LayerNorm Normed Output', null);
         expect(eq).toContain('\\frac');
         expect(eq).toContain('\\gamma');
+    });
+
+    it('renders layernorm preview equations as a single combined line', () => {
+        const previewEq = resolveSelectionPreviewEquations('LayerNorm Normed Output', null);
+        expect(previewEq).toHaveLength(1);
+        expect(previewEq[0].tex).toContain('\\frac');
+        expect(previewEq[0].tex).toContain('\\gamma');
     });
 
     it('shows selection-specific embedding equations instead of the full embedding bundle everywhere', () => {
@@ -61,8 +69,10 @@ describe('selectionPanelNarrativeUtils', () => {
 
     it('describes and equations weighted value vectors explicitly', () => {
         const eq = resolveSelectionEquations('Weighted Value Vector', null);
-        expect(eq).toContain('\\tilde{V}_{t,j}');
-        expect(eq).toContain('\\alpha_{t,j}');
+        expect(eq).toContain('H_i =');
+        expect(eq).toContain('\\mathrm{softmax}');
+        expect(eq).toContain('V}_i');
+        expect(eq).not.toContain('\\tilde{V}_{t,j}');
 
         const desc = resolveDescription('Weighted Value Vector', null, {
             info: {
@@ -83,6 +93,19 @@ describe('selectionPanelNarrativeUtils', () => {
             }
         });
         expect(desc).toContain('residual-stream');
+    });
+
+    it('references numbered layer norms without calling them blocks', () => {
+        const desc = resolveDescription('Residual Stream Vector', null, {
+            info: {
+                layerIndex: 5,
+                activationData: {
+                    stage: 'layer.incoming'
+                }
+            }
+        });
+        expect(desc).toContain('LayerNorm%201%20in%20layer%206');
+        expect(desc).not.toContain('block in layer 6');
     });
 
     it('resolves attention-score-specific copy from stage', () => {
@@ -134,9 +157,18 @@ describe('selectionPanelNarrativeUtils', () => {
         expect(queryPreview).toHaveLength(2);
         expect(queryPreview[0]).toMatchObject({ active: true });
         expect(queryPreview[1]).toMatchObject({ active: false });
+        expect(queryPreview[1].tex).toContain('H_i =');
+        expect(queryPreview[1].tex).not.toContain('s_{t,j}');
 
         const weightedValuePreview = resolveSelectionPreviewEquations('Weighted Value Vector', null);
-        expect(weightedValuePreview.map((entry) => entry.active)).toEqual([false, true, false]);
+        expect(weightedValuePreview.map((entry) => entry.active)).toEqual([true, false]);
+        expect(weightedValuePreview[0].tex).toContain('H_i =');
+        expect(weightedValuePreview[0].tex).not.toContain('\\tilde{V}_{t,j}');
+
+        const attentionScorePreview = resolveSelectionPreviewEquations('Attention Score', null);
+        expect(attentionScorePreview.map((entry) => entry.active)).toEqual([true, false]);
+        expect(attentionScorePreview[0].tex).toContain('H_i =');
+        expect(attentionScorePreview[0].tex).not.toContain('s_{t,j}');
 
         const embeddingPreview = resolveSelectionPreviewEquations('Token: hello', null);
         expect(embeddingPreview.map((entry) => entry.tex)).toHaveLength(2);

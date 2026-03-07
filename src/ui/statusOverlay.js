@@ -15,6 +15,7 @@ import {
 } from '../animations/LayerAnimationConstants.js';
 import { USE_PHYSICAL_MATERIALS } from '../utils/constants.js';
 import { applyPhysicalMaterialsToScene } from '../utils/materialUtils.js';
+import { buildAttentionEquationSet } from './attentionEquationTextUtils.js';
 
 // Initializes status overlay and equations panel updates.
 export function initStatusOverlay(pipeline, NUM_LAYERS) {
@@ -133,13 +134,25 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         return colorize(LN_EQ_BASE_COLOR, body);
     };
 
-    const QKV_PROJECTION_EQ = String.raw`\begin{aligned} ${Q} &= x_{\text{ln}} ${WQ} + ${BQ} \\ ${K} &= x_{\text{ln}} ${WK} + ${BK} \\ ${V} &= x_{\text{ln}} ${WV} + ${BV} \end{aligned}`;
+    const attentionEquations = buildAttentionEquationSet({
+        Q,
+        K,
+        V,
+        WQ,
+        WK,
+        WV,
+        BQ,
+        BK,
+        BV,
+        WO,
+        BO
+    });
     const EQ = {
-        qkv_per_head: QKV_PROJECTION_EQ,
-        qkv_packed: QKV_PROJECTION_EQ,
-        attn: `H_i = \\mathrm{softmax}\\left(\\frac{${Q}_i ${K}_i^\\top}{\\sqrt{d_h}} + M\\right)${V}_i,\\; i=1\\dots 12`,
-        concat_proj: String.raw`\begin{aligned} H &= \mathrm{Concat}(H_i)_{i=1}^{12} \\ O &= H ${WO} + ${BO} \end{aligned}`,
-        resid1: `${U} = x + O`,
+        qkv_per_head: attentionEquations.qkvProjection,
+        qkv_packed: attentionEquations.qkvProjection,
+        attn: attentionEquations.attention,
+        concat_proj: attentionEquations.concatProjection,
+        resid1: attentionEquations.postAttentionResidual,
         mlp: String.raw`\begin{aligned} a &= ${U_LN} ${WUp} + ${BUp} \\ z &= \mathrm{GELU}(a) \\ \mathrm{MLP}(${U_LN}) &= z ${WDown} + ${BDown} \end{aligned}`,
         resid2: String.raw`x_{\text{out}} = ${U} + ${MLPResidual}`,
         embed_token: `${X_TOK} = ${E}[${TOK_ID}]`,

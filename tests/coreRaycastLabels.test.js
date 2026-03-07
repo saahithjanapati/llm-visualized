@@ -18,6 +18,19 @@ describe('coreRaycastLabels', () => {
         expect(simplifyLayerNormParamHoverLabel('Query Weight Matrix')).toBe('Query Weight Matrix');
     });
 
+    it('uses numbered layernorm names in hover labels when context is available', () => {
+        expect(simplifyLayerNormParamHoverLabel('LayerNorm', null, {
+            userData: { layerNormKind: 'ln1' },
+            parent: null
+        })).toBe('LayerNorm 1');
+        expect(simplifyLayerNormParamHoverLabel('LayerNorm shift matrix', {
+            activationData: { stage: 'ln2.param.shift' }
+        })).toBe('LayerNorm 2 Shift');
+        expect(simplifyLayerNormParamHoverLabel('LN2 Normed', {
+            activationData: { stage: 'ln2.norm' }
+        })).toBe('LayerNorm 2 Normed');
+    });
+
     it('detects cached kv markers from vectorRef and object chain', () => {
         const infoHit = isCachedKvSelection({
             vectorRef: { userData: { cachedKv: true } }
@@ -30,4 +43,3 @@ describe('coreRaycastLabels', () => {
         expect(isCachedKvSelection(null, { userData: {}, parent: null })).toBe(false);
     });
 });
-

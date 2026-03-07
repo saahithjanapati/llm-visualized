@@ -29,6 +29,18 @@ describe('selectionPanelSelectionUtils', () => {
         expect(simplifyLayerNormParamDisplayLabel('MLP Down Projection - world')).toBe('MLP Down Projection');
     });
 
+    it('formats layernorm labels with explicit numbered names when context is available', () => {
+        expect(simplifyLayerNormParamDisplayLabel('LayerNorm', {
+            info: { layerNormKind: 'ln1' }
+        })).toBe('LayerNorm 1');
+        expect(simplifyLayerNormParamDisplayLabel('LayerNorm scale matrix', {
+            info: { activationData: { stage: 'ln2.param.scale' } }
+        })).toBe('LayerNorm 2 Scale');
+        expect(simplifyLayerNormParamDisplayLabel('LN1 Normed - token', {
+            info: { activationData: { stage: 'ln1.norm' } }
+        })).toBe('LayerNorm 1 Normed - token');
+    });
+
     it('detects KV cache vectors from vectorRef metadata', () => {
         const selection = {
             info: {
