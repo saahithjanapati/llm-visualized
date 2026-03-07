@@ -3520,6 +3520,18 @@ class SelectionPanel {
         return window.innerWidth <= 880 || window.innerHeight <= window.innerWidth;
     }
 
+    _isLandscapeViewport() {
+        if (typeof window === 'undefined') return true;
+        if (typeof window.matchMedia === 'function') {
+            return window.matchMedia('(orientation: landscape)').matches;
+        }
+        return window.innerWidth >= window.innerHeight;
+    }
+
+    _canResizeDesktopPanel() {
+        return !this._isSmallScreen() && this._isLandscapeViewport();
+    }
+
     _resolveDesktopPanelWidthBounds() {
         if (typeof window === 'undefined') {
             return resolveDesktopSelectionPanelWidthBounds();
@@ -3540,7 +3552,7 @@ class SelectionPanel {
     }
 
     _updateResizeHandleState() {
-        const canResize = !!(this.resizeHandle && this.isOpen && !this._isSmallScreen());
+        const canResize = !!(this.resizeHandle && this.isOpen && this._canResizeDesktopPanel());
         this.hudStack?.classList.toggle('is-resizable', canResize);
         if (!canResize && this._panelResizeDrag.active) {
             this._cancelPanelResizeDrag();
@@ -3564,7 +3576,7 @@ class SelectionPanel {
         immediateSceneShift = false,
         scheduleResize = true
     } = {}) {
-        if (!this._rootStyleTarget || this._isSmallScreen()) {
+        if (!this._rootStyleTarget || !this._canResizeDesktopPanel()) {
             this._updateResizeHandleState();
             return 0;
         }
@@ -3586,7 +3598,7 @@ class SelectionPanel {
     }
 
     _syncDesktopPanelWidthToViewport() {
-        if (this._desktopPanelWidthPx === null || this._isSmallScreen()) {
+        if (this._desktopPanelWidthPx === null || !this._canResizeDesktopPanel()) {
             this._updateResizeHandleState();
             return;
         }
@@ -3617,7 +3629,7 @@ class SelectionPanel {
     }
 
     _onResizeHandlePointerDown(event) {
-        if (!this.isOpen || this._isSmallScreen()) return;
+        if (!this.isOpen || !this._canResizeDesktopPanel()) return;
         if (!Number.isFinite(event?.clientX)) return;
         if (event.pointerType === 'touch') return;
         if (Number.isFinite(event?.button) && event.button !== 0) return;
@@ -3677,7 +3689,7 @@ class SelectionPanel {
     }
 
     _onResizeHandleKeydown(event) {
-        if (!this.isOpen || this._isSmallScreen()) return;
+        if (!this.isOpen || !this._canResizeDesktopPanel()) return;
         const { minWidthPx, maxWidthPx } = this._resolveDesktopPanelWidthBounds();
         const currentWidth = clampDesktopSelectionPanelWidth(
             this._getCurrentDesktopPanelWidthPx(),

@@ -943,7 +943,7 @@ body.detail-panel-resizing * {
     user-select: none;
 }
 
-@media (min-width: 881px) and (min-aspect-ratio: 1/1) {
+@media (min-width: 881px) and (orientation: landscape) {
     #hudStack.detail-open .detail-panel-resize-handle {
         position: absolute;
         top: 0;
@@ -968,13 +968,13 @@ body.detail-panel-resizing * {
         transform: translateX(-50%);
         background: linear-gradient(
             180deg,
-            rgba(143, 210, 255, 0.08) 0%,
-            rgba(143, 210, 255, 0.5) 18%,
-            rgba(143, 210, 255, 0.54) 82%,
-            rgba(143, 210, 255, 0.08) 100%
+            rgba(34, 34, 38, 0.06) 0%,
+            rgba(56, 56, 60, 0.28) 18%,
+            rgba(58, 58, 62, 0.3) 82%,
+            rgba(34, 34, 38, 0.06) 100%
         );
-        box-shadow: 0 0 14px rgba(143, 210, 255, 0.16);
-        opacity: 0.56;
+        box-shadow: 0 0 12px rgba(0, 0, 0, 0.24);
+        opacity: 0.68;
         transition: opacity 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
     }
 
@@ -987,11 +987,11 @@ body.detail-panel-resizing * {
         height: 52px;
         border-radius: 999px;
         transform: translate(-50%, -50%);
-        background: rgba(143, 210, 255, 0.24);
+        background: rgba(38, 38, 42, 0.92);
         box-shadow:
-            0 0 0 1px rgba(143, 210, 255, 0.22),
-            0 0 18px rgba(143, 210, 255, 0.14);
-        opacity: 0.72;
+            0 0 0 1px rgba(80, 80, 86, 0.24),
+            0 0 16px rgba(0, 0, 0, 0.26);
+        opacity: 0.86;
         transition: opacity 0.12s ease, background 0.12s ease, box-shadow 0.12s ease, transform 0.12s ease;
     }
 
@@ -1007,23 +1007,23 @@ body.detail-panel-resizing * {
     #hudStack.detail-open .detail-panel-resize-handle:hover::before,
     #hudStack.detail-open .detail-panel-resize-handle:focus-visible::before,
     #hudStack.is-resizing .detail-panel-resize-handle::before {
-        box-shadow: 0 0 18px rgba(143, 210, 255, 0.28);
+        box-shadow: 0 0 16px rgba(0, 0, 0, 0.3);
         background: linear-gradient(
             180deg,
-            rgba(143, 210, 255, 0.14) 0%,
-            rgba(143, 210, 255, 0.78) 18%,
-            rgba(143, 210, 255, 0.8) 82%,
-            rgba(143, 210, 255, 0.14) 100%
+            rgba(42, 42, 46, 0.12) 0%,
+            rgba(78, 78, 84, 0.42) 18%,
+            rgba(84, 84, 90, 0.44) 82%,
+            rgba(42, 42, 46, 0.12) 100%
         );
     }
 
     #hudStack.detail-open .detail-panel-resize-handle:hover::after,
     #hudStack.detail-open .detail-panel-resize-handle:focus-visible::after,
     #hudStack.is-resizing .detail-panel-resize-handle::after {
-        background: rgba(143, 210, 255, 0.42);
+        background: rgba(62, 62, 68, 0.96);
         box-shadow:
-            0 0 0 1px rgba(143, 210, 255, 0.36),
-            0 0 22px rgba(143, 210, 255, 0.22);
+            0 0 0 1px rgba(110, 110, 118, 0.34),
+            0 0 18px rgba(0, 0, 0, 0.3);
         transform: translate(-50%, -50%) scaleX(1.05);
     }
 }
@@ -1579,7 +1579,7 @@ body.detail-panel-resizing * {
 
 @media (min-width: 881px) and (min-aspect-ratio: 1/1) {
     #hudStack.detail-open {
-        bottom: max(10px, env(safe-area-inset-bottom));
+        bottom: 0;
     }
     #hudStack.detail-open #detailPanel.is-open {
         flex: 1 1 auto;
