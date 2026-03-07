@@ -624,7 +624,7 @@ body.touch-ui * {
     width: fit-content;
     max-width: var(--prompt-token-strip-max-width);
     padding: 8px 10px calc(7px + env(safe-area-inset-bottom)) calc(10px + env(safe-area-inset-left));
-    border-radius: 0 8px 0 0;
+    border-radius: 0 4px 0 0;
     overflow: visible;
     pointer-events: auto;
     color: #fff;
@@ -633,7 +633,7 @@ body.touch-ui * {
     content: '';
     position: absolute;
     inset: -4px 0 0;
-    border-radius: 0 12px 0 0;
+    border-radius: 0 6px 0 0;
     border: 1px solid rgba(255,255,255,0.2);
     background: rgba(0,0,0,0.92);
     box-shadow: 0 10px 24px rgba(0,0,0,0.44);
@@ -1584,6 +1584,8 @@ body.detail-panel-resizing * {
     #hudStack.detail-open #detailPanel.is-open {
         flex: 1 1 auto;
         max-height: none;
+        border-bottom-left-radius: 0;
+        border-bottom-right-radius: 0;
     }
 }
 .detail-header {
@@ -3340,6 +3342,8 @@ body.detail-panel-resizing * {
         padding-top: 0;
         box-shadow: 0 10px 28px rgba(0,0,0,0.32);
         transform: translateY(100%);
+        overscroll-behavior-y: contain;
+        touch-action: pan-y pinch-zoom;
     }
     #detailPanel.is-open {
         transform: translateY(0);
@@ -3354,6 +3358,9 @@ body.detail-panel-resizing * {
         border-right: none;
         border-bottom: none;
         border-top: 1px solid rgba(255,255,255,0.12);
+    }
+    #detailPanel > * {
+        flex: 0 0 auto;
     }
     #hudPanel.detail-open {
         border-bottom-left-radius: 16px;
@@ -3382,12 +3389,15 @@ body.detail-panel-resizing * {
         min-height: clamp(220px, calc(26dvh + var(--detail-mobile-preview-safe-bleed)), 320px);
         height: clamp(220px, calc(26dvh + var(--detail-mobile-preview-safe-bleed)), 320px);
         max-height: none;
+        touch-action: pan-y;
     }
     .detail-preview canvas {
         border-top: none;
         border-left: none;
         border-right: none;
         border-radius: 0 0 18px 18px;
+        pointer-events: none;
+        touch-action: pan-y;
     }
     .detail-history-btn {
         width: 42px;

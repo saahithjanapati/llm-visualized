@@ -367,6 +367,6 @@ export function buildSelectionChatPrompt({
         buildMarkdownBulletSection('Visible Legend', legendLines),
         buildMarkdownSection('Visible Activation Data', Array.isArray(dataLines) ? dataLines.join('\n') : ''),
         buildMarkdownBulletSection('KV Cache State', kvLines),
-        'The user will now ask a question.'
+        'INSERT YOUR QUESTION HERE'
     );
 }
