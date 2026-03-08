@@ -78,8 +78,10 @@ const TOKEN_CHIP_ONLY_MATERIAL_TWEAKS = Object.freeze({
 const CHIP_INSIDE_RELEASE_BUFFER_MS = 80;
 const TOP_LOGIT_REVEAL_DELAY_MS = 140;
 const BOTTOM_EMBED_FINAL_EMISSIVE = TOP_EMBED_BASE_EMISSIVE;
+const BOTTOM_POSITION_EMBED_FINAL_EMISSIVE = 0.03;
 const BOTTOM_EMBED_START_EMISSIVE = 0.0;
 const BOTTOM_EMBED_PEAK_EMISSIVE = 0.21;
+const BOTTOM_POSITION_EMBED_PEAK_EMISSIVE = 0.1;
 const BOTTOM_EMBED_PEAK_COLOR_MIX = 0.18;
 const BOTTOM_EMBED_PROGRESS_EPSILON = 1e-4;
 const BOTTOM_EMBED_SETTLE_EASE_POWER = 2.2;
@@ -776,7 +778,8 @@ export function addEmbeddingAndTokenChips({
         const posBottomMatrixController = createBottomEmbeddingMatrixController({
             matrix: posBottom,
             finalColor: positionGreen,
-            finalEmissiveIntensity: BOTTOM_EMBED_FINAL_EMISSIVE,
+            finalEmissiveIntensity: BOTTOM_POSITION_EMBED_FINAL_EMISSIVE,
+            peakEmissiveIntensity: BOTTOM_POSITION_EMBED_PEAK_EMISSIVE,
             getEntryProgress: () => getAverageChipEntryProgress(positionMatrixChipEntries),
             getExitProgress: () => getAverageBottomPositionExitProgress(getFirstLayerLanes(), posMatrixTopY)
         });

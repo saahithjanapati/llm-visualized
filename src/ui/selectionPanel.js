@@ -12,7 +12,11 @@ import {
 } from '../utils/layerNormLabels.js';
 import { initTouchClickFallback } from './touchClickFallback.js';
 import { fitSelectionDimensionLabels } from './selectionPanelDimensionFitUtils.js';
-import { clampDesktopSelectionPanelWidth, resolveDesktopSelectionPanelWidthBounds } from './selectionPanelLayoutUtils.js';
+import {
+    clampDesktopSelectionPanelWidth,
+    resolveCopyContextButtonLayout,
+    resolveDesktopSelectionPanelWidthBounds
+} from './selectionPanelLayoutUtils.js';
 import {
     buildAttentionScoreLabel,
     findUserDataNumber,
@@ -77,6 +81,10 @@ import {
     extractMaterialSnapshot,
     tryCopyVectorAppearanceToPreview
 } from './selectionPanelVectorCloneUtils.js';
+import {
+    LAYER_NORM_ACTIVE_PARAM_PREVIEW_COLOR_OPTIONS,
+    resolveLayerNormPreviewContext
+} from './selectionPanelLayerNormPreviewUtils.js';
 import {
     ATTENTION_DECODE_ROW_OFFSET_MAX_PX,
     ATTENTION_DECODE_ROW_OFFSET_MIN_PX,
@@ -180,13 +188,16 @@ import {
 } from '../utils/constants.js';
 import { getIncompleteUtf8TokenNote } from '../utils/tokenEncodingNotes.js';
 import { createTokenChipMesh } from '../utils/tokenChipMeshFactory.js';
-import { getLogitTokenColorCss, resolveLogitTokenSeed } from '../app/gpt-tower/logitColor.js';
 import {
     TOKEN_CHIP_HOVER_SYNC_EVENT,
     dispatchTokenChipHoverSync,
     normalizeTokenChipEntry,
     tokenChipEntriesMatch
 } from './tokenChipHoverSync.js';
+import {
+    applyTokenChipColors,
+    resolvePromptTokenChipColorState
+} from './tokenChipColorUtils.js';
 import {
     MHA_FINAL_Q_COLOR,
     MHA_FINAL_K_COLOR,
@@ -883,6 +894,36 @@ function applyFinalColorToObject(object, color) {
     });
 }
 
+function forcePreviewObjectOpaque(object) {
+    if (!object || typeof object.traverse !== 'function') return;
+    object.traverse((child) => {
+        if (!child?.material) return;
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        materials.forEach((mat) => {
+            if (!mat) return;
+            if (mat.transparent !== false) {
+                mat.transparent = false;
+                mat.needsUpdate = true;
+            }
+            if (mat.opacity !== 1) {
+                mat.opacity = 1;
+            }
+            if (mat.depthWrite !== true) {
+                mat.depthWrite = true;
+                mat.needsUpdate = true;
+            }
+            if (typeof mat.transmission === 'number' && mat.transmission !== 0) {
+                mat.transmission = 0;
+                mat.needsUpdate = true;
+            }
+            if (typeof mat.thickness === 'number' && mat.thickness !== 0) {
+                mat.thickness = 0;
+                mat.needsUpdate = true;
+            }
+        });
+    });
+}
+
 function stripPreviewTrails(object) {
     if (!object || typeof object.traverse !== 'function') return;
     const toRemove = [];
@@ -1472,8 +1513,9 @@ function extractPreviewVectorData(selectionInfo) {
 }
 
 function applyDataToPreviewVector(vec, data, { colorOptions = null, minimumKeyColors = 2 } = {}) {
-    if (!vec || !Array.isArray(data) || data.length === 0) return;
-    const raw = data.slice();
+    const isArrayLike = Array.isArray(data) || ArrayBuffer.isView(data);
+    if (!vec || !isArrayLike || data.length === 0) return;
+    const raw = Array.from(data);
     if (typeof vec.updateDataInternal === 'function') {
         vec.updateDataInternal(raw);
     } else {
@@ -2000,21 +2042,76 @@ function buildAttentionSpherePreview(selectionInfo) {
     };
 }
 
-function buildLayerNormPreview(label, selectionInfo) {
-    const clonePreview = buildSelectionClonePreview(selectionInfo, label)
-        || buildDirectClonePreview(selectionInfo);
-    if (clonePreview) {
-        applyFinalColorToObject(clonePreview.object, 0xffffff);
-        return clonePreview;
-    }
+function buildLayerNormParamBankPreview({
+    layerNormKind = null,
+    param = 'scale',
+    layerIndex = null,
+    layoutCount = 0,
+    activeLaneLayoutIndices = [],
+    baseVectorLength = D_MODEL,
+    previewDepth = LN_PARAMS.depth
+} = {}) {
+    if (!layerNormKind) return null;
 
-    const baseHoles = Number.isFinite(LN_PARAMS.numberOfHoles) ? LN_PARAMS.numberOfHoles : PREVIEW_SOLID_LANES;
-    const depthScale = PREVIEW_SOLID_LANES / Math.max(1, baseHoles);
+    const previewData = getLayerNormParamData(layerIndex, layerNormKind, param, baseVectorLength);
+    const isArrayLike = Array.isArray(previewData) || ArrayBuffer.isView(previewData);
+    if (!isArrayLike || previewData.length === 0) return null;
+
+    const safeLayoutCount = Math.max(1, Math.floor(layoutCount || activeLaneLayoutIndices.length || 1));
+    const laneIndices = Array.isArray(activeLaneLayoutIndices) && activeLaneLayoutIndices.length
+        ? activeLaneLayoutIndices
+        : Array.from({ length: safeLayoutCount }, (_, idx) => idx);
+    const previewInstanceCount = resolveLayerNormParamPreviewInstanceCount(null, previewData);
+    const zSpacing = previewDepth / (safeLayoutCount + 1);
+    const yPosition = param === 'shift'
+        ? LN_PARAMS.height * 0.25
+        : 3.3;
+    const vectors = [];
+    const group = new THREE.Group();
+
+    laneIndices.forEach((laneLayoutIndex) => {
+        const safeLaneLayoutIndex = Number.isFinite(laneLayoutIndex)
+            ? Math.max(0, Math.min(safeLayoutCount - 1, Math.floor(laneLayoutIndex)))
+            : 0;
+        const vec = createPreviewVector({
+            colorHex: MHA_FINAL_Q_COLOR,
+            data: null,
+            instanceCount: previewInstanceCount
+        });
+        vec.group.position.set(
+            0,
+            yPosition,
+            -previewDepth / 2 + zSpacing * (safeLaneLayoutIndex + 1)
+        );
+        vec.group.userData = vec.group.userData || {};
+        vec.group.userData.label = getLayerNormParamLabel(layerNormKind, param);
+        applyDataToPreviewVector(vec, previewData, {
+            colorOptions: LAYER_NORM_ACTIVE_PARAM_PREVIEW_COLOR_OPTIONS
+        });
+        group.add(vec.group);
+        vectors.push(vec);
+    });
+
+    return {
+        group,
+        dispose: () => {
+            vectors.forEach((vec) => {
+                vec.dispose();
+            });
+        }
+    };
+}
+
+export function buildLayerNormPreview(label, selectionInfo, engine = null) {
+    const previewContext = resolveLayerNormPreviewContext(selectionInfo, engine);
+    const holeCountFallback = Number.isFinite(LN_PARAMS.numberOfHoles) ? LN_PARAMS.numberOfHoles : PREVIEW_SOLID_LANES;
+    const holeCount = Math.max(1, Math.floor(previewContext.layoutCount || holeCountFallback));
+    const baseHoles = Number.isFinite(LN_PARAMS.numberOfHoles) ? LN_PARAMS.numberOfHoles : holeCount;
     const previewDepth = Math.max(
         180,
-        Math.min(PREVIEW_MATRIX_DEPTH, LN_PARAMS.depth * depthScale)
+        Math.min(PREVIEW_MATRIX_DEPTH, LN_PARAMS.depth * (holeCount / Math.max(1, baseHoles)))
     );
-    const params = { ...LN_PARAMS, numberOfHoles: PREVIEW_SOLID_LANES, depth: previewDepth };
+    const params = { ...LN_PARAMS, numberOfHoles: holeCount, depth: previewDepth };
     const ln = new LayerNormalizationVisualization(
         new THREE.Vector3(0, 0, 0),
         params.width,
@@ -2028,9 +2125,54 @@ function buildLayerNormPreview(label, selectionInfo) {
         true
     );
     ln.setColor(new THREE.Color(0xffffff));
+    ln.setMaterialProperties({
+        opacity: 1.0,
+        transparent: false,
+        transmission: 0.0,
+        thickness: 0.0,
+        emissiveIntensity: 0.18
+    });
+    forcePreviewObjectOpaque(ln.group);
+
+    const group = new THREE.Group();
+    group.add(ln.group);
+    const disposers = [() => ln.dispose()];
+
+    const scalePreview = buildLayerNormParamBankPreview({
+        layerNormKind: previewContext.layerNormKind,
+        param: 'scale',
+        layerIndex: previewContext.layerIndex,
+        layoutCount: holeCount,
+        activeLaneLayoutIndices: previewContext.activeLaneLayoutIndices,
+        baseVectorLength: previewContext.baseVectorLength,
+        previewDepth
+    });
+    if (scalePreview?.group) {
+        group.add(scalePreview.group);
+        disposers.push(scalePreview.dispose);
+    }
+
+    const shiftPreview = buildLayerNormParamBankPreview({
+        layerNormKind: previewContext.layerNormKind,
+        param: 'shift',
+        layerIndex: previewContext.layerIndex,
+        layoutCount: holeCount,
+        activeLaneLayoutIndices: previewContext.activeLaneLayoutIndices,
+        baseVectorLength: previewContext.baseVectorLength,
+        previewDepth
+    });
+    if (shiftPreview?.group) {
+        group.add(shiftPreview.group);
+        disposers.push(shiftPreview.dispose);
+    }
+
     return {
-        object: ln.group,
-        dispose: () => ln.dispose()
+        object: group,
+        dispose: () => {
+            disposers.forEach((dispose) => {
+                if (typeof dispose === 'function') dispose();
+            });
+        }
     };
 }
 
@@ -2065,13 +2207,15 @@ function buildLayerNormParamVectorPreview(label, selectionInfo) {
     const previewInstanceCount = resolveLayerNormParamPreviewInstanceCount(selectionInfo, previewData);
 
     const vec = createPreviewVector({
-        colorHex: 0xffffff,
+        colorHex: MHA_FINAL_Q_COLOR,
         data: null,
         instanceCount: previewInstanceCount
     });
     vec.group.userData = vec.group.userData || {};
     vec.group.userData.label = getLayerNormParamLabel(spec.layerNormKind, spec.param);
-    applyDataToPreviewVector(vec, previewData);
+    applyDataToPreviewVector(vec, previewData, {
+        colorOptions: LAYER_NORM_ACTIVE_PARAM_PREVIEW_COLOR_OPTIONS
+    });
 
     return {
         object: vec.group,
@@ -2081,7 +2225,7 @@ function buildLayerNormParamVectorPreview(label, selectionInfo) {
     };
 }
 
-function resolvePreviewObject(label, selectionInfo) {
+function resolvePreviewObject(label, selectionInfo, engine = null) {
     const lower = (label || '').toLowerCase();
     if (isLogitBarSelection(label, selectionInfo) || lower.startsWith('chosen token:')) {
         return buildLogitBarPreview(label, selectionInfo);
@@ -2090,6 +2234,9 @@ function resolvePreviewObject(label, selectionInfo) {
     if (attentionSpherePreview) return attentionSpherePreview;
     const layerNormParamPreview = buildLayerNormParamVectorPreview(label, selectionInfo);
     if (layerNormParamPreview) return layerNormParamPreview;
+    if (isLayerNormSolidSelection(label)) {
+        return buildLayerNormPreview(label, selectionInfo, engine);
+    }
     const isVectorSelection = isLikelyVectorSelection(label, selectionInfo);
     if (isVectorSelection) {
         const vectorClone = buildVectorClonePreview(selectionInfo, label);
@@ -2195,10 +2342,6 @@ function resolvePreviewObject(label, selectionInfo) {
         return buildDirectClonePreview(selectionInfo)
             || buildSelectionClonePreview(selectionInfo, label)
             || buildVectorPreview(null, selectionInfo);
-    }
-
-    if (lower.includes('layernorm') || lower.includes('layer norm')) {
-        return buildLayerNormPreview(label, selectionInfo);
     }
 
     if (isAttentionScoreSelection(label, selectionInfo)) {
@@ -2322,6 +2465,7 @@ class SelectionPanel {
         this.promptContextTokens = document.getElementById('detailPromptContextTokens');
         this.copyContextBtn = document.getElementById('detailCopyContextBtn');
         this.copyContextBtnLabel = document.getElementById('detailCopyContextBtnLabel');
+        this.copyContextBtnAssistant = document.getElementById('detailCopyContextBtnAssistant');
         this.closeBtn = document.getElementById('detailClose');
         this.canvas = document.getElementById('detailCanvas');
         this.description = document.getElementById('detailDescription');
@@ -2614,6 +2758,7 @@ class SelectionPanel {
         this._updateResizeHandleState();
         if (typeof document !== 'undefined' && document.fonts?.ready) {
             document.fonts.ready.then(() => {
+                this._applyCopyContextButtonLayout();
                 this._scheduleSelectionEquationFit();
                 this._scheduleDimensionLabelFit();
             });
@@ -2626,6 +2771,7 @@ class SelectionPanel {
         this._resizeObserver.observe(this.canvas.parentElement);
         if (this.panel) {
             this._panelResizeObserver = new ResizeObserver(() => {
+                this._applyCopyContextButtonLayout();
                 this._scheduleSelectionEquationFit();
                 this._scheduleDimensionLabelFit();
             });
@@ -2635,6 +2781,20 @@ class SelectionPanel {
             this._equationsResizeObserver = new ResizeObserver(() => this._scheduleSelectionEquationFit());
             this._equationsResizeObserver.observe(this.equationsSection);
         }
+    }
+
+    _applyCopyContextButtonLayout() {
+        if (!this.copyContextBtn) return;
+        const rect = this.copyContextBtn.getBoundingClientRect();
+        const widthPx = rect.width || this.copyContextBtn.clientWidth || this.copyContextBtn.offsetWidth || 0;
+        const layout = resolveCopyContextButtonLayout(widthPx);
+        this.copyContextBtn.style.setProperty('--detail-copy-context-font-size', `${layout.fontSizePx}px`);
+        this.copyContextBtn.style.setProperty('--detail-copy-context-icon-size', `${layout.iconSizePx}px`);
+        this.copyContextBtn.style.setProperty('--detail-copy-context-assistant-size', `${layout.assistantSizePx}px`);
+        this.copyContextBtn.style.setProperty('--detail-copy-context-gap', `${layout.gapPx}px`);
+        this.copyContextBtn.style.setProperty('--detail-copy-context-padding-inline', `${layout.paddingInlinePx}px`);
+        this.copyContextBtn.style.setProperty('--detail-copy-context-padding-block', `${layout.paddingBlockPx}px`);
+        this.copyContextBtn.style.setProperty('--detail-copy-context-radius', `${layout.borderRadiusPx}px`);
     }
 
     _applyDimensionLabelFit() {
@@ -2667,13 +2827,18 @@ class SelectionPanel {
 
     _setCopyContextButtonLabel(text) {
         const label = String(text || '').trim() || COPY_CONTEXT_BUTTON_DEFAULT_LABEL;
+        const defaultLabel = this._copyContextDefaultLabel || COPY_CONTEXT_BUTTON_DEFAULT_LABEL;
+        const isDefaultLabel = label === defaultLabel;
         if (this.copyContextBtnLabel) {
             this.copyContextBtnLabel.textContent = label;
-            return;
-        }
-        if (this.copyContextBtn) {
+        } else if (this.copyContextBtn) {
             this.copyContextBtn.textContent = label;
         }
+        if (this.copyContextBtn) {
+            this.copyContextBtn.dataset.copyContextLayout = isDefaultLabel ? 'default' : 'feedback';
+        }
+        this.copyContextBtnAssistant?.setAttribute('aria-hidden', 'true');
+        this._applyCopyContextButtonLayout();
     }
 
     _createLegendHoverUi(bar, kind) {
@@ -3387,7 +3552,11 @@ class SelectionPanel {
             }
             return;
         }
-        if (this.currentPreview && !this._previewPausedForPanelResize) {
+        if (this.currentPreview && this._previewPausedForPanelResize) {
+            // Resizing the canvas clears the WebGL buffer, so redraw the frozen
+            // preview without refitting until the drag finishes.
+            this._renderPreviewSnapshot();
+        } else if (this.currentPreview) {
             let allowFit = true;
             const now = performance.now();
             if (this._lastFitSize && now < this._fitLockUntil) {
@@ -3408,6 +3577,7 @@ class SelectionPanel {
         }
         this._updateMobileState();
         this._syncSceneShift();
+        this._applyCopyContextButtonLayout();
         this._scheduleSelectionEquationFit();
         this._scheduleDimensionLabelFit();
         this._refreshVisibleLegendGradients();
@@ -3652,21 +3822,27 @@ class SelectionPanel {
     _onResizeHandlePointerDown(event) {
         if (!this.isOpen || !this._canResizeDesktopPanel()) return;
         if (!Number.isFinite(event?.clientX)) return;
-        if (event.pointerType === 'touch') return;
-        if (Number.isFinite(event?.button) && event.button !== 0) return;
+        if (event?.pointerType === 'mouse' && Number.isFinite(event.button) && event.button !== 0) return;
 
-        event.preventDefault();
+        const touchLike = isTouchLikePointerEvent(event);
+        if (event.cancelable) event.preventDefault();
         event.stopPropagation();
 
         const startWidthPx = this._getCurrentDesktopPanelWidthPx();
         if (!(Number.isFinite(startWidthPx) && startWidthPx > 0)) return;
 
+        if (this.engine && typeof this.engine.resetInteractionState === 'function') {
+            this.engine.resetInteractionState();
+        }
         this._panelResizeDrag.active = true;
         this._panelResizeDrag.pointerId = Number.isFinite(event.pointerId) ? event.pointerId : null;
         this._panelResizeDrag.startX = event.clientX;
         this._panelResizeDrag.startWidthPx = startWidthPx;
         this.hudStack?.classList.add('is-resizing');
         if (typeof document !== 'undefined' && document.body) {
+            if (touchLike) {
+                document.body.classList.add('touch-ui');
+            }
             document.body.classList.add('detail-panel-resizing');
         }
         if (Number.isFinite(event.pointerId) && typeof this.resizeHandle?.setPointerCapture === 'function') {
@@ -3675,7 +3851,7 @@ class SelectionPanel {
             } catch (_) { /* no-op */ }
         }
         if (typeof window !== 'undefined') {
-            window.addEventListener('pointermove', this._onResizeHandlePointerMove);
+            window.addEventListener('pointermove', this._onResizeHandlePointerMove, { passive: false });
             window.addEventListener('pointerup', this._onResizeHandlePointerUp);
             window.addEventListener('pointercancel', this._onResizeHandlePointerUp);
         }
@@ -3691,7 +3867,7 @@ class SelectionPanel {
         }
         if (!Number.isFinite(event?.clientX)) return;
 
-        event.preventDefault();
+        if (event.cancelable) event.preventDefault();
         const deltaX = this._panelResizeDrag.startX - event.clientX;
         const nextWidth = this._panelResizeDrag.startWidthPx + deltaX;
         this._setDesktopPanelWidth(nextWidth, {
@@ -3705,6 +3881,8 @@ class SelectionPanel {
         if (Number.isFinite(this._panelResizeDrag.pointerId) && event?.pointerId !== this._panelResizeDrag.pointerId) {
             return;
         }
+        if (event?.cancelable) event.preventDefault();
+        event?.stopPropagation?.();
         this._cancelPanelResizeDrag({ finalizePreview: true });
         this._syncHoverLabelSuppressionFromHoverState();
         this._syncSceneShift({ immediate: true });
@@ -4012,10 +4190,6 @@ class SelectionPanel {
             safeTokenId = this.activationSource.getTokenId(safeTokenIndex);
             safeTokenId = Number.isFinite(safeTokenId) ? Math.floor(safeTokenId) : null;
         }
-        const seed = resolveLogitTokenSeed(
-            { token_id: safeTokenId, token: safeTokenText },
-            Number.isFinite(safeTokenIndex) ? safeTokenIndex : 0
-        );
 
         this.title.classList.add('detail-title--token-context');
         const fragment = document.createDocumentFragment();
@@ -4026,9 +4200,11 @@ class SelectionPanel {
 
         const chip = document.createElement('span');
         chip.className = 'detail-subtitle-token-chip detail-title-token-chip';
-        chip.style.setProperty('--token-color-border', getLogitTokenColorCss(seed, 0.92));
-        chip.style.setProperty('--token-color-fill', getLogitTokenColorCss(seed, 0.2));
-        chip.style.setProperty('--token-color-fill-hover', getLogitTokenColorCss(seed, 0.28));
+        applyTokenChipColors(chip, {
+            tokenLabel: safeTokenText,
+            tokenIndex: safeTokenIndex,
+            tokenId: safeTokenId
+        }, Number.isFinite(safeTokenIndex) ? safeTokenIndex : 0);
         chip.textContent = safeTokenText;
         chip.title = safeTokenText === ATTENTION_VALUE_PLACEHOLDER ? '' : safeTokenText;
         this._configureTokenNavChip(chip, {
@@ -4078,11 +4254,6 @@ class SelectionPanel {
             safeTokenId = Number.isFinite(safeTokenId) ? Math.floor(safeTokenId) : null;
         }
 
-        const seed = resolveLogitTokenSeed(
-            { token_id: safeTokenId, token: safeTokenText },
-            Number.isFinite(safeTokenIndex) ? safeTokenIndex : 0
-        );
-
         this._setSubtitleSecondaryText('');
         this.subtitleSecondary.classList.add('detail-subtitle--token-context');
 
@@ -4093,9 +4264,11 @@ class SelectionPanel {
 
         const chip = document.createElement('span');
         chip.className = 'detail-subtitle-token-chip detail-subtitle-secondary-token-chip';
-        chip.style.setProperty('--token-color-border', getLogitTokenColorCss(seed, 0.92));
-        chip.style.setProperty('--token-color-fill', getLogitTokenColorCss(seed, 0.2));
-        chip.style.setProperty('--token-color-fill-hover', getLogitTokenColorCss(seed, 0.28));
+        applyTokenChipColors(chip, {
+            tokenLabel: safeTokenText,
+            tokenIndex: safeTokenIndex,
+            tokenId: safeTokenId
+        }, Number.isFinite(safeTokenIndex) ? safeTokenIndex : 0);
         chip.textContent = safeTokenText;
         chip.title = safeTokenText;
         this._configureTokenNavChip(chip, {
@@ -4286,16 +4459,11 @@ class SelectionPanel {
 
             const chip = document.createElement('span');
             chip.className = 'detail-subtitle-token-chip';
-            const seed = resolveLogitTokenSeed(
-                {
-                    token_id: Number.isFinite(tokenId) ? Math.floor(tokenId) : null,
-                    token: safeTokenText
-                },
-                Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : 0
-            );
-            chip.style.setProperty('--token-color-border', getLogitTokenColorCss(seed, 0.92));
-            chip.style.setProperty('--token-color-fill', getLogitTokenColorCss(seed, 0.2));
-            chip.style.setProperty('--token-color-fill-hover', getLogitTokenColorCss(seed, 0.28));
+            applyTokenChipColors(chip, {
+                tokenLabel: safeTokenText,
+                tokenIndex,
+                tokenId
+            }, Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : 0);
             chip.textContent = safeTokenText;
             chip.title = safeTokenText === ATTENTION_VALUE_PLACEHOLDER ? '' : safeTokenText;
             this._configureTokenNavChip(chip, {
@@ -5480,16 +5648,14 @@ class SelectionPanel {
             && typeof this.activationSource.getTokenId === 'function') {
             resolvedTokenId = this.activationSource.getTokenId(resolvedTokenIndex);
         }
-        const seed = resolveLogitTokenSeed(
-            { token_id: resolvedTokenId, token: safeText },
-            Number.isFinite(resolvedTokenIndex) ? resolvedTokenIndex : fallbackSeed
-        );
 
         const chip = document.createElement('span');
         chip.className = 'attention-value-token-chip';
-        chip.style.setProperty('--token-color-border', getLogitTokenColorCss(seed, 0.92));
-        chip.style.setProperty('--token-color-fill', getLogitTokenColorCss(seed, 0.2));
-        chip.style.setProperty('--token-color-fill-hover', getLogitTokenColorCss(seed, 0.28));
+        applyTokenChipColors(chip, {
+            tokenLabel: safeText,
+            tokenIndex: resolvedTokenIndex,
+            tokenId: resolvedTokenId
+        }, Number.isFinite(resolvedTokenIndex) ? resolvedTokenIndex : fallbackSeed);
         chip.textContent = safeText;
         chip.title = safeText;
         this._configureTokenNavChip(chip, {
@@ -5785,10 +5951,6 @@ class SelectionPanel {
                 : 'position n/a';
             const tokenIndex = Number.isFinite(part?.tokenIndex) ? Math.floor(part.tokenIndex) : null;
             const tokenId = resolveTokenId(part);
-            const seed = resolveLogitTokenSeed(
-                { token_id: tokenId, token: tokenText },
-                Number.isFinite(tokenIndex) ? tokenIndex : fallbackIndex
-            );
 
             const partEl = document.createElement('div');
             partEl.className = 'detail-attention-context-part';
@@ -5799,9 +5961,11 @@ class SelectionPanel {
 
             const chipEl = document.createElement('span');
             chipEl.className = 'detail-attention-context-chip';
-            chipEl.style.setProperty('--token-color-border', getLogitTokenColorCss(seed, 0.92));
-            chipEl.style.setProperty('--token-color-fill', getLogitTokenColorCss(seed, 0.2));
-            chipEl.style.setProperty('--token-color-fill-hover', getLogitTokenColorCss(seed, 0.28));
+            applyTokenChipColors(chipEl, {
+                tokenLabel: tokenText,
+                tokenIndex,
+                tokenId
+            }, Number.isFinite(tokenIndex) ? tokenIndex : fallbackIndex);
             chipEl.textContent = tokenText;
             chipEl.title = tokenText === ATTENTION_VALUE_PLACEHOLDER ? '' : tokenText;
             this._configureTokenNavChip(chipEl, {
@@ -5814,7 +5978,11 @@ class SelectionPanel {
             positionEl.className = 'detail-attention-context-position';
             positionEl.textContent = `(${positionText})`;
 
-            partEl.append(roleEl, chipEl, positionEl);
+            const detailEl = document.createElement('span');
+            detailEl.className = 'detail-attention-context-detail';
+            detailEl.append(chipEl, positionEl);
+
+            partEl.append(roleEl, detailEl);
             return partEl;
         };
 
@@ -6267,6 +6435,7 @@ class SelectionPanel {
                 this.attentionEmpty.style.display = (hasAnyValue || this._attentionDynamic) ? 'none' : 'block';
             }
         }
+        this._setAttentionMatrixInteractivity(hasAnyValue);
         this._applyAttentionDecodeStyling();
         if (this._attentionPinned) {
             if (!this._restorePinnedAttentionCell()) {
@@ -6285,6 +6454,11 @@ class SelectionPanel {
                 this._setAttentionHoverFromCell(cell, { force: true });
             }
         }
+    }
+
+    _setAttentionMatrixInteractivity(isInteractive) {
+        if (!this.attentionMatrix) return;
+        this.attentionMatrix.dataset.interactive = isInteractive ? 'true' : 'false';
     }
 
     _updateAttentionPreview(selection) {
@@ -6321,6 +6495,7 @@ class SelectionPanel {
         if (!context || !this.activationSource) {
             this._updateAttentionToggleLabel(this.attentionMode);
             this._setAttentionVisibility(false);
+            this._setAttentionMatrixInteractivity(false);
             this._clearPinnedAttention();
             this._attentionDynamic = false;
             this._attentionDynamicKey = '';
@@ -6526,6 +6701,7 @@ class SelectionPanel {
         this.attentionTokensTop.appendChild(topFrag);
         this.attentionTokensLeft.appendChild(leftFrag);
         this.attentionMatrix.appendChild(matrixFrag);
+        this._setAttentionMatrixInteractivity(hasAnyValue);
         this._applyAttentionDecodeStyling();
         if (this.attentionEmpty) {
             this.attentionEmpty.style.display = (hasAnyValue || this._attentionDynamic) ? 'none' : 'block';
@@ -6816,7 +6992,9 @@ class SelectionPanel {
     _onDocumentPointerDown(event) {
         if (!Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return;
         const eventTarget = event.target instanceof Element ? event.target : null;
-        const hit = document.elementFromPoint(event.clientX, event.clientY);
+        const hit = typeof document.elementFromPoint === 'function'
+            ? document.elementFromPoint(event.clientX, event.clientY)
+            : null;
         const resolveClosest = (selector) => {
             const fromTarget = eventTarget && typeof eventTarget.closest === 'function'
                 ? eventTarget.closest(selector)
@@ -6985,6 +7163,17 @@ class SelectionPanel {
         this._previewRafId = null;
     }
 
+    _renderPreviewSnapshot({ syncEnvironment = true } = {}) {
+        if (!this.isReady || !this.isOpen || !this.currentPreview || this._geluDetailOpen) {
+            return false;
+        }
+        if (syncEnvironment) {
+            this._syncEnvironment();
+        }
+        this.renderer.render(this.scene, this.camera);
+        return true;
+    }
+
     _renderPreviewFrame(time) {
         if (!this.isReady || !this.isOpen || !this.currentPreview || this._geluDetailOpen || this._previewPausedForPanelResize) {
             return false;
@@ -7011,8 +7200,7 @@ class SelectionPanel {
         this.currentPreview.rotation.x = PREVIEW_BASE_TILT_X;
         this.currentPreview.rotation.z = 0;
         this._updateDynamicAttentionProgress();
-        this.renderer.render(this.scene, this.camera);
-        return true;
+        return this._renderPreviewSnapshot({ syncEnvironment: false });
     }
 
     _animate(time) {
@@ -7457,9 +7645,7 @@ class SelectionPanel {
         }
 
         const fragment = document.createDocumentFragment();
-        const mutedBorder = 'rgba(105, 114, 126, 0.6)';
-        const mutedFill = 'rgba(73, 80, 90, 0.1)';
-        const mutedFillHover = 'rgba(108, 117, 131, 0.18)';
+        const colorState = resolvePromptTokenChipColorState(entries);
 
         entries.forEach((entry, index) => {
             const chip = document.createElement('span');
@@ -7467,14 +7653,8 @@ class SelectionPanel {
             chip.className = 'detail-subtitle-token-chip detail-token-nav-chip detail-prompt-context-token';
             if (isSelected) {
                 chip.classList.add('detail-prompt-context-token--selected');
-                chip.style.setProperty('--token-color-border', getLogitTokenColorCss(entry.seed, 0.92));
-                chip.style.setProperty('--token-color-fill', getLogitTokenColorCss(entry.seed, 0.2));
-                chip.style.setProperty('--token-color-fill-hover', getLogitTokenColorCss(entry.seed, 0.28));
-            } else {
-                chip.style.setProperty('--token-color-border', mutedBorder);
-                chip.style.setProperty('--token-color-fill', mutedFill);
-                chip.style.setProperty('--token-color-fill-hover', mutedFillHover);
             }
+            applyTokenChipColors(chip, entry, index, { lookup: colorState.lookup });
             chip.textContent = entry.displayText;
             chip.title = entry.titleText || '';
             this._configureTokenNavChip(chip, {
@@ -7911,7 +8091,7 @@ class SelectionPanel {
 
         const preview = shouldReusePreview
             ? null
-            : (hidePreviewForSelection ? null : resolvePreviewObject(label, selection));
+            : (hidePreviewForSelection ? null : resolvePreviewObject(label, selection, this.engine));
         if (!shouldReusePreview && preview?.object) {
             const previewRoot = new THREE.Group();
             previewRoot.add(preview.object);

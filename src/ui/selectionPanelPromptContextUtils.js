@@ -1,4 +1,3 @@
-import { resolveLogitTokenSeed } from '../app/gpt-tower/logitColor.js';
 import { formatTokenLabel } from '../app/gpt-tower/tokenLabels.js';
 import { normalizeTokenChipEntry, tokenChipEntriesMatch } from './tokenChipHoverSync.js';
 
@@ -46,11 +45,7 @@ export function buildSelectionPromptContext({
                 tokenId,
                 tokenLabel: formattedLabel,
                 displayText: normalizePromptChipText(formattedLabel),
-                titleText: formattedLabel,
-                seed: resolveLogitTokenSeed(
-                    { token_id: tokenId, token: formattedLabel },
-                    Number.isFinite(tokenIndex) ? tokenIndex : laneIndex
-                )
+                titleText: formattedLabel
             };
         })
         .filter(Boolean);

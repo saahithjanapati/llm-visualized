@@ -1,4 +1,4 @@
-import { getLogitTokenColorCss, resolveLogitTokenSeed } from '../app/gpt-tower/logitColor.js';
+import { resolveTokenChipColors } from './tokenChipColorUtils.js';
 
 function escapeHtml(value) {
     return String(value)
@@ -31,22 +31,6 @@ function decodeInlineDetailActionPayload(value) {
     }
 }
 
-function isGenericTokenLabel(tokenText) {
-    return /^token\s+\d+$/i.test(String(tokenText || '').trim());
-}
-
-function resolveInlineTokenChipSeed(tokenText, tokenIndex = null, tokenId = null) {
-    const safeTokenText = String(tokenText || '').trim();
-    const safeTokenIndex = Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : 0;
-    const safeTokenId = Number.isFinite(tokenId) ? Math.floor(tokenId) : null;
-    const tokenEntry = Number.isFinite(safeTokenId)
-        ? { token_id: safeTokenId, token: safeTokenText }
-        : {
-            token: isGenericTokenLabel(safeTokenText) ? '' : safeTokenText
-        };
-    return resolveLogitTokenSeed(tokenEntry, safeTokenIndex);
-}
-
 function renderInlineTokenNavHtml(tokenTextEncoded, tokenIndexRaw, tokenIdRaw) {
     const tokenText = decodeInlineTokenNavText(tokenTextEncoded).trim();
     if (!tokenText) return '';
@@ -54,18 +38,21 @@ function renderInlineTokenNavHtml(tokenTextEncoded, tokenIndexRaw, tokenIdRaw) {
     const tokenId = Number(tokenIdRaw);
     const safeTokenIndex = Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : null;
     const safeTokenId = Number.isFinite(tokenId) ? Math.floor(tokenId) : null;
-    const seed = resolveInlineTokenChipSeed(tokenText, safeTokenIndex, safeTokenId);
+    const colors = resolveTokenChipColors({
+        tokenLabel: tokenText,
+        tokenIndex: safeTokenIndex,
+        tokenId: safeTokenId
+    }, Number.isFinite(safeTokenIndex) ? safeTokenIndex : 0);
     const chipStyle = [
-        `--token-color-border: ${getLogitTokenColorCss(seed, 0.92)}`,
-        `--token-color-fill: ${getLogitTokenColorCss(seed, 0.2)}`,
-        `--token-color-fill-hover: ${getLogitTokenColorCss(seed, 0.28)}`
+        `--token-color-border: ${colors.border}`,
+        `--token-color-fill: ${colors.fill}`,
+        `--token-color-fill-hover: ${colors.fillHover}`
     ].join('; ');
 
     const attrs = [
         'class="detail-subtitle-token-chip detail-token-nav-chip detail-description-token-chip"',
         'data-token-nav="true"',
         `data-token-text="${escapeHtml(tokenText)}"`,
-        `data-token-seed="${seed}"`,
         `style="${escapeHtml(chipStyle)}"`,
         'tabindex="0"',
         'role="button"',

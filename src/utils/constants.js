@@ -118,6 +118,7 @@ const WIDE_VIEWPORT_SUPERSAMPLE_MIN_HEIGHT = 1600;
 const ULTRA_VIEWPORT_SUPERSAMPLE_MIN_RATIO = 2.0;
 const ULTRA_VIEWPORT_SUPERSAMPLE_MIN_WIDTH = 3800;
 const ULTRA_VIEWPORT_SUPERSAMPLE_MIN_HEIGHT = 2000;
+let ACTIVE_RENDER_PIXEL_RATIO_HINT = null;
 
 /**
  * Determine the effective renderer DPR cap taking an optional runtime override
@@ -125,13 +126,22 @@ const ULTRA_VIEWPORT_SUPERSAMPLE_MIN_HEIGHT = 2000;
  *
  * @returns {number}
  */
-export function resolveRenderDprCap() {
-    const baseCap = (typeof RENDER_DPR_CAP === 'number' && RENDER_DPR_CAP > 0)
-        ? RENDER_DPR_CAP
-        : (QUALITY_PRESET === 'high' ? 2.0 : 1.5);
+export function resolveRenderDprCap({ dprCap = null } = {}) {
+    const normalizedCap = (typeof dprCap === 'number' && Number.isFinite(dprCap) && dprCap > 0)
+        ? Math.min(4, Math.max(0.5, dprCap))
+        : null;
+    const baseCap = normalizedCap ?? (
+        (typeof RENDER_DPR_CAP === 'number' && RENDER_DPR_CAP > 0)
+            ? RENDER_DPR_CAP
+            : (QUALITY_PRESET === 'high' ? 2.0 : 1.5)
+    );
 
     if (typeof window === 'undefined') {
         return baseCap;
+    }
+
+    if (normalizedCap !== null) {
+        return normalizedCap;
     }
 
     const override = window.__RENDER_DPR_CAP;
@@ -151,8 +161,8 @@ export function resolveRenderDprCap() {
  * - `window.__RENDER_DPR_CAP` (number > 0): lower or raise the effective cap.
  * - `window.__RENDER_PIXEL_RATIO` (number > 0): force a specific ratio.
  */
-export function resolveRenderPixelRatio({ viewportWidth = null, viewportHeight = null } = {}) {
-    const cap = resolveRenderDprCap();
+export function resolveRenderPixelRatio({ viewportWidth = null, viewportHeight = null, dprCap = null } = {}) {
+    const cap = resolveRenderDprCap({ dprCap });
     const dpr = (typeof window !== 'undefined' && typeof window.devicePixelRatio === 'number' && window.devicePixelRatio > 0)
         ? window.devicePixelRatio
         : 1;
@@ -195,6 +205,19 @@ export function resolveRenderPixelRatio({ viewportWidth = null, viewportHeight =
     }
 
     return ratio;
+}
+
+export function setActiveRenderPixelRatioHint(ratio = null) {
+    if (typeof ratio !== 'number' || !Number.isFinite(ratio) || ratio <= 0) {
+        ACTIVE_RENDER_PIXEL_RATIO_HINT = null;
+        return ACTIVE_RENDER_PIXEL_RATIO_HINT;
+    }
+    ACTIVE_RENDER_PIXEL_RATIO_HINT = Math.min(4, Math.max(0.5, ratio));
+    return ACTIVE_RENDER_PIXEL_RATIO_HINT;
+}
+
+export function getActiveRenderPixelRatioHint() {
+    return ACTIVE_RENDER_PIXEL_RATIO_HINT;
 }
 
 export const VECTOR_LENGTH = 100;

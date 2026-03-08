@@ -417,9 +417,11 @@ function buildAttentionScoreLinkedVectorReferences(selectionInfo = null) {
         tokenRef: keyTokenMeta
     });
     return {
-        queryVectorRef: `${queryVectorLink} for ${queryTokenRef}`,
-        keyVectorRef: `${keyVectorLink} for ${sourceTokenRef}`,
-        valueVectorRef: `${valueVectorLink} for ${sourceTokenRef}`
+        queryTokenRef,
+        sourceTokenRef,
+        queryVectorLink,
+        keyVectorLink,
+        valueVectorLink
     };
 }
 
@@ -443,7 +445,7 @@ function buildIncomingResidualDescription(selectionInfo = null) {
     return joinParagraphs(
         `This is the residual-stream vector representation for ${tokenRef} as it enters ${layerRef}, before ${ln1Ref} runs.`,
         buildIncomingResidualSourceSentence(selectionInfo),
-        `This vector already contains everything the model has accumulated so far for this position as it enters ${layerJobRef}, and ${layerJobRef} refines that state further for the eventual prediction of the next token after this one.`
+        `This vector already contains everything the model has accumulated so far for this position as it enters ${layerJobRef}, and ${layerJobRef} refines that state further for the eventual prediction of the subsequent token.`
     );
 }
 
@@ -877,36 +879,32 @@ const ATTENTION_GENERIC_DESCRIPTION = joinParagraphs(
 );
 
 function buildAttentionScoreGenericDescription(selectionInfo = null) {
-    const queryTokenRef = buildSelectionTokenReference(selectionInfo, 'the query token');
-    const sourceTokenRef = buildSelectionKeyTokenReference(selectionInfo, 'the source token');
     const headRef = buildSelectionHeadReference(selectionInfo);
     const linkedVectors = buildAttentionScoreLinkedVectorReferences(selectionInfo);
     return joinParagraphs(
-        `This is one entry in the attention matrix from ${queryTokenRef} to ${sourceTokenRef} in ${headRef}. It represents one query-token/source-token interaction inside that attention head.`,
-        `At different moments in the pipeline, this entry is either the raw scaled dot-product score between the ${linkedVectors.queryVectorRef} and the ${linkedVectors.keyVectorRef} or the post-softmax weight derived from that score.`,
-        `Across the full row for ${queryTokenRef}, these entries determine how much of each source token's ${linkedVectors.valueVectorRef} will be mixed into the output of ${headRef}.`
+        `This is one entry in the attention matrix for ${linkedVectors.queryTokenRef} attending to ${linkedVectors.sourceTokenRef} in ${headRef}.`,
+        `Depending on the stage, it is either the raw scaled dot-product score between the query token's ${linkedVectors.queryVectorLink} and the source token's ${linkedVectors.keyVectorLink}, or the post-softmax weight derived from that score.`,
+        `That weight determines how much of the source token's ${linkedVectors.valueVectorLink} is mixed into the output of ${headRef}.`
     );
 }
 
 function buildAttentionPreScoreDescription(selectionInfo = null) {
-    const queryTokenRef = buildSelectionTokenReference(selectionInfo, 'the query token');
-    const sourceTokenRef = buildSelectionKeyTokenReference(selectionInfo, 'the source token');
     const headRef = buildSelectionHeadReference(selectionInfo);
     const linkedVectors = buildAttentionScoreLinkedVectorReferences(selectionInfo);
     return joinParagraphs(
-        `This is the pre-softmax attention score from ${queryTokenRef} to ${sourceTokenRef} in ${headRef}. It is the scaled dot product ${inlineMath('\\frac{q_t \\cdot k_j}{\\sqrt{d_h}}')} computed between the ${linkedVectors.queryVectorRef} and the ${linkedVectors.keyVectorRef}, with causal masking applied before the row is normalized.`,
-        `At this stage the number is still a raw score. Softmax will convert the full row of raw scores for ${queryTokenRef} in ${headRef} into a normalized distribution over source tokens, and those normalized weights will later scale each source token's ${linkedVectors.valueVectorRef}.`
+        `This is the pre-softmax attention score for ${linkedVectors.queryTokenRef} attending to ${linkedVectors.sourceTokenRef} in ${headRef}.`,
+        `It is the scaled dot product ${inlineMath('\\frac{q_t \\cdot k_j}{\\sqrt{d_h}}')} between the query token's ${linkedVectors.queryVectorLink} and the source token's ${linkedVectors.keyVectorLink}, with causal masking applied before the row is normalized.`,
+        `At this stage the number is still a raw score. Softmax will turn the full row into normalized attention weights, and this entry will then scale the source token's ${linkedVectors.valueVectorLink}.`
     );
 }
 
 function buildAttentionPostScoreDescription(selectionInfo = null) {
-    const queryTokenRef = buildSelectionTokenReference(selectionInfo, 'the query token');
-    const sourceTokenRef = buildSelectionKeyTokenReference(selectionInfo, 'the source token');
     const headRef = buildSelectionHeadReference(selectionInfo);
     const linkedVectors = buildAttentionScoreLinkedVectorReferences(selectionInfo);
     return joinParagraphs(
-        `This is the post-softmax attention weight from ${queryTokenRef} to ${sourceTokenRef} in ${headRef}. It comes from applying softmax to the row of scaled dot products that includes the interaction between the ${linkedVectors.queryVectorRef} and the ${linkedVectors.keyVectorRef}.`,
-        `This scalar is then multiplied into the ${linkedVectors.valueVectorRef}, so it directly sets how much information from that source token enters the output of ${headRef} for ${queryTokenRef}.`
+        `This is the post-softmax attention weight for ${linkedVectors.queryTokenRef} reading from ${linkedVectors.sourceTokenRef} in ${headRef}.`,
+        `It comes from applying softmax to the row of scaled dot products built from the query token's ${linkedVectors.queryVectorLink} against the head's key vectors, including the source token's ${linkedVectors.keyVectorLink}.`,
+        `This scalar is then multiplied into the source token's ${linkedVectors.valueVectorLink}, so it directly sets how much information from that token enters the output of ${headRef}.`
     );
 }
 

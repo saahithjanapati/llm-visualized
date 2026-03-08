@@ -427,6 +427,8 @@ export class AutoCameraController {
         this._autoCameraConcatOffsetsEnabled = false;
         this._autoCameraLnCameraOffset = new THREE.Vector3();
         this._autoCameraLnTargetOffset = new THREE.Vector3();
+        this._autoCameraTopLnCameraOffset = new THREE.Vector3();
+        this._autoCameraTopLnTargetOffset = new THREE.Vector3();
         this._autoCameraTravelCameraOffset = new THREE.Vector3();
         this._autoCameraTravelTargetOffset = new THREE.Vector3();
         this._autoCameraFinalCameraOffset = new THREE.Vector3();
@@ -434,6 +436,7 @@ export class AutoCameraController {
         this._autoCameraLayerEndDesktopCameraOffset = new THREE.Vector3();
         this._autoCameraLayerEndDesktopTargetOffset = new THREE.Vector3();
         this._autoCameraLnOffsetsEnabled = false;
+        this._autoCameraTopLnOffsetsEnabled = false;
         this._autoCameraTravelOffsetsEnabled = false;
         this._autoCameraFinalOffsetsEnabled = false;
         this._autoCameraLayerEndDesktopOffsetsEnabled = false;
@@ -451,6 +454,8 @@ export class AutoCameraController {
         this._autoCameraConcatTargetOffsetBase = new THREE.Vector3();
         this._autoCameraLnCameraOffsetBase = new THREE.Vector3();
         this._autoCameraLnTargetOffsetBase = new THREE.Vector3();
+        this._autoCameraTopLnCameraOffsetBase = new THREE.Vector3();
+        this._autoCameraTopLnTargetOffsetBase = new THREE.Vector3();
         this._autoCameraTravelCameraOffsetBase = new THREE.Vector3();
         this._autoCameraTravelTargetOffsetBase = new THREE.Vector3();
         this._autoCameraFinalCameraOffsetBase = new THREE.Vector3();
@@ -558,6 +563,14 @@ export class AutoCameraController {
             this._autoCameraLnCameraOffsetBase.copy(lnCamOffset);
             this._autoCameraLnTargetOffsetBase.copy(lnTargetOffset);
             this._autoCameraLnOffsetsEnabled = true;
+        }
+
+        const topLnCamOffset = coerceVector3(opts.autoCameraTopLnCameraOffset, null);
+        const topLnTargetOffset = coerceVector3(opts.autoCameraTopLnTargetOffset, null);
+        if (topLnCamOffset && topLnTargetOffset) {
+            this._autoCameraTopLnCameraOffsetBase.copy(topLnCamOffset);
+            this._autoCameraTopLnTargetOffsetBase.copy(topLnTargetOffset);
+            this._autoCameraTopLnOffsetsEnabled = true;
         }
 
         const travelCamOffset = coerceVector3(opts.autoCameraTravelCameraOffset, null);
@@ -1310,6 +1323,9 @@ export class AutoCameraController {
         } else if (key === 'embed-add' && this._autoCameraEmbedAddOffsetsEnabled) {
             out.cameraOffset = this._autoCameraEmbedAddCameraOffset;
             out.targetOffset = this._autoCameraEmbedAddTargetOffset;
+        } else if (key === 'top-ln' && this._autoCameraTopLnOffsetsEnabled) {
+            out.cameraOffset = this._autoCameraTopLnCameraOffset;
+            out.targetOffset = this._autoCameraTopLnTargetOffset;
         } else if (key === 'ln' && this._autoCameraLnOffsetsEnabled) {
             out.cameraOffset = this._autoCameraLnCameraOffset;
             out.targetOffset = this._autoCameraLnTargetOffset;
@@ -1484,6 +1500,10 @@ export class AutoCameraController {
         if (this._autoCameraLnOffsetsEnabled) {
             applyScaleShift(this._autoCameraLnCameraOffset, this._autoCameraLnCameraOffsetBase);
             applyScaleShift(this._autoCameraLnTargetOffset, this._autoCameraLnTargetOffsetBase);
+        }
+        if (this._autoCameraTopLnOffsetsEnabled) {
+            applyScaleShift(this._autoCameraTopLnCameraOffset, this._autoCameraTopLnCameraOffsetBase);
+            applyScaleShift(this._autoCameraTopLnTargetOffset, this._autoCameraTopLnTargetOffsetBase);
         }
         if (this._autoCameraTravelOffsetsEnabled) {
             applyScaleShift(this._autoCameraTravelCameraOffset, this._autoCameraTravelCameraOffsetBase, shiftTravelX);

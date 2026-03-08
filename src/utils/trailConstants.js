@@ -1,7 +1,12 @@
 // Centralised visual parameters for StraightLineTrail lines
 // Modify these values to tweak trail appearance globally
 
-import { DEFAULT_NUM_VECTOR_LANES, NUM_VECTOR_LANES, resolveRenderPixelRatio } from './constants.js';
+import {
+    DEFAULT_NUM_VECTOR_LANES,
+    NUM_VECTOR_LANES,
+    getActiveRenderPixelRatioHint,
+    resolveRenderPixelRatio
+} from './constants.js';
 
 export const TRAIL_COLOR = 0xffffff;          // Default hex colour (match other trails)
 export const TRAIL_LINE_WIDTH = 1;            // Pixel width (hardware-dependent)
@@ -41,6 +46,11 @@ export const TRAIL_EMISSIVE_INTENSITY = 0.0;
  */
 export function getEffectiveDevicePixelRatio() {
     if (typeof window === 'undefined') return 1;
+
+    const activeHint = getActiveRenderPixelRatioHint();
+    if (Number.isFinite(activeHint) && activeHint > 0) {
+        return activeHint;
+    }
 
     const width = Number.isFinite(window.innerWidth) ? Math.round(window.innerWidth) : 0;
     const height = Number.isFinite(window.innerHeight) ? Math.round(window.innerHeight) : 0;

@@ -132,6 +132,8 @@ const pipeline = new LayerPipeline(gptCanvas, NUM_LAYERS, {
     autoCameraConcatMobileTargetOffset: vec3(CAMERA_CONFIG.followConcatMobileTargetOffset),
     autoCameraLnCameraOffset: vec3(CAMERA_CONFIG.followLnCameraOffset),
     autoCameraLnTargetOffset: vec3(CAMERA_CONFIG.followLnTargetOffset),
+    autoCameraTopLnCameraOffset: vec3(CAMERA_CONFIG.followTopLnCameraOffset),
+    autoCameraTopLnTargetOffset: vec3(CAMERA_CONFIG.followTopLnTargetOffset),
     autoCameraTravelCameraOffset: vec3(CAMERA_CONFIG.followTravelCameraOffset),
     autoCameraTravelTargetOffset: vec3(CAMERA_CONFIG.followTravelTargetOffset),
     autoCameraTravelMobileCameraOffset: vec3(CAMERA_CONFIG.followTravelMobileCameraOffset),

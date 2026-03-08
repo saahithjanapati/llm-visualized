@@ -3,6 +3,7 @@ import { HORIZ_PHASE, LEGACY_HORIZ_PHASE, LN2_PHASE } from './layers/gpt2LanePha
 const EMBED_VIEW_KEY_VOCAB = 'embed-vocab';
 const EMBED_VIEW_KEY_POSITION = 'embed-position';
 const EMBED_VIEW_KEY_ADD = 'embed-add';
+const TOP_LN_VIEW_KEY = 'top-ln';
 
 const isEmbedBottomViewKey = (key) => (
     key === EMBED_VIEW_KEY_VOCAB
@@ -105,6 +106,8 @@ export function resolveAutoCameraViewState({
     const laneCount = lanes.length;
     const laneIndex = laneCount ? Math.min(laneCount - 1, Math.floor(laneCount / 2)) : -1;
     const lane = laneIndex >= 0 ? lanes[laneIndex] : null;
+    const resolvedLayerRuntimeIndex = Number.isFinite(layer?.index) ? layer.index : layerIndex;
+    const resolvedLayerCount = Math.max(layers.length, resolvedLayerRuntimeIndex + 1);
     const inLaneLn = !!(lane
         && (
             lane.horizPhase === HORIZ_PHASE.RIGHT
@@ -119,6 +122,7 @@ export function resolveAutoCameraViewState({
         && lane.horizPhase === HORIZ_PHASE.WAITING
         && lane.ln2Phase === LN2_PHASE.NOT_STARTED);
     const inLn = inLaneLn || inTopLn;
+    const isLastLayer = !!(layer && resolvedLayerRuntimeIndex >= (resolvedLayerCount - 1));
     const holdViewBeforeLn2 = lanes.some((candidate) => candidate
         && (candidate.horizPhase === HORIZ_PHASE.POST_MHSA_ADDITION
             || candidate.horizPhase === HORIZ_PHASE.WAITING_FOR_LN2
@@ -158,12 +162,27 @@ export function resolveAutoCameraViewState({
     const forwardComplete = (typeof pipeline?.isForwardPassComplete === 'function')
         ? pipeline.isForwardPassComplete()
         : false;
+    const topEmbedEntryY = Number.isFinite(layer?.__topEmbedEntryYLocal)
+        ? layer.__topEmbedEntryYLocal
+        : NaN;
+    const inTopEmbedding = !!(
+        !forwardComplete
+        && isLastLayer
+        && Number.isFinite(topEmbedEntryY)
+        && lanes.some((candidate) => {
+            const y = candidate?.originalVec?.group?.position?.y;
+            return Number.isFinite(y) && y >= topEmbedEntryY - 0.5;
+        })
+    );
     const viewContext = {
         lane,
         laneIndex,
         laneCount,
         inLn,
         inTopLn,
+        inTopEmbedding,
+        isLastLayer,
+        topEmbedEntryY,
         inLayerHandoff,
         inResidualAdd,
         anyResidualAddActive,
@@ -198,6 +217,9 @@ export function resolveAutoCameraViewState({
     if (firstLayerEmbeddingToLnHandoff) {
         return { rawKey: 'ln', viewContext };
     }
+
+    if (inTopLn) return { rawKey: TOP_LN_VIEW_KEY, viewContext };
+    if (inTopEmbedding) return { rawKey: 'final', viewContext };
 
     const passPhase = mhsa?.mhaPassThroughPhase || 'positioning_mha_vectors';
     const inTravel = !!(lane && lane.horizPhase === HORIZ_PHASE.TRAVEL_MHSA
@@ -282,7 +304,7 @@ export function getAutoCameraViewSwitchHoldMs({
     if (toKey === 'layer-end-desktop' || fromKey === 'layer-end-desktop') {
         holdMs = Math.max(holdMs, 130);
     }
-    if (toKey === 'ln') {
+    if (toKey === 'ln' || toKey === TOP_LN_VIEW_KEY) {
         holdMs = Math.max(holdMs, 72);
     } else if (toKey === 'final') {
         holdMs = Math.min(holdMs, 20);

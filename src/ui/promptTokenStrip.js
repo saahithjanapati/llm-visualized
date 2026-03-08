@@ -1,15 +1,16 @@
 import { appState } from '../state/appState.js';
 import {
-    getLogitTokenChipColorCss,
-    resolveAdjacentLogitTokenChipColorKeys
-} from '../app/gpt-tower/logitColor.js';
-import {
     TOKEN_CHIP_HOVER_SYNC_EVENT,
     dispatchTokenChipHoverSync,
     normalizeTokenChipEntry,
     tokenChipEntriesMatch
 } from './tokenChipHoverSync.js';
 import { initTouchClickFallback } from './touchClickFallback.js';
+import {
+    applyTokenChipColors,
+    buildPromptTokenChipEntries,
+    setActivePromptTokenChipEntries
+} from './tokenChipColorUtils.js';
 
 const STRIP_ID = 'promptTokenStrip';
 const PROMPT_TOKEN_STRIP_HOVER_SOURCE = 'prompt-token-strip';
@@ -241,51 +242,13 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
         tokenIds = null,
         generatedToken = null
     } = {}) => {
-        const labels = Array.isArray(tokenLabels) ? tokenLabels : [];
-        const indices = Array.isArray(tokenIndices) ? tokenIndices : [];
-        const ids = Array.isArray(tokenIds) ? tokenIds : [];
-        const promptEntries = labels
-            .map((tokenLabel, laneIndex) => {
-                const label = (tokenLabel === null || tokenLabel === undefined)
-                    ? ''
-                    : String(tokenLabel);
-                if (!label.length) return null;
-                const tokenIndex = Number.isFinite(indices[laneIndex]) ? Math.floor(indices[laneIndex]) : null;
-                const tokenId = Number.isFinite(ids[laneIndex]) ? Math.floor(ids[laneIndex]) : null;
-                return {
-                    entryType: 'prompt',
-                    laneIndex,
-                    tokenIndex,
-                    tokenId,
-                    tokenLabel: label
-                };
-            })
-            .filter(Boolean);
-        const generatedLabel = (generatedToken && typeof generatedToken.tokenLabel === 'string')
-            ? generatedToken.tokenLabel
-            : '';
-        const generatedEntry = generatedLabel
-            ? {
-                entryType: 'generated',
-                laneIndex: Number.isFinite(generatedToken?.laneIndex) ? Math.floor(generatedToken.laneIndex) : null,
-                tokenIndex: Number.isFinite(generatedToken?.tokenIndex) ? Math.floor(generatedToken.tokenIndex) : null,
-                tokenId: Number.isFinite(generatedToken?.tokenId) ? Math.floor(generatedToken.tokenId) : null,
-                tokenLabel: generatedLabel,
-                selectionLabel: (typeof generatedToken?.selectionLabel === 'string' && generatedToken.selectionLabel.length)
-                    ? generatedToken.selectionLabel
-                    : null,
-                logitEntry: (generatedToken?.logitEntry && typeof generatedToken.logitEntry === 'object')
-                    ? generatedToken.logitEntry
-                    : null,
-                seed: Number.isFinite(generatedToken?.seed) ? Math.floor(generatedToken.seed) : null
-            }
-            : null;
-        const generatedAlreadyPresent = generatedEntry
-            ? promptEntries.some((entry) => tokenChipEntriesMatch(entry, generatedEntry))
-            : false;
-        const entries = (generatedEntry && !generatedAlreadyPresent)
-            ? [...promptEntries, generatedEntry]
-            : promptEntries;
+        const entries = buildPromptTokenChipEntries({
+            tokenLabels,
+            tokenIndices,
+            tokenIds,
+            generatedToken
+        });
+        const colorState = setActivePromptTokenChipEntries(entries);
 
         if (!entries.length) {
             dom.tokensEl.innerHTML = '';
@@ -320,18 +283,14 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
         lastSignature = signature;
 
         const fragment = document.createDocumentFragment();
-        const chipColorKeys = resolveAdjacentLogitTokenChipColorKeys(entries);
         entries.forEach((entry, index) => {
-            const colorKey = chipColorKeys[index] ?? 0;
             const tokenEl = document.createElement('button');
             tokenEl.type = 'button';
             tokenEl.className = 'prompt-token-strip__token';
             if (entry.entryType === 'generated') {
                 tokenEl.classList.add('prompt-token-strip__token--generated');
             }
-            tokenEl.style.setProperty('--token-color-border', getLogitTokenChipColorCss(colorKey, 0.92));
-            tokenEl.style.setProperty('--token-color-fill', getLogitTokenChipColorCss(colorKey, 0.2));
-            tokenEl.style.setProperty('--token-color-fill-hover', getLogitTokenChipColorCss(colorKey, 0.28));
+            applyTokenChipColors(tokenEl, entry, index, { lookup: colorState.lookup });
             tokenEl.textContent = normalizeTokenText(entry.tokenLabel);
             tokenEl.dataset.tokenEntryIndex = String(index);
             fragment.appendChild(tokenEl);
@@ -359,6 +318,7 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
             clickableEntries = [];
             setHoveredEntry(null, { emit: true });
             mirroredEntry = null;
+            setActivePromptTokenChipEntries([]);
             dom.tokensEl.removeEventListener('click', handleTokenClick);
             dom.tokensEl.removeEventListener('pointerover', handleTokenPointerOver);
             dom.tokensEl.removeEventListener('pointerout', handleTokenPointerOut);

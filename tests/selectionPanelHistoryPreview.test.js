@@ -14,6 +14,7 @@ vi.mock('three', async (importOriginal) => {
         constructor({ canvas } = {}) {
             this.domElement = canvas || null;
             this.sizeCalls = [];
+            this.renderCalls = 0;
             this.toneMapping = 0;
             this.toneMappingExposure = 1;
             this.outputColorSpace = null;
@@ -35,7 +36,9 @@ vi.mock('three', async (importOriginal) => {
             this.height = height;
         }
 
-        render() {}
+        render() {
+            this.renderCalls += 1;
+        }
 
         dispose() {}
     }
@@ -100,7 +103,17 @@ function make2dContext() {
 
 function buildPanelDom() {
     document.body.innerHTML = `
-        <div id="hudStack"></div>
+        <div id="hudStack">
+            <div
+                id="detailPanelResizeHandle"
+                class="detail-panel-resize-handle"
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Resize selection panel"
+                aria-hidden="true"
+                tabindex="-1"
+            ></div>
+        </div>
         <div id="hudPanel"></div>
         <section id="detailPanel" aria-hidden="true">
             <div class="detail-header">
@@ -125,7 +138,10 @@ function buildPanelDom() {
             <div id="detailDescription"></div>
             <div class="detail-copy-context">
                 <button id="detailCopyContextBtn" class="detail-copy-context-btn" type="button">
-                    <span id="detailCopyContextBtnLabel">Copy context</span>
+                    <span class="detail-copy-context-copy">
+                        <span id="detailCopyContextBtnLabel">Copy context</span>
+                        <span id="detailCopyContextBtnAssistant" aria-hidden="true">🤖</span>
+                    </span>
                 </button>
             </div>
             <section id="detailEquations" aria-hidden="true">
@@ -189,17 +205,31 @@ function buildPanelDom() {
     `;
 
     const canvas = document.getElementById('detailCanvas');
+    const hudStack = document.getElementById('hudStack');
     let previewHidden = false;
+    const resolveHudWidth = () => {
+        const cssWidth = Number.parseFloat(document.documentElement.style.getPropertyValue('--hud-stack-desktop-width'));
+        return Number.isFinite(cssWidth) ? cssWidth : 400;
+    };
     canvas.getBoundingClientRect = () => ({
-        width: previewHidden ? 0 : 320,
+        width: previewHidden ? 0 : Math.max(1, resolveHudWidth() - 80),
         height: previewHidden ? 0 : 180,
         top: 0,
         left: 0,
-        right: previewHidden ? 0 : 320,
+        right: previewHidden ? 0 : Math.max(1, resolveHudWidth() - 80),
         bottom: previewHidden ? 0 : 180
+    });
+    hudStack.getBoundingClientRect = () => ({
+        width: resolveHudWidth(),
+        height: 720,
+        top: 0,
+        left: 624,
+        right: 624 + resolveHudWidth(),
+        bottom: 720
     });
 
     return {
+        hudStack,
         setPreviewHidden(value) {
             previewHidden = !!value;
         }
@@ -220,6 +250,25 @@ function makeSelection() {
     };
 }
 
+function dispatchPointerEvent(target, type, {
+    clientX = 0,
+    clientY = 0,
+    pointerId = 1,
+    pointerType = 'mouse',
+    button = 0
+} = {}) {
+    const event = new Event(type, { bubbles: true, cancelable: true });
+    Object.defineProperties(event, {
+        clientX: { value: clientX },
+        clientY: { value: clientY },
+        pointerId: { value: pointerId },
+        pointerType: { value: pointerType },
+        button: { value: button }
+    });
+    target.dispatchEvent(event);
+    return event;
+}
+
 describe('selectionPanel history preview reuse', () => {
     beforeEach(() => {
         mockState.rendererInstances.length = 0;
@@ -232,6 +281,19 @@ describe('selectionPanel history preview reuse', () => {
             addEventListener() {},
             removeEventListener() {}
         };
+        window.matchMedia = vi.fn((query) => ({
+            matches: query.includes('orientation: landscape')
+                ? true
+                : query.includes('max-aspect-ratio: 1/1') || query.includes('max-width: 880px')
+                    ? false
+                    : false,
+            media: query,
+            addEventListener() {},
+            removeEventListener() {},
+            addListener() {},
+            removeListener() {},
+            dispatchEvent() { return false; }
+        }));
         document.fonts = { ready: Promise.resolve() };
         HTMLCanvasElement.prototype.getContext = vi.fn(() => make2dContext());
     });
@@ -240,6 +302,8 @@ describe('selectionPanel history preview reuse', () => {
         vi.useRealTimers();
         vi.unstubAllGlobals();
         document.body.innerHTML = '';
+        document.body.className = '';
+        document.documentElement.style.removeProperty('--hud-stack-desktop-width');
     });
 
     it('forces a resize when returning to a reused preview through history navigation', () => {
@@ -271,5 +335,115 @@ describe('selectionPanel history preview reuse', () => {
         vi.advanceTimersByTime(300);
 
         expect(renderer.sizeCalls.at(-1)).toEqual([320, 180]);
+    });
+
+    it('allows touch pointers to resize the selection panel', () => {
+        buildPanelDom();
+        const panel = initSelectionPanel();
+        const selection = makeSelection();
+        const resizeHandle = document.getElementById('detailPanelResizeHandle');
+
+        expect(resizeHandle).toBeTruthy();
+
+        panel.handleSelection(selection);
+        vi.advanceTimersByTime(300);
+
+        dispatchPointerEvent(resizeHandle, 'pointerdown', {
+            clientX: 500,
+            pointerId: 7,
+            pointerType: 'touch'
+        });
+
+        expect(document.body.classList.contains('detail-panel-resizing')).toBe(true);
+        expect(document.body.classList.contains('touch-ui')).toBe(true);
+
+        dispatchPointerEvent(window, 'pointermove', {
+            clientX: 460,
+            pointerId: 7,
+            pointerType: 'touch'
+        });
+
+        expect(document.documentElement.style.getPropertyValue('--hud-stack-desktop-width')).toBe('440px');
+
+        dispatchPointerEvent(window, 'pointerup', {
+            pointerId: 7,
+            pointerType: 'touch'
+        });
+
+        expect(document.body.classList.contains('detail-panel-resizing')).toBe(false);
+    });
+
+    it('keeps the preview drawn during sidebar resize without refitting mid-drag', () => {
+        buildPanelDom();
+        const panel = initSelectionPanel();
+        const selection = makeSelection();
+        const resizeHandle = document.getElementById('detailPanelResizeHandle');
+
+        panel.handleSelection(selection);
+        vi.advanceTimersByTime(300);
+
+        const renderer = mockState.rendererInstances[0];
+        expect(renderer).toBeTruthy();
+        const initialRenderCalls = renderer.renderCalls;
+        expect(renderer.sizeCalls.at(-1)).toEqual([320, 180]);
+
+        dispatchPointerEvent(resizeHandle, 'pointerdown', {
+            clientX: 500,
+            pointerId: 9
+        });
+        dispatchPointerEvent(window, 'pointermove', {
+            clientX: 460,
+            pointerId: 9
+        });
+        vi.advanceTimersByTime(300);
+
+        expect(renderer.sizeCalls.at(-1)).toEqual([360, 180]);
+        expect(renderer.renderCalls).toBeGreaterThan(initialRenderCalls);
+    });
+
+    it('renders attention score subtitle rows with a dedicated detail wrapper next to the score pill', () => {
+        buildPanelDom();
+        const panel = initSelectionPanel();
+
+        panel.updateData({
+            activationSource: {
+                getTokenCount: () => 8,
+                getTokenString: (index) => (index === 4 ? '"' : `tok-${index}`),
+                getTokenId: (index) => 1000 + index
+            },
+            attentionTokenIndices: [0, 1, 2, 3, 4, 5],
+            attentionTokenLabels: ['tok-0', 'tok-1', 'tok-2', 'tok-3', '"', 'tok-5']
+        });
+
+        panel.handleSelection({
+            label: 'Post-Softmax Attention Score',
+            kind: 'attentionSphere',
+            info: {
+                activationData: {
+                    stage: 'attention.post',
+                    layerIndex: 4,
+                    headIndex: 4,
+                    tokenIndex: 4,
+                    keyTokenIndex: 4,
+                    tokenLabel: '"',
+                    keyTokenLabel: '"',
+                    postScore: 0.0675
+                }
+            }
+        });
+
+        const subtitleSecondary = document.getElementById('detailSubtitleSecondary');
+        const parts = Array.from(subtitleSecondary.querySelectorAll('.detail-attention-context-part'));
+        const score = subtitleSecondary.querySelector('.detail-attention-context-score-value');
+
+        expect(subtitleSecondary.classList.contains('detail-subtitle--attention-context')).toBe(true);
+        expect(parts).toHaveLength(2);
+        for (const part of parts) {
+            const detail = part.querySelector('.detail-attention-context-detail');
+            expect(detail).toBeTruthy();
+            expect(detail?.querySelector('.detail-attention-context-chip')).toBeTruthy();
+            expect(detail?.querySelector('.detail-attention-context-position')?.textContent).toBe('(position 5)');
+        }
+        expect(score?.textContent).toBe('0.0675');
     });
 });

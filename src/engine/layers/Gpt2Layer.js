@@ -3111,13 +3111,17 @@ export default class Gpt2Layer extends BaseLayer {
                         vec,
                         lane,
                         () => {
-                            if (postMlpData) {
-                                applyVectorData(
-                                    lane.originalVec,
-                                    postMlpData,
-                                    lane.tokenLabel ? `Post-MLP Residual - ${lane.tokenLabel}` : 'Post-MLP Residual',
-                                    this._getLaneMeta(lane, 'residual.post_mlp')
-                                );
+                            try {
+                                if (postMlpData) {
+                                    applyVectorData(
+                                        lane.originalVec,
+                                        postMlpData,
+                                        lane.tokenLabel ? `Post-MLP Residual - ${lane.tokenLabel}` : 'Post-MLP Residual',
+                                        this._getLaneMeta(lane, 'residual.post_mlp')
+                                    );
+                                }
+                            } finally {
+                                this._completePendingAddition(lane);
                             }
                         },
                         { cameraHoldAfterAdditionMs: 220 }
@@ -4251,27 +4255,19 @@ export default class Gpt2Layer extends BaseLayer {
      * Schedule callback for when addition animation completes
      */
     _scheduleAdditionCompletion(lane) {
-        // Mirror timings from additionUtils to ensure consistent completion detection
+        // Safety fallback only. Normal completion should come from the actual
+        // addition callback so layer advancement is not delayed by timing drift.
         const duration      = PRISM_ADD_ANIM_BASE_DURATION             / PRISM_ADD_ANIM_SPEED_MULT;
         const flashDuration = PRISM_ADD_ANIM_BASE_FLASH_DURATION       / PRISM_ADD_ANIM_SPEED_MULT;
         const delayBetween  = PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS / PRISM_ADD_ANIM_SPEED_MULT;
         const vectorLength = lane?.addTarget?.instanceCount
             || lane?.originalVec?.instanceCount
             || this._getBaseVectorLength();
-        const totalAnimTime = duration + flashDuration + vectorLength * delayBetween;
+        const totalAnimTime = duration + flashDuration + Math.max(0, (vectorLength - 1) * delayBetween);
 
         lane.additionComplete = false;
 
-        const complete = () => {
-            if (this._pendingAdditions > 0) {
-                this._pendingAdditions--;
-            }
-            lane.additionComplete = true;
-            if (lane._additionCompletionTween) {
-                try { lane._additionCompletionTween.stop(); } catch (_) { /* no-op */ }
-                lane._additionCompletionTween = null;
-            }
-        };
+        const complete = () => this._completePendingAddition(lane);
 
         if (typeof TWEEN !== 'undefined') {
             const tween = new TWEEN.Tween({ progress: 0 })
@@ -4282,6 +4278,20 @@ export default class Gpt2Layer extends BaseLayer {
         } else {
             setTimeout(complete, totalAnimTime + 100);
         }
+    }
+
+    _completePendingAddition(lane) {
+        if (!lane || lane.additionComplete) return false;
+        lane.additionComplete = true;
+        if (this._pendingAdditions > 0) {
+            this._pendingAdditions--;
+        }
+        if (lane._additionCompletionTween) {
+            try { lane._additionCompletionTween.stop(); } catch (_) { /* no-op */ }
+            lane._additionCompletionTween = null;
+        }
+        this._emitProgress();
+        return true;
     }
 
     /**

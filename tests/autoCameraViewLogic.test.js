@@ -33,6 +33,21 @@ describe('autoCameraViewLogic.resolveAutoCameraViewState', () => {
         expect(result.rawKey).toBe('ln');
     });
 
+    it('returns top-ln for the final LayerNorm endgame phase', () => {
+        const pipeline = { isForwardPassComplete: () => false };
+        const result = resolveAutoCameraViewState({
+            pipeline,
+            layers: [{
+                index: 11,
+                lanes: [{ horizPhase: HORIZ_PHASE.WAITING, ln2Phase: LN2_PHASE.NOT_STARTED }]
+            }],
+            currentLayerIdx: 11,
+            isTopLayerNormCameraPhase: () => true
+        });
+        expect(result.rawKey).toBe('top-ln');
+        expect(result.viewContext?.inTopLn).toBe(true);
+    });
+
     it('returns ln when active lane is moving right toward first layer norm', () => {
         const pipeline = { isForwardPassComplete: () => false };
         const result = resolveAutoCameraViewState({
@@ -139,6 +154,29 @@ describe('autoCameraViewLogic.resolveAutoCameraViewState', () => {
         expect(result.rawKey).toBe('concat');
     });
 
+    it('returns final as soon as the last-layer vectors enter the top unembedding path', () => {
+        const pipeline = { isForwardPassComplete: () => false };
+        const result = resolveAutoCameraViewState({
+            pipeline,
+            layers: [{
+                index: 11,
+                __topEmbedEntryYLocal: 20000,
+                lanes: [{
+                    horizPhase: HORIZ_PHASE.WAITING,
+                    ln2Phase: LN2_PHASE.NOT_STARTED,
+                    originalVec: {
+                        group: {
+                            position: { y: 20000.25 }
+                        }
+                    }
+                }]
+            }],
+            currentLayerIdx: 11
+        });
+        expect(result.rawKey).toBe('final');
+        expect(result.viewContext?.inTopEmbedding).toBe(true);
+    });
+
     it('holds concat framing during output projection/residual add after concat', () => {
         const pipeline = { isForwardPassComplete: () => false };
         const result = resolveAutoCameraViewState({
@@ -221,5 +259,14 @@ describe('autoCameraViewLogic hold and stable key', () => {
             baseHoldMs: 90
         });
         expect(hold).toBe(28);
+    });
+
+    it('uses the layer-norm hold floor when switching into top-ln', () => {
+        const hold = getAutoCameraViewSwitchHoldMs({
+            fromKey: 'default',
+            toKey: 'top-ln',
+            baseHoldMs: 40
+        });
+        expect(hold).toBe(72);
     });
 });

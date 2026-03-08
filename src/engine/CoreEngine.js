@@ -3,10 +3,20 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-import { QUALITY_PRESET, resolveRenderPixelRatio } from '../utils/constants.js';
+import {
+    QUALITY_PRESET,
+    getActiveRenderPixelRatioHint,
+    resolveRenderPixelRatio,
+    setActiveRenderPixelRatioHint
+} from '../utils/constants.js';
 import { perfStats } from '../utils/perfStats.js';
 import { refreshTrailDisplayScales } from '../utils/trailUtils.js';
 import { TRAIL_LINE_WIDTH, TRAIL_OPACITY, scaleLineWidthForDisplay, scaleOpacityForDisplay } from '../utils/trailConstants.js';
+import {
+    applyPromptTokenChipColors,
+    formatTokenChipDisplayText
+} from '../utils/tokenChipStyleUtils.js';
+import { resolveHoverTokenContext } from './coreHoverTokenContext.js';
 import Gpt2Layer from './layers/Gpt2Layer.js';
 import { resolveRaycastLabel as resolveRaycastLabelFromIntersections } from './coreRaycastResolver.js';
 import {
@@ -21,6 +31,14 @@ const ZOOM_OUT_SUPERSAMPLE_MAX_MULTIPLIER = 1.22;
 const ZOOM_OUT_SUPERSAMPLE_MAX_DPR = 2.6;
 const ZOOM_OUT_SUPERSAMPLE_RATIO_STEP = 0.05;
 const ZOOM_OUT_SUPERSAMPLE_DEBOUNCE_MS = 140;
+const ADAPTIVE_RENDER_DPR_TOUCH_MAX = 3.0;
+const ADAPTIVE_RENDER_DPR_SAMPLE_MIN_MS = 900;
+const ADAPTIVE_RENDER_DPR_SAMPLE_MIN_FRAMES = 45;
+const ADAPTIVE_RENDER_DPR_STEP = 0.1;
+const ADAPTIVE_RENDER_DPR_PROMOTE_FPS = 57;
+const ADAPTIVE_RENDER_DPR_DEMOTE_FPS = 53;
+const ADAPTIVE_RENDER_DPR_ADJUST_COOLDOWN_MS = 1400;
+const HOVER_TOKEN_CHIP_FONT_SIZE = '11px';
 
 /**
  * CoreEngine is responsible for creating the Three-JS renderer, camera, 
@@ -39,6 +57,7 @@ export class CoreEngine {
         this._container = container;
         this._layers = layers;
         this._speed  = typeof opts.speed === 'number' ? opts.speed : 1.0;
+        this._activationSource = opts.activationSource || null;
         this._devMode = !!opts.devMode;
         this._cameraDebugEnabled = !!opts.cameraDebug;
         this._cameraDebugGroup = null;
@@ -98,8 +117,51 @@ export class CoreEngine {
             ? opts.zoomOutSupersampleDebounceMs
             : ZOOM_OUT_SUPERSAMPLE_DEBOUNCE_MS;
         this._pixelRatioRefreshTimer = null;
+        this._adaptiveRenderDprEnabled = opts.adaptiveRenderDpr !== false;
+        this._adaptiveRenderDprFloor = null;
+        this._adaptiveRenderDprCeiling = null;
+        this._adaptiveRenderDprCap = null;
+        this._adaptiveRenderDprLocked = false;
+        this._adaptiveRenderDprSampleElapsedMs = 0;
+        this._adaptiveRenderDprSampleFrames = 0;
+        this._adaptiveRenderDprLastAdjustAt = -Infinity;
+        this._adaptiveRenderDprStep = (typeof opts.adaptiveRenderDprStep === 'number'
+            && Number.isFinite(opts.adaptiveRenderDprStep)
+            && opts.adaptiveRenderDprStep > 0)
+            ? opts.adaptiveRenderDprStep
+            : ADAPTIVE_RENDER_DPR_STEP;
+        this._adaptiveRenderDprSampleMinMs = (typeof opts.adaptiveRenderDprSampleMinMs === 'number'
+            && Number.isFinite(opts.adaptiveRenderDprSampleMinMs)
+            && opts.adaptiveRenderDprSampleMinMs > 0)
+            ? opts.adaptiveRenderDprSampleMinMs
+            : ADAPTIVE_RENDER_DPR_SAMPLE_MIN_MS;
+        this._adaptiveRenderDprSampleMinFrames = (typeof opts.adaptiveRenderDprSampleMinFrames === 'number'
+            && Number.isFinite(opts.adaptiveRenderDprSampleMinFrames)
+            && opts.adaptiveRenderDprSampleMinFrames > 0)
+            ? Math.max(1, Math.round(opts.adaptiveRenderDprSampleMinFrames))
+            : ADAPTIVE_RENDER_DPR_SAMPLE_MIN_FRAMES;
+        this._adaptiveRenderDprPromoteFps = (typeof opts.adaptiveRenderDprPromoteFps === 'number'
+            && Number.isFinite(opts.adaptiveRenderDprPromoteFps)
+            && opts.adaptiveRenderDprPromoteFps > 0)
+            ? opts.adaptiveRenderDprPromoteFps
+            : ADAPTIVE_RENDER_DPR_PROMOTE_FPS;
+        this._adaptiveRenderDprDemoteFps = (typeof opts.adaptiveRenderDprDemoteFps === 'number'
+            && Number.isFinite(opts.adaptiveRenderDprDemoteFps)
+            && opts.adaptiveRenderDprDemoteFps > 0)
+            ? opts.adaptiveRenderDprDemoteFps
+            : ADAPTIVE_RENDER_DPR_DEMOTE_FPS;
+        this._adaptiveRenderDprAdjustCooldownMs = (typeof opts.adaptiveRenderDprAdjustCooldownMs === 'number'
+            && Number.isFinite(opts.adaptiveRenderDprAdjustCooldownMs)
+            && opts.adaptiveRenderDprAdjustCooldownMs >= 0)
+            ? opts.adaptiveRenderDprAdjustCooldownMs
+            : ADAPTIVE_RENDER_DPR_ADJUST_COOLDOWN_MS;
 
         const initialViewport = this._getViewportDimensions();
+        this._refreshAdaptiveRenderDprBounds({
+            viewportWidth: initialViewport.width,
+            viewportHeight: initialViewport.height,
+            resetCap: true
+        });
         this.camera = new THREE.PerspectiveCamera(60, initialViewport.width / initialViewport.height, 5, 10000);
         this.camera.position.set(0, 150, 800);
 
@@ -186,6 +248,7 @@ export class CoreEngine {
 
         // Hover label DOM element (similar styling to status overlay)
         this._hoverLabelDiv = document.createElement('div');
+        this._hoverLabelDiv.className = 'scene-hover-label';
         Object.assign(this._hoverLabelDiv.style, {
             position: 'fixed',
             top: '0px',
@@ -194,15 +257,36 @@ export class CoreEngine {
             fontFamily: 'monospace',
             fontSize: '14px',
             color: '#fff',
-            background: 'rgba(20,20,20,0.35)',
+            background: 'rgba(20,20,20,0.58)',
             backdropFilter: 'blur(6px)',
             WebkitBackdropFilter: 'blur(6px)',
             borderRadius: '8px',
             pointerEvents: 'none',
             zIndex: 6,
-            whiteSpace: 'pre',
+            whiteSpace: 'nowrap',
             display: 'none'
         });
+        this._hoverLabelDiv.style.setProperty('--detail-font-chip', HOVER_TOKEN_CHIP_FONT_SIZE);
+        this._hoverLabelContent = document.createElement('div');
+        this._hoverLabelContent.className = 'scene-hover-label__content';
+        this._hoverLabelText = document.createElement('span');
+        this._hoverLabelText.className = 'scene-hover-label__text';
+        this._hoverLabelSeparator = document.createElement('span');
+        this._hoverLabelSeparator.className = 'scene-hover-label__separator';
+        this._hoverLabelSeparator.textContent = '-';
+        this._hoverLabelTokenChip = document.createElement('span');
+        this._hoverLabelTokenChip.className = 'detail-subtitle-token-chip scene-hover-label__token-chip';
+        this._hoverLabelTokenChip.setAttribute('aria-hidden', 'true');
+        this._hoverLabelDetailText = document.createElement('span');
+        this._hoverLabelDetailText.className = 'scene-hover-label__detail-text';
+        this._hoverLabelDetailText.setAttribute('aria-hidden', 'true');
+        this._hoverLabelContent.append(
+            this._hoverLabelText,
+            this._hoverLabelSeparator,
+            this._hoverLabelTokenChip,
+            this._hoverLabelDetailText
+        );
+        this._hoverLabelDiv.appendChild(this._hoverLabelContent);
         document.body.appendChild(this._hoverLabelDiv);
 
         // Track primary touch interactions so quick taps can trigger raycasts
@@ -567,6 +651,11 @@ export class CoreEngine {
         if (this.composer && Array.isArray(this.composer.passes)) {
             this.composer.passes.forEach(p => p.dispose && p.dispose());
         }
+        const activeRenderHint = getActiveRenderPixelRatioHint();
+        if (Number.isFinite(activeRenderHint) && Number.isFinite(this._appliedRenderPixelRatio)
+            && Math.abs(activeRenderHint - this._appliedRenderPixelRatio) < 0.001) {
+            setActiveRenderPixelRatioHint(null);
+        }
         this.renderer.dispose();
         this.renderer.domElement.removeEventListener('pointermove', this._onPointerMove);
         this.renderer.domElement.removeEventListener('pointerdown', this._onPointerDown);
@@ -621,10 +710,123 @@ export class CoreEngine {
         };
     };
 
+    _hasManualRenderPixelRatioOverride() {
+        if (typeof window === 'undefined') return false;
+        return !!(
+            (typeof window.__RENDER_PIXEL_RATIO === 'number' && window.__RENDER_PIXEL_RATIO > 0)
+            || (typeof window.__RENDER_DPR_CAP === 'number' && window.__RENDER_DPR_CAP > 0)
+        );
+    }
+
+    _resetAdaptiveRenderDprSampling() {
+        this._adaptiveRenderDprSampleElapsedMs = 0;
+        this._adaptiveRenderDprSampleFrames = 0;
+    }
+
+    _refreshAdaptiveRenderDprBounds({ viewportWidth = null, viewportHeight = null, resetCap = false } = {}) {
+        if (!this._adaptiveRenderDprEnabled) return;
+
+        const manualOverride = this._hasManualRenderPixelRatioOverride();
+        this._adaptiveRenderDprLocked = manualOverride;
+        if (manualOverride) {
+            this._adaptiveRenderDprFloor = null;
+            this._adaptiveRenderDprCeiling = null;
+            this._adaptiveRenderDprCap = null;
+            this._resetAdaptiveRenderDprSampling();
+            return;
+        }
+
+        const width = Number.isFinite(viewportWidth)
+            ? viewportWidth
+            : (typeof window !== 'undefined' ? window.innerWidth : 0);
+        const height = Number.isFinite(viewportHeight)
+            ? viewportHeight
+            : (typeof window !== 'undefined' ? window.innerHeight : 0);
+        const floor = resolveRenderPixelRatio({
+            viewportWidth: width,
+            viewportHeight: height
+        });
+        const liveDpr = (typeof window !== 'undefined' && typeof window.devicePixelRatio === 'number' && window.devicePixelRatio > 0)
+            ? window.devicePixelRatio
+            : 1;
+        const touchPrimary = this._isTouchPrimaryDevice();
+        const desktopCeiling = this._zoomOutSupersampleEnabled
+            ? Math.max(floor, Math.min(this._zoomOutSupersampleMaxDpr, Math.max(liveDpr, floor)))
+            : floor;
+        const ceiling = touchPrimary
+            ? Math.max(floor, Math.min(ADAPTIVE_RENDER_DPR_TOUCH_MAX, Math.max(liveDpr, floor)))
+            : desktopCeiling;
+
+        this._adaptiveRenderDprFloor = floor;
+        this._adaptiveRenderDprCeiling = ceiling;
+        if (resetCap || !(Number.isFinite(this._adaptiveRenderDprCap) && this._adaptiveRenderDprCap > 0)) {
+            this._adaptiveRenderDprCap = floor;
+        } else {
+            this._adaptiveRenderDprCap = THREE.MathUtils.clamp(this._adaptiveRenderDprCap, floor, ceiling);
+        }
+        this._resetAdaptiveRenderDprSampling();
+    }
+
+    _getResolvedRenderDprCap() {
+        if (!this._adaptiveRenderDprEnabled || this._adaptiveRenderDprLocked) return null;
+        return (Number.isFinite(this._adaptiveRenderDprCap) && this._adaptiveRenderDprCap > 0)
+            ? this._adaptiveRenderDprCap
+            : null;
+    }
+
+    _noteAdaptiveRenderDprFrame(now, frameIntervalMs) {
+        if (!this._adaptiveRenderDprEnabled || this._adaptiveRenderDprLocked) return;
+        if (!(Number.isFinite(now) && Number.isFinite(frameIntervalMs) && frameIntervalMs > 0)) return;
+
+        const floor = this._adaptiveRenderDprFloor;
+        const ceiling = this._adaptiveRenderDprCeiling;
+        const cap = this._adaptiveRenderDprCap;
+        if (!(Number.isFinite(floor) && Number.isFinite(ceiling) && Number.isFinite(cap))) return;
+        if (ceiling <= floor + 0.001) return;
+
+        this._adaptiveRenderDprSampleElapsedMs += frameIntervalMs;
+        this._adaptiveRenderDprSampleFrames += 1;
+        if (this._adaptiveRenderDprSampleFrames < this._adaptiveRenderDprSampleMinFrames
+            && this._adaptiveRenderDprSampleElapsedMs < this._adaptiveRenderDprSampleMinMs) {
+            return;
+        }
+
+        const fps = (this._adaptiveRenderDprSampleElapsedMs > 0)
+            ? (this._adaptiveRenderDprSampleFrames * 1000) / this._adaptiveRenderDprSampleElapsedMs
+            : 0;
+        this._resetAdaptiveRenderDprSampling();
+
+        let nextCap = cap;
+        if (fps < this._adaptiveRenderDprDemoteFps && cap > floor + 0.001) {
+            const deficit = this._adaptiveRenderDprDemoteFps - fps;
+            const demoteStep = deficit >= 8
+                ? this._adaptiveRenderDprStep * 2
+                : this._adaptiveRenderDprStep;
+            nextCap = Math.max(floor, cap - demoteStep);
+        } else if (
+            fps > this._adaptiveRenderDprPromoteFps
+            && cap < ceiling - 0.001
+            && !this._isUserNavigating
+            && (now - this._adaptiveRenderDprLastAdjustAt) >= this._adaptiveRenderDprAdjustCooldownMs
+        ) {
+            nextCap = Math.min(ceiling, cap + this._adaptiveRenderDprStep);
+        }
+
+        if (Math.abs(nextCap - cap) < 0.001) return;
+        const step = Math.max(0.01, this._adaptiveRenderDprStep);
+        this._adaptiveRenderDprCap = Math.round(nextCap / step) * step;
+        this._adaptiveRenderDprLastAdjustAt = now;
+        this._updateRendererPixelRatio({ force: true });
+    }
+
     _onResize = () => {
         const { width, height } = this._getViewportDimensions();
         this.camera.aspect = width / height;
         this.camera.updateProjectionMatrix();
+        this._refreshAdaptiveRenderDprBounds({
+            viewportWidth: width,
+            viewportHeight: height
+        });
         this._updateRendererPixelRatio({ force: true, viewportWidth: width, viewportHeight: height });
         this.renderer.setSize(width, height);
         if (this.composer) this.composer.setSize(width, height);
@@ -689,7 +891,11 @@ export class CoreEngine {
             reason,
             dpr,
             rendererPixelRatio: renderRatio,
-            resolvedPixelRatio: resolveRenderPixelRatio({ viewportWidth: width, viewportHeight: height }),
+            resolvedPixelRatio: resolveRenderPixelRatio({
+                viewportWidth: width,
+                viewportHeight: height,
+                dprCap: this._getResolvedRenderDprCap()
+            }),
             viewport: {
                 width,
                 height,
@@ -741,6 +947,13 @@ export class CoreEngine {
             trailObjects: {
                 total: trailCount,
                 visible: visibleTrailCount
+            },
+            adaptiveRenderDpr: {
+                enabled: this._adaptiveRenderDprEnabled,
+                locked: this._adaptiveRenderDprLocked,
+                floor: this._adaptiveRenderDprFloor,
+                cap: this._adaptiveRenderDprCap,
+                ceiling: this._adaptiveRenderDprCeiling
             }
         });
     };
@@ -749,15 +962,21 @@ export class CoreEngine {
         if (!this.renderer) return;
         let nextRatio = resolveRenderPixelRatio({
             viewportWidth,
-            viewportHeight
+            viewportHeight,
+            dprCap: this._getResolvedRenderDprCap()
         });
         nextRatio = this._applyZoomOutSupersample(nextRatio);
+        const adaptiveCap = this._getResolvedRenderDprCap();
+        if (Number.isFinite(adaptiveCap) && adaptiveCap > 0) {
+            nextRatio = Math.min(nextRatio, adaptiveCap);
+        }
         if (!force && Number.isFinite(this._appliedRenderPixelRatio)
             && Math.abs(this._appliedRenderPixelRatio - nextRatio) < 0.001) {
             return;
         }
         this._appliedRenderPixelRatio = nextRatio;
         this.renderer.setPixelRatio(nextRatio);
+        setActiveRenderPixelRatioHint(nextRatio);
         if (this.composer && typeof this.composer.setPixelRatio === 'function') {
             this.composer.setPixelRatio(nextRatio);
         }
@@ -823,6 +1042,7 @@ export class CoreEngine {
     _onControlsStartInteraction() {
         this._isUserNavigating = true;
         this._cancelPendingPixelRatioRefresh();
+        this._resetAdaptiveRenderDprSampling();
         this._updateRendererPixelRatio({ force: true });
     }
 
@@ -1275,7 +1495,16 @@ export class CoreEngine {
                 resolved.info,
                 resolved.object || resolved.hit?.object || null
             );
-            this._hoverLabelDiv.textContent = hoverLabel;
+            const rendered = this._renderHoverLabel(
+                hoverLabel,
+                resolved.info,
+                resolved.object || resolved.hit?.object || null
+            );
+            if (!rendered) {
+                this._hoverLabelDiv.style.display = 'none';
+                this._setCanvasCursor(false);
+                return;
+            }
             this._hoverLabelDiv.style.left = `${clientX + 12}px`;
             this._hoverLabelDiv.style.top  = `${clientY + 12}px`;
             this._hoverLabelDiv.style.display = 'block';
@@ -1285,6 +1514,74 @@ export class CoreEngine {
         // No intersection with a labelled object – hide overlay.
         this._hoverLabelDiv.style.display = 'none';
         this._setCanvasCursor(false);
+    }
+
+    _renderHoverLabel(label = '', info = null, object = null) {
+        if (!this._hoverLabelDiv) return;
+        if (!this._hoverLabelText || !this._hoverLabelSeparator || !this._hoverLabelTokenChip || !this._hoverLabelDetailText) {
+            this._hoverLabelDiv.textContent = String(label || '');
+            return true;
+        }
+
+        const safeLabel = String(label || '');
+
+        const detailContext = resolveHoverTokenContext({
+            label: safeLabel,
+            info,
+            object,
+            activationSource: this._activationSource
+        });
+        if (detailContext?.suppressHoverLabel === true) {
+            this._hoverLabelText.textContent = '';
+            this._hoverLabelText.hidden = true;
+            this._hoverLabelSeparator.hidden = true;
+            this._hoverLabelTokenChip.hidden = true;
+            this._hoverLabelTokenChip.textContent = '';
+            this._hoverLabelTokenChip.removeAttribute('title');
+            this._hoverLabelDetailText.hidden = true;
+            this._hoverLabelDetailText.textContent = '';
+            return false;
+        }
+
+        const showDetail = !!detailContext;
+        const showTokenChip = detailContext?.detailKind === 'token-chip';
+        const showDetailText = detailContext?.detailKind === 'position-text';
+        const showPrimaryLabel = detailContext?.showPrimaryLabel !== false;
+        const primaryLabelText = (typeof detailContext?.primaryLabelText === 'string' && detailContext.primaryLabelText.length)
+            ? detailContext.primaryLabelText
+            : safeLabel;
+        this._hoverLabelText.textContent = showPrimaryLabel ? primaryLabelText : '';
+        this._hoverLabelText.hidden = !showPrimaryLabel;
+        this._hoverLabelSeparator.hidden = !showDetail || !showPrimaryLabel;
+        this._hoverLabelTokenChip.hidden = !showTokenChip;
+        this._hoverLabelDetailText.hidden = !showDetailText;
+        if (!showDetail) {
+            this._hoverLabelTokenChip.textContent = '';
+            this._hoverLabelTokenChip.removeAttribute('title');
+            this._hoverLabelDetailText.textContent = '';
+            return true;
+        }
+
+        if (showDetailText) {
+            this._hoverLabelTokenChip.textContent = '';
+            this._hoverLabelTokenChip.removeAttribute('title');
+            this._hoverLabelDetailText.textContent = detailContext.detailText || '';
+            return true;
+        }
+
+        this._hoverLabelDetailText.textContent = '';
+
+        this._hoverLabelTokenChip.textContent = formatTokenChipDisplayText(
+            detailContext.tokenLabel,
+            detailContext.tokenIndex
+        );
+        this._hoverLabelTokenChip.title = detailContext.tokenLabel;
+        applyPromptTokenChipColors(this._hoverLabelTokenChip, {
+            tokenText: detailContext.tokenLabel,
+            tokenIndex: detailContext.tokenIndex,
+            tokenId: detailContext.tokenId
+        });
+        return true;
     }
 
     _performSelectionAt(clientX, clientY, { force = false } = {}) {
@@ -1560,8 +1857,9 @@ export class CoreEngine {
             return;
         }
         this._lastFrameTime = now;
+        const frameIntervalMs = lastFrameTime !== null ? (now - lastFrameTime) : null;
         const frameDelta = lastFrameTime !== null
-            ? Math.min((now - lastFrameTime) / 1000, 0.1)
+            ? Math.min(frameIntervalMs / 1000, 0.1)
             : (1 / 60);
 
         const visibilityPauseOnly = this._paused && this._pauseReasons.size === 1 && this._pauseReasons.has('visibility');
@@ -1666,6 +1964,9 @@ export class CoreEngine {
         }
         if (perfEnabled) {
             perfStats.addTime('render', this._now() - renderStart);
+        }
+        if (!this._paused) {
+            this._noteAdaptiveRenderDprFrame(now, frameIntervalMs);
         }
 
         if (this._devMode && this._stats) this._stats.end();

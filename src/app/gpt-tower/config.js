@@ -82,8 +82,12 @@ export const CAMERA_CONFIG = {
     followTravelTargetOffset: [4038.68, -398.41, 601.18],
     followTravelMobileCameraOffset: [1497.04, -634.39, 1515.69],
     followTravelMobileTargetOffset: [3550.65, -516.36, 854.82],
-    followFinalCameraOffset: [-1215.87, 465.86, 3350.33],
-    followFinalTargetOffset: [1675.46, 227.33, -469.85],
+    // End-of-scene framing while vectors move through the final top LayerNorm.
+    followTopLnCameraOffset: [5.33, 2.04, 2353.35],
+    followTopLnTargetOffset: [448.41, 103.15, -690.93],
+    // End-of-scene framing once vectors have entered the final unembedding.
+    followFinalCameraOffset: [-4616.63, 2358.68, 5211.71],
+    followFinalTargetOffset: [836.20, 742.77, -769.78],
     followFinalMobileCameraOffset: [-2577.88, 2405.44, 5217.17],
     followFinalMobileTargetOffset: [873.36, 176.29, -957.97],
     followLayerEndDesktopCameraOffset: [-354.19, 2251.39, 7180.46],
