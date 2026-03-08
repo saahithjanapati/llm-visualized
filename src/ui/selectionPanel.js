@@ -82,10 +82,6 @@ import {
     tryCopyVectorAppearanceToPreview
 } from './selectionPanelVectorCloneUtils.js';
 import {
-    LAYER_NORM_ACTIVE_PARAM_PREVIEW_COLOR_OPTIONS,
-    resolveLayerNormPreviewContext
-} from './selectionPanelLayerNormPreviewUtils.js';
-import {
     ATTENTION_DECODE_ROW_OFFSET_MAX_PX,
     ATTENTION_DECODE_ROW_OFFSET_MIN_PX,
     ATTENTION_DECODE_ROW_OFFSET_MULT,
@@ -2035,6 +2031,10 @@ function buildAttentionSpherePreview(selectionInfo) {
     mesh.scale.setScalar(0.64);
     return {
         object: mesh,
+        view: {
+            fitDistanceMultiplier: 1.35,
+            fitPaddingMultiplier: 1.08
+        },
         dispose: () => {
             geometry.dispose();
             material.dispose();
@@ -2042,76 +2042,21 @@ function buildAttentionSpherePreview(selectionInfo) {
     };
 }
 
-function buildLayerNormParamBankPreview({
-    layerNormKind = null,
-    param = 'scale',
-    layerIndex = null,
-    layoutCount = 0,
-    activeLaneLayoutIndices = [],
-    baseVectorLength = D_MODEL,
-    previewDepth = LN_PARAMS.depth
-} = {}) {
-    if (!layerNormKind) return null;
-
-    const previewData = getLayerNormParamData(layerIndex, layerNormKind, param, baseVectorLength);
-    const isArrayLike = Array.isArray(previewData) || ArrayBuffer.isView(previewData);
-    if (!isArrayLike || previewData.length === 0) return null;
-
-    const safeLayoutCount = Math.max(1, Math.floor(layoutCount || activeLaneLayoutIndices.length || 1));
-    const laneIndices = Array.isArray(activeLaneLayoutIndices) && activeLaneLayoutIndices.length
-        ? activeLaneLayoutIndices
-        : Array.from({ length: safeLayoutCount }, (_, idx) => idx);
-    const previewInstanceCount = resolveLayerNormParamPreviewInstanceCount(null, previewData);
-    const zSpacing = previewDepth / (safeLayoutCount + 1);
-    const yPosition = param === 'shift'
-        ? LN_PARAMS.height * 0.25
-        : 3.3;
-    const vectors = [];
-    const group = new THREE.Group();
-
-    laneIndices.forEach((laneLayoutIndex) => {
-        const safeLaneLayoutIndex = Number.isFinite(laneLayoutIndex)
-            ? Math.max(0, Math.min(safeLayoutCount - 1, Math.floor(laneLayoutIndex)))
-            : 0;
-        const vec = createPreviewVector({
-            colorHex: MHA_FINAL_Q_COLOR,
-            data: null,
-            instanceCount: previewInstanceCount
-        });
-        vec.group.position.set(
-            0,
-            yPosition,
-            -previewDepth / 2 + zSpacing * (safeLaneLayoutIndex + 1)
-        );
-        vec.group.userData = vec.group.userData || {};
-        vec.group.userData.label = getLayerNormParamLabel(layerNormKind, param);
-        applyDataToPreviewVector(vec, previewData, {
-            colorOptions: LAYER_NORM_ACTIVE_PARAM_PREVIEW_COLOR_OPTIONS
-        });
-        group.add(vec.group);
-        vectors.push(vec);
-    });
-
-    return {
-        group,
-        dispose: () => {
-            vectors.forEach((vec) => {
-                vec.dispose();
-            });
-        }
-    };
-}
-
 export function buildLayerNormPreview(label, selectionInfo, engine = null) {
-    const previewContext = resolveLayerNormPreviewContext(selectionInfo, engine);
-    const holeCountFallback = Number.isFinite(LN_PARAMS.numberOfHoles) ? LN_PARAMS.numberOfHoles : PREVIEW_SOLID_LANES;
-    const holeCount = Math.max(1, Math.floor(previewContext.layoutCount || holeCountFallback));
-    const baseHoles = Number.isFinite(LN_PARAMS.numberOfHoles) ? LN_PARAMS.numberOfHoles : holeCount;
+    const clonePreview = buildSelectionClonePreview(selectionInfo, label)
+        || buildDirectClonePreview(selectionInfo);
+    if (clonePreview) {
+        applyFinalColorToObject(clonePreview.object, 0xffffff);
+        return clonePreview;
+    }
+
+    const baseHoles = Number.isFinite(LN_PARAMS.numberOfHoles) ? LN_PARAMS.numberOfHoles : PREVIEW_SOLID_LANES;
+    const depthScale = PREVIEW_SOLID_LANES / Math.max(1, baseHoles);
     const previewDepth = Math.max(
         180,
-        Math.min(PREVIEW_MATRIX_DEPTH, LN_PARAMS.depth * (holeCount / Math.max(1, baseHoles)))
+        Math.min(PREVIEW_MATRIX_DEPTH, LN_PARAMS.depth * depthScale)
     );
-    const params = { ...LN_PARAMS, numberOfHoles: holeCount, depth: previewDepth };
+    const params = { ...LN_PARAMS, numberOfHoles: PREVIEW_SOLID_LANES, depth: previewDepth };
     const ln = new LayerNormalizationVisualization(
         new THREE.Vector3(0, 0, 0),
         params.width,
@@ -2125,54 +2070,10 @@ export function buildLayerNormPreview(label, selectionInfo, engine = null) {
         true
     );
     ln.setColor(new THREE.Color(0xffffff));
-    ln.setMaterialProperties({
-        opacity: 1.0,
-        transparent: false,
-        transmission: 0.0,
-        thickness: 0.0,
-        emissiveIntensity: 0.18
-    });
-    forcePreviewObjectOpaque(ln.group);
-
-    const group = new THREE.Group();
-    group.add(ln.group);
-    const disposers = [() => ln.dispose()];
-
-    const scalePreview = buildLayerNormParamBankPreview({
-        layerNormKind: previewContext.layerNormKind,
-        param: 'scale',
-        layerIndex: previewContext.layerIndex,
-        layoutCount: holeCount,
-        activeLaneLayoutIndices: previewContext.activeLaneLayoutIndices,
-        baseVectorLength: previewContext.baseVectorLength,
-        previewDepth
-    });
-    if (scalePreview?.group) {
-        group.add(scalePreview.group);
-        disposers.push(scalePreview.dispose);
-    }
-
-    const shiftPreview = buildLayerNormParamBankPreview({
-        layerNormKind: previewContext.layerNormKind,
-        param: 'shift',
-        layerIndex: previewContext.layerIndex,
-        layoutCount: holeCount,
-        activeLaneLayoutIndices: previewContext.activeLaneLayoutIndices,
-        baseVectorLength: previewContext.baseVectorLength,
-        previewDepth
-    });
-    if (shiftPreview?.group) {
-        group.add(shiftPreview.group);
-        disposers.push(shiftPreview.dispose);
-    }
 
     return {
-        object: group,
-        dispose: () => {
-            disposers.forEach((dispose) => {
-                if (typeof dispose === 'function') dispose();
-            });
-        }
+        object: ln.group,
+        dispose: () => ln.dispose()
     };
 }
 
@@ -2207,15 +2108,13 @@ function buildLayerNormParamVectorPreview(label, selectionInfo) {
     const previewInstanceCount = resolveLayerNormParamPreviewInstanceCount(selectionInfo, previewData);
 
     const vec = createPreviewVector({
-        colorHex: MHA_FINAL_Q_COLOR,
+        colorHex: 0xffffff,
         data: null,
         instanceCount: previewInstanceCount
     });
     vec.group.userData = vec.group.userData || {};
     vec.group.userData.label = getLayerNormParamLabel(spec.layerNormKind, spec.param);
-    applyDataToPreviewVector(vec, previewData, {
-        colorOptions: LAYER_NORM_ACTIVE_PARAM_PREVIEW_COLOR_OPTIONS
-    });
+    applyDataToPreviewVector(vec, previewData);
 
     return {
         object: vec.group,
@@ -6262,15 +6161,22 @@ class SelectionPanel {
         }
     }
 
-    _applyAttentionCellRevealAnimation(cell, className, delayMs, durationMs) {
+    _clearAttentionCellRevealAnimation(cell) {
         if (!cell) return;
-        const hadClass = cell.classList.contains(className);
         cell.classList.remove(
             'post-softmax-reveal',
             'post-softmax-reveal-focus',
             'pre-softmax-reveal',
             'pre-softmax-reveal-focus'
         );
+        cell.style.animationDelay = '';
+        cell.style.animationDuration = '';
+    }
+
+    _applyAttentionCellRevealAnimation(cell, className, delayMs, durationMs) {
+        if (!cell) return;
+        const hadClass = cell.classList.contains(className);
+        this._clearAttentionCellRevealAnimation(cell);
         if (hadClass) {
             // Force a reflow when replaying the same keyframe class.
             void cell.offsetWidth;
@@ -6346,14 +6252,7 @@ class SelectionPanel {
                     this._cancelAttentionPopOut(cell);
                     cell.classList.add('is-empty');
                     cell.style.backgroundColor = '';
-                    cell.classList.remove(
-                        'post-softmax-reveal',
-                        'post-softmax-reveal-focus',
-                        'pre-softmax-reveal',
-                        'pre-softmax-reveal-focus'
-                    );
-                    cell.style.animationDelay = '';
-                    cell.style.animationDuration = '';
+                    this._clearAttentionCellRevealAnimation(cell);
                     continue;
                 }
                 const reveal = shouldRevealAttentionCell(progress, row, col, mode, this._attentionDecodeProfile);
@@ -6368,7 +6267,11 @@ class SelectionPanel {
                     cell.dataset.value = String(value);
                     cell.classList.remove('is-empty');
                     hasAnyValue = true;
-                    if (mode === 'post') {
+                    const isFocusedCell = cell.classList.contains('is-hovered')
+                        || cell.classList.contains('is-pinned');
+                    if (isFocusedCell) {
+                        this._clearAttentionCellRevealAnimation(cell);
+                    } else if (mode === 'post') {
                         if (shouldAnimateRow && !this._attentionPostAnimatedRows.has(row)) {
                             const revealOrder = getAttentionRevealOrder(row, col, count, ATTENTION_PREVIEW_TRIANGLE);
                             const revealClass = useFocusedPostReveal
@@ -6383,9 +6286,7 @@ class SelectionPanel {
                                 postAnimDuration
                             );
                         } else {
-                            cell.classList.remove('post-softmax-reveal', 'post-softmax-reveal-focus');
-                            cell.style.animationDelay = '';
-                            cell.style.animationDuration = '';
+                            this._clearAttentionCellRevealAnimation(cell);
                         }
                     } else if (mode === 'pre') {
                         if (wasEmpty) {
@@ -6397,9 +6298,7 @@ class SelectionPanel {
                                 preAnimDuration
                             );
                         } else {
-                            cell.classList.remove('pre-softmax-reveal', 'pre-softmax-reveal-focus');
-                            cell.style.animationDelay = '';
-                            cell.style.animationDuration = '';
+                            this._clearAttentionCellRevealAnimation(cell);
                         }
                     }
                 } else {
@@ -6411,15 +6310,7 @@ class SelectionPanel {
                         cell.removeAttribute('data-value');
                         cell.title = '';
                     }
-                    if (mode === 'post') {
-                        cell.classList.remove('post-softmax-reveal', 'post-softmax-reveal-focus');
-                        cell.style.animationDelay = '';
-                        cell.style.animationDuration = '';
-                    } else if (mode === 'pre') {
-                        cell.classList.remove('pre-softmax-reveal', 'pre-softmax-reveal-focus');
-                        cell.style.animationDelay = '';
-                        cell.style.animationDuration = '';
-                    }
+                    this._clearAttentionCellRevealAnimation(cell);
                 }
             }
             if (mode === 'post' && shouldAnimateRow) {
@@ -6856,6 +6747,7 @@ class SelectionPanel {
         if (isSameCell) {
             cell.classList.toggle('is-pinned', isPinnedSelection);
             if (this.attentionMatrix) this.attentionMatrix.classList.add('has-focus-cell');
+            this._clearAttentionCellRevealAnimation(cell);
             if (leftToken) leftToken.classList.toggle('is-highlighted', emphasizeTokenLabels);
             if (topToken) topToken.classList.toggle('is-highlighted', emphasizeTokenLabels);
             return;
@@ -6868,6 +6760,7 @@ class SelectionPanel {
         if (this.attentionMatrix) this.attentionMatrix.classList.add('has-focus-cell');
         cell.classList.add('is-hovered');
         cell.classList.toggle('is-pinned', isPinnedSelection);
+        this._clearAttentionCellRevealAnimation(cell);
         if (leftToken) leftToken.classList.toggle('is-highlighted', emphasizeTokenLabels);
         if (topToken) topToken.classList.toggle('is-highlighted', emphasizeTokenLabels);
         const rawValue = cell.dataset.value;
@@ -7466,6 +7359,8 @@ class SelectionPanel {
         const lower = String(label || '').toLowerCase();
         const activationStage = String(getActivationDataFromSelection(selection)?.stage || '').toLowerCase();
         const isLogitSelection = !!resolveLogitSelectionHeader(label, selection);
+        const isMlpDownSelection = lower.startsWith('mlp down projection')
+            || activationStage === 'mlp.down';
         const isPositionEmbeddingSelection = lower.startsWith('position:')
             || lower.includes('position embedding')
             || lower.includes('positional embedding')
@@ -7564,6 +7459,11 @@ class SelectionPanel {
             return metadata;
         }
 
+        if (isMlpDownSelection) {
+            hideRows();
+            return metadata;
+        }
+
         const tokenText = metadata.tokenText || ATTENTION_VALUE_PLACEHOLDER;
         const tokenDisplayText = metadata.tokenDisplayText || tokenText;
         const tokenIdText = metadata.tokenIdText || ATTENTION_VALUE_PLACEHOLDER;
@@ -7653,8 +7553,8 @@ class SelectionPanel {
             chip.className = 'detail-subtitle-token-chip detail-token-nav-chip detail-prompt-context-token';
             if (isSelected) {
                 chip.classList.add('detail-prompt-context-token--selected');
+                applyTokenChipColors(chip, entry, index, { lookup: colorState.lookup });
             }
-            applyTokenChipColors(chip, entry, index, { lookup: colorState.lookup });
             chip.textContent = entry.displayText;
             chip.title = entry.titleText || '';
             this._configureTokenNavChip(chip, {
@@ -8129,7 +8029,7 @@ class SelectionPanel {
             } else {
                 this._pendingReveal = false;
                 if (this.canvas) this.canvas.style.opacity = '1';
-                fitObjectToView(this.currentPreview, this.camera, { paddingMultiplier: finalPadding, distanceMultiplier: finalDistance });
+                fitObjectToView(this.currentPreview, this.camera, this._lastFitOptions);
                 this._noteFit();
             }
             if (this.currentPreview?.rotation) {

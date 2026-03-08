@@ -1,29 +1,23 @@
-import * as THREE from 'three';
 import {
-    LAYER_NORM_1_Y_POS,
-    LN_PARAMS,
-    EMBEDDING_MATRIX_PARAMS_VOCAB,
-    EMBEDDING_BOTTOM_TOP_ALIGN_OFFSET_FROM_LN1_BOTTOM,
-    EMBEDDING_BOTTOM_Y_ADJUST,
-    EMBEDDING_BOTTOM_VOCAB_X_OFFSET,
-    VECTOR_DEPTH_SPACING_BASE,
-    MAX_LANE_DEPTH_RATIO,
-    MIN_LANE_DEPTH
-} from '../../utils/constants.js';
-import { TOKEN_CHIP_STYLE } from './config.js';
+    applyTokenChipColors,
+    buildPromptTokenChipEntries,
+    resolvePromptTokenChipColorState
+} from '../../ui/tokenChipColorUtils.js';
+import { formatTokenLabel } from './tokenLabels.js';
 
-const FIRST_PASS_TYPE_MS = 42;
-const NEXT_PASS_TYPE_MS = 28;
-const TYPE_SETTLE_MS = 180;
-const TOKENIZE_IN_PLACE_DURATION_MS = 360;
-const TOKENIZE_STAGGER_MS = 20;
-const TOKENIZE_HOLD_MS = 220;
-const HANDOFF_BASE_DURATION_MS = 760;
-const HANDOFF_STAGGER_MS = 26;
-const HANDOFF_MIN_ARC_PX = 56;
-const HANDOFF_MAX_ARC_PX = 190;
-const HANDOFF_COMMIT_PROGRESS = 0.985;
-const HANDOFF_FADE_START_PROGRESS = 0.93;
+const FIRST_PASS_TYPE_BASE_MS = 46;
+const NEXT_PASS_TYPE_BASE_MS = 30;
+const TYPE_DELETE_MS = 26;
+const TYPE_SETTLE_MS = 320;
+const TOKENIZE_IN_PLACE_DURATION_MS = 780;
+const TOKENIZE_STAGGER_MS = 34;
+const TOKENIZE_HOLD_MS = 1000;
+const HANDOFF_BASE_DURATION_MS = 860;
+const HANDOFF_STAGGER_MS = 28;
+const HANDOFF_MIN_ARC_PX = 44;
+const HANDOFF_MAX_ARC_PX = 160;
+const HANDOFF_COMMIT_PROGRESS = 0.975;
+const HANDOFF_FADE_START_PROGRESS = 0.9;
 
 const TOKEN_REPLACEMENTS = new Map([
     ['Âł', ' '],
@@ -86,11 +80,22 @@ function decodeTokenToRawText(token) {
         .replace(/\u00A0/g, ' ');
 }
 
-function resolveLaneDepth(laneCount) {
-    const safeLaneCount = Math.max(1, Math.floor(laneCount || 1));
-    const desiredDepth = (safeLaneCount + 1) * VECTOR_DEPTH_SPACING_BASE;
-    const cappedDepthRaw = desiredDepth * MAX_LANE_DEPTH_RATIO;
-    return Math.max(MIN_LANE_DEPTH, cappedDepthRaw);
+function resolveTypingDelayMs(char, baseMs) {
+    const safeBaseMs = Number.isFinite(baseMs) ? baseMs : FIRST_PASS_TYPE_BASE_MS;
+    let delayMs = safeBaseMs * (0.9 + Math.random() * 0.9);
+
+    if (/\s/.test(char)) {
+        delayMs += 26 + Math.random() * 64;
+    }
+    if (/[,.!?;:]/.test(char)) {
+        delayMs += 90 + Math.random() * 180;
+    } else if (/[)"'\]]/.test(char)) {
+        delayMs += 36 + Math.random() * 82;
+    } else if (Math.random() < 0.16) {
+        delayMs += 34 + Math.random() * 88;
+    }
+
+    return Math.round(delayMs);
 }
 
 function buildOverlayDom() {
@@ -123,7 +128,6 @@ function buildOverlayDom() {
     return {
         root,
         scrimEl: root.querySelector('.pass-intro-scrim'),
-        stage: root.querySelector('.pass-intro-stage'),
         windowEl: root.querySelector('[data-role="window"]'),
         textEl: root.querySelector('[data-role="text"]'),
         cursorEl: root.querySelector('[data-role="cursor"]'),
@@ -131,61 +135,66 @@ function buildOverlayDom() {
     };
 }
 
-function resolveLandingPoint({
-    pipeline,
-    laneCount,
-    laneLayoutIndex,
-    rendererRect
-}) {
-    const safeLaneCount = Math.max(1, Math.floor(laneCount || 1));
-    const safeLayoutIndex = Math.max(0, Math.floor(Number.isFinite(laneLayoutIndex) ? laneLayoutIndex : 0));
+function buildFallbackTargets({ rootRect = null, chipRects = [] } = {}) {
+    const fallbackLeft = rootRect && rootRect.width > 0
+        ? rootRect.left + 18
+        : 18;
+    const fallbackRight = rootRect && rootRect.width > 0
+        ? rootRect.right - 18
+        : Math.max(140, window.innerWidth - 18);
+    const fallbackTop = rootRect && rootRect.height > 0
+        ? rootRect.top + 14
+        : Math.max(24, window.innerHeight - 74);
+    const rowGap = 8;
+    let cursorX = fallbackLeft;
+    let cursorY = fallbackTop;
 
-    const laneDepth = resolveLaneDepth(safeLaneCount);
-    const laneSpacing = laneDepth / (safeLaneCount + 1);
-    const laneZ = -laneDepth / 2 + laneSpacing * (safeLayoutIndex + 1);
+    return chipRects.map((rect) => {
+        const safeWidth = Math.max(48, rect?.width || 48);
+        const safeHeight = Math.max(24, rect?.height || 24);
+        if (cursorX + safeWidth > fallbackRight && cursorX > fallbackLeft) {
+            cursorX = fallbackLeft;
+            cursorY += safeHeight + rowGap;
+        }
 
-    const residualYBase = LAYER_NORM_1_Y_POS
-        - LN_PARAMS.height / 2
-        + EMBEDDING_BOTTOM_TOP_ALIGN_OFFSET_FROM_LN1_BOTTOM;
-    const bottomVocabCenterY = residualYBase
-        - EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2
-        + EMBEDDING_BOTTOM_Y_ADJUST;
-    const vocabBottomY = bottomVocabCenterY - EMBEDDING_MATRIX_PARAMS_VOCAB.height / 2;
-
-    const chipHeight = (Number.isFinite(TOKEN_CHIP_STYLE.height) ? TOKEN_CHIP_STYLE.height : TOKEN_CHIP_STYLE.minHeight)
-        * (Number.isFinite(TOKEN_CHIP_STYLE.scale) && TOKEN_CHIP_STYLE.scale > 0 ? TOKEN_CHIP_STYLE.scale : 1);
-    const staticY = vocabBottomY - chipHeight / 2 - TOKEN_CHIP_STYLE.staticGap;
-    const staticZ = laneZ + (Number.isFinite(TOKEN_CHIP_STYLE.staticZOffset) ? TOKEN_CHIP_STYLE.staticZOffset : 0);
-
-    const worldPoint = new THREE.Vector3(EMBEDDING_BOTTOM_VOCAB_X_OFFSET, staticY, staticZ);
-
-    const camera = pipeline?.engine?.camera;
-    if (!camera || !rendererRect) {
-        return {
-            x: window.innerWidth * 0.5,
-            y: window.innerHeight * 0.78
+        const target = {
+            x: cursorX + safeWidth / 2,
+            y: cursorY + safeHeight / 2,
+            scale: 0.8
         };
-    }
+        cursorX += safeWidth + rowGap;
+        return target;
+    });
+}
 
-    const projected = worldPoint.project(camera);
-    if (!Number.isFinite(projected.x) || !Number.isFinite(projected.y)) {
+function resolvePromptStripTargets({ promptTokenStrip, chipRects = [] } = {}) {
+    const root = promptTokenStrip?.getRootElement?.()
+        || document.getElementById('promptTokenStrip');
+    const rootRect = root?.getBoundingClientRect?.() || null;
+    const fallbackTargets = buildFallbackTargets({ rootRect, chipRects });
+
+    return chipRects.map((chipRect, index) => {
+        const tokenEl = promptTokenStrip?.getTokenElement?.(index)
+            || root?.querySelector?.(`[data-token-entry-index="${index}"]`);
+        const targetRect = tokenEl?.getBoundingClientRect?.() || null;
+        if (!targetRect || targetRect.width <= 0 || targetRect.height <= 0) {
+            return fallbackTargets[index];
+        }
+
+        const scaleX = targetRect.width / Math.max(1, chipRect?.width || 1);
+        const scaleY = targetRect.height / Math.max(1, chipRect?.height || 1);
         return {
-            x: window.innerWidth * 0.5,
-            y: window.innerHeight * 0.78
+            x: targetRect.left + targetRect.width / 2,
+            y: targetRect.top + targetRect.height / 2,
+            scale: clamp(Math.min(scaleX, scaleY), 0.58, 1.08)
         };
-    }
-
-    return {
-        x: rendererRect.left + ((projected.x + 1) * 0.5) * rendererRect.width,
-        y: rendererRect.top + ((1 - projected.y) * 0.5) * rendererRect.height
-    };
+    });
 }
 
 function buildTokenEntries({
     activationSource,
     laneCount,
     laneTokenIndices,
-    laneLayoutIndices,
     tokenLabels
 }) {
     const safeLaneCount = Math.max(1, Math.floor(laneCount || 1));
@@ -194,9 +203,6 @@ function buildTokenEntries({
     for (let lanePos = 0; lanePos < safeLaneCount; lanePos += 1) {
         const tokenIndex = Array.isArray(laneTokenIndices) && Number.isFinite(laneTokenIndices[lanePos])
             ? Math.floor(laneTokenIndices[lanePos])
-            : lanePos;
-        const layoutIndex = Array.isArray(laneLayoutIndices) && Number.isFinite(laneLayoutIndices[lanePos])
-            ? Math.floor(laneLayoutIndices[lanePos])
             : lanePos;
         const rawToken = Array.isArray(tokenLabels) && typeof tokenLabels[lanePos] === 'string'
             ? tokenLabels[lanePos]
@@ -209,11 +215,11 @@ function buildTokenEntries({
 
         entries.push({
             lanePos,
-            layoutIndex,
             tokenIndex,
             tokenId,
             rawToken: rawToken ?? '',
-            rawText: decodeTokenToRawText(rawToken ?? '')
+            rawText: decodeTokenToRawText(rawToken ?? ''),
+            displayLabel: formatTokenLabel(rawToken ?? '')
         });
     }
 
@@ -225,30 +231,219 @@ function normalizeInlineTokenText(value) {
     return value.replace(/ /g, '\u00A0');
 }
 
-function createInlineTokenElement(entry, index) {
-    const token = document.createElement('span');
-    token.className = 'pass-intro-inline-token';
-    token.style.setProperty('--chip-hue', String((index * 41) % 360));
-    token.style.setProperty('--tokenize-delay-ms', `${index * TOKENIZE_STAGGER_MS}ms`);
+function resolveTextNode(element) {
+    if (!element) return null;
+    for (let i = 0; i < element.childNodes.length; i += 1) {
+        const node = element.childNodes[i];
+        if (node && node.nodeType === Node.TEXT_NODE) {
+            return node;
+        }
+    }
+    return null;
+}
+
+function rectFromClientRectList(rectList) {
+    if (!rectList || !rectList.length) return null;
+    let left = Infinity;
+    let top = Infinity;
+    let right = -Infinity;
+    let bottom = -Infinity;
+    for (let i = 0; i < rectList.length; i += 1) {
+        const rect = rectList[i];
+        if (!rect) continue;
+        left = Math.min(left, rect.left);
+        top = Math.min(top, rect.top);
+        right = Math.max(right, rect.right);
+        bottom = Math.max(bottom, rect.bottom);
+    }
+    if (!Number.isFinite(left) || !Number.isFinite(top) || !Number.isFinite(right) || !Number.isFinite(bottom)) {
+        return null;
+    }
+    return {
+        left,
+        top,
+        right,
+        bottom,
+        width: Math.max(0, right - left),
+        height: Math.max(0, bottom - top)
+    };
+}
+
+function measureTokenTextRects(textEl, entries = []) {
+    const textNode = resolveTextNode(textEl);
+    if (!textNode) return [];
+
+    const textContent = typeof textNode.textContent === 'string' ? textNode.textContent : '';
+    let offset = 0;
+
+    return entries.map((entry) => {
+        const tokenText = typeof entry?.rawText === 'string' ? entry.rawText : '';
+        const tokenLength = tokenText.length;
+        const start = offset;
+        const end = Math.min(textContent.length, start + tokenLength);
+        offset = end;
+        if (end <= start) return null;
+
+        const range = document.createRange();
+        range.setStart(textNode, start);
+        range.setEnd(textNode, end);
+
+        const boundingRect = range.getBoundingClientRect();
+        if (boundingRect && boundingRect.width > 0 && boundingRect.height > 0) {
+            return {
+                left: boundingRect.left,
+                top: boundingRect.top,
+                right: boundingRect.right,
+                bottom: boundingRect.bottom,
+                width: boundingRect.width,
+                height: boundingRect.height
+            };
+        }
+
+        return rectFromClientRectList(range.getClientRects());
+    });
+}
+
+function copyChipComputedStyle(sourceEl, chip) {
+    if (!sourceEl || !chip || typeof window === 'undefined' || typeof window.getComputedStyle !== 'function') {
+        return;
+    }
+
+    const computed = window.getComputedStyle(sourceEl);
+    chip.style.display = computed.display;
+    chip.style.alignItems = computed.alignItems;
+    chip.style.justifyContent = computed.justifyContent;
+    chip.style.boxSizing = computed.boxSizing;
+    chip.style.fontFamily = computed.fontFamily;
+    chip.style.fontSize = computed.fontSize;
+    chip.style.fontWeight = computed.fontWeight;
+    chip.style.letterSpacing = computed.letterSpacing;
+    chip.style.lineHeight = computed.lineHeight;
+    chip.style.whiteSpace = computed.whiteSpace;
+    chip.style.color = computed.color;
+    chip.style.paddingTop = computed.paddingTop;
+    chip.style.paddingRight = computed.paddingRight;
+    chip.style.paddingBottom = computed.paddingBottom;
+    chip.style.paddingLeft = computed.paddingLeft;
+    chip.style.borderTopWidth = computed.borderTopWidth;
+    chip.style.borderRightWidth = computed.borderRightWidth;
+    chip.style.borderBottomWidth = computed.borderBottomWidth;
+    chip.style.borderLeftWidth = computed.borderLeftWidth;
+    chip.style.borderTopStyle = computed.borderTopStyle;
+    chip.style.borderRightStyle = computed.borderRightStyle;
+    chip.style.borderBottomStyle = computed.borderBottomStyle;
+    chip.style.borderLeftStyle = computed.borderLeftStyle;
+    chip.style.borderTopColor = computed.borderTopColor;
+    chip.style.borderRightColor = computed.borderRightColor;
+    chip.style.borderBottomColor = computed.borderBottomColor;
+    chip.style.borderLeftColor = computed.borderLeftColor;
+    chip.style.borderRadius = computed.borderRadius;
+    chip.style.minHeight = computed.minHeight;
+    chip.style.background = computed.background;
+    chip.style.boxShadow = computed.boxShadow;
+}
+
+function createInlinePromptToken({
+    entry,
+    index,
+    colorState,
+    promptTokenStrip
+}) {
+    const chip = document.createElement('span');
+    chip.className = 'pass-intro-inline-token';
+    chip.style.setProperty('--tokenize-delay-ms', `${index * TOKENIZE_STAGGER_MS}ms`);
+    applyTokenChipColors(chip, entry?.chipEntry, index, { lookup: colorState?.lookup });
+    const promptTokenEl = promptTokenStrip?.getTokenElement?.(index) || null;
+    copyChipComputedStyle(promptTokenEl, chip);
 
     const label = document.createElement('span');
     label.className = 'pass-intro-inline-token-label';
-    const displayText = normalizeInlineTokenText(entry.rawText);
-    label.textContent = displayText;
+    label.textContent = normalizeInlineTokenText(entry?.displayLabel);
+    chip.appendChild(label);
 
-    if (!entry.rawText || /^\s+$/.test(entry.rawText)) {
-        token.dataset.whitespace = 'true';
-    }
-
-    const idBadge = document.createElement('span');
-    idBadge.className = 'pass-intro-inline-token-id';
-    idBadge.textContent = Number.isFinite(entry.tokenId) ? `#${Math.floor(entry.tokenId)}` : '#?';
-
-    token.append(label, idBadge);
-    return token;
+    return chip;
 }
 
-export function initPassIntroOverlay({ pipeline, activationSource } = {}) {
+function renderInlinePromptTokens(textEl, entries = [], colorState = null, promptTokenStrip = null) {
+    if (!textEl) return [];
+
+    const fragment = document.createDocumentFragment();
+    const chipElements = [];
+    entries.forEach((entry, index) => {
+        const chip = createInlinePromptToken({ entry, index, colorState, promptTokenStrip });
+        chipElements.push(chip);
+        fragment.appendChild(chip);
+    });
+
+    textEl.replaceChildren(fragment);
+    return chipElements;
+}
+
+function createPromptChipOverlay({
+    sourceEl,
+    entry,
+    index,
+    promptTokenStrip,
+    colorState,
+    startRect
+}) {
+    const promptTokenEl = promptTokenStrip?.getTokenElement?.(index) || null;
+    const promptTokenRect = promptTokenEl?.getBoundingClientRect?.() || null;
+
+    const chip = document.createElement('span');
+    chip.className = 'pass-intro-token-chip';
+    chip.textContent = sourceEl?.textContent || promptTokenEl?.textContent || normalizeInlineTokenText(entry.displayLabel);
+    applyTokenChipColors(chip, entry.chipEntry, index, { lookup: colorState.lookup });
+    copyChipComputedStyle(sourceEl || promptTokenEl, chip);
+
+    const targetRect = (promptTokenRect && promptTokenRect.width > 0 && promptTokenRect.height > 0)
+        ? {
+            left: promptTokenRect.left,
+            top: promptTokenRect.top,
+            right: promptTokenRect.right,
+            bottom: promptTokenRect.bottom,
+            width: promptTokenRect.width,
+            height: promptTokenRect.height
+        }
+        : null;
+    const fallbackStartRect = startRect || targetRect || {
+        left: window.innerWidth * 0.5 - 24,
+        top: window.innerHeight * 0.45 - 12,
+        width: 48,
+        height: 24,
+        right: window.innerWidth * 0.5 + 24,
+        bottom: window.innerHeight * 0.45 + 12
+    };
+
+    const targetWidth = Math.max(1, targetRect?.width || fallbackStartRect.width || 1);
+    const targetHeight = Math.max(1, targetRect?.height || fallbackStartRect.height || 1);
+    const startScaleX = clamp((fallbackStartRect.width || targetWidth) / targetWidth, 0.6, 2.8);
+    const startScaleY = clamp((fallbackStartRect.height || targetHeight) / targetHeight, 0.75, 2.8);
+
+    chip.style.left = `${fallbackStartRect.left + (fallbackStartRect.width || 0) / 2}px`;
+    chip.style.top = `${fallbackStartRect.top + (fallbackStartRect.height || 0) / 2}px`;
+    chip.style.width = `${targetWidth}px`;
+    chip.style.height = `${targetHeight}px`;
+    chip.style.opacity = '0';
+    chip.style.transform = `translate(-50%, -50%) scale(${startScaleX.toFixed(4)}, ${startScaleY.toFixed(4)})`;
+    chip.dataset.startScaleX = startScaleX.toFixed(4);
+    chip.dataset.startScaleY = startScaleY.toFixed(4);
+    chip.dataset.targetWidth = targetWidth.toFixed(2);
+
+    return {
+        chip,
+        target: targetRect
+            ? {
+                x: targetRect.left + targetRect.width / 2,
+                y: targetRect.top + targetRect.height / 2,
+                scaleX: 1,
+                scaleY: 1
+            }
+            : null
+    };
+}
+
+export function initPassIntroOverlay({ activationSource, promptTokenStrip } = {}) {
     if (typeof document === 'undefined' || typeof window === 'undefined') {
         return {
             play: async () => {},
@@ -276,17 +471,17 @@ export function initPassIntroOverlay({ pipeline, activationSource } = {}) {
         dom.root.dataset.visible = 'false';
         dom.root.classList.remove('is-tokenized', 'is-handoff');
         dom.windowEl.classList.remove('is-transitioning');
-        dom.textEl.classList.remove('is-tokenized', 'is-faded');
+        dom.textEl.classList.remove('is-tokenized', 'is-tokenizing', 'is-faded');
         clearHandoffInlineState();
         dom.tokenLayer.innerHTML = '';
+        dom.textEl.textContent = '';
+        delete document.body.dataset.passIntroCommitted;
         document.body.classList.remove('pass-intro-active');
     };
 
-    const animateHandoffToTower = ({
+    const animateHandoffToPromptStrip = ({
         chips,
-        entries,
-        laneCount,
-        rendererRect,
+        targets,
         onCommit = null
     }) => {
         if (!Array.isArray(chips) || !chips.length) return Promise.resolve();
@@ -295,27 +490,34 @@ export function initPassIntroOverlay({ pipeline, activationSource } = {}) {
         const trajectories = chips.map((chip, idx) => {
             const startX = Number.parseFloat(chip.style.left) || 0;
             const startY = Number.parseFloat(chip.style.top) || 0;
-            const landing = resolveLandingPoint({
-                pipeline,
-                laneCount,
-                laneLayoutIndex: entries[idx]?.layoutIndex ?? idx,
-                rendererRect
-            });
-            const dx = landing.x - startX;
-            const dy = landing.y - startY;
+            const startScaleX = Number.parseFloat(chip.dataset.startScaleX) || 1;
+            const startScaleY = Number.parseFloat(chip.dataset.startScaleY) || 1;
+            const target = targets[idx] || {
+                x: startX,
+                y: startY,
+                scaleX: 1,
+                scaleY: 1
+            };
+            const dx = target.x - startX;
+            const dy = target.y - startY;
             const distance = Math.hypot(dx, dy);
             const laneSkew = (idx / Math.max(1, chips.length - 1)) - 0.5;
-            const baseArc = clamp(distance * 0.16, HANDOFF_MIN_ARC_PX, HANDOFF_MAX_ARC_PX);
+            const baseArc = clamp(distance * 0.14, HANDOFF_MIN_ARC_PX, HANDOFF_MAX_ARC_PX);
 
             return {
                 chip,
                 startX,
                 startY,
-                targetX: landing.x,
-                targetY: landing.y,
+                startScaleX,
+                startScaleY,
+                targetX: target.x,
+                targetY: target.y,
                 delayMs: idx * HANDOFF_STAGGER_MS,
-                durationMs: HANDOFF_BASE_DURATION_MS + clamp(distance * 0.1, 0, 180),
-                arcPx: baseArc + laneSkew * 22
+                durationMs: HANDOFF_BASE_DURATION_MS + clamp(distance * 0.12, 0, 160),
+                arcPx: baseArc + laneSkew * 18,
+                targetScaleX: Number.isFinite(target.scaleX) ? target.scaleX : 1,
+                targetScaleY: Number.isFinite(target.scaleY) ? target.scaleY : 1,
+                chipWidth: Number.parseFloat(chip.dataset.targetWidth) || 0
             };
         });
 
@@ -336,10 +538,10 @@ export function initPassIntroOverlay({ pipeline, activationSource } = {}) {
                 const elapsedMs = now - startMs;
                 const globalProgress = clamp(elapsedMs / Math.max(1, totalMs), 0, 1);
                 const windowProgress = easeInOutCubic(globalProgress);
-                dom.windowEl.style.opacity = String(lerp(0.26, 0.06, windowProgress));
-                dom.windowEl.style.transform = `translateX(-50%) translateY(${lerp(-6, -26, windowProgress).toFixed(2)}px) scale(${lerp(1, 0.94, windowProgress).toFixed(4)})`;
+                dom.windowEl.style.opacity = String(lerp(1, 0.16, windowProgress));
+                dom.windowEl.style.transform = `translateY(${lerp(0, -28, windowProgress).toFixed(2)}px) scale(${lerp(1, 0.96, windowProgress).toFixed(4)})`;
                 if (dom.scrimEl) {
-                    dom.scrimEl.style.opacity = String(lerp(0.4, 0.08, windowProgress));
+                    dom.scrimEl.style.opacity = String(lerp(1, 0.14, windowProgress));
                 }
                 if (!commitFired && globalProgress >= HANDOFF_COMMIT_PROGRESS) {
                     commitFired = true;
@@ -359,27 +561,15 @@ export function initPassIntroOverlay({ pipeline, activationSource } = {}) {
                     const x = lerp(entry.startX, entry.targetX, p);
                     const arch = Math.sin(Math.PI * p) * entry.arcPx;
                     const y = lerp(entry.startY, entry.targetY, p) - arch;
-                    const scale = lerp(1, 0.36, p);
-                    const rotation = lerp(0, (entry.targetX - entry.startX) * 0.012, 1 - p);
-
-                    let opacity = 1;
-                    if (localRaw > HANDOFF_FADE_START_PROGRESS) {
-                        const fadeProgress = (localRaw - HANDOFF_FADE_START_PROGRESS)
-                            / (1 - HANDOFF_FADE_START_PROGRESS);
-                        // Keep chips visible until almost complete so they read as the same objects
-                        // right up to the 3D handoff frame.
-                        opacity = 1 - (easeInCubic(fadeProgress) * 0.92);
-                    }
-
-                    const blurPx = localRaw > 0.78
-                        ? lerp(0, 1.1, (localRaw - 0.78) / 0.22)
-                        : 0;
+                    const scaleX = lerp(entry.startScaleX, entry.targetScaleX, p);
+                    const scaleY = lerp(entry.startScaleY, entry.targetScaleY, p);
+                    const rotation = lerp(0, clamp((entry.targetX - entry.startX) / Math.max(96, entry.chipWidth), -8, 8), 1 - p);
 
                     entry.chip.style.left = `${x.toFixed(2)}px`;
                     entry.chip.style.top = `${y.toFixed(2)}px`;
-                    entry.chip.style.transform = `translate(-50%, -50%) scale(${scale.toFixed(4)}) rotate(${rotation.toFixed(2)}deg)`;
-                    entry.chip.style.opacity = `${clamp(opacity, 0, 1).toFixed(4)}`;
-                    entry.chip.style.filter = blurPx > 0.01 ? `blur(${blurPx.toFixed(2)}px)` : 'none';
+                    entry.chip.style.transform = `translate(-50%, -50%) scale(${scaleX.toFixed(4)}, ${scaleY.toFixed(4)}) rotate(${rotation.toFixed(2)}deg)`;
+                    entry.chip.style.opacity = '1';
+                    entry.chip.style.filter = 'none';
                 });
 
                 if (allDone) {
@@ -398,7 +588,6 @@ export function initPassIntroOverlay({ pipeline, activationSource } = {}) {
     const play = async ({
         laneCount,
         laneTokenIndices,
-        laneLayoutIndices,
         tokenLabels,
         onHandoffCommit = null
     } = {}) => {
@@ -408,10 +597,19 @@ export function initPassIntroOverlay({ pipeline, activationSource } = {}) {
             activationSource,
             laneCount,
             laneTokenIndices,
-            laneLayoutIndices,
             tokenLabels
         });
         if (!entries.length) return;
+
+        const promptEntries = buildPromptTokenChipEntries({
+            tokenLabels: entries.map((entry) => entry.displayLabel),
+            tokenIndices: entries.map((entry) => entry.tokenIndex),
+            tokenIds: entries.map((entry) => entry.tokenId)
+        });
+        const colorState = resolvePromptTokenChipColorState(promptEntries);
+        entries.forEach((entry, index) => {
+            entry.chipEntry = promptEntries[index] || null;
+        });
 
         const nextRawText = entries.map((entry) => entry.rawText).join('');
         const normalizedNextText = String(nextRawText ?? '').replace(/\r/g, '').replace(/\u00A0/g, ' ');
@@ -419,8 +617,9 @@ export function initPassIntroOverlay({ pipeline, activationSource } = {}) {
         dom.root.dataset.visible = 'true';
         dom.root.classList.remove('is-tokenized', 'is-handoff');
         dom.windowEl.classList.remove('is-transitioning');
-        dom.textEl.classList.remove('is-tokenized', 'is-faded');
+        dom.textEl.classList.remove('is-tokenized', 'is-tokenizing', 'is-faded');
         dom.tokenLayer.innerHTML = '';
+        delete document.body.dataset.passIntroCommitted;
         document.body.classList.add('pass-intro-active');
 
         if (disposed) return;
@@ -429,21 +628,23 @@ export function initPassIntroOverlay({ pipeline, activationSource } = {}) {
         let typedText = currentRawText;
 
         if (prefixLen < typedText.length) {
-            typedText = typedText.slice(0, prefixLen);
-            dom.textEl.textContent = typedText;
-            await delay(120);
-            if (disposed) return;
+            while (typedText.length > prefixLen) {
+                if (disposed) return;
+                typedText = typedText.slice(0, -1);
+                dom.textEl.textContent = typedText;
+                await delay(TYPE_DELETE_MS);
+            }
         } else {
             dom.textEl.textContent = typedText;
         }
 
         const suffix = normalizedNextText.slice(prefixLen);
-        const typeDelay = hasPlayedOnce ? NEXT_PASS_TYPE_MS : FIRST_PASS_TYPE_MS;
+        const typeBaseMs = hasPlayedOnce ? NEXT_PASS_TYPE_BASE_MS : FIRST_PASS_TYPE_BASE_MS;
         for (let i = 0; i < suffix.length; i += 1) {
             if (disposed) return;
             typedText += suffix[i];
             dom.textEl.textContent = typedText;
-            await delay(typeDelay);
+            await delay(resolveTypingDelayMs(suffix[i], typeBaseMs));
         }
         if (!suffix.length) {
             await delay(80);
@@ -454,54 +655,76 @@ export function initPassIntroOverlay({ pipeline, activationSource } = {}) {
         await delay(TYPE_SETTLE_MS);
         if (disposed) return;
 
-        dom.textEl.textContent = '';
         dom.textEl.classList.add('is-tokenized');
-        const inlineTokens = entries.map((entry, idx) => {
-            const tokenEl = createInlineTokenElement(entry, idx);
-            dom.textEl.appendChild(tokenEl);
-            return tokenEl;
+        const inlineChipElements = renderInlinePromptTokens(dom.textEl, entries, colorState, promptTokenStrip);
+
+        await nextFrame();
+        if (disposed) return;
+
+        inlineChipElements.forEach((chip) => {
+            chip.classList.add('is-visible');
+        });
+
+        const tokenizeTailMs = TOKENIZE_IN_PLACE_DURATION_MS
+            + TOKENIZE_STAGGER_MS * Math.max(0, inlineChipElements.length - 1);
+        await delay(tokenizeTailMs);
+        if (disposed) return;
+
+        await delay(TOKENIZE_HOLD_MS);
+        if (disposed) return;
+
+        const overlayEntries = entries.map((entry, idx) => {
+            const sourceEl = inlineChipElements[idx] || null;
+            const sourceRect = sourceEl?.getBoundingClientRect?.() || null;
+            const overlay = createPromptChipOverlay({
+                sourceEl,
+                entry,
+                index: idx,
+                promptTokenStrip,
+                colorState,
+                startRect: (sourceRect && sourceRect.width > 0 && sourceRect.height > 0)
+                    ? {
+                        left: sourceRect.left,
+                        top: sourceRect.top,
+                        right: sourceRect.right,
+                        bottom: sourceRect.bottom,
+                        width: sourceRect.width,
+                        height: sourceRect.height
+                    }
+                    : null
+            });
+            overlay.chip.style.transition = 'none';
+            overlay.chip.style.opacity = '1';
+            dom.tokenLayer.appendChild(overlay.chip);
+            return overlay;
         });
 
         await nextFrame();
         if (disposed) return;
 
-        inlineTokens.forEach((tokenEl) => {
-            tokenEl.classList.add('is-visible');
-        });
-
-        const tokenizeTailMs = TOKENIZE_IN_PLACE_DURATION_MS
-            + TOKENIZE_STAGGER_MS * Math.max(0, inlineTokens.length - 1);
-        await delay(tokenizeTailMs + TOKENIZE_HOLD_MS);
-        if (disposed) return;
-
-        const chips = inlineTokens.map((tokenEl) => {
-            const rect = tokenEl.getBoundingClientRect();
-            const chip = tokenEl.cloneNode(true);
-            chip.classList.remove('pass-intro-inline-token', 'is-visible');
-            chip.classList.add('pass-intro-token-chip');
-            chip.style.left = `${rect.left + rect.width / 2}px`;
-            chip.style.top = `${rect.top + rect.height / 2}px`;
-            chip.style.opacity = '1';
-            chip.style.transform = 'translate(-50%, -50%) scale(1)';
-            chip.style.transition = 'none';
-            dom.tokenLayer.appendChild(chip);
-            return chip;
-        });
-
         dom.textEl.classList.add('is-faded');
-
-        const rendererRect = pipeline?.engine?.renderer?.domElement?.getBoundingClientRect?.()
-            || { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
-
         dom.root.classList.add('is-handoff');
         dom.windowEl.classList.add('is-transitioning');
 
-        await animateHandoffToTower({
+        const chips = overlayEntries.map((entry) => entry.chip);
+        const targets = overlayEntries.map((entry) => (
+            entry.target || {
+                x: Number.parseFloat(entry.chip.style.left) || (window.innerWidth * 0.5),
+                y: Number.parseFloat(entry.chip.style.top) || (window.innerHeight * 0.78),
+                scaleX: 1,
+                scaleY: 1
+            }
+        ));
+
+        await animateHandoffToPromptStrip({
             chips,
-            entries,
-            laneCount,
-            rendererRect,
-            onCommit: onHandoffCommit
+            targets,
+            onCommit: () => {
+                document.body.dataset.passIntroCommitted = 'true';
+                if (typeof onHandoffCommit === 'function') {
+                    onHandoffCommit();
+                }
+            }
         });
         await delay(40);
         if (disposed) return;

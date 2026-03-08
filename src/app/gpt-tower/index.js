@@ -28,6 +28,7 @@ import { loadActivationState } from './activation.js';
 import { initFollowModeControls, initTopControlsAutohide } from './topControls.js';
 import { buildPassState, initGenerationController } from './generationController.js';
 import { formatTokenLabel } from './tokenLabels.js';
+import { initPassIntroOverlay } from './passIntroOverlay.js';
 import {
     NUM_LAYERS,
     PROMPT_TOKENS,
@@ -160,6 +161,7 @@ const pipeline = new LayerPipeline(gptCanvas, NUM_LAYERS, {
 if (defaultSpeedProfile && typeof defaultSpeedProfile.engineSpeed === 'number') {
     pipeline?.engine?.setSpeed?.(defaultSpeedProfile.engineSpeed);
 }
+pipeline?.engine?.pause?.('initial-pass-intro');
 
 // Show GPT canvas immediately.
 gptCanvas.style.display = 'block';
@@ -279,6 +281,32 @@ const generationController = initGenerationController({
     cameraReturnTarget: camTarget,
     selectionPanel,
     promptTokenStrip
+});
+
+const passIntroOverlay = initPassIntroOverlay({
+    activationSource,
+    promptTokenStrip
+});
+Promise.resolve().then(async () => {
+    try {
+        await passIntroOverlay.play({
+            laneCount: initialPassState.totalLaneCount,
+            laneTokenIndices: initialPassState.laneTokenIndices,
+            tokenLabels: initialPassState.tokenLabels
+        });
+        await new Promise((resolve) => {
+            if (typeof requestAnimationFrame === 'function') {
+                requestAnimationFrame(() => resolve());
+                return;
+            }
+            resolve();
+        });
+        pipeline?.engine?.resume?.('initial-pass-intro');
+    } catch (err) {
+        console.error('Initial prompt intro failed:', err);
+        passIntroOverlay?.dispose?.();
+        pipeline?.engine?.resume?.('initial-pass-intro');
+    }
 });
 
 initSkipNextPassButton({ pipeline, generationController });

@@ -13,6 +13,7 @@ import {
     GLOBAL_ANIM_SPEED_MULT,
     SELF_ATTENTION_TIME_MULT,
     ANIM_RISE_SPEED_ORIGINAL,
+    ANIM_RISE_SPEED_INSIDE_LN,
     LN_PARAMS,
     LN_NORM_START_FRACTION_FROM_BOTTOM,
     PRISM_ADD_ANIM_BASE_DURATION,
@@ -2272,6 +2273,19 @@ export class LayerPipeline extends EventTarget {
                 const length = vec?.instanceCount || VECTOR_LENGTH_PRISM;
                 return (PRISM_ADD_ANIM_BASE_DURATION + PRISM_ADD_ANIM_BASE_FLASH_DURATION + length * PRISM_ADD_ANIM_BASE_DELAY_BETWEEN_PRISMS) / PRISM_ADD_ANIM_SPEED_MULT;
             };
+            const topLnNormDurationFor = (animation, length) => {
+                if (!animation) return 0;
+                const safeLength = Math.max(1, Math.floor(length || VECTOR_LENGTH_PRISM));
+                const speedScale = 100 / Math.max(1, GLOBAL_ANIM_SPEED_MULT);
+                const unitDelay = Math.max(0, (animation.config?.unitDelay ?? 0) * speedScale);
+                const unitDuration = Math.max(0, (animation.config?.unitDuration ?? 0) * speedScale);
+                return unitDuration + Math.max(0, safeLength - 1) * unitDelay;
+            };
+            const durationForRise = (distance, speed) => {
+                const safeSpeed = Math.max(1e-6, Number(speed) || 0);
+                const durMs = (Math.max(0, distance) / safeSpeed) * 1000;
+                return Math.max(100, durMs);
+            };
 
             const updateTrailPosition = (vector) => {
                 if (!vector || !vector.userData || !vector.userData.trail) return;
@@ -2411,6 +2425,19 @@ export class LayerPipeline extends EventTarget {
 
                 const normAnim = new PrismLayerNormAnimation(vec);
                 let normLoopActive = false;
+                const topLnRiseTargetY = (() => {
+                    const multTargetGroup = multVec && multVec.group;
+                    if (multTargetGroup && Number.isFinite(multTargetGroup.position.y)) {
+                        return Math.max(lnCenterY, multTargetGroup.position.y);
+                    }
+                    return lnCenterY;
+                })();
+                const topLnVectorHeight = (vec && typeof vec.getUniformHeight === 'function')
+                    ? vec.getUniformHeight()
+                    : NaN;
+                const topLnTouchTriggerY = (Number.isFinite(topLnVectorHeight) && topLnVectorHeight > 0)
+                    ? (topLnRiseTargetY - topLnVectorHeight)
+                    : topLnRiseTargetY;
 
                 if (startY >= lnBottomY) {
                     markTopLnEntered();
@@ -2431,7 +2458,10 @@ export class LayerPipeline extends EventTarget {
 
                 const startFinalRise = (resVec) => {
                     const riseDist = Math.max(0, entryYLocal - resVec.group.position.y);
-                    const durMs = (riseDist / (ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT)) * 1000;
+                    const durMs = durationForRise(
+                        riseDist,
+                        ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT
+                    );
                     new TWEEN.Tween(resVec.group.position)
                         .to({ y: entryYLocal }, Math.max(100, durMs))
                         .easing(TWEEN.Easing.Linear.None)
@@ -2560,8 +2590,8 @@ export class LayerPipeline extends EventTarget {
                     });
                 };
 
-                const riseToCenter = () => {
-                    const targetY = Math.max(vec.group.position.y, lnCenterY);
+                const riseToMultiplyTouch = () => {
+                    const targetY = Math.max(vec.group.position.y, topLnTouchTriggerY);
                     if (vec.group.position.y >= targetY - 0.01) {
                         vec.group.position.y = targetY;
                         updateTopLnColor(vec.group.position.y);
@@ -2572,7 +2602,10 @@ export class LayerPipeline extends EventTarget {
                     }
 
                     const distance = Math.max(0, targetY - vec.group.position.y);
-                    const duration = (distance / (ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT)) * 1000;
+                    const duration = durationForRise(
+                        distance,
+                        ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT
+                    );
                     new TWEEN.Tween(vec.group.position)
                         .to({ y: targetY }, Math.max(100, duration))
                         .easing(TWEEN.Easing.Linear.None)
@@ -2592,10 +2625,10 @@ export class LayerPipeline extends EventTarget {
 
                 const startNormalization = () => {
                     if (normLoopActive) return;
-                    if (this._skipToEndActive) {
-                        normLoopActive = true;
+                    if (this._skipToEndActive || typeof TWEEN === 'undefined') {
                         applyFinalNormData();
-                        riseToCenter();
+                        normLoopActive = false;
+                        riseToMultiplyTouch();
                         return;
                     }
                     normLoopActive = true;
@@ -2607,46 +2640,41 @@ export class LayerPipeline extends EventTarget {
                         });
                     } catch (_) {
                         normLoopActive = false;
-                        riseToCenter();
+                        riseToMultiplyTouch();
                         return;
                     }
-
-                    let lastTickMs = null;
-                    const runLoop = (frameNow) => {
-                        if (this._skipToEndActive) {
-                            normAnim.isAnimating = false;
-                            normLoopActive = false;
-                            riseToCenter();
-                            return;
-                        }
-                        const nowMs = Number.isFinite(frameNow)
-                            ? frameNow
-                            : ((typeof performance !== 'undefined' && typeof performance.now === 'function')
-                                ? performance.now()
-                                : Date.now());
-                        if (this._engine && this._engine._paused) {
-                            // Keep RAF alive while paused, but pin the last tick so
-                            // wall-clock pause time does not advance LN animation.
-                            lastTickMs = nowMs;
-                            requestAnimationFrame(runLoop);
-                            return;
-                        }
-                        const dt = Number.isFinite(lastTickMs)
-                            ? Math.max(0, Math.min((nowMs - lastTickMs) / 1000, 0.1))
-                            : 0;
-                        lastTickMs = nowMs;
-                        normAnim.update(dt);
-                        updateTopLnColor(vec.group.position.y);
-                        this.dispatchEvent(new Event('progress'));
-                        if (normAnim.isAnimating) {
-                            requestAnimationFrame(runLoop);
-                        } else {
+                    const normDurationMs = topLnNormDurationFor(normAnim, targetLength);
+                    let previousElapsedMs = 0;
+                    new TWEEN.Tween({ elapsedMs: 0 })
+                        .to({ elapsedMs: normDurationMs }, Math.max(1, normDurationMs))
+                        .easing(TWEEN.Easing.Linear.None)
+                        .onUpdate((state) => {
+                            if (this._skipToEndActive) {
+                                normAnim.isAnimating = false;
+                                return;
+                            }
+                            const nextElapsedMs = Math.max(previousElapsedMs, state.elapsedMs || 0);
+                            const deltaMs = nextElapsedMs - previousElapsedMs;
+                            previousElapsedMs = nextElapsedMs;
+                            normAnim.update(deltaMs / 1000);
+                            updateTopLnColor(vec.group.position.y);
+                            this.dispatchEvent(new Event('progress'));
+                        })
+                        .onComplete(() => {
+                            if (this._skipToEndActive) {
+                                normAnim.isAnimating = false;
+                                normLoopActive = false;
+                                riseToMultiplyTouch();
+                                return;
+                            }
+                            if (normAnim.isAnimating) {
+                                normAnim.update(Math.max(0.05, (normDurationMs - previousElapsedMs) / 1000));
+                            }
                             applyFinalNormData();
                             normLoopActive = false;
-                            riseToCenter();
-                        }
-                    };
-                    requestAnimationFrame(runLoop);
+                            riseToMultiplyTouch();
+                        })
+                        .start();
                 };
 
                 const moveToNormStart = () => {
@@ -2666,7 +2694,10 @@ export class LayerPipeline extends EventTarget {
                     }
 
                     const distance = Math.max(0, stageTarget - vec.group.position.y);
-                    const duration = (distance / (ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT)) * 1000;
+                    const duration = durationForRise(
+                        distance,
+                        ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT
+                    );
                     new TWEEN.Tween(vec.group.position)
                         .to({ y: stageTarget }, Math.max(100, duration))
                         .easing(TWEEN.Easing.Linear.None)

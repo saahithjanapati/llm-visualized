@@ -252,6 +252,62 @@ body.touch-ui * {
 #nextTokenBtn:not([data-visible="true"]) {
     display: none;
 }
+#nextTokenBtn {
+    position: fixed;
+    right: max(18px, env(safe-area-inset-right));
+    bottom: max(18px, env(safe-area-inset-bottom));
+    z-index: 9;
+    appearance: none;
+    -webkit-appearance: none;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+    touch-action: manipulation;
+    min-height: 46px;
+    padding: 11px 16px;
+    border: 1px solid rgba(255, 194, 120, 0.92);
+    border-radius: 14px;
+    background:
+        linear-gradient(135deg, rgba(255, 174, 78, 0.96), rgba(255, 114, 38, 0.94));
+    color: #fff7ec;
+    box-shadow:
+        0 14px 30px rgba(0, 0, 0, 0.34),
+        0 0 0 1px rgba(255, 194, 120, 0.12),
+        0 0 22px rgba(255, 140, 52, 0.3);
+    cursor: pointer;
+    font-family: "Inter", "SF Pro Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    line-height: 1;
+    white-space: nowrap;
+    transition:
+        transform 0.14s ease,
+        filter 0.14s ease,
+        box-shadow 0.14s ease,
+        border-color 0.14s ease;
+}
+#nextTokenBtn:hover:not(:disabled) {
+    transform: translateY(-1px);
+    filter: saturate(1.06) brightness(1.03);
+    box-shadow:
+        0 16px 34px rgba(0, 0, 0, 0.36),
+        0 0 0 1px rgba(255, 205, 138, 0.16),
+        0 0 28px rgba(255, 146, 54, 0.42);
+}
+#nextTokenBtn:focus-visible {
+    outline: 2px solid rgba(255, 221, 176, 0.96);
+    outline-offset: 3px;
+}
+#nextTokenBtn:disabled {
+    opacity: 0.58;
+    cursor: default;
+    transform: none;
+    filter: none;
+    box-shadow:
+        0 12px 24px rgba(0, 0, 0, 0.24),
+        0 0 0 1px rgba(255, 194, 120, 0.08);
+}
 #skipLayerBtn[data-state="skipping"],
 #skipToEndBtn[data-state="skipping"],
 #skipNextPassBtn[data-state="skipping"],
@@ -607,6 +663,182 @@ body.touch-ui * {
     transform: none;
 }
 
+#passIntroOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 18;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 180ms ease, visibility 180ms ease;
+}
+#passIntroOverlay[data-visible="true"] {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+}
+#passIntroOverlay .pass-intro-scrim {
+    position: absolute;
+    inset: 0;
+    background:
+        radial-gradient(120% 92% at 50% 4%, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0) 48%),
+        linear-gradient(180deg, rgba(0, 0, 0, 0.82), rgba(0, 0, 0, 0.94));
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+#passIntroOverlay .pass-intro-stage {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 100%;
+    padding: 28px;
+}
+#passIntroOverlay .pass-intro-window {
+    position: relative;
+    width: min(860px, calc(100vw - 40px));
+    border-radius: 18px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: linear-gradient(180deg, rgba(6, 6, 7, 0.97), rgba(0, 0, 0, 0.95));
+    box-shadow:
+        0 28px 70px rgba(0, 0, 0, 0.52),
+        0 0 0 1px rgba(255, 255, 255, 0.04);
+    overflow: hidden;
+}
+#passIntroOverlay .pass-intro-window-header {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-height: 42px;
+    padding: 0 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015));
+}
+#passIntroOverlay .pass-intro-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    flex: 0 0 auto;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.26) inset;
+}
+#passIntroOverlay .pass-intro-dot--red {
+    background: #ff6a5e;
+}
+#passIntroOverlay .pass-intro-dot--amber {
+    background: #ffbd4a;
+}
+#passIntroOverlay .pass-intro-dot--green {
+    background: #29cc5f;
+}
+#passIntroOverlay .pass-intro-window-title {
+    margin-left: 4px;
+    color: rgba(255, 255, 255, 0.72);
+    font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+#passIntroOverlay .pass-intro-editor {
+    position: relative;
+    min-height: clamp(180px, 30vh, 280px);
+    padding: clamp(24px, 3vw, 38px);
+}
+#passIntroOverlay .pass-intro-text {
+    display: inline;
+    color: rgba(244, 248, 255, 0.96);
+    font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: clamp(18px, 1.8vw, 24px);
+    line-height: 1.75;
+    letter-spacing: 0.01em;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    transition: opacity 620ms ease;
+}
+#passIntroOverlay .pass-intro-text.is-tokenized {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 8px;
+}
+#passIntroOverlay .pass-intro-text.is-faded {
+    opacity: 0.03;
+}
+#passIntroOverlay .pass-intro-text.is-tokenizing {
+    opacity: 0.24;
+}
+#passIntroOverlay .pass-intro-cursor {
+    display: inline-block;
+    margin-left: 2px;
+    color: rgba(255, 255, 255, 0.84);
+    font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: clamp(18px, 1.8vw, 24px);
+    line-height: 1.75;
+    vertical-align: top;
+    animation: passIntroCursorBlink 1s steps(1, end) infinite;
+}
+#passIntroOverlay.is-tokenized .pass-intro-cursor {
+    opacity: 0;
+}
+#passIntroOverlay .pass-intro-inline-token,
+#passIntroOverlay .pass-intro-token-chip {
+    --token-color-border: rgba(255,255,255,0.92);
+    --token-color-fill: rgba(255,255,255,0.2);
+    color: rgba(244, 248, 255, 0.96);
+    user-select: none;
+}
+#passIntroOverlay .pass-intro-inline-token {
+    opacity: 0;
+    transform: translateY(10px) scale(0.97);
+    filter: saturate(0.9);
+    transition:
+        opacity 620ms ease,
+        border-color 700ms ease,
+        background 700ms ease,
+        box-shadow 780ms ease,
+        transform 780ms cubic-bezier(0.2, 0.8, 0.2, 1),
+        filter 780ms ease;
+    transition-delay: var(--tokenize-delay-ms, 0ms);
+}
+#passIntroOverlay .pass-intro-inline-token-label {
+    display: inline;
+    white-space: pre-wrap;
+}
+#passIntroOverlay .pass-intro-inline-token.is-visible {
+    opacity: 1;
+    border-color: var(--token-color-border);
+    background: var(--token-color-fill);
+    box-shadow:
+        0 0 0 1px rgba(255, 255, 255, 0.08),
+        0 12px 30px rgba(0, 0, 0, 0.18);
+    transform: translateY(-0.5px);
+    filter: saturate(1.03);
+}
+#passIntroOverlay .pass-intro-token-chip {
+    position: fixed;
+    left: 0;
+    top: 0;
+    margin: 0;
+    z-index: 1;
+    opacity: 0;
+    transform-origin: center center;
+    filter: saturate(0.98);
+    transition:
+        opacity 720ms ease,
+        transform 780ms cubic-bezier(0.2, 0.8, 0.2, 1),
+        filter 720ms ease;
+    transition-delay: var(--tokenize-delay-ms, 0ms);
+}
+#passIntroOverlay .pass-intro-token-chip.is-tokenized {
+    opacity: 1;
+    filter: saturate(1.03);
+}
+#passIntroOverlay .pass-intro-token-layer {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+}
+
 #promptTokenStrip {
     --prompt-token-strip-max-width: min(1100px, 94vw);
     --prompt-token-chip-gap: clamp(6px, 0.22vw + 5px, 9px);
@@ -628,6 +860,9 @@ body.touch-ui * {
     overflow: visible;
     pointer-events: auto;
     color: #fff;
+    transition:
+        opacity 180ms linear,
+        filter 320ms ease;
 }
 #promptTokenStrip::before {
     content: '';
@@ -664,6 +899,15 @@ body.touch-ui * {
 }
 #promptTokenStrip[data-visible="false"] {
     display: none;
+}
+body.pass-intro-active #promptTokenStrip {
+    opacity: 0;
+    filter: saturate(0.8);
+    pointer-events: none;
+}
+body.pass-intro-active[data-pass-intro-committed="true"] #promptTokenStrip {
+    opacity: 1;
+    filter: none;
 }
 #promptTokenStrip .prompt-token-strip__header {
     display: flex;
@@ -762,7 +1006,62 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
         transform: translate(-50%, 0);
     }
 }
+@keyframes passIntroCursorBlink {
+    0%, 45% {
+        opacity: 1;
+    }
+    45.01%, 100% {
+        opacity: 0;
+    }
+}
 @media (max-width: 700px) {
+    #passIntroOverlay .pass-intro-stage {
+        padding: 16px;
+    }
+    #passIntroOverlay .pass-intro-window {
+        width: min(100%, 720px);
+        border-radius: 16px;
+    }
+    #passIntroOverlay .pass-intro-window-header {
+        min-height: 38px;
+        padding: 0 13px;
+        gap: 8px;
+    }
+    #passIntroOverlay .pass-intro-dot {
+        width: 9px;
+        height: 9px;
+    }
+    #passIntroOverlay .pass-intro-window-title {
+        font-size: 11px;
+    }
+    #passIntroOverlay .pass-intro-editor {
+        min-height: 168px;
+        padding: 18px 16px 20px;
+    }
+    #passIntroOverlay .pass-intro-text,
+    #passIntroOverlay .pass-intro-cursor {
+        font-size: clamp(15px, 4vw, 18px);
+        line-height: 1.65;
+    }
+    #passIntroOverlay .pass-intro-text.is-tokenized {
+        gap: 6px;
+    }
+    #passIntroOverlay .pass-intro-inline-token,
+    #passIntroOverlay .pass-intro-token-chip {
+        border-radius: 7px;
+        font-size: 12px;
+        padding: 3px 5px;
+    }
+    #nextTokenBtn {
+        right: max(8px, env(safe-area-inset-right));
+        bottom: max(8px, calc(env(safe-area-inset-bottom) + 8px));
+        min-height: 48px;
+        padding: 12px 15px;
+        border-radius: 13px;
+    }
+    body[data-prompt-token-strip-visible="true"] #nextTokenBtn {
+        bottom: calc(max(8px, calc(env(safe-area-inset-bottom) + 8px)) + var(--prompt-token-strip-height, 0px) + 10px);
+    }
     #generationOverlay {
         left: max(8px, env(safe-area-inset-left));
         right: max(8px, env(safe-area-inset-right));
@@ -862,6 +1161,16 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
 }
 
 @media (max-width: 420px) {
+    #nextTokenBtn {
+        right: max(6px, env(safe-area-inset-right));
+        bottom: max(6px, calc(env(safe-area-inset-bottom) + 6px));
+        min-height: 44px;
+        padding: 11px 14px;
+        font-size: 12px;
+    }
+    body[data-prompt-token-strip-visible="true"] #nextTokenBtn {
+        bottom: calc(max(6px, calc(env(safe-area-inset-bottom) + 6px)) + var(--prompt-token-strip-height, 0px) + 8px);
+    }
     #generationOverlay {
         left: max(6px, env(safe-area-inset-left));
         right: max(6px, env(safe-area-inset-right));
@@ -1787,9 +2096,17 @@ body.detail-panel-resizing * {
 }
 .scene-hover-label__content {
     display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    max-width: min(360px, calc(100vw - 48px));
+}
+.scene-hover-label__top-row {
+    display: inline-flex;
     align-items: center;
     gap: 6px;
-    max-width: min(360px, calc(100vw - 48px));
+    min-width: 0;
+    max-width: 100%;
 }
 .scene-hover-label__text {
     color: #fff;
@@ -1804,7 +2121,8 @@ body.detail-panel-resizing * {
 .scene-hover-label__text[hidden],
 .scene-hover-label__separator[hidden],
 .scene-hover-label__token-chip[hidden],
-.scene-hover-label__detail-text[hidden] {
+.scene-hover-label__detail-text[hidden],
+.scene-hover-label__subtitle[hidden] {
     display: none !important;
 }
 .scene-hover-label__token-chip {
@@ -1815,6 +2133,13 @@ body.detail-panel-resizing * {
     color: #d4dae2;
     font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     font-size: 12px;
+    line-height: 1.1;
+    white-space: nowrap;
+}
+.scene-hover-label__subtitle {
+    color: #98a2b3;
+    font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 11px;
     line-height: 1.1;
     white-space: nowrap;
 }

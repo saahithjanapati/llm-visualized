@@ -16,7 +16,10 @@ import {
     applyPromptTokenChipColors,
     formatTokenChipDisplayText
 } from '../utils/tokenChipStyleUtils.js';
-import { resolveHoverTokenContext } from './coreHoverTokenContext.js';
+import {
+    resolveHoverLabelSubtitle,
+    resolveHoverTokenContext
+} from './coreHoverTokenContext.js';
 import Gpt2Layer from './layers/Gpt2Layer.js';
 import { resolveRaycastLabel as resolveRaycastLabelFromIntersections } from './coreRaycastResolver.js';
 import {
@@ -257,7 +260,7 @@ export class CoreEngine {
             fontFamily: 'monospace',
             fontSize: '14px',
             color: '#fff',
-            background: 'rgba(20,20,20,0.58)',
+            background: 'rgba(20,20,20,0.72)',
             backdropFilter: 'blur(6px)',
             WebkitBackdropFilter: 'blur(6px)',
             borderRadius: '8px',
@@ -269,6 +272,8 @@ export class CoreEngine {
         this._hoverLabelDiv.style.setProperty('--detail-font-chip', HOVER_TOKEN_CHIP_FONT_SIZE);
         this._hoverLabelContent = document.createElement('div');
         this._hoverLabelContent.className = 'scene-hover-label__content';
+        this._hoverLabelTopRow = document.createElement('div');
+        this._hoverLabelTopRow.className = 'scene-hover-label__top-row';
         this._hoverLabelText = document.createElement('span');
         this._hoverLabelText.className = 'scene-hover-label__text';
         this._hoverLabelSeparator = document.createElement('span');
@@ -280,11 +285,18 @@ export class CoreEngine {
         this._hoverLabelDetailText = document.createElement('span');
         this._hoverLabelDetailText.className = 'scene-hover-label__detail-text';
         this._hoverLabelDetailText.setAttribute('aria-hidden', 'true');
-        this._hoverLabelContent.append(
+        this._hoverLabelSubtitle = document.createElement('span');
+        this._hoverLabelSubtitle.className = 'scene-hover-label__subtitle';
+        this._hoverLabelSubtitle.setAttribute('aria-hidden', 'true');
+        this._hoverLabelTopRow.append(
             this._hoverLabelText,
             this._hoverLabelSeparator,
             this._hoverLabelTokenChip,
             this._hoverLabelDetailText
+        );
+        this._hoverLabelContent.append(
+            this._hoverLabelTopRow,
+            this._hoverLabelSubtitle
         );
         this._hoverLabelDiv.appendChild(this._hoverLabelContent);
         document.body.appendChild(this._hoverLabelDiv);
@@ -1518,7 +1530,13 @@ export class CoreEngine {
 
     _renderHoverLabel(label = '', info = null, object = null) {
         if (!this._hoverLabelDiv) return;
-        if (!this._hoverLabelText || !this._hoverLabelSeparator || !this._hoverLabelTokenChip || !this._hoverLabelDetailText) {
+        if (
+            !this._hoverLabelText
+            || !this._hoverLabelSeparator
+            || !this._hoverLabelTokenChip
+            || !this._hoverLabelDetailText
+            || !this._hoverLabelSubtitle
+        ) {
             this._hoverLabelDiv.textContent = String(label || '');
             return true;
         }
@@ -1531,6 +1549,11 @@ export class CoreEngine {
             object,
             activationSource: this._activationSource
         });
+        const subtitleText = resolveHoverLabelSubtitle({
+            label: safeLabel,
+            info,
+            object
+        });
         if (detailContext?.suppressHoverLabel === true) {
             this._hoverLabelText.textContent = '';
             this._hoverLabelText.hidden = true;
@@ -1540,6 +1563,8 @@ export class CoreEngine {
             this._hoverLabelTokenChip.removeAttribute('title');
             this._hoverLabelDetailText.hidden = true;
             this._hoverLabelDetailText.textContent = '';
+            this._hoverLabelSubtitle.hidden = true;
+            this._hoverLabelSubtitle.textContent = '';
             return false;
         }
 
@@ -1547,6 +1572,7 @@ export class CoreEngine {
         const showTokenChip = detailContext?.detailKind === 'token-chip';
         const showDetailText = detailContext?.detailKind === 'position-text';
         const showPrimaryLabel = detailContext?.showPrimaryLabel !== false;
+        const showSubtitle = typeof subtitleText === 'string' && subtitleText.length > 0;
         const primaryLabelText = (typeof detailContext?.primaryLabelText === 'string' && detailContext.primaryLabelText.length)
             ? detailContext.primaryLabelText
             : safeLabel;
@@ -1555,6 +1581,8 @@ export class CoreEngine {
         this._hoverLabelSeparator.hidden = !showDetail || !showPrimaryLabel;
         this._hoverLabelTokenChip.hidden = !showTokenChip;
         this._hoverLabelDetailText.hidden = !showDetailText;
+        this._hoverLabelSubtitle.hidden = !showSubtitle;
+        this._hoverLabelSubtitle.textContent = showSubtitle ? subtitleText : '';
         if (!showDetail) {
             this._hoverLabelTokenChip.textContent = '';
             this._hoverLabelTokenChip.removeAttribute('title');

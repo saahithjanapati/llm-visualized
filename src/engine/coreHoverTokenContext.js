@@ -1,4 +1,5 @@
 import { resolveTokenChipLabel } from '../utils/tokenChipStyleUtils.js';
+import { resolveLayerNormKind } from '../utils/layerNormLabels.js';
 
 function toFiniteTokenNumber(value) {
     const parsed = Number(value);
@@ -91,6 +92,27 @@ function isWeightedSumHoverSelection(label = '', info = null, object = null) {
     if (info?.isWeightedSum === true) return true;
     const candidates = collectHoverDataCandidates(info, object);
     return candidates.some((candidate) => candidate?.isWeightedSum === true);
+}
+
+function formatHeadLayerSubtitle(headIndex = null, layerIndex = null) {
+    const parts = [];
+    if (Number.isFinite(headIndex)) {
+        parts.push(`Head ${Math.floor(headIndex) + 1}`);
+    }
+    if (Number.isFinite(layerIndex)) {
+        parts.push(`Layer ${Math.floor(layerIndex) + 1}`);
+    }
+    return parts.join(' • ');
+}
+
+function isFinalLayerNormHoverSelection(label = '', info = null, object = null) {
+    const stage = findHoverTokenString(info, object, 'stage');
+    const explicitKind = findHoverTokenString(info, object, 'layerNormKind');
+    return resolveLayerNormKind({
+        label,
+        stage,
+        explicitKind
+    }) === 'final';
 }
 
 function isTokenVectorStage(stage = '') {
@@ -195,4 +217,23 @@ export function resolveHoverTokenContext({
         tokenId: Number.isFinite(tokenId) ? Math.floor(tokenId) : null,
         tokenLabel: resolvedLabel
     };
+}
+
+export function resolveHoverLabelSubtitle({
+    label = '',
+    info = null,
+    object = null
+} = {}) {
+    if (isBottomTokenChipHoverSelection(label) || isBottomPositionChipHoverSelection(label)) {
+        return '';
+    }
+    if (isFinalLayerNormHoverSelection(label, info, object)) {
+        return '';
+    }
+    const headIndex = findHoverTokenNumber(info, object, 'headIndex');
+    const layerIndex = findHoverTokenNumber(info, object, 'layerIndex');
+    if (!Number.isFinite(headIndex) && !Number.isFinite(layerIndex)) {
+        return '';
+    }
+    return formatHeadLayerSubtitle(headIndex, layerIndex);
 }

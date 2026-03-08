@@ -194,7 +194,10 @@ export function buildMHAVisuals(parentGroup, {
 
     const initDarkColor = new THREE.Color(MHSA_MATRIX_INITIAL_RESTING_COLOR);
     outputProjectionMatrix.setColor(initDarkColor);
-    applyMatrixUserData(outputProjectionMatrix, { label: OUTPUT_PROJECTION_LABEL });
+    applyMatrixUserData(outputProjectionMatrix, {
+        label: OUTPUT_PROJECTION_LABEL,
+        ...(Number.isFinite(layerIndex) ? { layerIndex } : {})
+    });
 
     forEachGroupChildMaterial(outputProjectionMatrix.group, (material) => {
         material.opacity = 1.0;

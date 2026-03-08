@@ -196,9 +196,13 @@ function createAdvanceOverlay() {
 
 function createNextTokenButton() {
     const existing = document.getElementById('nextTokenBtn');
-    if (existing) return existing;
-    const topControls = document.getElementById('topControls');
-    if (!topControls) return null;
+    if (existing) {
+        if (document.body && existing.parentElement !== document.body) {
+            document.body.appendChild(existing);
+        }
+        return existing;
+    }
+    if (!document.body) return null;
 
     const btn = document.createElement('button');
     btn.id = 'nextTokenBtn';
@@ -208,12 +212,7 @@ function createNextTokenButton() {
     btn.setAttribute('aria-label', 'Advance to next token');
     btn.dataset.visible = 'false';
     btn.style.display = 'none';
-    const followBtn = document.getElementById('followModeBtn');
-    if (followBtn && followBtn.parentElement === topControls) {
-        topControls.insertBefore(btn, followBtn);
-    } else {
-        topControls.appendChild(btn);
-    }
+    document.body.appendChild(btn);
     return btn;
 }
 

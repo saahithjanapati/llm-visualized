@@ -312,6 +312,12 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
             render({ tokenLabels, tokenIndices, tokenIds, generatedToken });
         },
         setEnabled,
+        getRootElement: () => dom.root,
+        getTokenElement: (index) => {
+            const safeIndex = Number(index);
+            if (!Number.isFinite(safeIndex)) return null;
+            return dom.tokensEl.querySelector(`[data-token-entry-index="${Math.floor(safeIndex)}"]`);
+        },
         dispose: () => {
             setBodyVisibilityFlag(false);
             setPromptTokenStripHeightVar(0);

@@ -16,6 +16,12 @@ import {
     MHA_WEIGHTED_SUM_DOCK_OFFSET
 } from '../LayerAnimationConstants.js';
 import { getSideCopyEntry } from './laneIndex.js';
+import {
+    computeTravelArcHeight,
+    getArcOffset,
+    smoothSegmentProgress,
+    smootherstep01,
+} from './motionUtils.js';
 
 function logMhsaDebug(...args) {
     if (typeof window === 'undefined' || window.__MHSA_DEBUG !== true) return;
@@ -25,6 +31,10 @@ function logMhsaDebug(...args) {
 // Shared lightweight geometry for self-attention highlight spheres
 const SHARED_SPHERE_GEOMETRY = new THREE.SphereGeometry(10, 12, 12);
 const BLUE_ENTRY_DURATION_MULT = 1.75;
+const WEIGHTED_SUM_LANE_TRAVEL_DURATION_MULT = 0.86;
+const WEIGHTED_SUM_DOCK_TRAVEL_DURATION_MULT = 0.88;
+const WEIGHTED_SUM_DUPLICATE_TRAVEL_DURATION_MULT = 0.86;
+const WEIGHTED_SUM_PULSE_DURATION_MS = 100;
 
 /**
  * Self-attention specific, above-matrix animations.
@@ -162,6 +172,53 @@ export class SelfAttentionAnimator {
     _markVectorLayoutDirty(vec) {
         if (!this.ctx || typeof this.ctx._markBatchedVectorLayoutDirty !== 'function') return false;
         return this.ctx._markBatchedVectorLayoutDirty(vec) === true;
+    }
+
+    _tweenVectorTravel(vector, target, duration, {
+        minArc = 0,
+        maxArc = 0,
+        distanceScale = 0,
+        easing = TWEEN.Easing.Linear.None,
+        onComplete = null,
+    } = {}) {
+        if (!vector || !vector.group || !vector.group.position) {
+            if (typeof onComplete === 'function') onComplete();
+            return null;
+        }
+        const position = vector.group.position;
+        const startX = position.x;
+        const startY = position.y;
+        const startZ = position.z;
+        const targetX = Number.isFinite(target?.x) ? target.x : startX;
+        const targetY = Number.isFinite(target?.y) ? target.y : startY;
+        const targetZ = Number.isFinite(target?.z) ? target.z : startZ;
+        const travelDistance = Math.abs(targetX - startX) + Math.abs(targetY - startY) + Math.abs(targetZ - startZ);
+        const arcHeight = computeTravelArcHeight(travelDistance, { minArc, maxArc, distanceScale });
+        const finalize = () => {
+            position.set(targetX, targetY, targetZ);
+            this._markVectorLayoutDirty(vector);
+            if (typeof onComplete === 'function') onComplete();
+        };
+        if (typeof TWEEN === 'undefined') {
+            finalize();
+            return null;
+        }
+
+        const travelState = { progress: 0 };
+        const tween = new TWEEN.Tween(travelState)
+            .to({ progress: 1 }, Math.max(1, duration))
+            .easing(easing)
+            .onUpdate(() => {
+                const rawT = THREE.MathUtils.clamp(travelState.progress, 0, 1);
+                const travelT = smootherstep01(rawT);
+                position.x = THREE.MathUtils.lerp(startX, targetX, travelT);
+                position.y = THREE.MathUtils.lerp(startY, targetY, travelT) + getArcOffset(rawT, arcHeight);
+                position.z = THREE.MathUtils.lerp(startZ, targetZ, travelT);
+                this._markVectorLayoutDirty(vector);
+            })
+            .onComplete(finalize);
+        tween.start();
+        return tween;
     }
 
     _cleanupAttentionScoreMeshes() {
@@ -1289,8 +1346,18 @@ export class SelfAttentionAnimator {
         if (!vector) return;
         vector.userData = vector.userData || {};
         vector.userData.isWeightedSum = true;
+        const headIndex = Number.isFinite(vector.userData?.headIndex)
+            ? Math.floor(vector.userData.headIndex)
+            : null;
+        const layerIndex = Number.isFinite(vector.userData?.layerIndex)
+            ? Math.floor(vector.userData.layerIndex)
+            : (Number.isFinite(this.ctx?.layerIndex) ? Math.floor(this.ctx.layerIndex) : null);
         const tokenIndex = Number.isFinite(lane?.tokenIndex) ? Math.floor(lane.tokenIndex) : null;
         const tokenLabel = (lane && typeof lane.tokenLabel === 'string') ? lane.tokenLabel : null;
+        if (Number.isFinite(headIndex)) vector.userData.headIndex = headIndex;
+        else delete vector.userData.headIndex;
+        if (Number.isFinite(layerIndex)) vector.userData.layerIndex = layerIndex;
+        else delete vector.userData.layerIndex;
         if (Number.isFinite(tokenIndex)) vector.userData.tokenIndex = tokenIndex;
         else delete vector.userData.tokenIndex;
         if (tokenLabel) vector.userData.tokenLabel = tokenLabel;
@@ -1300,6 +1367,10 @@ export class SelfAttentionAnimator {
             vector.group.userData = vector.group.userData || {};
             vector.group.userData.label = label;
             vector.group.userData.isWeightedSum = true;
+            if (Number.isFinite(headIndex)) vector.group.userData.headIndex = headIndex;
+            else delete vector.group.userData.headIndex;
+            if (Number.isFinite(layerIndex)) vector.group.userData.layerIndex = layerIndex;
+            else delete vector.group.userData.layerIndex;
             if (Number.isFinite(tokenIndex)) vector.group.userData.tokenIndex = tokenIndex;
             else delete vector.group.userData.tokenIndex;
             if (tokenLabel) vector.group.userData.tokenLabel = tokenLabel;
@@ -1309,6 +1380,10 @@ export class SelfAttentionAnimator {
             vector.mesh.userData = vector.mesh.userData || {};
             vector.mesh.userData.label = label;
             vector.mesh.userData.isWeightedSum = true;
+            if (Number.isFinite(headIndex)) vector.mesh.userData.headIndex = headIndex;
+            else delete vector.mesh.userData.headIndex;
+            if (Number.isFinite(layerIndex)) vector.mesh.userData.layerIndex = layerIndex;
+            else delete vector.mesh.userData.layerIndex;
             if (Number.isFinite(tokenIndex)) vector.mesh.userData.tokenIndex = tokenIndex;
             else delete vector.mesh.userData.tokenIndex;
             if (tokenLabel) vector.mesh.userData.tokenLabel = tokenLabel;
@@ -1730,11 +1805,6 @@ export class SelfAttentionAnimator {
         const firstLaneZ = Array.isArray(laneZs) && laneZs.length
             ? laneZs[0]
             : vector.group.position.z;
-
-
-        // Convenience alias for durations / easing
-        const QEasing = TWEEN.Easing.Quadratic.InOut;
-
         const startLaneTraversal = () => {
             if (this.skipRequested) {
                 this._finishBlueImmediately(vector, headIdx, allDoneCb);
@@ -1771,36 +1841,47 @@ export class SelfAttentionAnimator {
         const horizontalDuration = needsHorizontalEntry ? this.BLUE_HORIZ_DURATION * BLUE_ENTRY_DURATION_MULT : 0;
         const totalEntryDuration = Math.max(1, verticalDuration + horizontalDuration);
         const cornerProgress = totalEntryDuration > 0 ? (verticalDuration / totalEntryDuration) : 0;
+        const cornerBlend = (needsVerticalEntry && needsHorizontalEntry)
+            ? Math.min(0.1, cornerProgress * 0.35, (1 - cornerProgress) * 0.22)
+            : 0;
+        const entryBaseY = vector.group.position.y;
+        const entryTravelDistance = Math.abs(firstLaneZ - startZ) + Math.abs(horizontalToK - startX);
+        const entryArcHeight = entryTravelDistance > 0.001
+            ? computeTravelArcHeight(entryTravelDistance, {
+                minArc: 10,
+                maxArc: 24,
+                distanceScale: 0.018,
+            })
+            : 0;
         const entryState = { progress: 0 };
 
         new TWEEN.Tween(entryState)
             .to({ progress: 1 }, totalEntryDuration)
-            .easing(QEasing)
+            .easing(TWEEN.Easing.Linear.None)
             .onUpdate(() => {
                 const progress = THREE.MathUtils.clamp(entryState.progress, 0, 1);
+                vector.group.position.y = entryBaseY + getArcOffset(progress, entryArcHeight);
                 if (!needsVerticalEntry) {
                     vector.group.position.z = firstLaneZ;
-                } else if (progress <= cornerProgress) {
-                    const verticalT = cornerProgress > 0 ? (progress / cornerProgress) : 1;
-                    vector.group.position.z = THREE.MathUtils.lerp(startZ, firstLaneZ, verticalT);
                 } else {
-                    vector.group.position.z = firstLaneZ;
+                    const verticalEnd = Math.min(1, cornerProgress + cornerBlend);
+                    const verticalT = smoothSegmentProgress(progress, 0, verticalEnd);
+                    vector.group.position.z = THREE.MathUtils.lerp(startZ, firstLaneZ, verticalT);
                 }
 
                 if (!needsHorizontalEntry) {
                     vector.group.position.x = horizontalToK;
                 } else if (!needsVerticalEntry) {
-                    vector.group.position.x = THREE.MathUtils.lerp(startX, horizontalToK, progress);
-                } else if (progress > cornerProgress) {
-                    const horizontalSpan = Math.max(1e-6, 1 - cornerProgress);
-                    const horizontalT = (progress - cornerProgress) / horizontalSpan;
-                    vector.group.position.x = THREE.MathUtils.lerp(startX, horizontalToK, horizontalT);
+                    vector.group.position.x = THREE.MathUtils.lerp(startX, horizontalToK, smootherstep01(progress));
                 } else {
-                    vector.group.position.x = startX;
+                    const horizontalStart = Math.max(0, cornerProgress - cornerBlend);
+                    const horizontalT = smoothSegmentProgress(progress, horizontalStart, 1);
+                    vector.group.position.x = THREE.MathUtils.lerp(startX, horizontalToK, horizontalT);
                 }
                 this._markVectorLayoutDirty(vector);
             })
             .onComplete(() => {
+                vector.group.position.y = entryBaseY;
                 vector.group.position.z = firstLaneZ;
                 vector.group.position.x = horizontalToK;
                 this._markVectorLayoutDirty(vector);
@@ -1926,18 +2007,12 @@ export class SelfAttentionAnimator {
             this._checkGlobalCompletion();
         };
 
-        if (typeof TWEEN !== 'undefined') {
-            new TWEEN.Tween(vector.group.position)
-                .to({ x: targetX, y: targetY, z: resolvedLaneZ }, this.DUPLICATE_TRAVEL_MERGE_MS)
-                .easing(TWEEN.Easing.Quadratic.Out)
-                .onComplete(() => {
-                    finalizeDock();
-                })
-                .start();
-        } else {
-            vector.group.position.set(targetX, targetY, resolvedLaneZ);
-            finalizeDock();
-        }
+        this._tweenVectorTravel(vector, { x: targetX, y: targetY, z: resolvedLaneZ }, this.DUPLICATE_TRAVEL_MERGE_MS * WEIGHTED_SUM_DOCK_TRAVEL_DURATION_MULT, {
+            minArc: 6,
+            maxArc: 16,
+            distanceScale: 0.018,
+            onComplete: finalizeDock,
+        });
     }
 
     _traverseLanes(vector, laneZs, count, spheresArr, createSpheres, doneCb, stepIdx = 0) {
@@ -1952,15 +2027,32 @@ export class SelfAttentionAnimator {
 
         const targetZ = laneZs[stepIdx < laneZs.length ? stepIdx : laneZs.length - 1];
         const prepassSlowMult = createSpheres ? SA_BLUE_PREPASS_SLOW_MULT : 1;
-        const laneHopDuration = this.BLUE_VERT_DURATION * prepassSlowMult;
+        const laneHopDuration = this.BLUE_VERT_DURATION * prepassSlowMult * (createSpheres ? 1 : WEIGHTED_SUM_LANE_TRAVEL_DURATION_MULT);
         const lanePauseDuration = this.BLUE_PAUSE_MS * prepassSlowMult;
-        new TWEEN.Tween(vector.group.position)
-            .to({ z: targetZ }, laneHopDuration)
-            .easing(TWEEN.Easing.Quadratic.InOut)
+        const startZ = vector.group.position.z;
+        const baseY = vector.group.position.y;
+        const laneDistance = Math.abs(targetZ - startZ);
+        const laneArcHeight = laneDistance > 0.001
+            ? computeTravelArcHeight(laneDistance, {
+                minArc: createSpheres ? 12 : 10,
+                maxArc: createSpheres ? 32 : 24,
+                distanceScale: createSpheres ? 0.06 : 0.045,
+            })
+            : 0;
+        const laneTravelState = { progress: 0 };
+        new TWEEN.Tween(laneTravelState)
+            .to({ progress: 1 }, laneHopDuration)
+            .easing(TWEEN.Easing.Linear.None)
             .onUpdate(() => {
+                const travelT = smootherstep01(laneTravelState.progress);
+                vector.group.position.z = THREE.MathUtils.lerp(startZ, targetZ, travelT);
+                vector.group.position.y = baseY + getArcOffset(laneTravelState.progress, laneArcHeight);
                 this._markVectorLayoutDirty(vector);
             })
             .onComplete(() => {
+                vector.group.position.z = targetZ;
+                vector.group.position.y = baseY;
+                this._markVectorLayoutDirty(vector);
                 if (this.skipRequested) return;
                 const headIdx = (vector.userData && typeof vector.userData.headIndex === 'number') ? vector.userData.headIndex : null;
                 if (createSpheres && Number.isFinite(headIdx)) {
@@ -2157,10 +2249,17 @@ export class SelfAttentionAnimator {
                                     dupVec.group.scale.set(weightScale, weightScale, weightScale);
                                 };
                                 const flyToSum = () => {
-                                    new TWEEN.Tween(dupVec.group.position)
-                                        .to(sumTarget, sumDuration)
-                                        .easing(TWEEN.Easing.Quadratic.InOut)
-                                        .onComplete(() => {
+                                    let traversalContinued = false;
+                                    const continueTraversalOnce = () => {
+                                        if (traversalContinued) return;
+                                        traversalContinued = true;
+                                        ContinueTraversal();
+                                    };
+                                    this._tweenVectorTravel(dupVec, sumTarget, sumDuration * WEIGHTED_SUM_DUPLICATE_TRAVEL_DURATION_MULT, {
+                                        minArc: 8,
+                                        maxArc: 20,
+                                        distanceScale: 0.028,
+                                        onComplete: () => {
                                             const outputLength = Number.isFinite(this.ctx?.outputVectorLength)
                                                 ? this.ctx.outputVectorLength
                                                 : (fixedVec.rawData ? fixedVec.rawData.length : 0);
@@ -2170,16 +2269,20 @@ export class SelfAttentionAnimator {
                                             const pulseSum = () => {
                                                 const baseScale = Math.max(1, vector.group.scale.x);
                                                 const pulseFactor = Number.isFinite(weight)
-                                                    ? THREE.MathUtils.lerp(1.04, 1.14, weight)
+                                                    ? THREE.MathUtils.lerp(1.03, 1.1, weight)
                                                     : 1.08;
                                                 const state = { s: baseScale };
                                                 new TWEEN.Tween(state)
-                                                    .to({ s: baseScale * pulseFactor }, 140)
+                                                    .to({ s: baseScale * pulseFactor }, WEIGHTED_SUM_PULSE_DURATION_MS)
                                                     .easing(TWEEN.Easing.Quadratic.Out)
                                                     .yoyo(true)
                                                     .repeat(1)
                                                     .onUpdate(() => {
                                                         vector.group.scale.set(state.s, state.s, state.s);
+                                                    })
+                                                    .onComplete(() => {
+                                                        vector.group.scale.set(baseScale, baseScale, baseScale);
+                                                        continueTraversalOnce();
                                                     })
                                                     .start();
                                             };
@@ -2188,7 +2291,10 @@ export class SelfAttentionAnimator {
                                             new TWEEN.Tween(vector.group.scale)
                                                 .to({ x: 1, y: 1, z: 1 }, this.DUPLICATE_POP_IN_MS)
                                                 .easing(TWEEN.Easing.Quadratic.Out)
-                                                .onComplete(pulseSum)
+                                                .onComplete(() => {
+                                                    vector.group.scale.set(1, 1, 1);
+                                                    continueTraversalOnce();
+                                                })
                                                 .start();
                                         } else {
                                             pulseSum();
@@ -2199,55 +2305,59 @@ export class SelfAttentionAnimator {
                                             .onComplete(() => {
                                                 this._spawnedTempVectors.delete(dupVec);
                                                 this._releaseDuplicateVector(dupVec);
-                                                // Continue traversal AFTER merge completes
-                                                ContinueTraversal();
                                             })
                                             .start();
-                                    }).start();
+                                    } });
                                 };
 
                                 if (spData && spPos) {
                                     const scoreTarget = { x: spPos.x, y: spPos.y, z: spPos.z };
-                                    new TWEEN.Tween(dupVec.group.position)
-                                        .to(scoreTarget, this.DUPLICATE_TRAVEL_MERGE_MS * SA_DUPLICATE_TO_SCORE_TRAVEL_FRACTION)
-                                        .easing(TWEEN.Easing.Quadratic.Out)
-                                        .onComplete(() => {
-                                            const baseDupScale = Math.max(0.001, Number.isFinite(dupVec.group.scale.x) ? dupVec.group.scale.x : 1);
-                                            const collisionPulseFactor = Number.isFinite(weight)
-                                                ? THREE.MathUtils.lerp(
-                                                    SA_DUPLICATE_SCORE_COLLISION_PULSE_MIN,
-                                                    SA_DUPLICATE_SCORE_COLLISION_PULSE_MAX,
-                                                    weight
-                                                )
-                                                : (SA_DUPLICATE_SCORE_COLLISION_PULSE_MIN + SA_DUPLICATE_SCORE_COLLISION_PULSE_MAX) * 0.5;
-                                            const collisionPulseDuration = this.DUPLICATE_SCORE_COLLISION_PULSE_MS;
-                                            const pulseScaleState = { s: baseDupScale };
-                                            new TWEEN.Tween(pulseScaleState)
-                                                .to({ s: baseDupScale * collisionPulseFactor }, collisionPulseDuration)
-                                                .easing(TWEEN.Easing.Quadratic.Out)
-                                                .yoyo(true)
-                                                .repeat(1)
-                                                .onUpdate(() => {
-                                                    dupVec.group.scale.set(pulseScaleState.s, pulseScaleState.s, pulseScaleState.s);
-                                                })
-                                                .start();
-                                            if (Number.isFinite(sphereId)) {
-                                                const haloColor = this._sampleVectorFlashColor(dupVec, this._collisionHaloColorTmp);
-                                                this._spawnAttentionSphereHalo(
-                                                    sphereId,
-                                                    collisionPulseDuration * SA_DUPLICATE_SCORE_COLLISION_HALO_DURATION_MULT,
-                                                    haloColor
-                                                );
-                                            }
-                                            // Recolor at collision to reflect value * post-softmax weight.
-                                            applyWeightedLook();
-                                            // Brief linger at the post-softmax score before merging into the running sum
-                                            this._scheduleAfterDelay(() => {
-                                                if (this.skipRequested) return;
-                                                flyToSum();
-                                            }, Math.max(80, collisionPulseDuration * 2));
-                                        })
-                                        .start();
+                                    this._tweenVectorTravel(
+                                        dupVec,
+                                        scoreTarget,
+                                        this.DUPLICATE_TRAVEL_MERGE_MS * SA_DUPLICATE_TO_SCORE_TRAVEL_FRACTION * WEIGHTED_SUM_DUPLICATE_TRAVEL_DURATION_MULT,
+                                        {
+                                            minArc: 5,
+                                            maxArc: 14,
+                                            distanceScale: 0.02,
+                                            onComplete: () => {
+                                                const baseDupScale = Math.max(0.001, Number.isFinite(dupVec.group.scale.x) ? dupVec.group.scale.x : 1);
+                                                const collisionPulseFactor = Number.isFinite(weight)
+                                                    ? THREE.MathUtils.lerp(
+                                                        SA_DUPLICATE_SCORE_COLLISION_PULSE_MIN,
+                                                        SA_DUPLICATE_SCORE_COLLISION_PULSE_MAX,
+                                                        weight
+                                                    )
+                                                    : (SA_DUPLICATE_SCORE_COLLISION_PULSE_MIN + SA_DUPLICATE_SCORE_COLLISION_PULSE_MAX) * 0.5;
+                                                const collisionPulseDuration = this.DUPLICATE_SCORE_COLLISION_PULSE_MS;
+                                                const pulseScaleState = { s: baseDupScale };
+                                                new TWEEN.Tween(pulseScaleState)
+                                                    .to({ s: baseDupScale * collisionPulseFactor }, collisionPulseDuration)
+                                                    .easing(TWEEN.Easing.Quadratic.Out)
+                                                    .yoyo(true)
+                                                    .repeat(1)
+                                                    .onUpdate(() => {
+                                                        dupVec.group.scale.set(pulseScaleState.s, pulseScaleState.s, pulseScaleState.s);
+                                                    })
+                                                    .start();
+                                                if (Number.isFinite(sphereId)) {
+                                                    const haloColor = this._sampleVectorFlashColor(dupVec, this._collisionHaloColorTmp);
+                                                    this._spawnAttentionSphereHalo(
+                                                        sphereId,
+                                                        collisionPulseDuration * SA_DUPLICATE_SCORE_COLLISION_HALO_DURATION_MULT,
+                                                        haloColor
+                                                    );
+                                                }
+                                                // Recolor at collision to reflect value * post-softmax weight.
+                                                applyWeightedLook();
+                                                // Brief linger at the post-softmax score before merging into the running sum
+                                                this._scheduleAfterDelay(() => {
+                                                    if (this.skipRequested) return;
+                                                    flyToSum();
+                                                }, Math.max(80, collisionPulseDuration * 2));
+                                            },
+                                        },
+                                    );
                                 } else {
                                     applyWeightedLook();
                                     flyToSum();

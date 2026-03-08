@@ -38,12 +38,15 @@ import {
 import { PrismLayerNormAnimation } from '../../animations/PrismLayerNormAnimation.js';
 import { MHSAAnimation } from '../../animations/MHSAAnimation.js';
 import { startPrismAdditionAnimation } from '../../utils/additionUtils.js';
-import { applyMatrixLabel, applyMatrixMaterialTweaks } from '../../utils/matrixVisualUtils.js';
+import {
+    applyMatrixLabel,
+    applyMatrixMaterialTweaks,
+    applyMatrixUserData
+} from '../../utils/matrixVisualUtils.js';
 import {
     applyVectorData,
     copyVectorAppearance,
     freezeStaticTransforms,
-    geluApprox,
     LN_INTERNAL_TRAIL_MIN_SEGMENT
 } from './gpt2LayerUtils.js';
 import { updateLayerNormVisualState } from './gpt2LayerNormVisuals.js';
@@ -748,6 +751,7 @@ export default class Gpt2Layer extends BaseLayer {
         matrix.setMaterialProperties({ opacity: 1.0, transparent: false, emissiveIntensity });
         applyMatrixMaterialTweaks(matrix, MLP_REFLECTIVITY_TWEAKS);
         applyMatrixLabel(matrix, label);
+        applyMatrixUserData(matrix, { layerIndex: this.index });
         this.raycastRoot.add(matrix.group);
         freezeStaticTransforms(matrix.group, true);
         return matrix;
@@ -2459,16 +2463,15 @@ export default class Gpt2Layer extends BaseLayer {
         const segmentVecs = lane.expandedVecSegments;
         const durationMs = Number.isFinite(options.durationMs) ? options.durationMs : 500;
         const riseExtra = Number.isFinite(options.riseExtra) ? options.riseExtra : 24;
-        const curveHeight = Number.isFinite(options.curveHeight) ? options.curveHeight : 36;
-        const curveDomain = Number.isFinite(options.curveDomain) ? options.curveDomain : 2.5;
-        const negativeScale = Number.isFinite(options.negativeScale) ? options.negativeScale : 2.6;
+        const waveHeight = Number.isFinite(options.curveHeight) ? options.curveHeight : 36;
+        const waveCycles = Number.isFinite(options.waveCycles) ? options.waveCycles : 1;
+        const waveTravelCycles = Number.isFinite(options.waveTravelCycles) ? options.waveTravelCycles : 0.75;
         const activationSwitchT = THREE.MathUtils.clamp(
             Number.isFinite(options.activationSwitchT) ? options.activationSwitchT : 0.35,
             0,
             0.9
         );
         const liteMode = options.liteMode === true;
-        const safeCurveDomain = curveDomain > 0 ? curveDomain : 1;
 
         if (lane) {
             lane.mlpGeluActive = true;
@@ -2539,28 +2542,29 @@ export default class Gpt2Layer extends BaseLayer {
 
         const segmentCounts = segmentVecs.map(seg => Math.max(1, Math.floor(seg.instanceCount || 1)));
         const totalCount = segmentCounts.reduce((sum, count) => sum + count, 0);
-        const offsets = segmentVecs.map((_, idx) => new Float32Array(segmentCounts[idx]));
+        const phaseOffsets = segmentVecs.map((_, idx) => new Float32Array(segmentCounts[idx]));
+        const phaseSpan = Math.PI * 2 * waveCycles;
         let globalIndex = 0;
         for (let s = 0; s < segmentVecs.length; s++) {
             const count = segmentCounts[s];
             for (let i = 0; i < count; i++) {
-                const t = totalCount > 1 ? globalIndex / (totalCount - 1) : 0.5;
-                const x = (t * 2 - 1) * safeCurveDomain;
-                const y = geluApprox(x);
-                const scaledY = y < 0 ? y * negativeScale : y;
-                offsets[s][i] = (scaledY / safeCurveDomain) * curveHeight;
+                const t = totalCount > 1 ? globalIndex / (totalCount - 1) : 0;
+                phaseOffsets[s][i] = t * phaseSpan;
                 globalIndex++;
             }
         }
 
         const state = { t: 0 };
 
-        // Bend into a GELU curve, switch colors mid-flight, then return to the flat vector.
+        // Send a traveling sine wave through the expanded prisms so the
+        // activation reads as a rising nonlinear ripple before down-projection.
         new TWEEN.Tween(state)
             .to({ t: 1 }, durationMs)
             .easing(TWEEN.Easing.Quadratic.InOut)
             .onUpdate(() => {
-                const curveT = Math.sin(Math.PI * state.t);
+                const waveEnvelope = Math.sin(Math.PI * state.t);
+                const phaseAdvance = state.t * Math.PI * 2 * waveTravelCycles;
+                const waveLeadPhase = Math.PI * 0.5;
                 if (state.t >= activationSwitchT) {
                     applyActivationOnce();
                 }
@@ -2573,10 +2577,11 @@ export default class Gpt2Layer extends BaseLayer {
 
                 for (let s = 0; s < segmentVecs.length; s++) {
                     const segVec = segmentVecs[s];
-                    const offsetRow = offsets[s];
+                    const phaseRow = phaseOffsets[s];
                     const count = segmentCounts[s];
                     for (let i = 0; i < count; i++) {
-                        segVec.setInstanceAppearance(i, offsetRow[i] * curveT, null, null, false);
+                        const waveOffset = Math.sin(phaseRow[i] - phaseAdvance + waveLeadPhase);
+                        segVec.setInstanceAppearance(i, waveHeight * waveEnvelope * waveOffset, null, null, false);
                     }
                     if (typeof segVec.markInstanceMatrixDirty === 'function') {
                         segVec.markInstanceMatrixDirty();

@@ -8,6 +8,7 @@ import {
     MLP_DOWN_MATRIX_COLOR
 } from '../animations/LayerAnimationConstants.js';
 import { buildAttentionEquationSet } from './attentionEquationTextUtils.js';
+import { buildSelectionLayerNormEquation } from './selectionPanelLayerNormEquationTextUtils.js';
 import { formatLayerNormLabel } from '../utils/layerNormLabels.js';
 import { D_MODEL, D_HEAD, VOCAB_SIZE, CONTEXT_LEN } from './selectionPanelConstants.js';
 import { formatTokenLabelForPreview } from './selectionPanelFormatUtils.js';
@@ -1089,6 +1090,31 @@ function resolveLayerNormEquationSymbols(lower) {
     };
 }
 
+function resolveLayerNormEquationHighlight(lower, stageLower = '') {
+    if (lower.includes('post-layernorm residual') || lower.includes('post layernorm residual')) {
+        return 'output';
+    }
+    if (
+        lower.includes('scale')
+        || lower.includes('gamma')
+        || stageLower.endsWith('.scale')
+        || stageLower.endsWith('.param.scale')
+    ) {
+        return 'scale';
+    }
+    if (
+        lower.includes('shift')
+        || lower.includes('beta')
+        || stageLower.endsWith('.param.shift')
+    ) {
+        return 'shift';
+    }
+    if (stageLower === 'ln1.shift' || stageLower === 'ln2.shift' || stageLower === 'final_ln.shift') {
+        return 'output';
+    }
+    return 'norm';
+}
+
 function resolveAttentionHeadSubscript(selectionInfo) {
     const headIndex = resolveSelectionHeadIndex(selectionInfo);
     return Number.isFinite(headIndex) ? String(headIndex + 1) : null;
@@ -1128,13 +1154,23 @@ function buildSelectionEquationEntries(label, selectionInfo = null) {
     const postMlpResidualEq = `x_{\\text{out}} = u + ${SELECTION_EQUATION_SYMBOLS.MLPDown}`;
     const logitsEq = `\\ell = x_{\\text{final}} ${SELECTION_EQUATION_SYMBOLS.WU}`;
     const probsEq = 'p = \\mathrm{softmax}(\\ell)';
-    const buildLayerNormEntries = (kind = 'ln1', activeIndexes = [0]) => {
+    const buildLayerNormEntries = (kind = 'ln1', highlight = 'norm') => {
         const layerNormKey = kind === 'ln2'
             ? 'ln2'
             : (kind === 'top' ? 'top' : 'ln1');
         const symbols = resolveLayerNormEquationSymbols(layerNormKey);
+        if (highlight === 'scale' || highlight === 'shift' || highlight === 'output') {
+            return [{
+                tex: buildSelectionLayerNormEquation({
+                    inputSymbol: symbols.input,
+                    outputSymbol: symbols.output,
+                    highlight
+                }),
+                active: true
+            }];
+        }
         const combinedEq = `${symbols.output} = \\gamma \\odot \\frac{${symbols.input} - \\mu}{\\sqrt{\\sigma^2 + \\epsilon}} + \\beta`;
-        return buildEquationEntries([combinedEq], activeIndexes);
+        return buildEquationEntries([combinedEq], [0]);
     };
 
     if (stageLower.startsWith('embedding.token')) {
@@ -1147,25 +1183,30 @@ function buildSelectionEquationEntries(label, selectionInfo = null) {
         return buildNlpEmbeddingEquationEntries([2]);
     }
     if (stageLower.startsWith('layer.incoming')) {
-        return buildLayerNormEntries('ln1', [0]);
+        return buildLayerNormEntries('ln1', 'norm');
     }
     if (stageLower === 'ln1.norm') {
-        return buildLayerNormEntries('ln1', [0]);
+        return buildLayerNormEntries('ln1', 'norm');
     }
-    if (stageLower === 'ln1.scale' || stageLower === 'ln1.shift') {
-        return buildLayerNormEntries('ln1', [1]);
+    if (stageLower === 'ln1.scale' || stageLower === 'ln1.shift' || stageLower === 'ln1.param.scale' || stageLower === 'ln1.param.shift') {
+        return buildLayerNormEntries('ln1', resolveLayerNormEquationHighlight(lower, stageLower));
     }
     if (stageLower === 'ln2.norm') {
-        return buildLayerNormEntries('ln2', [0]);
+        return buildLayerNormEntries('ln2', 'norm');
     }
-    if (stageLower === 'ln2.scale' || stageLower === 'ln2.shift') {
-        return buildLayerNormEntries('ln2', [1]);
+    if (stageLower === 'ln2.scale' || stageLower === 'ln2.shift' || stageLower === 'ln2.param.scale' || stageLower === 'ln2.param.shift') {
+        return buildLayerNormEntries('ln2', resolveLayerNormEquationHighlight(lower, stageLower));
     }
     if (stageLower === 'final_ln.norm') {
-        return buildLayerNormEntries('top', [0]);
+        return buildLayerNormEntries('top', 'norm');
     }
-    if (stageLower === 'final_ln.scale' || stageLower === 'final_ln.shift') {
-        return buildLayerNormEntries('top', [1]);
+    if (
+        stageLower === 'final_ln.scale'
+        || stageLower === 'final_ln.shift'
+        || stageLower === 'final_ln.param.scale'
+        || stageLower === 'final_ln.param.shift'
+    ) {
+        return buildLayerNormEntries('top', resolveLayerNormEquationHighlight(lower, stageLower));
     }
     if (stageLower === 'qkv.q') {
         return buildEquationEntries([queryProjectionEq, attentionEquation], [0]);
@@ -1279,20 +1320,7 @@ function buildSelectionEquationEntries(label, selectionInfo = null) {
         const layerNormKind = lower.includes('top') || lower.includes('final ln')
             ? 'top'
             : (resolveSelectionLayerNormKind(selectionInfo) === 'ln2' || lower.includes('ln2') ? 'ln2' : 'ln1');
-        if (lower.includes('normed') || lower.includes('normalized') || lower.includes('incoming residual')) {
-            return buildLayerNormEntries(layerNormKind, [0]);
-        }
-        if (
-            lower.includes('scale')
-            || lower.includes('gamma')
-            || lower.includes('shift')
-            || lower.includes('beta')
-            || lower.includes('post-layernorm residual')
-            || lower.includes('post layernorm residual')
-        ) {
-            return buildLayerNormEntries(layerNormKind, [1]);
-        }
-        return buildLayerNormEntries(layerNormKind, [0]);
+        return buildLayerNormEntries(layerNormKind, resolveLayerNormEquationHighlight(lower, stageLower));
     }
 
     if (lower.includes('attention')) {
