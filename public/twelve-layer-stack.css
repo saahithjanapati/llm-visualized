@@ -635,6 +635,8 @@ body.touch-ui * {
     inset: -4px 0 0;
     border-radius: 0 6px 0 0;
     border: 1px solid rgba(255,255,255,0.2);
+    border-left: none;
+    border-bottom: none;
     background: rgba(0,0,0,0.92);
     box-shadow: 0 10px 24px rgba(0,0,0,0.44);
     pointer-events: none;

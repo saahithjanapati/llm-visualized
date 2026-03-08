@@ -2546,7 +2546,6 @@ export class LayerPipeline extends EventTarget {
                             markSkipVisible(addVec);
                             startFinalRise(addVec);
                         }, {
-                            suppressResidualTrailUpdates: true,
                             finalData: finalAdditionData
                         });
 
