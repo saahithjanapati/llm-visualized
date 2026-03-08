@@ -31,6 +31,20 @@ export function initIntroAnimation(pipeline, gptCanvas) {
         overlay.classList.add('is-hidden');
     };
 
+    const waitForMainScenePresentation = async () => {
+        const engine = pipeline?.engine || null;
+        if (engine && typeof engine.whenFirstFramePresented === 'function') {
+            await engine.whenFirstFramePresented();
+        }
+        if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+            await new Promise((resolve) => {
+                window.requestAnimationFrame(() => {
+                    window.requestAnimationFrame(resolve);
+                });
+            });
+        }
+    };
+
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
@@ -39,6 +53,7 @@ export function initIntroAnimation(pipeline, gptCanvas) {
     appState.introActive = true;
     appState.introRaf = 0;
     appState.introCleaned = false;
+    let transitionPromise = null;
 
     function cleanupIntro() {
         if (appState.introCleaned) return;
@@ -128,6 +143,22 @@ export function initIntroAnimation(pipeline, gptCanvas) {
         setTimeout(() => revealChar(0), 500);
     });
 
+    const finalizeMainSceneTransition = async () => {
+        if (transitionPromise) return transitionPromise;
+        transitionPromise = (async () => {
+            try {
+                await waitForMainScenePresentation();
+            } catch (_) {
+                // Best-effort only; if the engine fails to signal, still reveal.
+            }
+            introCanvas.style.display = 'none';
+            gptCanvas.style.display = 'block';
+            cleanupIntro();
+            hideLoadingOverlay();
+        })();
+        return transitionPromise;
+    };
+
     appState.setEnvironmentKey(appState.selectedEnvironmentKey, pipeline, scene, { persist: false }).then(() => {
         scene.traverse((obj) => { if (obj.isAmbientLight) scene.remove(obj); });
         if (pipeline?.engine?.scene && typeof pipeline.engine.scene.traverse === 'function') {
@@ -139,14 +170,10 @@ export function initIntroAnimation(pipeline, gptCanvas) {
             pipeline.engine.renderer.toneMapping = THREE.ACESFilmicToneMapping;
             pipeline.engine.renderer.toneMappingExposure = 1.0;
         }
-        introCanvas.style.display = 'none';
-        cleanupIntro();
-        hideLoadingOverlay();
+        void finalizeMainSceneTransition();
     }).catch((err) => {
         console.warn('HDRI failed to load:', err);
-        introCanvas.style.display = 'none';
-        cleanupIntro();
-        hideLoadingOverlay();
+        void finalizeMainSceneTransition();
     });
 
     window.addEventListener('resize', () => {
@@ -174,20 +201,16 @@ export function initIntroAnimation(pipeline, gptCanvas) {
     if (!appState.skipIntro) {
         loopIntro();
     } else {
-        try {
-            transitionToGPT();
-        } catch (err) {
+        finalizeMainSceneTransition().catch((err) => {
             console.error('Failed to transition to GPT:', err);
             const ic = document.getElementById('introCanvas');
             if (ic) ic.style.display = 'none';
-        }
-        hideLoadingOverlay();
+            hideLoadingOverlay();
+        });
     }
 
     function transitionToGPT() {
-        introCanvas.style.display = 'none';
-        gptCanvas.style.display = 'block';
-        cleanupIntro();
+        void finalizeMainSceneTransition();
     }
 
     const cleanup = () => {

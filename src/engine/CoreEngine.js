@@ -127,6 +127,7 @@ export class CoreEngine {
         this._pendingResizeHandle = null;
         this._pendingResizeHandleType = null;
         this._hasPresentedFrame = false;
+        this._firstPresentedFrameResolvers = [];
         this._adaptiveRenderDprEnabled = opts.adaptiveRenderDpr !== false;
         this._adaptiveRenderDprFloor = null;
         this._adaptiveRenderDprCeiling = null;
@@ -610,6 +611,15 @@ export class CoreEngine {
         return !!this._isUserNavigating;
     }
 
+    whenFirstFramePresented() {
+        if (this._hasPresentedFrame) {
+            return Promise.resolve();
+        }
+        return new Promise((resolve) => {
+            this._firstPresentedFrameResolvers.push(resolve);
+        });
+    }
+
     /** Inform the engine that the camera or controls were changed programmatically. */
     notifyCameraUpdated() {
         if (!this.controls) return;
@@ -697,6 +707,12 @@ export class CoreEngine {
         if (this._raycastRaf !== null && typeof cancelAnimationFrame === 'function') {
             cancelAnimationFrame(this._raycastRaf);
             this._raycastRaf = null;
+        }
+        if (Array.isArray(this._firstPresentedFrameResolvers) && this._firstPresentedFrameResolvers.length > 0) {
+            const pendingResolvers = this._firstPresentedFrameResolvers.splice(0);
+            pendingResolvers.forEach((resolve) => {
+                try { resolve(); } catch (_) { /* best-effort */ }
+            });
         }
     }
 
@@ -2078,7 +2094,14 @@ export class CoreEngine {
         if (perfEnabled) {
             perfStats.addTime('render', this._now() - renderStart);
         }
+        const firstPresentedFrame = !this._hasPresentedFrame;
         this._hasPresentedFrame = true;
+        if (firstPresentedFrame && Array.isArray(this._firstPresentedFrameResolvers) && this._firstPresentedFrameResolvers.length > 0) {
+            const pendingResolvers = this._firstPresentedFrameResolvers.splice(0);
+            pendingResolvers.forEach((resolve) => {
+                try { resolve(); } catch (_) { /* best-effort */ }
+            });
+        }
         if (!this._paused) {
             this._noteAdaptiveRenderDprFrame(now, frameIntervalMs);
         }
