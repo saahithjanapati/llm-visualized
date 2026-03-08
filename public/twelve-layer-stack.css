@@ -3805,6 +3805,12 @@ body.detail-panel-resizing * {
         --hud-equations-panel-height: clamp(74px, 11vh, 90px);
         gap: 0;
     }
+    #promptTokenStrip {
+        border-radius: 0 18px 0 0;
+    }
+    #promptTokenStrip::before {
+        border-radius: 0 22px 0 0;
+    }
     #hudPanel { padding: 6px 8px 3px; gap: 4px 8px; }
     #statusOverlay { font-size: 12px; line-height: 1.15; }
     #parameterCounter .param-label { font-size: 10px; }
