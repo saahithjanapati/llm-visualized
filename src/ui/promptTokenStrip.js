@@ -14,6 +14,8 @@ import {
 
 const STRIP_ID = 'promptTokenStrip';
 const PROMPT_TOKEN_STRIP_HOVER_SOURCE = 'prompt-token-strip';
+const PROMPT_TOKEN_STRIP_COLLISION_GAP_PX = 12;
+const PROMPT_TOKEN_STRIP_COLLISION_MAX_WIDTH_VAR = '--prompt-token-strip-collision-max-width';
 
 function normalizeTokenText(token) {
     if (token === null || token === undefined) return '';
@@ -75,6 +77,22 @@ function isDetailPanelSuppressingStripOnMobile() {
     return window.innerWidth <= 880 || window.innerHeight <= window.innerWidth;
 }
 
+function rectsOverlapVertically(a, b, epsilon = 0.5) {
+    if (!a || !b) return false;
+    return a.bottom > (b.top + epsilon) && a.top < (b.bottom - epsilon);
+}
+
+function resolveVisibleRect(element) {
+    if (!element || typeof element.getBoundingClientRect !== 'function' || typeof window === 'undefined') {
+        return null;
+    }
+    const style = window.getComputedStyle(element);
+    if (style.display === 'none' || style.visibility === 'hidden') return null;
+    const rect = element.getBoundingClientRect();
+    if (!(rect.width > 0 && rect.height > 0)) return null;
+    return rect;
+}
+
 export function initPromptTokenStrip({ onTokenClick = null } = {}) {
     if (typeof document === 'undefined') {
         return {
@@ -84,19 +102,77 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
     }
 
     const dom = buildDom();
+    const detailPanel = document.getElementById('detailPanel');
+    const resizeHandle = document.getElementById('detailPanelResizeHandle');
     let lastSignature = '';
     let clickableEntries = [];
     let stripEnabled = appState.showPromptTokenStrip !== false;
     let bodyClassObserver = null;
     let stripSizeObserver = null;
+    let detailPanelObserver = null;
     let touchClickCleanup = null;
     let hoveredEntry = null;
     let mirroredEntry = null;
+    let layoutSyncFrame = null;
+    let lastCollisionMaxWidthPx = null;
 
-    const syncMeasuredHeight = () => {
-        const visible = dom.root.dataset.visible === 'true';
-        const measuredHeight = visible ? dom.root.getBoundingClientRect().height : 0;
-        setPromptTokenStripHeightVar(measuredHeight);
+    const clearCollisionMaxWidth = () => {
+        if (lastCollisionMaxWidthPx === null) return;
+        dom.root.style.removeProperty(PROMPT_TOKEN_STRIP_COLLISION_MAX_WIDTH_VAR);
+        lastCollisionMaxWidthPx = null;
+    };
+
+    const setCollisionMaxWidth = (widthPx) => {
+        if (!Number.isFinite(widthPx)) {
+            clearCollisionMaxWidth();
+            return;
+        }
+        const nextWidthPx = Math.max(0, Math.floor(widthPx));
+        if (nextWidthPx === lastCollisionMaxWidthPx) return;
+        dom.root.style.setProperty(PROMPT_TOKEN_STRIP_COLLISION_MAX_WIDTH_VAR, `${nextWidthPx}px`);
+        lastCollisionMaxWidthPx = nextWidthPx;
+    };
+
+    const resolveCollisionMaxWidth = () => {
+        if (dom.root.dataset.visible !== 'true') return null;
+        const stripRect = resolveVisibleRect(dom.root);
+        if (!stripRect) return null;
+
+        const blockerRects = [];
+        if (detailPanel?.classList.contains('is-open')) {
+            const detailPanelRect = resolveVisibleRect(detailPanel);
+            if (detailPanelRect) blockerRects.push(detailPanelRect);
+            const resizeHandleRect = resolveVisibleRect(resizeHandle);
+            if (resizeHandleRect) blockerRects.push(resizeHandleRect);
+        }
+        if (!blockerRects.length) return null;
+
+        const hasVerticalOverlap = blockerRects.some((rect) => rectsOverlapVertically(stripRect, rect));
+        if (!hasVerticalOverlap) return null;
+
+        const blockerLeft = Math.min(...blockerRects.map((rect) => rect.left));
+        return blockerLeft - stripRect.left - PROMPT_TOKEN_STRIP_COLLISION_GAP_PX;
+    };
+
+    const syncLayoutMetrics = () => {
+        layoutSyncFrame = null;
+        if (dom.root.dataset.visible !== 'true') {
+            clearCollisionMaxWidth();
+            setPromptTokenStripHeightVar(0);
+            return;
+        }
+
+        setCollisionMaxWidth(resolveCollisionMaxWidth());
+        setPromptTokenStripHeightVar(dom.root.getBoundingClientRect().height);
+    };
+
+    const scheduleLayoutSync = () => {
+        if (layoutSyncFrame !== null) return;
+        if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+            syncLayoutMetrics();
+            return;
+        }
+        layoutSyncFrame = window.requestAnimationFrame(syncLayoutMetrics);
     };
 
     const updateVisibility = () => {
@@ -105,7 +181,7 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
             && !isDetailPanelSuppressingStripOnMobile();
         dom.root.dataset.visible = shouldShow ? 'true' : 'false';
         setBodyVisibilityFlag(shouldShow);
-        syncMeasuredHeight();
+        scheduleLayoutSync();
     };
 
     const setEnabled = (enabled) => {
@@ -231,9 +307,19 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
     }
     if (typeof ResizeObserver !== 'undefined') {
         stripSizeObserver = new ResizeObserver(() => {
-            syncMeasuredHeight();
+            scheduleLayoutSync();
         });
         stripSizeObserver.observe(dom.root);
+        if (detailPanel) {
+            detailPanelObserver = new ResizeObserver(() => {
+                scheduleLayoutSync();
+            });
+            detailPanelObserver.observe(detailPanel);
+        }
+    }
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+        window.addEventListener('resize', scheduleLayoutSync);
+        window.visualViewport?.addEventListener?.('resize', scheduleLayoutSync);
     }
 
     const render = ({
@@ -299,7 +385,7 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
         dom.tokensEl.replaceChildren(fragment);
         applyActiveTokenState();
         updateVisibility();
-        syncMeasuredHeight();
+        scheduleLayoutSync();
     };
 
     return {
@@ -324,6 +410,7 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
             clickableEntries = [];
             setHoveredEntry(null, { emit: true });
             mirroredEntry = null;
+            clearCollisionMaxWidth();
             setActivePromptTokenChipEntries([]);
             dom.tokensEl.removeEventListener('click', handleTokenClick);
             dom.tokensEl.removeEventListener('pointerover', handleTokenPointerOver);
@@ -335,6 +422,8 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
             if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
                 window.removeEventListener('promptTokenStripVisibilityChanged', handleVisibilityChanged);
                 window.removeEventListener(TOKEN_CHIP_HOVER_SYNC_EVENT, handleTokenChipHoverSync);
+                window.removeEventListener('resize', scheduleLayoutSync);
+                window.visualViewport?.removeEventListener?.('resize', scheduleLayoutSync);
             }
             if (bodyClassObserver) {
                 bodyClassObserver.disconnect();
@@ -343,6 +432,14 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
             if (stripSizeObserver) {
                 stripSizeObserver.disconnect();
                 stripSizeObserver = null;
+            }
+            if (detailPanelObserver) {
+                detailPanelObserver.disconnect();
+                detailPanelObserver = null;
+            }
+            if (layoutSyncFrame !== null && typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
+                window.cancelAnimationFrame(layoutSyncFrame);
+                layoutSyncFrame = null;
             }
             if (dom.root && dom.root.parentElement) {
                 dom.root.parentElement.removeChild(dom.root);

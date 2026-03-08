@@ -265,17 +265,18 @@ body.touch-ui * {
     touch-action: manipulation;
     min-height: 46px;
     padding: 11px 16px;
-    border: 1px solid rgba(255, 194, 120, 0.92);
+    border: 1px solid rgba(122, 202, 255, 0.76);
     border-radius: 14px;
-    background:
-        linear-gradient(135deg, rgba(255, 174, 78, 0.96), rgba(255, 114, 38, 0.94));
-    color: #fff7ec;
+    background: rgba(16, 19, 26, 0.74);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    color: #eef7ff;
     box-shadow:
         0 14px 30px rgba(0, 0, 0, 0.34),
-        0 0 0 1px rgba(255, 194, 120, 0.12),
-        0 0 22px rgba(255, 140, 52, 0.3);
+        0 0 0 1px rgba(122, 202, 255, 0.08),
+        0 0 20px rgba(56, 132, 255, 0.14);
     cursor: pointer;
-    font-family: "Inter", "SF Pro Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
     font-size: 13px;
     font-weight: 700;
     letter-spacing: 0.02em;
@@ -283,30 +284,41 @@ body.touch-ui * {
     white-space: nowrap;
     transition:
         transform 0.14s ease,
-        filter 0.14s ease,
+        background 0.14s ease,
+        color 0.14s ease,
         box-shadow 0.14s ease,
         border-color 0.14s ease;
 }
-#nextTokenBtn:hover:not(:disabled) {
+#nextTokenBtn:hover:not(:disabled),
+#nextTokenBtn:focus-visible:not(:disabled) {
+    background: rgba(56, 132, 255, 0.18);
+    border-color: rgba(122, 202, 255, 0.82);
+    color: #ffffff;
     transform: translateY(-1px);
-    filter: saturate(1.06) brightness(1.03);
     box-shadow:
         0 16px 34px rgba(0, 0, 0, 0.36),
-        0 0 0 1px rgba(255, 205, 138, 0.16),
-        0 0 28px rgba(255, 146, 54, 0.42);
+        0 0 0 1px rgba(122, 202, 255, 0.16),
+        0 0 24px rgba(56, 132, 255, 0.24);
 }
 #nextTokenBtn:focus-visible {
-    outline: 2px solid rgba(255, 221, 176, 0.96);
+    outline: 2px solid rgba(122, 202, 255, 0.9);
     outline-offset: 3px;
+}
+#nextTokenBtn:active:not(:disabled) {
+    background: rgba(56, 132, 255, 0.24);
+    border-color: rgba(122, 202, 255, 0.88);
+    transform: translateY(0);
 }
 #nextTokenBtn:disabled {
     opacity: 0.58;
     cursor: default;
     transform: none;
-    filter: none;
+    color: rgba(238, 247, 255, 0.84);
+    background: rgba(16, 19, 26, 0.68);
+    border-color: rgba(122, 202, 255, 0.38);
     box-shadow:
         0 12px 24px rgba(0, 0, 0, 0.24),
-        0 0 0 1px rgba(255, 194, 120, 0.08);
+        0 0 0 1px rgba(122, 202, 255, 0.08);
 }
 #skipLayerBtn[data-state="skipping"],
 #skipToEndBtn[data-state="skipping"],
@@ -704,12 +716,25 @@ body.touch-ui * {
     max-height: calc(100vh - 56px);
     max-height: calc(100dvh - 56px);
     border-radius: 18px;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    background: linear-gradient(180deg, rgba(6, 6, 7, 0.97), rgba(0, 0, 0, 0.95));
+    border: 1px solid rgba(126, 255, 203, 0.16);
+    background:
+        radial-gradient(140% 120% at 0% 0%, rgba(93, 255, 171, 0.1), rgba(93, 255, 171, 0) 34%),
+        linear-gradient(180deg, rgba(9, 16, 13, 0.98), rgba(3, 6, 5, 0.98));
     box-shadow:
         0 28px 70px rgba(0, 0, 0, 0.52),
-        0 0 0 1px rgba(255, 255, 255, 0.04);
+        0 0 0 1px rgba(195, 255, 225, 0.05),
+        0 0 48px rgba(43, 255, 149, 0.08);
     overflow: hidden;
+}
+#passIntroOverlay .pass-intro-window::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0, rgba(255, 255, 255, 0.03) 1px, transparent 1px, transparent 6px),
+        linear-gradient(90deg, rgba(111, 255, 186, 0.045), rgba(111, 255, 186, 0));
+    opacity: 0.32;
+    pointer-events: none;
 }
 #passIntroOverlay .pass-intro-window-header {
     display: flex;
@@ -717,8 +742,8 @@ body.touch-ui * {
     gap: 9px;
     min-height: 42px;
     padding: 0 16px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015));
+    border-bottom: 1px solid rgba(126, 255, 203, 0.14);
+    background: linear-gradient(180deg, rgba(126, 255, 203, 0.08), rgba(255, 255, 255, 0.015));
 }
 #passIntroOverlay .pass-intro-dot {
     width: 10px;
@@ -736,14 +761,6 @@ body.touch-ui * {
 #passIntroOverlay .pass-intro-dot--green {
     background: #29cc5f;
 }
-#passIntroOverlay .pass-intro-window-title {
-    margin-left: 4px;
-    color: rgba(255, 255, 255, 0.72);
-    font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    font-size: 12px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-}
 #passIntroOverlay .pass-intro-editor {
     position: relative;
     flex: 1 1 auto;
@@ -753,15 +770,44 @@ body.touch-ui * {
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
 }
+#passIntroOverlay .pass-intro-editor::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+        radial-gradient(90% 60% at 18% 0%, rgba(115, 255, 188, 0.08), rgba(115, 255, 188, 0) 56%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0));
+    pointer-events: none;
+}
+#passIntroOverlay .pass-intro-shell-line {
+    position: relative;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+    gap: 14px;
+}
+#passIntroOverlay .pass-intro-shell-prompt {
+    color: rgba(120, 255, 191, 0.94);
+    font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: clamp(13px, 1vw, 15px);
+    line-height: 1.75;
+    letter-spacing: 0.04em;
+    text-shadow: 0 0 16px rgba(84, 255, 167, 0.18);
+    white-space: nowrap;
+}
+#passIntroOverlay .pass-intro-shell-content {
+    min-width: 0;
+}
 #passIntroOverlay .pass-intro-text {
     display: inline;
-    color: rgba(244, 248, 255, 0.96);
+    color: rgba(234, 255, 242, 0.96);
     font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     font-size: clamp(18px, 1.8vw, 24px);
     line-height: 1.75;
     letter-spacing: 0.01em;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+    text-shadow: 0 0 18px rgba(70, 255, 159, 0.08);
     transition: opacity 620ms ease;
 }
 #passIntroOverlay .pass-intro-text.is-tokenized {
@@ -779,11 +825,12 @@ body.touch-ui * {
 #passIntroOverlay .pass-intro-cursor {
     display: inline-block;
     margin-left: 2px;
-    color: rgba(255, 255, 255, 0.84);
+    color: rgba(120, 255, 191, 0.94);
     font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     font-size: clamp(18px, 1.8vw, 24px);
     line-height: 1.75;
     vertical-align: top;
+    text-shadow: 0 0 18px rgba(84, 255, 167, 0.22);
     animation: passIntroCursorBlink 1s steps(1, end) infinite;
 }
 #passIntroOverlay.is-tokenized .pass-intro-cursor {
@@ -863,7 +910,8 @@ body.touch-ui * {
     z-index: 7;
     isolation: isolate;
     width: fit-content;
-    max-width: var(--prompt-token-strip-max-width);
+    max-width: min(var(--prompt-token-strip-max-width), var(--prompt-token-strip-collision-max-width, 100vw));
+    box-sizing: border-box;
     padding: 8px 10px calc(7px + env(safe-area-inset-bottom)) calc(10px + env(safe-area-inset-left));
     border-radius: 0 4px 0 0;
     overflow: visible;
@@ -1004,6 +1052,9 @@ body.pass-intro-active[data-pass-intro-committed="true"] #promptTokenStrip {
 body[data-prompt-token-strip-visible="true"] #generationOverlay {
     bottom: calc(max(18px, env(safe-area-inset-bottom)) + var(--prompt-token-strip-height, 0px) + 12px);
 }
+body[data-prompt-token-strip-visible="true"] #nextTokenBtn {
+    bottom: calc(max(18px, env(safe-area-inset-bottom)) + var(--prompt-token-strip-height, 0px) + 12px);
+}
 
 @keyframes generationOverlayIn {
     from {
@@ -1025,9 +1076,7 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
 }
 @media (max-width: 700px) {
     #passIntroOverlay .pass-intro-stage {
-        align-items: flex-start;
-        overflow-y: auto;
-        overscroll-behavior: contain;
+        align-items: center;
         padding: 16px;
     }
     #passIntroOverlay .pass-intro-window {
@@ -1045,12 +1094,17 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
         width: 9px;
         height: 9px;
     }
-    #passIntroOverlay .pass-intro-window-title {
-        font-size: 11px;
-    }
     #passIntroOverlay .pass-intro-editor {
         min-height: 140px;
         padding: 18px 16px 20px;
+    }
+    #passIntroOverlay .pass-intro-shell-line {
+        grid-template-columns: 1fr;
+        gap: 4px;
+    }
+    #passIntroOverlay .pass-intro-shell-prompt {
+        font-size: 12px;
+        line-height: 1.4;
     }
     #passIntroOverlay .pass-intro-text,
     #passIntroOverlay .pass-intro-cursor {

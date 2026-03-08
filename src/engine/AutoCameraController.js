@@ -23,6 +23,8 @@ const AUTO_CAMERA_REF_MOTION_START_SPEED_DEFAULT = 26;
 const AUTO_CAMERA_REF_MOTION_STOP_SPEED_DEFAULT = 10;
 const AUTO_CAMERA_REF_MOTION_MIN_SCALE_DEFAULT = 0.36;
 const AUTO_CAMERA_CONTROLS_CAPTURE_EPSILON_SQ = 1;
+const STARTUP_CAMERA_INTRO_HOLD_MS_DEFAULT = 1000;
+const STARTUP_CAMERA_INTRO_TRANSITION_MS_DEFAULT = 1400;
 
 const coerceVector3 = (value, fallback = null) => {
     if (value instanceof THREE.Vector3) return value.clone();
@@ -31,6 +33,13 @@ const coerceVector3 = (value, fallback = null) => {
     }
     return fallback ? fallback.clone() : null;
 };
+
+const isFiniteVector3 = (value) => !!(
+    value
+    && Number.isFinite(value.x)
+    && Number.isFinite(value.y)
+    && Number.isFinite(value.z)
+);
 
 export class AutoCameraController {
     constructor({ pipeline, engine, opts = {} }) {
@@ -51,6 +60,7 @@ export class AutoCameraController {
             this._engine.controls.removeEventListener('change', this._controlsChangeHandler);
         }
         this._controlsChangeHandler = null;
+        this._completeStartupCameraIntro(false);
         if (this._cameraOffsetDiv) {
             this._cameraOffsetDiv.style.display = 'none';
         }
@@ -62,6 +72,14 @@ export class AutoCameraController {
 
     update() {
         const hasPanelShift = this._hasPanelShift();
+        if (this._startupCameraIntroActive) {
+            const introHandled = this._updateStartupCameraIntro();
+            if (hasPanelShift) {
+                this._applyPanelShift();
+            }
+            this._updateCameraOffsetOverlay();
+            if (introHandled) return;
+        }
         if (!this._autoCameraFollow && !this._devMode && !hasPanelShift) return;
         if (this._autoCameraFollow) {
             this._updateAutoCameraFollow();
@@ -105,6 +123,7 @@ export class AutoCameraController {
                 this._updateAutoCameraFollow();
             }
         } else {
+            this._completeStartupCameraIntro(false);
             this._autoCameraPostAddLockActive = false;
             this._autoCameraPostAddLockUntilMs = 0;
             this._autoCameraForceEmbedVocabStartLock = false;
@@ -283,6 +302,64 @@ export class AutoCameraController {
             .start();
     }
 
+    playStartupCameraIntro({
+        holdMs = STARTUP_CAMERA_INTRO_HOLD_MS_DEFAULT,
+        transitionMs = STARTUP_CAMERA_INTRO_TRANSITION_MS_DEFAULT
+    } = {}) {
+        if (this._startupCameraIntroActive && this._startupCameraIntroPromise) {
+            return this._startupCameraIntroPromise;
+        }
+        if (this._startupCameraIntroPlayed || !this._autoCameraFollow) {
+            return Promise.resolve(false);
+        }
+
+        const engine = this._engine;
+        const camera = engine?.camera;
+        const controls = engine?.controls;
+        if (!camera || !controls || !controls.target) {
+            return Promise.resolve(false);
+        }
+        if (!isFiniteVector3(this._overviewCameraPosition) || !isFiniteVector3(this._overviewCameraTarget)) {
+            return Promise.resolve(false);
+        }
+
+        const reference = this._startupCameraIntroTargetReference;
+        const { laneIndex } = this._resolveActiveLanePosition(reference);
+        if (laneIndex < 0 || !isFiniteVector3(reference)) {
+            return Promise.resolve(false);
+        }
+
+        const targetViewKey = this._autoCameraEmbedVocabOffsetsEnabled
+            ? 'embed-vocab'
+            : (this._resolveAutoCameraViewKey() || 'default');
+        const resolvedOffsets = this._resolveAutoCameraOffsetsForViewKey(targetViewKey, {});
+
+        this._startupCameraIntroPlayed = true;
+        this._startupCameraIntroActive = true;
+        this._startupCameraIntroStage = 'hold';
+        this._startupCameraIntroStageStartedAtMs = this._getNowMs();
+        this._startupCameraIntroHoldMs = Math.max(
+            0,
+            Number.isFinite(holdMs) ? holdMs : STARTUP_CAMERA_INTRO_HOLD_MS_DEFAULT
+        );
+        this._startupCameraIntroTransitionMs = Math.max(
+            0,
+            Number.isFinite(transitionMs) ? transitionMs : STARTUP_CAMERA_INTRO_TRANSITION_MS_DEFAULT
+        );
+        this._startupCameraIntroTargetViewKey = targetViewKey;
+        this._startupCameraIntroFromCamera.copy(this._overviewCameraPosition);
+        this._startupCameraIntroFromTarget.copy(this._overviewCameraTarget);
+        this._startupCameraIntroToCamera.copy(reference).add(resolvedOffsets.cameraOffset);
+        this._startupCameraIntroToTarget.copy(reference).add(resolvedOffsets.targetOffset);
+        this._applyAbsoluteCameraPose(this._overviewCameraPosition, this._overviewCameraTarget);
+
+        this._startupCameraIntroPromise = new Promise((resolve) => {
+            this._startupCameraIntroResolve = resolve;
+        });
+
+        return this._startupCameraIntroPromise;
+    }
+
     getReference() {
         const ref = this._autoCameraInspectorRef;
         const info = this._resolveActiveLanePosition(ref);
@@ -294,6 +371,17 @@ export class AutoCameraController {
     }
 
     maybeFocus({ immediate = false } = {}) {
+        if (this._startupCameraIntroActive) {
+            if (immediate) {
+                const nowMs = this._updateAutoCameraFrameTiming();
+                const introHandled = this._updateStartupCameraIntro(nowMs);
+                if (!introHandled && this._autoCameraFollow) {
+                    this._updateAutoCameraFollow();
+                }
+            }
+            this._updateCameraOffsetOverlay();
+            return;
+        }
         if (!this._autoCameraFollow && !immediate) {
             this._updateCameraOffsetOverlay();
             return;
@@ -482,6 +570,22 @@ export class AutoCameraController {
         this._panelShiftViewActive = false;
         this._autoCameraFrameDeltaSec = AUTO_CAMERA_FRAME_DELTA_SEC_DEFAULT;
         this._autoCameraLastUpdateMs = 0;
+        this._startupCameraIntroActive = false;
+        this._startupCameraIntroPlayed = false;
+        this._startupCameraIntroStage = 'idle';
+        this._startupCameraIntroStageStartedAtMs = 0;
+        this._startupCameraIntroHoldMs = STARTUP_CAMERA_INTRO_HOLD_MS_DEFAULT;
+        this._startupCameraIntroTransitionMs = STARTUP_CAMERA_INTRO_TRANSITION_MS_DEFAULT;
+        this._startupCameraIntroTargetViewKey = 'embed-vocab';
+        this._startupCameraIntroFromCamera = new THREE.Vector3();
+        this._startupCameraIntroFromTarget = new THREE.Vector3();
+        this._startupCameraIntroToCamera = new THREE.Vector3();
+        this._startupCameraIntroToTarget = new THREE.Vector3();
+        this._startupCameraIntroCurrentCamera = new THREE.Vector3();
+        this._startupCameraIntroCurrentTarget = new THREE.Vector3();
+        this._startupCameraIntroTargetReference = new THREE.Vector3();
+        this._startupCameraIntroPromise = null;
+        this._startupCameraIntroResolve = null;
     }
 
     _initOffsets(opts) {
@@ -649,6 +753,116 @@ export class AutoCameraController {
         if (this._panelShiftTween) return true;
         if (Math.abs(this._panelShiftPxCurrent) > 0.5) return true;
         return this._panelShiftViewActive;
+    }
+
+    _applyAbsoluteCameraPose(cameraPosition, cameraTarget) {
+        const engine = this._engine;
+        const camera = engine?.camera;
+        const controls = engine?.controls;
+        if (!camera || !controls || !controls.target) return false;
+        if (!isFiniteVector3(cameraPosition) || !isFiniteVector3(cameraTarget)) return false;
+
+        this._suppressControlsChange = true;
+        try {
+            camera.position.copy(cameraPosition);
+            controls.target.copy(cameraTarget);
+            if (typeof controls.update === 'function') controls.update();
+            engine?.notifyCameraUpdated?.();
+            this._recordAutoCameraAppliedPose();
+        } finally {
+            this._suppressControlsChange = false;
+        }
+        return true;
+    }
+
+    _completeStartupCameraIntro(result = false) {
+        const resolve = this._startupCameraIntroResolve;
+        this._startupCameraIntroActive = false;
+        this._startupCameraIntroStage = 'idle';
+        this._startupCameraIntroStageStartedAtMs = 0;
+        this._startupCameraIntroPromise = null;
+        this._startupCameraIntroResolve = null;
+        if (typeof resolve === 'function') {
+            resolve(result);
+        }
+        return result;
+    }
+
+    _finishStartupCameraIntro() {
+        const targetViewKey = this._startupCameraIntroTargetViewKey || 'default';
+        const resolvedOffsets = this._resolveAutoCameraOffsetsForViewKey(targetViewKey, {});
+
+        this._applyAbsoluteCameraPose(this._startupCameraIntroToCamera, this._startupCameraIntroToTarget);
+        this._autoCameraViewKey = targetViewKey;
+        this._autoCameraViewPendingKey = targetViewKey;
+        this._autoCameraViewPendingSinceMs = 0;
+        this._autoCameraViewBlendT = 1;
+        this._autoCameraViewBlendAlphaActive = this._autoCameraViewBlendAlphaTransition;
+        this._autoCameraViewFromCameraOffset.copy(resolvedOffsets.cameraOffset);
+        this._autoCameraViewFromTargetOffset.copy(resolvedOffsets.targetOffset);
+        this._autoCameraViewToCameraOffset.copy(resolvedOffsets.cameraOffset);
+        this._autoCameraViewToTargetOffset.copy(resolvedOffsets.targetOffset);
+        this._autoCameraForceEmbedVocabStartLock = targetViewKey === 'embed-vocab';
+        if (!this._captureAutoCameraOffsets(this._startupCameraIntroTargetReference)) {
+            this._setAutoCameraOffsets(
+                resolvedOffsets.cameraOffset,
+                resolvedOffsets.targetOffset,
+                { snap: true }
+            );
+        }
+        if (isFiniteVector3(this._startupCameraIntroTargetReference)) {
+            this._autoCameraSmoothedRef.copy(this._startupCameraIntroTargetReference);
+            this._autoCameraSmoothValid = true;
+            this._resetAutoCameraReferenceMotion(this._startupCameraIntroTargetReference);
+        } else {
+            this._autoCameraSmoothValid = false;
+            this._resetAutoCameraReferenceMotion();
+        }
+
+        return this._completeStartupCameraIntro(true);
+    }
+
+    _updateStartupCameraIntro(nowMs = null) {
+        if (!this._startupCameraIntroActive) return false;
+
+        const currentNowMs = Number.isFinite(nowMs) ? nowMs : this._updateAutoCameraFrameTiming();
+        if (this._startupCameraIntroStage === 'hold') {
+            this._applyAbsoluteCameraPose(this._overviewCameraPosition, this._overviewCameraTarget);
+            const elapsedMs = Math.max(0, currentNowMs - this._startupCameraIntroStageStartedAtMs);
+            if (elapsedMs < this._startupCameraIntroHoldMs) {
+                return true;
+            }
+            if (this._startupCameraIntroTransitionMs <= 0) {
+                this._finishStartupCameraIntro();
+                return false;
+            }
+            this._startupCameraIntroStage = 'transition';
+            this._startupCameraIntroStageStartedAtMs = currentNowMs;
+            return true;
+        }
+
+        if (this._startupCameraIntroStage === 'transition') {
+            const durationMs = Math.max(1, this._startupCameraIntroTransitionMs);
+            const rawT = Math.min(1, Math.max(0, (currentNowMs - this._startupCameraIntroStageStartedAtMs) / durationMs));
+            const easedT = rawT * rawT * (3 - 2 * rawT);
+            this._startupCameraIntroCurrentCamera
+                .copy(this._startupCameraIntroFromCamera)
+                .lerp(this._startupCameraIntroToCamera, easedT);
+            this._startupCameraIntroCurrentTarget
+                .copy(this._startupCameraIntroFromTarget)
+                .lerp(this._startupCameraIntroToTarget, easedT);
+            this._applyAbsoluteCameraPose(
+                this._startupCameraIntroCurrentCamera,
+                this._startupCameraIntroCurrentTarget
+            );
+            if (rawT >= 1) {
+                this._finishStartupCameraIntro();
+                return false;
+            }
+            return true;
+        }
+
+        return false;
     }
 
     _applyPanelShift() {

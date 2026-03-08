@@ -16,6 +16,9 @@ import { initTouchClickFallback } from '../../ui/touchClickFallback.js';
 const DEFAULT_ADVANCE_SECONDS = 10;
 const KV_DECODE_SINGLE_LANE_TRAIL_WIDTH_MULTIPLIER = 8.0;
 const KV_DECODE_SINGLE_LANE_TRAIL_OPACITY_BOOST = 2.2;
+const NEXT_TOKEN_DESKTOP_MEDIA_QUERY = '(min-width: 881px) and (min-aspect-ratio: 1/1)';
+const NEXT_TOKEN_PANEL_GAP_PX = 18;
+const NEXT_TOKEN_VIEWPORT_GUTTER_PX = 12;
 
 export function buildPassState({
     activationSource,
@@ -216,6 +219,142 @@ function createNextTokenButton() {
     return btn;
 }
 
+function resolveVisibleRect(element) {
+    if (!element || typeof element.getBoundingClientRect !== 'function' || typeof window === 'undefined') {
+        return null;
+    }
+    const style = window.getComputedStyle(element);
+    if (style.display === 'none' || style.visibility === 'hidden') return null;
+    const rect = element.getBoundingClientRect();
+    if (!(rect.width > 0 && rect.height > 0)) return null;
+    return rect;
+}
+
+function isDesktopNextTokenDockLayout() {
+    if (typeof window === 'undefined') return false;
+    if (typeof window.matchMedia === 'function') {
+        return window.matchMedia(NEXT_TOKEN_DESKTOP_MEDIA_QUERY).matches;
+    }
+    return window.innerWidth >= 881 && window.innerWidth >= window.innerHeight;
+}
+
+function syncNextTokenButtonLayout(
+    button,
+    {
+        hudStack = null,
+        detailPanel = null,
+        resizeHandle = null
+    } = {}
+) {
+    if (!button || typeof document === 'undefined') return;
+
+    const hudStackEl = hudStack || document.getElementById('hudStack');
+    const detailPanelEl = detailPanel || document.getElementById('detailPanel');
+    const resizeHandleEl = resizeHandle || document.getElementById('detailPanelResizeHandle');
+    const canDockLeftOfPanel = isDesktopNextTokenDockLayout()
+        && !!hudStackEl
+        && !!detailPanelEl
+        && hudStackEl.classList.contains('detail-open')
+        && detailPanelEl.classList.contains('is-open');
+
+    if (!canDockLeftOfPanel) {
+        button.dataset.layout = 'corner';
+        button.style.removeProperty('left');
+        button.style.removeProperty('right');
+        return;
+    }
+
+    const hudRect = resolveVisibleRect(hudStackEl);
+    const handleRect = resolveVisibleRect(resizeHandleEl);
+    const buttonRect = resolveVisibleRect(button);
+    const blockerLeft = Math.min(
+        hudRect?.left ?? Number.POSITIVE_INFINITY,
+        handleRect?.left ?? Number.POSITIVE_INFINITY
+    );
+    const buttonWidth = buttonRect?.width || button.offsetWidth || 0;
+
+    if (!Number.isFinite(blockerLeft) || !(buttonWidth > 0)) {
+        button.dataset.layout = 'corner';
+        button.style.removeProperty('left');
+        button.style.removeProperty('right');
+        return;
+    }
+
+    const nextLeft = Math.max(
+        NEXT_TOKEN_VIEWPORT_GUTTER_PX,
+        Math.round(blockerLeft - buttonWidth - NEXT_TOKEN_PANEL_GAP_PX)
+    );
+    button.dataset.layout = 'panel-docked';
+    button.style.left = `${nextLeft}px`;
+    button.style.right = 'auto';
+}
+
+function initNextTokenButtonLayoutSync(button) {
+    if (!button || typeof document === 'undefined' || typeof window === 'undefined') return null;
+
+    const hudStack = document.getElementById('hudStack');
+    const detailPanel = document.getElementById('detailPanel');
+    const resizeHandle = document.getElementById('detailPanelResizeHandle');
+    let syncRafId = null;
+    let resizeObserver = null;
+    let mutationObserver = null;
+
+    const runSync = () => {
+        syncRafId = null;
+        syncNextTokenButtonLayout(button, { hudStack, detailPanel, resizeHandle });
+    };
+
+    const scheduleSync = () => {
+        if (typeof window.requestAnimationFrame !== 'function') {
+            runSync();
+            return;
+        }
+        if (syncRafId !== null) return;
+        syncRafId = window.requestAnimationFrame(runSync);
+    };
+
+    if (typeof ResizeObserver !== 'undefined') {
+        resizeObserver = new ResizeObserver(() => {
+            scheduleSync();
+        });
+        if (hudStack) resizeObserver.observe(hudStack);
+        resizeObserver.observe(button);
+    }
+
+    if (typeof MutationObserver !== 'undefined') {
+        mutationObserver = new MutationObserver(() => {
+            scheduleSync();
+        });
+        if (hudStack) {
+            mutationObserver.observe(hudStack, {
+                attributes: true,
+                attributeFilter: ['class']
+            });
+        }
+        if (detailPanel) {
+            mutationObserver.observe(detailPanel, {
+                attributes: true,
+                attributeFilter: ['class']
+            });
+        }
+    }
+
+    window.addEventListener('resize', scheduleSync);
+    window.visualViewport?.addEventListener?.('resize', scheduleSync);
+    scheduleSync();
+
+    return () => {
+        window.removeEventListener('resize', scheduleSync);
+        window.visualViewport?.removeEventListener?.('resize', scheduleSync);
+        if (resizeObserver) resizeObserver.disconnect();
+        if (mutationObserver) mutationObserver.disconnect();
+        if (syncRafId !== null && typeof window.cancelAnimationFrame === 'function') {
+            window.cancelAnimationFrame(syncRafId);
+            syncRafId = null;
+        }
+    };
+}
+
 export function initGenerationController({
     pipeline,
     activationSource,
@@ -240,6 +379,7 @@ export function initGenerationController({
     const overlay = createAdvanceOverlay();
     const overlayTouchCleanup = initTouchClickFallback(overlay.root, { selector: 'button' });
     const nextTokenBtn = createNextTokenButton();
+    const nextTokenButtonLayoutCleanup = initNextTokenButtonLayoutSync(nextTokenBtn);
     let currentLaneCount = Math.max(1, Math.floor(initialLaneCount || 1));
     let passComplete = false;
     let autoAdvancePaused = false;
@@ -366,6 +506,7 @@ export function initGenerationController({
             nextTokenBtn.style.display = shouldShow ? '' : 'none';
         }
         nextTokenBtn.disabled = !shouldShow;
+        syncNextTokenButtonLayout(nextTokenBtn);
     };
 
     const updateOverlay = () => {
@@ -796,6 +937,7 @@ export function initGenerationController({
             if (chipCleanup?.dispose) chipCleanup.dispose();
             if (rafId && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(rafId);
             if (overlayTouchCleanup) overlayTouchCleanup();
+            if (nextTokenButtonLayoutCleanup) nextTokenButtonLayoutCleanup();
             promptTokenStrip?.dispose?.();
         }
     };

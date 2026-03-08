@@ -294,6 +294,10 @@ Promise.resolve().then(async () => {
             laneTokenIndices: initialPassState.laneTokenIndices,
             tokenLabels: initialPassState.tokenLabels
         });
+        await pipeline?.playStartupCameraIntro?.({
+            holdMs: CAMERA_CONFIG.startupOverviewHoldMs,
+            transitionMs: CAMERA_CONFIG.startupOverviewTransitionMs
+        });
         await new Promise((resolve) => {
             if (typeof requestAnimationFrame === 'function') {
                 requestAnimationFrame(() => resolve());

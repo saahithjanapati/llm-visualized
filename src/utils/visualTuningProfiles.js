@@ -24,7 +24,7 @@ export const GPT2_LAYER_VISUAL_TUNING = Object.freeze({
             // so enforce a minimum pulse window and stronger contrast.
             startEmissiveIntensity: 0.05,
             peakEmissiveIntensity: 0.78,
-            endEmissiveIntensity: 0.30,
+            endEmissiveIntensity: 0.34,
             minStageEnterDurationMs: 140,
             minStageThroughDurationMs: 190,
             minStageExitDurationMs: 140,

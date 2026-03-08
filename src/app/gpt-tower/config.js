@@ -52,6 +52,8 @@ export const CAMERA_CONFIG = {
     initialTarget: [0, 9000, 0],
     skipToEndPositionOffset: [0, 600, 36000],
     skipToEndTargetOffset: [0, 5200, 0],
+    startupOverviewHoldMs: 1000,
+    startupOverviewTransitionMs: 1400,
     targetClampRadiusBase: 8000,
     targetClampRadiusPerLayer: 900,
     mobileZoomOutMultiplier: 1.2,

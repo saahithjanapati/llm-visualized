@@ -112,11 +112,15 @@ function buildOverlayDom() {
                         <span class="pass-intro-dot pass-intro-dot--red" aria-hidden="true"></span>
                         <span class="pass-intro-dot pass-intro-dot--amber" aria-hidden="true"></span>
                         <span class="pass-intro-dot pass-intro-dot--green" aria-hidden="true"></span>
-                        <span class="pass-intro-window-title">Prompt</span>
                     </div>
                     <div class="pass-intro-editor" data-role="editor">
-                        <div class="pass-intro-text" data-role="text"></div>
-                        <span class="pass-intro-cursor" data-role="cursor">|</span>
+                        <div class="pass-intro-shell-line">
+                            <span class="pass-intro-shell-prompt" aria-hidden="true">bash-3.2$</span>
+                            <div class="pass-intro-shell-content">
+                                <div class="pass-intro-text" data-role="text"></div>
+                                <span class="pass-intro-cursor" data-role="cursor">█</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div class="pass-intro-token-layer" data-role="token-layer"></div>

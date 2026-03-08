@@ -473,6 +473,11 @@ export class LayerPipeline extends EventTarget {
         this._autoCamera?.focusOverview?.({ immediate, durationMs });
     }
 
+    /** Play the one-shot startup camera intro before the first pass begins. */
+    playStartupCameraIntro({ holdMs = 1000, transitionMs = 1400 } = {}) {
+        return this._autoCamera?.playStartupCameraIntro?.({ holdMs, transitionMs }) ?? Promise.resolve(false);
+    }
+
     /** Apply a horizontal screen-space shift (in pixels) to re-center the view. */
     setScreenShiftPixels(shiftPx, { immediate = false, durationMs = 520 } = {}) {
         this._autoCamera?.setScreenShiftPixels?.(shiftPx, { immediate, durationMs });
