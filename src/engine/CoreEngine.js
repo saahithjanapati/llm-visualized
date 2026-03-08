@@ -41,6 +41,10 @@ const ADAPTIVE_RENDER_DPR_STEP = 0.1;
 const ADAPTIVE_RENDER_DPR_PROMOTE_FPS = 57;
 const ADAPTIVE_RENDER_DPR_DEMOTE_FPS = 53;
 const ADAPTIVE_RENDER_DPR_ADJUST_COOLDOWN_MS = 1400;
+const ADAPTIVE_RENDER_DPR_TOUCH_HIGH_DPR_BOOTSTRAP = 2.5;
+const ADAPTIVE_RENDER_DPR_TOUCH_HIGH_DPR_MIN_DEVICE_DPR = 2.95;
+const ADAPTIVE_RENDER_DPR_TOUCH_HIGH_DPR_MAX_VIEWPORT_WIDTH = 430;
+const ADAPTIVE_RENDER_DPR_TOUCH_HIGH_DPR_MAX_VIEWPORT_HEIGHT = 980;
 const HOVER_TOKEN_CHIP_FONT_SIZE = '11px';
 
 /**
@@ -120,6 +124,8 @@ export class CoreEngine {
             ? opts.zoomOutSupersampleDebounceMs
             : ZOOM_OUT_SUPERSAMPLE_DEBOUNCE_MS;
         this._pixelRatioRefreshTimer = null;
+        this._pendingResizeHandle = null;
+        this._pendingResizeHandleType = null;
         this._adaptiveRenderDprEnabled = opts.adaptiveRenderDpr !== false;
         this._adaptiveRenderDprFloor = null;
         this._adaptiveRenderDprCeiling = null;
@@ -424,7 +430,6 @@ export class CoreEngine {
         this._visualViewport = window.visualViewport || null;
         if (this._visualViewport) {
             this._visualViewport.addEventListener('resize', this._onResize);
-            this._visualViewport.addEventListener('scroll', this._onResize);
         }
         document.addEventListener('visibilitychange', this._onVisibility);
         window.addEventListener('blur', this._onWindowBlur);
@@ -632,9 +637,9 @@ export class CoreEngine {
         window.removeEventListener('resize', this._onResize);
         if (this._visualViewport) {
             this._visualViewport.removeEventListener('resize', this._onResize);
-            this._visualViewport.removeEventListener('scroll', this._onResize);
             this._visualViewport = null;
         }
+        this._cancelPendingResize();
         document.removeEventListener('visibilitychange', this._onVisibility);
         window.removeEventListener('blur', this._onWindowBlur);
         window.removeEventListener('focus', this._onWindowFocus);
@@ -735,6 +740,29 @@ export class CoreEngine {
         this._adaptiveRenderDprSampleFrames = 0;
     }
 
+    _getPreferredAdaptiveTouchStartDpr({ floor, ceiling, liveDpr, viewportWidth, viewportHeight }) {
+        if (!(Number.isFinite(floor) && Number.isFinite(ceiling) && Number.isFinite(liveDpr))) {
+            return floor;
+        }
+        if (liveDpr < ADAPTIVE_RENDER_DPR_TOUCH_HIGH_DPR_MIN_DEVICE_DPR) {
+            return floor;
+        }
+        const width = Number.isFinite(viewportWidth) ? viewportWidth : 0;
+        const height = Number.isFinite(viewportHeight) ? viewportHeight : 0;
+        const compactPhoneViewport = width > 0
+            && width <= ADAPTIVE_RENDER_DPR_TOUCH_HIGH_DPR_MAX_VIEWPORT_WIDTH
+            && height > 0
+            && height <= ADAPTIVE_RENDER_DPR_TOUCH_HIGH_DPR_MAX_VIEWPORT_HEIGHT;
+        if (!compactPhoneViewport) {
+            return floor;
+        }
+        return THREE.MathUtils.clamp(
+            ADAPTIVE_RENDER_DPR_TOUCH_HIGH_DPR_BOOTSTRAP,
+            floor,
+            ceiling
+        );
+    }
+
     _refreshAdaptiveRenderDprBounds({ viewportWidth = null, viewportHeight = null, resetCap = false } = {}) {
         if (!this._adaptiveRenderDprEnabled) return;
 
@@ -768,11 +796,20 @@ export class CoreEngine {
         const ceiling = touchPrimary
             ? Math.max(floor, Math.min(ADAPTIVE_RENDER_DPR_TOUCH_MAX, Math.max(liveDpr, floor)))
             : desktopCeiling;
+        const preferredTouchStartCap = touchPrimary
+            ? this._getPreferredAdaptiveTouchStartDpr({
+                floor,
+                ceiling,
+                liveDpr,
+                viewportWidth: width,
+                viewportHeight: height
+            })
+            : floor;
 
         this._adaptiveRenderDprFloor = floor;
         this._adaptiveRenderDprCeiling = ceiling;
         if (resetCap || !(Number.isFinite(this._adaptiveRenderDprCap) && this._adaptiveRenderDprCap > 0)) {
-            this._adaptiveRenderDprCap = floor;
+            this._adaptiveRenderDprCap = touchPrimary ? preferredTouchStartCap : floor;
         } else {
             this._adaptiveRenderDprCap = THREE.MathUtils.clamp(this._adaptiveRenderDprCap, floor, ceiling);
         }
@@ -831,7 +868,8 @@ export class CoreEngine {
         this._updateRendererPixelRatio({ force: true });
     }
 
-    _onResize = () => {
+    _performResize = () => {
+        if (!this.camera || !this.renderer) return;
         const { width, height } = this._getViewportDimensions();
         this.camera.aspect = width / height;
         this.camera.updateProjectionMatrix();
@@ -847,6 +885,33 @@ export class CoreEngine {
         this._canvasRect = this.renderer.domElement.getBoundingClientRect();
         this._applyCameraZoomLimit();
         this._updateCameraFarFromControls();
+    };
+
+    _cancelPendingResize() {
+        if (this._pendingResizeHandle === null) return;
+        if (this._pendingResizeHandleType === 'raf' && typeof cancelAnimationFrame === 'function') {
+            cancelAnimationFrame(this._pendingResizeHandle);
+        } else if (this._pendingResizeHandleType === 'timeout' && typeof clearTimeout === 'function') {
+            clearTimeout(this._pendingResizeHandle);
+        }
+        this._pendingResizeHandle = null;
+        this._pendingResizeHandleType = null;
+    }
+
+    _onResize = () => {
+        if (this._pendingResizeHandle !== null) return;
+        const flushResize = () => {
+            this._pendingResizeHandle = null;
+            this._pendingResizeHandleType = null;
+            this._performResize();
+        };
+        if (typeof requestAnimationFrame === 'function') {
+            this._pendingResizeHandleType = 'raf';
+            this._pendingResizeHandle = requestAnimationFrame(flushResize);
+            return;
+        }
+        this._pendingResizeHandleType = 'timeout';
+        this._pendingResizeHandle = setTimeout(flushResize, 16);
     };
 
     _logTrailDebugMetrics = (reason, viewportWidth = null, viewportHeight = null) => {
