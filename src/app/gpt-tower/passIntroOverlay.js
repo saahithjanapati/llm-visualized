@@ -114,7 +114,7 @@ function buildOverlayDom() {
                         <span class="pass-intro-dot pass-intro-dot--green" aria-hidden="true"></span>
                         <span class="pass-intro-window-title">Prompt</span>
                     </div>
-                    <div class="pass-intro-editor">
+                    <div class="pass-intro-editor" data-role="editor">
                         <div class="pass-intro-text" data-role="text"></div>
                         <span class="pass-intro-cursor" data-role="cursor">|</span>
                     </div>
@@ -129,10 +129,16 @@ function buildOverlayDom() {
         root,
         scrimEl: root.querySelector('.pass-intro-scrim'),
         windowEl: root.querySelector('[data-role="window"]'),
+        editorEl: root.querySelector('[data-role="editor"]'),
         textEl: root.querySelector('[data-role="text"]'),
         cursorEl: root.querySelector('[data-role="cursor"]'),
         tokenLayer: root.querySelector('[data-role="token-layer"]')
     };
+}
+
+function syncEditorScroll(editorEl) {
+    if (!editorEl) return;
+    editorEl.scrollTop = editorEl.scrollHeight;
 }
 
 function buildFallbackTargets({ rootRect = null, chipRects = [] } = {}) {
@@ -475,6 +481,7 @@ export function initPassIntroOverlay({ activationSource, promptTokenStrip } = {}
         clearHandoffInlineState();
         dom.tokenLayer.innerHTML = '';
         dom.textEl.textContent = '';
+        if (dom.editorEl) dom.editorEl.scrollTop = 0;
         delete document.body.dataset.passIntroCommitted;
         document.body.classList.remove('pass-intro-active');
     };
@@ -621,6 +628,7 @@ export function initPassIntroOverlay({ activationSource, promptTokenStrip } = {}
         dom.tokenLayer.innerHTML = '';
         delete document.body.dataset.passIntroCommitted;
         document.body.classList.add('pass-intro-active');
+        if (dom.editorEl) dom.editorEl.scrollTop = 0;
 
         if (disposed) return;
 
@@ -632,10 +640,12 @@ export function initPassIntroOverlay({ activationSource, promptTokenStrip } = {}
                 if (disposed) return;
                 typedText = typedText.slice(0, -1);
                 dom.textEl.textContent = typedText;
+                syncEditorScroll(dom.editorEl);
                 await delay(TYPE_DELETE_MS);
             }
         } else {
             dom.textEl.textContent = typedText;
+            syncEditorScroll(dom.editorEl);
         }
 
         const suffix = normalizedNextText.slice(prefixLen);
@@ -644,6 +654,7 @@ export function initPassIntroOverlay({ activationSource, promptTokenStrip } = {}
             if (disposed) return;
             typedText += suffix[i];
             dom.textEl.textContent = typedText;
+            syncEditorScroll(dom.editorEl);
             await delay(resolveTypingDelayMs(suffix[i], typeBaseMs));
         }
         if (!suffix.length) {
@@ -657,6 +668,7 @@ export function initPassIntroOverlay({ activationSource, promptTokenStrip } = {}
 
         dom.textEl.classList.add('is-tokenized');
         const inlineChipElements = renderInlinePromptTokens(dom.textEl, entries, colorState, promptTokenStrip);
+        syncEditorScroll(dom.editorEl);
 
         await nextFrame();
         if (disposed) return;
