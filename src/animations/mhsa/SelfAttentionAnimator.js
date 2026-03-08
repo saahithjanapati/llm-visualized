@@ -17,8 +17,6 @@ import {
 } from '../LayerAnimationConstants.js';
 import { getSideCopyEntry } from './laneIndex.js';
 import {
-    computeTravelArcHeight,
-    getArcOffset,
     smoothSegmentProgress,
     smootherstep01,
 } from './motionUtils.js';
@@ -175,9 +173,6 @@ export class SelfAttentionAnimator {
     }
 
     _tweenVectorTravel(vector, target, duration, {
-        minArc = 0,
-        maxArc = 0,
-        distanceScale = 0,
         easing = TWEEN.Easing.Linear.None,
         onComplete = null,
     } = {}) {
@@ -192,8 +187,6 @@ export class SelfAttentionAnimator {
         const targetX = Number.isFinite(target?.x) ? target.x : startX;
         const targetY = Number.isFinite(target?.y) ? target.y : startY;
         const targetZ = Number.isFinite(target?.z) ? target.z : startZ;
-        const travelDistance = Math.abs(targetX - startX) + Math.abs(targetY - startY) + Math.abs(targetZ - startZ);
-        const arcHeight = computeTravelArcHeight(travelDistance, { minArc, maxArc, distanceScale });
         const finalize = () => {
             position.set(targetX, targetY, targetZ);
             this._markVectorLayoutDirty(vector);
@@ -212,7 +205,7 @@ export class SelfAttentionAnimator {
                 const rawT = THREE.MathUtils.clamp(travelState.progress, 0, 1);
                 const travelT = smootherstep01(rawT);
                 position.x = THREE.MathUtils.lerp(startX, targetX, travelT);
-                position.y = THREE.MathUtils.lerp(startY, targetY, travelT) + getArcOffset(rawT, arcHeight);
+                position.y = THREE.MathUtils.lerp(startY, targetY, travelT);
                 position.z = THREE.MathUtils.lerp(startZ, targetZ, travelT);
                 this._markVectorLayoutDirty(vector);
             })
@@ -1845,14 +1838,6 @@ export class SelfAttentionAnimator {
             ? Math.min(0.1, cornerProgress * 0.35, (1 - cornerProgress) * 0.22)
             : 0;
         const entryBaseY = vector.group.position.y;
-        const entryTravelDistance = Math.abs(firstLaneZ - startZ) + Math.abs(horizontalToK - startX);
-        const entryArcHeight = entryTravelDistance > 0.001
-            ? computeTravelArcHeight(entryTravelDistance, {
-                minArc: 10,
-                maxArc: 24,
-                distanceScale: 0.018,
-            })
-            : 0;
         const entryState = { progress: 0 };
 
         new TWEEN.Tween(entryState)
@@ -1860,7 +1845,7 @@ export class SelfAttentionAnimator {
             .easing(TWEEN.Easing.Linear.None)
             .onUpdate(() => {
                 const progress = THREE.MathUtils.clamp(entryState.progress, 0, 1);
-                vector.group.position.y = entryBaseY + getArcOffset(progress, entryArcHeight);
+                vector.group.position.y = entryBaseY;
                 if (!needsVerticalEntry) {
                     vector.group.position.z = firstLaneZ;
                 } else {
@@ -2007,12 +1992,12 @@ export class SelfAttentionAnimator {
             this._checkGlobalCompletion();
         };
 
-        this._tweenVectorTravel(vector, { x: targetX, y: targetY, z: resolvedLaneZ }, this.DUPLICATE_TRAVEL_MERGE_MS * WEIGHTED_SUM_DOCK_TRAVEL_DURATION_MULT, {
-            minArc: 6,
-            maxArc: 16,
-            distanceScale: 0.018,
-            onComplete: finalizeDock,
-        });
+        this._tweenVectorTravel(
+            vector,
+            { x: targetX, y: targetY, z: resolvedLaneZ },
+            this.DUPLICATE_TRAVEL_MERGE_MS * WEIGHTED_SUM_DOCK_TRAVEL_DURATION_MULT,
+            { onComplete: finalizeDock }
+        );
     }
 
     _traverseLanes(vector, laneZs, count, spheresArr, createSpheres, doneCb, stepIdx = 0) {
@@ -2031,14 +2016,6 @@ export class SelfAttentionAnimator {
         const lanePauseDuration = this.BLUE_PAUSE_MS * prepassSlowMult;
         const startZ = vector.group.position.z;
         const baseY = vector.group.position.y;
-        const laneDistance = Math.abs(targetZ - startZ);
-        const laneArcHeight = laneDistance > 0.001
-            ? computeTravelArcHeight(laneDistance, {
-                minArc: createSpheres ? 12 : 10,
-                maxArc: createSpheres ? 32 : 24,
-                distanceScale: createSpheres ? 0.06 : 0.045,
-            })
-            : 0;
         const laneTravelState = { progress: 0 };
         new TWEEN.Tween(laneTravelState)
             .to({ progress: 1 }, laneHopDuration)
@@ -2046,7 +2023,7 @@ export class SelfAttentionAnimator {
             .onUpdate(() => {
                 const travelT = smootherstep01(laneTravelState.progress);
                 vector.group.position.z = THREE.MathUtils.lerp(startZ, targetZ, travelT);
-                vector.group.position.y = baseY + getArcOffset(laneTravelState.progress, laneArcHeight);
+                vector.group.position.y = baseY;
                 this._markVectorLayoutDirty(vector);
             })
             .onComplete(() => {
@@ -2256,9 +2233,6 @@ export class SelfAttentionAnimator {
                                         ContinueTraversal();
                                     };
                                     this._tweenVectorTravel(dupVec, sumTarget, sumDuration * WEIGHTED_SUM_DUPLICATE_TRAVEL_DURATION_MULT, {
-                                        minArc: 8,
-                                        maxArc: 20,
-                                        distanceScale: 0.028,
                                         onComplete: () => {
                                             const outputLength = Number.isFinite(this.ctx?.outputVectorLength)
                                                 ? this.ctx.outputVectorLength
@@ -2317,9 +2291,6 @@ export class SelfAttentionAnimator {
                                         scoreTarget,
                                         this.DUPLICATE_TRAVEL_MERGE_MS * SA_DUPLICATE_TO_SCORE_TRAVEL_FRACTION * WEIGHTED_SUM_DUPLICATE_TRAVEL_DURATION_MULT,
                                         {
-                                            minArc: 5,
-                                            maxArc: 14,
-                                            distanceScale: 0.02,
                                             onComplete: () => {
                                                 const baseDupScale = Math.max(0.001, Number.isFinite(dupVec.group.scale.x) ? dupVec.group.scale.x : 1);
                                                 const collisionPulseFactor = Number.isFinite(weight)

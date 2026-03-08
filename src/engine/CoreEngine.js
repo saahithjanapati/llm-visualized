@@ -126,6 +126,7 @@ export class CoreEngine {
         this._pixelRatioRefreshTimer = null;
         this._pendingResizeHandle = null;
         this._pendingResizeHandleType = null;
+        this._hasPresentedFrame = false;
         this._adaptiveRenderDprEnabled = opts.adaptiveRenderDpr !== false;
         this._adaptiveRenderDprFloor = null;
         this._adaptiveRenderDprCeiling = null;
@@ -356,7 +357,7 @@ export class CoreEngine {
             );
             this.composer.addPass(bloomPass);
         }
-        this._updateRendererPixelRatio({ force: true });
+        this._updateRendererPixelRatio({ force: true, redraw: true });
 
         // ────────────────────────────────────────────────────────────────────
         // Controls & basic lighting
@@ -885,6 +886,7 @@ export class CoreEngine {
         this._canvasRect = this.renderer.domElement.getBoundingClientRect();
         this._applyCameraZoomLimit();
         this._updateCameraFarFromControls();
+        this._renderCurrentFrame();
     };
 
     _cancelPendingResize() {
@@ -1035,7 +1037,22 @@ export class CoreEngine {
         });
     };
 
-    _updateRendererPixelRatio = ({ force = false, viewportWidth = null, viewportHeight = null } = {}) => {
+    _renderCurrentFrame() {
+        if (!this._hasPresentedFrame) return;
+        if (!this.renderer || !this.scene || !this.camera) return;
+        if (this.composer) {
+            this.composer.render();
+        } else {
+            this.renderer.render(this.scene, this.camera);
+        }
+    }
+
+    _updateRendererPixelRatio = ({
+        force = false,
+        viewportWidth = null,
+        viewportHeight = null,
+        redraw = false
+    } = {}) => {
         if (!this.renderer) return;
         let nextRatio = resolveRenderPixelRatio({
             viewportWidth,
@@ -1059,6 +1076,9 @@ export class CoreEngine {
         }
         // Keep LineMaterial-based trails in sync with the active render size/DPR.
         refreshTrailDisplayScales(this.scene);
+        if (redraw) {
+            this._renderCurrentFrame();
+        }
     };
 
     _onControlsChangePixelRatio() {
@@ -1070,13 +1090,13 @@ export class CoreEngine {
             ? Math.max(0, Math.round(this._zoomOutSupersampleDebounceMs))
             : 0;
         if (debounceMs <= 0 || typeof setTimeout !== 'function') {
-            this._updateRendererPixelRatio();
+            this._updateRendererPixelRatio({ redraw: true });
             return;
         }
         this._cancelPendingPixelRatioRefresh();
         this._pixelRatioRefreshTimer = setTimeout(() => {
             this._pixelRatioRefreshTimer = null;
-            this._updateRendererPixelRatio();
+            this._updateRendererPixelRatio({ redraw: true });
         }, debounceMs);
     }
 
@@ -1120,7 +1140,7 @@ export class CoreEngine {
         this._isUserNavigating = true;
         this._cancelPendingPixelRatioRefresh();
         this._resetAdaptiveRenderDprSampling();
-        this._updateRendererPixelRatio({ force: true });
+        this._updateRendererPixelRatio({ force: true, redraw: true });
     }
 
     _onControlsEndInteraction() {
@@ -2058,6 +2078,7 @@ export class CoreEngine {
         if (perfEnabled) {
             perfStats.addTime('render', this._now() - renderStart);
         }
+        this._hasPresentedFrame = true;
         if (!this._paused) {
             this._noteAdaptiveRenderDprFrame(now, frameIntervalMs);
         }
