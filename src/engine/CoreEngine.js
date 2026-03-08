@@ -41,10 +41,6 @@ const ADAPTIVE_RENDER_DPR_STEP = 0.1;
 const ADAPTIVE_RENDER_DPR_PROMOTE_FPS = 57;
 const ADAPTIVE_RENDER_DPR_DEMOTE_FPS = 53;
 const ADAPTIVE_RENDER_DPR_ADJUST_COOLDOWN_MS = 1400;
-const ADAPTIVE_RENDER_DPR_TOUCH_HIGH_DPR_BOOTSTRAP = 2.5;
-const ADAPTIVE_RENDER_DPR_TOUCH_HIGH_DPR_MIN_DEVICE_DPR = 2.95;
-const ADAPTIVE_RENDER_DPR_TOUCH_HIGH_DPR_MAX_VIEWPORT_WIDTH = 430;
-const ADAPTIVE_RENDER_DPR_TOUCH_HIGH_DPR_MAX_VIEWPORT_HEIGHT = 980;
 const HOVER_TOKEN_CHIP_FONT_SIZE = '11px';
 
 /**
@@ -124,10 +120,6 @@ export class CoreEngine {
             ? opts.zoomOutSupersampleDebounceMs
             : ZOOM_OUT_SUPERSAMPLE_DEBOUNCE_MS;
         this._pixelRatioRefreshTimer = null;
-        this._pendingResizeHandle = null;
-        this._pendingResizeHandleType = null;
-        this._hasPresentedFrame = false;
-        this._firstPresentedFrameResolvers = [];
         this._adaptiveRenderDprEnabled = opts.adaptiveRenderDpr !== false;
         this._adaptiveRenderDprFloor = null;
         this._adaptiveRenderDprCeiling = null;
@@ -358,7 +350,7 @@ export class CoreEngine {
             );
             this.composer.addPass(bloomPass);
         }
-        this._updateRendererPixelRatio({ force: true, redraw: true });
+        this._updateRendererPixelRatio({ force: true });
 
         // ────────────────────────────────────────────────────────────────────
         // Controls & basic lighting
@@ -432,6 +424,7 @@ export class CoreEngine {
         this._visualViewport = window.visualViewport || null;
         if (this._visualViewport) {
             this._visualViewport.addEventListener('resize', this._onResize);
+            this._visualViewport.addEventListener('scroll', this._onResize);
         }
         document.addEventListener('visibilitychange', this._onVisibility);
         window.addEventListener('blur', this._onWindowBlur);
@@ -611,15 +604,6 @@ export class CoreEngine {
         return !!this._isUserNavigating;
     }
 
-    whenFirstFramePresented() {
-        if (this._hasPresentedFrame) {
-            return Promise.resolve();
-        }
-        return new Promise((resolve) => {
-            this._firstPresentedFrameResolvers.push(resolve);
-        });
-    }
-
     /** Inform the engine that the camera or controls were changed programmatically. */
     notifyCameraUpdated() {
         if (!this.controls) return;
@@ -648,9 +632,9 @@ export class CoreEngine {
         window.removeEventListener('resize', this._onResize);
         if (this._visualViewport) {
             this._visualViewport.removeEventListener('resize', this._onResize);
+            this._visualViewport.removeEventListener('scroll', this._onResize);
             this._visualViewport = null;
         }
-        this._cancelPendingResize();
         document.removeEventListener('visibilitychange', this._onVisibility);
         window.removeEventListener('blur', this._onWindowBlur);
         window.removeEventListener('focus', this._onWindowFocus);
@@ -708,12 +692,6 @@ export class CoreEngine {
             cancelAnimationFrame(this._raycastRaf);
             this._raycastRaf = null;
         }
-        if (Array.isArray(this._firstPresentedFrameResolvers) && this._firstPresentedFrameResolvers.length > 0) {
-            const pendingResolvers = this._firstPresentedFrameResolvers.splice(0);
-            pendingResolvers.forEach((resolve) => {
-                try { resolve(); } catch (_) { /* best-effort */ }
-            });
-        }
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -757,29 +735,6 @@ export class CoreEngine {
         this._adaptiveRenderDprSampleFrames = 0;
     }
 
-    _getPreferredAdaptiveTouchStartDpr({ floor, ceiling, liveDpr, viewportWidth, viewportHeight }) {
-        if (!(Number.isFinite(floor) && Number.isFinite(ceiling) && Number.isFinite(liveDpr))) {
-            return floor;
-        }
-        if (liveDpr < ADAPTIVE_RENDER_DPR_TOUCH_HIGH_DPR_MIN_DEVICE_DPR) {
-            return floor;
-        }
-        const width = Number.isFinite(viewportWidth) ? viewportWidth : 0;
-        const height = Number.isFinite(viewportHeight) ? viewportHeight : 0;
-        const compactPhoneViewport = width > 0
-            && width <= ADAPTIVE_RENDER_DPR_TOUCH_HIGH_DPR_MAX_VIEWPORT_WIDTH
-            && height > 0
-            && height <= ADAPTIVE_RENDER_DPR_TOUCH_HIGH_DPR_MAX_VIEWPORT_HEIGHT;
-        if (!compactPhoneViewport) {
-            return floor;
-        }
-        return THREE.MathUtils.clamp(
-            ADAPTIVE_RENDER_DPR_TOUCH_HIGH_DPR_BOOTSTRAP,
-            floor,
-            ceiling
-        );
-    }
-
     _refreshAdaptiveRenderDprBounds({ viewportWidth = null, viewportHeight = null, resetCap = false } = {}) {
         if (!this._adaptiveRenderDprEnabled) return;
 
@@ -813,20 +768,11 @@ export class CoreEngine {
         const ceiling = touchPrimary
             ? Math.max(floor, Math.min(ADAPTIVE_RENDER_DPR_TOUCH_MAX, Math.max(liveDpr, floor)))
             : desktopCeiling;
-        const preferredTouchStartCap = touchPrimary
-            ? this._getPreferredAdaptiveTouchStartDpr({
-                floor,
-                ceiling,
-                liveDpr,
-                viewportWidth: width,
-                viewportHeight: height
-            })
-            : floor;
 
         this._adaptiveRenderDprFloor = floor;
         this._adaptiveRenderDprCeiling = ceiling;
         if (resetCap || !(Number.isFinite(this._adaptiveRenderDprCap) && this._adaptiveRenderDprCap > 0)) {
-            this._adaptiveRenderDprCap = touchPrimary ? preferredTouchStartCap : floor;
+            this._adaptiveRenderDprCap = floor;
         } else {
             this._adaptiveRenderDprCap = THREE.MathUtils.clamp(this._adaptiveRenderDprCap, floor, ceiling);
         }
@@ -885,8 +831,7 @@ export class CoreEngine {
         this._updateRendererPixelRatio({ force: true });
     }
 
-    _performResize = () => {
-        if (!this.camera || !this.renderer) return;
+    _onResize = () => {
         const { width, height } = this._getViewportDimensions();
         this.camera.aspect = width / height;
         this.camera.updateProjectionMatrix();
@@ -902,34 +847,6 @@ export class CoreEngine {
         this._canvasRect = this.renderer.domElement.getBoundingClientRect();
         this._applyCameraZoomLimit();
         this._updateCameraFarFromControls();
-        this._renderCurrentFrame();
-    };
-
-    _cancelPendingResize() {
-        if (this._pendingResizeHandle === null) return;
-        if (this._pendingResizeHandleType === 'raf' && typeof cancelAnimationFrame === 'function') {
-            cancelAnimationFrame(this._pendingResizeHandle);
-        } else if (this._pendingResizeHandleType === 'timeout' && typeof clearTimeout === 'function') {
-            clearTimeout(this._pendingResizeHandle);
-        }
-        this._pendingResizeHandle = null;
-        this._pendingResizeHandleType = null;
-    }
-
-    _onResize = () => {
-        if (this._pendingResizeHandle !== null) return;
-        const flushResize = () => {
-            this._pendingResizeHandle = null;
-            this._pendingResizeHandleType = null;
-            this._performResize();
-        };
-        if (typeof requestAnimationFrame === 'function') {
-            this._pendingResizeHandleType = 'raf';
-            this._pendingResizeHandle = requestAnimationFrame(flushResize);
-            return;
-        }
-        this._pendingResizeHandleType = 'timeout';
-        this._pendingResizeHandle = setTimeout(flushResize, 16);
     };
 
     _logTrailDebugMetrics = (reason, viewportWidth = null, viewportHeight = null) => {
@@ -1053,22 +970,7 @@ export class CoreEngine {
         });
     };
 
-    _renderCurrentFrame() {
-        if (!this._hasPresentedFrame) return;
-        if (!this.renderer || !this.scene || !this.camera) return;
-        if (this.composer) {
-            this.composer.render();
-        } else {
-            this.renderer.render(this.scene, this.camera);
-        }
-    }
-
-    _updateRendererPixelRatio = ({
-        force = false,
-        viewportWidth = null,
-        viewportHeight = null,
-        redraw = false
-    } = {}) => {
+    _updateRendererPixelRatio = ({ force = false, viewportWidth = null, viewportHeight = null } = {}) => {
         if (!this.renderer) return;
         let nextRatio = resolveRenderPixelRatio({
             viewportWidth,
@@ -1092,9 +994,6 @@ export class CoreEngine {
         }
         // Keep LineMaterial-based trails in sync with the active render size/DPR.
         refreshTrailDisplayScales(this.scene);
-        if (redraw) {
-            this._renderCurrentFrame();
-        }
     };
 
     _onControlsChangePixelRatio() {
@@ -1106,13 +1005,13 @@ export class CoreEngine {
             ? Math.max(0, Math.round(this._zoomOutSupersampleDebounceMs))
             : 0;
         if (debounceMs <= 0 || typeof setTimeout !== 'function') {
-            this._updateRendererPixelRatio({ redraw: true });
+            this._updateRendererPixelRatio();
             return;
         }
         this._cancelPendingPixelRatioRefresh();
         this._pixelRatioRefreshTimer = setTimeout(() => {
             this._pixelRatioRefreshTimer = null;
-            this._updateRendererPixelRatio({ redraw: true });
+            this._updateRendererPixelRatio();
         }, debounceMs);
     }
 
@@ -1156,7 +1055,7 @@ export class CoreEngine {
         this._isUserNavigating = true;
         this._cancelPendingPixelRatioRefresh();
         this._resetAdaptiveRenderDprSampling();
-        this._updateRendererPixelRatio({ force: true, redraw: true });
+        this._updateRendererPixelRatio({ force: true });
     }
 
     _onControlsEndInteraction() {
@@ -2093,14 +1992,6 @@ export class CoreEngine {
         }
         if (perfEnabled) {
             perfStats.addTime('render', this._now() - renderStart);
-        }
-        const firstPresentedFrame = !this._hasPresentedFrame;
-        this._hasPresentedFrame = true;
-        if (firstPresentedFrame && Array.isArray(this._firstPresentedFrameResolvers) && this._firstPresentedFrameResolvers.length > 0) {
-            const pendingResolvers = this._firstPresentedFrameResolvers.splice(0);
-            pendingResolvers.forEach((resolve) => {
-                try { resolve(); } catch (_) { /* best-effort */ }
-            });
         }
         if (!this._paused) {
             this._noteAdaptiveRenderDprFrame(now, frameIntervalMs);
