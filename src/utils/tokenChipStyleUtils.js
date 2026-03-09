@@ -1,5 +1,5 @@
-import { getLogitTokenChipColorCss, resolveLogitTokenChipColorKey } from '../app/gpt-tower/logitColor.js';
 import { formatTokenLabel } from '../app/gpt-tower/tokenLabels.js';
+import { resolveTokenChipColors } from '../ui/tokenChipColorUtils.js';
 
 function toFiniteIndex(value) {
     if (value === null || value === undefined || value === '') return null;
@@ -38,7 +38,7 @@ export function applyPromptTokenChipColors(element, {
     const safeTokenIndex = toFiniteIndex(tokenIndex);
     const safeFallbackIndex = toFiniteIndex(fallbackIndex);
     const resolvedLabel = resolveTokenChipLabel(tokenText, safeTokenIndex);
-    const colorKey = resolveLogitTokenChipColorKey(
+    const colors = resolveTokenChipColors(
         {
             tokenId: toFiniteIndex(tokenId),
             tokenLabel: resolvedLabel
@@ -48,8 +48,8 @@ export function applyPromptTokenChipColors(element, {
             : (Number.isFinite(safeFallbackIndex) ? safeFallbackIndex : 0)
     );
 
-    element.style.setProperty('--token-color-border', getLogitTokenChipColorCss(colorKey, 0.92));
-    element.style.setProperty('--token-color-fill', getLogitTokenChipColorCss(colorKey, 0.2));
-    element.style.setProperty('--token-color-fill-hover', getLogitTokenChipColorCss(colorKey, 0.28));
-    return colorKey;
+    element.style.setProperty('--token-color-border', colors.border);
+    element.style.setProperty('--token-color-fill', colors.fill);
+    element.style.setProperty('--token-color-fill-hover', colors.fillHover);
+    return colors.colorKey;
 }
