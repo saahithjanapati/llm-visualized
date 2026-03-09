@@ -17,6 +17,7 @@ const DEFAULT_ADVANCE_SECONDS = 10;
 const KV_DECODE_SINGLE_LANE_TRAIL_WIDTH_MULTIPLIER = 8.0;
 const KV_DECODE_SINGLE_LANE_TRAIL_OPACITY_BOOST = 2.2;
 const NEXT_TOKEN_DESKTOP_MEDIA_QUERY = '(min-width: 881px) and (min-aspect-ratio: 1/1)';
+const NEXT_TOKEN_MOBILE_MEDIA_QUERY = '(max-aspect-ratio: 1/1), (max-width: 880px)';
 const NEXT_TOKEN_PANEL_GAP_PX = 18;
 const NEXT_TOKEN_VIEWPORT_GUTTER_PX = 12;
 
@@ -238,15 +239,90 @@ function isDesktopNextTokenDockLayout() {
     return window.innerWidth >= 881 && window.innerWidth >= window.innerHeight;
 }
 
+function isMobileNextTokenInlineLayout() {
+    if (typeof window === 'undefined') return false;
+    if (typeof window.matchMedia === 'function') {
+        return window.matchMedia(NEXT_TOKEN_MOBILE_MEDIA_QUERY).matches;
+    }
+    return window.innerWidth <= 880 || window.innerHeight >= window.innerWidth;
+}
+
+function parsePixelValue(value) {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function resolveCssPixelLength(element, property, cssValue) {
+    if (!element || typeof window === 'undefined' || !property || !cssValue) return null;
+
+    const previousValue = element.style.getPropertyValue(property);
+    const previousPriority = element.style.getPropertyPriority(property);
+    element.style.setProperty(property, cssValue, 'important');
+    const resolvedValue = parsePixelValue(window.getComputedStyle(element).getPropertyValue(property));
+
+    if (previousValue) {
+        element.style.setProperty(property, previousValue, previousPriority);
+    } else {
+        element.style.removeProperty(property);
+    }
+
+    return resolvedValue;
+}
+
+function resetNextTokenButtonMobileStripLayout(button) {
+    if (!button) return;
+    delete button.dataset.mobileStripLayout;
+    button.style.removeProperty('bottom');
+}
+
+function syncNextTokenButtonMobileStripLayout(
+    button,
+    {
+        promptTokenStrip = null
+    } = {}
+) {
+    resetNextTokenButtonMobileStripLayout(button);
+    if (!button || typeof document === 'undefined' || typeof window === 'undefined') return false;
+    if (!isMobileNextTokenInlineLayout()) return false;
+
+    const promptTokenStripEl = promptTokenStrip || document.getElementById('promptTokenStrip');
+    if (!promptTokenStripEl || promptTokenStripEl.dataset.visible !== 'true') return false;
+
+    const stripRect = resolveVisibleRect(promptTokenStripEl);
+    const buttonRect = resolveVisibleRect(button);
+    const buttonWidth = buttonRect?.width || button.offsetWidth || 0;
+    if (!stripRect || !(buttonWidth > 0)) return false;
+
+    const computedStyle = window.getComputedStyle(button);
+    const baseRightPx = parsePixelValue(computedStyle.getPropertyValue('right'))
+        ?? resolveCssPixelLength(button, 'right', 'var(--next-token-btn-right-base)');
+    const baseBottomPx = resolveCssPixelLength(button, 'bottom', 'var(--next-token-btn-bottom-base)');
+    const inlineGapPx = resolveCssPixelLength(button, 'margin-right', 'var(--next-token-btn-inline-gap, 0px)') ?? 0;
+    const viewportWidth = window.innerWidth || document.documentElement?.clientWidth || 0;
+    if (!Number.isFinite(baseRightPx) || !Number.isFinite(baseBottomPx) || !(viewportWidth > 0)) return false;
+
+    const buttonLeft = viewportWidth - baseRightPx - buttonWidth;
+    const fitsInline = (stripRect.right + inlineGapPx) <= buttonLeft;
+    if (!fitsInline) return false;
+
+    // Keep the button on the bottom row when the chip strip leaves enough
+    // horizontal room to the right on narrow/mobile layouts.
+    button.dataset.mobileStripLayout = 'inline';
+    button.style.bottom = `${baseBottomPx}px`;
+    return true;
+}
+
 function syncNextTokenButtonLayout(
     button,
     {
         hudStack = null,
         detailPanel = null,
-        resizeHandle = null
+        resizeHandle = null,
+        promptTokenStrip = null
     } = {}
 ) {
     if (!button || typeof document === 'undefined') return;
+    resetNextTokenButtonMobileStripLayout(button);
 
     const hudStackEl = hudStack || document.getElementById('hudStack');
     const detailPanelEl = detailPanel || document.getElementById('detailPanel');
@@ -261,6 +337,7 @@ function syncNextTokenButtonLayout(
         button.dataset.layout = 'corner';
         button.style.removeProperty('left');
         button.style.removeProperty('right');
+        syncNextTokenButtonMobileStripLayout(button, { promptTokenStrip });
         return;
     }
 
@@ -289,19 +366,30 @@ function syncNextTokenButtonLayout(
     button.style.right = 'auto';
 }
 
-function initNextTokenButtonLayoutSync(button) {
+function initNextTokenButtonLayoutSync(
+    button,
+    {
+        promptTokenStrip = null
+    } = {}
+) {
     if (!button || typeof document === 'undefined' || typeof window === 'undefined') return null;
 
     const hudStack = document.getElementById('hudStack');
     const detailPanel = document.getElementById('detailPanel');
     const resizeHandle = document.getElementById('detailPanelResizeHandle');
+    const promptTokenStripEl = promptTokenStrip || document.getElementById('promptTokenStrip');
     let syncRafId = null;
     let resizeObserver = null;
     let mutationObserver = null;
 
     const runSync = () => {
         syncRafId = null;
-        syncNextTokenButtonLayout(button, { hudStack, detailPanel, resizeHandle });
+        syncNextTokenButtonLayout(button, {
+            hudStack,
+            detailPanel,
+            resizeHandle,
+            promptTokenStrip: promptTokenStripEl
+        });
     };
 
     const scheduleSync = () => {
@@ -318,6 +406,7 @@ function initNextTokenButtonLayoutSync(button) {
             scheduleSync();
         });
         if (hudStack) resizeObserver.observe(hudStack);
+        if (promptTokenStripEl) resizeObserver.observe(promptTokenStripEl);
         resizeObserver.observe(button);
     }
 
@@ -335,6 +424,12 @@ function initNextTokenButtonLayoutSync(button) {
             mutationObserver.observe(detailPanel, {
                 attributes: true,
                 attributeFilter: ['class']
+            });
+        }
+        if (promptTokenStripEl) {
+            mutationObserver.observe(promptTokenStripEl, {
+                attributes: true,
+                attributeFilter: ['data-visible']
             });
         }
     }
@@ -379,7 +474,10 @@ export function initGenerationController({
     const overlay = createAdvanceOverlay();
     const overlayTouchCleanup = initTouchClickFallback(overlay.root, { selector: 'button' });
     const nextTokenBtn = createNextTokenButton();
-    const nextTokenButtonLayoutCleanup = initNextTokenButtonLayoutSync(nextTokenBtn);
+    const promptTokenStripEl = promptTokenStrip?.getRootElement?.() || document.getElementById('promptTokenStrip');
+    const nextTokenButtonLayoutCleanup = initNextTokenButtonLayoutSync(nextTokenBtn, {
+        promptTokenStrip: promptTokenStripEl
+    });
     let currentLaneCount = Math.max(1, Math.floor(initialLaneCount || 1));
     let passComplete = false;
     let autoAdvancePaused = false;
@@ -506,7 +604,7 @@ export function initGenerationController({
             nextTokenBtn.style.display = shouldShow ? '' : 'none';
         }
         nextTokenBtn.disabled = !shouldShow;
-        syncNextTokenButtonLayout(nextTokenBtn);
+        syncNextTokenButtonLayout(nextTokenBtn, { promptTokenStrip: promptTokenStripEl });
     };
 
     const updateOverlay = () => {

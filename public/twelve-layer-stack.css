@@ -253,9 +253,13 @@ body.touch-ui * {
     display: none;
 }
 #nextTokenBtn {
+    --next-token-btn-right-base: max(18px, env(safe-area-inset-right));
+    --next-token-btn-bottom-base: max(18px, env(safe-area-inset-bottom));
+    --next-token-btn-strip-stack-gap: 12px;
+    --next-token-btn-inline-gap: 10px;
     position: fixed;
-    right: max(18px, env(safe-area-inset-right));
-    bottom: max(18px, env(safe-area-inset-bottom));
+    right: var(--next-token-btn-right-base);
+    bottom: var(--next-token-btn-bottom-base);
     z-index: 9;
     appearance: none;
     -webkit-appearance: none;
@@ -1036,7 +1040,7 @@ body[data-prompt-token-strip-visible="true"] #generationOverlay {
     bottom: calc(max(18px, env(safe-area-inset-bottom)) + var(--prompt-token-strip-height, 0px) + 12px);
 }
 body[data-prompt-token-strip-visible="true"] #nextTokenBtn {
-    bottom: calc(max(18px, env(safe-area-inset-bottom)) + var(--prompt-token-strip-height, 0px) + 12px);
+    bottom: calc(var(--next-token-btn-bottom-base) + var(--prompt-token-strip-height, 0px) + var(--next-token-btn-strip-stack-gap));
 }
 
 @keyframes generationOverlayIn {
@@ -1098,14 +1102,13 @@ body[data-prompt-token-strip-visible="true"] #nextTokenBtn {
         padding: 3px 5px;
     }
     #nextTokenBtn {
-        right: max(8px, env(safe-area-inset-right));
-        bottom: max(8px, calc(env(safe-area-inset-bottom) + 8px));
+        --next-token-btn-right-base: max(8px, env(safe-area-inset-right));
+        --next-token-btn-bottom-base: max(8px, calc(env(safe-area-inset-bottom) + 8px));
+        --next-token-btn-strip-stack-gap: 10px;
+        --next-token-btn-inline-gap: 8px;
         min-height: 48px;
         padding: 12px 15px;
         border-radius: 13px;
-    }
-    body[data-prompt-token-strip-visible="true"] #nextTokenBtn {
-        bottom: calc(max(8px, calc(env(safe-area-inset-bottom) + 8px)) + var(--prompt-token-strip-height, 0px) + 10px);
     }
     #generationOverlay {
         left: max(8px, env(safe-area-inset-left));
@@ -1207,14 +1210,13 @@ body[data-prompt-token-strip-visible="true"] #nextTokenBtn {
 
 @media (max-width: 420px) {
     #nextTokenBtn {
-        right: max(6px, env(safe-area-inset-right));
-        bottom: max(6px, calc(env(safe-area-inset-bottom) + 6px));
+        --next-token-btn-right-base: max(6px, env(safe-area-inset-right));
+        --next-token-btn-bottom-base: max(6px, calc(env(safe-area-inset-bottom) + 6px));
+        --next-token-btn-strip-stack-gap: 8px;
+        --next-token-btn-inline-gap: 6px;
         min-height: 44px;
         padding: 11px 14px;
         font-size: 12px;
-    }
-    body[data-prompt-token-strip-visible="true"] #nextTokenBtn {
-        bottom: calc(max(6px, calc(env(safe-area-inset-bottom) + 6px)) + var(--prompt-token-strip-height, 0px) + 8px);
     }
     #generationOverlay {
         left: max(6px, env(safe-area-inset-left));
