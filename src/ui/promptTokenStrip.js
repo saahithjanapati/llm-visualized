@@ -16,6 +16,9 @@ const STRIP_ID = 'promptTokenStrip';
 const PROMPT_TOKEN_STRIP_HOVER_SOURCE = 'prompt-token-strip';
 const PROMPT_TOKEN_STRIP_COLLISION_GAP_PX = 12;
 const PROMPT_TOKEN_STRIP_COLLISION_MAX_WIDTH_VAR = '--prompt-token-strip-collision-max-width';
+const PROMPT_TOKEN_STRIP_MOBILE_MEDIA_QUERY = '(max-aspect-ratio: 1/1), (max-width: 880px)';
+const PROMPT_TOKEN_STRIP_FULL_WIDTH_EPSILON_PX = 2;
+const PROMPT_TOKEN_STRIP_WRAP_EPSILON_PX = 3;
 
 function normalizeTokenText(token) {
     if (token === null || token === undefined) return '';
@@ -72,9 +75,42 @@ function isDetailPanelSuppressingStripOnMobile() {
     if (typeof window === 'undefined' || typeof document === 'undefined' || !document.body) return false;
     if (!document.body.classList.contains('detail-mobile-focus')) return false;
     if (typeof window.matchMedia === 'function') {
-        return window.matchMedia('(max-aspect-ratio: 1/1), (max-width: 880px)').matches;
+        return window.matchMedia(PROMPT_TOKEN_STRIP_MOBILE_MEDIA_QUERY).matches;
     }
     return window.innerWidth <= 880 || window.innerHeight <= window.innerWidth;
+}
+
+function isMobilePromptTokenStripLayout() {
+    if (typeof window === 'undefined') return false;
+    if (typeof window.matchMedia === 'function') {
+        return window.matchMedia(PROMPT_TOKEN_STRIP_MOBILE_MEDIA_QUERY).matches;
+    }
+    return window.innerWidth <= 880 || window.innerHeight <= window.innerWidth;
+}
+
+function parsePixelValue(value) {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isPromptTokenStripWrapped(tokensEl) {
+    if (!tokensEl) return false;
+    const chips = tokensEl.querySelectorAll('[data-token-entry-index]');
+    if (chips.length < 2) return false;
+
+    let firstRowTop = null;
+    for (const chip of chips) {
+        const top = chip?.offsetTop;
+        if (!Number.isFinite(top)) continue;
+        if (firstRowTop === null) {
+            firstRowTop = top;
+            continue;
+        }
+        if (top > firstRowTop + PROMPT_TOKEN_STRIP_WRAP_EPSILON_PX) {
+            return true;
+        }
+    }
+    return false;
 }
 
 function rectsOverlapVertically(a, b, epsilon = 0.5) {
@@ -115,6 +151,10 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
     let mirroredEntry = null;
     let layoutSyncFrame = null;
     let lastCollisionMaxWidthPx = null;
+
+    const clearMobileFullWidthWrapState = () => {
+        delete dom.root.dataset.mobileFullWidthWrap;
+    };
 
     const clearCollisionMaxWidth = () => {
         if (lastCollisionMaxWidthPx === null) return;
@@ -158,11 +198,28 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
         layoutSyncFrame = null;
         if (dom.root.dataset.visible !== 'true') {
             clearCollisionMaxWidth();
+            clearMobileFullWidthWrapState();
             setPromptTokenStripHeightVar(0);
             return;
         }
 
         setCollisionMaxWidth(resolveCollisionMaxWidth());
+        if (!isMobilePromptTokenStripLayout()) {
+            clearMobileFullWidthWrapState();
+        } else {
+            const stripRect = resolveVisibleRect(dom.root);
+            const computedStyle = window.getComputedStyle(dom.root);
+            const maxWidthPx = parsePixelValue(computedStyle.getPropertyValue('max-width'));
+            const fillsAvailableWidth = !!stripRect
+                && Number.isFinite(maxWidthPx)
+                && stripRect.width >= (maxWidthPx - PROMPT_TOKEN_STRIP_FULL_WIDTH_EPSILON_PX);
+            const wrapped = isPromptTokenStripWrapped(dom.tokensEl);
+            if (fillsAvailableWidth && wrapped) {
+                dom.root.dataset.mobileFullWidthWrap = 'true';
+            } else {
+                clearMobileFullWidthWrapState();
+            }
+        }
         setPromptTokenStripHeightVar(dom.root.getBoundingClientRect().height);
     };
 
@@ -411,6 +468,7 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
             setHoveredEntry(null, { emit: true });
             mirroredEntry = null;
             clearCollisionMaxWidth();
+            clearMobileFullWidthWrapState();
             setActivePromptTokenChipEntries([]);
             dom.tokensEl.removeEventListener('click', handleTokenClick);
             dom.tokensEl.removeEventListener('pointerover', handleTokenPointerOver);

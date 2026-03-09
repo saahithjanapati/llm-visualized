@@ -293,6 +293,20 @@ body.touch-ui * {
         box-shadow 0.14s ease,
         border-color 0.14s ease;
 }
+#topControls > #nextTokenBtn {
+    position: static;
+    right: auto;
+    bottom: auto;
+    min-height: 38px;
+    padding: 8px 12px;
+    border-radius: 10px;
+    border-color: rgba(122, 202, 255, 0.76);
+    background: rgba(16, 19, 26, 0.74);
+    color: #eef7ff;
+    box-shadow:
+        0 0 0 1px rgba(122, 202, 255, 0.08),
+        0 0 18px rgba(56, 132, 255, 0.14);
+}
 #nextTokenBtn:hover:not(:disabled),
 #nextTokenBtn:focus-visible:not(:disabled) {
     background: rgba(56, 132, 255, 0.18);
@@ -920,6 +934,16 @@ body.touch-ui * {
     box-shadow: 0 10px 24px rgba(0,0,0,0.44);
     pointer-events: none;
     z-index: -1;
+}
+@media (max-aspect-ratio: 1/1), (max-width: 880px) {
+    #promptTokenStrip[data-mobile-full-width-wrap="true"] {
+        border-radius: 0;
+    }
+    #promptTokenStrip[data-mobile-full-width-wrap="true"]::before {
+        border-radius: 0;
+        border-right: none;
+        box-shadow: 0 -10px 24px rgba(0,0,0,0.24);
+    }
 }
 @media (any-pointer: coarse) {
     #promptTokenStrip {
@@ -3776,7 +3800,7 @@ body.detail-panel-resizing * {
         display: none !important;
     }
     #hudPanel { padding: 6px 8px 3px; gap: 4px 8px; }
-    #statusOverlay { font-size: 12px; line-height: 1.15; }
+    #statusOverlay { font-size: 12px; line-height: 1.15; padding-top: 2px; }
     #parameterCounter .param-value { font-size: 15px; }
     #equationsPanel .eq-title { font-size: 10px; margin-bottom: 2px; }
     #equationsPanel .eq-body { font-size: 12px; line-height: 1.28; }
@@ -3845,7 +3869,7 @@ body.detail-panel-resizing * {
         border-radius: 0 22px 0 0;
     }
     #hudPanel { padding: 6px 8px 3px; gap: 4px 8px; }
-    #statusOverlay { font-size: 12px; line-height: 1.15; }
+    #statusOverlay { font-size: 12px; line-height: 1.15; padding-top: 2px; }
     #parameterCounter .param-label { font-size: 10px; }
     #parameterCounter .param-value { font-size: 15px; }
     #equationsPanel .eq-title { font-size: 10px; margin-bottom: 2px; }

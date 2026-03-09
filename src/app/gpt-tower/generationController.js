@@ -275,6 +275,31 @@ function resetNextTokenButtonMobileStripLayout(button) {
     button.style.removeProperty('bottom');
 }
 
+function mountNextTokenButtonInBody(button) {
+    if (!button || typeof document === 'undefined' || !document.body) return;
+    if (button.parentElement !== document.body) {
+        document.body.appendChild(button);
+    }
+}
+
+function syncNextTokenButtonTopControlsLayout(button) {
+    if (!button || typeof document === 'undefined') return false;
+    if (!isDesktopNextTokenDockLayout()) return false;
+
+    const topControls = document.getElementById('topControls');
+    const pauseBtn = document.getElementById('pauseBtn');
+    if (!topControls || !pauseBtn) return false;
+
+    if (button.parentElement !== topControls || button.nextElementSibling !== pauseBtn) {
+        topControls.insertBefore(button, pauseBtn);
+    }
+    button.dataset.layout = 'top-controls';
+    button.style.removeProperty('left');
+    button.style.removeProperty('right');
+    button.style.removeProperty('bottom');
+    return true;
+}
+
 function syncNextTokenButtonMobileStripLayout(
     button,
     {
@@ -323,6 +348,8 @@ function syncNextTokenButtonLayout(
 ) {
     if (!button || typeof document === 'undefined') return;
     resetNextTokenButtonMobileStripLayout(button);
+    if (syncNextTokenButtonTopControlsLayout(button)) return;
+    mountNextTokenButtonInBody(button);
 
     const hudStackEl = hudStack || document.getElementById('hudStack');
     const detailPanelEl = detailPanel || document.getElementById('detailPanel');
