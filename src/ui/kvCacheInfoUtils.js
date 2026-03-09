@@ -7,11 +7,11 @@ export function normalizeKvCachePhase(phase = 'prefill') {
 export function formatKvCachePhaseLabel(phase = 'prefill') {
     return normalizeKvCachePhase(phase) === 'decode'
         ? 'Decode'
-        : 'Pre-fill';
+        : 'Pre-Fill';
 }
 
 export function buildKvCacheOverlayBadgeText(phase = 'prefill') {
-    return `KV cache enabled \u00b7 ${formatKvCachePhaseLabel(phase)}`;
+    return `KV Cache Enabled \u00b7 ${formatKvCachePhaseLabel(phase)}`;
 }
 
 export function buildKvCacheInfoSelection({ phase = 'prefill' } = {}) {

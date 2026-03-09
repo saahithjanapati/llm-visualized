@@ -215,6 +215,7 @@ const LAYERNORM_PANEL_ACTION_OPEN = 'open-layernorm';
 const LAYERNORM_PARAM_PANEL_ACTION_OPEN = 'open-layernorm-param';
 const QKV_SOURCE_VECTOR_PANEL_ACTION_OPEN = 'open-qkv-source-vector';
 const QKV_WEIGHT_MATRIX_PANEL_ACTION_OPEN = 'open-qkv-weight-matrix';
+const ATTENTION_SCORE_PREVIEW_DECIMALS = 4;
 let tokenChipFont = null;
 let tokenChipFontPromise = null;
 
@@ -587,7 +588,7 @@ function resolveAttentionScoreSelectionSummary(selectionInfo, context = null) {
     const targetTokenText = normalizeAttentionValuePart(targetLabel);
     const sourceText = sourceTokenText === ATTENTION_VALUE_PLACEHOLDER ? 'Source' : sourceTokenText;
     const targetText = targetTokenText === ATTENTION_VALUE_PLACEHOLDER ? 'Target' : targetTokenText;
-    const scoreText = Number.isFinite(score) ? score.toFixed(ATTENTION_SCORE_DECIMALS) : 'n/a';
+    const scoreText = formatAttentionPreviewScore(score, 'n/a');
     const hasSourceContext = Number.isFinite(sourceTokenIndex) || sourceLabel.length > 0;
     const hasTargetContext = Number.isFinite(targetTokenIndex) || targetLabel.length > 0;
     const tokenContext = (hasSourceContext || hasTargetContext)
@@ -687,6 +688,11 @@ function buildAttentionMatrixValues({ activationSource, layerIndex, headIndex, t
 function clamp01(value) {
     if (!Number.isFinite(value)) return 0;
     return Math.min(1, Math.max(0, value));
+}
+
+function formatAttentionPreviewScore(value, fallback = ATTENTION_VALUE_PLACEHOLDER) {
+    if (!Number.isFinite(value)) return fallback;
+    return value.toFixed(ATTENTION_SCORE_PREVIEW_DECIMALS);
 }
 
 function isTouchLikePointerEvent(event) {
@@ -6306,7 +6312,7 @@ class SelectionPanel {
                     cell.style.backgroundColor = colorToCss(color);
                     const rowLabel = tokenLabels[row] || '';
                     const colLabel = tokenLabels[col] || '';
-                    cell.title = `${rowLabel} → ${colLabel} (${mode === 'post' ? 'post' : 'pre'}): ${value.toFixed(ATTENTION_SCORE_DECIMALS)}`;
+                    cell.title = `${rowLabel} → ${colLabel} (${mode === 'post' ? 'post' : 'pre'}): ${formatAttentionPreviewScore(value)}`;
                     cell.dataset.value = String(value);
                     cell.classList.remove('is-empty');
                     hasAnyValue = true;
@@ -6606,7 +6612,7 @@ class SelectionPanel {
                         cell.style.backgroundColor = colorToCss(color);
                         const rowLabel = tokenLabels[row] || '';
                         const colLabel = tokenLabels[col] || '';
-                        cell.title = `${rowLabel} → ${colLabel} (${mode === 'post' ? 'post' : 'pre'}): ${value.toFixed(ATTENTION_SCORE_DECIMALS)}`;
+                        cell.title = `${rowLabel} → ${colLabel} (${mode === 'post' ? 'post' : 'pre'}): ${formatAttentionPreviewScore(value)}`;
                         cell.dataset.value = String(value);
                         hasAnyValue = true;
                     } else {
@@ -6816,9 +6822,7 @@ class SelectionPanel {
         const targetTokenIndex = Number.isFinite(rawColTokenIndex) ? Math.floor(rawColTokenIndex) : null;
         const sourceText = normalizeAttentionValuePart(rowLabel, 'Source');
         const targetText = normalizeAttentionValuePart(colLabel, 'Target');
-        const scoreText = Number.isFinite(valueNum)
-            ? valueNum.toFixed(ATTENTION_SCORE_DECIMALS)
-            : ATTENTION_VALUE_PLACEHOLDER;
+        const scoreText = formatAttentionPreviewScore(valueNum);
         this._setAttentionValue({
             source: sourceText,
             target: targetText,
