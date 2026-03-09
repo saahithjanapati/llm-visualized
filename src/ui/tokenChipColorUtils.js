@@ -153,7 +153,8 @@ export function resolveTokenChipColors(entry = null, fallbackIndex = 0, options 
         colorKey,
         border: getLogitTokenChipColorCss(colorKey, 0.92),
         fill: getLogitTokenChipColorCss(colorKey, 0.2),
-        fillHover: getLogitTokenChipColorCss(colorKey, 0.28)
+        fillHover: getLogitTokenChipColorCss(colorKey, 0.28),
+        fillActive: getLogitTokenChipColorCss(colorKey, 0.42)
     };
 }
 
@@ -163,5 +164,6 @@ export function applyTokenChipColors(element, entry = null, fallbackIndex = 0, o
     element.style.setProperty('--token-color-border', colors.border);
     element.style.setProperty('--token-color-fill', colors.fill);
     element.style.setProperty('--token-color-fill-hover', colors.fillHover);
+    element.style.setProperty('--token-color-fill-active', colors.fillActive);
     return colors;
 }

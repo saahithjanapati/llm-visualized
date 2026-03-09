@@ -112,8 +112,6 @@ export function initSettingsModal(pipeline) {
     setPreference('kvCacheModeEnabled', false);
     pipeline?.setAutoCameraFollow?.(appState.autoCameraFollow, { immediate: true });
     pipeline?.engine?.setCameraDebugEnabled?.(appState.showCameraDebug);
-    pipeline?.setDevMode?.(appState.devMode);
-    pipeline?.engine?.setDevMode?.(appState.devMode);
 
     let followInspectorEl = null;
     let followInspectorRaf = null;
@@ -447,8 +445,6 @@ export function initSettingsModal(pipeline) {
     devToggle?.addEventListener('change', () => {
         appState.devMode = !!devToggle.checked;
         setPreference('devMode', appState.devMode);
-        pipeline?.setDevMode?.(appState.devMode);
-        pipeline?.engine?.setDevMode?.(appState.devMode);
         if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
             window.dispatchEvent(new CustomEvent('selectionPanelDevModeChanged', {
                 detail: { enabled: appState.devMode }

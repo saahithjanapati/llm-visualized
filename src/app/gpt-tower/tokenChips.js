@@ -870,8 +870,10 @@ export function addEmbeddingAndTokenChips({
                 : ((typeof performance !== 'undefined' && typeof performance.now === 'function')
                     ? performance.now()
                     : Date.now());
-            const defaultReleaseAt = readyMs
-                + positionStartDelayAfterVocabMs
+            // Do not switch away from the vocab framing until the delayed
+            // position-chip wave is actually supposed to begin.
+            const defaultStartAt = readyMs + positionStartDelayAfterVocabMs;
+            const defaultReleaseAt = defaultStartAt
                 + posRiseDuration
                 + laneSpanMs
                 + CHIP_INSIDE_RELEASE_BUFFER_MS;
@@ -881,7 +883,7 @@ export function addEmbeddingAndTokenChips({
                 pendingFallbackAt: readyMs,
                 releaseByToken: Object.create(null),
                 startByToken: Object.create(null),
-                defaultStartAt: readyMs,
+                defaultStartAt,
                 defaultReleaseAt,
                 insideByToken: positionInsideByToken
             };

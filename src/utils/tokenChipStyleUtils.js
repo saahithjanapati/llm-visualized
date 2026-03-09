@@ -51,5 +51,6 @@ export function applyPromptTokenChipColors(element, {
     element.style.setProperty('--token-color-border', colors.border);
     element.style.setProperty('--token-color-fill', colors.fill);
     element.style.setProperty('--token-color-fill-hover', colors.fillHover);
+    element.style.setProperty('--token-color-fill-active', colors.fillActive);
     return colors.colorKey;
 }

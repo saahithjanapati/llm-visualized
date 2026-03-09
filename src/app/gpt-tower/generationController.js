@@ -20,6 +20,7 @@ const NEXT_TOKEN_DESKTOP_MEDIA_QUERY = '(min-width: 881px) and (min-aspect-ratio
 const NEXT_TOKEN_MOBILE_MEDIA_QUERY = '(max-aspect-ratio: 1/1), (max-width: 880px)';
 const NEXT_TOKEN_PANEL_GAP_PX = 18;
 const NEXT_TOKEN_VIEWPORT_GUTTER_PX = 12;
+const PASS_INTRO_ENGINE_PAUSE_REASON = 'generation-pass-intro';
 
 export function buildPassState({
     activationSource,
@@ -539,6 +540,25 @@ function initNextTokenButtonLayoutSync(
     };
 }
 
+function waitForAnimationFrames(frameCount = 1) {
+    const safeCount = Math.max(0, Math.floor(frameCount));
+    if (safeCount <= 0 || typeof requestAnimationFrame !== 'function') {
+        return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+        let remaining = safeCount;
+        const step = () => {
+            remaining -= 1;
+            if (remaining <= 0) {
+                resolve();
+                return;
+            }
+            requestAnimationFrame(step);
+        };
+        requestAnimationFrame(step);
+    });
+}
+
 export function initGenerationController({
     pipeline,
     activationSource,
@@ -551,6 +571,9 @@ export function initGenerationController({
     cameraReturnTarget,
     selectionPanel,
     promptTokenStrip,
+    passIntroOverlay = null,
+    startupOverviewHoldMs = 1000,
+    startupOverviewTransitionMs = 1400,
     autoAdvanceSeconds = DEFAULT_ADVANCE_SECONDS
 } = {}) {
     if (!pipeline) return null;
@@ -569,6 +592,7 @@ export function initGenerationController({
     });
     let currentLaneCount = Math.max(1, Math.floor(initialLaneCount || 1));
     let passComplete = false;
+    let forwardPassJumpPending = false;
     let autoAdvancePaused = false;
     let countdownActive = false;
     const safeAdvanceSeconds = Number.isFinite(autoAdvanceSeconds) ? autoAdvanceSeconds : DEFAULT_ADVANCE_SECONDS;
@@ -799,6 +823,42 @@ export function initGenerationController({
         });
     };
 
+    const playPendingPassIntro = async ({
+        passState,
+        attentionState = null
+    } = {}) => {
+        if (!passIntroOverlay || typeof passIntroOverlay.play !== 'function') return;
+        const sourceState = attentionState || passState;
+        if (!sourceState) return;
+
+        let startupCameraIntroPromise = null;
+        await passIntroOverlay.play({
+            laneCount: sourceState.totalLaneCount ?? sourceState.laneTokenIndices?.length ?? 0,
+            laneTokenIndices: sourceState.laneTokenIndices,
+            tokenLabels: sourceState.tokenLabels,
+            presentation: 'tokenized-append',
+            onBeforeHide: async () => {
+                if (!startupCameraIntroPromise) {
+                    startupCameraIntroPromise = Promise.resolve(
+                        pipeline?.playStartupCameraIntro?.({
+                            holdMs: startupOverviewHoldMs,
+                            transitionMs: startupOverviewTransitionMs,
+                            replay: true
+                        }) ?? false
+                    );
+                }
+                await waitForAnimationFrames(2);
+            }
+        });
+
+        await (startupCameraIntroPromise ?? pipeline?.playStartupCameraIntro?.({
+            holdMs: startupOverviewHoldMs,
+            transitionMs: startupOverviewTransitionMs,
+            replay: true
+        }));
+        await waitForAnimationFrames(1);
+    };
+
     let latestPassState = null;
     let latestAttentionState = null;
 
@@ -981,8 +1041,8 @@ export function initGenerationController({
             requestLastForwardPass: () => false,
             hasNextForwardPass: () => false,
             hasLastForwardPass: () => false,
-            isForwardPassJumpPending: () => false,
-            isNextForwardPassPending: () => false,
+            isForwardPassJumpPending: () => forwardPassJumpPending,
+            isNextForwardPassPending: () => forwardPassJumpPending,
             dispose: () => {
                 if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
                     window.removeEventListener('kvCacheModeChanged', handleKvCacheModeChanged);
@@ -995,18 +1055,62 @@ export function initGenerationController({
         };
     }
 
+    const runForwardPassJump = ({
+        targetLaneCount,
+        fromCompletedPass = true
+    } = {}) => {
+        if (forwardPassJumpPending) return false;
+
+        const nextLaneCount = Math.max(1, Math.floor(targetLaneCount || 1));
+        if (nextLaneCount <= currentLaneCount) {
+            if (!hasNextForwardPass()) {
+                markNoFurtherPasses();
+            }
+            return false;
+        }
+
+        forwardPassJumpPending = true;
+        passComplete = false;
+        autoAdvancePaused = false;
+        countdownActive = false;
+        clearOverlay();
+        updateNextTokenButton();
+
+        Promise.resolve().then(async () => {
+            const engine = pipeline?.engine;
+            engine?.pause?.(PASS_INTRO_ENGINE_PAUSE_REASON);
+            try {
+                rebuildPass({
+                    laneCount: nextLaneCount,
+                    resetPipeline: true,
+                    fromCompletedPass: !!fromCompletedPass
+                });
+                await playPendingPassIntro({
+                    passState: latestPassState,
+                    attentionState: latestAttentionState
+                });
+            } catch (err) {
+                console.error('Forward-pass jump intro failed:', err);
+            } finally {
+                engine?.resume?.(PASS_INTRO_ENGINE_PAUSE_REASON);
+                forwardPassJumpPending = false;
+                updateOverlay();
+                updateNextTokenButton();
+            }
+        });
+
+        return true;
+    };
+
     const advanceToNextPass = ({ fromCompletedPass = true } = {}) => {
         if (!hasNextForwardPass()) {
             markNoFurtherPasses();
             return false;
         }
-        const nextLane = Math.min(maxLaneCount, currentLaneCount + 1);
-        rebuildPass({
-            laneCount: nextLane,
-            resetPipeline: true,
-            fromCompletedPass: !!fromCompletedPass
+        return runForwardPassJump({
+            targetLaneCount: Math.min(maxLaneCount, currentLaneCount + 1),
+            fromCompletedPass
         });
-        return true;
     };
 
     const advanceToLastPass = ({ fromCompletedPass = true } = {}) => {
@@ -1014,12 +1118,10 @@ export function initGenerationController({
             markNoFurtherPasses();
             return false;
         }
-        rebuildPass({
-            laneCount: maxLaneCount,
-            resetPipeline: true,
-            fromCompletedPass: !!fromCompletedPass
+        return runForwardPassJump({
+            targetLaneCount: maxLaneCount,
+            fromCompletedPass
         });
-        return true;
     };
 
     const requestNextForwardPass = () => {
@@ -1115,8 +1217,8 @@ export function initGenerationController({
         requestLastForwardPass,
         hasNextForwardPass,
         hasLastForwardPass,
-        isForwardPassJumpPending: () => false,
-        isNextForwardPassPending: () => false,
+        isForwardPassJumpPending: () => forwardPassJumpPending,
+        isNextForwardPassPending: () => forwardPassJumpPending,
         dispose: () => {
             if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
                 window.removeEventListener('kvCacheModeChanged', handleKvCacheModeChanged);

@@ -277,14 +277,6 @@
                     <label class="section-label">Interaction</label>
                     <label class="toggle-row">
                         <span class="toggle-copy">
-                            <span class="toggle-text">Enable dev mode</span>
-                            <span class="toggle-description">Shows developer diagnostics like vector sampling indices in the selection panel and enables dev tooling.</span>
-                        </span>
-                        <input id="toggleDevMode" type="checkbox">
-                        <span class="toggle-track" aria-hidden="true"></span>
-                    </label>
-                    <label class="toggle-row">
-                        <span class="toggle-copy">
                             <span class="toggle-text">Enable hover labels (raycasting)</span>
                             <span class="toggle-description">Shows token and component labels when you hover scene objects.</span>
                         </span>
@@ -313,6 +305,14 @@
                             <span class="toggle-description">Shows the prompt split into tokens so you can track token flow.</span>
                         </span>
                         <input id="togglePromptTokenStrip" type="checkbox" checked>
+                        <span class="toggle-track" aria-hidden="true"></span>
+                    </label>
+                    <label class="toggle-row">
+                        <span class="toggle-copy">
+                            <span class="toggle-text">Enable dev mode</span>
+                            <span class="toggle-description">Shows vector sampling values and indices in the selection panel.</span>
+                        </span>
+                        <input id="toggleDevMode" type="checkbox">
                         <span class="toggle-track" aria-hidden="true"></span>
                     </label>
                     <div id="kvCacheStatusHint" class="settings-hint" hidden>KV cache enabled for prefill and decode.</div>

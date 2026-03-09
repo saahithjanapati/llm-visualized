@@ -306,6 +306,11 @@ if (pipeline.engine && typeof pipeline.engine.setRaycastSelectionHandler === 'fu
     });
 }
 
+const passIntroOverlay = initPassIntroOverlay({
+    activationSource,
+    promptTokenStrip
+});
+
 const generationController = initGenerationController({
     pipeline,
     activationSource,
@@ -317,12 +322,10 @@ const generationController = initGenerationController({
     cameraReturnPosition: camPos,
     cameraReturnTarget: camTarget,
     selectionPanel,
-    promptTokenStrip
-});
-
-const passIntroOverlay = initPassIntroOverlay({
-    activationSource,
-    promptTokenStrip
+    promptTokenStrip,
+    passIntroOverlay,
+    startupOverviewHoldMs: CAMERA_CONFIG.startupOverviewHoldMs,
+    startupOverviewTransitionMs: CAMERA_CONFIG.startupOverviewTransitionMs
 });
 
 function waitForAnimationFrames(frameCount = 1) {

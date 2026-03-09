@@ -46,7 +46,8 @@ function renderInlineTokenNavHtml(tokenTextEncoded, tokenIndexRaw, tokenIdRaw) {
     const chipStyle = [
         `--token-color-border: ${colors.border}`,
         `--token-color-fill: ${colors.fill}`,
-        `--token-color-fill-hover: ${colors.fillHover}`
+        `--token-color-fill-hover: ${colors.fillHover}`,
+        `--token-color-fill-active: ${colors.fillActive}`
     ].join('; ');
 
     const attrs = [

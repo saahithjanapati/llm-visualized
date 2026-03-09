@@ -12,12 +12,13 @@ const TYPE_SETTLE_MS = 320;
 const TOKENIZE_IN_PLACE_DURATION_MS = 780;
 const TOKENIZE_STAGGER_MS = 34;
 const TOKENIZE_HOLD_MS = 1000;
+const APPEND_TOKEN_STAGGER_MS = 110;
+const APPEND_TOKEN_SETTLE_MS = 460;
+const APPEND_TOKEN_HOLD_MS = 620;
 const HANDOFF_BASE_DURATION_MS = 860;
 const HANDOFF_STAGGER_MS = 28;
 const HANDOFF_MIN_ARC_PX = 44;
 const HANDOFF_MAX_ARC_PX = 160;
-const HANDOFF_COMMIT_PROGRESS = 0.975;
-const HANDOFF_FADE_START_PROGRESS = 0.9;
 const OVERLAY_HIDE_CLEANUP_DELAY_MS = 220;
 
 const TOKEN_REPLACEMENTS = new Map([
@@ -361,36 +362,63 @@ function createInlinePromptToken({
     entry,
     index,
     colorState,
-    promptTokenStrip
+    promptTokenStrip,
+    delayMs = index * TOKENIZE_STAGGER_MS
 }) {
     const chip = document.createElement('span');
     chip.className = 'pass-intro-inline-token';
-    chip.style.setProperty('--tokenize-delay-ms', `${index * TOKENIZE_STAGGER_MS}ms`);
+    chip.style.setProperty('--tokenize-delay-ms', `${Math.max(0, delayMs)}ms`);
     applyTokenChipColors(chip, entry?.chipEntry, index, { lookup: colorState?.lookup });
     const promptTokenEl = promptTokenStrip?.getTokenElement?.(index) || null;
     copyChipComputedStyle(promptTokenEl, chip);
+    chip.style.display = 'inline-flex';
+    chip.style.alignItems = 'center';
+    chip.style.justifyContent = 'center';
+    chip.style.transformOrigin = 'center center';
 
     const label = document.createElement('span');
     label.className = 'pass-intro-inline-token-label';
     label.textContent = normalizeInlineTokenText(entry?.displayLabel);
+    label.style.display = 'block';
+    label.style.lineHeight = '1';
     chip.appendChild(label);
 
     return chip;
 }
 
-function renderInlinePromptTokens(textEl, entries = [], colorState = null, promptTokenStrip = null) {
+function renderInlinePromptTokens(
+    textEl,
+    entries = [],
+    colorState = null,
+    promptTokenStrip = null,
+    { delayResolver = null } = {}
+) {
     if (!textEl) return [];
 
     const fragment = document.createDocumentFragment();
     const chipElements = [];
     entries.forEach((entry, index) => {
-        const chip = createInlinePromptToken({ entry, index, colorState, promptTokenStrip });
+        const chip = createInlinePromptToken({
+            entry,
+            index,
+            colorState,
+            promptTokenStrip,
+            delayMs: typeof delayResolver === 'function'
+                ? delayResolver(index, entry)
+                : (index * TOKENIZE_STAGGER_MS)
+        });
         chipElements.push(chip);
         fragment.appendChild(chip);
     });
 
     textEl.replaceChildren(fragment);
     return chipElements;
+}
+
+function resolveAppendStartIndex(previousTokenCount, nextTokenCount) {
+    if (!Number.isFinite(nextTokenCount) || nextTokenCount <= 0) return 0;
+    if (!Number.isFinite(previousTokenCount) || previousTokenCount <= 0) return 0;
+    return clamp(Math.floor(previousTokenCount), 0, Math.max(0, Math.floor(nextTokenCount)));
 }
 
 function createPromptChipOverlay({
@@ -469,6 +497,7 @@ export function initPassIntroOverlay({ activationSource, promptTokenStrip } = {}
     let disposed = false;
     let hasPlayedOnce = false;
     let currentRawText = '';
+    let currentTokenCount = 0;
     let activeHandoffRaf = null;
     let hideCleanupTimer = null;
 
@@ -516,12 +545,10 @@ export function initPassIntroOverlay({ activationSource, promptTokenStrip } = {}
 
     const animateHandoffToPromptStrip = ({
         chips,
-        targets,
-        onCommit = null
+        targets
     }) => {
         if (!Array.isArray(chips) || !chips.length) return Promise.resolve();
 
-        let commitFired = false;
         const trajectories = chips.map((chip, idx) => {
             const startX = Number.parseFloat(chip.style.left) || 0;
             const startY = Number.parseFloat(chip.style.top) || 0;
@@ -578,12 +605,6 @@ export function initPassIntroOverlay({ activationSource, promptTokenStrip } = {}
                 if (dom.scrimEl) {
                     dom.scrimEl.style.opacity = String(lerp(1, 0.14, windowProgress));
                 }
-                if (!commitFired && globalProgress >= HANDOFF_COMMIT_PROGRESS) {
-                    commitFired = true;
-                    if (typeof onCommit === 'function') {
-                        try { onCommit(); } catch (_) { /* no-op */ }
-                    }
-                }
 
                 let allDone = true;
                 trajectories.forEach((entry) => {
@@ -624,6 +645,7 @@ export function initPassIntroOverlay({ activationSource, promptTokenStrip } = {}
         laneCount,
         laneTokenIndices,
         tokenLabels,
+        presentation = 'typing',
         onHandoffCommit = null,
         onBeforeHide = null
     } = {}) => {
@@ -649,6 +671,11 @@ export function initPassIntroOverlay({ activationSource, promptTokenStrip } = {}
 
         const nextRawText = entries.map((entry) => entry.rawText).join('');
         const normalizedNextText = String(nextRawText ?? '').replace(/\r/g, '').replace(/\u00A0/g, ' ');
+        const appendStartIndex = resolveAppendStartIndex(currentTokenCount, entries.length);
+        const useTokenizedAppendPresentation = presentation === 'tokenized-append'
+            && hasPlayedOnce
+            && entries.length >= currentTokenCount
+            && appendStartIndex <= entries.length;
 
         finalizeHiddenState();
         dom.root.dataset.visible = 'true';
@@ -657,58 +684,101 @@ export function initPassIntroOverlay({ activationSource, promptTokenStrip } = {}
 
         if (disposed) return;
 
-        const prefixLen = commonPrefixLength(currentRawText, normalizedNextText);
-        let typedText = currentRawText;
+        let inlineChipElements = [];
+        if (useTokenizedAppendPresentation) {
+            currentRawText = normalizedNextText;
+            dom.root.classList.add('is-tokenized');
+            dom.textEl.classList.add('is-tokenized');
+            inlineChipElements = renderInlinePromptTokens(
+                dom.textEl,
+                entries,
+                colorState,
+                promptTokenStrip,
+                {
+                    delayResolver: (index) => (
+                        index < appendStartIndex ? 0 : (index - appendStartIndex) * APPEND_TOKEN_STAGGER_MS
+                    )
+                }
+            );
+            inlineChipElements.forEach((chip, index) => {
+                if (index < appendStartIndex) {
+                    chip.classList.add('is-visible');
+                    return;
+                }
+                chip.classList.add('is-appended');
+            });
+            syncEditorScroll(dom.editorEl);
 
-        if (prefixLen < typedText.length) {
-            while (typedText.length > prefixLen) {
-                if (disposed) return;
-                typedText = typedText.slice(0, -1);
+            await nextFrame();
+            if (disposed) return;
+
+            for (let i = appendStartIndex; i < inlineChipElements.length; i += 1) {
+                inlineChipElements[i].classList.add('is-visible');
+            }
+
+            const appendedCount = Math.max(0, inlineChipElements.length - appendStartIndex);
+            const appendTailMs = appendedCount > 0
+                ? APPEND_TOKEN_SETTLE_MS + APPEND_TOKEN_STAGGER_MS * Math.max(0, appendedCount - 1)
+                : 120;
+            await delay(appendTailMs);
+            if (disposed) return;
+
+            await delay(APPEND_TOKEN_HOLD_MS);
+            if (disposed) return;
+        } else {
+            const prefixLen = commonPrefixLength(currentRawText, normalizedNextText);
+            let typedText = currentRawText;
+
+            if (prefixLen < typedText.length) {
+                while (typedText.length > prefixLen) {
+                    if (disposed) return;
+                    typedText = typedText.slice(0, -1);
+                    dom.textEl.textContent = typedText;
+                    syncEditorScroll(dom.editorEl);
+                    await delay(TYPE_DELETE_MS);
+                }
+            } else {
                 dom.textEl.textContent = typedText;
                 syncEditorScroll(dom.editorEl);
-                await delay(TYPE_DELETE_MS);
             }
-        } else {
-            dom.textEl.textContent = typedText;
-            syncEditorScroll(dom.editorEl);
-        }
 
-        const suffix = normalizedNextText.slice(prefixLen);
-        const typeBaseMs = hasPlayedOnce ? NEXT_PASS_TYPE_BASE_MS : FIRST_PASS_TYPE_BASE_MS;
-        for (let i = 0; i < suffix.length; i += 1) {
+            const suffix = normalizedNextText.slice(prefixLen);
+            const typeBaseMs = hasPlayedOnce ? NEXT_PASS_TYPE_BASE_MS : FIRST_PASS_TYPE_BASE_MS;
+            for (let i = 0; i < suffix.length; i += 1) {
+                if (disposed) return;
+                typedText += suffix[i];
+                dom.textEl.textContent = typedText;
+                syncEditorScroll(dom.editorEl);
+                await delay(resolveTypingDelayMs(suffix[i], typeBaseMs));
+            }
+            if (!suffix.length) {
+                await delay(80);
+            }
+
+            currentRawText = normalizedNextText;
+            dom.root.classList.add('is-tokenized');
+            await delay(TYPE_SETTLE_MS);
             if (disposed) return;
-            typedText += suffix[i];
-            dom.textEl.textContent = typedText;
+
+            dom.textEl.classList.add('is-tokenized');
+            inlineChipElements = renderInlinePromptTokens(dom.textEl, entries, colorState, promptTokenStrip);
             syncEditorScroll(dom.editorEl);
-            await delay(resolveTypingDelayMs(suffix[i], typeBaseMs));
+
+            await nextFrame();
+            if (disposed) return;
+
+            inlineChipElements.forEach((chip) => {
+                chip.classList.add('is-visible');
+            });
+
+            const tokenizeTailMs = TOKENIZE_IN_PLACE_DURATION_MS
+                + TOKENIZE_STAGGER_MS * Math.max(0, inlineChipElements.length - 1);
+            await delay(tokenizeTailMs);
+            if (disposed) return;
+
+            await delay(TOKENIZE_HOLD_MS);
+            if (disposed) return;
         }
-        if (!suffix.length) {
-            await delay(80);
-        }
-
-        currentRawText = normalizedNextText;
-        dom.root.classList.add('is-tokenized');
-        await delay(TYPE_SETTLE_MS);
-        if (disposed) return;
-
-        dom.textEl.classList.add('is-tokenized');
-        const inlineChipElements = renderInlinePromptTokens(dom.textEl, entries, colorState, promptTokenStrip);
-        syncEditorScroll(dom.editorEl);
-
-        await nextFrame();
-        if (disposed) return;
-
-        inlineChipElements.forEach((chip) => {
-            chip.classList.add('is-visible');
-        });
-
-        const tokenizeTailMs = TOKENIZE_IN_PLACE_DURATION_MS
-            + TOKENIZE_STAGGER_MS * Math.max(0, inlineChipElements.length - 1);
-        await delay(tokenizeTailMs);
-        if (disposed) return;
-
-        await delay(TOKENIZE_HOLD_MS);
-        if (disposed) return;
 
         const overlayEntries = entries.map((entry, idx) => {
             const sourceEl = inlineChipElements[idx] || null;
@@ -755,14 +825,13 @@ export function initPassIntroOverlay({ activationSource, promptTokenStrip } = {}
 
         await animateHandoffToPromptStrip({
             chips,
-            targets,
-            onCommit: () => {
-                document.body.dataset.passIntroCommitted = 'true';
-                if (typeof onHandoffCommit === 'function') {
-                    onHandoffCommit();
-                }
-            }
+            targets
         });
+        dom.tokenLayer.innerHTML = '';
+        document.body.dataset.passIntroCommitted = 'true';
+        if (typeof onHandoffCommit === 'function') {
+            onHandoffCommit();
+        }
         await delay(40);
         if (disposed) return;
         if (typeof onBeforeHide === 'function') {
@@ -771,10 +840,11 @@ export function initPassIntroOverlay({ activationSource, promptTokenStrip } = {}
         if (disposed) return;
 
         hasPlayedOnce = true;
+        currentTokenCount = entries.length;
         hideOverlay();
     };
 
-        const dispose = () => {
+    const dispose = () => {
         if (disposed) return;
         disposed = true;
         hideOverlay({ immediate: true });

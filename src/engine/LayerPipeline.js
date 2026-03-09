@@ -474,8 +474,8 @@ export class LayerPipeline extends EventTarget {
     }
 
     /** Play the one-shot startup camera intro before the first pass begins. */
-    playStartupCameraIntro({ holdMs = 1000, transitionMs = 1400 } = {}) {
-        return this._autoCamera?.playStartupCameraIntro?.({ holdMs, transitionMs }) ?? Promise.resolve(false);
+    playStartupCameraIntro({ holdMs = 1000, transitionMs = 1400, replay = false } = {}) {
+        return this._autoCamera?.playStartupCameraIntro?.({ holdMs, transitionMs, replay }) ?? Promise.resolve(false);
     }
 
     /** Apply a horizontal screen-space shift (in pixels) to re-center the view. */

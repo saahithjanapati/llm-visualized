@@ -325,12 +325,13 @@ export class AutoCameraController {
 
     playStartupCameraIntro({
         holdMs = STARTUP_CAMERA_INTRO_HOLD_MS_DEFAULT,
-        transitionMs = STARTUP_CAMERA_INTRO_TRANSITION_MS_DEFAULT
+        transitionMs = STARTUP_CAMERA_INTRO_TRANSITION_MS_DEFAULT,
+        replay = false
     } = {}) {
         if (this._startupCameraIntroActive && this._startupCameraIntroPromise) {
             return this._startupCameraIntroPromise;
         }
-        if (this._startupCameraIntroPlayed || !this._autoCameraFollow) {
+        if ((this._startupCameraIntroPlayed && !replay) || !this._autoCameraFollow) {
             return Promise.resolve(false);
         }
 
