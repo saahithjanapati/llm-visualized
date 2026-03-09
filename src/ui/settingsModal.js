@@ -95,7 +95,10 @@ export function initSettingsModal(pipeline) {
         });
     }
 
-    initTouchClickFallback(settingsModal, { selector: 'button, .toggle-row' });
+    initTouchClickFallback(settingsModal, {
+        selector: 'button, .toggle-row',
+        activateOnPointerDownSelector: '#settingsClose'
+    });
 
     appState.autoCameraFollow = getPreference('autoCameraFollow', true);
     appState.showCameraDebug = getPreference('showCameraDebug', false);
@@ -446,6 +449,11 @@ export function initSettingsModal(pipeline) {
         setPreference('devMode', appState.devMode);
         pipeline?.setDevMode?.(appState.devMode);
         pipeline?.engine?.setDevMode?.(appState.devMode);
+        if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+            window.dispatchEvent(new CustomEvent('selectionPanelDevModeChanged', {
+                detail: { enabled: appState.devMode }
+            }));
+        }
     });
 
     const perfToggle = document.getElementById('togglePerfOverlay');

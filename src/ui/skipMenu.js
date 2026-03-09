@@ -49,7 +49,8 @@ export function initSkipMenu(pipeline) {
     if (!menu || !toggle || !items) return () => {};
     const modalTouchCleanup = initTouchClickFallback(modal, {
         selector: '.skip-option, #skipOptionsClose',
-        tapSlopPx: 20
+        tapSlopPx: 20,
+        activateOnPointerDownSelector: '#skipOptionsClose'
     });
 
     let rafId = null;

@@ -115,15 +115,15 @@
                         </div>
                         <div class="detail-info-preview__grid">
                             <div class="detail-info-preview__cell">
-                                <span class="detail-info-preview__cell-label">Stores</span>
+                                <span id="detailInfoPreviewCellStoreLabel" class="detail-info-preview__cell-label">Stores</span>
                                 <span id="detailInfoPreviewCellStore" class="detail-info-preview__cell-value">Keys and values for prior tokens</span>
                             </div>
                             <div class="detail-info-preview__cell">
-                                <span class="detail-info-preview__cell-label">Current pass</span>
+                                <span id="detailInfoPreviewCellPassLabel" class="detail-info-preview__cell-label">Current pass</span>
                                 <span id="detailInfoPreviewCellPass" class="detail-info-preview__cell-value">Build the prompt cache</span>
                             </div>
                             <div class="detail-info-preview__cell">
-                                <span class="detail-info-preview__cell-label">Why faster</span>
+                                <span id="detailInfoPreviewCellBenefitLabel" class="detail-info-preview__cell-label">Why faster</span>
                                 <span id="detailInfoPreviewCellBenefit" class="detail-info-preview__cell-value">Avoids recomputing the full prefix every token</span>
                             </div>
                         </div>
@@ -241,6 +241,10 @@
                 </div>
             </div>
             <div id="detailDescription" class="detail-description"></div>
+            <div id="detailDataSection" class="detail-data" style="display:none;">
+                <div id="detailDataTitle" class="detail-data-title">Vector sampling</div>
+                <pre id="detailData" class="detail-data-values"></pre>
+            </div>
             <div class="detail-copy-context">
                 <button id="detailCopyContextBtn" class="detail-copy-context-btn" type="button">
                     <span class="detail-copy-context-icon" aria-hidden="true">
@@ -266,11 +270,19 @@
         <div class="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
             <div class="settings-header">
                 <div id="settingsTitle" class="settings-title">Settings</div>
-                <button id="settingsClose" aria-label="Close settings">×</button>
+                <button id="settingsClose" type="button" aria-label="Close settings">×</button>
             </div>
             <div class="settings-content">
                 <div class="settings-section">
                     <label class="section-label">Interaction</label>
+                    <label class="toggle-row">
+                        <span class="toggle-copy">
+                            <span class="toggle-text">Enable dev mode</span>
+                            <span class="toggle-description">Shows developer diagnostics like vector sampling indices in the selection panel and enables dev tooling.</span>
+                        </span>
+                        <input id="toggleDevMode" type="checkbox">
+                        <span class="toggle-track" aria-hidden="true"></span>
+                    </label>
                     <label class="toggle-row">
                         <span class="toggle-copy">
                             <span class="toggle-text">Enable hover labels (raycasting)</span>
@@ -408,11 +420,6 @@
                     <label class="toggle-row">
                         <span class="toggle-text">Show perf overlay</span>
                         <input id="togglePerfOverlay" type="checkbox">
-                        <span class="toggle-track" aria-hidden="true"></span>
-                    </label>
-                    <label class="toggle-row">
-                        <span class="toggle-text">Dev mode (performance overlays)</span>
-                        <input id="toggleDevMode" type="checkbox">
                         <span class="toggle-track" aria-hidden="true"></span>
                     </label>
                 </div>

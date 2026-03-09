@@ -40,11 +40,24 @@ const resolveActivationTarget = (target) => {
     return target;
 };
 
-export function initTouchClickFallback(container, { selector = 'button', tapSlopPx = DEFAULT_TAP_SLOP_PX } = {}) {
+export function initTouchClickFallback(
+    container,
+    {
+        selector = 'button',
+        tapSlopPx = DEFAULT_TAP_SLOP_PX,
+        activateOnPointerDownSelector = null
+    } = {}
+) {
     if (!container) return () => {};
 
     let active = null;
     const pendingClicks = [];
+    const shouldActivateOnPointerDown = (target) => (
+        !!activateOnPointerDownSelector
+        && !!target
+        && typeof target.matches === 'function'
+        && target.matches(activateOnPointerDownSelector)
+    );
 
     const getPointerId = (event) => (Number.isFinite(event?.pointerId) ? event.pointerId : null);
 
@@ -77,6 +90,17 @@ export function initTouchClickFallback(container, { selector = 'button', tapSlop
         if (!isTouchLikeEvent(event)) return;
         const target = resolveClosestTarget(container, event, selector);
         if (!target || isElementDisabled(target)) return;
+        if (shouldActivateOnPointerDown(target)) {
+            active = null;
+            registerPendingClick(target);
+            const activationTarget = resolveActivationTarget(target);
+            if (event.cancelable) event.preventDefault();
+            event.stopPropagation();
+            if (activationTarget && typeof activationTarget.click === 'function') {
+                activationTarget.click();
+            }
+            return;
+        }
         const startX = Number.isFinite(event.clientX) ? event.clientX : 0;
         const startY = Number.isFinite(event.clientY) ? event.clientY : 0;
         active = {

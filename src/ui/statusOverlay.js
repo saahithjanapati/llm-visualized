@@ -20,6 +20,7 @@ import {
     KV_CACHE_INFO_REQUEST_EVENT,
     buildKvCacheOverlayBadgeText,
 } from './kvCacheInfoUtils.js';
+import { MHSA_INFO_REQUEST_EVENT } from './mhsaInfoUtils.js';
 
 // Initializes status overlay and equations panel updates.
 export function initStatusOverlay(pipeline, NUM_LAYERS) {
@@ -411,6 +412,47 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
             scheduleEquationFit();
         }
     }
+
+    const clearStatusText = () => {
+        if (!statusTextEl) return;
+        while (statusTextEl.firstChild) {
+            statusTextEl.removeChild(statusTextEl.firstChild);
+        }
+    };
+
+    const appendStatusLine = (text, { interactive = false } = {}) => {
+        if (!statusTextEl || typeof document === 'undefined') return;
+        const safeText = String(text || '').trim();
+        if (!safeText) return;
+        if (interactive) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'status-overlay__interactive-stage';
+            button.textContent = safeText;
+            button.setAttribute('aria-label', `Open ${safeText} details`);
+            button.addEventListener('click', () => {
+                if (typeof window === 'undefined') return;
+                window.dispatchEvent(new CustomEvent(MHSA_INFO_REQUEST_EVENT));
+            });
+            statusTextEl.appendChild(button);
+            return;
+        }
+        const lineEl = document.createElement('span');
+        lineEl.className = 'status-overlay__line';
+        lineEl.textContent = safeText;
+        statusTextEl.appendChild(lineEl);
+    };
+
+    const renderStatusText = ({ headerLine = '', stageLine = '' } = {}) => {
+        if (!statusTextEl) return;
+        clearStatusText();
+        if (headerLine) appendStatusLine(headerLine);
+        if (stageLine) {
+            appendStatusLine(stageLine, {
+                interactive: stageLine === 'Multi-Head Self-Attention'
+            });
+        }
+    };
 
     appState.lastEqKey = '';
     appState.lastEqSignature = '';
@@ -888,7 +930,10 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
 
         lastStatusText = nextStatusKey;
         if (statusTextEl) {
-            statusTextEl.textContent = nextStatusText;
+            renderStatusText({
+                headerLine,
+                stageLine: showStageLine ? displayStage : ''
+            });
         } else {
             statusDiv.textContent = nextStatusText;
         }

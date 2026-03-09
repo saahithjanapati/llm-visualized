@@ -28,7 +28,6 @@ import {
     isLayerNormLabel,
     isLayerNormSolidSelection,
     isLogitBarSelection,
-    isParameterSelection,
     isQkvMatrixLabel,
     isResidualVectorSelection,
     isSelfAttentionSelection,
@@ -66,13 +65,11 @@ import {
     setDescriptionContent
 } from './selectionPanelCopyUtils.js';
 import {
-    formatActivationData,
     formatAttentionSubtitleTokenPart,
     formatTokenLabelForPreview,
-    formatTokenWithIndex,
-    formatValues,
     normalizeAttentionValuePart
 } from './selectionPanelFormatUtils.js';
+import { resolveSelectionVectorSamplingData } from './selectionPanelVectorSamplingUtils.js';
 import { buildSelectionPromptContext } from './selectionPanelPromptContextUtils.js';
 import { buildSelectionChatPrompt } from './selectionPanelChatPromptUtils.js';
 import {
@@ -80,6 +77,7 @@ import {
     isKvCacheInfoSelection,
     normalizeKvCachePhase
 } from './kvCacheInfoUtils.js';
+import { isMhsaInfoSelection } from './mhsaInfoUtils.js';
 import {
     applyMaterialSnapshot,
     copyInstancedVectorColorsToPreview,
@@ -215,7 +213,9 @@ const LAYERNORM_PANEL_ACTION_OPEN = 'open-layernorm';
 const LAYERNORM_PARAM_PANEL_ACTION_OPEN = 'open-layernorm-param';
 const QKV_SOURCE_VECTOR_PANEL_ACTION_OPEN = 'open-qkv-source-vector';
 const QKV_WEIGHT_MATRIX_PANEL_ACTION_OPEN = 'open-qkv-weight-matrix';
+const ATTENTION_HEAD_COUNT = Math.max(1, Math.round(D_MODEL / D_HEAD));
 const ATTENTION_SCORE_PREVIEW_DECIMALS = 4;
+const SELECTION_PANEL_DEV_MODE_EVENT = 'selectionPanelDevModeChanged';
 let tokenChipFont = null;
 let tokenChipFontPromise = null;
 
@@ -2425,12 +2425,16 @@ class SelectionPanel {
         this.infoPreviewStepPrefill = document.getElementById('detailInfoPreviewStepPrefill');
         this.infoPreviewStepCache = document.getElementById('detailInfoPreviewStepCache');
         this.infoPreviewStepDecode = document.getElementById('detailInfoPreviewStepDecode');
+        this.infoPreviewCellStoreLabel = document.getElementById('detailInfoPreviewCellStoreLabel');
+        this.infoPreviewCellPassLabel = document.getElementById('detailInfoPreviewCellPassLabel');
+        this.infoPreviewCellBenefitLabel = document.getElementById('detailInfoPreviewCellBenefitLabel');
         this.infoPreviewCellStore = document.getElementById('detailInfoPreviewCellStore');
         this.infoPreviewCellPass = document.getElementById('detailInfoPreviewCellPass');
         this.infoPreviewCellBenefit = document.getElementById('detailInfoPreviewCellBenefit');
         this.description = document.getElementById('detailDescription');
         this.equationsSection = document.getElementById('detailEquations');
         this.equationsBody = document.getElementById('detailEquationsBody');
+        this.dataTitle = document.getElementById('detailDataTitle');
         this.dataEl = document.getElementById('detailData');
         this.dataSection = document.getElementById('detailDataSection');
         this.attentionRoot = document.getElementById('detailAttention');
@@ -2599,6 +2603,7 @@ class SelectionPanel {
         this._applySelectionEquationFit = this._applySelectionEquationFit.bind(this);
         this._scheduleDimensionLabelFit = this._scheduleDimensionLabelFit.bind(this);
         this._applyDimensionLabelFit = this._applyDimensionLabelFit.bind(this);
+        this._onDevModeChanged = this._onDevModeChanged.bind(this);
 
         this.activationSource = options.activationSource || null;
         this.laneTokenIndices = Array.isArray(options.laneTokenIndices) ? options.laneTokenIndices.slice() : null;
@@ -2710,6 +2715,7 @@ class SelectionPanel {
         }
         document.addEventListener('keydown', this._onKeydown);
         document.addEventListener('pointerdown', this._onDocumentPointerDown, { capture: true });
+        window.addEventListener(SELECTION_PANEL_DEV_MODE_EVENT, this._onDevModeChanged);
         this._touchClickCleanup = initTouchClickFallback(this.panel, {
             selector: '.toggle-row, .detail-token-nav-chip[data-token-nav="true"], .detail-history-btn, .detail-description-action-link, .detail-copy-context-btn, .detail-attention-score-link[data-attention-score-link="true"]'
         });
@@ -2783,6 +2789,11 @@ class SelectionPanel {
             }
             this._applyDimensionLabelFit();
         });
+    }
+
+    _onDevModeChanged() {
+        if (!this.isOpen || !this._lastSelection) return;
+        this.showSelection(this._lastSelection, { fromHistory: true });
     }
 
     _setCopyContextButtonLabel(text) {
@@ -7175,13 +7186,42 @@ class SelectionPanel {
     }
 
     _setInfoPreview(config = null) {
-        const showKvCacheInfo = config?.type === 'kvCache';
-        this.panel?.classList.toggle('is-info-preview', showKvCacheInfo);
+        const infoType = (config?.type === 'kvCache' || config?.type === 'mhsa')
+            ? config.type
+            : null;
+        const showInfoPreview = !!infoType;
+        this.panel?.classList.toggle('is-info-preview', showInfoPreview);
         if (!this.infoPreview) return;
 
-        this.infoPreview.hidden = !showKvCacheInfo;
-        this.infoPreview.setAttribute('aria-hidden', showKvCacheInfo ? 'false' : 'true');
-        if (!showKvCacheInfo) return;
+        this.infoPreview.hidden = !showInfoPreview;
+        this.infoPreview.setAttribute('aria-hidden', showInfoPreview ? 'false' : 'true');
+        if (!showInfoPreview) return;
+
+        const setText = (element, value) => {
+            if (element) element.textContent = value;
+        };
+        const setStep = (element, label, active = false) => {
+            if (!element) return;
+            element.textContent = label;
+            element.dataset.active = active ? 'true' : 'false';
+        };
+
+        if (infoType === 'mhsa') {
+            setText(this.infoPreviewEyebrow, 'Attention mechanism');
+            setText(this.infoPreviewTitle, 'Multi-Head Self-Attention');
+            setText(this.infoPreviewSummary, 'Each token scores the visible context and mixes the resulting value vectors into one attention update per head.');
+            setText(this.infoPreviewPhase, 'QK^T -> softmax -> V');
+            setStep(this.infoPreviewStepPrefill, 'Q / K / V', true);
+            setStep(this.infoPreviewStepCache, 'Score', true);
+            setStep(this.infoPreviewStepDecode, 'Mix', true);
+            setText(this.infoPreviewCellStoreLabel, 'Each head');
+            setText(this.infoPreviewCellPassLabel, 'What it computes');
+            setText(this.infoPreviewCellBenefitLabel, 'Why multi-head');
+            setText(this.infoPreviewCellStore, 'Projects the same token state into its own query, key, and value space.');
+            setText(this.infoPreviewCellPass, 'Compares queries against keys, applies softmax to get read weights, and uses those weights to blend value vectors.');
+            setText(this.infoPreviewCellBenefit, 'Different heads can focus on different token relationships before their outputs are concatenated and projected back.');
+            return;
+        }
 
         const phase = normalizeKvCachePhase(config?.phase);
         const phaseLabel = formatKvCachePhaseLabel(phase);
@@ -7190,20 +7230,24 @@ class SelectionPanel {
             : 'Compute the prompt once and write its cache entries'
             ;
 
-        if (this.infoPreviewEyebrow) this.infoPreviewEyebrow.textContent = 'Transformer inference';
-        if (this.infoPreviewTitle) this.infoPreviewTitle.textContent = 'KV Cache';
-        if (this.infoPreviewSummary) {
-            this.infoPreviewSummary.textContent = phase === 'decode'
+        setText(this.infoPreviewEyebrow, 'Transformer inference');
+        setText(this.infoPreviewTitle, 'KV Cache');
+        setText(
+            this.infoPreviewSummary,
+            phase === 'decode'
                 ? 'Reuse the cached prefix and compute fresh attention work only for the newest token.'
-                : 'Build the prompt cache once so later decode steps can reuse it.';
-        }
-        if (this.infoPreviewPhase) this.infoPreviewPhase.textContent = phaseLabel;
-        if (this.infoPreviewCellStore) this.infoPreviewCellStore.textContent = 'Keys + values from earlier tokens';
-        if (this.infoPreviewCellPass) this.infoPreviewCellPass.textContent = passCopy;
-        if (this.infoPreviewCellBenefit) this.infoPreviewCellBenefit.textContent = 'Avoid recomputing the full prefix each step';
-        if (this.infoPreviewStepPrefill) this.infoPreviewStepPrefill.dataset.active = phase === 'prefill' ? 'true' : 'false';
-        if (this.infoPreviewStepCache) this.infoPreviewStepCache.dataset.active = 'true';
-        if (this.infoPreviewStepDecode) this.infoPreviewStepDecode.dataset.active = phase === 'decode' ? 'true' : 'false';
+                : 'Build the prompt cache once so later decode steps can reuse it.'
+        );
+        setText(this.infoPreviewPhase, phaseLabel);
+        setStep(this.infoPreviewStepPrefill, 'Pre-fill', phase === 'prefill');
+        setStep(this.infoPreviewStepCache, 'Reuse cache', true);
+        setStep(this.infoPreviewStepDecode, 'Decode', phase === 'decode');
+        setText(this.infoPreviewCellStoreLabel, 'Stores');
+        setText(this.infoPreviewCellPassLabel, 'Current pass');
+        setText(this.infoPreviewCellBenefitLabel, 'Why faster');
+        setText(this.infoPreviewCellStore, 'Keys + values from earlier tokens');
+        setText(this.infoPreviewCellPass, passCopy);
+        setText(this.infoPreviewCellBenefit, 'Avoid recomputing the full prefix each step');
     }
 
     open() {
@@ -7823,14 +7867,19 @@ class SelectionPanel {
         const displayLabel = simplifyLayerNormParamDisplayLabel(label, selection);
         const lower = label.toLowerCase();
         const isKvCacheInfo = isKvCacheInfoSelection(label, selection);
+        const isMhsaInfo = isMhsaInfoSelection(label, selection);
         const kvCachePhase = isKvCacheInfo
             ? normalizeKvCachePhase(findUserDataString(selection, 'kvCachePhase'))
             : 'prefill';
         const kvCachePhaseLabel = isKvCacheInfo
             ? (findUserDataString(selection, 'kvCachePhaseLabel') || formatKvCachePhaseLabel(kvCachePhase))
             : '';
-        const hidePreviewForSelection = isKvCacheInfo;
-        const previewSelectionKey = hidePreviewForSelection ? null : buildSelectionPreviewKey(label, selection);
+        const infoPreviewConfig = isKvCacheInfo
+            ? { type: 'kvCache', phase: kvCachePhase }
+            : null;
+        const hidePreviewForSelection = isKvCacheInfo || isMhsaInfo;
+        const suppressScenePreview = hidePreviewForSelection;
+        const previewSelectionKey = suppressScenePreview ? null : buildSelectionPreviewKey(label, selection);
         const metadata = resolveMetadata(label, selection.kind, selection);
         const logitHeader = resolveLogitSelectionHeader(label, selection);
         const vectorSubtitleMetadata = this._resolveVectorTokenPosition(selection, label);
@@ -7849,12 +7898,14 @@ class SelectionPanel {
             || lower.includes('position embedding')
             || lower.includes('positional embedding')
             || activationStage.startsWith('embedding.position');
-        this._setInfoPreview(null);
+        this._setInfoPreview(infoPreviewConfig);
         this.panel.classList.toggle('is-preview-hidden', hidePreviewForSelection);
         if (logitHeader) {
             this._setTitleText(logitHeader.title);
         } else if (isKvCacheInfo) {
             this._setTitleText('KV Cache');
+        } else if (isMhsaInfo) {
+            this._setTitleText('Multi-Head Self-Attention');
         } else if (isTokenChipSelection) {
             const tokenText = (typeof vectorSubtitleMetadata?.tokenDisplayText === 'string')
                 ? vectorSubtitleMetadata.tokenDisplayText.trim()
@@ -7880,6 +7931,9 @@ class SelectionPanel {
                 this.subtitle.textContent = kvCachePhase === 'decode'
                     ? 'Enabled • Single-token decode pass'
                     : 'Enabled • Prompt pre-fill pass';
+            } else if (isMhsaInfo) {
+                this.subtitle.classList.remove('detail-subtitle--qkv-token-context');
+                this.subtitle.textContent = `Scaled dot-product attention across ${ATTENTION_HEAD_COUNT} heads`;
             } else if (isTokenChipSelection) {
                 const subtitleParts = [];
                 const tokenId = Number.isFinite(vectorSubtitleMetadata?.tokenId)
@@ -7976,6 +8030,8 @@ class SelectionPanel {
                 this._setSubtitleSecondaryText(subtitleSecondaryOverride);
             } else if (isKvCacheInfo) {
                 this._setSubtitleSecondaryText(`Current phase: ${kvCachePhaseLabel}`);
+            } else if (isMhsaInfo) {
+                this._setSubtitleSecondaryText('QK^T -> softmax -> V');
             } else if (logitHeader) {
                 this._setSubtitleSecondaryText('');
             } else if (isPositionEmbeddingSelection) {
@@ -8005,7 +8061,8 @@ class SelectionPanel {
             || isLogitTokenSelection
             || isTokenOrPositionChipSelection
             || isChosenTokenSelection
-            || isKvCacheInfo;
+            || isKvCacheInfo
+            || isMhsaInfo;
         const isVectorMetadata = isLikelyVectorSelection(label, selection) || isTokenOrPositionChipSelection;
         const dimsRow = this.inputDim?.closest('.detail-row')
             || this.outputDim?.closest('.detail-row')
@@ -8056,14 +8113,25 @@ class SelectionPanel {
         } else {
             this._currentSelectionEquations = resolveSelectionEquations(label, descriptionSelection) || '';
         }
-        const isParam = isParameterSelection(label);
+        const vectorSamplingData = (appState.devMode && !hideLayerNormFields && !isKvCacheInfo && !isMhsaInfo)
+            ? resolveSelectionVectorSamplingData({
+                label,
+                selectionInfo: selection,
+                activationSource: this.activationSource,
+                fallbackValues: extractPreviewVectorData(selection)
+            })
+            : null;
+        const showVectorSampling = !!vectorSamplingData;
         if (this.dataSection) {
-            this.dataSection.style.display = (isParam || hideLayerNormFields || isKvCacheInfo) ? 'none' : '';
+            this.dataSection.style.display = showVectorSampling ? '' : 'none';
         }
-        if (this.dataEl && (isParam || hideLayerNormFields || isKvCacheInfo)) this.dataEl.textContent = '';
+        if (this.dataTitle) {
+            this.dataTitle.textContent = vectorSamplingData?.title || 'Vector sampling';
+        }
+        if (this.dataEl && !showVectorSampling) this.dataEl.textContent = '';
         if (this.metaSection) {
             const rows = Array.from(this.metaSection.querySelectorAll('.detail-row, .detail-token-info'));
-            const hasVisibleRow = !isKvCacheInfo && rows.some(row => row.style.display !== 'none');
+            const hasVisibleRow = !isKvCacheInfo && !isMhsaInfo && rows.some(row => row.style.display !== 'none');
             this.metaSection.style.display = hasVisibleRow ? '' : 'none';
         }
         if (this.metaSection && this.attentionRoot && this.panel) {
@@ -8075,14 +8143,8 @@ class SelectionPanel {
                 this.panel.insertBefore(this.metaSection, this.dataSection);
             }
         }
-        if (this.dataEl) {
-            const activationData = (selection.object && selection.object.userData && selection.object.userData.activationData)
-                || (selection.info && selection.info.activationData)
-                || (selection.hit && selection.hit.object && selection.hit.object.userData && selection.hit.object.userData.activationData)
-                || null;
-            if (!isParam && !hideLayerNormFields) {
-                this.dataEl.textContent = formatActivationData(activationData);
-            }
+        if (this.dataEl && showVectorSampling) {
+            this.dataEl.textContent = vectorSamplingData.text;
         }
         this._updateVectorLegend(selection);
 
@@ -8103,7 +8165,7 @@ class SelectionPanel {
 
         const preview = shouldReusePreview
             ? null
-            : (hidePreviewForSelection ? null : resolvePreviewObject(label, selection, this.engine));
+            : (suppressScenePreview ? null : resolvePreviewObject(label, selection, this.engine));
         if (!shouldReusePreview && preview?.object) {
             const previewRoot = new THREE.Group();
             previewRoot.add(preview.object);

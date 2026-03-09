@@ -16,6 +16,7 @@ import {
     isKvCacheInfoSelection,
     normalizeKvCachePhase
 } from './kvCacheInfoUtils.js';
+import { isMhsaInfoSelection } from './mhsaInfoUtils.js';
 import {
     findUserDataNumber,
     findUserDataString,
@@ -904,6 +905,12 @@ const ATTENTION_GENERIC_DESCRIPTION = joinParagraphs(
     'The Q, K, and V matrix multiplications determine what each attention head measures and what content it can pass forward, so different attention heads can learn different lookup patterns and different kinds of token-to-token interactions.'
 );
 
+const MHSA_INFO_DESCRIPTION = joinParagraphs(
+    `Multi-head self-attention lets each token project its current state into queries, keys, and values, compare ${inlineMath('QK^\\top')} inside each head, and turn those scores into read weights with ${inlineMath('\\mathrm{softmax}(\\cdot)')}.`,
+    `Those weights decide how much of every source token's value vector should be mixed into the output for the current token. GPT-2 runs ${GPT2_NUM_HEADS_TEXT} heads in parallel, so the same token can look for different patterns and relationships at once.`,
+    `After that, the head outputs are concatenated and projected back to model width. In short: queries decide what to look for, keys decide where it matches, and values carry the content that gets passed forward.`
+);
+
 function buildAttentionScoreGenericDescription(selectionInfo = null) {
     const headRef = buildSelectionHeadReference(selectionInfo);
     const linkedVectors = buildAttentionScoreLinkedVectorReferences(selectionInfo);
@@ -1201,6 +1208,10 @@ function buildSelectionEquationEntries(label, selectionInfo = null) {
         return buildEquationEntries([combinedEq], [0]);
     };
 
+    if (isMhsaInfoSelection(label, selectionInfo)) {
+        return buildEquationEntries([attentionEquation, concatEq, outputProjectionEq], [0, 1, 2]);
+    }
+
     if (isKvCacheInfoSelection(label, selectionInfo)) {
         const phase = resolveKvCacheInfoPhase(selectionInfo);
         return phase === 'decode'
@@ -1384,6 +1395,10 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
     const activation = getActivationDataFromSelection(selectionInfo);
     const stage = activation?.stage || '';
     const stageLower = stage.toLowerCase();
+
+    if (isMhsaInfoSelection(label, selectionInfo)) {
+        return MHSA_INFO_DESCRIPTION;
+    }
 
     if (isKvCacheInfoSelection(label, selectionInfo)) {
         return buildKvCacheInfoDescription(selectionInfo);

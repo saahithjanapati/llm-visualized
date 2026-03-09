@@ -26,6 +26,10 @@ import {
     KV_CACHE_INFO_REQUEST_EVENT,
     buildKvCacheInfoSelection
 } from '../../ui/kvCacheInfoUtils.js';
+import {
+    MHSA_INFO_REQUEST_EVENT,
+    buildMhsaInfoSelection
+} from '../../ui/mhsaInfoUtils.js';
 import { initSelectionPanel } from '../../ui/selectionPanel.js';
 import { initPromptTokenStrip } from '../../ui/promptTokenStrip.js';
 import { loadActivationState } from './activation.js';
@@ -221,6 +225,16 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
     };
     window.__llmVisualizedKvCacheInfoListener = handleKvCacheInfoRequest;
     window.addEventListener(KV_CACHE_INFO_REQUEST_EVENT, handleKvCacheInfoRequest);
+
+    const previousMhsaInfoListener = window.__llmVisualizedMhsaInfoListener;
+    if (typeof previousMhsaInfoListener === 'function') {
+        window.removeEventListener(MHSA_INFO_REQUEST_EVENT, previousMhsaInfoListener);
+    }
+    const handleMhsaInfoRequest = () => {
+        selectionPanel.handleSelection(buildMhsaInfoSelection());
+    };
+    window.__llmVisualizedMhsaInfoListener = handleMhsaInfoRequest;
+    window.addEventListener(MHSA_INFO_REQUEST_EVENT, handleMhsaInfoRequest);
 }
 
 const findSelectionObjectByLabel = (label) => {
