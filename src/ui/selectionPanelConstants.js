@@ -96,7 +96,8 @@ export const TOKEN_CHIP_STYLE = Object.freeze({
     depth: 12,
     textDepth: 16,
     textSize: 52,
-    textOffset: 1.2
+    textOffset: 1.2,
+    secondaryTextColor: 0xebe7df
 });
 export const LOGIT_PREVIEW_TEXT_STYLE = Object.freeze({
     size: 360,

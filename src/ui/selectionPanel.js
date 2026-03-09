@@ -1084,6 +1084,32 @@ function getLaneZoomMultiplier(object) {
     return 1 + extra;
 }
 
+function resolveSelectionPreviewFitOptions(label, selectionInfo, previewRoot, previewView = null, isSmallScreen = false) {
+    const isVectorPreview = isLikelyVectorSelection(label, selectionInfo);
+    const isQkvMatrixPreview = isQkvMatrixLabel(label);
+    const isOutputProjPreview = label.toLowerCase().includes('output projection matrix');
+    const paddingMultiplier = isVectorPreview
+        ? PREVIEW_VECTOR_PADDING_MULT
+        : (isQkvMatrixPreview ? 0.75 : (isOutputProjPreview ? 0.85 : 1));
+    const distanceMultiplier = isVectorPreview
+        ? PREVIEW_VECTOR_DISTANCE_MULT
+        : (isQkvMatrixPreview ? 0.85 : (isOutputProjPreview ? 0.8 : 1));
+    const laneZoom = getLaneZoomMultiplier(previewRoot);
+    const isMatrixPreview = isWeightMatrixLabel(label) || isOutputProjPreview;
+    const matrixPaddingBoost = (isSmallScreen && isMatrixPreview) ? PREVIEW_MOBILE_MATRIX_PADDING_MULT : 1;
+    const matrixDistanceBoost = (isSmallScreen && isMatrixPreview) ? PREVIEW_MOBILE_MATRIX_DISTANCE_MULT : 1;
+    const viewPaddingBoost = Number.isFinite(previewView?.fitPaddingMultiplier)
+        ? previewView.fitPaddingMultiplier
+        : 1;
+    const viewDistanceBoost = Number.isFinite(previewView?.fitDistanceMultiplier)
+        ? previewView.fitDistanceMultiplier
+        : 1;
+    return {
+        paddingMultiplier: paddingMultiplier * laneZoom * matrixPaddingBoost * viewPaddingBoost,
+        distanceMultiplier: distanceMultiplier * laneZoom * matrixDistanceBoost * viewDistanceBoost
+    };
+}
+
 function resolveMetadata(label, kind = null, selectionInfo = null) {
     const lower = (label || '').toLowerCase();
     if (lower.startsWith('token:') || lower.startsWith('position:')) {
@@ -2032,8 +2058,8 @@ function buildAttentionSpherePreview(selectionInfo) {
     return {
         object: mesh,
         view: {
-            fitDistanceMultiplier: 1.35,
-            fitPaddingMultiplier: 1.08
+            fitDistanceMultiplier: 1.22,
+            fitPaddingMultiplier: 1.04
         },
         dispose: () => {
             geometry.dispose();
@@ -8005,24 +8031,15 @@ class SelectionPanel {
                 this.currentPreview.rotation.set(0, 0, 0);
             }
             this._lastFrameTime = performance.now();
-            const isVectorPreview = isLikelyVectorSelection(label, selection);
-            const isQkvMatrixPreview = isQkvMatrixLabel(label);
-            const isOutputProjPreview = label.toLowerCase().includes('output projection matrix');
-            const paddingMultiplier = isVectorPreview
-                ? PREVIEW_VECTOR_PADDING_MULT
-                : (isQkvMatrixPreview ? 0.75 : (isOutputProjPreview ? 0.85 : 1));
-            const distanceMultiplier = isVectorPreview
-                ? PREVIEW_VECTOR_DISTANCE_MULT
-                : (isQkvMatrixPreview ? 0.85 : (isOutputProjPreview ? 0.8 : 1));
-            const laneZoom = getLaneZoomMultiplier(this.currentPreview);
             const isSmallScreen = this._isSmallScreen();
-            const isMatrixPreview = isWeightMatrixLabel(label) || isOutputProjPreview;
-            const matrixPaddingBoost = (isSmallScreen && isMatrixPreview) ? PREVIEW_MOBILE_MATRIX_PADDING_MULT : 1;
-            const matrixDistanceBoost = (isSmallScreen && isMatrixPreview) ? PREVIEW_MOBILE_MATRIX_DISTANCE_MULT : 1;
-            const finalPadding = paddingMultiplier * laneZoom * matrixPaddingBoost;
-            const finalDistance = distanceMultiplier * laneZoom * matrixDistanceBoost;
             this._rotationSpeedMult = 1;
-            this._lastFitOptions = { paddingMultiplier: finalPadding, distanceMultiplier: finalDistance };
+            this._lastFitOptions = resolveSelectionPreviewFitOptions(
+                label,
+                selection,
+                this.currentPreview,
+                preview.view,
+                isSmallScreen
+            );
             if (!this.isOpen) {
                 this._pendingReveal = true;
                 if (this.canvas) this.canvas.style.opacity = '0';

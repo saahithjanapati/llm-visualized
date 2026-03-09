@@ -158,7 +158,9 @@ const MLP_TRANSITION_PROFILE_DEFAULT = Object.freeze({
     expandRiseMs: 500,
     geluDurationMs: 500,
     geluRiseExtra: 24,
-    geluCurveHeight: 36,
+    geluCurveHeight: 30,
+    geluWaveCycles: 0.5,
+    geluWaveTravelCycles: 0.3,
     geluActivationSwitchT: 0.35,
     geluLiteMode: false,
     maxUpDurationMs: null,
@@ -172,7 +174,9 @@ const MLP_TRANSITION_PROFILE_TOUCH = Object.freeze({
     expandRiseMs: 500,
     geluDurationMs: 500,
     geluRiseExtra: 24,
-    geluCurveHeight: 36,
+    geluCurveHeight: 30,
+    geluWaveCycles: 0.5,
+    geluWaveTravelCycles: 0.3,
     geluActivationSwitchT: 0.35,
     geluLiteMode: false,
     maxUpDurationMs: null,
@@ -2441,6 +2445,8 @@ export default class Gpt2Layer extends BaseLayer {
                         durationMs: mlpProfile.geluDurationMs,
                         riseExtra: mlpProfile.geluRiseExtra,
                         curveHeight: mlpProfile.geluCurveHeight,
+                        waveCycles: mlpProfile.geluWaveCycles,
+                        waveTravelCycles: mlpProfile.geluWaveTravelCycles,
                         activationSwitchT: mlpProfile.geluActivationSwitchT,
                         liteMode: !!mlpProfile.geluLiteMode
                     });
@@ -2463,9 +2469,9 @@ export default class Gpt2Layer extends BaseLayer {
         const segmentVecs = lane.expandedVecSegments;
         const durationMs = Number.isFinite(options.durationMs) ? options.durationMs : 500;
         const riseExtra = Number.isFinite(options.riseExtra) ? options.riseExtra : 24;
-        const waveHeight = Number.isFinite(options.curveHeight) ? options.curveHeight : 36;
-        const waveCycles = Number.isFinite(options.waveCycles) ? options.waveCycles : 1;
-        const waveTravelCycles = Number.isFinite(options.waveTravelCycles) ? options.waveTravelCycles : 0.75;
+        const waveHeight = Number.isFinite(options.curveHeight) ? options.curveHeight : 24;
+        const waveCycles = Number.isFinite(options.waveCycles) ? options.waveCycles : 0.5;
+        const waveTravelCycles = Number.isFinite(options.waveTravelCycles) ? options.waveTravelCycles : 0.3;
         const activationSwitchT = THREE.MathUtils.clamp(
             Number.isFinite(options.activationSwitchT) ? options.activationSwitchT : 0.35,
             0,

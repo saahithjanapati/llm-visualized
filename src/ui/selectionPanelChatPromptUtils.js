@@ -1,10 +1,15 @@
 import visualizationDescriptionMarkdown from '../../vizualization_description.md?raw';
-import { formatLayerNormLabel } from '../utils/layerNormLabels.js';
 import {
     ATTENTION_SCORE_DECIMALS,
     ATTENTION_VALUE_PLACEHOLDER
 } from './selectionPanelConstants.js';
 import { formatTokenLabelForPreview } from './selectionPanelFormatUtils.js';
+import {
+    buildChatPromptInstructionText,
+    buildSelfAttentionColorCueLines,
+    buildVisualizationStateLines,
+    describeSceneStage
+} from './selectionPanelChatPromptStateUtils.js';
 import {
     findUserDataNumber,
     findUserDataString,
@@ -104,64 +109,6 @@ function buildTokenSummary(token = null) {
         parts.push(`token ID ${token.tokenId}`);
     }
     return parts.join(', ');
-}
-
-function describeSceneStage(stage = '', normalizedLabel = '') {
-    const lower = String(stage || '').toLowerCase();
-    if (!lower) {
-        return normalizedLabel
-            ? `The selected object is currently shown as ${normalizedLabel}.`
-            : '';
-    }
-    if (lower === 'embedding.token') {
-        return 'The scene is showing the token lookup result from the vocabulary embedding table.';
-    }
-    if (lower === 'embedding.position') {
-        return 'The scene is showing the learned position vector associated with this token position.';
-    }
-    if (lower === 'embedding.sum') {
-        return 'The scene is showing the initial residual state formed by adding token and position information together.';
-    }
-    if (lower === 'layer.incoming') {
-        return `The selected residual vector is entering a transformer block before ${formatLayerNormLabel('ln1')} runs.`;
-    }
-    if (lower === 'residual.post_attention') {
-        return 'The attention branch has already written its update back into the residual stream, and the token is on its way to LayerNorm 2 and the MLP.';
-    }
-    if (lower === 'residual.post_mlp') {
-        return 'The MLP branch has already written its update back into the residual stream, so this token state is the block output passed upward to the next layer.';
-    }
-    if (lower === 'attention.pre') {
-        return 'The scene is showing a raw scaled dot-product attention score before softmax normalization.';
-    }
-    if (lower === 'attention.post') {
-        return 'The scene is showing a post-softmax attention weight that will be used to scale a value vector.';
-    }
-    if (lower.startsWith('qkv.q')) {
-        return 'The selected vector has already been projected into query space for one attention head.';
-    }
-    if (lower.startsWith('qkv.k')) {
-        return 'The selected vector has already been projected into key space for one attention head.';
-    }
-    if (lower.startsWith('qkv.v')) {
-        return 'The selected vector has already been projected into value space for one attention head.';
-    }
-    if (lower.startsWith('ln1.')) {
-        return `The selected object is in the ${formatLayerNormLabel('ln1')} path, immediately before self-attention reads the token state.`;
-    }
-    if (lower.startsWith('ln2.')) {
-        return `The selected object is in the ${formatLayerNormLabel('ln2')} path, immediately before the MLP reads the token state.`;
-    }
-    if (lower.startsWith('mlp.up')) {
-        return 'The scene is showing the MLP expansion step where model-width features are projected into the wider hidden space.';
-    }
-    if (lower.startsWith('mlp.activation')) {
-        return 'The scene is showing the nonlinear MLP activation after the up-projection.';
-    }
-    if (lower.startsWith('mlp.down')) {
-        return 'The scene is showing the MLP down-projection back to residual width.';
-    }
-    return `The active animation stage is ${JSON.stringify(stage)}.`;
 }
 
 function buildSpecificSelectionLines({
@@ -318,11 +265,7 @@ export function buildSelectionChatPrompt({
     activationSource = null,
     kvState = null
 } = {}) {
-    const instructionText = [
-        'You are helping a user understand an interactive GPT-2 visualization.',
-        'Use the reference markdown below as the broad description of the full scene, then use the live selection context afterward as the most specific description of what is currently selected.',
-        'Answer the user\'s next question about the model or the visualization using both sources.'
-    ].join('\n');
+    const instructionText = buildChatPromptInstructionText();
 
     const panelSummaryLines = [];
     if (title) panelSummaryLines.push(`Panel title: ${title}`);
@@ -350,12 +293,18 @@ export function buildSelectionChatPrompt({
     return joinSections(
         instructionText,
         buildMarkdownSection('Visualization Reference Markdown', String(visualizationDescriptionMarkdown || '').trim()),
+        buildMarkdownBulletSection('Self-Attention Color Cues', buildSelfAttentionColorCueLines()),
         buildMarkdownBulletSection('Current Selection', buildSpecificSelectionLines({
             selection,
             normalizedLabel,
             vectorTokenMetadata,
             attentionScoreSummary,
             activationSource,
+            kvState
+        })),
+        buildMarkdownBulletSection('Current Visualization State', buildVisualizationStateLines({
+            selection,
+            normalizedLabel,
             kvState
         })),
         buildMarkdownBulletSection('Selection Preview Panel', panelSummaryLines),
