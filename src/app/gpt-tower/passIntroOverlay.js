@@ -59,6 +59,12 @@ function delay(ms) {
     return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 }
 
+function hideLoadingOverlay() {
+    const overlay = document.getElementById('loadingOverlay');
+    if (!overlay) return;
+    overlay.classList.add('is-hidden');
+}
+
 function commonPrefixLength(a, b) {
     const maxLen = Math.min(a.length, b.length);
     let i = 0;
@@ -647,6 +653,7 @@ export function initPassIntroOverlay({ activationSource, promptTokenStrip } = {}
         finalizeHiddenState();
         dom.root.dataset.visible = 'true';
         document.body.classList.add('pass-intro-active');
+        hideLoadingOverlay();
 
         if (disposed) return;
 

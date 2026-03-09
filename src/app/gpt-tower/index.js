@@ -47,6 +47,12 @@ import {
 
 const vec3 = (arr) => new THREE.Vector3(arr[0], arr[1], arr[2]);
 
+function hideLoadingOverlay() {
+    const overlay = document.getElementById('loadingOverlay');
+    if (!overlay) return;
+    overlay.classList.add('is-hidden');
+}
+
 // Optionally load pre-baked geometries to skip heavy procedural work.
 await loadPrecomputedGeometries('/precomputed_components_slice.glb');
 // Skip full-depth QKV/output precompute when instanced slices are active,
@@ -373,6 +379,7 @@ Promise.resolve().then(async () => {
     } catch (err) {
         console.error('Initial prompt intro failed:', err);
         passIntroOverlay?.dispose?.();
+        hideLoadingOverlay();
         pipeline?.engine?.resume?.('initial-pass-intro');
     }
 });

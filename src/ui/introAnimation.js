@@ -141,12 +141,16 @@ export function initIntroAnimation(pipeline, gptCanvas) {
         }
         introCanvas.style.display = 'none';
         cleanupIntro();
-        hideLoadingOverlay();
+        if (!appState.skipIntro) {
+            hideLoadingOverlay();
+        }
     }).catch((err) => {
         console.warn('HDRI failed to load:', err);
         introCanvas.style.display = 'none';
         cleanupIntro();
-        hideLoadingOverlay();
+        if (!appState.skipIntro) {
+            hideLoadingOverlay();
+        }
     });
 
     window.addEventListener('resize', () => {
@@ -181,7 +185,6 @@ export function initIntroAnimation(pipeline, gptCanvas) {
             const ic = document.getElementById('introCanvas');
             if (ic) ic.style.display = 'none';
         }
-        hideLoadingOverlay();
     }
 
     function transitionToGPT() {

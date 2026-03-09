@@ -100,7 +100,64 @@ function resolveGeneratedLogitTokenId(entry) {
     return Number.isFinite(rawTokenId) ? Math.floor(rawTokenId) : null;
 }
 
-function resolveGeneratedLogitToken(activationSource, laneTokenIndices = []) {
+function findMatchingGeneratedLogitEntryIndex(logitRow, {
+    nextTokenRaw = null,
+    nextTokenId = null
+} = {}) {
+    if (!Array.isArray(logitRow) || !logitRow.length) return -1;
+
+    if (Number.isFinite(nextTokenId)) {
+        for (let i = 0; i < logitRow.length; i += 1) {
+            if (resolveGeneratedLogitTokenId(logitRow[i]) === Math.floor(nextTokenId)) {
+                return i;
+            }
+        }
+    }
+
+    if (typeof nextTokenRaw === 'string' && nextTokenRaw.length) {
+        for (let i = 0; i < logitRow.length; i += 1) {
+            if (typeof logitRow[i]?.token === 'string' && logitRow[i].token === nextTokenRaw) {
+                return i;
+            }
+        }
+    }
+
+    return -1;
+}
+
+function buildResolvedGeneratedToken({
+    tokenRaw = null,
+    tokenId = null,
+    tokenIndex = null,
+    logitEntry = null,
+    seedFallbackIndex = 0
+} = {}) {
+    const resolvedTokenId = Number.isFinite(tokenId) ? Math.floor(tokenId) : null;
+    const tokenText = typeof tokenRaw === 'string'
+        ? formatTokenLabel(sanitizeLogitToken(tokenRaw))
+        : '';
+    const fallbackText = Number.isFinite(resolvedTokenId) ? `#${resolvedTokenId}` : '';
+    const tokenLabel = tokenText || fallbackText;
+    if (!tokenLabel) return null;
+
+    const seedSource = logitEntry && typeof logitEntry === 'object'
+        ? logitEntry
+        : {
+            token_id: resolvedTokenId,
+            token: typeof tokenRaw === 'string' ? tokenRaw : tokenLabel
+        };
+
+    return {
+        tokenLabel,
+        tokenId: resolvedTokenId,
+        tokenIndex: Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : null,
+        seed: resolveLogitTokenSeed(seedSource, seedFallbackIndex),
+        selectionLabel: `Chosen token: ${tokenLabel}`,
+        logitEntry: (logitEntry && typeof logitEntry === 'object') ? logitEntry : null
+    };
+}
+
+export function resolveGeneratedLogitToken(activationSource, laneTokenIndices = []) {
     if (!activationSource || typeof activationSource.getLogitsForToken !== 'function') return null;
     if (!Array.isArray(laneTokenIndices) || !laneTokenIndices.length) return null;
     const lastTokenIndexRaw = laneTokenIndices[laneTokenIndices.length - 1];
@@ -117,14 +174,17 @@ function resolveGeneratedLogitToken(activationSource, laneTokenIndices = []) {
     const tokenCount = typeof activationSource.getTokenCount === 'function'
         ? activationSource.getTokenCount()
         : 0;
-    const hasNextToken = Number.isFinite(tokenCount) && (lastTokenIndex + 1) < tokenCount;
+    const nextTokenIndex = lastTokenIndex + 1;
+    const hasNextToken = Number.isFinite(tokenCount) && nextTokenIndex < tokenCount;
     const nextTokenRaw = hasNextToken && typeof activationSource.getTokenString === 'function'
-        ? activationSource.getTokenString(lastTokenIndex + 1)
+        ? activationSource.getTokenString(nextTokenIndex)
+        : null;
+    const nextTokenId = hasNextToken && typeof activationSource.getTokenId === 'function'
+        ? activationSource.getTokenId(nextTokenIndex)
         : null;
 
     let bestIdx = -1;
     let bestProb = -Infinity;
-    let pickedIdx = -1;
     for (let i = 0; i < logitRow.length; i += 1) {
         const entry = logitRow[i];
         const prob = Number(entry?.prob);
@@ -132,38 +192,35 @@ function resolveGeneratedLogitToken(activationSource, laneTokenIndices = []) {
             bestProb = prob;
             bestIdx = i;
         }
-        if (
-            pickedIdx === -1
-            && typeof nextTokenRaw === 'string'
-            && typeof entry?.token === 'string'
-            && entry.token === nextTokenRaw
-        ) {
-            pickedIdx = i;
-        }
     }
 
-    const chosenIdx = pickedIdx !== -1
-        ? pickedIdx
-        : (bestIdx !== -1 ? bestIdx : 0);
+    const matchedNextIdx = hasNextToken
+        ? findMatchingGeneratedLogitEntryIndex(logitRow, {
+            nextTokenRaw,
+            nextTokenId
+        })
+        : -1;
+    if (hasNextToken) {
+        const matchedEntry = matchedNextIdx !== -1 ? logitRow[matchedNextIdx] : null;
+        return buildResolvedGeneratedToken({
+            tokenRaw: nextTokenRaw,
+            tokenId: nextTokenId,
+            tokenIndex: nextTokenIndex,
+            logitEntry: matchedEntry,
+            seedFallbackIndex: matchedNextIdx !== -1 ? matchedNextIdx : nextTokenIndex
+        });
+    }
+
+    const chosenIdx = bestIdx !== -1 ? bestIdx : 0;
     const chosenEntry = logitRow[chosenIdx];
     if (!chosenEntry || typeof chosenEntry !== 'object') return null;
-
-    const tokenId = resolveGeneratedLogitTokenId(chosenEntry);
-    const tokenText = typeof chosenEntry.token === 'string'
-        ? formatTokenLabel(sanitizeLogitToken(chosenEntry.token))
-        : '';
-    const fallbackText = Number.isFinite(tokenId) ? `#${tokenId}` : '';
-    const tokenLabel = tokenText || fallbackText;
-    if (!tokenLabel) return null;
-
-    return {
-        tokenLabel,
-        tokenId,
-        tokenIndex: hasNextToken ? Math.floor(lastTokenIndex + 1) : null,
-        seed: resolveLogitTokenSeed(chosenEntry, chosenIdx),
-        selectionLabel: `Chosen token: ${tokenLabel}`,
-        logitEntry: chosenEntry
-    };
+    return buildResolvedGeneratedToken({
+        tokenRaw: chosenEntry.token,
+        tokenId: resolveGeneratedLogitTokenId(chosenEntry),
+        tokenIndex: null,
+        logitEntry: chosenEntry,
+        seedFallbackIndex: chosenIdx
+    });
 }
 
 function createAdvanceOverlay() {

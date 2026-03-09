@@ -705,7 +705,6 @@ body.touch-ui * {
     opacity: 0;
     visibility: hidden;
     pointer-events: none;
-    transition: opacity 180ms ease, visibility 180ms ease;
 }
 #passIntroOverlay[data-visible="true"] {
     opacity: 1;
