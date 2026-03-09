@@ -70,10 +70,40 @@ function resolveLogitLabelText(entry) {
     if (typeof entry.token === 'string') {
         return formatTokenLabel(sanitizeLogitToken(entry.token));
     }
-    if (Number.isFinite(entry.token_id)) {
-        return `#${Math.floor(entry.token_id)}`;
+    const tokenId = resolveChosenLogitTokenId(entry);
+    if (Number.isFinite(tokenId)) {
+        return `#${tokenId}`;
     }
     return '';
+}
+
+function resolveChosenLogitTokenId(entry) {
+    const rawTokenId = Number(entry?.token_id ?? entry?.tokenId);
+    return Number.isFinite(rawTokenId) ? Math.floor(rawTokenId) : null;
+}
+
+function resolveChosenLogitProbability(entry) {
+    const rawProbability = Number(entry?.prob ?? entry?.probability);
+    return Number.isFinite(rawProbability) ? rawProbability : null;
+}
+
+function applyChosenLogitSelectionMetadata(object, chosen, labelText, { setName = true } = {}) {
+    if (!object) return;
+    object.userData = object.userData || {};
+    object.userData.label = `Chosen token: ${labelText}`;
+    if (setName) object.name = `Chosen token: ${labelText}`;
+    object.userData.logitEntry = chosen.entry;
+    if (Number.isFinite(chosen.tokenIndex)) {
+        object.userData.tokenIndex = Math.floor(chosen.tokenIndex);
+    }
+    const tokenId = resolveChosenLogitTokenId(chosen.entry);
+    if (Number.isFinite(tokenId)) {
+        object.userData.tokenId = tokenId;
+    }
+    const probability = resolveChosenLogitProbability(chosen.entry);
+    if (Number.isFinite(probability)) {
+        object.userData.probability = probability;
+    }
 }
 
 function createExtrudedTextGroup(label, font, { size, depth, color }) {
@@ -190,15 +220,11 @@ function buildChosenLogitLabelGroup(barGroup, font) {
         }
         const labelZ = chosen.z;
         textGroup.position.set(labelX, labelY, labelZ);
-        textGroup.userData.label = `Chosen token: ${labelText}`;
-        textGroup.name = `Chosen token: ${labelText}`;
-        textGroup.userData.logitEntry = chosen.entry;
-        if (Number.isFinite(chosen.tokenIndex)) {
-            textGroup.userData.tokenIndex = Math.floor(chosen.tokenIndex);
-        }
-        if (Number.isFinite(chosen.entry?.token_id)) {
-            textGroup.userData.tokenId = Math.floor(chosen.entry.token_id);
-        }
+        applyChosenLogitSelectionMetadata(textGroup, chosen, labelText);
+        textGroup.traverse((node) => {
+            if (node === textGroup) return;
+            applyChosenLogitSelectionMetadata(node, chosen, labelText, { setName: false });
+        });
 
         const lineStartX = chosen.x;
         const lineStartZ = chosen.z;
@@ -227,14 +253,7 @@ function buildChosenLogitLabelGroup(barGroup, font) {
             opacity: LOGIT_LABEL_LINE_OPACITY
         });
         const line = new THREE.Line(lineGeometry, lineMaterial);
-        line.userData.label = `Chosen token: ${labelText}`;
-        line.userData.logitEntry = chosen.entry;
-        if (Number.isFinite(chosen.tokenIndex)) {
-            line.userData.tokenIndex = Math.floor(chosen.tokenIndex);
-        }
-        if (Number.isFinite(chosen.entry?.token_id)) {
-            line.userData.tokenId = Math.floor(chosen.entry.token_id);
-        }
+        applyChosenLogitSelectionMetadata(line, chosen, labelText, { setName: false });
 
         labelGroup.add(line);
         labelGroup.add(textGroup);
@@ -432,7 +451,7 @@ export function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vo
 
         for (let i = 0; i < Math.min(barCount, logitRow.length); i += 1) {
             const entry = logitRow[i];
-            const prob = Number(entry?.prob);
+            const prob = resolveChosenLogitProbability(entry);
             if (!Number.isFinite(prob)) continue;
             const height = computeLogitBarHeight(prob, globalMaxProb);
             const seed = resolveLogitTokenSeed(entry, i);
@@ -443,7 +462,7 @@ export function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vo
                 const tokenText = typeof entry.token === 'string'
                     ? formatTokenLabel(entry.token.replace(/\n/g, '\\n').replace(/\t/g, '\\t'))
                     : '';
-                const tokenId = Number.isFinite(entry.token_id) ? entry.token_id : null;
+                const tokenId = resolveChosenLogitTokenId(entry);
                 const labelLines = ['Logit'];
                 if (tokenText) labelLines.push(`Token "${tokenText}"`);
                 if (tokenId !== null) labelLines.push(`ID ${tokenId}`);

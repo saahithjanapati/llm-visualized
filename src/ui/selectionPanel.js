@@ -1207,13 +1207,24 @@ function resolveLogitSelectionEntry(selectionInfo) {
     return resolveSelectionLogitEntryMetadata(selectionInfo);
 }
 
+function resolveLogitEntryTokenId(entry) {
+    const rawTokenId = Number(entry?.token_id ?? entry?.tokenId);
+    return Number.isFinite(rawTokenId) ? Math.floor(rawTokenId) : null;
+}
+
+function resolveLogitEntryProbability(entry) {
+    const rawProbability = Number(entry?.probability ?? entry?.prob);
+    return Number.isFinite(rawProbability) ? rawProbability : null;
+}
+
 function resolveLogitPreviewTokenText(label, selectionInfo) {
     const entry = resolveLogitSelectionEntry(selectionInfo);
     if (typeof entry?.token === 'string') {
         const formatted = formatTokenLabelForPreview(sanitizeLogitTokenForPreview(entry.token));
         if (formatted) return formatted;
     }
-    if (Number.isFinite(entry?.token_id)) return `#${Math.floor(entry.token_id)}`;
+    const entryTokenId = resolveLogitEntryTokenId(entry);
+    if (Number.isFinite(entryTokenId)) return `#${entryTokenId}`;
     const labelTokenMatch = String(label || '').match(/token\s+"([^"]+)"/i);
     if (labelTokenMatch && labelTokenMatch[1]) {
         const formatted = formatTokenLabelForPreview(labelTokenMatch[1]);
@@ -1251,16 +1262,17 @@ function resolveLogitPreviewColor(selectionInfo) {
     return color.clone();
 }
 
-function resolveLogitSelectionTokenId(label, entry) {
-    if (Number.isFinite(entry?.token_id)) return Math.floor(entry.token_id);
-    const labelIdMatch = String(label || '').match(/\bid\s+(-?\d+)/i);
-    if (!labelIdMatch) return null;
-    const parsed = Number(labelIdMatch[1]);
-    return Number.isFinite(parsed) ? Math.floor(parsed) : null;
+function resolveLogitSelectionTokenId(label, entry, selectionInfo = null) {
+    const entryTokenId = resolveLogitEntryTokenId(entry);
+    if (Number.isFinite(entryTokenId)) return entryTokenId;
+    return resolvePreviewTokenId(label, selectionInfo);
 }
 
-function resolveLogitSelectionProbability(label, entry) {
-    if (Number.isFinite(entry?.prob)) return Number(entry.prob);
+function resolveLogitSelectionProbability(label, entry, selectionInfo = null) {
+    const entryProbability = resolveLogitEntryProbability(entry);
+    if (Number.isFinite(entryProbability)) return entryProbability;
+    const infoProbability = Number(selectionInfo?.info?.probability ?? selectionInfo?.info?.prob);
+    if (Number.isFinite(infoProbability)) return infoProbability;
     const labelProbMatch = String(label || '').match(/\bp\s+(-?\d*\.?\d+(?:e[-+]?\d+)?)\b/i);
     if (!labelProbMatch) return null;
     const parsed = Number(labelProbMatch[1]);
@@ -1289,8 +1301,8 @@ function resolveLogitSelectionHeader(label, selectionInfo) {
         && typeof entry === 'object'
         && (
             typeof entry.token === 'string'
-            || Number.isFinite(entry.token_id)
-            || Number.isFinite(entry.prob)
+            || Number.isFinite(resolveLogitEntryTokenId(entry))
+            || Number.isFinite(resolveLogitEntryProbability(entry))
             || Number.isFinite(entry.logit)
         )
     );
@@ -1299,8 +1311,8 @@ function resolveLogitSelectionHeader(label, selectionInfo) {
     if (!hasEntryData && !isSingleLogitLabel && !isChosenTokenLabel) return null;
 
     const tokenText = resolveLogitPreviewTokenText(label, selectionInfo);
-    const tokenId = resolveLogitSelectionTokenId(label, entry);
-    const probability = resolveLogitSelectionProbability(label, entry);
+    const tokenId = resolveLogitSelectionTokenId(label, entry, selectionInfo);
+    const probability = resolveLogitSelectionProbability(label, entry, selectionInfo);
     const subtitleParts = [];
     if (isChosenTokenLabel) subtitleParts.push('Chosen token');
     if (Number.isFinite(tokenId)) subtitleParts.push(`ID ${tokenId}`);
@@ -1445,7 +1457,7 @@ function createLogitTextPreviewShared(labelText, options = {}) {
 
 function buildLogitBarPreview(label, selectionInfo) {
     const tokenText = resolveLogitPreviewTokenText(label, selectionInfo);
-    const tokenId = resolveLogitSelectionTokenId(label, resolveLogitSelectionEntry(selectionInfo));
+    const tokenId = resolveLogitSelectionTokenId(label, resolveLogitSelectionEntry(selectionInfo), selectionInfo);
     return buildTokenChipPreview(tokenText, { tokenId });
 }
 
@@ -7473,8 +7485,8 @@ class SelectionPanel {
         if (isLogitSelection) {
             const entry = resolveLogitSelectionEntry(selection);
             const tokenText = resolveLogitPreviewTokenText(label, selection) || ATTENTION_VALUE_PLACEHOLDER;
-            const tokenId = resolveLogitSelectionTokenId(label, entry);
-            const probability = resolveLogitSelectionProbability(label, entry);
+            const tokenId = resolveLogitSelectionTokenId(label, entry, selection);
+            const probability = resolveLogitSelectionProbability(label, entry, selection);
             const tokenIdText = Number.isFinite(tokenId) ? String(Math.floor(tokenId)) : ATTENTION_VALUE_PLACEHOLDER;
             const probabilityText = Number.isFinite(probability)
                 ? formatLogitProbability(probability)
@@ -7657,8 +7669,9 @@ class SelectionPanel {
         }
 
         const entry = resolveLogitSelectionEntry(selection);
-        if (Number.isFinite(entry?.token_id)) {
-            return getIncompleteUtf8TokenNote(entry.token_id);
+        const logitTokenId = resolveLogitEntryTokenId(entry);
+        if (Number.isFinite(logitTokenId)) {
+            return getIncompleteUtf8TokenNote(logitTokenId);
         }
 
         const lower = (label || '').toLowerCase();

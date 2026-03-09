@@ -220,7 +220,8 @@ function buildSpecificSelectionLines({
     if (isLogitBarSelection(labelText, selection)) {
         const logitEntry = selection?.info?.logitEntry || null;
         const tokenLabel = formatTokenLabelForPreview(logitEntry?.token || logitEntry?.label || '');
-        const tokenId = Number.isFinite(logitEntry?.token_id) ? Math.floor(logitEntry.token_id) : null;
+        const rawTokenId = Number(logitEntry?.token_id ?? logitEntry?.tokenId);
+        const tokenId = Number.isFinite(rawTokenId) ? Math.floor(rawTokenId) : null;
         const probability = Number.isFinite(logitEntry?.probability)
             ? logitEntry.probability
             : (Number.isFinite(logitEntry?.prob) ? logitEntry.prob : null);
