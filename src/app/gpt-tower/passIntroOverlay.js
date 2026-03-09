@@ -18,6 +18,7 @@ const HANDOFF_MIN_ARC_PX = 44;
 const HANDOFF_MAX_ARC_PX = 160;
 const HANDOFF_COMMIT_PROGRESS = 0.975;
 const HANDOFF_FADE_START_PROGRESS = 0.9;
+const OVERLAY_HIDE_CLEANUP_DELAY_MS = 220;
 
 const TOKEN_REPLACEMENTS = new Map([
     ['Âł', ' '],
@@ -115,10 +116,8 @@ function buildOverlayDom() {
                     </div>
                     <div class="pass-intro-editor" data-role="editor">
                         <div class="pass-intro-shell-line">
-                            <span class="pass-intro-shell-prompt" aria-hidden="true">bash-3.2$</span>
                             <div class="pass-intro-shell-content">
                                 <div class="pass-intro-text" data-role="text"></div>
-                                <span class="pass-intro-cursor" data-role="cursor">█</span>
                             </div>
                         </div>
                     </div>
@@ -135,7 +134,6 @@ function buildOverlayDom() {
         windowEl: root.querySelector('[data-role="window"]'),
         editorEl: root.querySelector('[data-role="editor"]'),
         textEl: root.querySelector('[data-role="text"]'),
-        cursorEl: root.querySelector('[data-role="cursor"]'),
         tokenLayer: root.querySelector('[data-role="token-layer"]')
     };
 }
@@ -466,6 +464,14 @@ export function initPassIntroOverlay({ activationSource, promptTokenStrip } = {}
     let hasPlayedOnce = false;
     let currentRawText = '';
     let activeHandoffRaf = null;
+    let hideCleanupTimer = null;
+
+    const clearHideCleanupTimer = () => {
+        if (hideCleanupTimer) {
+            clearTimeout(hideCleanupTimer);
+            hideCleanupTimer = null;
+        }
+    };
 
     const clearHandoffInlineState = () => {
         dom.windowEl.style.opacity = '';
@@ -473,12 +479,8 @@ export function initPassIntroOverlay({ activationSource, promptTokenStrip } = {}
         if (dom.scrimEl) dom.scrimEl.style.opacity = '';
     };
 
-    const hideOverlay = () => {
-        if (activeHandoffRaf) {
-            cancelAnimationFrame(activeHandoffRaf);
-            activeHandoffRaf = null;
-        }
-        dom.root.dataset.visible = 'false';
+    const finalizeHiddenState = () => {
+        clearHideCleanupTimer();
         dom.root.classList.remove('is-tokenized', 'is-handoff');
         dom.windowEl.classList.remove('is-transitioning');
         dom.textEl.classList.remove('is-tokenized', 'is-tokenizing', 'is-faded');
@@ -488,6 +490,22 @@ export function initPassIntroOverlay({ activationSource, promptTokenStrip } = {}
         if (dom.editorEl) dom.editorEl.scrollTop = 0;
         delete document.body.dataset.passIntroCommitted;
         document.body.classList.remove('pass-intro-active');
+    };
+
+    const hideOverlay = ({ immediate = false } = {}) => {
+        if (activeHandoffRaf) {
+            cancelAnimationFrame(activeHandoffRaf);
+            activeHandoffRaf = null;
+        }
+        clearHideCleanupTimer();
+        dom.root.dataset.visible = 'false';
+        if (immediate) {
+            finalizeHiddenState();
+            return;
+        }
+        hideCleanupTimer = setTimeout(() => {
+            finalizeHiddenState();
+        }, OVERLAY_HIDE_CLEANUP_DELAY_MS);
     };
 
     const animateHandoffToPromptStrip = ({
@@ -600,7 +618,8 @@ export function initPassIntroOverlay({ activationSource, promptTokenStrip } = {}
         laneCount,
         laneTokenIndices,
         tokenLabels,
-        onHandoffCommit = null
+        onHandoffCommit = null,
+        onBeforeHide = null
     } = {}) => {
         if (disposed) return;
 
@@ -625,14 +644,9 @@ export function initPassIntroOverlay({ activationSource, promptTokenStrip } = {}
         const nextRawText = entries.map((entry) => entry.rawText).join('');
         const normalizedNextText = String(nextRawText ?? '').replace(/\r/g, '').replace(/\u00A0/g, ' ');
 
+        finalizeHiddenState();
         dom.root.dataset.visible = 'true';
-        dom.root.classList.remove('is-tokenized', 'is-handoff');
-        dom.windowEl.classList.remove('is-transitioning');
-        dom.textEl.classList.remove('is-tokenized', 'is-tokenizing', 'is-faded');
-        dom.tokenLayer.innerHTML = '';
-        delete document.body.dataset.passIntroCommitted;
         document.body.classList.add('pass-intro-active');
-        if (dom.editorEl) dom.editorEl.scrollTop = 0;
 
         if (disposed) return;
 
@@ -744,15 +758,19 @@ export function initPassIntroOverlay({ activationSource, promptTokenStrip } = {}
         });
         await delay(40);
         if (disposed) return;
+        if (typeof onBeforeHide === 'function') {
+            await onBeforeHide();
+        }
+        if (disposed) return;
 
         hasPlayedOnce = true;
         hideOverlay();
     };
 
-    const dispose = () => {
+        const dispose = () => {
         if (disposed) return;
         disposed = true;
-        hideOverlay();
+        hideOverlay({ immediate: true });
     };
 
     return { play, dispose };

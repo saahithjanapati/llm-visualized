@@ -287,17 +287,50 @@ const passIntroOverlay = initPassIntroOverlay({
     activationSource,
     promptTokenStrip
 });
+
+function waitForAnimationFrames(frameCount = 1) {
+    const safeCount = Math.max(0, Math.floor(frameCount));
+    if (safeCount <= 0 || typeof requestAnimationFrame !== 'function') {
+        return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+        let remaining = safeCount;
+        const step = () => {
+            remaining -= 1;
+            if (remaining <= 0) {
+                resolve();
+                return;
+            }
+            requestAnimationFrame(step);
+        };
+        requestAnimationFrame(step);
+    });
+}
+
 Promise.resolve().then(async () => {
+    let startupCameraIntroPromise = null;
     try {
         await passIntroOverlay.play({
             laneCount: initialPassState.totalLaneCount,
             laneTokenIndices: initialPassState.laneTokenIndices,
-            tokenLabels: initialPassState.tokenLabels
+            tokenLabels: initialPassState.tokenLabels,
+            onBeforeHide: async () => {
+                if (!startupCameraIntroPromise) {
+                    startupCameraIntroPromise = Promise.resolve(
+                        pipeline?.playStartupCameraIntro?.({
+                            holdMs: CAMERA_CONFIG.startupOverviewHoldMs,
+                            transitionMs: CAMERA_CONFIG.startupOverviewTransitionMs
+                        }) ?? false
+                    );
+                }
+                // Let the engine present the startup pose before the intro overlay fully dismisses.
+                await waitForAnimationFrames(2);
+            }
         });
-        await pipeline?.playStartupCameraIntro?.({
+        await (startupCameraIntroPromise ?? pipeline?.playStartupCameraIntro?.({
             holdMs: CAMERA_CONFIG.startupOverviewHoldMs,
             transitionMs: CAMERA_CONFIG.startupOverviewTransitionMs
-        });
+        }));
         await new Promise((resolve) => {
             if (typeof requestAnimationFrame === 'function') {
                 requestAnimationFrame(() => resolve());

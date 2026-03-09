@@ -80,6 +80,14 @@ export class AutoCameraController {
             this._updateCameraOffsetOverlay();
             if (introHandled) return;
         }
+        if (this._startupCameraOverviewPending && this._autoCameraFollow) {
+            this._applyAbsoluteCameraPose(this._overviewCameraPosition, this._overviewCameraTarget);
+            if (hasPanelShift) {
+                this._applyPanelShift();
+            }
+            this._updateCameraOffsetOverlay();
+            return;
+        }
         if (!this._autoCameraFollow && !this._devMode && !hasPanelShift) return;
         if (this._autoCameraFollow) {
             this._updateAutoCameraFollow();
@@ -94,6 +102,13 @@ export class AutoCameraController {
         const nextValue = !!enabled;
         if (nextValue === this._autoCameraFollow) {
             if (nextValue) {
+                if (this._startupCameraOverviewPending) {
+                    if (immediate) {
+                        this._applyAbsoluteCameraPose(this._overviewCameraPosition, this._overviewCameraTarget);
+                    }
+                    this._updateCameraOffsetOverlay();
+                    return;
+                }
                 if (resetView) {
                     this._applyFollowReset({ smoothReset });
                 }
@@ -114,6 +129,11 @@ export class AutoCameraController {
             this._autoCameraViewPendingSinceMs = 0;
             this._autoCameraPostAddLockActive = false;
             this._autoCameraPostAddLockUntilMs = 0;
+            if (!this._startupCameraIntroPlayed
+                && isFiniteVector3(this._overviewCameraPosition)
+                && isFiniteVector3(this._overviewCameraTarget)) {
+                this._startupCameraOverviewPending = true;
+            }
             if (resetView) {
                 this._applyFollowReset({ smoothReset });
             }
@@ -123,6 +143,7 @@ export class AutoCameraController {
                 this._updateAutoCameraFollow();
             }
         } else {
+            this._startupCameraOverviewPending = false;
             this._completeStartupCameraIntro(false);
             this._autoCameraPostAddLockActive = false;
             this._autoCameraPostAddLockUntilMs = 0;
@@ -329,9 +350,12 @@ export class AutoCameraController {
             return Promise.resolve(false);
         }
 
+        this._startupCameraOverviewPending = false;
+        this._autoCameraForceEmbedVocabStartLock = false;
         const targetViewKey = this._autoCameraEmbedVocabOffsetsEnabled
             ? 'embed-vocab'
-            : (this._resolveAutoCameraViewKey() || 'default');
+            : (this._resolveAutoCameraViewKey()
+                || (this._autoCameraEmbedPositionOffsetsEnabled ? 'embed-position' : 'default'));
         const resolvedOffsets = this._resolveAutoCameraOffsetsForViewKey(targetViewKey, {});
 
         this._startupCameraIntroPlayed = true;
@@ -379,6 +403,11 @@ export class AutoCameraController {
                     this._updateAutoCameraFollow();
                 }
             }
+            this._updateCameraOffsetOverlay();
+            return;
+        }
+        if (this._startupCameraOverviewPending && this._autoCameraFollow) {
+            this._applyAbsoluteCameraPose(this._overviewCameraPosition, this._overviewCameraTarget);
             this._updateCameraOffsetOverlay();
             return;
         }
@@ -570,6 +599,7 @@ export class AutoCameraController {
         this._panelShiftViewActive = false;
         this._autoCameraFrameDeltaSec = AUTO_CAMERA_FRAME_DELTA_SEC_DEFAULT;
         this._autoCameraLastUpdateMs = 0;
+        this._startupCameraOverviewPending = false;
         this._startupCameraIntroActive = false;
         this._startupCameraIntroPlayed = false;
         this._startupCameraIntroStage = 'idle';
@@ -596,6 +626,11 @@ export class AutoCameraController {
         this._overviewCameraTarget = coerceVector3(
             (opts.skipToEndCameraTarget ?? opts.cameraTarget) ?? null,
             null
+        );
+        this._startupCameraOverviewPending = !!(
+            this._autoCameraFollow
+            && isFiniteVector3(this._overviewCameraPosition)
+            && isFiniteVector3(this._overviewCameraTarget)
         );
 
         const defaultTargetOffset = coerceVector3(opts.autoCameraDefaultTargetOffset, new THREE.Vector3(0, 0, 0));

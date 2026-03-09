@@ -716,14 +716,13 @@ body.touch-ui * {
     max-height: calc(100vh - 56px);
     max-height: calc(100dvh - 56px);
     border-radius: 18px;
-    border: 1px solid rgba(126, 255, 203, 0.16);
+    border: 1px solid rgba(255, 255, 255, 0.12);
     background:
-        radial-gradient(140% 120% at 0% 0%, rgba(93, 255, 171, 0.1), rgba(93, 255, 171, 0) 34%),
-        linear-gradient(180deg, rgba(9, 16, 13, 0.98), rgba(3, 6, 5, 0.98));
+        radial-gradient(120% 92% at 50% 4%, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0) 42%),
+        linear-gradient(180deg, rgba(6, 6, 7, 0.97), rgba(0, 0, 0, 0.95));
     box-shadow:
         0 28px 70px rgba(0, 0, 0, 0.52),
-        0 0 0 1px rgba(195, 255, 225, 0.05),
-        0 0 48px rgba(43, 255, 149, 0.08);
+        0 0 0 1px rgba(255, 255, 255, 0.04);
     overflow: hidden;
 }
 #passIntroOverlay .pass-intro-window::before {
@@ -731,9 +730,8 @@ body.touch-ui * {
     position: absolute;
     inset: 0;
     background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0, rgba(255, 255, 255, 0.03) 1px, transparent 1px, transparent 6px),
-        linear-gradient(90deg, rgba(111, 255, 186, 0.045), rgba(111, 255, 186, 0));
-    opacity: 0.32;
+        linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0, rgba(255, 255, 255, 0.02) 1px, transparent 1px, transparent 6px);
+    opacity: 0.16;
     pointer-events: none;
 }
 #passIntroOverlay .pass-intro-window-header {
@@ -742,8 +740,8 @@ body.touch-ui * {
     gap: 9px;
     min-height: 42px;
     padding: 0 16px;
-    border-bottom: 1px solid rgba(126, 255, 203, 0.14);
-    background: linear-gradient(180deg, rgba(126, 255, 203, 0.08), rgba(255, 255, 255, 0.015));
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015));
 }
 #passIntroOverlay .pass-intro-dot {
     width: 10px;
@@ -775,40 +773,36 @@ body.touch-ui * {
     position: absolute;
     inset: 0;
     background:
-        radial-gradient(90% 60% at 18% 0%, rgba(115, 255, 188, 0.08), rgba(115, 255, 188, 0) 56%),
+        radial-gradient(90% 60% at 18% 0%, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0) 56%),
         linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0));
     pointer-events: none;
 }
 #passIntroOverlay .pass-intro-shell-line {
     position: relative;
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    align-items: start;
-    gap: 14px;
-}
-#passIntroOverlay .pass-intro-shell-prompt {
-    color: rgba(120, 255, 191, 0.94);
-    font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    font-size: clamp(13px, 1vw, 15px);
-    line-height: 1.75;
-    letter-spacing: 0.04em;
-    text-shadow: 0 0 16px rgba(84, 255, 167, 0.18);
-    white-space: nowrap;
+    display: block;
 }
 #passIntroOverlay .pass-intro-shell-content {
     min-width: 0;
 }
 #passIntroOverlay .pass-intro-text {
     display: inline;
-    color: rgba(234, 255, 242, 0.96);
+    color: rgba(244, 248, 255, 0.96);
     font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     font-size: clamp(18px, 1.8vw, 24px);
     line-height: 1.75;
     letter-spacing: 0.01em;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-    text-shadow: 0 0 18px rgba(70, 255, 159, 0.08);
+    text-shadow: none;
     transition: opacity 620ms ease;
+}
+#passIntroOverlay .pass-intro-text::after {
+    content: "█";
+    display: inline;
+    margin-left: 2px;
+    color: rgba(255, 255, 255, 0.84);
+    text-shadow: none;
+    animation: passIntroCursorBlink 1s steps(1, end) infinite;
 }
 #passIntroOverlay .pass-intro-text.is-tokenized {
     display: flex;
@@ -816,25 +810,14 @@ body.touch-ui * {
     align-items: flex-start;
     gap: 8px;
 }
+#passIntroOverlay .pass-intro-text.is-tokenized::after {
+    content: none;
+}
 #passIntroOverlay .pass-intro-text.is-faded {
     opacity: 0.03;
 }
 #passIntroOverlay .pass-intro-text.is-tokenizing {
     opacity: 0.24;
-}
-#passIntroOverlay .pass-intro-cursor {
-    display: inline-block;
-    margin-left: 2px;
-    color: rgba(120, 255, 191, 0.94);
-    font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    font-size: clamp(18px, 1.8vw, 24px);
-    line-height: 1.75;
-    vertical-align: top;
-    text-shadow: 0 0 18px rgba(84, 255, 167, 0.22);
-    animation: passIntroCursorBlink 1s steps(1, end) infinite;
-}
-#passIntroOverlay.is-tokenized .pass-intro-cursor {
-    opacity: 0;
 }
 #passIntroOverlay .pass-intro-inline-token,
 #passIntroOverlay .pass-intro-token-chip {
@@ -1099,15 +1082,9 @@ body[data-prompt-token-strip-visible="true"] #nextTokenBtn {
         padding: 18px 16px 20px;
     }
     #passIntroOverlay .pass-intro-shell-line {
-        grid-template-columns: 1fr;
-        gap: 4px;
+        display: block;
     }
-    #passIntroOverlay .pass-intro-shell-prompt {
-        font-size: 12px;
-        line-height: 1.4;
-    }
-    #passIntroOverlay .pass-intro-text,
-    #passIntroOverlay .pass-intro-cursor {
+    #passIntroOverlay .pass-intro-text {
         font-size: clamp(15px, 4vw, 18px);
         line-height: 1.65;
     }
