@@ -13,6 +13,10 @@ import { formatLayerNormLabel } from '../utils/layerNormLabels.js';
 import { D_MODEL, D_HEAD, VOCAB_SIZE, CONTEXT_LEN } from './selectionPanelConstants.js';
 import { formatTokenLabelForPreview } from './selectionPanelFormatUtils.js';
 import {
+    isKvCacheInfoSelection,
+    normalizeKvCachePhase
+} from './kvCacheInfoUtils.js';
+import {
     findUserDataNumber,
     findUserDataString,
     getActivationDataFromSelection,
@@ -272,6 +276,27 @@ function buildChosenTokenDescription(selectionInfo = null) {
             ? `The displayed probability here is ${probabilityText}, which is the token's full-distribution softmax probability before any truncation. If you describe decoding with top-k sampling, the sampler first keeps ${shortlistText}, renormalizes inside that subset, and then draws one token; this label shows the winner of that selection step.`
             : `This token is chosen from the softmax distribution over vocabulary logits. If you describe decoding with top-k sampling, the sampler first keeps ${shortlistText}, renormalizes inside that subset, and then draws one token; this label shows the winner of that selection step.`,
         appendSentence
+    );
+}
+
+function resolveKvCacheInfoPhase(selectionInfo = null) {
+    return normalizeKvCachePhase(findUserDataString(selectionInfo, 'kvCachePhase'));
+}
+
+function buildKvCacheInfoDescription(selectionInfo = null) {
+    const phase = resolveKvCacheInfoPhase(selectionInfo);
+    const currentPhaseParagraph = phase === 'decode'
+        ? 'Right now the visualization is in decode mode. The prompt has already been cached, so this pass computes the newest token\'s query, key, and value, appends the new key/value pair to the cache, and reuses the older cached entries for everything to the left.'
+        : 'Right now the visualization is in pre-fill mode. This is the first pass over the prompt, so the model still computes keys and values for every prompt token once and writes them into the cache for later reuse.';
+    const companionPhaseParagraph = phase === 'decode'
+        ? 'That decode step depends on the earlier pre-fill pass, which built the initial cache for the prompt tokens and made the full prompt history available without recomputing it again.'
+        : 'Once pre-fill finishes, later decode passes do not rebuild those prompt keys and values. They only add one new cache row per generated token and attend against the stored history.';
+
+    return joinParagraphs(
+        'KV cache stores each token\'s attention keys and values after they are computed, so later autoregressive steps can reuse them instead of rebuilding the whole attention history from scratch.',
+        currentPhaseParagraph,
+        companionPhaseParagraph,
+        'That reuse is why inference gets faster. Without a KV cache, every generated token would recompute keys and values for the entire prefix again. With the cache, the model mostly does fresh work only for the newest token, which reduces repeated computation and helps long prompts or long generations run much faster.'
     );
 }
 
@@ -1154,6 +1179,9 @@ function buildSelectionEquationEntries(label, selectionInfo = null) {
     const postMlpResidualEq = `x_{\\text{out}} = u + ${SELECTION_EQUATION_SYMBOLS.MLPDown}`;
     const logitsEq = `\\ell = x_{\\text{final}} ${SELECTION_EQUATION_SYMBOLS.WU}`;
     const probsEq = 'p = \\mathrm{softmax}(\\ell)';
+    const kvWriteEq = 'k_t = x_t W_K,\\quad v_t = x_t W_V';
+    const kvAppendEq = 'K_{1:t} = [K_{1:t-1}; k_t],\\quad V_{1:t} = [V_{1:t-1}; v_t]';
+    const kvReuseEq = 'o_t = \\mathrm{softmax}\\!\\left(\\frac{q_t K_{1:t}^{\\top}}{\\sqrt{d_h}}\\right) V_{1:t}';
     const buildLayerNormEntries = (kind = 'ln1', highlight = 'norm') => {
         const layerNormKey = kind === 'ln2'
             ? 'ln2'
@@ -1172,6 +1200,13 @@ function buildSelectionEquationEntries(label, selectionInfo = null) {
         const combinedEq = `${symbols.output} = \\gamma \\odot \\frac{${symbols.input} - \\mu}{\\sqrt{\\sigma^2 + \\epsilon}} + \\beta`;
         return buildEquationEntries([combinedEq], [0]);
     };
+
+    if (isKvCacheInfoSelection(label, selectionInfo)) {
+        const phase = resolveKvCacheInfoPhase(selectionInfo);
+        return phase === 'decode'
+            ? buildEquationEntries([kvAppendEq, kvReuseEq], [1])
+            : buildEquationEntries([kvWriteEq, kvAppendEq, kvReuseEq], [0, 1]);
+    }
 
     if (stageLower.startsWith('embedding.token')) {
         return buildEquationEntries([tokenEmbedEq, embedSumEq], [0]);
@@ -1349,6 +1384,10 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
     const activation = getActivationDataFromSelection(selectionInfo);
     const stage = activation?.stage || '';
     const stageLower = stage.toLowerCase();
+
+    if (isKvCacheInfoSelection(label, selectionInfo)) {
+        return buildKvCacheInfoDescription(selectionInfo);
+    }
 
     if (stageLower) {
         if (stageLower.startsWith('embedding.token')) {

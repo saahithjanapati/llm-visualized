@@ -76,6 +76,11 @@ import {
 import { buildSelectionPromptContext } from './selectionPanelPromptContextUtils.js';
 import { buildSelectionChatPrompt } from './selectionPanelChatPromptUtils.js';
 import {
+    formatKvCachePhaseLabel,
+    isKvCacheInfoSelection,
+    normalizeKvCachePhase
+} from './kvCacheInfoUtils.js';
+import {
     applyMaterialSnapshot,
     copyInstancedVectorColorsToPreview,
     extractMaterialSnapshot,
@@ -2392,7 +2397,19 @@ class SelectionPanel {
         this.copyContextBtnLabel = document.getElementById('detailCopyContextBtnLabel');
         this.copyContextBtnAssistant = document.getElementById('detailCopyContextBtnAssistant');
         this.closeBtn = document.getElementById('detailClose');
+        this.previewRoot = this.panel?.querySelector('.detail-preview') || null;
         this.canvas = document.getElementById('detailCanvas');
+        this.infoPreview = document.getElementById('detailInfoPreview');
+        this.infoPreviewEyebrow = document.getElementById('detailInfoPreviewEyebrow');
+        this.infoPreviewTitle = document.getElementById('detailInfoPreviewTitle');
+        this.infoPreviewSummary = document.getElementById('detailInfoPreviewSummary');
+        this.infoPreviewPhase = document.getElementById('detailInfoPreviewPhase');
+        this.infoPreviewStepPrefill = document.getElementById('detailInfoPreviewStepPrefill');
+        this.infoPreviewStepCache = document.getElementById('detailInfoPreviewStepCache');
+        this.infoPreviewStepDecode = document.getElementById('detailInfoPreviewStepDecode');
+        this.infoPreviewCellStore = document.getElementById('detailInfoPreviewCellStore');
+        this.infoPreviewCellPass = document.getElementById('detailInfoPreviewCellPass');
+        this.infoPreviewCellBenefit = document.getElementById('detailInfoPreviewCellBenefit');
         this.description = document.getElementById('detailDescription');
         this.equationsSection = document.getElementById('detailEquations');
         this.equationsBody = document.getElementById('detailEquationsBody');
@@ -7141,6 +7158,38 @@ class SelectionPanel {
         this.panel.scrollLeft = 0;
     }
 
+    _setInfoPreview(config = null) {
+        const showKvCacheInfo = config?.type === 'kvCache';
+        this.panel?.classList.toggle('is-info-preview', showKvCacheInfo);
+        if (!this.infoPreview) return;
+
+        this.infoPreview.hidden = !showKvCacheInfo;
+        this.infoPreview.setAttribute('aria-hidden', showKvCacheInfo ? 'false' : 'true');
+        if (!showKvCacheInfo) return;
+
+        const phase = normalizeKvCachePhase(config?.phase);
+        const phaseLabel = formatKvCachePhaseLabel(phase);
+        const passCopy = phase === 'decode'
+            ? 'Append one new token and attend over the cached prefix'
+            : 'Compute the prompt once and write its cache entries'
+            ;
+
+        if (this.infoPreviewEyebrow) this.infoPreviewEyebrow.textContent = 'Transformer inference';
+        if (this.infoPreviewTitle) this.infoPreviewTitle.textContent = 'KV Cache';
+        if (this.infoPreviewSummary) {
+            this.infoPreviewSummary.textContent = phase === 'decode'
+                ? 'Reuse the cached prefix and compute fresh attention work only for the newest token.'
+                : 'Build the prompt cache once so later decode steps can reuse it.';
+        }
+        if (this.infoPreviewPhase) this.infoPreviewPhase.textContent = phaseLabel;
+        if (this.infoPreviewCellStore) this.infoPreviewCellStore.textContent = 'Keys + values from earlier tokens';
+        if (this.infoPreviewCellPass) this.infoPreviewCellPass.textContent = passCopy;
+        if (this.infoPreviewCellBenefit) this.infoPreviewCellBenefit.textContent = 'Avoid recomputing the full prefix each step';
+        if (this.infoPreviewStepPrefill) this.infoPreviewStepPrefill.dataset.active = phase === 'prefill' ? 'true' : 'false';
+        if (this.infoPreviewStepCache) this.infoPreviewStepCache.dataset.active = 'true';
+        if (this.infoPreviewStepDecode) this.infoPreviewStepDecode.dataset.active = phase === 'decode' ? 'true' : 'false';
+    }
+
     open() {
         if (!this.isReady) return;
         const wasOpen = this.isOpen;
@@ -7192,6 +7241,7 @@ class SelectionPanel {
         this._resetCopyContextFeedback();
         this._cancelPanelResizeDrag();
         this.panel.classList.remove('is-open');
+        this.panel.classList.remove('is-info-preview');
         this.panel.classList.remove('is-preview-hidden');
         this.panel.classList.remove('is-gelu-view-open');
         this.hudStack?.classList.remove('detail-open');
@@ -7204,6 +7254,7 @@ class SelectionPanel {
         if (this.description) setDescriptionContent(this.description, '');
         if (this.equationsBody) setDescriptionContent(this.equationsBody, '');
         if (this.equationsBody) this.equationsBody.style.fontSize = '';
+        this._setInfoPreview(null);
         if (this.equationsSection) {
             this.equationsSection.classList.remove('is-visible');
             this.equationsSection.setAttribute('aria-hidden', 'true');
@@ -7754,7 +7805,14 @@ class SelectionPanel {
         this._lastSelectionLabel = label;
         const displayLabel = simplifyLayerNormParamDisplayLabel(label, selection);
         const lower = label.toLowerCase();
-        const hidePreviewForSelection = false;
+        const isKvCacheInfo = isKvCacheInfoSelection(label, selection);
+        const kvCachePhase = isKvCacheInfo
+            ? normalizeKvCachePhase(findUserDataString(selection, 'kvCachePhase'))
+            : 'prefill';
+        const kvCachePhaseLabel = isKvCacheInfo
+            ? (findUserDataString(selection, 'kvCachePhaseLabel') || formatKvCachePhaseLabel(kvCachePhase))
+            : '';
+        const hidePreviewForSelection = isKvCacheInfo;
         const previewSelectionKey = hidePreviewForSelection ? null : buildSelectionPreviewKey(label, selection);
         const metadata = resolveMetadata(label, selection.kind, selection);
         const logitHeader = resolveLogitSelectionHeader(label, selection);
@@ -7774,9 +7832,12 @@ class SelectionPanel {
             || lower.includes('position embedding')
             || lower.includes('positional embedding')
             || activationStage.startsWith('embedding.position');
+        this._setInfoPreview(null);
         this.panel.classList.toggle('is-preview-hidden', hidePreviewForSelection);
         if (logitHeader) {
             this._setTitleText(logitHeader.title);
+        } else if (isKvCacheInfo) {
+            this._setTitleText('KV Cache');
         } else if (isTokenChipSelection) {
             const tokenText = (typeof vectorSubtitleMetadata?.tokenDisplayText === 'string')
                 ? vectorSubtitleMetadata.tokenDisplayText.trim()
@@ -7797,6 +7858,11 @@ class SelectionPanel {
             if (logitHeader) {
                 this.subtitle.classList.remove('detail-subtitle--qkv-token-context');
                 this.subtitle.textContent = logitHeader.subtitle;
+            } else if (isKvCacheInfo) {
+                this.subtitle.classList.remove('detail-subtitle--qkv-token-context');
+                this.subtitle.textContent = kvCachePhase === 'decode'
+                    ? 'Enabled • Single-token decode pass'
+                    : 'Enabled • Prompt pre-fill pass';
             } else if (isTokenChipSelection) {
                 const subtitleParts = [];
                 const tokenId = Number.isFinite(vectorSubtitleMetadata?.tokenId)
@@ -7891,6 +7957,8 @@ class SelectionPanel {
         if (this.subtitleSecondary) {
             if (subtitleSecondaryOverride !== null) {
                 this._setSubtitleSecondaryText(subtitleSecondaryOverride);
+            } else if (isKvCacheInfo) {
+                this._setSubtitleSecondaryText(`Current phase: ${kvCachePhaseLabel}`);
             } else if (logitHeader) {
                 this._setSubtitleSecondaryText('');
             } else if (isPositionEmbeddingSelection) {
@@ -7919,7 +7987,8 @@ class SelectionPanel {
             || isAttentionScore
             || isLogitTokenSelection
             || isTokenOrPositionChipSelection
-            || isChosenTokenSelection;
+            || isChosenTokenSelection
+            || isKvCacheInfo;
         const isVectorMetadata = isLikelyVectorSelection(label, selection) || isTokenOrPositionChipSelection;
         const dimsRow = this.inputDim?.closest('.detail-row')
             || this.outputDim?.closest('.detail-row')
@@ -7972,12 +8041,12 @@ class SelectionPanel {
         }
         const isParam = isParameterSelection(label);
         if (this.dataSection) {
-            this.dataSection.style.display = (isParam || hideLayerNormFields) ? 'none' : '';
+            this.dataSection.style.display = (isParam || hideLayerNormFields || isKvCacheInfo) ? 'none' : '';
         }
-        if (this.dataEl && (isParam || hideLayerNormFields)) this.dataEl.textContent = '';
+        if (this.dataEl && (isParam || hideLayerNormFields || isKvCacheInfo)) this.dataEl.textContent = '';
         if (this.metaSection) {
             const rows = Array.from(this.metaSection.querySelectorAll('.detail-row, .detail-token-info'));
-            const hasVisibleRow = rows.some(row => row.style.display !== 'none');
+            const hasVisibleRow = !isKvCacheInfo && rows.some(row => row.style.display !== 'none');
             this.metaSection.style.display = hasVisibleRow ? '' : 'none';
         }
         if (this.metaSection && this.attentionRoot && this.panel) {

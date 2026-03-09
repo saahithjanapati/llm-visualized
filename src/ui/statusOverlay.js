@@ -16,6 +16,10 @@ import {
 import { USE_PHYSICAL_MATERIALS } from '../utils/constants.js';
 import { applyPhysicalMaterialsToScene } from '../utils/materialUtils.js';
 import { buildAttentionEquationSet } from './attentionEquationTextUtils.js';
+import {
+    KV_CACHE_INFO_REQUEST_EVENT,
+    buildKvCacheOverlayBadgeText,
+} from './kvCacheInfoUtils.js';
 
 // Initializes status overlay and equations panel updates.
 export function initStatusOverlay(pipeline, NUM_LAYERS) {
@@ -23,6 +27,12 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     const equationsPanel = document.getElementById('equationsPanel');
     const equationsTitle = document.getElementById('equationsTitle');
     const equationsBody = document.getElementById('equationsBody');
+    const statusTextEl = (statusDiv && typeof document !== 'undefined')
+        ? document.createElement('span')
+        : null;
+    const statusKvCacheLink = (statusDiv && typeof document !== 'undefined')
+        ? document.createElement('button')
+        : null;
     const shouldShowEquations = () => appState.showEquations && !appState.equationsSuppressed;
     const scheduleFrame = (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function')
         ? window.requestAnimationFrame.bind(window)
@@ -32,6 +42,23 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     appState.showHdrBackground = getPreference('showHdrBackground', false);
     if (equationsPanel) equationsPanel.style.display = shouldShowEquations() ? 'block' : 'none';
     appState.applyEnvironmentBackground(pipeline);
+
+    if (statusDiv && statusTextEl && statusKvCacheLink) {
+        statusDiv.textContent = '';
+        statusTextEl.className = 'status-overlay__text';
+        statusKvCacheLink.type = 'button';
+        statusKvCacheLink.className = 'status-overlay__kv-link';
+        statusKvCacheLink.hidden = true;
+        statusKvCacheLink.setAttribute('aria-hidden', 'true');
+        statusKvCacheLink.addEventListener('click', () => {
+            if (!appState.kvCacheModeEnabled || typeof window === 'undefined') return;
+            const phase = appState.kvCachePrefillActive ? 'prefill' : 'decode';
+            window.dispatchEvent(new CustomEvent(KV_CACHE_INFO_REQUEST_EVENT, {
+                detail: { phase }
+            }));
+        });
+        statusDiv.append(statusTextEl, statusKvCacheLink);
+    }
 
     const colorHex = (hex) => `#${Number(hex).toString(16).padStart(6, '0')}`;
     const colorize = (hex, body) => `\\textcolor{${hex}}{${body}}`;
@@ -252,22 +279,14 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     const applyEquationFit = () => {
         if (!equationsPanel || !equationsBody) return;
         if (!shouldShowEquations()) return;
-        const panelRect = equationsPanel.getBoundingClientRect();
-        if (!(panelRect.width > 0 && panelRect.height > 0)) return;
-
-        const titleStyle = equationsTitle ? window.getComputedStyle(equationsTitle) : null;
-        const titleVisible = !!titleStyle && titleStyle.display !== 'none';
-        const titleRect = (equationsTitle && titleVisible) ? equationsTitle.getBoundingClientRect() : { height: 0 };
-        const titleMarginBottom = titleVisible ? getPx(titleStyle.marginBottom) : 0;
+        const bodyRect = equationsBody.getBoundingClientRect();
+        if (!(bodyRect.width > 0 && bodyRect.height > 0)) return;
         const bodyStyle = window.getComputedStyle(equationsBody);
         const paddingX = getPx(bodyStyle.paddingLeft) + getPx(bodyStyle.paddingRight);
         const paddingY = getPx(bodyStyle.paddingTop) + getPx(bodyStyle.paddingBottom);
 
-        const availableWidth = Math.max(0, panelRect.width - paddingX - 1);
-        const availableHeight = Math.max(
-            0,
-            panelRect.height - titleRect.height - titleMarginBottom - paddingY - EQUATION_VERTICAL_GUARD_PX
-        );
+        const availableWidth = Math.max(0, bodyRect.width - paddingX - 1);
+        const availableHeight = Math.max(0, bodyRect.height - paddingY - EQUATION_VERTICAL_GUARD_PX);
         if (!(availableWidth > 0 && availableHeight > 0)) return;
         const fitWidth = Math.max(0, availableWidth - EQUATION_FIT_BUFFER_PX);
         const fitHeight = Math.max(0, availableHeight - EQUATION_FIT_BUFFER_PX);
@@ -852,23 +871,38 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         const headerLine = isFinalStage
             ? 'Output Head'
             : (hideLayerHeader ? '' : `Layer ${safeIdx + 1}`);
-        const kvCacheStatusNote = (appState.kvCacheModeEnabled && appState.kvCachePrefillActive)
-            ? '\nPre-fill stage\nKV cache enabled'
+        const kvCachePhase = appState.kvCachePrefillActive ? 'prefill' : 'decode';
+        const kvCacheStatusText = appState.kvCacheModeEnabled
+            ? buildKvCacheOverlayBadgeText(kvCachePhase)
             : '';
         const nextStatusText = showStageLine
             ? (headerLine
-                ? `${headerLine}\n${displayStage}${kvCacheStatusNote}`
-                : `${displayStage}${kvCacheStatusNote}`)
-            : (headerLine
-                ? `${headerLine}${kvCacheStatusNote}`
-                : `${kvCacheStatusNote}`.replace(/^\n/, ''));
-        if (nextStatusText === lastStatusText) {
+                ? `${headerLine}\n${displayStage}`
+                : `${displayStage}`)
+            : headerLine;
+        const nextStatusKey = `${nextStatusText}||${kvCacheStatusText}`;
+        if (nextStatusKey === lastStatusText) {
             checkTopEmbeddingActivation();
             return;
         }
 
-        lastStatusText = nextStatusText;
-        statusDiv.textContent = nextStatusText;
+        lastStatusText = nextStatusKey;
+        if (statusTextEl) {
+            statusTextEl.textContent = nextStatusText;
+        } else {
+            statusDiv.textContent = nextStatusText;
+        }
+        if (statusKvCacheLink) {
+            const showKvLink = appState.kvCacheModeEnabled;
+            statusKvCacheLink.hidden = !showKvLink;
+            statusKvCacheLink.setAttribute('aria-hidden', showKvLink ? 'false' : 'true');
+            statusKvCacheLink.textContent = kvCacheStatusText;
+            if (showKvLink) {
+                statusKvCacheLink.setAttribute('aria-label', `${kvCacheStatusText}. Open KV cache details.`);
+            } else {
+                statusKvCacheLink.removeAttribute('aria-label');
+            }
+        }
         checkTopEmbeddingActivation();
     }
 

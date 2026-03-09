@@ -98,6 +98,37 @@
             </div>
             <div class="detail-preview">
                 <canvas id="detailCanvas"></canvas>
+                <div id="detailInfoPreview" class="detail-info-preview" aria-hidden="true" hidden>
+                    <div class="detail-info-preview__panel">
+                        <div id="detailInfoPreviewEyebrow" class="detail-info-preview__eyebrow">Transformer inference</div>
+                        <div class="detail-info-preview__header">
+                            <div class="detail-info-preview__title-group">
+                                <div id="detailInfoPreviewTitle" class="detail-info-preview__title">KV Cache</div>
+                                <div id="detailInfoPreviewSummary" class="detail-info-preview__summary"></div>
+                            </div>
+                            <div id="detailInfoPreviewPhase" class="detail-info-preview__phase">Pre-fill</div>
+                        </div>
+                        <div class="detail-info-preview__rail" aria-hidden="true">
+                            <span id="detailInfoPreviewStepPrefill" class="detail-info-preview__step">Pre-fill</span>
+                            <span id="detailInfoPreviewStepCache" class="detail-info-preview__step detail-info-preview__step--always-active">Reuse cache</span>
+                            <span id="detailInfoPreviewStepDecode" class="detail-info-preview__step">Decode</span>
+                        </div>
+                        <div class="detail-info-preview__grid">
+                            <div class="detail-info-preview__cell">
+                                <span class="detail-info-preview__cell-label">Stores</span>
+                                <span id="detailInfoPreviewCellStore" class="detail-info-preview__cell-value">Keys and values for prior tokens</span>
+                            </div>
+                            <div class="detail-info-preview__cell">
+                                <span class="detail-info-preview__cell-label">Current pass</span>
+                                <span id="detailInfoPreviewCellPass" class="detail-info-preview__cell-value">Build the prompt cache</span>
+                            </div>
+                            <div class="detail-info-preview__cell">
+                                <span class="detail-info-preview__cell-label">Why faster</span>
+                                <span id="detailInfoPreviewCellBenefit" class="detail-info-preview__cell-value">Avoids recomputing the full prefix every token</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
             <div id="detailVectorLegend" class="vector-legend" aria-hidden="true">
                 <div id="detailVectorLegendBar" class="vector-legend-bar">

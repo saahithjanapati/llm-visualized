@@ -87,22 +87,34 @@ export function createGeluDetailView(panelEl) {
     root.className = 'detail-gelu-view';
     root.setAttribute('aria-hidden', 'true');
     root.innerHTML = `
-        <div class="detail-gelu-copy detail-gelu-card">
+        <div class="detail-gelu-section detail-gelu-copy">
+            <div class="detail-gelu-section-title">Overview</div>
             <p>GELU (Gaussian Error Linear Unit) is the MLP activation used by GPT-2.</p>
             <p>It keeps negative inputs but shrinks them smoothly, while mostly preserving large positive inputs.</p>
+        </div>
+        <div class="detail-gelu-section detail-gelu-equation">
+            <div class="detail-gelu-section-title">Equation</div>
             <div class="detail-gelu-formula" data-gelu-formula></div>
         </div>
-        <div class="detail-gelu-graph detail-gelu-card">
-            <div class="detail-gelu-graph-title">Interactive GELU curve</div>
-            <div class="detail-gelu-graph-hint">Move horizontally across the graph to inspect GELU(x).</div>
+        <div class="detail-gelu-section detail-gelu-graph">
+            <div class="detail-gelu-section-header">
+                <div class="detail-gelu-section-title">Interactive Curve</div>
+                <div class="detail-gelu-graph-hint">Move horizontally across the graph to inspect GELU(x).</div>
+            </div>
             <canvas class="detail-gelu-graph-canvas" aria-label="Interactive GELU graph"></canvas>
             <div class="detail-gelu-readout">
-                <span data-gelu-readout="x">x = --</span>
-                <span data-gelu-readout="y">GELU(x) = --</span>
+                <div class="detail-gelu-readout-card">
+                    <span class="detail-gelu-readout-label">Input x</span>
+                    <span class="detail-gelu-readout-value" data-gelu-readout="x">--</span>
+                </div>
+                <div class="detail-gelu-readout-card">
+                    <span class="detail-gelu-readout-label">Output GELU(x)</span>
+                    <span class="detail-gelu-readout-value" data-gelu-readout="y">--</span>
+                </div>
             </div>
         </div>
-        <div class="detail-gelu-notes detail-gelu-card">
-            <p>Why this shape matters:</p>
+        <div class="detail-gelu-section detail-gelu-notes">
+            <div class="detail-gelu-section-title">Why It Matters</div>
             <ul>
                 <li>Near zero, outputs change smoothly instead of switching sharply.</li>
                 <li>Negative values are softly damped rather than hard-clipped.</li>
@@ -152,13 +164,13 @@ export function createGeluDetailView(panelEl) {
     function updateReadout(x = null) {
         if (!readoutX || !readoutY) return;
         if (!Number.isFinite(x)) {
-            readoutX.textContent = 'x = --';
-            readoutY.textContent = 'GELU(x) = --';
+            readoutX.textContent = '--';
+            readoutY.textContent = '--';
             return;
         }
         const y = evaluateGelu(x);
-        readoutX.textContent = `x = ${formatGeluValue(x)}`;
-        readoutY.textContent = `GELU(x) = ${formatGeluValue(y)}`;
+        readoutX.textContent = formatGeluValue(x);
+        readoutY.textContent = formatGeluValue(y);
     }
 
     function drawGraph() {

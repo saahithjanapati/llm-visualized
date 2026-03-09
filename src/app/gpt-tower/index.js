@@ -22,6 +22,10 @@ import { initSkipLayerButton } from '../../ui/skipLayerButton.js';
 import { initSkipNextPassButton } from '../../ui/skipNextPassButton.js';
 import { initSkipLastPassButton } from '../../ui/skipLastPassButton.js';
 import { initSkipMenu } from '../../ui/skipMenu.js';
+import {
+    KV_CACHE_INFO_REQUEST_EVENT,
+    buildKvCacheInfoSelection
+} from '../../ui/kvCacheInfoUtils.js';
 import { initSelectionPanel } from '../../ui/selectionPanel.js';
 import { initPromptTokenStrip } from '../../ui/promptTokenStrip.js';
 import { loadActivationState } from './activation.js';
@@ -205,6 +209,19 @@ const selectionPanel = initSelectionPanel({
     pipeline,
     pauseMainFlowOnMobileFocus: true
 });
+
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    const previousKvCacheInfoListener = window.__llmVisualizedKvCacheInfoListener;
+    if (typeof previousKvCacheInfoListener === 'function') {
+        window.removeEventListener(KV_CACHE_INFO_REQUEST_EVENT, previousKvCacheInfoListener);
+    }
+    const handleKvCacheInfoRequest = (event) => {
+        const phase = event?.detail?.phase;
+        selectionPanel.handleSelection(buildKvCacheInfoSelection({ phase }));
+    };
+    window.__llmVisualizedKvCacheInfoListener = handleKvCacheInfoRequest;
+    window.addEventListener(KV_CACHE_INFO_REQUEST_EVENT, handleKvCacheInfoRequest);
+}
 
 const findSelectionObjectByLabel = (label) => {
     if (!label || typeof label !== 'string') return null;

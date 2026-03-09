@@ -4,6 +4,7 @@ import {
     resolveSelectionEquations,
     resolveSelectionPreviewEquations
 } from '../src/ui/selectionPanelNarrativeUtils.js';
+import { buildKvCacheInfoSelection } from '../src/ui/kvCacheInfoUtils.js';
 
 describe('selectionPanelNarrativeUtils', () => {
     it('builds selection-focused equations for known matrix labels', () => {
@@ -223,5 +224,26 @@ describe('selectionPanelNarrativeUtils', () => {
         expect(embeddingPreview.map((entry) => entry.tex)).toHaveLength(2);
         expect(embeddingPreview[0]).toMatchObject({ active: true });
         expect(embeddingPreview[1]).toMatchObject({ active: false });
+    });
+
+    it('explains KV cache pre-fill and decode with phase-aware equations', () => {
+        const prefillSelection = buildKvCacheInfoSelection({ phase: 'prefill' });
+        const prefillDesc = resolveDescription(prefillSelection.label, prefillSelection.kind, prefillSelection);
+        const prefillPreview = resolveSelectionPreviewEquations(prefillSelection.label, prefillSelection);
+
+        expect(prefillDesc).toContain('pre-fill mode');
+        expect(prefillDesc).toContain('every prompt token once');
+        expect(prefillDesc).toContain('inference gets faster');
+        expect(prefillPreview.map((entry) => entry.active)).toEqual([true, true, false]);
+        expect(resolveSelectionEquations(prefillSelection.label, prefillSelection)).toContain('K_{1:t} =');
+
+        const decodeSelection = buildKvCacheInfoSelection({ phase: 'decode' });
+        const decodeDesc = resolveDescription(decodeSelection.label, decodeSelection.kind, decodeSelection);
+        const decodePreview = resolveSelectionPreviewEquations(decodeSelection.label, decodeSelection);
+
+        expect(decodeDesc).toContain('decode mode');
+        expect(decodeDesc).toContain('newest token');
+        expect(decodePreview.map((entry) => entry.active)).toEqual([false, true]);
+        expect(decodePreview[1].tex).toContain('o_t =');
     });
 });
