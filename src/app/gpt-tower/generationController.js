@@ -95,6 +95,11 @@ function sanitizeLogitToken(token) {
     return raw.replace(/\n/g, '\\n').replace(/\t/g, '\\t');
 }
 
+function resolveGeneratedLogitTokenId(entry) {
+    const rawTokenId = Number(entry?.token_id ?? entry?.tokenId);
+    return Number.isFinite(rawTokenId) ? Math.floor(rawTokenId) : null;
+}
+
 function resolveGeneratedLogitToken(activationSource, laneTokenIndices = []) {
     if (!activationSource || typeof activationSource.getLogitsForToken !== 'function') return null;
     if (!Array.isArray(laneTokenIndices) || !laneTokenIndices.length) return null;
@@ -143,7 +148,7 @@ function resolveGeneratedLogitToken(activationSource, laneTokenIndices = []) {
     const chosenEntry = logitRow[chosenIdx];
     if (!chosenEntry || typeof chosenEntry !== 'object') return null;
 
-    const tokenId = Number.isFinite(chosenEntry.token_id) ? Math.floor(chosenEntry.token_id) : null;
+    const tokenId = resolveGeneratedLogitTokenId(chosenEntry);
     const tokenText = typeof chosenEntry.token === 'string'
         ? formatTokenLabel(sanitizeLogitToken(chosenEntry.token))
         : '';

@@ -135,4 +135,36 @@ describe('promptTokenStrip', () => {
             chips[1].style.getPropertyValue('--token-color-border')
         );
     });
+
+    it('keeps a generated dashed chip on the same color after it becomes solid', () => {
+        promptTokenStrip = initPromptTokenStrip();
+
+        promptTokenStrip.update({
+            tokenLabels: ['alpha'],
+            tokenIndices: [0],
+            tokenIds: [17],
+            generatedToken: {
+                tokenLabel: 'beta',
+                tokenIndex: 1,
+                tokenId: 0,
+                seed: 1
+            }
+        });
+
+        const dashedChips = [...document.querySelectorAll('#promptTokenStrip .prompt-token-strip__token')];
+        expect(dashedChips).toHaveLength(2);
+        expect(dashedChips[1].classList.contains('prompt-token-strip__token--generated')).toBe(true);
+        const dashedColor = dashedChips[1].style.getPropertyValue('--token-color-border');
+
+        promptTokenStrip.update({
+            tokenLabels: ['alpha', 'beta'],
+            tokenIndices: [0, 1],
+            tokenIds: [17, 0]
+        });
+
+        const solidChips = [...document.querySelectorAll('#promptTokenStrip .prompt-token-strip__token')];
+        expect(solidChips).toHaveLength(2);
+        expect(solidChips[1].classList.contains('prompt-token-strip__token--generated')).toBe(false);
+        expect(solidChips[1].style.getPropertyValue('--token-color-border')).toBe(dashedColor);
+    });
 });

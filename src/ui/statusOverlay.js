@@ -280,14 +280,27 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     const applyEquationFit = () => {
         if (!equationsPanel || !equationsBody) return;
         if (!shouldShowEquations()) return;
+        equationsPanel.style.height = '';
+        equationsBody.style.minHeight = '';
         const bodyRect = equationsBody.getBoundingClientRect();
-        if (!(bodyRect.width > 0 && bodyRect.height > 0)) return;
+        if (!(bodyRect.width > 0)) return;
+        const panelRect = equationsPanel.getBoundingClientRect();
+        const panelStyle = window.getComputedStyle(equationsPanel);
         const bodyStyle = window.getComputedStyle(equationsBody);
         const paddingX = getPx(bodyStyle.paddingLeft) + getPx(bodyStyle.paddingRight);
         const paddingY = getPx(bodyStyle.paddingTop) + getPx(bodyStyle.paddingBottom);
+        const chromeHeight = Math.max(0, panelRect.height - bodyRect.height);
+        const panelMinHeight = Math.max(0, getPx(panelStyle.minHeight));
+        const panelMaxHeight = Math.max(
+            panelMinHeight,
+            getPx(panelStyle.maxHeight)
+            || Math.max(panelMinHeight, (typeof window !== 'undefined' ? window.innerHeight * 0.26 : panelRect.height))
+        );
+        const bodyMinHeight = Math.max(0, getPx(bodyStyle.minHeight));
 
         const availableWidth = Math.max(0, bodyRect.width - paddingX - 1);
-        const availableHeight = Math.max(0, bodyRect.height - paddingY - EQUATION_VERTICAL_GUARD_PX);
+        const maxBodyHeight = Math.max(bodyMinHeight, panelMaxHeight - chromeHeight);
+        const availableHeight = Math.max(0, maxBodyHeight - paddingY - EQUATION_VERTICAL_GUARD_PX);
         if (!(availableWidth > 0 && availableHeight > 0)) return;
         const fitWidth = Math.max(0, availableWidth - EQUATION_FIT_BUFFER_PX);
         const fitHeight = Math.max(0, availableHeight - EQUATION_FIT_BUFFER_PX);
@@ -304,6 +317,19 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         };
         const applyFontPx = (fontPx) => {
             equationsBody.style.fontSize = `${fontPx.toFixed(2)}px`;
+        };
+        const applyPanelHeightForContent = (contentHeight) => {
+            const desiredBodyHeight = Math.max(
+                bodyMinHeight,
+                contentHeight + paddingY + EQUATION_VERTICAL_GUARD_PX
+            );
+            const targetPanelHeight = Math.max(
+                panelMinHeight,
+                Math.min(panelMaxHeight, desiredBodyHeight + chromeHeight)
+            );
+            const targetBodyHeight = Math.max(bodyMinHeight, targetPanelHeight - chromeHeight);
+            equationsPanel.style.height = `${targetPanelHeight.toFixed(2)}px`;
+            equationsBody.style.minHeight = `${targetBodyHeight.toFixed(2)}px`;
         };
         const fitsAt = (fontPx) => {
             applyFontPx(fontPx);
@@ -330,10 +356,9 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         let low = clampFontPx(EQUATION_FONT_MIN_PX, maxFontPx);
         const minFit = fitsAt(low);
         if (!minFit.fits) {
-            if (eqFitState.lastFontPx === null || Math.abs(eqFitState.lastFontPx - low) >= 0.1) {
-                applyFontPx(low);
-                eqFitState.lastFontPx = low;
-            }
+            applyFontPx(low);
+            applyPanelHeightForContent(minFit.size.height);
+            eqFitState.lastFontPx = low;
             return;
         }
 
@@ -354,11 +379,8 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         }
 
         const targetFontPx = clampFontPx(low, maxFontPx);
-        if (eqFitState.lastFontPx !== null && Math.abs(targetFontPx - eqFitState.lastFontPx) < 0.1) {
-            applyFontPx(eqFitState.lastFontPx);
-            return;
-        }
         applyFontPx(targetFontPx);
+        applyPanelHeightForContent(readEquationContentSize().height);
         eqFitState.lastFontPx = targetFontPx;
     };
     const scheduleEquationFit = () => {

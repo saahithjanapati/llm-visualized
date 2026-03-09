@@ -37,6 +37,18 @@ function buildTokenChipLookupKeys(entry = null) {
     return keys;
 }
 
+function resolveStoredTokenChipColorKey(entry = null, lookup = null) {
+    if (!(lookup instanceof Map)) return null;
+    const keys = buildTokenChipLookupKeys(entry);
+    for (let i = 0; i < keys.length; i += 1) {
+        const colorKey = lookup.get(keys[i]);
+        if (Number.isFinite(colorKey)) {
+            return colorKey;
+        }
+    }
+    return null;
+}
+
 export function buildPromptTokenChipEntries({
     tokenLabels = [],
     tokenIndices = null,
@@ -87,9 +99,13 @@ export function buildPromptTokenChipEntries({
         : promptEntries;
 }
 
-export function resolvePromptTokenChipColorState(entries = []) {
+export function resolvePromptTokenChipColorState(entries = [], { previousLookup = null } = {}) {
     const safeEntries = Array.isArray(entries) ? entries.filter(Boolean) : [];
-    const colorKeys = resolveAdjacentLogitTokenChipColorKeys(safeEntries);
+    const effectivePreviousLookup = previousLookup instanceof Map ? previousLookup : null;
+    const preferredColorKeys = effectivePreviousLookup
+        ? safeEntries.map((entry) => resolveStoredTokenChipColorKey(entry, effectivePreviousLookup))
+        : null;
+    const colorKeys = resolveAdjacentLogitTokenChipColorKeys(safeEntries, { preferredColorKeys });
     const lookup = new Map();
 
     safeEntries.forEach((entry, index) => {
@@ -109,7 +125,9 @@ export function resolvePromptTokenChipColorState(entries = []) {
 }
 
 export function setActivePromptTokenChipEntries(entries = []) {
-    const state = resolvePromptTokenChipColorState(entries);
+    const state = resolvePromptTokenChipColorState(entries, {
+        previousLookup: activePromptTokenChipLookup
+    });
     activePromptTokenChipLookup = state.lookup;
     return state;
 }

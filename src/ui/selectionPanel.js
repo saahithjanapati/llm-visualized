@@ -3379,34 +3379,10 @@ class SelectionPanel {
         const bodyRect = this.equationsBody.getBoundingClientRect();
         const availableWidth = Math.max(0, bodyRect.width);
         if (!(availableWidth > 0)) return;
-
-        const sectionRect = this.equationsSection.getBoundingClientRect();
-        const panelRect = this.panel.getBoundingClientRect();
-        const getPx = (value) => {
-            const parsed = Number.parseFloat(value);
-            return Number.isFinite(parsed) ? parsed : 0;
-        };
-        const panelStyle = (typeof window !== 'undefined')
-            ? window.getComputedStyle(this.panel)
-            : null;
-        const sectionStyle = (typeof window !== 'undefined')
-            ? window.getComputedStyle(this.equationsSection)
-            : null;
-        const panelPaddingBottom = panelStyle ? getPx(panelStyle.paddingBottom) : 0;
-        const sectionPaddingBottom = sectionStyle ? getPx(sectionStyle.paddingBottom) : 0;
-        const lowerGuard = Math.max(4, panelPaddingBottom + sectionPaddingBottom + 2);
-        const sectionTopInset = Math.max(0, bodyRect.top - sectionRect.top);
-        const availableHeight = Math.max(
-            0,
-            Math.min(
-                panelRect.bottom - bodyRect.top - lowerGuard,
-                panelRect.height - sectionTopInset - lowerGuard
-            )
-        );
-        if (!(availableHeight > 0)) return;
+        // The detail panel scrolls, so preserve vertical room for display equations
+        // and only squeeze typography when the math would overflow horizontally.
         const fitWidth = Math.max(0, availableWidth - DETAIL_EQUATION_FIT_BUFFER_PX);
-        const fitHeight = Math.max(0, availableHeight - DETAIL_EQUATION_FIT_BUFFER_PX);
-        if (!(fitWidth > 0 && fitHeight > 0)) return;
+        if (!(fitWidth > 0)) return;
 
         const baseFontPx = this._readSelectionEquationBaseFontPx();
         if (this._equationFitState.baseFontPx === null || Math.abs(baseFontPx - this._equationFitState.baseFontPx) > 0.5) {
@@ -3421,8 +3397,7 @@ class SelectionPanel {
             applyFontPx(fontPx);
             const fitted = this._readSelectionEquationContentSize();
             return {
-                fits: fitted.width <= fitWidth + 0.5
-                    && fitted.height <= fitHeight + 0.5,
+                fits: fitted.width <= fitWidth + 0.5,
                 size: fitted
             };
         };
@@ -3430,7 +3405,6 @@ class SelectionPanel {
         const maxFontPx = Math.max(
             DETAIL_EQUATION_FONT_MIN_PX,
             Math.min(
-                availableHeight,
                 DETAIL_EQUATION_FONT_MAX_PX,
                 this._equationFitState.baseFontPx * DETAIL_EQUATION_FONT_MAX_SCALE
             )
