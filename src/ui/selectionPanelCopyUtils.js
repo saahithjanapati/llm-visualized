@@ -223,6 +223,15 @@ function isVisibleForContextCopy(element) {
 
 export function collectVisibleContextText(root, { excludeSelectors = '' } = {}) {
     if (!root || typeof document === 'undefined' || typeof NodeFilter === 'undefined') return [];
+    const explicitCopyText = typeof root.dataset?.copyText === 'string'
+        ? root.dataset.copyText.trim()
+        : '';
+    if (explicitCopyText) {
+        return explicitCopyText
+            .split('\n')
+            .map((line) => line.trim())
+            .filter(Boolean);
+    }
     const lines = [];
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     let node = walker.nextNode();

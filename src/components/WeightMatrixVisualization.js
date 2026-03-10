@@ -30,33 +30,6 @@ function cloneMaterialTemplate(material) {
     return (typeof material.clone === 'function') ? material.clone() : null;
 }
 
-function buildChamferedRectShape(width, height, chamfer) {
-    const hw = width / 2;
-    const hh = height / 2;
-    const c = Math.max(0, Math.min(chamfer, hw, hh));
-    const shape = new THREE.Shape();
-
-    if (c < 1e-4) {
-        shape.moveTo(-hw, -hh);
-        shape.lineTo(hw, -hh);
-        shape.lineTo(hw, hh);
-        shape.lineTo(-hw, hh);
-        shape.closePath();
-        return shape;
-    }
-
-    shape.moveTo(-hw + c, -hh);
-    shape.lineTo(hw - c, -hh);
-    shape.lineTo(hw, -hh + c);
-    shape.lineTo(hw, hh - c);
-    shape.lineTo(hw - c, hh);
-    shape.lineTo(-hw + c, hh);
-    shape.lineTo(-hw, hh - c);
-    shape.lineTo(-hw, -hh + c);
-    shape.closePath();
-    return shape;
-}
-
 function getCacheKey(width, height, depth, topWidthFactor, cornerRadius, numberOfSlits, slitWidth, slitDepthFactor, slitBottomWidthFactor, slitTopWidthFactor) {
     return [width, height, depth, topWidthFactor, cornerRadius, numberOfSlits, slitWidth, slitDepthFactor, slitBottomWidthFactor, slitTopWidthFactor, QUALITY_PRESET].join('|');
 }
@@ -348,49 +321,22 @@ export class WeightMatrixVisualization {
                 if (safeTopWidth > 0) dynamicTopWidth = Math.min(dynamicTopWidth, safeTopWidth);
                 if (safeBottomWidth > 0) dynamicBottomWidth = Math.min(dynamicBottomWidth, safeBottomWidth);
 
-                // For strongly tapered Q/K/V bodies, use a rounded slit profile so
-                // the openings on the top face are less boxy around each lane.
-                const useRoundedSlitProfile = this.topWidthFactor <= 0.2;
-                if (!useRoundedSlitProfile) {
-                    if (Math.abs(dynamicBottomWidth - dynamicTopWidth) < 1e-4) {
-                        return new THREE.BoxGeometry(dynamicBottomWidth, slitBoxHeight, this.slitWidth);
-                    }
-                    const geom = new THREE.BoxGeometry(dynamicBottomWidth, slitBoxHeight, this.slitWidth, 1, 1, 1);
-                    const posAttr = geom.attributes.position;
-                    const halfH = slitBoxHeight / 2;
-                    for (let v = 0; v < posAttr.count; v++) {
-                        const y = posAttr.getY(v);
-                        const t = (y + halfH) / slitBoxHeight;
-                        const targetWidth = THREE.MathUtils.lerp(dynamicBottomWidth, dynamicTopWidth, t);
-                        const scale = (dynamicBottomWidth > 0) ? (targetWidth / dynamicBottomWidth) : 1.0;
-                        posAttr.setX(v, posAttr.getX(v) * scale);
-                    }
-                    posAttr.needsUpdate = true;
-                    geom.computeVertexNormals();
-                    return geom;
+                // Keep the cutter topology simple even for strongly tapered bodies.
+                // The previous chamfered slit profile created tiny diagonal rim
+                // faces after CSG, which showed up as dashed highlights around
+                // the slit openings in the precomputed GLBs.
+                const baseBottomWidth = Math.max(dynamicBottomWidth, 1e-3);
+                if (Math.abs(dynamicBottomWidth - dynamicTopWidth) < 1e-4) {
+                    return new THREE.BoxGeometry(baseBottomWidth, slitBoxHeight, this.slitWidth);
                 }
-
-                const baseWidth = Math.max(dynamicBottomWidth, 1e-3);
-                const minCrossWidth = Math.max(Math.min(dynamicBottomWidth, dynamicTopWidth, this.slitWidth), 1e-3);
-                const slitCornerChamfer = Math.max(0.25, minCrossWidth * 0.12);
-                const slitShape = buildChamferedRectShape(baseWidth, this.slitWidth, slitCornerChamfer);
-                const geom = new THREE.ExtrudeGeometry(slitShape, {
-                    depth: slitBoxHeight,
-                    steps: 1,
-                    bevelEnabled: false,
-                    curveSegments: 2
-                });
-                // Orient so: X = matrix width, Y = cut depth, Z = lane slit thickness.
-                geom.rotateX(Math.PI / 2);
-                geom.center();
-
+                const geom = new THREE.BoxGeometry(baseBottomWidth, slitBoxHeight, this.slitWidth, 1, 1, 1);
                 const posAttr = geom.attributes.position;
                 const halfH = slitBoxHeight / 2;
                 for (let v = 0; v < posAttr.count; v++) {
                     const y = posAttr.getY(v);
                     const t = THREE.MathUtils.clamp((y + halfH) / slitBoxHeight, 0, 1);
                     const targetWidth = THREE.MathUtils.lerp(dynamicBottomWidth, dynamicTopWidth, t);
-                    const scale = baseWidth > 0 ? targetWidth / baseWidth : 1.0;
+                    const scale = baseBottomWidth > 0 ? targetWidth / baseBottomWidth : 1.0;
                     posAttr.setX(v, posAttr.getX(v) * scale);
                 }
                 posAttr.needsUpdate = true;
@@ -439,36 +385,36 @@ export class WeightMatrixVisualization {
         if (!sideMaterial) {
             sideMaterial = createSciFiMaterial({
                 side: THREE.FrontSide,
-                transparent: true,
-                opacity: 0.9,
+                transparent: false,
+                opacity: 1.0,
                 accentColor: 0x6be7ff,
                 secondaryColor: 0x061733,
                 edgeColor: 0xcdf8ff,
                 emissiveColor: 0x54d7ff,
-                emissiveIntensity: 0.56,
-                metalness: 0.76,
-                roughness: 0.16,
-                clearcoat: 0.95,
-                clearcoatRoughness: 0.16,
-                transmission: 0.2,
-                thickness: 1.8,
-                iridescence: 0.62,
-                sheen: 0.62,
+                emissiveIntensity: 0.36,
+                metalness: 0.42,
+                roughness: 0.62,
+                clearcoat: 0.18,
+                clearcoatRoughness: 0.72,
+                transmission: 0.0,
+                thickness: 0.0,
+                iridescence: 0.0,
+                sheen: 0.08,
                 sheenColor: 0xd2ffff,
-                envMapIntensity: 1.55,
-                accentMix: 0.93,
-                glowFalloff: 2.2,
-                depthAccentStrength: 0.34,
+                envMapIntensity: 0.45,
+                accentMix: 0.9,
+                glowFalloff: 2.8,
+                depthAccentStrength: 0.06,
                 scanlineFrequency: (Math.PI * 2) / Math.max(this.height / 5, 1),
-                scanlineStrength: 0.26,
+                scanlineStrength: 0.0,
                 stripeFrequency: (Math.PI * 2) / Math.max(this.depth / 10, 1),
-                stripeStrength: 0.6,
-                rimIntensity: 0.68,
+                stripeStrength: 0.0,
+                rimIntensity: 0.08,
                 gradientSharpness: 1.4,
                 gradientBias: 0.02,
-                fresnelBoost: 0.36,
-                glintStrength: 0.24,
-                noiseStrength: 0.05
+                fresnelBoost: 0.0,
+                glintStrength: 0.0,
+                noiseStrength: 0.0
             });
         }
 
@@ -695,38 +641,42 @@ export class WeightMatrixVisualization {
         }
         if (!mat) {
             mat = createSciFiMaterial({
-                side: THREE.DoubleSide,
-                transparent: true,
-                opacity: 0.9,
+                // In the instanced-slice path, rendering both sides of the slit
+                // cavity surfaces makes the far interior wall show through the
+                // near wall at oblique angles. That reads as dashed outlines
+                // around the openings in the default tower view.
+                side: THREE.FrontSide,
+                transparent: false,
+                opacity: 1.0,
                 accentColor: 0x6deaff,
                 secondaryColor: 0x071836,
                 edgeColor: 0xd4f9ff,
                 emissiveColor: 0x53d9ff,
-                emissiveIntensity: 0.54,
-                metalness: 0.74,
-                roughness: 0.17,
-                clearcoat: 0.94,
-                clearcoatRoughness: 0.16,
-                transmission: 0.18,
-                thickness: 1.7,
-                iridescence: 0.6,
-                sheen: 0.6,
+                emissiveIntensity: 0.34,
+                metalness: 0.38,
+                roughness: 0.64,
+                clearcoat: 0.16,
+                clearcoatRoughness: 0.72,
+                transmission: 0.0,
+                thickness: 0.0,
+                iridescence: 0.0,
+                sheen: 0.08,
                 sheenColor: 0xd4ffff,
-                envMapIntensity: 1.5,
-                accentMix: 0.92,
-                glowFalloff: 2.1,
-                depthAccentStrength: 0.32,
+                envMapIntensity: 0.4,
+                accentMix: 0.9,
+                glowFalloff: 2.8,
+                depthAccentStrength: 0.04,
                 scanlineFrequency: (Math.PI * 2) / Math.max(this.height / 5, 1),
-                scanlineStrength: 0.24,
+                scanlineStrength: 0.0,
                 dimensions: sciFiSliceDims,
                 stripeFrequency: (Math.PI * 2) / Math.max(depthSpan / 6, 1),
-                stripeStrength: 0.55,
-                rimIntensity: 0.66,
+                stripeStrength: 0.0,
+                rimIntensity: 0.08,
                 gradientSharpness: 1.38,
                 gradientBias: 0.025,
-                fresnelBoost: 0.38,
-                glintStrength: 0.22,
-                noiseStrength: 0.05
+                fresnelBoost: 0.0,
+                glintStrength: 0.0,
+                noiseStrength: 0.0
             });
         }
         // Soften depth stripes for instanced slices to avoid lane seams.
@@ -745,6 +695,12 @@ export class WeightMatrixVisualization {
             }
             if (mat.userData.sciFiUniforms.uGlintStrength) {
                 mat.userData.sciFiUniforms.uGlintStrength.value = 0.0;
+            }
+            if (mat.userData.sciFiUniforms.uRimIntensity) {
+                mat.userData.sciFiUniforms.uRimIntensity.value = 0.12;
+            }
+            if (mat.userData.sciFiUniforms.uFresnelBoost) {
+                mat.userData.sciFiUniforms.uFresnelBoost.value = 0.0;
             }
         }
 

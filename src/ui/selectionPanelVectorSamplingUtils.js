@@ -4,6 +4,7 @@ import { getActivationDataFromSelection } from './selectionPanelSelectionUtils.j
 
 const DEFAULT_VECTOR_STRIDE = Math.max(1, Math.floor(PRISM_DIMENSIONS_PER_UNIT || 64));
 const MLP_SEGMENT_COUNT = 4;
+const VECTOR_SAMPLING_VALUE_DECIMALS = 3;
 
 function clampPositiveInt(value, fallback) {
     const next = Number(value);
@@ -129,8 +130,108 @@ function resolveEffectiveStride(domainLength, valueCount, configuredStride) {
 
 function formatNumericValue(value) {
     const num = Number(value);
-    if (!Number.isFinite(num)) return '0.0000';
-    return num.toFixed(4);
+    if (!Number.isFinite(num)) return '0';
+    const rounded = Number(num.toFixed(VECTOR_SAMPLING_VALUE_DECIMALS));
+    const normalized = Object.is(rounded, -0) ? 0 : rounded;
+    return normalized
+        .toFixed(VECTOR_SAMPLING_VALUE_DECIMALS)
+        .replace(/\.?0+$/, '');
+}
+
+function buildVectorSamplingText(summaryRows = [], tableRows = [], description = '') {
+    const lines = [];
+    if (typeof description === 'string' && description.trim().length) {
+        lines.push(description.trim(), '');
+    }
+    lines.push(...summaryRows.map((row) => `${row.label}: ${row.value}`));
+    if (tableRows.length) lines.push('');
+    tableRows.forEach((row) => {
+        lines.push(`dim ${row.dimension}: ${row.value}`);
+    });
+    return lines.join('\n');
+}
+
+function buildSamplingDescription(family, domain) {
+    const roundedNote = 'Values are rounded for readability.';
+    if (family === 'attention') {
+        return `These rows show the sampled source dimensions for this attention head vector. They drive the colors in the scene, not the full dense tensor. ${roundedNote}`;
+    }
+    if (family === 'mlp' && Number.isFinite(domain?.segmentIndex)) {
+        return `These rows show the sampled source dimensions for this MLP segment within the 3,072-d expansion. They are the debug subset used for the current colors, not the full tensor. ${roundedNote}`;
+    }
+    if (family === 'mlp') {
+        return `These rows show the sampled source dimensions for the expanded MLP vector. They are the debug subset used for the current colors, not the full tensor. ${roundedNote}`;
+    }
+    return `These rows show the sampled source dimensions for the model-width vector behind this selection. They drive the colors in the scene, not the full dense tensor. ${roundedNote}`;
+}
+
+export function renderSelectionVectorSamplingData(container, data = null) {
+    if (!container || typeof document === 'undefined') return;
+    container.replaceChildren();
+    if (!data) return;
+
+    const fragment = document.createDocumentFragment();
+
+    if (Array.isArray(data.summaryRows) && data.summaryRows.length) {
+        const summaryEl = document.createElement('div');
+        summaryEl.className = 'detail-data-summary';
+        data.summaryRows.forEach((row) => {
+            const rowEl = document.createElement('div');
+            rowEl.className = 'detail-data-summary-row';
+
+            const labelEl = document.createElement('span');
+            labelEl.className = 'detail-data-summary-label';
+            labelEl.textContent = row.label;
+
+            const valueEl = document.createElement('span');
+            valueEl.className = 'detail-data-summary-value';
+            valueEl.textContent = row.value;
+
+            rowEl.append(labelEl, valueEl);
+            summaryEl.appendChild(rowEl);
+        });
+        fragment.appendChild(summaryEl);
+    }
+
+    if (Array.isArray(data.tableRows) && data.tableRows.length) {
+        const tableWrap = document.createElement('div');
+        tableWrap.className = 'detail-data-table-wrap';
+
+        const table = document.createElement('table');
+        table.className = 'detail-data-table';
+
+        const thead = document.createElement('thead');
+        const headRow = document.createElement('tr');
+        ['Dimension', 'Value'].forEach((label) => {
+            const th = document.createElement('th');
+            th.scope = 'col';
+            th.textContent = label;
+            headRow.appendChild(th);
+        });
+        thead.appendChild(headRow);
+
+        const tbody = document.createElement('tbody');
+        data.tableRows.forEach((row) => {
+            const tr = document.createElement('tr');
+
+            const dimensionEl = document.createElement('td');
+            dimensionEl.className = 'detail-data-table-dimension';
+            dimensionEl.textContent = row.dimension;
+
+            const valueEl = document.createElement('td');
+            valueEl.className = 'detail-data-table-value';
+            valueEl.textContent = row.value;
+
+            tr.append(dimensionEl, valueEl);
+            tbody.appendChild(tr);
+        });
+
+        table.append(thead, tbody);
+        tableWrap.appendChild(table);
+        fragment.appendChild(tableWrap);
+    }
+
+    container.appendChild(fragment);
 }
 
 export function resolveSelectionVectorSamplingData({
@@ -155,6 +256,7 @@ export function resolveSelectionVectorSamplingData({
     const domain = resolveVectorDomain(family, activationData?.segmentIndex);
     const effectiveStride = resolveEffectiveStride(domain.domainLength, values.length, configuredStride);
     const maxSourceIndex = domain.offset + domain.domainLength - 1;
+    const description = buildSamplingDescription(family, domain);
     const entries = values.map((value, index) => {
         const localSourceIndex = Math.min(domain.domainLength - 1, index * effectiveStride);
         return {
@@ -163,27 +265,34 @@ export function resolveSelectionVectorSamplingData({
         };
     });
 
-    const lines = [
-        `Original vector length: ${domain.originalLength.toLocaleString('en-US')}`,
-        `Samples used for color: ${values.length.toLocaleString('en-US')}`,
-        `Sampling stride: ${effectiveStride.toLocaleString('en-US')}`
+    const summaryRows = [
+        { label: 'Original vector length', value: domain.originalLength.toLocaleString('en-US') },
+        { label: 'Samples used for color', value: values.length.toLocaleString('en-US') },
+        { label: 'Sampling stride', value: effectiveStride.toLocaleString('en-US') }
     ];
 
     if (Number.isFinite(domain.segmentIndex)) {
-        lines.splice(
+        summaryRows.splice(
             1,
             0,
-            `MLP segment: ${domain.segmentIndex + 1}/${MLP_SEGMENT_COUNT} (dims ${domain.offset}-${maxSourceIndex})`
+            {
+                label: 'MLP segment',
+                value: `${domain.segmentIndex + 1}/${MLP_SEGMENT_COUNT} (dims ${domain.offset.toLocaleString('en-US')}-${maxSourceIndex.toLocaleString('en-US')})`
+            }
         );
     }
 
-    lines.push('');
-    entries.forEach((entry) => {
-        lines.push(`dim ${entry.sourceIndex}: ${formatNumericValue(entry.value)}`);
-    });
+    const tableRows = entries.map((entry) => ({
+        sourceIndex: entry.sourceIndex,
+        dimension: entry.sourceIndex.toLocaleString('en-US'),
+        value: formatNumericValue(entry.value)
+    }));
 
     return {
         title: domain.title,
-        text: lines.join('\n')
+        description,
+        summaryRows,
+        tableRows,
+        text: buildVectorSamplingText(summaryRows, tableRows, description)
     };
 }

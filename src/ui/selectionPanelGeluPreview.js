@@ -46,8 +46,8 @@ export function setDescriptionGeluAction(descriptionEl, enabled = false) {
     actionBtn.type = 'button';
     actionBtn.className = 'detail-description-action-link';
     actionBtn.dataset.detailAction = GELU_PANEL_ACTION_OPEN;
-    actionBtn.textContent = 'Explore GELU activation details';
-    actionBtn.setAttribute('aria-label', 'Open GELU activation detail view');
+    actionBtn.textContent = 'View GELU details';
+    actionBtn.setAttribute('aria-label', 'Open the GELU activation detail view');
 
     actionRow.appendChild(actionBtn);
     descriptionEl.appendChild(actionRow);
@@ -87,34 +87,33 @@ export function createGeluDetailView(panelEl) {
     root.className = 'detail-gelu-view';
     root.setAttribute('aria-hidden', 'true');
     root.innerHTML = `
-        <div class="detail-gelu-section detail-gelu-copy">
-            <div class="detail-gelu-section-title">Overview</div>
+        <div class="detail-description detail-gelu-copy">
             <p>GELU (Gaussian Error Linear Unit) is the MLP activation used by GPT-2.</p>
             <p>It keeps negative inputs but shrinks them smoothly, while mostly preserving large positive inputs.</p>
         </div>
-        <div class="detail-gelu-section detail-gelu-equation">
-            <div class="detail-gelu-section-title">Equation</div>
-            <div class="detail-gelu-formula" data-gelu-formula></div>
+        <div class="detail-equations detail-gelu-equation-shell is-visible" aria-hidden="false">
+            <div class="detail-equations-title">Equation</div>
+            <div class="detail-equations-body detail-gelu-formula" data-gelu-formula></div>
         </div>
-        <div class="detail-gelu-section detail-gelu-graph">
-            <div class="detail-gelu-section-header">
-                <div class="detail-gelu-section-title">Interactive Curve</div>
+        <div class="detail-data detail-gelu-graph-card">
+            <div class="detail-gelu-card-header">
+                <div class="detail-data-title">Interactive curve</div>
                 <div class="detail-gelu-graph-hint">Move horizontally across the graph to inspect GELU(x).</div>
             </div>
             <canvas class="detail-gelu-graph-canvas" aria-label="Interactive GELU graph"></canvas>
-            <div class="detail-gelu-readout">
-                <div class="detail-gelu-readout-card">
-                    <span class="detail-gelu-readout-label">Input x</span>
-                    <span class="detail-gelu-readout-value" data-gelu-readout="x">--</span>
-                </div>
-                <div class="detail-gelu-readout-card">
-                    <span class="detail-gelu-readout-label">Output GELU(x)</span>
-                    <span class="detail-gelu-readout-value" data-gelu-readout="y">--</span>
-                </div>
+        </div>
+        <div class="detail-meta detail-gelu-readout" aria-label="GELU readout">
+            <div class="detail-row detail-gelu-readout-card">
+                <span class="detail-label detail-gelu-readout-label">Input x</span>
+                <span class="detail-value detail-gelu-readout-value" data-gelu-readout="x">--</span>
+            </div>
+            <div class="detail-row detail-gelu-readout-card">
+                <span class="detail-label detail-gelu-readout-label">Output GELU(x)</span>
+                <span class="detail-value detail-gelu-readout-value" data-gelu-readout="y">--</span>
             </div>
         </div>
-        <div class="detail-gelu-section detail-gelu-notes">
-            <div class="detail-gelu-section-title">Why It Matters</div>
+        <div class="detail-data detail-gelu-notes-card">
+            <div class="detail-data-title">Why it matters</div>
             <ul>
                 <li>Near zero, outputs change smoothly instead of switching sharply.</li>
                 <li>Negative values are softly damped rather than hard-clipped.</li>

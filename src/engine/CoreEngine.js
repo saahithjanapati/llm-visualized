@@ -42,6 +42,8 @@ const ADAPTIVE_RENDER_DPR_PROMOTE_FPS = 57;
 const ADAPTIVE_RENDER_DPR_DEMOTE_FPS = 53;
 const ADAPTIVE_RENDER_DPR_ADJUST_COOLDOWN_MS = 1400;
 const HOVER_TOKEN_CHIP_FONT_SIZE = '11px';
+const KEYBOARD_ZOOM_MIN_UNITS_PER_SECOND = 240;
+const KEYBOARD_ZOOM_MIN_DISTANCE = 0.1;
 
 /**
  * CoreEngine is responsible for creating the Three-JS renderer, camera, 
@@ -365,6 +367,16 @@ export class CoreEngine {
         this._keyboardPanSpeed = 420;
         this._keyboardRotateSpeed = 1.1;
         this._keyboardZoomSpeed = 0.6;
+        this._keyboardZoomMinUnitsPerSecond = (typeof opts.keyboardZoomMinUnitsPerSecond === 'number'
+            && Number.isFinite(opts.keyboardZoomMinUnitsPerSecond)
+            && opts.keyboardZoomMinUnitsPerSecond > 0)
+            ? opts.keyboardZoomMinUnitsPerSecond
+            : KEYBOARD_ZOOM_MIN_UNITS_PER_SECOND;
+        this._keyboardZoomMinDistance = (typeof opts.keyboardZoomMinDistance === 'number'
+            && Number.isFinite(opts.keyboardZoomMinDistance)
+            && opts.keyboardZoomMinDistance >= 0)
+            ? opts.keyboardZoomMinDistance
+            : KEYBOARD_ZOOM_MIN_DISTANCE;
         this._keyboardZoomVector = new THREE.Vector3();
         this._keyboardCodes = new Set([
             'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown',
@@ -1251,10 +1263,23 @@ export class CoreEngine {
         const currentDistance = offset.length();
         if (!currentDistance || !Number.isFinite(currentDistance)) return;
 
+        // Keep long-range zoom responsive while preventing close-up zoom from
+        // collapsing into tiny distance deltas near the current orbit target.
         const zoomScale = Math.exp(-direction * this._keyboardZoomSpeed * deltaSeconds);
-        let desiredDistance = currentDistance * zoomScale;
-        const minDistance = (typeof controls.minDistance === 'number') ? controls.minDistance : 0;
-        const maxDistance = (typeof controls.maxDistance === 'number') ? controls.maxDistance : Infinity;
+        const scaledDistance = currentDistance * zoomScale;
+        const scaledStep = Math.abs(scaledDistance - currentDistance);
+        const minimumStep = Math.max(0, this._keyboardZoomMinUnitsPerSecond * deltaSeconds);
+        const zoomStep = Math.max(scaledStep, minimumStep);
+        let desiredDistance = currentDistance + (direction > 0 ? -zoomStep : zoomStep);
+        const minDistance = Math.max(
+            (typeof controls.minDistance === 'number' && Number.isFinite(controls.minDistance))
+                ? controls.minDistance
+                : 0,
+            this._keyboardZoomMinDistance
+        );
+        const maxDistance = (typeof controls.maxDistance === 'number' && Number.isFinite(controls.maxDistance))
+            ? controls.maxDistance
+            : Infinity;
         desiredDistance = Math.max(minDistance, Math.min(maxDistance, desiredDistance));
         if (!Number.isFinite(desiredDistance) || desiredDistance === currentDistance) return;
 

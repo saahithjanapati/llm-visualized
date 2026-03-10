@@ -80,9 +80,9 @@ const SOFTENED_MATRIX_UNIFORMS = {
     scanlineStrength: 0.0,
     glintStrength: 0.0,
     noiseStrength: 0.0,
-    rimIntensity: 0.18,
-    depthAccentStrength: 0.06,
-    fresnelBoost: 0.12,
+    rimIntensity: 0.06,
+    depthAccentStrength: 0.02,
+    fresnelBoost: 0.0,
     accentMix: 0.7
 };
 

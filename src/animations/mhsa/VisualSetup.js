@@ -98,9 +98,10 @@ export function buildMHAVisuals(parentGroup, {
     const inactiveMatrixUniforms = {
         stripeStrength: 0.0,
         scanlineStrength: 0.0,
-        rimIntensity: 0.28,
-        depthAccentStrength: 0.08,
-        glintStrength: 0.04
+        rimIntensity: 0.06,
+        depthAccentStrength: 0.02,
+        fresnelBoost: 0.0,
+        glintStrength: 0.0
     };
     const tuneInactiveMatrix = (matrix) => {
         if (!matrix) return;
@@ -114,8 +115,9 @@ export function buildMHAVisuals(parentGroup, {
         scanlineStrength: 0.0,
         glintStrength: 0.0,
         noiseStrength: 0.0,
-        rimIntensity: 0.42,
-        depthAccentStrength: 0.12
+        rimIntensity: 0.06,
+        depthAccentStrength: 0.02,
+        fresnelBoost: 0.0
     };
 
     const QKV_SURFACE_TWEAKS = {
