@@ -2609,7 +2609,9 @@ export class LayerPipeline extends EventTarget {
                     const distance = Math.max(0, targetY - vec.group.position.y);
                     const duration = durationForRise(
                         distance,
-                        ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT
+                        // Keep the final handoff into the top LayerNorm paced like
+                        // the main residual stream instead of the faster in-ring rise.
+                        ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT
                     );
                     new TWEEN.Tween(vec.group.position)
                         .to({ y: targetY }, Math.max(100, duration))

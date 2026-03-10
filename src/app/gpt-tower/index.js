@@ -53,6 +53,17 @@ function hideLoadingOverlay() {
     overlay.classList.add('is-hidden');
 }
 
+function resolveInitialAppView() {
+    if (typeof window === 'undefined') return null;
+    const params = new URLSearchParams(window.location.search);
+    const viewParam = String(params.get('view') || '').trim().toLowerCase();
+    const hashView = String(window.location.hash || '').replace(/^#/, '').trim().toLowerCase();
+    if (viewParam === 'mhsa' || hashView === 'mhsa') {
+        return 'mhsa';
+    }
+    return null;
+}
+
 // Optionally load pre-baked geometries to skip heavy procedural work.
 await loadPrecomputedGeometries('/precomputed_components_slice.glb');
 // Skip full-depth QKV/output precompute when instanced slices are active,
@@ -347,7 +358,24 @@ function waitForAnimationFrames(frameCount = 1) {
     });
 }
 
+const initialAppView = resolveInitialAppView();
+const shouldOpenMhsaDirectly = initialAppView === 'mhsa';
+
 Promise.resolve().then(async () => {
+    if (shouldOpenMhsaDirectly) {
+        try {
+            passIntroOverlay?.dispose?.();
+            hideLoadingOverlay();
+            pipeline?.engine?.resume?.('initial-pass-intro');
+            await waitForAnimationFrames(1);
+            selectionPanel.handleSelection(buildMhsaInfoSelection());
+        } catch (err) {
+            console.error('Direct MHSA startup failed:', err);
+            hideLoadingOverlay();
+            pipeline?.engine?.resume?.('initial-pass-intro');
+        }
+        return;
+    }
     let startupCameraIntroPromise = null;
     try {
         await passIntroOverlay.play({

@@ -77,7 +77,17 @@ import {
     isKvCacheInfoSelection,
     normalizeKvCachePhase
 } from './kvCacheInfoUtils.js';
-import { isMhsaInfoSelection } from './mhsaInfoUtils.js';
+import {
+    buildMhsaInfoSelection,
+    isMhsaInfoSelection
+} from './mhsaInfoUtils.js';
+import {
+    MHSA_INFO_PANEL_ACTION_OPEN,
+    setDescriptionMhsaInfoAction
+} from './selectionPanelMhsaAction.js';
+import {
+    buildMhsaTokenMatrixPreviewData
+} from './selectionPanelMhsaTokenMatrixUtils.js';
 import {
     applyMaterialSnapshot,
     copyInstancedVectorColorsToPreview,
@@ -194,8 +204,7 @@ import {
     tokenChipEntriesMatch
 } from './tokenChipHoverSync.js';
 import {
-    applyTokenChipColors,
-    resolvePromptTokenChipColorState
+    applyTokenChipColors
 } from './tokenChipColorUtils.js';
 import {
     MHA_FINAL_Q_COLOR,
@@ -473,6 +482,16 @@ function colorToCss(color) {
     if (!color) return 'transparent';
     const target = color.isColor ? color : new THREE.Color(color);
     return `#${target.getHexString()}`;
+}
+
+function colorToRgbaCss(color, alpha = 1) {
+    if (!color) return 'rgba(0, 0, 0, 0)';
+    const target = color.isColor ? color : new THREE.Color(color);
+    const safeAlpha = Number.isFinite(alpha) ? THREE.MathUtils.clamp(alpha, 0, 1) : 1;
+    const r = Math.round(target.r * 255);
+    const g = Math.round(target.g * 255);
+    const b = Math.round(target.b * 255);
+    return `rgba(${r}, ${g}, ${b}, ${safeAlpha.toFixed(3)})`;
 }
 
 function darkenColor(color, factor = 1) {
@@ -2415,6 +2434,7 @@ class SelectionPanel {
         this.copyContextBtnLabel = document.getElementById('detailCopyContextBtnLabel');
         this.copyContextBtnAssistant = document.getElementById('detailCopyContextBtnAssistant');
         this.closeBtn = document.getElementById('detailClose');
+        this.fullscreenToggleBtn = document.getElementById('detailFullscreenToggle');
         this.previewRoot = this.panel?.querySelector('.detail-preview') || null;
         this.canvas = document.getElementById('detailCanvas');
         this.infoPreview = document.getElementById('detailInfoPreview');
@@ -2431,6 +2451,14 @@ class SelectionPanel {
         this.infoPreviewCellStore = document.getElementById('detailInfoPreviewCellStore');
         this.infoPreviewCellPass = document.getElementById('detailInfoPreviewCellPass');
         this.infoPreviewCellBenefit = document.getElementById('detailInfoPreviewCellBenefit');
+        this.mhsaTokenMatrixPreview = document.getElementById('detailMhsaTokenMatrixPreview');
+        this.mhsaTokenMatrixStatus = document.getElementById('detailMhsaTokenMatrixStatus');
+        this.mhsaTokenMatrixHover = document.getElementById('detailMhsaTokenMatrixHover');
+        this.mhsaTokenMatrixHoverToken = document.getElementById('detailMhsaTokenMatrixHoverToken');
+        this.mhsaTokenMatrixHoverDim = document.getElementById('detailMhsaTokenMatrixHoverDim');
+        this.mhsaTokenMatrixHoverBand = document.getElementById('detailMhsaTokenMatrixHoverBand');
+        this.mhsaTokenMatrixHoverValue = document.getElementById('detailMhsaTokenMatrixHoverValue');
+        this.mhsaTokenMatrixBody = document.getElementById('detailMhsaTokenMatrixBody');
         this.description = document.getElementById('detailDescription');
         this.equationsSection = document.getElementById('detailEquations');
         this.equationsBody = document.getElementById('detailEquationsBody');
@@ -2516,6 +2544,8 @@ class SelectionPanel {
         this.currentDispose = null;
         this.currentAnimator = null;
         this.isOpen = false;
+        this._isMhsaInfoSelectionActive = false;
+        this._mhsaFullscreenActive = false;
         this._lastFrameTime = performance.now();
         this._rotationSpeedMult = 1;
         this._currentPreviewSelectionKey = null;
@@ -2569,6 +2599,7 @@ class SelectionPanel {
         this._onResize = this._onResize.bind(this);
         this._onKeydown = this._onKeydown.bind(this);
         this._onCopyContextClick = this._onCopyContextClick.bind(this);
+        this._onFullscreenToggleClick = this._onFullscreenToggleClick.bind(this);
         this._onClosePointerDown = this._onClosePointerDown.bind(this);
         this._onDocumentPointerDown = this._onDocumentPointerDown.bind(this);
         this._blockPreviewGesture = this._blockPreviewGesture.bind(this);
@@ -2579,6 +2610,9 @@ class SelectionPanel {
         this._onAttentionPointerMove = this._onAttentionPointerMove.bind(this);
         this._onAttentionPointerDown = this._onAttentionPointerDown.bind(this);
         this._clearAttentionHover = this._clearAttentionHover.bind(this);
+        this._onMhsaTokenMatrixPointerMove = this._onMhsaTokenMatrixPointerMove.bind(this);
+        this._onMhsaTokenMatrixPointerDown = this._onMhsaTokenMatrixPointerDown.bind(this);
+        this._clearMhsaTokenMatrixHover = this._clearMhsaTokenMatrixHover.bind(this);
         this._onPanelPointerDown = this._onPanelPointerDown.bind(this);
         this._onPanelPointerEnter = this._onPanelPointerEnter.bind(this);
         this._onPanelPointerLeave = this._onPanelPointerLeave.bind(this);
@@ -2645,6 +2679,19 @@ class SelectionPanel {
         this._attentionPostAnimatedRows = new Set();
         this._attentionLastPostCompleted = 0;
         this._attentionScoreLink = null;
+        this._mhsaTokenMatrixData = null;
+        this._mhsaTokenMatrixRenderToken = 0;
+        this._mhsaTokenMatrixHoverCell = null;
+        this._mhsaTokenMatrixHoverRow = null;
+        this._mhsaTokenMatrixHoverCol = null;
+        this._mhsaTokenMatrixHoverKind = null;
+        this._mhsaTokenMatrixPinned = false;
+        this._mhsaTokenMatrixPinnedRow = null;
+        this._mhsaTokenMatrixPinnedCol = null;
+        this._mhsaTokenMatrixRowEls = [];
+        this._mhsaTokenMatrixQueryRowEls = [];
+        this._mhsaTokenMatrixXMatrixEl = null;
+        this._mhsaTokenMatrixQueryMatrixEl = null;
         this._legendHoverState = {
             kind: null,
             ratio: null
@@ -2664,6 +2711,7 @@ class SelectionPanel {
 
         this.closeBtn?.addEventListener('click', () => this.close({ clearHistory: false }));
         this.copyContextBtn?.addEventListener('click', this._onCopyContextClick);
+        this.fullscreenToggleBtn?.addEventListener('click', this._onFullscreenToggleClick);
         this.closeBtn?.addEventListener('pointerdown', this._onClosePointerDown);
         this.resizeHandle?.addEventListener('pointerdown', this._onResizeHandlePointerDown);
         this.resizeHandle?.addEventListener('keydown', this._onResizeHandleKeydown);
@@ -2685,6 +2733,12 @@ class SelectionPanel {
             this.attentionMatrix.addEventListener('pointermove', this._onAttentionPointerMove);
             this.attentionMatrix.addEventListener('pointerdown', this._onAttentionPointerDown);
             this.attentionMatrix.addEventListener('pointerleave', this._clearAttentionHover);
+        }
+        if (this.mhsaTokenMatrixBody) {
+            this.mhsaTokenMatrixBody.addEventListener('pointerover', this._onMhsaTokenMatrixPointerMove);
+            this.mhsaTokenMatrixBody.addEventListener('pointermove', this._onMhsaTokenMatrixPointerMove);
+            this.mhsaTokenMatrixBody.addEventListener('pointerdown', this._onMhsaTokenMatrixPointerDown);
+            this.mhsaTokenMatrixBody.addEventListener('pointerleave', this._clearMhsaTokenMatrixHover);
         }
         [this.vectorLegendBar, this.attentionLegend].filter(Boolean).forEach((bar) => {
             bar.addEventListener('pointerdown', this._onLegendPointerDown);
@@ -2722,6 +2776,7 @@ class SelectionPanel {
         this._observeResize();
         this._onResize();
         this._updateResizeHandleState();
+        this._updateMhsaFullscreenToggle();
         if (typeof document !== 'undefined' && document.fonts?.ready) {
             document.fonts.ready.then(() => {
                 this._applyCopyContextButtonLayout();
@@ -3246,7 +3301,7 @@ class SelectionPanel {
         const promptContextSummary = this._buildSelectionPromptContextSummary(selection, vectorTokenMetadata);
 
         const metaLines = collectVisibleContextText(this.metaSection, {
-            excludeSelectors: '#detailCopyContextBtn, #detailClose'
+            excludeSelectors: '#detailCopyContextBtn, #detailClose, #detailFullscreenToggle'
         });
 
         let legendLines = [];
@@ -3521,6 +3576,7 @@ class SelectionPanel {
             }
         }
         this._updateMobileState();
+        this._updateMhsaFullscreenToggle();
         this._syncSceneShift();
         this._applyCopyContextButtonLayout();
         this._scheduleSelectionEquationFit();
@@ -3602,8 +3658,105 @@ class SelectionPanel {
 
     _onKeydown(event) {
         if (event.key === 'Escape' && this.isOpen) {
+            if (this._mhsaFullscreenActive && this.fullscreenToggleBtn) {
+                this._setMhsaFullscreen(false);
+                return;
+            }
             this.close({ clearHistory: false });
         }
+    }
+
+    _canToggleMhsaFullscreen() {
+        return !!(this.isOpen && this._isMhsaInfoSelectionActive && !this._isSmallScreen());
+    }
+
+    _syncMhsaViewRoute(active) {
+        if (typeof window === 'undefined' || typeof window.history?.replaceState !== 'function') return;
+        let nextUrl;
+        try {
+            nextUrl = new URL(window.location.href);
+        } catch (_) {
+            return;
+        }
+        const shouldActivate = active === true;
+        const currentView = String(nextUrl.searchParams.get('view') || '').trim().toLowerCase();
+        const currentHash = String(nextUrl.hash || '').replace(/^#/, '').trim().toLowerCase();
+        if (shouldActivate) {
+            if (currentView !== 'mhsa') {
+                nextUrl.searchParams.set('view', 'mhsa');
+            }
+            if (currentHash === 'mhsa') {
+                nextUrl.hash = '';
+            }
+        } else {
+            if (currentView === 'mhsa') {
+                nextUrl.searchParams.delete('view');
+            }
+            if (currentHash === 'mhsa') {
+                nextUrl.hash = '';
+            }
+        }
+        const nextHref = `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`;
+        const currentHref = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+        if (nextHref !== currentHref) {
+            window.history.replaceState(window.history.state, '', nextHref);
+        }
+    }
+
+    _syncMhsaFullscreenDocumentState() {
+        if (typeof document === 'undefined' || !document.body) return;
+        document.body.classList.toggle('mhsa-fullscreen-active', !!this._mhsaFullscreenActive);
+    }
+
+    _updateMhsaFullscreenToggle() {
+        if (!this.fullscreenToggleBtn) return;
+        const canToggle = this._canToggleMhsaFullscreen();
+        let clearedFullscreen = false;
+        if (!canToggle && this._mhsaFullscreenActive) {
+            this._mhsaFullscreenActive = false;
+            this.panel?.classList.remove('is-mhsa-fullscreen');
+            clearedFullscreen = true;
+        }
+        this._syncMhsaFullscreenDocumentState();
+        this.fullscreenToggleBtn.hidden = !canToggle;
+        this.fullscreenToggleBtn.setAttribute('aria-hidden', canToggle ? 'false' : 'true');
+        this.fullscreenToggleBtn.dataset.fullscreen = this._mhsaFullscreenActive ? 'true' : 'false';
+        this.fullscreenToggleBtn.textContent = this._mhsaFullscreenActive ? 'Exit' : 'Full';
+        this.fullscreenToggleBtn.setAttribute(
+            'aria-label',
+            this._mhsaFullscreenActive ? 'Exit full screen' : 'Enter full screen'
+        );
+        this.fullscreenToggleBtn.title = this._mhsaFullscreenActive ? 'Exit full screen' : 'Enter full screen';
+        if (clearedFullscreen) {
+            this._updateResizeHandleState();
+            this._syncSceneShift({ immediate: true });
+            this._scheduleResize();
+        }
+    }
+
+    _setMhsaFullscreen(enabled) {
+        const next = !!enabled && this._canToggleMhsaFullscreen();
+        if (this._mhsaFullscreenActive === next) {
+            this._updateMhsaFullscreenToggle();
+            return;
+        }
+        this._mhsaFullscreenActive = next;
+        this.panel?.classList.toggle('is-mhsa-fullscreen', next);
+        this._syncMhsaFullscreenDocumentState();
+        this._updateMhsaFullscreenToggle();
+        this._updateResizeHandleState();
+        this._syncSceneShift({ immediate: true });
+        this._scheduleResize();
+        this._applyCopyContextButtonLayout();
+        this._scheduleSelectionEquationFit();
+        this._scheduleDimensionLabelFit();
+    }
+
+    _onFullscreenToggleClick(event) {
+        if (event?.cancelable) event.preventDefault();
+        event?.stopPropagation?.();
+        if (!this._canToggleMhsaFullscreen()) return;
+        this._setMhsaFullscreen(!this._mhsaFullscreenActive);
     }
 
     _onClosePointerDown(event) {
@@ -3649,7 +3802,7 @@ class SelectionPanel {
     }
 
     _canResizeDesktopPanel() {
-        return !this._isSmallScreen() && this._isLandscapeViewport();
+        return !this._mhsaFullscreenActive && !this._isSmallScreen() && this._isLandscapeViewport();
     }
 
     _resolveDesktopPanelWidthBounds() {
@@ -3889,7 +4042,7 @@ class SelectionPanel {
         if (typeof window === 'undefined') return;
 
         let nextShift = 0;
-        const shouldShift = this.isOpen && !this._isSmallScreen();
+        const shouldShift = this.isOpen && !this._isSmallScreen() && !this._mhsaFullscreenActive;
         if (shouldShift) {
             const anchor = this.hudStack || this.panel;
             const rect = anchor?.getBoundingClientRect?.();
@@ -5393,6 +5546,11 @@ class SelectionPanel {
         return true;
     }
 
+    _openMhsaInfoFromAction() {
+        this.showSelection(buildMhsaInfoSelection(), { scrollPanelToTop: true });
+        return true;
+    }
+
     _openQkvSourceVectorFromAction(actionEl) {
         const payload = this._parseDetailActionPayload(actionEl);
         const layerIndex = Number(payload?.layerIndex);
@@ -5493,6 +5651,9 @@ class SelectionPanel {
         if (action === GELU_PANEL_ACTION_OPEN) {
             this._openGeluDetailPreview();
             return true;
+        }
+        if (action === MHSA_INFO_PANEL_ACTION_OPEN) {
+            return this._openMhsaInfoFromAction();
         }
         if (action === ATTENTION_VECTOR_PANEL_ACTION_OPEN) {
             return this._openAttentionVectorFromAction(actionEl);
@@ -6926,6 +7087,293 @@ class SelectionPanel {
         return true;
     }
 
+    _setMhsaTokenMatrixStatus(message = '') {
+        if (!this.mhsaTokenMatrixStatus) return;
+        const text = typeof message === 'string' ? message.trim() : '';
+        this.mhsaTokenMatrixStatus.textContent = text;
+        this.mhsaTokenMatrixStatus.hidden = !text;
+        this.mhsaTokenMatrixStatus.setAttribute('aria-hidden', text ? 'false' : 'true');
+    }
+
+    _setMhsaTokenMatrixHoverValue(payload = null) {
+        void payload;
+        if (!this.mhsaTokenMatrixHover) return;
+        this.mhsaTokenMatrixHover.hidden = true;
+        this.mhsaTokenMatrixHover.dataset.empty = 'true';
+        this.mhsaTokenMatrixHover.setAttribute('aria-hidden', 'true');
+    }
+
+    _applyMhsaRowFocus(rowIndex) {
+        if (!this._mhsaTokenMatrixRowEls.length || !Number.isFinite(rowIndex)) return;
+        if (this._mhsaTokenMatrixHoverKind === 'row' && this._mhsaTokenMatrixHoverRow === rowIndex) return;
+        this._mhsaTokenMatrixHoverKind = 'row';
+        this._mhsaTokenMatrixHoverRow = rowIndex;
+        this._mhsaTokenMatrixHoverCol = null;
+        this._mhsaTokenMatrixHoverCell = null;
+        this._mhsaTokenMatrixBody?.classList.add('has-focus-row');
+        this._mhsaTokenMatrixBody?.classList.remove('has-focus-column');
+        this._mhsaTokenMatrixXMatrixEl?.classList.add('has-focus');
+        this._mhsaTokenMatrixQueryMatrixEl?.classList.add('has-focus');
+        this._mhsaTokenMatrixRowEls.forEach((rowState, index) => {
+            const isActive = index === rowIndex;
+            rowState?.rowEl?.classList.toggle('is-active', isActive);
+            rowState?.rowEl?.classList.toggle('is-dimmed', !isActive);
+            rowState?.labelEl?.classList.toggle('is-highlighted', isActive);
+        });
+        this._mhsaTokenMatrixQueryRowEls.forEach((rowEl, index) => {
+            const isActive = index === rowIndex;
+            rowEl?.classList.toggle('is-active', isActive);
+            rowEl?.classList.toggle('is-dimmed', !isActive);
+        });
+    }
+
+    _clearMhsaTokenMatrixHover(force = false) {
+        void force;
+        this._mhsaTokenMatrixBody?.classList.remove('has-focus-row', 'has-focus-column');
+        this._mhsaTokenMatrixXMatrixEl?.classList.remove('has-focus');
+        this._mhsaTokenMatrixQueryMatrixEl?.classList.remove('has-focus');
+        this._mhsaTokenMatrixRowEls.forEach((rowState) => {
+            rowState?.rowEl?.classList.remove('is-active', 'is-dimmed');
+            rowState?.labelEl?.classList.remove('is-highlighted');
+        });
+        this._mhsaTokenMatrixQueryRowEls.forEach((rowEl) => {
+            rowEl?.classList.remove('is-active', 'is-dimmed');
+        });
+        this._mhsaTokenMatrixHoverCell = null;
+        this._mhsaTokenMatrixHoverKind = null;
+        this._mhsaTokenMatrixHoverRow = null;
+        this._mhsaTokenMatrixHoverCol = null;
+        this._setMhsaTokenMatrixHoverValue(null);
+    }
+
+    _clearPinnedMhsaTokenMatrix() {
+        this._mhsaTokenMatrixPinned = false;
+        this._mhsaTokenMatrixPinnedRow = null;
+        this._mhsaTokenMatrixPinnedCol = null;
+        this._clearMhsaTokenMatrixHover(true);
+    }
+
+    _onMhsaTokenMatrixPointerMove(event) {
+        const target = event?.target instanceof Element ? event.target : null;
+        if (!target || !this.mhsaTokenMatrixBody) return;
+        const rowEl = target.closest('.mhsa-token-matrix-preview__row');
+        if (rowEl && this.mhsaTokenMatrixBody.contains(rowEl)) {
+            const rowIndex = Number(rowEl.dataset.row);
+            if (Number.isFinite(rowIndex)) {
+                this._applyMhsaRowFocus(rowIndex);
+                return;
+            }
+        }
+        const queryRowEl = target.closest('.mhsa-token-matrix-preview__query-row');
+        if (queryRowEl && this.mhsaTokenMatrixBody.contains(queryRowEl)) {
+            const rowIndex = Number(queryRowEl.dataset.row);
+            if (Number.isFinite(rowIndex)) {
+                this._applyMhsaRowFocus(rowIndex);
+                return;
+            }
+        }
+        this._clearMhsaTokenMatrixHover();
+    }
+
+    _onMhsaTokenMatrixPointerDown(event) {
+        void event;
+    }
+
+    _hideMhsaTokenMatrixPreview() {
+        this._mhsaTokenMatrixRenderToken += 1;
+        this._mhsaTokenMatrixData = null;
+        this._mhsaTokenMatrixRowEls = [];
+        this._mhsaTokenMatrixQueryRowEls = [];
+        this._mhsaTokenMatrixXMatrixEl = null;
+        this._mhsaTokenMatrixQueryMatrixEl = null;
+        this._clearPinnedMhsaTokenMatrix();
+        if (this.mhsaTokenMatrixBody) {
+            this.mhsaTokenMatrixBody.hidden = true;
+            this.mhsaTokenMatrixBody.classList.remove('has-focus-row', 'has-focus-column');
+            this.mhsaTokenMatrixBody.style.removeProperty('--mhsa-token-matrix-rows');
+            this.mhsaTokenMatrixBody.style.removeProperty('--mhsa-token-matrix-band-count');
+            this.mhsaTokenMatrixBody.replaceChildren();
+        }
+        this._setMhsaTokenMatrixHoverValue(null);
+        this._setMhsaTokenMatrixStatus('');
+        if (this.mhsaTokenMatrixPreview) {
+            this.mhsaTokenMatrixPreview.hidden = true;
+            this.mhsaTokenMatrixPreview.setAttribute('aria-hidden', 'true');
+        }
+    }
+
+    _renderMhsaTokenMatrixPreview() {
+        if (!this.mhsaTokenMatrixPreview || !this.mhsaTokenMatrixBody) return;
+        const renderToken = this._mhsaTokenMatrixRenderToken + 1;
+        this._mhsaTokenMatrixRenderToken = renderToken;
+        this._mhsaTokenMatrixData = null;
+        this._mhsaTokenMatrixRowEls = [];
+        this._mhsaTokenMatrixQueryRowEls = [];
+        this._mhsaTokenMatrixXMatrixEl = null;
+        this._mhsaTokenMatrixQueryMatrixEl = null;
+        this._clearPinnedMhsaTokenMatrix();
+        this.mhsaTokenMatrixPreview.hidden = false;
+        this.mhsaTokenMatrixPreview.setAttribute('aria-hidden', 'false');
+        this.mhsaTokenMatrixBody.hidden = true;
+        this.mhsaTokenMatrixBody.classList.remove('has-focus-row', 'has-focus-column');
+        this.mhsaTokenMatrixBody.replaceChildren();
+        this._setMhsaTokenMatrixHoverValue(null);
+        this._setMhsaTokenMatrixStatus('');
+        if (this.mhsaTokenMatrixHover) {
+            this.mhsaTokenMatrixHover.hidden = true;
+            this.mhsaTokenMatrixHover.setAttribute('aria-hidden', 'true');
+        }
+        if (this.mhsaTokenMatrixStatus) {
+            this.mhsaTokenMatrixStatus.hidden = true;
+            this.mhsaTokenMatrixStatus.setAttribute('aria-hidden', 'true');
+        }
+
+        try {
+            const previewData = buildMhsaTokenMatrixPreviewData({
+                activationSource: this.activationSource,
+                sampleStep: 64
+            });
+            if (
+                !previewData?.rowCount
+                || !previewData?.columnCount
+                || !previewData?.qWeightRowCount
+                || !previewData?.qWeightColumnCount
+                || !previewData?.qRowCount
+                || !previewData?.qColumnCount
+                || !Array.isArray(previewData.queryRows)
+                || !Array.isArray(previewData.rows)
+            ) {
+                this._setMhsaTokenMatrixStatus('Token matrix unavailable.');
+                return;
+            }
+            if (renderToken !== this._mhsaTokenMatrixRenderToken) return;
+            this._mhsaTokenMatrixData = previewData;
+            this.mhsaTokenMatrixBody.style.setProperty('--mhsa-token-matrix-rows', String(previewData.rowCount));
+            this.mhsaTokenMatrixBody.style.setProperty('--mhsa-token-matrix-band-count', String(previewData.bandCount || 1));
+            const fragment = document.createDocumentFragment();
+            const stageEl = document.createElement('div');
+            stageEl.className = 'mhsa-token-matrix-preview__stage';
+            const projectionStageEl = document.createElement('div');
+            projectionStageEl.className = 'mhsa-token-matrix-preview__projection-stage';
+            const xBlockEl = document.createElement('div');
+            xBlockEl.className = 'mhsa-token-matrix-preview__x-block';
+            const xMatrixEl = document.createElement('div');
+            xMatrixEl.className = 'mhsa-token-matrix-preview__x-matrix';
+            const weightBlockEl = document.createElement('div');
+            weightBlockEl.className = 'mhsa-token-matrix-preview__weight-block';
+            const weightCardEl = document.createElement('div');
+            weightCardEl.className = 'mhsa-token-matrix-preview__weight-card';
+            weightCardEl.style.background = previewData.qWeightGradientCss
+                || `linear-gradient(180deg, ${colorToRgbaCss(MHA_FINAL_Q_COLOR, 0.48)}, ${colorToRgbaCss(MHA_FINAL_Q_COLOR, 0.82)})`;
+            const weightCardLabelEl = document.createElement('div');
+            weightCardLabelEl.className = 'mhsa-token-matrix-preview__weight-card-label';
+            weightCardLabelEl.textContent = 'W_q';
+            weightCardEl.appendChild(weightCardLabelEl);
+            const plusEl = document.createElement('div');
+            plusEl.className = 'mhsa-token-matrix-preview__operator';
+            plusEl.textContent = '+';
+            const biasBlockEl = document.createElement('div');
+            biasBlockEl.className = 'mhsa-token-matrix-preview__bias-block';
+            const biasBarEl = document.createElement('div');
+            biasBarEl.className = 'mhsa-token-matrix-preview__bias-bar';
+            biasBarEl.style.background = previewData.qBiasGradientCss || `linear-gradient(90deg, ${colorToRgbaCss(MHA_FINAL_Q_COLOR, 0.62)}, ${colorToRgbaCss(MHA_FINAL_Q_COLOR, 0.88)})`;
+            const equalsEl = document.createElement('div');
+            equalsEl.className = 'mhsa-token-matrix-preview__operator';
+            equalsEl.textContent = '=';
+            const queryBlockEl = document.createElement('div');
+            queryBlockEl.className = 'mhsa-token-matrix-preview__query-block';
+            const queryMatrixEl = document.createElement('div');
+            queryMatrixEl.className = 'mhsa-token-matrix-preview__query-matrix';
+            this._mhsaTokenMatrixXMatrixEl = xMatrixEl;
+            this._mhsaTokenMatrixQueryMatrixEl = queryMatrixEl;
+            this._mhsaTokenMatrixRowEls = new Array(previewData.rowCount).fill(null);
+            this._mhsaTokenMatrixQueryRowEls = new Array(previewData.qRowCount).fill(null);
+
+            const createCaptionEl = (label, dims) => {
+                const captionEl = document.createElement('div');
+                captionEl.className = 'mhsa-token-matrix-preview__caption';
+                const labelLineEl = document.createElement('div');
+                labelLineEl.className = 'mhsa-token-matrix-preview__caption-label';
+                labelLineEl.textContent = label;
+                const dimsLineEl = document.createElement('div');
+                dimsLineEl.className = 'mhsa-token-matrix-preview__caption-dims';
+                dimsLineEl.textContent = dims;
+                captionEl.append(labelLineEl, dimsLineEl);
+                return captionEl;
+            };
+
+            previewData.rows.forEach((rowData) => {
+                const rowEl = document.createElement('div');
+                rowEl.className = 'mhsa-token-matrix-preview__row';
+                rowEl.dataset.row = String(rowData.rowIndex);
+
+                const labelEl = document.createElement('div');
+                labelEl.className = 'mhsa-token-matrix-preview__row-label';
+                labelEl.textContent = rowData.tokenLabel;
+
+                const barEl = document.createElement('div');
+                barEl.className = 'mhsa-token-matrix-preview__row-bar';
+                barEl.dataset.row = String(rowData.rowIndex);
+                barEl.style.background = rowData.gradientCss || 'none';
+
+                rowEl.append(labelEl, barEl);
+                xMatrixEl.appendChild(rowEl);
+                this._mhsaTokenMatrixRowEls[rowData.rowIndex] = { rowEl, labelEl, barEl };
+            });
+
+            previewData.queryRows.forEach((rowData) => {
+                const queryRowEl = document.createElement('div');
+                queryRowEl.className = 'mhsa-token-matrix-preview__query-row';
+                queryRowEl.dataset.row = String(rowData.rowIndex);
+
+                const queryRowBarEl = document.createElement('div');
+                queryRowBarEl.className = 'mhsa-token-matrix-preview__query-row-bar';
+                queryRowBarEl.style.background = rowData.gradientCss
+                    || `linear-gradient(90deg, ${colorToRgbaCss(MHA_FINAL_Q_COLOR, 0.62)}, ${colorToRgbaCss(MHA_FINAL_Q_COLOR, 0.88)})`;
+
+                queryRowEl.appendChild(queryRowBarEl);
+                queryMatrixEl.appendChild(queryRowEl);
+                this._mhsaTokenMatrixQueryRowEls[rowData.rowIndex] = queryRowEl;
+            });
+
+            xBlockEl.append(
+                xMatrixEl,
+                createCaptionEl('X_ln', `(${previewData.rowCount}, ${previewData.columnCount})`)
+            );
+            weightBlockEl.append(
+                weightCardEl,
+                createCaptionEl('W_q', `(${previewData.qWeightRowCount}, ${previewData.qWeightColumnCount})`)
+            );
+            biasBlockEl.append(
+                biasBarEl,
+                createCaptionEl('b_q', `(1, ${previewData.qColumnCount})`)
+            );
+            queryBlockEl.append(
+                queryMatrixEl,
+                createCaptionEl('Q', `(${previewData.qRowCount}, ${previewData.qColumnCount})`)
+            );
+
+            projectionStageEl.append(
+                weightBlockEl,
+                plusEl,
+                biasBlockEl,
+                equalsEl,
+                queryBlockEl
+            );
+
+            stageEl.append(xBlockEl, projectionStageEl);
+            fragment.appendChild(stageEl);
+
+            this.mhsaTokenMatrixBody.replaceChildren(fragment);
+            this.mhsaTokenMatrixBody.hidden = false;
+            this._setMhsaTokenMatrixStatus('');
+        } catch (error) {
+            if (renderToken !== this._mhsaTokenMatrixRenderToken) return;
+            console.warn('Failed to build MHSA token matrix preview:', error);
+            this._setMhsaTokenMatrixStatus('Failed to load token matrix.');
+        }
+    }
+
     _onDocumentPointerDown(event) {
         if (!Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return;
         const eventTarget = event.target instanceof Element ? event.target : null;
@@ -6970,6 +7418,15 @@ class SelectionPanel {
             && !matrixCell.classList.contains('is-empty')
             && !matrixCell.classList.contains('is-hidden')
         );
+        const mhsaTokenMatrixRoot = resolveClosest('#detailMhsaTokenMatrixBody');
+        const insideMhsaTokenMatrix = !!(
+            this.mhsaTokenMatrixBody
+            && mhsaTokenMatrixRoot === this.mhsaTokenMatrixBody
+        );
+        const mhsaTokenMatrixCell = insideMhsaTokenMatrix
+            ? resolveClosest('.mhsa-token-matrix-preview__row-bar')
+            : null;
+        const validMhsaTokenMatrixCell = !!mhsaTokenMatrixCell;
         const shouldClearPinnedAttention = this.isOpen
             && this._attentionPinned
             && !hitPanelTokenNavChip
@@ -6977,6 +7434,14 @@ class SelectionPanel {
             && (!insideAttentionMatrix || !validMatrixCell);
         if (shouldClearPinnedAttention) {
             this._clearPinnedAttention({ clearSelectionSummary: true });
+        }
+        const shouldClearPinnedMhsaTokenMatrix = this.isOpen
+            && this._mhsaTokenMatrixPinned
+            && !hitPanelTokenNavChip
+            && !hitPanelAttentionScoreLink
+            && (!insideMhsaTokenMatrix || !validMhsaTokenMatrixCell);
+        if (shouldClearPinnedMhsaTokenMatrix) {
+            this._clearPinnedMhsaTokenMatrix();
         }
         const panelHit = (hit && this.panel && this.panel.contains(hit))
             ? hit
@@ -7165,10 +7630,14 @@ class SelectionPanel {
             : null;
         const showInfoPreview = !!infoType;
         this.panel?.classList.toggle('is-info-preview', showInfoPreview);
+        this.panel?.classList.toggle('is-mhsa-info-preview', infoType === 'mhsa');
         if (!this.infoPreview) return;
 
         this.infoPreview.hidden = !showInfoPreview;
         this.infoPreview.setAttribute('aria-hidden', showInfoPreview ? 'false' : 'true');
+        if (infoType !== 'mhsa') {
+            this._hideMhsaTokenMatrixPreview();
+        }
         if (!showInfoPreview) return;
 
         const setText = (element, value) => {
@@ -7181,19 +7650,20 @@ class SelectionPanel {
         };
 
         if (infoType === 'mhsa') {
-            setText(this.infoPreviewEyebrow, 'Attention mechanism');
-            setText(this.infoPreviewTitle, 'Multi-Head Self-Attention');
-            setText(this.infoPreviewSummary, 'Each token scores the visible context and mixes the resulting value vectors into one attention update per head.');
-            setText(this.infoPreviewPhase, 'QK^T -> softmax -> V');
-            setStep(this.infoPreviewStepPrefill, 'Q / K / V', true);
-            setStep(this.infoPreviewStepCache, 'Score', true);
-            setStep(this.infoPreviewStepDecode, 'Mix', true);
-            setText(this.infoPreviewCellStoreLabel, 'Each head');
-            setText(this.infoPreviewCellPassLabel, 'What it computes');
-            setText(this.infoPreviewCellBenefitLabel, 'Why multi-head');
-            setText(this.infoPreviewCellStore, 'Projects the same token state into its own query, key, and value space.');
-            setText(this.infoPreviewCellPass, 'Compares queries against keys, applies softmax to get read weights, and uses those weights to blend value vectors.');
-            setText(this.infoPreviewCellBenefit, 'Different heads can focus on different token relationships before their outputs are concatenated and projected back.');
+            setText(this.infoPreviewEyebrow, '');
+            setText(this.infoPreviewTitle, '');
+            setText(this.infoPreviewSummary, '');
+            setText(this.infoPreviewPhase, '');
+            setStep(this.infoPreviewStepPrefill, '', false);
+            setStep(this.infoPreviewStepCache, '', false);
+            setStep(this.infoPreviewStepDecode, '', false);
+            setText(this.infoPreviewCellStoreLabel, '');
+            setText(this.infoPreviewCellPassLabel, '');
+            setText(this.infoPreviewCellBenefitLabel, '');
+            setText(this.infoPreviewCellStore, '');
+            setText(this.infoPreviewCellPass, '');
+            setText(this.infoPreviewCellBenefit, '');
+            this._renderMhsaTokenMatrixPreview();
             return;
         }
 
@@ -7233,6 +7703,7 @@ class SelectionPanel {
         this.hudPanel?.classList.add('detail-open');
         this.panel.setAttribute('aria-hidden', 'false');
         this._updateMobileState();
+        this._updateMhsaFullscreenToggle();
         this._updateResizeHandleState();
         this._syncSceneShift();
         if (!wasOpen) {
@@ -7255,7 +7726,11 @@ class SelectionPanel {
 
     close({ clearHistory = true } = {}) {
         if (!this.isReady) return;
+        this._isMhsaInfoSelectionActive = false;
+        this._mhsaFullscreenActive = false;
         this.isOpen = false;
+        this._syncMhsaViewRoute(false);
+        this._syncMhsaFullscreenDocumentState();
         this._stopLoop();
         this._closeGeluDetailPreview({ restoreSelection: false, restartLoop: false });
         this._currentSelectionDescription = '';
@@ -7278,11 +7753,13 @@ class SelectionPanel {
         this.panel.classList.remove('is-info-preview');
         this.panel.classList.remove('is-preview-hidden');
         this.panel.classList.remove('is-gelu-view-open');
+        this.panel.classList.remove('is-mhsa-fullscreen');
         this.hudStack?.classList.remove('detail-open');
         this.hudPanel?.classList.remove('detail-open');
         this.panel.setAttribute('aria-hidden', 'true');
         this._setHoverLabelSuppression(false);
         this._updateMobileState();
+        this._updateMhsaFullscreenToggle();
         this._updateResizeHandleState();
         this._syncSceneShift();
         if (this.description) setDescriptionContent(this.description, '');
@@ -7656,7 +8133,6 @@ class SelectionPanel {
         }
 
         const fragment = document.createDocumentFragment();
-        const colorState = resolvePromptTokenChipColorState(entries);
 
         entries.forEach((entry, index) => {
             const chip = document.createElement('span');
@@ -7664,7 +8140,7 @@ class SelectionPanel {
             chip.className = 'detail-subtitle-token-chip detail-token-nav-chip detail-prompt-context-token';
             if (isSelected) {
                 chip.classList.add('detail-prompt-context-token--selected');
-                applyTokenChipColors(chip, entry, index, { lookup: colorState.lookup });
+                applyTokenChipColors(chip, entry, index);
             }
             chip.textContent = entry.displayText;
             chip.title = entry.titleText || '';
@@ -7842,6 +8318,26 @@ class SelectionPanel {
         const lower = label.toLowerCase();
         const isKvCacheInfo = isKvCacheInfoSelection(label, selection);
         const isMhsaInfo = isMhsaInfoSelection(label, selection);
+        this._isMhsaInfoSelectionActive = isMhsaInfo;
+        this._syncMhsaViewRoute(isMhsaInfo);
+        if (!isMhsaInfo && this._mhsaFullscreenActive) {
+            this._mhsaFullscreenActive = false;
+            this.panel?.classList.remove('is-mhsa-fullscreen');
+            this._syncMhsaFullscreenDocumentState();
+            this._updateResizeHandleState();
+            this._syncSceneShift({ immediate: true });
+            this._scheduleResize();
+        }
+        this._updateMhsaFullscreenToggle();
+        const shouldShowMhsaInfoAction = !isMhsaInfo
+            && (
+                isSelfAttentionSelection(label, selection)
+                || isWeightedSumSelection(label, selection)
+                || isValueSelection(label, selection)
+                || isQkvMatrixLabel(label)
+                || lower.includes('output projection matrix')
+                || lower.includes('self-attention')
+            );
         const kvCachePhase = isKvCacheInfo
             ? normalizeKvCachePhase(findUserDataString(selection, 'kvCachePhase'))
             : 'prefill';
@@ -7850,9 +8346,9 @@ class SelectionPanel {
             : '';
         const infoPreviewConfig = isKvCacheInfo
             ? { type: 'kvCache', phase: kvCachePhase }
-            : null;
-        const hidePreviewForSelection = isKvCacheInfo || isMhsaInfo;
-        const suppressScenePreview = hidePreviewForSelection;
+            : (isMhsaInfo ? { type: 'mhsa' } : null);
+        const hidePreviewForSelection = isKvCacheInfo;
+        const suppressScenePreview = isKvCacheInfo || isMhsaInfo;
         const previewSelectionKey = suppressScenePreview ? null : buildSelectionPreviewKey(label, selection);
         const metadata = resolveMetadata(label, selection.kind, selection);
         const logitHeader = resolveLogitSelectionHeader(label, selection);
@@ -7907,7 +8403,7 @@ class SelectionPanel {
                     : 'Enabled • Prompt pre-fill pass';
             } else if (isMhsaInfo) {
                 this.subtitle.classList.remove('detail-subtitle--qkv-token-context');
-                this.subtitle.textContent = `Scaled dot-product attention across ${ATTENTION_HEAD_COUNT} heads`;
+                this.subtitle.textContent = '';
             } else if (isTokenChipSelection) {
                 const subtitleParts = [];
                 const tokenId = Number.isFinite(vectorSubtitleMetadata?.tokenId)
@@ -8005,7 +8501,7 @@ class SelectionPanel {
             } else if (isKvCacheInfo) {
                 this._setSubtitleSecondaryText(`Current phase: ${kvCachePhaseLabel}`);
             } else if (isMhsaInfo) {
-                this._setSubtitleSecondaryText('QK^T -> softmax -> V');
+                this._setSubtitleSecondaryText('');
             } else if (logitHeader) {
                 this._setSubtitleSecondaryText('');
             } else if (isPositionEmbeddingSelection) {
@@ -8072,6 +8568,7 @@ class SelectionPanel {
             this._currentSelectionDescription = getDescriptionPlainText(desc || '');
             setDescriptionContent(this.description, desc || '');
             setDescriptionGeluAction(this.description, isMlpMatrixSelectionLabel(label));
+            setDescriptionMhsaInfoAction(this.description, shouldShowMhsaInfoAction);
         } else {
             this._currentSelectionDescription = '';
         }
@@ -8194,6 +8691,9 @@ class SelectionPanel {
         this._updateAttentionPreview(selection);
         this._applyTokenChipHoverState();
         this.open();
+        if (isMhsaInfo && !this._isSmallScreen()) {
+            this._setMhsaFullscreen(true);
+        }
         if (scrollPanelToTop) {
             this._scrollPanelToTop();
         }

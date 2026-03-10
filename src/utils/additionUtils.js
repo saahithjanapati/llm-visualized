@@ -762,8 +762,14 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
         }
 
         if (lane) {
-            lane.originalVec    = targetVec;
-            lane.postAdditionVec= targetVec;
+            const promotedTarget = targetVec || lane.postAdditionVec || lane.originalVec || sourceVec || null;
+            if (promotedTarget) {
+                // Always carry the summed residual forward through the lane.
+                // The LN2 phase gate below only controls phase transitions, not
+                // which vector object the next stage/layer should inherit.
+                lane.originalVec = promotedTarget;
+                lane.postAdditionVec = promotedTarget;
+            }
             if (lane.ln2Phase !== 'done') {
                 lane.ln2Phase = 'preRise';
                 if (lane.layer && typeof lane.layer._emitProgress === 'function') lane.layer._emitProgress();

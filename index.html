@@ -94,12 +94,24 @@
                     <div id="detailSubtitle" class="detail-subtitle"></div>
                     <div id="detailSubtitleSecondary" class="detail-subtitle"></div>
                 </div>
-                <button id="detailClose" type="button" aria-label="Close details">×</button>
+                <div class="detail-header-actions">
+                    <button id="detailClose" type="button" aria-label="Close details">×</button>
+                </div>
             </div>
             <div class="detail-preview">
                 <canvas id="detailCanvas"></canvas>
                 <div id="detailInfoPreview" class="detail-info-preview" aria-hidden="true" hidden>
                     <div class="detail-info-preview__panel">
+                        <div id="detailMhsaTokenMatrixPreview" class="mhsa-token-matrix-preview" aria-hidden="true" hidden>
+                            <div id="detailMhsaTokenMatrixStatus" class="mhsa-token-matrix-preview__status">Loading token matrix…</div>
+                            <div id="detailMhsaTokenMatrixHover" class="mhsa-token-matrix-preview__hover" data-empty="true" hidden>
+                                <span id="detailMhsaTokenMatrixHoverToken" class="mhsa-token-matrix-preview__hover-item">Token --</span>
+                                <span id="detailMhsaTokenMatrixHoverDim" class="mhsa-token-matrix-preview__hover-item">Dim --</span>
+                                <span id="detailMhsaTokenMatrixHoverBand" class="mhsa-token-matrix-preview__hover-item">Band --</span>
+                                <span id="detailMhsaTokenMatrixHoverValue" class="mhsa-token-matrix-preview__hover-item">Value --</span>
+                            </div>
+                            <div id="detailMhsaTokenMatrixBody" class="mhsa-token-matrix-preview__body" hidden></div>
+                        </div>
                         <div id="detailInfoPreviewEyebrow" class="detail-info-preview__eyebrow">Transformer inference</div>
                         <div class="detail-info-preview__header">
                             <div class="detail-info-preview__title-group">
