@@ -79,6 +79,7 @@ import {
 } from './kvCacheInfoUtils.js';
 import {
     buildMhsaInfoSelection,
+    formatMhsaInfoTitle,
     isMhsaInfoSelection
 } from './mhsaInfoUtils.js';
 import {
@@ -2612,6 +2613,7 @@ class SelectionPanel {
         this._clearAttentionHover = this._clearAttentionHover.bind(this);
         this._onMhsaTokenMatrixPointerMove = this._onMhsaTokenMatrixPointerMove.bind(this);
         this._onMhsaTokenMatrixPointerDown = this._onMhsaTokenMatrixPointerDown.bind(this);
+        this._onMhsaTokenMatrixPointerUp = this._onMhsaTokenMatrixPointerUp.bind(this);
         this._clearMhsaTokenMatrixHover = this._clearMhsaTokenMatrixHover.bind(this);
         this._onPanelPointerDown = this._onPanelPointerDown.bind(this);
         this._onPanelPointerEnter = this._onPanelPointerEnter.bind(this);
@@ -2685,13 +2687,24 @@ class SelectionPanel {
         this._mhsaTokenMatrixHoverRow = null;
         this._mhsaTokenMatrixHoverCol = null;
         this._mhsaTokenMatrixHoverKind = null;
+        this._mhsaTokenMatrixHoverSource = null;
+        this._mhsaTokenMatrixHoverStage = null;
         this._mhsaTokenMatrixPinned = false;
         this._mhsaTokenMatrixPinnedRow = null;
         this._mhsaTokenMatrixPinnedCol = null;
         this._mhsaTokenMatrixRowEls = [];
         this._mhsaTokenMatrixQueryRowEls = [];
-        this._mhsaTokenMatrixXMatrixEl = null;
-        this._mhsaTokenMatrixQueryMatrixEl = null;
+        this._mhsaTokenMatrixXMatrixEl = [];
+        this._mhsaTokenMatrixQueryMatrixEl = [];
+        this._mhsaTokenMatrixPan = {
+            active: false,
+            pointerId: null,
+            startX: 0,
+            startY: 0,
+            startScrollLeft: 0,
+            startScrollTop: 0,
+            moved: false
+        };
         this._legendHoverState = {
             kind: null,
             ratio: null
@@ -2738,6 +2751,8 @@ class SelectionPanel {
             this.mhsaTokenMatrixBody.addEventListener('pointerover', this._onMhsaTokenMatrixPointerMove);
             this.mhsaTokenMatrixBody.addEventListener('pointermove', this._onMhsaTokenMatrixPointerMove);
             this.mhsaTokenMatrixBody.addEventListener('pointerdown', this._onMhsaTokenMatrixPointerDown);
+            this.mhsaTokenMatrixBody.addEventListener('pointerup', this._onMhsaTokenMatrixPointerUp);
+            this.mhsaTokenMatrixBody.addEventListener('pointercancel', this._onMhsaTokenMatrixPointerUp);
             this.mhsaTokenMatrixBody.addEventListener('pointerleave', this._clearMhsaTokenMatrixHover);
         }
         [this.vectorLegendBar, this.attentionLegend].filter(Boolean).forEach((bar) => {
@@ -5547,7 +5562,14 @@ class SelectionPanel {
     }
 
     _openMhsaInfoFromAction() {
-        this.showSelection(buildMhsaInfoSelection(), { scrollPanelToTop: true });
+        const sourceSelection = this._lastSelection;
+        const layerIndex = findUserDataNumber(sourceSelection, 'layerIndex');
+        const headIndex = findUserDataNumber(sourceSelection, 'headIndex');
+        const mhsaSelection = buildMhsaInfoSelection({
+            layerIndex: Number.isFinite(layerIndex) ? Math.floor(layerIndex) : null,
+            headIndex: Number.isFinite(headIndex) ? Math.floor(headIndex) : null
+        });
+        this.showSelection(mhsaSelection, { scrollPanelToTop: true });
         return true;
     }
 
@@ -7103,46 +7125,82 @@ class SelectionPanel {
         this.mhsaTokenMatrixHover.setAttribute('aria-hidden', 'true');
     }
 
-    _applyMhsaRowFocus(rowIndex) {
+    _applyMhsaRowFocus(rowIndex, options = {}) {
         if (!this._mhsaTokenMatrixRowEls.length || !Number.isFinite(rowIndex)) return;
-        if (this._mhsaTokenMatrixHoverKind === 'row' && this._mhsaTokenMatrixHoverRow === rowIndex) return;
+        const hoverSource = options?.sourceType === 'query' ? 'query' : 'x';
+        const hoverStage = Number.isFinite(options?.stageIndex) ? Math.floor(options.stageIndex) : null;
+        if (
+            this._mhsaTokenMatrixHoverKind === 'row'
+            && this._mhsaTokenMatrixHoverRow === rowIndex
+            && this._mhsaTokenMatrixHoverSource === hoverSource
+            && this._mhsaTokenMatrixHoverStage === hoverStage
+        ) {
+            return;
+        }
+        const broadcastAcrossStages = hoverSource === 'x' || !Number.isFinite(hoverStage);
         this._mhsaTokenMatrixHoverKind = 'row';
         this._mhsaTokenMatrixHoverRow = rowIndex;
         this._mhsaTokenMatrixHoverCol = null;
         this._mhsaTokenMatrixHoverCell = null;
+        this._mhsaTokenMatrixHoverSource = hoverSource;
+        this._mhsaTokenMatrixHoverStage = hoverStage;
         this._mhsaTokenMatrixBody?.classList.add('has-focus-row');
         this._mhsaTokenMatrixBody?.classList.remove('has-focus-column');
-        this._mhsaTokenMatrixXMatrixEl?.classList.add('has-focus');
-        this._mhsaTokenMatrixQueryMatrixEl?.classList.add('has-focus');
-        this._mhsaTokenMatrixRowEls.forEach((rowState, index) => {
-            const isActive = index === rowIndex;
-            rowState?.rowEl?.classList.toggle('is-active', isActive);
-            rowState?.rowEl?.classList.toggle('is-dimmed', !isActive);
-            rowState?.labelEl?.classList.toggle('is-highlighted', isActive);
+        this._mhsaTokenMatrixXMatrixEl.forEach((matrixEl, stageIndex) => {
+            const isFocused = broadcastAcrossStages || stageIndex === hoverStage;
+            matrixEl?.classList.toggle('has-focus', isFocused);
         });
-        this._mhsaTokenMatrixQueryRowEls.forEach((rowEl, index) => {
-            const isActive = index === rowIndex;
-            rowEl?.classList.toggle('is-active', isActive);
-            rowEl?.classList.toggle('is-dimmed', !isActive);
+        this._mhsaTokenMatrixQueryMatrixEl.forEach((matrixEl, stageIndex) => {
+            const isFocused = broadcastAcrossStages || stageIndex === hoverStage;
+            matrixEl?.classList.toggle('has-focus', isFocused);
+        });
+        this._mhsaTokenMatrixRowEls.forEach((rowStates, index) => {
+            const entries = Array.isArray(rowStates) ? rowStates : [rowStates];
+            entries.forEach((rowState) => {
+                const isFocusedStage = broadcastAcrossStages || rowState?.stageIndex === hoverStage;
+                const isActive = isFocusedStage && index === rowIndex;
+                const isDimmed = isFocusedStage && index !== rowIndex;
+                rowState?.rowEl?.classList.toggle('is-active', isActive);
+                rowState?.rowEl?.classList.toggle('is-dimmed', isDimmed);
+                rowState?.labelEl?.classList.toggle('is-highlighted', isActive);
+            });
+        });
+        this._mhsaTokenMatrixQueryRowEls.forEach((rowStates, index) => {
+            const entries = Array.isArray(rowStates) ? rowStates : [rowStates];
+            entries.forEach((rowState) => {
+                const isFocusedStage = broadcastAcrossStages || rowState?.stageIndex === hoverStage;
+                const isActive = isFocusedStage && index === rowIndex;
+                const isDimmed = isFocusedStage && index !== rowIndex;
+                rowState?.rowEl?.classList.toggle('is-active', isActive);
+                rowState?.rowEl?.classList.toggle('is-dimmed', isDimmed);
+            });
         });
     }
 
     _clearMhsaTokenMatrixHover(force = false) {
         void force;
         this._mhsaTokenMatrixBody?.classList.remove('has-focus-row', 'has-focus-column');
-        this._mhsaTokenMatrixXMatrixEl?.classList.remove('has-focus');
-        this._mhsaTokenMatrixQueryMatrixEl?.classList.remove('has-focus');
-        this._mhsaTokenMatrixRowEls.forEach((rowState) => {
-            rowState?.rowEl?.classList.remove('is-active', 'is-dimmed');
-            rowState?.labelEl?.classList.remove('is-highlighted');
+        this._mhsaTokenMatrixXMatrixEl.forEach((matrixEl) => matrixEl?.classList.remove('has-focus'));
+        this._mhsaTokenMatrixQueryMatrixEl.forEach((matrixEl) => matrixEl?.classList.remove('has-focus'));
+        this._mhsaTokenMatrixRowEls.forEach((rowStates) => {
+            const entries = Array.isArray(rowStates) ? rowStates : [rowStates];
+            entries.forEach((rowState) => {
+                rowState?.rowEl?.classList.remove('is-active', 'is-dimmed');
+                rowState?.labelEl?.classList.remove('is-highlighted');
+            });
         });
-        this._mhsaTokenMatrixQueryRowEls.forEach((rowEl) => {
-            rowEl?.classList.remove('is-active', 'is-dimmed');
+        this._mhsaTokenMatrixQueryRowEls.forEach((rowStates) => {
+            const entries = Array.isArray(rowStates) ? rowStates : [rowStates];
+            entries.forEach((rowState) => {
+                rowState?.rowEl?.classList.remove('is-active', 'is-dimmed');
+            });
         });
         this._mhsaTokenMatrixHoverCell = null;
         this._mhsaTokenMatrixHoverKind = null;
         this._mhsaTokenMatrixHoverRow = null;
         this._mhsaTokenMatrixHoverCol = null;
+        this._mhsaTokenMatrixHoverSource = null;
+        this._mhsaTokenMatrixHoverStage = null;
         this._setMhsaTokenMatrixHoverValue(null);
     }
 
@@ -7154,21 +7212,50 @@ class SelectionPanel {
     }
 
     _onMhsaTokenMatrixPointerMove(event) {
+        if (this._mhsaTokenMatrixPan?.active && this.mhsaTokenMatrixBody) {
+            if (
+                Number.isFinite(this._mhsaTokenMatrixPan.pointerId)
+                && Number.isFinite(event?.pointerId)
+                && event.pointerId !== this._mhsaTokenMatrixPan.pointerId
+            ) {
+                return;
+            }
+            const deltaX = Number.isFinite(event?.clientX) ? event.clientX - this._mhsaTokenMatrixPan.startX : 0;
+            const deltaY = Number.isFinite(event?.clientY) ? event.clientY - this._mhsaTokenMatrixPan.startY : 0;
+            if (Math.abs(deltaX) > 2 || Math.abs(deltaY) > 2) {
+                this._mhsaTokenMatrixPan.moved = true;
+            }
+            this.mhsaTokenMatrixBody.scrollLeft = this._mhsaTokenMatrixPan.startScrollLeft - deltaX;
+            this.mhsaTokenMatrixBody.scrollTop = this._mhsaTokenMatrixPan.startScrollTop - deltaY;
+            if (this._mhsaTokenMatrixPan.moved) {
+                this._clearMhsaTokenMatrixHover(true);
+            }
+            event?.preventDefault?.();
+            return;
+        }
         const target = event?.target instanceof Element ? event.target : null;
         if (!target || !this.mhsaTokenMatrixBody) return;
         const rowEl = target.closest('.mhsa-token-matrix-preview__row');
         if (rowEl && this.mhsaTokenMatrixBody.contains(rowEl)) {
             const rowIndex = Number(rowEl.dataset.row);
+            const stageIndex = Number(rowEl.dataset.stage);
             if (Number.isFinite(rowIndex)) {
-                this._applyMhsaRowFocus(rowIndex);
+                this._applyMhsaRowFocus(rowIndex, {
+                    sourceType: 'x',
+                    stageIndex: Number.isFinite(stageIndex) ? stageIndex : null
+                });
                 return;
             }
         }
         const queryRowEl = target.closest('.mhsa-token-matrix-preview__query-row');
         if (queryRowEl && this.mhsaTokenMatrixBody.contains(queryRowEl)) {
             const rowIndex = Number(queryRowEl.dataset.row);
+            const stageIndex = Number(queryRowEl.dataset.stage);
             if (Number.isFinite(rowIndex)) {
-                this._applyMhsaRowFocus(rowIndex);
+                this._applyMhsaRowFocus(rowIndex, {
+                    sourceType: 'query',
+                    stageIndex: Number.isFinite(stageIndex) ? stageIndex : null
+                });
                 return;
             }
         }
@@ -7176,7 +7263,57 @@ class SelectionPanel {
     }
 
     _onMhsaTokenMatrixPointerDown(event) {
-        void event;
+        if (!this.mhsaTokenMatrixBody || (Number.isFinite(event?.button) && event.button !== 0)) return;
+        const body = this.mhsaTokenMatrixBody;
+        const canPan = body.scrollHeight > body.clientHeight + 1 || body.scrollWidth > body.clientWidth + 1;
+        if (!canPan) return;
+        this._mhsaTokenMatrixPan.active = true;
+        this._mhsaTokenMatrixPan.pointerId = Number.isFinite(event?.pointerId) ? event.pointerId : null;
+        this._mhsaTokenMatrixPan.startX = Number.isFinite(event?.clientX) ? event.clientX : 0;
+        this._mhsaTokenMatrixPan.startY = Number.isFinite(event?.clientY) ? event.clientY : 0;
+        this._mhsaTokenMatrixPan.startScrollLeft = body.scrollLeft;
+        this._mhsaTokenMatrixPan.startScrollTop = body.scrollTop;
+        this._mhsaTokenMatrixPan.moved = false;
+        body.classList.add('is-panning');
+        if (Number.isFinite(event?.pointerId) && typeof body.setPointerCapture === 'function') {
+            try {
+                body.setPointerCapture(event.pointerId);
+            } catch (_) { /* no-op */ }
+        }
+        event?.preventDefault?.();
+    }
+
+    _onMhsaTokenMatrixPointerUp(event) {
+        if (!this._mhsaTokenMatrixPan?.active) return;
+        if (
+            Number.isFinite(this._mhsaTokenMatrixPan.pointerId)
+            && Number.isFinite(event?.pointerId)
+            && event.pointerId !== this._mhsaTokenMatrixPan.pointerId
+        ) {
+            return;
+        }
+        this._cancelMhsaTokenMatrixPan();
+    }
+
+    _cancelMhsaTokenMatrixPan() {
+        const body = this.mhsaTokenMatrixBody;
+        if (Number.isFinite(this._mhsaTokenMatrixPan?.pointerId) && typeof body?.releasePointerCapture === 'function') {
+            try {
+                body.releasePointerCapture(this._mhsaTokenMatrixPan.pointerId);
+            } catch (_) { /* no-op */ }
+        }
+        if (body) {
+            body.classList.remove('is-panning');
+        }
+        if (this._mhsaTokenMatrixPan) {
+            this._mhsaTokenMatrixPan.active = false;
+            this._mhsaTokenMatrixPan.pointerId = null;
+            this._mhsaTokenMatrixPan.startX = 0;
+            this._mhsaTokenMatrixPan.startY = 0;
+            this._mhsaTokenMatrixPan.startScrollLeft = 0;
+            this._mhsaTokenMatrixPan.startScrollTop = 0;
+            this._mhsaTokenMatrixPan.moved = false;
+        }
     }
 
     _hideMhsaTokenMatrixPreview() {
@@ -7184,14 +7321,17 @@ class SelectionPanel {
         this._mhsaTokenMatrixData = null;
         this._mhsaTokenMatrixRowEls = [];
         this._mhsaTokenMatrixQueryRowEls = [];
-        this._mhsaTokenMatrixXMatrixEl = null;
-        this._mhsaTokenMatrixQueryMatrixEl = null;
+        this._mhsaTokenMatrixXMatrixEl = [];
+        this._mhsaTokenMatrixQueryMatrixEl = [];
+        this._cancelMhsaTokenMatrixPan();
         this._clearPinnedMhsaTokenMatrix();
         if (this.mhsaTokenMatrixBody) {
             this.mhsaTokenMatrixBody.hidden = true;
             this.mhsaTokenMatrixBody.classList.remove('has-focus-row', 'has-focus-column');
             this.mhsaTokenMatrixBody.style.removeProperty('--mhsa-token-matrix-rows');
             this.mhsaTokenMatrixBody.style.removeProperty('--mhsa-token-matrix-band-count');
+            this.mhsaTokenMatrixBody.scrollLeft = 0;
+            this.mhsaTokenMatrixBody.scrollTop = 0;
             this.mhsaTokenMatrixBody.replaceChildren();
         }
         this._setMhsaTokenMatrixHoverValue(null);
@@ -7209,8 +7349,8 @@ class SelectionPanel {
         this._mhsaTokenMatrixData = null;
         this._mhsaTokenMatrixRowEls = [];
         this._mhsaTokenMatrixQueryRowEls = [];
-        this._mhsaTokenMatrixXMatrixEl = null;
-        this._mhsaTokenMatrixQueryMatrixEl = null;
+        this._mhsaTokenMatrixXMatrixEl = [];
+        this._mhsaTokenMatrixQueryMatrixEl = [];
         this._clearPinnedMhsaTokenMatrix();
         this.mhsaTokenMatrixPreview.hidden = false;
         this.mhsaTokenMatrixPreview.setAttribute('aria-hidden', 'false');
@@ -7229,19 +7369,25 @@ class SelectionPanel {
         }
 
         try {
-            const previewData = buildMhsaTokenMatrixPreviewData({
+            const layerIndex = findUserDataNumber(this._lastSelection, 'layerIndex');
+            const headIndex = findUserDataNumber(this._lastSelection, 'headIndex');
+            const previewOptions = {
                 activationSource: this.activationSource,
                 sampleStep: 64
-            });
+            };
+            if (Number.isFinite(layerIndex)) {
+                previewOptions.layerIndex = Math.floor(layerIndex);
+            }
+            if (Number.isFinite(headIndex)) {
+                previewOptions.headIndex = Math.floor(headIndex);
+            }
+            const previewData = buildMhsaTokenMatrixPreviewData(previewOptions);
             if (
                 !previewData?.rowCount
                 || !previewData?.columnCount
-                || !previewData?.qWeightRowCount
-                || !previewData?.qWeightColumnCount
-                || !previewData?.qRowCount
-                || !previewData?.qColumnCount
-                || !Array.isArray(previewData.queryRows)
                 || !Array.isArray(previewData.rows)
+                || !Array.isArray(previewData.projections)
+                || !previewData.projections.length
             ) {
                 this._setMhsaTokenMatrixStatus('Token matrix unavailable.');
                 return;
@@ -7251,120 +7397,343 @@ class SelectionPanel {
             this.mhsaTokenMatrixBody.style.setProperty('--mhsa-token-matrix-rows', String(previewData.rowCount));
             this.mhsaTokenMatrixBody.style.setProperty('--mhsa-token-matrix-band-count', String(previewData.bandCount || 1));
             const fragment = document.createDocumentFragment();
-            const stageEl = document.createElement('div');
-            stageEl.className = 'mhsa-token-matrix-preview__stage';
-            const projectionStageEl = document.createElement('div');
-            projectionStageEl.className = 'mhsa-token-matrix-preview__projection-stage';
-            const xBlockEl = document.createElement('div');
-            xBlockEl.className = 'mhsa-token-matrix-preview__x-block';
-            const xMatrixEl = document.createElement('div');
-            xMatrixEl.className = 'mhsa-token-matrix-preview__x-matrix';
-            const weightBlockEl = document.createElement('div');
-            weightBlockEl.className = 'mhsa-token-matrix-preview__weight-block';
-            const weightCardEl = document.createElement('div');
-            weightCardEl.className = 'mhsa-token-matrix-preview__weight-card';
-            weightCardEl.style.background = previewData.qWeightGradientCss
-                || `linear-gradient(180deg, ${colorToRgbaCss(MHA_FINAL_Q_COLOR, 0.48)}, ${colorToRgbaCss(MHA_FINAL_Q_COLOR, 0.82)})`;
-            const weightCardLabelEl = document.createElement('div');
-            weightCardLabelEl.className = 'mhsa-token-matrix-preview__weight-card-label';
-            weightCardLabelEl.textContent = 'W_q';
-            weightCardEl.appendChild(weightCardLabelEl);
-            const plusEl = document.createElement('div');
-            plusEl.className = 'mhsa-token-matrix-preview__operator';
-            plusEl.textContent = '+';
-            const biasBlockEl = document.createElement('div');
-            biasBlockEl.className = 'mhsa-token-matrix-preview__bias-block';
-            const biasBarEl = document.createElement('div');
-            biasBarEl.className = 'mhsa-token-matrix-preview__bias-bar';
-            biasBarEl.style.background = previewData.qBiasGradientCss || `linear-gradient(90deg, ${colorToRgbaCss(MHA_FINAL_Q_COLOR, 0.62)}, ${colorToRgbaCss(MHA_FINAL_Q_COLOR, 0.88)})`;
-            const equalsEl = document.createElement('div');
-            equalsEl.className = 'mhsa-token-matrix-preview__operator';
-            equalsEl.textContent = '=';
-            const queryBlockEl = document.createElement('div');
-            queryBlockEl.className = 'mhsa-token-matrix-preview__query-block';
-            const queryMatrixEl = document.createElement('div');
-            queryMatrixEl.className = 'mhsa-token-matrix-preview__query-matrix';
-            this._mhsaTokenMatrixXMatrixEl = xMatrixEl;
-            this._mhsaTokenMatrixQueryMatrixEl = queryMatrixEl;
-            this._mhsaTokenMatrixRowEls = new Array(previewData.rowCount).fill(null);
-            this._mhsaTokenMatrixQueryRowEls = new Array(previewData.qRowCount).fill(null);
+            const stageStackEl = document.createElement('div');
+            stageStackEl.className = 'mhsa-token-matrix-preview__stack';
+            this._mhsaTokenMatrixXMatrixEl = [];
+            this._mhsaTokenMatrixQueryMatrixEl = [];
+            this._mhsaTokenMatrixRowEls = Array.from({ length: previewData.rowCount }, () => []);
+            this._mhsaTokenMatrixQueryRowEls = Array.from({ length: previewData.rowCount }, () => []);
 
-            const createCaptionEl = (label, dims) => {
+            const renderMathLabel = (targetEl, labelTex, fallbackText = '') => {
+                if (!targetEl) return;
+                const safeLabelTex = typeof labelTex === 'string' ? labelTex.trim() : '';
+                const katex = (typeof window !== 'undefined') ? window.katex : null;
+                if (safeLabelTex && katex && typeof katex.renderToString === 'function') {
+                    try {
+                        targetEl.innerHTML = katex.renderToString(safeLabelTex, { throwOnError: false, displayMode: false });
+                    } catch (_) {
+                        targetEl.textContent = fallbackText || safeLabelTex;
+                    }
+                } else {
+                    targetEl.textContent = fallbackText || safeLabelTex;
+                }
+            };
+
+            const createVisualEl = (modifierClass = '') => {
+                const visualEl = document.createElement('div');
+                visualEl.className = modifierClass
+                    ? `mhsa-token-matrix-preview__visual ${modifierClass}`
+                    : 'mhsa-token-matrix-preview__visual';
+                return visualEl;
+            };
+
+            const createCaptionEl = (labelTex, dims = '') => {
                 const captionEl = document.createElement('div');
                 captionEl.className = 'mhsa-token-matrix-preview__caption';
-                const labelLineEl = document.createElement('div');
-                labelLineEl.className = 'mhsa-token-matrix-preview__caption-label';
-                labelLineEl.textContent = label;
-                const dimsLineEl = document.createElement('div');
-                dimsLineEl.className = 'mhsa-token-matrix-preview__caption-dims';
-                dimsLineEl.textContent = dims;
-                captionEl.append(labelLineEl, dimsLineEl);
+                const labelEl = document.createElement('div');
+                labelEl.className = 'mhsa-token-matrix-preview__caption-label';
+                renderMathLabel(labelEl, labelTex, labelTex);
+                captionEl.appendChild(labelEl);
+                if (typeof dims === 'string' && dims.trim().length) {
+                    const dimsEl = document.createElement('div');
+                    dimsEl.className = 'mhsa-token-matrix-preview__caption-dims';
+                    dimsEl.textContent = dims;
+                    captionEl.appendChild(dimsEl);
+                }
                 return captionEl;
             };
 
-            previewData.rows.forEach((rowData) => {
-                const rowEl = document.createElement('div');
-                rowEl.className = 'mhsa-token-matrix-preview__row';
-                rowEl.dataset.row = String(rowData.rowIndex);
+            const buildStageEl = (projectionData, stageIndex) => {
+                const stageEl = document.createElement('div');
+                stageEl.className = 'mhsa-token-matrix-preview__stage';
+                const projectionStageEl = document.createElement('div');
+                projectionStageEl.className = 'mhsa-token-matrix-preview__projection-stage';
+                const xBlockEl = document.createElement('div');
+                xBlockEl.className = 'mhsa-token-matrix-preview__x-block';
+                const xMatrixEl = document.createElement('div');
+                xMatrixEl.className = 'mhsa-token-matrix-preview__x-matrix';
+                const multiplyEl = document.createElement('div');
+                multiplyEl.className = 'mhsa-token-matrix-preview__operator mhsa-token-matrix-preview__operator--matrix mhsa-token-matrix-preview__operator--xw';
+                multiplyEl.textContent = '×';
+                const weightBlockEl = document.createElement('div');
+                weightBlockEl.className = 'mhsa-token-matrix-preview__weight-block';
+                const weightCardEl = document.createElement('div');
+                weightCardEl.className = 'mhsa-token-matrix-preview__weight-card';
+                weightCardEl.style.background = projectionData.weightGradientCss || 'none';
+                if (Array.isArray(projectionData.colorRgb) && projectionData.colorRgb.length === 3) {
+                    weightCardEl.style.setProperty('--mhsa-weight-rgb', projectionData.colorRgb.join(', '));
+                }
+                const plusEl = document.createElement('div');
+                plusEl.className = 'mhsa-token-matrix-preview__operator mhsa-token-matrix-preview__operator--wb';
+                plusEl.textContent = '+';
+                const biasBlockEl = document.createElement('div');
+                biasBlockEl.className = 'mhsa-token-matrix-preview__bias-block';
+                const biasBarEl = document.createElement('div');
+                biasBarEl.className = 'mhsa-token-matrix-preview__bias-bar';
+                biasBarEl.style.background = projectionData.biasGradientCss || 'none';
+                const equalsEl = document.createElement('div');
+                equalsEl.className = 'mhsa-token-matrix-preview__operator mhsa-token-matrix-preview__operator--bq';
+                equalsEl.textContent = '=';
+                const queryBlockEl = document.createElement('div');
+                queryBlockEl.className = 'mhsa-token-matrix-preview__query-block';
+                const queryMatrixEl = document.createElement('div');
+                queryMatrixEl.className = 'mhsa-token-matrix-preview__query-matrix';
+                xMatrixEl.dataset.stage = String(stageIndex);
+                queryMatrixEl.dataset.stage = String(stageIndex);
 
-                const labelEl = document.createElement('div');
-                labelEl.className = 'mhsa-token-matrix-preview__row-label';
-                labelEl.textContent = rowData.tokenLabel;
+                this._mhsaTokenMatrixXMatrixEl.push(xMatrixEl);
+                this._mhsaTokenMatrixQueryMatrixEl.push(queryMatrixEl);
 
-                const barEl = document.createElement('div');
-                barEl.className = 'mhsa-token-matrix-preview__row-bar';
-                barEl.dataset.row = String(rowData.rowIndex);
-                barEl.style.background = rowData.gradientCss || 'none';
+                previewData.rows.forEach((rowData) => {
+                    const rowEl = document.createElement('div');
+                    rowEl.className = 'mhsa-token-matrix-preview__row';
+                    rowEl.dataset.row = String(rowData.rowIndex);
+                    rowEl.dataset.stage = String(stageIndex);
 
-                rowEl.append(labelEl, barEl);
-                xMatrixEl.appendChild(rowEl);
-                this._mhsaTokenMatrixRowEls[rowData.rowIndex] = { rowEl, labelEl, barEl };
+                    const labelEl = document.createElement('div');
+                    labelEl.className = 'mhsa-token-matrix-preview__row-label';
+                    labelEl.textContent = rowData.tokenLabel;
+
+                    const barEl = document.createElement('div');
+                    barEl.className = 'mhsa-token-matrix-preview__row-bar';
+                    barEl.dataset.row = String(rowData.rowIndex);
+                    barEl.style.background = rowData.gradientCss || 'none';
+
+                    rowEl.append(labelEl, barEl);
+                    xMatrixEl.appendChild(rowEl);
+                    this._mhsaTokenMatrixRowEls[rowData.rowIndex]?.push({
+                        rowEl,
+                        labelEl,
+                        barEl,
+                        stageIndex
+                    });
+                });
+
+                projectionData.outputRows.forEach((rowData) => {
+                    const queryRowEl = document.createElement('div');
+                    queryRowEl.className = 'mhsa-token-matrix-preview__query-row';
+                    queryRowEl.dataset.row = String(rowData.rowIndex);
+                    queryRowEl.dataset.stage = String(stageIndex);
+
+                    const queryRowBarEl = document.createElement('div');
+                    queryRowBarEl.className = 'mhsa-token-matrix-preview__query-row-bar';
+                    queryRowBarEl.style.background = rowData.gradientCss || 'none';
+
+                    queryRowEl.appendChild(queryRowBarEl);
+                    queryMatrixEl.appendChild(queryRowEl);
+                    this._mhsaTokenMatrixQueryRowEls[rowData.rowIndex]?.push({
+                        rowEl: queryRowEl,
+                        barEl: queryRowBarEl,
+                        stageIndex
+                    });
+                });
+
+                const xVisualEl = createVisualEl('mhsa-token-matrix-preview__visual--x');
+                xVisualEl.appendChild(xMatrixEl);
+                const weightVisualEl = createVisualEl('mhsa-token-matrix-preview__visual--weight');
+                weightVisualEl.appendChild(weightCardEl);
+                const biasVisualEl = createVisualEl('mhsa-token-matrix-preview__visual--bias');
+                biasVisualEl.appendChild(biasBarEl);
+                const queryVisualEl = createVisualEl('mhsa-token-matrix-preview__visual--query');
+                queryVisualEl.appendChild(queryMatrixEl);
+
+                xBlockEl.append(
+                    xVisualEl,
+                    createCaptionEl('X_{\\ln}', `(${previewData.rowCount}, ${previewData.columnCount})`)
+                );
+                weightBlockEl.append(
+                    weightVisualEl,
+                    createCaptionEl(
+                        projectionData.weightLabelTex,
+                        `(${projectionData.weightRowCount}, ${projectionData.weightColumnCount})`
+                    )
+                );
+                biasBlockEl.append(
+                    biasVisualEl,
+                    createCaptionEl(projectionData.biasLabelTex, `(1, ${projectionData.outputColumnCount})`)
+                );
+                queryBlockEl.append(
+                    queryVisualEl,
+                    createCaptionEl(
+                        projectionData.outputLabelTex,
+                        `(${projectionData.outputRowCount}, ${projectionData.outputColumnCount})`
+                    )
+                );
+
+                projectionStageEl.append(
+                    weightBlockEl,
+                    plusEl,
+                    biasBlockEl,
+                    equalsEl,
+                    queryBlockEl
+                );
+
+                stageEl.append(xBlockEl, multiplyEl, projectionStageEl);
+                return stageEl;
+            };
+
+            const buildAttentionScoreStageEl = (scoreStage, queryStageIndex = 0) => {
+                const sidecarEl = document.createElement('div');
+                sidecarEl.className = 'mhsa-token-matrix-preview__attention-sidecar';
+
+                const buildAttentionSourceQueryBlock = () => {
+                    const sourceBlockEl = document.createElement('div');
+                    sourceBlockEl.className = 'mhsa-token-matrix-preview__query-block';
+                    const queryMatrixEl = document.createElement('div');
+                    queryMatrixEl.className = 'mhsa-token-matrix-preview__query-matrix mhsa-token-matrix-preview__query-matrix--input';
+                    queryMatrixEl.dataset.stage = String(queryStageIndex);
+                    scoreStage.queryRows.forEach((rowData) => {
+                        const queryRowEl = document.createElement('div');
+                        queryRowEl.className = 'mhsa-token-matrix-preview__query-row';
+                        queryRowEl.dataset.row = String(rowData.rowIndex);
+                        queryRowEl.dataset.stage = String(queryStageIndex);
+
+                        const queryRowBarEl = document.createElement('div');
+                        queryRowBarEl.className = 'mhsa-token-matrix-preview__query-row-bar';
+                        queryRowBarEl.style.background = rowData.gradientCss || 'none';
+
+                        queryRowEl.appendChild(queryRowBarEl);
+                        queryMatrixEl.appendChild(queryRowEl);
+                        this._mhsaTokenMatrixQueryRowEls[rowData.rowIndex]?.push({
+                            rowEl: queryRowEl,
+                            barEl: queryRowBarEl,
+                            stageIndex: queryStageIndex
+                        });
+                    });
+
+                    const queryVisualEl = createVisualEl('mhsa-token-matrix-preview__visual--query');
+                    queryVisualEl.appendChild(queryMatrixEl);
+                    sourceBlockEl.append(
+                        queryVisualEl,
+                        createCaptionEl(
+                            scoreStage.queryLabelTex,
+                            `(${scoreStage.queryRowCount}, ${scoreStage.queryColumnCount})`
+                        )
+                    );
+                    return sourceBlockEl;
+                };
+
+                const buildAttentionSourceTransposeBlock = () => {
+                    const transposeBlockEl = document.createElement('div');
+                    transposeBlockEl.className = 'mhsa-token-matrix-preview__transpose-block';
+                    const transposeMatrixEl = document.createElement('div');
+                    transposeMatrixEl.className = 'mhsa-token-matrix-preview__transpose-matrix';
+                    scoreStage.transposeColumns.forEach((columnData) => {
+                        const columnEl = document.createElement('div');
+                        columnEl.className = 'mhsa-token-matrix-preview__transpose-col';
+                        columnEl.style.background = columnData.fillCss || 'none';
+                        if (typeof columnData.tokenLabel === 'string' && columnData.tokenLabel.length) {
+                            columnEl.title = columnData.tokenLabel;
+                        }
+                        transposeMatrixEl.appendChild(columnEl);
+                    });
+                    const transposeVisualEl = createVisualEl('mhsa-token-matrix-preview__visual--transpose');
+                    transposeVisualEl.appendChild(transposeMatrixEl);
+                    transposeBlockEl.append(
+                        transposeVisualEl,
+                        createCaptionEl(
+                            scoreStage.transposeLabelTex,
+                            `(${scoreStage.transposeRowCount}, ${scoreStage.transposeColumnCount})`
+                        )
+                    );
+                    return transposeBlockEl;
+                };
+
+                const buildScoreBlock = () => {
+                    const scoreBlockEl = document.createElement('div');
+                    scoreBlockEl.className = 'mhsa-token-matrix-preview__score-block';
+                    const scoreMatrixEl = document.createElement('div');
+                    scoreMatrixEl.className = 'mhsa-token-matrix-preview__score-matrix';
+                    scoreMatrixEl.style.gridTemplateColumns = `repeat(${scoreStage.outputColumnCount}, minmax(0, 1fr))`;
+                    scoreMatrixEl.style.gridTemplateRows = `repeat(${scoreStage.outputRowCount}, minmax(0, 1fr))`;
+                    scoreStage.outputRows.forEach((rowData) => {
+                        rowData.cells.forEach((cellData) => {
+                            const cellEl = document.createElement('div');
+                            cellEl.className = 'mhsa-token-matrix-preview__score-cell';
+                            if (Number.isFinite(cellData.rawValue)) {
+                                cellEl.style.backgroundColor = cellData.fillCss || 'transparent';
+                                cellEl.title = `${cellData.rowTokenLabel} → ${cellData.colTokenLabel}: ${formatAttentionPreviewScore(cellData.rawValue)}`;
+                            } else {
+                                cellEl.classList.add('is-empty');
+                            }
+                            scoreMatrixEl.appendChild(cellEl);
+                        });
+                    });
+                    const scoreVisualEl = createVisualEl('mhsa-token-matrix-preview__visual--score');
+                    scoreVisualEl.appendChild(scoreMatrixEl);
+                    scoreBlockEl.append(
+                        scoreVisualEl,
+                        createCaptionEl(
+                            scoreStage.outputLabelTex,
+                            `(${scoreStage.outputRowCount}, ${scoreStage.outputColumnCount})`
+                        )
+                    );
+                    return scoreBlockEl;
+                };
+
+                const querySourceEl = document.createElement('div');
+                querySourceEl.className = 'mhsa-token-matrix-preview__attention-source mhsa-token-matrix-preview__attention-source--query';
+                const queryConnectorEl = document.createElement('div');
+                queryConnectorEl.className = 'mhsa-token-matrix-preview__attention-connector';
+                querySourceEl.append(queryConnectorEl, buildAttentionSourceQueryBlock());
+
+                const keySourceEl = document.createElement('div');
+                keySourceEl.className = 'mhsa-token-matrix-preview__attention-source mhsa-token-matrix-preview__attention-source--key';
+                const keyConnectorEl = document.createElement('div');
+                keyConnectorEl.className = 'mhsa-token-matrix-preview__attention-connector';
+                keySourceEl.append(keyConnectorEl, buildAttentionSourceTransposeBlock());
+
+                const multiplyEl = document.createElement('div');
+                multiplyEl.className = 'mhsa-token-matrix-preview__operator mhsa-token-matrix-preview__operator--attention-multiply';
+                multiplyEl.textContent = '×';
+
+                const resultFlowEl = document.createElement('div');
+                resultFlowEl.className = 'mhsa-token-matrix-preview__attention-result-flow';
+                const equalsEl = document.createElement('div');
+                equalsEl.className = 'mhsa-token-matrix-preview__operator mhsa-token-matrix-preview__operator--attention-equals';
+                equalsEl.textContent = '=';
+                resultFlowEl.append(equalsEl, buildScoreBlock());
+
+                sidecarEl.append(querySourceEl, keySourceEl, multiplyEl, resultFlowEl);
+                return sidecarEl;
+            };
+
+            previewData.projections.forEach((projectionData, stageIndex) => {
+                const validProjection = projectionData
+                    && projectionData.weightRowCount
+                    && projectionData.weightColumnCount
+                    && projectionData.outputRowCount
+                    && projectionData.outputColumnCount
+                    && Array.isArray(projectionData.outputRows);
+                if (!validProjection) return;
+                const stageEl = buildStageEl(projectionData, stageIndex);
+                stageEl.style.gridColumn = '1';
+                stageEl.style.gridRow = String(stageIndex + 1);
+                stageStackEl.appendChild(stageEl);
             });
 
-            previewData.queryRows.forEach((rowData) => {
-                const queryRowEl = document.createElement('div');
-                queryRowEl.className = 'mhsa-token-matrix-preview__query-row';
-                queryRowEl.dataset.row = String(rowData.rowIndex);
+            if (
+                previewData.attentionScoreStage
+                && Array.isArray(previewData.attentionScoreStage.queryRows)
+                && Array.isArray(previewData.attentionScoreStage.outputRows)
+            ) {
+                stageStackEl.classList.add('has-attention-sidecar');
+                const queryStageIndex = Math.max(0, previewData.projections.findIndex((projectionData) => projectionData?.kind === 'Q'));
+                const attentionStageEl = buildAttentionScoreStageEl(previewData.attentionScoreStage, queryStageIndex);
+                attentionStageEl.style.gridColumn = '2';
+                attentionStageEl.style.gridRow = '1 / span 2';
+                stageStackEl.appendChild(attentionStageEl);
+            }
 
-                const queryRowBarEl = document.createElement('div');
-                queryRowBarEl.className = 'mhsa-token-matrix-preview__query-row-bar';
-                queryRowBarEl.style.background = rowData.gradientCss
-                    || `linear-gradient(90deg, ${colorToRgbaCss(MHA_FINAL_Q_COLOR, 0.62)}, ${colorToRgbaCss(MHA_FINAL_Q_COLOR, 0.88)})`;
-
-                queryRowEl.appendChild(queryRowBarEl);
-                queryMatrixEl.appendChild(queryRowEl);
-                this._mhsaTokenMatrixQueryRowEls[rowData.rowIndex] = queryRowEl;
-            });
-
-            xBlockEl.append(
-                xMatrixEl,
-                createCaptionEl('X_ln', `(${previewData.rowCount}, ${previewData.columnCount})`)
-            );
-            weightBlockEl.append(
-                weightCardEl,
-                createCaptionEl('W_q', `(${previewData.qWeightRowCount}, ${previewData.qWeightColumnCount})`)
-            );
-            biasBlockEl.append(
-                biasBarEl,
-                createCaptionEl('b_q', `(1, ${previewData.qColumnCount})`)
-            );
-            queryBlockEl.append(
-                queryMatrixEl,
-                createCaptionEl('Q', `(${previewData.qRowCount}, ${previewData.qColumnCount})`)
-            );
-
-            projectionStageEl.append(
-                weightBlockEl,
-                plusEl,
-                biasBlockEl,
-                equalsEl,
-                queryBlockEl
-            );
-
-            stageEl.append(xBlockEl, projectionStageEl);
-            fragment.appendChild(stageEl);
+            if (!stageStackEl.childNodes.length) {
+                this._setMhsaTokenMatrixStatus('Token matrix unavailable.');
+                return;
+            }
+            fragment.appendChild(stageStackEl);
 
             this.mhsaTokenMatrixBody.replaceChildren(fragment);
+            this.mhsaTokenMatrixBody.scrollLeft = 0;
+            this.mhsaTokenMatrixBody.scrollTop = 0;
             this.mhsaTokenMatrixBody.hidden = false;
             this._setMhsaTokenMatrixStatus('');
         } catch (error) {
@@ -8375,7 +8744,10 @@ class SelectionPanel {
         } else if (isKvCacheInfo) {
             this._setTitleText('KV Cache');
         } else if (isMhsaInfo) {
-            this._setTitleText('Multi-Head Self-Attention');
+            const layerIndex = findUserDataNumber(selection, 'layerIndex');
+            this._setTitleText(formatMhsaInfoTitle(
+                Number.isFinite(layerIndex) ? Math.floor(layerIndex) : null
+            ));
         } else if (isTokenChipSelection) {
             const tokenText = (typeof vectorSubtitleMetadata?.tokenDisplayText === 'string')
                 ? vectorSubtitleMetadata.tokenDisplayText.trim()

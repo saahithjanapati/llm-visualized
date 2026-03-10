@@ -442,7 +442,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         }
     };
 
-    const appendStatusLine = (text, { interactive = false } = {}) => {
+    const appendStatusLine = (text, { interactive = false, detail = null } = {}) => {
         if (!statusTextEl || typeof document === 'undefined') return;
         const safeText = String(text || '').trim();
         if (!safeText) return;
@@ -454,7 +454,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
             button.setAttribute('aria-label', `Open ${safeText} details`);
             button.addEventListener('click', () => {
                 if (typeof window === 'undefined') return;
-                window.dispatchEvent(new CustomEvent(MHSA_INFO_REQUEST_EVENT));
+                window.dispatchEvent(new CustomEvent(MHSA_INFO_REQUEST_EVENT, { detail }));
             });
             statusTextEl.appendChild(button);
             return;
@@ -465,13 +465,14 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         statusTextEl.appendChild(lineEl);
     };
 
-    const renderStatusText = ({ headerLine = '', stageLine = '' } = {}) => {
+    const renderStatusText = ({ headerLine = '', stageLine = '', stageDetail = null } = {}) => {
         if (!statusTextEl) return;
         clearStatusText();
         if (headerLine) appendStatusLine(headerLine);
         if (stageLine) {
             appendStatusLine(stageLine, {
-                interactive: stageLine === 'Multi-Head Self-Attention'
+                interactive: stageLine === 'Multi-Head Self-Attention',
+                detail: stageDetail
             });
         }
     };
@@ -954,7 +955,10 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         if (statusTextEl) {
             renderStatusText({
                 headerLine,
-                stageLine: showStageLine ? displayStage : ''
+                stageLine: showStageLine ? displayStage : '',
+                stageDetail: showStageLine && displayStage === 'Multi-Head Self-Attention'
+                    ? { layerIndex: safeIdx }
+                    : null
             });
         } else {
             statusDiv.textContent = nextStatusText;

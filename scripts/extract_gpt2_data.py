@@ -231,6 +231,111 @@ def encode_triangular(
     return results
 
 
+def encode_strict_upper(
+    tensor: torch.Tensor,
+    quantiser: BaseQuantiser,
+    format: str = "rows",
+) -> List[object]:
+    """Encode strict upper-triangular attention values per row."""
+
+    if tensor.dim() != 4:
+        raise ValueError("Expected tensor with shape (batch, heads, query, key)")
+    batch, num_heads, seq_len, _ = tensor.shape
+    if batch != 1:
+        raise ValueError("Only batch size 1 is supported for capture")
+    if format not in {"rows", "packed"}:
+        raise ValueError(f"Unsupported triangular encoding format: {format}")
+
+    if format == "packed":
+        packed_results: List[Dict[str, object]] = []
+        for h in range(num_heads):
+            flat_values: List[object] = []
+            row_scales: List[float] = []
+            has_row_scales = False
+            for q in range(seq_len):
+                allowed = tensor[0, h, q, q + 1 :]
+                if allowed.numel() == 0:
+                    continue
+                encoded = quantiser.encode(allowed)
+                values = encoded.get("v")
+                if not isinstance(values, list):
+                    raise ValueError("Quantiser.encode must return list value under 'v'")
+                flat_values.extend(values)
+                scale = encoded.get("s")
+                if isinstance(scale, (int, float)):
+                    has_row_scales = True
+                    row_scales.append(float(scale))
+            head_entry: Dict[str, object] = {
+                "n": seq_len,
+                "v": flat_values,
+            }
+            if has_row_scales:
+                head_entry["rs"] = row_scales
+            packed_results.append(head_entry)
+        return packed_results
+
+    results: List[List[object]] = []
+    for h in range(num_heads):
+        head_entries: List[object] = []
+        for q in range(seq_len):
+            allowed = tensor[0, h, q, q + 1 :]
+            if allowed.numel() == 0:
+                head_entries.append([])
+            else:
+                head_entries.append(compact_encoded_vector_entry(quantiser.encode(allowed)))
+        results.append(head_entries)
+    return results
+
+
+def merge_attention_upper_triangle(
+    lower: List[object],
+    upper: List[object],
+    format: str = "rows",
+) -> List[object]:
+    """Attach strict upper-triangle payloads to lower-triangle attention rows."""
+
+    if format not in {"rows", "packed"}:
+        raise ValueError(f"Unsupported triangular encoding format: {format}")
+    if len(lower) != len(upper):
+        raise ValueError("Lower and upper attention payloads must have matching head counts")
+
+    merged: List[object] = []
+    if format == "packed":
+        for lower_head, upper_head in zip(lower, upper):
+            if not isinstance(lower_head, dict) or not isinstance(upper_head, dict):
+                raise ValueError("Packed attention payloads must be dictionaries")
+            head_entry = dict(lower_head)
+            head_entry["u"] = upper_head.get("v", [])
+            if "rs" in upper_head:
+                head_entry["urs"] = upper_head["rs"]
+            merged.append(head_entry)
+        return merged
+
+    for lower_head, upper_head in zip(lower, upper):
+        if not isinstance(lower_head, list) or not isinstance(upper_head, list):
+            raise ValueError("Row attention payloads must be nested lists")
+        if len(lower_head) != len(upper_head):
+            raise ValueError("Lower and upper attention rows must align")
+        head_entries: List[object] = []
+        for lower_row, upper_row in zip(lower_head, upper_head):
+            upper_values = upper_row.get("v", []) if isinstance(upper_row, dict) else upper_row
+            has_upper_values = isinstance(upper_values, list) and len(upper_values) > 0
+            if not has_upper_values:
+                head_entries.append(lower_row)
+                continue
+            row_entry: Dict[str, object]
+            if isinstance(lower_row, dict):
+                row_entry = dict(lower_row)
+            else:
+                row_entry = {"v": list(lower_row)}
+            row_entry["u"] = upper_values
+            if isinstance(upper_row, dict) and "s" in upper_row:
+                row_entry["us"] = upper_row["s"]
+            head_entries.append(row_entry)
+        merged.append(head_entries)
+    return merged
+
+
 # ---------------------------------------------------------------------------
 # FLOP accounting (approximate)
 # ---------------------------------------------------------------------------
@@ -625,6 +730,7 @@ class CaptureConfig:
     round_decimals: Optional[int] = None
     attention_score_round_decimals: Optional[int] = 4
     attention_scores_format: str = "packed"
+    store_pre_attention_upper: bool = True
     store_embedding_sum: bool = False
     store_residual_sums: bool = False
 
@@ -721,17 +827,29 @@ def run_instrumented_pass(
                 "v": encode_head_vector_states(v_heads, config.attention_stride, attention_quantiser),
             }
 
-            attn_weights = torch.matmul(q_heads, k_heads.transpose(-2, -1)) / math.sqrt(head_dim)
+            attn_scores_raw = torch.matmul(q_heads, k_heads.transpose(-2, -1)) / math.sqrt(head_dim)
             mask = torch.triu(torch.ones(seq_len, seq_len, device=device), diagonal=1)
-            attn_weights = attn_weights.masked_fill(mask == 1, float("-inf"))
+            attn_weights = attn_scores_raw.masked_fill(mask == 1, float("-inf"))
             attn_probs = F.softmax(attn_weights, dim=-1)
 
-            layer_entry["attention_scores"] = {
-                "pre": encode_triangular(
-                    attn_weights,
-                    attention_score_quantiser,
+            pre_attention_scores = encode_triangular(
+                attn_scores_raw,
+                attention_score_quantiser,
+                config.attention_scores_format,
+            )
+            if config.store_pre_attention_upper:
+                pre_attention_scores = merge_attention_upper_triangle(
+                    pre_attention_scores,
+                    encode_strict_upper(
+                        attn_scores_raw,
+                        attention_score_quantiser,
+                        config.attention_scores_format,
+                    ),
                     config.attention_scores_format,
-                ),
+                )
+
+            layer_entry["attention_scores"] = {
+                "pre": pre_attention_scores,
                 "post": encode_triangular(
                     attn_probs,
                     attention_score_quantiser,
@@ -892,6 +1010,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help="Storage format for attention scores (packed reduces JSON overhead).",
     )
     parser.add_argument(
+        "--store-pre-attention-upper",
+        dest="store_pre_attention_upper",
+        action="store_true",
+        default=True,
+        help="Store strict upper-triangle pre-softmax attention scores before causal masking.",
+    )
+    parser.add_argument(
+        "--no-store-pre-attention-upper",
+        dest="store_pre_attention_upper",
+        action="store_false",
+        help="Do not store strict upper-triangle pre-softmax attention scores.",
+    )
+    parser.add_argument(
         "--store-embedding-sum",
         action="store_true",
         help="Store embeddings.sum explicitly (otherwise computed in visualization).",
@@ -1032,6 +1163,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         round_decimals=args.round_decimals,
         attention_score_round_decimals=args.attention_score_round_decimals,
         attention_scores_format=args.attention_scores_format,
+        store_pre_attention_upper=args.store_pre_attention_upper,
         store_embedding_sum=args.store_embedding_sum,
         store_residual_sums=args.store_residual_sums,
     )

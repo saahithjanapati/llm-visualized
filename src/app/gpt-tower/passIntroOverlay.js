@@ -117,9 +117,12 @@ function buildOverlayDom() {
             <div class="pass-intro-stage">
                 <div class="pass-intro-window" data-role="window">
                     <div class="pass-intro-window-header">
-                        <span class="pass-intro-dot pass-intro-dot--red" aria-hidden="true"></span>
-                        <span class="pass-intro-dot pass-intro-dot--amber" aria-hidden="true"></span>
-                        <span class="pass-intro-dot pass-intro-dot--green" aria-hidden="true"></span>
+                        <div class="pass-intro-window-controls" aria-hidden="true">
+                            <span class="pass-intro-dot pass-intro-dot--red"></span>
+                            <span class="pass-intro-dot pass-intro-dot--amber"></span>
+                            <span class="pass-intro-dot pass-intro-dot--green"></span>
+                        </div>
+                        <div class="pass-intro-window-title">LLM-Visualized</div>
                     </div>
                     <div class="pass-intro-editor" data-role="editor">
                         <div class="pass-intro-shell-line">

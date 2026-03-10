@@ -99,6 +99,31 @@ function inferTriangularTokenCount(flatLength) {
     return (n * (n + 1)) / 2 === length ? n : 0;
 }
 
+function decodeScaledValues(values, scale = 1) {
+    if (!Array.isArray(values) || !values.length) return [];
+    const safeScale = Number.isFinite(scale) ? scale : 1;
+    return values.map((value) => {
+        const num = Number(value);
+        return Number.isFinite(num) ? num * safeScale : 0;
+    });
+}
+
+function decodeAttentionRowEntry(entry, rowIndex, tokenCount) {
+    if (Array.isArray(entry)) return cleanArray(entry);
+    if (!entry || typeof entry !== 'object' || !Array.isArray(entry.v)) return null;
+    const lower = decodeScaledValues(entry.v, entry.s);
+    const upper = Array.isArray(entry.u) ? decodeScaledValues(entry.u, entry.us) : [];
+    const upperLength = Math.max(0, tokenCount - rowIndex - 1);
+    if (!upperLength || !upper.length) return lower;
+    return lower.concat(upper.slice(0, upperLength));
+}
+
+function getStrictUpperRowStart(rowIndex, tokenCount) {
+    const safeRowIndex = Number.isFinite(rowIndex) ? Math.max(0, Math.floor(rowIndex)) : 0;
+    const safeTokenCount = Number.isFinite(tokenCount) ? Math.max(0, Math.floor(tokenCount)) : 0;
+    return (safeRowIndex * ((2 * safeTokenCount) - safeRowIndex - 1)) / 2;
+}
+
 function addVectors(a, b) {
     const left = Array.isArray(a) ? a : null;
     const right = Array.isArray(b) ? b : null;
@@ -347,7 +372,7 @@ export class CaptureActivationSource {
             if (Array.isArray(headEntry)) {
                 if (!headEntry.length) return null;
                 const rowIdx = clampIndex(tIdx, headEntry.length - 1);
-                return decodeVector(headEntry[rowIdx]);
+                return decodeAttentionRowEntry(headEntry[rowIdx], rowIdx, headEntry.length);
             }
             if (!headEntry || typeof headEntry !== 'object' || !Array.isArray(headEntry.v)) return null;
             const packedCacheKey = buildCacheKey(['attn_packed', mode, layerIndex, hIdx]);
@@ -363,10 +388,14 @@ export class CaptureActivationSource {
                     ? values.map((value) => value * globalScale)
                     : values;
                 const rowScales = Array.isArray(headEntry.rs) ? cleanArray(headEntry.rs) : null;
+                const upperValues = Array.isArray(headEntry.u) ? cleanArray(headEntry.u) : null;
+                const upperRowScales = Array.isArray(headEntry.urs) ? cleanArray(headEntry.urs) : null;
                 return {
                     values: scaledValues,
                     tokenCount,
                     rowScales,
+                    upperValues,
+                    upperRowScales,
                 };
             });
             if (!packedHead || !packedHead.values.length) return null;
@@ -383,7 +412,23 @@ export class CaptureActivationSource {
                     for (let i = 0; i < row.length; i += 1) row[i] *= rowScale;
                 }
             }
-            return row;
+            const upperLength = Math.max(0, packedHead.tokenCount - rowIdx - 1);
+            if (!upperLength || !packedHead.upperValues?.length) {
+                return row;
+            }
+            const upperStart = getStrictUpperRowStart(rowIdx, packedHead.tokenCount);
+            const upperEnd = upperStart + upperLength;
+            if (!Number.isFinite(upperStart) || !Number.isFinite(upperEnd)) return row;
+            if (upperStart < 0 || upperEnd > packedHead.upperValues.length) return row;
+            const upperRow = packedHead.upperValues.slice(upperStart, upperEnd);
+            if (packedHead.upperRowScales && packedHead.upperRowScales.length) {
+                const upperScaleIdx = clampIndex(rowIdx, packedHead.upperRowScales.length - 1);
+                const upperRowScale = packedHead.upperRowScales[upperScaleIdx];
+                if (Number.isFinite(upperRowScale) && upperRowScale !== 1) {
+                    for (let i = 0; i < upperRow.length; i += 1) upperRow[i] *= upperRowScale;
+                }
+            }
+            return row.concat(upperRow);
         });
     }
 

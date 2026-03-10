@@ -247,8 +247,13 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
     if (typeof previousMhsaInfoListener === 'function') {
         window.removeEventListener(MHSA_INFO_REQUEST_EVENT, previousMhsaInfoListener);
     }
-    const handleMhsaInfoRequest = () => {
-        selectionPanel.handleSelection(buildMhsaInfoSelection());
+    const handleMhsaInfoRequest = (event) => {
+        const layerIndex = Number(event?.detail?.layerIndex);
+        const headIndex = Number(event?.detail?.headIndex);
+        selectionPanel.handleSelection(buildMhsaInfoSelection({
+            layerIndex: Number.isFinite(layerIndex) ? Math.floor(layerIndex) : null,
+            headIndex: Number.isFinite(headIndex) ? Math.floor(headIndex) : null
+        }));
     };
     window.__llmVisualizedMhsaInfoListener = handleMhsaInfoRequest;
     window.addEventListener(MHSA_INFO_REQUEST_EVENT, handleMhsaInfoRequest);
