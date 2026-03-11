@@ -2,9 +2,16 @@ import { getAttentionBiasHeadSample } from '../data/biasParams.js';
 import {
     MHA_FINAL_K_COLOR,
     MHA_FINAL_Q_COLOR,
-    MHA_FINAL_V_COLOR
+    MHA_FINAL_V_COLOR,
+    MHA_VALUE_SPECTRUM_COLOR,
+    MHA_VALUE_HUE_SPREAD,
+    MHA_VALUE_LIGHTNESS_MIN,
+    MHA_VALUE_LIGHTNESS_MAX,
+    MHA_VALUE_RANGE_MIN,
+    MHA_VALUE_RANGE_MAX,
+    MHA_VALUE_CLAMP_MAX
 } from '../animations/LayerAnimationConstants.js';
-import { mapValueToColor } from '../utils/colors.js';
+import { buildHueRangeOptions, mapValueToColor, mapValueToHueRange } from '../utils/colors.js';
 import {
     ATTENTION_PRE_COLOR_CLAMP,
     ATTENTION_PREVIEW_COLOR_DARKEN_FACTOR,
@@ -18,6 +25,31 @@ const DEFAULT_SAMPLE_STEP = 64;
 const DEFAULT_LAYER_INDEX = 5;
 const DEFAULT_HEAD_INDEX = 5;
 const DEFAULT_PROMPT_ROW_COUNT = 5;
+const PROJECTION_VECTOR_PREVIEW_DARKEN_FACTOR = 0.86;
+const QUERY_VECTOR_GRADIENT_OPTIONS = buildHueRangeOptions(MHA_FINAL_Q_COLOR, {
+    hueSpread: MHA_VALUE_HUE_SPREAD,
+    minLightness: MHA_VALUE_LIGHTNESS_MIN,
+    maxLightness: MHA_VALUE_LIGHTNESS_MAX,
+    valueMin: MHA_VALUE_RANGE_MIN,
+    valueMax: MHA_VALUE_RANGE_MAX,
+    valueClampMax: MHA_VALUE_CLAMP_MAX
+});
+const KEY_VECTOR_GRADIENT_OPTIONS = buildHueRangeOptions(MHA_FINAL_K_COLOR, {
+    hueSpread: MHA_VALUE_HUE_SPREAD,
+    minLightness: MHA_VALUE_LIGHTNESS_MIN,
+    maxLightness: MHA_VALUE_LIGHTNESS_MAX,
+    valueMin: MHA_VALUE_RANGE_MIN,
+    valueMax: MHA_VALUE_RANGE_MAX,
+    valueClampMax: MHA_VALUE_CLAMP_MAX
+});
+const VALUE_VECTOR_GRADIENT_OPTIONS = buildHueRangeOptions(MHA_VALUE_SPECTRUM_COLOR, {
+    hueSpread: MHA_VALUE_HUE_SPREAD,
+    minLightness: MHA_VALUE_LIGHTNESS_MIN,
+    maxLightness: MHA_VALUE_LIGHTNESS_MAX,
+    valueMin: MHA_VALUE_RANGE_MIN,
+    valueMax: MHA_VALUE_RANGE_MAX,
+    valueClampMax: MHA_VALUE_CLAMP_MAX
+});
 const PROJECTION_CONFIGS = [
     {
         kind: 'q',
@@ -25,7 +57,8 @@ const PROJECTION_CONFIGS = [
         weightLabelTex: 'W_q',
         biasLabelTex: 'b_q',
         outputLabelTex: 'Q',
-        colorHex: MHA_FINAL_Q_COLOR
+        colorHex: MHA_FINAL_Q_COLOR,
+        gradientOptions: QUERY_VECTOR_GRADIENT_OPTIONS
     },
     {
         kind: 'k',
@@ -33,7 +66,8 @@ const PROJECTION_CONFIGS = [
         weightLabelTex: 'W_k',
         biasLabelTex: 'b_k',
         outputLabelTex: 'K',
-        colorHex: MHA_FINAL_K_COLOR
+        colorHex: MHA_FINAL_K_COLOR,
+        gradientOptions: KEY_VECTOR_GRADIENT_OPTIONS
     },
     {
         kind: 'v',
@@ -41,12 +75,19 @@ const PROJECTION_CONFIGS = [
         weightLabelTex: 'W_v',
         biasLabelTex: 'b_v',
         outputLabelTex: 'V',
-        colorHex: MHA_FINAL_V_COLOR
+        colorHex: MHA_FINAL_V_COLOR,
+        gradientOptions: VALUE_VECTOR_GRADIENT_OPTIONS
     }
 ];
 
 function colorToCss(color) {
     return color?.isColor ? `#${color.getHexString()}` : 'transparent';
+}
+
+function darkenColor(color, factor = 1) {
+    if (!color?.isColor) return color;
+    const safeFactor = Number.isFinite(factor) ? Math.max(0, Math.min(1, factor)) : 1;
+    return color.clone().multiplyScalar(safeFactor);
 }
 
 function rgbToCss(rgb, alpha = 1) {
@@ -103,19 +144,42 @@ function buildGradientCssFromSamples(values, direction = '90deg') {
     return `linear-gradient(${direction}, ${stops.join(', ')})`;
 }
 
+function buildHueGradientCssFromSamples(values, rangeOptions, direction = '90deg', darkenFactor = 1) {
+    const safeValues = cleanNumberArray(values);
+    if (!safeValues.length) return 'none';
+    if (safeValues.length === 1) {
+        return colorToCss(darkenColor(mapValueToHueRange(safeValues[0], rangeOptions), darkenFactor));
+    }
+    const lastIndex = Math.max(1, safeValues.length - 1);
+    const stops = safeValues.map((value, index) => {
+        const percent = (index / lastIndex) * 100;
+        return `${colorToCss(darkenColor(mapValueToHueRange(value, rangeOptions), darkenFactor))} ${percent.toFixed(4)}%`;
+    });
+    return `linear-gradient(${direction}, ${stops.join(', ')})`;
+}
+
+function buildValueVectorGradientCss(values, direction = '90deg') {
+    return buildHueGradientCssFromSamples(values, VALUE_VECTOR_GRADIENT_OPTIONS, direction);
+}
+
+function buildProjectionVectorGradientCss(values, scalarValue, rangeOptions, direction = '90deg', darkenFactor = 1) {
+    if (Array.isArray(values) && values.length) {
+        return buildHueGradientCssFromSamples(values, rangeOptions, direction, darkenFactor);
+    }
+    return colorToCss(
+        darkenColor(
+            mapValueToHueRange(Number.isFinite(scalarValue) ? scalarValue : 0, rangeOptions),
+            darkenFactor
+        )
+    );
+}
+
 function buildAccentCss(rgb, value = 0) {
     const intensity = Math.min(1, Math.abs(Number(value) || 0) / RESIDUAL_COLOR_CLAMP);
     const alphaStart = 0.52 + (intensity * 0.2);
     const alphaEnd = 0.78 + (intensity * 0.18);
     const [r, g, b] = Array.isArray(rgb) ? rgb : [255, 255, 255];
     return `linear-gradient(90deg, rgba(${r}, ${g}, ${b}, ${alphaStart.toFixed(3)}), rgba(${r}, ${g}, ${b}, ${alphaEnd.toFixed(3)}))`;
-}
-
-function buildSolidCss(rgb, value = 0) {
-    const intensity = Math.min(1, Math.abs(Number(value) || 0) / RESIDUAL_COLOR_CLAMP);
-    const alpha = 0.66 + (intensity * 0.24);
-    const [r, g, b] = Array.isArray(rgb) ? rgb : [255, 255, 255];
-    return `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(3)})`;
 }
 
 function buildWeightCardCss(rgb) {
@@ -137,6 +201,10 @@ function buildAttentionScoreCellCss(value) {
         return colorToCss(color.clone().multiplyScalar(ATTENTION_PREVIEW_COLOR_DARKEN_FACTOR));
     }
     return colorToCss(color);
+}
+
+function buildAttentionPostCellCss(value) {
+    return buildAttentionScoreCellCss(value);
 }
 
 function buildMaskCellCss(isMasked = false) {
@@ -192,7 +260,8 @@ function buildAttentionScoreStage({
     headIndex,
     rows,
     queryProjection,
-    keyProjection
+    keyProjection,
+    valueProjection
 } = {}) {
     if (
         !activationSource
@@ -203,6 +272,39 @@ function buildAttentionScoreStage({
     ) {
         return null;
     }
+
+    const valueRows = rows.map((rowData) => {
+        const projectionRow = Array.isArray(valueProjection?.outputRows)
+            ? valueProjection.outputRows[rowData.rowIndex]
+            : null;
+        const rawValues = Array.isArray(projectionRow?.rawValues) && projectionRow.rawValues.length
+            ? cleanNumberArray(projectionRow.rawValues, D_HEAD)
+            : (
+                typeof activationSource.getLayerQKVVector === 'function'
+                    ? activationSource.getLayerQKVVector(layerIndex, 'v', headIndex, rowData.tokenIndex, D_HEAD)
+                    : null
+            );
+        const safeValues = Array.isArray(rawValues) && rawValues.length
+            ? cleanNumberArray(rawValues, D_HEAD)
+            : null;
+        return {
+            rowIndex: rowData.rowIndex,
+            tokenLabel: rowData.tokenLabel,
+            rawValues: safeValues,
+            gradientCss: projectionRow?.gradientCss || (
+                Array.isArray(safeValues) && safeValues.length
+                    ? buildProjectionVectorGradientCss(
+                        safeValues,
+                        null,
+                        VALUE_VECTOR_GRADIENT_OPTIONS,
+                        '90deg',
+                        PROJECTION_VECTOR_PREVIEW_DARKEN_FACTOR
+                    )
+                    : 'none'
+            ),
+            title: `${rowData.tokenLabel}: value vector`
+        };
+    });
 
     const outputRows = rows.map((rowData) => {
         const scoreRow = typeof activationSource.getAttentionScoresRow === 'function'
@@ -265,9 +367,14 @@ function buildAttentionScoreStage({
                 rowTokenLabel: rowData.tokenLabel,
                 colTokenLabel: colData.tokenLabel,
                 rawValue: isMasked ? null : safeValue,
-                fillCss: (!isMasked && Number.isFinite(safeValue)) ? buildAttentionScoreCellCss(safeValue) : 'transparent',
+                fillCss: isMasked
+                    ? buildMaskCellCss(true)
+                    : (Number.isFinite(safeValue) ? buildAttentionPostCellCss(safeValue) : 'transparent'),
                 isMasked,
-                isEmpty: isMasked || !Number.isFinite(safeValue)
+                isEmpty: !isMasked && !Number.isFinite(safeValue),
+                title: isMasked
+                    ? `${rowData.tokenLabel} → ${colData.tokenLabel}: masked (softmax → 0)`
+                    : undefined
             };
         });
         return {
@@ -275,6 +382,24 @@ function buildAttentionScoreStage({
             tokenLabel: rowData.tokenLabel,
             cells,
             hasAnyValue: cells.some((cell) => !cell.isMasked && Number.isFinite(cell.rawValue))
+        };
+    });
+
+    const headOutputRows = rows.map((rowData) => {
+        const rawValues = typeof activationSource.getAttentionWeightedSum === 'function'
+            ? activationSource.getAttentionWeightedSum(layerIndex, headIndex, rowData.tokenIndex, D_HEAD)
+            : null;
+        const safeValues = Array.isArray(rawValues) && rawValues.length
+            ? cleanNumberArray(rawValues, D_HEAD)
+            : null;
+        return {
+            rowIndex: rowData.rowIndex,
+            tokenLabel: rowData.tokenLabel,
+            rawValues: safeValues,
+            gradientCss: Array.isArray(safeValues) && safeValues.length
+                ? buildValueVectorGradientCss(safeValues)
+                : 'none',
+            title: `${rowData.tokenLabel}: attention head output`
         };
     });
 
@@ -303,7 +428,15 @@ function buildAttentionScoreStage({
         postLabelTex: 'A_{\\mathrm{post}}',
         postRowCount: postRows.length,
         postColumnCount: rows.length,
-        postRows
+        postRows,
+        valueLabelTex: valueProjection?.outputLabelTex || 'V',
+        valueRowCount: valueRows.length,
+        valueColumnCount: D_HEAD,
+        valueRows,
+        headOutputLabelTex: 'H_i',
+        headOutputRowCount: headOutputRows.length,
+        headOutputColumnCount: D_HEAD,
+        headOutputRows
     };
 }
 
@@ -345,6 +478,12 @@ export function buildMhsaTokenMatrixPreviewData({
     const projections = PROJECTION_CONFIGS.map((config) => {
         const rgb = hexToRgb(config.colorHex);
         const outputRows = rows.map((rowData) => {
+            const rawValues = typeof activationSource.getLayerQKVVector === 'function'
+                ? activationSource.getLayerQKVVector(layerIndex, config.kind, headIndex, rowData.tokenIndex, D_HEAD)
+                : null;
+            const safeValues = Array.isArray(rawValues) && rawValues.length
+                ? cleanNumberArray(rawValues, D_HEAD)
+                : null;
             const scalar = typeof activationSource.getLayerQKVScalar === 'function'
                 ? activationSource.getLayerQKVScalar(layerIndex, config.kind, headIndex, rowData.tokenIndex)
                 : null;
@@ -354,7 +493,14 @@ export function buildMhsaTokenMatrixPreviewData({
                 tokenIndex: rowData.tokenIndex,
                 tokenLabel: rowData.tokenLabel,
                 rawValue: safeScalar,
-                gradientCss: buildSolidCss(rgb, safeScalar)
+                rawValues: safeValues,
+                gradientCss: buildProjectionVectorGradientCss(
+                    safeValues,
+                    safeScalar,
+                    config.gradientOptions,
+                    '90deg',
+                    PROJECTION_VECTOR_PREVIEW_DARKEN_FACTOR
+                )
             };
         });
         const biasSample = getAttentionBiasHeadSample(layerIndex, config.biasKind, headIndex);
@@ -381,7 +527,8 @@ export function buildMhsaTokenMatrixPreviewData({
         headIndex,
         rows,
         queryProjection: projections[0] || null,
-        keyProjection: projections[1] || null
+        keyProjection: projections[1] || null,
+        valueProjection: projections[2] || null
     });
 
     return {

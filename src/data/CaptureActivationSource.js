@@ -165,6 +165,8 @@ export class CaptureActivationSource {
         this._attentionRowCache = new Map();
         this._attentionHeadCache = new Map();
         this._qkvScalarCache = new Map();
+        this._qkvVectorCache = new Map();
+        this._attentionWeightedSumCache = new Map();
         this._baseVectorLength = null;
     }
 
@@ -359,6 +361,34 @@ export class CaptureActivationSource {
         });
     }
 
+    getLayerQKVVector(layerIndex, kind, headIndex, tokenIndex, targetLength = null) {
+        const layer = this.layers[layerIndex];
+        const qkv = layer && layer.qkv ? layer.qkv : null;
+        const heads = qkv && Array.isArray(qkv[kind]) ? qkv[kind] : null;
+        if (!heads || !heads.length) return null;
+        const hIdx = clampIndex(headIndex, heads.length - 1);
+        const tokens = Array.isArray(heads[hIdx]) ? heads[hIdx] : null;
+        if (!tokens || !tokens.length) return null;
+        const tIdx = clampIndex(tokenIndex, tokens.length - 1);
+        const normalizedLength = Number.isFinite(targetLength) && targetLength > 0
+            ? Math.max(1, Math.floor(targetLength))
+            : null;
+        const cacheKey = buildCacheKey([
+            'qkv_vector',
+            kind,
+            layerIndex,
+            hIdx,
+            tIdx,
+            normalizedLength === null ? 'raw' : normalizedLength
+        ]);
+        return this._getCached(this._qkvVectorCache, cacheKey, () => {
+            const decoded = decodeVector(tokens[tIdx]);
+            if (!decoded.length) return null;
+            if (normalizedLength === null) return decoded;
+            return normalizeVector(decoded, normalizedLength, true);
+        });
+    }
+
     getAttentionScoresRow(layerIndex, mode, headIndex, tokenIndex) {
         const layer = this.layers[layerIndex];
         const scores = layer && layer.attention_scores ? layer.attention_scores : null;
@@ -437,6 +467,50 @@ export class CaptureActivationSource {
         if (!row || !row.length) return null;
         const idx = clampIndex(keyTokenIndex, row.length - 1);
         return row[idx] ?? null;
+    }
+
+    getAttentionWeightedSum(layerIndex, headIndex, queryTokenIndex, targetLength = null) {
+        const normalizedLength = Number.isFinite(targetLength) && targetLength > 0
+            ? Math.max(1, Math.floor(targetLength))
+            : null;
+        const cacheKey = buildCacheKey([
+            'attention_weighted_sum',
+            layerIndex,
+            headIndex,
+            queryTokenIndex,
+            normalizedLength === null ? 'raw' : normalizedLength
+        ]);
+        return this._getCached(this._attentionWeightedSumCache, cacheKey, () => {
+            const weightRow = this.getAttentionScoresRow(layerIndex, 'post', headIndex, queryTokenIndex);
+            if (!Array.isArray(weightRow) || !weightRow.length) return null;
+
+            let result = null;
+            let usedWeight = false;
+
+            for (let keyTokenIndex = 0; keyTokenIndex < weightRow.length; keyTokenIndex += 1) {
+                const weight = weightRow[keyTokenIndex];
+                if (!Number.isFinite(weight)) continue;
+                const valueVector = this.getLayerQKVVector(
+                    layerIndex,
+                    'v',
+                    headIndex,
+                    keyTokenIndex,
+                    normalizedLength
+                );
+                if (!Array.isArray(valueVector) || !valueVector.length) continue;
+                if (!Array.isArray(result)) {
+                    result = new Array(valueVector.length).fill(0);
+                }
+                usedWeight = true;
+                for (let i = 0; i < valueVector.length; i += 1) {
+                    const value = Number.isFinite(valueVector[i]) ? valueVector[i] : 0;
+                    result[i] += weight * value;
+                }
+            }
+
+            if (!usedWeight || !Array.isArray(result)) return null;
+            return result;
+        });
     }
 
     getAttentionOutputProjection(layerIndex, tokenIndex, targetLength = VECTOR_LENGTH_PRISM) {

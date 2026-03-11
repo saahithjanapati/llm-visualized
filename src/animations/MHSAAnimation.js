@@ -2252,8 +2252,13 @@ export class MHSAAnimation {
         });
         entries.forEach(({ vec }) => {
             if (!vec || !vec.mesh) return;
-            const raw = Array.isArray(vec.rawData)
-                ? vec.rawData.slice(0, outputLength)
+            const weightedData = Array.isArray(vec.userData?.runningSumData) && vec.userData.runningSumData.length
+                ? vec.userData.runningSumData
+                : (Array.isArray(vec.userData?.weightedSumData) && vec.userData.weightedSumData.length
+                    ? vec.userData.weightedSumData
+                    : vec.rawData);
+            const raw = Array.isArray(weightedData)
+                ? weightedData.slice(0, outputLength)
                 : [];
             const numKeyColors = raw.length <= 1 ? 1 : Math.min(MHA_VALUE_KEY_COLOR_COUNT, raw.length);
             vec.applyProcessedVisuals(
@@ -2263,10 +2268,12 @@ export class MHSAAnimation {
                 { setHiddenToBlack: true },
                 raw
             );
+            vec.rawData = raw.slice();
             if (raw.length === 1 && typeof vec.setUniformColor === 'function') {
                 vec.setUniformColor(mapValueToHueRange(raw[0], rangeOptions));
             }
             if (vec.userData) {
+                vec.userData.weightedSumData = raw.slice();
                 vec.userData.weightedSumReadyForConcat = true;
             }
             vec.group.visible = true;

@@ -8,6 +8,8 @@ import {
 } from '../../utils/trailConstants.js';
 import { refreshTrailDisplayScales } from '../../utils/trailUtils.js';
 import { appState } from '../../state/appState.js';
+import { getIncompleteUtf8TokenDisplay } from '../../utils/tokenEncodingNotes.js';
+import { resolveLogitEntryText } from '../../utils/logitTokenText.js';
 import { addEmbeddingAndTokenChips } from './tokenChips.js';
 import { formatTokenLabel } from './tokenLabels.js';
 import { resolveLogitTokenSeed } from './logitColor.js';
@@ -134,8 +136,13 @@ function buildResolvedGeneratedToken({
     seedFallbackIndex = 0
 } = {}) {
     const resolvedTokenId = Number.isFinite(tokenId) ? Math.floor(tokenId) : null;
-    const tokenText = typeof tokenRaw === 'string'
-        ? formatTokenLabel(sanitizeLogitToken(tokenRaw))
+    const incompleteTokenDisplay = getIncompleteUtf8TokenDisplay(resolvedTokenId);
+    const resolvedTokenRaw = incompleteTokenDisplay
+        || ((typeof tokenRaw === 'string' && tokenRaw.length)
+            ? tokenRaw
+            : resolveLogitEntryText(logitEntry));
+    const tokenText = resolvedTokenRaw
+        ? formatTokenLabel(sanitizeLogitToken(resolvedTokenRaw))
         : '';
     const fallbackText = Number.isFinite(resolvedTokenId) ? `#${resolvedTokenId}` : '';
     const tokenLabel = tokenText || fallbackText;
@@ -145,7 +152,7 @@ function buildResolvedGeneratedToken({
         ? logitEntry
         : {
             token_id: resolvedTokenId,
-            token: typeof tokenRaw === 'string' ? tokenRaw : tokenLabel
+            token: resolvedTokenRaw || tokenLabel
         };
 
     return {

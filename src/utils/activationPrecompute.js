@@ -138,8 +138,16 @@ export async function precomputeActivationCaches(activationSource, options = {})
                     activationSource.getLayerQKVScalar(layerIndex, 'q', headIndex, tokenIndex);
                     activationSource.getLayerQKVScalar(layerIndex, 'k', headIndex, tokenIndex);
                     activationSource.getLayerQKVScalar(layerIndex, 'v', headIndex, tokenIndex);
+                    if (typeof activationSource.getLayerQKVVector === 'function') {
+                        activationSource.getLayerQKVVector(layerIndex, 'q', headIndex, tokenIndex);
+                        activationSource.getLayerQKVVector(layerIndex, 'k', headIndex, tokenIndex);
+                        activationSource.getLayerQKVVector(layerIndex, 'v', headIndex, tokenIndex);
+                    }
                     activationSource.getAttentionScoresRow(layerIndex, 'pre', headIndex, tokenIndex);
                     activationSource.getAttentionScoresRow(layerIndex, 'post', headIndex, tokenIndex);
+                    if (typeof activationSource.getAttentionWeightedSum === 'function') {
+                        activationSource.getAttentionWeightedSum(layerIndex, headIndex, tokenIndex);
+                    }
                 }
             }
 

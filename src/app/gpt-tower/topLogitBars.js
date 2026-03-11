@@ -16,6 +16,7 @@ import {
     TOP_LOGIT_BAR_OPACITY,
     TOP_LOGIT_BAR_RISE_DURATION_MS
 } from '../../utils/constants.js';
+import { resolveLogitEntryText } from '../../utils/logitTokenText.js';
 import { scaleGlobalEmissiveIntensity } from '../../utils/materialUtils.js';
 import { isIncompleteUtf8TokenId } from '../../utils/tokenEncodingNotes.js';
 import { formatTokenLabel } from './tokenLabels.js';
@@ -67,8 +68,9 @@ function sanitizeLogitToken(token) {
 
 function resolveLogitLabelText(entry) {
     if (!entry || typeof entry !== 'object') return '';
-    if (typeof entry.token === 'string') {
-        return formatTokenLabel(sanitizeLogitToken(entry.token));
+    const tokenText = resolveLogitEntryText(entry);
+    if (tokenText) {
+        return formatTokenLabel(sanitizeLogitToken(tokenText));
     }
     const tokenId = resolveChosenLogitTokenId(entry);
     if (Number.isFinite(tokenId)) {
@@ -459,14 +461,16 @@ export function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vo
             const startHeight = Math.max(0.1, TOP_LOGIT_BAR_MIN_HEIGHT * 0.15);
             const xPos = baseX + i * barSpacing;
             if (entry) {
-                const tokenText = typeof entry.token === 'string'
-                    ? formatTokenLabel(entry.token.replace(/\n/g, '\\n').replace(/\t/g, '\\t'))
+                const tokenTextRaw = resolveLogitEntryText(entry);
+                const tokenText = tokenTextRaw
+                    ? formatTokenLabel(tokenTextRaw.replace(/\n/g, '\\n').replace(/\t/g, '\\t'))
                     : '';
                 const tokenId = resolveChosenLogitTokenId(entry);
+                const isIncompleteToken = tokenId !== null && isIncompleteUtf8TokenId(tokenId);
                 const labelLines = ['Logit'];
-                if (tokenText) labelLines.push(`Token "${tokenText}"`);
+                if (tokenText && !isIncompleteToken) labelLines.push(`Token "${tokenText}"`);
                 if (tokenId !== null) labelLines.push(`ID ${tokenId}`);
-                if (tokenId !== null && isIncompleteUtf8TokenId(tokenId)) {
+                if (isIncompleteToken) {
                     labelLines.push('Incomplete UTF-8 byte fragment');
                 }
                 if (Number.isFinite(prob)) labelLines.push(formatHoverProbabilityPercentage(prob));

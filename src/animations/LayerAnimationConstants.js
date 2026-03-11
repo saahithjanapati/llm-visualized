@@ -136,7 +136,7 @@ export const POSITION_EMBED_COLOR = 0x2ad56f;
 // Base tint for V vectors (head visuals). Value-spectrum tint for the lightweight V outputs is separate.
 export const MHA_FINAL_V_COLOR = 0xaa3420;
 // Base tint for the value-spectrum applied to lightweight V vectors after head projection.
-export const MHA_VALUE_SPECTRUM_COLOR = 0xf28b30;
+export const MHA_VALUE_SPECTRUM_COLOR = 0xc44d25;
 // Value-vector spectrum tuning (shared by V outputs + weighted sums).
 export const MHA_VALUE_HUE_SPREAD = 0.22;
 export const MHA_VALUE_LIGHTNESS_MIN = 0.3;

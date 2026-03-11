@@ -66,6 +66,7 @@ import {
     buildDebugVectorSum,
     getLaneProgressSignature
 } from './gpt2LaneWatchdogUtils.js';
+import { shouldWaitForInputChipGate } from './gpt2InputChipGateUtils.js';
 import { logLayerNormVectorDump } from './gpt2LayerDebugUtils.js';
 import { GPT2_LAYER_VISUAL_TUNING } from '../../utils/visualTuningProfiles.js';
 import {
@@ -136,6 +137,9 @@ const WATCHDOG_FRAME_GAP_RESET_MS = 900;
 const POST_ATTENTION_LN2_PRE_RISE_SPEED_MULT = 1.25;
 const MULTIPLY_TRANSITION_DURATION_MS = 160;
 const MULTIPLY_SOURCE_SHRINK = 0.94;
+const MULTIPLY_RESULT_POP_SCALE = 1.16;
+const MULTIPLY_RESULT_POP_EXPAND_MS = 95;
+const MULTIPLY_RESULT_POP_SETTLE_MS = 115;
 const MLP_POST_PASS_THROUGH_FINAL_EMISSIVE = GPT2_LAYER_VISUAL_TUNING.mlp.postPassFinalEmissiveIntensity;
 const MLP_MATRIX_FLASH_START_EMISSIVE = Number.isFinite(GPT2_LAYER_VISUAL_TUNING.mlp.flashStartEmissiveIntensity)
     ? GPT2_LAYER_VISUAL_TUNING.mlp.flashStartEmissiveIntensity
@@ -3629,22 +3633,7 @@ export default class Gpt2Layer extends BaseLayer {
 
     _isWaitingForInputChipGate(gate, lane, nowMs, skipActive = false) {
         if (skipActive || this.index !== 0 || !lane) return false;
-        if (!gate || gate.enabled === false) return false;
-
-        if (gate.pending) {
-            return true;
-        }
-
-        const tokenIndex = Number.isFinite(lane.tokenIndex) ? Math.max(0, Math.floor(lane.tokenIndex)) : null;
-        const tokenKey = tokenIndex !== null ? String(tokenIndex) : null;
-        // Release only when the matching chip has actually finished entering
-        // the embedding matrix.
-        const insideByToken = gate.insideByToken;
-        if (tokenKey !== null && insideByToken && Object.prototype.hasOwnProperty.call(insideByToken, tokenKey)) {
-            if (insideByToken[tokenKey] === true) return false;
-            return true;
-        }
-        return false;
+        return shouldWaitForInputChipGate(gate, lane.tokenIndex, nowMs);
     }
 
     _isWaitingForInputVocabChipGate(lane, nowMs, skipActive = false) {
@@ -4067,7 +4056,7 @@ export default class Gpt2Layer extends BaseLayer {
     }
 
     _animateMultiplyTransition({ sourceVec, multResult, scaleParam = null, instant = false, onComplete = null }) {
-        const finish = () => {
+        const finalizeVisibility = () => {
             this._setLayerNormParamRefLayout(scaleParam, { visible: false });
             if (sourceVec && sourceVec.group) {
                 sourceVec.group.visible = false;
@@ -4080,25 +4069,66 @@ export default class Gpt2Layer extends BaseLayer {
                 multResult.group.scale.set(1, 1, 1);
                 this._setVectorOpacity(multResult, 1);
             }
+        };
+        const finish = () => {
             if (typeof onComplete === 'function') onComplete();
+        };
+        const pulseMultiplyResult = () => {
+            if (!multResult || !multResult.group || this._skipToEndActive || typeof TWEEN === 'undefined') {
+                finish();
+                return;
+            }
+
+            const baseScale = multResult.group.scale.clone();
+            const pulseState = { s: 1 };
+            const applyPulseScale = () => {
+                multResult.group.scale.set(
+                    baseScale.x * pulseState.s,
+                    baseScale.y * pulseState.s,
+                    baseScale.z * pulseState.s
+                );
+                this._emitProgress();
+            };
+
+            new TWEEN.Tween(pulseState)
+                .to({ s: MULTIPLY_RESULT_POP_SCALE }, MULTIPLY_RESULT_POP_EXPAND_MS)
+                .easing(TWEEN.Easing.Back.Out)
+                .onUpdate(applyPulseScale)
+                .onComplete(() => {
+                    new TWEEN.Tween(pulseState)
+                        .to({ s: 1 }, MULTIPLY_RESULT_POP_SETTLE_MS)
+                        .easing(TWEEN.Easing.Quadratic.InOut)
+                        .onUpdate(applyPulseScale)
+                        .onComplete(() => {
+                            multResult.group.scale.copy(baseScale);
+                            this._emitProgress();
+                            finish();
+                        })
+                        .start();
+                })
+                .start();
         };
 
         if (instant) {
-            finish();
+            finalizeVisibility();
+            pulseMultiplyResult();
             return;
         }
 
         if (!multResult || !multResult.group) {
+            finalizeVisibility();
             finish();
             return;
         }
 
         if (!sourceVec || !sourceVec.group) {
-            finish();
+            finalizeVisibility();
+            pulseMultiplyResult();
             return;
         }
 
         if (this._skipToEndActive || typeof TWEEN === 'undefined') {
+            finalizeVisibility();
             finish();
             return;
         }
@@ -4123,7 +4153,10 @@ export default class Gpt2Layer extends BaseLayer {
                 sourceVec.group.scale.lerpVectors(sourceStartScale, sourceEndScale, t);
                 this._emitProgress();
             })
-            .onComplete(finish)
+            .onComplete(() => {
+                finalizeVisibility();
+                pulseMultiplyResult();
+            })
             .start();
     }
 

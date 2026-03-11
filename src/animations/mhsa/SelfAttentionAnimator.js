@@ -1328,11 +1328,49 @@ export class SelfAttentionAnimator {
     }
 
     _applyWeightedSumScheme(vector, sourceData = null, options = {}) {
-        const mergedOptions = {
-            ...options,
-            disableCache: true,
+        if (!vector) return;
+        const outputLength = (this.ctx && this.ctx.outputVectorLength) ? this.ctx.outputVectorLength : 64;
+        const setHiddenToBlack = options && typeof options.setHiddenToBlack === 'boolean'
+            ? options.setHiddenToBlack
+            : true;
+        const disableCache = true;
+        const cacheKeyData = options && Object.prototype.hasOwnProperty.call(options, 'cacheKeyData')
+            ? options.cacheKeyData
+            : null;
+        const raw = Array.isArray(sourceData)
+            ? sourceData.slice(0, outputLength)
+            : (vector.rawData ? vector.rawData.slice(0, outputLength) : []);
+        const rangeOptions = this._valueHueRangeOptions || buildHueRangeOptions(MHA_VALUE_SPECTRUM_COLOR, {
+            hueSpread: MHA_VALUE_HUE_SPREAD,
+            minLightness: MHA_VALUE_LIGHTNESS_MIN,
+            maxLightness: MHA_VALUE_LIGHTNESS_MAX,
+            valueMin: MHA_VALUE_RANGE_MIN,
+            valueMax: MHA_VALUE_RANGE_MAX,
+            valueClampMax: MHA_VALUE_CLAMP_MAX,
+        });
+        const numKeyColors = raw.length <= 1
+            ? 1
+            : Math.min(MHA_VALUE_KEY_COLOR_COUNT, raw.length);
+        vector.applyProcessedVisuals(
+            raw,
+            outputLength,
+            { numKeyColors, generationOptions: rangeOptions },
+            { setHiddenToBlack },
+            disableCache ? null : (cacheKeyData !== null ? cacheKeyData : raw)
+        );
+        vector.rawData = raw.slice();
+        if (raw.length === 1 && typeof vector.setUniformColor === 'function') {
+            vector.setUniformColor(mapValueToHueRange(raw[0], rangeOptions));
+        }
+        vector.userData = vector.userData || {};
+        vector.userData.weightedSumData = raw.slice();
+        vector.userData.weightedSumVisuals = {
+            numKeyColors,
+            generationOptions: rangeOptions,
+            outputLength,
+            colorScheme: 'weighted-sum'
         };
-        this._applyValueVectorScheme(vector, sourceData, mergedOptions);
+        this._syncWeightedSumActivationData(vector, raw);
     }
 
     _tagWeightedSumVector(vector, lane = null) {
@@ -1382,6 +1420,45 @@ export class SelfAttentionAnimator {
             if (tokenLabel) vector.mesh.userData.tokenLabel = tokenLabel;
             else delete vector.mesh.userData.tokenLabel;
         }
+    }
+
+    _syncWeightedSumActivationData(vector, sourceData = null) {
+        if (!vector) return;
+        const outputLength = this._resolveOutputVectorLength();
+        const lane = vector.userData?.parentLane || null;
+        const values = Array.isArray(sourceData)
+            ? sourceData.slice(0, outputLength)
+            : this._sliceVectorData(
+                (Array.isArray(vector.userData?.runningSumData) && vector.userData.runningSumData.length)
+                    ? vector.userData.runningSumData
+                    : ((Array.isArray(vector.userData?.weightedSumData) && vector.userData.weightedSumData.length)
+                        ? vector.userData.weightedSumData
+                        : vector.rawData),
+                outputLength
+            );
+        const tokenIndex = Number.isFinite(lane?.tokenIndex)
+            ? Math.floor(lane.tokenIndex)
+            : (Number.isFinite(vector.userData?.tokenIndex) ? Math.floor(vector.userData.tokenIndex) : null);
+        const tokenLabel = (lane && typeof lane.tokenLabel === 'string' && lane.tokenLabel.length)
+            ? lane.tokenLabel
+            : ((typeof vector.userData?.tokenLabel === 'string' && vector.userData.tokenLabel.length)
+                ? vector.userData.tokenLabel
+                : null);
+        const activationData = buildActivationData({
+            label: 'Attention Weighted Sum',
+            stage: 'attention.weighted_sum',
+            layerIndex: Number.isFinite(this.ctx?.layerIndex) ? Math.floor(this.ctx.layerIndex) : undefined,
+            tokenIndex: Number.isFinite(tokenIndex) ? tokenIndex : undefined,
+            tokenLabel: tokenLabel || undefined,
+            headIndex: Number.isFinite(vector.userData?.headIndex) ? Math.floor(vector.userData.headIndex) : undefined,
+            values: values || undefined,
+            copyValues: false,
+        });
+        if (activationData && Number.isFinite(tokenIndex)) {
+            activationData.queryTokenIndex = tokenIndex;
+            if (tokenLabel) activationData.queryTokenLabel = tokenLabel;
+        }
+        applyActivationDataToVector(vector, activationData, 'Attention Weighted Sum');
     }
 
     _resolveOutputVectorLength() {

@@ -7,7 +7,10 @@ import {
     MLP_UP_MATRIX_COLOR,
     MLP_DOWN_MATRIX_COLOR
 } from '../animations/LayerAnimationConstants.js';
-import { buildAttentionEquationSet } from './attentionEquationTextUtils.js';
+import {
+    buildAttentionEquationSet,
+    buildAttentionProjectionEquation
+} from './attentionEquationTextUtils.js';
 import { buildSelectionLayerNormEquation } from './selectionPanelLayerNormEquationTextUtils.js';
 import { formatLayerNormLabel } from '../utils/layerNormLabels.js';
 import { D_MODEL, D_HEAD, VOCAB_SIZE, CONTEXT_LEN } from './selectionPanelConstants.js';
@@ -1020,12 +1023,49 @@ function buildContextualFallbackDescription(label, kind, stage = '') {
     );
 }
 
+const SELECTION_EQUATION_BASE_COLOR = '#8f98a6';
+const SELECTION_EQUATION_MUTED_SURFACE_COLOR = '#141417';
+const SELECTION_EQUATION_MUTED_ALPHA = 0.42;
 const toKatexColorHex = (hex) => `#${Number(hex).toString(16).padStart(6, '0')}`;
 const colorizeEquationToken = (hex, token) => `\\textcolor{${hex}}{${token}}`;
+function blendEquationColor(backgroundHex, foregroundHex, foregroundAlpha = 1) {
+    const safeAlpha = Number.isFinite(foregroundAlpha)
+        ? Math.max(0, Math.min(1, foregroundAlpha))
+        : 1;
+    const normalizeHex = (value, fallback) => {
+        const source = typeof value === 'string' ? value.trim() : '';
+        const matched = /^#?([0-9a-f]{6})$/i.exec(source);
+        return matched ? matched[1] : fallback;
+    };
+    const bgHex = normalizeHex(backgroundHex, '141417');
+    const fgHex = normalizeHex(foregroundHex, 'ffffff');
+    const toRgb = (hex) => ({
+        r: Number.parseInt(hex.slice(0, 2), 16),
+        g: Number.parseInt(hex.slice(2, 4), 16),
+        b: Number.parseInt(hex.slice(4, 6), 16)
+    });
+    const bg = toRgb(bgHex);
+    const fg = toRgb(fgHex);
+    const mix = (bgChannel, fgChannel) => Math.round((bgChannel * (1 - safeAlpha)) + (fgChannel * safeAlpha));
+    const mixedHex = [mix(bg.r, fg.r), mix(bg.g, fg.g), mix(bg.b, fg.b)]
+        .map((channel) => channel.toString(16).padStart(2, '0'))
+        .join('');
+    return `#${mixedHex}`;
+}
+const buildMutedEquationColor = (hex) => blendEquationColor(
+    SELECTION_EQUATION_MUTED_SURFACE_COLOR,
+    hex,
+    SELECTION_EQUATION_MUTED_ALPHA
+);
 const SELECTION_EQUATION_COLORS = {
+    base: SELECTION_EQUATION_BASE_COLOR,
+    mutedWhite: buildMutedEquationColor('#ffffff'),
     q: toKatexColorHex(MHA_FINAL_Q_COLOR),
+    qMuted: buildMutedEquationColor(toKatexColorHex(MHA_FINAL_Q_COLOR)),
     k: toKatexColorHex(MHA_FINAL_K_COLOR),
+    kMuted: buildMutedEquationColor(toKatexColorHex(MHA_FINAL_K_COLOR)),
     v: toKatexColorHex(MHA_FINAL_V_COLOR),
+    vMuted: buildMutedEquationColor(toKatexColorHex(MHA_FINAL_V_COLOR)),
     output: toKatexColorHex(MHA_OUTPUT_PROJECTION_MATRIX_COLOR),
     embeddingVocab: toKatexColorHex(MHA_FINAL_Q_COLOR),
     embeddingPos: toKatexColorHex(POSITION_EMBED_COLOR),
@@ -1036,6 +1076,10 @@ const SELECTION_EQUATION_SYMBOLS = {
     Q: colorizeEquationToken(SELECTION_EQUATION_COLORS.q, 'Q'),
     K: colorizeEquationToken(SELECTION_EQUATION_COLORS.k, 'K'),
     V: colorizeEquationToken(SELECTION_EQUATION_COLORS.v, 'V'),
+    QMuted: colorizeEquationToken(SELECTION_EQUATION_COLORS.qMuted, 'Q'),
+    KMuted: colorizeEquationToken(SELECTION_EQUATION_COLORS.kMuted, 'K'),
+    VMuted: colorizeEquationToken(SELECTION_EQUATION_COLORS.vMuted, 'V'),
+    XLnMuted: colorizeEquationToken(SELECTION_EQUATION_COLORS.mutedWhite, 'x_{\\text{ln}}'),
     WQ: colorizeEquationToken(SELECTION_EQUATION_COLORS.q, 'W_Q'),
     WK: colorizeEquationToken(SELECTION_EQUATION_COLORS.k, 'W_K'),
     WV: colorizeEquationToken(SELECTION_EQUATION_COLORS.v, 'W_V'),
@@ -1103,14 +1147,14 @@ function hasTopVocabEmbeddingLabel(lower) {
 function resolveLayerNormEquationSymbols(lower) {
     if (lower.includes('top')) {
         return {
-            input: 'x_{\\text{out}}',
+            input: 'x',
             norm: '\\hat{x}_{\\text{out}}',
             output: 'x_{\\text{final}}'
         };
     }
     if (lower.includes('ln2')) {
         return {
-            input: 'u',
+            input: 'x',
             norm: '\\hat{u}',
             output: 'u_{\\text{ln}}'
         };
@@ -1173,9 +1217,27 @@ function buildSelectionEquationEntries(label, selectionInfo = null) {
     const tokenEmbedEq = `${SELECTION_EQUATION_SYMBOLS.XTok} = ${SELECTION_EQUATION_SYMBOLS.E}[\\mathrm{token}_t]`;
     const posEmbedEq = `${SELECTION_EQUATION_SYMBOLS.XPos} = ${SELECTION_EQUATION_SYMBOLS.P}[t]`;
     const embedSumEq = `x_t = ${SELECTION_EQUATION_SYMBOLS.XTok} + ${SELECTION_EQUATION_SYMBOLS.XPos}`;
-    const queryProjectionEq = `${SELECTION_EQUATION_SYMBOLS.Q} = x_{\\text{ln}} ${SELECTION_EQUATION_SYMBOLS.WQ} + ${SELECTION_EQUATION_SYMBOLS.BQ}`;
-    const keyProjectionEq = `${SELECTION_EQUATION_SYMBOLS.K} = x_{\\text{ln}} ${SELECTION_EQUATION_SYMBOLS.WK} + ${SELECTION_EQUATION_SYMBOLS.BK}`;
-    const valueProjectionEq = `${SELECTION_EQUATION_SYMBOLS.V} = x_{\\text{ln}} ${SELECTION_EQUATION_SYMBOLS.WV} + ${SELECTION_EQUATION_SYMBOLS.BV}`;
+    const queryProjectionEq = attentionEquations.queryProjection;
+    const keyProjectionEq = attentionEquations.keyProjection;
+    const valueProjectionEq = attentionEquations.valueProjection;
+    const queryWeightMatrixEq = buildAttentionProjectionEquation({
+        outputSymbol: SELECTION_EQUATION_SYMBOLS.QMuted,
+        inputSymbol: SELECTION_EQUATION_SYMBOLS.XLnMuted,
+        weightSymbol: SELECTION_EQUATION_SYMBOLS.WQ,
+        biasSymbol: SELECTION_EQUATION_SYMBOLS.BQ
+    });
+    const keyWeightMatrixEq = buildAttentionProjectionEquation({
+        outputSymbol: SELECTION_EQUATION_SYMBOLS.KMuted,
+        inputSymbol: SELECTION_EQUATION_SYMBOLS.XLnMuted,
+        weightSymbol: SELECTION_EQUATION_SYMBOLS.WK,
+        biasSymbol: SELECTION_EQUATION_SYMBOLS.BK
+    });
+    const valueWeightMatrixEq = buildAttentionProjectionEquation({
+        outputSymbol: SELECTION_EQUATION_SYMBOLS.VMuted,
+        inputSymbol: SELECTION_EQUATION_SYMBOLS.XLnMuted,
+        weightSymbol: SELECTION_EQUATION_SYMBOLS.WV,
+        biasSymbol: SELECTION_EQUATION_SYMBOLS.BV
+    });
     const attentionEquation = attentionEquations.attention;
     const concatEq = attentionEquations.concat;
     const outputProjectionEq = attentionEquations.outputProjection;
@@ -1312,16 +1374,25 @@ function buildSelectionEquationEntries(label, selectionInfo = null) {
     if (lower.includes('position embedding') || lower.includes('positional embedding')) {
         return buildEquationEntries([posEmbedEq, embedSumEq], [0]);
     }
-    if (lower.includes('query weight matrix') || lower.includes('query vector')) {
+    if (lower.includes('query weight matrix')) {
+        return buildEquationEntries([queryWeightMatrixEq, attentionEquation], [0]);
+    }
+    if (lower.includes('query vector')) {
         return buildEquationEntries([queryProjectionEq, attentionEquation], [0]);
     }
-    if (lower.includes('key weight matrix') || lower.includes('cached key vector') || lower.includes('key vector')) {
+    if (lower.includes('key weight matrix')) {
+        return buildEquationEntries([keyWeightMatrixEq, attentionEquation], [0]);
+    }
+    if (lower.includes('cached key vector') || lower.includes('key vector')) {
         return buildEquationEntries([keyProjectionEq, attentionEquation], [0]);
     }
     if (lower.includes('weighted value vector')) {
         return buildEquationEntries([attentionEquation, concatEq], [0]);
     }
-    if (lower.includes('value weight matrix') || lower.includes('cached value vector') || lower.includes('value vector')) {
+    if (lower.includes('value weight matrix')) {
+        return buildEquationEntries([valueWeightMatrixEq, attentionEquation], [0]);
+    }
+    if (lower.includes('cached value vector') || lower.includes('value vector')) {
         return buildEquationEntries([valueProjectionEq, attentionEquation], [0]);
     }
     if (lower.includes('attention score')) {

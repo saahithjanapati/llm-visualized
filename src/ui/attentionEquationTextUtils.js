@@ -4,23 +4,72 @@ function formatHeadScopedSymbol(symbol, headSubscript = null) {
     return `${safeSymbol}_i`;
 }
 
+function resolveAttentionEquationSymbol(symbol, fallback) {
+    return typeof symbol === 'string' ? symbol : fallback;
+}
+
+export function buildAttentionProjectionEquation({
+    outputSymbol = 'Q',
+    inputSymbol = 'x_{\\text{ln}}',
+    weightSymbol = 'W_Q',
+    biasSymbol = 'b_Q',
+    alignEquals = false
+} = {}) {
+    const output = resolveAttentionEquationSymbol(outputSymbol, 'Q');
+    const input = resolveAttentionEquationSymbol(inputSymbol, 'x_{\\text{ln}}');
+    const weight = resolveAttentionEquationSymbol(weightSymbol, 'W_Q');
+    const bias = resolveAttentionEquationSymbol(biasSymbol, 'b_Q');
+    const equals = alignEquals ? '&=' : '=';
+    return `${output} ${equals} ${input} ${weight} + ${bias}`;
+}
+
 export function buildAttentionEquationSet(symbols = {}, options = {}) {
-    const Q = typeof symbols.Q === 'string' ? symbols.Q : 'Q';
-    const K = typeof symbols.K === 'string' ? symbols.K : 'K';
-    const V = typeof symbols.V === 'string' ? symbols.V : 'V';
-    const WQ = typeof symbols.WQ === 'string' ? symbols.WQ : 'W_Q';
-    const WK = typeof symbols.WK === 'string' ? symbols.WK : 'W_K';
-    const WV = typeof symbols.WV === 'string' ? symbols.WV : 'W_V';
-    const BQ = typeof symbols.BQ === 'string' ? symbols.BQ : 'b_Q';
-    const BK = typeof symbols.BK === 'string' ? symbols.BK : 'b_K';
-    const BV = typeof symbols.BV === 'string' ? symbols.BV : 'b_V';
-    const WO = typeof symbols.WO === 'string' ? symbols.WO : 'W_O';
-    const BO = typeof symbols.BO === 'string' ? symbols.BO : 'b_O';
+    const Q = resolveAttentionEquationSymbol(symbols.Q, 'Q');
+    const K = resolveAttentionEquationSymbol(symbols.K, 'K');
+    const V = resolveAttentionEquationSymbol(symbols.V, 'V');
+    const WQ = resolveAttentionEquationSymbol(symbols.WQ, 'W_Q');
+    const WK = resolveAttentionEquationSymbol(symbols.WK, 'W_K');
+    const WV = resolveAttentionEquationSymbol(symbols.WV, 'W_V');
+    const BQ = resolveAttentionEquationSymbol(symbols.BQ, 'b_Q');
+    const BK = resolveAttentionEquationSymbol(symbols.BK, 'b_K');
+    const BV = resolveAttentionEquationSymbol(symbols.BV, 'b_V');
+    const WO = resolveAttentionEquationSymbol(symbols.WO, 'W_O');
+    const BO = resolveAttentionEquationSymbol(symbols.BO, 'b_O');
     const safeHeadSubscript = typeof options.headSubscript === 'string' && options.headSubscript.trim().length
         ? options.headSubscript.trim()
         : null;
 
-    const qkvProjection = String.raw`\begin{aligned} ${Q} &= x_{\text{ln}} ${WQ} + ${BQ} \\ ${K} &= x_{\text{ln}} ${WK} + ${BK} \\ ${V} &= x_{\text{ln}} ${WV} + ${BV} \end{aligned}`;
+    const queryProjection = buildAttentionProjectionEquation({
+        outputSymbol: Q,
+        weightSymbol: WQ,
+        biasSymbol: BQ
+    });
+    const keyProjection = buildAttentionProjectionEquation({
+        outputSymbol: K,
+        weightSymbol: WK,
+        biasSymbol: BK
+    });
+    const valueProjection = buildAttentionProjectionEquation({
+        outputSymbol: V,
+        weightSymbol: WV,
+        biasSymbol: BV
+    });
+    const qkvProjection = String.raw`\begin{aligned} ${buildAttentionProjectionEquation({
+        outputSymbol: Q,
+        weightSymbol: WQ,
+        biasSymbol: BQ,
+        alignEquals: true
+    })} \\ ${buildAttentionProjectionEquation({
+        outputSymbol: K,
+        weightSymbol: WK,
+        biasSymbol: BK,
+        alignEquals: true
+    })} \\ ${buildAttentionProjectionEquation({
+        outputSymbol: V,
+        weightSymbol: WV,
+        biasSymbol: BV,
+        alignEquals: true
+    })} \end{aligned}`;
     const Qh = formatHeadScopedSymbol(Q, safeHeadSubscript);
     const Kh = formatHeadScopedSymbol(K, safeHeadSubscript);
     const Vh = formatHeadScopedSymbol(V, safeHeadSubscript);
@@ -35,6 +84,9 @@ export function buildAttentionEquationSet(symbols = {}, options = {}) {
     const postAttentionResidual = 'u = x + O';
 
     return {
+        queryProjection,
+        keyProjection,
+        valueProjection,
         qkvProjection,
         attention,
         concat,

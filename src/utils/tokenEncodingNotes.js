@@ -25,6 +25,7 @@ const GPT2_INCOMPLETE_UTF8_TOKEN_IDS = new Set([
 ]);
 
 const INCOMPLETE_UTF8_TOKEN_NOTE = 'This token is an incomplete UTF-8 byte fragment. It needs neighboring token bytes to render as readable text.';
+const INCOMPLETE_UTF8_TOKEN_DISPLAY = 'Incomplete UTF-8 byte fragment';
 
 function normalizeTokenId(tokenId) {
     if (!Number.isFinite(tokenId)) return null;
@@ -39,4 +40,8 @@ export function isIncompleteUtf8TokenId(tokenId) {
 
 export function getIncompleteUtf8TokenNote(tokenId) {
     return isIncompleteUtf8TokenId(tokenId) ? INCOMPLETE_UTF8_TOKEN_NOTE : '';
+}
+
+export function getIncompleteUtf8TokenDisplay(tokenId) {
+    return isIncompleteUtf8TokenId(tokenId) ? INCOMPLETE_UTF8_TOKEN_DISPLAY : '';
 }

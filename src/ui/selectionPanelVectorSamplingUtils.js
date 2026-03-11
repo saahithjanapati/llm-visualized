@@ -41,6 +41,7 @@ function resolveSamplingFamily(label = '', stage = '') {
 
     if (
         stageLower.startsWith('qkv.')
+        || stageLower === 'attention.weighted_sum'
         || stageLower === 'attention.weighted_value'
         || lower.includes('attention weighted sum')
         || lower.includes('weighted value vector')
