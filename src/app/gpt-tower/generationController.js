@@ -832,7 +832,8 @@ export function initGenerationController({
 
     const playPendingPassIntro = async ({
         passState,
-        attentionState = null
+        attentionState = null,
+        previousTokenCount = null
     } = {}) => {
         if (!passIntroOverlay || typeof passIntroOverlay.play !== 'function') return;
         const sourceState = attentionState || passState;
@@ -843,7 +844,8 @@ export function initGenerationController({
             laneCount: sourceState.totalLaneCount ?? sourceState.laneTokenIndices?.length ?? 0,
             laneTokenIndices: sourceState.laneTokenIndices,
             tokenLabels: sourceState.tokenLabels,
-            presentation: 'tokenized-append',
+            presentation: 'jump-append',
+            previousTokenCount,
             onBeforeHide: async () => {
                 if (!startupCameraIntroPromise) {
                     startupCameraIntroPromise = Promise.resolve(
@@ -1086,6 +1088,7 @@ export function initGenerationController({
         Promise.resolve().then(async () => {
             const engine = pipeline?.engine;
             engine?.pause?.(PASS_INTRO_ENGINE_PAUSE_REASON);
+            const priorTokenCount = currentLaneCount;
             try {
                 rebuildPass({
                     laneCount: nextLaneCount,
@@ -1094,7 +1097,8 @@ export function initGenerationController({
                 });
                 await playPendingPassIntro({
                     passState: latestPassState,
-                    attentionState: latestAttentionState
+                    attentionState: latestAttentionState,
+                    previousTokenCount: priorTokenCount
                 });
             } catch (err) {
                 console.error('Forward-pass jump intro failed:', err);

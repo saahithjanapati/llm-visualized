@@ -3270,7 +3270,7 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     --mhsa-caption-lift: calc((var(--mhsa-token-matrix-visual-height, 146px) - var(--mhsa-token-matrix-score-size, 78px)) / 2);
 }
 .mhsa-token-matrix-preview__post-block--head-copy {
-    margin-left: calc(clamp(54px, 4.5vw, 88px) + var(--mhsa-token-matrix-head-copy-offset-boost, 0px));
+    margin-left: calc(clamp(72px, 5.6vw, 106px) + var(--mhsa-token-matrix-head-copy-offset-boost, 0px));
 }
 .mhsa-token-matrix-preview__visual {
     min-height: var(--mhsa-token-matrix-visual-height, 146px);
@@ -3478,6 +3478,21 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     background: transparent;
     box-shadow: none;
 }
+.mhsa-token-matrix-preview__post-row {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(var(--mhsa-token-matrix-column-count, 1), minmax(0, 1fr));
+    gap: var(--mhsa-token-matrix-score-gap, 3px);
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    border-radius: clamp(3px, calc(var(--mhsa-token-matrix-score-size, 78px) * 0.08), 7px);
+    transition:
+        opacity 180ms ease,
+        filter 180ms ease,
+        box-shadow 180ms ease;
+}
 .mhsa-token-matrix-preview__score-cell,
 .mhsa-token-matrix-preview__score-cell-static,
 .mhsa-token-matrix-preview__mask-cell,
@@ -3524,11 +3539,23 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
 .mhsa-token-matrix-preview__score-cell-static.is-dimmed,
 .mhsa-token-matrix-preview__mask-cell.is-dimmed,
 .mhsa-token-matrix-preview__post-cell.is-dimmed {
-    opacity: 0.42;
-    filter: saturate(0.52) brightness(0.76);
+    opacity: 0.18;
+    filter: saturate(0.06) brightness(0.62) grayscale(0.78);
 }
 .mhsa-token-matrix-preview__post-cell.is-dimmed {
-    filter: saturate(0.5) brightness(0.82);
+    filter: saturate(0.06) brightness(0.62) grayscale(0.78);
+}
+.mhsa-token-matrix-preview__post-row.is-dimmed {
+    opacity: 0.18;
+    filter: saturate(0.06) brightness(0.62) grayscale(0.78);
+}
+.mhsa-token-matrix-preview__body.has-head-output-terminal-focus .mhsa-token-matrix-preview__post-block--head-copy .mhsa-token-matrix-preview__post-cell.is-dimmed {
+    opacity: 0.18;
+    filter: saturate(0.06) brightness(0.62) grayscale(0.78);
+}
+.mhsa-token-matrix-preview__body.has-head-output-terminal-focus .mhsa-token-matrix-preview__post-block--head-copy .mhsa-token-matrix-preview__post-row.is-dimmed {
+    opacity: 0.18;
+    filter: saturate(0.06) brightness(0.62) grayscale(0.78);
 }
 .mhsa-token-matrix-preview__score-cell.is-active,
 .mhsa-token-matrix-preview__score-cell-static.is-active,
@@ -3563,6 +3590,20 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
         0 0 0 1.5px rgba(120,204,255,0.72),
         0 0 10px rgba(78,178,255,0.34);
 }
+.mhsa-token-matrix-preview__post-row.is-active {
+    opacity: 1;
+    filter: none;
+    box-shadow: none;
+}
+.mhsa-token-matrix-preview__body.has-head-output-terminal-focus .mhsa-token-matrix-preview__post-block--head-copy .mhsa-token-matrix-preview__post-cell.is-active {
+    opacity: 1;
+    filter: brightness(1.2) saturate(1.1);
+}
+.mhsa-token-matrix-preview__body.has-head-output-terminal-focus .mhsa-token-matrix-preview__post-block--head-copy .mhsa-token-matrix-preview__post-row.is-active {
+    opacity: 1;
+    filter: none;
+    box-shadow: none;
+}
 .mhsa-token-matrix-preview__post-cell.is-masked.is-active {
     box-shadow:
         0 10px 18px rgba(0,0,0,0.5),
@@ -3576,6 +3617,11 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
         0 14px 24px rgba(0,0,0,0.58),
         0 0 0 1.5px rgba(130,211,255,0.84),
         0 0 14px rgba(88,185,255,0.42);
+}
+.mhsa-token-matrix-preview__body.has-pinned-focus .mhsa-token-matrix-preview__post-row.is-pinned {
+    opacity: 1;
+    filter: none;
+    box-shadow: none;
 }
 .mhsa-token-matrix-preview__body.has-pinned-focus .mhsa-token-matrix-preview__post-cell.is-masked.is-pinned {
     box-shadow:
@@ -3689,8 +3735,8 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
 .mhsa-token-matrix-preview__query-row.is-dimmed .mhsa-token-matrix-preview__query-row-bar,
 .mhsa-token-matrix-preview__compact-row.is-dimmed .mhsa-token-matrix-preview__compact-row-bar,
 .mhsa-token-matrix-preview__transpose-col.is-dimmed {
-    opacity: 0.42;
-    filter: saturate(0.52) brightness(0.76);
+    opacity: 0.18;
+    filter: saturate(0.06) brightness(0.62) grayscale(0.78);
 }
 .mhsa-token-matrix-preview__row.is-active {
     z-index: 2;
@@ -3750,8 +3796,8 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
 }
 .mhsa-token-matrix-preview__x-matrix:has(.mhsa-token-matrix-preview__row:hover) .mhsa-token-matrix-preview__row:not(:hover) .mhsa-token-matrix-preview__row-label,
 .mhsa-token-matrix-preview__x-matrix:has(.mhsa-token-matrix-preview__row:hover) .mhsa-token-matrix-preview__row:not(:hover) .mhsa-token-matrix-preview__row-bar {
-    opacity: 0.42;
-    filter: saturate(0.52) brightness(0.76);
+    opacity: 0.18;
+    filter: saturate(0.06) brightness(0.62) grayscale(0.78);
 }
 .mhsa-token-matrix-preview__x-matrix .mhsa-token-matrix-preview__row:hover {
     z-index: 2;
@@ -3776,8 +3822,8 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
         0 0 12px rgba(255,255,255,0.08);
 }
 .mhsa-token-matrix-preview__query-matrix:has(.mhsa-token-matrix-preview__query-row:hover) .mhsa-token-matrix-preview__query-row:not(:hover) .mhsa-token-matrix-preview__query-row-bar {
-    opacity: 0.42;
-    filter: saturate(0.52) brightness(0.76);
+    opacity: 0.18;
+    filter: saturate(0.06) brightness(0.62) grayscale(0.78);
 }
 .mhsa-token-matrix-preview__query-matrix .mhsa-token-matrix-preview__query-row:hover {
     z-index: 2;
@@ -3815,8 +3861,8 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     opacity: 0.68;
 }
 .mhsa-token-matrix-preview__compact-row-matrix:has(.mhsa-token-matrix-preview__compact-row:hover) .mhsa-token-matrix-preview__compact-row:not(:hover) .mhsa-token-matrix-preview__compact-row-bar {
-    opacity: 0.42;
-    filter: saturate(0.52) brightness(0.76);
+    opacity: 0.18;
+    filter: saturate(0.06) brightness(0.62) grayscale(0.78);
 }
 .mhsa-token-matrix-preview__compact-row-matrix .mhsa-token-matrix-preview__compact-row:hover {
     z-index: 2;
@@ -3830,7 +3876,12 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
         inset 0 0 18px rgba(255,255,255,0.06),
         0 0 12px rgba(255,255,255,0.08);
 }
-.mhsa-token-matrix-preview__body.has-head-output-terminal-focus .mhsa-token-matrix-preview__head-output-block:has(.mhsa-token-matrix-preview__compact-row:hover) .mhsa-token-matrix-preview__compact-row:not(:hover) .mhsa-token-matrix-preview__compact-row-bar,
+.mhsa-token-matrix-preview__body.has-head-output-terminal-focus .mhsa-token-matrix-preview__head-output-block:has(.mhsa-token-matrix-preview__compact-row:hover) .mhsa-token-matrix-preview__compact-row:not(:hover) .mhsa-token-matrix-preview__compact-row-bar {
+    opacity: 0.18;
+    filter: saturate(0.06) brightness(0.62) grayscale(0.78);
+    transform: none;
+    box-shadow: none;
+}
 .mhsa-token-matrix-preview__body.has-head-output-terminal-focus .mhsa-token-matrix-preview__head-output-block .mhsa-token-matrix-preview__compact-row:hover .mhsa-token-matrix-preview__compact-row-bar {
     opacity: 1;
     filter: none;
@@ -3838,8 +3889,8 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     box-shadow: none;
 }
 .mhsa-token-matrix-preview__transpose-matrix:has(.mhsa-token-matrix-preview__transpose-col:hover) .mhsa-token-matrix-preview__transpose-col:not(:hover) {
-    opacity: 0.42;
-    filter: saturate(0.52) brightness(0.76);
+    opacity: 0.18;
+    filter: saturate(0.06) brightness(0.62) grayscale(0.78);
 }
 .mhsa-token-matrix-preview__transpose-matrix .mhsa-token-matrix-preview__transpose-col:hover {
     opacity: 1;
@@ -5743,7 +5794,7 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
         gap: calc(10px + var(--mhsa-token-matrix-head-output-gap-boost, 0px));
     }
     .mhsa-token-matrix-preview__post-block--head-copy {
-        margin-left: calc(40px + var(--mhsa-token-matrix-head-copy-offset-boost, 0px));
+        margin-left: calc(56px + var(--mhsa-token-matrix-head-copy-offset-boost, 0px));
     }
     .mhsa-token-matrix-preview__softmax-stage {
         gap: calc(18px + var(--mhsa-token-matrix-softmax-stage-gap-boost, 0px));

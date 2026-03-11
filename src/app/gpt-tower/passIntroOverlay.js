@@ -15,6 +15,9 @@ const TOKENIZE_HOLD_MS = 1000;
 const APPEND_TOKEN_STAGGER_MS = 110;
 const APPEND_TOKEN_SETTLE_MS = 460;
 const APPEND_TOKEN_HOLD_MS = 620;
+const JUMP_APPEND_STAGGER_MS = 90;
+const JUMP_APPEND_SETTLE_MS = 320;
+const JUMP_APPEND_HOLD_MS = 180;
 const HANDOFF_BASE_DURATION_MS = 860;
 const HANDOFF_STAGGER_MS = 28;
 const HANDOFF_STRIP_REVEAL_PROGRESS = 0.72;
@@ -366,6 +369,7 @@ function copyChipComputedStyle(sourceEl, chip) {
 function createInlinePromptToken({
     entry,
     index,
+    promptIndex = index,
     colorState,
     promptTokenStrip,
     delayMs = index * TOKENIZE_STAGGER_MS
@@ -373,8 +377,8 @@ function createInlinePromptToken({
     const chip = document.createElement('span');
     chip.className = 'pass-intro-inline-token';
     chip.style.setProperty('--tokenize-delay-ms', `${Math.max(0, delayMs)}ms`);
-    applyTokenChipColors(chip, entry?.chipEntry, index, { lookup: colorState?.lookup });
-    const promptTokenEl = promptTokenStrip?.getTokenElement?.(index) || null;
+    applyTokenChipColors(chip, entry?.chipEntry, promptIndex, { lookup: colorState?.lookup });
+    const promptTokenEl = promptTokenStrip?.getTokenElement?.(promptIndex) || null;
     copyChipComputedStyle(promptTokenEl, chip);
     chip.style.display = 'inline-flex';
     chip.style.alignItems = 'center';
@@ -396,16 +400,20 @@ function renderInlinePromptTokens(
     entries = [],
     colorState = null,
     promptTokenStrip = null,
-    { delayResolver = null } = {}
+    { delayResolver = null, promptIndexResolver = null } = {}
 ) {
     if (!textEl) return [];
 
     const fragment = document.createDocumentFragment();
     const chipElements = [];
     entries.forEach((entry, index) => {
+        const promptIndex = (typeof promptIndexResolver === 'function')
+            ? promptIndexResolver(index, entry)
+            : index;
         const chip = createInlinePromptToken({
             entry,
             index,
+            promptIndex,
             colorState,
             promptTokenStrip,
             delayMs: typeof delayResolver === 'function'
@@ -668,6 +676,7 @@ export function initPassIntroOverlay({ activationSource, promptTokenStrip } = {}
         laneTokenIndices,
         tokenLabels,
         presentation = 'typing',
+        previousTokenCount = null,
         onHandoffCommit = null,
         onBeforeHide = null
     } = {}) => {
@@ -693,11 +702,19 @@ export function initPassIntroOverlay({ activationSource, promptTokenStrip } = {}
 
         const nextRawText = entries.map((entry) => entry.rawText).join('');
         const normalizedNextText = String(nextRawText ?? '').replace(/\r/g, '').replace(/\u00A0/g, ' ');
-        const appendStartIndex = resolveAppendStartIndex(currentTokenCount, entries.length);
+        const previousDisplayTokenCount = Number.isFinite(previousTokenCount)
+            ? Math.max(0, Math.floor(previousTokenCount))
+            : currentTokenCount;
+        const hasPreviousDisplayState = hasPlayedOnce || previousDisplayTokenCount > 0;
+        const appendStartIndex = resolveAppendStartIndex(previousDisplayTokenCount, entries.length);
         const useTokenizedAppendPresentation = presentation === 'tokenized-append'
-            && hasPlayedOnce
-            && entries.length >= currentTokenCount
-            && appendStartIndex <= entries.length;
+            && hasPreviousDisplayState
+            && entries.length >= previousDisplayTokenCount
+            && appendStartIndex < entries.length;
+        const useJumpAppendPresentation = presentation === 'jump-append'
+            && hasPreviousDisplayState
+            && entries.length >= previousDisplayTokenCount
+            && appendStartIndex < entries.length;
 
         finalizeHiddenState();
         dom.root.dataset.visible = 'true';
@@ -707,7 +724,50 @@ export function initPassIntroOverlay({ activationSource, promptTokenStrip } = {}
         if (disposed) return;
 
         let inlineChipElements = [];
-        if (useTokenizedAppendPresentation) {
+        let overlaySourceEntries = entries.map((entry, index) => ({
+            entry,
+            targetIndex: index
+        }));
+        if (useJumpAppendPresentation) {
+            currentRawText = normalizedNextText;
+            dom.root.classList.add('is-tokenized');
+            dom.textEl.classList.add('is-tokenized');
+            overlaySourceEntries = entries.slice(appendStartIndex).map((entry, index) => ({
+                entry,
+                targetIndex: appendStartIndex + index
+            }));
+            inlineChipElements = renderInlinePromptTokens(
+                dom.textEl,
+                entries,
+                colorState,
+                promptTokenStrip
+            );
+            inlineChipElements.forEach((chip, index) => {
+                if (index < appendStartIndex) {
+                    chip.classList.add('is-visible');
+                    return;
+                }
+                chip.classList.add('is-appended');
+            });
+            syncEditorScroll(dom.editorEl);
+
+            await nextFrame();
+            if (disposed) return;
+
+            for (let i = appendStartIndex; i < inlineChipElements.length; i += 1) {
+                inlineChipElements[i].classList.add('is-visible');
+            }
+
+            const appendedCount = Math.max(0, inlineChipElements.length - appendStartIndex);
+            const jumpTailMs = appendedCount > 0
+                ? JUMP_APPEND_SETTLE_MS + JUMP_APPEND_STAGGER_MS * Math.max(0, appendedCount - 1)
+                : 100;
+            await delay(jumpTailMs);
+            if (disposed) return;
+
+            await delay(JUMP_APPEND_HOLD_MS);
+            if (disposed) return;
+        } else if (useTokenizedAppendPresentation) {
             currentRawText = normalizedNextText;
             dom.root.classList.add('is-tokenized');
             dom.textEl.classList.add('is-tokenized');
@@ -802,13 +862,13 @@ export function initPassIntroOverlay({ activationSource, promptTokenStrip } = {}
             if (disposed) return;
         }
 
-        const overlayEntries = entries.map((entry, idx) => {
-            const sourceEl = inlineChipElements[idx] || null;
+        const overlayEntries = overlaySourceEntries.map(({ entry, targetIndex }) => {
+            const sourceEl = inlineChipElements[targetIndex] || null;
             const sourceRect = sourceEl?.getBoundingClientRect?.() || null;
             const overlay = createPromptChipOverlay({
                 sourceEl,
                 entry,
-                index: idx,
+                index: targetIndex,
                 promptTokenStrip,
                 colorState,
                 startRect: (sourceRect && sourceRect.width > 0 && sourceRect.height > 0)
