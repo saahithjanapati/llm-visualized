@@ -69,4 +69,18 @@ describe('gpt2InputChipGateUtils.shouldWaitForInputChipGate', () => {
 
         expect(shouldWaitForInputChipGate(gate, 1, 1000)).toBe(false);
     });
+
+    it('can keep waiting after the token is inside until its release time', () => {
+        const gate = {
+            enabled: true,
+            pending: false,
+            waitForReleaseAfterInside: true,
+            releaseByToken: { '1': 4000 },
+            defaultReleaseAt: 4000,
+            insideByToken: { '1': true }
+        };
+
+        expect(shouldWaitForInputChipGate(gate, 1, 3999)).toBe(true);
+        expect(shouldWaitForInputChipGate(gate, 1, 4000)).toBe(false);
+    });
 });

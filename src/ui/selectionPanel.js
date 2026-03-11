@@ -104,6 +104,20 @@ import {
     registerMhsaTokenMatrixCell
 } from './selectionPanelMhsaCellStoreUtils.js';
 import {
+    buildMhsaSceneModel
+} from '../view2d/model/buildMhsaSceneModel.js';
+import {
+    buildSceneLayout
+} from '../view2d/layout/buildSceneLayout.js';
+import {
+    CanvasSceneRenderer
+} from '../view2d/render/canvas/CanvasSceneRenderer.js';
+import {
+    resolveMhsaTokenMatrixCanvasMode,
+    shouldRenderMhsaTokenMatrixCanvas,
+    VIEW2D_MHSA_CANVAS_MODES
+} from '../view2d/runtime/view2dFeatureFlags.js';
+import {
     applyMaterialSnapshot,
     copyInstancedVectorColorsToPreview,
     extractMaterialSnapshot,
@@ -261,10 +275,10 @@ let tokenChipFontPromise = null;
 function getAttentionSectionCollapsedPreference() {
     try {
         const storage = globalThis?.localStorage;
-        if (!storage || typeof storage.getItem !== 'function') return false;
-        return getPreference(ATTENTION_SECTION_COLLAPSED_PREF_KEY, false) === true;
+        if (!storage || typeof storage.getItem !== 'function') return true;
+        return getPreference(ATTENTION_SECTION_COLLAPSED_PREF_KEY, true) === true;
     } catch (_error) {
-        return false;
+        return true;
     }
 }
 
@@ -320,6 +334,7 @@ function buildMetadata(params = 'TBD', inputDim = null, outputDim = null, length
         inputDim: hasDims ? formatNumber(inputDim) : 'TBD',
         outputDim: hasDims ? formatNumber(outputDim) : 'TBD',
         length: hasLength ? formatNumber(length) : 'TBD',
+        hasLength,
         biasDim: hasBiasDim ? formatNumber(biasDim) : '',
         hasBiasDim,
         hasDims
@@ -2476,6 +2491,7 @@ class SelectionPanel {
         this.title = document.getElementById('detailTitle');
         this.subtitle = document.getElementById('detailSubtitle');
         this.subtitleSecondary = document.getElementById('detailSubtitleSecondary');
+        this.subtitleTertiary = document.getElementById('detailSubtitleTertiary');
         this.params = document.getElementById('detailParams');
         this.paramsRow = document.getElementById('detailParamsRow');
         this.inputDim = document.getElementById('detailInputDim');
@@ -2487,6 +2503,7 @@ class SelectionPanel {
         this.biasDimRow = document.getElementById('detailBiasDimRow');
         this.biasDimLabel = document.getElementById('detailBiasDimLabel');
         this.biasDim = document.getElementById('detailBiasDim');
+        this.previewMetaSection = document.getElementById('detailPreviewMeta');
         this.metaSection = document.getElementById('detailMeta');
         this.tokenInfoRow = document.getElementById('detailTokenInfoRow');
         this.tokenInfoHeadPrimary = document.getElementById('detailTokenInfoHeadPrimary');
@@ -2527,7 +2544,17 @@ class SelectionPanel {
         this.mhsaTokenMatrixHoverDim = document.getElementById('detailMhsaTokenMatrixHoverDim');
         this.mhsaTokenMatrixHoverBand = document.getElementById('detailMhsaTokenMatrixHoverBand');
         this.mhsaTokenMatrixHoverValue = document.getElementById('detailMhsaTokenMatrixHoverValue');
+        this.mhsaTokenMatrixCanvas = document.getElementById('detailMhsaTokenMatrixCanvas');
         this.mhsaTokenMatrixBody = document.getElementById('detailMhsaTokenMatrixBody');
+        if (!this.mhsaTokenMatrixCanvas && this.mhsaTokenMatrixPreview && typeof document !== 'undefined') {
+            const canvasEl = document.createElement('canvas');
+            canvasEl.id = 'detailMhsaTokenMatrixCanvas';
+            canvasEl.className = 'mhsa-token-matrix-preview__canvas';
+            canvasEl.hidden = true;
+            canvasEl.setAttribute('aria-hidden', 'true');
+            this.mhsaTokenMatrixPreview.insertBefore(canvasEl, this.mhsaTokenMatrixBody || null);
+            this.mhsaTokenMatrixCanvas = canvasEl;
+        }
         this.description = document.getElementById('detailDescription');
         this.equationsSection = document.getElementById('detailEquations');
         this.equationsBody = document.getElementById('detailEquationsBody');
@@ -2628,7 +2655,6 @@ class SelectionPanel {
         this._rotationSpeedMult = 1;
         this._currentPreviewSelectionKey = null;
         this._lastFitOptions = null;
-        this._previewFitViewportCap = null;
         this._mobilePauseActive = false;
         this._mobileFocusActive = false;
         this._pauseMainFlowOnMobileFocus = options.pauseMainFlowOnMobileFocus === true;
@@ -2765,6 +2791,13 @@ class SelectionPanel {
         this._attentionLastPostCompleted = 0;
         this._attentionScoreLink = null;
         this._mhsaTokenMatrixData = null;
+        this._mhsaTokenMatrixSceneModel = null;
+        this._mhsaTokenMatrixSceneLayout = null;
+        this._mhsaTokenMatrixCanvasRenderer = this.mhsaTokenMatrixCanvas
+            ? new CanvasSceneRenderer({ canvas: this.mhsaTokenMatrixCanvas })
+            : null;
+        this._mhsaTokenMatrixCanvasRenderFrame = null;
+        this._mhsaTokenMatrixCanvasDebugSignature = '';
         this._mhsaTokenMatrixRenderToken = 0;
         this._mhsaTokenMatrixHoverCell = null;
         this._mhsaTokenMatrixHoverRow = null;
@@ -3444,6 +3477,7 @@ class SelectionPanel {
         const title = (this.title?.textContent || '').trim();
         const subtitle = (this.subtitle?.textContent || '').trim();
         const subtitleSecondary = (this.subtitleSecondary?.textContent || '').trim();
+        const subtitleTertiary = (this.subtitleTertiary?.textContent || '').trim();
         const descriptionText = String(this._currentSelectionDescription || '').trim();
         const equationText = String(this._currentSelectionEquations || '').trim();
         const vectorTokenMetadata = selection
@@ -3455,9 +3489,14 @@ class SelectionPanel {
             : null;
         const promptContextSummary = this._buildSelectionPromptContextSummary(selection, vectorTokenMetadata);
 
-        const metaLines = collectVisibleContextText(this.metaSection, {
-            excludeSelectors: '#detailCopyContextBtn, #detailClose, #detailFullscreenToggle'
-        });
+        const metaLines = [
+            ...collectVisibleContextText(this.previewMetaSection, {
+                excludeSelectors: '#detailCopyContextBtn, #detailClose, #detailFullscreenToggle'
+            }),
+            ...collectVisibleContextText(this.metaSection, {
+                excludeSelectors: '#detailCopyContextBtn, #detailClose, #detailFullscreenToggle'
+            })
+        ];
 
         let legendLines = [];
         if (this.vectorLegend?.classList.contains('is-visible')) {
@@ -3484,6 +3523,7 @@ class SelectionPanel {
             title,
             subtitle,
             subtitleSecondary,
+            subtitleTertiary,
             descriptionText,
             equationText,
             metaLines,
@@ -3758,6 +3798,9 @@ class SelectionPanel {
                 this._applyMhsaTokenMatrixViewport();
             });
         }
+        if (this._isMhsaInfoSelectionActive && !this.mhsaTokenMatrixPreview?.hidden) {
+            this._scheduleMhsaTokenMatrixCanvasRender();
+        }
         if (this._geluDetailOpen) {
             this._geluDetailView?.resizeAndRender();
         }
@@ -3834,22 +3877,9 @@ class SelectionPanel {
     }
 
     _resolvePreviewFitViewportCap(width = null, height = null) {
-        const viewport = this._resolvePreviewViewportSize(width, height);
-        if (!this._previewFitViewportCap) {
-            this._previewFitViewportCap = {
-                width: viewport.width,
-                height: viewport.height
-            };
-        }
         return {
-            width: Math.max(
-                PREVIEW_MAX_FIT_VIEWPORT_WIDTH_PX,
-                this._previewFitViewportCap?.width || 0
-            ),
-            height: Math.max(
-                PREVIEW_MAX_FIT_VIEWPORT_HEIGHT_PX,
-                this._previewFitViewportCap?.height || 0
-            )
+            width: PREVIEW_MAX_FIT_VIEWPORT_WIDTH_PX,
+            height: PREVIEW_MAX_FIT_VIEWPORT_HEIGHT_PX
         };
     }
 
@@ -4584,6 +4614,11 @@ class SelectionPanel {
             'detail-subtitle--token-context'
         );
         this.subtitleSecondary.textContent = String(text || '');
+    }
+
+    _setSubtitleTertiaryText(text = '') {
+        if (!this.subtitleTertiary) return;
+        this.subtitleTertiary.textContent = String(text || '');
     }
 
     _setSubtitleSecondaryTokenContext({
@@ -5957,6 +5992,7 @@ class SelectionPanel {
             this.subtitle.textContent = 'Gaussian Error Linear Unit used in GPT-2 MLP blocks';
         }
         this._setSubtitleSecondaryText('');
+        this._setSubtitleTertiaryText('');
         this._geluDetailView?.setVisible(true);
         this._geluDetailView?.resizeAndRender();
         this._stopLoop();
@@ -7582,6 +7618,7 @@ class SelectionPanel {
         workspace.style.removeProperty('zoom');
         workspace.style.transform = `${translate} scale(${scale})`;
         this._scheduleMhsaTokenMatrixConnectorUpdate();
+        this._scheduleMhsaTokenMatrixCanvasRender();
     }
 
     _resolveMhsaTokenMatrixViewportCenter(scaleOverride = null) {
@@ -9149,6 +9186,7 @@ class SelectionPanel {
     _hideMhsaTokenMatrixPreview() {
         this._mhsaTokenMatrixRenderToken += 1;
         this._cancelMhsaTokenMatrixConnectorUpdate();
+        this._cancelMhsaTokenMatrixCanvasRender();
         this._mhsaTokenMatrixData = null;
         this._mhsaTokenMatrixRowEls = [];
         this._mhsaTokenMatrixQueryRowEls = [];
@@ -9161,6 +9199,8 @@ class SelectionPanel {
         this._mhsaTokenMatrixPostCopyCellEls = [];
         this._mhsaTokenMatrixPostCopyRowEls = [];
         this._mhsaTokenMatrixMirroredPostCellEls = [];
+        this._mhsaTokenMatrixSceneModel = null;
+        this._mhsaTokenMatrixSceneLayout = null;
         this._mhsaTokenMatrixPinnedKind = null;
         this._mhsaTokenMatrixPinnedSource = null;
         this._mhsaTokenMatrixPinnedStage = null;
@@ -9190,18 +9230,268 @@ class SelectionPanel {
         this._mhsaTokenMatrixViewport.initialized = false;
         if (this.mhsaTokenMatrixBody) {
             this.mhsaTokenMatrixBody.hidden = true;
+            this.mhsaTokenMatrixBody.classList.remove('is-measure-only');
             this.mhsaTokenMatrixBody.classList.remove('has-focus-row', 'has-focus-column', 'has-scene-focus', 'has-pinned-focus');
             this.mhsaTokenMatrixBody.style.removeProperty('--mhsa-token-matrix-rows');
             this.mhsaTokenMatrixBody.style.removeProperty('--mhsa-token-matrix-band-count');
             clearMhsaTokenMatrixLayoutVars(this.mhsaTokenMatrixBody);
             this.mhsaTokenMatrixBody.replaceChildren();
         }
+        if (this.mhsaTokenMatrixCanvas) {
+            this.mhsaTokenMatrixCanvas.hidden = true;
+            this.mhsaTokenMatrixCanvas.setAttribute('aria-hidden', 'true');
+        }
         this._setMhsaTokenMatrixHoverValue(null);
         this._setMhsaTokenMatrixStatus('');
         if (this.mhsaTokenMatrixPreview) {
             this.mhsaTokenMatrixPreview.hidden = true;
             this.mhsaTokenMatrixPreview.setAttribute('aria-hidden', 'true');
+            this.mhsaTokenMatrixPreview.classList.remove('is-canvas-replace');
         }
+    }
+
+    _resolveMhsaTokenMatrixCanvasMode() {
+        return resolveMhsaTokenMatrixCanvasMode(typeof window !== 'undefined' ? window : null);
+    }
+
+    _publishMhsaTokenMatrixCanvasDebugState(stage = '', extra = {}) {
+        if (typeof window === 'undefined') return;
+        const payload = {
+            stage: typeof stage === 'string' ? stage : '',
+            renderToken: this._mhsaTokenMatrixRenderToken,
+            mode: this._resolveMhsaTokenMatrixCanvasMode(),
+            previewHidden: !!this.mhsaTokenMatrixPreview?.hidden,
+            canvasPresent: !!this.mhsaTokenMatrixCanvas,
+            canvasHidden: !!this.mhsaTokenMatrixCanvas?.hidden,
+            bodyHidden: !!this.mhsaTokenMatrixBody?.hidden,
+            bodyMeasureOnly: !!this.mhsaTokenMatrixBody?.classList?.contains('is-measure-only'),
+            hasSceneModel: !!this._mhsaTokenMatrixSceneModel,
+            hasSceneLayout: !!this._mhsaTokenMatrixSceneLayout,
+            hasCanvasRenderer: !!this._mhsaTokenMatrixCanvasRenderer,
+            scheduledFrame: this._mhsaTokenMatrixCanvasRenderFrame !== null,
+            ...extra
+        };
+        window.__MHSA_TOKEN_MATRIX_CANVAS_DEBUG_STATE = payload;
+        const signature = JSON.stringify(payload);
+        if (signature !== this._mhsaTokenMatrixCanvasDebugSignature) {
+            this._mhsaTokenMatrixCanvasDebugSignature = signature;
+            console.info('MHSA canvas debug state:', payload);
+        }
+    }
+
+    _cancelMhsaTokenMatrixCanvasRender() {
+        if (this._mhsaTokenMatrixCanvasRenderFrame === null) return;
+        if (typeof cancelAnimationFrame === 'function') {
+            cancelAnimationFrame(this._mhsaTokenMatrixCanvasRenderFrame);
+        } else {
+            clearTimeout(this._mhsaTokenMatrixCanvasRenderFrame);
+        }
+        this._mhsaTokenMatrixCanvasRenderFrame = null;
+    }
+
+    _syncMhsaTokenMatrixCanvasPresentation({ domReady = false } = {}) {
+        const mode = this._resolveMhsaTokenMatrixCanvasMode();
+        const shouldRenderCanvas = shouldRenderMhsaTokenMatrixCanvas(mode)
+            && !!this.mhsaTokenMatrixCanvas
+            && !!this._mhsaTokenMatrixSceneModel
+            && !!this._mhsaTokenMatrixSceneLayout;
+        const shouldUseMeasureOnlyBody = domReady
+            && shouldRenderCanvas
+            && mode === VIEW2D_MHSA_CANVAS_MODES.REPLACE;
+
+        if (this.mhsaTokenMatrixPreview) {
+            this.mhsaTokenMatrixPreview.classList.toggle(
+                'is-canvas-replace',
+                shouldRenderCanvas && mode === VIEW2D_MHSA_CANVAS_MODES.REPLACE
+            );
+        }
+        if (this.mhsaTokenMatrixCanvas) {
+            this.mhsaTokenMatrixCanvas.hidden = !shouldRenderCanvas;
+            this.mhsaTokenMatrixCanvas.setAttribute('aria-hidden', shouldRenderCanvas ? 'false' : 'true');
+        }
+        if (this.mhsaTokenMatrixBody) {
+            this.mhsaTokenMatrixBody.hidden = !domReady;
+            this.mhsaTokenMatrixBody.classList.toggle('is-measure-only', shouldUseMeasureOnlyBody);
+        }
+        if (shouldRenderCanvas) {
+            this._scheduleMhsaTokenMatrixCanvasRender();
+        } else {
+            this._cancelMhsaTokenMatrixCanvasRender();
+        }
+        this._publishMhsaTokenMatrixCanvasDebugState('sync-presentation', {
+            domReady,
+            shouldRenderCanvas,
+            shouldUseMeasureOnlyBody
+        });
+    }
+
+    _resolveMhsaTokenMatrixCanvasViewportTransform() {
+        const sceneBounds = this._mhsaTokenMatrixSceneLayout?.sceneBounds || null;
+        const workspace = this._mhsaTokenMatrixWorkspace;
+        const viewport = this._mhsaTokenMatrixViewport;
+        if (!sceneBounds || !workspace || !viewport) {
+            return null;
+        }
+
+        const workspaceRect = typeof workspace.getBoundingClientRect === 'function'
+            ? workspace.getBoundingClientRect()
+            : null;
+        const workspaceWidth = Math.max(
+            1,
+            workspace.scrollWidth
+            || workspace.offsetWidth
+            || workspace.clientWidth
+            || workspaceRect?.width
+            || 0
+        );
+        const workspaceHeight = Math.max(
+            1,
+            workspace.scrollHeight
+            || workspace.offsetHeight
+            || workspace.clientHeight
+            || workspaceRect?.height
+            || 0
+        );
+        const baseScaleX = workspaceWidth / Math.max(1, sceneBounds.width);
+        const baseScaleY = workspaceHeight / Math.max(1, sceneBounds.height);
+        const baseScale = Number.isFinite(baseScaleX) && baseScaleX > 0
+            ? baseScaleX
+            : baseScaleY;
+        if (!Number.isFinite(baseScale) || baseScale <= 0) {
+            return null;
+        }
+
+        const viewportScale = Number.isFinite(viewport.scale) && viewport.scale > 0
+            ? viewport.scale
+            : 1;
+
+        return {
+            source: 'dom-workspace',
+            scale: baseScale * viewportScale,
+            offsetX: Number.isFinite(viewport.panX) ? viewport.panX : 0,
+            offsetY: Number.isFinite(viewport.panY) ? viewport.panY : 0,
+            baseScale,
+            baseScaleX,
+            baseScaleY,
+            workspaceWidth,
+            workspaceHeight,
+            viewportScale,
+            viewportPanX: Number.isFinite(viewport.panX) ? viewport.panX : 0,
+            viewportPanY: Number.isFinite(viewport.panY) ? viewport.panY : 0
+        };
+    }
+
+    _renderMhsaTokenMatrixCanvasPreview() {
+        if (!this.mhsaTokenMatrixCanvas) {
+            this._publishMhsaTokenMatrixCanvasDebugState('render-skip', {
+                reason: 'missing-canvas'
+            });
+            return false;
+        }
+        if (this.mhsaTokenMatrixCanvas.hidden) {
+            this._publishMhsaTokenMatrixCanvasDebugState('render-skip', {
+                reason: 'canvas-hidden'
+            });
+            return false;
+        }
+        if (!this._mhsaTokenMatrixSceneModel) {
+            this._publishMhsaTokenMatrixCanvasDebugState('render-skip', {
+                reason: 'missing-scene-model'
+            });
+            return false;
+        }
+        if (!this._mhsaTokenMatrixSceneLayout) {
+            this._publishMhsaTokenMatrixCanvasDebugState('render-skip', {
+                reason: 'missing-scene-layout'
+            });
+            return false;
+        }
+        if (!this._mhsaTokenMatrixCanvasRenderer) {
+            this._mhsaTokenMatrixCanvasRenderer = new CanvasSceneRenderer({
+                canvas: this.mhsaTokenMatrixCanvas
+            });
+        } else {
+            this._mhsaTokenMatrixCanvasRenderer.setCanvas(this.mhsaTokenMatrixCanvas);
+        }
+        this._mhsaTokenMatrixCanvasRenderer.setScene(
+            this._mhsaTokenMatrixSceneModel,
+            this._mhsaTokenMatrixSceneLayout
+        );
+        const rect = typeof this.mhsaTokenMatrixCanvas.getBoundingClientRect === 'function'
+            ? this.mhsaTokenMatrixCanvas.getBoundingClientRect()
+            : null;
+        const width = Math.max(
+            1,
+            Math.floor(rect?.width || this.mhsaTokenMatrixCanvas.clientWidth || this.mhsaTokenMatrixCanvas.width || 0)
+        );
+        const height = Math.max(
+            1,
+            Math.floor(rect?.height || this.mhsaTokenMatrixCanvas.clientHeight || this.mhsaTokenMatrixCanvas.height || 0)
+        );
+        const viewportTransform = this._resolveMhsaTokenMatrixCanvasViewportTransform();
+        const didRender = this._mhsaTokenMatrixCanvasRenderer.render({
+            width,
+            height,
+            viewportTransform
+        });
+        const debugState = this._mhsaTokenMatrixCanvasRenderer.getLastRenderState?.() || null;
+        if (typeof window !== 'undefined') {
+            window.__MHSA_TOKEN_MATRIX_CANVAS_DEBUG_STATE = {
+                ...(debugState || {}),
+                didRender,
+                renderToken: this._mhsaTokenMatrixRenderToken,
+                canvasClientWidth: this.mhsaTokenMatrixCanvas.clientWidth || 0,
+                canvasClientHeight: this.mhsaTokenMatrixCanvas.clientHeight || 0,
+                sceneNodeCount: Array.isArray(this._mhsaTokenMatrixSceneModel?.nodes)
+                    ? this._mhsaTokenMatrixSceneModel.nodes.length
+                    : 0
+            };
+        }
+        this._publishMhsaTokenMatrixCanvasDebugState('render-complete', {
+            ...(debugState || {}),
+            didRender,
+            canvasClientWidth: this.mhsaTokenMatrixCanvas.clientWidth || 0,
+            canvasClientHeight: this.mhsaTokenMatrixCanvas.clientHeight || 0,
+            sceneNodeCount: Array.isArray(this._mhsaTokenMatrixSceneModel?.nodes)
+                ? this._mhsaTokenMatrixSceneModel.nodes.length
+                : 0,
+            viewportTransformSource: viewportTransform?.source || 'auto-fit'
+        });
+        return didRender;
+    }
+
+    _scheduleMhsaTokenMatrixCanvasRender() {
+        if (
+            !this._isMhsaInfoSelectionActive
+            || this.mhsaTokenMatrixPreview?.hidden
+            || !this.mhsaTokenMatrixCanvas
+            || this.mhsaTokenMatrixCanvas.hidden
+        ) {
+            this._publishMhsaTokenMatrixCanvasDebugState('schedule-skip', {
+                reason: !this._isMhsaInfoSelectionActive
+                    ? 'mhsa-inactive'
+                    : (this.mhsaTokenMatrixPreview?.hidden
+                        ? 'preview-hidden'
+                        : (!this.mhsaTokenMatrixCanvas
+                            ? 'missing-canvas'
+                            : 'canvas-hidden'))
+            });
+            return;
+        }
+        if (this._mhsaTokenMatrixCanvasRenderFrame !== null) {
+            this._publishMhsaTokenMatrixCanvasDebugState('schedule-skip', {
+                reason: 'frame-already-scheduled'
+            });
+            return;
+        }
+        const schedule = typeof requestAnimationFrame === 'function'
+            ? requestAnimationFrame.bind(window)
+            : (cb) => setTimeout(cb, 16);
+        this._mhsaTokenMatrixCanvasRenderFrame = schedule(() => {
+            this._mhsaTokenMatrixCanvasRenderFrame = null;
+            this._renderMhsaTokenMatrixCanvasPreview();
+        });
+        this._publishMhsaTokenMatrixCanvasDebugState('schedule-frame');
     }
 
     _renderMhsaTokenMatrixPreview() {
@@ -9209,6 +9499,7 @@ class SelectionPanel {
         const renderToken = this._mhsaTokenMatrixRenderToken + 1;
         this._mhsaTokenMatrixRenderToken = renderToken;
         this._cancelMhsaTokenMatrixConnectorUpdate();
+        this._cancelMhsaTokenMatrixCanvasRender();
         this._mhsaTokenMatrixData = null;
         this._mhsaTokenMatrixRowEls = [];
         this._mhsaTokenMatrixQueryRowEls = [];
@@ -9246,6 +9537,9 @@ class SelectionPanel {
         this.mhsaTokenMatrixPreview.hidden = false;
         this.mhsaTokenMatrixPreview.setAttribute('aria-hidden', 'false');
         this.mhsaTokenMatrixBody.hidden = true;
+        this.mhsaTokenMatrixBody.classList.remove('is-measure-only');
+        this._publishMhsaTokenMatrixCanvasDebugState('preview-start');
+        this._syncMhsaTokenMatrixCanvasPresentation({ domReady: false });
         this.mhsaTokenMatrixBody.classList.remove('has-focus-row', 'has-focus-column', 'has-scene-focus', 'has-pinned-focus');
         clearMhsaTokenMatrixLayoutVars(this.mhsaTokenMatrixBody);
         this.mhsaTokenMatrixBody.replaceChildren();
@@ -9284,6 +9578,7 @@ class SelectionPanel {
                 || !Array.isArray(previewData.projections)
                 || !previewData.projections.length
             ) {
+                this._publishMhsaTokenMatrixCanvasDebugState('preview-data-invalid');
                 this._setMhsaTokenMatrixStatus('Token matrix unavailable.');
                 return;
             }
@@ -9294,6 +9589,35 @@ class SelectionPanel {
                 isSmallScreen: this._isSmallScreen && this._isSmallScreen()
             });
             this._mhsaTokenMatrixLayoutMetrics = layoutMetrics;
+            this._mhsaTokenMatrixSceneModel = null;
+            this._mhsaTokenMatrixSceneLayout = null;
+            try {
+                this._mhsaTokenMatrixSceneModel = buildMhsaSceneModel({
+                    previewData,
+                    layerIndex: previewOptions.layerIndex,
+                    headIndex: previewOptions.headIndex,
+                    isSmallScreen: this._isSmallScreen && this._isSmallScreen(),
+                    layoutMetrics
+                });
+                if (this._mhsaTokenMatrixSceneModel) {
+                    this._mhsaTokenMatrixSceneLayout = buildSceneLayout(this._mhsaTokenMatrixSceneModel, {
+                        isSmallScreen: this._isSmallScreen && this._isSmallScreen(),
+                        layoutMetrics
+                    });
+                }
+                this._publishMhsaTokenMatrixCanvasDebugState('scene-built', {
+                    rowCount: previewData.rowCount,
+                    columnCount: previewData.columnCount,
+                    sceneRootCount: Array.isArray(this._mhsaTokenMatrixSceneModel?.nodes)
+                        ? this._mhsaTokenMatrixSceneModel.nodes.length
+                        : 0
+                });
+            } catch (sceneModelError) {
+                this._publishMhsaTokenMatrixCanvasDebugState('scene-build-error', {
+                    error: sceneModelError instanceof Error ? sceneModelError.message : String(sceneModelError)
+                });
+                console.warn('Failed to build MHSA 2D scene model/layout:', sceneModelError);
+            }
             this.mhsaTokenMatrixBody.style.setProperty('--mhsa-token-matrix-rows', String(previewData.rowCount));
             this.mhsaTokenMatrixBody.style.setProperty('--mhsa-token-matrix-band-count', String(previewData.bandCount || 1));
             applyMhsaTokenMatrixLayoutVars(this.mhsaTokenMatrixBody, layoutMetrics);
@@ -10233,7 +10557,7 @@ class SelectionPanel {
             this.mhsaTokenMatrixBody.replaceChildren(fragment);
             this._mhsaTokenMatrixWorkspace = workspaceEl;
             this._mhsaTokenMatrixOverlay = overlayEl;
-            this.mhsaTokenMatrixBody.hidden = false;
+            this._syncMhsaTokenMatrixCanvasPresentation({ domReady: true });
             this._resetMhsaTokenMatrixViewport();
             requestAnimationFrame(() => {
                 if (
@@ -10252,6 +10576,7 @@ class SelectionPanel {
                 this._applyMhsaTokenMatrixViewport();
             });
             this._scheduleMhsaTokenMatrixConnectorUpdate();
+            this._scheduleMhsaTokenMatrixCanvasRender();
             this._setMhsaTokenMatrixStatus('');
         } catch (error) {
             if (renderToken !== this._mhsaTokenMatrixRenderToken) return;
@@ -11248,6 +11573,7 @@ class SelectionPanel {
             : null;
         const attentionSubtitleLine = attentionScoreSummary?.tokenContextLine || '';
         let subtitleSecondaryOverride = null;
+        let subtitleTertiaryText = '';
         const isTokenChipSelection = lower.startsWith('token:');
         const isTokenOrPositionChipSelection = isTokenChipSelection || lower.startsWith('position:');
         const isChosenTokenSelection = lower.startsWith('chosen token:');
@@ -11424,28 +11750,35 @@ class SelectionPanel {
             || isKvCacheInfo
             || isMhsaInfo;
         const isVectorMetadata = isLikelyVectorSelection(label, selection) || isTokenOrPositionChipSelection;
+        if (isVectorMetadata && metadata.hasLength) {
+            subtitleTertiaryText = `Length: ${metadata.length}`;
+        }
         const dimsRow = this.inputDim?.closest('.detail-row')
             || this.outputDim?.closest('.detail-row')
             || null;
         if (this.inputDimLabel) {
-            this.inputDimLabel.textContent = isTokenOrPositionChipSelection
-                ? 'Length (one-hot encoded)'
-                : (isVectorMetadata ? 'Length' : 'Input dimension');
+            this.inputDimLabel.textContent = 'Input dimension';
         }
         if (this.outputDimLabel) this.outputDimLabel.textContent = 'Output dimension';
         if (this.inputDim) this.inputDim.textContent = hideTensorDimsField
             ? ''
-            : (isVectorMetadata ? metadata.length : metadata.inputDim);
+            : metadata.inputDim;
         if (this.outputDim) this.outputDim.textContent = hideTensorDimsField || isVectorMetadata ? '' : metadata.outputDim;
         if (this.outputDimHalf) this.outputDimHalf.style.display = (!hideTensorDimsField && isVectorMetadata) ? 'none' : '';
         if (this.inputDimHalf) this.inputDimHalf.style.flexBasis = isVectorMetadata ? '100%' : '';
-        if (dimsRow) dimsRow.style.display = hideTensorDimsField ? 'none' : '';
+        if (dimsRow) dimsRow.style.display = hideTensorDimsField || isVectorMetadata ? 'none' : '';
         const showParamCount = !hideTensorDimsField && !isVectorMetadata && metadata.hasDims;
         if (this.paramsRow) this.paramsRow.style.display = showParamCount ? '' : 'none';
         if (this.params) this.params.textContent = showParamCount ? metadata.params : '';
         const showBiasDim = !hideTensorDimsField && !isVectorMetadata && metadata.hasBiasDim;
         if (this.biasDimRow) this.biasDimRow.style.display = showBiasDim ? '' : 'none';
         if (this.biasDim) this.biasDim.textContent = showBiasDim ? metadata.biasDim : '';
+        this._setSubtitleTertiaryText(subtitleTertiaryText);
+        if (this.previewMetaSection) {
+            const topRows = Array.from(this.previewMetaSection.querySelectorAll('.detail-row'));
+            const hasVisibleTopRow = !isKvCacheInfo && !isMhsaInfo && topRows.some(row => row.style.display !== 'none');
+            this.previewMetaSection.style.display = hasVisibleTopRow ? '' : 'none';
+        }
         const vectorTokenMetadata = this._updateVectorTokenPositionRows(selection, label);
         const descriptionSelection = this._buildDescriptionSelectionContext(selection, {
             vectorTokenMetadata,
@@ -11511,15 +11844,6 @@ class SelectionPanel {
             const hasVisibleRow = !isKvCacheInfo && !isMhsaInfo && rows.some(row => row.style.display !== 'none');
             this.metaSection.style.display = hasVisibleRow ? '' : 'none';
         }
-        if (this.metaSection && this.attentionRoot && this.panel) {
-            if (isQkvMatrixLabel(label)) {
-                if (this.attentionRoot.parentElement === this.panel) {
-                    this.panel.insertBefore(this.metaSection, this.attentionRoot);
-                }
-            } else if (this.dataSection && this.dataSection.parentElement === this.panel) {
-                this.panel.insertBefore(this.metaSection, this.dataSection);
-            }
-        }
         renderSelectionVectorSamplingData(this.dataEl, showVectorSampling ? vectorSamplingData : null);
         this._updateVectorLegend(selection);
 
@@ -11536,7 +11860,6 @@ class SelectionPanel {
             this.currentDispose = null;
             this.currentAnimator = null;
             this._currentPreviewSelectionKey = null;
-            this._previewFitViewportCap = null;
         }
 
         const preview = shouldReusePreview
@@ -11550,7 +11873,6 @@ class SelectionPanel {
             this.currentDispose = (typeof preview.dispose === 'function') ? preview.dispose : null;
             this.currentAnimator = (typeof preview.animate === 'function') ? preview.animate : null;
             this._currentPreviewSelectionKey = previewSelectionKey;
-            this._previewFitViewportCap = null;
             const desiredRotation = new THREE.Euler(PREVIEW_BASE_TILT_X, PREVIEW_BASE_ROTATION_Y, 0);
             if (this.currentPreview?.rotation) {
                 this.currentPreview.rotation.set(0, 0, 0);
@@ -11589,7 +11911,6 @@ class SelectionPanel {
             this._currentPreviewSelectionKey = null;
             this._rotationSpeedMult = 1;
             this._lastFitOptions = null;
-            this._previewFitViewportCap = null;
             this._pendingReveal = false;
             this._pendingRevealSize = null;
             this._stopLoop();

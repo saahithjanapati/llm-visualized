@@ -254,6 +254,7 @@ export function buildSelectionChatPrompt({
     title = '',
     subtitle = '',
     subtitleSecondary = '',
+    subtitleTertiary = '',
     descriptionText = '',
     equationText = '',
     metaLines = [],
@@ -272,6 +273,7 @@ export function buildSelectionChatPrompt({
     if (title) panelSummaryLines.push(`Panel title: ${title}`);
     if (subtitle) panelSummaryLines.push(`Primary subtitle: ${subtitle}`);
     if (subtitleSecondary) panelSummaryLines.push(`Secondary subtitle: ${subtitleSecondary}`);
+    if (subtitleTertiary) panelSummaryLines.push(`Tertiary subtitle: ${subtitleTertiary}`);
 
     const kvLines = [];
     if (kvState) {

@@ -27,6 +27,8 @@ import { HORIZ_PHASE, LN2_PHASE } from './gpt2LanePhases.js';
 
 const TMP_WORLD_POS = new THREE.Vector3();
 const LN_ADD_VECTOR_OFFSET_FRACTION = 0.25; // fraction of LN height above centre for bias addition
+const INPUT_VOCAB_EMERGE_INSET_MIN_Y = 8;
+const INPUT_VOCAB_EMERGE_INSET_FACTOR = 0.75;
 export const LN_PARAM_MONOCHROME = {
     type: 'monochromatic',
     baseHue: 0,
@@ -43,6 +45,15 @@ function getPrismVectorHeight(vec) {
         ? vec._basePrismCenterY
         : 0;
     return halfPrismHeight > 0 ? halfPrismHeight * 2 : 10.5;
+}
+
+function getInputVocabSpawnOffsetY(vec) {
+    const prismHeight = getPrismVectorHeight(vec);
+    const extraInsetY = Math.max(
+        INPUT_VOCAB_EMERGE_INSET_MIN_Y,
+        prismHeight * INPUT_VOCAB_EMERGE_INSET_FACTOR
+    );
+    return prismHeight + extraInsetY;
 }
 
 export function createFreshLanes(layer, offsetX, ln1CenterY, ln2CenterY, ln1TopY) {
@@ -284,7 +295,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
         if (layer.index === 0) {
             // Spawn first-layer vocab vectors slightly inside the embedding so
             // they visually emerge through the top slit instead of popping in.
-            originalVec.group.position.y -= getPrismVectorHeight(originalVec);
+            originalVec.group.position.y -= getInputVocabSpawnOffsetY(originalVec);
             originalVec.group.visible = false;
             inputVocabSpawnLowered = true;
         }
@@ -468,6 +479,8 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
         // Top Y of the bottom vocab embedding matrix; used to detect when the
         // residual vector has exited the embedding block.
         vocabEmbeddingExitY: Number.isFinite(startY_override) ? startY_override : startY,
+        // Reveal the vocab vector only once its top reaches the matrix slit.
+        vocabEmbeddingRevealY: (Number.isFinite(startY_override) ? startY_override : startY) - getPrismVectorHeight(originalVec),
         __inputVocabGateAdjustedStartY: inputVocabSpawnLowered,
         zPos,
         __residualMaxY: (function(){ originalVec.group.getWorldPosition(TMP_WORLD_POS); return TMP_WORLD_POS.y; })()

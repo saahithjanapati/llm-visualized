@@ -204,7 +204,18 @@ export function getDescriptionPlainText(text) {
 
 function renderDescriptionHtml(text) {
     if (!text) return '';
-    return renderTextWithMath(text, { allowPlaceholders: true });
+    const raw = String(text || '');
+    const blocks = raw
+        .split(/\n{2,}/)
+        .map((block) => block.trim())
+        .filter(Boolean);
+    if (blocks.length === 0) return '';
+    return blocks.map((block) => {
+        const html = renderTextWithMath(block, { allowPlaceholders: true });
+        return /^\*\s+/.test(block)
+            ? `<div class="detail-description-note">${html}</div>`
+            : html;
+    }).join('<br /><br />');
 }
 
 export function setDescriptionContent(element, text) {

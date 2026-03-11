@@ -16,6 +16,10 @@ function resolveGateReleaseAt(gate, tokenKey) {
     return Number.isFinite(gate.defaultReleaseAt) ? gate.defaultReleaseAt : NaN;
 }
 
+function shouldWaitForReleaseAfterInside(gate) {
+    return !!(gate && gate.waitForReleaseAfterInside === true);
+}
+
 export function shouldWaitForInputChipGate(gate, tokenIndex, nowMs = NaN) {
     if (!gate || gate.enabled === false) return false;
 
@@ -34,8 +38,17 @@ export function shouldWaitForInputChipGate(gate, tokenIndex, nowMs = NaN) {
         && insideByToken
         && Object.prototype.hasOwnProperty.call(insideByToken, tokenKey)
     ) {
-        if (insideByToken[tokenKey] === true) return false;
         const tokenReleaseAt = resolveGateReleaseAt(gate, tokenKey);
+        if (insideByToken[tokenKey] === true) {
+            if (
+                shouldWaitForReleaseAfterInside(gate)
+                && Number.isFinite(nowMs)
+                && Number.isFinite(tokenReleaseAt)
+            ) {
+                return nowMs < tokenReleaseAt;
+            }
+            return false;
+        }
         if (Number.isFinite(nowMs) && Number.isFinite(tokenReleaseAt) && nowMs >= tokenReleaseAt) {
             return false;
         }

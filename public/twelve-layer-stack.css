@@ -2719,7 +2719,7 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     max-height: 42vh;
     box-sizing: border-box;
 }
-.detail-preview canvas {
+.detail-preview > #detailCanvas {
     width: 100%;
     height: 100%;
     display: block;
@@ -2742,7 +2742,7 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     min-height: 224px;
     max-height: 46vh;
 }
-#detailPanel.is-info-preview .detail-preview canvas {
+#detailPanel.is-info-preview .detail-preview > #detailCanvas {
     display: none;
 }
 #detailPanel.is-info-preview .detail-info-preview {
@@ -2938,6 +2938,7 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     display: none !important;
 }
 .mhsa-token-matrix-preview {
+    position: relative;
     width: 100%;
     min-height: 0;
     flex: 1 1 auto;
@@ -2957,6 +2958,28 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     display: none !important;
 }
 .mhsa-token-matrix-preview__hover-item {
+    display: none !important;
+}
+.mhsa-token-matrix-preview__canvas[hidden] {
+    display: none !important;
+}
+.mhsa-token-matrix-preview__canvas {
+    display: block;
+    flex: 1 1 auto;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    margin: 0;
+    background: #000;
+    border: none;
+    box-shadow: none;
+    touch-action: none;
+    pointer-events: none;
+    position: relative;
+    z-index: 1;
+}
+.mhsa-token-matrix-preview__body[hidden] {
     display: none !important;
 }
 .mhsa-token-matrix-preview__body {
@@ -3017,12 +3040,23 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     border: none;
     box-shadow: none;
 }
+.mhsa-token-matrix-preview__body.is-measure-only {
+    position: absolute;
+    inset: 0;
+    display: block !important;
+    visibility: hidden;
+    pointer-events: none;
+    z-index: 0;
+}
 .mhsa-token-matrix-preview__body.is-panning {
     cursor: grabbing;
     user-select: none;
 }
 .mhsa-token-matrix-preview__body.is-panning * {
     cursor: grabbing !important;
+}
+.mhsa-token-matrix-preview.is-canvas-replace .mhsa-token-matrix-preview__canvas {
+    flex-basis: auto;
 }
 .mhsa-token-matrix-preview__workspace {
     position: relative;
@@ -3981,6 +4015,11 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
 }
 .detail-description:empty {
     display: none;
+}
+.detail-description-note {
+    color: #9098a5;
+    font-size: calc(var(--detail-font-body) * 0.92);
+    line-height: 1.35;
 }
 .detail-description-action-row {
     margin-top: 8px;
@@ -5604,13 +5643,13 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
         --detail-mobile-preview-inset-x-left: max(12px, env(safe-area-inset-left));
         --detail-mobile-preview-inset-x-right: max(12px, env(safe-area-inset-right));
         --detail-mobile-preview-inset-y: 8px;
-        --detail-mobile-panel-bg: rgba(6, 8, 12, 0.975);
-        --detail-mobile-surface-bg: rgba(8, 11, 16, 0.9);
-        --detail-mobile-surface-bg-strong: rgba(5, 7, 11, 0.94);
-        --detail-mobile-surface-border: rgba(255,255,255,0.16);
+        --detail-mobile-panel-bg: rgba(10, 10, 12, 0.988);
+        --detail-mobile-surface-bg: rgba(255,255,255,0.065);
+        --detail-mobile-surface-bg-strong: rgba(255,255,255,0.085);
+        --detail-mobile-surface-border: rgba(255,255,255,0.12);
         --detail-mobile-surface-shadow:
-            0 14px 30px rgba(0,0,0,0.28),
-            inset 0 1px 0 rgba(255,255,255,0.05);
+            0 16px 36px rgba(0,0,0,0.38),
+            inset 0 1px 0 rgba(255,255,255,0.04);
         display: flex;
         position: fixed;
         top: 0;
@@ -5623,9 +5662,7 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
         padding-bottom: max(12px, env(safe-area-inset-bottom));
         padding-left: env(safe-area-inset-left);
         padding-right: env(safe-area-inset-right);
-        background:
-            radial-gradient(circle at top center, rgba(92, 130, 168, 0.14), transparent 40%),
-            linear-gradient(180deg, rgba(4, 6, 9, 0.985) 0%, var(--detail-mobile-panel-bg) 100%);
+        background: var(--detail-mobile-panel-bg);
         border: 1px solid rgba(255,255,255,0.14);
         border-left: none;
         border-right: none;
@@ -5633,7 +5670,7 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
         border-radius: 0;
         margin-top: 0;
         padding-top: 0;
-        box-shadow: 0 18px 42px rgba(0,0,0,0.42);
+        box-shadow: 0 20px 44px rgba(0,0,0,0.48);
         backdrop-filter: blur(14px);
         -webkit-backdrop-filter: blur(14px);
         transform: translateY(100%);
@@ -5669,14 +5706,8 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
         padding-top: max(10px, calc(env(safe-area-inset-top) + 4px));
         padding-right: 12px;
         padding-left: 12px;
-        background:
-            linear-gradient(
-                180deg,
-                rgba(5, 7, 11, 0.98) 0%,
-                rgba(7, 10, 15, 0.95) 68%,
-                rgba(7, 10, 15, 0.86) 100%
-            );
-        box-shadow: 0 10px 24px rgba(0,0,0,0.22);
+        background: rgba(10, 10, 12, 0.992);
+        box-shadow: 0 10px 24px rgba(0,0,0,0.28);
     }
     .detail-preview {
         padding:
@@ -5689,10 +5720,10 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
         min-height: clamp(220px, calc(26dvh + var(--detail-mobile-preview-safe-bleed)), 320px);
         height: clamp(220px, calc(26dvh + var(--detail-mobile-preview-safe-bleed)), 320px);
         max-height: none;
-        background: linear-gradient(180deg, rgba(3, 5, 8, 0.92), rgba(3, 5, 8, 0.12));
+        background: rgba(10, 10, 12, 0.74);
         touch-action: pan-y;
     }
-    .detail-preview canvas {
+    .detail-preview > #detailCanvas {
         border: 1px solid rgba(255,255,255,0.18);
         border-radius: 18px;
         background: #020406;
@@ -5861,11 +5892,11 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
         padding: 0;
     }
     .detail-copy-context-btn {
-        border-color: rgba(255,255,255,0.16);
-        background: rgba(255,255,255,0.07);
+        border-color: var(--detail-mobile-surface-border);
+        background: rgba(255,255,255,0.09);
         box-shadow:
             inset 0 0 0 1px rgba(255,255,255,0.04),
-            0 10px 22px rgba(0,0,0,0.2);
+            0 12px 24px rgba(0,0,0,0.28);
     }
     .detail-equations,
     .detail-attention,
@@ -5876,11 +5907,9 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
         box-shadow: var(--detail-mobile-surface-shadow);
     }
     .detail-prompt-context {
-        border-color: rgba(255,255,255,0.18);
-        background: rgba(6, 9, 13, 0.92);
-        box-shadow:
-            inset 0 1px 0 rgba(255,255,255,0.05),
-            0 14px 30px rgba(0,0,0,0.3);
+        border-color: var(--detail-mobile-surface-border);
+        background: var(--detail-mobile-surface-bg-strong);
+        box-shadow: var(--detail-mobile-surface-shadow);
     }
     .detail-attention-toggle,
     .detail-attention-collapse,

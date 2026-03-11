@@ -93,6 +93,7 @@
                     <div id="detailTitle" class="detail-title">Selection</div>
                     <div id="detailSubtitle" class="detail-subtitle"></div>
                     <div id="detailSubtitleSecondary" class="detail-subtitle"></div>
+                    <div id="detailSubtitleTertiary" class="detail-subtitle"></div>
                 </div>
                 <div class="detail-header-actions">
                     <button id="detailClose" type="button" aria-label="Close details">×</button>
@@ -110,6 +111,7 @@
                                 <span id="detailMhsaTokenMatrixHoverBand" class="mhsa-token-matrix-preview__hover-item">Band --</span>
                                 <span id="detailMhsaTokenMatrixHoverValue" class="mhsa-token-matrix-preview__hover-item">Value --</span>
                             </div>
+                            <canvas id="detailMhsaTokenMatrixCanvas" class="mhsa-token-matrix-preview__canvas" aria-hidden="true" hidden></canvas>
                             <div id="detailMhsaTokenMatrixBody" class="mhsa-token-matrix-preview__body" hidden></div>
                         </div>
                         <div id="detailInfoPreviewEyebrow" class="detail-info-preview__eyebrow">Transformer inference</div>
@@ -158,14 +160,7 @@
                     <span id="detailVectorLegendHigh">&ge;+2</span>
                 </div>
             </div>
-            <div id="detailEquations" class="detail-equations" aria-hidden="true">
-                <div class="detail-equations-title">Equations</div>
-                <div id="detailEquationsBody" class="detail-equations-body"></div>
-            </div>
-            <div id="detailPromptContextRow" class="detail-prompt-context" style="display:none;">
-                <div id="detailPromptContextTokens" class="detail-prompt-context-tokens" aria-label="Prompt context tokens"></div>
-            </div>
-            <div id="detailMeta" class="detail-meta">
+            <div id="detailPreviewMeta" class="detail-meta">
                 <div class="detail-row detail-row-dims">
                     <div id="detailInputDimHalf" class="detail-dim-half">
                         <span id="detailInputDimLabel" class="detail-label">Input dimension</span>
@@ -184,6 +179,16 @@
                     <span class="detail-label">Number of parameters</span>
                     <span id="detailParams" class="detail-value">—</span>
                 </div>
+            </div>
+            <div id="detailEquations" class="detail-equations" aria-hidden="true">
+                <div class="detail-equations-title">Equations</div>
+                <div id="detailEquationsBody" class="detail-equations-body"></div>
+            </div>
+            <div id="detailDescription" class="detail-description"></div>
+            <div id="detailPromptContextRow" class="detail-prompt-context" style="display:none;">
+                <div id="detailPromptContextTokens" class="detail-prompt-context-tokens" aria-label="Prompt context tokens"></div>
+            </div>
+            <div id="detailMeta" class="detail-meta">
                 <div id="detailTokenInfoRow" class="detail-token-info attention-value" style="display:none;" data-empty="true">
                     <div class="attention-value-head detail-token-info-head" aria-hidden="true">
                         <span id="detailTokenInfoHeadPrimary">Raw token</span>
@@ -200,6 +205,14 @@
                     <span class="detail-label">Token note</span>
                     <span id="detailTokenEncodingValue" class="detail-value">—</span>
                 </div>
+            </div>
+            <div id="detailDataSection" class="detail-data" style="display:none;">
+                <div class="detail-data-header">
+                    <span id="detailDataEyebrow" class="detail-data-eyebrow">DEV MODE</span>
+                    <div id="detailDataTitle" class="detail-data-title">Vector sampling</div>
+                </div>
+                <div id="detailDataBlurb" class="detail-data-blurb" hidden></div>
+                <div id="detailData" class="detail-data-values"></div>
             </div>
             <div id="detailAttention" class="detail-attention" aria-hidden="true">
                 <div class="detail-attention-header">
@@ -268,15 +281,6 @@
                         </div>
                     </div>
                 </div>
-            </div>
-            <div id="detailDescription" class="detail-description"></div>
-            <div id="detailDataSection" class="detail-data" style="display:none;">
-                <div class="detail-data-header">
-                    <span id="detailDataEyebrow" class="detail-data-eyebrow">DEV MODE</span>
-                    <div id="detailDataTitle" class="detail-data-title">Vector sampling</div>
-                </div>
-                <div id="detailDataBlurb" class="detail-data-blurb" hidden></div>
-                <div id="detailData" class="detail-data-values"></div>
             </div>
             <div class="detail-copy-context">
                 <button id="detailCopyContextBtn" class="detail-copy-context-btn" type="button">

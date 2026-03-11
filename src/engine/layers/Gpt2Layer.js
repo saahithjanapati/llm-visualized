@@ -1188,9 +1188,6 @@ export default class Gpt2Layer extends BaseLayer {
                         }
                         break;
                     }
-                    if (originalVec && originalVec.group && !originalVec.group.visible) {
-                        originalVec.group.visible = true;
-                    }
                     if (originalVec.group.position.y >= lane.branchStartY) {
                         // Clamp position so early-arriving lanes don’t drift.
                         originalVec.group.position.y = lane.branchStartY;
@@ -1208,6 +1205,7 @@ export default class Gpt2Layer extends BaseLayer {
                             originalVec.group.position.y + syncedRiseSpeed * dt
                         );
                     }
+                    this._syncInputVocabRevealState(lane);
                     break;
                 case HORIZ_PHASE.RIGHT:
                     // Mirror LN-2: lock Y at staging height and move X only.
@@ -3644,6 +3642,34 @@ export default class Gpt2Layer extends BaseLayer {
     _isWaitingForInputPositionChipGate(lane, nowMs, skipActive = false) {
         const gate = this._progressEmitter && this._progressEmitter.__inputPositionChipGate;
         return this._isWaitingForInputChipGate(gate, lane, nowMs, skipActive);
+    }
+
+    _syncInputVocabRevealState(lane) {
+        const originalVec = lane && lane.originalVec;
+        if (!originalVec || !originalVec.group) return;
+        const revealY = Number.isFinite(lane?.vocabEmbeddingRevealY)
+            ? lane.vocabEmbeddingRevealY
+            : NaN;
+        const shouldReveal = !Number.isFinite(revealY) || originalVec.group.position.y >= revealY - 0.01;
+        originalVec.group.visible = shouldReveal;
+        if (shouldReveal) return;
+
+        const trail = originalVec.userData && originalVec.userData.trail;
+        if (!trail) return;
+        if (originalVec.userData && originalVec.userData.trailWorld) {
+            originalVec.group.getWorldPosition(TMP_WORLD_POS);
+            if (typeof trail.snapLastPointTo === 'function') {
+                trail.snapLastPointTo(TMP_WORLD_POS);
+            } else if (typeof trail.update === 'function') {
+                trail.update(TMP_WORLD_POS);
+            }
+            return;
+        }
+        if (typeof trail.snapLastPointTo === 'function') {
+            trail.snapLastPointTo(originalVec.group.position);
+        } else if (typeof trail.update === 'function') {
+            trail.update(originalVec.group.position);
+        }
     }
 
     _ensureLanePostAdditionVector(lane, options = {}) {

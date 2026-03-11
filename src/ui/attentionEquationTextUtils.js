@@ -38,41 +38,44 @@ export function buildAttentionEquationSet(symbols = {}, options = {}) {
     const safeHeadSubscript = typeof options.headSubscript === 'string' && options.headSubscript.trim().length
         ? options.headSubscript.trim()
         : null;
+    const QHead = formatHeadScopedSymbol(Q, safeHeadSubscript);
+    const KHead = formatHeadScopedSymbol(K, safeHeadSubscript);
+    const VHead = formatHeadScopedSymbol(V, safeHeadSubscript);
 
     const queryProjection = buildAttentionProjectionEquation({
-        outputSymbol: Q,
+        outputSymbol: QHead,
         weightSymbol: WQ,
         biasSymbol: BQ
     });
     const keyProjection = buildAttentionProjectionEquation({
-        outputSymbol: K,
+        outputSymbol: KHead,
         weightSymbol: WK,
         biasSymbol: BK
     });
     const valueProjection = buildAttentionProjectionEquation({
-        outputSymbol: V,
+        outputSymbol: VHead,
         weightSymbol: WV,
         biasSymbol: BV
     });
     const qkvProjection = String.raw`\begin{aligned} ${buildAttentionProjectionEquation({
-        outputSymbol: Q,
+        outputSymbol: QHead,
         weightSymbol: WQ,
         biasSymbol: BQ,
         alignEquals: true
     })} \\ ${buildAttentionProjectionEquation({
-        outputSymbol: K,
+        outputSymbol: KHead,
         weightSymbol: WK,
         biasSymbol: BK,
         alignEquals: true
     })} \\ ${buildAttentionProjectionEquation({
-        outputSymbol: V,
+        outputSymbol: VHead,
         weightSymbol: WV,
         biasSymbol: BV,
         alignEquals: true
     })} \end{aligned}`;
-    const Qh = formatHeadScopedSymbol(Q, safeHeadSubscript);
-    const Kh = formatHeadScopedSymbol(K, safeHeadSubscript);
-    const Vh = formatHeadScopedSymbol(V, safeHeadSubscript);
+    const Qh = QHead;
+    const Kh = KHead;
+    const Vh = VHead;
     const Hh = formatHeadScopedSymbol('H', safeHeadSubscript);
     const headQualifier = safeHeadSubscript
         ? `,\\; i=${safeHeadSubscript}`

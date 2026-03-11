@@ -7,11 +7,11 @@ export const PREVIEW_TOKEN_LANES = 1;
 export const PREVIEW_MATRIX_DEPTH = 320;
 export const PREVIEW_LANE_SPACING = 80;
 export const PREVIEW_TARGET_SIZE = 140;
-// Default desktop preview cap once the 16px side padding is removed from a
-// 560px-wide panel. If a preview first opens larger than this, that larger
-// size becomes the cap so we do not unexpectedly pull the camera back.
-export const PREVIEW_MAX_FIT_VIEWPORT_WIDTH_PX = 528;
-export const PREVIEW_MAX_FIT_VIEWPORT_HEIGHT_PX = 297;
+// Hard desktop preview cap once the 16px side padding is removed from the
+// panel. Keeping this lower prevents selection previews from continuing to
+// grow on wider layouts.
+export const PREVIEW_MAX_FIT_VIEWPORT_WIDTH_PX = 448;
+export const PREVIEW_MAX_FIT_VIEWPORT_HEIGHT_PX = 252;
 export const PREVIEW_FRAME_PADDING = 1.25;
 export const PREVIEW_BASE_DISTANCE_MULT = 1.15;
 export const PREVIEW_ROTATION_ENVELOPE_MARGIN = 1.06;

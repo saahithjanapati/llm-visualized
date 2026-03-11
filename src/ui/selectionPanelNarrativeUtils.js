@@ -430,6 +430,7 @@ function buildAttentionScoreLinkedVectorReferences(selectionInfo = null) {
     const queryTokenMeta = resolveSelectionTokenRef(selectionInfo);
     const keyTokenMeta = resolveSelectionKeyTokenRef(selectionInfo);
     const queryTokenRef = buildTokenReference(queryTokenMeta, 'the query token');
+    const targetTokenRef = buildTokenReference(queryTokenMeta, 'the target token');
     const sourceTokenRef = buildTokenReference(keyTokenMeta, 'the source token');
     const queryVectorLink = buildAttentionVectorActionMarkup(selectionInfo, {
         vectorKind: 'Q',
@@ -448,6 +449,7 @@ function buildAttentionScoreLinkedVectorReferences(selectionInfo = null) {
     });
     return {
         queryTokenRef,
+        targetTokenRef,
         sourceTokenRef,
         queryVectorLink,
         keyVectorLink,
@@ -625,7 +627,8 @@ function buildLayerNormDescription(selectionInfo = null) {
     const layerNormRef = buildSelectionLayerNormReference(selectionInfo);
     return joinParagraphs(
         `${layerNormRef.charAt(0).toUpperCase()}${layerNormRef.slice(1)} normalizes one token's feature vector by subtracting its mean and dividing by its standard deviation across features, then applying learned ${scaleLink} and ${shiftLink}. This keeps feature magnitudes under control and gives later computations a more stable input.`,
-        'In GPT-2, LayerNorm runs before attention and before the MLP. That means the model normalizes the residual stream first and then feeds that conditioned state into each sublayer.'
+        'In GPT-2, LayerNorm runs before attention and before the MLP. That means the model normalizes the residual stream first and then feeds that conditioned state into each sublayer.',
+        buildLayerNormHadamardFootnote(`the learned ${scaleLink}`)
     );
 }
 
@@ -640,13 +643,19 @@ function buildTopLayerNormDescription(selectionInfo = null) {
     });
     return joinParagraphs(
         `This is the final LayerNorm at the top of the model. It performs the same normalize-then-affine operation as other LayerNorm blocks, but here the learned ${scaleLink} and ${shiftLink} prepare the representation directly for the output vocabulary projection.`,
-        'By the time the model reaches this point, all 12 transformer layers have already contributed their updates. This LayerNorm is the last conditioning step before logits are computed.'
+        'By the time the model reaches this point, all 12 transformer layers have already contributed their updates. This LayerNorm is the last conditioning step before logits are computed.',
+        buildLayerNormHadamardFootnote(`the learned ${scaleLink}`)
     );
+}
+
+function buildLayerNormHadamardFootnote(scaleRef = inlineMath('\\gamma')) {
+    return `* In the equation preview, ${inlineMath('\\odot')} means elementwise multiplication: each feature in the normalized vector is multiplied by the matching feature in ${scaleRef}.`;
 }
 
 const LN_SCALE_PARAMETER_DESCRIPTION = joinParagraphs(
     `This is a learned LayerNorm scale parameter vector, usually written as ${inlineMath('\\gamma')}. It is not produced by the current prompt; it is a fixed trained parameter shared across all tokens in this layer.`,
-    'After normalization, each feature is multiplied by its corresponding scale value. That gives the model a way to keep some features large, suppress others, and generally choose a useful post-normalization coordinate system.'
+    'After normalization, each feature is multiplied by its corresponding scale value. That gives the model a way to keep some features large, suppress others, and generally choose a useful post-normalization coordinate system.',
+    buildLayerNormHadamardFootnote()
 );
 
 const LN_SHIFT_PARAMETER_DESCRIPTION = joinParagraphs(
@@ -656,7 +665,8 @@ const LN_SHIFT_PARAMETER_DESCRIPTION = joinParagraphs(
 
 const FINAL_LN_SCALE_DESCRIPTION = joinParagraphs(
     'This is the learned scale vector for the final LayerNorm at the top of the model. It plays the same mathematical role as other LayerNorm scale vectors, but here it prepares the representation immediately before logits are computed.',
-    'Its job is to make the final hidden state land in a feature space that the unembedding matrix can read effectively.'
+    'Its job is to make the final hidden state land in a feature space that the unembedding matrix can read effectively.',
+    buildLayerNormHadamardFootnote()
 );
 
 const FINAL_LN_SHIFT_DESCRIPTION = joinParagraphs(
@@ -676,7 +686,7 @@ function buildQueryWeightMatrixDescription(selectionInfo = null) {
             inputName: 'LayerNorm output vector',
             outputName: 'query vector'
         }),
-        `In symbols, this is the ${inlineMath('q_t = x_t W_Q')} step for this attention head. The matrix multiplication recombines the full token state into the query space that determines what this attention head will search for.`,
+        `In symbols, this is the ${inlineMath(ATTENTION_QUERY_PROJECTION_TEX)} step for this attention head. The matrix multiplication recombines the full token state into the query space that determines what this attention head will search for.`,
         `The same matrix is applied at every token position, so ${headRef} produces one query vector per token. Those query vectors are then dotted with the key vectors from the same attention head to form raw attention scores.`
     );
 }
@@ -693,7 +703,7 @@ function buildKeyWeightMatrixDescription(selectionInfo = null) {
             inputName: 'LayerNorm output vector',
             outputName: 'key vector'
         }),
-        `In symbols, this is the ${inlineMath('k_t = x_t W_K')} step for this attention head. The matrix multiplication places each token into the key space that queries will be compared against.`,
+        `In symbols, this is the ${inlineMath(ATTENTION_KEY_PROJECTION_TEX)} step for this attention head. The matrix multiplication places each token into the key space that queries will be compared against.`,
         `The same matrix is applied independently at every token position, so ${headRef} produces a separate key vector for every token in the sequence. Those key vectors are what the head's queries use in their scaled dot products.`
     );
 }
@@ -710,7 +720,7 @@ function buildValueWeightMatrixDescription(selectionInfo = null) {
             inputName: 'LayerNorm output vector',
             outputName: 'value vector'
         }),
-        `In symbols, this is the ${inlineMath('v_t = x_t W_V')} step for this attention head. The matrix multiplication places each token into the value space that the attention head will actually mix after softmax has chosen the weights.`,
+        `In symbols, this is the ${inlineMath(ATTENTION_VALUE_PROJECTION_TEX)} step for this attention head. The matrix multiplication places each token into the value space that the attention head will actually mix after softmax has chosen the weights.`,
         `The same matrix is applied independently at every token position, so ${headRef} produces one value vector per token. Later, each of those value vectors is multiplied by a scalar attention weight and added into the head's weighted sum.`
     );
 }
@@ -811,7 +821,7 @@ function buildQueryVectorDescription(selectionInfo = null) {
         linkText: inlineMath('W_Q')
     });
     return joinParagraphs(
-        `This is the ${GPT2_D_HEAD_TEXT}-dimensional query vector for ${tokenRef} in ${headRef}. It is produced by multiplying the post-LayerNorm residual vector ${sourceVectorLink} for this token by the head-specific query matrix ${weightMatrixLink}, which is the ${inlineMath('q_t = x_t W_Q')} computation for this attention head.`,
+        `This is the ${GPT2_D_HEAD_TEXT}-dimensional query vector for ${tokenRef} in ${headRef}. It is produced by multiplying the post-LayerNorm residual vector ${sourceVectorLink} for this token by the head-specific query matrix ${weightMatrixLink}, which is the ${inlineMath(ATTENTION_QUERY_PROJECTION_TEX)} computation for this attention head.`,
         `The model takes dot products between this query vector and every key vector in ${headRef}, producing one raw attention score per source token before scaling by ${inlineMath('\\frac{1}{\\sqrt{d_h}}')}, causal masking, and softmax.`,
         `Those scores determine how strongly ${tokenRef} will read from each source token when ${headRef} forms its weighted sum of value vectors.`
     );
@@ -830,8 +840,8 @@ function buildKeyVectorDescription(selectionInfo = null) {
         linkText: inlineMath('W_K')
     });
     return joinParagraphs(
-        `This is the ${GPT2_D_HEAD_TEXT}-dimensional key vector for ${tokenRef} in ${headRef}. It is produced by multiplying the post-LayerNorm residual vector ${sourceVectorLink} for this token by the head-specific key matrix ${weightMatrixLink}, which is the ${inlineMath('k_j = x_j W_K')} computation for this attention head.`,
-        `When a query token computes ${inlineMath('q_t \\cdot k_j')} in ${headRef}, this vector supplies the ${inlineMath('k_j')} term for ${tokenRef}. After scaling by ${inlineMath('\\frac{1}{\\sqrt{d_h}}')}, and after masking removes disallowed future positions, that interaction contributes one raw attention score in the query token's row.`,
+        `This is the ${GPT2_D_HEAD_TEXT}-dimensional key vector for ${tokenRef} in ${headRef}. It is produced by multiplying the post-LayerNorm residual vector ${sourceVectorLink} for this token by the head-specific key matrix ${weightMatrixLink}, which is the ${inlineMath(ATTENTION_KEY_VECTOR_TEX)} computation for this attention head.`,
+        `When a query token computes ${inlineMath(ATTENTION_QK_DOT_PRODUCT_TEX)} in ${headRef}, this vector supplies the ${inlineMath('k_{j,i}')} term for ${tokenRef}. After scaling by ${inlineMath('\\frac{1}{\\sqrt{d_h}}')}, and after masking removes disallowed future positions, that interaction contributes one raw attention score in the query token's row.`,
         `Its job is to determine how strongly other tokens can attend to ${tokenRef} in ${headRef}.`
     );
 }
@@ -849,7 +859,7 @@ function buildValueVectorDescription(selectionInfo = null) {
         linkText: inlineMath('W_V')
     });
     return joinParagraphs(
-        `This is the ${GPT2_D_HEAD_TEXT}-dimensional value vector for ${tokenRef} in ${headRef}. It is produced by multiplying the post-LayerNorm residual vector ${sourceVectorLink} for this token by the head-specific value matrix ${weightMatrixLink}, which is the ${inlineMath('v_j = x_j W_V')} computation for this attention head.`,
+        `This is the ${GPT2_D_HEAD_TEXT}-dimensional value vector for ${tokenRef} in ${headRef}. It is produced by multiplying the post-LayerNorm residual vector ${sourceVectorLink} for this token by the head-specific value matrix ${weightMatrixLink}, which is the ${inlineMath(ATTENTION_VALUE_VECTOR_TEX)} computation for this attention head.`,
         `Once a query token's raw scores have been turned into weights ${inlineMath('\\alpha_{t,j}')} by softmax, this vector is multiplied by its scalar weight and added into the weighted sum.`,
         `That is how information from ${tokenRef} can flow into other tokens through ${headRef}.`
     );
@@ -918,8 +928,8 @@ function buildAttentionScoreGenericDescription(selectionInfo = null) {
     const headRef = buildSelectionHeadReference(selectionInfo);
     const linkedVectors = buildAttentionScoreLinkedVectorReferences(selectionInfo);
     return joinParagraphs(
-        `This is one entry in the attention matrix for ${linkedVectors.queryTokenRef} attending to ${linkedVectors.sourceTokenRef} in ${headRef}.`,
-        `Depending on the stage, it is either the raw scaled dot-product score between the query token's ${linkedVectors.queryVectorLink} and the source token's ${linkedVectors.keyVectorLink}, or the post-softmax weight derived from that score.`,
+        `This is one entry in the attention matrix from source token ${linkedVectors.sourceTokenRef} to target token ${linkedVectors.targetTokenRef} in ${headRef}.`,
+        `Depending on the stage, it is either the raw scaled dot-product score between the target token's ${linkedVectors.queryVectorLink} and the source token's ${linkedVectors.keyVectorLink}, or the post-softmax weight derived from that score.`,
         `That weight determines how much of the source token's ${linkedVectors.valueVectorLink} is mixed into the output of ${headRef}.`
     );
 }
@@ -928,8 +938,8 @@ function buildAttentionPreScoreDescription(selectionInfo = null) {
     const headRef = buildSelectionHeadReference(selectionInfo);
     const linkedVectors = buildAttentionScoreLinkedVectorReferences(selectionInfo);
     return joinParagraphs(
-        `This is the pre-softmax attention score for ${linkedVectors.queryTokenRef} attending to ${linkedVectors.sourceTokenRef} in ${headRef}.`,
-        `It is the scaled dot product ${inlineMath('\\frac{q_t \\cdot k_j}{\\sqrt{d_h}}')} between the query token's ${linkedVectors.queryVectorLink} and the source token's ${linkedVectors.keyVectorLink}, with causal masking applied before the row is normalized.`,
+        `This is the pre-softmax attention score from source token ${linkedVectors.sourceTokenRef} to target token ${linkedVectors.targetTokenRef} in ${headRef}.`,
+        `It is the scaled dot product ${inlineMath(ATTENTION_PRE_SCORE_TEX)} between the target token's ${linkedVectors.queryVectorLink} and the source token's ${linkedVectors.keyVectorLink}, with causal masking applied before the row is normalized.`,
         `At this stage the number is still a raw score. Softmax will turn the full row into normalized attention weights, and this entry will then scale the source token's ${linkedVectors.valueVectorLink}.`
     );
 }
@@ -938,8 +948,8 @@ function buildAttentionPostScoreDescription(selectionInfo = null) {
     const headRef = buildSelectionHeadReference(selectionInfo);
     const linkedVectors = buildAttentionScoreLinkedVectorReferences(selectionInfo);
     return joinParagraphs(
-        `This is the post-softmax attention weight for ${linkedVectors.queryTokenRef} reading from ${linkedVectors.sourceTokenRef} in ${headRef}.`,
-        `It comes from applying softmax to the row of scaled dot products built from the query token's ${linkedVectors.queryVectorLink} against the head's key vectors, including the source token's ${linkedVectors.keyVectorLink}.`,
+        `This is the post-softmax attention weight from source token ${linkedVectors.sourceTokenRef} to target token ${linkedVectors.targetTokenRef} in ${headRef}.`,
+        `It comes from applying softmax to the row of scaled dot products built from the target token's ${linkedVectors.queryVectorLink} against the head's key vectors, including the source token's ${linkedVectors.keyVectorLink}.`,
         `This scalar is then multiplied into the source token's ${linkedVectors.valueVectorLink}, so it directly sets how much information from that token enters the output of ${headRef}.`
     );
 }
@@ -1072,13 +1082,26 @@ const SELECTION_EQUATION_COLORS = {
     mlpUp: toKatexColorHex(MLP_UP_MATRIX_COLOR),
     mlpDown: toKatexColorHex(MLP_DOWN_MATRIX_COLOR)
 };
+const withHeadSubscript = (symbol) => `${symbol}_i`;
+const ATTENTION_QUERY_PROJECTION_TEX = 'q_{t,i} = x_t W_Q';
+const ATTENTION_KEY_PROJECTION_TEX = 'k_{t,i} = x_t W_K';
+const ATTENTION_VALUE_PROJECTION_TEX = 'v_{t,i} = x_t W_V';
+const ATTENTION_KEY_VECTOR_TEX = 'k_{j,i} = x_j W_K';
+const ATTENTION_VALUE_VECTOR_TEX = 'v_{j,i} = x_j W_V';
+const ATTENTION_QK_DOT_PRODUCT_TEX = 'q_{t,i} \\cdot k_{j,i}';
+const ATTENTION_PRE_SCORE_TEX = '\\frac{q_{t,i} \\cdot k_{j,i}}{\\sqrt{d_h}}';
 const SELECTION_EQUATION_SYMBOLS = {
     Q: colorizeEquationToken(SELECTION_EQUATION_COLORS.q, 'Q'),
     K: colorizeEquationToken(SELECTION_EQUATION_COLORS.k, 'K'),
     V: colorizeEquationToken(SELECTION_EQUATION_COLORS.v, 'V'),
+    HMuted: colorizeEquationToken(SELECTION_EQUATION_COLORS.mutedWhite, 'H'),
+    OMuted: colorizeEquationToken(SELECTION_EQUATION_COLORS.mutedWhite, 'O'),
     QMuted: colorizeEquationToken(SELECTION_EQUATION_COLORS.qMuted, 'Q'),
     KMuted: colorizeEquationToken(SELECTION_EQUATION_COLORS.kMuted, 'K'),
     VMuted: colorizeEquationToken(SELECTION_EQUATION_COLORS.vMuted, 'V'),
+    QHeadMuted: withHeadSubscript(colorizeEquationToken(SELECTION_EQUATION_COLORS.qMuted, 'Q')),
+    KHeadMuted: withHeadSubscript(colorizeEquationToken(SELECTION_EQUATION_COLORS.kMuted, 'K')),
+    VHeadMuted: withHeadSubscript(colorizeEquationToken(SELECTION_EQUATION_COLORS.vMuted, 'V')),
     XLnMuted: colorizeEquationToken(SELECTION_EQUATION_COLORS.mutedWhite, 'x_{\\text{ln}}'),
     WQ: colorizeEquationToken(SELECTION_EQUATION_COLORS.q, 'W_Q'),
     WK: colorizeEquationToken(SELECTION_EQUATION_COLORS.k, 'W_K'),
@@ -1221,22 +1244,28 @@ function buildSelectionEquationEntries(label, selectionInfo = null) {
     const keyProjectionEq = attentionEquations.keyProjection;
     const valueProjectionEq = attentionEquations.valueProjection;
     const queryWeightMatrixEq = buildAttentionProjectionEquation({
-        outputSymbol: SELECTION_EQUATION_SYMBOLS.QMuted,
+        outputSymbol: SELECTION_EQUATION_SYMBOLS.QHeadMuted,
         inputSymbol: SELECTION_EQUATION_SYMBOLS.XLnMuted,
         weightSymbol: SELECTION_EQUATION_SYMBOLS.WQ,
         biasSymbol: SELECTION_EQUATION_SYMBOLS.BQ
     });
     const keyWeightMatrixEq = buildAttentionProjectionEquation({
-        outputSymbol: SELECTION_EQUATION_SYMBOLS.KMuted,
+        outputSymbol: SELECTION_EQUATION_SYMBOLS.KHeadMuted,
         inputSymbol: SELECTION_EQUATION_SYMBOLS.XLnMuted,
         weightSymbol: SELECTION_EQUATION_SYMBOLS.WK,
         biasSymbol: SELECTION_EQUATION_SYMBOLS.BK
     });
     const valueWeightMatrixEq = buildAttentionProjectionEquation({
-        outputSymbol: SELECTION_EQUATION_SYMBOLS.VMuted,
+        outputSymbol: SELECTION_EQUATION_SYMBOLS.VHeadMuted,
         inputSymbol: SELECTION_EQUATION_SYMBOLS.XLnMuted,
         weightSymbol: SELECTION_EQUATION_SYMBOLS.WV,
         biasSymbol: SELECTION_EQUATION_SYMBOLS.BV
+    });
+    const outputProjectionWeightMatrixEq = buildAttentionProjectionEquation({
+        outputSymbol: SELECTION_EQUATION_SYMBOLS.OMuted,
+        inputSymbol: SELECTION_EQUATION_SYMBOLS.HMuted,
+        weightSymbol: SELECTION_EQUATION_SYMBOLS.WO,
+        biasSymbol: SELECTION_EQUATION_SYMBOLS.BO
     });
     const attentionEquation = attentionEquations.attention;
     const concatEq = attentionEquations.concat;
@@ -1402,7 +1431,7 @@ function buildSelectionEquationEntries(label, selectionInfo = null) {
         return buildEquationEntries([attentionEquation, concatEq, outputProjectionEq], [0]);
     }
     if (lower.includes('output projection matrix')) {
-        return buildEquationEntries([concatEq, outputProjectionEq, postAttentionResidualEq], [1]);
+        return buildEquationEntries([concatEq, outputProjectionWeightMatrixEq, postAttentionResidualEq], [1]);
     }
     if (lower.includes('post-attention residual')) {
         return buildEquationEntries([outputProjectionEq, postAttentionResidualEq], [1]);
