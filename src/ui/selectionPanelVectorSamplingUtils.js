@@ -77,6 +77,12 @@ function resolveSamplingFamily(label = '', stage = '') {
     return null;
 }
 
+function isWeightedSumSampling(label = '', stage = '') {
+    const lower = String(label || '').toLowerCase();
+    const stageLower = String(stage || '').toLowerCase();
+    return stageLower === 'attention.weighted_sum' || lower.includes('attention weighted sum');
+}
+
 function resolveVectorDomain(family, segmentIndex = null) {
     if (family === 'attention') {
         return {
@@ -255,11 +261,20 @@ export function resolveSelectionVectorSamplingData({
             ? resolveConfiguredStride(config, 'mlp_stride')
             : resolveConfiguredStride(config, 'residual_stride');
     const domain = resolveVectorDomain(family, activationData?.segmentIndex);
+    const weightedSumSampling = family === 'attention' && isWeightedSumSampling(label, activationData?.stage);
     const effectiveStride = resolveEffectiveStride(domain.domainLength, values.length, configuredStride);
+    const displayedValues = weightedSumSampling
+        ? values.slice(0, 1)
+        : values;
+    const displayedStride = weightedSumSampling
+        ? Math.max(1, domain.domainLength)
+        : effectiveStride;
     const maxSourceIndex = domain.offset + domain.domainLength - 1;
-    const description = buildSamplingDescription(family, domain);
-    const entries = values.map((value, index) => {
-        const localSourceIndex = Math.min(domain.domainLength - 1, index * effectiveStride);
+    const description = weightedSumSampling
+        ? `This weighted sum currently renders as one grouped prism, so only the first sampled head dimension is used for its dev-mode color readout. Values are rounded for readability.`
+        : buildSamplingDescription(family, domain);
+    const entries = displayedValues.map((value, index) => {
+        const localSourceIndex = Math.min(domain.domainLength - 1, index * displayedStride);
         return {
             sourceIndex: Math.min(maxSourceIndex, domain.offset + localSourceIndex),
             value
@@ -268,8 +283,8 @@ export function resolveSelectionVectorSamplingData({
 
     const summaryRows = [
         { label: 'Original vector length', value: domain.originalLength.toLocaleString('en-US') },
-        { label: 'Samples used for color', value: values.length.toLocaleString('en-US') },
-        { label: 'Sampling stride', value: effectiveStride.toLocaleString('en-US') }
+        { label: 'Samples used for color', value: displayedValues.length.toLocaleString('en-US') },
+        { label: 'Sampling stride', value: displayedStride.toLocaleString('en-US') }
     ];
 
     if (Number.isFinite(domain.segmentIndex)) {

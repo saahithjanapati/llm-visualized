@@ -64,6 +64,20 @@ function resolveInitialAppView() {
     return null;
 }
 
+function isEnabledUrlFlag(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    return normalized === '1'
+        || normalized === 'true'
+        || normalized === 'yes'
+        || normalized === 'on';
+}
+
+function shouldSkipInitialPassIntro() {
+    if (typeof window === 'undefined') return false;
+    const params = new URLSearchParams(window.location.search);
+    return isEnabledUrlFlag(params.get('skipPassIntro'));
+}
+
 // Optionally load pre-baked geometries to skip heavy procedural work.
 await loadPrecomputedGeometries('/precomputed_components_slice.glb');
 // Skip full-depth QKV/output precompute when instanced slices are active,
@@ -365,6 +379,7 @@ function waitForAnimationFrames(frameCount = 1) {
 
 const initialAppView = resolveInitialAppView();
 const shouldOpenMhsaDirectly = initialAppView === 'mhsa';
+const shouldBypassInitialPassIntro = shouldSkipInitialPassIntro();
 
 Promise.resolve().then(async () => {
     if (shouldOpenMhsaDirectly) {
@@ -376,6 +391,18 @@ Promise.resolve().then(async () => {
             selectionPanel.handleSelection(buildMhsaInfoSelection());
         } catch (err) {
             console.error('Direct MHSA startup failed:', err);
+            hideLoadingOverlay();
+            pipeline?.engine?.resume?.('initial-pass-intro');
+        }
+        return;
+    }
+    if (shouldBypassInitialPassIntro) {
+        try {
+            hideLoadingOverlay();
+            pipeline?.engine?.resume?.('initial-pass-intro');
+            await waitForAnimationFrames(1);
+        } catch (err) {
+            console.error('Skip-pass-intro startup failed:', err);
             hideLoadingOverlay();
             pipeline?.engine?.resume?.('initial-pass-intro');
         }

@@ -75,7 +75,10 @@ const TOKEN_CHIP_ONLY_MATERIAL_TWEAKS = Object.freeze({
     emissive: 0x000000,
     emissiveIntensity: 0
 });
-const CHIP_INSIDE_RELEASE_BUFFER_MS = 80;
+// Keep the token chip visibly "inside" the vocab embedding for a beat before
+// the first-layer residual vector is allowed to rise out of the matrix.
+const VOCAB_CHIP_INSIDE_RELEASE_BUFFER_MS = 260;
+const POSITION_CHIP_INSIDE_RELEASE_BUFFER_MS = 80;
 const TOP_LOGIT_REVEAL_DELAY_MS = 140;
 const BOTTOM_EMBED_FINAL_EMISSIVE = TOP_EMBED_BASE_EMISSIVE;
 const BOTTOM_POSITION_EMBED_FINAL_EMISSIVE = 0.03;
@@ -743,7 +746,7 @@ export function addEmbeddingAndTokenChips({
                 releaseByToken: Object.create(null),
                 startByToken: Object.create(null),
                 defaultStartAt: nowMs,
-                defaultReleaseAt: nowMs + Math.max(0, vocabRiseDuration + CHIP_INSIDE_RELEASE_BUFFER_MS),
+                defaultReleaseAt: nowMs + Math.max(0, vocabRiseDuration + VOCAB_CHIP_INSIDE_RELEASE_BUFFER_MS),
                 insideByToken: vocabInsideByToken
             };
             // Gate deferred positional-vector launch until position chips enter.
@@ -876,7 +879,7 @@ export function addEmbeddingAndTokenChips({
             const defaultReleaseAt = defaultStartAt
                 + posRiseDuration
                 + laneSpanMs
-                + CHIP_INSIDE_RELEASE_BUFFER_MS;
+                + POSITION_CHIP_INSIDE_RELEASE_BUFFER_MS;
             pipeline.__inputPositionChipGate = {
                 enabled: true,
                 pending: false,
@@ -946,7 +949,7 @@ export function addEmbeddingAndTokenChips({
                 if (tokenKey !== null) {
                     const tokenStartAt = positionWaveStartMs + laneDelayMs;
                     const tokenReleaseAt = tokenStartAt + (usesTween
-                        ? posRiseDuration + CHIP_INSIDE_RELEASE_BUFFER_MS
+                        ? posRiseDuration + POSITION_CHIP_INSIDE_RELEASE_BUFFER_MS
                         : 0);
                     if (!Number.isFinite(startByToken[tokenKey])) {
                         startByToken[tokenKey] = tokenStartAt;
@@ -1126,7 +1129,7 @@ export function addEmbeddingAndTokenChips({
                 if (hasAnimatedChip && Number.isFinite(tokenIndex)) {
                     const tokenStartAt = tokenWaveStartMs;
                     const tokenReleaseAt = tokenWaveStartMs + (usesTween
-                        ? vocabRiseDuration + CHIP_INSIDE_RELEASE_BUFFER_MS
+                        ? vocabRiseDuration + VOCAB_CHIP_INSIDE_RELEASE_BUFFER_MS
                         : 0);
                     const tokenKey = String(Math.max(0, Math.floor(tokenIndex)));
                     if (!Object.prototype.hasOwnProperty.call(vocabInsideByToken, tokenKey)) {
@@ -1248,7 +1251,7 @@ export function addEmbeddingAndTokenChips({
                     releaseByToken,
                     startByToken,
                     defaultStartAt: tokenWaveStartMs,
-                    defaultReleaseAt: tokenReleaseDefaultMs + CHIP_INSIDE_RELEASE_BUFFER_MS,
+                    defaultReleaseAt: tokenReleaseDefaultMs + VOCAB_CHIP_INSIDE_RELEASE_BUFFER_MS,
                     insideByToken: vocabInsideByToken
                 };
             }

@@ -11,7 +11,12 @@ import {
     MHA_VALUE_RANGE_MAX,
     MHA_VALUE_CLAMP_MAX
 } from '../animations/LayerAnimationConstants.js';
-import { buildHueRangeOptions, mapValueToColor, mapValueToHueRange } from '../utils/colors.js';
+import {
+    buildHueRangeOptions,
+    mapAttentionPostScoreToColor,
+    mapValueToColor,
+    mapValueToHueRange
+} from '../utils/colors.js';
 import {
     ATTENTION_PRE_COLOR_CLAMP,
     ATTENTION_PREVIEW_COLOR_DARKEN_FACTOR,
@@ -204,7 +209,7 @@ function buildAttentionScoreCellCss(value) {
 }
 
 function buildAttentionPostCellCss(value) {
-    return buildAttentionScoreCellCss(value);
+    return colorToCss(mapAttentionPostScoreToColor(value));
 }
 
 function buildMaskCellCss(isMasked = false) {

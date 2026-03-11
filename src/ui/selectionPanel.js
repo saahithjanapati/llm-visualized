@@ -94,6 +94,16 @@ import {
     buildMhsaTokenMatrixPreviewData
 } from './selectionPanelMhsaTokenMatrixUtils.js';
 import {
+    applyMhsaTokenMatrixLayoutVars,
+    clearMhsaTokenMatrixLayoutVars,
+    resolveMhsaTokenMatrixLayoutMetrics
+} from './selectionPanelMhsaLayoutUtils.js';
+import {
+    createMhsaTokenMatrixCellStore,
+    forEachMhsaTokenMatrixCell,
+    registerMhsaTokenMatrixCell
+} from './selectionPanelMhsaCellStoreUtils.js';
+import {
     applyMaterialSnapshot,
     copyInstancedVectorColorsToPreview,
     extractMaterialSnapshot,
@@ -151,6 +161,8 @@ import {
     PREVIEW_FRAME_PADDING,
     PREVIEW_LANES,
     PREVIEW_LANE_SPACING,
+    PREVIEW_MAX_FIT_VIEWPORT_HEIGHT_PX,
+    PREVIEW_MAX_FIT_VIEWPORT_WIDTH_PX,
     PREVIEW_MATRIX_DEPTH,
     PREVIEW_MOBILE_MATRIX_DISTANCE_MULT,
     PREVIEW_MOBILE_MATRIX_PADDING_MULT,
@@ -2407,6 +2419,10 @@ function fitObjectToView(object, camera, options = {}) {
         const scaledSize = new THREE.Vector3();
         scaledBox.getSize(scaledSize);
         const scaledMax = Math.max(scaledSize.x, scaledSize.y, scaledSize.z);
+        const viewportWidth = Number.isFinite(options.viewportWidth) ? options.viewportWidth : null;
+        const viewportHeight = Number.isFinite(options.viewportHeight) ? options.viewportHeight : null;
+        const maxViewportWidthPx = Number.isFinite(options.maxViewportWidthPx) ? options.maxViewportWidthPx : null;
+        const maxViewportHeightPx = Number.isFinite(options.maxViewportHeightPx) ? options.maxViewportHeightPx : null;
         const vFov = THREE.MathUtils.degToRad(camera.fov);
         const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
         const halfX = scaledSize.x * 0.5;
@@ -2420,10 +2436,23 @@ function fitObjectToView(object, camera, options = {}) {
         const horizontalHalf = radialHalf;
         const distY = verticalHalf / Math.tan(vFov / 2);
         const distX = horizontalHalf / Math.tan(hFov / 2);
+        // Once the preview canvas exceeds the design viewport, hold the
+        // object's screen footprint roughly steady instead of letting the
+        // rotating mesh keep growing with every panel resize.
+        const viewportDistanceScale = Math.max(
+            1,
+            (viewportWidth && maxViewportWidthPx && maxViewportWidthPx > 0)
+                ? (viewportWidth / maxViewportWidthPx)
+                : 1,
+            (viewportHeight && maxViewportHeightPx && maxViewportHeightPx > 0)
+                ? (viewportHeight / maxViewportHeightPx)
+                : 1
+        );
         const distance = Math.max(distX, distY)
             * PREVIEW_ROTATION_ENVELOPE_MARGIN
             * PREVIEW_BASE_DISTANCE_MULT
-            * distanceMult;
+            * distanceMult
+            * viewportDistanceScale;
 
         camera.near = Math.max(0.1, distance / 50);
         camera.far = Math.max(distance * 20, distance + scaledMax * 4);
@@ -2599,6 +2628,7 @@ class SelectionPanel {
         this._rotationSpeedMult = 1;
         this._currentPreviewSelectionKey = null;
         this._lastFitOptions = null;
+        this._previewFitViewportCap = null;
         this._mobilePauseActive = false;
         this._mobileFocusActive = false;
         this._pauseMainFlowOnMobileFocus = options.pauseMainFlowOnMobileFocus === true;
@@ -2758,12 +2788,14 @@ class SelectionPanel {
         this._mhsaTokenMatrixMaskCellEls = [];
         this._mhsaTokenMatrixPostCellEls = [];
         this._mhsaTokenMatrixPostCopyCellEls = [];
+        this._mhsaTokenMatrixMirroredPostCellEls = [];
         this._mhsaTokenMatrixXMatrixEl = [];
         this._mhsaTokenMatrixQueryMatrixEl = [];
         this._mhsaTokenMatrixProjectionStageEls = [];
         this._mhsaTokenMatrixAttentionFocusEls = null;
         this._mhsaTokenMatrixConnectorEls = {};
         this._mhsaTokenMatrixConnectorFrame = null;
+        this._mhsaTokenMatrixLayoutMetrics = null;
         this._mhsaTokenMatrixSceneFocusState = {
             projectionStages: [],
             attentionBlocks: [],
@@ -2772,6 +2804,7 @@ class SelectionPanel {
         this._mhsaTokenMatrixTransposeMatrixEl = null;
         this._mhsaTokenMatrixQueryStageIndex = null;
         this._mhsaTokenMatrixKeyStageIndex = null;
+        this._mhsaTokenMatrixValueStageIndex = null;
         this._mhsaTokenMatrixWorkspace = null;
         this._mhsaTokenMatrixOverlay = null;
         this._mhsaTokenMatrixPan = {
@@ -2796,7 +2829,7 @@ class SelectionPanel {
             panX: 0,
             panY: 0,
             scale: 1,
-            minScale: 0.58,
+            minScale: 0.36,
             maxScale: 2.8,
             initialized: false,
             hasInteracted: false
@@ -3692,7 +3725,11 @@ class SelectionPanel {
                 }
             }
             if (allowFit) {
-                fitObjectToView(this.currentPreview, this.camera, this._lastFitOptions || {});
+                fitObjectToView(
+                    this.currentPreview,
+                    this.camera,
+                    this._resolveCurrentPreviewFitOptions(width, height)
+                );
                 this._noteFit(width, height);
             }
         }
@@ -3721,7 +3758,14 @@ class SelectionPanel {
         if (!this.isReady || !this._pendingReveal) return;
         this._pendingReveal = false;
         if (this.currentPreview) {
-            fitObjectToView(this.currentPreview, this.camera, this._lastFitOptions || {});
+            fitObjectToView(
+                this.currentPreview,
+                this.camera,
+                this._resolveCurrentPreviewFitOptions(
+                    this._pendingRevealSize?.width,
+                    this._pendingRevealSize?.height
+                )
+            );
             this._noteFit(this._pendingRevealSize?.width, this._pendingRevealSize?.height);
         }
         if (this.canvas) {
@@ -3759,6 +3803,57 @@ class SelectionPanel {
             this._lastFitSize = { width: nextWidth, height: nextHeight };
         }
         this._fitLockUntil = performance.now() + PREVIEW_FIT_LOCK_MS;
+    }
+
+    _resolvePreviewViewportSize(width = null, height = null) {
+        let nextWidth = (Number.isFinite(width) && width > 0) ? Math.floor(width) : null;
+        let nextHeight = (Number.isFinite(height) && height > 0) ? Math.floor(height) : null;
+        if (nextWidth !== null && nextHeight !== null) {
+            return { width: nextWidth, height: nextHeight };
+        }
+
+        const rect = this.canvas?.getBoundingClientRect?.();
+        nextWidth = Math.max(
+            1,
+            Math.floor(rect?.width || this.canvas?.clientWidth || this.canvas?.width || 0)
+        );
+        nextHeight = Math.max(
+            1,
+            Math.floor(rect?.height || this.canvas?.clientHeight || this.canvas?.height || 0)
+        );
+        return { width: nextWidth, height: nextHeight };
+    }
+
+    _resolvePreviewFitViewportCap(width = null, height = null) {
+        const viewport = this._resolvePreviewViewportSize(width, height);
+        if (!this._previewFitViewportCap) {
+            this._previewFitViewportCap = {
+                width: viewport.width,
+                height: viewport.height
+            };
+        }
+        return {
+            width: Math.max(
+                PREVIEW_MAX_FIT_VIEWPORT_WIDTH_PX,
+                this._previewFitViewportCap?.width || 0
+            ),
+            height: Math.max(
+                PREVIEW_MAX_FIT_VIEWPORT_HEIGHT_PX,
+                this._previewFitViewportCap?.height || 0
+            )
+        };
+    }
+
+    _resolveCurrentPreviewFitOptions(width = null, height = null) {
+        const viewport = this._resolvePreviewViewportSize(width, height);
+        const fitViewportCap = this._resolvePreviewFitViewportCap(viewport.width, viewport.height);
+        return {
+            ...(this._lastFitOptions || {}),
+            viewportWidth: viewport.width,
+            viewportHeight: viewport.height,
+            maxViewportWidthPx: fitViewportCap.width,
+            maxViewportHeightPx: fitViewportCap.height
+        };
     }
 
     _cancelScheduledResize() {
@@ -7350,7 +7445,12 @@ class SelectionPanel {
         element.classList.toggle('is-scene-focus-dimmed', hasSceneFocus && !isActive);
     }
 
-    _resolveMhsaTokenMatrixAttentionFocusKeys({ query = false, transpose = false, score = false } = {}) {
+    _resolveMhsaTokenMatrixAttentionFocusKeys({
+        query = false,
+        transpose = false,
+        score = false,
+        includeWeightedOutput = true
+    } = {}) {
         const keys = [];
         if (query) keys.push('query');
         if (transpose) keys.push('transpose');
@@ -7374,13 +7474,17 @@ class SelectionPanel {
                 'mask',
                 'softmax-paren-close',
                 'equals-post',
-                'post',
-                'post-copy',
-                'head-output-multiply',
-                'value-post',
-                'head-output-equals',
-                'head-output'
+                'post'
             );
+            if (includeWeightedOutput) {
+                keys.push(
+                    'post-copy',
+                    'head-output-multiply',
+                    'value-post',
+                    'head-output-equals',
+                    'head-output'
+                );
+            }
         }
         return keys;
     }
@@ -7417,6 +7521,9 @@ class SelectionPanel {
         const hasSceneFocus = activeProjectionStages.size > 0
             || activeAttentionBlocks.size > 0
             || activeConnectors.size > 0;
+        const isHeadOutputTerminalFocus = activeProjectionStages.size === 0
+            && activeConnectors.size === 0
+            && activeAttentionBlocks.has('head-output');
 
         this._mhsaTokenMatrixSceneFocusState = {
             projectionStages: [...activeProjectionStages],
@@ -7424,6 +7531,7 @@ class SelectionPanel {
             connectors: [...activeConnectors]
         };
         this.mhsaTokenMatrixBody?.classList.toggle('has-scene-focus', hasSceneFocus);
+        this.mhsaTokenMatrixBody?.classList.toggle('has-head-output-terminal-focus', isHeadOutputTerminalFocus);
 
         this._mhsaTokenMatrixProjectionStageEls.forEach((entry) => {
             const stageIndex = Number.isFinite(entry?.stageIndex) ? entry.stageIndex : null;
@@ -7646,7 +7754,10 @@ class SelectionPanel {
         const overlay = this._mhsaTokenMatrixOverlay;
         const body = this.mhsaTokenMatrixBody;
         if (!workspace || !overlay || !body) return;
-        const CONNECTOR_GAP_PX = 10;
+        const CONNECTOR_GAP_PX = this._mhsaTokenMatrixLayoutMetrics?.connectorGaps?.default || 10;
+        const viewportScale = Number.isFinite(this._mhsaTokenMatrixViewport?.scale) && this._mhsaTokenMatrixViewport.scale > 0
+            ? this._mhsaTokenMatrixViewport.scale
+            : 1;
 
         const connectorKeys = ['q', 'k', 'pre', 'post', 'v'];
         const connectors = connectorKeys
@@ -7657,10 +7768,26 @@ class SelectionPanel {
             }))
             .filter((entry) => entry.source && entry.target);
 
-        const bodyRect = body.getBoundingClientRect?.();
-        if (!bodyRect || !(bodyRect.width > 0) || !(bodyRect.height > 0)) return;
-        const width = Math.max(1, Math.ceil(bodyRect.width || body.clientWidth || 1));
-        const height = Math.max(1, Math.ceil(bodyRect.height || body.clientHeight || 1));
+        const workspaceRect = workspace.getBoundingClientRect?.();
+        if (!workspaceRect || !(workspaceRect.width > 0) || !(workspaceRect.height > 0)) return;
+        const width = Math.max(
+            1,
+            Math.ceil(
+                workspace.scrollWidth
+                || workspace.clientWidth
+                || (workspaceRect.width / viewportScale)
+                || 1
+            )
+        );
+        const height = Math.max(
+            1,
+            Math.ceil(
+                workspace.scrollHeight
+                || workspace.clientHeight
+                || (workspaceRect.height / viewportScale)
+                || 1
+            )
+        );
         overlay.setAttribute('viewBox', `0 0 ${width} ${height}`);
         overlay.setAttribute('width', String(width));
         overlay.setAttribute('height', String(height));
@@ -7670,12 +7797,12 @@ class SelectionPanel {
             const rect = element.getBoundingClientRect?.();
             if (!rect) return null;
             return {
-                left: rect.left - bodyRect.left,
-                right: rect.right - bodyRect.left,
-                top: rect.top - bodyRect.top,
-                bottom: rect.bottom - bodyRect.top,
-                width: rect.width,
-                height: rect.height
+                left: (rect.left - workspaceRect.left) / viewportScale,
+                right: (rect.right - workspaceRect.left) / viewportScale,
+                top: (rect.top - workspaceRect.top) / viewportScale,
+                bottom: (rect.bottom - workspaceRect.top) / viewportScale,
+                width: rect.width / viewportScale,
+                height: rect.height / viewportScale
             };
         };
         const resolveAnchorPoint = (element) => {
@@ -7748,6 +7875,24 @@ class SelectionPanel {
             ].join(' ');
         };
 
+        const arrowMarkerId = `mhsa-token-matrix-arrowhead-${this._mhsaTokenMatrixRenderToken}`;
+        const defsEl = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+        const arrowMarkerEl = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+        arrowMarkerEl.setAttribute('id', arrowMarkerId);
+        arrowMarkerEl.setAttribute('viewBox', '0 0 8 8');
+        arrowMarkerEl.setAttribute('markerWidth', '8');
+        arrowMarkerEl.setAttribute('markerHeight', '8');
+        arrowMarkerEl.setAttribute('refX', '6.8');
+        arrowMarkerEl.setAttribute('refY', '4');
+        arrowMarkerEl.setAttribute('orient', 'auto');
+        arrowMarkerEl.setAttribute('markerUnits', 'userSpaceOnUse');
+        const arrowPathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        arrowPathEl.setAttribute('d', 'M 0 1.2 L 6.8 4 L 0 6.8 Z');
+        arrowPathEl.setAttribute('fill', 'rgba(216, 222, 232, 0.92)');
+        arrowPathEl.setAttribute('stroke', 'none');
+        arrowMarkerEl.appendChild(arrowPathEl);
+        defsEl.appendChild(arrowMarkerEl);
+
         const pathGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
         pathGroup.setAttribute('class', 'mhsa-token-matrix-preview__connector-layer');
         const connectorEls = {};
@@ -7774,12 +7919,13 @@ class SelectionPanel {
             linePath.setAttribute('class', 'mhsa-token-matrix-preview__connector-path mhsa-token-matrix-preview__focusable');
             linePath.setAttribute('d', pathData);
             linePath.setAttribute('stroke', '#ffffff');
+            linePath.setAttribute('marker-end', `url(#${arrowMarkerId})`);
 
             connectorEls[kind] = linePath;
             pathGroup.append(linePath);
         });
 
-        overlay.replaceChildren(pathGroup);
+        overlay.replaceChildren(defsEl, pathGroup);
         this._mhsaTokenMatrixConnectorEls = connectorEls;
         this._applyMhsaTokenMatrixSceneFocus(this._mhsaTokenMatrixSceneFocusState);
     }
@@ -7803,17 +7949,15 @@ class SelectionPanel {
             options.includeStaticScoreCells === false ? null : this._mhsaTokenMatrixStaticScoreCellEls,
             options.includeMaskCells === false ? null : this._mhsaTokenMatrixMaskCellEls,
             options.includePostCells === false ? null : this._mhsaTokenMatrixPostCellEls,
-            options.includePostCopyCells === false ? null : this._mhsaTokenMatrixPostCopyCellEls
+            options.includePostCopyCells === false ? null : this._mhsaTokenMatrixPostCopyCellEls,
+            options.includeMirroredPostCells === false ? null : this._mhsaTokenMatrixMirroredPostCellEls
         ].filter(Array.isArray);
         cellMatrices.forEach((cellMatrix) => {
-            cellMatrix.forEach((rowCells, focusRowIndex) => {
-                const entries = Array.isArray(rowCells) ? rowCells : [rowCells];
-                entries.forEach((cellEl, focusColIndex) => {
-                    if (!cellEl || cellEl.classList.contains('is-empty')) return;
-                    const isActive = hasFocus && focusRowIndex === rowIndex && focusColIndex === colIndex;
-                    cellEl.classList.toggle('is-active', isActive);
-                    cellEl.classList.toggle('is-dimmed', hasFocus && !isActive);
-                });
+            forEachMhsaTokenMatrixCell(cellMatrix, (cellEl, focusRowIndex, focusColIndex) => {
+                if (!cellEl || cellEl.classList.contains('is-empty')) return;
+                const isActive = hasFocus && focusRowIndex === rowIndex && focusColIndex === colIndex;
+                cellEl.classList.toggle('is-active', isActive);
+                cellEl.classList.toggle('is-dimmed', hasFocus && !isActive);
             });
         });
     }
@@ -7845,6 +7989,7 @@ class SelectionPanel {
             : null;
         const safeSourceType = sourceType === 'pre' ? 'pre' : (sourceType === 'mask' ? 'mask' : 'post');
         const isPreScoreFocus = safeSourceType === 'pre';
+        const isMaskFocus = safeSourceType === 'mask';
         if (!Number.isFinite(rowIndex) || !Number.isFinite(colIndex)) return;
         if (!Number.isFinite(queryStageIndex) || !Number.isFinite(keyStageIndex)) return;
         if (
@@ -7925,6 +8070,11 @@ class SelectionPanel {
                     includePostCells: false,
                     includePostCopyCells: false
                 }
+                : isMaskFocus
+                    ? {
+                        includePostCopyCells: false,
+                        includeMirroredPostCells: false
+                    }
                 : {}
         );
         const attentionBlocks = isPreScoreFocus
@@ -7940,18 +8090,25 @@ class SelectionPanel {
             : this._resolveMhsaTokenMatrixAttentionFocusKeys({
                 query: true,
                 transpose: true,
-                score: true
+                score: true,
+                includeWeightedOutput: !isMaskFocus
             });
         this._applyMhsaTokenMatrixSceneFocus({
             projectionStages: [queryStageIndex, keyStageIndex],
             attentionBlocks,
-            connectors: isPreScoreFocus ? ['q', 'k', 'pre'] : ['q', 'k', 'pre', 'post', 'v']
+            connectors: isPreScoreFocus
+                ? ['q', 'k', 'pre']
+                : isMaskFocus
+                    ? ['q', 'k', 'pre', 'post']
+                    : ['q', 'k', 'pre', 'post', 'v']
         });
     }
 
     _applyMhsaRowFocus(rowIndex, options = {}) {
         if (!this._mhsaTokenMatrixRowEls.length || !Number.isFinite(rowIndex)) return;
-        const hoverSource = options?.sourceType === 'query' ? 'query' : 'x';
+        const hoverSource = options?.sourceType === 'query'
+            ? 'query'
+            : (options?.sourceType === 'value-post' ? 'value-post' : 'x');
         const hoverStage = Number.isFinite(options?.stageIndex) ? Math.floor(options.stageIndex) : null;
         if (
             this._mhsaTokenMatrixHoverKind === 'row'
@@ -8032,17 +8189,71 @@ class SelectionPanel {
         const hasAttentionQueryFocus = projectionKind === 'q'
             || (broadcastAcrossStages && Number.isFinite(queryStageIndex));
         const hasAttentionTransposeFocus = shouldLinkTranspose;
-        this._applyMhsaTokenMatrixSceneFocus({
-            projectionStages: activeProjectionStages,
-            attentionBlocks: this._resolveMhsaTokenMatrixAttentionFocusKeys({
+        const hasAttentionValuePostFocus = hoverSource === 'value-post' && projectionKind === 'v';
+        const attentionBlocks = [
+            ...this._resolveMhsaTokenMatrixAttentionFocusKeys({
                 query: hasAttentionQueryFocus,
                 transpose: hasAttentionTransposeFocus,
                 score: false
             }),
+            ...(hasAttentionValuePostFocus ? ['value-post'] : [])
+        ];
+        this._applyMhsaTokenMatrixSceneFocus({
+            projectionStages: activeProjectionStages,
+            attentionBlocks,
             connectors: [
                 ...(hasAttentionQueryFocus ? ['q'] : []),
-                ...(hasAttentionTransposeFocus ? ['k'] : [])
+                ...(hasAttentionTransposeFocus ? ['k'] : []),
+                ...(hasAttentionValuePostFocus ? ['v'] : [])
             ]
+        });
+    }
+
+    _applyMhsaHeadOutputRowFocus(rowIndex) {
+        if (!Number.isFinite(rowIndex)) return;
+
+        this._mhsaTokenMatrixHoverKind = 'row';
+        this._mhsaTokenMatrixHoverRow = rowIndex;
+        this._mhsaTokenMatrixHoverCol = null;
+        this._mhsaTokenMatrixHoverCell = null;
+        this._mhsaTokenMatrixHoverSource = 'head-output';
+        this._mhsaTokenMatrixHoverStage = null;
+        this._mhsaTokenMatrixBody?.classList.add('has-focus-row');
+        this._mhsaTokenMatrixBody?.classList.remove('has-focus-column');
+        this._setMhsaTransposeFocus(null);
+        this._setMhsaScoreCellFocus(null, null);
+
+        this._mhsaTokenMatrixXMatrixEl.forEach((entry) => (entry?.matrixEl || entry)?.classList.remove('has-focus'));
+        this._mhsaTokenMatrixQueryMatrixEl.forEach((entry) => (entry?.matrixEl || entry)?.classList.remove('has-focus'));
+
+        this._mhsaTokenMatrixRowEls.forEach((rowStates) => {
+            const entries = Array.isArray(rowStates) ? rowStates : [rowStates];
+            entries.forEach((rowState) => {
+                rowState?.rowEl?.classList.remove('is-active', 'is-dimmed');
+                rowState?.labelEl?.classList.remove('is-highlighted');
+            });
+        });
+        this._mhsaTokenMatrixQueryRowEls.forEach((rowStates) => {
+            const entries = Array.isArray(rowStates) ? rowStates : [rowStates];
+            entries.forEach((rowState) => {
+                rowState?.rowEl?.classList.remove('is-active', 'is-dimmed');
+            });
+        });
+        this._mhsaTokenMatrixCompactRowEls.forEach((rowStates, focusRowIndex) => {
+            const entries = Array.isArray(rowStates) ? rowStates : [rowStates];
+            entries.forEach((rowState) => {
+                const isHeadOutputRow = rowState?.kind === 'head-output';
+                const isActive = isHeadOutputRow && focusRowIndex === rowIndex;
+                const isDimmed = isHeadOutputRow && focusRowIndex !== rowIndex;
+                rowState?.rowEl?.classList.toggle('is-active', isActive);
+                rowState?.rowEl?.classList.toggle('is-dimmed', isDimmed);
+            });
+        });
+
+        this._applyMhsaTokenMatrixSceneFocus({
+            projectionStages: [],
+            attentionBlocks: ['post-copy', 'value-post', 'head-output'],
+            connectors: []
         });
     }
 
@@ -8118,6 +8329,7 @@ class SelectionPanel {
             : null;
         const queryOnlyKeys = new Set(['query']);
         const transposeOnlyKeys = new Set(['transpose']);
+        const terminalOnlyKeys = new Set(['head-output']);
         const scoreKeys = new Set([
             'paren-pre-open',
             'multiply',
@@ -8161,14 +8373,22 @@ class SelectionPanel {
                 score: false
             });
             connectors = ['k'];
+        } else if (terminalOnlyKeys.has(safeKey)) {
+            projectionStages = [];
+            attentionBlocks = ['post-copy', 'value-post', safeKey];
+            connectors = [];
         } else if (scoreKeys.has(safeKey)) {
+            const isMaskOnlyFocus = safeKey === 'mask';
             projectionStages = [queryStageIndex, keyStageIndex].filter(Number.isFinite);
             attentionBlocks = this._resolveMhsaTokenMatrixAttentionFocusKeys({
                 query: true,
                 transpose: true,
-                score: true
+                score: true,
+                includeWeightedOutput: !isMaskOnlyFocus
             });
-            connectors = ['q', 'k', 'pre', 'post', 'v'];
+            connectors = isMaskOnlyFocus
+                ? ['q', 'k', 'pre', 'post']
+                : ['q', 'k', 'pre', 'post', 'v'];
         } else {
             return false;
         }
@@ -8262,8 +8482,17 @@ class SelectionPanel {
                     kind: 'row',
                     rowIndex,
                     colIndex: null,
-                    sourceType: 'query',
+                    sourceType: 'value-post',
                     stageIndex: Number.isFinite(stageIndex) ? stageIndex : null
+                };
+            }
+            if (Number.isFinite(rowIndex) && matrixKind === 'head-output') {
+                return {
+                    kind: 'row',
+                    rowIndex,
+                    colIndex: null,
+                    sourceType: 'head-output',
+                    stageIndex: null
                 };
             }
         }
@@ -8350,8 +8579,14 @@ class SelectionPanel {
         switch (targetInfo.kind) {
         case 'row':
             if (!Number.isFinite(targetInfo.rowIndex)) return false;
+            if (targetInfo.sourceType === 'head-output') {
+                this._applyMhsaHeadOutputRowFocus(targetInfo.rowIndex);
+                return true;
+            }
             this._applyMhsaRowFocus(targetInfo.rowIndex, {
-                sourceType: targetInfo.sourceType === 'query' ? 'query' : 'x',
+                sourceType: targetInfo.sourceType === 'query'
+                    ? 'query'
+                    : (targetInfo.sourceType === 'value-post' ? 'value-post' : 'x'),
                 stageIndex: Number.isFinite(targetInfo.stageIndex) ? targetInfo.stageIndex : null
             });
             return true;
@@ -8522,8 +8757,14 @@ class SelectionPanel {
             }
             const deltaX = Number.isFinite(event?.clientX) ? event.clientX - this._mhsaTokenMatrixPan.startX : 0;
             const deltaY = Number.isFinite(event?.clientY) ? event.clientY - this._mhsaTokenMatrixPan.startY : 0;
-            if (Math.abs(deltaX) > 2 || Math.abs(deltaY) > 2) {
+            const crossedDragThreshold = Math.abs(deltaX) > 2 || Math.abs(deltaY) > 2;
+            if (!this._mhsaTokenMatrixPan.moved) {
+                if (!crossedDragThreshold) {
+                    event?.preventDefault?.();
+                    return;
+                }
                 this._mhsaTokenMatrixPan.moved = true;
+                this.mhsaTokenMatrixBody.classList.add('is-panning');
                 this._mhsaTokenMatrixViewport.hasInteracted = true;
             }
             this._mhsaTokenMatrixViewport.panX = this._mhsaTokenMatrixPan.startPanX + deltaX;
@@ -8675,7 +8916,6 @@ class SelectionPanel {
         this._mhsaTokenMatrixPan.startPanY = this._mhsaTokenMatrixViewport.panY;
         this._mhsaTokenMatrixPan.moved = false;
         this._mhsaTokenMatrixPan.downTargetInfo = downTargetInfo;
-        body.classList.add('is-panning');
         if (Number.isFinite(event?.pointerId) && typeof body.setPointerCapture === 'function') {
             try {
                 body.setPointerCapture(event.pointerId);
@@ -8812,6 +9052,7 @@ class SelectionPanel {
         this._mhsaTokenMatrixMaskCellEls = [];
         this._mhsaTokenMatrixPostCellEls = [];
         this._mhsaTokenMatrixPostCopyCellEls = [];
+        this._mhsaTokenMatrixMirroredPostCellEls = [];
         this._mhsaTokenMatrixPinnedKind = null;
         this._mhsaTokenMatrixPinnedSource = null;
         this._mhsaTokenMatrixPinnedStage = null;
@@ -8821,6 +9062,7 @@ class SelectionPanel {
         this._mhsaTokenMatrixProjectionStageEls = [];
         this._mhsaTokenMatrixAttentionFocusEls = null;
         this._mhsaTokenMatrixConnectorEls = {};
+        this._mhsaTokenMatrixLayoutMetrics = null;
         this._mhsaTokenMatrixSceneFocusState = {
             projectionStages: [],
             attentionBlocks: [],
@@ -8829,6 +9071,7 @@ class SelectionPanel {
         this._mhsaTokenMatrixTransposeMatrixEl = null;
         this._mhsaTokenMatrixQueryStageIndex = null;
         this._mhsaTokenMatrixKeyStageIndex = null;
+        this._mhsaTokenMatrixValueStageIndex = null;
         this._mhsaTokenMatrixWorkspace = null;
         this._mhsaTokenMatrixOverlay = null;
         this._clearMhsaTokenMatrixKeyboardMotion();
@@ -8842,6 +9085,7 @@ class SelectionPanel {
             this.mhsaTokenMatrixBody.classList.remove('has-focus-row', 'has-focus-column', 'has-scene-focus', 'has-pinned-focus');
             this.mhsaTokenMatrixBody.style.removeProperty('--mhsa-token-matrix-rows');
             this.mhsaTokenMatrixBody.style.removeProperty('--mhsa-token-matrix-band-count');
+            clearMhsaTokenMatrixLayoutVars(this.mhsaTokenMatrixBody);
             this.mhsaTokenMatrixBody.replaceChildren();
         }
         this._setMhsaTokenMatrixHoverValue(null);
@@ -8867,6 +9111,7 @@ class SelectionPanel {
         this._mhsaTokenMatrixMaskCellEls = [];
         this._mhsaTokenMatrixPostCellEls = [];
         this._mhsaTokenMatrixPostCopyCellEls = [];
+        this._mhsaTokenMatrixMirroredPostCellEls = [];
         this._mhsaTokenMatrixPinnedKind = null;
         this._mhsaTokenMatrixPinnedSource = null;
         this._mhsaTokenMatrixPinnedStage = null;
@@ -8876,6 +9121,7 @@ class SelectionPanel {
         this._mhsaTokenMatrixProjectionStageEls = [];
         this._mhsaTokenMatrixAttentionFocusEls = null;
         this._mhsaTokenMatrixConnectorEls = {};
+        this._mhsaTokenMatrixLayoutMetrics = null;
         this._mhsaTokenMatrixSceneFocusState = {
             projectionStages: [],
             attentionBlocks: [],
@@ -8884,6 +9130,7 @@ class SelectionPanel {
         this._mhsaTokenMatrixTransposeMatrixEl = null;
         this._mhsaTokenMatrixQueryStageIndex = null;
         this._mhsaTokenMatrixKeyStageIndex = null;
+        this._mhsaTokenMatrixValueStageIndex = null;
         this._mhsaTokenMatrixWorkspace = null;
         this._mhsaTokenMatrixOverlay = null;
         this._clearPinnedMhsaTokenMatrix();
@@ -8891,6 +9138,7 @@ class SelectionPanel {
         this.mhsaTokenMatrixPreview.setAttribute('aria-hidden', 'false');
         this.mhsaTokenMatrixBody.hidden = true;
         this.mhsaTokenMatrixBody.classList.remove('has-focus-row', 'has-focus-column', 'has-scene-focus', 'has-pinned-focus');
+        clearMhsaTokenMatrixLayoutVars(this.mhsaTokenMatrixBody);
         this.mhsaTokenMatrixBody.replaceChildren();
         this._resetMhsaTokenMatrixViewport();
         this._setMhsaTokenMatrixHoverValue(null);
@@ -8932,8 +9180,14 @@ class SelectionPanel {
             }
             if (renderToken !== this._mhsaTokenMatrixRenderToken) return;
             this._mhsaTokenMatrixData = previewData;
+            const layoutMetrics = resolveMhsaTokenMatrixLayoutMetrics({
+                rowCount: previewData.rowCount,
+                isSmallScreen: this._isSmallScreen && this._isSmallScreen()
+            });
+            this._mhsaTokenMatrixLayoutMetrics = layoutMetrics;
             this.mhsaTokenMatrixBody.style.setProperty('--mhsa-token-matrix-rows', String(previewData.rowCount));
             this.mhsaTokenMatrixBody.style.setProperty('--mhsa-token-matrix-band-count', String(previewData.bandCount || 1));
+            applyMhsaTokenMatrixLayoutVars(this.mhsaTokenMatrixBody, layoutMetrics);
             const fragment = document.createDocumentFragment();
             const workspaceEl = document.createElement('div');
             workspaceEl.className = 'mhsa-token-matrix-preview__workspace';
@@ -8947,14 +9201,16 @@ class SelectionPanel {
             this._mhsaTokenMatrixQueryRowEls = Array.from({ length: previewData.rowCount }, () => []);
             this._mhsaTokenMatrixCompactRowEls = Array.from({ length: previewData.rowCount }, () => []);
             this._mhsaTokenMatrixTransposeColEls = Array.from({ length: previewData.rowCount }, () => []);
-            this._mhsaTokenMatrixScoreCellEls = Array.from({ length: previewData.rowCount }, () => []);
-            this._mhsaTokenMatrixStaticScoreCellEls = Array.from({ length: previewData.rowCount }, () => []);
-            this._mhsaTokenMatrixMaskCellEls = Array.from({ length: previewData.rowCount }, () => []);
-            this._mhsaTokenMatrixPostCellEls = Array.from({ length: previewData.rowCount }, () => []);
-            this._mhsaTokenMatrixPostCopyCellEls = Array.from({ length: previewData.rowCount }, () => []);
+            this._mhsaTokenMatrixScoreCellEls = createMhsaTokenMatrixCellStore(previewData.rowCount);
+            this._mhsaTokenMatrixStaticScoreCellEls = createMhsaTokenMatrixCellStore(previewData.rowCount);
+            this._mhsaTokenMatrixMaskCellEls = createMhsaTokenMatrixCellStore(previewData.rowCount);
+            this._mhsaTokenMatrixPostCellEls = createMhsaTokenMatrixCellStore(previewData.rowCount);
+            this._mhsaTokenMatrixPostCopyCellEls = createMhsaTokenMatrixCellStore(previewData.rowCount);
+            this._mhsaTokenMatrixMirroredPostCellEls = createMhsaTokenMatrixCellStore(previewData.rowCount);
             this._mhsaTokenMatrixTransposeMatrixEl = null;
             this._mhsaTokenMatrixQueryStageIndex = null;
             this._mhsaTokenMatrixKeyStageIndex = null;
+            this._mhsaTokenMatrixValueStageIndex = null;
 
             const renderMathLabel = (targetEl, labelTex, fallbackText = '') => {
                 if (!targetEl) return;
@@ -9099,6 +9355,8 @@ class SelectionPanel {
                 this._mhsaTokenMatrixQueryMatrixEl.push({ matrixEl: queryMatrixEl, stageIndex });
                 if (projectionKind === 'k') {
                     this._mhsaTokenMatrixKeyStageIndex = stageIndex;
+                } else if (projectionKind === 'v') {
+                    this._mhsaTokenMatrixValueStageIndex = stageIndex;
                 }
 
                 previewData.rows.forEach((rowData) => {
@@ -9161,6 +9419,9 @@ class SelectionPanel {
                 queryMatrixEl.dataset.mhsaConnectorColor = connectorColor;
                 queryMatrixEl.dataset.mhsaConnectorAnchorSide = 'right';
                 queryMatrixEl.dataset.mhsaConnectorRoute = 'horizontal';
+                queryMatrixEl.dataset.mhsaConnectorGap = String(
+                    layoutMetrics?.connectorGaps?.projection || layoutMetrics?.connectorGaps?.default || 10
+                );
 
                 xBlockEl.append(
                     xVisualEl,
@@ -9235,7 +9496,8 @@ class SelectionPanel {
                     connectorGap = null,
                     connectorPlacement = 'matrix',
                     titleMode = 'attention',
-                    cellStore = null
+                    cellStore = null,
+                    extraCellStores = []
                 } = {}) => {
                     const blockEl = document.createElement('div');
                     blockEl.className = blockClass;
@@ -9268,6 +9530,9 @@ class SelectionPanel {
                             cellEl.className = cellClass;
                             cellEl.dataset.row = String(cellData.rowIndex);
                             cellEl.dataset.col = String(cellData.colIndex);
+                            if (cellData.isMasked) {
+                                cellEl.classList.add('is-masked');
+                            }
                             if (cellData.isEmpty) {
                                 cellEl.classList.add('is-empty');
                             } else if (typeof cellData.fillCss === 'string' && cellData.fillCss.length) {
@@ -9281,11 +9546,17 @@ class SelectionPanel {
                             }
 
                             matrixEl.appendChild(cellEl);
-                            if (Array.isArray(cellStore) && Array.isArray(cellStore[cellData.rowIndex])) {
-                                cellStore[cellData.rowIndex][cellData.colIndex] = cellEl;
-                            }
+                            registerMhsaTokenMatrixCell(cellStore, cellData.rowIndex, cellData.colIndex, cellEl);
+                            extraCellStores.forEach((store) => {
+                                registerMhsaTokenMatrixCell(store, cellData.rowIndex, cellData.colIndex, cellEl);
+                            });
                             if (interactive) {
-                                this._mhsaTokenMatrixScoreCellEls[cellData.rowIndex][cellData.colIndex] = cellEl;
+                                registerMhsaTokenMatrixCell(
+                                    this._mhsaTokenMatrixScoreCellEls,
+                                    cellData.rowIndex,
+                                    cellData.colIndex,
+                                    cellEl
+                                );
                             }
                         });
                     });
@@ -9371,7 +9642,8 @@ class SelectionPanel {
                             rowStore[rowData.rowIndex].push({
                                 rowEl,
                                 barEl: rowBarEl,
-                                stageIndex: Number.isFinite(rowStageIndex) ? rowStageIndex : null
+                                stageIndex: Number.isFinite(rowStageIndex) ? rowStageIndex : null,
+                                kind: typeof rowKind === 'string' ? rowKind : ''
                             });
                         }
                     });
@@ -9467,7 +9739,9 @@ class SelectionPanel {
                     transposeBlockEl.dataset.mhsaConnectorColor = connectorColors.k || '#4cc47b';
                     transposeBlockEl.dataset.mhsaConnectorAnchorSide = 'bottom';
                     transposeBlockEl.dataset.mhsaConnectorRoute = 'horizontal';
-                    transposeBlockEl.dataset.mhsaConnectorGap = '16';
+                    transposeBlockEl.dataset.mhsaConnectorGap = String(
+                        layoutMetrics?.connectorGaps?.transpose || layoutMetrics?.connectorGaps?.default || 16
+                    );
                     transposeBlockEl.append(
                         transposeVisualEl,
                         createCaptionEl(
@@ -9482,7 +9756,8 @@ class SelectionPanel {
                     connectorSource = 'pre',
                     connectorAnchorSide = 'right',
                     connectorRoute = 'horizontal',
-                    connectorPlacement = 'matrix'
+                    connectorPlacement = 'matrix',
+                    connectorGap = null
                 } = {}) => {
                     return buildAttentionMatrixBlock({
                         rows: scoreStage.outputRows,
@@ -9495,7 +9770,8 @@ class SelectionPanel {
                         connectorColor: '#f3f6fb',
                         connectorAnchorSide,
                         connectorRoute,
-                        connectorPlacement
+                        connectorPlacement,
+                        connectorGap
                     });
                 };
 
@@ -9505,6 +9781,9 @@ class SelectionPanel {
                     const hasHeadOutputRows = Array.isArray(scoreStage.headOutputRows)
                         && scoreStage.headOutputRows.some((rowData) => Array.isArray(rowData?.rawValues) && rowData.rawValues.length);
                     if (!hasValueRows || !hasHeadOutputRows) return null;
+                    const valueStageIndex = Number.isFinite(this._mhsaTokenMatrixValueStageIndex)
+                        ? this._mhsaTokenMatrixValueStageIndex
+                        : queryStageIndex;
 
                     const headOutputStageEl = document.createElement('div');
                     headOutputStageEl.className = 'mhsa-token-matrix-preview__head-output-stage';
@@ -9524,9 +9803,10 @@ class SelectionPanel {
                         connectorColor: '#f3f6fb',
                         connectorAnchorSide: 'left',
                         connectorRoute: 'horizontal',
-                        connectorGap: 8,
+                        connectorGap: layoutMetrics?.connectorGaps?.post || 8,
                         titleMode: 'attention',
-                        cellStore: this._mhsaTokenMatrixPostCopyCellEls
+                        cellStore: this._mhsaTokenMatrixPostCopyCellEls,
+                        extraCellStores: [this._mhsaTokenMatrixMirroredPostCellEls]
                     });
 
                     const multiplyOutputEl = createOperatorEl({
@@ -9548,11 +9828,11 @@ class SelectionPanel {
                         connectorColor: connectorColors.v || '#f28b30',
                         connectorAnchorSide: 'bottom',
                         connectorRoute: 'horizontal',
-                        connectorGap: 18,
+                        connectorGap: layoutMetrics?.connectorGaps?.value || 18,
                         connectorPlacement: 'block',
                         rowStore: this._mhsaTokenMatrixCompactRowEls,
                         rowKind: 'v',
-                        rowStageIndex: queryStageIndex
+                        rowStageIndex: valueStageIndex
                     });
 
                     const equalsOutputEl = createOperatorEl({
@@ -9569,7 +9849,9 @@ class SelectionPanel {
                         rowCount: scoreStage.headOutputRowCount,
                         columnCount: scoreStage.headOutputColumnCount,
                         labelTex: scoreStage.headOutputLabelTex,
-                        focusKey: 'head-output'
+                        focusKey: 'head-output',
+                        rowStore: this._mhsaTokenMatrixCompactRowEls,
+                        rowKind: 'head-output'
                     });
 
                     headOutputStageEl.append(
@@ -9589,7 +9871,8 @@ class SelectionPanel {
                     const preScoreBlockEl = buildPreScoreBlock({
                         connectorAnchorSide: 'bottom',
                         connectorRoute: 'vertical',
-                        connectorPlacement: 'block'
+                        connectorPlacement: 'block',
+                        connectorGap: layoutMetrics?.connectorGaps?.pre || layoutMetrics?.connectorGaps?.default || 10
                     });
                     preScoreBlockEl.classList.add('mhsa-token-matrix-preview__softmax-pre-block');
 
@@ -9643,6 +9926,7 @@ class SelectionPanel {
                         connectorColor: '#f3f6fb',
                         connectorAnchorSide: 'top',
                         connectorRoute: 'vertical',
+                        connectorGap: layoutMetrics?.connectorGaps?.pre || layoutMetrics?.connectorGaps?.default || 10,
                         titleMode: 'attention',
                         cellStore: this._mhsaTokenMatrixStaticScoreCellEls
                     });
@@ -9677,9 +9961,10 @@ class SelectionPanel {
                         connectorColor: '#f3f6fb',
                         connectorAnchorSide: 'right',
                         connectorRoute: 'horizontal',
-                        connectorGap: 8,
+                        connectorGap: layoutMetrics?.connectorGaps?.post || 8,
                         titleMode: 'attention',
-                        cellStore: this._mhsaTokenMatrixPostCellEls
+                        cellStore: this._mhsaTokenMatrixPostCellEls,
+                        extraCellStores: [this._mhsaTokenMatrixMirroredPostCellEls]
                     });
 
                     softmaxPrefixEl.append(
@@ -9807,8 +10092,8 @@ class SelectionPanel {
                 this._setMhsaTokenMatrixStatus('Token matrix unavailable.');
                 return;
             }
-            workspaceEl.appendChild(stageStackEl);
-            fragment.append(workspaceEl, overlayEl);
+            workspaceEl.append(stageStackEl, overlayEl);
+            fragment.append(workspaceEl);
 
             this.mhsaTokenMatrixBody.replaceChildren(fragment);
             this._mhsaTokenMatrixWorkspace = workspaceEl;
@@ -11100,6 +11385,7 @@ class SelectionPanel {
             this.currentDispose = null;
             this.currentAnimator = null;
             this._currentPreviewSelectionKey = null;
+            this._previewFitViewportCap = null;
         }
 
         const preview = shouldReusePreview
@@ -11113,6 +11399,7 @@ class SelectionPanel {
             this.currentDispose = (typeof preview.dispose === 'function') ? preview.dispose : null;
             this.currentAnimator = (typeof preview.animate === 'function') ? preview.animate : null;
             this._currentPreviewSelectionKey = previewSelectionKey;
+            this._previewFitViewportCap = null;
             const desiredRotation = new THREE.Euler(PREVIEW_BASE_TILT_X, PREVIEW_BASE_ROTATION_Y, 0);
             if (this.currentPreview?.rotation) {
                 this.currentPreview.rotation.set(0, 0, 0);
@@ -11133,7 +11420,11 @@ class SelectionPanel {
             } else {
                 this._pendingReveal = false;
                 if (this.canvas) this.canvas.style.opacity = '1';
-                fitObjectToView(this.currentPreview, this.camera, this._lastFitOptions);
+                fitObjectToView(
+                    this.currentPreview,
+                    this.camera,
+                    this._resolveCurrentPreviewFitOptions()
+                );
                 this._noteFit();
             }
             if (this.currentPreview?.rotation) {
@@ -11147,6 +11438,7 @@ class SelectionPanel {
             this._currentPreviewSelectionKey = null;
             this._rotationSpeedMult = 1;
             this._lastFitOptions = null;
+            this._previewFitViewportCap = null;
             this._pendingReveal = false;
             this._pendingRevealSize = null;
             this._stopLoop();
