@@ -17,6 +17,8 @@ const APPEND_TOKEN_SETTLE_MS = 460;
 const APPEND_TOKEN_HOLD_MS = 620;
 const HANDOFF_BASE_DURATION_MS = 860;
 const HANDOFF_STAGGER_MS = 28;
+const HANDOFF_STRIP_REVEAL_PROGRESS = 0.72;
+const HANDOFF_CHIP_FADE_START_PROGRESS = 0.76;
 const HANDOFF_MIN_ARC_PX = 44;
 const HANDOFF_MAX_ARC_PX = 160;
 const OVERLAY_HIDE_CLEANUP_DELAY_MS = 220;
@@ -548,7 +550,8 @@ export function initPassIntroOverlay({ activationSource, promptTokenStrip } = {}
 
     const animateHandoffToPromptStrip = ({
         chips,
-        targets
+        targets,
+        onRevealTarget = null
     }) => {
         if (!Array.isArray(chips) || !chips.length) return Promise.resolve();
 
@@ -593,6 +596,7 @@ export function initPassIntroOverlay({ activationSource, promptTokenStrip } = {}
 
         return new Promise((resolve) => {
             const startMs = performance.now();
+            let hasRevealedTarget = false;
             const tick = (now) => {
                 if (disposed) {
                     activeHandoffRaf = null;
@@ -603,6 +607,12 @@ export function initPassIntroOverlay({ activationSource, promptTokenStrip } = {}
                 const elapsedMs = now - startMs;
                 const globalProgress = clamp(elapsedMs / Math.max(1, totalMs), 0, 1);
                 const windowProgress = easeInOutCubic(globalProgress);
+                if (!hasRevealedTarget && globalProgress >= HANDOFF_STRIP_REVEAL_PROGRESS) {
+                    hasRevealedTarget = true;
+                    if (typeof onRevealTarget === 'function') {
+                        onRevealTarget();
+                    }
+                }
                 dom.windowEl.style.opacity = String(lerp(1, 0.16, windowProgress));
                 dom.windowEl.style.transform = `translateY(${lerp(0, -28, windowProgress).toFixed(2)}px) scale(${lerp(1, 0.96, windowProgress).toFixed(4)})`;
                 if (dom.scrimEl) {
@@ -623,15 +633,24 @@ export function initPassIntroOverlay({ activationSource, promptTokenStrip } = {}
                     const scaleX = lerp(entry.startScaleX, entry.targetScaleX, p);
                     const scaleY = lerp(entry.startScaleY, entry.targetScaleY, p);
                     const rotation = lerp(0, clamp((entry.targetX - entry.startX) / Math.max(96, entry.chipWidth), -8, 8), 1 - p);
+                    const fadeProgress = clamp(
+                        (localRaw - HANDOFF_CHIP_FADE_START_PROGRESS) / Math.max(0.001, 1 - HANDOFF_CHIP_FADE_START_PROGRESS),
+                        0,
+                        1
+                    );
+                    const opacity = lerp(1, 0, easeInCubic(fadeProgress));
 
                     entry.chip.style.left = `${x.toFixed(2)}px`;
                     entry.chip.style.top = `${y.toFixed(2)}px`;
                     entry.chip.style.transform = `translate(-50%, -50%) scale(${scaleX.toFixed(4)}, ${scaleY.toFixed(4)}) rotate(${rotation.toFixed(2)}deg)`;
-                    entry.chip.style.opacity = '1';
+                    entry.chip.style.opacity = opacity.toFixed(4);
                     entry.chip.style.filter = 'none';
                 });
 
                 if (allDone) {
+                    if (!hasRevealedTarget && typeof onRevealTarget === 'function') {
+                        onRevealTarget();
+                    }
                     activeHandoffRaf = null;
                     resolve();
                     return;
@@ -825,13 +844,20 @@ export function initPassIntroOverlay({ activationSource, promptTokenStrip } = {}
                 scaleY: 1
             }
         ));
+        let promptStripCommitted = false;
+        const commitPromptStrip = () => {
+            if (promptStripCommitted) return;
+            promptStripCommitted = true;
+            document.body.dataset.passIntroCommitted = 'true';
+        };
 
         await animateHandoffToPromptStrip({
             chips,
-            targets
+            targets,
+            onRevealTarget: commitPromptStrip
         });
+        commitPromptStrip();
         dom.tokenLayer.innerHTML = '';
-        document.body.dataset.passIntroCommitted = 'true';
         if (typeof onHandoffCommit === 'function') {
             onHandoffCommit();
         }

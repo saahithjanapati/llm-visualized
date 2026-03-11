@@ -141,7 +141,7 @@ function buildAttentionScoreCellCss(value) {
 
 function buildMaskCellCss(isMasked = false) {
     if (isMasked) return 'rgba(0, 0, 0, 0.94)';
-    return 'rgba(255, 255, 255, 0.05)';
+    return buildAttentionScoreCellCss(0);
 }
 
 function resolvePreviewTokenIndices(activationSource, tokenIndices = null) {

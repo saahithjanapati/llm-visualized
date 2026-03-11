@@ -1,7 +1,7 @@
 const DETAIL_DIM_LABEL_MAX_FONT_PX = 11;
-const DETAIL_DIM_LABEL_MIN_FONT_PX = 7.5;
+const DETAIL_DIM_LABEL_MIN_FONT_PX = 6.25;
 const DETAIL_DIM_LABEL_MAX_LETTER_SPACING_PX = 0.5;
-const DETAIL_DIM_LABEL_MIN_LETTER_SPACING_PX = 0.12;
+const DETAIL_DIM_LABEL_MIN_LETTER_SPACING_PX = 0.04;
 const DETAIL_DIM_LABEL_FIT_EPSILON_PX = 0.75;
 const DETAIL_DIM_LABEL_FIT_ITERATIONS = 8;
 
@@ -72,8 +72,15 @@ function fitSingleDimensionLabel(labelEl) {
     applyLabelTypography(labelEl, bestFontPx, DETAIL_DIM_LABEL_MIN_LETTER_SPACING_PX);
 }
 
-export function fitSelectionDimensionLabels({ inputDimLabel, outputDimLabel }) {
+export function fitSelectionDimensionLabels({
+    inputDimLabel,
+    outputDimLabel,
+    biasDimLabel
+}) {
     if (typeof window === 'undefined') return;
-    fitSingleDimensionLabel(inputDimLabel);
-    fitSingleDimensionLabel(outputDimLabel);
+    [
+        inputDimLabel,
+        outputDimLabel,
+        biasDimLabel
+    ].forEach(fitSingleDimensionLabel);
 }
