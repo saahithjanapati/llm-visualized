@@ -5,6 +5,7 @@ import {
     resolveRenderPixelRatio,
     setActiveRenderPixelRatioHint
 } from '../src/utils/constants.js';
+import { resolveZoomOutSupersampleCeiling } from '../src/utils/renderPixelRatioUtils.js';
 import { getEffectiveDevicePixelRatio } from '../src/utils/trailConstants.js';
 
 function setViewport({ dpr, width, height }) {
@@ -57,5 +58,21 @@ describe('render pixel ratio helpers', () => {
 
         setActiveRenderPixelRatioHint(null);
         expect(getEffectiveDevicePixelRatio()).toBe(2);
+    });
+
+    it('keeps zoomed-out supersampling available on Retina displays', () => {
+        expect(resolveZoomOutSupersampleCeiling({
+            baseRatio: 2,
+            liveDpr: 2,
+            maxMultiplier: 1.22,
+            maxDpr: 2.6
+        })).toBeCloseTo(2.44, 5);
+
+        expect(resolveZoomOutSupersampleCeiling({
+            baseRatio: 2,
+            liveDpr: 3,
+            maxMultiplier: 1.22,
+            maxDpr: 2.6
+        })).toBeCloseTo(2.6, 5);
     });
 });

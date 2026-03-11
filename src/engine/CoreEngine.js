@@ -9,6 +9,7 @@ import {
     resolveRenderPixelRatio,
     setActiveRenderPixelRatioHint
 } from '../utils/constants.js';
+import { resolveZoomOutSupersampleCeiling } from '../utils/renderPixelRatioUtils.js';
 import { perfStats } from '../utils/perfStats.js';
 import { refreshTrailDisplayScales } from '../utils/trailUtils.js';
 import { TRAIL_LINE_WIDTH, TRAIL_OPACITY, scaleLineWidthForDisplay, scaleOpacityForDisplay } from '../utils/trailConstants.js';
@@ -775,7 +776,12 @@ export class CoreEngine {
             : 1;
         const touchPrimary = this._isTouchPrimaryDevice();
         const desktopCeiling = this._zoomOutSupersampleEnabled
-            ? Math.max(floor, Math.min(this._zoomOutSupersampleMaxDpr, Math.max(liveDpr, floor)))
+            ? resolveZoomOutSupersampleCeiling({
+                baseRatio: floor,
+                liveDpr,
+                maxMultiplier: this._zoomOutSupersampleMaxMultiplier,
+                maxDpr: this._zoomOutSupersampleMaxDpr
+            })
             : floor;
         const ceiling = touchPrimary
             ? Math.max(floor, Math.min(ADAPTIVE_RENDER_DPR_TOUCH_MAX, Math.max(liveDpr, floor)))
@@ -984,15 +990,31 @@ export class CoreEngine {
 
     _updateRendererPixelRatio = ({ force = false, viewportWidth = null, viewportHeight = null } = {}) => {
         if (!this.renderer) return;
+        const adaptiveCap = this._getResolvedRenderDprCap();
         let nextRatio = resolveRenderPixelRatio({
             viewportWidth,
             viewportHeight,
-            dprCap: this._getResolvedRenderDprCap()
+            dprCap: adaptiveCap
         });
         nextRatio = this._applyZoomOutSupersample(nextRatio);
-        const adaptiveCap = this._getResolvedRenderDprCap();
         if (Number.isFinite(adaptiveCap) && adaptiveCap > 0) {
-            nextRatio = Math.min(nextRatio, adaptiveCap);
+            const liveDpr = (typeof window !== 'undefined' && typeof window.devicePixelRatio === 'number' && window.devicePixelRatio > 0)
+                ? window.devicePixelRatio
+                : 1;
+            const floor = this._adaptiveRenderDprFloor;
+            const capIsBaseFloor = Number.isFinite(floor)
+                && floor > 0
+                && adaptiveCap <= (floor + 0.001)
+                && liveDpr <= (floor + 0.001);
+            const effectiveCap = capIsBaseFloor
+                ? resolveZoomOutSupersampleCeiling({
+                    baseRatio: floor,
+                    liveDpr,
+                    maxMultiplier: this._zoomOutSupersampleMaxMultiplier,
+                    maxDpr: this._zoomOutSupersampleMaxDpr
+                })
+                : adaptiveCap;
+            nextRatio = Math.min(nextRatio, effectiveCap);
         }
         if (!force && Number.isFinite(this._appliedRenderPixelRatio)
             && Math.abs(this._appliedRenderPixelRatio - nextRatio) < 0.001) {
@@ -1057,8 +1079,12 @@ export class CoreEngine {
 
         const maxMultiplier = Math.max(1, this._zoomOutSupersampleMaxMultiplier);
         const multiplier = 1 + (maxMultiplier - 1) * t;
-        const maxDpr = Math.max(baseRatio, this._zoomOutSupersampleMaxDpr);
-        const boosted = Math.min(maxDpr, baseRatio * multiplier);
+        const boostedCeiling = resolveZoomOutSupersampleCeiling({
+            baseRatio,
+            maxMultiplier: this._zoomOutSupersampleMaxMultiplier,
+            maxDpr: this._zoomOutSupersampleMaxDpr
+        });
+        const boosted = Math.min(boostedCeiling, baseRatio * multiplier);
         const quantized = Math.round(boosted / ZOOM_OUT_SUPERSAMPLE_RATIO_STEP) * ZOOM_OUT_SUPERSAMPLE_RATIO_STEP;
         return Math.max(baseRatio, quantized);
     }

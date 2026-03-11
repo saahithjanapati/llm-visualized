@@ -197,18 +197,24 @@ export function mapValueToGrayscale(value, options = null) {
 
 export function mapAttentionPostScoreToColor(value, options = null, targetColor = null) {
     const safeValue = Number.isFinite(value) ? THREE.MathUtils.clamp(value, 0, 1) : 0;
-    const clampMax = Number.isFinite(options?.clampMax)
-        ? Math.max(1e-6, Math.abs(options.clampMax))
-        : 1;
-    const minBrightness = Number.isFinite(options?.minBrightness)
-        ? THREE.MathUtils.clamp(options.minBrightness, 0, 1)
-        : 0.3;
-    const maxBrightness = Number.isFinite(options?.maxBrightness)
-        ? THREE.MathUtils.clamp(options.maxBrightness, 0, 1)
-        : 1;
-    const color = mapValueToColor(safeValue, { clampMax }, targetColor);
-    const t = Math.max(0, Math.min(1, safeValue / clampMax));
-    return color.multiplyScalar(THREE.MathUtils.lerp(minBrightness, maxBrightness, t));
+    const minBrightness = Number.isFinite(options?.minValue)
+        ? THREE.MathUtils.clamp(options.minValue, 0, 1)
+        : Number.isFinite(options?.minBrightness)
+            ? THREE.MathUtils.clamp(options.minBrightness, 0, 1)
+            : 0;
+    const maxBrightness = Number.isFinite(options?.maxValue)
+        ? THREE.MathUtils.clamp(options.maxValue, 0, 1)
+        : Number.isFinite(options?.maxBrightness)
+            ? THREE.MathUtils.clamp(options.maxBrightness, 0, 1)
+            : 1;
+    const brightness = THREE.MathUtils.lerp(
+        minBrightness,
+        Math.max(minBrightness, maxBrightness),
+        safeValue
+    );
+    const color = targetColor && targetColor.isColor ? targetColor : new THREE.Color();
+    color.setRGB(brightness, brightness, brightness);
+    return color;
 }
 
 // Add a counter to limit logging if needed, e.g., for mapValueToColor
