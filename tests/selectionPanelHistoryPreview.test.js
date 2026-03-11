@@ -148,29 +148,39 @@ function buildPanelDom() {
                 <div id="detailEquationsBody"></div>
             </section>
             <section id="detailAttention" aria-hidden="true">
-                <label class="toggle-row">
-                    <input id="detailAttentionToggle" type="checkbox" />
-                    <span id="detailAttentionToggleLabel"></span>
-                </label>
-                <div class="attention-axis-label--left"></div>
-                <div class="detail-attention-grid">
-                    <div id="detailAttentionTokensTop"></div>
-                    <div id="detailAttentionTokensLeft"></div>
-                    <div id="detailAttentionMatrix"></div>
+                <div class="detail-attention-header">
+                    <div id="detailAttentionTitle"></div>
+                    <div class="detail-attention-header-actions">
+                        <label class="toggle-row">
+                            <input id="detailAttentionToggle" type="checkbox" />
+                            <span id="detailAttentionToggleLabel"></span>
+                        </label>
+                        <button id="detailAttentionCollapseBtn" type="button">
+                            <span id="detailAttentionCollapseLabel"></span>
+                        </button>
+                    </div>
                 </div>
-                <div id="detailAttentionEmpty"></div>
-                <div id="detailAttentionNote"></div>
-                <div id="detailAttentionValue">
-                    <span id="detailAttentionValueSource"></span>
-                    <span id="detailAttentionValueTarget"></span>
-                    <span id="detailAttentionValueScore"></span>
-                </div>
-                <div id="detailAttentionLegend">
-                    <span class="attention-legend-tick" data-ratio="0"></span>
-                    <span class="attention-legend-tick" data-ratio="0.5"></span>
-                    <span class="attention-legend-tick" data-ratio="1"></span>
-                    <span id="detailAttentionLegendLow"></span>
-                    <span id="detailAttentionLegendHigh"></span>
+                <div id="detailAttentionBody">
+                    <div class="attention-axis-label--left"></div>
+                    <div class="detail-attention-grid">
+                        <div id="detailAttentionTokensTop"></div>
+                        <div id="detailAttentionTokensLeft"></div>
+                        <div id="detailAttentionMatrix"></div>
+                    </div>
+                    <div id="detailAttentionEmpty"></div>
+                    <div id="detailAttentionNote"></div>
+                    <div id="detailAttentionValue">
+                        <span id="detailAttentionValueSource"></span>
+                        <span id="detailAttentionValueTarget"></span>
+                        <span id="detailAttentionValueScore"></span>
+                    </div>
+                    <div id="detailAttentionLegend">
+                        <span class="attention-legend-tick" data-ratio="0"></span>
+                        <span class="attention-legend-tick" data-ratio="0.5"></span>
+                        <span class="attention-legend-tick" data-ratio="1"></span>
+                        <span id="detailAttentionLegendLow"></span>
+                        <span id="detailAttentionLegendHigh"></span>
+                    </div>
                 </div>
             </section>
             <section id="detailMeta">
@@ -445,5 +455,101 @@ describe('selectionPanel history preview reuse', () => {
             expect(detail?.querySelector('.detail-attention-context-position')?.textContent).toBe('(position 5)');
         }
         expect(score?.textContent).toBe('0.0675');
+    });
+
+    it('keeps the attention matrix collapsed across related attention selections and updates the title metadata', () => {
+        buildPanelDom();
+        const storage = {
+            getItem: vi.fn(() => null),
+            setItem: vi.fn(),
+            removeItem: vi.fn(),
+            clear: vi.fn()
+        };
+        vi.stubGlobal('localStorage', storage);
+
+        const panel = initSelectionPanel();
+        panel.updateData({
+            activationSource: {
+                getTokenCount: () => 4,
+                getTokenString: (index) => `tok-${index}`,
+                getTokenId: (index) => 200 + index,
+                getAttentionScoresRow: (_layerIndex, _mode, _headIndex, queryTokenIndex) => {
+                    if (queryTokenIndex === 0) return [0.51, 0.49];
+                    return [0, 1];
+                }
+            },
+            attentionTokenIndices: [0, 1],
+            attentionTokenLabels: ['tok-0', 'tok-1']
+        });
+
+        panel.handleSelection({
+            label: 'Post-Softmax Attention Score',
+            kind: 'attentionSphere',
+            info: {
+                activationData: {
+                    stage: 'attention.post',
+                    layerIndex: 4,
+                    headIndex: 2,
+                    tokenIndex: 0,
+                    keyTokenIndex: 1,
+                    tokenLabel: 'tok-0',
+                    keyTokenLabel: 'tok-1',
+                    postScore: 0.49
+                }
+            }
+        });
+
+        const title = document.getElementById('detailAttentionTitle');
+        const collapseBtn = document.getElementById('detailAttentionCollapseBtn');
+        const collapseLabel = document.getElementById('detailAttentionCollapseLabel');
+        const body = document.getElementById('detailAttentionBody');
+        const modeToggleRow = document.getElementById('detailAttentionToggle')?.closest('label');
+
+        expect(title?.textContent).toBe('Attention scores | Layer 5 | Head 3');
+        expect(body?.hidden).toBe(false);
+        expect(modeToggleRow?.hidden).toBe(false);
+        expect(collapseLabel?.textContent).toBe('Minimize');
+
+        collapseBtn?.click();
+
+        expect(body?.hidden).toBe(true);
+        expect(modeToggleRow?.hidden).toBe(true);
+        expect(collapseLabel?.textContent).toBe('Maximize');
+        expect(storage.setItem).toHaveBeenCalledWith(
+            'selectionPanelAttentionSectionCollapsed',
+            'true'
+        );
+
+        panel.handleSelection({
+            label: 'Pre-Softmax Attention Score',
+            kind: 'attentionSphere',
+            info: {
+                activationData: {
+                    stage: 'attention.pre',
+                    layerIndex: 1,
+                    headIndex: 5,
+                    tokenIndex: 0,
+                    keyTokenIndex: 0,
+                    tokenLabel: 'tok-0',
+                    keyTokenLabel: 'tok-0',
+                    preScore: 0.51
+                }
+            }
+        });
+
+        expect(title?.textContent).toBe('Attention scores | Layer 2 | Head 6');
+        expect(body?.hidden).toBe(true);
+        expect(modeToggleRow?.hidden).toBe(true);
+        expect(collapseLabel?.textContent).toBe('Maximize');
+
+        collapseBtn?.click();
+
+        expect(body?.hidden).toBe(false);
+        expect(modeToggleRow?.hidden).toBe(false);
+        expect(collapseLabel?.textContent).toBe('Minimize');
+        expect(storage.setItem).toHaveBeenLastCalledWith(
+            'selectionPanelAttentionSectionCollapsed',
+            'false'
+        );
     });
 });

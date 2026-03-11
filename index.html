@@ -203,52 +203,69 @@
             </div>
             <div id="detailAttention" class="detail-attention" aria-hidden="true">
                 <div class="detail-attention-header">
-                    <div class="detail-attention-title">Attention scores</div>
-                    <label class="toggle-row detail-attention-toggle">
-                        <span id="detailAttentionToggleLabel" class="toggle-text">Pre-softmax</span>
-                        <input id="detailAttentionToggle" type="checkbox" />
-                        <span class="toggle-track" aria-hidden="true"></span>
-                    </label>
-                </div>
-                <div class="detail-attention-grid">
-                    <div class="attention-corner"></div>
-                    <div class="attention-axis-label attention-axis-label--top">
-                        <span class="attention-axis-label-text">Target Token</span>
+                    <div id="detailAttentionTitle" class="detail-attention-title">Attention scores</div>
+                    <div class="detail-attention-header-actions">
+                        <label class="toggle-row detail-attention-toggle">
+                            <span id="detailAttentionToggleLabel" class="toggle-text">Pre-softmax</span>
+                            <input id="detailAttentionToggle" type="checkbox" />
+                            <span class="toggle-track" aria-hidden="true"></span>
+                        </label>
+                        <button
+                            id="detailAttentionCollapseBtn"
+                            class="detail-attention-collapse"
+                            type="button"
+                            aria-controls="detailAttentionBody"
+                            aria-expanded="true"
+                        >
+                            <span class="detail-attention-collapse-icon" aria-hidden="true">
+                                <span class="detail-attention-collapse-icon-bar"></span>
+                                <span class="detail-attention-collapse-icon-bar detail-attention-collapse-icon-bar--vertical"></span>
+                            </span>
+                            <span id="detailAttentionCollapseLabel" class="detail-attention-collapse-label">Minimize</span>
+                        </button>
                     </div>
-                    <div class="attention-axis-label attention-axis-label--left">
-                        <span class="attention-axis-label-text">Source Token</span>
-                    </div>
-                    <div id="detailAttentionTokensTop" class="attention-tokens attention-tokens-top"></div>
-                    <div id="detailAttentionTokensLeft" class="attention-tokens attention-tokens-left"></div>
-                    <div id="detailAttentionMatrix" class="attention-matrix"></div>
                 </div>
-                <div class="attention-legend" aria-hidden="true">
-                    <span id="detailAttentionLegendLow" class="attention-legend-label">&lt;= -5</span>
-                    <div id="detailAttentionLegend" class="attention-legend-bar" data-mid="0">
-                        <div class="attention-legend-ticks" aria-hidden="true">
-                            <span class="attention-legend-tick" data-ratio="0" style="--tick-pos:0%;"></span>
-                            <span class="attention-legend-tick" data-ratio="0.25" style="--tick-pos:25%;"></span>
-                            <span class="attention-legend-tick attention-legend-tick--major" data-ratio="0.5" style="--tick-pos:50%;"></span>
-                            <span class="attention-legend-tick" data-ratio="0.75" style="--tick-pos:75%;"></span>
-                            <span class="attention-legend-tick" data-ratio="1" style="--tick-pos:100%;"></span>
+                <div id="detailAttentionBody" class="detail-attention-body">
+                    <div class="detail-attention-grid">
+                        <div class="attention-corner"></div>
+                        <div class="attention-axis-label attention-axis-label--top">
+                            <span class="attention-axis-label-text">Target Token</span>
                         </div>
+                        <div class="attention-axis-label attention-axis-label--left">
+                            <span class="attention-axis-label-text">Source Token</span>
+                        </div>
+                        <div id="detailAttentionTokensTop" class="attention-tokens attention-tokens-top"></div>
+                        <div id="detailAttentionTokensLeft" class="attention-tokens attention-tokens-left"></div>
+                        <div id="detailAttentionMatrix" class="attention-matrix"></div>
                     </div>
-                    <span id="detailAttentionLegendHigh" class="attention-legend-label">&gt;= +5</span>
-                </div>
-                <div id="detailAttentionEmpty" class="attention-empty">No attention scores available.</div>
-                <div id="detailAttentionNote" class="attention-note"></div>
-                <div id="detailAttentionValue" class="attention-value" data-empty="true">
-                    <div class="attention-value-head" aria-hidden="true">
-                        <span>Source token</span>
-                        <span>Target token</span>
-                        <span>Score</span>
+                    <div class="attention-legend" aria-hidden="true">
+                        <span id="detailAttentionLegendLow" class="attention-legend-label">&lt;= -5</span>
+                        <div id="detailAttentionLegend" class="attention-legend-bar" data-mid="0">
+                            <div class="attention-legend-ticks" aria-hidden="true">
+                                <span class="attention-legend-tick" data-ratio="0" style="--tick-pos:0%;"></span>
+                                <span class="attention-legend-tick" data-ratio="0.25" style="--tick-pos:25%;"></span>
+                                <span class="attention-legend-tick attention-legend-tick--major" data-ratio="0.5" style="--tick-pos:50%;"></span>
+                                <span class="attention-legend-tick" data-ratio="0.75" style="--tick-pos:75%;"></span>
+                                <span class="attention-legend-tick" data-ratio="1" style="--tick-pos:100%;"></span>
+                            </div>
+                        </div>
+                        <span id="detailAttentionLegendHigh" class="attention-legend-label">&gt;= +5</span>
                     </div>
-                    <div class="attention-value-bar">
-                        <span id="detailAttentionValueSource" class="attention-value-item attention-value-item--source">--</span>
-                        <span id="detailAttentionValueTarget" class="attention-value-item attention-value-item--target">--</span>
-                        <span id="detailAttentionValueScore" class="attention-value-item attention-value-item--score">
-                            <span class="detail-attention-score-pill">--</span>
-                        </span>
+                    <div id="detailAttentionEmpty" class="attention-empty">No attention scores available.</div>
+                    <div id="detailAttentionNote" class="attention-note"></div>
+                    <div id="detailAttentionValue" class="attention-value" data-empty="true">
+                        <div class="attention-value-head" aria-hidden="true">
+                            <span>Source token</span>
+                            <span>Target token</span>
+                            <span>Score</span>
+                        </div>
+                        <div class="attention-value-bar">
+                            <span id="detailAttentionValueSource" class="attention-value-item attention-value-item--source">--</span>
+                            <span id="detailAttentionValueTarget" class="attention-value-item attention-value-item--target">--</span>
+                            <span id="detailAttentionValueScore" class="attention-value-item attention-value-item--score">
+                                <span class="detail-attention-score-pill">--</span>
+                            </span>
+                        </div>
                     </div>
                 </div>
             </div>

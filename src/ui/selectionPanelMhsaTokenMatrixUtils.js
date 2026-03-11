@@ -139,31 +139,51 @@ function buildAttentionScoreCellCss(value) {
     return colorToCss(color);
 }
 
-function resolvePromptRowCount(activationSource) {
+function buildMaskCellCss(isMasked = false) {
+    if (isMasked) return 'rgba(0, 0, 0, 0.94)';
+    return 'rgba(255, 255, 255, 0.05)';
+}
+
+function resolvePreviewTokenIndices(activationSource, tokenIndices = null) {
+    if (Array.isArray(tokenIndices) && tokenIndices.length) {
+        return tokenIndices
+            .map((value) => Number(value))
+            .filter(Number.isFinite)
+            .map((value) => Math.max(0, Math.floor(value)));
+    }
     const promptTokens = Array.isArray(activationSource?.meta?.prompt_tokens)
         ? activationSource.meta.prompt_tokens
         : [];
-    if (promptTokens.length) return promptTokens.length;
+    if (promptTokens.length) {
+        return Array.from({ length: promptTokens.length }, (_, idx) => idx);
+    }
     const tokenCount = typeof activationSource?.getTokenCount === 'function'
         ? activationSource.getTokenCount()
         : 0;
     if (Number.isFinite(tokenCount) && tokenCount > 0) {
-        return Math.min(DEFAULT_PROMPT_ROW_COUNT, Math.floor(tokenCount));
+        const rowCount = Math.floor(tokenCount);
+        return Array.from({ length: rowCount }, (_, idx) => idx);
     }
-    return DEFAULT_PROMPT_ROW_COUNT;
+    return Array.from({ length: DEFAULT_PROMPT_ROW_COUNT }, (_, idx) => idx);
 }
 
-function resolveTokenLabel(activationSource, tokenIndex) {
+function resolveTokenLabel(activationSource, tokenIndex, fallbackLabel = null, fallbackIndex = null) {
+    if (typeof fallbackLabel === 'string' && fallbackLabel.trim().length > 0) {
+        return normalizeTokenLabel(fallbackLabel, Number.isFinite(fallbackIndex) ? fallbackIndex : tokenIndex);
+    }
     const tokenDisplayStrings = Array.isArray(activationSource?.meta?.token_display_strings)
         ? activationSource.meta.token_display_strings
         : [];
     if (typeof tokenDisplayStrings[tokenIndex] === 'string') {
-        return normalizeTokenLabel(tokenDisplayStrings[tokenIndex], tokenIndex);
+        return normalizeTokenLabel(
+            tokenDisplayStrings[tokenIndex],
+            Number.isFinite(fallbackIndex) ? fallbackIndex : tokenIndex
+        );
     }
     const label = typeof activationSource?.getTokenString === 'function'
         ? activationSource.getTokenString(tokenIndex)
         : null;
-    return normalizeTokenLabel(label, tokenIndex);
+    return normalizeTokenLabel(label, Number.isFinite(fallbackIndex) ? fallbackIndex : tokenIndex);
 }
 
 function buildAttentionScoreStage({
@@ -186,10 +206,10 @@ function buildAttentionScoreStage({
 
     const outputRows = rows.map((rowData) => {
         const scoreRow = typeof activationSource.getAttentionScoresRow === 'function'
-            ? activationSource.getAttentionScoresRow(layerIndex, 'pre', headIndex, rowData.rowIndex)
+            ? activationSource.getAttentionScoresRow(layerIndex, 'pre', headIndex, rowData.tokenIndex)
             : null;
         const cells = rows.map((colData) => {
-            const rawValue = Array.isArray(scoreRow) ? scoreRow[colData.rowIndex] : null;
+            const rawValue = Array.isArray(scoreRow) ? scoreRow[colData.tokenIndex] : null;
             const safeValue = Number.isFinite(rawValue) ? rawValue : null;
             return {
                 rowIndex: rowData.rowIndex,
@@ -212,6 +232,52 @@ function buildAttentionScoreStage({
         return null;
     }
 
+    const maskRows = rows.map((rowData) => ({
+        rowIndex: rowData.rowIndex,
+        tokenLabel: rowData.tokenLabel,
+        cells: rows.map((colData) => {
+            const isMasked = colData.rowIndex > rowData.rowIndex;
+            return {
+                rowIndex: rowData.rowIndex,
+                colIndex: colData.rowIndex,
+                rowTokenLabel: rowData.tokenLabel,
+                colTokenLabel: colData.tokenLabel,
+                rawValue: isMasked ? Number.NEGATIVE_INFINITY : 0,
+                fillCss: buildMaskCellCss(isMasked),
+                isMasked,
+                isEmpty: false,
+                title: `${rowData.tokenLabel} → ${colData.tokenLabel}: ${isMasked ? '-∞' : '0'}`
+            };
+        })
+    }));
+
+    const postRows = rows.map((rowData) => {
+        const scoreRow = typeof activationSource.getAttentionScoresRow === 'function'
+            ? activationSource.getAttentionScoresRow(layerIndex, 'post', headIndex, rowData.tokenIndex)
+            : null;
+        const cells = rows.map((colData) => {
+            const isMasked = colData.rowIndex > rowData.rowIndex;
+            const rawValue = Array.isArray(scoreRow) ? scoreRow[colData.tokenIndex] : null;
+            const safeValue = Number.isFinite(rawValue) ? rawValue : null;
+            return {
+                rowIndex: rowData.rowIndex,
+                colIndex: colData.rowIndex,
+                rowTokenLabel: rowData.tokenLabel,
+                colTokenLabel: colData.tokenLabel,
+                rawValue: isMasked ? null : safeValue,
+                fillCss: (!isMasked && Number.isFinite(safeValue)) ? buildAttentionScoreCellCss(safeValue) : 'transparent',
+                isMasked,
+                isEmpty: isMasked || !Number.isFinite(safeValue)
+            };
+        });
+        return {
+            rowIndex: rowData.rowIndex,
+            tokenLabel: rowData.tokenLabel,
+            cells,
+            hasAnyValue: cells.some((cell) => !cell.isMasked && Number.isFinite(cell.rawValue))
+        };
+    });
+
     return {
         queryLabelTex: queryProjection.outputLabelTex,
         queryRowCount: queryProjection.outputRowCount,
@@ -230,7 +296,14 @@ function buildAttentionScoreStage({
         outputLabelTex: 'A_{\\mathrm{pre}}',
         outputRowCount: outputRows.length,
         outputColumnCount: rows.length,
-        outputRows
+        outputRows,
+        maskLabelTex: 'M_{\\mathrm{causal}}',
+        maskRows,
+        softmaxLabelTex: '\\mathrm{softmax}',
+        postLabelTex: 'A_{\\mathrm{post}}',
+        postRowCount: postRows.length,
+        postColumnCount: rows.length,
+        postRows
     };
 }
 
@@ -238,22 +311,32 @@ export function buildMhsaTokenMatrixPreviewData({
     activationSource,
     layerIndex = DEFAULT_LAYER_INDEX,
     headIndex = DEFAULT_HEAD_INDEX,
-    sampleStep = DEFAULT_SAMPLE_STEP
+    sampleStep = DEFAULT_SAMPLE_STEP,
+    tokenIndices = null,
+    tokenLabels = null
 } = {}) {
     if (!activationSource) return null;
 
-    const rowCount = resolvePromptRowCount(activationSource);
+    const resolvedTokenIndices = resolvePreviewTokenIndices(activationSource, tokenIndices);
+    const rowCount = resolvedTokenIndices.length;
     const bandCount = Math.max(1, Math.ceil(D_MODEL / Math.max(1, Math.floor(sampleStep || DEFAULT_SAMPLE_STEP))));
     const rows = [];
 
     for (let rowIndex = 0; rowIndex < rowCount; rowIndex += 1) {
+        const tokenIndex = resolvedTokenIndices[rowIndex];
         const lnShiftVector = typeof activationSource.getLayerLn1 === 'function'
-            ? activationSource.getLayerLn1(layerIndex, 'shift', rowIndex)
+            ? activationSource.getLayerLn1(layerIndex, 'shift', tokenIndex)
             : null;
         const rowSamples = cleanNumberArray(lnShiftVector, bandCount);
         rows.push({
             rowIndex,
-            tokenLabel: resolveTokenLabel(activationSource, rowIndex),
+            tokenIndex,
+            tokenLabel: resolveTokenLabel(
+                activationSource,
+                tokenIndex,
+                Array.isArray(tokenLabels) ? tokenLabels[rowIndex] : null,
+                rowIndex
+            ),
             rawValues: rowSamples,
             gradientCss: buildGradientCssFromSamples(rowSamples)
         });
@@ -263,11 +346,13 @@ export function buildMhsaTokenMatrixPreviewData({
         const rgb = hexToRgb(config.colorHex);
         const outputRows = rows.map((rowData) => {
             const scalar = typeof activationSource.getLayerQKVScalar === 'function'
-                ? activationSource.getLayerQKVScalar(layerIndex, config.kind, headIndex, rowData.rowIndex)
+                ? activationSource.getLayerQKVScalar(layerIndex, config.kind, headIndex, rowData.tokenIndex)
                 : null;
             const safeScalar = Number.isFinite(scalar) ? scalar : 0;
             return {
                 rowIndex: rowData.rowIndex,
+                tokenIndex: rowData.tokenIndex,
+                tokenLabel: rowData.tokenLabel,
                 rawValue: safeScalar,
                 gradientCss: buildSolidCss(rgb, safeScalar)
             };
