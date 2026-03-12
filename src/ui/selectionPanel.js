@@ -3670,8 +3670,6 @@ class SelectionPanel {
         const bodyRect = this.equationsBody.getBoundingClientRect();
         const availableWidth = Math.max(0, bodyRect.width);
         if (!(availableWidth > 0)) return;
-        // The detail panel scrolls, so preserve vertical room for display equations
-        // and only squeeze typography when the math would overflow horizontally.
         const fitWidth = Math.max(0, availableWidth - DETAIL_EQUATION_FIT_BUFFER_PX);
         if (!(fitWidth > 0)) return;
 
@@ -11969,7 +11967,7 @@ class SelectionPanel {
             || isKvCacheInfo
             || isMhsaInfo;
         const isVectorMetadata = isLikelyVectorSelection(label, selection) || isTokenOrPositionChipSelection;
-        if (isVectorMetadata && metadata.hasLength) {
+        if (isVectorMetadata && metadata.hasLength && !isTokenChipSelection) {
             subtitleTertiaryText = `Length: ${metadata.length}`;
         }
         const dimsRow = this.inputDim?.closest('.detail-row')

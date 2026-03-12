@@ -573,34 +573,57 @@ body.touch-ui * {
 
 /* Forward-pass auto-advance overlay */
 #generationOverlay {
-    --generation-accent: rgba(118, 191, 255, 0.96);
-    --generation-border: rgba(109, 147, 205, 0.2);
-    --generation-text: rgba(233, 241, 255, 0.92);
-    --generation-muted: rgba(156, 171, 194, 0.78);
+    --generation-cyan: #68d4ff;
+    --generation-mint: #6ef4d0;
+    --generation-magenta: #ff64f3;
+    --generation-yellow: #ffe34f;
+    --generation-orange: #ff9a3d;
+    --generation-border: rgba(255, 255, 255, 0.14);
+    --generation-text: rgba(249, 249, 250, 0.96);
+    --generation-muted: rgba(185, 185, 189, 0.84);
     position: fixed;
+    isolation: isolate;
     left: 50%;
     bottom: max(18px, env(safe-area-inset-bottom));
     transform: translateX(-50%);
     z-index: 8;
     display: flex;
     flex-direction: column;
-    gap: 9px;
+    gap: 10px;
     width: min(480px, 92vw);
-    padding: 11px 12px 12px;
+    padding: 12px 13px 13px;
     color: var(--generation-text);
-    background:
-        radial-gradient(120% 160% at 50% -20%, rgba(76, 129, 255, 0.15), rgba(9, 12, 18, 0) 48%),
-        linear-gradient(180deg, rgba(9, 12, 17, 0.96), rgba(3, 5, 9, 0.94));
+    background: linear-gradient(180deg, rgba(13, 13, 14, 0.96), rgba(5, 5, 6, 0.95));
     border: 1px solid var(--generation-border);
     border-radius: 12px;
     box-shadow:
         0 18px 42px rgba(0, 0, 0, 0.56),
-        inset 0 1px 0 rgba(160, 208, 255, 0.05),
-        0 0 0 1px rgba(36, 56, 94, 0.12);
-    backdrop-filter: blur(12px) saturate(1.02);
-    -webkit-backdrop-filter: blur(12px) saturate(1.02);
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    backdrop-filter: blur(10px) saturate(1.02);
+    -webkit-backdrop-filter: blur(10px) saturate(1.02);
     pointer-events: auto;
-    font-family: var(--viz-sci-fi-font);
+    overflow: hidden;
+    font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+#generationOverlay::before {
+    content: '';
+    position: absolute;
+    inset: 0 0 auto;
+    height: 1px;
+    background: linear-gradient(
+        90deg,
+        rgba(104, 212, 255, 0) 0%,
+        rgba(104, 212, 255, 0.72) 22%,
+        rgba(255, 100, 243, 0.64) 52%,
+        rgba(255, 227, 79, 0.6) 80%,
+        rgba(255, 154, 61, 0) 100%
+    );
+    pointer-events: none;
+    z-index: 0;
+}
+#generationOverlay > * {
+    position: relative;
+    z-index: 1;
 }
 #generationOverlay[data-visible="true"] {
     animation: generationOverlayIn 0.16s ease-out;
@@ -611,76 +634,84 @@ body.touch-ui * {
 #generationOverlay .generation-header {
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: 6px;
 }
 #generationOverlay .generation-title {
-    font-size: 11px;
+    font-size: 11.4px;
     font-weight: 500;
-    letter-spacing: 0.12em;
+    letter-spacing: 0.02em;
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
     align-items: center;
     color: var(--generation-text);
-    text-transform: uppercase;
+    text-transform: none;
 }
 #generationOverlay [data-role="title-prefix"] {
-    color: rgba(210, 223, 241, 0.8);
+    color: rgba(249, 249, 250, 0.94);
 }
 #generationOverlay [data-role="countdown-wrap"] {
     display: inline-flex;
     align-items: baseline;
     justify-content: center;
-    gap: 2px;
-    min-width: 48px;
-    padding: 2px 7px 3px;
+    gap: 3px;
+    min-width: 52px;
+    padding: 3px 8px 4px;
     border-radius: 999px;
-    border: 1px solid rgba(112, 158, 224, 0.28);
-    background: rgba(5, 9, 15, 0.76);
-    color: var(--generation-accent);
-    font-size: 10.5px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background:
+        linear-gradient(90deg, rgba(104, 212, 255, 0.12), rgba(255, 100, 243, 0.08) 58%, rgba(255, 227, 79, 0.12)),
+        rgba(255, 255, 255, 0.04);
+    color: rgba(250, 250, 251, 0.98);
+    font-size: 10.4px;
     font-weight: 600;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.02em;
     font-variant-numeric: tabular-nums;
-    box-shadow: inset 0 0 0 1px rgba(135, 181, 255, 0.04);
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.03),
+        0 0 16px rgba(104, 212, 255, 0.08);
 }
 #generationOverlay [data-role="countdown"] {
-    font-size: 14px;
+    font-size: 15px;
     line-height: 1;
     color: inherit;
 }
 #generationOverlay .generation-meta {
     margin-top: 0;
-    font-size: 10.5px;
+    padding-left: 10px;
+    border-left: 2px solid rgba(104, 212, 255, 0.54);
+    font-size: 10.8px;
     color: var(--generation-muted);
     line-height: 1.45;
-    letter-spacing: 0.02em;
+    letter-spacing: 0;
 }
 #generationOverlay .generation-bar {
-    height: 4px;
-    background: rgba(116, 139, 176, 0.1);
+    height: 5px;
+    background: rgba(255, 255, 255, 0.08);
     border: none;
     border-radius: 999px;
     overflow: hidden;
-    box-shadow: inset 0 0 0 1px rgba(93, 120, 164, 0.12);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 #generationOverlay .generation-bar-fill {
     height: 100%;
     width: 0%;
     background: linear-gradient(
         90deg,
-        rgba(104, 212, 255, 0.92) 0%,
-        rgba(79, 154, 255, 0.94) 45%,
-        rgba(52, 99, 255, 0.9) 100%
+        rgba(104, 212, 255, 0.96) 0%,
+        rgba(110, 244, 208, 0.96) 28%,
+        rgba(255, 100, 243, 0.96) 58%,
+        rgba(255, 227, 79, 0.94) 82%,
+        rgba(255, 154, 61, 0.94) 100%
     );
-    box-shadow: 0 0 10px rgba(82, 164, 255, 0.28);
+    box-shadow: 0 0 16px rgba(104, 212, 255, 0.3);
     transition: width 0.2s ease;
 }
 #generationOverlay[data-paused="true"] .generation-bar-fill {
     background: linear-gradient(
         90deg,
-        rgba(102, 112, 128, 0.48) 0%,
-        rgba(149, 157, 170, 0.38) 100%
+        rgba(102, 102, 107, 0.58) 0%,
+        rgba(185, 185, 189, 0.42) 100%
     );
     box-shadow: none;
 }
@@ -695,46 +726,55 @@ body.touch-ui * {
     -webkit-appearance: none;
     min-width: 0;
     min-height: 34px;
-    border: 1px solid rgba(103, 136, 188, 0.22);
-    background: rgba(5, 9, 15, 0.72);
-    color: rgba(201, 216, 238, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(249, 249, 250, 0.94);
     border-radius: 9px;
     padding: 7px 10px;
-    font-size: 10.5px;
+    font-size: 10.7px;
     font-weight: 500;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
     cursor: pointer;
-    transition: transform .12s ease, background .14s ease, border-color .14s ease;
+    transition: transform .12s ease, background .14s ease, border-color .14s ease, box-shadow .14s ease;
     font-family: inherit;
 }
 #generationOverlay button:hover:not(:disabled) {
-    background: rgba(10, 16, 27, 0.92);
-    border-color: rgba(123, 186, 255, 0.38);
-    color: var(--generation-text);
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.28);
+    color: rgba(255, 255, 255, 0.98);
     transform: translateY(-1px);
 }
 #generationOverlay button:focus-visible {
-    outline: 2px solid rgba(118, 183, 255, 0.64);
+    outline: 2px solid rgba(255, 255, 255, 0.84);
     outline-offset: 2px;
 }
 #generationOverlay button.primary {
-    background: rgba(8, 15, 27, 0.86);
-    border-color: rgba(112, 167, 255, 0.36);
-    color: rgba(221, 235, 255, 0.96);
-    box-shadow: inset 0 0 0 1px rgba(128, 183, 255, 0.05);
+    background:
+        linear-gradient(90deg, rgba(104, 212, 255, 0.13), rgba(255, 100, 243, 0.09) 58%, rgba(255, 227, 79, 0.13)),
+        rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.22);
+    color: rgba(255, 255, 255, 0.98);
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+        0 0 18px rgba(104, 212, 255, 0.08);
 }
 #generationOverlay button.primary:hover:not(:disabled) {
-    background: rgba(12, 22, 38, 0.94);
-    border-color: rgba(126, 191, 255, 0.5);
+    background:
+        linear-gradient(90deg, rgba(104, 212, 255, 0.18), rgba(255, 100, 243, 0.13) 58%, rgba(255, 227, 79, 0.16)),
+        rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.34);
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.05),
+        0 0 20px rgba(104, 212, 255, 0.12);
 }
 #generationOverlay button:disabled {
     opacity: 0.46;
     cursor: default;
     transform: none;
-    color: rgba(145, 160, 182, 0.72);
-    background: rgba(6, 10, 16, 0.52);
-    border-color: rgba(82, 96, 120, 0.22);
+    color: rgba(177, 177, 181, 0.72);
+    background: rgba(255, 255, 255, 0.03);
+    border-color: rgba(255, 255, 255, 0.1);
     box-shadow: none;
 }
 
@@ -1255,13 +1295,10 @@ body[data-prompt-token-strip-visible="true"] #nextTokenBtn {
         padding: 12px;
         gap: 9px;
         border-radius: 14px;
-        background:
-            radial-gradient(145% 125% at 50% -14%, rgba(76, 129, 255, 0.16), rgba(9, 12, 17, 0) 50%),
-            linear-gradient(180deg, rgba(8, 11, 16, 0.97), rgba(3, 5, 9, 0.96));
+        background: linear-gradient(180deg, rgba(13, 13, 14, 0.97), rgba(6, 6, 7, 0.96));
         box-shadow:
             0 18px 36px rgba(0, 0, 0, 0.5),
-            inset 0 1px 0 rgba(160, 208, 255, 0.05),
-            0 0 0 1px rgba(36, 56, 94, 0.12);
+            inset 0 1px 0 rgba(255, 255, 255, 0.04);
     }
     #generationOverlay[data-visible="true"] {
         animation: generationOverlayInMobile 0.16s ease-out;
@@ -1295,7 +1332,7 @@ body[data-prompt-token-strip-visible="true"] #nextTokenBtn {
         overflow: hidden;
     }
     #generationOverlay .generation-bar {
-        height: 4px;
+        height: 5px;
     }
     #generationOverlay .generation-actions {
         gap: 8px;
@@ -4195,6 +4232,8 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     overflow-x: auto;
     overflow-y: visible;
     box-sizing: border-box;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
     font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
 }
 .detail-equations-body:empty {
@@ -4207,6 +4246,8 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     overflow-y: visible;
     padding-top: 0.14em;
     padding-bottom: 0.22em;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
 }
 .detail-equations-body .katex-display > .katex {
     font-size: 1em;
@@ -4217,6 +4258,12 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     font-size: var(--detail-font-equation);
     line-height: 1.2;
     transition: opacity 0.18s ease, color 0.18s ease;
+}
+.detail-equations-body::-webkit-scrollbar,
+.detail-equations-body .katex-display::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
 }
 .detail-equations-body .detail-preview-equation[data-active="true"] {
     color: #ffffff;

@@ -24,6 +24,7 @@ const _snapDir = new THREE.Vector3();
 const _trimLast = new THREE.Vector3();
 const _stepTarget = new THREE.Vector3();
 const TRAIL_DIRECTION_DOT_THRESHOLD = 0.9975; // ~4° angle tolerance, reduces tiny zig-zag shimmer
+const TRAIL_SEGMENT_KEY_PRECISION = 4;
 const WIDE_LINE_HIDDEN_POSITIONS = new Float32Array([
     0, HIDE_INSTANCE_Y_OFFSET, 0,
     0, HIDE_INSTANCE_Y_OFFSET, 0
@@ -99,6 +100,68 @@ function applyTrailMaterialScale(material, effectiveOpacity, effectiveWidth) {
     material.needsUpdate = true;
 }
 
+function compareTrailPointOrder(ax, ay, az, bx, by, bz) {
+    if (ax !== bx) return ax < bx ? -1 : 1;
+    if (ay !== by) return ay < by ? -1 : 1;
+    if (az !== bz) return az < bz ? -1 : 1;
+    return 0;
+}
+
+function formatTrailKeyComponent(value) {
+    return Number.isFinite(value) ? value.toFixed(TRAIL_SEGMENT_KEY_PRECISION) : 'NaN';
+}
+
+function buildTrailSegmentKey(ax, ay, az, bx, by, bz) {
+    const swap = compareTrailPointOrder(ax, ay, az, bx, by, bz) > 0;
+    const x0 = swap ? bx : ax;
+    const y0 = swap ? by : ay;
+    const z0 = swap ? bz : az;
+    const x1 = swap ? ax : bx;
+    const y1 = swap ? ay : by;
+    const z1 = swap ? az : bz;
+    return [
+        formatTrailKeyComponent(x0),
+        formatTrailKeyComponent(y0),
+        formatTrailKeyComponent(z0),
+        formatTrailKeyComponent(x1),
+        formatTrailKeyComponent(y1),
+        formatTrailKeyComponent(z1)
+    ].join('|');
+}
+
+function collectUniqueTrailSegmentBuffers(segmentSources) {
+    if (!Array.isArray(segmentSources) || segmentSources.length === 0) {
+        return { chunks: [], totalFloats: 0 };
+    }
+
+    const seenSegmentKeys = new Set();
+    const chunks = [];
+    let totalFloats = 0;
+
+    for (const source of segmentSources) {
+        if (!source || source.length < 6) continue;
+        const uniqueFloats = [];
+        for (let i = 0; (i + 5) < source.length; i += 6) {
+            const ax = source[i];
+            const ay = source[i + 1];
+            const az = source[i + 2];
+            const bx = source[i + 3];
+            const by = source[i + 4];
+            const bz = source[i + 5];
+            const segmentKey = buildTrailSegmentKey(ax, ay, az, bx, by, bz);
+            if (seenSegmentKeys.has(segmentKey)) continue;
+            seenSegmentKeys.add(segmentKey);
+            uniqueFloats.push(ax, ay, az, bx, by, bz);
+        }
+        if (!uniqueFloats.length) continue;
+        const chunk = Float32Array.from(uniqueFloats);
+        chunks.push(chunk);
+        totalFloats += chunk.length;
+    }
+
+    return { chunks, totalFloats };
+}
+
 function resolveTrailPassId(root) {
     let node = root;
     while (node) {
@@ -129,6 +192,7 @@ export class StraightLineTrail {
         this._opacity = opacity;
         this._lineWidth = Number.isFinite(lineWidth) ? lineWidth : TRAIL_LINE_WIDTH;
         this._useWideLine = USE_WIDE_TRAIL_LINES_DYNAMIC;
+        this._disposed = false;
         const maxSegmentsSafe = Number.isFinite(maxSegments)
             ? Math.max(1, Math.floor(maxSegments))
             : TRAIL_MAX_SEGMENTS;
@@ -188,6 +252,7 @@ export class StraightLineTrail {
      * @param {THREE.Object3D} newScene
      */
     reparent(newScene) {
+        if (this._disposed) return;
         if (!newScene || newScene === this._scene) return;
         if (this._line && this._line.parent) {
             this._line.parent.remove(this._line);
@@ -201,6 +266,7 @@ export class StraightLineTrail {
     // ---------------------------------------------------------------------
 
     start(pos) {
+        if (this._disposed) return;
         if (this._vertexCount) return; // already started
         // Duplicate first vertex so we have at least 2 for Line rendering
         this._writeVertex(0, pos);
@@ -217,6 +283,7 @@ export class StraightLineTrail {
      * overlap and appear brighter.
      */
     resetToPosition(pos) {
+        if (this._disposed) return;
         if (!pos) return;
         this._vertexCount = 0;
         this._currentDir = null;
@@ -228,6 +295,7 @@ export class StraightLineTrail {
     }
 
     update(pos) {
+        if (this._disposed) return;
         if (this._vertexCount === 0) return; // not started yet
         if (!pos) return;
 
@@ -299,6 +367,7 @@ export class StraightLineTrail {
      * @param {THREE.Vector3} pos
      */
     snapLastPointTo(pos) {
+        if (this._disposed) return;
         if (!pos || this._vertexCount === 0) return;
         this._writeVertex(this._vertexCount - 1, pos);
         if (this._vertexCount >= 2) {
@@ -321,9 +390,29 @@ export class StraightLineTrail {
     }
 
     dispose() {
-        this._scene.remove(this._line);
-        this._geometry.dispose();
-        this._material.dispose();
+        if (this._disposed) return;
+        this._disposed = true;
+        if (this._line && this._line.userData) {
+            delete this._line.userData.trailRef;
+            this._line.userData.trailDisposed = true;
+        }
+        if (this._line && this._line.parent) {
+            this._line.parent.remove(this._line);
+        } else if (this._scene && this._line) {
+            this._scene.remove(this._line);
+        }
+        if (this._geometry && typeof this._geometry.dispose === 'function') {
+            this._geometry.dispose();
+        }
+        if (this._material && typeof this._material.dispose === 'function') {
+            this._material.dispose();
+        }
+        this._vertexCount = 0;
+        this._currentDir = null;
+        this._attr = null;
+        this._geometry = null;
+        this._material = null;
+        this._line = null;
     }
 
     /** Adjust base opacity at runtime and update underlying material accordingly. */
@@ -348,6 +437,7 @@ export class StraightLineTrail {
 
     /** Re-apply runtime/DPR scaling to opacity + line width. */
     refreshDisplayScale() {
+        if (this._disposed) return;
         const effOpacity = scaleOpacityForDisplay(this._opacity);
         const effWidth = scaleLineWidthForDisplay(this._lineWidth);
         applyTrailMaterialScale(this._material, effOpacity, effWidth);
@@ -371,6 +461,7 @@ export class StraightLineTrail {
 
     /** Return a shallow copy of currently used positions (vertexCount * 3). */
     copyUsedPositions() {
+        if (this._disposed) return new Float32Array(0);
         const n = Math.max(0, this._vertexCount);
         const out = new Float32Array(n * 3);
         out.set(this._positions.subarray(0, n * 3));
@@ -379,6 +470,7 @@ export class StraightLineTrail {
 
     /** Convert current polyline vertices into LineSegments vertex pairs. */
     toSegmentsFloat32() {
+        if (this._disposed) return new Float32Array(0);
         const n = this._vertexCount;
         if (n < 2) return new Float32Array(0);
         const segs = (n - 1);
@@ -407,6 +499,7 @@ export class StraightLineTrail {
      * @param {number} [options.preserveSegments=0] – number of newest segments to keep live.
      */
     extractSegmentsAndTrim(options = {}) {
+        if (this._disposed) return new Float32Array(0);
         const { preserveSegments = 0 } = options;
         if (this._vertexCount < 2) return new Float32Array(0);
 
@@ -470,6 +563,7 @@ export class StraightLineTrail {
     // ------------------------------------------------------------------
 
     _syncGeometryFromPositions() {
+        if (this._disposed) return;
         if (!this._geometry) return;
         if (this._useWideLine) {
             updateWideLineMaterialResolution(this._material);
@@ -584,15 +678,18 @@ export class BatchedSegmentTrail {
         this._index = index;
         this._start = new THREE.Vector3();
         this.isBatchedTrail = true;
+        this._disposed = false;
     }
 
     start(pos) {
+        if (this._disposed) return;
         if (!pos) return;
         this._start.copy(pos);
         this._batch._setSegment(this._index, pos, pos);
     }
 
     update(pos) {
+        if (this._disposed) return;
         if (!pos) return;
         this._batch._setSegment(this._index, this._start, pos);
     }
@@ -602,6 +699,8 @@ export class BatchedSegmentTrail {
     }
 
     dispose() {
+        if (this._disposed) return;
+        this._disposed = true;
         this._batch._setSegment(this._index, BATCHED_TRAIL_HIDDEN_POINT, BATCHED_TRAIL_HIDDEN_POINT);
     }
 }
@@ -649,16 +748,26 @@ function applyFadeIn(material, targetOpacity, fadeInMs) {
 export function mergeTrailsIntoLineSegments(trails, scene, color = TRAIL_COLOR, lineWidth = TRAIL_LINE_WIDTH, opacity = TRAIL_OPACITY, options = null) {
     if (!Array.isArray(trails) || trails.length === 0 || !scene) return null;
 
-    // Concatenate segments for all trails
-    let totalFloats = 0;
-    const chunks = [];
-    for (const t of trails) {
-        if (!t || typeof t.toSegmentsFloat32 !== 'function') continue;
-        const seg = t.toSegmentsFloat32();
-        if (seg.length === 0) continue;
-        chunks.push(seg);
-        totalFloats += seg.length;
+    const uniqueTrails = [];
+    const seenTrails = new Set();
+    for (const trail of trails) {
+        if (!trail || seenTrails.has(trail)) continue;
+        seenTrails.add(trail);
+        if (trail._disposed) continue;
+        if (typeof trail.toSegmentsFloat32 !== 'function') continue;
+        uniqueTrails.push(trail);
     }
+    if (uniqueTrails.length === 0) return null;
+
+    // Concatenate segments for all trails, dropping exact/near-exact duplicates
+    // so a resumed hand-off cannot stack the same translucent line twice.
+    const rawSegments = [];
+    for (const trail of uniqueTrails) {
+        const seg = trail.toSegmentsFloat32();
+        if (seg.length === 0) continue;
+        rawSegments.push(seg);
+    }
+    const { chunks, totalFloats } = collectUniqueTrailSegmentBuffers(rawSegments);
     if (totalFloats === 0) return null;
 
     const positions = new Float32Array(totalFloats);
@@ -709,7 +818,7 @@ export function mergeTrailsIntoLineSegments(trails, scene, color = TRAIL_COLOR, 
     scene.add(merged);
 
     // Dispose original individual trails
-    trails.forEach(t => t && typeof t.dispose === 'function' && t.dispose());
+    uniqueTrails.forEach(t => t && typeof t.dispose === 'function' && t.dispose());
 
     return merged;
 }
@@ -717,15 +826,11 @@ export function mergeTrailsIntoLineSegments(trails, scene, color = TRAIL_COLOR, 
 /** Build one LineSegments object from a list of Float32Array segment buffers. */
 export function buildMergedLineSegmentsFromSegments(segmentsList, scene, color = TRAIL_COLOR, lineWidth = TRAIL_LINE_WIDTH, opacity = TRAIL_OPACITY, options = null) {
     if (!Array.isArray(segmentsList) || segmentsList.length === 0 || !scene) return null;
-    let totalFloats = 0;
-    for (const seg of segmentsList) {
-        if (seg && seg.length) totalFloats += seg.length;
-    }
+    const { chunks, totalFloats } = collectUniqueTrailSegmentBuffers(segmentsList);
     if (totalFloats === 0) return null;
     const positions = new Float32Array(totalFloats);
     let offset = 0;
-    for (const seg of segmentsList) {
-        if (!seg || !seg.length) continue;
+    for (const seg of chunks) {
         positions.set(seg, offset);
         offset += seg.length;
     }

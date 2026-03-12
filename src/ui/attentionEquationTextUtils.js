@@ -4,12 +4,15 @@ function formatHeadScopedSymbol(symbol, headSubscript = null) {
     const safeSubscript = typeof headSubscript === 'string' && headSubscript.trim().length
         ? headSubscript.trim()
         : 'i';
+    const subscriptSuffix = safeSubscript.length === 1
+        ? `_${safeSubscript}`
+        : `_{${safeSubscript}}`;
     const colorizedTokenMatch = safeSymbol.match(/^\\textcolor\{([^}]+)\}\{(.+)\}$/);
     if (colorizedTokenMatch) {
         const [, color, body] = colorizedTokenMatch;
-        return `\\textcolor{${color}}{${body}_{${safeSubscript}}}`;
+        return `\\textcolor{${color}}{${body}}${subscriptSuffix}`;
     }
-    return `${safeSymbol}_${safeSubscript}`;
+    return `${safeSymbol}${subscriptSuffix}`;
 }
 
 function resolveAttentionEquationSymbol(symbol, fallback) {
@@ -46,9 +49,10 @@ export function buildAttentionEquationSet(symbols = {}, options = {}) {
     const safeHeadSubscript = typeof options.headSubscript === 'string' && options.headSubscript.trim().length
         ? options.headSubscript.trim()
         : null;
-    const QHead = formatHeadScopedSymbol(Q, safeHeadSubscript);
-    const KHead = formatHeadScopedSymbol(K, safeHeadSubscript);
-    const VHead = formatHeadScopedSymbol(V, safeHeadSubscript);
+    const headIndexSymbol = 'i';
+    const QHead = formatHeadScopedSymbol(Q, headIndexSymbol);
+    const KHead = formatHeadScopedSymbol(K, headIndexSymbol);
+    const VHead = formatHeadScopedSymbol(V, headIndexSymbol);
 
     const queryProjection = buildAttentionProjectionEquation({
         outputSymbol: QHead,
@@ -84,7 +88,7 @@ export function buildAttentionEquationSet(symbols = {}, options = {}) {
     const Qh = QHead;
     const Kh = KHead;
     const Vh = VHead;
-    const Hh = formatHeadScopedSymbol('H', safeHeadSubscript);
+    const Hh = formatHeadScopedSymbol('H', headIndexSymbol);
     const headQualifier = safeHeadSubscript
         ? `,\\; i=${safeHeadSubscript}`
         : ',\\; i=1\\dots 12';
