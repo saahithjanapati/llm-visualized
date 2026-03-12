@@ -36,6 +36,8 @@ import {
 
 const DEFAULT_VISIBLE_TOKEN_COUNT = 5;
 const SUMMARY_MODEL_COLS = 18;
+const SUMMARY_RESIDUAL_COLS = 12;
+const RESIDUAL_STRIP_UNIT = 6;
 const SUMMARY_HEAD_COLS = 12;
 const SUMMARY_MLP_COLS = 24;
 const SUMMARY_LOGIT_COLS = 12;
@@ -101,19 +103,32 @@ function colorToCss(color) {
     return color?.isColor ? `#${color.getHexString()}` : 'transparent';
 }
 
+function buildValueColors(values = [], {
+    clampMax = RESIDUAL_COLOR_CLAMP,
+    rangeOptions = null
+} = {}) {
+    const safeValues = cleanNumberArray(values);
+    if (!safeValues.length) return [];
+    return safeValues.map((value) => colorToCss(
+        rangeOptions
+            ? mapValueToHueRange(value, rangeOptions)
+            : mapValueToColor(value, { clampMax })
+    ));
+}
+
 function buildGradientCss(values = [], {
     clampMax = RESIDUAL_COLOR_CLAMP,
     direction = '90deg',
     rangeOptions = null
 } = {}) {
-    const safeValues = cleanNumberArray(values);
-    if (!safeValues.length) return 'none';
-    const stops = safeValues.map((value, index) => {
-        const ratio = safeValues.length > 1 ? index / (safeValues.length - 1) : 0;
-        const color = rangeOptions
-            ? mapValueToHueRange(value, rangeOptions)
-            : mapValueToColor(value, { clampMax });
-        return `${colorToCss(color)} ${(ratio * 100).toFixed(4)}%`;
+    const fillColors = buildValueColors(values, {
+        clampMax,
+        rangeOptions
+    });
+    if (!fillColors.length) return 'none';
+    const stops = fillColors.map((fillColor, index) => {
+        const ratio = fillColors.length > 1 ? index / (fillColors.length - 1) : 0;
+        return `${fillColor} ${(ratio * 100).toFixed(4)}%`;
     });
     if (stops.length === 1) {
         return `linear-gradient(${direction}, ${stops[0].replace(' 0.0000%', ' 0%')}, ${stops[0].replace(' 0.0000%', ' 100%')})`;
@@ -191,6 +206,10 @@ function buildVectorRowItems(tokenRefs = [], {
 } = {}) {
     return tokenRefs.map((tokenRef) => {
         const values = sampleVector(getVector(tokenRef) || [], measureCols);
+        const fillColors = buildValueColors(values, {
+            clampMax,
+            rangeOptions
+        });
         const semantic = buildSemantic(baseSemantic, {
             role,
             rowIndex: tokenRef.rowIndex,
@@ -202,6 +221,7 @@ function buildVectorRowItems(tokenRefs = [], {
             label: tokenRef.tokenLabel,
             semantic,
             rawValues: values,
+            fillColors,
             gradientCss: buildGradientCss(values, {
                 clampMax,
                 rangeOptions
@@ -298,7 +318,10 @@ function createCompactRowsMetadata({
     rowHeight = null,
     rowGap = null,
     paddingX = null,
-    paddingY = null
+    paddingY = null,
+    variant = '',
+    hideSurface = false,
+    collapsedBinCount = null
 } = {}) {
     const compactRows = {};
     if (Number.isFinite(compactWidth) && compactWidth > 0) compactRows.compactWidth = Math.floor(compactWidth);
@@ -306,6 +329,11 @@ function createCompactRowsMetadata({
     if (Number.isFinite(rowGap) && rowGap >= 0) compactRows.rowGap = Math.floor(rowGap);
     if (Number.isFinite(paddingX) && paddingX >= 0) compactRows.paddingX = Math.floor(paddingX);
     if (Number.isFinite(paddingY) && paddingY >= 0) compactRows.paddingY = Math.floor(paddingY);
+    if (typeof variant === 'string' && variant.trim().length) compactRows.variant = variant.trim();
+    if (hideSurface) compactRows.hideSurface = true;
+    if (Number.isFinite(collapsedBinCount) && collapsedBinCount > 0) {
+        compactRows.collapsedBinCount = Math.floor(collapsedBinCount);
+    }
     return Object.keys(compactRows).length ? { compactRows } : null;
 }
 
@@ -403,6 +431,7 @@ function createResidualStateModule({
     const rowItems = buildVectorRowItems(tokenRefs, {
         baseSemantic: semantic,
         role: 'residual-row',
+        measureCols: SUMMARY_RESIDUAL_COLS,
         getVector
     });
     const rowCount = Math.max(1, rowItems.length);
@@ -418,16 +447,18 @@ function createResidualStateModule({
         rowItems,
         visual: { styleKey: VIEW2D_STYLE_KEYS.RESIDUAL },
         metadata: mergeMetadata(
-            createMeasureMetadata(SUMMARY_MODEL_COLS, rowCount),
+            createMeasureMetadata(SUMMARY_RESIDUAL_COLS, rowCount),
             createCompactRowsMetadata({
-                compactWidth: 104,
-                rowHeight: 7,
-                rowGap: 2,
-                paddingX: 6,
-                paddingY: 5
+                compactWidth: SUMMARY_RESIDUAL_COLS * RESIDUAL_STRIP_UNIT,
+                rowHeight: RESIDUAL_STRIP_UNIT,
+                rowGap: 0,
+                paddingX: 0,
+                paddingY: 0,
+                variant: 'vector-strip',
+                hideSurface: true
             }),
             createCardMetadata(null, null, {
-                cornerRadius: 14
+                cornerRadius: 6
             })
         )
     });

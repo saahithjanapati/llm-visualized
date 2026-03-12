@@ -382,7 +382,7 @@ export function createTransformerView2dDetailView(panelEl) {
                 <div class="detail-transformer-view2d-toolbar">
                     <div class="detail-transformer-view2d-toolbar-copy">
                         <div class="detail-transformer-view2d-toolbar-title">2D canvas prototype</div>
-                        <div class="detail-transformer-view2d-hint">Drag to pan. Scroll or +/- to zoom. Use arrows or WASD to move. Use Focus selection to return to the current component.</div>
+                        <div class="detail-transformer-view2d-hint">Drag or use one finger to pan. Scroll, pinch, or use +/- to zoom. Use arrows or WASD to move. Use Focus selection to return to the current component.</div>
                     </div>
                     <div class="detail-transformer-view2d-toolbar-actions">
                         <button
@@ -420,7 +420,7 @@ export function createTransformerView2dDetailView(panelEl) {
                 class="detail-transformer-view2d-canvas-card"
                 tabindex="0"
                 role="group"
-                aria-label="Scalable 2D transformer canvas. Drag to pan, scroll or use plus and minus to zoom, and use arrow keys or W A S D to move around."
+                aria-label="Scalable 2D transformer canvas. Drag or use one finger to pan, pinch or scroll to zoom, and use arrow keys or W A S D to move around."
             >
                 <canvas class="detail-transformer-view2d-canvas" aria-label="Scalable 2D transformer canvas"></canvas>
             </div>
@@ -457,6 +457,14 @@ export function createTransformerView2dDetailView(panelEl) {
         focusLabel: 'Transformer overview',
         sceneLabel: '0 layers / 0 tokens',
         pointer: null,
+        touchGesture: {
+            pointers: new Map(),
+            pinchActive: false,
+            startDistance: 0,
+            startScale: 1,
+            anchorLocalX: 0,
+            anchorLocalY: 0
+        },
         animationFrame: null,
         renderFrame: null,
         interactionTimer: null,
@@ -586,7 +594,8 @@ export function createTransformerView2dDetailView(panelEl) {
             width,
             height,
             dpr: state.isInteracting ? VIEW2D_INTERACTION_DPR : null,
-            viewportTransform: viewportController.getViewportTransform('detail-transformer-view2d')
+            viewportTransform: viewportController.getViewportTransform('detail-transformer-view2d'),
+            interacting: state.isInteracting
         });
         updateReadouts();
         return didRender;
@@ -760,22 +769,175 @@ export function createTransformerView2dDetailView(panelEl) {
         event.stopPropagation();
     }
 
-    function onPointerDown(event) {
-        if (!state.visible || event.button !== 0) return;
-        focusCanvasSurface();
+    function releaseCanvasPointerCapture(pointerId = null) {
+        if (!Number.isFinite(pointerId) || typeof canvas?.releasePointerCapture !== 'function') return;
+        try {
+            canvas.releasePointerCapture(pointerId);
+        } catch (_) { /* no-op */ }
+    }
+
+    function beginPointerPan({
+        pointerId = null,
+        clientX = 0,
+        clientY = 0
+    } = {}) {
         state.pointer = {
-            pointerId: event.pointerId,
-            clientX: event.clientX,
-            clientY: event.clientY
+            pointerId: Number.isFinite(pointerId) ? pointerId : null,
+            clientX: Number.isFinite(clientX) ? clientX : 0,
+            clientY: Number.isFinite(clientY) ? clientY : 0
         };
-        canvas.setPointerCapture?.(event.pointerId);
+        if (Number.isFinite(state.pointer.pointerId) && typeof canvas?.setPointerCapture === 'function') {
+            try {
+                canvas.setPointerCapture(state.pointer.pointerId);
+            } catch (_) { /* no-op */ }
+        }
         stopAnimation();
         markInteraction(true);
         canvas.classList.add('is-panning');
+    }
+
+    function clearPointer(event = null, { scheduleSettle = true } = {}) {
+        const capturedPointerId = Number.isFinite(state.pointer?.pointerId)
+            ? state.pointer.pointerId
+            : (Number.isFinite(event?.pointerId) ? event.pointerId : null);
+        releaseCanvasPointerCapture(capturedPointerId);
+        state.pointer = null;
+        if (!state.touchGesture?.pinchActive) {
+            canvas.classList.remove('is-panning');
+        }
+        if (scheduleSettle) {
+            scheduleInteractionSettle();
+        }
+    }
+
+    function trackTouchPointer(event) {
+        if (!state.touchGesture?.pointers || !Number.isFinite(event?.pointerId)) return;
+        state.touchGesture.pointers.set(event.pointerId, {
+            clientX: Number.isFinite(event?.clientX) ? event.clientX : 0,
+            clientY: Number.isFinite(event?.clientY) ? event.clientY : 0
+        });
+    }
+
+    function untrackTouchPointer(pointerId) {
+        if (!state.touchGesture?.pointers || !Number.isFinite(pointerId)) return;
+        state.touchGesture.pointers.delete(pointerId);
+    }
+
+    function resetTouchGesture() {
+        if (!state.touchGesture) return;
+        state.touchGesture.pointers.clear();
+        state.touchGesture.pinchActive = false;
+        state.touchGesture.startDistance = 0;
+        state.touchGesture.startScale = 1;
+        state.touchGesture.anchorLocalX = 0;
+        state.touchGesture.anchorLocalY = 0;
+        canvas.classList.remove('is-panning');
+    }
+
+    function getTouchMetrics() {
+        if (!canvas || !state.touchGesture?.pointers) return null;
+        const points = Array.from(state.touchGesture.pointers.values())
+            .filter((point) => Number.isFinite(point?.clientX) && Number.isFinite(point?.clientY));
+        if (points.length < 2) return null;
+        const [first, second] = points;
+        const dx = second.clientX - first.clientX;
+        const dy = second.clientY - first.clientY;
+        const rect = canvas.getBoundingClientRect();
+        return {
+            distance: Math.hypot(dx, dy),
+            canvasX: ((first.clientX + second.clientX) * 0.5) - rect.left,
+            canvasY: ((first.clientY + second.clientY) * 0.5) - rect.top
+        };
+    }
+
+    function beginTouchPinch() {
+        if (!state.touchGesture?.pointers || state.touchGesture.pointers.size < 2) return false;
+        const metrics = getTouchMetrics();
+        if (!metrics || !(metrics.distance > 0)) return false;
+        const viewport = viewportController.getState();
+        const currentScale = Number.isFinite(viewport.scale) && viewport.scale > 0 ? viewport.scale : 1;
+        clearPointer(null, { scheduleSettle: false });
+        state.touchGesture.pinchActive = true;
+        state.touchGesture.startDistance = metrics.distance;
+        state.touchGesture.startScale = currentScale;
+        state.touchGesture.anchorLocalX = (metrics.canvasX - viewport.panX) / currentScale;
+        state.touchGesture.anchorLocalY = (metrics.canvasY - viewport.panY) / currentScale;
+        stopAnimation();
+        markInteraction(true);
+        canvas.classList.add('is-panning');
+        return true;
+    }
+
+    function updateTouchPinch(event) {
+        if (!state.touchGesture?.pointers || !Number.isFinite(event?.pointerId)) return false;
+        const point = state.touchGesture.pointers.get(event.pointerId);
+        if (!point) return false;
+        point.clientX = Number.isFinite(event?.clientX) ? event.clientX : point.clientX;
+        point.clientY = Number.isFinite(event?.clientY) ? event.clientY : point.clientY;
+        if (!state.touchGesture.pinchActive) return false;
+        const metrics = getTouchMetrics();
+        if (!metrics || !(metrics.distance > 0)) return false;
+        const distanceRatio = metrics.distance / Math.max(1, state.touchGesture.startDistance);
+        const nextScale = state.touchGesture.startScale * distanceRatio;
+        viewportController.setState({
+            scale: nextScale,
+            panX: metrics.canvasX - (state.touchGesture.anchorLocalX * nextScale),
+            panY: metrics.canvasY - (state.touchGesture.anchorLocalY * nextScale)
+        });
+        markInteraction(true);
+        scheduleRender();
+        return true;
+    }
+
+    function endTouchPinch() {
+        if (!state.touchGesture) return;
+        state.touchGesture.pinchActive = false;
+        state.touchGesture.startDistance = 0;
+        state.touchGesture.startScale = 1;
+        state.touchGesture.anchorLocalX = 0;
+        state.touchGesture.anchorLocalY = 0;
+        if (state.touchGesture.pointers.size === 1) {
+            const [pointerId, point] = state.touchGesture.pointers.entries().next().value || [];
+            if (Number.isFinite(pointerId) && point) {
+                beginPointerPan({
+                    pointerId,
+                    clientX: point.clientX,
+                    clientY: point.clientY
+                });
+                return;
+            }
+        }
+        canvas.classList.remove('is-panning');
+        scheduleInteractionSettle();
+    }
+
+    function onPointerDown(event) {
+        if (!state.visible || (Number.isFinite(event?.button) && event.button !== 0)) return;
+        focusCanvasSurface();
+        if (event?.pointerType === 'touch') {
+            trackTouchPointer(event);
+            if (beginTouchPinch()) {
+                event.preventDefault();
+                return;
+            }
+        }
+        if (state.touchGesture?.pinchActive) {
+            event.preventDefault();
+            return;
+        }
+        beginPointerPan({
+            pointerId: event?.pointerId,
+            clientX: event?.clientX,
+            clientY: event?.clientY
+        });
         event.preventDefault();
     }
 
     function onPointerMove(event) {
+        if (event?.pointerType === 'touch' && updateTouchPinch(event)) {
+            event.preventDefault();
+            return;
+        }
         if (!state.pointer || state.pointer.pointerId !== event.pointerId) return;
         const deltaX = event.clientX - state.pointer.clientX;
         const deltaY = event.clientY - state.pointer.clientY;
@@ -785,15 +947,6 @@ export function createTransformerView2dDetailView(panelEl) {
         markInteraction(true);
         scheduleRender();
         event.preventDefault();
-    }
-
-    function clearPointer(event = null) {
-        if (state.pointer && event && state.pointer.pointerId === event.pointerId) {
-            canvas.releasePointerCapture?.(event.pointerId);
-        }
-        state.pointer = null;
-        canvas.classList.remove('is-panning');
-        scheduleInteractionSettle();
     }
 
     function onWheel(event) {
@@ -810,14 +963,27 @@ export function createTransformerView2dDetailView(panelEl) {
         event.preventDefault();
     }
 
+    function onPointerUp(event) {
+        if (event?.pointerType === 'touch') {
+            untrackTouchPointer(event?.pointerId);
+            if (state.touchGesture?.pinchActive) {
+                endTouchPinch();
+                event.preventDefault();
+                return;
+            }
+        }
+        if (!state.pointer || state.pointer.pointerId !== event.pointerId) return;
+        clearPointer(event);
+    }
+
     canvasCard?.addEventListener('keydown', onCanvasCardKeyDown);
     canvasCard?.addEventListener('keyup', onCanvasCardKeyUp);
     canvasCard?.addEventListener('pointerdown', focusCanvasSurface);
     canvasCard?.addEventListener('blur', clearKeyboardMotion);
     canvas?.addEventListener('pointerdown', onPointerDown);
     canvas?.addEventListener('pointermove', onPointerMove);
-    canvas?.addEventListener('pointerup', clearPointer);
-    canvas?.addEventListener('pointercancel', clearPointer);
+    canvas?.addEventListener('pointerup', onPointerUp);
+    canvas?.addEventListener('pointercancel', onPointerUp);
     canvas?.addEventListener('wheel', onWheel, { passive: false });
     canvas?.addEventListener('dblclick', () => {
         focusCanvasSurface();
@@ -838,7 +1004,8 @@ export function createTransformerView2dDetailView(panelEl) {
             root.classList.toggle('is-visible', state.visible);
             root.setAttribute('aria-hidden', state.visible ? 'false' : 'true');
             if (!state.visible) {
-                clearPointer();
+                clearPointer(null, { scheduleSettle: false });
+                resetTouchGesture();
                 clearKeyboardMotion();
                 stopAnimation();
                 stopRenderLoop();
@@ -869,6 +1036,8 @@ export function createTransformerView2dDetailView(panelEl) {
             });
             renderer.setScene(state.scene, state.layout);
             viewportController.setSceneBounds(state.layout.sceneBounds || null);
+            clearPointer(null, { scheduleSettle: false });
+            resetTouchGesture();
             state.sceneLabel = `${state.scene?.metadata?.layerCount || 0} layers / ${state.scene?.metadata?.tokenCount || 0} tokens`;
             state.pendingInitialFocus = true;
             measureCanvasSize();

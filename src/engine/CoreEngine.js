@@ -40,6 +40,7 @@ const ZOOM_OUT_SUPERSAMPLE_MAX_MULTIPLIER = 1.22;
 const ZOOM_OUT_SUPERSAMPLE_MAX_DPR = 2.6;
 const ZOOM_OUT_SUPERSAMPLE_RATIO_STEP = 0.05;
 const ZOOM_OUT_SUPERSAMPLE_DEBOUNCE_MS = 140;
+const CONTROLS_INTERACTION_IDLE_MS = 220;
 const ADAPTIVE_RENDER_DPR_TOUCH_MAX = 3.0;
 const ADAPTIVE_RENDER_DPR_SAMPLE_MIN_MS = 900;
 const ADAPTIVE_RENDER_DPR_SAMPLE_MIN_FRAMES = 45;
@@ -129,6 +130,12 @@ export class CoreEngine {
             ? opts.zoomOutSupersampleDebounceMs
             : ZOOM_OUT_SUPERSAMPLE_DEBOUNCE_MS;
         this._pixelRatioRefreshTimer = null;
+        this._controlsInteractionEndTimer = null;
+        this._controlsInteractionIdleMs = (typeof opts.controlsInteractionIdleMs === 'number'
+            && Number.isFinite(opts.controlsInteractionIdleMs)
+            && opts.controlsInteractionIdleMs >= 0)
+            ? opts.controlsInteractionIdleMs
+            : CONTROLS_INTERACTION_IDLE_MS;
         this._adaptiveRenderDprEnabled = opts.adaptiveRenderDpr !== false;
         this._adaptiveRenderDprFloor = null;
         this._adaptiveRenderDprCeiling = null;
@@ -653,6 +660,7 @@ export class CoreEngine {
 
     dispose() {
         this._cancelPendingPixelRatioRefresh();
+        this._cancelPendingControlsInteractionEnd();
         window.removeEventListener('resize', this._onResize);
         if (this._visualViewport) {
             this._visualViewport.removeEventListener('resize', this._onResize);
@@ -1042,6 +1050,7 @@ export class CoreEngine {
     };
 
     _onControlsChangePixelRatio() {
+        if (this._isUserNavigating) return;
         this._schedulePixelRatioRefresh();
     }
 
@@ -1066,6 +1075,14 @@ export class CoreEngine {
             clearTimeout(this._pixelRatioRefreshTimer);
         }
         this._pixelRatioRefreshTimer = null;
+    }
+
+    _cancelPendingControlsInteractionEnd() {
+        if (this._controlsInteractionEndTimer === null) return;
+        if (typeof clearTimeout === 'function') {
+            clearTimeout(this._controlsInteractionEndTimer);
+        }
+        this._controlsInteractionEndTimer = null;
     }
 
     _applyZoomOutSupersample(baseRatio) {
@@ -1101,15 +1118,29 @@ export class CoreEngine {
     }
 
     _onControlsStartInteraction() {
+        this._cancelPendingControlsInteractionEnd();
         this._isUserNavigating = true;
         this._cancelPendingPixelRatioRefresh();
         this._resetAdaptiveRenderDprSampling();
-        this._updateRendererPixelRatio({ force: true });
     }
 
     _onControlsEndInteraction() {
-        this._isUserNavigating = false;
-        this._schedulePixelRatioRefresh();
+        if (!this._isUserNavigating) return;
+        this._cancelPendingControlsInteractionEnd();
+        const idleMs = Math.max(0, Math.round(this._controlsInteractionIdleMs));
+        if (idleMs <= 0 || typeof setTimeout !== 'function') {
+            this._isUserNavigating = false;
+            this._updateRendererPixelRatio();
+            return;
+        }
+        // OrbitControls emits wheel zoom as many short start/end pairs.
+        // Hold the "user navigating" state briefly so those bursts reuse the
+        // same render DPR instead of flashing between ratios.
+        this._controlsInteractionEndTimer = setTimeout(() => {
+            this._controlsInteractionEndTimer = null;
+            this._isUserNavigating = false;
+            this._updateRendererPixelRatio();
+        }, idleMs);
     }
 
     _onVisibility = () => {
@@ -1175,6 +1206,7 @@ export class CoreEngine {
         if (typeof controls.state === 'number') {
             controls.state = -1;
         }
+        this._cancelPendingControlsInteractionEnd();
         this._isUserNavigating = false;
         if (this._hoverLabelDiv) {
             this._hoverLabelDiv.style.display = 'none';

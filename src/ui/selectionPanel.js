@@ -272,6 +272,7 @@ const LAYERNORM_PARAM_PANEL_ACTION_OPEN = 'open-layernorm-param';
 const QKV_SOURCE_VECTOR_PANEL_ACTION_OPEN = 'open-qkv-source-vector';
 const QKV_WEIGHT_MATRIX_PANEL_ACTION_OPEN = 'open-qkv-weight-matrix';
 const ATTENTION_SECTION_COLLAPSED_PREF_KEY = 'selectionPanelAttentionSectionCollapsed';
+const TRANSFORMER_VIEW2D_PAUSE_REASON = 'detail-transformer-view2d';
 const ATTENTION_HEAD_COUNT = Math.max(1, Math.round(D_MODEL / D_HEAD));
 const ATTENTION_SCORE_PREVIEW_DECIMALS = 4;
 const SELECTION_PANEL_DEV_MODE_EVENT = 'selectionPanelDevModeChanged';
@@ -6144,7 +6145,7 @@ class SelectionPanel {
             this.subtitle.textContent = 'Scalable semantic canvas for the current transformer state';
         }
         this._setSubtitleSecondaryText(`Focus: ${view2dContext.focusLabel}`);
-        this._setSubtitleTertiaryText('Prototype view. Drag to pan and scroll to zoom.');
+        this._setSubtitleTertiaryText('Prototype view. Drag or use one finger to pan, and pinch or scroll to zoom.');
         this._transformerView2dDetailView?.setVisible(true);
         this._transformerView2dDetailView?.open({
             activationSource: this.activationSource,
@@ -6154,6 +6155,7 @@ class SelectionPanel {
             focusLabel: view2dContext.focusLabel,
             isSmallScreen: this._isSmallScreen && this._isSmallScreen()
         });
+        this.engine?.pause?.(TRANSFORMER_VIEW2D_PAUSE_REASON);
         this._stopLoop();
         this._setAttentionVisibility(false);
         this._setPanelTokenHoverEntry(null, { emit: true });
@@ -6174,6 +6176,7 @@ class SelectionPanel {
         this._transformerView2dDetailOpen = false;
         this.panel.classList.remove('is-transformer-view2d-open');
         this._transformerView2dDetailView?.setVisible(false);
+        this.engine?.resume?.(TRANSFORMER_VIEW2D_PAUSE_REASON);
         if (this._mhsaFullscreenActive) {
             this._setMhsaFullscreen(false);
         }

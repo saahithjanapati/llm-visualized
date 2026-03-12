@@ -9,12 +9,14 @@ import {
     createAnchorRef,
     createConnectorNode,
     createGroupNode,
+    createMatrixNode,
     createSceneModel,
     createTextNode,
     VIEW2D_ANCHOR_SIDES,
     VIEW2D_CONNECTOR_ROUTES
 } from '../src/view2d/schema/sceneTypes.js';
 import { flattenSceneNodes } from '../src/view2d/schema/sceneTypes.js';
+import { VIEW2D_MATRIX_PRESENTATIONS } from '../src/view2d/schema/sceneTypes.js';
 import { resolveView2dStyle, VIEW2D_STYLE_KEYS } from '../src/view2d/theme/visualTokens.js';
 
 function createActivationSource(tokenCount = 4) {
@@ -279,5 +281,88 @@ describe('CanvasSceneRenderer', () => {
         expect(renderer.getLastRenderState()?.worldScale).toBeCloseTo(0.42, 6);
         expect(renderer.getLastRenderState()?.offsetX).toBe(-120);
         expect(renderer.getLastRenderState()?.offsetY).toBe(36);
+    });
+
+    it('holds higher-detail matrix interiors until zoom interaction settles', () => {
+        const matrixNode = createMatrixNode({
+            role: 'matrix',
+            semantic: { componentKind: 'test-matrix', role: 'matrix' },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.BANDED_ROWS,
+            dimensions: { rows: 2, cols: 64 },
+            label: { text: 'Test matrix', tex: 'Test matrix' },
+            rowItems: [
+                { rowIndex: 0, label: 'Row A', gradientCss: 'rgba(255,0,0,0.7)' },
+                { rowIndex: 1, label: 'Row B', gradientCss: 'rgba(0,255,0,0.7)' }
+            ]
+        });
+        const scene = createSceneModel({
+            semantic: { componentKind: 'test-scene' },
+            nodes: [matrixNode]
+        });
+        const layout = buildSceneLayout(scene);
+        const renderer = new CanvasSceneRenderer({ canvas });
+        const lowScale = 0.14;
+        const highScale = 1.1;
+        const highOffsetX = (640 - (layout.sceneBounds.width * highScale)) / 2;
+        const highOffsetY = (360 - (layout.sceneBounds.height * highScale)) / 2;
+
+        renderer.setScene(scene, layout);
+
+        expect(renderer.render({
+            width: 640,
+            height: 360,
+            dpr: 1,
+            interacting: false,
+            viewportTransform: {
+                source: 'settled-low-scale',
+                scale: lowScale,
+                offsetX: (640 - (layout.sceneBounds.width * lowScale)) / 2,
+                offsetY: (360 - (layout.sceneBounds.height * lowScale)) / 2
+            }
+        })).toBe(true);
+        expect(renderer.getLastRenderState()?.detailScale).toBeCloseTo(lowScale, 6);
+
+        ctx.operations.length = 0;
+        expect(renderer.render({
+            width: 640,
+            height: 360,
+            dpr: 1,
+            interacting: true,
+            viewportTransform: {
+                source: 'active-high-scale',
+                scale: highScale,
+                offsetX: highOffsetX,
+                offsetY: highOffsetY
+            }
+        })).toBe(true);
+
+        const activeRowLabels = ctx.operations
+            .filter((entry) => entry.type === 'fillText')
+            .map((entry) => entry.text)
+            .filter((text) => text === 'Row A' || text === 'Row B');
+        expect(renderer.getLastRenderState()?.worldScale).toBeCloseTo(highScale, 6);
+        expect(renderer.getLastRenderState()?.detailScale).toBeCloseTo(lowScale, 6);
+        expect(activeRowLabels).toHaveLength(0);
+
+        ctx.operations.length = 0;
+        expect(renderer.render({
+            width: 640,
+            height: 360,
+            dpr: 1,
+            interacting: false,
+            viewportTransform: {
+                source: 'settled-high-scale',
+                scale: highScale,
+                offsetX: highOffsetX,
+                offsetY: highOffsetY
+            }
+        })).toBe(true);
+
+        const settledRowLabels = ctx.operations
+            .filter((entry) => entry.type === 'fillText')
+            .map((entry) => entry.text)
+            .filter((text) => text === 'Row A' || text === 'Row B');
+        expect(renderer.getLastRenderState()?.detailScale).toBeCloseTo(highScale, 6);
+        expect(settledRowLabels).toEqual(['Row A', 'Row B']);
     });
 });

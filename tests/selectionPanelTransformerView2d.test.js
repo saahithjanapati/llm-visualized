@@ -114,6 +114,25 @@ function createMockContext() {
     };
 }
 
+function dispatchPointerEvent(target, type, {
+    clientX = 0,
+    clientY = 0,
+    pointerId = 1,
+    pointerType = 'mouse',
+    button = 0
+} = {}) {
+    const event = new Event(type, { bubbles: true, cancelable: true });
+    Object.defineProperties(event, {
+        clientX: { value: clientX },
+        clientY: { value: clientY },
+        pointerId: { value: pointerId },
+        pointerType: { value: pointerType },
+        button: { value: button }
+    });
+    target.dispatchEvent(event);
+    return event;
+}
+
 describe('selectionPanelTransformerView2d', () => {
     let rafQueue;
     let canvasGetContextSpy;
@@ -326,5 +345,93 @@ describe('selectionPanelTransformerView2d', () => {
         canvasCard.dispatchEvent(new KeyboardEvent('keyup', { key: '=', bubbles: true }));
 
         expect(afterZoom.scale).toBeGreaterThan(afterPan.scale);
+    });
+
+    it('supports touch pan and pinch zoom on the transformer 2D canvas surface', () => {
+        const panel = document.createElement('section');
+        panel.innerHTML = `
+            <div class="detail-header"></div>
+            <div class="detail-body"></div>
+        `;
+        document.body.appendChild(panel);
+
+        const view = createTransformerView2dDetailView(panel);
+        const canvas = panel.querySelector('.detail-transformer-view2d-canvas');
+        const ctx = createMockContext();
+
+        canvas.getContext = vi.fn(() => ctx);
+        canvas.getBoundingClientRect = () => ({
+            left: 0,
+            top: 0,
+            right: 640,
+            bottom: 360,
+            width: 640,
+            height: 360
+        });
+        canvas.setPointerCapture = vi.fn();
+        canvas.releasePointerCapture = vi.fn();
+
+        view.setVisible(true);
+        view.open({
+            activationSource: createActivationSource(4),
+            semanticTarget: {
+                componentKind: 'mhsa',
+                layerIndex: 0,
+                stage: 'attention',
+                role: 'module'
+            },
+            focusLabel: 'Layer 1 MHSA'
+        });
+
+        const beforePan = view.getViewportState();
+        dispatchPointerEvent(canvas, 'pointerdown', {
+            clientX: 120,
+            clientY: 120,
+            pointerId: 1,
+            pointerType: 'touch'
+        });
+        dispatchPointerEvent(canvas, 'pointermove', {
+            clientX: 160,
+            clientY: 150,
+            pointerId: 1,
+            pointerType: 'touch'
+        });
+        const afterPan = view.getViewportState();
+
+        expect(afterPan.panX).toBeGreaterThan(beforePan.panX);
+        expect(afterPan.panY).toBeGreaterThan(beforePan.panY);
+
+        dispatchPointerEvent(canvas, 'pointerdown', {
+            clientX: 240,
+            clientY: 110,
+            pointerId: 2,
+            pointerType: 'touch'
+        });
+        dispatchPointerEvent(canvas, 'pointermove', {
+            clientX: 300,
+            clientY: 80,
+            pointerId: 2,
+            pointerType: 'touch'
+        });
+        const afterPinch = view.getViewportState();
+
+        expect(afterPinch.scale).toBeGreaterThan(afterPan.scale);
+
+        dispatchPointerEvent(canvas, 'pointerup', {
+            clientX: 300,
+            clientY: 80,
+            pointerId: 2,
+            pointerType: 'touch'
+        });
+        dispatchPointerEvent(canvas, 'pointermove', {
+            clientX: 182,
+            clientY: 166,
+            pointerId: 1,
+            pointerType: 'touch'
+        });
+        const afterPinchPan = view.getViewportState();
+
+        expect(afterPinchPan.panX).toBeGreaterThan(afterPinch.panX);
+        expect(afterPinchPan.panY).toBeGreaterThan(afterPinch.panY);
     });
 });

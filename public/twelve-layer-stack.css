@@ -1695,6 +1695,7 @@ body.detail-panel-resizing * {
 #parameterCounter {
     position: static;
     --parameter-counter-value-color: #f3f7fb;
+    --parameter-counter-value-gradient: linear-gradient(90deg, #f3f7fb 0%, #f3f7fb 100%);
     --parameter-counter-glow-near: rgba(255, 180, 120, 0.8);
     --parameter-counter-glow-mid: rgba(255, 211, 120, 0.54);
     --parameter-counter-glow-far: rgba(255, 120, 198, 0.34);
@@ -1713,19 +1714,29 @@ body.detail-panel-resizing * {
     color: #b8c0cc;
 }
 #parameterCounter .param-value {
+    display: inline-block;
     margin-top: 4px;
     font-size: 18px;
     letter-spacing: 0.6px;
+    background-image: none;
+    background-position: center center;
+    background-repeat: no-repeat;
+    background-size: 100% 100%;
+    -webkit-text-fill-color: currentColor;
     transition: transform 0.2s ease, text-shadow 0.2s ease, color 0.2s ease, filter 0.2s ease;
 }
 #parameterCounter[data-animating="true"] .param-value {
     color: var(--parameter-counter-value-color);
+    background-image: var(--parameter-counter-value-gradient);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
     text-shadow:
-        0 0 10px var(--parameter-counter-glow-near),
-        0 0 22px var(--parameter-counter-glow-mid),
-        0 0 36px var(--parameter-counter-glow-far);
-    filter: saturate(1.16) brightness(1.08);
-    transform: translateY(-1px) scale(1.02);
+        0 0 4px var(--parameter-counter-glow-near),
+        0 0 10px var(--parameter-counter-glow-mid),
+        0 0 16px var(--parameter-counter-glow-far);
+    filter: saturate(1.04) brightness(1.02);
+    transform: translateY(-0.5px);
 }
 
 /* Fullscreen blurred overlay */

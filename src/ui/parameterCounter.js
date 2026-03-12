@@ -13,6 +13,15 @@ import {
     PRISM_ADD_ANIM_SPEED_MULT,
     VECTOR_LENGTH_PRISM
 } from '../utils/constants.js';
+import {
+    MHA_FINAL_K_COLOR,
+    MHA_FINAL_Q_COLOR,
+    MHA_FINAL_V_COLOR,
+    MHA_OUTPUT_PROJECTION_MATRIX_COLOR,
+    MLP_DOWN_MATRIX_COLOR,
+    MLP_UP_MATRIX_COLOR,
+    POSITION_EMBED_COLOR
+} from '../animations/LayerAnimationConstants.js';
 
 const STAGE_LABELS = {
     token_embedding: 'Token embedding',
@@ -33,32 +42,105 @@ const BASE_SPEED_MULT = 100;
 const MIN_STAGE_MS = 280;
 const DEFAULT_STAGE_MS = 900;
 const SKIP_MIN_STAGE_MS = 120;
-const FULL_CIRCLE_DEGREES = 360;
+const COUNTER_DEFAULT_COLOR = 0xf3f7fb;
+const COUNTER_LAYER_NORM_COLOR = 0xffffff;
 
-function normalizeHue(value) {
-    return ((value % FULL_CIRCLE_DEGREES) + FULL_CIRCLE_DEGREES) % FULL_CIRCLE_DEGREES;
+const COUNTER_STAGE_PALETTES = Object.freeze({
+    token_embedding: [MHA_FINAL_Q_COLOR],
+    position_embedding: [POSITION_EMBED_COLOR],
+    ln1_scale: [COUNTER_LAYER_NORM_COLOR],
+    ln1_shift: [COUNTER_LAYER_NORM_COLOR],
+    qkv_projection: [MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR],
+    attn_output_projection: [MHA_OUTPUT_PROJECTION_MATRIX_COLOR],
+    ln2_scale: [COUNTER_LAYER_NORM_COLOR],
+    ln2_shift: [COUNTER_LAYER_NORM_COLOR],
+    mlp_up_projection: [MLP_UP_MATRIX_COLOR],
+    mlp_down_projection: [MLP_DOWN_MATRIX_COLOR],
+    final_ln_scale: [COUNTER_LAYER_NORM_COLOR],
+    final_ln_shift: [COUNTER_LAYER_NORM_COLOR]
+});
+
+const COUNTER_STAGE_GRADIENT_MODES = Object.freeze({
+    qkv_projection: 'bands'
+});
+
+function clampChannel(value) {
+    if (!Number.isFinite(value)) return 0;
+    return Math.max(0, Math.min(255, Math.round(value)));
 }
 
-function formatGlowColor(hue, saturation, lightness, alpha = 1) {
-    return `hsla(${Math.round(normalizeHue(hue))}, ${saturation}%, ${lightness}%, ${alpha})`;
+function normalizeHexColor(value) {
+    const safe = Number.isFinite(value) ? value : COUNTER_DEFAULT_COLOR;
+    return safe & 0xffffff;
 }
 
-function randomizeCounterGlow(counter, valueEl) {
-    if (!counter || !valueEl) return;
+function colorToRgb(hexColor) {
+    const safe = normalizeHexColor(hexColor);
+    return {
+        r: clampChannel((safe >> 16) & 0xff),
+        g: clampChannel((safe >> 8) & 0xff),
+        b: clampChannel(safe & 0xff)
+    };
+}
 
-    const baseHue = Math.random() * FULL_CIRCLE_DEGREES;
-    const accentHue = baseHue + 88 + Math.random() * 48;
-    const edgeHue = baseHue + 190 + Math.random() * 60;
+function colorToCss(hexColor) {
+    const safe = normalizeHexColor(hexColor);
+    return `#${safe.toString(16).padStart(6, '0')}`;
+}
 
-    const valueColor = formatGlowColor(baseHue, 100, 82);
-    const glowNear = formatGlowColor(baseHue + 10, 100, 72, 0.9);
-    const glowMid = formatGlowColor(accentHue, 100, 72, 0.65);
-    const glowFar = formatGlowColor(edgeHue, 100, 75, 0.45);
+function formatGlowColor(hexColor, alpha = 1) {
+    const { r, g, b } = colorToRgb(hexColor);
+    const safeAlpha = Number.isFinite(alpha) ? Math.max(0, Math.min(1, alpha)) : 1;
+    return `rgba(${r}, ${g}, ${b}, ${safeAlpha})`;
+}
 
-    counter.style.setProperty('--parameter-counter-value-color', valueColor);
-    counter.style.setProperty('--parameter-counter-glow-near', glowNear);
-    counter.style.setProperty('--parameter-counter-glow-mid', glowMid);
-    counter.style.setProperty('--parameter-counter-glow-far', glowFar);
+function buildGradientCss(palette, mode = 'smooth') {
+    const colors = Array.isArray(palette) && palette.length
+        ? palette
+        : [COUNTER_DEFAULT_COLOR];
+
+    if (colors.length === 1) {
+        const cssColor = colorToCss(colors[0]);
+        return `linear-gradient(90deg, ${cssColor} 0%, ${cssColor} 100%)`;
+    }
+
+    if (mode === 'bands') {
+        const segmentWidth = 100 / colors.length;
+        const stops = [];
+        for (let i = 0; i < colors.length; i++) {
+            const start = i * segmentWidth;
+            const end = (i + 1) * segmentWidth;
+            const cssColor = colorToCss(colors[i]);
+            stops.push(`${cssColor} ${start.toFixed(1)}%`);
+            stops.push(`${cssColor} ${end.toFixed(1)}%`);
+        }
+        return `linear-gradient(90deg, ${stops.join(', ')})`;
+    }
+
+    const lastIndex = colors.length - 1;
+    const stops = colors.map((color, index) => {
+        const pct = lastIndex > 0 ? (index / lastIndex) * 100 : 0;
+        return `${colorToCss(color)} ${pct.toFixed(1)}%`;
+    });
+    return `linear-gradient(90deg, ${stops.join(', ')})`;
+}
+
+function applyStageCounterGlow(counter, stage) {
+    if (!counter) return;
+
+    const palette = COUNTER_STAGE_PALETTES[stage] || [COUNTER_DEFAULT_COLOR];
+    const gradientMode = COUNTER_STAGE_GRADIENT_MODES[stage] || 'smooth';
+    const midIndex = Math.floor(palette.length / 2);
+    const fillColor = palette[midIndex] ?? COUNTER_DEFAULT_COLOR;
+    const nearColor = palette[0] ?? fillColor;
+    const midColor = palette[midIndex] ?? fillColor;
+    const farColor = palette[palette.length - 1] ?? fillColor;
+
+    counter.style.setProperty('--parameter-counter-value-color', colorToCss(fillColor));
+    counter.style.setProperty('--parameter-counter-value-gradient', buildGradientCss(palette, gradientMode));
+    counter.style.setProperty('--parameter-counter-glow-near', formatGlowColor(nearColor, 0.28));
+    counter.style.setProperty('--parameter-counter-glow-mid', formatGlowColor(midColor, 0.14));
+    counter.style.setProperty('--parameter-counter-glow-far', formatGlowColor(farColor, 0.06));
 }
 
 function formatMillions(value) {
@@ -250,7 +332,7 @@ export function initParameterCounter(pipeline, numLayers) {
             to: entry.cumulative,
             index: typeof index === 'number' ? index : null,
         };
-        randomizeCounterGlow(counter, valueEl);
+        applyStageCounterGlow(counter, entry.stage);
         if (stageEl) {
             stageEl.textContent = label || formatStageLabel(entry.stage, entry.layer ?? null);
         }
@@ -303,6 +385,7 @@ export function initParameterCounter(pipeline, numLayers) {
         pauseStamp = null;
         queue.length = 0;
         counter.dataset.animating = 'false';
+        applyStageCounterGlow(counter, null);
         if (stageEl) stageEl.textContent = '';
         renderValue(currentValue);
         seedTokenEmbedding();
