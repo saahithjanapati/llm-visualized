@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 
-const INPUT_VOCAB_RISE_SPEED_PRE_REVEAL = 4.1;
-const INPUT_VOCAB_RISE_SPEED_AT_REVEAL = 3.15;
-const INPUT_VOCAB_RISE_SPEED_NEAR_EXIT = 2.8;
-const INPUT_VOCAB_RISE_SPEED_POST_EXIT = 3.25;
+export const INPUT_VOCAB_RISE_SPEED_PRE_REVEAL = 4.1;
+export const INPUT_VOCAB_RISE_SPEED_AT_REVEAL = 3.15;
+export const INPUT_VOCAB_RISE_SPEED_NEAR_EXIT = 2.8;
+export const INPUT_VOCAB_RISE_SPEED_POST_EXIT = 3.25;
 
 export function getFirstLayerInputVocabRiseSpeedMult({
     layerIndex = -1,

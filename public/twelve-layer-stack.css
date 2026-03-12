@@ -287,7 +287,6 @@ body.touch-ui * {
     font-weight: 500;
     letter-spacing: 0.12em;
     line-height: 1;
-    text-transform: uppercase;
     white-space: nowrap;
     transition:
         transform 0.14s ease,
@@ -2193,6 +2192,9 @@ body.detail-panel-resizing * {
     width: 100%;
     display: flex;
     justify-content: center;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: visible;
 }
 #equationsPanel .eq-body > .katex-display > .katex {
     margin: 0 auto;
@@ -4273,14 +4275,21 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     font-size: 1em;
 }
 .detail-equations-body .detail-preview-equation {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: visible;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
     color: #8f98a6;
     opacity: 0.42;
-    font-size: var(--detail-font-equation);
+    font-size: 1em;
     line-height: 1.2;
     transition: opacity 0.18s ease, color 0.18s ease;
 }
 .detail-equations-body::-webkit-scrollbar,
-.detail-equations-body .katex-display::-webkit-scrollbar {
+.detail-equations-body .katex-display::-webkit-scrollbar,
+.detail-equations-body .detail-preview-equation::-webkit-scrollbar {
     width: 0;
     height: 0;
     display: none;

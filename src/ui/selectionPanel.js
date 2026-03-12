@@ -74,6 +74,10 @@ import {
     shouldRevealAttentionCell
 } from './selectionPanelAttentionRevealUtils.js';
 import {
+    readEquationBaseFontPx,
+    readEquationContentSize
+} from './equationFitUtils.js';
+import {
     collectVisibleContextText,
     copyTextToClipboard,
     getDescriptionPlainText,
@@ -3598,75 +3602,16 @@ class SelectionPanel {
     }
 
     _readSelectionEquationBaseFontPx() {
-        if (!this.equationsBody || typeof window === 'undefined') return 12;
-        const previous = this.equationsBody.style.fontSize;
-        this.equationsBody.style.fontSize = '';
-        const parsed = Number.parseFloat(window.getComputedStyle(this.equationsBody).fontSize);
-        this.equationsBody.style.fontSize = previous;
-        return Number.isFinite(parsed) ? parsed : 12;
+        return readEquationBaseFontPx(this.equationsBody, 12);
     }
 
     _readSelectionEquationContentSize() {
-        if (!this.equationsBody) return { width: 0, height: 0 };
-        const katexDisplay = this.equationsBody.querySelector('.katex-display');
-        const katexRoot = this.equationsBody.querySelector('.katex-display > .katex');
-        const measureKatexBaseBounds = () => {
-            if (!katexRoot) return null;
-            const bases = katexRoot.querySelectorAll('.katex-html .base');
-            if (!bases || !bases.length) return null;
-            let left = Infinity;
-            let right = -Infinity;
-            let top = Infinity;
-            let bottom = -Infinity;
-            bases.forEach((base) => {
-                const rect = base.getBoundingClientRect();
-                if (!(rect.width > 0 && rect.height > 0)) return;
-                left = Math.min(left, rect.left);
-                right = Math.max(right, rect.right);
-                top = Math.min(top, rect.top);
-                bottom = Math.max(bottom, rect.bottom);
-            });
-            if (!Number.isFinite(left) || !Number.isFinite(right) || !Number.isFinite(top) || !Number.isFinite(bottom)) {
-                return null;
-            }
-            return { width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
-        };
-        const baseBounds = measureKatexBaseBounds();
-        if (baseBounds && katexRoot) {
-            const rootRect = katexRoot.getBoundingClientRect();
-            return {
-                width: Math.max(0, baseBounds.width + 1),
-                height: Math.max(0, baseBounds.height, katexRoot.scrollHeight, rootRect.height || 0)
-            };
-        }
-        if (katexRoot) {
-            const rect = katexRoot.getBoundingClientRect();
-            return {
-                width: Math.max(0, katexRoot.scrollWidth, rect.width || 0),
-                height: Math.max(0, katexRoot.scrollHeight, rect.height || 0)
-            };
-        }
-        if (katexDisplay) {
-            const rect = katexDisplay.getBoundingClientRect();
-            return {
-                width: Math.max(0, katexDisplay.scrollWidth, rect.width || 0),
-                height: Math.max(0, katexDisplay.scrollHeight, rect.height || 0)
-            };
-        }
-        return {
-            width: this.equationsBody.scrollWidth,
-            height: this.equationsBody.scrollHeight
-        };
+        return readEquationContentSize(this.equationsBody);
     }
 
     _applySelectionEquationFit() {
         if (!this.isReady || !this.isOpen || !this.equationsSection || !this.equationsBody) return;
         if (!this.equationsSection.classList.contains('is-visible')) return;
-        if (this.equationsBody.querySelector('.detail-preview-equation')) {
-            this.equationsBody.style.fontSize = '';
-            this._equationFitState.lastFontPx = null;
-            return;
-        }
 
         const bodyRect = this.equationsBody.getBoundingClientRect();
         const availableWidth = Math.max(0, bodyRect.width);

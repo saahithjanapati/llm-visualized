@@ -107,6 +107,7 @@ const PLUS_OPERATOR_FONT_SCALE = 0.92;
 const PLUS_OPERATOR_FONT_WEIGHT = 500;
 const MATRIX_DETAIL_MIN_SCREEN_WIDTH_PX = 72;
 const MATRIX_DETAIL_MIN_SCREEN_HEIGHT_PX = 24;
+const INTERACTION_DETAIL_RELEASE_RATIO = 0.88;
 
 function parseLinearGradient(input = '') {
     const key = String(input || '');
@@ -443,7 +444,15 @@ function drawCardSurfaceEffects(ctx, bounds, cornerRadius, style, safeWorldScale
     ctx.restore();
 }
 
-function drawMatrixNode(ctx, node, entry, config, worldScale = 1, detailScale = worldScale) {
+function drawMatrixNode(
+    ctx,
+    node,
+    entry,
+    config,
+    worldScale = 1,
+    detailScale = worldScale,
+    { skipSurfaceEffects = false } = {}
+) {
     const contentBounds = entry.contentBounds || entry.bounds;
     const style = resolveView2dStyle(node.visual?.styleKey) || {};
     const accent = style.accent || config.tokens.palette.neutral;
@@ -471,7 +480,7 @@ function drawMatrixNode(ctx, node, entry, config, worldScale = 1, detailScale = 
         ctx.lineWidth = config.tokens.matrix.borderWidth;
         ctx.strokeStyle = border;
         ctx.stroke();
-        if (node.presentation === VIEW2D_MATRIX_PRESENTATIONS.CARD) {
+        if (!skipSurfaceEffects && node.presentation === VIEW2D_MATRIX_PRESENTATIONS.CARD) {
             drawCardSurfaceEffects(ctx, contentBounds, cornerRadius, style, safeWorldScale, projectedWidth, projectedHeight);
         }
     }
@@ -770,6 +779,30 @@ function resolveRenderViewportTransform(sceneBounds, resolution, viewportTransfo
     };
 }
 
+function resolveInteractionDetailScale(worldScale = 1, latchedDetailScale = null, interacting = false) {
+    const safeWorldScale = Math.max(0.0001, Number.isFinite(worldScale) ? worldScale : 1);
+    if (!interacting) return safeWorldScale;
+    const safeLatched = Math.max(0.0001, Number.isFinite(latchedDetailScale) ? latchedDetailScale : 0);
+    if (!(safeLatched > 0)) return safeWorldScale;
+    if (safeWorldScale >= safeLatched) {
+        return safeLatched;
+    }
+    if (safeWorldScale <= (safeLatched * INTERACTION_DETAIL_RELEASE_RATIO)) {
+        return safeWorldScale;
+    }
+    return safeLatched;
+}
+
+function collectVisibleEntries(entries = [], visibleWorldBounds = null, target = []) {
+    target.length = 0;
+    for (let index = 0; index < entries.length; index += 1) {
+        const entry = entries[index];
+        if (!entry?.entry || !intersectsBounds(entry.entry.bounds, visibleWorldBounds)) continue;
+        target.push(entry);
+    }
+    return target;
+}
+
 export class CanvasSceneRenderer {
     constructor({
         canvas = null,
@@ -785,6 +818,8 @@ export class CanvasSceneRenderer {
         this.connectors = [];
         this.lastRenderState = null;
         this.latchedDetailScale = null;
+        this.visibleDrawableNodes = [];
+        this.visibleConnectors = [];
     }
 
     setCanvas(canvas = null) {
@@ -886,20 +921,29 @@ export class CanvasSceneRenderer {
         const offsetX = resolvedViewport.offsetX;
         const offsetY = resolvedViewport.offsetY;
         const safeWorldScale = Math.max(0.0001, Number.isFinite(worldScale) ? worldScale : 1);
-        if (!(this.latchedDetailScale > 0) || !interacting) {
-            this.latchedDetailScale = safeWorldScale;
-        }
-        const detailScale = interacting
-            ? Math.min(safeWorldScale, this.latchedDetailScale)
-            : safeWorldScale;
+        this.latchedDetailScale = resolveInteractionDetailScale(
+            safeWorldScale,
+            this.latchedDetailScale,
+            interacting
+        );
+        const detailScale = this.latchedDetailScale;
         const visibleWorldBounds = resolveVisibleWorldBounds(resolution, {
             offsetX,
             offsetY,
             worldScale,
             sceneBounds
         });
-        const visibleDrawableNodes = this.drawableNodes.filter(({ entry }) => intersectsBounds(entry.bounds, visibleWorldBounds));
-        const visibleConnectors = this.connectors.filter(({ entry }) => intersectsBounds(entry.bounds, visibleWorldBounds));
+        const visibleDrawableNodes = collectVisibleEntries(
+            this.drawableNodes,
+            visibleWorldBounds,
+            this.visibleDrawableNodes
+        );
+        const visibleConnectors = collectVisibleEntries(
+            this.connectors,
+            visibleWorldBounds,
+            this.visibleConnectors
+        );
+        const interactionFastPath = interacting;
 
         const renderState = {
             ok: true,
@@ -928,7 +972,8 @@ export class CanvasSceneRenderer {
             nodeCount: this.drawableNodes.length,
             connectorCount: this.connectors.length,
             visibleNodeCount: visibleDrawableNodes.length,
-            visibleConnectorCount: visibleConnectors.length
+            visibleConnectorCount: visibleConnectors.length,
+            interactionFastPath
         };
         this.lastRenderState = renderState;
 
@@ -941,7 +986,9 @@ export class CanvasSceneRenderer {
 
             visibleDrawableNodes.forEach(({ node, entry }) => {
                 if (node.kind === VIEW2D_NODE_KINDS.MATRIX) {
-                    drawMatrixNode(ctx, node, entry, config, worldScale, detailScale);
+                    drawMatrixNode(ctx, node, entry, config, worldScale, detailScale, {
+                        skipSurfaceEffects: interactionFastPath
+                    });
                 } else if (node.kind === VIEW2D_NODE_KINDS.TEXT || node.kind === VIEW2D_NODE_KINDS.OPERATOR) {
                     drawTextLikeNode(ctx, node, entry, config, worldScale, detailScale);
                 }

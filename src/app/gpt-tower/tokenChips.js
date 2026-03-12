@@ -748,7 +748,8 @@ export function addEmbeddingAndTokenChips({
                 startByToken: Object.create(null),
                 defaultStartAt: nowMs,
                 defaultReleaseAt: nowMs + Math.max(0, vocabRiseDuration + VOCAB_CHIP_INSIDE_RELEASE_BUFFER_MS),
-                insideByToken: vocabInsideByToken
+                insideByToken: vocabInsideByToken,
+                chipEntries: null
             };
             // Gate deferred positional-vector launch until position chips enter.
             pipeline.__inputPositionChipGate = {
@@ -1206,9 +1207,11 @@ export function addEmbeddingAndTokenChips({
                 animatedEmbeddingChips.push(chip);
                 vocabMatrixChipEntries.push({
                     chip,
+                    tokenKey,
                     startY,
                     targetY,
-                    entryStartY: vocabMatrixBottomY - chip.userData.size.height / 2
+                    entryStartY: vocabMatrixBottomY - chip.userData.size.height / 2,
+                    durationMs: vocabRiseDuration
                 });
 
                 if (typeof TWEEN !== 'undefined') {
@@ -1250,13 +1253,14 @@ export function addEmbeddingAndTokenChips({
                     pending: false,
                     pendingFallbackAt: tokenWaveStartMs,
                     waitForReleaseAfterInside: true,
-                    releaseByToken,
-                    startByToken,
-                    defaultStartAt: tokenWaveStartMs,
-                    defaultReleaseAt: tokenReleaseDefaultMs + VOCAB_CHIP_INSIDE_RELEASE_BUFFER_MS,
-                    insideByToken: vocabInsideByToken
-                };
-            }
+                releaseByToken,
+                startByToken,
+                defaultStartAt: tokenWaveStartMs,
+                defaultReleaseAt: tokenReleaseDefaultMs + VOCAB_CHIP_INSIDE_RELEASE_BUFFER_MS,
+                insideByToken: vocabInsideByToken,
+                chipEntries: vocabMatrixChipEntries
+            };
+        }
         };
         const spawnPositionChips = (font) => {
             if (disposed) return;

@@ -86,11 +86,13 @@ function createMockContext() {
             operations.push({ type: 'fillText', text, x, y });
         },
         createLinearGradient() {
+            operations.push({ type: 'createLinearGradient' });
             return {
                 addColorStop() {}
             };
         },
         createRadialGradient() {
+            operations.push({ type: 'createRadialGradient' });
             return {
                 addColorStop() {}
             };
@@ -364,5 +366,131 @@ describe('CanvasSceneRenderer', () => {
             .filter((text) => text === 'Row A' || text === 'Row B');
         expect(renderer.getLastRenderState()?.detailScale).toBeCloseTo(highScale, 6);
         expect(settledRowLabels).toEqual(['Row A', 'Row B']);
+    });
+
+    it('steps zoom-out detail changes down in larger interaction chunks', () => {
+        const matrixNode = createMatrixNode({
+            role: 'matrix',
+            semantic: { componentKind: 'test-matrix', role: 'matrix' },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.BANDED_ROWS,
+            dimensions: { rows: 2, cols: 64 },
+            label: { text: 'Test matrix', tex: 'Test matrix' },
+            rowItems: [
+                { rowIndex: 0, label: 'Row A', gradientCss: 'rgba(255,0,0,0.7)' },
+                { rowIndex: 1, label: 'Row B', gradientCss: 'rgba(0,255,0,0.7)' }
+            ]
+        });
+        const scene = createSceneModel({
+            semantic: { componentKind: 'test-scene' },
+            nodes: [matrixNode]
+        });
+        const layout = buildSceneLayout(scene);
+        const renderer = new CanvasSceneRenderer({ canvas });
+        const settledScale = 1.1;
+        const slightZoomOutScale = 1.02;
+        const releaseScale = 0.94;
+
+        renderer.setScene(scene, layout);
+
+        expect(renderer.render({
+            width: 640,
+            height: 360,
+            dpr: 1,
+            interacting: false,
+            viewportTransform: {
+                source: 'settled-high-scale',
+                scale: settledScale,
+                offsetX: (640 - (layout.sceneBounds.width * settledScale)) / 2,
+                offsetY: (360 - (layout.sceneBounds.height * settledScale)) / 2
+            }
+        })).toBe(true);
+        expect(renderer.getLastRenderState()?.detailScale).toBeCloseTo(settledScale, 6);
+
+        expect(renderer.render({
+            width: 640,
+            height: 360,
+            dpr: 1,
+            interacting: true,
+            viewportTransform: {
+                source: 'active-slight-zoom-out',
+                scale: slightZoomOutScale,
+                offsetX: (640 - (layout.sceneBounds.width * slightZoomOutScale)) / 2,
+                offsetY: (360 - (layout.sceneBounds.height * slightZoomOutScale)) / 2
+            }
+        })).toBe(true);
+        expect(renderer.getLastRenderState()?.interactionFastPath).toBe(true);
+        expect(renderer.getLastRenderState()?.detailScale).toBeCloseTo(settledScale, 6);
+
+        expect(renderer.render({
+            width: 640,
+            height: 360,
+            dpr: 1,
+            interacting: true,
+            viewportTransform: {
+                source: 'active-release-zoom-out',
+                scale: releaseScale,
+                offsetX: (640 - (layout.sceneBounds.width * releaseScale)) / 2,
+                offsetY: (360 - (layout.sceneBounds.height * releaseScale)) / 2
+            }
+        })).toBe(true);
+        expect(renderer.getLastRenderState()?.detailScale).toBeCloseTo(releaseScale, 6);
+    });
+
+    it('skips expensive card surface effects while the viewport is interacting', () => {
+        const cardNode = createMatrixNode({
+            role: 'projection-weight',
+            semantic: { componentKind: 'test-card', role: 'projection-weight' },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+            dimensions: { rows: 64, cols: 64 },
+            label: { text: 'Card', tex: 'Card' },
+            visual: { styleKey: VIEW2D_STYLE_KEYS.MHSA_Q }
+        });
+        const scene = createSceneModel({
+            semantic: { componentKind: 'test-scene' },
+            nodes: [cardNode]
+        });
+        const layout = buildSceneLayout(scene);
+        const renderer = new CanvasSceneRenderer({ canvas });
+        const scale = 1.15;
+        const offsetX = (640 - (layout.sceneBounds.width * scale)) / 2;
+        const offsetY = (360 - (layout.sceneBounds.height * scale)) / 2;
+
+        renderer.setScene(scene, layout);
+
+        ctx.operations.length = 0;
+        expect(renderer.render({
+            width: 640,
+            height: 360,
+            dpr: 1,
+            interacting: false,
+            viewportTransform: {
+                source: 'settled-card',
+                scale,
+                offsetX,
+                offsetY
+            }
+        })).toBe(true);
+        const settledRadialGradientCount = ctx.operations
+            .filter((entry) => entry.type === 'createRadialGradient')
+            .length;
+        expect(settledRadialGradientCount).toBeGreaterThan(0);
+
+        ctx.operations.length = 0;
+        expect(renderer.render({
+            width: 640,
+            height: 360,
+            dpr: 1,
+            interacting: true,
+            viewportTransform: {
+                source: 'interacting-card',
+                scale,
+                offsetX,
+                offsetY
+            }
+        })).toBe(true);
+        const interactingRadialGradientCount = ctx.operations
+            .filter((entry) => entry.type === 'createRadialGradient')
+            .length;
+        expect(interactingRadialGradientCount).toBe(0);
     });
 });

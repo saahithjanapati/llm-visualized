@@ -17,6 +17,11 @@ import { USE_PHYSICAL_MATERIALS } from '../utils/constants.js';
 import { applyPhysicalMaterialsToScene } from '../utils/materialUtils.js';
 import { buildAttentionEquationSet } from './attentionEquationTextUtils.js';
 import {
+    readEquationBaseFontPx,
+    readEquationContentSize as measureEquationContentSize
+} from './equationFitUtils.js';
+import { resolveMlpOverlayStage } from './statusOverlayMlpEquationUtils.js';
+import {
     KV_CACHE_INFO_REQUEST_EVENT,
     buildKvCacheOverlayBadgeText,
 } from './kvCacheInfoUtils.js';
@@ -95,7 +100,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     const WU = colorize(embeddingVocabColor, 'W_U');
     const U = 'u';
     const U_LN = `${U}_{\\text{ln}}`;
-    const MLPResidual = colorize(mlpDownColor, `\\mathrm{MLP}(${U_LN})`);
+    const MLPResidual = `${colorize(mlpDownColor, '\\mathrm{MLP}')}(${U_LN})`;
     const X_OUT = 'x_{\\text{out}}';
     const X_FINAL = 'x_{\\text{final}}';
     const LOGITS = '\\ell';
@@ -143,25 +148,6 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         return colorize(LN_EQ_BASE_COLOR, body);
     };
 
-    const buildMlpEquation = (highlights) => {
-        const upT = normalizeHighlight(highlights.up);
-        const geluT = normalizeHighlight(highlights.gelu);
-        const downT = normalizeHighlight(highlights.down);
-        const lhsPre = colorize(eqColorFor(1), 'a');
-        const lhsExpr = colorize(eqColorFor(1), 'z');
-        const lhsMlp = colorize(eqColorFor(1), `\\mathrm{MLP}(${U_LN})`);
-        const eqExpr = colorize(eqColorFor(1), '=');
-        const upTerm = `${U_LN} ${WUp} + ${BUp}`;
-        const upExpr = colorize(eqColorFor(upT), upTerm);
-        const geluExpr = geluT > 0
-            ? colorize(eqColorFor(geluT), `\\mathrm{GELU}(${upTerm})`)
-            : `\\mathrm{GELU}(${upExpr})`;
-        const downTerm = `z ${WDown} + ${BDown}`;
-        const downExpr = colorize(eqColorFor(downT), downTerm);
-        const body = String.raw`\begin{aligned} ${lhsPre} &${eqExpr} ${upExpr} \\ ${lhsExpr} &${eqExpr} ${geluExpr} \\ ${lhsMlp} &${eqExpr} ${downExpr} \end{aligned}`;
-        return colorize(LN_EQ_BASE_COLOR, body);
-    };
-
     const attentionEquations = buildAttentionEquationSet({
         Q,
         K,
@@ -181,7 +167,9 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         attn: attentionEquations.attention,
         concat_proj: attentionEquations.concatProjection,
         resid1: attentionEquations.postAttentionResidual,
-        mlp: String.raw`\begin{aligned} a &= ${U_LN} ${WUp} + ${BUp} \\ z &= \mathrm{GELU}(a) \\ \mathrm{MLP}(${U_LN}) &= z ${WDown} + ${BDown} \end{aligned}`,
+        mlp_up: `a = ${U_LN} ${WUp} + ${BUp}`,
+        mlp_gelu: 'z = \\mathrm{GELU}(a)',
+        mlp_down: `\\mathrm{MLP}(${U_LN}) = z ${WDown} + ${BDown}`,
         resid2: String.raw`x_{\text{out}} = ${U} + ${MLPResidual}`,
         embed_token: `${X_TOK} = ${E}[${TOK_ID}]`,
         embed_pos: `${X_POS} = ${P}[t]`,
@@ -196,6 +184,8 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     const EQUATION_FIT_BUFFER_PX = 1.25;
     const EQUATION_SIZE_CAPS = {
         default: { maxPx: EQUATION_FONT_MAX_PX, maxScale: EQUATION_FONT_MAX_SCALE },
+        qkv_per_head: { maxPx: 15.6, maxScale: 1.14 },
+        qkv_packed: { maxPx: 15.6, maxScale: 1.14 },
         ln1: { maxPx: 17.2, maxScale: 1.32 },
         ln2: { maxPx: 17.2, maxScale: 1.32 },
         ln_top: { maxPx: 17.2, maxScale: 1.32 },
@@ -218,64 +208,10 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         return Number.isFinite(parsed) ? parsed : 0;
     };
     const readBaseFontPx = () => {
-        if (!equationsBody || typeof window === 'undefined') return 14;
-        const previous = equationsBody.style.fontSize;
-        equationsBody.style.fontSize = '';
-        const base = getPx(window.getComputedStyle(equationsBody).fontSize) || 14;
-        equationsBody.style.fontSize = previous;
-        return base;
+        return readEquationBaseFontPx(equationsBody, 14);
     };
     const readEquationContentSize = () => {
-        if (!equationsBody) return { width: 0, height: 0 };
-        const katexDisplay = equationsBody.querySelector('.katex-display');
-        const katexRoot = equationsBody.querySelector('.katex-display > .katex');
-        const measureKatexBaseBounds = () => {
-            if (!katexRoot) return null;
-            const bases = katexRoot.querySelectorAll('.katex-html .base');
-            if (!bases || !bases.length) return null;
-            let left = Infinity;
-            let right = -Infinity;
-            let top = Infinity;
-            let bottom = -Infinity;
-            bases.forEach((base) => {
-                const rect = base.getBoundingClientRect();
-                if (!(rect.width > 0 && rect.height > 0)) return;
-                left = Math.min(left, rect.left);
-                right = Math.max(right, rect.right);
-                top = Math.min(top, rect.top);
-                bottom = Math.max(bottom, rect.bottom);
-            });
-            if (!Number.isFinite(left) || !Number.isFinite(right) || !Number.isFinite(top) || !Number.isFinite(bottom)) {
-                return null;
-            }
-            return { width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
-        };
-        const baseBounds = measureKatexBaseBounds();
-        if (baseBounds && katexRoot) {
-            const rootRect = katexRoot.getBoundingClientRect();
-            return {
-                width: Math.max(0, baseBounds.width + 1),
-                height: Math.max(0, baseBounds.height, katexRoot.scrollHeight, rootRect.height || 0)
-            };
-        }
-        if (katexRoot) {
-            const rect = katexRoot.getBoundingClientRect();
-            return {
-                width: Math.max(0, katexRoot.scrollWidth, rect.width || 0),
-                height: Math.max(0, katexRoot.scrollHeight, rect.height || 0)
-            };
-        }
-        if (katexDisplay) {
-            const rect = katexDisplay.getBoundingClientRect();
-            return {
-                width: Math.max(0, katexDisplay.scrollWidth, rect.width || 0),
-                height: Math.max(0, katexDisplay.scrollHeight, rect.height || 0)
-            };
-        }
-        return {
-            width: equationsBody.scrollWidth,
-            height: equationsBody.scrollHeight
-        };
+        return measureEquationContentSize(equationsBody);
     };
     const applyEquationFit = () => {
         if (!equationsPanel || !equationsBody) return;
@@ -522,13 +458,6 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         return { norm, scale, shift };
     };
 
-    const getMlpHighlights = (lanes) => {
-        const up = lanes.some(l => l?.mlpUpStarted);
-        const gelu = lanes.some(l => l?.mlpGeluActive || l?.mlpGeluComplete);
-        const down = lanes.some(l => l?.mlpDownStarted || l?.mlpDownComplete);
-        return { up, gelu, down };
-    };
-
     const getTopLayerNormHighlights = (lanes) => {
         const norm = lanes.some(l => l?.__topLnEntered || l?.__topLnMultStarted || l?.__topLnShiftStarted || l?.__topLnShiftComplete);
         const scale = lanes.some(l => l?.__topLnMultStarted || l?.__topLnShiftStarted || l?.__topLnShiftComplete);
@@ -754,8 +683,14 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
             title = 'Residual Add 1';
         } else if (mlpActive) {
             const adding = lanes.some(l => l.ln2Phase === 'done' && !l.additionComplete);
-            key = adding ? 'resid2' : 'mlp';
-            title = adding ? 'Residual Add 2' : 'MLP (FFN)';
+            if (adding) {
+                key = 'resid2';
+                title = 'Residual Add 2';
+            } else {
+                const mlpStage = resolveMlpOverlayStage(lanes);
+                key = mlpStage?.eqKey || 'mlp_up';
+                title = mlpStage?.eqTitle || 'MLP Up Projection';
+            }
         } else if (ln2Active) {
             key = 'ln2';
             title = 'LayerNorm 2';
@@ -818,10 +753,6 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
             const shiftT = quantizeHighlight(highlights.shift);
             eqBody = buildLayerNormEquation('x', U_LN, { norm: normT, scale: scaleT, shift: shiftT });
             signature = `${key}|n${normT.toFixed(3)}|s${scaleT.toFixed(3)}|h${shiftT.toFixed(3)}`;
-        } else if (key === 'mlp') {
-            const highlights = getMlpHighlights(lanes);
-            eqBody = buildMlpEquation(highlights);
-            signature = `${key}|u${highlights.up ? 1 : 0}|g${highlights.gelu ? 1 : 0}|d${highlights.down ? 1 : 0}`;
         }
         if (signature === appState.lastEqSignature) return;
         appState.lastEqKey = key;

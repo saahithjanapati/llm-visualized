@@ -281,13 +281,23 @@ function createNextTokenButton() {
     const btn = document.createElement('button');
     btn.id = 'nextTokenBtn';
     btn.type = 'button';
-    btn.textContent = 'Next token';
+    btn.textContent = 'Next Token';
     btn.title = 'Advance to next token';
     btn.setAttribute('aria-label', 'Advance to next token');
     btn.dataset.visible = 'false';
     btn.style.display = 'none';
     document.body.appendChild(btn);
     return btn;
+}
+
+function initNextTokenButtonTouchFallback(button) {
+    if (!button || typeof document === 'undefined' || !document.body) return null;
+    // On mobile the button is mounted directly under body, so reuse the shared
+    // tap fallback path that synthesizes activation when the native click is missed.
+    return initTouchClickFallback(document.body, {
+        selector: 'body > #nextTokenBtn',
+        tapSlopPx: 20
+    });
 }
 
 function resolveVisibleRect(element) {
@@ -593,6 +603,7 @@ export function initGenerationController({
     const overlay = createAdvanceOverlay();
     const overlayTouchCleanup = initTouchClickFallback(overlay.root, { selector: 'button' });
     const nextTokenBtn = createNextTokenButton();
+    const nextTokenButtonTouchCleanup = initNextTokenButtonTouchFallback(nextTokenBtn);
     const promptTokenStripEl = promptTokenStrip?.getRootElement?.() || document.getElementById('promptTokenStrip');
     const nextTokenButtonLayoutCleanup = initNextTokenButtonLayoutSync(nextTokenBtn, {
         promptTokenStrip: promptTokenStripEl
@@ -1059,6 +1070,7 @@ export function initGenerationController({
                 if (chipCleanup?.dispose) chipCleanup.dispose();
                 if (rafId && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(rafId);
                 if (overlayTouchCleanup) overlayTouchCleanup();
+                if (nextTokenButtonTouchCleanup) nextTokenButtonTouchCleanup();
                 promptTokenStrip?.dispose?.();
             }
         };
@@ -1237,6 +1249,7 @@ export function initGenerationController({
             if (chipCleanup?.dispose) chipCleanup.dispose();
             if (rafId && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(rafId);
             if (overlayTouchCleanup) overlayTouchCleanup();
+            if (nextTokenButtonTouchCleanup) nextTokenButtonTouchCleanup();
             if (nextTokenButtonLayoutCleanup) nextTokenButtonLayoutCleanup();
             promptTokenStrip?.dispose?.();
         }

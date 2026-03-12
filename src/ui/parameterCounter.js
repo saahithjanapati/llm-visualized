@@ -1,6 +1,7 @@
 import { PARAMETER_CHECKPOINTS } from '../data/parameterCheckpoints.js';
 import { appState } from '../state/appState.js';
 import {
+    ANIM_RISE_SPEED_ORIGINAL,
     ANIM_RISE_SPEED_INSIDE_LN,
     GLOBAL_ANIM_SPEED_MULT,
     MHSA_PASS_THROUGH_TOTAL_DURATION_MS,
@@ -22,6 +23,12 @@ import {
     MLP_UP_MATRIX_COLOR,
     POSITION_EMBED_COLOR
 } from '../animations/LayerAnimationConstants.js';
+import { shouldWaitForInputChipGate } from '../engine/layers/gpt2InputChipGateUtils.js';
+import {
+    INPUT_VOCAB_RISE_SPEED_AT_REVEAL,
+    INPUT_VOCAB_RISE_SPEED_NEAR_EXIT,
+    INPUT_VOCAB_RISE_SPEED_PRE_REVEAL
+} from '../engine/layers/gpt2InputVocabTravelUtils.js';
 
 const STAGE_LABELS = {
     token_embedding: 'Token embedding',
@@ -92,6 +99,11 @@ function formatGlowColor(hexColor, alpha = 1) {
     const { r, g, b } = colorToRgb(hexColor);
     const safeAlpha = Number.isFinite(alpha) ? Math.max(0, Math.min(1, alpha)) : 1;
     return `rgba(${r}, ${g}, ${b}, ${safeAlpha})`;
+}
+
+function clamp01(value) {
+    if (!Number.isFinite(value)) return 0;
+    return Math.max(0, Math.min(1, value));
 }
 
 function buildGradientCss(palette, mode = 'smooth') {
@@ -178,11 +190,83 @@ function estimateMlpDownDuration(layer, lane) {
     return Math.max(MIN_STAGE_MS, Math.abs(distance) / speed * 1000);
 }
 
+function invertQuadraticOut(progress) {
+    const clamped = clamp01(progress);
+    return 1 - Math.sqrt(Math.max(0, 1 - clamped));
+}
+
+function estimateTokenEmbeddingChipDuration(entry) {
+    const durationMs = Number.isFinite(entry?.durationMs) ? entry.durationMs : NaN;
+    const startY = Number.isFinite(entry?.startY) ? entry.startY : NaN;
+    const targetY = Number.isFinite(entry?.targetY) ? entry.targetY : NaN;
+    const currentY = Number.isFinite(entry?.chip?.position?.y)
+        ? entry.chip.position.y
+        : (Number.isFinite(entry?.entryStartY) ? entry.entryStartY : NaN);
+    const totalDistance = targetY - startY;
+
+    if (
+        !Number.isFinite(durationMs)
+        || durationMs <= 0
+        || !Number.isFinite(startY)
+        || !Number.isFinite(targetY)
+        || !Number.isFinite(currentY)
+        || !Number.isFinite(totalDistance)
+        || totalDistance <= 1e-6
+    ) {
+        return NaN;
+    }
+
+    const currentProgress = clamp01((currentY - startY) / totalDistance);
+    const currentT = invertQuadraticOut(currentProgress);
+    return Math.max(MIN_STAGE_MS, durationMs * Math.max(0, 1 - currentT));
+}
+
+function estimateTokenEmbeddingDuration(lane) {
+    const chipDuration = estimateTokenEmbeddingChipDuration(lane);
+    if (Number.isFinite(chipDuration)) {
+        return chipDuration;
+    }
+
+    const speed = ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT;
+    const fallbackMs = 700 * (BASE_SPEED_MULT / Math.max(1, GLOBAL_ANIM_SPEED_MULT));
+    const travelStartY = Number.isFinite(lane?.vocabEmbeddingTravelStartY)
+        ? lane.vocabEmbeddingTravelStartY
+        : NaN;
+    const exitY = Number.isFinite(lane?.vocabEmbeddingExitY)
+        ? lane.vocabEmbeddingExitY
+        : NaN;
+
+    if (!Number.isFinite(speed) || speed <= 0 || !Number.isFinite(travelStartY) || !Number.isFinite(exitY) || exitY <= travelStartY) {
+        return fallbackMs;
+    }
+
+    const revealYRaw = Number.isFinite(lane?.vocabEmbeddingRevealY)
+        ? lane.vocabEmbeddingRevealY
+        : NaN;
+    const revealY = Number.isFinite(revealYRaw)
+        ? Math.max(travelStartY, Math.min(exitY, revealYRaw))
+        : NaN;
+
+    if (!Number.isFinite(revealY) || revealY <= travelStartY + 0.01 || revealY >= exitY - 0.01) {
+        const averageRiseMult = (INPUT_VOCAB_RISE_SPEED_PRE_REVEAL + INPUT_VOCAB_RISE_SPEED_NEAR_EXIT) / 2;
+        return Math.max(MIN_STAGE_MS, ((exitY - travelStartY) / (speed * averageRiseMult)) * 1000);
+    }
+
+    const preRevealDistance = Math.max(0, revealY - travelStartY);
+    const postRevealDistance = Math.max(0, exitY - revealY);
+    const preRevealSpeedMult = (INPUT_VOCAB_RISE_SPEED_PRE_REVEAL + INPUT_VOCAB_RISE_SPEED_AT_REVEAL) / 2;
+    const postRevealSpeedMult = (INPUT_VOCAB_RISE_SPEED_AT_REVEAL + INPUT_VOCAB_RISE_SPEED_NEAR_EXIT) / 2;
+    const preRevealMs = preRevealDistance / (speed * preRevealSpeedMult) * 1000;
+    const postRevealMs = postRevealDistance / (speed * postRevealSpeedMult) * 1000;
+
+    return Math.max(MIN_STAGE_MS, preRevealMs + postRevealMs);
+}
+
 function estimateStageDuration(stage, layer, lane) {
     const speedScale = BASE_SPEED_MULT / Math.max(1, GLOBAL_ANIM_SPEED_MULT);
     switch (stage) {
         case 'token_embedding':
-            return 700 * speedScale;
+            return estimateTokenEmbeddingDuration(lane);
         case 'position_embedding':
             return 1200 * speedScale;
         case 'ln1_scale':
@@ -227,6 +311,66 @@ function pickLane(lanes, predicate) {
     return lanes.find(predicate) || null;
 }
 
+function detectInputVocabChipEntry(pipeline) {
+    const gate = pipeline?.__inputVocabChipGate;
+    const entries = Array.isArray(gate?.chipEntries) ? gate.chipEntries : [];
+    if (!entries.length) return null;
+
+    return pickLane(entries, (entry) => {
+        const chipY = entry?.chip?.position?.y;
+        const entryStartY = Number.isFinite(entry?.entryStartY) ? entry.entryStartY : NaN;
+        const targetY = Number.isFinite(entry?.targetY) ? entry.targetY : NaN;
+        const tokenKey = typeof entry?.tokenKey === 'string' ? entry.tokenKey : null;
+        const tokenInside = !!(
+            tokenKey
+            && gate?.insideByToken
+            && Object.prototype.hasOwnProperty.call(gate.insideByToken, tokenKey)
+            && gate.insideByToken[tokenKey] === true
+        );
+
+        if (!Number.isFinite(chipY) || !Number.isFinite(entryStartY) || !Number.isFinite(targetY)) {
+            return false;
+        }
+        if (tokenInside) {
+            return false;
+        }
+        return chipY >= entryStartY - 0.01 && chipY <= targetY + 0.01;
+    });
+}
+
+function detectInputVocabPassLane(pipeline, layer) {
+    if (!pipeline || layer?.index !== 0) return null;
+
+    const gate = pipeline.__inputVocabChipGate;
+    const nowMs = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+        ? performance.now()
+        : Date.now();
+
+    return pickLane(layer?.lanes || [], (lane) => {
+        const currentY = lane?.originalVec?.group?.position?.y;
+        const travelStartY = Number.isFinite(lane?.vocabEmbeddingTravelStartY)
+            ? lane.vocabEmbeddingTravelStartY
+            : NaN;
+        const exitY = Number.isFinite(lane?.vocabEmbeddingExitY)
+            ? lane.vocabEmbeddingExitY
+            : NaN;
+
+        if (
+            !Number.isFinite(currentY)
+            || !Number.isFinite(travelStartY)
+            || !Number.isFinite(exitY)
+        ) {
+            return false;
+        }
+
+        if (currentY <= travelStartY + 0.01 || currentY >= exitY - 0.01) {
+            return false;
+        }
+
+        return !shouldWaitForInputChipGate(gate, lane.tokenIndex, nowMs);
+    });
+}
+
 function detectStage(pipeline, numLayers) {
     const layers = pipeline?._layers;
     if (!Array.isArray(layers) || !layers.length) return null;
@@ -250,6 +394,14 @@ function detectStage(pipeline, numLayers) {
     if (!layer) return null;
 
     const lanes = layer.lanes || [];
+    const inputVocabChipEntry = detectInputVocabChipEntry(pipeline);
+    if (inputVocabChipEntry) {
+        return { stage: 'token_embedding', layer: null, lane: inputVocabChipEntry };
+    }
+    const inputVocabLane = detectInputVocabPassLane(pipeline, layer);
+    if (inputVocabLane) {
+        return { stage: 'token_embedding', layer: null, lane: inputVocabLane };
+    }
 
     if (layer.index === 0) {
         const posLane = pickLane(
@@ -362,22 +514,6 @@ export function initParameterCounter(pipeline, numLayers) {
         startNext();
     };
 
-    const seedTokenEmbedding = () => {
-        const key = stageKey('token_embedding', null);
-        const idx = indexByKey.get(key);
-        if (idx == null) return;
-        const entry = checkpoints[idx];
-        queue.push({
-            entry,
-            durationMs: estimateStageDuration('token_embedding', null, null),
-            label: formatStageLabel('token_embedding', null),
-            minDuration: MIN_STAGE_MS,
-            index: idx,
-        });
-        lastIndex = idx;
-        startNext();
-    };
-
     const resetCounterForNewPass = () => {
         currentValue = 0;
         lastIndex = -1;
@@ -388,7 +524,6 @@ export function initParameterCounter(pipeline, numLayers) {
         applyStageCounterGlow(counter, null);
         if (stageEl) stageEl.textContent = '';
         renderValue(currentValue);
-        seedTokenEmbedding();
     };
 
     resetCounterForNewPass();
