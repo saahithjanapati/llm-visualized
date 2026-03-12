@@ -161,6 +161,18 @@
                 </div>
             </div>
             <div id="detailPreviewMeta" class="detail-meta">
+                <div id="detailTokenInfoRow" class="detail-token-info attention-value" style="display:none;" data-empty="true">
+                    <div class="attention-value-head detail-token-info-head" aria-hidden="true">
+                        <span id="detailTokenInfoHeadPrimary">Raw token</span>
+                        <span id="detailTokenInfoHeadSecondary">Token ID</span>
+                        <span id="detailTokenInfoHeadTertiary">Position</span>
+                    </div>
+                    <div class="attention-value-bar detail-token-info-bar">
+                        <span id="detailTokenInfoText" class="attention-value-item detail-token-info-item detail-token-info-item--text">--</span>
+                        <span id="detailTokenInfoId" class="attention-value-item detail-token-info-item detail-token-info-item--id">--</span>
+                        <span id="detailTokenInfoPosition" class="attention-value-item detail-token-info-item detail-token-info-item--position">--</span>
+                    </div>
+                </div>
                 <div class="detail-row detail-row-dims">
                     <div id="detailInputDimHalf" class="detail-dim-half">
                         <span id="detailInputDimLabel" class="detail-label">Input dimension</span>
@@ -189,18 +201,6 @@
                 <div id="detailPromptContextTokens" class="detail-prompt-context-tokens" aria-label="Prompt context tokens"></div>
             </div>
             <div id="detailMeta" class="detail-meta">
-                <div id="detailTokenInfoRow" class="detail-token-info attention-value" style="display:none;" data-empty="true">
-                    <div class="attention-value-head detail-token-info-head" aria-hidden="true">
-                        <span id="detailTokenInfoHeadPrimary">Raw token</span>
-                        <span id="detailTokenInfoHeadSecondary">Token ID</span>
-                        <span id="detailTokenInfoHeadTertiary">Position</span>
-                    </div>
-                    <div class="attention-value-bar detail-token-info-bar">
-                        <span id="detailTokenInfoText" class="attention-value-item detail-token-info-item detail-token-info-item--text">--</span>
-                        <span id="detailTokenInfoId" class="attention-value-item detail-token-info-item detail-token-info-item--id">--</span>
-                        <span id="detailTokenInfoPosition" class="attention-value-item detail-token-info-item detail-token-info-item--position">--</span>
-                    </div>
-                </div>
                 <div id="detailTokenEncodingRow" class="detail-row detail-row-token-note" style="display:none;">
                     <span class="detail-label">Token note</span>
                     <span id="detailTokenEncodingValue" class="detail-value">—</span>

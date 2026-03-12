@@ -11888,7 +11888,7 @@ class SelectionPanel {
         if (this.biasDim) this.biasDim.textContent = showBiasDim ? metadata.biasDim : '';
         this._setSubtitleTertiaryText(subtitleTertiaryText);
         if (this.previewMetaSection) {
-            const topRows = Array.from(this.previewMetaSection.querySelectorAll('.detail-row'));
+            const topRows = Array.from(this.previewMetaSection.querySelectorAll('.detail-row, .detail-token-info'));
             const hasVisibleTopRow = !isKvCacheInfo && !isMhsaInfo && topRows.some(row => row.style.display !== 'none');
             this.previewMetaSection.style.display = hasVisibleTopRow ? '' : 'none';
         }

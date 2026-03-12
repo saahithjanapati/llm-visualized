@@ -134,6 +134,7 @@ const INPUT_VOCAB_TRAVEL_MIN_OPACITY = 0.24;
 const INPUT_VOCAB_VISUAL_EPSILON = 0.004;
 const LANE_PHASE_STALL_TIMEOUT_MS_SKIP = 3000;
 const LANE_PHASE_STALL_TIMEOUT_MS_NORMAL = 4500;
+const FINAL_ADDITION_WATCHDOG_GRACE_MS = 2500;
 // Allow extra headroom during debug-heavy sessions so watchdog fallback does not
 // fire purely because console instrumentation slowed animation frames.
 const LN2_HANDOFF_STALL_TIMEOUT_MS_NORMAL = 7000;
@@ -2213,6 +2214,8 @@ export default class Gpt2Layer extends BaseLayer {
             this._resetLaneStallWatchdog(lanes);
         }
 
+        this._applyPendingAdditionWatchdog(lanes, nowMs);
+
         // ----------------------------------------------------------
         // Notify LayerPipeline once **all** lanes have finished AND all additions complete
         // ----------------------------------------------------------
@@ -3136,36 +3139,42 @@ export default class Gpt2Layer extends BaseLayer {
                 if (this.mhsaAnimation && lane.originalVec) {
                     // Track this addition animation
                     this._pendingAdditions++;
-                    
+
                     // Trigger the final addition animation (originalVec ➔ vec)
                     // Prisms should rise from the lower original vector up into the processed one.
                     const postMlpData = this._getPostMlpResidualData(lane);
                     if (postMlpData) {
                         lane.additionTargetData = postMlpData;
                     }
-                    this.mhsaAnimation._startAdditionAnimation(
-                        lane.originalVec,
-                        vec,
-                        lane,
-                        () => {
-                            try {
-                                if (postMlpData) {
-                                    applyVectorData(
-                                        lane.originalVec,
-                                        postMlpData,
-                                        lane.tokenLabel ? `Post-MLP Residual - ${lane.tokenLabel}` : 'Post-MLP Residual',
-                                        this._getLaneMeta(lane, 'residual.post_mlp')
-                                    );
-                                }
-                            } finally {
-                                this._completePendingAddition(lane);
-                            }
-                        },
-                        { cameraHoldAfterAdditionMs: 220 }
-                    );
-                    
-                    // Set up completion callback for when addition finishes
                     this._scheduleAdditionCompletion(lane);
+                    try {
+                        this.mhsaAnimation._startAdditionAnimation(
+                            lane.originalVec,
+                            vec,
+                            lane,
+                            () => {
+                                try {
+                                    if (postMlpData) {
+                                        applyVectorData(
+                                            lane.originalVec,
+                                            postMlpData,
+                                            lane.tokenLabel ? `Post-MLP Residual - ${lane.tokenLabel}` : 'Post-MLP Residual',
+                                            this._getLaneMeta(lane, 'residual.post_mlp')
+                                        );
+                                    }
+                                } finally {
+                                    this._completePendingAddition(lane);
+                                }
+                            },
+                            { cameraHoldAfterAdditionMs: 220 }
+                        );
+                    } catch (err) {
+                        console.warn(
+                            `Layer ${this.index}: failed to start final addition for lane ${lane.laneIndex ?? '?'}.`,
+                            err
+                        );
+                        this._completePendingAddition(lane);
+                    }
                 }
                 this._setLaneLn2Phase(lane, LN2_PHASE.DONE, 'mlp return to residual complete');
                 this._emitProgress();
@@ -4449,8 +4458,16 @@ export default class Gpt2Layer extends BaseLayer {
             || lane?.originalVec?.instanceCount
             || this._getBaseVectorLength();
         const totalAnimTime = duration + flashDuration + Math.max(0, (vectorLength - 1) * delayBetween);
+        const startedAtMs = this._getNowMs();
 
         lane.additionComplete = false;
+        lane.__additionPending = true;
+        lane.__additionStartedAtMs = startedAtMs;
+        lane.__additionExpectedCompleteAtMs = startedAtMs + totalAnimTime + 100;
+        lane.__additionWatchdogGraceMs = Math.max(
+            FINAL_ADDITION_WATCHDOG_GRACE_MS,
+            totalAnimTime
+        );
 
         const complete = () => this._completePendingAddition(lane);
 
@@ -4468,6 +4485,10 @@ export default class Gpt2Layer extends BaseLayer {
     _completePendingAddition(lane) {
         if (!lane || lane.additionComplete) return false;
         lane.additionComplete = true;
+        delete lane.__additionPending;
+        delete lane.__additionStartedAtMs;
+        delete lane.__additionExpectedCompleteAtMs;
+        delete lane.__additionWatchdogGraceMs;
         if (this._pendingAdditions > 0) {
             this._pendingAdditions--;
         }
@@ -4477,6 +4498,61 @@ export default class Gpt2Layer extends BaseLayer {
         }
         this._emitProgress();
         return true;
+    }
+
+    _applyPendingAdditionWatchdog(lanes, nowMs) {
+        if (!Array.isArray(lanes) || !lanes.length || !Number.isFinite(nowMs) || this._pendingAdditions <= 0) {
+            return false;
+        }
+
+        const allLanesDone = lanes.every((lane) => !lane || lane.ln2Phase === LN2_PHASE.DONE);
+        if (!allLanesDone) return false;
+
+        let forcedCount = 0;
+        let trackedPendingCount = 0;
+
+        for (let i = 0; i < lanes.length; i++) {
+            const lane = lanes[i];
+            if (!lane || lane.additionComplete) continue;
+
+            const hasPendingMarker = !!lane.__additionPending
+                || !!lane._additionCompletionTween
+                || Number.isFinite(lane.__additionExpectedCompleteAtMs);
+            if (!hasPendingMarker) continue;
+
+            trackedPendingCount += 1;
+
+            const expectedAtMs = Number.isFinite(lane.__additionExpectedCompleteAtMs)
+                ? lane.__additionExpectedCompleteAtMs
+                : nowMs;
+            const graceMs = Number.isFinite(lane.__additionWatchdogGraceMs)
+                ? lane.__additionWatchdogGraceMs
+                : FINAL_ADDITION_WATCHDOG_GRACE_MS;
+
+            if (nowMs < (expectedAtMs + graceMs)) continue;
+
+            if (this._completePendingAddition(lane)) {
+                forcedCount += 1;
+                console.warn(
+                    `Layer ${this.index}: final addition watchdog forced completion for lane ${lane.laneIndex ?? '?'}.`
+                );
+            }
+        }
+
+        if (forcedCount > 0) {
+            return true;
+        }
+
+        if (trackedPendingCount === 0 && this._pendingAdditions > 0) {
+            console.warn(
+                `Layer ${this.index}: final addition watchdog cleared ${this._pendingAdditions} leaked pending addition(s).`
+            );
+            this._pendingAdditions = 0;
+            this._emitProgress();
+            return true;
+        }
+
+        return false;
     }
 
     /**
