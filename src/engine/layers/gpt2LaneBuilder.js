@@ -3,7 +3,12 @@ import { StraightLineTrail } from '../../utils/trailUtils.js';
 import { TRAIL_MIN_SEGMENT_DISTANCE } from '../../utils/trailConstants.js';
 import { PrismLayerNormAnimation } from '../../animations/PrismLayerNormAnimation.js';
 import { startPrismAdditionAnimation } from '../../utils/additionUtils.js';
-import { applyVectorData, copyVectorAppearance, LN_INTERNAL_TRAIL_MIN_SEGMENT } from './gpt2LayerUtils.js';
+import {
+    applyVectorData,
+    cloneVectorKeyColors,
+    copyVectorAppearance,
+    LN_INTERNAL_TRAIL_MIN_SEGMENT
+} from './gpt2LayerUtils.js';
 import { BatchedPrismVectorSet } from '../../components/BatchedPrismVectorSet.js';
 import { logRandomColorDebug } from '../../utils/randomColorDebug.js';
 import {
@@ -27,8 +32,6 @@ import { HORIZ_PHASE, LN2_PHASE } from './gpt2LanePhases.js';
 
 const TMP_WORLD_POS = new THREE.Vector3();
 const LN_ADD_VECTOR_OFFSET_FRACTION = 0.25; // fraction of LN height above centre for bias addition
-const INPUT_VOCAB_EMERGE_INSET_MIN_Y = 8;
-const INPUT_VOCAB_EMERGE_INSET_FACTOR = 0.75;
 export const LN_PARAM_MONOCHROME = {
     type: 'monochromatic',
     baseHue: 0,
@@ -47,13 +50,18 @@ function getPrismVectorHeight(vec) {
     return halfPrismHeight > 0 ? halfPrismHeight * 2 : 10.5;
 }
 
-function getInputVocabSpawnOffsetY(vec) {
+function getInputVocabSpawnLayout(startY, vec) {
     const prismHeight = getPrismVectorHeight(vec);
-    const extraInsetY = Math.max(
-        INPUT_VOCAB_EMERGE_INSET_MIN_Y,
-        prismHeight * INPUT_VOCAB_EMERGE_INSET_FACTOR
-    );
-    return prismHeight + extraInsetY;
+    const prismHalfHeight = prismHeight / 2;
+    const matrixBottomY = startY - EMBEDDING_MATRIX_PARAMS_VOCAB.height;
+    const travelStartY = matrixBottomY - prismHalfHeight;
+    const entryY = matrixBottomY + prismHalfHeight;
+    return {
+        travelStartY,
+        entryY,
+        visibleStartY: travelStartY + prismHeight * 0.2,
+        revealY: startY - prismHeight
+    };
 }
 
 export function createFreshLanes(layer, offsetX, ln1CenterY, ln2CenterY, ln1TopY) {
@@ -64,7 +72,8 @@ export function createFreshLanes(layer, offsetX, ln1CenterY, ln2CenterY, ln1TopY
         ? layer._getActiveLaneLayoutIndices()
         : Array.from({ length: layer._laneCount }, (_, idx) => idx);
     const slitSpacing = LN_PARAMS.depth / (layoutCount + 1);
-    // Start vectors at the TOP of the bottom embedding matrix.
+    // Anchor the first-layer vocab vectors to the bottom embedding geometry;
+    // per-lane setup may place them below the block for an upward entry.
     const startY = (LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2 + EMBEDDING_BOTTOM_TOP_ALIGN_OFFSET_FROM_LN1_BOTTOM) + EMBEDDING_BOTTOM_Y_ADJUST;
     const meetY = ln1TopY + 5;
     for (let localLaneIdx = 0; localLaneIdx < layer._laneCount; localLaneIdx++) {
@@ -251,6 +260,7 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
         ? oldLane.tokenLabel
         : layer._getTokenLabel(laneTokenIndex);
     let originalVec, zPos, startY, trail;
+    let inputVocabLayout = null;
     let inputVocabSpawnLowered = false;
 
     if (oldLane && oldLane.originalVec) {
@@ -293,9 +303,10 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
             layer._getInstanceCountFromData(data)
         );
         if (layer.index === 0) {
-            // Spawn first-layer vocab vectors slightly inside the embedding so
-            // they visually emerge through the top slit instead of popping in.
-            originalVec.group.position.y -= getInputVocabSpawnOffsetY(originalVec);
+            // Start first-layer vocab vectors below the bottom face so they
+            // visibly enter the embedding before emerging from the top slit.
+            inputVocabLayout = getInputVocabSpawnLayout(startY, originalVec);
+            originalVec.group.position.y = inputVocabLayout.travelStartY;
             originalVec.group.visible = false;
             inputVocabSpawnLowered = true;
         }
@@ -479,8 +490,13 @@ export function buildSingleLane(layer, oldLane, offsetX, ln1CenterY, ln2CenterY,
         // Top Y of the bottom vocab embedding matrix; used to detect when the
         // residual vector has exited the embedding block.
         vocabEmbeddingExitY: Number.isFinite(startY_override) ? startY_override : startY,
-        // Reveal the vocab vector only once its top reaches the matrix slit.
-        vocabEmbeddingRevealY: (Number.isFinite(startY_override) ? startY_override : startY) - getPrismVectorHeight(originalVec),
+        vocabEmbeddingEntryY: inputVocabLayout ? inputVocabLayout.entryY : NaN,
+        vocabEmbeddingVisibleStartY: inputVocabLayout ? inputVocabLayout.visibleStartY : NaN,
+        vocabEmbeddingRevealY: inputVocabLayout
+            ? inputVocabLayout.revealY
+            : (Number.isFinite(startY_override) ? startY_override : startY) - getPrismVectorHeight(originalVec),
+        vocabEmbeddingTravelStartY: inputVocabLayout ? inputVocabLayout.travelStartY : NaN,
+        vocabEmbeddingBaseColors: inputVocabLayout ? cloneVectorKeyColors(originalVec) : null,
         __inputVocabGateAdjustedStartY: inputVocabSpawnLowered,
         zPos,
         __residualMaxY: (function(){ originalVec.group.getWorldPosition(TMP_WORLD_POS); return TMP_WORLD_POS.y; })()

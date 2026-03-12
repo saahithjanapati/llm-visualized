@@ -37,6 +37,7 @@ import {
 } from '../../utils/constants.js';
 import { PrismLayerNormAnimation } from '../../animations/PrismLayerNormAnimation.js';
 import { MHSAAnimation } from '../../animations/MHSAAnimation.js';
+import { MHA_FINAL_Q_COLOR } from '../../animations/LayerAnimationConstants.js';
 import { startPrismAdditionAnimation } from '../../utils/additionUtils.js';
 import {
     applyMatrixLabel,
@@ -45,6 +46,7 @@ import {
 } from '../../utils/matrixVisualUtils.js';
 import {
     applyVectorData,
+    blendVectorKeyColors,
     copyVectorAppearance,
     freezeStaticTransforms,
     LN_INTERNAL_TRAIL_MIN_SEGMENT
@@ -106,6 +108,7 @@ const COLOR_LIGHT_YELLOW = new THREE.Color(GPT2_LAYER_VISUAL_TUNING.layerNorm.ac
 const COLOR_BRIGHT_YELLOW = new THREE.Color(GPT2_LAYER_VISUAL_TUNING.layerNorm.finalColor);
 const COLOR_WHITE = new THREE.Color(0xffffff);
 const COLOR_INACTIVE_COMPONENT = new THREE.Color(INACTIVE_COMPONENT_COLOR);
+const INPUT_VOCAB_TRAVEL_TINT_COLOR = new THREE.Color(MHA_FINAL_Q_COLOR);
 
 const TMP_LN_TRAIL_POS = new THREE.Vector3();
 const SKIP_VISIBILITY_REFRESH_MS = 56;
@@ -125,6 +128,10 @@ const POS_ADD_STALL_TIMEOUT_MS = 12000;
 const POS_PASS_START_PAUSE_MS = 140;
 const FIRST_LAYER_LN1_START_PAUSE_MS = 180;
 const FIRST_LAYER_LN1_RISE_SPEED_MULT = 0.48;
+const FIRST_LAYER_INPUT_VOCAB_RISE_SPEED_MULT = 6.0;
+const INPUT_VOCAB_TRAVEL_TINT_MAX = 0.18;
+const INPUT_VOCAB_TRAVEL_MIN_OPACITY = 0.24;
+const INPUT_VOCAB_VISUAL_EPSILON = 0.004;
 const LANE_PHASE_STALL_TIMEOUT_MS_SKIP = 3000;
 const LANE_PHASE_STALL_TIMEOUT_MS_NORMAL = 4500;
 // Allow extra headroom during debug-heavy sessions so watchdog fallback does not
@@ -771,6 +778,10 @@ export default class Gpt2Layer extends BaseLayer {
         const bottomY_ln1_abs = LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2;
         const midY_ln1_abs    = LAYER_NORM_1_Y_POS;
         const topY_ln1_abs    = LAYER_NORM_1_Y_POS + LN_PARAMS.height / 2;
+        const ln1CenterX = this.ln1 && this.ln1.group && Number.isFinite(this.ln1.group.position.x)
+            ? this.ln1.group.position.x
+            : BRANCH_X;
+        const ln1EntryXEpsilon = 0.5;
         const ln2CenterY = this.ln2 && this.ln2.group && Number.isFinite(this.ln2.group.position.y)
             ? this.ln2.group.position.y
             : LAYER_NORM_2_Y_POS;
@@ -912,15 +923,21 @@ export default class Gpt2Layer extends BaseLayer {
                 // Aggregate LN1/LN2 state and readiness flags in a single pass.
                 const dupVec = lane.dupVec;
                 if (dupVec && dupVec.group && dupVec.group.visible) {
-                    const y = dupVec.group.position.y;
-                    highestLN1VecY = Math.max(highestLN1VecY, y);
-                    if (y >= bottomY_ln1_abs - exitTransitionRange) anyVectorInLN1 = true;
+                    const x = dupVec.group.position.x;
+                    if (Math.abs(x - ln1CenterX) <= ln1EntryXEpsilon) {
+                        const y = dupVec.group.position.y;
+                        highestLN1VecY = Math.max(highestLN1VecY, y);
+                        if (y >= bottomY_ln1_abs - exitTransitionRange) anyVectorInLN1 = true;
+                    }
                 }
                 const resultVec = lane.resultVec;
                 if (resultVec && resultVec.group && resultVec.group.visible) {
-                    const y = resultVec.group.position.y;
-                    highestLN1VecY = Math.max(highestLN1VecY, y);
-                    if (y >= bottomY_ln1_abs - exitTransitionRange) anyVectorInLN1 = true;
+                    const x = resultVec.group.position.x;
+                    if (Math.abs(x - ln1CenterX) <= ln1EntryXEpsilon) {
+                        const y = resultVec.group.position.y;
+                        highestLN1VecY = Math.max(highestLN1VecY, y);
+                        if (y >= bottomY_ln1_abs - exitTransitionRange) anyVectorInLN1 = true;
+                    }
                 }
 
                 const movingLn2 = lane.movingVecLN2;
@@ -1088,7 +1105,7 @@ export default class Gpt2Layer extends BaseLayer {
             activeOpacity: layerNormTuning.activeOpacity,
             skipActive,
             skipColorLerpAlpha: SKIP_COMPONENT_COLOR_LERP_ALPHA,
-            applyWhenInactive: true,
+            applyWhenInactive: false,
         }).colorLocked;
 
         this._ln2ColorLocked = updateLayerNormVisualState({
@@ -1192,7 +1209,14 @@ export default class Gpt2Layer extends BaseLayer {
                         // Clamp position so early-arriving lanes don’t drift.
                         originalVec.group.position.y = lane.branchStartY;
                     } else {
-                        const baseRiseSpeed = ANIM_RISE_SPEED_ORIGINAL * speedMult;
+                        const inputVocabRiseMult = (
+                            !skipActive
+                            && this.index === 0
+                            && Number.isFinite(lane.vocabEmbeddingTravelStartY)
+                        )
+                            ? FIRST_LAYER_INPUT_VOCAB_RISE_SPEED_MULT
+                            : 1;
+                        const baseRiseSpeed = ANIM_RISE_SPEED_ORIGINAL * speedMult * inputVocabRiseMult;
                         const syncedRiseSpeed = this._getSynchronizedRiseSpeed(
                             originalVec.group.position.y,
                             lane.branchStartY,
@@ -3644,15 +3668,106 @@ export default class Gpt2Layer extends BaseLayer {
         return this._isWaitingForInputChipGate(gate, lane, nowMs, skipActive);
     }
 
+    _applyInputVocabTravelAppearance(lane, tintAlpha = 0, opacity = 1) {
+        const originalVec = lane && lane.originalVec;
+        if (!originalVec || !originalVec.group) return;
+
+        const safeTintAlpha = THREE.MathUtils.clamp(Number.isFinite(tintAlpha) ? tintAlpha : 0, 0, INPUT_VOCAB_TRAVEL_TINT_MAX);
+        const safeOpacity = THREE.MathUtils.clamp(Number.isFinite(opacity) ? opacity : 1, 0, 1);
+        const lastTintAlpha = Number.isFinite(lane?.__inputVocabTintAlpha) ? lane.__inputVocabTintAlpha : NaN;
+        const lastOpacity = Number.isFinite(lane?.__inputVocabOpacity) ? lane.__inputVocabOpacity : NaN;
+
+        if (
+            Array.isArray(lane?.vocabEmbeddingBaseColors)
+            && lane.vocabEmbeddingBaseColors.length
+            && (
+                !Number.isFinite(lastTintAlpha)
+                || Math.abs(lastTintAlpha - safeTintAlpha) > INPUT_VOCAB_VISUAL_EPSILON
+            )
+        ) {
+            blendVectorKeyColors(
+                originalVec,
+                lane.vocabEmbeddingBaseColors,
+                INPUT_VOCAB_TRAVEL_TINT_COLOR,
+                safeTintAlpha
+            );
+            lane.__inputVocabTintAlpha = safeTintAlpha;
+        }
+
+        if (
+            !Number.isFinite(lastOpacity)
+            || Math.abs(lastOpacity - safeOpacity) > INPUT_VOCAB_VISUAL_EPSILON
+        ) {
+            this._setVectorOpacity(originalVec, safeOpacity);
+            lane.__inputVocabOpacity = safeOpacity;
+        }
+    }
+
     _syncInputVocabRevealState(lane) {
         const originalVec = lane && lane.originalVec;
         if (!originalVec || !originalVec.group) return;
+        if (lane && lane.__inputVocabVisualsComplete) {
+            originalVec.group.visible = true;
+            return;
+        }
+        const visibleStartY = Number.isFinite(lane?.vocabEmbeddingVisibleStartY)
+            ? lane.vocabEmbeddingVisibleStartY
+            : NaN;
+        const entryY = Number.isFinite(lane?.vocabEmbeddingEntryY)
+            ? lane.vocabEmbeddingEntryY
+            : NaN;
         const revealY = Number.isFinite(lane?.vocabEmbeddingRevealY)
             ? lane.vocabEmbeddingRevealY
             : NaN;
-        const shouldReveal = !Number.isFinite(revealY) || originalVec.group.position.y >= revealY - 0.01;
+        const exitY = Number.isFinite(lane?.vocabEmbeddingExitY)
+            ? lane.vocabEmbeddingExitY
+            : NaN;
+        const currentY = originalVec.group.position.y;
+        const shouldReveal = !Number.isFinite(visibleStartY) || currentY >= visibleStartY - 0.01;
         originalVec.group.visible = shouldReveal;
-        if (shouldReveal) return;
+
+        if (shouldReveal) {
+            let tintAlpha = 0;
+            if (Number.isFinite(entryY) && Number.isFinite(revealY) && revealY > entryY + 0.01) {
+                if (currentY < revealY) {
+                    const tintProgress = THREE.MathUtils.clamp(
+                        (currentY - entryY) / Math.max(1e-6, revealY - entryY),
+                        0,
+                        1
+                    );
+                    tintAlpha = INPUT_VOCAB_TRAVEL_TINT_MAX * THREE.MathUtils.smoothstep(tintProgress, 0, 1);
+                } else if (Number.isFinite(exitY) && exitY > revealY + 0.01) {
+                    const fadeProgress = THREE.MathUtils.clamp(
+                        (currentY - revealY) / Math.max(1e-6, exitY - revealY),
+                        0,
+                        1
+                    );
+                    tintAlpha = INPUT_VOCAB_TRAVEL_TINT_MAX * (1 - THREE.MathUtils.smoothstep(fadeProgress, 0, 1));
+                }
+            }
+
+            let opacity = 1;
+            if (Number.isFinite(visibleStartY) && Number.isFinite(entryY) && entryY > visibleStartY + 0.01) {
+                const opacityProgress = THREE.MathUtils.clamp(
+                    (currentY - visibleStartY) / Math.max(1e-6, entryY - visibleStartY),
+                    0,
+                    1
+                );
+                opacity = THREE.MathUtils.lerp(
+                    INPUT_VOCAB_TRAVEL_MIN_OPACITY,
+                    1,
+                    THREE.MathUtils.smoothstep(opacityProgress, 0, 1)
+                );
+            }
+
+            this._applyInputVocabTravelAppearance(lane, tintAlpha, opacity);
+            if (Number.isFinite(exitY) && currentY >= exitY - 0.01 && tintAlpha <= INPUT_VOCAB_VISUAL_EPSILON) {
+                lane.__inputVocabVisualsComplete = true;
+            }
+            return;
+        }
+
+        this._applyInputVocabTravelAppearance(lane, 0, INPUT_VOCAB_TRAVEL_MIN_OPACITY);
 
         const trail = originalVec.userData && originalVec.userData.trail;
         if (!trail) return;

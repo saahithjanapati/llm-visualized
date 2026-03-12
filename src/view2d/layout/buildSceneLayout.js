@@ -50,6 +50,12 @@ function resolveCaptionLines(node) {
     return lines;
 }
 
+function resolveMeasuredValue(value, fallback = null) {
+    return Number.isFinite(value) && value > 0
+        ? Math.max(1, Math.floor(value))
+        : fallback;
+}
+
 function createAnchors(contentBounds) {
     if (!contentBounds) {
         return {
@@ -161,10 +167,12 @@ function measureLeafNode(node, config) {
     let layoutData = {};
 
     if (node.kind === VIEW2D_NODE_KINDS.MATRIX) {
+        const measuredRows = resolveMeasuredValue(node.metadata?.measure?.rows, null);
+        const measuredCols = resolveMeasuredValue(node.metadata?.measure?.cols, null);
         switch (node.presentation) {
         case VIEW2D_MATRIX_PRESENTATIONS.BANDED_ROWS: {
-            const rowCount = Math.max(1, node.dimensions?.rows || node.rowItems?.length || 1);
-            const maxBarWidth = Math.max(148, (node.dimensions?.cols || 1) * 1.15);
+            const rowCount = Math.max(1, measuredRows || node.rowItems?.length || node.dimensions?.rows || 1);
+            const maxBarWidth = Math.max(148, (measuredCols || node.dimensions?.cols || 1) * 1.15);
             contentWidth = config.component.rowLabelGutterWidth + maxBarWidth + (config.component.contentPaddingX * 2);
             contentHeight = (rowCount * config.component.bandedRowHeight)
                 + (Math.max(0, rowCount - 1) * config.component.bandedRowGap)
@@ -180,10 +188,10 @@ function measureLeafNode(node, config) {
             break;
         }
         case VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS: {
-            const rowCount = Math.max(1, node.dimensions?.rows || node.rowItems?.length || 1);
+            const rowCount = Math.max(1, measuredRows || node.rowItems?.length || node.dimensions?.rows || 1);
             const compactWidth = Math.max(
                 config.component.compactMinWidth,
-                (node.dimensions?.cols || 1) * config.component.gridCellSize
+                (measuredCols || node.dimensions?.cols || 1) * config.component.gridCellSize
             );
             contentWidth = compactWidth + (config.component.contentPaddingX * 2);
             contentHeight = (rowCount * config.component.compactRowHeight)
@@ -199,8 +207,8 @@ function measureLeafNode(node, config) {
             break;
         }
         case VIEW2D_MATRIX_PRESENTATIONS.GRID: {
-            const rowCount = Math.max(1, node.dimensions?.rows || 1);
-            const colCount = Math.max(1, node.dimensions?.cols || 1);
+            const rowCount = Math.max(1, measuredRows || node.dimensions?.rows || 1);
+            const colCount = Math.max(1, measuredCols || node.dimensions?.cols || 1);
             contentWidth = (colCount * config.component.gridCellSize)
                 + (Math.max(0, colCount - 1) * config.component.gridCellGap)
                 + (config.component.contentPaddingX * 2);
@@ -216,8 +224,8 @@ function measureLeafNode(node, config) {
             break;
         }
         case VIEW2D_MATRIX_PRESENTATIONS.COLUMN_STRIP: {
-            const rowCount = Math.max(1, node.dimensions?.rows || 1);
-            const colCount = Math.max(1, node.dimensions?.cols || node.columnItems?.length || 1);
+            const rowCount = Math.max(1, measuredRows || node.dimensions?.rows || 1);
+            const colCount = Math.max(1, measuredCols || node.columnItems?.length || node.dimensions?.cols || 1);
             contentWidth = (colCount * config.component.transposeColWidth)
                 + (Math.max(0, colCount - 1) * config.component.transposeColGap)
                 + (config.component.contentPaddingX * 2);
@@ -235,7 +243,7 @@ function measureLeafNode(node, config) {
         case VIEW2D_MATRIX_PRESENTATIONS.ACCENT_BAR:
             contentWidth = Math.max(
                 56,
-                (node.dimensions?.cols || 1) * (config.component.gridCellSize * 0.85)
+                (measuredCols || node.dimensions?.cols || 1) * (config.component.gridCellSize * 0.85)
             ) + (config.component.contentPaddingX * 2);
             contentHeight = config.component.biasBarHeight + (config.component.contentPaddingY * 2);
             layoutData = {
@@ -403,6 +411,7 @@ function registerNodeEntry(registry, node, {
         labelBounds,
         dimensionBounds,
         anchors: createAnchors(contentBounds || bounds),
+        semantic: node.semantic || null,
         layoutData,
         metadata: node.metadata || null
     });
@@ -642,6 +651,7 @@ export function buildSceneLayout(scene, {
                 target: child.target,
                 bounds: inflateBounds(pointBounds(pathPoints), 2),
                 pathPoints,
+                semantic: child.semantic || null,
                 metadata: child.metadata || null
             });
         });

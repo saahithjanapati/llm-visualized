@@ -35,6 +35,88 @@ function cloneArray(items = []) {
     }) : [];
 }
 
+function normalizeSemanticValue(value) {
+    if (value === null || value === undefined) return null;
+    if (typeof value === 'number') {
+        return Number.isFinite(value) ? Math.floor(value) : null;
+    }
+    if (typeof value === 'string') {
+        const safe = value.trim();
+        return safe.length ? safe : null;
+    }
+    if (typeof value === 'boolean') {
+        return value;
+    }
+    return null;
+}
+
+function cloneSemantic(semantic = null) {
+    if (!semantic || typeof semantic !== 'object') return null;
+    const normalized = Object.entries(semantic).reduce((acc, [key, value]) => {
+        if (!key) return acc;
+        const normalizedValue = normalizeSemanticValue(value);
+        if (normalizedValue !== null) {
+            acc[key] = normalizedValue;
+        }
+        return acc;
+    }, {});
+    return Object.keys(normalized).length ? normalized : null;
+}
+
+function getBoundsArea(bounds = null) {
+    if (!bounds) return 0;
+    const width = Number.isFinite(bounds.width) ? Math.max(0, bounds.width) : 0;
+    const height = Number.isFinite(bounds.height) ? Math.max(0, bounds.height) : 0;
+    return width * height;
+}
+
+function scoreSemanticMatch(entrySemantic = null, targetSemantic = null) {
+    if (!entrySemantic || !targetSemantic) return null;
+    const targetEntries = Object.entries(targetSemantic);
+    if (!targetEntries.length) return null;
+    for (const [key, value] of targetEntries) {
+        if (!Object.prototype.hasOwnProperty.call(entrySemantic, key)) {
+            return null;
+        }
+        if (entrySemantic[key] !== value) {
+            return null;
+        }
+    }
+    const extraKeyCount = Object.keys(entrySemantic)
+        .filter((key) => !Object.prototype.hasOwnProperty.call(targetSemantic, key))
+        .length;
+    return {
+        matchCount: targetEntries.length,
+        extraKeyCount
+    };
+}
+
+function compareSemanticMatches(a, b) {
+    if ((a?.score?.matchCount || 0) !== (b?.score?.matchCount || 0)) {
+        return (b?.score?.matchCount || 0) - (a?.score?.matchCount || 0);
+    }
+    if ((a?.score?.extraKeyCount || 0) !== (b?.score?.extraKeyCount || 0)) {
+        return (a?.score?.extraKeyCount || 0) - (b?.score?.extraKeyCount || 0);
+    }
+
+    const kindRank = (entry) => {
+        const kind = String(entry?.entry?.kind || '');
+        if (kind === 'group') return 0;
+        if (kind === 'matrix') return 1;
+        if (kind === 'text' || kind === 'operator') return 2;
+        if (kind === 'connector') return 3;
+        return 4;
+    };
+    const rankDelta = kindRank(a) - kindRank(b);
+    if (rankDelta !== 0) return rankDelta;
+
+    if ((a?.entry?.depth || 0) !== (b?.entry?.depth || 0)) {
+        return (a?.entry?.depth || 0) - (b?.entry?.depth || 0);
+    }
+
+    return getBoundsArea(b?.entry?.bounds) - getBoundsArea(a?.entry?.bounds);
+}
+
 export class LayoutRegistry {
     constructor() {
         this._sceneBounds = null;
@@ -64,6 +146,7 @@ export class LayoutRegistry {
             labelBounds: cloneBounds(entry.labelBounds),
             dimensionBounds: cloneBounds(entry.dimensionBounds),
             anchors: cloneAnchors(entry.anchors),
+            semantic: cloneSemantic(entry.semantic),
             layoutData: entry.layoutData && typeof entry.layoutData === 'object'
                 ? { ...entry.layoutData }
                 : null,
@@ -85,6 +168,7 @@ export class LayoutRegistry {
             labelBounds: cloneBounds(entry.labelBounds),
             dimensionBounds: cloneBounds(entry.dimensionBounds),
             anchors: cloneAnchors(entry.anchors),
+            semantic: cloneSemantic(entry.semantic),
             layoutData: entry.layoutData ? { ...entry.layoutData } : null,
             metadata: entry.metadata ? { ...entry.metadata } : null
         };
@@ -120,6 +204,7 @@ export class LayoutRegistry {
             source: entry.source && typeof entry.source === 'object' ? { ...entry.source } : null,
             target: entry.target && typeof entry.target === 'object' ? { ...entry.target } : null,
             pathPoints: Array.isArray(entry.pathPoints) ? entry.pathPoints.map((point) => clonePoint(point)) : [],
+            semantic: cloneSemantic(entry.semantic),
             metadata: entry.metadata && typeof entry.metadata === 'object'
                 ? { ...entry.metadata }
                 : null
@@ -137,6 +222,7 @@ export class LayoutRegistry {
             source: entry.source ? { ...entry.source } : null,
             target: entry.target ? { ...entry.target } : null,
             pathPoints: entry.pathPoints.map((point) => clonePoint(point)),
+            semantic: cloneSemantic(entry.semantic),
             metadata: entry.metadata ? { ...entry.metadata } : null
         };
     }
@@ -147,6 +233,73 @@ export class LayoutRegistry {
 
     getConnectorEntries() {
         return Array.from(this._connectorEntries.values()).map((entry) => this.getConnectorEntry(entry.nodeId));
+    }
+
+    getEntriesForSemanticTarget(target = null, { includeConnectors = false } = {}) {
+        const targetSemantic = cloneSemantic(target);
+        if (!targetSemantic) return [];
+
+        const nodeMatches = Array.from(this._nodeEntries.values()).map((entry) => ({
+            entryType: 'node',
+            entry,
+            score: scoreSemanticMatch(entry.semantic, targetSemantic)
+        })).filter((candidate) => candidate.score);
+        const connectorMatches = includeConnectors
+            ? Array.from(this._connectorEntries.values()).map((entry) => ({
+                entryType: 'connector',
+                entry,
+                score: scoreSemanticMatch(entry.semantic, targetSemantic)
+            })).filter((candidate) => candidate.score)
+            : [];
+
+        return [...nodeMatches, ...connectorMatches]
+            .sort(compareSemanticMatches)
+            .map((candidate) => (
+                candidate.entryType === 'connector'
+                    ? this.getConnectorEntry(candidate.entry.nodeId)
+                    : this.getNodeEntry(candidate.entry.nodeId)
+            ))
+            .filter(Boolean);
+    }
+
+    resolveEntryForSemanticTarget(target = null, options = {}) {
+        return this.getEntriesForSemanticTarget(target, options)[0] || null;
+    }
+
+    resolveNodeIdForSemanticTarget(target = null, options = {}) {
+        const entry = this.resolveEntryForSemanticTarget(target, options);
+        return typeof entry?.nodeId === 'string' ? entry.nodeId : null;
+    }
+
+    resolveBoundsForSemanticTarget(target = null, options = {}) {
+        const entry = this.resolveEntryForSemanticTarget(target, options);
+        return cloneBounds(entry?.bounds || null);
+    }
+
+    resolveAnchorsForSemanticTarget(target = null, options = {}) {
+        const entry = this.resolveEntryForSemanticTarget(target, options);
+        return cloneAnchors(entry?.anchors || {});
+    }
+
+    resolveFocusPathForSemanticTarget(target = null, options = {}) {
+        const entry = this.resolveEntryForSemanticTarget(target, options);
+        if (!entry || typeof entry.nodeId !== 'string' || !entry.nodeId.length) return [];
+
+        const path = [];
+        let current = this._nodeEntries.get(entry.nodeId) || null;
+        while (current) {
+            path.unshift({
+                nodeId: current.nodeId,
+                kind: current.kind,
+                role: current.role,
+                semantic: cloneSemantic(current.semantic),
+                bounds: cloneBounds(current.bounds)
+            });
+            current = typeof current.parentId === 'string' && current.parentId.length
+                ? this._nodeEntries.get(current.parentId) || null
+                : null;
+        }
+        return path;
     }
 
     toJSON() {

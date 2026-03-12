@@ -52,6 +52,12 @@ import {
     isMlpMatrixSelectionLabel,
     setDescriptionGeluAction
 } from './selectionPanelGeluPreview.js';
+import {
+    createTransformerView2dDetailView,
+    resolveTransformerView2dActionContext,
+    setDescriptionTransformerView2dAction,
+    TRANSFORMER_VIEW2D_PANEL_ACTION_OPEN
+} from './selectionPanelTransformerView2d.js';
 import { renderSelectionPreviewEquations } from './selectionPanelEquationPreviewUtils.js';
 import {
     computeAttentionCellSize,
@@ -2692,6 +2698,10 @@ class SelectionPanel {
         this._geluDetailView = createGeluDetailView(this.panel);
         this._geluDetailOpen = false;
         this._geluSourceSelection = null;
+        this._transformerView2dDetailView = createTransformerView2dDetailView(this.panel);
+        this._transformerView2dDetailOpen = false;
+        this._transformerView2dSourceSelection = null;
+        this._currentTransformerView2dContext = null;
         this._lastSelection = null;
         this._lastSelectionLabel = '';
         this._historyEntries = [];
@@ -3745,6 +3755,9 @@ class SelectionPanel {
             if (this._geluDetailOpen) {
                 this._geluDetailView?.resizeAndRender();
             }
+            if (this._transformerView2dDetailOpen) {
+                this._transformerView2dDetailView?.resizeAndRender();
+            }
             return;
         }
         if (this.currentPreview && this._previewPausedForPanelResize) {
@@ -3803,6 +3816,9 @@ class SelectionPanel {
         }
         if (this._geluDetailOpen) {
             this._geluDetailView?.resizeAndRender();
+        }
+        if (this._transformerView2dDetailOpen) {
+            this._transformerView2dDetailView?.resizeAndRender();
         }
     }
 
@@ -3940,6 +3956,10 @@ class SelectionPanel {
         }
 
         if (event.key === 'Escape' && this.isOpen) {
+            if (this._transformerView2dDetailOpen) {
+                this.close({ clearHistory: false });
+                return;
+            }
             if (this._mhsaFullscreenActive && this.fullscreenToggleBtn) {
                 this._setMhsaFullscreen(false);
                 return;
@@ -3958,7 +3978,13 @@ class SelectionPanel {
     }
 
     _canToggleMhsaFullscreen() {
-        return !!(this.isOpen && this._isMhsaInfoSelectionActive && !this._isSmallScreen());
+        return !!(
+            this.isOpen
+            && (
+                this._transformerView2dDetailOpen
+                || (this._isMhsaInfoSelectionActive && !this._isSmallScreen())
+            )
+        );
     }
 
     _syncMhsaViewRoute(active) {
@@ -4002,6 +4028,7 @@ class SelectionPanel {
     _updateMhsaFullscreenToggle() {
         if (!this.fullscreenToggleBtn) return;
         const canToggle = this._canToggleMhsaFullscreen();
+        const shouldShowToggle = canToggle && !this._transformerView2dDetailOpen;
         let clearedFullscreen = false;
         if (!canToggle && this._mhsaFullscreenActive) {
             this._mhsaFullscreenActive = false;
@@ -4009,8 +4036,8 @@ class SelectionPanel {
             clearedFullscreen = true;
         }
         this._syncMhsaFullscreenDocumentState();
-        this.fullscreenToggleBtn.hidden = !canToggle;
-        this.fullscreenToggleBtn.setAttribute('aria-hidden', canToggle ? 'false' : 'true');
+        this.fullscreenToggleBtn.hidden = !shouldShowToggle;
+        this.fullscreenToggleBtn.setAttribute('aria-hidden', shouldShowToggle ? 'false' : 'true');
         this.fullscreenToggleBtn.dataset.fullscreen = this._mhsaFullscreenActive ? 'true' : 'false';
         this.fullscreenToggleBtn.textContent = this._mhsaFullscreenActive ? 'Exit' : 'Full';
         this.fullscreenToggleBtn.setAttribute(
@@ -4490,6 +4517,14 @@ class SelectionPanel {
         if (entry.type === 'gelu') {
             this.showSelection(entry.selection, { fromHistory: true });
             this._openGeluDetailPreview({
+                fromHistory: true,
+                sourceSelection: entry.selection
+            });
+            return true;
+        }
+        if (entry.type === 'transformer-view2d') {
+            this.showSelection(entry.selection, { fromHistory: true });
+            this._openTransformerView2dPreview({
                 fromHistory: true,
                 sourceSelection: entry.selection
             });
@@ -5955,6 +5990,9 @@ class SelectionPanel {
             this._openGeluDetailPreview();
             return true;
         }
+        if (action === TRANSFORMER_VIEW2D_PANEL_ACTION_OPEN) {
+            return this._openTransformerView2dPreview();
+        }
         if (action === MHSA_INFO_PANEL_ACTION_OPEN) {
             return this._openMhsaInfoFromAction();
         }
@@ -6004,6 +6042,70 @@ class SelectionPanel {
         } else {
             this._updateHistoryNavigationControls();
         }
+    }
+
+    _openTransformerView2dPreview({ fromHistory = false, sourceSelection = null } = {}) {
+        const resolvedSelection = sourceSelection || this._lastSelection;
+        const sourceLabel = this._lastSelectionLabel;
+        const resolvedLabel = resolvedSelection?.label
+            ? normalizeSelectionLabel(resolvedSelection.label, resolvedSelection)
+            : sourceLabel;
+        const view2dContext = resolveTransformerView2dActionContext(resolvedSelection, resolvedLabel);
+        if (!resolvedSelection || !view2dContext) return false;
+        this._transformerView2dSourceSelection = resolvedSelection;
+        this._currentTransformerView2dContext = view2dContext;
+        this._transformerView2dDetailOpen = true;
+        this.panel.classList.add('is-transformer-view2d-open');
+        this._setTitleText('2D Transformer Canvas');
+        if (this.subtitle) {
+            this.subtitle.classList.remove('detail-subtitle--qkv-token-context');
+            this.subtitle.textContent = 'Scalable semantic canvas for the current transformer state';
+        }
+        this._setSubtitleSecondaryText(`Focus: ${view2dContext.focusLabel}`);
+        this._setSubtitleTertiaryText('Prototype view. Drag to pan and scroll to zoom.');
+        this._transformerView2dDetailView?.setVisible(true);
+        this._transformerView2dDetailView?.open({
+            activationSource: this.activationSource,
+            tokenIndices: Array.isArray(this.attentionTokenIndices) ? this.attentionTokenIndices : this.laneTokenIndices,
+            tokenLabels: Array.isArray(this.attentionTokenLabels) ? this.attentionTokenLabels : this.tokenLabels,
+            semanticTarget: view2dContext.semanticTarget,
+            focusLabel: view2dContext.focusLabel,
+            isSmallScreen: this._isSmallScreen && this._isSmallScreen()
+        });
+        this._stopLoop();
+        this._setAttentionVisibility(false);
+        this._setPanelTokenHoverEntry(null, { emit: true });
+        if (!fromHistory) {
+            const entry = this._buildHistoryEntry('transformer-view2d', resolvedSelection);
+            this._pushHistoryEntry(entry);
+        } else {
+            this._updateHistoryNavigationControls();
+        }
+        if (this._canToggleMhsaFullscreen()) {
+            this._setMhsaFullscreen(true);
+        }
+        return true;
+    }
+
+    _closeTransformerView2dPreview({ restoreSelection = false, restartLoop = true } = {}) {
+        if (!this._transformerView2dDetailOpen) return false;
+        this._transformerView2dDetailOpen = false;
+        this.panel.classList.remove('is-transformer-view2d-open');
+        this._transformerView2dDetailView?.setVisible(false);
+        if (this._mhsaFullscreenActive) {
+            this._setMhsaFullscreen(false);
+        }
+        const sourceSelection = this._transformerView2dSourceSelection;
+        this._transformerView2dSourceSelection = null;
+        if (restoreSelection && sourceSelection) {
+            this.showSelection(sourceSelection);
+            return true;
+        }
+        if (restartLoop && this.isOpen) {
+            this._startLoop();
+            this._scheduleResize();
+        }
+        return true;
     }
 
     _closeGeluDetailPreview({ restoreSelection = false, restartLoop = true } = {}) {
@@ -9333,6 +9435,12 @@ class SelectionPanel {
             return null;
         }
 
+        // In canvas replace mode the DOM workspace is kept only for measurement,
+        // so its centered transform should not drive the canvas camera.
+        if (this.mhsaTokenMatrixBody?.classList?.contains('is-measure-only')) {
+            return null;
+        }
+
         const workspaceRect = typeof workspace.getBoundingClientRect === 'function'
             ? workspace.getBoundingClientRect()
             : null;
@@ -10940,6 +11048,7 @@ class SelectionPanel {
         this._syncMhsaFullscreenDocumentState();
         this._stopLoop();
         this._closeGeluDetailPreview({ restoreSelection: false, restartLoop: false });
+        this._closeTransformerView2dPreview({ restoreSelection: false, restartLoop: false });
         this._currentSelectionDescription = '';
         this._currentSelectionEquations = '';
         renderSelectionPreviewEquations(this.equationsBody, []);
@@ -10960,6 +11069,7 @@ class SelectionPanel {
         this.panel.classList.remove('is-info-preview');
         this.panel.classList.remove('is-preview-hidden');
         this.panel.classList.remove('is-gelu-view-open');
+        this.panel.classList.remove('is-transformer-view2d-open');
         this.panel.classList.remove('is-mhsa-fullscreen');
         this.hudStack?.classList.remove('detail-open');
         this.hudPanel?.classList.remove('detail-open');
@@ -11522,10 +11632,13 @@ class SelectionPanel {
         const scrollPanelToTop = options?.scrollPanelToTop === true;
 
         this._closeGeluDetailPreview({ restoreSelection: false, restartLoop: false });
+        this._closeTransformerView2dPreview({ restoreSelection: false, restartLoop: false });
         this._resetCopyContextFeedback();
         const label = normalizeSelectionLabel(selection.label, selection);
+        const transformerView2dContext = resolveTransformerView2dActionContext(selection, label);
         this._lastSelection = selection;
         this._lastSelectionLabel = label;
+        this._currentTransformerView2dContext = transformerView2dContext;
         const displayLabel = simplifyLayerNormParamDisplayLabel(label, selection);
         const lower = label.toLowerCase();
         const isKvCacheInfo = isKvCacheInfoSelection(label, selection);
@@ -11792,6 +11905,10 @@ class SelectionPanel {
             setDescriptionContent(this.description, desc || '');
             setDescriptionGeluAction(this.description, isMlpMatrixSelectionLabel(label));
             setDescriptionMhsaInfoAction(this.description, shouldShowMhsaInfoAction);
+            setDescriptionTransformerView2dAction(this.description, {
+                enabled: !!transformerView2dContext,
+                label: transformerView2dContext?.actionLabel || 'Open 2D canvas'
+            });
         } else {
             this._currentSelectionDescription = '';
         }

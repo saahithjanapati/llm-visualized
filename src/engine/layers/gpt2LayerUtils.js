@@ -74,6 +74,40 @@ export function copyVectorAppearance(targetVec, sourceVec, fallbackLabel = null,
     return applyVectorData(targetVec, values, label, meta || null);
 }
 
+export function cloneVectorKeyColors(vec) {
+    const keyColors = vec && Array.isArray(vec.currentKeyColors) ? vec.currentKeyColors : null;
+    if (!keyColors || !keyColors.length) return [];
+    return keyColors.map((color) => (color && typeof color.clone === 'function')
+        ? color.clone()
+        : new THREE.Color(0.5, 0.5, 0.5));
+}
+
+export function blendVectorKeyColors(vec, baseColors, tintColor, tintAlpha = 0) {
+    if (!vec || typeof vec._buildColorBuffers !== 'function' || typeof vec._applyColorBuffers !== 'function') {
+        return false;
+    }
+    if (!Array.isArray(baseColors) || !baseColors.length) return false;
+
+    const safeAlpha = THREE.MathUtils.clamp(Number.isFinite(tintAlpha) ? tintAlpha : 0, 0, 1);
+    const resolvedTint = (tintColor && tintColor.isColor) ? tintColor : new THREE.Color(0xffffff);
+    if (!Array.isArray(vec.currentKeyColors) || vec.currentKeyColors.length !== baseColors.length) {
+        vec.currentKeyColors = baseColors.map((color) => color.clone());
+    }
+
+    for (let i = 0; i < baseColors.length; i++) {
+        const baseColor = baseColors[i];
+        if (!baseColor) continue;
+        if (!(vec.currentKeyColors[i] instanceof THREE.Color)) {
+            vec.currentKeyColors[i] = baseColor.clone();
+        }
+        vec.currentKeyColors[i].copy(baseColor).lerp(resolvedTint, safeAlpha);
+    }
+
+    const buffers = vec._buildColorBuffers();
+    vec._applyColorBuffers(buffers);
+    return true;
+}
+
 export function geluApprox(x) {
     const coeff = Math.sqrt(2 / Math.PI);
     return 0.5 * x * (1 + Math.tanh(coeff * (x + 0.044715 * Math.pow(x, 3))));

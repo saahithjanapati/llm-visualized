@@ -4312,6 +4312,159 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     margin-top: 6px;
 }
 
+.detail-transformer-view2d {
+    display: none;
+    flex-direction: column;
+    gap: 10px;
+    padding: 2px 0 10px;
+    min-height: 0;
+}
+.detail-transformer-view2d.is-visible {
+    display: flex;
+}
+.detail-transformer-view2d-copy {
+    padding-top: 2px;
+    padding-bottom: 0;
+}
+.detail-transformer-view2d-copy p {
+    margin: 0;
+}
+.detail-transformer-view2d-copy p + p {
+    margin-top: 8px;
+}
+.detail-transformer-view2d-stage {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 0;
+}
+.detail-transformer-view2d-hud {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.detail-transformer-view2d-toolbar {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+.detail-transformer-view2d-toolbar-copy {
+    min-width: 0;
+}
+.detail-transformer-view2d-hint {
+    margin-top: 6px;
+    color: #98a4b3;
+    font-size: var(--detail-font-caption);
+    line-height: 1.4;
+    font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+.detail-transformer-view2d-toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+.detail-transformer-view2d-btn {
+    white-space: nowrap;
+}
+.detail-transformer-view2d-canvas-card {
+    padding: 10px;
+    min-height: 0;
+}
+.detail-transformer-view2d-canvas {
+    width: 100%;
+    height: 420px;
+    display: block;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.12);
+    background:
+        radial-gradient(circle at top left, rgba(38, 68, 112, 0.28), transparent 34%),
+        linear-gradient(180deg, rgba(8, 12, 18, 0.98), rgba(3, 4, 7, 0.98));
+    touch-action: none;
+    cursor: grab;
+}
+.detail-transformer-view2d-canvas.is-panning {
+    cursor: grabbing;
+}
+.detail-transformer-view2d-readout {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open {
+    gap: 0;
+    padding: 0;
+}
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-header {
+    position: absolute;
+    inset: 0 0 auto 0;
+    z-index: 5;
+    padding:
+        max(12px, calc(env(safe-area-inset-top) + 4px))
+        max(16px, env(safe-area-inset-right))
+        10px
+        max(16px, env(safe-area-inset-left));
+    background: linear-gradient(180deg, rgba(0, 0, 0, 0.92), rgba(0, 0, 0, 0.54) 72%, rgba(0, 0, 0, 0));
+    pointer-events: auto;
+}
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d {
+    width: 100%;
+    max-width: none;
+    align-self: stretch;
+    flex: 1 1 auto;
+    min-height: 100dvh;
+    padding: 0;
+    gap: 0;
+}
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-copy {
+    display: none;
+}
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-stage {
+    flex: 1 1 auto;
+    min-height: 100dvh;
+}
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-hud {
+    position: absolute;
+    inset:
+        max(70px, calc(env(safe-area-inset-top) + 58px))
+        max(16px, env(safe-area-inset-right))
+        auto
+        max(16px, env(safe-area-inset-left));
+    z-index: 4;
+    display: grid;
+    gap: 12px;
+    pointer-events: none;
+}
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-toolbar,
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-readout {
+    pointer-events: auto;
+    background: rgba(8, 12, 18, 0.72);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.26);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-toolbar {
+    max-width: min(760px, calc(100vw - 32px));
+}
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-readout {
+    width: min(480px, calc(100vw - 32px));
+}
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-canvas-card {
+    padding: 0;
+    min-height: 100dvh;
+    flex: 1 1 auto;
+    border: none;
+    background: transparent;
+}
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-canvas {
+    height: 100dvh;
+    min-height: 100dvh;
+    border: none;
+    border-radius: 0;
+}
+
 #detailPanel.is-gelu-view-open > .detail-preview,
 #detailPanel.is-gelu-view-open > .vector-legend,
 #detailPanel.is-gelu-view-open > .detail-description,
@@ -4320,6 +4473,18 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
 #detailPanel.is-gelu-view-open > .detail-attention,
 #detailPanel.is-gelu-view-open > .detail-meta,
 #detailPanel.is-gelu-view-open > .detail-data {
+    display: none !important;
+}
+
+#detailPanel.is-transformer-view2d-open > .detail-preview,
+#detailPanel.is-transformer-view2d-open > .vector-legend,
+#detailPanel.is-transformer-view2d-open > .detail-description,
+#detailPanel.is-transformer-view2d-open > .detail-copy-context,
+#detailPanel.is-transformer-view2d-open > .detail-equations,
+#detailPanel.is-transformer-view2d-open > .detail-attention,
+#detailPanel.is-transformer-view2d-open > .detail-meta,
+#detailPanel.is-transformer-view2d-open > .detail-data,
+#detailPanel.is-transformer-view2d-open > .detail-prompt-context {
     display: none !important;
 }
 

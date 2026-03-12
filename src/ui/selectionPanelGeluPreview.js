@@ -36,7 +36,18 @@ export function isMlpMatrixSelectionLabel(label = '') {
 
 export function setDescriptionGeluAction(descriptionEl, enabled = false) {
     if (!descriptionEl) return;
-    descriptionEl.querySelectorAll('.detail-description-action-row').forEach((node) => node.remove());
+
+    descriptionEl
+        .querySelectorAll(`[data-detail-action="${GELU_PANEL_ACTION_OPEN}"]`)
+        .forEach((node) => {
+            const row = node.closest('.detail-description-action-row');
+            if (row) {
+                row.remove();
+                return;
+            }
+            node.remove();
+        });
+
     if (!enabled) return;
 
     const actionRow = document.createElement('div');

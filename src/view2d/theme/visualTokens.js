@@ -32,17 +32,23 @@ export const VIEW2D_STYLE_KEYS = Object.freeze({
     LABEL: 'label',
     CAPTION: 'caption',
     OPERATOR: 'operator',
+    EMBEDDING_TOKEN: 'embedding.token',
+    EMBEDDING_POSITION: 'embedding.position',
+    LAYER_NORM: 'layer-norm',
     MATRIX_INPUT: 'matrix.input',
     MATRIX_WEIGHT: 'matrix.weight',
     MATRIX_BIAS: 'matrix.bias',
+    OUTPUT_PROJECTION: 'output-projection',
     MHSA_Q: 'mhsa.q',
     MHSA_K: 'mhsa.k',
     MHSA_V: 'mhsa.v',
+    MHSA_HEAD: 'mhsa.head',
     MHSA_SCORE: 'mhsa.score',
     MHSA_MASK: 'mhsa.mask',
     MHSA_POST: 'mhsa.post',
     MHSA_HEAD_OUTPUT: 'mhsa.head-output',
     MLP: 'mlp',
+    LOGITS: 'logits',
     RESIDUAL: 'residual',
     CONNECTOR_NEUTRAL: 'connector.neutral',
     CONNECTOR_Q: 'connector.q',
@@ -99,6 +105,15 @@ const VIEW2D_VISUAL_TOKENS = Object.freeze({
         [VIEW2D_STYLE_KEYS.OPERATOR]: Object.freeze({
             color: 'rgba(243, 246, 251, 0.940)'
         }),
+        [VIEW2D_STYLE_KEYS.EMBEDDING_TOKEN]: Object.freeze({
+            accent: 'rgba(110, 176, 255, 0.920)'
+        }),
+        [VIEW2D_STYLE_KEYS.EMBEDDING_POSITION]: Object.freeze({
+            accent: 'rgba(146, 244, 208, 0.920)'
+        }),
+        [VIEW2D_STYLE_KEYS.LAYER_NORM]: Object.freeze({
+            accent: 'rgba(236, 242, 251, 0.900)'
+        }),
         [VIEW2D_STYLE_KEYS.MATRIX_INPUT]: Object.freeze({
             accent: 'rgba(222, 228, 238, 0.900)'
         }),
@@ -108,6 +123,9 @@ const VIEW2D_VISUAL_TOKENS = Object.freeze({
         [VIEW2D_STYLE_KEYS.MATRIX_BIAS]: Object.freeze({
             accent: 'rgba(243, 246, 251, 0.860)'
         }),
+        [VIEW2D_STYLE_KEYS.OUTPUT_PROJECTION]: Object.freeze({
+            accent: 'rgba(196, 214, 248, 0.920)'
+        }),
         [VIEW2D_STYLE_KEYS.MHSA_Q]: Object.freeze({
             accent: hexToCss(MHA_FINAL_Q_COLOR)
         }),
@@ -116,6 +134,9 @@ const VIEW2D_VISUAL_TOKENS = Object.freeze({
         }),
         [VIEW2D_STYLE_KEYS.MHSA_V]: Object.freeze({
             accent: hexToCss(MHA_FINAL_V_COLOR)
+        }),
+        [VIEW2D_STYLE_KEYS.MHSA_HEAD]: Object.freeze({
+            accent: 'rgba(173, 198, 255, 0.920)'
         }),
         [VIEW2D_STYLE_KEYS.MHSA_SCORE]: Object.freeze({
             accent: 'rgba(243, 246, 251, 0.940)'
@@ -131,6 +152,9 @@ const VIEW2D_VISUAL_TOKENS = Object.freeze({
         }),
         [VIEW2D_STYLE_KEYS.MLP]: Object.freeze({
             accent: hexToCss(FINAL_MLP_COLOR)
+        }),
+        [VIEW2D_STYLE_KEYS.LOGITS]: Object.freeze({
+            accent: 'rgba(242, 217, 107, 0.940)'
         }),
         [VIEW2D_STYLE_KEYS.RESIDUAL]: Object.freeze({
             accent: hexToCss(PREVIEW_TRAIL_COLOR)
