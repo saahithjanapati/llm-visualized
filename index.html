@@ -225,13 +225,8 @@
             </div>
             <div id="detailAttention" class="detail-attention" aria-hidden="true">
                 <div class="detail-attention-header">
-                    <div id="detailAttentionTitle" class="detail-attention-title">Attention scores</div>
-                    <div class="detail-attention-header-actions">
-                        <label class="toggle-row detail-attention-toggle">
-                            <span id="detailAttentionToggleLabel" class="toggle-text">Pre-softmax</span>
-                            <input id="detailAttentionToggle" type="checkbox" />
-                            <span class="toggle-track" aria-hidden="true"></span>
-                        </label>
+                    <div class="detail-attention-header-top">
+                        <div id="detailAttentionTitle" class="detail-attention-title">Attention score matrix</div>
                         <button
                             id="detailAttentionCollapseBtn"
                             class="detail-attention-collapse"
@@ -245,6 +240,14 @@
                             </span>
                             <span id="detailAttentionCollapseLabel" class="detail-attention-collapse-label">Minimize</span>
                         </button>
+                    </div>
+                    <div id="detailAttentionHeaderMeta" class="detail-attention-header-bottom">
+                        <div id="detailAttentionContext" class="detail-attention-context"></div>
+                        <label class="toggle-row detail-attention-toggle">
+                            <span id="detailAttentionToggleLabel" class="toggle-text">Pre-softmax</span>
+                            <input id="detailAttentionToggle" type="checkbox" />
+                            <span class="toggle-track" aria-hidden="true"></span>
+                        </label>
                     </div>
                 </div>
                 <div id="detailAttentionBody" class="detail-attention-body">

@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+    buildResidualRowHoverPayload,
     resolveActiveFocusLabel,
     resolveActiveSemanticTarget,
     resolveDetailTargetsFromSemanticTarget,
     resolveFocusSemanticTargets
 } from '../src/view2d/transformerView2dTargets.js';
+import { SPACE_TOKEN_DISPLAY } from '../src/ui/selectionPanelConstants.js';
 
 describe('transformerView2dTargets', () => {
     it('derives head, concat, and projection detail targets from semantic targets', () => {
@@ -128,5 +130,43 @@ describe('transformerView2dTargets', () => {
                 role: 'module'
             }
         ]);
+    });
+
+    it('formats whitespace residual-row labels the same way as the 3D token display', () => {
+        const payload = buildResidualRowHoverPayload({
+            rowItem: {
+                label: ' ',
+                semantic: {
+                    componentKind: 'residual',
+                    stage: 'incoming',
+                    layerIndex: 0,
+                    tokenIndex: 4
+                }
+            }
+        }, {
+            getTokenId(tokenIndex) {
+                return tokenIndex + 100;
+            },
+            getTokenString() {
+                return ' ';
+            }
+        });
+
+        expect(payload).toEqual({
+            label: 'Residual Stream Vector',
+            info: {
+                layerIndex: 0,
+                tokenIndex: 4,
+                tokenId: 104,
+                tokenLabel: SPACE_TOKEN_DISPLAY,
+                activationData: {
+                    label: 'Residual Stream Vector',
+                    stage: 'layer.incoming',
+                    layerIndex: 0,
+                    tokenIndex: 4,
+                    tokenLabel: SPACE_TOKEN_DISPLAY
+                }
+            }
+        });
     });
 });

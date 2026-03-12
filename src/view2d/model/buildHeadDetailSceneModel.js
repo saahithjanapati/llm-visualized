@@ -1,4 +1,3 @@
-import { D_MODEL } from '../../ui/selectionPanelConstants.js';
 import {
     buildSceneNodeId,
     createAnchorRef,
@@ -16,61 +15,35 @@ import {
     resolveView2dVisualTokens,
     VIEW2D_STYLE_KEYS
 } from '../theme/visualTokens.js';
-import { createView2dVectorStripMetadata } from '../shared/vectorStrip.js';
+import { createVectorStripMatrixNode } from './createResidualVectorMatrixNode.js';
+import { formatView2dMatrixDimensions } from '../shared/formatMatrixDimensions.js';
+import { D_MODEL } from '../../ui/selectionPanelConstants.js';
 
 const HEAD_DETAIL_COPY_DEFS = Object.freeze([
     Object.freeze({
-        key: 'q',
-        tex: 'X_{\\ln}^{Q}',
-        text: 'X_ln^Q'
+        key: 'q'
     }),
     Object.freeze({
-        key: 'k',
-        tex: 'X_{\\ln}^{K}',
-        text: 'X_ln^K'
+        key: 'k'
     }),
     Object.freeze({
-        key: 'v',
-        tex: 'X_{\\ln}^{V}',
-        text: 'X_ln^V'
+        key: 'v'
     })
 ]);
 
 const DETAIL_LAYOUT = Object.freeze({
-    sourceWidth: 2,
+    sourceWidth: 56,
     sourceHeight: 2,
-    branchSpacerWidth: 44,
+    branchSpacerWidth: 28,
     branchSpacerHeight: 2,
-    copyWidth: 176,
-    copyWidthSmall: 156,
-    rowHeight: 8,
-    rowHeightSmall: 7,
-    rowGap: 2,
-    stackGap: 22,
-    stackGapSmall: 18,
-    captionMinScreenHeightPx: 18
+    connectorGap: 0,
+    stackGap: 96,
+    stackGapSmall: 72,
+    captionMinScreenHeightPx: 28
 });
 
 function normalizeIndex(value) {
     return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : null;
-}
-
-function buildLabel(tex = '', text = '') {
-    return {
-        tex: typeof tex === 'string' ? tex : '',
-        text: typeof text === 'string' && text.length ? text : tex
-    };
-}
-
-function mergeMetadata(...parts) {
-    const merged = parts.reduce((acc, part) => {
-        if (!part || typeof part !== 'object') return acc;
-        return {
-            ...acc,
-            ...part
-        };
-    }, {});
-    return Object.keys(merged).length ? merged : null;
 }
 
 function createCardMetadata(width = null, height = null, {
@@ -84,33 +57,6 @@ function createCardMetadata(width = null, height = null, {
     const metadata = Object.keys(card).length ? { card } : {};
     if (hidden) metadata.hidden = true;
     return Object.keys(metadata).length ? metadata : null;
-}
-
-function createCaptionMetadata({
-    position = 'bottom',
-    styleKey = null,
-    dimensionsTex = '',
-    dimensionsText = '',
-    minScreenHeightPx = null
-} = {}) {
-    const caption = {};
-    const safePosition = String(position || '').trim().toLowerCase();
-    if (safePosition === 'top' || safePosition === 'bottom' || safePosition === 'inside-top') {
-        caption.position = safePosition;
-    }
-    if (typeof styleKey === 'string' && styleKey.length) {
-        caption.styleKey = styleKey;
-    }
-    if (typeof dimensionsTex === 'string' && dimensionsTex.trim().length) {
-        caption.dimensionsTex = dimensionsTex.trim();
-    }
-    if (typeof dimensionsText === 'string' && dimensionsText.trim().length) {
-        caption.dimensionsText = dimensionsText.trim();
-    }
-    if (Number.isFinite(minScreenHeightPx) && minScreenHeightPx > 0) {
-        caption.minScreenHeightPx = Math.max(1, Math.floor(minScreenHeightPx));
-    }
-    return Object.keys(caption).length ? { caption } : null;
 }
 
 function createHiddenSpacer({
@@ -175,9 +121,9 @@ function buildResidualCopyNode(copyDef, rows = [], {
     rowCount = 1,
     isSmallScreen = false
 } = {}) {
-    const copyWidth = isSmallScreen ? DETAIL_LAYOUT.copyWidthSmall : DETAIL_LAYOUT.copyWidth;
-    const rowHeight = isSmallScreen ? DETAIL_LAYOUT.rowHeightSmall : DETAIL_LAYOUT.rowHeight;
     const branchKey = copyDef?.key || '';
+    const branchLabel = branchKey ? branchKey.toUpperCase() : '';
+    const dimensionCaption = formatView2dMatrixDimensions(rowCount, D_MODEL);
     const semantic = {
         componentKind: 'mhsa',
         layerIndex,
@@ -186,39 +132,24 @@ function buildResidualCopyNode(copyDef, rows = [], {
         role: 'x-ln-copy',
         ...(branchKey ? { branchKey } : {})
     };
-    return createMatrixNode({
+    return createVectorStripMatrixNode({
         role: 'x-ln-copy',
         semantic,
-        label: buildLabel(copyDef?.tex || 'X_{\\ln}', copyDef?.text || 'X_ln'),
-        dimensions: {
-            rows: rowCount,
-            cols: D_MODEL
-        },
-        presentation: VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS,
-        shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+        labelTex: branchLabel ? `X_{\\ln}^{${branchLabel}}` : 'X_{\\ln}',
+        labelText: branchLabel ? `X_ln^${branchLabel}` : 'X_ln',
+        visualStyleKey: VIEW2D_STYLE_KEYS.RESIDUAL,
+        captionDimensionsTex: dimensionCaption.tex,
+        captionDimensionsText: dimensionCaption.text,
         rowItems: buildResidualCopyRowItems(rows, {
             layerIndex,
             headIndex,
             branchKey
         }),
-        visual: {
-            styleKey: VIEW2D_STYLE_KEYS.RESIDUAL
-        },
-        metadata: mergeMetadata(
-            createCaptionMetadata({
-                position: 'bottom',
-                styleKey: VIEW2D_STYLE_KEYS.LABEL,
-                dimensionsTex: `${rowCount} \\\\times ${D_MODEL}`,
-                dimensionsText: `${rowCount} × ${D_MODEL}`,
-                minScreenHeightPx: DETAIL_LAYOUT.captionMinScreenHeightPx
-            }),
-            createView2dVectorStripMetadata({
-                compactWidth: copyWidth,
-                rowHeight,
-                rowGap: DETAIL_LAYOUT.rowGap,
-                hideSurface: true
-            })
-        )
+        rowCount,
+        captionPosition: 'float-top',
+        captionMinScreenHeightPx: isSmallScreen
+            ? Math.max(18, DETAIL_LAYOUT.captionMinScreenHeightPx - 4)
+            : DETAIL_LAYOUT.captionMinScreenHeightPx
     });
 }
 
@@ -294,15 +225,17 @@ export function buildHeadDetailSceneModel({
             role: 'x-ln-copy-connector',
             copyIndex
         },
-        source: createAnchorRef(sourceNode.id, VIEW2D_ANCHOR_SIDES.RIGHT),
+        source: createAnchorRef(sourceNode.id, VIEW2D_ANCHOR_SIDES.CENTER),
         target: createAnchorRef(copyNode.id, VIEW2D_ANCHOR_SIDES.LEFT),
         route: VIEW2D_CONNECTOR_ROUTES.HORIZONTAL,
+        gap: DETAIL_LAYOUT.connectorGap,
         visual: {
             styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL,
-            stroke: 'rgb(255, 255, 255)'
+            stroke: 'rgba(255, 255, 255, 0.84)'
         },
         metadata: {
-            preserveColor: true
+            preserveColor: true,
+            strokeWidthScale: 0.72
         }
     }));
 
@@ -350,6 +283,12 @@ export function buildHeadDetailSceneModel({
             source: 'buildHeadDetailSceneModel',
             rowCount,
             isSmallScreen: !!isSmallScreen,
+            layoutMetrics: {
+                cssVars: {
+                    '--mhsa-token-matrix-canvas-pad-x-boost': isSmallScreen ? '-32px' : '-48px',
+                    '--mhsa-token-matrix-canvas-pad-y-boost': isSmallScreen ? '-24px' : '-32px'
+                }
+            },
             tokens: visualTokens || resolveView2dVisualTokens()
         }
     });

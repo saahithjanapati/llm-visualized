@@ -6,6 +6,13 @@ function normalizeLayerNormKind(kind = null) {
     return null;
 }
 
+function normalizeLayerNormParam(param = null) {
+    const lower = String(param || '').toLowerCase();
+    if (lower === 'scale' || lower === 'gamma') return 'scale';
+    if (lower === 'shift' || lower === 'beta') return 'shift';
+    return null;
+}
+
 export function resolveLayerNormKind({
     label = '',
     stage = '',
@@ -67,6 +74,37 @@ export function formatLayerNormParamLabel(kind = null, param = 'scale') {
         return `${formatLayerNormLabel(safeKind)} ${safeParam}`;
     }
     return `LayerNorm ${safeParam}`;
+}
+
+export function resolveLayerNormParamSpec({
+    label = '',
+    stage = '',
+    explicitKind = null,
+    explicitParam = null
+} = {}) {
+    const layerNormKind = resolveLayerNormKind({ label, stage, explicitKind });
+    if (!layerNormKind) return null;
+
+    const safeParam = normalizeLayerNormParam(explicitParam);
+    if (safeParam) {
+        return { layerNormKind, param: safeParam };
+    }
+
+    const lower = String(label || '').toLowerCase();
+    const stageLower = String(stage || '').toLowerCase();
+    const hasScaleLabel = /\blayer\s*norm(?:\s*[12]|\s*\(top\))?\s+scale\b/.test(lower)
+        || /\bfinal\s+ln\s+scale\b/.test(lower)
+        || /\bln[12]\s+scale\b/.test(lower);
+    const hasShiftLabel = /\blayer\s*norm(?:\s*[12]|\s*\(top\))?\s+shift\b/.test(lower)
+        || /\bfinal\s+ln\s+shift\b/.test(lower)
+        || /\bln[12]\s+shift\b/.test(lower);
+    const isScale = stageLower.endsWith('.param.scale')
+        || hasScaleLabel;
+    const isShift = stageLower.endsWith('.param.shift')
+        || hasShiftLabel;
+    const param = isScale ? 'scale' : (isShift ? 'shift' : null);
+
+    return param ? { layerNormKind, param } : null;
 }
 
 export function expandLayerNormLabel(label = '', kind = null) {

@@ -171,6 +171,21 @@ function resolveCanvasFitTransform(sceneBounds, {
     };
 }
 
+function resolveCanvasHeadDetailTransform(sceneBounds, {
+    width = 1,
+    height = 1
+} = {}) {
+    const fitTransform = resolveCanvasFitTransform(sceneBounds, {
+        width,
+        height
+    });
+    return {
+        scale: fitTransform.scale,
+        offsetX: -((sceneBounds?.x || 0) * fitTransform.scale),
+        offsetY: fitTransform.offsetY
+    };
+}
+
 describe('selectionPanelTransformerView2d', () => {
     let rafQueue;
     let canvasGetContextSpy;
@@ -759,17 +774,17 @@ describe('selectionPanelTransformerView2d', () => {
                 headIndex: 4
             }
         });
-        const headDetailScene = scene.metadata.headDetailScene;
+        const headDetailScene = scene.metadata.mhsaHeadDetailScene || scene.metadata.headDetailScene;
         const detailLayout = buildSceneLayout(headDetailScene);
         const copyEntry = detailLayout.registry.getNodeEntries().find((entry) => (
             entry.role === 'x-ln-copy'
             && entry.semantic?.branchKey === 'q'
         ));
-        const detailTransform = resolveCanvasFitTransform(detailLayout.sceneBounds, {
+        const detailTransform = resolveCanvasHeadDetailTransform(detailLayout.sceneBounds, {
             width: 640,
             height: 360
         });
-        const worldX = copyEntry.contentBounds.x + 8;
+        const worldX = copyEntry.contentBounds.x + copyEntry.layoutData.innerPaddingX + 8;
         const worldY = copyEntry.contentBounds.y + copyEntry.layoutData.innerPaddingY + (copyEntry.layoutData.rowHeight * 0.5);
         const clientX = detailTransform.offsetX + (worldX * detailTransform.scale);
         const clientY = detailTransform.offsetY + (worldY * detailTransform.scale);

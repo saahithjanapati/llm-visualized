@@ -71,6 +71,47 @@ describe('coreHoverTokenContext', () => {
         })).toBeNull();
     });
 
+    it('returns source and target token rows for attention-score hovers', () => {
+        const info = {
+            activationData: {
+                stage: 'attention.pre',
+                tokenIndex: 1,
+                tokenLabel: 'beta',
+                keyTokenIndex: 0,
+                keyTokenLabel: 'alpha'
+            }
+        };
+        const activationSource = {
+            getTokenId: (tokenIndex) => (tokenIndex === 1 ? 22 : (tokenIndex === 0 ? 11 : null))
+        };
+
+        expect(resolveHoverTokenContext({
+            label: 'Pre-Softmax Attention Score',
+            info,
+            activationSource
+        })).toEqual({
+            suppressHoverLabel: false,
+            showPrimaryLabel: true,
+            detailKind: 'attention-token-pair',
+            attentionRows: [
+                {
+                    roleLabel: 'Source',
+                    tokenLabel: 'beta',
+                    tokenIndex: 1,
+                    tokenId: 22,
+                    positionText: 'Position 2'
+                },
+                {
+                    roleLabel: 'Target',
+                    tokenLabel: 'alpha',
+                    tokenIndex: 0,
+                    tokenId: 11,
+                    positionText: 'Position 1'
+                }
+            ]
+        });
+    });
+
     it('shows qkv hover subtitles as position before head and layer', () => {
         const info = {
             headIndex: 1,
@@ -165,10 +206,27 @@ describe('coreHoverTokenContext', () => {
         });
     });
 
+    it('keeps token chips off layernorm parameter hovers even with token metadata present', () => {
+        const info = {
+            activationData: {
+                stage: 'ln1.param.scale',
+                tokenIndex: 5,
+                tokenLabel: 'theta'
+            },
+            layerNormKind: 'ln1'
+        };
+
+        expect(resolveHoverTokenContext({
+            label: 'LayerNorm 1 Scale',
+            info
+        })).toBeNull();
+    });
+
     it('shows bottom token-chip hovers as chip-only', () => {
         const info = {
             tokenIndex: 2,
-            tokenLabel: 'omega'
+            tokenLabel: 'omega',
+            positionIndex: 3
         };
 
         expect(resolveHoverTokenContext({
@@ -184,6 +242,10 @@ describe('coreHoverTokenContext', () => {
             tokenId: null,
             tokenLabel: 'omega'
         });
+        expect(resolveHoverLabelSubtitle({
+            label: 'Token: omega',
+            info
+        })).toBe('Position 3');
     });
 
     it('keeps bottom position-chip hovers text-only', () => {
@@ -231,6 +293,25 @@ describe('coreHoverTokenContext', () => {
             label: 'Query Weight Matrix',
             info
         })).toBeNull();
+    });
+
+    it('keeps token chips off bias vectors even when token metadata is present', () => {
+        const info = {
+            tokenIndex: 2,
+            tokenLabel: 'gamma',
+            headIndex: 4,
+            layerIndex: 1
+        };
+
+        expect(isVectorLikeHoverSelection('Value Bias Vector', info)).toBe(false);
+        expect(resolveHoverTokenContext({
+            label: 'Value Bias Vector',
+            info
+        })).toBeNull();
+        expect(resolveHoverLabelSubtitle({
+            label: 'Value Bias Vector',
+            info
+        })).toBe('Head 5 • Layer 2');
     });
 
     it('does not attach token chips to non-vector token-bearing hovers', () => {

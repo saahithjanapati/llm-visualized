@@ -9,6 +9,7 @@ import {
     isWeightedSumSelection
 } from '../ui/selectionPanelSelectionUtils.js';
 import { resolveLayerNormKind } from '../utils/layerNormLabels.js';
+import { resolvePreferredTokenLabel } from '../utils/tokenLabelResolution.js';
 
 export function normalizeOptionalIndex(value) {
     return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : null;
@@ -91,11 +92,11 @@ export function buildResidualRowHoverPayload(rowHit = null, activationSource = n
     const tokenId = Number.isFinite(tokenIndex) && typeof activationSource?.getTokenId === 'function'
         ? normalizeOptionalIndex(activationSource.getTokenId(tokenIndex))
         : null;
-    const tokenLabel = typeof rowHit?.rowItem?.label === 'string' && rowHit.rowItem.label.trim().length
-        ? rowHit.rowItem.label.trim()
-        : (Number.isFinite(tokenIndex) && typeof activationSource?.getTokenString === 'function'
-            ? String(activationSource.getTokenString(tokenIndex) || '').trim()
-            : '');
+    const tokenLabel = resolvePreferredTokenLabel({
+        tokenLabel: rowHit?.rowItem?.label,
+        tokenIndex,
+        activationSource
+    });
     const isPostLayerNormResidual = activationStage === 'ln1.shift' || activationStage === 'ln2.shift';
     const headIndex = normalizeOptionalIndex(semantic.headIndex);
     const label = isPostLayerNormResidual ? 'Post LayerNorm Residual Vector' : 'Residual Stream Vector';

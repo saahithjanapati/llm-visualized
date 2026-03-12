@@ -1,6 +1,14 @@
 import { buildMhsaTokenMatrixPreviewData } from '../../ui/selectionPanelMhsaTokenMatrixUtils.js';
 import { resolveMhsaTokenMatrixLayoutMetrics } from '../../ui/selectionPanelMhsaLayoutUtils.js';
 import {
+    createCaptionedCardMatrixNode,
+    resolveRelativeCardSize
+} from './createCaptionedCardMatrixNode.js';
+import {
+    createTransposeVectorStripMatrixNode,
+    createVectorStripMatrixNode
+} from './createResidualVectorMatrixNode.js';
+import {
     buildSceneNodeId,
     createAnchorRef,
     createConnectorNode,
@@ -21,6 +29,43 @@ import {
     VIEW2D_STYLE_KEYS
 } from '../theme/visualTokens.js';
 import { createView2dVectorStripMetadata } from '../shared/vectorStrip.js';
+import { formatView2dMatrixDimensions } from '../shared/formatMatrixDimensions.js';
+
+const MHSA_SOURCE_ANCHOR_WIDTH = 22;
+const MHSA_SOURCE_ANCHOR_MIN_HEIGHT = 108;
+const MHSA_SOURCE_ANCHOR_MAX_HEIGHT = 176;
+const MHSA_SOURCE_ANCHOR_ROW_HEIGHT = 18;
+const PROJECTION_STACK_GAP = 120;
+const PROJECTION_STACK_GAP_SMALL = 92;
+const PROJECTION_SIDECAR_GAP = 30;
+const PROJECTION_SIDECAR_GAP_SMALL = 24;
+const PROJECTION_MULTIPLY_OPERATOR_SCALE = 0.82;
+const PROJECTION_XLN_COMPACT_WIDTH = 84;
+const PROJECTION_XLN_COMPACT_WIDTH_SMALL = 72;
+const PROJECTION_XLN_ROW_HEIGHT = 7;
+const PROJECTION_XLN_ROW_HEIGHT_SMALL = 6;
+const PROJECTION_WEIGHT_REFERENCE_EXTENT = 84;
+const PROJECTION_WEIGHT_REFERENCE_EXTENT_SMALL = 76;
+const PROJECTION_WEIGHT_MIN_WIDTH = 42;
+const PROJECTION_WEIGHT_MAX_WIDTH = 138;
+const PROJECTION_WEIGHT_MIN_HEIGHT = 56;
+const PROJECTION_WEIGHT_MAX_HEIGHT = 144;
+const PROJECTION_CAPTION_LABEL_SCALE = 0.42;
+const PROJECTION_CAPTION_DIMENSIONS_SCALE = 0.5;
+const PROJECTION_BIAS_ROW_HEIGHT = 14;
+const PROJECTION_BIAS_CAPTION_MIN_SCREEN_HEIGHT = 12;
+const PROJECTION_BIAS_COMPACT_WIDTH = 52;
+const PROJECTION_BIAS_COMPACT_WIDTH_SMALL = 44;
+const PROJECTION_BIAS_CORNER_RADIUS = 5;
+const PROJECTION_OUTPUT_COMPACT_WIDTH = 66;
+const PROJECTION_OUTPUT_COMPACT_WIDTH_SMALL = 56;
+const PROJECTION_OUTPUT_ROW_HEIGHT = 7;
+const PROJECTION_OUTPUT_ROW_HEIGHT_SMALL = 6;
+const PROJECTION_XLN_TARGET_GAP = 8;
+const ATTENTION_TRANSPOSE_MIN_WIDTH = 24;
+const ATTENTION_TRANSPOSE_MIN_WIDTH_SMALL = 20;
+const ATTENTION_TRANSPOSE_CORNER_RADIUS = 8;
+const MHSA_CONNECTOR_STROKE = 'rgba(255, 255, 255, 0.84)';
 
 function normalizeIndex(value) {
     return Number.isFinite(value) ? Math.floor(value) : null;
@@ -42,6 +87,19 @@ function buildLabel(labelTex = '', fallbackText = '') {
     };
 }
 
+function createCardMetadata(width = null, height = null, {
+    hidden = false,
+    cornerRadius = null
+} = {}) {
+    const card = {};
+    if (Number.isFinite(width) && width > 0) card.width = Math.floor(width);
+    if (Number.isFinite(height) && height > 0) card.height = Math.floor(height);
+    if (Number.isFinite(cornerRadius) && cornerRadius >= 0) card.cornerRadius = Math.floor(cornerRadius);
+    const metadata = Object.keys(card).length ? { card } : {};
+    if (hidden) metadata.hidden = true;
+    return Object.keys(metadata).length ? metadata : null;
+}
+
 function buildGradientRowItems(rows = [], baseSemantic = {}, role = 'row') {
     return rows.map((rowData) => {
         const semantic = buildSemantic(baseSemantic, {
@@ -60,6 +118,72 @@ function buildGradientRowItems(rows = [], baseSemantic = {}, role = 'row') {
             title: typeof rowData.title === 'string' ? rowData.title : null
         };
     });
+}
+
+function buildProjectionInputRowItems(rows = [], baseSemantic = {}, branchKey = '') {
+    return rows.map((rowData) => {
+        const semantic = {
+            componentKind: 'residual',
+            layerIndex: baseSemantic?.layerIndex,
+            headIndex: baseSemantic?.headIndex,
+            stage: 'ln1.shift',
+            role: 'x-ln-row',
+            rowIndex: rowData.rowIndex,
+            tokenIndex: rowData.tokenIndex,
+            ...(branchKey ? { branchKey } : {})
+        };
+        return {
+            id: buildSceneNodeId(semantic),
+            index: rowData.rowIndex,
+            label: rowData.tokenLabel || `Token ${rowData.rowIndex + 1}`,
+            semantic,
+            rawValue: Number.isFinite(rowData.rawValue) ? rowData.rawValue : null,
+            rawValues: Array.isArray(rowData.rawValues) ? [...rowData.rawValues] : null,
+            gradientCss: rowData.gradientCss || 'none',
+            title: typeof rowData.title === 'string' ? rowData.title : null
+        };
+    });
+}
+
+function buildProjectionOutputRowItems(rows = [], baseSemantic = {}, branchKey = '') {
+    return rows.map((rowData) => {
+        const semantic = {
+            componentKind: 'mhsa',
+            layerIndex: baseSemantic?.layerIndex,
+            headIndex: baseSemantic?.headIndex,
+            stage: `qkv.${branchKey}`,
+            role: 'projection-output-row',
+            rowIndex: rowData.rowIndex,
+            tokenIndex: rowData.tokenIndex,
+            ...(branchKey ? { branchKey } : {})
+        };
+        return {
+            id: buildSceneNodeId(semantic),
+            index: rowData.rowIndex,
+            label: rowData.tokenLabel || `Token ${rowData.rowIndex + 1}`,
+            semantic,
+            rawValue: Number.isFinite(rowData.rawValue) ? rowData.rawValue : null,
+            rawValues: Array.isArray(rowData.rawValues) ? [...rowData.rawValues] : null,
+            gradientCss: rowData.gradientCss || 'none',
+            title: typeof rowData.title === 'string' ? rowData.title : null
+        };
+    });
+}
+
+function buildProjectionBiasRowItems(projectionData = null, projectionSemantic = {}) {
+    const rowSemantic = buildSemantic(projectionSemantic, {
+        role: 'projection-bias-row',
+        rowIndex: 0
+    });
+    return [{
+        id: buildSceneNodeId(rowSemantic),
+        index: 0,
+        label: '',
+        semantic: rowSemantic,
+        rawValue: Number.isFinite(projectionData?.biasValue) ? projectionData.biasValue : null,
+        gradientCss: projectionData?.biasVectorGradientCss || projectionData?.biasGradientCss || 'none',
+        title: typeof projectionData?.biasLabelTex === 'string' ? projectionData.biasLabelTex : null
+    }];
 }
 
 function buildAttentionGridRowItems(rows = [], baseSemantic = {}) {
@@ -102,8 +226,11 @@ function buildAttentionGridRowItems(rows = [], baseSemantic = {}) {
 function buildTransposeColumnItems(columns = [], baseSemantic = {}) {
     return columns.map((columnData) => {
         const semantic = buildSemantic(baseSemantic, {
+            stage: 'qkv.k',
             role: 'transpose-column',
-            colIndex: columnData.colIndex
+            colIndex: columnData.colIndex,
+            tokenIndex: columnData.colIndex,
+            branchKey: 'k'
         });
         return {
             id: buildSceneNodeId(semantic),
@@ -117,93 +244,161 @@ function buildTransposeColumnItems(columns = [], baseSemantic = {}) {
     });
 }
 
+function buildProjectionSourceAnchorNode({
+    baseSemantic,
+    rowCount = 1,
+    isSmallScreen = false
+}) {
+    const safeRowCount = Number.isFinite(rowCount) ? Math.max(1, Math.floor(rowCount)) : 1;
+    const cardHeight = Math.max(
+        isSmallScreen ? MHSA_SOURCE_ANCHOR_MIN_HEIGHT - 16 : MHSA_SOURCE_ANCHOR_MIN_HEIGHT,
+        Math.min(
+            isSmallScreen ? MHSA_SOURCE_ANCHOR_MAX_HEIGHT - 20 : MHSA_SOURCE_ANCHOR_MAX_HEIGHT,
+            (safeRowCount * MHSA_SOURCE_ANCHOR_ROW_HEIGHT) + (isSmallScreen ? 40 : 52)
+        )
+    );
+    const cardWidth = isSmallScreen ? MHSA_SOURCE_ANCHOR_WIDTH - 4 : MHSA_SOURCE_ANCHOR_WIDTH;
+    return createMatrixNode({
+        role: 'projection-source-anchor',
+        semantic: buildSemantic(baseSemantic, {
+            stage: 'projection-source',
+            role: 'projection-source-anchor'
+        }),
+        dimensions: {
+            rows: 1,
+            cols: 1
+        },
+        presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+        shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+        visual: {
+            styleKey: VIEW2D_STYLE_KEYS.MHSA_HEAD
+        },
+        metadata: createCardMetadata(cardWidth, cardHeight, {
+            hidden: true,
+            cornerRadius: 0
+        })
+    });
+}
+
 function buildProjectionStageNode({
     baseSemantic,
     previewData,
     projectionData,
-    stageIndex
+    stageIndex,
+    isSmallScreen = false
 }) {
     const projectionKind = String(projectionData?.kind || '').toLowerCase();
     const projectionSemantic = buildSemantic(baseSemantic, {
         stage: `projection-${projectionKind}`,
         stageIndex
     });
+    const inputDimensionCaption = formatView2dMatrixDimensions(previewData.rowCount, previewData.columnCount);
+    const biasDimensionCaption = formatView2dMatrixDimensions(1, projectionData.outputColumnCount);
     const styleKey = projectionKind === 'q'
         ? VIEW2D_STYLE_KEYS.MHSA_Q
         : (projectionKind === 'k' ? VIEW2D_STYLE_KEYS.MHSA_K : VIEW2D_STYLE_KEYS.MHSA_V);
 
-    const xInputNode = createMatrixNode({
-        role: 'projection-input',
-        semantic: buildSemantic(projectionSemantic, { role: 'projection-input' }),
-        label: buildLabel('X_{\\ln}', 'X_ln'),
-        dimensions: {
-            rows: previewData.rowCount,
-            cols: previewData.columnCount
-        },
-        presentation: VIEW2D_MATRIX_PRESENTATIONS.BANDED_ROWS,
-        shape: VIEW2D_MATRIX_SHAPES.MATRIX,
-        rowItems: buildGradientRowItems(previewData.rows, projectionSemantic, 'projection-input-row'),
-        visual: {
-            styleKey: VIEW2D_STYLE_KEYS.MATRIX_INPUT
-        }
+    const xInputNode = createVectorStripMatrixNode({
+        role: 'x-ln-copy',
+        semantic: buildSemantic(projectionSemantic, {
+            role: 'x-ln-copy',
+            branchKey: projectionKind
+        }),
+        labelTex: 'X_{\\ln}',
+        labelText: 'X_ln',
+        rowItems: buildProjectionInputRowItems(previewData.rows, baseSemantic, projectionKind),
+        rowCount: previewData.rowCount,
+        compactWidth: isSmallScreen ? PROJECTION_XLN_COMPACT_WIDTH_SMALL : PROJECTION_XLN_COMPACT_WIDTH,
+        rowHeight: isSmallScreen ? PROJECTION_XLN_ROW_HEIGHT_SMALL : PROJECTION_XLN_ROW_HEIGHT,
+        captionPosition: 'bottom',
+        captionDimensionsTex: inputDimensionCaption.tex,
+        captionDimensionsText: inputDimensionCaption.text,
+        captionScaleWithNode: true,
+        visualStyleKey: VIEW2D_STYLE_KEYS.RESIDUAL
     });
 
-    const weightNode = createMatrixNode({
+    const weightCardSize = resolveRelativeCardSize({
+        rows: projectionData.weightRowCount,
+        cols: projectionData.weightColumnCount,
+        referenceCount: previewData.columnCount,
+        referenceExtent: isSmallScreen ? PROJECTION_WEIGHT_REFERENCE_EXTENT_SMALL : PROJECTION_WEIGHT_REFERENCE_EXTENT,
+        minWidth: PROJECTION_WEIGHT_MIN_WIDTH,
+        maxWidth: PROJECTION_WEIGHT_MAX_WIDTH,
+        minHeight: PROJECTION_WEIGHT_MIN_HEIGHT,
+        maxHeight: PROJECTION_WEIGHT_MAX_HEIGHT
+    });
+    const weightNode = createCaptionedCardMatrixNode({
         role: 'projection-weight',
         semantic: buildSemantic(projectionSemantic, { role: 'projection-weight' }),
-        label: buildLabel(projectionData.weightLabelTex, projectionData.weightLabelTex),
-        dimensions: {
-            rows: projectionData.weightRowCount,
-            cols: projectionData.weightColumnCount
-        },
-        presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
-        shape: VIEW2D_MATRIX_SHAPES.MATRIX,
-        visual: {
-            styleKey: VIEW2D_STYLE_KEYS.MATRIX_WEIGHT,
-            background: projectionData.weightGradientCss || 'none'
-        },
+        labelTex: projectionData.weightLabelTex,
+        labelText: projectionData.weightLabelTex,
+        rowCount: projectionData.weightRowCount,
+        columnCount: projectionData.weightColumnCount,
+        cardWidth: weightCardSize.width,
+        cardHeight: weightCardSize.height,
+        cardCornerRadius: 10,
+        captionMinScreenHeightPx: 28,
+        visualStyleKey: styleKey,
+        captionScaleWithNode: true,
+        captionLabelScale: PROJECTION_CAPTION_LABEL_SCALE,
+        captionDimensionsScale: PROJECTION_CAPTION_DIMENSIONS_SCALE,
+        background: projectionData.weightGradientCss || 'none',
         metadata: {
             kind: projectionKind
         }
     });
 
-    const biasNode = createMatrixNode({
+    const biasNode = createVectorStripMatrixNode({
         role: 'projection-bias',
         semantic: buildSemantic(projectionSemantic, { role: 'projection-bias' }),
-        label: buildLabel(projectionData.biasLabelTex, projectionData.biasLabelTex),
-        dimensions: {
-            rows: 1,
-            cols: projectionData.outputColumnCount
-        },
-        presentation: VIEW2D_MATRIX_PRESENTATIONS.ACCENT_BAR,
-        shape: VIEW2D_MATRIX_SHAPES.VECTOR,
-        visual: {
-            styleKey: VIEW2D_STYLE_KEYS.MATRIX_BIAS,
-            background: projectionData.biasGradientCss || 'none'
-        },
+        labelTex: projectionData.biasLabelTex,
+        labelText: projectionData.biasLabelTex,
+        rowItems: buildProjectionBiasRowItems(projectionData, projectionSemantic),
+        rowCount: 1,
+        columnCount: projectionData.outputColumnCount,
+        compactWidth: isSmallScreen ? PROJECTION_BIAS_COMPACT_WIDTH_SMALL : PROJECTION_BIAS_COMPACT_WIDTH,
+        rowHeight: PROJECTION_BIAS_ROW_HEIGHT,
+        captionPosition: 'bottom',
+        captionMinScreenHeightPx: PROJECTION_BIAS_CAPTION_MIN_SCREEN_HEIGHT,
+        captionDimensionsTex: biasDimensionCaption.tex,
+        captionDimensionsText: biasDimensionCaption.text,
+        captionScaleWithNode: true,
+        captionLabelScale: PROJECTION_CAPTION_LABEL_SCALE,
+        captionDimensionsScale: PROJECTION_CAPTION_DIMENSIONS_SCALE,
+        visualStyleKey: styleKey,
+        stripMetadata: createView2dVectorStripMetadata({
+            compactWidth: isSmallScreen ? PROJECTION_BIAS_COMPACT_WIDTH_SMALL : PROJECTION_BIAS_COMPACT_WIDTH,
+            rowHeight: PROJECTION_BIAS_ROW_HEIGHT,
+            cornerRadius: PROJECTION_BIAS_CORNER_RADIUS,
+            hideSurface: true
+        }),
         metadata: {
             kind: projectionKind
         }
     });
 
-    const outputNode = createMatrixNode({
+    const outputDimensionCaption = formatView2dMatrixDimensions(
+        projectionData.outputRowCount,
+        projectionData.outputColumnCount
+    );
+    const outputNode = createVectorStripMatrixNode({
         role: 'projection-output',
         semantic: buildSemantic(projectionSemantic, { role: 'projection-output' }),
-        label: buildLabel(projectionData.outputLabelTex, projectionData.outputLabelTex),
-        dimensions: {
-            rows: projectionData.outputRowCount,
-            cols: projectionData.outputColumnCount
-        },
-        presentation: VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS,
-        shape: VIEW2D_MATRIX_SHAPES.MATRIX,
-        rowItems: buildGradientRowItems(projectionData.outputRows, projectionSemantic, 'projection-output-row'),
-        visual: {
-            styleKey
-        },
+        labelTex: projectionData.outputLabelTex,
+        labelText: projectionData.outputLabelTex,
+        rowItems: buildProjectionOutputRowItems(projectionData.outputRows, baseSemantic, projectionKind),
+        rowCount: projectionData.outputRowCount,
+        columnCount: projectionData.outputColumnCount,
+        compactWidth: isSmallScreen ? PROJECTION_OUTPUT_COMPACT_WIDTH_SMALL : PROJECTION_OUTPUT_COMPACT_WIDTH,
+        rowHeight: isSmallScreen ? PROJECTION_OUTPUT_ROW_HEIGHT_SMALL : PROJECTION_OUTPUT_ROW_HEIGHT,
+        captionPosition: 'bottom',
+        captionDimensionsTex: outputDimensionCaption.tex,
+        captionDimensionsText: outputDimensionCaption.text,
+        captionScaleWithNode: true,
+        visualStyleKey: styleKey,
         metadata: {
             kind: projectionKind,
-            stageIndex,
-            ...createView2dVectorStripMetadata()
+            stageIndex
         }
     });
 
@@ -242,7 +437,10 @@ function buildProjectionStageNode({
                 role: 'projection-multiply',
                 semantic: buildSemantic(projectionSemantic, { role: 'projection-multiply', operatorKey: 'multiply' }),
                 text: 'x',
-                visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR }
+                visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR },
+                metadata: {
+                    fontScale: PROJECTION_MULTIPLY_OPERATOR_SCALE
+                }
             }),
             equationNode
         ],
@@ -257,46 +455,74 @@ function buildAttentionStageNode({
     baseSemantic,
     scoreStage,
     queryStageIndex,
-    valueStageIndex
+    valueStageIndex,
+    isSmallScreen = false
 }) {
     const attentionSemantic = buildSemantic(baseSemantic, {
         stage: 'attention'
     });
+    const attentionQueryCompactWidth = isSmallScreen
+        ? PROJECTION_OUTPUT_COMPACT_WIDTH_SMALL
+        : PROJECTION_OUTPUT_COMPACT_WIDTH;
+    const attentionQueryRowHeight = isSmallScreen
+        ? PROJECTION_OUTPUT_ROW_HEIGHT_SMALL
+        : PROJECTION_OUTPUT_ROW_HEIGHT;
+    const queryDimensionCaption = formatView2dMatrixDimensions(
+        scoreStage.queryRowCount,
+        scoreStage.queryColumnCount
+    );
+    const transposeDimensionCaption = formatView2dMatrixDimensions(
+        scoreStage.transposeRowCount,
+        scoreStage.transposeColumnCount
+    );
+    const transposeTargetWidth = Math.max(
+        isSmallScreen ? ATTENTION_TRANSPOSE_MIN_WIDTH_SMALL : ATTENTION_TRANSPOSE_MIN_WIDTH,
+        scoreStage.transposeColumnCount * attentionQueryRowHeight
+    );
+    const transposeColumnWidth = Math.max(
+        1,
+        Math.floor(transposeTargetWidth / Math.max(1, scoreStage.transposeColumnCount))
+    );
 
-    const querySourceNode = createMatrixNode({
+    const querySourceNode = createVectorStripMatrixNode({
         role: 'attention-query-source',
         semantic: buildSemantic(attentionSemantic, { role: 'attention-query-source' }),
-        label: buildLabel(scoreStage.queryLabelTex, scoreStage.queryLabelTex),
-        dimensions: {
-            rows: scoreStage.queryRowCount,
-            cols: scoreStage.queryColumnCount
-        },
-        presentation: VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS,
-        shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+        labelTex: scoreStage.queryLabelTex,
+        labelText: scoreStage.queryLabelTex,
         rowItems: buildGradientRowItems(scoreStage.queryRows, attentionSemantic, 'attention-query-row'),
-        visual: {
-            styleKey: VIEW2D_STYLE_KEYS.MHSA_Q
-        },
+        rowCount: scoreStage.queryRowCount,
+        columnCount: scoreStage.queryColumnCount,
+        compactWidth: attentionQueryCompactWidth,
+        rowHeight: attentionQueryRowHeight,
+        captionPosition: 'bottom',
+        captionDimensionsTex: queryDimensionCaption.tex,
+        captionDimensionsText: queryDimensionCaption.text,
+        captionScaleWithNode: true,
+        visualStyleKey: VIEW2D_STYLE_KEYS.MHSA_Q,
         metadata: {
-            stageIndex: queryStageIndex,
-            ...createView2dVectorStripMetadata()
+            stageIndex: queryStageIndex
         }
     });
 
-    const transposeNode = createMatrixNode({
+    const transposeNode = createTransposeVectorStripMatrixNode({
         role: 'attention-key-transpose',
         semantic: buildSemantic(attentionSemantic, { role: 'attention-key-transpose' }),
-        label: buildLabel(scoreStage.transposeLabelTex, scoreStage.transposeLabelTex),
-        dimensions: {
-            rows: scoreStage.transposeRowCount,
-            cols: scoreStage.transposeColumnCount
-        },
-        presentation: VIEW2D_MATRIX_PRESENTATIONS.COLUMN_STRIP,
-        shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+        labelTex: scoreStage.transposeLabelTex,
+        labelText: scoreStage.transposeLabelTex,
         columnItems: buildTransposeColumnItems(scoreStage.transposeColumns, attentionSemantic),
-        visual: {
-            styleKey: VIEW2D_STYLE_KEYS.MHSA_K
-        }
+        rowCount: scoreStage.transposeRowCount,
+        columnCount: scoreStage.transposeColumnCount,
+        compactHeight: attentionQueryCompactWidth,
+        columnWidth: transposeColumnWidth,
+        columnGap: 0,
+        paddingX: 0,
+        paddingY: 0,
+        cornerRadius: ATTENTION_TRANSPOSE_CORNER_RADIUS,
+        captionPosition: 'bottom',
+        captionDimensionsTex: transposeDimensionCaption.tex,
+        captionDimensionsText: transposeDimensionCaption.text,
+        captionScaleWithNode: true,
+        visualStyleKey: VIEW2D_STYLE_KEYS.MHSA_K
     });
 
     const preScoreNode = createMatrixNode({
@@ -561,6 +787,44 @@ function buildAttentionStageNode({
     });
 }
 
+function buildProjectionIngressConnectorNodes({
+    baseSemantic,
+    layoutMetrics,
+    projectionNodes,
+    sourceAnchorNode
+}) {
+    const connectorGaps = layoutMetrics?.connectorGaps || {};
+    const findProjectionInput = (kind) => projectionNodes.find((stageNode) => stageNode?.metadata?.kind === kind)
+        ?.children?.[0] || null;
+
+    return ['q', 'k', 'v'].map((kind) => {
+        const targetNode = findProjectionInput(kind);
+        if (!sourceAnchorNode || !targetNode) return null;
+        return createConnectorNode({
+            role: `connector-xln-${kind}`,
+            semantic: buildSemantic(baseSemantic, {
+                stage: `connector-xln-${kind}`,
+                role: 'connector-xln',
+                branchKey: kind
+            }),
+            source: createAnchorRef(sourceAnchorNode.id, VIEW2D_ANCHOR_SIDES.LEFT),
+            target: createAnchorRef(targetNode.id, VIEW2D_ANCHOR_SIDES.LEFT),
+            route: VIEW2D_CONNECTOR_ROUTES.HORIZONTAL,
+            gap: 0,
+            sourceGap: 0,
+            targetGap: PROJECTION_XLN_TARGET_GAP,
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL,
+                stroke: MHSA_CONNECTOR_STROKE
+            },
+            metadata: {
+                preserveColor: true,
+                strokeWidthScale: 0.88
+            }
+        });
+    }).filter(Boolean);
+}
+
 function buildConnectorNodes({
     baseSemantic,
     layoutMetrics,
@@ -604,7 +868,13 @@ function buildConnectorNodes({
                 route: VIEW2D_CONNECTOR_ROUTES.HORIZONTAL,
                 gap: connectorGaps.projection,
                 gapKey: 'projection',
-                visual: { styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_Q }
+                visual: {
+                    styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL,
+                    stroke: MHSA_CONNECTOR_STROKE
+                },
+                metadata: {
+                    preserveColor: true
+                }
             })
             : null,
         kOutputNode && transposeNode
@@ -616,7 +886,13 @@ function buildConnectorNodes({
                 route: VIEW2D_CONNECTOR_ROUTES.HORIZONTAL,
                 gap: connectorGaps.transpose,
                 gapKey: 'transpose',
-                visual: { styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_K }
+                visual: {
+                    styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL,
+                    stroke: MHSA_CONNECTOR_STROKE
+                },
+                metadata: {
+                    preserveColor: true
+                }
             })
             : null,
         preScoreNode && maskedInputNode
@@ -628,7 +904,13 @@ function buildConnectorNodes({
                 route: VIEW2D_CONNECTOR_ROUTES.VERTICAL,
                 gap: connectorGaps.pre,
                 gapKey: 'pre',
-                visual: { styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL }
+                visual: {
+                    styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL,
+                    stroke: MHSA_CONNECTOR_STROKE
+                },
+                metadata: {
+                    preserveColor: true
+                }
             })
             : null,
         postNode && postCopyNode
@@ -640,7 +922,13 @@ function buildConnectorNodes({
                 route: VIEW2D_CONNECTOR_ROUTES.HORIZONTAL,
                 gap: connectorGaps.post,
                 gapKey: 'post',
-                visual: { styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_POST }
+                visual: {
+                    styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL,
+                    stroke: MHSA_CONNECTOR_STROKE
+                },
+                metadata: {
+                    preserveColor: true
+                }
             })
             : null,
         vOutputNode && valuePostNode
@@ -652,7 +940,13 @@ function buildConnectorNodes({
                 route: VIEW2D_CONNECTOR_ROUTES.HORIZONTAL,
                 gap: connectorGaps.value,
                 gapKey: 'value',
-                visual: { styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_V }
+                visual: {
+                    styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL,
+                    stroke: MHSA_CONNECTOR_STROKE
+                },
+                metadata: {
+                    preserveColor: true
+                }
             })
             : null
     ].filter(Boolean);
@@ -722,10 +1016,26 @@ export function buildMhsaSceneModel({
                 baseSemantic,
                 previewData: resolvedPreviewData,
                 projectionData,
-                stageIndex
+                stageIndex,
+                isSmallScreen
             });
         })
         .filter(Boolean);
+    const projectionSourceAnchorNode = buildProjectionSourceAnchorNode({
+        baseSemantic,
+        rowCount: resolvedPreviewData.rowCount,
+        isSmallScreen
+    });
+    const projectionStackNode = createGroupNode({
+        role: 'projection-stack',
+        semantic: buildSemantic(baseSemantic, { stage: 'projection-stack', role: 'projection-stack' }),
+        direction: VIEW2D_LAYOUT_DIRECTIONS.VERTICAL,
+        gapKey: 'stack',
+        children: projectionNodes,
+        metadata: {
+            gapOverride: isSmallScreen ? PROJECTION_STACK_GAP_SMALL : PROJECTION_STACK_GAP
+        }
+    });
 
     const attentionNode = resolvedPreviewData.attentionScoreStage
         && Array.isArray(resolvedPreviewData.attentionScoreStage.queryRows)
@@ -734,34 +1044,51 @@ export function buildMhsaSceneModel({
             baseSemantic,
             scoreStage: resolvedPreviewData.attentionScoreStage,
             queryStageIndex,
-            valueStageIndex
+            valueStageIndex,
+            isSmallScreen
         })
         : null;
 
     const rootNodes = [
         createGroupNode({
-            role: 'projection-stack',
-            semantic: buildSemantic(baseSemantic, { stage: 'projection-stack', role: 'projection-stack' }),
-            direction: VIEW2D_LAYOUT_DIRECTIONS.VERTICAL,
-            gapKey: 'stack',
-            children: projectionNodes
+            role: 'projection-sidecar',
+            semantic: buildSemantic(baseSemantic, { stage: 'projection-sidecar', role: 'projection-sidecar' }),
+            direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
+            gapKey: 'projection',
+            children: [
+                projectionSourceAnchorNode,
+                projectionStackNode
+            ],
+            metadata: {
+                gapOverride: isSmallScreen ? PROJECTION_SIDECAR_GAP_SMALL : PROJECTION_SIDECAR_GAP
+            }
         })
     ];
 
+    const connectorNodes = buildProjectionIngressConnectorNodes({
+        baseSemantic,
+        layoutMetrics: resolvedLayoutMetrics,
+        projectionNodes,
+        sourceAnchorNode: projectionSourceAnchorNode
+    });
     if (attentionNode) {
         rootNodes.push(attentionNode);
+        connectorNodes.push(...buildConnectorNodes({
+            baseSemantic,
+            layoutMetrics: resolvedLayoutMetrics,
+            projectionNodes,
+            attentionNode
+        }));
+    }
+
+    if (connectorNodes.length) {
         rootNodes.push(
             createGroupNode({
                 role: 'connector-layer',
                 semantic: buildSemantic(baseSemantic, { stage: 'connector-layer', role: 'connector-layer' }),
                 direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
                 gapKey: 'default',
-                children: buildConnectorNodes({
-                    baseSemantic,
-                    layoutMetrics: resolvedLayoutMetrics,
-                    projectionNodes,
-                    attentionNode
-                })
+                children: connectorNodes
             })
         );
     }

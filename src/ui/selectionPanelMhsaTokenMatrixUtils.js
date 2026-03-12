@@ -519,7 +519,15 @@ export function buildMhsaTokenMatrixPreviewData({
             weightRowCount: D_MODEL,
             weightColumnCount: D_HEAD,
             weightGradientCss: buildWeightCardCss(rgb),
+            biasValue: safeBiasSample,
             biasGradientCss: buildAccentCss(rgb, safeBiasSample),
+            biasVectorGradientCss: buildProjectionVectorGradientCss(
+                null,
+                safeBiasSample,
+                config.gradientOptions,
+                '90deg',
+                PROJECTION_VECTOR_PREVIEW_DARKEN_FACTOR
+            ),
             outputRowCount: outputRows.length,
             outputColumnCount: D_HEAD,
             outputRows

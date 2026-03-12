@@ -41,6 +41,58 @@ function setHidden(node, hidden) {
     node.hidden = !!hidden;
 }
 
+function createAttentionDetailRow(documentRef) {
+    const row = documentRef.createElement('div');
+    row.className = 'scene-hover-label__attention-row';
+
+    const role = documentRef.createElement('span');
+    role.className = 'scene-hover-label__attention-role';
+
+    const chip = documentRef.createElement('span');
+    chip.className = 'detail-subtitle-token-chip scene-hover-label__attention-chip';
+    chip.setAttribute('aria-hidden', 'true');
+
+    const position = documentRef.createElement('span');
+    position.className = 'scene-hover-label__attention-position';
+    position.setAttribute('aria-hidden', 'true');
+
+    row.append(role, chip, position);
+    return { row, role, chip, position };
+}
+
+function renderAttentionDetailRow(rowParts, rowContext = null) {
+    if (!rowParts) return false;
+
+    const hasToken = !!rowContext && (
+        typeof rowContext.tokenLabel === 'string' && rowContext.tokenLabel.length > 0
+        || Number.isFinite(rowContext.tokenIndex)
+    );
+    setHidden(rowParts.row, !hasToken);
+    if (!hasToken) {
+        rowParts.role.textContent = '';
+        rowParts.chip.textContent = '';
+        rowParts.chip.removeAttribute('title');
+        rowParts.position.textContent = '';
+        return false;
+    }
+
+    rowParts.role.textContent = rowContext.roleLabel || 'Token';
+    rowParts.chip.textContent = formatTokenChipDisplayText(
+        rowContext.tokenLabel,
+        rowContext.tokenIndex
+    );
+    rowParts.chip.title = rowContext.tokenLabel || '';
+    applyPromptTokenChipColors(rowParts.chip, {
+        tokenText: rowContext.tokenLabel,
+        tokenIndex: rowContext.tokenIndex,
+        tokenId: rowContext.tokenId
+    });
+    rowParts.position.textContent = rowContext.positionText
+        ? `(${rowContext.positionText})`
+        : '';
+    return true;
+}
+
 export function createHoverLabelOverlay({
     documentRef = typeof document !== 'undefined' ? document : null,
     parent = documentRef?.body || null,
@@ -77,12 +129,18 @@ export function createHoverLabelOverlay({
     const detailText = documentRef.createElement('span');
     detailText.className = 'scene-hover-label__detail-text';
     detailText.setAttribute('aria-hidden', 'true');
+    const attentionDetails = documentRef.createElement('div');
+    attentionDetails.className = 'scene-hover-label__attention-details';
+    attentionDetails.setAttribute('aria-hidden', 'true');
+    const sourceRow = createAttentionDetailRow(documentRef);
+    const targetRow = createAttentionDetailRow(documentRef);
+    attentionDetails.append(sourceRow.row, targetRow.row);
     const subtitle = documentRef.createElement('span');
     subtitle.className = 'scene-hover-label__subtitle';
     subtitle.setAttribute('aria-hidden', 'true');
 
     topRow.append(labelText, separator, tokenChip, detailText);
-    content.append(topRow, subtitle);
+    content.append(topRow, attentionDetails, subtitle);
     root.appendChild(content);
     parent.appendChild(root);
 
@@ -112,11 +170,14 @@ export function createHoverLabelOverlay({
             tokenChip.textContent = '';
             tokenChip.removeAttribute('title');
             detailText.textContent = '';
+            renderAttentionDetailRow(sourceRow, null);
+            renderAttentionDetailRow(targetRow, null);
             subtitle.textContent = '';
             setHidden(labelText, true);
             setHidden(separator, true);
             setHidden(tokenChip, true);
             setHidden(detailText, true);
+            setHidden(attentionDetails, true);
             setHidden(subtitle, true);
             return false;
         }
@@ -124,6 +185,7 @@ export function createHoverLabelOverlay({
         const showDetail = !!detailContext;
         const showTokenChip = detailContext?.detailKind === 'token-chip';
         const showDetailText = detailContext?.detailKind === 'position-text';
+        const showAttentionDetails = detailContext?.detailKind === 'attention-token-pair';
         const showPrimaryLabel = detailContext?.showPrimaryLabel !== false;
         const showSubtitle = typeof subtitleText === 'string' && subtitleText.length > 0;
         const primaryLabelText = (
@@ -136,15 +198,31 @@ export function createHoverLabelOverlay({
         labelText.textContent = showPrimaryLabel ? primaryLabelText : '';
         subtitle.textContent = showSubtitle ? subtitleText : '';
         setHidden(labelText, !showPrimaryLabel);
-        setHidden(separator, !showDetail || !showPrimaryLabel);
+        setHidden(separator, !showDetail || !showPrimaryLabel || showAttentionDetails);
         setHidden(tokenChip, !showTokenChip);
         setHidden(detailText, !showDetailText);
+        setHidden(attentionDetails, !showAttentionDetails);
         setHidden(subtitle, !showSubtitle);
 
         if (!showDetail) {
             tokenChip.textContent = '';
             tokenChip.removeAttribute('title');
             detailText.textContent = '';
+            renderAttentionDetailRow(sourceRow, null);
+            renderAttentionDetailRow(targetRow, null);
+            return true;
+        }
+
+        if (showAttentionDetails) {
+            tokenChip.textContent = '';
+            tokenChip.removeAttribute('title');
+            detailText.textContent = '';
+            const rows = Array.isArray(detailContext.attentionRows)
+                ? detailContext.attentionRows
+                : [];
+            const sourceVisible = renderAttentionDetailRow(sourceRow, rows[0] || null);
+            const targetVisible = renderAttentionDetailRow(targetRow, rows[1] || null);
+            setHidden(attentionDetails, !(sourceVisible || targetVisible));
             return true;
         }
 
@@ -152,10 +230,14 @@ export function createHoverLabelOverlay({
             tokenChip.textContent = '';
             tokenChip.removeAttribute('title');
             detailText.textContent = detailContext.detailText || '';
+            renderAttentionDetailRow(sourceRow, null);
+            renderAttentionDetailRow(targetRow, null);
             return true;
         }
 
         detailText.textContent = '';
+        renderAttentionDetailRow(sourceRow, null);
+        renderAttentionDetailRow(targetRow, null);
         tokenChip.textContent = formatTokenChipDisplayText(
             detailContext.tokenLabel,
             detailContext.tokenIndex

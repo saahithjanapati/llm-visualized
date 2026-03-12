@@ -669,6 +669,36 @@ export class MHSAAnimation {
         return true;
     }
 
+    syncVisualState() {
+        const batches = new Set();
+        const addBatch = (batch) => {
+            if (batch) batches.add(batch);
+        };
+
+        if (this._batchedVectorSets) {
+            Object.values(this._batchedVectorSets).forEach(addBatch);
+        }
+        if (this._liveBatchesToSync && this._liveBatchesToSync.size) {
+            this._liveBatchesToSync.forEach(addBatch);
+        }
+        if (this._cachedKvBatchesToSync && this._cachedKvBatchesToSync.size) {
+            this._cachedKvBatchesToSync.forEach(addBatch);
+        }
+
+        batches.forEach((batch) => {
+            try {
+                if (typeof batch.syncAll === 'function') {
+                    batch.syncAll();
+                } else if (typeof batch.syncDirty === 'function') {
+                    batch.syncDirty();
+                }
+            } catch (_) { /* optional batch sync */ }
+        });
+
+        this._liveBatchesToSync?.clear();
+        this._cachedKvBatchesToSync?.clear();
+    }
+
     getLaneForZ(zPos) {
         if (!Number.isFinite(zPos)) return null;
         if (this._laneByZ && this._laneByZ.size) {

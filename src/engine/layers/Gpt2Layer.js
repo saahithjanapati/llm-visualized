@@ -1098,10 +1098,9 @@ export default class Gpt2Layer extends BaseLayer {
                     allMlpReady = false;
                 }
 
-                // Expanded 4× vector group trail
-                if (lane.expandedVecGroup && lane.expandedVecTrail) {
-                    lane.expandedVecTrail.update(lane.expandedVecGroup.position);
-                }
+                // Expanded MLP-group trails are manually sampled by their
+                // tweens so the path stays in the correct coordinate space and
+                // only records one sample per visual move.
 
                 // Trails for K/Q/V copies are updated inside VectorRouter.
                 // Avoid double-updating here to reduce CPU work.
@@ -2285,6 +2284,25 @@ export default class Gpt2Layer extends BaseLayer {
         // Do not force residual vectors downward here; MHSAAnimation already clamps upward motion.
     }
 
+    onEngineResume({ reason = 'generic' } = {}) {
+        if (reason !== 'visibility') return;
+
+        this._lastUpdateNowMs = NaN;
+        this._ln2HandoffStallSinceMs = NaN;
+        this._resetLaneStallWatchdog(Array.isArray(this.lanes) ? this.lanes : []);
+
+        if (this._lnParamBanks) {
+            Object.values(this._lnParamBanks).forEach((bank) => {
+                if (!bank || typeof bank.syncAll !== 'function') return;
+                try {
+                    bank.syncAll();
+                } catch (_) { /* LayerNorm placeholders are non-critical visuals. */ }
+            });
+        }
+        this._dirtyLnParamBanks?.clear();
+        this.mhsaAnimation?.syncVisualState?.();
+    }
+
     /**
      * Animate vector through MLP up-projection (768 → 3072 dimensions)
      */
@@ -2652,7 +2670,10 @@ export default class Gpt2Layer extends BaseLayer {
                 const liftProgress = state.t >= activationSwitchT
                     ? (state.t - activationSwitchT) / Math.max(1e-6, 1 - activationSwitchT)
                     : 0;
-                const liftT = TWEEN.Easing.Back.Out(THREE.MathUtils.clamp(liftProgress, 0, 1));
+                // Keep the whole expanded group on a monotonic rise so the
+                // recorded trail does not overshoot and fold back into a
+                // brighter-looking dot at the GELU handoff.
+                const liftT = TWEEN.Easing.Cubic.Out(THREE.MathUtils.clamp(liftProgress, 0, 1));
                 expandedGroup.position.y = baseY + riseExtra * liftT;
                 updateExpandedTrail();
 

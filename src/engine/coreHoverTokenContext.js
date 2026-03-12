@@ -1,5 +1,9 @@
 import { resolveTokenChipLabel } from '../utils/tokenChipStyleUtils.js';
-import { resolveLayerNormKind } from '../utils/layerNormLabels.js';
+import {
+    resolveLayerNormKind,
+    resolveLayerNormParamSpec
+} from '../utils/layerNormLabels.js';
+import { resolvePreferredTokenLabel } from '../utils/tokenLabelResolution.js';
 
 function toFiniteTokenNumber(value) {
     const parsed = Number(value);
@@ -70,6 +74,10 @@ function isWeightMatrixHoverSelection(label = '') {
     return String(label || '').toLowerCase().includes('weight matrix');
 }
 
+function isBiasVectorHoverSelection(label = '') {
+    return String(label || '').toLowerCase().includes('bias vector');
+}
+
 function isEmbeddingMatrixHoverSelection(label = '') {
     const lower = String(label || '').toLowerCase().trim();
     return lower === 'vocabulary embedding'
@@ -94,6 +102,23 @@ function isWeightedSumHoverSelection(label = '', info = null, object = null) {
     return candidates.some((candidate) => candidate?.isWeightedSum === true);
 }
 
+function isAttentionScoreHoverSelection(label = '', info = null, object = null) {
+    const lower = String(label || '').toLowerCase();
+    const stageLower = findHoverTokenString(info, object, 'stage').toLowerCase();
+    if (stageLower === 'attention.pre' || stageLower === 'attention.post') return true;
+
+    const kindLower = String(info?.kind || object?.userData?.kind || '').toLowerCase();
+    if (kindLower === 'attentionsphere') return true;
+
+    if (!lower.includes('attention score')) return false;
+
+    const keyTokenLabel = findHoverTokenString(info, object, 'keyTokenLabel');
+    return Number.isFinite(findHoverTokenNumber(info, object, 'keyTokenIndex'))
+        || (typeof keyTokenLabel === 'string' && keyTokenLabel.length > 0)
+        || Number.isFinite(findHoverTokenNumber(info, object, 'preScore'))
+        || Number.isFinite(findHoverTokenNumber(info, object, 'postScore'));
+}
+
 function formatHeadLayerSubtitle(headIndex = null, layerIndex = null) {
     const parts = [];
     if (Number.isFinite(headIndex)) {
@@ -103,6 +128,18 @@ function formatHeadLayerSubtitle(headIndex = null, layerIndex = null) {
         parts.push(`Layer ${Math.floor(layerIndex) + 1}`);
     }
     return parts.join(' • ');
+}
+
+function resolveHoverPositionIndex(info = null, object = null) {
+    const explicitPositionIndex = findHoverTokenNumber(info, object, 'positionIndex');
+    if (Number.isFinite(explicitPositionIndex)) {
+        return Math.max(1, Math.floor(explicitPositionIndex));
+    }
+    const tokenIndex = findHoverTokenNumber(info, object, 'tokenIndex');
+    if (Number.isFinite(tokenIndex)) {
+        return Math.max(1, Math.floor(tokenIndex) + 1);
+    }
+    return null;
 }
 
 function isQkvStage(stage = '') {
@@ -141,6 +178,16 @@ function isFinalLayerNormHoverSelection(label = '', info = null, object = null) 
     }) === 'final';
 }
 
+function isLayerNormParamHoverSelection(label = '', info = null, object = null) {
+    const stage = findHoverTokenString(info, object, 'stage');
+    const explicitKind = findHoverTokenString(info, object, 'layerNormKind');
+    return !!resolveLayerNormParamSpec({
+        label,
+        stage,
+        explicitKind
+    });
+}
+
 function isTokenVectorStage(stage = '') {
     const lower = String(stage || '').toLowerCase();
     if (!lower) return false;
@@ -175,6 +222,7 @@ function isVectorLikeCandidate(candidate = null) {
 
 export function isVectorLikeHoverSelection(label = '', info = null, object = null) {
     if (isWeightMatrixHoverSelection(label)) return false;
+    if (isBiasVectorHoverSelection(label)) return false;
 
     const lower = String(label || '').toLowerCase();
     if (lower.includes('vector') || lower.includes('weighted sum')) return true;
@@ -187,6 +235,94 @@ export function isVectorLikeHoverSelection(label = '', info = null, object = nul
     return candidates.some((candidate) => isVectorLikeCandidate(candidate));
 }
 
+function resolveAttentionRowContext({
+    roleLabel = 'Token',
+    tokenIndex = null,
+    tokenId = null,
+    tokenLabel = '',
+    activationSource = null
+} = {}) {
+    const safeTokenIndex = Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : null;
+    let safeTokenId = Number.isFinite(tokenId) ? Math.floor(tokenId) : null;
+    if (!Number.isFinite(safeTokenId)
+        && Number.isFinite(safeTokenIndex)
+        && typeof activationSource?.getTokenId === 'function') {
+        const resolvedTokenId = activationSource.getTokenId(safeTokenIndex);
+        if (Number.isFinite(resolvedTokenId)) safeTokenId = Math.floor(resolvedTokenId);
+    }
+
+    const preferredLabel = resolvePreferredTokenLabel({
+        tokenLabel,
+        tokenIndex: safeTokenIndex,
+        activationSource
+    });
+    if (!preferredLabel && !Number.isFinite(safeTokenIndex)) return null;
+
+    return {
+        roleLabel,
+        tokenLabel: preferredLabel,
+        tokenIndex: safeTokenIndex,
+        tokenId: safeTokenId,
+        positionText: Number.isFinite(safeTokenIndex)
+            ? `Position ${safeTokenIndex + 1}`
+            : 'Position n/a'
+    };
+}
+
+function resolveAttentionScoreHoverContext({
+    label = '',
+    info = null,
+    object = null,
+    activationSource = null
+} = {}) {
+    if (!isAttentionScoreHoverSelection(label, info, object)) return null;
+
+    const sourceTokenIndex = (() => {
+        const queryTokenIndex = findHoverTokenNumber(info, object, 'queryTokenIndex');
+        if (Number.isFinite(queryTokenIndex)) return Math.floor(queryTokenIndex);
+        const tokenIndex = findHoverTokenNumber(info, object, 'tokenIndex');
+        return Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : null;
+    })();
+    const sourceTokenLabel = findHoverTokenString(info, object, 'queryTokenLabel')
+        || findHoverTokenString(info, object, 'tokenLabel');
+    const sourceTokenId = (() => {
+        const queryTokenId = findHoverTokenNumber(info, object, 'queryTokenId');
+        if (Number.isFinite(queryTokenId)) return Math.floor(queryTokenId);
+        const tokenId = findHoverTokenNumber(info, object, 'tokenId');
+        return Number.isFinite(tokenId) ? Math.floor(tokenId) : null;
+    })();
+
+    const targetTokenIndex = findHoverTokenNumber(info, object, 'keyTokenIndex');
+    const targetTokenLabel = findHoverTokenString(info, object, 'keyTokenLabel');
+    const targetTokenId = findHoverTokenNumber(info, object, 'keyTokenId');
+
+    const attentionRows = [
+        resolveAttentionRowContext({
+            roleLabel: 'Source',
+            tokenIndex: sourceTokenIndex,
+            tokenId: sourceTokenId,
+            tokenLabel: sourceTokenLabel,
+            activationSource
+        }),
+        resolveAttentionRowContext({
+            roleLabel: 'Target',
+            tokenIndex: targetTokenIndex,
+            tokenId: targetTokenId,
+            tokenLabel: targetTokenLabel,
+            activationSource
+        })
+    ];
+
+    if (!attentionRows.some(Boolean)) return null;
+
+    return {
+        suppressHoverLabel: false,
+        showPrimaryLabel: true,
+        detailKind: 'attention-token-pair',
+        attentionRows
+    };
+}
+
 export function resolveHoverTokenContext({
     label = '',
     info = null,
@@ -196,8 +332,19 @@ export function resolveHoverTokenContext({
     if (isEmbeddingMatrixHoverSelection(label) || isWeightMatrixHoverSelection(label)) {
         return null;
     }
+    if (isBiasVectorHoverSelection(label)) {
+        return null;
+    }
 
     if (isBottomPositionChipHoverSelection(label)) return null;
+
+    const attentionScoreContext = resolveAttentionScoreHoverContext({
+        label,
+        info,
+        object,
+        activationSource
+    });
+    if (attentionScoreContext) return attentionScoreContext;
 
     const isBottomTokenChip = isBottomTokenChipHoverSelection(label);
     if (!isBottomTokenChip && !isVectorLikeHoverSelection(label, info, object)) return null;
@@ -210,14 +357,13 @@ export function resolveHoverTokenContext({
     }
 
     if (isWeightedSumHoverSelection(label, info, object)) return null;
+    if (isLayerNormParamHoverSelection(label, info, object)) return null;
 
-    let tokenLabel = findHoverTokenString(info, object, 'tokenLabel');
-    if (!tokenLabel && Number.isFinite(tokenIndex) && typeof activationSource?.getTokenString === 'function') {
-        const resolvedTokenLabel = activationSource.getTokenString(tokenIndex);
-        if (typeof resolvedTokenLabel === 'string' && resolvedTokenLabel.length) {
-            tokenLabel = resolvedTokenLabel;
-        }
-    }
+    const tokenLabel = resolvePreferredTokenLabel({
+        tokenLabel: findHoverTokenString(info, object, 'tokenLabel'),
+        tokenIndex,
+        activationSource
+    });
 
     const resolvedLabel = resolveTokenChipLabel(tokenLabel, tokenIndex);
     if (!resolvedLabel) return null;
@@ -239,19 +385,22 @@ export function resolveHoverLabelSubtitle({
     info = null,
     object = null
 } = {}) {
-    if (isBottomTokenChipHoverSelection(label) || isBottomPositionChipHoverSelection(label)) {
+    if (isBottomPositionChipHoverSelection(label)) {
         return '';
+    }
+    const positionIndex = resolveHoverPositionIndex(info, object);
+    if (isBottomTokenChipHoverSelection(label)) {
+        return Number.isFinite(positionIndex) ? `Position ${positionIndex}` : '';
     }
     if (isFinalLayerNormHoverSelection(label, info, object)) {
         return '';
     }
     const headIndex = findHoverTokenNumber(info, object, 'headIndex');
     const layerIndex = findHoverTokenNumber(info, object, 'layerIndex');
-    const tokenIndex = findHoverTokenNumber(info, object, 'tokenIndex');
     const stage = findHoverTokenString(info, object, 'stage');
     const subtitle = formatHeadLayerSubtitle(headIndex, layerIndex);
-    if (Number.isFinite(tokenIndex)) {
-        const positionText = `Position ${Math.floor(tokenIndex) + 1}`;
+    if (Number.isFinite(positionIndex)) {
+        const positionText = `Position ${positionIndex}`;
         if (isResidualStreamHoverSelection(label, stage) || isPostLayerNormResidualHoverSelection(label, stage)) {
             return subtitle ? `${positionText} • ${subtitle}` : positionText;
         }

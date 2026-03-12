@@ -33,13 +33,17 @@ import {
     resolveView2dVisualTokens,
     VIEW2D_STYLE_KEYS
 } from '../theme/visualTokens.js';
-import { createView2dVectorStripMetadata } from '../shared/vectorStrip.js';
+import {
+    createResidualVectorMatrixNode,
+    RESIDUAL_VECTOR_MEASURE_COLS
+} from './createResidualVectorMatrixNode.js';
 import { buildHeadDetailSceneModel } from './buildHeadDetailSceneModel.js';
+import { buildMhsaSceneModel } from './buildMhsaSceneModel.js';
+import { resolvePreferredTokenLabel } from '../../utils/tokenLabelResolution.js';
 
 const DEFAULT_VISIBLE_TOKEN_COUNT = 5;
 const SUMMARY_MODEL_COLS = 18;
-const SUMMARY_RESIDUAL_COLS = 12;
-const RESIDUAL_STRIP_UNIT = 6;
+const SUMMARY_RESIDUAL_COLS = RESIDUAL_VECTOR_MEASURE_COLS;
 const SUMMARY_HEAD_COLS = 12;
 const SUMMARY_MLP_COLS = 24;
 const SUMMARY_LOGIT_COLS = 12;
@@ -208,15 +212,12 @@ function resolveVisibleTokenIndices(activationSource = null, tokenIndices = null
 }
 
 function resolveTokenLabel(activationSource = null, tokenIndex = 0, fallbackLabel = null, fallbackIndex = 0) {
-    if (typeof fallbackLabel === 'string' && fallbackLabel.trim().length) {
-        return fallbackLabel.trim();
-    }
-    const label = typeof activationSource?.getTokenString === 'function'
-        ? activationSource.getTokenString(tokenIndex)
-        : null;
-    if (typeof label === 'string' && label.trim().length) {
-        return label.trim();
-    }
+    const resolvedLabel = resolvePreferredTokenLabel({
+        tokenLabel: fallbackLabel,
+        tokenIndex,
+        activationSource
+    });
+    if (resolvedLabel.length) return resolvedLabel;
     return `Token ${fallbackIndex + 1}`;
 }
 
@@ -377,7 +378,8 @@ function createCaptionMetadata({
     styleKey = null,
     dimensionsTex = '',
     dimensionsText = '',
-    minScreenHeightPx = null
+    minScreenHeightPx = null,
+    renderMode = ''
 } = {}) {
     const caption = {};
     const safePosition = String(position || '').trim().toLowerCase();
@@ -395,6 +397,10 @@ function createCaptionMetadata({
     }
     if (Number.isFinite(minScreenHeightPx) && minScreenHeightPx > 0) {
         caption.minScreenHeightPx = Math.max(1, Math.floor(minScreenHeightPx));
+    }
+    const safeRenderMode = String(renderMode || '').trim().toLowerCase();
+    if (safeRenderMode.length) {
+        caption.renderMode = safeRenderMode;
     }
     return Object.keys(caption).length ? { caption } : null;
 }
@@ -558,8 +564,8 @@ function createFixedWidthColumn({
 
 function createResidualStateModule({
     semantic = {},
-    labelTex = '\\mathrm{X}',
-    labelText = 'X',
+    labelTex = 'x',
+    labelText = 'x',
     tokenRefs = [],
     getVector = () => null
 } = {}) {
@@ -570,35 +576,15 @@ function createResidualStateModule({
         getVector
     });
     const rowCount = Math.max(1, rowItems.length);
-    const dimensionsTex = `${rowCount} \\times ${D_MODEL}`;
-    const dimensionsText = `${rowCount} × ${D_MODEL}`;
-    const cardNode = createMatrixNode({
+    const cardNode = createResidualVectorMatrixNode({
         role: 'module-card',
         semantic: buildSemantic(semantic, { role: 'module-card' }),
-        label: buildLabel(labelTex, labelText),
-        dimensions: {
-            rows: rowCount,
-            cols: D_MODEL
-        },
-        presentation: VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS,
-        shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+        labelTex,
+        labelText,
         rowItems,
-        visual: { styleKey: VIEW2D_STYLE_KEYS.RESIDUAL },
-        metadata: mergeMetadata(
-            createMeasureMetadata(SUMMARY_RESIDUAL_COLS, rowCount),
-            createCaptionMetadata({
-                position: 'float-top',
-                styleKey: VIEW2D_STYLE_KEYS.LABEL,
-                dimensionsTex,
-                dimensionsText,
-                minScreenHeightPx: 28
-            }),
-            createView2dVectorStripMetadata({
-                compactWidth: SUMMARY_RESIDUAL_COLS * RESIDUAL_STRIP_UNIT,
-                rowHeight: RESIDUAL_STRIP_UNIT,
-                hideSurface: true
-            })
-        )
+        rowCount,
+        captionPosition: 'float-top',
+        captionMinScreenHeightPx: 28
     });
 
     return {
@@ -1286,14 +1272,32 @@ export function buildTransformerSceneModel({
     const resolvedLayerCount = Number.isFinite(layerCount) ? Math.max(1, Math.floor(layerCount)) : NUM_LAYERS;
     const tokenRefs = resolveVisibleTokenRefs(activationSource, tokenIndices, tokenLabels);
     const resolvedTokens = visualTokens || resolveView2dVisualTokens();
-    const resolvedHeadDetailTarget = normalizeHeadDetailTarget(headDetailTarget);
-    const resolvedConcatDetailTarget = normalizeConcatDetailTarget(concatDetailTarget);
-    const resolvedOutputProjectionDetailTarget = normalizeOutputProjectionDetailTarget(outputProjectionDetailTarget);
+    const requestedOutputProjectionDetailTarget = normalizeOutputProjectionDetailTarget(outputProjectionDetailTarget);
+    const requestedConcatDetailTarget = requestedOutputProjectionDetailTarget
+        ? null
+        : normalizeConcatDetailTarget(concatDetailTarget);
+    const requestedHeadDetailTarget = (requestedOutputProjectionDetailTarget || requestedConcatDetailTarget)
+        ? null
+        : normalizeHeadDetailTarget(headDetailTarget);
+    const resolvedHeadDetailTarget = requestedHeadDetailTarget;
+    const resolvedConcatDetailTarget = requestedConcatDetailTarget;
+    const resolvedOutputProjectionDetailTarget = requestedOutputProjectionDetailTarget;
     const headDetailPreview = buildHeadDetailPreview({
         activationSource,
         tokenRefs,
         headDetailTarget: resolvedHeadDetailTarget
     });
+    const mhsaHeadDetailScene = resolvedHeadDetailTarget
+        ? buildMhsaSceneModel({
+            activationSource,
+            layerIndex: resolvedHeadDetailTarget.layerIndex,
+            headIndex: resolvedHeadDetailTarget.headIndex,
+            tokenIndices: tokenRefs.map((tokenRef) => tokenRef.tokenIndex),
+            tokenLabels: tokenRefs.map((tokenRef) => tokenRef.tokenLabel),
+            isSmallScreen,
+            visualTokens: resolvedTokens
+        })
+        : null;
     const headDetailScene = buildHeadDetailSceneModel({
         headDetailPreview,
         headDetailTarget: resolvedHeadDetailTarget,
@@ -1374,6 +1378,7 @@ export function buildTransformerSceneModel({
             headDetailTarget: resolvedHeadDetailTarget,
             headDetailPreview,
             headDetailScene,
+            mhsaHeadDetailScene,
             concatDetailTarget: resolvedConcatDetailTarget,
             concatDetailPreview,
             outputProjectionDetailTarget: resolvedOutputProjectionDetailTarget,

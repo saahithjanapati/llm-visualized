@@ -1,5 +1,9 @@
 import { buildSceneLayout } from '../view2d/layout/buildSceneLayout.js';
 import { resolveSemanticTargetBounds } from '../view2d/layout/resolveSemanticTargetBounds.js';
+import {
+    createMhsaDetailSceneIndex,
+    resolveMhsaDetailHoverState
+} from '../view2d/mhsaDetailInteraction.js';
 import { buildTransformerSceneModel } from '../view2d/model/buildTransformerSceneModel.js';
 import { CanvasSceneRenderer } from '../view2d/render/canvas/CanvasSceneRenderer.js';
 import {
@@ -26,6 +30,7 @@ import {
 } from '../view2d/transformerView2dRoute.js';
 import { View2dViewportController, resolveViewportFitTransform } from '../view2d/runtime/View2dViewportController.js';
 import { createHoverLabelOverlay } from './hoverLabelOverlay.js';
+import { createTransformerView2dResidualCaptionOverlay } from './transformerView2dResidualCaptionOverlay.js';
 
 export const TRANSFORMER_VIEW2D_PANEL_ACTION_OPEN = 'open-transformer-view2d';
 export {
@@ -44,6 +49,11 @@ const VIEW2D_CLICK_SLOP_PX = 6;
 const VIEW2D_KEYBOARD_PAN_PX_PER_SEC = 620;
 const VIEW2D_KEYBOARD_ZOOM_RATE = 0.00165;
 const VIEW2D_KEYBOARD_INITIAL_STEP_MS = 16;
+const VIEW2D_ROW_HOVER_FADE_DURATION_MS = 180;
+const VIEW2D_DETAIL_VIEWPORT_PADDING = 28;
+const VIEW2D_DETAIL_VIEWPORT_MIN_SCALE = 0.035;
+const VIEW2D_DETAIL_VIEWPORT_MAX_SCALE = 10;
+const VIEW2D_HEAD_DETAIL_FRAME_PAD_PX = 5;
 const VIEW2D_HEAD_DETAIL_FOCUS_PADDING = Object.freeze({
     top: 6,
     right: 6,
@@ -52,6 +62,7 @@ const VIEW2D_HEAD_DETAIL_FOCUS_PADDING = Object.freeze({
 });
 const VIEW2D_HEAD_DETAIL_DEPTH_ENTER_RATIO = 0.97;
 const VIEW2D_HEAD_DETAIL_DEPTH_EXIT_RATIO = 0.93;
+
 function isTextEntryTarget(target) {
     if (!(target instanceof Element)) return false;
     const tagName = String(target.tagName || '').toLowerCase();
@@ -159,6 +170,7 @@ export function createTransformerView2dDetailView(panelEl) {
                 role="group"
                 aria-label="Scalable 2D transformer canvas. Drag or use one finger to pan, pinch or scroll to zoom, and use arrow keys or W A S D to move around."
             >
+                <div class="detail-transformer-view2d-detail-frame" aria-hidden="true"></div>
                 <canvas class="detail-transformer-view2d-canvas" aria-label="Scalable 2D transformer canvas"></canvas>
             </div>
         </div>
@@ -173,6 +185,7 @@ export function createTransformerView2dDetailView(panelEl) {
 
     const canvas = root.querySelector('.detail-transformer-view2d-canvas');
     const canvasCard = root.querySelector('.detail-transformer-view2d-canvas-card');
+    const detailFrame = root.querySelector('.detail-transformer-view2d-detail-frame');
     const hud = root.querySelector('.detail-transformer-view2d-hud');
     const focusBtn = root.querySelector(`[data-transformer-view2d-action="${VIEW2D_DETAIL_ACTION_FOCUS}"]`);
     const fitBtn = root.querySelector(`[data-transformer-view2d-action="${VIEW2D_DETAIL_ACTION_FIT}"]`);
@@ -182,15 +195,23 @@ export function createTransformerView2dDetailView(panelEl) {
     const hoverLabelOverlay = createHoverLabelOverlay({
         zIndex: 12
     });
+    const residualCaptionOverlay = createTransformerView2dResidualCaptionOverlay({
+        parent: canvasCard
+    });
 
     const renderer = new CanvasSceneRenderer({
         canvas,
         dprCap: VIEW2D_PREVIEW_DPR_CAP_IDLE
     });
     const viewportController = new View2dViewportController({
-        minScale: 0.035,
-        maxScale: 10,
-        padding: 28
+        minScale: VIEW2D_DETAIL_VIEWPORT_MIN_SCALE,
+        maxScale: VIEW2D_DETAIL_VIEWPORT_MAX_SCALE,
+        padding: VIEW2D_DETAIL_VIEWPORT_PADDING
+    });
+    const detailViewportController = new View2dViewportController({
+        minScale: VIEW2D_DETAIL_VIEWPORT_MIN_SCALE,
+        maxScale: VIEW2D_DETAIL_VIEWPORT_MAX_SCALE,
+        padding: VIEW2D_DETAIL_VIEWPORT_PADDING
     });
 
     const state = {
@@ -207,11 +228,24 @@ export function createTransformerView2dDetailView(panelEl) {
         concatDetailTarget: null,
         outputProjectionDetailTarget: null,
         headDetailFocusScale: null,
+        headDetailSceneFitScale: null,
         headDetailDepthActive: false,
         semanticTarget: null,
         focusLabel: 'Transformer overview',
         sceneLabel: '0 layers / 0 tokens',
+        detailSceneIndex: null,
+        detailSceneFocus: null,
+        detailSceneHoverSignature: '',
         hoveredResidualRow: null,
+        hoverDimming: {
+            value: 0,
+            target: 0,
+            rafId: null,
+            lastTime: 0,
+            previousHoveredRow: null,
+            rowBlend: 1,
+            rowBlendTarget: 1
+        },
         pointer: null,
         touchGesture: {
             pointers: new Map(),
@@ -246,13 +280,21 @@ export function createTransformerView2dDetailView(panelEl) {
         concatDetailTarget = null,
         outputProjectionDetailTarget = null
     } = {}) {
-        state.headDetailTarget = resolveHeadDetailTarget(headDetailTarget);
-        state.concatDetailTarget = resolveConcatDetailTarget(concatDetailTarget);
-        state.outputProjectionDetailTarget = resolveOutputProjectionDetailTarget(outputProjectionDetailTarget);
+        const resolvedOutputProjectionDetailTarget = resolveOutputProjectionDetailTarget(outputProjectionDetailTarget);
+        const resolvedConcatDetailTarget = resolvedOutputProjectionDetailTarget
+            ? null
+            : resolveConcatDetailTarget(concatDetailTarget);
+        const resolvedHeadDetailTarget = (resolvedOutputProjectionDetailTarget || resolvedConcatDetailTarget)
+            ? null
+            : resolveHeadDetailTarget(headDetailTarget);
+        state.headDetailTarget = resolvedHeadDetailTarget;
+        state.concatDetailTarget = resolvedConcatDetailTarget;
+        state.outputProjectionDetailTarget = resolvedOutputProjectionDetailTarget;
     }
 
     function resetHeadDetailState(nextDepthActive = false) {
         state.headDetailFocusScale = null;
+        state.headDetailSceneFitScale = null;
         state.headDetailDepthActive = !!nextDepthActive;
     }
 
@@ -280,9 +322,12 @@ export function createTransformerView2dDetailView(panelEl) {
     }
 
     function stopAnimation() {
-        if (state.animationFrame === null) return;
-        cancelAnimationFrame(state.animationFrame);
-        state.animationFrame = null;
+        if (state.animationFrame !== null) {
+            cancelAnimationFrame(state.animationFrame);
+            state.animationFrame = null;
+        }
+        viewportController.animation = null;
+        detailViewportController.animation = null;
     }
 
     function stopRenderLoop() {
@@ -314,6 +359,266 @@ export function createTransformerView2dDetailView(panelEl) {
         return measureCanvasSize();
     }
 
+    function containsPoint(bounds = null, x = 0, y = 0) {
+        if (!bounds) return false;
+        const minX = Number.isFinite(bounds.x) ? bounds.x : 0;
+        const minY = Number.isFinite(bounds.y) ? bounds.y : 0;
+        const maxX = minX + Math.max(0, Number(bounds.width) || 0);
+        const maxY = minY + Math.max(0, Number(bounds.height) || 0);
+        return x >= minX && x <= maxX && y >= minY && y <= maxY;
+    }
+
+    function getActiveViewportController() {
+        return state.headDetailDepthActive && state.headDetailTarget
+            ? detailViewportController
+            : viewportController;
+    }
+
+    function resolveHeadDetailSceneBounds() {
+        const bounds = renderer.getHeadDetailSceneBounds();
+        if (!bounds || !(bounds.width > 0) || !(bounds.height > 0)) {
+            return null;
+        }
+        return bounds;
+    }
+
+    function syncHeadDetailViewport({
+        forceFit = false,
+        animate = false
+    } = {}) {
+        if (!state.headDetailTarget) return false;
+        const bounds = resolveHeadDetailSceneBounds();
+        if (!bounds) return false;
+        const { width, height } = getCanvasSize();
+        detailViewportController.setViewportSize(width, height);
+        detailViewportController.setSceneBounds(bounds);
+        const fitTransform = resolveViewportFitTransform(bounds, { width, height }, {
+            padding: VIEW2D_DETAIL_VIEWPORT_PADDING,
+            minScale: VIEW2D_DETAIL_VIEWPORT_MIN_SCALE,
+            maxScale: VIEW2D_DETAIL_VIEWPORT_MAX_SCALE
+        });
+        state.headDetailSceneFitScale = Number.isFinite(fitTransform?.scale) ? fitTransform.scale : null;
+        if (!forceFit) {
+            return true;
+        }
+        if (animate) {
+            detailViewportController.flyToBounds(bounds, {
+                animate: true,
+                durationMs: 420,
+                now: performance.now(),
+                padding: VIEW2D_DETAIL_VIEWPORT_PADDING
+            });
+            animateViewport();
+            return true;
+        }
+        detailViewportController.fitToBounds(bounds, {
+            padding: VIEW2D_DETAIL_VIEWPORT_PADDING
+        });
+        return true;
+    }
+
+    function hideDetailFrame() {
+        if (!detailFrame) return;
+        detailFrame.classList.remove('is-visible');
+        detailFrame.style.left = '';
+        detailFrame.style.top = '';
+        detailFrame.style.width = '';
+        detailFrame.style.height = '';
+        detailFrame.style.borderRadius = '';
+    }
+
+    function syncDetailFrame() {
+        if (
+            !detailFrame
+            || !canvas
+            || !canvasCard
+            || !state.visible
+            || !state.headDetailDepthActive
+            || !state.headDetailTarget
+        ) {
+            hideDetailFrame();
+            return;
+        }
+
+        const sceneBounds = resolveHeadDetailSceneBounds();
+        const projectedBounds = renderer.resolveScreenBounds(sceneBounds);
+        if (!sceneBounds || !projectedBounds) {
+            hideDetailFrame();
+            return;
+        }
+
+        const canvasRect = canvas.getBoundingClientRect();
+        const cardRect = canvasCard.getBoundingClientRect();
+        const cardWidth = Math.max(0, cardRect.width);
+        const cardHeight = Math.max(0, cardRect.height);
+        if (!(cardWidth > 0) || !(cardHeight > 0)) {
+            hideDetailFrame();
+            return;
+        }
+
+        const framePad = state.isSmallScreen
+            ? Math.max(4, VIEW2D_HEAD_DETAIL_FRAME_PAD_PX - 1)
+            : VIEW2D_HEAD_DETAIL_FRAME_PAD_PX;
+        const rawLeft = (canvasRect.left - cardRect.left) + projectedBounds.x - framePad;
+        const rawTop = (canvasRect.top - cardRect.top) + projectedBounds.y - framePad;
+        const rawRight = rawLeft + projectedBounds.width + (framePad * 2);
+        const rawBottom = rawTop + projectedBounds.height + (framePad * 2);
+        const left = Math.max(0, Math.min(cardWidth, rawLeft));
+        const top = Math.max(0, Math.min(cardHeight, rawTop));
+        const right = Math.max(left, Math.min(cardWidth, rawRight));
+        const bottom = Math.max(top, Math.min(cardHeight, rawBottom));
+        const width = Math.max(0, right - left);
+        const height = Math.max(0, bottom - top);
+        if (!(width > 1) || !(height > 1)) {
+            hideDetailFrame();
+            return;
+        }
+
+        detailFrame.style.left = `${Math.round(left)}px`;
+        detailFrame.style.top = `${Math.round(top)}px`;
+        detailFrame.style.width = `${Math.round(width)}px`;
+        detailFrame.style.height = `${Math.round(height)}px`;
+        detailFrame.style.borderRadius = `${state.isSmallScreen ? 22 : 28}px`;
+        detailFrame.classList.add('is-visible');
+    }
+
+    function resolveViewportWorldBounds(controller = viewportController) {
+        const { width, height } = getCanvasSize();
+        if (!(width > 0) || !(height > 0)) return null;
+        const topLeft = controller.screenToWorld(0, 0);
+        const bottomRight = controller.screenToWorld(width, height);
+        const minX = Math.min(topLeft.x, bottomRight.x);
+        const minY = Math.min(topLeft.y, bottomRight.y);
+        const maxX = Math.max(topLeft.x, bottomRight.x);
+        const maxY = Math.max(topLeft.y, bottomRight.y);
+        return {
+            x: minX,
+            y: minY,
+            width: Math.max(0, maxX - minX),
+            height: Math.max(0, maxY - minY)
+        };
+    }
+
+    function isViewportNearFocusBounds(bounds = null, controller = viewportController) {
+        const viewportBounds = resolveViewportWorldBounds(controller);
+        if (!bounds || !viewportBounds) return false;
+        const centerX = viewportBounds.x + (viewportBounds.width * 0.5);
+        const centerY = viewportBounds.y + (viewportBounds.height * 0.5);
+        const marginX = Math.max(bounds.width * 0.45, viewportBounds.width * 0.1);
+        const marginY = Math.max(bounds.height * 0.45, viewportBounds.height * 0.1);
+        return containsPoint({
+            x: bounds.x - marginX,
+            y: bounds.y - marginY,
+            width: bounds.width + (marginX * 2),
+            height: bounds.height + (marginY * 2)
+        }, centerX, centerY);
+    }
+
+    function stopHoverDimmingAnimation() {
+        const hoverDimming = state.hoverDimming;
+        if (!hoverDimming || hoverDimming.rafId === null) return;
+        cancelAnimationFrame(hoverDimming.rafId);
+        hoverDimming.rafId = null;
+        hoverDimming.lastTime = 0;
+    }
+
+    function resetHoverRowBlend() {
+        const hoverDimming = state.hoverDimming;
+        if (!hoverDimming) return;
+        hoverDimming.previousHoveredRow = null;
+        hoverDimming.rowBlend = 1;
+        hoverDimming.rowBlendTarget = 1;
+    }
+
+    function ensureHoverDimmingAnimation() {
+        const hoverDimming = state.hoverDimming;
+        if (!hoverDimming || hoverDimming.rafId !== null) return;
+        const dimSettled = Math.abs(hoverDimming.target - hoverDimming.value) <= 0.01;
+        const rowBlendSettled = Math.abs(hoverDimming.rowBlendTarget - hoverDimming.rowBlend) <= 0.01;
+        if (dimSettled && rowBlendSettled) {
+            hoverDimming.value = hoverDimming.target;
+            hoverDimming.rowBlend = hoverDimming.rowBlendTarget;
+            if (hoverDimming.rowBlendTarget >= 1) {
+                hoverDimming.previousHoveredRow = null;
+            }
+            return;
+        }
+
+        const tick = (now) => {
+            hoverDimming.rafId = null;
+            if (!state.visible) {
+                hoverDimming.value = hoverDimming.target;
+                hoverDimming.rowBlend = hoverDimming.rowBlendTarget;
+                if (hoverDimming.rowBlendTarget >= 1) {
+                    hoverDimming.previousHoveredRow = null;
+                }
+                hoverDimming.lastTime = 0;
+                return;
+            }
+            const previousTime = Number.isFinite(hoverDimming.lastTime) && hoverDimming.lastTime > 0
+                ? hoverDimming.lastTime
+                : now;
+            const dt = Math.max(8, Math.min(32, now - previousTime));
+            hoverDimming.lastTime = now;
+            const alpha = 1 - Math.exp(-dt / VIEW2D_ROW_HOVER_FADE_DURATION_MS);
+            hoverDimming.value += (hoverDimming.target - hoverDimming.value) * alpha;
+            hoverDimming.rowBlend += (hoverDimming.rowBlendTarget - hoverDimming.rowBlend) * alpha;
+
+            if (Math.abs(hoverDimming.target - hoverDimming.value) <= 0.01) {
+                hoverDimming.value = hoverDimming.target;
+            }
+            if (Math.abs(hoverDimming.rowBlendTarget - hoverDimming.rowBlend) <= 0.01) {
+                hoverDimming.rowBlend = hoverDimming.rowBlendTarget;
+                if (hoverDimming.rowBlendTarget >= 1) {
+                    hoverDimming.previousHoveredRow = null;
+                }
+            }
+
+            const nextDimSettled = Math.abs(hoverDimming.target - hoverDimming.value) <= 0.01;
+            const nextRowBlendSettled = Math.abs(hoverDimming.rowBlendTarget - hoverDimming.rowBlend) <= 0.01;
+            render();
+            if (nextDimSettled && nextRowBlendSettled) {
+                hoverDimming.lastTime = 0;
+                return;
+            }
+            hoverDimming.rafId = requestAnimationFrame(tick);
+        };
+
+        hoverDimming.lastTime = 0;
+        hoverDimming.rafId = requestAnimationFrame(tick);
+    }
+
+    function setHoverDimmingTarget(target = 0, {
+        immediate = false,
+        shouldRender = true
+    } = {}) {
+        const hoverDimming = state.hoverDimming;
+        if (!hoverDimming) return;
+        const nextTarget = Math.max(0, Math.min(1, Number.isFinite(target) ? target : 0));
+        hoverDimming.target = nextTarget;
+
+        if (immediate) {
+            stopHoverDimmingAnimation();
+            hoverDimming.value = nextTarget;
+            if (nextTarget <= 0.001) {
+                resetHoverRowBlend();
+            }
+            if (shouldRender) scheduleRender();
+            return;
+        }
+
+        if (
+            Math.abs(hoverDimming.value - nextTarget) < 0.001
+            && Math.abs(hoverDimming.rowBlendTarget - hoverDimming.rowBlend) < 0.001
+        ) {
+            hoverDimming.value = nextTarget;
+            if (shouldRender) scheduleRender();
+            return;
+        }
+
+        ensureHoverDimmingAnimation();
+    }
+
     function setNodeText(node, nextText) {
         if (!node) return;
         const safeText = String(nextText ?? '');
@@ -322,53 +627,119 @@ export function createTransformerView2dDetailView(panelEl) {
         }
     }
 
-    function clearResidualRowHover({ scheduleRender: shouldScheduleRender = true } = {}) {
-        const hadHover = !!state.hoveredResidualRow;
+    function clearCanvasHover({ scheduleRender: shouldScheduleRender = true } = {}) {
+        const hadResidualHover = !!state.hoveredResidualRow;
+        const hadDetailHover = !!state.detailSceneFocus;
         state.hoveredResidualRow = null;
+        state.detailSceneFocus = null;
+        state.detailSceneHoverSignature = '';
         hoverLabelOverlay.hide();
-        if (hadHover && shouldScheduleRender) {
+        resetHoverRowBlend();
+        setHoverDimmingTarget(0, {
+            immediate: !state.visible,
+            shouldRender: shouldScheduleRender || hadResidualHover || hadDetailHover
+        });
+        if ((hadResidualHover || hadDetailHover) && shouldScheduleRender) {
             scheduleRender();
         }
     }
 
-    function updateResidualRowHover(event = null) {
-        const allowHeadDetailHover = !!(state.headDetailDepthActive && state.headDetailTarget);
+    function updateCanvasHover(event = null) {
+        const allowHeadDetailHover = !!(
+            state.headDetailDepthActive
+            && state.headDetailTarget
+            && state.detailSceneIndex
+        );
+        const suppressOverviewHover = !!(
+            state.headDetailDepthActive
+            && hasActiveDetailTarget()
+            && !state.headDetailTarget
+        );
         if (
             !state.visible
             || !canvas
             || !Number.isFinite(event?.clientX)
             || !Number.isFinite(event?.clientY)
             || event?.pointerType === 'touch'
-            || (hasActiveDetailTarget() && !allowHeadDetailHover)
         ) {
-            clearResidualRowHover();
+            clearCanvasHover();
             return null;
         }
 
         const rect = canvas.getBoundingClientRect();
         const localX = event.clientX - rect.left;
         const localY = event.clientY - rect.top;
-        const hit = allowHeadDetailHover
-            ? renderer.resolveInteractiveHitAtScreenPoint(localX, localY)
-            : (() => {
-                const worldPoint = viewportController.screenToWorld(localX, localY);
-                return renderer.resolveInteractiveHitAtPoint(worldPoint.x, worldPoint.y);
-            })();
-        const hoverPayload = buildResidualRowHoverPayload(hit?.rowHit, state.activationSource);
-        if (!hoverPayload || !hit?.node?.id || !Number.isFinite(hit?.rowHit?.rowIndex)) {
-            clearResidualRowHover();
+        const hit = renderer.resolveInteractiveHitAtScreenPoint(localX, localY);
+        if (suppressOverviewHover) {
+            clearCanvasHover();
+            return hit?.entry || null;
+        }
+        if (allowHeadDetailHover) {
+            const detailHoverState = resolveMhsaDetailHoverState(state.detailSceneIndex, hit);
+            const residualHoverPayload = buildResidualRowHoverPayload(hit?.rowHit, state.activationSource);
+            if (!detailHoverState?.focusState) {
+                clearCanvasHover();
+                return hit?.entry || null;
+            }
+
+            const didChange = detailHoverState.signature !== state.detailSceneHoverSignature;
+            state.hoveredResidualRow = null;
+            resetHoverRowBlend();
+            setHoverDimmingTarget(0, {
+                immediate: true,
+                shouldRender: false
+            });
+            state.detailSceneFocus = detailHoverState.focusState;
+            state.detailSceneHoverSignature = detailHoverState.signature;
+            const hoverLabel = residualHoverPayload?.label || detailHoverState.label || '';
+            const hoverInfo = residualHoverPayload?.info || detailHoverState.info || null;
+            if (hoverLabel) {
+                hoverLabelOverlay.show({
+                    clientX: event.clientX,
+                    clientY: event.clientY,
+                    label: hoverLabel,
+                    info: hoverInfo,
+                    activationSource: state.activationSource
+                });
+            } else {
+                hoverLabelOverlay.hide();
+            }
+            if (didChange) {
+                scheduleRender();
+            }
             return hit?.entry || null;
         }
 
+        const worldPoint = viewportController.screenToWorld(localX, localY);
+        const worldHit = renderer.resolveInteractiveHitAtPoint(worldPoint.x, worldPoint.y);
+        const hoverPayload = buildResidualRowHoverPayload(worldHit?.rowHit, state.activationSource);
+        if (!hoverPayload || !worldHit?.node?.id || !Number.isFinite(worldHit?.rowHit?.rowIndex)) {
+            clearCanvasHover();
+            return worldHit?.entry || hit?.entry || null;
+        }
+
         const nextHoveredRow = {
-            nodeId: hit.node.id,
-            rowIndex: Math.max(0, Math.floor(hit.rowHit.rowIndex))
+            nodeId: worldHit.node.id,
+            rowIndex: Math.max(0, Math.floor(worldHit.rowHit.rowIndex))
         };
         const prevHoveredRow = state.hoveredResidualRow;
         const didChange = !prevHoveredRow
             || prevHoveredRow.nodeId !== nextHoveredRow.nodeId
             || prevHoveredRow.rowIndex !== nextHoveredRow.rowIndex;
+        if (didChange && prevHoveredRow) {
+            state.hoverDimming.previousHoveredRow = {
+                nodeId: prevHoveredRow.nodeId,
+                rowIndex: prevHoveredRow.rowIndex
+            };
+            state.hoverDimming.rowBlend = 0;
+            state.hoverDimming.rowBlendTarget = 1;
+        } else if (!didChange) {
+            resetHoverRowBlend();
+        }
         state.hoveredResidualRow = nextHoveredRow;
+        setHoverDimmingTarget(1, {
+            shouldRender: didChange
+        });
         hoverLabelOverlay.show({
             clientX: event.clientX,
             clientY: event.clientY,
@@ -379,7 +750,7 @@ export function createTransformerView2dDetailView(panelEl) {
         if (didChange) {
             scheduleRender();
         }
-        return hit?.entry || null;
+        return worldHit?.entry || null;
     }
 
     function setInteractionActive(active = false) {
@@ -422,13 +793,18 @@ export function createTransformerView2dDetailView(panelEl) {
     }
 
     function syncHeadDetailChrome() {
-        const isHeadDetailActive = !!state.headDetailDepthActive;
-        const isConcatDetailActive = isHeadDetailActive && !!state.concatDetailTarget;
+        const isDetailDeepActive = !!state.headDetailDepthActive;
+        const isHeadDetailActive = isDetailDeepActive && hasActiveDetailTarget();
+        const isHeadDetailSceneActive = isDetailDeepActive && !!state.headDetailTarget;
+        const isConcatDetailActive = isDetailDeepActive && !!state.concatDetailTarget;
         root.classList.toggle('is-head-detail-active', isHeadDetailActive);
+        root.classList.toggle('is-head-detail-scene-active', isHeadDetailSceneActive);
         root.classList.toggle('is-concat-detail-active', isConcatDetailActive);
         canvasCard?.classList.toggle('is-head-detail-active', isHeadDetailActive);
+        canvasCard?.classList.toggle('is-head-detail-scene-active', isHeadDetailSceneActive);
         canvasCard?.classList.toggle('is-concat-detail-active', isConcatDetailActive);
         canvas?.classList.toggle('is-head-detail-active', isHeadDetailActive);
+        canvas?.classList.toggle('is-head-detail-scene-active', isHeadDetailSceneActive);
         canvas?.classList.toggle('is-concat-detail-active', isConcatDetailActive);
         if (hud) {
             hud.hidden = isHeadDetailActive;
@@ -443,8 +819,8 @@ export function createTransformerView2dDetailView(panelEl) {
         const { width, height } = getCanvasSize();
         const transform = resolveViewportFitTransform(bounds, { width, height }, {
             padding: VIEW2D_HEAD_DETAIL_FOCUS_PADDING,
-            minScale: 0.035,
-            maxScale: 10
+            minScale: VIEW2D_DETAIL_VIEWPORT_MIN_SCALE,
+            maxScale: VIEW2D_DETAIL_VIEWPORT_MAX_SCALE
         });
         return Number.isFinite(transform?.scale) ? transform.scale : null;
     }
@@ -452,10 +828,53 @@ export function createTransformerView2dDetailView(panelEl) {
     function updateHeadDetailDepthState({ preserveDeepState = false } = {}) {
         if (!hasActiveDetailTarget()) {
             state.headDetailFocusScale = null;
+            state.headDetailSceneFitScale = null;
             state.headDetailDepthActive = false;
             return false;
         }
 
+        if (state.headDetailTarget) {
+            if (state.headDetailDepthActive) {
+                const didSyncDetailViewport = syncHeadDetailViewport({
+                    forceFit: !Number.isFinite(state.headDetailSceneFitScale) || state.headDetailSceneFitScale <= 0
+                });
+                if (!didSyncDetailViewport) {
+                    state.headDetailDepthActive = false;
+                    state.headDetailSceneFitScale = null;
+                    return false;
+                }
+                const trackedFitScale = Number(state.headDetailSceneFitScale) || null;
+                const currentDetailScale = Number(detailViewportController.getState().scale) || 1;
+                if (Number.isFinite(trackedFitScale) && trackedFitScale > 0) {
+                    const deactivateScale = trackedFitScale * VIEW2D_HEAD_DETAIL_DEPTH_EXIT_RATIO;
+                    if (!preserveDeepState && currentDetailScale < deactivateScale) {
+                        state.headDetailDepthActive = false;
+                    }
+                }
+                return state.headDetailDepthActive;
+            }
+
+            const focusBounds = resolveSelectionFocusBounds();
+            const focusScale = computeHeadDetailFocusScale();
+            if (Number.isFinite(focusScale)) {
+                state.headDetailFocusScale = focusScale;
+            }
+
+            const currentScale = Number(viewportController.getState().scale) || 1;
+            const trackedFocusScale = Number(state.headDetailFocusScale) || null;
+            if (!Number.isFinite(trackedFocusScale) || trackedFocusScale <= 0) {
+                return false;
+            }
+
+            const activateScale = trackedFocusScale * VIEW2D_HEAD_DETAIL_DEPTH_ENTER_RATIO;
+            const viewportNearFocus = isViewportNearFocusBounds(focusBounds, viewportController);
+            if (currentScale >= activateScale && viewportNearFocus) {
+                state.headDetailDepthActive = syncHeadDetailViewport({ forceFit: true });
+            }
+            return state.headDetailDepthActive;
+        }
+
+        const focusBounds = resolveSelectionFocusBounds();
         const focusScale = computeHeadDetailFocusScale();
         if (Number.isFinite(focusScale)) {
             state.headDetailFocusScale = focusScale;
@@ -469,12 +888,13 @@ export function createTransformerView2dDetailView(panelEl) {
 
         const activateScale = trackedFocusScale * VIEW2D_HEAD_DETAIL_DEPTH_ENTER_RATIO;
         const deactivateScale = trackedFocusScale * VIEW2D_HEAD_DETAIL_DEPTH_EXIT_RATIO;
+        const viewportNearFocus = isViewportNearFocusBounds(focusBounds, viewportController);
         let nextDepthState = state.headDetailDepthActive;
         if (nextDepthState) {
-            if (!preserveDeepState && currentScale < deactivateScale) {
+            if (!preserveDeepState && (currentScale < deactivateScale || !viewportNearFocus)) {
                 nextDepthState = false;
             }
-        } else if (currentScale >= activateScale) {
+        } else if (currentScale >= activateScale && viewportNearFocus) {
             nextDepthState = true;
         }
 
@@ -503,6 +923,13 @@ export function createTransformerView2dDetailView(panelEl) {
             concatDetailTarget: state.concatDetailTarget,
             outputProjectionDetailTarget: state.outputProjectionDetailTarget
         });
+        state.detailSceneIndex = createMhsaDetailSceneIndex(
+            state.scene?.metadata?.mhsaHeadDetailScene
+            || state.scene?.metadata?.headDetailScene
+            || null
+        );
+        state.detailSceneFocus = null;
+        state.detailSceneHoverSignature = '';
         state.layout = buildSceneLayout(state.scene, {
             isSmallScreen: state.isSmallScreen
         });
@@ -516,7 +943,7 @@ export function createTransformerView2dDetailView(panelEl) {
         const resolvedTarget = resolveHeadDetailTarget(headDetailTarget);
         if (!resolvedTarget) return false;
         stopAnimation();
-        clearResidualRowHover({ scheduleRender: false });
+        clearCanvasHover({ scheduleRender: false });
         setDetailTargets({ headDetailTarget: resolvedTarget });
         return commitSceneSelection({ animate, nextDepthActive: false });
     }
@@ -525,7 +952,7 @@ export function createTransformerView2dDetailView(panelEl) {
         const resolvedTarget = resolveConcatDetailTarget(concatDetailTarget);
         if (!resolvedTarget) return false;
         stopAnimation();
-        clearResidualRowHover({ scheduleRender: false });
+        clearCanvasHover({ scheduleRender: false });
         setDetailTargets({ concatDetailTarget: resolvedTarget });
         return commitSceneSelection({ animate, nextDepthActive: false });
     }
@@ -534,7 +961,7 @@ export function createTransformerView2dDetailView(panelEl) {
         const resolvedTarget = resolveOutputProjectionDetailTarget(outputProjectionDetailTarget);
         if (!resolvedTarget) return false;
         stopAnimation();
-        clearResidualRowHover({ scheduleRender: false });
+        clearCanvasHover({ scheduleRender: false });
         setDetailTargets({ outputProjectionDetailTarget: resolvedTarget });
         return commitSceneSelection({ animate, nextDepthActive: false });
     }
@@ -542,18 +969,19 @@ export function createTransformerView2dDetailView(panelEl) {
     function closeDetail({ animate = true } = {}) {
         if (!hasActiveDetailTarget()) return false;
         stopAnimation();
-        clearResidualRowHover({ scheduleRender: false });
+        clearCanvasHover({ scheduleRender: false });
         setDetailTargets();
         return commitSceneSelection({ animate, nextDepthActive: false });
     }
 
     function updateReadouts() {
         syncHeadDetailChrome();
+        const activeViewportController = getActiveViewportController();
         if (focusReadout) {
             setNodeText(focusReadout, state.focusLabel);
         }
         if (zoomReadout) {
-            setNodeText(zoomReadout, `${Math.round((viewportController.getState().scale || 1) * 100)}%`);
+            setNodeText(zoomReadout, `${Math.round((activeViewportController.getState().scale || 1) * 100)}%`);
         }
         if (sceneReadout) {
             setNodeText(sceneReadout, state.sceneLabel);
@@ -575,6 +1003,9 @@ export function createTransformerView2dDetailView(panelEl) {
         const { width, height } = getCanvasSize();
         viewportController.setViewportSize(width, height);
         viewportController.setSceneBounds(state.layout.sceneBounds || null);
+        const headDetailSceneBounds = resolveHeadDetailSceneBounds();
+        detailViewportController.setViewportSize(width, height);
+        detailViewportController.setSceneBounds(headDetailSceneBounds);
         updateHeadDetailDepthState();
         const didRender = renderer.render({
             width,
@@ -583,12 +1014,31 @@ export function createTransformerView2dDetailView(panelEl) {
                 ? VIEW2D_PREVIEW_DPR_CAP_INTERACTING
                 : VIEW2D_PREVIEW_DPR_CAP_IDLE,
             viewportTransform: viewportController.getViewportTransform('detail-transformer-view2d'),
+            detailViewportTransform: (
+                state.headDetailDepthActive && state.headDetailTarget
+                    ? detailViewportController.getViewportTransform('detail-transformer-view2d-head-detail')
+                    : null
+            ),
             interacting: state.isInteracting,
             headDetailDepthActive: state.headDetailDepthActive,
             interactionState: {
-                hoveredRow: state.hoveredResidualRow
+                hoveredRow: state.hoveredResidualRow,
+                previousHoveredRow: state.hoverDimming?.previousHoveredRow || null,
+                hoverRowBlend: state.hoverDimming?.rowBlend ?? 1,
+                hoverDimStrength: state.hoverDimming?.value || 0,
+                detailSceneFocus: state.headDetailDepthActive ? state.detailSceneFocus : null
             }
         });
+        const captionSceneState = renderer.getActiveCaptionSceneState();
+        residualCaptionOverlay.sync({
+            scene: captionSceneState?.scene || null,
+            layout: captionSceneState?.layout || null,
+            canvas,
+            projectBounds: (bounds) => renderer.resolveScreenBounds(bounds),
+            visible: state.visible,
+            enabled: true
+        });
+        syncDetailFrame();
         updateReadouts();
         return didRender;
     }
@@ -606,8 +1056,9 @@ export function createTransformerView2dDetailView(panelEl) {
         const tick = (now) => {
             state.animationFrame = null;
             viewportController.step(now);
+            detailViewportController.step(now);
             render();
-            if (viewportController.animation) {
+            if (viewportController.animation || detailViewportController.animation) {
                 state.animationFrame = requestAnimationFrame(tick);
             }
         };
@@ -615,18 +1066,28 @@ export function createTransformerView2dDetailView(panelEl) {
     }
 
     function fitScene({ animate = true } = {}) {
+        if (state.headDetailDepthActive && state.headDetailTarget) {
+            const didFit = syncHeadDetailViewport({
+                forceFit: true,
+                animate
+            });
+            if (didFit && !animate) {
+                render();
+            }
+            return didFit;
+        }
         if (!state.layout?.sceneBounds) return false;
         if (animate) {
             viewportController.flyToBounds(state.layout.sceneBounds, {
                 animate: true,
                 durationMs: 420,
                 now: performance.now(),
-                padding: 28
+                padding: VIEW2D_DETAIL_VIEWPORT_PADDING
             });
             animateViewport();
             return true;
         }
-        viewportController.fitScene({ padding: 28 });
+        viewportController.fitScene({ padding: VIEW2D_DETAIL_VIEWPORT_PADDING });
         render();
         return true;
     }
@@ -648,6 +1109,20 @@ export function createTransformerView2dDetailView(panelEl) {
     }
 
     function focusSelection({ animate = true } = {}) {
+        if (state.headDetailDepthActive && state.headDetailTarget) {
+            const didFit = syncHeadDetailViewport({
+                forceFit: true,
+                animate
+            });
+            if (!didFit) return false;
+            state.focusLabel = resolveActiveFocusLabel(state);
+            updateReadouts();
+            if (!animate) {
+                render();
+            }
+            return true;
+        }
+
         if (!state.layout?.registry || !state.semanticTarget) {
             return fitScene({ animate });
         }
@@ -667,8 +1142,8 @@ export function createTransformerView2dDetailView(panelEl) {
             const { width, height } = getCanvasSize();
             const transform = resolveViewportFitTransform(bounds, { width, height }, {
                 padding,
-                minScale: 0.035,
-                maxScale: 10
+                minScale: VIEW2D_DETAIL_VIEWPORT_MIN_SCALE,
+                maxScale: VIEW2D_DETAIL_VIEWPORT_MAX_SCALE
             });
             state.headDetailFocusScale = Number.isFinite(transform?.scale) ? transform.scale : null;
             state.headDetailDepthActive = animate !== true;
@@ -690,17 +1165,14 @@ export function createTransformerView2dDetailView(panelEl) {
     }
 
     function resolveCanvasPointerHit(event = null) {
-        if (!canvas || !state.layout?.registry || !Number.isFinite(event?.clientX) || !Number.isFinite(event?.clientY)) {
+        if (!canvas || !Number.isFinite(event?.clientX) || !Number.isFinite(event?.clientY)) {
             return null;
         }
         const rect = canvas.getBoundingClientRect();
-        const worldPoint = viewportController.screenToWorld(
+        return renderer.resolveInteractiveHitAtScreenPoint(
             event.clientX - rect.left,
             event.clientY - rect.top
-        );
-        return state.layout.registry.resolveNodeEntryAtPoint(worldPoint.x, worldPoint.y, {
-            includeGroups: false
-        });
+        )?.entry || null;
     }
 
     function updateCanvasCursor(entry = null) {
@@ -752,6 +1224,7 @@ export function createTransformerView2dDetailView(panelEl) {
     function applyKeyboardMotion(dt = VIEW2D_KEYBOARD_INITIAL_STEP_MS) {
         const activeKeys = state.keyboardMotion?.activeKeys;
         if (!activeKeys?.size) return false;
+        const activeViewportController = getActiveViewportController();
 
         const safeDt = Math.min(32, Math.max(8, Number.isFinite(dt) ? dt : VIEW2D_KEYBOARD_INITIAL_STEP_MS));
         const panXDir = (activeKeys.has('pan-left') ? 1 : 0) + (activeKeys.has('pan-right') ? -1 : 0);
@@ -761,7 +1234,7 @@ export function createTransformerView2dDetailView(panelEl) {
         let changed = false;
         if (panXDir !== 0 || panYDir !== 0) {
             const distance = (VIEW2D_KEYBOARD_PAN_PX_PER_SEC * safeDt) / 1000;
-            viewportController.panBy(
+            activeViewportController.panBy(
                 panXDir * distance,
                 panYDir * distance
             );
@@ -771,7 +1244,7 @@ export function createTransformerView2dDetailView(panelEl) {
         if (zoomDir !== 0) {
             const { width, height } = getCanvasSize();
             const zoomFactor = Math.exp(zoomDir * safeDt * VIEW2D_KEYBOARD_ZOOM_RATE);
-            viewportController.zoomAt(zoomFactor, width * 0.5, height * 0.5);
+            activeViewportController.zoomAt(zoomFactor, width * 0.5, height * 0.5);
             changed = true;
         }
 
@@ -851,7 +1324,7 @@ export function createTransformerView2dDetailView(panelEl) {
         clientX = 0,
         clientY = 0
     } = {}) {
-        clearResidualRowHover({ scheduleRender: false });
+        clearCanvasHover({ scheduleRender: false });
         state.pointer = {
             pointerId: Number.isFinite(pointerId) ? pointerId : null,
             clientX: Number.isFinite(clientX) ? clientX : 0,
@@ -928,7 +1401,8 @@ export function createTransformerView2dDetailView(panelEl) {
         if (!state.touchGesture?.pointers || state.touchGesture.pointers.size < 2) return false;
         const metrics = getTouchMetrics();
         if (!metrics || !(metrics.distance > 0)) return false;
-        const viewport = viewportController.getState();
+        const activeViewportController = getActiveViewportController();
+        const viewport = activeViewportController.getState();
         const currentScale = Number.isFinite(viewport.scale) && viewport.scale > 0 ? viewport.scale : 1;
         clearPointer(null, { scheduleSettle: false });
         state.touchGesture.pinchActive = true;
@@ -953,7 +1427,7 @@ export function createTransformerView2dDetailView(panelEl) {
         if (!metrics || !(metrics.distance > 0)) return false;
         const distanceRatio = metrics.distance / Math.max(1, state.touchGesture.startDistance);
         const nextScale = state.touchGesture.startScale * distanceRatio;
-        viewportController.setState({
+        getActiveViewportController().setState({
             scale: nextScale,
             panX: metrics.canvasX - (state.touchGesture.anchorLocalX * nextScale),
             panY: metrics.canvasY - (state.touchGesture.anchorLocalY * nextScale)
@@ -1013,7 +1487,7 @@ export function createTransformerView2dDetailView(panelEl) {
             return;
         }
         if (!state.pointer) {
-            updateCanvasCursor(updateResidualRowHover(event) || resolveCanvasPointerHit(event));
+            updateCanvasCursor(updateCanvasHover(event) || resolveCanvasPointerHit(event));
             return;
         }
         if (!state.pointer || state.pointer.pointerId !== event.pointerId) return;
@@ -1027,7 +1501,7 @@ export function createTransformerView2dDetailView(panelEl) {
                 event.clientY - state.pointer.startClientY
             ) >= VIEW2D_CLICK_SLOP_PX;
         }
-        viewportController.panBy(deltaX, deltaY);
+        getActiveViewportController().panBy(deltaX, deltaY);
         markInteraction(true);
         scheduleRender();
         event.preventDefault();
@@ -1036,13 +1510,13 @@ export function createTransformerView2dDetailView(panelEl) {
     function onWheel(event) {
         if (!state.visible) return;
         focusCanvasSurface();
-        clearResidualRowHover({ scheduleRender: false });
+        clearCanvasHover({ scheduleRender: false });
         const rect = canvas.getBoundingClientRect();
         const anchorX = event.clientX - rect.left;
         const anchorY = event.clientY - rect.top;
         const zoomMultiplier = Math.exp(-event.deltaY * 0.0015);
         stopAnimation();
-        viewportController.zoomAt(zoomMultiplier, anchorX, anchorY);
+        getActiveViewportController().zoomAt(zoomMultiplier, anchorX, anchorY);
         markInteraction(false);
         scheduleRender();
         event.preventDefault();
@@ -1068,7 +1542,7 @@ export function createTransformerView2dDetailView(panelEl) {
     }
 
     function onPointerLeave() {
-        clearResidualRowHover();
+        clearCanvasHover();
         updateCanvasCursor(null);
     }
 
@@ -1104,7 +1578,11 @@ export function createTransformerView2dDetailView(panelEl) {
             root.classList.toggle('is-visible', state.visible);
             root.setAttribute('aria-hidden', state.visible ? 'false' : 'true');
             if (!state.visible) {
-                clearResidualRowHover({ scheduleRender: false });
+                clearCanvasHover({ scheduleRender: false });
+                stopHoverDimmingAnimation();
+                setHoverDimmingTarget(0, { immediate: true, shouldRender: false });
+                hideDetailFrame();
+                residualCaptionOverlay.hide();
                 clearPointer(null, { scheduleSettle: false });
                 resetTouchGesture();
                 clearKeyboardMotion();
@@ -1132,7 +1610,10 @@ export function createTransformerView2dDetailView(panelEl) {
             state.baseSemanticTarget = deriveBaseSemanticTarget(semanticTarget);
             state.baseFocusLabel = String(focusLabel || '').trim() || describeTransformerView2dTarget(state.baseSemanticTarget);
             setDetailTargets(resolveDetailTargetsFromSemanticTarget(semanticTarget));
-            clearResidualRowHover({ scheduleRender: false });
+            clearCanvasHover({ scheduleRender: false });
+            setHoverDimmingTarget(0, { immediate: true, shouldRender: false });
+            hideDetailFrame();
+            residualCaptionOverlay.hide();
             resetHeadDetailState(hasActiveDetailTarget());
             syncActiveSelectionState();
             rebuildSceneState();

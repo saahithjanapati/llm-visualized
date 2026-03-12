@@ -2684,6 +2684,45 @@ export class LayerPipeline extends EventTarget {
                         .start();
                 };
 
+                const tweenIntoTopLayerNorm = (targetY, speed, onComplete) => {
+                    const clampedTargetY = Math.max(vec.group.position.y, targetY);
+                    if (vec.group.position.y >= clampedTargetY - 0.01) {
+                        vec.group.position.y = clampedTargetY;
+                        updateTopLnColor(vec.group.position.y);
+                        updateTrailPosition(vec);
+                        if (!lane.__topLnEntered && vec.group.position.y >= lnBottomY) {
+                            markTopLnEntered();
+                        }
+                        this.dispatchEvent(new Event('progress'));
+                        if (typeof onComplete === 'function') onComplete();
+                        return;
+                    }
+
+                    const distance = Math.max(0, clampedTargetY - vec.group.position.y);
+                    const duration = durationForRise(distance, speed);
+                    new TWEEN.Tween(vec.group.position)
+                        .to({ y: clampedTargetY }, Math.max(100, duration))
+                        .easing(TWEEN.Easing.Linear.None)
+                        .onUpdate(() => {
+                            updateTopLnColor(vec.group.position.y);
+                            updateTrailPosition(vec);
+                            if (!lane.__topLnEntered && vec.group.position.y >= lnBottomY) {
+                                markTopLnEntered();
+                            }
+                            this.dispatchEvent(new Event('progress'));
+                        })
+                        .onComplete(() => {
+                            updateTopLnColor(vec.group.position.y);
+                            updateTrailPosition(vec);
+                            if (!lane.__topLnEntered && vec.group.position.y >= lnBottomY) {
+                                markTopLnEntered();
+                            }
+                            this.dispatchEvent(new Event('progress'));
+                            if (typeof onComplete === 'function') onComplete();
+                        })
+                        .start();
+                };
+
                 const moveToNormStart = () => {
                     updateTopLnColor(vec.group.position.y);
                     const stageTarget = Math.max(vec.group.position.y, normStartY);
@@ -2700,29 +2739,27 @@ export class LayerPipeline extends EventTarget {
                         return;
                     }
 
-                    const distance = Math.max(0, stageTarget - vec.group.position.y);
-                    const duration = durationForRise(
-                        distance,
-                        ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT
+                    // Keep the top-of-stack handoff entirely on the slower
+                    // residual-stream pacing so it matches the rest of the
+                    // visualization instead of snapping upward inside the ring.
+                    if (vec.group.position.y < lnBottomY - 0.01) {
+                        tweenIntoTopLayerNorm(
+                            lnBottomY,
+                            ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT,
+                            () => tweenIntoTopLayerNorm(
+                                stageTarget,
+                                ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT,
+                                startNormalization
+                            )
+                        );
+                        return;
+                    }
+
+                    tweenIntoTopLayerNorm(
+                        stageTarget,
+                        ANIM_RISE_SPEED_ORIGINAL * GLOBAL_ANIM_SPEED_MULT,
+                        startNormalization
                     );
-                    new TWEEN.Tween(vec.group.position)
-                        .to({ y: stageTarget }, Math.max(100, duration))
-                        .easing(TWEEN.Easing.Linear.None)
-                        .onUpdate(() => {
-                            updateTopLnColor(vec.group.position.y);
-                            updateTrailPosition(vec);
-                            if (!lane.__topLnEntered && vec.group.position.y >= lnBottomY) {
-                                markTopLnEntered();
-                            }
-                            this.dispatchEvent(new Event('progress'));
-                        })
-                        .onComplete(() => {
-                            updateTopLnColor(vec.group.position.y);
-                            updateTrailPosition(vec);
-                            this.dispatchEvent(new Event('progress'));
-                            startNormalization();
-                        })
-                        .start();
                 };
 
                 moveToNormStart();

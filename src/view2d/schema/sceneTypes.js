@@ -274,6 +274,8 @@ export function createConnectorNode({
     target = null,
     route = VIEW2D_CONNECTOR_ROUTES.HORIZONTAL,
     gap = null,
+    sourceGap = null,
+    targetGap = null,
     gapKey = 'default',
     ...rest
 } = {}) {
@@ -282,12 +284,15 @@ export function createConnectorNode({
         kind: VIEW2D_NODE_KINDS.CONNECTOR,
         anchors: []
     });
+    const resolvedGap = Number.isFinite(gap) ? Math.max(0, Math.floor(gap)) : null;
     return {
         ...base,
         source: source && typeof source === 'object' ? { ...source } : null,
         target: target && typeof target === 'object' ? { ...target } : null,
         route,
-        gap: Number.isFinite(gap) ? Math.max(0, Math.floor(gap)) : null,
+        gap: resolvedGap,
+        sourceGap: Number.isFinite(sourceGap) ? Math.max(0, Math.floor(sourceGap)) : resolvedGap,
+        targetGap: Number.isFinite(targetGap) ? Math.max(0, Math.floor(targetGap)) : resolvedGap,
         gapKey
     };
 }

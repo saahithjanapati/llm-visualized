@@ -1,7 +1,8 @@
 import {
     expandLayerNormLabel,
     formatLayerNormParamLabel,
-    resolveLayerNormKind
+    resolveLayerNormKind,
+    resolveLayerNormParamSpec
 } from '../utils/layerNormLabels.js';
 
 export function getActivationDataFromSelection(selectionInfo) {
@@ -86,6 +87,11 @@ export function simplifyLayerNormParamDisplayLabel(label, selectionInfo = null) 
     const lower = raw.toLowerCase();
     const stageLower = String(getActivationDataFromSelection(selectionInfo)?.stage || '').toLowerCase();
     const explicitKind = findUserDataString(selectionInfo, 'layerNormKind');
+    const paramSpec = resolveLayerNormParamSpec({
+        label: raw,
+        stage: stageLower,
+        explicitKind
+    });
     const layerNormKind = resolveLayerNormKind({
         label: raw,
         stage: stageLower,
@@ -95,13 +101,18 @@ export function simplifyLayerNormParamDisplayLabel(label, selectionInfo = null) 
     if (lower.startsWith('mlp up projection')) return 'MLP Up Projection';
     if (lower.startsWith('mlp down projection')) return 'MLP Down Projection';
 
+    if (paramSpec) {
+        return formatLayerNormParamLabel(paramSpec.layerNormKind, paramSpec.param);
+    }
+
     const isLayerNormContext = lower.includes('layernorm')
         || lower.includes('layer norm')
         || lower.includes('ln1')
         || lower.includes('ln2')
         || lower.includes('final ln')
         || stageLower.includes('ln1.param.')
-        || stageLower.includes('ln2.param.');
+        || stageLower.includes('ln2.param.')
+        || stageLower.includes('final_ln.param.');
     if (!isLayerNormContext) return raw;
 
     const isScale = lower.includes('scale')

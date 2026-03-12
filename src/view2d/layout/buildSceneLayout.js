@@ -147,6 +147,10 @@ function resolveLayoutConfig(scene, {
 }
 
 function resolveGroupGap(node, config) {
+    const explicitGap = Number(node?.metadata?.gapOverride);
+    if (Number.isFinite(explicitGap) && explicitGap >= 0) {
+        return explicitGap;
+    }
     const direction = node?.layout?.direction || VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL;
     const gapKey = String(node?.layout?.gapKey || 'default');
     if (gapKey === 'stack') {
@@ -250,17 +254,31 @@ function measureLeafNode(node, config) {
         case VIEW2D_MATRIX_PRESENTATIONS.COLUMN_STRIP: {
             const rowCount = Math.max(1, measuredRows || node.dimensions?.rows || 1);
             const colCount = Math.max(1, measuredCols || node.columnItems?.length || node.dimensions?.cols || 1);
-            contentWidth = (colCount * config.component.transposeColWidth)
-                + (Math.max(0, colCount - 1) * config.component.transposeColGap)
-                + (config.component.contentPaddingX * 2);
-            contentHeight = (rowCount * config.component.transposeCellHeight)
-                + (config.component.contentPaddingY * 2);
+            const columnStrip = node.metadata?.columnStrip || {};
+            const colWidth = resolveMeasuredValue(columnStrip.colWidth, config.component.transposeColWidth);
+            const colGap = Number.isFinite(columnStrip.colGap) && columnStrip.colGap >= 0
+                ? Math.max(0, Math.floor(columnStrip.colGap))
+                : config.component.transposeColGap;
+            const innerPaddingX = Number.isFinite(columnStrip.paddingX) && columnStrip.paddingX >= 0
+                ? Math.max(0, Math.floor(columnStrip.paddingX))
+                : config.component.contentPaddingX;
+            const innerPaddingY = Number.isFinite(columnStrip.paddingY) && columnStrip.paddingY >= 0
+                ? Math.max(0, Math.floor(columnStrip.paddingY))
+                : config.component.contentPaddingY;
+            const colHeight = resolveMeasuredValue(
+                columnStrip.colHeight,
+                rowCount * config.component.transposeCellHeight
+            );
+            contentWidth = (colCount * colWidth)
+                + (Math.max(0, colCount - 1) * colGap)
+                + (innerPaddingX * 2);
+            contentHeight = colHeight + (innerPaddingY * 2);
             layoutData = {
-                colWidth: config.component.transposeColWidth,
-                colGap: config.component.transposeColGap,
-                colHeight: rowCount * config.component.transposeCellHeight,
-                innerPaddingX: config.component.contentPaddingX,
-                innerPaddingY: config.component.contentPaddingY
+                colWidth,
+                colGap,
+                colHeight,
+                innerPaddingX,
+                innerPaddingY
             };
             break;
         }
@@ -312,11 +330,15 @@ function measureLeafNode(node, config) {
             paddingX: textMetrics.paddingX
         };
     } else if (node.kind === VIEW2D_NODE_KINDS.OPERATOR) {
-        const rawWidth = measureTextWidth(node.text || '', config.component.operatorFontSize);
+        const operatorScale = Number.isFinite(node.metadata?.fontScale) && node.metadata.fontScale > 0
+            ? Number(node.metadata.fontScale)
+            : 1;
+        const operatorFontSize = config.component.operatorFontSize * operatorScale;
+        const rawWidth = measureTextWidth(node.text || '', operatorFontSize);
         contentWidth = rawWidth + (config.component.operatorSidePadding * 2);
-        contentHeight = config.component.operatorFontSize * 1.45;
+        contentHeight = operatorFontSize * 1.45;
         layoutData = {
-            fontSize: config.component.operatorFontSize
+            fontSize: operatorFontSize
         };
     }
 
@@ -617,9 +639,17 @@ function offsetPoint(point, anchor, gap = 0) {
     }
 }
 
-function buildConnectorPath(sourcePoint, targetPoint, sourceAnchor, targetAnchor, gap = 0, route = 'horizontal') {
-    const leadSource = offsetPoint(sourcePoint, sourceAnchor, gap);
-    const leadTarget = offsetPoint(targetPoint, targetAnchor, gap);
+function buildConnectorPath(
+    sourcePoint,
+    targetPoint,
+    sourceAnchor,
+    targetAnchor,
+    sourceGap = 0,
+    targetGap = 0,
+    route = 'horizontal'
+) {
+    const leadSource = offsetPoint(sourcePoint, sourceAnchor, sourceGap);
+    const leadTarget = offsetPoint(targetPoint, targetAnchor, targetGap);
     const dx = Math.abs(leadTarget.x - leadSource.x);
     const dy = Math.abs(leadTarget.y - leadSource.y);
     if (dx < 0.5 || dy < 0.5) {
@@ -726,7 +756,8 @@ export function buildSceneLayout(scene, {
                 targetPoint,
                 child.source?.anchor,
                 child.target?.anchor,
-                child.gap || 0,
+                child.sourceGap ?? child.gap ?? 0,
+                child.targetGap ?? child.gap ?? 0,
                 child.route
             );
             registry.setConnectorEntry(child.id, {

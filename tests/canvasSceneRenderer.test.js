@@ -4,6 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildMhsaSceneModel } from '../src/view2d/model/buildMhsaSceneModel.js';
 import { buildTransformerSceneModel } from '../src/view2d/model/buildTransformerSceneModel.js';
 import { buildSceneLayout } from '../src/view2d/layout/buildSceneLayout.js';
+import {
+    createMhsaDetailSceneIndex,
+    resolveMhsaDetailHoverState
+} from '../src/view2d/mhsaDetailInteraction.js';
 import { CanvasSceneRenderer, syncCanvasResolution } from '../src/view2d/render/canvas/CanvasSceneRenderer.js';
 import {
     createAnchorRef,
@@ -206,6 +210,37 @@ describe('CanvasSceneRenderer', () => {
         expect(resolveView2dStyle(VIEW2D_STYLE_KEYS.MHSA_HEAD_OUTPUT)?.fill).toMatch(/^linear-gradient\(/);
     });
 
+    it('applies per-node card gradients to card presentations during render', () => {
+        const cardNode = createMatrixNode({
+            role: 'projection-weight',
+            semantic: { componentKind: 'test-card', role: 'projection-weight' },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+            dimensions: { rows: 768, cols: 64 },
+            label: { text: 'W_q', tex: 'W_q' },
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.MHSA_Q,
+                background: 'linear-gradient(162deg, rgba(80, 170, 255, 0.88) 0%, rgba(24, 78, 184, 0.92) 100%)'
+            }
+        });
+        const scene = createSceneModel({
+            semantic: { componentKind: 'test-scene' },
+            nodes: [cardNode]
+        });
+        const layout = buildSceneLayout(scene);
+        const renderer = new CanvasSceneRenderer({ canvas });
+
+        renderer.setScene(scene, layout);
+
+        ctx.operations.length = 0;
+        expect(renderer.render({
+            width: 640,
+            height: 360,
+            dpr: 1,
+            interacting: true
+        })).toBe(true);
+        expect(ctx.operations.filter((entry) => entry.type === 'createLinearGradient').length).toBeGreaterThan(0);
+    });
+
     it('renders a selected MHSA head with a black interior only in deepest head mode', () => {
         const scene = buildTransformerSceneModel({
             activationSource: createActivationSource(4),
@@ -259,6 +294,100 @@ describe('CanvasSceneRenderer', () => {
         expect(renderer.getLastRenderState()?.viewportSource).toBe('test-selected-head-card');
         expect(renderer.getLastRenderState()?.headDetailBounds).toBeTruthy();
         expect(renderer.getLastRenderState()?.headDetailDepthActive).toBe(true);
+    });
+
+    it('resolves visible MHSA weight-card hits to weight-matrix hover labels in head detail mode', () => {
+        const scene = buildTransformerSceneModel({
+            activationSource: createActivationSource(4),
+            layerCount: 1,
+            headDetailTarget: {
+                layerIndex: 0,
+                headIndex: 3
+            }
+        });
+        const layout = buildSceneLayout(scene);
+        const renderer = new CanvasSceneRenderer({ canvas });
+        const detailScene = scene.metadata.mhsaHeadDetailScene || scene.metadata.headDetailScene;
+        const detailLayout = buildSceneLayout(detailScene);
+        const detailIndex = createMhsaDetailSceneIndex(detailScene);
+        const weightEntry = detailLayout.registry.getNodeEntries().find((entry) => (
+            entry.role === 'projection-weight'
+            && entry.semantic?.stage === 'projection-k'
+        ));
+
+        renderer.setScene(scene, layout);
+        expect(renderer.render({
+            width: 640,
+            height: 360,
+            dpr: 1,
+            headDetailDepthActive: true
+        })).toBe(true);
+
+        const detailRenderState = renderer.activeDetailSceneRenderState;
+        const screenX = detailRenderState.offsetX
+            + ((weightEntry.contentBounds.x + (weightEntry.contentBounds.width * 0.5)) * detailRenderState.worldScale);
+        const screenY = detailRenderState.offsetY
+            + ((weightEntry.contentBounds.y + (weightEntry.contentBounds.height * 0.5)) * detailRenderState.worldScale);
+        const hit = renderer.resolveInteractiveHitAtScreenPoint(screenX, screenY);
+        const hoverState = resolveMhsaDetailHoverState(detailIndex, hit);
+
+        expect(hit?.node?.role).toBe('projection-weight');
+        expect(hoverState?.label).toBe('Key Weight Matrix');
+        expect(hoverState?.info).toEqual({
+            layerIndex: 0,
+            headIndex: 3,
+            activationData: {
+                label: 'Key Weight Matrix',
+                layerIndex: 0,
+                headIndex: 3
+            }
+        });
+    });
+
+    it('uses visible MHSA detail content bounds instead of padded scene bounds', () => {
+        const scene = buildTransformerSceneModel({
+            activationSource: createActivationSource(4),
+            layerCount: 1,
+            headDetailTarget: {
+                layerIndex: 0,
+                headIndex: 3
+            }
+        });
+        const layout = buildSceneLayout(scene);
+        const renderer = new CanvasSceneRenderer({ canvas });
+        const detailScene = scene.metadata.mhsaHeadDetailScene || scene.metadata.headDetailScene;
+        const detailLayout = buildSceneLayout(detailScene);
+        const detailNodes = flattenSceneNodes(detailScene);
+        const expectedBounds = [
+            ...detailNodes
+                .filter((node) => node.kind !== 'group' && node.kind !== 'connector' && !node?.metadata?.hidden)
+                .map((node) => detailLayout.registry.getNodeEntry(node.id)?.bounds || null),
+            ...detailNodes
+                .filter((node) => node.kind === 'connector')
+                .map((node) => detailLayout.registry.getConnectorEntry(node.id)?.bounds || null)
+        ]
+            .filter(Boolean)
+            .reduce((acc, bounds) => {
+                if (!acc) {
+                    return { ...bounds };
+                }
+                const minX = Math.min(acc.x, bounds.x);
+                const minY = Math.min(acc.y, bounds.y);
+                const maxX = Math.max(acc.x + acc.width, bounds.x + bounds.width);
+                const maxY = Math.max(acc.y + acc.height, bounds.y + bounds.height);
+                return {
+                    x: minX,
+                    y: minY,
+                    width: maxX - minX,
+                    height: maxY - minY
+                };
+            }, null);
+
+        renderer.setScene(scene, layout);
+
+        expect(renderer.getHeadDetailSceneBounds()).toEqual(expectedBounds);
+        expect(renderer.getHeadDetailSceneBounds()?.x).toBeGreaterThan(detailLayout.sceneBounds.x);
+        expect(renderer.getHeadDetailSceneBounds()?.width).toBeLessThan(detailLayout.sceneBounds.width);
     });
 
     it('renders the deepest concatenate detail stage with a framed concat target and inbound arrows', () => {
@@ -757,7 +886,7 @@ describe('CanvasSceneRenderer', () => {
 
         expect(ctx.operations.some((entry) => (
             entry.type === 'fillText'
-            && (entry.text === 'X' || entry.text === '4 × 768')
+            && (entry.text === 'X' || entry.text === '(4, 768)')
         ))).toBe(false);
 
         ctx.operations.length = 0;
@@ -779,7 +908,7 @@ describe('CanvasSceneRenderer', () => {
         ))).toBe(true);
         expect(ctx.operations.some((entry) => (
             entry.type === 'fillText'
-            && entry.text === '4 × 768'
+            && entry.text === '(4, 768)'
         ))).toBe(true);
     });
 });

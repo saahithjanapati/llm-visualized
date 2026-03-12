@@ -11,7 +11,7 @@ import {
 } from '../src/view2d/schema/sceneTypes.js';
 import { resolveView2dCaptionLines } from '../src/view2d/captionUtils.js';
 import { VIEW2D_VECTOR_STRIP_VARIANT } from '../src/view2d/shared/vectorStrip.js';
-import { D_HEAD, D_MODEL } from '../src/ui/selectionPanelConstants.js';
+import { D_HEAD, D_MODEL, SPACE_TOKEN_DISPLAY } from '../src/ui/selectionPanelConstants.js';
 
 function createActivationSource(tokenCount = 4) {
     const promptTokens = Array.from({ length: tokenCount }, (_, index) => index);
@@ -190,11 +190,32 @@ describe('buildTransformerSceneModel', () => {
         expect(incomingResidualCard?.label?.tex).toBe('\\mathrm{X}');
         expect(incomingResidualCard?.metadata?.caption?.position).toBe('float-top');
         expect(incomingResidualCard?.metadata?.caption?.styleKey).toBe('label');
-        expect(incomingResidualCard?.metadata?.caption?.dimensionsText).toBe('4 × 768');
-        expect(incomingResidualCard?.metadata?.caption?.dimensionsTex).toBe('4 \\times 768');
+        expect(incomingResidualCard?.metadata?.caption?.dimensionsText).toBe('(4, 768)');
+        expect(incomingResidualCard?.metadata?.caption?.dimensionsTex).toBe('(4, 768)');
         expect(incomingResidualCard?.metadata?.caption?.minScreenHeightPx).toBe(28);
         expect(incomingResidualEntry?.labelBounds?.y).toBeLessThan(incomingResidualEntry?.contentBounds?.y ?? 0);
         expect(incomingResidualEntry?.dimensionBounds?.y).toBeLessThan(incomingResidualEntry?.contentBounds?.y ?? 0);
+    });
+
+    it('preserves visible space-token labels for residual rows', () => {
+        const activationSource = createActivationSource(5);
+        activationSource.meta.token_display_strings = ['tok_0', 'tok_1', 'tok_2', 'tok_3', ' '];
+        activationSource.getTokenString = (tokenIndex) => activationSource.meta.token_display_strings[tokenIndex] || null;
+
+        const scene = buildTransformerSceneModel({
+            activationSource,
+            layerCount: 1
+        });
+        const nodes = flattenSceneNodes(scene);
+        const incomingResidualCard = nodes.find((node) => (
+            node.role === 'module-card'
+            && node.semantic?.componentKind === 'residual'
+            && node.semantic?.stage === 'incoming'
+        ));
+        const lastRow = incomingResidualCard?.rowItems?.[4];
+
+        expect(lastRow?.label).toBe(SPACE_TOKEN_DISPLAY);
+        expect(lastRow?.title).toBe(SPACE_TOKEN_DISPLAY);
     });
 
     it('keeps captions scoped to residual stream vectors instead of all transformer cards', () => {
@@ -232,7 +253,7 @@ describe('buildTransformerSceneModel', () => {
 
         expect(resolveView2dCaptionLines(incomingResidualCard)).toEqual([
             { tex: '\\mathrm{X}', text: 'X' },
-            { tex: '4 \\times 768', text: '4 × 768' }
+            { tex: '(4, 768)', text: '(4, 768)' }
         ]);
         expect(resolveView2dCaptionLines(layerNormCard)).toEqual([]);
         expect(resolveView2dCaptionLines(headCard)).toEqual([]);
@@ -326,7 +347,7 @@ describe('buildTransformerSceneModel', () => {
         expect(postAttentionResidual?.rowItems?.[0]?.gradientCss).toContain('linear-gradient(');
         expect(postAttentionResidual?.rowItems?.[0]?.gradientCss).not.toBe(incomingResidual?.rowItems?.[0]?.gradientCss);
         expect(incomingResidual?.metadata?.compactRows?.variant).toBe(VIEW2D_VECTOR_STRIP_VARIANT);
-        expect(incomingResidual?.metadata?.compactRows?.rowGap).toBe(1);
+        expect(incomingResidual?.metadata?.compactRows?.rowGap).toBe(0);
         expect(incomingResidual?.metadata?.compactRows?.paddingY).toBe(0);
 
         const layout = buildSceneLayout(scene);
@@ -337,7 +358,7 @@ describe('buildTransformerSceneModel', () => {
             && entry.role === 'module-card'
         ));
 
-        expect(incomingEntry?.contentBounds?.height).toBeGreaterThan(24);
+        expect(incomingEntry?.contentBounds?.height).toBeGreaterThanOrEqual(24);
         expect(incomingEntry?.contentBounds?.height).toBeLessThan(40);
     });
 
@@ -363,7 +384,7 @@ describe('buildTransformerSceneModel', () => {
         expect(incomingResidual?.dimensions?.rows).toBe(14);
         expect(incomingResidual?.rowItems).toHaveLength(14);
         expect(incomingResidual?.rowItems?.[13]?.label).toBe('tok_13');
-        expect(incomingResidual?.metadata?.caption?.dimensionsText).toBe('14 × 768');
+        expect(incomingResidual?.metadata?.caption?.dimensionsText).toBe('(14, 768)');
     });
 
     it('resolves semantic bounds and focus paths for layer and head targets after layout', () => {

@@ -160,7 +160,7 @@ export class VectorRouter {
                             this._spawnUpwardCopyForHead(lane, targetHeadIdx, tVec);
                             lane.headIndex = targetHeadIdx + 1;
                             if (lane.headIndex >= NUM_HEAD_SETS_LAYER) {
-                                tVec.group.visible = false;
+                                this._setVectorVisible(tVec, false);
                                 lane.horizPhase = 'finishedHeads';
                             }
                             if (tVec.userData && tVec.userData.trail) {

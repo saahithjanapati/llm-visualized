@@ -9,7 +9,8 @@ import { mapAttentionPostScoreToColor, mapValueToColor } from '../utils/colors.j
 import { resolveLogitEntryText } from '../utils/logitTokenText.js';
 import {
     formatLayerNormLabel,
-    formatLayerNormParamLabel
+    formatLayerNormParamLabel,
+    resolveLayerNormParamSpec
 } from '../utils/layerNormLabels.js';
 import { initTouchClickFallback } from './touchClickFallback.js';
 import { fitSelectionDimensionLabels } from './selectionPanelDimensionFitUtils.js';
@@ -404,40 +405,7 @@ function setLayerNormParameterSummaryContent(element, parameterSummary = null) {
     const totalParameterCount = Number.isFinite(parameterSummary?.totalParameterCount)
         ? Math.max(1, Math.floor(parameterSummary.totalParameterCount))
         : (perParameterCount * 2);
-    const perParameterText = formatNumber(perParameterCount);
-    const totalParameterText = formatNumber(totalParameterCount);
-    const payloadBase = {};
-    if (typeof parameterSummary?.layerNormKind === 'string' && parameterSummary.layerNormKind.trim().length) {
-        payloadBase.layerNormKind = parameterSummary.layerNormKind.trim();
-    }
-    if (Number.isFinite(parameterSummary?.layerIndex)) {
-        payloadBase.layerIndex = Math.floor(parameterSummary.layerIndex);
-    }
-
-    element.textContent = '';
-
-    if (typeof document === 'undefined') {
-        element.textContent = `${totalParameterText} = ${perParameterText} x 2 (${perParameterText} for scale + ${perParameterText} for shift)`;
-        return;
-    }
-
-    const fragment = document.createDocumentFragment();
-    fragment.append(`${totalParameterText} = ${perParameterText} x 2 (${perParameterText} for `);
-    fragment.append(
-        createInlineDetailActionButton('scale', LAYERNORM_PARAM_PANEL_ACTION_OPEN, {
-            ...payloadBase,
-            param: 'scale'
-        }) || 'scale'
-    );
-    fragment.append(` + ${perParameterText} for `);
-    fragment.append(
-        createInlineDetailActionButton('shift', LAYERNORM_PARAM_PANEL_ACTION_OPEN, {
-            ...payloadBase,
-            param: 'shift'
-        }) || 'shift'
-    );
-    fragment.append(')');
-    element.append(fragment);
+    element.textContent = formatNumber(totalParameterCount);
 }
 
 function readSceneSelectionNumber(node, key) {
@@ -480,43 +448,18 @@ function isRelabeledQkvVectorCandidate({
 }
 
 function resolveLayerNormParamPreviewSpec(label = '', selectionInfo = null) {
-    const lower = String(label || '').toLowerCase();
     const activationStage = String(getActivationDataFromSelection(selectionInfo)?.stage || '').toLowerCase();
-    const layerNormKind = activationStage.startsWith('ln1.')
-        ? 'ln1'
-        : activationStage.startsWith('ln2.')
-            ? 'ln2'
-            : activationStage.startsWith('final_ln.')
-                ? 'final'
-                : (lower.includes('final ln')
-                    ? 'final'
-                    : (lower.includes('ln2') ? 'ln2' : (lower.includes('ln1') ? 'ln1' : null)));
-    const isScale = activationStage.endsWith('.param.scale')
-        || lower.includes('layernorm scale')
-        || lower.includes('layer norm scale')
-        || lower.includes('layernorm 1 scale')
-        || lower.includes('layer norm 1 scale')
-        || lower.includes('layernorm 2 scale')
-        || lower.includes('layer norm 2 scale')
-        || lower.includes('final ln scale')
-        || lower.includes('ln1 scale')
-        || lower.includes('ln2 scale');
-    const isShift = activationStage.endsWith('.param.shift')
-        || lower.includes('layernorm shift')
-        || lower.includes('layer norm shift')
-        || lower.includes('layernorm 1 shift')
-        || lower.includes('layer norm 1 shift')
-        || lower.includes('layernorm 2 shift')
-        || lower.includes('layer norm 2 shift')
-        || lower.includes('final ln shift')
-        || lower.includes('ln1 shift')
-        || lower.includes('ln2 shift');
-    const param = isScale ? 'scale' : (isShift ? 'shift' : null);
-    if (!param || !layerNormKind) return null;
+    const explicitKind = findUserDataString(selectionInfo, 'layerNormKind') || null;
+    const paramSpec = resolveLayerNormParamSpec({
+        label,
+        stage: activationStage,
+        explicitKind
+    });
+    if (!paramSpec) return null;
     const layerIndex = findUserDataNumber(selectionInfo, 'layerIndex');
     return {
-        layerNormKind,
-        param,
+        layerNormKind: paramSpec.layerNormKind,
+        param: paramSpec.param,
         layerIndex: Number.isFinite(layerIndex) ? Math.floor(layerIndex) : null
     };
 }
@@ -2634,6 +2577,8 @@ class SelectionPanel {
         this.dataSection = document.getElementById('detailDataSection');
         this.attentionRoot = document.getElementById('detailAttention');
         this.attentionTitle = document.getElementById('detailAttentionTitle');
+        this.attentionHeaderMeta = document.getElementById('detailAttentionHeaderMeta');
+        this.attentionContextLabel = document.getElementById('detailAttentionContext');
         this.attentionToggle = document.getElementById('detailAttentionToggle');
         this.attentionToggleLabel = document.getElementById('detailAttentionToggleLabel');
         this.attentionToggleRow = this.attentionToggle?.closest('.detail-attention-toggle')
@@ -6269,14 +6214,14 @@ class SelectionPanel {
 
     _updateAttentionTitle(context = null) {
         if (!this.attentionTitle) return;
-        const titleParts = [];
+        this.attentionTitle.textContent = 'Attention score matrix';
+        if (!this.attentionContextLabel) return;
+        const contextParts = [];
         const layerIndex = Number.isFinite(context?.layerIndex) ? Math.floor(context.layerIndex) : null;
         const headIndex = Number.isFinite(context?.headIndex) ? Math.floor(context.headIndex) : null;
-        if (Number.isFinite(layerIndex)) titleParts.push(`Layer ${layerIndex + 1}`);
-        if (Number.isFinite(headIndex)) titleParts.push(`Head ${headIndex + 1}`);
-        this.attentionTitle.textContent = titleParts.length
-            ? `Attention scores | ${titleParts.join(' | ')}`
-            : 'Attention scores';
+        if (Number.isFinite(layerIndex)) contextParts.push(`Layer ${layerIndex + 1}`);
+        if (Number.isFinite(headIndex)) contextParts.push(`Head ${headIndex + 1}`);
+        this.attentionContextLabel.textContent = contextParts.join(' • ');
     }
 
     _applyAttentionCollapseState() {
@@ -6284,6 +6229,10 @@ class SelectionPanel {
         if (this.attentionRoot) {
             this.attentionRoot.classList.toggle('is-collapsed', collapsed);
             this.attentionRoot.dataset.collapsed = collapsed ? 'true' : 'false';
+        }
+        if (this.attentionHeaderMeta) {
+            this.attentionHeaderMeta.hidden = collapsed;
+            this.attentionHeaderMeta.setAttribute('aria-hidden', collapsed ? 'true' : 'false');
         }
         if (this.attentionToggleRow) {
             this.attentionToggleRow.hidden = collapsed;
@@ -6294,7 +6243,7 @@ class SelectionPanel {
         }
         if (this.attentionCollapseBtn) {
             const contextLabel = this._formatAttentionPanelContext(this._attentionContext);
-            const actionBase = collapsed ? 'Maximize attention scores' : 'Minimize attention scores';
+            const actionBase = collapsed ? 'Maximize attention score matrix' : 'Minimize attention score matrix';
             const actionLabel = contextLabel
                 ? `${actionBase} for ${contextLabel}`
                 : actionBase;
@@ -11287,6 +11236,7 @@ class SelectionPanel {
         const isVectorSelection = isLikelyVectorSelection(label, selection);
         const isTokenChipSelection = lower.startsWith('token:') || lower.startsWith('position:');
         if (!isVectorSelection && !isTokenChipSelection) return null;
+        if (resolveLayerNormParamPreviewSpec(label, selection)) return null;
 
         let laneIndex = findUserDataNumber(selection, 'laneIndex');
         if (!Number.isFinite(laneIndex)) {

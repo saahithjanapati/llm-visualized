@@ -302,6 +302,43 @@ export class CoreEngine {
         this._hoverLabelDetailText = document.createElement('span');
         this._hoverLabelDetailText.className = 'scene-hover-label__detail-text';
         this._hoverLabelDetailText.setAttribute('aria-hidden', 'true');
+        this._hoverLabelAttentionDetails = document.createElement('div');
+        this._hoverLabelAttentionDetails.className = 'scene-hover-label__attention-details';
+        this._hoverLabelAttentionDetails.setAttribute('aria-hidden', 'true');
+        this._hoverLabelAttentionSourceRow = document.createElement('div');
+        this._hoverLabelAttentionSourceRow.className = 'scene-hover-label__attention-row';
+        this._hoverLabelAttentionSourceRole = document.createElement('span');
+        this._hoverLabelAttentionSourceRole.className = 'scene-hover-label__attention-role';
+        this._hoverLabelAttentionSourceChip = document.createElement('span');
+        this._hoverLabelAttentionSourceChip.className = 'detail-subtitle-token-chip scene-hover-label__attention-chip';
+        this._hoverLabelAttentionSourceChip.setAttribute('aria-hidden', 'true');
+        this._hoverLabelAttentionSourcePosition = document.createElement('span');
+        this._hoverLabelAttentionSourcePosition.className = 'scene-hover-label__attention-position';
+        this._hoverLabelAttentionSourcePosition.setAttribute('aria-hidden', 'true');
+        this._hoverLabelAttentionSourceRow.append(
+            this._hoverLabelAttentionSourceRole,
+            this._hoverLabelAttentionSourceChip,
+            this._hoverLabelAttentionSourcePosition
+        );
+        this._hoverLabelAttentionTargetRow = document.createElement('div');
+        this._hoverLabelAttentionTargetRow.className = 'scene-hover-label__attention-row';
+        this._hoverLabelAttentionTargetRole = document.createElement('span');
+        this._hoverLabelAttentionTargetRole.className = 'scene-hover-label__attention-role';
+        this._hoverLabelAttentionTargetChip = document.createElement('span');
+        this._hoverLabelAttentionTargetChip.className = 'detail-subtitle-token-chip scene-hover-label__attention-chip';
+        this._hoverLabelAttentionTargetChip.setAttribute('aria-hidden', 'true');
+        this._hoverLabelAttentionTargetPosition = document.createElement('span');
+        this._hoverLabelAttentionTargetPosition.className = 'scene-hover-label__attention-position';
+        this._hoverLabelAttentionTargetPosition.setAttribute('aria-hidden', 'true');
+        this._hoverLabelAttentionTargetRow.append(
+            this._hoverLabelAttentionTargetRole,
+            this._hoverLabelAttentionTargetChip,
+            this._hoverLabelAttentionTargetPosition
+        );
+        this._hoverLabelAttentionDetails.append(
+            this._hoverLabelAttentionSourceRow,
+            this._hoverLabelAttentionTargetRow
+        );
         this._hoverLabelSubtitle = document.createElement('span');
         this._hoverLabelSubtitle.className = 'scene-hover-label__subtitle';
         this._hoverLabelSubtitle.setAttribute('aria-hidden', 'true');
@@ -313,6 +350,7 @@ export class CoreEngine {
         );
         this._hoverLabelContent.append(
             this._hoverLabelTopRow,
+            this._hoverLabelAttentionDetails,
             this._hoverLabelSubtitle
         );
         this._hoverLabelDiv.appendChild(this._hoverLabelContent);
@@ -470,6 +508,7 @@ export class CoreEngine {
         this._clock  = new THREE.Clock();
         this._paused = false;
         this._pauseReasons = new Set();
+        this._needsFreshFrameAfterResume = false;
         this._minFrameIntervalMs = 1000 / 60; // Cap render/update loop to 60 FPS
         this._maxUpdateDeltaSec = 0.1; // Clamp large rAF gaps (tab/window switch) to keep animations stable.
         this._lastFrameTime = null;
@@ -656,6 +695,17 @@ export class CoreEngine {
         if (this._pauseReasons.size === 0 && this._paused) {
             this._paused = false;
             this._clock.start();
+            this._lastFrameTime = null;
+            this._needsFreshFrameAfterResume = true;
+            for (let i = 0; i < this._layers.length; i++) {
+                const layer = this._layers[i];
+                if (!layer || typeof layer.onEngineResume !== 'function') continue;
+                try {
+                    layer.onEngineResume({ reason });
+                } catch (err) {
+                    console.error(`CoreEngine: layer ${i} onEngineResume() failed`, err);
+                }
+            }
         }
     }
 
@@ -753,6 +803,34 @@ export class CoreEngine {
             width: Math.max(1, Math.round(vvWidth)),
             height: Math.max(1, Math.round(vvHeight))
         };
+    };
+
+    _clearRenderTargetsForFreshFrame = () => {
+        const renderer = this.renderer;
+        if (!renderer || typeof renderer.clear !== 'function') return;
+        const canSetRenderTarget = typeof renderer.setRenderTarget === 'function';
+        const previousTarget = (typeof renderer.getRenderTarget === 'function')
+            ? renderer.getRenderTarget()
+            : null;
+        try {
+            if (canSetRenderTarget) {
+                renderer.setRenderTarget(null);
+            }
+            renderer.clear(true, true, true);
+            if (this.composer) {
+                [this.composer.readBuffer, this.composer.writeBuffer].forEach((target) => {
+                    if (!target || !canSetRenderTarget) return;
+                    renderer.setRenderTarget(target);
+                    renderer.clear(true, true, true);
+                });
+            }
+        } catch (_) {
+            // Best-effort buffer clear for the first resumed frame only.
+        } finally {
+            if (canSetRenderTarget) {
+                renderer.setRenderTarget(previousTarget || null);
+            }
+        }
     };
 
     _hasManualRenderPixelRatioOverride() {
@@ -1637,6 +1715,37 @@ export class CoreEngine {
             return true;
         }
 
+        const renderAttentionRow = (row, role, chip, position, rowContext = null) => {
+            const hasToken = !!rowContext && (
+                typeof rowContext.tokenLabel === 'string' && rowContext.tokenLabel.length > 0
+                || Number.isFinite(rowContext.tokenIndex)
+            );
+            row.hidden = !hasToken;
+            if (!hasToken) {
+                role.textContent = '';
+                chip.textContent = '';
+                chip.removeAttribute('title');
+                position.textContent = '';
+                return false;
+            }
+
+            role.textContent = rowContext.roleLabel || 'Token';
+            chip.textContent = formatTokenChipDisplayText(
+                rowContext.tokenLabel,
+                rowContext.tokenIndex
+            );
+            chip.title = rowContext.tokenLabel || '';
+            applyPromptTokenChipColors(chip, {
+                tokenText: rowContext.tokenLabel,
+                tokenIndex: rowContext.tokenIndex,
+                tokenId: rowContext.tokenId
+            });
+            position.textContent = rowContext.positionText
+                ? `(${rowContext.positionText})`
+                : '';
+            return true;
+        };
+
         const safeLabel = String(label || '');
 
         const detailContext = resolveHoverTokenContext({
@@ -1659,6 +1768,21 @@ export class CoreEngine {
             this._hoverLabelTokenChip.removeAttribute('title');
             this._hoverLabelDetailText.hidden = true;
             this._hoverLabelDetailText.textContent = '';
+            this._hoverLabelAttentionDetails.hidden = true;
+            renderAttentionRow(
+                this._hoverLabelAttentionSourceRow,
+                this._hoverLabelAttentionSourceRole,
+                this._hoverLabelAttentionSourceChip,
+                this._hoverLabelAttentionSourcePosition,
+                null
+            );
+            renderAttentionRow(
+                this._hoverLabelAttentionTargetRow,
+                this._hoverLabelAttentionTargetRole,
+                this._hoverLabelAttentionTargetChip,
+                this._hoverLabelAttentionTargetPosition,
+                null
+            );
             this._hoverLabelSubtitle.hidden = true;
             this._hoverLabelSubtitle.textContent = '';
             return false;
@@ -1667,6 +1791,7 @@ export class CoreEngine {
         const showDetail = !!detailContext;
         const showTokenChip = detailContext?.detailKind === 'token-chip';
         const showDetailText = detailContext?.detailKind === 'position-text';
+        const showAttentionDetails = detailContext?.detailKind === 'attention-token-pair';
         const showPrimaryLabel = detailContext?.showPrimaryLabel !== false;
         const showSubtitle = typeof subtitleText === 'string' && subtitleText.length > 0;
         const primaryLabelText = (typeof detailContext?.primaryLabelText === 'string' && detailContext.primaryLabelText.length)
@@ -1674,15 +1799,55 @@ export class CoreEngine {
             : safeLabel;
         this._hoverLabelText.textContent = showPrimaryLabel ? primaryLabelText : '';
         this._hoverLabelText.hidden = !showPrimaryLabel;
-        this._hoverLabelSeparator.hidden = !showDetail || !showPrimaryLabel;
+        this._hoverLabelSeparator.hidden = !showDetail || !showPrimaryLabel || showAttentionDetails;
         this._hoverLabelTokenChip.hidden = !showTokenChip;
         this._hoverLabelDetailText.hidden = !showDetailText;
+        this._hoverLabelAttentionDetails.hidden = !showAttentionDetails;
         this._hoverLabelSubtitle.hidden = !showSubtitle;
         this._hoverLabelSubtitle.textContent = showSubtitle ? subtitleText : '';
         if (!showDetail) {
             this._hoverLabelTokenChip.textContent = '';
             this._hoverLabelTokenChip.removeAttribute('title');
             this._hoverLabelDetailText.textContent = '';
+            renderAttentionRow(
+                this._hoverLabelAttentionSourceRow,
+                this._hoverLabelAttentionSourceRole,
+                this._hoverLabelAttentionSourceChip,
+                this._hoverLabelAttentionSourcePosition,
+                null
+            );
+            renderAttentionRow(
+                this._hoverLabelAttentionTargetRow,
+                this._hoverLabelAttentionTargetRole,
+                this._hoverLabelAttentionTargetChip,
+                this._hoverLabelAttentionTargetPosition,
+                null
+            );
+            return true;
+        }
+
+        if (showAttentionDetails) {
+            this._hoverLabelTokenChip.textContent = '';
+            this._hoverLabelTokenChip.removeAttribute('title');
+            this._hoverLabelDetailText.textContent = '';
+            const rows = Array.isArray(detailContext.attentionRows)
+                ? detailContext.attentionRows
+                : [];
+            const sourceVisible = renderAttentionRow(
+                this._hoverLabelAttentionSourceRow,
+                this._hoverLabelAttentionSourceRole,
+                this._hoverLabelAttentionSourceChip,
+                this._hoverLabelAttentionSourcePosition,
+                rows[0] || null
+            );
+            const targetVisible = renderAttentionRow(
+                this._hoverLabelAttentionTargetRow,
+                this._hoverLabelAttentionTargetRole,
+                this._hoverLabelAttentionTargetChip,
+                this._hoverLabelAttentionTargetPosition,
+                rows[1] || null
+            );
+            this._hoverLabelAttentionDetails.hidden = !(sourceVisible || targetVisible);
             return true;
         }
 
@@ -1690,10 +1855,38 @@ export class CoreEngine {
             this._hoverLabelTokenChip.textContent = '';
             this._hoverLabelTokenChip.removeAttribute('title');
             this._hoverLabelDetailText.textContent = detailContext.detailText || '';
+            renderAttentionRow(
+                this._hoverLabelAttentionSourceRow,
+                this._hoverLabelAttentionSourceRole,
+                this._hoverLabelAttentionSourceChip,
+                this._hoverLabelAttentionSourcePosition,
+                null
+            );
+            renderAttentionRow(
+                this._hoverLabelAttentionTargetRow,
+                this._hoverLabelAttentionTargetRole,
+                this._hoverLabelAttentionTargetChip,
+                this._hoverLabelAttentionTargetPosition,
+                null
+            );
             return true;
         }
 
         this._hoverLabelDetailText.textContent = '';
+        renderAttentionRow(
+            this._hoverLabelAttentionSourceRow,
+            this._hoverLabelAttentionSourceRole,
+            this._hoverLabelAttentionSourceChip,
+            this._hoverLabelAttentionSourcePosition,
+            null
+        );
+        renderAttentionRow(
+            this._hoverLabelAttentionTargetRow,
+            this._hoverLabelAttentionTargetRole,
+            this._hoverLabelAttentionTargetChip,
+            this._hoverLabelAttentionTargetPosition,
+            null
+        );
 
         this._hoverLabelTokenChip.textContent = formatTokenChipDisplayText(
             detailContext.tokenLabel,
@@ -2081,6 +2274,10 @@ export class CoreEngine {
         this.controls.update();
         this._updateCameraDebug();
         const renderStart = perfEnabled ? this._now() : 0;
+        if (this._needsFreshFrameAfterResume) {
+            this._clearRenderTargetsForFreshFrame();
+            this._needsFreshFrameAfterResume = false;
+        }
         if (this.composer) {
             this.composer.render();
         } else {
