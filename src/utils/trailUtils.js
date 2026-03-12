@@ -129,12 +129,100 @@ function buildTrailSegmentKey(ax, ay, az, bx, by, bz) {
     ].join('|');
 }
 
-function collectUniqueTrailSegmentBuffers(segmentSources) {
+function resolveTrailStyleColor(color) {
+    if (color && typeof color.getHex === 'function') {
+        return color.getHex();
+    }
+    if (typeof color === 'number' && Number.isFinite(color)) {
+        return color;
+    }
+    try {
+        return new THREE.Color(color ?? TRAIL_COLOR).getHex();
+    } catch (_) {
+        return TRAIL_COLOR;
+    }
+}
+
+function buildTrailStyleKey(color = TRAIL_COLOR, lineWidth = TRAIL_LINE_WIDTH, opacity = TRAIL_OPACITY) {
+    const safeColor = resolveTrailStyleColor(color);
+    const safeLineWidth = Number.isFinite(lineWidth) ? lineWidth : TRAIL_LINE_WIDTH;
+    const safeOpacity = Number.isFinite(opacity) ? opacity : TRAIL_OPACITY;
+    return `${safeColor.toString(16)}|${safeLineWidth.toFixed(4)}|${safeOpacity.toFixed(4)}`;
+}
+
+function resolveTrailObjectStyleKey(obj) {
+    if (!obj) return buildTrailStyleKey();
+    const material = Array.isArray(obj.material) ? obj.material[0] : obj.material;
+    const color = material && material.color ? material.color : TRAIL_COLOR;
+    const lineWidth = Number.isFinite(obj.userData?.trailBaseLineWidth)
+        ? obj.userData.trailBaseLineWidth
+        : (typeof material?.linewidth === 'number' ? material.linewidth : TRAIL_LINE_WIDTH);
+    const opacity = Number.isFinite(obj.userData?.trailBaseOpacity)
+        ? obj.userData.trailBaseOpacity
+        : (typeof material?.opacity === 'number' ? material.opacity : TRAIL_OPACITY);
+    return buildTrailStyleKey(color, lineWidth, opacity);
+}
+
+function extractTrailSegmentsFloat32(obj) {
+    if (!obj || !obj.geometry) return null;
+    const geometry = obj.geometry;
+    const positionAttr = (typeof geometry.getAttribute === 'function')
+        ? geometry.getAttribute('position')
+        : geometry.attributes?.position;
+    if (positionAttr && positionAttr.array && positionAttr.array.length >= 6) {
+        const maxVertices = Math.floor(positionAttr.array.length / 3);
+        const drawCountRaw = (geometry.drawRange && Number.isFinite(geometry.drawRange.count) && geometry.drawRange.count > 0)
+            ? geometry.drawRange.count
+            : maxVertices;
+        const drawCount = Math.max(0, Math.min(maxVertices, Math.floor(drawCountRaw)));
+        if (drawCount < 2) return null;
+        return positionAttr.array.subarray(0, drawCount * 3);
+    }
+    const interleaved = geometry.attributes?.instanceStart?.data?.array;
+    if (interleaved && interleaved.length >= 6) {
+        return interleaved.subarray(0, interleaved.length);
+    }
+    return null;
+}
+
+function collectExistingMergedTrailSegmentSources(root, { styleKey = null } = {}) {
+    if (!root || typeof root.traverse !== 'function') return [];
+    const segmentSources = [];
+    root.traverse((obj) => {
+        if (!obj?.userData?.trailMerged) return;
+        if (styleKey && resolveTrailObjectStyleKey(obj) !== styleKey) return;
+        const segments = extractTrailSegmentsFloat32(obj);
+        if (!segments || segments.length < 6) return;
+        segmentSources.push(segments);
+    });
+    return segmentSources;
+}
+
+function markSeenTrailSegments(seenSegmentKeys, segmentSources) {
+    if (!(seenSegmentKeys instanceof Set) || !Array.isArray(segmentSources) || segmentSources.length === 0) {
+        return;
+    }
+    for (const source of segmentSources) {
+        if (!source || source.length < 6) continue;
+        for (let i = 0; (i + 5) < source.length; i += 6) {
+            const ax = source[i];
+            const ay = source[i + 1];
+            const az = source[i + 2];
+            const bx = source[i + 3];
+            const by = source[i + 4];
+            const bz = source[i + 5];
+            seenSegmentKeys.add(buildTrailSegmentKey(ax, ay, az, bx, by, bz));
+        }
+    }
+}
+
+function collectUniqueTrailSegmentBuffers(segmentSources, existingSegmentSources = null) {
     if (!Array.isArray(segmentSources) || segmentSources.length === 0) {
         return { chunks: [], totalFloats: 0 };
     }
 
     const seenSegmentKeys = new Set();
+    markSeenTrailSegments(seenSegmentKeys, existingSegmentSources);
     const chunks = [];
     let totalFloats = 0;
 
@@ -760,15 +848,21 @@ export function mergeTrailsIntoLineSegments(trails, scene, color = TRAIL_COLOR, 
     if (uniqueTrails.length === 0) return null;
 
     // Concatenate segments for all trails, dropping exact/near-exact duplicates
-    // so a resumed hand-off cannot stack the same translucent line twice.
+    // both within this merge batch and against already-frozen scene geometry so
+    // resumed recovery paths cannot stack the same translucent line twice.
     const rawSegments = [];
     for (const trail of uniqueTrails) {
         const seg = trail.toSegmentsFloat32();
         if (seg.length === 0) continue;
         rawSegments.push(seg);
     }
-    const { chunks, totalFloats } = collectUniqueTrailSegmentBuffers(rawSegments);
-    if (totalFloats === 0) return null;
+    const styleKey = buildTrailStyleKey(color, lineWidth, opacity);
+    const existingSegmentSources = collectExistingMergedTrailSegmentSources(scene, { styleKey });
+    const { chunks, totalFloats } = collectUniqueTrailSegmentBuffers(rawSegments, existingSegmentSources);
+    if (totalFloats === 0) {
+        uniqueTrails.forEach(t => t && typeof t.dispose === 'function' && t.dispose());
+        return null;
+    }
 
     const positions = new Float32Array(totalFloats);
     let offset = 0;
@@ -826,7 +920,11 @@ export function mergeTrailsIntoLineSegments(trails, scene, color = TRAIL_COLOR, 
 /** Build one LineSegments object from a list of Float32Array segment buffers. */
 export function buildMergedLineSegmentsFromSegments(segmentsList, scene, color = TRAIL_COLOR, lineWidth = TRAIL_LINE_WIDTH, opacity = TRAIL_OPACITY, options = null) {
     if (!Array.isArray(segmentsList) || segmentsList.length === 0 || !scene) return null;
-    const { chunks, totalFloats } = collectUniqueTrailSegmentBuffers(segmentsList);
+    const styleKey = buildTrailStyleKey(color, lineWidth, opacity);
+    // Residual freezes can be retried after resume/recovery; ignore segments
+    // already present in matching merged trails so opacity does not compound.
+    const existingSegmentSources = collectExistingMergedTrailSegmentSources(scene, { styleKey });
+    const { chunks, totalFloats } = collectUniqueTrailSegmentBuffers(segmentsList, existingSegmentSources);
     if (totalFloats === 0) return null;
     const positions = new Float32Array(totalFloats);
     let offset = 0;

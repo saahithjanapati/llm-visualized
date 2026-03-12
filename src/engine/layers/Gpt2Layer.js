@@ -71,6 +71,11 @@ import {
 } from './gpt2LaneWatchdogUtils.js';
 import { shouldWaitForInputChipGate } from './gpt2InputChipGateUtils.js';
 import { logLayerNormVectorDump } from './gpt2LayerDebugUtils.js';
+import {
+    buildGeluWaveField,
+    computeGeluWhipOffset
+} from './gpt2GeluMotionUtils.js';
+import { computeMlpMatrixPassEmissive } from './gpt2MlpMatrixVisualUtils.js';
 import { GPT2_LAYER_VISUAL_TUNING } from '../../utils/visualTuningProfiles.js';
 import {
     applyLayerNormParamVectorForLayer,
@@ -169,10 +174,12 @@ const MLP_TRANSITION_PROFILE_DEFAULT = Object.freeze({
     expandRiseUnits: 30,
     expandRiseMs: 500,
     geluDurationMs: 500,
-    geluRiseExtra: 24,
-    geluCurveHeight: 30,
-    geluWaveCycles: 0.5,
-    geluWaveTravelCycles: 0.3,
+    geluRiseExtra: 28,
+    geluCurveHeight: 36,
+    geluWaveCycles: 1.15,
+    geluWaveTravelCycles: 0.85,
+    geluWaveHarmonicBlend: 0.28,
+    geluWhipStrength: 0.4,
     geluActivationSwitchT: 0.35,
     geluLiteMode: false,
     maxUpDurationMs: null,
@@ -186,10 +193,12 @@ const MLP_TRANSITION_PROFILE_TOUCH = Object.freeze({
     expandRiseUnits: 30,
     expandRiseMs: 500,
     geluDurationMs: 500,
-    geluRiseExtra: 24,
-    geluCurveHeight: 30,
-    geluWaveCycles: 0.5,
-    geluWaveTravelCycles: 0.3,
+    geluRiseExtra: 28,
+    geluCurveHeight: 36,
+    geluWaveCycles: 1.15,
+    geluWaveTravelCycles: 0.85,
+    geluWaveHarmonicBlend: 0.28,
+    geluWhipStrength: 0.4,
     geluActivationSwitchT: 0.35,
     geluLiteMode: false,
     maxUpDurationMs: null,
@@ -447,15 +456,12 @@ export default class Gpt2Layer extends BaseLayer {
 
         const clampedProgress = THREE.MathUtils.clamp(progress, 0, 1);
         const entryT = THREE.MathUtils.smoothstep(clampedProgress, 0, 0.22);
-        const exitT = THREE.MathUtils.smoothstep(clampedProgress, 0.82, 1);
-        const pulseBoost = (peakIntensity - finalIntensity)
-            * 0.12
-            * Math.sin(Math.PI * clampedProgress)
-            * entryT
-            * (1 - exitT);
-        const sustainedEmissive = THREE.MathUtils.lerp(startIntensity, peakIntensity, entryT);
-        const activeEmissive = Math.min(peakIntensity, sustainedEmissive + pulseBoost);
-        const emissive = THREE.MathUtils.lerp(activeEmissive, finalIntensity, exitT);
+        const emissive = computeMlpMatrixPassEmissive(
+            clampedProgress,
+            startIntensity,
+            peakIntensity,
+            finalIntensity
+        );
         const color = tweenColor.copy(startColor).lerp(activeColor, entryT);
 
         matrix.setColor(color);
@@ -2514,6 +2520,8 @@ export default class Gpt2Layer extends BaseLayer {
                         curveHeight: mlpProfile.geluCurveHeight,
                         waveCycles: mlpProfile.geluWaveCycles,
                         waveTravelCycles: mlpProfile.geluWaveTravelCycles,
+                        waveHarmonicBlend: mlpProfile.geluWaveHarmonicBlend,
+                        whipStrength: mlpProfile.geluWhipStrength,
                         activationSwitchT: mlpProfile.geluActivationSwitchT,
                         liteMode: !!mlpProfile.geluLiteMode
                     });
@@ -2539,6 +2547,8 @@ export default class Gpt2Layer extends BaseLayer {
         const waveHeight = Number.isFinite(options.curveHeight) ? options.curveHeight : 24;
         const waveCycles = Number.isFinite(options.waveCycles) ? options.waveCycles : 0.5;
         const waveTravelCycles = Number.isFinite(options.waveTravelCycles) ? options.waveTravelCycles : 0.3;
+        const waveHarmonicBlend = Number.isFinite(options.waveHarmonicBlend) ? options.waveHarmonicBlend : undefined;
+        const whipStrength = Number.isFinite(options.whipStrength) ? options.whipStrength : undefined;
         const activationSwitchT = THREE.MathUtils.clamp(
             Number.isFinite(options.activationSwitchT) ? options.activationSwitchT : 0.35,
             0,
@@ -2599,7 +2609,7 @@ export default class Gpt2Layer extends BaseLayer {
                     const liftProgress = state.t >= activationSwitchT
                         ? (state.t - activationSwitchT) / Math.max(1e-6, 1 - activationSwitchT)
                         : 0;
-                    const liftT = TWEEN.Easing.Quadratic.Out(THREE.MathUtils.clamp(liftProgress, 0, 1));
+                    const liftT = TWEEN.Easing.Cubic.Out(THREE.MathUtils.clamp(liftProgress, 0, 1));
                     expandedGroup.position.y = baseY + riseExtra * liftT;
                     updateExpandedTrail();
                 })
@@ -2614,47 +2624,42 @@ export default class Gpt2Layer extends BaseLayer {
         }
 
         const segmentCounts = segmentVecs.map(seg => Math.max(1, Math.floor(seg.instanceCount || 1)));
-        const totalCount = segmentCounts.reduce((sum, count) => sum + count, 0);
-        const phaseOffsets = segmentVecs.map((_, idx) => new Float32Array(segmentCounts[idx]));
-        const phaseSpan = Math.PI * 2 * waveCycles;
-        let globalIndex = 0;
-        for (let s = 0; s < segmentVecs.length; s++) {
-            const count = segmentCounts[s];
-            for (let i = 0; i < count; i++) {
-                const t = totalCount > 1 ? globalIndex / (totalCount - 1) : 0;
-                phaseOffsets[s][i] = t * phaseSpan;
-                globalIndex++;
-            }
-        }
+        const { phaseOffsets, normalizedIndices } = buildGeluWaveField(segmentCounts, waveCycles);
 
         const state = { t: 0 };
 
-        // Send a traveling sine wave through the expanded prisms so the
-        // activation reads as a rising nonlinear ripple before down-projection.
+        // Drive a fuller sinusoid with a tip-biased snap so the GELU read
+        // feels like a whip traveling through the expanded vector.
         new TWEEN.Tween(state)
             .to({ t: 1 }, durationMs)
             .easing(TWEEN.Easing.Quadratic.InOut)
             .onUpdate(() => {
-                const waveEnvelope = Math.sin(Math.PI * state.t);
-                const phaseAdvance = state.t * Math.PI * 2 * waveTravelCycles;
-                const waveLeadPhase = Math.PI * 0.5;
                 if (state.t >= activationSwitchT) {
                     applyActivationOnce();
                 }
                 const liftProgress = state.t >= activationSwitchT
                     ? (state.t - activationSwitchT) / Math.max(1e-6, 1 - activationSwitchT)
                     : 0;
-                const liftT = TWEEN.Easing.Quadratic.Out(THREE.MathUtils.clamp(liftProgress, 0, 1));
+                const liftT = TWEEN.Easing.Back.Out(THREE.MathUtils.clamp(liftProgress, 0, 1));
                 expandedGroup.position.y = baseY + riseExtra * liftT;
                 updateExpandedTrail();
 
                 for (let s = 0; s < segmentVecs.length; s++) {
                     const segVec = segmentVecs[s];
                     const phaseRow = phaseOffsets[s];
+                    const normalizedRow = normalizedIndices[s];
                     const count = segmentCounts[s];
                     for (let i = 0; i < count; i++) {
-                        const waveOffset = Math.sin(phaseRow[i] - phaseAdvance + waveLeadPhase);
-                        segVec.setInstanceAppearance(i, waveHeight * waveEnvelope * waveOffset, null, null, false);
+                        const waveOffset = computeGeluWhipOffset({
+                            phaseOffset: phaseRow[i],
+                            normalizedIndex: normalizedRow[i],
+                            progress: state.t,
+                            waveHeight,
+                            waveTravelCycles,
+                            harmonicBlend: waveHarmonicBlend,
+                            whipStrength
+                        });
+                        segVec.setInstanceAppearance(i, waveOffset, null, null, false);
                     }
                     if (typeof segVec.markInstanceMatrixDirty === 'function') {
                         segVec.markInstanceMatrixDirty();

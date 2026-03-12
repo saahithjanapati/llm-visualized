@@ -62,8 +62,10 @@ import {
 } from './selectionPanelSoftmaxPreview.js';
 import {
     createTransformerView2dDetailView,
+    describeTransformerView2dTarget,
     resolveTransformerView2dActionContext,
     setDescriptionTransformerView2dAction,
+    syncTransformerView2dRoute,
     TRANSFORMER_VIEW2D_PANEL_ACTION_OPEN
 } from './selectionPanelTransformerView2d.js';
 import { renderSelectionPreviewEquations } from './selectionPanelEquationPreviewUtils.js';
@@ -92,6 +94,10 @@ import {
     renderSelectionVectorSamplingData,
     resolveSelectionVectorSamplingData
 } from './selectionPanelVectorSamplingUtils.js';
+import {
+    LAYER_NORM_ACTIVE_PARAM_PREVIEW_COLOR_OPTIONS,
+    resolveLayerNormPreviewContext
+} from './selectionPanelLayerNormPreviewUtils.js';
 import { buildSelectionPromptContext } from './selectionPanelPromptContextUtils.js';
 import { buildSelectionChatPrompt } from './selectionPanelChatPromptUtils.js';
 import {
@@ -294,10 +300,10 @@ let tokenChipFontPromise = null;
 function getAttentionSectionCollapsedPreference() {
     try {
         const storage = globalThis?.localStorage;
-        if (!storage || typeof storage.getItem !== 'function') return true;
-        return getPreference(ATTENTION_SECTION_COLLAPSED_PREF_KEY, true) === true;
+        if (!storage || typeof storage.getItem !== 'function') return false;
+        return getPreference(ATTENTION_SECTION_COLLAPSED_PREF_KEY, false) === true;
     } catch (_error) {
-        return true;
+        return false;
     }
 }
 
@@ -2195,21 +2201,76 @@ function buildAttentionSpherePreview(selectionInfo) {
     };
 }
 
-export function buildLayerNormPreview(label, selectionInfo, engine = null) {
-    const clonePreview = buildSelectionClonePreview(selectionInfo, label)
-        || buildDirectClonePreview(selectionInfo);
-    if (clonePreview) {
-        applyFinalColorToObject(clonePreview.object, 0xffffff);
-        return clonePreview;
-    }
+function buildLayerNormParamBankPreview({
+    layerNormKind = null,
+    param = 'scale',
+    layerIndex = null,
+    layoutCount = 0,
+    activeLaneLayoutIndices = [],
+    baseVectorLength = D_MODEL,
+    previewDepth = LN_PARAMS.depth
+} = {}) {
+    if (!layerNormKind) return null;
 
-    const baseHoles = Number.isFinite(LN_PARAMS.numberOfHoles) ? LN_PARAMS.numberOfHoles : PREVIEW_SOLID_LANES;
-    const depthScale = PREVIEW_SOLID_LANES / Math.max(1, baseHoles);
+    const previewData = getLayerNormParamData(layerIndex, layerNormKind, param, baseVectorLength);
+    const isArrayLike = Array.isArray(previewData) || ArrayBuffer.isView(previewData);
+    if (!isArrayLike || previewData.length === 0) return null;
+
+    const safeLayoutCount = Math.max(1, Math.floor(layoutCount || activeLaneLayoutIndices.length || 1));
+    const laneIndices = Array.isArray(activeLaneLayoutIndices) && activeLaneLayoutIndices.length
+        ? activeLaneLayoutIndices
+        : Array.from({ length: safeLayoutCount }, (_, idx) => idx);
+    const previewInstanceCount = resolveLayerNormParamPreviewInstanceCount(null, previewData);
+    const zSpacing = previewDepth / (safeLayoutCount + 1);
+    const yPosition = param === 'shift'
+        ? LN_PARAMS.height * 0.25
+        : 3.3;
+    const vectors = [];
+    const group = new THREE.Group();
+
+    laneIndices.forEach((laneLayoutIndex) => {
+        const safeLaneLayoutIndex = Number.isFinite(laneLayoutIndex)
+            ? Math.max(0, Math.min(safeLayoutCount - 1, Math.floor(laneLayoutIndex)))
+            : 0;
+        const vec = createPreviewVector({
+            colorHex: MHA_FINAL_Q_COLOR,
+            data: null,
+            instanceCount: previewInstanceCount
+        });
+        vec.group.position.set(
+            0,
+            yPosition,
+            -previewDepth / 2 + zSpacing * (safeLaneLayoutIndex + 1)
+        );
+        vec.group.userData = vec.group.userData || {};
+        vec.group.userData.label = getLayerNormParamLabel(layerNormKind, param);
+        applyDataToPreviewVector(vec, previewData, {
+            colorOptions: LAYER_NORM_ACTIVE_PARAM_PREVIEW_COLOR_OPTIONS
+        });
+        group.add(vec.group);
+        vectors.push(vec);
+    });
+
+    return {
+        group,
+        dispose: () => {
+            vectors.forEach((vec) => {
+                vec.dispose();
+            });
+        }
+    };
+}
+
+export function buildLayerNormPreview(label, selectionInfo, engine = null) {
+    const previewContext = resolveLayerNormPreviewContext(selectionInfo, engine);
+    const holeCountFallback = Number.isFinite(LN_PARAMS.numberOfHoles) ? LN_PARAMS.numberOfHoles : PREVIEW_SOLID_LANES;
+    const holeCount = Math.max(1, Math.floor(previewContext.layoutCount || holeCountFallback));
+    const baseHoles = Number.isFinite(LN_PARAMS.numberOfHoles) ? LN_PARAMS.numberOfHoles : holeCount;
     const previewDepth = Math.max(
         180,
-        Math.min(PREVIEW_MATRIX_DEPTH, LN_PARAMS.depth * depthScale)
+        Math.min(PREVIEW_MATRIX_DEPTH, LN_PARAMS.depth * (holeCount / Math.max(1, baseHoles)))
     );
-    const params = { ...LN_PARAMS, numberOfHoles: PREVIEW_SOLID_LANES, depth: previewDepth };
+    const params = { ...LN_PARAMS, numberOfHoles: holeCount, depth: previewDepth };
     const ln = new LayerNormalizationVisualization(
         new THREE.Vector3(0, 0, 0),
         params.width,
@@ -2223,10 +2284,54 @@ export function buildLayerNormPreview(label, selectionInfo, engine = null) {
         true
     );
     ln.setColor(new THREE.Color(0xffffff));
+    ln.setMaterialProperties({
+        opacity: 1.0,
+        transparent: false,
+        transmission: 0.0,
+        thickness: 0.0,
+        emissiveIntensity: 0.18
+    });
+    forcePreviewObjectOpaque(ln.group);
+
+    const group = new THREE.Group();
+    group.add(ln.group);
+    const disposers = [() => ln.dispose()];
+
+    const scalePreview = buildLayerNormParamBankPreview({
+        layerNormKind: previewContext.layerNormKind,
+        param: 'scale',
+        layerIndex: previewContext.layerIndex,
+        layoutCount: holeCount,
+        activeLaneLayoutIndices: previewContext.activeLaneLayoutIndices,
+        baseVectorLength: previewContext.baseVectorLength,
+        previewDepth
+    });
+    if (scalePreview?.group) {
+        group.add(scalePreview.group);
+        disposers.push(scalePreview.dispose);
+    }
+
+    const shiftPreview = buildLayerNormParamBankPreview({
+        layerNormKind: previewContext.layerNormKind,
+        param: 'shift',
+        layerIndex: previewContext.layerIndex,
+        layoutCount: holeCount,
+        activeLaneLayoutIndices: previewContext.activeLaneLayoutIndices,
+        baseVectorLength: previewContext.baseVectorLength,
+        previewDepth
+    });
+    if (shiftPreview?.group) {
+        group.add(shiftPreview.group);
+        disposers.push(shiftPreview.dispose);
+    }
 
     return {
-        object: ln.group,
-        dispose: () => ln.dispose()
+        object: group,
+        dispose: () => {
+            disposers.forEach((dispose) => {
+                if (typeof dispose === 'function') dispose();
+            });
+        }
     };
 }
 
@@ -2261,13 +2366,15 @@ function buildLayerNormParamVectorPreview(label, selectionInfo) {
     const previewInstanceCount = resolveLayerNormParamPreviewInstanceCount(selectionInfo, previewData);
 
     const vec = createPreviewVector({
-        colorHex: 0xffffff,
+        colorHex: MHA_FINAL_Q_COLOR,
         data: null,
         instanceCount: previewInstanceCount
     });
     vec.group.userData = vec.group.userData || {};
     vec.group.userData.label = getLayerNormParamLabel(spec.layerNormKind, spec.param);
-    applyDataToPreviewVector(vec, previewData);
+    applyDataToPreviewVector(vec, previewData, {
+        colorOptions: LAYER_NORM_ACTIVE_PARAM_PREVIEW_COLOR_OPTIONS
+    });
 
     return {
         object: vec.group,
@@ -6072,16 +6179,42 @@ class SelectionPanel {
         return true;
     }
 
-    _openTransformerView2dPreview({ fromHistory = false, sourceSelection = null } = {}) {
+    openTransformerView2d({
+        semanticTarget = null,
+        focusLabel = '',
+        syncRoute = true
+    } = {}) {
+        return this._openTransformerView2dPreview({
+            sourceSelection: null,
+            syncRoute,
+            view2dContext: {
+                semanticTarget,
+                focusLabel: String(focusLabel || '').trim() || describeTransformerView2dTarget(semanticTarget),
+                actionLabel: 'Open 2D canvas'
+            }
+        });
+    }
+
+    _openTransformerView2dPreview({
+        fromHistory = false,
+        sourceSelection = null,
+        view2dContext = null,
+        syncRoute = true
+    } = {}) {
         const resolvedSelection = sourceSelection || this._lastSelection;
         const sourceLabel = this._lastSelectionLabel;
         const resolvedLabel = resolvedSelection?.label
             ? normalizeSelectionLabel(resolvedSelection.label, resolvedSelection)
             : sourceLabel;
-        const view2dContext = resolveTransformerView2dActionContext(resolvedSelection, resolvedLabel);
-        if (!resolvedSelection || !view2dContext) return false;
-        this._transformerView2dSourceSelection = resolvedSelection;
-        this._currentTransformerView2dContext = view2dContext;
+        const resolvedView2dContext = view2dContext
+            || resolveTransformerView2dActionContext(resolvedSelection, resolvedLabel);
+        if (!resolvedView2dContext) return false;
+
+        this._isMhsaInfoSelectionActive = false;
+        this._syncMhsaViewRoute(false);
+        this._setInfoPreview(null);
+        this._transformerView2dSourceSelection = resolvedSelection || null;
+        this._currentTransformerView2dContext = resolvedView2dContext;
         this._transformerView2dDetailOpen = true;
         this.panel.classList.add('is-transformer-view2d-open');
         this._setTitleText('2D Transformer Canvas');
@@ -6089,22 +6222,29 @@ class SelectionPanel {
             this.subtitle.classList.remove('detail-subtitle--qkv-token-context');
             this.subtitle.textContent = 'Scalable semantic canvas for the current transformer state';
         }
-        this._setSubtitleSecondaryText(`Focus: ${view2dContext.focusLabel}`);
+        this._setSubtitleSecondaryText(`Focus: ${resolvedView2dContext.focusLabel}`);
         this._setSubtitleTertiaryText('Prototype view. Drag or use one finger to pan, and pinch or scroll to zoom.');
+        this.open();
         this._transformerView2dDetailView?.setVisible(true);
         this._transformerView2dDetailView?.open({
             activationSource: this.activationSource,
             tokenIndices: Array.isArray(this.attentionTokenIndices) ? this.attentionTokenIndices : this.laneTokenIndices,
             tokenLabels: Array.isArray(this.attentionTokenLabels) ? this.attentionTokenLabels : this.tokenLabels,
-            semanticTarget: view2dContext.semanticTarget,
-            focusLabel: view2dContext.focusLabel,
+            semanticTarget: resolvedView2dContext.semanticTarget,
+            focusLabel: resolvedView2dContext.focusLabel,
             isSmallScreen: this._isSmallScreen && this._isSmallScreen()
         });
         this.engine?.pause?.(TRANSFORMER_VIEW2D_PAUSE_REASON);
         this._stopLoop();
         this._setAttentionVisibility(false);
         this._setPanelTokenHoverEntry(null, { emit: true });
-        if (!fromHistory) {
+        if (syncRoute) {
+            syncTransformerView2dRoute({
+                active: true,
+                semanticTarget: resolvedView2dContext.semanticTarget
+            });
+        }
+        if (!fromHistory && resolvedSelection) {
             const entry = this._buildHistoryEntry('transformer-view2d', resolvedSelection);
             this._pushHistoryEntry(entry);
         } else {
@@ -6121,6 +6261,7 @@ class SelectionPanel {
         this._transformerView2dDetailOpen = false;
         this.panel.classList.remove('is-transformer-view2d-open');
         this._transformerView2dDetailView?.setVisible(false);
+        syncTransformerView2dRoute({ active: false });
         this.engine?.resume?.(TRANSFORMER_VIEW2D_PAUSE_REASON);
         if (this._mhsaFullscreenActive) {
             this._setMhsaFullscreen(false);
@@ -6185,13 +6326,14 @@ class SelectionPanel {
 
     _updateAttentionTitle(context = null) {
         if (!this.attentionTitle) return;
-        const contextLabel = this._formatAttentionPanelContext(context);
-        const titleBase = this._attentionSectionCollapsed === true
-            ? 'View attention scores'
-            : 'Attention matrix';
-        this.attentionTitle.textContent = contextLabel
-            ? `${titleBase} for ${contextLabel}`
-            : titleBase;
+        const titleParts = [];
+        const layerIndex = Number.isFinite(context?.layerIndex) ? Math.floor(context.layerIndex) : null;
+        const headIndex = Number.isFinite(context?.headIndex) ? Math.floor(context.headIndex) : null;
+        if (Number.isFinite(layerIndex)) titleParts.push(`Layer ${layerIndex + 1}`);
+        if (Number.isFinite(headIndex)) titleParts.push(`Head ${headIndex + 1}`);
+        this.attentionTitle.textContent = titleParts.length
+            ? `Attention scores | ${titleParts.join(' | ')}`
+            : 'Attention scores';
     }
 
     _applyAttentionCollapseState() {
@@ -6209,7 +6351,7 @@ class SelectionPanel {
         }
         if (this.attentionCollapseBtn) {
             const contextLabel = this._formatAttentionPanelContext(this._attentionContext);
-            const actionBase = collapsed ? 'Expand attention matrix' : 'Collapse attention matrix';
+            const actionBase = collapsed ? 'Maximize attention scores' : 'Minimize attention scores';
             const actionLabel = contextLabel
                 ? `${actionBase} for ${contextLabel}`
                 : actionBase;
@@ -6218,7 +6360,7 @@ class SelectionPanel {
             this.attentionCollapseBtn.title = actionLabel;
         }
         if (this.attentionCollapseLabel) {
-            this.attentionCollapseLabel.textContent = collapsed ? 'Expand' : 'Collapse';
+            this.attentionCollapseLabel.textContent = collapsed ? 'Maximize' : 'Minimize';
         }
         this._updateAttentionTitle(this._attentionContext);
         if (collapsed) {
@@ -12114,11 +12256,17 @@ export function initSelectionPanel(options = {}) {
     requestTokenChipFont();
     const panel = new SelectionPanel(options);
     if (!panel.isReady) {
-        return { handleSelection: () => {}, close: () => {} };
+        return {
+            handleSelection: () => {},
+            close: () => {},
+            updateData: () => {},
+            openTransformerView2d: () => false
+        };
     }
     return {
         handleSelection: (selection) => panel.showSelection(selection),
         close: () => panel.close(),
-        updateData: (data) => panel.updateData(data)
+        updateData: (data) => panel.updateData(data),
+        openTransformerView2d: (config) => panel.openTransformerView2d(config)
     };
 }

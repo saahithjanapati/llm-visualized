@@ -4,6 +4,8 @@ import {
     SPACE_TOKEN_DISPLAY
 } from './selectionPanelConstants.js';
 
+const ATTENTION_DETAIL_SCORE_DECIMALS = Math.max(4, ATTENTION_SCORE_DECIMALS);
+
 export function formatValues(values, perLine = 8) {
     if (!values || typeof values.length !== 'number' || values.length === 0) return '(empty)';
     let result = '';
@@ -71,11 +73,11 @@ export function formatActivationData(data) {
             const selectedMode = stageLower.includes('post') ? 'post' : 'pre';
             const selectedScore = selectedMode === 'post' ? data.postScore : data.preScore;
             if (Number.isFinite(selectedScore)) {
-                lines.push(`Attention score (${selectedMode}-softmax): ${selectedScore.toFixed(ATTENTION_SCORE_DECIMALS)}`);
+                lines.push(`Attention score (${selectedMode}-softmax): ${selectedScore.toFixed(ATTENTION_DETAIL_SCORE_DECIMALS)}`);
             }
         }
-        if (Number.isFinite(data.preScore)) lines.push(`Pre-softmax: ${data.preScore.toFixed(ATTENTION_SCORE_DECIMALS)}`);
-        if (Number.isFinite(data.postScore)) lines.push(`Post-softmax: ${data.postScore.toFixed(ATTENTION_SCORE_DECIMALS)}`);
+        if (Number.isFinite(data.preScore)) lines.push(`Pre-softmax: ${data.preScore.toFixed(ATTENTION_DETAIL_SCORE_DECIMALS)}`);
+        if (Number.isFinite(data.postScore)) lines.push(`Post-softmax: ${data.postScore.toFixed(ATTENTION_DETAIL_SCORE_DECIMALS)}`);
     }
     if (data.values && typeof data.values.length === 'number') {
         lines.push(`Values (${data.values.length}):`);

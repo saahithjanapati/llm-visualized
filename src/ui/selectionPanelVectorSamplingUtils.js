@@ -248,7 +248,9 @@ export function resolveSelectionVectorSamplingData({
     fallbackValues = null
 } = {}) {
     const activationData = getActivationDataFromSelection(selectionInfo);
-    const values = toNumericArray(activationData?.values) || toNumericArray(fallbackValues);
+    const activationValues = toNumericArray(activationData?.values);
+    const fallbackNumericValues = toNumericArray(fallbackValues);
+    const values = activationValues || fallbackNumericValues;
     if (!values) return null;
 
     const family = resolveSamplingFamily(label, activationData?.stage);
@@ -261,7 +263,9 @@ export function resolveSelectionVectorSamplingData({
             ? resolveConfiguredStride(config, 'mlp_stride')
             : resolveConfiguredStride(config, 'residual_stride');
     const domain = resolveVectorDomain(family, activationData?.segmentIndex);
-    const weightedSumSampling = family === 'attention' && isWeightedSumSampling(label, activationData?.stage);
+    const weightedSumSampling = family === 'attention'
+        && isWeightedSumSampling(label, activationData?.stage)
+        && !!activationValues;
     const effectiveStride = resolveEffectiveStride(domain.domainLength, values.length, configuredStride);
     const displayedValues = weightedSumSampling
         ? values.slice(0, 1)

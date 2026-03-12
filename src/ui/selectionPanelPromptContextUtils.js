@@ -1,4 +1,5 @@
 import { formatTokenLabel } from '../app/gpt-tower/tokenLabels.js';
+import { resolveLogitTokenSeed } from '../app/gpt-tower/logitColor.js';
 import { getIncompleteUtf8TokenDisplay } from '../utils/tokenEncodingNotes.js';
 import { normalizeTokenChipEntry, tokenChipEntriesMatch } from './tokenChipHoverSync.js';
 
@@ -42,10 +43,15 @@ export function buildSelectionPromptContext({
             }
             const incompleteDisplay = getIncompleteUtf8TokenDisplay(tokenId);
             const resolvedLabel = incompleteDisplay || formattedLabel;
+            const canonicalSeed = resolveLogitTokenSeed({
+                token_id: tokenId,
+                token: resolvedLabel
+            }, laneIndex);
             return {
                 laneIndex,
                 tokenIndex,
                 tokenId,
+                seed: canonicalSeed,
                 tokenLabel: resolvedLabel,
                 displayText: normalizePromptChipText(resolvedLabel),
                 titleText: resolvedLabel
@@ -63,6 +69,12 @@ export function buildSelectionPromptContext({
     const activeIndex = selectedEntry
         ? entries.findIndex((entry) => tokenChipEntriesMatch(entry, selectedEntry))
         : -1;
+    if (activeIndex >= 0 && entries[activeIndex]) {
+        entries[activeIndex].seed = resolveLogitTokenSeed({
+            token_id: selectedTokenId,
+            token: selectedDisplayText
+        }, activeIndex);
+    }
 
     return {
         entries,

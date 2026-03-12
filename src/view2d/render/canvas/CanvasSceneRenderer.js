@@ -105,8 +105,6 @@ const PERSISTENT_OPERATOR_MIN_SCREEN_FONT_PX = 8.5;
 const PERSISTENT_PLUS_OPERATOR_MIN_SCREEN_FONT_PX = 7.6;
 const PLUS_OPERATOR_FONT_SCALE = 0.92;
 const PLUS_OPERATOR_FONT_WEIGHT = 500;
-const MATRIX_DETAIL_MIN_SCREEN_WIDTH_PX = 72;
-const MATRIX_DETAIL_MIN_SCREEN_HEIGHT_PX = 24;
 const INTERACTION_DETAIL_RELEASE_RATIO = 0.88;
 
 function parseLinearGradient(input = '') {
@@ -469,8 +467,6 @@ function drawMatrixNode(
         : config.tokens.matrix.cornerRadius;
     const projectedWidth = contentBounds.width * safeDetailScale;
     const projectedHeight = contentBounds.height * safeDetailScale;
-    const useSummaryInterior = projectedWidth < MATRIX_DETAIL_MIN_SCREEN_WIDTH_PX
-        || projectedHeight < MATRIX_DETAIL_MIN_SCREEN_HEIGHT_PX;
 
     ctx.save();
     if (!hideSurface) {
@@ -489,44 +485,32 @@ function drawMatrixNode(
     const rowItems = Array.isArray(node.rowItems) ? node.rowItems : [];
     const columnItems = Array.isArray(node.columnItems) ? node.columnItems : [];
     if (node.presentation === VIEW2D_MATRIX_PRESENTATIONS.BANDED_ROWS) {
-        if (useSummaryInterior) {
+        const showRowLabels = (layoutData.rowHeight * safeDetailScale) >= CAPTION_MIN_SCREEN_HEIGHT_PX;
+        rowItems.forEach((rowItem, index) => {
+            const rowY = contentBounds.y + layoutData.innerPaddingY + index * (layoutData.rowHeight + layoutData.rowGap);
+            const barX = contentBounds.x + layoutData.innerPaddingX + layoutData.labelGutterWidth;
             const barBounds = {
-                x: contentBounds.x + layoutData.innerPaddingX,
-                y: contentBounds.y + Math.max(layoutData.innerPaddingY, contentBounds.height * 0.28),
-                width: Math.max(1, contentBounds.width - (layoutData.innerPaddingX * 2)),
-                height: Math.max(3, Math.min(contentBounds.height * 0.38, contentBounds.height - (layoutData.innerPaddingY * 2)))
+                x: barX,
+                y: rowY,
+                width: layoutData.barWidth,
+                height: layoutData.rowHeight
             };
             roundRectPath(ctx, barBounds.x, barBounds.y, barBounds.width, barBounds.height, 6);
-            ctx.fillStyle = accent;
+            ctx.fillStyle = resolveFill(ctx, rowItem.gradientCss, barBounds, accent);
             ctx.fill();
-        } else {
-            const showRowLabels = (layoutData.rowHeight * safeDetailScale) >= CAPTION_MIN_SCREEN_HEIGHT_PX;
-            rowItems.forEach((rowItem, index) => {
-                const rowY = contentBounds.y + layoutData.innerPaddingY + index * (layoutData.rowHeight + layoutData.rowGap);
-                const barX = contentBounds.x + layoutData.innerPaddingX + layoutData.labelGutterWidth;
-                const barBounds = {
-                    x: barX,
-                    y: rowY,
-                    width: layoutData.barWidth,
-                    height: layoutData.rowHeight
-                };
-                roundRectPath(ctx, barBounds.x, barBounds.y, barBounds.width, barBounds.height, 6);
-                ctx.fillStyle = resolveFill(ctx, rowItem.gradientCss, barBounds, accent);
-                ctx.fill();
 
-                if (showRowLabels) {
-                    ctx.fillStyle = config.tokens.palette.mutedText;
-                    ctx.font = `500 ${config.component.captionFontSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
-                    ctx.textAlign = 'left';
-                    ctx.textBaseline = 'middle';
-                    ctx.fillText(
-                        rowItem.label || '',
-                        contentBounds.x + layoutData.innerPaddingX,
-                        rowY + (layoutData.rowHeight / 2)
-                    );
-                }
-            });
-        }
+            if (showRowLabels) {
+                ctx.fillStyle = config.tokens.palette.mutedText;
+                ctx.font = `500 ${config.component.captionFontSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(
+                    rowItem.label || '',
+                    contentBounds.x + layoutData.innerPaddingX,
+                    rowY + (layoutData.rowHeight / 2)
+                );
+            }
+        });
     } else if (node.presentation === VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS) {
         if (isVectorStripRows) {
             drawVectorStripRows(
@@ -537,16 +521,6 @@ function drawMatrixNode(
                 accent,
                 cornerRadius
             );
-        } else if (useSummaryInterior) {
-            const rowBounds = {
-                x: contentBounds.x + layoutData.innerPaddingX,
-                y: contentBounds.y + layoutData.innerPaddingY,
-                width: Math.max(1, Math.min(layoutData.compactWidth, contentBounds.width - (layoutData.innerPaddingX * 2))),
-                height: Math.max(3, Math.min(contentBounds.height - (layoutData.innerPaddingY * 2), contentBounds.height * 0.46))
-            };
-            roundRectPath(ctx, rowBounds.x, rowBounds.y, rowBounds.width, rowBounds.height, 5);
-            ctx.fillStyle = accent;
-            ctx.fill();
         } else {
             rowItems.forEach((rowItem, index) => {
                 const rowY = contentBounds.y + layoutData.innerPaddingY + index * (layoutData.rowHeight + layoutData.rowGap);

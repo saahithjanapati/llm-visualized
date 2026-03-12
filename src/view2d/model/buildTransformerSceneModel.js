@@ -451,9 +451,9 @@ function createResidualStateModule({
             createCompactRowsMetadata({
                 compactWidth: SUMMARY_RESIDUAL_COLS * RESIDUAL_STRIP_UNIT,
                 rowHeight: RESIDUAL_STRIP_UNIT,
-                rowGap: 0,
+                rowGap: 2,
                 paddingX: 0,
-                paddingY: 0,
+                paddingY: 4,
                 variant: 'vector-strip',
                 hideSurface: true
             }),

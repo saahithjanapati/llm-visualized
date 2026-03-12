@@ -4,7 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     createTransformerView2dDetailView,
     describeTransformerView2dTarget,
-    resolveTransformerView2dActionContext
+    resolveTransformerView2dActionContext,
+    resolveTransformerView2dRoute,
+    syncTransformerView2dRoute
 } from '../src/ui/selectionPanelTransformerView2d.js';
 import { D_HEAD, D_MODEL } from '../src/ui/selectionPanelConstants.js';
 
@@ -280,6 +282,44 @@ describe('selectionPanelTransformerView2d', () => {
             stage: 'output',
             role: 'unembedding'
         });
+    });
+
+    it('parses direct 2D canvas routes from URL parameters', () => {
+        const route = resolveTransformerView2dRoute(
+            'https://example.test/?view=2d&component=mhsa&layer=3&head=2&stage=attention&role=head'
+        );
+
+        expect(route).toEqual({
+            semanticTarget: {
+                componentKind: 'mhsa',
+                layerIndex: 3,
+                headIndex: 2,
+                stage: 'attention',
+                role: 'head'
+            }
+        });
+    });
+
+    it('syncs direct 2D canvas routes onto the current URL', () => {
+        window.history.replaceState({}, '', '/?foo=bar#2d');
+
+        syncTransformerView2dRoute({
+            active: true,
+            semanticTarget: {
+                componentKind: 'mlp',
+                layerIndex: 7,
+                stage: 'mlp-up',
+                role: 'mlp-up'
+            }
+        });
+
+        expect(window.location.search).toBe('?foo=bar&view=2d&component=mlp&layer=7&stage=mlp-up&role=mlp-up');
+        expect(window.location.hash).toBe('');
+
+        syncTransformerView2dRoute({ active: false });
+
+        expect(window.location.search).toBe('?foo=bar');
+        expect(window.location.hash).toBe('');
     });
 
     it('describes residual and final layer norm targets with human-readable labels', () => {

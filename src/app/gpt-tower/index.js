@@ -31,6 +31,7 @@ import {
     buildMhsaInfoSelection
 } from '../../ui/mhsaInfoUtils.js';
 import { initSelectionPanel } from '../../ui/selectionPanel.js';
+import { resolveTransformerView2dRoute } from '../../ui/selectionPanelTransformerView2d.js';
 import { initPromptTokenStrip } from '../../ui/promptTokenStrip.js';
 import { loadActivationState } from './activation.js';
 import { initFollowModeControls, initTopControlsAutohide } from './topControls.js';
@@ -58,8 +59,18 @@ function resolveInitialAppView() {
     const params = new URLSearchParams(window.location.search);
     const viewParam = String(params.get('view') || '').trim().toLowerCase();
     const hashView = String(window.location.hash || '').replace(/^#/, '').trim().toLowerCase();
-    if (viewParam === 'mhsa' || hashView === 'mhsa') {
-        return 'mhsa';
+    if (viewParam === 'mhsa') {
+        return { kind: 'mhsa' };
+    }
+    const transformerView2dRoute = resolveTransformerView2dRoute(window.location);
+    if (transformerView2dRoute) {
+        return {
+            kind: 'transformer-view2d',
+            ...transformerView2dRoute
+        };
+    }
+    if (hashView === 'mhsa') {
+        return { kind: 'mhsa' };
     }
     return null;
 }
@@ -378,7 +389,10 @@ function waitForAnimationFrames(frameCount = 1) {
 }
 
 const initialAppView = resolveInitialAppView();
-const shouldOpenMhsaDirectly = initialAppView === 'mhsa';
+const shouldOpenMhsaDirectly = initialAppView?.kind === 'mhsa';
+const initialTransformerView2dRoute = initialAppView?.kind === 'transformer-view2d'
+    ? initialAppView
+    : null;
 const shouldBypassInitialPassIntro = shouldSkipInitialPassIntro();
 
 Promise.resolve().then(async () => {
@@ -391,6 +405,22 @@ Promise.resolve().then(async () => {
             selectionPanel.handleSelection(buildMhsaInfoSelection());
         } catch (err) {
             console.error('Direct MHSA startup failed:', err);
+            hideLoadingOverlay();
+            pipeline?.engine?.resume?.('initial-pass-intro');
+        }
+        return;
+    }
+    if (initialTransformerView2dRoute) {
+        try {
+            passIntroOverlay?.dispose?.();
+            hideLoadingOverlay();
+            pipeline?.engine?.resume?.('initial-pass-intro');
+            await waitForAnimationFrames(1);
+            selectionPanel.openTransformerView2d({
+                semanticTarget: initialTransformerView2dRoute.semanticTarget
+            });
+        } catch (err) {
+            console.error('Direct 2D startup failed:', err);
             hideLoadingOverlay();
             pipeline?.engine?.resume?.('initial-pass-intro');
         }
