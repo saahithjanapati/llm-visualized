@@ -53,6 +53,14 @@ import {
     setDescriptionGeluAction
 } from './selectionPanelGeluPreview.js';
 import {
+    SOFTMAX_PANEL_ACTION_OPEN,
+    createSoftmaxDetailView,
+    getSoftmaxCopyContextContent,
+    isPostSoftmaxAttentionSelection,
+    resolveSoftmaxPreviewContext,
+    setDescriptionSoftmaxAction
+} from './selectionPanelSoftmaxPreview.js';
+import {
     createTransformerView2dDetailView,
     resolveTransformerView2dActionContext,
     setDescriptionTransformerView2dAction,
@@ -2698,6 +2706,9 @@ class SelectionPanel {
         this._geluDetailView = createGeluDetailView(this.panel);
         this._geluDetailOpen = false;
         this._geluSourceSelection = null;
+        this._softmaxDetailView = createSoftmaxDetailView(this.panel);
+        this._softmaxDetailOpen = false;
+        this._softmaxSourceSelection = null;
         this._transformerView2dDetailView = createTransformerView2dDetailView(this.panel);
         this._transformerView2dDetailOpen = false;
         this._transformerView2dSourceSelection = null;
@@ -3499,6 +3510,26 @@ class SelectionPanel {
             : null;
         const promptContextSummary = this._buildSelectionPromptContextSummary(selection, vectorTokenMetadata);
 
+        if (this._softmaxDetailOpen) {
+            const softmaxContent = getSoftmaxCopyContextContent();
+            return buildSelectionChatPrompt({
+                selection,
+                normalizedLabel,
+                title,
+                subtitle,
+                subtitleSecondary,
+                subtitleTertiary,
+                panelContentsBlurb: softmaxContent.panelContentsBlurb,
+                descriptionText: softmaxContent.descriptionText,
+                equationText: softmaxContent.equationText,
+                promptContextSummary,
+                attentionScoreSummary,
+                vectorTokenMetadata,
+                activationSource: this.activationSource,
+                kvState: this._resolveCopyContextKvState(selection)
+            });
+        }
+
         const metaLines = [
             ...collectVisibleContextText(this.previewMetaSection, {
                 excludeSelectors: '#detailCopyContextBtn, #detailClose, #detailFullscreenToggle'
@@ -3755,6 +3786,9 @@ class SelectionPanel {
             if (this._geluDetailOpen) {
                 this._geluDetailView?.resizeAndRender();
             }
+            if (this._softmaxDetailOpen) {
+                this._softmaxDetailView?.resizeAndRender();
+            }
             if (this._transformerView2dDetailOpen) {
                 this._transformerView2dDetailView?.resizeAndRender();
             }
@@ -3816,6 +3850,9 @@ class SelectionPanel {
         }
         if (this._geluDetailOpen) {
             this._geluDetailView?.resizeAndRender();
+        }
+        if (this._softmaxDetailOpen) {
+            this._softmaxDetailView?.resizeAndRender();
         }
         if (this._transformerView2dDetailOpen) {
             this._transformerView2dDetailView?.resizeAndRender();
@@ -4517,6 +4554,14 @@ class SelectionPanel {
         if (entry.type === 'gelu') {
             this.showSelection(entry.selection, { fromHistory: true });
             this._openGeluDetailPreview({
+                fromHistory: true,
+                sourceSelection: entry.selection
+            });
+            return true;
+        }
+        if (entry.type === 'softmax') {
+            this.showSelection(entry.selection, { fromHistory: true });
+            this._openSoftmaxDetailPreview({
                 fromHistory: true,
                 sourceSelection: entry.selection
             });
@@ -5990,6 +6035,9 @@ class SelectionPanel {
             this._openGeluDetailPreview();
             return true;
         }
+        if (action === SOFTMAX_PANEL_ACTION_OPEN) {
+            return this._openSoftmaxDetailPreview();
+        }
         if (action === TRANSFORMER_VIEW2D_PANEL_ACTION_OPEN) {
             return this._openTransformerView2dPreview();
         }
@@ -6042,6 +6090,42 @@ class SelectionPanel {
         } else {
             this._updateHistoryNavigationControls();
         }
+    }
+
+    _openSoftmaxDetailPreview({ fromHistory = false, sourceSelection = null } = {}) {
+        const resolvedSelection = sourceSelection || this._lastSelection;
+        const sourceLabel = this._lastSelectionLabel;
+        const resolvedLabel = resolvedSelection?.label
+            ? normalizeSelectionLabel(resolvedSelection.label, resolvedSelection)
+            : sourceLabel;
+        if (!resolvedSelection || !isPostSoftmaxAttentionSelection(resolvedSelection, resolvedLabel)) return false;
+
+        const softmaxContext = resolveSoftmaxPreviewContext(resolvedSelection, this.activationSource);
+        if (!softmaxContext) return false;
+
+        this._softmaxSourceSelection = resolvedSelection;
+        this._softmaxDetailOpen = true;
+        this.panel.classList.add('is-softmax-view-open');
+        this._setTitleText('Softmax');
+        if (this.subtitle) {
+            this.subtitle.classList.remove('detail-subtitle--qkv-token-context');
+            this.subtitle.textContent = 'Turns raw scores into normalized weights';
+        }
+        this._setSubtitleSecondaryText('');
+        this._setSubtitleTertiaryText('Why the model uses it in attention.');
+        this._softmaxDetailView?.setContext(softmaxContext);
+        this._softmaxDetailView?.setVisible(true);
+        this._softmaxDetailView?.resizeAndRender();
+        this._stopLoop();
+        this._setAttentionVisibility(false);
+        this._setPanelTokenHoverEntry(null, { emit: true });
+        if (!fromHistory) {
+            const entry = this._buildHistoryEntry('softmax', resolvedSelection);
+            this._pushHistoryEntry(entry);
+        } else {
+            this._updateHistoryNavigationControls();
+        }
+        return true;
     }
 
     _openTransformerView2dPreview({ fromHistory = false, sourceSelection = null } = {}) {
@@ -6097,6 +6181,24 @@ class SelectionPanel {
         }
         const sourceSelection = this._transformerView2dSourceSelection;
         this._transformerView2dSourceSelection = null;
+        if (restoreSelection && sourceSelection) {
+            this.showSelection(sourceSelection);
+            return true;
+        }
+        if (restartLoop && this.isOpen) {
+            this._startLoop();
+            this._scheduleResize();
+        }
+        return true;
+    }
+
+    _closeSoftmaxDetailPreview({ restoreSelection = false, restartLoop = true } = {}) {
+        if (!this._softmaxDetailOpen) return false;
+        this._softmaxDetailOpen = false;
+        this.panel.classList.remove('is-softmax-view-open');
+        this._softmaxDetailView?.setVisible(false);
+        const sourceSelection = this._softmaxSourceSelection;
+        this._softmaxSourceSelection = null;
         if (restoreSelection && sourceSelection) {
             this.showSelection(sourceSelection);
             return true;
@@ -10863,6 +10965,7 @@ class SelectionPanel {
             && this.isOpen
             && this.currentPreview
             && !this._geluDetailOpen
+            && !this._softmaxDetailOpen
             && !this._previewPausedForPanelResize
         );
     }
@@ -10881,7 +10984,7 @@ class SelectionPanel {
     }
 
     _renderPreviewSnapshot({ syncEnvironment = true } = {}) {
-        if (!this.isReady || !this.isOpen || !this.currentPreview || this._geluDetailOpen) {
+        if (!this.isReady || !this.isOpen || !this.currentPreview || this._geluDetailOpen || this._softmaxDetailOpen) {
             return false;
         }
         if (syncEnvironment) {
@@ -10892,7 +10995,7 @@ class SelectionPanel {
     }
 
     _renderPreviewFrame(time) {
-        if (!this.isReady || !this.isOpen || !this.currentPreview || this._geluDetailOpen || this._previewPausedForPanelResize) {
+        if (!this.isReady || !this.isOpen || !this.currentPreview || this._geluDetailOpen || this._softmaxDetailOpen || this._previewPausedForPanelResize) {
             return false;
         }
         const now = (typeof time === 'number') ? time : performance.now();
@@ -11047,6 +11150,7 @@ class SelectionPanel {
         this._syncMhsaViewRoute(false);
         this._syncMhsaFullscreenDocumentState();
         this._stopLoop();
+        this._closeSoftmaxDetailPreview({ restoreSelection: false, restartLoop: false });
         this._closeGeluDetailPreview({ restoreSelection: false, restartLoop: false });
         this._closeTransformerView2dPreview({ restoreSelection: false, restartLoop: false });
         this._currentSelectionDescription = '';
@@ -11068,6 +11172,7 @@ class SelectionPanel {
         this.panel.classList.remove('is-open');
         this.panel.classList.remove('is-info-preview');
         this.panel.classList.remove('is-preview-hidden');
+        this.panel.classList.remove('is-softmax-view-open');
         this.panel.classList.remove('is-gelu-view-open');
         this.panel.classList.remove('is-transformer-view2d-open');
         this.panel.classList.remove('is-mhsa-fullscreen');
@@ -11631,6 +11736,7 @@ class SelectionPanel {
         const fromHistory = options?.fromHistory === true;
         const scrollPanelToTop = options?.scrollPanelToTop === true;
 
+        this._closeSoftmaxDetailPreview({ restoreSelection: false, restartLoop: false });
         this._closeGeluDetailPreview({ restoreSelection: false, restartLoop: false });
         this._closeTransformerView2dPreview({ restoreSelection: false, restartLoop: false });
         this._resetCopyContextFeedback();
@@ -11903,6 +12009,7 @@ class SelectionPanel {
             const desc = resolveDescription(label, selection.kind, descriptionSelection);
             this._currentSelectionDescription = getDescriptionPlainText(desc || '');
             setDescriptionContent(this.description, desc || '');
+            setDescriptionSoftmaxAction(this.description, isPostSoftmaxAttentionSelection(descriptionSelection, label));
             setDescriptionGeluAction(this.description, isMlpMatrixSelectionLabel(label));
             setDescriptionMhsaInfoAction(this.description, shouldShowMhsaInfoAction);
             setDescriptionTransformerView2dAction(this.description, {

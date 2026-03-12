@@ -4312,6 +4312,39 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     margin-top: 6px;
 }
 
+.detail-softmax-view {
+    display: none;
+    flex-direction: column;
+    gap: 10px;
+    padding: 2px 0 10px;
+}
+.detail-softmax-view.is-visible {
+    display: flex;
+}
+.detail-softmax-copy {
+    padding-top: 2px;
+    padding-bottom: 0;
+}
+.detail-softmax-copy p {
+    margin: 0;
+}
+.detail-softmax-copy p + p {
+    margin-top: 8px;
+}
+.detail-softmax-equation-shell {
+    margin-top: 0;
+}
+.detail-softmax-formula {
+    padding-bottom: 2px;
+}
+.detail-softmax-note {
+    margin: 10px 0 0;
+    color: #cfd3dc;
+    font-size: var(--detail-font-body);
+    line-height: 1.45;
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+}
+
 .detail-transformer-view2d {
     display: none;
     position: relative;
@@ -4608,6 +4641,17 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
 #detailPanel.is-gelu-view-open > .detail-attention,
 #detailPanel.is-gelu-view-open > .detail-meta,
 #detailPanel.is-gelu-view-open > .detail-data {
+    display: none !important;
+}
+
+#detailPanel.is-softmax-view-open > .detail-preview,
+#detailPanel.is-softmax-view-open > .vector-legend,
+#detailPanel.is-softmax-view-open > .detail-description,
+#detailPanel.is-softmax-view-open > .detail-equations,
+#detailPanel.is-softmax-view-open > .detail-attention,
+#detailPanel.is-softmax-view-open > .detail-meta,
+#detailPanel.is-softmax-view-open > .detail-data,
+#detailPanel.is-softmax-view-open > .detail-prompt-context {
     display: none !important;
 }
 

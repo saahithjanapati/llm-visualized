@@ -255,6 +255,7 @@ export function buildSelectionChatPrompt({
     subtitle = '',
     subtitleSecondary = '',
     subtitleTertiary = '',
+    panelContentsBlurb = '',
     descriptionText = '',
     equationText = '',
     metaLines = [],
@@ -311,6 +312,7 @@ export function buildSelectionChatPrompt({
             kvState
         })),
         buildMarkdownBulletSection('Selection Preview Panel', panelSummaryLines),
+        buildMarkdownSection('Selection Preview Includes', panelContentsBlurb),
         buildMarkdownSection('Panel Description', descriptionText),
         buildMarkdownSection('Equation Overlay', equationText),
         buildMarkdownSection('Prompt Context', promptContextSummary),

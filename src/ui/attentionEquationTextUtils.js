@@ -1,7 +1,15 @@
 function formatHeadScopedSymbol(symbol, headSubscript = null) {
     const safeSymbol = typeof symbol === 'string' ? symbol : '';
     if (!safeSymbol) return '';
-    return `${safeSymbol}_i`;
+    const safeSubscript = typeof headSubscript === 'string' && headSubscript.trim().length
+        ? headSubscript.trim()
+        : 'i';
+    const colorizedTokenMatch = safeSymbol.match(/^\\textcolor\{([^}]+)\}\{(.+)\}$/);
+    if (colorizedTokenMatch) {
+        const [, color, body] = colorizedTokenMatch;
+        return `\\textcolor{${color}}{${body}_{${safeSubscript}}}`;
+    }
+    return `${safeSymbol}_${safeSubscript}`;
 }
 
 function resolveAttentionEquationSymbol(symbol, fallback) {

@@ -64,6 +64,7 @@ import {
     LN2_PHASE,
     isAllowedLanePhaseTransition
 } from './gpt2LanePhases.js';
+import { getFirstLayerInputVocabRiseSpeedMult } from './gpt2InputVocabTravelUtils.js';
 import {
     buildDebugVectorSum,
     getLaneProgressSignature
@@ -128,7 +129,6 @@ const POS_ADD_STALL_TIMEOUT_MS = 12000;
 const POS_PASS_START_PAUSE_MS = 140;
 const FIRST_LAYER_LN1_START_PAUSE_MS = 180;
 const FIRST_LAYER_LN1_RISE_SPEED_MULT = 0.48;
-const FIRST_LAYER_INPUT_VOCAB_RISE_SPEED_MULT = 6.0;
 const INPUT_VOCAB_TRAVEL_TINT_MAX = 0.18;
 const INPUT_VOCAB_TRAVEL_MIN_OPACITY = 0.24;
 const INPUT_VOCAB_VISUAL_EPSILON = 0.004;
@@ -1210,13 +1210,12 @@ export default class Gpt2Layer extends BaseLayer {
                         // Clamp position so early-arriving lanes don’t drift.
                         originalVec.group.position.y = lane.branchStartY;
                     } else {
-                        const inputVocabRiseMult = (
-                            !skipActive
-                            && this.index === 0
-                            && Number.isFinite(lane.vocabEmbeddingTravelStartY)
-                        )
-                            ? FIRST_LAYER_INPUT_VOCAB_RISE_SPEED_MULT
-                            : 1;
+                        const inputVocabRiseMult = getFirstLayerInputVocabRiseSpeedMult({
+                            layerIndex: this.index,
+                            lane,
+                            currentY: originalVec.group.position.y,
+                            skipActive
+                        });
                         const baseRiseSpeed = ANIM_RISE_SPEED_ORIGINAL * speedMult * inputVocabRiseMult;
                         const syncedRiseSpeed = this._getSynchronizedRiseSpeed(
                             originalVec.group.position.y,
