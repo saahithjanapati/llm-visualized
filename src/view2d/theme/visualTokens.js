@@ -55,10 +55,20 @@ function buildAttentionProjectionStyle(baseHex = 0xFFFFFF, {
     });
 }
 
+function buildStableMhsaHeadFill() {
+    const q = hexToCss(MHA_FINAL_Q_COLOR, 0.98);
+    const qBridge = hexToCss(mixHexValues(MHA_FINAL_Q_COLOR, MHA_FINAL_K_COLOR, 0.38), 0.98);
+    const k = hexToCss(MHA_FINAL_K_COLOR, 0.98);
+    const kBridge = hexToCss(mixHexValues(MHA_FINAL_K_COLOR, MHA_FINAL_V_COLOR, 0.34), 0.98);
+    const v = hexToCss(MHA_FINAL_V_COLOR, 0.98);
+    return `linear-gradient(90deg, ${q} 0%, ${q} 28%, ${qBridge} 38%, ${k} 50%, ${kBridge} 62%, ${v} 72%, ${v} 100%)`;
+}
+
 export const VIEW2D_STYLE_KEYS = Object.freeze({
     SCENE: 'scene',
     LABEL: 'label',
     LABEL_DARK: 'label.dark',
+    RESIDUAL_LABEL: 'residual.label',
     CAPTION: 'caption',
     OPERATOR: 'operator',
     EMBEDDING_TOKEN: 'embedding.token',
@@ -76,6 +86,8 @@ export const VIEW2D_STYLE_KEYS = Object.freeze({
     MHSA_MASK: 'mhsa.mask',
     MHSA_POST: 'mhsa.post',
     MHSA_HEAD_OUTPUT: 'mhsa.head-output',
+    MHSA_HEAD_DETAIL_FRAME: 'mhsa.head-detail-frame',
+    CONCATENATE: 'concatenate',
     MLP: 'mlp',
     LOGITS: 'logits',
     RESIDUAL: 'residual',
@@ -133,6 +145,9 @@ const VIEW2D_VISUAL_TOKENS = Object.freeze({
         [VIEW2D_STYLE_KEYS.LABEL_DARK]: Object.freeze({
             color: 'rgba(16, 20, 28, 0.940)'
         }),
+        [VIEW2D_STYLE_KEYS.RESIDUAL_LABEL]: Object.freeze({
+            color: 'rgba(0, 0, 0, 0.960)'
+        }),
         [VIEW2D_STYLE_KEYS.CAPTION]: Object.freeze({
             color: 'rgba(206, 213, 224, 0.820)'
         }),
@@ -189,8 +204,9 @@ const VIEW2D_VISUAL_TOKENS = Object.freeze({
         }),
         [VIEW2D_STYLE_KEYS.MHSA_HEAD]: Object.freeze({
             accent: hexToCss(MHA_FINAL_Q_COLOR, 0.98),
-            fill: `linear-gradient(96deg, ${hexToCss(mixHexValues(MHA_FINAL_Q_COLOR, 0x000000, 0.10), 0.98)} 0%, ${hexToCss(MHA_FINAL_Q_COLOR, 1)} 24%, ${hexToCss(MHA_FINAL_K_COLOR, 0.98)} 52%, ${hexToCss(mixHexValues(MHA_FINAL_V_COLOR, 0x000000, 0.02), 0.98)} 79%, ${hexToCss(mixHexValues(MHA_FINAL_V_COLOR, 0x000000, 0.12), 0.96)} 100%)`,
+            fill: buildStableMhsaHeadFill(),
             stroke: 'rgba(148, 164, 186, 0.82)',
+            disableCardSurfaceEffects: true,
             cardGlowColor: hexToCss(mixHexValues(MHA_FINAL_Q_COLOR, 0x000000, 0.10), 0.30),
             cardGlowOpacity: 0.22,
             cardGlowBlur: 18,
@@ -211,6 +227,18 @@ const VIEW2D_VISUAL_TOKENS = Object.freeze({
         [VIEW2D_STYLE_KEYS.MHSA_HEAD_OUTPUT]: buildAttentionProjectionStyle(MHA_FINAL_V_COLOR, {
             hotspotMix: 0.28,
             shadowMix: 0.08
+        }),
+        [VIEW2D_STYLE_KEYS.MHSA_HEAD_DETAIL_FRAME]: Object.freeze({
+            accent: 'rgba(255, 255, 255, 0.98)',
+            fill: 'rgba(0, 0, 0, 0.985)',
+            stroke: 'rgba(255, 255, 255, 0.10)',
+            disableCardSurfaceEffects: true
+        }),
+        [VIEW2D_STYLE_KEYS.CONCATENATE]: Object.freeze({
+            accent: 'rgba(255, 255, 255, 0.98)',
+            fill: 'linear-gradient(145deg, rgba(6, 8, 12, 1) 0%, rgba(6, 8, 12, 1) 100%)',
+            stroke: 'rgba(255, 255, 255, 0.92)',
+            disableCardSurfaceEffects: true
         }),
         [VIEW2D_STYLE_KEYS.MLP]: Object.freeze({
             accent: hexToCss(FINAL_MLP_COLOR, 0.98),

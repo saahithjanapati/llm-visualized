@@ -171,10 +171,11 @@ const MLP_MATRIX_FLASH_MIN_DURATION_MS = Number.isFinite(GPT2_LAYER_VISUAL_TUNIN
     : 340;
 const POST_MLP_RETURN_TRAIL_OPACITY = 0.1;
 const MLP_TRANSITION_PROFILE_DEFAULT = Object.freeze({
-    expandRiseUnits: 30,
+    expandRiseUnits: 38,
     expandRiseMs: 500,
     geluDurationMs: 500,
     geluRiseExtra: 28,
+    postGeluHoldMs: 220,
     geluCurveHeight: 36,
     geluWaveCycles: 1.15,
     geluWaveTravelCycles: 0.85,
@@ -190,10 +191,11 @@ const MLP_TRANSITION_PROFILE_DEFAULT = Object.freeze({
 const MLP_TRANSITION_PROFILE_TOUCH = Object.freeze({
     // Keep touch/mobile behavior aligned with desktop so GELU curve bending
     // remains visible instead of falling back to the lite vertical-lift path.
-    expandRiseUnits: 30,
+    expandRiseUnits: 38,
     expandRiseMs: 500,
     geluDurationMs: 500,
     geluRiseExtra: 28,
+    postGeluHoldMs: 220,
     geluCurveHeight: 36,
     geluWaveCycles: 1.15,
     geluWaveTravelCycles: 0.85,
@@ -207,10 +209,11 @@ const MLP_TRANSITION_PROFILE_TOUCH = Object.freeze({
     passDurationMultiplier: 1.18
 });
 const MLP_TRANSITION_PROFILE_SKIP = Object.freeze({
-    expandRiseUnits: 16,
+    expandRiseUnits: 20,
     expandRiseMs: 180,
     geluDurationMs: 150,
     geluRiseExtra: 12,
+    postGeluHoldMs: 90,
     geluCurveHeight: 16,
     geluActivationSwitchT: 0.22,
     geluLiteMode: true,
@@ -220,10 +223,11 @@ const MLP_TRANSITION_PROFILE_SKIP = Object.freeze({
     passDurationMultiplier: 1
 });
 const MLP_TRANSITION_PROFILE_SKIP_TOUCH = Object.freeze({
-    expandRiseUnits: 12,
+    expandRiseUnits: 16,
     expandRiseMs: 140,
     geluDurationMs: 110,
     geluRiseExtra: 8,
+    postGeluHoldMs: 70,
     geluCurveHeight: 10,
     geluActivationSwitchT: 0.2,
     geluLiteMode: true,
@@ -2438,16 +2442,12 @@ export default class Gpt2Layer extends BaseLayer {
         vec.group.visible = false;
 
         // ---- Trail for expanded 4x vector group ----
-        // During skip, carry forward the LN2 trail so we preserve a single
-        // continuous LN2 -> MLP -> residual path with no shortcut segment.
+        // Carry forward the incoming LN2 trail when available so the MLP
+        // handoff stays visually continuous and does not stack a second,
+        // brighter trail segment at the same point.
         let expTrail = null;
         let expTrailWorld = false;
-        if (
-            this._skipToEndActive
-            && vec
-            && vec.userData
-            && vec.userData.trail
-        ) {
+        if (vec && vec.userData && vec.userData.trail) {
             expTrail = vec.userData.trail;
             expTrailWorld = !!vec.userData.trailWorld;
             delete vec.userData.trail;
@@ -2493,7 +2493,19 @@ export default class Gpt2Layer extends BaseLayer {
                 }
             })
             .onComplete(() => {
-                const startDown = () => this._animateMlpDownProjection(lane);
+                const startDown = () => {
+                    const postGeluHoldMs = Number.isFinite(mlpProfile.postGeluHoldMs)
+                        ? Math.max(0, mlpProfile.postGeluHoldMs)
+                        : 0;
+                    if (typeof TWEEN === 'undefined' || postGeluHoldMs <= 0) {
+                        this._animateMlpDownProjection(lane);
+                        return;
+                    }
+                    new TWEEN.Tween({ t: 0 })
+                        .to({ t: 1 }, postGeluHoldMs)
+                        .onComplete(() => this._animateMlpDownProjection(lane))
+                        .start();
+                };
                 const activationData = this._getMlpActivationData(lane);
                 const applyActivation = () => {
                     if (activationData && lane.expandedVecSegments) {

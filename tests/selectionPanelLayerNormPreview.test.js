@@ -1,27 +1,7 @@
+import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { buildLayerNormPreview } from '../src/ui/selectionPanel.js';
-
-function makeLayer(index, {
-    layoutCount = 1,
-    activeLaneLayoutIndices = [0],
-    baseVectorLength = 768
-} = {}) {
-    return {
-        index,
-        _laneLayoutCount: layoutCount,
-        _activeLaneLayoutIndices: activeLaneLayoutIndices.slice(),
-        _baseVectorLength: baseVectorLength,
-        _getLaneLayoutCount() {
-            return this._laneLayoutCount;
-        },
-        _getActiveLaneLayoutIndices() {
-            return this._activeLaneLayoutIndices.slice();
-        },
-        _getBaseVectorLength() {
-            return this._baseVectorLength;
-        }
-    };
-}
+import { resolveLayerNormParameterSummary } from '../src/ui/selectionPanelLayerNormPreviewUtils.js';
 
 function collectLabelledGroups(root, label) {
     const groups = [];
@@ -34,79 +14,89 @@ function collectLabelledGroups(root, label) {
     return groups;
 }
 
-function collectVectorMeshes(root) {
-    const meshes = [];
-    root.traverse((child) => {
-        if (child?.isInstancedMesh && child.userData?.isVector) {
-            meshes.push(child);
-        }
-    });
-    return meshes;
-}
-
 describe('selectionPanel layer norm preview', () => {
-    it('builds an opaque composite preview with blue active scale and shift vectors', () => {
-        const layer = makeLayer(4, {
-            layoutCount: 4,
-            activeLaneLayoutIndices: [0, 3]
-        });
-        const preview = buildLayerNormPreview(
-            'LayerNorm 2',
-            {
-                label: 'LayerNorm 2',
-                info: {
-                    layerIndex: 4,
-                    layerNormKind: 'ln2'
+    it('derives layer norm parameter totals from the live base vector length when available', () => {
+        const engine = {
+            _layers: [
+                {
+                    index: 0,
+                    _getBaseVectorLength: () => 1024
                 }
-            },
-            {
-                _layers: [null, null, null, null, layer]
+            ]
+        };
+
+        const summary = resolveLayerNormParameterSummary({
+            label: 'LayerNorm 1',
+            info: {
+                layerIndex: 0,
+                layerNormKind: 'ln1'
             }
-        );
+        }, engine);
+
+        expect(summary.perParameterCount).toBe(1024);
+        expect(summary.totalParameterCount).toBe(2048);
+        expect(summary.layerNormKind).toBe('ln1');
+        expect(summary.layerIndex).toBe(0);
+    });
+
+    it('clones the selected layer norm solid without injecting synthetic param banks', () => {
+        const sourceGroup = new THREE.Group();
+        sourceGroup.userData.label = 'LayerNorm 2';
+
+        const sourceGeometry = new THREE.TorusGeometry(32, 8, 12, 32);
+        const sourceMaterial = new THREE.MeshPhysicalMaterial({
+            color: 0x68e3ff,
+            transparent: true,
+            opacity: 0.42
+        });
+        const sourceMesh = new THREE.InstancedMesh(sourceGeometry, sourceMaterial, 2);
+        sourceMesh.userData.sourceMeshId = 'layer-norm-solid';
+
+        const firstMatrix = new THREE.Matrix4().makeTranslation(0, 0, -18);
+        const secondMatrix = new THREE.Matrix4().makeTranslation(0, 0, 18);
+        sourceMesh.setMatrixAt(0, firstMatrix);
+        sourceMesh.setMatrixAt(1, secondMatrix);
+        sourceMesh.instanceMatrix.needsUpdate = true;
+        sourceGroup.add(sourceMesh);
+
+        const preview = buildLayerNormPreview('LayerNorm 2', {
+            label: 'LayerNorm 2',
+            object: sourceGroup,
+            hit: { object: sourceMesh }
+        });
 
         expect(preview?.object).toBeTruthy();
+        expect(preview.object).not.toBe(sourceGroup);
+        expect(preview.object.userData?.label).toBe('LayerNorm 2');
 
-        const previewObject = preview.object;
-        const scaleGroups = collectLabelledGroups(previewObject, 'LayerNorm 2 Scale');
-        const shiftGroups = collectLabelledGroups(previewObject, 'LayerNorm 2 Shift');
-        const vectorMeshes = collectVectorMeshes(previewObject);
+        const scaleGroups = collectLabelledGroups(preview.object, 'LayerNorm 2 Scale');
+        const shiftGroups = collectLabelledGroups(preview.object, 'LayerNorm 2 Shift');
+        expect(scaleGroups).toHaveLength(0);
+        expect(shiftGroups).toHaveLength(0);
 
-        expect(scaleGroups).toHaveLength(2);
-        expect(shiftGroups).toHaveLength(2);
-        expect(new Set(scaleGroups.map((group) => group.position.z)).size).toBe(2);
-        expect(new Set(shiftGroups.map((group) => group.position.z)).size).toBe(2);
-        expect(vectorMeshes).toHaveLength(4);
-
-        const materials = [];
-        previewObject.traverse((child) => {
-            if (!child?.material) return;
-            const mats = Array.isArray(child.material) ? child.material : [child.material];
-            mats.forEach((mat) => {
-                if (mat) materials.push(mat);
-            });
-        });
-        expect(materials.length).toBeGreaterThan(0);
-        materials.forEach((material) => {
-            expect(material.transparent).toBe(false);
-            expect(material.opacity).toBe(1);
-        });
-
-        const firstVectorMesh = vectorMeshes[0];
-        expect(firstVectorMesh.instanceColor?.array).toBeTruthy();
-        const colors = firstVectorMesh.instanceColor.array;
-        let hasBlueActiveColor = false;
-        for (let i = 0; i < colors.length; i += 3) {
-            const r = colors[i];
-            const g = colors[i + 1];
-            const b = colors[i + 2];
-            if (Math.abs(r - g) < 1e-4 && Math.abs(g - b) < 1e-4) continue;
-            if (b > r) {
-                hasBlueActiveColor = true;
-                break;
+        let clonedMesh = null;
+        preview.object.traverse((child) => {
+            if (child?.isInstancedMesh && child.userData?.sourceMeshId === 'layer-norm-solid') {
+                clonedMesh = child;
             }
-        }
-        expect(hasBlueActiveColor).toBe(true);
+        });
+
+        expect(clonedMesh).toBeTruthy();
+        expect(clonedMesh).not.toBe(sourceMesh);
+        expect(clonedMesh.geometry).not.toBe(sourceGeometry);
+        expect(clonedMesh.material).not.toBe(sourceMaterial);
+        expect(clonedMesh.material.transparent).toBe(sourceMaterial.transparent);
+        expect(clonedMesh.material.opacity).toBe(sourceMaterial.opacity);
+        expect(clonedMesh.count).toBe(2);
+
+        const clonedMatrix = new THREE.Matrix4();
+        clonedMesh.getMatrixAt(0, clonedMatrix);
+        expect(Array.from(clonedMatrix.elements)).toEqual(Array.from(firstMatrix.elements));
+        clonedMesh.getMatrixAt(1, clonedMatrix);
+        expect(Array.from(clonedMatrix.elements)).toEqual(Array.from(secondMatrix.elements));
 
         preview.dispose();
+        sourceGeometry.dispose();
+        sourceMaterial.dispose();
     });
 });

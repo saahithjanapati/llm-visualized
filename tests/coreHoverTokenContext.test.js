@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
     findHoverTokenString,
     isVectorLikeHoverSelection,
+    resolveHoverLabelSubtitle,
     resolveHoverTokenContext
 } from '../src/engine/coreHoverTokenContext.js';
 
@@ -57,7 +58,7 @@ describe('coreHoverTokenContext', () => {
         });
     });
 
-    it('shows plain position text instead of a token chip for weighted sums', () => {
+    it('keeps weighted-sum hover labels free of top-row detail text', () => {
         const info = {
             isWeightedSum: true,
             tokenIndex: 4,
@@ -67,15 +68,74 @@ describe('coreHoverTokenContext', () => {
         expect(resolveHoverTokenContext({
             label: 'Attention Weighted Sum',
             info
-        })).toEqual({
-            suppressHoverLabel: false,
-            showPrimaryLabel: true,
-            detailKind: 'position-text',
-            detailText: 'Position 5',
+        })).toBeNull();
+    });
+
+    it('shows qkv hover subtitles as position before head and layer', () => {
+        const info = {
+            headIndex: 1,
+            layerIndex: 3,
+            tokenIndex: 6,
+            stage: 'qkv.k'
+        };
+
+        expect(resolveHoverLabelSubtitle({
+            label: 'Key Vector',
+            info
+        })).toBe('Position 7 • Head 2 • Layer 4');
+    });
+
+    it('shows weighted-sum hover subtitles as position before head and layer', () => {
+        const info = {
+            isWeightedSum: true,
+            headIndex: 1,
+            layerIndex: 3,
+            tokenIndex: 6,
+            stage: 'attention.weighted_sum'
+        };
+
+        expect(resolveHoverLabelSubtitle({
+            label: 'Attention Weighted Sum',
+            info
+        })).toBe('Position 7 • Head 2 • Layer 4');
+    });
+
+    it('appends token position to incoming residual hover subtitles', () => {
+        const info = {
+            layerIndex: 2,
             tokenIndex: 4,
-            tokenId: null,
-            tokenLabel: ''
-        });
+            stage: 'layer.incoming'
+        };
+
+        expect(resolveHoverLabelSubtitle({
+            label: 'Residual Stream Vector',
+            info
+        })).toBe('Position 5 • Layer 3');
+    });
+
+    it('shows position before layer for post-layernorm residual hover subtitles', () => {
+        const info = {
+            layerIndex: 1,
+            tokenIndex: 3,
+            stage: 'ln1.shift'
+        };
+
+        expect(resolveHoverLabelSubtitle({
+            label: 'Post LayerNorm Residual Vector',
+            info
+        })).toBe('Position 4 • Layer 2');
+    });
+
+    it('shows position for embedding-sum residual hover subtitles even without a layer', () => {
+        const info = {
+            tokenIndex: 1,
+            stage: 'embedding.sum'
+        };
+
+        expect(resolveHoverLabelSubtitle({
+            label: 'Residual Stream Vector',
+            info
+        })).toBe('Position 2');
     });
 
     it('shows token chips for mlp down-projection vector hovers', () => {

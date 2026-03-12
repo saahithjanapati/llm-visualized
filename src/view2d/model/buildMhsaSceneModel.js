@@ -20,6 +20,7 @@ import {
     resolveView2dVisualTokens,
     VIEW2D_STYLE_KEYS
 } from '../theme/visualTokens.js';
+import { createView2dVectorStripMetadata } from '../shared/vectorStrip.js';
 
 function normalizeIndex(value) {
     return Number.isFinite(value) ? Math.floor(value) : null;
@@ -201,7 +202,8 @@ function buildProjectionStageNode({
         },
         metadata: {
             kind: projectionKind,
-            stageIndex
+            stageIndex,
+            ...createView2dVectorStripMetadata()
         }
     });
 
@@ -276,7 +278,8 @@ function buildAttentionStageNode({
             styleKey: VIEW2D_STYLE_KEYS.MHSA_Q
         },
         metadata: {
-            stageIndex: queryStageIndex
+            stageIndex: queryStageIndex,
+            ...createView2dVectorStripMetadata()
         }
     });
 
@@ -425,7 +428,8 @@ function buildAttentionStageNode({
                         styleKey: VIEW2D_STYLE_KEYS.MHSA_V
                     },
                     metadata: {
-                        stageIndex: valueStageIndex
+                        stageIndex: valueStageIndex,
+                        ...createView2dVectorStripMetadata()
                     }
                 }),
                 createOperatorNode({
@@ -450,7 +454,8 @@ function buildAttentionStageNode({
                     ),
                     visual: {
                         styleKey: VIEW2D_STYLE_KEYS.MHSA_HEAD_OUTPUT
-                    }
+                    },
+                    metadata: createView2dVectorStripMetadata()
                 })
             ]
         })

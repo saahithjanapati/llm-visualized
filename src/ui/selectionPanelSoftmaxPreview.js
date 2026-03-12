@@ -95,7 +95,6 @@ export function createSoftmaxDetailView(panelEl) {
             <p>${SOFTMAX_OVERVIEW_LINES[1]}</p>
         </div>
         <div class="detail-equations detail-softmax-equation-shell is-visible" aria-hidden="false">
-            <div class="detail-equations-title">Equation</div>
             <div class="detail-equations-body detail-softmax-formula" data-softmax-formula></div>
         </div>
         <div class="detail-data detail-softmax-note-card">

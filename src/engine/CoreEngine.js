@@ -49,8 +49,9 @@ const ADAPTIVE_RENDER_DPR_PROMOTE_FPS = 57;
 const ADAPTIVE_RENDER_DPR_DEMOTE_FPS = 53;
 const ADAPTIVE_RENDER_DPR_ADJUST_COOLDOWN_MS = 1400;
 const HOVER_TOKEN_CHIP_FONT_SIZE = '11px';
-const KEYBOARD_ZOOM_MIN_UNITS_PER_SECOND = 1200;
-const KEYBOARD_ZOOM_MAX_UNITS_PER_SECOND = 5200;
+const KEYBOARD_ZOOM_SPEED = 0.68;
+const KEYBOARD_ZOOM_MIN_UNITS_PER_SECOND = 1350;
+const KEYBOARD_ZOOM_MAX_UNITS_PER_SECOND = 5800;
 const KEYBOARD_ZOOM_MIN_DISTANCE = 0.1;
 
 /**
@@ -380,7 +381,7 @@ export class CoreEngine {
         this._keyState = new Set();
         this._keyboardPanSpeed = 420;
         this._keyboardRotateSpeed = 1.1;
-        this._keyboardZoomSpeed = 0.6;
+        this._keyboardZoomSpeed = KEYBOARD_ZOOM_SPEED;
         this._keyboardZoomMinUnitsPerSecond = (typeof opts.keyboardZoomMinUnitsPerSecond === 'number'
             && Number.isFinite(opts.keyboardZoomMinUnitsPerSecond)
             && opts.keyboardZoomMinUnitsPerSecond > 0)

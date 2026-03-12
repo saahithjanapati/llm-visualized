@@ -33,6 +33,8 @@ import {
     resolveView2dVisualTokens,
     VIEW2D_STYLE_KEYS
 } from '../theme/visualTokens.js';
+import { createView2dVectorStripMetadata } from '../shared/vectorStrip.js';
+import { buildHeadDetailSceneModel } from './buildHeadDetailSceneModel.js';
 
 const DEFAULT_VISIBLE_TOKEN_COUNT = 5;
 const SUMMARY_MODEL_COLS = 18;
@@ -41,6 +43,7 @@ const RESIDUAL_STRIP_UNIT = 6;
 const SUMMARY_HEAD_COLS = 12;
 const SUMMARY_MLP_COLS = 24;
 const SUMMARY_LOGIT_COLS = 12;
+const CARD_LABEL_HORIZONTAL_INSET = 10;
 
 const HEAD_RANGE_OPTIONS = buildHueRangeOptions(MHA_FINAL_Q_COLOR, {
     valueMin: -2,
@@ -72,6 +75,41 @@ const LOGIT_RANGE_OPTIONS = buildHueRangeOptions(TOP_LOGIT_BAR_COLOR, {
 
 function normalizeIndex(value) {
     return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : null;
+}
+
+function normalizeHeadDetailTarget(target = null) {
+    if (!target || typeof target !== 'object') return null;
+    const layerIndex = normalizeIndex(target.layerIndex);
+    const headIndex = normalizeIndex(target.headIndex);
+    if (!Number.isFinite(layerIndex) || !Number.isFinite(headIndex)) {
+        return null;
+    }
+    return {
+        layerIndex,
+        headIndex
+    };
+}
+
+function normalizeConcatDetailTarget(target = null) {
+    if (!target || typeof target !== 'object') return null;
+    const layerIndex = normalizeIndex(target.layerIndex);
+    if (!Number.isFinite(layerIndex)) {
+        return null;
+    }
+    return {
+        layerIndex
+    };
+}
+
+function normalizeOutputProjectionDetailTarget(target = null) {
+    if (!target || typeof target !== 'object') return null;
+    const layerIndex = normalizeIndex(target.layerIndex);
+    if (!Number.isFinite(layerIndex)) {
+        return null;
+    }
+    return {
+        layerIndex
+    };
 }
 
 function cleanNumberArray(values = [], fallbackLength = 0) {
@@ -153,14 +191,13 @@ function buildSemantic(baseSemantic, extra = {}) {
 }
 
 function resolveVisibleTokenIndices(activationSource = null, tokenIndices = null, maxTokens = DEFAULT_VISIBLE_TOKEN_COUNT) {
-    const safeMaxTokens = Math.max(1, Math.floor(maxTokens || DEFAULT_VISIBLE_TOKEN_COUNT));
     if (Array.isArray(tokenIndices) && tokenIndices.length) {
         return tokenIndices
             .map((value) => Number(value))
             .filter(Number.isFinite)
-            .map((value) => Math.max(0, Math.floor(value)))
-            .slice(0, safeMaxTokens);
+            .map((value) => Math.max(0, Math.floor(value)));
     }
+    const safeMaxTokens = Math.max(1, Math.floor(maxTokens || DEFAULT_VISIBLE_TOKEN_COUNT));
     const tokenCount = typeof activationSource?.getTokenCount === 'function'
         ? activationSource.getTokenCount()
         : (Array.isArray(activationSource?.meta?.prompt_tokens) ? activationSource.meta.prompt_tokens.length : 0);
@@ -231,6 +268,73 @@ function buildVectorRowItems(tokenRefs = [], {
     });
 }
 
+function buildHeadDetailPreview({
+    activationSource = null,
+    tokenRefs = [],
+    headDetailTarget = null
+} = {}) {
+    const resolvedTarget = normalizeHeadDetailTarget(headDetailTarget);
+    if (!resolvedTarget || typeof activationSource?.getLayerLn1 !== 'function') {
+        return null;
+    }
+    const baseSemantic = {
+        componentKind: 'mhsa',
+        layerIndex: resolvedTarget.layerIndex,
+        headIndex: resolvedTarget.headIndex,
+        stage: 'head-detail',
+        role: 'x-ln'
+    };
+    const rowItems = buildVectorRowItems(tokenRefs, {
+        baseSemantic,
+        role: 'x-ln-row',
+        measureCols: SUMMARY_RESIDUAL_COLS,
+        getVector: (tokenRef) => activationSource.getLayerLn1(
+            resolvedTarget.layerIndex,
+            'shift',
+            tokenRef.tokenIndex,
+            D_MODEL
+        )
+    });
+    if (!rowItems.length) {
+        return null;
+    }
+    return {
+        xLnCopies: 3,
+        rowItems: rowItems.map((rowItem) => ({
+            id: rowItem.id,
+            index: rowItem.index,
+            label: rowItem.label,
+            tokenIndex: rowItem.semantic?.tokenIndex,
+            gradientCss: rowItem.gradientCss,
+            rawValues: Array.isArray(rowItem.rawValues) ? [...rowItem.rawValues] : null
+        }))
+    };
+}
+
+function buildConcatenateDetailPreview({
+    concatDetailTarget = null
+} = {}) {
+    const resolvedTarget = normalizeConcatDetailTarget(concatDetailTarget);
+    if (!resolvedTarget) {
+        return null;
+    }
+    return {
+        arrowCount: NUM_HEAD_SETS_LAYER
+    };
+}
+
+function buildOutputProjectionDetailPreview({
+    outputProjectionDetailTarget = null
+} = {}) {
+    const resolvedTarget = normalizeOutputProjectionDetailTarget(outputProjectionDetailTarget);
+    if (!resolvedTarget) {
+        return null;
+    }
+    return {
+        arrowCount: 1
+    };
+}
+
 function buildLogitRowItems(logitEntries = [], baseSemantic = {}) {
     return logitEntries.map((entry, index) => {
         const semantic = buildSemantic(baseSemantic, {
@@ -260,13 +364,64 @@ function createMeasureMetadata(cols, rows = null) {
     return Object.keys(measure).length ? { measure } : null;
 }
 
-function createModuleTitleNode(baseSemantic = {}, text = '') {
+function createTextFitMetadata(maxWidth = null) {
+    const textFit = {};
+    if (Number.isFinite(maxWidth) && maxWidth > 0) {
+        textFit.maxWidth = Math.floor(maxWidth);
+    }
+    return Object.keys(textFit).length ? { textFit } : null;
+}
+
+function createCaptionMetadata({
+    position = 'bottom',
+    styleKey = null,
+    dimensionsTex = '',
+    dimensionsText = '',
+    minScreenHeightPx = null
+} = {}) {
+    const caption = {};
+    const safePosition = String(position || '').trim().toLowerCase();
+    if (safePosition === 'top' || safePosition === 'inside-top' || safePosition === 'float-top') {
+        caption.position = safePosition;
+    }
+    if (typeof styleKey === 'string' && styleKey.length) {
+        caption.styleKey = styleKey;
+    }
+    if (typeof dimensionsTex === 'string' && dimensionsTex.trim().length) {
+        caption.dimensionsTex = dimensionsTex.trim();
+    }
+    if (typeof dimensionsText === 'string' && dimensionsText.trim().length) {
+        caption.dimensionsText = dimensionsText.trim();
+    }
+    if (Number.isFinite(minScreenHeightPx) && minScreenHeightPx > 0) {
+        caption.minScreenHeightPx = Math.max(1, Math.floor(minScreenHeightPx));
+    }
+    return Object.keys(caption).length ? { caption } : null;
+}
+
+function createFittedLabelNode({
+    role = 'module-title',
+    semantic = {},
+    text = '',
+    styleKey = VIEW2D_STYLE_KEYS.LABEL,
+    maxWidth = null
+} = {}) {
     return createTextNode({
+        role,
+        semantic,
+        text,
+        presentation: VIEW2D_TEXT_PRESENTATIONS.LABEL,
+        visual: { styleKey },
+        metadata: createTextFitMetadata(maxWidth)
+    });
+}
+
+function createModuleTitleNode(baseSemantic = {}, text = '') {
+    return createFittedLabelNode({
         role: 'module-title',
         semantic: buildSemantic(baseSemantic, { role: 'module-title' }),
         text,
-        presentation: VIEW2D_TEXT_PRESENTATIONS.LABEL,
-        visual: { styleKey: VIEW2D_STYLE_KEYS.LABEL }
+        styleKey: VIEW2D_STYLE_KEYS.LABEL
     });
 }
 
@@ -313,30 +468,6 @@ function createCardMetadata(width = null, height = null, {
     return Object.keys(metadata).length ? metadata : null;
 }
 
-function createCompactRowsMetadata({
-    compactWidth = null,
-    rowHeight = null,
-    rowGap = null,
-    paddingX = null,
-    paddingY = null,
-    variant = '',
-    hideSurface = false,
-    collapsedBinCount = null
-} = {}) {
-    const compactRows = {};
-    if (Number.isFinite(compactWidth) && compactWidth > 0) compactRows.compactWidth = Math.floor(compactWidth);
-    if (Number.isFinite(rowHeight) && rowHeight > 0) compactRows.rowHeight = Math.floor(rowHeight);
-    if (Number.isFinite(rowGap) && rowGap >= 0) compactRows.rowGap = Math.floor(rowGap);
-    if (Number.isFinite(paddingX) && paddingX >= 0) compactRows.paddingX = Math.floor(paddingX);
-    if (Number.isFinite(paddingY) && paddingY >= 0) compactRows.paddingY = Math.floor(paddingY);
-    if (typeof variant === 'string' && variant.trim().length) compactRows.variant = variant.trim();
-    if (hideSurface) compactRows.hideSurface = true;
-    if (Number.isFinite(collapsedBinCount) && collapsedBinCount > 0) {
-        compactRows.collapsedBinCount = Math.floor(collapsedBinCount);
-    }
-    return Object.keys(compactRows).length ? { compactRows } : null;
-}
-
 function createModuleCardGroup({
     semantic = {},
     title = '',
@@ -346,7 +477,8 @@ function createModuleCardGroup({
     cardHeight = 96,
     dimensions = { rows: 1, cols: 1 },
     cardCornerRadius = null,
-    textStyleKey = VIEW2D_STYLE_KEYS.LABEL
+    textStyleKey = VIEW2D_STYLE_KEYS.LABEL,
+    textFitWidth = null
 } = {}) {
     const cardNode = createMatrixNode({
         role: cardRole,
@@ -370,12 +502,14 @@ function createModuleCardGroup({
             gapKey: 'default',
             children: [
                 cardNode,
-                createTextNode({
+                createFittedLabelNode({
                     role: 'module-title',
                     semantic: buildSemantic(semantic, { role: 'module-title' }),
                     text: title,
-                    presentation: VIEW2D_TEXT_PRESENTATIONS.LABEL,
-                    visual: { styleKey: textStyleKey }
+                    styleKey: textStyleKey,
+                    maxWidth: Number.isFinite(textFitWidth) && textFitWidth > 0
+                        ? textFitWidth
+                        : Math.max(24, cardWidth - (CARD_LABEL_HORIZONTAL_INSET * 2))
                 })
             ]
         }),
@@ -424,7 +558,8 @@ function createFixedWidthColumn({
 
 function createResidualStateModule({
     semantic = {},
-    title = '',
+    labelTex = '\\mathrm{X}',
+    labelText = 'X',
     tokenRefs = [],
     getVector = () => null
 } = {}) {
@@ -435,9 +570,12 @@ function createResidualStateModule({
         getVector
     });
     const rowCount = Math.max(1, rowItems.length);
+    const dimensionsTex = `${rowCount} \\times ${D_MODEL}`;
+    const dimensionsText = `${rowCount} × ${D_MODEL}`;
     const cardNode = createMatrixNode({
         role: 'module-card',
         semantic: buildSemantic(semantic, { role: 'module-card' }),
+        label: buildLabel(labelTex, labelText),
         dimensions: {
             rows: rowCount,
             cols: D_MODEL
@@ -448,17 +586,17 @@ function createResidualStateModule({
         visual: { styleKey: VIEW2D_STYLE_KEYS.RESIDUAL },
         metadata: mergeMetadata(
             createMeasureMetadata(SUMMARY_RESIDUAL_COLS, rowCount),
-            createCompactRowsMetadata({
+            createCaptionMetadata({
+                position: 'float-top',
+                styleKey: VIEW2D_STYLE_KEYS.LABEL,
+                dimensionsTex,
+                dimensionsText,
+                minScreenHeightPx: 28
+            }),
+            createView2dVectorStripMetadata({
                 compactWidth: SUMMARY_RESIDUAL_COLS * RESIDUAL_STRIP_UNIT,
                 rowHeight: RESIDUAL_STRIP_UNIT,
-                rowGap: 2,
-                paddingX: 0,
-                paddingY: 4,
-                variant: 'vector-strip',
                 hideSurface: true
-            }),
-            createCardMetadata(null, null, {
-                cornerRadius: 6
             })
         )
     });
@@ -469,16 +607,7 @@ function createResidualStateModule({
             semantic,
             direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
             gapKey: 'default',
-            children: [
-                cardNode,
-                createTextNode({
-                    role: 'module-title',
-                    semantic: buildSemantic(semantic, { role: 'module-title' }),
-                    text: title,
-                    presentation: VIEW2D_TEXT_PRESENTATIONS.LABEL,
-                    visual: { styleKey: VIEW2D_STYLE_KEYS.LABEL }
-                })
-            ]
+            children: [cardNode]
         }),
         cardNode
     };
@@ -609,9 +738,10 @@ function buildMhsaModule({
         const labelNode = createTextNode({
             role: 'head-label',
             semantic: buildSemantic(headSemantic, { role: 'head-label' }),
-            text: `Head ${headIndex + 1}`,
+            text: `Attention Head ${headIndex + 1}`,
             presentation: VIEW2D_TEXT_PRESENTATIONS.LABEL,
-            visual: { styleKey: VIEW2D_STYLE_KEYS.LABEL }
+            visual: { styleKey: VIEW2D_STYLE_KEYS.LABEL },
+            metadata: createTextFitMetadata(Math.max(24, HEAD_CARD_WIDTH - (CARD_LABEL_HORIZONTAL_INSET * 2)))
         });
         const headNode = createGroupNode({
             role: 'head',
@@ -667,7 +797,7 @@ function buildOutputProjectionModule({
             stage: 'attn-out',
             role: 'module'
         },
-        title: 'Out proj',
+        title: 'Output Projection',
         styleKey: VIEW2D_STYLE_KEYS.OUTPUT_PROJECTION,
         cardRole: 'projection-weight',
         cardWidth: 110,
@@ -676,6 +806,30 @@ function buildOutputProjectionModule({
         dimensions: {
             rows: D_MODEL,
             cols: D_MODEL
+        }
+    });
+}
+
+function buildConcatenateModule({
+    layerIndex = 0
+} = {}) {
+    return createModuleCardGroup({
+        semantic: {
+            componentKind: 'mhsa',
+            layerIndex,
+            stage: 'concatenate',
+            role: 'concat'
+        },
+        title: 'Concatenate',
+        styleKey: VIEW2D_STYLE_KEYS.CONCATENATE,
+        cardRole: 'concat-card',
+        cardWidth: 124,
+        cardHeight: 38,
+        cardCornerRadius: 10,
+        textStyleKey: VIEW2D_STYLE_KEYS.LABEL,
+        dimensions: {
+            rows: NUM_HEAD_SETS_LAYER,
+            cols: D_HEAD
         }
     });
 }
@@ -704,7 +858,7 @@ function buildMlpModule({
             stage: 'mlp',
             role: 'module'
         },
-        title: 'MLP',
+        title: 'Multilayer Perceptron',
         styleKey: VIEW2D_STYLE_KEYS.MLP,
         cardWidth: 148,
         cardHeight: 92,
@@ -719,7 +873,11 @@ function buildMlpModule({
 function buildLayerGroup({
     layerIndex = 0,
     activationSource = null,
-    tokenRefs = []
+    tokenRefs = [],
+    tokenIndices = null,
+    tokenLabels = null,
+    isSmallScreen = false,
+    visualTokens = null
 } = {}) {
     const layerSemantic = {
         componentKind: 'layer',
@@ -729,11 +887,13 @@ function buildLayerGroup({
     const COLUMN_WIDTHS = {
         residual: 136,
         heads: 200,
+        concat: 144,
         outProj: 152,
         addIn: 80,
         ln2: 148,
         mlp: 196,
-        addOut: 80
+        addOut: 80,
+        detail: 0
     };
     const TOP_ROW_HEIGHT = 58;
 
@@ -744,7 +904,8 @@ function buildLayerGroup({
             stage: 'incoming',
             role: 'module'
         },
-        title: 'x_in',
+        labelTex: '\\mathrm{X}',
+        labelText: 'X',
         tokenRefs,
         getVector: (tokenRef) => (
             typeof activationSource?.getLayerIncoming === 'function'
@@ -755,9 +916,12 @@ function buildLayerGroup({
     const ln1Module = buildLayerNormModule({
         layerIndex,
         stage: 'ln1',
-        title: 'LN1'
+        title: 'LayerNorm 1'
     });
     const mhsaModule = buildMhsaModule({
+        layerIndex
+    });
+    const concatenateModule = buildConcatenateModule({
         layerIndex
     });
     const outputProjectionModule = buildOutputProjectionModule({
@@ -775,7 +939,8 @@ function buildLayerGroup({
             stage: 'post-attn-residual',
             role: 'module'
         },
-        title: 'x_attn',
+        labelTex: '\\mathrm{X}',
+        labelText: 'X',
         tokenRefs,
         getVector: (tokenRef) => (
             typeof activationSource?.getPostAttentionResidual === 'function'
@@ -786,7 +951,7 @@ function buildLayerGroup({
     const ln2Module = buildLayerNormModule({
         layerIndex,
         stage: 'ln2',
-        title: 'LN2'
+        title: 'LayerNorm 2'
     });
     const mlpModule = buildMlpModule({
         layerIndex
@@ -811,6 +976,11 @@ function buildLayerGroup({
             createFixedWidthColumn({
                 semantic: buildSemantic(layerSemantic, { stage: 'top-head-space', role: 'top-head-space' }),
                 width: COLUMN_WIDTHS.heads,
+                height: TOP_ROW_HEIGHT
+            }),
+            createFixedWidthColumn({
+                semantic: buildSemantic(layerSemantic, { stage: 'top-concat-space', role: 'top-concat-space' }),
+                width: COLUMN_WIDTHS.concat,
                 height: TOP_ROW_HEIGHT
             }),
             createFixedWidthColumn({
@@ -864,6 +1034,13 @@ function buildLayerGroup({
                 height: 360,
                 align: 'top',
                 child: mhsaModule.node
+            }),
+            createFixedWidthColumn({
+                semantic: buildSemantic(layerSemantic, { stage: 'bottom-concat', role: 'bottom-concat' }),
+                width: COLUMN_WIDTHS.concat,
+                height: 96,
+                align: 'center',
+                child: concatenateModule.node
             }),
             createFixedWidthColumn({
                 semantic: buildSemantic(layerSemantic, { stage: 'bottom-outproj', role: 'bottom-outproj' }),
@@ -948,9 +1125,14 @@ function buildLayerGroup({
         })),
         ...mhsaModule.headCardNodes.map((headCardNode, headIndex) => ({
             from: headCardNode,
-            to: outputProjectionModule.cardNode,
-            key: `layer-${layerIndex}-head-${headIndex}-outproj`
+            to: concatenateModule.cardNode,
+            key: `layer-${layerIndex}-head-${headIndex}-concat`
         })),
+        {
+            from: concatenateModule.cardNode,
+            to: outputProjectionModule.cardNode,
+            key: `layer-${layerIndex}-concat-outproj`
+        },
         {
             from: outputProjectionModule.cardNode,
             to: postAttentionAdd.cardNode,
@@ -994,7 +1176,7 @@ function buildLayerGroup({
 function buildFinalLayerNormModule() {
     return buildLayerNormModule({
         stage: 'final-ln',
-        title: 'Final LN'
+        title: 'Final LayerNorm'
     });
 }
 
@@ -1096,16 +1278,43 @@ export function buildTransformerSceneModel({
     tokenLabels = null,
     layerCount = NUM_LAYERS,
     isSmallScreen = false,
-    visualTokens = null
+    visualTokens = null,
+    headDetailTarget = null,
+    concatDetailTarget = null,
+    outputProjectionDetailTarget = null
 } = {}) {
     const resolvedLayerCount = Number.isFinite(layerCount) ? Math.max(1, Math.floor(layerCount)) : NUM_LAYERS;
     const tokenRefs = resolveVisibleTokenRefs(activationSource, tokenIndices, tokenLabels);
     const resolvedTokens = visualTokens || resolveView2dVisualTokens();
+    const resolvedHeadDetailTarget = normalizeHeadDetailTarget(headDetailTarget);
+    const resolvedConcatDetailTarget = normalizeConcatDetailTarget(concatDetailTarget);
+    const resolvedOutputProjectionDetailTarget = normalizeOutputProjectionDetailTarget(outputProjectionDetailTarget);
+    const headDetailPreview = buildHeadDetailPreview({
+        activationSource,
+        tokenRefs,
+        headDetailTarget: resolvedHeadDetailTarget
+    });
+    const headDetailScene = buildHeadDetailSceneModel({
+        headDetailPreview,
+        headDetailTarget: resolvedHeadDetailTarget,
+        visualTokens: resolvedTokens,
+        isSmallScreen
+    });
+    const concatDetailPreview = buildConcatenateDetailPreview({
+        concatDetailTarget: resolvedConcatDetailTarget
+    });
+    const outputProjectionDetailPreview = buildOutputProjectionDetailPreview({
+        outputProjectionDetailTarget: resolvedOutputProjectionDetailTarget
+    });
 
     const layerModules = Array.from({ length: resolvedLayerCount }, (_, layerIndex) => buildLayerGroup({
         layerIndex,
         activationSource,
-        tokenRefs
+        tokenRefs,
+        tokenIndices,
+        tokenLabels,
+        isSmallScreen,
+        visualTokens: resolvedTokens
     }));
 
     const connectors = [];
@@ -1161,7 +1370,14 @@ export function buildTransformerSceneModel({
             tokenIndices: tokenRefs.map((tokenRef) => tokenRef.tokenIndex),
             isSmallScreen: !!isSmallScreen,
             tokens: resolvedTokens,
-            focusBuilder: 'buildMhsaSceneModel'
+            focusBuilder: 'buildMhsaSceneModel',
+            headDetailTarget: resolvedHeadDetailTarget,
+            headDetailPreview,
+            headDetailScene,
+            concatDetailTarget: resolvedConcatDetailTarget,
+            concatDetailPreview,
+            outputProjectionDetailTarget: resolvedOutputProjectionDetailTarget,
+            outputProjectionDetailPreview
         }
     });
 }

@@ -70,6 +70,15 @@ function getBoundsArea(bounds = null) {
     return width * height;
 }
 
+function containsPoint(bounds = null, x = 0, y = 0) {
+    if (!bounds) return false;
+    const minX = Number.isFinite(bounds.x) ? bounds.x : 0;
+    const minY = Number.isFinite(bounds.y) ? bounds.y : 0;
+    const maxX = minX + (Number.isFinite(bounds.width) ? Math.max(0, bounds.width) : 0);
+    const maxY = minY + (Number.isFinite(bounds.height) ? Math.max(0, bounds.height) : 0);
+    return x >= minX && x <= maxX && y >= minY && y <= maxY;
+}
+
 function scoreSemanticMatch(entrySemantic = null, targetSemantic = null) {
     if (!entrySemantic || !targetSemantic) return null;
     const targetEntries = Object.entries(targetSemantic);
@@ -115,6 +124,24 @@ function compareSemanticMatches(a, b) {
     }
 
     return getBoundsArea(b?.entry?.bounds) - getBoundsArea(a?.entry?.bounds);
+}
+
+function comparePointHitEntries(a, b) {
+    if ((a?.depth || 0) !== (b?.depth || 0)) {
+        return (b?.depth || 0) - (a?.depth || 0);
+    }
+
+    const kindRank = (entry) => {
+        const kind = String(entry?.kind || '');
+        if (kind === 'matrix') return 0;
+        if (kind === 'text' || kind === 'operator') return 1;
+        if (kind === 'group') return 2;
+        return 3;
+    };
+    const rankDelta = kindRank(a) - kindRank(b);
+    if (rankDelta !== 0) return rankDelta;
+
+    return getBoundsArea(a?.bounds) - getBoundsArea(b?.bounds);
 }
 
 export class LayoutRegistry {
@@ -229,6 +256,20 @@ export class LayoutRegistry {
 
     getNodeEntries() {
         return Array.from(this._nodeEntries.values()).map((entry) => this.getNodeEntry(entry.nodeId));
+    }
+
+    getNodeEntriesAtPoint(x = 0, y = 0, { includeGroups = false } = {}) {
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return [];
+        return Array.from(this._nodeEntries.values())
+            .filter((entry) => includeGroups || entry.kind !== 'group')
+            .filter((entry) => containsPoint(entry.bounds, x, y))
+            .sort(comparePointHitEntries)
+            .map((entry) => this.getNodeEntry(entry.nodeId))
+            .filter(Boolean);
+    }
+
+    resolveNodeEntryAtPoint(x = 0, y = 0, options = {}) {
+        return this.getNodeEntriesAtPoint(x, y, options)[0] || null;
     }
 
     getConnectorEntries() {

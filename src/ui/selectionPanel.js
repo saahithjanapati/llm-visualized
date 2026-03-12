@@ -96,7 +96,7 @@ import {
 } from './selectionPanelVectorSamplingUtils.js';
 import {
     LAYER_NORM_ACTIVE_PARAM_PREVIEW_COLOR_OPTIONS,
-    resolveLayerNormPreviewContext
+    resolveLayerNormParameterSummary
 } from './selectionPanelLayerNormPreviewUtils.js';
 import { buildSelectionPromptContext } from './selectionPanelPromptContextUtils.js';
 import { buildSelectionChatPrompt } from './selectionPanelChatPromptUtils.js';
@@ -364,6 +364,80 @@ function buildMetadata(params = 'TBD', inputDim = null, outputDim = null, length
         hasBiasDim,
         hasDims
     };
+}
+
+function createInlineDetailActionButton(label = '', action = '', payload = null) {
+    if (typeof document === 'undefined') return null;
+    const safeLabel = typeof label === 'string' ? label.trim() : '';
+    const safeAction = typeof action === 'string' ? action.trim() : '';
+    if (!safeLabel || !safeAction) return null;
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'detail-description-action-link detail-description-inline-action-link';
+    button.dataset.detailAction = safeAction;
+    button.setAttribute('aria-label', safeLabel);
+    button.textContent = safeLabel;
+
+    if (payload && typeof payload === 'object') {
+        const safePayload = Object.fromEntries(
+            Object.entries(payload).filter(([, value]) => value !== undefined)
+        );
+        if (Object.keys(safePayload).length > 0) {
+            button.dataset.detailPayload = encodeURIComponent(JSON.stringify(safePayload));
+        }
+    }
+
+    return button;
+}
+
+function setLayerNormParameterSummaryContent(element, parameterSummary = null) {
+    if (!element) return;
+    if (!parameterSummary) {
+        element.textContent = '';
+        return;
+    }
+
+    const perParameterCount = Number.isFinite(parameterSummary?.perParameterCount)
+        ? Math.max(1, Math.floor(parameterSummary.perParameterCount))
+        : D_MODEL;
+    const totalParameterCount = Number.isFinite(parameterSummary?.totalParameterCount)
+        ? Math.max(1, Math.floor(parameterSummary.totalParameterCount))
+        : (perParameterCount * 2);
+    const perParameterText = formatNumber(perParameterCount);
+    const totalParameterText = formatNumber(totalParameterCount);
+    const payloadBase = {};
+    if (typeof parameterSummary?.layerNormKind === 'string' && parameterSummary.layerNormKind.trim().length) {
+        payloadBase.layerNormKind = parameterSummary.layerNormKind.trim();
+    }
+    if (Number.isFinite(parameterSummary?.layerIndex)) {
+        payloadBase.layerIndex = Math.floor(parameterSummary.layerIndex);
+    }
+
+    element.textContent = '';
+
+    if (typeof document === 'undefined') {
+        element.textContent = `${totalParameterText} = ${perParameterText} x 2 (${perParameterText} for scale + ${perParameterText} for shift)`;
+        return;
+    }
+
+    const fragment = document.createDocumentFragment();
+    fragment.append(`${totalParameterText} = ${perParameterText} x 2 (${perParameterText} for `);
+    fragment.append(
+        createInlineDetailActionButton('scale', LAYERNORM_PARAM_PANEL_ACTION_OPEN, {
+            ...payloadBase,
+            param: 'scale'
+        }) || 'scale'
+    );
+    fragment.append(` + ${perParameterText} for `);
+    fragment.append(
+        createInlineDetailActionButton('shift', LAYERNORM_PARAM_PANEL_ACTION_OPEN, {
+            ...payloadBase,
+            param: 'shift'
+        }) || 'shift'
+    );
+    fragment.append(')');
+    element.append(fragment);
 }
 
 function readSceneSelectionNumber(node, key) {
@@ -1006,36 +1080,6 @@ function applyFinalColorToObject(object, color) {
                 }
             }
             mat.needsUpdate = true;
-        });
-    });
-}
-
-function forcePreviewObjectOpaque(object) {
-    if (!object || typeof object.traverse !== 'function') return;
-    object.traverse((child) => {
-        if (!child?.material) return;
-        const materials = Array.isArray(child.material) ? child.material : [child.material];
-        materials.forEach((mat) => {
-            if (!mat) return;
-            if (mat.transparent !== false) {
-                mat.transparent = false;
-                mat.needsUpdate = true;
-            }
-            if (mat.opacity !== 1) {
-                mat.opacity = 1;
-            }
-            if (mat.depthWrite !== true) {
-                mat.depthWrite = true;
-                mat.needsUpdate = true;
-            }
-            if (typeof mat.transmission === 'number' && mat.transmission !== 0) {
-                mat.transmission = 0;
-                mat.needsUpdate = true;
-            }
-            if (typeof mat.thickness === 'number' && mat.thickness !== 0) {
-                mat.thickness = 0;
-                mat.needsUpdate = true;
-            }
         });
     });
 }
@@ -2201,76 +2245,20 @@ function buildAttentionSpherePreview(selectionInfo) {
     };
 }
 
-function buildLayerNormParamBankPreview({
-    layerNormKind = null,
-    param = 'scale',
-    layerIndex = null,
-    layoutCount = 0,
-    activeLaneLayoutIndices = [],
-    baseVectorLength = D_MODEL,
-    previewDepth = LN_PARAMS.depth
-} = {}) {
-    if (!layerNormKind) return null;
-
-    const previewData = getLayerNormParamData(layerIndex, layerNormKind, param, baseVectorLength);
-    const isArrayLike = Array.isArray(previewData) || ArrayBuffer.isView(previewData);
-    if (!isArrayLike || previewData.length === 0) return null;
-
-    const safeLayoutCount = Math.max(1, Math.floor(layoutCount || activeLaneLayoutIndices.length || 1));
-    const laneIndices = Array.isArray(activeLaneLayoutIndices) && activeLaneLayoutIndices.length
-        ? activeLaneLayoutIndices
-        : Array.from({ length: safeLayoutCount }, (_, idx) => idx);
-    const previewInstanceCount = resolveLayerNormParamPreviewInstanceCount(null, previewData);
-    const zSpacing = previewDepth / (safeLayoutCount + 1);
-    const yPosition = param === 'shift'
-        ? LN_PARAMS.height * 0.25
-        : 3.3;
-    const vectors = [];
-    const group = new THREE.Group();
-
-    laneIndices.forEach((laneLayoutIndex) => {
-        const safeLaneLayoutIndex = Number.isFinite(laneLayoutIndex)
-            ? Math.max(0, Math.min(safeLayoutCount - 1, Math.floor(laneLayoutIndex)))
-            : 0;
-        const vec = createPreviewVector({
-            colorHex: MHA_FINAL_Q_COLOR,
-            data: null,
-            instanceCount: previewInstanceCount
-        });
-        vec.group.position.set(
-            0,
-            yPosition,
-            -previewDepth / 2 + zSpacing * (safeLaneLayoutIndex + 1)
-        );
-        vec.group.userData = vec.group.userData || {};
-        vec.group.userData.label = getLayerNormParamLabel(layerNormKind, param);
-        applyDataToPreviewVector(vec, previewData, {
-            colorOptions: LAYER_NORM_ACTIVE_PARAM_PREVIEW_COLOR_OPTIONS
-        });
-        group.add(vec.group);
-        vectors.push(vec);
-    });
-
-    return {
-        group,
-        dispose: () => {
-            vectors.forEach((vec) => {
-                vec.dispose();
-            });
-        }
-    };
-}
-
 export function buildLayerNormPreview(label, selectionInfo, engine = null) {
-    const previewContext = resolveLayerNormPreviewContext(selectionInfo, engine);
-    const holeCountFallback = Number.isFinite(LN_PARAMS.numberOfHoles) ? LN_PARAMS.numberOfHoles : PREVIEW_SOLID_LANES;
-    const holeCount = Math.max(1, Math.floor(previewContext.layoutCount || holeCountFallback));
-    const baseHoles = Number.isFinite(LN_PARAMS.numberOfHoles) ? LN_PARAMS.numberOfHoles : holeCount;
+    const clonePreview = buildSelectionClonePreview(selectionInfo, label)
+        || buildDirectClonePreview(selectionInfo);
+    if (clonePreview) {
+        applyFinalColorToObject(clonePreview.object, 0xffffff);
+        return clonePreview;
+    }
+
+    const baseHoles = Number.isFinite(LN_PARAMS.numberOfHoles) ? LN_PARAMS.numberOfHoles : PREVIEW_SOLID_LANES;
     const previewDepth = Math.max(
         180,
-        Math.min(PREVIEW_MATRIX_DEPTH, LN_PARAMS.depth * (holeCount / Math.max(1, baseHoles)))
+        Math.min(PREVIEW_MATRIX_DEPTH, LN_PARAMS.depth * (PREVIEW_SOLID_LANES / Math.max(1, baseHoles)))
     );
-    const params = { ...LN_PARAMS, numberOfHoles: holeCount, depth: previewDepth };
+    const params = { ...LN_PARAMS, numberOfHoles: PREVIEW_SOLID_LANES, depth: previewDepth };
     const ln = new LayerNormalizationVisualization(
         new THREE.Vector3(0, 0, 0),
         params.width,
@@ -2284,54 +2272,10 @@ export function buildLayerNormPreview(label, selectionInfo, engine = null) {
         true
     );
     ln.setColor(new THREE.Color(0xffffff));
-    ln.setMaterialProperties({
-        opacity: 1.0,
-        transparent: false,
-        transmission: 0.0,
-        thickness: 0.0,
-        emissiveIntensity: 0.18
-    });
-    forcePreviewObjectOpaque(ln.group);
-
-    const group = new THREE.Group();
-    group.add(ln.group);
-    const disposers = [() => ln.dispose()];
-
-    const scalePreview = buildLayerNormParamBankPreview({
-        layerNormKind: previewContext.layerNormKind,
-        param: 'scale',
-        layerIndex: previewContext.layerIndex,
-        layoutCount: holeCount,
-        activeLaneLayoutIndices: previewContext.activeLaneLayoutIndices,
-        baseVectorLength: previewContext.baseVectorLength,
-        previewDepth
-    });
-    if (scalePreview?.group) {
-        group.add(scalePreview.group);
-        disposers.push(scalePreview.dispose);
-    }
-
-    const shiftPreview = buildLayerNormParamBankPreview({
-        layerNormKind: previewContext.layerNormKind,
-        param: 'shift',
-        layerIndex: previewContext.layerIndex,
-        layoutCount: holeCount,
-        activeLaneLayoutIndices: previewContext.activeLaneLayoutIndices,
-        baseVectorLength: previewContext.baseVectorLength,
-        previewDepth
-    });
-    if (shiftPreview?.group) {
-        group.add(shiftPreview.group);
-        disposers.push(shiftPreview.dispose);
-    }
 
     return {
-        object: group,
-        dispose: () => {
-            disposers.forEach((dispose) => {
-                if (typeof dispose === 'function') dispose();
-            });
-        }
+        object: ln.group,
+        dispose: () => ln.dispose()
     };
 }
 
@@ -2594,7 +2538,6 @@ function fitObjectToView(object, camera, options = {}) {
             * PREVIEW_BASE_DISTANCE_MULT
             * distanceMult
             * viewportDistanceScale;
-
         camera.near = Math.max(0.1, distance / 50);
         camera.far = Math.max(distance * 20, distance + scaledMax * 4);
         camera.position.set(0, 0, distance * 1.1);
@@ -12048,6 +11991,9 @@ class SelectionPanel {
             }
         }
         const hideLayerNormFields = isLayerNormSolidSelection(label);
+        const layerNormParameterSummary = hideLayerNormFields
+            ? resolveLayerNormParameterSummary(selection, this.engine)
+            : null;
         const isLogitTokenSelection = !!logitHeader;
         const hideTensorDimsField = hideLayerNormFields
             || isAttentionScore
@@ -12074,9 +12020,16 @@ class SelectionPanel {
         if (this.outputDimHalf) this.outputDimHalf.style.display = (!hideTensorDimsField && isVectorMetadata) ? 'none' : '';
         if (this.inputDimHalf) this.inputDimHalf.style.flexBasis = isVectorMetadata ? '100%' : '';
         if (dimsRow) dimsRow.style.display = hideTensorDimsField || isVectorMetadata ? 'none' : '';
-        const showParamCount = !hideTensorDimsField && !isVectorMetadata && metadata.hasDims;
+        const showParamCount = (!!layerNormParameterSummary)
+            || (!hideTensorDimsField && !isVectorMetadata && metadata.hasDims);
         if (this.paramsRow) this.paramsRow.style.display = showParamCount ? '' : 'none';
-        if (this.params) this.params.textContent = showParamCount ? metadata.params : '';
+        if (this.params) {
+            if (layerNormParameterSummary) {
+                setLayerNormParameterSummaryContent(this.params, layerNormParameterSummary);
+            } else {
+                this.params.textContent = showParamCount ? metadata.params : '';
+            }
+        }
         const showBiasDim = !hideTensorDimsField && !isVectorMetadata && metadata.hasBiasDim;
         if (this.biasDimRow) this.biasDimRow.style.display = showBiasDim ? '' : 'none';
         if (this.biasDim) this.biasDim.textContent = showBiasDim ? metadata.biasDim : '';

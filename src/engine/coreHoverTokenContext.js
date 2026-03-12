@@ -105,6 +105,32 @@ function formatHeadLayerSubtitle(headIndex = null, layerIndex = null) {
     return parts.join(' • ');
 }
 
+function isQkvStage(stage = '') {
+    return String(stage || '').toLowerCase().startsWith('qkv.');
+}
+
+function isResidualVectorStage(stage = '') {
+    const lower = String(stage || '').toLowerCase();
+    return lower.startsWith('layer.incoming') || lower.startsWith('residual.');
+}
+
+function isResidualStreamHoverSelection(label = '', stage = '') {
+    const lower = String(label || '').toLowerCase();
+    const stageLower = String(stage || '').toLowerCase();
+    return lower.includes('residual stream vector')
+        || stageLower === 'embedding.sum'
+        || isResidualVectorStage(stageLower);
+}
+
+function isPostLayerNormResidualHoverSelection(label = '', stage = '') {
+    const lower = String(label || '').toLowerCase();
+    const stageLower = String(stage || '').toLowerCase();
+    return lower.includes('post-layernorm residual')
+        || lower.includes('post layernorm residual')
+        || stageLower === 'ln1.shift'
+        || stageLower === 'ln2.shift';
+}
+
 function isFinalLayerNormHoverSelection(label = '', info = null, object = null) {
     const stage = findHoverTokenString(info, object, 'stage');
     const explicitKind = findHoverTokenString(info, object, 'layerNormKind');
@@ -183,18 +209,7 @@ export function resolveHoverTokenContext({
         if (Number.isFinite(resolvedTokenId)) tokenId = Math.floor(resolvedTokenId);
     }
 
-    if (isWeightedSumHoverSelection(label, info, object)) {
-        if (!Number.isFinite(tokenIndex)) return null;
-        return {
-            suppressHoverLabel: false,
-            showPrimaryLabel: true,
-            detailKind: 'position-text',
-            detailText: `Position ${tokenIndex + 1}`,
-            tokenIndex: Math.floor(tokenIndex),
-            tokenId: Number.isFinite(tokenId) ? Math.floor(tokenId) : null,
-            tokenLabel: ''
-        };
-    }
+    if (isWeightedSumHoverSelection(label, info, object)) return null;
 
     let tokenLabel = findHoverTokenString(info, object, 'tokenLabel');
     if (!tokenLabel && Number.isFinite(tokenIndex) && typeof activationSource?.getTokenString === 'function') {
@@ -232,8 +247,20 @@ export function resolveHoverLabelSubtitle({
     }
     const headIndex = findHoverTokenNumber(info, object, 'headIndex');
     const layerIndex = findHoverTokenNumber(info, object, 'layerIndex');
-    if (!Number.isFinite(headIndex) && !Number.isFinite(layerIndex)) {
+    const tokenIndex = findHoverTokenNumber(info, object, 'tokenIndex');
+    const stage = findHoverTokenString(info, object, 'stage');
+    const subtitle = formatHeadLayerSubtitle(headIndex, layerIndex);
+    if (Number.isFinite(tokenIndex)) {
+        const positionText = `Position ${Math.floor(tokenIndex) + 1}`;
+        if (isResidualStreamHoverSelection(label, stage) || isPostLayerNormResidualHoverSelection(label, stage)) {
+            return subtitle ? `${positionText} • ${subtitle}` : positionText;
+        }
+        if (isQkvStage(stage) || isWeightedSumHoverSelection(label, info, object)) {
+            return subtitle ? `${positionText} • ${subtitle}` : positionText;
+        }
+    }
+    if (!subtitle) {
         return '';
     }
-    return formatHeadLayerSubtitle(headIndex, layerIndex);
+    return subtitle;
 }

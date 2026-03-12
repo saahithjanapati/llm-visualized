@@ -99,8 +99,8 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     const P = colorize(embeddingPosColor, 'P');
     const WU = colorize(embeddingVocabColor, 'W_U');
     const U = 'u';
-    const U_LN = `${U}_{\\text{ln}}`;
-    const MLPResidual = `${colorize(mlpDownColor, '\\mathrm{MLP}')}(${U_LN})`;
+    const X_LN = 'x_{\\text{ln}}';
+    const MLPResidual = `${colorize(mlpDownColor, '\\mathrm{MLP}')}(${X_LN})`;
     const X_OUT = 'x_{\\text{out}}';
     const X_FINAL = 'x_{\\text{final}}';
     const LOGITS = '\\ell';
@@ -167,9 +167,9 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
         attn: attentionEquations.attention,
         concat_proj: attentionEquations.concatProjection,
         resid1: attentionEquations.postAttentionResidual,
-        mlp_up: `a = ${U_LN} ${WUp} + ${BUp}`,
+        mlp_up: `a = ${X_LN} ${WUp} + ${BUp}`,
         mlp_gelu: 'z = \\mathrm{GELU}(a)',
-        mlp_down: `\\mathrm{MLP}(${U_LN}) = z ${WDown} + ${BDown}`,
+        mlp_down: `\\mathrm{MLP}(${X_LN}) = z ${WDown} + ${BDown}`,
         resid2: String.raw`x_{\text{out}} = ${U} + ${MLPResidual}`,
         embed_token: `${X_TOK} = ${E}[${TOK_ID}]`,
         embed_pos: `${X_POS} = ${P}[t]`,
@@ -751,7 +751,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
             const normT = quantizeHighlight(highlights.norm);
             const scaleT = quantizeHighlight(highlights.scale);
             const shiftT = quantizeHighlight(highlights.shift);
-            eqBody = buildLayerNormEquation('x', U_LN, { norm: normT, scale: scaleT, shift: shiftT });
+            eqBody = buildLayerNormEquation(U, X_LN, { norm: normT, scale: scaleT, shift: shiftT });
             signature = `${key}|n${normT.toFixed(3)}|s${scaleT.toFixed(3)}|h${shiftT.toFixed(3)}`;
         }
         if (signature === appState.lastEqSignature) return;

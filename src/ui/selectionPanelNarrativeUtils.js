@@ -1098,10 +1098,13 @@ const ATTENTION_VALUE_VECTOR_TEX = 'v_{j,i} = x_j W_V';
 const ATTENTION_QK_DOT_PRODUCT_TEX = 'q_{t,i} \\cdot k_{j,i}';
 const ATTENTION_PRE_SCORE_TEX = '\\frac{q_{t,i} \\cdot k_{j,i}}{\\sqrt{d_h}}';
 const ATTENTION_POST_WEIGHT_TEX = '\\alpha_{t,j} = \\frac{\\exp\\left(s_{t,j}\\right)}{\\sum_k \\exp\\left(s_{t,k}\\right)}';
+const NORMALIZED_STREAM_SYMBOL = 'x_{\\text{ln}}';
 const SELECTION_EQUATION_SYMBOLS = {
     Q: colorizeEquationToken(SELECTION_EQUATION_COLORS.q, 'Q'),
     K: colorizeEquationToken(SELECTION_EQUATION_COLORS.k, 'K'),
     V: colorizeEquationToken(SELECTION_EQUATION_COLORS.v, 'V'),
+    HBright: colorizeEquationToken('#ffffff', 'H'),
+    OBright: colorizeEquationToken('#ffffff', 'O'),
     HMuted: colorizeEquationToken(SELECTION_EQUATION_COLORS.mutedWhite, 'H'),
     OMuted: colorizeEquationToken(SELECTION_EQUATION_COLORS.mutedWhite, 'O'),
     QMuted: colorizeEquationToken(SELECTION_EQUATION_COLORS.qMuted, 'Q'),
@@ -1110,13 +1113,19 @@ const SELECTION_EQUATION_SYMBOLS = {
     QHeadMuted: colorizeHeadScopedEquationToken(SELECTION_EQUATION_COLORS.qMuted, 'Q'),
     KHeadMuted: colorizeHeadScopedEquationToken(SELECTION_EQUATION_COLORS.kMuted, 'K'),
     VHeadMuted: colorizeHeadScopedEquationToken(SELECTION_EQUATION_COLORS.vMuted, 'V'),
-    XLnBright: colorizeEquationToken('#ffffff', 'x_{\\text{ln}}'),
+    XLnBright: colorizeEquationToken('#ffffff', NORMALIZED_STREAM_SYMBOL),
     WQ: colorizeEquationToken(SELECTION_EQUATION_COLORS.q, 'W_Q'),
+    WQHead: colorizeEquationToken(SELECTION_EQUATION_COLORS.q, 'W_{Q_i}'),
     WK: colorizeEquationToken(SELECTION_EQUATION_COLORS.k, 'W_K'),
+    WKHead: colorizeEquationToken(SELECTION_EQUATION_COLORS.k, 'W_{K_i}'),
     WV: colorizeEquationToken(SELECTION_EQUATION_COLORS.v, 'W_V'),
+    WVHead: colorizeEquationToken(SELECTION_EQUATION_COLORS.v, 'W_{V_i}'),
     BQ: colorizeEquationToken(SELECTION_EQUATION_COLORS.q, 'b_Q'),
+    BQHead: colorizeEquationToken(SELECTION_EQUATION_COLORS.q, 'b_{Q_i}'),
     BK: colorizeEquationToken(SELECTION_EQUATION_COLORS.k, 'b_K'),
+    BKHead: colorizeEquationToken(SELECTION_EQUATION_COLORS.k, 'b_{K_i}'),
     BV: colorizeEquationToken(SELECTION_EQUATION_COLORS.v, 'b_V'),
+    BVHead: colorizeEquationToken(SELECTION_EQUATION_COLORS.v, 'b_{V_i}'),
     WO: colorizeEquationToken(SELECTION_EQUATION_COLORS.output, 'W_O'),
     BO: colorizeEquationToken(SELECTION_EQUATION_COLORS.output, 'b_O'),
     XTok: 'x_t^{\\text{tok}}',
@@ -1128,7 +1137,7 @@ const SELECTION_EQUATION_SYMBOLS = {
     BUp: colorizeEquationToken(SELECTION_EQUATION_COLORS.mlpUp, 'b_{\\text{up}}'),
     WDown: colorizeEquationToken(SELECTION_EQUATION_COLORS.mlpDown, 'W_{\\text{down}}'),
     BDown: colorizeEquationToken(SELECTION_EQUATION_COLORS.mlpDown, 'b_{\\text{down}}'),
-    MLPDown: `${colorizeEquationToken(SELECTION_EQUATION_COLORS.mlpDown, '\\mathrm{MLP}')}\\left(u_{\\text{ln}}\\right)`
+    MLPDown: `${colorizeEquationToken(SELECTION_EQUATION_COLORS.mlpDown, '\\mathrm{MLP}')}\\left(${NORMALIZED_STREAM_SYMBOL}\\right)`
 };
 
 function buildEquationEntries(lines, activeIndexes = []) {
@@ -1185,15 +1194,15 @@ function resolveLayerNormEquationSymbols(lower) {
     }
     if (lower.includes('ln2')) {
         return {
-            input: 'x',
+            input: 'u',
             norm: '\\hat{u}',
-            output: 'u_{\\text{ln}}'
+            output: NORMALIZED_STREAM_SYMBOL
         };
     }
     return {
         input: 'x',
         norm: '\\hat{x}',
-        output: 'x_{\\text{ln}}'
+        output: NORMALIZED_STREAM_SYMBOL
     };
 }
 
@@ -1234,12 +1243,12 @@ function buildSelectionEquationEntries(label, selectionInfo = null) {
         Q: SELECTION_EQUATION_SYMBOLS.Q,
         K: SELECTION_EQUATION_SYMBOLS.K,
         V: SELECTION_EQUATION_SYMBOLS.V,
-        WQ: SELECTION_EQUATION_SYMBOLS.WQ,
-        WK: SELECTION_EQUATION_SYMBOLS.WK,
-        WV: SELECTION_EQUATION_SYMBOLS.WV,
-        BQ: SELECTION_EQUATION_SYMBOLS.BQ,
-        BK: SELECTION_EQUATION_SYMBOLS.BK,
-        BV: SELECTION_EQUATION_SYMBOLS.BV,
+        WQ: SELECTION_EQUATION_SYMBOLS.WQHead,
+        WK: SELECTION_EQUATION_SYMBOLS.WKHead,
+        WV: SELECTION_EQUATION_SYMBOLS.WVHead,
+        BQ: SELECTION_EQUATION_SYMBOLS.BQHead,
+        BK: SELECTION_EQUATION_SYMBOLS.BKHead,
+        BV: SELECTION_EQUATION_SYMBOLS.BVHead,
         WO: SELECTION_EQUATION_SYMBOLS.WO,
         BO: SELECTION_EQUATION_SYMBOLS.BO
     }, {
@@ -1254,24 +1263,24 @@ function buildSelectionEquationEntries(label, selectionInfo = null) {
     const queryWeightMatrixEq = buildAttentionProjectionEquation({
         outputSymbol: SELECTION_EQUATION_SYMBOLS.QHeadMuted,
         inputSymbol: SELECTION_EQUATION_SYMBOLS.XLnBright,
-        weightSymbol: SELECTION_EQUATION_SYMBOLS.WQ,
-        biasSymbol: SELECTION_EQUATION_SYMBOLS.BQ
+        weightSymbol: SELECTION_EQUATION_SYMBOLS.WQHead,
+        biasSymbol: SELECTION_EQUATION_SYMBOLS.BQHead
     });
     const keyWeightMatrixEq = buildAttentionProjectionEquation({
         outputSymbol: SELECTION_EQUATION_SYMBOLS.KHeadMuted,
         inputSymbol: SELECTION_EQUATION_SYMBOLS.XLnBright,
-        weightSymbol: SELECTION_EQUATION_SYMBOLS.WK,
-        biasSymbol: SELECTION_EQUATION_SYMBOLS.BK
+        weightSymbol: SELECTION_EQUATION_SYMBOLS.WKHead,
+        biasSymbol: SELECTION_EQUATION_SYMBOLS.BKHead
     });
     const valueWeightMatrixEq = buildAttentionProjectionEquation({
         outputSymbol: SELECTION_EQUATION_SYMBOLS.VHeadMuted,
         inputSymbol: SELECTION_EQUATION_SYMBOLS.XLnBright,
-        weightSymbol: SELECTION_EQUATION_SYMBOLS.WV,
-        biasSymbol: SELECTION_EQUATION_SYMBOLS.BV
+        weightSymbol: SELECTION_EQUATION_SYMBOLS.WVHead,
+        biasSymbol: SELECTION_EQUATION_SYMBOLS.BVHead
     });
     const outputProjectionWeightMatrixEq = buildAttentionProjectionEquation({
-        outputSymbol: SELECTION_EQUATION_SYMBOLS.OMuted,
-        inputSymbol: SELECTION_EQUATION_SYMBOLS.HMuted,
+        outputSymbol: SELECTION_EQUATION_SYMBOLS.OBright,
+        inputSymbol: SELECTION_EQUATION_SYMBOLS.HBright,
         weightSymbol: SELECTION_EQUATION_SYMBOLS.WO,
         biasSymbol: SELECTION_EQUATION_SYMBOLS.BO
     });
@@ -1279,9 +1288,9 @@ function buildSelectionEquationEntries(label, selectionInfo = null) {
     const concatEq = attentionEquations.concat;
     const outputProjectionEq = attentionEquations.outputProjection;
     const postAttentionResidualEq = attentionEquations.postAttentionResidual;
-    const mlpUpEq = `a = u_{\\text{ln}} ${SELECTION_EQUATION_SYMBOLS.WUp} + ${SELECTION_EQUATION_SYMBOLS.BUp}`;
+    const mlpUpEq = `a = ${NORMALIZED_STREAM_SYMBOL} ${SELECTION_EQUATION_SYMBOLS.WUp} + ${SELECTION_EQUATION_SYMBOLS.BUp}`;
     const mlpGeluEq = 'z = \\mathrm{GELU}(a)';
-    const mlpDownEq = `\\mathrm{MLP}(u_{\\text{ln}}) = z ${SELECTION_EQUATION_SYMBOLS.WDown} + ${SELECTION_EQUATION_SYMBOLS.BDown}`;
+    const mlpDownEq = `\\mathrm{MLP}(${NORMALIZED_STREAM_SYMBOL}) = z ${SELECTION_EQUATION_SYMBOLS.WDown} + ${SELECTION_EQUATION_SYMBOLS.BDown}`;
     const postMlpResidualEq = `x_{\\text{out}} = u + ${SELECTION_EQUATION_SYMBOLS.MLPDown}`;
     const logitsEq = `\\ell = x_{\\text{final}} ${SELECTION_EQUATION_SYMBOLS.WU}`;
     const probsEq = 'p = \\mathrm{softmax}(\\ell)';

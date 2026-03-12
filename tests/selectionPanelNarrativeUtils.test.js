@@ -9,9 +9,23 @@ import { buildKvCacheInfoSelection } from '../src/ui/kvCacheInfoUtils.js';
 describe('selectionPanelNarrativeUtils', () => {
     it('builds selection-focused equations for known matrix labels', () => {
         const eq = resolveSelectionEquations('Query Weight Matrix', null);
-        expect(eq).toContain('W_Q');
+        expect(eq).toContain('W_{Q_i}');
+        expect(eq).toContain('b_{Q_i}');
         expect(eq).toContain('H_i =');
         expect(eq).not.toContain('s_{t,j}');
+    });
+
+    it('shows head-scoped projection parameters for Q, K, and V selection preview equations', () => {
+        const queryEq = resolveSelectionEquations('Query Vector', null);
+        const keyEq = resolveSelectionEquations('Key Vector', null);
+        const valueEq = resolveSelectionEquations('Value Vector', null);
+
+        expect(queryEq).toContain('W_{Q_i}');
+        expect(queryEq).toContain('b_{Q_i}');
+        expect(keyEq).toContain('W_{K_i}');
+        expect(keyEq).toContain('b_{K_i}');
+        expect(valueEq).toContain('W_{V_i}');
+        expect(valueEq).toContain('b_{V_i}');
     });
 
     it('uses fixed 12-head concat indexing for output projection equations', () => {
@@ -51,6 +65,29 @@ describe('selectionPanelNarrativeUtils', () => {
         expect(previewEq).toHaveLength(1);
         expect(previewEq[0].tex).toContain('\\frac');
         expect(previewEq[0].tex).toContain('\\gamma');
+    });
+
+    it('keeps second layer norm and mlp equations aligned on x_ln naming', () => {
+        const ln2Eq = resolveSelectionEquations('LayerNorm 2 Normed Output', {
+            info: {
+                activationData: {
+                    stage: 'ln2.norm'
+                }
+            }
+        });
+        const mlpUpEq = resolveSelectionEquations('MLP Up Projection', {
+            info: {
+                activationData: {
+                    stage: 'mlp.up'
+                }
+            }
+        });
+
+        expect(ln2Eq).toContain('x_{\\text{ln}}');
+        expect(ln2Eq).toContain('u - \\mu');
+        expect(ln2Eq).not.toContain('u_{\\text{ln}}');
+        expect(mlpUpEq).toContain('a = x_{\\text{ln}}');
+        expect(mlpUpEq).not.toContain('u_{\\text{ln}}');
     });
 
     it('shows selection-specific embedding equations instead of the full embedding bundle everywhere', () => {

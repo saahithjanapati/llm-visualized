@@ -61,6 +61,12 @@ function createMockContext() {
         lineTo(x, y) {
             operations.push({ type: 'lineTo', x, y });
         },
+        quadraticCurveTo(cpx, cpy, x, y) {
+            operations.push({ type: 'quadraticCurveTo', cpx, cpy, x, y });
+        },
+        rect(x, y, width, height) {
+            operations.push({ type: 'rect', x, y, width, height });
+        },
         arcTo() {},
         closePath() {},
         fill() {
@@ -75,7 +81,17 @@ function createMockContext() {
             });
         },
         clip() {},
-        fillRect() {},
+        fillRect(x, y, width, height) {
+            operations.push({
+                type: 'fillRect',
+                x,
+                y,
+                width,
+                height,
+                fillStyle: this.fillStyle,
+                globalAlpha: this.globalAlpha
+            });
+        },
         clearRect() {},
         save() {},
         restore() {},
@@ -84,6 +100,11 @@ function createMockContext() {
         setTransform() {},
         fillText(text, x, y) {
             operations.push({ type: 'fillText', text, x, y });
+        },
+        measureText(text = '') {
+            return {
+                width: String(text).length * 7
+            };
         },
         createLinearGradient() {
             operations.push({ type: 'createLinearGradient' });
@@ -137,6 +158,18 @@ describe('CanvasSceneRenderer', () => {
         expect(canvas.height).toBe(360);
     });
 
+    it('allows a lower per-render DPR cap for interaction frames', () => {
+        const resolution = syncCanvasResolution(canvas, {
+            width: 320,
+            height: 180,
+            dprCap: 1
+        });
+
+        expect(resolution.dpr).toBe(1);
+        expect(canvas.width).toBe(320);
+        expect(canvas.height).toBe(180);
+    });
+
     it('renders a laid-out MHSA scene without throwing', () => {
         const scene = buildMhsaSceneModel({
             activationSource: createActivationSource(4),
@@ -171,6 +204,162 @@ describe('CanvasSceneRenderer', () => {
         expect(resolveView2dStyle(VIEW2D_STYLE_KEYS.MHSA_K)?.fill).toMatch(/^linear-gradient\(/);
         expect(resolveView2dStyle(VIEW2D_STYLE_KEYS.MHSA_V)?.fill).toMatch(/^linear-gradient\(/);
         expect(resolveView2dStyle(VIEW2D_STYLE_KEYS.MHSA_HEAD_OUTPUT)?.fill).toMatch(/^linear-gradient\(/);
+    });
+
+    it('renders a selected MHSA head with a black interior only in deepest head mode', () => {
+        const scene = buildTransformerSceneModel({
+            activationSource: createActivationSource(4),
+            layerCount: 1,
+            headDetailTarget: {
+                layerIndex: 0,
+                headIndex: 3
+            }
+        });
+        const layout = buildSceneLayout(scene);
+        const renderer = new CanvasSceneRenderer({ canvas });
+        const detailEntry = layout.registry.getNodeEntries().find((entry) => (
+            entry.role === 'head-card'
+            && entry.semantic?.componentKind === 'mhsa'
+            && entry.semantic?.layerIndex === 0
+            && entry.semantic?.headIndex === 3
+        ));
+        const viewportPadding = 28;
+        const scale = Math.min(
+            (640 - (viewportPadding * 2)) / Math.max(1, detailEntry.bounds.width),
+            (360 - (viewportPadding * 2)) / Math.max(1, detailEntry.bounds.height)
+        );
+        const offsetX = ((640 - (detailEntry.bounds.width * scale)) / 2) - (detailEntry.bounds.x * scale);
+        const offsetY = ((360 - (detailEntry.bounds.height * scale)) / 2) - (detailEntry.bounds.y * scale);
+        renderer.setScene(scene, layout);
+
+        expect(renderer.render({
+            width: 640,
+            height: 360,
+            dpr: 1,
+            headDetailDepthActive: true,
+            viewportTransform: {
+                source: 'test-selected-head-card',
+                scale,
+                offsetX,
+                offsetY
+            }
+        })).toBe(true);
+
+        expect(ctx.operations.some((entry) => (
+            entry.type === 'fillRect'
+            && entry.fillStyle === '#000'
+        ))).toBe(true);
+        expect(ctx.operations.some((entry) => (
+            entry.type === 'stroke'
+            && entry.strokeStyle === 'rgb(255, 255, 255)'
+        ))).toBe(true);
+        expect(ctx.operations.filter((entry) => entry.type === 'createLinearGradient').length).toBeGreaterThan(0);
+        expect(ctx.operations.filter((entry) => entry.type === 'fillRect').length).toBeGreaterThan(10);
+        expect(ctx.operations.some((entry) => entry.type === 'stroke')).toBe(true);
+        expect(renderer.getLastRenderState()?.viewportSource).toBe('test-selected-head-card');
+        expect(renderer.getLastRenderState()?.headDetailBounds).toBeTruthy();
+        expect(renderer.getLastRenderState()?.headDetailDepthActive).toBe(true);
+    });
+
+    it('renders the deepest concatenate detail stage with a framed concat target and inbound arrows', () => {
+        const scene = buildTransformerSceneModel({
+            activationSource: createActivationSource(4),
+            layerCount: 1,
+            concatDetailTarget: {
+                layerIndex: 0
+            }
+        });
+        const layout = buildSceneLayout(scene);
+        const renderer = new CanvasSceneRenderer({ canvas });
+        const detailEntry = layout.registry.getNodeEntries().find((entry) => (
+            entry.role === 'concat-card'
+            && entry.semantic?.componentKind === 'mhsa'
+            && entry.semantic?.layerIndex === 0
+            && entry.semantic?.stage === 'concatenate'
+        ));
+        const viewportPadding = 28;
+        const scale = Math.min(
+            (640 - (viewportPadding * 2)) / Math.max(1, detailEntry.bounds.width),
+            (360 - (viewportPadding * 2)) / Math.max(1, detailEntry.bounds.height)
+        );
+        const offsetX = ((640 - (detailEntry.bounds.width * scale)) / 2) - (detailEntry.bounds.x * scale);
+        const offsetY = ((360 - (detailEntry.bounds.height * scale)) / 2) - (detailEntry.bounds.y * scale);
+        renderer.setScene(scene, layout);
+
+        expect(renderer.render({
+            width: 640,
+            height: 360,
+            dpr: 1,
+            headDetailDepthActive: true,
+            viewportTransform: {
+                source: 'test-selected-concat-card',
+                scale,
+                offsetX,
+                offsetY
+            }
+        })).toBe(true);
+
+        expect(ctx.operations.some((entry) => (
+            entry.type === 'fillRect'
+            && entry.fillStyle === '#000'
+        ))).toBe(true);
+        expect(ctx.operations.filter((entry) => entry.type === 'lineTo').length).toBeGreaterThanOrEqual(24);
+        expect(ctx.operations.filter((entry) => entry.type === 'stroke').length).toBeGreaterThanOrEqual(13);
+        expect(renderer.getLastRenderState()?.detailTargetKind).toBe('concatenate');
+        expect(renderer.getLastRenderState()?.concatDetailBounds).toBeTruthy();
+        expect(renderer.getLastRenderState()?.headDetailDepthActive).toBe(true);
+    });
+
+    it('renders the deepest output projection detail stage with a magenta frame and one inbound arrow', () => {
+        const scene = buildTransformerSceneModel({
+            activationSource: createActivationSource(4),
+            layerCount: 1,
+            outputProjectionDetailTarget: {
+                layerIndex: 0
+            }
+        });
+        const layout = buildSceneLayout(scene);
+        const renderer = new CanvasSceneRenderer({ canvas });
+        const detailEntry = layout.registry.getNodeEntries().find((entry) => (
+            entry.role === 'projection-weight'
+            && entry.semantic?.componentKind === 'output-projection'
+            && entry.semantic?.layerIndex === 0
+            && entry.semantic?.stage === 'attn-out'
+        ));
+        const viewportPadding = 28;
+        const scale = Math.min(
+            (640 - (viewportPadding * 2)) / Math.max(1, detailEntry.bounds.width),
+            (360 - (viewportPadding * 2)) / Math.max(1, detailEntry.bounds.height)
+        );
+        const offsetX = ((640 - (detailEntry.bounds.width * scale)) / 2) - (detailEntry.bounds.x * scale);
+        const offsetY = ((360 - (detailEntry.bounds.height * scale)) / 2) - (detailEntry.bounds.y * scale);
+        renderer.setScene(scene, layout);
+
+        expect(renderer.render({
+            width: 640,
+            height: 360,
+            dpr: 1,
+            headDetailDepthActive: true,
+            viewportTransform: {
+                source: 'test-selected-output-projection',
+                scale,
+                offsetX,
+                offsetY
+            }
+        })).toBe(true);
+
+        expect(ctx.operations.some((entry) => (
+            entry.type === 'fillRect'
+            && entry.fillStyle === '#000'
+        ))).toBe(true);
+        expect(ctx.operations.filter((entry) => entry.type === 'lineTo').length).toBeGreaterThanOrEqual(1);
+        expect(ctx.operations.some((entry) => (
+            entry.type === 'stroke'
+            && entry.strokeStyle === resolveView2dStyle(VIEW2D_STYLE_KEYS.OUTPUT_PROJECTION)?.stroke
+        ))).toBe(true);
+        expect(renderer.getLastRenderState()?.detailTargetKind).toBe('output-projection');
+        expect(renderer.getLastRenderState()?.outputProjectionDetailBounds).toBeTruthy();
+        expect(renderer.getLastRenderState()?.headDetailDepthActive).toBe(true);
     });
 
     it('snaps connector path strokes to a stable half-pixel grid', () => {
@@ -285,7 +474,7 @@ describe('CanvasSceneRenderer', () => {
         expect(renderer.getLastRenderState()?.offsetY).toBe(36);
     });
 
-    it('holds higher-detail matrix interiors until zoom interaction settles', () => {
+    it('uses the interaction fast path while zooming and restores full matrix detail after settle', () => {
         const matrixNode = createMatrixNode({
             role: 'matrix',
             semantic: { componentKind: 'test-matrix', role: 'matrix' },
@@ -343,7 +532,8 @@ describe('CanvasSceneRenderer', () => {
             .map((entry) => entry.text)
             .filter((text) => text === 'Row A' || text === 'Row B');
         expect(renderer.getLastRenderState()?.worldScale).toBeCloseTo(highScale, 6);
-        expect(renderer.getLastRenderState()?.detailScale).toBeCloseTo(lowScale, 6);
+        expect(renderer.getLastRenderState()?.detailScale).toBeCloseTo(highScale, 6);
+        expect(renderer.getLastRenderState()?.interactionFastPath).toBe(true);
         expect(activeRowLabels).toHaveLength(0);
 
         ctx.operations.length = 0;
@@ -368,7 +558,7 @@ describe('CanvasSceneRenderer', () => {
         expect(settledRowLabels).toEqual(['Row A', 'Row B']);
     });
 
-    it('steps zoom-out detail changes down in larger interaction chunks', () => {
+    it('tracks live interaction scale while the fast path is active', () => {
         const matrixNode = createMatrixNode({
             role: 'matrix',
             semantic: { componentKind: 'test-matrix', role: 'matrix' },
@@ -419,7 +609,7 @@ describe('CanvasSceneRenderer', () => {
             }
         })).toBe(true);
         expect(renderer.getLastRenderState()?.interactionFastPath).toBe(true);
-        expect(renderer.getLastRenderState()?.detailScale).toBeCloseTo(settledScale, 6);
+        expect(renderer.getLastRenderState()?.detailScale).toBeCloseTo(slightZoomOutScale, 6);
 
         expect(renderer.render({
             width: 640,
@@ -492,5 +682,104 @@ describe('CanvasSceneRenderer', () => {
             .filter((entry) => entry.type === 'createRadialGradient')
             .length;
         expect(interactingRadialGradientCount).toBe(0);
+    });
+
+    it('resolves residual row hits and fades non-hovered rows in compact residual strips', () => {
+        const scene = buildTransformerSceneModel({
+            activationSource: createActivationSource(4),
+            layerCount: 1
+        });
+        const layout = buildSceneLayout(scene);
+        const renderer = new CanvasSceneRenderer({ canvas });
+        const residualEntry = layout.registry.getNodeEntries().find((entry) => (
+            entry.role === 'module-card'
+            && entry.semantic?.componentKind === 'residual'
+            && entry.semantic?.stage === 'incoming'
+        ));
+        const rowPoint = {
+            x: residualEntry.contentBounds.x + residualEntry.layoutData.innerPaddingX + 8,
+            y: residualEntry.contentBounds.y + residualEntry.layoutData.innerPaddingY + (residualEntry.layoutData.rowHeight * 0.5)
+        };
+
+        renderer.setScene(scene, layout);
+        expect(renderer.render({ width: 640, height: 360, dpr: 1 })).toBe(true);
+
+        const hit = renderer.resolveInteractiveHitAtPoint(rowPoint.x, rowPoint.y);
+        expect(hit?.node?.semantic?.componentKind).toBe('residual');
+        expect(hit?.rowHit?.rowIndex).toBe(0);
+        expect(hit?.rowHit?.rowItem?.semantic?.tokenIndex).toBe(0);
+
+        ctx.operations.length = 0;
+        expect(renderer.render({
+            width: 640,
+            height: 360,
+            dpr: 1,
+            interactionState: {
+                hoveredRow: {
+                    nodeId: residualEntry.nodeId,
+                    rowIndex: 0
+                }
+            }
+        })).toBe(true);
+
+        expect(ctx.operations.some((entry) => (
+            entry.type === 'fillRect'
+            && entry.globalAlpha === 0.18
+        ))).toBe(true);
+    });
+
+    it('only shows residual stream captions after zooming in past the residual caption threshold', () => {
+        const scene = buildTransformerSceneModel({
+            activationSource: createActivationSource(4),
+            layerCount: 1
+        });
+        const layout = buildSceneLayout(scene);
+        const renderer = new CanvasSceneRenderer({ canvas });
+        const residualEntry = layout.registry.getNodeEntries().find((entry) => (
+            entry.role === 'module-card'
+            && entry.semantic?.componentKind === 'residual'
+            && entry.semantic?.stage === 'incoming'
+        ));
+
+        renderer.setScene(scene, layout);
+
+        expect(renderer.render({
+            width: 640,
+            height: 360,
+            dpr: 1,
+            viewportTransform: {
+                source: 'residual-caption-medium-zoom',
+                scale: 1.4,
+                offsetX: -residualEntry.bounds.x * 1.4,
+                offsetY: -residualEntry.bounds.y * 1.4
+            }
+        })).toBe(true);
+
+        expect(ctx.operations.some((entry) => (
+            entry.type === 'fillText'
+            && (entry.text === 'X' || entry.text === '4 × 768')
+        ))).toBe(false);
+
+        ctx.operations.length = 0;
+        expect(renderer.render({
+            width: 640,
+            height: 360,
+            dpr: 1,
+            viewportTransform: {
+                source: 'residual-caption-high-zoom',
+                scale: 3.2,
+                offsetX: -residualEntry.bounds.x * 3.2,
+                offsetY: -residualEntry.bounds.y * 3.2
+            }
+        })).toBe(true);
+
+        expect(ctx.operations.some((entry) => (
+            entry.type === 'fillText'
+            && entry.text === 'X'
+        ))).toBe(true);
+        expect(ctx.operations.some((entry) => (
+            entry.type === 'fillText'
+            && entry.text === '4 × 768'
+        ))).toBe(true);
     });
 });

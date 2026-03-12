@@ -103,7 +103,6 @@ export function createGeluDetailView(panelEl) {
             <p>It keeps negative inputs but shrinks them smoothly, while mostly preserving large positive inputs.</p>
         </div>
         <div class="detail-equations detail-gelu-equation-shell is-visible" aria-hidden="false">
-            <div class="detail-equations-title">Equation</div>
             <div class="detail-equations-body detail-gelu-formula" data-gelu-formula></div>
         </div>
         <div class="detail-data detail-gelu-graph-card">

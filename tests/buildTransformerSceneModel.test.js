@@ -9,6 +9,8 @@ import {
     flattenSceneNodes,
     VIEW2D_MATRIX_PRESENTATIONS
 } from '../src/view2d/schema/sceneTypes.js';
+import { resolveView2dCaptionLines } from '../src/view2d/captionUtils.js';
+import { VIEW2D_VECTOR_STRIP_VARIANT } from '../src/view2d/shared/vectorStrip.js';
 import { D_HEAD, D_MODEL } from '../src/ui/selectionPanelConstants.js';
 
 function createActivationSource(tokenCount = 4) {
@@ -105,6 +107,195 @@ describe('buildTransformerSceneModel', () => {
             node.role === 'residual-add-operator'
             && node.visual?.styleKey === 'residual.add-symbol'
         ))).toBe(true);
+        expect(nodes.some((node) => (
+            node.role === 'concat-card'
+            && node.visual?.styleKey === 'concatenate'
+        ))).toBe(true);
+    });
+
+    it('uses full stage labels for the transformer 2D canvas text', () => {
+        const scene = buildTransformerSceneModel({
+            activationSource: createActivationSource(4),
+            layerCount: 1
+        });
+        const nodes = flattenSceneNodes(scene);
+        const layout = buildSceneLayout(scene);
+
+        expect(nodes.find((node) => (
+            node.role === 'module-title'
+            && node.semantic?.componentKind === 'layer-norm'
+            && node.semantic?.stage === 'ln1'
+        ))?.text).toBe('LayerNorm 1');
+        expect(nodes.find((node) => (
+            node.role === 'head-label'
+            && node.semantic?.componentKind === 'mhsa'
+            && node.semantic?.headIndex === 0
+        ))?.text).toBe('Attention Head 1');
+        expect(nodes.find((node) => (
+            node.role === 'module-title'
+            && node.semantic?.componentKind === 'output-projection'
+        ))?.text).toBe('Output Projection');
+        expect(nodes.find((node) => (
+            node.role === 'module-title'
+            && node.semantic?.componentKind === 'mlp'
+            && node.semantic?.stage === 'mlp'
+        ))?.text).toBe('Multilayer Perceptron');
+
+        const outputProjectionTitleEntry = layout.registry.getNodeEntries().find((entry) => (
+            entry.role === 'module-title'
+            && entry.semantic?.componentKind === 'output-projection'
+        ));
+        const outputProjectionCardEntry = layout.registry.getNodeEntries().find((entry) => (
+            entry.role === 'projection-weight'
+            && entry.semantic?.componentKind === 'output-projection'
+        ));
+        const mlpTitleEntry = layout.registry.getNodeEntries().find((entry) => (
+            entry.role === 'module-title'
+            && entry.semantic?.componentKind === 'mlp'
+            && entry.semantic?.stage === 'mlp'
+        ));
+        const mlpCardEntry = layout.registry.getNodeEntries().find((entry) => (
+            entry.role === 'module-card'
+            && entry.semantic?.componentKind === 'mlp'
+            && entry.semantic?.stage === 'mlp'
+        ));
+
+        expect(outputProjectionTitleEntry?.contentBounds?.width).toBeLessThanOrEqual(outputProjectionCardEntry?.contentBounds?.width ?? 0);
+        expect(mlpTitleEntry?.contentBounds?.width).toBeLessThanOrEqual(mlpCardEntry?.contentBounds?.width ?? 0);
+    });
+
+    it('stores residual stream captions above the matrix card for zoomed-in rendering', () => {
+        const scene = buildTransformerSceneModel({
+            activationSource: createActivationSource(4),
+            layerCount: 1
+        });
+        const nodes = flattenSceneNodes(scene);
+        const layout = buildSceneLayout(scene);
+        const incomingResidualCard = nodes.find((node) => (
+            node.role === 'module-card'
+            && node.semantic?.componentKind === 'residual'
+            && node.semantic?.stage === 'incoming'
+        ));
+        const incomingResidualEntry = layout.registry.getNodeEntries().find((entry) => (
+            entry.role === 'module-card'
+            && entry.semantic?.componentKind === 'residual'
+            && entry.semantic?.stage === 'incoming'
+        ));
+
+        expect(nodes.some((node) => (
+            node.role === 'module-title'
+            && node.semantic?.componentKind === 'residual'
+            && node.semantic?.stage === 'incoming'
+        ))).toBe(false);
+        expect(incomingResidualCard?.label?.tex).toBe('\\mathrm{X}');
+        expect(incomingResidualCard?.metadata?.caption?.position).toBe('float-top');
+        expect(incomingResidualCard?.metadata?.caption?.styleKey).toBe('label');
+        expect(incomingResidualCard?.metadata?.caption?.dimensionsText).toBe('4 × 768');
+        expect(incomingResidualCard?.metadata?.caption?.dimensionsTex).toBe('4 \\times 768');
+        expect(incomingResidualCard?.metadata?.caption?.minScreenHeightPx).toBe(28);
+        expect(incomingResidualEntry?.labelBounds?.y).toBeLessThan(incomingResidualEntry?.contentBounds?.y ?? 0);
+        expect(incomingResidualEntry?.dimensionBounds?.y).toBeLessThan(incomingResidualEntry?.contentBounds?.y ?? 0);
+    });
+
+    it('keeps captions scoped to residual stream vectors instead of all transformer cards', () => {
+        const scene = buildTransformerSceneModel({
+            activationSource: createActivationSource(4),
+            layerCount: 1
+        });
+        const nodes = flattenSceneNodes(scene);
+        const incomingResidualCard = nodes.find((node) => (
+            node.role === 'module-card'
+            && node.semantic?.componentKind === 'residual'
+            && node.semantic?.stage === 'incoming'
+        ));
+        const layerNormCard = nodes.find((node) => (
+            node.role === 'module-card'
+            && node.semantic?.componentKind === 'layer-norm'
+            && node.semantic?.stage === 'ln1'
+        ));
+        const headCard = nodes.find((node) => (
+            node.role === 'head-card'
+            && node.semantic?.componentKind === 'mhsa'
+            && node.semantic?.layerIndex === 0
+            && node.semantic?.headIndex === 0
+        ));
+        const concatCard = nodes.find((node) => (
+            node.role === 'concat-card'
+            && node.semantic?.componentKind === 'mhsa'
+            && node.semantic?.layerIndex === 0
+        ));
+        const outputProjectionCard = nodes.find((node) => (
+            node.role === 'projection-weight'
+            && node.semantic?.componentKind === 'output-projection'
+            && node.semantic?.layerIndex === 0
+        ));
+
+        expect(resolveView2dCaptionLines(incomingResidualCard)).toEqual([
+            { tex: '\\mathrm{X}', text: 'X' },
+            { tex: '4 \\times 768', text: '4 × 768' }
+        ]);
+        expect(resolveView2dCaptionLines(layerNormCard)).toEqual([]);
+        expect(resolveView2dCaptionLines(headCard)).toEqual([]);
+        expect(resolveView2dCaptionLines(concatCard)).toEqual([]);
+        expect(resolveView2dCaptionLines(outputProjectionCard)).toEqual([]);
+    });
+
+    it('tracks the selected head without creating a separate detail panel', () => {
+        const scene = buildTransformerSceneModel({
+            activationSource: createActivationSource(4),
+            layerCount: 1,
+            headDetailTarget: {
+                layerIndex: 0,
+                headIndex: 2
+            }
+        });
+        const nodes = flattenSceneNodes(scene);
+        const selectedHeadCardNode = nodes.find((node) => (
+            node.role === 'head-card'
+            && node.semantic?.componentKind === 'mhsa'
+            && node.semantic?.layerIndex === 0
+            && node.semantic?.headIndex === 2
+        ));
+
+        expect(scene.metadata.headDetailTarget).toEqual({
+            layerIndex: 0,
+            headIndex: 2
+        });
+        expect(scene.metadata.headDetailPreview?.xLnCopies).toBe(3);
+        expect(scene.metadata.headDetailPreview?.rowItems).toHaveLength(4);
+        expect(scene.metadata.headDetailPreview?.rowItems?.[0]?.gradientCss).toContain('linear-gradient(');
+        expect(nodes.some((node) => node.role === 'head-detail-panel')).toBe(false);
+        expect(selectedHeadCardNode?.visual?.styleKey).toBe('mhsa.head');
+    });
+
+    it('stores concatenate detail preview metadata for layer-level concat focus', () => {
+        const scene = buildTransformerSceneModel({
+            activationSource: createActivationSource(4),
+            layerCount: 1,
+            concatDetailTarget: {
+                layerIndex: 0
+            }
+        });
+
+        expect(scene.metadata.concatDetailTarget).toEqual({
+            layerIndex: 0
+        });
+        expect(scene.metadata.concatDetailPreview?.arrowCount).toBe(12);
+    });
+
+    it('stores output projection detail preview metadata for layer-level projection focus', () => {
+        const scene = buildTransformerSceneModel({
+            activationSource: createActivationSource(4),
+            layerCount: 1,
+            outputProjectionDetailTarget: {
+                layerIndex: 0
+            }
+        });
+
+        expect(scene.metadata.outputProjectionDetailTarget).toEqual({
+            layerIndex: 0
+        });
+        expect(scene.metadata.outputProjectionDetailPreview?.arrowCount).toBe(1);
     });
 
     it('renders incoming and post-attention residual states as compact value summaries', () => {
@@ -134,6 +325,9 @@ describe('buildTransformerSceneModel', () => {
         expect(incomingResidual?.rowItems?.[0]?.gradientCss).toContain('linear-gradient(');
         expect(postAttentionResidual?.rowItems?.[0]?.gradientCss).toContain('linear-gradient(');
         expect(postAttentionResidual?.rowItems?.[0]?.gradientCss).not.toBe(incomingResidual?.rowItems?.[0]?.gradientCss);
+        expect(incomingResidual?.metadata?.compactRows?.variant).toBe(VIEW2D_VECTOR_STRIP_VARIANT);
+        expect(incomingResidual?.metadata?.compactRows?.rowGap).toBe(1);
+        expect(incomingResidual?.metadata?.compactRows?.paddingY).toBe(0);
 
         const layout = buildSceneLayout(scene);
         const incomingEntry = layout.registry.getNodeEntries().find((entry) => (
@@ -143,8 +337,33 @@ describe('buildTransformerSceneModel', () => {
             && entry.role === 'module-card'
         ));
 
-        expect(incomingEntry?.contentBounds?.height).toBeGreaterThan(36);
-        expect(incomingEntry?.contentBounds?.height).toBeLessThan(60);
+        expect(incomingEntry?.contentBounds?.height).toBeGreaterThan(24);
+        expect(incomingEntry?.contentBounds?.height).toBeLessThan(40);
+    });
+
+    it('uses the full live token window when explicit token indices are provided', () => {
+        const tokenIndices = Array.from({ length: 14 }, (_, index) => index);
+        const tokenLabels = tokenIndices.map((index) => `tok_${index}`);
+        const scene = buildTransformerSceneModel({
+            activationSource: createActivationSource(14),
+            layerCount: 1,
+            tokenIndices,
+            tokenLabels
+        });
+        const nodes = flattenSceneNodes(scene);
+        const incomingResidual = nodes.find((node) => (
+            node.semantic?.componentKind === 'residual'
+            && node.semantic?.layerIndex === 0
+            && node.semantic?.stage === 'incoming'
+            && node.role === 'module-card'
+        ));
+
+        expect(scene.metadata.tokenCount).toBe(14);
+        expect(scene.metadata.tokenIndices).toEqual(tokenIndices);
+        expect(incomingResidual?.dimensions?.rows).toBe(14);
+        expect(incomingResidual?.rowItems).toHaveLength(14);
+        expect(incomingResidual?.rowItems?.[13]?.label).toBe('tok_13');
+        expect(incomingResidual?.metadata?.caption?.dimensionsText).toBe('14 × 768');
     });
 
     it('resolves semantic bounds and focus paths for layer and head targets after layout', () => {
@@ -217,6 +436,28 @@ describe('buildTransformerSceneModel', () => {
         expect(connectorEntry.pathPoints[1].x).toBeCloseTo(connectorEntry.pathPoints[2].x, 5);
     });
 
+    it('routes MHSA head outputs through a concatenate box before output projection', () => {
+        const scene = buildTransformerSceneModel({
+            activationSource: createActivationSource(4)
+        });
+        const layout = buildSceneLayout(scene);
+
+        const concatEntry = layout.registry.getNodeEntries().find((entry) => (
+            entry.semantic?.componentKind === 'mhsa'
+            && entry.semantic?.layerIndex === 0
+            && entry.semantic?.stage === 'concatenate'
+            && entry.role === 'concat-card'
+        ));
+        const connectorEntry = layout.registry.getConnectorEntries().find(
+            (entry) => entry.role === 'connector-layer-0-concat-outproj'
+        );
+
+        expect(concatEntry).toBeTruthy();
+        expect(connectorEntry).toBeTruthy();
+        expect(connectorEntry.pathPoints).toHaveLength(2);
+        expect(connectorEntry.pathPoints[0].x).toBeLessThan(connectorEntry.pathPoints[1].x);
+    });
+
     it('returns MLP to the second residual add node with a right-then-up elbow', () => {
         const scene = buildTransformerSceneModel({
             activationSource: createActivationSource(4)
@@ -231,7 +472,7 @@ describe('buildTransformerSceneModel', () => {
         expect(connectorEntry.pathPoints[1].x).toBeCloseTo(connectorEntry.pathPoints[2].x, 5);
     });
 
-    it('keeps LN1, Head 1, output projection, LN2, and MLP on the same lower-row centerline', () => {
+    it('keeps LN1, output projection, LN2, and MLP on the same lower-row centerline', () => {
         const scene = buildTransformerSceneModel({
             activationSource: createActivationSource(4)
         });
@@ -242,12 +483,6 @@ describe('buildTransformerSceneModel', () => {
             && entry.semantic?.layerIndex === 0
             && entry.semantic?.stage === 'ln1'
             && entry.role === 'module-card'
-        ));
-        const head1Entry = layout.registry.getNodeEntries().find((entry) => (
-            entry.semantic?.componentKind === 'mhsa'
-            && entry.semantic?.layerIndex === 0
-            && entry.semantic?.headIndex === 0
-            && entry.role === 'head-card'
         ));
         const outProjEntry = layout.registry.getNodeEntries().find((entry) => (
             entry.semantic?.componentKind === 'output-projection'
@@ -268,15 +503,54 @@ describe('buildTransformerSceneModel', () => {
         ));
 
         const ln1CenterY = ln1Entry.contentBounds.y + (ln1Entry.contentBounds.height / 2);
-        const head1CenterY = head1Entry.contentBounds.y + (head1Entry.contentBounds.height / 2);
         const outProjCenterY = outProjEntry.contentBounds.y + (outProjEntry.contentBounds.height / 2);
         const ln2CenterY = ln2Entry.contentBounds.y + (ln2Entry.contentBounds.height / 2);
         const mlpCenterY = mlpEntry.contentBounds.y + (mlpEntry.contentBounds.height / 2);
 
-        expect(ln1CenterY).toBeCloseTo(head1CenterY, 5);
         expect(ln1CenterY).toBeCloseTo(outProjCenterY, 5);
         expect(ln2CenterY).toBeCloseTo(mlpCenterY, 5);
         expect(ln1CenterY).toBeCloseTo(ln2CenterY, 5);
+    });
+
+    it('keeps the top residual streamline on a single centerline even with zoomed residual captions', () => {
+        const scene = buildTransformerSceneModel({
+            activationSource: createActivationSource(4)
+        });
+        const layout = buildSceneLayout(scene);
+
+        const incomingResidualEntry = layout.registry.getNodeEntries().find((entry) => (
+            entry.semantic?.componentKind === 'residual'
+            && entry.semantic?.layerIndex === 0
+            && entry.semantic?.stage === 'incoming'
+            && entry.role === 'module-card'
+        ));
+        const postAttentionAddEntry = layout.registry.getNodeEntries().find((entry) => (
+            entry.semantic?.componentKind === 'residual'
+            && entry.semantic?.layerIndex === 0
+            && entry.semantic?.stage === 'post-attn-add'
+            && entry.role === 'add-circle'
+        ));
+        const postAttentionResidualEntry = layout.registry.getNodeEntries().find((entry) => (
+            entry.semantic?.componentKind === 'residual'
+            && entry.semantic?.layerIndex === 0
+            && entry.semantic?.stage === 'post-attn-residual'
+            && entry.role === 'module-card'
+        ));
+        const postMlpAddEntry = layout.registry.getNodeEntries().find((entry) => (
+            entry.semantic?.componentKind === 'residual'
+            && entry.semantic?.layerIndex === 0
+            && entry.semantic?.stage === 'post-mlp-add'
+            && entry.role === 'add-circle'
+        ));
+
+        const incomingResidualCenterY = incomingResidualEntry.contentBounds.y + (incomingResidualEntry.contentBounds.height / 2);
+        const postAttentionAddCenterY = postAttentionAddEntry.contentBounds.y + (postAttentionAddEntry.contentBounds.height / 2);
+        const postAttentionResidualCenterY = postAttentionResidualEntry.contentBounds.y + (postAttentionResidualEntry.contentBounds.height / 2);
+        const postMlpAddCenterY = postMlpAddEntry.contentBounds.y + (postMlpAddEntry.contentBounds.height / 2);
+
+        expect(incomingResidualCenterY).toBeCloseTo(postAttentionAddCenterY, 5);
+        expect(incomingResidualCenterY).toBeCloseTo(postAttentionResidualCenterY, 5);
+        expect(incomingResidualCenterY).toBeCloseTo(postMlpAddCenterY, 5);
     });
 
 });

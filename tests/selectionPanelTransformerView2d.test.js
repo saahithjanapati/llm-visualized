@@ -8,6 +8,8 @@ import {
     resolveTransformerView2dRoute,
     syncTransformerView2dRoute
 } from '../src/ui/selectionPanelTransformerView2d.js';
+import { buildSceneLayout } from '../src/view2d/layout/buildSceneLayout.js';
+import { buildTransformerSceneModel } from '../src/view2d/model/buildTransformerSceneModel.js';
 import { D_HEAD, D_MODEL } from '../src/ui/selectionPanelConstants.js';
 
 function createActivationSource(tokenCount = 4) {
@@ -84,6 +86,7 @@ function createMockContext() {
         beginPath() {},
         moveTo() {},
         lineTo() {},
+        quadraticCurveTo() {},
         arcTo() {},
         closePath() {},
         fill() {},
@@ -97,6 +100,11 @@ function createMockContext() {
         scale() {},
         setTransform() {},
         fillText() {},
+        measureText(text = '') {
+            return {
+                width: String(text).length * 7
+            };
+        },
         createLinearGradient() {
             return {
                 addColorStop() {}
@@ -133,6 +141,34 @@ function dispatchPointerEvent(target, type, {
     });
     target.dispatchEvent(event);
     return event;
+}
+
+function resolveCanvasFitTransform(sceneBounds, {
+    width = 1,
+    height = 1
+} = {}) {
+    const fitPaddingPx = Math.max(12, Math.round(Math.min(width, height) * 0.04));
+    const availableWidth = Math.max(1, width - (fitPaddingPx * 2));
+    const availableHeight = Math.max(1, height - (fitPaddingPx * 2));
+    const widthFitScale = availableWidth / Math.max(1, sceneBounds?.width || 1);
+    const heightFitScale = availableHeight / Math.max(1, sceneBounds?.height || 1);
+    const minReadableHeight = Math.min(
+        availableHeight,
+        Math.max(220, availableHeight * 0.4)
+    );
+    const readableScaleFloor = minReadableHeight / Math.max(1, sceneBounds?.height || 1);
+    const scale = Math.max(
+        0.01,
+        Math.min(2, Math.min(
+            heightFitScale,
+            Math.max(widthFitScale, readableScaleFloor)
+        ))
+    );
+    return {
+        scale,
+        offsetX: (width - ((sceneBounds?.width || 0) * scale)) / 2 - ((sceneBounds?.x || 0) * scale),
+        offsetY: (height - ((sceneBounds?.height || 0) * scale)) / 2 - ((sceneBounds?.y || 0) * scale)
+    };
 }
 
 describe('selectionPanelTransformerView2d', () => {
@@ -220,7 +256,28 @@ describe('selectionPanelTransformerView2d', () => {
             stage: 'attention',
             role: 'head'
         });
-        expect(context?.focusLabel).toBe('Layer 4 MHSA Head 9');
+        expect(context?.focusLabel).toBe('Layer 4 Attention Head 9');
+    });
+
+    it('maps concatenate selections into concat-focused 2D targets', () => {
+        const context = resolveTransformerView2dActionContext({
+            label: 'Concatenate',
+            info: {
+                layerIndex: 2,
+                activationData: {
+                    layerIndex: 2,
+                    stage: 'attention.concatenate'
+                }
+            }
+        });
+
+        expect(context?.semanticTarget).toEqual({
+            componentKind: 'mhsa',
+            layerIndex: 2,
+            stage: 'concatenate',
+            role: 'concat'
+        });
+        expect(context?.focusLabel).toBe('Layer 3 Concatenate Heads');
     });
 
     it('maps output projection matrix selections to the projection weight target', () => {
@@ -240,7 +297,27 @@ describe('selectionPanelTransformerView2d', () => {
             stage: 'attn-out',
             role: 'projection-weight'
         });
-        expect(context?.focusLabel).toBe('Layer 3 output projection');
+        expect(context?.focusLabel).toBe('Layer 3 Output Projection');
+    });
+
+    it('maps alpha projection matrix selections to the output projection target', () => {
+        const context = resolveTransformerView2dActionContext({
+            label: 'Alpha Projection Matrix',
+            info: {
+                layerIndex: 1,
+                activationData: {
+                    layerIndex: 1
+                }
+            }
+        });
+
+        expect(context?.semanticTarget).toEqual({
+            componentKind: 'output-projection',
+            layerIndex: 1,
+            stage: 'attn-out',
+            role: 'projection-weight'
+        });
+        expect(context?.focusLabel).toBe('Layer 2 Output Projection');
     });
 
     it('maps MLP projection selections to the correct stage', () => {
@@ -260,7 +337,7 @@ describe('selectionPanelTransformerView2d', () => {
             stage: 'mlp-up',
             role: 'mlp-up'
         });
-        expect(context?.focusLabel).toBe('Layer 8 MLP up projection');
+        expect(context?.focusLabel).toBe('Layer 8 Multilayer Perceptron Up Projection');
     });
 
     it('maps logits selections and top unembedding labels into output-space targets', () => {
@@ -347,6 +424,7 @@ describe('selectionPanelTransformerView2d', () => {
         const view = createTransformerView2dDetailView(panel);
         const canvas = panel.querySelector('.detail-transformer-view2d-canvas');
         const canvasCard = panel.querySelector('.detail-transformer-view2d-canvas-card');
+        const hud = panel.querySelector('.detail-transformer-view2d-hud');
         const ctx = createMockContext();
 
         canvas.getContext = vi.fn(() => ctx);
@@ -385,6 +463,328 @@ describe('selectionPanelTransformerView2d', () => {
         canvasCard.dispatchEvent(new KeyboardEvent('keyup', { key: '=', bubbles: true }));
 
         expect(afterZoom.scale).toBeGreaterThan(afterPan.scale);
+    });
+
+    it('only enters the head detail state for explicit head targets and zooms tighter than the overview focus', () => {
+        const panel = document.createElement('section');
+        panel.innerHTML = `
+            <div class="detail-header"></div>
+            <div class="detail-body"></div>
+        `;
+        document.body.appendChild(panel);
+
+        const view = createTransformerView2dDetailView(panel);
+        const canvas = panel.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panel.querySelector('.detail-transformer-view2d-canvas-card');
+        const hud = panel.querySelector('.detail-transformer-view2d-hud');
+        const ctx = createMockContext();
+
+        canvas.getContext = vi.fn(() => ctx);
+        canvas.getBoundingClientRect = () => ({
+            left: 0,
+            top: 0,
+            right: 640,
+            bottom: 360,
+            width: 640,
+            height: 360
+        });
+
+        view.setVisible(true);
+        view.open({
+            activationSource: createActivationSource(4),
+            semanticTarget: {
+                componentKind: 'mhsa',
+                layerIndex: 0,
+                stage: 'attention',
+                role: 'module'
+            },
+            focusLabel: 'Layer 1 MHSA'
+        });
+
+        const moduleScale = view.getViewportState().scale;
+        expect(panel.querySelector('[data-transformer-view2d-action="close-head-detail"]')).toBeNull();
+        expect(canvasCard.classList.contains('is-head-detail-active')).toBe(false);
+        expect(hud.hidden).toBe(false);
+
+        view.open({
+            activationSource: createActivationSource(4),
+            semanticTarget: {
+                componentKind: 'mhsa',
+                layerIndex: 0,
+                headIndex: 4,
+                stage: 'attention',
+                role: 'head'
+            },
+            focusLabel: 'Layer 1 MHSA Head 5'
+        });
+
+        const headScale = view.getViewportState().scale;
+        expect(canvasCard.classList.contains('is-head-detail-active')).toBe(true);
+        expect(hud.hidden).toBe(true);
+        expect(headScale).toBeGreaterThan(moduleScale * 1.25);
+
+        canvas.dispatchEvent(new WheelEvent('wheel', {
+            deltaY: 160,
+            clientX: 320,
+            clientY: 180,
+            bubbles: true,
+            cancelable: true
+        }));
+        rafQueue.splice(0).forEach((callback) => callback?.(performance.now()));
+
+        const zoomedOutScale = view.getViewportState().scale;
+        expect(zoomedOutScale).toBeLessThan(headScale);
+        expect(canvasCard.classList.contains('is-head-detail-active')).toBe(false);
+        expect(hud.hidden).toBe(false);
+    });
+
+    it('enters the concat detail state for concatenate targets and hides the overview HUD', () => {
+        const panel = document.createElement('section');
+        panel.innerHTML = `
+            <div class="detail-header"></div>
+            <div class="detail-body"></div>
+        `;
+        document.body.appendChild(panel);
+
+        const view = createTransformerView2dDetailView(panel);
+        const canvas = panel.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panel.querySelector('.detail-transformer-view2d-canvas-card');
+        const hud = panel.querySelector('.detail-transformer-view2d-hud');
+        const ctx = createMockContext();
+
+        canvas.getContext = vi.fn(() => ctx);
+        canvas.getBoundingClientRect = () => ({
+            left: 0,
+            top: 0,
+            right: 640,
+            bottom: 360,
+            width: 640,
+            height: 360
+        });
+
+        view.setVisible(true);
+        view.open({
+            activationSource: createActivationSource(4),
+            semanticTarget: {
+                componentKind: 'mhsa',
+                layerIndex: 0,
+                stage: 'concatenate',
+                role: 'concat'
+            },
+            focusLabel: 'Layer 1 Concatenate Heads'
+        });
+
+        expect(canvasCard.classList.contains('is-head-detail-active')).toBe(true);
+        expect(hud.hidden).toBe(true);
+
+        canvas.dispatchEvent(new WheelEvent('wheel', {
+            deltaY: 160,
+            clientX: 320,
+            clientY: 180,
+            bubbles: true,
+            cancelable: true
+        }));
+        rafQueue.splice(0).forEach((callback) => callback?.(performance.now()));
+
+        expect(canvasCard.classList.contains('is-head-detail-active')).toBe(false);
+        expect(hud.hidden).toBe(false);
+    });
+
+    it('enters the output projection detail state for output projection targets and hides the overview HUD', () => {
+        const panel = document.createElement('section');
+        panel.innerHTML = `
+            <div class="detail-header"></div>
+            <div class="detail-body"></div>
+        `;
+        document.body.appendChild(panel);
+
+        const view = createTransformerView2dDetailView(panel);
+        const canvas = panel.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panel.querySelector('.detail-transformer-view2d-canvas-card');
+        const hud = panel.querySelector('.detail-transformer-view2d-hud');
+        const ctx = createMockContext();
+
+        canvas.getContext = vi.fn(() => ctx);
+        canvas.getBoundingClientRect = () => ({
+            left: 0,
+            top: 0,
+            right: 640,
+            bottom: 360,
+            width: 640,
+            height: 360
+        });
+
+        view.setVisible(true);
+        view.open({
+            activationSource: createActivationSource(4),
+            semanticTarget: {
+                componentKind: 'output-projection',
+                layerIndex: 0,
+                stage: 'attn-out',
+                role: 'projection-weight'
+            },
+            focusLabel: 'Layer 1 Output Projection'
+        });
+
+        expect(canvasCard.classList.contains('is-head-detail-active')).toBe(true);
+        expect(hud.hidden).toBe(true);
+
+        canvas.dispatchEvent(new WheelEvent('wheel', {
+            deltaY: 160,
+            clientX: 320,
+            clientY: 180,
+            bubbles: true,
+            cancelable: true
+        }));
+        rafQueue.splice(0).forEach((callback) => callback?.(performance.now()));
+
+        expect(canvasCard.classList.contains('is-head-detail-active')).toBe(false);
+        expect(hud.hidden).toBe(false);
+    });
+
+    it('shows the shared residual hover tooltip for hovered 2D residual rows and hides it on leave', () => {
+        const panel = document.createElement('section');
+        panel.innerHTML = `
+            <div class="detail-header"></div>
+            <div class="detail-body"></div>
+        `;
+        document.body.appendChild(panel);
+
+        const view = createTransformerView2dDetailView(panel);
+        const canvas = panel.querySelector('.detail-transformer-view2d-canvas');
+        const ctx = createMockContext();
+        const activationSource = createActivationSource(4);
+
+        canvas.getContext = vi.fn(() => ctx);
+        canvas.getBoundingClientRect = () => ({
+            left: 0,
+            top: 0,
+            right: 640,
+            bottom: 360,
+            width: 640,
+            height: 360
+        });
+
+        view.setVisible(true);
+        view.open({
+            activationSource,
+            semanticTarget: {
+                componentKind: 'residual',
+                layerIndex: 0,
+                stage: 'incoming',
+                role: 'module'
+            },
+            focusLabel: 'Layer 1 incoming residual'
+        });
+
+        const scene = buildTransformerSceneModel({
+            activationSource,
+            layerCount: 1
+        });
+        const layout = buildSceneLayout(scene);
+        const residualEntry = layout.registry.getNodeEntries().find((entry) => (
+            entry.role === 'module-card'
+            && entry.semantic?.componentKind === 'residual'
+            && entry.semantic?.stage === 'incoming'
+        ));
+        const viewport = view.getViewportState();
+        const worldX = residualEntry.contentBounds.x + residualEntry.layoutData.innerPaddingX + 8;
+        const worldY = residualEntry.contentBounds.y + residualEntry.layoutData.innerPaddingY + (residualEntry.layoutData.rowHeight * 0.5);
+        const clientX = viewport.panX + (worldX * viewport.scale);
+        const clientY = viewport.panY + (worldY * viewport.scale);
+
+        dispatchPointerEvent(canvas, 'pointermove', {
+            clientX,
+            clientY,
+            pointerType: 'mouse'
+        });
+
+        const tooltip = document.body.querySelector('.scene-hover-label');
+        expect(tooltip?.style.display).toBe('block');
+        expect(tooltip?.querySelector('.scene-hover-label__text')?.textContent).toBe('Residual Stream Vector');
+        expect(tooltip?.querySelector('.scene-hover-label__token-chip')?.textContent).toContain('tok_0');
+        expect(tooltip?.querySelector('.scene-hover-label__subtitle')?.textContent).toBe('Position 1 • Layer 1');
+
+        dispatchPointerEvent(canvas, 'pointerleave', {
+            clientX,
+            clientY,
+            pointerType: 'mouse'
+        });
+
+        expect(tooltip?.style.display).toBe('none');
+    });
+
+    it('shows the shared post-layernorm hover tooltip for deep attention-head branch copies', () => {
+        const panel = document.createElement('section');
+        panel.innerHTML = `
+            <div class="detail-header"></div>
+            <div class="detail-body"></div>
+        `;
+        document.body.appendChild(panel);
+
+        const view = createTransformerView2dDetailView(panel);
+        const canvas = panel.querySelector('.detail-transformer-view2d-canvas');
+        const ctx = createMockContext();
+        const activationSource = createActivationSource(4);
+
+        canvas.getContext = vi.fn(() => ctx);
+        canvas.getBoundingClientRect = () => ({
+            left: 0,
+            top: 0,
+            right: 640,
+            bottom: 360,
+            width: 640,
+            height: 360
+        });
+
+        view.setVisible(true);
+        view.open({
+            activationSource,
+            semanticTarget: {
+                componentKind: 'mhsa',
+                layerIndex: 0,
+                headIndex: 4,
+                stage: 'attention',
+                role: 'head'
+            },
+            focusLabel: 'Layer 1 MHSA Head 5'
+        });
+        rafQueue.splice(0).forEach((callback) => callback?.(performance.now()));
+
+        const scene = buildTransformerSceneModel({
+            activationSource,
+            layerCount: 1,
+            headDetailTarget: {
+                layerIndex: 0,
+                headIndex: 4
+            }
+        });
+        const headDetailScene = scene.metadata.headDetailScene;
+        const detailLayout = buildSceneLayout(headDetailScene);
+        const copyEntry = detailLayout.registry.getNodeEntries().find((entry) => (
+            entry.role === 'x-ln-copy'
+            && entry.semantic?.branchKey === 'q'
+        ));
+        const detailTransform = resolveCanvasFitTransform(detailLayout.sceneBounds, {
+            width: 640,
+            height: 360
+        });
+        const worldX = copyEntry.contentBounds.x + 8;
+        const worldY = copyEntry.contentBounds.y + copyEntry.layoutData.innerPaddingY + (copyEntry.layoutData.rowHeight * 0.5);
+        const clientX = detailTransform.offsetX + (worldX * detailTransform.scale);
+        const clientY = detailTransform.offsetY + (worldY * detailTransform.scale);
+
+        dispatchPointerEvent(canvas, 'pointermove', {
+            clientX,
+            clientY,
+            pointerType: 'mouse'
+        });
+
+        const tooltip = document.body.querySelector('.scene-hover-label');
+        expect(tooltip?.style.display).toBe('block');
+        expect(tooltip?.querySelector('.scene-hover-label__text')?.textContent).toBe('Post LayerNorm Residual Vector');
+        expect(tooltip?.querySelector('.scene-hover-label__token-chip')?.textContent).toContain('tok_0');
+        expect(tooltip?.querySelector('.scene-hover-label__subtitle')?.textContent).toBe('Position 1 • Head 5 • Layer 1');
     });
 
     it('supports touch pan and pinch zoom on the transformer 2D canvas surface', () => {

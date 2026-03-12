@@ -7,6 +7,15 @@ import {
 } from '../schema/sceneTypes.js';
 import { resolveView2dVisualTokens } from '../theme/visualTokens.js';
 import {
+    fitView2dText,
+    measureView2dText
+} from '../textMeasurement.js';
+import {
+    resolveView2dCaptionLines,
+    resolveView2dCaptionMeasurementText,
+    resolveView2dCaptionPosition
+} from '../captionUtils.js';
+import {
     inflateBounds,
     LayoutRegistry,
     unionBounds
@@ -33,22 +42,15 @@ function parsePx(value, fallback = 0) {
     return Number.isFinite(numeric) ? numeric : fallback;
 }
 
-function measureTextWidth(text = '', fontSize = 12) {
-    const safeText = typeof text === 'string' ? text : '';
-    return Math.max(0, (safeText.length || 1) * fontSize * 0.58);
+function resolveTextMetrics(text = '', baseFontSize = 12, textFit = null) {
+    return fitView2dText(text, {
+        baseFontSize,
+        maxWidth: textFit?.maxWidth ?? null
+    });
 }
 
-function resolveCaptionLines(node) {
-    if (!node?.label) return [];
-    const labelText = String(node.label.text || node.label.tex || '').trim();
-    const lines = [];
-    if (labelText.length) {
-        lines.push(labelText);
-    }
-    if (node.kind === VIEW2D_NODE_KINDS.MATRIX && Number.isFinite(node.dimensions?.rows) && Number.isFinite(node.dimensions?.cols)) {
-        lines.push(`(${node.dimensions.rows}, ${node.dimensions.cols})`);
-    }
-    return lines;
+function measureTextWidth(text = '', fontSize = 12) {
+    return measureView2dText(text, { fontSize }).inkWidth;
 }
 
 function resolveMeasuredValue(value, fallback = null) {
@@ -156,11 +158,19 @@ function resolveGroupGap(node, config) {
 }
 
 function measureLeafNode(node, config) {
-    const captionLines = resolveCaptionLines(node);
-    const captionWidth = captionLines.length
-        ? Math.max(...captionLines.map((line) => measureTextWidth(line, config.component.captionFontSize)))
+    const captionLines = resolveView2dCaptionLines(node);
+    const captionPosition = resolveView2dCaptionPosition(node);
+    const shouldMeasureCaptionWidth = captionLines.length && captionPosition !== 'inside-top';
+    const reserveCaptionSpace = captionLines.length && captionPosition === 'top';
+    const captionWidth = shouldMeasureCaptionWidth
+        ? Math.max(
+            ...captionLines.map((line) => measureTextWidth(
+                resolveView2dCaptionMeasurementText(line),
+                config.component.captionFontSize
+            ))
+        )
         : 0;
-    const captionHeight = captionLines.length
+    const captionHeight = reserveCaptionSpace
         ? (config.component.captionGap + (captionLines.length * config.component.captionLineHeight))
         : 0;
     let contentWidth = 0;
@@ -289,10 +299,17 @@ function measureLeafNode(node, config) {
             };
         }
     } else if (node.kind === VIEW2D_NODE_KINDS.TEXT) {
-        contentWidth = measureTextWidth(node.text || node.tex, config.component.labelFontSize);
-        contentHeight = config.component.labelFontSize * 1.4;
+        const textMetrics = resolveTextMetrics(
+            node.text || node.tex,
+            config.component.labelFontSize,
+            node.metadata?.textFit || null
+        );
+        contentWidth = textMetrics.width;
+        contentHeight = textMetrics.height;
         layoutData = {
-            fontSize: config.component.labelFontSize
+            fontSize: textMetrics.fontSize,
+            maxWidth: textMetrics.maxWidth,
+            paddingX: textMetrics.paddingX
         };
     } else if (node.kind === VIEW2D_NODE_KINDS.OPERATOR) {
         const rawWidth = measureTextWidth(node.text || '', config.component.operatorFontSize);
@@ -312,6 +329,7 @@ function measureLeafNode(node, config) {
         contentWidth,
         contentHeight,
         captionLines,
+        captionPosition,
         captionWidth,
         captionHeight,
         layoutData
@@ -326,6 +344,7 @@ function measureNode(node, config, cache) {
             contentWidth: 0,
             contentHeight: 0,
             captionLines: [],
+            captionPosition: 'bottom',
             captionWidth: 0,
             captionHeight: 0,
             layoutData: {},
@@ -351,6 +370,7 @@ function measureNode(node, config, cache) {
                 contentHeight: childMeasurements.reduce((acc, child) => acc + child.height, 0)
                     + (Math.max(0, childMeasurements.length - 1) * gap),
                 captionLines: [],
+                captionPosition: 'bottom',
                 captionWidth: 0,
                 captionHeight: 0,
                 layoutData: {
@@ -367,6 +387,7 @@ function measureNode(node, config, cache) {
                 contentWidth: childMeasurements.length ? Math.max(...childMeasurements.map((child) => child.width)) : 0,
                 contentHeight: childMeasurements.length ? Math.max(...childMeasurements.map((child) => child.height)) : 0,
                 captionLines: [],
+                captionPosition: 'bottom',
                 captionWidth: 0,
                 captionHeight: 0,
                 layoutData: {
@@ -385,6 +406,7 @@ function measureNode(node, config, cache) {
                     + (Math.max(0, childMeasurements.length - 1) * gap),
                 contentHeight: childMeasurements.length ? Math.max(...childMeasurements.map((child) => child.height)) : 0,
                 captionLines: [],
+                captionPosition: 'bottom',
                 captionWidth: 0,
                 captionHeight: 0,
                 layoutData: {
@@ -402,6 +424,7 @@ function measureNode(node, config, cache) {
             contentWidth: 0,
             contentHeight: 0,
             captionLines: [],
+            captionPosition: 'bottom',
             captionWidth: 0,
             captionHeight: 0,
             layoutData: {},
@@ -508,9 +531,12 @@ function placeNode(node, x, y, measurement, registry, config, depth = 0, parentI
     }
 
     const contentX = x + ((measurement.width - measurement.contentWidth) / 2);
+    const contentY = measurement.captionPosition === 'top'
+        ? y + measurement.captionHeight
+        : y;
     const contentBounds = {
         x: contentX,
-        y,
+        y: contentY,
         width: measurement.contentWidth,
         height: measurement.contentHeight
     };
@@ -522,20 +548,26 @@ function placeNode(node, x, y, measurement, registry, config, depth = 0, parentI
     };
     let labelBounds = null;
     let dimensionBounds = null;
-    if (measurement.captionLines.length) {
-        const captionY = y + measurement.contentHeight + config.component.captionGap;
+    if (measurement.captionLines.length && (measurement.captionHeight > 0 || measurement.captionPosition === 'float-top')) {
+        const lineHeight = config.component.captionLineHeight;
+        const floatTopGap = Math.max(2, Math.round(config.component.captionGap * 0.4));
+        const captionY = measurement.captionPosition === 'top'
+            ? y
+            : (measurement.captionPosition === 'float-top'
+                ? contentBounds.y - floatTopGap - (measurement.captionLines.length * lineHeight)
+                : y + measurement.contentHeight + config.component.captionGap);
         labelBounds = {
             x: x + ((measurement.width - measurement.captionWidth) / 2),
             y: captionY,
             width: measurement.captionWidth,
-            height: config.component.captionLineHeight
+            height: lineHeight
         };
         if (measurement.captionLines.length > 1) {
             dimensionBounds = {
                 x: labelBounds.x,
-                y: labelBounds.y + config.component.captionLineHeight,
+                y: labelBounds.y + lineHeight,
                 width: labelBounds.width,
-                height: config.component.captionLineHeight
+                height: lineHeight
             };
         }
     }

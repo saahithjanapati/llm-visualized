@@ -55,6 +55,16 @@
             </div>
         </div>
         <button id="followModeBtn" type="button" aria-pressed="true" aria-label="Follow mode enabled" title="Follow mode enabled">Follow mode on</button>
+        <button
+            id="transformerView2dBtn"
+            type="button"
+            aria-haspopup="dialog"
+            aria-controls="detailPanel"
+            aria-label="Open the 2D matrix view"
+            title="Open the 2D matrix view"
+        >
+            2D View
+        </button>
         <button id="settingsBtn" type="button" aria-haspopup="dialog" aria-controls="settingsOverlay" title="Settings">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                 <path d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1 1 0 0 0-1.1-.2a1 1 0 0 0-.6.9V20a2 2 0 0 1-4 0v-.1a1 1 0 0 0-.6-.9a1 1 0 0 0-1.1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1 1 0 0 0 .2-1.1a1 1 0 0 0-.9-.6H4a2 2 0 0 1 0-4h.1a1 1 0 0 0 .9-.6a1 1 0 0 0-.2-1.1l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1 1 0 0 0 1.1.2a1 1 0 0 0 .6-.9V4a2 2 0 0 1 4 0v.1a1 1 0 0 0 .6.9a1 1 0 0 0 1.1-.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1 1 0 0 0-.2 1.1a1 1 0 0 0 .9.6H20a2 2 0 0 1 0 4h-.1a1 1 0 0 0-.9.6z"></path>
@@ -144,6 +154,9 @@
                     </div>
                 </div>
             </div>
+            <div id="detailEquations" class="detail-equations" aria-hidden="true">
+                <div id="detailEquationsBody" class="detail-equations-body"></div>
+            </div>
             <div id="detailPromptContextRow" class="detail-prompt-context" style="display:none;">
                 <div id="detailPromptContextTokens" class="detail-prompt-context-tokens" aria-label="Prompt context tokens"></div>
             </div>
@@ -194,10 +207,6 @@
                     <span class="detail-label">Number of parameters</span>
                     <span id="detailParams" class="detail-value">—</span>
                 </div>
-            </div>
-            <div id="detailEquations" class="detail-equations" aria-hidden="true">
-                <div class="detail-equations-title">Equations</div>
-                <div id="detailEquationsBody" class="detail-equations-body"></div>
             </div>
             <div id="detailDescription" class="detail-description"></div>
             <div id="detailMeta" class="detail-meta">

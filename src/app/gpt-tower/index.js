@@ -242,6 +242,7 @@ const followModeControls = initFollowModeControls({
     appState,
     followModeBtn
 });
+const transformerView2dBtn = document.getElementById('transformerView2dBtn');
 
 const topControls = document.getElementById('topControls');
 const settingsOverlay = document.getElementById('settingsOverlay');
@@ -254,6 +255,15 @@ const selectionPanel = initSelectionPanel({
     engine: pipeline.engine,
     pipeline,
     pauseMainFlowOnMobileFocus: true
+});
+
+transformerView2dBtn?.addEventListener('click', (event) => {
+    event.preventDefault();
+    showTopControls();
+    selectionPanel.openTransformerView2d({
+        semanticTarget: null,
+        focusLabel: 'Transformer overview'
+    });
 });
 
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
