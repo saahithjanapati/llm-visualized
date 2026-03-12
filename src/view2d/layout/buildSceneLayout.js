@@ -1,5 +1,6 @@
 import {
     VIEW2D_ANCHOR_SIDES,
+    VIEW2D_CONNECTOR_ROUTES,
     VIEW2D_LAYOUT_DIRECTIONS,
     VIEW2D_MATRIX_PRESENTATIONS,
     VIEW2D_NODE_KINDS
@@ -189,19 +190,32 @@ function measureLeafNode(node, config) {
         }
         case VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS: {
             const rowCount = Math.max(1, measuredRows || node.rowItems?.length || node.dimensions?.rows || 1);
-            const compactWidth = Math.max(
-                config.component.compactMinWidth,
-                (measuredCols || node.dimensions?.cols || 1) * config.component.gridCellSize
-            );
-            contentWidth = compactWidth + (config.component.contentPaddingX * 2);
-            contentHeight = (rowCount * config.component.compactRowHeight)
-                + (Math.max(0, rowCount - 1) * config.component.compactRowGap)
-                + (config.component.contentPaddingY * 2);
+            const compactRows = node.metadata?.compactRows || {};
+            const compactWidthOverride = resolveMeasuredValue(compactRows.compactWidth, null);
+            const rowHeight = resolveMeasuredValue(compactRows.rowHeight, config.component.compactRowHeight);
+            const rowGap = Number.isFinite(compactRows.rowGap) && compactRows.rowGap >= 0
+                ? Math.max(0, Math.floor(compactRows.rowGap))
+                : config.component.compactRowGap;
+            const innerPaddingX = Number.isFinite(compactRows.paddingX) && compactRows.paddingX >= 0
+                ? Math.max(0, Math.floor(compactRows.paddingX))
+                : config.component.contentPaddingX;
+            const innerPaddingY = Number.isFinite(compactRows.paddingY) && compactRows.paddingY >= 0
+                ? Math.max(0, Math.floor(compactRows.paddingY))
+                : config.component.contentPaddingY;
+            const compactWidth = compactWidthOverride
+                ?? Math.max(
+                    config.component.compactMinWidth,
+                    (measuredCols || node.dimensions?.cols || 1) * config.component.gridCellSize
+                );
+            contentWidth = compactWidth + (innerPaddingX * 2);
+            contentHeight = (rowCount * rowHeight)
+                + (Math.max(0, rowCount - 1) * rowGap)
+                + (innerPaddingY * 2);
             layoutData = {
-                rowHeight: config.component.compactRowHeight,
-                rowGap: config.component.compactRowGap,
-                innerPaddingX: config.component.contentPaddingX,
-                innerPaddingY: config.component.contentPaddingY,
+                rowHeight,
+                rowGap,
+                innerPaddingX,
+                innerPaddingY,
                 compactWidth
             };
             break;
@@ -253,11 +267,12 @@ function measureLeafNode(node, config) {
             };
             break;
         case VIEW2D_MATRIX_PRESENTATIONS.CARD:
-            contentWidth = config.component.weightCardWidth;
-            contentHeight = config.component.weightCardHeight;
+            contentWidth = resolveMeasuredValue(node.metadata?.card?.width, config.component.weightCardWidth);
+            contentHeight = resolveMeasuredValue(node.metadata?.card?.height, config.component.weightCardHeight);
             layoutData = {
-                cardWidth: config.component.weightCardWidth,
-                cardHeight: config.component.weightCardHeight
+                cardWidth: contentWidth,
+                cardHeight: contentHeight,
+                cardRadius: resolveMeasuredValue(node.metadata?.card?.cornerRadius, null)
             };
             break;
         default:
@@ -265,6 +280,13 @@ function measureLeafNode(node, config) {
             contentHeight = 64;
             layoutData = {};
             break;
+        }
+        const cardRadius = resolveMeasuredValue(node.metadata?.card?.cornerRadius, null);
+        if (cardRadius !== null) {
+            layoutData = {
+                ...layoutData,
+                cardRadius
+            };
         }
     } else if (node.kind === VIEW2D_NODE_KINDS.TEXT) {
         contentWidth = measureTextWidth(node.text || node.tex, config.component.labelFontSize);
@@ -333,7 +355,8 @@ function measureNode(node, config, cache) {
                 captionHeight: 0,
                 layoutData: {
                     gap,
-                    direction
+                    direction,
+                    align: node.layout?.align || 'center'
                 },
                 childMeasurements
             };
@@ -348,7 +371,8 @@ function measureNode(node, config, cache) {
                 captionHeight: 0,
                 layoutData: {
                     gap,
-                    direction
+                    direction,
+                    align: node.layout?.align || 'center'
                 },
                 childMeasurements
             };
@@ -365,7 +389,8 @@ function measureNode(node, config, cache) {
                 captionHeight: 0,
                 layoutData: {
                     gap,
-                    direction
+                    direction,
+                    align: node.layout?.align || 'center'
                 },
                 childMeasurements
             };
@@ -438,26 +463,43 @@ function placeNode(node, x, y, measurement, registry, config, depth = 0, parentI
 
         const direction = node.layout?.direction || VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL;
         const gap = measurement.layoutData?.gap || 0;
+        const align = measurement.layoutData?.align || 'center';
         if (direction === VIEW2D_LAYOUT_DIRECTIONS.VERTICAL) {
             let cursorY = y;
             node.children.forEach((child, index) => {
                 const childMeasurement = measurement.childMeasurements[index];
-                const childX = x + ((measurement.width - childMeasurement.width) / 2);
+                const childX = align === 'start'
+                    ? x
+                    : (align === 'end'
+                        ? x + (measurement.width - childMeasurement.width)
+                        : x + ((measurement.width - childMeasurement.width) / 2));
                 placeNode(child, childX, cursorY, childMeasurement, registry, config, depth + 1, node.id);
                 cursorY += childMeasurement.height + gap;
             });
         } else if (direction === VIEW2D_LAYOUT_DIRECTIONS.OVERLAY) {
             node.children.forEach((child, index) => {
                 const childMeasurement = measurement.childMeasurements[index];
-                const childX = x + ((measurement.width - childMeasurement.width) / 2);
-                const childY = y + ((measurement.height - childMeasurement.height) / 2);
+                const childX = align === 'start'
+                    ? x
+                    : (align === 'end'
+                        ? x + (measurement.width - childMeasurement.width)
+                        : x + ((measurement.width - childMeasurement.width) / 2));
+                const childY = align === 'top'
+                    ? y
+                    : (align === 'bottom'
+                        ? y + (measurement.height - childMeasurement.height)
+                        : y + ((measurement.height - childMeasurement.height) / 2));
                 placeNode(child, childX, childY, childMeasurement, registry, config, depth + 1, node.id);
             });
         } else {
             let cursorX = x;
             node.children.forEach((child, index) => {
                 const childMeasurement = measurement.childMeasurements[index];
-                const childY = y + ((measurement.height - childMeasurement.height) / 2);
+                const childY = align === 'start'
+                    ? y
+                    : (align === 'end'
+                        ? y + (measurement.height - childMeasurement.height)
+                        : y + ((measurement.height - childMeasurement.height) / 2));
                 placeNode(child, cursorX, childY, childMeasurement, registry, config, depth + 1, node.id);
                 cursorX += childMeasurement.width + gap;
             });
@@ -551,6 +593,16 @@ function buildConnectorPath(sourcePoint, targetPoint, sourceAnchor, targetAnchor
     if (dx < 0.5 || dy < 0.5) {
         return [
             leadSource,
+            leadTarget
+        ];
+    }
+    if (route === VIEW2D_CONNECTOR_ROUTES.ELBOW) {
+        const elbowPoint = (sourceAnchor === VIEW2D_ANCHOR_SIDES.TOP || sourceAnchor === VIEW2D_ANCHOR_SIDES.BOTTOM)
+            ? { x: leadSource.x, y: leadTarget.y }
+            : { x: leadTarget.x, y: leadSource.y };
+        return [
+            leadSource,
+            elbowPoint,
             leadTarget
         ];
     }

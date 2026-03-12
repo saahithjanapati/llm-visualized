@@ -21,9 +21,30 @@ const VIEW2D_DETAIL_ACTION_FOCUS = 'focus-selection';
 const VIEW2D_DETAIL_ACTION_FIT = 'fit-scene';
 const VIEW2D_INTERACTION_DPR = 1;
 const VIEW2D_INTERACTION_SETTLE_MS = 140;
+const VIEW2D_KEYBOARD_PAN_PX_PER_SEC = 620;
+const VIEW2D_KEYBOARD_ZOOM_RATE = 0.00145;
+const VIEW2D_KEYBOARD_INITIAL_STEP_MS = 16;
 
 function normalizeOptionalIndex(value) {
     return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : null;
+}
+
+function isTextEntryTarget(target) {
+    if (!(target instanceof Element)) return false;
+    const tagName = String(target.tagName || '').toLowerCase();
+    if (tagName === 'input' || tagName === 'textarea' || tagName === 'select') return true;
+    return target.isContentEditable === true;
+}
+
+function normalizeView2dKeyboardControlKey(key = '') {
+    const lower = String(key || '').toLowerCase();
+    if (lower === 'arrowleft' || lower === 'a') return 'pan-left';
+    if (lower === 'arrowright' || lower === 'd') return 'pan-right';
+    if (lower === 'arrowup' || lower === 'w') return 'pan-up';
+    if (lower === 'arrowdown' || lower === 's') return 'pan-down';
+    if (key === '+' || key === '=' || lower === 'add' || lower === 'numpadadd') return 'zoom-in';
+    if (key === '-' || key === '_' || lower === 'subtract' || lower === 'numpadsubtract') return 'zoom-out';
+    return '';
 }
 
 function buildSemanticTarget(rawTarget = null) {
@@ -361,7 +382,7 @@ export function createTransformerView2dDetailView(panelEl) {
                 <div class="detail-transformer-view2d-toolbar">
                     <div class="detail-transformer-view2d-toolbar-copy">
                         <div class="detail-transformer-view2d-toolbar-title">2D canvas prototype</div>
-                        <div class="detail-transformer-view2d-hint">Drag to pan. Scroll to zoom. Use Focus selection to return to the current component.</div>
+                        <div class="detail-transformer-view2d-hint">Drag to pan. Scroll or +/- to zoom. Use arrows or WASD to move. Use Focus selection to return to the current component.</div>
                     </div>
                     <div class="detail-transformer-view2d-toolbar-actions">
                         <button
@@ -395,7 +416,12 @@ export function createTransformerView2dDetailView(panelEl) {
                     </div>
                 </div>
             </div>
-            <div class="detail-transformer-view2d-canvas-card">
+            <div
+                class="detail-transformer-view2d-canvas-card"
+                tabindex="0"
+                role="group"
+                aria-label="Scalable 2D transformer canvas. Drag to pan, scroll or use plus and minus to zoom, and use arrow keys or W A S D to move around."
+            >
                 <canvas class="detail-transformer-view2d-canvas" aria-label="Scalable 2D transformer canvas"></canvas>
             </div>
         </div>
@@ -409,6 +435,7 @@ export function createTransformerView2dDetailView(panelEl) {
     }
 
     const canvas = root.querySelector('.detail-transformer-view2d-canvas');
+    const canvasCard = root.querySelector('.detail-transformer-view2d-canvas-card');
     const focusBtn = root.querySelector(`[data-transformer-view2d-action="${VIEW2D_DETAIL_ACTION_FOCUS}"]`);
     const fitBtn = root.querySelector(`[data-transformer-view2d-action="${VIEW2D_DETAIL_ACTION_FIT}"]`);
     const focusReadout = root.querySelector('[data-transformer-view2d-readout="focus"]');
@@ -434,6 +461,11 @@ export function createTransformerView2dDetailView(panelEl) {
         renderFrame: null,
         interactionTimer: null,
         isInteracting: false,
+        keyboardMotion: {
+            activeKeys: new Set(),
+            rafId: null,
+            lastTime: 0
+        },
         viewportSize: {
             width: 1,
             height: 1
@@ -510,6 +542,16 @@ export function createTransformerView2dDetailView(panelEl) {
         setInteractionActive(true);
         if (!activePointer) {
             scheduleInteractionSettle();
+        }
+    }
+
+    function focusCanvasSurface() {
+        if (!state.visible || !canvasCard || typeof canvasCard.focus !== 'function') return;
+        if (document.activeElement === canvasCard) return;
+        try {
+            canvasCard.focus({ preventScroll: true });
+        } catch (_) {
+            canvasCard.focus();
         }
     }
 
@@ -617,8 +659,110 @@ export function createTransformerView2dDetailView(panelEl) {
         return true;
     }
 
+    function clearKeyboardMotion() {
+        const keyboardMotion = state.keyboardMotion;
+        if (!keyboardMotion) return;
+        keyboardMotion.activeKeys.clear();
+        keyboardMotion.lastTime = 0;
+        if (keyboardMotion.rafId !== null) {
+            cancelAnimationFrame(keyboardMotion.rafId);
+            keyboardMotion.rafId = null;
+        }
+    }
+
+    function applyKeyboardMotion(dt = VIEW2D_KEYBOARD_INITIAL_STEP_MS) {
+        const activeKeys = state.keyboardMotion?.activeKeys;
+        if (!activeKeys?.size) return false;
+
+        const safeDt = Math.min(32, Math.max(8, Number.isFinite(dt) ? dt : VIEW2D_KEYBOARD_INITIAL_STEP_MS));
+        const panXDir = (activeKeys.has('pan-left') ? 1 : 0) + (activeKeys.has('pan-right') ? -1 : 0);
+        const panYDir = (activeKeys.has('pan-up') ? 1 : 0) + (activeKeys.has('pan-down') ? -1 : 0);
+        const zoomDir = (activeKeys.has('zoom-in') ? 1 : 0) + (activeKeys.has('zoom-out') ? -1 : 0);
+
+        let changed = false;
+        if (panXDir !== 0 || panYDir !== 0) {
+            const distance = (VIEW2D_KEYBOARD_PAN_PX_PER_SEC * safeDt) / 1000;
+            viewportController.panBy(
+                panXDir * distance,
+                panYDir * distance
+            );
+            changed = true;
+        }
+
+        if (zoomDir !== 0) {
+            const { width, height } = getCanvasSize();
+            const zoomFactor = Math.exp(zoomDir * safeDt * VIEW2D_KEYBOARD_ZOOM_RATE);
+            viewportController.zoomAt(zoomFactor, width * 0.5, height * 0.5);
+            changed = true;
+        }
+
+        if (changed) {
+            markInteraction(false);
+            scheduleRender();
+        }
+        return changed;
+    }
+
+    function tickKeyboardMotion(time) {
+        const keyboardMotion = state.keyboardMotion;
+        if (!keyboardMotion) return;
+        keyboardMotion.rafId = null;
+        if (!state.visible || !keyboardMotion.activeKeys.size) {
+            clearKeyboardMotion();
+            return;
+        }
+
+        const lastTime = Number.isFinite(keyboardMotion.lastTime) ? keyboardMotion.lastTime : time;
+        const dt = time - lastTime;
+        keyboardMotion.lastTime = time;
+        applyKeyboardMotion(dt);
+
+        if (keyboardMotion.activeKeys.size) {
+            keyboardMotion.rafId = requestAnimationFrame((nextTime) => {
+                tickKeyboardMotion(nextTime);
+            });
+        }
+    }
+
+    function startKeyboardMotion() {
+        const keyboardMotion = state.keyboardMotion;
+        if (!keyboardMotion || keyboardMotion.rafId !== null) return;
+        keyboardMotion.lastTime = performance.now();
+        keyboardMotion.rafId = requestAnimationFrame((time) => {
+            tickKeyboardMotion(time);
+        });
+    }
+
+    function onCanvasCardKeyDown(event) {
+        if (!state.visible) return;
+        if (event.ctrlKey || event.metaKey || event.altKey) return;
+        if (isTextEntryTarget(event.target)) return;
+        const controlKey = normalizeView2dKeyboardControlKey(event.key);
+        if (!controlKey) return;
+
+        state.keyboardMotion.activeKeys.add(controlKey);
+        if (!event.repeat) {
+            applyKeyboardMotion(VIEW2D_KEYBOARD_INITIAL_STEP_MS);
+        }
+        startKeyboardMotion();
+        event.preventDefault();
+        event.stopPropagation();
+    }
+
+    function onCanvasCardKeyUp(event) {
+        const controlKey = normalizeView2dKeyboardControlKey(event.key);
+        if (!controlKey || !state.keyboardMotion) return;
+        state.keyboardMotion.activeKeys.delete(controlKey);
+        if (!state.keyboardMotion.activeKeys.size) {
+            clearKeyboardMotion();
+        }
+        event.preventDefault();
+        event.stopPropagation();
+    }
+
     function onPointerDown(event) {
         if (!state.visible || event.button !== 0) return;
+        focusCanvasSurface();
         state.pointer = {
             pointerId: event.pointerId,
             clientX: event.clientX,
@@ -654,6 +798,7 @@ export function createTransformerView2dDetailView(panelEl) {
 
     function onWheel(event) {
         if (!state.visible) return;
+        focusCanvasSurface();
         const rect = canvas.getBoundingClientRect();
         const anchorX = event.clientX - rect.left;
         const anchorY = event.clientY - rect.top;
@@ -665,14 +810,27 @@ export function createTransformerView2dDetailView(panelEl) {
         event.preventDefault();
     }
 
+    canvasCard?.addEventListener('keydown', onCanvasCardKeyDown);
+    canvasCard?.addEventListener('keyup', onCanvasCardKeyUp);
+    canvasCard?.addEventListener('pointerdown', focusCanvasSurface);
+    canvasCard?.addEventListener('blur', clearKeyboardMotion);
     canvas?.addEventListener('pointerdown', onPointerDown);
     canvas?.addEventListener('pointermove', onPointerMove);
     canvas?.addEventListener('pointerup', clearPointer);
     canvas?.addEventListener('pointercancel', clearPointer);
     canvas?.addEventListener('wheel', onWheel, { passive: false });
-    canvas?.addEventListener('dblclick', () => focusSelection({ animate: true }));
-    focusBtn?.addEventListener('click', () => focusSelection({ animate: true }));
-    fitBtn?.addEventListener('click', () => fitScene({ animate: true }));
+    canvas?.addEventListener('dblclick', () => {
+        focusCanvasSurface();
+        focusSelection({ animate: true });
+    });
+    focusBtn?.addEventListener('click', () => {
+        focusSelection({ animate: true });
+        focusCanvasSurface();
+    });
+    fitBtn?.addEventListener('click', () => {
+        fitScene({ animate: true });
+        focusCanvasSurface();
+    });
 
     return {
         setVisible(visible = false) {
@@ -681,6 +839,7 @@ export function createTransformerView2dDetailView(panelEl) {
             root.setAttribute('aria-hidden', state.visible ? 'false' : 'true');
             if (!state.visible) {
                 clearPointer();
+                clearKeyboardMotion();
                 stopAnimation();
                 stopRenderLoop();
                 clearInteractionTimer();
@@ -714,7 +873,9 @@ export function createTransformerView2dDetailView(panelEl) {
             state.pendingInitialFocus = true;
             measureCanvasSize();
             updateReadouts();
-            return this.resizeAndRender();
+            const didRender = this.resizeAndRender();
+            focusCanvasSurface();
+            return didRender;
         },
         resizeAndRender() {
             if (!state.visible || !state.scene || !state.layout) return false;
@@ -728,6 +889,9 @@ export function createTransformerView2dDetailView(panelEl) {
                 }
             }
             return render();
+        },
+        getViewportState() {
+            return viewportController.getState();
         }
     };
 }

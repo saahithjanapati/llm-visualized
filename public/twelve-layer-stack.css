@@ -1694,6 +1694,10 @@ body.detail-panel-resizing * {
 
 #parameterCounter {
     position: static;
+    --parameter-counter-value-color: #f3f7fb;
+    --parameter-counter-glow-near: rgba(255, 180, 120, 0.8);
+    --parameter-counter-glow-mid: rgba(255, 211, 120, 0.54);
+    --parameter-counter-glow-far: rgba(255, 120, 198, 0.34);
     padding: 0;
     min-width: 0;
     background: transparent;
@@ -1712,10 +1716,15 @@ body.detail-panel-resizing * {
     margin-top: 4px;
     font-size: 18px;
     letter-spacing: 0.6px;
-    transition: transform 0.2s ease, text-shadow 0.2s ease;
+    transition: transform 0.2s ease, text-shadow 0.2s ease, color 0.2s ease, filter 0.2s ease;
 }
 #parameterCounter[data-animating="true"] .param-value {
-    text-shadow: 0 0 14px rgba(255, 180, 120, 0.6);
+    color: var(--parameter-counter-value-color);
+    text-shadow:
+        0 0 10px var(--parameter-counter-glow-near),
+        0 0 22px var(--parameter-counter-glow-mid),
+        0 0 36px var(--parameter-counter-glow-far);
+    filter: saturate(1.16) brightness(1.08);
     transform: translateY(-1px) scale(1.02);
 }
 
@@ -4476,6 +4485,15 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     border-radius: 12px;
     border: 1px solid rgba(255,255,255,0.12);
     background: rgba(255,255,255,0.04);
+    transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+}
+.detail-transformer-view2d-canvas-card:focus {
+    outline: none;
+}
+.detail-transformer-view2d-canvas-card:focus-visible {
+    border-color: rgba(143, 211, 255, 0.58);
+    box-shadow: 0 0 0 1px rgba(143, 211, 255, 0.18), 0 0 0 4px rgba(143, 211, 255, 0.12);
+    background: rgba(143, 211, 255, 0.05);
 }
 .detail-transformer-view2d-action {
     appearance: none;
@@ -4846,11 +4864,15 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
 .detail-attention-header-actions {
     display: flex;
     align-items: center;
-    justify-content: flex-end;
+    justify-content: flex-start;
     gap: 8px;
-    flex: 0 1 auto;
-    margin-left: auto;
+    flex: 1 1 100%;
+    width: 100%;
+    min-width: 0;
+    margin-left: 0;
     max-width: 100%;
+    padding-right: 46px;
+    box-sizing: border-box;
 }
 .detail-attention-toggle {
     padding: 6px 8px;
@@ -5746,7 +5768,7 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     line-height: 1.35;
 }
 .detail-prompt-context {
-    margin: 8px 16px 0;
+    margin: 0 16px;
     padding: 10px 12px;
     border-radius: 16px;
     border: 1px solid rgba(255,255,255,0.14);

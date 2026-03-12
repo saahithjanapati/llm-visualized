@@ -1,5 +1,6 @@
 import {
     MHA_FINAL_K_COLOR,
+    MHA_OUTPUT_PROJECTION_MATRIX_COLOR,
     MHA_FINAL_Q_COLOR,
     MHA_FINAL_V_COLOR
 } from '../../animations/LayerAnimationConstants.js';
@@ -7,6 +8,7 @@ import {
     FINAL_MLP_COLOR,
     PREVIEW_TRAIL_COLOR
 } from '../../ui/selectionPanelConstants.js';
+import { GPT2_LAYER_VISUAL_TUNING } from '../../utils/visualTuningProfiles.js';
 
 function hexToRgb(hexValue = 0xFFFFFF) {
     const safe = Number.isFinite(hexValue)
@@ -27,9 +29,36 @@ function hexToCss(hexValue = 0xFFFFFF, alpha = 1) {
     return `rgba(${r}, ${g}, ${b}, ${Math.max(0, Math.min(1, alpha)).toFixed(3)})`;
 }
 
+function mixHexValues(fromHex = 0xFFFFFF, toHex = 0xFFFFFF, amount = 0.5) {
+    const t = Math.max(0, Math.min(1, Number.isFinite(amount) ? amount : 0.5));
+    const [fromR, fromG, fromB] = hexToRgb(fromHex);
+    const [toR, toG, toB] = hexToRgb(toHex);
+    const mix = (from, to) => Math.round(from + ((to - from) * t));
+    return (mix(fromR, toR) << 16) | (mix(fromG, toG) << 8) | mix(fromB, toB);
+}
+
+function buildAttentionProjectionStyle(baseHex = 0xFFFFFF, {
+    hotspotMix = 0.46,
+    shadowMix = 0.16
+} = {}) {
+    return Object.freeze({
+        accent: hexToCss(mixHexValues(baseHex, 0xFFFFFF, 0.14), 1),
+        fill: `linear-gradient(140deg, ${hexToCss(mixHexValues(baseHex, 0xFFFFFF, 0.34), 0.82)} 0%, ${hexToCss(mixHexValues(baseHex, 0xFFFFFF, 0.12), 0.94)} 38%, ${hexToCss(baseHex, 1)} 70%, ${hexToCss(mixHexValues(baseHex, 0x000000, shadowMix), 0.9)} 100%)`,
+        stroke: hexToCss(mixHexValues(baseHex, 0xFFFFFF, 0.24), 0.98),
+        cardGlowColor: hexToCss(baseHex, 0.42),
+        cardGlowOpacity: 0.42,
+        cardGlowBlur: 30,
+        cardHotspotColor: hexToCss(mixHexValues(baseHex, 0xFFFFFF, hotspotMix), 0.32),
+        cardInnerGlowColor: hexToCss(baseHex, 0.18),
+        cardSheenColor: 'rgba(255,255,255,0.16)',
+        cardEdgeHighlight: 'rgba(255,255,255,0.38)'
+    });
+}
+
 export const VIEW2D_STYLE_KEYS = Object.freeze({
     SCENE: 'scene',
     LABEL: 'label',
+    LABEL_DARK: 'label.dark',
     CAPTION: 'caption',
     OPERATOR: 'operator',
     EMBEDDING_TOKEN: 'embedding.token',
@@ -50,6 +79,8 @@ export const VIEW2D_STYLE_KEYS = Object.freeze({
     MLP: 'mlp',
     LOGITS: 'logits',
     RESIDUAL: 'residual',
+    RESIDUAL_ADD: 'residual.add',
+    RESIDUAL_ADD_SYMBOL: 'residual.add-symbol',
     CONNECTOR_NEUTRAL: 'connector.neutral',
     CONNECTOR_Q: 'connector.q',
     CONNECTOR_K: 'connector.k',
@@ -65,12 +96,12 @@ const VIEW2D_VISUAL_TOKENS = Object.freeze({
         v: hexToCss(MHA_FINAL_V_COLOR),
         mlp: hexToCss(FINAL_MLP_COLOR),
         residual: hexToCss(PREVIEW_TRAIL_COLOR),
-        neutral: 'rgb(243, 246, 251)',
+        neutral: 'rgba(241, 244, 248, 0.96)',
         text: 'rgba(235, 239, 247, 0.960)',
         mutedText: 'rgba(206, 213, 224, 0.820)',
-        border: 'rgba(193, 201, 216, 0.260)',
-        panelBackground: 'rgba(7, 9, 14, 0.960)',
-        sceneBackground: 'rgba(4, 6, 10, 0.980)'
+        border: 'rgba(241, 244, 248, 0.54)',
+        panelBackground: 'rgba(255, 255, 255, 0.055)',
+        sceneBackground: 'rgba(0, 0, 0, 0)'
     }),
     dimming: Object.freeze({
         inactiveOpacity: 0.18,
@@ -78,7 +109,7 @@ const VIEW2D_VISUAL_TOKENS = Object.freeze({
         activeOpacity: 1
     }),
     connector: Object.freeze({
-        strokeWidth: 2,
+        strokeWidth: 1.45,
         glowWidth: 6,
         defaultGap: 10
     }),
@@ -99,6 +130,9 @@ const VIEW2D_VISUAL_TOKENS = Object.freeze({
         [VIEW2D_STYLE_KEYS.LABEL]: Object.freeze({
             color: 'rgba(235, 239, 247, 0.960)'
         }),
+        [VIEW2D_STYLE_KEYS.LABEL_DARK]: Object.freeze({
+            color: 'rgba(16, 20, 28, 0.940)'
+        }),
         [VIEW2D_STYLE_KEYS.CAPTION]: Object.freeze({
             color: 'rgba(206, 213, 224, 0.820)'
         }),
@@ -112,7 +146,16 @@ const VIEW2D_VISUAL_TOKENS = Object.freeze({
             accent: 'rgba(146, 244, 208, 0.920)'
         }),
         [VIEW2D_STYLE_KEYS.LAYER_NORM]: Object.freeze({
-            accent: 'rgba(236, 242, 251, 0.900)'
+            accent: hexToCss(GPT2_LAYER_VISUAL_TUNING.layerNorm.finalColor, 1),
+            fill: `linear-gradient(140deg, ${hexToCss(0xFFFFFF, 0.62)} 0%, ${hexToCss(0xFFFFFF, 0.86)} 52%, ${hexToCss(0xDDE6F4, 0.64)} 100%)`,
+            stroke: hexToCss(GPT2_LAYER_VISUAL_TUNING.layerNorm.finalColor, 1),
+            cardGlowColor: hexToCss(GPT2_LAYER_VISUAL_TUNING.layerNorm.finalColor, 0.34),
+            cardGlowOpacity: 0.34,
+            cardGlowBlur: 24,
+            cardHotspotColor: 'rgba(255,255,255,0.26)',
+            cardInnerGlowColor: 'rgba(255,255,255,0.12)',
+            cardSheenColor: 'rgba(255,255,255,0.24)',
+            cardEdgeHighlight: 'rgba(255,255,255,0.54)'
         }),
         [VIEW2D_STYLE_KEYS.MATRIX_INPUT]: Object.freeze({
             accent: 'rgba(222, 228, 238, 0.900)'
@@ -124,19 +167,37 @@ const VIEW2D_VISUAL_TOKENS = Object.freeze({
             accent: 'rgba(243, 246, 251, 0.860)'
         }),
         [VIEW2D_STYLE_KEYS.OUTPUT_PROJECTION]: Object.freeze({
-            accent: 'rgba(196, 214, 248, 0.920)'
+            accent: hexToCss(MHA_OUTPUT_PROJECTION_MATRIX_COLOR, 1),
+            fill: `linear-gradient(138deg, ${hexToCss(mixHexValues(MHA_OUTPUT_PROJECTION_MATRIX_COLOR, 0xFFFFFF, 0.34), 0.78)} 0%, ${hexToCss(MHA_OUTPUT_PROJECTION_MATRIX_COLOR, 1)} 56%, ${hexToCss(mixHexValues(MHA_OUTPUT_PROJECTION_MATRIX_COLOR, 0x000000, 0.08), 0.82)} 100%)`,
+            stroke: hexToCss(mixHexValues(MHA_OUTPUT_PROJECTION_MATRIX_COLOR, 0xFFFFFF, 0.10), 1),
+            cardGlowColor: hexToCss(MHA_OUTPUT_PROJECTION_MATRIX_COLOR, 0.46),
+            cardGlowOpacity: 0.42,
+            cardGlowBlur: 34,
+            cardHotspotColor: hexToCss(mixHexValues(MHA_OUTPUT_PROJECTION_MATRIX_COLOR, 0xFFFFFF, 0.38), 0.30),
+            cardInnerGlowColor: hexToCss(MHA_OUTPUT_PROJECTION_MATRIX_COLOR, 0.18),
+            cardSheenColor: 'rgba(255,255,255,0.18)',
+            cardEdgeHighlight: 'rgba(255,255,255,0.34)'
         }),
-        [VIEW2D_STYLE_KEYS.MHSA_Q]: Object.freeze({
-            accent: hexToCss(MHA_FINAL_Q_COLOR)
+        [VIEW2D_STYLE_KEYS.MHSA_Q]: buildAttentionProjectionStyle(MHA_FINAL_Q_COLOR),
+        [VIEW2D_STYLE_KEYS.MHSA_K]: buildAttentionProjectionStyle(MHA_FINAL_K_COLOR, {
+            hotspotMix: 0.42,
+            shadowMix: 0.14
         }),
-        [VIEW2D_STYLE_KEYS.MHSA_K]: Object.freeze({
-            accent: hexToCss(MHA_FINAL_K_COLOR)
-        }),
-        [VIEW2D_STYLE_KEYS.MHSA_V]: Object.freeze({
-            accent: hexToCss(MHA_FINAL_V_COLOR)
+        [VIEW2D_STYLE_KEYS.MHSA_V]: buildAttentionProjectionStyle(MHA_FINAL_V_COLOR, {
+            hotspotMix: 0.34,
+            shadowMix: 0.12
         }),
         [VIEW2D_STYLE_KEYS.MHSA_HEAD]: Object.freeze({
-            accent: 'rgba(173, 198, 255, 0.920)'
+            accent: hexToCss(MHA_FINAL_Q_COLOR, 0.98),
+            fill: `linear-gradient(96deg, ${hexToCss(mixHexValues(MHA_FINAL_Q_COLOR, 0x000000, 0.10), 0.98)} 0%, ${hexToCss(MHA_FINAL_Q_COLOR, 1)} 24%, ${hexToCss(MHA_FINAL_K_COLOR, 0.98)} 52%, ${hexToCss(mixHexValues(MHA_FINAL_V_COLOR, 0x000000, 0.02), 0.98)} 79%, ${hexToCss(mixHexValues(MHA_FINAL_V_COLOR, 0x000000, 0.12), 0.96)} 100%)`,
+            stroke: 'rgba(148, 164, 186, 0.82)',
+            cardGlowColor: hexToCss(mixHexValues(MHA_FINAL_Q_COLOR, 0x000000, 0.10), 0.30),
+            cardGlowOpacity: 0.22,
+            cardGlowBlur: 18,
+            cardHotspotColor: 'rgba(255,255,255,0.02)',
+            cardInnerGlowColor: 'rgba(0,0,0,0.18)',
+            cardSheenColor: 'rgba(255,255,255,0.03)',
+            cardEdgeHighlight: 'rgba(255,255,255,0.16)'
         }),
         [VIEW2D_STYLE_KEYS.MHSA_SCORE]: Object.freeze({
             accent: 'rgba(243, 246, 251, 0.940)'
@@ -147,17 +208,51 @@ const VIEW2D_VISUAL_TOKENS = Object.freeze({
         [VIEW2D_STYLE_KEYS.MHSA_POST]: Object.freeze({
             accent: 'rgba(243, 246, 251, 0.940)'
         }),
-        [VIEW2D_STYLE_KEYS.MHSA_HEAD_OUTPUT]: Object.freeze({
-            accent: 'rgba(243, 246, 251, 0.940)'
+        [VIEW2D_STYLE_KEYS.MHSA_HEAD_OUTPUT]: buildAttentionProjectionStyle(MHA_FINAL_V_COLOR, {
+            hotspotMix: 0.28,
+            shadowMix: 0.08
         }),
         [VIEW2D_STYLE_KEYS.MLP]: Object.freeze({
-            accent: hexToCss(FINAL_MLP_COLOR)
+            accent: hexToCss(FINAL_MLP_COLOR, 0.98),
+            fill: `linear-gradient(138deg, ${hexToCss(mixHexValues(FINAL_MLP_COLOR, 0xFFFFFF, 0.28), 0.82)} 0%, ${hexToCss(FINAL_MLP_COLOR, 0.98)} 56%, ${hexToCss(mixHexValues(FINAL_MLP_COLOR, 0x000000, 0.06), 0.84)} 100%)`,
+            stroke: hexToCss(mixHexValues(FINAL_MLP_COLOR, 0xFFFFFF, 0.10), 1),
+            cardGlowColor: hexToCss(FINAL_MLP_COLOR, 0.44),
+            cardGlowOpacity: 0.42,
+            cardGlowBlur: 34,
+            cardHotspotColor: hexToCss(mixHexValues(FINAL_MLP_COLOR, 0xFFFFFF, 0.34), 0.30),
+            cardInnerGlowColor: hexToCss(FINAL_MLP_COLOR, 0.18),
+            cardSheenColor: 'rgba(255,255,255,0.16)',
+            cardEdgeHighlight: 'rgba(255,255,255,0.32)'
         }),
         [VIEW2D_STYLE_KEYS.LOGITS]: Object.freeze({
             accent: 'rgba(242, 217, 107, 0.940)'
         }),
         [VIEW2D_STYLE_KEYS.RESIDUAL]: Object.freeze({
-            accent: hexToCss(PREVIEW_TRAIL_COLOR)
+            accent: hexToCss(PREVIEW_TRAIL_COLOR, 0.98),
+            fill: `linear-gradient(138deg, ${hexToCss(mixHexValues(PREVIEW_TRAIL_COLOR, 0xFFFFFF, 0.24), 0.52)} 0%, ${hexToCss(PREVIEW_TRAIL_COLOR, 0.78)} 54%, ${hexToCss(mixHexValues(PREVIEW_TRAIL_COLOR, 0x000000, 0.08), 0.58)} 100%)`,
+            stroke: 'rgba(236, 244, 255, 0.98)',
+            cardGlowColor: hexToCss(PREVIEW_TRAIL_COLOR, 0.28),
+            cardGlowOpacity: 0.24,
+            cardGlowBlur: 22,
+            cardHotspotColor: 'rgba(255,255,255,0.16)',
+            cardInnerGlowColor: hexToCss(PREVIEW_TRAIL_COLOR, 0.12),
+            cardSheenColor: 'rgba(255,255,255,0.12)',
+            cardEdgeHighlight: 'rgba(255,255,255,0.28)'
+        }),
+        [VIEW2D_STYLE_KEYS.RESIDUAL_ADD]: Object.freeze({
+            accent: 'rgba(160, 166, 176, 0.98)',
+            fill: 'linear-gradient(145deg, rgba(12, 14, 18, 1) 0%, rgba(12, 14, 18, 1) 100%)',
+            stroke: 'rgba(176, 182, 191, 0.92)',
+            cardGlowColor: 'rgba(120, 126, 138, 0.10)',
+            cardGlowOpacity: 0.08,
+            cardGlowBlur: 10,
+            cardHotspotColor: 'rgba(0,0,0,0.0)',
+            cardInnerGlowColor: 'rgba(0,0,0,0.0)',
+            cardSheenColor: 'rgba(255,255,255,0.0)',
+            cardEdgeHighlight: 'rgba(196, 201, 209, 0.18)'
+        }),
+        [VIEW2D_STYLE_KEYS.RESIDUAL_ADD_SYMBOL]: Object.freeze({
+            color: 'rgba(255, 255, 255, 0.98)'
         }),
         [VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL]: Object.freeze({
             stroke: 'rgba(243, 246, 251, 0.940)'
@@ -172,7 +267,7 @@ const VIEW2D_VISUAL_TOKENS = Object.freeze({
             stroke: hexToCss(MHA_FINAL_V_COLOR)
         }),
         [VIEW2D_STYLE_KEYS.CONNECTOR_POST]: Object.freeze({
-            stroke: 'rgba(243, 246, 251, 0.940)'
+            stroke: 'rgba(225, 238, 255, 0.82)'
         })
     })
 });

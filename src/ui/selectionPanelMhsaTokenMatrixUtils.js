@@ -30,7 +30,7 @@ const DEFAULT_SAMPLE_STEP = 64;
 const DEFAULT_LAYER_INDEX = 5;
 const DEFAULT_HEAD_INDEX = 5;
 const DEFAULT_PROMPT_ROW_COUNT = 5;
-const PROJECTION_VECTOR_PREVIEW_DARKEN_FACTOR = 0.86;
+const PROJECTION_VECTOR_PREVIEW_DARKEN_FACTOR = 0.98;
 const QUERY_VECTOR_GRADIENT_OPTIONS = buildHueRangeOptions(MHA_FINAL_Q_COLOR, {
     hueSpread: MHA_VALUE_HUE_SPREAD,
     minLightness: MHA_VALUE_LIGHTNESS_MIN,
@@ -181,23 +181,23 @@ function buildProjectionVectorGradientCss(values, scalarValue, rangeOptions, dir
 
 function buildAccentCss(rgb, value = 0) {
     const intensity = Math.min(1, Math.abs(Number(value) || 0) / RESIDUAL_COLOR_CLAMP);
-    const alphaStart = 0.52 + (intensity * 0.2);
-    const alphaEnd = 0.78 + (intensity * 0.18);
-    const [r, g, b] = Array.isArray(rgb) ? rgb : [255, 255, 255];
-    return `linear-gradient(90deg, rgba(${r}, ${g}, ${b}, ${alphaStart.toFixed(3)}), rgba(${r}, ${g}, ${b}, ${alphaEnd.toFixed(3)}))`;
+    const base = Array.isArray(rgb) ? rgb : [255, 255, 255];
+    const highlight = mixRgb(base, [255, 255, 255], 0.22);
+    const core = mixRgb(base, [255, 255, 255], 0.06);
+    const depth = mixRgb(base, [10, 14, 20], 0.16);
+    const alphaStart = 0.72 + (intensity * 0.12);
+    const alphaMid = 0.88 + (intensity * 0.08);
+    const alphaEnd = 0.82 + (intensity * 0.12);
+    return `linear-gradient(92deg, ${rgbToCss(highlight, alphaStart)} 0%, ${rgbToCss(core, alphaMid)} 52%, ${rgbToCss(depth, alphaEnd)} 100%)`;
 }
 
 function buildWeightCardCss(rgb) {
     const base = Array.isArray(rgb) ? rgb : [255, 255, 255];
-    const top = mixRgb(base, [255, 255, 255], 0.18);
-    const mid = mixRgb(base, [255, 255, 255], 0.04);
-    const bottom = mixRgb(base, [8, 12, 18], 0.32);
-    return [
-        `radial-gradient(138% 112% at 92% 6%, ${rgbToCss(top, 0.52)} 0%, ${rgbToCss(top, 0.16)} 34%, ${rgbToCss(top, 0.04)} 56%, ${rgbToCss(top, 0.0)} 78%)`,
-        `radial-gradient(124% 118% at 10% 94%, ${rgbToCss(bottom, 0.88)} 0%, ${rgbToCss(bottom, 0.42)} 36%, ${rgbToCss(bottom, 0.12)} 58%, ${rgbToCss(bottom, 0.0)} 82%)`,
-        `radial-gradient(116% 92% at 46% 52%, ${rgbToCss(mid, 0.42)} 0%, ${rgbToCss(mid, 0.2)} 42%, ${rgbToCss(mid, 0.0)} 74%)`,
-        `linear-gradient(160deg, ${rgbToCss(top, 0.82)} 0%, ${rgbToCss(mid, 0.92)} 44%, ${rgbToCss(bottom, 0.96)} 100%)`
-    ].join(', ');
+    const top = mixRgb(base, [255, 255, 255], 0.28);
+    const upperMid = mixRgb(base, [255, 255, 255], 0.14);
+    const lowerMid = mixRgb(base, [255, 255, 255], 0.04);
+    const bottom = mixRgb(base, [8, 12, 18], 0.18);
+    return `linear-gradient(162deg, ${rgbToCss(top, 0.88)} 0%, ${rgbToCss(upperMid, 0.96)} 34%, ${rgbToCss(lowerMid, 0.98)} 64%, ${rgbToCss(bottom, 0.92)} 100%)`;
 }
 
 function buildAttentionScoreCellCss(value) {

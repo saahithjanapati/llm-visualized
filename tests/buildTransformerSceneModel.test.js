@@ -5,7 +5,10 @@ import {
     resolveSemanticTargetFocusPath
 } from '../src/view2d/layout/resolveSemanticTargetBounds.js';
 import { buildTransformerSceneModel } from '../src/view2d/model/buildTransformerSceneModel.js';
-import { flattenSceneNodes } from '../src/view2d/schema/sceneTypes.js';
+import {
+    flattenSceneNodes,
+    VIEW2D_MATRIX_PRESENTATIONS
+} from '../src/view2d/schema/sceneTypes.js';
 import { D_HEAD, D_MODEL } from '../src/ui/selectionPanelConstants.js';
 
 function createActivationSource(tokenCount = 4) {
@@ -96,10 +99,52 @@ describe('buildTransformerSceneModel', () => {
             && node.semantic?.componentKind === 'mhsa'
             && node.semantic?.layerIndex === 6
         ))).toBe(true);
+        expect(nodes.some((node) => node.role === 'head-card' && node.visual?.styleKey === 'mhsa.head')).toBe(true);
+        expect(nodes.some((node) => node.role === 'add-circle' && node.visual?.styleKey === 'residual.add')).toBe(true);
         expect(nodes.some((node) => (
-            node.role === 'module'
-            && node.semantic?.componentKind === 'logits'
+            node.role === 'residual-add-operator'
+            && node.visual?.styleKey === 'residual.add-symbol'
         ))).toBe(true);
+    });
+
+    it('renders incoming and post-attention residual states as compact value summaries', () => {
+        const tokenCount = 4;
+        const scene = buildTransformerSceneModel({
+            activationSource: createActivationSource(tokenCount)
+        });
+        const nodes = flattenSceneNodes(scene);
+
+        const incomingResidual = nodes.find((node) => (
+            node.semantic?.componentKind === 'residual'
+            && node.semantic?.layerIndex === 0
+            && node.semantic?.stage === 'incoming'
+            && node.role === 'module-card'
+        ));
+        const postAttentionResidual = nodes.find((node) => (
+            node.semantic?.componentKind === 'residual'
+            && node.semantic?.layerIndex === 0
+            && node.semantic?.stage === 'post-attn-residual'
+            && node.role === 'module-card'
+        ));
+
+        expect(incomingResidual?.presentation).toBe(VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS);
+        expect(postAttentionResidual?.presentation).toBe(VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS);
+        expect(incomingResidual?.rowItems).toHaveLength(tokenCount);
+        expect(postAttentionResidual?.rowItems).toHaveLength(tokenCount);
+        expect(incomingResidual?.rowItems?.[0]?.gradientCss).toContain('linear-gradient(');
+        expect(postAttentionResidual?.rowItems?.[0]?.gradientCss).toContain('linear-gradient(');
+        expect(postAttentionResidual?.rowItems?.[0]?.gradientCss).not.toBe(incomingResidual?.rowItems?.[0]?.gradientCss);
+
+        const layout = buildSceneLayout(scene);
+        const incomingEntry = layout.registry.getNodeEntries().find((entry) => (
+            entry.semantic?.componentKind === 'residual'
+            && entry.semantic?.layerIndex === 0
+            && entry.semantic?.stage === 'incoming'
+            && entry.role === 'module-card'
+        ));
+
+        expect(incomingEntry?.contentBounds?.height).toBeGreaterThan(36);
+        expect(incomingEntry?.contentBounds?.height).toBeLessThan(60);
     });
 
     it('resolves semantic bounds and focus paths for layer and head targets after layout', () => {
@@ -130,11 +175,108 @@ describe('buildTransformerSceneModel', () => {
         expect(mhsaModuleBounds?.height).toBeGreaterThan(0);
         expect(headBounds?.width).toBeGreaterThan(0);
         expect(headBounds?.height).toBeGreaterThan(0);
-        expect(mhsaModuleBounds.width).toBeGreaterThan(headBounds.width);
+        expect(mhsaModuleBounds.height).toBeGreaterThan(headBounds.height);
         expect(focusPath.map((entry) => entry.role)).toEqual(expect.arrayContaining([
             'layer',
             'module',
             'head'
         ]));
     });
+
+    it('routes the post-attention residual state directly into LN2', () => {
+        const scene = buildTransformerSceneModel({
+            activationSource: createActivationSource(4)
+        });
+        const layout = buildSceneLayout(scene);
+
+        const residualStateEntry = layout.registry.getNodeEntries().find((entry) => (
+            entry.semantic?.componentKind === 'residual'
+            && entry.semantic?.layerIndex === 0
+            && entry.semantic?.stage === 'post-attn-residual'
+            && entry.role === 'module-card'
+        ));
+        const connectorEntry = layout.registry.getConnectorEntries().find((entry) => entry.role === 'connector-layer-0-add1-ln2');
+
+        expect(residualStateEntry).toBeTruthy();
+        expect(connectorEntry).toBeTruthy();
+        expect(connectorEntry.pathPoints).toHaveLength(2);
+        expect(connectorEntry.pathPoints[0].x).toBeCloseTo(connectorEntry.pathPoints[1].x, 5);
+    });
+
+    it('returns output projection directly under the first residual add node', () => {
+        const scene = buildTransformerSceneModel({
+            activationSource: createActivationSource(4)
+        });
+        const layout = buildSceneLayout(scene);
+
+        const connectorEntry = layout.registry.getConnectorEntries().find((entry) => entry.role === 'connector-layer-0-outproj-add1');
+
+        expect(connectorEntry).toBeTruthy();
+        expect(connectorEntry.pathPoints).toHaveLength(3);
+        expect(connectorEntry.pathPoints[0].y).toBeCloseTo(connectorEntry.pathPoints[1].y, 5);
+        expect(connectorEntry.pathPoints[1].x).toBeCloseTo(connectorEntry.pathPoints[2].x, 5);
+    });
+
+    it('returns MLP to the second residual add node with a right-then-up elbow', () => {
+        const scene = buildTransformerSceneModel({
+            activationSource: createActivationSource(4)
+        });
+        const layout = buildSceneLayout(scene);
+
+        const connectorEntry = layout.registry.getConnectorEntries().find((entry) => entry.role === 'connector-layer-0-mlp-add2');
+
+        expect(connectorEntry).toBeTruthy();
+        expect(connectorEntry.pathPoints).toHaveLength(3);
+        expect(connectorEntry.pathPoints[0].y).toBeCloseTo(connectorEntry.pathPoints[1].y, 5);
+        expect(connectorEntry.pathPoints[1].x).toBeCloseTo(connectorEntry.pathPoints[2].x, 5);
+    });
+
+    it('keeps LN1, Head 1, output projection, LN2, and MLP on the same lower-row centerline', () => {
+        const scene = buildTransformerSceneModel({
+            activationSource: createActivationSource(4)
+        });
+        const layout = buildSceneLayout(scene);
+
+        const ln1Entry = layout.registry.getNodeEntries().find((entry) => (
+            entry.semantic?.componentKind === 'layer-norm'
+            && entry.semantic?.layerIndex === 0
+            && entry.semantic?.stage === 'ln1'
+            && entry.role === 'module-card'
+        ));
+        const head1Entry = layout.registry.getNodeEntries().find((entry) => (
+            entry.semantic?.componentKind === 'mhsa'
+            && entry.semantic?.layerIndex === 0
+            && entry.semantic?.headIndex === 0
+            && entry.role === 'head-card'
+        ));
+        const outProjEntry = layout.registry.getNodeEntries().find((entry) => (
+            entry.semantic?.componentKind === 'output-projection'
+            && entry.semantic?.layerIndex === 0
+            && entry.role === 'projection-weight'
+        ));
+        const ln2Entry = layout.registry.getNodeEntries().find((entry) => (
+            entry.semantic?.componentKind === 'layer-norm'
+            && entry.semantic?.layerIndex === 0
+            && entry.semantic?.stage === 'ln2'
+            && entry.role === 'module-card'
+        ));
+        const mlpEntry = layout.registry.getNodeEntries().find((entry) => (
+            entry.semantic?.componentKind === 'mlp'
+            && entry.semantic?.layerIndex === 0
+            && entry.semantic?.stage === 'mlp'
+            && entry.role === 'module-card'
+        ));
+
+        const ln1CenterY = ln1Entry.contentBounds.y + (ln1Entry.contentBounds.height / 2);
+        const head1CenterY = head1Entry.contentBounds.y + (head1Entry.contentBounds.height / 2);
+        const outProjCenterY = outProjEntry.contentBounds.y + (outProjEntry.contentBounds.height / 2);
+        const ln2CenterY = ln2Entry.contentBounds.y + (ln2Entry.contentBounds.height / 2);
+        const mlpCenterY = mlpEntry.contentBounds.y + (mlpEntry.contentBounds.height / 2);
+
+        expect(ln1CenterY).toBeCloseTo(head1CenterY, 5);
+        expect(ln1CenterY).toBeCloseTo(outProjCenterY, 5);
+        expect(ln2CenterY).toBeCloseTo(mlpCenterY, 5);
+        expect(ln1CenterY).toBeCloseTo(ln2CenterY, 5);
+    });
+
 });

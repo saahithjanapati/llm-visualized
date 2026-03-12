@@ -88,6 +88,9 @@ export class AutoCameraController {
             this._updateCameraOffsetOverlay();
             return;
         }
+        if (!this._autoCameraFollow) {
+            this._syncAutoCameraSemanticView();
+        }
         if (!this._autoCameraFollow && !this._devMode && !hasPanelShift) return;
         if (this._autoCameraFollow) {
             this._updateAutoCameraFollow();
@@ -123,6 +126,7 @@ export class AutoCameraController {
         }
         this._autoCameraFollow = nextValue;
         if (this._autoCameraFollow) {
+            this._syncAutoCameraSemanticView();
             this._autoCameraSmoothValid = false;
             this._resetAutoCameraReferenceMotion();
             this._autoCameraViewPendingKey = this._autoCameraViewKey;
@@ -413,6 +417,7 @@ export class AutoCameraController {
             return;
         }
         if (!this._autoCameraFollow && !immediate) {
+            this._syncAutoCameraSemanticView();
             this._updateCameraOffsetOverlay();
             return;
         }
@@ -1555,6 +1560,13 @@ export class AutoCameraController {
         this._autoCameraViewPendingKey = result.pendingKey;
         this._autoCameraViewPendingSinceMs = result.pendingSinceMs;
         return result.key;
+    }
+
+    _syncAutoCameraSemanticView() {
+        const rawKey = this._resolveAutoCameraViewKey();
+        const key = this._resolveStableAutoCameraViewKey(rawKey, this._autoCameraViewContext);
+        this._autoCameraViewKey = key;
+        return key;
     }
 
     _resolveAutoCameraOffsetsForViewKey(key, out = this._autoCameraResolvedViewOffsets) {

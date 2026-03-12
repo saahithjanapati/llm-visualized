@@ -33,6 +33,33 @@ const BASE_SPEED_MULT = 100;
 const MIN_STAGE_MS = 280;
 const DEFAULT_STAGE_MS = 900;
 const SKIP_MIN_STAGE_MS = 120;
+const FULL_CIRCLE_DEGREES = 360;
+
+function normalizeHue(value) {
+    return ((value % FULL_CIRCLE_DEGREES) + FULL_CIRCLE_DEGREES) % FULL_CIRCLE_DEGREES;
+}
+
+function formatGlowColor(hue, saturation, lightness, alpha = 1) {
+    return `hsla(${Math.round(normalizeHue(hue))}, ${saturation}%, ${lightness}%, ${alpha})`;
+}
+
+function randomizeCounterGlow(counter, valueEl) {
+    if (!counter || !valueEl) return;
+
+    const baseHue = Math.random() * FULL_CIRCLE_DEGREES;
+    const accentHue = baseHue + 88 + Math.random() * 48;
+    const edgeHue = baseHue + 190 + Math.random() * 60;
+
+    const valueColor = formatGlowColor(baseHue, 100, 82);
+    const glowNear = formatGlowColor(baseHue + 10, 100, 72, 0.9);
+    const glowMid = formatGlowColor(accentHue, 100, 72, 0.65);
+    const glowFar = formatGlowColor(edgeHue, 100, 75, 0.45);
+
+    counter.style.setProperty('--parameter-counter-value-color', valueColor);
+    counter.style.setProperty('--parameter-counter-glow-near', glowNear);
+    counter.style.setProperty('--parameter-counter-glow-mid', glowMid);
+    counter.style.setProperty('--parameter-counter-glow-far', glowFar);
+}
 
 function formatMillions(value) {
     const millions = value / 1_000_000;
@@ -223,6 +250,7 @@ export function initParameterCounter(pipeline, numLayers) {
             to: entry.cumulative,
             index: typeof index === 'number' ? index : null,
         };
+        randomizeCounterGlow(counter, valueEl);
         if (stageEl) {
             stageEl.textContent = label || formatStageLabel(entry.stage, entry.layer ?? null);
         }

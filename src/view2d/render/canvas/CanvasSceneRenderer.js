@@ -57,9 +57,51 @@ function isCanvasColor(value = '') {
         && !value.includes('gradient(');
 }
 
+function parseCanvasColor(value = '') {
+    const raw = String(value || '').trim();
+    if (!raw.length) return null;
+    const hexMatch = raw.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+    if (hexMatch) {
+        const hex = hexMatch[1];
+        if (hex.length === 3) {
+            return {
+                r: Number.parseInt(`${hex[0]}${hex[0]}`, 16),
+                g: Number.parseInt(`${hex[1]}${hex[1]}`, 16),
+                b: Number.parseInt(`${hex[2]}${hex[2]}`, 16),
+                a: 1
+            };
+        }
+        return {
+            r: Number.parseInt(hex.slice(0, 2), 16),
+            g: Number.parseInt(hex.slice(2, 4), 16),
+            b: Number.parseInt(hex.slice(4, 6), 16),
+            a: 1
+        };
+    }
+    const rgbMatch = raw.match(/^rgba?\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)(?:\s*,\s*([0-9.]+))?\s*\)$/i);
+    if (rgbMatch) {
+        return {
+            r: Math.max(0, Math.min(255, Number.parseFloat(rgbMatch[1]))),
+            g: Math.max(0, Math.min(255, Number.parseFloat(rgbMatch[2]))),
+            b: Math.max(0, Math.min(255, Number.parseFloat(rgbMatch[3]))),
+            a: Math.max(0, Math.min(1, rgbMatch[4] === undefined ? 1 : Number.parseFloat(rgbMatch[4])))
+        };
+    }
+    return null;
+}
+
+function flattenColorAgainstBlack(value = '', opacity = 1) {
+    const parsed = parseCanvasColor(value);
+    if (!parsed) return null;
+    const alpha = Math.max(0, Math.min(1, parsed.a * (Number.isFinite(opacity) ? opacity : 1)));
+    const scale = (channel) => Math.round(Math.max(0, Math.min(255, channel * alpha)));
+    return `rgb(${scale(parsed.r)}, ${scale(parsed.g)}, ${scale(parsed.b)})`;
+}
+
 const PARSED_LINEAR_GRADIENT_CACHE = new Map();
 const CAPTION_MIN_SCREEN_HEIGHT_PX = 18;
 const TEXT_MIN_SCREEN_HEIGHT_PX = 10;
+const PERSISTENT_OPERATOR_MIN_SCREEN_FONT_PX = 8.5;
 const MATRIX_DETAIL_MIN_SCREEN_WIDTH_PX = 72;
 const MATRIX_DETAIL_MIN_SCREEN_HEIGHT_PX = 24;
 
@@ -296,24 +338,115 @@ function drawCaption(ctx, entry, node, config, worldScale = 1) {
     ctx.restore();
 }
 
+function drawCardSurfaceEffects(ctx, bounds, cornerRadius, style, safeWorldScale, projectedWidth, projectedHeight) {
+    if (!bounds || projectedWidth < 16 || projectedHeight < 10) return;
+
+    const glowColor = typeof style.cardGlowColor === 'string' ? style.cardGlowColor : null;
+    const glowBlur = Number.isFinite(style.cardGlowBlur) ? style.cardGlowBlur : 16;
+    const glowOpacity = Number.isFinite(style.cardGlowOpacity) ? style.cardGlowOpacity : 0.2;
+    const hotspotColor = typeof style.cardHotspotColor === 'string' ? style.cardHotspotColor : 'rgba(255,255,255,0.12)';
+    const innerGlowColor = typeof style.cardInnerGlowColor === 'string' ? style.cardInnerGlowColor : null;
+    const sheenColor = typeof style.cardSheenColor === 'string' ? style.cardSheenColor : 'rgba(255,255,255,0.14)';
+    const edgeHighlight = typeof style.cardEdgeHighlight === 'string' ? style.cardEdgeHighlight : 'rgba(255,255,255,0.18)';
+
+    if (glowColor && projectedWidth >= 22 && projectedHeight >= 14) {
+        ctx.save();
+        roundRectPath(ctx, bounds.x, bounds.y, bounds.width, bounds.height, cornerRadius);
+        ctx.fillStyle = glowColor;
+        ctx.globalAlpha = glowOpacity;
+        ctx.shadowColor = glowColor;
+        ctx.shadowBlur = glowBlur / safeWorldScale;
+        ctx.fill();
+        ctx.restore();
+
+        ctx.save();
+        roundRectPath(ctx, bounds.x, bounds.y, bounds.width, bounds.height, cornerRadius);
+        ctx.lineWidth = Math.max(0.7, 1.2) / safeWorldScale;
+        ctx.strokeStyle = glowColor;
+        ctx.shadowColor = glowColor;
+        ctx.shadowBlur = (glowBlur * 0.8) / safeWorldScale;
+        ctx.globalAlpha = Math.min(1, glowOpacity + 0.28);
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    ctx.save();
+    roundRectPath(ctx, bounds.x, bounds.y, bounds.width, bounds.height, cornerRadius);
+    ctx.clip();
+
+    const sheen = ctx.createLinearGradient(bounds.x, bounds.y, bounds.x + bounds.width, bounds.y + bounds.height);
+    sheen.addColorStop(0, sheenColor);
+    sheen.addColorStop(0.24, 'rgba(255,255,255,0.06)');
+    sheen.addColorStop(0.52, 'rgba(255,255,255,0.0)');
+    sheen.addColorStop(1, 'rgba(255,255,255,0.04)');
+    ctx.fillStyle = sheen;
+    ctx.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+
+    if (innerGlowColor) {
+        const innerGlow = ctx.createRadialGradient(
+            bounds.x + (bounds.width * 0.48),
+            bounds.y + (bounds.height * 0.5),
+            0,
+            bounds.x + (bounds.width * 0.48),
+            bounds.y + (bounds.height * 0.5),
+            Math.max(bounds.width, bounds.height) * 0.72
+        );
+        innerGlow.addColorStop(0, innerGlowColor);
+        innerGlow.addColorStop(0.56, 'rgba(255,255,255,0.0)');
+        innerGlow.addColorStop(1, 'rgba(255,255,255,0.0)');
+        ctx.fillStyle = innerGlow;
+        ctx.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+    }
+
+    const hotspot = ctx.createRadialGradient(
+        bounds.x + (bounds.width * 0.72),
+        bounds.y + (bounds.height * 0.18),
+        0,
+        bounds.x + (bounds.width * 0.72),
+        bounds.y + (bounds.height * 0.18),
+        Math.max(bounds.width, bounds.height) * 0.7
+    );
+    hotspot.addColorStop(0, hotspotColor);
+    hotspot.addColorStop(0.42, 'rgba(255,255,255,0.0)');
+    hotspot.addColorStop(1, 'rgba(255,255,255,0.0)');
+    ctx.fillStyle = hotspot;
+    ctx.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+    ctx.restore();
+
+    ctx.save();
+    roundRectPath(ctx, bounds.x, bounds.y, bounds.width, bounds.height, cornerRadius);
+    ctx.lineWidth = Math.max(0.45, 0.8) / safeWorldScale;
+    ctx.strokeStyle = edgeHighlight;
+    ctx.globalAlpha = 1;
+    ctx.stroke();
+    ctx.restore();
+}
+
 function drawMatrixNode(ctx, node, entry, config, worldScale = 1) {
     const contentBounds = entry.contentBounds || entry.bounds;
     const style = resolveView2dStyle(node.visual?.styleKey) || {};
     const accent = style.accent || config.tokens.palette.neutral;
-    const background = config.tokens.palette.panelBackground;
-    const border = config.tokens.palette.border;
-    const projectedWidth = contentBounds.width * Math.max(0.0001, worldScale);
-    const projectedHeight = contentBounds.height * Math.max(0.0001, worldScale);
+    const background = style.fill || config.tokens.palette.panelBackground;
+    const border = style.stroke || config.tokens.palette.border;
+    const safeWorldScale = Math.max(0.0001, Number.isFinite(worldScale) ? worldScale : 1);
+    const cornerRadius = Number.isFinite(entry.layoutData?.cardRadius)
+        ? entry.layoutData.cardRadius
+        : config.tokens.matrix.cornerRadius;
+    const projectedWidth = contentBounds.width * safeWorldScale;
+    const projectedHeight = contentBounds.height * safeWorldScale;
     const useSummaryInterior = projectedWidth < MATRIX_DETAIL_MIN_SCREEN_WIDTH_PX
         || projectedHeight < MATRIX_DETAIL_MIN_SCREEN_HEIGHT_PX;
 
     ctx.save();
-    roundRectPath(ctx, contentBounds.x, contentBounds.y, contentBounds.width, contentBounds.height, config.tokens.matrix.cornerRadius);
-    ctx.fillStyle = background;
+    roundRectPath(ctx, contentBounds.x, contentBounds.y, contentBounds.width, contentBounds.height, cornerRadius);
+    ctx.fillStyle = resolveFill(ctx, background, contentBounds, accent);
     ctx.fill();
     ctx.lineWidth = config.tokens.matrix.borderWidth;
     ctx.strokeStyle = border;
     ctx.stroke();
+    if (node.presentation === VIEW2D_MATRIX_PRESENTATIONS.CARD) {
+        drawCardSurfaceEffects(ctx, contentBounds, cornerRadius, style, safeWorldScale, projectedWidth, projectedHeight);
+    }
 
     const layoutData = entry.layoutData || {};
     const rowItems = Array.isArray(node.rowItems) ? node.rowItems : [];
@@ -418,13 +551,6 @@ function drawMatrixNode(ctx, node, entry, config, worldScale = 1) {
         roundRectPath(ctx, barBounds.x, barBounds.y, barBounds.width, barBounds.height, 6);
         ctx.fillStyle = resolveFill(ctx, node.visual?.background, barBounds, accent);
         ctx.fill();
-    } else if (node.presentation === VIEW2D_MATRIX_PRESENTATIONS.CARD) {
-        const cardGradient = ctx.createLinearGradient(contentBounds.x, contentBounds.y, contentBounds.x + contentBounds.width, contentBounds.y + contentBounds.height);
-        cardGradient.addColorStop(0, 'rgba(255,255,255,0.08)');
-        cardGradient.addColorStop(0.5, accent);
-        cardGradient.addColorStop(1, 'rgba(0,0,0,0.45)');
-        ctx.fillStyle = cardGradient;
-        ctx.fill();
     }
     ctx.restore();
     drawCaption(ctx, entry, node, config, worldScale);
@@ -432,14 +558,24 @@ function drawMatrixNode(ctx, node, entry, config, worldScale = 1) {
 
 function drawTextLikeNode(ctx, node, entry, config, worldScale = 1) {
     const bounds = entry.contentBounds || entry.bounds;
-    if ((bounds.height * Math.max(0.0001, worldScale)) < TEXT_MIN_SCREEN_HEIGHT_PX) {
+    const safeWorldScale = Math.max(0.0001, Number.isFinite(worldScale) ? worldScale : 1);
+    const isPersistentOperator = node.kind === VIEW2D_NODE_KINDS.OPERATOR
+        && (
+            node.role === 'residual-add-operator'
+            || node.visual?.styleKey === 'residual.add-symbol'
+        );
+    if (!isPersistentOperator && (bounds.height * safeWorldScale) < TEXT_MIN_SCREEN_HEIGHT_PX) {
         return;
     }
     ctx.save();
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     if (node.kind === VIEW2D_NODE_KINDS.OPERATOR) {
-        ctx.font = `600 ${entry.layoutData?.fontSize || config.component.operatorFontSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+        const baseFontSize = entry.layoutData?.fontSize || config.component.operatorFontSize;
+        const adjustedFontSize = isPersistentOperator
+            ? Math.max(baseFontSize, PERSISTENT_OPERATOR_MIN_SCREEN_FONT_PX / safeWorldScale)
+            : baseFontSize;
+        ctx.font = `600 ${adjustedFontSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
         ctx.fillStyle = resolveView2dStyle(node.visual?.styleKey)?.color || config.tokens.palette.text;
     } else {
         ctx.font = `500 ${entry.layoutData?.fontSize || config.component.labelFontSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
@@ -477,51 +613,58 @@ function drawConnectorArrowHead(ctx, startPoint, endPoint, strokeWidth, fillStyl
     ctx.restore();
 }
 
+function snapWorldPointToConnectorGrid(point, worldScale = 1) {
+    if (!point || typeof point !== 'object') return point;
+    const safeWorldScale = Math.max(0.0001, Number.isFinite(worldScale) ? worldScale : 1);
+    const snap = (value) => {
+        const screenValue = Number(value) * safeWorldScale;
+        return (Math.round(screenValue * 2) / 2) / safeWorldScale;
+    };
+    return {
+        x: snap(point.x),
+        y: snap(point.y)
+    };
+}
+
 function drawConnector(ctx, connectorEntry, config, accent = null, worldScale = 1) {
     const points = Array.isArray(connectorEntry.pathPoints) ? connectorEntry.pathPoints : [];
     if (points.length < 2) return;
-    const accentStroke = accent || config.tokens.palette.neutral;
-    const foregroundStroke = 'rgba(216, 222, 232, 0.96)';
+    const foregroundStroke = accent || config.tokens.palette.neutral;
     const safeWorldScale = Math.max(0.0001, Number.isFinite(worldScale) ? worldScale : 1);
-    const glowWidth = Math.max(4, config.tokens.connector.glowWidth + 2) / safeWorldScale;
-    const strokeWidth = Math.max(1.4, config.tokens.connector.strokeWidth * 1.15) / safeWorldScale;
-    const tailPoint = points[Math.max(0, points.length - 2)];
-    const headPoint = points[points.length - 1];
+    const targetScreenWidthPx = safeWorldScale < 0.35
+        ? 0.58
+        : (safeWorldScale < 0.7 ? 0.72 : (safeWorldScale < 1.25 ? 0.88 : 1.02));
+    const strokeWidth = Math.max(0.42, targetScreenWidthPx) / safeWorldScale;
+    const strokeOpacity = safeWorldScale < 0.35
+        ? 0.46
+        : (safeWorldScale < 0.7 ? 0.54 : (safeWorldScale < 1.25 ? 0.66 : 0.78));
+    const flattenedForegroundStroke = flattenColorAgainstBlack(foregroundStroke, strokeOpacity) || foregroundStroke;
+    const snappedPoints = points.map((point) => snapWorldPointToConnectorGrid(point, safeWorldScale));
+    const tailPoint = snappedPoints[Math.max(0, snappedPoints.length - 2)];
+    const headPoint = snappedPoints[snappedPoints.length - 1];
 
     ctx.save();
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
+    ctx.lineCap = 'butt';
+    ctx.lineJoin = 'miter';
+    ctx.miterLimit = 2;
     ctx.globalCompositeOperation = 'source-over';
     ctx.filter = 'none';
     ctx.globalAlpha = 1;
     ctx.beginPath();
-    ctx.moveTo(points[0].x, points[0].y);
-    for (let index = 1; index < points.length; index += 1) {
-        ctx.lineTo(points[index].x, points[index].y);
-    }
-    ctx.lineWidth = glowWidth;
-    ctx.strokeStyle = accentStroke;
-    ctx.globalAlpha = 0.42;
-    ctx.shadowColor = accentStroke;
-    ctx.shadowBlur = (config.tokens.connector.glowWidth * 1.8) / safeWorldScale;
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.moveTo(points[0].x, points[0].y);
-    for (let index = 1; index < points.length; index += 1) {
-        ctx.lineTo(points[index].x, points[index].y);
+    ctx.moveTo(snappedPoints[0].x, snappedPoints[0].y);
+    for (let index = 1; index < snappedPoints.length; index += 1) {
+        ctx.lineTo(snappedPoints[index].x, snappedPoints[index].y);
     }
     ctx.lineWidth = strokeWidth;
-    ctx.globalAlpha = 1;
     ctx.shadowBlur = 0;
-    ctx.strokeStyle = foregroundStroke;
+    ctx.strokeStyle = flattenedForegroundStroke;
     ctx.stroke();
     drawConnectorArrowHead(
         ctx,
         tailPoint,
         headPoint,
         strokeWidth,
-        foregroundStroke
+        flattenedForegroundStroke
     );
     ctx.restore();
 }
@@ -611,6 +754,7 @@ export class CanvasSceneRenderer {
         const allNodes = this.scene ? flattenSceneNodes(this.scene) : [];
         this.drawableNodes = allNodes
             .filter((node) => ![VIEW2D_NODE_KINDS.CONNECTOR, VIEW2D_NODE_KINDS.GROUP].includes(node.kind))
+            .filter((node) => !node?.metadata?.hidden)
             .map((node) => ({
                 node,
                 entry: registry?.getNodeEntry(node.id) || null

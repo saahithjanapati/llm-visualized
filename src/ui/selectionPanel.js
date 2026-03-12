@@ -11967,7 +11967,7 @@ class SelectionPanel {
             || isKvCacheInfo
             || isMhsaInfo;
         const isVectorMetadata = isLikelyVectorSelection(label, selection) || isTokenOrPositionChipSelection;
-        if (isVectorMetadata && metadata.hasLength && !isTokenChipSelection) {
+        if (isVectorMetadata && metadata.hasLength && !isTokenOrPositionChipSelection) {
             subtitleTertiaryText = `Length: ${metadata.length}`;
         }
         const dimsRow = this.inputDim?.closest('.detail-row')

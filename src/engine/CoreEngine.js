@@ -12,7 +12,12 @@ import {
 import { resolveZoomOutSupersampleCeiling } from '../utils/renderPixelRatioUtils.js';
 import { perfStats } from '../utils/perfStats.js';
 import { refreshTrailDisplayScales } from '../utils/trailUtils.js';
-import { TRAIL_LINE_WIDTH, TRAIL_OPACITY, scaleLineWidthForDisplay, scaleOpacityForDisplay } from '../utils/trailConstants.js';
+import {
+    TRAIL_LINE_WIDTH,
+    TRAIL_OPACITY,
+    scaleLineWidthForDisplay,
+    scaleOpacityForDisplay
+} from '../utils/trailConstants.js';
 import {
     applyPromptTokenChipColors,
     formatTokenChipDisplayText
@@ -43,7 +48,8 @@ const ADAPTIVE_RENDER_DPR_PROMOTE_FPS = 57;
 const ADAPTIVE_RENDER_DPR_DEMOTE_FPS = 53;
 const ADAPTIVE_RENDER_DPR_ADJUST_COOLDOWN_MS = 1400;
 const HOVER_TOKEN_CHIP_FONT_SIZE = '11px';
-const KEYBOARD_ZOOM_MIN_UNITS_PER_SECOND = 240;
+const KEYBOARD_ZOOM_MIN_UNITS_PER_SECOND = 1200;
+const KEYBOARD_ZOOM_MAX_UNITS_PER_SECOND = 5200;
 const KEYBOARD_ZOOM_MIN_DISTANCE = 0.1;
 
 /**
@@ -373,6 +379,11 @@ export class CoreEngine {
             && opts.keyboardZoomMinUnitsPerSecond > 0)
             ? opts.keyboardZoomMinUnitsPerSecond
             : KEYBOARD_ZOOM_MIN_UNITS_PER_SECOND;
+        this._keyboardZoomMaxUnitsPerSecond = (typeof opts.keyboardZoomMaxUnitsPerSecond === 'number'
+            && Number.isFinite(opts.keyboardZoomMaxUnitsPerSecond)
+            && opts.keyboardZoomMaxUnitsPerSecond > 0)
+            ? Math.max(opts.keyboardZoomMaxUnitsPerSecond, this._keyboardZoomMinUnitsPerSecond)
+            : KEYBOARD_ZOOM_MAX_UNITS_PER_SECOND;
         this._keyboardZoomMinDistance = (typeof opts.keyboardZoomMinDistance === 'number'
             && Number.isFinite(opts.keyboardZoomMinDistance)
             && opts.keyboardZoomMinDistance >= 0)
@@ -1289,13 +1300,14 @@ export class CoreEngine {
         const currentDistance = offset.length();
         if (!currentDistance || !Number.isFinite(currentDistance)) return;
 
-        // Keep long-range zoom responsive while preventing close-up zoom from
-        // collapsing into tiny distance deltas near the current orbit target.
+        // Keep zoom velocity within a narrower world-space band so held keys
+        // feel closer to a linear dolly than a pure percent-of-distance zoom.
         const zoomScale = Math.exp(-direction * this._keyboardZoomSpeed * deltaSeconds);
         const scaledDistance = currentDistance * zoomScale;
         const scaledStep = Math.abs(scaledDistance - currentDistance);
         const minimumStep = Math.max(0, this._keyboardZoomMinUnitsPerSecond * deltaSeconds);
-        const zoomStep = Math.max(scaledStep, minimumStep);
+        const maximumStep = Math.max(minimumStep, this._keyboardZoomMaxUnitsPerSecond * deltaSeconds);
+        const zoomStep = THREE.MathUtils.clamp(scaledStep, minimumStep, maximumStep);
         let desiredDistance = currentDistance + (direction > 0 ? -zoomStep : zoomStep);
         const minDistance = Math.max(
             (typeof controls.minDistance === 'number' && Number.isFinite(controls.minDistance))

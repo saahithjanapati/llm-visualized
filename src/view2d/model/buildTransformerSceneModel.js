@@ -269,586 +269,602 @@ function createModuleGroup(baseSemantic = {}, title = '', children = []) {
     });
 }
 
-function buildResidualNode({
+function mergeMetadata(...parts) {
+    const merged = parts.reduce((acc, part) => {
+        if (!part || typeof part !== 'object') return acc;
+        return {
+            ...acc,
+            ...part
+        };
+    }, {});
+    return Object.keys(merged).length ? merged : null;
+}
+
+function createCardMetadata(width = null, height = null, {
+    hidden = false,
+    cornerRadius = null
+} = {}) {
+    const card = {};
+    if (Number.isFinite(width) && width > 0) card.width = Math.floor(width);
+    if (Number.isFinite(height) && height > 0) card.height = Math.floor(height);
+    if (Number.isFinite(cornerRadius) && cornerRadius >= 0) card.cornerRadius = Math.floor(cornerRadius);
+    const metadata = Object.keys(card).length ? { card } : {};
+    if (hidden) metadata.hidden = true;
+    return Object.keys(metadata).length ? metadata : null;
+}
+
+function createCompactRowsMetadata({
+    compactWidth = null,
+    rowHeight = null,
+    rowGap = null,
+    paddingX = null,
+    paddingY = null
+} = {}) {
+    const compactRows = {};
+    if (Number.isFinite(compactWidth) && compactWidth > 0) compactRows.compactWidth = Math.floor(compactWidth);
+    if (Number.isFinite(rowHeight) && rowHeight > 0) compactRows.rowHeight = Math.floor(rowHeight);
+    if (Number.isFinite(rowGap) && rowGap >= 0) compactRows.rowGap = Math.floor(rowGap);
+    if (Number.isFinite(paddingX) && paddingX >= 0) compactRows.paddingX = Math.floor(paddingX);
+    if (Number.isFinite(paddingY) && paddingY >= 0) compactRows.paddingY = Math.floor(paddingY);
+    return Object.keys(compactRows).length ? { compactRows } : null;
+}
+
+function createModuleCardGroup({
     semantic = {},
-    labelTex = '',
-    fallbackText = '',
-    tokenRefs = [],
-    getVector = () => null
-} = {}) {
-    return createMatrixNode({
-        role: semantic.role || 'module',
-        semantic,
-        label: buildLabel(labelTex, fallbackText),
-        dimensions: {
-            rows: tokenRefs.length,
-            cols: D_MODEL
-        },
-        presentation: VIEW2D_MATRIX_PRESENTATIONS.BANDED_ROWS,
-        shape: VIEW2D_MATRIX_SHAPES.MATRIX,
-        rowItems: buildVectorRowItems(tokenRefs, {
-            baseSemantic: semantic,
-            role: 'vector-row',
-            measureCols: SUMMARY_MODEL_COLS,
-            getVector
-        }),
-        visual: {
-            styleKey: VIEW2D_STYLE_KEYS.RESIDUAL
-        },
-        metadata: createMeasureMetadata(SUMMARY_MODEL_COLS, tokenRefs.length)
-    });
-}
-
-function buildSimpleModuleNode({
-    componentKind = '',
-    layerIndex = null,
-    stage = '',
     title = '',
-    labelTex = '',
-    fallbackText = '',
     styleKey = VIEW2D_STYLE_KEYS.RESIDUAL,
-    tokenRefs = [],
-    measureCols = SUMMARY_MODEL_COLS,
-    getVector = () => null
+    cardRole = 'module-card',
+    cardWidth = 112,
+    cardHeight = 96,
+    dimensions = { rows: 1, cols: 1 },
+    cardCornerRadius = null,
+    textStyleKey = VIEW2D_STYLE_KEYS.LABEL
 } = {}) {
-    return createModuleGroup({
-        componentKind,
-        layerIndex,
-        stage
-    }, title, [
-        createMatrixNode({
-            role: 'module-summary',
-            semantic: {
-                componentKind,
-                layerIndex,
-                stage,
-                role: 'module-summary'
-            },
-            label: buildLabel(labelTex, fallbackText),
-            dimensions: {
-                rows: tokenRefs.length,
-                cols: D_MODEL
-            },
-            presentation: VIEW2D_MATRIX_PRESENTATIONS.BANDED_ROWS,
-            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
-            rowItems: buildVectorRowItems(tokenRefs, {
-                baseSemantic: {
-                    componentKind,
-                    layerIndex,
-                    stage
-                },
-                role: 'vector-row',
-                measureCols,
-                rangeOptions: styleKey === VIEW2D_STYLE_KEYS.MLP ? MLP_RANGE_OPTIONS : null,
-                getVector
-            }),
-            visual: {
-                styleKey
-            },
-            metadata: createMeasureMetadata(measureCols, tokenRefs.length)
-        })
-    ]);
-}
-
-function buildEmbeddingModule({
-    tokenRefs = [],
-    activationSource = null
-} = {}) {
-    const baseSemantic = {
-        componentKind: 'embedding',
-        stage: 'input'
-    };
-    const tokenNode = createMatrixNode({
-        role: 'token-embedding',
-        semantic: buildSemantic(baseSemantic, { stage: 'token', role: 'token-embedding' }),
-        label: buildLabel('E_{tok}', 'E_tok'),
-        dimensions: {
-            rows: tokenRefs.length,
-            cols: D_MODEL
-        },
-        presentation: VIEW2D_MATRIX_PRESENTATIONS.BANDED_ROWS,
+    const cardNode = createMatrixNode({
+        role: cardRole,
+        semantic: buildSemantic(semantic, { role: cardRole }),
+        dimensions,
+        presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
         shape: VIEW2D_MATRIX_SHAPES.MATRIX,
-        rowItems: buildVectorRowItems(tokenRefs, {
-            baseSemantic,
-            role: 'token-row',
-            measureCols: SUMMARY_MODEL_COLS,
-            getVector: (tokenRef) => activationSource?.getEmbedding?.('token', tokenRef.tokenIndex, D_MODEL)
-        }),
-        visual: {
-            styleKey: VIEW2D_STYLE_KEYS.EMBEDDING_TOKEN
-        },
-        metadata: createMeasureMetadata(SUMMARY_MODEL_COLS, tokenRefs.length)
+        visual: { styleKey },
+        metadata: mergeMetadata(
+            createCardMetadata(cardWidth, cardHeight, {
+                cornerRadius: cardCornerRadius
+            })
+        )
     });
-
-    const positionNode = createMatrixNode({
-        role: 'position-embedding',
-        semantic: buildSemantic(baseSemantic, { stage: 'position', role: 'position-embedding' }),
-        label: buildLabel('E_{pos}', 'E_pos'),
-        dimensions: {
-            rows: tokenRefs.length,
-            cols: D_MODEL
-        },
-        presentation: VIEW2D_MATRIX_PRESENTATIONS.BANDED_ROWS,
-        shape: VIEW2D_MATRIX_SHAPES.MATRIX,
-        rowItems: buildVectorRowItems(tokenRefs, {
-            baseSemantic,
-            role: 'position-row',
-            measureCols: SUMMARY_MODEL_COLS,
-            rangeOptions: VALUE_RANGE_OPTIONS,
-            getVector: (tokenRef) => activationSource?.getEmbedding?.('position', tokenRef.tokenIndex, D_MODEL)
-        }),
-        visual: {
-            styleKey: VIEW2D_STYLE_KEYS.EMBEDDING_POSITION
-        },
-        metadata: createMeasureMetadata(SUMMARY_MODEL_COLS, tokenRefs.length)
-    });
-
-    const sumNode = createMatrixNode({
-        role: 'sum-output',
-        semantic: buildSemantic(baseSemantic, { stage: 'sum', role: 'sum-output' }),
-        label: buildLabel('X_0', 'X_0'),
-        dimensions: {
-            rows: tokenRefs.length,
-            cols: D_MODEL
-        },
-        presentation: VIEW2D_MATRIX_PRESENTATIONS.BANDED_ROWS,
-        shape: VIEW2D_MATRIX_SHAPES.MATRIX,
-        rowItems: buildVectorRowItems(tokenRefs, {
-            baseSemantic,
-            role: 'sum-row',
-            measureCols: SUMMARY_MODEL_COLS,
-            getVector: (tokenRef) => activationSource?.getEmbedding?.('sum', tokenRef.tokenIndex, D_MODEL)
-        }),
-        visual: {
-            styleKey: VIEW2D_STYLE_KEYS.RESIDUAL
-        },
-        metadata: createMeasureMetadata(SUMMARY_MODEL_COLS, tokenRefs.length)
-    });
-
-    const node = createModuleGroup(baseSemantic, 'Embeddings', [
-        tokenNode,
-        createOperatorNode({
-            role: 'embedding-plus',
-            semantic: buildSemantic(baseSemantic, { stage: 'plus', role: 'embedding-plus', operatorKey: 'plus' }),
-            text: '+',
-            visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR }
-        }),
-        positionNode,
-        createOperatorNode({
-            role: 'embedding-equals',
-            semantic: buildSemantic(baseSemantic, { stage: 'equals', role: 'embedding-equals', operatorKey: 'equals' }),
-            text: '=',
-            visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR }
-        }),
-        sumNode
-    ]);
 
     return {
-        node,
-        entryNode: sumNode,
-        exitNode: sumNode
-    };
-}
-
-function buildMhsaModule({
-    layerIndex = 0,
-    tokenRefs = [],
-    activationSource = null
-} = {}) {
-    const baseSemantic = {
-        componentKind: 'mhsa',
-        layerIndex,
-        stage: 'attention'
-    };
-
-    const headNodes = Array.from({ length: NUM_HEAD_SETS_LAYER }, (_, headIndex) => {
-        const headSemantic = buildSemantic(baseSemantic, {
-            headIndex,
-            stage: 'head-stack'
-        });
-        const headVector = activationSource?.getAttentionWeightedSum?.(
-            layerIndex,
-            headIndex,
-            tokenRefs[tokenRefs.length - 1]?.tokenIndex ?? 0,
-            D_HEAD
-        ) || activationSource?.getLayerQKVVector?.(
-            layerIndex,
-            'q',
-            headIndex,
-            tokenRefs[tokenRefs.length - 1]?.tokenIndex ?? 0,
-            D_HEAD
-        );
-        const summaryValues = sampleVector(headVector || [], SUMMARY_HEAD_COLS);
-
-        return createGroupNode({
-            role: 'head',
-            semantic: buildSemantic(headSemantic, { role: 'head' }),
-            direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
-            gapKey: 'inline',
+        node: createGroupNode({
+            role: semantic.role || 'module',
+            semantic,
+            direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
+            gapKey: 'default',
             children: [
+                cardNode,
                 createTextNode({
-                    role: 'head-badge',
-                    semantic: buildSemantic(headSemantic, { role: 'head-badge' }),
-                    text: `H${headIndex + 1}`,
+                    role: 'module-title',
+                    semantic: buildSemantic(semantic, { role: 'module-title' }),
+                    text: title,
                     presentation: VIEW2D_TEXT_PRESENTATIONS.LABEL,
-                    visual: { styleKey: VIEW2D_STYLE_KEYS.CAPTION }
-                }),
-                createMatrixNode({
-                    role: 'head-summary',
-                    semantic: buildSemantic(headSemantic, { role: 'head-summary' }),
-                    dimensions: {
-                        rows: 1,
-                        cols: D_HEAD
-                    },
-                    presentation: VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS,
-                    shape: VIEW2D_MATRIX_SHAPES.MATRIX,
-                    rowItems: [{
-                        id: buildSceneNodeId(buildSemantic(headSemantic, { role: 'head-summary-row', rowIndex: 0 })),
-                        index: 0,
-                        label: `Head ${headIndex + 1}`,
-                        semantic: buildSemantic(headSemantic, { role: 'head-summary-row', rowIndex: 0 }),
-                        rawValues: summaryValues,
-                        gradientCss: buildGradientCss(summaryValues, { rangeOptions: HEAD_RANGE_OPTIONS })
-                    }],
-                    visual: {
-                        styleKey: VIEW2D_STYLE_KEYS.MHSA_HEAD
-                    },
-                    metadata: createMeasureMetadata(SUMMARY_HEAD_COLS, 1)
+                    visual: { styleKey: textStyleKey }
                 })
             ]
-        });
-    });
-
-    const node = createModuleGroup(baseSemantic, 'MHSA', [
-        createGroupNode({
-            role: 'head-stack',
-            semantic: buildSemantic(baseSemantic, { role: 'head-stack' }),
-            direction: VIEW2D_LAYOUT_DIRECTIONS.VERTICAL,
-            gapKey: 'default',
-            children: headNodes
-        })
-    ]);
-
-    return {
-        node,
-        entryNode: node,
-        exitNode: node
+        }),
+        cardNode
     };
 }
 
-function buildOutputProjectionModule({
-    layerIndex = 0,
-    tokenRefs = [],
-    activationSource = null
-} = {}) {
-    const baseSemantic = {
-        componentKind: 'output-projection',
-        layerIndex,
-        stage: 'attn-out'
-    };
-    const outputNode = createMatrixNode({
-        role: 'projection-output',
-        semantic: buildSemantic(baseSemantic, { role: 'projection-output' }),
-        label: buildLabel('A_{out}', 'attn_out'),
+function createHiddenSpacer(width = 1, height = 1, semantic = {}) {
+    return createMatrixNode({
+        role: 'layout-spacer',
+        semantic: buildSemantic(semantic, { role: 'layout-spacer' }),
         dimensions: {
-            rows: tokenRefs.length,
-            cols: D_MODEL
-        },
-        presentation: VIEW2D_MATRIX_PRESENTATIONS.BANDED_ROWS,
-        shape: VIEW2D_MATRIX_SHAPES.MATRIX,
-        rowItems: buildVectorRowItems(tokenRefs, {
-            baseSemantic,
-            role: 'output-row',
-            measureCols: SUMMARY_MODEL_COLS,
-            getVector: (tokenRef) => activationSource?.getAttentionOutputProjection?.(layerIndex, tokenRef.tokenIndex, D_MODEL)
-        }),
-        visual: {
-            styleKey: VIEW2D_STYLE_KEYS.OUTPUT_PROJECTION
-        },
-        metadata: createMeasureMetadata(SUMMARY_MODEL_COLS, tokenRefs.length)
-    });
-
-    const weightNode = createMatrixNode({
-        role: 'projection-weight',
-        semantic: buildSemantic(baseSemantic, { role: 'projection-weight' }),
-        label: buildLabel('W_O', 'W_O'),
-        dimensions: {
-            rows: D_MODEL,
-            cols: D_MODEL
+            rows: 1,
+            cols: 1
         },
         presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
         shape: VIEW2D_MATRIX_SHAPES.MATRIX,
         visual: {
-            styleKey: VIEW2D_STYLE_KEYS.MATRIX_WEIGHT
-        }
+            styleKey: VIEW2D_STYLE_KEYS.RESIDUAL
+        },
+        metadata: createCardMetadata(width, height, {
+            hidden: true,
+            cornerRadius: 0
+        })
     });
-
-    const node = createModuleGroup(baseSemantic, 'Output proj', [
-        weightNode,
-        outputNode
-    ]);
-
-    return {
-        node,
-        entryNode: node,
-        exitNode: outputNode
-    };
 }
 
-function buildResidualAddModule({
-    layerIndex = 0,
-    stage = '',
+function createFixedWidthColumn({
+    semantic = {},
+    role = 'layout-column',
+    width = 100,
+    height = 24,
+    align = 'center',
+    child = null
+} = {}) {
+    const spacer = createHiddenSpacer(width, height, semantic);
+    return createGroupNode({
+        role,
+        semantic,
+        direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
+        gapKey: 'default',
+        align,
+        children: child ? [spacer, child] : [spacer]
+    });
+}
+
+function createResidualStateModule({
+    semantic = {},
     title = '',
     tokenRefs = [],
     getVector = () => null
 } = {}) {
-    const baseSemantic = {
-        componentKind: 'residual',
-        layerIndex,
-        stage
-    };
-    const outputNode = createMatrixNode({
-        role: 'residual-add-output',
-        semantic: buildSemantic(baseSemantic, { role: 'residual-add-output' }),
-        label: buildLabel('x_{res}', 'x_res'),
+    const rowItems = buildVectorRowItems(tokenRefs, {
+        baseSemantic: semantic,
+        role: 'residual-row',
+        getVector
+    });
+    const rowCount = Math.max(1, rowItems.length);
+    const cardNode = createMatrixNode({
+        role: 'module-card',
+        semantic: buildSemantic(semantic, { role: 'module-card' }),
         dimensions: {
-            rows: tokenRefs.length,
+            rows: rowCount,
             cols: D_MODEL
         },
-        presentation: VIEW2D_MATRIX_PRESENTATIONS.BANDED_ROWS,
+        presentation: VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS,
         shape: VIEW2D_MATRIX_SHAPES.MATRIX,
-        rowItems: buildVectorRowItems(tokenRefs, {
-            baseSemantic,
-            role: 'residual-row',
-            measureCols: SUMMARY_MODEL_COLS,
-            getVector
-        }),
-        visual: {
-            styleKey: VIEW2D_STYLE_KEYS.RESIDUAL
-        },
-        metadata: createMeasureMetadata(SUMMARY_MODEL_COLS, tokenRefs.length)
+        rowItems,
+        visual: { styleKey: VIEW2D_STYLE_KEYS.RESIDUAL },
+        metadata: mergeMetadata(
+            createMeasureMetadata(SUMMARY_MODEL_COLS, rowCount),
+            createCompactRowsMetadata({
+                compactWidth: 104,
+                rowHeight: 7,
+                rowGap: 2,
+                paddingX: 6,
+                paddingY: 5
+            }),
+            createCardMetadata(null, null, {
+                cornerRadius: 14
+            })
+        )
     });
 
-    const node = createModuleGroup(baseSemantic, title, [
-        createOperatorNode({
-            role: 'residual-add-operator',
-            semantic: buildSemantic(baseSemantic, { role: 'residual-add-operator', operatorKey: 'plus' }),
-            text: '+',
-            visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR }
-        }),
-        outputNode
-    ]);
-
     return {
-        node,
-        entryNode: node,
-        exitNode: outputNode
+        node: createGroupNode({
+            role: semantic.role || 'module',
+            semantic,
+            direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
+            gapKey: 'default',
+            children: [
+                cardNode,
+                createTextNode({
+                    role: 'module-title',
+                    semantic: buildSemantic(semantic, { role: 'module-title' }),
+                    text: title,
+                    presentation: VIEW2D_TEXT_PRESENTATIONS.LABEL,
+                    visual: { styleKey: VIEW2D_STYLE_KEYS.LABEL }
+                })
+            ]
+        }),
+        cardNode
     };
 }
 
-function buildMlpModule({
-    layerIndex = 0,
-    tokenRefs = [],
-    activationSource = null
+function createTopAddNode({
+    semantic = {}
 } = {}) {
-    const baseSemantic = {
-        componentKind: 'mlp',
-        layerIndex,
-        stage: 'mlp'
+    const cardNode = createMatrixNode({
+        role: 'add-circle',
+        semantic: buildSemantic(semantic, { role: 'add-circle' }),
+        dimensions: {
+            rows: 1,
+            cols: 1
+        },
+        presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+        shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+        visual: { styleKey: VIEW2D_STYLE_KEYS.RESIDUAL_ADD },
+        metadata: createCardMetadata(28, 28, {
+            cornerRadius: 999
+        })
+    });
+    return {
+        node: createGroupNode({
+            role: semantic.role || 'module',
+            semantic,
+            direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
+            gapKey: 'default',
+            children: [
+                cardNode,
+                createOperatorNode({
+                    role: 'residual-add-operator',
+                    semantic: buildSemantic(semantic, { role: 'residual-add-operator', operatorKey: 'plus' }),
+                    text: '+',
+                    visual: { styleKey: VIEW2D_STYLE_KEYS.RESIDUAL_ADD_SYMBOL }
+                })
+            ]
+        }),
+        cardNode
     };
-    const upNode = createMatrixNode({
-        role: 'mlp-up',
-        semantic: buildSemantic(baseSemantic, { stage: 'mlp-up', role: 'mlp-up' }),
-        label: buildLabel('MLP_{up}', 'MLP_up'),
-        dimensions: {
-            rows: tokenRefs.length,
-            cols: D_MODEL * 4
-        },
-        presentation: VIEW2D_MATRIX_PRESENTATIONS.BANDED_ROWS,
-        shape: VIEW2D_MATRIX_SHAPES.MATRIX,
-        rowItems: buildVectorRowItems(tokenRefs, {
-            baseSemantic,
-            role: 'mlp-up-row',
-            measureCols: SUMMARY_MLP_COLS,
-            rangeOptions: MLP_RANGE_OPTIONS,
-            getVector: (tokenRef) => activationSource?.getMlpUp?.(layerIndex, tokenRef.tokenIndex, D_MODEL * 4)
-        }),
-        visual: {
-            styleKey: VIEW2D_STYLE_KEYS.MLP
-        },
-        metadata: createMeasureMetadata(SUMMARY_MLP_COLS, tokenRefs.length)
-    });
+}
 
-    const activationNode = createMatrixNode({
-        role: 'mlp-activation',
-        semantic: buildSemantic(baseSemantic, { stage: 'mlp-activation', role: 'mlp-activation' }),
-        label: buildLabel('GELU', 'GELU'),
-        dimensions: {
-            rows: tokenRefs.length,
-            cols: D_MODEL * 4
+function buildLayerNormModule({
+    layerIndex = null,
+    stage = '',
+    title = ''
+} = {}) {
+    return createModuleCardGroup({
+        semantic: {
+            componentKind: 'layer-norm',
+            layerIndex,
+            stage,
+            role: 'module'
         },
-        presentation: VIEW2D_MATRIX_PRESENTATIONS.BANDED_ROWS,
-        shape: VIEW2D_MATRIX_SHAPES.MATRIX,
-        rowItems: buildVectorRowItems(tokenRefs, {
-            baseSemantic,
-            role: 'mlp-activation-row',
-            measureCols: SUMMARY_MLP_COLS,
-            rangeOptions: MLP_RANGE_OPTIONS,
-            getVector: (tokenRef) => activationSource?.getMlpActivation?.(layerIndex, tokenRef.tokenIndex, D_MODEL * 4)
-        }),
-        visual: {
-            styleKey: VIEW2D_STYLE_KEYS.MLP
-        },
-        metadata: createMeasureMetadata(SUMMARY_MLP_COLS, tokenRefs.length)
-    });
-
-    const downNode = createMatrixNode({
-        role: 'mlp-down',
-        semantic: buildSemantic(baseSemantic, { stage: 'mlp-down', role: 'mlp-down' }),
-        label: buildLabel('MLP_{down}', 'MLP_down'),
+        title,
+        styleKey: VIEW2D_STYLE_KEYS.LAYER_NORM,
+        textStyleKey: VIEW2D_STYLE_KEYS.LABEL_DARK,
+        cardWidth: 92,
+        cardHeight: 42,
+        cardCornerRadius: 999,
         dimensions: {
-            rows: tokenRefs.length,
+            rows: 1,
             cols: D_MODEL
+        }
+    });
+}
+
+function buildEmbeddingCardGroup({
+    role = '',
+    stage = '',
+    title = '',
+    styleKey = VIEW2D_STYLE_KEYS.EMBEDDING_TOKEN
+} = {}) {
+    return createModuleCardGroup({
+        semantic: {
+            componentKind: 'embedding',
+            stage,
+            role
         },
-        presentation: VIEW2D_MATRIX_PRESENTATIONS.BANDED_ROWS,
-        shape: VIEW2D_MATRIX_SHAPES.MATRIX,
-        rowItems: buildVectorRowItems(tokenRefs, {
-            baseSemantic,
-            role: 'mlp-down-row',
-            measureCols: SUMMARY_MODEL_COLS,
-            rangeOptions: MLP_RANGE_OPTIONS,
-            getVector: (tokenRef) => activationSource?.getMlpDown?.(layerIndex, tokenRef.tokenIndex, D_MODEL)
-        }),
-        visual: {
-            styleKey: VIEW2D_STYLE_KEYS.MLP
-        },
-        metadata: createMeasureMetadata(SUMMARY_MODEL_COLS, tokenRefs.length)
+        title,
+        styleKey,
+        cardWidth: 92,
+        cardHeight: 72,
+        dimensions: {
+            rows: CONTEXT_LEN,
+            cols: D_MODEL
+        }
+    });
+}
+
+function buildMhsaModule({
+    layerIndex = 0
+} = {}) {
+    const HEAD_CARD_WIDTH = 136;
+    const HEAD_CARD_HEIGHT = 52;
+    const HEAD_STACK_ALIGNMENT_OFFSET = 4;
+    const baseSemantic = {
+        componentKind: 'mhsa',
+        layerIndex,
+        stage: 'attention',
+        role: 'module'
+    };
+
+    const headEntries = Array.from({ length: NUM_HEAD_SETS_LAYER }, (_, headIndex) => {
+        const headSemantic = {
+            componentKind: 'mhsa',
+            layerIndex,
+            headIndex,
+            stage: 'attention',
+            role: 'head'
+        };
+        const headCard = createMatrixNode({
+            role: 'head-card',
+            semantic: buildSemantic(headSemantic, { role: 'head-card' }),
+            dimensions: {
+                rows: 1,
+                cols: D_HEAD
+            },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.MHSA_HEAD
+            },
+            metadata: createCardMetadata(HEAD_CARD_WIDTH, HEAD_CARD_HEIGHT, {
+                cornerRadius: 12
+            })
+        });
+        const labelNode = createTextNode({
+            role: 'head-label',
+            semantic: buildSemantic(headSemantic, { role: 'head-label' }),
+            text: `Head ${headIndex + 1}`,
+            presentation: VIEW2D_TEXT_PRESENTATIONS.LABEL,
+            visual: { styleKey: VIEW2D_STYLE_KEYS.LABEL }
+        });
+        const headNode = createGroupNode({
+            role: 'head',
+            semantic: headSemantic,
+            direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
+            gapKey: 'default',
+            children: [
+                headCard,
+                labelNode
+            ]
+        });
+        return {
+            node: headNode,
+            cardNode: headCard
+        };
     });
 
-    const node = createModuleGroup(baseSemantic, 'MLP', [
-        upNode,
-        activationNode,
-        downNode
-    ]);
+    const node = createGroupNode({
+        role: 'module',
+        semantic: baseSemantic,
+        direction: VIEW2D_LAYOUT_DIRECTIONS.VERTICAL,
+        gapKey: 'default',
+        children: [
+            createGroupNode({
+                role: 'head-stack',
+                semantic: buildSemantic(baseSemantic, { role: 'head-stack' }),
+                direction: VIEW2D_LAYOUT_DIRECTIONS.VERTICAL,
+                gapKey: 'default',
+                children: [
+                    createHiddenSpacer(HEAD_CARD_WIDTH, HEAD_STACK_ALIGNMENT_OFFSET, buildSemantic(baseSemantic, {
+                        stage: 'head-stack-offset',
+                        role: 'head-stack-offset'
+                    })),
+                    ...headEntries.map((entry) => entry.node)
+                ]
+            })
+        ]
+    });
 
     return {
         node,
-        entryNode: node,
-        exitNode: downNode
+        headCardNodes: headEntries.map((entry) => entry.cardNode)
     };
+}
+
+function buildOutputProjectionModule({
+    layerIndex = 0
+} = {}) {
+    return createModuleCardGroup({
+        semantic: {
+            componentKind: 'output-projection',
+            layerIndex,
+            stage: 'attn-out',
+            role: 'module'
+        },
+        title: 'Out proj',
+        styleKey: VIEW2D_STYLE_KEYS.OUTPUT_PROJECTION,
+        cardRole: 'projection-weight',
+        cardWidth: 110,
+        cardHeight: 86,
+        cardCornerRadius: 14,
+        dimensions: {
+            rows: D_MODEL,
+            cols: D_MODEL
+        }
+    });
+}
+
+function buildResidualAddModule({
+    layerIndex = 0,
+    stage = ''
+} = {}) {
+    return createTopAddNode({
+        semantic: {
+            componentKind: 'residual',
+            layerIndex,
+            stage,
+            role: 'module'
+        }
+    });
+}
+
+function buildMlpModule({
+    layerIndex = 0
+} = {}) {
+    return createModuleCardGroup({
+        semantic: {
+            componentKind: 'mlp',
+            layerIndex,
+            stage: 'mlp',
+            role: 'module'
+        },
+        title: 'MLP',
+        styleKey: VIEW2D_STYLE_KEYS.MLP,
+        cardWidth: 148,
+        cardHeight: 92,
+        cardCornerRadius: 14,
+        dimensions: {
+            rows: D_MODEL,
+            cols: D_MODEL * 4
+        }
+    });
 }
 
 function buildLayerGroup({
     layerIndex = 0,
-    tokenRefs = [],
-    activationSource = null
+    activationSource = null,
+    tokenRefs = []
 } = {}) {
     const layerSemantic = {
         componentKind: 'layer',
         layerIndex
     };
 
-    const residualInNode = buildResidualNode({
+    const COLUMN_WIDTHS = {
+        residual: 136,
+        heads: 200,
+        outProj: 152,
+        addIn: 80,
+        ln2: 148,
+        mlp: 196,
+        addOut: 80
+    };
+    const TOP_ROW_HEIGHT = 58;
+
+    const incomingResidual = createResidualStateModule({
         semantic: {
             componentKind: 'residual',
             layerIndex,
             stage: 'incoming',
             role: 'module'
         },
-        labelTex: 'x_{in}',
-        fallbackText: 'x_in',
+        title: 'x_in',
         tokenRefs,
-        getVector: (tokenRef) => activationSource?.getLayerIncoming?.(layerIndex, tokenRef.tokenIndex, D_MODEL)
+        getVector: (tokenRef) => (
+            typeof activationSource?.getLayerIncoming === 'function'
+                ? activationSource.getLayerIncoming(layerIndex, tokenRef.tokenIndex, D_MODEL)
+                : null
+        )
     });
-
-    const ln1Node = buildSimpleModuleNode({
-        componentKind: 'layer-norm',
+    const ln1Module = buildLayerNormModule({
         layerIndex,
         stage: 'ln1',
-        title: 'LN1',
-        labelTex: 'X_{\\ln 1}',
-        fallbackText: 'X_ln1',
-        styleKey: VIEW2D_STYLE_KEYS.LAYER_NORM,
-        tokenRefs,
-        measureCols: SUMMARY_MODEL_COLS,
-        getVector: (tokenRef) => activationSource?.getLayerLn1?.(layerIndex, 'shift', tokenRef.tokenIndex, D_MODEL)
+        title: 'LN1'
     });
-
     const mhsaModule = buildMhsaModule({
-        layerIndex,
-        tokenRefs,
-        activationSource
+        layerIndex
     });
-
     const outputProjectionModule = buildOutputProjectionModule({
-        layerIndex,
-        tokenRefs,
-        activationSource
+        layerIndex
     });
-
     const postAttentionAdd = buildResidualAddModule({
+        componentKind: 'residual',
         layerIndex,
-        stage: 'post-attn-add',
-        title: 'Add',
-        tokenRefs,
-        getVector: (tokenRef) => activationSource?.getPostAttentionResidual?.(layerIndex, tokenRef.tokenIndex, D_MODEL)
+        stage: 'post-attn-add'
     });
-
-    const ln2Node = buildSimpleModuleNode({
-        componentKind: 'layer-norm',
-        layerIndex,
-        stage: 'ln2',
-        title: 'LN2',
-        labelTex: 'X_{\\ln 2}',
-        fallbackText: 'X_ln2',
-        styleKey: VIEW2D_STYLE_KEYS.LAYER_NORM,
-        tokenRefs,
-        measureCols: SUMMARY_MODEL_COLS,
-        getVector: (tokenRef) => activationSource?.getLayerLn2?.(layerIndex, 'shift', tokenRef.tokenIndex, D_MODEL)
-    });
-
-    const mlpModule = buildMlpModule({
-        layerIndex,
-        tokenRefs,
-        activationSource
-    });
-
-    const postMlpAdd = buildResidualAddModule({
-        layerIndex,
-        stage: 'post-mlp-add',
-        title: 'Add',
-        tokenRefs,
-        getVector: (tokenRef) => activationSource?.getPostMlpResidual?.(layerIndex, tokenRef.tokenIndex, D_MODEL)
-    });
-
-    const residualOutNode = buildResidualNode({
+    const postAttentionResidual = createResidualStateModule({
         semantic: {
             componentKind: 'residual',
             layerIndex,
-            stage: 'outgoing',
+            stage: 'post-attn-residual',
             role: 'module'
         },
-        labelTex: 'x_{out}',
-        fallbackText: 'x_out',
+        title: 'x_attn',
         tokenRefs,
-        getVector: (tokenRef) => activationSource?.getPostMlpResidual?.(layerIndex, tokenRef.tokenIndex, D_MODEL)
+        getVector: (tokenRef) => (
+            typeof activationSource?.getPostAttentionResidual === 'function'
+                ? activationSource.getPostAttentionResidual(layerIndex, tokenRef.tokenIndex, D_MODEL)
+                : null
+        )
+    });
+    const ln2Module = buildLayerNormModule({
+        layerIndex,
+        stage: 'ln2',
+        title: 'LN2'
+    });
+    const mlpModule = buildMlpModule({
+        layerIndex
+    });
+    const postMlpAdd = buildResidualAddModule({
+        layerIndex,
+        stage: 'post-mlp-add'
     });
 
-    const contentNode = createGroupNode({
-        role: 'layer-body',
-        semantic: buildSemantic(layerSemantic, { role: 'layer-body' }),
+    const topRow = createGroupNode({
+        role: 'layer-top-row',
+        semantic: buildSemantic(layerSemantic, { role: 'layer-top-row' }),
         direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
         gapKey: 'stage',
         children: [
-            residualInNode,
-            ln1Node,
-            mhsaModule.node,
-            outputProjectionModule.node,
-            postAttentionAdd.node,
-            ln2Node,
-            mlpModule.node,
-            postMlpAdd.node,
-            residualOutNode
+            createFixedWidthColumn({
+                semantic: buildSemantic(layerSemantic, { stage: 'top-x-in', role: 'top-x-in' }),
+                width: COLUMN_WIDTHS.residual,
+                height: TOP_ROW_HEIGHT,
+                child: incomingResidual.node
+            }),
+            createFixedWidthColumn({
+                semantic: buildSemantic(layerSemantic, { stage: 'top-head-space', role: 'top-head-space' }),
+                width: COLUMN_WIDTHS.heads,
+                height: TOP_ROW_HEIGHT
+            }),
+            createFixedWidthColumn({
+                semantic: buildSemantic(layerSemantic, { stage: 'top-outproj-space', role: 'top-outproj-space' }),
+                width: COLUMN_WIDTHS.outProj,
+                height: TOP_ROW_HEIGHT
+            }),
+            createFixedWidthColumn({
+                semantic: buildSemantic(layerSemantic, { stage: 'top-post-attn-add', role: 'top-post-attn-add' }),
+                width: COLUMN_WIDTHS.addIn,
+                height: TOP_ROW_HEIGHT,
+                child: postAttentionAdd.node
+            }),
+            createFixedWidthColumn({
+                semantic: buildSemantic(layerSemantic, { stage: 'top-post-attn-residual', role: 'top-post-attn-residual' }),
+                width: COLUMN_WIDTHS.ln2,
+                height: TOP_ROW_HEIGHT,
+                child: postAttentionResidual.node
+            }),
+            createFixedWidthColumn({
+                semantic: buildSemantic(layerSemantic, { stage: 'top-mlp-space', role: 'top-mlp-space' }),
+                width: COLUMN_WIDTHS.mlp,
+                height: TOP_ROW_HEIGHT
+            }),
+            createFixedWidthColumn({
+                semantic: buildSemantic(layerSemantic, { stage: 'top-post-mlp-add', role: 'top-post-mlp-add' }),
+                width: COLUMN_WIDTHS.addOut,
+                height: TOP_ROW_HEIGHT,
+                child: postMlpAdd.node
+            })
+        ]
+    });
+
+    const bottomRow = createGroupNode({
+        role: 'layer-bottom-row',
+        semantic: buildSemantic(layerSemantic, { role: 'layer-bottom-row' }),
+        direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
+        gapKey: 'stage',
+        align: 'start',
+        children: [
+            createFixedWidthColumn({
+                semantic: buildSemantic(layerSemantic, { stage: 'bottom-ln1', role: 'bottom-ln1' }),
+                width: COLUMN_WIDTHS.residual,
+                height: 96,
+                align: 'center',
+                child: ln1Module.node
+            }),
+            createFixedWidthColumn({
+                semantic: buildSemantic(layerSemantic, { stage: 'bottom-heads', role: 'bottom-heads' }),
+                width: COLUMN_WIDTHS.heads,
+                height: 360,
+                align: 'top',
+                child: mhsaModule.node
+            }),
+            createFixedWidthColumn({
+                semantic: buildSemantic(layerSemantic, { stage: 'bottom-outproj', role: 'bottom-outproj' }),
+                width: COLUMN_WIDTHS.outProj,
+                height: 96,
+                align: 'center',
+                child: outputProjectionModule.node
+            }),
+            createFixedWidthColumn({
+                semantic: buildSemantic(layerSemantic, { stage: 'bottom-post-attn-add-space', role: 'bottom-post-attn-add-space' }),
+                width: COLUMN_WIDTHS.addIn,
+                height: 84
+            }),
+            createFixedWidthColumn({
+                semantic: buildSemantic(layerSemantic, { stage: 'bottom-ln2', role: 'bottom-ln2' }),
+                width: COLUMN_WIDTHS.ln2,
+                height: 96,
+                align: 'center',
+                child: ln2Module.node
+            }),
+            createFixedWidthColumn({
+                semantic: buildSemantic(layerSemantic, { stage: 'bottom-mlp', role: 'bottom-mlp' }),
+                width: COLUMN_WIDTHS.mlp,
+                height: 96,
+                align: 'center',
+                child: mlpModule.node
+            }),
+            createFixedWidthColumn({
+                semantic: buildSemantic(layerSemantic, { stage: 'bottom-add-space', role: 'bottom-add-space' }),
+                width: COLUMN_WIDTHS.addOut,
+                height: 84
+            })
         ]
     });
 
@@ -865,43 +881,89 @@ function buildLayerGroup({
                 presentation: VIEW2D_TEXT_PRESENTATIONS.LABEL,
                 visual: { styleKey: VIEW2D_STYLE_KEYS.LABEL }
             }),
-            contentNode
+            topRow,
+            bottomRow
         ]
     });
 
     const flow = [
-        { from: residualInNode, to: ln1Node, key: `layer-${layerIndex}-incoming-ln1` },
-        { from: ln1Node, to: mhsaModule.node, key: `layer-${layerIndex}-ln1-mhsa` },
-        { from: mhsaModule.node, to: outputProjectionModule.node, key: `layer-${layerIndex}-mhsa-outproj` },
-        { from: outputProjectionModule.node, to: postAttentionAdd.node, key: `layer-${layerIndex}-outproj-add1` },
-        { from: postAttentionAdd.node, to: ln2Node, key: `layer-${layerIndex}-add1-ln2` },
-        { from: ln2Node, to: mlpModule.node, key: `layer-${layerIndex}-ln2-mlp` },
-        { from: mlpModule.node, to: postMlpAdd.node, key: `layer-${layerIndex}-mlp-add2` },
-        { from: postMlpAdd.node, to: residualOutNode, key: `layer-${layerIndex}-add2-outgoing` }
+        {
+            from: incomingResidual.cardNode,
+            to: postAttentionAdd.cardNode,
+            key: `layer-${layerIndex}-residual-top-post-attn-add`
+        },
+        {
+            from: postAttentionAdd.cardNode,
+            to: postAttentionResidual.cardNode,
+            key: `layer-${layerIndex}-residual-top-post-attn-residual`
+        },
+        {
+            from: postAttentionResidual.cardNode,
+            to: postMlpAdd.cardNode,
+            key: `layer-${layerIndex}-residual-top-post-mlp-add`
+        },
+        {
+            from: incomingResidual.cardNode,
+            to: ln1Module.cardNode,
+            key: `layer-${layerIndex}-incoming-ln1`,
+            sourceAnchor: VIEW2D_ANCHOR_SIDES.BOTTOM,
+            targetAnchor: VIEW2D_ANCHOR_SIDES.TOP,
+            route: VIEW2D_CONNECTOR_ROUTES.VERTICAL
+        },
+        ...mhsaModule.headCardNodes.map((headCardNode, headIndex) => ({
+            from: ln1Module.cardNode,
+            to: headCardNode,
+            key: `layer-${layerIndex}-ln1-head-${headIndex}`
+        })),
+        ...mhsaModule.headCardNodes.map((headCardNode, headIndex) => ({
+            from: headCardNode,
+            to: outputProjectionModule.cardNode,
+            key: `layer-${layerIndex}-head-${headIndex}-outproj`
+        })),
+        {
+            from: outputProjectionModule.cardNode,
+            to: postAttentionAdd.cardNode,
+            key: `layer-${layerIndex}-outproj-add1`,
+            sourceAnchor: VIEW2D_ANCHOR_SIDES.RIGHT,
+            targetAnchor: VIEW2D_ANCHOR_SIDES.BOTTOM,
+            route: VIEW2D_CONNECTOR_ROUTES.ELBOW
+        },
+        {
+            from: postAttentionResidual.cardNode,
+            to: ln2Module.cardNode,
+            key: `layer-${layerIndex}-add1-ln2`,
+            sourceAnchor: VIEW2D_ANCHOR_SIDES.BOTTOM,
+            targetAnchor: VIEW2D_ANCHOR_SIDES.TOP,
+            route: VIEW2D_CONNECTOR_ROUTES.VERTICAL,
+            gap: 12
+        },
+        {
+            from: ln2Module.cardNode,
+            to: mlpModule.cardNode,
+            key: `layer-${layerIndex}-ln2-mlp`
+        },
+        {
+            from: mlpModule.cardNode,
+            to: postMlpAdd.cardNode,
+            key: `layer-${layerIndex}-mlp-add2`,
+            sourceAnchor: VIEW2D_ANCHOR_SIDES.RIGHT,
+            targetAnchor: VIEW2D_ANCHOR_SIDES.BOTTOM,
+            route: VIEW2D_CONNECTOR_ROUTES.ELBOW
+        }
     ];
 
     return {
         node,
-        entryNode: residualInNode,
-        exitNode: residualOutNode,
+        entryNode: incomingResidual.cardNode,
+        exitNode: postMlpAdd.cardNode,
         flow
     };
 }
 
-function buildFinalLayerNormModule({
-    tokenRefs = [],
-    activationSource = null
-} = {}) {
-    return buildSimpleModuleNode({
-        componentKind: 'layer-norm',
+function buildFinalLayerNormModule() {
+    return buildLayerNormModule({
         stage: 'final-ln',
-        title: 'Final LN',
-        labelTex: 'X_{\\ln,f}',
-        fallbackText: 'X_lnf',
-        styleKey: VIEW2D_STYLE_KEYS.LAYER_NORM,
-        tokenRefs,
-        measureCols: SUMMARY_MODEL_COLS,
-        getVector: (tokenRef) => activationSource?.getFinalLayerNorm?.('shift', tokenRef.tokenIndex, D_MODEL)
+        title: 'Final LN'
     });
 }
 
@@ -970,7 +1032,16 @@ function buildLogitsModule({
     };
 }
 
-function createFlowConnector(fromNode, toNode, connectorKey, styleKey = VIEW2D_STYLE_KEYS.CONNECTOR_POST) {
+function createFlowConnector({
+    fromNode = null,
+    toNode = null,
+    connectorKey = '',
+    styleKey = VIEW2D_STYLE_KEYS.CONNECTOR_POST,
+    sourceAnchor = VIEW2D_ANCHOR_SIDES.RIGHT,
+    targetAnchor = VIEW2D_ANCHOR_SIDES.LEFT,
+    route = VIEW2D_CONNECTOR_ROUTES.HORIZONTAL,
+    gap = 10
+} = {}) {
     if (!fromNode?.id || !toNode?.id) return null;
     return createConnectorNode({
         role: `connector-${connectorKey}`,
@@ -979,10 +1050,10 @@ function createFlowConnector(fromNode, toNode, connectorKey, styleKey = VIEW2D_S
             stage: `connector-${connectorKey}`,
             role: `connector-${connectorKey}`
         },
-        source: createAnchorRef(fromNode.id, VIEW2D_ANCHOR_SIDES.RIGHT),
-        target: createAnchorRef(toNode.id, VIEW2D_ANCHOR_SIDES.LEFT),
-        route: VIEW2D_CONNECTOR_ROUTES.HORIZONTAL,
-        gap: 10,
+        source: createAnchorRef(fromNode.id, sourceAnchor),
+        target: createAnchorRef(toNode.id, targetAnchor),
+        route,
+        gap,
         gapKey: 'default',
         visual: { styleKey }
     });
@@ -1000,65 +1071,38 @@ export function buildTransformerSceneModel({
     const tokenRefs = resolveVisibleTokenRefs(activationSource, tokenIndices, tokenLabels);
     const resolvedTokens = visualTokens || resolveView2dVisualTokens();
 
-    const embeddingModule = buildEmbeddingModule({
-        tokenRefs,
-        activationSource
-    });
-
     const layerModules = Array.from({ length: resolvedLayerCount }, (_, layerIndex) => buildLayerGroup({
         layerIndex,
-        tokenRefs,
-        activationSource
+        activationSource,
+        tokenRefs
     }));
 
-    const finalLayerNormModule = buildFinalLayerNormModule({
-        tokenRefs,
-        activationSource
-    });
-
-    const logitsModule = buildLogitsModule({
-        tokenRefs,
-        activationSource
-    });
-
     const connectors = [];
-    if (layerModules.length) {
-        connectors.push(createFlowConnector(
-            embeddingModule.exitNode,
-            layerModules[0].entryNode,
-            'embedding-layer-0'
-        ));
-    }
     layerModules.forEach((layerModule, layerIndex) => {
-        layerModule.flow.forEach(({ from, to, key }) => {
-            connectors.push(createFlowConnector(from, to, key));
+        layerModule.flow.forEach(({ from, to, key, sourceAnchor, targetAnchor, route, styleKey, gap }) => {
+            connectors.push(createFlowConnector({
+                fromNode: from,
+                toNode: to,
+                connectorKey: key,
+                sourceAnchor,
+                targetAnchor,
+                route,
+                styleKey,
+                gap
+            }));
         });
         const nextLayerModule = layerModules[layerIndex + 1];
         if (nextLayerModule) {
-            connectors.push(createFlowConnector(
-                layerModule.exitNode,
-                nextLayerModule.entryNode,
-                `layer-${layerIndex}-to-layer-${layerIndex + 1}`
-            ));
-        } else {
-            connectors.push(createFlowConnector(
-                layerModule.exitNode,
-                finalLayerNormModule,
-                `layer-${layerIndex}-to-final-ln`
-            ));
+            connectors.push(createFlowConnector({
+                fromNode: layerModule.exitNode,
+                toNode: nextLayerModule.entryNode,
+                connectorKey: `layer-${layerIndex}-to-layer-${layerIndex + 1}`
+            }));
         }
     });
-    connectors.push(createFlowConnector(
-        finalLayerNormModule,
-        logitsModule.node,
-        'final-ln-to-logits'
-    ));
 
     const rootNodes = [
-        embeddingModule.node,
         ...layerModules.map((module) => module.node),
-        finalLayerNormModule,
-        logitsModule.node,
         createGroupNode({
             role: 'connector-layer',
             semantic: {

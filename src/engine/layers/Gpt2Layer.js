@@ -177,7 +177,8 @@ const MLP_TRANSITION_PROFILE_DEFAULT = Object.freeze({
     geluLiteMode: false,
     maxUpDurationMs: null,
     maxDownDurationMs: null,
-    colorMinDurationMs: MLP_MATRIX_FLASH_MIN_DURATION_MS
+    colorMinDurationMs: MLP_MATRIX_FLASH_MIN_DURATION_MS,
+    passDurationMultiplier: 1.18
 });
 const MLP_TRANSITION_PROFILE_TOUCH = Object.freeze({
     // Keep touch/mobile behavior aligned with desktop so GELU curve bending
@@ -193,7 +194,8 @@ const MLP_TRANSITION_PROFILE_TOUCH = Object.freeze({
     geluLiteMode: false,
     maxUpDurationMs: null,
     maxDownDurationMs: null,
-    colorMinDurationMs: MLP_MATRIX_FLASH_MIN_DURATION_MS
+    colorMinDurationMs: MLP_MATRIX_FLASH_MIN_DURATION_MS,
+    passDurationMultiplier: 1.18
 });
 const MLP_TRANSITION_PROFILE_SKIP = Object.freeze({
     expandRiseUnits: 16,
@@ -205,7 +207,8 @@ const MLP_TRANSITION_PROFILE_SKIP = Object.freeze({
     geluLiteMode: true,
     maxUpDurationMs: 260,
     maxDownDurationMs: 320,
-    colorMinDurationMs: 220
+    colorMinDurationMs: 220,
+    passDurationMultiplier: 1
 });
 const MLP_TRANSITION_PROFILE_SKIP_TOUCH = Object.freeze({
     expandRiseUnits: 12,
@@ -217,7 +220,8 @@ const MLP_TRANSITION_PROFILE_SKIP_TOUCH = Object.freeze({
     geluLiteMode: true,
     maxUpDurationMs: 220,
     maxDownDurationMs: 240,
-    colorMinDurationMs: 180
+    colorMinDurationMs: 180,
+    passDurationMultiplier: 1
 });
 
 export default class Gpt2Layer extends BaseLayer {
@@ -408,16 +412,54 @@ export default class Gpt2Layer extends BaseLayer {
         return MLP_TRANSITION_PROFILE_DEFAULT;
     }
 
-    _resolveMlpColorDuration(baseDurationMs, profile = null) {
+    _resolveMlpPassDuration(baseDurationMs, profile = null, maxDurationMs = null) {
         const safeBase = Number.isFinite(baseDurationMs) ? Math.max(0, baseDurationMs) : 0;
+        if (safeBase <= 0) return 0;
         const resolved = profile || this._resolveMlpTransitionProfile();
+        const durationMultiplier = resolved && Number.isFinite(resolved.passDurationMultiplier)
+            ? resolved.passDurationMultiplier
+            : 1;
+        let duration = safeBase * durationMultiplier;
+        if (Number.isFinite(maxDurationMs)) {
+            duration = Math.min(duration, maxDurationMs * durationMultiplier);
+        }
+        let minDuration = 0;
         if (resolved && Number.isFinite(resolved.colorMinDurationMs)) {
-            return Math.max(safeBase, resolved.colorMinDurationMs);
+            minDuration = resolved.colorMinDurationMs;
+        } else if (this._skipToEndActive) {
+            minDuration = SKIP_MLP_COLOR_MIN_MS;
         }
-        if (this._skipToEndActive) {
-            return Math.max(safeBase, SKIP_MLP_COLOR_MIN_MS);
+        if (Number.isFinite(maxDurationMs)) {
+            minDuration = Math.min(minDuration, maxDurationMs * durationMultiplier);
         }
-        return safeBase;
+        duration = Math.max(duration, minDuration);
+        return duration;
+    }
+
+    _computeTweenProgress(currentValue, startValue, endValue) {
+        const delta = endValue - startValue;
+        if (!Number.isFinite(delta) || Math.abs(delta) < 1e-6) return 1;
+        return THREE.MathUtils.clamp((currentValue - startValue) / delta, 0, 1);
+    }
+
+    _applyMlpMatrixPassVisual(matrix, progress, tweenColor, startColor, activeColor, startIntensity, peakIntensity, finalIntensity) {
+        if (!matrix || !tweenColor || !startColor || !activeColor) return;
+
+        const clampedProgress = THREE.MathUtils.clamp(progress, 0, 1);
+        const entryT = THREE.MathUtils.smoothstep(clampedProgress, 0, 0.22);
+        const exitT = THREE.MathUtils.smoothstep(clampedProgress, 0.82, 1);
+        const pulseBoost = (peakIntensity - finalIntensity)
+            * 0.12
+            * Math.sin(Math.PI * clampedProgress)
+            * entryT
+            * (1 - exitT);
+        const sustainedEmissive = THREE.MathUtils.lerp(startIntensity, peakIntensity, entryT);
+        const activeEmissive = Math.min(peakIntensity, sustainedEmissive + pulseBoost);
+        const emissive = THREE.MathUtils.lerp(activeEmissive, finalIntensity, exitT);
+        const color = tweenColor.copy(startColor).lerp(activeColor, entryT);
+
+        matrix.setColor(color);
+        matrix.setEmissive(color, emissive);
     }
 
     _getBasePrismAdditionDurationMs() {
@@ -2275,10 +2317,8 @@ export default class Gpt2Layer extends BaseLayer {
         const distance = topY - vec.group.position.y;
         const rawDuration = (distance / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
         const mlpProfile = this._resolveMlpTransitionProfile();
-        let duration = Number.isFinite(rawDuration) ? Math.max(0, rawDuration) : 0;
-        if (Number.isFinite(mlpProfile.maxUpDurationMs)) {
-            duration = Math.min(duration, mlpProfile.maxUpDurationMs);
-        }
+        const startY = vec.group.position.y;
+        const duration = this._resolveMlpPassDuration(rawDuration, mlpProfile, mlpProfile.maxUpDurationMs);
         if (duration <= 0) {
             vec.group.position.y = Math.max(vec.group.position.y, topY);
             vec.group.scale.setScalar(0.6);
@@ -2288,38 +2328,37 @@ export default class Gpt2Layer extends BaseLayer {
             this._expandTo4x(lane, vec, mlpUpData);
             return;
         }
-        const colorDuration = this._resolveMlpColorDuration(duration, mlpProfile);
 
-        // Animate matrix colour and emissive intensity for a glow effect
-        const state = { t: 0, emissive: startIntensity };
-        new TWEEN.Tween(state)
-            .to({ t: 1, emissive: peakIntensity }, colorDuration * 0.6)
-            .easing(TWEEN.Easing.Quadratic.InOut)
-            .onUpdate(() => {
-                const col = tweenColor.copy(matrixStartColor).lerp(matrixEndColor, state.t);
-                this.mlpUp.setColor(col);
-                this.mlpUp.setEmissive(col, state.emissive);
-            })
-            .onComplete(() => {
-                new TWEEN.Tween(state)
-                    .to({ emissive: finalIntensity }, colorDuration * 0.4)
-                    .easing(TWEEN.Easing.Quadratic.InOut)
-                    .onUpdate(() => {
-                        this.mlpUp.setEmissive(matrixEndColor, state.emissive);
-                    })
-                    .start();
-            })
-            .start();
-            
         // Move vector through matrix
         new TWEEN.Tween(vec.group.position)
             .to({ y: topY }, duration)
             .easing(TWEEN.Easing.Linear.None)
             .onUpdate(() => {
+                const progress = this._computeTweenProgress(vec.group.position.y, startY, topY);
+                this._applyMlpMatrixPassVisual(
+                    this.mlpUp,
+                    progress,
+                    tweenColor,
+                    matrixStartColor,
+                    matrixEndColor,
+                    startIntensity,
+                    peakIntensity,
+                    finalIntensity
+                );
             })
             .onStart(() => {
                 // Shrink to fit in narrowing matrix
                 vec.group.scale.setScalar(0.6);
+                this._applyMlpMatrixPassVisual(
+                    this.mlpUp,
+                    0,
+                    tweenColor,
+                    matrixStartColor,
+                    matrixEndColor,
+                    startIntensity,
+                    peakIntensity,
+                    finalIntensity
+                );
             })
             .onComplete(() => {
                 // Restore scale
@@ -2677,11 +2716,8 @@ export default class Gpt2Layer extends BaseLayer {
         const startY = expandedGroup.position.y;
         const totalDist = downTopY - startY;
         const mlpProfile = this._resolveMlpTransitionProfile();
-        let durationDown = (Math.abs(totalDist) / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
-        if (Number.isFinite(mlpProfile.maxDownDurationMs)) {
-            durationDown = Math.min(durationDown, mlpProfile.maxDownDurationMs);
-        }
-        const colorDurationDown = this._resolveMlpColorDuration(durationDown, mlpProfile);
+        const rawDurationDown = (Math.abs(totalDist) / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
+        const durationDown = this._resolveMlpPassDuration(rawDurationDown, mlpProfile, mlpProfile.maxDownDurationMs);
 
         const matrixBottomWidth = MLP_MATRIX_PARAMS_DOWN.width;
         const matrixTopWidth = MLP_MATRIX_PARAMS_DOWN.width * MLP_MATRIX_PARAMS_DOWN.topWidthFactor;
@@ -2744,32 +2780,23 @@ export default class Gpt2Layer extends BaseLayer {
         const startIntensity = MLP_MATRIX_FLASH_START_EMISSIVE;
         const peakIntensity = MLP_MATRIX_FLASH_PEAK_EMISSIVE_DOWN;
         const finalIntensity = MLP_POST_PASS_THROUGH_FINAL_EMISSIVE;
-        const downState = { t: 0, emissive: startIntensity };
 
-        new TWEEN.Tween(downState)
-            .to({ t: 1, emissive: peakIntensity }, colorDurationDown * 0.6)
-            .easing(TWEEN.Easing.Quadratic.InOut)
-            .onUpdate(() => {
-                const col = downTweenColor.copy(this._mlpMatrixInactiveColor).lerp(orangeColor, downState.t);
-                this.mlpDown.setColor(col);
-                this.mlpDown.setEmissive(col, downState.emissive);
-            })
-            .onComplete(() => {
-                new TWEEN.Tween(downState)
-                    .to({ emissive: finalIntensity }, colorDurationDown * 0.4)
-                    .easing(TWEEN.Easing.Quadratic.InOut)
-                    .onUpdate(() => {
-                        this.mlpDown.setEmissive(orangeColor, downState.emissive);
-                    })
-                    .start();
-            })
-            .start();
-            
         // Move expanded vector through matrix
         new TWEEN.Tween(expandedGroup.position)
             .to({ y: downTopY }, durationDown)
             .easing(TWEEN.Easing.Linear.None)
             .onUpdate(() => {
+                const progress = this._computeTweenProgress(expandedGroup.position.y, startY, downTopY);
+                this._applyMlpMatrixPassVisual(
+                    this.mlpDown,
+                    progress,
+                    downTweenColor,
+                    this._mlpMatrixInactiveColor,
+                    orangeColor,
+                    startIntensity,
+                    peakIntensity,
+                    finalIntensity
+                );
                 updateExpandedTrail();
                 if (expandedGroup.position.y >= downBottomY) {
                     const maxScale = clampScaleForY(expandedGroup.position.y);
@@ -2836,6 +2863,18 @@ export default class Gpt2Layer extends BaseLayer {
                         })
                         .start();
                 }
+            })
+            .onStart(() => {
+                this._applyMlpMatrixPassVisual(
+                    this.mlpDown,
+                    0,
+                    downTweenColor,
+                    this._mlpMatrixInactiveColor,
+                    orangeColor,
+                    startIntensity,
+                    peakIntensity,
+                    finalIntensity
+                );
             })
             .onComplete(() => {
                 lane.mlpDownComplete = true;
