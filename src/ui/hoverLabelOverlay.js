@@ -93,6 +93,21 @@ function renderAttentionDetailRow(rowParts, rowContext = null) {
     return true;
 }
 
+function setAttentionDetailOrder(content, subtitle, attentionDetails, subtitleFirst) {
+    if (!content || !subtitle || !attentionDetails) return;
+    // Attention score hovers read more naturally when head/layer context appears
+    // before the source/target token pair block.
+    if (subtitleFirst) {
+        if (subtitle.nextSibling !== attentionDetails) {
+            content.insertBefore(subtitle, attentionDetails);
+        }
+        return;
+    }
+    if (attentionDetails.nextSibling !== subtitle) {
+        content.insertBefore(attentionDetails, subtitle);
+    }
+}
+
 export function createHoverLabelOverlay({
     documentRef = typeof document !== 'undefined' ? document : null,
     parent = documentRef?.body || null,
@@ -166,6 +181,7 @@ export function createHoverLabelOverlay({
         });
 
         if (detailContext?.suppressHoverLabel === true) {
+            setAttentionDetailOrder(content, subtitle, attentionDetails, false);
             labelText.textContent = '';
             tokenChip.textContent = '';
             tokenChip.removeAttribute('title');
@@ -197,6 +213,7 @@ export function createHoverLabelOverlay({
 
         labelText.textContent = showPrimaryLabel ? primaryLabelText : '';
         subtitle.textContent = showSubtitle ? subtitleText : '';
+        setAttentionDetailOrder(content, subtitle, attentionDetails, showAttentionDetails);
         setHidden(labelText, !showPrimaryLabel);
         setHidden(separator, !showDetail || !showPrimaryLabel || showAttentionDetails);
         setHidden(tokenChip, !showTokenChip);

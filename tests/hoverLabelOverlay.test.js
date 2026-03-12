@@ -42,11 +42,17 @@ describe('hoverLabelOverlay', () => {
         expect(shown).toBe(true);
 
         const tooltip = dom.window.document.body.querySelector('.scene-hover-label');
+        const content = tooltip?.querySelector('.scene-hover-label__content');
         const rows = Array.from(tooltip?.querySelectorAll('.scene-hover-label__attention-row') || []);
 
         expect(tooltip?.style.display).toBe('block');
         expect(tooltip?.querySelector('.scene-hover-label__text')?.textContent).toBe('Pre-Softmax Attention Score');
         expect(tooltip?.querySelector('.scene-hover-label__subtitle')?.textContent).toBe('Head 3 • Layer 1');
+        expect(Array.from(content?.children || []).map((node) => node.className)).toEqual([
+            'scene-hover-label__top-row',
+            'scene-hover-label__subtitle',
+            'scene-hover-label__attention-details'
+        ]);
         expect(rows).toHaveLength(2);
         expect(rows[0]?.querySelector('.scene-hover-label__attention-role')?.textContent).toBe('Source');
         expect(rows[0]?.querySelector('.scene-hover-label__attention-chip')?.textContent).toContain('beta');

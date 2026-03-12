@@ -4583,6 +4583,7 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     border-radius: 12px;
     background: transparent;
     box-shadow: none;
+    overflow: visible;
 }
 .detail-transformer-view2d-detail-frame {
     position: absolute;
@@ -4663,7 +4664,7 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
 .detail-transformer-view2d-caption-overlay {
     position: absolute;
     pointer-events: none;
-    overflow: hidden;
+    overflow: visible;
     z-index: 2;
     display: none;
 }

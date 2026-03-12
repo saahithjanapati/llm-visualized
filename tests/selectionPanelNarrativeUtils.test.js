@@ -67,7 +67,7 @@ describe('selectionPanelNarrativeUtils', () => {
         expect(previewEq[0].tex).toContain('\\gamma');
     });
 
-    it('keeps second layer norm and mlp equations aligned on x_ln naming', () => {
+    it('keeps second layer norm and mlp equations aligned on x-based naming', () => {
         const ln2Eq = resolveSelectionEquations('LayerNorm 2 Normed Output', {
             info: {
                 activationData: {
@@ -84,7 +84,7 @@ describe('selectionPanelNarrativeUtils', () => {
         });
 
         expect(ln2Eq).toContain('x_{\\text{ln}}');
-        expect(ln2Eq).toContain('u - \\mu');
+        expect(ln2Eq).toContain('x - \\mu');
         expect(ln2Eq).not.toContain('u_{\\text{ln}}');
         expect(mlpUpEq).toContain('a = x_{\\text{ln}}');
         expect(mlpUpEq).not.toContain('u_{\\text{ln}}');

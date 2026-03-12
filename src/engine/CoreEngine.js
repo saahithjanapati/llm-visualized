@@ -1715,6 +1715,33 @@ export class CoreEngine {
             return true;
         }
 
+        const setAttentionDetailOrder = (subtitleFirst) => {
+            if (
+                !this._hoverLabelContent
+                || !this._hoverLabelSubtitle
+                || !this._hoverLabelAttentionDetails
+            ) {
+                return;
+            }
+            // Attention score hovers read more naturally when head/layer context
+            // appears before the source/target token pair block.
+            if (subtitleFirst) {
+                if (this._hoverLabelSubtitle.nextSibling !== this._hoverLabelAttentionDetails) {
+                    this._hoverLabelContent.insertBefore(
+                        this._hoverLabelSubtitle,
+                        this._hoverLabelAttentionDetails
+                    );
+                }
+                return;
+            }
+            if (this._hoverLabelAttentionDetails.nextSibling !== this._hoverLabelSubtitle) {
+                this._hoverLabelContent.insertBefore(
+                    this._hoverLabelAttentionDetails,
+                    this._hoverLabelSubtitle
+                );
+            }
+        };
+
         const renderAttentionRow = (row, role, chip, position, rowContext = null) => {
             const hasToken = !!rowContext && (
                 typeof rowContext.tokenLabel === 'string' && rowContext.tokenLabel.length > 0
@@ -1760,6 +1787,7 @@ export class CoreEngine {
             object
         });
         if (detailContext?.suppressHoverLabel === true) {
+            setAttentionDetailOrder(false);
             this._hoverLabelText.textContent = '';
             this._hoverLabelText.hidden = true;
             this._hoverLabelSeparator.hidden = true;
@@ -1799,6 +1827,7 @@ export class CoreEngine {
             : safeLabel;
         this._hoverLabelText.textContent = showPrimaryLabel ? primaryLabelText : '';
         this._hoverLabelText.hidden = !showPrimaryLabel;
+        setAttentionDetailOrder(showAttentionDetails);
         this._hoverLabelSeparator.hidden = !showDetail || !showPrimaryLabel || showAttentionDetails;
         this._hoverLabelTokenChip.hidden = !showTokenChip;
         this._hoverLabelDetailText.hidden = !showDetailText;

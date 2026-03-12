@@ -1194,7 +1194,7 @@ function resolveLayerNormEquationSymbols(lower) {
     }
     if (lower.includes('ln2')) {
         return {
-            input: 'u',
+            input: 'x',
             norm: '\\hat{u}',
             output: NORMALIZED_STREAM_SYMBOL
         };

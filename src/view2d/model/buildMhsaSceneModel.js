@@ -39,14 +39,18 @@ const PROJECTION_STACK_GAP = 120;
 const PROJECTION_STACK_GAP_SMALL = 92;
 const PROJECTION_SIDECAR_GAP = 30;
 const PROJECTION_SIDECAR_GAP_SMALL = 24;
+const PROJECTION_STAGE_INLINE_GAP = 12;
+const PROJECTION_STAGE_INLINE_GAP_SMALL = 10;
+const PROJECTION_EQUATION_GAP = 12;
+const PROJECTION_EQUATION_GAP_SMALL = 10;
 const PROJECTION_MULTIPLY_OPERATOR_SCALE = 0.82;
-const PROJECTION_XLN_COMPACT_WIDTH = 84;
-const PROJECTION_XLN_COMPACT_WIDTH_SMALL = 72;
+const PROJECTION_XLN_COMPACT_WIDTH = 88;
+const PROJECTION_XLN_COMPACT_WIDTH_SMALL = 76;
 const PROJECTION_XLN_ROW_HEIGHT = 7;
 const PROJECTION_XLN_ROW_HEIGHT_SMALL = 6;
-const PROJECTION_WEIGHT_REFERENCE_EXTENT = 84;
-const PROJECTION_WEIGHT_REFERENCE_EXTENT_SMALL = 76;
-const PROJECTION_WEIGHT_MIN_WIDTH = 42;
+const PROJECTION_WEIGHT_REFERENCE_EXTENT = 92;
+const PROJECTION_WEIGHT_REFERENCE_EXTENT_SMALL = 84;
+const PROJECTION_WEIGHT_MIN_WIDTH = 48;
 const PROJECTION_WEIGHT_MAX_WIDTH = 138;
 const PROJECTION_WEIGHT_MIN_HEIGHT = 56;
 const PROJECTION_WEIGHT_MAX_HEIGHT = 144;
@@ -54,17 +58,21 @@ const PROJECTION_CAPTION_LABEL_SCALE = 0.42;
 const PROJECTION_CAPTION_DIMENSIONS_SCALE = 0.5;
 const PROJECTION_BIAS_ROW_HEIGHT = 14;
 const PROJECTION_BIAS_CAPTION_MIN_SCREEN_HEIGHT = 12;
-const PROJECTION_BIAS_COMPACT_WIDTH = 52;
-const PROJECTION_BIAS_COMPACT_WIDTH_SMALL = 44;
+const PROJECTION_BIAS_COMPACT_WIDTH = 58;
+const PROJECTION_BIAS_COMPACT_WIDTH_SMALL = 50;
 const PROJECTION_BIAS_CORNER_RADIUS = 5;
-const PROJECTION_OUTPUT_COMPACT_WIDTH = 66;
-const PROJECTION_OUTPUT_COMPACT_WIDTH_SMALL = 56;
+const PROJECTION_OUTPUT_COMPACT_WIDTH = 72;
+const PROJECTION_OUTPUT_COMPACT_WIDTH_SMALL = 62;
 const PROJECTION_OUTPUT_ROW_HEIGHT = 7;
 const PROJECTION_OUTPUT_ROW_HEIGHT_SMALL = 6;
 const PROJECTION_XLN_TARGET_GAP = 8;
 const ATTENTION_TRANSPOSE_MIN_WIDTH = 24;
 const ATTENTION_TRANSPOSE_MIN_WIDTH_SMALL = 20;
 const ATTENTION_TRANSPOSE_CORNER_RADIUS = 8;
+const ATTENTION_STAGE_VERTICAL_LIFT = 104;
+const ATTENTION_STAGE_VERTICAL_LIFT_SMALL = 80;
+const ATTENTION_STAGE_VERTICAL_LIFT_PER_EXTRA_ROW = 6;
+const ATTENTION_STAGE_VERTICAL_LIFT_PER_EXTRA_ROW_SMALL = 5;
 const MHSA_CONNECTOR_STROKE = 'rgba(255, 255, 255, 0.84)';
 
 function normalizeIndex(value) {
@@ -98,6 +106,41 @@ function createCardMetadata(width = null, height = null, {
     const metadata = Object.keys(card).length ? { card } : {};
     if (hidden) metadata.hidden = true;
     return Object.keys(metadata).length ? metadata : null;
+}
+
+function createHiddenSpacer({
+    semantic = {},
+    role = 'layout-spacer',
+    width = 1,
+    height = 1
+} = {}) {
+    return createMatrixNode({
+        role,
+        semantic,
+        dimensions: {
+            rows: 1,
+            cols: 1
+        },
+        presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+        shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+        visual: {
+            styleKey: VIEW2D_STYLE_KEYS.RESIDUAL
+        },
+        metadata: createCardMetadata(width, height, {
+            hidden: true,
+            cornerRadius: 0
+        })
+    });
+}
+
+function resolveAttentionStageLift(rowCount = 1, isSmallScreen = false) {
+    const safeRowCount = Number.isFinite(rowCount) ? Math.max(1, Math.floor(rowCount)) : 1;
+    const extraRows = Math.max(0, safeRowCount - 5);
+    const baseLift = isSmallScreen ? ATTENTION_STAGE_VERTICAL_LIFT_SMALL : ATTENTION_STAGE_VERTICAL_LIFT;
+    const perExtraRow = isSmallScreen
+        ? ATTENTION_STAGE_VERTICAL_LIFT_PER_EXTRA_ROW_SMALL
+        : ATTENTION_STAGE_VERTICAL_LIFT_PER_EXTRA_ROW;
+    return Math.max(0, Math.round(baseLift + (extraRows * perExtraRow)));
 }
 
 function buildGradientRowItems(rows = [], baseSemantic = {}, role = 'row') {
@@ -423,7 +466,10 @@ function buildProjectionStageNode({
                 visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR }
             }),
             outputNode
-        ]
+        ],
+        metadata: {
+            gapOverride: isSmallScreen ? PROJECTION_EQUATION_GAP_SMALL : PROJECTION_EQUATION_GAP
+        }
     });
 
     return createGroupNode({
@@ -445,6 +491,7 @@ function buildProjectionStageNode({
             equationNode
         ],
         metadata: {
+            gapOverride: isSmallScreen ? PROJECTION_STAGE_INLINE_GAP_SMALL : PROJECTION_STAGE_INLINE_GAP,
             kind: projectionKind,
             stageIndex
         }
@@ -1036,6 +1083,7 @@ export function buildMhsaSceneModel({
             gapOverride: isSmallScreen ? PROJECTION_STACK_GAP_SMALL : PROJECTION_STACK_GAP
         }
     });
+    const attentionStageLift = resolveAttentionStageLift(resolvedPreviewData.rowCount, isSmallScreen);
 
     const attentionNode = resolvedPreviewData.attentionScoreStage
         && Array.isArray(resolvedPreviewData.attentionScoreStage.queryRows)
@@ -1046,6 +1094,32 @@ export function buildMhsaSceneModel({
             queryStageIndex,
             valueStageIndex,
             isSmallScreen
+        })
+        : null;
+    const attentionRootNode = attentionNode
+        ? createGroupNode({
+            role: 'attention-stage-positioner',
+            semantic: buildSemantic(baseSemantic, {
+                stage: 'attention-stage-positioner',
+                role: 'attention-stage-positioner'
+            }),
+            direction: VIEW2D_LAYOUT_DIRECTIONS.VERTICAL,
+            gapKey: 'default',
+            children: [
+                attentionNode,
+                createHiddenSpacer({
+                    semantic: buildSemantic(baseSemantic, {
+                        stage: 'attention-stage-positioner',
+                        role: 'attention-stage-shift-spacer'
+                    }),
+                    role: 'attention-stage-shift-spacer',
+                    width: 1,
+                    height: attentionStageLift * 2
+                })
+            ],
+            metadata: {
+                gapOverride: 0
+            }
         })
         : null;
 
@@ -1071,8 +1145,8 @@ export function buildMhsaSceneModel({
         projectionNodes,
         sourceAnchorNode: projectionSourceAnchorNode
     });
-    if (attentionNode) {
-        rootNodes.push(attentionNode);
+    if (attentionRootNode) {
+        rootNodes.push(attentionRootNode);
         connectorNodes.push(...buildConnectorNodes({
             baseSemantic,
             layoutMetrics: resolvedLayoutMetrics,
