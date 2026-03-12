@@ -57,8 +57,18 @@ function isCanvasColor(value = '') {
         && !value.includes('gradient(');
 }
 
+const PARSED_LINEAR_GRADIENT_CACHE = new Map();
+const CAPTION_MIN_SCREEN_HEIGHT_PX = 18;
+const TEXT_MIN_SCREEN_HEIGHT_PX = 10;
+const MATRIX_DETAIL_MIN_SCREEN_WIDTH_PX = 72;
+const MATRIX_DETAIL_MIN_SCREEN_HEIGHT_PX = 24;
+
 function parseLinearGradient(input = '') {
-    const match = String(input || '').match(/^linear-gradient\((.+)\)$/i);
+    const key = String(input || '');
+    if (PARSED_LINEAR_GRADIENT_CACHE.has(key)) {
+        return PARSED_LINEAR_GRADIENT_CACHE.get(key);
+    }
+    const match = key.match(/^linear-gradient\((.+)\)$/i);
     if (!match) return null;
     const tokens = splitTopLevel(match[1]);
     if (tokens.length < 2) return null;
@@ -78,10 +88,15 @@ function parseLinearGradient(input = '') {
         };
     }).filter((stop) => stop.color.length);
     if (!stops.length) return null;
-    return {
+    const parsed = {
         angle: Number.isFinite(angle) ? angle : 90,
         stops
     };
+    if (PARSED_LINEAR_GRADIENT_CACHE.size > 4096) {
+        PARSED_LINEAR_GRADIENT_CACHE.clear();
+    }
+    PARSED_LINEAR_GRADIENT_CACHE.set(key, parsed);
+    return parsed;
 }
 
 function createCanvasGradient(ctx, fillStyle, bounds, fallbackColor) {
@@ -117,6 +132,35 @@ function cloneBounds(bounds = null) {
         y: Number.isFinite(bounds.y) ? bounds.y : 0,
         width: Number.isFinite(bounds.width) ? bounds.width : 0,
         height: Number.isFinite(bounds.height) ? bounds.height : 0
+    };
+}
+
+function intersectsBounds(a = null, b = null) {
+    if (!a || !b) return false;
+    const aRight = (Number(a.x) || 0) + Math.max(0, Number(a.width) || 0);
+    const aBottom = (Number(a.y) || 0) + Math.max(0, Number(a.height) || 0);
+    const bRight = (Number(b.x) || 0) + Math.max(0, Number(b.width) || 0);
+    const bBottom = (Number(b.y) || 0) + Math.max(0, Number(b.height) || 0);
+    return aRight >= (Number(b.x) || 0)
+        && bRight >= (Number(a.x) || 0)
+        && aBottom >= (Number(b.y) || 0)
+        && bBottom >= (Number(a.y) || 0);
+}
+
+function resolveVisibleWorldBounds(resolution, {
+    offsetX = 0,
+    offsetY = 0,
+    worldScale = 1,
+    sceneBounds = null
+} = {}) {
+    const safeScale = Math.max(0.0001, Number.isFinite(worldScale) ? worldScale : 1);
+    if (!resolution || !sceneBounds) return cloneBounds(sceneBounds);
+    const overscan = 96 / safeScale;
+    return {
+        x: ((-offsetX) / safeScale) - overscan,
+        y: ((-offsetY) / safeScale) - overscan,
+        width: (resolution.width / safeScale) + (overscan * 2),
+        height: (resolution.height / safeScale) + (overscan * 2)
     };
 }
 
@@ -222,7 +266,7 @@ export function syncCanvasResolution(canvas, {
     };
 }
 
-function drawCaption(ctx, entry, node, config) {
+function drawCaption(ctx, entry, node, config, worldScale = 1) {
     const lines = [];
     if (entry.labelBounds) {
         lines.push({
@@ -237,6 +281,10 @@ function drawCaption(ctx, entry, node, config) {
         });
     }
     if (!lines.length) return;
+    const maxHeight = Math.max(...lines.map(({ bounds }) => Number(bounds?.height) || 0));
+    if ((maxHeight * Math.max(0.0001, worldScale)) < CAPTION_MIN_SCREEN_HEIGHT_PX) {
+        return;
+    }
     ctx.save();
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -248,12 +296,16 @@ function drawCaption(ctx, entry, node, config) {
     ctx.restore();
 }
 
-function drawMatrixNode(ctx, node, entry, config) {
+function drawMatrixNode(ctx, node, entry, config, worldScale = 1) {
     const contentBounds = entry.contentBounds || entry.bounds;
     const style = resolveView2dStyle(node.visual?.styleKey) || {};
     const accent = style.accent || config.tokens.palette.neutral;
     const background = config.tokens.palette.panelBackground;
     const border = config.tokens.palette.border;
+    const projectedWidth = contentBounds.width * Math.max(0.0001, worldScale);
+    const projectedHeight = contentBounds.height * Math.max(0.0001, worldScale);
+    const useSummaryInterior = projectedWidth < MATRIX_DETAIL_MIN_SCREEN_WIDTH_PX
+        || projectedHeight < MATRIX_DETAIL_MIN_SCREEN_HEIGHT_PX;
 
     ctx.save();
     roundRectPath(ctx, contentBounds.x, contentBounds.y, contentBounds.width, contentBounds.height, config.tokens.matrix.cornerRadius);
@@ -267,42 +319,69 @@ function drawMatrixNode(ctx, node, entry, config) {
     const rowItems = Array.isArray(node.rowItems) ? node.rowItems : [];
     const columnItems = Array.isArray(node.columnItems) ? node.columnItems : [];
     if (node.presentation === VIEW2D_MATRIX_PRESENTATIONS.BANDED_ROWS) {
-        rowItems.forEach((rowItem, index) => {
-            const rowY = contentBounds.y + layoutData.innerPaddingY + index * (layoutData.rowHeight + layoutData.rowGap);
-            const barX = contentBounds.x + layoutData.innerPaddingX + layoutData.labelGutterWidth;
+        if (useSummaryInterior) {
             const barBounds = {
-                x: barX,
-                y: rowY,
-                width: layoutData.barWidth,
-                height: layoutData.rowHeight
+                x: contentBounds.x + layoutData.innerPaddingX,
+                y: contentBounds.y + Math.max(layoutData.innerPaddingY, contentBounds.height * 0.28),
+                width: Math.max(1, contentBounds.width - (layoutData.innerPaddingX * 2)),
+                height: Math.max(3, Math.min(contentBounds.height * 0.38, contentBounds.height - (layoutData.innerPaddingY * 2)))
             };
             roundRectPath(ctx, barBounds.x, barBounds.y, barBounds.width, barBounds.height, 6);
-            ctx.fillStyle = resolveFill(ctx, rowItem.gradientCss, barBounds, accent);
+            ctx.fillStyle = accent;
             ctx.fill();
+        } else {
+            const showRowLabels = (layoutData.rowHeight * Math.max(0.0001, worldScale)) >= CAPTION_MIN_SCREEN_HEIGHT_PX;
+            rowItems.forEach((rowItem, index) => {
+                const rowY = contentBounds.y + layoutData.innerPaddingY + index * (layoutData.rowHeight + layoutData.rowGap);
+                const barX = contentBounds.x + layoutData.innerPaddingX + layoutData.labelGutterWidth;
+                const barBounds = {
+                    x: barX,
+                    y: rowY,
+                    width: layoutData.barWidth,
+                    height: layoutData.rowHeight
+                };
+                roundRectPath(ctx, barBounds.x, barBounds.y, barBounds.width, barBounds.height, 6);
+                ctx.fillStyle = resolveFill(ctx, rowItem.gradientCss, barBounds, accent);
+                ctx.fill();
 
-            ctx.fillStyle = config.tokens.palette.mutedText;
-            ctx.font = `500 ${config.component.captionFontSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
-            ctx.textAlign = 'left';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(
-                rowItem.label || '',
-                contentBounds.x + layoutData.innerPaddingX,
-                rowY + (layoutData.rowHeight / 2)
-            );
-        });
+                if (showRowLabels) {
+                    ctx.fillStyle = config.tokens.palette.mutedText;
+                    ctx.font = `500 ${config.component.captionFontSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+                    ctx.textAlign = 'left';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(
+                        rowItem.label || '',
+                        contentBounds.x + layoutData.innerPaddingX,
+                        rowY + (layoutData.rowHeight / 2)
+                    );
+                }
+            });
+        }
     } else if (node.presentation === VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS) {
-        rowItems.forEach((rowItem, index) => {
-            const rowY = contentBounds.y + layoutData.innerPaddingY + index * (layoutData.rowHeight + layoutData.rowGap);
+        if (useSummaryInterior) {
             const rowBounds = {
                 x: contentBounds.x + layoutData.innerPaddingX,
-                y: rowY,
-                width: layoutData.compactWidth,
-                height: layoutData.rowHeight
+                y: contentBounds.y + layoutData.innerPaddingY,
+                width: Math.max(1, Math.min(layoutData.compactWidth, contentBounds.width - (layoutData.innerPaddingX * 2))),
+                height: Math.max(3, Math.min(contentBounds.height - (layoutData.innerPaddingY * 2), contentBounds.height * 0.46))
             };
             roundRectPath(ctx, rowBounds.x, rowBounds.y, rowBounds.width, rowBounds.height, 5);
-            ctx.fillStyle = resolveFill(ctx, rowItem.gradientCss, rowBounds, accent);
+            ctx.fillStyle = accent;
             ctx.fill();
-        });
+        } else {
+            rowItems.forEach((rowItem, index) => {
+                const rowY = contentBounds.y + layoutData.innerPaddingY + index * (layoutData.rowHeight + layoutData.rowGap);
+                const rowBounds = {
+                    x: contentBounds.x + layoutData.innerPaddingX,
+                    y: rowY,
+                    width: layoutData.compactWidth,
+                    height: layoutData.rowHeight
+                };
+                roundRectPath(ctx, rowBounds.x, rowBounds.y, rowBounds.width, rowBounds.height, 5);
+                ctx.fillStyle = resolveFill(ctx, rowItem.gradientCss, rowBounds, accent);
+                ctx.fill();
+            });
+        }
     } else if (node.presentation === VIEW2D_MATRIX_PRESENTATIONS.GRID) {
         rowItems.forEach((rowItem, rowIndex) => {
             const cells = Array.isArray(rowItem.cells) ? rowItem.cells : [];
@@ -348,11 +427,14 @@ function drawMatrixNode(ctx, node, entry, config) {
         ctx.fill();
     }
     ctx.restore();
-    drawCaption(ctx, entry, node, config);
+    drawCaption(ctx, entry, node, config, worldScale);
 }
 
-function drawTextLikeNode(ctx, node, entry, config) {
+function drawTextLikeNode(ctx, node, entry, config, worldScale = 1) {
     const bounds = entry.contentBounds || entry.bounds;
+    if ((bounds.height * Math.max(0.0001, worldScale)) < TEXT_MIN_SCREEN_HEIGHT_PX) {
+        return;
+    }
     ctx.save();
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -365,7 +447,7 @@ function drawTextLikeNode(ctx, node, entry, config) {
     }
     ctx.fillText(node.text || node.tex || '', bounds.x + (bounds.width / 2), bounds.y + (bounds.height / 2));
     ctx.restore();
-    drawCaption(ctx, entry, node, config);
+    drawCaption(ctx, entry, node, config, worldScale);
 }
 
 function drawConnectorArrowHead(ctx, startPoint, endPoint, strokeWidth, fillStyle) {
@@ -510,6 +592,8 @@ export class CanvasSceneRenderer {
         this.scene = null;
         this.layout = null;
         this.metrics = null;
+        this.drawableNodes = [];
+        this.connectors = [];
         this.lastRenderState = null;
     }
 
@@ -523,6 +607,23 @@ export class CanvasSceneRenderer {
         this.scene = scene || null;
         this.layout = layout || (scene ? buildSceneLayout(scene, options) : null);
         this.metrics = this.layout?.config || null;
+        const registry = this.layout?.registry || null;
+        const allNodes = this.scene ? flattenSceneNodes(this.scene) : [];
+        this.drawableNodes = allNodes
+            .filter((node) => ![VIEW2D_NODE_KINDS.CONNECTOR, VIEW2D_NODE_KINDS.GROUP].includes(node.kind))
+            .map((node) => ({
+                node,
+                entry: registry?.getNodeEntry(node.id) || null
+            }))
+            .filter((item) => item.entry);
+        this.connectors = allNodes
+            .filter((node) => node.kind === VIEW2D_NODE_KINDS.CONNECTOR)
+            .map((node) => ({
+                node,
+                entry: registry?.getConnectorEntry(node.id) || null,
+                stroke: resolveView2dStyle(node.visual?.styleKey)?.stroke || null
+            }))
+            .filter((item) => item.entry);
         return this.layout;
     }
 
@@ -591,9 +692,14 @@ export class CanvasSceneRenderer {
         const worldScale = resolvedViewport.worldScale;
         const offsetX = resolvedViewport.offsetX;
         const offsetY = resolvedViewport.offsetY;
-        const allNodes = flattenSceneNodes(this.scene);
-        const connectors = allNodes.filter((node) => node.kind === VIEW2D_NODE_KINDS.CONNECTOR);
-        const drawableNodes = allNodes.filter((node) => ![VIEW2D_NODE_KINDS.CONNECTOR, VIEW2D_NODE_KINDS.GROUP].includes(node.kind));
+        const visibleWorldBounds = resolveVisibleWorldBounds(resolution, {
+            offsetX,
+            offsetY,
+            worldScale,
+            sceneBounds
+        });
+        const visibleDrawableNodes = this.drawableNodes.filter(({ entry }) => intersectsBounds(entry.bounds, visibleWorldBounds));
+        const visibleConnectors = this.connectors.filter(({ entry }) => intersectsBounds(entry.bounds, visibleWorldBounds));
 
         const renderState = {
             ok: true,
@@ -618,8 +724,10 @@ export class CanvasSceneRenderer {
             fittedHeight: sceneBounds.height * worldScale,
             viewportSource: resolvedViewport.source || 'auto-fit',
             viewportTransform: resolvedViewport.viewportTransform || null,
-            nodeCount: drawableNodes.length,
-            connectorCount: connectors.length
+            nodeCount: this.drawableNodes.length,
+            connectorCount: this.connectors.length,
+            visibleNodeCount: visibleDrawableNodes.length,
+            visibleConnectorCount: visibleConnectors.length
         };
         this.lastRenderState = renderState;
 
@@ -630,20 +738,15 @@ export class CanvasSceneRenderer {
             ctx.fillStyle = config.tokens.palette.sceneBackground;
             ctx.fillRect(0, 0, sceneBounds.width, sceneBounds.height);
 
-            drawableNodes.forEach((node) => {
-                const entry = this.layout.registry.getNodeEntry(node.id);
-                if (!entry) return;
+            visibleDrawableNodes.forEach(({ node, entry }) => {
                 if (node.kind === VIEW2D_NODE_KINDS.MATRIX) {
-                    drawMatrixNode(ctx, node, entry, config);
+                    drawMatrixNode(ctx, node, entry, config, worldScale);
                 } else if (node.kind === VIEW2D_NODE_KINDS.TEXT || node.kind === VIEW2D_NODE_KINDS.OPERATOR) {
-                    drawTextLikeNode(ctx, node, entry, config);
+                    drawTextLikeNode(ctx, node, entry, config, worldScale);
                 }
             });
 
-            connectors.forEach((node) => {
-                const entry = this.layout.registry.getConnectorEntry(node.id);
-                if (!entry) return;
-                const stroke = resolveView2dStyle(node.visual?.styleKey)?.stroke || config.tokens.palette.neutral;
+            visibleConnectors.forEach(({ entry, stroke }) => {
                 drawConnector(ctx, entry, config, stroke, worldScale);
             });
 

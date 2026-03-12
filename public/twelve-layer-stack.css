@@ -4314,17 +4314,24 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
 
 .detail-transformer-view2d {
     display: none;
+    position: relative;
     flex-direction: column;
     gap: 10px;
     padding: 2px 0 10px;
     min-height: 0;
+    isolation: isolate;
 }
 .detail-transformer-view2d.is-visible {
     display: flex;
 }
 .detail-transformer-view2d-copy {
+    padding: 2px 16px 0;
     padding-top: 2px;
     padding-bottom: 0;
+    font-size: var(--detail-font-body);
+    line-height: 1.45;
+    color: #cfd3dc;
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
 }
 .detail-transformer-view2d-copy p {
     margin: 0;
@@ -4337,21 +4344,36 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     display: flex;
     flex-direction: column;
     gap: 10px;
+    flex: 1 1 auto;
     min-height: 0;
 }
 .detail-transformer-view2d-hud {
     display: flex;
     flex-direction: column;
     gap: 10px;
+    z-index: 2;
 }
 .detail-transformer-view2d-toolbar {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
     gap: 12px;
+    margin: 2px 16px 0;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.04);
 }
 .detail-transformer-view2d-toolbar-copy {
     min-width: 0;
+}
+.detail-transformer-view2d-toolbar-title {
+    color: #9aa3af;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-size: var(--detail-font-section-label);
+    margin-bottom: 0;
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
 }
 .detail-transformer-view2d-hint {
     margin-top: 6px;
@@ -4367,12 +4389,47 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     flex-wrap: wrap;
     justify-content: flex-end;
 }
-.detail-transformer-view2d-btn {
-    white-space: nowrap;
-}
 .detail-transformer-view2d-canvas-card {
+    margin: 2px 16px 0;
     padding: 10px;
     min-height: 0;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.04);
+}
+.detail-transformer-view2d-action {
+    appearance: none;
+    -webkit-appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(143, 211, 255, 0.28);
+    background: rgba(143, 211, 255, 0.08);
+    color: #d6f0ff;
+    font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: var(--detail-font-ui);
+    line-height: 1.2;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease, transform 0.16s ease, opacity 0.16s ease;
+}
+.detail-transformer-view2d-action:hover {
+    border-color: rgba(143, 211, 255, 0.58);
+    background: rgba(143, 211, 255, 0.14);
+    color: #f2fbff;
+}
+.detail-transformer-view2d-action:active {
+    transform: translateY(1px) scale(0.98);
+}
+.detail-transformer-view2d-action:focus-visible {
+    outline: 2px solid rgba(143, 211, 255, 0.84);
+    outline-offset: 2px;
+}
+.detail-transformer-view2d-action:disabled {
+    opacity: 0.45;
+    cursor: default;
 }
 .detail-transformer-view2d-canvas {
     width: 100%;
@@ -4390,29 +4447,66 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     cursor: grabbing;
 }
 .detail-transformer-view2d-readout {
+    display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    margin: 0 16px;
+}
+.detail-transformer-view2d-stat {
+    display: grid;
+    gap: 4px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.04);
+}
+.detail-transformer-view2d-stat-label {
+    color: #9aa3af;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-size: var(--detail-font-section-label);
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+}
+.detail-transformer-view2d-stat-value {
+    color: #fff;
+    font-size: var(--detail-font-value);
+    line-height: 1.35;
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
 }
 #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open {
     gap: 0;
     padding: 0;
+    padding-bottom: 0;
+    overflow: hidden;
 }
 #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-header {
     position: absolute;
-    inset: 0 0 auto 0;
-    z-index: 5;
-    padding:
-        max(12px, calc(env(safe-area-inset-top) + 4px))
-        max(16px, env(safe-area-inset-right))
-        10px
-        max(16px, env(safe-area-inset-left));
-    background: linear-gradient(180deg, rgba(0, 0, 0, 0.92), rgba(0, 0, 0, 0.54) 72%, rgba(0, 0, 0, 0));
+    inset: 0;
+    z-index: 6;
+    padding: 0;
+    background: none;
+    box-shadow: none;
+    pointer-events: none;
+}
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-history-nav,
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-title-group {
+    display: none;
+}
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-header-actions {
+    position: absolute;
+    top: max(12px, calc(env(safe-area-inset-top) + 4px));
+    right: max(16px, env(safe-area-inset-right));
+    z-index: 7;
     pointer-events: auto;
 }
 #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d {
+    position: absolute;
+    inset: 0;
     width: 100%;
     max-width: none;
     align-self: stretch;
-    flex: 1 1 auto;
+    display: flex;
+    flex: 0 0 auto;
     min-height: 100dvh;
     padding: 0;
     gap: 0;
@@ -4421,48 +4515,89 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     display: none;
 }
 #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-stage {
-    flex: 1 1 auto;
-    min-height: 100dvh;
+    position: absolute;
+    inset: 0;
+    gap: 0;
+    min-height: 100%;
 }
 #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-hud {
     position: absolute;
     inset:
-        max(70px, calc(env(safe-area-inset-top) + 58px))
+        max(16px, calc(env(safe-area-inset-top) + 16px))
         max(16px, env(safe-area-inset-right))
         auto
         max(16px, env(safe-area-inset-left));
     z-index: 4;
     display: grid;
     gap: 12px;
+    max-width: min(840px, calc(100vw - 32px));
     pointer-events: none;
 }
 #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-toolbar,
 #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-readout {
-    pointer-events: auto;
-    background: rgba(8, 12, 18, 0.72);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.26);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
+    margin: 0;
+    pointer-events: none;
+    background: none;
+    border: none;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
 }
 #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-toolbar {
-    max-width: min(760px, calc(100vw - 32px));
+    padding: 0;
+}
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-toolbar-copy {
+    max-width: min(520px, calc(100vw - 56px));
+}
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-toolbar-title {
+    color: rgba(221, 232, 243, 0.78);
+    text-shadow: 0 2px 10px rgba(0, 0, 0, 0.88);
+}
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-hint {
+    color: rgba(184, 196, 210, 0.86);
+    text-shadow: 0 2px 10px rgba(0, 0, 0, 0.88);
+}
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-toolbar-actions {
+    pointer-events: none;
+}
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-action {
+    pointer-events: auto;
+    background: rgba(0, 0, 0, 0.56);
+    border-color: rgba(255, 255, 255, 0.16);
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
 }
 #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-readout {
-    width: min(480px, calc(100vw - 32px));
+    width: min(560px, calc(100vw - 32px));
+}
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-stat {
+    padding: 0;
+    border: none;
+    background: none;
+}
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-stat-label {
+    color: rgba(184, 196, 210, 0.72);
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.84);
+}
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-stat-value {
+    color: #fff;
+    text-shadow: 0 2px 12px rgba(0, 0, 0, 0.92);
 }
 #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-canvas-card {
+    position: absolute;
+    inset: 0;
+    margin: 0;
     padding: 0;
     min-height: 100dvh;
-    flex: 1 1 auto;
     border: none;
-    background: transparent;
+    border-radius: 0;
+    background: #000;
 }
 #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-canvas {
     height: 100dvh;
     min-height: 100dvh;
     border: none;
     border-radius: 0;
+    background: #000;
 }
 
 #detailPanel.is-gelu-view-open > .detail-preview,

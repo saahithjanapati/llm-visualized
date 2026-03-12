@@ -19,6 +19,8 @@ export const TRANSFORMER_VIEW2D_PANEL_ACTION_OPEN = 'open-transformer-view2d';
 
 const VIEW2D_DETAIL_ACTION_FOCUS = 'focus-selection';
 const VIEW2D_DETAIL_ACTION_FIT = 'fit-scene';
+const VIEW2D_INTERACTION_DPR = 1;
+const VIEW2D_INTERACTION_SETTLE_MS = 140;
 
 function normalizeOptionalIndex(value) {
     return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : null;
@@ -350,50 +352,50 @@ export function createTransformerView2dDetailView(panelEl) {
     root.className = 'detail-transformer-view2d';
     root.setAttribute('aria-hidden', 'true');
     root.innerHTML = `
-        <div class="detail-description detail-transformer-view2d-copy">
+        <div class="detail-transformer-view2d-copy">
             <p>Prototype canvas for the new scalable 2D transformer view.</p>
             <p>It uses the semantic scene model and canvas renderer instead of the current DOM-heavy matrix layout.</p>
         </div>
         <div class="detail-transformer-view2d-stage">
             <div class="detail-transformer-view2d-hud">
-                <div class="detail-data detail-transformer-view2d-toolbar">
+                <div class="detail-transformer-view2d-toolbar">
                     <div class="detail-transformer-view2d-toolbar-copy">
-                        <div class="detail-data-title">2D canvas prototype</div>
+                        <div class="detail-transformer-view2d-toolbar-title">2D canvas prototype</div>
                         <div class="detail-transformer-view2d-hint">Drag to pan. Scroll to zoom. Use Focus selection to return to the current component.</div>
                     </div>
                     <div class="detail-transformer-view2d-toolbar-actions">
                         <button
                             type="button"
-                            class="detail-description-action-link detail-transformer-view2d-btn"
+                            class="detail-transformer-view2d-action"
                             data-transformer-view2d-action="${VIEW2D_DETAIL_ACTION_FOCUS}"
                         >
                             Focus selection
                         </button>
                         <button
                             type="button"
-                            class="detail-description-action-link detail-transformer-view2d-btn"
+                            class="detail-transformer-view2d-action"
                             data-transformer-view2d-action="${VIEW2D_DETAIL_ACTION_FIT}"
                         >
                             Fit scene
                         </button>
                     </div>
                 </div>
-                <div class="detail-meta detail-transformer-view2d-readout">
-                    <div class="detail-row">
-                        <span class="detail-label">Focus</span>
-                        <span class="detail-value" data-transformer-view2d-readout="focus">Transformer overview</span>
+                <div class="detail-transformer-view2d-readout" aria-live="polite">
+                    <div class="detail-transformer-view2d-stat">
+                        <span class="detail-transformer-view2d-stat-label">Focus</span>
+                        <span class="detail-transformer-view2d-stat-value" data-transformer-view2d-readout="focus">Transformer overview</span>
                     </div>
-                    <div class="detail-row">
-                        <span class="detail-label">Zoom</span>
-                        <span class="detail-value" data-transformer-view2d-readout="zoom">100%</span>
+                    <div class="detail-transformer-view2d-stat">
+                        <span class="detail-transformer-view2d-stat-label">Zoom</span>
+                        <span class="detail-transformer-view2d-stat-value" data-transformer-view2d-readout="zoom">100%</span>
                     </div>
-                    <div class="detail-row">
-                        <span class="detail-label">Scene</span>
-                        <span class="detail-value" data-transformer-view2d-readout="scene">0 layers / 0 tokens</span>
+                    <div class="detail-transformer-view2d-stat">
+                        <span class="detail-transformer-view2d-stat-label">Scene</span>
+                        <span class="detail-transformer-view2d-stat-value" data-transformer-view2d-readout="scene">0 layers / 0 tokens</span>
                     </div>
                 </div>
             </div>
-            <div class="detail-data detail-transformer-view2d-canvas-card">
+            <div class="detail-transformer-view2d-canvas-card">
                 <canvas class="detail-transformer-view2d-canvas" aria-label="Scalable 2D transformer canvas"></canvas>
             </div>
         </div>
@@ -429,6 +431,13 @@ export function createTransformerView2dDetailView(panelEl) {
         sceneLabel: '0 layers / 0 tokens',
         pointer: null,
         animationFrame: null,
+        renderFrame: null,
+        interactionTimer: null,
+        isInteracting: false,
+        viewportSize: {
+            width: 1,
+            height: 1
+        },
         pendingInitialFocus: false
     };
 
@@ -438,44 +447,115 @@ export function createTransformerView2dDetailView(panelEl) {
         state.animationFrame = null;
     }
 
-    function readCanvasSize() {
+    function stopRenderLoop() {
+        if (state.renderFrame === null) return;
+        cancelAnimationFrame(state.renderFrame);
+        state.renderFrame = null;
+    }
+
+    function measureCanvasSize() {
         const rect = typeof canvas?.getBoundingClientRect === 'function'
             ? canvas.getBoundingClientRect()
             : null;
-        return {
+        state.viewportSize = {
             width: Math.max(1, Math.floor(rect?.width || canvas?.clientWidth || canvas?.width || 1)),
             height: Math.max(1, Math.floor(rect?.height || canvas?.clientHeight || canvas?.height || 1))
         };
+        return state.viewportSize;
+    }
+
+    function getCanvasSize() {
+        const width = Number(state.viewportSize?.width) || 0;
+        const height = Number(state.viewportSize?.height) || 0;
+        if (width > 0 && height > 0) {
+            return {
+                width,
+                height
+            };
+        }
+        return measureCanvasSize();
+    }
+
+    function setNodeText(node, nextText) {
+        if (!node) return;
+        const safeText = String(nextText ?? '');
+        if (node.textContent !== safeText) {
+            node.textContent = safeText;
+        }
+    }
+
+    function setInteractionActive(active = false) {
+        const next = !!active;
+        if (state.isInteracting === next) return;
+        state.isInteracting = next;
+        scheduleRender();
+    }
+
+    function clearInteractionTimer() {
+        if (state.interactionTimer === null) return;
+        clearTimeout(state.interactionTimer);
+        state.interactionTimer = null;
+    }
+
+    function scheduleInteractionSettle() {
+        clearInteractionTimer();
+        state.interactionTimer = setTimeout(() => {
+            state.interactionTimer = null;
+            setInteractionActive(false);
+        }, VIEW2D_INTERACTION_SETTLE_MS);
+    }
+
+    function markInteraction(activePointer = false) {
+        clearInteractionTimer();
+        setInteractionActive(true);
+        if (!activePointer) {
+            scheduleInteractionSettle();
+        }
     }
 
     function updateReadouts() {
         if (focusReadout) {
-            focusReadout.textContent = state.focusLabel;
+            setNodeText(focusReadout, state.focusLabel);
         }
         if (zoomReadout) {
-            zoomReadout.textContent = `${Math.round((viewportController.getState().scale || 1) * 100)}%`;
+            setNodeText(zoomReadout, `${Math.round((viewportController.getState().scale || 1) * 100)}%`);
         }
         if (sceneReadout) {
-            sceneReadout.textContent = state.sceneLabel;
+            setNodeText(sceneReadout, state.sceneLabel);
         }
         if (focusBtn) {
-            focusBtn.disabled = !state.semanticTarget;
-            focusBtn.setAttribute('aria-disabled', state.semanticTarget ? 'false' : 'true');
+            const isDisabled = !state.semanticTarget;
+            if (focusBtn.disabled !== isDisabled) {
+                focusBtn.disabled = isDisabled;
+            }
+            const ariaDisabled = isDisabled ? 'true' : 'false';
+            if (focusBtn.getAttribute('aria-disabled') !== ariaDisabled) {
+                focusBtn.setAttribute('aria-disabled', ariaDisabled);
+            }
         }
     }
 
     function render() {
         if (!state.visible || !state.scene || !state.layout) return false;
-        const { width, height } = readCanvasSize();
+        const { width, height } = getCanvasSize();
         viewportController.setViewportSize(width, height);
         viewportController.setSceneBounds(state.layout.sceneBounds || null);
         const didRender = renderer.render({
             width,
             height,
+            dpr: state.isInteracting ? VIEW2D_INTERACTION_DPR : null,
             viewportTransform: viewportController.getViewportTransform('detail-transformer-view2d')
         });
         updateReadouts();
         return didRender;
+    }
+
+    function scheduleRender() {
+        if (state.renderFrame !== null) return;
+        state.renderFrame = requestAnimationFrame(() => {
+            state.renderFrame = null;
+            render();
+        });
     }
 
     function animateViewport() {
@@ -546,6 +626,7 @@ export function createTransformerView2dDetailView(panelEl) {
         };
         canvas.setPointerCapture?.(event.pointerId);
         stopAnimation();
+        markInteraction(true);
         canvas.classList.add('is-panning');
         event.preventDefault();
     }
@@ -557,7 +638,8 @@ export function createTransformerView2dDetailView(panelEl) {
         state.pointer.clientX = event.clientX;
         state.pointer.clientY = event.clientY;
         viewportController.panBy(deltaX, deltaY);
-        render();
+        markInteraction(true);
+        scheduleRender();
         event.preventDefault();
     }
 
@@ -567,6 +649,7 @@ export function createTransformerView2dDetailView(panelEl) {
         }
         state.pointer = null;
         canvas.classList.remove('is-panning');
+        scheduleInteractionSettle();
     }
 
     function onWheel(event) {
@@ -577,7 +660,8 @@ export function createTransformerView2dDetailView(panelEl) {
         const zoomMultiplier = Math.exp(-event.deltaY * 0.0015);
         stopAnimation();
         viewportController.zoomAt(zoomMultiplier, anchorX, anchorY);
-        render();
+        markInteraction(false);
+        scheduleRender();
         event.preventDefault();
     }
 
@@ -598,6 +682,9 @@ export function createTransformerView2dDetailView(panelEl) {
             if (!state.visible) {
                 clearPointer();
                 stopAnimation();
+                stopRenderLoop();
+                clearInteractionTimer();
+                state.isInteracting = false;
                 return;
             }
             this.resizeAndRender();
@@ -625,12 +712,13 @@ export function createTransformerView2dDetailView(panelEl) {
             viewportController.setSceneBounds(state.layout.sceneBounds || null);
             state.sceneLabel = `${state.scene?.metadata?.layerCount || 0} layers / ${state.scene?.metadata?.tokenCount || 0} tokens`;
             state.pendingInitialFocus = true;
+            measureCanvasSize();
             updateReadouts();
             return this.resizeAndRender();
         },
         resizeAndRender() {
             if (!state.visible || !state.scene || !state.layout) return false;
-            const { width, height } = readCanvasSize();
+            const { width, height } = measureCanvasSize();
             viewportController.setViewportSize(width, height);
             viewportController.setSceneBounds(state.layout.sceneBounds || null);
             if (state.pendingInitialFocus) {
