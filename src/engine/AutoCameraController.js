@@ -129,8 +129,6 @@ export class AutoCameraController {
             this._syncAutoCameraSemanticView();
             this._autoCameraSmoothValid = false;
             this._resetAutoCameraReferenceMotion();
-            this._autoCameraViewPendingKey = this._autoCameraViewKey;
-            this._autoCameraViewPendingSinceMs = 0;
             this._autoCameraPostAddLockActive = false;
             this._autoCameraPostAddLockUntilMs = 0;
             if (!this._startupCameraIntroPlayed
@@ -187,15 +185,17 @@ export class AutoCameraController {
             // Start follow-mode from whichever semantic view should be active
             // right now, then blend from the live camera pose to that target.
             this._autoCameraForceEmbedVocabStartLock = false;
-            const resetViewKey = this._resolveAutoCameraViewKey() || fallbackViewKey;
+            const resetRawViewKey = this._resolveAutoCameraViewKey() || fallbackViewKey;
+            const resetViewKey = this._resolveStableAutoCameraViewKey(
+                resetRawViewKey,
+                this._autoCameraViewContext
+            ) || fallbackViewKey;
             const {
                 cameraOffset: resetCameraOffset,
                 targetOffset: resetTargetOffset
             } = this._resolveAutoCameraOffsetsForViewKey(resetViewKey, {});
 
             this._autoCameraViewKey = resetViewKey;
-            this._autoCameraViewPendingKey = resetViewKey;
-            this._autoCameraViewPendingSinceMs = 0;
             this._autoCameraViewBlendAlphaActive = this._autoCameraViewBlendAlphaTransition;
 
             if (capturedFromCurrentView && this._hasAutoCameraOffsets) {

@@ -1,0 +1,1435 @@
+import { describe, expect, it } from 'vitest';
+
+import {
+    createAnchorRef,
+    createConnectorNode,
+    createGroupNode,
+    createMatrixNode,
+    createOperatorNode,
+    createSceneModel,
+    flattenSceneNodes,
+    VIEW2D_ANCHOR_SIDES,
+    VIEW2D_CONNECTOR_ROUTES,
+    VIEW2D_LAYOUT_DIRECTIONS,
+    VIEW2D_MATRIX_PRESENTATIONS,
+    VIEW2D_MATRIX_SHAPES
+} from '../../schema/sceneTypes.js';
+import { D_HEAD, D_MODEL } from '../../../ui/selectionPanelConstants.js';
+import {
+    createMhsaDetailSceneIndex,
+    resolveMhsaDetailHoverState
+} from '../../mhsaDetailInteraction.js';
+import { buildMhsaSceneModel } from '../../model/buildMhsaSceneModel.js';
+import { VIEW2D_VECTOR_STRIP_VARIANT } from '../../shared/vectorStrip.js';
+import { VIEW2D_STYLE_KEYS } from '../../theme/visualTokens.js';
+import { CanvasSceneRenderer } from './CanvasSceneRenderer.js';
+
+function createMockContext() {
+    const stateStack = [];
+    let currentPath = [];
+    return {
+        operations: [],
+        font: '',
+        fillStyle: '',
+        strokeStyle: '',
+        lineWidth: 0,
+        globalAlpha: 1,
+        globalCompositeOperation: 'source-over',
+        filter: 'none',
+        shadowBlur: 0,
+        shadowColor: 'transparent',
+        textAlign: 'left',
+        textBaseline: 'alphabetic',
+        currentScaleX: 1,
+        currentScaleY: 1,
+        save() {
+            stateStack.push({
+                globalAlpha: this.globalAlpha,
+                fillStyle: this.fillStyle,
+                strokeStyle: this.strokeStyle,
+                lineWidth: this.lineWidth,
+                globalCompositeOperation: this.globalCompositeOperation,
+                filter: this.filter,
+                shadowBlur: this.shadowBlur,
+                shadowColor: this.shadowColor,
+                textAlign: this.textAlign,
+                textBaseline: this.textBaseline,
+                font: this.font,
+                currentScaleX: this.currentScaleX,
+                currentScaleY: this.currentScaleY
+            });
+        },
+        restore() {
+            const state = stateStack.pop();
+            if (!state) return;
+            this.globalAlpha = state.globalAlpha;
+            this.fillStyle = state.fillStyle;
+            this.strokeStyle = state.strokeStyle;
+            this.lineWidth = state.lineWidth;
+            this.globalCompositeOperation = state.globalCompositeOperation;
+            this.filter = state.filter;
+            this.shadowBlur = state.shadowBlur;
+            this.shadowColor = state.shadowColor;
+            this.textAlign = state.textAlign;
+            this.textBaseline = state.textBaseline;
+            this.font = state.font;
+            this.currentScaleX = state.currentScaleX;
+            this.currentScaleY = state.currentScaleY;
+        },
+        setTransform(a = 1, _b = 0, _c = 0, d = 1) {
+            this.currentScaleX = Number.isFinite(a) ? a : 1;
+            this.currentScaleY = Number.isFinite(d) ? d : 1;
+        },
+        clearRect() {},
+        fillRect(x, y, width, height) {
+            this.operations.push({
+                type: 'fillRect',
+                x,
+                y,
+                width,
+                height,
+                fillStyle: this.fillStyle,
+                globalAlpha: this.globalAlpha,
+                filter: this.filter
+            });
+        },
+        translate() {},
+        scale(x = 1, y = 1) {
+            this.currentScaleX *= Number.isFinite(x) ? x : 1;
+            this.currentScaleY *= Number.isFinite(y) ? y : 1;
+        },
+        beginPath() {
+            currentPath = [];
+        },
+        rect() {},
+        moveTo(x, y) {
+            currentPath.push({ type: 'moveTo', x, y });
+        },
+        lineTo(x, y) {
+            currentPath.push({ type: 'lineTo', x, y });
+        },
+        arcTo(x1, y1, x2, y2, radius) {
+            currentPath.push({ type: 'arcTo', x1, y1, x2, y2, radius });
+        },
+        closePath() {
+            currentPath.push({ type: 'closePath' });
+        },
+        fill() {
+            this.operations.push({
+                type: 'fill',
+                globalAlpha: this.globalAlpha,
+                filter: this.filter,
+                fillStyle: this.fillStyle,
+                path: currentPath.map((entry) => ({ ...entry }))
+            });
+        },
+        stroke() {
+            this.operations.push({
+                type: 'stroke',
+                globalAlpha: this.globalAlpha,
+                filter: this.filter,
+                strokeStyle: this.strokeStyle,
+                path: currentPath.map((entry) => ({ ...entry }))
+            });
+        },
+        clip() {},
+        fillText(text, x, y) {
+            const fontPx = parseFontPx(this.font);
+            this.operations.push({
+                type: 'fillText',
+                text,
+                x,
+                y,
+                font: this.font,
+                effectiveFontPx: fontPx * this.currentScaleY
+            });
+        },
+        measureText(text) {
+            const fontSizeMatch = String(this.font || '').match(/([0-9.]+)px/);
+            const fontSize = Number.parseFloat(fontSizeMatch?.[1] || '12');
+            return {
+                width: Math.max(1, String(text || ' ').length) * fontSize * 0.6,
+                actualBoundingBoxLeft: 0,
+                actualBoundingBoxRight: Math.max(1, String(text || ' ').length) * fontSize * 0.6,
+                actualBoundingBoxAscent: fontSize * 0.8,
+                actualBoundingBoxDescent: fontSize * 0.3
+            };
+        },
+        createLinearGradient() {
+            return {
+                stops: [],
+                addColorStop(offset, color) {
+                    this.stops.push({ offset, color });
+                }
+            };
+        },
+        createRadialGradient() {
+            return {
+                stops: [],
+                addColorStop(offset, color) {
+                    this.stops.push({ offset, color });
+                }
+            };
+        }
+    };
+}
+
+function createMockCanvas(ctx, width = 400, height = 240) {
+    return {
+        width,
+        height,
+        clientWidth: width,
+        clientHeight: height,
+        getContext(kind) {
+            return kind === '2d' ? ctx : null;
+        },
+        getBoundingClientRect() {
+            return {
+                width,
+                height,
+                left: 0,
+                top: 0,
+                right: width,
+                bottom: height
+            };
+        }
+    };
+}
+
+function parseFontPx(font = '') {
+    return Number.parseFloat(String(font).match(/([0-9.]+)px/)?.[1] || '0');
+}
+
+function createMhsaDetailVectorValues(seed = 0) {
+    return Array.from({ length: D_HEAD }, (_, index) => Number((seed + (index * 0.01)).toFixed(4)));
+}
+
+function createMhsaDetailTokenLabels(count = 2) {
+    return Array.from({ length: count }, (_, index) => `Token ${String.fromCharCode(65 + index)}`);
+}
+
+function createMhsaDetailBaseRows(tokenLabels = []) {
+    return tokenLabels.map((tokenLabel, rowIndex) => ({
+        rowIndex,
+        tokenIndex: rowIndex,
+        tokenLabel,
+        rawValues: createMhsaDetailVectorValues(rowIndex),
+        gradientCss: `rgba(${120 + (rowIndex * 16)}, 220, 255, 0.9)`
+    }));
+}
+
+function createMhsaDetailProjectionOutputRows(label = 'Q', tokenLabels = []) {
+    return tokenLabels.map((tokenLabel, rowIndex) => ({
+        rowIndex,
+        tokenIndex: rowIndex,
+        tokenLabel,
+        rawValue: Number((rowIndex + 0.25).toFixed(3)),
+        rawValues: createMhsaDetailVectorValues(rowIndex + 1),
+        gradientCss: `rgba(${180 - (rowIndex * 20)}, ${140 + (rowIndex * 24)}, 255, 0.88)`,
+        title: `${tokenLabel}: ${label} vector`
+    }));
+}
+
+function createMhsaDetailGridRows(fillCss = 'rgba(255, 255, 255, 0.28)', tokenLabels = [], {
+    stageKey = 'pre'
+} = {}) {
+    return tokenLabels.map((tokenLabel, rowIndex) => ({
+        rowIndex,
+        tokenIndex: rowIndex,
+        tokenLabel,
+        cells: tokenLabels.map((colLabel, colIndex) => {
+            const isMasked = colIndex > rowIndex;
+            const preScore = Number(((rowIndex + 1) * (colIndex + 1) * 0.125).toFixed(3));
+            const postScore = Number((((rowIndex + 1) + (colIndex + 1)) * 0.05).toFixed(3));
+            const maskValue = isMasked ? Number.NEGATIVE_INFINITY : 0;
+            return {
+                rowIndex,
+                colIndex,
+                rowTokenLabel: tokenLabel,
+                colTokenLabel: colLabel,
+                queryTokenIndex: rowIndex,
+                keyTokenIndex: colIndex,
+                queryTokenLabel: tokenLabel,
+                keyTokenLabel: colLabel,
+                preScore,
+                postScore: isMasked ? 0 : postScore,
+                maskValue,
+                rawValue: stageKey === 'mask'
+                    ? maskValue
+                    : (stageKey === 'post' ? (isMasked ? null : postScore) : preScore),
+                fillCss,
+                isMasked,
+                isEmpty: stageKey === 'post' ? isMasked : false,
+                title: `${tokenLabel} -> ${colLabel}`
+            };
+        }),
+        hasAnyValue: true
+    }));
+}
+
+function createMhsaDetailPreviewData(tokenCount = 2) {
+    const tokenLabels = createMhsaDetailTokenLabels(tokenCount);
+    const rows = createMhsaDetailBaseRows(tokenLabels);
+    const queryOutputRows = createMhsaDetailProjectionOutputRows('Q', tokenLabels);
+    const keyOutputRows = createMhsaDetailProjectionOutputRows('K', tokenLabels);
+    const valueOutputRows = createMhsaDetailProjectionOutputRows('V', tokenLabels);
+    const createProjection = (kind, outputLabelTex, outputRows) => ({
+        kind,
+        weightLabelTex: `W_${kind.toLowerCase()}`,
+        biasLabelTex: `b_${kind.toLowerCase()}`,
+        outputLabelTex,
+        weightRowCount: D_MODEL,
+        weightColumnCount: D_HEAD,
+        biasValue: 0.15,
+        biasVectorGradientCss: 'rgba(255, 255, 255, 0.2)',
+        outputRowCount: outputRows.length,
+        outputColumnCount: D_HEAD,
+        outputRows
+    });
+    const attentionGridRows = createMhsaDetailGridRows('rgba(255, 255, 255, 0.28)', tokenLabels, {
+        stageKey: 'pre'
+    });
+    const maskGridRows = createMhsaDetailGridRows('rgba(0, 0, 0, 0.94)', tokenLabels, {
+        stageKey: 'mask'
+    });
+    const postGridRows = createMhsaDetailGridRows('rgba(160, 220, 255, 0.34)', tokenLabels, {
+        stageKey: 'post'
+    });
+
+    return {
+        rowCount: rows.length,
+        columnCount: D_MODEL,
+        bandCount: 12,
+        sampleStep: 64,
+        rows,
+        projections: [
+            createProjection('Q', 'Q', queryOutputRows),
+            createProjection('K', 'K', keyOutputRows),
+            createProjection('V', 'V', valueOutputRows)
+        ],
+        attentionScoreStage: {
+            queryLabelTex: 'Q',
+            queryRowCount: queryOutputRows.length,
+            queryColumnCount: D_HEAD,
+            queryRows: queryOutputRows,
+            transposeLabelTex: 'K^{\\mathsf{T}}',
+            transposeRowCount: D_HEAD,
+            transposeColumnCount: keyOutputRows.length,
+            transposeColumns: keyOutputRows.map((rowData) => ({
+                colIndex: rowData.rowIndex,
+                tokenIndex: rowData.tokenIndex,
+                rawValue: rowData.rawValue,
+                rawValues: rowData.rawValues,
+                fillCss: rowData.gradientCss,
+                tokenLabel: rowData.tokenLabel
+            })),
+            scaleLabelTex: '\\sqrt{d_{\\mathrm{head}}}',
+            outputLabelTex: 'A_{\\mathrm{pre}}',
+            outputRowCount: attentionGridRows.length,
+            outputColumnCount: attentionGridRows.length,
+            outputRows: attentionGridRows,
+            maskLabelTex: 'M_{\\mathrm{causal}}',
+            maskRows: maskGridRows,
+            softmaxLabelTex: '\\mathrm{softmax}',
+            postLabelTex: 'A_{\\mathrm{post}}',
+            postRowCount: postGridRows.length,
+            postColumnCount: postGridRows.length,
+            postRows: postGridRows,
+            valueLabelTex: 'V',
+            valueRowCount: valueOutputRows.length,
+            valueColumnCount: D_HEAD,
+            valueRows: valueOutputRows,
+            headOutputLabelTex: 'H_i',
+            headOutputRowCount: valueOutputRows.length,
+            headOutputColumnCount: D_HEAD,
+            headOutputRows: valueOutputRows
+        }
+    };
+}
+
+function resolveOpsInsideBounds(operations = [], bounds = null) {
+    if (!bounds) return [];
+    const minX = Number(bounds.x) || 0;
+    const minY = Number(bounds.y) || 0;
+    const maxX = minX + (Number(bounds.width) || 0);
+    const maxY = minY + (Number(bounds.height) || 0);
+    const containsRectCenter = (x = 0, y = 0, width = 0, height = 0) => {
+        const centerX = x + (width / 2);
+        const centerY = y + (height / 2);
+        return centerX >= minX && centerX <= maxX && centerY >= minY && centerY <= maxY;
+    };
+    return operations.filter((entry) => {
+        if (entry.type === 'fillRect') {
+            return containsRectCenter(
+                Number(entry.x) || 0,
+                Number(entry.y) || 0,
+                Number(entry.width) || 0,
+                Number(entry.height) || 0
+            );
+        }
+        return false;
+    });
+}
+
+describe('CanvasSceneRenderer', () => {
+    it('scales MHSA detail operator glyphs with the scene while zooming', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx);
+        const renderer = new CanvasSceneRenderer({ canvas });
+        const scene = createSceneModel({
+            nodes: [
+                createOperatorNode({
+                    role: 'attention-equals',
+                    semantic: {
+                        componentKind: 'mhsa',
+                        stage: 'attention',
+                        role: 'attention-equals',
+                        operatorKey: 'equals'
+                    },
+                    text: '=',
+                    visual: {
+                        styleKey: VIEW2D_STYLE_KEYS.OPERATOR
+                    }
+                })
+            ],
+            metadata: {
+                visualContract: 'selection-panel-mhsa-v1'
+            }
+        });
+        renderer.setScene(scene);
+
+        expect(renderer.render({
+            width: 400,
+            height: 240,
+            dpr: 1,
+            viewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            }
+        })).toBe(true);
+        const firstDraw = ctx.operations.find((entry) => entry.type === 'fillText' && entry.text === '=');
+        expect(firstDraw).toBeTruthy();
+        const firstScreenFontPx = Number(firstDraw?.effectiveFontPx || 0);
+
+        ctx.operations = [];
+        expect(renderer.render({
+            width: 400,
+            height: 240,
+            dpr: 1,
+            viewportTransform: {
+                scale: 2,
+                offsetX: 0,
+                offsetY: 0
+            }
+        })).toBe(true);
+        const secondDraw = ctx.operations.find((entry) => entry.type === 'fillText' && entry.text === '=');
+        expect(secondDraw).toBeTruthy();
+        const secondScreenFontPx = Number(secondDraw?.effectiveFontPx || 0);
+
+        expect(firstScreenFontPx).toBeGreaterThan(0);
+        expect(secondScreenFontPx).toBeGreaterThan(firstScreenFontPx);
+        expect(secondScreenFontPx / Math.max(1, firstScreenFontPx)).toBeCloseTo(2, 1);
+    });
+
+    it('keeps connector arrowheads visible during interactive head-detail zoom renders', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx);
+        const renderer = new CanvasSceneRenderer({ canvas });
+
+        const sourceNode = createMatrixNode({
+            role: 'source-anchor',
+            semantic: {
+                componentKind: 'mhsa',
+                layerIndex: 0,
+                headIndex: 0,
+                stage: 'head-detail',
+                role: 'source-anchor'
+            },
+            dimensions: { rows: 1, cols: 1 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.RESIDUAL
+            },
+            metadata: {
+                hidden: true,
+                card: {
+                    width: 24,
+                    height: 24,
+                    cornerRadius: 0
+                }
+            }
+        });
+        const targetNode = createMatrixNode({
+            role: 'target-anchor',
+            semantic: {
+                componentKind: 'mhsa',
+                layerIndex: 0,
+                headIndex: 0,
+                stage: 'head-detail',
+                role: 'target-anchor'
+            },
+            dimensions: { rows: 1, cols: 1 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.RESIDUAL
+            },
+            metadata: {
+                hidden: true,
+                card: {
+                    width: 24,
+                    height: 24,
+                    cornerRadius: 0
+                }
+            }
+        });
+        const connectorNode = createConnectorNode({
+            role: 'x-ln-copy-connector-0',
+            semantic: {
+                componentKind: 'mhsa',
+                layerIndex: 0,
+                headIndex: 0,
+                stage: 'head-detail',
+                role: 'x-ln-copy-connector',
+                copyIndex: 0
+            },
+            source: createAnchorRef(sourceNode.id, VIEW2D_ANCHOR_SIDES.RIGHT),
+            target: createAnchorRef(targetNode.id, VIEW2D_ANCHOR_SIDES.LEFT),
+            route: VIEW2D_CONNECTOR_ROUTES.HORIZONTAL,
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL,
+                stroke: 'rgba(255, 255, 255, 0.84)'
+            },
+            metadata: {
+                preserveColor: true
+            }
+        });
+        const headDetailScene = createSceneModel({
+            nodes: [
+                createGroupNode({
+                    role: 'head-detail-stage',
+                    semantic: {
+                        componentKind: 'mhsa',
+                        layerIndex: 0,
+                        headIndex: 0,
+                        stage: 'head-detail',
+                        role: 'head-detail-stage'
+                    },
+                    direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
+                    children: [sourceNode, targetNode]
+                }),
+                createGroupNode({
+                    role: 'head-detail-connectors',
+                    semantic: {
+                        componentKind: 'mhsa',
+                        layerIndex: 0,
+                        headIndex: 0,
+                        stage: 'head-detail',
+                        role: 'head-detail-connectors'
+                    },
+                    direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
+                    children: [connectorNode]
+                })
+            ],
+            metadata: {
+                visualContract: 'selection-panel-mhsa-v1'
+            }
+        });
+        const scene = createSceneModel({
+            nodes: [],
+            metadata: {
+                visualContract: 'selection-panel-mhsa-v1',
+                headDetailTarget: {
+                    layerIndex: 0,
+                    headIndex: 0
+                },
+                headDetailScene
+            }
+        });
+
+        renderer.setScene(scene);
+
+        expect(renderer.render({
+            width: 400,
+            height: 240,
+            dpr: 1,
+            interacting: true,
+            headDetailDepthActive: true,
+            detailViewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            }
+        })).toBe(true);
+
+        const arrowHeadFill = ctx.operations.find((entry) => (
+            entry.type === 'fill'
+            && entry.path.filter((step) => step.type === 'lineTo').length >= 2
+        ));
+
+        expect(arrowHeadFill).toBeTruthy();
+    });
+
+    it('dims the matrix surface during local MHSA detail cell focus without dimming the selected cell', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx);
+        const renderer = new CanvasSceneRenderer({ canvas });
+
+        const matrixNode = createMatrixNode({
+            role: 'attention-pre-score',
+            semantic: {
+                componentKind: 'mhsa',
+                layerIndex: 0,
+                headIndex: 0,
+                stage: 'attention',
+                role: 'attention-pre-score'
+            },
+            dimensions: { rows: 2, cols: 2 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.GRID,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            rowItems: [
+                {
+                    cells: [
+                        { fillCss: 'rgba(255, 255, 255, 0.8)' },
+                        { fillCss: 'rgba(160, 160, 160, 0.8)' }
+                    ]
+                },
+                {
+                    cells: [
+                        { fillCss: 'rgba(120, 120, 120, 0.8)' },
+                        { fillCss: 'rgba(80, 80, 80, 0.8)' }
+                    ]
+                }
+            ],
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.MHSA_SCORE
+            },
+            metadata: {
+                grid: {
+                    preserveDetail: true
+                }
+            }
+        });
+
+        const scene = createSceneModel({
+            nodes: [matrixNode],
+            metadata: {
+                visualContract: 'selection-panel-mhsa-v1'
+            }
+        });
+        renderer.setScene(scene);
+
+        expect(renderer.render({
+            width: 400,
+            height: 240,
+            dpr: 1,
+            viewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            },
+            interactionState: {
+                detailSceneFocus: {
+                    activeNodeIds: [matrixNode.id],
+                    cellSelections: [
+                        {
+                            nodeId: matrixNode.id,
+                            rowIndex: 0,
+                            colIndex: 0
+                        }
+                    ]
+                }
+            }
+        })).toBe(true);
+
+        const fillOps = ctx.operations.filter((entry) => entry.type === 'fill');
+        const surfaceFill = fillOps.find((entry) => Math.abs(Number(entry.globalAlpha) - 0.24) < 0.001) || null;
+        const focusedCellFill = fillOps.find((entry) => Math.abs(Number(entry.globalAlpha) - 1) < 0.001) || null;
+
+        expect(surfaceFill).toBeTruthy();
+        expect(focusedCellFill).toBeTruthy();
+    });
+
+    it('keeps multiple selected rows bright in compact vector-strip matrices', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx);
+        const renderer = new CanvasSceneRenderer({ canvas });
+
+        const matrixNode = createMatrixNode({
+            role: 'projection-source-xln',
+            semantic: {
+                componentKind: 'mhsa',
+                layerIndex: 0,
+                headIndex: 0,
+                stage: 'ln1.shift',
+                role: 'projection-source-xln'
+            },
+            dimensions: { rows: 3, cols: 64 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            rowItems: [
+                { label: 'Token A', gradientCss: 'rgba(80, 160, 255, 0.96)' },
+                { label: 'Token B', gradientCss: 'rgba(80, 160, 255, 0.96)' },
+                { label: 'Token C', gradientCss: 'rgba(80, 160, 255, 0.96)' }
+            ],
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.RESIDUAL
+            },
+            metadata: {
+                compactRows: {
+                    compactWidth: 120,
+                    rowHeight: 12,
+                    rowGap: 4,
+                    paddingX: 0,
+                    paddingY: 0,
+                    variant: VIEW2D_VECTOR_STRIP_VARIANT
+                }
+            }
+        });
+
+        renderer.setScene(createSceneModel({
+            nodes: [matrixNode],
+            metadata: {
+                visualContract: 'selection-panel-mhsa-v1'
+            }
+        }));
+
+        expect(renderer.render({
+            width: 400,
+            height: 240,
+            dpr: 1,
+            viewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            },
+            interactionState: {
+                detailSceneFocus: {
+                    activeNodeIds: [matrixNode.id],
+                    rowSelections: [
+                        { nodeId: matrixNode.id, rowIndex: 0 },
+                        { nodeId: matrixNode.id, rowIndex: 2 }
+                    ]
+                }
+            }
+        })).toBe(true);
+
+        const fillRects = ctx.operations.filter((entry) => (
+            entry.type === 'fillRect'
+            && String(entry.fillStyle || '').includes('rgba(80, 160, 255, 0.96)')
+        ));
+        expect(fillRects).toHaveLength(3);
+        const sortedAlphas = fillRects
+            .map((entry) => Number(entry.globalAlpha) || 0)
+            .sort((left, right) => right - left);
+
+        expect(sortedAlphas[0]).toBeCloseTo(1, 3);
+        expect(sortedAlphas[1]).toBeCloseTo(1, 3);
+        expect(sortedAlphas[2]).toBeCloseTo(0.18, 3);
+    });
+
+    it('keeps preserve-detail grid cells visible during interactive hover fast paths', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx);
+        const renderer = new CanvasSceneRenderer({ canvas });
+
+        const matrixNode = createMatrixNode({
+            role: 'attention-post',
+            semantic: {
+                componentKind: 'mhsa',
+                layerIndex: 0,
+                headIndex: 0,
+                stage: 'attention',
+                role: 'attention-post'
+            },
+            dimensions: { rows: 3, cols: 3 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.GRID,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            rowItems: [
+                {
+                    cells: [
+                        { fillCss: 'rgba(255, 255, 255, 0.8)' },
+                        { fillCss: 'rgba(220, 220, 220, 0.8)' },
+                        { fillCss: 'rgba(190, 190, 190, 0.8)' }
+                    ]
+                },
+                {
+                    cells: [
+                        { fillCss: 'rgba(160, 160, 160, 0.8)' },
+                        { fillCss: 'rgba(130, 130, 130, 0.8)' },
+                        { fillCss: 'rgba(100, 100, 100, 0.8)' }
+                    ]
+                },
+                {
+                    cells: [
+                        { fillCss: 'rgba(90, 90, 90, 0.8)' },
+                        { fillCss: 'rgba(70, 70, 70, 0.8)' },
+                        { fillCss: 'rgba(50, 50, 50, 0.8)' }
+                    ]
+                }
+            ],
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.MHSA_SCORE
+            },
+            metadata: {
+                grid: {
+                    preserveDetail: true
+                }
+            }
+        });
+
+        renderer.setScene(createSceneModel({
+            nodes: [matrixNode],
+            metadata: {
+                visualContract: 'selection-panel-mhsa-v1'
+            }
+        }));
+
+        expect(renderer.render({
+            width: 400,
+            height: 240,
+            dpr: 1,
+            interacting: true,
+            viewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            },
+            interactionState: {
+                detailSceneFocus: {
+                    activeNodeIds: [matrixNode.id],
+                    cellSelections: [
+                        {
+                            nodeId: matrixNode.id,
+                            rowIndex: 1,
+                            colIndex: 1
+                        }
+                    ]
+                }
+            }
+        })).toBe(true);
+
+        const fillOps = ctx.operations.filter((entry) => entry.type === 'fill');
+        const focusedCellStroke = ctx.operations.find((entry) => (
+            entry.type === 'stroke'
+            && entry.strokeStyle === 'rgba(255, 255, 255, 0.88)'
+        )) || null;
+
+        expect(fillOps.length).toBeGreaterThan(2);
+        expect(focusedCellStroke).toBeTruthy();
+    });
+
+    it('applies focus alpha to card surface effects and edge strokes for inactive matrices', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx);
+        const renderer = new CanvasSceneRenderer({ canvas });
+
+        const cardNode = createMatrixNode({
+            role: 'output-projection-card',
+            semantic: {
+                componentKind: 'mhsa',
+                layerIndex: 0,
+                headIndex: 0,
+                stage: 'projection-q',
+                role: 'output-projection-card'
+            },
+            dimensions: { rows: 1, cols: 1 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.OUTPUT_PROJECTION
+            },
+            metadata: {
+                card: {
+                    width: 72,
+                    height: 72,
+                    cornerRadius: 12
+                }
+            }
+        });
+
+        const scene = createSceneModel({
+            nodes: [cardNode],
+            metadata: {
+                visualContract: 'selection-panel-mhsa-v1'
+            }
+        });
+        renderer.setScene(scene);
+
+        expect(renderer.render({
+            width: 400,
+            height: 240,
+            dpr: 1,
+            viewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            },
+            interactionState: {
+                detailSceneFocus: {
+                    activeNodeIds: ['different-node']
+                }
+            }
+        })).toBe(true);
+
+        const nonBackgroundOps = ctx.operations.filter((entry) => {
+            if (entry.type !== 'fill' && entry.type !== 'stroke') return false;
+            return entry.fillStyle !== 'rgba(0, 0, 0, 0)';
+        });
+        const maxAlpha = Math.max(...nonBackgroundOps.map((entry) => Number(entry.globalAlpha) || 0));
+        const hasInactiveFilter = nonBackgroundOps.some((entry) => entry.filter === 'saturate(0.06) brightness(0.62) grayscale(0.78)');
+
+        expect(maxAlpha).toBeLessThanOrEqual(0.181);
+        expect(hasInactiveFilter).toBe(true);
+    });
+
+    it('applies the inactive dimming filter to inactive compact-row matrices', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx);
+        const renderer = new CanvasSceneRenderer({ canvas });
+
+        const compactRowNode = createMatrixNode({
+            role: 'inactive-query-vector',
+            semantic: {
+                componentKind: 'mhsa',
+                layerIndex: 0,
+                headIndex: 0,
+                stage: 'projection-q',
+                role: 'inactive-query-vector'
+            },
+            dimensions: { rows: 2, cols: 64 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            rowItems: [
+                { label: 'Token A', gradientCss: 'rgba(80, 160, 255, 0.96)' },
+                { label: 'Token B', gradientCss: 'rgba(80, 160, 255, 0.96)' }
+            ],
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.MHSA_Q
+            },
+            metadata: {
+                compactRows: {
+                    compactWidth: 120,
+                    rowHeight: 12,
+                    rowGap: 4,
+                    paddingX: 0,
+                    paddingY: 0
+                }
+            }
+        });
+
+        const scene = createSceneModel({
+            nodes: [compactRowNode],
+            metadata: {
+                visualContract: 'selection-panel-mhsa-v1'
+            }
+        });
+        renderer.setScene(scene);
+
+        expect(renderer.render({
+            width: 400,
+            height: 240,
+            dpr: 1,
+            viewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            },
+            interactionState: {
+                detailSceneFocus: {
+                    activeNodeIds: ['different-node']
+                }
+            }
+        })).toBe(true);
+
+        const fillOps = ctx.operations.filter((entry) => (
+            (entry.type === 'fill' || entry.type === 'fillRect')
+            && entry.fillStyle !== 'rgba(0, 0, 0, 0)'
+        ));
+        expect(fillOps.length).toBeGreaterThan(0);
+        expect(fillOps.every((entry) => entry.filter === 'saturate(0.06) brightness(0.62) grayscale(0.78)')).toBe(true);
+    });
+
+    it('applies stronger opacity dimming to explicitly dimmed nodes', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx);
+        const renderer = new CanvasSceneRenderer({ canvas });
+
+        const compactRowNode = createMatrixNode({
+            role: 'inactive-query-vector',
+            semantic: {
+                componentKind: 'mhsa',
+                layerIndex: 0,
+                headIndex: 0,
+                stage: 'projection-q',
+                role: 'inactive-query-vector'
+            },
+            dimensions: { rows: 2, cols: 64 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            rowItems: [
+                { label: 'Token A', gradientCss: 'rgba(80, 160, 255, 0.96)' },
+                { label: 'Token B', gradientCss: 'rgba(80, 160, 255, 0.96)' }
+            ],
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.MHSA_Q
+            },
+            metadata: {
+                compactRows: {
+                    compactWidth: 120,
+                    rowHeight: 12,
+                    rowGap: 4,
+                    paddingX: 0,
+                    paddingY: 0
+                }
+            }
+        });
+
+        const scene = createSceneModel({
+            nodes: [compactRowNode],
+            metadata: {
+                visualContract: 'selection-panel-mhsa-v1'
+            }
+        });
+        renderer.setScene(scene);
+
+        expect(renderer.render({
+            width: 400,
+            height: 240,
+            dpr: 1,
+            viewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            },
+            interactionState: {
+                detailSceneFocus: {
+                    activeNodeIds: ['different-node'],
+                    dimNodeIds: [compactRowNode.id]
+                }
+            }
+        })).toBe(true);
+
+        const fillOps = ctx.operations.filter((entry) => (
+            (entry.type === 'fill' || entry.type === 'fillRect')
+            && entry.fillStyle !== 'rgba(0, 0, 0, 0)'
+        ));
+        expect(fillOps.length).toBeGreaterThan(0);
+        expect(Math.max(...fillOps.map((entry) => Number(entry.globalAlpha) || 0))).toBeLessThanOrEqual(0.081);
+    });
+
+    it('skips the inactive dimming filter inside deep MHSA detail renders', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx);
+        const renderer = new CanvasSceneRenderer({ canvas });
+
+        const compactRowNode = createMatrixNode({
+            role: 'attention-value-post',
+            semantic: {
+                componentKind: 'mhsa',
+                layerIndex: 0,
+                headIndex: 0,
+                stage: 'attention',
+                role: 'attention-value-post'
+            },
+            dimensions: { rows: 2, cols: 64 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            rowItems: [
+                { label: 'Token A', gradientCss: 'rgba(80, 160, 255, 0.96)' },
+                { label: 'Token B', gradientCss: 'rgba(80, 160, 255, 0.96)' }
+            ],
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.MHSA_V
+            },
+            metadata: {
+                compactRows: {
+                    compactWidth: 120,
+                    rowHeight: 12,
+                    rowGap: 4,
+                    paddingX: 0,
+                    paddingY: 0
+                }
+            }
+        });
+
+        const detailScene = createSceneModel({
+            nodes: [compactRowNode],
+            metadata: {
+                visualContract: 'selection-panel-mhsa-v1'
+            }
+        });
+        const wrapperScene = createSceneModel({
+            nodes: [],
+            metadata: {
+                visualContract: 'selection-panel-mhsa-v1',
+                headDetailTarget: {
+                    layerIndex: 0,
+                    headIndex: 0
+                },
+                mhsaHeadDetailScene: detailScene
+            }
+        });
+        renderer.setScene(wrapperScene);
+
+        expect(renderer.render({
+            width: 400,
+            height: 240,
+            dpr: 1,
+            viewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            },
+            detailViewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            },
+            headDetailDepthActive: true,
+            interactionState: {
+                detailSceneFocus: {
+                    activeNodeIds: ['different-node']
+                }
+            }
+        })).toBe(true);
+
+        const fillOps = ctx.operations.filter((entry) => (
+            (entry.type === 'fill' || entry.type === 'fillRect')
+            && entry.fillStyle !== '#000'
+            && entry.fillStyle !== 'rgba(0, 0, 0, 0)'
+        ));
+        expect(fillOps.length).toBeGreaterThan(0);
+        expect(fillOps.every((entry) => entry.filter === 'none')).toBe(true);
+    });
+
+    it('dims Q/K setup matrix fills during deep-detail V hover focus', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx, 1280, 720);
+        const renderer = new CanvasSceneRenderer({ canvas });
+
+        const detailScene = buildMhsaSceneModel({
+            previewData: createMhsaDetailPreviewData(),
+            layerIndex: 2,
+            headIndex: 1,
+            isSmallScreen: false
+        });
+        const detailNodes = flattenSceneNodes(detailScene);
+        const detailIndex = createMhsaDetailSceneIndex(detailScene);
+        const valueNode = detailNodes.find((node) => node.role === 'attention-value-post') || null;
+        const queryInputNode = detailNodes.find((node) => (
+            node.role === 'x-ln-copy'
+            && String(node.semantic?.branchKey || '').toLowerCase() === 'q'
+        )) || null;
+        const keyInputNode = detailNodes.find((node) => (
+            node.role === 'x-ln-copy'
+            && String(node.semantic?.branchKey || '').toLowerCase() === 'k'
+        )) || null;
+        const queryBiasNode = detailNodes.find((node) => (
+            node.role === 'projection-bias'
+            && String(node.metadata?.kind || '').toLowerCase() === 'q'
+        )) || null;
+        const keyBiasNode = detailNodes.find((node) => (
+            node.role === 'projection-bias'
+            && String(node.metadata?.kind || '').toLowerCase() === 'k'
+        )) || null;
+        const queryProjectionNode = detailNodes.find((node) => (
+            node.role === 'projection-output'
+            && String(node.metadata?.kind || '').toLowerCase() === 'q'
+        )) || null;
+        const keyTransposeNode = detailNodes.find((node) => node.role === 'attention-key-transpose') || null;
+        const hoverState = resolveMhsaDetailHoverState(detailIndex, {
+            node: valueNode
+        });
+
+        expect(valueNode).toBeTruthy();
+        expect(queryInputNode).toBeTruthy();
+        expect(keyInputNode).toBeTruthy();
+        expect(queryBiasNode).toBeTruthy();
+        expect(keyBiasNode).toBeTruthy();
+        expect(queryProjectionNode).toBeTruthy();
+        expect(keyTransposeNode).toBeTruthy();
+        expect(hoverState?.focusState?.dimNodeIds).toContain(queryInputNode?.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(keyInputNode?.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(queryBiasNode?.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(keyBiasNode?.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(queryProjectionNode?.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(keyTransposeNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(queryInputNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(keyInputNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(queryBiasNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(keyBiasNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(queryProjectionNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(keyTransposeNode?.id);
+
+        renderer.setScene(createSceneModel({
+            nodes: [],
+            metadata: {
+                visualContract: 'selection-panel-mhsa-v1',
+                headDetailTarget: {
+                    layerIndex: 2,
+                    headIndex: 1
+                },
+                mhsaHeadDetailScene: detailScene
+            }
+        }));
+
+        expect(renderer.render({
+            width: 1280,
+            height: 720,
+            dpr: 1,
+            viewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            },
+            detailViewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            },
+            headDetailDepthActive: true,
+            interactionState: {
+                detailSceneFocus: hoverState?.focusState || null
+            }
+        })).toBe(true);
+
+        const registry = renderer.headDetailSceneState?.layout?.registry || null;
+        const assertNodeIsDimmed = (node) => {
+            const entry = registry?.getNodeEntry(node?.id || '') || null;
+            const fillOps = resolveOpsInsideBounds(ctx.operations, entry?.contentBounds || entry?.bounds || null);
+            const maxAlpha = Math.max(...fillOps.map((operation) => Number(operation.globalAlpha) || 0));
+            expect(fillOps.length).toBeGreaterThan(0);
+            expect(maxAlpha, node?.id || node?.role || 'node').toBeLessThanOrEqual(0.081);
+        };
+
+        assertNodeIsDimmed(queryInputNode);
+        assertNodeIsDimmed(keyInputNode);
+        assertNodeIsDimmed(queryBiasNode);
+        assertNodeIsDimmed(keyBiasNode);
+        assertNodeIsDimmed(queryProjectionNode);
+        assertNodeIsDimmed(keyTransposeNode);
+    });
+
+    it('resolves grid-cell hits directly and ignores pointer positions inside grid gaps', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx);
+        const renderer = new CanvasSceneRenderer({ canvas });
+
+        const gridNode = createMatrixNode({
+            role: 'attention-post',
+            semantic: {
+                componentKind: 'mhsa',
+                layerIndex: 0,
+                headIndex: 0,
+                stage: 'attention',
+                role: 'attention-post'
+            },
+            dimensions: { rows: 2, cols: 3 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.GRID,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            rowItems: [
+                {
+                    cells: [
+                        { fillCss: 'rgba(255, 255, 255, 0.8)' },
+                        { fillCss: 'rgba(160, 160, 160, 0.8)' },
+                        { fillCss: 'rgba(120, 120, 120, 0.8)' }
+                    ]
+                },
+                {
+                    cells: [
+                        { fillCss: 'rgba(90, 90, 90, 0.8)' },
+                        { fillCss: 'rgba(70, 70, 70, 0.8)' },
+                        { fillCss: 'rgba(50, 50, 50, 0.8)' }
+                    ]
+                }
+            ],
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.MHSA_SCORE
+            },
+            metadata: {
+                grid: {
+                    preserveDetail: true
+                }
+            }
+        });
+
+        renderer.setScene(createSceneModel({
+            nodes: [gridNode],
+            metadata: {
+                visualContract: 'selection-panel-mhsa-v1'
+            }
+        }));
+
+        expect(renderer.render({
+            width: 400,
+            height: 240,
+            dpr: 1,
+            viewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            }
+        })).toBe(true);
+
+        const entry = renderer.layout?.registry?.getNodeEntry(gridNode.id);
+        expect(entry?.contentBounds).toBeTruthy();
+        expect(entry?.layoutData).toBeTruthy();
+
+        const contentBounds = entry.contentBounds;
+        const layoutData = entry.layoutData;
+        const cellX = contentBounds.x + layoutData.innerPaddingX + layoutData.cellSize + layoutData.cellGap + (layoutData.cellSize * 0.5);
+        const cellY = contentBounds.y + layoutData.innerPaddingY + (layoutData.cellSize * 0.5);
+        const cellHit = renderer.resolveInteractiveHitAtPoint(cellX, cellY);
+
+        expect(cellHit?.cellHit?.rowIndex).toBe(0);
+        expect(cellHit?.cellHit?.colIndex).toBe(1);
+
+        const gapX = contentBounds.x + layoutData.innerPaddingX + layoutData.cellSize + (layoutData.cellGap * 0.5);
+        const gapHit = renderer.resolveInteractiveHitAtPoint(gapX, cellY);
+
+        expect(gapHit?.cellHit).toBeNull();
+    });
+
+    it('resolves column-strip hovers without scanning every column', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx);
+        const renderer = new CanvasSceneRenderer({ canvas });
+
+        const columnNode = createMatrixNode({
+            role: 'attention-key-transpose',
+            semantic: {
+                componentKind: 'mhsa',
+                layerIndex: 0,
+                headIndex: 0,
+                stage: 'attention',
+                role: 'attention-key-transpose'
+            },
+            dimensions: { rows: 4, cols: 3 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.COLUMN_STRIP,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            columnItems: [
+                { fillCss: 'rgba(80, 160, 255, 0.92)' },
+                { fillCss: 'rgba(80, 160, 255, 0.92)' },
+                { fillCss: 'rgba(80, 160, 255, 0.92)' }
+            ],
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.MHSA_K
+            },
+            metadata: {
+                columnStrip: {
+                    colWidth: 14,
+                    colGap: 6,
+                    colHeight: 72,
+                    paddingX: 0,
+                    paddingY: 0
+                }
+            }
+        });
+
+        renderer.setScene(createSceneModel({
+            nodes: [columnNode],
+            metadata: {
+                visualContract: 'selection-panel-mhsa-v1'
+            }
+        }));
+
+        expect(renderer.render({
+            width: 400,
+            height: 240,
+            dpr: 1,
+            viewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            }
+        })).toBe(true);
+
+        const entry = renderer.layout?.registry?.getNodeEntry(columnNode.id);
+        expect(entry?.contentBounds).toBeTruthy();
+        expect(entry?.layoutData).toBeTruthy();
+
+        const contentBounds = entry.contentBounds;
+        const layoutData = entry.layoutData;
+        const colX = contentBounds.x + layoutData.innerPaddingX + (2 * (layoutData.colWidth + layoutData.colGap)) + (layoutData.colWidth * 0.5);
+        const colY = contentBounds.y + layoutData.innerPaddingY + (layoutData.colHeight * 0.5);
+        const colHit = renderer.resolveInteractiveHitAtPoint(colX, colY);
+
+        expect(colHit?.columnHit?.colIndex).toBe(2);
+
+        const gapX = contentBounds.x + layoutData.innerPaddingX + layoutData.colWidth + (layoutData.colGap * 0.5);
+        const gapHit = renderer.resolveInteractiveHitAtPoint(gapX, colY);
+
+        expect(gapHit?.columnHit).toBeNull();
+    });
+
+    it('keeps vector-strip row hover fallback behavior when the pointer lands in a row gap', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx);
+        const renderer = new CanvasSceneRenderer({ canvas });
+
+        const compactRowNode = createMatrixNode({
+            role: 'attention-head-output',
+            semantic: {
+                componentKind: 'mhsa',
+                layerIndex: 0,
+                headIndex: 0,
+                stage: 'attention',
+                role: 'attention-head-output'
+            },
+            dimensions: { rows: 3, cols: 64 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            rowItems: [
+                { label: 'Token A', gradientCss: 'rgba(80, 160, 255, 0.96)' },
+                { label: 'Token B', gradientCss: 'rgba(80, 160, 255, 0.96)' },
+                { label: 'Token C', gradientCss: 'rgba(80, 160, 255, 0.96)' }
+            ],
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.MHSA_V
+            },
+            metadata: {
+                compactRows: {
+                    compactWidth: 120,
+                    rowHeight: 12,
+                    rowGap: 8,
+                    paddingX: 0,
+                    paddingY: 0,
+                    variant: VIEW2D_VECTOR_STRIP_VARIANT
+                }
+            }
+        });
+
+        renderer.setScene(createSceneModel({
+            nodes: [compactRowNode],
+            metadata: {
+                visualContract: 'selection-panel-mhsa-v1'
+            }
+        }));
+
+        expect(renderer.render({
+            width: 400,
+            height: 240,
+            dpr: 1,
+            viewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            }
+        })).toBe(true);
+
+        const entry = renderer.layout?.registry?.getNodeEntry(compactRowNode.id);
+        expect(entry?.contentBounds).toBeTruthy();
+        expect(entry?.layoutData).toBeTruthy();
+
+        const contentBounds = entry.contentBounds;
+        const layoutData = entry.layoutData;
+        const hitX = contentBounds.x + layoutData.innerPaddingX + (layoutData.compactWidth * 0.5);
+        const hitY = contentBounds.y + layoutData.innerPaddingY + layoutData.rowHeight + (layoutData.rowGap * 0.75);
+        const rowHit = renderer.resolveInteractiveHitAtPoint(hitX, hitY);
+
+        expect(rowHit?.rowHit?.rowIndex).toBe(1);
+    });
+});

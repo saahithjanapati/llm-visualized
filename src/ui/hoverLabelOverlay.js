@@ -344,6 +344,15 @@ export function createHoverLabelOverlay({
             root.style.display = 'block';
             return true;
         },
+        move({
+            clientX = 0,
+            clientY = 0
+        } = {}) {
+            if (root.style.display === 'none') return false;
+            root.style.left = `${Math.round((Number(clientX) || 0) + offsetX)}px`;
+            root.style.top = `${Math.round((Number(clientY) || 0) + offsetY)}px`;
+            return true;
+        },
         hide() {
             root.style.display = 'none';
         },

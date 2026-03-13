@@ -161,6 +161,8 @@ export class LayoutRegistry {
         this._sceneBounds = null;
         this._nodeEntries = new Map();
         this._connectorEntries = new Map();
+        this._pointHitEntries = [];
+        this._pointHitEntriesDirty = true;
     }
 
     setSceneBounds(bounds = null) {
@@ -194,6 +196,7 @@ export class LayoutRegistry {
                 : null
         };
         this._nodeEntries.set(nodeId, normalizedEntry);
+        this._pointHitEntriesDirty = true;
         return normalizedEntry;
     }
 
@@ -303,16 +306,40 @@ export class LayoutRegistry {
 
     getNodeEntriesAtPoint(x = 0, y = 0, { includeGroups = false } = {}) {
         if (!Number.isFinite(x) || !Number.isFinite(y)) return [];
-        return Array.from(this._nodeEntries.values())
+        return this._getPointHitEntries()
             .filter((entry) => includeGroups || entry.kind !== 'group')
             .filter((entry) => containsPoint(entry.bounds, x, y))
-            .sort(comparePointHitEntries)
             .map((entry) => this.getNodeEntry(entry.nodeId))
             .filter(Boolean);
     }
 
+    _getPointHitEntries() {
+        if (this._pointHitEntriesDirty) {
+            this._pointHitEntries = Array.from(this._nodeEntries.values())
+                .sort(comparePointHitEntries);
+            this._pointHitEntriesDirty = false;
+        }
+        return this._pointHitEntries;
+    }
+
+    resolveRawNodeEntryAtPoint(x = 0, y = 0, options = {}) {
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+        const includeGroups = options?.includeGroups === true;
+        const pointHitEntries = this._getPointHitEntries();
+        for (let index = 0; index < pointHitEntries.length; index += 1) {
+            const entry = pointHitEntries[index];
+            if (!entry) continue;
+            if (!includeGroups && entry.kind === 'group') continue;
+            if (containsPoint(entry.bounds, x, y)) {
+                return entry;
+            }
+        }
+        return null;
+    }
+
     resolveNodeEntryAtPoint(x = 0, y = 0, options = {}) {
-        return this.getNodeEntriesAtPoint(x, y, options)[0] || null;
+        const entry = this.resolveRawNodeEntryAtPoint(x, y, options);
+        return entry ? this.getNodeEntry(entry.nodeId) : null;
     }
 
     getConnectorEntries() {

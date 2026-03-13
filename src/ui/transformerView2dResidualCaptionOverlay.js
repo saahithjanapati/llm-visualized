@@ -9,6 +9,10 @@ import {
     resolveView2dSceneTextZoomPolicy,
     VIEW2D_TEXT_ZOOM_BEHAVIORS
 } from '../view2d/shared/mhsaDetailFixedLabelSizing.js';
+import {
+    normalizeSceneFocusState,
+    resolveSceneNodeFocusAlpha
+} from '../view2d/sceneFocusState.js';
 
 const RESIDUAL_CAPTION_TOP_GAP_PX = 4;
 const RESIDUAL_CAPTION_BOTTOM_GAP_PX = 4;
@@ -24,11 +28,22 @@ const ZOOMED_OUT_FONT_SOFTEN_RANGE_PX = 24;
 const MHSA_UNIFORM_CAPTION_MIN_SCREEN_HEIGHT_PX = 28;
 const MHSA_UNIFORM_CAPTION_LABEL_MIN_FONT_PX = 17;
 const MHSA_UNIFORM_CAPTION_LABEL_MAX_FONT_PX = 17;
-const MHSA_UNIFORM_CAPTION_DIMENSIONS_MIN_FONT_PX = 13;
+const MHSA_UNIFORM_CAPTION_DIMENSIONS_MIN_FONT_PX = 14;
 const MHSA_UNIFORM_CAPTION_DIMENSIONS_MAX_FONT_PX = 14;
 const MHSA_DETAIL_SCENE_RELATIVE_CAPTION_LABEL_BOOST = 1.14;
 const MHSA_DETAIL_SCENE_RELATIVE_CAPTION_DIMENSIONS_BOOST = 1.1;
 const MHSA_DETAIL_SCENE_RELATIVE_DOM_TEXT_BOOST = 1.08;
+const DEFAULT_CAPTION_LABEL_ROLE_SCALE = 1;
+const DEFAULT_CAPTION_DIMENSIONS_ROLE_SCALE = 1;
+const DEFAULT_CAPTION_KATEX_SUBSCRIPT_SCALE_EM = 0.8;
+const DEFAULT_CAPTION_INLINE_SUBSCRIPT_SCALE_EM = 0.84;
+const DEFAULT_CAPTION_INLINE_SUBSCRIPT_OFFSET_EM = 0.28;
+const PROJECTION_BIAS_CAPTION_LABEL_ROLE_SCALE = 4.1;
+const PROJECTION_BIAS_CAPTION_DIMENSIONS_ROLE_SCALE = 2.8;
+const PROJECTION_BIAS_CAPTION_KATEX_SUBSCRIPT_SCALE_EM = 0.62;
+const PROJECTION_BIAS_CAPTION_INLINE_SUBSCRIPT_SCALE_EM = 0.6;
+const PROJECTION_BIAS_CAPTION_INLINE_SUBSCRIPT_OFFSET_EM = 0.36;
+const OVERLAY_FOCUS_INACTIVE_OPACITY = 0.18;
 
 function escapeHtml(value = '') {
     return String(value)
@@ -229,6 +244,41 @@ function isResidualCaptionNode(node = null) {
         && String(node?.metadata?.caption?.renderMode || '').trim().toLowerCase() === 'dom-katex';
 }
 
+function applyCaptionRoleStyling(itemEl, node = null) {
+    if (!itemEl) return;
+    const isProjectionBiasNode = String(node?.role || '').trim().toLowerCase() === 'projection-bias';
+    itemEl.style.setProperty(
+        '--detail-transformer-view2d-caption-label-role-scale',
+        String(isProjectionBiasNode
+            ? PROJECTION_BIAS_CAPTION_LABEL_ROLE_SCALE
+            : DEFAULT_CAPTION_LABEL_ROLE_SCALE)
+    );
+    itemEl.style.setProperty(
+        '--detail-transformer-view2d-caption-dimensions-role-scale',
+        String(isProjectionBiasNode
+            ? PROJECTION_BIAS_CAPTION_DIMENSIONS_ROLE_SCALE
+            : DEFAULT_CAPTION_DIMENSIONS_ROLE_SCALE)
+    );
+    itemEl.style.setProperty(
+        '--detail-transformer-view2d-caption-katex-subscript-scale',
+        `${isProjectionBiasNode
+            ? PROJECTION_BIAS_CAPTION_KATEX_SUBSCRIPT_SCALE_EM
+            : DEFAULT_CAPTION_KATEX_SUBSCRIPT_SCALE_EM}em`
+    );
+    itemEl.style.setProperty(
+        '--detail-transformer-view2d-caption-inline-subscript-scale',
+        `${isProjectionBiasNode
+            ? PROJECTION_BIAS_CAPTION_INLINE_SUBSCRIPT_SCALE_EM
+            : DEFAULT_CAPTION_INLINE_SUBSCRIPT_SCALE_EM}em`
+    );
+    itemEl.style.setProperty(
+        '--detail-transformer-view2d-caption-inline-subscript-offset',
+        `${isProjectionBiasNode
+            ? PROJECTION_BIAS_CAPTION_INLINE_SUBSCRIPT_OFFSET_EM
+            : DEFAULT_CAPTION_INLINE_SUBSCRIPT_OFFSET_EM}em`
+    );
+}
+
 function buildCaptionCandidate({
     node = null,
     lines = [],
@@ -295,7 +345,10 @@ function resolveMhsaUniformCaptionState(candidates = []) {
 }
 
 function isDomKatexTextNode(node = null) {
-    return node?.kind === VIEW2D_NODE_KINDS.TEXT
+    return (
+        node?.kind === VIEW2D_NODE_KINDS.TEXT
+        || node?.kind === VIEW2D_NODE_KINDS.OPERATOR
+    )
         && String(node?.metadata?.renderMode || '').trim().toLowerCase() === 'dom-katex';
 }
 
@@ -386,7 +439,8 @@ export function createTransformerView2dResidualCaptionOverlay({
             canvas = null,
             projectBounds = null,
             visible = false,
-            enabled = true
+            enabled = true,
+            focusState = null
         } = {}) {
             if (!visible || !enabled || !scene || !layout?.registry || !canvas || typeof projectBounds !== 'function') {
                 hide();
@@ -401,6 +455,9 @@ export function createTransformerView2dResidualCaptionOverlay({
                 && isSceneRelativeTextZoomBehavior(textZoomPolicy.captionBehavior);
             const useMhsaDetailSceneRelativeDomTextBoost = textZoomPolicy.useUniformMatrixCaptions
                 && isSceneRelativeTextZoomBehavior(textZoomPolicy.domTextBehavior);
+            const overlayFocusState = normalizeSceneFocusState(focusState, {
+                inactiveOpacity: OVERLAY_FOCUS_INACTIVE_OPACITY
+            });
             root.style.display = 'block';
             root.style.left = `${Math.round(canvas.offsetLeft || 0)}px`;
             root.style.top = `${Math.round(canvas.offsetTop || 0)}px`;
@@ -444,9 +501,17 @@ export function createTransformerView2dResidualCaptionOverlay({
                 const projectedBounds = projectBounds(entryBounds);
                 if (!projectedBounds) return;
 
-                const minScreenHeightPx = Number.isFinite(node?.metadata?.minScreenHeightPx)
-                    ? Math.max(0, Number(node.metadata.minScreenHeightPx))
-                    : 10;
+                const isOperatorNode = node.kind === VIEW2D_NODE_KINDS.OPERATOR;
+                const operatorMinScreenHeightPx = isOperatorNode
+                    && Number.isFinite(fixedTextSizing?.operatorMinScreenHeightPx)
+                    ? Math.max(0, Number(fixedTextSizing.operatorMinScreenHeightPx))
+                    : null;
+                const minScreenHeightPx = operatorMinScreenHeightPx
+                    ?? (
+                        Number.isFinite(node?.metadata?.minScreenHeightPx)
+                            ? Math.max(0, Number(node.metadata.minScreenHeightPx))
+                            : 10
+                    );
                 const projectedHeight = Math.max(0, Number(projectedBounds.height) || 0);
                 if (projectedHeight < minScreenHeightPx) return;
                 if (!intersectsCanvas(projectedBounds, canvasWidth, canvasHeight)) return;
@@ -457,6 +522,7 @@ export function createTransformerView2dResidualCaptionOverlay({
                     1,
                     (Number(entry?.layoutData?.fontSize) || 12) * screenScale
                 );
+                const baseLayoutFontPx = Math.max(1, Number(entry?.layoutData?.fontSize) || 12);
                 const fixedScreenFontPx = Number.isFinite(node?.metadata?.fixedScreenFontPx)
                     && node.metadata.fixedScreenFontPx > 0
                     ? Number(node.metadata.fixedScreenFontPx)
@@ -465,39 +531,74 @@ export function createTransformerView2dResidualCaptionOverlay({
                     && node.metadata.persistentMinScreenFontPx > 0
                     ? Number(node.metadata.persistentMinScreenFontPx)
                     : null;
+                const operatorMinScreenFontPx = isOperatorNode
+                    && Number.isFinite(fixedTextSizing?.operatorMinScreenFontPx)
+                    && fixedTextSizing.operatorMinScreenFontPx > 0
+                    ? Number(fixedTextSizing.operatorMinScreenFontPx)
+                    : persistentMinScreenFontPx;
                 const zoomedOutMinScreenFontPx = Number.isFinite(node?.metadata?.zoomedOutMinScreenFontPx)
                     && node.metadata.zoomedOutMinScreenFontPx > 0
                     ? Number(node.metadata.zoomedOutMinScreenFontPx)
                     : null;
-                const domTextBaseFontPx = isSceneRelativeTextZoomBehavior(textZoomPolicy.domTextBehavior)
-                    ? baseFontPx
+                const domTextZoomBehavior = isOperatorNode
+                    ? textZoomPolicy.operatorBehavior
+                    : textZoomPolicy.domTextBehavior;
+                const useSceneRelativeOperatorSizing = isOperatorNode
+                    && isSceneRelativeTextZoomBehavior(domTextZoomBehavior);
+                const domTextBaseFontPx = isOperatorNode
+                    ? (
+                        useSceneRelativeOperatorSizing
+                            ? baseFontPx
+                            : Math.max(baseLayoutFontPx, operatorMinScreenFontPx || 0)
+                    )
                     : (
-                        persistentMinScreenFontPx
-                            ? Math.max(baseFontPx, persistentMinScreenFontPx)
-                            : baseFontPx
+                        isSceneRelativeTextZoomBehavior(textZoomPolicy.domTextBehavior)
+                            ? baseFontPx
+                            : (
+                                persistentMinScreenFontPx
+                                    ? Math.max(baseFontPx, persistentMinScreenFontPx)
+                                    : baseFontPx
+                            )
                     );
                 const resolvedDomTextFontPx = resolveOverlayFontPx({
-                    zoomBehavior: textZoomPolicy.domTextBehavior,
+                    zoomBehavior: domTextZoomBehavior,
                     baseFontPx: domTextBaseFontPx * (
-                        useMhsaDetailSceneRelativeDomTextBoost
+                        !isOperatorNode && useMhsaDetailSceneRelativeDomTextBoost
                             ? MHSA_DETAIL_SCENE_RELATIVE_DOM_TEXT_BOOST
                             : 1
                     ),
                     projectedExtent: projectedHeight,
                     minScreenHeightPx,
-                    fixedScreenFontPx: fixedTextSizing?.textScreenFontPx ?? fixedScreenFontPx,
-                    minScreenFontPx: zoomedOutMinScreenFontPx
+                    fixedScreenFontPx: isOperatorNode
+                        ? (
+                            useSceneRelativeOperatorSizing
+                                ? null
+                                : domTextBaseFontPx
+                        )
+                        : (fixedTextSizing?.textScreenFontPx ?? fixedScreenFontPx),
+                    minScreenFontPx: isOperatorNode
+                        ? (operatorMinScreenFontPx ?? 8)
+                        : (
+                            zoomedOutMinScreenFontPx
                         ?? (persistentMinScreenFontPx
                             ? Math.max(8, persistentMinScreenFontPx * 0.84)
                             : 8)
+                        )
                 });
                 const item = ensureTextItem(node.id);
                 if (!item) return;
                 seenIds.add(node.id);
                 item.itemEl.hidden = false;
+                item.itemEl.dataset.nodeKind = isOperatorNode ? 'operator' : 'text';
+                if (isOperatorNode) {
+                    item.itemEl.dataset.operatorKey = String(node?.semantic?.operatorKey || '').trim().toLowerCase();
+                } else {
+                    delete item.itemEl.dataset.operatorKey;
+                }
                 item.itemEl.style.left = `${Math.round(projectedBounds.x + (projectedBounds.width / 2))}px`;
                 item.itemEl.style.top = `${Math.round(projectedBounds.y + (projectedBounds.height / 2))}px`;
                 item.itemEl.style.setProperty('--detail-transformer-view2d-dom-text-size', `${resolvedDomTextFontPx.toFixed(2)}px`);
+                item.itemEl.style.opacity = String(resolveSceneNodeFocusAlpha(node.id, overlayFocusState));
                 renderKatex(item.labelEl, node.tex, node.text);
             });
 
@@ -567,6 +668,7 @@ export function createTransformerView2dResidualCaptionOverlay({
                         projectedCaptionExtent
                     )
                     : projectedContentHeight;
+                const dimensionsCaptionSizingExtent = captionSizingExtent;
                 const labelFontPx = fixedTextSizing?.captionLabelScreenFontPx
                     ?? resolveCaptionFontPx({
                         useMatrixRelativeSizing,
@@ -585,7 +687,7 @@ export function createTransformerView2dResidualCaptionOverlay({
                 const dimensionsFontPx = fixedTextSizing?.captionDimensionsScreenFontPx
                     ?? resolveCaptionFontPx({
                         useMatrixRelativeSizing,
-                        projectedContentHeight: captionSizingExtent,
+                        projectedContentHeight: dimensionsCaptionSizingExtent,
                         sizeProgress,
                         minFontPx: activeUniformCaptionState
                             ? MHSA_UNIFORM_CAPTION_DIMENSIONS_MIN_FONT_PX
@@ -637,8 +739,10 @@ export function createTransformerView2dResidualCaptionOverlay({
                 item.itemEl.style.left = `${Math.round(anchorX)}px`;
                 item.itemEl.style.top = `${Math.round(anchorY)}px`;
                 item.itemEl.style.removeProperty('width');
+                applyCaptionRoleStyling(item.itemEl, node);
                 item.itemEl.style.setProperty('--detail-transformer-view2d-caption-label-size', `${resolvedLabelFontPx.toFixed(2)}px`);
                 item.itemEl.style.setProperty('--detail-transformer-view2d-caption-dimensions-size', `${resolvedDimensionsFontPx.toFixed(2)}px`);
+                item.itemEl.style.opacity = String(resolveSceneNodeFocusAlpha(node.id, overlayFocusState));
 
                 renderKatex(item.labelEl, lines[0]?.tex, lines[0]?.text);
                 const dimensionsLine = lines[1] || null;

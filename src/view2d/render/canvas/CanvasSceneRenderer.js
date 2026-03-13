@@ -10,6 +10,7 @@ import {
     VIEW2D_VECTOR_STRIP_VARIANT
 } from '../../shared/vectorStrip.js';
 import { resolveMhsaDetailFixedTextSizing } from '../../shared/mhsaDetailFixedLabelSizing.js';
+import { VIEW2D_TEXT_ZOOM_BEHAVIORS } from '../../shared/mhsaDetailFixedLabelSizing.js';
 import {
     measureView2dText,
     resolveView2dTextFont
@@ -24,6 +25,14 @@ import {
     drawSimpleTex,
     hasSimpleTexMarkup
 } from '../../simpleTex.js';
+import {
+    normalizeSceneFocusState,
+    resolveSceneColumnSelectionAlpha,
+    resolveSceneElementFocusAlpha,
+    resolveSceneGridCellAlpha,
+    resolveSceneNodeFocusAlpha,
+    resolveSceneRowSelectionAlpha
+} from '../../sceneFocusState.js';
 
 function clampPositive(value, fallback = 1) {
     return Number.isFinite(value) && value > 0 ? value : fallback;
@@ -198,6 +207,7 @@ function drawVectorStripRows(
     cornerRadius = 0,
     {
         hoveredRowIndex = null,
+        focusedRowIndices = null,
         previousHoveredRowIndex = null,
         hoverRowBlend = 1,
         dimmingStrength = 0,
@@ -221,7 +231,18 @@ function drawVectorStripRows(
         : 0;
     const resolvedHoverScaleY = Number.isFinite(hoverScaleY) ? Math.max(1, hoverScaleY) : 1;
     const resolvedHoverGlowBlur = Number.isFinite(hoverGlowBlur) ? Math.max(0, hoverGlowBlur) : 0;
+    const focusedRowIndexSet = focusedRowIndices instanceof Set
+        ? focusedRowIndices
+        : new Set(
+            Array.isArray(focusedRowIndices)
+                ? focusedRowIndices
+                    .filter((value) => Number.isFinite(value))
+                    .map((value) => Math.max(0, Math.floor(value)))
+                : []
+        );
+    const hasFocusedRows = focusedRowIndexSet.size > 0;
     const resolveHighlightStrength = (index) => {
+        if (hasFocusedRows) return 0;
         let strength = 0;
         if (Number.isFinite(hoveredRowIndex) && index === hoveredRowIndex) {
             strength = Math.max(strength, Math.max(0, Math.min(1, hoverRowBlend)));
@@ -248,12 +269,18 @@ function drawVectorStripRows(
             height: scaledHeight
         };
         const alpha = Math.max(0, Math.min(1, Number.isFinite(baseAlpha) ? baseAlpha : 1))
-            * resolveRowDimmingAlpha(index, hoveredRowIndex, {
-                previousHoveredRowIndex,
-                hoverRowBlend,
-                dimStrength: dimmingStrength,
-                dimmedRowOpacity
-            });
+            * (
+                hasFocusedRows
+                    ? (focusedRowIndexSet.has(index)
+                        ? 1
+                        : Math.max(0, Math.min(1, Number.isFinite(dimmedRowOpacity) ? dimmedRowOpacity : 0.18)))
+                    : resolveRowDimmingAlpha(index, hoveredRowIndex, {
+                        previousHoveredRowIndex,
+                        hoverRowBlend,
+                        dimStrength: dimmingStrength,
+                        dimmedRowOpacity
+                    })
+            );
         return {
             rowItem,
             index,
@@ -390,12 +417,13 @@ function drawVectorStripColumns(
     ctx.restore();
 }
 
-function resolveGridCellCornerRadius(cellSize = 0, worldScale = 1) {
+function resolveGridCellCornerRadius(cellSize = 0, worldScale = 1, radiusScale = 1) {
     const safeCellSize = Number.isFinite(cellSize) ? Math.max(0, Number(cellSize)) : 0;
     const safeWorldScale = Math.max(0.0001, Number.isFinite(worldScale) ? worldScale : 1);
+    const safeRadiusScale = Number.isFinite(radiusScale) ? Math.max(0, Number(radiusScale)) : 1;
     const screenCellSize = safeCellSize * safeWorldScale;
     const radiusPx = Math.max(1, Math.min(2, screenCellSize * 0.11));
-    return radiusPx / safeWorldScale;
+    return (radiusPx * safeRadiusScale) / safeWorldScale;
 }
 
 function cloneBounds(bounds = null) {
@@ -478,6 +506,52 @@ function resolveRowDimmingAlpha(rowIndex = 0, hoveredRowIndex = null, {
     return baseAlpha;
 }
 
+function hasLocalMatrixSceneSelection(node = null, sceneFocusState = null) {
+    if (!node?.id || !sceneFocusState) return false;
+    return !!(
+        sceneFocusState.rowSelections?.get(node.id)?.size
+        || sceneFocusState.columnSelections?.get(node.id)?.size
+        || sceneFocusState.cellSelections?.get(node.id)?.size
+    );
+}
+
+function resolveMatrixSurfaceFocusAlpha(node = null, sceneFocusState = null, focusAlpha = 1) {
+    const nodeAlpha = Math.max(0, Math.min(1, Number.isFinite(focusAlpha) ? focusAlpha : 1));
+    if (
+        nodeAlpha < 0.995
+        || !sceneFocusState
+        || !hasLocalMatrixSceneSelection(node, sceneFocusState)
+    ) {
+        return nodeAlpha;
+    }
+    const inactiveOpacity = Number.isFinite(sceneFocusState?.inactiveOpacity)
+        ? Math.max(0, Math.min(1, Number(sceneFocusState.inactiveOpacity)))
+        : 0.18;
+    return nodeAlpha * Math.max(0.24, inactiveOpacity);
+}
+
+function resolveSceneInactiveFilter(sceneFocusState = null, focusAlpha = 1, config = null) {
+    const nodeAlpha = Math.max(0, Math.min(1, Number.isFinite(focusAlpha) ? focusAlpha : 1));
+    if (!sceneFocusState || nodeAlpha >= 0.995) return 'none';
+    const filter = typeof config?.tokens?.dimming?.inactiveFilter === 'string'
+        ? config.tokens.dimming.inactiveFilter.trim()
+        : '';
+    return filter.length ? filter : 'none';
+}
+
+function resolveSceneNodeFilter(nodeId = '', sceneFocusState = null, focusAlpha = 1, config = null, {
+    disableInactiveFilter = false
+} = {}) {
+    if (!sceneFocusState) return 'none';
+    const isExplicitDimNode = typeof nodeId === 'string'
+        && nodeId.length
+        && sceneFocusState.dimNodeIds?.has(nodeId);
+    if (disableInactiveFilter && !isExplicitDimNode) {
+        return 'none';
+    }
+    return resolveSceneInactiveFilter(sceneFocusState, focusAlpha, config);
+}
+
 function resolveRowHitBounds(node = null, entry = null, rowIndex = null) {
     if (!node || node.kind !== VIEW2D_NODE_KINDS.MATRIX) return null;
     if (!Number.isFinite(rowIndex) || rowIndex < 0) return null;
@@ -523,6 +597,32 @@ function resolveRowHitBounds(node = null, entry = null, rowIndex = null) {
     };
 }
 
+function resolveTrackIndex(relativeOffset = 0, itemSize = 0, itemGap = 0, itemCount = 0) {
+    const safeItemCount = Number.isFinite(itemCount) ? Math.max(0, Math.floor(itemCount)) : 0;
+    const safeItemSize = Number(itemSize) || 0;
+    if (!Number.isFinite(relativeOffset) || safeItemCount <= 0 || !(safeItemSize > 0)) {
+        return null;
+    }
+
+    const safeItemGap = Math.max(0, Number(itemGap) || 0);
+    const stride = safeItemSize + safeItemGap;
+    if (!(stride > 0)) return null;
+
+    const index = Math.floor(relativeOffset / stride);
+    if (index < 0 || index >= safeItemCount) return null;
+
+    const offsetWithinStride = relativeOffset - (index * stride);
+    if (offsetWithinStride < 0 || offsetWithinStride > safeItemSize) {
+        return null;
+    }
+
+    return {
+        index,
+        stride,
+        offsetWithinStride
+    };
+}
+
 function resolveMatrixRowHit(node = null, entry = null, x = 0, y = 0, detailScale = 1) {
     if (!node || node.kind !== VIEW2D_NODE_KINDS.MATRIX) return null;
     if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
@@ -536,12 +636,21 @@ function resolveMatrixRowHit(node = null, entry = null, x = 0, y = 0, detailScal
         return null;
     }
 
-    for (let index = 0; index < rowItems.length; index += 1) {
-        const bounds = resolveRowHitBounds(node, entry, index);
-        if (!containsPoint(bounds, x, y)) continue;
+    const contentBounds = entry?.contentBounds || entry?.bounds || null;
+    const layoutData = entry?.layoutData || null;
+    if (!contentBounds || !layoutData) return null;
+    const innerPaddingY = Math.max(0, Number(layoutData.innerPaddingY) || 0);
+    const rowHeight = Math.max(1, Number(layoutData.rowHeight) || 0);
+    const rowGap = Math.max(0, Number(layoutData.rowGap) || 0);
+    const relativeY = y - (contentBounds.y + innerPaddingY);
+    const resolvedTrack = resolveTrackIndex(relativeY, rowHeight, rowGap, rowItems.length);
+
+    if (resolvedTrack) {
+        const bounds = resolveRowHitBounds(node, entry, resolvedTrack.index);
+        if (!bounds) return null;
         return {
-            rowIndex: index,
-            rowItem: rowItems[index],
+            rowIndex: resolvedTrack.index,
+            rowItem: rowItems[resolvedTrack.index],
             bounds
         };
     }
@@ -551,14 +660,7 @@ function resolveMatrixRowHit(node = null, entry = null, x = 0, y = 0, detailScal
         && compactRowsMeta.variant === VIEW2D_VECTOR_STRIP_VARIANT;
     if (!isVectorStripRows) return null;
 
-    const contentBounds = entry?.contentBounds || entry?.bounds || null;
-    const layoutData = entry?.layoutData || null;
-    if (!contentBounds || !layoutData) return null;
-    const innerPaddingY = Math.max(0, Number(layoutData.innerPaddingY) || 0);
-    const rowHeight = Math.max(1, Number(layoutData.rowHeight) || 0);
-    const rowGap = Math.max(0, Number(layoutData.rowGap) || 0);
     const stride = Math.max(1, rowHeight + rowGap);
-    const relativeY = y - (contentBounds.y + innerPaddingY);
     const approxRowIndex = Math.max(
         0,
         Math.min(
@@ -584,27 +686,32 @@ function resolveMatrixCellHit(node = null, entry = null, x = 0, y = 0) {
     const layoutData = entry?.layoutData || null;
     const contentBounds = entry?.contentBounds || entry?.bounds || null;
     if (!rowItems.length || !layoutData || !contentBounds) return null;
+    const cellSize = Math.max(1, Number(layoutData.cellSize) || 0);
+    const cellGap = Math.max(0, Number(layoutData.cellGap) || 0);
+    const innerPaddingX = Math.max(0, Number(layoutData.innerPaddingX) || 0);
+    const innerPaddingY = Math.max(0, Number(layoutData.innerPaddingY) || 0);
+    const relativeY = y - (contentBounds.y + innerPaddingY);
+    const resolvedRow = resolveTrackIndex(relativeY, cellSize, cellGap, rowItems.length);
+    if (!resolvedRow) return null;
 
-    for (let rowIndex = 0; rowIndex < rowItems.length; rowIndex += 1) {
-        const cells = Array.isArray(rowItems[rowIndex]?.cells) ? rowItems[rowIndex].cells : [];
-        for (let colIndex = 0; colIndex < cells.length; colIndex += 1) {
-            const cellBounds = {
-                x: contentBounds.x + layoutData.innerPaddingX + colIndex * (layoutData.cellSize + layoutData.cellGap),
-                y: contentBounds.y + layoutData.innerPaddingY + rowIndex * (layoutData.cellSize + layoutData.cellGap),
-                width: layoutData.cellSize,
-                height: layoutData.cellSize
-            };
-            if (!containsPoint(cellBounds, x, y)) continue;
-            return {
-                rowIndex,
-                colIndex,
-                cellItem: cells[colIndex],
-                bounds: cellBounds
-            };
+    const cells = Array.isArray(rowItems[resolvedRow.index]?.cells) ? rowItems[resolvedRow.index].cells : [];
+    if (!cells.length) return null;
+
+    const relativeX = x - (contentBounds.x + innerPaddingX);
+    const resolvedCol = resolveTrackIndex(relativeX, cellSize, cellGap, cells.length);
+    if (!resolvedCol) return null;
+
+    return {
+        rowIndex: resolvedRow.index,
+        colIndex: resolvedCol.index,
+        cellItem: cells[resolvedCol.index],
+        bounds: {
+            x: contentBounds.x + innerPaddingX + resolvedCol.index * (cellSize + cellGap),
+            y: contentBounds.y + innerPaddingY + resolvedRow.index * (cellSize + cellGap),
+            width: cellSize,
+            height: cellSize
         }
-    }
-
-    return null;
+    };
 }
 
 function resolveMatrixColumnHit(node = null, entry = null, x = 0, y = 0) {
@@ -616,23 +723,24 @@ function resolveMatrixColumnHit(node = null, entry = null, x = 0, y = 0) {
     const layoutData = entry?.layoutData || null;
     const contentBounds = entry?.contentBounds || entry?.bounds || null;
     if (!columnItems.length || !layoutData || !contentBounds) return null;
+    const colWidth = Math.max(1, Number(layoutData.colWidth) || 0);
+    const colGap = Math.max(0, Number(layoutData.colGap) || 0);
+    const innerPaddingX = Math.max(0, Number(layoutData.innerPaddingX) || 0);
+    const innerPaddingY = Math.max(0, Number(layoutData.innerPaddingY) || 0);
+    const relativeX = x - (contentBounds.x + innerPaddingX);
+    const resolvedCol = resolveTrackIndex(relativeX, colWidth, colGap, columnItems.length);
+    if (!resolvedCol) return null;
 
-    for (let colIndex = 0; colIndex < columnItems.length; colIndex += 1) {
-        const colBounds = {
-            x: contentBounds.x + layoutData.innerPaddingX + colIndex * (layoutData.colWidth + layoutData.colGap),
-            y: contentBounds.y + layoutData.innerPaddingY,
-            width: layoutData.colWidth,
-            height: layoutData.colHeight
-        };
-        if (!containsPoint(colBounds, x, y)) continue;
-        return {
-            colIndex,
-            columnItem: columnItems[colIndex],
-            bounds: colBounds
-        };
-    }
-
-    return null;
+    return {
+        colIndex: resolvedCol.index,
+        columnItem: columnItems[resolvedCol.index],
+        bounds: {
+            x: contentBounds.x + innerPaddingX + resolvedCol.index * (colWidth + colGap),
+            y: contentBounds.y + innerPaddingY,
+            width: colWidth,
+            height: Math.max(1, Number(layoutData.colHeight) || 0)
+        }
+    };
 }
 
 function normalizeHeadDetailTarget(target = null) {
@@ -1155,8 +1263,19 @@ function drawCaption(ctx, entry, node, config, worldScale = 1, detailScale = wor
     ctx.restore();
 }
 
-function drawCardSurfaceEffects(ctx, bounds, cornerRadius, style, safeWorldScale, projectedWidth, projectedHeight) {
+function drawCardSurfaceEffects(
+    ctx,
+    bounds,
+    cornerRadius,
+    style,
+    safeWorldScale,
+    projectedWidth,
+    projectedHeight,
+    focusAlpha = 1
+) {
     if (!bounds) return;
+    const baseAlpha = Math.max(0, Math.min(1, Number.isFinite(focusAlpha) ? focusAlpha : 1));
+    if (baseAlpha <= 0) return;
 
     const glowColor = typeof style.cardGlowColor === 'string' ? style.cardGlowColor : null;
     const glowBlur = Number.isFinite(style.cardGlowBlur) ? style.cardGlowBlur : 16;
@@ -1170,7 +1289,7 @@ function drawCardSurfaceEffects(ctx, bounds, cornerRadius, style, safeWorldScale
         ctx.save();
         roundRectPath(ctx, bounds.x, bounds.y, bounds.width, bounds.height, cornerRadius);
         ctx.fillStyle = glowColor;
-        ctx.globalAlpha = glowOpacity;
+        ctx.globalAlpha = glowOpacity * baseAlpha;
         ctx.shadowColor = glowColor;
         ctx.shadowBlur = glowBlur / safeWorldScale;
         ctx.fill();
@@ -1182,7 +1301,7 @@ function drawCardSurfaceEffects(ctx, bounds, cornerRadius, style, safeWorldScale
         ctx.strokeStyle = glowColor;
         ctx.shadowColor = glowColor;
         ctx.shadowBlur = (glowBlur * 0.8) / safeWorldScale;
-        ctx.globalAlpha = Math.min(1, glowOpacity + 0.28);
+        ctx.globalAlpha = Math.min(1, glowOpacity + 0.28) * baseAlpha;
         ctx.stroke();
         ctx.restore();
     }
@@ -1234,13 +1353,15 @@ function drawCardSurfaceEffects(ctx, bounds, cornerRadius, style, safeWorldScale
     roundRectPath(ctx, bounds.x, bounds.y, bounds.width, bounds.height, cornerRadius);
     ctx.lineWidth = Math.max(0.45, 0.8) / safeWorldScale;
     ctx.strokeStyle = edgeHighlight;
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = baseAlpha;
     ctx.stroke();
     ctx.restore();
 }
 
-function drawCardEdgeStrokes(ctx, bounds, cornerRadius, style, safeWorldScale) {
+function drawCardEdgeStrokes(ctx, bounds, cornerRadius, style, safeWorldScale, focusAlpha = 1) {
     if (!bounds) return;
+    const baseAlpha = Math.max(0, Math.min(1, Number.isFinite(focusAlpha) ? focusAlpha : 1));
+    if (baseAlpha <= 0) return;
     const lineWidth = Math.max(
         0.8,
         Number.isFinite(style.edgeStrokeWidth) ? style.edgeStrokeWidth : 2.8
@@ -1279,6 +1400,7 @@ function drawCardEdgeStrokes(ctx, bounds, cornerRadius, style, safeWorldScale) {
         );
         ctx.lineWidth = lineWidth;
         ctx.strokeStyle = strokeGradient;
+        ctx.globalAlpha = baseAlpha;
         ctx.stroke();
         ctx.restore();
         return;
@@ -1295,6 +1417,7 @@ function drawCardEdgeStrokes(ctx, bounds, cornerRadius, style, safeWorldScale) {
         ctx.lineJoin = 'round';
         ctx.lineWidth = lineWidth;
         ctx.strokeStyle = color;
+        ctx.globalAlpha = baseAlpha;
         ctx.stroke();
         ctx.restore();
     };
@@ -1368,12 +1491,16 @@ function drawEmbeddedScene(
     worldScale,
     detailScale,
     cornerRadius,
-    { fastPath = false } = {}
+    {
+        fastPath = false,
+        focusAlpha = 1
+    } = {}
 ) {
     if (!contentBounds || !embeddedScene?.scene || !embeddedScene?.layout?.registry) return;
     const renderCache = resolveEmbeddedSceneRenderCache(embeddedScene);
     const sceneBounds = embeddedScene.layout.sceneBounds || embeddedScene.layout.registry.getSceneBounds();
     if (!renderCache || !sceneBounds?.width || !sceneBounds?.height) return;
+    const embeddedFocusAlpha = Math.max(0, Math.min(1, Number.isFinite(focusAlpha) ? focusAlpha : 1));
 
     const paddingX = Math.max(0, Number(embeddedScene.paddingX) || 0);
     const paddingY = Math.max(0, Number(embeddedScene.paddingY) || 0);
@@ -1414,6 +1541,7 @@ function drawEmbeddedScene(
             drawMatrixNode(ctx, node, entry, nestedConfig, nestedWorldScale, nestedDetailScale, {
                 skipSurfaceEffects: fastPath,
                 fastPath,
+                focusAlpha: embeddedFocusAlpha,
                 fixedTextSizing: nestedFixedTextSizing
             });
         } else if (node.kind === VIEW2D_NODE_KINDS.TEXT || node.kind === VIEW2D_NODE_KINDS.OPERATOR) {
@@ -1424,7 +1552,7 @@ function drawEmbeddedScene(
                 nestedConfig,
                 nestedWorldScale,
                 nestedDetailScale,
-                1,
+                embeddedFocusAlpha,
                 nestedFixedTextSizing
             );
         }
@@ -1432,126 +1560,12 @@ function drawEmbeddedScene(
 
     renderCache.connectors.forEach(({ entry, stroke }) => {
         drawConnector(ctx, entry, nestedConfig, stroke, nestedWorldScale, {
-            skipArrowHead: fastPath
+            focusAlpha: embeddedFocusAlpha,
+            emphasize: embeddedFocusAlpha >= 0.995
         });
     });
 
     ctx.restore();
-}
-
-function normalizeSceneFocusSelections(items = [], key = 'rowIndex') {
-    const selectionMap = new Map();
-    if (!Array.isArray(items) || !items.length) return selectionMap;
-    items.forEach((item) => {
-        const nodeId = typeof item?.nodeId === 'string' ? item.nodeId : '';
-        const indexValue = Number.isFinite(item?.[key]) ? Math.max(0, Math.floor(item[key])) : null;
-        if (!nodeId.length || !Number.isFinite(indexValue)) return;
-        let bucket = selectionMap.get(nodeId);
-        if (!bucket) {
-            bucket = new Set();
-            selectionMap.set(nodeId, bucket);
-        }
-        bucket.add(indexValue);
-    });
-    return selectionMap;
-}
-
-function normalizeSceneFocusCellSelections(items = []) {
-    const selectionMap = new Map();
-    if (!Array.isArray(items) || !items.length) return selectionMap;
-    items.forEach((item) => {
-        const nodeId = typeof item?.nodeId === 'string' ? item.nodeId : '';
-        const rowIndex = Number.isFinite(item?.rowIndex) ? Math.max(0, Math.floor(item.rowIndex)) : null;
-        const colIndex = Number.isFinite(item?.colIndex) ? Math.max(0, Math.floor(item.colIndex)) : null;
-        if (!nodeId.length || !Number.isFinite(rowIndex) || !Number.isFinite(colIndex)) return;
-        let bucket = selectionMap.get(nodeId);
-        if (!bucket) {
-            bucket = new Set();
-            selectionMap.set(nodeId, bucket);
-        }
-        bucket.add(`${rowIndex}:${colIndex}`);
-    });
-    return selectionMap;
-}
-
-function normalizeSceneFocusState(focusState = null, config = null) {
-    if (!focusState || typeof focusState !== 'object') return null;
-    const activeNodeIds = new Set(
-        Array.isArray(focusState.activeNodeIds)
-            ? focusState.activeNodeIds.filter((value) => typeof value === 'string' && value.length)
-            : []
-    );
-    const activeConnectorIds = new Set(
-        Array.isArray(focusState.activeConnectorIds)
-            ? focusState.activeConnectorIds.filter((value) => typeof value === 'string' && value.length)
-            : []
-    );
-    const rowSelections = normalizeSceneFocusSelections(focusState.rowSelections, 'rowIndex');
-    const columnSelections = normalizeSceneFocusSelections(focusState.columnSelections, 'colIndex');
-    const cellSelections = normalizeSceneFocusCellSelections(focusState.cellSelections);
-    const hasSceneFocus = activeNodeIds.size > 0
-        || activeConnectorIds.size > 0
-        || rowSelections.size > 0
-        || columnSelections.size > 0
-        || cellSelections.size > 0;
-    if (!hasSceneFocus) return null;
-    return {
-        activeNodeIds,
-        activeConnectorIds,
-        rowSelections,
-        columnSelections,
-        cellSelections,
-        inactiveOpacity: Math.max(
-            0.08,
-            Math.min(0.4, Number(config?.tokens?.dimming?.inactiveOpacity) || 0.18)
-        )
-    };
-}
-
-function resolveSceneElementFocusAlpha(isActive = true, sceneFocusState = null) {
-    if (!sceneFocusState?.inactiveOpacity) return 1;
-    return isActive ? 1 : sceneFocusState.inactiveOpacity;
-}
-
-function resolveSceneNodeFocusAlpha(nodeId = '', sceneFocusState = null) {
-    if (!sceneFocusState) return 1;
-    if (typeof nodeId !== 'string' || !nodeId.length) {
-        return sceneFocusState.inactiveOpacity;
-    }
-    return resolveSceneElementFocusAlpha(sceneFocusState.activeNodeIds.has(nodeId), sceneFocusState);
-}
-
-function resolveSceneRowSelectionAlpha(nodeId = '', rowIndex = null, sceneFocusState = null) {
-    if (!sceneFocusState || !Number.isFinite(rowIndex)) return null;
-    const bucket = sceneFocusState.rowSelections.get(nodeId);
-    if (!bucket || !bucket.size) return null;
-    return resolveSceneElementFocusAlpha(bucket.has(Math.max(0, Math.floor(rowIndex))), sceneFocusState);
-}
-
-function resolveSceneColumnSelectionAlpha(nodeId = '', colIndex = null, sceneFocusState = null) {
-    if (!sceneFocusState || !Number.isFinite(colIndex)) return null;
-    const bucket = sceneFocusState.columnSelections.get(nodeId);
-    if (!bucket || !bucket.size) return null;
-    return resolveSceneElementFocusAlpha(bucket.has(Math.max(0, Math.floor(colIndex))), sceneFocusState);
-}
-
-function resolveSceneGridCellAlpha(nodeId = '', rowIndex = null, colIndex = null, sceneFocusState = null) {
-    if (!sceneFocusState || !Number.isFinite(rowIndex) || !Number.isFinite(colIndex)) return null;
-    const rowBucket = sceneFocusState.rowSelections.get(nodeId) || null;
-    const colBucket = sceneFocusState.columnSelections.get(nodeId) || null;
-    const cellBucket = sceneFocusState.cellSelections.get(nodeId) || null;
-    const hasLocalFocus = !!(
-        (rowBucket && rowBucket.size)
-        || (colBucket && colBucket.size)
-        || (cellBucket && cellBucket.size)
-    );
-    if (!hasLocalFocus) return null;
-    const rowMatch = !rowBucket || !rowBucket.size || rowBucket.has(Math.max(0, Math.floor(rowIndex)));
-    const colMatch = !colBucket || !colBucket.size || colBucket.has(Math.max(0, Math.floor(colIndex)));
-    const cellMatch = !cellBucket || !cellBucket.size || cellBucket.has(
-        `${Math.max(0, Math.floor(rowIndex))}:${Math.max(0, Math.floor(colIndex))}`
-    );
-    return resolveSceneElementFocusAlpha(rowMatch && colMatch && cellMatch, sceneFocusState);
 }
 
 function drawMatrixNode(
@@ -1568,7 +1582,8 @@ function drawMatrixNode(
         headDetailDepthActive = false,
         interactionState = null,
         focusAlpha = 1,
-        fixedTextSizing = null
+        fixedTextSizing = null,
+        disableInactiveFilter = false
     } = {}
 ) {
     const contentBounds = entry.contentBounds || entry.bounds;
@@ -1611,24 +1626,44 @@ function drawMatrixNode(
     const vectorStripBandSeparatorOpacity = Number.isFinite(compactRowsMeta.bandSeparatorOpacity)
         ? Math.max(0, Math.min(1, Number(compactRowsMeta.bandSeparatorOpacity)))
         : 0;
-    const vectorStripHoverScaleY = Number.isFinite(compactRowsMeta.hoverScaleY)
-        ? Math.max(1, Number(compactRowsMeta.hoverScaleY))
-        : 1;
-    const vectorStripHoverGlowColor = typeof compactRowsMeta.hoverGlowColor === 'string'
-        ? compactRowsMeta.hoverGlowColor
-        : null;
-    const vectorStripHoverGlowBlur = Number.isFinite(compactRowsMeta.hoverGlowBlur)
-        ? Math.max(0, Number(compactRowsMeta.hoverGlowBlur))
-        : 0;
-    const vectorStripHoverStrokeColor = typeof compactRowsMeta.hoverStrokeColor === 'string'
-        ? compactRowsMeta.hoverStrokeColor
-        : null;
+    const vectorStripHoverScaleY = fastPath
+        ? 1
+        : (
+            Number.isFinite(compactRowsMeta.hoverScaleY)
+                ? Math.max(1, Number(compactRowsMeta.hoverScaleY))
+                : 1
+        );
+    const vectorStripHoverGlowColor = fastPath
+        ? null
+        : (
+            typeof compactRowsMeta.hoverGlowColor === 'string'
+                ? compactRowsMeta.hoverGlowColor
+                : null
+        );
+    const vectorStripHoverGlowBlur = fastPath
+        ? 0
+        : (
+            Number.isFinite(compactRowsMeta.hoverGlowBlur)
+                ? Math.max(0, Number(compactRowsMeta.hoverGlowBlur))
+                : 0
+        );
+    const vectorStripHoverStrokeColor = fastPath
+        ? null
+        : (
+            typeof compactRowsMeta.hoverStrokeColor === 'string'
+                ? compactRowsMeta.hoverStrokeColor
+                : null
+        );
     const vectorStripDimmedRowOpacity = Number.isFinite(compactRowsMeta.dimmedRowOpacity)
         ? Math.max(0, Math.min(1, Number(compactRowsMeta.dimmedRowOpacity)))
         : 0.18;
-    const vectorStripHoverScaleX = Number.isFinite(columnStripMeta.hoverScaleX)
-        ? Math.max(1, Number(columnStripMeta.hoverScaleX))
-        : 1;
+    const vectorStripHoverScaleX = fastPath
+        ? 1
+        : (
+            Number.isFinite(columnStripMeta.hoverScaleX)
+                ? Math.max(1, Number(columnStripMeta.hoverScaleX))
+                : 1
+        );
     const vectorStripDimmedColumnOpacity = Number.isFinite(columnStripMeta.dimmedColumnOpacity)
         ? Math.max(0, Math.min(1, Number(columnStripMeta.dimmedColumnOpacity)))
         : 0.18;
@@ -1647,9 +1682,15 @@ function drawMatrixNode(
     );
     const embeddedScene = node.metadata?.embeddedScene || null;
     const nodeFocusAlpha = Math.max(0, Math.min(1, Number.isFinite(focusAlpha) ? focusAlpha : 1));
+    const sceneFocusState = interactionState?.sceneFocusState || null;
+    const surfaceFocusAlpha = resolveMatrixSurfaceFocusAlpha(node, sceneFocusState, nodeFocusAlpha);
+    const inactiveNodeFilter = resolveSceneNodeFilter(node.id, sceneFocusState, nodeFocusAlpha, config, {
+        disableInactiveFilter
+    });
 
     ctx.save();
-    ctx.globalAlpha = nodeFocusAlpha;
+    ctx.globalAlpha = surfaceFocusAlpha;
+    ctx.filter = inactiveNodeFilter;
     if (!hideSurface) {
         roundRectPath(ctx, contentBounds.x, contentBounds.y, contentBounds.width, contentBounds.height, cornerRadius);
         ctx.fillStyle = resolveFill(ctx, background, contentBounds, accent);
@@ -1662,7 +1703,16 @@ function drawMatrixNode(
             && node.presentation === VIEW2D_MATRIX_PRESENTATIONS.CARD
             && style.disableCardSurfaceEffects !== true
         ) {
-            drawCardSurfaceEffects(ctx, contentBounds, cornerRadius, style, safeWorldScale, projectedWidth, projectedHeight);
+            drawCardSurfaceEffects(
+                ctx,
+                contentBounds,
+                cornerRadius,
+                style,
+                safeWorldScale,
+                projectedWidth,
+                projectedHeight,
+                surfaceFocusAlpha
+            );
         }
     }
 
@@ -1675,7 +1725,10 @@ function drawMatrixNode(
             safeWorldScale,
             safeDetailScale,
             cornerRadius,
-            { fastPath }
+            {
+                fastPath,
+                focusAlpha: nodeFocusAlpha
+            }
         );
     }
 
@@ -1695,7 +1748,7 @@ function drawMatrixNode(
         : 0;
     const shouldDimRows = hoverDimStrength > 0 && rowItems.length > 1;
     const dimmedRowOpacity = vectorStripDimmedRowOpacity;
-    const sceneFocusState = interactionState?.sceneFocusState || null;
+    ctx.globalAlpha = nodeFocusAlpha;
     if (node.presentation === VIEW2D_MATRIX_PRESENTATIONS.BANDED_ROWS) {
         if (useSummaryInterior) {
             const barBounds = {
@@ -1758,8 +1811,8 @@ function drawMatrixNode(
     } else if (node.presentation === VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS) {
         if (isVectorStripRows) {
             const sceneRowSelections = sceneFocusState?.rowSelections?.get(node.id) || null;
-            const sceneFocusedRowIndex = sceneRowSelections?.size
-                ? Array.from(sceneRowSelections)[0]
+            const sceneFocusedRowIndices = sceneRowSelections?.size
+                ? Array.from(sceneRowSelections)
                 : null;
             drawVectorStripRows(
                 ctx,
@@ -1768,12 +1821,9 @@ function drawMatrixNode(
                 layoutData,
                 accent,
                 cornerRadius,
-                Number.isFinite(sceneFocusedRowIndex)
+                sceneFocusedRowIndices?.length
                     ? {
-                        hoveredRowIndex: sceneFocusedRowIndex,
-                        previousHoveredRowIndex: null,
-                        hoverRowBlend: 1,
-                        dimmingStrength: 1,
+                        focusedRowIndices: sceneFocusedRowIndices,
                         dimmedRowOpacity: sceneFocusState?.inactiveOpacity || dimmedRowOpacity,
                         baseAlpha: nodeFocusAlpha,
                         bandCount: vectorStripBandCount,
@@ -1800,6 +1850,7 @@ function drawMatrixNode(
                                 hoverStrokeColor: vectorStripHoverStrokeColor
                             }
                             : {
+                                baseAlpha: nodeFocusAlpha,
                                 bandCount: vectorStripBandCount,
                                 bandSeparatorOpacity: vectorStripBandSeparatorOpacity,
                                 hoverScaleY: vectorStripHoverScaleY,
@@ -1853,7 +1904,11 @@ function drawMatrixNode(
             ctx.fillStyle = accent;
             ctx.fill();
         } else {
-            const cellCornerRadius = resolveGridCellCornerRadius(layoutData.cellSize, safeWorldScale);
+            const cellCornerRadius = resolveGridCellCornerRadius(
+                layoutData.cellSize,
+                safeWorldScale,
+                gridMeta.cellCornerRadiusScale
+            );
             rowItems.forEach((rowItem, rowIndex) => {
                 const cells = Array.isArray(rowItem.cells) ? rowItem.cells : [];
                 cells.forEach((cellItem, colIndex) => {
@@ -1910,15 +1965,27 @@ function drawMatrixNode(
                     dimmedColumnOpacity: sceneFocusState?.inactiveOpacity || vectorStripDimmedColumnOpacity,
                     baseAlpha: nodeFocusAlpha,
                     hoverScaleX: vectorStripHoverScaleX,
-                    hoverGlowColor: typeof columnStripMeta.hoverGlowColor === 'string'
-                        ? columnStripMeta.hoverGlowColor
-                        : null,
-                    hoverGlowBlur: Number.isFinite(columnStripMeta.hoverGlowBlur)
-                        ? Math.max(0, Number(columnStripMeta.hoverGlowBlur))
-                        : 0,
-                    hoverStrokeColor: typeof columnStripMeta.hoverStrokeColor === 'string'
-                        ? columnStripMeta.hoverStrokeColor
-                        : null
+                    hoverGlowColor: fastPath
+                        ? null
+                        : (
+                            typeof columnStripMeta.hoverGlowColor === 'string'
+                                ? columnStripMeta.hoverGlowColor
+                                : null
+                        ),
+                    hoverGlowBlur: fastPath
+                        ? 0
+                        : (
+                            Number.isFinite(columnStripMeta.hoverGlowBlur)
+                                ? Math.max(0, Number(columnStripMeta.hoverGlowBlur))
+                                : 0
+                        ),
+                    hoverStrokeColor: fastPath
+                        ? null
+                        : (
+                            typeof columnStripMeta.hoverStrokeColor === 'string'
+                                ? columnStripMeta.hoverStrokeColor
+                                : null
+                        )
                 }
             );
         } else if (useSummaryInterior || fastPath) {
@@ -1959,7 +2026,8 @@ function drawMatrixNode(
         ctx.fill();
     }
     if (!hideSurface) {
-        drawCardEdgeStrokes(ctx, contentBounds, cornerRadius, style, safeWorldScale);
+        ctx.globalAlpha = surfaceFocusAlpha;
+        drawCardEdgeStrokes(ctx, contentBounds, cornerRadius, style, safeWorldScale, surfaceFocusAlpha);
     }
     ctx.restore();
     drawCaption(ctx, entry, node, config, safeWorldScale, safeDetailScale, focusAlpha, fixedTextSizing);
@@ -2037,9 +2105,12 @@ function drawTextLikeNode(ctx, node, entry, config, worldScale = 1, detailScale 
     const tex = node.tex || '';
     let renderedFontSize = entry.layoutData?.fontSize || config.component.labelFontSize;
     let renderedFontWeight = 500;
+    let renderBounds = bounds;
     if (node.kind === VIEW2D_NODE_KINDS.OPERATOR) {
         const baseFontSize = entry.layoutData?.fontSize || config.component.operatorFontSize;
         const isPlusOperator = node.semantic?.operatorKey === 'plus' || node.text === '+';
+        const operatorZoomBehavior = fixedTextSizing?.operatorBehavior || VIEW2D_TEXT_ZOOM_BEHAVIORS.SCREEN_ADAPTIVE;
+        const useSceneRelativeOperatorSizing = operatorZoomBehavior === VIEW2D_TEXT_ZOOM_BEHAVIORS.SCENE_RELATIVE;
         const defaultPersistentMinScreenFontPx = isPersistentOperator
             ? (isPlusOperator
                 ? PERSISTENT_PLUS_OPERATOR_MIN_SCREEN_FONT_PX
@@ -2053,19 +2124,38 @@ function drawTextLikeNode(ctx, node, entry, config, worldScale = 1, detailScale 
             defaultPersistentMinScreenFontPx,
             detailOperatorMinScreenFontPx
         );
-        const fixedOperatorFontSize = fixedTextSizing?.textScreenFontPx
-            ? (fixedTextSizing.textScreenFontPx / safeWorldScale)
-            : null;
-        const adjustedFontSize = fixedOperatorFontSize
-            ?? (
-                persistentMinScreenFontPx > 0
-                    ? Math.max(baseFontSize, persistentMinScreenFontPx / safeWorldScale)
-                    : baseFontSize
+        const useScreenFixedOperatorSizing = operatorZoomBehavior === VIEW2D_TEXT_ZOOM_BEHAVIORS.SCREEN_FIXED;
+        const fixedOperatorFontSize = useScreenFixedOperatorSizing
+            ? null
+            : (!useSceneRelativeOperatorSizing && fixedTextSizing?.textScreenFontPx
+                ? (fixedTextSizing.textScreenFontPx / safeWorldScale)
+                : null);
+        const adjustedFontSize = useSceneRelativeOperatorSizing
+            ? baseFontSize
+            : (
+                fixedOperatorFontSize
+                ?? (
+                    persistentMinScreenFontPx > 0
+                        ? Math.max(baseFontSize, persistentMinScreenFontPx / safeWorldScale)
+                        : baseFontSize
+                )
             );
+        const screenFixedFontSize = persistentMinScreenFontPx > 0
+            ? Math.max(baseFontSize, persistentMinScreenFontPx)
+            : baseFontSize;
         renderedFontSize = isPlusOperator
-            ? adjustedFontSize * PLUS_OPERATOR_FONT_SCALE
-            : adjustedFontSize;
+            ? (useScreenFixedOperatorSizing ? screenFixedFontSize : adjustedFontSize) * PLUS_OPERATOR_FONT_SCALE
+            : (useScreenFixedOperatorSizing ? screenFixedFontSize : adjustedFontSize);
         renderedFontWeight = isPlusOperator ? PLUS_OPERATOR_FONT_WEIGHT : 600;
+        if (useScreenFixedOperatorSizing) {
+            renderBounds = {
+                x: bounds.x * safeWorldScale,
+                y: bounds.y * safeWorldScale,
+                width: bounds.width * safeWorldScale,
+                height: bounds.height * safeWorldScale
+            };
+            ctx.scale(1 / safeWorldScale, 1 / safeWorldScale);
+        }
         ctx.font = `${renderedFontWeight} ${renderedFontSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
         ctx.fillStyle = resolveView2dStyle(node.visual?.styleKey)?.color || config.tokens.palette.text;
     } else {
@@ -2099,21 +2189,25 @@ function drawTextLikeNode(ctx, node, entry, config, worldScale = 1, detailScale 
         });
         ctx.fillStyle = resolveView2dStyle(node.visual?.styleKey)?.color || config.tokens.palette.text;
     }
-    const clipBounds = resolveTextLikeClipBounds(bounds, node, renderedFontSize, config, renderedFontWeight);
+    const clipBounds = resolveTextLikeClipBounds(renderBounds, node, renderedFontSize, config, renderedFontWeight);
     ctx.beginPath();
     ctx.rect(clipBounds.x, clipBounds.y, clipBounds.width, clipBounds.height);
     ctx.clip();
     ctx.globalAlpha = Math.max(0, Math.min(1, Number.isFinite(focusAlpha) ? focusAlpha : 1));
     if (tex && hasSimpleTexMarkup(tex)) {
         drawSimpleTex(ctx, tex, {
-            x: bounds.x + (bounds.width / 2),
-            y: bounds.y + (bounds.height / 2),
+            x: renderBounds.x + (renderBounds.width / 2),
+            y: renderBounds.y + (renderBounds.height / 2),
             fontSize: renderedFontSize,
             fontWeight: renderedFontWeight,
             color: resolveView2dStyle(node.visual?.styleKey)?.color || config.tokens.palette.text
         });
     } else {
-        ctx.fillText(text, bounds.x + (bounds.width / 2), bounds.y + (bounds.height / 2));
+        ctx.fillText(
+            text,
+            renderBounds.x + (renderBounds.width / 2),
+            renderBounds.y + (renderBounds.height / 2)
+        );
     }
     ctx.restore();
     drawCaption(ctx, entry, node, config, safeWorldScale, safeDetailScale, focusAlpha, fixedTextSizing);
@@ -2360,11 +2454,36 @@ function createPreparedSceneState(scene = null) {
 function resolvePreparedSceneHitAtPoint(preparedSceneState = null, x = 0, y = 0, detailScale = 1) {
     const registry = preparedSceneState?.layout?.registry || null;
     if (!registry || !Number.isFinite(x) || !Number.isFinite(y)) return null;
-    const entry = registry.resolveNodeEntryAtPoint(x, y, {
-        includeGroups: false
-    });
+    const entry = typeof registry.resolveRawNodeEntryAtPoint === 'function'
+        ? registry.resolveRawNodeEntryAtPoint(x, y, {
+            includeGroups: false
+        })
+        : registry.resolveNodeEntryAtPoint(x, y, {
+            includeGroups: false
+        });
     if (!entry) return null;
     const drawable = preparedSceneState.drawableNodesById.get(entry.nodeId) || null;
+    const node = drawable?.node || null;
+    return {
+        entry,
+        node,
+        rowHit: resolveMatrixRowHit(node, entry, x, y, detailScale),
+        cellHit: resolveMatrixCellHit(node, entry, x, y),
+        columnHit: resolveMatrixColumnHit(node, entry, x, y)
+    };
+}
+
+function resolveSceneHitAtPoint(registry = null, drawableNodesById = null, x = 0, y = 0, detailScale = 1) {
+    if (!registry || !Number.isFinite(x) || !Number.isFinite(y)) return null;
+    const entry = typeof registry.resolveRawNodeEntryAtPoint === 'function'
+        ? registry.resolveRawNodeEntryAtPoint(x, y, {
+            includeGroups: false
+        })
+        : registry.resolveNodeEntryAtPoint(x, y, {
+            includeGroups: false
+        });
+    if (!entry) return null;
+    const drawable = drawableNodesById?.get(entry.nodeId) || null;
     const node = drawable?.node || null;
     return {
         entry,
@@ -2500,20 +2619,14 @@ export class CanvasSceneRenderer {
 
     resolveInteractiveHitAtPoint(x = 0, y = 0) {
         if (!this.layout?.registry || !Number.isFinite(x) || !Number.isFinite(y)) return null;
-        const entry = this.layout.registry.resolveNodeEntryAtPoint(x, y, {
-            includeGroups: false
-        });
-        if (!entry) return null;
-        const drawable = this.drawableNodesById.get(entry.nodeId) || null;
-        const node = drawable?.node || null;
         const detailScale = this.lastRenderState?.detailScale || this.lastRenderState?.worldScale || 1;
-        return {
-            entry,
-            node,
-            rowHit: resolveMatrixRowHit(node, entry, x, y, detailScale),
-            cellHit: resolveMatrixCellHit(node, entry, x, y),
-            columnHit: resolveMatrixColumnHit(node, entry, x, y)
-        };
+        return resolveSceneHitAtPoint(
+            this.layout.registry,
+            this.drawableNodesById,
+            x,
+            y,
+            detailScale
+        );
     }
 
     resolveInteractiveHitAtScreenPoint(x = 0, y = 0) {
@@ -2584,7 +2697,9 @@ export class CanvasSceneRenderer {
             tokens: resolveView2dVisualTokens(),
             component: { captionFontSize: 11, labelFontSize: 12, operatorFontSize: 20 }
         };
-        const sceneFocusState = normalizeSceneFocusState(interactionState?.detailSceneFocus, config);
+        const sceneFocusState = normalizeSceneFocusState(interactionState?.detailSceneFocus, {
+            inactiveOpacity: Number(config?.tokens?.dimming?.inactiveOpacity) || 0.18
+        });
         const normalizedInteractionState = sceneFocusState
             ? {
                 ...(interactionState || {}),
@@ -2748,7 +2863,10 @@ export class CanvasSceneRenderer {
                             fastPath: interactionFastPath,
                             interactionState: normalizedInteractionState,
                             focusAlpha,
-                            fixedTextSizing: detailFixedTextSizing
+                            fixedTextSizing: detailFixedTextSizing,
+                            // Canvas filters are disproportionately expensive in the dense
+                            // deep-detail MHSA scene and make passive row hovers feel laggy.
+                            disableInactiveFilter: true
                         });
                     } else if (node.kind === VIEW2D_NODE_KINDS.TEXT || node.kind === VIEW2D_NODE_KINDS.OPERATOR) {
                         drawTextLikeNode(
@@ -2768,7 +2886,6 @@ export class CanvasSceneRenderer {
                         ? resolveSceneElementFocusAlpha(sceneFocusState.activeConnectorIds.has(node.id), sceneFocusState)
                         : 1;
                     drawConnector(ctx, entry, config, stroke, detailWorldScale, {
-                        skipArrowHead: interactionFastPath,
                         focusAlpha,
                         emphasize: focusAlpha >= 0.995
                     });
@@ -2823,7 +2940,6 @@ export class CanvasSceneRenderer {
                     ? resolveSceneElementFocusAlpha(sceneFocusState.activeConnectorIds.has(node.id), sceneFocusState)
                     : 1;
                 drawConnector(ctx, entry, config, stroke, worldScale, {
-                    skipArrowHead: interactionFastPath,
                     focusAlpha,
                     emphasize: focusAlpha >= 0.995
                 });

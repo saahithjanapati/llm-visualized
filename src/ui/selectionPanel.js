@@ -127,7 +127,14 @@ import {
     resolveMhsaTokenMatrixLayoutMetrics
 } from './selectionPanelMhsaLayoutUtils.js';
 import {
-    resolveMhsaTokenMatrixProjectionStageTarget
+    buildMhsaProjectionComponentStateKey,
+    resolveMhsaKeyRowSceneFocus,
+    resolveMhsaProjectionInputRowSceneFocus,
+    resolveMhsaProjectionWeightSceneFocus,
+    resolveMhsaValueInputRowSceneFocus,
+    resolveMhsaValueRowSceneFocus,
+    resolveMhsaTokenMatrixProjectionStageTarget,
+    shouldMirrorMhsaHeadOutputRowFocus
 } from './selectionPanelMhsaInteractionUtils.js';
 import {
     resolveMhsaTokenMatrixFixedLabelScale
@@ -2543,7 +2550,9 @@ class SelectionPanel {
         this.tokenEncodingValue = document.getElementById('detailTokenEncodingValue');
         this.promptContextRow = document.getElementById('detailPromptContextRow');
         this.promptContextTokens = document.getElementById('detailPromptContextTokens');
+        this.transformerView2dActionRow = document.getElementById('detailView2dActionRow');
         this.transformerView2dActionBtn = document.getElementById('detailView2dActionBtn');
+        this.transformerView2dActionBtnLabel = document.getElementById('detailView2dActionBtnLabel');
         this.copyContextBtn = document.getElementById('detailCopyContextBtn');
         this.copyContextBtnLabel = document.getElementById('detailCopyContextBtnLabel');
         this.copyContextBtnAssistant = document.getElementById('detailCopyContextBtnAssistant');
@@ -2871,12 +2880,14 @@ class SelectionPanel {
         this._mhsaTokenMatrixXMatrixEl = [];
         this._mhsaTokenMatrixQueryMatrixEl = [];
         this._mhsaTokenMatrixProjectionStageEls = [];
+        this._mhsaTokenMatrixProjectionComponentEls = [];
         this._mhsaTokenMatrixAttentionFocusEls = null;
         this._mhsaTokenMatrixConnectorEls = {};
         this._mhsaTokenMatrixConnectorFrame = null;
         this._mhsaTokenMatrixLayoutMetrics = null;
         this._mhsaTokenMatrixSceneFocusState = {
             projectionStages: [],
+            projectionComponents: [],
             attentionBlocks: [],
             connectors: []
         };
@@ -3092,23 +3103,60 @@ class SelectionPanel {
         this.showSelection(this._lastSelection, { fromHistory: true });
     }
 
-    _setTransformerView2dActionButtonState(view2dContext = null) {
+    _setTransformerView2dActionButtonState(actionConfig = null) {
         if (!this.transformerView2dActionBtn) return;
-        const enabled = !!view2dContext;
+        const enabled = !!actionConfig;
+        if (this.transformerView2dActionRow) {
+            this.transformerView2dActionRow.hidden = !enabled;
+            this.transformerView2dActionRow.setAttribute('aria-hidden', enabled ? 'false' : 'true');
+        }
         this.transformerView2dActionBtn.hidden = !enabled;
         this.transformerView2dActionBtn.setAttribute('aria-hidden', enabled ? 'false' : 'true');
         if (!enabled) {
+            this.transformerView2dActionBtn.dataset.detailAction = TRANSFORMER_VIEW2D_PANEL_ACTION_OPEN;
+            if (this.transformerView2dActionBtnLabel) {
+                this.transformerView2dActionBtnLabel.textContent = 'View in 2D / matrix form';
+            }
             this.transformerView2dActionBtn.setAttribute('aria-label', 'View in 2D / matrix form');
             this.transformerView2dActionBtn.removeAttribute('title');
             return;
         }
+        const label = String(actionConfig?.label || '').trim() || 'View in 2D / matrix form';
+        const ariaLabel = String(actionConfig?.ariaLabel || '').trim() || label;
+        const title = String(actionConfig?.title || '').trim() || ariaLabel;
+        const action = String(actionConfig?.action || '').trim() || TRANSFORMER_VIEW2D_PANEL_ACTION_OPEN;
+        this.transformerView2dActionBtn.dataset.detailAction = action;
+        if (this.transformerView2dActionBtnLabel) {
+            this.transformerView2dActionBtnLabel.textContent = label;
+        }
+        this.transformerView2dActionBtn.setAttribute('aria-label', ariaLabel);
+        this.transformerView2dActionBtn.title = title;
+        this._applyCopyContextButtonLayout();
+    }
+
+    _resolveSelectionPrimaryActionConfig({
+        shouldShowMhsaInfoAction = false,
+        view2dContext = null
+    } = {}) {
+        if (shouldShowMhsaInfoAction) {
+            return {
+                action: MHSA_INFO_PANEL_ACTION_OPEN,
+                label: 'View in 2D / matrix form',
+                ariaLabel: 'Open the multi-head self-attention matrix form view',
+                title: 'Open the multi-head self-attention matrix form view'
+            };
+        }
+        if (!view2dContext) return null;
         const focusLabel = String(view2dContext?.focusLabel || '').trim();
         const actionLabel = focusLabel
             ? `View ${focusLabel} in 2D / matrix form`
             : 'View in 2D / matrix form';
-        this.transformerView2dActionBtn.setAttribute('aria-label', actionLabel);
-        this.transformerView2dActionBtn.title = actionLabel;
-        this._applyCopyContextButtonLayout();
+        return {
+            action: TRANSFORMER_VIEW2D_PANEL_ACTION_OPEN,
+            label: 'View in 2D / matrix form',
+            ariaLabel: actionLabel,
+            title: actionLabel
+        };
     }
 
     _setCopyContextButtonLabel(text) {
@@ -7826,6 +7874,12 @@ class SelectionPanel {
     }
 
     _setMhsaTokenMatrixSceneElementState(element, hasSceneFocus, isActive) {
+        if (Array.isArray(element)) {
+            element.forEach((entry) => {
+                this._setMhsaTokenMatrixSceneElementState(entry, hasSceneFocus, isActive);
+            });
+            return;
+        }
         if (!element) return;
         element.classList.toggle('is-scene-focus-active', hasSceneFocus && isActive);
         element.classList.toggle('is-scene-focus-dimmed', hasSceneFocus && !isActive);
@@ -7905,6 +7959,9 @@ class SelectionPanel {
         const projectionStageIndices = Array.isArray(config?.projectionStages)
             ? config.projectionStages
             : [];
+        const projectionComponentKeys = Array.isArray(config?.projectionComponents)
+            ? config.projectionComponents
+            : [];
         const attentionBlockKeys = Array.isArray(config?.attentionBlocks)
             ? config.attentionBlocks
             : [];
@@ -7916,6 +7973,10 @@ class SelectionPanel {
                 .filter(Number.isFinite)
                 .map((stageIndex) => Math.floor(stageIndex))
         );
+        const activeProjectionComponents = new Set(
+            projectionComponentKeys
+                .filter((key) => typeof key === 'string' && key.length)
+        );
         const activeAttentionBlocks = new Set(
             attentionBlockKeys
                 .filter((key) => typeof key === 'string' && key.length)
@@ -7925,14 +7986,18 @@ class SelectionPanel {
                 .filter((key) => typeof key === 'string' && key.length)
         );
         const hasSceneFocus = activeProjectionStages.size > 0
+            || activeProjectionComponents.size > 0
             || activeAttentionBlocks.size > 0
             || activeConnectors.size > 0;
         const isHeadOutputTerminalFocus = activeProjectionStages.size === 0
+            && activeProjectionComponents.size === 0
             && activeConnectors.size === 0
             && activeAttentionBlocks.has('head-output');
+        const hasProjectionComponentFocus = activeProjectionComponents.size > 0;
 
         this._mhsaTokenMatrixSceneFocusState = {
             projectionStages: [...activeProjectionStages],
+            projectionComponents: [...activeProjectionComponents],
             attentionBlocks: [...activeAttentionBlocks],
             connectors: [...activeConnectors]
         };
@@ -7942,7 +8007,20 @@ class SelectionPanel {
         this._mhsaTokenMatrixProjectionStageEls.forEach((entry) => {
             const stageIndex = Number.isFinite(entry?.stageIndex) ? entry.stageIndex : null;
             const isActive = Number.isFinite(stageIndex) && activeProjectionStages.has(stageIndex);
-            this._setMhsaTokenMatrixSceneElementState(entry?.stageEl, hasSceneFocus, isActive);
+            this._setMhsaTokenMatrixSceneElementState(
+                entry?.stageEl,
+                hasSceneFocus && !hasProjectionComponentFocus,
+                isActive
+            );
+        });
+
+        this._mhsaTokenMatrixProjectionComponentEls.forEach((entry) => {
+            const stateKey = buildMhsaProjectionComponentStateKey(entry?.stageIndex, entry?.componentKey);
+            this._setMhsaTokenMatrixSceneElementState(
+                entry?.element,
+                hasSceneFocus && hasProjectionComponentFocus,
+                activeProjectionComponents.has(stateKey)
+            );
         });
 
         Object.entries(this._mhsaTokenMatrixAttentionFocusEls || {}).forEach(([key, element]) => {
@@ -7971,6 +8049,10 @@ class SelectionPanel {
         this.mhsaTokenMatrixBody?.style.setProperty(
             '--mhsa-token-matrix-fixed-label-scale',
             fixedLabelScale.toFixed(4)
+        );
+        this.mhsaTokenMatrixBody?.style.setProperty(
+            '--mhsa-token-matrix-viewport-scale',
+            numericScale.toFixed(4)
         );
         const translate = `translate(${viewport.panX.toFixed(1)}px, ${viewport.panY.toFixed(1)}px)`;
         const scale = numericScale.toFixed(4);
@@ -8242,6 +8324,12 @@ class SelectionPanel {
             const rect = toLocalRect(element);
             if (!rect) return null;
             const side = String(element?.dataset?.mhsaConnectorAnchorSide || 'center').toLowerCase();
+            const anchorInsetRaw = Number(element?.dataset?.mhsaConnectorAnchorInset);
+            const anchorInset = Number.isFinite(anchorInsetRaw)
+                ? Math.max(0, anchorInsetRaw)
+                : 0;
+            const insetX = Math.min(Math.max(0, rect.width / 2), anchorInset);
+            const insetY = Math.min(Math.max(0, rect.height / 2), anchorInset);
             switch (side) {
             case 'left':
                 return { x: rect.left, y: rect.top + (rect.height / 2) };
@@ -8251,6 +8339,14 @@ class SelectionPanel {
                 return { x: rect.left + (rect.width / 2), y: rect.top };
             case 'bottom':
                 return { x: rect.left + (rect.width / 2), y: rect.bottom };
+            case 'top-left':
+                return { x: rect.left + insetX, y: rect.top };
+            case 'top-right':
+                return { x: rect.right - insetX, y: rect.top };
+            case 'bottom-left':
+                return { x: rect.left + insetX, y: rect.bottom };
+            case 'bottom-right':
+                return { x: rect.right - insetX, y: rect.bottom };
             default:
                 return { x: rect.left + (rect.width / 2), y: rect.top + (rect.height / 2) };
             }
@@ -8268,63 +8364,111 @@ class SelectionPanel {
             case 'right':
                 return { x: point.x + safeGap, y: point.y };
             case 'top':
+            case 'top-left':
+            case 'top-right':
                 return { x: point.x, y: point.y - safeGap };
             case 'bottom':
+            case 'bottom-left':
+            case 'bottom-right':
                 return { x: point.x, y: point.y + safeGap };
             default:
                 return { x: point.x, y: point.y };
             }
         };
-        const buildConnectorPathData = (start, end, route = 'horizontal', options = {}) => {
-            if (!start || !end) return '';
+        const buildConnectorPathPoints = (start, end, route = 'horizontal', options = {}) => {
+            if (!start || !end) return [];
             const targetSide = String(options?.targetSide || '').toLowerCase();
+            const targetVerticalSide = targetSide.startsWith('top')
+                ? 'top'
+                : (targetSide.startsWith('bottom') ? 'bottom' : targetSide);
+            const sourceGap = Number.isFinite(options?.sourceGap) ? Math.max(0, options.sourceGap) : CONNECTOR_GAP_PX;
+            const targetGap = Number.isFinite(options?.targetGap) ? Math.max(0, options.targetGap) : CONNECTOR_GAP_PX;
             const dx = Math.abs(end.x - start.x);
             const dy = Math.abs(end.y - start.y);
             if (dx < 0.5 || dy < 0.5) {
-                return `M ${start.x.toFixed(2)} ${start.y.toFixed(2)} L ${end.x.toFixed(2)} ${end.y.toFixed(2)}`;
+                return [start, end];
             }
-            if (targetSide === 'top' || targetSide === 'bottom') {
+            if (route === 'underpass') {
+                const sweepY = Math.max(start.y, end.y) + Math.max(12, sourceGap, targetGap);
                 return [
-                    `M ${start.x.toFixed(2)} ${start.y.toFixed(2)}`,
-                    `L ${end.x.toFixed(2)} ${start.y.toFixed(2)}`,
-                    `L ${end.x.toFixed(2)} ${end.y.toFixed(2)}`
-                ].join(' ');
+                    start,
+                    { x: start.x, y: sweepY },
+                    { x: end.x, y: sweepY },
+                    end
+                ];
+            }
+            if (targetVerticalSide === 'top' || targetVerticalSide === 'bottom') {
+                return [
+                    start,
+                    { x: end.x, y: start.y },
+                    end
+                ];
             }
             if (route === 'vertical') {
                 const midY = (start.y + end.y) / 2;
                 return [
-                    `M ${start.x.toFixed(2)} ${start.y.toFixed(2)}`,
-                    `L ${start.x.toFixed(2)} ${midY.toFixed(2)}`,
-                    `L ${end.x.toFixed(2)} ${midY.toFixed(2)}`,
-                    `L ${end.x.toFixed(2)} ${end.y.toFixed(2)}`
-                ].join(' ');
+                    start,
+                    { x: start.x, y: midY },
+                    { x: end.x, y: midY },
+                    end
+                ];
             }
             const midX = (start.x + end.x) / 2;
             return [
-                `M ${start.x.toFixed(2)} ${start.y.toFixed(2)}`,
-                `L ${midX.toFixed(2)} ${start.y.toFixed(2)}`,
-                `L ${midX.toFixed(2)} ${end.y.toFixed(2)}`,
-                `L ${end.x.toFixed(2)} ${end.y.toFixed(2)}`
+                start,
+                { x: midX, y: start.y },
+                { x: midX, y: end.y },
+                end
+            ];
+        };
+        const buildConnectorPathData = (points = []) => {
+            if (!Array.isArray(points) || points.length < 2) return '';
+            return points
+                .map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
+                .join(' ');
+        };
+        const buildConnectorArrowTipPathData = (points = []) => {
+            if (!Array.isArray(points) || points.length < 2) return '';
+            const head = points[points.length - 1];
+            let tail = null;
+            for (let idx = points.length - 2; idx >= 0; idx -= 1) {
+                const candidate = points[idx];
+                if (!candidate) continue;
+                const dx = head.x - candidate.x;
+                const dy = head.y - candidate.y;
+                if (Math.hypot(dx, dy) > 0.5) {
+                    tail = candidate;
+                    break;
+                }
+            }
+            if (!tail) return '';
+            const dx = head.x - tail.x;
+            const dy = head.y - tail.y;
+            const length = Math.hypot(dx, dy);
+            if (!(length > 0.5)) return '';
+
+            const unitX = dx / length;
+            const unitY = dy / length;
+            const normalX = -unitY;
+            const normalY = unitX;
+            const screenScale = Number.isFinite(viewportScale) && viewportScale > 0 ? viewportScale : 1;
+            const arrowLength = 6.8 / screenScale;
+            const arrowHalfWidth = 2.8 / screenScale;
+            const overlap = 0.8 / screenScale;
+            const baseX = head.x - (unitX * Math.max(0.1, arrowLength - overlap));
+            const baseY = head.y - (unitY * Math.max(0.1, arrowLength - overlap));
+            const leftX = baseX + (normalX * arrowHalfWidth);
+            const leftY = baseY + (normalY * arrowHalfWidth);
+            const rightX = baseX - (normalX * arrowHalfWidth);
+            const rightY = baseY - (normalY * arrowHalfWidth);
+
+            return [
+                `M ${leftX.toFixed(2)} ${leftY.toFixed(2)}`,
+                `L ${head.x.toFixed(2)} ${head.y.toFixed(2)}`,
+                `L ${rightX.toFixed(2)} ${rightY.toFixed(2)}`,
+                'Z'
             ].join(' ');
         };
-
-        const arrowMarkerId = `mhsa-token-matrix-arrowhead-${this._mhsaTokenMatrixRenderToken}`;
-        const defsEl = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-        const arrowMarkerEl = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
-        arrowMarkerEl.setAttribute('id', arrowMarkerId);
-        arrowMarkerEl.setAttribute('viewBox', '0 0 8 8');
-        arrowMarkerEl.setAttribute('markerWidth', '8');
-        arrowMarkerEl.setAttribute('markerHeight', '8');
-        arrowMarkerEl.setAttribute('refX', '6.8');
-        arrowMarkerEl.setAttribute('refY', '4');
-        arrowMarkerEl.setAttribute('orient', 'auto');
-        arrowMarkerEl.setAttribute('markerUnits', 'userSpaceOnUse');
-        const arrowPathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        arrowPathEl.setAttribute('d', 'M 0 1.2 L 6.8 4 L 0 6.8 Z');
-        arrowPathEl.setAttribute('fill', 'rgba(216, 222, 232, 0.92)');
-        arrowPathEl.setAttribute('stroke', 'none');
-        arrowMarkerEl.appendChild(arrowPathEl);
-        defsEl.appendChild(arrowMarkerEl);
 
         const pathGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
         pathGroup.setAttribute('class', 'mhsa-token-matrix-preview__connector-layer');
@@ -8333,32 +8477,51 @@ class SelectionPanel {
         connectors.forEach(({ source, target, kind }) => {
             const sourceSide = String(source?.dataset?.mhsaConnectorAnchorSide || 'center').toLowerCase();
             const targetSide = String(target?.dataset?.mhsaConnectorAnchorSide || 'center').toLowerCase();
+            const sourceGap = resolveConnectorGap(source);
+            const targetGap = resolveConnectorGap(target);
             const start = offsetAnchorPoint(
                 resolveAnchorPoint(source),
                 sourceSide,
-                resolveConnectorGap(source)
+                sourceGap
             );
             const end = offsetAnchorPoint(
                 resolveAnchorPoint(target),
                 targetSide,
-                resolveConnectorGap(target)
+                targetGap
             );
             const route = String(target?.dataset?.mhsaConnectorRoute || source?.dataset?.mhsaConnectorRoute || 'horizontal')
                 .toLowerCase();
-            const pathData = buildConnectorPathData(start, end, route, { sourceSide, targetSide, kind });
+            const pathPoints = buildConnectorPathPoints(start, end, route, {
+                sourceSide,
+                targetSide,
+                kind,
+                sourceGap,
+                targetGap
+            });
+            const pathData = buildConnectorPathData(pathPoints);
             if (!pathData) return;
 
             const linePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
             linePath.setAttribute('class', 'mhsa-token-matrix-preview__connector-path mhsa-token-matrix-preview__focusable');
             linePath.setAttribute('d', pathData);
             linePath.setAttribute('stroke', '#ffffff');
-            linePath.setAttribute('marker-end', `url(#${arrowMarkerId})`);
-
-            connectorEls[kind] = linePath;
+            const arrowTipData = buildConnectorArrowTipPathData(pathPoints);
+            const connectorGroupEls = [linePath];
             pathGroup.append(linePath);
+            if (arrowTipData) {
+                const tipPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                tipPath.setAttribute('class', 'mhsa-token-matrix-preview__connector-tip mhsa-token-matrix-preview__focusable');
+                tipPath.setAttribute('d', arrowTipData);
+                tipPath.setAttribute('fill', 'rgba(216, 222, 232, 0.92)');
+                tipPath.setAttribute('stroke', 'none');
+                connectorGroupEls.push(tipPath);
+                pathGroup.append(tipPath);
+            }
+
+            connectorEls[kind] = connectorGroupEls;
         });
 
-        overlay.replaceChildren(defsEl, pathGroup);
+        overlay.replaceChildren(pathGroup);
         this._mhsaTokenMatrixConnectorEls = connectorEls;
         this._applyMhsaTokenMatrixSceneFocus(this._mhsaTokenMatrixSceneFocusState);
     }
@@ -8431,7 +8594,7 @@ class SelectionPanel {
         });
     }
 
-    _setMhsaAttentionMatrixAxisFocus({ rowIndex = null, colIndex = null } = {}) {
+    _setMhsaAttentionMatrixAxisFocus({ rowIndex = null, colIndex = null } = {}, options = {}) {
         const hasRowFocus = Number.isFinite(rowIndex);
         const hasColFocus = Number.isFinite(colIndex);
         const hasFocus = hasRowFocus || hasColFocus;
@@ -8439,7 +8602,8 @@ class SelectionPanel {
             this._mhsaTokenMatrixScoreCellEls,
             this._mhsaTokenMatrixStaticScoreCellEls,
             this._mhsaTokenMatrixMaskCellEls,
-            this._mhsaTokenMatrixPostCellEls
+            this._mhsaTokenMatrixPostCellEls,
+            options.includePostCopyCells === true ? this._mhsaTokenMatrixPostCopyCellEls : null
         ].filter(Array.isArray);
         cellMatrices.forEach((cellMatrix) => {
             forEachMhsaTokenMatrixCell(cellMatrix, (cellEl, focusRowIndex, focusColIndex) => {
@@ -8457,6 +8621,15 @@ class SelectionPanel {
             ? this._mhsaTokenMatrixKeyStageIndex
             : null;
         if (!Number.isFinite(rowIndex) || !Number.isFinite(keyStageIndex)) return;
+        const firstProjectionStageIndex = this._mhsaTokenMatrixProjectionStageEls.find((entry) => Number.isFinite(entry?.stageIndex))
+            ?.stageIndex ?? null;
+        const keyRowSceneFocus = resolveMhsaKeyRowSceneFocus({
+            keyStageIndex,
+            firstProjectionStageIndex
+        });
+        const focusedXStages = new Set(
+            [firstProjectionStageIndex, keyStageIndex].filter(Number.isFinite)
+        );
 
         this._applyMhsaRowFocus(rowIndex, {
             sourceType: 'query',
@@ -8468,6 +8641,47 @@ class SelectionPanel {
         this._mhsaTokenMatrixHoverStage = keyStageIndex;
         this._mhsaTokenMatrixBody?.classList.add('has-focus-column');
         this._setMhsaTransposeFocus(rowIndex);
+        this._setMhsaAttentionMatrixAxisFocus({ colIndex: rowIndex }, { includePostCopyCells: false });
+        this._mhsaTokenMatrixXMatrixEl.forEach((entry) => {
+            const matrixEl = entry?.matrixEl || entry;
+            const stageIndex = Number.isFinite(entry?.stageIndex) ? entry.stageIndex : null;
+            matrixEl?.classList.toggle('has-focus', focusedXStages.has(stageIndex));
+        });
+        this._mhsaTokenMatrixRowEls.forEach((rowStates, focusRowIndex) => {
+            const entries = Array.isArray(rowStates) ? rowStates : [rowStates];
+            entries.forEach((rowState) => {
+                const stageIndex = Number.isFinite(rowState?.stageIndex) ? rowState.stageIndex : null;
+                const isFocusedStage = focusedXStages.has(stageIndex);
+                const isActive = isFocusedStage && focusRowIndex === rowIndex;
+                rowState?.rowEl?.classList.toggle('is-active', isActive);
+                rowState?.rowEl?.classList.toggle('is-dimmed', !isActive);
+                rowState?.labelEl?.classList.toggle('is-highlighted', isActive);
+            });
+        });
+        this._mhsaTokenMatrixQueryRowEls.forEach((rowStates, focusRowIndex) => {
+            const entries = Array.isArray(rowStates) ? rowStates : [rowStates];
+            entries.forEach((rowState) => {
+                const isKeyStage = rowState?.stageIndex === keyStageIndex;
+                const isActive = isKeyStage && focusRowIndex === rowIndex;
+                rowState?.rowEl?.classList.toggle('is-active', isActive);
+                rowState?.rowEl?.classList.toggle('is-dimmed', !isActive);
+            });
+        });
+        this._mhsaTokenMatrixCompactRowEls.forEach((rowStates) => {
+            const entries = Array.isArray(rowStates) ? rowStates : [rowStates];
+            entries.forEach((rowState) => {
+                rowState?.rowEl?.classList.remove('is-active');
+                rowState?.rowEl?.classList.add('is-dimmed');
+            });
+        });
+        if (keyRowSceneFocus) {
+            this._applyMhsaTokenMatrixSceneFocus({
+                projectionStages: [],
+                projectionComponents: keyRowSceneFocus.projectionComponents,
+                attentionBlocks: keyRowSceneFocus.attentionBlocks,
+                connectors: keyRowSceneFocus.connectors
+            });
+        }
     }
 
     _applyMhsaScoreCellFocus(rowIndex, colIndex, { sourceType = 'score' } = {}) {
@@ -8641,6 +8855,15 @@ class SelectionPanel {
             ? this._mhsaTokenMatrixKeyStageIndex
             : null;
         const projectionKind = this._resolveMhsaTokenMatrixProjectionKind(hoverStage);
+        const firstProjectionStageIndex = this._mhsaTokenMatrixProjectionStageEls.find((entry) => Number.isFinite(entry?.stageIndex))
+            ?.stageIndex ?? null;
+        const shouldHighlightFirstCopyRow = hoverSource === 'query'
+            || hoverSource === 'value-post'
+            || (hoverSource === 'x' && (projectionKind === 'q' || projectionKind === 'k' || projectionKind === 'v'));
+        const shouldMirrorHeadOutputRow = shouldMirrorMhsaHeadOutputRowFocus({
+            hoverSource,
+            projectionKind
+        });
         const shouldLinkTranspose = projectionKind === 'k'
             || (hoverSource === 'query' && Number.isFinite(keyStageIndex) && hoverStage === keyStageIndex);
         this._mhsaTokenMatrixBody?.classList.toggle('has-focus-column', shouldLinkTranspose);
@@ -8648,7 +8871,11 @@ class SelectionPanel {
         this._mhsaTokenMatrixXMatrixEl.forEach((entry) => {
             const matrixEl = entry?.matrixEl || entry;
             const stageIndex = Number.isFinite(entry?.stageIndex) ? entry.stageIndex : null;
-            const isFocused = broadcastAcrossStages || stageIndex === hoverStage;
+            const isFocused = broadcastAcrossStages
+                || stageIndex === hoverStage
+                || (shouldHighlightFirstCopyRow
+                    && Number.isFinite(firstProjectionStageIndex)
+                    && stageIndex === firstProjectionStageIndex);
             matrixEl?.classList.toggle('has-focus', isFocused);
         });
         this._mhsaTokenMatrixQueryMatrixEl.forEach((entry) => {
@@ -8660,7 +8887,12 @@ class SelectionPanel {
         this._mhsaTokenMatrixRowEls.forEach((rowStates, index) => {
             const entries = Array.isArray(rowStates) ? rowStates : [rowStates];
             entries.forEach((rowState) => {
-                const isFocusedStage = broadcastAcrossStages || rowState?.stageIndex === hoverStage;
+                const stageIndex = Number.isFinite(rowState?.stageIndex) ? rowState.stageIndex : null;
+                const isFocusedStage = broadcastAcrossStages
+                    || stageIndex === hoverStage
+                    || (shouldHighlightFirstCopyRow
+                        && Number.isFinite(firstProjectionStageIndex)
+                        && stageIndex === firstProjectionStageIndex);
                 const isActive = isFocusedStage && index === rowIndex;
                 const isDimmed = isFocusedStage && index !== rowIndex;
                 rowState?.rowEl?.classList.toggle('is-active', isActive);
@@ -8681,7 +8913,10 @@ class SelectionPanel {
         this._mhsaTokenMatrixCompactRowEls.forEach((rowStates, index) => {
             const entries = Array.isArray(rowStates) ? rowStates : [rowStates];
             entries.forEach((rowState) => {
-                const isFocusedStage = broadcastAcrossStages || rowState?.stageIndex === hoverStage;
+                const isHeadOutputRow = rowState?.kind === 'head-output';
+                const isFocusedStage = broadcastAcrossStages
+                    || rowState?.stageIndex === hoverStage
+                    || (shouldMirrorHeadOutputRow && isHeadOutputRow);
                 const isActive = isFocusedStage && index === rowIndex;
                 const isDimmed = isFocusedStage && index !== rowIndex;
                 rowState?.rowEl?.classList.toggle('is-active', isActive);
@@ -8691,12 +8926,16 @@ class SelectionPanel {
         const queryStageIndex = Number.isFinite(this._mhsaTokenMatrixQueryStageIndex)
             ? this._mhsaTokenMatrixQueryStageIndex
             : null;
-        const shouldFocusAttentionRow = projectionKind === 'q' && hoverSource === 'query';
+        const shouldFocusAttentionRow = projectionKind === 'q'
+            && (hoverSource === 'query' || hoverSource === 'x');
         const shouldFocusAttentionColumn = shouldLinkTranspose;
+        const shouldFocusPostCopyAxis = shouldFocusAttentionRow || shouldFocusAttentionColumn;
+        this._setMhsaPostRowFocus(shouldFocusAttentionRow ? rowIndex : null);
         this._setMhsaAttentionMatrixAxisFocus(
             shouldFocusAttentionRow
                 ? { rowIndex }
-                : (shouldFocusAttentionColumn ? { colIndex: rowIndex } : {})
+                : (shouldFocusAttentionColumn ? { colIndex: rowIndex } : {}),
+            { includePostCopyCells: shouldFocusPostCopyAxis }
         );
         const activeProjectionStages = broadcastAcrossStages
             ? this._mhsaTokenMatrixProjectionStageEls
@@ -8709,6 +8948,36 @@ class SelectionPanel {
         const hasAttentionScoreAxisFocus = shouldFocusAttentionRow || shouldFocusAttentionColumn;
         const hasAttentionValuePostFocus = projectionKind === 'v'
             && (hoverSource === 'value-post' || hoverSource === 'query');
+        const keyRowSceneFocus = projectionKind === 'k' && hoverSource === 'query'
+            ? resolveMhsaKeyRowSceneFocus({
+                keyStageIndex: hoverStage,
+                firstProjectionStageIndex
+            })
+            : null;
+        const copiedInputRowSceneFocus = hoverSource === 'x'
+            && (projectionKind === 'q' || projectionKind === 'k' || projectionKind === 'v')
+            ? resolveMhsaProjectionInputRowSceneFocus({
+                stageIndex: hoverStage,
+                firstProjectionStageIndex
+            })
+            : null;
+        const valueInputRowSceneFocus = projectionKind === 'v' && hoverSource === 'x'
+            ? resolveMhsaValueInputRowSceneFocus({
+                valueStageIndex: hoverStage,
+                firstProjectionStageIndex
+            })
+            : null;
+        const useValueRowSceneFocus = projectionKind === 'v' && hoverSource === 'value-post';
+        const valueRowSceneFocus = useValueRowSceneFocus
+            ? resolveMhsaValueRowSceneFocus({
+                valueStageIndex: hoverStage,
+                firstProjectionStageIndex
+            })
+            : null;
+        const projectionSceneFocus = valueRowSceneFocus
+            || copiedInputRowSceneFocus
+            || valueInputRowSceneFocus
+            || keyRowSceneFocus;
         const attentionBlocks = [
             ...this._resolveMhsaTokenMatrixAttentionFocusKeys({
                 query: hasAttentionQueryFocus,
@@ -8716,14 +8985,18 @@ class SelectionPanel {
                 score: hasAttentionScoreAxisFocus,
                 includeWeightedOutput: false
             }),
+            ...(shouldFocusPostCopyAxis ? ['post-copy'] : []),
+            ...(shouldMirrorHeadOutputRow ? ['head-output'] : []),
             ...(hasAttentionValuePostFocus ? ['value-post'] : [])
         ];
         this._applyMhsaTokenMatrixSceneFocus({
-            projectionStages: activeProjectionStages,
-            attentionBlocks,
-            connectors: [
+            projectionStages: projectionSceneFocus ? [] : activeProjectionStages,
+            projectionComponents: projectionSceneFocus?.projectionComponents || [],
+            attentionBlocks: projectionSceneFocus?.attentionBlocks || attentionBlocks,
+            connectors: projectionSceneFocus?.connectors || [
                 ...(hasAttentionQueryFocus ? ['q'] : []),
                 ...(hasAttentionTransposeFocus ? ['k'] : []),
+                ...(shouldFocusAttentionRow ? ['pre', 'post'] : []),
                 ...(hasAttentionValuePostFocus ? ['v'] : [])
             ]
         });
@@ -8778,10 +9051,22 @@ class SelectionPanel {
         });
     }
 
-    _applyMhsaTokenMatrixProjectionStageFocus(stageIndex = null) {
+    _applyMhsaTokenMatrixProjectionStageFocus(stageIndex = null, options = {}) {
         if (!Number.isFinite(stageIndex)) return false;
         const safeStageIndex = Math.floor(stageIndex);
         const projectionKind = this._resolveMhsaTokenMatrixProjectionKind(safeStageIndex);
+        const firstProjectionStageIndex = this._mhsaTokenMatrixProjectionStageEls.find((entry) => Number.isFinite(entry?.stageIndex))
+            ?.stageIndex ?? null;
+        const componentKey = typeof options?.componentKey === 'string'
+            ? options.componentKey.trim().toLowerCase()
+            : '';
+        const weightFocusConfig = componentKey === 'weight'
+            ? resolveMhsaProjectionWeightSceneFocus({
+                projectionKind,
+                stageIndex: safeStageIndex,
+                firstProjectionStageIndex
+            })
+            : null;
         const hasAttentionQueryFocus = projectionKind === 'q';
         const hasAttentionTransposeFocus = projectionKind === 'k';
 
@@ -8789,11 +9074,10 @@ class SelectionPanel {
         this._mhsaTokenMatrixHoverRow = null;
         this._mhsaTokenMatrixHoverCol = null;
         this._mhsaTokenMatrixHoverCell = null;
-        this._mhsaTokenMatrixHoverSource = null;
+        this._mhsaTokenMatrixHoverSource = componentKey || null;
         this._mhsaTokenMatrixHoverStage = safeStageIndex;
         this._setMhsaScoreCellFocus(null, null);
         this._mhsaTokenMatrixBody?.classList.remove('has-focus-row', 'has-focus-column');
-        this._mhsaTokenMatrixBody?.classList.toggle('has-focus-column', hasAttentionTransposeFocus);
         this._setMhsaTransposeFocus(null);
 
         this._mhsaTokenMatrixXMatrixEl.forEach((entry) => {
@@ -8824,6 +9108,17 @@ class SelectionPanel {
             });
         });
 
+        if (weightFocusConfig) {
+            this._applyMhsaTokenMatrixSceneFocus({
+                projectionStages: [],
+                projectionComponents: weightFocusConfig.projectionComponents,
+                attentionBlocks: weightFocusConfig.attentionBlocks,
+                connectors: weightFocusConfig.connectors
+            });
+            return true;
+        }
+
+        this._mhsaTokenMatrixBody?.classList.toggle('has-focus-column', hasAttentionTransposeFocus);
         this._applyMhsaTokenMatrixSceneFocus({
             projectionStages: [safeStageIndex],
             attentionBlocks: this._resolveMhsaTokenMatrixAttentionFocusKeys({
@@ -9137,7 +9432,9 @@ class SelectionPanel {
         case 'attention-block':
             return this._applyMhsaTokenMatrixAttentionBlockFocus(targetInfo.focusKey);
         case 'stage':
-            return this._applyMhsaTokenMatrixProjectionStageFocus(targetInfo.stageIndex);
+            return this._applyMhsaTokenMatrixProjectionStageFocus(targetInfo.stageIndex, {
+                componentKey: targetInfo.focusKey
+            });
         default:
             return false;
         }
@@ -9161,6 +9458,7 @@ class SelectionPanel {
             '.mhsa-token-matrix-preview__post-cell.is-pinned',
             '.mhsa-token-matrix-preview__focusable.is-pinned',
             '.mhsa-token-matrix-preview__connector-path.is-pinned',
+            '.mhsa-token-matrix-preview__connector-tip.is-pinned',
             '.mhsa-token-matrix-preview__x-matrix.is-pinned',
             '.mhsa-token-matrix-preview__query-matrix.is-pinned',
             '.mhsa-token-matrix-preview__transpose-matrix.is-pinned'
@@ -9183,6 +9481,7 @@ class SelectionPanel {
             '.mhsa-token-matrix-preview__post-cell.is-active',
             '.mhsa-token-matrix-preview__focusable.is-scene-focus-active',
             '.mhsa-token-matrix-preview__connector-path.is-scene-focus-active',
+            '.mhsa-token-matrix-preview__connector-tip.is-scene-focus-active',
             '.mhsa-token-matrix-preview__x-matrix.has-focus',
             '.mhsa-token-matrix-preview__query-matrix.has-focus',
             '.mhsa-token-matrix-preview__transpose-matrix.has-focus'
@@ -9630,11 +9929,13 @@ class SelectionPanel {
         this._mhsaTokenMatrixXMatrixEl = [];
         this._mhsaTokenMatrixQueryMatrixEl = [];
         this._mhsaTokenMatrixProjectionStageEls = [];
+        this._mhsaTokenMatrixProjectionComponentEls = [];
         this._mhsaTokenMatrixAttentionFocusEls = null;
         this._mhsaTokenMatrixConnectorEls = {};
         this._mhsaTokenMatrixLayoutMetrics = null;
         this._mhsaTokenMatrixSceneFocusState = {
             projectionStages: [],
+            projectionComponents: [],
             attentionBlocks: [],
             connectors: []
         };
@@ -9655,6 +9956,7 @@ class SelectionPanel {
             this.mhsaTokenMatrixBody.classList.remove('is-measure-only');
             this.mhsaTokenMatrixBody.classList.remove('has-focus-row', 'has-focus-column', 'has-scene-focus', 'has-pinned-focus');
             this.mhsaTokenMatrixBody.style.removeProperty('--mhsa-token-matrix-fixed-label-scale');
+            this.mhsaTokenMatrixBody.style.removeProperty('--mhsa-token-matrix-viewport-scale');
             this.mhsaTokenMatrixBody.style.removeProperty('--mhsa-token-matrix-rows');
             this.mhsaTokenMatrixBody.style.removeProperty('--mhsa-token-matrix-band-count');
             clearMhsaTokenMatrixLayoutVars(this.mhsaTokenMatrixBody);
@@ -9948,11 +10250,13 @@ class SelectionPanel {
         this._mhsaTokenMatrixXMatrixEl = [];
         this._mhsaTokenMatrixQueryMatrixEl = [];
         this._mhsaTokenMatrixProjectionStageEls = [];
+        this._mhsaTokenMatrixProjectionComponentEls = [];
         this._mhsaTokenMatrixAttentionFocusEls = null;
         this._mhsaTokenMatrixConnectorEls = {};
         this._mhsaTokenMatrixLayoutMetrics = null;
         this._mhsaTokenMatrixSceneFocusState = {
             projectionStages: [],
+            projectionComponents: [],
             attentionBlocks: [],
             connectors: []
         };
@@ -9971,6 +10275,7 @@ class SelectionPanel {
         this._syncMhsaTokenMatrixCanvasPresentation({ domReady: false });
         this.mhsaTokenMatrixBody.classList.remove('has-focus-row', 'has-focus-column', 'has-scene-focus', 'has-pinned-focus');
         this.mhsaTokenMatrixBody.style.removeProperty('--mhsa-token-matrix-fixed-label-scale');
+        this.mhsaTokenMatrixBody.style.removeProperty('--mhsa-token-matrix-viewport-scale');
         clearMhsaTokenMatrixLayoutVars(this.mhsaTokenMatrixBody);
         this.mhsaTokenMatrixBody.replaceChildren();
         this._resetMhsaTokenMatrixViewport();
@@ -10075,6 +10380,7 @@ class SelectionPanel {
             this._mhsaTokenMatrixQueryStageIndex = null;
             this._mhsaTokenMatrixKeyStageIndex = null;
             this._mhsaTokenMatrixValueStageIndex = null;
+            this._mhsaTokenMatrixProjectionComponentEls = [];
 
             const renderMathLabel = (targetEl, labelTex, fallbackText = '') => {
                 if (!targetEl) return;
@@ -10113,6 +10419,19 @@ class SelectionPanel {
                     captionEl.appendChild(dimsEl);
                 }
                 return captionEl;
+            };
+
+            const registerProjectionComponentEl = (element, stageIndex, componentKey) => {
+                if (!element || !Number.isFinite(stageIndex)) return element;
+                const safeComponentKey = String(componentKey || '').trim().toLowerCase();
+                if (!safeComponentKey.length) return element;
+                element.classList.add('mhsa-token-matrix-preview__focusable');
+                this._mhsaTokenMatrixProjectionComponentEls.push({
+                    element,
+                    stageIndex,
+                    componentKey: safeComponentKey
+                });
+                return element;
             };
 
             const createOperatorEl = ({
@@ -10292,6 +10611,14 @@ class SelectionPanel {
                 queryMatrixEl.dataset.mhsaConnectorAnchorSide = 'right';
                 queryMatrixEl.dataset.mhsaConnectorRoute = 'horizontal';
                 queryMatrixEl.dataset.mhsaConnectorGap = String(queryConnectorGap);
+
+                registerProjectionComponentEl(xBlockEl, stageIndex, 'input');
+                registerProjectionComponentEl(multiplyEl, stageIndex, 'multiply');
+                registerProjectionComponentEl(weightBlockEl, stageIndex, 'weight');
+                registerProjectionComponentEl(plusEl, stageIndex, 'plus');
+                registerProjectionComponentEl(biasBlockEl, stageIndex, 'bias');
+                registerProjectionComponentEl(equalsEl, stageIndex, 'equals');
+                registerProjectionComponentEl(queryBlockEl, stageIndex, 'output');
 
                 xBlockEl.append(
                     xVisualEl,
@@ -10481,6 +10808,7 @@ class SelectionPanel {
                     connectorAnchorSide = 'left',
                     connectorRoute = 'horizontal',
                     connectorGap = null,
+                    connectorAnchorInset = null,
                     connectorPlacement = 'matrix',
                     rowStore = null,
                     rowKind = '',
@@ -10507,6 +10835,9 @@ class SelectionPanel {
                         connectorEl.dataset.mhsaConnectorRoute = connectorRoute;
                         if (Number.isFinite(connectorGap)) {
                             connectorEl.dataset.mhsaConnectorGap = String(Math.max(0, Math.floor(connectorGap)));
+                        }
+                        if (Number.isFinite(connectorAnchorInset)) {
+                            connectorEl.dataset.mhsaConnectorAnchorInset = String(Math.max(0, Math.floor(connectorAnchorInset)));
                         }
                     }
 
@@ -10722,9 +11053,10 @@ class SelectionPanel {
                         focusKey: 'value-post',
                         connectorTarget: 'v',
                         connectorColor: connectorColors.v || '#f28b30',
-                        connectorAnchorSide: 'bottom',
+                        connectorAnchorSide: 'bottom-left',
                         connectorRoute: 'horizontal',
                         connectorGap: layoutMetrics?.connectorGaps?.value || 18,
+                        connectorAnchorInset: 4,
                         connectorPlacement: 'block',
                         rowStore: this._mhsaTokenMatrixCompactRowEls,
                         rowKind: 'v',
@@ -11071,6 +11403,12 @@ class SelectionPanel {
             this.mhsaTokenMatrixBody
             && mhsaTokenMatrixRoot === this.mhsaTokenMatrixBody
         );
+        const mhsaTokenMatrixTarget = insideMhsaTokenMatrix
+            ? this._resolveMhsaTokenMatrixInteractionTarget(
+                hit && this.mhsaTokenMatrixBody?.contains(hit) ? hit : eventTarget,
+                { requirePinnableStageComponent: true }
+            )
+            : null;
         const shouldClearPinnedAttention = this.isOpen
             && this._attentionPinned
             && !hitPanelTokenNavChip
@@ -11083,7 +11421,7 @@ class SelectionPanel {
             && this._mhsaTokenMatrixPinned
             && !hitPanelTokenNavChip
             && !hitPanelAttentionScoreLink
-            && !insideMhsaTokenMatrix;
+            && (!insideMhsaTokenMatrix || !mhsaTokenMatrixTarget);
         if (shouldClearPinnedMhsaTokenMatrix) {
             this._clearPinnedMhsaTokenMatrix();
         }
@@ -11969,11 +12307,8 @@ class SelectionPanel {
         this._closeTransformerView2dPreview({ restoreSelection: false, restartLoop: false });
         this._resetCopyContextFeedback();
         const label = normalizeSelectionLabel(selection.label, selection);
-        const transformerView2dContext = resolveTransformerView2dActionContext(selection, label);
         this._lastSelection = selection;
         this._lastSelectionLabel = label;
-        this._currentTransformerView2dContext = transformerView2dContext;
-        this._setTransformerView2dActionButtonState(transformerView2dContext);
         const displayLabel = simplifyLayerNormParamDisplayLabel(label, selection);
         const lower = label.toLowerCase();
         const isKvCacheInfo = isKvCacheInfoSelection(label, selection);
@@ -11998,6 +12333,12 @@ class SelectionPanel {
                 || lower.includes('output projection matrix')
                 || lower.includes('self-attention')
             );
+        const transformerView2dContext = resolveTransformerView2dActionContext(selection, label);
+        this._currentTransformerView2dContext = transformerView2dContext;
+        this._setTransformerView2dActionButtonState(this._resolveSelectionPrimaryActionConfig({
+            shouldShowMhsaInfoAction,
+            view2dContext: transformerView2dContext
+        }));
         const kvCachePhase = isKvCacheInfo
             ? normalizeKvCachePhase(findUserDataString(selection, 'kvCachePhase'))
             : 'prefill';
@@ -12250,7 +12591,7 @@ class SelectionPanel {
             setDescriptionContent(this.description, desc || '');
             setDescriptionSoftmaxAction(this.description, isPostSoftmaxAttentionSelection(descriptionSelection, label));
             setDescriptionGeluAction(this.description, isMlpMatrixSelectionLabel(label));
-            setDescriptionMhsaInfoAction(this.description, shouldShowMhsaInfoAction);
+            setDescriptionMhsaInfoAction(this.description, false);
         } else {
             this._currentSelectionDescription = '';
         }

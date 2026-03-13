@@ -47,6 +47,10 @@ import { getSideCopyEntry } from './mhsa/laneIndex.js';
 import { animateVectorMatrixPassThrough as animateVectorMatrixPassThroughExternal } from './mhsa/VectorMatrixPassThrough.js';
 import { clearScheduledDelays, resolveSkipDelay, resolveSkipDuration, scheduleAfterDelay } from './mhsa/mhsaTimingUtils.js';
 import { applyOutputProjectionPassVisual } from './mhsa/outputProjectionVisualUtils.js';
+import {
+    applyAttentionOutputProjectionDataToVector,
+    applyPostAttentionResidualDataToVector
+} from './mhsa/mhsaActivationVectorUtils.js';
 import { appState } from '../state/appState.js';
 import { applyMatrixLabel, applyMatrixMaterialTweaks } from '../utils/matrixVisualUtils.js';
 import {
@@ -2685,33 +2689,17 @@ export class MHSAAnimation {
                     new TWEEN.Tween(vec.group.position)
                         .to({ y: matrixTopY }, duration2)
                         .onStart(() => {
-                            // Apply transformation INSIDE the projection matrix
                             const lane = resolveLaneForVector();
-                            const outputData = (this.activationSource && lane && Number.isFinite(this.layerIndex))
-                                ? this.activationSource.getAttentionOutputProjection(this.layerIndex, lane.tokenIndex, this.vectorPrismCount)
-                                : null;
-                            const newRaw = outputData || this._generateRawDataWithSwitchPoints(30);
-                            const cacheKeyData = outputData || null;
-                            const numKeyColors = Math.min(30, Math.max(1, newRaw.length || 1));
-                            vec.applyProcessedVisuals(
-                                newRaw,
-                                NUM_HEAD_SETS_LAYER * this.outputVectorLength, // 12 * 64  = 768 visible output units
-                                { numKeyColors, generationOptions: null },
-                                { setHiddenToBlack: false },
-                                cacheKeyData
-                            );
-                            const label = lane && lane.tokenLabel
-                                ? `Attention Output Projection - ${lane.tokenLabel}`
-                                : 'Attention Output Projection';
-                            const activationData = buildActivationData({
-                                label,
-                                stage: 'attention.output_projection',
+                            const fallbackData = this._generateRawDataWithSwitchPoints(30);
+                            applyAttentionOutputProjectionDataToVector(vec, {
+                                activationSource: this.activationSource,
                                 layerIndex: this.layerIndex,
-                                tokenIndex: lane ? lane.tokenIndex : undefined,
-                                tokenLabel: lane ? lane.tokenLabel : undefined,
-                                values: newRaw,
+                                tokenIndex: lane ? lane.tokenIndex : null,
+                                tokenLabel: lane ? lane.tokenLabel : null,
+                                vectorPrismCount: this.vectorPrismCount,
+                                outputVectorLength: this.outputVectorLength,
+                                fallbackData
                             });
-                            applyActivationDataToVector(vec, activationData, label);
                         })
 
                         .onUpdate(() => {
@@ -2827,26 +2815,12 @@ export class MHSAAnimation {
                                                         }
                                                         this._startAdditionAnimation(matchingLane.originalVec, vec, matchingLane, () => {
                                                             if (postData) {
-                                                                const label = matchingLane.tokenLabel
-                                                                    ? `Post-Attention Residual - ${matchingLane.tokenLabel}`
-                                                                    : 'Post-Attention Residual';
-                                                                matchingLane.originalVec.rawData = postData.slice();
-                                                                const numKeyColors = Math.min(30, Math.max(1, postData.length || 1));
-                                                                matchingLane.originalVec.updateKeyColorsFromData(
-                                                                    matchingLane.originalVec.rawData,
-                                                                    numKeyColors,
-                                                                    null,
-                                                                    postData
-                                                                );
-                                                                const activationData = buildActivationData({
-                                                                    label,
-                                                                    stage: 'residual.post_attention',
+                                                                applyPostAttentionResidualDataToVector(matchingLane.originalVec, {
+                                                                    values: postData,
                                                                     layerIndex: this.layerIndex,
                                                                     tokenIndex: matchingLane.tokenIndex,
-                                                                    tokenLabel: matchingLane.tokenLabel,
-                                                                    values: postData,
+                                                                    tokenLabel: matchingLane.tokenLabel
                                                                 });
-                                                                applyActivationDataToVector(matchingLane.originalVec, activationData, label);
                                                             }
                                                         });
                                                     } else {

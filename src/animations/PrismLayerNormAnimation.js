@@ -2,6 +2,22 @@ import * as THREE from 'three';
 import { VECTOR_LENGTH_PRISM, PLN_UNIT_DELAY_MS, PLN_UNIT_CYCLE_DURATION_MS, GLOBAL_ANIM_SPEED_MULT } from '../utils/constants.js';
 import { mapValueToColor } from '../utils/colors.js'; // For color mapping if needed
 
+function readColorBufferAt(buffer, index, fallbackValue = 0, targetColor = null) {
+    const color = (targetColor && targetColor.isColor) ? targetColor : new THREE.Color();
+    if (!buffer || index < 0) {
+        return color.copy(mapValueToColor(fallbackValue));
+    }
+    const baseIndex = index * 3;
+    if ((baseIndex + 2) >= buffer.length) {
+        return color.copy(mapValueToColor(fallbackValue));
+    }
+    return color.setRGB(
+        buffer[baseIndex],
+        buffer[baseIndex + 1],
+        buffer[baseIndex + 2]
+    );
+}
+
 export class PrismLayerNormAnimation {
     constructor(prismVisualization, config = {}) {
         this.prismVis = prismVisualization;
@@ -100,6 +116,18 @@ export class PrismLayerNormAnimation {
             this.prismVis.updateKeyColorsFromData(this.prismVis.rawData, numKeyColors, null, dataArray);
         }
 
+        const normalizedColorState = (deferDataUpdate
+            && Array.isArray(normalizedData)
+            && normalizedData.length
+            && typeof this.prismVis.previewColorStateFromData === 'function')
+            ? this.prismVis.previewColorStateFromData(
+                normalizedData,
+                Math.min(30, Math.max(1, normalizedData.length || 1)),
+                null,
+                normalizedData
+            )
+            : null;
+
         this.unitAnimationStates = Array(this._instanceCount).fill(null).map((_, index) => {
             const distanceFromCenter = Math.abs(index - Math.floor(this._instanceCount / 2));
             const normalizedDistance = this._instanceCount > 1 ? distanceFromCenter / (this._instanceCount / 2) : 0;
@@ -120,10 +148,36 @@ export class PrismLayerNormAnimation {
                 riseHeight: riseHeight,
                 startColor,
                 originalColor: new THREE.Color(), // Will store before flash
-                flashTargetColor: mapValueToColor((normalizedData && normalizedData[index]) || 0), // Color based on norm data
+                flashTargetColor: (deferDataUpdate && normalizedColorState)
+                    ? readColorBufferAt(
+                        normalizedColorState.instanceColors,
+                        index,
+                        (normalizedData && normalizedData[index]) || 0
+                    )
+                    : mapValueToColor((normalizedData && normalizedData[index]) || 0),
                 finalRestingColor: deferDataUpdate
-                    ? mapValueToColor((normalizedData && normalizedData[index]) || 0)
-                    : this.prismVis.getDefaultColorForIndex(index) // Default subsection gradient color
+                    ? (normalizedColorState
+                        ? readColorBufferAt(
+                            normalizedColorState.instanceColors,
+                            index,
+                            (normalizedData && normalizedData[index]) || 0
+                        )
+                        : mapValueToColor((normalizedData && normalizedData[index]) || 0))
+                    : this.prismVis.getDefaultColorForIndex(index), // Default subsection gradient color
+                finalGradientStart: (deferDataUpdate && normalizedColorState)
+                    ? readColorBufferAt(
+                        normalizedColorState.colorStart,
+                        index,
+                        (normalizedData && normalizedData[Math.max(0, index - 1)]) || 0
+                    )
+                    : null,
+                finalGradientEnd: (deferDataUpdate && normalizedColorState)
+                    ? readColorBufferAt(
+                        normalizedColorState.colorEnd,
+                        index,
+                        (normalizedData && normalizedData[Math.min(this._instanceCount - 1, index + 1)]) || 0
+                    )
+                    : null
             };
         });
         
@@ -131,6 +185,9 @@ export class PrismLayerNormAnimation {
         for (let i = 0; i < this._instanceCount; i++) {
             this.prismVis.resetInstanceAppearance(i);
             const state = this.unitAnimationStates[i];
+            if (!perUnitNormalizedReveal && state.finalGradientStart && state.finalGradientEnd) {
+                this.prismVis.setInstanceGradientColors(i, state.finalGradientStart, state.finalGradientEnd, true);
+            }
             const initialColor = perUnitNormalizedReveal
                 ? state.startColor
                 : state.finalRestingColor;
@@ -206,6 +263,9 @@ export class PrismLayerNormAnimation {
                     state.hasCompleted = true;
                     state.isActive = false;
                     this.prismVis.resetInstanceAppearance(i); // Reset matrix only
+                    if (state.finalGradientStart && state.finalGradientEnd) {
+                        this.prismVis.setInstanceGradientColors(i, state.finalGradientStart, state.finalGradientEnd, true);
+                    }
                     this.prismVis.mesh.setColorAt(i, state.finalRestingColor); // Set final color
                     // Matrix/Color already marked true
                 }

@@ -76,6 +76,7 @@ import {
     buildGeluWaveField,
     computeGeluWhipOffset
 } from './gpt2GeluMotionUtils.js';
+import { sliceMlpActivationIntoSegments } from './gpt2MlpActivationSegments.js';
 import { computeMlpMatrixPassEmissive } from './gpt2MlpMatrixVisualUtils.js';
 import { GPT2_LAYER_VISUAL_TUNING } from '../../utils/visualTuningProfiles.js';
 import {
@@ -2526,11 +2527,13 @@ export default class Gpt2Layer extends BaseLayer {
                 const activationData = this._getMlpActivationData(lane);
                 const applyActivation = () => {
                     if (activationData && lane.expandedVecSegments) {
-                        const activationSlices = activationData.slice();
-                        while (activationSlices.length < segments * segmentLength) activationSlices.push(0);
+                        const segmentSlices = sliceMlpActivationIntoSegments(
+                            activationData,
+                            segments,
+                            segmentLength
+                        );
                         lane.expandedVecSegments.forEach((segVec, idx) => {
-                            const start = idx * segmentLength;
-                            const slice = activationSlices.slice(start, start + segmentLength);
+                            const slice = segmentSlices[idx] || new Array(segmentLength).fill(0);
                             applyVectorData(
                                 segVec,
                                 slice,

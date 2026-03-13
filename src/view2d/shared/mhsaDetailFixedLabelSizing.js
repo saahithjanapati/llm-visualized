@@ -16,6 +16,7 @@ export const VIEW2D_TEXT_ZOOM_BEHAVIORS = Object.freeze({
 const DEFAULT_VIEW2D_SCENE_TEXT_ZOOM_POLICY = Object.freeze({
     captionBehavior: VIEW2D_TEXT_ZOOM_BEHAVIORS.SCREEN_ADAPTIVE,
     domTextBehavior: VIEW2D_TEXT_ZOOM_BEHAVIORS.SCREEN_ADAPTIVE,
+    operatorBehavior: VIEW2D_TEXT_ZOOM_BEHAVIORS.SCREEN_ADAPTIVE,
     useUniformMatrixCaptions: false,
     textScreenFontPx: null,
     captionLabelScreenFontPx: null,
@@ -28,12 +29,13 @@ const DEFAULT_VIEW2D_SCENE_TEXT_ZOOM_POLICY = Object.freeze({
 const MHSA_DETAIL_VIEW2D_SCENE_TEXT_ZOOM_POLICY = Object.freeze({
     captionBehavior: VIEW2D_TEXT_ZOOM_BEHAVIORS.SCENE_RELATIVE,
     domTextBehavior: VIEW2D_TEXT_ZOOM_BEHAVIORS.SCENE_RELATIVE,
+    operatorBehavior: VIEW2D_TEXT_ZOOM_BEHAVIORS.SCENE_RELATIVE,
     useUniformMatrixCaptions: true,
     textScreenFontPx: null,
     captionLabelScreenFontPx: null,
     captionDimensionsScreenFontPx: null,
     rowLabelScreenFontPx: MHSA_DETAIL_FIXED_ROW_LABEL_SCREEN_FONT_PX,
-    operatorMinScreenFontPx: MHSA_DETAIL_OPERATOR_MIN_SCREEN_FONT_PX,
+    operatorMinScreenFontPx: null,
     operatorMinScreenHeightPx: 0
 });
 
@@ -55,6 +57,7 @@ export function resolveMhsaDetailFixedTextSizing(scene = null, viewportWidth = 0
         captionLabelScreenFontPx: textZoomPolicy.captionLabelScreenFontPx,
         captionDimensionsScreenFontPx: textZoomPolicy.captionDimensionsScreenFontPx,
         rowLabelScreenFontPx: textZoomPolicy.rowLabelScreenFontPx,
+        operatorBehavior: textZoomPolicy.operatorBehavior,
         operatorMinScreenFontPx: textZoomPolicy.operatorMinScreenFontPx,
         operatorMinScreenHeightPx: textZoomPolicy.operatorMinScreenHeightPx
     };

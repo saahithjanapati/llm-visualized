@@ -106,6 +106,13 @@ function clamp01(value) {
     return Math.max(0, Math.min(1, value));
 }
 
+export function interpolateCounterValue(from, to, elapsedMs, durationMs) {
+    const safeDuration = Math.max(1, Number.isFinite(durationMs) ? durationMs : DEFAULT_STAGE_MS);
+    const progress = clamp01((Number.isFinite(elapsedMs) ? elapsedMs : 0) / safeDuration);
+    const eased = 1 - Math.pow(1 - progress, 3);
+    return from + (to - from) * eased;
+}
+
 function buildGradientCss(palette, mode = 'smooth') {
     const colors = Array.isArray(palette) && palette.length
         ? palette
@@ -576,11 +583,14 @@ export function initParameterCounter(pipeline, numLayers) {
         }
 
         if (activeAnim) {
-            const t = Math.min(1, (now - activeAnim.start) / activeAnim.duration);
-            const eased = 1 - Math.pow(1 - t, 3);
-            const value = activeAnim.from + (activeAnim.to - activeAnim.from) * eased;
+            const value = interpolateCounterValue(
+                activeAnim.from,
+                activeAnim.to,
+                now - activeAnim.start,
+                activeAnim.duration
+            );
             renderValue(value);
-            if (t >= 1) {
+            if (now - activeAnim.start >= activeAnim.duration) {
                 currentValue = activeAnim.to;
                 activeAnim = null;
                 counter.dataset.animating = 'false';

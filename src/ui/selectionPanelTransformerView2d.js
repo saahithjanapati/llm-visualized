@@ -357,6 +357,8 @@ export function createTransformerView2dDetailView(panelEl) {
         detailSceneIndex: null,
         detailSceneFocus: null,
         detailSceneHoverSignature: '',
+        detailScenePinnedFocus: null,
+        detailScenePinnedSignature: '',
         hoveredResidualRow: null,
         hoverDimming: {
             value: 0,
@@ -367,6 +369,9 @@ export function createTransformerView2dDetailView(panelEl) {
             rowBlend: 1,
             rowBlendTarget: 1
         },
+        hoverTargetKey: '',
+        hoverFrame: null,
+        pendingHoverEvent: null,
         pointer: null,
         touchGesture: {
             pointers: new Map(),
@@ -807,7 +812,110 @@ export function createTransformerView2dDetailView(panelEl) {
         return simplifyLayerNormParamHoverLabel(normalizedLabel, info);
     }
 
-    function clearCanvasHover({ scheduleRender: shouldScheduleRender = true } = {}) {
+    function snapshotHoverEvent(event = null) {
+        if (!Number.isFinite(event?.clientX) || !Number.isFinite(event?.clientY)) {
+            return null;
+        }
+        return {
+            clientX: Number(event.clientX),
+            clientY: Number(event.clientY),
+            pointerId: Number.isFinite(event?.pointerId) ? Number(event.pointerId) : null,
+            pointerType: String(event?.pointerType || '')
+        };
+    }
+
+    function buildCanvasHoverTargetKey(hit = null, mode = '') {
+        const nodeId = typeof hit?.node?.id === 'string' ? hit.node.id : '';
+        if (!nodeId.length) {
+            return mode ? `${mode}:none` : 'none';
+        }
+
+        const parts = [mode || 'hover', nodeId];
+        if (Number.isFinite(hit?.cellHit?.rowIndex) && Number.isFinite(hit?.cellHit?.colIndex)) {
+            parts.push(`cell:${Math.max(0, Math.floor(hit.cellHit.rowIndex))}:${Math.max(0, Math.floor(hit.cellHit.colIndex))}`);
+        }
+        if (Number.isFinite(hit?.rowHit?.rowIndex)) {
+            parts.push(`row:${Math.max(0, Math.floor(hit.rowHit.rowIndex))}`);
+        }
+        if (Number.isFinite(hit?.columnHit?.colIndex)) {
+            parts.push(`col:${Math.max(0, Math.floor(hit.columnHit.colIndex))}`);
+        }
+        return parts.join('|');
+    }
+
+    function resetCanvasHoverTargetKey() {
+        state.hoverTargetKey = '';
+    }
+
+    function cancelScheduledHoverUpdate() {
+        state.pendingHoverEvent = null;
+        if (state.hoverFrame === null) return;
+        cancelAnimationFrame(state.hoverFrame);
+        state.hoverFrame = null;
+    }
+
+    function clearPinnedDetailSceneFocus({ scheduleRender: shouldScheduleRender = true } = {}) {
+        const hadPinnedFocus = !!state.detailScenePinnedFocus;
+        state.detailScenePinnedFocus = null;
+        state.detailScenePinnedSignature = '';
+        state.detailSceneFocus = null;
+        state.detailSceneHoverSignature = '';
+        resetCanvasHoverTargetKey();
+        hoverLabelOverlay.hide();
+        if (hadPinnedFocus && shouldScheduleRender) {
+            scheduleRender();
+        }
+        return hadPinnedFocus;
+    }
+
+    function lockPinnedDetailSceneFocus(detailHoverState = null) {
+        if (!detailHoverState?.focusState) return false;
+        const nextSignature = typeof detailHoverState.signature === 'string'
+            ? detailHoverState.signature
+            : '';
+        const didChange = (
+            !state.detailScenePinnedFocus
+            || state.detailScenePinnedSignature !== nextSignature
+        );
+        state.hoveredResidualRow = null;
+        resetHoverRowBlend();
+        setHoverDimmingTarget(0, {
+            immediate: true,
+            shouldRender: false
+        });
+        state.detailScenePinnedFocus = detailHoverState.focusState;
+        state.detailScenePinnedSignature = nextSignature;
+        state.detailSceneFocus = detailHoverState.focusState;
+        state.detailSceneHoverSignature = nextSignature;
+        resetCanvasHoverTargetKey();
+        hoverLabelOverlay.hide();
+        if (didChange) {
+            scheduleRender();
+        }
+        return true;
+    }
+
+    function clearCanvasHover({
+        scheduleRender: shouldScheduleRender = true,
+        force = false
+    } = {}) {
+        resetCanvasHoverTargetKey();
+        if (state.detailScenePinnedFocus && force !== true) {
+            const hadResidualHover = !!state.hoveredResidualRow;
+            state.hoveredResidualRow = null;
+            state.detailSceneFocus = state.detailScenePinnedFocus;
+            state.detailSceneHoverSignature = state.detailScenePinnedSignature;
+            hoverLabelOverlay.hide();
+            resetHoverRowBlend();
+            setHoverDimmingTarget(0, {
+                immediate: !state.visible,
+                shouldRender: false
+            });
+            if (hadResidualHover && shouldScheduleRender) {
+                scheduleRender();
+            }
+            return;
+        }
         const hadResidualHover = !!state.hoveredResidualRow;
         const hadDetailHover = !!state.detailSceneFocus;
         state.hoveredResidualRow = null;
@@ -855,13 +963,33 @@ export function createTransformerView2dDetailView(panelEl) {
             return hit?.entry || null;
         }
         if (allowHeadDetailHover) {
+            if (state.detailScenePinnedFocus) {
+                resetCanvasHoverTargetKey();
+                hoverLabelOverlay.hide();
+                state.detailSceneFocus = state.detailScenePinnedFocus;
+                state.detailSceneHoverSignature = state.detailScenePinnedSignature;
+                return hit?.entry || null;
+            }
+            const detailHoverKey = buildCanvasHoverTargetKey(hit, 'detail');
+            if (detailHoverKey === state.hoverTargetKey) {
+                hoverLabelOverlay.move({
+                    clientX: event.clientX,
+                    clientY: event.clientY
+                });
+                return hit?.entry || null;
+            }
+
             const detailHoverState = resolveMhsaDetailHoverState(state.detailSceneIndex, hit);
-            const residualHoverPayload = buildResidualRowHoverPayload(hit?.rowHit, state.activationSource);
             if (!detailHoverState?.focusState) {
                 clearCanvasHover();
                 return hit?.entry || null;
             }
 
+            const hoverInfo = detailHoverState?.info || null;
+            const hoverLabel = normalizeCanvasHoverLabel(
+                detailHoverState?.label || '',
+                hoverInfo
+            );
             const didChange = detailHoverState.signature !== state.detailSceneHoverSignature;
             state.hoveredResidualRow = null;
             resetHoverRowBlend();
@@ -871,11 +999,7 @@ export function createTransformerView2dDetailView(panelEl) {
             });
             state.detailSceneFocus = detailHoverState.focusState;
             state.detailSceneHoverSignature = detailHoverState.signature;
-            const hoverInfo = residualHoverPayload?.info || detailHoverState.info || null;
-            const hoverLabel = normalizeCanvasHoverLabel(
-                residualHoverPayload?.label || detailHoverState.label || '',
-                hoverInfo
-            );
+            state.hoverTargetKey = detailHoverKey;
             if (hoverLabel) {
                 hoverLabelOverlay.show({
                     clientX: event.clientX,
@@ -897,6 +1021,14 @@ export function createTransformerView2dDetailView(panelEl) {
         const worldHit = renderer.resolveInteractiveHitAtPoint(worldPoint.x, worldPoint.y);
         const residualHoverPayload = buildResidualRowHoverPayload(worldHit?.rowHit, state.activationSource);
         if (residualHoverPayload && worldHit?.node?.id && Number.isFinite(worldHit?.rowHit?.rowIndex)) {
+            const residualHoverKey = buildCanvasHoverTargetKey(worldHit, 'overview-row');
+            if (residualHoverKey === state.hoverTargetKey) {
+                hoverLabelOverlay.move({
+                    clientX: event.clientX,
+                    clientY: event.clientY
+                });
+                return worldHit?.entry || null;
+            }
             const hoverLabel = normalizeCanvasHoverLabel(
                 residualHoverPayload.label,
                 residualHoverPayload.info
@@ -925,6 +1057,7 @@ export function createTransformerView2dDetailView(panelEl) {
                 resetHoverRowBlend();
             }
             state.hoveredResidualRow = nextHoveredRow;
+            state.hoverTargetKey = residualHoverKey;
             setHoverDimmingTarget(1, {
                 shouldRender: didChange
             });
@@ -947,6 +1080,15 @@ export function createTransformerView2dDetailView(panelEl) {
             return worldHit?.entry || hit?.entry || null;
         }
 
+        const semanticHoverKey = buildCanvasHoverTargetKey(worldHit, 'overview-node');
+        if (semanticHoverKey === state.hoverTargetKey) {
+            hoverLabelOverlay.move({
+                clientX: event.clientX,
+                clientY: event.clientY
+            });
+            return worldHit?.entry || null;
+        }
+
         const hoverLabel = normalizeCanvasHoverLabel(
             semanticHoverPayload.label,
             semanticHoverPayload.info
@@ -958,13 +1100,14 @@ export function createTransformerView2dDetailView(panelEl) {
 
         const hadResidualHover = !!state.hoveredResidualRow;
         state.hoveredResidualRow = null;
-        state.detailSceneFocus = null;
-        state.detailSceneHoverSignature = '';
+        state.detailSceneFocus = state.detailScenePinnedFocus || null;
+        state.detailSceneHoverSignature = state.detailScenePinnedSignature || '';
         resetHoverRowBlend();
         setHoverDimmingTarget(0, {
             immediate: true,
             shouldRender: false
         });
+        state.hoverTargetKey = semanticHoverKey;
         hoverLabelOverlay.show({
             clientX: event.clientX,
             clientY: event.clientY,
@@ -976,6 +1119,39 @@ export function createTransformerView2dDetailView(panelEl) {
             scheduleRender();
         }
         return worldHit?.entry || null;
+    }
+
+    function processCanvasHoverEvent(event = null) {
+        const hoveredEntry = updateCanvasHover(event) || resolveCanvasPointerHit(event);
+        updateCanvasCursor(hoveredEntry);
+    }
+
+    function scheduleCanvasHoverUpdate(event = null) {
+        const hoverEvent = snapshotHoverEvent(event);
+        if (!hoverEvent || hoverEvent.pointerType === 'touch') {
+            cancelScheduledHoverUpdate();
+            clearCanvasHover();
+            updateCanvasCursor(null);
+            return;
+        }
+
+        // Passive hover should keep the high-detail canvas path active.
+        clearInteractionTimer();
+        setInteractionActive(false);
+
+        if (state.hoverFrame !== null) {
+            state.pendingHoverEvent = hoverEvent;
+            return;
+        }
+
+        processCanvasHoverEvent(hoverEvent);
+        state.hoverFrame = requestAnimationFrame(() => {
+            state.hoverFrame = null;
+            const nextHoverEvent = state.pendingHoverEvent;
+            state.pendingHoverEvent = null;
+            if (!nextHoverEvent) return;
+            scheduleCanvasHoverUpdate(nextHoverEvent);
+        });
     }
 
     function setInteractionActive(active = false) {
@@ -1166,8 +1342,11 @@ export function createTransformerView2dDetailView(panelEl) {
             || state.scene?.metadata?.headDetailScene
             || null
         );
+        state.detailScenePinnedFocus = null;
+        state.detailScenePinnedSignature = '';
         state.detailSceneFocus = null;
         state.detailSceneHoverSignature = '';
+        resetCanvasHoverTargetKey();
         state.layout = buildSceneLayout(state.scene, {
             isSmallScreen: state.isSmallScreen
         });
@@ -1181,6 +1360,7 @@ export function createTransformerView2dDetailView(panelEl) {
         const resolvedTarget = resolveHeadDetailTarget(headDetailTarget);
         if (!resolvedTarget) return false;
         stopAnimation();
+        cancelScheduledHoverUpdate();
         clearCanvasHover({ scheduleRender: false });
         setDetailTargets({ headDetailTarget: resolvedTarget });
         return commitSceneSelection({ animate, nextDepthActive: false });
@@ -1190,6 +1370,7 @@ export function createTransformerView2dDetailView(panelEl) {
         const resolvedTarget = resolveConcatDetailTarget(concatDetailTarget);
         if (!resolvedTarget) return false;
         stopAnimation();
+        cancelScheduledHoverUpdate();
         clearCanvasHover({ scheduleRender: false });
         setDetailTargets({ concatDetailTarget: resolvedTarget });
         return commitSceneSelection({ animate, nextDepthActive: false });
@@ -1199,6 +1380,7 @@ export function createTransformerView2dDetailView(panelEl) {
         const resolvedTarget = resolveOutputProjectionDetailTarget(outputProjectionDetailTarget);
         if (!resolvedTarget) return false;
         stopAnimation();
+        cancelScheduledHoverUpdate();
         clearCanvasHover({ scheduleRender: false });
         setDetailTargets({ outputProjectionDetailTarget: resolvedTarget });
         return commitSceneSelection({ animate, nextDepthActive: false });
@@ -1207,6 +1389,7 @@ export function createTransformerView2dDetailView(panelEl) {
     function closeDetail({ animate = true } = {}) {
         if (!hasActiveDetailTarget()) return false;
         stopAnimation();
+        cancelScheduledHoverUpdate();
         clearCanvasHover({ scheduleRender: false });
         setDetailTargets();
         return commitSceneSelection({ animate, nextDepthActive: false });
@@ -1215,10 +1398,13 @@ export function createTransformerView2dDetailView(panelEl) {
     function exitDeepDetail({ animate = true } = {}) {
         if (!state.headDetailTarget || !state.headDetailDepthActive) return false;
         stopAnimation();
+        cancelScheduledHoverUpdate();
         clearCanvasHover({ scheduleRender: false });
         disableAutoFrameState();
         state.headDetailDepthActive = false;
         state.headDetailDepthAutoReentryBlocked = true;
+        state.detailScenePinnedFocus = null;
+        state.detailScenePinnedSignature = '';
         state.detailSceneFocus = null;
         state.detailSceneHoverSignature = '';
         const bounds = resolveSelectionFocusBounds();
@@ -1369,7 +1555,8 @@ export function createTransformerView2dDetailView(panelEl) {
             canvas,
             projectBounds: (bounds) => renderer.resolveScreenBounds(bounds),
             visible: state.visible,
-            enabled: true
+            enabled: true,
+            focusState: state.headDetailDepthActive ? state.detailSceneFocus : null
         });
         syncDetailFrame();
         updateReadouts();
@@ -1506,6 +1693,17 @@ export function createTransformerView2dDetailView(panelEl) {
             event.clientX - rect.left,
             event.clientY - rect.top
         )?.entry || null;
+    }
+
+    function resolveCanvasScreenHit(event = null) {
+        if (!canvas || !Number.isFinite(event?.clientX) || !Number.isFinite(event?.clientY)) {
+            return null;
+        }
+        const rect = canvas.getBoundingClientRect();
+        return renderer.resolveInteractiveHitAtScreenPoint(
+            event.clientX - rect.left,
+            event.clientY - rect.top
+        ) || null;
     }
 
     function updateCanvasCursor(entry = null) {
@@ -1696,6 +1894,7 @@ export function createTransformerView2dDetailView(panelEl) {
     function onDocumentPointerDown(event) {
         if (!state.visible || !(event?.target instanceof Node)) return;
         if (root.contains(event.target)) return;
+        clearPinnedDetailSceneFocus({ scheduleRender: true });
         disengageKeyboardMotion();
     }
 
@@ -1717,6 +1916,7 @@ export function createTransformerView2dDetailView(panelEl) {
         clientX = 0,
         clientY = 0
     } = {}) {
+        cancelScheduledHoverUpdate();
         clearCanvasHover({ scheduleRender: false });
         state.pointer = {
             pointerId: Number.isFinite(pointerId) ? pointerId : null,
@@ -1797,6 +1997,7 @@ export function createTransformerView2dDetailView(panelEl) {
         const activeViewportController = getActiveViewportController();
         const viewport = activeViewportController.getState();
         const currentScale = Number.isFinite(viewport.scale) && viewport.scale > 0 ? viewport.scale : 1;
+        cancelScheduledHoverUpdate();
         clearPointer(null, { scheduleSettle: false });
         state.touchGesture.pinchActive = true;
         state.touchGesture.startDistance = metrics.distance;
@@ -1881,7 +2082,7 @@ export function createTransformerView2dDetailView(panelEl) {
             return;
         }
         if (!state.pointer) {
-            updateCanvasCursor(updateCanvasHover(event) || resolveCanvasPointerHit(event));
+            scheduleCanvasHoverUpdate(event);
             return;
         }
         if (!state.pointer || state.pointer.pointerId !== event.pointerId) return;
@@ -1905,6 +2106,7 @@ export function createTransformerView2dDetailView(panelEl) {
     function onWheel(event) {
         if (!state.visible) return;
         focusCanvasSurface();
+        cancelScheduledHoverUpdate();
         clearCanvasHover({ scheduleRender: false });
         const rect = canvas.getBoundingClientRect();
         const anchorX = event.clientX - rect.left;
@@ -1929,15 +2131,27 @@ export function createTransformerView2dDetailView(panelEl) {
         }
         if (!state.pointer || state.pointer.pointerId !== event.pointerId) return;
         const shouldTreatAsClick = state.pointer.moved !== true;
-        const clickedEntry = shouldTreatAsClick ? resolveCanvasPointerHit(event) : null;
+        const clickedHit = shouldTreatAsClick ? resolveCanvasScreenHit(event) : null;
+        const clickedEntry = clickedHit?.entry || null;
         clearPointer(event);
         updateCanvasCursor(clickedEntry);
         if (shouldTreatAsClick) {
+            if (state.headDetailDepthActive && state.detailSceneIndex) {
+                const detailHoverState = resolveMhsaDetailHoverState(state.detailSceneIndex, clickedHit);
+                if (detailHoverState?.focusState) {
+                    lockPinnedDetailSceneFocus(detailHoverState);
+                    return;
+                }
+                if (clearPinnedDetailSceneFocus({ scheduleRender: true })) {
+                    return;
+                }
+            }
             onSceneNodeClick(clickedEntry);
         }
     }
 
     function onPointerLeave() {
+        cancelScheduledHoverUpdate();
         clearCanvasHover();
         updateCanvasCursor(null);
     }
@@ -1984,7 +2198,9 @@ export function createTransformerView2dDetailView(panelEl) {
             root.setAttribute('aria-hidden', state.visible ? 'false' : 'true');
             renderTokenStrip();
             if (!state.visible) {
-                clearCanvasHover({ scheduleRender: false });
+                cancelScheduledHoverUpdate();
+                clearPinnedDetailSceneFocus({ scheduleRender: false });
+                clearCanvasHover({ scheduleRender: false, force: true });
                 stopHoverDimmingAnimation();
                 setHoverDimmingTarget(0, { immediate: true, shouldRender: false });
                 hideDetailFrame();
@@ -2017,7 +2233,9 @@ export function createTransformerView2dDetailView(panelEl) {
             state.baseSemanticTarget = deriveBaseSemanticTarget(semanticTarget);
             state.baseFocusLabel = String(focusLabel || '').trim() || describeTransformerView2dTarget(state.baseSemanticTarget);
             setDetailTargets(resolveDetailTargetsFromSemanticTarget(semanticTarget));
-            clearCanvasHover({ scheduleRender: false });
+            cancelScheduledHoverUpdate();
+            clearPinnedDetailSceneFocus({ scheduleRender: false });
+            clearCanvasHover({ scheduleRender: false, force: true });
             setHoverDimmingTarget(0, { immediate: true, shouldRender: false });
             hideDetailFrame();
             residualCaptionOverlay.hide();

@@ -152,6 +152,10 @@ const camPos = vec3(CAMERA_CONFIG.initialPosition);
 const camTarget = vec3(CAMERA_CONFIG.initialTarget);
 const skipToEndCamPos = camPos.clone().add(vec3(CAMERA_CONFIG.skipToEndPositionOffset));
 const skipToEndCamTarget = camTarget.clone().add(vec3(CAMERA_CONFIG.skipToEndTargetOffset));
+const cameraMaxDistance = Math.max(
+    camPos.distanceTo(camTarget),
+    skipToEndCamPos.distanceTo(skipToEndCamTarget)
+) * CAMERA_CONFIG.maxZoomOutDistanceMultiplier;
 const targetClampRadius = Math.max(
     CAMERA_CONFIG.targetClampRadiusBase,
     NUM_LAYERS * CAMERA_CONFIG.targetClampRadiusPerLayer
@@ -159,6 +163,7 @@ const targetClampRadius = Math.max(
 const pipeline = new LayerPipeline(gptCanvas, NUM_LAYERS, {
     cameraPosition: camPos,
     cameraTarget: camTarget,
+    cameraMaxDistance,
     skipToEndCameraPosition: skipToEndCamPos,
     skipToEndCameraTarget: skipToEndCamTarget,
     targetClampCenter: camTarget,

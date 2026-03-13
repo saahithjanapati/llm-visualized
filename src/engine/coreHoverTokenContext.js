@@ -382,7 +382,7 @@ function resolveAttentionScoreHoverContext({
     const pushPreMetric = () => {
         if (!Number.isFinite(preScore)) return false;
         attentionMetrics.push({
-            roleLabel: 'Pre-softmax',
+            roleLabel: 'Score',
             valueText: formatMetricValue(preScore)
         });
         return true;
@@ -390,7 +390,7 @@ function resolveAttentionScoreHoverContext({
     const pushPostMetric = () => {
         if (!Number.isFinite(postScore)) return false;
         attentionMetrics.push({
-            roleLabel: 'Post-softmax',
+            roleLabel: 'Score',
             valueText: formatMetricValue(postScore)
         });
         return true;

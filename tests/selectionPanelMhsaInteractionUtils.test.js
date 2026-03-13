@@ -46,7 +46,7 @@ describe('selectionPanelMhsaInteractionUtils', () => {
 
         expect(resolveMhsaTokenMatrixProjectionStageTarget(gapFill, { root })).toEqual({
             stageIndex: 2,
-            focusKey: 'v'
+            focusKey: null
         });
     });
 
@@ -67,21 +67,21 @@ describe('selectionPanelMhsaInteractionUtils', () => {
             requirePinnableComponent: true
         })).toEqual({
             stageIndex: 2,
-            focusKey: 'v'
+            focusKey: 'input'
         });
         expect(resolveMhsaTokenMatrixProjectionStageTarget(weightCard, {
             root,
             requirePinnableComponent: true
         })).toEqual({
             stageIndex: 2,
-            focusKey: 'v'
+            focusKey: 'weight'
         });
         expect(resolveMhsaTokenMatrixProjectionStageTarget(plusOperator, {
             root,
             requirePinnableComponent: true
         })).toEqual({
             stageIndex: 2,
-            focusKey: 'v'
+            focusKey: 'plus'
         });
     });
 });

@@ -9,7 +9,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:activation-integrity": "node scripts/run_activation_integrity_suite.mjs"
   },
   "keywords": [],
   "author": "",

@@ -10,6 +10,7 @@ import {
 } from '../src/ui/selectionPanelTransformerView2d.js';
 import { buildSceneLayout } from '../src/view2d/layout/buildSceneLayout.js';
 import { buildTransformerSceneModel } from '../src/view2d/model/buildTransformerSceneModel.js';
+import { CanvasSceneRenderer } from '../src/view2d/render/canvas/CanvasSceneRenderer.js';
 import { resolveViewportFitTransform } from '../src/view2d/runtime/View2dViewportController.js';
 import { flattenSceneNodes } from '../src/view2d/schema/sceneTypes.js';
 import { D_HEAD, D_MODEL } from '../src/ui/selectionPanelConstants.js';
@@ -154,6 +155,69 @@ function resolveEntryClientPoint(entry, viewport, {
         clientX: viewport.panX + (((bounds?.x || 0) + ((bounds?.width || 0) * xInset)) * viewport.scale),
         clientY: viewport.panY + (((bounds?.y || 0) + ((bounds?.height || 0) * yInset)) * viewport.scale)
     };
+}
+
+function resolveRowClientPoint(entry, viewport, rowIndex = 0, {
+    xInset = 0.5
+} = {}) {
+    const contentBounds = entry?.contentBounds || entry?.bounds || null;
+    const innerPaddingX = Number(entry?.layoutData?.innerPaddingX) || 0;
+    const innerPaddingY = Number(entry?.layoutData?.innerPaddingY) || 0;
+    const rowGap = Number(entry?.layoutData?.rowGap) || 0;
+    const contentWidth = Math.max(1, (contentBounds?.width || 0) - (innerPaddingX * 2));
+    const rowWidth = Math.max(
+        1,
+        Math.min(Number(entry?.layoutData?.compactWidth) || contentWidth, contentWidth)
+    );
+    const rowHeight = Math.max(1, Number(entry?.layoutData?.rowHeight) || (contentBounds?.height || 0));
+    const worldX = (contentBounds?.x || 0) + innerPaddingX + (rowWidth * xInset);
+    const worldY = (contentBounds?.y || 0)
+        + innerPaddingY
+        + (Math.max(0, rowIndex) * (rowHeight + rowGap))
+        + (rowHeight * 0.5);
+    return {
+        clientX: viewport.panX + (worldX * viewport.scale),
+        clientY: viewport.panY + (worldY * viewport.scale)
+    };
+}
+
+function resolveInteractiveRowClientPoint(scene, layout, viewport, entry, rowIndex = 0) {
+    const bounds = entry?.contentBounds || entry?.bounds || null;
+    const innerPaddingY = Number(entry?.layoutData?.innerPaddingY) || 0;
+    const rowHeight = Math.max(1, Number(entry?.layoutData?.rowHeight) || (bounds?.height || 0));
+    const rowGap = Number(entry?.layoutData?.rowGap) || 0;
+    const rowTop = (bounds?.y || 0) + innerPaddingY + (Math.max(0, rowIndex) * (rowHeight + rowGap));
+    const renderer = new CanvasSceneRenderer({
+        canvas: {
+            width: 640,
+            height: 360,
+            getContext: () => createMockContext()
+        }
+    });
+    renderer.setScene(scene, layout);
+
+    for (let yStep = 1; yStep <= 6; yStep += 1) {
+        const worldY = rowTop + ((rowHeight * yStep) / 7);
+        for (let xStep = 1; xStep <= 10; xStep += 1) {
+            const worldX = (bounds?.x || 0) + (((bounds?.width || 0) * xStep) / 11);
+            const hit = renderer.resolveInteractiveHitAtPoint(worldX, worldY);
+            if (hit?.node?.id === entry?.id && hit?.rowHit?.rowIndex === rowIndex) {
+                return {
+                    clientX: viewport.panX + (worldX * viewport.scale),
+                    clientY: viewport.panY + (worldY * viewport.scale)
+                };
+            }
+        }
+    }
+
+    return resolveRowClientPoint(entry, viewport, rowIndex);
+}
+
+function drainRafQueue(queue, now = performance.now()) {
+    while (queue.length) {
+        const callbacks = queue.splice(0);
+        callbacks.forEach((callback) => callback?.(now));
+    }
 }
 
 function resolveSceneRenderableBounds(scene, layout) {
@@ -1076,6 +1140,99 @@ describe('selectionPanelTransformerView2d', () => {
         expect(tooltip?.querySelector('.scene-hover-label__text')?.textContent).toBe('Post LayerNorm Residual Vector');
         expect(tooltip?.querySelector('.scene-hover-label__token-chip')?.textContent).toContain('tok_0');
         expect(tooltip?.querySelector('.scene-hover-label__subtitle')?.textContent).toBe('Position 1 • Head 5 • Layer 1');
+    });
+
+    it('keeps deep-detail focus active for value rows and copied X_ln rows', () => {
+        const panel = document.createElement('section');
+        panel.innerHTML = `
+            <div class="detail-header"></div>
+            <div class="detail-body"></div>
+        `;
+        document.body.appendChild(panel);
+
+        const renderSpy = vi.spyOn(CanvasSceneRenderer.prototype, 'render');
+        const view = createTransformerView2dDetailView(panel);
+        const canvas = panel.querySelector('.detail-transformer-view2d-canvas');
+        const ctx = createMockContext();
+        const activationSource = createActivationSource(4);
+
+        canvas.getContext = vi.fn(() => ctx);
+        canvas.getBoundingClientRect = () => ({
+            left: 0,
+            top: 0,
+            right: 640,
+            bottom: 360,
+            width: 640,
+            height: 360
+        });
+
+        view.setVisible(true);
+        view.open({
+            activationSource,
+            semanticTarget: {
+                componentKind: 'mhsa',
+                layerIndex: 0,
+                headIndex: 4,
+                stage: 'attention',
+                role: 'head'
+            },
+            focusLabel: 'Layer 1 MHSA Head 5'
+        });
+        drainRafQueue(rafQueue);
+
+        const scene = buildTransformerSceneModel({
+            activationSource,
+            layerCount: 1,
+            headDetailTarget: {
+                layerIndex: 0,
+                headIndex: 4
+            }
+        });
+        const headDetailScene = scene.metadata.mhsaHeadDetailScene || scene.metadata.headDetailScene;
+        const detailLayout = buildSceneLayout(headDetailScene);
+        const copyEntry = detailLayout.registry.getNodeEntries().find((entry) => (
+            entry.role === 'x-ln-copy'
+            && entry.semantic?.branchKey === 'v'
+        ));
+        const valueEntry = detailLayout.registry.getNodeEntries().find((entry) => (
+            entry.role === 'projection-output'
+            && entry.metadata?.kind === 'v'
+        ));
+        const detailViewport = view.getViewportState();
+
+        const valueRenderCountBefore = renderSpy.mock.calls.length;
+        dispatchPointerEvent(canvas, 'pointermove', {
+            ...resolveInteractiveRowClientPoint(headDetailScene, detailLayout, detailViewport, valueEntry, 1),
+            pointerType: 'mouse'
+        });
+        drainRafQueue(rafQueue);
+
+        const valueTooltip = document.body.querySelector('.scene-hover-label');
+        expect(valueTooltip?.querySelector('.scene-hover-label__text')?.textContent).toBe('Value Vector');
+
+        const valueFocusCall = renderSpy.mock.calls
+            .slice(valueRenderCountBefore)
+            .map(([args]) => args)
+            .reverse()
+            .find((args) => args?.interactionState?.detailSceneFocus);
+        expect(valueFocusCall?.interactionState?.detailSceneFocus?.activeNodeIds?.length).toBeGreaterThan(0);
+
+        const copyRenderCountBefore = renderSpy.mock.calls.length;
+        dispatchPointerEvent(canvas, 'pointermove', {
+            ...resolveInteractiveRowClientPoint(headDetailScene, detailLayout, detailViewport, copyEntry, 0),
+            pointerType: 'mouse'
+        });
+        drainRafQueue(rafQueue);
+
+        const copyTooltip = document.body.querySelector('.scene-hover-label');
+        expect(copyTooltip?.querySelector('.scene-hover-label__text')?.textContent).toBe('Post LayerNorm Residual Vector');
+
+        const copyFocusCall = renderSpy.mock.calls
+            .slice(copyRenderCountBefore)
+            .map(([args]) => args)
+            .reverse()
+            .find((args) => args?.interactionState?.detailSceneFocus);
+        expect(copyFocusCall?.interactionState?.detailSceneFocus?.activeNodeIds?.length).toBeGreaterThan(0);
     });
 
     it('supports touch pan and pinch zoom on the transformer 2D canvas surface', () => {

@@ -505,7 +505,7 @@ describe('selectionPanel history preview reuse', () => {
         const body = document.getElementById('detailAttentionBody');
         const modeToggleRow = document.getElementById('detailAttentionToggle')?.closest('label');
 
-        expect(title?.textContent).toBe('Attention scores | Layer 5 | Head 3');
+        expect(title?.textContent).toBe('Attention score matrix');
         expect(body?.hidden).toBe(false);
         expect(modeToggleRow?.hidden).toBe(false);
         expect(collapseLabel?.textContent).toBe('Minimize');
@@ -537,7 +537,7 @@ describe('selectionPanel history preview reuse', () => {
             }
         });
 
-        expect(title?.textContent).toBe('Attention scores | Layer 2 | Head 6');
+        expect(title?.textContent).toBe('Attention score matrix');
         expect(body?.hidden).toBe(true);
         expect(modeToggleRow?.hidden).toBe(true);
         expect(collapseLabel?.textContent).toBe('Maximize');

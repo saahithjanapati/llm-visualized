@@ -55,7 +55,7 @@ function createActivationSource(tokenCount = 4) {
 }
 
 describe('mhsaDetailInteraction', () => {
-    it('uses the same branch focus for W_q hover as the corresponding query path', () => {
+    it('narrows W_q hover to the local X_ln, Q, and query-source branch', () => {
         const scene = buildMhsaSceneModel({
             activationSource: createActivationSource(4),
             layerIndex: 2,
@@ -64,16 +64,17 @@ describe('mhsaDetailInteraction', () => {
         });
         const index = createMhsaDetailSceneIndex(scene);
         const nodes = flattenSceneNodes(scene);
+        const sourceNode = nodes.find((node) => node.role === 'projection-source-xln');
+        const qInputNode = nodes.find((node) => node.role === 'x-ln-copy' && node.semantic?.branchKey === 'q');
         const qWeightNode = nodes.find((node) => node.role === 'projection-weight' && node.metadata?.kind === 'q');
+        const qValueNode = nodes.find((node) => node.role === 'projection-output' && node.metadata?.kind === 'q');
         const qQueryNode = nodes.find((node) => node.role === 'attention-query-source');
+        const kValueNode = nodes.find((node) => node.role === 'projection-output' && node.metadata?.kind === 'k');
+        const vValueNode = nodes.find((node) => node.role === 'projection-output' && node.metadata?.kind === 'v');
         const qIngressConnector = nodes.find((node) => node.role === 'connector-xln-q');
+        const qConnectorNode = nodes.find((node) => node.role === 'connector-q');
 
-        const weightHover = resolveMhsaDetailHoverState(index, {
-            node: qWeightNode
-        });
-        const queryHover = resolveMhsaDetailHoverState(index, {
-            node: qQueryNode
-        });
+        const weightHover = resolveMhsaDetailHoverState(index, { node: qWeightNode });
 
         expect(weightHover?.label).toBe('Query Weight Matrix');
         expect(weightHover?.info).toEqual({
@@ -85,11 +86,18 @@ describe('mhsaDetailInteraction', () => {
                 headIndex: 3
             }
         });
+        expect(weightHover?.focusState?.activeNodeIds).toContain(sourceNode?.id);
+        expect(weightHover?.focusState?.activeNodeIds).toContain(qInputNode?.id);
+        expect(weightHover?.focusState?.activeNodeIds).toContain(qWeightNode?.id);
+        expect(weightHover?.focusState?.activeNodeIds).toContain(qValueNode?.id);
+        expect(weightHover?.focusState?.activeNodeIds).toContain(qQueryNode?.id);
+        expect(weightHover?.focusState?.activeNodeIds).not.toContain(kValueNode?.id);
+        expect(weightHover?.focusState?.activeNodeIds).not.toContain(vValueNode?.id);
         expect(weightHover?.focusState?.activeConnectorIds).toContain(qIngressConnector?.id);
-        expect(weightHover?.focusState).toEqual(queryHover?.focusState);
+        expect(weightHover?.focusState?.activeConnectorIds).toContain(qConnectorNode?.id);
     });
 
-    it('uses the same branch focus for W_k hover as the corresponding key path', () => {
+    it('narrows W_k hover to the local X_ln, K, and K^T branch', () => {
         const scene = buildMhsaSceneModel({
             activationSource: createActivationSource(4),
             layerIndex: 2,
@@ -98,22 +106,29 @@ describe('mhsaDetailInteraction', () => {
         });
         const index = createMhsaDetailSceneIndex(scene);
         const nodes = flattenSceneNodes(scene);
+        const sourceNode = nodes.find((node) => node.role === 'projection-source-xln');
+        const kInputNode = nodes.find((node) => node.role === 'x-ln-copy' && node.semantic?.branchKey === 'k');
         const kWeightNode = nodes.find((node) => node.role === 'projection-weight' && node.metadata?.kind === 'k');
+        const kValueNode = nodes.find((node) => node.role === 'projection-output' && node.metadata?.kind === 'k');
         const kTransposeNode = nodes.find((node) => node.role === 'attention-key-transpose');
+        const qQueryNode = nodes.find((node) => node.role === 'attention-query-source');
         const kIngressConnector = nodes.find((node) => node.role === 'connector-xln-k');
+        const kConnectorNode = nodes.find((node) => node.role === 'connector-k');
 
-        const weightHover = resolveMhsaDetailHoverState(index, {
-            node: kWeightNode
-        });
-        const keyHover = resolveMhsaDetailHoverState(index, {
-            node: kTransposeNode
-        });
+        const weightHover = resolveMhsaDetailHoverState(index, { node: kWeightNode });
 
+        expect(weightHover?.label).toBe('Key Weight Matrix');
+        expect(weightHover?.focusState?.activeNodeIds).toContain(sourceNode?.id);
+        expect(weightHover?.focusState?.activeNodeIds).toContain(kInputNode?.id);
+        expect(weightHover?.focusState?.activeNodeIds).toContain(kWeightNode?.id);
+        expect(weightHover?.focusState?.activeNodeIds).toContain(kValueNode?.id);
+        expect(weightHover?.focusState?.activeNodeIds).toContain(kTransposeNode?.id);
+        expect(weightHover?.focusState?.activeNodeIds).not.toContain(qQueryNode?.id);
         expect(weightHover?.focusState?.activeConnectorIds).toContain(kIngressConnector?.id);
-        expect(weightHover?.focusState).toEqual(keyHover?.focusState);
+        expect(weightHover?.focusState?.activeConnectorIds).toContain(kConnectorNode?.id);
     });
 
-    it('uses the same branch focus for W_v hover as the corresponding value path', () => {
+    it('narrows W_v hover to the local X_ln, V, and weighted-value branch', () => {
         const scene = buildMhsaSceneModel({
             activationSource: createActivationSource(4),
             layerIndex: 2,
@@ -122,22 +137,27 @@ describe('mhsaDetailInteraction', () => {
         });
         const index = createMhsaDetailSceneIndex(scene);
         const nodes = flattenSceneNodes(scene);
+        const sourceNode = nodes.find((node) => node.role === 'projection-source-xln');
+        const vInputNode = nodes.find((node) => node.role === 'x-ln-copy' && node.semantic?.branchKey === 'v');
         const vWeightNode = nodes.find((node) => node.role === 'projection-weight' && node.metadata?.kind === 'v');
         const vValueNode = nodes.find((node) => node.role === 'attention-value-post');
+        const headOutputNode = nodes.find((node) => node.role === 'attention-head-output');
         const vIngressConnector = nodes.find((node) => node.role === 'connector-xln-v');
+        const vConnectorNode = nodes.find((node) => node.role === 'connector-v');
 
-        const weightHover = resolveMhsaDetailHoverState(index, {
-            node: vWeightNode
-        });
-        const valueHover = resolveMhsaDetailHoverState(index, {
-            node: vValueNode
-        });
+        const weightHover = resolveMhsaDetailHoverState(index, { node: vWeightNode });
 
+        expect(weightHover?.label).toBe('Value Weight Matrix');
+        expect(weightHover?.focusState?.activeNodeIds).toContain(sourceNode?.id);
+        expect(weightHover?.focusState?.activeNodeIds).toContain(vInputNode?.id);
+        expect(weightHover?.focusState?.activeNodeIds).toContain(vWeightNode?.id);
+        expect(weightHover?.focusState?.activeNodeIds).toContain(vValueNode?.id);
+        expect(weightHover?.focusState?.activeNodeIds).not.toContain(headOutputNode?.id);
         expect(weightHover?.focusState?.activeConnectorIds).toContain(vIngressConnector?.id);
-        expect(weightHover?.focusState).toEqual(valueHover?.focusState);
+        expect(weightHover?.focusState?.activeConnectorIds).toContain(vConnectorNode?.id);
     });
 
-    it('uses the same branch focus and head/layer tooltip metadata for bias-vector hover', () => {
+    it('keeps bias-vector hover on the same local branch with head/layer tooltip metadata', () => {
         const scene = buildMhsaSceneModel({
             activationSource: createActivationSource(4),
             layerIndex: 0,
@@ -146,8 +166,13 @@ describe('mhsaDetailInteraction', () => {
         });
         const index = createMhsaDetailSceneIndex(scene);
         const nodes = flattenSceneNodes(scene);
+        const sourceNode = nodes.find((node) => node.role === 'projection-source-xln');
+        const vInputNode = nodes.find((node) => node.role === 'x-ln-copy' && node.semantic?.branchKey === 'v');
         const vBiasNode = nodes.find((node) => node.role === 'projection-bias' && node.metadata?.kind === 'v');
-        const vWeightNode = nodes.find((node) => node.role === 'projection-weight' && node.metadata?.kind === 'v');
+        const vOutputNode = nodes.find((node) => node.role === 'projection-output' && node.metadata?.kind === 'v');
+        const vValueNode = nodes.find((node) => node.role === 'attention-value-post');
+        const connectorVNode = nodes.find((node) => node.role === 'connector-v');
+        const connectorXlnVNode = nodes.find((node) => node.role === 'connector-xln-v');
 
         const biasHover = resolveMhsaDetailHoverState(index, {
             node: vBiasNode,
@@ -155,9 +180,6 @@ describe('mhsaDetailInteraction', () => {
                 rowIndex: 0,
                 rowItem: vBiasNode?.rowItems?.[0] || null
             }
-        });
-        const weightHover = resolveMhsaDetailHoverState(index, {
-            node: vWeightNode
         });
 
         expect(biasHover?.label).toBe('Value Bias Vector');
@@ -170,7 +192,13 @@ describe('mhsaDetailInteraction', () => {
                 headIndex: 4
             }
         });
-        expect(biasHover?.focusState).toEqual(weightHover?.focusState);
+        expect(biasHover?.focusState?.activeNodeIds).toContain(sourceNode?.id);
+        expect(biasHover?.focusState?.activeNodeIds).toContain(vInputNode?.id);
+        expect(biasHover?.focusState?.activeNodeIds).toContain(vBiasNode?.id);
+        expect(biasHover?.focusState?.activeNodeIds).toContain(vOutputNode?.id);
+        expect(biasHover?.focusState?.activeNodeIds).toContain(vValueNode?.id);
+        expect(biasHover?.focusState?.activeConnectorIds).toContain(connectorVNode?.id);
+        expect(biasHover?.focusState?.activeConnectorIds).toContain(connectorXlnVNode?.id);
     });
 
     it('routes projection-output row hover to the corresponding Q/K/V vector tooltip metadata', () => {
@@ -235,7 +263,7 @@ describe('mhsaDetailInteraction', () => {
         });
     });
 
-    it('routes K^T column hover to the corresponding key-vector tooltip metadata', () => {
+    it('routes K^T column hover to the corresponding key-vector tooltip metadata and score-axis focus', () => {
         const scene = buildMhsaSceneModel({
             activationSource: createActivationSource(5),
             layerIndex: 1,
@@ -245,8 +273,12 @@ describe('mhsaDetailInteraction', () => {
         const index = createMhsaDetailSceneIndex(scene);
         const nodes = flattenSceneNodes(scene);
         const transposeNode = nodes.find((node) => node.role === 'attention-key-transpose');
+        const postNode = nodes.find((node) => node.role === 'attention-post');
+        const postCopyNode = nodes.find((node) => node.role === 'attention-post-copy');
         const transposeColumn = transposeNode?.columnItems?.[3] || null;
-        const kWeightNode = nodes.find((node) => node.role === 'projection-weight' && node.metadata?.kind === 'k');
+        const connectorKNode = nodes.find((node) => node.role === 'connector-k');
+        const connectorPreNode = nodes.find((node) => node.role === 'connector-pre');
+        const connectorPostNode = nodes.find((node) => node.role === 'connector-post');
 
         const transposeHover = resolveMhsaDetailHoverState(index, {
             node: transposeNode,
@@ -254,9 +286,6 @@ describe('mhsaDetailInteraction', () => {
                 colIndex: 3,
                 columnItem: transposeColumn
             }
-        });
-        const weightHover = resolveMhsaDetailHoverState(index, {
-            node: kWeightNode
         });
 
         expect(transposeHover?.label).toBe('Key Vector');
@@ -274,12 +303,19 @@ describe('mhsaDetailInteraction', () => {
                 headIndex: 4
             }
         });
-        expect(weightHover?.focusState?.activeNodeIds.every((nodeId) => (
-            transposeHover?.focusState?.activeNodeIds.includes(nodeId)
-        ))).toBe(true);
-        expect(transposeHover?.focusState?.activeConnectorIds).toEqual(weightHover?.focusState?.activeConnectorIds);
+        expect(transposeHover?.focusState?.activeConnectorIds).toContain(connectorKNode?.id);
+        expect(transposeHover?.focusState?.activeConnectorIds).toContain(connectorPreNode?.id);
+        expect(transposeHover?.focusState?.activeConnectorIds).toContain(connectorPostNode?.id);
         expect(transposeHover?.focusState?.columnSelections).toContainEqual({
             nodeId: transposeNode?.id,
+            colIndex: 3
+        });
+        expect(transposeHover?.focusState?.columnSelections).toContainEqual({
+            nodeId: postNode?.id,
+            colIndex: 3
+        });
+        expect(transposeHover?.focusState?.columnSelections).toContainEqual({
+            nodeId: postCopyNode?.id,
             colIndex: 3
         });
     });

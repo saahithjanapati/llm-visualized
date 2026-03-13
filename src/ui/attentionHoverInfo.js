@@ -26,7 +26,7 @@ export function resolveAttentionHoverLabel(stageKey = '') {
     case 'post':
         return 'Post-Softmax Attention Score';
     case 'masked-input':
-        return 'Masked Attention Score';
+        return 'Pre-Softmax Attention Score';
     case 'pre':
     default:
         return 'Pre-Softmax Attention Score';
@@ -36,7 +36,7 @@ export function resolveAttentionHoverLabel(stageKey = '') {
 export function resolveAttentionHoverActivationStage(stageKey = '') {
     switch (normalizeAttentionHoverStageKey(stageKey)) {
     case 'masked-input':
-        return 'attention.masked_input';
+        return 'attention.pre';
     case 'mask':
         return 'attention.mask';
     case 'post':
@@ -74,8 +74,7 @@ export function buildAttentionHoverInfo({
     const label = resolveAttentionHoverLabel(normalizedStageKey);
     const activationStage = resolveAttentionHoverActivationStage(normalizedStageKey);
     const showMaskValue = normalizedStageKey === 'mask'
-        || normalizedStageKey === 'masked-input'
-        || safeIsMasked;
+        || (normalizedStageKey !== 'masked-input' && safeIsMasked);
 
     const activationData = {
         label,

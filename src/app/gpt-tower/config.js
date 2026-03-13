@@ -57,6 +57,8 @@ export const CAMERA_CONFIG = {
     targetClampRadiusBase: 8000,
     targetClampRadiusPerLayer: 900,
     mobileZoomOutMultiplier: 1.2,
+    // Allow manual orbit zoom-out to go beyond the farthest authored tower view.
+    maxZoomOutDistanceMultiplier: 1.6,
     autoCameraHeadBias: 0.0,
     followDefaultCameraOffset: [-1215.87, 465.86, 3350.33],
     followDefaultTargetOffset: [1675.46, 227.33, -469.85],

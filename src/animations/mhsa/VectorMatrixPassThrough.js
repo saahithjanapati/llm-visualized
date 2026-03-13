@@ -60,7 +60,7 @@ const applyVectorCategoryLabel = (vectorRef, vectorCategory, ctx) => {
     } catch (_) { /* no-op */ }
 };
 
-const applyQkvProcessedVisuals = (vectorRef, ctx, vectorCategory, outLength, finalVectorColor) => {
+export const applyQkvProcessedVisuals = (vectorRef, ctx, vectorCategory, outLength, finalVectorColor) => {
     if (!vectorRef || typeof vectorRef.applyProcessedVisuals !== 'function') return false;
     const activationSource = ctx && ctx.activationSource ? ctx.activationSource : null;
     const layerIndex = Number.isFinite(ctx?.layerIndex) ? ctx.layerIndex : null;

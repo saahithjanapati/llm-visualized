@@ -91,16 +91,14 @@ const PROJECTION_XLN_TARGET_GAP = 8;
 const ATTENTION_TRANSPOSE_CORNER_RADIUS = 8;
 const ATTENTION_QKT_GROUP_GAP = 12;
 const ATTENTION_QKT_GROUP_GAP_SMALL = 10;
-const ATTENTION_KT_CLOSE_GAP = -60;
-const ATTENTION_KT_CLOSE_GAP_SMALL = -48;
 const ATTENTION_CLOSE_DIVISOR_GAP = 8;
 const ATTENTION_CLOSE_DIVISOR_GAP_SMALL = 6;
-const ATTENTION_DIVISOR_GAP = -12;
-const ATTENTION_DIVISOR_GAP_SMALL = -10;
+const ATTENTION_DIVISOR_GAP = -16;
+const ATTENTION_DIVISOR_GAP_SMALL = -13;
 const ATTENTION_SCALE_TEXT_OFFSET_X = -8;
 const ATTENTION_SCALE_TEXT_OFFSET_X_SMALL = -6;
-const ATTENTION_RESULT_CLUSTER_GAP = -10;
-const ATTENTION_RESULT_CLUSTER_GAP_SMALL = -8;
+const ATTENTION_RESULT_CLUSTER_GAP = -14;
+const ATTENTION_RESULT_CLUSTER_GAP_SMALL = -11;
 const ATTENTION_SOFTMAX_PERSISTENT_FONT_PX = 16;
 const ATTENTION_SOFTMAX_PERSISTENT_FONT_PX_SMALL = 15;
 const ATTENTION_SOFTMAX_ZOOMED_OUT_FONT_PX = 17;
@@ -116,10 +114,14 @@ const ATTENTION_SOFTMAX_PREFIX_GAP = 6;
 const ATTENTION_SOFTMAX_PREFIX_GAP_SMALL = 4;
 const ATTENTION_SOFTMAX_BODY_GAP = 4;
 const ATTENTION_SOFTMAX_BODY_GAP_SMALL = 3;
+const ATTENTION_SOFTMAX_CLOSE_EQUALS_GAP = 4;
+const ATTENTION_SOFTMAX_CLOSE_EQUALS_GAP_SMALL = 3;
 const ATTENTION_SOFTMAX_FLOW_GAP = 88;
 const ATTENTION_SOFTMAX_FLOW_GAP_SMALL = 66;
-const ATTENTION_SOFTMAX_ROW_OFFSET = 12;
-const ATTENTION_SOFTMAX_ROW_OFFSET_SMALL = 10;
+const ATTENTION_SOFTMAX_ROW_OFFSET = 48;
+const ATTENTION_SOFTMAX_ROW_OFFSET_SMALL = 38;
+const ATTENTION_SOFTMAX_RESULT_ALIGNMENT_OFFSET = 36;
+const ATTENTION_SOFTMAX_RESULT_ALIGNMENT_OFFSET_SMALL = 29;
 const ATTENTION_POST_COPY_STAGE_SPACER = 48;
 const ATTENTION_POST_COPY_STAGE_SPACER_SMALL = 36;
 const ATTENTION_HEAD_OUTPUT_GAP = 10;
@@ -132,25 +134,28 @@ const ATTENTION_PRE_SCORE_CAPTION_LABEL_SCALE = 0.82;
 const ATTENTION_MASK_CAPTION_LABEL_SCALE = 0.82;
 const ATTENTION_GRID_PADDING = 4;
 const ATTENTION_GRID_CARD_CORNER_RADIUS = 12;
+const ATTENTION_GRID_CELL_CORNER_RADIUS_SCALE = 0.9;
 const ATTENTION_SOFTMAX_TEXT_FONT_SCALE = 1.28;
 const ATTENTION_SCALE_TEXT_FONT_SCALE = 1.4;
 const ATTENTION_STAGE_VERTICAL_LIFT = 144;
 const ATTENTION_STAGE_VERTICAL_LIFT_SMALL = 110;
 const ATTENTION_STAGE_VERTICAL_LIFT_PER_EXTRA_ROW = 6;
 const ATTENTION_STAGE_VERTICAL_LIFT_PER_EXTRA_ROW_SMALL = 5;
-const ATTENTION_BOTTOM_CAPTION_CONNECTOR_CLEARANCE = 44;
-const ATTENTION_BOTTOM_CAPTION_CONNECTOR_CLEARANCE_SMALL = 36;
-const ATTENTION_CONNECTOR_CLEARANCE_PER_EXTRA_ROW = 1.5;
-const ATTENTION_CONNECTOR_CLEARANCE_PER_EXTRA_ROW_SMALL = 1.25;
-const ATTENTION_CONNECTOR_CLEARANCE_MAX_EXTRA = 22;
-const ATTENTION_CONNECTOR_CLEARANCE_MAX_EXTRA_SMALL = 18;
 const ATTENTION_CONNECTOR_CAPTION_EXIT_GAP = 4;
-const ATTENTION_PRE_CONNECTOR_SOURCE_GAP = 6;
-const ATTENTION_PRE_CONNECTOR_SOURCE_GAP_SMALL = 4;
+const ATTENTION_PRE_CONNECTOR_SOURCE_OFFSET_Y = 16;
+const ATTENTION_VALUE_CONNECTOR_SOURCE_OFFSET_Y = 14;
+const ATTENTION_VALUE_CONNECTOR_SOURCE_GAP = 8;
+const ATTENTION_VALUE_CONNECTOR_TARGET_GAP = 8;
 const MHSA_CONNECTOR_STROKE = 'rgba(255, 255, 255, 0.84)';
 const MHSA_SYMBOL_CAPTION_LABEL_SCALE = 0.9;
 const MHSA_WEIGHT_CAPTION_LABEL_SCALE_FACTOR = 0.72;
 const MHSA_WEIGHT_CAPTION_LABEL_SCALE_MIN = 1.02;
+const ATTENTION_SOFTMAX_CORE_FLOW_GAP_BOOST_RATIO = 0.15;
+const ATTENTION_SOFTMAX_CORE_FLOW_GAP_BOOST_MAX = 10;
+const ATTENTION_LEFT_HAND_SIDE_GAP_BASE = 10;
+const ATTENTION_LEFT_HAND_SIDE_GAP_BASE_SMALL = 8;
+const ATTENTION_LEFT_HAND_SIDE_GAP_BOOST_RATIO = 0.1;
+const ATTENTION_LEFT_HAND_SIDE_GAP_BOOST_MAX = 8;
 
 function normalizeIndex(value) {
     return Number.isFinite(value) ? Math.floor(value) : null;
@@ -167,6 +172,34 @@ function buildSemantic(baseSemantic, extra = {}) {
     };
 }
 
+function resolveAttentionSoftmaxCoreFlowGap(layoutMetrics = null, isSmallScreen = false) {
+    const baseGap = isSmallScreen ? 14 : 18;
+    const rawBoost = layoutMetrics?.cssVars?.['--mhsa-token-matrix-softmax-stage-gap-boost'];
+    const boost = typeof rawBoost === 'string'
+        ? Number.parseFloat(rawBoost)
+        : (Number.isFinite(rawBoost) ? Number(rawBoost) : 0);
+    const safeBoost = Number.isFinite(boost) ? Math.max(0, boost) : 0;
+    const resolvedBoost = Math.min(
+        ATTENTION_SOFTMAX_CORE_FLOW_GAP_BOOST_MAX,
+        Math.round(safeBoost * ATTENTION_SOFTMAX_CORE_FLOW_GAP_BOOST_RATIO)
+    );
+    return baseGap + resolvedBoost;
+}
+
+function resolveAttentionLeftHandSideGap(layoutMetrics = null, isSmallScreen = false) {
+    const baseGap = isSmallScreen ? ATTENTION_LEFT_HAND_SIDE_GAP_BASE_SMALL : ATTENTION_LEFT_HAND_SIDE_GAP_BASE;
+    const rawBoost = layoutMetrics?.cssVars?.['--mhsa-token-matrix-attention-flow-gap-boost'];
+    const boost = typeof rawBoost === 'string'
+        ? Number.parseFloat(rawBoost)
+        : (Number.isFinite(rawBoost) ? Number(rawBoost) : 0);
+    const safeBoost = Number.isFinite(boost) ? Math.max(0, boost) : 0;
+    const resolvedBoost = Math.min(
+        ATTENTION_LEFT_HAND_SIDE_GAP_BOOST_MAX,
+        Math.round(safeBoost * ATTENTION_LEFT_HAND_SIDE_GAP_BOOST_RATIO)
+    );
+    return baseGap + resolvedBoost;
+}
+
 function buildLabel(labelTex = '', fallbackText = '') {
     return {
         tex: typeof labelTex === 'string' ? labelTex : '',
@@ -176,18 +209,31 @@ function buildLabel(labelTex = '', fallbackText = '') {
     };
 }
 
-function buildMhsaProjectionBiasLabel(labelTex = '') {
+function createMhsaOperatorNode({
+    metadata = null,
+    ...rest
+} = {}) {
+    return createOperatorNode({
+        ...rest,
+        metadata: {
+            ...(metadata && typeof metadata === 'object' ? metadata : {}),
+            renderMode: 'dom-katex'
+        }
+    });
+}
+
+function buildMhsaProjectionSubscriptLabel(labelTex = '') {
     const safeLabelTex = typeof labelTex === 'string' ? labelTex.trim() : '';
-    const simpleBiasMatch = safeLabelTex.match(/^b_([A-Za-z]+)$/);
-    if (!simpleBiasMatch) {
+    const simpleSubscriptMatch = safeLabelTex.match(/^([A-Za-z]+)_([A-Za-z]+)$/);
+    if (!simpleSubscriptMatch) {
         return {
             labelTex: safeLabelTex,
             labelText: safeLabelTex
         };
     }
-    const [, subscript] = simpleBiasMatch;
+    const [, base, subscript] = simpleSubscriptMatch;
     return {
-        labelTex: `b_{\\mathrm{${subscript}}}`,
+        labelTex: `${base}_{\\mathrm{${subscript}}}`,
         labelText: safeLabelTex
     };
 }
@@ -207,7 +253,8 @@ function createCardMetadata(width = null, height = null, {
 
 function createPersistentAttentionGridMetadata({
     paddingX = ATTENTION_GRID_PADDING,
-    paddingY = ATTENTION_GRID_PADDING
+    paddingY = ATTENTION_GRID_PADDING,
+    cellCornerRadiusScale = ATTENTION_GRID_CELL_CORNER_RADIUS_SCALE
 } = {}) {
     return {
         grid: {
@@ -217,6 +264,9 @@ function createPersistentAttentionGridMetadata({
                 : {}),
             ...(Number.isFinite(paddingY) && paddingY >= 0
                 ? { paddingY: Math.max(0, Math.floor(paddingY)) }
+                : {}),
+            ...(Number.isFinite(cellCornerRadiusScale) && cellCornerRadiusScale >= 0
+                ? { cellCornerRadiusScale: Math.max(0, Number(cellCornerRadiusScale)) }
                 : {})
         },
         ...createCardMetadata(null, null, {
@@ -365,31 +415,6 @@ function resolveProjectionStackGap({
             + Math.min(maxExtra, resolvedExtraRows * perExtraRow)
         )
     );
-}
-
-function resolveAttentionBottomCaptionConnectorClearance({
-    rowCount = 1,
-    extraRows = null,
-    isSmallScreen = false
-} = {}) {
-    const safeRowCount = Number.isFinite(rowCount) ? Math.max(1, Math.floor(rowCount)) : 1;
-    const resolvedExtraRows = Number.isFinite(extraRows)
-        ? Math.max(0, Math.floor(extraRows))
-        : Math.max(0, safeRowCount - 5);
-    const baseClearance = isSmallScreen
-        ? ATTENTION_BOTTOM_CAPTION_CONNECTOR_CLEARANCE_SMALL
-        : ATTENTION_BOTTOM_CAPTION_CONNECTOR_CLEARANCE;
-    const perExtraRow = isSmallScreen
-        ? ATTENTION_CONNECTOR_CLEARANCE_PER_EXTRA_ROW_SMALL
-        : ATTENTION_CONNECTOR_CLEARANCE_PER_EXTRA_ROW;
-    const maxExtra = isSmallScreen
-        ? ATTENTION_CONNECTOR_CLEARANCE_MAX_EXTRA_SMALL
-        : ATTENTION_CONNECTOR_CLEARANCE_MAX_EXTRA;
-    const extraClearance = Math.min(
-        maxExtra,
-        Math.round(resolvedExtraRows * perExtraRow)
-    );
-    return Math.max(0, baseClearance + extraClearance);
 }
 
 function resolveVectorStripDimensions({
@@ -852,8 +877,7 @@ function buildProjectionStageNode({
     const weightNode = createCaptionedCardMatrixNode({
         role: 'projection-weight',
         semantic: buildSemantic(projectionSemantic, { role: 'projection-weight' }),
-        labelTex: projectionData.weightLabelTex,
-        labelText: projectionData.weightLabelTex,
+        ...buildMhsaProjectionSubscriptLabel(projectionData.weightLabelTex),
         rowCount: projectionData.weightRowCount,
         columnCount: projectionData.weightColumnCount,
         cardWidth: weightCardSize.width,
@@ -875,7 +899,7 @@ function buildProjectionStageNode({
     const biasNode = createVectorStripMatrixNode({
         role: 'projection-bias',
         semantic: buildSemantic(projectionSemantic, { role: 'projection-bias' }),
-        ...buildMhsaProjectionBiasLabel(projectionData.biasLabelTex),
+        ...buildMhsaProjectionSubscriptLabel(projectionData.biasLabelTex),
         rowItems: buildProjectionBiasRowItems(projectionData, projectionSemantic),
         rowCount: 1,
         columnCount: projectionData.outputColumnCount,
@@ -932,14 +956,14 @@ function buildProjectionStageNode({
         gapKey: 'projection',
         children: [
             weightNode,
-            createOperatorNode({
+            createMhsaOperatorNode({
                 role: 'projection-plus',
                 semantic: buildSemantic(projectionSemantic, { role: 'projection-plus', operatorKey: 'plus' }),
                 text: '+',
                 visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR }
             }),
             biasNode,
-            createOperatorNode({
+            createMhsaOperatorNode({
                 role: 'projection-equals',
                 semantic: buildSemantic(projectionSemantic, { role: 'projection-equals', operatorKey: 'equals' }),
                 text: '=',
@@ -959,7 +983,7 @@ function buildProjectionStageNode({
         gapKey: 'projection',
         children: [
             xInputNode,
-            createOperatorNode({
+            createMhsaOperatorNode({
                 role: 'projection-multiply',
                 semantic: buildSemantic(projectionSemantic, { role: 'projection-multiply', operatorKey: 'multiply' }),
                 text: 'x',
@@ -1170,7 +1194,7 @@ function buildAttentionStageNode({
                         : ATTENTION_SOFTMAX_ZOOMED_OUT_FONT_PX
                 }
             }),
-            createOperatorNode({
+            createMhsaOperatorNode({
                 role: 'attention-softmax-open',
                 semantic: buildSemantic(attentionSemantic, { role: 'attention-softmax-open', operatorKey: 'open' }),
                 text: '(',
@@ -1219,7 +1243,7 @@ function buildAttentionStageNode({
                                 ...createAttentionMatrixCaptionMetadata(scoreStage.postRowCount, scoreStage.postColumnCount)
                             }
                         }),
-                        createOperatorNode({
+                        createMhsaOperatorNode({
                             role: 'attention-head-output-multiply',
                             semantic: buildSemantic(attentionSemantic, { role: 'attention-head-output-multiply', operatorKey: 'multiply' }),
                             text: 'x',
@@ -1251,7 +1275,7 @@ function buildAttentionStageNode({
                             : ATTENTION_HEAD_OUTPUT_PRODUCT_GAP
                     }
                 }),
-                createOperatorNode({
+                createMhsaOperatorNode({
                     role: 'attention-head-output-equals',
                     semantic: buildSemantic(attentionSemantic, { role: 'attention-head-output-equals', operatorKey: 'equals' }),
                     text: '=',
@@ -1286,27 +1310,40 @@ function buildAttentionStageNode({
 
     const softmaxCoreFlowChildren = [
         maskedInputNode,
-        createOperatorNode({
+        createMhsaOperatorNode({
             role: 'attention-softmax-plus',
             semantic: buildSemantic(attentionSemantic, { role: 'attention-softmax-plus', operatorKey: 'plus' }),
             text: '+',
             visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR }
         }),
         maskNode,
-        createOperatorNode({
-            role: 'attention-softmax-close',
-            semantic: buildSemantic(attentionSemantic, { role: 'attention-softmax-close', operatorKey: 'close' }),
-            text: ')',
-            visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR },
+        createGroupNode({
+            role: 'attention-softmax-close-equals-group',
+            semantic: buildSemantic(attentionSemantic, { role: 'attention-softmax-close-equals-group' }),
+            direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
+            gapKey: 'inline',
+            children: [
+                createMhsaOperatorNode({
+                    role: 'attention-softmax-close',
+                    semantic: buildSemantic(attentionSemantic, { role: 'attention-softmax-close', operatorKey: 'close' }),
+                    text: ')',
+                    visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR },
+                    metadata: {
+                        fontScale: ATTENTION_SOFTMAX_GROUPING_OPERATOR_SCALE
+                    }
+                }),
+                createMhsaOperatorNode({
+                    role: 'attention-softmax-equals',
+                    semantic: buildSemantic(attentionSemantic, { role: 'attention-softmax-equals', operatorKey: 'equals' }),
+                    text: '=',
+                    visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR }
+                })
+            ],
             metadata: {
-                fontScale: ATTENTION_SOFTMAX_GROUPING_OPERATOR_SCALE
+                gapOverride: isSmallScreen
+                    ? ATTENTION_SOFTMAX_CLOSE_EQUALS_GAP_SMALL
+                    : ATTENTION_SOFTMAX_CLOSE_EQUALS_GAP
             }
-        }),
-        createOperatorNode({
-            role: 'attention-softmax-equals',
-            semantic: buildSemantic(attentionSemantic, { role: 'attention-softmax-equals', operatorKey: 'equals' }),
-            text: '=',
-            visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR }
         }),
         postNode
     ];
@@ -1331,7 +1368,10 @@ function buildAttentionStageNode({
         semantic: buildSemantic(attentionSemantic, { role: 'attention-softmax-core-flow' }),
         direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
         gapKey: 'softmax',
-        children: softmaxCoreFlowChildren
+        children: softmaxCoreFlowChildren,
+        metadata: {
+            gapOverride: resolveAttentionSoftmaxCoreFlowGap(layoutMetrics, isSmallScreen)
+        }
     });
 
     const softmaxCoreGap = isSmallScreen
@@ -1398,7 +1438,7 @@ function buildAttentionStageNode({
         gapKey: 'inline',
         align: 'center',
         children: [
-            createOperatorNode({
+            createMhsaOperatorNode({
                 role: 'attention-equals',
                 semantic: buildSemantic(attentionSemantic, { role: 'attention-equals', operatorKey: 'equals' }),
                 text: '=',
@@ -1430,7 +1470,11 @@ function buildAttentionStageNode({
         scoreStage.outputRowCount,
         isSmallScreen,
         layoutMetrics
-    ) + softmaxCoreGap;
+    ) + softmaxCoreGap + (
+        isSmallScreen
+            ? ATTENTION_SOFTMAX_RESULT_ALIGNMENT_OFFSET_SMALL
+            : ATTENTION_SOFTMAX_RESULT_ALIGNMENT_OFFSET
+    );
 
     const divisorNode = createGroupNode({
         role: 'attention-divisor-group',
@@ -1438,7 +1482,7 @@ function buildAttentionStageNode({
         direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
         gapKey: 'inline',
         children: [
-            createOperatorNode({
+            createMhsaOperatorNode({
                 role: 'attention-divide',
                 semantic: buildSemantic(attentionSemantic, { role: 'attention-divide', operatorKey: 'divide' }),
                 text: '/',
@@ -1474,9 +1518,13 @@ function buildAttentionStageNode({
         direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
         gapKey: 'inline',
         children: [
-            createOperatorNode({
+            createMhsaOperatorNode({
                 role: 'attention-close',
-                semantic: buildSemantic(attentionSemantic, { role: 'attention-close', operatorKey: 'close' }),
+                semantic: buildSemantic(attentionSemantic, {
+                    role: 'attention-close',
+                    operatorKey: 'close',
+                    clusterKey: 'divisor'
+                }),
                 text: ')',
                 visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR },
                 metadata: {
@@ -1490,35 +1538,13 @@ function buildAttentionStageNode({
         }
     });
 
-    const transposeCloseNode = createGroupNode({
-        role: 'attention-transpose-close-group',
-        semantic: buildSemantic(attentionSemantic, { role: 'attention-transpose-close-group' }),
-        direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
-        gapKey: 'inline',
-        children: [
-            transposeNode,
-            createOperatorNode({
-                role: 'attention-close',
-                semantic: buildSemantic(attentionSemantic, { role: 'attention-close', operatorKey: 'close' }),
-                text: ')',
-                visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR },
-                metadata: {
-                    fontScale: ATTENTION_GROUPING_OPERATOR_SCALE
-                }
-            })
-        ],
-        metadata: {
-            gapOverride: isSmallScreen ? ATTENTION_KT_CLOSE_GAP_SMALL : ATTENTION_KT_CLOSE_GAP
-        }
-    });
-
     const qktEquationNode = createGroupNode({
         role: 'attention-qkt-equation',
         semantic: buildSemantic(attentionSemantic, { role: 'attention-qkt-equation' }),
         direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
         gapKey: 'inline',
         children: [
-            createOperatorNode({
+            createMhsaOperatorNode({
                 role: 'attention-open',
                 semantic: buildSemantic(attentionSemantic, { role: 'attention-open', operatorKey: 'open' }),
                 text: '(',
@@ -1528,13 +1554,13 @@ function buildAttentionStageNode({
                 }
             }),
             querySourceNode,
-            createOperatorNode({
+            createMhsaOperatorNode({
                 role: 'attention-multiply',
                 semantic: buildSemantic(attentionSemantic, { role: 'attention-multiply', operatorKey: 'multiply' }),
                 text: 'x',
                 visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR }
             }),
-            transposeCloseNode
+            transposeNode
         ],
         metadata: {
             gapOverride: isSmallScreen ? ATTENTION_QKT_GROUP_GAP_SMALL : ATTENTION_QKT_GROUP_GAP
@@ -1550,7 +1576,10 @@ function buildAttentionStageNode({
         children: [
             qktEquationNode,
             divisorClusterNode
-        ]
+        ],
+        metadata: {
+            gapOverride: resolveAttentionLeftHandSideGap(layoutMetrics, isSmallScreen)
+        }
     });
 
     const attentionResultNode = createGroupNode({
@@ -1638,23 +1667,6 @@ function buildConnectorNodes({
     isSmallScreen = false
 }) {
     const connectorGaps = layoutMetrics?.connectorGaps || {};
-    const attentionConnectorClearance = resolveAttentionBottomCaptionConnectorClearance({
-        rowCount: layoutMetrics?.rowCount,
-        extraRows: layoutMetrics?.extraRows,
-        isSmallScreen
-    });
-    const preConnectorSourceGap = Math.max(
-        0,
-        (connectorGaps.pre ?? connectorGaps.default ?? 0)
-            + ATTENTION_CONNECTOR_CAPTION_EXIT_GAP
-            + (isSmallScreen
-                ? ATTENTION_PRE_CONNECTOR_SOURCE_GAP_SMALL
-                : ATTENTION_PRE_CONNECTOR_SOURCE_GAP)
-    );
-    const valueConnectorSourceGap = Math.max(
-        0,
-        connectorGaps.value ?? connectorGaps.default ?? 0
-    );
     const findProjectionOutput = (kind) => projectionNodes.find((stageNode) => stageNode?.metadata?.kind === kind)
         ?.children?.[2]?.children?.[4] || null;
     const findAttentionNode = (role) => {
@@ -1708,14 +1720,15 @@ function buildConnectorNodes({
                 target: createAnchorRef(transposeNode.id, VIEW2D_ANCHOR_SIDES.BOTTOM),
                 route: VIEW2D_CONNECTOR_ROUTES.ELBOW,
                 gap: connectorGaps.transpose,
-                targetGap: attentionConnectorClearance,
+                targetGap: ATTENTION_CONNECTOR_CAPTION_EXIT_GAP,
                 gapKey: 'transpose',
                 visual: {
                     styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL,
                     stroke: MHSA_CONNECTOR_STROKE
                 },
                 metadata: {
-                    preserveColor: true
+                    preserveColor: true,
+                    targetAnchorMode: 'caption-bottom'
                 }
             })
             : null,
@@ -1727,7 +1740,7 @@ function buildConnectorNodes({
                 target: createAnchorRef(maskedInputNode.id, VIEW2D_ANCHOR_SIDES.TOP),
                 route: VIEW2D_CONNECTOR_ROUTES.VERTICAL,
                 gap: connectorGaps.pre,
-                sourceGap: preConnectorSourceGap,
+                sourceGap: ATTENTION_CONNECTOR_CAPTION_EXIT_GAP,
                 gapKey: 'pre',
                 visual: {
                     styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL,
@@ -1735,7 +1748,8 @@ function buildConnectorNodes({
                 },
                 metadata: {
                     preserveColor: true,
-                    sourceAnchorMode: 'caption-bottom'
+                    sourceAnchorMode: 'caption-bottom',
+                    sourceAnchorOffsetY: ATTENTION_PRE_CONNECTOR_SOURCE_OFFSET_Y
                 }
             })
             : null,
@@ -1765,8 +1779,8 @@ function buildConnectorNodes({
                 target: createAnchorRef(valuePostNode.id, VIEW2D_ANCHOR_SIDES.BOTTOM),
                 route: VIEW2D_CONNECTOR_ROUTES.ELBOW,
                 gap: connectorGaps.value,
-                sourceGap: valueConnectorSourceGap,
-                targetGap: 0,
+                sourceGap: ATTENTION_VALUE_CONNECTOR_SOURCE_GAP,
+                targetGap: ATTENTION_VALUE_CONNECTOR_TARGET_GAP,
                 gapKey: 'value',
                 visual: {
                     styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL,
@@ -1774,6 +1788,7 @@ function buildConnectorNodes({
                 },
                 metadata: {
                     preserveColor: true,
+                    sourceAnchorOffsetY: ATTENTION_VALUE_CONNECTOR_SOURCE_OFFSET_Y,
                     targetAnchorMode: 'caption-bottom'
                 }
             })

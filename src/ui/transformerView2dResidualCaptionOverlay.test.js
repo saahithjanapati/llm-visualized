@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { D_HEAD, D_MODEL } from './selectionPanelConstants.js';
 import { createTransformerView2dResidualCaptionOverlay, resolveCaptionScreenExtent } from './transformerView2dResidualCaptionOverlay.js';
 import { buildSceneLayout } from '../view2d/layout/buildSceneLayout.js';
+import { createMhsaDetailSceneIndex, resolveMhsaDetailHoverState } from '../view2d/mhsaDetailInteraction.js';
 import { buildMhsaSceneModel } from '../view2d/model/buildMhsaSceneModel.js';
 import { buildHeadDetailSceneModel } from '../view2d/model/buildHeadDetailSceneModel.js';
 import { flattenSceneNodes } from '../view2d/schema/sceneTypes.js';
@@ -185,6 +186,8 @@ function buildMhsaFixtures({
     const maskedInputNode = nodes.find((node) => node.role === 'attention-masked-input') || null;
     const maskNode = nodes.find((node) => node.role === 'attention-mask') || null;
     const postNode = nodes.find((node) => node.role === 'attention-post') || null;
+    const valuePostNode = nodes.find((node) => node.role === 'attention-value-post') || null;
+    const headOutputNode = nodes.find((node) => node.role === 'attention-head-output') || null;
     const softmaxLabelNode = nodes.find((node) => node.role === 'attention-softmax-label') || null;
     const scaleNode = nodes.find((node) => node.role === 'attention-scale') || null;
 
@@ -224,6 +227,8 @@ function buildMhsaFixtures({
         maskedInputNode,
         maskNode,
         postNode,
+        valuePostNode,
+        headOutputNode,
         softmaxLabelNode,
         scaleNode,
         canvas,
@@ -552,6 +557,64 @@ describe('transformerView2dResidualCaptionOverlay', () => {
         }
     });
 
+    it('applies bias-caption tuning so subscripts stay smaller and bias dimensions render larger', () => {
+        const fixtures = buildMhsaFixtures();
+        const {
+            scene,
+            layout,
+            qBiasNode,
+            weightNode,
+            canvas,
+            overlay,
+            cleanup
+        } = fixtures;
+
+        try {
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds: (bounds) => ({
+                    x: bounds.x,
+                    y: bounds.y,
+                    width: bounds.width,
+                    height: bounds.height
+                }),
+                visible: true,
+                enabled: true
+            });
+
+            const biasItem = queryCaptionItem(qBiasNode.id);
+            const weightItem = queryCaptionItem(weightNode.id);
+            const biasLabelRoleScale = Number.parseFloat(
+                biasItem?.style.getPropertyValue('--detail-transformer-view2d-caption-label-role-scale') || '0'
+            );
+            const biasDimensionsRoleScale = Number.parseFloat(
+                biasItem?.style.getPropertyValue('--detail-transformer-view2d-caption-dimensions-role-scale') || '0'
+            );
+            const biasKatexSubscriptScale = Number.parseFloat(
+                biasItem?.style.getPropertyValue('--detail-transformer-view2d-caption-katex-subscript-scale') || '0'
+            );
+            const weightKatexSubscriptScale = Number.parseFloat(
+                weightItem?.style.getPropertyValue('--detail-transformer-view2d-caption-katex-subscript-scale') || '0'
+            );
+            const biasInlineSubscriptScale = Number.parseFloat(
+                biasItem?.style.getPropertyValue('--detail-transformer-view2d-caption-inline-subscript-scale') || '0'
+            );
+            const weightInlineSubscriptScale = Number.parseFloat(
+                weightItem?.style.getPropertyValue('--detail-transformer-view2d-caption-inline-subscript-scale') || '0'
+            );
+
+            expect(biasLabelRoleScale).toBeGreaterThan(3);
+            expect(biasLabelRoleScale).toBeLessThan(4.6);
+            expect(biasDimensionsRoleScale).toBeGreaterThan(1);
+            expect(biasKatexSubscriptScale).toBeLessThan(weightKatexSubscriptScale);
+            expect(biasInlineSubscriptScale).toBeLessThan(weightInlineSubscriptScale);
+        } finally {
+            cleanup();
+        }
+    });
+
     it('prefers KaTeX rendering for MHSA bias, score, and scale labels when available', () => {
         const fixtures = buildMhsaFixtures();
         const {
@@ -571,6 +634,10 @@ describe('transformerView2dResidualCaptionOverlay', () => {
         };
 
         try {
+            const qWeightNode = flattenSceneNodes(scene).find((node) => (
+                node.role === 'projection-weight'
+                && String(node.metadata?.kind || '').toLowerCase() === 'q'
+            )) || null;
             const preScoreEntry = layout.registry.getNodeEntry(preScoreNode.id);
             const visibleScale = resolveThresholdScale(preScoreEntry).scale * 1.2;
             const projectBounds = (bounds) => ({
@@ -590,12 +657,20 @@ describe('transformerView2dResidualCaptionOverlay', () => {
             });
 
             expect(window.katex.renderToString).toHaveBeenCalledWith(
+                'W_{\\mathrm{q}}',
+                expect.objectContaining({
+                    throwOnError: false,
+                    displayMode: false
+                })
+            );
+            expect(window.katex.renderToString).toHaveBeenCalledWith(
                 'b_{\\mathrm{q}}',
                 expect.objectContaining({
                     throwOnError: false,
                     displayMode: false
                 })
             );
+            expect(queryCaptionItem(qWeightNode?.id || '')?.querySelector('.katex')).toBeTruthy();
             expect(queryCaptionItem(qBiasNode.id)?.dataset.nodeRole).toBe('projection-bias');
             expect(queryCaptionItem(qBiasNode.id)?.querySelector('.katex')).toBeTruthy();
             expect(queryCaptionItem(biasNode.id)?.querySelector('.katex')).toBeTruthy();
@@ -775,6 +850,7 @@ describe('transformerView2dResidualCaptionOverlay', () => {
             );
 
             expect(weightLabelSize).toBeGreaterThan(0);
+            expect(weightLabelSize).toBeGreaterThan(0);
             expect(weightLabelSize).toBeGreaterThan(40);
         } finally {
             cleanup();
@@ -916,7 +992,78 @@ describe('transformerView2dResidualCaptionOverlay', () => {
         }
     });
 
-    it('keeps head-detail matrix captions readable across zoom levels', () => {
+    it('scales MHSA equation operators with zoom levels', () => {
+        const fixtures = buildMhsaFixtures();
+        const {
+            scene,
+            layout,
+            canvas,
+            overlay,
+            cleanup
+        } = fixtures;
+
+        try {
+            const operatorNode = flattenSceneNodes(scene).find((node) => node.role === 'attention-equals');
+            const operatorEntry = layout.registry.getNodeEntry(operatorNode?.id || '');
+            const baseBounds = operatorEntry?.contentBounds || operatorEntry?.bounds || null;
+            const zoomedOutScale = 0.42;
+            const zoomedInScale = 1.42;
+            const targetX = 52;
+            const targetY = 48;
+            const projectBounds = (scale) => {
+                const offsetX = targetX - ((Number(baseBounds?.x) || 0) * scale);
+                const offsetY = targetY - ((Number(baseBounds?.y) || 0) * scale);
+                return (bounds) => ({
+                    x: (bounds.x * scale) + offsetX,
+                    y: (bounds.y * scale) + offsetY,
+                    width: bounds.width * scale,
+                    height: bounds.height * scale
+                });
+            };
+
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds: projectBounds(zoomedOutScale),
+                visible: true,
+                enabled: true
+            });
+
+            const zoomedOutItem = queryCaptionItem(operatorNode?.id || '');
+            const zoomedOutFontSize = Number.parseFloat(
+                zoomedOutItem?.style.getPropertyValue('--detail-transformer-view2d-dom-text-size') || '0'
+            );
+            const zoomedOutHeight = (Number(baseBounds?.height) || 0) * zoomedOutScale;
+
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds: projectBounds(zoomedInScale),
+                visible: true,
+                enabled: true
+            });
+
+            const zoomedInItem = queryCaptionItem(operatorNode?.id || '');
+            const zoomedInFontSize = Number.parseFloat(
+                zoomedInItem?.style.getPropertyValue('--detail-transformer-view2d-dom-text-size') || '0'
+            );
+            const zoomedInHeight = (Number(baseBounds?.height) || 0) * zoomedInScale;
+
+            expect(operatorNode).toBeTruthy();
+            expect(zoomedOutItem?.dataset.nodeKind).toBe('operator');
+            expect(zoomedOutItem?.textContent).toContain('=');
+            expect(zoomedOutFontSize).toBeGreaterThan(0);
+            expect(zoomedInFontSize).toBeGreaterThan(zoomedOutFontSize);
+            expect(zoomedOutFontSize / Math.max(1, zoomedOutHeight))
+                .toBeCloseTo(zoomedInFontSize / Math.max(1, zoomedInHeight), 2);
+        } finally {
+            cleanup();
+        }
+    });
+
+    it('scales head-detail matrix labels and dimensions with zoom', () => {
         const fixtures = buildHeadDetailFixtures();
         const {
             scene,
@@ -929,7 +1076,7 @@ describe('transformerView2dResidualCaptionOverlay', () => {
 
         try {
             const qCopyEntry = layout.registry.getNodeEntry(qCopyNode.id);
-            const zoomedOutScale = 0.74;
+            const zoomedOutScale = 0.38;
             const zoomedInScale = 1.46;
             const projectBounds = (scale) => (bounds) => ({
                 x: bounds.x,
@@ -973,8 +1120,9 @@ describe('transformerView2dResidualCaptionOverlay', () => {
             expect(qCopyEntry).toBeTruthy();
             expect(zoomedOutLabelSize).toBeGreaterThan(0);
             expect(zoomedOutDimensionsSize).toBeGreaterThan(0);
-            expect(zoomedInLabelSize).toBeGreaterThanOrEqual(zoomedOutLabelSize);
-            expect(zoomedInDimensionsSize).toBeGreaterThanOrEqual(zoomedOutDimensionsSize);
+            expect(zoomedInLabelSize).toBeGreaterThan(zoomedOutLabelSize);
+            expect(zoomedInDimensionsSize).toBeGreaterThan(zoomedOutDimensionsSize);
+            expect(zoomedOutDimensionsSize).toBeLessThan(ATTENTION_MATRIX_LABEL_MIN_SCREEN_FONT_PX);
         } finally {
             cleanup();
         }
@@ -1074,10 +1222,22 @@ describe('transformerView2dResidualCaptionOverlay', () => {
             const preScoreLabelSize = Number.parseFloat(
                 queryCaptionItem(preScoreNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
             );
+            const queryDimensionsSize = Number.parseFloat(
+                queryCaptionItem(queryNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-dimensions-size') || '0'
+            );
+            const transposeDimensionsSize = Number.parseFloat(
+                queryCaptionItem(transposeNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-dimensions-size') || '0'
+            );
+            const preScoreDimensionsSize = Number.parseFloat(
+                queryCaptionItem(preScoreNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-dimensions-size') || '0'
+            );
 
             expect(preScoreLabelSize).toBeGreaterThan(0);
             expect(preScoreLabelSize).toBeCloseTo(queryLabelSize, 1);
             expect(preScoreLabelSize).toBeCloseTo(transposeLabelSize, 1);
+            expect(preScoreDimensionsSize).toBeGreaterThan(0);
+            expect(preScoreDimensionsSize).toBeCloseTo(queryDimensionsSize, 1);
+            expect(preScoreDimensionsSize).toBeCloseTo(transposeDimensionsSize, 1);
         } finally {
             cleanup();
         }
@@ -1145,6 +1305,61 @@ describe('transformerView2dResidualCaptionOverlay', () => {
             expect(zoomedOutLabelSizes.some((labelSize) => (
                 labelSize < ATTENTION_MATRIX_LABEL_MIN_SCREEN_FONT_PX
             ))).toBe(true);
+        } finally {
+            cleanup();
+        }
+    });
+
+    it('dims Q and V captions while keeping H_i active during K-row detail focus', () => {
+        const fixtures = buildMhsaFixtures();
+        const {
+            scene,
+            layout,
+            outputNode,
+            queryNode,
+            valuePostNode,
+            headOutputNode,
+            canvas,
+            overlay,
+            cleanup
+        } = fixtures;
+
+        try {
+            const outputEntry = layout.registry.getNodeEntry(outputNode.id);
+            const visibleScale = resolveThresholdScale(outputEntry).scale * 1.1;
+            const projectBounds = (bounds) => ({
+                x: bounds.x,
+                y: bounds.y,
+                width: bounds.width * visibleScale,
+                height: bounds.height * visibleScale
+            });
+            const index = createMhsaDetailSceneIndex(scene);
+            const hoverState = resolveMhsaDetailHoverState(index, {
+                node: outputNode,
+                rowHit: {
+                    rowIndex: 0,
+                    rowItem: outputNode.rowItems[0]
+                }
+            });
+
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds,
+                visible: true,
+                enabled: true,
+                focusState: hoverState?.focusState || null
+            });
+
+            expect(queryCaptionItem(outputNode.id)?.hidden).toBe(false);
+            expect(queryCaptionItem(queryNode.id)?.hidden).toBe(false);
+            expect(queryCaptionItem(valuePostNode.id)?.hidden).toBe(false);
+            expect(queryCaptionItem(headOutputNode.id)?.hidden).toBe(false);
+            expect(Number.parseFloat(queryCaptionItem(outputNode.id)?.style.opacity || '0')).toBeCloseTo(1, 3);
+            expect(Number.parseFloat(queryCaptionItem(queryNode.id)?.style.opacity || '0')).toBeCloseTo(0.18, 3);
+            expect(Number.parseFloat(queryCaptionItem(valuePostNode.id)?.style.opacity || '0')).toBeCloseTo(0.18, 3);
+            expect(Number.parseFloat(queryCaptionItem(headOutputNode.id)?.style.opacity || '0')).toBeCloseTo(1, 3);
         } finally {
             cleanup();
         }

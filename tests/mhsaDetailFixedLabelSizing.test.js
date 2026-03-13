@@ -28,6 +28,7 @@ describe('resolveView2dSceneTextZoomPolicy', () => {
         expect(resolveView2dSceneTextZoomPolicy(scene)).toEqual({
             captionBehavior: VIEW2D_TEXT_ZOOM_BEHAVIORS.SCREEN_ADAPTIVE,
             domTextBehavior: VIEW2D_TEXT_ZOOM_BEHAVIORS.SCREEN_ADAPTIVE,
+            operatorBehavior: VIEW2D_TEXT_ZOOM_BEHAVIORS.SCREEN_ADAPTIVE,
             useUniformMatrixCaptions: false,
             textScreenFontPx: null,
             captionLabelScreenFontPx: null,
@@ -38,7 +39,7 @@ describe('resolveView2dSceneTextZoomPolicy', () => {
         });
     });
 
-    it('marks MHSA detail scenes as scene-relative for captions and DOM text', () => {
+    it('marks MHSA detail scenes as scene-relative for captions, DOM text, and operators', () => {
         const scene = createSceneWithMetadata({
             visualContract: 'selection-panel-mhsa-v1',
             source: 'selectionPanelMhsaTokenMatrixUtils'
@@ -48,19 +49,20 @@ describe('resolveView2dSceneTextZoomPolicy', () => {
         expect(resolveView2dSceneTextZoomPolicy(scene)).toEqual({
             captionBehavior: VIEW2D_TEXT_ZOOM_BEHAVIORS.SCENE_RELATIVE,
             domTextBehavior: VIEW2D_TEXT_ZOOM_BEHAVIORS.SCENE_RELATIVE,
+            operatorBehavior: VIEW2D_TEXT_ZOOM_BEHAVIORS.SCENE_RELATIVE,
             useUniformMatrixCaptions: true,
             textScreenFontPx: null,
             captionLabelScreenFontPx: null,
             captionDimensionsScreenFontPx: null,
             rowLabelScreenFontPx: 14,
-            operatorMinScreenFontPx: 12,
+            operatorMinScreenFontPx: null,
             operatorMinScreenHeightPx: 0
         });
     });
 });
 
 describe('resolveMhsaDetailFixedTextSizing', () => {
-    it('only keeps row labels on the fixed-screen path for MHSA detail scenes', () => {
+    it('keeps row labels fixed while captions and operators stay scene-relative for MHSA detail scenes', () => {
         const detailScene = createSceneWithMetadata({
             visualContract: 'selection-panel-mhsa-v1'
         });
@@ -72,7 +74,8 @@ describe('resolveMhsaDetailFixedTextSizing', () => {
             captionLabelScreenFontPx: null,
             captionDimensionsScreenFontPx: null,
             rowLabelScreenFontPx: 14,
-            operatorMinScreenFontPx: 12,
+            operatorBehavior: VIEW2D_TEXT_ZOOM_BEHAVIORS.SCENE_RELATIVE,
+            operatorMinScreenFontPx: null,
             operatorMinScreenHeightPx: 0
         });
     });

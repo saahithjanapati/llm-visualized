@@ -13,6 +13,11 @@ import {
 } from './mhsaDetailInteraction.js';
 
 const TOKEN_LABELS = ['Token A', 'Token B'];
+const CONNECTOR_CAPTION_EXIT_GAP = 4;
+const PRE_CONNECTOR_SOURCE_OFFSET_Y = 16;
+const VALUE_CONNECTOR_SOURCE_OFFSET_Y = 14;
+const VALUE_CONNECTOR_SOURCE_GAP = 8;
+const VALUE_CONNECTOR_TARGET_GAP = 8;
 
 function createVectorValues(seed = 0) {
     return Array.from({ length: D_HEAD }, (_, index) => Number((seed + (index * 0.01)).toFixed(4)));
@@ -181,6 +186,38 @@ function buildSceneFixtures(tokenCount = TOKEN_LABELS.length, {
         node.role === 'x-ln-copy'
         && String(node.semantic?.branchKey || '').toLowerCase() === 'q'
     )) || null;
+    const keyInputNode = nodes.find((node) => (
+        node.role === 'x-ln-copy'
+        && String(node.semantic?.branchKey || '').toLowerCase() === 'k'
+    )) || null;
+    const valueInputNode = nodes.find((node) => (
+        node.role === 'x-ln-copy'
+        && String(node.semantic?.branchKey || '').toLowerCase() === 'v'
+    )) || null;
+    const queryWeightNode = nodes.find((node) => (
+        node.role === 'projection-weight'
+        && String(node.metadata?.kind || '').toLowerCase() === 'q'
+    )) || null;
+    const queryBiasNode = nodes.find((node) => (
+        node.role === 'projection-bias'
+        && String(node.metadata?.kind || '').toLowerCase() === 'q'
+    )) || null;
+    const keyWeightNode = nodes.find((node) => (
+        node.role === 'projection-weight'
+        && String(node.metadata?.kind || '').toLowerCase() === 'k'
+    )) || null;
+    const keyBiasNode = nodes.find((node) => (
+        node.role === 'projection-bias'
+        && String(node.metadata?.kind || '').toLowerCase() === 'k'
+    )) || null;
+    const valueWeightNode = nodes.find((node) => (
+        node.role === 'projection-weight'
+        && String(node.metadata?.kind || '').toLowerCase() === 'v'
+    )) || null;
+    const valueBiasNode = nodes.find((node) => (
+        node.role === 'projection-bias'
+        && String(node.metadata?.kind || '').toLowerCase() === 'v'
+    )) || null;
     const queryProjectionOutputNode = nodes.find((node) => (
         node.role === 'projection-output'
         && String(node.metadata?.kind || '').toLowerCase() === 'q'
@@ -193,6 +230,10 @@ function buildSceneFixtures(tokenCount = TOKEN_LABELS.length, {
     const attentionEqualsNode = nodes.find((node) => node.role === 'attention-equals') || null;
     const attentionDivideNode = nodes.find((node) => node.role === 'attention-divide') || null;
     const attentionScaleNode = nodes.find((node) => node.role === 'attention-scale') || null;
+    const divisorClusterNode = nodes.find((node) => node.role === 'attention-divisor-cluster') || null;
+    const divisorCloseNode = divisorClusterNode?.children?.find((node) => (
+        node.role === 'attention-close' && node.semantic?.clusterKey === 'divisor'
+    )) || null;
     const attentionStageNode = nodes.find((node) => node.role === 'attention-stage') || null;
     const maskedInputNode = nodes.find((node) => node.role === 'attention-masked-input') || null;
     const postCopyNode = nodes.find((node) => node.role === 'attention-post-copy') || null;
@@ -204,11 +245,14 @@ function buildSceneFixtures(tokenCount = TOKEN_LABELS.length, {
         && String(node.metadata?.kind || '').toLowerCase() === 'k'
     )) || null;
     const qktEquationNode = nodes.find((node) => node.role === 'attention-qkt-equation') || null;
-    const transposeCloseGroupNode = nodes.find((node) => node.role === 'attention-transpose-close-group') || null;
-    const transposeCloseNode = transposeCloseGroupNode?.children?.find((node) => node.role === 'attention-close') || null;
     const connectorKNode = nodes.find((node) => node.role === 'connector-k') || null;
+    const connectorQNode = nodes.find((node) => node.role === 'connector-q') || null;
     const connectorPreNode = nodes.find((node) => node.role === 'connector-pre') || null;
+    const connectorPostNode = nodes.find((node) => node.role === 'connector-post') || null;
     const connectorVNode = nodes.find((node) => node.role === 'connector-v') || null;
+    const connectorXlnQNode = nodes.find((node) => node.role === 'connector-xln-q') || null;
+    const connectorXlnKNode = nodes.find((node) => node.role === 'connector-xln-k') || null;
+    const connectorXlnVNode = nodes.find((node) => node.role === 'connector-xln-v') || null;
     const projectionIngressConnectorNodes = nodes.filter((node) => (
         node.role === 'connector-xln-q'
         || node.role === 'connector-xln-k'
@@ -230,12 +274,22 @@ function buildSceneFixtures(tokenCount = TOKEN_LABELS.length, {
         transposeNode,
         queryNode,
         queryInputNode,
+        keyInputNode,
+        valueInputNode,
+        queryWeightNode,
+        queryBiasNode,
+        keyWeightNode,
+        keyBiasNode,
+        valueWeightNode,
+        valueBiasNode,
         queryProjectionOutputNode,
         valueProjectionOutputNode,
         preScoreNode,
         attentionEqualsNode,
         attentionDivideNode,
         attentionScaleNode,
+        divisorClusterNode,
+        divisorCloseNode,
         attentionStageNode,
         maskedInputNode,
         postCopyNode,
@@ -244,11 +298,14 @@ function buildSceneFixtures(tokenCount = TOKEN_LABELS.length, {
         softmaxCloseNode,
         keyProjectionOutputNode,
         qktEquationNode,
-        transposeCloseGroupNode,
-        transposeCloseNode,
+        connectorQNode,
         connectorKNode,
         connectorPreNode,
+        connectorPostNode,
         connectorVNode,
+        connectorXlnQNode,
+        connectorXlnKNode,
+        connectorXlnVNode,
         projectionIngressConnectorNodes,
         valuePostNode,
         headOutputNode,
@@ -281,6 +338,13 @@ function resolveEntryDimensionTop(entry = null) {
     return Math.max(contentBottom, labelBottom);
 }
 
+function resolveHorizontalContentGap(leftEntry = null, rightEntry = null) {
+    const leftRight = (leftEntry?.contentBounds?.x || 0) + (leftEntry?.contentBounds?.width || 0);
+    return Math.round((rightEntry?.contentBounds?.x || 0) - leftRight);
+}
+
+const ATTENTION_GRID_CELL_CORNER_RADIUS_SCALE = 0.9;
+
 describe('MHSA detail transpose view', () => {
     it('renders K^T as a transpose column strip with transpose-aware dimensions', () => {
         const {
@@ -310,7 +374,23 @@ describe('MHSA detail transpose view', () => {
     it('treats direct K^T hover as a column selection on the transpose strip', () => {
         const {
             index,
-            transposeNode
+            transposeNode,
+            projectionSourceNode,
+            queryNode,
+            queryInputNode,
+            queryWeightNode,
+            queryBiasNode,
+            queryProjectionOutputNode,
+            valueInputNode,
+            valueWeightNode,
+            valueBiasNode,
+            valueProjectionOutputNode,
+            connectorKNode,
+            connectorPreNode,
+            connectorPostNode,
+            connectorVNode,
+            valuePostNode,
+            headOutputNode
         } = buildSceneFixtures();
 
         const hoverState = resolveMhsaDetailHoverState(index, {
@@ -326,6 +406,25 @@ describe('MHSA detail transpose view', () => {
             nodeId: transposeNode.id,
             colIndex: 1
         });
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: projectionSourceNode.id,
+            rowIndex: 1
+        });
+        expect(hoverState?.focusState?.activeConnectorIds).toContain(connectorKNode.id);
+        expect(hoverState?.focusState?.activeConnectorIds).toContain(connectorPreNode.id);
+        expect(hoverState?.focusState?.activeConnectorIds).toContain(connectorPostNode.id);
+        expect(hoverState?.focusState?.activeConnectorIds).not.toContain(connectorVNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(queryNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(valuePostNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(headOutputNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(queryInputNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(queryWeightNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(queryBiasNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(queryProjectionOutputNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(valueInputNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(valueWeightNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(valueBiasNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(valueProjectionOutputNode.id);
         expect(
             hoverState?.focusState?.rowSelections?.some((selection) => selection.nodeId === transposeNode.id)
         ).toBe(false);
@@ -336,8 +435,23 @@ describe('MHSA detail transpose view', () => {
             index,
             transposeNode,
             keyProjectionOutputNode,
+            queryNode,
+            queryInputNode,
+            queryWeightNode,
+            queryBiasNode,
+            queryProjectionOutputNode,
+            valueInputNode,
+            valueWeightNode,
+            valueBiasNode,
+            valueProjectionOutputNode,
             postNode,
-            postCopyNode
+            postCopyNode,
+            connectorKNode,
+            connectorPreNode,
+            connectorPostNode,
+            connectorVNode,
+            valuePostNode,
+            headOutputNode
         } = buildSceneFixtures();
 
         const hoverState = resolveMhsaDetailHoverState(index, {
@@ -357,18 +471,49 @@ describe('MHSA detail transpose view', () => {
             nodeId: postNode.id,
             colIndex: 0
         });
-        expect(
-            hoverState?.focusState?.columnSelections?.some((selection) => selection.nodeId === postCopyNode.id)
-        ).toBe(false);
+        expect(hoverState?.focusState?.columnSelections).toContainEqual({
+            nodeId: postCopyNode.id,
+            colIndex: 0
+        });
+        expect(hoverState?.focusState?.activeNodeIds).toContain(postCopyNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(queryNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(valuePostNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(headOutputNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(queryInputNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(queryWeightNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(queryBiasNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(queryProjectionOutputNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(valueInputNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(valueWeightNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(valueBiasNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(valueProjectionOutputNode.id);
+        expect(hoverState?.focusState?.activeConnectorIds).toContain(connectorKNode.id);
+        expect(hoverState?.focusState?.activeConnectorIds).toContain(connectorPreNode.id);
+        expect(hoverState?.focusState?.activeConnectorIds).toContain(connectorPostNode.id);
+        expect(hoverState?.focusState?.activeConnectorIds).not.toContain(connectorVNode.id);
     });
 
-    it('propagates query-path focus into the softmax row without keeping weighted-output copies active', () => {
+    it('propagates query-path focus into post-softmax rows and the matching head-output row', () => {
         const {
             index,
+            projectionSourceNode,
             queryProjectionOutputNode,
+            keyInputNode,
+            valueInputNode,
+            keyWeightNode,
+            keyBiasNode,
+            keyProjectionOutputNode,
+            transposeNode,
+            valueWeightNode,
+            valueBiasNode,
+            valueProjectionOutputNode,
             postNode,
             postCopyNode,
-            headOutputNode
+            headOutputNode,
+            connectorQNode,
+            connectorKNode,
+            connectorVNode,
+            valuePostNode
         } = buildSceneFixtures();
 
         const hoverState = resolveMhsaDetailHoverState(index, {
@@ -381,44 +526,227 @@ describe('MHSA detail transpose view', () => {
 
         expect(hoverState?.label).toBe('Query Vector');
         expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: projectionSourceNode.id,
+            rowIndex: 1
+        });
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
             nodeId: postNode.id,
             rowIndex: 1
         });
-        expect(
-            hoverState?.focusState?.rowSelections?.some((selection) => selection.nodeId === postCopyNode.id)
-        ).toBe(false);
-        expect(
-            hoverState?.focusState?.rowSelections?.some((selection) => selection.nodeId === headOutputNode.id)
-        ).toBe(false);
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: postCopyNode.id,
+            rowIndex: 1
+        });
+        expect(hoverState?.focusState?.activeNodeIds).toContain(postCopyNode.id);
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: headOutputNode.id,
+            rowIndex: 1
+        });
+        expect(hoverState?.focusState?.activeNodeIds).toContain(headOutputNode.id);
+        expect(hoverState?.focusState?.activeConnectorIds).toContain(connectorQNode.id);
+        expect(hoverState?.focusState?.activeConnectorIds).not.toContain(connectorKNode.id);
+        expect(hoverState?.focusState?.activeConnectorIds).not.toContain(connectorVNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(keyInputNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(valueInputNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(keyWeightNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(keyBiasNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(keyProjectionOutputNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(transposeNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(valueWeightNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(valueBiasNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(valueProjectionOutputNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(valuePostNode.id);
+    });
+
+    it('narrows W_Q hover to the local X_ln, Q, and query-source path', () => {
+        const {
+            index,
+            projectionSourceNode,
+            queryInputNode,
+            queryWeightNode,
+            queryProjectionOutputNode,
+            queryNode,
+            keyProjectionOutputNode,
+            valueProjectionOutputNode,
+            connectorQNode,
+            connectorXlnQNode,
+            connectorKNode
+        } = buildSceneFixtures();
+
+        const hoverState = resolveMhsaDetailHoverState(index, {
+            node: queryWeightNode
+        });
+
+        expect(hoverState?.label).toBe('Query Weight Matrix');
+        expect(hoverState?.focusState?.activeNodeIds).toContain(projectionSourceNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(queryInputNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(queryWeightNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(queryProjectionOutputNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(queryNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(keyProjectionOutputNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(valueProjectionOutputNode.id);
+        expect(hoverState?.focusState?.activeConnectorIds).toContain(connectorXlnQNode.id);
+        expect(hoverState?.focusState?.activeConnectorIds).toContain(connectorQNode.id);
+        expect(hoverState?.focusState?.activeConnectorIds).not.toContain(connectorKNode.id);
+    });
+
+    it('narrows W_K hover to the local X_ln, K, and K^T path', () => {
+        const {
+            index,
+            projectionSourceNode,
+            queryInputNode,
+            keyInputNode,
+            valueInputNode,
+            queryWeightNode,
+            queryBiasNode,
+            keyWeightNode,
+            keyProjectionOutputNode,
+            queryProjectionOutputNode,
+            valueWeightNode,
+            valueBiasNode,
+            valueProjectionOutputNode,
+            transposeNode,
+            queryNode,
+            connectorXlnKNode,
+            connectorKNode,
+            connectorVNode
+        } = buildSceneFixtures();
+
+        const hoverState = resolveMhsaDetailHoverState(index, {
+            node: keyWeightNode
+        });
+
+        expect(hoverState?.label).toBe('Key Weight Matrix');
+        expect(hoverState?.focusState?.activeNodeIds).toContain(projectionSourceNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(keyInputNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(keyWeightNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(keyProjectionOutputNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(transposeNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(queryInputNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(valueInputNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(queryWeightNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(queryBiasNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(queryProjectionOutputNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(valueWeightNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(valueBiasNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(valueProjectionOutputNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(queryNode.id);
+        expect(hoverState?.focusState?.activeConnectorIds).toContain(connectorXlnKNode.id);
+        expect(hoverState?.focusState?.activeConnectorIds).toContain(connectorKNode.id);
+        expect(hoverState?.focusState?.activeConnectorIds).not.toContain(connectorVNode.id);
+    });
+
+    it('narrows W_V hover to the local X_ln, V, and weighted-value path', () => {
+        const {
+            index,
+            projectionSourceNode,
+            queryInputNode,
+            keyInputNode,
+            queryWeightNode,
+            keyWeightNode,
+            queryBiasNode,
+            keyBiasNode,
+            queryProjectionOutputNode,
+            keyProjectionOutputNode,
+            queryNode,
+            transposeNode,
+            valueInputNode,
+            valueWeightNode,
+            valueProjectionOutputNode,
+            valuePostNode,
+            headOutputNode,
+            connectorXlnVNode,
+            connectorVNode,
+            connectorQNode
+        } = buildSceneFixtures();
+
+        const hoverState = resolveMhsaDetailHoverState(index, {
+            node: valueWeightNode
+        });
+
+        expect(hoverState?.label).toBe('Value Weight Matrix');
+        expect(hoverState?.focusState?.activeNodeIds).toContain(projectionSourceNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(valueInputNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(valueWeightNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(valueProjectionOutputNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(valuePostNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(headOutputNode.id);
+        expect(hoverState?.focusState?.activeConnectorIds).toContain(connectorXlnVNode.id);
+        expect(hoverState?.focusState?.activeConnectorIds).toContain(connectorVNode.id);
+        expect(hoverState?.focusState?.activeConnectorIds).not.toContain(connectorQNode.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(queryInputNode.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(keyInputNode.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(queryWeightNode.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(keyWeightNode.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(queryBiasNode.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(keyBiasNode.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(queryProjectionOutputNode.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(keyProjectionOutputNode.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(queryNode.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(transposeNode.id);
     });
 
     it('uses a tighter local gap inside the QK^T grouping row', () => {
         const {
             qktEquationNode,
-            transposeCloseGroupNode,
-            transposeCloseNode,
+            divisorCloseNode,
             layout,
             transposeNode,
+            attentionScaleNode,
             softmaxOpenNode,
             softmaxCloseNode
         } = buildSceneFixtures();
 
         const transposeEntry = layout?.registry?.getNodeEntry(transposeNode?.id || '');
-        const transposeCloseEntry = layout?.registry?.getNodeEntry(transposeCloseNode?.id || '');
-        const transposeContentRight = (transposeEntry?.contentBounds?.x || 0) + (transposeEntry?.contentBounds?.width || 0);
-        const transposeCloseGap = (transposeCloseEntry?.contentBounds?.x || 0) - transposeContentRight;
+        const divisorCloseEntry = layout?.registry?.getNodeEntry(divisorCloseNode?.id || '');
+        const scaleEntry = layout?.registry?.getNodeEntry(attentionScaleNode?.id || '');
+        const divisorCloseGap = resolveHorizontalContentGap(transposeEntry, divisorCloseEntry);
+        const transposeScaleGap = resolveHorizontalContentGap(transposeEntry, scaleEntry);
 
         expect(qktEquationNode).toBeTruthy();
         expect(qktEquationNode?.metadata?.gapOverride).toBe(12);
-        expect(transposeCloseGroupNode).toBeTruthy();
-        expect(transposeCloseGroupNode?.metadata?.gapOverride).toBe(-60);
-        expect(transposeCloseNode).toBeTruthy();
         expect(transposeEntry).toBeTruthy();
-        expect(transposeCloseEntry).toBeTruthy();
-        expect(transposeCloseGap).toBeGreaterThanOrEqual(8);
-        expect(transposeCloseGap).toBeLessThanOrEqual(16);
+        expect(divisorCloseEntry).toBeTruthy();
+        expect(scaleEntry).toBeTruthy();
+        expect(divisorCloseGap).toBeLessThanOrEqual(26);
+        expect(transposeScaleGap).toBeGreaterThanOrEqual(0);
         expect(softmaxOpenNode?.metadata?.fontScale).toBeGreaterThan(1);
         expect(softmaxCloseNode?.metadata?.fontScale).toBeGreaterThan(1);
+    });
+
+    it('keeps dense 12-token softmax spacing tighter without crowding the divisor cluster', () => {
+        const { scene, layout } = buildSceneFixtures(12);
+        const nodes = flattenSceneNodes(scene);
+        const findNode = (role) => nodes.find((node) => node.role === role) || null;
+        const divisorClusterNode = findNode('attention-divisor-cluster');
+        const divisorCloseNode = divisorClusterNode?.children?.find((node) => (
+            node.role === 'attention-close' && node.semantic?.clusterKey === 'divisor'
+        )) || null;
+
+        const transposeEntry = layout?.registry?.getNodeEntry(findNode('attention-key-transpose')?.id || '');
+        const divisorCloseEntry = layout?.registry?.getNodeEntry(divisorCloseNode?.id || '');
+        const softmaxCoreFlowEntry = layout?.registry?.getNodeEntry(findNode('attention-softmax-core-flow')?.id || '');
+        const maskedInputEntry = layout?.registry?.getNodeEntry(findNode('attention-masked-input')?.id || '');
+        const plusEntry = layout?.registry?.getNodeEntry(findNode('attention-softmax-plus')?.id || '');
+        const maskEntry = layout?.registry?.getNodeEntry(findNode('attention-mask')?.id || '');
+        const softmaxCloseEntry = layout?.registry?.getNodeEntry(findNode('attention-softmax-close')?.id || '');
+        const softmaxEqualsEntry = layout?.registry?.getNodeEntry(findNode('attention-softmax-equals')?.id || '');
+        const postEntry = layout?.registry?.getNodeEntry(findNode('attention-post')?.id || '');
+
+        const divisorCloseGap = resolveHorizontalContentGap(transposeEntry, divisorCloseEntry);
+        const maskedPlusGap = resolveHorizontalContentGap(maskedInputEntry, plusEntry);
+        const plusMaskGap = resolveHorizontalContentGap(plusEntry, maskEntry);
+        const maskCloseGap = resolveHorizontalContentGap(maskEntry, softmaxCloseEntry);
+        const closeEqualsGap = resolveHorizontalContentGap(softmaxCloseEntry, softmaxEqualsEntry);
+        const equalsPostGap = resolveHorizontalContentGap(softmaxEqualsEntry, postEntry);
+
+        expect(softmaxCoreFlowEntry?.layoutData?.gap).toBeLessThanOrEqual(26);
+        expect(divisorCloseGap).toBeLessThanOrEqual(18);
+        expect(maskedPlusGap).toBeLessThanOrEqual(30);
+        expect(plusMaskGap).toBeLessThanOrEqual(30);
+        expect(maskCloseGap).toBeLessThanOrEqual(30);
+        expect(closeEqualsGap).toBeLessThanOrEqual(20);
+        expect(equalsPostGap).toBeLessThanOrEqual(30);
     });
 
     it('keeps the computed A_pre row aligned with the QK^T row and moves the softmax core below it', () => {
@@ -454,7 +782,7 @@ describe('MHSA detail transpose view', () => {
         expect(attentionEqualsEntry).toBeTruthy();
         expect(attentionDivideEntry).toBeTruthy();
         expect(attentionScaleEntry).toBeTruthy();
-        expect(attentionStageNode?.metadata?.gapOverride).toBe(-10);
+        expect(attentionStageNode?.metadata?.gapOverride).toBe(-14);
         expect(maskedInputEntry).toBeTruthy();
         expect(transposeEntry).toBeTruthy();
         expect(softmaxLabelEntry).toBeTruthy();
@@ -484,10 +812,10 @@ describe('MHSA detail transpose view', () => {
         )).toBeLessThanOrEqual(17);
         expect((attentionScaleEntry?.contentBounds?.x || 0) - (
             (attentionDivideEntry?.contentBounds?.x || 0) + (attentionDivideEntry?.contentBounds?.width || 0)
-        )).toBeLessThanOrEqual(-4);
+        )).toBeLessThanOrEqual(-8);
         expect((attentionEqualsEntry?.contentBounds?.x || 0) - (
             (attentionScaleEntry?.contentBounds?.x || 0) + (attentionScaleEntry?.contentBounds?.width || 0)
-        )).toBeLessThanOrEqual(12);
+        )).toBeLessThanOrEqual(8);
         expect(Math.abs(
             (maskedInputEntry?.contentBounds?.x || 0)
             - (preScoreEntry?.contentBounds?.x || 0)
@@ -498,6 +826,9 @@ describe('MHSA detail transpose view', () => {
         expect(maskedInputEntry?.contentBounds?.y).toBeGreaterThan(
             resolveEntryCaptionBottom(preScoreEntry)
         );
+        expect(
+            (maskedInputEntry?.contentBounds?.y || 0) - resolveEntryCaptionBottom(preScoreEntry)
+        ).toBeGreaterThanOrEqual(48);
         expect(softmaxLabelEntry?.contentBounds?.x).toBeLessThan(maskedInputEntry?.contentBounds?.x || 0);
         expect((softmaxLabelEntry?.contentBounds?.x || 0)).toBeLessThan(preScoreEntry?.contentBounds?.x || 0);
         expect(
@@ -547,8 +878,9 @@ describe('MHSA detail transpose view', () => {
         expect(connectorEntry?.pathPoints?.[1]?.x).toBeCloseTo(connectorEntry?.pathPoints?.[2]?.x || 0, 4);
         expect(connectorEntry?.pathPoints?.[1]?.x).toBeCloseTo(transposeEntry?.anchors?.bottom?.x || 0, 4);
         expect(connectorEntry?.pathPoints?.[1]?.y).toBeCloseTo(connectorEntry?.pathPoints?.[0]?.y || 0, 4);
-        expect(connectorEntry?.pathPoints?.[2]?.y).toBeGreaterThan(
-            (transposeEntry?.bounds?.y || 0) + (transposeEntry?.bounds?.height || 0)
+        expect(connectorEntry?.pathPoints?.[2]?.y).toBeCloseTo(
+            resolveEntryCaptionBottom(transposeEntry) + CONNECTOR_CAPTION_EXIT_GAP,
+            4
         );
     });
 
@@ -568,8 +900,9 @@ describe('MHSA detail transpose view', () => {
         expect(preScoreEntry).toBeTruthy();
         expect(maskedInputEntry).toBeTruthy();
         expect(connectorEntry?.pathPoints?.[0]?.x).toBeCloseTo(preScoreEntry?.anchors?.bottom?.x || 0, 4);
-        expect(connectorEntry?.pathPoints?.[0]?.y).toBeGreaterThanOrEqual(
-            resolveEntryCaptionBottom(preScoreEntry) + 10
+        expect(connectorEntry?.pathPoints?.[0]?.y).toBeCloseTo(
+            resolveEntryCaptionBottom(preScoreEntry) + CONNECTOR_CAPTION_EXIT_GAP + PRE_CONNECTOR_SOURCE_OFFSET_Y,
+            4
         );
         expect(connectorEntry?.pathPoints?.[connectorEntry.pathPoints.length - 1]?.y).toBeLessThanOrEqual(
             maskedInputEntry?.contentBounds?.y || 0
@@ -592,15 +925,16 @@ describe('MHSA detail transpose view', () => {
         expect(preScoreEntry).toBeTruthy();
         expect(maskedInputEntry).toBeTruthy();
         expect(connectorEntry?.pathPoints?.[0]?.x).toBeCloseTo(preScoreEntry?.anchors?.bottom?.x || 0, 4);
-        expect(connectorEntry?.pathPoints?.[0]?.y).toBeGreaterThanOrEqual(
-            resolveEntryCaptionBottom(preScoreEntry) + 8
+        expect(connectorEntry?.pathPoints?.[0]?.y).toBeCloseTo(
+            resolveEntryCaptionBottom(preScoreEntry) + CONNECTOR_CAPTION_EXIT_GAP + PRE_CONNECTOR_SOURCE_OFFSET_Y,
+            4
         );
         expect(connectorEntry?.pathPoints?.[connectorEntry.pathPoints.length - 1]?.y).toBeLessThanOrEqual(
             maskedInputEntry?.contentBounds?.y || 0
         );
     });
 
-    it('routes the V connector from the source right edge with a horizontal-first elbow into the weighted value operand', () => {
+    it('routes the V connector directly from the projection output into the weighted value operand', () => {
         const {
             layout,
             connectorVNode,
@@ -616,29 +950,30 @@ describe('MHSA detail transpose view', () => {
         expect(valueProjectionEntry).toBeTruthy();
         expect(valuePostEntry).toBeTruthy();
         expect(connectorEntry?.pathPoints).toHaveLength(3);
-        expect(connectorEntry?.pathPoints?.[0]?.x).toBeGreaterThan(
-            (valueProjectionEntry?.anchors?.right?.x || 0) + 8
+        expect(connectorEntry?.pathPoints?.[0]?.x).toBeCloseTo(
+            (valueProjectionEntry?.anchors?.right?.x || 0) + VALUE_CONNECTOR_SOURCE_GAP,
+            4
         );
         expect(connectorEntry?.pathPoints?.[0]?.y).toBeCloseTo(
-            (valueProjectionEntry?.anchors?.right?.y || 0),
+            (valueProjectionEntry?.anchors?.right?.y || 0) + VALUE_CONNECTOR_SOURCE_OFFSET_Y,
             4
         );
         expect(connectorEntry?.pathPoints?.[1]?.y).toBeCloseTo(
             connectorEntry?.pathPoints?.[0]?.y || 0,
             4
         );
-        expect(connectorEntry?.pathPoints?.[1]?.x).toBeGreaterThan(
-            connectorEntry?.pathPoints?.[0]?.x || 0
-        );
         expect(connectorEntry?.pathPoints?.[1]?.x).toBeCloseTo(
             connectorEntry?.pathPoints?.[2]?.x || 0,
             4
+        );
+        expect(connectorEntry?.pathPoints?.[2]?.y).toBeLessThan(
+            connectorEntry?.pathPoints?.[1]?.y || 0
         );
         expect(Math.abs(
             (connectorEntry?.pathPoints?.[2]?.x || 0) - (valuePostEntry?.anchors?.bottom?.x || 0)
         )).toBeLessThanOrEqual(4);
         expect(connectorEntry?.pathPoints?.[2]?.y).toBeCloseTo(
-            resolveEntryCaptionBottom(valuePostEntry),
+            resolveEntryCaptionBottom(valuePostEntry) + VALUE_CONNECTOR_TARGET_GAP,
             4
         );
     });
@@ -675,6 +1010,7 @@ describe('MHSA detail transpose view', () => {
             expect(node).toBeTruthy();
             expect(node?.metadata?.grid?.paddingX).toBe(4);
             expect(node?.metadata?.grid?.paddingY).toBe(4);
+            expect(node?.metadata?.grid?.cellCornerRadiusScale).toBeCloseTo(ATTENTION_GRID_CELL_CORNER_RADIUS_SCALE, 5);
             expect(node?.metadata?.card?.cornerRadius).toBe(12);
         });
     });
@@ -682,6 +1018,17 @@ describe('MHSA detail transpose view', () => {
     it('maps value-post hover rows to the Value Vector tooltip payload', () => {
         const {
             index,
+            projectionSourceNode,
+            queryInputNode,
+            keyInputNode,
+            queryWeightNode,
+            keyWeightNode,
+            queryBiasNode,
+            keyBiasNode,
+            queryProjectionOutputNode,
+            keyProjectionOutputNode,
+            queryNode,
+            transposeNode,
             valuePostNode,
             headOutputNode,
             postCopyNode,
@@ -701,9 +1048,154 @@ describe('MHSA detail transpose view', () => {
         expect(hoverState?.info?.activationData?.stage).toBe('qkv.v');
         expect(hoverState?.info?.activationData?.tokenIndex).toBe(1);
         expect(hoverState?.info?.activationData?.tokenLabel).toBe('Token B');
-        expect(hoverState?.focusState?.activeNodeIds).not.toContain(headOutputNode?.id);
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: projectionSourceNode.id,
+            rowIndex: 1
+        });
+        expect(hoverState?.focusState?.activeNodeIds).toContain(headOutputNode?.id);
         expect(hoverState?.focusState?.activeNodeIds).not.toContain(postCopyNode?.id);
         expect(hoverState?.focusState?.activeConnectorIds).toContain(connectorVNode?.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(queryInputNode.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(keyInputNode.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(queryWeightNode.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(keyWeightNode.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(queryBiasNode.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(keyBiasNode.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(queryProjectionOutputNode.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(keyProjectionOutputNode.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(queryNode.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(transposeNode.id);
+    });
+
+    it('keeps the full H_i matrix active when hovering a projection-side V row', () => {
+        const {
+            index,
+            projectionSourceNode,
+            valueProjectionOutputNode,
+            headOutputNode,
+            postCopyNode,
+            connectorVNode
+        } = buildSceneFixtures();
+
+        const hoverState = resolveMhsaDetailHoverState(index, {
+            node: valueProjectionOutputNode,
+            rowHit: {
+                rowIndex: 0,
+                rowItem: valueProjectionOutputNode.rowItems[0]
+            }
+        });
+
+        expect(hoverState?.label).toBe('Value Vector');
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: projectionSourceNode.id,
+            rowIndex: 0
+        });
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: valueProjectionOutputNode.id,
+            rowIndex: 0
+        });
+        expect(hoverState?.focusState?.activeNodeIds).toContain(headOutputNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(postCopyNode?.id);
+        expect(hoverState?.focusState?.activeConnectorIds).toContain(connectorVNode?.id);
+    });
+
+    it('can resolve deep-hover tooltip payloads without building focus state', () => {
+        const {
+            index,
+            valuePostNode
+        } = buildSceneFixtures();
+
+        const hoverState = resolveMhsaDetailHoverState(index, {
+            node: valuePostNode,
+            rowHit: {
+                rowIndex: 1,
+                rowItem: valuePostNode.rowItems[1]
+            }
+        }, {
+            includeFocusState: false
+        });
+
+        expect(hoverState?.label).toBe('Value Vector');
+        expect(hoverState?.info?.activationData?.stage).toBe('qkv.v');
+        expect(hoverState?.focusState).toBeNull();
+        expect(hoverState?.signature).toBe('');
+    });
+
+    it('reuses cached deep-hover results for identical hits and focus modes', () => {
+        const {
+            index,
+            valuePostNode
+        } = buildSceneFixtures();
+
+        const hit = {
+            node: valuePostNode,
+            rowHit: {
+                rowIndex: 1,
+                rowItem: valuePostNode.rowItems[1]
+            }
+        };
+
+        const focusedHover = resolveMhsaDetailHoverState(index, hit);
+        const focusedHoverRepeat = resolveMhsaDetailHoverState(index, hit);
+        const tooltipHover = resolveMhsaDetailHoverState(index, hit, {
+            includeFocusState: false
+        });
+        const tooltipHoverRepeat = resolveMhsaDetailHoverState(index, hit, {
+            includeFocusState: false
+        });
+
+        expect(focusedHover).toBe(focusedHoverRepeat);
+        expect(tooltipHover).toBe(tooltipHoverRepeat);
+        expect(focusedHover).not.toBe(tooltipHover);
+    });
+
+    it('keeps direct value-post role hovers on the local V branch instead of the full weighted-output path', () => {
+        const {
+            index,
+            queryInputNode,
+            keyInputNode,
+            queryWeightNode,
+            keyWeightNode,
+            queryBiasNode,
+            keyBiasNode,
+            queryProjectionOutputNode,
+            keyProjectionOutputNode,
+            valuePostNode,
+            headOutputNode,
+            postCopyNode,
+            queryNode,
+            transposeNode,
+            connectorVNode,
+            connectorQNode,
+            connectorKNode,
+            connectorPostNode
+        } = buildSceneFixtures();
+
+        const hoverState = resolveMhsaDetailHoverState(index, {
+            node: valuePostNode
+        });
+
+        expect(hoverState?.label).toBe('Value Vector');
+        expect(hoverState?.info?.activationData?.label).toBe('Value Vector');
+        expect(hoverState?.focusState?.activeNodeIds).toContain(valuePostNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(headOutputNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(postCopyNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(queryNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(transposeNode?.id);
+        expect(hoverState?.focusState?.activeConnectorIds).toContain(connectorVNode?.id);
+        expect(hoverState?.focusState?.activeConnectorIds).not.toContain(connectorQNode?.id);
+        expect(hoverState?.focusState?.activeConnectorIds).not.toContain(connectorKNode?.id);
+        expect(hoverState?.focusState?.activeConnectorIds).not.toContain(connectorPostNode?.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(queryInputNode.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(keyInputNode.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(queryWeightNode.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(keyWeightNode.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(queryBiasNode.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(keyBiasNode.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(queryProjectionOutputNode.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(keyProjectionOutputNode.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(queryNode.id);
+        expect(hoverState?.focusState?.dimNodeIds).toContain(transposeNode.id);
     });
 
     it('maps head-output hover rows to the Attention Weighted Sum tooltip payload', () => {
@@ -729,28 +1221,36 @@ describe('MHSA detail transpose view', () => {
         expect(hoverState?.info?.activationData?.tokenLabel).toBe('Token A');
     });
 
-    it('maps pre-score matrix hover to the pre-softmax attention-score tooltip payload', () => {
+    it('ignores score-matrix background hovers when no specific attention cell is hit', () => {
         const {
             index,
-            preScoreNode
+            preScoreNode,
+            maskedInputNode,
+            maskNode,
+            postNode,
+            postCopyNode
         } = buildSceneFixtures();
 
-        const hoverState = resolveMhsaDetailHoverState(index, {
-            node: preScoreNode
+        [
+            preScoreNode,
+            maskedInputNode,
+            maskNode,
+            postNode,
+            postCopyNode
+        ].forEach((node) => {
+            expect(resolveMhsaDetailHoverState(index, { node })).toBeNull();
         });
-
-        expect(hoverState?.label).toBe('Pre-Softmax Attention Score');
-        expect(hoverState?.info?.activationData?.label).toBe('Pre-Softmax Attention Score');
-        expect(hoverState?.info?.activationData?.stage).toBe('attention.pre');
-        expect(hoverState?.info?.activationData?.layerIndex).toBe(2);
-        expect(hoverState?.info?.activationData?.headIndex).toBe(1);
     });
 
     it('maps pre-score hover cells to a pre-softmax attention-score tooltip payload', () => {
         const {
             index,
+            projectionSourceNode,
             preScoreNode,
-            postCopyNode
+            postCopyNode,
+            headOutputNode,
+            valuePostNode,
+            connectorVNode
         } = buildSceneFixtures();
 
         const hoverState = resolveMhsaDetailHoverState(index, {
@@ -772,6 +1272,21 @@ describe('MHSA detail transpose view', () => {
         expect(hoverState?.info?.activationData?.preScore).toBe(0.25);
         expect(hoverState?.info?.activationData?.postScore).toBe(0.15);
         expect(hoverState?.info?.activationData?.showMaskValue).toBeUndefined();
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: projectionSourceNode.id,
+            rowIndex: 1
+        });
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: projectionSourceNode.id,
+            rowIndex: 0
+        });
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: headOutputNode.id,
+            rowIndex: 1
+        });
+        expect(hoverState?.focusState?.activeNodeIds).toContain(headOutputNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(valuePostNode.id);
+        expect(hoverState?.focusState?.activeConnectorIds).not.toContain(connectorVNode.id);
         expect(hoverState?.focusState?.cellSelections).toContainEqual({
             nodeId: postCopyNode?.id,
             rowIndex: 1,
@@ -779,11 +1294,14 @@ describe('MHSA detail transpose view', () => {
         });
     });
 
-    it('maps masked-input hover cells to a masked attention-score tooltip payload with causal-mask details', () => {
+    it('maps masked-input hover cells to the same pre-softmax tooltip payload used by the first A_pre matrix', () => {
         const {
             index,
             maskedInputNode,
-            postCopyNode
+            postCopyNode,
+            headOutputNode,
+            valuePostNode,
+            connectorVNode
         } = buildSceneFixtures();
 
         const hoverState = resolveMhsaDetailHoverState(index, {
@@ -795,14 +1313,21 @@ describe('MHSA detail transpose view', () => {
             }
         });
 
-        expect(hoverState?.label).toBe('Masked Attention Score');
-        expect(hoverState?.info?.activationData?.label).toBe('Masked Attention Score');
-        expect(hoverState?.info?.activationData?.stage).toBe('attention.masked_input');
+        expect(hoverState?.label).toBe('Pre-Softmax Attention Score');
+        expect(hoverState?.info?.activationData?.label).toBe('Pre-Softmax Attention Score');
+        expect(hoverState?.info?.activationData?.stage).toBe('attention.pre');
         expect(hoverState?.info?.activationData?.preScore).toBe(0.25);
         expect(hoverState?.info?.activationData?.postScore).toBe(0);
         expect(hoverState?.info?.activationData?.maskValue).toBe(Number.NEGATIVE_INFINITY);
-        expect(hoverState?.info?.activationData?.showMaskValue).toBe(true);
+        expect(hoverState?.info?.activationData?.showMaskValue).toBeUndefined();
         expect(hoverState?.info?.activationData?.isMasked).toBe(true);
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: headOutputNode.id,
+            rowIndex: 0
+        });
+        expect(hoverState?.focusState?.activeNodeIds).toContain(headOutputNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(valuePostNode.id);
+        expect(hoverState?.focusState?.activeConnectorIds).not.toContain(connectorVNode.id);
         expect(hoverState?.focusState?.cellSelections).toContainEqual({
             nodeId: postCopyNode?.id,
             rowIndex: 0,
@@ -815,7 +1340,10 @@ describe('MHSA detail transpose view', () => {
             index,
             maskNode,
             postNode,
-            postCopyNode
+            postCopyNode,
+            headOutputNode,
+            valuePostNode,
+            connectorVNode
         } = buildSceneFixtures();
 
         const hoverState = resolveMhsaDetailHoverState(index, {
@@ -834,8 +1362,15 @@ describe('MHSA detail transpose view', () => {
         expect(hoverState?.info?.activationData?.postScore).toBe(0);
         expect(hoverState?.info?.activationData?.maskValue).toBe(Number.NEGATIVE_INFINITY);
         expect(hoverState?.info?.activationData?.showMaskValue).toBe(true);
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: headOutputNode.id,
+            rowIndex: 0
+        });
+        expect(hoverState?.focusState?.activeNodeIds).toContain(headOutputNode.id);
         expect(hoverState?.focusState?.activeNodeIds).not.toContain(postNode?.id);
         expect(hoverState?.focusState?.activeNodeIds).toContain(postCopyNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(valuePostNode.id);
+        expect(hoverState?.focusState?.activeConnectorIds).not.toContain(connectorVNode.id);
         expect(
             hoverState?.focusState?.columnSelections?.some((selection) => selection.nodeId === postNode?.id)
         ).toBe(false);
@@ -852,8 +1387,12 @@ describe('MHSA detail transpose view', () => {
     it('maps masked post-score hover cells to a post-softmax attention-score tooltip payload with zero post-softmax weight', () => {
         const {
             index,
+            projectionSourceNode,
             postNode,
-            postCopyNode
+            postCopyNode,
+            headOutputNode,
+            valuePostNode,
+            connectorVNode
         } = buildSceneFixtures();
 
         const hoverState = resolveMhsaDetailHoverState(index, {
@@ -872,6 +1411,21 @@ describe('MHSA detail transpose view', () => {
         expect(hoverState?.info?.activationData?.postScore).toBe(0);
         expect(hoverState?.info?.activationData?.maskValue).toBe(Number.NEGATIVE_INFINITY);
         expect(hoverState?.info?.activationData?.showMaskValue).toBe(true);
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: projectionSourceNode.id,
+            rowIndex: 0
+        });
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: projectionSourceNode.id,
+            rowIndex: 1
+        });
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: headOutputNode.id,
+            rowIndex: 0
+        });
+        expect(hoverState?.focusState?.activeNodeIds).toContain(headOutputNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(valuePostNode.id);
+        expect(hoverState?.focusState?.activeConnectorIds).not.toContain(connectorVNode.id);
         expect(hoverState?.focusState?.cellSelections).toContainEqual({
             nodeId: postCopyNode?.id,
             rowIndex: 0,
@@ -883,7 +1437,11 @@ describe('MHSA detail transpose view', () => {
         const {
             index,
             projectionSourceNode,
-            projectionIngressConnectorNodes
+            projectionIngressConnectorNodes,
+            queryProjectionOutputNode,
+            keyProjectionOutputNode,
+            valueProjectionOutputNode,
+            transposeNode
         } = buildSceneFixtures();
 
         const hoverState = resolveMhsaDetailHoverState(index, {
@@ -911,6 +1469,22 @@ describe('MHSA detail transpose view', () => {
             nodeId: index?.projectionInputIdsByKind?.v,
             rowIndex: 1
         });
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: queryProjectionOutputNode.id,
+            rowIndex: 1
+        });
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: keyProjectionOutputNode.id,
+            rowIndex: 1
+        });
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: valueProjectionOutputNode.id,
+            rowIndex: 1
+        });
+        expect(hoverState?.focusState?.columnSelections).toContainEqual({
+            nodeId: transposeNode.id,
+            colIndex: 1
+        });
         expect(hoverState?.focusState?.activeConnectorIds).toHaveLength(3);
         projectionIngressConnectorNodes.forEach((connectorNode) => {
             expect(hoverState?.focusState?.activeConnectorIds).toContain(connectorNode.id);
@@ -920,7 +1494,15 @@ describe('MHSA detail transpose view', () => {
     it('treats copied X_ln rows as post-layernorm residual rows for hover labels', () => {
         const {
             index,
-            queryInputNode
+            projectionSourceNode,
+            queryInputNode,
+            preScoreNode,
+            maskedInputNode,
+            maskNode,
+            postNode,
+            postCopyNode,
+            headOutputNode,
+            transposeNode
         } = buildSceneFixtures();
 
         const hoverState = resolveMhsaDetailHoverState(index, {
@@ -939,6 +1521,94 @@ describe('MHSA detail transpose view', () => {
             nodeId: queryInputNode.id,
             rowIndex: 0
         });
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: projectionSourceNode.id,
+            rowIndex: 0
+        });
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: preScoreNode.id,
+            rowIndex: 0
+        });
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: maskedInputNode.id,
+            rowIndex: 0
+        });
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: maskNode.id,
+            rowIndex: 0
+        });
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: postNode.id,
+            rowIndex: 0
+        });
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: postCopyNode.id,
+            rowIndex: 0
+        });
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: headOutputNode.id,
+            rowIndex: 0
+        });
+        expect(hoverState?.focusState?.activeNodeIds).toContain(headOutputNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(transposeNode.id);
+    });
+
+    it('mirrors copied K/V X_ln row hovers back to the shared parent X_ln row', () => {
+        const {
+            index,
+            projectionSourceNode,
+            keyInputNode,
+            valueInputNode
+        } = buildSceneFixtures();
+
+        [keyInputNode, valueInputNode].forEach((node) => {
+            const hoverState = resolveMhsaDetailHoverState(index, {
+                node,
+                rowHit: {
+                    rowIndex: 1,
+                    rowItem: node?.rowItems?.[1]
+                }
+            });
+
+            expect(hoverState?.focusState?.rowSelections).toContainEqual({
+                nodeId: node.id,
+                rowIndex: 1
+            });
+            expect(hoverState?.focusState?.rowSelections).toContainEqual({
+                nodeId: projectionSourceNode.id,
+                rowIndex: 1
+            });
+        });
+    });
+
+    it('keeps the softmax closing parenthesis close to the trailing equals sign', () => {
+        const scene = buildMhsaSceneModel({
+            previewData: createPreviewData(6),
+            layerIndex: 2,
+            headIndex: 1
+        });
+        const layout = buildSceneLayout(scene);
+        const nodes = flattenSceneNodes(scene);
+
+        const closeEqualsGroupNode = nodes.find((node) => node.role === 'attention-softmax-close-equals-group') || null;
+        const softmaxCloseNode = nodes.find((node) => node.role === 'attention-softmax-close') || null;
+        const softmaxEqualsNode = nodes.find((node) => node.role === 'attention-softmax-equals') || null;
+        const postNode = nodes.find((node) => node.role === 'attention-post') || null;
+
+        const closeEntry = layout?.registry?.getNodeEntry(softmaxCloseNode?.id || '');
+        const equalsEntry = layout?.registry?.getNodeEntry(softmaxEqualsNode?.id || '');
+        const postEntry = layout?.registry?.getNodeEntry(postNode?.id || '');
+
+        const closeEqualsGap = Math.round(
+            (equalsEntry?.bounds?.x || 0) - ((closeEntry?.bounds?.x || 0) + (closeEntry?.bounds?.width || 0))
+        );
+        const equalsPostGap = Math.round(
+            (postEntry?.bounds?.x || 0) - ((equalsEntry?.bounds?.x || 0) + (equalsEntry?.bounds?.width || 0))
+        );
+
+        expect(closeEqualsGroupNode?.metadata?.gapOverride).toBe(4);
+        expect(closeEqualsGap).toBe(4);
+        expect(equalsPostGap).toBeGreaterThan(closeEqualsGap);
     });
 
     it('increases the projection stack gap as more tokens are shown', () => {
@@ -990,7 +1660,7 @@ describe('MHSA detail transpose view', () => {
         );
     });
 
-    it('keeps feature-dimension strips visually larger than token-count attention grids', () => {
+    it('keeps token-count attention grids more readable than the feature-dimension strip rows', () => {
         const mediumScene = buildMhsaSceneModel({
             previewData: createPreviewData(12),
             layerIndex: 2,
@@ -1020,8 +1690,6 @@ describe('MHSA detail transpose view', () => {
         const largePreScoreNode = findNodeByRole(largeScene, 'attention-pre-score');
         const largeProjectionOutputNode = findProjectionOutput(largeScene, 'q');
 
-        const mediumQueryEntry = mediumLayout?.registry?.getNodeEntry(mediumQueryNode?.id || '');
-        const largeQueryEntry = largeLayout?.registry?.getNodeEntry(largeQueryNode?.id || '');
         const mediumPreScoreEntry = mediumLayout?.registry?.getNodeEntry(mediumPreScoreNode?.id || '');
         const largePreScoreEntry = largeLayout?.registry?.getNodeEntry(largePreScoreNode?.id || '');
 
@@ -1037,23 +1705,32 @@ describe('MHSA detail transpose view', () => {
         expect(largeProjectionOutputNode?.metadata?.compactRows?.compactWidth).toBe(
             largeQueryNode?.metadata?.compactRows?.compactWidth
         );
+        expect(mediumPreScoreEntry?.layoutData?.cellSize).toBeGreaterThanOrEqual(5);
+        expect(mediumPreScoreEntry?.layoutData?.cellSize).toBeGreaterThan(
+            mediumQueryNode?.metadata?.compactRows?.rowHeight || 0
+        );
         expect(largeXlnNode?.metadata?.compactRows?.compactWidth).toBeGreaterThan(
             largeQueryNode?.metadata?.compactRows?.compactWidth || 0
         );
-        expect(Math.max(
-            largePreScoreEntry?.contentBounds?.width || 0,
-            largePreScoreEntry?.contentBounds?.height || 0
-        )).toBeLessThan(largeQueryEntry?.contentBounds?.width || 0);
+        expect(largePreScoreEntry?.layoutData?.cellSize).toBeGreaterThan(
+            largeQueryNode?.metadata?.compactRows?.rowHeight || 0
+        );
         expect(largePreScoreEntry?.contentBounds?.width).toBeGreaterThanOrEqual(
             mediumPreScoreEntry?.contentBounds?.width || 0
         );
-        expect((largeQueryEntry?.contentBounds?.height || 0) / Math.max(1, largePreScoreEntry?.contentBounds?.height || 0))
-            .toBeGreaterThan(
-                (mediumQueryEntry?.contentBounds?.height || 0) / Math.max(1, mediumPreScoreEntry?.contentBounds?.height || 0)
-            );
+        expect(largePreScoreEntry?.layoutData?.cellSize).toBeLessThan(
+            mediumPreScoreEntry?.layoutData?.cellSize || 0
+        );
     });
 
-    it('adds extra vertical clearance under attention captions when the token window is large', () => {
+    it('scales attention caption bounds with larger token windows and routes connectors from those bounds', () => {
+        const baseScene = buildMhsaSceneModel({
+            previewData: createPreviewData(TOKEN_LABELS.length),
+            layerIndex: 2,
+            headIndex: 1
+        });
+        const baseLayout = buildSceneLayout(baseScene);
+        const baseNodes = flattenSceneNodes(baseScene);
         const largeScene = buildMhsaSceneModel({
             previewData: createPreviewData(12),
             layerIndex: 2,
@@ -1062,34 +1739,55 @@ describe('MHSA detail transpose view', () => {
         const largeLayout = buildSceneLayout(largeScene);
         const nodes = flattenSceneNodes(largeScene);
 
+        const basePreScoreNode = baseNodes.find((node) => node.role === 'attention-pre-score') || null;
+        const baseValuePostNode = baseNodes.find((node) => node.role === 'attention-value-post') || null;
+
         const queryNode = nodes.find((node) => node.role === 'attention-query-source') || null;
         const transposeNode = nodes.find((node) => node.role === 'attention-key-transpose') || null;
+        const preScoreNode = nodes.find((node) => node.role === 'attention-pre-score') || null;
+        const maskedInputNode = nodes.find((node) => node.role === 'attention-masked-input') || null;
         const valueProjectionOutputNode = nodes.find((node) => (
             node.role === 'projection-output'
             && String(node.metadata?.kind || '').toLowerCase() === 'v'
         )) || null;
         const valuePostNode = nodes.find((node) => node.role === 'attention-value-post') || null;
         const connectorKNode = nodes.find((node) => node.role === 'connector-k') || null;
+        const connectorPreNode = nodes.find((node) => node.role === 'connector-pre') || null;
         const connectorVNode = nodes.find((node) => node.role === 'connector-v') || null;
 
         const queryEntry = largeLayout?.registry?.getNodeEntry(queryNode?.id || '');
         const transposeEntry = largeLayout?.registry?.getNodeEntry(transposeNode?.id || '');
+        const preScoreEntry = largeLayout?.registry?.getNodeEntry(preScoreNode?.id || '');
+        const basePreScoreEntry = baseLayout?.registry?.getNodeEntry(basePreScoreNode?.id || '');
+        const maskedInputEntry = largeLayout?.registry?.getNodeEntry(maskedInputNode?.id || '');
         const valueProjectionEntry = largeLayout?.registry?.getNodeEntry(valueProjectionOutputNode?.id || '');
         const valuePostEntry = largeLayout?.registry?.getNodeEntry(valuePostNode?.id || '');
+        const baseValuePostEntry = baseLayout?.registry?.getNodeEntry(baseValuePostNode?.id || '');
         const connectorKEntry = largeLayout?.registry?.getConnectorEntry(connectorKNode?.id || '');
+        const connectorPreEntry = largeLayout?.registry?.getConnectorEntry(connectorPreNode?.id || '');
         const connectorVEntry = largeLayout?.registry?.getConnectorEntry(connectorVNode?.id || '');
-
-        const qktCaptionBottom = Math.max(
-            resolveEntryCaptionBottom(queryEntry),
-            resolveEntryCaptionBottom(transposeEntry)
+        expect(preScoreEntry?.labelBounds?.height).toBeGreaterThan(basePreScoreEntry?.labelBounds?.height || 0);
+        expect(preScoreEntry?.dimensionBounds?.height).toBeGreaterThan(basePreScoreEntry?.dimensionBounds?.height || 0);
+        expect(valuePostEntry?.labelBounds?.height).toBeGreaterThan(baseValuePostEntry?.labelBounds?.height || 0);
+        expect(resolveEntryCaptionBottom(valuePostEntry)).toBeGreaterThan(resolveEntryCaptionBottom(baseValuePostEntry));
+        expect(connectorKEntry?.pathPoints?.[2]?.y).toBeCloseTo(
+            resolveEntryCaptionBottom(transposeEntry) + CONNECTOR_CAPTION_EXIT_GAP,
+            4
         );
-
-        expect(connectorKEntry?.pathPoints?.[0]?.y).toBeGreaterThan(qktCaptionBottom + 10);
-        expect(connectorVEntry?.pathPoints?.[0]?.x).toBeGreaterThan(
-            (valueProjectionEntry?.anchors?.right?.x || 0) + 8
+        expect(connectorPreEntry?.pathPoints?.[0]?.x).toBeCloseTo(preScoreEntry?.anchors?.bottom?.x || 0, 4);
+        expect(connectorPreEntry?.pathPoints?.[0]?.y).toBeCloseTo(
+            resolveEntryCaptionBottom(preScoreEntry) + CONNECTOR_CAPTION_EXIT_GAP + PRE_CONNECTOR_SOURCE_OFFSET_Y,
+            4
+        );
+        expect(connectorPreEntry?.pathPoints?.[connectorPreEntry.pathPoints.length - 1]?.y).toBeLessThanOrEqual(
+            maskedInputEntry?.contentBounds?.y || 0
+        );
+        expect(connectorVEntry?.pathPoints?.[0]?.x).toBeCloseTo(
+            (valueProjectionEntry?.anchors?.right?.x || 0) + VALUE_CONNECTOR_SOURCE_GAP,
+            4
         );
         expect(connectorVEntry?.pathPoints?.[0]?.y).toBeCloseTo(
-            valueProjectionEntry?.anchors?.right?.y || 0,
+            (valueProjectionEntry?.anchors?.right?.y || 0) + VALUE_CONNECTOR_SOURCE_OFFSET_Y,
             4
         );
         expect(connectorVEntry?.pathPoints?.[1]?.y).toBeCloseTo(
@@ -1100,8 +1798,14 @@ describe('MHSA detail transpose view', () => {
             connectorVEntry?.pathPoints?.[2]?.x || 0,
             4
         );
+        expect(Math.abs(
+            (connectorVEntry?.pathPoints?.[2]?.x || 0) - (valuePostEntry?.anchors?.bottom?.x || 0)
+        )).toBeLessThanOrEqual(4);
+        expect(connectorVEntry?.pathPoints?.[2]?.y).toBeLessThan(
+            connectorVEntry?.pathPoints?.[1]?.y || 0
+        );
         expect(connectorVEntry?.pathPoints?.[2]?.y).toBeCloseTo(
-            resolveEntryCaptionBottom(valuePostEntry),
+            resolveEntryCaptionBottom(valuePostEntry) + VALUE_CONNECTOR_TARGET_GAP,
             4
         );
     });

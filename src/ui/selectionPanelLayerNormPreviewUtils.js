@@ -121,7 +121,9 @@ export function resolveLayerNormPreviewContext(selectionInfo = null, engine = nu
 
 export function resolveLayerNormParameterSummary(selectionInfo = null, engine = null) {
     const previewContext = resolveLayerNormPreviewContext(selectionInfo, engine);
-    const perParameterCount = D_MODEL;
+    const perParameterCount = Number.isFinite(previewContext?.baseVectorLength) && previewContext.baseVectorLength > 0
+        ? Math.floor(previewContext.baseVectorLength)
+        : D_MODEL;
 
     return {
         ...previewContext,

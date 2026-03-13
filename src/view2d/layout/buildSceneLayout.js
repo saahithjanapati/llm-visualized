@@ -35,6 +35,14 @@ const CSS_VAR_NAMES = Object.freeze({
     headCopyOffset: '--mhsa-token-matrix-head-copy-offset-boost'
 });
 
+const MHSA_DETAIL_VISUAL_CONTRACT = 'selection-panel-mhsa-v1';
+const MHSA_DETAIL_CAPTION_LABEL_HEIGHT_RATIO = 0.34;
+const MHSA_DETAIL_CAPTION_DIMENSIONS_HEIGHT_RATIO = 0.24;
+const MHSA_DETAIL_CAPTION_LABEL_BOOST = 1.14;
+const MHSA_DETAIL_CAPTION_DIMENSIONS_BOOST = 1.1;
+const MHSA_DETAIL_SOFTMAX_GAP_BOOST_RATIO = 0.4;
+const MHSA_DETAIL_SOFTMAX_GAP_BOOST_MAX = 20;
+
 function parsePx(value, fallback = 0) {
     if (typeof value === 'number' && Number.isFinite(value)) return value;
     if (typeof value !== 'string') return fallback;
@@ -51,6 +59,14 @@ function resolveTextMetrics(text = '', baseFontSize = 12, textFit = null) {
 
 function measureTextWidth(text = '', fontSize = 12) {
     return measureView2dText(text, { fontSize }).inkWidth;
+}
+
+function resolveMhsaDetailSoftmaxGapBoost(boost = 0) {
+    const safeBoost = Number.isFinite(boost) ? Math.max(0, Math.round(boost)) : 0;
+    return Math.min(
+        MHSA_DETAIL_SOFTMAX_GAP_BOOST_MAX,
+        Math.round(safeBoost * MHSA_DETAIL_SOFTMAX_GAP_BOOST_RATIO)
+    );
 }
 
 function resolveMeasuredValue(value, fallback = null) {
@@ -140,9 +156,15 @@ function resolveLayoutConfig(scene, {
     component.gridPaddingX = resolveNonNegativeOverride(componentOverrides.gridPaddingX, component.gridPaddingX);
     component.gridPaddingY = resolveNonNegativeOverride(componentOverrides.gridPaddingY, component.gridPaddingY);
 
+    const isMhsaDetailScene = String(scene?.metadata?.visualContract || '').trim().toLowerCase() === MHSA_DETAIL_VISUAL_CONTRACT;
+    const resolvedSoftmaxGapBoost = isMhsaDetailScene
+        ? resolveMhsaDetailSoftmaxGapBoost(softmaxGapBoost)
+        : softmaxGapBoost;
+
     return {
         scenePaddingX: (isSmallScreen ? 32 : 48) + padXBoost,
         scenePaddingY: (isSmallScreen ? 24 : 32) + padYBoost,
+        isMhsaDetailScene,
         rootGap: (isSmallScreen ? 40 : 56) + stackColumnGapBoost,
         groupGaps: {
             default: isSmallScreen ? 14 : 18,
@@ -152,11 +174,62 @@ function resolveLayoutConfig(scene, {
             stage: (isSmallScreen ? 16 : 20) + stageGapBoost,
             attention: (isSmallScreen ? 16 : 22) + attentionGapBoost,
             inline: (isSmallScreen ? 10 : 14) + inlineGapBoost,
-            softmax: (isSmallScreen ? 14 : 18) + softmaxGapBoost,
+            softmax: (isSmallScreen ? 14 : 18) + resolvedSoftmaxGapBoost,
             'head-output': (isSmallScreen ? 16 : 20) + headOutputGapBoost + headCopyOffsetBoost
         },
         component,
         tokens
+    };
+}
+
+function resolveCaptionLineHeights(node, contentBounds, measurement, config) {
+    const defaultLineHeight = Math.max(1, Math.floor(config?.component?.captionLineHeight || 0));
+    const fallback = {
+        labelHeight: defaultLineHeight,
+        dimensionsHeight: defaultLineHeight
+    };
+    if (!node || !contentBounds || !measurement?.captionLines?.length || !config?.isMhsaDetailScene) {
+        return fallback;
+    }
+    if (measurement.captionPosition !== 'bottom' || node.kind !== VIEW2D_NODE_KINDS.MATRIX) {
+        return fallback;
+    }
+    if (!String(node?.role || '').trim().toLowerCase().startsWith('attention-')) {
+        return fallback;
+    }
+    const captionMeta = node?.metadata?.caption || null;
+    if (String(captionMeta?.renderMode || '').trim().toLowerCase() !== 'dom-katex') {
+        return fallback;
+    }
+    const contentHeight = Math.max(0, Number(contentBounds.height) || 0);
+    if (!(contentHeight > 0)) {
+        return fallback;
+    }
+    const labelScale = Number.isFinite(captionMeta?.labelScale) && captionMeta.labelScale > 0
+        ? Number(captionMeta.labelScale)
+        : 1;
+    const dimensionsScale = Number.isFinite(captionMeta?.dimensionsScale) && captionMeta.dimensionsScale > 0
+        ? Number(captionMeta.dimensionsScale)
+        : 1;
+    return {
+        labelHeight: Math.max(
+            defaultLineHeight,
+            Math.round(
+                contentHeight
+                * MHSA_DETAIL_CAPTION_LABEL_HEIGHT_RATIO
+                * labelScale
+                * MHSA_DETAIL_CAPTION_LABEL_BOOST
+            )
+        ),
+        dimensionsHeight: Math.max(
+            defaultLineHeight,
+            Math.round(
+                contentHeight
+                * MHSA_DETAIL_CAPTION_DIMENSIONS_HEIGHT_RATIO
+                * dimensionsScale
+                * MHSA_DETAIL_CAPTION_DIMENSIONS_BOOST
+            )
+        )
     };
 }
 
@@ -697,26 +770,39 @@ function placeNode(node, x, y, measurement, registry, config, depth = 0, parentI
     };
     let labelBounds = null;
     let dimensionBounds = null;
-    if (measurement.captionLines.length && (measurement.captionHeight > 0 || measurement.captionPosition === 'float-top')) {
-        const lineHeight = config.component.captionLineHeight;
+    if (
+        measurement.captionLines.length
+        && (
+            measurement.captionHeight > 0
+            || measurement.captionPosition === 'float-top'
+            || measurement.captionPosition === 'bottom'
+        )
+    ) {
+        const {
+            labelHeight,
+            dimensionsHeight
+        } = resolveCaptionLineHeights(node, contentBounds, measurement, config);
         const floatTopGap = Math.max(2, Math.round(config.component.captionGap * 0.4));
         const captionY = measurement.captionPosition === 'top'
             ? y
             : (measurement.captionPosition === 'float-top'
-                ? contentBounds.y - floatTopGap - (measurement.captionLines.length * lineHeight)
+                ? contentBounds.y - floatTopGap - (
+                    labelHeight
+                    + (measurement.captionLines.length > 1 ? dimensionsHeight : 0)
+                )
                 : y + measurement.contentHeight + config.component.captionGap);
         labelBounds = {
             x: x + ((measurement.width - measurement.captionWidth) / 2),
             y: captionY,
             width: measurement.captionWidth,
-            height: lineHeight
+            height: labelHeight
         };
         if (measurement.captionLines.length > 1) {
             dimensionBounds = {
                 x: labelBounds.x,
-                y: labelBounds.y + lineHeight,
+                y: labelBounds.y + labelHeight,
                 width: labelBounds.width,
-                height: lineHeight
+                height: dimensionsHeight
             };
         }
     }
@@ -798,19 +884,40 @@ function resolveConnectorAnchorPoint(registry, anchorRef = null, metadata = null
     if (!entry) return basePoint;
     const modeKey = endpoint === 'target' ? 'targetAnchorMode' : 'sourceAnchorMode';
     const anchorMode = String(metadata?.[modeKey] || '').trim().toLowerCase();
+    const offsetXKey = endpoint === 'target' ? 'targetAnchorOffsetX' : 'sourceAnchorOffsetX';
+    const offsetYKey = endpoint === 'target' ? 'targetAnchorOffsetY' : 'sourceAnchorOffsetY';
+    const offsetXRatioKey = endpoint === 'target' ? 'targetAnchorOffsetXRatio' : 'sourceAnchorOffsetXRatio';
+    const offsetYRatioKey = endpoint === 'target' ? 'targetAnchorOffsetYRatio' : 'sourceAnchorOffsetYRatio';
+    const anchorBounds = entry.contentBounds || entry.bounds || null;
+    const offsetX = (
+        (Number.isFinite(metadata?.[offsetXKey]) ? Number(metadata[offsetXKey]) : 0)
+        + (Number.isFinite(metadata?.[offsetXRatioKey]) && anchorBounds
+            ? Number(metadata[offsetXRatioKey]) * Math.max(0, Number(anchorBounds.width) || 0)
+            : 0)
+    );
+    const offsetY = (
+        (Number.isFinite(metadata?.[offsetYKey]) ? Number(metadata[offsetYKey]) : 0)
+        + (Number.isFinite(metadata?.[offsetYRatioKey]) && anchorBounds
+            ? Number(metadata[offsetYRatioKey]) * Math.max(0, Number(anchorBounds.height) || 0)
+            : 0)
+    );
+    const applyAnchorOffset = (point) => ({
+        x: point.x + offsetX,
+        y: point.y + offsetY
+    });
     if (anchorMode === 'caption-bottom' && anchorRef.anchor === VIEW2D_ANCHOR_SIDES.BOTTOM) {
-        return {
+        return applyAnchorOffset({
             x: basePoint.x,
             y: resolveConnectorCaptionBottom(entry)
-        };
+        });
     }
     if (anchorMode === 'dimension-top' && anchorRef.anchor === VIEW2D_ANCHOR_SIDES.BOTTOM) {
-        return {
+        return applyAnchorOffset({
             x: basePoint.x,
             y: resolveConnectorDimensionTop(entry)
-        };
+        });
     }
-    return basePoint;
+    return applyAnchorOffset(basePoint);
 }
 
 function buildConnectorPath(

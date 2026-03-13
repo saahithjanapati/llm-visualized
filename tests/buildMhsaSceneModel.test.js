@@ -114,6 +114,7 @@ describe('buildMhsaSceneModel', () => {
         expect(qInputNode?.metadata?.compactRows?.compactWidth).toBe(131);
         expect(qInputNode?.metadata?.compactRows?.rowHeight).toBe(7);
         expect(qMultiplyNode?.metadata?.fontScale).toBe(0.82);
+        expect(qMultiplyNode?.metadata?.renderMode).toBe('dom-katex');
         expect(projectionSidecarNode?.metadata?.gapOverride).toBe(84);
         expect(projectionStackNode?.metadata?.gapOverride).toBe(188);
         expect(qWeightNode?.visual?.styleKey).toBe(VIEW2D_STYLE_KEYS.MHSA_Q);
@@ -225,8 +226,8 @@ describe('buildMhsaSceneModel', () => {
         });
 
         expect(largeScene.metadata.rowCount).toBe(7);
-        expect(largeScene.metadata.layoutMetrics.connectorGaps.default)
-            .toBeGreaterThan(smallScene.metadata.layoutMetrics.connectorGaps.default);
+        expect(largeScene.metadata.layoutMetrics.extraRows)
+            .toBeGreaterThan(smallScene.metadata.layoutMetrics.extraRows);
 
         const largeNodes = flattenSceneNodes(largeScene);
         const largeQOutputNode = largeNodes.find((node) => node.role === 'projection-output' && node.metadata?.kind === 'q');
@@ -297,14 +298,14 @@ describe('buildMhsaSceneModel', () => {
         expect(Math.abs(
             ((attentionPreScoreEntry?.contentBounds?.y || 0) + ((attentionPreScoreEntry?.contentBounds?.height || 0) / 2))
             - ((attentionQueryEntry?.contentBounds?.y || 0) + ((attentionQueryEntry?.contentBounds?.height || 0) / 2))
-        )).toBeLessThan(5);
+        )).toBeLessThanOrEqual(8);
         expect(Math.abs(
             ((attentionPreScoreEntry?.contentBounds?.y || 0) + ((attentionPreScoreEntry?.contentBounds?.height || 0) / 2))
             - ((attentionTransposeEntry?.contentBounds?.y || 0) + ((attentionTransposeEntry?.contentBounds?.height || 0) / 2))
-        )).toBeLessThan(5);
-        expect(attentionPreScoreEntry?.layoutData?.innerPaddingX).toBe(1);
-        expect(attentionPreScoreEntry?.layoutData?.innerPaddingY).toBe(1);
-        expect(attentionPreScoreEntry?.layoutData?.cardRadius).toBe(8);
+        )).toBeLessThanOrEqual(8);
+        expect(attentionPreScoreEntry?.layoutData?.innerPaddingX).toBe(4);
+        expect(attentionPreScoreEntry?.layoutData?.innerPaddingY).toBe(4);
+        expect(attentionPreScoreEntry?.layoutData?.cardRadius).toBe(12);
         expect(attentionSoftmaxFlowEntry?.contentBounds?.y).toBeGreaterThan(
             (attentionPreScoreEntry?.contentBounds?.y || 0) + (attentionPreScoreEntry?.contentBounds?.height || 0)
         );

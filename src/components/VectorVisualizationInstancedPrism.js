@@ -102,6 +102,13 @@ function setColorCacheEntry(data, cacheKey, entry) {
     bucket.set(cacheKey, entry);
 }
 
+function cloneColorList(colors) {
+    if (!Array.isArray(colors) || !colors.length) return [];
+    return colors.map((color) => (color && typeof color.clone === 'function')
+        ? color.clone()
+        : new THREE.Color(0.5, 0.5, 0.5));
+}
+
 export class VectorVisualizationInstancedPrism {
     constructor(initialData = null, initialPosition = new THREE.Vector3(0, 0, 0), numSubsections = 30, instanceCount = VECTOR_LENGTH_PRISM, options = {}) {
         this.group = new THREE.Group();
@@ -658,6 +665,58 @@ varying float vGradientT;`
             this.mesh.instanceColor.array.set(buffers.instanceColors);
             this.mesh.instanceColor.needsUpdate = true;
         }
+    }
+
+    captureColorState() {
+        if (!this.mesh || !this.mesh.geometry) return null;
+        const colorStartAttr = this.mesh.geometry.getAttribute('colorStart');
+        const colorEndAttr = this.mesh.geometry.getAttribute('colorEnd');
+        return {
+            numSubsections: Math.max(0, Math.floor(this.numSubsections || 0)),
+            keyColors: cloneColorList(this.currentKeyColors),
+            colorStart: colorStartAttr?.array ? colorStartAttr.array.slice() : null,
+            colorEnd: colorEndAttr?.array ? colorEndAttr.array.slice() : null,
+            instanceColors: this.mesh.instanceColor?.array ? this.mesh.instanceColor.array.slice() : null
+        };
+    }
+
+    applyColorState(state) {
+        if (!state) return false;
+        this.numSubsections = Math.max(0, Math.floor(state.numSubsections || 0));
+        this.currentKeyColors = cloneColorList(state.keyColors);
+        this._applyColorBuffers({
+            colorStart: state.colorStart,
+            colorEnd: state.colorEnd,
+            instanceColors: state.instanceColors
+        });
+        return true;
+    }
+
+    previewColorStateFromData(data, numKeyColorsToSample = 30, colorGenerationOptions = null, cacheKeyData = null) {
+        const snapshot = this.captureColorState();
+        if (!snapshot) return null;
+        const previewSource = isArrayLike(cacheKeyData) ? cacheKeyData : data;
+        this.updateKeyColorsFromData(data, numKeyColorsToSample, colorGenerationOptions, previewSource);
+        const preview = this.captureColorState();
+        this.applyColorState(snapshot);
+        return preview;
+    }
+
+    setInstanceGradientColors(index, startColor, endColor, markNeedsUpdate = true) {
+        if (index < 0 || index >= this.instanceCount) return false;
+        const colorStartAttr = this.mesh?.geometry?.getAttribute('colorStart');
+        const colorEndAttr = this.mesh?.geometry?.getAttribute('colorEnd');
+        if (!colorStartAttr || !colorEndAttr) return false;
+
+        const resolvedStart = (startColor && startColor.isColor) ? startColor : new THREE.Color(0.5, 0.5, 0.5);
+        const resolvedEnd = (endColor && endColor.isColor) ? endColor : resolvedStart;
+        colorStartAttr.setXYZ(index, resolvedStart.r, resolvedStart.g, resolvedStart.b);
+        colorEndAttr.setXYZ(index, resolvedEnd.r, resolvedEnd.g, resolvedEnd.b);
+        if (markNeedsUpdate) {
+            colorStartAttr.needsUpdate = true;
+            colorEndAttr.needsUpdate = true;
+        }
+        return true;
     }
 
     updateKeyColorsFromData(data, numKeyColorsToSample = 30, colorGenerationOptions = null, cacheKeyData = null) {
