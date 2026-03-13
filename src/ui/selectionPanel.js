@@ -98,6 +98,7 @@ import {
     LAYER_NORM_ACTIVE_PARAM_PREVIEW_COLOR_OPTIONS,
     resolveLayerNormParameterSummary
 } from './selectionPanelLayerNormPreviewUtils.js';
+import { resolveSelectionPrimaryActionConfig } from './selectionPanelPrimaryActionUtils.js';
 import { buildSelectionPromptContext } from './selectionPanelPromptContextUtils.js';
 import { buildSelectionChatPrompt } from './selectionPanelChatPromptUtils.js';
 import {
@@ -3135,28 +3136,9 @@ class SelectionPanel {
     }
 
     _resolveSelectionPrimaryActionConfig({
-        shouldShowMhsaInfoAction = false,
         view2dContext = null
     } = {}) {
-        if (shouldShowMhsaInfoAction) {
-            return {
-                action: MHSA_INFO_PANEL_ACTION_OPEN,
-                label: 'View in 2D / matrix form',
-                ariaLabel: 'Open the multi-head self-attention matrix form view',
-                title: 'Open the multi-head self-attention matrix form view'
-            };
-        }
-        if (!view2dContext) return null;
-        const focusLabel = String(view2dContext?.focusLabel || '').trim();
-        const actionLabel = focusLabel
-            ? `View ${focusLabel} in 2D / matrix form`
-            : 'View in 2D / matrix form';
-        return {
-            action: TRANSFORMER_VIEW2D_PANEL_ACTION_OPEN,
-            label: 'View in 2D / matrix form',
-            ariaLabel: actionLabel,
-            title: actionLabel
-        };
+        return resolveSelectionPrimaryActionConfig({ view2dContext });
     }
 
     _setCopyContextButtonLabel(text) {
@@ -12324,19 +12306,9 @@ class SelectionPanel {
             this._scheduleResize();
         }
         this._updateMhsaFullscreenToggle();
-        const shouldShowMhsaInfoAction = !isMhsaInfo
-            && (
-                isSelfAttentionSelection(label, selection)
-                || isWeightedSumSelection(label, selection)
-                || isValueSelection(label, selection)
-                || isQkvMatrixLabel(label)
-                || lower.includes('output projection matrix')
-                || lower.includes('self-attention')
-            );
         const transformerView2dContext = resolveTransformerView2dActionContext(selection, label);
         this._currentTransformerView2dContext = transformerView2dContext;
         this._setTransformerView2dActionButtonState(this._resolveSelectionPrimaryActionConfig({
-            shouldShowMhsaInfoAction,
             view2dContext: transformerView2dContext
         }));
         const kvCachePhase = isKvCacheInfo
