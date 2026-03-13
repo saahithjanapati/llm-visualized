@@ -51,6 +51,7 @@ import {
     freezeStaticTransforms,
     LN_INTERNAL_TRAIL_MIN_SEGMENT
 } from './gpt2LayerUtils.js';
+import { animatePrismMultiplyTransition } from './gpt2MultiplyTransition.js';
 import { updateLayerNormVisualState } from './gpt2LayerNormVisuals.js';
 import {
     buildSingleLane,
@@ -148,11 +149,6 @@ const LN2_HANDOFF_STALL_TIMEOUT_MS_NORMAL = 7000;
 // that can spawn fallback vectors/trails on top of active ones.
 const WATCHDOG_FRAME_GAP_RESET_MS = 900;
 const POST_ATTENTION_LN2_PRE_RISE_SPEED_MULT = 1.25;
-const MULTIPLY_TRANSITION_DURATION_MS = 160;
-const MULTIPLY_SOURCE_SHRINK = 0.94;
-const MULTIPLY_RESULT_POP_SCALE = 1.16;
-const MULTIPLY_RESULT_POP_EXPAND_MS = 95;
-const MULTIPLY_RESULT_POP_SETTLE_MS = 115;
 const MLP_POST_PASS_THROUGH_FINAL_EMISSIVE = GPT2_LAYER_VISUAL_TUNING.mlp.postPassFinalEmissiveIntensity;
 const MLP_MATRIX_FLASH_START_EMISSIVE = Number.isFinite(GPT2_LAYER_VISUAL_TUNING.mlp.flashStartEmissiveIntensity)
     ? GPT2_LAYER_VISUAL_TUNING.mlp.flashStartEmissiveIntensity
@@ -4291,108 +4287,19 @@ export default class Gpt2Layer extends BaseLayer {
     }
 
     _animateMultiplyTransition({ sourceVec, multResult, scaleParam = null, instant = false, onComplete = null }) {
-        const finalizeVisibility = () => {
-            this._setLayerNormParamRefLayout(scaleParam, { visible: false });
-            if (sourceVec && sourceVec.group) {
-                sourceVec.group.visible = false;
-                if (sourceVec.group.parent) {
-                    sourceVec.group.parent.remove(sourceVec.group);
-                }
+        animatePrismMultiplyTransition({
+            sourceVec,
+            multResult,
+            scaleParam,
+            instant,
+            onComplete,
+            skipToEndActive: this._skipToEndActive,
+            emitProgress: () => this._emitProgress(),
+            setVectorOpacity: (vec, opacity) => this._setVectorOpacity(vec, opacity),
+            setScaleParamVisible: (targetVec, visible) => {
+                this._setLayerNormParamRefLayout(targetVec, { visible });
             }
-            if (multResult && multResult.group) {
-                multResult.group.visible = true;
-                multResult.group.scale.set(1, 1, 1);
-                this._setVectorOpacity(multResult, 1);
-            }
-        };
-        const finish = () => {
-            if (typeof onComplete === 'function') onComplete();
-        };
-        const pulseMultiplyResult = () => {
-            if (!multResult || !multResult.group || this._skipToEndActive || typeof TWEEN === 'undefined') {
-                finish();
-                return;
-            }
-
-            const baseScale = multResult.group.scale.clone();
-            const pulseState = { s: 1 };
-            const applyPulseScale = () => {
-                multResult.group.scale.set(
-                    baseScale.x * pulseState.s,
-                    baseScale.y * pulseState.s,
-                    baseScale.z * pulseState.s
-                );
-                this._emitProgress();
-            };
-
-            new TWEEN.Tween(pulseState)
-                .to({ s: MULTIPLY_RESULT_POP_SCALE }, MULTIPLY_RESULT_POP_EXPAND_MS)
-                .easing(TWEEN.Easing.Back.Out)
-                .onUpdate(applyPulseScale)
-                .onComplete(() => {
-                    new TWEEN.Tween(pulseState)
-                        .to({ s: 1 }, MULTIPLY_RESULT_POP_SETTLE_MS)
-                        .easing(TWEEN.Easing.Quadratic.InOut)
-                        .onUpdate(applyPulseScale)
-                        .onComplete(() => {
-                            multResult.group.scale.copy(baseScale);
-                            this._emitProgress();
-                            finish();
-                        })
-                        .start();
-                })
-                .start();
-        };
-
-        if (instant) {
-            finalizeVisibility();
-            pulseMultiplyResult();
-            return;
-        }
-
-        if (!multResult || !multResult.group) {
-            finalizeVisibility();
-            finish();
-            return;
-        }
-
-        if (!sourceVec || !sourceVec.group) {
-            finalizeVisibility();
-            pulseMultiplyResult();
-            return;
-        }
-
-        if (this._skipToEndActive || typeof TWEEN === 'undefined') {
-            finalizeVisibility();
-            finish();
-            return;
-        }
-
-        const sourceStartScale = sourceVec.group.scale.clone();
-        const sourceEndScale = sourceStartScale.clone().multiplyScalar(MULTIPLY_SOURCE_SHRINK);
-
-        multResult.group.visible = false;
-        multResult.group.scale.set(1, 1, 1);
-        this._setVectorOpacity(sourceVec, 1);
-        this._setVectorOpacity(multResult, 1);
-        // Hide parameter vector during the handoff tween to avoid blended
-        // overlap colors that can read as random/glitchy.
-        this._setLayerNormParamRefLayout(scaleParam, { visible: false });
-
-        const tweenState = { t: 0 };
-        new TWEEN.Tween(tweenState)
-            .to({ t: 1 }, MULTIPLY_TRANSITION_DURATION_MS)
-            .easing(TWEEN.Easing.Quadratic.Out)
-            .onUpdate(() => {
-                const t = THREE.MathUtils.clamp(tweenState.t, 0, 1);
-                sourceVec.group.scale.lerpVectors(sourceStartScale, sourceEndScale, t);
-                this._emitProgress();
-            })
-            .onComplete(() => {
-                finalizeVisibility();
-                pulseMultiplyResult();
-            })
-            .start();
+        });
     }
 
     _getLaneMeta(lane, stage, extra = {}) {

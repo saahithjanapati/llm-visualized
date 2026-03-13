@@ -696,6 +696,6 @@ export function resolveTransformerView2dActionContext(selectionInfo = null, norm
     return {
         semanticTarget,
         focusLabel: describeTransformerView2dTarget(semanticTarget),
-        actionLabel: 'Open 2D canvas'
+        actionLabel: 'View in 2D / matrix form'
     };
 }

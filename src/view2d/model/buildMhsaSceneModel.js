@@ -28,10 +28,6 @@ import {
     resolveView2dVisualTokens,
     VIEW2D_STYLE_KEYS
 } from '../theme/visualTokens.js';
-import {
-    measureView2dText,
-    resolveView2dTextPadding
-} from '../textMeasurement.js';
 import { createView2dVectorStripMetadata } from '../shared/vectorStrip.js';
 import { formatView2dMatrixDimensions } from '../shared/formatMatrixDimensions.js';
 import {
@@ -47,6 +43,8 @@ const PROJECTION_STACK_GAP_MAX_EXTRA = 80;
 const PROJECTION_STACK_GAP_MAX_EXTRA_SMALL = 64;
 const PROJECTION_SIDECAR_GAP = 84;
 const PROJECTION_SIDECAR_GAP_SMALL = 64;
+const ATTENTION_STAGE_SIDECAR_GAP = -12;
+const ATTENTION_STAGE_SIDECAR_GAP_SMALL = -8;
 const PROJECTION_STAGE_INLINE_GAP = 12;
 const PROJECTION_STAGE_INLINE_GAP_SMALL = 10;
 const PROJECTION_EQUATION_GAP = 12;
@@ -80,9 +78,11 @@ const VECTOR_STRIP_MAX_WIDTH_BOOST_SMALL = 48;
 const PROJECTION_BIAS_ROW_HEIGHT = 14;
 const PROJECTION_BIAS_CAPTION_MIN_SCREEN_HEIGHT = 12;
 const PROJECTION_BIAS_LABEL_MIN_SCREEN_FONT_PX = 15;
+const PROJECTION_KEY_BIAS_LABEL_MIN_SCREEN_FONT_PX = 18;
 const PROJECTION_BIAS_CORNER_RADIUS = 5;
 const PROJECTION_BIAS_CAPTION_LABEL_SCALE = 1.8;
 const PROJECTION_QUERY_BIAS_CAPTION_LABEL_SCALE = 2.0;
+const PROJECTION_KEY_BIAS_CAPTION_LABEL_SCALE = 2.75;
 const PROJECTION_OUTPUT_COMPACT_WIDTH = 72;
 const PROJECTION_OUTPUT_COMPACT_WIDTH_SMALL = 62;
 const PROJECTION_OUTPUT_ROW_HEIGHT = 7;
@@ -95,10 +95,12 @@ const ATTENTION_KT_CLOSE_GAP = -60;
 const ATTENTION_KT_CLOSE_GAP_SMALL = -48;
 const ATTENTION_CLOSE_DIVISOR_GAP = 8;
 const ATTENTION_CLOSE_DIVISOR_GAP_SMALL = 6;
-const ATTENTION_DIVISOR_GAP = 0;
-const ATTENTION_DIVISOR_GAP_SMALL = 0;
-const ATTENTION_RESULT_CLUSTER_GAP = 10;
-const ATTENTION_RESULT_CLUSTER_GAP_SMALL = 8;
+const ATTENTION_DIVISOR_GAP = -12;
+const ATTENTION_DIVISOR_GAP_SMALL = -10;
+const ATTENTION_SCALE_TEXT_OFFSET_X = -8;
+const ATTENTION_SCALE_TEXT_OFFSET_X_SMALL = -6;
+const ATTENTION_RESULT_CLUSTER_GAP = -10;
+const ATTENTION_RESULT_CLUSTER_GAP_SMALL = -8;
 const ATTENTION_SOFTMAX_PERSISTENT_FONT_PX = 16;
 const ATTENTION_SOFTMAX_PERSISTENT_FONT_PX_SMALL = 15;
 const ATTENTION_SOFTMAX_ZOOMED_OUT_FONT_PX = 17;
@@ -116,6 +118,8 @@ const ATTENTION_SOFTMAX_BODY_GAP = 4;
 const ATTENTION_SOFTMAX_BODY_GAP_SMALL = 3;
 const ATTENTION_SOFTMAX_FLOW_GAP = 88;
 const ATTENTION_SOFTMAX_FLOW_GAP_SMALL = 66;
+const ATTENTION_SOFTMAX_ROW_OFFSET = 12;
+const ATTENTION_SOFTMAX_ROW_OFFSET_SMALL = 10;
 const ATTENTION_POST_COPY_STAGE_SPACER = 48;
 const ATTENTION_POST_COPY_STAGE_SPACER_SMALL = 36;
 const ATTENTION_HEAD_OUTPUT_GAP = 10;
@@ -126,8 +130,8 @@ const ATTENTION_MATRIX_CAPTION_LABEL_MIN_SCREEN_FONT_PX = 14;
 const ATTENTION_MATRIX_CAPTION_DIMENSIONS_MIN_SCREEN_FONT_PX = 11;
 const ATTENTION_PRE_SCORE_CAPTION_LABEL_SCALE = 0.82;
 const ATTENTION_MASK_CAPTION_LABEL_SCALE = 0.82;
-const ATTENTION_GRID_PADDING = 1;
-const ATTENTION_GRID_CARD_CORNER_RADIUS = 8;
+const ATTENTION_GRID_PADDING = 4;
+const ATTENTION_GRID_CARD_CORNER_RADIUS = 12;
 const ATTENTION_SOFTMAX_TEXT_FONT_SCALE = 1.28;
 const ATTENTION_SCALE_TEXT_FONT_SCALE = 1.4;
 const ATTENTION_STAGE_VERTICAL_LIFT = 144;
@@ -141,6 +145,8 @@ const ATTENTION_CONNECTOR_CLEARANCE_PER_EXTRA_ROW_SMALL = 1.25;
 const ATTENTION_CONNECTOR_CLEARANCE_MAX_EXTRA = 22;
 const ATTENTION_CONNECTOR_CLEARANCE_MAX_EXTRA_SMALL = 18;
 const ATTENTION_CONNECTOR_CAPTION_EXIT_GAP = 4;
+const ATTENTION_PRE_CONNECTOR_SOURCE_GAP = 6;
+const ATTENTION_PRE_CONNECTOR_SOURCE_GAP_SMALL = 4;
 const MHSA_CONNECTOR_STROKE = 'rgba(255, 255, 255, 0.84)';
 const MHSA_SYMBOL_CAPTION_LABEL_SCALE = 0.9;
 const MHSA_WEIGHT_CAPTION_LABEL_SCALE_FACTOR = 0.72;
@@ -557,50 +563,6 @@ function resolveAttentionSoftmaxPrefixOffset(rowCount = 1, isSmallScreen = false
     return Math.max(1, Math.round((flowHeight - prefixVisualHeightEstimate) * 0.5));
 }
 
-function resolveLabelNodeWidth(text = '', fontScale = 1, visualTokens = null) {
-    const tokens = visualTokens || resolveView2dVisualTokens();
-    const baseFontSize = Math.max(10, tokens?.typography?.labelFontSize || 12);
-    const fontSize = baseFontSize * (Number.isFinite(fontScale) && fontScale > 0 ? Number(fontScale) : 1);
-    const textMetrics = measureView2dText(text, { fontSize });
-    return textMetrics.inkWidth + (resolveView2dTextPadding(fontSize) * 2);
-}
-
-function resolveOperatorNodeWidth(text = '', {
-    fontScale = 1,
-    isSmallScreen = false,
-    visualTokens = null
-} = {}) {
-    const tokens = visualTokens || resolveView2dVisualTokens();
-    const baseFontSize = Math.max(16, tokens?.typography?.operatorFontSize || 20);
-    const fontSize = baseFontSize * (Number.isFinite(fontScale) && fontScale > 0 ? Number(fontScale) : 1);
-    const sidePadding = isSmallScreen ? 8 : 10;
-    const textMetrics = measureView2dText(text, { fontSize });
-    return textMetrics.inkWidth + (sidePadding * 2);
-}
-
-function resolveAttentionSoftmaxBodyOffsetX({
-    isSmallScreen = false,
-    visualTokens = null,
-    softmaxLabelText = 'softmax'
-} = {}) {
-    const resultGroupGap = isSmallScreen ? ATTENTION_RESULT_GROUP_GAP_SMALL : ATTENTION_RESULT_GROUP_GAP;
-    const softmaxPrefixGap = isSmallScreen ? ATTENTION_SOFTMAX_PREFIX_GAP_SMALL : ATTENTION_SOFTMAX_PREFIX_GAP;
-    const softmaxBodyGap = isSmallScreen ? ATTENTION_SOFTMAX_BODY_GAP_SMALL : ATTENTION_SOFTMAX_BODY_GAP;
-    const equalsWidth = resolveOperatorNodeWidth('=', {
-        isSmallScreen,
-        visualTokens
-    });
-    const softmaxLabelWidth = resolveLabelNodeWidth(softmaxLabelText, ATTENTION_SOFTMAX_TEXT_FONT_SCALE, visualTokens);
-    const softmaxOpenWidth = resolveOperatorNodeWidth('(', {
-        fontScale: ATTENTION_SOFTMAX_GROUPING_OPERATOR_SCALE,
-        isSmallScreen,
-        visualTokens
-    });
-    return Math.round((equalsWidth + resultGroupGap) - (
-        softmaxLabelWidth + softmaxPrefixGap + softmaxOpenWidth + softmaxBodyGap
-    ));
-}
-
 function buildGradientRowItems(rows = [], baseSemantic = {}, role = 'row') {
     return rows.map((rowData) => {
         const semantic = buildSemantic(baseSemantic, {
@@ -844,6 +806,14 @@ function buildProjectionStageNode({
         isSmallScreen,
         layoutMetrics
     });
+    const projectionBiasCaptionLabelScale = projectionKind === 'q'
+        ? PROJECTION_QUERY_BIAS_CAPTION_LABEL_SCALE
+        : (projectionKind === 'k'
+            ? PROJECTION_KEY_BIAS_CAPTION_LABEL_SCALE
+            : PROJECTION_BIAS_CAPTION_LABEL_SCALE);
+    const projectionBiasLabelMinScreenFontPx = projectionKind === 'k'
+        ? PROJECTION_KEY_BIAS_LABEL_MIN_SCREEN_FONT_PX
+        : PROJECTION_BIAS_LABEL_MIN_SCREEN_FONT_PX;
     const xLnDimensions = projectionVisualMetrics.xLnDimensions;
     const projectionOutputDimensions = projectionVisualMetrics.outputDimensions;
 
@@ -914,10 +884,8 @@ function buildProjectionStageNode({
         captionPosition: 'bottom',
         captionMinScreenHeightPx: PROJECTION_BIAS_CAPTION_MIN_SCREEN_HEIGHT,
         captionPreferStandardSizing: true,
-        captionLabelScale: projectionKind === 'q'
-            ? PROJECTION_QUERY_BIAS_CAPTION_LABEL_SCALE
-            : PROJECTION_BIAS_CAPTION_LABEL_SCALE,
-        captionLabelMinScreenFontPx: PROJECTION_BIAS_LABEL_MIN_SCREEN_FONT_PX,
+        captionLabelScale: projectionBiasCaptionLabelScale,
+        captionLabelMinScreenFontPx: projectionBiasLabelMinScreenFontPx,
         captionDimensionsTex: biasDimensionCaption.tex,
         captionDimensionsText: biasDimensionCaption.text,
         visualStyleKey: styleKey,
@@ -1369,6 +1337,9 @@ function buildAttentionStageNode({
     const softmaxCoreGap = isSmallScreen
         ? ATTENTION_SOFTMAX_FLOW_GAP_SMALL
         : ATTENTION_SOFTMAX_FLOW_GAP;
+    const softmaxRowOffset = isSmallScreen
+        ? ATTENTION_SOFTMAX_ROW_OFFSET_SMALL
+        : ATTENTION_SOFTMAX_ROW_OFFSET;
     const softmaxPrefixOffset = resolveAttentionSoftmaxPrefixOffset(
         scoreStage.outputRowCount,
         isSmallScreen,
@@ -1407,13 +1378,17 @@ function buildAttentionStageNode({
             softmaxPrefixColumnNode,
             softmaxCoreFlowNode
         ],
+        layout: {
+            anchorAlign: {
+                axis: 'x',
+                selfNodeId: maskedInputNode.id,
+                targetNodeId: preScoreNode.id,
+                selfAnchor: VIEW2D_ANCHOR_SIDES.LEFT,
+                targetAnchor: VIEW2D_ANCHOR_SIDES.LEFT
+            }
+        },
         metadata: {
-            gapOverride: isSmallScreen ? ATTENTION_SOFTMAX_BODY_GAP_SMALL : ATTENTION_SOFTMAX_BODY_GAP,
-            layoutOffsetX: resolveAttentionSoftmaxBodyOffsetX({
-                isSmallScreen,
-                visualTokens: resolvedTokens,
-                softmaxLabelText: scoreStage.softmaxLabelTex || 'softmax'
-            })
+            gapOverride: isSmallScreen ? ATTENTION_SOFTMAX_BODY_GAP_SMALL : ATTENTION_SOFTMAX_BODY_GAP
         }
     });
     const attentionResultEquationRowNode = createGroupNode({
@@ -1447,7 +1422,7 @@ function buildAttentionStageNode({
             softmaxBodyNode
         ],
         metadata: {
-            gapOverride: softmaxCoreGap
+            gapOverride: softmaxCoreGap + softmaxRowOffset
         }
     });
 
@@ -1476,6 +1451,11 @@ function buildAttentionStageNode({
                 text: 'sqrt(d_head)',
                 presentation: VIEW2D_TEXT_PRESENTATIONS.LABEL,
                 visual: { styleKey: VIEW2D_STYLE_KEYS.LABEL },
+                layout: {
+                    offsetX: isSmallScreen
+                        ? ATTENTION_SCALE_TEXT_OFFSET_X_SMALL
+                        : ATTENTION_SCALE_TEXT_OFFSET_X
+                },
                 metadata: {
                     renderMode: 'dom-katex',
                     minScreenHeightPx: 0,
@@ -1663,6 +1643,18 @@ function buildConnectorNodes({
         extraRows: layoutMetrics?.extraRows,
         isSmallScreen
     });
+    const preConnectorSourceGap = Math.max(
+        0,
+        (connectorGaps.pre ?? connectorGaps.default ?? 0)
+            + ATTENTION_CONNECTOR_CAPTION_EXIT_GAP
+            + (isSmallScreen
+                ? ATTENTION_PRE_CONNECTOR_SOURCE_GAP_SMALL
+                : ATTENTION_PRE_CONNECTOR_SOURCE_GAP)
+    );
+    const valueConnectorSourceGap = Math.max(
+        0,
+        connectorGaps.value ?? connectorGaps.default ?? 0
+    );
     const findProjectionOutput = (kind) => projectionNodes.find((stageNode) => stageNode?.metadata?.kind === kind)
         ?.children?.[2]?.children?.[4] || null;
     const findAttentionNode = (role) => {
@@ -1735,13 +1727,15 @@ function buildConnectorNodes({
                 target: createAnchorRef(maskedInputNode.id, VIEW2D_ANCHOR_SIDES.TOP),
                 route: VIEW2D_CONNECTOR_ROUTES.VERTICAL,
                 gap: connectorGaps.pre,
+                sourceGap: preConnectorSourceGap,
                 gapKey: 'pre',
                 visual: {
                     styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL,
                     stroke: MHSA_CONNECTOR_STROKE
                 },
                 metadata: {
-                    preserveColor: true
+                    preserveColor: true,
+                    sourceAnchorMode: 'caption-bottom'
                 }
             })
             : null,
@@ -1767,12 +1761,12 @@ function buildConnectorNodes({
             ? createConnectorNode({
                 role: 'connector-v',
                 semantic: buildSemantic(baseSemantic, { stage: 'connector-v', role: 'connector-v' }),
-                source: createAnchorRef(vOutputNode.id, VIEW2D_ANCHOR_SIDES.BOTTOM),
+                source: createAnchorRef(vOutputNode.id, VIEW2D_ANCHOR_SIDES.RIGHT),
                 target: createAnchorRef(valuePostNode.id, VIEW2D_ANCHOR_SIDES.BOTTOM),
-                route: VIEW2D_CONNECTOR_ROUTES.UNDERPASS,
+                route: VIEW2D_CONNECTOR_ROUTES.ELBOW,
                 gap: connectorGaps.value,
-                sourceGap: ATTENTION_CONNECTOR_CAPTION_EXIT_GAP,
-                targetGap: ATTENTION_CONNECTOR_CAPTION_EXIT_GAP,
+                sourceGap: valueConnectorSourceGap,
+                targetGap: 0,
                 gapKey: 'value',
                 visual: {
                     styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL,
@@ -1780,7 +1774,6 @@ function buildConnectorNodes({
                 },
                 metadata: {
                     preserveColor: true,
-                    sourceAnchorMode: 'caption-bottom',
                     targetAnchorMode: 'caption-bottom'
                 }
             })
@@ -1928,18 +1921,35 @@ export function buildMhsaSceneModel({
         })
         : null;
 
+    const projectionSidecarNode = createGroupNode({
+        role: 'projection-sidecar',
+        semantic: buildSemantic(baseSemantic, { stage: 'projection-sidecar', role: 'projection-sidecar' }),
+        direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
+        gapKey: 'projection',
+        children: [
+            projectionSourceNode,
+            projectionStackNode
+        ],
+        metadata: {
+            gapOverride: isSmallScreen ? PROJECTION_SIDECAR_GAP_SMALL : PROJECTION_SIDECAR_GAP
+        }
+    });
+
+    const mainFlowChildren = attentionRootNode
+        ? [projectionSidecarNode, attentionRootNode]
+        : [projectionSidecarNode];
     const rootNodes = [
         createGroupNode({
-            role: 'projection-sidecar',
-            semantic: buildSemantic(baseSemantic, { stage: 'projection-sidecar', role: 'projection-sidecar' }),
+            role: 'mhsa-main-flow',
+            semantic: buildSemantic(baseSemantic, { stage: 'mhsa-main-flow', role: 'mhsa-main-flow' }),
             direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
-            gapKey: 'projection',
-            children: [
-                projectionSourceNode,
-                projectionStackNode
-            ],
+            gapKey: 'stage',
+            align: 'center',
+            children: mainFlowChildren,
             metadata: {
-                gapOverride: isSmallScreen ? PROJECTION_SIDECAR_GAP_SMALL : PROJECTION_SIDECAR_GAP
+                gapOverride: attentionRootNode
+                    ? (isSmallScreen ? ATTENTION_STAGE_SIDECAR_GAP_SMALL : ATTENTION_STAGE_SIDECAR_GAP)
+                    : 0
             }
         })
     ];
@@ -1951,7 +1961,6 @@ export function buildMhsaSceneModel({
         sourceNode: projectionSourceNode
     });
     if (attentionRootNode) {
-        rootNodes.push(attentionRootNode);
         connectorNodes.push(...buildConnectorNodes({
             baseSemantic,
             layoutMetrics: resolvedLayoutMetrics,

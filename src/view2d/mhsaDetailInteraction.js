@@ -457,8 +457,7 @@ function buildQueryRowSelections(index = null, rowIndex = null) {
     return [
         { nodeId: index.projectionInputIdsByKind.q, rowIndex },
         { nodeId: index.projectionOutputIdsByKind.q, rowIndex },
-        { nodeId: index.singleNodeIds.attentionQuerySource, rowIndex },
-        { nodeId: index.singleNodeIds.attentionHeadOutput, rowIndex }
+        { nodeId: index.singleNodeIds.attentionQuerySource, rowIndex }
     ];
 }
 
@@ -485,8 +484,7 @@ function buildValueRowSelections(index = null, rowIndex = null) {
     return [
         { nodeId: index.projectionInputIdsByKind.v, rowIndex },
         { nodeId: index.projectionOutputIdsByKind.v, rowIndex },
-        { nodeId: index.singleNodeIds.attentionValuePost, rowIndex },
-        { nodeId: index.singleNodeIds.attentionHeadOutput, rowIndex }
+        { nodeId: index.singleNodeIds.attentionValuePost, rowIndex }
     ];
 }
 
@@ -525,7 +523,7 @@ function buildAttentionKeyTransposeSelections(index = null, axisIndex = null) {
 
 function buildScoreAxisSelections(index = null, axisIndex = null, {
     includePost = true,
-    includePostCopy = true
+    includePostCopy = false
 } = {}) {
     if (!Number.isFinite(axisIndex) || !index) {
         return {
@@ -552,20 +550,45 @@ function buildScoreAxisSelections(index = null, axisIndex = null, {
 }
 
 function buildScoreAxisRowSelections(index = null, rowIndex = null) {
+    return buildScoreAxisRowSelectionsWithOptions(index, rowIndex);
+}
+
+function buildScoreAxisRowSelectionsWithOptions(index = null, rowIndex = null, {
+    includePost = true,
+    includePostCopy = false
+} = {}) {
     if (!Number.isFinite(rowIndex) || !index) return [];
     return [
         { nodeId: index.singleNodeIds.attentionPreScore, rowIndex },
         { nodeId: index.singleNodeIds.attentionMaskedInput, rowIndex },
         { nodeId: index.singleNodeIds.attentionMask, rowIndex },
-        { nodeId: index.singleNodeIds.attentionPost, rowIndex },
-        { nodeId: index.singleNodeIds.attentionPostCopy, rowIndex }
+        ...(includePost
+            ? [{ nodeId: index.singleNodeIds.attentionPost, rowIndex }]
+            : []),
+        ...(includePostCopy
+            ? [{ nodeId: index.singleNodeIds.attentionPostCopy, rowIndex }]
+            : [])
     ];
+}
+
+function buildPostCopyMirrorCellSelections(index = null, rowIndex = null, colIndex = null) {
+    if (!index || !Number.isFinite(rowIndex) || !Number.isFinite(colIndex)) return [];
+    const nodeId = index?.singleNodeIds?.attentionPostCopy;
+    if (typeof nodeId !== 'string' || !nodeId.length) return [];
+    return [{
+        nodeId,
+        rowIndex,
+        colIndex
+    }];
 }
 
 function buildPreScoreCellResult(index = null, node = null, rowIndex = null, colIndex = null, cellItem = null) {
     const activeNodeIds = [];
     const activeConnectorIds = [];
-    const scoreAxisSelections = buildScoreAxisSelections(index, colIndex);
+    const scoreAxisSelections = buildScoreAxisSelections(index, colIndex, {
+        includePost: false,
+        includePostCopy: false
+    });
     const info = buildAttentionCellHoverInfo(node, cellItem, 'pre');
     const rowSelections = [
         ...buildQueryRowSelections(index, rowIndex),
@@ -575,7 +598,8 @@ function buildPreScoreCellResult(index = null, node = null, rowIndex = null, col
     const columnSelections = scoreAxisSelections.columnSelections;
     const cellSelections = [
         { nodeId: index?.singleNodeIds?.attentionPreScore, rowIndex, colIndex },
-        { nodeId: index?.singleNodeIds?.attentionMaskedInput, rowIndex, colIndex }
+        { nodeId: index?.singleNodeIds?.attentionMaskedInput, rowIndex, colIndex },
+        ...buildPostCopyMirrorCellSelections(index, rowIndex, colIndex)
     ];
 
     appendProjectionStagePath(activeNodeIds, index, ['q', 'k']);
@@ -604,7 +628,8 @@ function buildPreScoreCellResult(index = null, node = null, rowIndex = null, col
 function buildSoftmaxCellResult(index = null, node = null, rowIndex = null, colIndex = null, cellItem = null, {
     stageKey = 'post',
     includeWeightedOutput = false,
-    includePostCopy = false
+    includePostCopy = false,
+    includeMirroredPostCopyCell = false
 } = {}) {
     const activeNodeIds = [];
     const activeConnectorIds = [];
@@ -632,10 +657,13 @@ function buildSoftmaxCellResult(index = null, node = null, rowIndex = null, colI
             : []),
         ...(includePostSelections && includePostCopy
             ? [{ nodeId: index?.singleNodeIds?.attentionPostCopy, rowIndex, colIndex }]
+            : []),
+        ...(includeMirroredPostCopyCell
+            ? buildPostCopyMirrorCellSelections(index, rowIndex, colIndex)
             : [])
     ];
 
-    appendProjectionStagePath(activeNodeIds, index, includeWeightedOutput ? ['q', 'k', 'v'] : ['q', 'k']);
+    appendProjectionStagePath(activeNodeIds, index, ['q', 'k']);
     appendAllUnique(activeNodeIds, isMaskStage
         ? resolveAttentionMaskStageRoleIds(index, {
             query: true,
@@ -678,22 +706,31 @@ function buildProjectionRowResult(index = null, node = null, kind = '', rowHit =
     appendProjectionStagePath(activeNodeIds, index, [safeKind]);
 
     if (safeKind === 'q') {
+        const includeAttentionScorePath = role === 'attention-query-source' || role === 'projection-output';
         appendAllUnique(activeNodeIds, resolveAttentionRoleIds(index, {
             query: true,
             transpose: false,
-            score: false
+            score: includeAttentionScorePath,
+            includeWeightedOutput: false
         }));
         appendConnectorKinds(activeConnectorIds, index, ['q']);
         rowSelections.push(...buildQueryRowSelections(index, rowIndex));
-        if (role === 'attention-query-source' || role === 'projection-output') {
-            rowSelections.push(...buildScoreAxisRowSelections(index, rowIndex));
+        if (includeAttentionScorePath) {
+            rowSelections.push(...buildScoreAxisRowSelectionsWithOptions(index, rowIndex, {
+                includePost: true,
+                includePostCopy: false
+            }));
         }
     } else if (safeKind === 'k') {
-        const scoreAxisSelections = buildScoreAxisSelections(index, rowIndex);
+        const scoreAxisSelections = buildScoreAxisSelections(index, rowIndex, {
+            includePost: true,
+            includePostCopy: false
+        });
         appendAllUnique(activeNodeIds, resolveAttentionRoleIds(index, {
             query: false,
             transpose: true,
-            score: false
+            score: true,
+            includeWeightedOutput: false
         }));
         appendConnectorKinds(activeConnectorIds, index, ['k']);
         rowSelections.push(...buildKeyRowSelections(index, rowIndex), ...scoreAxisSelections.rowSelections);
@@ -701,9 +738,7 @@ function buildProjectionRowResult(index = null, node = null, kind = '', rowHit =
     } else if (safeKind === 'v') {
         appendAllUnique(activeNodeIds, [
             ...(index?.projectionLeafIdsByKind?.v || []),
-            ...(index?.nodeIdsByRole?.get('attention-post-copy') || []),
-            ...(index?.nodeIdsByRole?.get('attention-value-post') || []),
-            ...(index?.nodeIdsByRole?.get('attention-head-output') || [])
+            ...(index?.nodeIdsByRole?.get('attention-value-post') || [])
         ]);
         appendConnectorKinds(activeConnectorIds, index, ['v']);
         rowSelections.push(...buildValueRowSelections(index, rowIndex));
@@ -741,7 +776,10 @@ function buildTransposeAxisResult(index = null, axisHit = null) {
         : (Number.isFinite(axisHit.colIndex) ? Math.max(0, Math.floor(axisHit.colIndex)) : null);
     const activeNodeIds = [];
     const activeConnectorIds = [];
-    const scoreAxisSelections = buildScoreAxisSelections(index, axisIndex);
+    const scoreAxisSelections = buildScoreAxisSelections(index, axisIndex, {
+        includePost: true,
+        includePostCopy: false
+    });
     const rowSelections = [
         ...buildKeyRowSelections(index, axisIndex),
         ...scoreAxisSelections.rowSelections
@@ -752,7 +790,8 @@ function buildTransposeAxisResult(index = null, axisHit = null) {
     appendAllUnique(activeNodeIds, resolveAttentionRoleIds(index, {
         query: false,
         transpose: true,
-        score: false
+        score: true,
+        includeWeightedOutput: false
     }));
     appendConnectorKinds(activeConnectorIds, index, ['k']);
 
@@ -786,16 +825,22 @@ function buildWeightedOutputRowResult(index = null, node = null, rowHit = null, 
     const rowIndex = Number.isFinite(rowHit.rowIndex) ? Math.max(0, Math.floor(rowHit.rowIndex)) : null;
     const activeNodeIds = [];
     const activeConnectorIds = [];
-    const rowSelections = [
-        { nodeId: index.singleNodeIds.attentionValuePost, rowIndex },
-        { nodeId: index.singleNodeIds.attentionHeadOutput, rowIndex }
-    ];
+    const rowSelections = includeProjection
+        ? [{ nodeId: index.singleNodeIds.attentionValuePost, rowIndex }]
+        : [
+            { nodeId: index.singleNodeIds.attentionValuePost, rowIndex },
+            { nodeId: index.singleNodeIds.attentionHeadOutput, rowIndex }
+        ];
 
-    appendAllUnique(activeNodeIds, [
-        ...(index?.nodeIdsByRole?.get('attention-post-copy') || []),
-        ...(index?.nodeIdsByRole?.get('attention-value-post') || []),
-        ...(index?.nodeIdsByRole?.get('attention-head-output') || [])
-    ]);
+    appendAllUnique(activeNodeIds, includeProjection
+        ? [
+            ...(index?.nodeIdsByRole?.get('attention-value-post') || [])
+        ]
+        : [
+            ...(index?.nodeIdsByRole?.get('attention-post-copy') || []),
+            ...(index?.nodeIdsByRole?.get('attention-value-post') || []),
+            ...(index?.nodeIdsByRole?.get('attention-head-output') || [])
+        ]);
     if (includeProjection) {
         appendProjectionStagePath(activeNodeIds, index, ['v']);
         rowSelections.push(...buildValueRowSelections(index, rowIndex));
@@ -863,14 +908,7 @@ function buildProjectionStageResult(index = null, kind = '') {
         }));
         appendConnectorKinds(activeConnectorIds, index, ['k']);
     } else if (safeKind === 'v') {
-        appendProjectionStagePath(activeNodeIds, index, ['q', 'k', 'v']);
-        appendAllUnique(activeNodeIds, resolveAttentionRoleIds(index, {
-            query: true,
-            transpose: true,
-            score: true,
-            includeWeightedOutput: true
-        }));
-        appendConnectorKinds(activeConnectorIds, index, ['q', 'k', 'pre', 'post', 'v']);
+        appendProjectionStagePath(activeNodeIds, index, ['v']);
     }
 
     return buildFocusResult({
@@ -960,7 +998,7 @@ function buildAttentionRoleResult(index = null, node = null, role = '') {
     }
 
     if (safeRole === 'attention-value-post') {
-        appendProjectionStagePath(activeNodeIds, index, ['q', 'k', 'v']);
+        appendProjectionStagePath(activeNodeIds, index, ['q', 'k']);
         appendAllUnique(activeNodeIds, resolveAttentionRoleIds(index, {
             query: true,
             transpose: true,
@@ -979,7 +1017,7 @@ function buildAttentionRoleResult(index = null, node = null, role = '') {
     }
 
     if (safeRole === 'attention-post-copy') {
-        appendProjectionStagePath(activeNodeIds, index, ['q', 'k', 'v']);
+        appendProjectionStagePath(activeNodeIds, index, ['q', 'k']);
         appendAllUnique(activeNodeIds, resolveAttentionRoleIds(index, {
             query: true,
             transpose: true,
@@ -996,7 +1034,7 @@ function buildAttentionRoleResult(index = null, node = null, role = '') {
     }
 
     if (WEIGHTED_OUTPUT_ROLES.includes(safeRole) && safeRole !== 'attention-head-output') {
-        appendProjectionStagePath(activeNodeIds, index, ['q', 'k', 'v']);
+        appendProjectionStagePath(activeNodeIds, index, ['q', 'k']);
         appendAllUnique(activeNodeIds, resolveAttentionRoleIds(index, {
             query: true,
             transpose: true,
@@ -1027,7 +1065,7 @@ function buildAttentionRoleResult(index = null, node = null, role = '') {
 
     const isScoreRole = PRE_ATTENTION_ROLES.includes(safeRole) || SCORE_ATTENTION_ROLES.includes(safeRole);
     if (isScoreRole) {
-        appendProjectionStagePath(activeNodeIds, index, ['q', 'k', ...(safeRole === 'attention-post' ? ['v'] : [])]);
+        appendProjectionStagePath(activeNodeIds, index, ['q', 'k']);
         appendAllUnique(activeNodeIds, resolveAttentionRoleIds(index, {
             query: true,
             transpose: true,
@@ -1180,7 +1218,8 @@ export function resolveMhsaDetailHoverState(index = null, hit = null) {
                 {
                     stageKey,
                     includeWeightedOutput: false,
-                    includePostCopy: false
+                    includePostCopy: false,
+                    includeMirroredPostCopyCell: true
                 }
             );
         }

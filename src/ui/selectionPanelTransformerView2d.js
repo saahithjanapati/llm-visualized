@@ -180,7 +180,7 @@ function normalizeView2dKeyboardControlKey(key = '') {
 
 export function setDescriptionTransformerView2dAction(descriptionEl, {
     enabled = false,
-    label = 'Open 2D canvas'
+    label = 'View in 2D / matrix form'
 } = {}) {
     if (!descriptionEl) return;
 

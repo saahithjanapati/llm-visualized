@@ -14,6 +14,7 @@ import {
     createConnectorNode,
     createGroupNode,
     createMatrixNode,
+    createOperatorNode,
     createSceneModel,
     createTextNode,
     VIEW2D_ANCHOR_SIDES,
@@ -808,6 +809,59 @@ describe('CanvasSceneRenderer', () => {
         expect(ctx.operations.some((entry) => entry.type === 'fillText' && entry.text === '=')).toBe(true);
         expect(ctx.operations.some((entry) => entry.type === 'fillText' && entry.text === '(')).toBe(true);
         expect(ctx.operations.some((entry) => entry.type === 'fillText' && entry.text === ')')).toBe(true);
+    });
+
+    it('expands low-zoom operator clip bounds so plus and multiply glyphs do not get cut off', () => {
+        const renderOperatorAtLowZoom = (text, operatorKey) => {
+            const operatorNode = createOperatorNode({
+                role: `test-${operatorKey}`,
+                semantic: { componentKind: 'test-operator', role: `test-${operatorKey}`, operatorKey },
+                text,
+                visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR }
+            });
+            const scene = createSceneModel({
+                semantic: { componentKind: 'test-operator-scene' },
+                metadata: { visualContract: 'selection-panel-mhsa-v1' },
+                nodes: [operatorNode]
+            });
+            const layout = buildSceneLayout(scene);
+            const renderer = new CanvasSceneRenderer({ canvas });
+            const scale = 0.05;
+            const offsetX = (640 - (layout.sceneBounds.width * scale)) / 2;
+            const offsetY = (360 - (layout.sceneBounds.height * scale)) / 2;
+
+            renderer.setScene(scene, layout);
+            ctx.operations.length = 0;
+            expect(renderer.render({
+                width: 640,
+                height: 360,
+                dpr: 1,
+                viewportTransform: {
+                    source: `operator-low-zoom-${operatorKey}`,
+                    scale,
+                    offsetX,
+                    offsetY
+                }
+            })).toBe(true);
+
+            const clipRects = ctx.operations.filter((entry) => entry.type === 'rect');
+            expect(ctx.operations.some((entry) => entry.type === 'fillText' && entry.text === text)).toBe(true);
+            expect(clipRects).toHaveLength(1);
+            return {
+                clipRect: clipRects[0],
+                bounds: layout.registry.getNodeEntry(operatorNode.id)?.contentBounds
+            };
+        };
+
+        const plusResult = renderOperatorAtLowZoom('+', 'plus');
+        expect(plusResult.bounds).toBeTruthy();
+        expect(plusResult.clipRect.width).toBeGreaterThan(plusResult.bounds.width);
+        expect(plusResult.clipRect.height).toBeGreaterThan(plusResult.bounds.height);
+
+        const multiplyResult = renderOperatorAtLowZoom('x', 'multiply');
+        expect(multiplyResult.bounds).toBeTruthy();
+        expect(multiplyResult.clipRect.width).toBeGreaterThan(multiplyResult.bounds.width);
+        expect(multiplyResult.clipRect.height).toBeGreaterThan(multiplyResult.bounds.height);
     });
 
     it('honors an external viewport transform when provided', () => {

@@ -175,8 +175,78 @@ function resolveGroupGap(node, config) {
     return config.groupGaps[gapKey] ?? config.groupGaps.default;
 }
 
-function resolveNodeLayoutOffset(value = 0) {
-    return Number.isFinite(value) ? Math.round(Number(value)) : 0;
+function resolveNodeLayoutOffset(node = null, axis = 'x') {
+    const layoutValue = axis === 'y'
+        ? node?.layout?.offsetY
+        : node?.layout?.offsetX;
+    if (Number.isFinite(layoutValue)) {
+        return Math.round(Number(layoutValue));
+    }
+    const legacyMetadataValue = axis === 'y'
+        ? node?.metadata?.layoutOffsetY
+        : node?.metadata?.layoutOffsetX;
+    return Number.isFinite(legacyMetadataValue) ? Math.round(Number(legacyMetadataValue)) : 0;
+}
+
+function walkNodeTree(nodes = [], visit = null) {
+    if (typeof visit !== 'function' || !Array.isArray(nodes)) return;
+    const pending = [...nodes];
+    while (pending.length) {
+        const node = pending.shift();
+        if (!node || typeof node !== 'object') continue;
+        visit(node);
+        if (Array.isArray(node.children) && node.children.length) {
+            pending.unshift(...node.children);
+        }
+    }
+}
+
+function resolveAnchorCoordinate(entry = null, anchor = VIEW2D_ANCHOR_SIDES.CENTER, axis = 'x') {
+    const anchorPoint = entry?.anchors?.[anchor] || entry?.anchors?.[VIEW2D_ANCHOR_SIDES.CENTER] || null;
+    if (!anchorPoint) return null;
+    const coordinate = axis === 'y' ? anchorPoint.y : anchorPoint.x;
+    return Number.isFinite(coordinate) ? coordinate : null;
+}
+
+function applySceneNodeAnchorAlignments(scene = null, registry = null) {
+    if (!scene?.nodes || !registry) return;
+    walkNodeTree(scene.nodes, (node) => {
+        const anchorAlign = node?.layout?.anchorAlign;
+        if (!anchorAlign || typeof anchorAlign !== 'object') return;
+        const axis = String(anchorAlign.axis || 'x').trim().toLowerCase() === 'y' ? 'y' : 'x';
+        const selfNodeId = typeof anchorAlign.selfNodeId === 'string' && anchorAlign.selfNodeId.length
+            ? anchorAlign.selfNodeId
+            : node.id;
+        const targetNodeId = typeof anchorAlign.targetNodeId === 'string' && anchorAlign.targetNodeId.length
+            ? anchorAlign.targetNodeId
+            : null;
+        if (!targetNodeId) return;
+
+        const selfEntry = registry.getNodeEntry(selfNodeId);
+        const targetEntry = registry.getNodeEntry(targetNodeId);
+        if (!selfEntry || !targetEntry) return;
+
+        const selfCoordinate = resolveAnchorCoordinate(
+            selfEntry,
+            anchorAlign.selfAnchor || VIEW2D_ANCHOR_SIDES.CENTER,
+            axis
+        );
+        const targetCoordinate = resolveAnchorCoordinate(
+            targetEntry,
+            anchorAlign.targetAnchor || VIEW2D_ANCHOR_SIDES.CENTER,
+            axis
+        );
+        if (!Number.isFinite(selfCoordinate) || !Number.isFinite(targetCoordinate)) return;
+
+        const offset = Number.isFinite(anchorAlign.offset) ? Number(anchorAlign.offset) : 0;
+        const delta = (targetCoordinate + offset) - selfCoordinate;
+        if (!Number.isFinite(delta) || Math.abs(delta) < 0.5) return;
+        registry.translateNodeSubtree(
+            node.id,
+            axis === 'x' ? delta : 0,
+            axis === 'y' ? delta : 0
+        );
+    });
 }
 
 function measureLeafNode(node, config) {
@@ -537,8 +607,8 @@ function placeNode(node, x, y, measurement, registry, config, depth = 0, parentI
             let cursorY = y;
             node.children.forEach((child, index) => {
                 const childMeasurement = measurement.childMeasurements[index];
-                const childOffsetX = resolveNodeLayoutOffset(child?.metadata?.layoutOffsetX);
-                const childOffsetY = resolveNodeLayoutOffset(child?.metadata?.layoutOffsetY);
+                const childOffsetX = resolveNodeLayoutOffset(child, 'x');
+                const childOffsetY = resolveNodeLayoutOffset(child, 'y');
                 const childX = align === 'start'
                     ? x
                     : (align === 'end'
@@ -559,8 +629,8 @@ function placeNode(node, x, y, measurement, registry, config, depth = 0, parentI
         } else if (direction === VIEW2D_LAYOUT_DIRECTIONS.OVERLAY) {
             node.children.forEach((child, index) => {
                 const childMeasurement = measurement.childMeasurements[index];
-                const childOffsetX = resolveNodeLayoutOffset(child?.metadata?.layoutOffsetX);
-                const childOffsetY = resolveNodeLayoutOffset(child?.metadata?.layoutOffsetY);
+                const childOffsetX = resolveNodeLayoutOffset(child, 'x');
+                const childOffsetY = resolveNodeLayoutOffset(child, 'y');
                 const childX = align === 'start'
                     ? x
                     : (align === 'end'
@@ -586,8 +656,8 @@ function placeNode(node, x, y, measurement, registry, config, depth = 0, parentI
             let cursorX = x;
             node.children.forEach((child, index) => {
                 const childMeasurement = measurement.childMeasurements[index];
-                const childOffsetX = resolveNodeLayoutOffset(child?.metadata?.layoutOffsetX);
-                const childOffsetY = resolveNodeLayoutOffset(child?.metadata?.layoutOffsetY);
+                const childOffsetX = resolveNodeLayoutOffset(child, 'x');
+                const childOffsetY = resolveNodeLayoutOffset(child, 'y');
                 const childY = align === 'start'
                     ? y
                     : (align === 'end'
@@ -692,6 +762,18 @@ function resolveConnectorCaptionBottom(entry = null) {
     return Math.max(contentBottom, labelBottom, dimensionsBottom);
 }
 
+function resolveConnectorDimensionTop(entry = null) {
+    if (!entry || typeof entry !== 'object') return 0;
+    if (entry.dimensionBounds && Number.isFinite(entry.dimensionBounds.y)) {
+        return entry.dimensionBounds.y;
+    }
+    const contentBottom = (entry.contentBounds?.y || 0) + (entry.contentBounds?.height || 0);
+    const labelBottom = entry.labelBounds
+        ? (entry.labelBounds.y + entry.labelBounds.height)
+        : 0;
+    return Math.max(contentBottom, labelBottom);
+}
+
 function offsetPoint(point, anchor, gap = 0) {
     const safeGap = Number.isFinite(gap) ? Math.max(0, gap) : 0;
     switch (anchor) {
@@ -720,6 +802,12 @@ function resolveConnectorAnchorPoint(registry, anchorRef = null, metadata = null
         return {
             x: basePoint.x,
             y: resolveConnectorCaptionBottom(entry)
+        };
+    }
+    if (anchorMode === 'dimension-top' && anchorRef.anchor === VIEW2D_ANCHOR_SIDES.BOTTOM) {
+        return {
+            x: basePoint.x,
+            y: resolveConnectorDimensionTop(entry)
         };
     }
     return basePoint;
@@ -848,6 +936,12 @@ export function buildSceneLayout(scene, {
         const overlayY = config.scenePaddingY + ((rootHeight - measurement.height) / 2);
         placeNode(node, overlayX, overlayY, measurement, registry, config, 0, null);
     });
+
+    applySceneNodeAnchorAlignments(scene, registry);
+    registry.setSceneBounds(unionBounds([
+        registry.getSceneBounds(),
+        ...registry.getNodeEntries().map((entry) => entry.bounds)
+    ]));
 
     scene.nodes.forEach((node) => {
         if (node?.kind !== VIEW2D_NODE_KINDS.GROUP || !Array.isArray(node.children)) return;

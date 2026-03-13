@@ -26,6 +26,18 @@ function cloneAnchors(anchors = {}) {
     }, {});
 }
 
+function translatePointInPlace(point = null, offsetX = 0, offsetY = 0) {
+    if (!point || typeof point !== 'object') return;
+    point.x += Number.isFinite(offsetX) ? offsetX : 0;
+    point.y += Number.isFinite(offsetY) ? offsetY : 0;
+}
+
+function translateBoundsInPlace(bounds = null, offsetX = 0, offsetY = 0) {
+    if (!bounds || typeof bounds !== 'object') return;
+    bounds.x += Number.isFinite(offsetX) ? offsetX : 0;
+    bounds.y += Number.isFinite(offsetY) ? offsetY : 0;
+}
+
 function cloneArray(items = []) {
     return Array.isArray(items) ? items.map((item) => {
         if (item && typeof item === 'object') {
@@ -256,6 +268,37 @@ export class LayoutRegistry {
 
     getNodeEntries() {
         return Array.from(this._nodeEntries.values()).map((entry) => this.getNodeEntry(entry.nodeId));
+    }
+
+    translateNodeSubtree(nodeId, offsetX = 0, offsetY = 0) {
+        if (typeof nodeId !== 'string' || !nodeId.length) return false;
+        if (!Number.isFinite(offsetX) && !Number.isFinite(offsetY)) return false;
+        const safeOffsetX = Number.isFinite(offsetX) ? offsetX : 0;
+        const safeOffsetY = Number.isFinite(offsetY) ? offsetY : 0;
+        if (safeOffsetX === 0 && safeOffsetY === 0) return false;
+        if (!this._nodeEntries.has(nodeId)) return false;
+
+        const pending = [nodeId];
+        while (pending.length) {
+            const currentNodeId = pending.shift();
+            const currentEntry = this._nodeEntries.get(currentNodeId);
+            if (!currentEntry) continue;
+
+            translateBoundsInPlace(currentEntry.bounds, safeOffsetX, safeOffsetY);
+            translateBoundsInPlace(currentEntry.contentBounds, safeOffsetX, safeOffsetY);
+            translateBoundsInPlace(currentEntry.labelBounds, safeOffsetX, safeOffsetY);
+            translateBoundsInPlace(currentEntry.dimensionBounds, safeOffsetX, safeOffsetY);
+            Object.values(currentEntry.anchors || {}).forEach((anchorPoint) => {
+                translatePointInPlace(anchorPoint, safeOffsetX, safeOffsetY);
+            });
+
+            this._nodeEntries.forEach((candidateEntry, candidateNodeId) => {
+                if (candidateEntry?.parentId === currentNodeId) {
+                    pending.push(candidateNodeId);
+                }
+            });
+        }
+        return true;
     }
 
     getNodeEntriesAtPoint(x = 0, y = 0, { includeGroups = false } = {}) {

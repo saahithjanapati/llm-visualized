@@ -48,12 +48,12 @@ import {
 import { buildHueRangeOptions, mapValueToHueRange } from '../utils/colors.js';
 import { setGlobalTrailMaxStepDistance, clearTrailsFromScene, refreshTrailDisplayScales } from '../utils/trailUtils.js';
 import { applyLayerNormMaterial } from './layers/gpt2LayerUtils.js';
+import { animatePrismMultiplyTransition } from './layers/gpt2MultiplyTransition.js';
 import { scaleGlobalEmissiveIntensity } from '../utils/materialUtils.js';
 import {
     buildElementwiseSum,
     isArrayLike,
     recolorVectorFromData,
-    simplePrismMultiply,
     toMutableArray
 } from './layerPipelineMath.js';
 import {
@@ -2498,100 +2498,145 @@ export class LayerPipeline extends EventTarget {
                     addVec.group.visible = true;
                     activateFinalLnParamColors();
 
-                    simplePrismMultiply(vec, multVec, () => {
-                        updateTopLnColor(multVec.group.position.y);
-                        vec.group.visible = false;
-                        multVec.group.visible = false;
-                        const finalLnScaledDataRaw = getFinalLnStageData('scale', lane, multVec.instanceCount);
-                        const finalLnScaledData = (isArrayLike(finalLnScaledDataRaw) && finalLnScaledDataRaw.length)
-                            ? finalLnScaledDataRaw
-                            : null;
-                        const productData = finalLnScaledData
-                            ? finalLnScaledData
-                            : multVec.rawData.slice();
-
-                        const resVec = new VectorVisualizationInstancedPrism(
-                            productData,
-                            multVec.group.position.clone(),
-                            30,
-                            multVec.instanceCount
-                        );
-                        lastLayer.root.add(resVec.group);
-                        markSkipVisible(resVec);
-
-                        if (!usingScalePlaceholder && multVec.group && multVec.group.parent) {
-                            multVec.group.parent.remove(multVec.group);
+                    const scaleParamData = (Array.isArray(multVec.rawData) || ArrayBuffer.isView(multVec.rawData))
+                        ? multVec.rawData
+                        : [];
+                    const sourceRaw = (Array.isArray(vec.rawData) || ArrayBuffer.isView(vec.rawData))
+                        ? vec.rawData
+                        : [];
+                    const multData = sourceRaw.slice();
+                    if (scaleParamData.length) {
+                        const len = Math.min(multData.length, scaleParamData.length);
+                        for (let i = 0; i < len; i++) {
+                            multData[i] = (sourceRaw[i] || 0) * (scaleParamData[i] || 0);
                         }
+                    }
+                    const finalLnScaledDataRaw = getFinalLnStageData('scale', lane, vec.instanceCount);
+                    const finalLnScaledData = (isArrayLike(finalLnScaledDataRaw) && finalLnScaledDataRaw.length)
+                        ? finalLnScaledDataRaw
+                        : null;
+                    const multSeed = multData.length
+                        ? multData
+                        : (sourceRaw.length
+                            ? sourceRaw.slice()
+                            : new Array(Math.max(1, Math.floor(vec.instanceCount || VECTOR_LENGTH_PRISM))).fill(0));
+                    const multResult = new VectorVisualizationInstancedPrism(
+                        multSeed,
+                        multVec.group.position.clone(),
+                        30,
+                        vec.instanceCount
+                    );
+                    lastLayer.root.add(multResult.group);
+                    multResult.group.visible = false;
+                    markSkipVisible(multResult);
+                    recolorVectorFromData(multResult, finalLnScaledData || multSeed, null);
 
-                        resVec.userData = resVec.userData || {};
-                        if (vec.userData && vec.userData.trail) {
-                            resVec.userData.trail = vec.userData.trail;
-                            resVec.userData.trailWorld = vec.userData.trailWorld;
+                    const reusedTrail = vec.userData && vec.userData.trail;
+                    const reusedTrailIsWorld = Boolean(vec.userData && vec.userData.trailWorld);
+                    if (reusedTrail) {
+                        multResult.userData = multResult.userData || {};
+                        multResult.userData.trail = reusedTrail;
+                        multResult.userData.trailWorld = reusedTrailIsWorld;
+                        if (reusedTrailIsWorld) {
+                            multResult.group.getWorldPosition(TMP_WORLD_POS);
+                            if (typeof reusedTrail.snapLastPointTo === 'function') {
+                                reusedTrail.snapLastPointTo(TMP_WORLD_POS);
+                            } else if (typeof reusedTrail.update === 'function') {
+                                reusedTrail.update(TMP_WORLD_POS);
+                            }
+                        } else if (typeof reusedTrail.snapLastPointTo === 'function') {
+                            reusedTrail.snapLastPointTo(multResult.group.position);
+                        } else if (typeof reusedTrail.update === 'function') {
+                            reusedTrail.update(multResult.group.position);
                         }
-                        lane.originalVec = resVec;
+                        delete vec.userData.trail;
+                        delete vec.userData.trailWorld;
+                    }
 
-                        updateTopLnColor(resVec.group.position.y);
-                        this.dispatchEvent(new Event('progress'));
+                    animatePrismMultiplyTransition({
+                        sourceVec: vec,
+                        multResult,
+                        scaleParam: multVec,
+                        instant: true,
+                        skipToEndActive: this._skipToEndActive,
+                        emitProgress: () => {
+                            updateTopLnColor(multResult.group.position.y);
+                            this.dispatchEvent(new Event('progress'));
+                        },
+                        setScaleParamVisible: (targetVec, visible) => {
+                            if (targetVec && targetVec.group) {
+                                targetVec.group.visible = visible;
+                            }
+                        },
+                        onComplete: () => {
+                            updateTopLnColor(multResult.group.position.y);
+                            if (!usingScalePlaceholder && multVec.group && multVec.group.parent) {
+                                multVec.group.parent.remove(multVec.group);
+                            }
 
-                        const finalLnShiftedData = getFinalLnStageData('shift', lane, resVec.instanceCount);
-                        const finalAdditionData = (isArrayLike(finalLnShiftedData) && finalLnShiftedData.length)
-                            ? finalLnShiftedData
-                            : buildElementwiseSum(resVec.rawData, addVec.rawData, resVec.instanceCount);
+                            lane.originalVec = multResult;
+                            this.dispatchEvent(new Event('progress'));
 
-                        lane.__topLnShiftStarted = true;
-                        startPrismAdditionAnimation(resVec, addVec, null, () => {
-                            lane.__topLnShiftComplete = true;
-                            const additionTrail = resVec.userData && resVec.userData.trail;
-                            if (additionTrail) {
-                                addVec.userData = addVec.userData || {};
-                                const additionTrailIsWorld = Boolean(resVec.userData && resVec.userData.trailWorld);
-                                const prevTrail = addVec.userData.trail;
-                                if (prevTrail && prevTrail !== additionTrail) {
-                                    try {
-                                        if (typeof prevTrail.dispose === 'function') {
-                                            prevTrail.dispose();
-                                        } else if (prevTrail._line && prevTrail._line.parent) {
-                                            prevTrail._line.parent.remove(prevTrail._line);
+                            const finalLnShiftedData = getFinalLnStageData('shift', lane, multResult.instanceCount);
+                            const finalAdditionData = (isArrayLike(finalLnShiftedData) && finalLnShiftedData.length)
+                                ? finalLnShiftedData
+                                : buildElementwiseSum(multResult.rawData, addVec.rawData, multResult.instanceCount);
+
+                            lane.__topLnShiftStarted = true;
+                            startPrismAdditionAnimation(multResult, addVec, null, () => {
+                                lane.__topLnShiftComplete = true;
+                                const additionTrail = multResult.userData && multResult.userData.trail;
+                                if (additionTrail) {
+                                    addVec.userData = addVec.userData || {};
+                                    const additionTrailIsWorld = Boolean(multResult.userData && multResult.userData.trailWorld);
+                                    const prevTrail = addVec.userData.trail;
+                                    if (prevTrail && prevTrail !== additionTrail) {
+                                        try {
+                                            if (typeof prevTrail.dispose === 'function') {
+                                                prevTrail.dispose();
+                                            } else if (prevTrail._line && prevTrail._line.parent) {
+                                                prevTrail._line.parent.remove(prevTrail._line);
+                                            }
+                                        } catch (_) { /* optional cleanup */ }
+                                    }
+                                    addVec.userData.trail = additionTrail;
+                                    addVec.userData.trailWorld = additionTrailIsWorld;
+                                    if (additionTrailIsWorld) {
+                                        addVec.group.getWorldPosition(TMP_WORLD_POS);
+                                        if (typeof additionTrail.snapLastPointTo === 'function') {
+                                            additionTrail.snapLastPointTo(TMP_WORLD_POS);
+                                        } else {
+                                            additionTrail.update(TMP_WORLD_POS);
                                         }
-                                    } catch (_) { /* optional cleanup */ }
-                                }
-                                addVec.userData.trail = additionTrail;
-                                addVec.userData.trailWorld = additionTrailIsWorld;
-                                if (additionTrailIsWorld) {
-                                    addVec.group.getWorldPosition(TMP_WORLD_POS);
-                                    if (typeof additionTrail.snapLastPointTo === 'function') {
-                                        additionTrail.snapLastPointTo(TMP_WORLD_POS);
                                     } else {
-                                        additionTrail.update(TMP_WORLD_POS);
+                                        if (typeof additionTrail.snapLastPointTo === 'function') {
+                                            additionTrail.snapLastPointTo(addVec.group.position);
+                                        } else {
+                                            additionTrail.update(addVec.group.position);
+                                        }
                                     }
-                                } else {
-                                    if (typeof additionTrail.snapLastPointTo === 'function') {
-                                        additionTrail.snapLastPointTo(addVec.group.position);
-                                    } else {
-                                        additionTrail.update(addVec.group.position);
-                                    }
+                                    delete multResult.userData.trail;
+                                    delete multResult.userData.trailWorld;
                                 }
-                                delete resVec.userData.trail;
-                                delete resVec.userData.trailWorld;
-                            }
-                            if (resVec.group && resVec.group.parent) {
-                                resVec.group.parent.remove(resVec.group);
-                            }
-                            lane.originalVec = addVec;
-                            markSkipVisible(addVec);
-                            startFinalRise(addVec);
-                        }, {
-                            finalData: finalAdditionData
-                        });
+                                if (multResult.group && multResult.group.parent) {
+                                    multResult.group.parent.remove(multResult.group);
+                                }
+                                lane.originalVec = addVec;
+                                markSkipVisible(addVec);
+                                startFinalRise(addVec);
+                            }, {
+                                finalData: finalAdditionData
+                            });
 
-                        const additionDuration = additionDurationFor(resVec);
-                        new TWEEN.Tween({ t: 0 })
-                            .to({ t: 1 }, additionDuration)
-                            .onUpdate(() => {
-                                updateTopLnColor(resVec.group.position.y);
-                                this.dispatchEvent(new Event('progress'));
-                            })
-                            .start();
+                            const additionDuration = additionDurationFor(multResult);
+                            new TWEEN.Tween({ t: 0 })
+                                .to({ t: 1 }, additionDuration)
+                                .onUpdate(() => {
+                                    updateTopLnColor(multResult.group.position.y);
+                                    this.dispatchEvent(new Event('progress'));
+                                })
+                                .start();
+                        }
                     });
                 };
 

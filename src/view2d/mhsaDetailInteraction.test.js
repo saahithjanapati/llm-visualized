@@ -163,12 +163,15 @@ function createPreviewData(tokenCount = TOKEN_LABELS.length) {
     };
 }
 
-function buildSceneFixtures(tokenCount = TOKEN_LABELS.length) {
+function buildSceneFixtures(tokenCount = TOKEN_LABELS.length, {
+    isSmallScreen = false
+} = {}) {
     const previewData = createPreviewData(tokenCount);
     const scene = buildMhsaSceneModel({
         previewData,
         layerIndex: 2,
-        headIndex: 1
+        headIndex: 1,
+        isSmallScreen
     });
     const nodes = flattenSceneNodes(scene);
     const projectionSourceNode = nodes.find((node) => node.role === 'projection-source-xln') || null;
@@ -204,6 +207,7 @@ function buildSceneFixtures(tokenCount = TOKEN_LABELS.length) {
     const transposeCloseGroupNode = nodes.find((node) => node.role === 'attention-transpose-close-group') || null;
     const transposeCloseNode = transposeCloseGroupNode?.children?.find((node) => node.role === 'attention-close') || null;
     const connectorKNode = nodes.find((node) => node.role === 'connector-k') || null;
+    const connectorPreNode = nodes.find((node) => node.role === 'connector-pre') || null;
     const connectorVNode = nodes.find((node) => node.role === 'connector-v') || null;
     const projectionIngressConnectorNodes = nodes.filter((node) => (
         node.role === 'connector-xln-q'
@@ -215,7 +219,7 @@ function buildSceneFixtures(tokenCount = TOKEN_LABELS.length) {
     const maskNode = nodes.find((node) => node.role === 'attention-mask') || null;
     const postNode = nodes.find((node) => node.role === 'attention-post') || null;
     const index = createMhsaDetailSceneIndex(scene);
-    const layout = buildSceneLayout(scene);
+    const layout = buildSceneLayout(scene, { isSmallScreen });
 
     return {
         previewData,
@@ -243,6 +247,7 @@ function buildSceneFixtures(tokenCount = TOKEN_LABELS.length) {
         transposeCloseGroupNode,
         transposeCloseNode,
         connectorKNode,
+        connectorPreNode,
         connectorVNode,
         projectionIngressConnectorNodes,
         valuePostNode,
@@ -262,6 +267,18 @@ function resolveEntryCaptionBottom(entry = null) {
         ? (entry.dimensionBounds.y + entry.dimensionBounds.height)
         : 0;
     return Math.max(boundsBottom, labelBottom, dimensionsBottom);
+}
+
+function resolveEntryDimensionTop(entry = null) {
+    if (!entry) return 0;
+    if (Number.isFinite(entry.dimensionBounds?.y)) {
+        return entry.dimensionBounds.y;
+    }
+    const contentBottom = (entry.contentBounds?.y || 0) + (entry.contentBounds?.height || 0);
+    const labelBottom = entry.labelBounds
+        ? (entry.labelBounds.y + entry.labelBounds.height)
+        : 0;
+    return Math.max(contentBottom, labelBottom);
 }
 
 describe('MHSA detail transpose view', () => {
@@ -314,11 +331,12 @@ describe('MHSA detail transpose view', () => {
         ).toBe(false);
     });
 
-    it('propagates key-path focus from K rows into the transpose K^T column selection', () => {
+    it('propagates key-path focus from K rows into the transpose and post-softmax column selections', () => {
         const {
             index,
             transposeNode,
             keyProjectionOutputNode,
+            postNode,
             postCopyNode
         } = buildSceneFixtures();
 
@@ -336,15 +354,19 @@ describe('MHSA detail transpose view', () => {
             colIndex: 0
         });
         expect(hoverState?.focusState?.columnSelections).toContainEqual({
-            nodeId: postCopyNode.id,
+            nodeId: postNode.id,
             colIndex: 0
         });
+        expect(
+            hoverState?.focusState?.columnSelections?.some((selection) => selection.nodeId === postCopyNode.id)
+        ).toBe(false);
     });
 
-    it('propagates query-path focus into the copied A_post row selection', () => {
+    it('propagates query-path focus into the softmax row without keeping weighted-output copies active', () => {
         const {
             index,
             queryProjectionOutputNode,
+            postNode,
             postCopyNode,
             headOutputNode
         } = buildSceneFixtures();
@@ -359,13 +381,15 @@ describe('MHSA detail transpose view', () => {
 
         expect(hoverState?.label).toBe('Query Vector');
         expect(hoverState?.focusState?.rowSelections).toContainEqual({
-            nodeId: postCopyNode.id,
+            nodeId: postNode.id,
             rowIndex: 1
         });
-        expect(hoverState?.focusState?.rowSelections).toContainEqual({
-            nodeId: headOutputNode.id,
-            rowIndex: 1
-        });
+        expect(
+            hoverState?.focusState?.rowSelections?.some((selection) => selection.nodeId === postCopyNode.id)
+        ).toBe(false);
+        expect(
+            hoverState?.focusState?.rowSelections?.some((selection) => selection.nodeId === headOutputNode.id)
+        ).toBe(false);
     });
 
     it('uses a tighter local gap inside the QK^T grouping row', () => {
@@ -430,7 +454,7 @@ describe('MHSA detail transpose view', () => {
         expect(attentionEqualsEntry).toBeTruthy();
         expect(attentionDivideEntry).toBeTruthy();
         expect(attentionScaleEntry).toBeTruthy();
-        expect(attentionStageNode?.metadata?.gapOverride).toBe(10);
+        expect(attentionStageNode?.metadata?.gapOverride).toBe(-10);
         expect(maskedInputEntry).toBeTruthy();
         expect(transposeEntry).toBeTruthy();
         expect(softmaxLabelEntry).toBeTruthy();
@@ -460,16 +484,19 @@ describe('MHSA detail transpose view', () => {
         )).toBeLessThanOrEqual(17);
         expect((attentionScaleEntry?.contentBounds?.x || 0) - (
             (attentionDivideEntry?.contentBounds?.x || 0) + (attentionDivideEntry?.contentBounds?.width || 0)
-        )).toBeLessThanOrEqual(10);
+        )).toBeLessThanOrEqual(-4);
         expect((attentionEqualsEntry?.contentBounds?.x || 0) - (
             (attentionScaleEntry?.contentBounds?.x || 0) + (attentionScaleEntry?.contentBounds?.width || 0)
-        )).toBeLessThanOrEqual(14);
+        )).toBeLessThanOrEqual(12);
         expect(Math.abs(
             (maskedInputEntry?.contentBounds?.x || 0)
             - (preScoreEntry?.contentBounds?.x || 0)
         )).toBeLessThanOrEqual(4);
         expect(maskedInputEntry?.contentBounds?.y).toBeGreaterThan(
             (preScoreEntry?.contentBounds?.y || 0) + (preScoreEntry?.contentBounds?.height || 0)
+        );
+        expect(maskedInputEntry?.contentBounds?.y).toBeGreaterThan(
+            resolveEntryCaptionBottom(preScoreEntry)
         );
         expect(softmaxLabelEntry?.contentBounds?.x).toBeLessThan(maskedInputEntry?.contentBounds?.x || 0);
         expect((softmaxLabelEntry?.contentBounds?.x || 0)).toBeLessThan(preScoreEntry?.contentBounds?.x || 0);
@@ -525,7 +552,55 @@ describe('MHSA detail transpose view', () => {
         );
     });
 
-    it('routes the V connector below both caption blocks before crossing into the weighted value operand', () => {
+    it('routes the pre-softmax connector from below the A_pre caption into the softmax row', () => {
+        const {
+            layout,
+            preScoreNode,
+            maskedInputNode,
+            connectorPreNode
+        } = buildSceneFixtures();
+
+        const connectorEntry = layout?.registry?.getConnectorEntry(connectorPreNode?.id || '');
+        const preScoreEntry = layout?.registry?.getNodeEntry(preScoreNode?.id || '');
+        const maskedInputEntry = layout?.registry?.getNodeEntry(maskedInputNode?.id || '');
+
+        expect(connectorEntry).toBeTruthy();
+        expect(preScoreEntry).toBeTruthy();
+        expect(maskedInputEntry).toBeTruthy();
+        expect(connectorEntry?.pathPoints?.[0]?.x).toBeCloseTo(preScoreEntry?.anchors?.bottom?.x || 0, 4);
+        expect(connectorEntry?.pathPoints?.[0]?.y).toBeGreaterThanOrEqual(
+            resolveEntryCaptionBottom(preScoreEntry) + 10
+        );
+        expect(connectorEntry?.pathPoints?.[connectorEntry.pathPoints.length - 1]?.y).toBeLessThanOrEqual(
+            maskedInputEntry?.contentBounds?.y || 0
+        );
+    });
+
+    it('keeps extra pre-softmax caption clearance on the small-screen layout', () => {
+        const {
+            layout,
+            preScoreNode,
+            maskedInputNode,
+            connectorPreNode
+        } = buildSceneFixtures(TOKEN_LABELS.length, { isSmallScreen: true });
+
+        const connectorEntry = layout?.registry?.getConnectorEntry(connectorPreNode?.id || '');
+        const preScoreEntry = layout?.registry?.getNodeEntry(preScoreNode?.id || '');
+        const maskedInputEntry = layout?.registry?.getNodeEntry(maskedInputNode?.id || '');
+
+        expect(connectorEntry).toBeTruthy();
+        expect(preScoreEntry).toBeTruthy();
+        expect(maskedInputEntry).toBeTruthy();
+        expect(connectorEntry?.pathPoints?.[0]?.x).toBeCloseTo(preScoreEntry?.anchors?.bottom?.x || 0, 4);
+        expect(connectorEntry?.pathPoints?.[0]?.y).toBeGreaterThanOrEqual(
+            resolveEntryCaptionBottom(preScoreEntry) + 8
+        );
+        expect(connectorEntry?.pathPoints?.[connectorEntry.pathPoints.length - 1]?.y).toBeLessThanOrEqual(
+            maskedInputEntry?.contentBounds?.y || 0
+        );
+    });
+
+    it('routes the V connector from the source right edge with a horizontal-first elbow into the weighted value operand', () => {
         const {
             layout,
             connectorVNode,
@@ -540,24 +615,31 @@ describe('MHSA detail transpose view', () => {
         expect(connectorEntry).toBeTruthy();
         expect(valueProjectionEntry).toBeTruthy();
         expect(valuePostEntry).toBeTruthy();
-        expect(connectorEntry?.pathPoints).toHaveLength(4);
-        expect(connectorEntry?.pathPoints?.[1]?.x).toBeCloseTo(connectorEntry?.pathPoints?.[0]?.x || 0, 4);
-        expect(connectorEntry?.pathPoints?.[1]?.y).toBeGreaterThan(connectorEntry?.pathPoints?.[0]?.y || 0);
-        expect(connectorEntry?.pathPoints?.[0]?.y).toBeGreaterThan(
-            resolveEntryCaptionBottom(valueProjectionEntry)
+        expect(connectorEntry?.pathPoints).toHaveLength(3);
+        expect(connectorEntry?.pathPoints?.[0]?.x).toBeGreaterThan(
+            (valueProjectionEntry?.anchors?.right?.x || 0) + 8
         );
-        expect(connectorEntry?.pathPoints?.[0]?.y).toBeLessThanOrEqual(
-            resolveEntryCaptionBottom(valueProjectionEntry) + 8
+        expect(connectorEntry?.pathPoints?.[0]?.y).toBeCloseTo(
+            (valueProjectionEntry?.anchors?.right?.y || 0),
+            4
         );
-        expect(connectorEntry?.pathPoints?.[1]?.y).toBeCloseTo(connectorEntry?.pathPoints?.[2]?.y || 0, 4);
-        expect(connectorEntry?.pathPoints?.[2]?.x).toBeGreaterThan(connectorEntry?.pathPoints?.[1]?.x || 0);
-        expect(connectorEntry?.pathPoints?.[2]?.x).toBeCloseTo(connectorEntry?.pathPoints?.[3]?.x || 0, 4);
-        expect(connectorEntry?.pathPoints?.[2]?.y).toBeGreaterThan(connectorEntry?.pathPoints?.[3]?.y || 0);
-        expect(connectorEntry?.pathPoints?.[3]?.y).toBeGreaterThan(
-            resolveEntryCaptionBottom(valuePostEntry)
+        expect(connectorEntry?.pathPoints?.[1]?.y).toBeCloseTo(
+            connectorEntry?.pathPoints?.[0]?.y || 0,
+            4
         );
-        expect(connectorEntry?.pathPoints?.[3]?.y).toBeLessThanOrEqual(
-            resolveEntryCaptionBottom(valuePostEntry) + 8
+        expect(connectorEntry?.pathPoints?.[1]?.x).toBeGreaterThan(
+            connectorEntry?.pathPoints?.[0]?.x || 0
+        );
+        expect(connectorEntry?.pathPoints?.[1]?.x).toBeCloseTo(
+            connectorEntry?.pathPoints?.[2]?.x || 0,
+            4
+        );
+        expect(Math.abs(
+            (connectorEntry?.pathPoints?.[2]?.x || 0) - (valuePostEntry?.anchors?.bottom?.x || 0)
+        )).toBeLessThanOrEqual(4);
+        expect(connectorEntry?.pathPoints?.[2]?.y).toBeCloseTo(
+            resolveEntryCaptionBottom(valuePostEntry),
+            4
         );
     });
 
@@ -582,10 +664,28 @@ describe('MHSA detail transpose view', () => {
         expect(headOutputNode.metadata?.compactRows?.rowHeight).toBe(7);
     });
 
+    it('uses larger rounded shells and insets for the attention score grids', () => {
+        const {
+            preScoreNode,
+            maskNode,
+            postNode
+        } = buildSceneFixtures();
+
+        [preScoreNode, maskNode, postNode].forEach((node) => {
+            expect(node).toBeTruthy();
+            expect(node?.metadata?.grid?.paddingX).toBe(4);
+            expect(node?.metadata?.grid?.paddingY).toBe(4);
+            expect(node?.metadata?.card?.cornerRadius).toBe(12);
+        });
+    });
+
     it('maps value-post hover rows to the Value Vector tooltip payload', () => {
         const {
             index,
-            valuePostNode
+            valuePostNode,
+            headOutputNode,
+            postCopyNode,
+            connectorVNode
         } = buildSceneFixtures();
 
         const hoverState = resolveMhsaDetailHoverState(index, {
@@ -601,6 +701,9 @@ describe('MHSA detail transpose view', () => {
         expect(hoverState?.info?.activationData?.stage).toBe('qkv.v');
         expect(hoverState?.info?.activationData?.tokenIndex).toBe(1);
         expect(hoverState?.info?.activationData?.tokenLabel).toBe('Token B');
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(headOutputNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(postCopyNode?.id);
+        expect(hoverState?.focusState?.activeConnectorIds).toContain(connectorVNode?.id);
     });
 
     it('maps head-output hover rows to the Attention Weighted Sum tooltip payload', () => {
@@ -646,7 +749,8 @@ describe('MHSA detail transpose view', () => {
     it('maps pre-score hover cells to a pre-softmax attention-score tooltip payload', () => {
         const {
             index,
-            preScoreNode
+            preScoreNode,
+            postCopyNode
         } = buildSceneFixtures();
 
         const hoverState = resolveMhsaDetailHoverState(index, {
@@ -668,12 +772,18 @@ describe('MHSA detail transpose view', () => {
         expect(hoverState?.info?.activationData?.preScore).toBe(0.25);
         expect(hoverState?.info?.activationData?.postScore).toBe(0.15);
         expect(hoverState?.info?.activationData?.showMaskValue).toBeUndefined();
+        expect(hoverState?.focusState?.cellSelections).toContainEqual({
+            nodeId: postCopyNode?.id,
+            rowIndex: 1,
+            colIndex: 0
+        });
     });
 
     it('maps masked-input hover cells to a masked attention-score tooltip payload with causal-mask details', () => {
         const {
             index,
-            maskedInputNode
+            maskedInputNode,
+            postCopyNode
         } = buildSceneFixtures();
 
         const hoverState = resolveMhsaDetailHoverState(index, {
@@ -693,6 +803,11 @@ describe('MHSA detail transpose view', () => {
         expect(hoverState?.info?.activationData?.maskValue).toBe(Number.NEGATIVE_INFINITY);
         expect(hoverState?.info?.activationData?.showMaskValue).toBe(true);
         expect(hoverState?.info?.activationData?.isMasked).toBe(true);
+        expect(hoverState?.focusState?.cellSelections).toContainEqual({
+            nodeId: postCopyNode?.id,
+            rowIndex: 0,
+            colIndex: 1
+        });
     });
 
     it('maps causal-mask hover cells to a causal-mask tooltip payload', () => {
@@ -720,25 +835,25 @@ describe('MHSA detail transpose view', () => {
         expect(hoverState?.info?.activationData?.maskValue).toBe(Number.NEGATIVE_INFINITY);
         expect(hoverState?.info?.activationData?.showMaskValue).toBe(true);
         expect(hoverState?.focusState?.activeNodeIds).not.toContain(postNode?.id);
-        expect(hoverState?.focusState?.activeNodeIds).not.toContain(postCopyNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(postCopyNode?.id);
         expect(
-            hoverState?.focusState?.columnSelections?.some((selection) => (
-                selection.nodeId === postNode?.id
-                || selection.nodeId === postCopyNode?.id
-            ))
+            hoverState?.focusState?.columnSelections?.some((selection) => selection.nodeId === postNode?.id)
         ).toBe(false);
         expect(
-            hoverState?.focusState?.cellSelections?.some((selection) => (
-                selection.nodeId === postNode?.id
-                || selection.nodeId === postCopyNode?.id
-            ))
+            hoverState?.focusState?.cellSelections?.some((selection) => selection.nodeId === postNode?.id)
         ).toBe(false);
+        expect(hoverState?.focusState?.cellSelections).toContainEqual({
+            nodeId: postCopyNode?.id,
+            rowIndex: 0,
+            colIndex: 1
+        });
     });
 
     it('maps masked post-score hover cells to a post-softmax attention-score tooltip payload with zero post-softmax weight', () => {
         const {
             index,
-            postNode
+            postNode,
+            postCopyNode
         } = buildSceneFixtures();
 
         const hoverState = resolveMhsaDetailHoverState(index, {
@@ -757,6 +872,11 @@ describe('MHSA detail transpose view', () => {
         expect(hoverState?.info?.activationData?.postScore).toBe(0);
         expect(hoverState?.info?.activationData?.maskValue).toBe(Number.NEGATIVE_INFINITY);
         expect(hoverState?.info?.activationData?.showMaskValue).toBe(true);
+        expect(hoverState?.focusState?.cellSelections).toContainEqual({
+            nodeId: postCopyNode?.id,
+            rowIndex: 0,
+            colIndex: 1
+        });
     });
 
     it('maps shared X_ln source rows into the copied X_ln rows and copy connectors', () => {
@@ -965,17 +1085,24 @@ describe('MHSA detail transpose view', () => {
         );
 
         expect(connectorKEntry?.pathPoints?.[0]?.y).toBeGreaterThan(qktCaptionBottom + 10);
-        expect(connectorVEntry?.pathPoints?.[0]?.y).toBeGreaterThan(
-            resolveEntryCaptionBottom(valueProjectionEntry)
+        expect(connectorVEntry?.pathPoints?.[0]?.x).toBeGreaterThan(
+            (valueProjectionEntry?.anchors?.right?.x || 0) + 8
         );
-        expect(connectorVEntry?.pathPoints?.[0]?.y).toBeLessThanOrEqual(
-            resolveEntryCaptionBottom(valueProjectionEntry) + 8
+        expect(connectorVEntry?.pathPoints?.[0]?.y).toBeCloseTo(
+            valueProjectionEntry?.anchors?.right?.y || 0,
+            4
         );
-        expect(connectorVEntry?.pathPoints?.[3]?.y).toBeGreaterThan(
-            resolveEntryCaptionBottom(valuePostEntry)
+        expect(connectorVEntry?.pathPoints?.[1]?.y).toBeCloseTo(
+            connectorVEntry?.pathPoints?.[0]?.y || 0,
+            4
         );
-        expect(connectorVEntry?.pathPoints?.[3]?.y).toBeLessThanOrEqual(
-            resolveEntryCaptionBottom(valuePostEntry) + 8
+        expect(connectorVEntry?.pathPoints?.[1]?.x).toBeCloseTo(
+            connectorVEntry?.pathPoints?.[2]?.x || 0,
+            4
+        );
+        expect(connectorVEntry?.pathPoints?.[2]?.y).toBeCloseTo(
+            resolveEntryCaptionBottom(valuePostEntry),
+            4
         );
     });
 

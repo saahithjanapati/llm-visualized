@@ -3,6 +3,15 @@ import { buildMhsaSceneModel } from '../src/view2d/model/buildMhsaSceneModel.js'
 import { buildSceneLayout } from '../src/view2d/layout/buildSceneLayout.js';
 import { buildTransformerSceneModel } from '../src/view2d/model/buildTransformerSceneModel.js';
 import {
+    createGroupNode,
+    createMatrixNode,
+    createSceneModel,
+    flattenSceneNodes,
+    VIEW2D_LAYOUT_DIRECTIONS,
+    VIEW2D_MATRIX_PRESENTATIONS,
+    VIEW2D_MATRIX_SHAPES
+} from '../src/view2d/schema/sceneTypes.js';
+import {
     fitView2dText,
     resetView2dTextMeasurementCache
 } from '../src/view2d/textMeasurement.js';
@@ -51,20 +60,23 @@ describe('buildSceneLayout', () => {
         expect(layout.sceneBounds.width).toBeGreaterThan(0);
         expect(layout.sceneBounds.height).toBeGreaterThan(0);
 
+        const allNodes = flattenSceneNodes(scene);
         const projectionStackEntry = layout.registry.getNodeEntry(
-            scene.nodes.find((node) => node.role === 'projection-stack')?.id
+            allNodes.find((node) => node.role === 'projection-stack')?.id
         );
         const attentionStageEntry = layout.registry.getNodeEntry(
-            scene.nodes.find((node) => node.role === 'attention-stage')?.id
+            allNodes.find((node) => node.role === 'attention-stage')?.id
         );
         const qConnectorEntry = layout.registry.getConnectorEntry(
-            scene.nodes
+            allNodes
                 .find((node) => node.role === 'connector-layer')
                 ?.children?.find((node) => node.role === 'connector-q')
                 ?.id
         );
 
-        expect(attentionStageEntry.bounds.x).toBeGreaterThan(projectionStackEntry.bounds.x + projectionStackEntry.bounds.width);
+        expect(attentionStageEntry.bounds.x).toBeGreaterThan(
+            (projectionStackEntry.bounds.x + projectionStackEntry.bounds.width) - 24
+        );
         expect(qConnectorEntry?.pathPoints?.length).toBeGreaterThanOrEqual(2);
         qConnectorEntry?.pathPoints?.forEach((point) => {
             expect(Number.isFinite(point?.x)).toBe(true);
@@ -178,5 +190,142 @@ describe('buildSceneLayout', () => {
             globalThis.document = originalDocument;
             resetView2dTextMeasurementCache();
         }
+    });
+
+    it('supports reusable child layout offsets through node layout metadata', () => {
+        const topNode = createMatrixNode({
+            role: 'top-card',
+            dimensions: { rows: 1, cols: 1 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            metadata: {
+                card: {
+                    width: 40,
+                    height: 20
+                }
+            }
+        });
+        const offsetNode = createMatrixNode({
+            role: 'offset-card',
+            dimensions: { rows: 1, cols: 1 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            layout: {
+                offsetX: -12
+            },
+            metadata: {
+                card: {
+                    width: 40,
+                    height: 20
+                }
+            }
+        });
+        const scene = createSceneModel({
+            nodes: [
+                createGroupNode({
+                    role: 'root-stack',
+                    direction: VIEW2D_LAYOUT_DIRECTIONS.VERTICAL,
+                    align: 'start',
+                    children: [
+                        topNode,
+                        offsetNode
+                    ]
+                })
+            ]
+        });
+
+        const layout = buildSceneLayout(scene);
+        const topEntry = layout.registry.getNodeEntry(topNode.id);
+        const offsetEntry = layout.registry.getNodeEntry(offsetNode.id);
+
+        expect(topEntry).toBeTruthy();
+        expect(offsetEntry).toBeTruthy();
+        expect(offsetEntry?.contentBounds?.x).toBe((topEntry?.contentBounds?.x || 0) - 12);
+    });
+
+    it('supports anchor-aligning a subtree against a sibling descendant', () => {
+        const targetNode = createMatrixNode({
+            role: 'target-card',
+            dimensions: { rows: 1, cols: 1 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            metadata: {
+                card: {
+                    width: 40,
+                    height: 20
+                }
+            }
+        });
+        const prefixNode = createMatrixNode({
+            role: 'prefix-card',
+            dimensions: { rows: 1, cols: 1 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            metadata: {
+                card: {
+                    width: 16,
+                    height: 20
+                }
+            }
+        });
+        const alignedNode = createMatrixNode({
+            role: 'aligned-card',
+            dimensions: { rows: 1, cols: 1 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            metadata: {
+                card: {
+                    width: 40,
+                    height: 20
+                }
+            }
+        });
+        const alignedRow = createGroupNode({
+            role: 'aligned-row',
+            direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
+            align: 'start',
+            children: [
+                prefixNode,
+                alignedNode
+            ],
+            layout: {
+                anchorAlign: {
+                    axis: 'x',
+                    selfNodeId: alignedNode.id,
+                    targetNodeId: targetNode.id,
+                    selfAnchor: 'left',
+                    targetAnchor: 'left'
+                }
+            },
+            metadata: {
+                gapOverride: 6
+            }
+        });
+        const scene = createSceneModel({
+            nodes: [
+                createGroupNode({
+                    role: 'root-stack',
+                    direction: VIEW2D_LAYOUT_DIRECTIONS.VERTICAL,
+                    align: 'start',
+                    children: [
+                        targetNode,
+                        alignedRow
+                    ]
+                })
+            ]
+        });
+
+        const layout = buildSceneLayout(scene);
+        const targetEntry = layout.registry.getNodeEntry(targetNode.id);
+        const prefixEntry = layout.registry.getNodeEntry(prefixNode.id);
+        const alignedEntry = layout.registry.getNodeEntry(alignedNode.id);
+
+        expect(targetEntry).toBeTruthy();
+        expect(prefixEntry).toBeTruthy();
+        expect(alignedEntry).toBeTruthy();
+        expect(alignedEntry?.contentBounds?.x).toBe(targetEntry?.contentBounds?.x || 0);
+        expect(
+            (prefixEntry?.contentBounds?.x || 0) + (prefixEntry?.contentBounds?.width || 0)
+        ).toBeLessThanOrEqual(alignedEntry?.contentBounds?.x || 0);
     });
 });

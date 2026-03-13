@@ -4156,6 +4156,16 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     font-size: var(--mhsa-token-matrix-fixed-label-font-size, 14px);
     line-height: 1.05;
 }
+.mhsa-token-matrix-preview__bias-block {
+    --mhsa-token-matrix-fixed-label-font-size: 20px;
+}
+.mhsa-token-matrix-preview__bias-block .mhsa-token-matrix-preview__caption-label {
+    font-size: 20px;
+    line-height: 0.92;
+}
+.mhsa-token-matrix-preview__bias-block .mhsa-token-matrix-preview__caption-label .katex {
+    font-size: 1.2em;
+}
 .mhsa-token-matrix-preview__caption-label .katex {
     color: inherit;
     font-size: 1em;
@@ -4223,6 +4233,8 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     vertical-align: baseline;
 }
 .detail-copy-context {
+    display: grid;
+    gap: 8px;
     padding: 0 16px 8px;
 }
 .detail-copy-context-btn {
@@ -4290,6 +4302,11 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
 }
 .detail-copy-context-btn[data-copy-context-layout="feedback"] .detail-copy-context-assistant {
     display: none;
+}
+.detail-copy-context-btn--view2d .detail-copy-context-icon-grid,
+.detail-copy-context-btn--view2d .detail-copy-context-icon-arrow {
+    opacity: 1;
+    color: #8fd3ff;
 }
 .detail-copy-context-icon-clipboard {
     opacity: 1;
@@ -4881,6 +4898,10 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
 .detail-transformer-view2d-residual-caption-line--label {
     font-size: var(--detail-transformer-view2d-caption-label-size, 16px);
 }
+.detail-transformer-view2d-residual-caption[data-node-role="projection-bias"] .detail-transformer-view2d-residual-caption-line--label {
+    font-size: calc(var(--detail-transformer-view2d-caption-label-size, 16px) * 3.2);
+    line-height: 0.8;
+}
 .detail-transformer-view2d-residual-caption-line--dimensions {
     font-size: var(--detail-transformer-view2d-caption-dimensions-size, 14px);
     color: rgba(214, 222, 233, 0.86);
@@ -4894,7 +4915,7 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     font-size: 0.8em !important;
 }
 .detail-transformer-view2d-residual-caption[data-node-role="projection-bias"] .katex .msupsub .sizing.mtight {
-    font-size: 0.92em !important;
+    font-size: 1.12em !important;
 }
 .detail-transformer-view2d-residual-caption-line .katex .msupsub .mtight:not(.sizing),
 .detail-transformer-view2d-dom-text .katex .msupsub .mtight:not(.sizing) {

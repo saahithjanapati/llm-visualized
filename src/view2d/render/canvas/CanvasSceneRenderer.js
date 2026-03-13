@@ -1965,6 +1965,47 @@ function drawMatrixNode(
     drawCaption(ctx, entry, node, config, safeWorldScale, safeDetailScale, focusAlpha, fixedTextSizing);
 }
 
+function resolveTextLikeClipBounds(bounds, node, renderedFontSize, config, fontWeight = 500) {
+    if (!bounds) return null;
+    const baseClipBounds = {
+        x: bounds.x - 1,
+        y: bounds.y,
+        width: bounds.width + 2,
+        height: bounds.height
+    };
+    if (node?.kind !== VIEW2D_NODE_KINDS.OPERATOR) {
+        return baseClipBounds;
+    }
+
+    const measurement = measureView2dText(node.text || node.tex || ' ', {
+        fontSize: renderedFontSize,
+        fontWeight
+    });
+    const operatorSidePadding = Number.isFinite(config?.component?.operatorSidePadding)
+        ? Math.max(0, Number(config.component.operatorSidePadding))
+        : 0;
+    const extraSidePadding = Math.max(2, renderedFontSize * 0.06);
+    const extraVerticalPadding = Math.max(2, renderedFontSize * 0.08);
+    const requiredWidth = Math.max(
+        baseClipBounds.width,
+        measurement.inkWidth + (operatorSidePadding * 2) + (extraSidePadding * 2)
+    );
+    const requiredHeight = Math.max(
+        baseClipBounds.height,
+        measurement.height + (extraVerticalPadding * 2)
+    );
+    const extraWidth = Math.max(0, requiredWidth - baseClipBounds.width);
+    const extraHeight = Math.max(0, requiredHeight - baseClipBounds.height);
+    const topExpansion = extraHeight * 0.45;
+
+    return {
+        x: baseClipBounds.x - (extraWidth / 2),
+        y: baseClipBounds.y - topExpansion,
+        width: baseClipBounds.width + extraWidth,
+        height: baseClipBounds.height + extraHeight
+    };
+}
+
 function drawTextLikeNode(ctx, node, entry, config, worldScale = 1, detailScale = worldScale, focusAlpha = 1, fixedTextSizing = null) {
     const bounds = entry.contentBounds || entry.bounds;
     const renderMode = String(node?.metadata?.renderMode || '').trim().toLowerCase();
@@ -1995,6 +2036,7 @@ function drawTextLikeNode(ctx, node, entry, config, worldScale = 1, detailScale 
     const text = node.text || node.tex || '';
     const tex = node.tex || '';
     let renderedFontSize = entry.layoutData?.fontSize || config.component.labelFontSize;
+    let renderedFontWeight = 500;
     if (node.kind === VIEW2D_NODE_KINDS.OPERATOR) {
         const baseFontSize = entry.layoutData?.fontSize || config.component.operatorFontSize;
         const isPlusOperator = node.semantic?.operatorKey === 'plus' || node.text === '+';
@@ -2023,8 +2065,8 @@ function drawTextLikeNode(ctx, node, entry, config, worldScale = 1, detailScale 
         renderedFontSize = isPlusOperator
             ? adjustedFontSize * PLUS_OPERATOR_FONT_SCALE
             : adjustedFontSize;
-        const fontWeight = isPlusOperator ? PLUS_OPERATOR_FONT_WEIGHT : 600;
-        ctx.font = `${fontWeight} ${renderedFontSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+        renderedFontWeight = isPlusOperator ? PLUS_OPERATOR_FONT_WEIGHT : 600;
+        ctx.font = `${renderedFontWeight} ${renderedFontSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
         ctx.fillStyle = resolveView2dStyle(node.visual?.styleKey)?.color || config.tokens.palette.text;
     } else {
         const maxWidth = Number.isFinite(entry.layoutData?.maxWidth) && entry.layoutData.maxWidth > 0
@@ -2053,12 +2095,13 @@ function drawTextLikeNode(ctx, node, entry, config, worldScale = 1, detailScale 
         }
         ctx.font = resolveView2dTextFont({
             fontSize: renderedFontSize,
-            fontWeight: 500
+            fontWeight: renderedFontWeight
         });
         ctx.fillStyle = resolveView2dStyle(node.visual?.styleKey)?.color || config.tokens.palette.text;
     }
+    const clipBounds = resolveTextLikeClipBounds(bounds, node, renderedFontSize, config, renderedFontWeight);
     ctx.beginPath();
-    ctx.rect(bounds.x - 1, bounds.y, bounds.width + 2, bounds.height);
+    ctx.rect(clipBounds.x, clipBounds.y, clipBounds.width, clipBounds.height);
     ctx.clip();
     ctx.globalAlpha = Math.max(0, Math.min(1, Number.isFinite(focusAlpha) ? focusAlpha : 1));
     if (tex && hasSimpleTexMarkup(tex)) {
@@ -2066,7 +2109,7 @@ function drawTextLikeNode(ctx, node, entry, config, worldScale = 1, detailScale 
             x: bounds.x + (bounds.width / 2),
             y: bounds.y + (bounds.height / 2),
             fontSize: renderedFontSize,
-            fontWeight: node.kind === VIEW2D_NODE_KINDS.OPERATOR ? 600 : 500,
+            fontWeight: renderedFontWeight,
             color: resolveView2dStyle(node.visual?.styleKey)?.color || config.tokens.palette.text
         });
     } else {

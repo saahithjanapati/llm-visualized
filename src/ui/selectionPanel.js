@@ -65,7 +65,6 @@ import {
     createTransformerView2dDetailView,
     describeTransformerView2dTarget,
     resolveTransformerView2dActionContext,
-    setDescriptionTransformerView2dAction,
     syncTransformerView2dRoute,
     TRANSFORMER_VIEW2D_PANEL_ACTION_OPEN
 } from './selectionPanelTransformerView2d.js';
@@ -127,6 +126,9 @@ import {
     clearMhsaTokenMatrixLayoutVars,
     resolveMhsaTokenMatrixLayoutMetrics
 } from './selectionPanelMhsaLayoutUtils.js';
+import {
+    resolveMhsaTokenMatrixProjectionStageTarget
+} from './selectionPanelMhsaInteractionUtils.js';
 import {
     resolveMhsaTokenMatrixFixedLabelScale
 } from './selectionPanelMhsaViewportUtils.js';
@@ -2541,6 +2543,7 @@ class SelectionPanel {
         this.tokenEncodingValue = document.getElementById('detailTokenEncodingValue');
         this.promptContextRow = document.getElementById('detailPromptContextRow');
         this.promptContextTokens = document.getElementById('detailPromptContextTokens');
+        this.transformerView2dActionBtn = document.getElementById('detailView2dActionBtn');
         this.copyContextBtn = document.getElementById('detailCopyContextBtn');
         this.copyContextBtnLabel = document.getElementById('detailCopyContextBtnLabel');
         this.copyContextBtnAssistant = document.getElementById('detailCopyContextBtnAssistant');
@@ -2726,6 +2729,7 @@ class SelectionPanel {
         this._transformerView2dDetailOpen = false;
         this._transformerView2dSourceSelection = null;
         this._currentTransformerView2dContext = null;
+        this._setTransformerView2dActionButtonState(null);
         this._lastSelection = null;
         this._lastSelectionLabel = '';
         this._historyEntries = [];
@@ -2905,7 +2909,7 @@ class SelectionPanel {
             panY: 0,
             scale: 1,
             minScale: 0.36,
-            maxScale: 2.8,
+            maxScale: 3.6,
             initialized: false,
             hasInteracted: false
         };
@@ -3033,17 +3037,25 @@ class SelectionPanel {
     }
 
     _applyCopyContextButtonLayout() {
-        if (!this.copyContextBtn) return;
-        const rect = this.copyContextBtn.getBoundingClientRect();
-        const widthPx = rect.width || this.copyContextBtn.clientWidth || this.copyContextBtn.offsetWidth || 0;
-        const layout = resolveCopyContextButtonLayout(widthPx);
-        this.copyContextBtn.style.setProperty('--detail-copy-context-font-size', `${layout.fontSizePx}px`);
-        this.copyContextBtn.style.setProperty('--detail-copy-context-icon-size', `${layout.iconSizePx}px`);
-        this.copyContextBtn.style.setProperty('--detail-copy-context-assistant-size', `${layout.assistantSizePx}px`);
-        this.copyContextBtn.style.setProperty('--detail-copy-context-gap', `${layout.gapPx}px`);
-        this.copyContextBtn.style.setProperty('--detail-copy-context-padding-inline', `${layout.paddingInlinePx}px`);
-        this.copyContextBtn.style.setProperty('--detail-copy-context-padding-block', `${layout.paddingBlockPx}px`);
-        this.copyContextBtn.style.setProperty('--detail-copy-context-radius', `${layout.borderRadiusPx}px`);
+        const buttons = [this.transformerView2dActionBtn, this.copyContextBtn].filter(Boolean);
+        if (buttons.length === 0) return;
+        buttons.forEach((button) => {
+            if (button.hidden) return;
+            const rect = button.getBoundingClientRect();
+            const widthPx = rect.width
+                || button.clientWidth
+                || button.offsetWidth
+                || button.parentElement?.getBoundingClientRect?.().width
+                || 0;
+            const layout = resolveCopyContextButtonLayout(widthPx);
+            button.style.setProperty('--detail-copy-context-font-size', `${layout.fontSizePx}px`);
+            button.style.setProperty('--detail-copy-context-icon-size', `${layout.iconSizePx}px`);
+            button.style.setProperty('--detail-copy-context-assistant-size', `${layout.assistantSizePx}px`);
+            button.style.setProperty('--detail-copy-context-gap', `${layout.gapPx}px`);
+            button.style.setProperty('--detail-copy-context-padding-inline', `${layout.paddingInlinePx}px`);
+            button.style.setProperty('--detail-copy-context-padding-block', `${layout.paddingBlockPx}px`);
+            button.style.setProperty('--detail-copy-context-radius', `${layout.borderRadiusPx}px`);
+        });
     }
 
     _applyDimensionLabelFit() {
@@ -3078,6 +3090,25 @@ class SelectionPanel {
     _onDevModeChanged() {
         if (!this.isOpen || !this._lastSelection) return;
         this.showSelection(this._lastSelection, { fromHistory: true });
+    }
+
+    _setTransformerView2dActionButtonState(view2dContext = null) {
+        if (!this.transformerView2dActionBtn) return;
+        const enabled = !!view2dContext;
+        this.transformerView2dActionBtn.hidden = !enabled;
+        this.transformerView2dActionBtn.setAttribute('aria-hidden', enabled ? 'false' : 'true');
+        if (!enabled) {
+            this.transformerView2dActionBtn.setAttribute('aria-label', 'View in 2D / matrix form');
+            this.transformerView2dActionBtn.removeAttribute('title');
+            return;
+        }
+        const focusLabel = String(view2dContext?.focusLabel || '').trim();
+        const actionLabel = focusLabel
+            ? `View ${focusLabel} in 2D / matrix form`
+            : 'View in 2D / matrix form';
+        this.transformerView2dActionBtn.setAttribute('aria-label', actionLabel);
+        this.transformerView2dActionBtn.title = actionLabel;
+        this._applyCopyContextButtonLayout();
     }
 
     _setCopyContextButtonLabel(text) {
@@ -6098,7 +6129,7 @@ class SelectionPanel {
             view2dContext: {
                 semanticTarget,
                 focusLabel: String(focusLabel || '').trim() || describeTransformerView2dTarget(semanticTarget),
-                actionLabel: 'Open 2D canvas'
+                actionLabel: 'View in 2D / matrix form'
             }
         });
     }
@@ -8933,7 +8964,9 @@ class SelectionPanel {
         return true;
     }
 
-    _resolveMhsaTokenMatrixInteractionTarget(target) {
+    _resolveMhsaTokenMatrixInteractionTarget(target, {
+        requirePinnableStageComponent = false
+    } = {}) {
         if (!(target instanceof Element) || !this.mhsaTokenMatrixBody) return null;
 
         const rowEl = target.closest('.mhsa-token-matrix-preview__row');
@@ -9055,19 +9088,19 @@ class SelectionPanel {
             }
         }
 
-        const stageEl = target.closest('[data-mhsa-projection-stage-index]');
-        if (stageEl && this.mhsaTokenMatrixBody.contains(stageEl)) {
-            const stageIndex = Number(stageEl.dataset.mhsaProjectionStageIndex);
-            if (Number.isFinite(stageIndex)) {
-                return {
-                    kind: 'stage',
-                    rowIndex: null,
-                    colIndex: null,
-                    sourceType: null,
-                    stageIndex,
-                    focusKey: String(stageEl.dataset.mhsaProjectionKind || '').toLowerCase()
-                };
-            }
+        const stageTarget = resolveMhsaTokenMatrixProjectionStageTarget(target, {
+            root: this.mhsaTokenMatrixBody,
+            requirePinnableComponent: requirePinnableStageComponent
+        });
+        if (stageTarget) {
+            return {
+                kind: 'stage',
+                rowIndex: null,
+                colIndex: null,
+                sourceType: null,
+                stageIndex: stageTarget.stageIndex,
+                focusKey: stageTarget.focusKey
+            };
         }
 
         return null;
@@ -9339,7 +9372,8 @@ class SelectionPanel {
         }
         const body = this.mhsaTokenMatrixBody;
         this._startMhsaTokenMatrixPan(event, this._resolveMhsaTokenMatrixInteractionTarget(
-            event?.target instanceof Element ? event.target : null
+            event?.target instanceof Element ? event.target : null,
+            { requirePinnableStageComponent: true }
         ));
         event?.preventDefault?.();
     }
@@ -9365,7 +9399,10 @@ class SelectionPanel {
             && (!Number.isFinite(event?.button) || event.button === 0);
         const targetInfo = shouldPinSelection
             ? (
-                this._resolveMhsaTokenMatrixInteractionTarget(event?.target instanceof Element ? event.target : null)
+                this._resolveMhsaTokenMatrixInteractionTarget(
+                    event?.target instanceof Element ? event.target : null,
+                    { requirePinnableStageComponent: true }
+                )
                 || this._mhsaTokenMatrixPan.downTargetInfo
             )
             : null;
@@ -10242,13 +10279,19 @@ class SelectionPanel {
                 const connectorColor = Array.isArray(projectionData.colorRgb) && projectionData.colorRgb.length === 3
                     ? `rgb(${projectionData.colorRgb.join(', ')})`
                     : '#d9e8ff';
+                const queryConnectorGap = projectionKind === 'v'
+                    ? (layoutMetrics?.connectorGaps?.value
+                        || layoutMetrics?.connectorGaps?.projection
+                        || layoutMetrics?.connectorGaps?.default
+                        || 10)
+                    : (layoutMetrics?.connectorGaps?.projection
+                        || layoutMetrics?.connectorGaps?.default
+                        || 10);
                 queryMatrixEl.dataset.mhsaConnectorSource = String(projectionData.kind || '').toLowerCase();
                 queryMatrixEl.dataset.mhsaConnectorColor = connectorColor;
                 queryMatrixEl.dataset.mhsaConnectorAnchorSide = 'right';
                 queryMatrixEl.dataset.mhsaConnectorRoute = 'horizontal';
-                queryMatrixEl.dataset.mhsaConnectorGap = String(
-                    layoutMetrics?.connectorGaps?.projection || layoutMetrics?.connectorGaps?.default || 10
-                );
+                queryMatrixEl.dataset.mhsaConnectorGap = String(queryConnectorGap);
 
                 xBlockEl.append(
                     xVisualEl,
@@ -11930,6 +11973,7 @@ class SelectionPanel {
         this._lastSelection = selection;
         this._lastSelectionLabel = label;
         this._currentTransformerView2dContext = transformerView2dContext;
+        this._setTransformerView2dActionButtonState(transformerView2dContext);
         const displayLabel = simplifyLayerNormParamDisplayLabel(label, selection);
         const lower = label.toLowerCase();
         const isKvCacheInfo = isKvCacheInfoSelection(label, selection);
@@ -12207,10 +12251,6 @@ class SelectionPanel {
             setDescriptionSoftmaxAction(this.description, isPostSoftmaxAttentionSelection(descriptionSelection, label));
             setDescriptionGeluAction(this.description, isMlpMatrixSelectionLabel(label));
             setDescriptionMhsaInfoAction(this.description, shouldShowMhsaInfoAction);
-            setDescriptionTransformerView2dAction(this.description, {
-                enabled: !!transformerView2dContext,
-                label: transformerView2dContext?.actionLabel || 'Open 2D canvas'
-            });
         } else {
             this._currentSelectionDescription = '';
         }
