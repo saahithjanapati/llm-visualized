@@ -9,6 +9,7 @@ import { getPreference, setPreference } from '../utils/preferences.js';
 import { appState } from '../state/appState.js';
 import { ENVIRONMENT_MAP_OPTIONS } from '../utils/environmentMaps.js';
 import { initPerfOverlay } from './perfOverlay.js';
+import { createModalReopenGuard } from './modalReopenGuard.js';
 import { initTouchClickFallback } from './touchClickFallback.js';
 
 const BRIGHTNESS_PREF_KEY = 'displayBrightnessScale';
@@ -94,6 +95,8 @@ export function initSettingsModal(pipeline) {
             environmentMapSelect.appendChild(el);
         });
     }
+
+    const reopenGuard = createModalReopenGuard();
 
     initTouchClickFallback(settingsModal, {
         selector: 'button, .toggle-row',
@@ -341,7 +344,11 @@ export function initSettingsModal(pipeline) {
         }
     };
 
+    const isSettingsOpen = () => settingsOverlay?.getAttribute('aria-hidden') === 'false';
+
     function openSettings() {
+        if (!settingsOverlay || isSettingsOpen()) return;
+        if (!reopenGuard.shouldAllowOpen()) return;
         settingsOverlay.style.display = 'flex';
         settingsOverlay.setAttribute('aria-hidden', 'false');
         document.body.style.overflow = 'hidden';
@@ -373,7 +380,13 @@ export function initSettingsModal(pipeline) {
         updateKvCacheStatusHint(appState.kvCacheModeEnabled);
     }
 
-    function closeSettings() {
+    function closeSettings({ guardReopen = false } = {}) {
+        if (!settingsOverlay || !isSettingsOpen()) return;
+        if (guardReopen) {
+            // On mobile, the close tap can fall through to the opener after the
+            // overlay hides. Block that one immediate reopen attempt.
+            reopenGuard.markClosed();
+        }
         settingsOverlay.style.display = 'none';
         settingsOverlay.setAttribute('aria-hidden', 'true');
         document.body.style.overflow = '';
@@ -382,12 +395,14 @@ export function initSettingsModal(pipeline) {
     }
 
     settingsBtn?.addEventListener('click', openSettings);
-    settingsClose?.addEventListener('click', closeSettings);
+    settingsClose?.addEventListener('click', () => {
+        closeSettings({ guardReopen: true });
+    });
     settingsOverlay?.addEventListener('click', (e) => {
-        if (e.target === settingsOverlay) closeSettings();
+        if (e.target === settingsOverlay) closeSettings({ guardReopen: true });
     });
     window.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && settingsOverlay?.getAttribute('aria-hidden') === 'false') {
+        if (e.key === 'Escape' && isSettingsOpen()) {
             closeSettings();
         }
     });

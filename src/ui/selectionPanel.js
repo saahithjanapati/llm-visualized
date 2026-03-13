@@ -112,6 +112,10 @@ import {
     isMhsaInfoSelection
 } from './mhsaInfoUtils.js';
 import {
+    buildAttentionHoverInfo,
+    resolveAttentionHoverLabel
+} from './attentionHoverInfo.js';
+import {
     MHSA_INFO_PANEL_ACTION_OPEN,
     setDescriptionMhsaInfoAction
 } from './selectionPanelMhsaAction.js';
@@ -124,6 +128,9 @@ import {
     resolveMhsaTokenMatrixLayoutMetrics
 } from './selectionPanelMhsaLayoutUtils.js';
 import {
+    resolveMhsaTokenMatrixFixedLabelScale
+} from './selectionPanelMhsaViewportUtils.js';
+import {
     createMhsaTokenMatrixCellStore,
     forEachMhsaTokenMatrixCell,
     registerMhsaTokenMatrixCell
@@ -131,6 +138,7 @@ import {
 import {
     buildMhsaSceneModel
 } from '../view2d/model/buildMhsaSceneModel.js';
+import { createHoverLabelOverlay } from './hoverLabelOverlay.js';
 import {
     buildSceneLayout
 } from '../view2d/layout/buildSceneLayout.js';
@@ -285,7 +293,7 @@ const QKV_WEIGHT_MATRIX_PANEL_ACTION_OPEN = 'open-qkv-weight-matrix';
 const ATTENTION_SECTION_COLLAPSED_PREF_KEY = 'selectionPanelAttentionSectionCollapsed';
 const TRANSFORMER_VIEW2D_PAUSE_REASON = 'detail-transformer-view2d';
 const ATTENTION_HEAD_COUNT = Math.max(1, Math.round(D_MODEL / D_HEAD));
-const ATTENTION_SCORE_PREVIEW_DECIMALS = 4;
+const ATTENTION_SCORE_PREVIEW_DECIMALS = 3;
 const SELECTION_PANEL_DEV_MODE_EVENT = 'selectionPanelDevModeChanged';
 const TOKEN_CHIP_WARNING_STYLE = Object.freeze({
     ...TOKEN_CHIP_STYLE,
@@ -2246,6 +2254,11 @@ function buildLayerNormParamVectorPreview(label, selectionInfo) {
     const spec = resolveLayerNormParamPreviewSpec(label, selectionInfo);
     if (!spec) return null;
 
+    // Prefer cloning the live vector appearance so the selection preview
+    // matches the in-scene LayerNorm parameter colors exactly.
+    const liveClonePreview = buildVectorClonePreview(selectionInfo, label);
+    if (liveClonePreview) return liveClonePreview;
+
     const previewLength = Math.max(1, Math.floor(resolveVectorLength(label, selectionInfo) || D_MODEL));
     const previewData = getLayerNormParamData(spec.layerIndex, spec.layerNormKind, spec.param, previewLength)
         || extractPreviewVectorData(selectionInfo);
@@ -2816,6 +2829,13 @@ class SelectionPanel {
         this._mhsaTokenMatrixSceneLayout = null;
         this._mhsaTokenMatrixCanvasRenderer = this.mhsaTokenMatrixCanvas
             ? new CanvasSceneRenderer({ canvas: this.mhsaTokenMatrixCanvas })
+            : null;
+        this._mhsaTokenMatrixHoverOverlay = typeof document !== 'undefined'
+            ? createHoverLabelOverlay({
+                documentRef: document,
+                parent: document.body,
+                zIndex: 14
+            })
             : null;
         this._mhsaTokenMatrixCanvasRenderFrame = null;
         this._mhsaTokenMatrixCanvasDebugSignature = '';
@@ -7661,11 +7681,117 @@ class SelectionPanel {
     }
 
     _setMhsaTokenMatrixHoverValue(payload = null) {
-        void payload;
         if (!this.mhsaTokenMatrixHover) return;
         this.mhsaTokenMatrixHover.hidden = true;
         this.mhsaTokenMatrixHover.dataset.empty = 'true';
         this.mhsaTokenMatrixHover.setAttribute('aria-hidden', 'true');
+        if (
+            !payload
+            || !Number.isFinite(payload.clientX)
+            || !Number.isFinite(payload.clientY)
+            || typeof payload.label !== 'string'
+            || !payload.label.length
+        ) {
+            this._mhsaTokenMatrixHoverOverlay?.hide();
+            return;
+        }
+        const shown = this._mhsaTokenMatrixHoverOverlay?.show({
+            clientX: payload.clientX,
+            clientY: payload.clientY,
+            label: payload.label,
+            info: payload.info || null,
+            activationSource: this.activationSource
+        });
+        if (!shown) {
+            this._mhsaTokenMatrixHoverOverlay?.hide();
+        }
+    }
+
+    _resolveMhsaTokenMatrixScoreHoverPayload({
+        rowIndex = null,
+        colIndex = null,
+        sourceType = 'pre'
+    } = {}) {
+        const scoreStage = this._mhsaTokenMatrixData?.attentionScoreStage || null;
+        if (!scoreStage || !Number.isFinite(rowIndex) || !Number.isFinite(colIndex)) return null;
+
+        const safeRowIndex = Math.max(0, Math.floor(rowIndex));
+        const safeColIndex = Math.max(0, Math.floor(colIndex));
+        const stageKey = sourceType === 'mask'
+            ? 'mask'
+            : (sourceType === 'masked-input'
+                ? 'masked-input'
+                : (sourceType === 'post' ? 'post' : 'pre'));
+        const sourceRows = stageKey === 'mask'
+            ? scoreStage.maskRows
+            : (stageKey === 'post' ? scoreStage.postRows : scoreStage.outputRows);
+        const rowData = Array.isArray(sourceRows) ? sourceRows[safeRowIndex] : null;
+        const cellData = Array.isArray(rowData?.cells) ? rowData.cells[safeColIndex] : null;
+        if (!cellData) return null;
+
+        const layerIndex = findUserDataNumber(this._lastSelection, 'layerIndex');
+        const headIndex = findUserDataNumber(this._lastSelection, 'headIndex');
+        const queryTokenIndex = Number.isFinite(cellData.queryTokenIndex)
+            ? Math.floor(cellData.queryTokenIndex)
+            : (Number.isFinite(rowData?.tokenIndex) ? Math.floor(rowData.tokenIndex) : null);
+        const keyTokenIndex = Number.isFinite(cellData.keyTokenIndex)
+            ? Math.floor(cellData.keyTokenIndex)
+            : null;
+        const queryTokenLabel = cellData.queryTokenLabel || cellData.rowTokenLabel || rowData?.tokenLabel || '';
+        const keyTokenLabel = cellData.keyTokenLabel || cellData.colTokenLabel || '';
+        const info = buildAttentionHoverInfo({
+            stageKey,
+            layerIndex: Number.isFinite(layerIndex) ? Math.floor(layerIndex) : null,
+            headIndex: Number.isFinite(headIndex) ? Math.floor(headIndex) : null,
+            queryTokenIndex,
+            queryTokenLabel,
+            keyTokenIndex,
+            keyTokenLabel,
+            preScore: typeof cellData.preScore === 'number' && !Number.isNaN(cellData.preScore)
+                ? cellData.preScore
+                : null,
+            postScore: typeof cellData.postScore === 'number' && !Number.isNaN(cellData.postScore)
+                ? cellData.postScore
+                : null,
+            maskValue: typeof cellData.maskValue === 'number' && !Number.isNaN(cellData.maskValue)
+                ? cellData.maskValue
+                : null,
+            isMasked: cellData.isMasked === true
+        });
+        if (!info) return null;
+
+        return {
+            label: resolveAttentionHoverLabel(stageKey),
+            info
+        };
+    }
+
+    _resolveMhsaTokenMatrixAttentionBlockHoverPayload(focusKey = '') {
+        const safeFocusKey = String(focusKey || '').trim().toLowerCase();
+        const stageKey = safeFocusKey === 'score'
+            ? 'pre'
+            : (safeFocusKey === 'masked-input'
+                ? 'masked-input'
+                : ((safeFocusKey === 'mask')
+                    ? 'mask'
+                    : ((safeFocusKey === 'post' || safeFocusKey === 'post-copy')
+                        ? 'post'
+                        : '')));
+        if (!stageKey) return null;
+
+        const layerIndex = findUserDataNumber(this._lastSelection, 'layerIndex');
+        const headIndex = findUserDataNumber(this._lastSelection, 'headIndex');
+        const info = buildAttentionHoverInfo({
+            stageKey,
+            layerIndex: Number.isFinite(layerIndex) ? Math.floor(layerIndex) : null,
+            headIndex: Number.isFinite(headIndex) ? Math.floor(headIndex) : null
+        });
+        if (!info) return null;
+
+        return {
+            label: resolveAttentionHoverLabel(stageKey),
+            info
+        };
     }
 
     _setMhsaTokenMatrixSceneElementState(element, hasSceneFocus, isActive) {
@@ -7716,6 +7842,26 @@ class SelectionPanel {
             }
         }
         return keys;
+    }
+
+    _resolveMhsaTokenMatrixMaskFocusKeys({
+        query = false,
+        transpose = false
+    } = {}) {
+        return [
+            ...this._resolveMhsaTokenMatrixAttentionFocusKeys({
+                query,
+                transpose,
+                score: false
+            }),
+            'score',
+            'softmax',
+            'softmax-paren-open',
+            'masked-input',
+            'add',
+            'mask',
+            'softmax-paren-close'
+        ];
     }
 
     _resolveMhsaTokenMatrixProjectionKind(stageIndex = null) {
@@ -7790,12 +7936,10 @@ class SelectionPanel {
         const viewport = this._mhsaTokenMatrixViewport;
         if (!workspace || !viewport) return;
         const numericScale = Number.isFinite(viewport.scale) && viewport.scale > 0 ? viewport.scale : 1;
-        const captionZoomScale = numericScale < 1
-            ? THREE.MathUtils.clamp(Math.pow(1 / numericScale, 0.72), 1, 1.9)
-            : 1;
+        const fixedLabelScale = resolveMhsaTokenMatrixFixedLabelScale(numericScale);
         this.mhsaTokenMatrixBody?.style.setProperty(
-            '--mhsa-token-matrix-caption-zoom-scale',
-            captionZoomScale.toFixed(3)
+            '--mhsa-token-matrix-fixed-label-scale',
+            fixedLabelScale.toFixed(4)
         );
         const translate = `translate(${viewport.panX.toFixed(1)}px, ${viewport.panY.toFixed(1)}px)`;
         const scale = numericScale.toFixed(4);
@@ -8302,9 +8446,16 @@ class SelectionPanel {
         const keyStageIndex = Number.isFinite(this._mhsaTokenMatrixKeyStageIndex)
             ? this._mhsaTokenMatrixKeyStageIndex
             : null;
-        const safeSourceType = sourceType === 'pre' ? 'pre' : (sourceType === 'mask' ? 'mask' : 'post');
+        const safeSourceType = sourceType === 'mask'
+            ? 'mask'
+            : (sourceType === 'masked-input'
+                ? 'masked-input'
+                : (sourceType === 'pre' ? 'pre' : 'post'));
         const isPreScoreFocus = safeSourceType === 'pre';
+        const isMaskedInputFocus = safeSourceType === 'masked-input';
         const isMaskFocus = safeSourceType === 'mask';
+        const isPostScoreFocus = safeSourceType === 'post';
+        const isSoftmaxStageFocus = isMaskedInputFocus || isMaskFocus;
         if (!Number.isFinite(rowIndex) || !Number.isFinite(colIndex)) return;
         if (!Number.isFinite(queryStageIndex) || !Number.isFinite(keyStageIndex)) return;
         if (
@@ -8366,7 +8517,7 @@ class SelectionPanel {
             const entries = Array.isArray(rowStates) ? rowStates : [rowStates];
             entries.forEach((rowState) => {
                 const stageIndex = Number.isFinite(rowState?.stageIndex) ? rowState.stageIndex : null;
-                const isFocusedStage = !isPreScoreFocus && stageIndex === queryStageIndex;
+                const isFocusedStage = isPostScoreFocus && stageIndex === queryStageIndex;
                 const isActive = isFocusedStage && focusRowIndex === rowIndex;
                 rowState?.rowEl?.classList.toggle('is-active', isActive);
                 rowState?.rowEl?.classList.toggle('is-dimmed', isFocusedStage && !isActive);
@@ -8387,6 +8538,12 @@ class SelectionPanel {
                 }
                 : isMaskFocus
                     ? {
+                        includePostCells: false,
+                        includePostCopyCells: false,
+                        includeMirroredPostCells: false
+                    }
+                : isSoftmaxStageFocus
+                    ? {
                         includePostCopyCells: false,
                         includeMirroredPostCells: false
                     }
@@ -8402,11 +8559,16 @@ class SelectionPanel {
                 'score',
                 'masked-input'
             ]
+            : isMaskFocus
+                ? this._resolveMhsaTokenMatrixMaskFocusKeys({
+                    query: true,
+                    transpose: true
+                })
             : this._resolveMhsaTokenMatrixAttentionFocusKeys({
                 query: true,
                 transpose: true,
                 score: true,
-                includeWeightedOutput: !isMaskFocus
+                includeWeightedOutput: !isSoftmaxStageFocus
             });
         this._applyMhsaTokenMatrixSceneFocus({
             projectionStages: [queryStageIndex, keyStageIndex],
@@ -8414,6 +8576,8 @@ class SelectionPanel {
             connectors: isPreScoreFocus
                 ? ['q', 'k', 'pre']
                 : isMaskFocus
+                    ? ['q', 'k', 'pre']
+                : isSoftmaxStageFocus
                     ? ['q', 'k', 'pre', 'post']
                     : ['q', 'k', 'pre', 'post', 'v']
         });
@@ -8706,14 +8870,19 @@ class SelectionPanel {
         } else if (scoreKeys.has(safeKey)) {
             const isMaskOnlyFocus = safeKey === 'mask';
             projectionStages = [queryStageIndex, keyStageIndex].filter(Number.isFinite);
-            attentionBlocks = this._resolveMhsaTokenMatrixAttentionFocusKeys({
-                query: true,
-                transpose: true,
-                score: true,
-                includeWeightedOutput: !isMaskOnlyFocus
-            });
+            attentionBlocks = isMaskOnlyFocus
+                ? this._resolveMhsaTokenMatrixMaskFocusKeys({
+                    query: true,
+                    transpose: true
+                })
+                : this._resolveMhsaTokenMatrixAttentionFocusKeys({
+                    query: true,
+                    transpose: true,
+                    score: true,
+                    includeWeightedOutput: true
+                });
             connectors = isMaskOnlyFocus
-                ? ['q', 'k', 'pre', 'post']
+                ? ['q', 'k', 'pre']
                 : ['q', 'k', 'pre', 'post', 'v'];
         } else {
             return false;
@@ -8852,7 +9021,11 @@ class SelectionPanel {
                 : (
                     scoreCellEl.classList.contains('mhsa-token-matrix-preview__post-cell')
                         ? 'post'
-                        : 'pre'
+                        : (
+                            scoreCellEl.classList.contains('mhsa-token-matrix-preview__score-cell-static')
+                                ? 'masked-input'
+                                : 'pre'
+                        )
                 );
             if (Number.isFinite(rowIndex) && Number.isFinite(colIndex)) {
                 return {
@@ -8998,6 +9171,7 @@ class SelectionPanel {
         this._mhsaTokenMatrixPinnedSource = typeof targetInfo.sourceType === 'string' ? targetInfo.sourceType : null;
         this._mhsaTokenMatrixPinnedStage = Number.isFinite(targetInfo.stageIndex) ? targetInfo.stageIndex : null;
         this._mhsaTokenMatrixPinnedFocusKey = typeof targetInfo.focusKey === 'string' ? targetInfo.focusKey : null;
+        this._setMhsaTokenMatrixHoverValue(null);
         this._applyMhsaTokenMatrixResolvedTarget(targetInfo);
         this._syncMhsaTokenMatrixPinnedClasses();
         return true;
@@ -9023,7 +9197,10 @@ class SelectionPanel {
 
     _clearMhsaTokenMatrixHover(force = false) {
         const forceFlag = force === true;
-        if (this._mhsaTokenMatrixPinned && !forceFlag) return;
+        if (this._mhsaTokenMatrixPinned && !forceFlag) {
+            this._setMhsaTokenMatrixHoverValue(null);
+            return;
+        }
         this._mhsaTokenMatrixBody?.classList.remove('has-focus-row', 'has-focus-column');
         this._mhsaTokenMatrixXMatrixEl.forEach((entry) => (entry?.matrixEl || entry)?.classList.remove('has-focus'));
         this._mhsaTokenMatrixQueryMatrixEl.forEach((entry) => (entry?.matrixEl || entry)?.classList.remove('has-focus'));
@@ -9110,10 +9287,34 @@ class SelectionPanel {
             return;
         }
         const target = event?.target instanceof Element ? event.target : null;
-        if (!target || !this.mhsaTokenMatrixBody) return;
-        if (this._mhsaTokenMatrixPinned) return;
+        if (!target || !this.mhsaTokenMatrixBody) {
+            this._setMhsaTokenMatrixHoverValue(null);
+            return;
+        }
+        if (this._mhsaTokenMatrixPinned) {
+            this._setMhsaTokenMatrixHoverValue(null);
+            return;
+        }
         const targetInfo = this._resolveMhsaTokenMatrixInteractionTarget(target);
-        if (this._applyMhsaTokenMatrixResolvedTarget(targetInfo)) return;
+        const applied = this._applyMhsaTokenMatrixResolvedTarget(targetInfo);
+        if (applied) {
+            const hoverPayload = targetInfo?.kind === 'score'
+                ? this._resolveMhsaTokenMatrixScoreHoverPayload(targetInfo)
+                : (targetInfo?.kind === 'attention-block'
+                    ? this._resolveMhsaTokenMatrixAttentionBlockHoverPayload(targetInfo.focusKey)
+                    : null);
+            this._setMhsaTokenMatrixHoverValue(
+                hoverPayload && Number.isFinite(event?.clientX) && Number.isFinite(event?.clientY)
+                    ? {
+                        ...hoverPayload,
+                        clientX: event.clientX,
+                        clientY: event.clientY
+                    }
+                    : null
+            );
+            return;
+        }
+        this._setMhsaTokenMatrixHoverValue(null);
         this._clearMhsaTokenMatrixHover();
     }
 
@@ -9416,6 +9617,7 @@ class SelectionPanel {
             this.mhsaTokenMatrixBody.hidden = true;
             this.mhsaTokenMatrixBody.classList.remove('is-measure-only');
             this.mhsaTokenMatrixBody.classList.remove('has-focus-row', 'has-focus-column', 'has-scene-focus', 'has-pinned-focus');
+            this.mhsaTokenMatrixBody.style.removeProperty('--mhsa-token-matrix-fixed-label-scale');
             this.mhsaTokenMatrixBody.style.removeProperty('--mhsa-token-matrix-rows');
             this.mhsaTokenMatrixBody.style.removeProperty('--mhsa-token-matrix-band-count');
             clearMhsaTokenMatrixLayoutVars(this.mhsaTokenMatrixBody);
@@ -9731,6 +9933,7 @@ class SelectionPanel {
         this._publishMhsaTokenMatrixCanvasDebugState('preview-start');
         this._syncMhsaTokenMatrixCanvasPresentation({ domReady: false });
         this.mhsaTokenMatrixBody.classList.remove('has-focus-row', 'has-focus-column', 'has-scene-focus', 'has-pinned-focus');
+        this.mhsaTokenMatrixBody.style.removeProperty('--mhsa-token-matrix-fixed-label-scale');
         clearMhsaTokenMatrixLayoutVars(this.mhsaTokenMatrixBody);
         this.mhsaTokenMatrixBody.replaceChildren();
         this._resetMhsaTokenMatrixViewport();
@@ -9951,7 +10154,7 @@ class SelectionPanel {
                 const weightBlockEl = document.createElement('div');
                 weightBlockEl.className = 'mhsa-token-matrix-preview__weight-block';
                 const weightCardEl = document.createElement('div');
-                weightCardEl.className = 'mhsa-token-matrix-preview__weight-card';
+                weightCardEl.className = 'mhsa-token-matrix-preview__weight-card mhsa-token-matrix-preview__weight-card--projection';
                 weightCardEl.style.background = projectionData.weightGradientCss || 'none';
                 if (Array.isArray(projectionData.colorRgb) && projectionData.colorRgb.length === 3) {
                     weightCardEl.style.setProperty('--mhsa-weight-rgb', projectionData.colorRgb.join(', '));
@@ -10174,6 +10377,7 @@ class SelectionPanel {
                         }
                         rowData.cells.forEach((cellData) => {
                             const cellEl = document.createElement('div');
+                            const allowNativeTitle = titleMode !== 'attention' && titleMode !== 'mask';
                             cellEl.className = cellClass;
                             cellEl.dataset.row = String(cellData.rowIndex);
                             cellEl.dataset.col = String(cellData.colIndex);
@@ -10186,9 +10390,9 @@ class SelectionPanel {
                                 cellEl.style.background = cellData.fillCss;
                             }
 
-                            if (typeof cellData.title === 'string' && cellData.title.length) {
+                            if (allowNativeTitle && typeof cellData.title === 'string' && cellData.title.length) {
                                 cellEl.title = cellData.title;
-                            } else if (titleMode === 'attention' && Number.isFinite(cellData.rawValue)) {
+                            } else if (allowNativeTitle && titleMode === 'attention' && Number.isFinite(cellData.rawValue)) {
                                 cellEl.title = `${cellData.rowTokenLabel} → ${cellData.colTokenLabel}: ${formatAttentionPreviewScore(cellData.rawValue)}`;
                             }
 
@@ -10310,7 +10514,7 @@ class SelectionPanel {
                     const scaleVisualEl = createVisualEl('mhsa-token-matrix-preview__visual--scale');
                     const scaleTextEl = document.createElement('div');
                     scaleTextEl.className = 'mhsa-token-matrix-preview__scale-text';
-                    renderMathLabel(scaleTextEl, scoreStage.scaleLabelTex, 'sqrt(d_h)');
+                    renderMathLabel(scaleTextEl, scoreStage.scaleLabelTex, 'sqrt(d_head)');
                     scaleVisualEl.appendChild(scaleTextEl);
                     scaleBlockEl.append(scaleVisualEl);
                     return registerAttentionFocusEl('scale', scaleBlockEl);
@@ -10459,7 +10663,7 @@ class SelectionPanel {
                     });
 
                     const multiplyOutputEl = createOperatorEl({
-                        className: 'mhsa-token-matrix-preview__operator--attention-multiply',
+                        className: 'mhsa-token-matrix-preview__operator--attention-multiply mhsa-token-matrix-preview__operator--attention-multiply-output',
                         text: '×'
                     });
                     registerAttentionFocusEl('head-output-multiply', multiplyOutputEl);
@@ -10537,7 +10741,7 @@ class SelectionPanel {
                     softmaxPrefixEl.className = 'mhsa-token-matrix-preview__softmax-prefix';
 
                     const openParenEl = createOperatorEl({
-                        className: 'mhsa-token-matrix-preview__operator--attention-paren',
+                        className: 'mhsa-token-matrix-preview__operator--attention-paren mhsa-token-matrix-preview__operator--attention-paren-softmax mhsa-token-matrix-preview__operator--attention-paren-softmax-open',
                         text: '('
                     });
                     registerAttentionFocusEl('softmax-paren-open', openParenEl);
@@ -10549,7 +10753,7 @@ class SelectionPanel {
                     registerAttentionFocusEl('add', plusEl);
 
                     const closeParenEl = createOperatorEl({
-                        className: 'mhsa-token-matrix-preview__operator--attention-paren',
+                        className: 'mhsa-token-matrix-preview__operator--attention-paren mhsa-token-matrix-preview__operator--attention-paren-softmax mhsa-token-matrix-preview__operator--attention-paren-softmax-close',
                         text: ')'
                     });
                     registerAttentionFocusEl('softmax-paren-close', closeParenEl);
@@ -10644,7 +10848,7 @@ class SelectionPanel {
                 attentionEquationEl.className = 'mhsa-token-matrix-preview__attention-equation';
 
                 const openParenEl = createOperatorEl({
-                    className: 'mhsa-token-matrix-preview__operator--attention-paren',
+                    className: 'mhsa-token-matrix-preview__operator--attention-paren mhsa-token-matrix-preview__operator--attention-paren-pre-open',
                     text: '('
                 });
                 registerAttentionFocusEl('paren-pre-open', openParenEl);
@@ -10656,7 +10860,7 @@ class SelectionPanel {
                 registerAttentionFocusEl('multiply', multiplyEl);
 
                 const closeParenEl = createOperatorEl({
-                    className: 'mhsa-token-matrix-preview__operator--attention-paren',
+                    className: 'mhsa-token-matrix-preview__operator--attention-paren mhsa-token-matrix-preview__operator--attention-paren-pre-close',
                     text: ')'
                 });
                 registerAttentionFocusEl('paren-pre-close', closeParenEl);
@@ -10668,7 +10872,7 @@ class SelectionPanel {
                 registerAttentionFocusEl('divide', divideEl);
 
                 const equalsEl = createOperatorEl({
-                    className: 'mhsa-token-matrix-preview__operator--attention-equals',
+                    className: 'mhsa-token-matrix-preview__operator--attention-equals mhsa-token-matrix-preview__operator--attention-equals-pre',
                     text: '='
                 });
                 registerAttentionFocusEl('equals-pre', equalsEl);

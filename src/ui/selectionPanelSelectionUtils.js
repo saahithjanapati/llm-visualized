@@ -86,6 +86,9 @@ export function simplifyLayerNormParamDisplayLabel(label, selectionInfo = null) 
     const raw = String(label || '');
     const lower = raw.toLowerCase();
     const stageLower = String(getActivationDataFromSelection(selectionInfo)?.stage || '').toLowerCase();
+    if (lower.includes('post-layernorm residual') || lower.includes('post layernorm residual')) {
+        return raw;
+    }
     const explicitKind = findUserDataString(selectionInfo, 'layerNormKind');
     const paramSpec = resolveLayerNormParamSpec({
         label: raw,

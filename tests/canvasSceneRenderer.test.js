@@ -22,6 +22,7 @@ import {
 import { flattenSceneNodes } from '../src/view2d/schema/sceneTypes.js';
 import { VIEW2D_MATRIX_PRESENTATIONS } from '../src/view2d/schema/sceneTypes.js';
 import { resolveView2dStyle, VIEW2D_STYLE_KEYS } from '../src/view2d/theme/visualTokens.js';
+import { VIEW2D_VECTOR_STRIP_VARIANT } from '../src/view2d/shared/vectorStrip.js';
 
 function createActivationSource(tokenCount = 4) {
     return {
@@ -239,6 +240,212 @@ describe('CanvasSceneRenderer', () => {
             interacting: true
         })).toBe(true);
         expect(ctx.operations.filter((entry) => entry.type === 'createLinearGradient').length).toBeGreaterThan(0);
+    });
+
+    it('keeps transpose vector-strip columns visible at low zoom instead of collapsing to a summary bar', () => {
+        const transposeNode = createMatrixNode({
+            role: 'attention-key-transpose',
+            semantic: { componentKind: 'mhsa', role: 'attention-key-transpose' },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.COLUMN_STRIP,
+            dimensions: { rows: 64, cols: 4 },
+            columnItems: [
+                { label: 'tok_0', fillCss: 'rgba(120,220,255,0.85)' },
+                { label: 'tok_1', fillCss: 'rgba(120,220,255,0.82)' },
+                { label: 'tok_2', fillCss: 'rgba(120,220,255,0.79)' },
+                { label: 'tok_3', fillCss: 'rgba(120,220,255,0.76)' }
+            ],
+            metadata: {
+                columnStrip: {
+                    variant: VIEW2D_VECTOR_STRIP_VARIANT,
+                    colWidth: 7,
+                    colHeight: 72,
+                    colGap: 0,
+                    paddingX: 0,
+                    paddingY: 0,
+                    hideSurface: true
+                }
+            },
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.MHSA_K
+            }
+        });
+        const scene = createSceneModel({
+            semantic: { componentKind: 'test-scene' },
+            nodes: [transposeNode]
+        });
+        const layout = buildSceneLayout(scene);
+        const renderer = new CanvasSceneRenderer({ canvas });
+
+        renderer.setScene(scene, layout);
+
+        ctx.operations.length = 0;
+        expect(renderer.render({
+            width: 640,
+            height: 360,
+            dpr: 1,
+            viewportTransform: {
+                source: 'low-zoom-transpose-columns',
+                scale: 1.4,
+                offsetX: 0,
+                offsetY: 0
+            }
+        })).toBe(true);
+
+        const fillRects = ctx.operations.filter((entry) => entry.type === 'fillRect');
+
+        expect(fillRects.length).toBeGreaterThanOrEqual(4);
+        expect(fillRects.filter((entry) => entry.width <= 12)).toHaveLength(4);
+    });
+
+    it('keeps persistent TeX labels visible below the normal text cutoff', () => {
+        const scaleNode = createTextNode({
+            role: 'attention-scale',
+            semantic: { componentKind: 'mhsa', role: 'attention-scale' },
+            tex: '\\sqrt{d_{\\mathrm{head}}}',
+            text: 'sqrt(d_head)',
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.LABEL
+            },
+            metadata: {
+                minScreenHeightPx: 0,
+                persistentMinScreenFontPx: 11
+            }
+        });
+        const scene = createSceneModel({
+            semantic: { componentKind: 'test-scene' },
+            nodes: [scaleNode]
+        });
+        const layout = buildSceneLayout(scene);
+        const renderer = new CanvasSceneRenderer({ canvas });
+
+        renderer.setScene(scene, layout);
+
+        ctx.operations.length = 0;
+        expect(renderer.render({
+            width: 640,
+            height: 360,
+            dpr: 1,
+            viewportTransform: {
+                source: 'persistent-tex-low-zoom',
+                scale: 0.05,
+                offsetX: 0,
+                offsetY: 0
+            }
+        })).toBe(true);
+
+        expect(ctx.operations.some((entry) => (
+            entry.type === 'fillText'
+            && (entry.text === 'd' || entry.text === 'head')
+        ))).toBe(true);
+    });
+
+    it('renders detailed attention grid cells as rounded tiles instead of hard fillRect squares', () => {
+        const gridNode = createMatrixNode({
+            role: 'attention-post',
+            semantic: { componentKind: 'mhsa', role: 'attention-post' },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.GRID,
+            dimensions: { rows: 2, cols: 2 },
+            rowItems: [
+                {
+                    cells: [
+                        { fillCss: 'rgba(120,220,255,0.8)' },
+                        { fillCss: 'rgba(120,220,255,0.7)' }
+                    ]
+                },
+                {
+                    cells: [
+                        { fillCss: 'rgba(120,220,255,0.6)' },
+                        { fillCss: 'rgba(120,220,255,0.5)' }
+                    ]
+                }
+            ],
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.MHSA_POST
+            }
+        });
+        const scene = createSceneModel({
+            semantic: { componentKind: 'test-scene' },
+            nodes: [gridNode]
+        });
+        const layout = buildSceneLayout(scene);
+        const renderer = new CanvasSceneRenderer({ canvas });
+
+        renderer.setScene(scene, layout);
+
+        ctx.operations.length = 0;
+        expect(renderer.render({
+            width: 640,
+            height: 360,
+            dpr: 1,
+            viewportTransform: {
+                source: 'rounded-grid-cells',
+                scale: 4,
+                offsetX: 0,
+                offsetY: 0
+            }
+        })).toBe(true);
+
+        expect(ctx.operations.some((entry) => entry.type === 'fill')).toBe(true);
+        expect(ctx.operations.filter((entry) => (
+            entry.type === 'fillRect'
+            && entry.width <= 20
+            && entry.height <= 20
+        ))).toHaveLength(0);
+    });
+
+    it('keeps persistent attention grids visible at low zoom during the interaction fast-path', () => {
+        const gridNode = createMatrixNode({
+            role: 'attention-post',
+            semantic: { componentKind: 'mhsa', role: 'attention-post' },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.GRID,
+            dimensions: { rows: 2, cols: 2 },
+            rowItems: [
+                {
+                    cells: [
+                        { fillCss: 'rgba(120,220,255,0.8)' },
+                        { fillCss: 'rgba(120,220,255,0.7)' }
+                    ]
+                },
+                {
+                    cells: [
+                        { fillCss: 'rgba(120,220,255,0.6)' },
+                        { fillCss: 'rgba(120,220,255,0.5)' }
+                    ]
+                }
+            ],
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.MHSA_POST
+            },
+            metadata: {
+                grid: {
+                    preserveDetail: true
+                }
+            }
+        });
+        const scene = createSceneModel({
+            semantic: { componentKind: 'test-scene' },
+            nodes: [gridNode]
+        });
+        const layout = buildSceneLayout(scene);
+        const renderer = new CanvasSceneRenderer({ canvas });
+
+        renderer.setScene(scene, layout);
+
+        ctx.operations.length = 0;
+        expect(renderer.render({
+            width: 640,
+            height: 360,
+            dpr: 1,
+            interacting: true,
+            viewportTransform: {
+                source: 'persistent-grid-low-zoom',
+                scale: 0.18,
+                offsetX: 0,
+                offsetY: 0
+            }
+        })).toBe(true);
+
+        expect(ctx.operations.filter((entry) => entry.type === 'fill')).toHaveLength(5);
     });
 
     it('renders a selected MHSA head with a black interior only in deepest head mode', () => {

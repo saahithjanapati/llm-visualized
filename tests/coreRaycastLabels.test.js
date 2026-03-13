@@ -15,6 +15,9 @@ describe('coreRaycastLabels', () => {
     it('simplifies layernorm param labels', () => {
         expect(simplifyLayerNormParamHoverLabel('LayerNorm scale matrix')).toBe('LayerNorm Scale');
         expect(simplifyLayerNormParamHoverLabel('LayerNorm shift matrix')).toBe('LayerNorm Shift');
+        expect(simplifyLayerNormParamHoverLabel('Post LayerNorm Residual Vector', {
+            activationData: { stage: 'ln1.shift' }
+        })).toBe('Post LayerNorm Residual Vector');
         expect(simplifyLayerNormParamHoverLabel('Query Weight Matrix')).toBe('Query Weight Matrix');
     });
 

@@ -66,7 +66,7 @@ describe('buildMhsaSceneModel', () => {
         expect(scene.metadata.rowCount).toBe(3);
 
         const nodes = flattenSceneNodes(scene);
-        const sourceAnchorNode = nodes.find((node) => node.role === 'projection-source-anchor');
+        const sourceNode = nodes.find((node) => node.role === 'projection-source-xln');
         const projectionSidecarNode = nodes.find((node) => node.role === 'projection-sidecar');
         const projectionStackNode = nodes.find((node) => node.role === 'projection-stack');
         const qInputNode = nodes.find((node) => node.role === 'x-ln-copy' && node.semantic?.branchKey === 'q');
@@ -76,13 +76,31 @@ describe('buildMhsaSceneModel', () => {
         const qOutputNode = nodes.find((node) => node.role === 'projection-output' && node.metadata?.kind === 'q');
         const attentionQueryNode = nodes.find((node) => node.role === 'attention-query-source');
         const attentionTransposeNode = nodes.find((node) => node.role === 'attention-key-transpose');
+        const preScoreNode = nodes.find((node) => node.role === 'attention-pre-score');
+        const maskedInputNode = nodes.find((node) => node.role === 'attention-masked-input');
+        const maskNode = nodes.find((node) => node.role === 'attention-mask');
         const postNode = nodes.find((node) => node.role === 'attention-post');
+        const postCopyNode = nodes.find((node) => node.role === 'attention-post-copy');
+        const valuePostNode = nodes.find((node) => node.role === 'attention-value-post');
         const headOutputNode = nodes.find((node) => node.role === 'attention-head-output');
+        const softmaxLabelNode = nodes.find((node) => node.role === 'attention-softmax-label');
         const connectorNodes = nodes.filter((node) => node.kind === 'connector');
         const connectorRoles = nodes
             .filter((node) => node.kind === 'connector')
             .map((node) => node.role);
 
+        expect(sourceNode?.dimensions).toEqual({ rows: 3, cols: D_MODEL });
+        expect(sourceNode?.rowItems?.[0]?.semantic).toMatchObject({
+            componentKind: 'residual',
+            layerIndex: 2,
+            headIndex: 4,
+            stage: 'ln1.shift',
+            tokenIndex: 0
+        });
+        expect(sourceNode?.metadata?.caption?.position).toBe('bottom');
+        expect(sourceNode?.metadata?.caption?.scaleWithNode).toBeUndefined();
+        expect(sourceNode?.metadata?.compactRows?.compactWidth).toBe(96);
+        expect(sourceNode?.metadata?.compactRows?.rowHeight).toBe(7);
         expect(qInputNode?.rowItems?.[0]?.semantic).toMatchObject({
             componentKind: 'residual',
             layerIndex: 2,
@@ -92,22 +110,20 @@ describe('buildMhsaSceneModel', () => {
             tokenIndex: 0
         });
         expect(qInputNode?.metadata?.caption?.position).toBe('bottom');
-        expect(qInputNode?.metadata?.caption?.scaleWithNode).toBe(true);
-        expect(qInputNode?.metadata?.compactRows?.compactWidth).toBe(84);
+        expect(qInputNode?.metadata?.caption?.scaleWithNode).toBeUndefined();
+        expect(qInputNode?.metadata?.compactRows?.compactWidth).toBe(96);
         expect(qInputNode?.metadata?.compactRows?.rowHeight).toBe(7);
         expect(qMultiplyNode?.metadata?.fontScale).toBe(0.82);
-        expect(sourceAnchorNode?.metadata?.hidden).toBe(true);
-        expect(sourceAnchorNode?.metadata?.card?.cornerRadius).toBe(0);
         expect(projectionSidecarNode?.metadata?.gapOverride).toBe(30);
-        expect(projectionStackNode?.metadata?.gapOverride).toBe(120);
+        expect(projectionStackNode?.metadata?.gapOverride).toBe(144);
         expect(qWeightNode?.visual?.styleKey).toBe(VIEW2D_STYLE_KEYS.MHSA_Q);
         expect(qWeightNode?.visual?.background).toMatch(/^linear-gradient\(/);
         expect(qWeightNode?.metadata?.caption?.renderMode).toBe('dom-katex');
         expect(qWeightNode?.metadata?.caption?.position).toBe('bottom');
-        expect(qWeightNode?.metadata?.caption?.scaleWithNode).toBe(true);
+        expect(qWeightNode?.metadata?.caption?.scaleWithNode).toBeUndefined();
         expect(qWeightNode?.metadata?.caption?.minScreenHeightPx).toBe(28);
-        expect(qWeightNode?.metadata?.caption?.labelScale).toBe(0.42);
-        expect(qWeightNode?.metadata?.caption?.dimensionsScale).toBe(0.5);
+        expect(qWeightNode?.metadata?.caption?.labelScale).toBeUndefined();
+        expect(qWeightNode?.metadata?.caption?.dimensionsScale).toBeUndefined();
         expect(qWeightNode?.metadata?.card?.cornerRadius).toBe(10);
         expect(qBiasNode?.dimensions).toEqual({ rows: 1, cols: D_HEAD });
         expect(qBiasNode?.visual?.styleKey).toBe(VIEW2D_STYLE_KEYS.MHSA_Q);
@@ -118,11 +134,11 @@ describe('buildMhsaSceneModel', () => {
         expect(qBiasNode?.metadata?.caption?.dimensionsTex).toBe(`(1, ${D_HEAD})`);
         expect(qBiasNode?.metadata?.caption?.dimensionsText).toBe(`(1, ${D_HEAD})`);
         expect(qBiasNode?.metadata?.caption?.minScreenHeightPx).toBe(12);
-        expect(qBiasNode?.metadata?.caption?.scaleWithNode).toBe(true);
-        expect(qBiasNode?.metadata?.caption?.labelScale).toBe(0.42);
-        expect(qBiasNode?.metadata?.caption?.dimensionsScale).toBe(0.5);
+        expect(qBiasNode?.metadata?.caption?.scaleWithNode).toBeUndefined();
+        expect(qBiasNode?.metadata?.caption?.labelScale).toBeUndefined();
+        expect(qBiasNode?.metadata?.caption?.dimensionsScale).toBeUndefined();
         expect(qBiasNode?.metadata?.compactRows?.rowHeight).toBe(14);
-        expect(qBiasNode?.metadata?.compactRows?.compactWidth).toBe(52);
+        expect(qBiasNode?.metadata?.compactRows?.compactWidth).toBe(58);
         expect(qBiasNode?.metadata?.card?.cornerRadius).toBe(5);
         expect(qOutputNode?.dimensions).toEqual({ rows: 3, cols: D_HEAD });
         expect(qOutputNode?.rowItems?.[0]?.semantic).toMatchObject({
@@ -136,19 +152,38 @@ describe('buildMhsaSceneModel', () => {
         expect(qOutputNode?.metadata?.caption?.renderMode).toBe('dom-katex');
         expect(qOutputNode?.metadata?.caption?.position).toBe('bottom');
         expect(qOutputNode?.metadata?.caption?.dimensionsText).toBe(`(3, ${D_HEAD})`);
-        expect(qOutputNode?.metadata?.compactRows?.compactWidth).toBe(66);
+        expect(qOutputNode?.metadata?.compactRows?.compactWidth).toBe(72);
         expect(qOutputNode?.metadata?.compactRows?.rowHeight).toBe(7);
         expect(attentionQueryNode?.dimensions).toEqual({ rows: 3, cols: D_HEAD });
         expect(attentionQueryNode?.metadata?.caption?.position).toBe('bottom');
         expect(attentionQueryNode?.metadata?.caption?.dimensionsText).toBe(`(3, ${D_HEAD})`);
-        expect(attentionQueryNode?.metadata?.compactRows?.compactWidth).toBe(66);
+        expect(attentionQueryNode?.metadata?.caption?.scaleWithNode).toBeUndefined();
+        expect(attentionQueryNode?.metadata?.compactRows?.compactWidth).toBe(72);
         expect(attentionQueryNode?.metadata?.compactRows?.rowHeight).toBe(7);
         expect(attentionTransposeNode?.dimensions).toEqual({ rows: D_HEAD, cols: 3 });
         expect(attentionTransposeNode?.metadata?.caption?.position).toBe('bottom');
         expect(attentionTransposeNode?.metadata?.caption?.dimensionsText).toBe(`(${D_HEAD}, 3)`);
-        expect(attentionTransposeNode?.metadata?.columnStrip?.colGap).toBe(0);
-        expect(attentionTransposeNode?.metadata?.columnStrip?.colHeight).toBe(66);
+        expect(attentionTransposeNode?.metadata?.caption?.scaleWithNode).toBeUndefined();
+        expect(attentionTransposeNode?.metadata?.columnStrip?.colWidth).toBe(7);
+        expect(attentionTransposeNode?.metadata?.columnStrip?.colHeight).toBe(72);
+        expect(attentionTransposeNode?.metadata?.compactRows).toBeUndefined();
         expect(attentionTransposeNode?.metadata?.card?.cornerRadius).toBe(8);
+        expect(preScoreNode?.metadata?.caption?.renderMode).toBe('dom-katex');
+        expect(preScoreNode?.metadata?.caption?.dimensionsText).toBe('(3, 3)');
+        expect(maskedInputNode?.metadata?.caption?.renderMode).toBe('dom-katex');
+        expect(maskedInputNode?.metadata?.caption?.dimensionsText).toBe('(3, 3)');
+        expect(maskNode?.metadata?.caption?.renderMode).toBe('dom-katex');
+        expect(maskNode?.metadata?.caption?.dimensionsText).toBe('(3, 3)');
+        expect(postNode?.metadata?.grid?.preserveDetail).toBe(true);
+        expect(postNode?.metadata?.caption?.renderMode).toBe('dom-katex');
+        expect(postNode?.metadata?.caption?.dimensionsText).toBe('(3, 3)');
+        expect(postCopyNode?.metadata?.caption?.renderMode).toBe('dom-katex');
+        expect(postCopyNode?.metadata?.caption?.dimensionsText).toBe('(3, 3)');
+        expect(valuePostNode?.metadata?.caption?.renderMode).toBe('dom-katex');
+        expect(valuePostNode?.metadata?.caption?.dimensionsText).toBe(`(3, ${D_HEAD})`);
+        expect(headOutputNode?.metadata?.caption?.renderMode).toBe('dom-katex');
+        expect(headOutputNode?.metadata?.caption?.dimensionsText).toBe(`(3, ${D_HEAD})`);
+        expect(softmaxLabelNode?.metadata?.renderMode).toBe('dom-katex');
         expect(attentionTransposeNode?.columnItems?.[0]?.semantic).toMatchObject({
             componentKind: 'mhsa',
             layerIndex: 2,
@@ -219,6 +254,13 @@ describe('buildMhsaSceneModel', () => {
         const qOutputNode = nodes.find((node) => node.role === 'projection-output' && node.metadata?.kind === 'q');
         const attentionQueryNode = nodes.find((node) => node.role === 'attention-query-source');
         const attentionTransposeNode = nodes.find((node) => node.role === 'attention-key-transpose');
+        const attentionEqualsNode = nodes.find((node) => node.role === 'attention-equals');
+        const attentionDivideNode = nodes.find((node) => node.role === 'attention-divide');
+        const attentionScaleNode = nodes.find((node) => node.role === 'attention-scale');
+        const attentionPreScoreNode = nodes.find((node) => node.role === 'attention-pre-score');
+        const attentionSoftmaxPrefixNode = nodes.find((node) => node.role === 'attention-softmax-prefix');
+        const attentionSoftmaxFlowNode = nodes.find((node) => node.role === 'attention-softmax-flow');
+        const connectorKNode = nodes.find((node) => node.role === 'connector-k');
         const qInputEntry = layout.registry.getNodeEntry(qInputNode?.id || '');
         const qMultiplyEntry = layout.registry.getNodeEntry(qMultiplyNode?.id || '');
         const qWeightEntry = layout.registry.getNodeEntry(qWeightNode?.id || '');
@@ -226,6 +268,13 @@ describe('buildMhsaSceneModel', () => {
         const qOutputEntry = layout.registry.getNodeEntry(qOutputNode?.id || '');
         const attentionQueryEntry = layout.registry.getNodeEntry(attentionQueryNode?.id || '');
         const attentionTransposeEntry = layout.registry.getNodeEntry(attentionTransposeNode?.id || '');
+        const attentionEqualsEntry = layout.registry.getNodeEntry(attentionEqualsNode?.id || '');
+        const attentionDivideEntry = layout.registry.getNodeEntry(attentionDivideNode?.id || '');
+        const attentionScaleEntry = layout.registry.getNodeEntry(attentionScaleNode?.id || '');
+        const attentionPreScoreEntry = layout.registry.getNodeEntry(attentionPreScoreNode?.id || '');
+        const attentionSoftmaxPrefixEntry = layout.registry.getNodeEntry(attentionSoftmaxPrefixNode?.id || '');
+        const attentionSoftmaxFlowEntry = layout.registry.getNodeEntry(attentionSoftmaxFlowNode?.id || '');
+        const connectorKEntry = layout.registry.getConnectorEntry(connectorKNode?.id || '');
 
         expect(qInputEntry?.contentBounds?.width).toBeGreaterThan(0);
         expect(qMultiplyEntry?.layoutData?.fontSize).toBeLessThan(layout.config.component.operatorFontSize);
@@ -233,17 +282,53 @@ describe('buildMhsaSceneModel', () => {
         expect(qWeightEntry?.contentBounds?.height).toBeGreaterThan(qWeightEntry?.contentBounds?.width);
         expect(qBiasEntry?.contentBounds?.width).toBeGreaterThan(0);
         expect(qBiasEntry?.contentBounds?.width).toBeLessThan(qInputEntry?.contentBounds?.width);
-        expect(qBiasEntry?.contentBounds?.width).toBe(52);
+        expect(qBiasEntry?.contentBounds?.width).toBe(58);
         expect(qBiasEntry?.contentBounds?.height).toBe(14);
         expect(qOutputEntry?.contentBounds?.width).toBeGreaterThan(0);
         expect(qOutputEntry?.contentBounds?.width).toBeLessThan(qInputEntry?.contentBounds?.width);
-        expect(qOutputEntry?.contentBounds?.width).toBe(66);
+        expect(qOutputEntry?.contentBounds?.width).toBe(72);
         expect(qOutputEntry?.contentBounds?.height).toBe(qInputEntry?.contentBounds?.height);
-        expect(attentionQueryEntry?.contentBounds?.width).toBe(66);
+        expect(attentionQueryEntry?.contentBounds?.width).toBe(72);
         expect(attentionQueryEntry?.contentBounds?.height).toBe(qOutputEntry?.contentBounds?.height);
-        expect(attentionTransposeEntry?.contentBounds?.height).toBe(66);
+        expect(attentionTransposeEntry?.contentBounds?.height).toBe(attentionQueryEntry?.contentBounds?.width);
         expect(attentionTransposeEntry?.contentBounds?.width).toBeLessThan(attentionTransposeEntry?.contentBounds?.height);
         expect(attentionTransposeEntry?.contentBounds?.width).toBe(35);
+        expect(
+            (attentionPreScoreEntry?.contentBounds?.y || 0) + ((attentionPreScoreEntry?.contentBounds?.height || 0) / 2)
+        ).toBe(
+            (attentionQueryEntry?.contentBounds?.y || 0) + ((attentionQueryEntry?.contentBounds?.height || 0) / 2)
+        );
+        expect(
+            (attentionPreScoreEntry?.contentBounds?.y || 0) + ((attentionPreScoreEntry?.contentBounds?.height || 0) / 2)
+        ).toBe(
+            (attentionTransposeEntry?.contentBounds?.y || 0) + ((attentionTransposeEntry?.contentBounds?.height || 0) / 2)
+        );
+        expect(attentionSoftmaxFlowEntry?.contentBounds?.y).toBeGreaterThan(
+            (attentionPreScoreEntry?.contentBounds?.y || 0) + (attentionPreScoreEntry?.contentBounds?.height || 0)
+        );
+        expect(connectorKNode?.target?.anchor).toBe('bottom');
+        expect(connectorKEntry?.pathPoints.at(-1)?.y).toBeGreaterThanOrEqual(
+            (attentionTransposeEntry?.dimensionBounds?.y || 0)
+            + (attentionTransposeEntry?.dimensionBounds?.height || 0)
+        );
+        expect(attentionScaleNode?.metadata).toMatchObject({
+            renderMode: 'dom-katex',
+            minScreenHeightPx: 0
+        });
+        expect(attentionScaleNode?.metadata?.fixedScreenFontPx).toBeUndefined();
+        expect((attentionScaleEntry?.bounds?.x || 0) - ((attentionDivideEntry?.bounds?.x || 0) + (attentionDivideEntry?.bounds?.width || 0)))
+            .toBeLessThan((attentionEqualsEntry?.bounds?.x || 0) - ((attentionScaleEntry?.bounds?.x || 0) + (attentionScaleEntry?.bounds?.width || 0)));
+        expect(attentionPreScoreEntry?.contentBounds?.x).toBe(attentionSoftmaxPrefixEntry?.contentBounds?.x);
+        expect(attentionPreScoreEntry?.contentBounds?.x).toBeGreaterThan(
+            (attentionEqualsEntry?.contentBounds?.x || 0) + (attentionEqualsEntry?.contentBounds?.width || 0)
+        );
+        expect(attentionSoftmaxFlowEntry?.contentBounds?.y).toBeGreaterThan(
+            (attentionPreScoreEntry?.contentBounds?.y || 0) + (attentionPreScoreEntry?.contentBounds?.height || 0)
+        );
+        expect(
+            (attentionSoftmaxFlowEntry?.contentBounds?.y || 0)
+            - ((attentionPreScoreEntry?.contentBounds?.y || 0) + (attentionPreScoreEntry?.contentBounds?.height || 0))
+        ).toBeGreaterThanOrEqual(36);
     });
 
     it('starts the ingress stem at the left source anchor and stops arrowheads short of the X_ln strips', () => {
@@ -255,10 +340,10 @@ describe('buildMhsaSceneModel', () => {
         });
         const layout = buildSceneLayout(scene);
         const nodes = flattenSceneNodes(scene);
-        const sourceAnchorNode = nodes.find((node) => node.role === 'projection-source-anchor');
+        const sourceNode = nodes.find((node) => node.role === 'projection-source-xln');
         const qInputNode = nodes.find((node) => node.role === 'x-ln-copy' && node.semantic?.branchKey === 'q');
         const qIngressConnectorNode = nodes.find((node) => node.role === 'connector-xln-q');
-        const sourceAnchorEntry = layout.registry.getNodeEntry(sourceAnchorNode?.id || '');
+        const sourceEntry = layout.registry.getNodeEntry(sourceNode?.id || '');
         const qInputEntry = layout.registry.getNodeEntry(qInputNode?.id || '');
         const qIngressConnectorEntry = layout.registry.getConnectorEntry(qIngressConnectorNode?.id || '');
         const connectorSourcePoint = qIngressConnectorEntry?.pathPoints?.[0];
@@ -267,11 +352,11 @@ describe('buildMhsaSceneModel', () => {
         expect(qIngressConnectorNode?.gap).toBe(0);
         expect(qIngressConnectorNode?.sourceGap).toBe(0);
         expect(qIngressConnectorNode?.targetGap).toBe(8);
-        expect(connectorSourcePoint).toEqual(sourceAnchorEntry?.anchors?.left);
+        expect(connectorSourcePoint).toEqual(sourceEntry?.anchors?.right);
         expect(connectorTargetPoint).toEqual({
             x: (qInputEntry?.anchors?.left?.x || 0) - 8,
             y: qInputEntry?.anchors?.left?.y || 0
         });
-        expect(qInputEntry?.contentBounds?.x).toBeGreaterThan(sourceAnchorEntry?.bounds?.x || 0);
+        expect(qInputEntry?.contentBounds?.x).toBeGreaterThan(sourceEntry?.contentBounds?.x || 0);
     });
 });

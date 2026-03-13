@@ -222,6 +222,23 @@ describe('coreHoverTokenContext', () => {
         })).toBeNull();
     });
 
+    it('keeps token chips off suppressed semantic module hovers even if token metadata leaks in', () => {
+        const info = {
+            suppressTokenChip: true,
+            activationData: {
+                stage: 'attention.output_projection',
+                suppressTokenChip: true,
+                tokenIndex: 5,
+                tokenLabel: 'theta'
+            }
+        };
+
+        expect(resolveHoverTokenContext({
+            label: 'Output Projection Matrix',
+            info
+        })).toBeNull();
+    });
+
     it('shows bottom token-chip hovers as chip-only', () => {
         const info = {
             tokenIndex: 2,

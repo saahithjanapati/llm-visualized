@@ -32,6 +32,7 @@ import {
 } from '../../animations/LayerAnimationConstants.js';
 import { appState } from '../../state/appState.js';
 import { applyPhysicalMaterialsToScene } from '../../utils/materialUtils.js';
+import { resolveTopLogitRevealY } from '../../utils/topEmbeddingTimingUtils.js';
 import {
     TRAIL_COLOR,
     TRAIL_LINE_WIDTH,
@@ -79,7 +80,7 @@ const TOKEN_CHIP_ONLY_MATERIAL_TWEAKS = Object.freeze({
 // the first-layer residual vector is allowed to rise out of the matrix.
 const VOCAB_CHIP_INSIDE_RELEASE_BUFFER_MS = 260;
 const POSITION_CHIP_INSIDE_RELEASE_BUFFER_MS = 80;
-const TOP_LOGIT_REVEAL_DELAY_MS = 140;
+const TOP_LOGIT_REVEAL_DELAY_MS = 180;
 const BOTTOM_EMBED_FINAL_EMISSIVE = TOP_EMBED_BASE_EMISSIVE;
 const BOTTOM_POSITION_EMBED_FINAL_EMISSIVE = 0.03;
 const BOTTOM_EMBED_START_EMISSIVE = 0.0;
@@ -1589,10 +1590,13 @@ export function addEmbeddingAndTokenChips({
                             ? lastLayerRef.__topEmbedExitYLocal
                             : lastLayerRef.__topEmbedStopYLocal);
                     if (!Number.isFinite(entryY)) return false;
-                    // Trigger logits slightly before vectors fully cross the bottom
-                    // face of the top unembedding matrix to reduce perceived lag.
-                    const earlyRevealOffset = Math.max(8, EMBEDDING_MATRIX_PARAMS_VOCAB.height * 0.015);
-                    const revealTriggerY = entryY - earlyRevealOffset;
+                    const exitY = Number.isFinite(lastLayerRef.__topEmbedExitYLocal)
+                        ? lastLayerRef.__topEmbedExitYLocal
+                        : entryY;
+                    // Wait until the unembedding has already started brightening
+                    // so the logits do not jump ahead of the matrix activation.
+                    const revealTriggerY = resolveTopLogitRevealY(entryY, exitY);
+                    if (!Number.isFinite(revealTriggerY)) return false;
                     const lanes = Array.isArray(lastLayerRef.lanes) ? lastLayerRef.lanes : [];
                     if (!lanes.length) return false;
                     return lanes.every((lane) => {

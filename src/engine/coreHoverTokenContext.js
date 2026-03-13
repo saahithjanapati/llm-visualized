@@ -11,6 +11,15 @@ function toFiniteTokenNumber(value) {
     return Math.floor(parsed);
 }
 
+function toHoverNumber(value, { allowInfinity = false } = {}) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+    if (allowInfinity && (parsed === Number.POSITIVE_INFINITY || parsed === Number.NEGATIVE_INFINITY)) {
+        return parsed;
+    }
+    return null;
+}
+
 function pushCandidate(candidates, seen, candidate) {
     if (!candidate || typeof candidate !== 'object') return;
     if (seen.has(candidate)) return;
@@ -70,6 +79,25 @@ export function findHoverTokenNumber(info = null, object = null, key = '') {
     return null;
 }
 
+function findHoverNumericValue(info = null, object = null, key = '', { allowInfinity = false } = {}) {
+    const candidates = collectHoverDataCandidates(info, object);
+    for (const candidate of candidates) {
+        const value = toHoverNumber(candidate?.[key], { allowInfinity });
+        if (value !== null) return value;
+    }
+    return null;
+}
+
+function findHoverBoolean(info = null, object = null, key = '') {
+    const candidates = collectHoverDataCandidates(info, object);
+    for (const candidate of candidates) {
+        if (typeof candidate?.[key] === 'boolean') {
+            return candidate[key];
+        }
+    }
+    return null;
+}
+
 function isWeightMatrixHoverSelection(label = '') {
     return String(label || '').toLowerCase().includes('weight matrix');
 }
@@ -104,8 +132,18 @@ function isWeightedSumHoverSelection(label = '', info = null, object = null) {
 
 function isAttentionScoreHoverSelection(label = '', info = null, object = null) {
     const lower = String(label || '').toLowerCase();
-    const stageLower = findHoverTokenString(info, object, 'stage').toLowerCase();
-    if (stageLower === 'attention.pre' || stageLower === 'attention.post') return true;
+    const stageLower = findHoverTokenString(info, object, 'stage')
+        .toLowerCase()
+        .replace(/-/g, '_');
+    if (
+        stageLower === 'attention.pre'
+        || stageLower === 'attention.post'
+        || stageLower === 'attention.masked_input'
+        || stageLower === 'attention.mask'
+        || stageLower === 'attention.post_copy'
+    ) {
+        return true;
+    }
 
     const kindLower = String(info?.kind || object?.userData?.kind || '').toLowerCase();
     if (kindLower === 'attentionsphere') return true;
@@ -116,7 +154,8 @@ function isAttentionScoreHoverSelection(label = '', info = null, object = null) 
     return Number.isFinite(findHoverTokenNumber(info, object, 'keyTokenIndex'))
         || (typeof keyTokenLabel === 'string' && keyTokenLabel.length > 0)
         || Number.isFinite(findHoverTokenNumber(info, object, 'preScore'))
-        || Number.isFinite(findHoverTokenNumber(info, object, 'postScore'));
+        || Number.isFinite(findHoverTokenNumber(info, object, 'postScore'))
+        || findHoverNumericValue(info, object, 'maskValue', { allowInfinity: true }) !== null;
 }
 
 function formatHeadLayerSubtitle(headIndex = null, layerIndex = null) {
@@ -235,6 +274,11 @@ export function isVectorLikeHoverSelection(label = '', info = null, object = nul
     return candidates.some((candidate) => isVectorLikeCandidate(candidate));
 }
 
+function shouldSuppressTokenChipHover(info = null, object = null) {
+    const candidates = collectHoverDataCandidates(info, object);
+    return candidates.some((candidate) => candidate?.suppressTokenChip === true);
+}
+
 function resolveAttentionRowContext({
     roleLabel = 'Token',
     tokenIndex = null,
@@ -315,11 +359,65 @@ function resolveAttentionScoreHoverContext({
 
     if (!attentionRows.some(Boolean)) return null;
 
+    const preScore = findHoverNumericValue(info, object, 'preScore');
+    const postScore = findHoverNumericValue(info, object, 'postScore');
+    const maskValue = findHoverNumericValue(info, object, 'maskValue', { allowInfinity: true });
+    const showMaskValue = findHoverBoolean(info, object, 'showMaskValue') === true;
+    const attentionStage = findHoverTokenString(info, object, 'stage')
+        .toLowerCase()
+        .replace(/-/g, '_');
+    const attentionMetrics = [];
+    const formatMetricValue = (value) => {
+        if (value === Number.POSITIVE_INFINITY) return '∞';
+        if (value === Number.NEGATIVE_INFINITY) return '-∞';
+        return Number.isFinite(value) ? value.toFixed(4) : 'n/a';
+    };
+
+    const preferredMetricKey = attentionStage === 'attention.post' || attentionStage === 'attention.post_copy'
+        ? 'post'
+        : (attentionStage === 'attention.mask' || attentionStage === 'attention.masked_input'
+            ? 'mask'
+            : 'pre');
+
+    const pushPreMetric = () => {
+        if (!Number.isFinite(preScore)) return false;
+        attentionMetrics.push({
+            roleLabel: 'Pre-softmax',
+            valueText: formatMetricValue(preScore)
+        });
+        return true;
+    };
+    const pushPostMetric = () => {
+        if (!Number.isFinite(postScore)) return false;
+        attentionMetrics.push({
+            roleLabel: 'Post-softmax',
+            valueText: formatMetricValue(postScore)
+        });
+        return true;
+    };
+    const pushMaskMetric = () => {
+        if (!showMaskValue || maskValue === null) return false;
+        attentionMetrics.push({
+            roleLabel: 'Causal mask',
+            valueText: formatMetricValue(maskValue)
+        });
+        return true;
+    };
+
+    if (preferredMetricKey === 'post') {
+        pushPostMetric() || pushPreMetric() || pushMaskMetric();
+    } else if (preferredMetricKey === 'mask') {
+        pushMaskMetric() || pushPostMetric() || pushPreMetric();
+    } else {
+        pushPreMetric() || pushMaskMetric() || pushPostMetric();
+    }
+
     return {
         suppressHoverLabel: false,
         showPrimaryLabel: true,
         detailKind: 'attention-token-pair',
-        attentionRows
+        attentionRows,
+        ...(attentionMetrics.length ? { attentionMetrics } : {})
     };
 }
 
@@ -347,6 +445,7 @@ export function resolveHoverTokenContext({
     if (attentionScoreContext) return attentionScoreContext;
 
     const isBottomTokenChip = isBottomTokenChipHoverSelection(label);
+    if (!isBottomTokenChip && shouldSuppressTokenChipHover(info, object)) return null;
     if (!isBottomTokenChip && !isVectorLikeHoverSelection(label, info, object)) return null;
 
     const tokenIndex = findHoverTokenNumber(info, object, 'tokenIndex');

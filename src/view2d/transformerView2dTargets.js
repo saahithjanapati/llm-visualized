@@ -121,6 +121,93 @@ export function buildResidualRowHoverPayload(rowHit = null, activationSource = n
     };
 }
 
+function resolveLayerNormKindFromSemanticStage(stage = '') {
+    const lower = String(stage || '').trim().toLowerCase();
+    if (lower === 'ln1') return 'ln1';
+    if (lower === 'ln2') return 'ln2';
+    if (lower === 'final-ln') return 'final';
+    return null;
+}
+
+function buildSemanticHoverInfo({
+    label = '',
+    layerIndex = null,
+    activationStage = '',
+    layerNormKind = null,
+    suppressTokenChip = false
+} = {}) {
+    const info = {};
+    if (Number.isFinite(layerIndex)) {
+        info.layerIndex = Math.max(0, Math.floor(layerIndex));
+    }
+    if (typeof layerNormKind === 'string' && layerNormKind.length) {
+        info.layerNormKind = layerNormKind;
+    }
+    if (suppressTokenChip === true) {
+        info.suppressTokenChip = true;
+    }
+
+    if (label || activationStage || Object.keys(info).length) {
+        info.activationData = {
+            ...(label ? { label } : {}),
+            ...(activationStage ? { stage: activationStage } : {}),
+            ...(Number.isFinite(layerIndex) ? { layerIndex: Math.max(0, Math.floor(layerIndex)) } : {}),
+            ...(typeof layerNormKind === 'string' && layerNormKind.length ? { layerNormKind } : {}),
+            ...(suppressTokenChip === true ? { suppressTokenChip: true } : {})
+        };
+    }
+
+    return info;
+}
+
+export function buildSemanticNodeHoverPayload(hit = null) {
+    const entry = hit?.entry || null;
+    const semantic = entry?.semantic || hit?.node?.semantic || null;
+    const role = String(entry?.role || hit?.node?.role || semantic?.role || '').trim().toLowerCase();
+    if (!semantic || typeof semantic !== 'object') return null;
+
+    if (
+        semantic.componentKind === 'layer-norm'
+        && (role === 'module-card' || role === 'module-title' || role === 'module')
+    ) {
+        const layerNormKind = resolveLayerNormKindFromSemanticStage(semantic.stage);
+        const label = layerNormKind === 'final' ? 'LayerNorm (Top)' : 'LayerNorm';
+        return {
+            label,
+            info: buildSemanticHoverInfo({
+                label,
+                layerIndex: semantic.layerIndex,
+                activationStage: layerNormKind === 'final' ? 'final_ln.norm' : `${layerNormKind || 'layernorm'}.norm`,
+                layerNormKind,
+                suppressTokenChip: true
+            })
+        };
+    }
+
+    if (
+        semantic.componentKind === 'output-projection'
+        && (
+            role === 'projection-weight'
+            || role === 'module-card'
+            || role === 'module-title'
+            || role === 'module'
+        )
+    ) {
+        const label = 'Output Projection Matrix';
+        return {
+            label,
+            info: buildSemanticHoverInfo({
+                label,
+                layerIndex: semantic.layerIndex,
+                activationStage: 'attention.output_projection',
+                suppressTokenChip: true
+            })
+        };
+    }
+
+    return null;
+}
+
 export function buildHeadDetailSemanticTarget(target = null, role = 'head') {
     const resolvedTarget = resolveHeadDetailTarget(target);
     if (!resolvedTarget) return null;

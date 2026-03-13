@@ -369,6 +369,9 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
     if (sourceVec) {
         sourceVec.userData = sourceVec.userData || {};
     }
+    if (lane && lane.__pendingAdditionFinalize) {
+        delete lane.__pendingAdditionFinalize;
+    }
 
     const sourceCount = getVectorInstanceCount(sourceVec, VECTOR_LENGTH_PRISM);
     const targetCount = getVectorInstanceCount(targetVec, VECTOR_LENGTH_PRISM);
@@ -707,6 +710,9 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
 
     const finishAddition = () => {
         setProgress(1);
+        if (lane && lane.__pendingAdditionFinalize) {
+            delete lane.__pendingAdditionFinalize;
+        }
         if (lane) {
             delete lane.stopRise;
             delete lane.stopRiseTarget;
@@ -789,6 +795,9 @@ export function startPrismAdditionAnimation(sourceVec, targetVec, lane, onComple
         additionFinalized = true;
         finishAddition();
     };
+    if (lane) {
+        lane.__pendingAdditionFinalize = finishOnce;
+    }
 
     if (vectorLength <= 0) {
         finishOnce();

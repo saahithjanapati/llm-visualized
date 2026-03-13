@@ -1,0 +1,1095 @@
+// @vitest-environment jsdom
+
+import { describe, expect, it, vi } from 'vitest';
+
+import { D_HEAD, D_MODEL } from './selectionPanelConstants.js';
+import { createTransformerView2dResidualCaptionOverlay, resolveCaptionScreenExtent } from './transformerView2dResidualCaptionOverlay.js';
+import { buildSceneLayout } from '../view2d/layout/buildSceneLayout.js';
+import { buildMhsaSceneModel } from '../view2d/model/buildMhsaSceneModel.js';
+import { buildHeadDetailSceneModel } from '../view2d/model/buildHeadDetailSceneModel.js';
+import { flattenSceneNodes } from '../view2d/schema/sceneTypes.js';
+
+const DEFAULT_TOKEN_LABELS = ['Token A', 'Token B'];
+const MHSA_UNIFORM_MIN_SCREEN_HEIGHT_PX = 28;
+const ATTENTION_MATRIX_LABEL_MIN_SCREEN_FONT_PX = 14;
+const BIAS_LABEL_MIN_SCREEN_FONT_PX = 13;
+function createVectorValues(seed = 0) {
+    return Array.from({ length: D_HEAD }, (_, index) => Number((seed + (index * 0.01)).toFixed(4)));
+}
+
+function createBaseRows(tokenLabels = DEFAULT_TOKEN_LABELS) {
+    return tokenLabels.map((tokenLabel, rowIndex) => ({
+        rowIndex,
+        tokenIndex: rowIndex,
+        tokenLabel,
+        rawValues: createVectorValues(rowIndex),
+        gradientCss: `rgba(${120 + (rowIndex * 16)}, 220, 255, 0.9)`
+    }));
+}
+
+function createProjectionOutputRows(label = 'Q', tokenLabels = DEFAULT_TOKEN_LABELS) {
+    return tokenLabels.map((tokenLabel, rowIndex) => ({
+        rowIndex,
+        tokenIndex: rowIndex,
+        tokenLabel,
+        rawValue: Number((rowIndex + 0.25).toFixed(3)),
+        rawValues: createVectorValues(rowIndex + 1),
+        gradientCss: `rgba(${180 - (rowIndex * 20)}, ${140 + (rowIndex * 24)}, 255, 0.88)`,
+        title: `${tokenLabel}: ${label} vector`
+    }));
+}
+
+function createGridRows(tokenLabels = DEFAULT_TOKEN_LABELS, fillCss = 'rgba(255, 255, 255, 0.28)') {
+    return tokenLabels.map((tokenLabel, rowIndex) => ({
+        rowIndex,
+        tokenLabel,
+        cells: tokenLabels.map((colLabel, colIndex) => ({
+            rowIndex,
+            colIndex,
+            rowTokenLabel: tokenLabel,
+            colTokenLabel: colLabel,
+            rawValue: Number(((rowIndex + 1) * (colIndex + 1) * 0.125).toFixed(3)),
+            fillCss,
+            isMasked: false,
+            isEmpty: false,
+            title: `${tokenLabel} -> ${colLabel}`
+        })),
+        hasAnyValue: true
+    }));
+}
+
+function createPreviewData({
+    tokenLabels = DEFAULT_TOKEN_LABELS
+} = {}) {
+    const rows = createBaseRows(tokenLabels);
+    const queryOutputRows = createProjectionOutputRows('Q', tokenLabels);
+    const keyOutputRows = createProjectionOutputRows('K', tokenLabels);
+    const valueOutputRows = createProjectionOutputRows('V', tokenLabels);
+
+    const createProjection = (kind, outputLabelTex, outputRows) => ({
+        kind,
+        weightLabelTex: `W_${kind.toLowerCase()}`,
+        biasLabelTex: `b_${kind.toLowerCase()}`,
+        outputLabelTex,
+        weightRowCount: D_MODEL,
+        weightColumnCount: D_HEAD,
+        biasValue: 0.15,
+        biasVectorGradientCss: 'rgba(255, 255, 255, 0.2)',
+        outputRowCount: outputRows.length,
+        outputColumnCount: D_HEAD,
+        outputRows
+    });
+
+    const attentionGridRows = createGridRows(tokenLabels);
+    const postGridRows = createGridRows(tokenLabels, 'rgba(160, 220, 255, 0.34)');
+
+    return {
+        rowCount: rows.length,
+        columnCount: D_MODEL,
+        bandCount: 12,
+        sampleStep: 64,
+        rows,
+        projections: [
+            createProjection('Q', 'Q', queryOutputRows),
+            createProjection('K', 'K', keyOutputRows),
+            createProjection('V', 'V', valueOutputRows)
+        ],
+        attentionScoreStage: {
+            queryLabelTex: 'Q',
+            queryRowCount: queryOutputRows.length,
+            queryColumnCount: D_HEAD,
+            queryRows: queryOutputRows,
+            transposeLabelTex: 'K^{\\mathsf{T}}',
+            transposeRowCount: D_HEAD,
+            transposeColumnCount: keyOutputRows.length,
+            transposeColumns: keyOutputRows.map((rowData) => ({
+                colIndex: rowData.rowIndex,
+                tokenIndex: rowData.tokenIndex,
+                rawValue: rowData.rawValue,
+                rawValues: rowData.rawValues,
+                fillCss: rowData.gradientCss,
+                tokenLabel: rowData.tokenLabel
+            })),
+            scaleLabelTex: '\\sqrt{d_{\\mathrm{head}}}',
+            outputLabelTex: 'A_{\\mathrm{pre}}',
+            outputRowCount: attentionGridRows.length,
+            outputColumnCount: attentionGridRows.length,
+            outputRows: attentionGridRows,
+            maskLabelTex: 'M_{\\mathrm{causal}}',
+            maskRows: attentionGridRows,
+            softmaxLabelTex: '\\mathrm{softmax}',
+            postLabelTex: 'A_{\\mathrm{post}}',
+            postRowCount: postGridRows.length,
+            postColumnCount: postGridRows.length,
+            postRows: postGridRows,
+            valueLabelTex: 'V',
+            valueRowCount: valueOutputRows.length,
+            valueColumnCount: D_HEAD,
+            valueRows: valueOutputRows,
+            headOutputLabelTex: 'H_i',
+            headOutputRowCount: valueOutputRows.length,
+            headOutputColumnCount: D_HEAD,
+            headOutputRows: valueOutputRows
+        }
+    };
+}
+
+function buildMhsaFixtures({
+    tokenLabels = DEFAULT_TOKEN_LABELS,
+    canvasWidth = 2200,
+    canvasHeight = 1400
+} = {}) {
+    const scene = buildMhsaSceneModel({
+        previewData: createPreviewData({ tokenLabels }),
+        layerIndex: 2,
+        headIndex: 1
+    });
+    const layout = buildSceneLayout(scene);
+    const nodes = flattenSceneNodes(scene);
+    const weightNode = nodes.find((node) => (
+        node.role === 'projection-weight'
+        && String(node.metadata?.kind || '').toLowerCase() === 'k'
+    )) || null;
+    const xLnNode = nodes.find((node) => (
+        node.role === 'x-ln-copy'
+        && String(node.semantic?.branchKey || '').toLowerCase() === 'k'
+    )) || null;
+    const qBiasNode = nodes.find((node) => (
+        node.role === 'projection-bias'
+        && String(node.metadata?.kind || '').toLowerCase() === 'q'
+    )) || null;
+    const biasNode = nodes.find((node) => (
+        node.role === 'projection-bias'
+        && String(node.metadata?.kind || '').toLowerCase() === 'k'
+    )) || null;
+    const outputNode = nodes.find((node) => (
+        node.role === 'projection-output'
+        && String(node.metadata?.kind || '').toLowerCase() === 'k'
+    )) || null;
+    const projectionStackNode = nodes.find((node) => node.role === 'projection-stack') || null;
+    const qStageNode = nodes.find((node) => (
+        node.role === 'projection-stage'
+        && String(node.metadata?.kind || '').toLowerCase() === 'q'
+    )) || null;
+    const kStageNode = nodes.find((node) => (
+        node.role === 'projection-stage'
+        && String(node.metadata?.kind || '').toLowerCase() === 'k'
+    )) || null;
+    const vStageNode = nodes.find((node) => (
+        node.role === 'projection-stage'
+        && String(node.metadata?.kind || '').toLowerCase() === 'v'
+    )) || null;
+    const queryNode = nodes.find((node) => node.role === 'attention-query-source') || null;
+    const transposeNode = nodes.find((node) => node.role === 'attention-key-transpose') || null;
+    const preScoreNode = nodes.find((node) => node.role === 'attention-pre-score') || null;
+    const maskedInputNode = nodes.find((node) => node.role === 'attention-masked-input') || null;
+    const maskNode = nodes.find((node) => node.role === 'attention-mask') || null;
+    const postNode = nodes.find((node) => node.role === 'attention-post') || null;
+    const softmaxLabelNode = nodes.find((node) => node.role === 'attention-softmax-label') || null;
+    const scaleNode = nodes.find((node) => node.role === 'attention-scale') || null;
+
+    const parent = document.createElement('div');
+    document.body.appendChild(parent);
+    const canvas = document.createElement('canvas');
+    parent.appendChild(canvas);
+    Object.defineProperties(canvas, {
+        clientWidth: { configurable: true, value: canvasWidth },
+        clientHeight: { configurable: true, value: canvasHeight },
+        offsetLeft: { configurable: true, value: 0 },
+        offsetTop: { configurable: true, value: 0 }
+    });
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+
+    const overlay = createTransformerView2dResidualCaptionOverlay({
+        documentRef: document,
+        parent
+    });
+
+    return {
+        scene,
+        layout,
+        weightNode,
+        xLnNode,
+        qBiasNode,
+        biasNode,
+        outputNode,
+        projectionStackNode,
+        qStageNode,
+        kStageNode,
+        vStageNode,
+        queryNode,
+        transposeNode,
+        preScoreNode,
+        maskedInputNode,
+        maskNode,
+        postNode,
+        softmaxLabelNode,
+        scaleNode,
+        canvas,
+        overlay,
+        cleanup() {
+            overlay.destroy();
+            parent.remove();
+        }
+    };
+}
+
+function buildHeadDetailFixtures({
+    tokenLabels = DEFAULT_TOKEN_LABELS,
+    canvasWidth = 2200,
+    canvasHeight = 1400
+} = {}) {
+    const scene = buildHeadDetailSceneModel({
+        headDetailPreview: {
+            rowItems: createBaseRows(tokenLabels)
+        },
+        headDetailTarget: {
+            layerIndex: 2,
+            headIndex: 1
+        }
+    });
+    const layout = buildSceneLayout(scene);
+    const nodes = flattenSceneNodes(scene);
+    const qCopyNode = nodes.find((node) => (
+        node.role === 'x-ln-copy'
+        && String(node.semantic?.branchKey || '').toLowerCase() === 'q'
+    )) || null;
+
+    const parent = document.createElement('div');
+    document.body.appendChild(parent);
+    const canvas = document.createElement('canvas');
+    parent.appendChild(canvas);
+    Object.defineProperties(canvas, {
+        clientWidth: { configurable: true, value: canvasWidth },
+        clientHeight: { configurable: true, value: canvasHeight },
+        offsetLeft: { configurable: true, value: 0 },
+        offsetTop: { configurable: true, value: 0 }
+    });
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+
+    const overlay = createTransformerView2dResidualCaptionOverlay({
+        documentRef: document,
+        parent
+    });
+
+    return {
+        scene,
+        layout,
+        qCopyNode,
+        canvas,
+        overlay,
+        cleanup() {
+            overlay.destroy();
+            parent.remove();
+        }
+    };
+}
+
+function resolveThresholdScale(entry = null) {
+    const extent = resolveCaptionScreenExtent({
+        captionPosition: 'bottom',
+        projectedContentWidth: entry?.contentBounds?.width || 0,
+        projectedContentHeight: entry?.contentBounds?.height || 0,
+        scaleWithNode: false
+    });
+    return {
+        extent,
+        scale: MHSA_UNIFORM_MIN_SCREEN_HEIGHT_PX / Math.max(0.0001, extent)
+    };
+}
+
+function queryCaptionItem(nodeId = '') {
+    return document.querySelector(`[data-node-id="${nodeId}"]`);
+}
+
+describe('transformerView2dResidualCaptionOverlay', () => {
+    it('scales the projection weight, bias, and output blocks together for taller token windows', () => {
+        const baseFixtures = buildMhsaFixtures();
+        const tallFixtures = buildMhsaFixtures({
+            tokenLabels: Array.from({ length: 12 }, (_, index) => `Token ${index + 1}`)
+        });
+
+        try {
+            expect(Number(tallFixtures.weightNode?.metadata?.card?.width) || 0)
+                .toBeGreaterThan(Number(baseFixtures.weightNode?.metadata?.card?.width) || 0);
+            expect(Number(tallFixtures.weightNode?.metadata?.card?.height) || 0)
+                .toBeGreaterThan(Number(baseFixtures.weightNode?.metadata?.card?.height) || 0);
+            expect(Number(tallFixtures.biasNode?.metadata?.compactRows?.compactWidth) || 0)
+                .toBeGreaterThan(Number(baseFixtures.biasNode?.metadata?.compactRows?.compactWidth) || 0);
+            expect(Number(tallFixtures.outputNode?.metadata?.compactRows?.compactWidth) || 0)
+                .toBeGreaterThan(Number(baseFixtures.outputNode?.metadata?.compactRows?.compactWidth) || 0);
+        } finally {
+            tallFixtures.cleanup();
+            baseFixtures.cleanup();
+        }
+    });
+
+    it('keeps MHSA matrix captions visible throughout the detailed view instead of gating them by zoom', () => {
+        const fixtures = buildMhsaFixtures();
+        const {
+            scene,
+            layout,
+            weightNode,
+            outputNode,
+            canvas,
+            overlay,
+            cleanup
+        } = fixtures;
+
+        try {
+            const weightEntry = layout.registry.getNodeEntry(weightNode.id);
+            const outputEntry = layout.registry.getNodeEntry(outputNode.id);
+            const weightThreshold = resolveThresholdScale(weightEntry);
+            const outputThreshold = resolveThresholdScale(outputEntry);
+
+            expect(weightThreshold.extent).toBeGreaterThan(outputThreshold.extent);
+
+            const betweenScale = (weightThreshold.scale + outputThreshold.scale) / 2;
+            const visibleScale = outputThreshold.scale * 1.08;
+            const projectBounds = (scale) => (bounds) => ({
+                x: bounds.x,
+                y: bounds.y,
+                width: bounds.width * scale,
+                height: bounds.height * scale
+            });
+
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds: projectBounds(visibleScale),
+                visible: true,
+                enabled: true
+            });
+
+            const visibleWeightItem = queryCaptionItem(weightNode.id);
+            const visibleOutputItem = queryCaptionItem(outputNode.id);
+            expect(visibleWeightItem).toBeTruthy();
+            expect(visibleOutputItem).toBeTruthy();
+            expect(visibleWeightItem.hidden).toBe(false);
+            expect(visibleOutputItem.hidden).toBe(false);
+
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds: projectBounds(betweenScale),
+                visible: true,
+                enabled: true
+            });
+
+            expect(queryCaptionItem(weightNode.id)?.hidden).toBe(false);
+            expect(queryCaptionItem(outputNode.id)?.hidden).toBe(false);
+        } finally {
+            cleanup();
+        }
+    });
+
+    it('scales MHSA matrix captions with zoom levels', () => {
+        const fixtures = buildMhsaFixtures();
+        const {
+            scene,
+            layout,
+            weightNode,
+            outputNode,
+            canvas,
+            overlay,
+            cleanup
+        } = fixtures;
+
+        try {
+            const outputEntry = layout.registry.getNodeEntry(outputNode.id);
+            const visibleScale = resolveThresholdScale(outputEntry).scale * 1.1;
+            const zoomedInScale = visibleScale * 1.9;
+            const projectBounds = (scale) => (bounds) => ({
+                x: bounds.x,
+                y: bounds.y,
+                width: bounds.width * scale,
+                height: bounds.height * scale
+            });
+
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds: projectBounds(visibleScale),
+                visible: true,
+                enabled: true
+            });
+
+            const weightItem = queryCaptionItem(weightNode.id);
+            const outputItem = queryCaptionItem(outputNode.id);
+            const zoomedOutWeightLabelSize = Number.parseFloat(
+                weightItem?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+            const zoomedOutOutputLabelSize = Number.parseFloat(
+                outputItem?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+            const zoomedOutWeightDimensionsSize = Number.parseFloat(
+                weightItem?.style.getPropertyValue('--detail-transformer-view2d-caption-dimensions-size') || '0'
+            );
+            const zoomedOutOutputDimensionsSize = Number.parseFloat(
+                outputItem?.style.getPropertyValue('--detail-transformer-view2d-caption-dimensions-size') || '0'
+            );
+
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds: projectBounds(zoomedInScale),
+                visible: true,
+                enabled: true
+            });
+
+            const zoomedInWeightLabelSize = Number.parseFloat(
+                queryCaptionItem(weightNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+            const zoomedInOutputLabelSize = Number.parseFloat(
+                queryCaptionItem(outputNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+            const zoomedInWeightDimensionsSize = Number.parseFloat(
+                queryCaptionItem(weightNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-dimensions-size') || '0'
+            );
+            const zoomedInOutputDimensionsSize = Number.parseFloat(
+                queryCaptionItem(outputNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-dimensions-size') || '0'
+            );
+
+            expect(zoomedOutOutputLabelSize).toBeGreaterThan(0);
+            expect(zoomedOutOutputDimensionsSize).toBeGreaterThan(0);
+            expect(zoomedOutWeightLabelSize).toBeGreaterThan(0);
+            expect(zoomedOutWeightDimensionsSize).toBeGreaterThan(0);
+            expect(zoomedInOutputLabelSize).toBeGreaterThan(zoomedOutOutputLabelSize);
+            expect(zoomedInOutputDimensionsSize).toBeGreaterThan(zoomedOutOutputDimensionsSize);
+            expect(zoomedInWeightLabelSize).toBeGreaterThan(zoomedOutWeightLabelSize);
+            expect(zoomedInWeightDimensionsSize).toBeGreaterThan(zoomedOutWeightDimensionsSize);
+        } finally {
+            cleanup();
+        }
+    });
+
+    it('keeps the Q bias caption proportional to its matrix across zoom levels', () => {
+        const fixtures = buildMhsaFixtures();
+        const {
+            scene,
+            layout,
+            qBiasNode,
+            canvas,
+            overlay,
+            cleanup
+        } = fixtures;
+
+        try {
+            const biasEntry = layout.registry.getNodeEntry(qBiasNode.id);
+            const zoomedOutScale = 0.2;
+            const zoomedInScale = 1.1;
+            const targetX = 32;
+            const targetY = 40;
+            const projectBounds = (scale) => {
+                const offsetX = targetX - ((Number(biasEntry?.contentBounds?.x) || 0) * scale);
+                const offsetY = targetY - ((Number(biasEntry?.contentBounds?.y) || 0) * scale);
+                return (bounds) => ({
+                    x: (bounds.x * scale) + offsetX,
+                    y: (bounds.y * scale) + offsetY,
+                    width: bounds.width * scale,
+                    height: bounds.height * scale
+                });
+            };
+
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds: projectBounds(zoomedOutScale),
+                visible: true,
+                enabled: true
+            });
+
+            const zoomedOutLabelSize = Number.parseFloat(
+                queryCaptionItem(qBiasNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+            const zoomedOutExtent = Math.min(
+                (Number(biasEntry?.contentBounds?.width) || 0) * zoomedOutScale,
+                (Number(biasEntry?.contentBounds?.height) || 0) * zoomedOutScale
+            );
+
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds: projectBounds(zoomedInScale),
+                visible: true,
+                enabled: true
+            });
+
+            const zoomedInLabelSize = Number.parseFloat(
+                queryCaptionItem(qBiasNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+            const zoomedInExtent = Math.min(
+                (Number(biasEntry?.contentBounds?.width) || 0) * zoomedInScale,
+                (Number(biasEntry?.contentBounds?.height) || 0) * zoomedInScale
+            );
+
+            expect(zoomedOutLabelSize).toBeGreaterThan(0);
+            expect(zoomedInLabelSize).toBeGreaterThan(zoomedOutLabelSize);
+            expect(zoomedOutLabelSize).toBeLessThan(BIAS_LABEL_MIN_SCREEN_FONT_PX);
+            expect(zoomedOutLabelSize / Math.max(1, zoomedOutExtent))
+                .toBeCloseTo(zoomedInLabelSize / Math.max(1, zoomedInExtent), 2);
+        } finally {
+            cleanup();
+        }
+    });
+
+    it('prefers KaTeX rendering for MHSA bias, score, and scale labels when available', () => {
+        const fixtures = buildMhsaFixtures();
+        const {
+            scene,
+            layout,
+            qBiasNode,
+            biasNode,
+            preScoreNode,
+            scaleNode,
+            canvas,
+            overlay,
+            cleanup
+        } = fixtures;
+        const originalKatex = window.katex;
+        window.katex = {
+            renderToString: vi.fn((tex) => `<span class="katex" data-tex="${tex}"></span>`)
+        };
+
+        try {
+            const preScoreEntry = layout.registry.getNodeEntry(preScoreNode.id);
+            const visibleScale = resolveThresholdScale(preScoreEntry).scale * 1.2;
+            const projectBounds = (bounds) => ({
+                x: bounds.x,
+                y: bounds.y,
+                width: bounds.width * visibleScale,
+                height: bounds.height * visibleScale
+            });
+
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds,
+                visible: true,
+                enabled: true
+            });
+
+            expect(window.katex.renderToString).toHaveBeenCalledWith(
+                'b_{\\mathrm{q}}',
+                expect.objectContaining({
+                    throwOnError: false,
+                    displayMode: false
+                })
+            );
+            expect(queryCaptionItem(qBiasNode.id)?.querySelector('.katex')).toBeTruthy();
+            expect(queryCaptionItem(biasNode.id)?.querySelector('.katex')).toBeTruthy();
+            expect(queryCaptionItem(preScoreNode.id)?.querySelector('.katex')).toBeTruthy();
+            expect(queryCaptionItem(scaleNode.id)?.querySelector('.katex')).toBeTruthy();
+        } finally {
+            if (originalKatex) {
+                window.katex = originalKatex;
+            } else {
+                delete window.katex;
+            }
+            cleanup();
+        }
+    });
+
+    it('keeps the K weight caption at least as large as the copied X_ln caption in the focused view for taller token windows', () => {
+        const fixtures = buildMhsaFixtures({
+            tokenLabels: Array.from({ length: 12 }, (_, index) => `Token ${index + 1}`)
+        });
+        const {
+            scene,
+            layout,
+            weightNode,
+            xLnNode,
+            canvas,
+            overlay,
+            cleanup
+        } = fixtures;
+
+        try {
+            const xLnEntry = layout.registry.getNodeEntry(xLnNode.id);
+            const weightLabelScale = Number(weightNode?.metadata?.caption?.labelScale) || 0;
+            const visibleScale = resolveThresholdScale(xLnEntry).scale * 2.5;
+            const projectBounds = (bounds) => ({
+                x: bounds.x,
+                y: bounds.y,
+                width: bounds.width * visibleScale,
+                height: bounds.height * visibleScale
+            });
+
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds,
+                visible: true,
+                enabled: true
+            });
+
+            const weightLabelSize = Number.parseFloat(
+                queryCaptionItem(weightNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+            const xLnLabelSize = Number.parseFloat(
+                queryCaptionItem(xLnNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+
+            expect(weightLabelScale).toBeGreaterThan(1.5);
+            expect(weightLabelSize).toBeGreaterThan(0);
+            expect(weightLabelSize).toBeGreaterThanOrEqual(xLnLabelSize);
+        } finally {
+            cleanup();
+        }
+    });
+
+    it('lets the K weight caption grow during deep zoom', () => {
+        const fixtures = buildMhsaFixtures({
+            tokenLabels: Array.from({ length: 12 }, (_, index) => `Token ${index + 1}`)
+        });
+        const {
+            scene,
+            layout,
+            weightNode,
+            canvas,
+            overlay,
+            cleanup
+        } = fixtures;
+
+        try {
+            const weightEntry = layout.registry.getNodeEntry(weightNode.id);
+            const visibleScale = resolveThresholdScale(weightEntry).scale * 6.5;
+            const projectBounds = (bounds) => ({
+                x: bounds.x,
+                y: bounds.y,
+                width: bounds.width * visibleScale,
+                height: bounds.height * visibleScale
+            });
+
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds,
+                visible: true,
+                enabled: true
+            });
+
+            const weightLabelSize = Number.parseFloat(
+                queryCaptionItem(weightNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+
+            expect(weightLabelSize).toBeGreaterThan(0);
+            expect(weightLabelSize).toBeGreaterThan(48);
+        } finally {
+            cleanup();
+        }
+    });
+
+    it('scales the dom-katex sqrt(d_head) label with zoom levels', () => {
+        const fixtures = buildMhsaFixtures();
+        const {
+            scene,
+            layout,
+            scaleNode,
+            canvas,
+            overlay,
+            cleanup
+        } = fixtures;
+
+        try {
+            const scaleEntry = layout.registry.getNodeEntry(scaleNode.id);
+            const baseBounds = scaleEntry?.contentBounds || scaleEntry?.bounds || null;
+            const zoomedOutScale = 0.72;
+            const zoomedInScale = 1.4;
+            const targetX = 36;
+            const targetY = 42;
+            const projectBounds = (scale) => {
+                const offsetX = targetX - ((Number(baseBounds?.x) || 0) * scale);
+                const offsetY = targetY - ((Number(baseBounds?.y) || 0) * scale);
+                return (bounds) => ({
+                    x: (bounds.x * scale) + offsetX,
+                    y: (bounds.y * scale) + offsetY,
+                    width: bounds.width * scale,
+                    height: bounds.height * scale
+                });
+            };
+
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds: projectBounds(zoomedOutScale),
+                visible: true,
+                enabled: true
+            });
+
+            const zoomedOutFontSize = Number.parseFloat(
+                queryCaptionItem(scaleNode.id)?.style.getPropertyValue('--detail-transformer-view2d-dom-text-size') || '0'
+            );
+            const zoomedOutHeight = (Number(baseBounds?.height) || 0) * zoomedOutScale;
+
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds: projectBounds(zoomedInScale),
+                visible: true,
+                enabled: true
+            });
+
+            const zoomedInFontSize = Number.parseFloat(
+                queryCaptionItem(scaleNode.id)?.style.getPropertyValue('--detail-transformer-view2d-dom-text-size') || '0'
+            );
+            const zoomedInHeight = (Number(baseBounds?.height) || 0) * zoomedInScale;
+
+            expect(scaleEntry).toBeTruthy();
+            expect(zoomedOutFontSize).toBeGreaterThan(0);
+            expect(zoomedInFontSize).toBeGreaterThan(zoomedOutFontSize);
+            expect(zoomedOutFontSize / Math.max(1, zoomedOutHeight))
+                .toBeCloseTo(zoomedInFontSize / Math.max(1, zoomedInHeight), 2);
+        } finally {
+            cleanup();
+        }
+    });
+
+    it('scales the dom-katex softmax label with zoom levels on narrow MHSA detail canvases', () => {
+        const fixtures = buildMhsaFixtures({
+            canvasWidth: 640,
+            canvasHeight: 420
+        });
+        const {
+            scene,
+            layout,
+            softmaxLabelNode,
+            canvas,
+            overlay,
+            cleanup
+        } = fixtures;
+
+        try {
+            const softmaxEntry = layout.registry.getNodeEntry(softmaxLabelNode.id);
+            const baseBounds = softmaxEntry?.contentBounds || softmaxEntry?.bounds || null;
+            const zoomedOutScale = 0.78;
+            const zoomedInScale = 1.18;
+            const targetX = 28;
+            const targetY = 34;
+            const projectBounds = (scale) => {
+                const offsetX = targetX - ((Number(baseBounds?.x) || 0) * scale);
+                const offsetY = targetY - ((Number(baseBounds?.y) || 0) * scale);
+                return (bounds) => ({
+                    x: (bounds.x * scale) + offsetX,
+                    y: (bounds.y * scale) + offsetY,
+                    width: bounds.width * scale,
+                    height: bounds.height * scale
+                });
+            };
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds: projectBounds(zoomedOutScale),
+                visible: true,
+                enabled: true
+            });
+
+            const zoomedOutFontSize = Number.parseFloat(
+                queryCaptionItem(softmaxLabelNode.id)?.style.getPropertyValue('--detail-transformer-view2d-dom-text-size') || '0'
+            );
+            const zoomedOutHeight = (Number(baseBounds?.height) || 0) * zoomedOutScale;
+
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds: projectBounds(zoomedInScale),
+                visible: true,
+                enabled: true
+            });
+
+            const zoomedInFontSize = Number.parseFloat(
+                queryCaptionItem(softmaxLabelNode.id)?.style.getPropertyValue('--detail-transformer-view2d-dom-text-size') || '0'
+            );
+            const zoomedInHeight = (Number(baseBounds?.height) || 0) * zoomedInScale;
+
+            expect(zoomedOutFontSize).toBeGreaterThan(0);
+            expect(zoomedInFontSize).toBeGreaterThan(zoomedOutFontSize);
+            expect(zoomedOutFontSize / Math.max(1, zoomedOutHeight))
+                .toBeCloseTo(zoomedInFontSize / Math.max(1, zoomedInHeight), 2);
+        } finally {
+            cleanup();
+        }
+    });
+
+    it('keeps head-detail matrix captions readable across zoom levels', () => {
+        const fixtures = buildHeadDetailFixtures();
+        const {
+            scene,
+            layout,
+            qCopyNode,
+            canvas,
+            overlay,
+            cleanup
+        } = fixtures;
+
+        try {
+            const qCopyEntry = layout.registry.getNodeEntry(qCopyNode.id);
+            const zoomedOutScale = 0.74;
+            const zoomedInScale = 1.46;
+            const projectBounds = (scale) => (bounds) => ({
+                x: bounds.x,
+                y: bounds.y,
+                width: bounds.width * scale,
+                height: bounds.height * scale
+            });
+
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds: projectBounds(zoomedOutScale),
+                visible: true,
+                enabled: true
+            });
+
+            const zoomedOutLabelSize = Number.parseFloat(
+                queryCaptionItem(qCopyNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+            const zoomedOutDimensionsSize = Number.parseFloat(
+                queryCaptionItem(qCopyNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-dimensions-size') || '0'
+            );
+
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds: projectBounds(zoomedInScale),
+                visible: true,
+                enabled: true
+            });
+
+            const zoomedInLabelSize = Number.parseFloat(
+                queryCaptionItem(qCopyNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+            const zoomedInDimensionsSize = Number.parseFloat(
+                queryCaptionItem(qCopyNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-dimensions-size') || '0'
+            );
+
+            expect(qCopyEntry).toBeTruthy();
+            expect(zoomedOutLabelSize).toBeGreaterThan(0);
+            expect(zoomedOutDimensionsSize).toBeGreaterThan(0);
+            expect(zoomedInLabelSize).toBeGreaterThanOrEqual(zoomedOutLabelSize);
+            expect(zoomedInDimensionsSize).toBeGreaterThanOrEqual(zoomedOutDimensionsSize);
+        } finally {
+            cleanup();
+        }
+    });
+
+    it('keeps the attention query and transpose captions on the same visual scale', () => {
+        const fixtures = buildMhsaFixtures();
+        const {
+            scene,
+            layout,
+            queryNode,
+            transposeNode,
+            canvas,
+            overlay,
+            cleanup
+        } = fixtures;
+
+        try {
+            const queryEntry = layout.registry.getNodeEntry(queryNode.id);
+            const visibleScale = resolveThresholdScale(queryEntry).scale * 1.1;
+            const projectBounds = (bounds) => ({
+                x: bounds.x,
+                y: bounds.y,
+                width: bounds.width * visibleScale,
+                height: bounds.height * visibleScale
+            });
+
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds,
+                visible: true,
+                enabled: true
+            });
+
+            const queryItem = queryCaptionItem(queryNode.id);
+            const transposeItem = queryCaptionItem(transposeNode.id);
+            const queryLabelSize = Number.parseFloat(
+                queryItem?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+            const transposeLabelSize = Number.parseFloat(
+                transposeItem?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+            const queryDimensionsSize = Number.parseFloat(
+                queryItem?.style.getPropertyValue('--detail-transformer-view2d-caption-dimensions-size') || '0'
+            );
+            const transposeDimensionsSize = Number.parseFloat(
+                transposeItem?.style.getPropertyValue('--detail-transformer-view2d-caption-dimensions-size') || '0'
+            );
+
+            expect(transposeLabelSize).toBeCloseTo(queryLabelSize, 2);
+            expect(transposeDimensionsSize).toBeCloseTo(queryDimensionsSize, 2);
+        } finally {
+            cleanup();
+        }
+    });
+
+    it('lets attention-grid captions scale more aggressively than the surrounding MHSA matrices', () => {
+        const fixtures = buildMhsaFixtures();
+        const {
+            scene,
+            layout,
+            queryNode,
+            transposeNode,
+            preScoreNode,
+            canvas,
+            overlay,
+            cleanup
+        } = fixtures;
+
+        try {
+            const queryEntry = layout.registry.getNodeEntry(queryNode.id);
+            const visibleScale = resolveThresholdScale(queryEntry).scale * 1.1;
+            const projectBounds = (bounds) => ({
+                x: bounds.x,
+                y: bounds.y,
+                width: bounds.width * visibleScale,
+                height: bounds.height * visibleScale
+            });
+
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds,
+                visible: true,
+                enabled: true
+            });
+
+            const queryLabelSize = Number.parseFloat(
+                queryCaptionItem(queryNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+            const transposeLabelSize = Number.parseFloat(
+                queryCaptionItem(transposeNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+            const preScoreLabelSize = Number.parseFloat(
+                queryCaptionItem(preScoreNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+
+            expect(preScoreLabelSize).toBeGreaterThan(0);
+            expect(preScoreLabelSize).toBeGreaterThanOrEqual(queryLabelSize);
+            expect(preScoreLabelSize).toBeGreaterThanOrEqual(transposeLabelSize);
+        } finally {
+            cleanup();
+        }
+    });
+
+    it('keeps the attention score-stage labels proportional to their matrices across zoom levels', () => {
+        const fixtures = buildMhsaFixtures();
+        const {
+            scene,
+            layout,
+            preScoreNode,
+            maskedInputNode,
+            maskNode,
+            postNode,
+            canvas,
+            overlay,
+            cleanup
+        } = fixtures;
+
+        try {
+            const preScoreEntry = layout.registry.getNodeEntry(preScoreNode.id);
+            const zoomedOutScale = 0.45;
+            const zoomedInScale = 0.95;
+            const targetX = 40;
+            const targetY = 48;
+            const stageNodes = [
+                preScoreNode,
+                maskedInputNode,
+                maskNode,
+                postNode
+            ];
+            const projectBounds = (scale) => {
+                const offsetX = targetX - ((Number(preScoreEntry?.contentBounds?.x) || 0) * scale);
+                const offsetY = targetY - ((Number(preScoreEntry?.contentBounds?.y) || 0) * scale);
+                return (bounds) => ({
+                    x: (bounds.x * scale) + offsetX,
+                    y: (bounds.y * scale) + offsetY,
+                    width: bounds.width * scale,
+                    height: bounds.height * scale
+                });
+            };
+            const measureLabelSizes = (scale) => {
+                overlay.sync({
+                    scene,
+                    layout,
+                    canvas,
+                    projectBounds: projectBounds(scale),
+                    visible: true,
+                    enabled: true
+                });
+                return stageNodes.map((node) => Number.parseFloat(
+                    queryCaptionItem(node.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+                ));
+            };
+
+            const zoomedOutLabelSizes = measureLabelSizes(zoomedOutScale);
+            const zoomedInLabelSizes = measureLabelSizes(zoomedInScale);
+
+            zoomedOutLabelSizes.forEach((labelSize) => {
+                expect(labelSize).toBeGreaterThan(0);
+            });
+            zoomedInLabelSizes.forEach((labelSize, index) => {
+                expect(labelSize).toBeGreaterThan(zoomedOutLabelSizes[index]);
+            });
+            expect(zoomedOutLabelSizes.some((labelSize) => (
+                labelSize < ATTENTION_MATRIX_LABEL_MIN_SCREEN_FONT_PX
+            ))).toBe(true);
+        } finally {
+            cleanup();
+        }
+    });
+
+    it('increases vertical spacing between the Q, K, and V projection equations for taller token windows', () => {
+        const baseFixtures = buildMhsaFixtures();
+        const tallFixtures = buildMhsaFixtures({
+            tokenLabels: Array.from({ length: 12 }, (_, index) => `Token ${index + 1}`)
+        });
+
+        try {
+            const baseQEntry = baseFixtures.layout.registry.getNodeEntry(baseFixtures.qStageNode.id);
+            const baseKEntry = baseFixtures.layout.registry.getNodeEntry(baseFixtures.kStageNode.id);
+            const baseVEntry = baseFixtures.layout.registry.getNodeEntry(baseFixtures.vStageNode.id);
+            const tallQEntry = tallFixtures.layout.registry.getNodeEntry(tallFixtures.qStageNode.id);
+            const tallKEntry = tallFixtures.layout.registry.getNodeEntry(tallFixtures.kStageNode.id);
+            const tallVEntry = tallFixtures.layout.registry.getNodeEntry(tallFixtures.vStageNode.id);
+
+            const baseQToKGap = (baseKEntry?.bounds?.y || 0)
+                - ((baseQEntry?.bounds?.y || 0) + (baseQEntry?.bounds?.height || 0));
+            const baseKToVGap = (baseVEntry?.bounds?.y || 0)
+                - ((baseKEntry?.bounds?.y || 0) + (baseKEntry?.bounds?.height || 0));
+            const tallQToKGap = (tallKEntry?.bounds?.y || 0)
+                - ((tallQEntry?.bounds?.y || 0) + (tallQEntry?.bounds?.height || 0));
+            const tallKToVGap = (tallVEntry?.bounds?.y || 0)
+                - ((tallKEntry?.bounds?.y || 0) + (tallKEntry?.bounds?.height || 0));
+
+            expect(Number(baseFixtures.projectionStackNode?.metadata?.gapOverride) || 0)
+                .toBeLessThan(Number(tallFixtures.projectionStackNode?.metadata?.gapOverride) || 0);
+            expect(tallQToKGap).toBeGreaterThan(baseQToKGap);
+            expect(tallKToVGap).toBeGreaterThan(baseKToVGap);
+        } finally {
+            tallFixtures.cleanup();
+            baseFixtures.cleanup();
+        }
+    });
+});

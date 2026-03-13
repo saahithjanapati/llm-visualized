@@ -31,33 +31,51 @@ import {
 import { createView2dVectorStripMetadata } from '../shared/vectorStrip.js';
 import { formatView2dMatrixDimensions } from '../shared/formatMatrixDimensions.js';
 
-const MHSA_SOURCE_ANCHOR_WIDTH = 22;
-const MHSA_SOURCE_ANCHOR_MIN_HEIGHT = 108;
-const MHSA_SOURCE_ANCHOR_MAX_HEIGHT = 176;
-const MHSA_SOURCE_ANCHOR_ROW_HEIGHT = 18;
-const PROJECTION_STACK_GAP = 120;
-const PROJECTION_STACK_GAP_SMALL = 92;
-const PROJECTION_SIDECAR_GAP = 30;
-const PROJECTION_SIDECAR_GAP_SMALL = 24;
+const PROJECTION_STACK_GAP = 188;
+const PROJECTION_STACK_GAP_SMALL = 148;
+const PROJECTION_STACK_GAP_PER_EXTRA_ROW = 10;
+const PROJECTION_STACK_GAP_PER_EXTRA_ROW_SMALL = 8;
+const PROJECTION_STACK_GAP_MAX_EXTRA = 80;
+const PROJECTION_STACK_GAP_MAX_EXTRA_SMALL = 64;
+const PROJECTION_SIDECAR_GAP = 84;
+const PROJECTION_SIDECAR_GAP_SMALL = 64;
 const PROJECTION_STAGE_INLINE_GAP = 12;
 const PROJECTION_STAGE_INLINE_GAP_SMALL = 10;
 const PROJECTION_EQUATION_GAP = 12;
 const PROJECTION_EQUATION_GAP_SMALL = 10;
 const PROJECTION_MULTIPLY_OPERATOR_SCALE = 0.82;
-const PROJECTION_XLN_COMPACT_WIDTH = 88;
-const PROJECTION_XLN_COMPACT_WIDTH_SMALL = 76;
+const ATTENTION_GROUPING_OPERATOR_SCALE = 1.28;
+const PROJECTION_XLN_COMPACT_WIDTH = 96;
+const PROJECTION_XLN_COMPACT_WIDTH_SMALL = 84;
 const PROJECTION_XLN_ROW_HEIGHT = 7;
 const PROJECTION_XLN_ROW_HEIGHT_SMALL = 6;
-const PROJECTION_WEIGHT_REFERENCE_EXTENT = 92;
+const PROJECTION_WEIGHT_REFERENCE_EXTENT = 96;
 const PROJECTION_WEIGHT_REFERENCE_EXTENT_SMALL = 84;
-const PROJECTION_WEIGHT_MIN_WIDTH = 48;
+const PROJECTION_WEIGHT_MIN_WIDTH = 52;
 const PROJECTION_WEIGHT_MAX_WIDTH = 138;
 const PROJECTION_WEIGHT_MIN_HEIGHT = 56;
 const PROJECTION_WEIGHT_MAX_HEIGHT = 144;
-const PROJECTION_CAPTION_LABEL_SCALE = 0.42;
-const PROJECTION_CAPTION_DIMENSIONS_SCALE = 0.5;
+const PROJECTION_WEIGHT_CAPTION_LABEL_SCALE_MIN = 1.12;
+const PROJECTION_WEIGHT_CAPTION_LABEL_SCALE_MAX = 4.0;
+const PROJECTION_WEIGHT_CAPTION_LABEL_SCALE_BOOST = 2.2;
+const PROJECTION_STAGE_VISUAL_SCALE_MAX = 1.5;
+const PROJECTION_STAGE_VISUAL_SCALE_MAX_SMALL = 1.34;
+const PROJECTION_STAGE_WEIGHT_REFERENCE_SCALE = 1.08;
+const PROJECTION_STAGE_BIAS_WIDTH_RATIO = 0.84;
+const PROJECTION_STAGE_BIAS_HEIGHT_BLEND = 0.64;
+const VECTOR_STRIP_ROW_HEIGHT_BLEND_PER_EXTRA_ROW = 0.08;
+const VECTOR_STRIP_ROW_HEIGHT_BLEND_PER_EXTRA_ROW_SMALL = 0.07;
+const VECTOR_STRIP_ROW_HEIGHT_MAX_BLEND = 0.56;
+const VECTOR_STRIP_ROW_HEIGHT_MAX_BLEND_SMALL = 0.46;
+const VECTOR_STRIP_MAX_ROW_HEIGHT_BOOST = 8;
+const VECTOR_STRIP_MAX_ROW_HEIGHT_BOOST_SMALL = 6;
+const VECTOR_STRIP_WIDTH_BOOST_PER_ROW_HEIGHT = 8;
+const VECTOR_STRIP_WIDTH_BOOST_PER_ROW_HEIGHT_SMALL = 7;
+const VECTOR_STRIP_MAX_WIDTH_BOOST = 64;
+const VECTOR_STRIP_MAX_WIDTH_BOOST_SMALL = 48;
 const PROJECTION_BIAS_ROW_HEIGHT = 14;
 const PROJECTION_BIAS_CAPTION_MIN_SCREEN_HEIGHT = 12;
+const PROJECTION_BIAS_LABEL_MIN_SCREEN_FONT_PX = 13;
 const PROJECTION_BIAS_COMPACT_WIDTH = 58;
 const PROJECTION_BIAS_COMPACT_WIDTH_SMALL = 50;
 const PROJECTION_BIAS_CORNER_RADIUS = 5;
@@ -66,17 +84,62 @@ const PROJECTION_OUTPUT_COMPACT_WIDTH_SMALL = 62;
 const PROJECTION_OUTPUT_ROW_HEIGHT = 7;
 const PROJECTION_OUTPUT_ROW_HEIGHT_SMALL = 6;
 const PROJECTION_XLN_TARGET_GAP = 8;
-const ATTENTION_TRANSPOSE_MIN_WIDTH = 24;
-const ATTENTION_TRANSPOSE_MIN_WIDTH_SMALL = 20;
 const ATTENTION_TRANSPOSE_CORNER_RADIUS = 8;
-const ATTENTION_STAGE_VERTICAL_LIFT = 104;
-const ATTENTION_STAGE_VERTICAL_LIFT_SMALL = 80;
+const ATTENTION_QKT_GROUP_GAP = 12;
+const ATTENTION_QKT_GROUP_GAP_SMALL = 10;
+const ATTENTION_KT_CLOSE_GAP = 3;
+const ATTENTION_KT_CLOSE_GAP_SMALL = 2;
+const ATTENTION_CLOSE_DIVISOR_GAP = 8;
+const ATTENTION_CLOSE_DIVISOR_GAP_SMALL = 6;
+const ATTENTION_DIVISOR_GAP = 6;
+const ATTENTION_DIVISOR_GAP_SMALL = 4;
+const ATTENTION_SOFTMAX_PERSISTENT_FONT_PX = 15;
+const ATTENTION_SOFTMAX_PERSISTENT_FONT_PX_SMALL = 14;
+const ATTENTION_SOFTMAX_ZOOMED_OUT_FONT_PX = 16;
+const ATTENTION_SOFTMAX_ZOOMED_OUT_FONT_PX_SMALL = 15;
+const ATTENTION_SOFTMAX_GROUPING_OPERATOR_SCALE = 1.34;
+const ATTENTION_SOFTMAX_PREFIX_VISUAL_HEIGHT_ESTIMATE = 42;
+const ATTENTION_SOFTMAX_PREFIX_VISUAL_HEIGHT_ESTIMATE_SMALL = 38;
+const ATTENTION_RESULT_STAGE_GAP = 36;
+const ATTENTION_RESULT_STAGE_GAP_SMALL = 28;
+const ATTENTION_RESULT_GROUP_GAP = 8;
+const ATTENTION_RESULT_GROUP_GAP_SMALL = 6;
+const ATTENTION_SOFTMAX_PREFIX_GAP = 6;
+const ATTENTION_SOFTMAX_PREFIX_GAP_SMALL = 4;
+const ATTENTION_SOFTMAX_BODY_GAP = 12;
+const ATTENTION_SOFTMAX_BODY_GAP_SMALL = 10;
+const ATTENTION_SOFTMAX_FLOW_GAP = 88;
+const ATTENTION_SOFTMAX_FLOW_GAP_SMALL = 66;
+const ATTENTION_POST_COPY_STAGE_SPACER = 48;
+const ATTENTION_POST_COPY_STAGE_SPACER_SMALL = 36;
+const ATTENTION_HEAD_OUTPUT_GAP = 10;
+const ATTENTION_HEAD_OUTPUT_GAP_SMALL = 8;
+const ATTENTION_HEAD_OUTPUT_PRODUCT_GAP = 6;
+const ATTENTION_HEAD_OUTPUT_PRODUCT_GAP_SMALL = 4;
+const ATTENTION_MATRIX_CAPTION_LABEL_MIN_SCREEN_FONT_PX = 14;
+const ATTENTION_MATRIX_CAPTION_DIMENSIONS_MIN_SCREEN_FONT_PX = 11;
+const ATTENTION_STAGE_VERTICAL_LIFT = 116;
+const ATTENTION_STAGE_VERTICAL_LIFT_SMALL = 90;
 const ATTENTION_STAGE_VERTICAL_LIFT_PER_EXTRA_ROW = 6;
 const ATTENTION_STAGE_VERTICAL_LIFT_PER_EXTRA_ROW_SMALL = 5;
+const ATTENTION_BOTTOM_CAPTION_CONNECTOR_CLEARANCE = 44;
+const ATTENTION_BOTTOM_CAPTION_CONNECTOR_CLEARANCE_SMALL = 36;
+const ATTENTION_CONNECTOR_CLEARANCE_PER_EXTRA_ROW = 1.5;
+const ATTENTION_CONNECTOR_CLEARANCE_PER_EXTRA_ROW_SMALL = 1.25;
+const ATTENTION_CONNECTOR_CLEARANCE_MAX_EXTRA = 22;
+const ATTENTION_CONNECTOR_CLEARANCE_MAX_EXTRA_SMALL = 18;
+const ATTENTION_CONNECTOR_CAPTION_EXIT_GAP = 4;
 const MHSA_CONNECTOR_STROKE = 'rgba(255, 255, 255, 0.84)';
+const MHSA_SYMBOL_CAPTION_LABEL_SCALE = 0.9;
+const MHSA_WEIGHT_CAPTION_LABEL_SCALE_FACTOR = 0.72;
+const MHSA_WEIGHT_CAPTION_LABEL_SCALE_MIN = 1.02;
 
 function normalizeIndex(value) {
     return Number.isFinite(value) ? Math.floor(value) : null;
+}
+
+function hasNumericValue(value) {
+    return typeof value === 'number' && !Number.isNaN(value);
 }
 
 function buildSemantic(baseSemantic, extra = {}) {
@@ -95,6 +158,22 @@ function buildLabel(labelTex = '', fallbackText = '') {
     };
 }
 
+function buildMhsaProjectionBiasLabel(labelTex = '') {
+    const safeLabelTex = typeof labelTex === 'string' ? labelTex.trim() : '';
+    const simpleBiasMatch = safeLabelTex.match(/^b_([A-Za-z]+)$/);
+    if (!simpleBiasMatch) {
+        return {
+            labelTex: safeLabelTex,
+            labelText: safeLabelTex
+        };
+    }
+    const [, subscript] = simpleBiasMatch;
+    return {
+        labelTex: `b_{\\mathrm{${subscript}}}`,
+        labelText: safeLabelTex
+    };
+}
+
 function createCardMetadata(width = null, height = null, {
     hidden = false,
     cornerRadius = null
@@ -106,6 +185,78 @@ function createCardMetadata(width = null, height = null, {
     const metadata = Object.keys(card).length ? { card } : {};
     if (hidden) metadata.hidden = true;
     return Object.keys(metadata).length ? metadata : null;
+}
+
+function createPersistentAttentionGridMetadata() {
+    return {
+        grid: {
+            preserveDetail: true
+        }
+    };
+}
+
+function createCaptionMetadata({
+    position = 'bottom',
+    dimensionsTex = '',
+    dimensionsText = '',
+    minScreenHeightPx = 28,
+    renderMode = 'dom-katex',
+    preferStandardSizing = false,
+    labelMinScreenFontPx = null,
+    dimensionsMinScreenFontPx = null
+} = {}) {
+    const caption = {};
+    const safePosition = String(position || '').trim().toLowerCase();
+    if (
+        safePosition === 'top'
+        || safePosition === 'bottom'
+        || safePosition === 'inside-top'
+        || safePosition === 'float-top'
+    ) {
+        caption.position = safePosition;
+    }
+    if (typeof dimensionsTex === 'string' && dimensionsTex.trim().length) {
+        caption.dimensionsTex = dimensionsTex.trim();
+    }
+    if (typeof dimensionsText === 'string' && dimensionsText.trim().length) {
+        caption.dimensionsText = dimensionsText.trim();
+    }
+    if (Number.isFinite(minScreenHeightPx) && minScreenHeightPx > 0) {
+        caption.minScreenHeightPx = Math.max(1, Math.floor(minScreenHeightPx));
+    }
+    const safeRenderMode = String(renderMode || '').trim().toLowerCase();
+    if (safeRenderMode.length) {
+        caption.renderMode = safeRenderMode;
+    }
+    if (preferStandardSizing === true) {
+        caption.preferStandardSizing = true;
+    }
+    if (Number.isFinite(labelMinScreenFontPx) && labelMinScreenFontPx > 0) {
+        caption.labelMinScreenFontPx = Number(labelMinScreenFontPx);
+    }
+    if (Number.isFinite(dimensionsMinScreenFontPx) && dimensionsMinScreenFontPx > 0) {
+        caption.dimensionsMinScreenFontPx = Number(dimensionsMinScreenFontPx);
+    }
+    return Object.keys(caption).length ? { caption } : null;
+}
+
+function createAttentionMatrixCaptionMetadata(rows = 1, cols = 1, {
+    position = 'bottom',
+    minScreenHeightPx = 28,
+    labelMinScreenFontPx = ATTENTION_MATRIX_CAPTION_LABEL_MIN_SCREEN_FONT_PX,
+    dimensionsMinScreenFontPx = ATTENTION_MATRIX_CAPTION_DIMENSIONS_MIN_SCREEN_FONT_PX
+} = {}) {
+    const dimensionCaption = formatView2dMatrixDimensions(rows, cols);
+    return createCaptionMetadata({
+        position,
+        dimensionsTex: dimensionCaption.tex,
+        dimensionsText: dimensionCaption.text,
+        minScreenHeightPx,
+        renderMode: 'dom-katex',
+        preferStandardSizing: true,
+        labelMinScreenFontPx,
+        dimensionsMinScreenFontPx
+    });
 }
 
 function createHiddenSpacer({
@@ -133,14 +284,245 @@ function createHiddenSpacer({
     });
 }
 
-function resolveAttentionStageLift(rowCount = 1, isSmallScreen = false) {
+function resolveAttentionStageLift({
+    rowCount = 1,
+    extraRows = null,
+    isSmallScreen = false
+} = {}) {
     const safeRowCount = Number.isFinite(rowCount) ? Math.max(1, Math.floor(rowCount)) : 1;
-    const extraRows = Math.max(0, safeRowCount - 5);
+    const resolvedExtraRows = Number.isFinite(extraRows)
+        ? Math.max(0, Math.floor(extraRows))
+        : Math.max(0, safeRowCount - 5);
     const baseLift = isSmallScreen ? ATTENTION_STAGE_VERTICAL_LIFT_SMALL : ATTENTION_STAGE_VERTICAL_LIFT;
     const perExtraRow = isSmallScreen
         ? ATTENTION_STAGE_VERTICAL_LIFT_PER_EXTRA_ROW_SMALL
         : ATTENTION_STAGE_VERTICAL_LIFT_PER_EXTRA_ROW;
-    return Math.max(0, Math.round(baseLift + (extraRows * perExtraRow)));
+    return Math.max(0, Math.round(baseLift + (resolvedExtraRows * perExtraRow)));
+}
+
+function resolveProjectionStackGap({
+    rowCount = 1,
+    extraRows = null,
+    isSmallScreen = false
+} = {}) {
+    const safeRowCount = Number.isFinite(rowCount) ? Math.max(1, Math.floor(rowCount)) : 1;
+    const resolvedExtraRows = Number.isFinite(extraRows)
+        ? Math.max(0, Math.floor(extraRows))
+        : Math.max(0, safeRowCount - 5);
+    const baseGap = isSmallScreen ? PROJECTION_STACK_GAP_SMALL : PROJECTION_STACK_GAP;
+    const perExtraRow = isSmallScreen
+        ? PROJECTION_STACK_GAP_PER_EXTRA_ROW_SMALL
+        : PROJECTION_STACK_GAP_PER_EXTRA_ROW;
+    const maxExtra = isSmallScreen
+        ? PROJECTION_STACK_GAP_MAX_EXTRA_SMALL
+        : PROJECTION_STACK_GAP_MAX_EXTRA;
+    return Math.max(
+        0,
+        Math.round(
+            baseGap
+            + Math.min(maxExtra, resolvedExtraRows * perExtraRow)
+        )
+    );
+}
+
+function resolveAttentionBottomCaptionConnectorClearance({
+    rowCount = 1,
+    extraRows = null,
+    isSmallScreen = false
+} = {}) {
+    const safeRowCount = Number.isFinite(rowCount) ? Math.max(1, Math.floor(rowCount)) : 1;
+    const resolvedExtraRows = Number.isFinite(extraRows)
+        ? Math.max(0, Math.floor(extraRows))
+        : Math.max(0, safeRowCount - 5);
+    const baseClearance = isSmallScreen
+        ? ATTENTION_BOTTOM_CAPTION_CONNECTOR_CLEARANCE_SMALL
+        : ATTENTION_BOTTOM_CAPTION_CONNECTOR_CLEARANCE;
+    const perExtraRow = isSmallScreen
+        ? ATTENTION_CONNECTOR_CLEARANCE_PER_EXTRA_ROW_SMALL
+        : ATTENTION_CONNECTOR_CLEARANCE_PER_EXTRA_ROW;
+    const maxExtra = isSmallScreen
+        ? ATTENTION_CONNECTOR_CLEARANCE_MAX_EXTRA_SMALL
+        : ATTENTION_CONNECTOR_CLEARANCE_MAX_EXTRA;
+    const extraClearance = Math.min(
+        maxExtra,
+        Math.round(resolvedExtraRows * perExtraRow)
+    );
+    return Math.max(0, baseClearance + extraClearance);
+}
+
+function resolveVectorStripDimensions({
+    rowCount = 1,
+    extraRows = null,
+    baseCompactWidth = 72,
+    baseRowHeight = 7,
+    isSmallScreen = false,
+    layoutMetrics = null
+} = {}) {
+    const safeRowCount = Number.isFinite(rowCount) ? Math.max(1, Math.floor(rowCount)) : 1;
+    const resolvedExtraRows = Number.isFinite(extraRows)
+        ? Math.max(0, Math.floor(extraRows))
+        : Math.max(0, safeRowCount - 5);
+    const safeBaseCompactWidth = Math.max(1, Math.floor(Number(baseCompactWidth) || 72));
+    const safeBaseRowHeight = Math.max(1, Math.floor(Number(baseRowHeight) || 7));
+    const attentionPerRowFootprint = resolveAttentionFlowRowHeight(
+        safeRowCount,
+        isSmallScreen,
+        layoutMetrics
+    ) / safeRowCount;
+    const blendPerExtraRow = isSmallScreen
+        ? VECTOR_STRIP_ROW_HEIGHT_BLEND_PER_EXTRA_ROW_SMALL
+        : VECTOR_STRIP_ROW_HEIGHT_BLEND_PER_EXTRA_ROW;
+    const maxBlend = isSmallScreen
+        ? VECTOR_STRIP_ROW_HEIGHT_MAX_BLEND_SMALL
+        : VECTOR_STRIP_ROW_HEIGHT_MAX_BLEND;
+    const maxRowHeightBoost = isSmallScreen
+        ? VECTOR_STRIP_MAX_ROW_HEIGHT_BOOST_SMALL
+        : VECTOR_STRIP_MAX_ROW_HEIGHT_BOOST;
+    const widthBoostPerRowHeight = isSmallScreen
+        ? VECTOR_STRIP_WIDTH_BOOST_PER_ROW_HEIGHT_SMALL
+        : VECTOR_STRIP_WIDTH_BOOST_PER_ROW_HEIGHT;
+    const maxWidthBoost = isSmallScreen
+        ? VECTOR_STRIP_MAX_WIDTH_BOOST_SMALL
+        : VECTOR_STRIP_MAX_WIDTH_BOOST;
+    const blend = Math.min(maxBlend, resolvedExtraRows * blendPerExtraRow);
+    const resolvedRowHeight = Math.max(
+        safeBaseRowHeight,
+        Math.min(
+            safeBaseRowHeight + maxRowHeightBoost,
+            Math.round(
+                safeBaseRowHeight
+                + ((attentionPerRowFootprint - safeBaseRowHeight) * blend)
+            )
+        )
+    );
+    return {
+        compactWidth: safeBaseCompactWidth + Math.min(
+            maxWidthBoost,
+            Math.max(0, resolvedRowHeight - safeBaseRowHeight) * widthBoostPerRowHeight
+        ),
+        rowHeight: resolvedRowHeight
+    };
+}
+
+function resolveProjectionStageVisualMetrics({
+    previewRowCount = 1,
+    previewColumnCount = 1,
+    projectionData = null,
+    extraRows = null,
+    isSmallScreen = false,
+    layoutMetrics = null
+} = {}) {
+    const xLnDimensions = resolveVectorStripDimensions({
+        rowCount: previewRowCount,
+        extraRows,
+        baseCompactWidth: isSmallScreen ? PROJECTION_XLN_COMPACT_WIDTH_SMALL : PROJECTION_XLN_COMPACT_WIDTH,
+        baseRowHeight: isSmallScreen ? PROJECTION_XLN_ROW_HEIGHT_SMALL : PROJECTION_XLN_ROW_HEIGHT,
+        isSmallScreen,
+        layoutMetrics
+    });
+    const outputDimensions = resolveVectorStripDimensions({
+        rowCount: projectionData?.outputRowCount,
+        extraRows,
+        baseCompactWidth: isSmallScreen ? PROJECTION_OUTPUT_COMPACT_WIDTH_SMALL : PROJECTION_OUTPUT_COMPACT_WIDTH,
+        baseRowHeight: isSmallScreen ? PROJECTION_OUTPUT_ROW_HEIGHT_SMALL : PROJECTION_OUTPUT_ROW_HEIGHT,
+        isSmallScreen,
+        layoutMetrics
+    });
+    const baseOutputCompactWidth = isSmallScreen ? PROJECTION_OUTPUT_COMPACT_WIDTH_SMALL : PROJECTION_OUTPUT_COMPACT_WIDTH;
+    const baseOutputRowHeight = isSmallScreen ? PROJECTION_OUTPUT_ROW_HEIGHT_SMALL : PROJECTION_OUTPUT_ROW_HEIGHT;
+    const projectionScale = Math.min(
+        isSmallScreen ? PROJECTION_STAGE_VISUAL_SCALE_MAX_SMALL : PROJECTION_STAGE_VISUAL_SCALE_MAX,
+        Math.max(
+            1,
+            outputDimensions.compactWidth / Math.max(1, baseOutputCompactWidth),
+            outputDimensions.rowHeight / Math.max(1, baseOutputRowHeight)
+        )
+    );
+    const weightReferenceExtent = Math.round(
+        (isSmallScreen ? PROJECTION_WEIGHT_REFERENCE_EXTENT_SMALL : PROJECTION_WEIGHT_REFERENCE_EXTENT)
+        * Math.max(1, projectionScale * PROJECTION_STAGE_WEIGHT_REFERENCE_SCALE)
+    );
+    const weightCardSize = resolveRelativeCardSize({
+        rows: projectionData?.weightRowCount,
+        cols: projectionData?.weightColumnCount,
+        referenceCount: previewColumnCount,
+        referenceExtent: weightReferenceExtent,
+        minWidth: Math.round(PROJECTION_WEIGHT_MIN_WIDTH * Math.min(1.18, projectionScale)),
+        maxWidth: Math.round(PROJECTION_WEIGHT_MAX_WIDTH * projectionScale),
+        minHeight: Math.round(PROJECTION_WEIGHT_MIN_HEIGHT * Math.min(1.12, projectionScale)),
+        maxHeight: Math.round(PROJECTION_WEIGHT_MAX_HEIGHT * projectionScale)
+    });
+    const baseBiasCompactWidth = isSmallScreen ? PROJECTION_BIAS_COMPACT_WIDTH_SMALL : PROJECTION_BIAS_COMPACT_WIDTH;
+    const biasCompactWidth = Math.max(
+        baseBiasCompactWidth,
+        Math.round(outputDimensions.compactWidth * PROJECTION_STAGE_BIAS_WIDTH_RATIO)
+    );
+    const biasRowHeight = Math.max(
+        PROJECTION_BIAS_ROW_HEIGHT,
+        Math.round(
+            PROJECTION_BIAS_ROW_HEIGHT
+            * Math.min(1.28, 1 + ((projectionScale - 1) * PROJECTION_STAGE_BIAS_HEIGHT_BLEND))
+        )
+    );
+
+    return {
+        xLnDimensions,
+        outputDimensions,
+        weightCardSize,
+        biasCompactWidth,
+        biasRowHeight,
+        projectionScale
+    };
+}
+
+function resolveAttentionGridLayoutMetrics(layoutMetrics = null, isSmallScreen = false) {
+    const componentOverrides = layoutMetrics?.componentOverrides || {};
+    const cellSize = Number.isFinite(componentOverrides.gridCellSize) && componentOverrides.gridCellSize > 0
+        ? Math.max(1, Math.floor(componentOverrides.gridCellSize))
+        : (isSmallScreen ? 9 : 10);
+    const cellGap = Number.isFinite(componentOverrides.gridCellGap) && componentOverrides.gridCellGap >= 0
+        ? Math.max(0, Math.floor(componentOverrides.gridCellGap))
+        : 2;
+    return {
+        cellSize,
+        cellGap,
+        contentPaddingY: isSmallScreen ? 8 : 10
+    };
+}
+
+function resolveAttentionFlowRowHeight(rowCount = 1, isSmallScreen = false, layoutMetrics = null) {
+    const safeRowCount = Number.isFinite(rowCount) ? Math.max(1, Math.floor(rowCount)) : 1;
+    const {
+        cellSize,
+        cellGap,
+        contentPaddingY
+    } = resolveAttentionGridLayoutMetrics(layoutMetrics, isSmallScreen);
+    return (safeRowCount * cellSize)
+        + (Math.max(0, safeRowCount - 1) * cellGap)
+        + (contentPaddingY * 2);
+}
+
+function resolveAttentionCaptionBlockHeight(isSmallScreen = false) {
+    const captionGap = isSmallScreen ? 8 : 10;
+    const captionLineHeight = isSmallScreen ? 12 : 14;
+    return captionGap + (captionLineHeight * 2);
+}
+
+function resolveAttentionMatrixBlockHeight(rowCount = 1, isSmallScreen = false, layoutMetrics = null) {
+    return resolveAttentionFlowRowHeight(rowCount, isSmallScreen, layoutMetrics)
+        + resolveAttentionCaptionBlockHeight(isSmallScreen);
+}
+
+function resolveAttentionSoftmaxPrefixOffset(rowCount = 1, isSmallScreen = false, layoutMetrics = null) {
+    const flowHeight = resolveAttentionFlowRowHeight(rowCount, isSmallScreen, layoutMetrics);
+    const coreGap = isSmallScreen
+        ? ATTENTION_SOFTMAX_FLOW_GAP_SMALL
+        : ATTENTION_SOFTMAX_FLOW_GAP;
+    const prefixVisualHeightEstimate = isSmallScreen
+        ? ATTENTION_SOFTMAX_PREFIX_VISUAL_HEIGHT_ESTIMATE_SMALL
+        : ATTENTION_SOFTMAX_PREFIX_VISUAL_HEIGHT_ESTIMATE;
+    const centerOffset = Math.max(0, Math.round((flowHeight - prefixVisualHeightEstimate) * 0.5));
+    return flowHeight + coreGap + centerOffset;
 }
 
 function buildGradientRowItems(rows = [], baseSemantic = {}, role = 'row') {
@@ -233,7 +615,8 @@ function buildAttentionGridRowItems(rows = [], baseSemantic = {}) {
     return rows.map((rowData) => {
         const rowSemantic = buildSemantic(baseSemantic, {
             role: 'attention-row',
-            rowIndex: rowData.rowIndex
+            rowIndex: rowData.rowIndex,
+            tokenIndex: rowData.tokenIndex
         });
         return {
             id: buildSceneNodeId(rowSemantic),
@@ -254,7 +637,18 @@ function buildAttentionGridRowItems(rows = [], baseSemantic = {}) {
                         semantic: cellSemantic,
                         rowLabel: cellData.rowTokenLabel || rowData.tokenLabel || '',
                         colLabel: cellData.colTokenLabel || '',
-                        rawValue: Number.isFinite(cellData.rawValue) ? cellData.rawValue : null,
+                        queryTokenIndex: normalizeIndex(cellData.queryTokenIndex),
+                        keyTokenIndex: normalizeIndex(cellData.keyTokenIndex),
+                        queryTokenLabel: typeof cellData.queryTokenLabel === 'string'
+                            ? cellData.queryTokenLabel
+                            : (cellData.rowTokenLabel || rowData.tokenLabel || ''),
+                        keyTokenLabel: typeof cellData.keyTokenLabel === 'string'
+                            ? cellData.keyTokenLabel
+                            : (cellData.colTokenLabel || ''),
+                        preScore: hasNumericValue(cellData.preScore) ? cellData.preScore : null,
+                        postScore: hasNumericValue(cellData.postScore) ? cellData.postScore : null,
+                        maskValue: hasNumericValue(cellData.maskValue) ? cellData.maskValue : null,
+                        rawValue: hasNumericValue(cellData.rawValue) ? cellData.rawValue : null,
                         fillCss: cellData.fillCss || 'transparent',
                         isMasked: !!cellData.isMasked,
                         isEmpty: !!cellData.isEmpty,
@@ -272,7 +666,7 @@ function buildTransposeColumnItems(columns = [], baseSemantic = {}) {
             stage: 'qkv.k',
             role: 'transpose-column',
             colIndex: columnData.colIndex,
-            tokenIndex: columnData.colIndex,
+            tokenIndex: columnData.tokenIndex ?? columnData.colIndex,
             branchKey: 'k'
         });
         return {
@@ -281,45 +675,66 @@ function buildTransposeColumnItems(columns = [], baseSemantic = {}) {
             label: columnData.tokenLabel || `Token ${columnData.colIndex + 1}`,
             semantic,
             rawValue: Number.isFinite(columnData.rawValue) ? columnData.rawValue : null,
+            rawValues: Array.isArray(columnData.rawValues) ? [...columnData.rawValues] : null,
             fillCss: columnData.fillCss || 'transparent',
             title: typeof columnData.tokenLabel === 'string' ? columnData.tokenLabel : null
         };
     });
 }
 
-function buildProjectionSourceAnchorNode({
+function resolveTransposeStripLayout({
+    targetHeight = PROJECTION_OUTPUT_COMPACT_WIDTH,
+    columnUnit = PROJECTION_OUTPUT_ROW_HEIGHT
+} = {}) {
+    const resolvedTargetHeight = Math.max(1, Math.floor(targetHeight || PROJECTION_OUTPUT_COMPACT_WIDTH));
+    const resolvedColumnUnit = Math.max(1, Math.floor(columnUnit || PROJECTION_OUTPUT_ROW_HEIGHT));
+    return {
+        colWidth: resolvedColumnUnit,
+        colGap: 0,
+        colHeight: resolvedTargetHeight,
+        paddingX: 0,
+        paddingY: 0
+    };
+}
+
+function buildProjectionSourceNode({
     baseSemantic,
+    previewData,
     rowCount = 1,
-    isSmallScreen = false
+    extraRows = null,
+    isSmallScreen = false,
+    layoutMetrics = null
 }) {
-    const safeRowCount = Number.isFinite(rowCount) ? Math.max(1, Math.floor(rowCount)) : 1;
-    const cardHeight = Math.max(
-        isSmallScreen ? MHSA_SOURCE_ANCHOR_MIN_HEIGHT - 16 : MHSA_SOURCE_ANCHOR_MIN_HEIGHT,
-        Math.min(
-            isSmallScreen ? MHSA_SOURCE_ANCHOR_MAX_HEIGHT - 20 : MHSA_SOURCE_ANCHOR_MAX_HEIGHT,
-            (safeRowCount * MHSA_SOURCE_ANCHOR_ROW_HEIGHT) + (isSmallScreen ? 40 : 52)
-        )
+    const dimensionCaption = formatView2dMatrixDimensions(
+        rowCount,
+        previewData?.columnCount
     );
-    const cardWidth = isSmallScreen ? MHSA_SOURCE_ANCHOR_WIDTH - 4 : MHSA_SOURCE_ANCHOR_WIDTH;
-    return createMatrixNode({
-        role: 'projection-source-anchor',
+    const xLnDimensions = resolveVectorStripDimensions({
+        rowCount,
+        extraRows,
+        baseCompactWidth: isSmallScreen ? PROJECTION_XLN_COMPACT_WIDTH_SMALL : PROJECTION_XLN_COMPACT_WIDTH,
+        baseRowHeight: isSmallScreen ? PROJECTION_XLN_ROW_HEIGHT_SMALL : PROJECTION_XLN_ROW_HEIGHT,
+        isSmallScreen,
+        layoutMetrics
+    });
+    return createVectorStripMatrixNode({
+        role: 'projection-source-xln',
         semantic: buildSemantic(baseSemantic, {
             stage: 'projection-source',
-            role: 'projection-source-anchor'
+            role: 'projection-source-xln'
         }),
-        dimensions: {
-            rows: 1,
-            cols: 1
-        },
-        presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
-        shape: VIEW2D_MATRIX_SHAPES.MATRIX,
-        visual: {
-            styleKey: VIEW2D_STYLE_KEYS.MHSA_HEAD
-        },
-        metadata: createCardMetadata(cardWidth, cardHeight, {
-            hidden: true,
-            cornerRadius: 0
-        })
+        labelTex: 'X_{\\ln}',
+        labelText: 'X_ln',
+        rowItems: buildProjectionInputRowItems(previewData?.rows, baseSemantic),
+        rowCount,
+        columnCount: previewData?.columnCount,
+        compactWidth: xLnDimensions.compactWidth,
+        rowHeight: xLnDimensions.rowHeight,
+        captionPosition: 'bottom',
+        captionLabelScale: MHSA_SYMBOL_CAPTION_LABEL_SCALE,
+        captionDimensionsTex: dimensionCaption.tex,
+        captionDimensionsText: dimensionCaption.text,
+        visualStyleKey: VIEW2D_STYLE_KEYS.RESIDUAL
     });
 }
 
@@ -328,7 +743,9 @@ function buildProjectionStageNode({
     previewData,
     projectionData,
     stageIndex,
-    isSmallScreen = false
+    extraRows = null,
+    isSmallScreen = false,
+    layoutMetrics = null
 }) {
     const projectionKind = String(projectionData?.kind || '').toLowerCase();
     const projectionSemantic = buildSemantic(baseSemantic, {
@@ -340,6 +757,16 @@ function buildProjectionStageNode({
     const styleKey = projectionKind === 'q'
         ? VIEW2D_STYLE_KEYS.MHSA_Q
         : (projectionKind === 'k' ? VIEW2D_STYLE_KEYS.MHSA_K : VIEW2D_STYLE_KEYS.MHSA_V);
+    const projectionVisualMetrics = resolveProjectionStageVisualMetrics({
+        previewRowCount: previewData.rowCount,
+        previewColumnCount: previewData.columnCount,
+        projectionData,
+        extraRows,
+        isSmallScreen,
+        layoutMetrics
+    });
+    const xLnDimensions = projectionVisualMetrics.xLnDimensions;
+    const projectionOutputDimensions = projectionVisualMetrics.outputDimensions;
 
     const xInputNode = createVectorStripMatrixNode({
         role: 'x-ln-copy',
@@ -351,25 +778,28 @@ function buildProjectionStageNode({
         labelText: 'X_ln',
         rowItems: buildProjectionInputRowItems(previewData.rows, baseSemantic, projectionKind),
         rowCount: previewData.rowCount,
-        compactWidth: isSmallScreen ? PROJECTION_XLN_COMPACT_WIDTH_SMALL : PROJECTION_XLN_COMPACT_WIDTH,
-        rowHeight: isSmallScreen ? PROJECTION_XLN_ROW_HEIGHT_SMALL : PROJECTION_XLN_ROW_HEIGHT,
+        compactWidth: xLnDimensions.compactWidth,
+        rowHeight: xLnDimensions.rowHeight,
         captionPosition: 'bottom',
+        captionLabelScale: MHSA_SYMBOL_CAPTION_LABEL_SCALE,
         captionDimensionsTex: inputDimensionCaption.tex,
         captionDimensionsText: inputDimensionCaption.text,
-        captionScaleWithNode: true,
         visualStyleKey: VIEW2D_STYLE_KEYS.RESIDUAL
     });
 
-    const weightCardSize = resolveRelativeCardSize({
-        rows: projectionData.weightRowCount,
-        cols: projectionData.weightColumnCount,
-        referenceCount: previewData.columnCount,
-        referenceExtent: isSmallScreen ? PROJECTION_WEIGHT_REFERENCE_EXTENT_SMALL : PROJECTION_WEIGHT_REFERENCE_EXTENT,
-        minWidth: PROJECTION_WEIGHT_MIN_WIDTH,
-        maxWidth: PROJECTION_WEIGHT_MAX_WIDTH,
-        minHeight: PROJECTION_WEIGHT_MIN_HEIGHT,
-        maxHeight: PROJECTION_WEIGHT_MAX_HEIGHT
-    });
+    const weightCardSize = projectionVisualMetrics.weightCardSize;
+    const projectionXlnCaptionExtent = Math.min(
+        xLnDimensions.compactWidth,
+        previewData.rowCount * xLnDimensions.rowHeight
+    );
+    const projectionWeightCaptionExtent = Math.max(1, Math.min(weightCardSize.width, weightCardSize.height));
+    const projectionWeightCaptionLabelScale = Math.max(
+        PROJECTION_WEIGHT_CAPTION_LABEL_SCALE_MIN,
+        Math.min(
+            PROJECTION_WEIGHT_CAPTION_LABEL_SCALE_MAX,
+            (projectionXlnCaptionExtent / projectionWeightCaptionExtent) * PROJECTION_WEIGHT_CAPTION_LABEL_SCALE_BOOST
+        )
+    );
     const weightNode = createCaptionedCardMatrixNode({
         role: 'projection-weight',
         semantic: buildSemantic(projectionSemantic, { role: 'projection-weight' }),
@@ -381,11 +811,13 @@ function buildProjectionStageNode({
         cardHeight: weightCardSize.height,
         cardCornerRadius: 10,
         captionMinScreenHeightPx: 28,
+        captionLabelScale: Math.max(
+            MHSA_WEIGHT_CAPTION_LABEL_SCALE_MIN,
+            projectionWeightCaptionLabelScale * MHSA_WEIGHT_CAPTION_LABEL_SCALE_FACTOR
+        ),
         visualStyleKey: styleKey,
-        captionScaleWithNode: true,
-        captionLabelScale: PROJECTION_CAPTION_LABEL_SCALE,
-        captionDimensionsScale: PROJECTION_CAPTION_DIMENSIONS_SCALE,
         background: projectionData.weightGradientCss || 'none',
+        disableCardSurfaceEffects: true,
         metadata: {
             kind: projectionKind
         }
@@ -394,24 +826,23 @@ function buildProjectionStageNode({
     const biasNode = createVectorStripMatrixNode({
         role: 'projection-bias',
         semantic: buildSemantic(projectionSemantic, { role: 'projection-bias' }),
-        labelTex: projectionData.biasLabelTex,
-        labelText: projectionData.biasLabelTex,
+        ...buildMhsaProjectionBiasLabel(projectionData.biasLabelTex),
         rowItems: buildProjectionBiasRowItems(projectionData, projectionSemantic),
         rowCount: 1,
         columnCount: projectionData.outputColumnCount,
-        compactWidth: isSmallScreen ? PROJECTION_BIAS_COMPACT_WIDTH_SMALL : PROJECTION_BIAS_COMPACT_WIDTH,
-        rowHeight: PROJECTION_BIAS_ROW_HEIGHT,
+        compactWidth: projectionVisualMetrics.biasCompactWidth,
+        rowHeight: projectionVisualMetrics.biasRowHeight,
         captionPosition: 'bottom',
         captionMinScreenHeightPx: PROJECTION_BIAS_CAPTION_MIN_SCREEN_HEIGHT,
+        captionPreferStandardSizing: true,
+        captionLabelScale: 1.08,
+        captionLabelMinScreenFontPx: PROJECTION_BIAS_LABEL_MIN_SCREEN_FONT_PX,
         captionDimensionsTex: biasDimensionCaption.tex,
         captionDimensionsText: biasDimensionCaption.text,
-        captionScaleWithNode: true,
-        captionLabelScale: PROJECTION_CAPTION_LABEL_SCALE,
-        captionDimensionsScale: PROJECTION_CAPTION_DIMENSIONS_SCALE,
         visualStyleKey: styleKey,
         stripMetadata: createView2dVectorStripMetadata({
-            compactWidth: isSmallScreen ? PROJECTION_BIAS_COMPACT_WIDTH_SMALL : PROJECTION_BIAS_COMPACT_WIDTH,
-            rowHeight: PROJECTION_BIAS_ROW_HEIGHT,
+            compactWidth: projectionVisualMetrics.biasCompactWidth,
+            rowHeight: projectionVisualMetrics.biasRowHeight,
             cornerRadius: PROJECTION_BIAS_CORNER_RADIUS,
             hideSurface: true
         }),
@@ -432,12 +863,12 @@ function buildProjectionStageNode({
         rowItems: buildProjectionOutputRowItems(projectionData.outputRows, baseSemantic, projectionKind),
         rowCount: projectionData.outputRowCount,
         columnCount: projectionData.outputColumnCount,
-        compactWidth: isSmallScreen ? PROJECTION_OUTPUT_COMPACT_WIDTH_SMALL : PROJECTION_OUTPUT_COMPACT_WIDTH,
-        rowHeight: isSmallScreen ? PROJECTION_OUTPUT_ROW_HEIGHT_SMALL : PROJECTION_OUTPUT_ROW_HEIGHT,
+        compactWidth: projectionOutputDimensions.compactWidth,
+        rowHeight: projectionOutputDimensions.rowHeight,
         captionPosition: 'bottom',
+        captionLabelScale: MHSA_SYMBOL_CAPTION_LABEL_SCALE,
         captionDimensionsTex: outputDimensionCaption.tex,
         captionDimensionsText: outputDimensionCaption.text,
-        captionScaleWithNode: true,
         visualStyleKey: styleKey,
         metadata: {
             kind: projectionKind,
@@ -503,17 +934,27 @@ function buildAttentionStageNode({
     scoreStage,
     queryStageIndex,
     valueStageIndex,
-    isSmallScreen = false
+    extraRows = null,
+    isSmallScreen = false,
+    layoutMetrics = null
 }) {
     const attentionSemantic = buildSemantic(baseSemantic, {
         stage: 'attention'
     });
-    const attentionQueryCompactWidth = isSmallScreen
-        ? PROJECTION_OUTPUT_COMPACT_WIDTH_SMALL
-        : PROJECTION_OUTPUT_COMPACT_WIDTH;
-    const attentionQueryRowHeight = isSmallScreen
-        ? PROJECTION_OUTPUT_ROW_HEIGHT_SMALL
-        : PROJECTION_OUTPUT_ROW_HEIGHT;
+    const attentionVectorDimensions = resolveVectorStripDimensions({
+        rowCount: scoreStage.queryRowCount,
+        extraRows,
+        baseCompactWidth: isSmallScreen ? PROJECTION_OUTPUT_COMPACT_WIDTH_SMALL : PROJECTION_OUTPUT_COMPACT_WIDTH,
+        baseRowHeight: isSmallScreen ? PROJECTION_OUTPUT_ROW_HEIGHT_SMALL : PROJECTION_OUTPUT_ROW_HEIGHT,
+        isSmallScreen,
+        layoutMetrics
+    });
+    const attentionQueryCompactWidth = attentionVectorDimensions.compactWidth;
+    const attentionQueryRowHeight = attentionVectorDimensions.rowHeight;
+    const transposeStripLayout = resolveTransposeStripLayout({
+        targetHeight: attentionQueryCompactWidth,
+        columnUnit: attentionQueryRowHeight
+    });
     const queryDimensionCaption = formatView2dMatrixDimensions(
         scoreStage.queryRowCount,
         scoreStage.queryColumnCount
@@ -521,14 +962,6 @@ function buildAttentionStageNode({
     const transposeDimensionCaption = formatView2dMatrixDimensions(
         scoreStage.transposeRowCount,
         scoreStage.transposeColumnCount
-    );
-    const transposeTargetWidth = Math.max(
-        isSmallScreen ? ATTENTION_TRANSPOSE_MIN_WIDTH_SMALL : ATTENTION_TRANSPOSE_MIN_WIDTH,
-        scoreStage.transposeColumnCount * attentionQueryRowHeight
-    );
-    const transposeColumnWidth = Math.max(
-        1,
-        Math.floor(transposeTargetWidth / Math.max(1, scoreStage.transposeColumnCount))
     );
 
     const querySourceNode = createVectorStripMatrixNode({
@@ -542,9 +975,9 @@ function buildAttentionStageNode({
         compactWidth: attentionQueryCompactWidth,
         rowHeight: attentionQueryRowHeight,
         captionPosition: 'bottom',
+        captionLabelScale: MHSA_SYMBOL_CAPTION_LABEL_SCALE,
         captionDimensionsTex: queryDimensionCaption.tex,
         captionDimensionsText: queryDimensionCaption.text,
-        captionScaleWithNode: true,
         visualStyleKey: VIEW2D_STYLE_KEYS.MHSA_Q,
         metadata: {
             stageIndex: queryStageIndex
@@ -559,16 +992,20 @@ function buildAttentionStageNode({
         columnItems: buildTransposeColumnItems(scoreStage.transposeColumns, attentionSemantic),
         rowCount: scoreStage.transposeRowCount,
         columnCount: scoreStage.transposeColumnCount,
-        compactHeight: attentionQueryCompactWidth,
-        columnWidth: transposeColumnWidth,
-        columnGap: 0,
-        paddingX: 0,
-        paddingY: 0,
+        displayRowCount: scoreStage.transposeRowCount,
+        displayColumnCount: scoreStage.transposeColumnCount,
+        measureRows: scoreStage.transposeRowCount,
+        measureCols: scoreStage.transposeColumnCount,
+        colWidth: transposeStripLayout.colWidth,
+        colHeight: transposeStripLayout.colHeight,
+        colGap: transposeStripLayout.colGap,
+        paddingX: transposeStripLayout.paddingX,
+        paddingY: transposeStripLayout.paddingY,
         cornerRadius: ATTENTION_TRANSPOSE_CORNER_RADIUS,
         captionPosition: 'bottom',
+        captionLabelScale: MHSA_SYMBOL_CAPTION_LABEL_SCALE,
         captionDimensionsTex: transposeDimensionCaption.tex,
         captionDimensionsText: transposeDimensionCaption.text,
-        captionScaleWithNode: true,
         visualStyleKey: VIEW2D_STYLE_KEYS.MHSA_K
     });
 
@@ -584,6 +1021,10 @@ function buildAttentionStageNode({
         rowItems: buildAttentionGridRowItems(scoreStage.outputRows, buildSemantic(attentionSemantic, { stage: 'attention-pre-score' })),
         visual: {
             styleKey: VIEW2D_STYLE_KEYS.MHSA_SCORE
+        },
+        metadata: {
+            ...createPersistentAttentionGridMetadata(),
+            ...createAttentionMatrixCaptionMetadata(scoreStage.outputRowCount, scoreStage.outputColumnCount)
         }
     });
 
@@ -599,6 +1040,10 @@ function buildAttentionStageNode({
         rowItems: buildAttentionGridRowItems(scoreStage.outputRows, buildSemantic(attentionSemantic, { stage: 'attention-masked-input' })),
         visual: {
             styleKey: VIEW2D_STYLE_KEYS.MHSA_SCORE
+        },
+        metadata: {
+            ...createPersistentAttentionGridMetadata(),
+            ...createAttentionMatrixCaptionMetadata(scoreStage.outputRowCount, scoreStage.outputColumnCount)
         }
     });
 
@@ -614,6 +1059,10 @@ function buildAttentionStageNode({
         rowItems: buildAttentionGridRowItems(scoreStage.maskRows, buildSemantic(attentionSemantic, { stage: 'attention-mask' })),
         visual: {
             styleKey: VIEW2D_STYLE_KEYS.MHSA_MASK
+        },
+        metadata: {
+            ...createPersistentAttentionGridMetadata(),
+            ...createAttentionMatrixCaptionMetadata(scoreStage.outputRowCount, scoreStage.outputColumnCount)
         }
     });
 
@@ -629,6 +1078,10 @@ function buildAttentionStageNode({
         rowItems: buildAttentionGridRowItems(scoreStage.postRows, buildSemantic(attentionSemantic, { stage: 'attention-post' })),
         visual: {
             styleKey: VIEW2D_STYLE_KEYS.MHSA_POST
+        },
+        metadata: {
+            ...createPersistentAttentionGridMetadata(),
+            ...createAttentionMatrixCaptionMetadata(scoreStage.postRowCount, scoreStage.postColumnCount)
         }
     });
 
@@ -644,15 +1097,31 @@ function buildAttentionStageNode({
                 tex: scoreStage.softmaxLabelTex,
                 text: 'softmax',
                 presentation: VIEW2D_TEXT_PRESENTATIONS.LABEL,
-                visual: { styleKey: VIEW2D_STYLE_KEYS.LABEL }
+                visual: { styleKey: VIEW2D_STYLE_KEYS.LABEL },
+                metadata: {
+                    renderMode: 'dom-katex',
+                    minScreenHeightPx: 0,
+                    persistentMinScreenFontPx: isSmallScreen
+                        ? ATTENTION_SOFTMAX_PERSISTENT_FONT_PX_SMALL
+                        : ATTENTION_SOFTMAX_PERSISTENT_FONT_PX,
+                    zoomedOutMinScreenFontPx: isSmallScreen
+                        ? ATTENTION_SOFTMAX_ZOOMED_OUT_FONT_PX_SMALL
+                        : ATTENTION_SOFTMAX_ZOOMED_OUT_FONT_PX
+                }
             }),
             createOperatorNode({
                 role: 'attention-softmax-open',
                 semantic: buildSemantic(attentionSemantic, { role: 'attention-softmax-open', operatorKey: 'open' }),
                 text: '(',
-                visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR }
+                visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR },
+                metadata: {
+                    fontScale: ATTENTION_SOFTMAX_GROUPING_OPERATOR_SCALE
+                }
             })
-        ]
+        ],
+        metadata: {
+            gapOverride: isSmallScreen ? ATTENTION_SOFTMAX_PREFIX_GAP_SMALL : ATTENTION_SOFTMAX_PREFIX_GAP
+        }
     });
 
     const headOutputStageNode = Array.isArray(scoreStage.valueRows) && Array.isArray(scoreStage.headOutputRows)
@@ -662,47 +1131,63 @@ function buildAttentionStageNode({
             direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
             gapKey: 'head-output',
             children: [
-                createMatrixNode({
-                    role: 'attention-post-copy',
-                    semantic: buildSemantic(attentionSemantic, { role: 'attention-post-copy', stage: 'head-output' }),
-                    label: buildLabel(scoreStage.postLabelTex, scoreStage.postLabelTex),
-                    dimensions: {
-                        rows: scoreStage.postRowCount,
-                        cols: scoreStage.postColumnCount
-                    },
-                    presentation: VIEW2D_MATRIX_PRESENTATIONS.GRID,
-                    rowItems: buildAttentionGridRowItems(
-                        scoreStage.postRows,
-                        buildSemantic(attentionSemantic, { stage: 'attention-post-copy' })
-                    ),
-                    visual: {
-                        styleKey: VIEW2D_STYLE_KEYS.MHSA_POST
-                    }
-                }),
-                createOperatorNode({
-                    role: 'attention-head-output-multiply',
-                    semantic: buildSemantic(attentionSemantic, { role: 'attention-head-output-multiply', operatorKey: 'multiply' }),
-                    text: 'x',
-                    visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR }
-                }),
-                createMatrixNode({
-                    role: 'attention-value-post',
-                    semantic: buildSemantic(attentionSemantic, { role: 'attention-value-post', stage: 'head-output' }),
-                    label: buildLabel(scoreStage.valueLabelTex, scoreStage.valueLabelTex),
-                    dimensions: {
-                        rows: scoreStage.valueRowCount,
-                        cols: scoreStage.valueColumnCount
-                    },
-                    presentation: VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS,
-                    rowItems: buildGradientRowItems(scoreStage.valueRows, buildSemantic(attentionSemantic, {
-                        stage: 'attention-value-post'
-                    }), 'attention-value-post-row'),
-                    visual: {
-                        styleKey: VIEW2D_STYLE_KEYS.MHSA_V
-                    },
+                createGroupNode({
+                    role: 'attention-head-output-product',
+                    semantic: buildSemantic(attentionSemantic, { role: 'attention-head-output-product', stage: 'head-output' }),
+                    direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
+                    gapKey: 'inline',
+                    children: [
+                        createMatrixNode({
+                            role: 'attention-post-copy',
+                            semantic: buildSemantic(attentionSemantic, { role: 'attention-post-copy', stage: 'head-output' }),
+                            label: buildLabel(scoreStage.postLabelTex, scoreStage.postLabelTex),
+                            dimensions: {
+                                rows: scoreStage.postRowCount,
+                                cols: scoreStage.postColumnCount
+                            },
+                            presentation: VIEW2D_MATRIX_PRESENTATIONS.GRID,
+                            rowItems: buildAttentionGridRowItems(
+                                scoreStage.postRows,
+                                buildSemantic(attentionSemantic, { stage: 'attention-post-copy' })
+                            ),
+                            visual: {
+                                styleKey: VIEW2D_STYLE_KEYS.MHSA_POST
+                            },
+                            metadata: {
+                                ...createPersistentAttentionGridMetadata(),
+                                ...createAttentionMatrixCaptionMetadata(scoreStage.postRowCount, scoreStage.postColumnCount)
+                            }
+                        }),
+                        createOperatorNode({
+                            role: 'attention-head-output-multiply',
+                            semantic: buildSemantic(attentionSemantic, { role: 'attention-head-output-multiply', operatorKey: 'multiply' }),
+                            text: 'x',
+                            visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR }
+                        }),
+                        createVectorStripMatrixNode({
+                            role: 'attention-value-post',
+                            semantic: buildSemantic(attentionSemantic, { role: 'attention-value-post', stage: 'head-output' }),
+                            labelTex: scoreStage.valueLabelTex,
+                            labelText: scoreStage.valueLabelTex,
+                            rowItems: buildGradientRowItems(scoreStage.valueRows, buildSemantic(attentionSemantic, {
+                                stage: 'attention-value-post'
+                            }), 'attention-value-post-row'),
+                            rowCount: scoreStage.valueRowCount,
+                            columnCount: scoreStage.valueColumnCount,
+                            compactWidth: attentionVectorDimensions.compactWidth,
+                            rowHeight: attentionVectorDimensions.rowHeight,
+                            captionPosition: 'bottom',
+                            captionLabelScale: MHSA_SYMBOL_CAPTION_LABEL_SCALE,
+                            visualStyleKey: VIEW2D_STYLE_KEYS.MHSA_V,
+                            metadata: {
+                                stageIndex: valueStageIndex
+                            }
+                        })
+                    ],
                     metadata: {
-                        stageIndex: valueStageIndex,
-                        ...createView2dVectorStripMetadata()
+                        gapOverride: isSmallScreen
+                            ? ATTENTION_HEAD_OUTPUT_PRODUCT_GAP_SMALL
+                            : ATTENTION_HEAD_OUTPUT_PRODUCT_GAP
                     }
                 }),
                 createOperatorNode({
@@ -711,31 +1196,34 @@ function buildAttentionStageNode({
                     text: '=',
                     visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR }
                 }),
-                createMatrixNode({
+                createVectorStripMatrixNode({
                     role: 'attention-head-output',
                     semantic: buildSemantic(attentionSemantic, { role: 'attention-head-output', stage: 'head-output' }),
-                    label: buildLabel(scoreStage.headOutputLabelTex, scoreStage.headOutputLabelTex),
-                    dimensions: {
-                        rows: scoreStage.headOutputRowCount,
-                        cols: scoreStage.headOutputColumnCount
-                    },
-                    presentation: VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS,
+                    labelTex: scoreStage.headOutputLabelTex,
+                    labelText: scoreStage.headOutputLabelTex,
                     rowItems: buildGradientRowItems(
                         scoreStage.headOutputRows,
                         buildSemantic(attentionSemantic, { stage: 'attention-head-output' }),
                         'attention-head-output-row'
                     ),
-                    visual: {
-                        styleKey: VIEW2D_STYLE_KEYS.MHSA_HEAD_OUTPUT
-                    },
-                    metadata: createView2dVectorStripMetadata()
+                    rowCount: scoreStage.headOutputRowCount,
+                    columnCount: scoreStage.headOutputColumnCount,
+                    compactWidth: attentionVectorDimensions.compactWidth,
+                    rowHeight: attentionVectorDimensions.rowHeight,
+                    captionPosition: 'bottom',
+                    captionLabelScale: MHSA_SYMBOL_CAPTION_LABEL_SCALE,
+                    visualStyleKey: VIEW2D_STYLE_KEYS.MHSA_HEAD_OUTPUT
                 })
-            ]
+            ],
+            metadata: {
+                gapOverride: isSmallScreen
+                    ? ATTENTION_HEAD_OUTPUT_GAP_SMALL
+                    : ATTENTION_HEAD_OUTPUT_GAP
+            }
         })
         : null;
 
-    const softmaxFlowChildren = [
-        softmaxPrefixNode,
+    const softmaxCoreFlowChildren = [
         maskedInputNode,
         createOperatorNode({
             role: 'attention-softmax-plus',
@@ -748,7 +1236,10 @@ function buildAttentionStageNode({
             role: 'attention-softmax-close',
             semantic: buildSemantic(attentionSemantic, { role: 'attention-softmax-close', operatorKey: 'close' }),
             text: ')',
-            visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR }
+            visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR },
+            metadata: {
+                fontScale: ATTENTION_SOFTMAX_GROUPING_OPERATOR_SCALE
+            }
         }),
         createOperatorNode({
             role: 'attention-softmax-equals',
@@ -759,52 +1250,147 @@ function buildAttentionStageNode({
         postNode
     ];
     if (headOutputStageNode) {
-        softmaxFlowChildren.push(headOutputStageNode);
+        softmaxCoreFlowChildren.push(
+            createHiddenSpacer({
+                semantic: buildSemantic(attentionSemantic, {
+                    role: 'attention-post-copy-stage-spacer'
+                }),
+                role: 'attention-post-copy-stage-spacer',
+                width: isSmallScreen
+                    ? ATTENTION_POST_COPY_STAGE_SPACER_SMALL
+                    : ATTENTION_POST_COPY_STAGE_SPACER,
+                height: 1
+            })
+        );
+        softmaxCoreFlowChildren.push(headOutputStageNode);
     }
+
+    const softmaxCoreFlowNode = createGroupNode({
+        role: 'attention-softmax-core-flow',
+        semantic: buildSemantic(attentionSemantic, { role: 'attention-softmax-core-flow' }),
+        direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
+        gapKey: 'softmax',
+        children: softmaxCoreFlowChildren
+    });
+
+    const softmaxCoreGap = isSmallScreen
+        ? ATTENTION_SOFTMAX_FLOW_GAP_SMALL
+        : ATTENTION_SOFTMAX_FLOW_GAP;
+    const softmaxPrefixOffset = resolveAttentionSoftmaxPrefixOffset(
+        scoreStage.outputRowCount,
+        isSmallScreen,
+        layoutMetrics
+    );
+
+    const softmaxPrefixColumnNode = createGroupNode({
+        role: 'attention-softmax-prefix-column',
+        semantic: buildSemantic(attentionSemantic, { role: 'attention-softmax-prefix-column' }),
+        direction: VIEW2D_LAYOUT_DIRECTIONS.VERTICAL,
+        gapKey: 'default',
+        align: 'end',
+        children: [
+            createHiddenSpacer({
+                semantic: buildSemantic(attentionSemantic, {
+                    role: 'attention-softmax-prefix-offset'
+                }),
+                role: 'attention-softmax-prefix-offset',
+                width: 1,
+                height: softmaxPrefixOffset
+            }),
+            softmaxPrefixNode
+        ],
+        metadata: {
+            gapOverride: 0
+        }
+    });
+
+    const softmaxCoreColumnNode = createGroupNode({
+        role: 'attention-softmax-core-column',
+        semantic: buildSemantic(attentionSemantic, { role: 'attention-softmax-core-column' }),
+        direction: VIEW2D_LAYOUT_DIRECTIONS.VERTICAL,
+        gapKey: 'softmax',
+        align: 'start',
+        children: [
+            preScoreNode,
+            softmaxCoreFlowNode
+        ],
+        metadata: {
+            gapOverride: softmaxCoreGap
+        }
+    });
+
+    const softmaxBodyNode = createGroupNode({
+        role: 'attention-softmax-body',
+        semantic: buildSemantic(attentionSemantic, { role: 'attention-softmax-body' }),
+        direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
+        gapKey: 'inline',
+        align: 'start',
+        children: [
+            softmaxPrefixColumnNode,
+            softmaxCoreColumnNode
+        ],
+        metadata: {
+            gapOverride: isSmallScreen ? ATTENTION_SOFTMAX_BODY_GAP_SMALL : ATTENTION_SOFTMAX_BODY_GAP
+        }
+    });
+
+    const softmaxAlignmentSpacer = createHiddenSpacer({
+        semantic: buildSemantic(attentionSemantic, {
+            role: 'attention-softmax-alignment-spacer'
+        }),
+        role: 'attention-softmax-alignment-spacer',
+        width: 1,
+        height: resolveAttentionFlowRowHeight(scoreStage.outputRowCount, isSmallScreen, layoutMetrics)
+    });
+
+    const attentionResultEqualsNode = createGroupNode({
+        role: 'attention-result-equals-column',
+        semantic: buildSemantic(attentionSemantic, { role: 'attention-result-equals-column' }),
+        direction: VIEW2D_LAYOUT_DIRECTIONS.VERTICAL,
+        gapKey: 'default',
+        align: 'center',
+        children: [
+            createHiddenSpacer({
+                semantic: buildSemantic(attentionSemantic, {
+                    role: 'attention-result-equals-offset'
+                }),
+                role: 'attention-result-equals-offset',
+                width: 1,
+                height: resolveAttentionFlowRowHeight(scoreStage.outputRowCount, isSmallScreen, layoutMetrics)
+            }),
+            createOperatorNode({
+                role: 'attention-equals',
+                semantic: buildSemantic(attentionSemantic, { role: 'attention-equals', operatorKey: 'equals' }),
+                text: '=',
+                visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR }
+            })
+        ],
+        metadata: {
+            gapOverride: 0
+        }
+    });
 
     const softmaxStageNode = createGroupNode({
         role: 'attention-softmax-stage',
         semantic: buildSemantic(attentionSemantic, { role: 'attention-softmax-stage' }),
         direction: VIEW2D_LAYOUT_DIRECTIONS.VERTICAL,
         gapKey: 'softmax',
+        align: 'start',
         children: [
-            preScoreNode,
-            createGroupNode({
-                role: 'attention-softmax-flow',
-                semantic: buildSemantic(attentionSemantic, { role: 'attention-softmax-flow' }),
-                direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
-                gapKey: 'softmax',
-                children: softmaxFlowChildren
-            })
-        ]
+            softmaxAlignmentSpacer,
+            softmaxBodyNode
+        ],
+        metadata: {
+            gapOverride: isSmallScreen ? ATTENTION_RESULT_STAGE_GAP_SMALL : ATTENTION_RESULT_STAGE_GAP
+        }
     });
 
-    return createGroupNode({
-        role: 'attention-stage',
-        semantic: buildSemantic(attentionSemantic, { role: 'attention-stage' }),
+    const divisorNode = createGroupNode({
+        role: 'attention-divisor-group',
+        semantic: buildSemantic(attentionSemantic, { role: 'attention-divisor-group' }),
         direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
-        gapKey: 'attention',
+        gapKey: 'inline',
         children: [
-            createOperatorNode({
-                role: 'attention-open',
-                semantic: buildSemantic(attentionSemantic, { role: 'attention-open', operatorKey: 'open' }),
-                text: '(',
-                visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR }
-            }),
-            querySourceNode,
-            createOperatorNode({
-                role: 'attention-multiply',
-                semantic: buildSemantic(attentionSemantic, { role: 'attention-multiply', operatorKey: 'multiply' }),
-                text: 'x',
-                visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR }
-            }),
-            transposeNode,
-            createOperatorNode({
-                role: 'attention-close',
-                semantic: buildSemantic(attentionSemantic, { role: 'attention-close', operatorKey: 'close' }),
-                text: ')',
-                visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR }
-            }),
             createOperatorNode({
                 role: 'attention-divide',
                 semantic: buildSemantic(attentionSemantic, { role: 'attention-divide', operatorKey: 'divide' }),
@@ -815,17 +1401,117 @@ function buildAttentionStageNode({
                 role: 'attention-scale',
                 semantic: buildSemantic(attentionSemantic, { role: 'attention-scale', focusKey: 'scale' }),
                 tex: scoreStage.scaleLabelTex,
-                text: 'sqrt(d_h)',
+                text: 'sqrt(d_head)',
                 presentation: VIEW2D_TEXT_PRESENTATIONS.LABEL,
-                visual: { styleKey: VIEW2D_STYLE_KEYS.LABEL }
+                visual: { styleKey: VIEW2D_STYLE_KEYS.LABEL },
+                metadata: {
+                    renderMode: 'dom-katex',
+                    minScreenHeightPx: 0
+                }
             }),
+        ],
+        metadata: {
+            gapOverride: isSmallScreen ? ATTENTION_DIVISOR_GAP_SMALL : ATTENTION_DIVISOR_GAP
+        }
+    });
+
+    const divisorClusterNode = createGroupNode({
+        role: 'attention-divisor-cluster',
+        semantic: buildSemantic(attentionSemantic, { role: 'attention-divisor-cluster' }),
+        direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
+        gapKey: 'inline',
+        children: [
             createOperatorNode({
-                role: 'attention-equals',
-                semantic: buildSemantic(attentionSemantic, { role: 'attention-equals', operatorKey: 'equals' }),
-                text: '=',
+                role: 'attention-close',
+                semantic: buildSemantic(attentionSemantic, { role: 'attention-close', operatorKey: 'close' }),
+                text: ')',
+                visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR },
+                metadata: {
+                    fontScale: ATTENTION_GROUPING_OPERATOR_SCALE
+                }
+            }),
+            divisorNode
+        ],
+        metadata: {
+            gapOverride: isSmallScreen ? ATTENTION_CLOSE_DIVISOR_GAP_SMALL : ATTENTION_CLOSE_DIVISOR_GAP
+        }
+    });
+
+    const transposeCloseNode = createGroupNode({
+        role: 'attention-transpose-close-group',
+        semantic: buildSemantic(attentionSemantic, { role: 'attention-transpose-close-group' }),
+        direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
+        gapKey: 'inline',
+        children: [
+            transposeNode,
+            createOperatorNode({
+                role: 'attention-close',
+                semantic: buildSemantic(attentionSemantic, { role: 'attention-close', operatorKey: 'close' }),
+                text: ')',
+                visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR },
+                metadata: {
+                    fontScale: ATTENTION_GROUPING_OPERATOR_SCALE
+                }
+            })
+        ],
+        metadata: {
+            gapOverride: isSmallScreen ? ATTENTION_KT_CLOSE_GAP_SMALL : ATTENTION_KT_CLOSE_GAP
+        }
+    });
+
+    const qktEquationNode = createGroupNode({
+        role: 'attention-qkt-equation',
+        semantic: buildSemantic(attentionSemantic, { role: 'attention-qkt-equation' }),
+        direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
+        gapKey: 'inline',
+        children: [
+            createOperatorNode({
+                role: 'attention-open',
+                semantic: buildSemantic(attentionSemantic, { role: 'attention-open', operatorKey: 'open' }),
+                text: '(',
+                visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR },
+                metadata: {
+                    fontScale: ATTENTION_GROUPING_OPERATOR_SCALE
+                }
+            }),
+            querySourceNode,
+            createOperatorNode({
+                role: 'attention-multiply',
+                semantic: buildSemantic(attentionSemantic, { role: 'attention-multiply', operatorKey: 'multiply' }),
+                text: 'x',
                 visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR }
             }),
+            transposeCloseNode
+        ],
+        metadata: {
+            gapOverride: isSmallScreen ? ATTENTION_QKT_GROUP_GAP_SMALL : ATTENTION_QKT_GROUP_GAP
+        }
+    });
+
+    const attentionResultNode = createGroupNode({
+        role: 'attention-result-stage',
+        semantic: buildSemantic(attentionSemantic, { role: 'attention-result-stage' }),
+        direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
+        gapKey: 'inline',
+        align: 'start',
+        children: [
+            attentionResultEqualsNode,
             softmaxStageNode
+        ],
+        metadata: {
+            gapOverride: isSmallScreen ? ATTENTION_RESULT_GROUP_GAP_SMALL : ATTENTION_RESULT_GROUP_GAP
+        }
+    });
+
+    return createGroupNode({
+        role: 'attention-stage',
+        semantic: buildSemantic(attentionSemantic, { role: 'attention-stage' }),
+        direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
+        gapKey: 'attention',
+        children: [
+            qktEquationNode,
+            divisorClusterNode,
+            attentionResultNode
         ],
         metadata: {
             queryStageIndex,
@@ -838,7 +1524,7 @@ function buildProjectionIngressConnectorNodes({
     baseSemantic,
     layoutMetrics,
     projectionNodes,
-    sourceAnchorNode
+    sourceNode
 }) {
     const connectorGaps = layoutMetrics?.connectorGaps || {};
     const findProjectionInput = (kind) => projectionNodes.find((stageNode) => stageNode?.metadata?.kind === kind)
@@ -846,7 +1532,7 @@ function buildProjectionIngressConnectorNodes({
 
     return ['q', 'k', 'v'].map((kind) => {
         const targetNode = findProjectionInput(kind);
-        if (!sourceAnchorNode || !targetNode) return null;
+        if (!sourceNode || !targetNode) return null;
         return createConnectorNode({
             role: `connector-xln-${kind}`,
             semantic: buildSemantic(baseSemantic, {
@@ -854,7 +1540,7 @@ function buildProjectionIngressConnectorNodes({
                 role: 'connector-xln',
                 branchKey: kind
             }),
-            source: createAnchorRef(sourceAnchorNode.id, VIEW2D_ANCHOR_SIDES.LEFT),
+            source: createAnchorRef(sourceNode.id, VIEW2D_ANCHOR_SIDES.RIGHT),
             target: createAnchorRef(targetNode.id, VIEW2D_ANCHOR_SIDES.LEFT),
             route: VIEW2D_CONNECTOR_ROUTES.HORIZONTAL,
             gap: 0,
@@ -876,9 +1562,15 @@ function buildConnectorNodes({
     baseSemantic,
     layoutMetrics,
     projectionNodes,
-    attentionNode
+    attentionNode,
+    isSmallScreen = false
 }) {
     const connectorGaps = layoutMetrics?.connectorGaps || {};
+    const attentionConnectorClearance = resolveAttentionBottomCaptionConnectorClearance({
+        rowCount: layoutMetrics?.rowCount,
+        extraRows: layoutMetrics?.extraRows,
+        isSmallScreen
+    });
     const findProjectionOutput = (kind) => projectionNodes.find((stageNode) => stageNode?.metadata?.kind === kind)
         ?.children?.[2]?.children?.[4] || null;
     const findAttentionNode = (role) => {
@@ -930,8 +1622,9 @@ function buildConnectorNodes({
                 semantic: buildSemantic(baseSemantic, { stage: 'connector-k', role: 'connector-k' }),
                 source: createAnchorRef(kOutputNode.id, VIEW2D_ANCHOR_SIDES.RIGHT),
                 target: createAnchorRef(transposeNode.id, VIEW2D_ANCHOR_SIDES.BOTTOM),
-                route: VIEW2D_CONNECTOR_ROUTES.HORIZONTAL,
+                route: VIEW2D_CONNECTOR_ROUTES.ELBOW,
                 gap: connectorGaps.transpose,
+                targetGap: attentionConnectorClearance,
                 gapKey: 'transpose',
                 visual: {
                     styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL,
@@ -982,17 +1675,21 @@ function buildConnectorNodes({
             ? createConnectorNode({
                 role: 'connector-v',
                 semantic: buildSemantic(baseSemantic, { stage: 'connector-v', role: 'connector-v' }),
-                source: createAnchorRef(vOutputNode.id, VIEW2D_ANCHOR_SIDES.RIGHT),
+                source: createAnchorRef(vOutputNode.id, VIEW2D_ANCHOR_SIDES.BOTTOM),
                 target: createAnchorRef(valuePostNode.id, VIEW2D_ANCHOR_SIDES.BOTTOM),
-                route: VIEW2D_CONNECTOR_ROUTES.HORIZONTAL,
+                route: VIEW2D_CONNECTOR_ROUTES.UNDERPASS,
                 gap: connectorGaps.value,
+                sourceGap: ATTENTION_CONNECTOR_CAPTION_EXIT_GAP,
+                targetGap: ATTENTION_CONNECTOR_CAPTION_EXIT_GAP,
                 gapKey: 'value',
                 visual: {
                     styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL,
                     stroke: MHSA_CONNECTOR_STROKE
                 },
                 metadata: {
-                    preserveColor: true
+                    preserveColor: true,
+                    sourceAnchorMode: 'caption-bottom',
+                    targetAnchorMode: 'caption-bottom'
                 }
             })
             : null
@@ -1064,14 +1761,19 @@ export function buildMhsaSceneModel({
                 previewData: resolvedPreviewData,
                 projectionData,
                 stageIndex,
-                isSmallScreen
+                extraRows: resolvedLayoutMetrics?.extraRows,
+                isSmallScreen,
+                layoutMetrics: resolvedLayoutMetrics
             });
         })
         .filter(Boolean);
-    const projectionSourceAnchorNode = buildProjectionSourceAnchorNode({
+    const projectionSourceNode = buildProjectionSourceNode({
         baseSemantic,
+        previewData: resolvedPreviewData,
         rowCount: resolvedPreviewData.rowCount,
-        isSmallScreen
+        extraRows: resolvedLayoutMetrics?.extraRows,
+        isSmallScreen,
+        layoutMetrics: resolvedLayoutMetrics
     });
     const projectionStackNode = createGroupNode({
         role: 'projection-stack',
@@ -1080,10 +1782,18 @@ export function buildMhsaSceneModel({
         gapKey: 'stack',
         children: projectionNodes,
         metadata: {
-            gapOverride: isSmallScreen ? PROJECTION_STACK_GAP_SMALL : PROJECTION_STACK_GAP
+            gapOverride: resolveProjectionStackGap({
+                rowCount: resolvedPreviewData.rowCount,
+                extraRows: resolvedLayoutMetrics?.extraRows,
+                isSmallScreen
+            })
         }
     });
-    const attentionStageLift = resolveAttentionStageLift(resolvedPreviewData.rowCount, isSmallScreen);
+    const attentionStageLift = resolveAttentionStageLift({
+        rowCount: resolvedPreviewData.rowCount,
+        extraRows: resolvedLayoutMetrics?.extraRows,
+        isSmallScreen
+    });
 
     const attentionNode = resolvedPreviewData.attentionScoreStage
         && Array.isArray(resolvedPreviewData.attentionScoreStage.queryRows)
@@ -1093,7 +1803,9 @@ export function buildMhsaSceneModel({
             scoreStage: resolvedPreviewData.attentionScoreStage,
             queryStageIndex,
             valueStageIndex,
-            isSmallScreen
+            extraRows: resolvedLayoutMetrics?.extraRows,
+            isSmallScreen,
+            layoutMetrics: resolvedLayoutMetrics
         })
         : null;
     const attentionRootNode = attentionNode
@@ -1130,7 +1842,7 @@ export function buildMhsaSceneModel({
             direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
             gapKey: 'projection',
             children: [
-                projectionSourceAnchorNode,
+                projectionSourceNode,
                 projectionStackNode
             ],
             metadata: {
@@ -1143,7 +1855,7 @@ export function buildMhsaSceneModel({
         baseSemantic,
         layoutMetrics: resolvedLayoutMetrics,
         projectionNodes,
-        sourceAnchorNode: projectionSourceAnchorNode
+        sourceNode: projectionSourceNode
     });
     if (attentionRootNode) {
         rootNodes.push(attentionRootNode);
@@ -1151,7 +1863,8 @@ export function buildMhsaSceneModel({
             baseSemantic,
             layoutMetrics: resolvedLayoutMetrics,
             projectionNodes,
-            attentionNode
+            attentionNode,
+            isSmallScreen
         }));
     }
 

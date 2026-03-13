@@ -4,16 +4,67 @@ import {
     flattenSceneNodes,
     VIEW2D_NODE_KINDS
 } from '../view2d/schema/sceneTypes.js';
+import {
+    isMhsaDetailScene,
+    resolveMhsaDetailFixedTextSizing
+} from '../view2d/shared/mhsaDetailFixedLabelSizing.js';
 
 const RESIDUAL_CAPTION_TOP_GAP_PX = 4;
 const RESIDUAL_CAPTION_BOTTOM_GAP_PX = 4;
 const RESIDUAL_CAPTION_FONT_RAMP_PX = 44;
-const RESIDUAL_CAPTION_LABEL_MIN_FONT_PX = 12;
-const RESIDUAL_CAPTION_LABEL_MAX_FONT_PX = 14;
-const RESIDUAL_CAPTION_DIMENSIONS_MIN_FONT_PX = 10;
-const RESIDUAL_CAPTION_DIMENSIONS_MAX_FONT_PX = 11;
+const RESIDUAL_CAPTION_LABEL_MIN_FONT_PX = 14;
+const RESIDUAL_CAPTION_LABEL_MAX_FONT_PX = 16;
+const RESIDUAL_CAPTION_DIMENSIONS_MIN_FONT_PX = 12;
+const RESIDUAL_CAPTION_DIMENSIONS_MAX_FONT_PX = 14;
 const RESIDUAL_TOP_CAPTION_LABEL_RATIO = 0.34;
 const RESIDUAL_TOP_CAPTION_DIMENSIONS_RATIO = 0.24;
+const ZOOMED_OUT_FONT_SOFTEN_MIN_SCALE = 0.82;
+const ZOOMED_OUT_FONT_SOFTEN_RANGE_PX = 24;
+const MHSA_UNIFORM_CAPTION_MIN_SCREEN_HEIGHT_PX = 28;
+const MHSA_UNIFORM_CAPTION_LABEL_MIN_FONT_PX = 17;
+const MHSA_UNIFORM_CAPTION_LABEL_MAX_FONT_PX = 17;
+const MHSA_UNIFORM_CAPTION_DIMENSIONS_MIN_FONT_PX = 13;
+const MHSA_UNIFORM_CAPTION_DIMENSIONS_MAX_FONT_PX = 14;
+
+function escapeHtml(value = '') {
+    return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+}
+
+function resolveInlineSubscriptParts(tex = '', fallbackText = '') {
+    const safeTex = typeof tex === 'string' ? tex.trim() : '';
+    const safeFallback = typeof fallbackText === 'string' ? fallbackText.trim() : '';
+    const rawValue = safeTex || safeFallback;
+    if (!rawValue.length) return null;
+
+    const patterns = [
+        /^([A-Za-z]+)_\{\\mathrm\{([A-Za-z]+)\}\}$/,
+        /^([A-Za-z]+)_\{\\([A-Za-z]+)\}$/,
+        /^([A-Za-z]+)_\{([A-Za-z]+)\}$/,
+        /^([A-Za-z]+)_([A-Za-z]+)$/
+    ];
+    for (const pattern of patterns) {
+        const match = rawValue.match(pattern);
+        if (!match) continue;
+        const [, base, sub] = match;
+        if (!base || !sub) continue;
+        return { base, sub };
+    }
+    return null;
+}
+
+function renderInlineSubscript(targetEl, base = '', sub = '') {
+    targetEl.innerHTML = `
+        <span class="detail-transformer-view2d-inline-subscript">
+            <span class="detail-transformer-view2d-inline-subscript__base">${escapeHtml(base)}</span>
+            <span class="detail-transformer-view2d-inline-subscript__sub">${escapeHtml(sub)}</span>
+        </span>
+    `;
+}
 
 function renderKatex(targetEl, tex = '', fallbackText = '') {
     if (!targetEl) return;
@@ -36,6 +87,13 @@ function renderKatex(targetEl, tex = '', fallbackText = '') {
         }
     }
 
+    const inlineSubscriptParts = resolveInlineSubscriptParts(safeTex, safeFallback);
+    if (inlineSubscriptParts) {
+        renderInlineSubscript(targetEl, inlineSubscriptParts.base, inlineSubscriptParts.sub);
+        targetEl.dataset.renderKey = cacheKey;
+        return;
+    }
+
     targetEl.textContent = safeFallback || safeTex;
     targetEl.dataset.renderKey = cacheKey;
 }
@@ -44,26 +102,77 @@ function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
 }
 
-function resolveCaptionFontPx({
+export function resolveCaptionScreenExtent({
+    captionPosition = 'bottom',
+    projectedContentWidth = 0,
+    projectedContentHeight = 0,
+    scaleWithNode = false
+} = {}) {
+    const safeWidth = Number.isFinite(projectedContentWidth)
+        ? Math.max(0, Number(projectedContentWidth))
+        : 0;
+    const safeHeight = Number.isFinite(projectedContentHeight)
+        ? Math.max(0, Number(projectedContentHeight))
+        : 0;
+    const safePosition = String(captionPosition || '').trim().toLowerCase();
+    if (scaleWithNode === true || safePosition !== 'bottom') {
+        return safeHeight;
+    }
+    return Math.min(safeWidth, safeHeight);
+}
+
+export function resolveCaptionFontPx({
     useMatrixRelativeSizing = false,
     projectedContentHeight = 0,
     sizeProgress = 0,
     minFontPx = 12,
     maxFontPx = 14,
     heightRatio = 0.34,
-    scale = 1
+    scale = 1,
+    enforceMinFontPx = true
 } = {}) {
+    const safeProjectedContentHeight = Number.isFinite(projectedContentHeight)
+        ? Math.max(0, Number(projectedContentHeight))
+        : 0;
     const safeScale = Number.isFinite(scale) && scale > 0 ? Number(scale) : 1;
     if (useMatrixRelativeSizing) {
-        return Math.max(
-            minFontPx,
-            projectedContentHeight * heightRatio * safeScale
-        );
+        const relativeFontPx = safeProjectedContentHeight * heightRatio * safeScale;
+        return enforceMinFontPx
+            ? Math.max(minFontPx, relativeFontPx)
+            : relativeFontPx;
     }
     return (
         minFontPx
         + ((maxFontPx - minFontPx) * sizeProgress)
     ) * safeScale;
+}
+
+function resolveZoomedOutFontScale(projectedExtent = 0, minScreenHeightPx = 0) {
+    const safeExtent = Number.isFinite(projectedExtent) ? Math.max(0, Number(projectedExtent)) : 0;
+    const safeMinScreenHeightPx = Number.isFinite(minScreenHeightPx)
+        ? Math.max(0, Number(minScreenHeightPx))
+        : 0;
+    const softenStartPx = safeMinScreenHeightPx + ZOOMED_OUT_FONT_SOFTEN_RANGE_PX;
+    if (safeExtent >= softenStartPx) return 1;
+    if (softenStartPx <= safeMinScreenHeightPx) return ZOOMED_OUT_FONT_SOFTEN_MIN_SCALE;
+    const progress = clamp(
+        (safeExtent - safeMinScreenHeightPx) / Math.max(1, softenStartPx - safeMinScreenHeightPx),
+        0,
+        1
+    );
+    return ZOOMED_OUT_FONT_SOFTEN_MIN_SCALE
+        + ((1 - ZOOMED_OUT_FONT_SOFTEN_MIN_SCALE) * progress);
+}
+
+function applyZoomedOutFontDamping(fontPx = 0, projectedExtent = 0, minScreenHeightPx = 0, {
+    absoluteMinFontPx = 0
+} = {}) {
+    const safeFontPx = Number.isFinite(fontPx) ? Math.max(0, Number(fontPx)) : 0;
+    const dampedFontPx = safeFontPx * resolveZoomedOutFontScale(projectedExtent, minScreenHeightPx);
+    return Math.max(
+        Number.isFinite(absoluteMinFontPx) ? Math.max(0, Number(absoluteMinFontPx)) : 0,
+        dampedFontPx
+    );
 }
 
 function intersectsCanvas(bounds = null, width = 0, height = 0) {
@@ -81,6 +190,62 @@ function isResidualCaptionNode(node = null) {
         && String(node?.metadata?.caption?.renderMode || '').trim().toLowerCase() === 'dom-katex';
 }
 
+function isMhsaUniformCaptionScene(scene = null) {
+    return isMhsaDetailScene(scene);
+}
+
+function buildCaptionCandidate({
+    node = null,
+    lines = [],
+    contentBounds = null,
+    captionPosition = 'bottom',
+    scaleWithNode = false,
+    minScreenHeightPx = 18
+} = {}) {
+    const projectedContentWidth = Math.max(0, Number(contentBounds?.width) || 0);
+    const projectedContentHeight = Math.max(0, Number(contentBounds?.height) || 0);
+    return {
+        node,
+        lines,
+        contentBounds,
+        captionPosition,
+        scaleWithNode,
+        minScreenHeightPx,
+        projectedContentHeight,
+        projectedCaptionExtent: resolveCaptionScreenExtent({
+            captionPosition,
+            projectedContentWidth,
+            projectedContentHeight,
+            scaleWithNode
+        })
+    };
+}
+
+function resolveMhsaUniformCaptionState(candidates = []) {
+    if (!Array.isArray(candidates) || !candidates.length) return null;
+    const minProjectedCaptionExtent = candidates.reduce((minExtent, candidate) => (
+        Math.min(minExtent, Number(candidate?.projectedCaptionExtent) || 0)
+    ), Number.POSITIVE_INFINITY);
+    const minScreenHeightPx = Math.max(
+        MHSA_UNIFORM_CAPTION_MIN_SCREEN_HEIGHT_PX,
+        ...candidates.map((candidate) => Number(candidate?.minScreenHeightPx) || 0)
+    );
+    return {
+        minScreenHeightPx,
+        visible: true,
+        sizeProgress: clamp(
+            (minProjectedCaptionExtent - minScreenHeightPx) / RESIDUAL_CAPTION_FONT_RAMP_PX,
+            0,
+            1
+        )
+    };
+}
+
+function isDomKatexTextNode(node = null) {
+    return node?.kind === VIEW2D_NODE_KINDS.TEXT
+        && String(node?.metadata?.renderMode || '').trim().toLowerCase() === 'dom-katex';
+}
+
 function createCaptionItem(documentRef) {
     const itemEl = documentRef.createElement('div');
     itemEl.className = 'detail-transformer-view2d-residual-caption';
@@ -93,6 +258,18 @@ function createCaptionItem(documentRef) {
         itemEl,
         labelEl,
         dimensionsEl
+    };
+}
+
+function createTextItem(documentRef) {
+    const itemEl = documentRef.createElement('div');
+    itemEl.className = 'detail-transformer-view2d-dom-text';
+    const labelEl = documentRef.createElement('div');
+    labelEl.className = 'detail-transformer-view2d-dom-text-line';
+    itemEl.append(labelEl);
+    return {
+        itemEl,
+        labelEl
     };
 }
 
@@ -122,6 +299,20 @@ export function createTransformerView2dResidualCaptionOverlay({
             return itemMap.get(safeNodeId);
         }
         const item = createCaptionItem(documentRef);
+        item.itemEl.dataset.nodeId = safeNodeId;
+        root.appendChild(item.itemEl);
+        itemMap.set(safeNodeId, item);
+        return item;
+    }
+
+    function ensureTextItem(nodeId = '') {
+        const safeNodeId = String(nodeId || '');
+        if (!safeNodeId.length) return null;
+        if (itemMap.has(safeNodeId)) {
+            return itemMap.get(safeNodeId);
+        }
+        const item = createTextItem(documentRef);
+        item.itemEl.dataset.nodeId = safeNodeId;
         root.appendChild(item.itemEl);
         itemMap.set(safeNodeId, item);
         return item;
@@ -151,6 +342,8 @@ export function createTransformerView2dResidualCaptionOverlay({
 
             const canvasWidth = Math.max(1, canvas.clientWidth || canvas.width || 1);
             const canvasHeight = Math.max(1, canvas.clientHeight || canvas.height || 1);
+            const fixedTextSizing = resolveMhsaDetailFixedTextSizing(scene, canvasWidth);
+            const useSceneRelativeTextSizing = isMhsaDetailScene(scene);
             root.style.display = 'block';
             root.style.left = `${Math.round(canvas.offsetLeft || 0)}px`;
             root.style.top = `${Math.round(canvas.offsetTop || 0)}px`;
@@ -158,35 +351,139 @@ export function createTransformerView2dResidualCaptionOverlay({
             root.style.height = `${Math.round(canvasHeight)}px`;
 
             const seenIds = new Set();
+            const captionCandidates = [];
             flattenSceneNodes(scene).forEach((node) => {
-                if (!isResidualCaptionNode(node)) return;
+                if (isResidualCaptionNode(node)) {
+                    const entry = layout.registry.getNodeEntry(node.id);
+                    if (!entry?.contentBounds) return;
+
+                    const lines = resolveView2dCaptionLines(node);
+                    if (!lines.length) return;
+
+                    const contentBounds = projectBounds(entry.contentBounds);
+                    if (!contentBounds) return;
+                    if (!intersectsCanvas(contentBounds, canvasWidth, canvasHeight)) return;
+                    const captionPosition = resolveView2dCaptionPosition(node);
+                    const scaleWithNode = node?.metadata?.caption?.scaleWithNode === true;
+                    const minScreenHeightPx = Number.isFinite(node?.metadata?.caption?.minScreenHeightPx)
+                        && node.metadata.caption.minScreenHeightPx > 0
+                        ? node.metadata.caption.minScreenHeightPx
+                        : 18;
+                    captionCandidates.push(buildCaptionCandidate({
+                        node,
+                        lines,
+                        contentBounds,
+                        captionPosition,
+                        scaleWithNode,
+                        minScreenHeightPx
+                    }));
+                    return;
+                }
+
+                if (!isDomKatexTextNode(node)) return;
                 const entry = layout.registry.getNodeEntry(node.id);
-                if (!entry?.contentBounds) return;
+                const entryBounds = entry?.contentBounds || entry?.bounds;
+                if (!entryBounds) return;
+                const projectedBounds = projectBounds(entryBounds);
+                if (!projectedBounds) return;
 
-                const lines = resolveView2dCaptionLines(node);
-                if (!lines.length) return;
+                const minScreenHeightPx = Number.isFinite(node?.metadata?.minScreenHeightPx)
+                    ? Math.max(0, Number(node.metadata.minScreenHeightPx))
+                    : 10;
+                const projectedHeight = Math.max(0, Number(projectedBounds.height) || 0);
+                if (projectedHeight < minScreenHeightPx) return;
+                if (!intersectsCanvas(projectedBounds, canvasWidth, canvasHeight)) return;
 
-                const contentBounds = projectBounds(entry.contentBounds);
-                if (!contentBounds) return;
-                const minScreenHeightPx = Number.isFinite(node?.metadata?.caption?.minScreenHeightPx)
-                    && node.metadata.caption.minScreenHeightPx > 0
-                    ? node.metadata.caption.minScreenHeightPx
-                    : 18;
-                const projectedContentHeight = Math.max(0, Number(contentBounds.height) || 0);
-                if (projectedContentHeight < minScreenHeightPx) return;
-                if (!intersectsCanvas(contentBounds, canvasWidth, canvasHeight)) return;
+                const worldHeight = Math.max(1, Number(entryBounds.height) || 1);
+                const screenScale = projectedHeight / worldHeight;
+                const baseFontPx = Math.max(
+                    1,
+                    (Number(entry?.layoutData?.fontSize) || 12) * screenScale
+                );
+                const fixedScreenFontPx = Number.isFinite(node?.metadata?.fixedScreenFontPx)
+                    && node.metadata.fixedScreenFontPx > 0
+                    ? Number(node.metadata.fixedScreenFontPx)
+                    : null;
+                const persistentMinScreenFontPx = Number.isFinite(node?.metadata?.persistentMinScreenFontPx)
+                    && node.metadata.persistentMinScreenFontPx > 0
+                    ? Number(node.metadata.persistentMinScreenFontPx)
+                    : null;
+                const zoomedOutMinScreenFontPx = Number.isFinite(node?.metadata?.zoomedOutMinScreenFontPx)
+                    && node.metadata.zoomedOutMinScreenFontPx > 0
+                    ? Number(node.metadata.zoomedOutMinScreenFontPx)
+                    : null;
+                const dampedFontPx = useSceneRelativeTextSizing
+                    ? baseFontPx
+                    : (
+                        fixedTextSizing?.textScreenFontPx
+                            ?? (
+                                fixedScreenFontPx
+                                    ? fixedScreenFontPx
+                                    : applyZoomedOutFontDamping(
+                                        (
+                                            persistentMinScreenFontPx
+                                                ? Math.max(baseFontPx, persistentMinScreenFontPx)
+                                                : baseFontPx
+                                        ),
+                                        projectedHeight,
+                                        minScreenHeightPx,
+                                        {
+                                            absoluteMinFontPx: zoomedOutMinScreenFontPx
+                                                ?? (persistentMinScreenFontPx
+                                                    ? Math.max(8, persistentMinScreenFontPx * 0.84)
+                                                    : 8)
+                                        }
+                                    )
+                            )
+                    );
+                const item = ensureTextItem(node.id);
+                if (!item) return;
+                seenIds.add(node.id);
+                item.itemEl.hidden = false;
+                item.itemEl.style.left = `${Math.round(projectedBounds.x + (projectedBounds.width / 2))}px`;
+                item.itemEl.style.top = `${Math.round(projectedBounds.y + (projectedBounds.height / 2))}px`;
+                item.itemEl.style.setProperty('--detail-transformer-view2d-dom-text-size', `${dampedFontPx.toFixed(2)}px`);
+                renderKatex(item.labelEl, node.tex, node.text);
+            });
+
+            const uniformMhsaCaptionState = isMhsaUniformCaptionScene(scene)
+                ? resolveMhsaUniformCaptionState(captionCandidates)
+                : null;
+            const useSceneRelativeCaptionSizing = isMhsaDetailScene(scene);
+            captionCandidates.forEach((candidate) => {
+                const {
+                    node,
+                    lines,
+                    contentBounds,
+                    captionPosition,
+                    scaleWithNode,
+                    minScreenHeightPx,
+                    projectedContentHeight,
+                    projectedCaptionExtent
+                } = candidate;
+                const shouldShow = uniformMhsaCaptionState
+                    ? uniformMhsaCaptionState.visible
+                    : projectedCaptionExtent >= minScreenHeightPx;
+                if (!shouldShow) return;
 
                 const item = ensureItem(node.id);
                 if (!item) return;
                 seenIds.add(node.id);
-                const sizeProgress = clamp(
-                    (projectedContentHeight - minScreenHeightPx) / RESIDUAL_CAPTION_FONT_RAMP_PX,
-                    0,
-                    1
-                );
-                const captionPosition = resolveView2dCaptionPosition(node);
-                const useMatrixRelativeSizing = captionPosition !== 'bottom'
-                    || node?.metadata?.caption?.scaleWithNode === true;
+                const sizeProgress = uniformMhsaCaptionState
+                    ? uniformMhsaCaptionState.sizeProgress
+                    : clamp(
+                        (projectedCaptionExtent - minScreenHeightPx) / RESIDUAL_CAPTION_FONT_RAMP_PX,
+                        0,
+                        1
+                    );
+                const preferStandardSizing = node?.metadata?.caption?.preferStandardSizing === true;
+                const useMatrixRelativeSizing = useSceneRelativeCaptionSizing
+                    ? true
+                    : (
+                        uniformMhsaCaptionState
+                            ? !preferStandardSizing
+                            : (captionPosition !== 'bottom' || scaleWithNode)
+                    );
                 const labelScale = Number.isFinite(node?.metadata?.caption?.labelScale)
                     && node.metadata.caption.labelScale > 0
                     ? Number(node.metadata.caption.labelScale)
@@ -195,24 +492,89 @@ export function createTransformerView2dResidualCaptionOverlay({
                     && node.metadata.caption.dimensionsScale > 0
                     ? Number(node.metadata.caption.dimensionsScale)
                     : 1;
-                const labelFontPx = resolveCaptionFontPx({
-                    useMatrixRelativeSizing,
-                    projectedContentHeight,
-                    sizeProgress,
-                    minFontPx: RESIDUAL_CAPTION_LABEL_MIN_FONT_PX,
-                    maxFontPx: RESIDUAL_CAPTION_LABEL_MAX_FONT_PX,
-                    heightRatio: RESIDUAL_TOP_CAPTION_LABEL_RATIO,
-                    scale: labelScale
-                });
-                const dimensionsFontPx = resolveCaptionFontPx({
-                    useMatrixRelativeSizing,
-                    projectedContentHeight,
-                    sizeProgress,
-                    minFontPx: RESIDUAL_CAPTION_DIMENSIONS_MIN_FONT_PX,
-                    maxFontPx: RESIDUAL_CAPTION_DIMENSIONS_MAX_FONT_PX,
-                    heightRatio: RESIDUAL_TOP_CAPTION_DIMENSIONS_RATIO,
-                    scale: dimensionsScale
-                });
+                const captionSizingExtent = uniformMhsaCaptionState
+                    ? projectedCaptionExtent
+                    : projectedContentHeight;
+                const labelFontPx = fixedTextSizing?.captionLabelScreenFontPx
+                    ?? resolveCaptionFontPx({
+                        useMatrixRelativeSizing,
+                        projectedContentHeight: captionSizingExtent,
+                        sizeProgress,
+                        minFontPx: uniformMhsaCaptionState
+                            ? MHSA_UNIFORM_CAPTION_LABEL_MIN_FONT_PX
+                            : RESIDUAL_CAPTION_LABEL_MIN_FONT_PX,
+                        maxFontPx: uniformMhsaCaptionState
+                            ? MHSA_UNIFORM_CAPTION_LABEL_MAX_FONT_PX
+                            : RESIDUAL_CAPTION_LABEL_MAX_FONT_PX,
+                        heightRatio: RESIDUAL_TOP_CAPTION_LABEL_RATIO,
+                        scale: labelScale,
+                        enforceMinFontPx: !useSceneRelativeCaptionSizing
+                    });
+                const dimensionsFontPx = fixedTextSizing?.captionDimensionsScreenFontPx
+                    ?? resolveCaptionFontPx({
+                        useMatrixRelativeSizing,
+                        projectedContentHeight: captionSizingExtent,
+                        sizeProgress,
+                        minFontPx: uniformMhsaCaptionState
+                            ? MHSA_UNIFORM_CAPTION_DIMENSIONS_MIN_FONT_PX
+                            : RESIDUAL_CAPTION_DIMENSIONS_MIN_FONT_PX,
+                        maxFontPx: uniformMhsaCaptionState
+                            ? MHSA_UNIFORM_CAPTION_DIMENSIONS_MAX_FONT_PX
+                            : RESIDUAL_CAPTION_DIMENSIONS_MAX_FONT_PX,
+                        heightRatio: RESIDUAL_TOP_CAPTION_DIMENSIONS_RATIO,
+                        scale: dimensionsScale,
+                        enforceMinFontPx: !useSceneRelativeCaptionSizing
+                    });
+                const labelMinScreenFontPx = Number.isFinite(node?.metadata?.caption?.labelMinScreenFontPx)
+                    && node.metadata.caption.labelMinScreenFontPx > 0
+                    ? Number(node.metadata.caption.labelMinScreenFontPx)
+                    : null;
+                const labelMaxScreenFontPx = Number.isFinite(node?.metadata?.caption?.labelMaxScreenFontPx)
+                    && node.metadata.caption.labelMaxScreenFontPx > 0
+                    ? Number(node.metadata.caption.labelMaxScreenFontPx)
+                    : null;
+                const dimensionsMinScreenFontPx = Number.isFinite(node?.metadata?.caption?.dimensionsMinScreenFontPx)
+                    && node.metadata.caption.dimensionsMinScreenFontPx > 0
+                    ? Number(node.metadata.caption.dimensionsMinScreenFontPx)
+                    : null;
+                const dampedLabelFontPx = useSceneRelativeCaptionSizing
+                    ? labelFontPx
+                    : (
+                        fixedTextSizing?.captionLabelScreenFontPx
+                            ?? applyZoomedOutFontDamping(
+                                labelFontPx,
+                                projectedCaptionExtent,
+                                minScreenHeightPx,
+                                {
+                                    absoluteMinFontPx: labelMinScreenFontPx
+                                        ?? (uniformMhsaCaptionState ? 11.5 : 10.5)
+                                }
+                            )
+                    );
+                const resolvedLabelFontPx = useSceneRelativeCaptionSizing
+                    ? labelFontPx
+                    : (
+                        fixedTextSizing?.captionLabelScreenFontPx
+                            ?? (
+                                Number.isFinite(labelMaxScreenFontPx)
+                                    ? Math.min(dampedLabelFontPx, labelMaxScreenFontPx)
+                                    : dampedLabelFontPx
+                            )
+                    );
+                const resolvedDimensionsFontPx = useSceneRelativeCaptionSizing
+                    ? dimensionsFontPx
+                    : (
+                        fixedTextSizing?.captionDimensionsScreenFontPx
+                            ?? applyZoomedOutFontDamping(
+                                dimensionsFontPx,
+                                projectedCaptionExtent,
+                                minScreenHeightPx,
+                                {
+                                    absoluteMinFontPx: dimensionsMinScreenFontPx
+                                        ?? (uniformMhsaCaptionState ? 10.5 : 9.5)
+                                }
+                            )
+                    );
                 const anchorX = contentBounds.x + (contentBounds.width / 2);
                 const anchorY = captionPosition === 'bottom'
                     ? contentBounds.y + contentBounds.height + RESIDUAL_CAPTION_BOTTOM_GAP_PX
@@ -222,8 +584,8 @@ export function createTransformerView2dResidualCaptionOverlay({
                 item.itemEl.style.left = `${Math.round(anchorX)}px`;
                 item.itemEl.style.top = `${Math.round(anchorY)}px`;
                 item.itemEl.style.removeProperty('width');
-                item.itemEl.style.setProperty('--detail-transformer-view2d-caption-label-size', `${labelFontPx.toFixed(2)}px`);
-                item.itemEl.style.setProperty('--detail-transformer-view2d-caption-dimensions-size', `${dimensionsFontPx.toFixed(2)}px`);
+                item.itemEl.style.setProperty('--detail-transformer-view2d-caption-label-size', `${resolvedLabelFontPx.toFixed(2)}px`);
+                item.itemEl.style.setProperty('--detail-transformer-view2d-caption-dimensions-size', `${resolvedDimensionsFontPx.toFixed(2)}px`);
 
                 renderKatex(item.labelEl, lines[0]?.tex, lines[0]?.text);
                 const dimensionsLine = lines[1] || null;

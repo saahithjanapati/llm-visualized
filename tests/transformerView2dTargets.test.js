@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
     buildResidualRowHoverPayload,
+    buildSemanticNodeHoverPayload,
     resolveActiveFocusLabel,
     resolveActiveSemanticTarget,
     resolveDetailTargetsFromSemanticTarget,
@@ -165,6 +166,56 @@ describe('transformerView2dTargets', () => {
                     layerIndex: 0,
                     tokenIndex: 4,
                     tokenLabel: SPACE_TOKEN_DISPLAY
+                }
+            }
+        });
+    });
+
+    it('builds semantic hover payloads for layer norm and output projection overview nodes', () => {
+        expect(buildSemanticNodeHoverPayload({
+            entry: {
+                role: 'module-card',
+                semantic: {
+                    componentKind: 'layer-norm',
+                    layerIndex: 2,
+                    stage: 'ln2'
+                }
+            }
+        })).toEqual({
+            label: 'LayerNorm',
+            info: {
+                layerIndex: 2,
+                layerNormKind: 'ln2',
+                suppressTokenChip: true,
+                activationData: {
+                    label: 'LayerNorm',
+                    stage: 'ln2.norm',
+                    layerIndex: 2,
+                    layerNormKind: 'ln2',
+                    suppressTokenChip: true
+                }
+            }
+        });
+
+        expect(buildSemanticNodeHoverPayload({
+            entry: {
+                role: 'projection-weight',
+                semantic: {
+                    componentKind: 'output-projection',
+                    layerIndex: 4,
+                    stage: 'attn-out'
+                }
+            }
+        })).toEqual({
+            label: 'Output Projection Matrix',
+            info: {
+                layerIndex: 4,
+                suppressTokenChip: true,
+                activationData: {
+                    label: 'Output Projection Matrix',
+                    stage: 'attention.output_projection',
+                    layerIndex: 4,
+                    suppressTokenChip: true
                 }
             }
         });

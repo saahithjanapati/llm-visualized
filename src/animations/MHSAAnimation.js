@@ -46,6 +46,7 @@ import { scaleGlobalEmissiveIntensity } from '../utils/materialUtils.js';
 import { getSideCopyEntry } from './mhsa/laneIndex.js';
 import { animateVectorMatrixPassThrough as animateVectorMatrixPassThroughExternal } from './mhsa/VectorMatrixPassThrough.js';
 import { clearScheduledDelays, resolveSkipDelay, resolveSkipDuration, scheduleAfterDelay } from './mhsa/mhsaTimingUtils.js';
+import { applyOutputProjectionPassVisual } from './mhsa/outputProjectionVisualUtils.js';
 import { appState } from '../state/appState.js';
 import { applyMatrixLabel, applyMatrixMaterialTweaks } from '../utils/matrixVisualUtils.js';
 import {
@@ -3358,42 +3359,32 @@ export class MHSAAnimation {
         this.outputProjectionMatrix.setColor(startColor);
         this.outputProjectionMatrix.setEmissive(startColor, startEmissiveIntensity);
 
-        // First brighten the matrix
-        const state = {
-            r: startColor.r,
-            g: startColor.g,
-            b: startColor.b,
-            emissiveIntensity: startEmissiveIntensity
-        };
         const currentColor = this._outputProjColorScratch;
+        const state = { progress: 0 };
         
         new TWEEN.Tween(state)
-            .to({ 
-                r: brightColor.r, 
-                g: brightColor.g, 
-                b: brightColor.b,
-                emissiveIntensity: peakEmissiveIntensity
-            }, effectiveDuration * 0.6) // 60% of the total duration
-            .easing(TWEEN.Easing.Quadratic.InOut)
+            .to({ progress: 1 }, effectiveDuration)
+            .easing(TWEEN.Easing.Linear.None)
             .onUpdate(() => {
-                currentColor.setRGB(state.r, state.g, state.b);
-                this.outputProjectionMatrix.setColor(currentColor);
-                this.outputProjectionMatrix.setEmissive(currentColor, state.emissiveIntensity);
+                const visualState = applyOutputProjectionPassVisual({
+                    progress: state.progress,
+                    startColor,
+                    activeColor: brightColor,
+                    targetColor: currentColor,
+                    startEmissiveIntensity,
+                    peakEmissiveIntensity,
+                    endEmissiveIntensity,
+                });
+                this.outputProjectionMatrix.setColor(visualState.color);
+                this.outputProjectionMatrix.setEmissive(visualState.color, visualState.emissiveIntensity);
             })
             .onComplete(() => {
-                // Then dim slightly to the final state
-                new TWEEN.Tween(state)
-                    .to({ emissiveIntensity: endEmissiveIntensity }, effectiveDuration * 0.4) // 40% of the total duration
-                    .easing(TWEEN.Easing.Quadratic.InOut)
-                    .onUpdate(() => {
-                        this.outputProjectionMatrix.setEmissive(brightColor, state.emissiveIntensity);
-                    })
-                    .onComplete(() => {
-                        this.outputProjMatrixAnimationPhase = 'completed';
-                        // Ensure final opacity is fully opaque
-                        this.outputProjectionMatrix.setMaterialProperties({ opacity: 1.0, transparent: false });
-                    })
-                    .start();
+                currentColor.copy(brightColor);
+                this.outputProjectionMatrix.setColor(currentColor);
+                this.outputProjectionMatrix.setEmissive(currentColor, endEmissiveIntensity);
+                this.outputProjMatrixAnimationPhase = 'completed';
+                // Ensure final opacity is fully opaque
+                this.outputProjectionMatrix.setMaterialProperties({ opacity: 1.0, transparent: false });
             })
             .start();
     }

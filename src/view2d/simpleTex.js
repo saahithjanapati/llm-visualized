@@ -19,11 +19,15 @@ const SIMPLE_TEX_SYMBOLS = Object.freeze({
 
 const SIMPLE_TEX_TEXT_COMMANDS = new Set([
     'mathrm',
+    'mathsf',
+    'mathbf',
+    'mathit',
+    'mathtt',
     'text',
     'operatorname'
 ]);
 
-function resolveSimpleTexRuns(input = '', variant = 'base') {
+function resolveSimpleTexRunsInternal(input = '', variant = 'base', state = { nextSqrtGroupId: 0 }) {
     const safeInput = typeof input === 'string' ? input : '';
     const runs = [];
     let index = 0;
@@ -98,7 +102,7 @@ function resolveSimpleTexRuns(input = '', variant = 'base') {
         }
 
         return {
-            runs: resolveSimpleTexRuns(content, nextVariant),
+            runs: resolveSimpleTexRunsInternal(content, nextVariant, state),
             index: cursor < safeInput.length ? cursor + 1 : cursor
         };
     };
@@ -118,6 +122,25 @@ function resolveSimpleTexRuns(input = '', variant = 'base') {
                 flush();
                 const group = readGroup(index, variant);
                 runs.push(...group.runs);
+                index = group.index;
+                continue;
+            }
+            if (name === 'sqrt') {
+                flush();
+                const group = readGroup(index, variant);
+                const sqrtGroupId = state.nextSqrtGroupId;
+                state.nextSqrtGroupId += 1;
+                runs.push({
+                    variant,
+                    text: '√',
+                    sqrtGroupId,
+                    sqrtRole: 'radical'
+                });
+                runs.push(...group.runs.map((run) => ({
+                    ...run,
+                    sqrtGroupId,
+                    sqrtRole: 'radicand'
+                })));
                 index = group.index;
                 continue;
             }
@@ -166,6 +189,10 @@ function resolveSimpleTexRuns(input = '', variant = 'base') {
     return runs.filter((run) => typeof run.text === 'string' && run.text.length);
 }
 
+function resolveSimpleTexRuns(input = '', variant = 'base') {
+    return resolveSimpleTexRunsInternal(input, variant, { nextSqrtGroupId: 0 });
+}
+
 export function hasSimpleTexMarkup(input = '') {
     return typeof input === 'string' && /[\\_^{}]/.test(input);
 }
@@ -201,6 +228,7 @@ export function drawSimpleTex(ctx, input = '', {
     if (!runs.length) return;
 
     ctx.save();
+    ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = color;
 
@@ -225,16 +253,74 @@ export function drawSimpleTex(ctx, input = '', {
         cursorX -= totalWidth;
     }
 
-    measuredRuns.forEach((run) => {
-        ctx.font = `${fontWeight} ${run.fontSize}px ${fontFamily}`;
+    const positionedRuns = measuredRuns.map((run) => {
         let baselineY = y;
         if (run.variant === 'subscript') {
             baselineY += fontSize * subscriptOffset;
         } else if (run.variant === 'superscript') {
             baselineY -= fontSize * superscriptOffset;
         }
-        ctx.fillText(run.text, cursorX, baselineY);
+        const positionedRun = {
+            ...run,
+            x: cursorX,
+            baselineY
+        };
         cursorX += run.width;
+        return positionedRun;
+    });
+
+    positionedRuns.forEach((run) => {
+        if (run.sqrtRole === 'radical') return;
+        ctx.font = `${fontWeight} ${run.fontSize}px ${fontFamily}`;
+        ctx.fillText(run.text, run.x, run.baselineY);
+    });
+
+    const sqrtGroups = new Map();
+    positionedRuns.forEach((run) => {
+        if (!Number.isFinite(run.sqrtGroupId)) return;
+        const group = sqrtGroups.get(run.sqrtGroupId) || {
+            radical: null,
+            radicandRuns: []
+        };
+        if (run.sqrtRole === 'radical') {
+            group.radical = run;
+        } else if (run.sqrtRole === 'radicand') {
+            group.radicandRuns.push(run);
+        }
+        sqrtGroups.set(run.sqrtGroupId, group);
+    });
+
+    sqrtGroups.forEach(({ radical, radicandRuns }) => {
+        if (!radical || !radicandRuns.length) return;
+        const firstRadicand = radicandRuns[0];
+        const lastRadicand = radicandRuns[radicandRuns.length - 1];
+        const lineStartX = Math.max(
+            radical.x + (radical.width * 0.78),
+            firstRadicand.x - (fontSize * 0.08)
+        );
+        const lineEndX = lastRadicand.x + lastRadicand.width + (fontSize * 0.04);
+        const lineY = y - (fontSize * 0.44);
+        const leadX = radical.x + (radical.width * 0.08);
+        const hookX = radical.x + (radical.width * 0.28);
+        const valleyX = radical.x + (radical.width * 0.48);
+        const riseY = y - (fontSize * 0.16);
+        const hookY = y + (fontSize * 0.24);
+        const valleyY = y + (fontSize * 0.36);
+
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = Math.max(1, fontSize * 0.08);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        ctx.moveTo(leadX, y + (fontSize * 0.02));
+        ctx.lineTo(hookX, hookY);
+        ctx.lineTo(valleyX, valleyY);
+        ctx.lineTo(lineStartX, riseY);
+        ctx.lineTo(lineStartX, lineY);
+        ctx.lineTo(lineEndX, lineY);
+        ctx.stroke();
+        ctx.restore();
     });
 
     ctx.restore();

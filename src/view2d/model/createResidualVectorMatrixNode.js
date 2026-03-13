@@ -5,8 +5,8 @@ import {
     VIEW2D_MATRIX_SHAPES
 } from '../schema/sceneTypes.js';
 import {
-    createView2dTransposeStripMetadata,
     createView2dVectorStripMetadata,
+    createView2dTransposeStripMetadata,
     VIEW2D_VECTOR_STRIP_STYLE_VARIANTS
 } from '../shared/vectorStrip.js';
 import { formatView2dMatrixDimensions } from '../shared/formatMatrixDimensions.js';
@@ -50,7 +50,10 @@ function createCaptionMetadata({
     renderMode = 'dom-katex',
     scaleWithNode = false,
     labelScale = null,
-    dimensionsScale = null
+    dimensionsScale = null,
+    preferStandardSizing = false,
+    labelMinScreenFontPx = null,
+    dimensionsMinScreenFontPx = null
 } = {}) {
     const caption = {};
     const safePosition = String(position || '').trim().toLowerCase();
@@ -86,6 +89,15 @@ function createCaptionMetadata({
     }
     if (Number.isFinite(dimensionsScale) && dimensionsScale > 0) {
         caption.dimensionsScale = Number(dimensionsScale);
+    }
+    if (preferStandardSizing === true) {
+        caption.preferStandardSizing = true;
+    }
+    if (Number.isFinite(labelMinScreenFontPx) && labelMinScreenFontPx > 0) {
+        caption.labelMinScreenFontPx = Number(labelMinScreenFontPx);
+    }
+    if (Number.isFinite(dimensionsMinScreenFontPx) && dimensionsMinScreenFontPx > 0) {
+        caption.dimensionsMinScreenFontPx = Number(dimensionsMinScreenFontPx);
     }
     return Object.keys(caption).length ? { caption } : null;
 }
@@ -144,6 +156,9 @@ export function createVectorStripMatrixNode({
     captionScaleWithNode = false,
     captionLabelScale = null,
     captionDimensionsScale = null,
+    captionPreferStandardSizing = false,
+    captionLabelMinScreenFontPx = null,
+    captionDimensionsMinScreenFontPx = null,
     visualStyleKey = VIEW2D_STYLE_KEYS.RESIDUAL,
     stripStyleVariant = VIEW2D_VECTOR_STRIP_STYLE_VARIANTS.STANDARD,
     stripMetadata = null,
@@ -186,7 +201,10 @@ export function createVectorStripMatrixNode({
                 renderMode: 'dom-katex',
                 scaleWithNode: captionScaleWithNode,
                 labelScale: captionLabelScale,
-                dimensionsScale: captionDimensionsScale
+                dimensionsScale: captionDimensionsScale,
+                preferStandardSizing: captionPreferStandardSizing,
+                labelMinScreenFontPx: captionLabelMinScreenFontPx,
+                dimensionsMinScreenFontPx: captionDimensionsMinScreenFontPx
             }),
             createView2dVectorStripMetadata({
                 compactWidth: resolvedCompactWidth,
@@ -208,9 +226,13 @@ export function createTransposeVectorStripMatrixNode({
     columnItems = [],
     rowCount = 1,
     columnCount = null,
-    compactHeight = null,
-    columnWidth = null,
-    columnGap = null,
+    displayRowCount = null,
+    displayColumnCount = null,
+    measureRows = null,
+    measureCols = null,
+    colWidth = RESIDUAL_VECTOR_STRIP_UNIT,
+    colHeight = null,
+    colGap = null,
     paddingX = null,
     paddingY = null,
     cornerRadius = null,
@@ -222,26 +244,38 @@ export function createTransposeVectorStripMatrixNode({
     captionScaleWithNode = false,
     captionLabelScale = null,
     captionDimensionsScale = null,
+    captionLabelMinScreenFontPx = null,
+    captionDimensionsMinScreenFontPx = null,
     visualStyleKey = VIEW2D_STYLE_KEYS.RESIDUAL,
     stripStyleVariant = VIEW2D_VECTOR_STRIP_STYLE_VARIANTS.STANDARD,
     stripMetadata = null,
     metadata = null
 } = {}) {
-    const resolvedRowCount = resolvePositiveInt(rowCount, 1);
-    const resolvedColumnCount = Number.isFinite(columnCount)
+    const resolvedMatrixRowCount = resolvePositiveInt(rowCount, 1);
+    const resolvedMatrixColumnCount = Number.isFinite(columnCount)
         ? Math.max(1, Math.floor(columnCount))
         : Math.max(1, Array.isArray(columnItems) ? columnItems.length : 0);
-    const resolvedCompactHeight = resolvePositiveInt(compactHeight, null);
-    const resolvedColumnWidth = resolvePositiveInt(columnWidth, null);
-    const dimensionCaption = formatView2dMatrixDimensions(resolvedRowCount, resolvedColumnCount);
+    const resolvedDisplayRowCount = resolvePositiveInt(displayRowCount, resolvedMatrixRowCount);
+    const resolvedDisplayColumnCount = resolvePositiveInt(displayColumnCount, resolvedMatrixColumnCount);
+    const resolvedMeasureRows = resolvePositiveInt(measureRows, resolvedDisplayRowCount);
+    const resolvedMeasureCols = resolvePositiveInt(
+        measureCols,
+        Math.max(
+            1,
+            Array.isArray(columnItems) ? columnItems.length : resolvedDisplayColumnCount
+        )
+    );
+    const resolvedColWidth = resolvePositiveInt(colWidth, RESIDUAL_VECTOR_STRIP_UNIT);
+    const resolvedColHeight = resolvePositiveInt(colHeight, null);
+    const dimensionCaption = formatView2dMatrixDimensions(resolvedMatrixRowCount, resolvedMatrixColumnCount);
 
     return createMatrixNode({
         role,
         semantic,
         label: buildLabel(labelTex, labelText),
         dimensions: {
-            rows: resolvedRowCount,
-            cols: resolvedColumnCount
+            rows: resolvedMatrixRowCount,
+            cols: resolvedMatrixColumnCount
         },
         presentation: VIEW2D_MATRIX_PRESENTATIONS.COLUMN_STRIP,
         shape: VIEW2D_MATRIX_SHAPES.MATRIX,
@@ -250,6 +284,7 @@ export function createTransposeVectorStripMatrixNode({
             styleKey: visualStyleKey
         },
         metadata: mergeMetadata(
+            createMeasureMetadata(resolvedMeasureCols, resolvedMeasureRows),
             createCaptionMetadata({
                 position: captionPosition,
                 styleKey: captionStyleKey,
@@ -263,16 +298,19 @@ export function createTransposeVectorStripMatrixNode({
                 renderMode: 'dom-katex',
                 scaleWithNode: captionScaleWithNode,
                 labelScale: captionLabelScale,
-                dimensionsScale: captionDimensionsScale
+                dimensionsScale: captionDimensionsScale,
+                labelMinScreenFontPx: captionLabelMinScreenFontPx,
+                dimensionsMinScreenFontPx: captionDimensionsMinScreenFontPx
             }),
             createView2dTransposeStripMetadata({
-                colWidth: resolvedColumnWidth,
-                colGap: resolveNonNegativeInt(columnGap, null),
-                colHeight: resolvedCompactHeight,
+                colWidth: resolvedColWidth,
+                colHeight: resolvedColHeight,
+                colGap: resolveNonNegativeInt(colGap, null),
                 paddingX: resolveNonNegativeInt(paddingX, null),
                 paddingY: resolveNonNegativeInt(paddingY, null),
                 cornerRadius: resolveNonNegativeInt(cornerRadius, null),
-                styleVariant: stripStyleVariant
+                styleVariant: stripStyleVariant,
+                hideSurface: true
             }),
             stripMetadata,
             metadata

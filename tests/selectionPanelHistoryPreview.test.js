@@ -454,7 +454,7 @@ describe('selectionPanel history preview reuse', () => {
             expect(detail?.querySelector('.detail-attention-context-chip')).toBeTruthy();
             expect(detail?.querySelector('.detail-attention-context-position')?.textContent).toBe('(position 5)');
         }
-        expect(score?.textContent).toBe('0.0675');
+        expect(score?.textContent).toBe('0.068');
     });
 
     it('keeps the attention matrix collapsed across related attention selections and updates the title metadata', () => {

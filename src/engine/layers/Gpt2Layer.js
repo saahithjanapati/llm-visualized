@@ -337,6 +337,7 @@ export default class Gpt2Layer extends BaseLayer {
         this._lanePhaseDebugOverride = undefined;
         this._ln2HandoffStallSinceMs = NaN;
         this._lastUpdateNowMs = NaN;
+        this._playbackTimelineMs = 0;
     }
 
     setProgressEmitter(emitter) { this._progressEmitter = emitter; }
@@ -828,6 +829,8 @@ export default class Gpt2Layer extends BaseLayer {
     update(dt) {
         const skipActive = this._skipToEndActive;
         const nowMs = this._getNowMs();
+        const playbackStepMs = Number.isFinite(dt) ? Math.max(0, dt * 1000) : 0;
+        this._playbackTimelineMs += playbackStepMs;
         const bottomY_ln1_abs = LAYER_NORM_1_Y_POS - LN_PARAMS.height / 2;
         const midY_ln1_abs    = LAYER_NORM_1_Y_POS;
         const topY_ln1_abs    = LAYER_NORM_1_Y_POS + LN_PARAMS.height / 2;
@@ -2264,7 +2267,7 @@ export default class Gpt2Layer extends BaseLayer {
             this._resetLaneStallWatchdog(lanes);
         }
 
-        this._applyPendingAdditionWatchdog(lanes, nowMs);
+        this._applyPendingAdditionWatchdog(lanes, this._getPlaybackNowMs());
 
         // ----------------------------------------------------------
         // Notify LayerPipeline once **all** lanes have finished AND all additions complete
@@ -3512,6 +3515,12 @@ export default class Gpt2Layer extends BaseLayer {
             : Date.now();
     }
 
+    _getPlaybackNowMs() {
+        return Number.isFinite(this._playbackTimelineMs)
+            ? this._playbackTimelineMs
+            : 0;
+    }
+
     _updatePositionalPassBarrier({
         lanes,
         nowMs,
@@ -4534,7 +4543,7 @@ export default class Gpt2Layer extends BaseLayer {
             || lane?.originalVec?.instanceCount
             || this._getBaseVectorLength();
         const totalAnimTime = duration + flashDuration + Math.max(0, (vectorLength - 1) * delayBetween);
-        const startedAtMs = this._getNowMs();
+        const startedAtMs = this._getPlaybackNowMs();
 
         lane.additionComplete = false;
         lane.__additionPending = true;
@@ -4545,7 +4554,7 @@ export default class Gpt2Layer extends BaseLayer {
             totalAnimTime
         );
 
-        const complete = () => this._completePendingAddition(lane);
+        const complete = () => Gpt2Layer.prototype._forceCompletePendingAddition.call(this, lane, 'scheduled fallback');
 
         if (typeof TWEEN !== 'undefined') {
             const tween = new TWEEN.Tween({ progress: 0 })
@@ -4558,10 +4567,32 @@ export default class Gpt2Layer extends BaseLayer {
         }
     }
 
+    _forceCompletePendingAddition(lane, reason = 'unknown') {
+        if (!lane || lane.additionComplete) return false;
+
+        const finalize = lane.__pendingAdditionFinalize;
+        if (typeof finalize === 'function') {
+            try {
+                finalize();
+            } catch (err) {
+                console.warn(
+                    `Layer ${this.index}: pending addition finalize failed for lane ${lane.laneIndex ?? '?'} (${reason}).`,
+                    err
+                );
+            }
+            if (lane.additionComplete) {
+                return true;
+            }
+        }
+
+        return this._completePendingAddition(lane);
+    }
+
     _completePendingAddition(lane) {
         if (!lane || lane.additionComplete) return false;
         lane.additionComplete = true;
         delete lane.__additionPending;
+        delete lane.__pendingAdditionFinalize;
         delete lane.__additionStartedAtMs;
         delete lane.__additionExpectedCompleteAtMs;
         delete lane.__additionWatchdogGraceMs;
@@ -4607,7 +4638,7 @@ export default class Gpt2Layer extends BaseLayer {
 
             if (nowMs < (expectedAtMs + graceMs)) continue;
 
-            if (this._completePendingAddition(lane)) {
+            if (Gpt2Layer.prototype._forceCompletePendingAddition.call(this, lane, 'watchdog')) {
                 forcedCount += 1;
                 console.warn(
                     `Layer ${this.index}: final addition watchdog forced completion for lane ${lane.laneIndex ?? '?'}.`

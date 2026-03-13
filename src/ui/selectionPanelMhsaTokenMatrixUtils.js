@@ -294,6 +294,7 @@ function buildAttentionScoreStage({
             : null;
         return {
             rowIndex: rowData.rowIndex,
+            tokenIndex: rowData.tokenIndex,
             tokenLabel: rowData.tokenLabel,
             rawValues: safeValues,
             gradientCss: projectionRow?.gradientCss || (
@@ -311,24 +312,63 @@ function buildAttentionScoreStage({
         };
     });
 
-    const outputRows = rows.map((rowData) => {
-        const scoreRow = typeof activationSource.getAttentionScoresRow === 'function'
+    const preScoreRows = rows.map((rowData) => (
+        typeof activationSource.getAttentionScoresRow === 'function'
             ? activationSource.getAttentionScoresRow(layerIndex, 'pre', headIndex, rowData.tokenIndex)
-            : null;
+            : null
+    ));
+    const postScoreRows = rows.map((rowData) => (
+        typeof activationSource.getAttentionScoresRow === 'function'
+            ? activationSource.getAttentionScoresRow(layerIndex, 'post', headIndex, rowData.tokenIndex)
+            : null
+    ));
+    const buildAttentionCellMeta = (rowData, colData) => {
+        const preScoreRow = preScoreRows[rowData.rowIndex];
+        const postScoreRow = postScoreRows[rowData.rowIndex];
+        const isMasked = colData.rowIndex > rowData.rowIndex;
+        const preScoreValue = Array.isArray(preScoreRow) ? preScoreRow[colData.tokenIndex] : null;
+        const postScoreValue = Array.isArray(postScoreRow) ? postScoreRow[colData.tokenIndex] : null;
+        const safePreScore = Number.isFinite(preScoreValue) ? preScoreValue : null;
+        const safePostScore = Number.isFinite(postScoreValue) ? postScoreValue : null;
+        return {
+            queryTokenIndex: rowData.tokenIndex,
+            keyTokenIndex: colData.tokenIndex,
+            queryTokenLabel: rowData.tokenLabel,
+            keyTokenLabel: colData.tokenLabel,
+            preScore: safePreScore,
+            postScore: isMasked
+                ? (Number.isFinite(safePostScore) ? safePostScore : 0)
+                : safePostScore,
+            maskValue: isMasked ? Number.NEGATIVE_INFINITY : 0,
+            isMasked
+        };
+    };
+
+    const outputRows = rows.map((rowData) => {
         const cells = rows.map((colData) => {
-            const rawValue = Array.isArray(scoreRow) ? scoreRow[colData.tokenIndex] : null;
-            const safeValue = Number.isFinite(rawValue) ? rawValue : null;
+            const cellMeta = buildAttentionCellMeta(rowData, colData);
             return {
                 rowIndex: rowData.rowIndex,
                 colIndex: colData.rowIndex,
                 rowTokenLabel: rowData.tokenLabel,
                 colTokenLabel: colData.tokenLabel,
-                rawValue: safeValue,
-                fillCss: Number.isFinite(safeValue) ? buildAttentionScoreCellCss(safeValue) : 'transparent'
+                queryTokenIndex: cellMeta.queryTokenIndex,
+                keyTokenIndex: cellMeta.keyTokenIndex,
+                queryTokenLabel: cellMeta.queryTokenLabel,
+                keyTokenLabel: cellMeta.keyTokenLabel,
+                preScore: cellMeta.preScore,
+                postScore: cellMeta.postScore,
+                maskValue: cellMeta.maskValue,
+                isMasked: cellMeta.isMasked,
+                rawValue: cellMeta.preScore,
+                fillCss: Number.isFinite(cellMeta.preScore)
+                    ? buildAttentionScoreCellCss(cellMeta.preScore)
+                    : 'transparent'
             };
         });
         return {
             rowIndex: rowData.rowIndex,
+            tokenIndex: rowData.tokenIndex,
             tokenLabel: rowData.tokenLabel,
             cells,
             hasAnyValue: cells.some((cell) => Number.isFinite(cell.rawValue))
@@ -341,49 +381,60 @@ function buildAttentionScoreStage({
 
     const maskRows = rows.map((rowData) => ({
         rowIndex: rowData.rowIndex,
+        tokenIndex: rowData.tokenIndex,
         tokenLabel: rowData.tokenLabel,
         cells: rows.map((colData) => {
-            const isMasked = colData.rowIndex > rowData.rowIndex;
+            const cellMeta = buildAttentionCellMeta(rowData, colData);
             return {
                 rowIndex: rowData.rowIndex,
                 colIndex: colData.rowIndex,
                 rowTokenLabel: rowData.tokenLabel,
                 colTokenLabel: colData.tokenLabel,
-                rawValue: isMasked ? Number.NEGATIVE_INFINITY : 0,
-                fillCss: buildMaskCellCss(isMasked),
-                isMasked,
+                queryTokenIndex: cellMeta.queryTokenIndex,
+                keyTokenIndex: cellMeta.keyTokenIndex,
+                queryTokenLabel: cellMeta.queryTokenLabel,
+                keyTokenLabel: cellMeta.keyTokenLabel,
+                preScore: cellMeta.preScore,
+                postScore: cellMeta.postScore,
+                maskValue: cellMeta.maskValue,
+                rawValue: cellMeta.maskValue,
+                fillCss: buildMaskCellCss(cellMeta.isMasked),
+                isMasked: cellMeta.isMasked,
                 isEmpty: false,
-                title: `${rowData.tokenLabel} → ${colData.tokenLabel}: ${isMasked ? '-∞' : '0'}`
+                title: `${rowData.tokenLabel} → ${colData.tokenLabel}: ${cellMeta.isMasked ? '-∞' : '0'}`
             };
         })
     }));
 
     const postRows = rows.map((rowData) => {
-        const scoreRow = typeof activationSource.getAttentionScoresRow === 'function'
-            ? activationSource.getAttentionScoresRow(layerIndex, 'post', headIndex, rowData.tokenIndex)
-            : null;
         const cells = rows.map((colData) => {
-            const isMasked = colData.rowIndex > rowData.rowIndex;
-            const rawValue = Array.isArray(scoreRow) ? scoreRow[colData.tokenIndex] : null;
-            const safeValue = Number.isFinite(rawValue) ? rawValue : null;
+            const cellMeta = buildAttentionCellMeta(rowData, colData);
             return {
                 rowIndex: rowData.rowIndex,
                 colIndex: colData.rowIndex,
                 rowTokenLabel: rowData.tokenLabel,
                 colTokenLabel: colData.tokenLabel,
-                rawValue: isMasked ? null : safeValue,
-                fillCss: isMasked
+                queryTokenIndex: cellMeta.queryTokenIndex,
+                keyTokenIndex: cellMeta.keyTokenIndex,
+                queryTokenLabel: cellMeta.queryTokenLabel,
+                keyTokenLabel: cellMeta.keyTokenLabel,
+                preScore: cellMeta.preScore,
+                postScore: cellMeta.postScore,
+                maskValue: cellMeta.maskValue,
+                rawValue: cellMeta.isMasked ? null : cellMeta.postScore,
+                fillCss: cellMeta.isMasked
                     ? buildMaskCellCss(true)
-                    : (Number.isFinite(safeValue) ? buildAttentionPostCellCss(safeValue) : 'transparent'),
-                isMasked,
-                isEmpty: !isMasked && !Number.isFinite(safeValue),
-                title: isMasked
+                    : (Number.isFinite(cellMeta.postScore) ? buildAttentionPostCellCss(cellMeta.postScore) : 'transparent'),
+                isMasked: cellMeta.isMasked,
+                isEmpty: !cellMeta.isMasked && !Number.isFinite(cellMeta.postScore),
+                title: cellMeta.isMasked
                     ? `${rowData.tokenLabel} → ${colData.tokenLabel}: masked (softmax → 0)`
                     : undefined
             };
         });
         return {
             rowIndex: rowData.rowIndex,
+            tokenIndex: rowData.tokenIndex,
             tokenLabel: rowData.tokenLabel,
             cells,
             hasAnyValue: cells.some((cell) => !cell.isMasked && Number.isFinite(cell.rawValue))
@@ -399,6 +450,7 @@ function buildAttentionScoreStage({
             : null;
         return {
             rowIndex: rowData.rowIndex,
+            tokenIndex: rowData.tokenIndex,
             tokenLabel: rowData.tokenLabel,
             rawValues: safeValues,
             gradientCss: Array.isArray(safeValues) && safeValues.length
@@ -418,11 +470,13 @@ function buildAttentionScoreStage({
         transposeColumnCount: keyProjection.outputRowCount,
         transposeColumns: keyProjection.outputRows.map((rowData) => ({
             colIndex: rowData.rowIndex,
+            tokenIndex: rowData.tokenIndex,
             rawValue: rowData.rawValue,
+            rawValues: Array.isArray(rowData.rawValues) ? [...rowData.rawValues] : null,
             fillCss: rowData.gradientCss,
             tokenLabel: rows[rowData.rowIndex]?.tokenLabel || `Token ${rowData.rowIndex + 1}`
         })),
-        scaleLabelTex: '\\sqrt{d_h}',
+        scaleLabelTex: '\\sqrt{d_{\\mathrm{head}}}',
         outputLabelTex: 'A_{\\mathrm{pre}}',
         outputRowCount: outputRows.length,
         outputColumnCount: rows.length,

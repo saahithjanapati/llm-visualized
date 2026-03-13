@@ -59,6 +59,12 @@ function resolveMeasuredValue(value, fallback = null) {
         : fallback;
 }
 
+function resolveNonNegativeOverride(value, fallback = null) {
+    return Number.isFinite(value) && value >= 0
+        ? Math.max(0, Math.floor(value))
+        : fallback;
+}
+
 function createAnchors(contentBounds) {
     if (!contentBounds) {
         return {
@@ -87,6 +93,7 @@ function resolveLayoutConfig(scene, {
 } = {}) {
     const metrics = layoutMetrics || scene?.metadata?.layoutMetrics || {};
     const cssVars = metrics?.cssVars || {};
+    const componentOverrides = metrics?.componentOverrides || {};
     const tokens = visualTokens || scene?.metadata?.tokens || resolveView2dVisualTokens();
 
     const padXBoost = parsePx(cssVars[CSS_VAR_NAMES.canvasPadX]);
@@ -113,8 +120,8 @@ function resolveLayoutConfig(scene, {
         bandedRowGap: isSmallScreen ? 6 : 8,
         compactRowHeight: isSmallScreen ? 12 : 16,
         compactRowGap: isSmallScreen ? 4 : 6,
-        gridCellSize: isSmallScreen ? 12 : 14,
-        gridCellGap: isSmallScreen ? 3 : 4,
+        gridCellSize: isSmallScreen ? 9 : 10,
+        gridCellGap: isSmallScreen ? 2 : 2,
         transposeColWidth: isSmallScreen ? 10 : 12,
         transposeColGap: isSmallScreen ? 4 : 6,
         transposeCellHeight: isSmallScreen ? 12 : 14,
@@ -125,6 +132,9 @@ function resolveLayoutConfig(scene, {
         compactMinWidth: isSmallScreen ? 74 : 92,
         operatorSidePadding: isSmallScreen ? 8 : 10
     };
+
+    component.gridCellSize = resolveMeasuredValue(componentOverrides.gridCellSize, component.gridCellSize);
+    component.gridCellGap = resolveNonNegativeOverride(componentOverrides.gridCellGap, component.gridCellGap);
 
     return {
         scenePaddingX: (isSmallScreen ? 32 : 48) + padXBoost,
@@ -623,6 +633,18 @@ function pointBounds(points = []) {
     };
 }
 
+function resolveConnectorCaptionBottom(entry = null) {
+    if (!entry || typeof entry !== 'object') return 0;
+    const contentBottom = (entry.contentBounds?.y || 0) + (entry.contentBounds?.height || 0);
+    const labelBottom = entry.labelBounds
+        ? (entry.labelBounds.y + entry.labelBounds.height)
+        : 0;
+    const dimensionsBottom = entry.dimensionBounds
+        ? (entry.dimensionBounds.y + entry.dimensionBounds.height)
+        : 0;
+    return Math.max(contentBottom, labelBottom, dimensionsBottom);
+}
+
 function offsetPoint(point, anchor, gap = 0) {
     const safeGap = Number.isFinite(gap) ? Math.max(0, gap) : 0;
     switch (anchor) {
@@ -637,6 +659,23 @@ function offsetPoint(point, anchor, gap = 0) {
     default:
         return { ...point };
     }
+}
+
+function resolveConnectorAnchorPoint(registry, anchorRef = null, metadata = null, endpoint = 'source') {
+    if (!registry || !anchorRef || typeof anchorRef !== 'object') return null;
+    const basePoint = registry.resolveAnchor(anchorRef);
+    if (!basePoint) return null;
+    const entry = registry.getNodeEntry(anchorRef.nodeId);
+    if (!entry) return basePoint;
+    const modeKey = endpoint === 'target' ? 'targetAnchorMode' : 'sourceAnchorMode';
+    const anchorMode = String(metadata?.[modeKey] || '').trim().toLowerCase();
+    if (anchorMode === 'caption-bottom' && anchorRef.anchor === VIEW2D_ANCHOR_SIDES.BOTTOM) {
+        return {
+            x: basePoint.x,
+            y: resolveConnectorCaptionBottom(entry)
+        };
+    }
+    return basePoint;
 }
 
 function buildConnectorPath(
@@ -665,6 +704,25 @@ function buildConnectorPath(
         return [
             leadSource,
             elbowPoint,
+            leadTarget
+        ];
+    }
+    if (route === VIEW2D_CONNECTOR_ROUTES.HORIZONTAL_BALANCED) {
+        const midX = (leadSource.x + leadTarget.x) / 2;
+        return [
+            leadSource,
+            { x: midX, y: leadSource.y },
+            { x: midX, y: leadTarget.y },
+            leadTarget
+        ];
+    }
+    if (route === VIEW2D_CONNECTOR_ROUTES.UNDERPASS) {
+        const sweepGap = Math.max(12, sourceGap, targetGap);
+        const sweepY = Math.max(leadSource.y, leadTarget.y) + sweepGap;
+        return [
+            leadSource,
+            { x: leadSource.x, y: sweepY },
+            { x: leadTarget.x, y: sweepY },
             leadTarget
         ];
     }
@@ -748,8 +806,18 @@ export function buildSceneLayout(scene, {
         if (node?.kind !== VIEW2D_NODE_KINDS.GROUP || !Array.isArray(node.children)) return;
         node.children.forEach((child) => {
             if (child?.kind !== VIEW2D_NODE_KINDS.CONNECTOR) return;
-            const sourcePoint = registry.resolveAnchor(child.source);
-            const targetPoint = registry.resolveAnchor(child.target);
+            const sourcePoint = resolveConnectorAnchorPoint(
+                registry,
+                child.source,
+                child.metadata,
+                'source'
+            );
+            const targetPoint = resolveConnectorAnchorPoint(
+                registry,
+                child.target,
+                child.metadata,
+                'target'
+            );
             if (!sourcePoint || !targetPoint) return;
             const pathPoints = buildConnectorPath(
                 sourcePoint,

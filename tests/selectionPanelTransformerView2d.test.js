@@ -10,6 +10,7 @@ import {
 } from '../src/ui/selectionPanelTransformerView2d.js';
 import { buildSceneLayout } from '../src/view2d/layout/buildSceneLayout.js';
 import { buildTransformerSceneModel } from '../src/view2d/model/buildTransformerSceneModel.js';
+import { resolveViewportFitTransform } from '../src/view2d/runtime/View2dViewportController.js';
 import { D_HEAD, D_MODEL } from '../src/ui/selectionPanelConstants.js';
 
 function createActivationSource(tokenCount = 4) {
@@ -143,46 +144,14 @@ function dispatchPointerEvent(target, type, {
     return event;
 }
 
-function resolveCanvasFitTransform(sceneBounds, {
-    width = 1,
-    height = 1
+function resolveEntryClientPoint(entry, viewport, {
+    xInset = 0.5,
+    yInset = 0.5
 } = {}) {
-    const fitPaddingPx = Math.max(12, Math.round(Math.min(width, height) * 0.04));
-    const availableWidth = Math.max(1, width - (fitPaddingPx * 2));
-    const availableHeight = Math.max(1, height - (fitPaddingPx * 2));
-    const widthFitScale = availableWidth / Math.max(1, sceneBounds?.width || 1);
-    const heightFitScale = availableHeight / Math.max(1, sceneBounds?.height || 1);
-    const minReadableHeight = Math.min(
-        availableHeight,
-        Math.max(220, availableHeight * 0.4)
-    );
-    const readableScaleFloor = minReadableHeight / Math.max(1, sceneBounds?.height || 1);
-    const scale = Math.max(
-        0.01,
-        Math.min(2, Math.min(
-            heightFitScale,
-            Math.max(widthFitScale, readableScaleFloor)
-        ))
-    );
+    const bounds = entry?.contentBounds || entry?.bounds || null;
     return {
-        scale,
-        offsetX: (width - ((sceneBounds?.width || 0) * scale)) / 2 - ((sceneBounds?.x || 0) * scale),
-        offsetY: (height - ((sceneBounds?.height || 0) * scale)) / 2 - ((sceneBounds?.y || 0) * scale)
-    };
-}
-
-function resolveCanvasHeadDetailTransform(sceneBounds, {
-    width = 1,
-    height = 1
-} = {}) {
-    const fitTransform = resolveCanvasFitTransform(sceneBounds, {
-        width,
-        height
-    });
-    return {
-        scale: fitTransform.scale,
-        offsetX: -((sceneBounds?.x || 0) * fitTransform.scale),
-        offsetY: fitTransform.offsetY
+        clientX: viewport.panX + (((bounds?.x || 0) + ((bounds?.width || 0) * xInset)) * viewport.scale),
+        clientY: viewport.panY + (((bounds?.y || 0) + ((bounds?.height || 0) * yInset)) * viewport.scale)
     };
 }
 
@@ -426,6 +395,112 @@ describe('selectionPanelTransformerView2d', () => {
             stage: 'final-ln',
             role: 'module'
         })).toBe('Final LayerNorm');
+    });
+
+    it('re-fits the overview scene when the opening canvas grows to a larger screen size', () => {
+        const panel = document.createElement('section');
+        panel.innerHTML = `
+            <div class="detail-header"></div>
+            <div class="detail-body"></div>
+        `;
+        document.body.appendChild(panel);
+
+        const view = createTransformerView2dDetailView(panel);
+        const canvas = panel.querySelector('.detail-transformer-view2d-canvas');
+        const ctx = createMockContext();
+        const activationSource = createActivationSource(4);
+        let canvasRect = {
+            width: 640,
+            height: 360
+        };
+
+        canvas.getContext = vi.fn(() => ctx);
+        canvas.getBoundingClientRect = () => ({
+            left: 0,
+            top: 0,
+            right: canvasRect.width,
+            bottom: canvasRect.height,
+            width: canvasRect.width,
+            height: canvasRect.height
+        });
+
+        view.setVisible(true);
+        view.open({ activationSource });
+        const initialViewport = view.getViewportState();
+
+        canvasRect = {
+            width: 960,
+            height: 540
+        };
+        view.resizeAndRender();
+
+        const resizedViewport = view.getViewportState();
+        const scene = buildTransformerSceneModel({ activationSource });
+        const layout = buildSceneLayout(scene);
+        const expectedFit = resolveViewportFitTransform(layout.sceneBounds, canvasRect, {
+            padding: 28,
+            minScale: 0.035,
+            maxScale: 10
+        });
+
+        expect(resizedViewport.scale).toBeCloseTo(expectedFit.scale, 6);
+        expect(resizedViewport.panX).toBeCloseTo(expectedFit.panX, 6);
+        expect(resizedViewport.panY).toBeCloseTo(expectedFit.panY, 6);
+        expect(resizedViewport.scale).toBeGreaterThan(initialViewport.scale);
+    });
+
+    it('renders prompt token chips in the bottom-left 2D overlay from the live token window', () => {
+        const panel = document.createElement('section');
+        panel.innerHTML = `
+            <div class="detail-header"></div>
+            <div class="detail-body"></div>
+        `;
+        document.body.appendChild(panel);
+
+        const view = createTransformerView2dDetailView(panel);
+        const canvas = panel.querySelector('.detail-transformer-view2d-canvas');
+        const ctx = createMockContext();
+        const activationSource = {
+            ...createActivationSource(3),
+            getTokenId(tokenIndex) {
+                return 1000 + tokenIndex;
+            }
+        };
+
+        canvas.getContext = vi.fn(() => ctx);
+        canvas.getBoundingClientRect = () => ({
+            left: 0,
+            top: 0,
+            right: 640,
+            bottom: 360,
+            width: 640,
+            height: 360
+        });
+
+        view.setVisible(true);
+        view.open({
+            activationSource,
+            tokenIndices: [0, 1, 2],
+            tokenLabels: ['tok_0', 'tok_1', 'tok_2'],
+            semanticTarget: {
+                componentKind: 'residual',
+                layerIndex: 0,
+                stage: 'incoming',
+                role: 'module',
+                tokenIndex: 1
+            },
+            focusLabel: 'Layer 1 incoming residual'
+        });
+
+        const tokenStrip = panel.querySelector('.detail-transformer-view2d-token-strip');
+        const tokenChips = Array.from(panel.querySelectorAll('.detail-transformer-view2d-token-strip__token'));
+
+        expect(tokenStrip?.dataset.visible).toBe('true');
+        expect(tokenChips).toHaveLength(3);
+        expect(tokenChips.map((chip) => chip.textContent)).toEqual(['tok_0', 'tok_1', 'tok_2']);
+        expect(tokenChips[1]?.dataset.tokenIndex).toBe('1');
+        expect(tokenChips[1]?.dataset.tokenId).toBe('1001');
+        expect(tokenChips[1]?.dataset.tokenNav).toBe('true');
     });
 
     it('supports keyboard pan and zoom on the transformer 2D canvas surface', () => {
@@ -729,6 +804,105 @@ describe('selectionPanelTransformerView2d', () => {
         expect(tooltip?.style.display).toBe('none');
     });
 
+    it('shows the shared layer norm hover tooltip for overview layer norm pills', () => {
+        const panel = document.createElement('section');
+        panel.innerHTML = `
+            <div class="detail-header"></div>
+            <div class="detail-body"></div>
+        `;
+        document.body.appendChild(panel);
+
+        const view = createTransformerView2dDetailView(panel);
+        const canvas = panel.querySelector('.detail-transformer-view2d-canvas');
+        const ctx = createMockContext();
+        const activationSource = createActivationSource(4);
+
+        canvas.getContext = vi.fn(() => ctx);
+        canvas.getBoundingClientRect = () => ({
+            left: 0,
+            top: 0,
+            right: 640,
+            bottom: 360,
+            width: 640,
+            height: 360
+        });
+
+        view.setVisible(true);
+        view.open({ activationSource });
+
+        const scene = buildTransformerSceneModel({ activationSource });
+        const layout = buildSceneLayout(scene);
+        const layerNormEntry = layout.registry.getNodeEntries().find((entry) => (
+            entry.role === 'module-card'
+            && entry.semantic?.componentKind === 'layer-norm'
+            && entry.semantic?.stage === 'ln1'
+            && entry.semantic?.layerIndex === 0
+        ));
+        const viewport = view.getViewportState();
+        const { clientX, clientY } = resolveEntryClientPoint(layerNormEntry, viewport);
+
+        dispatchPointerEvent(canvas, 'pointermove', {
+            clientX,
+            clientY,
+            pointerType: 'mouse'
+        });
+
+        const tooltip = document.body.querySelector('.scene-hover-label');
+        expect(tooltip?.style.display).toBe('block');
+        expect(tooltip?.querySelector('.scene-hover-label__text')?.textContent).toBe('LayerNorm 1');
+        expect(tooltip?.querySelector('.scene-hover-label__token-chip')?.hidden).toBe(true);
+        expect(tooltip?.querySelector('.scene-hover-label__subtitle')?.textContent).toBe('Layer 1');
+    });
+
+    it('shows the shared output projection hover tooltip for overview output projection cards', () => {
+        const panel = document.createElement('section');
+        panel.innerHTML = `
+            <div class="detail-header"></div>
+            <div class="detail-body"></div>
+        `;
+        document.body.appendChild(panel);
+
+        const view = createTransformerView2dDetailView(panel);
+        const canvas = panel.querySelector('.detail-transformer-view2d-canvas');
+        const ctx = createMockContext();
+        const activationSource = createActivationSource(4);
+
+        canvas.getContext = vi.fn(() => ctx);
+        canvas.getBoundingClientRect = () => ({
+            left: 0,
+            top: 0,
+            right: 640,
+            bottom: 360,
+            width: 640,
+            height: 360
+        });
+
+        view.setVisible(true);
+        view.open({ activationSource });
+
+        const scene = buildTransformerSceneModel({ activationSource });
+        const layout = buildSceneLayout(scene);
+        const outputProjectionEntry = layout.registry.getNodeEntries().find((entry) => (
+            entry.role === 'projection-weight'
+            && entry.semantic?.componentKind === 'output-projection'
+            && entry.semantic?.layerIndex === 0
+        ));
+        const viewport = view.getViewportState();
+        const { clientX, clientY } = resolveEntryClientPoint(outputProjectionEntry, viewport);
+
+        dispatchPointerEvent(canvas, 'pointermove', {
+            clientX,
+            clientY,
+            pointerType: 'mouse'
+        });
+
+        const tooltip = document.body.querySelector('.scene-hover-label');
+        expect(tooltip?.style.display).toBe('block');
+        expect(tooltip?.querySelector('.scene-hover-label__text')?.textContent).toBe('Output Projection Matrix');
+        expect(tooltip?.querySelector('.scene-hover-label__token-chip')?.hidden).toBe(true);
+        expect(tooltip?.querySelector('.scene-hover-label__subtitle')?.textContent).toBe('Layer 1');
+    });
+
     it('shows the shared post-layernorm hover tooltip for deep attention-head branch copies', () => {
         const panel = document.createElement('section');
         panel.innerHTML = `
@@ -780,14 +954,18 @@ describe('selectionPanelTransformerView2d', () => {
             entry.role === 'x-ln-copy'
             && entry.semantic?.branchKey === 'q'
         ));
-        const detailTransform = resolveCanvasHeadDetailTransform(detailLayout.sceneBounds, {
-            width: 640,
-            height: 360
-        });
-        const worldX = copyEntry.contentBounds.x + copyEntry.layoutData.innerPaddingX + 8;
+        const detailViewport = view.getViewportState();
+        const rowWidth = Math.max(
+            1,
+            Math.min(
+                copyEntry.layoutData.compactWidth,
+                copyEntry.contentBounds.width - (copyEntry.layoutData.innerPaddingX * 2)
+            )
+        );
+        const worldX = copyEntry.contentBounds.x + copyEntry.layoutData.innerPaddingX + (rowWidth * 0.5);
         const worldY = copyEntry.contentBounds.y + copyEntry.layoutData.innerPaddingY + (copyEntry.layoutData.rowHeight * 0.5);
-        const clientX = detailTransform.offsetX + (worldX * detailTransform.scale);
-        const clientY = detailTransform.offsetY + (worldY * detailTransform.scale);
+        const clientX = detailViewport.panX + (worldX * detailViewport.scale);
+        const clientY = detailViewport.panY + (worldY * detailViewport.scale);
 
         dispatchPointerEvent(canvas, 'pointermove', {
             clientX,
@@ -889,4 +1067,5 @@ describe('selectionPanelTransformerView2d', () => {
         expect(afterPinchPan.panX).toBeGreaterThan(afterPinch.panX);
         expect(afterPinchPan.panY).toBeGreaterThan(afterPinch.panY);
     });
+
 });

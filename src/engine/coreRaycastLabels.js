@@ -62,6 +62,9 @@ export function simplifyLayerNormParamHoverLabel(label, info = null, object = nu
         || object?.userData?.activationData?.stage
         || '';
     const stageLower = String(stage).toLowerCase();
+    if (lower.includes('post-layernorm residual') || lower.includes('post layernorm residual')) {
+        return raw;
+    }
     const layerNormKind = resolveLayerNormKind({
         label: raw,
         stage,

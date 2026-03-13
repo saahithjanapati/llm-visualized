@@ -26,6 +26,7 @@ import {
     buildKvCacheOverlayBadgeText,
 } from './kvCacheInfoUtils.js';
 import { MHSA_INFO_REQUEST_EVENT } from './mhsaInfoUtils.js';
+import { getTopEmbeddingActivationEasedProgress } from '../utils/topEmbeddingTimingUtils.js';
 
 // Initializes status overlay and equations panel updates.
 export function initStatusOverlay(pipeline, NUM_LAYERS) {
@@ -111,9 +112,6 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
     const topEmbedTargetColor = new THREE.Color(MHA_FINAL_Q_COLOR);
     const topEmbedWorkingColor = new THREE.Color();
     const topEmbedMaxEmissive = TOP_EMBED_MAX_EMISSIVE;
-    const TOP_EMBED_ACTIVATION_INSET_FRACTION = 0.08;
-    const TOP_EMBED_ACTIVATION_INSET_MIN = 1.0;
-
     const LN_EQ_BASE_COLOR = '#6a6a6a';
     const LN_EQ_ACTIVE_COLOR = '#ffffff';
     const EQ_PROGRESS_STEPS = 14;
@@ -780,18 +778,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
             if (Number.isFinite(y) && y > highestY) highestY = y;
         }
         if (!Number.isFinite(highestY)) return;
-        const span = Number.isFinite(exitY) ? Math.max(0, exitY - entryY) : 0;
-        const activationInset = Math.min(
-            Math.max(TOP_EMBED_ACTIVATION_INSET_MIN, span * TOP_EMBED_ACTIVATION_INSET_FRACTION),
-            Math.max(0, span - 1e-6)
-        );
-        const activationStartY = entryY + activationInset;
-        let t = 0;
-        if (highestY >= activationStartY) {
-            const denom = Math.max(1e-6, exitY - activationStartY);
-            t = denom > 0 ? Math.min(1, (highestY - activationStartY) / denom) : 1;
-        }
-        const eased = t * t * (3 - 2 * t);
+        const eased = getTopEmbeddingActivationEasedProgress(entryY, exitY, highestY);
         // Avoid re-applying the base gray style before activation starts.
         if (eased <= 0 && !appState.topEmbedActivated) {
             return;

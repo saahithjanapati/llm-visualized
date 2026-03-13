@@ -13,6 +13,10 @@ import { resolveLogitEntryText } from '../../utils/logitTokenText.js';
 import { addEmbeddingAndTokenChips } from './tokenChips.js';
 import { formatTokenLabel } from './tokenLabels.js';
 import { resolveLogitTokenSeed } from './logitColor.js';
+import {
+    resolveKvCachePassMode,
+    resolveKvPrefillBaseLaneCount
+} from './kvCachePassMode.js';
 import { initTouchClickFallback } from '../../ui/touchClickFallback.js';
 
 const DEFAULT_ADVANCE_SECONDS = 10;
@@ -598,7 +602,7 @@ export function initGenerationController({
     const totalTokenCount = resolveTokenCount(activationSource, initialLaneCount);
     const maxLaneCount = Math.max(1, totalTokenCount || initialLaneCount);
     const canLoop = !!activationSource && maxLaneCount > initialLaneCount;
-    const kvPrefillBaseLaneCount = Math.max(1, Math.floor(initialLaneCount || 1));
+    const kvPrefillBaseLaneCount = resolveKvPrefillBaseLaneCount({ initialLaneCount });
 
     const overlay = createAdvanceOverlay();
     const overlayTouchCleanup = initTouchClickFallback(overlay.root, { selector: 'button' });
@@ -631,8 +635,8 @@ export function initGenerationController({
             return Math.max(1, Math.floor(kvSessionBaseLaneCount));
         }
         // Defensive fallback when toggle event ordering misses transition state.
-        // KV mode should treat only the initial pass as prefill, even when the
-        // toggle is enabled mid-sequence.
+        // KV mode should treat only token 1 as prefill, even when the toggle is
+        // enabled after the scene has already advanced.
         const fallback = initialBase;
         kvSessionBaseLaneCount = fallback;
         return fallback;
@@ -640,18 +644,26 @@ export function initGenerationController({
 
     const syncKvCachePassState = (laneCountValue) => {
         const base = resolveKvSessionBase(laneCountValue);
-        const next = Math.max(1, Math.floor(laneCountValue || 1));
-        const passIndex = Math.max(0, next - base);
-        appState.kvCachePassIndex = passIndex;
-        appState.kvCachePrefillActive = kvModeEnabled && passIndex === 0;
+        const passMode = resolveKvCachePassMode({
+            laneCount: laneCountValue,
+            kvModeEnabled,
+            prefillBaseLaneCount: base
+        });
+        appState.kvCachePassIndex = passMode.passIndex;
+        appState.kvCachePrefillActive = passMode.kvCachePrefillActive;
     };
 
     const resolvePassPlan = (laneCountValue) => {
-        const totalLaneCount = Math.max(1, Math.floor(laneCountValue || 1));
-        const base = resolveKvSessionBase(totalLaneCount);
-        const passIndex = Math.max(0, totalLaneCount - base);
-        const kvCacheDecodeActive = kvModeEnabled && passIndex > 0;
-        const activeLaneCount = kvCacheDecodeActive ? 1 : totalLaneCount;
+        const base = resolveKvSessionBase(laneCountValue);
+        const passMode = resolveKvCachePassMode({
+            laneCount: laneCountValue,
+            kvModeEnabled,
+            prefillBaseLaneCount: base
+        });
+        const totalLaneCount = passMode.totalLaneCount;
+        const passIndex = passMode.passIndex;
+        const kvCacheDecodeActive = passMode.kvCacheDecodeActive;
+        const activeLaneCount = passMode.activeLaneCount;
         const laneLayoutIndices = kvCacheDecodeActive
             ? [Math.max(0, totalLaneCount - 1)]
             : Array.from({ length: totalLaneCount }, (_, idx) => idx);
@@ -1005,9 +1017,9 @@ export function initGenerationController({
         kvModeEnabled = nextEnabled;
         appState.kvCacheModeEnabled = nextEnabled;
         if (isEnablingKv) {
-            // In KV mode, only the initial pass is treated as prefill. If KV is
-            // enabled later, restart directly into decode semantics for the
-            // current token count.
+            // In KV mode, only token 1 is treated as prefill. If KV is enabled
+            // later, restart directly into decode semantics for the current
+            // token count.
             kvSessionBaseLaneCount = kvPrefillBaseLaneCount;
         } else if (isDisablingKv) {
             kvSessionBaseLaneCount = null;

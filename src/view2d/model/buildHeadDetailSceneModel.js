@@ -235,7 +235,8 @@ export function buildHeadDetailSceneModel({
         },
         metadata: {
             preserveColor: true,
-            strokeWidthScale: 0.72
+            strokeWidthScale: 0.72,
+            arrowTipTouchTarget: true
         }
     }));
 
@@ -280,6 +281,7 @@ export function buildHeadDetailSceneModel({
             })
         ],
         metadata: {
+            visualContract: 'selection-panel-mhsa-v1',
             source: 'buildHeadDetailSceneModel',
             rowCount,
             isSmallScreen: !!isSmallScreen,

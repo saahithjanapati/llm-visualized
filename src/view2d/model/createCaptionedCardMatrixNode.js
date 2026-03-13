@@ -54,7 +54,8 @@ function createCaptionMetadata({
     renderMode = 'dom-katex',
     scaleWithNode = false,
     labelScale = null,
-    dimensionsScale = null
+    dimensionsScale = null,
+    labelMaxScreenFontPx = null
 } = {}) {
     const caption = {};
     const safePosition = String(position || '').trim().toLowerCase();
@@ -90,6 +91,9 @@ function createCaptionMetadata({
     }
     if (Number.isFinite(dimensionsScale) && dimensionsScale > 0) {
         caption.dimensionsScale = Number(dimensionsScale);
+    }
+    if (Number.isFinite(labelMaxScreenFontPx) && labelMaxScreenFontPx > 0) {
+        caption.labelMaxScreenFontPx = Number(labelMaxScreenFontPx);
     }
     return Object.keys(caption).length ? { caption } : null;
 }
@@ -158,10 +162,12 @@ export function createCaptionedCardMatrixNode({
     captionScaleWithNode = false,
     captionLabelScale = null,
     captionDimensionsScale = null,
+    captionLabelMaxScreenFontPx = null,
     visualStyleKey = VIEW2D_STYLE_KEYS.MATRIX_WEIGHT,
     background = null,
     accent = null,
     stroke = null,
+    disableCardSurfaceEffects = false,
     metadata = null
 } = {}) {
     const resolvedRows = Number.isFinite(rowCount) ? Math.max(1, Math.floor(rowCount)) : 1;
@@ -178,6 +184,9 @@ export function createCaptionedCardMatrixNode({
     }
     if (typeof stroke === 'string' && stroke.length) {
         visual.stroke = stroke;
+    }
+    if (disableCardSurfaceEffects === true) {
+        visual.disableCardSurfaceEffects = true;
     }
 
     return createMatrixNode({
@@ -209,7 +218,8 @@ export function createCaptionedCardMatrixNode({
                 renderMode: 'dom-katex',
                 scaleWithNode: captionScaleWithNode,
                 labelScale: captionLabelScale,
-                dimensionsScale: captionDimensionsScale
+                dimensionsScale: captionDimensionsScale,
+                labelMaxScreenFontPx: captionLabelMaxScreenFontPx
             }),
             metadata
         )

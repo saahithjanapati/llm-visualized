@@ -37,6 +37,8 @@ export const VIEW2D_TEXT_PRESENTATIONS = Object.freeze({
 
 export const VIEW2D_CONNECTOR_ROUTES = Object.freeze({
     HORIZONTAL: 'horizontal',
+    HORIZONTAL_BALANCED: 'horizontal-balanced',
+    UNDERPASS: 'underpass',
     VERTICAL: 'vertical',
     ELBOW: 'elbow'
 });

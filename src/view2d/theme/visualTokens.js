@@ -39,15 +39,16 @@ function mixHexValues(fromHex = 0xFFFFFF, toHex = 0xFFFFFF, amount = 0.5) {
 
 function buildAttentionProjectionStyle(baseHex = 0xFFFFFF, {
     hotspotMix = 0.46,
-    shadowMix = 0.16
+    shadowMix = 0.16,
+    disableGlow = false
 } = {}) {
     return Object.freeze({
         accent: hexToCss(mixHexValues(baseHex, 0xFFFFFF, 0.14), 1),
         fill: `linear-gradient(140deg, ${hexToCss(mixHexValues(baseHex, 0xFFFFFF, 0.34), 0.82)} 0%, ${hexToCss(mixHexValues(baseHex, 0xFFFFFF, 0.12), 0.94)} 38%, ${hexToCss(baseHex, 1)} 70%, ${hexToCss(mixHexValues(baseHex, 0x000000, shadowMix), 0.9)} 100%)`,
         stroke: hexToCss(mixHexValues(baseHex, 0xFFFFFF, 0.24), 0.98),
-        cardGlowColor: hexToCss(baseHex, 0.42),
-        cardGlowOpacity: 0.42,
-        cardGlowBlur: 30,
+        cardGlowColor: disableGlow ? null : hexToCss(baseHex, 0.42),
+        cardGlowOpacity: disableGlow ? 0 : 0.42,
+        cardGlowBlur: disableGlow ? 0 : 30,
         cardHotspotColor: hexToCss(mixHexValues(baseHex, 0xFFFFFF, hotspotMix), 0.32),
         cardInnerGlowColor: hexToCss(baseHex, 0.18),
         cardSheenColor: 'rgba(255,255,255,0.16)',
@@ -193,12 +194,16 @@ const VIEW2D_VISUAL_TOKENS = Object.freeze({
             cardSheenColor: 'rgba(255,255,255,0.18)',
             cardEdgeHighlight: 'rgba(255,255,255,0.34)'
         }),
-        [VIEW2D_STYLE_KEYS.MHSA_Q]: buildAttentionProjectionStyle(MHA_FINAL_Q_COLOR),
+        [VIEW2D_STYLE_KEYS.MHSA_Q]: buildAttentionProjectionStyle(MHA_FINAL_Q_COLOR, {
+            disableGlow: true
+        }),
         [VIEW2D_STYLE_KEYS.MHSA_K]: buildAttentionProjectionStyle(MHA_FINAL_K_COLOR, {
+            disableGlow: true,
             hotspotMix: 0.42,
             shadowMix: 0.14
         }),
         [VIEW2D_STYLE_KEYS.MHSA_V]: buildAttentionProjectionStyle(MHA_FINAL_V_COLOR, {
+            disableGlow: true,
             hotspotMix: 0.34,
             shadowMix: 0.12
         }),

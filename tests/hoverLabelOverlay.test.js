@@ -30,6 +30,7 @@ describe('hoverLabelOverlay', () => {
                     tokenLabel: 'beta',
                     keyTokenIndex: 0,
                     keyTokenLabel: 'alpha',
+                    preScore: 0.375,
                     headIndex: 2,
                     layerIndex: 0
                 }
@@ -43,7 +44,10 @@ describe('hoverLabelOverlay', () => {
 
         const tooltip = dom.window.document.body.querySelector('.scene-hover-label');
         const content = tooltip?.querySelector('.scene-hover-label__content');
+        const details = tooltip?.querySelector('.scene-hover-label__attention-details');
         const rows = Array.from(tooltip?.querySelectorAll('.scene-hover-label__attention-row') || []);
+        const metricRows = Array.from(tooltip?.querySelectorAll('.scene-hover-label__attention-metric') || [])
+            .filter((row) => !row.hidden);
 
         expect(tooltip?.style.display).toBe('block');
         expect(tooltip?.querySelector('.scene-hover-label__text')?.textContent).toBe('Pre-Softmax Attention Score');
@@ -53,6 +57,14 @@ describe('hoverLabelOverlay', () => {
             'scene-hover-label__subtitle',
             'scene-hover-label__attention-details'
         ]);
+        expect(Array.from(details?.children || []).map((node) => node.className)).toEqual([
+            'scene-hover-label__attention-metrics',
+            'scene-hover-label__attention-row',
+            'scene-hover-label__attention-row'
+        ]);
+        expect(metricRows).toHaveLength(1);
+        expect(metricRows[0]?.querySelector('.scene-hover-label__attention-metric-role')?.textContent).toBe('Pre-softmax');
+        expect(metricRows[0]?.querySelector('.scene-hover-label__attention-metric-value')?.textContent).toBe('0.3750');
         expect(rows).toHaveLength(2);
         expect(rows[0]?.querySelector('.scene-hover-label__attention-role')?.textContent).toBe('Source');
         expect(rows[0]?.querySelector('.scene-hover-label__attention-chip')?.textContent).toContain('beta');

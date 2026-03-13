@@ -377,7 +377,7 @@ export const MERGE_EXTRA_BUFFER_MS = 80;                      // Small settle bu
 
 // Output projection staged timings
 export const OUTPUT_PROJ_STAGE1_MS = 1000; // to matrix bottom
-export const OUTPUT_PROJ_STAGE2_MS = 1200; // through matrix (slightly slower)
+export const OUTPUT_PROJ_STAGE2_MS = 1350; // through matrix (slowed slightly so the glow reads more clearly)
 export const OUTPUT_PROJ_STAGE3_MS = 500;  // final rise after matrix
 
 // ------------------------------------------------------------

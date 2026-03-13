@@ -37,6 +37,9 @@ describe('selectionPanelSelectionUtils', () => {
         expect(simplifyLayerNormParamDisplayLabel('LayerNorm scale matrix', {
             info: { activationData: { stage: 'ln2.param.scale' } }
         })).toBe('LayerNorm 2 Scale');
+        expect(simplifyLayerNormParamDisplayLabel('Post LayerNorm Residual Vector', {
+            info: { activationData: { stage: 'ln1.shift' } }
+        })).toBe('Post LayerNorm Residual Vector');
         expect(simplifyLayerNormParamDisplayLabel('LN1 Normed - token', {
             info: { activationData: { stage: 'ln1.norm' } }
         })).toBe('LayerNorm 1 Normed - token');

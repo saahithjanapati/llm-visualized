@@ -295,7 +295,7 @@ export class CoreEngine {
         this._hoverLabelText.className = 'scene-hover-label__text';
         this._hoverLabelSeparator = document.createElement('span');
         this._hoverLabelSeparator.className = 'scene-hover-label__separator';
-        this._hoverLabelSeparator.textContent = '-';
+        this._hoverLabelSeparator.textContent = '•';
         this._hoverLabelTokenChip = document.createElement('span');
         this._hoverLabelTokenChip.className = 'detail-subtitle-token-chip scene-hover-label__token-chip';
         this._hoverLabelTokenChip.setAttribute('aria-hidden', 'true');
@@ -335,7 +335,27 @@ export class CoreEngine {
             this._hoverLabelAttentionTargetChip,
             this._hoverLabelAttentionTargetPosition
         );
+        this._hoverLabelAttentionMetricRows = Array.from({ length: 3 }, () => {
+            const row = document.createElement('div');
+            row.className = 'scene-hover-label__attention-metric';
+
+            const role = document.createElement('span');
+            role.className = 'scene-hover-label__attention-metric-role';
+
+            const value = document.createElement('span');
+            value.className = 'scene-hover-label__attention-metric-value';
+
+            row.append(role, value);
+            return { row, role, value };
+        });
+        this._hoverLabelAttentionMetrics = document.createElement('div');
+        this._hoverLabelAttentionMetrics.className = 'scene-hover-label__attention-metrics';
+        this._hoverLabelAttentionMetrics.setAttribute('aria-hidden', 'true');
+        this._hoverLabelAttentionMetricRows.forEach((rowParts) => {
+            this._hoverLabelAttentionMetrics.appendChild(rowParts.row);
+        });
         this._hoverLabelAttentionDetails.append(
+            this._hoverLabelAttentionMetrics,
             this._hoverLabelAttentionSourceRow,
             this._hoverLabelAttentionTargetRow
         );
@@ -1773,6 +1793,22 @@ export class CoreEngine {
             return true;
         };
 
+        const renderAttentionMetricRow = (rowParts, metric = null) => {
+            if (!rowParts) return false;
+            const roleLabel = typeof metric?.roleLabel === 'string' ? metric.roleLabel : '';
+            const valueText = typeof metric?.valueText === 'string' ? metric.valueText : '';
+            const visible = roleLabel.length > 0 && valueText.length > 0;
+            rowParts.row.hidden = !visible;
+            if (!visible) {
+                rowParts.role.textContent = '';
+                rowParts.value.textContent = '';
+                return false;
+            }
+            rowParts.role.textContent = roleLabel;
+            rowParts.value.textContent = valueText;
+            return true;
+        };
+
         const safeLabel = String(label || '');
 
         const detailContext = resolveHoverTokenContext({
@@ -1811,6 +1847,10 @@ export class CoreEngine {
                 this._hoverLabelAttentionTargetPosition,
                 null
             );
+            this._hoverLabelAttentionMetricRows.forEach((rowParts) => {
+                renderAttentionMetricRow(rowParts, null);
+            });
+            this._hoverLabelAttentionMetrics.hidden = true;
             this._hoverLabelSubtitle.hidden = true;
             this._hoverLabelSubtitle.textContent = '';
             return false;
@@ -1852,6 +1892,10 @@ export class CoreEngine {
                 this._hoverLabelAttentionTargetPosition,
                 null
             );
+            this._hoverLabelAttentionMetricRows.forEach((rowParts) => {
+                renderAttentionMetricRow(rowParts, null);
+            });
+            this._hoverLabelAttentionMetrics.hidden = true;
             return true;
         }
 
@@ -1861,6 +1905,9 @@ export class CoreEngine {
             this._hoverLabelDetailText.textContent = '';
             const rows = Array.isArray(detailContext.attentionRows)
                 ? detailContext.attentionRows
+                : [];
+            const metrics = Array.isArray(detailContext.attentionMetrics)
+                ? detailContext.attentionMetrics
                 : [];
             const sourceVisible = renderAttentionRow(
                 this._hoverLabelAttentionSourceRow,
@@ -1876,7 +1923,12 @@ export class CoreEngine {
                 this._hoverLabelAttentionTargetPosition,
                 rows[1] || null
             );
-            this._hoverLabelAttentionDetails.hidden = !(sourceVisible || targetVisible);
+            let metricsVisible = false;
+            this._hoverLabelAttentionMetricRows.forEach((rowParts, index) => {
+                metricsVisible = renderAttentionMetricRow(rowParts, metrics[index] || null) || metricsVisible;
+            });
+            this._hoverLabelAttentionMetrics.hidden = !metricsVisible;
+            this._hoverLabelAttentionDetails.hidden = !(sourceVisible || targetVisible || metricsVisible);
             return true;
         }
 
@@ -1898,6 +1950,10 @@ export class CoreEngine {
                 this._hoverLabelAttentionTargetPosition,
                 null
             );
+            this._hoverLabelAttentionMetricRows.forEach((rowParts) => {
+                renderAttentionMetricRow(rowParts, null);
+            });
+            this._hoverLabelAttentionMetrics.hidden = true;
             return true;
         }
 
@@ -1916,6 +1972,10 @@ export class CoreEngine {
             this._hoverLabelAttentionTargetPosition,
             null
         );
+        this._hoverLabelAttentionMetricRows.forEach((rowParts) => {
+            renderAttentionMetricRow(rowParts, null);
+        });
+        this._hoverLabelAttentionMetrics.hidden = true;
 
         this._hoverLabelTokenChip.textContent = formatTokenChipDisplayText(
             detailContext.tokenLabel,

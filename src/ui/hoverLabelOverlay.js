@@ -60,6 +60,20 @@ function createAttentionDetailRow(documentRef) {
     return { row, role, chip, position };
 }
 
+function createAttentionMetricRow(documentRef) {
+    const row = documentRef.createElement('div');
+    row.className = 'scene-hover-label__attention-metric';
+
+    const role = documentRef.createElement('span');
+    role.className = 'scene-hover-label__attention-metric-role';
+
+    const value = documentRef.createElement('span');
+    value.className = 'scene-hover-label__attention-metric-value';
+
+    row.append(role, value);
+    return { row, role, value };
+}
+
 function renderAttentionDetailRow(rowParts, rowContext = null) {
     if (!rowParts) return false;
 
@@ -90,6 +104,22 @@ function renderAttentionDetailRow(rowParts, rowContext = null) {
     rowParts.position.textContent = rowContext.positionText
         ? `(${rowContext.positionText})`
         : '';
+    return true;
+}
+
+function renderAttentionMetricRow(rowParts, metric = null) {
+    if (!rowParts) return false;
+    const roleLabel = typeof metric?.roleLabel === 'string' ? metric.roleLabel : '';
+    const valueText = typeof metric?.valueText === 'string' ? metric.valueText : '';
+    const visible = roleLabel.length > 0 && valueText.length > 0;
+    setHidden(rowParts.row, !visible);
+    if (!visible) {
+        rowParts.role.textContent = '';
+        rowParts.value.textContent = '';
+        return false;
+    }
+    rowParts.role.textContent = roleLabel;
+    rowParts.value.textContent = valueText;
     return true;
 }
 
@@ -137,7 +167,7 @@ export function createHoverLabelOverlay({
     labelText.className = 'scene-hover-label__text';
     const separator = documentRef.createElement('span');
     separator.className = 'scene-hover-label__separator';
-    separator.textContent = '-';
+    separator.textContent = '•';
     const tokenChip = documentRef.createElement('span');
     tokenChip.className = 'detail-subtitle-token-chip scene-hover-label__token-chip';
     tokenChip.setAttribute('aria-hidden', 'true');
@@ -149,7 +179,12 @@ export function createHoverLabelOverlay({
     attentionDetails.setAttribute('aria-hidden', 'true');
     const sourceRow = createAttentionDetailRow(documentRef);
     const targetRow = createAttentionDetailRow(documentRef);
-    attentionDetails.append(sourceRow.row, targetRow.row);
+    const metricRows = Array.from({ length: 3 }, () => createAttentionMetricRow(documentRef));
+    const attentionMetrics = documentRef.createElement('div');
+    attentionMetrics.className = 'scene-hover-label__attention-metrics';
+    attentionMetrics.setAttribute('aria-hidden', 'true');
+    metricRows.forEach((rowParts) => attentionMetrics.appendChild(rowParts.row));
+    attentionDetails.append(attentionMetrics, sourceRow.row, targetRow.row);
     const subtitle = documentRef.createElement('span');
     subtitle.className = 'scene-hover-label__subtitle';
     subtitle.setAttribute('aria-hidden', 'true');
@@ -188,6 +223,8 @@ export function createHoverLabelOverlay({
             detailText.textContent = '';
             renderAttentionDetailRow(sourceRow, null);
             renderAttentionDetailRow(targetRow, null);
+            metricRows.forEach((rowParts) => renderAttentionMetricRow(rowParts, null));
+            setHidden(attentionMetrics, true);
             subtitle.textContent = '';
             setHidden(labelText, true);
             setHidden(separator, true);
@@ -227,6 +264,8 @@ export function createHoverLabelOverlay({
             detailText.textContent = '';
             renderAttentionDetailRow(sourceRow, null);
             renderAttentionDetailRow(targetRow, null);
+            metricRows.forEach((rowParts) => renderAttentionMetricRow(rowParts, null));
+            setHidden(attentionMetrics, true);
             return true;
         }
 
@@ -237,9 +276,17 @@ export function createHoverLabelOverlay({
             const rows = Array.isArray(detailContext.attentionRows)
                 ? detailContext.attentionRows
                 : [];
+            const metrics = Array.isArray(detailContext.attentionMetrics)
+                ? detailContext.attentionMetrics
+                : [];
             const sourceVisible = renderAttentionDetailRow(sourceRow, rows[0] || null);
             const targetVisible = renderAttentionDetailRow(targetRow, rows[1] || null);
-            setHidden(attentionDetails, !(sourceVisible || targetVisible));
+            let metricsVisible = false;
+            metricRows.forEach((rowParts, index) => {
+                metricsVisible = renderAttentionMetricRow(rowParts, metrics[index] || null) || metricsVisible;
+            });
+            setHidden(attentionMetrics, !metricsVisible);
+            setHidden(attentionDetails, !(sourceVisible || targetVisible || metricsVisible));
             return true;
         }
 
@@ -249,12 +296,16 @@ export function createHoverLabelOverlay({
             detailText.textContent = detailContext.detailText || '';
             renderAttentionDetailRow(sourceRow, null);
             renderAttentionDetailRow(targetRow, null);
+            metricRows.forEach((rowParts) => renderAttentionMetricRow(rowParts, null));
+            setHidden(attentionMetrics, true);
             return true;
         }
 
         detailText.textContent = '';
         renderAttentionDetailRow(sourceRow, null);
         renderAttentionDetailRow(targetRow, null);
+        metricRows.forEach((rowParts) => renderAttentionMetricRow(rowParts, null));
+        setHidden(attentionMetrics, true);
         tokenChip.textContent = formatTokenChipDisplayText(
             detailContext.tokenLabel,
             detailContext.tokenIndex
