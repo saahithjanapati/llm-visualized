@@ -1201,7 +1201,10 @@ describe('MHSA detail transpose view', () => {
     it('maps head-output hover rows to the Attention Weighted Sum tooltip payload', () => {
         const {
             index,
-            headOutputNode
+            headOutputNode,
+            valuePostNode,
+            postNode,
+            postCopyNode
         } = buildSceneFixtures();
 
         const hoverState = resolveMhsaDetailHoverState(index, {
@@ -1219,6 +1222,20 @@ describe('MHSA detail transpose view', () => {
         expect(hoverState?.info?.activationData?.isWeightedSum).toBe(true);
         expect(hoverState?.info?.activationData?.tokenIndex).toBe(0);
         expect(hoverState?.info?.activationData?.tokenLabel).toBe('Token A');
+        expect(hoverState?.focusState?.activeNodeIds).toContain(valuePostNode.id);
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: postNode.id,
+            rowIndex: 0
+        });
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: postCopyNode.id,
+            rowIndex: 0
+        });
+        expect(
+            hoverState?.focusState?.rowSelections?.some((selection) => (
+                selection.nodeId === valuePostNode.id && selection.rowIndex === 0
+            ))
+        ).toBe(false);
     });
 
     it('ignores score-matrix background hovers when no specific attention cell is hit', () => {
@@ -1367,16 +1384,18 @@ describe('MHSA detail transpose view', () => {
             rowIndex: 0
         });
         expect(hoverState?.focusState?.activeNodeIds).toContain(headOutputNode.id);
-        expect(hoverState?.focusState?.activeNodeIds).not.toContain(postNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(postNode?.id);
         expect(hoverState?.focusState?.activeNodeIds).toContain(postCopyNode?.id);
         expect(hoverState?.focusState?.activeNodeIds).not.toContain(valuePostNode.id);
         expect(hoverState?.focusState?.activeConnectorIds).not.toContain(connectorVNode.id);
         expect(
             hoverState?.focusState?.columnSelections?.some((selection) => selection.nodeId === postNode?.id)
-        ).toBe(false);
-        expect(
-            hoverState?.focusState?.cellSelections?.some((selection) => selection.nodeId === postNode?.id)
-        ).toBe(false);
+        ).toBe(true);
+        expect(hoverState?.focusState?.cellSelections).toContainEqual({
+            nodeId: postNode?.id,
+            rowIndex: 0,
+            colIndex: 1
+        });
         expect(hoverState?.focusState?.cellSelections).toContainEqual({
             nodeId: postCopyNode?.id,
             rowIndex: 0,

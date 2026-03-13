@@ -1643,36 +1643,6 @@ body.detail-panel-resizing * {
 .status-overlay__line {
     display: block;
 }
-.status-overlay__interactive-stage {
-    appearance: none;
-    -webkit-appearance: none;
-    border: 0;
-    margin: 0;
-    padding: 0;
-    background: transparent;
-    color: #dbeaff;
-    font: inherit;
-    line-height: inherit;
-    letter-spacing: inherit;
-    text-align: left;
-    cursor: pointer;
-    touch-action: manipulation;
-    text-decoration-line: underline;
-    text-decoration-thickness: 1px;
-    text-decoration-color: rgba(130, 189, 255, 0.82);
-    text-underline-offset: 3px;
-    box-shadow: none;
-    transition: color 0.18s ease, text-decoration-color 0.18s ease;
-}
-.status-overlay__interactive-stage:hover,
-.status-overlay__interactive-stage:focus-visible {
-    color: #eef6ff;
-    text-decoration-color: rgba(170, 214, 255, 0.96);
-}
-.status-overlay__interactive-stage:focus-visible {
-    outline: 2px solid rgba(150, 204, 255, 0.72);
-    outline-offset: 2px;
-}
 .status-overlay__kv-link {
     appearance: none;
     -webkit-appearance: none;

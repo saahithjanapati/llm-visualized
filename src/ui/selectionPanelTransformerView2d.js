@@ -70,7 +70,7 @@ const VIEW2D_HEAD_DETAIL_FOCUS_PADDING = Object.freeze({
     left: 6
 });
 const VIEW2D_HEAD_DETAIL_DEPTH_ENTER_RATIO = 0.97;
-const VIEW2D_HEAD_DETAIL_DEPTH_EXIT_RATIO = 0.93;
+const VIEW2D_HEAD_DETAIL_DEPTH_EXIT_RATIO = 0.95;
 
 function normalizeView2dTokenChipIndex(value = null) {
     return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : null;

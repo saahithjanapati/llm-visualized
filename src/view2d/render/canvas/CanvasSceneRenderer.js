@@ -135,6 +135,10 @@ const PLUS_OPERATOR_FONT_WEIGHT = 500;
 const MATRIX_DETAIL_MIN_SCREEN_WIDTH_PX = 72;
 const MATRIX_DETAIL_MIN_SCREEN_HEIGHT_PX = 24;
 const INTERACTION_DETAIL_RELEASE_RATIO = 0.88;
+const VECTOR_STRIP_HIGHLIGHT_STROKE_SCREEN_PX = 0.8;
+const GRID_FOCUSED_CELL_STROKE_SCREEN_PX = 0.92;
+const MATRIX_ORNAMENT_ARROW_GAP_SCREEN_PX = 9;
+const MATRIX_ORNAMENT_ARROW_SHAFT_SCREEN_PX = 30;
 
 function parseLinearGradient(input = '') {
     const key = String(input || '');
@@ -310,7 +314,7 @@ function drawVectorStripRows(
             if (highlightStrength > 0.001 && typeof hoverStrokeColor === 'string' && hoverStrokeColor.length) {
                 ctx.save();
                 ctx.globalAlpha = alpha * highlightStrength;
-                ctx.lineWidth = 1;
+                ctx.lineWidth = VECTOR_STRIP_HIGHLIGHT_STROKE_SCREEN_PX;
                 ctx.strokeStyle = hoverStrokeColor;
                 ctx.strokeRect(
                     bounds.x + 0.5,
@@ -403,7 +407,7 @@ function drawVectorStripColumns(
             if (highlightStrength > 0.001 && typeof hoverStrokeColor === 'string' && hoverStrokeColor.length) {
                 ctx.save();
                 ctx.globalAlpha = alpha * highlightStrength;
-                ctx.lineWidth = 1;
+                ctx.lineWidth = VECTOR_STRIP_HIGHLIGHT_STROKE_SCREEN_PX;
                 ctx.strokeStyle = hoverStrokeColor;
                 ctx.strokeRect(
                     bounds.x + 0.5,
@@ -1931,7 +1935,7 @@ function drawMatrixNode(
                     );
                     ctx.fill();
                     if (Number.isFinite(cellAlpha) && cellAlpha >= 0.995) {
-                        ctx.lineWidth = Math.max(1, 1.15 / safeWorldScale);
+                        ctx.lineWidth = Math.max(0.85, GRID_FOCUSED_CELL_STROKE_SCREEN_PX / safeWorldScale);
                         ctx.strokeStyle = 'rgba(255, 255, 255, 0.88)';
                         roundRectPath(
                             ctx,
@@ -2030,7 +2034,85 @@ function drawMatrixNode(
         drawCardEdgeStrokes(ctx, contentBounds, cornerRadius, style, safeWorldScale, surfaceFocusAlpha);
     }
     ctx.restore();
+    drawMatrixConnectorOrnaments(ctx, node, contentBounds, config, safeWorldScale, nodeFocusAlpha);
     drawCaption(ctx, entry, node, config, safeWorldScale, safeDetailScale, focusAlpha, fixedTextSizing);
+}
+
+function drawMatrixEdgeArrow(
+    ctx,
+    bounds,
+    config,
+    worldScale = 1,
+    focusAlpha = 1,
+    {
+        direction = 'right'
+    } = {}
+) {
+    if (!bounds) return;
+    const safeWorldScale = Math.max(0.0001, Number.isFinite(worldScale) ? worldScale : 1);
+    const gap = MATRIX_ORNAMENT_ARROW_GAP_SCREEN_PX / safeWorldScale;
+    const shaftLength = MATRIX_ORNAMENT_ARROW_SHAFT_SCREEN_PX / safeWorldScale;
+    const isLeft = String(direction || '').trim().toLowerCase() === 'left';
+    const anchorX = isLeft
+        ? bounds.x - gap
+        : bounds.x + bounds.width + gap;
+    const startPoint = isLeft
+        ? {
+            x: anchorX - shaftLength,
+            y: bounds.y + (bounds.height * 0.5)
+        }
+        : {
+            x: anchorX,
+            y: bounds.y + (bounds.height * 0.5)
+        };
+    const endPoint = isLeft
+        ? {
+            x: anchorX,
+            y: startPoint.y
+        }
+        : {
+            x: startPoint.x + shaftLength,
+            y: startPoint.y
+        };
+    drawConnector(
+        ctx,
+        {
+            pathPoints: [startPoint, endPoint],
+            metadata: {
+                strokeWidthScale: 1,
+                preserveColor: true
+            }
+        },
+        config,
+        resolveView2dStyle(VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL)?.stroke || config?.tokens?.palette?.neutral || null,
+        safeWorldScale,
+        {
+            focusAlpha,
+            emphasize: false
+        }
+    );
+}
+
+function drawMatrixConnectorOrnaments(
+    ctx,
+    node,
+    bounds,
+    config,
+    worldScale = 1,
+    focusAlpha = 1
+) {
+    if (!node || !bounds) return;
+    if (node.role === 'attention-head-output') {
+        drawMatrixEdgeArrow(ctx, bounds, config, worldScale, focusAlpha, {
+            direction: 'right'
+        });
+        return;
+    }
+    if (node.role === 'projection-source-xln') {
+        drawMatrixEdgeArrow(ctx, bounds, config, worldScale, focusAlpha, {
+            direction: 'left'
+        });
+    }
 }
 
 function resolveTextLikeClipBounds(bounds, node, renderedFontSize, config, fontWeight = 500) {

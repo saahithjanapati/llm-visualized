@@ -129,6 +129,7 @@ function createMockContext() {
                 globalAlpha: this.globalAlpha,
                 filter: this.filter,
                 strokeStyle: this.strokeStyle,
+                lineWidth: this.lineWidth,
                 path: currentPath.map((entry) => ({ ...entry }))
             });
         },
@@ -819,6 +820,7 @@ describe('CanvasSceneRenderer', () => {
 
         expect(fillOps.length).toBeGreaterThan(2);
         expect(focusedCellStroke).toBeTruthy();
+        expect(Number(focusedCellStroke?.lineWidth) || 0).toBeLessThanOrEqual(0.93);
     });
 
     it('applies focus alpha to card surface effects and edge strokes for inactive matrices', () => {
@@ -1431,5 +1433,232 @@ describe('CanvasSceneRenderer', () => {
         const rowHit = renderer.resolveInteractiveHitAtPoint(hitX, hitY);
 
         expect(rowHit?.rowHit?.rowIndex).toBe(1);
+    });
+
+    it('draws a connector-style right-facing continuation arrow with a gap for the H_i matrix', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx);
+        const renderer = new CanvasSceneRenderer({ canvas });
+
+        const headOutputNode = createMatrixNode({
+            role: 'attention-head-output',
+            semantic: {
+                componentKind: 'mhsa',
+                layerIndex: 0,
+                headIndex: 0,
+                stage: 'head-output',
+                role: 'attention-head-output'
+            },
+            dimensions: { rows: 3, cols: 64 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            rowItems: [
+                { label: 'Token A', gradientCss: 'rgba(242, 136, 48, 0.96)' },
+                { label: 'Token B', gradientCss: 'rgba(242, 136, 48, 0.96)' },
+                { label: 'Token C', gradientCss: 'rgba(242, 136, 48, 0.96)' }
+            ],
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.MHSA_HEAD_OUTPUT
+            },
+            metadata: {
+                compactRows: {
+                    compactWidth: 120,
+                    rowHeight: 12,
+                    rowGap: 8,
+                    paddingX: 0,
+                    paddingY: 0,
+                    variant: VIEW2D_VECTOR_STRIP_VARIANT
+                }
+            }
+        });
+
+        renderer.setScene(createSceneModel({
+            nodes: [headOutputNode],
+            metadata: {
+                visualContract: 'selection-panel-mhsa-v1'
+            }
+        }));
+
+        expect(renderer.render({
+            width: 400,
+            height: 240,
+            dpr: 1,
+            viewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            }
+        })).toBe(true);
+
+        const entry = renderer.layout?.registry?.getNodeEntry(headOutputNode.id);
+        expect(entry?.contentBounds).toBeTruthy();
+
+        const contentBounds = entry.contentBounds;
+        const expectedCenterY = contentBounds.y + (contentBounds.height * 0.5);
+        const arrowShaft = ctx.operations.find((operation) => {
+            if (operation?.type !== 'stroke' || !Array.isArray(operation.path) || operation.path.length !== 2) {
+                return false;
+            }
+            const [move, line] = operation.path;
+            return move?.type === 'moveTo'
+                && line?.type === 'lineTo'
+                && move.x > (contentBounds.x + contentBounds.width)
+                && line.x > move.x
+                && Math.abs(move.y - expectedCenterY) <= 0.51
+                && Math.abs(line.y - expectedCenterY) <= 0.51;
+        });
+
+        expect(arrowShaft).toBeTruthy();
+        expect(arrowShaft.path[0].x - (contentBounds.x + contentBounds.width)).toBeGreaterThan(0);
+    });
+
+    it('keeps the H_i continuation arrow visible at low zoom', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx);
+        const renderer = new CanvasSceneRenderer({ canvas });
+
+        const headOutputNode = createMatrixNode({
+            role: 'attention-head-output',
+            semantic: {
+                componentKind: 'mhsa',
+                layerIndex: 0,
+                headIndex: 0,
+                stage: 'head-output',
+                role: 'attention-head-output'
+            },
+            dimensions: { rows: 3, cols: 64 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            rowItems: [
+                { label: 'Token A', gradientCss: 'rgba(242, 136, 48, 0.96)' },
+                { label: 'Token B', gradientCss: 'rgba(242, 136, 48, 0.96)' },
+                { label: 'Token C', gradientCss: 'rgba(242, 136, 48, 0.96)' }
+            ],
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.MHSA_HEAD_OUTPUT
+            },
+            metadata: {
+                compactRows: {
+                    compactWidth: 120,
+                    rowHeight: 12,
+                    rowGap: 8,
+                    paddingX: 0,
+                    paddingY: 0,
+                    variant: VIEW2D_VECTOR_STRIP_VARIANT
+                }
+            }
+        });
+
+        renderer.setScene(createSceneModel({
+            nodes: [headOutputNode],
+            metadata: {
+                visualContract: 'selection-panel-mhsa-v1'
+            }
+        }));
+
+        expect(renderer.render({
+            width: 400,
+            height: 240,
+            dpr: 1,
+            viewportTransform: {
+                scale: 0.12,
+                offsetX: 0,
+                offsetY: 0
+            }
+        })).toBe(true);
+
+        const entry = renderer.layout?.registry?.getNodeEntry(headOutputNode.id);
+        expect(entry?.contentBounds).toBeTruthy();
+
+        const contentBounds = entry.contentBounds;
+        const arrowShaft = ctx.operations.find((operation) => {
+            if (operation?.type !== 'stroke' || !Array.isArray(operation.path) || operation.path.length !== 2) {
+                return false;
+            }
+            const [move, line] = operation.path;
+            return move?.type === 'moveTo'
+                && line?.type === 'lineTo'
+                && move.x > (contentBounds.x + contentBounds.width)
+                && line.x > move.x;
+        });
+
+        expect(arrowShaft).toBeTruthy();
+    });
+
+    it('draws a left-side incoming connector-style arrow with a gap for the parent X_ln matrix', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx);
+        const renderer = new CanvasSceneRenderer({ canvas });
+
+        const projectionSourceNode = createMatrixNode({
+            role: 'projection-source-xln',
+            semantic: {
+                componentKind: 'mhsa',
+                layerIndex: 0,
+                headIndex: 0,
+                stage: 'projection-source',
+                role: 'projection-source-xln'
+            },
+            dimensions: { rows: 3, cols: 64 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            rowItems: [
+                { label: 'Token A', gradientCss: 'rgba(80, 160, 255, 0.96)' },
+                { label: 'Token B', gradientCss: 'rgba(80, 160, 255, 0.96)' },
+                { label: 'Token C', gradientCss: 'rgba(80, 160, 255, 0.96)' }
+            ],
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.RESIDUAL
+            },
+            metadata: {
+                compactRows: {
+                    compactWidth: 120,
+                    rowHeight: 12,
+                    rowGap: 8,
+                    paddingX: 0,
+                    paddingY: 0,
+                    variant: VIEW2D_VECTOR_STRIP_VARIANT
+                }
+            }
+        });
+
+        renderer.setScene(createSceneModel({
+            nodes: [projectionSourceNode],
+            metadata: {
+                visualContract: 'selection-panel-mhsa-v1'
+            }
+        }));
+
+        expect(renderer.render({
+            width: 400,
+            height: 240,
+            dpr: 1,
+            viewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            }
+        })).toBe(true);
+
+        const entry = renderer.layout?.registry?.getNodeEntry(projectionSourceNode.id);
+        expect(entry?.contentBounds).toBeTruthy();
+
+        const contentBounds = entry.contentBounds;
+        const expectedCenterY = contentBounds.y + (contentBounds.height * 0.5);
+        const arrowShaft = ctx.operations.find((operation) => {
+            if (operation?.type !== 'stroke' || !Array.isArray(operation.path) || operation.path.length !== 2) {
+                return false;
+            }
+            const [move, line] = operation.path;
+            return move?.type === 'moveTo'
+                && line?.type === 'lineTo'
+                && move.x < line.x
+                && line.x < contentBounds.x
+                && Math.abs(move.y - expectedCenterY) <= 0.51
+                && Math.abs(line.y - expectedCenterY) <= 0.51;
+        });
+
+        expect(arrowShaft).toBeTruthy();
+        expect(contentBounds.x - arrowShaft.path[1].x).toBeGreaterThan(0);
     });
 });

@@ -170,11 +170,12 @@ function buildPreScoreCellResult(index = null, node = null, rowIndex = null, col
 function buildSoftmaxCellResult(index = null, node = null, rowIndex = null, colIndex = null, cellItem = null, {
     stageKey = 'post',
     includePostCopy = false,
-    includeMirroredPostCopyCell = false
+    includeMirroredPostCopyCell = false,
+    includePostForMask = false
 } = {}, options = null) {
     const normalizedStageKey = normalizeAttentionHoverStageKey(stageKey);
     const isMaskStage = normalizedStageKey === 'mask';
-    const includePostSelections = !isMaskStage;
+    const includePostSelections = !isMaskStage || includePostForMask;
     const scoreAxisSelections = buildScoreAxisSelections(index, colIndex, {
         includePost: includePostSelections,
         includePostCopy: includePostSelections && includePostCopy
@@ -342,7 +343,8 @@ function buildWeightedOutputRowResult(index = null, node = null, rowHit = null, 
     const rowSelections = includeProjection
         ? [{ nodeId: index.singleNodeIds.attentionValuePost, rowIndex }]
         : [
-            { nodeId: index.singleNodeIds.attentionValuePost, rowIndex },
+            { nodeId: index.singleNodeIds.attentionPost, rowIndex },
+            { nodeId: index.singleNodeIds.attentionPostCopy, rowIndex },
             { nodeId: index.singleNodeIds.attentionHeadOutput, rowIndex }
         ];
 
@@ -557,7 +559,8 @@ export function resolveMhsaDetailHoverState(index = null, hit = null, options = 
                 {
                     stageKey: entity.stageKey,
                     includePostCopy: false,
-                    includeMirroredPostCopyCell: true
+                    includeMirroredPostCopyCell: true,
+                    includePostForMask: entity.stageKey === 'mask'
                 },
                 options
             );
