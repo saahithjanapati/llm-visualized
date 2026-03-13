@@ -57,6 +57,8 @@ export const CAMERA_CONFIG = {
     targetClampRadiusBase: 8000,
     targetClampRadiusPerLayer: 900,
     mobileZoomOutMultiplier: 1.2,
+    // Keep some extra zoom-out headroom without letting the tower become a speck.
+    desktopZoomOutMultiplier: 1.1,
     // Allow manual orbit zoom-out to go beyond the farthest authored tower view.
     maxZoomOutDistanceMultiplier: 1.6,
     autoCameraHeadBias: 0.0,

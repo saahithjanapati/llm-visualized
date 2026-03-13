@@ -169,6 +169,7 @@ const pipeline = new LayerPipeline(gptCanvas, NUM_LAYERS, {
     targetClampCenter: camTarget,
     targetClampRadius,
     mobileZoomOutMultiplier: CAMERA_CONFIG.mobileZoomOutMultiplier,
+    desktopZoomOutMultiplier: CAMERA_CONFIG.desktopZoomOutMultiplier,
     autoCameraHeadBias: CAMERA_CONFIG.autoCameraHeadBias,
     autoCameraDefaultCameraOffset: vec3(CAMERA_CONFIG.followDefaultCameraOffset),
     autoCameraDefaultTargetOffset: vec3(CAMERA_CONFIG.followDefaultTargetOffset),
