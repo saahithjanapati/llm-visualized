@@ -1,3 +1,8 @@
+import {
+    resolveMhsaDimensionVisualExtent,
+    resolveMhsaTokenVisualExtent
+} from '../view2d/shared/mhsaDimensionSizing.js';
+
 const BASE_ROW_COUNT = 5;
 
 const DESKTOP_BOOST_RULES = {};
@@ -15,10 +20,12 @@ const DESKTOP_DENSITY_RULES = Object.freeze({
     previewRowGap: 0,
     previewTargetExtent: 104,
     gridCellSizeBase: 9,
-    gridCellSizeMin: 6,
+    gridCellSizeMin: 1,
     gridCellGapBase: 2,
     gridCellGapDense: 1,
-    gridTargetExtent: 96
+    gridTargetExtent: 96,
+    gridPaddingX: 2,
+    gridPaddingY: 2
 });
 
 const MOBILE_DENSITY_RULES = Object.freeze({
@@ -27,10 +34,12 @@ const MOBILE_DENSITY_RULES = Object.freeze({
     previewRowGap: 0,
     previewTargetExtent: 86,
     gridCellSizeBase: 8,
-    gridCellSizeMin: 5,
+    gridCellSizeMin: 1,
     gridCellGapBase: 1,
     gridCellGapDense: 1,
-    gridTargetExtent: 82
+    gridTargetExtent: 82,
+    gridPaddingX: 2,
+    gridPaddingY: 2
 });
 
 const DESKTOP_CONNECTOR_RULES = {
@@ -82,6 +91,9 @@ function resolveAdaptiveUnitSize(rowCount, {
 
 function resolveDenseGridGap(rowCount, rules) {
     const safeRowCount = Number.isFinite(rowCount) ? Math.max(1, Math.floor(rowCount)) : BASE_ROW_COUNT;
+    if (safeRowCount >= BASE_ROW_COUNT + 7) {
+        return 0;
+    }
     return safeRowCount >= BASE_ROW_COUNT + 3
         ? Math.max(0, Math.floor(rules.gridCellGapDense))
         : Math.max(0, Math.floor(rules.gridCellGapBase));
@@ -91,6 +103,15 @@ function resolveDensityMetrics(rowCount, isSmallScreen = false) {
     const safeRowCount = Number.isFinite(rowCount) ? Math.max(1, Math.floor(rowCount)) : BASE_ROW_COUNT;
     const rules = isSmallScreen ? MOBILE_DENSITY_RULES : DESKTOP_DENSITY_RULES;
     const gridCellGap = resolveDenseGridGap(safeRowCount, rules);
+    const gridPaddingX = Math.max(0, Math.floor(rules.gridPaddingX || 0));
+    const gridPaddingY = Math.max(0, Math.floor(rules.gridPaddingY || 0));
+    const gridVisualTargetExtent = resolveMhsaTokenVisualExtent(safeRowCount, {
+        isSmallScreen
+    });
+    const gridTargetExtent = Math.max(
+        1,
+        gridVisualTargetExtent - (gridPaddingX * 2)
+    );
     const previewRowHeight = resolveAdaptiveUnitSize(safeRowCount, {
         baseSize: rules.previewRowHeightBase,
         minSize: rules.previewRowHeightMin,
@@ -101,14 +122,16 @@ function resolveDensityMetrics(rowCount, isSmallScreen = false) {
         baseSize: rules.gridCellSizeBase,
         minSize: rules.gridCellSizeMin,
         gap: gridCellGap,
-        targetExtent: rules.gridTargetExtent
+        targetExtent: gridTargetExtent
     });
 
     return {
         previewRowHeight,
         previewRowGap: Math.max(0, Math.floor(rules.previewRowGap)),
         gridCellSize,
-        gridCellGap
+        gridCellGap,
+        gridPaddingX,
+        gridPaddingY
     };
 }
 
@@ -159,7 +182,9 @@ export function resolveMhsaTokenMatrixLayoutMetrics({
         connectorGaps: resolveConnectorGaps(extraRows, connectorRules),
         componentOverrides: {
             gridCellSize: densityMetrics.gridCellSize,
-            gridCellGap: densityMetrics.gridCellGap
+            gridCellGap: densityMetrics.gridCellGap,
+            gridPaddingX: densityMetrics.gridPaddingX,
+            gridPaddingY: densityMetrics.gridPaddingY
         }
     };
 }

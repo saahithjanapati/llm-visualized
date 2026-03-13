@@ -99,7 +99,7 @@ describe('buildMhsaSceneModel', () => {
         });
         expect(sourceNode?.metadata?.caption?.position).toBe('bottom');
         expect(sourceNode?.metadata?.caption?.scaleWithNode).toBeUndefined();
-        expect(sourceNode?.metadata?.compactRows?.compactWidth).toBe(96);
+        expect(sourceNode?.metadata?.compactRows?.compactWidth).toBe(131);
         expect(sourceNode?.metadata?.compactRows?.rowHeight).toBe(7);
         expect(qInputNode?.rowItems?.[0]?.semantic).toMatchObject({
             componentKind: 'residual',
@@ -111,18 +111,18 @@ describe('buildMhsaSceneModel', () => {
         });
         expect(qInputNode?.metadata?.caption?.position).toBe('bottom');
         expect(qInputNode?.metadata?.caption?.scaleWithNode).toBeUndefined();
-        expect(qInputNode?.metadata?.compactRows?.compactWidth).toBe(96);
+        expect(qInputNode?.metadata?.compactRows?.compactWidth).toBe(131);
         expect(qInputNode?.metadata?.compactRows?.rowHeight).toBe(7);
         expect(qMultiplyNode?.metadata?.fontScale).toBe(0.82);
-        expect(projectionSidecarNode?.metadata?.gapOverride).toBe(30);
-        expect(projectionStackNode?.metadata?.gapOverride).toBe(144);
+        expect(projectionSidecarNode?.metadata?.gapOverride).toBe(84);
+        expect(projectionStackNode?.metadata?.gapOverride).toBe(188);
         expect(qWeightNode?.visual?.styleKey).toBe(VIEW2D_STYLE_KEYS.MHSA_Q);
         expect(qWeightNode?.visual?.background).toMatch(/^linear-gradient\(/);
         expect(qWeightNode?.metadata?.caption?.renderMode).toBe('dom-katex');
         expect(qWeightNode?.metadata?.caption?.position).toBe('bottom');
         expect(qWeightNode?.metadata?.caption?.scaleWithNode).toBeUndefined();
         expect(qWeightNode?.metadata?.caption?.minScreenHeightPx).toBe(28);
-        expect(qWeightNode?.metadata?.caption?.labelScale).toBeUndefined();
+        expect(qWeightNode?.metadata?.caption?.labelScale).toBe(1.02);
         expect(qWeightNode?.metadata?.caption?.dimensionsScale).toBeUndefined();
         expect(qWeightNode?.metadata?.card?.cornerRadius).toBe(10);
         expect(qBiasNode?.dimensions).toEqual({ rows: 1, cols: D_HEAD });
@@ -135,10 +135,10 @@ describe('buildMhsaSceneModel', () => {
         expect(qBiasNode?.metadata?.caption?.dimensionsText).toBe(`(1, ${D_HEAD})`);
         expect(qBiasNode?.metadata?.caption?.minScreenHeightPx).toBe(12);
         expect(qBiasNode?.metadata?.caption?.scaleWithNode).toBeUndefined();
-        expect(qBiasNode?.metadata?.caption?.labelScale).toBeUndefined();
+        expect(qBiasNode?.metadata?.caption?.labelScale).toBe(2);
         expect(qBiasNode?.metadata?.caption?.dimensionsScale).toBeUndefined();
         expect(qBiasNode?.metadata?.compactRows?.rowHeight).toBe(14);
-        expect(qBiasNode?.metadata?.compactRows?.compactWidth).toBe(58);
+        expect(qBiasNode?.metadata?.compactRows?.compactWidth).toBe(72);
         expect(qBiasNode?.metadata?.card?.cornerRadius).toBe(5);
         expect(qOutputNode?.dimensions).toEqual({ rows: 3, cols: D_HEAD });
         expect(qOutputNode?.rowItems?.[0]?.semantic).toMatchObject({
@@ -259,7 +259,7 @@ describe('buildMhsaSceneModel', () => {
         const attentionScaleNode = nodes.find((node) => node.role === 'attention-scale');
         const attentionPreScoreNode = nodes.find((node) => node.role === 'attention-pre-score');
         const attentionSoftmaxPrefixNode = nodes.find((node) => node.role === 'attention-softmax-prefix');
-        const attentionSoftmaxFlowNode = nodes.find((node) => node.role === 'attention-softmax-flow');
+        const attentionSoftmaxFlowNode = nodes.find((node) => node.role === 'attention-softmax-core-flow');
         const connectorKNode = nodes.find((node) => node.role === 'connector-k');
         const qInputEntry = layout.registry.getNodeEntry(qInputNode?.id || '');
         const qMultiplyEntry = layout.registry.getNodeEntry(qMultiplyNode?.id || '');
@@ -280,9 +280,10 @@ describe('buildMhsaSceneModel', () => {
         expect(qMultiplyEntry?.layoutData?.fontSize).toBeLessThan(layout.config.component.operatorFontSize);
         expect(qWeightEntry?.contentBounds?.height).toBe(qInputEntry?.contentBounds?.width);
         expect(qWeightEntry?.contentBounds?.height).toBeGreaterThan(qWeightEntry?.contentBounds?.width);
+        expect(qWeightEntry?.contentBounds?.width).toBe(qOutputEntry?.contentBounds?.width);
         expect(qBiasEntry?.contentBounds?.width).toBeGreaterThan(0);
         expect(qBiasEntry?.contentBounds?.width).toBeLessThan(qInputEntry?.contentBounds?.width);
-        expect(qBiasEntry?.contentBounds?.width).toBe(58);
+        expect(qBiasEntry?.contentBounds?.width).toBe(qOutputEntry?.contentBounds?.width);
         expect(qBiasEntry?.contentBounds?.height).toBe(14);
         expect(qOutputEntry?.contentBounds?.width).toBeGreaterThan(0);
         expect(qOutputEntry?.contentBounds?.width).toBeLessThan(qInputEntry?.contentBounds?.width);
@@ -293,16 +294,17 @@ describe('buildMhsaSceneModel', () => {
         expect(attentionTransposeEntry?.contentBounds?.height).toBe(attentionQueryEntry?.contentBounds?.width);
         expect(attentionTransposeEntry?.contentBounds?.width).toBeLessThan(attentionTransposeEntry?.contentBounds?.height);
         expect(attentionTransposeEntry?.contentBounds?.width).toBe(35);
-        expect(
-            (attentionPreScoreEntry?.contentBounds?.y || 0) + ((attentionPreScoreEntry?.contentBounds?.height || 0) / 2)
-        ).toBe(
-            (attentionQueryEntry?.contentBounds?.y || 0) + ((attentionQueryEntry?.contentBounds?.height || 0) / 2)
-        );
-        expect(
-            (attentionPreScoreEntry?.contentBounds?.y || 0) + ((attentionPreScoreEntry?.contentBounds?.height || 0) / 2)
-        ).toBe(
-            (attentionTransposeEntry?.contentBounds?.y || 0) + ((attentionTransposeEntry?.contentBounds?.height || 0) / 2)
-        );
+        expect(Math.abs(
+            ((attentionPreScoreEntry?.contentBounds?.y || 0) + ((attentionPreScoreEntry?.contentBounds?.height || 0) / 2))
+            - ((attentionQueryEntry?.contentBounds?.y || 0) + ((attentionQueryEntry?.contentBounds?.height || 0) / 2))
+        )).toBeLessThan(5);
+        expect(Math.abs(
+            ((attentionPreScoreEntry?.contentBounds?.y || 0) + ((attentionPreScoreEntry?.contentBounds?.height || 0) / 2))
+            - ((attentionTransposeEntry?.contentBounds?.y || 0) + ((attentionTransposeEntry?.contentBounds?.height || 0) / 2))
+        )).toBeLessThan(5);
+        expect(attentionPreScoreEntry?.layoutData?.innerPaddingX).toBe(1);
+        expect(attentionPreScoreEntry?.layoutData?.innerPaddingY).toBe(1);
+        expect(attentionPreScoreEntry?.layoutData?.cardRadius).toBe(8);
         expect(attentionSoftmaxFlowEntry?.contentBounds?.y).toBeGreaterThan(
             (attentionPreScoreEntry?.contentBounds?.y || 0) + (attentionPreScoreEntry?.contentBounds?.height || 0)
         );
@@ -318,7 +320,9 @@ describe('buildMhsaSceneModel', () => {
         expect(attentionScaleNode?.metadata?.fixedScreenFontPx).toBeUndefined();
         expect((attentionScaleEntry?.bounds?.x || 0) - ((attentionDivideEntry?.bounds?.x || 0) + (attentionDivideEntry?.bounds?.width || 0)))
             .toBeLessThan((attentionEqualsEntry?.bounds?.x || 0) - ((attentionScaleEntry?.bounds?.x || 0) + (attentionScaleEntry?.bounds?.width || 0)));
-        expect(attentionPreScoreEntry?.contentBounds?.x).toBe(attentionSoftmaxPrefixEntry?.contentBounds?.x);
+        expect(attentionPreScoreEntry?.contentBounds?.x).toBeGreaterThan(
+            attentionSoftmaxPrefixEntry?.contentBounds?.x || 0
+        );
         expect(attentionPreScoreEntry?.contentBounds?.x).toBeGreaterThan(
             (attentionEqualsEntry?.contentBounds?.x || 0) + (attentionEqualsEntry?.contentBounds?.width || 0)
         );

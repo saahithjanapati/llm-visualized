@@ -11,6 +11,7 @@ import {
 import { buildSceneLayout } from '../src/view2d/layout/buildSceneLayout.js';
 import { buildTransformerSceneModel } from '../src/view2d/model/buildTransformerSceneModel.js';
 import { resolveViewportFitTransform } from '../src/view2d/runtime/View2dViewportController.js';
+import { flattenSceneNodes } from '../src/view2d/schema/sceneTypes.js';
 import { D_HEAD, D_MODEL } from '../src/ui/selectionPanelConstants.js';
 
 function createActivationSource(tokenCount = 4) {
@@ -153,6 +154,36 @@ function resolveEntryClientPoint(entry, viewport, {
         clientX: viewport.panX + (((bounds?.x || 0) + ((bounds?.width || 0) * xInset)) * viewport.scale),
         clientY: viewport.panY + (((bounds?.y || 0) + ((bounds?.height || 0) * yInset)) * viewport.scale)
     };
+}
+
+function resolveSceneRenderableBounds(scene, layout) {
+    const registry = layout?.registry || null;
+    return flattenSceneNodes(scene)
+        .flatMap((node) => {
+            if (node.kind === 'group' || node?.metadata?.hidden) {
+                return [];
+            }
+            if (node.kind === 'connector') {
+                return [registry?.getConnectorEntry(node.id)?.bounds || null];
+            }
+            return [registry?.getNodeEntry(node.id)?.bounds || null];
+        })
+        .filter(Boolean)
+        .reduce((acc, bounds) => {
+            if (!acc) {
+                return { ...bounds };
+            }
+            const minX = Math.min(acc.x, bounds.x);
+            const minY = Math.min(acc.y, bounds.y);
+            const maxX = Math.max(acc.x + acc.width, bounds.x + bounds.width);
+            const maxY = Math.max(acc.y + acc.height, bounds.y + bounds.height);
+            return {
+                x: minX,
+                y: minY,
+                width: maxX - minX,
+                height: maxY - minY
+            };
+        }, null);
 }
 
 describe('selectionPanelTransformerView2d', () => {
@@ -555,7 +586,7 @@ describe('selectionPanelTransformerView2d', () => {
         expect(afterZoom.scale).toBeGreaterThan(afterPan.scale);
     });
 
-    it('only enters the head detail state for explicit head targets and zooms tighter than the overview focus', () => {
+    it('only enters the head detail state for explicit head targets and keeps zooming inside that deep scene', () => {
         const panel = document.createElement('section');
         panel.innerHTML = `
             <div class="detail-header"></div>
@@ -611,7 +642,7 @@ describe('selectionPanelTransformerView2d', () => {
         const headScale = view.getViewportState().scale;
         expect(canvasCard.classList.contains('is-head-detail-active')).toBe(true);
         expect(hud.hidden).toBe(true);
-        expect(headScale).toBeGreaterThan(moduleScale * 1.25);
+        expect(headScale).toBeGreaterThan(moduleScale);
 
         canvas.dispatchEvent(new WheelEvent('wheel', {
             deltaY: 160,
@@ -624,8 +655,75 @@ describe('selectionPanelTransformerView2d', () => {
 
         const zoomedOutScale = view.getViewportState().scale;
         expect(zoomedOutScale).toBeLessThan(headScale);
-        expect(canvasCard.classList.contains('is-head-detail-active')).toBe(false);
-        expect(hud.hidden).toBe(false);
+        expect(canvasCard.classList.contains('is-head-detail-active')).toBe(true);
+        expect(hud.hidden).toBe(true);
+    });
+
+    it('caps the deepest head-detail viewport at a separate zoom-out floor', () => {
+        const panel = document.createElement('section');
+        panel.innerHTML = `
+            <div class="detail-header"></div>
+            <div class="detail-body"></div>
+        `;
+        document.body.appendChild(panel);
+
+        const view = createTransformerView2dDetailView(panel);
+        const canvas = panel.querySelector('.detail-transformer-view2d-canvas');
+        const ctx = createMockContext();
+        const activationSource = createActivationSource(4);
+        const canvasRect = {
+            width: 72,
+            height: 72
+        };
+
+        canvas.getContext = vi.fn(() => ctx);
+        canvas.getBoundingClientRect = () => ({
+            left: 0,
+            top: 0,
+            right: canvasRect.width,
+            bottom: canvasRect.height,
+            width: canvasRect.width,
+            height: canvasRect.height
+        });
+
+        view.setVisible(true);
+        view.open({
+            activationSource,
+            semanticTarget: {
+                componentKind: 'mhsa',
+                layerIndex: 0,
+                headIndex: 4,
+                stage: 'attention',
+                role: 'head'
+            },
+            focusLabel: 'Layer 1 MHSA Head 5'
+        });
+
+        const scene = buildTransformerSceneModel({
+            activationSource,
+            layerCount: 1,
+            headDetailTarget: {
+                layerIndex: 0,
+                headIndex: 4
+            }
+        });
+        const headDetailScene = scene.metadata.mhsaHeadDetailScene || scene.metadata.headDetailScene;
+        const detailLayout = buildSceneLayout(headDetailScene);
+        const detailBounds = resolveSceneRenderableBounds(headDetailScene, detailLayout);
+        const unclampedFit = resolveViewportFitTransform(detailBounds, canvasRect, {
+            padding: 28,
+            minScale: 0.035,
+            maxScale: 10
+        });
+        const expectedFit = resolveViewportFitTransform(detailBounds, canvasRect, {
+            padding: 28,
+            minScale: 0.06,
+            maxScale: 10
+        });
+
+        expect(unclampedFit.scale).toBeLessThan(0.06);
+        expect(expectedFit.scale).toBeCloseTo(0.06, 6);
+        expect(view.getViewportState().scale).toBeCloseTo(expectedFit.scale, 6);
     });
 
     it('enters the concat detail state for concatenate targets and hides the overview HUD', () => {

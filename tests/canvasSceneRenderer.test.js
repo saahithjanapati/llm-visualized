@@ -782,6 +782,34 @@ describe('CanvasSceneRenderer', () => {
         expect(ctx.operations.some((entry) => entry.type === 'fillText' && entry.text === '+')).toBe(true);
     });
 
+    it('keeps MHSA detail operators visible at very low zoom', () => {
+        const scene = buildMhsaSceneModel({
+            activationSource: createActivationSource(4),
+            layerIndex: 2,
+            headIndex: 1
+        });
+        const layout = buildSceneLayout(scene);
+        const renderer = new CanvasSceneRenderer({ canvas });
+        renderer.setScene(scene, layout);
+
+        expect(renderer.render({
+            width: 640,
+            height: 360,
+            dpr: 1,
+            viewportTransform: {
+                source: 'mhsa-detail-low-zoom-operators',
+                scale: 0.05,
+                offsetX: 0,
+                offsetY: 0
+            }
+        })).toBe(true);
+
+        expect(ctx.operations.some((entry) => entry.type === 'fillText' && entry.text === '+')).toBe(true);
+        expect(ctx.operations.some((entry) => entry.type === 'fillText' && entry.text === '=')).toBe(true);
+        expect(ctx.operations.some((entry) => entry.type === 'fillText' && entry.text === '(')).toBe(true);
+        expect(ctx.operations.some((entry) => entry.type === 'fillText' && entry.text === ')')).toBe(true);
+    });
+
     it('honors an external viewport transform when provided', () => {
         const scene = buildMhsaSceneModel({
             activationSource: createActivationSource(4),

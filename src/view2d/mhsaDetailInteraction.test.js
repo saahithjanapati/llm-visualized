@@ -163,8 +163,8 @@ function createPreviewData(tokenCount = TOKEN_LABELS.length) {
     };
 }
 
-function buildSceneFixtures() {
-    const previewData = createPreviewData();
+function buildSceneFixtures(tokenCount = TOKEN_LABELS.length) {
+    const previewData = createPreviewData(tokenCount);
     const scene = buildMhsaSceneModel({
         previewData,
         layerIndex: 2,
@@ -187,6 +187,10 @@ function buildSceneFixtures() {
         && String(node.metadata?.kind || '').toLowerCase() === 'v'
     )) || null;
     const preScoreNode = nodes.find((node) => node.role === 'attention-pre-score') || null;
+    const attentionEqualsNode = nodes.find((node) => node.role === 'attention-equals') || null;
+    const attentionDivideNode = nodes.find((node) => node.role === 'attention-divide') || null;
+    const attentionScaleNode = nodes.find((node) => node.role === 'attention-scale') || null;
+    const attentionStageNode = nodes.find((node) => node.role === 'attention-stage') || null;
     const maskedInputNode = nodes.find((node) => node.role === 'attention-masked-input') || null;
     const postCopyNode = nodes.find((node) => node.role === 'attention-post-copy') || null;
     const softmaxLabelNode = nodes.find((node) => node.role === 'attention-softmax-label') || null;
@@ -198,6 +202,7 @@ function buildSceneFixtures() {
     )) || null;
     const qktEquationNode = nodes.find((node) => node.role === 'attention-qkt-equation') || null;
     const transposeCloseGroupNode = nodes.find((node) => node.role === 'attention-transpose-close-group') || null;
+    const transposeCloseNode = transposeCloseGroupNode?.children?.find((node) => node.role === 'attention-close') || null;
     const connectorKNode = nodes.find((node) => node.role === 'connector-k') || null;
     const connectorVNode = nodes.find((node) => node.role === 'connector-v') || null;
     const projectionIngressConnectorNodes = nodes.filter((node) => (
@@ -224,6 +229,10 @@ function buildSceneFixtures() {
         queryProjectionOutputNode,
         valueProjectionOutputNode,
         preScoreNode,
+        attentionEqualsNode,
+        attentionDivideNode,
+        attentionScaleNode,
+        attentionStageNode,
         maskedInputNode,
         postCopyNode,
         softmaxLabelNode,
@@ -232,6 +241,7 @@ function buildSceneFixtures() {
         keyProjectionOutputNode,
         qktEquationNode,
         transposeCloseGroupNode,
+        transposeCloseNode,
         connectorKNode,
         connectorVNode,
         projectionIngressConnectorNodes,
@@ -362,34 +372,110 @@ describe('MHSA detail transpose view', () => {
         const {
             qktEquationNode,
             transposeCloseGroupNode,
+            transposeCloseNode,
+            layout,
+            transposeNode,
             softmaxOpenNode,
             softmaxCloseNode
         } = buildSceneFixtures();
 
+        const transposeEntry = layout?.registry?.getNodeEntry(transposeNode?.id || '');
+        const transposeCloseEntry = layout?.registry?.getNodeEntry(transposeCloseNode?.id || '');
+        const transposeContentRight = (transposeEntry?.contentBounds?.x || 0) + (transposeEntry?.contentBounds?.width || 0);
+        const transposeCloseGap = (transposeCloseEntry?.contentBounds?.x || 0) - transposeContentRight;
+
         expect(qktEquationNode).toBeTruthy();
         expect(qktEquationNode?.metadata?.gapOverride).toBe(12);
         expect(transposeCloseGroupNode).toBeTruthy();
-        expect(transposeCloseGroupNode?.metadata?.gapOverride).toBe(3);
+        expect(transposeCloseGroupNode?.metadata?.gapOverride).toBe(-60);
+        expect(transposeCloseNode).toBeTruthy();
+        expect(transposeEntry).toBeTruthy();
+        expect(transposeCloseEntry).toBeTruthy();
+        expect(transposeCloseGap).toBeGreaterThanOrEqual(8);
+        expect(transposeCloseGap).toBeLessThanOrEqual(16);
         expect(softmaxOpenNode?.metadata?.fontScale).toBeGreaterThan(1);
         expect(softmaxCloseNode?.metadata?.fontScale).toBeGreaterThan(1);
     });
 
-    it('aligns the softmax input A_pre under the computed A_pre matrix', () => {
+    it('keeps the computed A_pre row aligned with the QK^T row and moves the softmax core below it', () => {
         const {
             layout,
+            queryProjectionOutputNode,
+            keyProjectionOutputNode,
             preScoreNode,
-            maskedInputNode
-        } = buildSceneFixtures();
+            attentionEqualsNode,
+            attentionDivideNode,
+            attentionScaleNode,
+            attentionStageNode,
+            maskedInputNode,
+            transposeNode,
+            softmaxLabelNode,
+            softmaxOpenNode
+        } = buildSceneFixtures(12);
 
+        const queryProjectionOutputEntry = layout?.registry?.getNodeEntry(queryProjectionOutputNode?.id || '');
+        const keyProjectionOutputEntry = layout?.registry?.getNodeEntry(keyProjectionOutputNode?.id || '');
         const preScoreEntry = layout?.registry?.getNodeEntry(preScoreNode?.id || '');
+        const attentionEqualsEntry = layout?.registry?.getNodeEntry(attentionEqualsNode?.id || '');
+        const attentionDivideEntry = layout?.registry?.getNodeEntry(attentionDivideNode?.id || '');
+        const attentionScaleEntry = layout?.registry?.getNodeEntry(attentionScaleNode?.id || '');
         const maskedInputEntry = layout?.registry?.getNodeEntry(maskedInputNode?.id || '');
+        const transposeEntry = layout?.registry?.getNodeEntry(transposeNode?.id || '');
+        const softmaxLabelEntry = layout?.registry?.getNodeEntry(softmaxLabelNode?.id || '');
+        const softmaxOpenEntry = layout?.registry?.getNodeEntry(softmaxOpenNode?.id || '');
 
+        expect(queryProjectionOutputEntry).toBeTruthy();
+        expect(keyProjectionOutputEntry).toBeTruthy();
         expect(preScoreEntry).toBeTruthy();
+        expect(attentionEqualsEntry).toBeTruthy();
+        expect(attentionDivideEntry).toBeTruthy();
+        expect(attentionScaleEntry).toBeTruthy();
+        expect(attentionStageNode?.metadata?.gapOverride).toBe(10);
         expect(maskedInputEntry).toBeTruthy();
-        expect(maskedInputEntry?.contentBounds?.x).toBeCloseTo(preScoreEntry?.contentBounds?.x || 0, 4);
+        expect(transposeEntry).toBeTruthy();
+        expect(softmaxLabelEntry).toBeTruthy();
+        expect(softmaxOpenEntry).toBeTruthy();
+        const queryOutputCenterY = (queryProjectionOutputEntry?.contentBounds?.y || 0)
+            + ((queryProjectionOutputEntry?.contentBounds?.height || 0) * 0.5);
+        const keyOutputCenterY = (keyProjectionOutputEntry?.contentBounds?.y || 0)
+            + ((keyProjectionOutputEntry?.contentBounds?.height || 0) * 0.5);
+        const preScoreCenterY = (preScoreEntry?.contentBounds?.y || 0)
+            + ((preScoreEntry?.contentBounds?.height || 0) * 0.5);
+        const attentionEqualsCenterY = (attentionEqualsEntry?.contentBounds?.y || 0)
+            + ((attentionEqualsEntry?.contentBounds?.height || 0) * 0.5);
+        const transposeCenterY = (transposeEntry?.contentBounds?.y || 0)
+            + ((transposeEntry?.contentBounds?.height || 0) * 0.5);
+        const qkMidpointY = (queryOutputCenterY + keyOutputCenterY) * 0.5;
+
+        expect(Math.abs(preScoreCenterY - transposeCenterY)).toBeLessThanOrEqual(8);
+        expect(Math.abs(attentionEqualsCenterY - transposeCenterY)).toBeLessThanOrEqual(8);
+        expect(preScoreCenterY).toBeGreaterThan(queryOutputCenterY);
+        expect(preScoreCenterY).toBeLessThan(keyOutputCenterY);
+        expect(Math.abs(preScoreCenterY - qkMidpointY)).toBeLessThanOrEqual(28);
+        expect((preScoreEntry?.contentBounds?.x || 0)).toBeGreaterThan(
+            (attentionEqualsEntry?.contentBounds?.x || 0) + (attentionEqualsEntry?.contentBounds?.width || 0)
+        );
+        expect((preScoreEntry?.contentBounds?.x || 0) - (
+            (attentionEqualsEntry?.contentBounds?.x || 0) + (attentionEqualsEntry?.contentBounds?.width || 0)
+        )).toBeLessThanOrEqual(17);
+        expect((attentionScaleEntry?.contentBounds?.x || 0) - (
+            (attentionDivideEntry?.contentBounds?.x || 0) + (attentionDivideEntry?.contentBounds?.width || 0)
+        )).toBeLessThanOrEqual(10);
+        expect((attentionEqualsEntry?.contentBounds?.x || 0) - (
+            (attentionScaleEntry?.contentBounds?.x || 0) + (attentionScaleEntry?.contentBounds?.width || 0)
+        )).toBeLessThanOrEqual(14);
+        expect(Math.abs(
+            (maskedInputEntry?.contentBounds?.x || 0)
+            - (preScoreEntry?.contentBounds?.x || 0)
+        )).toBeLessThanOrEqual(4);
         expect(maskedInputEntry?.contentBounds?.y).toBeGreaterThan(
             (preScoreEntry?.contentBounds?.y || 0) + (preScoreEntry?.contentBounds?.height || 0)
         );
+        expect(softmaxLabelEntry?.contentBounds?.x).toBeLessThan(maskedInputEntry?.contentBounds?.x || 0);
+        expect((softmaxLabelEntry?.contentBounds?.x || 0)).toBeLessThan(preScoreEntry?.contentBounds?.x || 0);
+        expect(
+            ((softmaxOpenEntry?.contentBounds?.x || 0) + (softmaxOpenEntry?.contentBounds?.width || 0))
+        ).toBeLessThanOrEqual((maskedInputEntry?.contentBounds?.x || 0) + 2);
     });
 
     it('centers the softmax label against the masked-input / mask / post row', () => {
@@ -757,12 +843,12 @@ describe('MHSA detail transpose view', () => {
 
     it('shrinks detailed attention grid cells for larger token windows', () => {
         const smallScene = buildMhsaSceneModel({
-            previewData: createPreviewData(5),
+            previewData: createPreviewData(2),
             layerIndex: 2,
             headIndex: 1
         });
         const largeScene = buildMhsaSceneModel({
-            previewData: createPreviewData(12),
+            previewData: createPreviewData(25),
             layerIndex: 2,
             headIndex: 1
         });
@@ -776,7 +862,7 @@ describe('MHSA detail transpose view', () => {
         const largePreScoreEntry = largeLayout?.registry?.getNodeEntry(largePreScoreNode?.id || '');
 
         expect(smallPreScoreEntry?.layoutData?.cellSize).toBeLessThan(10);
-        expect(largePreScoreEntry?.layoutData?.cellSize).toBeLessThan(
+        expect(largePreScoreEntry?.layoutData?.cellSize).toBeLessThanOrEqual(
             smallPreScoreEntry?.layoutData?.cellSize || 0
         );
         expect(largePreScoreEntry?.layoutData?.cellGap).toBeLessThanOrEqual(
@@ -784,18 +870,18 @@ describe('MHSA detail transpose view', () => {
         );
     });
 
-    it('scales vector-strip dimensions up as larger token windows make the attention grids taller', () => {
-        const smallScene = buildMhsaSceneModel({
-            previewData: createPreviewData(2),
-            layerIndex: 2,
-            headIndex: 1
-        });
-        const largeScene = buildMhsaSceneModel({
+    it('keeps feature-dimension strips visually larger than token-count attention grids', () => {
+        const mediumScene = buildMhsaSceneModel({
             previewData: createPreviewData(12),
             layerIndex: 2,
             headIndex: 1
         });
-        const smallLayout = buildSceneLayout(smallScene);
+        const largeScene = buildMhsaSceneModel({
+            previewData: createPreviewData(25),
+            layerIndex: 2,
+            headIndex: 1
+        });
+        const mediumLayout = buildSceneLayout(mediumScene);
         const largeLayout = buildSceneLayout(largeScene);
 
         const findProjectionOutput = (scene, kind) => flattenSceneNodes(scene).find((node) => (
@@ -804,25 +890,26 @@ describe('MHSA detail transpose view', () => {
         )) || null;
         const findNodeByRole = (scene, role) => flattenSceneNodes(scene).find((node) => node.role === role) || null;
 
-        const smallQueryNode = findNodeByRole(smallScene, 'attention-query-source');
+        const mediumQueryNode = findNodeByRole(mediumScene, 'attention-query-source');
         const largeQueryNode = findNodeByRole(largeScene, 'attention-query-source');
-        const smallPreScoreNode = findNodeByRole(smallScene, 'attention-pre-score');
+        const largeXlnNode = flattenSceneNodes(largeScene).find((node) => (
+            node.role === 'x-ln-copy'
+            && String(node.semantic?.branchKey || '').toLowerCase() === 'q'
+        )) || null;
+        const mediumPreScoreNode = findNodeByRole(mediumScene, 'attention-pre-score');
         const largePreScoreNode = findNodeByRole(largeScene, 'attention-pre-score');
         const largeProjectionOutputNode = findProjectionOutput(largeScene, 'q');
 
-        const smallQueryEntry = smallLayout?.registry?.getNodeEntry(smallQueryNode?.id || '');
+        const mediumQueryEntry = mediumLayout?.registry?.getNodeEntry(mediumQueryNode?.id || '');
         const largeQueryEntry = largeLayout?.registry?.getNodeEntry(largeQueryNode?.id || '');
-        const smallPreScoreEntry = smallLayout?.registry?.getNodeEntry(smallPreScoreNode?.id || '');
+        const mediumPreScoreEntry = mediumLayout?.registry?.getNodeEntry(mediumPreScoreNode?.id || '');
         const largePreScoreEntry = largeLayout?.registry?.getNodeEntry(largePreScoreNode?.id || '');
 
-        const smallHeightRatio = (smallQueryEntry?.contentBounds?.height || 0) / Math.max(1, smallPreScoreEntry?.contentBounds?.height || 0);
-        const largeHeightRatio = (largeQueryEntry?.contentBounds?.height || 0) / Math.max(1, largePreScoreEntry?.contentBounds?.height || 0);
-
-        expect(largeQueryNode?.metadata?.compactRows?.rowHeight).toBeGreaterThan(
-            smallQueryNode?.metadata?.compactRows?.rowHeight || 0
+        expect(largeQueryNode?.metadata?.compactRows?.rowHeight).toBeLessThan(
+            mediumQueryNode?.metadata?.compactRows?.rowHeight || 0
         );
-        expect(largeQueryNode?.metadata?.compactRows?.compactWidth).toBeGreaterThan(
-            smallQueryNode?.metadata?.compactRows?.compactWidth || 0
+        expect(largeQueryNode?.metadata?.compactRows?.compactWidth).toBe(
+            mediumQueryNode?.metadata?.compactRows?.compactWidth
         );
         expect(largeProjectionOutputNode?.metadata?.compactRows?.rowHeight).toBe(
             largeQueryNode?.metadata?.compactRows?.rowHeight
@@ -830,8 +917,20 @@ describe('MHSA detail transpose view', () => {
         expect(largeProjectionOutputNode?.metadata?.compactRows?.compactWidth).toBe(
             largeQueryNode?.metadata?.compactRows?.compactWidth
         );
-        expect(largeHeightRatio).toBeGreaterThan(smallHeightRatio);
-        expect(largeHeightRatio).toBeGreaterThan(0.6);
+        expect(largeXlnNode?.metadata?.compactRows?.compactWidth).toBeGreaterThan(
+            largeQueryNode?.metadata?.compactRows?.compactWidth || 0
+        );
+        expect(Math.max(
+            largePreScoreEntry?.contentBounds?.width || 0,
+            largePreScoreEntry?.contentBounds?.height || 0
+        )).toBeLessThan(largeQueryEntry?.contentBounds?.width || 0);
+        expect(largePreScoreEntry?.contentBounds?.width).toBeGreaterThanOrEqual(
+            mediumPreScoreEntry?.contentBounds?.width || 0
+        );
+        expect((largeQueryEntry?.contentBounds?.height || 0) / Math.max(1, largePreScoreEntry?.contentBounds?.height || 0))
+            .toBeGreaterThan(
+                (mediumQueryEntry?.contentBounds?.height || 0) / Math.max(1, mediumPreScoreEntry?.contentBounds?.height || 0)
+            );
     });
 
     it('adds extra vertical clearance under attention captions when the token window is large', () => {

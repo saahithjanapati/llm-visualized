@@ -130,11 +130,15 @@ function resolveLayoutConfig(scene, {
         biasBarHeight: isSmallScreen ? 14 : 18,
         rowLabelGutterWidth: isSmallScreen ? 72 : 92,
         compactMinWidth: isSmallScreen ? 74 : 92,
-        operatorSidePadding: isSmallScreen ? 8 : 10
+        operatorSidePadding: isSmallScreen ? 8 : 10,
+        gridPaddingX: isSmallScreen ? 10 : 12,
+        gridPaddingY: isSmallScreen ? 8 : 10
     };
 
     component.gridCellSize = resolveMeasuredValue(componentOverrides.gridCellSize, component.gridCellSize);
     component.gridCellGap = resolveNonNegativeOverride(componentOverrides.gridCellGap, component.gridCellGap);
+    component.gridPaddingX = resolveNonNegativeOverride(componentOverrides.gridPaddingX, component.gridPaddingX);
+    component.gridPaddingY = resolveNonNegativeOverride(componentOverrides.gridPaddingY, component.gridPaddingY);
 
     return {
         scenePaddingX: (isSmallScreen ? 32 : 48) + padXBoost,
@@ -158,7 +162,7 @@ function resolveLayoutConfig(scene, {
 
 function resolveGroupGap(node, config) {
     const explicitGap = Number(node?.metadata?.gapOverride);
-    if (Number.isFinite(explicitGap) && explicitGap >= 0) {
+    if (Number.isFinite(explicitGap)) {
         return explicitGap;
     }
     const direction = node?.layout?.direction || VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL;
@@ -169,6 +173,10 @@ function resolveGroupGap(node, config) {
             : config.groupGaps.stackHorizontal;
     }
     return config.groupGaps[gapKey] ?? config.groupGaps.default;
+}
+
+function resolveNodeLayoutOffset(value = 0) {
+    return Number.isFinite(value) ? Math.round(Number(value)) : 0;
 }
 
 function measureLeafNode(node, config) {
@@ -247,17 +255,20 @@ function measureLeafNode(node, config) {
         case VIEW2D_MATRIX_PRESENTATIONS.GRID: {
             const rowCount = Math.max(1, measuredRows || node.dimensions?.rows || 1);
             const colCount = Math.max(1, measuredCols || node.dimensions?.cols || 1);
+            const gridMeta = node.metadata?.grid || {};
+            const gridPaddingX = resolveNonNegativeOverride(gridMeta.paddingX, config.component.gridPaddingX);
+            const gridPaddingY = resolveNonNegativeOverride(gridMeta.paddingY, config.component.gridPaddingY);
             contentWidth = (colCount * config.component.gridCellSize)
                 + (Math.max(0, colCount - 1) * config.component.gridCellGap)
-                + (config.component.contentPaddingX * 2);
+                + (gridPaddingX * 2);
             contentHeight = (rowCount * config.component.gridCellSize)
                 + (Math.max(0, rowCount - 1) * config.component.gridCellGap)
-                + (config.component.contentPaddingY * 2);
+                + (gridPaddingY * 2);
             layoutData = {
                 cellSize: config.component.gridCellSize,
                 cellGap: config.component.gridCellGap,
-                innerPaddingX: config.component.contentPaddingX,
-                innerPaddingY: config.component.contentPaddingY
+                innerPaddingX: gridPaddingX,
+                innerPaddingY: gridPaddingY
             };
             break;
         }
@@ -327,9 +338,12 @@ function measureLeafNode(node, config) {
             };
         }
     } else if (node.kind === VIEW2D_NODE_KINDS.TEXT) {
+        const textScale = Number.isFinite(node.metadata?.fontScale) && node.metadata.fontScale > 0
+            ? Number(node.metadata.fontScale)
+            : 1;
         const textMetrics = resolveTextMetrics(
             node.text || node.tex,
-            config.component.labelFontSize,
+            config.component.labelFontSize * textScale,
             node.metadata?.textFit || null
         );
         contentWidth = textMetrics.width;
@@ -523,17 +537,30 @@ function placeNode(node, x, y, measurement, registry, config, depth = 0, parentI
             let cursorY = y;
             node.children.forEach((child, index) => {
                 const childMeasurement = measurement.childMeasurements[index];
+                const childOffsetX = resolveNodeLayoutOffset(child?.metadata?.layoutOffsetX);
+                const childOffsetY = resolveNodeLayoutOffset(child?.metadata?.layoutOffsetY);
                 const childX = align === 'start'
                     ? x
                     : (align === 'end'
                         ? x + (measurement.width - childMeasurement.width)
                         : x + ((measurement.width - childMeasurement.width) / 2));
-                placeNode(child, childX, cursorY, childMeasurement, registry, config, depth + 1, node.id);
+                placeNode(
+                    child,
+                    childX + childOffsetX,
+                    cursorY + childOffsetY,
+                    childMeasurement,
+                    registry,
+                    config,
+                    depth + 1,
+                    node.id
+                );
                 cursorY += childMeasurement.height + gap;
             });
         } else if (direction === VIEW2D_LAYOUT_DIRECTIONS.OVERLAY) {
             node.children.forEach((child, index) => {
                 const childMeasurement = measurement.childMeasurements[index];
+                const childOffsetX = resolveNodeLayoutOffset(child?.metadata?.layoutOffsetX);
+                const childOffsetY = resolveNodeLayoutOffset(child?.metadata?.layoutOffsetY);
                 const childX = align === 'start'
                     ? x
                     : (align === 'end'
@@ -544,18 +571,38 @@ function placeNode(node, x, y, measurement, registry, config, depth = 0, parentI
                     : (align === 'bottom'
                         ? y + (measurement.height - childMeasurement.height)
                         : y + ((measurement.height - childMeasurement.height) / 2));
-                placeNode(child, childX, childY, childMeasurement, registry, config, depth + 1, node.id);
+                placeNode(
+                    child,
+                    childX + childOffsetX,
+                    childY + childOffsetY,
+                    childMeasurement,
+                    registry,
+                    config,
+                    depth + 1,
+                    node.id
+                );
             });
         } else {
             let cursorX = x;
             node.children.forEach((child, index) => {
                 const childMeasurement = measurement.childMeasurements[index];
+                const childOffsetX = resolveNodeLayoutOffset(child?.metadata?.layoutOffsetX);
+                const childOffsetY = resolveNodeLayoutOffset(child?.metadata?.layoutOffsetY);
                 const childY = align === 'start'
                     ? y
                     : (align === 'end'
                         ? y + (measurement.height - childMeasurement.height)
                         : y + ((measurement.height - childMeasurement.height) / 2));
-                placeNode(child, cursorX, childY, childMeasurement, registry, config, depth + 1, node.id);
+                placeNode(
+                    child,
+                    cursorX + childOffsetX,
+                    childY + childOffsetY,
+                    childMeasurement,
+                    registry,
+                    config,
+                    depth + 1,
+                    node.id
+                );
                 cursorX += childMeasurement.width + gap;
             });
         }

@@ -5,8 +5,9 @@ import {
     VIEW2D_NODE_KINDS
 } from '../view2d/schema/sceneTypes.js';
 import {
-    isMhsaDetailScene,
-    resolveMhsaDetailFixedTextSizing
+    resolveMhsaDetailFixedTextSizing,
+    resolveView2dSceneTextZoomPolicy,
+    VIEW2D_TEXT_ZOOM_BEHAVIORS
 } from '../view2d/shared/mhsaDetailFixedLabelSizing.js';
 
 const RESIDUAL_CAPTION_TOP_GAP_PX = 4;
@@ -25,6 +26,9 @@ const MHSA_UNIFORM_CAPTION_LABEL_MIN_FONT_PX = 17;
 const MHSA_UNIFORM_CAPTION_LABEL_MAX_FONT_PX = 17;
 const MHSA_UNIFORM_CAPTION_DIMENSIONS_MIN_FONT_PX = 13;
 const MHSA_UNIFORM_CAPTION_DIMENSIONS_MAX_FONT_PX = 14;
+const MHSA_DETAIL_SCENE_RELATIVE_CAPTION_LABEL_BOOST = 1.14;
+const MHSA_DETAIL_SCENE_RELATIVE_CAPTION_DIMENSIONS_BOOST = 1.1;
+const MHSA_DETAIL_SCENE_RELATIVE_DOM_TEXT_BOOST = 1.08;
 
 function escapeHtml(value = '') {
     return String(value)
@@ -175,6 +179,41 @@ function applyZoomedOutFontDamping(fontPx = 0, projectedExtent = 0, minScreenHei
     );
 }
 
+function isSceneRelativeTextZoomBehavior(zoomBehavior = '') {
+    return zoomBehavior === VIEW2D_TEXT_ZOOM_BEHAVIORS.SCENE_RELATIVE;
+}
+
+function resolveOverlayFontPx({
+    zoomBehavior = VIEW2D_TEXT_ZOOM_BEHAVIORS.SCREEN_ADAPTIVE,
+    baseFontPx = 0,
+    projectedExtent = 0,
+    minScreenHeightPx = 0,
+    fixedScreenFontPx = null,
+    minScreenFontPx = 0,
+    maxScreenFontPx = null
+} = {}) {
+    const safeBaseFontPx = Number.isFinite(baseFontPx) ? Math.max(0, Number(baseFontPx)) : 0;
+    if (zoomBehavior === VIEW2D_TEXT_ZOOM_BEHAVIORS.SCENE_RELATIVE) {
+        return safeBaseFontPx;
+    }
+    if (zoomBehavior === VIEW2D_TEXT_ZOOM_BEHAVIORS.SCREEN_FIXED) {
+        return Number.isFinite(fixedScreenFontPx) && fixedScreenFontPx > 0
+            ? Number(fixedScreenFontPx)
+            : safeBaseFontPx;
+    }
+    const dampedFontPx = applyZoomedOutFontDamping(
+        safeBaseFontPx,
+        projectedExtent,
+        minScreenHeightPx,
+        {
+            absoluteMinFontPx: minScreenFontPx
+        }
+    );
+    return Number.isFinite(maxScreenFontPx) && maxScreenFontPx > 0
+        ? Math.min(dampedFontPx, Number(maxScreenFontPx))
+        : dampedFontPx;
+}
+
 function intersectsCanvas(bounds = null, width = 0, height = 0) {
     if (!bounds) return false;
     return !(
@@ -188,10 +227,6 @@ function intersectsCanvas(bounds = null, width = 0, height = 0) {
 function isResidualCaptionNode(node = null) {
     return node?.kind === VIEW2D_NODE_KINDS.MATRIX
         && String(node?.metadata?.caption?.renderMode || '').trim().toLowerCase() === 'dom-katex';
-}
-
-function isMhsaUniformCaptionScene(scene = null) {
-    return isMhsaDetailScene(scene);
 }
 
 function buildCaptionCandidate({
@@ -223,6 +258,20 @@ function buildCaptionCandidate({
 
 function resolveMhsaUniformCaptionState(candidates = []) {
     if (!Array.isArray(candidates) || !candidates.length) return null;
+    const projectedCaptionExtents = candidates
+        .map((candidate) => Number(candidate?.projectedCaptionExtent) || 0)
+        .filter((extent) => extent > 0)
+        .sort((left, right) => left - right);
+    const medianProjectedCaptionExtent = projectedCaptionExtents.length
+        ? (
+            projectedCaptionExtents.length % 2 === 1
+                ? projectedCaptionExtents[(projectedCaptionExtents.length - 1) / 2]
+                : (
+                    projectedCaptionExtents[(projectedCaptionExtents.length / 2) - 1]
+                    + projectedCaptionExtents[projectedCaptionExtents.length / 2]
+                ) / 2
+        )
+        : 0;
     const minProjectedCaptionExtent = candidates.reduce((minExtent, candidate) => (
         Math.min(minExtent, Number(candidate?.projectedCaptionExtent) || 0)
     ), Number.POSITIVE_INFINITY);
@@ -233,6 +282,10 @@ function resolveMhsaUniformCaptionState(candidates = []) {
     return {
         minScreenHeightPx,
         visible: true,
+        referenceProjectedCaptionExtent: Math.max(
+            minScreenHeightPx,
+            medianProjectedCaptionExtent || minProjectedCaptionExtent
+        ),
         sizeProgress: clamp(
             (minProjectedCaptionExtent - minScreenHeightPx) / RESIDUAL_CAPTION_FONT_RAMP_PX,
             0,
@@ -343,7 +396,11 @@ export function createTransformerView2dResidualCaptionOverlay({
             const canvasWidth = Math.max(1, canvas.clientWidth || canvas.width || 1);
             const canvasHeight = Math.max(1, canvas.clientHeight || canvas.height || 1);
             const fixedTextSizing = resolveMhsaDetailFixedTextSizing(scene, canvasWidth);
-            const useSceneRelativeTextSizing = isMhsaDetailScene(scene);
+            const textZoomPolicy = resolveView2dSceneTextZoomPolicy(scene);
+            const useMhsaDetailSceneRelativeCaptionBoost = textZoomPolicy.useUniformMatrixCaptions
+                && isSceneRelativeTextZoomBehavior(textZoomPolicy.captionBehavior);
+            const useMhsaDetailSceneRelativeDomTextBoost = textZoomPolicy.useUniformMatrixCaptions
+                && isSceneRelativeTextZoomBehavior(textZoomPolicy.domTextBehavior);
             root.style.display = 'block';
             root.style.left = `${Math.round(canvas.offsetLeft || 0)}px`;
             root.style.top = `${Math.round(canvas.offsetTop || 0)}px`;
@@ -412,44 +469,42 @@ export function createTransformerView2dResidualCaptionOverlay({
                     && node.metadata.zoomedOutMinScreenFontPx > 0
                     ? Number(node.metadata.zoomedOutMinScreenFontPx)
                     : null;
-                const dampedFontPx = useSceneRelativeTextSizing
+                const domTextBaseFontPx = isSceneRelativeTextZoomBehavior(textZoomPolicy.domTextBehavior)
                     ? baseFontPx
                     : (
-                        fixedTextSizing?.textScreenFontPx
-                            ?? (
-                                fixedScreenFontPx
-                                    ? fixedScreenFontPx
-                                    : applyZoomedOutFontDamping(
-                                        (
-                                            persistentMinScreenFontPx
-                                                ? Math.max(baseFontPx, persistentMinScreenFontPx)
-                                                : baseFontPx
-                                        ),
-                                        projectedHeight,
-                                        minScreenHeightPx,
-                                        {
-                                            absoluteMinFontPx: zoomedOutMinScreenFontPx
-                                                ?? (persistentMinScreenFontPx
-                                                    ? Math.max(8, persistentMinScreenFontPx * 0.84)
-                                                    : 8)
-                                        }
-                                    )
-                            )
+                        persistentMinScreenFontPx
+                            ? Math.max(baseFontPx, persistentMinScreenFontPx)
+                            : baseFontPx
                     );
+                const resolvedDomTextFontPx = resolveOverlayFontPx({
+                    zoomBehavior: textZoomPolicy.domTextBehavior,
+                    baseFontPx: domTextBaseFontPx * (
+                        useMhsaDetailSceneRelativeDomTextBoost
+                            ? MHSA_DETAIL_SCENE_RELATIVE_DOM_TEXT_BOOST
+                            : 1
+                    ),
+                    projectedExtent: projectedHeight,
+                    minScreenHeightPx,
+                    fixedScreenFontPx: fixedTextSizing?.textScreenFontPx ?? fixedScreenFontPx,
+                    minScreenFontPx: zoomedOutMinScreenFontPx
+                        ?? (persistentMinScreenFontPx
+                            ? Math.max(8, persistentMinScreenFontPx * 0.84)
+                            : 8)
+                });
                 const item = ensureTextItem(node.id);
                 if (!item) return;
                 seenIds.add(node.id);
                 item.itemEl.hidden = false;
                 item.itemEl.style.left = `${Math.round(projectedBounds.x + (projectedBounds.width / 2))}px`;
                 item.itemEl.style.top = `${Math.round(projectedBounds.y + (projectedBounds.height / 2))}px`;
-                item.itemEl.style.setProperty('--detail-transformer-view2d-dom-text-size', `${dampedFontPx.toFixed(2)}px`);
+                item.itemEl.style.setProperty('--detail-transformer-view2d-dom-text-size', `${resolvedDomTextFontPx.toFixed(2)}px`);
                 renderKatex(item.labelEl, node.tex, node.text);
             });
 
-            const uniformMhsaCaptionState = isMhsaUniformCaptionScene(scene)
+            const uniformMhsaCaptionState = textZoomPolicy.useUniformMatrixCaptions
                 ? resolveMhsaUniformCaptionState(captionCandidates)
                 : null;
-            const useSceneRelativeCaptionSizing = isMhsaDetailScene(scene);
+            const useSceneRelativeCaptionSizing = isSceneRelativeTextZoomBehavior(textZoomPolicy.captionBehavior);
             captionCandidates.forEach((candidate) => {
                 const {
                     node,
@@ -461,16 +516,18 @@ export function createTransformerView2dResidualCaptionOverlay({
                     projectedContentHeight,
                     projectedCaptionExtent
                 } = candidate;
-                const shouldShow = uniformMhsaCaptionState
-                    ? uniformMhsaCaptionState.visible
+                const activeUniformCaptionState = uniformMhsaCaptionState;
+                const shouldShow = activeUniformCaptionState
+                    ? activeUniformCaptionState.visible
                     : projectedCaptionExtent >= minScreenHeightPx;
                 if (!shouldShow) return;
 
                 const item = ensureItem(node.id);
                 if (!item) return;
                 seenIds.add(node.id);
-                const sizeProgress = uniformMhsaCaptionState
-                    ? uniformMhsaCaptionState.sizeProgress
+                item.itemEl.dataset.nodeRole = String(node.role || '');
+                const sizeProgress = activeUniformCaptionState
+                    ? activeUniformCaptionState.sizeProgress
                     : clamp(
                         (projectedCaptionExtent - minScreenHeightPx) / RESIDUAL_CAPTION_FONT_RAMP_PX,
                         0,
@@ -492,22 +549,37 @@ export function createTransformerView2dResidualCaptionOverlay({
                     && node.metadata.caption.dimensionsScale > 0
                     ? Number(node.metadata.caption.dimensionsScale)
                     : 1;
-                const captionSizingExtent = uniformMhsaCaptionState
-                    ? projectedCaptionExtent
+                const useUniformMatrixCaptionSizing = useMhsaDetailSceneRelativeCaptionBoost
+                    && !!activeUniformCaptionState;
+                const effectiveLabelScale = (useUniformMatrixCaptionSizing ? 1 : labelScale) * (
+                    useMhsaDetailSceneRelativeCaptionBoost
+                        ? MHSA_DETAIL_SCENE_RELATIVE_CAPTION_LABEL_BOOST
+                        : 1
+                );
+                const effectiveDimensionsScale = (useUniformMatrixCaptionSizing ? 1 : dimensionsScale) * (
+                    useMhsaDetailSceneRelativeCaptionBoost
+                        ? MHSA_DETAIL_SCENE_RELATIVE_CAPTION_DIMENSIONS_BOOST
+                        : 1
+                );
+                const captionSizingExtent = activeUniformCaptionState
+                    ? Math.min(
+                        activeUniformCaptionState.referenceProjectedCaptionExtent,
+                        projectedCaptionExtent
+                    )
                     : projectedContentHeight;
                 const labelFontPx = fixedTextSizing?.captionLabelScreenFontPx
                     ?? resolveCaptionFontPx({
                         useMatrixRelativeSizing,
                         projectedContentHeight: captionSizingExtent,
                         sizeProgress,
-                        minFontPx: uniformMhsaCaptionState
+                        minFontPx: activeUniformCaptionState
                             ? MHSA_UNIFORM_CAPTION_LABEL_MIN_FONT_PX
                             : RESIDUAL_CAPTION_LABEL_MIN_FONT_PX,
-                        maxFontPx: uniformMhsaCaptionState
+                        maxFontPx: activeUniformCaptionState
                             ? MHSA_UNIFORM_CAPTION_LABEL_MAX_FONT_PX
                             : RESIDUAL_CAPTION_LABEL_MAX_FONT_PX,
                         heightRatio: RESIDUAL_TOP_CAPTION_LABEL_RATIO,
-                        scale: labelScale,
+                        scale: effectiveLabelScale,
                         enforceMinFontPx: !useSceneRelativeCaptionSizing
                     });
                 const dimensionsFontPx = fixedTextSizing?.captionDimensionsScreenFontPx
@@ -515,14 +587,14 @@ export function createTransformerView2dResidualCaptionOverlay({
                         useMatrixRelativeSizing,
                         projectedContentHeight: captionSizingExtent,
                         sizeProgress,
-                        minFontPx: uniformMhsaCaptionState
+                        minFontPx: activeUniformCaptionState
                             ? MHSA_UNIFORM_CAPTION_DIMENSIONS_MIN_FONT_PX
                             : RESIDUAL_CAPTION_DIMENSIONS_MIN_FONT_PX,
-                        maxFontPx: uniformMhsaCaptionState
+                        maxFontPx: activeUniformCaptionState
                             ? MHSA_UNIFORM_CAPTION_DIMENSIONS_MAX_FONT_PX
                             : RESIDUAL_CAPTION_DIMENSIONS_MAX_FONT_PX,
                         heightRatio: RESIDUAL_TOP_CAPTION_DIMENSIONS_RATIO,
-                        scale: dimensionsScale,
+                        scale: effectiveDimensionsScale,
                         enforceMinFontPx: !useSceneRelativeCaptionSizing
                     });
                 const labelMinScreenFontPx = Number.isFinite(node?.metadata?.caption?.labelMinScreenFontPx)
@@ -537,44 +609,25 @@ export function createTransformerView2dResidualCaptionOverlay({
                     && node.metadata.caption.dimensionsMinScreenFontPx > 0
                     ? Number(node.metadata.caption.dimensionsMinScreenFontPx)
                     : null;
-                const dampedLabelFontPx = useSceneRelativeCaptionSizing
-                    ? labelFontPx
-                    : (
-                        fixedTextSizing?.captionLabelScreenFontPx
-                            ?? applyZoomedOutFontDamping(
-                                labelFontPx,
-                                projectedCaptionExtent,
-                                minScreenHeightPx,
-                                {
-                                    absoluteMinFontPx: labelMinScreenFontPx
-                                        ?? (uniformMhsaCaptionState ? 11.5 : 10.5)
-                                }
-                            )
-                    );
-                const resolvedLabelFontPx = useSceneRelativeCaptionSizing
-                    ? labelFontPx
-                    : (
-                        fixedTextSizing?.captionLabelScreenFontPx
-                            ?? (
-                                Number.isFinite(labelMaxScreenFontPx)
-                                    ? Math.min(dampedLabelFontPx, labelMaxScreenFontPx)
-                                    : dampedLabelFontPx
-                            )
-                    );
-                const resolvedDimensionsFontPx = useSceneRelativeCaptionSizing
-                    ? dimensionsFontPx
-                    : (
-                        fixedTextSizing?.captionDimensionsScreenFontPx
-                            ?? applyZoomedOutFontDamping(
-                                dimensionsFontPx,
-                                projectedCaptionExtent,
-                                minScreenHeightPx,
-                                {
-                                    absoluteMinFontPx: dimensionsMinScreenFontPx
-                                        ?? (uniformMhsaCaptionState ? 10.5 : 9.5)
-                                }
-                            )
-                    );
+                const resolvedLabelFontPx = resolveOverlayFontPx({
+                    zoomBehavior: textZoomPolicy.captionBehavior,
+                    baseFontPx: labelFontPx,
+                    projectedExtent: projectedCaptionExtent,
+                    minScreenHeightPx,
+                    fixedScreenFontPx: fixedTextSizing?.captionLabelScreenFontPx,
+                    minScreenFontPx: labelMinScreenFontPx
+                        ?? (activeUniformCaptionState ? 11.5 : 10.5),
+                    maxScreenFontPx: labelMaxScreenFontPx
+                });
+                const resolvedDimensionsFontPx = resolveOverlayFontPx({
+                    zoomBehavior: textZoomPolicy.captionBehavior,
+                    baseFontPx: dimensionsFontPx,
+                    projectedExtent: projectedCaptionExtent,
+                    minScreenHeightPx,
+                    fixedScreenFontPx: fixedTextSizing?.captionDimensionsScreenFontPx,
+                    minScreenFontPx: dimensionsMinScreenFontPx
+                        ?? (activeUniformCaptionState ? 10.5 : 9.5)
+                });
                 const anchorX = contentBounds.x + (contentBounds.width / 2);
                 const anchorY = captionPosition === 'bottom'
                     ? contentBounds.y + contentBounds.height + RESIDUAL_CAPTION_BOTTOM_GAP_PX

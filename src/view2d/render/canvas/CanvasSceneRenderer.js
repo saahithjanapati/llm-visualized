@@ -1978,10 +1978,15 @@ function drawTextLikeNode(ctx, node, entry, config, worldScale = 1, detailScale 
             node.role === 'residual-add-operator'
             || node.visual?.styleKey === 'residual.add-symbol'
         );
+    const detailOperatorMinScreenHeightPx = node.kind === VIEW2D_NODE_KINDS.OPERATOR
+        && Number.isFinite(fixedTextSizing?.operatorMinScreenHeightPx)
+        ? Math.max(0, Number(fixedTextSizing.operatorMinScreenHeightPx))
+        : null;
     const minScreenHeightPx = Number.isFinite(node.metadata?.minScreenHeightPx)
         ? Math.max(0, Number(node.metadata.minScreenHeightPx))
         : TEXT_MIN_SCREEN_HEIGHT_PX;
-    if (!isPersistentOperator && (bounds.height * safeDetailScale) < minScreenHeightPx) {
+    const effectiveMinScreenHeightPx = detailOperatorMinScreenHeightPx ?? minScreenHeightPx;
+    if (!isPersistentOperator && (bounds.height * safeDetailScale) < effectiveMinScreenHeightPx) {
         return;
     }
     ctx.save();
@@ -1993,15 +1998,25 @@ function drawTextLikeNode(ctx, node, entry, config, worldScale = 1, detailScale 
     if (node.kind === VIEW2D_NODE_KINDS.OPERATOR) {
         const baseFontSize = entry.layoutData?.fontSize || config.component.operatorFontSize;
         const isPlusOperator = node.semantic?.operatorKey === 'plus' || node.text === '+';
-        const persistentMinScreenFontPx = isPlusOperator
-            ? PERSISTENT_PLUS_OPERATOR_MIN_SCREEN_FONT_PX
-            : PERSISTENT_OPERATOR_MIN_SCREEN_FONT_PX;
+        const defaultPersistentMinScreenFontPx = isPersistentOperator
+            ? (isPlusOperator
+                ? PERSISTENT_PLUS_OPERATOR_MIN_SCREEN_FONT_PX
+                : PERSISTENT_OPERATOR_MIN_SCREEN_FONT_PX)
+            : 0;
+        const detailOperatorMinScreenFontPx = Number.isFinite(fixedTextSizing?.operatorMinScreenFontPx)
+            && fixedTextSizing.operatorMinScreenFontPx > 0
+            ? Number(fixedTextSizing.operatorMinScreenFontPx)
+            : 0;
+        const persistentMinScreenFontPx = Math.max(
+            defaultPersistentMinScreenFontPx,
+            detailOperatorMinScreenFontPx
+        );
         const fixedOperatorFontSize = fixedTextSizing?.textScreenFontPx
             ? (fixedTextSizing.textScreenFontPx / safeWorldScale)
             : null;
         const adjustedFontSize = fixedOperatorFontSize
             ?? (
-                isPersistentOperator
+                persistentMinScreenFontPx > 0
                     ? Math.max(baseFontSize, persistentMinScreenFontPx / safeWorldScale)
                     : baseFontSize
             );

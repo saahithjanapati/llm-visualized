@@ -28,8 +28,16 @@ import {
     resolveView2dVisualTokens,
     VIEW2D_STYLE_KEYS
 } from '../theme/visualTokens.js';
+import {
+    measureView2dText,
+    resolveView2dTextPadding
+} from '../textMeasurement.js';
 import { createView2dVectorStripMetadata } from '../shared/vectorStrip.js';
 import { formatView2dMatrixDimensions } from '../shared/formatMatrixDimensions.js';
+import {
+    resolveMhsaDimensionVisualExtent,
+    resolveMhsaTokenVisualExtent
+} from '../shared/mhsaDimensionSizing.js';
 
 const PROJECTION_STACK_GAP = 188;
 const PROJECTION_STACK_GAP_SMALL = 148;
@@ -45,12 +53,8 @@ const PROJECTION_EQUATION_GAP = 12;
 const PROJECTION_EQUATION_GAP_SMALL = 10;
 const PROJECTION_MULTIPLY_OPERATOR_SCALE = 0.82;
 const ATTENTION_GROUPING_OPERATOR_SCALE = 1.28;
-const PROJECTION_XLN_COMPACT_WIDTH = 96;
-const PROJECTION_XLN_COMPACT_WIDTH_SMALL = 84;
 const PROJECTION_XLN_ROW_HEIGHT = 7;
 const PROJECTION_XLN_ROW_HEIGHT_SMALL = 6;
-const PROJECTION_WEIGHT_REFERENCE_EXTENT = 96;
-const PROJECTION_WEIGHT_REFERENCE_EXTENT_SMALL = 84;
 const PROJECTION_WEIGHT_MIN_WIDTH = 52;
 const PROJECTION_WEIGHT_MAX_WIDTH = 138;
 const PROJECTION_WEIGHT_MIN_HEIGHT = 56;
@@ -75,10 +79,10 @@ const VECTOR_STRIP_MAX_WIDTH_BOOST = 64;
 const VECTOR_STRIP_MAX_WIDTH_BOOST_SMALL = 48;
 const PROJECTION_BIAS_ROW_HEIGHT = 14;
 const PROJECTION_BIAS_CAPTION_MIN_SCREEN_HEIGHT = 12;
-const PROJECTION_BIAS_LABEL_MIN_SCREEN_FONT_PX = 13;
-const PROJECTION_BIAS_COMPACT_WIDTH = 58;
-const PROJECTION_BIAS_COMPACT_WIDTH_SMALL = 50;
+const PROJECTION_BIAS_LABEL_MIN_SCREEN_FONT_PX = 15;
 const PROJECTION_BIAS_CORNER_RADIUS = 5;
+const PROJECTION_BIAS_CAPTION_LABEL_SCALE = 1.8;
+const PROJECTION_QUERY_BIAS_CAPTION_LABEL_SCALE = 2.0;
 const PROJECTION_OUTPUT_COMPACT_WIDTH = 72;
 const PROJECTION_OUTPUT_COMPACT_WIDTH_SMALL = 62;
 const PROJECTION_OUTPUT_ROW_HEIGHT = 7;
@@ -87,16 +91,18 @@ const PROJECTION_XLN_TARGET_GAP = 8;
 const ATTENTION_TRANSPOSE_CORNER_RADIUS = 8;
 const ATTENTION_QKT_GROUP_GAP = 12;
 const ATTENTION_QKT_GROUP_GAP_SMALL = 10;
-const ATTENTION_KT_CLOSE_GAP = 3;
-const ATTENTION_KT_CLOSE_GAP_SMALL = 2;
+const ATTENTION_KT_CLOSE_GAP = -60;
+const ATTENTION_KT_CLOSE_GAP_SMALL = -48;
 const ATTENTION_CLOSE_DIVISOR_GAP = 8;
 const ATTENTION_CLOSE_DIVISOR_GAP_SMALL = 6;
-const ATTENTION_DIVISOR_GAP = 6;
-const ATTENTION_DIVISOR_GAP_SMALL = 4;
-const ATTENTION_SOFTMAX_PERSISTENT_FONT_PX = 15;
-const ATTENTION_SOFTMAX_PERSISTENT_FONT_PX_SMALL = 14;
-const ATTENTION_SOFTMAX_ZOOMED_OUT_FONT_PX = 16;
-const ATTENTION_SOFTMAX_ZOOMED_OUT_FONT_PX_SMALL = 15;
+const ATTENTION_DIVISOR_GAP = 0;
+const ATTENTION_DIVISOR_GAP_SMALL = 0;
+const ATTENTION_RESULT_CLUSTER_GAP = 10;
+const ATTENTION_RESULT_CLUSTER_GAP_SMALL = 8;
+const ATTENTION_SOFTMAX_PERSISTENT_FONT_PX = 16;
+const ATTENTION_SOFTMAX_PERSISTENT_FONT_PX_SMALL = 15;
+const ATTENTION_SOFTMAX_ZOOMED_OUT_FONT_PX = 17;
+const ATTENTION_SOFTMAX_ZOOMED_OUT_FONT_PX_SMALL = 16;
 const ATTENTION_SOFTMAX_GROUPING_OPERATOR_SCALE = 1.34;
 const ATTENTION_SOFTMAX_PREFIX_VISUAL_HEIGHT_ESTIMATE = 42;
 const ATTENTION_SOFTMAX_PREFIX_VISUAL_HEIGHT_ESTIMATE_SMALL = 38;
@@ -106,8 +112,8 @@ const ATTENTION_RESULT_GROUP_GAP = 8;
 const ATTENTION_RESULT_GROUP_GAP_SMALL = 6;
 const ATTENTION_SOFTMAX_PREFIX_GAP = 6;
 const ATTENTION_SOFTMAX_PREFIX_GAP_SMALL = 4;
-const ATTENTION_SOFTMAX_BODY_GAP = 12;
-const ATTENTION_SOFTMAX_BODY_GAP_SMALL = 10;
+const ATTENTION_SOFTMAX_BODY_GAP = 4;
+const ATTENTION_SOFTMAX_BODY_GAP_SMALL = 3;
 const ATTENTION_SOFTMAX_FLOW_GAP = 88;
 const ATTENTION_SOFTMAX_FLOW_GAP_SMALL = 66;
 const ATTENTION_POST_COPY_STAGE_SPACER = 48;
@@ -118,8 +124,14 @@ const ATTENTION_HEAD_OUTPUT_PRODUCT_GAP = 6;
 const ATTENTION_HEAD_OUTPUT_PRODUCT_GAP_SMALL = 4;
 const ATTENTION_MATRIX_CAPTION_LABEL_MIN_SCREEN_FONT_PX = 14;
 const ATTENTION_MATRIX_CAPTION_DIMENSIONS_MIN_SCREEN_FONT_PX = 11;
-const ATTENTION_STAGE_VERTICAL_LIFT = 116;
-const ATTENTION_STAGE_VERTICAL_LIFT_SMALL = 90;
+const ATTENTION_PRE_SCORE_CAPTION_LABEL_SCALE = 0.82;
+const ATTENTION_MASK_CAPTION_LABEL_SCALE = 0.82;
+const ATTENTION_GRID_PADDING = 1;
+const ATTENTION_GRID_CARD_CORNER_RADIUS = 8;
+const ATTENTION_SOFTMAX_TEXT_FONT_SCALE = 1.28;
+const ATTENTION_SCALE_TEXT_FONT_SCALE = 1.4;
+const ATTENTION_STAGE_VERTICAL_LIFT = 144;
+const ATTENTION_STAGE_VERTICAL_LIFT_SMALL = 110;
 const ATTENTION_STAGE_VERTICAL_LIFT_PER_EXTRA_ROW = 6;
 const ATTENTION_STAGE_VERTICAL_LIFT_PER_EXTRA_ROW_SMALL = 5;
 const ATTENTION_BOTTOM_CAPTION_CONNECTOR_CLEARANCE = 44;
@@ -187,11 +199,23 @@ function createCardMetadata(width = null, height = null, {
     return Object.keys(metadata).length ? metadata : null;
 }
 
-function createPersistentAttentionGridMetadata() {
+function createPersistentAttentionGridMetadata({
+    paddingX = ATTENTION_GRID_PADDING,
+    paddingY = ATTENTION_GRID_PADDING
+} = {}) {
     return {
         grid: {
-            preserveDetail: true
-        }
+            preserveDetail: true,
+            ...(Number.isFinite(paddingX) && paddingX >= 0
+                ? { paddingX: Math.max(0, Math.floor(paddingX)) }
+                : {}),
+            ...(Number.isFinite(paddingY) && paddingY >= 0
+                ? { paddingY: Math.max(0, Math.floor(paddingY)) }
+                : {})
+        },
+        ...createCardMetadata(null, null, {
+            cornerRadius: ATTENTION_GRID_CARD_CORNER_RADIUS
+        })
     };
 }
 
@@ -201,6 +225,8 @@ function createCaptionMetadata({
     dimensionsText = '',
     minScreenHeightPx = 28,
     renderMode = 'dom-katex',
+    labelScale = null,
+    dimensionsScale = null,
     preferStandardSizing = false,
     labelMinScreenFontPx = null,
     dimensionsMinScreenFontPx = null
@@ -228,6 +254,12 @@ function createCaptionMetadata({
     if (safeRenderMode.length) {
         caption.renderMode = safeRenderMode;
     }
+    if (Number.isFinite(labelScale) && labelScale > 0) {
+        caption.labelScale = Number(labelScale);
+    }
+    if (Number.isFinite(dimensionsScale) && dimensionsScale > 0) {
+        caption.dimensionsScale = Number(dimensionsScale);
+    }
     if (preferStandardSizing === true) {
         caption.preferStandardSizing = true;
     }
@@ -243,6 +275,8 @@ function createCaptionMetadata({
 function createAttentionMatrixCaptionMetadata(rows = 1, cols = 1, {
     position = 'bottom',
     minScreenHeightPx = 28,
+    labelScale = null,
+    dimensionsScale = null,
     labelMinScreenFontPx = ATTENTION_MATRIX_CAPTION_LABEL_MIN_SCREEN_FONT_PX,
     dimensionsMinScreenFontPx = ATTENTION_MATRIX_CAPTION_DIMENSIONS_MIN_SCREEN_FONT_PX
 } = {}) {
@@ -253,6 +287,8 @@ function createAttentionMatrixCaptionMetadata(rows = 1, cols = 1, {
         dimensionsText: dimensionCaption.text,
         minScreenHeightPx,
         renderMode: 'dom-katex',
+        labelScale,
+        dimensionsScale,
         preferStandardSizing: true,
         labelMinScreenFontPx,
         dimensionsMinScreenFontPx
@@ -359,47 +395,21 @@ function resolveVectorStripDimensions({
     layoutMetrics = null
 } = {}) {
     const safeRowCount = Number.isFinite(rowCount) ? Math.max(1, Math.floor(rowCount)) : 1;
-    const resolvedExtraRows = Number.isFinite(extraRows)
-        ? Math.max(0, Math.floor(extraRows))
-        : Math.max(0, safeRowCount - 5);
     const safeBaseCompactWidth = Math.max(1, Math.floor(Number(baseCompactWidth) || 72));
     const safeBaseRowHeight = Math.max(1, Math.floor(Number(baseRowHeight) || 7));
-    const attentionPerRowFootprint = resolveAttentionFlowRowHeight(
-        safeRowCount,
-        isSmallScreen,
-        layoutMetrics
-    ) / safeRowCount;
-    const blendPerExtraRow = isSmallScreen
-        ? VECTOR_STRIP_ROW_HEIGHT_BLEND_PER_EXTRA_ROW_SMALL
-        : VECTOR_STRIP_ROW_HEIGHT_BLEND_PER_EXTRA_ROW;
-    const maxBlend = isSmallScreen
-        ? VECTOR_STRIP_ROW_HEIGHT_MAX_BLEND_SMALL
-        : VECTOR_STRIP_ROW_HEIGHT_MAX_BLEND;
-    const maxRowHeightBoost = isSmallScreen
-        ? VECTOR_STRIP_MAX_ROW_HEIGHT_BOOST_SMALL
-        : VECTOR_STRIP_MAX_ROW_HEIGHT_BOOST;
-    const widthBoostPerRowHeight = isSmallScreen
-        ? VECTOR_STRIP_WIDTH_BOOST_PER_ROW_HEIGHT_SMALL
-        : VECTOR_STRIP_WIDTH_BOOST_PER_ROW_HEIGHT;
-    const maxWidthBoost = isSmallScreen
-        ? VECTOR_STRIP_MAX_WIDTH_BOOST_SMALL
-        : VECTOR_STRIP_MAX_WIDTH_BOOST;
-    const blend = Math.min(maxBlend, resolvedExtraRows * blendPerExtraRow);
+    const rowTargetExtent = resolveMhsaTokenVisualExtent(safeRowCount, {
+        isSmallScreen
+    });
+    const minRowHeight = safeRowCount >= 20 ? 2 : (safeRowCount >= 10 ? 3 : 4);
     const resolvedRowHeight = Math.max(
-        safeBaseRowHeight,
+        minRowHeight,
         Math.min(
-            safeBaseRowHeight + maxRowHeightBoost,
-            Math.round(
-                safeBaseRowHeight
-                + ((attentionPerRowFootprint - safeBaseRowHeight) * blend)
-            )
+            safeBaseRowHeight,
+            Math.floor(rowTargetExtent / safeRowCount)
         )
     );
     return {
-        compactWidth: safeBaseCompactWidth + Math.min(
-            maxWidthBoost,
-            Math.max(0, resolvedRowHeight - safeBaseRowHeight) * widthBoostPerRowHeight
-        ),
+        compactWidth: safeBaseCompactWidth,
         rowHeight: resolvedRowHeight
     };
 }
@@ -412,10 +422,16 @@ function resolveProjectionStageVisualMetrics({
     isSmallScreen = false,
     layoutMetrics = null
 } = {}) {
+    const previewFeatureExtent = resolveMhsaDimensionVisualExtent(previewColumnCount, {
+        isSmallScreen
+    });
+    const outputFeatureExtent = resolveMhsaDimensionVisualExtent(projectionData?.outputColumnCount, {
+        isSmallScreen
+    });
     const xLnDimensions = resolveVectorStripDimensions({
         rowCount: previewRowCount,
         extraRows,
-        baseCompactWidth: isSmallScreen ? PROJECTION_XLN_COMPACT_WIDTH_SMALL : PROJECTION_XLN_COMPACT_WIDTH,
+        baseCompactWidth: previewFeatureExtent,
         baseRowHeight: isSmallScreen ? PROJECTION_XLN_ROW_HEIGHT_SMALL : PROJECTION_XLN_ROW_HEIGHT,
         isSmallScreen,
         layoutMetrics
@@ -423,12 +439,12 @@ function resolveProjectionStageVisualMetrics({
     const outputDimensions = resolveVectorStripDimensions({
         rowCount: projectionData?.outputRowCount,
         extraRows,
-        baseCompactWidth: isSmallScreen ? PROJECTION_OUTPUT_COMPACT_WIDTH_SMALL : PROJECTION_OUTPUT_COMPACT_WIDTH,
+        baseCompactWidth: outputFeatureExtent,
         baseRowHeight: isSmallScreen ? PROJECTION_OUTPUT_ROW_HEIGHT_SMALL : PROJECTION_OUTPUT_ROW_HEIGHT,
         isSmallScreen,
         layoutMetrics
     });
-    const baseOutputCompactWidth = isSmallScreen ? PROJECTION_OUTPUT_COMPACT_WIDTH_SMALL : PROJECTION_OUTPUT_COMPACT_WIDTH;
+    const baseOutputCompactWidth = outputFeatureExtent;
     const baseOutputRowHeight = isSmallScreen ? PROJECTION_OUTPUT_ROW_HEIGHT_SMALL : PROJECTION_OUTPUT_ROW_HEIGHT;
     const projectionScale = Math.min(
         isSmallScreen ? PROJECTION_STAGE_VISUAL_SCALE_MAX_SMALL : PROJECTION_STAGE_VISUAL_SCALE_MAX,
@@ -439,24 +455,31 @@ function resolveProjectionStageVisualMetrics({
         )
     );
     const weightReferenceExtent = Math.round(
-        (isSmallScreen ? PROJECTION_WEIGHT_REFERENCE_EXTENT_SMALL : PROJECTION_WEIGHT_REFERENCE_EXTENT)
-        * Math.max(1, projectionScale * PROJECTION_STAGE_WEIGHT_REFERENCE_SCALE)
+        previewFeatureExtent * Math.max(1, projectionScale * PROJECTION_STAGE_WEIGHT_REFERENCE_SCALE)
     );
+    const weightMinWidth = Math.round(PROJECTION_WEIGHT_MIN_WIDTH * Math.min(1.18, projectionScale));
+    const weightMaxWidth = Math.round(PROJECTION_WEIGHT_MAX_WIDTH * projectionScale);
+    const weightMinHeight = Math.round(PROJECTION_WEIGHT_MIN_HEIGHT * Math.min(1.12, projectionScale));
+    const weightMaxHeight = Math.round(PROJECTION_WEIGHT_MAX_HEIGHT * projectionScale);
     const weightCardSize = resolveRelativeCardSize({
         rows: projectionData?.weightRowCount,
         cols: projectionData?.weightColumnCount,
         referenceCount: previewColumnCount,
         referenceExtent: weightReferenceExtent,
-        minWidth: Math.round(PROJECTION_WEIGHT_MIN_WIDTH * Math.min(1.18, projectionScale)),
-        maxWidth: Math.round(PROJECTION_WEIGHT_MAX_WIDTH * projectionScale),
-        minHeight: Math.round(PROJECTION_WEIGHT_MIN_HEIGHT * Math.min(1.12, projectionScale)),
-        maxHeight: Math.round(PROJECTION_WEIGHT_MAX_HEIGHT * projectionScale)
+        minWidth: weightMinWidth,
+        maxWidth: weightMaxWidth,
+        minHeight: weightMinHeight,
+        maxHeight: weightMaxHeight
     });
-    const baseBiasCompactWidth = isSmallScreen ? PROJECTION_BIAS_COMPACT_WIDTH_SMALL : PROJECTION_BIAS_COMPACT_WIDTH;
-    const biasCompactWidth = Math.max(
-        baseBiasCompactWidth,
-        Math.round(outputDimensions.compactWidth * PROJECTION_STAGE_BIAS_WIDTH_RATIO)
+    weightCardSize.height = Math.max(
+        weightMinHeight,
+        Math.min(weightMaxHeight, xLnDimensions.compactWidth)
     );
+    weightCardSize.width = Math.max(
+        weightMinWidth,
+        Math.min(weightMaxWidth, outputDimensions.compactWidth)
+    );
+    const biasCompactWidth = outputDimensions.compactWidth;
     const biasRowHeight = Math.max(
         PROJECTION_BIAS_ROW_HEIGHT,
         Math.round(
@@ -483,10 +506,17 @@ function resolveAttentionGridLayoutMetrics(layoutMetrics = null, isSmallScreen =
     const cellGap = Number.isFinite(componentOverrides.gridCellGap) && componentOverrides.gridCellGap >= 0
         ? Math.max(0, Math.floor(componentOverrides.gridCellGap))
         : 2;
+    const gridPaddingX = Number.isFinite(componentOverrides.gridPaddingX) && componentOverrides.gridPaddingX >= 0
+        ? Math.max(0, Math.floor(componentOverrides.gridPaddingX))
+        : (isSmallScreen ? 8 : 10);
+    const gridPaddingY = Number.isFinite(componentOverrides.gridPaddingY) && componentOverrides.gridPaddingY >= 0
+        ? Math.max(0, Math.floor(componentOverrides.gridPaddingY))
+        : (isSmallScreen ? 8 : 10);
     return {
         cellSize,
         cellGap,
-        contentPaddingY: isSmallScreen ? 8 : 10
+        contentPaddingX: gridPaddingX,
+        contentPaddingY: gridPaddingY
     };
 }
 
@@ -495,11 +525,17 @@ function resolveAttentionFlowRowHeight(rowCount = 1, isSmallScreen = false, layo
     const {
         cellSize,
         cellGap,
+        contentPaddingX,
         contentPaddingY
     } = resolveAttentionGridLayoutMetrics(layoutMetrics, isSmallScreen);
-    return (safeRowCount * cellSize)
+    return Math.max(
+        (safeRowCount * cellSize)
         + (Math.max(0, safeRowCount - 1) * cellGap)
-        + (contentPaddingY * 2);
+        + (contentPaddingY * 2),
+        (safeRowCount * cellSize)
+        + (Math.max(0, safeRowCount - 1) * cellGap)
+        + (contentPaddingX * 2)
+    );
 }
 
 function resolveAttentionCaptionBlockHeight(isSmallScreen = false) {
@@ -515,14 +551,54 @@ function resolveAttentionMatrixBlockHeight(rowCount = 1, isSmallScreen = false, 
 
 function resolveAttentionSoftmaxPrefixOffset(rowCount = 1, isSmallScreen = false, layoutMetrics = null) {
     const flowHeight = resolveAttentionFlowRowHeight(rowCount, isSmallScreen, layoutMetrics);
-    const coreGap = isSmallScreen
-        ? ATTENTION_SOFTMAX_FLOW_GAP_SMALL
-        : ATTENTION_SOFTMAX_FLOW_GAP;
     const prefixVisualHeightEstimate = isSmallScreen
         ? ATTENTION_SOFTMAX_PREFIX_VISUAL_HEIGHT_ESTIMATE_SMALL
         : ATTENTION_SOFTMAX_PREFIX_VISUAL_HEIGHT_ESTIMATE;
-    const centerOffset = Math.max(0, Math.round((flowHeight - prefixVisualHeightEstimate) * 0.5));
-    return flowHeight + coreGap + centerOffset;
+    return Math.max(1, Math.round((flowHeight - prefixVisualHeightEstimate) * 0.5));
+}
+
+function resolveLabelNodeWidth(text = '', fontScale = 1, visualTokens = null) {
+    const tokens = visualTokens || resolveView2dVisualTokens();
+    const baseFontSize = Math.max(10, tokens?.typography?.labelFontSize || 12);
+    const fontSize = baseFontSize * (Number.isFinite(fontScale) && fontScale > 0 ? Number(fontScale) : 1);
+    const textMetrics = measureView2dText(text, { fontSize });
+    return textMetrics.inkWidth + (resolveView2dTextPadding(fontSize) * 2);
+}
+
+function resolveOperatorNodeWidth(text = '', {
+    fontScale = 1,
+    isSmallScreen = false,
+    visualTokens = null
+} = {}) {
+    const tokens = visualTokens || resolveView2dVisualTokens();
+    const baseFontSize = Math.max(16, tokens?.typography?.operatorFontSize || 20);
+    const fontSize = baseFontSize * (Number.isFinite(fontScale) && fontScale > 0 ? Number(fontScale) : 1);
+    const sidePadding = isSmallScreen ? 8 : 10;
+    const textMetrics = measureView2dText(text, { fontSize });
+    return textMetrics.inkWidth + (sidePadding * 2);
+}
+
+function resolveAttentionSoftmaxBodyOffsetX({
+    isSmallScreen = false,
+    visualTokens = null,
+    softmaxLabelText = 'softmax'
+} = {}) {
+    const resultGroupGap = isSmallScreen ? ATTENTION_RESULT_GROUP_GAP_SMALL : ATTENTION_RESULT_GROUP_GAP;
+    const softmaxPrefixGap = isSmallScreen ? ATTENTION_SOFTMAX_PREFIX_GAP_SMALL : ATTENTION_SOFTMAX_PREFIX_GAP;
+    const softmaxBodyGap = isSmallScreen ? ATTENTION_SOFTMAX_BODY_GAP_SMALL : ATTENTION_SOFTMAX_BODY_GAP;
+    const equalsWidth = resolveOperatorNodeWidth('=', {
+        isSmallScreen,
+        visualTokens
+    });
+    const softmaxLabelWidth = resolveLabelNodeWidth(softmaxLabelText, ATTENTION_SOFTMAX_TEXT_FONT_SCALE, visualTokens);
+    const softmaxOpenWidth = resolveOperatorNodeWidth('(', {
+        fontScale: ATTENTION_SOFTMAX_GROUPING_OPERATOR_SCALE,
+        isSmallScreen,
+        visualTokens
+    });
+    return Math.round((equalsWidth + resultGroupGap) - (
+        softmaxLabelWidth + softmaxPrefixGap + softmaxOpenWidth + softmaxBodyGap
+    ));
 }
 
 function buildGradientRowItems(rows = [], baseSemantic = {}, role = 'row') {
@@ -709,10 +785,13 @@ function buildProjectionSourceNode({
         rowCount,
         previewData?.columnCount
     );
+    const previewFeatureExtent = resolveMhsaDimensionVisualExtent(previewData?.columnCount, {
+        isSmallScreen
+    });
     const xLnDimensions = resolveVectorStripDimensions({
         rowCount,
         extraRows,
-        baseCompactWidth: isSmallScreen ? PROJECTION_XLN_COMPACT_WIDTH_SMALL : PROJECTION_XLN_COMPACT_WIDTH,
+        baseCompactWidth: previewFeatureExtent,
         baseRowHeight: isSmallScreen ? PROJECTION_XLN_ROW_HEIGHT_SMALL : PROJECTION_XLN_ROW_HEIGHT,
         isSmallScreen,
         layoutMetrics
@@ -835,7 +914,9 @@ function buildProjectionStageNode({
         captionPosition: 'bottom',
         captionMinScreenHeightPx: PROJECTION_BIAS_CAPTION_MIN_SCREEN_HEIGHT,
         captionPreferStandardSizing: true,
-        captionLabelScale: 1.08,
+        captionLabelScale: projectionKind === 'q'
+            ? PROJECTION_QUERY_BIAS_CAPTION_LABEL_SCALE
+            : PROJECTION_BIAS_CAPTION_LABEL_SCALE,
         captionLabelMinScreenFontPx: PROJECTION_BIAS_LABEL_MIN_SCREEN_FONT_PX,
         captionDimensionsTex: biasDimensionCaption.tex,
         captionDimensionsText: biasDimensionCaption.text,
@@ -936,15 +1017,20 @@ function buildAttentionStageNode({
     valueStageIndex,
     extraRows = null,
     isSmallScreen = false,
-    layoutMetrics = null
+    layoutMetrics = null,
+    visualTokens = null
 }) {
+    const resolvedTokens = visualTokens || resolveView2dVisualTokens();
     const attentionSemantic = buildSemantic(baseSemantic, {
         stage: 'attention'
+    });
+    const attentionFeatureExtent = resolveMhsaDimensionVisualExtent(scoreStage.queryColumnCount, {
+        isSmallScreen
     });
     const attentionVectorDimensions = resolveVectorStripDimensions({
         rowCount: scoreStage.queryRowCount,
         extraRows,
-        baseCompactWidth: isSmallScreen ? PROJECTION_OUTPUT_COMPACT_WIDTH_SMALL : PROJECTION_OUTPUT_COMPACT_WIDTH,
+        baseCompactWidth: attentionFeatureExtent,
         baseRowHeight: isSmallScreen ? PROJECTION_OUTPUT_ROW_HEIGHT_SMALL : PROJECTION_OUTPUT_ROW_HEIGHT,
         isSmallScreen,
         layoutMetrics
@@ -1024,7 +1110,9 @@ function buildAttentionStageNode({
         },
         metadata: {
             ...createPersistentAttentionGridMetadata(),
-            ...createAttentionMatrixCaptionMetadata(scoreStage.outputRowCount, scoreStage.outputColumnCount)
+            ...createAttentionMatrixCaptionMetadata(scoreStage.outputRowCount, scoreStage.outputColumnCount, {
+                labelScale: ATTENTION_PRE_SCORE_CAPTION_LABEL_SCALE
+            })
         }
     });
 
@@ -1043,7 +1131,9 @@ function buildAttentionStageNode({
         },
         metadata: {
             ...createPersistentAttentionGridMetadata(),
-            ...createAttentionMatrixCaptionMetadata(scoreStage.outputRowCount, scoreStage.outputColumnCount)
+            ...createAttentionMatrixCaptionMetadata(scoreStage.outputRowCount, scoreStage.outputColumnCount, {
+                labelScale: ATTENTION_PRE_SCORE_CAPTION_LABEL_SCALE
+            })
         }
     });
 
@@ -1062,7 +1152,9 @@ function buildAttentionStageNode({
         },
         metadata: {
             ...createPersistentAttentionGridMetadata(),
-            ...createAttentionMatrixCaptionMetadata(scoreStage.outputRowCount, scoreStage.outputColumnCount)
+            ...createAttentionMatrixCaptionMetadata(scoreStage.outputRowCount, scoreStage.outputColumnCount, {
+                labelScale: ATTENTION_MASK_CAPTION_LABEL_SCALE
+            })
         }
     });
 
@@ -1101,6 +1193,7 @@ function buildAttentionStageNode({
                 metadata: {
                     renderMode: 'dom-katex',
                     minScreenHeightPx: 0,
+                    fontScale: ATTENTION_SOFTMAX_TEXT_FONT_SCALE,
                     persistentMinScreenFontPx: isSmallScreen
                         ? ATTENTION_SOFTMAX_PERSISTENT_FONT_PX_SMALL
                         : ATTENTION_SOFTMAX_PERSISTENT_FONT_PX,
@@ -1304,21 +1397,6 @@ function buildAttentionStageNode({
         }
     });
 
-    const softmaxCoreColumnNode = createGroupNode({
-        role: 'attention-softmax-core-column',
-        semantic: buildSemantic(attentionSemantic, { role: 'attention-softmax-core-column' }),
-        direction: VIEW2D_LAYOUT_DIRECTIONS.VERTICAL,
-        gapKey: 'softmax',
-        align: 'start',
-        children: [
-            preScoreNode,
-            softmaxCoreFlowNode
-        ],
-        metadata: {
-            gapOverride: softmaxCoreGap
-        }
-    });
-
     const softmaxBodyNode = createGroupNode({
         role: 'attention-softmax-body',
         semantic: buildSemantic(attentionSemantic, { role: 'attention-softmax-body' }),
@@ -1327,63 +1405,57 @@ function buildAttentionStageNode({
         align: 'start',
         children: [
             softmaxPrefixColumnNode,
-            softmaxCoreColumnNode
+            softmaxCoreFlowNode
         ],
         metadata: {
-            gapOverride: isSmallScreen ? ATTENTION_SOFTMAX_BODY_GAP_SMALL : ATTENTION_SOFTMAX_BODY_GAP
+            gapOverride: isSmallScreen ? ATTENTION_SOFTMAX_BODY_GAP_SMALL : ATTENTION_SOFTMAX_BODY_GAP,
+            layoutOffsetX: resolveAttentionSoftmaxBodyOffsetX({
+                isSmallScreen,
+                visualTokens: resolvedTokens,
+                softmaxLabelText: scoreStage.softmaxLabelTex || 'softmax'
+            })
         }
     });
-
-    const softmaxAlignmentSpacer = createHiddenSpacer({
-        semantic: buildSemantic(attentionSemantic, {
-            role: 'attention-softmax-alignment-spacer'
-        }),
-        role: 'attention-softmax-alignment-spacer',
-        width: 1,
-        height: resolveAttentionFlowRowHeight(scoreStage.outputRowCount, isSmallScreen, layoutMetrics)
-    });
-
-    const attentionResultEqualsNode = createGroupNode({
-        role: 'attention-result-equals-column',
-        semantic: buildSemantic(attentionSemantic, { role: 'attention-result-equals-column' }),
-        direction: VIEW2D_LAYOUT_DIRECTIONS.VERTICAL,
-        gapKey: 'default',
+    const attentionResultEquationRowNode = createGroupNode({
+        role: 'attention-result-equation-row',
+        semantic: buildSemantic(attentionSemantic, { role: 'attention-result-equation-row' }),
+        direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
+        gapKey: 'inline',
         align: 'center',
         children: [
-            createHiddenSpacer({
-                semantic: buildSemantic(attentionSemantic, {
-                    role: 'attention-result-equals-offset'
-                }),
-                role: 'attention-result-equals-offset',
-                width: 1,
-                height: resolveAttentionFlowRowHeight(scoreStage.outputRowCount, isSmallScreen, layoutMetrics)
-            }),
             createOperatorNode({
                 role: 'attention-equals',
                 semantic: buildSemantic(attentionSemantic, { role: 'attention-equals', operatorKey: 'equals' }),
                 text: '=',
                 visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR }
-            })
+            }),
+            preScoreNode
         ],
         metadata: {
-            gapOverride: 0
+            gapOverride: isSmallScreen ? ATTENTION_RESULT_GROUP_GAP_SMALL : ATTENTION_RESULT_GROUP_GAP
         }
     });
 
-    const softmaxStageNode = createGroupNode({
-        role: 'attention-softmax-stage',
-        semantic: buildSemantic(attentionSemantic, { role: 'attention-softmax-stage' }),
+    const attentionResultContentNode = createGroupNode({
+        role: 'attention-result-content',
+        semantic: buildSemantic(attentionSemantic, { role: 'attention-result-content' }),
         direction: VIEW2D_LAYOUT_DIRECTIONS.VERTICAL,
         gapKey: 'softmax',
         align: 'start',
         children: [
-            softmaxAlignmentSpacer,
+            attentionResultEquationRowNode,
             softmaxBodyNode
         ],
         metadata: {
-            gapOverride: isSmallScreen ? ATTENTION_RESULT_STAGE_GAP_SMALL : ATTENTION_RESULT_STAGE_GAP
+            gapOverride: softmaxCoreGap
         }
     });
+
+    const attentionResultTopOffset = resolveAttentionFlowRowHeight(
+        scoreStage.outputRowCount,
+        isSmallScreen,
+        layoutMetrics
+    ) + softmaxCoreGap;
 
     const divisorNode = createGroupNode({
         role: 'attention-divisor-group',
@@ -1406,7 +1478,8 @@ function buildAttentionStageNode({
                 visual: { styleKey: VIEW2D_STYLE_KEYS.LABEL },
                 metadata: {
                     renderMode: 'dom-katex',
-                    minScreenHeightPx: 0
+                    minScreenHeightPx: 0,
+                    fontScale: ATTENTION_SCALE_TEXT_FONT_SCALE
                 }
             }),
         ],
@@ -1488,18 +1561,37 @@ function buildAttentionStageNode({
         }
     });
 
+    const attentionLeftHandSideNode = createGroupNode({
+        role: 'attention-left-hand-side',
+        semantic: buildSemantic(attentionSemantic, { role: 'attention-left-hand-side' }),
+        direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
+        gapKey: 'attention',
+        align: 'center',
+        children: [
+            qktEquationNode,
+            divisorClusterNode
+        ]
+    });
+
     const attentionResultNode = createGroupNode({
         role: 'attention-result-stage',
         semantic: buildSemantic(attentionSemantic, { role: 'attention-result-stage' }),
-        direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
-        gapKey: 'inline',
+        direction: VIEW2D_LAYOUT_DIRECTIONS.VERTICAL,
+        gapKey: 'default',
         align: 'start',
         children: [
-            attentionResultEqualsNode,
-            softmaxStageNode
+            createHiddenSpacer({
+                semantic: buildSemantic(attentionSemantic, {
+                    role: 'attention-result-top-offset'
+                }),
+                role: 'attention-result-top-offset',
+                width: 1,
+                height: attentionResultTopOffset
+            }),
+            attentionResultContentNode
         ],
         metadata: {
-            gapOverride: isSmallScreen ? ATTENTION_RESULT_GROUP_GAP_SMALL : ATTENTION_RESULT_GROUP_GAP
+            gapOverride: 0
         }
     });
 
@@ -1507,15 +1599,15 @@ function buildAttentionStageNode({
         role: 'attention-stage',
         semantic: buildSemantic(attentionSemantic, { role: 'attention-stage' }),
         direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
-        gapKey: 'attention',
+        gapKey: 'inline',
         children: [
-            qktEquationNode,
-            divisorClusterNode,
+            attentionLeftHandSideNode,
             attentionResultNode
         ],
         metadata: {
             queryStageIndex,
-            valueStageIndex
+            valueStageIndex,
+            gapOverride: isSmallScreen ? ATTENTION_RESULT_CLUSTER_GAP_SMALL : ATTENTION_RESULT_CLUSTER_GAP
         }
     });
 }
@@ -1805,7 +1897,8 @@ export function buildMhsaSceneModel({
             valueStageIndex,
             extraRows: resolvedLayoutMetrics?.extraRows,
             isSmallScreen,
-            layoutMetrics: resolvedLayoutMetrics
+            layoutMetrics: resolvedLayoutMetrics,
+            visualTokens: resolvedTokens
         })
         : null;
     const attentionRootNode = attentionNode

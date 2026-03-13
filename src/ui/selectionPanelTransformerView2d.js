@@ -60,6 +60,7 @@ const VIEW2D_KEYBOARD_INITIAL_STEP_MS = 16;
 const VIEW2D_ROW_HOVER_FADE_DURATION_MS = 180;
 const VIEW2D_DETAIL_VIEWPORT_PADDING = 28;
 const VIEW2D_DETAIL_VIEWPORT_MIN_SCALE = 0.035;
+const VIEW2D_HEAD_DETAIL_VIEWPORT_MIN_SCALE = 0.06;
 const VIEW2D_DETAIL_VIEWPORT_MAX_SCALE = 10;
 const VIEW2D_HEAD_DETAIL_FRAME_PAD_PX = 5;
 const VIEW2D_HEAD_DETAIL_FOCUS_PADDING = Object.freeze({
@@ -328,7 +329,7 @@ export function createTransformerView2dDetailView(panelEl) {
         padding: VIEW2D_DETAIL_VIEWPORT_PADDING
     });
     const detailViewportController = new View2dViewportController({
-        minScale: VIEW2D_DETAIL_VIEWPORT_MIN_SCALE,
+        minScale: VIEW2D_HEAD_DETAIL_VIEWPORT_MIN_SCALE,
         maxScale: VIEW2D_DETAIL_VIEWPORT_MAX_SCALE,
         padding: VIEW2D_DETAIL_VIEWPORT_PADDING
     });
@@ -568,7 +569,7 @@ export function createTransformerView2dDetailView(panelEl) {
         detailViewportController.setSceneBounds(bounds);
         const fitTransform = resolveViewportFitTransform(bounds, { width, height }, {
             padding: VIEW2D_DETAIL_VIEWPORT_PADDING,
-            minScale: VIEW2D_DETAIL_VIEWPORT_MIN_SCALE,
+            minScale: VIEW2D_HEAD_DETAIL_VIEWPORT_MIN_SCALE,
             maxScale: VIEW2D_DETAIL_VIEWPORT_MAX_SCALE
         });
         state.headDetailSceneFitScale = Number.isFinite(fitTransform?.scale) ? fitTransform.scale : null;

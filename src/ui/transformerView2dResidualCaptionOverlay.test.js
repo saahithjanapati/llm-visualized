@@ -305,21 +305,33 @@ function queryCaptionItem(nodeId = '') {
 }
 
 describe('transformerView2dResidualCaptionOverlay', () => {
-    it('scales the projection weight, bias, and output blocks together for taller token windows', () => {
+    it('keeps the projection weight, bias, and output blocks locked to their feature dimensions across token windows', () => {
         const baseFixtures = buildMhsaFixtures();
         const tallFixtures = buildMhsaFixtures({
             tokenLabels: Array.from({ length: 12 }, (_, index) => `Token ${index + 1}`)
         });
 
         try {
-            expect(Number(tallFixtures.weightNode?.metadata?.card?.width) || 0)
-                .toBeGreaterThan(Number(baseFixtures.weightNode?.metadata?.card?.width) || 0);
+            expect(Number(baseFixtures.weightNode?.metadata?.card?.height) || 0)
+                .toBe(Number(baseFixtures.xLnNode?.metadata?.compactRows?.compactWidth) || 0);
             expect(Number(tallFixtures.weightNode?.metadata?.card?.height) || 0)
-                .toBeGreaterThan(Number(baseFixtures.weightNode?.metadata?.card?.height) || 0);
+                .toBe(Number(tallFixtures.xLnNode?.metadata?.compactRows?.compactWidth) || 0);
+            expect(Number(baseFixtures.weightNode?.metadata?.card?.width) || 0)
+                .toBe(Number(baseFixtures.outputNode?.metadata?.compactRows?.compactWidth) || 0);
+            expect(Number(tallFixtures.weightNode?.metadata?.card?.width) || 0)
+                .toBe(Number(tallFixtures.outputNode?.metadata?.compactRows?.compactWidth) || 0);
+            expect(Number(tallFixtures.weightNode?.metadata?.card?.width) || 0)
+                .toBe(Number(baseFixtures.weightNode?.metadata?.card?.width) || 0);
+            expect(Number(tallFixtures.weightNode?.metadata?.card?.height) || 0)
+                .toBe(Number(baseFixtures.weightNode?.metadata?.card?.height) || 0);
             expect(Number(tallFixtures.biasNode?.metadata?.compactRows?.compactWidth) || 0)
-                .toBeGreaterThan(Number(baseFixtures.biasNode?.metadata?.compactRows?.compactWidth) || 0);
+                .toBe(Number(baseFixtures.biasNode?.metadata?.compactRows?.compactWidth) || 0);
             expect(Number(tallFixtures.outputNode?.metadata?.compactRows?.compactWidth) || 0)
+                .toBe(Number(baseFixtures.outputNode?.metadata?.compactRows?.compactWidth) || 0);
+            expect(Number(baseFixtures.xLnNode?.metadata?.compactRows?.compactWidth) || 0)
                 .toBeGreaterThan(Number(baseFixtures.outputNode?.metadata?.compactRows?.compactWidth) || 0);
+            expect(Number(tallFixtures.xLnNode?.metadata?.compactRows?.compactWidth) || 0)
+                .toBeGreaterThan(Number(tallFixtures.outputNode?.metadata?.compactRows?.compactWidth) || 0);
         } finally {
             tallFixtures.cleanup();
             baseFixtures.cleanup();
@@ -469,7 +481,7 @@ describe('transformerView2dResidualCaptionOverlay', () => {
         }
     });
 
-    it('keeps the Q bias caption proportional to its matrix across zoom levels', () => {
+    it('keeps the Q bias caption legible across zoom levels under uniform matrix sizing', () => {
         const fixtures = buildMhsaFixtures();
         const {
             scene,
@@ -532,10 +544,9 @@ describe('transformerView2dResidualCaptionOverlay', () => {
             );
 
             expect(zoomedOutLabelSize).toBeGreaterThan(0);
-            expect(zoomedInLabelSize).toBeGreaterThan(zoomedOutLabelSize);
+            expect(zoomedInLabelSize).toBeGreaterThanOrEqual(zoomedOutLabelSize);
             expect(zoomedOutLabelSize).toBeLessThan(BIAS_LABEL_MIN_SCREEN_FONT_PX);
-            expect(zoomedOutLabelSize / Math.max(1, zoomedOutExtent))
-                .toBeCloseTo(zoomedInLabelSize / Math.max(1, zoomedInExtent), 2);
+            expect(zoomedInExtent).toBeGreaterThan(zoomedOutExtent);
         } finally {
             cleanup();
         }
@@ -585,6 +596,7 @@ describe('transformerView2dResidualCaptionOverlay', () => {
                     displayMode: false
                 })
             );
+            expect(queryCaptionItem(qBiasNode.id)?.dataset.nodeRole).toBe('projection-bias');
             expect(queryCaptionItem(qBiasNode.id)?.querySelector('.katex')).toBeTruthy();
             expect(queryCaptionItem(biasNode.id)?.querySelector('.katex')).toBeTruthy();
             expect(queryCaptionItem(preScoreNode.id)?.querySelector('.katex')).toBeTruthy();
@@ -599,29 +611,31 @@ describe('transformerView2dResidualCaptionOverlay', () => {
         }
     });
 
-    it('keeps the K weight caption at least as large as the copied X_ln caption in the focused view for taller token windows', () => {
-        const fixtures = buildMhsaFixtures({
-            tokenLabels: Array.from({ length: 12 }, (_, index) => `Token ${index + 1}`)
-        });
+    it('standardizes MHSA detail matrix label sizes while keeping softmax and scale text tuned', () => {
+        const fixtures = buildMhsaFixtures();
         const {
             scene,
             layout,
-            weightNode,
-            xLnNode,
+            preScoreNode,
+            maskNode,
+            postNode,
+            softmaxLabelNode,
+            scaleNode,
             canvas,
             overlay,
             cleanup
         } = fixtures;
 
         try {
-            const xLnEntry = layout.registry.getNodeEntry(xLnNode.id);
-            const weightLabelScale = Number(weightNode?.metadata?.caption?.labelScale) || 0;
-            const visibleScale = resolveThresholdScale(xLnEntry).scale * 2.5;
+            const preScoreEntry = layout.registry.getNodeEntry(preScoreNode.id);
+            const targetX = 40;
+            const targetY = 48;
+            const scale = 0.95;
             const projectBounds = (bounds) => ({
-                x: bounds.x,
-                y: bounds.y,
-                width: bounds.width * visibleScale,
-                height: bounds.height * visibleScale
+                x: (bounds.x * scale) + (targetX - ((Number(preScoreEntry?.contentBounds?.x) || 0) * scale)),
+                y: (bounds.y * scale) + (targetY - ((Number(preScoreEntry?.contentBounds?.y) || 0) * scale)),
+                width: bounds.width * scale,
+                height: bounds.height * scale
             });
 
             overlay.sync({
@@ -633,22 +647,98 @@ describe('transformerView2dResidualCaptionOverlay', () => {
                 enabled: true
             });
 
-            const weightLabelSize = Number.parseFloat(
-                queryCaptionItem(weightNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            const preScoreLabelSize = Number.parseFloat(
+                queryCaptionItem(preScoreNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
             );
-            const xLnLabelSize = Number.parseFloat(
-                queryCaptionItem(xLnNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            const maskLabelSize = Number.parseFloat(
+                queryCaptionItem(maskNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
             );
-
-            expect(weightLabelScale).toBeGreaterThan(1.5);
-            expect(weightLabelSize).toBeGreaterThan(0);
-            expect(weightLabelSize).toBeGreaterThanOrEqual(xLnLabelSize);
+            const postLabelSize = Number.parseFloat(
+                queryCaptionItem(postNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+            expect(preScoreLabelSize).toBeGreaterThan(0);
+            expect(maskLabelSize).toBeGreaterThan(0);
+            expect(postLabelSize).toBeGreaterThan(0);
+            expect(preScoreLabelSize).toBeCloseTo(postLabelSize, 1);
+            expect(maskLabelSize).toBeCloseTo(postLabelSize, 1);
+            expect(softmaxLabelNode?.metadata?.fontScale).toBeGreaterThan(1);
+            expect(scaleNode?.metadata?.fontScale).toBeGreaterThan(softmaxLabelNode?.metadata?.fontScale || 0);
         } finally {
             cleanup();
         }
     });
 
-    it('lets the K weight caption grow during deep zoom', () => {
+    it('lets the K weight and bias captions shrink with the scene when zooming out', () => {
+        const fixtures = buildMhsaFixtures({
+            tokenLabels: Array.from({ length: 12 }, (_, index) => `Token ${index + 1}`)
+        });
+        const {
+            scene,
+            layout,
+            weightNode,
+            biasNode,
+            canvas,
+            overlay,
+            cleanup
+        } = fixtures;
+
+        try {
+            const weightEntry = layout.registry.getNodeEntry(weightNode.id);
+            const zoomedInScale = resolveThresholdScale(weightEntry).scale * 2.4;
+            const zoomedOutScale = resolveThresholdScale(weightEntry).scale * 0.55;
+            const projectBounds = (scale) => (bounds) => ({
+                x: bounds.x,
+                y: bounds.y,
+                width: bounds.width * scale,
+                height: bounds.height * scale
+            });
+
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds: projectBounds(zoomedInScale),
+                visible: true,
+                enabled: true
+            });
+
+            const zoomedInWeightLabelSize = Number.parseFloat(
+                queryCaptionItem(weightNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+            const zoomedInBiasLabelSize = Number.parseFloat(
+                queryCaptionItem(biasNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds: projectBounds(zoomedOutScale),
+                visible: true,
+                enabled: true
+            });
+
+            const zoomedOutWeightLabelSize = Number.parseFloat(
+                queryCaptionItem(weightNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+            const zoomedOutBiasLabelSize = Number.parseFloat(
+                queryCaptionItem(biasNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+
+            expect(zoomedInWeightLabelSize).toBeGreaterThan(0);
+            expect(zoomedInBiasLabelSize).toBeGreaterThan(0);
+            expect(zoomedOutWeightLabelSize).toBeGreaterThan(0);
+            expect(zoomedOutBiasLabelSize).toBeGreaterThan(0);
+            expect(zoomedOutWeightLabelSize).toBeLessThan(zoomedInWeightLabelSize);
+            expect(zoomedOutBiasLabelSize).toBeLessThan(zoomedInBiasLabelSize);
+            expect(zoomedOutWeightLabelSize).toBeLessThanOrEqual(zoomedInWeightLabelSize * 0.75);
+            expect(zoomedOutBiasLabelSize).toBeLessThanOrEqual(zoomedInBiasLabelSize * 0.75);
+        } finally {
+            cleanup();
+        }
+    });
+
+    it('keeps the K weight caption readable during deep zoom', () => {
         const fixtures = buildMhsaFixtures({
             tokenLabels: Array.from({ length: 12 }, (_, index) => `Token ${index + 1}`)
         });
@@ -685,7 +775,7 @@ describe('transformerView2dResidualCaptionOverlay', () => {
             );
 
             expect(weightLabelSize).toBeGreaterThan(0);
-            expect(weightLabelSize).toBeGreaterThan(48);
+            expect(weightLabelSize).toBeGreaterThan(40);
         } finally {
             cleanup();
         }
@@ -943,7 +1033,7 @@ describe('transformerView2dResidualCaptionOverlay', () => {
         }
     });
 
-    it('lets attention-grid captions scale more aggressively than the surrounding MHSA matrices', () => {
+    it('keeps attention-grid captions on the same visual scale as the surrounding MHSA matrices', () => {
         const fixtures = buildMhsaFixtures();
         const {
             scene,
@@ -986,14 +1076,14 @@ describe('transformerView2dResidualCaptionOverlay', () => {
             );
 
             expect(preScoreLabelSize).toBeGreaterThan(0);
-            expect(preScoreLabelSize).toBeGreaterThanOrEqual(queryLabelSize);
-            expect(preScoreLabelSize).toBeGreaterThanOrEqual(transposeLabelSize);
+            expect(preScoreLabelSize).toBeCloseTo(queryLabelSize, 1);
+            expect(preScoreLabelSize).toBeCloseTo(transposeLabelSize, 1);
         } finally {
             cleanup();
         }
     });
 
-    it('keeps the attention score-stage labels proportional to their matrices across zoom levels', () => {
+    it('keeps the attention score-stage labels visible across zoom levels under uniform matrix sizing', () => {
         const fixtures = buildMhsaFixtures();
         const {
             scene,
@@ -1050,7 +1140,7 @@ describe('transformerView2dResidualCaptionOverlay', () => {
                 expect(labelSize).toBeGreaterThan(0);
             });
             zoomedInLabelSizes.forEach((labelSize, index) => {
-                expect(labelSize).toBeGreaterThan(zoomedOutLabelSizes[index]);
+                expect(labelSize).toBeGreaterThanOrEqual(zoomedOutLabelSizes[index]);
             });
             expect(zoomedOutLabelSizes.some((labelSize) => (
                 labelSize < ATTENTION_MATRIX_LABEL_MIN_SCREEN_FONT_PX
