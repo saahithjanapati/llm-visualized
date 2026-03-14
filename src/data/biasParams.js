@@ -24,6 +24,17 @@ export function getAttentionBiasHeadSample(layerIndex, kind = 'query', headIndex
     return Number.isFinite(value) ? value : null;
 }
 
+export function getMlpBiasVectorSample(layerIndex, kind = 'up') {
+    if (!rawParams || typeof rawParams !== 'object') return null;
+    const layers = Array.isArray(rawParams.layers) ? rawParams.layers : null;
+    if (!layers || !layers.length) return null;
+    const safeLayerIndex = clampIndex(layerIndex, layers.length - 1);
+    const layer = layers[safeLayerIndex];
+    const mlp = layer && typeof layer === 'object' ? layer.mlp : null;
+    const samples = mlp && Array.isArray(mlp[kind]) ? mlp[kind] : null;
+    return samples && samples.length ? [...samples] : null;
+}
+
 export function getBiasParamsMeta() {
     if (!rawParams || typeof rawParams !== 'object') return {};
     return rawParams.meta || {};

@@ -35,6 +35,72 @@ function createMockActivationSource() {
 }
 
 describe('buildTransformerSceneModel', () => {
+    it('places a position-embedding module before the first incoming residual stream', () => {
+        const scene = buildTransformerSceneModel({
+            activationSource: createMockActivationSource(),
+            tokenIndices: [0, 1],
+            tokenLabels: ['Token A', 'Token B'],
+            layerCount: 2
+        });
+        const nodes = flattenSceneNodes(scene);
+        const positionEmbeddingNodes = nodes.filter((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node?.role === 'position-embedding-card'
+            && node?.semantic?.componentKind === 'embedding'
+            && node?.semantic?.stage === 'embedding.position'
+        ));
+        const firstIncomingResidualNode = nodes.find((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node?.role === 'module-card'
+            && node?.semantic?.componentKind === 'residual'
+            && node?.semantic?.stage === 'incoming'
+            && node?.semantic?.layerIndex === 0
+        ));
+
+        expect(positionEmbeddingNodes).toHaveLength(1);
+        expect(firstIncomingResidualNode).toBeTruthy();
+
+        const positionEmbeddingNode = positionEmbeddingNodes[0];
+        const connectors = nodes.filter((node) => node?.kind === VIEW2D_NODE_KINDS.CONNECTOR);
+        expect(connectors.some((connector) => (
+            connector?.source?.nodeId === positionEmbeddingNode.id
+            && connector?.target?.nodeId === firstIncomingResidualNode.id
+        ))).toBe(true);
+
+        const layout = buildSceneLayout(scene);
+        const positionEmbeddingEntry = layout?.registry?.getNodeEntry(positionEmbeddingNode.id);
+        const incomingResidualEntry = layout?.registry?.getNodeEntry(firstIncomingResidualNode.id);
+        const firstLayerNormNode = nodes.find((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node?.role === 'module-card'
+            && node?.semantic?.componentKind === 'layer-norm'
+            && node?.semantic?.stage === 'ln1'
+            && node?.semantic?.layerIndex === 0
+        ));
+        const firstLayerNormEntry = layout?.registry?.getNodeEntry(firstLayerNormNode?.id);
+
+        expect(positionEmbeddingEntry).toBeTruthy();
+        expect(incomingResidualEntry).toBeTruthy();
+        expect(firstLayerNormEntry).toBeTruthy();
+        expect(
+            positionEmbeddingEntry.anchors[VIEW2D_ANCHOR_SIDES.RIGHT].x
+        ).toBeLessThan(
+            incomingResidualEntry.anchors[VIEW2D_ANCHOR_SIDES.LEFT].x
+        );
+        expect(
+            Math.abs(
+                positionEmbeddingEntry.anchors[VIEW2D_ANCHOR_SIDES.CENTER].y
+                - incomingResidualEntry.anchors[VIEW2D_ANCHOR_SIDES.CENTER].y
+            )
+        ).toBeLessThan(0.5);
+        expect(
+            Math.abs(
+                incomingResidualEntry.anchors[VIEW2D_ANCHOR_SIDES.CENTER].x
+                - firstLayerNormEntry.anchors[VIEW2D_ANCHOR_SIDES.CENTER].x
+            )
+        ).toBeLessThan(0.5);
+    });
+
     it('adds the final layer norm to the right of the top residual stream', () => {
         const scene = buildTransformerSceneModel({
             activationSource: createMockActivationSource(),

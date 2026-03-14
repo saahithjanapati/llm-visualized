@@ -37,6 +37,9 @@ export function shouldRevealAttentionCell(progress, row, col, mode = 'pre', deco
 export function countVisibleAttentionCellsInRow(row, count, triangle = 'lower') {
     const safeCount = Math.max(1, Math.floor(count || 1));
     const safeRow = clamp(Math.floor(row || 0), 0, safeCount - 1);
+    if (triangle === 'full') {
+        return safeCount;
+    }
     if (triangle === 'upper') {
         return Math.max(1, safeCount - safeRow);
     }
@@ -47,6 +50,9 @@ export function getAttentionRevealOrder(row, col, count, triangle = 'lower') {
     const safeCount = Math.max(1, Math.floor(count || 1));
     const safeRow = clamp(Math.floor(row || 0), 0, safeCount - 1);
     const safeCol = clamp(Math.floor(col || 0), 0, safeCount - 1);
+    if (triangle === 'full') {
+        return safeCol;
+    }
     if (triangle === 'upper') {
         return Math.max(0, safeCol - safeRow);
     }

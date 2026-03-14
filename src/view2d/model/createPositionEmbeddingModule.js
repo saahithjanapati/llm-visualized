@@ -1,0 +1,112 @@
+import {
+    CONTEXT_LEN,
+    D_MODEL
+} from '../../ui/selectionPanelConstants.js';
+import {
+    createGroupNode,
+    createMatrixNode,
+    createTextNode,
+    VIEW2D_LAYOUT_DIRECTIONS,
+    VIEW2D_MATRIX_PRESENTATIONS,
+    VIEW2D_MATRIX_SHAPES
+} from '../schema/sceneTypes.js';
+import { VIEW2D_STYLE_KEYS } from '../theme/visualTokens.js';
+
+const CARD_LABEL_HORIZONTAL_INSET = 12;
+
+function mergeSemantic(baseSemantic = {}, extra = {}) {
+    return {
+        ...(baseSemantic && typeof baseSemantic === 'object' ? baseSemantic : {}),
+        ...(extra && typeof extra === 'object' ? extra : {})
+    };
+}
+
+function buildLabel(tex = '', text = '') {
+    return {
+        tex: typeof tex === 'string' ? tex : '',
+        text: typeof text === 'string' && text.length ? text : tex
+    };
+}
+
+function createTextFitMetadata(maxWidth = null) {
+    if (!Number.isFinite(maxWidth) || maxWidth <= 0) return null;
+    return {
+        textFit: {
+            maxWidth: Math.floor(maxWidth)
+        }
+    };
+}
+
+function createCardMetadata(width = null, height = null, {
+    cornerRadius = null,
+    shape = '',
+    shapeConfig = null
+} = {}) {
+    const card = {};
+    if (Number.isFinite(width) && width > 0) card.width = Math.floor(width);
+    if (Number.isFinite(height) && height > 0) card.height = Math.floor(height);
+    if (Number.isFinite(cornerRadius) && cornerRadius >= 0) card.cornerRadius = Math.floor(cornerRadius);
+    if (typeof shape === 'string' && shape.length) card.shape = shape;
+    if (shapeConfig && typeof shapeConfig === 'object') {
+        card.shapeConfig = { ...shapeConfig };
+    }
+    return Object.keys(card).length ? { card } : null;
+}
+
+export function buildPositionEmbeddingModule({
+    semantic = {},
+    title = 'Position Embedding'
+} = {}) {
+    const cardWidth = 196;
+    const cardHeight = 144;
+    const titleMaxWidth = Math.max(24, cardWidth - (CARD_LABEL_HORIZONTAL_INSET * 2));
+
+    const cardNode = createMatrixNode({
+        role: 'position-embedding-card',
+        semantic: mergeSemantic(semantic, { role: 'position-embedding-card' }),
+        label: buildLabel('W_{pos}', 'Position Embedding'),
+        dimensions: {
+            rows: CONTEXT_LEN,
+            cols: D_MODEL
+        },
+        presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+        shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+        visual: {
+            styleKey: VIEW2D_STYLE_KEYS.EMBEDDING_POSITION_STREAM
+        },
+        metadata: createCardMetadata(cardWidth, cardHeight, {
+            cornerRadius: 18,
+            shape: 'curved-trapezoid',
+            shapeConfig: {
+                leftInset: 0,
+                rightInset: 4,
+                rightHeightRatio: 0.36,
+                cornerRadius: 14
+            }
+        })
+    });
+
+    const titleNode = createTextNode({
+        role: 'module-title',
+        semantic: mergeSemantic(semantic, { role: 'module-title' }),
+        text: title,
+        visual: {
+            styleKey: VIEW2D_STYLE_KEYS.LABEL
+        },
+        metadata: createTextFitMetadata(titleMaxWidth)
+    });
+
+    return {
+        node: createGroupNode({
+            role: semantic.role || 'module',
+            semantic,
+            direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
+            gapKey: 'default',
+            children: [
+                cardNode,
+                titleNode
+            ]
+        }),
+        cardNode
+    };
+}

@@ -737,7 +737,7 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
             const normT = quantizeHighlight(highlights.norm);
             const scaleT = quantizeHighlight(highlights.scale);
             const shiftT = quantizeHighlight(highlights.shift);
-            eqBody = buildLayerNormEquation(U, X_LN, { norm: normT, scale: scaleT, shift: shiftT });
+            eqBody = buildLayerNormEquation('x', X_LN, { norm: normT, scale: scaleT, shift: shiftT });
             signature = `${key}|n${normT.toFixed(3)}|s${scaleT.toFixed(3)}|h${shiftT.toFixed(3)}`;
         }
         if (signature === appState.lastEqSignature) return;

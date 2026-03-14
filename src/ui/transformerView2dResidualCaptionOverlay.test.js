@@ -2,7 +2,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { D_HEAD, D_MODEL } from './selectionPanelConstants.js';
+import { D_HEAD, D_MODEL, FINAL_MLP_COLOR } from './selectionPanelConstants.js';
 import { createTransformerView2dResidualCaptionOverlay, resolveCaptionScreenExtent } from './transformerView2dResidualCaptionOverlay.js';
 import { buildSceneLayout } from '../view2d/layout/buildSceneLayout.js';
 import { createMhsaDetailSceneIndex, resolveMhsaDetailHoverState } from '../view2d/mhsaDetailInteraction.js';
@@ -22,6 +22,12 @@ function createVectorValues(seed = 0) {
 
 function createResidualValues(seed = 0) {
     return Array.from({ length: D_MODEL }, (_, index) => Number((seed + (index * 0.004)).toFixed(4)));
+}
+
+function toKatexColorHex(hex = 0xFFFFFF) {
+    return `#${Math.max(0, Math.min(0xFFFFFF, Math.floor(
+        Number.isFinite(hex) ? hex : 0xFFFFFF
+    ))).toString(16).padStart(6, '0')}`;
 }
 
 function createBaseRows(tokenLabels = DEFAULT_TOKEN_LABELS) {
@@ -383,6 +389,7 @@ function buildMlpDetailFixtures({
     const layout = buildSceneLayout(scene);
     const nodes = flattenSceneNodes(scene);
     const inputNode = nodes.find((node) => node.role === 'projection-source-xln') || null;
+    const downOutputNode = nodes.find((node) => node.role === 'mlp-down-output') || null;
 
     const parent = document.createElement('div');
     document.body.appendChild(parent);
@@ -406,6 +413,7 @@ function buildMlpDetailFixtures({
         scene,
         layout,
         inputNode,
+        downOutputNode,
         canvas,
         overlay,
         cleanup() {
@@ -1307,6 +1315,54 @@ describe('transformerView2dResidualCaptionOverlay', () => {
             expect(zoomedInLabelSize).toBeGreaterThan(zoomedOutLabelSize);
             expect(zoomedInDimensionsSize).toBeGreaterThan(zoomedOutDimensionsSize);
         } finally {
+            cleanup();
+        }
+    });
+
+    it('renders the final MLP output caption with a colored KaTeX MLP token', () => {
+        const fixtures = buildMlpDetailFixtures();
+        const {
+            scene,
+            layout,
+            downOutputNode,
+            canvas,
+            overlay,
+            cleanup
+        } = fixtures;
+        const originalKatex = window.katex;
+        window.katex = {
+            renderToString: vi.fn((tex) => `<span class="katex" data-tex="${tex}"></span>`)
+        };
+
+        try {
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds: (bounds) => ({
+                    x: bounds.x,
+                    y: bounds.y,
+                    width: bounds.width,
+                    height: bounds.height
+                }),
+                visible: true,
+                enabled: true
+            });
+
+            expect(window.katex.renderToString).toHaveBeenCalledWith(
+                `\\textcolor{${toKatexColorHex(FINAL_MLP_COLOR)}}{\\mathrm{MLP}}(x_{\\ln})`,
+                expect.objectContaining({
+                    throwOnError: false,
+                    displayMode: false
+                })
+            );
+            expect(queryCaptionItem(downOutputNode?.id || '')?.querySelector('.katex')).toBeTruthy();
+        } finally {
+            if (originalKatex) {
+                window.katex = originalKatex;
+            } else {
+                delete window.katex;
+            }
             cleanup();
         }
     });

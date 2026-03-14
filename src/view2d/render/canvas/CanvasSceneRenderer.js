@@ -49,6 +49,102 @@ function roundRectPath(ctx, x, y, width, height, radius = 8) {
     ctx.closePath();
 }
 
+const VIEW2D_CARD_SHAPES = Object.freeze({
+    CURVED_TRAPEZOID: 'curved-trapezoid'
+});
+
+function curvedTrapezoidPath(ctx, bounds, shapeConfig = null) {
+    const x = Number(bounds?.x) || 0;
+    const y = Number(bounds?.y) || 0;
+    const width = Math.max(1, Number(bounds?.width) || 0);
+    const height = Math.max(1, Number(bounds?.height) || 0);
+    const centerY = y + (height / 2);
+    const leftInset = Number.isFinite(shapeConfig?.leftInset)
+        ? Math.max(0, Math.min(width * 0.4, Number(shapeConfig.leftInset)))
+        : 0;
+    const rightInset = Number.isFinite(shapeConfig?.rightInset)
+        ? Math.max(0, Math.min(width * 0.28, Number(shapeConfig.rightInset)))
+        : Math.min(width * 0.06, 8);
+    const rightHeightRatio = Number.isFinite(shapeConfig?.rightHeightRatio)
+        ? Math.max(0.18, Math.min(0.92, Number(shapeConfig.rightHeightRatio)))
+        : 0.38;
+    const rightHalfHeight = Math.max(1, (height * rightHeightRatio) / 2);
+    const cornerRadius = Number.isFinite(shapeConfig?.cornerRadius)
+        ? Math.max(0, Number(shapeConfig.cornerRadius))
+        : Math.min(18, height * 0.18);
+    const topLeft = {
+        x: x + leftInset,
+        y
+    };
+    const topRight = {
+        x: x + width - rightInset,
+        y: centerY - rightHalfHeight
+    };
+    const bottomRight = {
+        x: x + width - rightInset,
+        y: centerY + rightHalfHeight
+    };
+    const bottomLeft = {
+        x: x + leftInset,
+        y: y + height
+    };
+
+    const points = [topLeft, topRight, bottomRight, bottomLeft];
+    const corners = points.map((point, index) => {
+        const previous = points[(index + points.length - 1) % points.length];
+        const next = points[(index + 1) % points.length];
+        const toPreviousX = previous.x - point.x;
+        const toPreviousY = previous.y - point.y;
+        const toNextX = next.x - point.x;
+        const toNextY = next.y - point.y;
+        const previousLength = Math.hypot(toPreviousX, toPreviousY);
+        const nextLength = Math.hypot(toNextX, toNextY);
+        const cutDistance = Math.min(
+            cornerRadius,
+            previousLength * 0.5,
+            nextLength * 0.5
+        );
+        const previousUnitX = previousLength > 0 ? toPreviousX / previousLength : 0;
+        const previousUnitY = previousLength > 0 ? toPreviousY / previousLength : 0;
+        const nextUnitX = nextLength > 0 ? toNextX / nextLength : 0;
+        const nextUnitY = nextLength > 0 ? toNextY / nextLength : 0;
+        return {
+            point,
+            start: {
+                x: point.x + (previousUnitX * cutDistance),
+                y: point.y + (previousUnitY * cutDistance)
+            },
+            end: {
+                x: point.x + (nextUnitX * cutDistance),
+                y: point.y + (nextUnitY * cutDistance)
+            }
+        };
+    });
+
+    ctx.beginPath();
+    ctx.moveTo(corners[0].start.x, corners[0].start.y);
+    corners.forEach((corner, index) => {
+        ctx.quadraticCurveTo(
+            corner.point.x,
+            corner.point.y,
+            corner.end.x,
+            corner.end.y
+        );
+        const nextCorner = corners[(index + 1) % corners.length];
+        ctx.lineTo(nextCorner.start.x, nextCorner.start.y);
+    });
+    ctx.closePath();
+}
+
+function traceCardPath(ctx, bounds, cornerRadius = 8, cardMetadata = null) {
+    const cardShape = String(cardMetadata?.shape || '').trim().toLowerCase();
+    if (cardShape === VIEW2D_CARD_SHAPES.CURVED_TRAPEZOID) {
+        curvedTrapezoidPath(ctx, bounds, cardMetadata?.shapeConfig || null);
+        return;
+    }
+    roundRectPath(ctx, bounds.x, bounds.y, bounds.width, bounds.height, cornerRadius);
+}
+
 function splitTopLevel(input = '') {
     const parts = [];
     let depth = 0;
@@ -1305,7 +1401,8 @@ function drawCardSurfaceEffects(
     safeWorldScale,
     projectedWidth,
     projectedHeight,
-    focusAlpha = 1
+    focusAlpha = 1,
+    cardMetadata = null
 ) {
     if (!bounds) return;
     const baseAlpha = Math.max(0, Math.min(1, Number.isFinite(focusAlpha) ? focusAlpha : 1));
@@ -1321,7 +1418,7 @@ function drawCardSurfaceEffects(
 
     if (glowColor) {
         ctx.save();
-        roundRectPath(ctx, bounds.x, bounds.y, bounds.width, bounds.height, cornerRadius);
+        traceCardPath(ctx, bounds, cornerRadius, cardMetadata);
         ctx.fillStyle = glowColor;
         ctx.globalAlpha = glowOpacity * baseAlpha;
         ctx.shadowColor = glowColor;
@@ -1330,7 +1427,7 @@ function drawCardSurfaceEffects(
         ctx.restore();
 
         ctx.save();
-        roundRectPath(ctx, bounds.x, bounds.y, bounds.width, bounds.height, cornerRadius);
+        traceCardPath(ctx, bounds, cornerRadius, cardMetadata);
         ctx.lineWidth = Math.max(0.7, 1.2) / safeWorldScale;
         ctx.strokeStyle = glowColor;
         ctx.shadowColor = glowColor;
@@ -1341,7 +1438,7 @@ function drawCardSurfaceEffects(
     }
 
     ctx.save();
-    roundRectPath(ctx, bounds.x, bounds.y, bounds.width, bounds.height, cornerRadius);
+    traceCardPath(ctx, bounds, cornerRadius, cardMetadata);
     ctx.clip();
 
     const sheen = ctx.createLinearGradient(bounds.x, bounds.y, bounds.x + bounds.width, bounds.y + bounds.height);
@@ -1384,7 +1481,7 @@ function drawCardSurfaceEffects(
     ctx.restore();
 
     ctx.save();
-    roundRectPath(ctx, bounds.x, bounds.y, bounds.width, bounds.height, cornerRadius);
+    traceCardPath(ctx, bounds, cornerRadius, cardMetadata);
     ctx.lineWidth = Math.max(0.45, 0.8) / safeWorldScale;
     ctx.strokeStyle = edgeHighlight;
     ctx.globalAlpha = baseAlpha;
@@ -1706,6 +1803,7 @@ function drawMatrixNode(
     const cornerRadius = Number.isFinite(entry.layoutData?.cardRadius)
         ? entry.layoutData.cardRadius
         : config.tokens.matrix.cornerRadius;
+    const cardMetadata = node.metadata?.card || null;
     const projectedWidth = contentBounds.width * safeDetailScale;
     const projectedHeight = contentBounds.height * safeDetailScale;
     const summaryWidthThreshold = MATRIX_DETAIL_MIN_SCREEN_WIDTH_PX * (fastPath ? 1.45 : 1);
@@ -1726,7 +1824,7 @@ function drawMatrixNode(
     ctx.globalAlpha = surfaceFocusAlpha;
     ctx.filter = inactiveNodeFilter;
     if (!hideSurface) {
-        roundRectPath(ctx, contentBounds.x, contentBounds.y, contentBounds.width, contentBounds.height, cornerRadius);
+        traceCardPath(ctx, contentBounds, cornerRadius, cardMetadata);
         ctx.fillStyle = resolveFill(ctx, background, contentBounds, accent);
         ctx.fill();
         ctx.lineWidth = config.tokens.matrix.borderWidth;
@@ -1745,7 +1843,8 @@ function drawMatrixNode(
                 safeWorldScale,
                 projectedWidth,
                 projectedHeight,
-                surfaceFocusAlpha
+                surfaceFocusAlpha,
+                cardMetadata
             );
         }
     }

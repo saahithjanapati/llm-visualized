@@ -81,6 +81,41 @@ export function resolveMhsaDetailHoverEntity(hit = null) {
                 rowHit: hit.rowHit
             };
         }
+        if (node.role === 'mlp-up-output' || node.role === 'mlp-up-output-copy') {
+            return {
+                type: 'mlp-up-output-row',
+                node,
+                rowHit: hit.rowHit
+            };
+        }
+        if (node.role === 'mlp-activation-output' || node.role === 'mlp-activation-output-copy') {
+            return {
+                type: 'mlp-activation-row',
+                node,
+                rowHit: hit.rowHit
+            };
+        }
+        if (node.role === 'mlp-down-output') {
+            return {
+                type: 'mlp-down-output-row',
+                node,
+                rowHit: hit.rowHit
+            };
+        }
+        if (node.role === 'mlp-up-bias') {
+            return {
+                type: 'mlp-up-bias',
+                node,
+                rowHit: hit.rowHit
+            };
+        }
+        if (node.role === 'mlp-down-bias') {
+            return {
+                type: 'mlp-down-bias',
+                node,
+                rowHit: hit.rowHit
+            };
+        }
         if (node.role === 'attention-value-post') {
             return {
                 type: 'weighted-output-row',
@@ -113,6 +148,34 @@ export function resolveMhsaDetailHoverEntity(hit = null) {
                 : (node.role === 'projection-bias' ? 'projection-bias' : 'projection-stage'),
             node,
             projectionKind
+        };
+    }
+
+    if (node.role === 'mlp-up-weight') {
+        return {
+            type: 'mlp-up-weight',
+            node
+        };
+    }
+
+    if (node.role === 'mlp-up-bias') {
+        return {
+            type: 'mlp-up-bias',
+            node
+        };
+    }
+
+    if (node.role === 'mlp-down-weight') {
+        return {
+            type: 'mlp-down-weight',
+            node
+        };
+    }
+
+    if (node.role === 'mlp-down-bias') {
+        return {
+            type: 'mlp-down-bias',
+            node
         };
     }
 

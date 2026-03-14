@@ -1,5 +1,10 @@
 import { buildAttentionHoverInfo } from '../ui/attentionHoverInfo.js';
 import { resolvePostLayerNormResidualLabel } from '../utils/layerNormLabels.js';
+import {
+    MLP_ACTIVATION_TOOLTIP_LABEL,
+    MLP_DOWN_BIAS_TOOLTIP_LABEL,
+    MLP_DOWN_TOOLTIP_LABEL
+} from '../utils/mlpLabels.js';
 
 const PROJECTION_KIND_LABELS = Object.freeze({
     q: 'Query',
@@ -92,6 +97,141 @@ export function buildProjectionVectorHoverInfo(node = null, rowItem = null, kind
             ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
                 ? { tokenLabel: tokenInfo.tokenLabel }
                 : {})
+        }
+    };
+}
+
+export function buildMlpUpProjectionHoverInfo(node = null, rowItem = null) {
+    const tokenInfo = createTokenInfo(rowItem) || {};
+    const label = 'MLP Up Projection';
+    const info = buildProjectionHoverInfo(node, label, {
+        stage: 'mlp.up',
+        ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
+        ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
+            ? { tokenLabel: tokenInfo.tokenLabel }
+            : {})
+    }) || {};
+
+    return {
+        ...tokenInfo,
+        ...info,
+        activationData: {
+            ...(info.activationData || {}),
+            stage: 'mlp.up',
+            ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
+            ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
+                ? { tokenLabel: tokenInfo.tokenLabel }
+                : {})
+        }
+    };
+}
+
+export function buildMlpUpWeightHoverInfo(node = null) {
+    const label = 'MLP Up Weight Matrix';
+    const info = buildProjectionHoverInfo(node, label, {
+        stage: 'mlp.up'
+    }) || {};
+
+    return {
+        ...info,
+        activationData: {
+            ...(info.activationData || {}),
+            stage: 'mlp.up'
+        }
+    };
+}
+
+export function buildMlpActivationHoverInfo(node = null, rowItem = null) {
+    const tokenInfo = createTokenInfo(rowItem) || {};
+    const label = MLP_ACTIVATION_TOOLTIP_LABEL;
+    const info = buildProjectionHoverInfo(node, label, {
+        stage: 'mlp.activation',
+        ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
+        ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
+            ? { tokenLabel: tokenInfo.tokenLabel }
+            : {})
+    }) || {};
+
+    return {
+        ...tokenInfo,
+        ...info,
+        activationData: {
+            ...(info.activationData || {}),
+            stage: 'mlp.activation',
+            ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
+            ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
+                ? { tokenLabel: tokenInfo.tokenLabel }
+                : {})
+        }
+    };
+}
+
+export function buildMlpDownProjectionHoverInfo(node = null, rowItem = null) {
+    const tokenInfo = createTokenInfo(rowItem) || {};
+    const label = 'MLP Down Projection';
+    const info = buildProjectionHoverInfo(node, label, {
+        stage: 'mlp.down',
+        ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
+        ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
+            ? { tokenLabel: tokenInfo.tokenLabel }
+            : {})
+    }) || {};
+
+    return {
+        ...tokenInfo,
+        ...info,
+        activationData: {
+            ...(info.activationData || {}),
+            stage: 'mlp.down',
+            ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
+            ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
+                ? { tokenLabel: tokenInfo.tokenLabel }
+                : {})
+        }
+    };
+}
+
+export function buildMlpUpBiasHoverInfo(node = null) {
+    const label = 'Bias Vector for MLP Up Matrix';
+    const info = buildProjectionHoverInfo(node, label, {
+        stage: 'mlp.up.bias'
+    }) || {};
+
+    return {
+        ...info,
+        activationData: {
+            ...(info.activationData || {}),
+            stage: 'mlp.up.bias'
+        }
+    };
+}
+
+export function buildMlpDownWeightHoverInfo(node = null) {
+    const label = MLP_DOWN_TOOLTIP_LABEL;
+    const info = buildProjectionHoverInfo(node, label, {
+        stage: 'mlp.down'
+    }) || {};
+
+    return {
+        ...info,
+        activationData: {
+            ...(info.activationData || {}),
+            stage: 'mlp.down'
+        }
+    };
+}
+
+export function buildMlpDownBiasHoverInfo(node = null) {
+    const label = MLP_DOWN_BIAS_TOOLTIP_LABEL;
+    const info = buildProjectionHoverInfo(node, label, {
+        stage: 'mlp.down.bias'
+    }) || {};
+
+    return {
+        ...info,
+        activationData: {
+            ...(info.activationData || {}),
+            stage: 'mlp.down.bias'
         }
     };
 }

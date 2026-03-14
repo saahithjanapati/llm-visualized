@@ -26,6 +26,10 @@ import {
     resolveHoverLabelSubtitle,
     resolveHoverTokenContext
 } from './coreHoverTokenContext.js';
+import {
+    isSmallScreenViewport,
+    resolveCameraMaxDistance
+} from './coreCameraZoomLimitUtils.js';
 import Gpt2Layer from './layers/Gpt2Layer.js';
 import { resolveRaycastLabel as resolveRaycastLabelFromIntersections } from './coreRaycastResolver.js';
 import {
@@ -102,7 +106,7 @@ export class CoreEngine {
             ? opts.cameraMaxDistance
             : null;
         this._cameraMaxDistance = this._cameraBaseMaxDistance;
-        this._mobileZoomOutMultiplier = (typeof opts.mobileZoomOutMultiplier === 'number' && opts.mobileZoomOutMultiplier > 1)
+        this._mobileZoomOutMultiplier = (typeof opts.mobileZoomOutMultiplier === 'number' && opts.mobileZoomOutMultiplier > 0)
             ? opts.mobileZoomOutMultiplier
             : 1.0;
         this._desktopZoomOutMultiplier = (typeof opts.desktopZoomOutMultiplier === 'number' && opts.desktopZoomOutMultiplier > 1)
@@ -2092,18 +2096,23 @@ export class CoreEngine {
             this._cameraBaseMaxDistance = baseMaxDistance;
         }
 
-        let maxDistance = baseMaxDistance;
-        if (this._isTouchPrimaryDevice()) {
-            maxDistance = baseMaxDistance * this._mobileZoomOutMultiplier;
-        } else if (this._isLargeDesktopViewport()) {
-            maxDistance = baseMaxDistance * this._desktopZoomOutMultiplier;
-        }
+        const maxDistance = resolveCameraMaxDistance({
+            baseMaxDistance,
+            isSmallScreen: this._isSmallViewport(),
+            isLargeDesktopViewport: this._isLargeDesktopViewport(),
+            smallScreenZoomOutMultiplier: this._mobileZoomOutMultiplier,
+            desktopZoomOutMultiplier: this._desktopZoomOutMultiplier
+        });
 
         if (typeof maxDistance === 'number' && Number.isFinite(maxDistance) && maxDistance > 0) {
             this._cameraMaxDistance = maxDistance;
             this.controls.maxDistance = maxDistance;
             this._clampCameraDistanceToLimit(maxDistance);
         }
+    }
+
+    _isSmallViewport() {
+        return isSmallScreenViewport();
     }
 
     _isTouchPrimaryDevice() {

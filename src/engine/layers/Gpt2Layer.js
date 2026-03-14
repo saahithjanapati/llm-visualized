@@ -51,6 +51,10 @@ import {
     freezeStaticTransforms,
     LN_INTERNAL_TRAIL_MIN_SEGMENT
 } from './gpt2LayerUtils.js';
+import {
+    MLP_ACTIVATION_TOOLTIP_LABEL,
+    MLP_DOWN_TOOLTIP_LABEL
+} from '../../utils/mlpLabels.js';
 import { animatePrismMultiplyTransition } from './gpt2MultiplyTransition.js';
 import { updateLayerNormVisualState } from './gpt2LayerNormVisuals.js';
 import {
@@ -775,7 +779,7 @@ export default class Gpt2Layer extends BaseLayer {
             offsetX,
             centerY: mlpDownCenterY,
             params: MLP_MATRIX_PARAMS_DOWN,
-            label: 'MLP Down Weight Matrix',
+            label: MLP_DOWN_TOOLTIP_LABEL,
             color: inactiveDark,
             emissiveIntensity: 0.1
         });
@@ -2538,8 +2542,8 @@ export default class Gpt2Layer extends BaseLayer {
                                 segVec,
                                 slice,
                                 lane && lane.tokenLabel
-                                    ? `MLP Activation - ${lane.tokenLabel}`
-                                    : 'MLP Activation',
+                                    ? `${MLP_ACTIVATION_TOOLTIP_LABEL} - ${lane.tokenLabel}`
+                                    : MLP_ACTIVATION_TOOLTIP_LABEL,
                                 this._getLaneMeta(lane, 'mlp.activation', { segmentIndex: idx })
                             );
                         });

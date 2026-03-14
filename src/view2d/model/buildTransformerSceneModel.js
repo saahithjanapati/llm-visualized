@@ -41,6 +41,7 @@ import { buildHeadDetailSceneModel } from './buildHeadDetailSceneModel.js';
 import { buildMlpDetailSceneModel } from './buildMlpDetailSceneModel.js';
 import { buildMhsaSceneModel } from './buildMhsaSceneModel.js';
 import { buildOutputProjectionDetailSceneModel } from './buildOutputProjectionDetailSceneModel.js';
+import { buildPositionEmbeddingModule } from './createPositionEmbeddingModule.js';
 import { resolvePreferredTokenLabel } from '../../utils/tokenLabelResolution.js';
 
 const DEFAULT_VISIBLE_TOKEN_COUNT = 5;
@@ -934,6 +935,7 @@ function buildLayerGroup({
     tokenRefs = [],
     tokenIndices = null,
     tokenLabels = null,
+    includeInputPositionEmbedding = false,
     isSmallScreen = false,
     visualTokens = null
 } = {}) {
@@ -970,6 +972,15 @@ function buildLayerGroup({
                 : null
         )
     });
+    const inputPositionEmbedding = includeInputPositionEmbedding
+        ? buildPositionEmbeddingModule({
+            semantic: {
+                componentKind: 'embedding',
+                stage: 'embedding.position',
+                role: 'module'
+            }
+        })
+        : null;
     const ln1Module = buildLayerNormModule({
         layerIndex,
         stage: 'ln1',
@@ -1014,6 +1025,48 @@ function buildLayerGroup({
         layerIndex,
         stage: 'post-mlp-add'
     });
+    const positionEmbeddingOverlay = inputPositionEmbedding
+        ? createGroupNode({
+            role: 'input-position-embedding-overlay',
+            semantic: buildSemantic(layerSemantic, {
+                stage: 'input-position-embedding-overlay',
+                role: 'input-position-embedding-overlay'
+            }),
+            direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
+            gapKey: 'default',
+            layout: {
+                anchorAlign: {
+                    axis: 'x',
+                    selfNodeId: inputPositionEmbedding.cardNode.id,
+                    targetNodeId: incomingResidual.cardNode.id,
+                    selfAnchor: VIEW2D_ANCHOR_SIDES.RIGHT,
+                    targetAnchor: VIEW2D_ANCHOR_SIDES.LEFT,
+                    offset: -320
+                }
+            },
+            children: [
+                createGroupNode({
+                    role: 'input-position-embedding-y-anchor',
+                    semantic: buildSemantic(layerSemantic, {
+                        stage: 'input-position-embedding-y-anchor',
+                        role: 'input-position-embedding-y-anchor'
+                    }),
+                    direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
+                    gapKey: 'default',
+                    layout: {
+                        anchorAlign: {
+                            axis: 'y',
+                            selfNodeId: inputPositionEmbedding.cardNode.id,
+                            targetNodeId: incomingResidual.cardNode.id,
+                            selfAnchor: VIEW2D_ANCHOR_SIDES.CENTER,
+                            targetAnchor: VIEW2D_ANCHOR_SIDES.CENTER
+                        }
+                    },
+                    children: [inputPositionEmbedding.node]
+                })
+            ]
+        })
+        : null;
 
     const topRow = createGroupNode({
         role: 'layer-top-row',
@@ -1137,6 +1190,16 @@ function buildLayerGroup({
     });
 
     const flow = [
+        ...(inputPositionEmbedding
+            ? [
+                {
+                    from: inputPositionEmbedding.cardNode,
+                    to: incomingResidual.cardNode,
+                    key: `layer-${layerIndex}-position-embedding-to-residual`,
+                    gap: 8
+                }
+            ]
+            : []),
         {
             from: incomingResidual.cardNode,
             to: postAttentionAdd.cardNode,
@@ -1206,6 +1269,7 @@ function buildLayerGroup({
         node,
         entryNode: incomingResidual.cardNode,
         exitNode: postMlpAdd.cardNode,
+        overlayNodes: positionEmbeddingOverlay ? [positionEmbeddingOverlay] : [],
         flow
     };
 }
@@ -1485,6 +1549,7 @@ export function buildTransformerSceneModel({
         tokenRefs,
         tokenIndices,
         tokenLabels,
+        includeInputPositionEmbedding: layerIndex === 0,
         isSmallScreen,
         visualTokens: resolvedTokens
     }));
@@ -1537,6 +1602,7 @@ export function buildTransformerSceneModel({
 
     const rootNodes = [
         ...layerModules.map((module) => module.node),
+        ...layerModules.flatMap((module) => module.overlayNodes || []),
         ...(finalOutputModule ? [finalOutputModule.node] : []),
         createGroupNode({
             role: 'connector-layer',

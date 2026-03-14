@@ -24,6 +24,11 @@ import {
     D_MODEL,
     RESIDUAL_COLOR_CLAMP
 } from './selectionPanelConstants.js';
+import {
+    isCausalUpperAttentionCell,
+    resolveAttentionMatrixCellValue,
+    shouldMuteCausalUpperPreAttentionCell
+} from './selectionPanelAttentionMatrixUtils.js';
 import { formatTokenLabelForPreview } from './selectionPanelFormatUtils.js';
 
 const DEFAULT_SAMPLE_STEP = 64;
@@ -325,22 +330,35 @@ function buildAttentionScoreStage({
     const buildAttentionCellMeta = (rowData, colData) => {
         const preScoreRow = preScoreRows[rowData.rowIndex];
         const postScoreRow = postScoreRows[rowData.rowIndex];
-        const isMasked = colData.rowIndex > rowData.rowIndex;
+        const isMasked = isCausalUpperAttentionCell(rowData.tokenIndex, colData.tokenIndex);
         const preScoreValue = Array.isArray(preScoreRow) ? preScoreRow[colData.tokenIndex] : null;
         const postScoreValue = Array.isArray(postScoreRow) ? postScoreRow[colData.tokenIndex] : null;
-        const safePreScore = Number.isFinite(preScoreValue) ? preScoreValue : null;
-        const safePostScore = Number.isFinite(postScoreValue) ? postScoreValue : null;
+        const safePreScore = resolveAttentionMatrixCellValue({
+            mode: 'pre',
+            value: preScoreValue,
+            queryTokenIndex: rowData.tokenIndex,
+            keyTokenIndex: colData.tokenIndex
+        });
+        const safePostScore = resolveAttentionMatrixCellValue({
+            mode: 'post',
+            value: postScoreValue,
+            queryTokenIndex: rowData.tokenIndex,
+            keyTokenIndex: colData.tokenIndex
+        });
         return {
             queryTokenIndex: rowData.tokenIndex,
             keyTokenIndex: colData.tokenIndex,
             queryTokenLabel: rowData.tokenLabel,
             keyTokenLabel: colData.tokenLabel,
             preScore: safePreScore,
-            postScore: isMasked
-                ? (Number.isFinite(safePostScore) ? safePostScore : 0)
-                : safePostScore,
+            postScore: safePostScore,
             maskValue: isMasked ? Number.NEGATIVE_INFINITY : 0,
-            isMasked
+            isMasked,
+            defaultMuted: shouldMuteCausalUpperPreAttentionCell({
+                mode: 'pre',
+                queryTokenIndex: rowData.tokenIndex,
+                keyTokenIndex: colData.tokenIndex
+            })
         };
     };
 
@@ -360,6 +378,7 @@ function buildAttentionScoreStage({
                 postScore: cellMeta.postScore,
                 maskValue: cellMeta.maskValue,
                 isMasked: cellMeta.isMasked,
+                defaultMuted: cellMeta.defaultMuted,
                 rawValue: cellMeta.preScore,
                 fillCss: Number.isFinite(cellMeta.preScore)
                     ? buildAttentionScoreCellCss(cellMeta.preScore)
@@ -400,6 +419,7 @@ function buildAttentionScoreStage({
                 rawValue: cellMeta.maskValue,
                 fillCss: buildMaskCellCss(cellMeta.isMasked),
                 isMasked: cellMeta.isMasked,
+                useMaskedStyle: true,
                 isEmpty: false,
                 title: `${rowData.tokenLabel} → ${colData.tokenLabel}: ${cellMeta.isMasked ? '-∞' : '0'}`
             };
@@ -421,14 +441,15 @@ function buildAttentionScoreStage({
                 preScore: cellMeta.preScore,
                 postScore: cellMeta.postScore,
                 maskValue: cellMeta.maskValue,
-                rawValue: cellMeta.isMasked ? null : cellMeta.postScore,
-                fillCss: cellMeta.isMasked
-                    ? buildMaskCellCss(true)
-                    : (Number.isFinite(cellMeta.postScore) ? buildAttentionPostCellCss(cellMeta.postScore) : 'transparent'),
+                rawValue: cellMeta.postScore,
+                fillCss: Number.isFinite(cellMeta.postScore)
+                    ? buildAttentionPostCellCss(cellMeta.postScore)
+                    : 'transparent',
                 isMasked: cellMeta.isMasked,
-                isEmpty: !cellMeta.isMasked && !Number.isFinite(cellMeta.postScore),
+                useMaskedStyle: false,
+                isEmpty: !Number.isFinite(cellMeta.postScore),
                 title: cellMeta.isMasked
-                    ? `${rowData.tokenLabel} → ${colData.tokenLabel}: masked (softmax → 0)`
+                    ? `${rowData.tokenLabel} → ${colData.tokenLabel}: 0 (masked after softmax)`
                     : undefined
             };
         });

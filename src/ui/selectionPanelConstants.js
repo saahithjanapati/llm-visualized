@@ -52,7 +52,9 @@ export const ATTENTION_PREVIEW_TARGET_PX = 320;
 export const ATTENTION_PREVIEW_MIN_CELL = 4;
 export const ATTENTION_PREVIEW_MAX_CELL = 24;
 export const ATTENTION_PREVIEW_GAP = 4;
-export const ATTENTION_PREVIEW_TRIANGLE = 'lower';
+// Supports 'lower'/'upper' legacy layouts and 'full' when both triangles
+// should render in the sidebar preview.
+export const ATTENTION_PREVIEW_TRIANGLE = 'full';
 // Matches `.detail-attention-grid` column gap in CSS.
 export const ATTENTION_PREVIEW_GRID_GAP = 8;
 export const ATTENTION_PRE_COLOR_CLAMP = 5;

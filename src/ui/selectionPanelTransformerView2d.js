@@ -40,12 +40,21 @@ import { View2dViewportController, resolveViewportFitTransform } from '../view2d
 import { createHoverLabelOverlay } from './hoverLabelOverlay.js';
 import { createTransformerView2dResidualCaptionOverlay } from './transformerView2dResidualCaptionOverlay.js';
 import { buildSelectionPromptContext } from './selectionPanelPromptContextUtils.js';
+import {
+    buildTransformerView2dOverviewState,
+    TRANSFORMER_VIEW2D_OVERVIEW_FOCUS_LABEL
+} from './selectionPanelTransformerView2dStateUtils.js';
 import { hasView2dPointerExceededClickSlop } from './selectionPanelTransformerView2dInteractionUtils.js';
+import { createTransformerView2dTokenHoverSync } from './selectionPanelTransformerView2dTokenHoverUtils.js';
 import {
     resolveTransformerView2dOverviewMinScale,
     TRANSFORMER_VIEW2D_OVERVIEW_MIN_SCALE_DEFAULT
 } from './selectionPanelTransformerView2dViewportUtils.js';
 import { applyTokenChipColors } from './tokenChipColorUtils.js';
+import {
+    normalizeTransformerView2dDetailInteractionTargets,
+    resolveTransformerView2dDetailInteractionHoverState
+} from '../view2d/transformerView2dDetailInteractionTargets.js';
 
 export const TRANSFORMER_VIEW2D_PANEL_ACTION_OPEN = 'open-transformer-view2d';
 export {
@@ -194,10 +203,16 @@ function configureView2dTokenNavChip(chip, {
         delete chip.dataset.tokenId;
     }
     chip.dataset.tokenNav = safeTokenText.length > 0 ? 'true' : 'false';
+    const isButton = String(chip.tagName || '').toLowerCase() === 'button';
 
     if (safeTokenText.length > 0) {
-        chip.tabIndex = 0;
-        chip.setAttribute('role', 'button');
+        if (!isButton) {
+            chip.tabIndex = 0;
+            chip.setAttribute('role', 'button');
+        } else {
+            chip.removeAttribute('tabindex');
+            chip.removeAttribute('role');
+        }
         chip.setAttribute('aria-label', `Open token details for ${safeTokenText}`);
     } else {
         chip.removeAttribute('tabindex');
@@ -289,7 +304,7 @@ export function createTransformerView2dDetailView(panelEl) {
                 <div class="detail-transformer-view2d-toolbar">
                     <div class="detail-transformer-view2d-toolbar-copy">
                         <div class="detail-transformer-view2d-toolbar-title">2D canvas prototype</div>
-                        <div class="detail-transformer-view2d-hint">Drag or use one finger to pan. Scroll, pinch, or use +/- to zoom. Use arrows or WASD to move. Use Focus selection to return to the current component. Use Back to graph to leave the deepest head view.</div>
+                        <div class="detail-transformer-view2d-hint">Drag or use one finger to pan. Scroll, pinch, or use +/- to zoom. Use arrows or WASD to move. Use Focus selection to return to the current component. Use Back to graph to return to the full transformer overview.</div>
                     </div>
                     <div class="detail-transformer-view2d-toolbar-actions">
                         <button
@@ -311,7 +326,7 @@ export function createTransformerView2dDetailView(panelEl) {
                 <div class="detail-transformer-view2d-readout" aria-live="polite">
                     <div class="detail-transformer-view2d-stat">
                         <span class="detail-transformer-view2d-stat-label">Focus</span>
-                        <span class="detail-transformer-view2d-stat-value" data-transformer-view2d-readout="focus">Transformer overview</span>
+                        <span class="detail-transformer-view2d-stat-value" data-transformer-view2d-readout="focus">${TRANSFORMER_VIEW2D_OVERVIEW_FOCUS_LABEL}</span>
                     </div>
                     <div class="detail-transformer-view2d-stat">
                         <span class="detail-transformer-view2d-stat-label">Zoom</span>
@@ -346,7 +361,7 @@ export function createTransformerView2dDetailView(panelEl) {
                     aria-hidden="true"
                 >
                     <div
-                        class="detail-transformer-view2d-token-strip__tokens"
+                        class="detail-transformer-view2d-token-strip__tokens prompt-token-strip__tokens"
                         data-transformer-view2d-role="token-strip-tokens"
                     ></div>
                 </div>
@@ -368,6 +383,9 @@ export function createTransformerView2dDetailView(panelEl) {
     const detailFrame = root.querySelector('.detail-transformer-view2d-detail-frame');
     const tokenStrip = root.querySelector('.detail-transformer-view2d-token-strip');
     const tokenStripTokens = root.querySelector('[data-transformer-view2d-role="token-strip-tokens"]');
+    const tokenHoverSync = createTransformerView2dTokenHoverSync({
+        container: tokenStripTokens
+    });
     const hud = root.querySelector('.detail-transformer-view2d-hud');
     const focusBtn = root.querySelector(`[data-transformer-view2d-action="${VIEW2D_DETAIL_ACTION_FOCUS}"]`);
     const fitBtn = root.querySelector(`[data-transformer-view2d-action="${VIEW2D_DETAIL_ACTION_FIT}"]`);
@@ -405,19 +423,20 @@ export function createTransformerView2dDetailView(panelEl) {
         tokenLabels: null,
         isSmallScreen: false,
         baseSemanticTarget: null,
-        baseFocusLabel: 'Transformer overview',
+        baseFocusLabel: TRANSFORMER_VIEW2D_OVERVIEW_FOCUS_LABEL,
         headDetailTarget: null,
         concatDetailTarget: null,
         outputProjectionDetailTarget: null,
         mlpDetailTarget: null,
         detailSemanticTargets: [],
         detailFocusLabel: '',
+        pendingDetailInteractionTargets: [],
         headDetailFocusScale: null,
         headDetailSceneFitScale: null,
         headDetailDepthActive: false,
         headDetailDepthAutoReentryBlocked: false,
         semanticTarget: null,
-        focusLabel: 'Transformer overview',
+        focusLabel: TRANSFORMER_VIEW2D_OVERVIEW_FOCUS_LABEL,
         sceneLabel: '0 layers / 0 tokens',
         detailSceneIndex: null,
         detailSceneFocus: null,
@@ -1223,7 +1242,9 @@ export function createTransformerView2dDetailView(panelEl) {
         return hadPinnedFocus;
     }
 
-    function lockPinnedDetailSceneFocus(detailHoverState = null) {
+    function lockPinnedDetailSceneFocus(detailHoverState = null, {
+        scheduleRender: shouldScheduleRender = true
+    } = {}) {
         if (!detailHoverState?.focusState) return false;
         const nextSignature = typeof detailHoverState.signature === 'string'
             ? detailHoverState.signature
@@ -1244,7 +1265,7 @@ export function createTransformerView2dDetailView(panelEl) {
         state.detailSceneHoverSignature = nextSignature;
         resetCanvasHoverTargetKey();
         hoverLabelOverlay.hide();
-        if (didChange) {
+        if (didChange && shouldScheduleRender) {
             scheduleRender();
         }
         return true;
@@ -1254,6 +1275,7 @@ export function createTransformerView2dDetailView(panelEl) {
         scheduleRender: shouldScheduleRender = true,
         force = false
     } = {}) {
+        tokenHoverSync.clearCanvasEntry({ emit: true });
         resetCanvasHoverTargetKey();
         if (state.detailScenePinnedFocus && force !== true) {
             const hadResidualHover = !!state.hoveredResidualRow;
@@ -1319,6 +1341,7 @@ export function createTransformerView2dDetailView(panelEl) {
         }
         if (allowDetailSceneHover) {
             if (state.detailScenePinnedFocus) {
+                tokenHoverSync.clearCanvasEntry({ emit: true });
                 resetCanvasHoverTargetKey();
                 hoverLabelOverlay.hide();
                 state.detailSceneFocus = state.detailScenePinnedFocus;
@@ -1327,6 +1350,7 @@ export function createTransformerView2dDetailView(panelEl) {
             }
             const detailHoverKey = buildCanvasHoverTargetKey(hit, 'detail');
             if (detailHoverKey === state.hoverTargetKey) {
+                tokenHoverSync.clearCanvasEntry({ emit: true });
                 hoverLabelOverlay.move({
                     clientX: event.clientX,
                     clientY: event.clientY
@@ -1345,6 +1369,7 @@ export function createTransformerView2dDetailView(panelEl) {
                 detailHoverState?.label || '',
                 hoverInfo
             );
+            tokenHoverSync.clearCanvasEntry({ emit: true });
             const didChange = detailHoverState.signature !== state.detailSceneHoverSignature;
             state.hoveredResidualRow = null;
             resetHoverRowBlend();
@@ -1378,6 +1403,7 @@ export function createTransformerView2dDetailView(panelEl) {
         if (residualHoverPayload && worldHit?.node?.id && Number.isFinite(worldHit?.rowHit?.rowIndex)) {
             const residualHoverKey = buildCanvasHoverTargetKey(worldHit, 'overview-row');
             if (residualHoverKey === state.hoverTargetKey) {
+                tokenHoverSync.setCanvasEntryFromResidualHoverPayload(residualHoverPayload, { emit: true });
                 hoverLabelOverlay.move({
                     clientX: event.clientX,
                     clientY: event.clientY
@@ -1413,6 +1439,7 @@ export function createTransformerView2dDetailView(panelEl) {
             }
             state.hoveredResidualRow = nextHoveredRow;
             state.hoverTargetKey = residualHoverKey;
+            tokenHoverSync.setCanvasEntryFromResidualHoverPayload(residualHoverPayload, { emit: true });
             setHoverDimmingTarget(1, {
                 shouldRender: didChange
             });
@@ -1437,6 +1464,7 @@ export function createTransformerView2dDetailView(panelEl) {
 
         const semanticHoverKey = buildCanvasHoverTargetKey(worldHit, 'overview-node');
         if (semanticHoverKey === state.hoverTargetKey) {
+            tokenHoverSync.clearCanvasEntry({ emit: true });
             hoverLabelOverlay.move({
                 clientX: event.clientX,
                 clientY: event.clientY
@@ -1457,6 +1485,7 @@ export function createTransformerView2dDetailView(panelEl) {
         state.hoveredResidualRow = null;
         state.detailSceneFocus = state.detailScenePinnedFocus || null;
         state.detailSceneHoverSignature = state.detailScenePinnedSignature || '';
+        tokenHoverSync.clearCanvasEntry({ emit: true });
         resetHoverRowBlend();
         setHoverDimmingTarget(0, {
             immediate: true,
@@ -1556,6 +1585,7 @@ export function createTransformerView2dDetailView(panelEl) {
         const isHeadDetailActive = isDetailDeepActive && hasActiveDetailTarget();
         const isHeadDetailSceneActive = isDetailDeepActive && hasSceneBackedDetailTarget();
         const isConcatDetailActive = isDetailDeepActive && !!state.concatDetailTarget;
+        const canReturnToGraphOverview = hasActiveDetailTarget();
         root.classList.toggle('is-head-detail-active', isHeadDetailActive);
         root.classList.toggle('is-head-detail-scene-active', isHeadDetailSceneActive);
         root.classList.toggle('is-concat-detail-active', isConcatDetailActive);
@@ -1566,8 +1596,8 @@ export function createTransformerView2dDetailView(panelEl) {
         canvas?.classList.toggle('is-head-detail-scene-active', isHeadDetailSceneActive);
         canvas?.classList.toggle('is-concat-detail-active', isConcatDetailActive);
         if (deepControls) {
-            deepControls.hidden = !isHeadDetailSceneActive;
-            deepControls.setAttribute('aria-hidden', isHeadDetailSceneActive ? 'false' : 'true');
+            deepControls.hidden = !canReturnToGraphOverview;
+            deepControls.setAttribute('aria-hidden', canReturnToGraphOverview ? 'false' : 'true');
         }
         if (hud) {
             hud.hidden = isHeadDetailActive;
@@ -1714,6 +1744,18 @@ export function createTransformerView2dDetailView(panelEl) {
         state.detailSceneFocus = null;
         state.detailSceneHoverSignature = '';
         resetCanvasHoverTargetKey();
+        if (state.detailSceneIndex && state.pendingDetailInteractionTargets.length) {
+            const initialDetailHoverState = resolveTransformerView2dDetailInteractionHoverState(
+                state.detailSceneIndex,
+                state.pendingDetailInteractionTargets
+            );
+            if (initialDetailHoverState?.focusState) {
+                lockPinnedDetailSceneFocus(initialDetailHoverState, {
+                    scheduleRender: false
+                });
+            }
+            state.pendingDetailInteractionTargets = [];
+        }
         state.layout = buildSceneLayout(state.scene, {
             isSmallScreen: state.isSmallScreen
         });
@@ -1779,42 +1821,26 @@ export function createTransformerView2dDetailView(panelEl) {
         return commitSceneSelection({ animate, nextDepthActive: false });
     }
 
-    function exitDeepDetail({ animate = true } = {}) {
-        if (!hasSceneBackedDetailTarget() || !state.headDetailDepthActive) return false;
+    function returnToGraphOverview({ animate = true } = {}) {
         stopAnimation();
+        clearStagedFocusTransition();
+        clearStagedHeadDetailTransition();
         cancelScheduledHoverUpdate();
         clearCanvasHover({ scheduleRender: false });
-        disableAutoFrameState();
-        state.headDetailDepthActive = false;
-        state.headDetailDepthAutoReentryBlocked = true;
-        state.detailScenePinnedFocus = null;
-        state.detailScenePinnedSignature = '';
-        state.detailSceneFocus = null;
-        state.detailSceneHoverSignature = '';
-        const bounds = resolveSelectionFocusBounds();
-        const padding = VIEW2D_HEAD_DETAIL_FOCUS_PADDING;
-        state.focusLabel = resolveActiveFocusLabel(state);
-        updateReadouts();
-
-        if (!bounds) {
-            render();
-            return true;
-        }
-
-        if (animate) {
-            viewportController.flyToBounds(bounds, {
-                animate: true,
-                durationMs: 420,
-                now: performance.now(),
-                padding
-            });
-            animateViewport();
-            return true;
-        }
-
-        viewportController.fitToBounds(bounds, { padding });
-        render();
-        return true;
+        clearPinnedDetailSceneFocus({ scheduleRender: false });
+        const overviewState = buildTransformerView2dOverviewState();
+        state.baseSemanticTarget = overviewState.baseSemanticTarget;
+        state.baseFocusLabel = overviewState.baseFocusLabel;
+        setDetailTargets(overviewState.detailTargets);
+        setDetailFocusTarget({
+            detailSemanticTargets: overviewState.detailSemanticTargets,
+            detailFocusLabel: overviewState.detailFocusLabel
+        });
+        state.pendingDetailInteractionTargets = [...overviewState.pendingDetailInteractionTargets];
+        return commitSceneSelection({
+            animate,
+            nextDepthActive: false
+        });
     }
 
     function updateReadouts() {
@@ -1857,6 +1883,7 @@ export function createTransformerView2dDetailView(panelEl) {
         });
 
         if (!entries.length) {
+            tokenHoverSync.clear({ emit: true });
             state.tokenStripSignature = '';
             tokenStripTokens.replaceChildren();
             tokenStrip.dataset.visible = 'false';
@@ -1878,8 +1905,9 @@ export function createTransformerView2dDetailView(panelEl) {
         if (nextSignature !== state.tokenStripSignature) {
             const fragment = document.createDocumentFragment();
             entries.forEach((entry, index) => {
-                const chip = document.createElement('span');
-                chip.className = 'detail-transformer-view2d-token-strip__token detail-transformer-view2d-token';
+                const chip = document.createElement('button');
+                chip.type = 'button';
+                chip.className = 'detail-transformer-view2d-token-strip__token prompt-token-strip__token detail-transformer-view2d-token';
                 if (index === activeIndex) {
                     chip.classList.add('detail-transformer-view2d-token--selected');
                 }
@@ -1897,6 +1925,7 @@ export function createTransformerView2dDetailView(panelEl) {
             state.tokenStripSignature = nextSignature;
         }
 
+        tokenHoverSync.applyState();
         tokenStrip.dataset.visible = state.visible ? 'true' : 'false';
         tokenStrip.setAttribute('aria-hidden', state.visible ? 'false' : 'true');
     }
@@ -2600,7 +2629,7 @@ export function createTransformerView2dDetailView(panelEl) {
     });
     deepExitBtn?.addEventListener('click', () => {
         clearStagedHeadDetailTransition();
-        exitDeepDetail({ animate: true });
+        returnToGraphOverview({ animate: true });
         focusCanvasSurface();
     });
     window.addEventListener('keydown', onWindowKeyDown);
@@ -2616,6 +2645,7 @@ export function createTransformerView2dDetailView(panelEl) {
             root.setAttribute('aria-hidden', state.visible ? 'false' : 'true');
             renderTokenStrip();
             if (!state.visible) {
+                tokenHoverSync.clear({ emit: true });
                 clearStagedFocusTransition();
                 clearStagedHeadDetailTransition();
                 cancelScheduledHoverUpdate();
@@ -2643,9 +2673,10 @@ export function createTransformerView2dDetailView(panelEl) {
             tokenIndices = null,
             tokenLabels = null,
             semanticTarget = null,
-            focusLabel = 'Transformer overview',
+            focusLabel = TRANSFORMER_VIEW2D_OVERVIEW_FOCUS_LABEL,
             detailSemanticTargets = null,
             detailFocusLabel = '',
+            detailInteractionTargets = null,
             transitionMode = '',
             isSmallScreen = false
         } = {}) {
@@ -2683,13 +2714,16 @@ export function createTransformerView2dDetailView(panelEl) {
                 ? null
                 : deriveBaseSemanticTarget(semanticTarget);
             state.baseFocusLabel = shouldStageHeadDetailEntry
-                ? 'Transformer overview'
+                ? TRANSFORMER_VIEW2D_OVERVIEW_FOCUS_LABEL
                 : (String(focusLabel || '').trim() || describeTransformerView2dTarget(state.baseSemanticTarget));
             setDetailTargets(shouldStageHeadDetailEntry ? {} : resolvedDetailTargets);
             setDetailFocusTarget({
                 detailSemanticTargets: normalizedDetailSemanticTargets,
                 detailFocusLabel
             });
+            state.pendingDetailInteractionTargets = normalizeTransformerView2dDetailInteractionTargets(
+                detailInteractionTargets
+            );
             if (shouldStageHeadDetailEntry) {
                 state.stagedHeadDetailTransition = {
                     headDetailTarget: resolvedDetailTargets.headDetailTarget,
@@ -2705,6 +2739,7 @@ export function createTransformerView2dDetailView(panelEl) {
             cancelScheduledHoverUpdate();
             clearPinnedDetailSceneFocus({ scheduleRender: false });
             clearCanvasHover({ scheduleRender: false, force: true });
+            tokenHoverSync.clear({ emit: true });
             setHoverDimmingTarget(0, { immediate: true, shouldRender: false });
             hideDetailFrame();
             residualCaptionOverlay.hide();

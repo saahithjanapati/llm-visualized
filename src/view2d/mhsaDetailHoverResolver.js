@@ -3,6 +3,11 @@ import {
     resolveAttentionHoverLabel
 } from '../ui/attentionHoverInfo.js';
 import {
+    MLP_ACTIVATION_TOOLTIP_LABEL,
+    MLP_DOWN_BIAS_TOOLTIP_LABEL,
+    MLP_DOWN_TOOLTIP_LABEL
+} from '../utils/mlpLabels.js';
+import {
     PRE_ATTENTION_ROLES,
     SCORE_ATTENTION_ROLES,
     WEIGHTED_OUTPUT_ROLES,
@@ -24,6 +29,13 @@ import {
 } from './mhsaDetailFocusResult.js';
 import {
     buildAttentionCellHoverInfo,
+    buildMlpActivationHoverInfo,
+    buildMlpDownBiasHoverInfo,
+    buildMlpDownProjectionHoverInfo,
+    buildMlpDownWeightHoverInfo,
+    buildMlpUpBiasHoverInfo,
+    buildMlpUpProjectionHoverInfo,
+    buildMlpUpWeightHoverInfo,
     buildAttentionStageRoleHoverInfo,
     buildPostLayerNormResidualHoverInfo,
     buildProjectionColumnHoverInfo,
@@ -401,6 +413,13 @@ function buildProjectionSourceRowResult(index = null, rowHit = null, options = n
     if (!index || !rowHit) return null;
     const rowIndex = Number.isFinite(rowHit.rowIndex) ? Math.max(0, Math.floor(rowHit.rowIndex)) : null;
     const transposeSelections = buildAttentionKeyTransposeSelections(index, rowIndex);
+    const mlpWeightNodeId = (index?.nodeIdsByRole?.get('mlp-up-weight') || [])[0] || '';
+    const mlpBiasNodeId = (index?.nodeIdsByRole?.get('mlp-up-bias') || [])[0] || '';
+    const mlpOutputNodeId = (index?.nodeIdsByRole?.get('mlp-up-output') || [])[0] || '';
+    const mlpOutputCopyNodeId = (index?.nodeIdsByRole?.get('mlp-up-output-copy') || [])[0] || '';
+    const mlpActivationNodeId = (index?.nodeIdsByRole?.get('mlp-activation-output') || [])[0] || '';
+    const mlpActivationCopyNodeId = (index?.nodeIdsByRole?.get('mlp-activation-output-copy') || [])[0] || '';
+    const mlpDownOutputNodeId = (index?.nodeIdsByRole?.get('mlp-down-output') || [])[0] || '';
     const info = buildPostLayerNormResidualHoverInfo(
         index?.nodesById?.get(index?.singleNodeIds?.projectionSourceXln || ''),
         rowHit.rowItem
@@ -411,14 +430,180 @@ function buildProjectionSourceRowResult(index = null, rowHit = null, options = n
         }),
         info,
         descriptors: ['projectionSourceAll'],
+        extraNodeIds: [mlpWeightNodeId, mlpBiasNodeId],
         rowSelections: [
             ...buildProjectionSourceRowSelections(index, rowIndex),
+            ...(mlpOutputNodeId ? [{ nodeId: mlpOutputNodeId, rowIndex }] : []),
+            ...(mlpOutputCopyNodeId ? [{ nodeId: mlpOutputCopyNodeId, rowIndex }] : []),
+            ...(mlpActivationNodeId ? [{ nodeId: mlpActivationNodeId, rowIndex }] : []),
+            ...(mlpActivationCopyNodeId ? [{ nodeId: mlpActivationCopyNodeId, rowIndex }] : []),
+            ...(mlpDownOutputNodeId ? [{ nodeId: mlpDownOutputNodeId, rowIndex }] : []),
             ...buildQueryRowSelections(index, rowIndex),
             ...buildKeyRowSelections(index, rowIndex),
             ...buildValueRowSelections(index, rowIndex),
             ...transposeSelections.rowSelections
         ],
         columnSelections: transposeSelections.columnSelections
+    }, options);
+}
+
+function buildMlpUpOutputRowResult(index = null, node = null, rowHit = null, options = null) {
+    if (!index || !node || !rowHit) return null;
+    const rowIndex = Number.isFinite(rowHit.rowIndex) ? Math.max(0, Math.floor(rowHit.rowIndex)) : null;
+    if (!Number.isFinite(rowIndex)) return null;
+    const info = buildMlpUpProjectionHoverInfo(node, rowHit.rowItem);
+    const inputNodeId = index?.singleNodeIds?.projectionSourceXln || '';
+    const weightNodeId = (index?.nodeIdsByRole?.get('mlp-up-weight') || [])[0] || '';
+    const biasNodeId = (index?.nodeIdsByRole?.get('mlp-up-bias') || [])[0] || '';
+    const outputNodeId = (index?.nodeIdsByRole?.get('mlp-up-output') || [])[0] || '';
+    const outputCopyNodeId = (index?.nodeIdsByRole?.get('mlp-up-output-copy') || [])[0] || '';
+    const activationNodeId = (index?.nodeIdsByRole?.get('mlp-activation-output') || [])[0] || '';
+    const activationCopyNodeId = (index?.nodeIdsByRole?.get('mlp-activation-output-copy') || [])[0] || '';
+    return buildPathFocusResult(index, {
+        label: info?.activationData?.label || 'MLP Up Projection',
+        info,
+        extraNodeIds: [
+            inputNodeId,
+            weightNodeId,
+            biasNodeId,
+            outputNodeId,
+            outputCopyNodeId,
+            activationNodeId,
+            activationCopyNodeId
+        ],
+        rowSelections: [
+            ...(outputNodeId ? [{ nodeId: outputNodeId, rowIndex }] : []),
+            ...(outputCopyNodeId ? [{ nodeId: outputCopyNodeId, rowIndex }] : []),
+            ...(inputNodeId ? [{ nodeId: inputNodeId, rowIndex }] : []),
+            ...(activationNodeId ? [{ nodeId: activationNodeId, rowIndex }] : []),
+            ...(activationCopyNodeId ? [{ nodeId: activationCopyNodeId, rowIndex }] : [])
+        ]
+    }, options);
+}
+
+function buildMlpUpWeightResult(index = null, node = null, options = null) {
+    if (!index || !node) return null;
+    const inputNodeId = index?.singleNodeIds?.projectionSourceXln || '';
+    const biasNodeId = (index?.nodeIdsByRole?.get('mlp-up-bias') || [])[0] || '';
+    const outputNodeId = (index?.nodeIdsByRole?.get('mlp-up-output') || [])[0] || '';
+    const outputCopyNodeId = (index?.nodeIdsByRole?.get('mlp-up-output-copy') || [])[0] || '';
+    return buildPathFocusResult(index, {
+        label: 'MLP Up Weight Matrix',
+        info: buildMlpUpWeightHoverInfo(node),
+        extraNodeIds: [node.id, inputNodeId, biasNodeId, outputNodeId, outputCopyNodeId]
+    }, options);
+}
+
+function buildMlpActivationRowResult(index = null, node = null, rowHit = null, options = null) {
+    if (!index || !node || !rowHit) return null;
+    const rowIndex = Number.isFinite(rowHit.rowIndex) ? Math.max(0, Math.floor(rowHit.rowIndex)) : null;
+    if (!Number.isFinite(rowIndex)) return null;
+    const info = buildMlpActivationHoverInfo(node, rowHit.rowItem);
+    const inputNodeId = index?.singleNodeIds?.projectionSourceXln || '';
+    const outputNodeId = (index?.nodeIdsByRole?.get('mlp-up-output') || [])[0] || '';
+    const outputCopyNodeId = (index?.nodeIdsByRole?.get('mlp-up-output-copy') || [])[0] || '';
+    const activationNodeId = (index?.nodeIdsByRole?.get('mlp-activation-output') || [])[0] || '';
+    const activationCopyNodeId = (index?.nodeIdsByRole?.get('mlp-activation-output-copy') || [])[0] || '';
+    const downWeightNodeId = (index?.nodeIdsByRole?.get('mlp-down-weight') || [])[0] || '';
+    const downBiasNodeId = (index?.nodeIdsByRole?.get('mlp-down-bias') || [])[0] || '';
+    const downOutputNodeId = (index?.nodeIdsByRole?.get('mlp-down-output') || [])[0] || '';
+    return buildPathFocusResult(index, {
+        label: info?.activationData?.label || MLP_ACTIVATION_TOOLTIP_LABEL,
+        info,
+        extraNodeIds: [
+            inputNodeId,
+            outputNodeId,
+            outputCopyNodeId,
+            activationNodeId,
+            activationCopyNodeId,
+            downWeightNodeId,
+            downBiasNodeId,
+            downOutputNodeId
+        ],
+        rowSelections: [
+            ...(inputNodeId ? [{ nodeId: inputNodeId, rowIndex }] : []),
+            ...(outputNodeId ? [{ nodeId: outputNodeId, rowIndex }] : []),
+            ...(outputCopyNodeId ? [{ nodeId: outputCopyNodeId, rowIndex }] : []),
+            ...(activationNodeId ? [{ nodeId: activationNodeId, rowIndex }] : []),
+            ...(activationCopyNodeId ? [{ nodeId: activationCopyNodeId, rowIndex }] : []),
+            ...(downOutputNodeId ? [{ nodeId: downOutputNodeId, rowIndex }] : [])
+        ]
+    }, options);
+}
+
+function buildMlpUpBiasResult(index = null, node = null, options = null) {
+    if (!index || !node) return null;
+    const inputNodeId = index?.singleNodeIds?.projectionSourceXln || '';
+    const weightNodeId = (index?.nodeIdsByRole?.get('mlp-up-weight') || [])[0] || '';
+    const outputNodeId = (index?.nodeIdsByRole?.get('mlp-up-output') || [])[0] || '';
+    const outputCopyNodeId = (index?.nodeIdsByRole?.get('mlp-up-output-copy') || [])[0] || '';
+    return buildPathFocusResult(index, {
+        label: 'Bias Vector for MLP Up Matrix',
+        info: buildMlpUpBiasHoverInfo(node),
+        extraNodeIds: [node.id, inputNodeId, weightNodeId, outputNodeId, outputCopyNodeId]
+    }, options);
+}
+
+function buildMlpDownOutputRowResult(index = null, node = null, rowHit = null, options = null) {
+    if (!index || !node || !rowHit) return null;
+    const rowIndex = Number.isFinite(rowHit.rowIndex) ? Math.max(0, Math.floor(rowHit.rowIndex)) : null;
+    if (!Number.isFinite(rowIndex)) return null;
+    const info = buildMlpDownProjectionHoverInfo(node, rowHit.rowItem);
+    const inputNodeId = index?.singleNodeIds?.projectionSourceXln || '';
+    const upOutputNodeId = (index?.nodeIdsByRole?.get('mlp-up-output') || [])[0] || '';
+    const upOutputCopyNodeId = (index?.nodeIdsByRole?.get('mlp-up-output-copy') || [])[0] || '';
+    const activationNodeId = (index?.nodeIdsByRole?.get('mlp-activation-output') || [])[0] || '';
+    const activationCopyNodeId = (index?.nodeIdsByRole?.get('mlp-activation-output-copy') || [])[0] || '';
+    const weightNodeId = (index?.nodeIdsByRole?.get('mlp-down-weight') || [])[0] || '';
+    const biasNodeId = (index?.nodeIdsByRole?.get('mlp-down-bias') || [])[0] || '';
+    const outputNodeId = (index?.nodeIdsByRole?.get('mlp-down-output') || [])[0] || '';
+    return buildPathFocusResult(index, {
+        label: info?.activationData?.label || 'MLP Down Projection',
+        info,
+        extraNodeIds: [
+            inputNodeId,
+            upOutputNodeId,
+            upOutputCopyNodeId,
+            activationNodeId,
+            activationCopyNodeId,
+            weightNodeId,
+            biasNodeId,
+            outputNodeId
+        ],
+        rowSelections: [
+            ...(inputNodeId ? [{ nodeId: inputNodeId, rowIndex }] : []),
+            ...(upOutputNodeId ? [{ nodeId: upOutputNodeId, rowIndex }] : []),
+            ...(upOutputCopyNodeId ? [{ nodeId: upOutputCopyNodeId, rowIndex }] : []),
+            ...(activationNodeId ? [{ nodeId: activationNodeId, rowIndex }] : []),
+            ...(activationCopyNodeId ? [{ nodeId: activationCopyNodeId, rowIndex }] : []),
+            ...(outputNodeId ? [{ nodeId: outputNodeId, rowIndex }] : [])
+        ]
+    }, options);
+}
+
+function buildMlpDownWeightResult(index = null, node = null, options = null) {
+    if (!index || !node) return null;
+    const activationNodeId = (index?.nodeIdsByRole?.get('mlp-activation-output') || [])[0] || '';
+    const activationCopyNodeId = (index?.nodeIdsByRole?.get('mlp-activation-output-copy') || [])[0] || '';
+    const biasNodeId = (index?.nodeIdsByRole?.get('mlp-down-bias') || [])[0] || '';
+    const outputNodeId = (index?.nodeIdsByRole?.get('mlp-down-output') || [])[0] || '';
+    return buildPathFocusResult(index, {
+        label: MLP_DOWN_TOOLTIP_LABEL,
+        info: buildMlpDownWeightHoverInfo(node),
+        extraNodeIds: [node.id, activationNodeId, activationCopyNodeId, biasNodeId, outputNodeId]
+    }, options);
+}
+
+function buildMlpDownBiasResult(index = null, node = null, options = null) {
+    if (!index || !node) return null;
+    const activationNodeId = (index?.nodeIdsByRole?.get('mlp-activation-output') || [])[0] || '';
+    const activationCopyNodeId = (index?.nodeIdsByRole?.get('mlp-activation-output-copy') || [])[0] || '';
+    const weightNodeId = (index?.nodeIdsByRole?.get('mlp-down-weight') || [])[0] || '';
+    const outputNodeId = (index?.nodeIdsByRole?.get('mlp-down-output') || [])[0] || '';
+    return buildPathFocusResult(index, {
+        label: MLP_DOWN_BIAS_TOOLTIP_LABEL,
+        info: buildMlpDownBiasHoverInfo(node),
+        extraNodeIds: [node.id, activationNodeId, activationCopyNodeId, weightNodeId, outputNodeId]
     }, options);
 }
 
@@ -627,6 +812,34 @@ export function resolveMhsaDetailHoverState(index = null, hit = null, options = 
 
     if (entity.type === 'projection-source-row') {
         return buildProjectionSourceRowResult(index, entity.rowHit, options);
+    }
+
+    if (entity.type === 'mlp-up-output-row') {
+        return buildMlpUpOutputRowResult(index, entity.node, entity.rowHit, options);
+    }
+
+    if (entity.type === 'mlp-activation-row') {
+        return buildMlpActivationRowResult(index, entity.node, entity.rowHit, options);
+    }
+
+    if (entity.type === 'mlp-down-output-row') {
+        return buildMlpDownOutputRowResult(index, entity.node, entity.rowHit, options);
+    }
+
+    if (entity.type === 'mlp-up-weight') {
+        return buildMlpUpWeightResult(index, entity.node, options);
+    }
+
+    if (entity.type === 'mlp-up-bias') {
+        return buildMlpUpBiasResult(index, entity.node, options);
+    }
+
+    if (entity.type === 'mlp-down-weight') {
+        return buildMlpDownWeightResult(index, entity.node, options);
+    }
+
+    if (entity.type === 'mlp-down-bias') {
+        return buildMlpDownBiasResult(index, entity.node, options);
     }
 
     if (entity.type === 'weighted-output-row') {

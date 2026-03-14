@@ -112,6 +112,9 @@ function createMockContext() {
         arcTo(x1, y1, x2, y2, radius) {
             currentPath.push({ type: 'arcTo', x1, y1, x2, y2, radius });
         },
+        quadraticCurveTo(cpx, cpy, x, y) {
+            currentPath.push({ type: 'quadraticCurveTo', cpx, cpy, x, y });
+        },
         closePath() {
             currentPath.push({ type: 'closePath' });
         },
@@ -661,6 +664,67 @@ describe('CanvasSceneRenderer', () => {
         ));
 
         expect(arrowHeadFill).toBeTruthy();
+    });
+
+    it('renders curved trapezoid card surfaces for position-embedding overview nodes', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx);
+        const renderer = new CanvasSceneRenderer({ canvas });
+
+        const positionEmbeddingNode = createMatrixNode({
+            role: 'position-embedding-card',
+            semantic: {
+                componentKind: 'embedding',
+                stage: 'embedding.position',
+                role: 'position-embedding-card'
+            },
+            dimensions: { rows: 1024, cols: D_MODEL },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.EMBEDDING_POSITION_STREAM
+            },
+            metadata: {
+                card: {
+                    width: 156,
+                    height: 88,
+                    cornerRadius: 18,
+                    shape: 'curved-trapezoid',
+                    shapeConfig: {
+                        leftInset: 12,
+                        rightInset: 8,
+                        rightHeightRatio: 0.38,
+                        leftBulge: 12,
+                        rightBulge: 8
+                    }
+                }
+            }
+        });
+
+        renderer.setScene(createSceneModel({
+            nodes: [positionEmbeddingNode]
+        }));
+
+        expect(renderer.render({
+            width: 400,
+            height: 240,
+            dpr: 1,
+            viewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            }
+        })).toBe(true);
+
+        const curvedFill = ctx.operations.find((entry) => (
+            entry.type === 'fill'
+            && entry.path.some((step) => step.type === 'quadraticCurveTo')
+        )) || null;
+
+        expect(curvedFill).toBeTruthy();
+        expect(
+            curvedFill.path.filter((step) => step.type === 'quadraticCurveTo')
+        ).toHaveLength(4);
     });
 
     it('dims the matrix surface during local MHSA detail cell focus without dimming the selected cell', () => {
@@ -1963,6 +2027,67 @@ describe('CanvasSceneRenderer', () => {
         expect(zoomedInArrow.effectiveLineWidth).toBeGreaterThan(zoomedOutArrow.effectiveLineWidth);
         expect(zoomedInArrow.effectiveHeadLength).toBeGreaterThan(zoomedOutArrow.effectiveHeadLength);
         expect(zoomedInArrow.effectiveHeadSpan).toBeGreaterThan(zoomedOutArrow.effectiveHeadSpan);
+    });
+
+    it('uses the scene connector layer for the MLP(x_ln) outgoing right-edge arrow', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx, 960, 540);
+        const renderer = new CanvasSceneRenderer({ canvas });
+        const tokenRefs = ['Token A', 'Token B'].map((tokenLabel, rowIndex) => ({
+            rowIndex,
+            tokenIndex: rowIndex,
+            tokenLabel
+        }));
+        const scene = buildMlpDetailSceneModel({
+            activationSource: {
+                getLayerLn2(_layerIndex = 0, _kind = 'shift', tokenIndex = 0, targetLength = D_MODEL) {
+                    return Array.from({ length: targetLength }, (_, index) => Number(
+                        ((tokenIndex * 0.1) + (index * 0.01)).toFixed(4)
+                    ));
+                }
+            },
+            mlpDetailTarget: {
+                layerIndex: 0
+            },
+            tokenRefs
+        });
+        const nodes = flattenSceneNodes(scene);
+        const downOutputNode = nodes.find((node) => node.role === 'mlp-down-output') || null;
+        const outgoingSpacerNode = nodes.find((node) => node.role === 'outgoing-arrow-spacer') || null;
+        const connectorNode = nodes.find((node) => node.role === 'connector-mlp-down-output-outgoing') || null;
+
+        renderer.setScene(scene);
+        expect(renderer.render({
+            width: 960,
+            height: 540,
+            dpr: 1,
+            viewportTransform: {
+                scale: 0.28,
+                offsetX: 0,
+                offsetY: 0
+            }
+        })).toBe(true);
+
+        const connectorEntry = renderer.layout?.registry?.getConnectorEntry(connectorNode?.id || '');
+        const outputEntry = renderer.layout?.registry?.getNodeEntry(downOutputNode?.id || '');
+        const outputBounds = outputEntry?.contentBounds || null;
+
+        expect(downOutputNode?.metadata?.disableEdgeOrnament).toBe(true);
+        expect(connectorNode?.source).toMatchObject({
+            nodeId: downOutputNode?.id,
+            anchor: 'right'
+        });
+        expect(connectorNode?.target).toMatchObject({
+            nodeId: outgoingSpacerNode?.id,
+            anchor: 'right'
+        });
+        expect(connectorEntry?.pathPoints?.length).toBeGreaterThanOrEqual(2);
+        expect(outputBounds).toBeTruthy();
+        expect(connectorEntry?.pathPoints?.[0]?.x).toBeGreaterThan(
+            (outputBounds?.x || 0) + (outputBounds?.width || 0) + 4
+        );
+        const lastPathPoint = connectorEntry?.pathPoints?.[connectorEntry.pathPoints.length - 1] || null;
+        expect((lastPathPoint?.x || 0)).toBeGreaterThan(connectorEntry?.pathPoints?.[0]?.x || 0);
     });
 
     it('uses the scene connector layer for the MHSA x_ln incoming edge arrow', () => {

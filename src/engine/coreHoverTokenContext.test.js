@@ -38,7 +38,7 @@ describe('resolveHoverTokenContext attention metrics', () => {
 
         expect(context?.detailKind).toBe('attention-token-pair');
         expect(context?.attentionMetrics).toEqual([{
-            roleLabel: 'Score',
+            roleLabel: 'Score:',
             valueText: '0.2500'
         }]);
     });
@@ -53,7 +53,7 @@ describe('resolveHoverTokenContext attention metrics', () => {
 
         expect(context?.detailKind).toBe('attention-token-pair');
         expect(context?.attentionMetrics).toEqual([{
-            roleLabel: 'Score',
+            roleLabel: 'Score:',
             valueText: '0.1500'
         }]);
     });

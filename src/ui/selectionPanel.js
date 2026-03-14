@@ -70,6 +70,10 @@ import {
     syncTransformerView2dRoute,
     TRANSFORMER_VIEW2D_PANEL_ACTION_OPEN
 } from './selectionPanelTransformerView2d.js';
+import {
+    normalizeTransformerView2dDetailInteractionTargets,
+    resolveTransformerView2dDetailInteractionTargets
+} from '../view2d/transformerView2dDetailInteractionTargets.js';
 import { renderSelectionPreviewEquations } from './selectionPanelEquationPreviewUtils.js';
 import {
     computeAttentionCellSize,
@@ -77,6 +81,11 @@ import {
     getAttentionRevealOrder,
     shouldRevealAttentionCell
 } from './selectionPanelAttentionRevealUtils.js';
+import {
+    buildAttentionMatrixValues,
+    resolveAttentionMatrixCellValue,
+    shouldMuteCausalUpperPreAttentionCell
+} from './selectionPanelAttentionMatrixUtils.js';
 import {
     readEquationBaseFontPx,
     readEquationContentSize
@@ -718,7 +727,12 @@ function resolveAttentionScoreSelectionSummary(selectionInfo, context = null) {
 
     const mode = resolveAttentionModeFromSelection(selectionInfo)
         || (stageLower.includes('post') ? 'post' : 'pre');
-    const score = mode === 'post' ? activation.postScore : activation.preScore;
+    const score = resolveAttentionMatrixCellValue({
+        mode,
+        value: mode === 'post' ? activation.postScore : activation.preScore,
+        queryTokenIndex: activation.tokenIndex,
+        keyTokenIndex: activation.keyTokenIndex
+    });
     const tokenIndices = Array.isArray(context?.tokenIndices) ? context.tokenIndices : [];
     const tokenLabels = Array.isArray(context?.tokenLabels) ? context.tokenLabels : [];
 
@@ -813,25 +827,6 @@ function measureMaxTokenLabelWidth(labels, referenceEl) {
     }
     const padding = 4; // subtle breathing room; padding is handled separately
     return maxWidth + padding;
-}
-
-function buildAttentionMatrixValues({ activationSource, layerIndex, headIndex, tokenIndices, mode }) {
-    if (!activationSource || !Array.isArray(tokenIndices) || !tokenIndices.length) return null;
-    const values = [];
-    for (let i = 0; i < tokenIndices.length; i += 1) {
-        const queryTokenIndex = tokenIndices[i];
-        const row = activationSource.getAttentionScoresRow
-            ? activationSource.getAttentionScoresRow(layerIndex, mode, headIndex, queryTokenIndex)
-            : null;
-        const rowValues = [];
-        for (let j = 0; j < tokenIndices.length; j += 1) {
-            const keyTokenIndex = tokenIndices[j];
-            const value = Array.isArray(row) ? row[keyTokenIndex] : null;
-            rowValues.push(Number.isFinite(value) ? value : null);
-        }
-        values.push(rowValues);
-    }
-    return values;
 }
 
 function clamp01(value) {
@@ -2160,7 +2155,12 @@ function buildAttentionSpherePreview(selectionInfo) {
 
     const mode = resolveAttentionModeFromSelection(selectionInfo)
         || (stageLower.includes('post') ? 'post' : 'pre');
-    const score = mode === 'post' ? activation?.postScore : activation?.preScore;
+    const score = resolveAttentionMatrixCellValue({
+        mode,
+        value: mode === 'post' ? activation?.postScore : activation?.preScore,
+        queryTokenIndex: activation?.tokenIndex,
+        keyTokenIndex: activation?.keyTokenIndex
+    });
     const color = TMP_COLOR;
     let usedLiveColor = false;
     if (source?.isInstancedMesh) {
@@ -6161,6 +6161,7 @@ class SelectionPanel {
         focusLabel = '',
         detailSemanticTargets = null,
         detailFocusLabel = '',
+        detailInteractionTargets = null,
         transitionMode = '',
         syncRoute = true
     } = {}) {
@@ -6172,6 +6173,7 @@ class SelectionPanel {
                 focusLabel: String(focusLabel || '').trim() || describeTransformerView2dTarget(semanticTarget),
                 detailSemanticTargets,
                 detailFocusLabel: String(detailFocusLabel || '').trim(),
+                detailInteractionTargets,
                 transitionMode: String(transitionMode || '').trim(),
                 actionLabel: 'View in 2D / matrix form'
             }
@@ -6192,12 +6194,26 @@ class SelectionPanel {
         const resolvedView2dContext = view2dContext
             || resolveTransformerView2dActionContext(resolvedSelection, resolvedLabel);
         if (!resolvedView2dContext) return false;
+        const resolvedDetailInteractionTargets = resolvedView2dContext.detailInteractionTargets
+            ? normalizeTransformerView2dDetailInteractionTargets(
+                resolvedView2dContext.detailInteractionTargets
+            )
+            : resolveTransformerView2dDetailInteractionTargets(
+                resolvedSelection,
+                resolvedView2dContext.detailSemanticTargets
+            );
+        const hydratedView2dContext = {
+            ...resolvedView2dContext,
+            ...(resolvedDetailInteractionTargets.length
+                ? { detailInteractionTargets: resolvedDetailInteractionTargets }
+                : {})
+        };
 
         this._isMhsaInfoSelectionActive = false;
         this._syncMhsaViewRoute(false);
         this._setInfoPreview(null);
         this._transformerView2dSourceSelection = resolvedSelection || null;
-        this._currentTransformerView2dContext = resolvedView2dContext;
+        this._currentTransformerView2dContext = hydratedView2dContext;
         this._transformerView2dDetailOpen = true;
         this.panel.classList.add('is-transformer-view2d-open');
         this._setTitleText('2D Transformer Canvas');
@@ -6206,8 +6222,8 @@ class SelectionPanel {
             this.subtitle.textContent = 'Scalable semantic canvas for the current transformer state';
         }
         const resolvedCanvasFocusLabel = String(
-            resolvedView2dContext.detailFocusLabel
-            || resolvedView2dContext.focusLabel
+            hydratedView2dContext.detailFocusLabel
+            || hydratedView2dContext.focusLabel
             || ''
         ).trim();
         this._setSubtitleSecondaryText(`Focus: ${resolvedCanvasFocusLabel}`);
@@ -6218,11 +6234,12 @@ class SelectionPanel {
             activationSource: this.activationSource,
             tokenIndices: Array.isArray(this.attentionTokenIndices) ? this.attentionTokenIndices : this.laneTokenIndices,
             tokenLabels: Array.isArray(this.attentionTokenLabels) ? this.attentionTokenLabels : this.tokenLabels,
-            semanticTarget: resolvedView2dContext.semanticTarget,
-            focusLabel: resolvedView2dContext.focusLabel,
-            detailSemanticTargets: resolvedView2dContext.detailSemanticTargets,
-            detailFocusLabel: resolvedView2dContext.detailFocusLabel,
-            transitionMode: resolvedView2dContext.transitionMode,
+            semanticTarget: hydratedView2dContext.semanticTarget,
+            focusLabel: hydratedView2dContext.focusLabel,
+            detailSemanticTargets: hydratedView2dContext.detailSemanticTargets,
+            detailFocusLabel: hydratedView2dContext.detailFocusLabel,
+            detailInteractionTargets: hydratedView2dContext.detailInteractionTargets,
+            transitionMode: hydratedView2dContext.transitionMode,
             isSmallScreen: this._isSmallScreen && this._isSmallScreen()
         });
         this.engine?.pause?.(TRANSFORMER_VIEW2D_PAUSE_REASON);
@@ -6232,7 +6249,7 @@ class SelectionPanel {
         if (syncRoute) {
             syncTransformerView2dRoute({
                 active: true,
-                semanticTarget: resolvedView2dContext.semanticTarget
+                semanticTarget: hydratedView2dContext.semanticTarget
             });
         }
         if (!fromHistory && resolvedSelection) {
@@ -6623,13 +6640,19 @@ class SelectionPanel {
         }
 
         if (this.activationSource && typeof this.activationSource.getAttentionScore === 'function') {
-            const score = this.activationSource.getAttentionScore(
+            const rawScore = this.activationSource.getAttentionScore(
                 link.layerIndex,
                 link.mode,
                 link.headIndex,
                 link.sourceTokenIndex,
                 link.targetTokenIndex
             );
+            const score = resolveAttentionMatrixCellValue({
+                mode: link.mode,
+                value: rawScore,
+                queryTokenIndex: link.sourceTokenIndex,
+                keyTokenIndex: link.targetTokenIndex
+            });
             if (Number.isFinite(score)) {
                 if (link.mode === 'post') activationData.postScore = score;
                 else activationData.preScore = score;
@@ -7423,15 +7446,26 @@ class SelectionPanel {
                 cell.className = 'attention-cell';
                 cell.dataset.row = String(row);
                 cell.dataset.col = String(col);
+                const rowTokenIndex = tokenIndices[row];
+                const colTokenIndex = tokenIndices[col];
                 const isVisible = ATTENTION_PREVIEW_TRIANGLE === 'upper'
                     ? col >= row
-                    : col <= row;
+                    : (ATTENTION_PREVIEW_TRIANGLE === 'lower'
+                        ? col <= row
+                        : true);
                 const value = values ? values[row]?.[col] : null;
                 if (!isVisible) {
                     cell.classList.add('is-hidden');
                 } else if (!Number.isFinite(value)) {
                     cell.classList.add('is-empty');
                 } else {
+                    if (shouldMuteCausalUpperPreAttentionCell({
+                        mode,
+                        queryTokenIndex: rowTokenIndex,
+                        keyTokenIndex: colTokenIndex
+                    })) {
+                        cell.classList.add('is-causal-upper-muted');
+                    }
                     const reveal = shouldRevealAttentionCell(progress, row, col, mode, decodeProfile);
                     if (reveal) {
                         const color = resolveAttentionPreviewCellColor(value, mode);
@@ -7446,8 +7480,6 @@ class SelectionPanel {
                     }
                     cell.dataset.rowLabel = tokenLabels[row] || '';
                     cell.dataset.colLabel = tokenLabels[col] || '';
-                    const rowTokenIndex = tokenIndices[row];
-                    const colTokenIndex = tokenIndices[col];
                     if (Number.isFinite(rowTokenIndex)) {
                         cell.dataset.rowTokenIndex = String(Math.floor(rowTokenIndex));
                     } else {
@@ -10755,8 +10787,11 @@ class SelectionPanel {
                             cellEl.className = cellClass;
                             cellEl.dataset.row = String(cellData.rowIndex);
                             cellEl.dataset.col = String(cellData.colIndex);
-                            if (cellData.isMasked) {
+                            if (cellData.isMasked && cellData.useMaskedStyle !== false) {
                                 cellEl.classList.add('is-masked');
+                            }
+                            if (cellData.defaultMuted) {
+                                cellEl.classList.add('is-default-muted');
                             }
                             if (cellData.isEmpty) {
                                 cellEl.classList.add('is-empty');

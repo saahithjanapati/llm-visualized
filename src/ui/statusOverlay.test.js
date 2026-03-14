@@ -83,3 +83,70 @@ describe('statusOverlay KV cache link touch fallback', () => {
         window.removeEventListener(KV_CACHE_INFO_REQUEST_EVENT, openListener);
     });
 });
+
+describe('statusOverlay layer norm equations', () => {
+    let appState;
+    let initStatusOverlay;
+
+    beforeEach(async () => {
+        vi.resetModules();
+        vi.stubGlobal('localStorage', {
+            getItem: vi.fn(() => null),
+            setItem: vi.fn(),
+            removeItem: vi.fn(),
+            clear: vi.fn()
+        });
+        vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
+        vi.stubGlobal('ResizeObserver', class {
+            observe() {}
+            disconnect() {}
+        });
+        ({ appState } = await import('../state/appState.js'));
+        ({ initStatusOverlay } = await import('./statusOverlay.js'));
+        document.body.innerHTML = `
+            <div id="statusOverlay"></div>
+            <section id="equationsPanel">
+                <div id="equationsTitle"></div>
+                <div id="equationsBody"></div>
+            </section>
+        `;
+        appState.showEquations = true;
+        appState.equationsSuppressed = false;
+    });
+
+    afterEach(() => {
+        document.body.innerHTML = '';
+        vi.unstubAllGlobals();
+    });
+
+    it('renders LayerNorm 2 with x minus mu in the normalization term', () => {
+        const render = vi.fn();
+        window.katex = { render };
+        const pipeline = {
+            _currentLayerIdx: 0,
+            _layers: [{
+                index: 0,
+                isActive: false,
+                lanes: [{
+                    ln2Phase: 'active',
+                    mlpUpStarted: false,
+                    stopRise: false,
+                    horizPhase: 'waitingForLN2'
+                }]
+            }],
+            engine: {
+                scene: {
+                    traverse() {}
+                }
+            },
+            addEventListener: vi.fn()
+        };
+
+        initStatusOverlay(pipeline, 1);
+
+        expect(render).toHaveBeenCalled();
+        const [tex] = render.mock.calls.at(-1);
+        expect(tex).toContain('\\frac{x - \\mu}{\\sqrt{\\sigma^2 + \\epsilon}}');
+        expect(tex).not.toContain('\\frac{u - \\mu}{\\sqrt{\\sigma^2 + \\epsilon}}');
+    });
+});

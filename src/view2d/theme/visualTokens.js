@@ -74,6 +74,7 @@ export const VIEW2D_STYLE_KEYS = Object.freeze({
     OPERATOR: 'operator',
     EMBEDDING_TOKEN: 'embedding.token',
     EMBEDDING_POSITION: 'embedding.position',
+    EMBEDDING_POSITION_STREAM: 'embedding.position-stream',
     LAYER_NORM: 'layer-norm',
     MATRIX_INPUT: 'matrix.input',
     MATRIX_WEIGHT: 'matrix.weight',
@@ -160,6 +161,18 @@ const VIEW2D_VISUAL_TOKENS = Object.freeze({
         }),
         [VIEW2D_STYLE_KEYS.EMBEDDING_POSITION]: Object.freeze({
             accent: 'rgba(146, 244, 208, 0.920)'
+        }),
+        [VIEW2D_STYLE_KEYS.EMBEDDING_POSITION_STREAM]: Object.freeze({
+            accent: 'rgba(54, 132, 255, 0.980)',
+            fill: 'linear-gradient(132deg, rgba(134, 187, 255, 0.94) 0%, rgba(54, 132, 255, 0.98) 44%, rgba(18, 78, 208, 0.99) 100%)',
+            stroke: 'rgba(236, 246, 255, 0.96)',
+            cardGlowColor: 'rgba(36, 108, 240, 0.42)',
+            cardGlowOpacity: 0.34,
+            cardGlowBlur: 26,
+            cardHotspotColor: 'rgba(255,255,255,0.18)',
+            cardInnerGlowColor: 'rgba(72, 146, 255, 0.12)',
+            cardSheenColor: 'rgba(255,255,255,0.14)',
+            cardEdgeHighlight: 'rgba(255,255,255,0.30)'
         }),
         [VIEW2D_STYLE_KEYS.LAYER_NORM]: Object.freeze({
             accent: hexToCss(GPT2_LAYER_VISUAL_TUNING.layerNorm.finalColor, 1),

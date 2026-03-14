@@ -246,7 +246,10 @@ function isResidualCaptionNode(node = null) {
 
 function applyCaptionRoleStyling(itemEl, node = null) {
     if (!itemEl) return;
-    const isProjectionBiasNode = String(node?.role || '').trim().toLowerCase() === 'projection-bias';
+    const nodeRole = String(node?.role || '').trim().toLowerCase();
+    const isProjectionBiasNode = nodeRole === 'projection-bias'
+        || nodeRole === 'mlp-up-bias'
+        || nodeRole === 'mlp-down-bias';
     itemEl.style.setProperty(
         '--detail-transformer-view2d-caption-label-role-scale',
         String(isProjectionBiasNode
