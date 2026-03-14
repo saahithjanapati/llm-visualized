@@ -31,7 +31,11 @@ import {
 } from './createCaptionedCardMatrixNode.js';
 import { createVectorStripMatrixNode } from './createResidualVectorMatrixNode.js';
 import { createView2dVectorStripMetadata } from '../shared/vectorStrip.js';
-import { resolveMhsaDimensionVisualExtent } from '../shared/mhsaDimensionSizing.js';
+import {
+    resolveMhsaDimensionVisualExtent,
+    resolveMhsaTokenVisualExtent
+} from '../shared/mhsaDimensionSizing.js';
+import { resolveMhsaTokenMatrixLayoutMetrics } from '../../ui/selectionPanelMhsaLayoutUtils.js';
 
 const INPUT_MEASURE_COLS = 12;
 const MLP_INTERMEDIATE_SIZE = D_MODEL * 4;
@@ -80,6 +84,10 @@ const MLP_WEIGHT_REFERENCE_EXTENT_SCALE = 0.88;
 const MLP_BIAS_ROW_HEIGHT = 14;
 const MLP_BIAS_ROW_HEIGHT_SMALL = 12;
 const MLP_BIAS_CORNER_RADIUS = 5;
+const MLP_GELU_STAGE_GAP_PER_EXTRA_ROW = 4;
+const MLP_GELU_STAGE_GAP_PER_EXTRA_ROW_SMALL = 3;
+const MLP_GELU_STAGE_GAP_MAX_EXTRA = 28;
+const MLP_GELU_STAGE_GAP_MAX_EXTRA_SMALL = 20;
 
 function normalizeIndex(value) {
     return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : null;
@@ -211,7 +219,19 @@ function resolveVectorMetrics(rowCount = 1, {
     isSmallScreen = false,
     columnCount = D_MODEL
 } = {}) {
-    const rowHeight = isSmallScreen ? BASE_VECTOR_ROW_HEIGHT_SMALL : BASE_VECTOR_ROW_HEIGHT;
+    const safeRowCount = Math.max(1, Math.floor(rowCount || 1));
+    const baseRowHeight = isSmallScreen ? BASE_VECTOR_ROW_HEIGHT_SMALL : BASE_VECTOR_ROW_HEIGHT;
+    const rowTargetExtent = resolveMhsaTokenVisualExtent(safeRowCount, {
+        isSmallScreen
+    });
+    const minRowHeight = safeRowCount >= 20 ? 2 : (safeRowCount >= 10 ? 3 : 4);
+    const rowHeight = Math.max(
+        minRowHeight,
+        Math.min(
+            baseRowHeight,
+            Math.floor(rowTargetExtent / safeRowCount)
+        )
+    );
     return {
         rowHeight,
         rowGap: BASE_VECTOR_ROW_GAP,
@@ -221,8 +241,16 @@ function resolveVectorMetrics(rowCount = 1, {
             isSmallScreen
         }),
         measureCols: resolveMeasureCols(columnCount),
-        rowCount: Math.max(1, Math.floor(rowCount || 1))
+        rowCount: safeRowCount
     };
+}
+
+function resolveMlpGeluStageGap(extraRows = 0, isSmallScreen = false) {
+    const safeExtraRows = Number.isFinite(extraRows) ? Math.max(0, Math.floor(extraRows)) : 0;
+    const baseGap = isSmallScreen ? MLP_GELU_STAGE_GAP_SMALL : MLP_GELU_STAGE_GAP;
+    const perExtraRow = isSmallScreen ? MLP_GELU_STAGE_GAP_PER_EXTRA_ROW_SMALL : MLP_GELU_STAGE_GAP_PER_EXTRA_ROW;
+    const maxExtra = isSmallScreen ? MLP_GELU_STAGE_GAP_MAX_EXTRA_SMALL : MLP_GELU_STAGE_GAP_MAX_EXTRA;
+    return baseGap + Math.min(maxExtra, safeExtraRows * perExtraRow);
 }
 
 function buildResidualRowItems(tokenRefs = [], {
@@ -389,6 +417,10 @@ export function buildMlpDetailSceneModel({
     }
 
     const rowCount = Math.max(1, tokenRefs.length);
+    const resolvedLayoutMetrics = resolveMhsaTokenMatrixLayoutMetrics({
+        rowCount,
+        isSmallScreen
+    });
     const baseSemantic = {
         componentKind: 'mlp',
         layerIndex,
@@ -526,6 +558,14 @@ export function buildMlpDetailSceneModel({
         minHeight: isSmallScreen ? MLP_WEIGHT_MIN_HEIGHT_SMALL : MLP_WEIGHT_MIN_HEIGHT,
         maxHeight: isSmallScreen ? MLP_WEIGHT_MAX_HEIGHT_SMALL : MLP_WEIGHT_MAX_HEIGHT
     });
+    weightCardSize.height = Math.max(
+        isSmallScreen ? MLP_WEIGHT_MIN_HEIGHT_SMALL : MLP_WEIGHT_MIN_HEIGHT,
+        Math.round(vectorMetrics.compactWidth)
+    );
+    weightCardSize.width = Math.max(
+        isSmallScreen ? MLP_WEIGHT_MIN_WIDTH_SMALL : MLP_WEIGHT_MIN_WIDTH,
+        Math.round(mlpUpVectorMetrics.compactWidth)
+    );
     const weightNode = createCaptionedCardMatrixNode({
         role: 'mlp-up-weight',
         semantic: buildSemantic(mlpUpWeightSemantic, {
@@ -725,6 +765,14 @@ export function buildMlpDetailSceneModel({
         minHeight: isSmallScreen ? MLP_WEIGHT_MIN_HEIGHT_SMALL : MLP_WEIGHT_MIN_HEIGHT,
         maxHeight: isSmallScreen ? MLP_WEIGHT_MAX_HEIGHT_SMALL : MLP_WEIGHT_MAX_HEIGHT
     });
+    downWeightCardSize.height = Math.max(
+        isSmallScreen ? MLP_WEIGHT_MIN_HEIGHT_SMALL : MLP_WEIGHT_MIN_HEIGHT,
+        Math.round(mlpUpVectorMetrics.compactWidth)
+    );
+    downWeightCardSize.width = Math.max(
+        isSmallScreen ? MLP_WEIGHT_MIN_WIDTH_SMALL : MLP_WEIGHT_MIN_WIDTH,
+        Math.round(vectorMetrics.compactWidth)
+    );
     const downWeightNode = createCaptionedCardMatrixNode({
         role: 'mlp-down-weight',
         semantic: buildSemantic(mlpDownWeightSemantic, {
@@ -985,7 +1033,7 @@ export function buildMlpDetailSceneModel({
             }
         },
         metadata: {
-            gapOverride: isSmallScreen ? MLP_GELU_STAGE_GAP_SMALL : MLP_GELU_STAGE_GAP
+            gapOverride: resolveMlpGeluStageGap(resolvedLayoutMetrics?.extraRows, isSmallScreen)
         }
     });
     const downEquationRowNode = createGroupNode({
@@ -1243,7 +1291,9 @@ export function buildMlpDetailSceneModel({
             rowCount,
             isSmallScreen: !!isSmallScreen,
             layoutMetrics: {
+                ...resolvedLayoutMetrics,
                 cssVars: {
+                    ...(resolvedLayoutMetrics?.cssVars || {}),
                     '--mhsa-token-matrix-canvas-pad-x-boost': isSmallScreen ? '-20px' : '-32px',
                     '--mhsa-token-matrix-canvas-pad-y-boost': isSmallScreen ? '-10px' : '-16px',
                     '--mhsa-token-matrix-stage-gap-boost': isSmallScreen ? '-6px' : '-8px'

@@ -39,24 +39,17 @@ function createMockActivationSource() {
 }
 
 describe('buildMlpDetailSceneModel', () => {
-    function buildScene() {
+    function buildScene(tokenCount = 2) {
         return buildMlpDetailSceneModel({
             activationSource: createMockActivationSource(),
             mlpDetailTarget: {
                 layerIndex: 4
             },
-            tokenRefs: [
-                {
-                    rowIndex: 0,
-                    tokenIndex: 0,
-                    tokenLabel: 'Token A'
-                },
-                {
-                    rowIndex: 1,
-                    tokenIndex: 1,
-                    tokenLabel: 'Token B'
-                }
-            ]
+            tokenRefs: Array.from({ length: tokenCount }, (_, rowIndex) => ({
+                rowIndex,
+                tokenIndex: rowIndex,
+                tokenLabel: `Token ${String.fromCharCode(65 + (rowIndex % 26))}${rowIndex >= 26 ? rowIndex : ''}`.trim()
+            }))
         });
     }
 
@@ -124,6 +117,8 @@ describe('buildMlpDetailSceneModel', () => {
             rows: D_MODEL,
             cols: D_MODEL * 4
         });
+        expect(weightNode?.metadata?.card?.height).toBe(inputNode?.metadata?.compactRows?.compactWidth);
+        expect(weightNode?.metadata?.card?.width).toBe(outputNode?.metadata?.compactRows?.compactWidth);
         expect(weightNode?.metadata?.caption?.dimensionsText).toBe('(768, 3072)');
         expect(biasNode?.label?.tex).toBe('b_{\\mathrm{up}}');
         expect(biasNode?.label?.text).toBe('b_up');
@@ -196,6 +191,8 @@ describe('buildMlpDetailSceneModel', () => {
             rows: D_MODEL * 4,
             cols: D_MODEL
         });
+        expect(downWeightNode?.metadata?.card?.height).toBe(activationCopyNode?.metadata?.compactRows?.compactWidth);
+        expect(downWeightNode?.metadata?.card?.width).toBe(downOutputNode?.metadata?.compactRows?.compactWidth);
         expect(downWeightNode?.metadata?.caption?.dimensionsText).toBe('(3072, 768)');
         expect(downBiasNode?.label?.tex).toBe('b_{\\mathrm{down}}');
         expect(downBiasNode?.label?.text).toBe('b_down');
@@ -335,6 +332,62 @@ describe('buildMlpDetailSceneModel', () => {
         expect(downOutgoingConnectorEntry?.pathPoints?.[0]?.x || 0).toBeGreaterThan(
             (downOutputEntry?.contentBounds?.x || 0) + (downOutputEntry?.contentBounds?.width || 0)
         );
+    });
+
+    it('adapts dense token windows with denser rows and larger GELU spacing while preserving dimension ordering', () => {
+        const baseScene = buildScene(2);
+        const denseScene = buildScene(12);
+        const baseNodes = flattenSceneNodes(baseScene);
+        const denseNodes = flattenSceneNodes(denseScene);
+        const baseInputNode = baseNodes.find((node) => node?.role === 'projection-source-xln') || null;
+        const denseInputNode = denseNodes.find((node) => node?.role === 'projection-source-xln') || null;
+        const baseOutputNode = baseNodes.find((node) => node?.role === 'mlp-up-output') || null;
+        const denseOutputNode = denseNodes.find((node) => node?.role === 'mlp-up-output') || null;
+        const baseOutputCopyNode = baseNodes.find((node) => node?.role === 'mlp-up-output-copy') || null;
+        const denseOutputCopyNode = denseNodes.find((node) => node?.role === 'mlp-up-output-copy') || null;
+        const baseActivationNode = baseNodes.find((node) => node?.role === 'mlp-activation-output') || null;
+        const denseActivationNode = denseNodes.find((node) => node?.role === 'mlp-activation-output') || null;
+        const baseUpWeightNode = baseNodes.find((node) => node?.role === 'mlp-up-weight') || null;
+        const denseUpWeightNode = denseNodes.find((node) => node?.role === 'mlp-up-weight') || null;
+        const baseDownWeightNode = baseNodes.find((node) => node?.role === 'mlp-down-weight') || null;
+        const denseDownWeightNode = denseNodes.find((node) => node?.role === 'mlp-down-weight') || null;
+
+        expect(Number(denseScene?.metadata?.layoutMetrics?.extraRows) || 0).toBeGreaterThan(0);
+        expect((denseInputNode?.metadata?.compactRows?.rowHeight || 0)).toBeLessThan(
+            (baseInputNode?.metadata?.compactRows?.rowHeight || 0)
+        );
+        expect((denseOutputNode?.metadata?.compactRows?.rowHeight || 0)).toBeLessThan(
+            (baseOutputNode?.metadata?.compactRows?.rowHeight || 0)
+        );
+        expect((denseActivationNode?.metadata?.compactRows?.rowHeight || 0)).toBeLessThan(
+            (baseActivationNode?.metadata?.compactRows?.rowHeight || 0)
+        );
+        expect((baseOutputNode?.metadata?.compactRows?.compactWidth || 0)).toBeGreaterThan(
+            (baseInputNode?.metadata?.compactRows?.compactWidth || 0)
+        );
+        expect((denseOutputNode?.metadata?.compactRows?.compactWidth || 0)).toBeGreaterThan(
+            (denseInputNode?.metadata?.compactRows?.compactWidth || 0)
+        );
+        expect(baseUpWeightNode?.metadata?.card?.height).toBe(baseInputNode?.metadata?.compactRows?.compactWidth);
+        expect(baseUpWeightNode?.metadata?.card?.width).toBe(baseOutputNode?.metadata?.compactRows?.compactWidth);
+        expect(denseUpWeightNode?.metadata?.card?.height).toBe(denseInputNode?.metadata?.compactRows?.compactWidth);
+        expect(denseUpWeightNode?.metadata?.card?.width).toBe(denseOutputNode?.metadata?.compactRows?.compactWidth);
+        expect(baseDownWeightNode?.metadata?.card?.height).toBe(baseActivationNode?.metadata?.compactRows?.compactWidth);
+        expect(baseDownWeightNode?.metadata?.card?.width).toBe(baseInputNode?.metadata?.compactRows?.compactWidth);
+        expect(denseDownWeightNode?.metadata?.card?.height).toBe(denseActivationNode?.metadata?.compactRows?.compactWidth);
+        expect(denseDownWeightNode?.metadata?.card?.width).toBe(denseInputNode?.metadata?.compactRows?.compactWidth);
+
+        const baseLayout = buildSceneLayout(baseScene);
+        const denseLayout = buildSceneLayout(denseScene);
+        const baseOutputEntry = baseLayout?.registry?.getNodeEntry(baseOutputNode?.id);
+        const denseOutputEntry = denseLayout?.registry?.getNodeEntry(denseOutputNode?.id);
+        const baseOutputCopyEntry = baseLayout?.registry?.getNodeEntry(baseOutputCopyNode?.id);
+        const denseOutputCopyEntry = denseLayout?.registry?.getNodeEntry(denseOutputCopyNode?.id);
+        const baseGap = (baseOutputCopyEntry?.contentBounds?.y || 0)
+            - ((baseOutputEntry?.contentBounds?.y || 0) + (baseOutputEntry?.contentBounds?.height || 0));
+        const denseGap = (denseOutputCopyEntry?.contentBounds?.y || 0)
+            - ((denseOutputEntry?.contentBounds?.y || 0) + (denseOutputEntry?.contentBounds?.height || 0));
+        expect(denseGap).toBeGreaterThan(baseGap);
     });
 
     it('reuses the detail-scene row hover behavior for ln2 x_ln rows', () => {

@@ -35,7 +35,7 @@ function createMockActivationSource() {
 }
 
 describe('buildTransformerSceneModel', () => {
-    it('places a position-embedding module before the first incoming residual stream', () => {
+    it('places vocabulary and position embeddings before the first incoming residual stream', () => {
         const scene = buildTransformerSceneModel({
             activationSource: createMockActivationSource(),
             tokenIndices: [0, 1],
@@ -43,11 +43,23 @@ describe('buildTransformerSceneModel', () => {
             layerCount: 2
         });
         const nodes = flattenSceneNodes(scene);
-        const positionEmbeddingNodes = nodes.filter((node) => (
+        const vocabularyEmbeddingNode = nodes.find((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node?.role === 'vocabulary-embedding-card'
+            && node?.semantic?.componentKind === 'embedding'
+            && node?.semantic?.stage === 'embedding.token'
+        ));
+        const positionEmbeddingNode = nodes.find((node) => (
             node?.kind === VIEW2D_NODE_KINDS.MATRIX
             && node?.role === 'position-embedding-card'
             && node?.semantic?.componentKind === 'embedding'
             && node?.semantic?.stage === 'embedding.position'
+        ));
+        const embeddingAddNode = nodes.find((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node?.role === 'add-circle'
+            && node?.semantic?.componentKind === 'embedding'
+            && node?.semantic?.stage === 'embedding.sum'
         ));
         const firstIncomingResidualNode = nodes.find((node) => (
             node?.kind === VIEW2D_NODE_KINDS.MATRIX
@@ -57,18 +69,29 @@ describe('buildTransformerSceneModel', () => {
             && node?.semantic?.layerIndex === 0
         ));
 
-        expect(positionEmbeddingNodes).toHaveLength(1);
+        expect(vocabularyEmbeddingNode).toBeTruthy();
+        expect(positionEmbeddingNode).toBeTruthy();
+        expect(embeddingAddNode).toBeTruthy();
         expect(firstIncomingResidualNode).toBeTruthy();
 
-        const positionEmbeddingNode = positionEmbeddingNodes[0];
         const connectors = nodes.filter((node) => node?.kind === VIEW2D_NODE_KINDS.CONNECTOR);
         expect(connectors.some((connector) => (
+            connector?.source?.nodeId === vocabularyEmbeddingNode.id
+            && connector?.target?.nodeId === embeddingAddNode.id
+        ))).toBe(true);
+        expect(connectors.some((connector) => (
             connector?.source?.nodeId === positionEmbeddingNode.id
+            && connector?.target?.nodeId === embeddingAddNode.id
+        ))).toBe(true);
+        expect(connectors.some((connector) => (
+            connector?.source?.nodeId === embeddingAddNode.id
             && connector?.target?.nodeId === firstIncomingResidualNode.id
         ))).toBe(true);
 
         const layout = buildSceneLayout(scene);
+        const vocabularyEmbeddingEntry = layout?.registry?.getNodeEntry(vocabularyEmbeddingNode.id);
         const positionEmbeddingEntry = layout?.registry?.getNodeEntry(positionEmbeddingNode.id);
+        const embeddingAddEntry = layout?.registry?.getNodeEntry(embeddingAddNode.id);
         const incomingResidualEntry = layout?.registry?.getNodeEntry(firstIncomingResidualNode.id);
         const firstLayerNormNode = nodes.find((node) => (
             node?.kind === VIEW2D_NODE_KINDS.MATRIX
@@ -79,17 +102,30 @@ describe('buildTransformerSceneModel', () => {
         ));
         const firstLayerNormEntry = layout?.registry?.getNodeEntry(firstLayerNormNode?.id);
 
+        expect(vocabularyEmbeddingEntry).toBeTruthy();
         expect(positionEmbeddingEntry).toBeTruthy();
+        expect(embeddingAddEntry).toBeTruthy();
         expect(incomingResidualEntry).toBeTruthy();
         expect(firstLayerNormEntry).toBeTruthy();
         expect(
-            positionEmbeddingEntry.anchors[VIEW2D_ANCHOR_SIDES.RIGHT].x
+            embeddingAddEntry.anchors[VIEW2D_ANCHOR_SIDES.RIGHT].x
         ).toBeLessThan(
             incomingResidualEntry.anchors[VIEW2D_ANCHOR_SIDES.LEFT].x
         );
         expect(
             Math.abs(
-                positionEmbeddingEntry.anchors[VIEW2D_ANCHOR_SIDES.CENTER].y
+                vocabularyEmbeddingEntry.anchors[VIEW2D_ANCHOR_SIDES.CENTER].y
+                - embeddingAddEntry.anchors[VIEW2D_ANCHOR_SIDES.CENTER].y
+            )
+        ).toBeLessThan(0.5);
+        expect(
+            positionEmbeddingEntry.anchors[VIEW2D_ANCHOR_SIDES.CENTER].y
+        ).toBeGreaterThan(
+            vocabularyEmbeddingEntry.anchors[VIEW2D_ANCHOR_SIDES.CENTER].y
+        );
+        expect(
+            Math.abs(
+                embeddingAddEntry.anchors[VIEW2D_ANCHOR_SIDES.CENTER].y
                 - incomingResidualEntry.anchors[VIEW2D_ANCHOR_SIDES.CENTER].y
             )
         ).toBeLessThan(0.5);

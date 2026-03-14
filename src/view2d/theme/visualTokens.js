@@ -74,6 +74,7 @@ export const VIEW2D_STYLE_KEYS = Object.freeze({
     OPERATOR: 'operator',
     EMBEDDING_TOKEN: 'embedding.token',
     EMBEDDING_POSITION: 'embedding.position',
+    EMBEDDING_TOKEN_STREAM: 'embedding.token-stream',
     EMBEDDING_POSITION_STREAM: 'embedding.position-stream',
     LAYER_NORM: 'layer-norm',
     MATRIX_INPUT: 'matrix.input',
@@ -162,7 +163,7 @@ const VIEW2D_VISUAL_TOKENS = Object.freeze({
         [VIEW2D_STYLE_KEYS.EMBEDDING_POSITION]: Object.freeze({
             accent: 'rgba(146, 244, 208, 0.920)'
         }),
-        [VIEW2D_STYLE_KEYS.EMBEDDING_POSITION_STREAM]: Object.freeze({
+        [VIEW2D_STYLE_KEYS.EMBEDDING_TOKEN_STREAM]: Object.freeze({
             accent: 'rgba(54, 132, 255, 0.980)',
             fill: 'linear-gradient(132deg, rgba(134, 187, 255, 0.94) 0%, rgba(54, 132, 255, 0.98) 44%, rgba(18, 78, 208, 0.99) 100%)',
             stroke: 'rgba(236, 246, 255, 0.96)',
@@ -172,6 +173,18 @@ const VIEW2D_VISUAL_TOKENS = Object.freeze({
             cardHotspotColor: 'rgba(255,255,255,0.18)',
             cardInnerGlowColor: 'rgba(72, 146, 255, 0.12)',
             cardSheenColor: 'rgba(255,255,255,0.14)',
+            cardEdgeHighlight: 'rgba(255,255,255,0.30)'
+        }),
+        [VIEW2D_STYLE_KEYS.EMBEDDING_POSITION_STREAM]: Object.freeze({
+            accent: 'rgba(70, 198, 134, 0.980)',
+            fill: 'linear-gradient(132deg, rgba(168, 244, 198, 0.94) 0%, rgba(70, 198, 134, 0.97) 44%, rgba(24, 132, 82, 0.99) 100%)',
+            stroke: 'rgba(234, 255, 243, 0.96)',
+            cardGlowColor: 'rgba(48, 170, 112, 0.34)',
+            cardGlowOpacity: 0.28,
+            cardGlowBlur: 22,
+            cardHotspotColor: 'rgba(255,255,255,0.16)',
+            cardInnerGlowColor: 'rgba(88, 216, 150, 0.10)',
+            cardSheenColor: 'rgba(255,255,255,0.12)',
             cardEdgeHighlight: 'rgba(255,255,255,0.30)'
         }),
         [VIEW2D_STYLE_KEYS.LAYER_NORM]: Object.freeze({

@@ -57,14 +57,50 @@ export function buildPositionEmbeddingModule({
     semantic = {},
     title = 'Position Embedding'
 } = {}) {
-    const cardWidth = 196;
-    const cardHeight = 144;
+    return buildEmbeddingStreamModule({
+        semantic,
+        title,
+        role: 'position-embedding-card',
+        stageLabel: 'Position Embedding',
+        labelTex: 'W_{pos}',
+        styleKey: VIEW2D_STYLE_KEYS.EMBEDDING_POSITION_STREAM,
+        cardWidth: 148,
+        cardHeight: 108
+    });
+}
+
+export function buildVocabularyEmbeddingModule({
+    semantic = {},
+    title = 'Vocabulary Embedding'
+} = {}) {
+    return buildEmbeddingStreamModule({
+        semantic,
+        title,
+        role: 'vocabulary-embedding-card',
+        stageLabel: 'Vocabulary Embedding',
+        labelTex: 'W_E',
+        styleKey: VIEW2D_STYLE_KEYS.EMBEDDING_TOKEN_STREAM,
+        cardWidth: 196,
+        cardHeight: 144
+    });
+}
+
+function buildEmbeddingStreamModule({
+    semantic = {},
+    title = '',
+    role = 'embedding-stream-card',
+    stageLabel = '',
+    labelTex = '',
+    styleKey = VIEW2D_STYLE_KEYS.EMBEDDING_TOKEN_STREAM,
+    cardWidth = 180,
+    cardHeight = 128
+} = {}) {
     const titleMaxWidth = Math.max(24, cardWidth - (CARD_LABEL_HORIZONTAL_INSET * 2));
 
     const cardNode = createMatrixNode({
-        role: 'position-embedding-card',
-        semantic: mergeSemantic(semantic, { role: 'position-embedding-card' }),
-        label: buildLabel('W_{pos}', 'Position Embedding'),
+        role,
+        semantic: mergeSemantic(semantic, { role }),
+        label: buildLabel(labelTex, stageLabel),
         dimensions: {
             rows: CONTEXT_LEN,
             cols: D_MODEL
@@ -72,7 +108,7 @@ export function buildPositionEmbeddingModule({
         presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
         shape: VIEW2D_MATRIX_SHAPES.MATRIX,
         visual: {
-            styleKey: VIEW2D_STYLE_KEYS.EMBEDDING_POSITION_STREAM
+            styleKey
         },
         metadata: createCardMetadata(cardWidth, cardHeight, {
             cornerRadius: 18,

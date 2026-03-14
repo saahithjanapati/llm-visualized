@@ -41,7 +41,10 @@ import { buildHeadDetailSceneModel } from './buildHeadDetailSceneModel.js';
 import { buildMlpDetailSceneModel } from './buildMlpDetailSceneModel.js';
 import { buildMhsaSceneModel } from './buildMhsaSceneModel.js';
 import { buildOutputProjectionDetailSceneModel } from './buildOutputProjectionDetailSceneModel.js';
-import { buildPositionEmbeddingModule } from './createPositionEmbeddingModule.js';
+import {
+    buildPositionEmbeddingModule,
+    buildVocabularyEmbeddingModule
+} from './createPositionEmbeddingModule.js';
 import { resolvePreferredTokenLabel } from '../../utils/tokenLabelResolution.js';
 
 const DEFAULT_VISIBLE_TOKEN_COUNT = 5;
@@ -972,6 +975,15 @@ function buildLayerGroup({
                 : null
         )
     });
+    const inputVocabularyEmbedding = includeInputPositionEmbedding
+        ? buildVocabularyEmbeddingModule({
+            semantic: {
+                componentKind: 'embedding',
+                stage: 'embedding.token',
+                role: 'module'
+            }
+        })
+        : null;
     const inputPositionEmbedding = includeInputPositionEmbedding
         ? buildPositionEmbeddingModule({
             semantic: {
@@ -1025,7 +1037,100 @@ function buildLayerGroup({
         layerIndex,
         stage: 'post-mlp-add'
     });
-    const positionEmbeddingOverlay = inputPositionEmbedding
+    const embeddingInputAdd = includeInputPositionEmbedding
+        ? createTopAddNode({
+            semantic: {
+                componentKind: 'embedding',
+                stage: 'embedding.sum',
+                role: 'module'
+            }
+        })
+        : null;
+    const embeddingAddOverlay = embeddingInputAdd
+        ? createGroupNode({
+            role: 'input-embedding-add-overlay',
+            semantic: buildSemantic(layerSemantic, {
+                stage: 'input-embedding-add-overlay',
+                role: 'input-embedding-add-overlay'
+            }),
+            direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
+            gapKey: 'default',
+            layout: {
+                anchorAlign: {
+                    axis: 'x',
+                    selfNodeId: embeddingInputAdd.cardNode.id,
+                    targetNodeId: incomingResidual.cardNode.id,
+                    selfAnchor: VIEW2D_ANCHOR_SIDES.RIGHT,
+                    targetAnchor: VIEW2D_ANCHOR_SIDES.LEFT,
+                    offset: -68
+                }
+            },
+            children: [
+                createGroupNode({
+                    role: 'input-embedding-add-y-anchor',
+                    semantic: buildSemantic(layerSemantic, {
+                        stage: 'input-embedding-add-y-anchor',
+                        role: 'input-embedding-add-y-anchor'
+                    }),
+                    direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
+                    gapKey: 'default',
+                    layout: {
+                        anchorAlign: {
+                            axis: 'y',
+                            selfNodeId: embeddingInputAdd.cardNode.id,
+                            targetNodeId: incomingResidual.cardNode.id,
+                            selfAnchor: VIEW2D_ANCHOR_SIDES.CENTER,
+                            targetAnchor: VIEW2D_ANCHOR_SIDES.CENTER
+                        }
+                    },
+                    children: [embeddingInputAdd.node]
+                })
+            ]
+        })
+        : null;
+    const vocabularyEmbeddingOverlay = inputVocabularyEmbedding && embeddingInputAdd
+        ? createGroupNode({
+            role: 'input-vocabulary-embedding-overlay',
+            semantic: buildSemantic(layerSemantic, {
+                stage: 'input-vocabulary-embedding-overlay',
+                role: 'input-vocabulary-embedding-overlay'
+            }),
+            direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
+            gapKey: 'default',
+            layout: {
+                anchorAlign: {
+                    axis: 'x',
+                    selfNodeId: inputVocabularyEmbedding.cardNode.id,
+                    targetNodeId: embeddingInputAdd.cardNode.id,
+                    selfAnchor: VIEW2D_ANCHOR_SIDES.RIGHT,
+                    targetAnchor: VIEW2D_ANCHOR_SIDES.LEFT,
+                    offset: -300
+                }
+            },
+            children: [
+                createGroupNode({
+                    role: 'input-vocabulary-embedding-y-anchor',
+                    semantic: buildSemantic(layerSemantic, {
+                        stage: 'input-vocabulary-embedding-y-anchor',
+                        role: 'input-vocabulary-embedding-y-anchor'
+                    }),
+                    direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
+                    gapKey: 'default',
+                    layout: {
+                        anchorAlign: {
+                            axis: 'y',
+                            selfNodeId: inputVocabularyEmbedding.cardNode.id,
+                            targetNodeId: embeddingInputAdd.cardNode.id,
+                            selfAnchor: VIEW2D_ANCHOR_SIDES.CENTER,
+                            targetAnchor: VIEW2D_ANCHOR_SIDES.CENTER
+                        }
+                    },
+                    children: [inputVocabularyEmbedding.node]
+                })
+            ]
+        })
+        : null;
+    const positionEmbeddingOverlay = inputPositionEmbedding && inputVocabularyEmbedding
         ? createGroupNode({
             role: 'input-position-embedding-overlay',
             semantic: buildSemantic(layerSemantic, {
@@ -1038,10 +1143,9 @@ function buildLayerGroup({
                 anchorAlign: {
                     axis: 'x',
                     selfNodeId: inputPositionEmbedding.cardNode.id,
-                    targetNodeId: incomingResidual.cardNode.id,
-                    selfAnchor: VIEW2D_ANCHOR_SIDES.RIGHT,
-                    targetAnchor: VIEW2D_ANCHOR_SIDES.LEFT,
-                    offset: -320
+                    targetNodeId: inputVocabularyEmbedding.cardNode.id,
+                    selfAnchor: VIEW2D_ANCHOR_SIDES.CENTER,
+                    targetAnchor: VIEW2D_ANCHOR_SIDES.CENTER
                 }
             },
             children: [
@@ -1057,9 +1161,10 @@ function buildLayerGroup({
                         anchorAlign: {
                             axis: 'y',
                             selfNodeId: inputPositionEmbedding.cardNode.id,
-                            targetNodeId: incomingResidual.cardNode.id,
+                            targetNodeId: inputVocabularyEmbedding.cardNode.id,
                             selfAnchor: VIEW2D_ANCHOR_SIDES.CENTER,
-                            targetAnchor: VIEW2D_ANCHOR_SIDES.CENTER
+                            targetAnchor: VIEW2D_ANCHOR_SIDES.CENTER,
+                            offset: 182
                         }
                     },
                     children: [inputPositionEmbedding.node]
@@ -1190,13 +1295,32 @@ function buildLayerGroup({
     });
 
     const flow = [
-        ...(inputPositionEmbedding
+        ...(inputVocabularyEmbedding && embeddingInputAdd
+            ? [
+                {
+                    from: inputVocabularyEmbedding.cardNode,
+                    to: embeddingInputAdd.cardNode,
+                    key: `layer-${layerIndex}-vocabulary-embedding-to-add`,
+                    gap: 10
+                },
+                {
+                    from: embeddingInputAdd.cardNode,
+                    to: incomingResidual.cardNode,
+                    key: `layer-${layerIndex}-embedding-add-to-residual`,
+                    gap: 8
+                }
+            ]
+            : []),
+        ...(inputPositionEmbedding && embeddingInputAdd
             ? [
                 {
                     from: inputPositionEmbedding.cardNode,
-                    to: incomingResidual.cardNode,
-                    key: `layer-${layerIndex}-position-embedding-to-residual`,
-                    gap: 8
+                    to: embeddingInputAdd.cardNode,
+                    key: `layer-${layerIndex}-position-embedding-to-add`,
+                    sourceAnchor: VIEW2D_ANCHOR_SIDES.RIGHT,
+                    targetAnchor: VIEW2D_ANCHOR_SIDES.BOTTOM,
+                    route: VIEW2D_CONNECTOR_ROUTES.ELBOW,
+                    gap: 10
                 }
             ]
             : []),
@@ -1269,7 +1393,11 @@ function buildLayerGroup({
         node,
         entryNode: incomingResidual.cardNode,
         exitNode: postMlpAdd.cardNode,
-        overlayNodes: positionEmbeddingOverlay ? [positionEmbeddingOverlay] : [],
+        overlayNodes: [
+            embeddingAddOverlay,
+            vocabularyEmbeddingOverlay,
+            positionEmbeddingOverlay
+        ].filter(Boolean),
         flow
     };
 }
