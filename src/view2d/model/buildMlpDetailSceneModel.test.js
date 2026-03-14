@@ -612,7 +612,7 @@ describe('buildMlpDetailSceneModel', () => {
         });
     });
 
-    it('reuses the 3D MLP-down tooltip payload for down-projection output rows', () => {
+    it('preserves token metadata on MLP-down output row hover payloads', () => {
         const scene = buildScene();
         const nodes = flattenSceneNodes(scene);
         const inputNode = nodes.find((node) => node?.role === 'projection-source-xln') || null;
@@ -633,10 +633,10 @@ describe('buildMlpDetailSceneModel', () => {
         });
 
         expect(hoverState?.label).toBe('MLP Down Projection');
-        expect(hoverState?.info?.suppressTokenChip).toBe(true);
         expect(hoverState?.info?.activationData?.label).toBe('MLP Down Projection');
         expect(hoverState?.info?.activationData?.stage).toBe('mlp.down');
-        expect(hoverState?.info?.activationData?.suppressTokenChip).toBe(true);
+        expect(hoverState?.info?.suppressTokenChip).toBeUndefined();
+        expect(hoverState?.info?.activationData?.suppressTokenChip).toBeUndefined();
         expect(hoverState?.info?.activationData?.tokenIndex).toBe(0);
         expect(hoverState?.focusState?.activeNodeIds).toContain(inputNode?.id);
         expect(hoverState?.focusState?.activeNodeIds).toContain(outputNode?.id);

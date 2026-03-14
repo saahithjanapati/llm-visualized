@@ -817,6 +817,67 @@ describe('CanvasSceneRenderer', () => {
         ).toHaveLength(4);
     });
 
+    it('renders mirrored curved trapezoid card surfaces for output unembedding nodes', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx);
+        const renderer = new CanvasSceneRenderer({ canvas });
+
+        const unembeddingNode = createMatrixNode({
+            role: 'unembedding',
+            semantic: {
+                componentKind: 'logits',
+                stage: 'unembedding',
+                role: 'unembedding'
+            },
+            dimensions: { rows: D_MODEL, cols: 50257 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.EMBEDDING_TOKEN_STREAM
+            },
+            metadata: {
+                card: {
+                    width: 196,
+                    height: 144,
+                    cornerRadius: 18,
+                    shape: 'curved-trapezoid',
+                    shapeConfig: {
+                        leftInset: 4,
+                        rightInset: 0,
+                        leftHeightRatio: 0.36,
+                        rightHeightRatio: 1,
+                        cornerRadius: 14
+                    }
+                }
+            }
+        });
+
+        renderer.setScene(createSceneModel({
+            nodes: [unembeddingNode]
+        }));
+
+        expect(renderer.render({
+            width: 420,
+            height: 260,
+            dpr: 1,
+            viewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            }
+        })).toBe(true);
+
+        const curvedFill = ctx.operations.find((entry) => (
+            entry.type === 'fill'
+            && entry.path.some((step) => step.type === 'quadraticCurveTo')
+        )) || null;
+        const quadratics = curvedFill?.path?.filter((step) => step.type === 'quadraticCurveTo') || [];
+
+        expect(curvedFill).toBeTruthy();
+        expect(quadratics).toHaveLength(4);
+        expect(quadratics[0]?.cpy || 0).toBeGreaterThan(quadratics[1]?.cpy || 0);
+    });
+
     it('dims the matrix surface during local MHSA detail cell focus without dimming the selected cell', () => {
         const ctx = createMockContext();
         const canvas = createMockCanvas(ctx);

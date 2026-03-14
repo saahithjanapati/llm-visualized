@@ -16,8 +16,13 @@ function getAttentionBiasSamples(layerIndex, kind = 'query') {
     return samples && samples.length ? samples : null;
 }
 
-export function getAttentionBiasHeadSample(layerIndex, kind = 'query', headIndex = 0) {
+export function getAttentionBiasVectorSample(layerIndex, kind = 'query') {
     const samples = getAttentionBiasSamples(layerIndex, kind);
+    return samples && samples.length ? [...samples] : null;
+}
+
+export function getAttentionBiasHeadSample(layerIndex, kind = 'query', headIndex = 0) {
+    const samples = getAttentionBiasVectorSample(layerIndex, kind);
     if (!samples || !samples.length) return null;
     const safeHeadIndex = clampIndex(headIndex, samples.length - 1);
     const value = samples[safeHeadIndex];

@@ -1,7 +1,19 @@
-import { MHA_FINAL_V_COLOR } from '../../animations/LayerAnimationConstants.js';
-import { D_HEAD } from '../../ui/selectionPanelConstants.js';
+import {
+    MHA_FINAL_V_COLOR,
+    MHA_OUTPUT_PROJECTION_MATRIX_COLOR
+} from '../../animations/LayerAnimationConstants.js';
+import { getAttentionBiasVectorSample } from '../../data/biasParams.js';
+import {
+    D_HEAD,
+    D_MODEL,
+    RESIDUAL_COLOR_CLAMP
+} from '../../ui/selectionPanelConstants.js';
 import { NUM_HEAD_SETS_LAYER } from '../../utils/constants.js';
-import { buildHueRangeOptions, mapValueToHueRange } from '../../utils/colors.js';
+import {
+    buildHueRangeOptions,
+    mapValueToColor,
+    mapValueToHueRange
+} from '../../utils/colors.js';
 import {
     buildSceneNodeId,
     createAnchorRef,
@@ -22,8 +34,15 @@ import {
     VIEW2D_STYLE_KEYS
 } from '../theme/visualTokens.js';
 import { createVectorStripMatrixNode } from './createResidualVectorMatrixNode.js';
+import {
+    createCaptionedCardMatrixNode,
+    resolveRelativeCardSize
+} from './createCaptionedCardMatrixNode.js';
 import { createView2dVectorStripMetadata } from '../shared/vectorStrip.js';
-import { resolveMhsaDimensionVisualExtent } from '../shared/mhsaDimensionSizing.js';
+import {
+    resolveMhsaDimensionVisualExtent,
+    resolveMhsaTokenVisualExtent
+} from '../shared/mhsaDimensionSizing.js';
 
 const HEAD_OUTPUT_MEASURE_COLS = 12;
 const HEAD_OUTPUT_ROW_HEIGHT = 7;
@@ -40,7 +59,7 @@ const CONCAT_LIST_ITEM_GAP = 12;
 const CONCAT_LIST_ITEM_GAP_SMALL = 9;
 const CONCAT_GROUP_GAP = 8;
 const CONCAT_GROUP_GAP_SMALL = 6;
-const CONCAT_LABEL_FONT_SCALE = 1.32;
+const CONCAT_LABEL_FONT_SCALE = 1.82;
 const CONCAT_GROUPING_OPERATOR_SCALE = 1.38;
 const CONCAT_ABOVE_HEAD_GAP = 20;
 const CONCAT_ABOVE_HEAD_GAP_SMALL = 14;
@@ -54,8 +73,32 @@ const INCOMING_ARROW_SPACER_WIDTH = 56;
 const INCOMING_ARROW_SPACER_WIDTH_SMALL = 48;
 const ARROW_HEAD_TARGET_GAP = 12;
 const OUTPUT_HEAD_CAPTION_LABEL_SCALE = 0.9;
+const OUTPUT_PROJECTION_VECTOR_ROW_HEIGHT = 7;
+const OUTPUT_PROJECTION_VECTOR_ROW_HEIGHT_SMALL = 6;
+const OUTPUT_PROJECTION_BIAS_ROW_HEIGHT = 14;
+const OUTPUT_PROJECTION_BIAS_ROW_HEIGHT_SMALL = 12;
+const OUTPUT_PROJECTION_BIAS_CORNER_RADIUS = 5;
+const OUTPUT_PROJECTION_EQUATION_GAP = 12;
+const OUTPUT_PROJECTION_EQUATION_GAP_SMALL = 10;
+const OUTPUT_PROJECTION_WEIGHT_MIN_WIDTH = 84;
+const OUTPUT_PROJECTION_WEIGHT_MAX_WIDTH = 148;
+const OUTPUT_PROJECTION_WEIGHT_MIN_HEIGHT = 84;
+const OUTPUT_PROJECTION_WEIGHT_MAX_HEIGHT = 148;
+const OUTPUT_PROJECTION_OUTGOING_ARROW_SPACER_WIDTH = 60;
+const OUTPUT_PROJECTION_OUTGOING_ARROW_SPACER_WIDTH_SMALL = 52;
+const OUTPUT_PROJECTION_CONNECTOR_SOURCE_GAP = 8;
+const OUTPUT_PROJECTION_CONNECTOR_TARGET_GAP = 12;
+const OUTPUT_PROJECTION_BIAS_LABEL_SCALE = 1.8;
+const OUTPUT_PROJECTION_MULTIPLY_OPERATOR_SCALE = 0.92;
+const OUTPUT_PROJECTION_WEIGHT_CAPTION_SCENE_RELATIVE_EXPONENT = 0.72;
 
 const HEAD_OUTPUT_RANGE_OPTIONS = buildHueRangeOptions(MHA_FINAL_V_COLOR, {
+    valueMin: -2,
+    valueMax: 2,
+    minLightness: 0.34,
+    maxLightness: 0.72
+});
+const OUTPUT_PROJECTION_RANGE_OPTIONS = buildHueRangeOptions(MHA_OUTPUT_PROJECTION_MATRIX_COLOR, {
     valueMin: -2,
     valueMax: 2,
     minLightness: 0.34,
@@ -102,12 +145,25 @@ function colorToCss(color) {
     return color?.isColor ? `#${color.getHexString()}` : 'transparent';
 }
 
-function buildGradientCss(values = [], direction = '90deg') {
+function buildGradientCss(values = [], direction = '90deg', rangeOptions = HEAD_OUTPUT_RANGE_OPTIONS) {
     const safeValues = cleanNumberArray(values);
     if (!safeValues.length) return 'none';
     const stops = safeValues.map((value, index) => {
         const ratio = safeValues.length > 1 ? index / (safeValues.length - 1) : 0;
-        return `${colorToCss(mapValueToHueRange(value, HEAD_OUTPUT_RANGE_OPTIONS))} ${(ratio * 100).toFixed(4)}%`;
+        return `${colorToCss(mapValueToHueRange(value, rangeOptions))} ${(ratio * 100).toFixed(4)}%`;
+    });
+    if (stops.length === 1) {
+        return `linear-gradient(${direction}, ${stops[0].replace(' 0.0000%', ' 0%')}, ${stops[0].replace(' 0.0000%', ' 100%')})`;
+    }
+    return `linear-gradient(${direction}, ${stops.join(', ')})`;
+}
+
+function buildResidualGradientCss(values = [], direction = '90deg') {
+    const safeValues = cleanNumberArray(values);
+    if (!safeValues.length) return 'none';
+    const stops = safeValues.map((value, index) => {
+        const ratio = safeValues.length > 1 ? index / (safeValues.length - 1) : 0;
+        return `${colorToCss(mapValueToColor(value, { clampMax: RESIDUAL_COLOR_CLAMP }))} ${(ratio * 100).toFixed(4)}%`;
     });
     if (stops.length === 1) {
         return `linear-gradient(${direction}, ${stops[0].replace(' 0.0000%', ' 0%')}, ${stops[0].replace(' 0.0000%', ' 100%')})`;
@@ -158,6 +214,84 @@ function resolveHeadOutputCompactWidth({
             maxExtentPx: isSmallScreen ? 118 : 136
         }))
     );
+}
+
+function resolveOutputProjectionFeatureExtent({
+    isSmallScreen = false
+} = {}) {
+    return Math.max(
+        isSmallScreen ? 94 : 108,
+        Math.round(resolveMhsaDimensionVisualExtent(D_MODEL, {
+            isSmallScreen,
+            baseDimensionCount: D_MODEL,
+            exponent: 0.3,
+            baseExtentPx: isSmallScreen ? 104 : 122,
+            minExtentPx: isSmallScreen ? 94 : 108,
+            maxExtentPx: isSmallScreen ? 124 : 144
+        }))
+    );
+}
+
+function resolveOutputProjectionVectorDimensions({
+    rowCount = 1,
+    baseCompactWidth = 72,
+    baseRowHeight = OUTPUT_PROJECTION_VECTOR_ROW_HEIGHT,
+    isSmallScreen = false
+} = {}) {
+    const safeRowCount = Number.isFinite(rowCount) ? Math.max(1, Math.floor(rowCount)) : 1;
+    const safeBaseRowHeight = Math.max(1, Math.floor(Number(baseRowHeight) || OUTPUT_PROJECTION_VECTOR_ROW_HEIGHT));
+    const rowTargetExtent = resolveMhsaTokenVisualExtent(safeRowCount, {
+        isSmallScreen
+    });
+    const minRowHeight = safeRowCount >= 20 ? 2 : (safeRowCount >= 10 ? 3 : 4);
+    return {
+        compactWidth: Math.max(1, Math.floor(Number(baseCompactWidth) || 72)),
+        rowHeight: Math.max(
+            minRowHeight,
+            Math.min(
+                safeBaseRowHeight,
+                Math.floor(rowTargetExtent / safeRowCount)
+            )
+        )
+    };
+}
+
+function resolveOutputProjectionStageVisualMetrics(rowCount = 1, {
+    isSmallScreen = false
+} = {}) {
+    const outputFeatureExtent = resolveOutputProjectionFeatureExtent({
+        isSmallScreen
+    });
+    const outputDimensions = resolveOutputProjectionVectorDimensions({
+        rowCount,
+        baseCompactWidth: outputFeatureExtent,
+        baseRowHeight: isSmallScreen ? OUTPUT_PROJECTION_VECTOR_ROW_HEIGHT_SMALL : OUTPUT_PROJECTION_VECTOR_ROW_HEIGHT,
+        isSmallScreen
+    });
+    const weightCardSize = resolveRelativeCardSize({
+        rows: D_MODEL,
+        cols: D_MODEL,
+        referenceCount: D_MODEL,
+        referenceExtent: Math.round(outputDimensions.compactWidth * 1.08),
+        minWidth: isSmallScreen ? OUTPUT_PROJECTION_WEIGHT_MIN_WIDTH - 8 : OUTPUT_PROJECTION_WEIGHT_MIN_WIDTH,
+        maxWidth: isSmallScreen ? OUTPUT_PROJECTION_WEIGHT_MAX_WIDTH - 12 : OUTPUT_PROJECTION_WEIGHT_MAX_WIDTH,
+        minHeight: isSmallScreen ? OUTPUT_PROJECTION_WEIGHT_MIN_HEIGHT - 8 : OUTPUT_PROJECTION_WEIGHT_MIN_HEIGHT,
+        maxHeight: isSmallScreen ? OUTPUT_PROJECTION_WEIGHT_MAX_HEIGHT - 12 : OUTPUT_PROJECTION_WEIGHT_MAX_HEIGHT
+    });
+    weightCardSize.width = Math.min(
+        isSmallScreen ? OUTPUT_PROJECTION_WEIGHT_MAX_WIDTH - 12 : OUTPUT_PROJECTION_WEIGHT_MAX_WIDTH,
+        Math.max(
+            isSmallScreen ? OUTPUT_PROJECTION_WEIGHT_MIN_WIDTH - 8 : OUTPUT_PROJECTION_WEIGHT_MIN_WIDTH,
+            outputDimensions.compactWidth
+        )
+    );
+    weightCardSize.height = weightCardSize.width;
+    return {
+        outputDimensions,
+        biasCompactWidth: outputDimensions.compactWidth,
+        biasRowHeight: isSmallScreen ? OUTPUT_PROJECTION_BIAS_ROW_HEIGHT_SMALL : OUTPUT_PROJECTION_BIAS_ROW_HEIGHT,
+        weightCardSize
+    };
 }
 
 function buildHeadOutputRowItems(activationSource = null, tokenRefs = [], {
@@ -212,7 +346,9 @@ function sampleHeadOutputValues(activationSource = null, {
 }
 
 function buildConcatOutputRowItems(activationSource = null, tokenRefs = [], {
-    layerIndex = null
+    layerIndex = null,
+    stage = 'concatenate',
+    rowRole = 'concat-output-row'
 } = {}) {
     return tokenRefs.map((tokenRef) => {
         const tokenIndex = normalizeIndex(tokenRef?.tokenIndex);
@@ -229,8 +365,8 @@ function buildConcatOutputRowItems(activationSource = null, tokenRefs = [], {
         const semantic = {
             componentKind: 'output-projection',
             layerIndex,
-            stage: 'concatenate',
-            role: 'concat-output-row',
+            stage,
+            role: rowRole,
             rowIndex: normalizeIndex(tokenRef?.rowIndex) ?? 0,
             ...(Number.isFinite(tokenIndex) ? { tokenIndex } : {})
         };
@@ -244,6 +380,65 @@ function buildConcatOutputRowItems(activationSource = null, tokenRefs = [], {
             title: `${label}: concat(H)`
         };
     });
+}
+
+function buildOutputProjectionRowItems(activationSource = null, tokenRefs = [], {
+    layerIndex = null
+} = {}) {
+    return tokenRefs.map((tokenRef) => {
+        const tokenIndex = normalizeIndex(tokenRef?.tokenIndex);
+        const rawVector = typeof activationSource?.getAttentionOutputProjection === 'function'
+            ? activationSource.getAttentionOutputProjection(layerIndex, tokenIndex, D_MODEL)
+            : null;
+        const sampledValues = sampleVector(
+            cleanNumberArray(rawVector, D_MODEL),
+            HEAD_OUTPUT_MEASURE_COLS
+        );
+        const label = typeof tokenRef?.tokenLabel === 'string' && tokenRef.tokenLabel.length
+            ? tokenRef.tokenLabel
+            : `Token ${(Number(tokenRef?.rowIndex) || 0) + 1}`;
+        const semantic = {
+            componentKind: 'output-projection',
+            layerIndex,
+            stage: 'attn-out',
+            role: 'projection-output-row',
+            rowIndex: normalizeIndex(tokenRef?.rowIndex) ?? 0,
+            ...(Number.isFinite(tokenIndex) ? { tokenIndex } : {})
+        };
+        return {
+            id: buildSceneNodeId(semantic),
+            index: normalizeIndex(tokenRef?.rowIndex) ?? 0,
+            label,
+            semantic,
+            rawValues: sampledValues,
+            gradientCss: buildResidualGradientCss(sampledValues),
+            title: `${label}: O`
+        };
+    });
+}
+
+function buildOutputProjectionBiasRowItems(layerIndex = null) {
+    const rawValues = sampleVector(
+        cleanNumberArray(getAttentionBiasVectorSample(layerIndex, 'output'), HEAD_OUTPUT_MEASURE_COLS),
+        HEAD_OUTPUT_MEASURE_COLS
+    );
+    const rowSemantic = {
+        componentKind: 'output-projection',
+        layerIndex,
+        stage: 'attn-out',
+        role: 'projection-bias-row',
+        rowIndex: 0
+    };
+    return [{
+        id: buildSceneNodeId(rowSemantic),
+        index: 0,
+        label: '',
+        semantic: rowSemantic,
+        rawValues,
+        rawValue: rawValues[0] ?? 0,
+        gradientCss: buildGradientCss(rawValues, '90deg', OUTPUT_PROJECTION_RANGE_OPTIONS),
+        title: 'b_O'
+    }];
 }
 
 function createHeadOutputMatrixNode(activationSource = null, tokenRefs = [], {
@@ -312,22 +507,28 @@ function createHeadOutputMatrixNode(activationSource = null, tokenRefs = [], {
 function createConcatOutputMatrixNode(activationSource = null, tokenRefs = [], {
     layerIndex = null,
     rowCount = 1,
-    isSmallScreen = false
+    isSmallScreen = false,
+    role = 'concat-output-matrix',
+    semanticRole = 'concat-output-matrix',
+    semanticStage = 'concatenate',
+    rowRole = 'concat-output-row'
 } = {}) {
     const compactWidth = isSmallScreen ? CONCAT_OUTPUT_COMPACT_WIDTH_SMALL : CONCAT_OUTPUT_COMPACT_WIDTH;
     const rowHeight = isSmallScreen ? HEAD_OUTPUT_ROW_HEIGHT_SMALL : HEAD_OUTPUT_ROW_HEIGHT;
     return createVectorStripMatrixNode({
-        role: 'concat-output-matrix',
+        role,
         semantic: {
             componentKind: 'output-projection',
             layerIndex,
-            stage: 'concatenate',
-            role: 'concat-output-matrix'
+            stage: semanticStage,
+            role: semanticRole
         },
         labelTex: 'H_{\\mathrm{concat}}',
         labelText: 'H_concat',
         rowItems: buildConcatOutputRowItems(activationSource, tokenRefs, {
-            layerIndex
+            layerIndex,
+            stage: semanticStage,
+            rowRole
         }),
         rowCount,
         columnCount: D_HEAD * NUM_HEAD_SETS_LAYER,
@@ -466,6 +667,22 @@ function createOutputProjectionDetailOperatorNode({
             fontScale
         }
     });
+}
+
+function buildOutputProjectionSubscriptLabel(labelTex = '') {
+    const safeLabelTex = typeof labelTex === 'string' ? labelTex.trim() : '';
+    const simpleSubscriptMatch = safeLabelTex.match(/^([A-Za-z]+)_([A-Za-z]+)$/);
+    if (!simpleSubscriptMatch) {
+        return {
+            labelTex: safeLabelTex,
+            labelText: safeLabelTex
+        };
+    }
+    const [, base, subscript] = simpleSubscriptMatch;
+    return {
+        labelTex: `${base}_{\\mathrm{${subscript}}}`,
+        labelText: safeLabelTex
+    };
 }
 
 function createConcatStageNode({
@@ -630,6 +847,202 @@ function createConcatStageNode({
     };
 }
 
+function createOutputProjectionStageNode({
+    activationSource = null,
+    tokenRefs = [],
+    layerIndex = null,
+    rowCount = 1,
+    alignTargetNodeId = '',
+    isSmallScreen = false
+} = {}) {
+    const projectionSemantic = {
+        componentKind: 'output-projection',
+        layerIndex,
+        stage: 'attn-out',
+        role: 'projection-stage'
+    };
+    const visualMetrics = resolveOutputProjectionStageVisualMetrics(rowCount, {
+        isSmallScreen
+    });
+    const concatOutputCopyNode = createConcatOutputMatrixNode(activationSource, tokenRefs, {
+        layerIndex,
+        rowCount,
+        isSmallScreen,
+        role: 'concat-output-copy-matrix',
+        semanticRole: 'concat-output-copy-matrix',
+        semanticStage: 'attn-out',
+        rowRole: 'concat-output-copy-row'
+    });
+    const weightNode = createCaptionedCardMatrixNode({
+        role: 'projection-weight',
+        semantic: buildSemantic(projectionSemantic, {
+            role: 'projection-weight'
+        }),
+        ...buildOutputProjectionSubscriptLabel('W_O'),
+        rowCount: D_MODEL,
+        columnCount: D_MODEL,
+        cardWidth: visualMetrics.weightCardSize.width,
+        cardHeight: visualMetrics.weightCardSize.height,
+        cardCornerRadius: 10,
+        captionPosition: 'bottom',
+        captionLabelScale: 1.12,
+        captionDimensionsScale: 0.94,
+        captionSceneRelativeExtentExponent: OUTPUT_PROJECTION_WEIGHT_CAPTION_SCENE_RELATIVE_EXPONENT,
+        visualStyleKey: VIEW2D_STYLE_KEYS.OUTPUT_PROJECTION,
+        disableCardSurfaceEffects: true,
+        metadata: {
+            kind: 'output-projection'
+        }
+    });
+    const biasNode = createVectorStripMatrixNode({
+        role: 'projection-bias',
+        semantic: buildSemantic(projectionSemantic, {
+            role: 'projection-bias'
+        }),
+        ...buildOutputProjectionSubscriptLabel('b_O'),
+        rowItems: buildOutputProjectionBiasRowItems(layerIndex),
+        rowCount: 1,
+        columnCount: D_MODEL,
+        measureCols: HEAD_OUTPUT_MEASURE_COLS,
+        compactWidth: visualMetrics.biasCompactWidth,
+        rowHeight: visualMetrics.biasRowHeight,
+        captionPosition: 'bottom',
+        captionMinScreenHeightPx: 12,
+        captionPreferStandardSizing: true,
+        captionLabelScale: OUTPUT_PROJECTION_BIAS_LABEL_SCALE,
+        visualStyleKey: VIEW2D_STYLE_KEYS.OUTPUT_PROJECTION,
+        stripMetadata: createView2dVectorStripMetadata({
+            compactWidth: visualMetrics.biasCompactWidth,
+            rowHeight: visualMetrics.biasRowHeight,
+            cornerRadius: OUTPUT_PROJECTION_BIAS_CORNER_RADIUS,
+            bandCount: HEAD_OUTPUT_MEASURE_COLS,
+            hoverScaleY: 1.12,
+            hoverGlowBlur: 10,
+            hideSurface: true
+        }),
+        metadata: {
+            kind: 'output-projection'
+        }
+    });
+    const outputNode = createVectorStripMatrixNode({
+        role: 'projection-output',
+        semantic: buildSemantic(projectionSemantic, {
+            role: 'projection-output'
+        }),
+        labelTex: 'O',
+        labelText: 'O',
+        rowItems: buildOutputProjectionRowItems(activationSource, tokenRefs, {
+            layerIndex
+        }),
+        rowCount,
+        columnCount: D_MODEL,
+        measureCols: HEAD_OUTPUT_MEASURE_COLS,
+        compactWidth: visualMetrics.outputDimensions.compactWidth,
+        rowHeight: visualMetrics.outputDimensions.rowHeight,
+        captionPosition: 'bottom',
+        captionLabelScale: OUTPUT_HEAD_CAPTION_LABEL_SCALE,
+        visualStyleKey: VIEW2D_STYLE_KEYS.RESIDUAL,
+        stripMetadata: createView2dVectorStripMetadata({
+            compactWidth: visualMetrics.outputDimensions.compactWidth,
+            rowHeight: visualMetrics.outputDimensions.rowHeight,
+            cornerRadius: 10,
+            bandCount: HEAD_OUTPUT_MEASURE_COLS,
+            hoverScaleY: 1.12,
+            hoverGlowBlur: 10,
+            hideSurface: true
+        }),
+        metadata: {
+            kind: 'output-projection'
+        }
+    });
+    const outgoingArrowSpacerNode = createHiddenSpacer({
+        semantic: buildSemantic(projectionSemantic, {
+            role: 'projection-output-arrow-spacer'
+        }),
+        role: 'projection-output-arrow-spacer',
+        width: isSmallScreen ? OUTPUT_PROJECTION_OUTGOING_ARROW_SPACER_WIDTH_SMALL : OUTPUT_PROJECTION_OUTGOING_ARROW_SPACER_WIDTH,
+        height: 1
+    });
+    const equationNode = createGroupNode({
+        role: 'output-projection-equation',
+        semantic: buildSemantic(projectionSemantic, {
+            role: 'output-projection-equation'
+        }),
+        direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
+        gapKey: 'inline',
+        align: 'center',
+        children: [
+            concatOutputCopyNode,
+            createOutputProjectionDetailOperatorNode({
+                role: 'projection-multiply',
+                semantic: buildSemantic(projectionSemantic, {
+                    role: 'projection-multiply',
+                    operatorKey: 'multiply'
+                }),
+                text: '×',
+                fontScale: OUTPUT_PROJECTION_MULTIPLY_OPERATOR_SCALE
+            }),
+            weightNode,
+            createOutputProjectionDetailOperatorNode({
+                role: 'projection-plus',
+                semantic: buildSemantic(projectionSemantic, {
+                    role: 'projection-plus',
+                    operatorKey: 'plus'
+                }),
+                text: '+'
+            }),
+            biasNode,
+            createOutputProjectionDetailOperatorNode({
+                role: 'projection-equals',
+                semantic: buildSemantic(projectionSemantic, {
+                    role: 'projection-equals',
+                    operatorKey: 'equals'
+                }),
+                text: '='
+            }),
+            outputNode,
+            outgoingArrowSpacerNode
+        ],
+        metadata: {
+            gapOverride: isSmallScreen ? OUTPUT_PROJECTION_EQUATION_GAP_SMALL : OUTPUT_PROJECTION_EQUATION_GAP
+        }
+    });
+
+    return {
+        node: createGroupNode({
+            role: 'output-projection-stage',
+            semantic: buildSemantic(projectionSemantic, {
+                role: 'output-projection-stage'
+            }),
+            direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
+            gapKey: 'default',
+            align: 'center',
+            layout: alignTargetNodeId
+                ? {
+                    anchorAlign: {
+                        axis: 'y',
+                        targetNodeId: alignTargetNodeId,
+                        selfAnchor: VIEW2D_ANCHOR_SIDES.CENTER,
+                        targetAnchor: VIEW2D_ANCHOR_SIDES.CENTER,
+                        offset: 0
+                    }
+                }
+                : null,
+            children: [
+                equationNode
+            ],
+            metadata: {
+                gapOverride: 0
+            }
+        }),
+        concatOutputCopyNode,
+        weightNode,
+        biasNode,
+        outputNode,
+        outgoingArrowSpacerNode
+    };
+}
+
 export function buildOutputProjectionDetailSceneModel({
     activationSource = null,
     outputProjectionDetailTarget = null,
@@ -705,6 +1118,14 @@ export function buildOutputProjectionDetailSceneModel({
         alignTargetNodeId: headStackTopSpacerNode.id,
         isSmallScreen
     });
+    const outputProjectionStage = createOutputProjectionStageNode({
+        activationSource,
+        tokenRefs,
+        layerIndex,
+        rowCount,
+        alignTargetNodeId: concatStage.concatOutputNode.id,
+        isSmallScreen
+    });
     const concatCopyConnectorNodes = headEntries.map((entry, headIndex) => {
         const copyMatrixNode = concatStage.copyMatrixNodes[headIndex] || null;
         if (!entry?.matrixNode?.id || !copyMatrixNode?.id) return null;
@@ -733,6 +1154,50 @@ export function buildOutputProjectionDetailSceneModel({
             }
         });
     }).filter(Boolean);
+    const concatToProjectionConnectorNode = createConnectorNode({
+        role: 'concat-output-projection-connector',
+        semantic: {
+            componentKind: 'output-projection',
+            layerIndex,
+            stage: 'attn-out',
+            role: 'concat-output-projection-connector'
+        },
+        source: createAnchorRef(concatStage.concatOutputNode.id, VIEW2D_ANCHOR_SIDES.RIGHT),
+        target: createAnchorRef(outputProjectionStage.concatOutputCopyNode.id, VIEW2D_ANCHOR_SIDES.LEFT),
+        route: VIEW2D_CONNECTOR_ROUTES.HORIZONTAL,
+        sourceGap: OUTPUT_PROJECTION_CONNECTOR_SOURCE_GAP,
+        targetGap: OUTPUT_PROJECTION_CONNECTOR_TARGET_GAP,
+        visual: {
+            styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL,
+            stroke: 'rgba(255, 255, 255, 0.84)'
+        },
+        metadata: {
+            preserveColor: true,
+            strokeWidthScale: 0.72
+        }
+    });
+    const projectionOutputConnectorNode = createConnectorNode({
+        role: 'projection-output-connector',
+        semantic: {
+            componentKind: 'output-projection',
+            layerIndex,
+            stage: 'attn-out',
+            role: 'projection-output-connector'
+        },
+        source: createAnchorRef(outputProjectionStage.outputNode.id, VIEW2D_ANCHOR_SIDES.RIGHT),
+        target: createAnchorRef(outputProjectionStage.outgoingArrowSpacerNode.id, VIEW2D_ANCHOR_SIDES.RIGHT),
+        route: VIEW2D_CONNECTOR_ROUTES.HORIZONTAL,
+        sourceGap: OUTPUT_PROJECTION_CONNECTOR_SOURCE_GAP,
+        targetGap: 0,
+        visual: {
+            styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL,
+            stroke: 'rgba(255, 255, 255, 0.84)'
+        },
+        metadata: {
+            preserveColor: true,
+            strokeWidthScale: 0.72
+        }
+    });
 
     return createSceneModel({
         semantic: {
@@ -755,7 +1220,8 @@ export function buildOutputProjectionDetailSceneModel({
                 align: 'center',
                 children: [
                     headStackNode,
-                    concatStage.node
+                    concatStage.node,
+                    outputProjectionStage.node
                 ],
                 metadata: {
                     gapOverride: isSmallScreen ? OUTPUT_PROJECTION_STAGE_GAP_SMALL : OUTPUT_PROJECTION_STAGE_GAP
@@ -773,7 +1239,9 @@ export function buildOutputProjectionDetailSceneModel({
                 gapKey: 'default',
                 children: [
                     ...headEntries.map((entry) => entry.connectorNode),
-                    ...concatCopyConnectorNodes
+                    ...concatCopyConnectorNodes,
+                    concatToProjectionConnectorNode,
+                    projectionOutputConnectorNode
                 ]
             })
         ],

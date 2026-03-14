@@ -46,7 +46,11 @@ import {
 } from './selectionPanelTransformerView2dStateUtils.js';
 import { hasView2dPointerExceededClickSlop } from './selectionPanelTransformerView2dInteractionUtils.js';
 import {
-    hasTransformerView2dLockedDetailSelection
+    hasTransformerView2dLockedDetailSelection,
+    isTransformerView2dDetailSelectionLockActive,
+    resolveTransformerView2dDetailClickLockAction,
+    shouldFreezeTransformerView2dDetailHover,
+    TRANSFORMER_VIEW2D_DETAIL_CLICK_LOCK_ACTIONS
 } from './selectionPanelTransformerView2dLockUtils.js';
 import {
     createTransformerView2dTokenHoverSync,
@@ -451,6 +455,7 @@ export function createTransformerView2dDetailView(panelEl) {
         detailScenePinnedSignature: '',
         detailScenePinnedTokenEntry: null,
         detailScenePinnedTokenSticky: false,
+        detailSceneLockActive: false,
         hoveredResidualRow: null,
         hoverDimming: {
             value: 0,
@@ -1242,6 +1247,7 @@ export function createTransformerView2dDetailView(panelEl) {
         state.detailScenePinnedSignature = '';
         state.detailScenePinnedTokenEntry = null;
         state.detailScenePinnedTokenSticky = false;
+        state.detailSceneLockActive = false;
         state.detailSceneFocus = null;
         state.detailSceneHoverSignature = '';
         resetCanvasHoverTargetKey();
@@ -1257,7 +1263,8 @@ export function createTransformerView2dDetailView(panelEl) {
 
     function lockPinnedDetailSceneFocus(detailHoverState = null, {
         scheduleRender: shouldScheduleRender = true,
-        persistTokenChip = false
+        persistTokenChip = false,
+        lockSelection = true
     } = {}) {
         if (!detailHoverState?.focusState) return false;
         const pinnedTokenEntry = resolveTransformerView2dTokenEntryFromHoverPayload(detailHoverState);
@@ -1278,6 +1285,7 @@ export function createTransformerView2dDetailView(panelEl) {
         state.detailScenePinnedSignature = nextSignature;
         state.detailScenePinnedTokenEntry = pinnedTokenEntry;
         state.detailScenePinnedTokenSticky = persistTokenChip === true && !!pinnedTokenEntry;
+        state.detailSceneLockActive = lockSelection === true;
         state.detailSceneFocus = detailHoverState.focusState;
         state.detailSceneHoverSignature = nextSignature;
         resetCanvasHoverTargetKey();
@@ -1343,6 +1351,10 @@ export function createTransformerView2dDetailView(panelEl) {
             && hasSceneBackedDetailTarget()
             && state.detailSceneIndex
         );
+        const freezeDetailSceneHover = shouldFreezeTransformerView2dDetailHover({
+            allowDetailSceneHover,
+            detailSceneSelectionLocked: state.detailSceneLockActive
+        });
         const suppressOverviewHover = !!(
             state.headDetailDepthActive
             && hasActiveDetailTarget()
@@ -1365,6 +1377,10 @@ export function createTransformerView2dDetailView(panelEl) {
         const hit = renderer.resolveInteractiveHitAtScreenPoint(localX, localY);
         if (suppressOverviewHover) {
             clearCanvasHover();
+            return hit?.entry || null;
+        }
+        if (freezeDetailSceneHover) {
+            clearCanvasHover({ scheduleRender: false });
             return hit?.entry || null;
         }
         if (allowDetailSceneHover) {
@@ -1762,6 +1778,7 @@ export function createTransformerView2dDetailView(panelEl) {
         state.detailScenePinnedSignature = '';
         state.detailScenePinnedTokenEntry = null;
         state.detailScenePinnedTokenSticky = false;
+        state.detailSceneLockActive = false;
         state.detailSceneFocus = null;
         state.detailSceneHoverSignature = '';
         resetCanvasHoverTargetKey();
@@ -1774,7 +1791,8 @@ export function createTransformerView2dDetailView(panelEl) {
             if (initialDetailHoverState?.focusState) {
                 lockPinnedDetailSceneFocus(initialDetailHoverState, {
                     scheduleRender: false,
-                    persistTokenChip: false
+                    persistTokenChip: false,
+                    lockSelection: false
                 });
             }
             state.pendingDetailInteractionTargets = [];
@@ -2605,10 +2623,21 @@ export function createTransformerView2dDetailView(panelEl) {
         if (shouldTreatAsClick) {
             if (state.headDetailDepthActive && state.detailSceneIndex) {
                 const detailHoverState = resolveMhsaDetailHoverState(state.detailSceneIndex, clickedHit);
-                if (detailHoverState?.focusState) {
+                const detailClickLockAction = resolveTransformerView2dDetailClickLockAction({
+                    detailSceneSelectionLocked: state.detailSceneLockActive,
+                    detailHoverState
+                });
+                if (detailClickLockAction === TRANSFORMER_VIEW2D_DETAIL_CLICK_LOCK_ACTIONS.LOCK_TARGET) {
                     lockPinnedDetailSceneFocus(detailHoverState, {
                         persistTokenChip: true
                     });
+                    return;
+                }
+                if (detailClickLockAction === TRANSFORMER_VIEW2D_DETAIL_CLICK_LOCK_ACTIONS.CLEAR_LOCK) {
+                    clearPinnedDetailSceneFocus({ scheduleRender: true });
+                    return;
+                }
+                if (detailClickLockAction === TRANSFORMER_VIEW2D_DETAIL_CLICK_LOCK_ACTIONS.IGNORE) {
                     return;
                 }
                 if (clearPinnedDetailSceneFocus({ scheduleRender: true })) {
@@ -2665,7 +2694,7 @@ export function createTransformerView2dDetailView(panelEl) {
 
     return {
         hasSelectionLock() {
-            return hasTransformerView2dLockedDetailSelection(state.detailScenePinnedFocus);
+            return isTransformerView2dDetailSelectionLockActive(state.detailSceneLockActive);
         },
         clearSelectionLock({
             scheduleRender: shouldScheduleRender = true

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { D_HEAD } from '../ui/selectionPanelConstants.js';
+import {
+    D_HEAD,
+    D_MODEL
+} from '../ui/selectionPanelConstants.js';
 import {
     createMhsaDetailSceneIndex,
     resolveMhsaDetailHoverState
@@ -17,6 +20,9 @@ function createMockActivationSource() {
     return {
         getAttentionWeightedSum(_layerIndex = 0, headIndex = 0, tokenIndex = 0, targetLength = D_HEAD) {
             return createVector((headIndex * 0.2) + (tokenIndex * 0.05), targetLength);
+        },
+        getAttentionOutputProjection(_layerIndex = 0, tokenIndex = 0, targetLength = D_MODEL) {
+            return createVector(0.4 + (tokenIndex * 0.07), targetLength);
         }
     };
 }
@@ -191,5 +197,81 @@ describe('output projection detail hover', () => {
             tokenId: null,
             tokenLabel: 'Token B'
         });
+    });
+
+    it('focuses the post-concat output-projection equation nodes on the right-hand stage', () => {
+        const scene = buildOutputProjectionDetailSceneModel({
+            activationSource: createMockActivationSource(),
+            outputProjectionDetailTarget: {
+                layerIndex: 3
+            },
+            tokenRefs: [
+                { rowIndex: 0, tokenIndex: 0, tokenLabel: 'Token A' },
+                { rowIndex: 1, tokenIndex: 1, tokenLabel: 'Token B' }
+            ]
+        });
+        const index = createMhsaDetailSceneIndex(scene);
+        const nodes = flattenSceneNodes(scene);
+        const concatOutputNode = nodes.find((node) => node?.role === 'concat-output-matrix') || null;
+        const concatOutputCopyNode = nodes.find((node) => node?.role === 'concat-output-copy-matrix') || null;
+        const projectionWeightNode = nodes.find((node) => node?.role === 'projection-weight') || null;
+        const projectionBiasNode = nodes.find((node) => node?.role === 'projection-bias') || null;
+        const projectionOutputNode = nodes.find((node) => node?.role === 'projection-output') || null;
+        const concatToProjectionConnectorNode = nodes.find((node) => (
+            node?.role === 'concat-output-projection-connector'
+        )) || null;
+        const projectionOutputConnectorNode = nodes.find((node) => (
+            node?.role === 'projection-output-connector'
+        )) || null;
+
+        const outputHoverState = resolveMhsaDetailHoverState(index, {
+            node: projectionOutputNode,
+            rowHit: {
+                rowIndex: 1,
+                rowItem: projectionOutputNode?.rowItems?.[1]
+            }
+        });
+
+        expect(outputHoverState?.label).toBe('Attention Output Vector');
+        expect(outputHoverState?.info?.activationData?.stage).toBe('attention.output_projection');
+        expect(outputHoverState?.info?.activationData?.tokenIndex).toBe(1);
+        expect(outputHoverState?.focusState?.activeNodeIds).toContain(concatOutputNode?.id);
+        expect(outputHoverState?.focusState?.activeNodeIds).toContain(concatOutputCopyNode?.id);
+        expect(outputHoverState?.focusState?.activeNodeIds).toContain(projectionWeightNode?.id);
+        expect(outputHoverState?.focusState?.activeNodeIds).toContain(projectionBiasNode?.id);
+        expect(outputHoverState?.focusState?.activeNodeIds).toContain(projectionOutputNode?.id);
+        expect(outputHoverState?.focusState?.activeConnectorIds).toContain(concatToProjectionConnectorNode?.id);
+        expect(outputHoverState?.focusState?.activeConnectorIds).toContain(projectionOutputConnectorNode?.id);
+        expect(outputHoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: concatOutputNode?.id,
+            rowIndex: 1
+        });
+        expect(outputHoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: concatOutputCopyNode?.id,
+            rowIndex: 1
+        });
+        expect(outputHoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: projectionOutputNode?.id,
+            rowIndex: 1
+        });
+        expect(resolveTransformerView2dTokenEntryFromHoverPayload(outputHoverState)).toEqual({
+            tokenIndex: 1,
+            tokenId: null,
+            tokenLabel: 'Token B'
+        });
+
+        const weightHoverState = resolveMhsaDetailHoverState(index, {
+            node: projectionWeightNode
+        });
+
+        expect(weightHoverState?.label).toBe('Output Projection Matrix');
+        expect(weightHoverState?.info?.activationData?.stage).toBe('attention.output_projection');
+        expect(weightHoverState?.focusState?.activeNodeIds).toContain(concatOutputNode?.id);
+        expect(weightHoverState?.focusState?.activeNodeIds).toContain(concatOutputCopyNode?.id);
+        expect(weightHoverState?.focusState?.activeNodeIds).toContain(projectionWeightNode?.id);
+        expect(weightHoverState?.focusState?.activeNodeIds).toContain(projectionBiasNode?.id);
+        expect(weightHoverState?.focusState?.activeNodeIds).toContain(projectionOutputNode?.id);
+        expect(weightHoverState?.focusState?.activeConnectorIds).toContain(concatToProjectionConnectorNode?.id);
+        expect(weightHoverState?.focusState?.activeConnectorIds).toContain(projectionOutputConnectorNode?.id);
     });
 });

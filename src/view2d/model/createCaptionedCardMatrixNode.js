@@ -55,7 +55,9 @@ function createCaptionMetadata({
     scaleWithNode = false,
     labelScale = null,
     dimensionsScale = null,
-    labelMaxScreenFontPx = null
+    sceneRelativeExtentExponent = null,
+    labelMaxScreenFontPx = null,
+    fixedScreenFontPx = null
 } = {}) {
     const caption = {};
     const safePosition = String(position || '').trim().toLowerCase();
@@ -92,8 +94,14 @@ function createCaptionMetadata({
     if (Number.isFinite(dimensionsScale) && dimensionsScale > 0) {
         caption.dimensionsScale = Number(dimensionsScale);
     }
+    if (Number.isFinite(sceneRelativeExtentExponent) && sceneRelativeExtentExponent > 0) {
+        caption.sceneRelativeExtentExponent = Math.min(1, Number(sceneRelativeExtentExponent));
+    }
     if (Number.isFinite(labelMaxScreenFontPx) && labelMaxScreenFontPx > 0) {
         caption.labelMaxScreenFontPx = Number(labelMaxScreenFontPx);
+    }
+    if (Number.isFinite(fixedScreenFontPx) && fixedScreenFontPx > 0) {
+        caption.fixedScreenFontPx = Number(fixedScreenFontPx);
     }
     return Object.keys(caption).length ? { caption } : null;
 }
@@ -162,7 +170,9 @@ export function createCaptionedCardMatrixNode({
     captionScaleWithNode = false,
     captionLabelScale = null,
     captionDimensionsScale = null,
+    captionSceneRelativeExtentExponent = null,
     captionLabelMaxScreenFontPx = null,
+    captionFixedScreenFontPx = null,
     visualStyleKey = VIEW2D_STYLE_KEYS.MATRIX_WEIGHT,
     background = null,
     accent = null,
@@ -219,7 +229,9 @@ export function createCaptionedCardMatrixNode({
                 scaleWithNode: captionScaleWithNode,
                 labelScale: captionLabelScale,
                 dimensionsScale: captionDimensionsScale,
-                labelMaxScreenFontPx: captionLabelMaxScreenFontPx
+                sceneRelativeExtentExponent: captionSceneRelativeExtentExponent,
+                labelMaxScreenFontPx: captionLabelMaxScreenFontPx,
+                fixedScreenFontPx: captionFixedScreenFontPx
             }),
             metadata
         )

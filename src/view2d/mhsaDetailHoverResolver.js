@@ -443,6 +443,14 @@ function findOutputProjectionConcatOutputNodeId(index = null) {
     return (index?.nodeIdsByRole?.get('concat-output-matrix') || [])[0] || '';
 }
 
+function findOutputProjectionConcatCopyNodeId(index = null) {
+    return (index?.nodeIdsByRole?.get('concat-output-copy-matrix') || [])[0] || '';
+}
+
+function findOutputProjectionProjectedOutputNodeId(index = null) {
+    return (index?.nodeIdsByRole?.get('projection-output') || [])[0] || '';
+}
+
 function collectOutputProjectionHeadMatrixNodeIds(index = null) {
     const nodeIds = [];
     appendAllUnique(nodeIds, index?.nodeIdsByRole?.get('head-output-matrix') || []);
@@ -458,6 +466,84 @@ function collectOutputProjectionConnectorIds(index = null) {
         appendUnique(connectorIds, node.id);
     }
     return connectorIds;
+}
+
+function collectOutputProjectionEquationConnectorIds(index = null) {
+    const connectorIds = [];
+    if (!index?.nodesById) return connectorIds;
+    for (const node of index.nodesById.values()) {
+        if (
+            node?.role !== 'concat-output-projection-connector'
+            && node?.role !== 'projection-output-connector'
+        ) {
+            continue;
+        }
+        appendUnique(connectorIds, node.id);
+    }
+    return connectorIds;
+}
+
+function buildAttentionOutputProjectionHoverInfo(node = null, rowItem = null, {
+    label = 'Attention Output Vector',
+    extraActivationData = {}
+} = {}) {
+    const tokenInfo = createTokenInfo(rowItem) || {};
+    const info = buildProjectionHoverInfo(node, label, {
+        stage: 'attention.output_projection',
+        ...(extraActivationData && typeof extraActivationData === 'object' ? extraActivationData : {}),
+        ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
+        ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
+            ? { tokenLabel: tokenInfo.tokenLabel }
+            : {})
+    }) || {};
+
+    return {
+        ...tokenInfo,
+        ...info,
+        activationData: {
+            ...(info.activationData || {}),
+            stage: 'attention.output_projection',
+            ...(extraActivationData && typeof extraActivationData === 'object' ? extraActivationData : {}),
+            ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
+            ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
+                ? { tokenLabel: tokenInfo.tokenLabel }
+                : {})
+        }
+    };
+}
+
+function buildOutputProjectionEquationResult(index = null, {
+    label = '',
+    info = null,
+    rowIndex = null,
+    includeOutputRow = false
+} = {}, options = null) {
+    if (!index) return null;
+    const concatOutputNodeId = findOutputProjectionConcatOutputNodeId(index);
+    const concatCopyNodeId = findOutputProjectionConcatCopyNodeId(index);
+    const outputNodeId = findOutputProjectionProjectedOutputNodeId(index);
+    const weightNodeId = (index?.nodeIdsByRole?.get('projection-weight') || [])[0] || '';
+    const biasNodeId = (index?.nodeIdsByRole?.get('projection-bias') || [])[0] || '';
+
+    return buildPathFocusResult(index, {
+        label,
+        info,
+        extraNodeIds: [
+            concatOutputNodeId,
+            concatCopyNodeId,
+            weightNodeId,
+            biasNodeId,
+            outputNodeId
+        ],
+        extraConnectorIds: collectOutputProjectionEquationConnectorIds(index),
+        rowSelections: Number.isFinite(rowIndex)
+            ? [
+                ...(concatOutputNodeId ? [{ nodeId: concatOutputNodeId, rowIndex }] : []),
+                ...(concatCopyNodeId ? [{ nodeId: concatCopyNodeId, rowIndex }] : []),
+                ...(includeOutputRow && outputNodeId ? [{ nodeId: outputNodeId, rowIndex }] : [])
+            ]
+            : []
+    }, options);
 }
 
 function buildOutputProjectionHeadOutputRowResult(index = null, node = null, rowHit = null, options = null) {
@@ -509,6 +595,7 @@ function buildOutputProjectionConcatOutputRowResult(index = null, node = null, r
     if (!Number.isFinite(rowIndex)) return null;
     const headMatrixNodeIds = collectOutputProjectionHeadMatrixNodeIds(index);
     const concatOutputNodeId = findOutputProjectionConcatOutputNodeId(index) || node.id;
+    const concatCopyNodeId = findOutputProjectionConcatCopyNodeId(index);
     return buildPathFocusResult(index, {
         label: 'Concatenated Head Output',
         info: buildConcatenatedHeadOutputHoverInfo(node, rowHit.rowItem),
@@ -520,6 +607,10 @@ function buildOutputProjectionConcatOutputRowResult(index = null, node = null, r
             })),
             ...(concatOutputNodeId ? [{
                 nodeId: concatOutputNodeId,
+                rowIndex
+            }] : []),
+            ...(concatCopyNodeId ? [{
+                nodeId: concatCopyNodeId,
                 rowIndex
             }] : [])
         ]
@@ -537,6 +628,8 @@ function buildOutputProjectionConcatOutputBandResult(index = null, node = null, 
         sourceNodeId,
         copyNodeId
     } = findOutputProjectionHeadMatrixIds(index, headIndex);
+    const concatOutputNodeId = findOutputProjectionConcatOutputNodeId(index);
+    const concatCopyNodeId = findOutputProjectionConcatCopyNodeId(index);
     return buildPathFocusResult(index, {
         label: 'Attention Weighted Sum',
         info: buildConcatenatedHeadOutputBandHoverInfo(
@@ -558,11 +651,59 @@ function buildOutputProjectionConcatOutputBandResult(index = null, node = null, 
                 rowIndex
             }] : [])
         ],
-        cellSelections: [{
-            nodeId: node.id,
-            rowIndex,
-            colIndex: headIndex
-        }]
+        cellSelections: [
+            ...(concatOutputNodeId ? [{
+                nodeId: concatOutputNodeId,
+                rowIndex,
+                colIndex: headIndex
+            }] : []),
+            ...(concatCopyNodeId ? [{
+                nodeId: concatCopyNodeId,
+                rowIndex,
+                colIndex: headIndex
+            }] : [])
+        ]
+    }, options);
+}
+
+function buildOutputProjectionWeightResult(index = null, node = null, options = null) {
+    return buildOutputProjectionEquationResult(index, {
+        label: 'Output Projection Matrix',
+        info: buildAttentionOutputProjectionHoverInfo(node, null, {
+            label: 'Output Projection Matrix',
+            extraActivationData: {
+                parameterType: 'weight'
+            }
+        })
+    }, options);
+}
+
+function buildOutputProjectionBiasResult(index = null, node = null, options = null) {
+    return buildOutputProjectionEquationResult(index, {
+        label: 'Output Projection Bias Vector',
+        info: buildAttentionOutputProjectionHoverInfo(node, null, {
+            label: 'Output Projection Bias Vector',
+            extraActivationData: {
+                parameterType: 'bias'
+            }
+        })
+    }, options);
+}
+
+function buildOutputProjectionOutputRowResult(index = null, node = null, rowHit = null, options = null) {
+    if (!index || !node || !rowHit) return null;
+    const rowIndex = Number.isFinite(rowHit.rowIndex) ? Math.max(0, Math.floor(rowHit.rowIndex)) : null;
+    if (!Number.isFinite(rowIndex)) return null;
+    return buildOutputProjectionEquationResult(index, {
+        label: 'Attention Output Vector',
+        info: buildAttentionOutputProjectionHoverInfo(node, rowHit.rowItem, {
+            label: 'Attention Output Vector',
+            extraActivationData: {
+                vectorCategory: 'attention-output'
+            }
+        }),
+        rowIndex,
+        includeOutputRow: true
     }, options);
 }
 
@@ -1024,6 +1165,18 @@ export function resolveMhsaDetailHoverState(index = null, hit = null, options = 
 
     if (entity.type === 'output-projection-concat-output-row') {
         return buildOutputProjectionConcatOutputRowResult(index, entity.node, entity.rowHit, options);
+    }
+
+    if (entity.type === 'output-projection-weight') {
+        return buildOutputProjectionWeightResult(index, entity.node, options);
+    }
+
+    if (entity.type === 'output-projection-bias') {
+        return buildOutputProjectionBiasResult(index, entity.node, options);
+    }
+
+    if (entity.type === 'output-projection-output-row') {
+        return buildOutputProjectionOutputRowResult(index, entity.node, entity.rowHit, options);
     }
 
     if (entity.type === 'projection-weight') {

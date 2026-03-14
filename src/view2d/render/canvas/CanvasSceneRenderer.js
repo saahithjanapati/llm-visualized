@@ -59,22 +59,27 @@ function curvedTrapezoidPath(ctx, bounds, shapeConfig = null) {
     const width = Math.max(1, Number(bounds?.width) || 0);
     const height = Math.max(1, Number(bounds?.height) || 0);
     const centerY = y + (height / 2);
+    const clampHeightRatio = (value, fallback) => (
+        Number.isFinite(value)
+            ? Math.max(0.18, Math.min(1, Number(value)))
+            : fallback
+    );
     const leftInset = Number.isFinite(shapeConfig?.leftInset)
         ? Math.max(0, Math.min(width * 0.4, Number(shapeConfig.leftInset)))
         : 0;
     const rightInset = Number.isFinite(shapeConfig?.rightInset)
         ? Math.max(0, Math.min(width * 0.28, Number(shapeConfig.rightInset)))
         : Math.min(width * 0.06, 8);
-    const rightHeightRatio = Number.isFinite(shapeConfig?.rightHeightRatio)
-        ? Math.max(0.18, Math.min(0.92, Number(shapeConfig.rightHeightRatio)))
-        : 0.38;
+    const leftHeightRatio = clampHeightRatio(shapeConfig?.leftHeightRatio, 1);
+    const rightHeightRatio = clampHeightRatio(shapeConfig?.rightHeightRatio, 0.38);
+    const leftHalfHeight = Math.max(1, (height * leftHeightRatio) / 2);
     const rightHalfHeight = Math.max(1, (height * rightHeightRatio) / 2);
     const cornerRadius = Number.isFinite(shapeConfig?.cornerRadius)
         ? Math.max(0, Number(shapeConfig.cornerRadius))
         : Math.min(18, height * 0.18);
     const topLeft = {
         x: x + leftInset,
-        y
+        y: centerY - leftHalfHeight
     };
     const topRight = {
         x: x + width - rightInset,
@@ -86,7 +91,7 @@ function curvedTrapezoidPath(ctx, bounds, shapeConfig = null) {
     };
     const bottomLeft = {
         x: x + leftInset,
-        y: y + height
+        y: centerY + leftHalfHeight
     };
 
     const points = [topLeft, topRight, bottomRight, bottomLeft];

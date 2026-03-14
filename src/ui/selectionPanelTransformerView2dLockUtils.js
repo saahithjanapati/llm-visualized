@@ -2,10 +2,39 @@ export function hasTransformerView2dLockedDetailSelection(detailScenePinnedFocus
     return !!(detailScenePinnedFocus && typeof detailScenePinnedFocus === 'object');
 }
 
+export const TRANSFORMER_VIEW2D_DETAIL_CLICK_LOCK_ACTIONS = Object.freeze({
+    IGNORE: 'ignore',
+    CLEAR_LOCK: 'clear-lock',
+    LOCK_TARGET: 'lock-target',
+    NONE: 'none'
+});
+
+export function isTransformerView2dDetailSelectionLockActive(detailSceneSelectionLocked = false) {
+    return detailSceneSelectionLocked === true;
+}
+
 export function shouldFreezeTransformerView2dDetailHover({
     allowDetailSceneHover = false,
-    detailScenePinnedFocus = null
+    detailSceneSelectionLocked = false
 } = {}) {
     return !!allowDetailSceneHover
-        && hasTransformerView2dLockedDetailSelection(detailScenePinnedFocus);
+        && isTransformerView2dDetailSelectionLockActive(detailSceneSelectionLocked);
+}
+
+export function resolveTransformerView2dDetailClickLockAction({
+    detailSceneSelectionLocked = false,
+    detailHoverState = null
+} = {}) {
+    const hasLockedDetailSelection = isTransformerView2dDetailSelectionLockActive(detailSceneSelectionLocked);
+    const clickedFocusableDetailTarget = !!detailHoverState?.focusState;
+
+    if (hasLockedDetailSelection) {
+        return clickedFocusableDetailTarget
+            ? TRANSFORMER_VIEW2D_DETAIL_CLICK_LOCK_ACTIONS.IGNORE
+            : TRANSFORMER_VIEW2D_DETAIL_CLICK_LOCK_ACTIONS.CLEAR_LOCK;
+    }
+
+    return clickedFocusableDetailTarget
+        ? TRANSFORMER_VIEW2D_DETAIL_CLICK_LOCK_ACTIONS.LOCK_TARGET
+        : TRANSFORMER_VIEW2D_DETAIL_CLICK_LOCK_ACTIONS.NONE;
 }

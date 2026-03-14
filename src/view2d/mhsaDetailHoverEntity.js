@@ -25,9 +25,10 @@ function normalizeAxisIndex(hit = null) {
 export function resolveMhsaDetailHoverEntity(hit = null) {
     const node = hit?.node || null;
     if (!node) return null;
+    const componentKind = String(node?.semantic?.componentKind || '').trim().toLowerCase();
 
     if (hit?.cellHit) {
-        if (node.role === 'concat-output-matrix') {
+        if (node.role === 'concat-output-matrix' || node.role === 'concat-output-copy-matrix') {
             return {
                 type: 'output-projection-concat-output-band',
                 node,
@@ -63,6 +64,22 @@ export function resolveMhsaDetailHoverEntity(hit = null) {
     const projectionKind = normalizeProjectionKind(resolveProjectionKindForNode(node));
 
     if (hit?.rowHit) {
+        if (componentKind === 'output-projection') {
+            if (node.role === 'projection-output') {
+                return {
+                    type: 'output-projection-output-row',
+                    node,
+                    rowHit: hit.rowHit
+                };
+            }
+            if (node.role === 'concat-output-copy-matrix') {
+                return {
+                    type: 'output-projection-concat-output-row',
+                    node,
+                    rowHit: hit.rowHit
+                };
+            }
+        }
         if (projectionKind) {
             return {
                 type: node.role === 'projection-bias' ? 'projection-bias' : 'projection-row',
@@ -151,6 +168,28 @@ export function resolveMhsaDetailHoverEntity(hit = null) {
                 type: 'output-projection-concat-output-row',
                 node,
                 rowHit: hit.rowHit
+            };
+        }
+        if (componentKind === 'output-projection' && node.role === 'projection-bias') {
+            return {
+                type: 'output-projection-bias',
+                node,
+                rowHit: hit.rowHit
+            };
+        }
+    }
+
+    if (componentKind === 'output-projection') {
+        if (node.role === 'projection-weight') {
+            return {
+                type: 'output-projection-weight',
+                node
+            };
+        }
+        if (node.role === 'projection-bias') {
+            return {
+                type: 'output-projection-bias',
+                node
             };
         }
     }

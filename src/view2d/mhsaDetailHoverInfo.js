@@ -171,7 +171,6 @@ export function buildMlpDownProjectionHoverInfo(node = null, rowItem = null) {
     const label = 'MLP Down Projection';
     const info = buildProjectionHoverInfo(node, label, {
         stage: 'mlp.down',
-        suppressTokenChip: true,
         ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
         ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
             ? { tokenLabel: tokenInfo.tokenLabel }
@@ -180,12 +179,10 @@ export function buildMlpDownProjectionHoverInfo(node = null, rowItem = null) {
 
     return {
         ...tokenInfo,
-        suppressTokenChip: true,
         ...info,
         activationData: {
             ...(info.activationData || {}),
             stage: 'mlp.down',
-            suppressTokenChip: true,
             ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
             ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
                 ? { tokenLabel: tokenInfo.tokenLabel }

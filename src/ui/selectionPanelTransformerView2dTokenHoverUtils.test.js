@@ -78,18 +78,21 @@ describe('selectionPanelTransformerView2dTokenHoverUtils', () => {
         })).toBeNull();
     });
 
-    it('suppresses token metadata for MLP down projection hovers to match 3D behavior', () => {
+    it('keeps token metadata for MLP down projection row hovers', () => {
         expect(resolveTransformerView2dTokenEntryFromHoverPayload({
             label: 'MLP Down Projection',
             info: {
                 activationData: {
                     stage: 'mlp.down',
-                    suppressTokenChip: true,
                     tokenIndex: 1,
                     tokenLabel: 'Token B'
                 }
             }
-        })).toBeNull();
+        })).toEqual({
+            tokenIndex: 1,
+            tokenId: null,
+            tokenLabel: 'Token B'
+        });
     });
 
     it('normalizes source and target token metadata from attention hover payloads', () => {
@@ -247,7 +250,7 @@ describe('selectionPanelTransformerView2dTokenHoverUtils', () => {
         hoverSync.dispose({ emit: false });
     });
 
-    it('does not highlight a token chip when the canvas hovers the MLP down projection', () => {
+    it('highlights the matching token chip when the canvas hovers the MLP down projection row', () => {
         const container = document.createElement('div');
         const firstChip = buildTokenChip({
             tokenText: 'Token A',
@@ -268,7 +271,6 @@ describe('selectionPanelTransformerView2dTokenHoverUtils', () => {
             info: {
                 activationData: {
                     stage: 'mlp.down',
-                    suppressTokenChip: true,
                     tokenIndex: 1,
                     tokenLabel: 'Token B'
                 }
@@ -276,8 +278,8 @@ describe('selectionPanelTransformerView2dTokenHoverUtils', () => {
         });
 
         expect(firstChip.classList.contains('is-token-chip-active')).toBe(false);
-        expect(secondChip.classList.contains('is-token-chip-active')).toBe(false);
-        expect(container.dataset.tokenFocusActive).toBe('false');
+        expect(secondChip.classList.contains('is-token-chip-active')).toBe(true);
+        expect(container.dataset.tokenFocusActive).toBe('true');
 
         hoverSync.dispose({ emit: false });
     });

@@ -113,6 +113,10 @@ describe('buildTransformerSceneModel', () => {
             incomingResidualEntry.anchors[VIEW2D_ANCHOR_SIDES.LEFT].x
         );
         expect(
+            incomingResidualEntry.anchors[VIEW2D_ANCHOR_SIDES.LEFT].x
+            - embeddingAddEntry.anchors[VIEW2D_ANCHOR_SIDES.RIGHT].x
+        ).toBeGreaterThan(80);
+        expect(
             Math.abs(
                 vocabularyEmbeddingEntry.anchors[VIEW2D_ANCHOR_SIDES.CENTER].y
                 - embeddingAddEntry.anchors[VIEW2D_ANCHOR_SIDES.CENTER].y
@@ -137,7 +141,7 @@ describe('buildTransformerSceneModel', () => {
         ).toBeLessThan(0.5);
     });
 
-    it('adds the final layer norm to the right of the top residual stream', () => {
+    it('adds the final layer norm and unembedding to the right of the top residual stream', () => {
         const scene = buildTransformerSceneModel({
             activationSource: createMockActivationSource(),
             tokenIndices: [0, 1],
@@ -157,6 +161,12 @@ describe('buildTransformerSceneModel', () => {
             && node?.semantic?.componentKind === 'layer-norm'
             && node?.semantic?.stage === 'final-ln'
         ));
+        const unembeddingNode = nodes.find((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node?.role === 'unembedding'
+            && node?.semantic?.componentKind === 'logits'
+            && node?.semantic?.stage === 'unembedding'
+        ));
         const lastResidualAddNode = nodes.find((node) => (
             node?.kind === VIEW2D_NODE_KINDS.MATRIX
             && node?.role === 'add-circle'
@@ -166,6 +176,7 @@ describe('buildTransformerSceneModel', () => {
 
         expect(outgoingResidualNode).toBeTruthy();
         expect(finalLayerNormNode).toBeTruthy();
+        expect(unembeddingNode).toBeTruthy();
         expect(lastResidualAddNode).toBeTruthy();
 
         const connectors = nodes.filter((node) => node?.kind === VIEW2D_NODE_KINDS.CONNECTOR);
@@ -177,14 +188,20 @@ describe('buildTransformerSceneModel', () => {
             connector?.source?.nodeId === outgoingResidualNode.id
             && connector?.target?.nodeId === finalLayerNormNode.id
         ))).toBe(true);
+        expect(connectors.some((connector) => (
+            connector?.source?.nodeId === finalLayerNormNode.id
+            && connector?.target?.nodeId === unembeddingNode.id
+        ))).toBe(true);
 
         const layout = buildSceneLayout(scene);
         const outgoingResidualEntry = layout?.registry?.getNodeEntry(outgoingResidualNode.id);
         const finalLayerNormEntry = layout?.registry?.getNodeEntry(finalLayerNormNode.id);
+        const unembeddingEntry = layout?.registry?.getNodeEntry(unembeddingNode.id);
         const lastResidualAddEntry = layout?.registry?.getNodeEntry(lastResidualAddNode.id);
 
         expect(outgoingResidualEntry).toBeTruthy();
         expect(finalLayerNormEntry).toBeTruthy();
+        expect(unembeddingEntry).toBeTruthy();
         expect(lastResidualAddEntry).toBeTruthy();
         expect(
             Math.abs(
@@ -196,6 +213,16 @@ describe('buildTransformerSceneModel', () => {
             finalLayerNormEntry.anchors[VIEW2D_ANCHOR_SIDES.LEFT].x
         ).toBeGreaterThan(
             outgoingResidualEntry.anchors[VIEW2D_ANCHOR_SIDES.RIGHT].x
+        );
+        expect(
+            unembeddingEntry.anchors[VIEW2D_ANCHOR_SIDES.LEFT].x
+        ).toBeGreaterThan(
+            finalLayerNormEntry.anchors[VIEW2D_ANCHOR_SIDES.RIGHT].x
+        );
+        expect(
+            unembeddingNode?.metadata?.card?.shapeConfig?.leftHeightRatio
+        ).toBeLessThan(
+            unembeddingNode?.metadata?.card?.shapeConfig?.rightHeightRatio
         );
     });
 

@@ -43,6 +43,7 @@ import { buildMhsaSceneModel } from './buildMhsaSceneModel.js';
 import { buildOutputProjectionDetailSceneModel } from './buildOutputProjectionDetailSceneModel.js';
 import {
     buildPositionEmbeddingModule,
+    buildUnembeddingModule,
     buildVocabularyEmbeddingModule
 } from './createPositionEmbeddingModule.js';
 import { resolvePreferredTokenLabel } from '../../utils/tokenLabelResolution.js';
@@ -54,6 +55,7 @@ const SUMMARY_HEAD_COLS = 12;
 const SUMMARY_MLP_COLS = 24;
 const SUMMARY_LOGIT_COLS = 12;
 const CARD_LABEL_HORIZONTAL_INSET = 10;
+const INPUT_EMBEDDING_ADD_TO_RESIDUAL_OFFSET_X = -96;
 
 const HEAD_RANGE_OPTIONS = buildHueRangeOptions(MHA_FINAL_Q_COLOR, {
     valueMin: -2,
@@ -1062,7 +1064,7 @@ function buildLayerGroup({
                     targetNodeId: incomingResidual.cardNode.id,
                     selfAnchor: VIEW2D_ANCHOR_SIDES.RIGHT,
                     targetAnchor: VIEW2D_ANCHOR_SIDES.LEFT,
-                    offset: -68
+                    offset: INPUT_EMBEDDING_ADD_TO_RESIDUAL_OFFSET_X
                 }
             },
             children: [
@@ -1417,7 +1419,8 @@ function buildFinalOutputGroup({
 } = {}) {
     const COLUMN_WIDTHS = {
         residual: 136,
-        layerNorm: 148
+        layerNorm: 148,
+        unembedding: 232
     };
     const TOP_ROW_HEIGHT = 58;
     const baseSemantic = {
@@ -1442,6 +1445,13 @@ function buildFinalOutputGroup({
         )
     });
     const finalLayerNorm = buildFinalLayerNormModule();
+    const unembeddingModule = buildUnembeddingModule({
+        semantic: {
+            componentKind: 'logits',
+            stage: 'unembedding',
+            role: 'module'
+        }
+    });
 
     const node = createGroupNode({
         role: 'final-output',
@@ -1472,6 +1482,12 @@ function buildFinalOutputGroup({
                 width: COLUMN_WIDTHS.layerNorm,
                 height: TOP_ROW_HEIGHT,
                 child: finalLayerNorm.node
+            }),
+            createFixedWidthColumn({
+                semantic: buildSemantic(baseSemantic, { stage: 'unembedding', role: 'unembedding' }),
+                width: COLUMN_WIDTHS.unembedding,
+                height: 156,
+                child: unembeddingModule.node
             })
         ]
     });
@@ -1489,11 +1505,16 @@ function buildFinalOutputGroup({
         to: finalLayerNorm.cardNode,
         key: 'final-output-layer-norm'
     });
+    flow.push({
+        from: finalLayerNorm.cardNode,
+        to: unembeddingModule.cardNode,
+        key: 'final-output-unembedding'
+    });
 
     return {
         node,
         entryNode: outgoingResidual.cardNode,
-        exitNode: finalLayerNorm.cardNode,
+        exitNode: unembeddingModule.cardNode,
         flow
     };
 }

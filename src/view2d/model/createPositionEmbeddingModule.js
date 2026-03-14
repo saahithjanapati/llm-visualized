@@ -81,8 +81,45 @@ export function buildVocabularyEmbeddingModule({
         labelTex: 'W_{vocabulary}',
         styleKey: VIEW2D_STYLE_KEYS.EMBEDDING_TOKEN_STREAM,
         cardWidth: 196,
-        cardHeight: 144
+        cardHeight: 144,
+        wideSide: 'left'
     });
+}
+
+export function buildUnembeddingModule({
+    semantic = {},
+    title = 'Unembedding'
+} = {}) {
+    return buildEmbeddingStreamModule({
+        semantic,
+        title,
+        role: 'unembedding',
+        labelText: 'W_U',
+        labelTex: 'W_U',
+        styleKey: VIEW2D_STYLE_KEYS.EMBEDDING_TOKEN_STREAM,
+        cardWidth: 196,
+        cardHeight: 144,
+        wideSide: 'right'
+    });
+}
+
+function createEmbeddingStreamShapeConfig(wideSide = 'left') {
+    if (String(wideSide || '').trim().toLowerCase() === 'right') {
+        return {
+            leftInset: 4,
+            rightInset: 0,
+            leftHeightRatio: 0.36,
+            rightHeightRatio: 1,
+            cornerRadius: 14
+        };
+    }
+    return {
+        leftInset: 0,
+        rightInset: 4,
+        leftHeightRatio: 1,
+        rightHeightRatio: 0.36,
+        cornerRadius: 14
+    };
 }
 
 function buildEmbeddingStreamModule({
@@ -93,7 +130,8 @@ function buildEmbeddingStreamModule({
     labelTex = '',
     styleKey = VIEW2D_STYLE_KEYS.EMBEDDING_TOKEN_STREAM,
     cardWidth = 180,
-    cardHeight = 128
+    cardHeight = 128,
+    wideSide = 'left'
 } = {}) {
     const titleMaxWidth = Math.max(24, cardWidth - (CARD_LABEL_HORIZONTAL_INSET * 2));
 
@@ -112,12 +150,7 @@ function buildEmbeddingStreamModule({
         metadata: createCardMetadata(cardWidth, cardHeight, {
             cornerRadius: 18,
             shape: 'curved-trapezoid',
-            shapeConfig: {
-                leftInset: 0,
-                rightInset: 4,
-                rightHeightRatio: 0.36,
-                cornerRadius: 14
-            }
+            shapeConfig: createEmbeddingStreamShapeConfig(wideSide)
         })
     });
 

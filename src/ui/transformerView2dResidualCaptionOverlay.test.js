@@ -320,6 +320,11 @@ function buildOutputProjectionFixtures({
                 return Array.from({ length: targetLength }, (_, index) => Number(
                     ((headIndex * 0.15) + (tokenIndex * 0.07) + (index * 0.01)).toFixed(4)
                 ));
+            },
+            getAttentionOutputProjection(_layerIndex = 0, tokenIndex = 0, targetLength = D_MODEL) {
+                return Array.from({ length: targetLength }, (_, index) => Number(
+                    ((tokenIndex * 0.05) + (index * 0.004)).toFixed(4)
+                ));
             }
         },
         outputProjectionDetailTarget: {
@@ -333,6 +338,8 @@ function buildOutputProjectionFixtures({
         node.role === 'head-output-matrix'
         && Number(node.semantic?.headIndex) === 0
     )) || null;
+    const projectionWeightNode = nodes.find((node) => node.role === 'projection-weight') || null;
+    const projectionOutputNode = nodes.find((node) => node.role === 'projection-output') || null;
 
     const parent = document.createElement('div');
     document.body.appendChild(parent);
@@ -356,6 +363,8 @@ function buildOutputProjectionFixtures({
         scene,
         layout,
         headMatrixNode,
+        projectionWeightNode,
+        projectionOutputNode,
         canvas,
         overlay,
         cleanup() {
@@ -1592,6 +1601,137 @@ describe('transformerView2dResidualCaptionOverlay', () => {
             expect(captionItem).toBeTruthy();
             expect(captionItem?.hidden).toBe(false);
             expect(labelSize).toBeGreaterThan(0);
+        } finally {
+            cleanup();
+        }
+    });
+
+    it('renders the output-projection W_O caption with the standard inline-subscript styling', () => {
+        const fixtures = buildOutputProjectionFixtures({
+            canvasWidth: 1280,
+            canvasHeight: 840
+        });
+        const {
+            scene,
+            layout,
+            projectionWeightNode,
+            canvas,
+            overlay,
+            cleanup
+        } = fixtures;
+
+        try {
+            const weightEntry = layout.registry.getNodeEntry(projectionWeightNode.id);
+            const projectedScale = resolveThresholdScale(weightEntry).scale * 1.8;
+            const targetX = 60;
+            const targetY = 56;
+            const offsetX = targetX - ((Number(weightEntry?.contentBounds?.x) || 0) * projectedScale);
+            const offsetY = targetY - ((Number(weightEntry?.contentBounds?.y) || 0) * projectedScale);
+
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds: (bounds) => ({
+                    x: (bounds.x * projectedScale) + offsetX,
+                    y: (bounds.y * projectedScale) + offsetY,
+                    width: bounds.width * projectedScale,
+                    height: bounds.height * projectedScale
+                }),
+                visible: true,
+                enabled: true
+            });
+
+            const weightLabelItem = queryCaptionItem(projectionWeightNode.id);
+            const inlineSubscript = weightLabelItem?.querySelector('.detail-transformer-view2d-inline-subscript__sub');
+            const labelSize = Number.parseFloat(
+                weightLabelItem?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+            const dimensionsSize = Number.parseFloat(
+                weightLabelItem?.style.getPropertyValue('--detail-transformer-view2d-caption-dimensions-size') || '0'
+            );
+
+            expect(labelSize).toBeGreaterThan(0);
+            expect(dimensionsSize).toBeGreaterThan(0);
+            expect(inlineSubscript?.textContent).toBe('O');
+            expect(
+                weightLabelItem?.style.getPropertyValue('--detail-transformer-view2d-caption-inline-subscript-scale')
+            ).toBe('0.84em');
+            expect(
+                weightLabelItem?.style.getPropertyValue('--detail-transformer-view2d-caption-inline-subscript-offset')
+            ).toBe('0.28em');
+        } finally {
+            cleanup();
+        }
+    });
+
+    it('dampens the output-projection W_O caption zoom swing', () => {
+        const fixtures = buildOutputProjectionFixtures({
+            canvasWidth: 1280,
+            canvasHeight: 840
+        });
+        const {
+            scene,
+            layout,
+            projectionWeightNode,
+            canvas,
+            overlay,
+            cleanup
+        } = fixtures;
+
+        try {
+            const weightEntry = layout.registry.getNodeEntry(projectionWeightNode.id);
+            const zoomedOutScale = resolveThresholdScale(weightEntry).scale * 0.55;
+            const zoomedInScale = resolveThresholdScale(weightEntry).scale * 1.8;
+            const targetX = 60;
+            const targetY = 56;
+            const projectBounds = (scale) => {
+                const offsetX = targetX - ((Number(weightEntry?.contentBounds?.x) || 0) * scale);
+                const offsetY = targetY - ((Number(weightEntry?.contentBounds?.y) || 0) * scale);
+                return (bounds) => ({
+                    x: (bounds.x * scale) + offsetX,
+                    y: (bounds.y * scale) + offsetY,
+                    width: bounds.width * scale,
+                    height: bounds.height * scale
+                });
+            };
+
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds: projectBounds(zoomedOutScale),
+                visible: true,
+                enabled: true
+            });
+
+            const zoomedOutLabelSize = Number.parseFloat(
+                queryCaptionItem(projectionWeightNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+            const zoomedOutItem = queryCaptionItem(projectionWeightNode.id);
+
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds: projectBounds(zoomedInScale),
+                visible: true,
+                enabled: true
+            });
+
+            const zoomedInLabelSize = Number.parseFloat(
+                queryCaptionItem(projectionWeightNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+            const zoomedInItem = queryCaptionItem(projectionWeightNode.id);
+            const labelScaleRatio = zoomedInLabelSize / Math.max(0.0001, zoomedOutLabelSize);
+            const rawViewportScaleRatio = zoomedInScale / zoomedOutScale;
+
+            expect(zoomedOutItem?.hidden).toBe(false);
+            expect(zoomedInItem?.hidden).toBe(false);
+            expect(zoomedOutLabelSize).toBeGreaterThan(0);
+            expect(zoomedInLabelSize).toBeGreaterThan(zoomedOutLabelSize);
+            expect(labelScaleRatio).toBeGreaterThan(1.2);
+            expect(labelScaleRatio).toBeLessThan(rawViewportScaleRatio * 0.92);
         } finally {
             cleanup();
         }
